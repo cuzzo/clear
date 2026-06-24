@@ -1030,16 +1030,18 @@ impl<'a> Extractor<'a> {
     fn collect_owner_fields_from_children(&mut self, node: &Node) {
         let owner = self.current_owner();
         for child in child_nodes(node) {
-            self.collect_owner_fields_from_node(&owner, child);
+            self.collect_owner_fields_from_node(&owner, child, false);
         }
     }
 
-    fn collect_owner_fields_from_node(&mut self, owner: &str, node: &Node) {
-        if matches!(node.r#type.as_str(), "DEFN" | "DEFS" | "CLASS" | "MODULE") {
+    fn collect_owner_fields_from_node(&mut self, owner: &str, node: &Node, in_method: bool) {
+        if matches!(node.r#type.as_str(), "CLASS" | "MODULE") {
             return;
         }
 
-        if let Some(mut declaration) = self.behavior.state_declaration_from_node(node, owner) {
+        let is_method = in_method || matches!(node.r#type.as_str(), "DEFN" | "DEFS");
+
+        if let Some(mut declaration) = self.behavior.state_declaration_from_node(node, owner, is_method) {
             declaration.field = self.behavior.clean_identifier(&declaration.field);
             declaration.file = self.file.clone();
             declaration.owner = owner.to_string();
@@ -1074,7 +1076,7 @@ impl<'a> Extractor<'a> {
                 }
             }
             for child in child_nodes(node) {
-                self.collect_owner_fields_from_node(owner, child);
+                self.collect_owner_fields_from_node(owner, child, is_method);
                 if child.r#type == "LVAR" {
                     if let Some(name) = first_string_or_symbol(child) {
                         if simple_identifier(&name) {
@@ -1087,7 +1089,7 @@ impl<'a> Extractor<'a> {
         }
 
         for child in child_nodes(node) {
-            self.collect_owner_fields_from_node(owner, child);
+            self.collect_owner_fields_from_node(owner, child, is_method);
         }
     }
 
@@ -2625,7 +2627,7 @@ mod tests {
         let field_decl_empty = mock_node("FIELD_DECLARATION", vec![
             Child::Node(Box::new(lvar_empty)),
         ], "");
-        extractor.collect_owner_fields_from_node("MyOwner", &field_decl_empty);
+        extractor.collect_owner_fields_from_node("MyOwner", &field_decl_empty, false);
 
         // child.r#type == "LVAR" with valid simple name to cover line 1083
         extractor.owners.push("MyOwner".to_string());
@@ -2635,7 +2637,7 @@ mod tests {
         let field_decl_valid = mock_node("FIELD_DECLARATION", vec![
             Child::Node(Box::new(lvar_valid)),
         ], "");
-        extractor.collect_owner_fields_from_node("MyOwner", &field_decl_valid);
+        extractor.collect_owner_fields_from_node("MyOwner", &field_decl_valid, false);
         assert!(extractor.owner_field("my_field"));
 
         // CALL with call_parts returning None inside collect_state_refs

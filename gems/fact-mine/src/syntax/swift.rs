@@ -219,7 +219,11 @@ impl NormalizedLanguageBehavior for SwiftNormalizedBehavior {
         &self,
         node: &Node,
         _owner: &str,
+        in_method: bool,
     ) -> Option<StateDeclaration> {
+        if in_method {
+            return None;
+        }
         // Try structured children first: [name, type?, value?]
         let child_nodes: Vec<&Node> = node.children.iter().filter_map(|c| match c {
             Child::Node(n) => Some(n.as_ref()),

@@ -173,7 +173,10 @@ impl NormalizedLanguageBehavior for ZigNormalizedBehavior {
         }
     }
 
-    fn state_declaration_from_node(&self, node: &Node, _owner: &str) -> Option<StateDeclaration> {
+    fn state_declaration_from_node(&self, node: &Node, _owner: &str, in_method: bool) -> Option<StateDeclaration> {
+        if in_method {
+            return None;
+        }
         if node.r#type != "CONTAINER_FIELD" {
             return None;
         }
@@ -411,11 +414,11 @@ mod tests {
         child_node.children = vec![Child::Integer(42)];
         let mut container_node = node("CONTAINER_FIELD", "");
         container_node.children = vec![Child::Node(Box::new(child_node))];
-        assert!(behavior.state_declaration_from_node(&container_node, "Widget").is_none());
+        assert!(behavior.state_declaration_from_node(&container_node, "Widget", false).is_none());
 
         let mut container_node_no_lvar = node("CONTAINER_FIELD", "");
         container_node_no_lvar.children = vec![Child::Node(Box::new(node("NOT_LVAR", "")))];
-        assert!(behavior.state_declaration_from_node(&container_node_no_lvar, "Widget").is_none());
+        assert!(behavior.state_declaration_from_node(&container_node_no_lvar, "Widget", false).is_none());
 
         assert!(behavior.local_flow_declaration_keyword("const"));
         assert!(behavior.local_flow_declaration_keyword("var"));

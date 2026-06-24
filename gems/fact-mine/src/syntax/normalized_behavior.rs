@@ -161,7 +161,7 @@ pub(crate) trait NormalizedLanguageBehavior: Sync {
         None
     }
 
-    fn state_declaration_from_node(&self, _node: &Node, _owner: &str) -> Option<StateDeclaration> {
+    fn state_declaration_from_node(&self, _node: &Node, _owner: &str, _in_method: bool) -> Option<StateDeclaration> {
         None
     }
 

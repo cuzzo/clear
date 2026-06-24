@@ -200,7 +200,11 @@ impl NormalizedLanguageBehavior for RustNormalizedBehavior {
         &self,
         node: &Node,
         _owner: &str,
+        in_method: bool,
     ) -> Option<StateDeclaration> {
+        if in_method {
+            return None;
+        }
         // Try structured children first: [name, type?, value?]
         let child_nodes: Vec<&Node> = node.children.iter().filter_map(|c| match c {
             Child::Node(n) => Some(n.as_ref()),
@@ -341,7 +345,7 @@ mod tests {
             last_column: 15,
             text: "my_field: usize".to_string(),
         };
-        let decl = behavior.state_declaration_from_node(&field_node, "Widget").unwrap();
+        let decl = behavior.state_declaration_from_node(&field_node, "Widget", false).unwrap();
         assert_eq!(decl.field, "my_field");
         assert_eq!(decl.r#type, Some("usize".to_string()));
 
@@ -373,7 +377,7 @@ mod tests {
             last_column: 11,
             text: "my field: :".to_string(),
         };
-        assert!(behavior.state_declaration_from_node(&colon_field_node, "Widget").is_none());
+        assert!(behavior.state_declaration_from_node(&colon_field_node, "Widget", false).is_none());
 
 
         let multiline_node = Node {

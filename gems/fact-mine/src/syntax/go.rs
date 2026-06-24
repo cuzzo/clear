@@ -76,7 +76,11 @@ impl NormalizedLanguageBehavior for GoNormalizedBehavior {
         &self,
         node: &Node,
         _owner: &str,
+        in_method: bool,
     ) -> Option<super::StateDeclaration> {
+        if in_method {
+            return None;
+        }
         if node.r#type != "FIELD_DECLARATION" {
             return None;
         }

@@ -125,7 +125,26 @@ impl NormalizedLanguageBehavior for TypeScriptNormalizedBehavior {
         &self,
         node: &Node,
         _owner: &str,
+        in_method: bool,
     ) -> Option<StateDeclaration> {
+        let has_modifier = node.children.iter().any(|c| match c {
+            Child::Node(n) => {
+                let text = n.text.trim();
+                matches!(text, "public" | "private" | "protected" | "readonly" | "static")
+            }
+            _ => false,
+        });
+
+        if in_method {
+            let starts_with_this = node.children.first().and_then(|c| match c {
+                Child::Node(n) => Some(n.text.trim().starts_with("this.")),
+                _ => None,
+            }).unwrap_or(false);
+            if !has_modifier && !starts_with_this {
+                return None;
+            }
+        }
+
         // Try structured children first: [name, type?, value?]
         let mut child_nodes: Vec<&Node> = node.children.iter().filter_map(|c| match c {
             Child::Node(n) => Some(n.as_ref()),
@@ -154,7 +173,8 @@ impl NormalizedLanguageBehavior for TypeScriptNormalizedBehavior {
         }
 
         if child_nodes.len() >= 2 {
-            let name = child_nodes[0].text.trim();
+            let raw_name = child_nodes[0].text.trim();
+            let name = raw_name.strip_prefix("this.").unwrap_or(raw_name);
             if is_simple_name(name) {
                 let mut type_text = child_nodes[1].text.trim().to_string();
                 if type_text.starts_with(':') {
@@ -176,6 +196,7 @@ impl NormalizedLanguageBehavior for TypeScriptNormalizedBehavior {
         let text = node.text.trim();
         if let Some((raw_name, rest)) = text.split_once(':') {
             let mut name = raw_name.trim();
+            name = name.strip_prefix("this.").unwrap_or(name);
             loop {
                 let mut stripped = false;
                 for modifier in [

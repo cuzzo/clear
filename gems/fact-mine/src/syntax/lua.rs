@@ -219,6 +219,7 @@ impl NormalizedLanguageBehavior for LuaNormalizedBehavior {
         &self,
         node: &Node,
         _owner: &str,
+        _in_method: bool,
     ) -> Option<StateDeclaration> {
         let text = node.text.trim();
         // Lua: table fields, pattern: name = value (no type annotation in Lua)

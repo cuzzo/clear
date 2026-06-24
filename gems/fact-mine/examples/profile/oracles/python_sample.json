@@ -2,6 +2,23 @@
   "array_shapes": [],
   "fields": [
     {
+      "declared_type": "int",
+      "id": "python\u0000/home/yahn/cheat/gems/fact-mine/examples/profile/python_sample.py\u0000Database\u0000field\u0000port",
+      "language": "python",
+      "line": 5,
+      "name": "port",
+      "owner": "Database",
+      "path": "/home/yahn/cheat/gems/fact-mine/examples/profile/python_sample.py",
+      "source": "syntax",
+      "span": [
+        5,
+        8,
+        5,
+        29
+      ],
+      "static_origin": "state_declaration"
+    },
+    {
       "declared_type": null,
       "id": "python\u0000/home/yahn/cheat/gems/fact-mine/examples/profile/python_sample.py\u0000Greeter\u0000field\u0000_db",
       "language": "python",
@@ -112,7 +129,26 @@
   },
   "state_param_origins": {},
   "state_protocols": {},
-  "state_types": {},
+  "state_type_records": [
+    {
+      "declared_type": "int",
+      "field": "port",
+      "key": "Database\u0000port",
+      "language": "python",
+      "line": 5,
+      "owner": "Database",
+      "path": "/home/yahn/cheat/gems/fact-mine/examples/profile/python_sample.py",
+      "span": [
+        5,
+        8,
+        5,
+        29
+      ]
+    }
+  ],
+  "state_types": {
+    "Database\u0000port": "int"
+  },
   "type_definitions": [
     {
       "id": "python\u0000/home/yahn/cheat/gems/fact-mine/examples/profile/python_sample.py\u0000Greeter\u0000method_signature\u0000__init__\u00008\u0000python-typing",
@@ -145,8 +181,20 @@
         }
       ],
       "path": "/home/yahn/cheat/gems/fact-mine/examples/profile/python_sample.py",
-      "return_type": "str:",
+      "return_type": "str",
       "signature": "def hello(self, name: str) -> str:",
+      "type_system": "python-typing"
+    },
+    {
+      "declared_type": "int",
+      "id": "python\u0000/home/yahn/cheat/gems/fact-mine/examples/profile/python_sample.py\u0000Database\u0000state_field\u0000port\u00005\u0000python-typing",
+      "kind": "state_field",
+      "language": "python",
+      "line": 5,
+      "name": "port",
+      "owner": "Database",
+      "path": "/home/yahn/cheat/gems/fact-mine/examples/profile/python_sample.py",
+      "source": "syntax",
       "type_system": "python-typing"
     }
   ]

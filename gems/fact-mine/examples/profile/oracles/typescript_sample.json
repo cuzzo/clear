@@ -176,7 +176,7 @@
         }
       ],
       "path": "/home/yahn/cheat/gems/fact-mine/examples/profile/typescript_sample.ts",
-      "return_type": "string {",
+      "return_type": "string",
       "signature": "public hello(name: string): string {",
       "type_system": "typescript"
     },

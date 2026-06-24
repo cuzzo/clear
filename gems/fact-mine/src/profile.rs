@@ -966,7 +966,7 @@ impl SignatureParser {
             "ruby" => parse_sorbet_signature(sig),
             "python" => parse_python_signature(sig),
             "typescript" | "javascript" => parse_typescript_signature(sig),
-            _ => (None, Vec::new()),
+            _ => parse_generic_signature(sig),
         }
     }
 }
@@ -1077,7 +1077,7 @@ fn parse_python_signature(
     let return_type = sig[paren_close + 1..]
         .trim()
         .strip_prefix("->")
-        .map(|s| s.trim().to_string());
+        .map(|s| s.trim().trim_end_matches(':').trim().to_string());
 
     let params: Vec<BTreeMap<String, String>> = params_str
         .split(',')
@@ -1121,7 +1121,7 @@ fn parse_typescript_signature(
     let return_type = sig[paren_close + 1..]
         .trim()
         .strip_prefix(':')
-        .map(|s| s.trim().trim_end_matches(';').to_string());
+        .map(|s| s.trim().trim_end_matches(';').trim_end_matches('{').trim().to_string());
 
     let params: Vec<BTreeMap<String, String>> = params_str
         .split(',')
@@ -1144,6 +1144,73 @@ fn parse_typescript_signature(
             map.insert("name".to_string(), name);
             map.insert("type".to_string(), type_part);
             Some(map)
+        })
+        .collect();
+
+    (return_type, params)
+}
+
+fn parse_generic_signature(
+    sig: &str,
+) -> (Option<String>, Vec<BTreeMap<String, String>>) {
+    let sig = sig.trim();
+    let paren_open = match sig.find('(') {
+        Some(p) => p,
+        None => return (None, Vec::new()),
+    };
+    let paren_close = match sig.rfind(')') {
+        Some(p) => p,
+        None => return (None, Vec::new()),
+    };
+    let params_str = &sig[paren_open + 1..paren_close];
+    let after_paren = sig[paren_close + 1..].trim();
+
+    let mut return_type = None;
+    if let Some(ret) = after_paren.strip_prefix("->") {
+        return_type = Some(ret.trim().trim_end_matches('{').trim_end_matches(';').trim().to_string());
+    } else if let Some(ret) = after_paren.strip_prefix(':') {
+        return_type = Some(ret.trim().trim_end_matches('{').trim_end_matches(';').trim().to_string());
+    } else if !after_paren.is_empty() && after_paren != "{" && after_paren != ";" {
+        return_type = Some(after_paren.trim().trim_end_matches('{').trim_end_matches(';').trim().to_string());
+    }
+
+    let params: Vec<BTreeMap<String, String>> = params_str
+        .split(',')
+        .filter_map(|entry| {
+            let entry = entry.trim();
+            if entry.is_empty() || entry == "self" || entry == "this" {
+                return None;
+            }
+            let mut name = String::new();
+            let mut ty = String::new();
+            if let Some((n, t)) = entry.split_once(':') {
+                name = n.trim().to_string();
+                ty = t.trim().to_string();
+            } else {
+                let parts: Vec<&str> = entry.split_whitespace().collect();
+                if parts.len() >= 2 {
+                    // Go style "name Type" or Java style "Type name"
+                    // If the first looks like a standard type or has uppercase, it's Java style, but simpler to check the last word
+                    let last = parts.last().unwrap();
+                    if last.chars().next().unwrap_or(' ').is_ascii_lowercase() {
+                        // Java/C: "Type name"
+                        name = last.to_string();
+                        ty = parts[0..parts.len()-1].join(" ");
+                    } else {
+                        // Go: "name Type"
+                        name = parts[0].to_string();
+                        ty = parts[1..].join(" ");
+                    }
+                }
+            }
+            if !name.is_empty() && !ty.is_empty() {
+                let mut map = BTreeMap::new();
+                map.insert("name".to_string(), name);
+                map.insert("type".to_string(), ty);
+                Some(map)
+            } else {
+                None
+            }
         })
         .collect();
 
@@ -1689,7 +1756,7 @@ pub(crate) mod tests {
     pub(crate) fn test_python_signature_parsing_impl() {
         let sig = "def my_func(a: int, b: str = 'hello') -> str:";
         let (return_type, params) = parse_python_signature(sig);
-        assert_eq!(return_type, Some("str:".to_string()));
+        assert_eq!(return_type, Some("str".to_string()));
         assert_eq!(params.len(), 2);
         assert_eq!(params[0].get("name").unwrap(), "a");
         assert_eq!(params[0].get("type").unwrap(), "int");
