@@ -2312,6 +2312,52 @@ pub(crate) mod tests {
             let _ = normalizer_idf.next_named_sibling(root_idf);
             let _ = normalizer_idf.normalize_dotted_call_expression(root_idf);
 
+            mock.mock_self_or_this.store(true, Ordering::Relaxed);
+            let _ = normalizer_ret.normalize_node(arg_not_list);
+            mock.mock_self_or_this.store(false, Ordering::Relaxed);
+
+            mock.mock_concatenated.store(true, Ordering::Relaxed);
+            let _ = normalizer_ret.normalize_node(arg_not_list);
+            mock.mock_concatenated.store(false, Ordering::Relaxed);
+            
+            mock.mock_if_statement.store(true, Ordering::Relaxed);
+            let _ = normalizer_ret.normalize_node(arg_not_list);
+            mock.mock_if_statement.store(false, Ordering::Relaxed);
+
+            let _ = normalizer_idf.normalize_singleton_function(root_idf);
+            let _ = normalizer_idf.normalize_class_like_owner(root_idf);
+            let _ = normalizer_idf.normalize_class(root_idf);
+            let _ = normalizer_idf.normalize_leading_function_statement(root_idf);
+            let _ = normalizer_idf.normalize_rescue_clause(root_idf);
+            let _ = normalizer_idf.normalize_ensure_clause(root_idf);
+            let _ = normalizer_idf.normalize_begin(root_idf);
+            let _ = normalizer_idf.normalize_loop(root_idf, "WHILE");
+            let _ = normalizer_idf.literal_arguments_from_text(root_idf);
+            let _ = normalizer_idf.normalize_call_with_block(root_idf);
+            let _ = normalizer_idf.scalar_argument_list_value(root_idf);
+            let _ = normalizer_idf.single_dotted_body_node(root_idf);
+            let _ = normalizer_idf.normalize_infix_statement(root_idf);
+            let _ = normalizer_idf.inline_def_name_after_receiver(root_idf, root_idf);
+            let _ = normalizer_idf.inline_def_receiver(root_idf);
+            let mut targets = Vec::new();
+            normalizer_idf.collect_destructured_parameter_targets(root_idf, &mut targets);
+            let _ = normalizer_idf.normalize_operator_assignment(root_idf);
+            let _ = normalizer_idf.normalize_operator_assignment_statement(root_idf);
+            let _ = normalizer_idf.normalize_rescue_modifier(root_idf);
+            let _ = normalizer_idf.normalize_when(root_idf);
+            let _ = normalizer_idf.normalize_case(root_idf);
+            let _ = normalizer_idf.normalize_return(root_idf);
+            let _ = normalizer_idf.normalize_ternary_statement(root_idf);
+            let _ = normalizer_idf.normalize_boolean(root_idf);
+            let _ = normalizer_idf.normalize_comparison(root_idf);
+            let _ = normalizer_idf.normalize_operator_call(root_idf);
+            let _ = normalizer_idf.normalize_infix_statement(root_idf);
+            let _ = normalizer_idf.normalize_unary_not(root_idf);
+            let _ = normalizer_idf.normalize_unary_not_statement(root_idf);
+            let _ = normalizer_idf.normalize_unary_minus(root_idf);
+            let _ = normalizer_idf.normalize_ternary_branch(&[root_idf]);
+            let _ = normalizer_idf.normalize_assignment(root_idf);
+
             mock.tracks_scope.store(false, Ordering::Relaxed);
         }
     }
