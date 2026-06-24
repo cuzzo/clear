@@ -1,0 +1,300 @@
+{
+  "children": [
+    {
+      "Node": {
+        "children": [
+          {
+            "Symbol": "foo"
+          },
+          {
+            "Node": {
+              "children": [
+                "Nil",
+                "Nil",
+                {
+                  "Node": {
+                    "children": [
+                      {
+                        "Node": {
+                          "children": [
+                            {
+                              "String": "x"
+                            }
+                          ],
+                          "first_column": 10,
+                          "first_lineno": 2,
+                          "last_column": 11,
+                          "last_lineno": 2,
+                          "text": "x",
+                          "type": "LVAR"
+                        }
+                      },
+                      {
+                        "Node": {
+                          "children": [
+                            {
+                              "Node": {
+                                "children": [
+                                  {
+                                    "Node": {
+                                      "children": [],
+                                      "first_column": 13,
+                                      "first_lineno": 3,
+                                      "last_column": 14,
+                                      "last_lineno": 3,
+                                      "text": "1",
+                                      "type": "INTEGER"
+                                    }
+                                  }
+                                ],
+                                "first_column": 8,
+                                "first_lineno": 3,
+                                "last_column": 23,
+                                "last_lineno": 4,
+                                "text": "case 1:\n            return 1, 2",
+                                "type": "LIST"
+                              }
+                            },
+                            {
+                              "Node": {
+                                "children": [
+                                  {
+                                    "Node": {
+                                      "children": [
+                                        {
+                                          "Node": {
+                                            "children": [],
+                                            "first_column": 19,
+                                            "first_lineno": 4,
+                                            "last_column": 20,
+                                            "last_lineno": 4,
+                                            "text": "1",
+                                            "type": "INTEGER"
+                                          }
+                                        },
+                                        {
+                                          "Node": {
+                                            "children": [],
+                                            "first_column": 22,
+                                            "first_lineno": 4,
+                                            "last_column": 23,
+                                            "last_lineno": 4,
+                                            "text": "2",
+                                            "type": "INTEGER"
+                                          }
+                                        }
+                                      ],
+                                      "first_column": 19,
+                                      "first_lineno": 4,
+                                      "last_column": 23,
+                                      "last_lineno": 4,
+                                      "text": "1, 2",
+                                      "type": "EXPRESSION_LIST"
+                                    }
+                                  }
+                                ],
+                                "first_column": 12,
+                                "first_lineno": 4,
+                                "last_column": 23,
+                                "last_lineno": 4,
+                                "text": "return 1, 2",
+                                "type": "RETURN"
+                              }
+                            },
+                            {
+                              "Node": {
+                                "children": [
+                                  {
+                                    "Node": {
+                                      "children": [
+                                        {
+                                          "Node": {
+                                            "children": [],
+                                            "first_column": 13,
+                                            "first_lineno": 5,
+                                            "last_column": 20,
+                                            "last_lineno": 5,
+                                            "text": "MyConst",
+                                            "type": "DOTTED_NAME"
+                                          }
+                                        }
+                                      ],
+                                      "first_column": 8,
+                                      "first_lineno": 5,
+                                      "last_column": 31,
+                                      "last_lineno": 6,
+                                      "text": "case MyConst:\n            return obj.method()",
+                                      "type": "LIST"
+                                    }
+                                  },
+                                  {
+                                    "Node": {
+                                      "children": [
+                                        {
+                                          "Node": {
+                                            "children": [
+                                              {
+                                                "Node": {
+                                                  "children": [
+                                                    {
+                                                      "String": "obj"
+                                                    }
+                                                  ],
+                                                  "first_column": 19,
+                                                  "first_lineno": 6,
+                                                  "last_column": 22,
+                                                  "last_lineno": 6,
+                                                  "text": "obj",
+                                                  "type": "LVAR"
+                                                }
+                                              },
+                                              {
+                                                "Symbol": "method"
+                                              },
+                                              "Nil"
+                                            ],
+                                            "first_column": 19,
+                                            "first_lineno": 6,
+                                            "last_column": 31,
+                                            "last_lineno": 6,
+                                            "text": "obj.method()",
+                                            "type": "CALL"
+                                          }
+                                        }
+                                      ],
+                                      "first_column": 12,
+                                      "first_lineno": 6,
+                                      "last_column": 31,
+                                      "last_lineno": 6,
+                                      "text": "return obj.method()",
+                                      "type": "RETURN"
+                                    }
+                                  },
+                                  {
+                                    "Node": {
+                                      "children": [
+                                        {
+                                          "Node": {
+                                            "children": [
+                                              {
+                                                "Node": {
+                                                  "children": [],
+                                                  "first_column": 13,
+                                                  "first_lineno": 7,
+                                                  "last_column": 22,
+                                                  "last_lineno": 7,
+                                                  "text": "bare_name",
+                                                  "type": "DOTTED_NAME"
+                                                }
+                                              }
+                                            ],
+                                            "first_column": 8,
+                                            "first_lineno": 7,
+                                            "last_column": 26,
+                                            "last_lineno": 8,
+                                            "text": "case bare_name:\n            return not obj",
+                                            "type": "LIST"
+                                          }
+                                        },
+                                        {
+                                          "Node": {
+                                            "children": [
+                                              {
+                                                "Node": {
+                                                  "children": [
+                                                    {
+                                                      "Node": {
+                                                        "children": [
+                                                          {
+                                                            "String": "obj"
+                                                          }
+                                                        ],
+                                                        "first_column": 23,
+                                                        "first_lineno": 8,
+                                                        "last_column": 26,
+                                                        "last_lineno": 8,
+                                                        "text": "obj",
+                                                        "type": "LVAR"
+                                                      }
+                                                    }
+                                                  ],
+                                                  "first_column": 19,
+                                                  "first_lineno": 8,
+                                                  "last_column": 26,
+                                                  "last_lineno": 8,
+                                                  "text": "not obj",
+                                                  "type": "NOT_OPERATOR"
+                                                }
+                                              }
+                                            ],
+                                            "first_column": 12,
+                                            "first_lineno": 8,
+                                            "last_column": 26,
+                                            "last_lineno": 8,
+                                            "text": "return not obj",
+                                            "type": "RETURN"
+                                          }
+                                        },
+                                        "Nil"
+                                      ],
+                                      "first_column": 8,
+                                      "first_lineno": 7,
+                                      "last_column": 26,
+                                      "last_lineno": 8,
+                                      "text": "case bare_name:\n            return not obj",
+                                      "type": "WHEN"
+                                    }
+                                  }
+                                ],
+                                "first_column": 8,
+                                "first_lineno": 5,
+                                "last_column": 31,
+                                "last_lineno": 6,
+                                "text": "case MyConst:\n            return obj.method()",
+                                "type": "WHEN"
+                              }
+                            }
+                          ],
+                          "first_column": 8,
+                          "first_lineno": 3,
+                          "last_column": 23,
+                          "last_lineno": 4,
+                          "text": "case 1:\n            return 1, 2",
+                          "type": "WHEN"
+                        }
+                      }
+                    ],
+                    "first_column": 4,
+                    "first_lineno": 2,
+                    "last_column": 26,
+                    "last_lineno": 8,
+                    "text": "match x:\n        case 1:\n            return 1, 2\n        case MyConst:\n            return obj.method()\n        case bare_name:\n            return not obj",
+                    "type": "CASE"
+                  }
+                }
+              ],
+              "first_column": 4,
+              "first_lineno": 2,
+              "last_column": 26,
+              "last_lineno": 8,
+              "text": "match x:\n        case 1:\n            return 1, 2\n        case MyConst:\n            return obj.method()\n        case bare_name:\n            return not obj",
+              "type": "SCOPE"
+            }
+          }
+        ],
+        "first_column": 0,
+        "first_lineno": 1,
+        "last_column": 26,
+        "last_lineno": 8,
+        "text": "def foo():\n    match x:\n        case 1:\n            return 1, 2\n        case MyConst:\n            return obj.method()\n        case bare_name:\n            return not obj",
+        "type": "DEFN"
+      }
+    }
+  ],
+  "first_column": 0,
+  "first_lineno": 1,
+  "last_column": 0,
+  "last_lineno": 9,
+  "text": "def foo():\n    match x:\n        case 1:\n            return 1, 2\n        case MyConst:\n            return obj.method()\n        case bare_name:\n            return not obj\n",
+  "type": "ROOT"
+}
