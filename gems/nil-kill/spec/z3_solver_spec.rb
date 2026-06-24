@@ -173,6 +173,18 @@ RSpec.describe NilKill::Z3Solver do
         }
 
         solver = described_class.new(evidence, [path])
+        allow(solver).to receive(:z3_available?).and_return(true)
+        allow(Open3).to receive(:capture3).with("z3 -smt2 -in", anything) do |_cmd, opts|
+          stdin = opts[:stdin_data]
+          type_ids = solver.instance_variable_get(:@type_ids)
+          string_id = type_ids["String"]
+          numeric_id = type_ids["Numeric"]
+          if string_id && numeric_id && stdin.include?("(assert (is-sub #{string_id} #{numeric_id}))")
+            ["unsat\n", "", double(success?: true)]
+          else
+            ["sat\n", "", double(success?: true)]
+          end
+        end
 
         action_consistent = {
           "kind" => "fix_sig_return",
