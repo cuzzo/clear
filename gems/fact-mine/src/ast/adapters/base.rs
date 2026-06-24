@@ -138,6 +138,10 @@ pub(crate) trait AstNormalizationAdapter: Sync {
         false
     }
 
+    fn custom_function_name(&self, _node: TreeSitterNode<'_>, _source: &str) -> Option<String> {
+        None
+    }
+
     fn begin_statement(&self, _node: TreeSitterNode<'_>, _source: &str) -> bool {
         false
     }

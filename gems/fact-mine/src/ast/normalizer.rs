@@ -5347,6 +5347,10 @@ impl<'source> TreeSitterNormalizer<'source> {
     }
 
     pub(in crate::ast) fn function_name(&self, node: TreeSitterNode<'_>) -> Option<String> {
+        if let Some(name) = self.normalization_adapter.custom_function_name(node, self.source) {
+            return Some(name);
+        }
+
         if self.singleton_function_kind(node.kind()) {
             return Some(self.singleton_name(node));
         }

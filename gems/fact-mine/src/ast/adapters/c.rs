@@ -24,4 +24,18 @@ impl AstNormalizationAdapter for CAstAdapter {
             .collect::<Vec<_>>();
         (!body.is_empty()).then_some(body)
     }
+
+    fn custom_function_name(&self, node: TreeSitterNode<'_>, source: &str) -> Option<String> {
+        if node.kind() == "function_definition" {
+            let mut stack = named_children(node);
+            while !stack.is_empty() {
+                let child = stack.remove(0);
+                if child.kind() == "identifier" || child.kind() == "field_identifier" {
+                    return Some(super::super::node_text(child, source).to_string());
+                }
+                stack.extend(named_children(child));
+            }
+        }
+        None
+    }
 }

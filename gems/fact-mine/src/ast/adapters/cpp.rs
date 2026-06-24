@@ -43,4 +43,18 @@ impl AstNormalizationAdapter for CppAstAdapter {
             .collect::<Vec<_>>();
         (!patterns.is_empty()).then_some(patterns)
     }
+
+    fn custom_function_name(&self, node: TreeSitterNode<'_>, source: &str) -> Option<String> {
+        if node.kind() == "function_definition" {
+            let mut stack = named_children(node);
+            while !stack.is_empty() {
+                let child = stack.remove(0);
+                if child.kind() == "identifier" || child.kind() == "field_identifier" || child.kind() == "qualified_identifier" || child.kind() == "destructor_name" {
+                    return Some(super::super::node_text(child, source).to_string());
+                }
+                stack.extend(named_children(child));
+            }
+        }
+        None
+    }
 }
