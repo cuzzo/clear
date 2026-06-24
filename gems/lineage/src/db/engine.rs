@@ -137,6 +137,7 @@ where
                 }
                 stats.logical_units += 1;
 
+                let mut is_new = false;
                 if let Some(prev) = previous.get(&unit.id) {
                     if let Some(event_type) = classify_event(prev, &unit, commit.is_fix()) {
                         let event = Event {
@@ -211,9 +212,13 @@ where
                     claimed_moves.insert(previous_id.clone());
                     aliases.insert(observed_id, previous_id.clone());
                     unit.id = previous_id;
+                } else {
+                    is_new = true;
                 }
 
-                self.storage.upsert_logical_unit(&unit, commit.timestamp)?;
+                if is_new {
+                    self.storage.upsert_logical_unit(&unit, commit.timestamp)?;
+                }
                 current.insert(unit.id.clone(), unit);
             }
             previous = current;
