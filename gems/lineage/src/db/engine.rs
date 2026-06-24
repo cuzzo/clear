@@ -8,6 +8,12 @@ use std::collections::{HashMap, HashSet};
 
 const MOVE_SIZE_RATIO_FLOOR: f64 = 0.50;
 
+#[derive(serde::Serialize, serde::Deserialize)]
+struct EngineState {
+    previous: HashMap<String, LogicalUnit>,
+    aliases: HashMap<String, String>,
+}
+
 #[derive(Debug, Default, Clone, Copy, PartialEq, Eq)]
 pub struct EngineStats {
     pub commits: usize,
@@ -59,15 +65,38 @@ where
             }
         }
 
+        let mut start_idx = 0;
         let mut previous: HashMap<String, LogicalUnit> = HashMap::new();
-        let mut previous_by_name: HashMap<(UnitKind, String), Vec<String>> = HashMap::new();
         let mut aliases: HashMap<String, String> = HashMap::new();
-        let mut stats = EngineStats::default();
+
+        for i in (0..commits.len()).rev() {
+            if let Ok(Some(state_json)) = self.storage.load_engine_state(&commits[i].hash) {
+                if let Ok(state) = serde_json::from_str::<EngineState>(&state_json) {
+                    previous = state.previous;
+                    aliases = state.aliases;
+                    start_idx = i + 1;
+                    break;
+                }
+            }
+        }
+
+        let mut previous_by_name: HashMap<(UnitKind, String), Vec<String>> = HashMap::new();
         let mut file_units: HashMap<String, Vec<LogicalUnit>> = HashMap::new();
+        if start_idx > 0 {
+            for unit in previous.values() {
+                previous_by_name
+                    .entry((unit.kind, unit.name.clone()))
+                    .or_default()
+                    .push(unit.id.clone());
+                file_units.entry(unit.path.clone()).or_default().push(unit.clone());
+            }
+        }
+
+        let mut stats = EngineStats::default();
 
         let provider = &self.provider;
         let extractor = &self.extractor;
-        let commits_changes: Result<Vec<_>> = (0..commits.len())
+        let commits_changes: Result<Vec<_>> = (start_idx..commits.len())
             .into_par_iter()
             .map(|idx| {
                 let commit = &commits[idx];
@@ -98,13 +127,14 @@ where
             })
             .collect();
 
-        for (commit_idx, commit) in commits.into_iter().enumerate() {
+        for (commit_idx, commit) in commits.into_iter().enumerate().skip(start_idx) {
             self.storage.insert_metadata(&commit)?;
             let mut current = HashMap::new();
             let mut claimed_moves = HashSet::new();
 
-            let changes = &commits_changes[commit_idx];
-            let commit_parsed_units = &parsed_commits_units[commit_idx];
+            let suffix_idx = commit_idx - start_idx;
+            let changes = &commits_changes[suffix_idx];
+            let commit_parsed_units = &parsed_commits_units[suffix_idx];
 
             for (file_idx, file) in changes.added_or_modified.iter().enumerate() {
                 let units = commit_parsed_units[file_idx].clone();
@@ -231,6 +261,13 @@ where
                     .push(unit.id.clone());
             }
             stats.commits += 1;
+
+            let state = EngineState {
+                previous: previous.clone(),
+                aliases: aliases.clone(),
+            };
+            let state_json = serde_json::to_string(&state)?;
+            self.storage.save_engine_state(&commit.hash, &state_json)?;
         }
 
         Ok(stats)
@@ -878,5 +915,56 @@ mod tests {
         let stats = engine.run(None).unwrap();
 
         assert_eq!(stats.moves, 1);
+    }
+
+    #[test]
+    fn incremental_indexing_resumes_state() {
+        let commits1 = vec![
+            CommitMetadata { hash: "c1".into(), message: "init".into(), timestamp: 1 },
+        ];
+        let mut files1 = HashMap::new();
+        files1.insert("c1".into(), vec![BlobFile {
+            path: "src/a.rb".into(),
+            contents: "def run\n  foo.bar.baz.map { |x| x.to_s }\nend\n".into(),
+        }]);
+
+        let dir = tempfile::tempdir().unwrap();
+        let db_path = dir.path().join("lineage.db");
+
+        // Run 1: process c1
+        {
+            let provider = MemoryProvider { commits: commits1, files: files1 };
+            let storage = Storage::open(&db_path).unwrap();
+            let mut engine = LineageEngine::new(provider, crate::extract::HeuristicExtractor::default(), storage);
+            let stats = engine.run(None).unwrap();
+            assert_eq!(stats.commits, 1);
+            assert_eq!(stats.moves, 0);
+        }
+
+        // Run 2: process c1 and c2 (incremental)
+        let commits2 = vec![
+            CommitMetadata { hash: "c1".into(), message: "init".into(), timestamp: 1 },
+            CommitMetadata { hash: "c2".into(), message: "move".into(), timestamp: 2 },
+        ];
+        let mut files2 = HashMap::new();
+        files2.insert("c1".into(), vec![BlobFile {
+            path: "src/a.rb".into(),
+            contents: "def run\n  foo.bar.baz.map { |x| x.to_s }\nend\n".into(),
+        }]);
+        files2.insert("c2".into(), vec![BlobFile {
+            path: "src/b.rb".into(),
+            contents: "def run\n  foo.bar.baz.map { |x| x.to_s }\nend\n".into(),
+        }]);
+
+        {
+            let provider = MemoryProvider { commits: commits2, files: files2 };
+            let storage = Storage::open_existing(&db_path).unwrap();
+            let mut engine = LineageEngine::new(provider, crate::extract::HeuristicExtractor::default(), storage);
+            let stats = engine.run(None).unwrap();
+            // Should skip c1, and only process c2 (1 commit)
+            assert_eq!(stats.commits, 1);
+            // It should successfully track the move from a.rb to b.rb!
+            assert_eq!(stats.moves, 1);
+        }
     }
 }

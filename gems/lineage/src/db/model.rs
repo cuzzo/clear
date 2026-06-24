@@ -1,7 +1,8 @@
+use serde::{Serialize, Deserialize};
 use sha2::{Digest, Sha256};
 use std::fmt;
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub enum UnitKind {
     Function,
     Class,
@@ -47,7 +48,7 @@ impl fmt::Display for EventType {
     }
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct LogicalUnit {
     pub id: String,
     pub name: String,
