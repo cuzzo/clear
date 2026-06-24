@@ -34,8 +34,45 @@ module NilKill
     end
 
     def scan
-      @files.each { |path| scan_file(path) if File.file?(path) }
+      obs = @evidence.dig("facts", "hidden_enum_observations")
+      if obs && !obs.empty?
+        load_observations(obs)
+      else
+        @files.each { |path| scan_file(path) if File.file?(path) }
+      end
       rows.sort_by { |row| [-row["score"].to_i, row["path"].to_s, row["line"].to_i, row["slot"].to_s] }
+    end
+
+    def load_observations(observations)
+      observations.each do |obs|
+        slot = {
+          "key" => obs["key"],
+          "kind" => obs["kind"],
+          "path" => obs["path"],
+          "line" => obs["line"].to_i,
+          "owner" => obs["owner"],
+          "method" => obs["method"],
+          "method_kind" => obs["method_kind"],
+          "slot" => obs["slot"],
+          "type" => obs["type"]
+        }
+        entry = slot_entry(slot)
+
+        event = obs["event"]
+        values = obs["values"] || []
+        site = obs["site"] || {}
+
+        case event
+        when "decision"
+          merge_values(entry, values)
+          entry["decisions"] << site.merge("values" => values)
+        when "producer"
+          merge_values(entry, values)
+          entry["producers"] << site.merge("values" => values)
+        when "blocker"
+          entry["blockers"] << site
+        end
+      end
     end
 
     private

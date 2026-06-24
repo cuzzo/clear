@@ -11,13 +11,22 @@ module NilKill
     end
 
     def run
+      # Phase 1: Ingestion & Normalization
       load_runtime
       index_sources
       load_sorbet if @run_sorbet
-      build_actions
+
+      # Phase 2: Flow Propagation & Constraint Solving
       build_flow_graph
+
+      # Phase 3: Stateful Pressure Scanning (independent of parsing)
       build_fallibility_pressure
       build_hidden_enum_pressure
+
+      # Phase 4: Action Generation
+      build_actions
+
+      # Phase 5: Output Rendering
       evidence = @store.to_h
       @store.write(evidence)
       Report.new([], evidence: evidence).run
