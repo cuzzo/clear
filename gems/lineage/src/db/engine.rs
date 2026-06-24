@@ -6,7 +6,6 @@ use anyhow::Result;
 use rayon::prelude::*;
 use std::collections::{HashMap, HashSet};
 
-const MOVE_SIMILARITY_THRESHOLD: f64 = 0.72;
 const MOVE_SIZE_RATIO_FLOOR: f64 = 0.50;
 
 #[derive(Debug, Default, Clone, Copy, PartialEq, Eq)]
@@ -83,7 +82,7 @@ where
             .map(|changes| {
                 changes
                     .added_or_modified
-                    .iter()
+                    .par_iter()
                     .map(|file| extractor.extract_units(file))
                     .collect()
             })
@@ -231,13 +230,97 @@ fn find_moved_unit<'a>(
                 && prev.name == current.name
                 && prev.path != current.path
                 && size_ratio(prev, current) >= MOVE_SIZE_RATIO_FLOOR
+                && is_valid_cross_file_move(prev, current)
         })
         .filter_map(|prev| {
             let similarity = block_similarity(prev, current);
-            (similarity >= MOVE_SIMILARITY_THRESHOLD).then_some((prev, similarity))
+            let meaningful_len = get_meaningful_lines(prev).len().max(get_meaningful_lines(current).len());
+            let threshold = get_similarity_threshold(meaningful_len);
+            (similarity >= threshold).then_some((prev, similarity))
         })
         .max_by(|(_, left), (_, right)| left.partial_cmp(right).unwrap_or(std::cmp::Ordering::Equal))
         .map(|(prev, _)| prev)
+}
+
+fn get_similarity_threshold(block_size: usize) -> f64 {
+    if block_size <= 2 {
+        0.95
+    } else if block_size == 3 {
+        0.80
+    } else if block_size == 4 {
+        0.72
+    } else {
+        let raw = 0.75 - (block_size as f64 - 3.0) * 0.02;
+        raw.max(0.50)
+    }
+}
+
+fn is_meaningless_line(line: &str, path: &str) -> bool {
+    let ext = path.rsplit_once('.').map(|(_, ext)| ext.to_ascii_lowercase()).unwrap_or_default();
+    let trimmed = line.trim();
+    if trimmed.is_empty() {
+        return true;
+    }
+    match ext.as_str() {
+        "rb" | "lua" => trimmed.eq_ignore_ascii_case("end"),
+        "go" | "rs" | "c" | "h" | "cc" | "cpp" | "cxx" | "hh" | "hpp" | "hxx" | "cs" | "java" | "kt" | "kts" | "swift" | "js" | "jsx" | "ts" | "tsx" | "zig" | "php" => {
+            trimmed == "}" || trimmed == "{" || trimmed == "};" || trimmed == "{" || trimmed == "{}"
+        }
+        _ => false
+    }
+}
+
+fn is_trivial_line(line: &str) -> bool {
+    let clean = line.replace(|c: char| c.is_whitespace(), "");
+    if clean.is_empty() {
+        return true;
+    }
+    if clean.len() < 20 {
+        let has_chaining = clean.matches('.').count() >= 2 || clean.contains("|>") || clean.contains("->");
+        let has_closure = clean.contains("{|") || clean.contains("=>") || clean.contains("->") || clean.contains("||");
+        let has_complex_op = clean.contains("&&") || clean.contains("==") || clean.contains("!=");
+        if !has_chaining && !has_closure && !has_complex_op {
+            return true;
+        }
+    }
+    let lower = clean.to_lowercase();
+    if lower == "returntrue" || lower == "returnfalse" || lower == "returnnull" || lower == "return" || lower == "return;" || lower == "return0" || lower == "return1" {
+        return true;
+    }
+    false
+}
+
+fn is_valid_cross_file_move(prev: &LogicalUnit, current: &LogicalUnit) -> bool {
+    let prev_lines = get_meaningful_lines(prev);
+    let current_lines = get_meaningful_lines(current);
+
+    if prev_lines.len() <= 1 || current_lines.len() <= 1 {
+        return false;
+    }
+
+    let prev_body_len = prev_lines.len() - 1;
+    let current_body_len = current_lines.len() - 1;
+
+    // If it's a single line body statement, we require it to be non-trivial.
+    if prev_body_len == 1 {
+        if is_trivial_line(prev_lines[1]) {
+            return false;
+        }
+    }
+    if current_body_len == 1 {
+        if is_trivial_line(current_lines[1]) {
+            return false;
+        }
+    }
+
+    true
+}
+
+fn get_meaningful_lines(unit: &LogicalUnit) -> Vec<&str> {
+    unit.normalized_source
+        .lines()
+        .filter(|line| !is_meaningless_line(line, &unit.path))
+        .collect()
 }
 
 fn classify_event(previous: &LogicalUnit, current: &LogicalUnit, fix_commit: bool) -> Option<EventType> {
@@ -253,13 +336,9 @@ fn classify_event(previous: &LogicalUnit, current: &LogicalUnit, fix_commit: boo
 }
 
 fn size_ratio(previous: &LogicalUnit, current: &LogicalUnit) -> f64 {
-    let left = normalized_line_count(previous).max(1) as f64;
-    let right = normalized_line_count(current).max(1) as f64;
+    let left = get_meaningful_lines(previous).len().max(1) as f64;
+    let right = get_meaningful_lines(current).len().max(1) as f64;
     left.min(right) / left.max(right)
-}
-
-fn normalized_line_count(unit: &LogicalUnit) -> usize {
-    unit.normalized_source.lines().count()
 }
 
 fn block_similarity(previous: &LogicalUnit, current: &LogicalUnit) -> f64 {
@@ -267,8 +346,8 @@ fn block_similarity(previous: &LogicalUnit, current: &LogicalUnit) -> f64 {
         return 1.0;
     }
 
-    let left: Vec<&str> = previous.normalized_source.lines().collect();
-    let right: Vec<&str> = current.normalized_source.lines().collect();
+    let left = get_meaningful_lines(previous);
+    let right = get_meaningful_lines(current);
     let max_len = left.len().max(right.len());
     if max_len == 0 {
         return 1.0;
@@ -492,14 +571,14 @@ mod tests {
             "c1".into(),
             vec![BlobFile {
                 path: "src/a.rb".into(),
-                contents: "def run\n1\nend\n".into(),
+                contents: "def run\n  foo.bar.baz.map { |x| x.to_s }\nend\n".into(),
             }],
         );
         files.insert(
             "c2".into(),
             vec![BlobFile {
                 path: "src/b.rb".into(),
-                contents: "def run\n1\nend\n".into(),
+                contents: "def run\n  foo.bar.baz.map { |x| x.to_s }\nend\n".into(),
             }],
         );
 
@@ -680,5 +759,101 @@ mod tests {
         assert_eq!(stats.events, 0);
         assert_eq!(stats.moves, 0);
         assert_eq!(stats.fixes, 0);
+    }
+
+    #[test]
+    fn does_not_track_meaningless_line_moves() {
+        let commits = vec![
+            CommitMetadata { hash: "c1".into(), message: "init".into(), timestamp: 1 },
+            CommitMetadata { hash: "c2".into(), message: "move".into(), timestamp: 2 },
+        ];
+        let mut files = HashMap::new();
+        files.insert("c1".into(), vec![BlobFile {
+            path: "src/a.rb".into(),
+            contents: "def run\nend\n".into(),
+        }]);
+        files.insert("c2".into(), vec![BlobFile {
+            path: "src/b.rb".into(),
+            contents: "def run\nend\n".into(),
+        }]);
+
+        let provider = MemoryProvider { commits, files };
+        let storage = Storage::open_memory().unwrap();
+        let mut engine = LineageEngine::new(provider, crate::extract::HeuristicExtractor::default(), storage);
+        let stats = engine.run(None).unwrap();
+
+        assert_eq!(stats.moves, 0);
+    }
+
+    #[test]
+    fn does_not_track_trivial_single_line_moves() {
+        let commits = vec![
+            CommitMetadata { hash: "c1".into(), message: "init".into(), timestamp: 1 },
+            CommitMetadata { hash: "c2".into(), message: "move".into(), timestamp: 2 },
+        ];
+        let mut files = HashMap::new();
+        files.insert("c1".into(), vec![BlobFile {
+            path: "src/a.rb".into(),
+            contents: "def run\n  run()\nend\n".into(),
+        }]);
+        files.insert("c2".into(), vec![BlobFile {
+            path: "src/b.rb".into(),
+            contents: "def run\n  run()\nend\n".into(),
+        }]);
+
+        let provider = MemoryProvider { commits, files };
+        let storage = Storage::open_memory().unwrap();
+        let mut engine = LineageEngine::new(provider, crate::extract::HeuristicExtractor::default(), storage);
+        let stats = engine.run(None).unwrap();
+
+        assert_eq!(stats.moves, 0);
+    }
+
+    #[test]
+    fn tracks_meaningful_single_line_moves() {
+        let commits = vec![
+            CommitMetadata { hash: "c1".into(), message: "init".into(), timestamp: 1 },
+            CommitMetadata { hash: "c2".into(), message: "move".into(), timestamp: 2 },
+        ];
+        let mut files = HashMap::new();
+        files.insert("c1".into(), vec![BlobFile {
+            path: "src/a.rb".into(),
+            contents: "def run\n  foo.bar.baz.map { |x| x.to_s }\nend\n".into(),
+        }]);
+        files.insert("c2".into(), vec![BlobFile {
+            path: "src/b.rb".into(),
+            contents: "def run\n  foo.bar.baz.map { |x| x.to_s }\nend\n".into(),
+        }]);
+
+        let provider = MemoryProvider { commits, files };
+        let storage = Storage::open_memory().unwrap();
+        let mut engine = LineageEngine::new(provider, crate::extract::HeuristicExtractor::default(), storage);
+        let stats = engine.run(None).unwrap();
+
+        assert_eq!(stats.moves, 1);
+    }
+
+    #[test]
+    fn tracks_block_moves_even_with_trivial_lines() {
+        let commits = vec![
+            CommitMetadata { hash: "c1".into(), message: "init".into(), timestamp: 1 },
+            CommitMetadata { hash: "c2".into(), message: "move".into(), timestamp: 2 },
+        ];
+        let mut files = HashMap::new();
+        files.insert("c1".into(), vec![BlobFile {
+            path: "src/a.rb".into(),
+            contents: "def run\n  foo();\n  bar();\n  baz();\nend\n".into(),
+        }]);
+        files.insert("c2".into(), vec![BlobFile {
+            path: "src/b.rb".into(),
+            contents: "def run\n  foo();\n  bar();\n  baz();\nend\n".into(),
+        }]);
+
+        let provider = MemoryProvider { commits, files };
+        let storage = Storage::open_memory().unwrap();
+        let mut engine = LineageEngine::new(provider, crate::extract::HeuristicExtractor::default(), storage);
+        let stats = engine.run(None).unwrap();
+
+        assert_eq!(stats.moves, 1);
     }
 }

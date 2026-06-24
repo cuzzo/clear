@@ -449,7 +449,7 @@ mod tests {
         let _c1 = create_commit(
             &repo,
             "add main fn",
-            &[("src/main.rs", "fn main() {\n    let x = 1;\n}\n")],
+            &[("src/main.rs", "fn main() {\n    foo().bar().baz().map(|x| x.to_string());\n}\n")],
         )?;
         
         // Commit 2: Move/rename main fn to helper fn in another file
@@ -462,7 +462,7 @@ mod tests {
         let _c2 = create_commit(
             &repo,
             "move main fn to helper",
-            &[("src/helper.rs", "fn main() {\n    let x = 1;\n}\n")],
+            &[("src/helper.rs", "fn main() {\n    foo().bar().baz().map(|x| x.to_string());\n}\n")],
         )?;
 
         let provider = GitProvider::open(dir.path())?;
