@@ -39,6 +39,7 @@ group :development do
   gem 'espalier', path: 'gems/espalier', require: false
   gem 'nil-kill', path: 'gems/nil-kill', require: false
   gem 'auto-type', path: 'gems/auto-type', require: false
+  gem 'boobytrap', path: 'gems/boobytrap', require: false
 
   # Rubocop with the rubocop-sorbet plugin. We don't run general
   # Rubocop style — only the `Sorbet/EnforceSignatures` cop, which

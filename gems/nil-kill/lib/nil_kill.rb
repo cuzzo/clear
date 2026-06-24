@@ -11,6 +11,8 @@ require "set"
 require "shellwords"
 require "time"
 require "sorbet-runtime"
+require "boobytrap"
+require "boobytrap/coverage_providers"
 
 module NilKill
   ROOT = File.expand_path("../../..", __dir__)
