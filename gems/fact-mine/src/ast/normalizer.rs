@@ -150,9 +150,6 @@ impl<'source> TreeSitterNormalizer<'source> {
         if self.yield_argument_list(node) {
             return Some(self.normalize_yield_argument_list(node));
         }
-        if self.super_statement(node) {
-            return Some(self.normalize_super_statement(node));
-        }
         if self.unary_not_statement(node) {
             return self.normalize_unary_not_statement(node);
         }
@@ -950,14 +947,7 @@ impl<'source> TreeSitterNormalizer<'source> {
                 self.raw_named_children(node)
                     .into_iter()
                     .filter(|child| {
-                        matches!(
-                            child.kind(),
-                            "pattern"
-                                | "case_pattern"
-                                | "match_pattern"
-                                | "switch_pattern"
-                                | "when_condition"
-                        )
+                        self.normalization_adapter.is_pattern_node_kind(child.kind())
                     })
                     .collect::<Vec<_>>()
             });
@@ -979,15 +969,7 @@ impl<'source> TreeSitterNormalizer<'source> {
         let mut normalized = Vec::new();
         for pattern in patterns {
             let pattern_text = node_text(pattern, self.source).to_string();
-            let pattern_wrapper = matches!(
-                pattern.kind(),
-                "pattern"
-                    | "case_pattern"
-                    | "match_pattern"
-                    | "switch_pattern"
-                    | "when_condition"
-                    | "expression_list"
-            );
+            let pattern_wrapper = self.normalization_adapter.is_pattern_wrapper_kind(pattern.kind());
             let pattern_children = self.named_children(pattern);
             if pattern_text.contains("::") {
                 normalized.push(self.wrap("CONST", vec![Child::Symbol(pattern_text)], pattern));
@@ -1148,10 +1130,8 @@ impl<'source> TreeSitterNormalizer<'source> {
     }
 
     pub(in crate::ast) fn wrapped_return_statement(&self, node: TreeSitterNode<'_>) -> bool {
-        matches!(
-            node.kind(),
-            "body_statement" | "block_body" | "statement" | "block" | "statement_list"
-        ) && !node_text(node, self.source).contains('\n')
+        self.normalization_adapter.wrapped_return_block_kind(node.kind())
+            && !node_text(node, self.source).contains('\n')
             && node
                 .children(&mut node.walk())
                 .next()
@@ -1347,7 +1327,7 @@ impl<'source> TreeSitterNormalizer<'source> {
     ) -> Option<Node> {
         let raw_named = self.raw_named_children(node);
         let target = if raw_named.len() == 1
-            && BINARY_WRAPPER_KINDS.contains(&raw_named[0].kind())
+            && self.normalization_adapter.binary_wrapper_kinds().contains(&raw_named[0].kind())
             && node_text(node, self.source) == node_text(raw_named[0], self.source)
         {
             raw_named[0]
@@ -2342,7 +2322,6 @@ impl<'source> TreeSitterNormalizer<'source> {
         self.normalize_body_nodes(self.named_children(node), node)
     }
 
-    #[cfg(test)]
     pub(in crate::ast) fn normalize_dotted_call_expression(
         &mut self,
         node: TreeSitterNode<'_>,
@@ -2618,10 +2597,8 @@ impl<'source> TreeSitterNormalizer<'source> {
         node: TreeSitterNode<'_>,
     ) -> Option<Node> {
         let raw_named = self.raw_named_children(node);
-        let target = if matches!(
-            node.kind(),
-            "body_statement" | "block" | "block_body" | "statement"
-        ) && raw_named.len() == 1
+        let target = if self.normalization_adapter.is_command_call_wrapper_kind(node.kind())
+            && raw_named.len() == 1
             && self.normalization_adapter.check_node_role(raw_named[0], "call")
             && node_text(node, self.source) == node_text(raw_named[0], self.source)
         {
@@ -2930,10 +2907,8 @@ impl<'source> TreeSitterNormalizer<'source> {
     }
 
     pub(in crate::ast) fn terminal_statement(&self, node: TreeSitterNode<'_>) -> bool {
-        matches!(
-            node.kind(),
-            "body_statement" | "block_body" | "statement" | "argument_list"
-        ) && self.named_children(node).is_empty()
+        self.normalization_adapter.is_terminal_statement_kind(node.kind())
+            && self.named_children(node).is_empty()
             && !node_text(node, self.source).trim().is_empty()
     }
 
@@ -3055,16 +3030,19 @@ impl<'source> TreeSitterNormalizer<'source> {
         let children = self
             .named_children(node)
             .into_iter()
-            .filter_map(|child| match child.kind() {
-                "interpolation" => self
-                    .normalize_interpolation(child)
-                    .map(|node| Child::Node(Box::new(node))),
-                "string_content" => Some(Child::Node(Box::new(self.wrap(
-                    "STR",
-                    vec![Child::String(node_text(child, self.source).to_string())],
-                    child,
-                )))),
-                _ => None,
+            .filter_map(|child| {
+                if self.normalization_adapter.interpolation_node(child) {
+                    self.normalize_interpolation(child)
+                        .map(|node| Child::Node(Box::new(node)))
+                } else if self.normalization_adapter.check_node_role(child, "string_content") {
+                    Some(Child::Node(Box::new(self.wrap(
+                        "STR",
+                        vec![Child::String(node_text(child, self.source).to_string())],
+                        child,
+                    ))))
+                } else {
+                    None
+                }
             })
             .collect::<Vec<_>>();
         let node_type = if children
@@ -3284,17 +3262,19 @@ impl<'source> TreeSitterNormalizer<'source> {
     ) -> Vec<Child> {
         self.named_children(node)
             .into_iter()
-            .filter_map(|child| match child.kind() {
-                _ if self.interpolation_node(child) => self.normalize_interpolation(child),
-                _ if self.normalization_adapter.heredoc_content_node(child) => {
+            .filter_map(|child| {
+                if self.interpolation_node(child) {
+                    self.normalize_interpolation(child)
+                } else if self.normalization_adapter.heredoc_content_node(child) {
                     let text = node_text(child, self.source).to_string();
                     if text.is_empty() {
                         None
                     } else {
                         Some(self.wrap("STR", vec![Child::String(text)], child))
                     }
+                } else {
+                    None
                 }
-                _ => None,
             })
             .map(|child| Child::Node(Box::new(child)))
             .collect()
@@ -3380,15 +3360,7 @@ impl<'source> TreeSitterNormalizer<'source> {
     }
 
     pub(in crate::ast) fn parameter_name(&self, param: TreeSitterNode<'_>) -> Option<String> {
-        if matches!(
-            param.kind(),
-            "identifier"
-                | "hash_splat_parameter"
-                | "splat_parameter"
-                | "block_parameter"
-                | "keyword_parameter"
-                | "optional_parameter"
-        ) {
+        if self.normalization_adapter.is_parameter_name_kind(param.kind()) {
             if let Some(name) = self.identifier_text(param) {
                 return Some(name);
             }
@@ -3518,7 +3490,6 @@ impl<'source> TreeSitterNormalizer<'source> {
         }
     }
 
-    #[cfg(test)]
     pub(in crate::ast) fn list(
         &self,
         children: Option<Vec<Node>>,
@@ -3652,10 +3623,7 @@ impl<'source> TreeSitterNormalizer<'source> {
         let Some(parent) = node.parent() else {
             return false;
         };
-        if matches!(
-            parent.kind(),
-            "method" | "method_parameters" | "parameter_list" | "argument_list" | "arguments"
-        ) {
+        if self.normalization_adapter.is_vcall_excluded_parent_kind(parent.kind()) {
             return false;
         }
         if self.member_read_node(parent) {
@@ -3787,17 +3755,7 @@ impl<'source> TreeSitterNormalizer<'source> {
     }
 
     pub(in crate::ast) fn modifier_return_action(&self, node: TreeSitterNode<'_>) -> bool {
-        matches!(
-            node.kind(),
-            "return"
-                | "return_statement"
-                | "return_expression"
-                | "break"
-                | "break_statement"
-                | "break_expression"
-                | "next"
-                | "continue_statement"
-        )
+        self.normalization_adapter.check_node_role(node, "return_or_break")
     }
 
     pub(in crate::ast) fn leading_if_statement(&self, node: TreeSitterNode<'_>) -> bool {
@@ -3939,11 +3897,11 @@ impl<'source> TreeSitterNormalizer<'source> {
         let target = self.leading_loop_target(node).unwrap_or(node);
         if target != node {
             let keyword = target.children(&mut target.walk()).next()?.kind();
-            let node_type = if keyword == "until" { "UNTIL" } else { "WHILE" };
+            let node_type = self.loop_node_type(keyword).unwrap_or("WHILE");
             return self.normalize_loop(target, node_type);
         }
         let keyword = target.children(&mut target.walk()).next()?.kind();
-        let node_type = if keyword == "until" { "UNTIL" } else { "WHILE" };
+        let node_type = self.loop_node_type(keyword).unwrap_or("WHILE");
         let named = self.named_children(target);
         let condition = optional_node(
             named
@@ -3959,7 +3917,7 @@ impl<'source> TreeSitterNormalizer<'source> {
         node: TreeSitterNode<'_>,
     ) -> Option<Node> {
         let target = self.leading_owner_target(node).unwrap_or(node);
-        let keyword = target.children(&mut target.walk()).next()?.kind();
+        let _keyword = target.children(&mut target.walk()).next()?.kind();
         let name = self.const_for(self.named_children(target).first().copied(), target);
         let body_node = self.named_field(target, "body").or_else(|| {
             self.named_children(target)
@@ -3968,7 +3926,7 @@ impl<'source> TreeSitterNormalizer<'source> {
                 .find(|child| self.block_kind(child.kind()))
         });
         let body = body_node.and_then(|body| self.normalize_body(body));
-        if keyword == "module" {
+        if self.module_node(target) {
             Some(self.wrap(
                 "MODULE",
                 vec![
@@ -4081,11 +4039,7 @@ impl<'source> TreeSitterNormalizer<'source> {
     }
 
     pub(in crate::ast) fn command_call_statement(&self, node: TreeSitterNode<'_>) -> bool {
-        if !matches!(
-            node.kind(),
-            "body_statement" | "block" | "block_body" | "statement"
-        ) || self.dotted_call(node)
-        {
+        if !self.normalization_adapter.is_command_call_wrapper_kind(node.kind()) || self.dotted_call(node) {
             return false;
         }
 
@@ -4250,10 +4204,7 @@ impl<'source> TreeSitterNormalizer<'source> {
         }
 
         children.into_iter().find(|child| {
-            matches!(
-                child.kind(),
-                "self" | "this" | "constant" | "scope_resolution"
-            )
+            self.normalization_adapter.is_inline_def_receiver_kind(child.kind())
         })
     }
 
@@ -4420,10 +4371,7 @@ impl<'source> TreeSitterNormalizer<'source> {
     }
 
     pub(in crate::ast) fn boolean_statement(&self, node: TreeSitterNode<'_>) -> bool {
-        if !matches!(
-            node.kind(),
-            "body_statement" | "block_body" | "statement" | "argument_list" | "expression_list"
-        ) {
+        if !self.normalization_adapter.is_boolean_statement_wrapper_kind(node.kind()) {
             return false;
         }
         let named = self.named_children(node);
@@ -4504,10 +4452,7 @@ impl<'source> TreeSitterNormalizer<'source> {
     }
 
     pub(in crate::ast) fn unary_not_statement(&self, node: TreeSitterNode<'_>) -> bool {
-        if !matches!(
-            node.kind(),
-            "body_statement" | "block_body" | "statement" | "argument_list"
-        ) {
+        if !self.normalization_adapter.is_statement_wrapper_kind(node.kind()) {
             return false;
         }
         let named = self.named_children(node);
@@ -4552,18 +4497,12 @@ impl<'source> TreeSitterNormalizer<'source> {
         &self,
         node: TreeSitterNode<'tree>,
     ) -> Option<(TreeSitterNode<'tree>, String, TreeSitterNode<'tree>)> {
-        if !matches!(
-            node.kind(),
-            "body_statement" | "block_body" | "statement" | "argument_list"
-        ) {
+        if !self.normalization_adapter.is_statement_wrapper_kind(node.kind()) {
             return None;
         }
         let raw_named = self.raw_named_children(node);
         let target = if raw_named.len() == 1
-            && matches!(
-                raw_named[0].kind(),
-                "binary" | "binary_expression" | "comparison_operator"
-            )
+            && self.normalization_adapter.is_infix_target_kind(raw_named[0].kind())
             && node_text(node, self.source) == node_text(raw_named[0], self.source)
         {
             raw_named[0]
@@ -4818,12 +4757,7 @@ impl<'source> TreeSitterNormalizer<'source> {
         let callable = self
             .named_children(node)
             .into_iter()
-            .filter(|child| {
-                !matches!(
-                    child.kind(),
-                    "block" | "do_block" | "argument_list" | "arguments"
-                )
-            })
+            .filter(|child| !self.normalization_adapter.is_call_block_or_arg_kind(child.kind()))
             .collect::<Vec<_>>();
         if callable
             .iter()
@@ -4856,12 +4790,7 @@ impl<'source> TreeSitterNormalizer<'source> {
             .named_children(node)
             .into_iter()
             .filter(|child| Some(*child) != block)
-            .filter(|child| {
-                !matches!(
-                    child.kind(),
-                    "block" | "do_block" | "argument_list" | "arguments"
-                )
-            })
+            .filter(|child| !self.normalization_adapter.is_call_block_or_arg_kind(child.kind()))
             .collect::<Vec<_>>();
         let receiver = *callable.first()?;
         let method = node_text(*callable.get(1)?, self.source)
@@ -4877,21 +4806,8 @@ impl<'source> TreeSitterNormalizer<'source> {
         if self.normalization_adapter.member_read_excluded(node) {
             return false;
         }
-        matches!(
-            node.kind(),
-            "call"
-                | "attribute"
-                | "member_expression"
-                | "member_access_expression"
-                | "dot_index_expression"
-                | "field"
-                | "field_access"
-                | "selector_expression"
-                | "field_expression"
-                | "navigation_expression"
-                | "directly_assignable_expression"
-                | "expression_list"
-        ) && self.member_parts(node).is_some()
+        self.normalization_adapter.is_member_read_kind(node.kind())
+            && self.member_parts(node).is_some()
     }
 
     pub(in crate::ast) fn member_parts<'tree>(
@@ -4933,10 +4849,7 @@ impl<'source> TreeSitterNormalizer<'source> {
             })
             .or_else(|| {
                 named_children.iter().copied().rev().find(|child| {
-                    !matches!(
-                        child.kind(),
-                        "block" | "do_block" | "argument_list" | "arguments"
-                    )
+                    !self.normalization_adapter.is_call_block_or_arg_kind(child.kind())
                 })
             })?;
         (receiver != method).then(|| {
@@ -5189,7 +5102,6 @@ impl<'source> TreeSitterNormalizer<'source> {
             .any(|child| self.same_ts_node(child, node))
     }
 
-    #[cfg(test)]
     pub(in crate::ast) fn node_key(&self, node: TreeSitterNode<'_>) -> (String, usize, usize) {
         (node.kind().to_string(), node.start_byte(), node.end_byte())
     }
@@ -5395,7 +5307,7 @@ impl<'source> TreeSitterNormalizer<'source> {
                 source,
             ));
         }
-        if left.kind() == "expression_list" {
+        if self.normalization_adapter.check_node_role(left, "expression_list") {
             return self
                 .named_children(left)
                 .into_iter()
@@ -5522,7 +5434,7 @@ impl<'source> TreeSitterNormalizer<'source> {
 
         self.named_children(node)
             .into_iter()
-            .find(|child| matches!(child.kind(), "block" | "do_block"))
+            .find(|child| self.normalization_adapter.check_node_role(*child, "block_or_do_block"))
     }
 
     pub(in crate::ast) fn named_field<'tree>(
@@ -5540,7 +5452,6 @@ impl<'source> TreeSitterNormalizer<'source> {
         node.parent()
     }
 
-    #[cfg(test)]
     pub(in crate::ast) fn next_sibling<'tree>(
         &self,
         node: TreeSitterNode<'tree>,
@@ -5548,7 +5459,6 @@ impl<'source> TreeSitterNormalizer<'source> {
         node.next_sibling()
     }
 
-    #[cfg(test)]
     pub(in crate::ast) fn prev_sibling<'tree>(
         &self,
         node: TreeSitterNode<'tree>,
@@ -5556,7 +5466,6 @@ impl<'source> TreeSitterNormalizer<'source> {
         node.prev_sibling()
     }
 
-    #[cfg(test)]
     pub(in crate::ast) fn next_named_sibling<'tree>(
         &self,
         node: TreeSitterNode<'tree>,
@@ -5886,77 +5795,27 @@ impl<'source> TreeSitterNormalizer<'source> {
     }
 
     pub(in crate::ast) fn const_kind(&self, kind: &str) -> bool {
-        matches!(
-            kind,
-            "constant" | "scope_resolution" | "type_identifier" | "scoped_type_identifier"
-        )
+        self.normalization_adapter.const_node_kind(kind)
     }
 
     pub(in crate::ast) fn call_kind(&self, kind: &str) -> bool {
-        matches!(
-            kind,
-            "call"
-                | "call_expression"
-                | "function_call_expression"
-                | "method_call"
-                | "method_call_expression"
-        )
+        self.normalization_adapter.call_node_kind(kind)
     }
 
     pub(in crate::ast) fn block_kind(&self, kind: &str) -> bool {
         self.normalization_adapter.block_node_kind(kind)
-            || matches!(
-                kind,
-                "block"
-                    | "body_statement"
-                    | "statement_block"
-                    | "statement_list"
-                    | "class_body"
-                    | "switch_body"
-                    | "match_block"
-                    | "then"
-                    | "block_body"
-                    | "control_structure_body"
-                    | "compound_statement"
-                    | "declaration_list"
-                    | "function_body"
-                    | "statements"
-            )
     }
 
     pub(in crate::ast) fn case_kind(&self, kind: &str) -> bool {
-        matches!(
-            kind,
-            "case"
-                | "switch_statement"
-                | "expression_switch_statement"
-                | "switch_expression"
-                | "match_statement"
-                | "match_expression"
-                | "when_expression"
-        )
+        self.normalization_adapter.case_node_kind(kind)
     }
 
     pub(in crate::ast) fn when_kind(&self, kind: &str) -> bool {
-        matches!(
-            kind,
-            "when"
-                | "switch_case"
-                | "case_clause"
-                | "expression_case"
-                | "case_statement"
-                | "switch_section"
-                | "switch_block_statement_group"
-                | "switch_entry"
-                | "when_entry"
-                | "match_arm"
-        )
+        self.normalization_adapter.when_node_kind(kind)
     }
 
     pub(in crate::ast) fn statement_node(&self, kind: &str) -> bool {
-        kind.ends_with("_statement")
-            || kind.ends_with("_expression")
-            || matches!(kind, "return" | "break" | "next")
+        self.normalization_adapter.statement_node_kind(kind)
     }
 
     pub(in crate::ast) fn unwrap_node(&self, node: TreeSitterNode<'_>) -> bool {
@@ -6137,1081 +5996,5 @@ impl<'source> TreeSitterNormalizer<'source> {
     }
 }
 
-#[cfg(test)]
-mod dummy_arch_test {}
 
-pub(crate) mod tests {
-    use super::*;
-    use crate::syntax::Language;
-    use tree_sitter::Parser;
-
-    pub(crate) fn test_normalizer_uncovered_paths_impl() {
-        // 1. local_or_call_for_name
-        let mut parser = Parser::new();
-        parser.set_language(&tree_sitter_ruby::LANGUAGE.into()).unwrap();
-        let tree = parser.parse("x = 1", None).unwrap();
-        let root = tree.root_node();
-        let ts_node = root.child(0).unwrap();
-
-        let mut normalizer_ruby = TreeSitterNormalizer::new("x = 1", Language::parse("ruby").unwrap());
-        normalizer_ruby.local_stack.push({
-            let mut s = BTreeSet::new();
-            s.insert("x".to_string());
-            s
-        });
-        let n1 = normalizer_ruby.local_or_call_for_name("x", ts_node);
-        assert_eq!(n1.r#type, "LVAR");
-
-        let n2 = normalizer_ruby.local_or_call_for_name("vcall_func", ts_node);
-        assert_eq!(n2.r#type, "VCALL");
-
-        let normalizer_js = TreeSitterNormalizer::new("x = 1", Language::parse("javascript").unwrap());
-        let n3 = normalizer_js.local_or_call_for_name("vcall_func", ts_node);
-        assert_eq!(n3.r#type, "LVAR");
-
-        // 2. prepend_inline_parameter_begin and inline_parameter_begin_marker
-        let tree_fn = parser.parse("def foo(x); end", None).unwrap();
-        let method_node = tree_fn.root_node().child(0).unwrap();
-        let normalizer_ruby_fn = TreeSitterNormalizer::new("def foo(x); end", Language::parse("ruby").unwrap());
-
-        let marker = normalizer_ruby_fn.inline_parameter_begin_marker(method_node);
-        assert!(marker.is_some());
-
-        let dummy_body = Node {
-            r#type: "IDENTIFIER".to_string(),
-            children: vec![],
-            first_lineno: 1,
-            first_column: 0,
-            last_lineno: 1,
-            last_column: 3,
-            text: "foo".to_string(),
-        };
-
-        // When body is None
-        assert!(normalizer_ruby_fn.prepend_inline_parameter_begin(method_node, None).is_none());
-
-        // When body is Some but not BLOCK
-        let prepended = normalizer_ruby_fn.prepend_inline_parameter_begin(method_node, Some(dummy_body.clone())).unwrap();
-        assert_eq!(prepended.r#type, "BLOCK");
-        assert_eq!(prepended.children.len(), 2);
-
-        // When body is Some and BLOCK
-        let block_body = Node {
-            r#type: "BLOCK".to_string(),
-            children: vec![Child::Node(Box::new(dummy_body.clone()))],
-            first_lineno: 1,
-            first_column: 0,
-            last_lineno: 1,
-            last_column: 3,
-            text: "".to_string(),
-        };
-        let prepended_block = normalizer_ruby_fn.prepend_inline_parameter_begin(method_node, Some(block_body)).unwrap();
-        assert_eq!(prepended_block.r#type, "BLOCK");
-        assert_eq!(prepended_block.children.len(), 2);
-
-        // When body is Some and empty BLOCK
-        let empty_block = Node {
-            r#type: "BLOCK".to_string(),
-            children: vec![],
-            first_lineno: 1,
-            first_column: 0,
-            last_lineno: 1,
-            last_column: 3,
-            text: "".to_string(),
-        };
-        let prepended_empty = normalizer_ruby_fn.prepend_inline_parameter_begin(method_node, Some(empty_block));
-        assert!(prepended_empty.is_none());
-
-        // When not dynamic syntax enabled
-        assert!(normalizer_js.prepend_inline_parameter_begin(method_node, Some(dummy_body.clone())).is_some());
-
-        // 3. singleton_receiver & singleton_name
-        let tree_sing = parser.parse("def self.bar; end", None).unwrap();
-        let sing_node = tree_sing.root_node().child(0).unwrap();
-        let normalizer_sing = TreeSitterNormalizer::new("def self.bar; end", Language::parse("ruby").unwrap());
-        let receiver = normalizer_sing.singleton_receiver(sing_node).unwrap();
-        assert_eq!(node_text(receiver, "def self.bar; end"), "self");
-        let name = normalizer_sing.singleton_name(sing_node);
-        assert_eq!(name, "bar");
-
-        let tree_norm = parser.parse("def bar; end", None).unwrap();
-        let norm_node = tree_norm.root_node().child(0).unwrap();
-        let normalizer_norm = TreeSitterNormalizer::new("def bar; end", Language::parse("ruby").unwrap());
-        assert!(normalizer_norm.singleton_receiver(norm_node).is_none());
-        assert_eq!(normalizer_norm.singleton_name(norm_node), "bar");
-
-        // 4. parenthesized_source
-        let mut js_parser = Parser::new();
-        js_parser.set_language(&tree_sitter_javascript::LANGUAGE.into()).unwrap();
-        let tree_js = js_parser.parse("(a)", None).unwrap();
-        let paren_node = tree_js.root_node().child(0).unwrap().child(0).unwrap();
-        let normalizer_js_paren = TreeSitterNormalizer::new("(a)", Language::parse("javascript").unwrap());
-        let source_node = normalizer_js_paren.parenthesized_source(paren_node).unwrap();
-        assert_eq!(source_node.r#type, "SOURCE");
-        assert_eq!(source_node.text, "(a)");
-
-        // 5. elide_tail_returns
-        let normalizer_ruby_elide = TreeSitterNormalizer::new("", Language::parse("ruby").unwrap());
-
-        // Test None
-        assert!(normalizer_ruby_elide.elide_tail_returns(None).is_none());
-
-        // Test DEFN
-        let defn = Node {
-            r#type: "DEFN".to_string(),
-            children: vec![],
-            first_lineno: 0,
-            first_column: 0,
-            last_lineno: 0,
-            last_column: 0,
-            text: "".to_string(),
-        };
-        assert_eq!(normalizer_ruby_elide.elide_tail_returns(Some(defn)).unwrap().r#type, "DEFN");
-
-        // Test RETURN
-        let val = Node {
-            r#type: "LVAR".to_string(),
-            children: vec![],
-            first_lineno: 0,
-            first_column: 0,
-            last_lineno: 0,
-            last_column: 0,
-            text: "x".to_string(),
-        };
-        let ret = Node {
-            r#type: "RETURN".to_string(),
-            children: vec![Child::Node(Box::new(val))],
-            first_lineno: 0,
-            first_column: 0,
-            last_lineno: 0,
-            last_column: 0,
-            text: "".to_string(),
-        };
-        let elided_ret = normalizer_ruby_elide.elide_tail_returns(Some(ret)).unwrap();
-        assert_eq!(elided_ret.r#type, "LVAR");
-        assert_eq!(elided_ret.text, "x");
-
-        // Test BLOCK
-        let block = Node {
-            r#type: "BLOCK".to_string(),
-            children: vec![
-                Child::Node(Box::new(Node {
-                    r#type: "LASGN".to_string(),
-                    children: vec![],
-                    first_lineno: 0,
-                    first_column: 0,
-                    last_lineno: 0,
-                    last_column: 0,
-                    text: "".to_string(),
-                })),
-                Child::Node(Box::new(Node {
-                    r#type: "RETURN".to_string(),
-                    children: vec![Child::Node(Box::new(Node {
-                        r#type: "LVAR".to_string(),
-                        children: vec![],
-                        first_lineno: 0,
-                        first_column: 0,
-                        last_lineno: 0,
-                        last_column: 0,
-                        text: "y".to_string(),
-                    }))],
-                    first_lineno: 0,
-                    first_column: 0,
-                    last_lineno: 0,
-                    last_column: 0,
-                    text: "".to_string(),
-                })),
-            ],
-            first_lineno: 0,
-            first_column: 0,
-            last_lineno: 0,
-            last_column: 0,
-            text: "".to_string(),
-        };
-        let elided_block = normalizer_ruby_elide.elide_tail_returns(Some(block)).unwrap();
-        assert_eq!(elided_block.children.len(), 2);
-        if let Child::Node(ref n) = elided_block.children[1] {
-            assert_eq!(n.r#type, "LVAR");
-            assert_eq!(n.text, "y");
-        } else {
-            panic!("Expected node child");
-        }
-
-        // Test SCOPE
-        let scope = Node {
-            r#type: "SCOPE".to_string(),
-            children: vec![
-                Child::Nil,
-                Child::Nil,
-                Child::Node(Box::new(Node {
-                    r#type: "RETURN".to_string(),
-                    children: vec![Child::Node(Box::new(Node {
-                        r#type: "LVAR".to_string(),
-                        children: vec![],
-                        first_lineno: 0,
-                        first_column: 0,
-                        last_lineno: 0,
-                        last_column: 0,
-                        text: "z".to_string(),
-                    }))],
-                    first_lineno: 0,
-                    first_column: 0,
-                    last_lineno: 0,
-                    last_column: 0,
-                    text: "".to_string(),
-                })),
-            ],
-            first_lineno: 0,
-            first_column: 0,
-            last_lineno: 0,
-            last_column: 0,
-            text: "".to_string(),
-        };
-        let elided_scope = normalizer_ruby_elide.elide_tail_returns(Some(scope)).unwrap();
-        if let Child::Node(ref n) = elided_scope.children[2] {
-            assert_eq!(n.r#type, "LVAR");
-            assert_eq!(n.text, "z");
-        } else {
-            panic!("Expected node child");
-        }
-
-        // Test IF / UNLESS
-        let if_node = Node {
-            r#type: "IF".to_string(),
-            children: vec![
-                Child::Nil,
-                Child::Node(Box::new(Node {
-                    r#type: "RETURN".to_string(),
-                    children: vec![Child::Node(Box::new(Node {
-                        r#type: "LVAR".to_string(),
-                        children: vec![],
-                        first_lineno: 0,
-                        first_column: 0,
-                        last_lineno: 0,
-                        last_column: 0,
-                        text: "a".to_string(),
-                    }))],
-                    first_lineno: 0,
-                    first_column: 0,
-                    last_lineno: 0,
-                    last_column: 0,
-                    text: "".to_string(),
-                })),
-                Child::Node(Box::new(Node {
-                    r#type: "RETURN".to_string(),
-                    children: vec![Child::Node(Box::new(Node {
-                        r#type: "LVAR".to_string(),
-                        children: vec![],
-                        first_lineno: 0,
-                        first_column: 0,
-                        last_lineno: 0,
-                        last_column: 0,
-                        text: "b".to_string(),
-                    }))],
-                    first_lineno: 0,
-                    first_column: 0,
-                    last_lineno: 0,
-                    last_column: 0,
-                    text: "".to_string(),
-                })),
-            ],
-            first_lineno: 0,
-            first_column: 0,
-            last_lineno: 0,
-            last_column: 0,
-            text: "".to_string(),
-        };
-        let elided_if = normalizer_ruby_elide.elide_tail_returns(Some(if_node)).unwrap();
-        if let Child::Node(ref n) = elided_if.children[1] {
-            assert_eq!(n.r#type, "LVAR");
-        }
-        if let Child::Node(ref n) = elided_if.children[2] {
-            assert_eq!(n.r#type, "LVAR");
-        }
-
-        // Test CASE / CASE2
-        let case_node = Node {
-            r#type: "CASE".to_string(),
-            children: vec![
-                Child::Nil,
-                Child::Node(Box::new(Node {
-                    r#type: "RETURN".to_string(),
-                    children: vec![Child::Node(Box::new(Node {
-                        r#type: "LVAR".to_string(),
-                        children: vec![],
-                        first_lineno: 0,
-                        first_column: 0,
-                        last_lineno: 0,
-                        last_column: 0,
-                        text: "c".to_string(),
-                    }))],
-                    first_lineno: 0,
-                    first_column: 0,
-                    last_lineno: 0,
-                    last_column: 0,
-                    text: "".to_string(),
-                })),
-            ],
-            first_lineno: 0,
-            first_column: 0,
-            last_lineno: 0,
-            last_column: 0,
-            text: "".to_string(),
-        };
-        let elided_case = normalizer_ruby_elide.elide_tail_returns(Some(case_node)).unwrap();
-        if let Child::Node(ref n) = elided_case.children[1] {
-            assert_eq!(n.r#type, "LVAR");
-        }
-
-        // Test WHEN / RESBODY
-        let when_node = Node {
-            r#type: "WHEN".to_string(),
-            children: vec![
-                Child::Nil,
-                Child::Node(Box::new(Node {
-                    r#type: "RETURN".to_string(),
-                    children: vec![Child::Node(Box::new(Node {
-                        r#type: "LVAR".to_string(),
-                        children: vec![],
-                        first_lineno: 0,
-                        first_column: 0,
-                        last_lineno: 0,
-                        last_column: 0,
-                        text: "d".to_string(),
-                    }))],
-                    first_lineno: 0,
-                    first_column: 0,
-                    last_lineno: 0,
-                    last_column: 0,
-                    text: "".to_string(),
-                })),
-            ],
-            first_lineno: 0,
-            first_column: 0,
-            last_lineno: 0,
-            last_column: 0,
-            text: "".to_string(),
-        };
-        let elided_when = normalizer_ruby_elide.elide_tail_returns(Some(when_node)).unwrap();
-        if let Child::Node(ref n) = elided_when.children[1] {
-            assert_eq!(n.r#type, "LVAR");
-        }
-
-        // Test RESCUE
-        let rescue_node = Node {
-            r#type: "RESCUE".to_string(),
-            children: vec![
-                Child::Node(Box::new(Node {
-                    r#type: "RETURN".to_string(),
-                    children: vec![Child::Node(Box::new(Node {
-                        r#type: "LVAR".to_string(),
-                        children: vec![],
-                        first_lineno: 0,
-                        first_column: 0,
-                        last_lineno: 0,
-                        last_column: 0,
-                        text: "e".to_string(),
-                    }))],
-                    first_lineno: 0,
-                    first_column: 0,
-                    last_lineno: 0,
-                    last_column: 0,
-                    text: "".to_string(),
-                })),
-            ],
-            first_lineno: 0,
-            first_column: 0,
-            last_lineno: 0,
-            last_column: 0,
-            text: "".to_string(),
-        };
-        let elided_rescue = normalizer_ruby_elide.elide_tail_returns(Some(rescue_node)).unwrap();
-        if let Child::Node(ref n) = elided_rescue.children[0] {
-            assert_eq!(n.r#type, "LVAR");
-        }
-
-        // Test drop_trailing_nil_statement
-        assert!(normalizer_ruby_elide.drop_trailing_nil_statement(None).is_none());
-        let lvar_node = Node {
-            r#type: "LVAR".to_string(),
-            children: vec![],
-            first_lineno: 0,
-            first_column: 0,
-            last_lineno: 0,
-            last_column: 0,
-            text: "x".to_string(),
-        };
-        assert_eq!(
-            normalizer_ruby_elide.drop_trailing_nil_statement(Some(lvar_node.clone())).unwrap().r#type,
-            "LVAR"
-        );
-        let block_nil = Node {
-            r#type: "BLOCK".to_string(),
-            children: vec![Child::Nil, Child::Node(Box::new(Node { r#type: "NIL".to_string(), children: vec![], first_lineno: 0, first_column: 0, last_lineno: 0, last_column: 0, text: "".to_string() }))],
-            first_lineno: 0,
-            first_column: 0,
-            last_lineno: 0,
-            last_column: 0,
-            text: "".to_string(),
-        };
-        assert!(normalizer_ruby_elide.drop_trailing_nil_statement(Some(block_nil)).is_none());
-
-        // --- EXTRA COVERAGE TESTS ---
-
-        // Helper to parse code snippets
-        fn parse_code(code: &str, lang: &str) -> (tree_sitter::Tree, Language) {
-            let mut parser = Parser::new();
-            let language = Language::parse(lang).unwrap();
-            parser.set_language(&crate::syntax::parser_grammar::grammar_for_language(language)).unwrap();
-            let tree = parser.parse(code, None).unwrap();
-            (tree, language)
-        }
-
-        // 6. scalar_argument_list_value coverage
-        {
-            let (tree, lang) = parse_code("yield; nil; true; false; :foo; 123; x", "ruby");
-            let root = tree.root_node();
-            let mut normalizer = TreeSitterNormalizer::new("yield; nil; true; false; :foo; 123; x", lang);
-            
-            // Iterate over all children
-            for child in root.children(&mut root.walk()) {
-                normalizer.scalar_argument_list_value(child);
-                for sub in child.children(&mut child.walk()) {
-                    normalizer.scalar_argument_list_value(sub);
-                }
-            }
-
-            // Enable dynamic syntax
-            normalizer.local_stack.push({
-                let mut s = BTreeSet::new();
-                s.insert("x".to_string());
-                s
-            });
-            for child in root.children(&mut root.walk()) {
-                normalizer.scalar_argument_list_value(child);
-                for sub in child.children(&mut child.walk()) {
-                    normalizer.scalar_argument_list_value(sub);
-                }
-            }
-        }
-
-        // 7. named_children other kinds coverage (Python)
-        {
-            let (tree, lang) = parse_code("obj.attr\n\"hello\"\n[]\n[1, 2]\n...\nNone\nx\n", "python");
-            let root = tree.root_node();
-            let normalizer = TreeSitterNormalizer::new("obj.attr\n\"hello\"\n[]\n[1, 2]\n...\nNone\nx\n", lang);
-            for child in root.children(&mut root.walk()) {
-                normalizer.named_children(child);
-            }
-        }
-
-        // 8. named_children generic_type (Java & CPP)
-        {
-            let (tree, lang) = parse_code("List<String>.class;", "java");
-            let root = tree.root_node();
-            let normalizer = TreeSitterNormalizer::new("List<String>.class;", lang);
-            for child in root.children(&mut root.walk()) {
-                normalizer.named_children(child);
-            }
-
-            let (tree_cpp, lang_cpp) = parse_code("vector<int>;", "cpp");
-            let root_cpp = tree_cpp.root_node();
-            let normalizer_cpp = TreeSitterNormalizer::new("vector<int>;", lang_cpp);
-            for child in root_cpp.children(&mut root_cpp.walk()) {
-                normalizer_cpp.named_children(child);
-            }
-        }
-
-        // 9. source_before_child coverage
-        {
-            let (tree, lang) = parse_code("x = 1", "ruby");
-            let root = tree.root_node();
-            let normalizer = TreeSitterNormalizer::new("x = 1", lang);
-            let first_child = root.child(0).unwrap();
-            normalizer.source_before_child(root, first_child);
-        }
-
-        // 10. parenthesized_source & operator_assignment_operator
-        {
-            let (tree, lang) = parse_code("(x,)", "python");
-            let root = tree.root_node();
-            let normalizer = TreeSitterNormalizer::new("(x,)", lang);
-            let paren_node = root.child(0).unwrap().child(0).unwrap();
-            normalizer.parenthesized_source(paren_node);
-
-            let (tree2, lang2) = parse_code("x += 1", "python");
-            let root2 = tree2.root_node();
-            let normalizer2 = TreeSitterNormalizer::new("x += 1", lang2);
-            for child in root2.children(&mut root2.walk()) {
-                normalizer2.operator_assignment_operator(child);
-            }
-        }
-
-        // 11. source_from_normalized_nodes coverage
-        {
-            let node1 = Node {
-                r#type: "LVAR".to_string(),
-                children: Vec::new(),
-                first_lineno: 1,
-                first_column: 0,
-                last_lineno: 1,
-                last_column: 5,
-                text: "hello".to_string(),
-            };
-            let node2 = Node {
-                r#type: "LVAR".to_string(),
-                children: Vec::new(),
-                first_lineno: 1,
-                first_column: 0,
-                last_lineno: 1,
-                last_column: 5,
-                text: "hello".to_string(),
-            };
-            let normalizer = TreeSitterNormalizer::new("hello\nworld\n!", Language::parse("ruby").unwrap());
-            normalizer.source_from_normalized_nodes(&node1, &node2);
-
-            let node3 = Node {
-                r#type: "LVAR".to_string(),
-                children: Vec::new(),
-                first_lineno: 3,
-                first_column: 0,
-                last_lineno: 3,
-                last_column: 1,
-                text: "!".to_string(),
-            };
-            normalizer.source_from_normalized_nodes(&node1, &node3);
-        }
-
-        // 12. single_dotted_else_body & single_dotted_body_node coverage
-        {
-            let (tree, lang) = parse_code("if x\n  1\nelse\n  foo.bar\nend", "ruby");
-            let root = tree.root_node();
-            let mut normalizer = TreeSitterNormalizer::new("if x\n  1\nelse\n  foo.bar\nend", lang);
-            
-            // Find else node
-            let if_node = root.child(0).unwrap();
-            let mut else_node = None;
-            for child in if_node.children(&mut if_node.walk()) {
-                if child.kind() == "else" {
-                    else_node = Some(child);
-                    break;
-                }
-            }
-            if let Some(else_node) = else_node {
-                normalizer.single_dotted_else_body(else_node);
-                normalizer.normalize_else_or_branch(else_node);
-            }
-
-            // Cover single_dotted_body_node
-            let (tree_js, lang_js) = parse_code("foo;", "javascript");
-            let root_js = tree_js.root_node();
-            let expr_stmt = root_js.child(0).unwrap();
-            let normalizer_js = TreeSitterNormalizer::new("foo;", lang_js);
-            normalizer_js.single_dotted_body_node(expr_stmt);
-        }
-
-        // 13. normalize_nested_class_as_iter
-        {
-            let (tree, lang) = parse_code("class Foo:", "python");
-            let root = tree.root_node();
-            let class_node = root.child(0).unwrap();
-            let mut normalizer = TreeSitterNormalizer::new("class Foo:", lang);
-            normalizer.normalize_nested_class_as_iter(class_node);
-        }
-
-        // 14. normalize_super_statement with call child
-        {
-            let (tree, lang) = parse_code("super foo 1", "ruby");
-            let root = tree.root_node();
-            let super_node = root.child(0).unwrap();
-            let mut normalizer = TreeSitterNormalizer::new("super foo 1", lang);
-            normalizer.normalize_super_statement(super_node);
-        }
-
-        // 15. MockAdapter tests (leading function statement fall-through, dynamic scope, normalize_return_value predicates)
-        {
-            use crate::ast::adapters::AstNormalizationAdapter;
-            use std::sync::atomic::{AtomicBool, Ordering};
-            use std::sync::Mutex;
-
-            struct MockAdapter {
-                tracks_scope: AtomicBool,
-                is_boolean: AtomicBool,
-                is_ternary: AtomicBool,
-                is_case: AtomicBool,
-                is_dotted: AtomicBool,
-                is_unary_not: AtomicBool,
-                is_modifier: AtomicBool,
-                is_bare_const: AtomicBool,
-                wrapped_call_target: Mutex<Option<TreeSitterNode<'static>>>,
-            }
-
-            impl AstNormalizationAdapter for MockAdapter {
-                fn tracks_dynamic_local_scope(&self) -> bool {
-                    self.tracks_scope.load(Ordering::Relaxed)
-                }
-                fn boolean_expression_kind(&self, _node: TreeSitterNode<'_>) -> bool {
-                    self.is_boolean.load(Ordering::Relaxed)
-                }
-                fn ternary_statement(&self, _node: TreeSitterNode<'_>, _source: &str) -> bool {
-                    self.is_ternary.load(Ordering::Relaxed)
-                }
-                fn case_argument_list(&self, _node: TreeSitterNode<'_>, _source: &str) -> bool {
-                    self.is_case.load(Ordering::Relaxed)
-                }
-                fn dotted_expression_wrapper(&self, _node: TreeSitterNode<'_>) -> bool {
-                    self.is_dotted.load(Ordering::Relaxed)
-                }
-                fn unary_not_expression(&self, _node: TreeSitterNode<'_>, _source: &str) -> bool {
-                    self.is_unary_not.load(Ordering::Relaxed)
-                }
-                fn statement_wrapped_call_target<'t>(
-                    &self,
-                    node: TreeSitterNode<'t>,
-                    _source: &str,
-                ) -> Option<TreeSitterNode<'t>> {
-                    if node.kind() == "argument_list" {
-                        let guard = self.wrapped_call_target.lock().unwrap();
-                        guard.clone().map(|n| unsafe { std::mem::transmute(n) })
-                    } else {
-                        None
-                    }
-                }
-                fn leading_function_statement(&self, node: TreeSitterNode<'_>, _source: &str) -> bool {
-                    node.kind() == "method"
-                }
-                fn function_kind(&self, _kind: &str) -> bool {
-                    false
-                }
-                fn leading_function_target<'tree>(
-                    &self,
-                    node: TreeSitterNode<'tree>,
-                    _source: &str,
-                ) -> Option<TreeSitterNode<'tree>> {
-                    if node.kind() == "method" {
-                        Some(node)
-                    } else {
-                        None
-                    }
-                }
-                fn modifier_node_type(&self, _kind: &str) -> Option<&'static str> {
-                    if self.is_modifier.load(Ordering::Relaxed) {
-                        Some("IF")
-                    } else {
-                        None
-                    }
-                }
-                fn bare_const_call_function(&self, _function: TreeSitterNode<'_>) -> bool {
-                    self.is_bare_const.load(Ordering::Relaxed)
-                }
-            }
-
-            let mock = Box::leak(Box::new(MockAdapter {
-                tracks_scope: AtomicBool::new(false),
-                is_boolean: AtomicBool::new(false),
-                is_ternary: AtomicBool::new(false),
-                is_case: AtomicBool::new(false),
-                is_dotted: AtomicBool::new(false),
-                is_unary_not: AtomicBool::new(false),
-                is_modifier: AtomicBool::new(false),
-                is_bare_const: AtomicBool::new(false),
-                wrapped_call_target: Mutex::new(None),
-            }));
-
-            // Test return value predicates
-            let (tree_arg, lang_arg) = parse_code("foo(x)", "ruby");
-            let tree_arg = Box::leak(Box::new(tree_arg));
-            let root_arg = tree_arg.root_node();
-            let call_node = root_arg.child(0).unwrap();
-            let arg_list = call_node.child(1).unwrap();
-            assert_eq!(arg_list.kind(), "argument_list");
-
-            let mut normalizer_arg = TreeSitterNormalizer {
-                source: "foo(x)",
-                language: lang_arg,
-                normalization_adapter: mock,
-                local_stack: Vec::new(),
-                root_span: None,
-                current_heredoc_body_span: None,
-            };
-
-            // Toggle dynamic syntax on
-            mock.tracks_scope.store(true, Ordering::Relaxed);
-
-            mock.is_boolean.store(true, Ordering::Relaxed);
-            normalizer_arg.normalize_return_value(arg_list);
-            mock.is_boolean.store(false, Ordering::Relaxed);
-
-            mock.is_ternary.store(true, Ordering::Relaxed);
-            normalizer_arg.normalize_return_value(arg_list);
-            mock.is_ternary.store(false, Ordering::Relaxed);
-
-            mock.is_case.store(true, Ordering::Relaxed);
-            normalizer_arg.normalize_return_value(arg_list);
-            mock.is_case.store(false, Ordering::Relaxed);
-
-            mock.is_dotted.store(true, Ordering::Relaxed);
-            normalizer_arg.normalize_return_value(arg_list);
-            mock.is_dotted.store(false, Ordering::Relaxed);
-
-            mock.is_unary_not.store(true, Ordering::Relaxed);
-            normalizer_arg.normalize_return_value(arg_list);
-            mock.is_unary_not.store(false, Ordering::Relaxed);
-
-            // Test real infix statement
-            let (tree_infix, lang_infix) = parse_code("def foo; a + b; end", "ruby");
-            let tree_infix = Box::leak(Box::new(tree_infix));
-            let root_infix = tree_infix.root_node();
-            let method_infix = root_infix.child(0).unwrap();
-            let body_infix = method_infix.child(2).unwrap();
-            let mut normalizer_infix = TreeSitterNormalizer {
-                source: "def foo; a + b; end",
-                language: lang_infix,
-                normalization_adapter: mock,
-                local_stack: Vec::new(),
-                root_span: None,
-                current_heredoc_body_span: None,
-            };
-            normalizer_infix.normalize_return_value(body_infix);
-            normalizer_infix.normalize_leading_function_statement(method_infix);
-            normalizer_infix.normalize_singleton_function(method_infix);
-
-            // Test real element reference
-            let (tree_ref, lang_ref) = parse_code("foo(a[b])", "ruby");
-            let tree_ref = Box::leak(Box::new(tree_ref));
-            let root_ref = tree_ref.root_node();
-            let call_ref = root_ref.child(0).unwrap();
-            let arg_list_ref = call_ref.child(1).unwrap();
-            let mut normalizer_ref = TreeSitterNormalizer {
-                source: "foo(a[b])",
-                language: lang_ref,
-                normalization_adapter: mock,
-                local_stack: Vec::new(),
-                root_span: None,
-                current_heredoc_body_span: None,
-            };
-            normalizer_ref.normalize_return_value(arg_list_ref);
-
-            // Test call with block argument
-            let (tree_blk, lang_blk) = parse_code("bar(x) {}", "ruby");
-            let tree_blk = Box::leak(Box::new(tree_blk));
-            let call_blk_node = tree_blk.root_node().child(0).unwrap();
-            let arg_list_blk = call_blk_node.child(1).unwrap();
-            *mock.wrapped_call_target.lock().unwrap() = Some(call_blk_node);
-
-            let mut normalizer_blk = TreeSitterNormalizer {
-                source: "bar(x) {}",
-                language: lang_blk,
-                normalization_adapter: mock,
-                local_stack: Vec::new(),
-                root_span: None,
-                current_heredoc_body_span: None,
-            };
-
-            normalizer_blk.normalize_return_value(arg_list_blk);
-            *mock.wrapped_call_target.lock().unwrap() = None;
-
-            // Test normalize_modifier_statement
-            mock.is_modifier.store(true, Ordering::Relaxed);
-            normalizer_arg.normalize_modifier_statement(arg_list);
-            mock.is_modifier.store(false, Ordering::Relaxed);
-
-            // Test normalize_body with argument list to hit dead code branch
-            normalizer_arg.normalize_body(arg_list);
-
-            // Test normalize_call_without_block with mock modes
-            let mut normalizer_call_mock = TreeSitterNormalizer {
-                source: "foo(x)",
-                language: lang_arg,
-                normalization_adapter: mock,
-                local_stack: Vec::new(),
-                root_span: None,
-                current_heredoc_body_span: None,
-            };
-
-            let (tree_js_dotted, _) = parse_code("a.b", "javascript");
-            let tree_js_dotted = Box::leak(Box::new(tree_js_dotted));
-            let call_js_dotted = tree_js_dotted.root_node().child(0).unwrap().child(0).unwrap();
-
-            // 1. Bare const call
-            mock.is_bare_const.store(true, Ordering::Relaxed);
-            normalizer_call_mock.normalize_call_without_block(call_node, None);
-            normalizer_call_mock.normalize_call_without_block(call_node, Some(arg_list));
-            mock.is_bare_const.store(false, Ordering::Relaxed);
-
-            // 2. Member read node
-            normalizer_call_mock.normalize_call_without_block(call_js_dotted, None);
-            normalizer_call_mock.normalize_call_without_block(call_js_dotted, Some(arg_list));
-
-            // 3. Normal fallback
-            normalizer_call_mock.normalize_call_without_block(call_node, None);
-            normalizer_call_mock.normalize_call_without_block(call_node, Some(arg_list));
-
-            // Test elsif fallback
-            normalizer_infix.normalize_elsif(method_infix);
-
-            // Test normalize_operator_call one operand fallback
-            let (tree_unary, lang_unary) = parse_code("!a", "ruby");
-            let root_unary = tree_unary.root_node();
-            let unary_node = root_unary.child(0).unwrap().child(0).unwrap();
-            let mut normalizer_unary = TreeSitterNormalizer::new("!a", lang_unary);
-            normalizer_unary.normalize_operator_call(unary_node);
-        }
-
-        // 16. Lua single argument string (no_paren_string_argument_content)
-        {
-            let (tree, lang) = parse_code("print 'hello'", "lua");
-            let root = tree.root_node();
-            let normalizer = TreeSitterNormalizer::new("print 'hello'", lang);
-            normalizer.normalize(root);
-        }
-
-        // 17. Multi-language snippet coverage for AstNormalizationAdapter and TreeSitterNormalizer branches
-        {
-            fn normalize_code_str(code: &str, lang: &str) {
-                let (tree, language) = parse_code(code, lang);
-                let mut normalizer = TreeSitterNormalizer::new(code, language);
-                fn force_normalize_all_descendants(normalizer: &mut TreeSitterNormalizer<'_>, node: TreeSitterNode<'_>) {
-                    let _ = normalizer.normalize_node(node);
-                    let mut cursor = node.walk();
-                    for child in node.children(&mut cursor) {
-                        if child.is_named() {
-                            force_normalize_all_descendants(normalizer, child);
-                        }
-                    }
-                }
-                force_normalize_all_descendants(&mut normalizer, tree.root_node());
-            }
-
-            let ruby_snippets = &[
-                "while a; b; end",
-                "until a; b; end",
-                "for x in y; z; end",
-                "loop do; a; end",
-                "if a; b; elsif c; d; else; e; end",
-                "unless a; b; else; c; end",
-                "a ? b : c",
-                "case x; when y; z; else; w; end",
-                "a rescue b",
-                "case; when x; y; end",
-                "def foo(x); y; end",
-                "def self.bar(x); y; end",
-                "class A < B; end",
-                "module M; end",
-                "class << self; end",
-                "begin; a; rescue E => e; b; ensure; c; end",
-                "[1, 2, 3]",
-                "{a: 1, b: 2}",
-                "\"hello #{x}\"",
-                "return x",
-                "break",
-                "next",
-                "yield x",
-                "super(x)",
-                "x += 1",
-                "x ||= 1",
-                "x &&= 1",
-                "a.b = c",
-                "a.b",
-                "a&.b",
-                "!a",
-                "not a",
-                "-a",
-                "a && b",
-                "a || b",
-                "a == b",
-                "a != b",
-                "a < b",
-                "self",
-                "@ivar",
-                "$gvar",
-                "A::B",
-                "yield",
-                "begin a + b end",
-                "begin a =~ /b/ end",
-                "begin a =~ b end",
-                "begin class A; end end",
-                "begin module M; end end",
-                "begin case a when b; c end end",
-                "begin while a; b end end",
-                "begin until a; b end end",
-                "begin bar(x) {} end",
-                "begin a.b end",
-                "begin a&.b end",
-                "begin foo(x) end",
-                "def check; !flag; end",
-                "def check; !!flag; end",
-                "def check; not flag; end",
-                "begin <<-EOF\nhello\nEOF\nend",
-                "a =~ /b/",
-                "a =~ b",
-                "foo {}",
-                "begin foo {} end",
-                "a[b]",
-                "self[b]",
-                "begin a[b] end",
-                "begin def foo; end end",
-                "begin def self.foo; end end",
-                "begin def self.bar(x); y; end end",
-                "begin a rescue E => e; b end",
-                "begin -a end",
-            ];
-
-            let python_snippets = &[
-                "while a:\n  b",
-                "for x in y:\n  z",
-                "if a:\n  b\nelif c:\n  d\nelse:\n  e",
-                "def foo(x):\n  return x",
-                "lambda x: x",
-                "class A(B):\n  pass",
-                "try:\n  a\nexcept Exception as e:\n  b\nfinally:\n  c",
-                "[1, 2]",
-                "{\"a\": 1}",
-                "f\"hello {x}\"",
-                "x += 1",
-                "not a",
-                "-a",
-                "a and b",
-                "a or b",
-                "a == b",
-                "None",
-                "True",
-                "False",
-                "class A:\n  class B:\n    pass",
-                "(a + b)(x)",
-            ];
-
-            let js_snippets = &[
-                "while(a) { b; }",
-                "for(let x of y) { z; }",
-                "if (a) { b; } else if (c) { d; } else { e; }",
-                "function foo(x) { return x; }",
-                "let f = (x) => x;",
-                "class A extends B {}",
-                "try { a; } catch(e) { b; } finally { c; }",
-                "switch(x) { case y: z; break; default: w; }",
-                "[1, 2]",
-                "({a: 1})",
-                "x += 1",
-                "!a",
-                "-a",
-                "a && b",
-                "a || b",
-                "a == b",
-                "null",
-                "undefined",
-            ];
-
-            let ts_snippets = &[
-                "let x: List<T>;",
-                "type Foo = Bar;",
-            ];
-
-            let go_snippets = &[
-                "func foo() { if a { b } else { c } }",
-                "for i := 0; i < 10; i++ {}",
-            ];
-
-            let rust_snippets = &[
-                "fn foo() { if a { b } else { c } }",
-                "match x { Some(y) => z, None => w }",
-            ];
-
-            let java_snippets = &[
-                "class A { void foo() { if (a) { b; } } }",
-            ];
-
-            let kotlin_snippets = &[
-                "fun foo() { if (a) b else c }",
-            ];
-
-            let cpp_snippets = &[
-                "int main() { if (a) { b; } else { c; } }",
-            ];
-
-            let csharp_snippets = &[
-                "class A { void Foo() { if (a) { b(); } } }",
-            ];
-
-            let swift_snippets = &[
-                "func foo() { if a { b() } }",
-            ];
-
-            let php_snippets = &[
-                "<?php if ($a) { $b; } ?>",
-            ];
-
-            let lua_snippets = &[
-                "if a then b() else c() end",
-                "while a do b() end",
-            ];
-
-            for s in ruby_snippets {
-                normalize_code_str(s, "ruby");
-            }
-            for s in python_snippets {
-                normalize_code_str(s, "python");
-            }
-            for s in js_snippets {
-                normalize_code_str(s, "javascript");
-            }
-            for s in ts_snippets {
-                normalize_code_str(s, "typescript");
-            }
-            for s in go_snippets {
-                normalize_code_str(s, "go");
-            }
-            for s in rust_snippets {
-                normalize_code_str(s, "rust");
-            }
-            for s in java_snippets {
-                normalize_code_str(s, "java");
-            }
-            for s in kotlin_snippets {
-                normalize_code_str(s, "kotlin");
-            }
-            for s in cpp_snippets {
-                normalize_code_str(s, "cpp");
-            }
-            for s in csharp_snippets {
-                normalize_code_str(s, "csharp");
-            }
-            for s in swift_snippets {
-                normalize_code_str(s, "swift");
-            }
-            for s in php_snippets {
-                normalize_code_str(s, "php");
-            }
-            for s in lua_snippets {
-                normalize_code_str(s, "lua");
-            }
-        }
-
-        // 18. Direct call to normalize_return_node_with_elide_symbol, normalize_return_value_call, and empty return()
-        {
-            let (tree, lang) = parse_code("return :symbol", "ruby");
-            let ret_node = tree.root_node().child(0).unwrap();
-            let mut normalizer = TreeSitterNormalizer::new("return :symbol", lang);
-            normalizer.normalize_return_node_with_elide_symbol(ret_node, true);
-
-            let (tree_call, lang_call) = parse_code("my_func(x)", "ruby");
-            let call_node = tree_call.root_node().child(0).unwrap();
-            let mut normalizer_call = TreeSitterNormalizer::new("my_func(x)", lang_call);
-            normalizer_call.normalize_return_value_call(call_node);
-            
-            let (tree_empty, lang_empty) = parse_code("return()", "ruby");
-            let normalizer_empty = TreeSitterNormalizer::new("return()", lang_empty);
-            normalizer_empty.normalize(tree_empty.root_node());
-        }
-    }
-
-    #[test]
-    fn test_normalizer_uncovered_paths() {
-        test_normalizer_uncovered_paths_impl();
-    }
-}
-
-pub fn run_normalizer_uncovered_paths_tests() {
-    tests::test_normalizer_uncovered_paths_impl();
-}
-
+include!("normalizer-test.rs");
