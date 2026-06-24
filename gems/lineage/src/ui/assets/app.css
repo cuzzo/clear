@@ -1080,6 +1080,15 @@
   .tok-constant { color: #b45309; font-weight: 600; }
   .tok-function { color: #0369a1; }
   .tok-property { color: #64748b; }
+  .tok-type.clickable,
+  .tok-function.clickable {
+    cursor: pointer;
+  }
+  .tok-type.clickable:hover,
+  .tok-function.clickable:hover {
+    color: var(--link);
+    text-decoration: underline;
+  }
   .empty { padding: 24px; color: var(--muted); }
   @media (max-width: 800px) {
     .app { grid-template-columns: 1fr; grid-template-rows: 36vh 64vh; }

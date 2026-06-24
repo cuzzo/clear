@@ -763,6 +763,7 @@ fn ui_router(state: UiServerState) -> Router {
         .route("/api/files", get(api_files_handler))
         .route("/api/dashboard", get(api_dashboard_handler))
         .route("/api/source", get(api_source_handler))
+        .route("/api/definition", get(api_definition_handler))
         .route("/assets/*path", get(asset_handler))
         .route("/favicon.ico", get(favicon_handler))
         .with_state(state)
@@ -2463,6 +2464,37 @@ async fn api_source_handler(
     ) {
         Ok(payload) => Json(payload).into_response(),
         Err(error) => error_json(StatusCode::NOT_FOUND, error),
+    }
+}
+
+#[derive(Debug, serde::Deserialize)]
+struct DefinitionQuery {
+    name: String,
+}
+
+#[derive(Debug, serde::Serialize)]
+struct DefinitionResult {
+    path: String,
+    line: u32,
+}
+
+async fn api_definition_handler(
+    State(state): State<UiServerState>,
+    Query(query): Query<DefinitionQuery>,
+) -> Response<Body> {
+    let storage = match Storage::open_existing(state.db.as_ref()) {
+        Ok(storage) => storage,
+        Err(error) => return error_json(StatusCode::INTERNAL_SERVER_ERROR, error),
+    };
+    match storage.find_definitions(&query.name) {
+        Ok(definitions) => {
+            let results: Vec<DefinitionResult> = definitions
+                .into_iter()
+                .map(|(path, line)| DefinitionResult { path, line })
+                .collect();
+            Json(results).into_response()
+        }
+        Err(error) => error_json(StatusCode::INTERNAL_SERVER_ERROR, error),
     }
 }
 
