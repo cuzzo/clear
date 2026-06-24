@@ -235,7 +235,8 @@ fn detect_candidate(line: &str, line_number: u32, extension: Option<&str>) -> Op
         Some("swift") => detect_swift(trimmed, line_number),
         Some("kt") | Some("kts") => detect_kotlin(trimmed, line_number),
         Some("go") => detect_go(trimmed, line_number),
-        Some("zig") => detect_rust_or_zig(trimmed, line_number),
+        Some("rs") | Some("zig") => detect_rust_or_zig(trimmed, line_number),
+        Some("php") => detect_php(trimmed, line_number),
         Some("S") => detect_assembly(trimmed, line_number),
         _ => None,
     }
@@ -952,6 +953,41 @@ fn strip_javascript_modifiers(mut line: &str) -> &str {
         line = next;
     }
 }
+
+fn detect_php(line: &str, line_number: u32) -> Option<Candidate> {
+    let line = strip_php_modifiers(line);
+    if let Some(rest) = line.strip_prefix("function ") {
+        return named_candidate(rest, UnitKind::Function, line, line_number);
+    }
+    if let Some(rest) = line.strip_prefix("class ") {
+        return named_candidate(rest, UnitKind::Class, line, line_number);
+    }
+    if let Some(rest) = line.strip_prefix("interface ") {
+        return named_candidate(rest, UnitKind::Class, line, line_number);
+    }
+    if let Some(rest) = line.strip_prefix("trait ") {
+        return named_candidate(rest, UnitKind::Class, line, line_number);
+    }
+    None
+}
+
+fn strip_php_modifiers(mut line: &str) -> &str {
+    loop {
+        let next = line
+            .strip_prefix("public ")
+            .or_else(|| line.strip_prefix("private "))
+            .or_else(|| line.strip_prefix("protected "))
+            .or_else(|| line.strip_prefix("static "))
+            .or_else(|| line.strip_prefix("final "))
+            .or_else(|| line.strip_prefix("abstract "))
+            .unwrap_or(line);
+        if next == line {
+            return line;
+        }
+        line = next;
+    }
+}
+
 
 fn javascript_const_callable_name(line: &str) -> Option<&str> {
     let rest = line

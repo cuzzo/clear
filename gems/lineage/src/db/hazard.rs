@@ -38,6 +38,10 @@ pub fn ingest_hazards(
         "c" => ingest_c_hazards(storage, repo.as_ref(), commit, timestamp),
         "cpp" => ingest_cpp_hazards(storage, repo.as_ref(), commit, timestamp),
         "csharp" => ingest_csharp_hazards(storage, repo.as_ref(), commit, timestamp),
+        "ruby" | "python" | "javascript" | "typescript" | "java" | "kotlin" | "swift" | "lua" | "php" => {
+            storage.deactivate_active_hazards(provider)?;
+            Ok(HazardIngestStats { scanned_files: 0, hazards: 0, events: 0 })
+        }
         other => anyhow::bail!("unsupported hazard provider {other:?}"),
     }
 }
