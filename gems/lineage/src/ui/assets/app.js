@@ -136,7 +136,10 @@
     }
     const promise = (async () => {
       try {
-        const res = await fetch(`/api/definition?name=${encodeURIComponent(name)}`);
+        const urlParams = new URLSearchParams(window.location.search);
+        const commit = urlParams.get("commit") || "";
+        const path = urlParams.get("path") || "";
+        const res = await fetch(`/api/definition?name=${encodeURIComponent(name)}&commit=${encodeURIComponent(commit)}&path=${encodeURIComponent(path)}`);
         if (res.ok) {
           const data = await res.json();
           return data && data.length > 0;
@@ -165,12 +168,16 @@
         const isClickable = await checkClickable(name);
         if (!isClickable) return;
         try {
-          const res = await fetch(`/api/definition?name=${encodeURIComponent(name)}`);
+          const urlParams = new URLSearchParams(window.location.search);
+          const commit = urlParams.get("commit") || "";
+          const path = urlParams.get("path") || "";
+          const res = await fetch(`/api/definition?name=${encodeURIComponent(name)}&commit=${encodeURIComponent(commit)}&path=${encodeURIComponent(path)}`);
           if (res.ok) {
             const data = await res.json();
             if (data && data.length > 0) {
               const match = data[0];
-              window.location.href = `/index.html?path=${encodeURIComponent(match.path)}#L${match.line}`;
+              const commitArg = commit ? `&commit=${encodeURIComponent(commit)}` : "";
+              window.location.href = `/?path=${encodeURIComponent(match.path)}${commitArg}#L${match.line}`;
             }
           }
         } catch (_e) {}
