@@ -321,6 +321,7 @@ impl Storage {
             CREATE INDEX IF NOT EXISTS idx_ui_warning_units_path ON ui_warning_units(current_path);
             "#,
         )?;
+        self.ensure_logical_unit_column("start_line", "INTEGER DEFAULT 1")?;
         self.ensure_logical_unit_column("current_line_cov", "REAL DEFAULT 0.0")?;
         self.ensure_logical_unit_column("current_integration_cov", "REAL DEFAULT 0.0")?;
         self.ensure_logical_unit_column("current_mutant_cov", "REAL DEFAULT 0.0")?;
