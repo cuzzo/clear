@@ -6,6 +6,7 @@ use serde_json::json;
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::time::{SystemTime, UNIX_EPOCH};
+use streaming_iterator::StreamingIterator;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct HazardIngestStats {
@@ -344,208 +345,193 @@ fn excluded_zig_file(path: &str) -> bool {
         || matches!(name, "all-tests.zig" | "all-fuzz.zig" | "size_check.zig" | "runtime-header.zig")
 }
 
-fn scan_zig_sites(path: &str, contents: &str) -> Vec<HazardSite> {
+const GO_HAZARDS: &str = include_str!("queries/go/hazards.scm");
+const RUST_HAZARDS: &str = include_str!("queries/rust/hazards.scm");
+const ZIG_HAZARDS: &str = include_str!("queries/zig/hazards.scm");
+const C_HAZARDS: &str = include_str!("queries/c/hazards.scm");
+const CPP_HAZARDS: &str = include_str!("queries/cpp/hazards.scm");
+const CSHARP_HAZARDS: &str = include_str!("queries/csharp/hazards.scm");
+
+fn evidence_for_hazard(hazard_type: &str) -> &'static str {
+    if hazard_type.contains("concurrency") || hazard_type.contains("channel") || hazard_type.contains("waitgroup") || hazard_type.contains("sync") {
+        "concurrency"
+    } else if hazard_type.contains("race") || hazard_type.contains("lock") {
+        "race"
+    } else if hazard_type.contains("loom") {
+        "loom"
+    } else if hazard_type.contains("unsafe_fn") || hazard_type.contains("unsafe_impl") || hazard_type.contains("unsafe_block") || hazard_type.contains("unsafe_operation") {
+        "miri"
+    } else if hazard_type.contains("tsan") {
+        "tsan"
+    } else if hazard_type.contains("asan") {
+        "asan"
+    } else if hazard_type.contains("lsan") || hazard_type.contains("lifetime") {
+        "lsan"
+    } else if hazard_type.contains("ubsan") || hazard_type.contains("arithmetic") || hazard_type.contains("cast") {
+        "ubsan"
+    } else if hazard_type.contains("unsafe") {
+        "unsafe"
+    } else if hazard_type.contains("allocator") {
+        "allocator"
+    } else if hazard_type.contains("vopr") {
+        "vopr"
+    } else {
+        "hazard"
+    }
+}
+
+fn query_hazards(
+    path: &str,
+    contents: &str,
+    language: tree_sitter::Language,
+    query_str: &str,
+    default_evidence: &str,
+) -> Vec<HazardSite> {
+    let mut parser = tree_sitter::Parser::new();
+    if parser.set_language(&language).is_err() {
+        return Vec::new();
+    }
+    let Some(tree) = parser.parse(contents, None) else {
+        return Vec::new();
+    };
+    let query = match tree_sitter::Query::new(&language, query_str) {
+        Ok(q) => q,
+        Err(e) => {
+            eprintln!("QUERY ERROR for {}: {:?}", path, e);
+            return Vec::new();
+        }
+    };
+
+    let mut cursor = tree_sitter::QueryCursor::new();
     let mut sites = Vec::new();
+    let mut matches = cursor.matches(&query, tree.root_node(), contents.as_bytes());
+
+    while let Some(m) = matches.next() {
+        for capture in m.captures {
+            let capture_name = query.capture_names()[capture.index as usize];
+            if let Some(hazard_type) = capture_name.strip_prefix("hazard.") {
+                let start_line = (capture.node.start_position().row + 1) as u32;
+                let line_text = contents
+                    .lines()
+                    .nth((start_line as usize).saturating_sub(1))
+                    .unwrap_or("")
+                    .trim()
+                    .to_string();
+                
+                let evidence = evidence_for_hazard(hazard_type);
+                let final_evidence = if evidence == "hazard" { default_evidence } else { evidence };
+
+                sites.push(HazardSite {
+                    path: path.to_string(),
+                    line: start_line,
+                    source: line_text,
+                    hazard_type: hazard_type.to_string(),
+                    required_evidence: final_evidence.to_string(),
+                });
+            }
+        }
+    }
+    let mut unique_sites = Vec::new();
+    for site in sites {
+        if !unique_sites.iter().any(|s: &HazardSite| s.line == site.line && s.hazard_type == site.hazard_type) {
+            unique_sites.push(site);
+        }
+    }
+    unique_sites
+}
+
+fn scan_zig_sites(path: &str, contents: &str) -> Vec<HazardSite> {
+    let sites = query_hazards(path, contents, tree_sitter_zig::LANGUAGE.into(), ZIG_HAZARDS, "vopr");
+
+    let mut final_sites = Vec::new();
     let mut in_loom_exclude = false;
     let mut in_vopr_exclude = false;
     let mut in_retry = false;
-    for (index, line) in contents.lines().enumerate() {
-        let line_no = (index + 1) as u32;
+
+    let mut line_states = Vec::new();
+    for line in contents.lines() {
         if line.contains("LOOM-EXCLUDE-BEGIN") {
             in_loom_exclude = true;
-            continue;
         }
         if line.contains("LOOM-EXCLUDE-END") {
             in_loom_exclude = false;
-            continue;
         }
         if line.contains("VOPR-EXCLUDE-BEGIN") {
             in_vopr_exclude = true;
-            continue;
         }
         if line.contains("VOPR-EXCLUDE-END") {
             in_vopr_exclude = false;
+        }
+        
+        let mut retry_triggered = false;
+        let mut retry_ended = false;
+        let mut vopr_retry_direct = false;
+        if line.contains("VOPR-START-RETRY") {
+            in_retry = true;
+            retry_triggered = true;
+        }
+        if line.contains("VOPR-END-RETRY") {
+            in_retry = false;
+            retry_ended = true;
+        }
+        if line.contains("VOPR-RETRY") {
+            vopr_retry_direct = true;
+        }
+
+        line_states.push((in_loom_exclude, in_vopr_exclude, in_retry, retry_triggered, retry_ended, vopr_retry_direct, line));
+    }
+
+    for site in sites {
+        let idx = (site.line as usize).saturating_sub(1);
+        if let Some(&(loom_ex, vopr_ex, _, _, _, _, _)) = line_states.get(idx) {
+            if site.hazard_type == "zig_loom_atomic" && loom_ex {
+                continue;
+            }
+            if site.hazard_type.starts_with("zig_vopr_") && vopr_ex {
+                continue;
+            }
+            final_sites.push(site);
+        }
+    }
+
+    for (idx, &(_loom_ex, vopr_ex, retry, start_retry, _, retry_direct, line)) in line_states.iter().enumerate() {
+        let line_no = (idx + 1) as u32;
+        if vopr_ex {
             continue;
         }
-
-        let code = strip_zig_comment(line);
-        if !in_loom_exclude && is_atomic_site(code) {
-            sites.push(site(path, line_no, line, "zig_loom_atomic", "loom"));
-        }
-
-        if !in_vopr_exclude {
-            if line.contains("VOPR-START-RETRY") {
-                sites.push(site(path, line_no, line, "zig_vopr_retry", "vopr"));
-                in_retry = true;
-                continue;
-            }
-            if line.contains("VOPR-END-RETRY") {
-                in_retry = false;
-                continue;
-            }
-            if line.contains("VOPR-RETRY") {
-                sites.push(site(path, line_no, line, "zig_vopr_retry", "vopr"));
-                continue;
-            }
-            if let Some(category) = vopr_category(code) {
-                sites.push(site(
-                    path,
-                    line_no,
-                    line,
-                    &format!("zig_vopr_{category}"),
-                    "vopr",
-                ));
-            } else if in_retry && !code.trim().is_empty() {
-                sites.push(site(path, line_no, line, "zig_vopr_retry_body", "vopr"));
+        if start_retry {
+            final_sites.push(site(path, line_no, line, "zig_vopr_retry", "vopr"));
+        } else if retry_direct {
+            final_sites.push(site(path, line_no, line, "zig_vopr_retry", "vopr"));
+        } else if retry && !line.trim().is_empty() && !line.contains("VOPR-") {
+            let has_structural_vopr = final_sites.iter().any(|s| s.line == line_no && s.hazard_type.starts_with("zig_vopr_"));
+            if !has_structural_vopr {
+                final_sites.push(site(path, line_no, line, "zig_vopr_retry_body", "vopr"));
             }
         }
     }
-    sites
+
+    final_sites
 }
 
 fn scan_go_sites(path: &str, contents: &str) -> Vec<HazardSite> {
-    let mut sites = Vec::new();
-    let mut in_block_comment = false;
-    for (index, line) in contents.lines().enumerate() {
-        let line_no = (index + 1) as u32;
-        let code = strip_go_comment(line, &mut in_block_comment);
-        if code.trim().is_empty() {
-            continue;
-        }
-        if is_go_goroutine_site(&code) {
-            sites.push(site(path, line_no, line, "go_race_goroutine", "race"));
-        }
-        if is_go_atomic_site(&code) {
-            sites.push(site(path, line_no, line, "go_race_atomic", "race"));
-        }
-        if is_go_lock_site(&code) {
-            sites.push(site(path, line_no, line, "go_race_lock", "race"));
-        }
-        if is_go_waitgroup_site(&code) {
-            sites.push(site(path, line_no, line, "go_concurrency_waitgroup", "concurrency"));
-        }
-        if is_go_channel_site(&code) {
-            sites.push(site(path, line_no, line, "go_concurrency_channel", "concurrency"));
-        }
-    }
-    sites
+    query_hazards(path, contents, tree_sitter_go::LANGUAGE.into(), GO_HAZARDS, "race")
 }
 
 fn scan_rust_sites(path: &str, contents: &str) -> Vec<HazardSite> {
-    let mut sites = Vec::new();
-    let mut in_block_comment = false;
-    let mut unsafe_depth = 0_i32;
-    for (index, line) in contents.lines().enumerate() {
-        let line_no = (index + 1) as u32;
-        let code = strip_quoted_literals(&strip_go_comment(line, &mut in_block_comment));
-        if code.trim().is_empty() {
-            continue;
-        }
-        if is_rust_atomic_site(&code) {
-            sites.push(site(path, line_no, line, "rust_loom_atomic", "loom"));
-        }
-        if is_rust_concurrency_site(&code) {
-            sites.push(site(path, line_no, line, "rust_loom_concurrency", "loom"));
-        }
-        if code.contains("unsafe fn ") || code.contains("unsafe fn(") {
-            sites.push(site(path, line_no, line, "rust_unsafe_fn", "miri"));
-        }
-        if code.contains("unsafe impl ") {
-            sites.push(site(path, line_no, line, "rust_unsafe_impl", "miri"));
-        }
-        let starts_unsafe = code.contains("unsafe {");
-        if starts_unsafe {
-            sites.push(site(path, line_no, line, "rust_unsafe_block", "miri"));
-        }
-        if (unsafe_depth > 0 || starts_unsafe) && is_rust_unsafe_operation(&code) {
-            sites.push(site(path, line_no, line, "rust_unsafe_operation", "miri"));
-        }
-        unsafe_depth = update_unsafe_depth(&code, unsafe_depth);
-    }
-    sites
+    query_hazards(path, contents, tree_sitter_rust::LANGUAGE.into(), RUST_HAZARDS, "miri")
 }
 
 fn scan_c_sites(path: &str, contents: &str) -> Vec<HazardSite> {
-    let mut sites = Vec::new();
-    let mut in_block_comment = false;
-    for (index, line) in contents.lines().enumerate() {
-        let line_no = (index + 1) as u32;
-        let code = strip_quoted_literals(&strip_go_comment(line, &mut in_block_comment));
-        if code.trim().is_empty() {
-            continue;
-        }
-        if is_c_tsan_site(&code) {
-            sites.push(site(path, line_no, line, "c_tsan_concurrency", "tsan"));
-        }
-        if is_c_asan_api_site(&code) {
-            sites.push(site(path, line_no, line, "c_asan_raw_memory_api", "asan"));
-        }
-        if is_c_pointer_hazard(&code) {
-            sites.push(site(path, line_no, line, "c_asan_pointer", "asan"));
-        }
-        if is_c_lsan_site(&code) {
-            sites.push(site(path, line_no, line, "c_lsan_lifetime", "lsan"));
-        }
-        if is_arithmetic_ub_site(&code) {
-            sites.push(site(path, line_no, line, "c_ubsan_arithmetic", "ubsan"));
-        }
-        if is_c_cast_ub_site(&code) {
-            sites.push(site(path, line_no, line, "c_ubsan_cast", "ubsan"));
-        }
-    }
-    sites
+    query_hazards(path, contents, tree_sitter_c::LANGUAGE.into(), C_HAZARDS, "tsan")
 }
 
 fn scan_cpp_sites(path: &str, contents: &str) -> Vec<HazardSite> {
-    let mut sites = Vec::new();
-    let mut in_block_comment = false;
-    for (index, line) in contents.lines().enumerate() {
-        let line_no = (index + 1) as u32;
-        let code = strip_quoted_literals(&strip_go_comment(line, &mut in_block_comment));
-        if code.trim().is_empty() {
-            continue;
-        }
-        if is_cpp_tsan_site(&code) {
-            sites.push(site(path, line_no, line, "cpp_tsan_concurrency", "tsan"));
-        }
-        if is_cpp_asan_api_site(&code) {
-            sites.push(site(path, line_no, line, "cpp_asan_raw_memory_api", "asan"));
-        }
-        if is_cpp_pointer_or_cast_hazard(&code) {
-            sites.push(site(path, line_no, line, "cpp_asan_pointer_or_cast", "asan"));
-        }
-        if is_cpp_lsan_site(&code) {
-            sites.push(site(path, line_no, line, "cpp_lsan_lifetime", "lsan"));
-        }
-        if is_arithmetic_ub_site(&code) {
-            sites.push(site(path, line_no, line, "cpp_ubsan_arithmetic", "ubsan"));
-        }
-        if contains_any(&code, &["reinterpret_cast<", "const_cast<", "static_cast<"]) {
-            sites.push(site(path, line_no, line, "cpp_ubsan_cast", "ubsan"));
-        }
-    }
-    sites
+    query_hazards(path, contents, tree_sitter_cpp::LANGUAGE.into(), CPP_HAZARDS, "tsan")
 }
 
 fn scan_csharp_sites(path: &str, contents: &str) -> Vec<HazardSite> {
-    let mut sites = Vec::new();
-    let mut in_block_comment = false;
-    let mut unsafe_depth = 0_i32;
-    for (index, line) in contents.lines().enumerate() {
-        let line_no = (index + 1) as u32;
-        let code = strip_quoted_literals(&strip_go_comment(line, &mut in_block_comment));
-        if code.trim().is_empty() {
-            continue;
-        }
-        if is_csharp_concurrency_site(&code) {
-            sites.push(site(path, line_no, line, "csharp_concurrency", "concurrency"));
-        }
-        if is_csharp_unsafe_site(&code, unsafe_depth) {
-            sites.push(site(path, line_no, line, "csharp_unsafe_memory", "unsafe"));
-        }
-        unsafe_depth = update_csharp_unsafe_depth(&code, unsafe_depth);
-    }
-    sites
+    query_hazards(path, contents, tree_sitter_c_sharp::LANGUAGE.into(), CSHARP_HAZARDS, "concurrency")
 }
 
 fn site(
@@ -564,565 +550,7 @@ fn site(
     }
 }
 
-fn is_go_goroutine_site(code: &str) -> bool {
-    code.trim_start().starts_with("go ") || code.contains("; go ")
-}
 
-fn is_go_atomic_site(code: &str) -> bool {
-    code.contains("atomic.")
-}
-
-fn is_go_lock_site(code: &str) -> bool {
-    [
-        "sync.Mutex",
-        "sync.RWMutex",
-        "sync.Map",
-        "sync.Once",
-        "sync.Cond",
-        ".Lock(",
-        ".Unlock(",
-        ".RLock(",
-        ".RUnlock(",
-    ]
-    .iter()
-    .any(|needle| code.contains(needle))
-}
-
-fn is_go_waitgroup_site(code: &str) -> bool {
-    ["sync.WaitGroup", ".Add(", ".Done(", ".Wait("]
-        .iter()
-        .any(|needle| code.contains(needle))
-}
-
-fn is_go_channel_site(code: &str) -> bool {
-    code.contains("make(chan")
-        || code.contains("select {")
-        || code.contains("<-")
-}
-
-fn contains_any(code: &str, needles: &[&str]) -> bool {
-    needles.iter().any(|needle| code.contains(needle))
-}
-
-fn is_rust_atomic_site(code: &str) -> bool {
-    contains_any(
-        code,
-        &[
-            "std::sync::atomic",
-            "core::sync::atomic",
-            "Ordering::",
-            ".load(",
-            ".store(",
-            ".swap(",
-            ".compare_exchange(",
-            ".compare_exchange_weak(",
-            ".fetch_add(",
-            ".fetch_sub(",
-            ".fetch_or(",
-            ".fetch_and(",
-            ".fetch_xor(",
-            ".fetch_update(",
-            "fence(",
-            "AtomicBool",
-            "AtomicI",
-            "AtomicU",
-            "AtomicPtr",
-        ],
-    )
-}
-
-fn is_rust_concurrency_site(code: &str) -> bool {
-    contains_any(
-        code,
-        &[
-            "thread::spawn",
-            "std::thread::spawn",
-            "std::sync::Mutex",
-            "std::sync::RwLock",
-            "std::sync::Condvar",
-            "std::sync::Arc",
-            "Arc<",
-            "Mutex<",
-            "RwLock<",
-            "Condvar",
-            "mpsc::",
-            "crossbeam::channel",
-            ".lock(",
-            ".try_lock(",
-        ],
-    )
-}
-
-fn is_rust_unsafe_operation(code: &str) -> bool {
-    contains_any(
-        code,
-        &[
-            "std::ptr::",
-            "core::ptr::",
-            "ptr::read",
-            "ptr::write",
-            "ptr::copy",
-            "copy_nonoverlapping",
-            "from_raw",
-            "into_raw",
-            "get_unchecked",
-            "get_unchecked_mut",
-            "unwrap_unchecked",
-            "transmute",
-            "assume_init",
-            "MaybeUninit",
-            "addr_of!",
-            "asm!",
-            ".add(",
-            ".offset(",
-            ".read(",
-            ".write(",
-            ".copy_to(",
-            ".copy_from(",
-        ],
-    ) || pointer_deref_site(code)
-}
-
-fn update_unsafe_depth(code: &str, unsafe_depth: i32) -> i32 {
-    let relevant = if unsafe_depth > 0 {
-        code
-    } else if let Some(index) = code.find("unsafe {") {
-        &code[index..]
-    } else {
-        ""
-    };
-    if relevant.is_empty() {
-        return unsafe_depth;
-    }
-    (unsafe_depth + brace_delta(relevant)).max(0)
-}
-
-fn is_c_tsan_site(code: &str) -> bool {
-    contains_any(
-        code,
-        &[
-            "_Atomic",
-            "atomic_",
-            "__atomic_",
-            "__sync_",
-            "pthread_create",
-            "pthread_mutex_",
-            "pthread_rwlock_",
-            "pthread_cond_",
-            "pthread_spin_",
-            "pthread_barrier_",
-            "mtx_",
-            "cnd_",
-            "thrd_create",
-        ],
-    )
-}
-
-fn is_c_asan_api_site(code: &str) -> bool {
-    contains_any(
-        code,
-        &[
-            "memcpy(",
-            "memmove(",
-            "memset(",
-            "strcpy(",
-            "strncpy(",
-            "strcat(",
-            "strncat(",
-            "sprintf(",
-            "snprintf(",
-            "vsprintf(",
-            "vsnprintf(",
-            "gets(",
-            "scanf(",
-            "sscanf(",
-            "fscanf(",
-            "alloca(",
-        ],
-    )
-}
-
-fn is_c_lsan_site(code: &str) -> bool {
-    contains_any(
-        code,
-        &[
-            "malloc(",
-            "calloc(",
-            "realloc(",
-            "aligned_alloc(",
-            "posix_memalign(",
-            "strdup(",
-            "strndup(",
-            "free(",
-        ],
-    )
-}
-
-fn is_c_pointer_hazard(code: &str) -> bool {
-    code.contains("->") || pointer_deref_site(code)
-}
-
-fn is_c_cast_ub_site(code: &str) -> bool {
-    contains_any(
-        code,
-        &[
-            "(intptr_t)",
-            "(uintptr_t)",
-            "(size_t)",
-            "(ssize_t)",
-            "(int)",
-            "(long)",
-            "(short)",
-            "(char)",
-            "(void *)",
-            "(char *)",
-            "(int *)",
-            "(long *)",
-        ],
-    )
-}
-
-fn is_cpp_tsan_site(code: &str) -> bool {
-    contains_any(
-        code,
-        &[
-            "std::thread",
-            "std::jthread",
-            "std::async",
-            "std::atomic",
-            "std::mutex",
-            "std::shared_mutex",
-            "std::recursive_mutex",
-            "std::condition_variable",
-            "std::lock_guard",
-            "std::unique_lock",
-            "std::scoped_lock",
-            "std::call_once",
-            ".lock(",
-            ".try_lock(",
-            ".unlock(",
-        ],
-    )
-}
-
-fn is_cpp_asan_api_site(code: &str) -> bool {
-    contains_any(
-        code,
-        &[
-            "std::memcpy(",
-            "std::memmove(",
-            "std::memset(",
-            "memcpy(",
-            "memmove(",
-            "memset(",
-            "strcpy(",
-            "strncpy(",
-            "strcat(",
-            "strncat(",
-            "sprintf(",
-            "snprintf(",
-            "std::span<",
-            "std::string_view",
-        ],
-    )
-}
-
-fn is_cpp_lsan_site(code: &str) -> bool {
-    contains_any(
-        code,
-        &[
-            "malloc(",
-            "calloc(",
-            "realloc(",
-            "free(",
-            "std::malloc(",
-            "std::calloc(",
-            "std::realloc(",
-            "std::free(",
-            "new ",
-            "new[]",
-            "delete ",
-            "delete[]",
-        ],
-    )
-}
-
-fn is_cpp_pointer_or_cast_hazard(code: &str) -> bool {
-    code.contains("->")
-        || pointer_deref_site(code)
-        || contains_any(code, &["reinterpret_cast<", "const_cast<"])
-}
-
-fn is_arithmetic_ub_site(code: &str) -> bool {
-    contains_any(code, &[" / ", " % ", "<<", ">>"])
-}
-
-fn is_csharp_concurrency_site(code: &str) -> bool {
-    contains_any(
-        code,
-        &[
-            "Task.Run",
-            "Task.Factory.StartNew",
-            "new Thread",
-            "ThreadPool.",
-            "Parallel.",
-            "lock (",
-            "lock(",
-            "Monitor.",
-            "Interlocked.",
-            "Volatile.",
-            "ConcurrentDictionary",
-            "ConcurrentQueue",
-            "ConcurrentBag",
-            "BlockingCollection",
-            "SemaphoreSlim",
-            "Mutex",
-            "ReaderWriterLockSlim",
-            "SpinLock",
-        ],
-    )
-}
-
-fn is_csharp_unsafe_site(code: &str, unsafe_depth: i32) -> bool {
-    (unsafe_depth > 0 && (code.contains("->") || pointer_deref_site(code)))
-        || contains_any(
-            code,
-            &[
-                "unsafe",
-                "fixed (",
-                "fixed(",
-                "stackalloc",
-                "Marshal.",
-                "IntPtr",
-                "UIntPtr",
-                "GCHandle",
-                "Unsafe.",
-                "MemoryMarshal.",
-                "byte*",
-                "char*",
-                "int*",
-                "long*",
-                "void*",
-            ],
-        )
-}
-
-fn update_csharp_unsafe_depth(code: &str, unsafe_depth: i32) -> i32 {
-    let relevant = if unsafe_depth > 0 {
-        code
-    } else if let Some(index) = code.find("unsafe {") {
-        &code[index..]
-    } else {
-        ""
-    };
-    if relevant.is_empty() {
-        return unsafe_depth;
-    }
-    (unsafe_depth + brace_delta(relevant)).max(0)
-}
-
-fn pointer_deref_site(code: &str) -> bool {
-    let trimmed = code.trim_start();
-    trimmed.starts_with('*')
-        || contains_any(code, &["= *", "=*", "return *", "(*", ", *", "[*"])
-}
-
-fn brace_delta(code: &str) -> i32 {
-    code.chars().fold(0_i32, |total, ch| match ch {
-        '{' => total + 1,
-        '}' => total - 1,
-        _ => total,
-    })
-}
-
-fn is_atomic_site(code: &str) -> bool {
-    code.contains("@atomic")
-        || code.contains("@cmpxchg")
-        || code.contains("@fence(")
-        || [
-            ".load(",
-            ".store(",
-            ".swap(",
-            ".fetchAdd(",
-            ".fetchSub(",
-            ".fetchOr(",
-            ".fetchAnd(",
-            ".fetchXor(",
-            ".fetchMin(",
-            ".fetchMax(",
-            ".cmpxchgStrong(",
-            ".cmpxchgWeak(",
-            ".compareExchange(",
-            ".compareExchangeStrong(",
-            ".compareExchangeWeak(",
-            ".rmw(",
-        ]
-        .iter()
-        .any(|needle| code.contains(needle))
-}
-
-fn vopr_category(code: &str) -> Option<&'static str> {
-    if [
-        "std.time.milliTimestamp(",
-        "std.time.nanoTimestamp(",
-        "std.time.microTimestamp(",
-        "std.time.Instant.now(",
-        "std.time.Timer",
-        "clock_gettime(",
-        "milliTimestamp(",
-        "nanoTimestamp(",
-    ]
-    .iter()
-    .any(|needle| code.contains(needle))
-    {
-        return Some("time");
-    }
-    if ["std.crypto.random", "std.Random", "std.rand", "getrandom(", "Random.DefaultPrng"]
-        .iter()
-        .any(|needle| code.contains(needle))
-    {
-        return Some("random");
-    }
-    if [
-        "posix.recv(",
-        "posix.send(",
-        "posix.connect(",
-        "posix.accept(",
-        "posix.bind(",
-        "posix.listen(",
-        "posix.socket(",
-        "std.posix.recv(",
-        "std.posix.send(",
-        "std.posix.connect(",
-        "std.posix.accept(",
-        "std.net.",
-        "linux.IoUring.recv(",
-        "linux.IoUring.send(",
-        "linux.IoUring.accept(",
-        "linux.IoUring.connect(",
-    ]
-    .iter()
-    .any(|needle| code.contains(needle))
-    {
-        return Some("net_io");
-    }
-    if [
-        "posix.open(",
-        "posix.openat(",
-        "posix.read(",
-        "posix.write(",
-        "posix.close(",
-        "posix.fsync(",
-        "std.posix.open(",
-        "std.posix.openat(",
-        "std.posix.read(",
-        "std.posix.write(",
-        "std.posix.close(",
-        "std.fs.",
-        "linux.IoUring.read(",
-        "linux.IoUring.write(",
-        "linux.IoUring.fsync(",
-        "linux.IoUring.openat(",
-        "linux.IoUring.close(",
-    ]
-    .iter()
-    .any(|needle| code.contains(needle))
-    {
-        return Some("fs_io");
-    }
-    if [
-        "self.ring.read(",
-        "self.ring.write(",
-        "self.ring.recv(",
-        "self.ring.send(",
-        "self.ring.accept(",
-        "self.ring.connect(",
-        "self.ring.fsync(",
-        "self.ring.poll_add(",
-        "self.ring.poll_remove(",
-        "self.ring.cancel(",
-        "ring.read(",
-        "ring.write(",
-        "ring.recv(",
-        "ring.send(",
-        "ring.accept(",
-        "ring.connect(",
-    ]
-    .iter()
-    .any(|needle| code.contains(needle))
-    {
-        return Some("ring_io");
-    }
-    None
-}
-
-fn strip_zig_comment(line: &str) -> &str {
-    line.split_once("//").map(|(code, _)| code).unwrap_or(line)
-}
-
-fn strip_go_comment(line: &str, in_block_comment: &mut bool) -> String {
-    let mut out = String::new();
-    let mut rest = line;
-    loop {
-        if *in_block_comment {
-            let Some((_, after)) = rest.split_once("*/") else {
-                return out;
-            };
-            *in_block_comment = false;
-            rest = after;
-            continue;
-        }
-        let block = rest.find("/*");
-        let line_comment = rest.find("//");
-        match (block, line_comment) {
-            (Some(block), Some(comment)) if comment < block => {
-                out.push_str(&rest[..comment]);
-                return out;
-            }
-            (Some(block), _) => {
-                out.push_str(&rest[..block]);
-                rest = &rest[block + 2..];
-                *in_block_comment = true;
-            }
-            (_, Some(comment)) => {
-                out.push_str(&rest[..comment]);
-                return out;
-            }
-            (None, None) => {
-                out.push_str(rest);
-                return out;
-            }
-        }
-    }
-}
-
-fn strip_quoted_literals(line: &str) -> String {
-    let mut out = String::with_capacity(line.len());
-    let mut chars = line.chars().peekable();
-    while let Some(ch) = chars.next() {
-        if ch == '"' || ch == '\'' {
-            let quote = ch;
-            out.push_str("\"\"");
-            let mut escaped = false;
-            for inner in chars.by_ref() {
-                if escaped {
-                    escaped = false;
-                    continue;
-                }
-                if inner == '\\' {
-                    escaped = true;
-                    continue;
-                }
-                if inner == quote {
-                    break;
-                }
-            }
-        } else {
-            out.push(ch);
-        }
-    }
-    out
-}
 
 fn unit_for_site(blob: &BlobFile, units: &[LogicalUnit], line: u32) -> LogicalUnit {
     units
@@ -1550,5 +978,47 @@ mod tests {
 
     fn hazard_types(sites: Vec<HazardSite>) -> Vec<String> {
         sites.into_iter().map(|site| site.hazard_type).collect()
+    }
+
+    #[test]
+    fn test_ingest_c_cpp_csharp_and_timestamp_fallback() {
+        let dir = tempdir().unwrap();
+        fs::write(dir.path().join("test.c"), "void foo() { char *p = malloc(10); free(p); }").unwrap();
+        fs::write(dir.path().join("test.cpp"), "void foo() { auto p = new int; delete p; }").unwrap();
+        fs::write(dir.path().join("test.cs"), "public unsafe class Bar { void Baz() { fixed (int* p = &x) {} } }").unwrap();
+
+        let storage = Storage::open_memory().unwrap();
+
+        let stats_c = ingest_hazards(&storage, dir.path(), "c", "commit_c", None).unwrap();
+        assert_eq!(stats_c.scanned_files, 1);
+
+        let stats_cpp = ingest_hazards(&storage, dir.path(), "cpp", "commit_cpp", None).unwrap();
+        assert_eq!(stats_cpp.scanned_files, 1);
+
+        let stats_csharp = ingest_hazards(&storage, dir.path(), "csharp", "commit_cs", None).unwrap();
+        assert_eq!(stats_csharp.scanned_files, 1);
+    }
+
+    #[test]
+    fn test_query_hazards_invalid_query_error() {
+        let sites = query_hazards("test.rs", "pub fn foo() {}", tree_sitter_rust::LANGUAGE.into(), "(invalid_pattern", "miri");
+        assert!(sites.is_empty());
+    }
+
+    #[test]
+    fn test_evidence_for_hazard_unmatched_keywords() {
+        assert_eq!(evidence_for_hazard("allocator_leak"), "allocator");
+        assert_eq!(evidence_for_hazard("vopr_io"), "vopr");
+        assert_eq!(evidence_for_hazard("unknown_hazard"), "hazard");
+    }
+
+    #[test]
+    fn test_non_directory_file_collection_no_files() {
+        let dir = tempdir().unwrap();
+        let file_path = dir.path().join("not_a_dir");
+        fs::write(&file_path, "code").unwrap();
+        let storage = Storage::open_memory().unwrap();
+        let stats = ingest_hazards(&storage, &file_path, "zig", "abc", Some(10)).unwrap();
+        assert_eq!(stats.scanned_files, 0);
     }
 }
