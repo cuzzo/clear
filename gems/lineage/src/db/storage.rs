@@ -273,6 +273,11 @@ impl Storage {
               value TEXT NOT NULL
             );
 
+            CREATE TABLE IF NOT EXISTS engine_state (
+              commit_hash TEXT PRIMARY KEY,
+              state_json TEXT NOT NULL
+            );
+
             CREATE INDEX IF NOT EXISTS idx_events_unit_id ON events(unit_id);
             CREATE INDEX IF NOT EXISTS idx_events_unit_latest
               ON events(unit_id, timestamp DESC, id DESC);
@@ -536,6 +541,22 @@ impl Storage {
         let mut stmt = self
             .conn
             .prepare("SELECT timestamp FROM metadata WHERE commit_hash = ?1")?;
+        let mut rows = stmt.query(params![commit_hash])?;
+        Ok(rows.next()?.map(|row| row.get(0)).transpose()?)
+    }
+
+    pub fn save_engine_state(&self, commit_hash: &str, state_json: &str) -> Result<()> {
+        self.conn.execute(
+            "INSERT OR REPLACE INTO engine_state (commit_hash, state_json) VALUES (?1, ?2)",
+            params![commit_hash, state_json],
+        )?;
+        Ok(())
+    }
+
+    pub fn load_engine_state(&self, commit_hash: &str) -> Result<Option<String>> {
+        let mut stmt = self
+            .conn
+            .prepare("SELECT state_json FROM engine_state WHERE commit_hash = ?1")?;
         let mut rows = stmt.query(params![commit_hash])?;
         Ok(rows.next()?.map(|row| row.get(0)).transpose()?)
     }
