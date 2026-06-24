@@ -568,6 +568,19 @@
             2,
             47
           ]
+        },
+        {
+          "field": "count",
+          "function": "process",
+          "line": 27,
+          "owner": "LuaSyntaxFactsCore",
+          "receiver": "self",
+          "span": [
+            27,
+            4,
+            27,
+            31
+          ]
         }
       ]
     }

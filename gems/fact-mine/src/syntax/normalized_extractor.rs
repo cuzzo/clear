@@ -625,10 +625,9 @@ impl<'a> Extractor<'a> {
     fn scan_local_assignment(&mut self, node: &Node) {
         let field = first_string_or_symbol(node)
             .or_else(|| child_node(node, 0).map(|n| n.text.clone()));
-        let field_clean = field.as_deref().map(|f| self.behavior.clean_identifier(f));
         let writes = self
             .behavior
-            .local_assignment_writes(field_clean.as_deref(), node, span(node));
+            .local_assignment_writes(field.as_deref(), node, span(node));
         if !writes.is_empty() {
             for write in writes {
                 self.record_state_write_target_span(write.receiver, write.field, node, write.span);

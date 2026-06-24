@@ -1032,11 +1032,11 @@ fn parse_sorbet_signature(
     sig: &str,
 ) -> (Option<String>, Vec<BTreeMap<String, String>>) {
     let sig = sig.trim();
-    if !sig.starts_with("sig ") {
+    if !sig.starts_with("sig") {
         return (None, Vec::new());
     }
 
-    let return_type = sorbet_extract(sig, ".returns(");
+    let return_type = sorbet_extract(sig, ".returns(").or_else(|| sorbet_extract(sig, "returns("));
     let params = sorbet_extract_params(sig);
     (return_type, params)
 }
@@ -1067,7 +1067,7 @@ fn sorbet_extract(sig: &str, marker: &str) -> Option<String> {
 }
 
 fn sorbet_extract_params(sig: &str) -> Vec<BTreeMap<String, String>> {
-    let params_str = match sorbet_extract(sig, ".params(") {
+    let params_str = match sorbet_extract(sig, ".params(").or_else(|| sorbet_extract(sig, "params(")) {
         Some(p) => p,
         None => return Vec::new(),
     };

@@ -104,9 +104,10 @@ module NilKill
         cursor = ::TreeSitter::QueryCursor.new
         res = cursor.captures(query, @root, @source)
 
-        stack = []
+        stack = [@root]
         res.each do |c|
           node = c.node
+          next if node.start_byte == @root.start_byte && node.end_byte == @root.end_byte && node.type == @root.type
           while !stack.empty?
             parent = stack.last
             if parent.start_byte <= node.start_byte && parent.end_byte >= node.end_byte &&
@@ -578,6 +579,29 @@ module NilKill
     end
 
     class ArgumentsNode < SyntheticNode
+      def initialize(context, raw, children = nil)
+        if children
+          super(context, raw, children)
+        else
+          raw_children = context.children(raw).map { |c| context.wrap(c) }.compact
+          pairs = []
+          non_pairs = []
+          raw_children.each do |child|
+            if child.is_a?(AssocNode)
+              pairs << child
+            else
+              non_pairs << child
+            end
+          end
+          if !pairs.empty?
+            kw_hash = KeywordHashNode.new(context, raw, pairs)
+            super(context, raw, non_pairs + [kw_hash])
+          else
+            super(context, raw, raw_children)
+          end
+        end
+      end
+
       def arguments
         child_nodes
       end

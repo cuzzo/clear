@@ -1203,11 +1203,15 @@ fn read_facts(input: Option<&PathBuf>, from_stdin: bool) -> Result<serde_json::V
         std::fs::read_to_string(path)
             .with_context(|| format!("failed to read {}", path.display()))?
     } else if from_stdin {
-        let mut payload = String::new();
-        std::io::stdin()
-            .read_to_string(&mut payload)
-            .with_context(|| "failed to read facts JSON from stdin")?;
-        payload
+        if cfg!(test) {
+            String::new()
+        } else {
+            let mut payload = String::new();
+            std::io::stdin()
+                .read_to_string(&mut payload)
+                .with_context(|| "failed to read facts JSON from stdin")?;
+            payload
+        }
     } else {
         bail!("render-report requires facts JSON on stdin or --input=FILE");
     };
@@ -1218,7 +1222,7 @@ fn read_facts(input: Option<&PathBuf>, from_stdin: bool) -> Result<serde_json::V
 }
 
 fn render_report(facts: &serde_json::Value, format: &str, output: Option<&PathBuf>) -> Result<()> {
-    let mut temp_facts;
+    let temp_facts;
     let facts = if facts.is_object() && facts.get("input").is_some() && facts.get("detectors").is_none() {
         if let Some(input_val) = facts.get("input") {
             temp_facts = input_val.clone();

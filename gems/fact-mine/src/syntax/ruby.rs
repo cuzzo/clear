@@ -730,7 +730,7 @@ fn method_param_types(
         .iter()
         .map(|function| {
             (
-                function.name.clone(),
+                format!("{}\u{0}{}", function.owner, function.name),
                 sig_param_types(source, function.line),
             )
         })
@@ -744,6 +744,9 @@ fn sig_param_types(source: &str, function_line: usize) -> BTreeMap<String, Strin
     let mut cursor = function_line.saturating_sub(2);
     while let Some(line) = lines.get(cursor) {
         let stripped = line.trim();
+        if stripped.starts_with("def ") || stripped.starts_with("class ") || stripped.starts_with("module ") {
+            return BTreeMap::new();
+        }
         if !stripped.is_empty() {
             sig_lines.push(*line);
         }

@@ -271,7 +271,7 @@ module NilKill
               k = arg.key&.slice&.to_s&.delete_suffix(":")
               v = arg.value&.slice&.to_s
               info[:params] << { "name" => k, "type" => v }
-            elsif arg.is_a?(NilKill::Syntax::HashNode)
+            elsif arg.is_a?(NilKill::Syntax::HashNode) || arg.is_a?(NilKill::Syntax::KeywordHashNode)
               arg.elements.each do |pair|
                 if pair.is_a?(NilKill::Syntax::AssocNode)
                   k = pair.key&.slice&.to_s&.delete_suffix(":")

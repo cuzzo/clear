@@ -540,7 +540,47 @@
           ]
         }
       ],
-      "state_writes": []
+      "state_writes": [
+        {
+          "field": "count",
+          "function": "process",
+          "line": 31,
+          "owner": "SwiftSyntaxFactsCore",
+          "receiver": "self",
+          "span": [
+            31,
+            6,
+            31,
+            21
+          ]
+        },
+        {
+          "field": "sink",
+          "function": "(top-level)",
+          "line": 13,
+          "owner": "SwiftSyntaxFactsCore",
+          "receiver": "self",
+          "span": [
+            13,
+            4,
+            13,
+            20
+          ]
+        },
+        {
+          "field": "status",
+          "function": "(top-level)",
+          "line": 12,
+          "owner": "SwiftSyntaxFactsCore",
+          "receiver": "self",
+          "span": [
+            12,
+            4,
+            12,
+            24
+          ]
+        }
+      ]
     }
   ],
   "format": "decomplex.syntax-facts.v1"
