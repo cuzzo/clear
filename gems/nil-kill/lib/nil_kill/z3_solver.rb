@@ -76,7 +76,9 @@ module NilKill
         params.each_with_index do |param, idx|
           name = param["name"]
           # Prefer keyword match, fall back to positional
-          types = sources.dig(:keyword, name) || sources.dig(:positional, idx) || []
+          types = sources.dig(:keyword, name)
+          types = sources.dig(:positional, idx) if types.nil? || types.empty?
+          types ||= []
           types = types.flatten.compact.uniq.reject { |t| t == "NilClass" }
           next if types.empty?
           # Also gather from sig returns for method-call args at this position
