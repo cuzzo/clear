@@ -178,9 +178,7 @@ impl Report {
         let mut out = Vec::new();
         for u in &self.uses {
             if let Some(ps) = by_canon.get(&u.canon) {
-                if ps.is_empty() {
-                    continue;
-                }
+                // ps is never empty because it was grouped from existing items
                 if ps.iter().any(|p| p.name == u.defn) {
                     continue;
                 }
@@ -310,6 +308,15 @@ mod tests {
                     "raw": "x == 0",
                     "span": [11, 12, 13, 14],
                     "enclosing_span": [11, 12, 13, 14]
+                },
+                {
+                    "canon_source": "unknown",
+                    "file": "foo.rb",
+                    "function": "other_func",
+                    "line": 12,
+                    "raw": "unknown",
+                    "span": [12, 11, 13, 13],
+                    "enclosing_span": [12, 11, 13, 13]
                 }
             ]
         })).unwrap();

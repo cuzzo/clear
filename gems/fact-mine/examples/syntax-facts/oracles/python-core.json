@@ -272,13 +272,13 @@
           "span": [
             54,
             4,
-            56,
+            61,
             22
           ],
           "visibility": "private"
         },
         {
-          "line": 58,
+          "line": 63,
           "name": "generator",
           "owner": "PythonSyntaxFactsCore",
           "params": [
@@ -286,15 +286,15 @@
             "values"
           ],
           "span": [
-            58,
+            63,
             4,
-            60,
+            65,
             23
           ],
           "visibility": "public"
         },
         {
-          "line": 62,
+          "line": 67,
           "name": "simple_with",
           "owner": "PythonSyntaxFactsCore",
           "params": [
@@ -302,9 +302,9 @@
             "resource"
           ],
           "span": [
-            62,
+            67,
             4,
-            64,
+            69,
             16
           ],
           "visibility": "public"
@@ -325,6 +325,26 @@
             22
           ],
           "visibility": "public"
+        },
+        {
+          "line": 71,
+          "name": "options",
+          "owner": "PythonSyntaxFactsCore",
+          "params": [
+            "self",
+            "a",
+            "b",
+            "args",
+            "c",
+            "kwargs"
+          ],
+          "span": [
+            71,
+            4,
+            75,
+            16
+          ],
+          "visibility": "public"
         }
       ],
       "language": "python",
@@ -336,13 +356,37 @@
           "span": [
             6,
             0,
-            64,
+            75,
             16
           ]
         }
       ],
       "predicate_bodies": [],
       "semantic_effects": [
+        {
+          "detail": "op-assign",
+          "function": "_normalize",
+          "kind": "hidden_mutation",
+          "line": 58,
+          "span": [
+            58,
+            12,
+            58,
+            27
+          ]
+        },
+        {
+          "detail": "op-assign",
+          "function": "process",
+          "kind": "hidden_mutation",
+          "line": 19,
+          "span": [
+            19,
+            12,
+            19,
+            27
+          ]
+        },
         {
           "detail": "open",
           "function": "process",
@@ -526,19 +570,6 @@
             8,
             10,
             22
-          ]
-        },
-        {
-          "field": "count",
-          "function": "process",
-          "line": 19,
-          "owner": "PythonSyntaxFactsCore",
-          "receiver": "self",
-          "span": [
-            19,
-            12,
-            19,
-            27
           ]
         },
         {

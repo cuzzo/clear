@@ -49,18 +49,20 @@ fn shared_examples_match_oracles() -> Result<()> {
         let actual = run_detector(detector_name, &[fixture.clone()], language, &options)
             .with_context(|| format!("{} {}", detector_name, fixture.display()))?;
         let projected = project_detector_output(&detector, actual);
+        let expected_normalized = normalize_paths(&expected);
+        let projected_normalized = normalize_paths(&projected);
 
         if std::env::var("UPDATE_ORACLES").is_ok() {
             let mut oracle: Value = serde_json::from_str(&fs::read_to_string(&oracle_path)?)?;
-            oracle["expected"] = projected.clone();
+            oracle["expected"] = projected_normalized;
             fs::write(&oracle_path, serde_json::to_string_pretty(&oracle)?)?;
-        } else if projected != expected {
+        } else if projected_normalized != expected_normalized {
             failures.push(format!(
                 "{} {}\nexpected: {}\nactual:   {}",
                 detector_name,
                 fixture.display(),
-                expected,
-                projected
+                expected_normalized,
+                projected_normalized
             ));
         }
     }
@@ -857,6 +859,32 @@ fn canonical_value(value: &Value) -> Value {
             Value::Object(out)
         }
         Value::Array(values) => Value::Array(values.iter().map(canonical_value).collect()),
+        _ => value.clone(),
+    }
+}
+
+fn normalize_paths(value: &Value) -> Value {
+    match value {
+        Value::Object(map) => {
+            let mut out = Map::new();
+            for (k, v) in map {
+                let mut v_norm = normalize_paths(v);
+                if k == "ref_at" || k == "at" || k == "file" || k == "path" || k == "uri" {
+                    if let Value::String(s) = &v_norm {
+                        if let Some(idx) = s.find("gems/decomplex/examples/") {
+                            v_norm = Value::String(s[idx..].to_string());
+                        } else if let Some(idx) = s.find("gems/fact-mine/examples/") {
+                            v_norm = Value::String(s[idx..].to_string());
+                        }
+                    }
+                }
+                out.insert(k.clone(), v_norm);
+            }
+            Value::Object(out)
+        }
+        Value::Array(arr) => {
+            Value::Array(arr.iter().map(normalize_paths).collect())
+        }
         _ => value.clone(),
     }
 }

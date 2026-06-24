@@ -215,6 +215,19 @@ mod tests {
                     "function": "m",
                     "line": 5,
                     "span": [1, 2, 3, 4]
+                },
+                {
+                    "variant_set": ["X", "Y", "Z"],
+                    "arm_members": {
+                        "X": ["a"],
+                        "Y": ["b"],
+                        "Z": ["c"]
+                    },
+                    "outside": [],
+                    "file": "foo.rb",
+                    "function": "m",
+                    "line": 6,
+                    "span": [1, 2, 3, 4]
                 }
             ]
         })).unwrap();

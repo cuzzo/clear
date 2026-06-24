@@ -274,6 +274,9 @@ Supported formats include `simplecov`, `cobertura`, `codecov`,
 authoritative for that commit and should replace prior rows for the
 same source.
 
+> [!NOTE]
+> For `cobertura` format, Lineage automatically parses `<source>` tags to combine them with class filenames. This resolves path resolution ambiguity for common file names (such as `src/lib.rs` or `src/main.rs`) when ingesting coverage from monorepo sub-projects.
+
 Recommended CLEAR lanes:
 
 - Ruby unit specs: `--format simplecov --test-type unit`

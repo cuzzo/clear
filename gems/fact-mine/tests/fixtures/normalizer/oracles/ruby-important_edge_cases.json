@@ -1,0 +1,924 @@
+{
+  "children": [
+    {
+      "Node": {
+        "children": [
+          {
+            "Node": {
+              "children": [
+                {
+                  "Symbol": "x"
+                }
+              ],
+              "first_column": 5,
+              "first_lineno": 1,
+              "last_column": 6,
+              "last_lineno": 1,
+              "text": "x",
+              "type": "VCALL"
+            }
+          },
+          {
+            "Node": {
+              "children": [
+                {
+                  "Node": {
+                    "children": [],
+                    "first_column": 3,
+                    "first_lineno": 2,
+                    "last_column": 4,
+                    "last_lineno": 2,
+                    "text": "1",
+                    "type": "INTEGER"
+                  }
+                },
+                {
+                  "Node": {
+                    "children": [
+                      {
+                        "Node": {
+                          "children": [
+                            {
+                              "Node": {
+                                "children": [
+                                  {
+                                    "Node": {
+                                      "children": [],
+                                      "first_column": 9,
+                                      "first_lineno": 3,
+                                      "last_column": 10,
+                                      "last_lineno": 3,
+                                      "text": "1",
+                                      "type": "INTEGER"
+                                    }
+                                  },
+                                  {
+                                    "Node": {
+                                      "children": [],
+                                      "first_column": 12,
+                                      "first_lineno": 3,
+                                      "last_column": 13,
+                                      "last_lineno": 3,
+                                      "text": "2",
+                                      "type": "INTEGER"
+                                    }
+                                  }
+                                ],
+                                "first_column": 9,
+                                "first_lineno": 3,
+                                "last_column": 13,
+                                "last_lineno": 3,
+                                "text": "1, 2",
+                                "type": "LIST"
+                              }
+                            }
+                          ],
+                          "first_column": 2,
+                          "first_lineno": 3,
+                          "last_column": 13,
+                          "last_lineno": 3,
+                          "text": "return 1, 2",
+                          "type": "RETURN"
+                        }
+                      }
+                    ],
+                    "first_column": 4,
+                    "first_lineno": 2,
+                    "last_column": 13,
+                    "last_lineno": 3,
+                    "text": "\n  return 1, 2",
+                    "type": "BLOCK"
+                  }
+                }
+              ],
+              "first_column": 0,
+              "first_lineno": 2,
+              "last_column": 13,
+              "last_lineno": 3,
+              "text": "in 1\n  return 1, 2",
+              "type": "IN_CLAUSE"
+            }
+          },
+          {
+            "Node": {
+              "children": [
+                {
+                  "Node": {
+                    "children": [
+                      {
+                        "Symbol": "MyConst"
+                      }
+                    ],
+                    "first_column": 3,
+                    "first_lineno": 4,
+                    "last_column": 10,
+                    "last_lineno": 4,
+                    "text": "MyConst",
+                    "type": "CONST"
+                  }
+                },
+                {
+                  "Node": {
+                    "children": [
+                      {
+                        "Node": {
+                          "children": [
+                            {
+                              "Node": {
+                                "children": [
+                                  {
+                                    "Node": {
+                                      "children": [
+                                        {
+                                          "Symbol": "obj"
+                                        }
+                                      ],
+                                      "first_column": 9,
+                                      "first_lineno": 5,
+                                      "last_column": 12,
+                                      "last_lineno": 5,
+                                      "text": "obj",
+                                      "type": "VCALL"
+                                    }
+                                  },
+                                  {
+                                    "Symbol": "method"
+                                  },
+                                  "Nil"
+                                ],
+                                "first_column": 9,
+                                "first_lineno": 5,
+                                "last_column": 19,
+                                "last_lineno": 5,
+                                "text": "obj.method",
+                                "type": "CALL"
+                              }
+                            }
+                          ],
+                          "first_column": 2,
+                          "first_lineno": 5,
+                          "last_column": 19,
+                          "last_lineno": 5,
+                          "text": "return obj.method",
+                          "type": "RETURN"
+                        }
+                      }
+                    ],
+                    "first_column": 10,
+                    "first_lineno": 4,
+                    "last_column": 19,
+                    "last_lineno": 5,
+                    "text": "\n  return obj.method",
+                    "type": "BLOCK"
+                  }
+                }
+              ],
+              "first_column": 0,
+              "first_lineno": 4,
+              "last_column": 19,
+              "last_lineno": 5,
+              "text": "in MyConst\n  return obj.method",
+              "type": "IN_CLAUSE"
+            }
+          },
+          {
+            "Node": {
+              "children": [
+                {
+                  "Node": {
+                    "children": [
+                      {
+                        "Symbol": "bare_name"
+                      }
+                    ],
+                    "first_column": 3,
+                    "first_lineno": 6,
+                    "last_column": 12,
+                    "last_lineno": 6,
+                    "text": "bare_name",
+                    "type": "VCALL"
+                  }
+                },
+                {
+                  "Node": {
+                    "children": [
+                      {
+                        "Node": {
+                          "children": [
+                            {
+                              "Node": {
+                                "children": [
+                                  {
+                                    "Node": {
+                                      "children": [
+                                        {
+                                          "Symbol": "obj"
+                                        }
+                                      ],
+                                      "first_column": 10,
+                                      "first_lineno": 7,
+                                      "last_column": 13,
+                                      "last_lineno": 7,
+                                      "text": "obj",
+                                      "type": "VCALL"
+                                    }
+                                  },
+                                  {
+                                    "Symbol": "!"
+                                  },
+                                  "Nil"
+                                ],
+                                "first_column": 9,
+                                "first_lineno": 7,
+                                "last_column": 13,
+                                "last_lineno": 7,
+                                "text": "!obj",
+                                "type": "OPCALL"
+                              }
+                            }
+                          ],
+                          "first_column": 2,
+                          "first_lineno": 7,
+                          "last_column": 13,
+                          "last_lineno": 7,
+                          "text": "return !obj",
+                          "type": "RETURN"
+                        }
+                      }
+                    ],
+                    "first_column": 12,
+                    "first_lineno": 6,
+                    "last_column": 13,
+                    "last_lineno": 7,
+                    "text": "\n  return !obj",
+                    "type": "BLOCK"
+                  }
+                }
+              ],
+              "first_column": 0,
+              "first_lineno": 6,
+              "last_column": 13,
+              "last_lineno": 7,
+              "text": "in bare_name\n  return !obj",
+              "type": "IN_CLAUSE"
+            }
+          }
+        ],
+        "first_column": 0,
+        "first_lineno": 1,
+        "last_column": 3,
+        "last_lineno": 8,
+        "text": "case x\nin 1\n  return 1, 2\nin MyConst\n  return obj.method\nin bare_name\n  return !obj\nend",
+        "type": "CASE_MATCH"
+      }
+    },
+    {
+      "Node": {
+        "children": [
+          {
+            "Symbol": "test_infix"
+          },
+          {
+            "Node": {
+              "children": [
+                "Nil",
+                "Nil",
+                {
+                  "Node": {
+                    "children": [
+                      {
+                        "Node": {
+                          "children": [
+                            {
+                              "Symbol": "a"
+                            }
+                          ],
+                          "first_column": 9,
+                          "first_lineno": 11,
+                          "last_column": 10,
+                          "last_lineno": 11,
+                          "text": "a",
+                          "type": "VCALL"
+                        }
+                      },
+                      {
+                        "Symbol": "+"
+                      },
+                      {
+                        "Node": {
+                          "children": [
+                            {
+                              "Node": {
+                                "children": [
+                                  {
+                                    "Symbol": "b"
+                                  }
+                                ],
+                                "first_column": 13,
+                                "first_lineno": 11,
+                                "last_column": 14,
+                                "last_lineno": 11,
+                                "text": "b",
+                                "type": "VCALL"
+                              }
+                            }
+                          ],
+                          "first_column": 13,
+                          "first_lineno": 11,
+                          "last_column": 14,
+                          "last_lineno": 11,
+                          "text": "b",
+                          "type": "LIST"
+                        }
+                      }
+                    ],
+                    "first_column": 9,
+                    "first_lineno": 11,
+                    "last_column": 14,
+                    "last_lineno": 11,
+                    "text": "a + b",
+                    "type": "OPCALL"
+                  }
+                }
+              ],
+              "first_column": 9,
+              "first_lineno": 11,
+              "last_column": 14,
+              "last_lineno": 11,
+              "text": "a + b",
+              "type": "SCOPE"
+            }
+          }
+        ],
+        "first_column": 0,
+        "first_lineno": 10,
+        "last_column": 3,
+        "last_lineno": 12,
+        "text": "def test_infix\n  return a + b\nend",
+        "type": "DEFN"
+      }
+    },
+    {
+      "Node": {
+        "children": [
+          {
+            "Symbol": "test_ternary"
+          },
+          {
+            "Node": {
+              "children": [
+                "Nil",
+                "Nil",
+                {
+                  "Node": {
+                    "children": [
+                      {
+                        "Node": {
+                          "children": [
+                            {
+                              "Symbol": "a"
+                            }
+                          ],
+                          "first_column": 9,
+                          "first_lineno": 15,
+                          "last_column": 10,
+                          "last_lineno": 15,
+                          "text": "a",
+                          "type": "VCALL"
+                        }
+                      },
+                      {
+                        "Node": {
+                          "children": [
+                            {
+                              "Symbol": "b"
+                            }
+                          ],
+                          "first_column": 13,
+                          "first_lineno": 15,
+                          "last_column": 14,
+                          "last_lineno": 15,
+                          "text": "b",
+                          "type": "VCALL"
+                        }
+                      },
+                      {
+                        "Node": {
+                          "children": [
+                            {
+                              "Symbol": "c"
+                            }
+                          ],
+                          "first_column": 17,
+                          "first_lineno": 15,
+                          "last_column": 18,
+                          "last_lineno": 15,
+                          "text": "c",
+                          "type": "VCALL"
+                        }
+                      }
+                    ],
+                    "first_column": 9,
+                    "first_lineno": 15,
+                    "last_column": 18,
+                    "last_lineno": 15,
+                    "text": "a ? b : c",
+                    "type": "IF"
+                  }
+                }
+              ],
+              "first_column": 9,
+              "first_lineno": 15,
+              "last_column": 18,
+              "last_lineno": 15,
+              "text": "a ? b : c",
+              "type": "SCOPE"
+            }
+          }
+        ],
+        "first_column": 0,
+        "first_lineno": 14,
+        "last_column": 3,
+        "last_lineno": 16,
+        "text": "def test_ternary\n  return a ? b : c\nend",
+        "type": "DEFN"
+      }
+    },
+    {
+      "Node": {
+        "children": [
+          {
+            "Symbol": "self_element_ref"
+          },
+          {
+            "Node": {
+              "children": [
+                "Nil",
+                "Nil",
+                {
+                  "Node": {
+                    "children": [
+                      {
+                        "Node": {
+                          "children": [],
+                          "first_column": 2,
+                          "first_lineno": 19,
+                          "last_column": 6,
+                          "last_lineno": 19,
+                          "text": "self",
+                          "type": "SELF"
+                        }
+                      },
+                      {
+                        "Symbol": "[]="
+                      },
+                      {
+                        "Node": {
+                          "children": [
+                            {
+                              "Node": {
+                                "children": [
+                                  {
+                                    "Symbol": "foo"
+                                  }
+                                ],
+                                "first_column": 7,
+                                "first_lineno": 19,
+                                "last_column": 10,
+                                "last_lineno": 19,
+                                "text": "foo",
+                                "type": "VCALL"
+                              }
+                            },
+                            {
+                              "Node": {
+                                "children": [],
+                                "first_column": 14,
+                                "first_lineno": 19,
+                                "last_column": 15,
+                                "last_lineno": 19,
+                                "text": "1",
+                                "type": "INTEGER"
+                              }
+                            }
+                          ],
+                          "first_column": 2,
+                          "first_lineno": 19,
+                          "last_column": 11,
+                          "last_lineno": 19,
+                          "text": "self[foo]",
+                          "type": "LIST"
+                        }
+                      }
+                    ],
+                    "first_column": 2,
+                    "first_lineno": 19,
+                    "last_column": 15,
+                    "last_lineno": 19,
+                    "text": "self[foo] = 1",
+                    "type": "ATTRASGN"
+                  }
+                }
+              ],
+              "first_column": 2,
+              "first_lineno": 19,
+              "last_column": 15,
+              "last_lineno": 19,
+              "text": "self[foo] = 1",
+              "type": "SCOPE"
+            }
+          }
+        ],
+        "first_column": 0,
+        "first_lineno": 18,
+        "last_column": 3,
+        "last_lineno": 20,
+        "text": "def self_element_ref\n  self[foo] = 1\nend",
+        "type": "DEFN"
+      }
+    },
+    {
+      "Node": {
+        "children": [
+          {
+            "Symbol": "augmented_assignment"
+          },
+          {
+            "Node": {
+              "children": [
+                "Nil",
+                "Nil",
+                {
+                  "Node": {
+                    "children": [
+                      {
+                        "Node": {
+                          "children": [
+                            {
+                              "String": "a"
+                            },
+                            {
+                              "Node": {
+                                "children": [
+                                  {
+                                    "Node": {
+                                      "children": [
+                                        {
+                                          "String": "a"
+                                        }
+                                      ],
+                                      "first_column": 2,
+                                      "first_lineno": 23,
+                                      "last_column": 3,
+                                      "last_lineno": 23,
+                                      "text": "a",
+                                      "type": "LVAR"
+                                    }
+                                  },
+                                  {
+                                    "Symbol": "+"
+                                  },
+                                  {
+                                    "Node": {
+                                      "children": [
+                                        {
+                                          "Node": {
+                                            "children": [],
+                                            "first_column": 7,
+                                            "first_lineno": 23,
+                                            "last_column": 8,
+                                            "last_lineno": 23,
+                                            "text": "1",
+                                            "type": "INTEGER"
+                                          }
+                                        }
+                                      ],
+                                      "first_column": 7,
+                                      "first_lineno": 23,
+                                      "last_column": 8,
+                                      "last_lineno": 23,
+                                      "text": "1",
+                                      "type": "LIST"
+                                    }
+                                  }
+                                ],
+                                "first_column": 2,
+                                "first_lineno": 23,
+                                "last_column": 8,
+                                "last_lineno": 23,
+                                "text": "a += 1",
+                                "type": "CALL"
+                              }
+                            }
+                          ],
+                          "first_column": 2,
+                          "first_lineno": 23,
+                          "last_column": 8,
+                          "last_lineno": 23,
+                          "text": "a += 1",
+                          "type": "LASGN"
+                        }
+                      },
+                      {
+                        "Node": {
+                          "children": [
+                            {
+                              "String": "@a"
+                            },
+                            {
+                              "Node": {
+                                "children": [
+                                  {
+                                    "Node": {
+                                      "children": [
+                                        {
+                                          "String": "@a"
+                                        }
+                                      ],
+                                      "first_column": 2,
+                                      "first_lineno": 24,
+                                      "last_column": 4,
+                                      "last_lineno": 24,
+                                      "text": "@a",
+                                      "type": "IVAR"
+                                    }
+                                  },
+                                  {
+                                    "Symbol": "+"
+                                  },
+                                  {
+                                    "Node": {
+                                      "children": [
+                                        {
+                                          "Node": {
+                                            "children": [],
+                                            "first_column": 8,
+                                            "first_lineno": 24,
+                                            "last_column": 9,
+                                            "last_lineno": 24,
+                                            "text": "1",
+                                            "type": "INTEGER"
+                                          }
+                                        }
+                                      ],
+                                      "first_column": 8,
+                                      "first_lineno": 24,
+                                      "last_column": 9,
+                                      "last_lineno": 24,
+                                      "text": "1",
+                                      "type": "LIST"
+                                    }
+                                  }
+                                ],
+                                "first_column": 2,
+                                "first_lineno": 24,
+                                "last_column": 9,
+                                "last_lineno": 24,
+                                "text": "@a += 1",
+                                "type": "CALL"
+                              }
+                            }
+                          ],
+                          "first_column": 2,
+                          "first_lineno": 24,
+                          "last_column": 9,
+                          "last_lineno": 24,
+                          "text": "@a += 1",
+                          "type": "IASGN"
+                        }
+                      }
+                    ],
+                    "first_column": 2,
+                    "first_lineno": 23,
+                    "last_column": 9,
+                    "last_lineno": 24,
+                    "text": "a += 1\n  @a += 1",
+                    "type": "BLOCK"
+                  }
+                }
+              ],
+              "first_column": 2,
+              "first_lineno": 23,
+              "last_column": 9,
+              "last_lineno": 24,
+              "text": "a += 1\n  @a += 1",
+              "type": "SCOPE"
+            }
+          }
+        ],
+        "first_column": 0,
+        "first_lineno": 22,
+        "last_column": 3,
+        "last_lineno": 25,
+        "text": "def augmented_assignment\n  a += 1\n  @a += 1\nend",
+        "type": "DEFN"
+      }
+    },
+    {
+      "Node": {
+        "children": [
+          {
+            "Node": {
+              "children": [
+                {
+                  "Symbol": "Foo"
+                }
+              ],
+              "first_column": 7,
+              "first_lineno": 27,
+              "last_column": 10,
+              "last_lineno": 27,
+              "text": "Foo",
+              "type": "CONST"
+            }
+          },
+          {
+            "Node": {
+              "children": [
+                "Nil",
+                "Nil",
+                {
+                  "Node": {
+                    "children": [
+                      {
+                        "Node": {
+                          "children": [
+                            {
+                              "Symbol": "Bar"
+                            }
+                          ],
+                          "first_column": 8,
+                          "first_lineno": 28,
+                          "last_column": 11,
+                          "last_lineno": 28,
+                          "text": "Bar",
+                          "type": "CONST"
+                        }
+                      },
+                      "Nil",
+                      {
+                        "Node": {
+                          "children": [
+                            "Nil",
+                            "Nil",
+                            {
+                              "Node": {
+                                "children": [
+                                  {
+                                    "Symbol": "private"
+                                  },
+                                  {
+                                    "Node": {
+                                      "children": [
+                                        {
+                                          "Node": {
+                                            "children": [
+                                              {
+                                                "Symbol": "visibility_test"
+                                              },
+                                              {
+                                                "Node": {
+                                                  "children": [
+                                                    "Nil",
+                                                    "Nil",
+                                                    "Nil"
+                                                  ],
+                                                  "first_column": 12,
+                                                  "first_lineno": 29,
+                                                  "last_column": 7,
+                                                  "last_lineno": 31,
+                                                  "text": "def visibility_test\n      # private method\n    end",
+                                                  "type": "SCOPE"
+                                                }
+                                              }
+                                            ],
+                                            "first_column": 12,
+                                            "first_lineno": 29,
+                                            "last_column": 7,
+                                            "last_lineno": 31,
+                                            "text": "def visibility_test\n      # private method\n    end",
+                                            "type": "DEFN"
+                                          }
+                                        }
+                                      ],
+                                      "first_column": 4,
+                                      "first_lineno": 29,
+                                      "last_column": 7,
+                                      "last_lineno": 31,
+                                      "text": "private def visibility_test\n      # private method\n    end",
+                                      "type": "LIST"
+                                    }
+                                  }
+                                ],
+                                "first_column": 4,
+                                "first_lineno": 29,
+                                "last_column": 7,
+                                "last_lineno": 31,
+                                "text": "private def visibility_test\n      # private method\n    end",
+                                "type": "FCALL"
+                              }
+                            }
+                          ],
+                          "first_column": 4,
+                          "first_lineno": 29,
+                          "last_column": 7,
+                          "last_lineno": 31,
+                          "text": "private def visibility_test\n      # private method\n    end",
+                          "type": "SCOPE"
+                        }
+                      }
+                    ],
+                    "first_column": 2,
+                    "first_lineno": 28,
+                    "last_column": 5,
+                    "last_lineno": 32,
+                    "text": "class Bar\n    private def visibility_test\n      # private method\n    end\n  end",
+                    "type": "CLASS"
+                  }
+                }
+              ],
+              "first_column": 2,
+              "first_lineno": 28,
+              "last_column": 5,
+              "last_lineno": 32,
+              "text": "class Bar\n    private def visibility_test\n      # private method\n    end\n  end",
+              "type": "SCOPE"
+            }
+          }
+        ],
+        "first_column": 0,
+        "first_lineno": 27,
+        "last_column": 3,
+        "last_lineno": 33,
+        "text": "module Foo\n  class Bar\n    private def visibility_test\n      # private method\n    end\n  end\nend",
+        "type": "MODULE"
+      }
+    },
+    {
+      "Node": {
+        "children": [
+          {
+            "Symbol": "test_unary_not"
+          },
+          {
+            "Node": {
+              "children": [
+                "Nil",
+                "Nil",
+                {
+                  "Node": {
+                    "children": [
+                      {
+                        "Node": {
+                          "children": [
+                            {
+                              "Symbol": "foo"
+                            }
+                          ],
+                          "first_column": 3,
+                          "first_lineno": 36,
+                          "last_column": 6,
+                          "last_lineno": 36,
+                          "text": "foo",
+                          "type": "VCALL"
+                        }
+                      },
+                      {
+                        "Symbol": "!"
+                      },
+                      "Nil"
+                    ],
+                    "first_column": 2,
+                    "first_lineno": 36,
+                    "last_column": 6,
+                    "last_lineno": 36,
+                    "text": "!foo",
+                    "type": "OPCALL"
+                  }
+                }
+              ],
+              "first_column": 2,
+              "first_lineno": 36,
+              "last_column": 6,
+              "last_lineno": 36,
+              "text": "!foo",
+              "type": "SCOPE"
+            }
+          }
+        ],
+        "first_column": 0,
+        "first_lineno": 35,
+        "last_column": 3,
+        "last_lineno": 37,
+        "text": "def test_unary_not\n  !foo\nend",
+        "type": "DEFN"
+      }
+    }
+  ],
+  "first_column": 0,
+  "first_lineno": 1,
+  "last_column": 0,
+  "last_lineno": 39,
+  "text": "case x\nin 1\n  return 1, 2\nin MyConst\n  return obj.method\nin bare_name\n  return !obj\nend\n\ndef test_infix\n  return a + b\nend\n\ndef test_ternary\n  return a ? b : c\nend\n\ndef self_element_ref\n  self[foo] = 1\nend\n\ndef augmented_assignment\n  a += 1\n  @a += 1\nend\n\nmodule Foo\n  class Bar\n    private def visibility_test\n      # private method\n    end\n  end\nend\n\ndef test_unary_not\n  !foo\nend\n\n",
+  "type": "ROOT"
+}

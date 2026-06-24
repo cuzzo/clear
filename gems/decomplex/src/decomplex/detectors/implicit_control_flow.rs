@@ -570,7 +570,7 @@ mod tests {
                 { "file": "foo.rb", "owner": "ClassA", "name": "d", "line": 4, "reads": [], "writes": ["state_2"] },
                 { "file": "foo.rb", "owner": "ClassA", "name": "e", "line": 5, "reads": ["state_3"], "writes": [] },
                 { "file": "foo.rb", "owner": "ClassA", "name": "f", "line": 6, "reads": [], "writes": ["state_3"] },
-                { "file": "foo.rb", "owner": "ClassA", "name": "read_interpolated_string", "line": 7, "reads": ["state_4"], "writes": [] }
+                { "file": "foo.rb", "owner": "ClassA", "name": "read_interpolated_string", "line": 7, "reads": ["state_1"], "writes": [] }
             ],
             "protocol_call_paths": [
                 // 4 sequences for a -> b
@@ -691,17 +691,25 @@ mod tests {
                     ]
                 },
 
-                // Sequences to test low confidence drift check (line 324)
-                // We add another 3 sequences with "a" and "b" to increase denominator to 8.
-                // Then confidence for b -> a is 4 / 8 = 0.5 < 0.75, which skips it!
-                // To achieve this, let's keep this test simple and not add it, or verify both high and low confidence.
-                // Actually, just having udrift1 is enough to cover >= 0.75.
-                // To trigger < 0.75, let's add some more matching sequences:
                 {
-                    "file": "foo.rb", "owner": "ClassA", "name": "ulow_conf1", "line": 160,
+                    "file": "foo.rb", "owner": "ClassA", "name": "udrift2", "line": 145,
                     "calls": [
-                        { "mid": "a", "file": "foo.rb", "owner": "ClassA", "defn": "ulow_conf1", "line": 161, "span": [161, 1, 161, 5] },
-                        { "mid": "b", "file": "foo.rb", "owner": "ClassA", "defn": "ulow_conf1", "line": 162, "span": [162, 1, 162, 5] }
+                        { "mid": "b", "file": "foo.rb", "owner": "ClassA", "defn": "udrift2", "line": 146, "span": [146, 1, 146, 5] },
+                        { "mid": "a", "file": "foo.rb", "owner": "ClassA", "defn": "udrift2", "line": 147, "span": [147, 1, 147, 5] }
+                    ]
+                },
+                {
+                    "file": "foo.rb", "owner": "ClassA", "name": "udrift_cd", "line": 160,
+                    "calls": [
+                        { "mid": "d", "file": "foo.rb", "owner": "ClassA", "defn": "udrift_cd", "line": 161, "span": [161, 1, 161, 5] },
+                        { "mid": "c", "file": "foo.rb", "owner": "ClassA", "defn": "udrift_cd", "line": 162, "span": [162, 1, 162, 5] }
+                    ]
+                },
+                {
+                    "file": "foo.rb", "owner": "ClassA", "name": "udrift_ef", "line": 170,
+                    "calls": [
+                        { "mid": "f", "file": "foo.rb", "owner": "ClassA", "defn": "udrift_ef", "line": 171, "span": [171, 1, 171, 5] },
+                        { "mid": "e", "file": "foo.rb", "owner": "ClassA", "defn": "udrift_ef", "line": 172, "span": [172, 1, 172, 5] }
                     ]
                 }
             ]
@@ -713,7 +721,7 @@ mod tests {
         // c -> d (support = 4, write_write)
         // e -> f (support = 4, read_write)
         // plus b -> a (support = 1, read_write)
-        assert_eq!(report.ordered_protocols.len(), 4);
+        assert_eq!(report.ordered_protocols.len(), 6);
         assert_eq!(report.ordered_protocols[0].protocol, vec!["a", "b"]);
         assert_eq!(report.ordered_protocols[0].dependency, vec!["write_read"]);
 
@@ -724,14 +732,11 @@ mod tests {
         assert_eq!(report.ordered_protocols[2].dependency, vec!["read_write"]);
 
         // drift check:
-        // udrift1 has "b" then "a" -> confidence is 4 / 6 = 0.67 < 0.75, so it is skipped.
-        // Wait, if confidence is 0.67, it is skipped.
-        // What if we want it to NOT be skipped?
-        // If we remove the "ulow_conf1" sequence, denominator is 5, confidence is 4/5 = 0.8 >= 0.75.
-        // Then we get a drift result!
-        // Let's check: report.order_drift.is_empty() because confidence = 0.67 < 0.75.
-        assert_eq!(report.order_drift.len(), 1);
-        assert_eq!(report.order_drift[0].protocol, vec!["a", "b"]);
-        assert_eq!(report.order_drift[0].observed, vec!["b", "a"]);
+        // udrift1 and udrift2 have "b" then "a" -> confidence is 4 / 6 = 0.67 < 0.75, so it is skipped.
+        // udrift_cd and udrift_ef yield 1 valid drift each (confidence 4/5 = 0.8 >= 0.75)
+        // This gives 2 elements in order_drift, testing the sort_by block.
+        assert_eq!(report.order_drift.len(), 2);
+        assert_eq!(report.order_drift[0].protocol, vec!["c", "d"]);
+        assert_eq!(report.order_drift[1].protocol, vec!["e", "f"]);
     }
 }

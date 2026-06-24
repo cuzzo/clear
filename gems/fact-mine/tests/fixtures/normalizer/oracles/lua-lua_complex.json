@@ -1,0 +1,429 @@
+{
+  "children": [
+    {
+      "Node": {
+        "children": [
+          {
+            "Symbol": "foo"
+          },
+          {
+            "Node": {
+              "children": [
+                "Nil",
+                "Nil",
+                {
+                  "Node": {
+                    "children": [
+                      {
+                        "Node": {
+                          "children": [
+                            {
+                              "String": "a"
+                            }
+                          ],
+                          "first_column": 5,
+                          "first_lineno": 2,
+                          "last_column": 6,
+                          "last_lineno": 2,
+                          "text": "a",
+                          "type": "LVAR"
+                        }
+                      },
+                      {
+                        "Node": {
+                          "children": [
+                            {
+                              "Node": {
+                                "children": [],
+                                "first_column": 11,
+                                "first_lineno": 3,
+                                "last_column": 12,
+                                "last_lineno": 3,
+                                "text": "1",
+                                "type": "EXPRESSION_LIST"
+                              }
+                            }
+                          ],
+                          "first_column": 4,
+                          "first_lineno": 3,
+                          "last_column": 12,
+                          "last_lineno": 3,
+                          "text": "return 1",
+                          "type": "RETURN"
+                        }
+                      },
+                      {
+                        "Node": {
+                          "children": [
+                            {
+                              "Node": {
+                                "children": [
+                                  {
+                                    "String": "b"
+                                  }
+                                ],
+                                "first_column": 9,
+                                "first_lineno": 4,
+                                "last_column": 10,
+                                "last_lineno": 4,
+                                "text": "b",
+                                "type": "LVAR"
+                              }
+                            },
+                            {
+                              "Node": {
+                                "children": [
+                                  {
+                                    "Node": {
+                                      "children": [],
+                                      "first_column": 11,
+                                      "first_lineno": 5,
+                                      "last_column": 12,
+                                      "last_lineno": 5,
+                                      "text": "2",
+                                      "type": "EXPRESSION_LIST"
+                                    }
+                                  }
+                                ],
+                                "first_column": 4,
+                                "first_lineno": 5,
+                                "last_column": 12,
+                                "last_lineno": 5,
+                                "text": "return 2",
+                                "type": "RETURN"
+                              }
+                            },
+                            {
+                              "Node": {
+                                "children": [
+                                  {
+                                    "Node": {
+                                      "children": [
+                                        {
+                                          "Node": {
+                                            "children": [],
+                                            "first_column": 11,
+                                            "first_lineno": 7,
+                                            "last_column": 12,
+                                            "last_lineno": 7,
+                                            "text": "3",
+                                            "type": "EXPRESSION_LIST"
+                                          }
+                                        }
+                                      ],
+                                      "first_column": 4,
+                                      "first_lineno": 7,
+                                      "last_column": 12,
+                                      "last_lineno": 7,
+                                      "text": "return 3",
+                                      "type": "RETURN"
+                                    }
+                                  }
+                                ],
+                                "first_column": 2,
+                                "first_lineno": 6,
+                                "last_column": 12,
+                                "last_lineno": 7,
+                                "text": "else\n    return 3",
+                                "type": "ELSE_STATEMENT"
+                              }
+                            }
+                          ],
+                          "first_column": 2,
+                          "first_lineno": 4,
+                          "last_column": 12,
+                          "last_lineno": 5,
+                          "text": "elseif b then\n    return 2",
+                          "type": "IF"
+                        }
+                      }
+                    ],
+                    "first_column": 2,
+                    "first_lineno": 2,
+                    "last_column": 5,
+                    "last_lineno": 8,
+                    "text": "if a then\n    return 1\n  elseif b then\n    return 2\n  else\n    return 3\n  end",
+                    "type": "IF"
+                  }
+                }
+              ],
+              "first_column": 2,
+              "first_lineno": 2,
+              "last_column": 5,
+              "last_lineno": 8,
+              "text": "if a then\n    return 1\n  elseif b then\n    return 2\n  else\n    return 3\n  end",
+              "type": "SCOPE"
+            }
+          }
+        ],
+        "first_column": 0,
+        "first_lineno": 1,
+        "last_column": 3,
+        "last_lineno": 9,
+        "text": "local function foo()\n  if a then\n    return 1\n  elseif b then\n    return 2\n  else\n    return 3\n  end\nend",
+        "type": "DEFN"
+      }
+    },
+    {
+      "Node": {
+        "children": [
+          {
+            "Node": {
+              "children": [
+                {
+                  "Node": {
+                    "children": [
+                      {
+                        "String": "i"
+                      },
+                      {
+                        "Node": {
+                          "children": [],
+                          "first_column": 6,
+                          "first_lineno": 11,
+                          "last_column": 7,
+                          "last_lineno": 11,
+                          "text": "1",
+                          "type": "NUMBER"
+                        }
+                      }
+                    ],
+                    "first_column": 4,
+                    "first_lineno": 11,
+                    "last_column": 10,
+                    "last_lineno": 11,
+                    "text": "i=1,10",
+                    "type": "LASGN"
+                  }
+                },
+                {
+                  "Node": {
+                    "children": [],
+                    "first_column": 8,
+                    "first_lineno": 11,
+                    "last_column": 10,
+                    "last_lineno": 11,
+                    "text": "10",
+                    "type": "NUMBER"
+                  }
+                }
+              ],
+              "first_column": 4,
+              "first_lineno": 11,
+              "last_column": 10,
+              "last_lineno": 11,
+              "text": "i=1,10",
+              "type": "FOR_NUMERIC_CLAUSE"
+            }
+          },
+          {
+            "Node": {
+              "children": [
+                {
+                  "Node": {
+                    "children": [
+                      {
+                        "Node": {
+                          "children": [
+                            {
+                              "String": "i"
+                            }
+                          ],
+                          "first_column": 5,
+                          "first_lineno": 12,
+                          "last_column": 6,
+                          "last_lineno": 12,
+                          "text": "i",
+                          "type": "LVAR"
+                        }
+                      },
+                      {
+                        "Symbol": "=="
+                      },
+                      {
+                        "Node": {
+                          "children": [
+                            {
+                              "Node": {
+                                "children": [],
+                                "first_column": 10,
+                                "first_lineno": 12,
+                                "last_column": 11,
+                                "last_lineno": 12,
+                                "text": "5",
+                                "type": "NUMBER"
+                              }
+                            }
+                          ],
+                          "first_column": 10,
+                          "first_lineno": 12,
+                          "last_column": 11,
+                          "last_lineno": 12,
+                          "text": "5",
+                          "type": "LIST"
+                        }
+                      }
+                    ],
+                    "first_column": 5,
+                    "first_lineno": 12,
+                    "last_column": 11,
+                    "last_lineno": 12,
+                    "text": "i == 5",
+                    "type": "OPCALL"
+                  }
+                },
+                {
+                  "Node": {
+                    "children": [],
+                    "first_column": 17,
+                    "first_lineno": 12,
+                    "last_column": 22,
+                    "last_lineno": 12,
+                    "text": "break",
+                    "type": "BREAK"
+                  }
+                },
+                "Nil"
+              ],
+              "first_column": 2,
+              "first_lineno": 12,
+              "last_column": 26,
+              "last_lineno": 12,
+              "text": "if i == 5 then break end",
+              "type": "IF"
+            }
+          }
+        ],
+        "first_column": 0,
+        "first_lineno": 11,
+        "last_column": 3,
+        "last_lineno": 13,
+        "text": "for i=1,10 do\n  if i == 5 then break end\nend",
+        "type": "FOR"
+      }
+    },
+    {
+      "Node": {
+        "children": [
+          {
+            "Node": {
+              "children": [
+                {
+                  "Node": {
+                    "children": [
+                      {
+                        "Node": {
+                          "children": [
+                            {
+                              "String": "k"
+                            }
+                          ],
+                          "first_column": 4,
+                          "first_lineno": 15,
+                          "last_column": 5,
+                          "last_lineno": 15,
+                          "text": "k",
+                          "type": "LVAR"
+                        }
+                      },
+                      {
+                        "Node": {
+                          "children": [
+                            {
+                              "String": "v"
+                            }
+                          ],
+                          "first_column": 6,
+                          "first_lineno": 15,
+                          "last_column": 7,
+                          "last_lineno": 15,
+                          "text": "v",
+                          "type": "LVAR"
+                        }
+                      }
+                    ],
+                    "first_column": 4,
+                    "first_lineno": 15,
+                    "last_column": 7,
+                    "last_lineno": 15,
+                    "text": "k,v",
+                    "type": "VARIABLE_LIST"
+                  }
+                },
+                {
+                  "Node": {
+                    "children": [
+                      {
+                        "Node": {
+                          "children": [
+                            {
+                              "String": "pairs"
+                            }
+                          ],
+                          "first_column": 11,
+                          "first_lineno": 15,
+                          "last_column": 16,
+                          "last_lineno": 15,
+                          "text": "pairs",
+                          "type": "LVAR"
+                        }
+                      },
+                      {
+                        "Node": {
+                          "children": [
+                            {
+                              "Node": {
+                                "children": [],
+                                "first_column": 17,
+                                "first_lineno": 15,
+                                "last_column": 19,
+                                "last_lineno": 15,
+                                "text": "{}",
+                                "type": "HASH"
+                              }
+                            }
+                          ],
+                          "first_column": 16,
+                          "first_lineno": 15,
+                          "last_column": 20,
+                          "last_lineno": 15,
+                          "text": "({})",
+                          "type": "ARGUMENTS"
+                        }
+                      }
+                    ],
+                    "first_column": 11,
+                    "first_lineno": 15,
+                    "last_column": 20,
+                    "last_lineno": 15,
+                    "text": "pairs({})",
+                    "type": "EXPRESSION_LIST"
+                  }
+                }
+              ],
+              "first_column": 4,
+              "first_lineno": 15,
+              "last_column": 20,
+              "last_lineno": 15,
+              "text": "k,v in pairs({})",
+              "type": "FOR_GENERIC_CLAUSE"
+            }
+          },
+          "Nil"
+        ],
+        "first_column": 0,
+        "first_lineno": 15,
+        "last_column": 3,
+        "last_lineno": 16,
+        "text": "for k,v in pairs({}) do\nend",
+        "type": "FOR"
+      }
+    }
+  ],
+  "first_column": 0,
+  "first_lineno": 1,
+  "last_column": 0,
+  "last_lineno": 17,
+  "text": "local function foo()\n  if a then\n    return 1\n  elseif b then\n    return 2\n  else\n    return 3\n  end\nend\n\nfor i=1,10 do\n  if i == 5 then break end\nend\n\nfor k,v in pairs({}) do\nend\n",
+  "type": "ROOT"
+}

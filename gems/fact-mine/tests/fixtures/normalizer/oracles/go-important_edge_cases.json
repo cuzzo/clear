@@ -1,0 +1,216 @@
+{
+  "children": [
+    {
+      "Node": {
+        "children": [
+          {
+            "Node": {
+              "children": [],
+              "first_column": 8,
+              "first_lineno": 1,
+              "last_column": 12,
+              "last_lineno": 1,
+              "text": "main",
+              "type": "PACKAGE_IDENTIFIER"
+            }
+          }
+        ],
+        "first_column": 0,
+        "first_lineno": 1,
+        "last_column": 12,
+        "last_lineno": 1,
+        "text": "package main",
+        "type": "PACKAGE_CLAUSE"
+      }
+    },
+    {
+      "Node": {
+        "children": [
+          {
+            "Symbol": "foo"
+          },
+          {
+            "Node": {
+              "children": [
+                "Nil",
+                "Nil",
+                {
+                  "Node": {
+                    "children": [
+                      {
+                        "Node": {
+                          "children": [
+                            {
+                              "Node": {
+                                "children": [
+                                  {
+                                    "Node": {
+                                      "children": [],
+                                      "first_column": 11,
+                                      "first_lineno": 4,
+                                      "last_column": 12,
+                                      "last_lineno": 4,
+                                      "text": "1",
+                                      "type": "INT_LITERAL"
+                                    }
+                                  },
+                                  {
+                                    "Node": {
+                                      "children": [],
+                                      "first_column": 14,
+                                      "first_lineno": 4,
+                                      "last_column": 15,
+                                      "last_lineno": 4,
+                                      "text": "2",
+                                      "type": "INT_LITERAL"
+                                    }
+                                  }
+                                ],
+                                "first_column": 11,
+                                "first_lineno": 4,
+                                "last_column": 15,
+                                "last_lineno": 4,
+                                "text": "1, 2",
+                                "type": "EXPRESSION_LIST"
+                              }
+                            }
+                          ],
+                          "first_column": 4,
+                          "first_lineno": 4,
+                          "last_column": 15,
+                          "last_lineno": 4,
+                          "text": "return 1, 2",
+                          "type": "RETURN"
+                        }
+                      }
+                    ],
+                    "first_column": 4,
+                    "first_lineno": 4,
+                    "last_column": 0,
+                    "last_lineno": 5,
+                    "text": "return 1, 2\n",
+                    "type": "BLOCK"
+                  }
+                }
+              ],
+              "first_column": 4,
+              "first_lineno": 4,
+              "last_column": 0,
+              "last_lineno": 5,
+              "text": "return 1, 2\n",
+              "type": "SCOPE"
+            }
+          }
+        ],
+        "first_column": 0,
+        "first_lineno": 3,
+        "last_column": 1,
+        "last_lineno": 5,
+        "text": "func foo() (int, int) {\n    return 1, 2\n}",
+        "type": "DEFN"
+      }
+    },
+    {
+      "Node": {
+        "children": [
+          {
+            "Symbol": "bar"
+          },
+          {
+            "Node": {
+              "children": [
+                "Nil",
+                "Nil",
+                {
+                  "Node": {
+                    "children": [
+                      {
+                        "Node": {
+                          "children": [
+                            {
+                              "Node": {
+                                "children": [
+                                  {
+                                    "Node": {
+                                      "children": [
+                                        {
+                                          "Node": {
+                                            "children": [
+                                              {
+                                                "String": "a"
+                                              }
+                                            ],
+                                            "first_column": 11,
+                                            "first_lineno": 8,
+                                            "last_column": 12,
+                                            "last_lineno": 8,
+                                            "text": "a",
+                                            "type": "LVAR"
+                                          }
+                                        },
+                                        {
+                                          "Symbol": "b"
+                                        },
+                                        "Nil"
+                                      ],
+                                      "first_column": 11,
+                                      "first_lineno": 8,
+                                      "last_column": 16,
+                                      "last_lineno": 8,
+                                      "text": "a.b()",
+                                      "type": "CALL"
+                                    }
+                                  }
+                                ],
+                                "first_column": 11,
+                                "first_lineno": 8,
+                                "last_column": 16,
+                                "last_lineno": 8,
+                                "text": "a.b()",
+                                "type": "EXPRESSION_LIST"
+                              }
+                            }
+                          ],
+                          "first_column": 4,
+                          "first_lineno": 8,
+                          "last_column": 16,
+                          "last_lineno": 8,
+                          "text": "return a.b()",
+                          "type": "RETURN"
+                        }
+                      }
+                    ],
+                    "first_column": 4,
+                    "first_lineno": 8,
+                    "last_column": 0,
+                    "last_lineno": 9,
+                    "text": "return a.b()\n",
+                    "type": "BLOCK"
+                  }
+                }
+              ],
+              "first_column": 4,
+              "first_lineno": 8,
+              "last_column": 0,
+              "last_lineno": 9,
+              "text": "return a.b()\n",
+              "type": "SCOPE"
+            }
+          }
+        ],
+        "first_column": 0,
+        "first_lineno": 7,
+        "last_column": 1,
+        "last_lineno": 9,
+        "text": "func bar() int {\n    return a.b()\n}",
+        "type": "DEFN"
+      }
+    }
+  ],
+  "first_column": 0,
+  "first_lineno": 1,
+  "last_column": 0,
+  "last_lineno": 10,
+  "text": "package main\n\nfunc foo() (int, int) {\n    return 1, 2\n}\n\nfunc bar() int {\n    return a.b()\n}\n",
+  "type": "ROOT"
+}

@@ -251,7 +251,16 @@ mod tests {
             "branch_decisions": [],
             "branch_arms": [],
             "dispatch_sites": [],
-            "semantic_effect_sites": [],
+            "semantic_effect_sites": [
+                {
+                    "file": "foo.rb",
+                    "function": "",
+                    "kind": "monkeypatch",
+                    "detail": "test",
+                    "line": 10,
+                    "span": [1, 2, 3, 4]
+                }
+            ],
             "local_complexity_scores": {},
             "local_methods": [],
             "predicate_aliases": [],
@@ -269,7 +278,9 @@ mod tests {
         })).unwrap();
 
         let res = scan_documents(&[doc]);
-        assert!(res.is_empty());
+        assert_eq!(res.len(), 1);
+        assert_eq!(res[0].detail, "test");
+        assert_eq!(res[0].sites, vec!["foo.rb:(top-level):10"]);
     }
 }
 

@@ -1,0 +1,652 @@
+{
+  "children": [
+    {
+      "Node": {
+        "children": [
+          {
+            "Symbol": "complex_try"
+          },
+          {
+            "Node": {
+              "children": [
+                "Nil",
+                "Nil",
+                {
+                  "Node": {
+                    "children": [
+                      {
+                        "Node": {
+                          "children": [
+                            {
+                              "Node": {
+                                "children": [
+                                  {
+                                    "Node": {
+                                      "children": [],
+                                      "first_column": 8,
+                                      "first_lineno": 3,
+                                      "last_column": 9,
+                                      "last_lineno": 3,
+                                      "text": "1",
+                                      "type": "INTEGER"
+                                    }
+                                  },
+                                  {
+                                    "Node": {
+                                      "children": [],
+                                      "first_column": 12,
+                                      "first_lineno": 3,
+                                      "last_column": 13,
+                                      "last_lineno": 3,
+                                      "text": "0",
+                                      "type": "INTEGER"
+                                    }
+                                  }
+                                ],
+                                "first_column": 8,
+                                "first_lineno": 3,
+                                "last_column": 13,
+                                "last_lineno": 3,
+                                "text": "1 / 0",
+                                "type": "BLOCK"
+                              }
+                            },
+                            {
+                              "Node": {
+                                "children": [
+                                  {
+                                    "Node": {
+                                      "children": [
+                                        {
+                                          "Node": {
+                                            "children": [
+                                              {
+                                                "String": "ZeroDivisionError"
+                                              }
+                                            ],
+                                            "first_column": 11,
+                                            "first_lineno": 4,
+                                            "last_column": 28,
+                                            "last_lineno": 4,
+                                            "text": "ZeroDivisionError",
+                                            "type": "LVAR"
+                                          }
+                                        }
+                                      ],
+                                      "first_column": 11,
+                                      "first_lineno": 4,
+                                      "last_column": 28,
+                                      "last_lineno": 4,
+                                      "text": "ZeroDivisionError",
+                                      "type": "LIST"
+                                    }
+                                  },
+                                  {
+                                    "Node": {
+                                      "children": [
+                                        {
+                                          "Node": {
+                                            "children": [
+                                              {
+                                                "String": "e"
+                                              },
+                                              {
+                                                "Node": {
+                                                  "children": [],
+                                                  "first_column": 32,
+                                                  "first_lineno": 4,
+                                                  "last_column": 33,
+                                                  "last_lineno": 4,
+                                                  "text": "e",
+                                                  "type": "ERRINFO"
+                                                }
+                                              }
+                                            ],
+                                            "first_column": 32,
+                                            "first_lineno": 4,
+                                            "last_column": 33,
+                                            "last_lineno": 4,
+                                            "text": "e",
+                                            "type": "LASGN"
+                                          }
+                                        },
+                                        {
+                                          "Node": {
+                                            "children": [
+                                              {
+                                                "Symbol": "print"
+                                              },
+                                              {
+                                                "Node": {
+                                                  "children": [
+                                                    {
+                                                      "Node": {
+                                                        "children": [
+                                                          {
+                                                            "String": "e"
+                                                          }
+                                                        ],
+                                                        "first_column": 14,
+                                                        "first_lineno": 5,
+                                                        "last_column": 15,
+                                                        "last_lineno": 5,
+                                                        "text": "e",
+                                                        "type": "LVAR"
+                                                      }
+                                                    }
+                                                  ],
+                                                  "first_column": 13,
+                                                  "first_lineno": 5,
+                                                  "last_column": 16,
+                                                  "last_lineno": 5,
+                                                  "text": "(e)",
+                                                  "type": "LIST"
+                                                }
+                                              }
+                                            ],
+                                            "first_column": 8,
+                                            "first_lineno": 5,
+                                            "last_column": 16,
+                                            "last_lineno": 5,
+                                            "text": "print(e)",
+                                            "type": "FCALL"
+                                          }
+                                        }
+                                      ],
+                                      "first_column": 32,
+                                      "first_lineno": 4,
+                                      "last_column": 16,
+                                      "last_lineno": 5,
+                                      "text": "e:\n        print(e)",
+                                      "type": "BLOCK"
+                                    }
+                                  },
+                                  {
+                                    "Node": {
+                                      "children": [
+                                        {
+                                          "Node": {
+                                            "children": [
+                                              {
+                                                "Node": {
+                                                  "children": [
+                                                    {
+                                                      "String": "Exception"
+                                                    }
+                                                  ],
+                                                  "first_column": 11,
+                                                  "first_lineno": 6,
+                                                  "last_column": 20,
+                                                  "last_lineno": 6,
+                                                  "text": "Exception",
+                                                  "type": "LVAR"
+                                                }
+                                              }
+                                            ],
+                                            "first_column": 11,
+                                            "first_lineno": 6,
+                                            "last_column": 20,
+                                            "last_lineno": 6,
+                                            "text": "Exception",
+                                            "type": "LIST"
+                                          }
+                                        },
+                                        {
+                                          "Node": {
+                                            "children": [
+                                              {
+                                                "Symbol": "print"
+                                              },
+                                              {
+                                                "Node": {
+                                                  "children": [
+                                                    {
+                                                      "Node": {
+                                                        "children": [
+                                                          {
+                                                            "String": "\"Error\""
+                                                          }
+                                                        ],
+                                                        "first_column": 14,
+                                                        "first_lineno": 7,
+                                                        "last_column": 21,
+                                                        "last_lineno": 7,
+                                                        "text": "\"Error\"",
+                                                        "type": "STR"
+                                                      }
+                                                    }
+                                                  ],
+                                                  "first_column": 13,
+                                                  "first_lineno": 7,
+                                                  "last_column": 22,
+                                                  "last_lineno": 7,
+                                                  "text": "(\"Error\")",
+                                                  "type": "LIST"
+                                                }
+                                              }
+                                            ],
+                                            "first_column": 8,
+                                            "first_lineno": 7,
+                                            "last_column": 22,
+                                            "last_lineno": 7,
+                                            "text": "print(\"Error\")",
+                                            "type": "FCALL"
+                                          }
+                                        },
+                                        "Nil"
+                                      ],
+                                      "first_column": 4,
+                                      "first_lineno": 6,
+                                      "last_column": 22,
+                                      "last_lineno": 7,
+                                      "text": "except Exception:\n        print(\"Error\")",
+                                      "type": "RESBODY"
+                                    }
+                                  }
+                                ],
+                                "first_column": 4,
+                                "first_lineno": 4,
+                                "last_column": 16,
+                                "last_lineno": 5,
+                                "text": "except ZeroDivisionError as e:\n        print(e)",
+                                "type": "RESBODY"
+                              }
+                            },
+                            "Nil"
+                          ],
+                          "first_column": 8,
+                          "first_lineno": 3,
+                          "last_column": 22,
+                          "last_lineno": 7,
+                          "text": "1 / 0\n    except ZeroDivisionError as e:\n        print(e)\n    except Exception:\n        print(\"Error\")",
+                          "type": "RESCUE"
+                        }
+                      },
+                      {
+                        "Node": {
+                          "children": [
+                            {
+                              "Symbol": "print"
+                            },
+                            {
+                              "Node": {
+                                "children": [
+                                  {
+                                    "Node": {
+                                      "children": [
+                                        {
+                                          "String": "\"Cleanup\""
+                                        }
+                                      ],
+                                      "first_column": 14,
+                                      "first_lineno": 11,
+                                      "last_column": 23,
+                                      "last_lineno": 11,
+                                      "text": "\"Cleanup\"",
+                                      "type": "STR"
+                                    }
+                                  }
+                                ],
+                                "first_column": 13,
+                                "first_lineno": 11,
+                                "last_column": 24,
+                                "last_lineno": 11,
+                                "text": "(\"Cleanup\")",
+                                "type": "LIST"
+                              }
+                            }
+                          ],
+                          "first_column": 8,
+                          "first_lineno": 11,
+                          "last_column": 24,
+                          "last_lineno": 11,
+                          "text": "print(\"Cleanup\")",
+                          "type": "FCALL"
+                        }
+                      }
+                    ],
+                    "first_column": 8,
+                    "first_lineno": 3,
+                    "last_column": 22,
+                    "last_lineno": 7,
+                    "text": "1 / 0\n    except ZeroDivisionError as e:\n        print(e)\n    except Exception:\n        print(\"Error\")",
+                    "type": "ENSURE"
+                  }
+                }
+              ],
+              "first_column": 8,
+              "first_lineno": 3,
+              "last_column": 22,
+              "last_lineno": 7,
+              "text": "1 / 0\n    except ZeroDivisionError as e:\n        print(e)\n    except Exception:\n        print(\"Error\")",
+              "type": "SCOPE"
+            }
+          }
+        ],
+        "first_column": 0,
+        "first_lineno": 1,
+        "last_column": 24,
+        "last_lineno": 11,
+        "text": "def complex_try():\n    try:\n        1 / 0\n    except ZeroDivisionError as e:\n        print(e)\n    except Exception:\n        print(\"Error\")\n    else:\n        print(\"Success\")\n    finally:\n        print(\"Cleanup\")",
+        "type": "DEFN"
+      }
+    },
+    {
+      "Node": {
+        "children": [
+          {
+            "Symbol": "list_comp"
+          },
+          {
+            "Node": {
+              "children": [
+                "Nil",
+                "Nil",
+                {
+                  "Node": {
+                    "children": [
+                      {
+                        "Node": {
+                          "children": [
+                            {
+                              "Node": {
+                                "children": [
+                                  {
+                                    "String": "x"
+                                  }
+                                ],
+                                "first_column": 12,
+                                "first_lineno": 14,
+                                "last_column": 13,
+                                "last_lineno": 14,
+                                "text": "x",
+                                "type": "LVAR"
+                              }
+                            },
+                            {
+                              "Node": {
+                                "children": [
+                                  {
+                                    "Node": {
+                                      "children": [
+                                        {
+                                          "String": "x"
+                                        }
+                                      ],
+                                      "first_column": 18,
+                                      "first_lineno": 14,
+                                      "last_column": 19,
+                                      "last_lineno": 14,
+                                      "text": "x",
+                                      "type": "LVAR"
+                                    }
+                                  },
+                                  "Nil"
+                                ],
+                                "first_column": 14,
+                                "first_lineno": 14,
+                                "last_column": 32,
+                                "last_lineno": 14,
+                                "text": "for x in range(10)",
+                                "type": "FOR"
+                              }
+                            },
+                            {
+                              "Node": {
+                                "children": [
+                                  {
+                                    "Node": {
+                                      "children": [
+                                        {
+                                          "Node": {
+                                            "children": [
+                                              {
+                                                "Node": {
+                                                  "children": [
+                                                    {
+                                                      "String": "x"
+                                                    }
+                                                  ],
+                                                  "first_column": 36,
+                                                  "first_lineno": 14,
+                                                  "last_column": 37,
+                                                  "last_lineno": 14,
+                                                  "text": "x",
+                                                  "type": "LVAR"
+                                                }
+                                              },
+                                              {
+                                                "Symbol": "%"
+                                              },
+                                              {
+                                                "Node": {
+                                                  "children": [
+                                                    {
+                                                      "Node": {
+                                                        "children": [],
+                                                        "first_column": 40,
+                                                        "first_lineno": 14,
+                                                        "last_column": 41,
+                                                        "last_lineno": 14,
+                                                        "text": "2",
+                                                        "type": "INTEGER"
+                                                      }
+                                                    }
+                                                  ],
+                                                  "first_column": 40,
+                                                  "first_lineno": 14,
+                                                  "last_column": 41,
+                                                  "last_lineno": 14,
+                                                  "text": "2",
+                                                  "type": "LIST"
+                                                }
+                                              }
+                                            ],
+                                            "first_column": 36,
+                                            "first_lineno": 14,
+                                            "last_column": 41,
+                                            "last_lineno": 14,
+                                            "text": "x % 2",
+                                            "type": "OPCALL"
+                                          }
+                                        },
+                                        {
+                                          "Symbol": "=="
+                                        },
+                                        {
+                                          "Node": {
+                                            "children": [
+                                              {
+                                                "Node": {
+                                                  "children": [],
+                                                  "first_column": 45,
+                                                  "first_lineno": 14,
+                                                  "last_column": 46,
+                                                  "last_lineno": 14,
+                                                  "text": "0",
+                                                  "type": "INTEGER"
+                                                }
+                                              }
+                                            ],
+                                            "first_column": 45,
+                                            "first_lineno": 14,
+                                            "last_column": 46,
+                                            "last_lineno": 14,
+                                            "text": "0",
+                                            "type": "LIST"
+                                          }
+                                        }
+                                      ],
+                                      "first_column": 36,
+                                      "first_lineno": 14,
+                                      "last_column": 46,
+                                      "last_lineno": 14,
+                                      "text": "x % 2 == 0",
+                                      "type": "OPCALL"
+                                    }
+                                  }
+                                ],
+                                "first_column": 33,
+                                "first_lineno": 14,
+                                "last_column": 46,
+                                "last_lineno": 14,
+                                "text": "if x % 2 == 0",
+                                "type": "IF_CLAUSE"
+                              }
+                            }
+                          ],
+                          "first_column": 11,
+                          "first_lineno": 14,
+                          "last_column": 47,
+                          "last_lineno": 14,
+                          "text": "[x for x in range(10) if x % 2 == 0]",
+                          "type": "LIST_COMPREHENSION"
+                        }
+                      }
+                    ],
+                    "first_column": 4,
+                    "first_lineno": 14,
+                    "last_column": 47,
+                    "last_lineno": 14,
+                    "text": "return [x for x in range(10) if x % 2 == 0]",
+                    "type": "RETURN"
+                  }
+                }
+              ],
+              "first_column": 4,
+              "first_lineno": 14,
+              "last_column": 47,
+              "last_lineno": 14,
+              "text": "return [x for x in range(10) if x % 2 == 0]",
+              "type": "SCOPE"
+            }
+          }
+        ],
+        "first_column": 0,
+        "first_lineno": 13,
+        "last_column": 47,
+        "last_lineno": 14,
+        "text": "def list_comp():\n    return [x for x in range(10) if x % 2 == 0]",
+        "type": "DEFN"
+      }
+    },
+    {
+      "Node": {
+        "children": [
+          {
+            "Node": {
+              "children": [
+                {
+                  "Node": {
+                    "children": [
+                      {
+                        "String": "decorator"
+                      }
+                    ],
+                    "first_column": 1,
+                    "first_lineno": 16,
+                    "last_column": 10,
+                    "last_lineno": 16,
+                    "text": "decorator",
+                    "type": "LVAR"
+                  }
+                }
+              ],
+              "first_column": 0,
+              "first_lineno": 16,
+              "last_column": 10,
+              "last_lineno": 16,
+              "text": "@decorator",
+              "type": "DECORATOR"
+            }
+          },
+          {
+            "Node": {
+              "children": [
+                {
+                  "Symbol": "decorated"
+                },
+                {
+                  "Node": {
+                    "children": [
+                      "Nil",
+                      "Nil",
+                      "Nil"
+                    ],
+                    "first_column": 0,
+                    "first_lineno": 17,
+                    "last_column": 8,
+                    "last_lineno": 18,
+                    "text": "def decorated():\n    pass",
+                    "type": "SCOPE"
+                  }
+                }
+              ],
+              "first_column": 0,
+              "first_lineno": 17,
+              "last_column": 8,
+              "last_lineno": 18,
+              "text": "def decorated():\n    pass",
+              "type": "DEFN"
+            }
+          }
+        ],
+        "first_column": 0,
+        "first_lineno": 16,
+        "last_column": 8,
+        "last_lineno": 18,
+        "text": "@decorator\ndef decorated():\n    pass",
+        "type": "DECORATED_DEFINITION"
+      }
+    },
+    {
+      "Node": {
+        "children": [
+          {
+            "Node": {
+              "children": [
+                {
+                  "Symbol": "A"
+                }
+              ],
+              "first_column": 6,
+              "first_lineno": 20,
+              "last_column": 7,
+              "last_lineno": 20,
+              "text": "A",
+              "type": "CONST"
+            }
+          },
+          "Nil",
+          {
+            "Node": {
+              "children": [
+                "Nil",
+                "Nil",
+                "Nil"
+              ],
+              "first_column": 0,
+              "first_lineno": 20,
+              "last_column": 8,
+              "last_lineno": 21,
+              "text": "class A:\n    pass",
+              "type": "SCOPE"
+            }
+          }
+        ],
+        "first_column": 0,
+        "first_lineno": 20,
+        "last_column": 8,
+        "last_lineno": 21,
+        "text": "class A:\n    pass",
+        "type": "CLASS"
+      }
+    }
+  ],
+  "first_column": 0,
+  "first_lineno": 1,
+  "last_column": 0,
+  "last_lineno": 22,
+  "text": "def complex_try():\n    try:\n        1 / 0\n    except ZeroDivisionError as e:\n        print(e)\n    except Exception:\n        print(\"Error\")\n    else:\n        print(\"Success\")\n    finally:\n        print(\"Cleanup\")\n\ndef list_comp():\n    return [x for x in range(10) if x % 2 == 0]\n\n@decorator\ndef decorated():\n    pass\n\nclass A:\n    pass\n",
+  "type": "ROOT"
+}

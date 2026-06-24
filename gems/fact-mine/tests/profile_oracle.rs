@@ -51,14 +51,49 @@ fn profile_merge_combines_two_files() -> Result<()> {
     let doc_calc = syntax::parse_file(calc, Language::Ruby)?;
     let doc_greeter = syntax::parse_file(greeter, Language::Ruby)?;
 
-    let out_calc = profile::extract(&doc_calc, Profile::Espalier);
-    let out_greeter = profile::extract(&doc_greeter, Profile::Espalier);
+    let mut out_calc = profile::extract(&doc_calc, Profile::Espalier);
+    let mut out_greeter = profile::extract(&doc_greeter, Profile::Espalier);
 
     assert!(!out_calc.methods.is_empty());
     assert!(!out_greeter.methods.is_empty());
 
-    let merged = profile::merge(vec![out_calc, out_greeter], Profile::Espalier);
+    // Inject state_protocols and state_param_origins to test merge logic
+    out_calc.state_protocols.insert("Service\u{0}client".to_string(), vec!["read".to_string()]);
+    out_greeter.state_protocols.insert("Service\u{0}client".to_string(), vec!["write".to_string()]);
+
+    out_calc.state_param_origins.insert("Worker\u{0}run\u{0}param".to_string(), vec!["total".to_string()]);
+    out_greeter.state_param_origins.insert("Worker\u{0}run\u{0}param".to_string(), vec!["other".to_string()]);
+
+    // Inject NilKill fields to test nil_kill merge logic
+    out_calc.collection_index_lookups.push(serde_json::json!("lookup1"));
+    out_greeter.collection_index_lookups.push(serde_json::json!("lookup2"));
+    out_calc.hash_record_blockers.push(serde_json::json!("blocker"));
+    out_calc.tlet_sites.push(serde_json::json!("tlet"));
+    out_calc.dead_nil_checks.push(serde_json::json!("dead"));
+    out_calc.deterministic_guards.push(serde_json::json!("guard"));
+    out_calc.return_origins.push(serde_json::json!("origin"));
+    out_calc.noreturn_methods.push(serde_json::json!("noreturn"));
+
+    let merged = profile::merge(vec![out_calc, out_greeter], Profile::NilKill);
     assert!(merged.methods.len() > 1, "merge should combine methods");
+    
+    // Assert on merged state_protocols and state_param_origins
+    let proto = merged.state_protocols.get("Service\u{0}client").unwrap();
+    assert!(proto.contains(&"read".to_string()));
+    assert!(proto.contains(&"write".to_string()));
+
+    let origins = merged.state_param_origins.get("Worker\u{0}run\u{0}param").unwrap();
+    assert!(origins.contains(&"total".to_string()));
+    assert!(origins.contains(&"other".to_string()));
+
+    // Assert on merged NilKill fields
+    assert_eq!(merged.collection_index_lookups.len(), 2);
+    assert_eq!(merged.hash_record_blockers.len(), 1);
+    assert_eq!(merged.tlet_sites.len(), 1);
+    assert_eq!(merged.dead_nil_checks.len(), 1);
+    assert_eq!(merged.deterministic_guards.len(), 1);
+    assert_eq!(merged.return_origins.len(), 1);
+    assert_eq!(merged.noreturn_methods.len(), 1);
 
     Ok(())
 }
@@ -233,4 +268,83 @@ fn normalize_for_oracle(value: &Value, expected: &Value) -> Value {
         }
         _ => value.clone(),
     }
+}
+
+#[test]
+fn test_comprehensive_profile_extraction_integration() -> Result<()> {
+    use std::io::Write;
+
+    // 1. Create a comprehensive Ruby file
+    let mut ruby_tmp = tempfile::Builder::new().suffix(".rb").tempfile()?;
+    let ruby_content = r#"
+class Database
+end
+
+class Greeter
+  MY_CONST = {
+    :sym => :symbol,
+    "str" => "string",
+  }
+
+  def initialize(db: Database)
+    @db = db
+    @name = "world"
+  end
+
+  def hello(name)
+    user[:name]
+    user.fetch(:id)
+    self.typed_method(name)
+    @client.nested.fetch
+    self.db.query
+  end
+
+  sig { params(x: Integer).returns(String) }
+  def typed_method(x)
+    "result"
+  end
+end
+
+[true, false, nil, 4.5, Object, untyped_var]
+"#;
+    ruby_tmp.write_all(ruby_content.as_bytes())?;
+    let doc_rb = syntax::parse_file(ruby_tmp.path().to_path_buf(), Language::Ruby)?;
+
+    // 2. Create a Python file
+    let mut py_tmp = tempfile::Builder::new().suffix(".py").tempfile()?;
+    let py_content = r#"
+class PyClass:
+    def py_fn(self, a: int) -> str:
+        return "hello"
+"#;
+    py_tmp.write_all(py_content.as_bytes())?;
+    let doc_py = syntax::parse_file(py_tmp.path().to_path_buf(), Language::Python)?;
+
+    // 3. Create a TypeScript file
+    let mut ts_tmp = tempfile::Builder::new().suffix(".ts").tempfile()?;
+    let ts_content = r#"
+class Greeter {
+    hello(name: string): string {
+        return "hello";
+    }
+}
+"#;
+    ts_tmp.write_all(ts_content.as_bytes())?;
+    let doc_ts = syntax::parse_file(ts_tmp.path().to_path_buf(), Language::TypeScript)?;
+
+    // 4. Extract profiles
+    let output_rb = profile::extract(&doc_rb, Profile::NilKill);
+    let output_py = profile::extract(&doc_py, Profile::Espalier);
+    let output_ts = profile::extract(&doc_ts, Profile::Espalier);
+
+    // Assertions to verify we extracted expected facts
+    assert!(!output_rb.methods.is_empty());
+    assert!(!output_py.methods.is_empty());
+    assert!(!output_ts.methods.is_empty());
+
+    // 5. Merge profiles
+    let merged = profile::merge(vec![output_rb, output_py, output_ts], Profile::NilKill);
+    assert!(merged.methods.len() > 1);
+
+    Ok(())
 }

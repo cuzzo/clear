@@ -15,7 +15,7 @@ pub enum Profile {
 }
 
 /// The enriched output matching what Ruby's EspalierProfile::Builder.build returns.
-#[derive(Clone, Debug, Serialize)]
+#[derive(Clone, Debug, Serialize, Default)]
 pub struct ProfileOutput {
     pub methods: Vec<MethodRecord>,
     pub fields: Vec<FieldRecord>,
@@ -1569,13 +1569,12 @@ fn split_method_key(key: &str) -> (String, String) {
     }
 }
 
-#[cfg(test)]
-mod tests {
+pub(crate) mod tests {
     use super::*;
 
     use crate::syntax::Language;
 
-    fn test_document() -> Document {
+    pub(crate) fn test_document() -> Document {
         Document {
             file: "test.rb".to_string(),
             language: Language::Ruby,
@@ -1646,8 +1645,7 @@ mod tests {
         }
     }
 
-    #[test]
-    fn extracts_methods() {
+    pub(crate) fn extracts_methods_impl() {
         let doc = test_document();
         let output = extract(&doc, Profile::Espalier);
         assert_eq!(output.methods.len(), 1);
@@ -1658,16 +1656,14 @@ mod tests {
         assert_eq!(method.signature, "def hello(name)");
     }
 
-    #[test]
-    fn extracts_fields() {
+    pub(crate) fn extracts_fields_impl() {
         let doc = test_document();
         let output = extract(&doc, Profile::Espalier);
         assert_eq!(output.fields.len(), 1);
         assert_eq!(output.fields[0].name, "@name");
     }
 
-    #[test]
-    fn extracts_state_types() {
+    pub(crate) fn extracts_state_types_impl() {
         let doc = test_document();
         let output = extract(&doc, Profile::Espalier);
         assert_eq!(output.state_types.len(), 1);
@@ -1677,13 +1673,684 @@ mod tests {
         );
     }
 
-    #[test]
-    fn nil_kill_profile_still_returns_core_facts() {
+    pub(crate) fn nil_kill_profile_still_returns_core_facts_impl() {
         let doc = test_document();
         let output = extract(&doc, Profile::NilKill);
         assert_eq!(output.methods.len(), 1);
         assert_eq!(output.fields.len(), 1);
     }
+
+    pub(crate) fn test_python_signature_parsing_impl() {
+        let sig = "def my_func(a: int, b: str = 'hello') -> str:";
+        let (return_type, params) = parse_python_signature(sig);
+        assert_eq!(return_type, Some("str:".to_string()));
+        assert_eq!(params.len(), 2);
+        assert_eq!(params[0].get("name").unwrap(), "a");
+        assert_eq!(params[0].get("type").unwrap(), "int");
+        assert_eq!(params[1].get("name").unwrap(), "b");
+        assert_eq!(params[1].get("type").unwrap(), "str = 'hello'");
+
+        let (r, p) = parse_python_signature("def no_paren");
+        assert!(r.is_none());
+        assert!(p.is_empty());
+
+        let (r, p) = parse_python_signature("def my_func(a: int");
+        assert!(r.is_none());
+
+        let (r, p) = parse_python_signature("def my_func(self, cls, , a, b: ) -> str:");
+        assert_eq!(p.len(), 0);
+    }
+
+    pub(crate) fn test_typescript_signature_parsing_impl() {
+        let sig = "(a: number, b?: string, ...c: any[]): void;";
+        let (return_type, params) = parse_typescript_signature(sig);
+        assert_eq!(return_type, Some("void".to_string()));
+        assert_eq!(params.len(), 3);
+        assert_eq!(params[0].get("name").unwrap(), "a");
+        assert_eq!(params[0].get("type").unwrap(), "number");
+        assert_eq!(params[1].get("name").unwrap(), "b");
+        assert_eq!(params[1].get("type").unwrap(), "string");
+        assert_eq!(params[2].get("name").unwrap(), "c");
+        assert_eq!(params[2].get("type").unwrap(), "any[]");
+
+        let (r, p) = parse_typescript_signature("no_paren");
+        assert!(r.is_none());
+        assert!(p.is_empty());
+
+        let (r, p) = parse_typescript_signature("(a: number");
+        assert!(r.is_none());
+
+        let (r, p) = parse_typescript_signature("( , a, b: ): void");
+        assert_eq!(p.len(), 0);
+    }
+
+    pub(crate) fn test_nil_kill_profile_merge_impl() {
+        let mut p1 = ProfileOutput::default();
+        p1.collection_index_lookups = vec![serde_json::json!({"test": 1})];
+        let mut p2 = ProfileOutput::default();
+        p2.collection_index_lookups = vec![serde_json::json!({"test": 2})];
+
+        let merged = merge(vec![p1, p2], Profile::NilKill);
+        assert_eq!(merged.collection_index_lookups.len(), 2);
+    }
+
+    pub(crate) fn test_comprehensive_profile_extraction_impl() {
+        let file_path_buf = std::env::temp_dir().join(format!(
+            "dummy_profile_test_{}.rb",
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        let file_path = file_path_buf.to_str().unwrap().to_string();
+
+        let source_content = r#"# Ruby source
+def hello(name)
+  user[:name]
+  user.fetch(:id)
+end
+
+sig do
+  params(x: Integer)
+    .returns(String)
+end
+def typed_method(x)
+end
+
+{ a: 1, "b" => "hello", :c => [1, 2] }
+[true, false, nil, 4.5, Object, untyped_var]
+{}
+
+# Python source
+def py_fn(a: int) -> str:
+  pass
+"#;
+        std::fs::write(&file_path, source_content.as_bytes()).unwrap();
+
+        let mut doc = test_document();
+        doc.file = file_path.clone();
+        doc.language = Language::Ruby;
+        
+        // Add a function with empty signature to trigger source line sig extraction (multi-line sig)
+        doc.function_defs.push(syntax::FunctionDef {
+            file: file_path.clone(),
+            name: "typed_method".to_string(),
+            owner: "Greeter".to_string(),
+            line: 11, // def typed_method line
+            span: [11, 0, 11, 19],
+            body: crate::ast::RawNode {
+                kind: "method".to_string(),
+                text: "def typed_method(x)".to_string(),
+                span: [11, 0, 11, 19],
+                named: true,
+                field_name: None,
+                children: vec![],
+            },
+            visibility: Some("public".to_string()),
+            params: vec!["x".to_string()],
+            signature: "".to_string(),
+        });
+
+        // Add a function with explicit signature to parse
+        doc.function_defs.push(syntax::FunctionDef {
+            file: file_path.clone(),
+            name: "explicit_method".to_string(),
+            owner: "Greeter".to_string(),
+            line: 12,
+            span: [12, 0, 12, 19],
+            body: crate::ast::RawNode {
+                kind: "method".to_string(),
+                text: "def explicit_method(x)".to_string(),
+                span: [12, 0, 12, 19],
+                named: true,
+                field_name: None,
+                children: vec![],
+            },
+            visibility: Some("public".to_string()),
+            params: vec!["x".to_string()],
+            signature: "sig { .params(x: Integer).returns(String) }".to_string(),
+        });
+
+        // Add a top-level function (empty owner) to cover method_kind top branch
+        doc.function_defs.push(syntax::FunctionDef {
+            file: file_path.clone(),
+            name: "top_level_fn".to_string(),
+            owner: "".to_string(),
+            line: 13,
+            span: [13, 0, 13, 19],
+            body: crate::ast::RawNode {
+                kind: "method".to_string(),
+                text: "def top_level_fn(x)".to_string(),
+                span: [13, 0, 13, 19],
+                named: true,
+                field_name: None,
+                children: vec![],
+            },
+            visibility: Some("public".to_string()),
+            params: vec![],
+            signature: "def top_level_fn".to_string(),
+        });
+
+        // Add call sites for [] and fetch
+        doc.call_sites.push(syntax::CallSite {
+            receiver: "user".to_string(),
+            message: "[]".to_string(),
+            file: file_path.clone(),
+            function: "hello".to_string(),
+            owner: "Greeter".to_string(),
+            line: 3,
+            span: [3, 2, 3, 13],
+            conditional: false,
+            arguments: vec![":name".to_string()],
+            control: None,
+            safe_navigation: false,
+            block: false,
+        });
+        doc.call_sites.push(syntax::CallSite {
+            receiver: "user".to_string(),
+            message: "fetch".to_string(),
+            file: file_path.clone(),
+            function: "hello".to_string(),
+            owner: "Greeter".to_string(),
+            line: 4,
+            span: [4, 2, 4, 17],
+            conditional: false,
+            arguments: vec![":id".to_string()],
+            control: None,
+            safe_navigation: false,
+            block: false,
+        });
+
+        // Add call sites with special receivers for resolve_state_receiver coverage
+        doc.call_sites.push(syntax::CallSite {
+            receiver: "@client.nested".to_string(),
+            message: "fetch".to_string(),
+            file: file_path.clone(),
+            function: "hello".to_string(),
+            owner: "Greeter".to_string(),
+            line: 4,
+            span: [4, 0, 4, 10],
+            conditional: false,
+            arguments: vec![],
+            control: None,
+            safe_navigation: false,
+            block: false,
+        });
+        doc.call_sites.push(syntax::CallSite {
+            receiver: "self.db".to_string(),
+            message: "query".to_string(),
+            file: file_path.clone(),
+            function: "hello".to_string(),
+            owner: "Greeter".to_string(),
+            line: 5,
+            span: [5, 0, 5, 10],
+            conditional: false,
+            arguments: vec![],
+            control: None,
+            safe_navigation: false,
+            block: false,
+        });
+
+        // Add internal calls to trigger CallGraphEdge and weight deduplication
+        doc.call_sites.push(syntax::CallSite {
+            receiver: "self".to_string(),
+            message: "typed_method".to_string(),
+            file: file_path.clone(),
+            function: "hello".to_string(),
+            owner: "Greeter".to_string(),
+            line: 3,
+            span: [3, 2, 3, 15],
+            conditional: false,
+            arguments: vec![],
+            control: None,
+            safe_navigation: false,
+            block: false,
+        });
+        doc.call_sites.push(syntax::CallSite {
+            receiver: "self".to_string(),
+            message: "typed_method".to_string(),
+            file: file_path.clone(),
+            function: "hello".to_string(),
+            owner: "Greeter".to_string(),
+            line: 3,
+            span: [3, 2, 3, 15],
+            conditional: false,
+            arguments: vec![],
+            control: None,
+            safe_navigation: false,
+            block: false,
+        });
+        doc.call_sites.push(syntax::CallSite {
+            receiver: "".to_string(),
+            message: "typed_method".to_string(),
+            file: file_path.clone(),
+            function: "hello".to_string(),
+            owner: "Greeter".to_string(),
+            line: 3,
+            span: [3, 2, 3, 15],
+            conditional: true,
+            arguments: vec![],
+            control: None,
+            safe_navigation: false,
+            block: false,
+        });
+        doc.call_sites.push(syntax::CallSite {
+            receiver: "".to_string(),
+            message: "typed_method".to_string(),
+            file: file_path.clone(),
+            function: "hello".to_string(),
+            owner: "Nonexistent".to_string(),
+            line: 3,
+            span: [3, 2, 3, 15],
+            conditional: false,
+            arguments: vec![],
+            control: None,
+            safe_navigation: false,
+            block: false,
+        });
+
+        // Populate struct declarations
+        doc.immutable_struct_readers.insert("Config".to_string(), vec!["port".to_string()]);
+        doc.immutable_struct_reader_types.insert("Config".to_string(), {
+            let mut map = BTreeMap::new();
+            map.insert("port".to_string(), "Integer".to_string());
+            map
+        });
+
+        // Populate state declarations & owner defs for StateTypeEdges
+        doc.owner_defs.push(syntax::OwnerDef {
+            file: file_path.clone(),
+            name: "Database".to_string(),
+            kind: "class".to_string(),
+            line: 1,
+            span: [1, 0, 1, 15],
+        });
+        doc.state_declarations.push(syntax::StateDeclaration {
+            field: "@db".to_string(),
+            owner: "Greeter".to_string(),
+            r#type: Some("Database".to_string()),
+            file: file_path.clone(),
+            line: 2,
+            span: [2, 0, 2, 10],
+        });
+        // Duplicate field declaration to cover skip branch
+        doc.state_declarations.push(syntax::StateDeclaration {
+            field: "@db".to_string(),
+            owner: "Greeter".to_string(),
+            r#type: Some("Database".to_string()),
+            file: file_path.clone(),
+            line: 2,
+            span: [2, 0, 2, 10],
+        });
+        doc.state_declarations.push(syntax::StateDeclaration {
+            field: "@nested_db".to_string(),
+            owner: "Greeter".to_string(),
+            r#type: Some("Client::Database".to_string()),
+            file: file_path.clone(),
+            line: 3,
+            span: [3, 0, 3, 10],
+        });
+        // Edge cases for state declarations
+        doc.state_declarations.push(syntax::StateDeclaration {
+            field: "@nodb".to_string(),
+            owner: "Greeter".to_string(),
+            r#type: None,
+            file: file_path.clone(),
+            line: 4,
+            span: [4, 0, 4, 10],
+        });
+        doc.state_declarations.push(syntax::StateDeclaration {
+            field: "@candidate_db".to_string(),
+            owner: "Greeter".to_string(),
+            r#type: Some("<,>Database".to_string()),
+            file: file_path.clone(),
+            line: 5,
+            span: [5, 0, 5, 10],
+        });
+
+        // State writes with invalid owner to cover skip branch
+        doc.state_writes.push(syntax::StateWrite {
+            field: "db".to_string(),
+            receiver: "self".to_string(),
+            file: file_path.clone(),
+            function: "hello".to_string(),
+            line: 3,
+            span: [3, 0, 3, 10],
+            owner: "InvalidOwner".to_string(),
+        });
+
+        // Populate method_param_types
+        doc.method_param_types.insert("Greeter\u{0}hello".to_string(), {
+            let mut map = BTreeMap::new();
+            map.insert("name".to_string(), "String".to_string());
+            map
+        });
+
+        // Test extraction
+        let output = extract(&doc, Profile::NilKill);
+        assert!(!output.collection_index_lookups.is_empty());
+        assert!(!output.hash_shapes.is_empty());
+        assert!(!output.array_shapes.is_empty());
+        assert!(!output.struct_declarations.is_empty());
+        assert!(!output.state_type_edges.is_empty());
+        assert!(!output.call_graph_edges.is_empty());
+
+        let output_espalier = extract(&doc, Profile::Espalier);
+        assert!(!output_espalier.state_type_edges.is_empty());
+
+        // Test merge of state_protocols and state_param_origins
+        let mut p1 = ProfileOutput::default();
+        p1.state_protocols.insert("Greeter\u{0}client".to_string(), vec!["read".to_string()]);
+        p1.state_param_origins.insert("Greeter\u{0}initialize\u{0}param".to_string(), vec!["@db".to_string()]);
+
+        let mut p2 = ProfileOutput::default();
+        p2.state_protocols.insert("Greeter\u{0}client".to_string(), vec!["write".to_string()]);
+        p2.state_param_origins.insert("Greeter\u{0}initialize\u{0}param".to_string(), vec!["@nested_db".to_string()]);
+
+        let merged = merge(vec![p1, p2], Profile::NilKill);
+        assert_eq!(merged.state_protocols.get("Greeter\u{0}client").unwrap().len(), 2);
+        assert_eq!(merged.state_param_origins.get("Greeter\u{0}initialize\u{0}param").unwrap().len(), 2);
+
+        // Test python signature source extraction
+        let mut doc_py = test_document();
+        doc_py.file = file_path.clone();
+        doc_py.language = Language::Python;
+        doc_py.function_defs.push(syntax::FunctionDef {
+            file: file_path.clone(),
+            name: "py_fn".to_string(),
+            owner: "PyClass".to_string(),
+            line: 19,
+            span: [19, 0, 19, 19],
+            body: crate::ast::RawNode {
+                kind: "function_definition".to_string(),
+                text: "def py_fn(a: int) -> str:".to_string(),
+                span: [19, 0, 19, 19],
+                named: true,
+                field_name: None,
+                children: vec![],
+            },
+            visibility: None,
+            params: vec!["a".to_string()],
+            signature: "".to_string(),
+        });
+        extract(&doc_py, Profile::Espalier);
+    }
+
+    pub(crate) fn test_sorbet_signature_parsing_impl() {
+        let (r, p) = parse_sorbet_signature("def foo");
+        assert!(r.is_none());
+
+        let (r, p) = parse_sorbet_signature("sig { .params(x: Integer).returns(String) }");
+        assert_eq!(r, Some("String".to_string()));
+        assert_eq!(p.len(), 1);
+        assert_eq!(p[0].get("name").unwrap(), "x");
+        assert_eq!(p[0].get("type").unwrap(), "Integer");
+
+        let (r, p) = parse_sorbet_signature("sig { .params(x: T::Array[Integer], y: T::Hash[Symbol, String]).returns(String) }");
+        assert_eq!(r, Some("String".to_string()));
+        assert_eq!(p.len(), 2);
+
+        let (r, p) = parse_sorbet_signature("sig { .params(x: Integer");
+        assert!(r.is_none());
+    }
+
+    pub(crate) fn test_hash_array_shape_edge_cases_impl() {
+        let lines = vec!["{ a: 1".to_string()];
+        assert!(collect_braced_block(&lines, 0).is_none());
+
+        assert!(find_brace_block("no brace").is_none());
+        assert!(find_brace_block("{ no close").is_none());
+        assert!(extract_hash_pairs("{}").is_empty());
+        assert!(extract_hash_pairs("no brace").is_empty());
+        assert!(parse_hash_pair("invalid_pattern").is_none());
+        assert!(parse_hash_pair("\"key\" : value").is_none());
+        assert!(parse_hash_pair(":key : value").is_none());
+
+        assert_eq!(infer_literal_type(""), "T.untyped");
+        assert_eq!(infer_literal_type(":sym"), "Symbol");
+        assert_eq!(infer_literal_type("[]"), "T::Array[T.untyped]");
+        assert_eq!(infer_literal_type("{a: 1}"), "T::Hash[T.untyped, T.untyped]");
+    }
+
+    pub(crate) fn test_language_type_system_impl() {
+        assert_eq!(language_type_system("ruby"), "sorbet");
+        assert_eq!(language_type_system("python"), "python-typing");
+        assert_eq!(language_type_system("typescript"), "typescript");
+        assert_eq!(language_type_system("javascript"), "typescript");
+        assert_eq!(language_type_system("go"), "go-types");
+        assert_eq!(language_type_system("rust"), "rust-types");
+        assert_eq!(language_type_system("java"), "java-types");
+        assert_eq!(language_type_system("kotlin"), "kotlin-types");
+        assert_eq!(language_type_system("swift"), "swift-types");
+        assert_eq!(language_type_system("csharp"), "csharp-types");
+        assert_eq!(language_type_system("unknown"), "native");
+    }
+
+    pub(crate) fn test_profile_extra_coverage_impl() {
+        // 1. SignatureParser::parse language fallback
+        let (parsed_sig, parsed_params) = SignatureParser::parse("sig", "go");
+        assert!(parsed_sig.is_none());
+        assert!(parsed_params.is_empty());
+
+        // 2. AliasResolver::resolve fallback
+        let (p_name, s_name) = AliasResolver::resolve("SimpleName");
+        assert_eq!(p_name, "");
+        assert_eq!(s_name, "SimpleName");
+
+        // 3. sorbet_extract nested parentheses
+        let (res_type, params) = parse_sorbet_signature("sig { .returns(Nested(Type)) }");
+        assert_eq!(res_type, Some("Nested(Type)".to_string()));
+        assert!(params.is_empty());
+
+        // 4. method_signature language fallbacks and signature_format edge cases
+        let lines = vec!["def foo(a, b)".to_string()];
+        let fn_def = syntax::FunctionDef {
+            file: "test.py".to_string(),
+            name: "foo".to_string(),
+            owner: "".to_string(),
+            line: 1,
+            span: [1, 0, 1, 10],
+            body: crate::ast::RawNode {
+                kind: "function_definition".to_string(),
+                text: "".to_string(),
+                span: [1, 0, 1, 10],
+                named: true,
+                field_name: None,
+                children: vec![],
+            },
+            visibility: None,
+            params: vec!["a".to_string(), "b".to_string()],
+            signature: "".to_string(),
+        };
+        let sig = method_signature(&lines, &fn_def, "go");
+        assert_eq!(sig, "foo (a, b)");
+
+        let mut fn_def_empty = fn_def.clone();
+        fn_def_empty.params = vec![];
+        let sig_empty = method_signature(&lines, &fn_def_empty, "go");
+        assert_eq!(sig_empty, "foo");
+
+        let mut fn_def_ruby = fn_def.clone();
+        fn_def_ruby.line = 100;
+        let sig_ruby = method_signature(&lines, &fn_def_ruby, "ruby");
+        assert_eq!(sig_ruby, "");
+
+        let mut fn_def_py = fn_def.clone();
+        fn_def_py.line = 100;
+        let sig_py = method_signature(&lines, &fn_def_py, "python");
+        assert_eq!(sig_py, "");
+
+        // 5. collect_braced_block with close brace before open brace
+        let lines_braced = vec!["}".to_string()];
+        assert!(collect_braced_block(&lines_braced, 0).is_none());
+
+        // 6. find_brace_block nested braces
+        assert_eq!(find_brace_block("{a: {b: 1}}"), Some("a: {b: 1}".to_string()));
+
+        // 7. extract_call_graph_edges duplicate edges
+        let doc_edges_json = serde_json::json!({
+            "file": "test.rb",
+            "language": "ruby",
+            "function_defs": [
+                {
+                    "file": "test.rb",
+                    "name": "hello",
+                    "owner": "Greeter",
+                    "line": 1,
+                    "span": [1, 0, 1, 10],
+                    "body": {
+                        "kind": "method",
+                        "text": "def hello",
+                        "span": [1, 0, 1, 10],
+                        "named": true,
+                        "field_name": null,
+                        "children": []
+                    },
+                    "visibility": "public",
+                    "params": ["name"],
+                    "signature": "def hello(name)"
+                },
+                {
+                    "file": "test.rb",
+                    "name": "helper",
+                    "owner": "Greeter",
+                    "line": 2,
+                    "span": [2, 0, 2, 10],
+                    "body": {
+                        "kind": "method",
+                        "text": "def helper",
+                        "span": [2, 0, 2, 10],
+                        "named": true,
+                        "field_name": null,
+                        "children": []
+                    },
+                    "visibility": "public",
+                    "params": [],
+                    "signature": "def helper"
+                }
+            ],
+            "call_sites": [
+                {
+                    "receiver": "self",
+                    "message": "helper",
+                    "file": "test.rb",
+                    "function": "hello",
+                    "owner": "Greeter",
+                    "line": 1,
+                    "span": [1, 0, 1, 10],
+                    "conditional": false,
+                    "arguments": [],
+                    "control": null,
+                    "safe_navigation": false,
+                    "block": false
+                },
+                {
+                    "receiver": "",
+                    "message": "helper",
+                    "file": "test.rb",
+                    "function": "hello",
+                    "owner": "Greeter",
+                    "line": 1,
+                    "span": [1, 0, 1, 10],
+                    "conditional": false,
+                    "arguments": [],
+                    "control": null,
+                    "safe_navigation": false,
+                    "block": false
+                }
+            ]
+        });
+        let doc_edges: Document = serde_json::from_value(doc_edges_json).unwrap();
+        let edges = extract_call_graph_edges(&doc_edges);
+        assert_eq!(edges.len(), 1);
+        assert_eq!(edges[0].weight, 2);
+
+        // 8. extract_collection_index_lookups edge cases
+        let doc_lookups_json = serde_json::json!({
+            "file": "test.rb",
+            "language": "ruby",
+            "call_sites": [
+                {
+                    "receiver": "user",
+                    "message": "[]",
+                    "file": "test.rb",
+                    "function": "hello",
+                    "owner": "Greeter",
+                    "line": 1,
+                    "span": [1, 0, 1, 10],
+                    "conditional": false,
+                    "arguments": ["name"],
+                    "control": null,
+                    "safe_navigation": false,
+                    "block": false
+                },
+                {
+                    "receiver": "user",
+                    "message": "fetch",
+                    "file": "test.rb",
+                    "function": "hello",
+                    "owner": "Greeter",
+                    "line": 2,
+                    "span": [2, 0, 2, 10],
+                    "conditional": false,
+                    "arguments": ["id"],
+                    "control": null,
+                    "safe_navigation": false,
+                    "block": false
+                },
+                {
+                    "receiver": "user",
+                    "message": "[]",
+                    "file": "test.rb",
+                    "function": "hello",
+                    "owner": "Greeter",
+                    "line": 3,
+                    "span": [3, 0, 3, 10],
+                    "conditional": false,
+                    "arguments": ["name"],
+                    "control": null,
+                    "safe_navigation": false,
+                    "block": false
+                }
+            ]
+        });
+        let doc_lookups: Document = serde_json::from_value(doc_lookups_json).unwrap();
+        let lines_lookups = vec![
+            "different[name]".to_string(),
+            "different.fetch(id)".to_string(),
+            "user[invalid".to_string(),
+        ];
+        let lookups = extract_collection_index_lookups(&lines_lookups, &doc_lookups, "test.rb");
+        assert_eq!(lookups.len(), 3);
+    }
+
+    #[test] fn extracts_methods() { extracts_methods_impl(); }
+    #[test] fn extracts_fields() { extracts_fields_impl(); }
+    #[test] fn extracts_state_types() { extracts_state_types_impl(); }
+    #[test] fn nil_kill_profile_still_returns_core_facts() { nil_kill_profile_still_returns_core_facts_impl(); }
+    #[test] fn test_python_signature_parsing() { test_python_signature_parsing_impl(); }
+    #[test] fn test_typescript_signature_parsing() { test_typescript_signature_parsing_impl(); }
+    #[test] fn test_nil_kill_profile_merge() { test_nil_kill_profile_merge_impl(); }
+    #[test] fn test_comprehensive_profile_extraction() { test_comprehensive_profile_extraction_impl(); }
+    #[test] fn test_sorbet_signature_parsing() { test_sorbet_signature_parsing_impl(); }
+    #[test] fn test_hash_array_shape_edge_cases() { test_hash_array_shape_edge_cases_impl(); }
+    #[test] fn test_language_type_system() { test_language_type_system_impl(); }
+    #[test] fn test_profile_extra_coverage() { test_profile_extra_coverage_impl(); }
+}
+
+pub fn run_profile_tests() {
+    tests::extracts_methods_impl();
+    tests::extracts_fields_impl();
+    tests::extracts_state_types_impl();
+    tests::nil_kill_profile_still_returns_core_facts_impl();
+    tests::test_python_signature_parsing_impl();
+    tests::test_typescript_signature_parsing_impl();
+    tests::test_nil_kill_profile_merge_impl();
+    tests::test_comprehensive_profile_extraction_impl();
+    tests::test_sorbet_signature_parsing_impl();
+    tests::test_hash_array_shape_edge_cases_impl();
+    tests::test_language_type_system_impl();
+    tests::test_profile_extra_coverage_impl();
 }
 fn extract_collection_index_lookups(lines: &[String], document: &Document, path: &str) -> Vec<serde_json::Value> {
     let mut lookups = Vec::new();

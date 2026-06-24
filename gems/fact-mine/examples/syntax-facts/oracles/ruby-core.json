@@ -3,6 +3,20 @@
     {
       "branch_decisions": [
         {
+          "function": "(top-level)",
+          "line": 121,
+          "predicate": "$GLOBAL_STATE > 0",
+          "span": [
+            121,
+            0,
+            125,
+            3
+          ],
+          "state_refs": [
+            "$GLOBAL_STATE"
+          ]
+        },
+        {
           "function": "process",
           "line": 32,
           "predicate": "user.role",
@@ -35,6 +49,26 @@
       "calls": [
         {
           "arguments": [
+            "!name"
+          ],
+          "block": false,
+          "conditional": false,
+          "control": "always",
+          "function": "audit",
+          "line": 75,
+          "message": "audit",
+          "owner": "RubySyntaxFactsCore",
+          "receiver": "self",
+          "safe_navigation": false,
+          "span": [
+            75,
+            4,
+            75,
+            15
+          ]
+        },
+        {
+          "arguments": [
             "0",
             "Integer"
           ],
@@ -52,6 +86,26 @@
             13,
             21,
             30
+          ]
+        },
+        {
+          "arguments": [
+            "1"
+          ],
+          "block": false,
+          "conditional": false,
+          "control": "always",
+          "function": "audit",
+          "line": 73,
+          "message": "+",
+          "owner": "RubySyntaxFactsCore",
+          "receiver": "GLOBAL_STATE",
+          "safe_navigation": false,
+          "span": [
+            73,
+            4,
+            73,
+            22
           ]
         },
         {
@@ -186,15 +240,15 @@
           "conditional": false,
           "control": "always",
           "function": "audit",
-          "line": 59,
+          "line": 61,
           "message": "send",
           "owner": "RubySyntaxFactsCore",
           "receiver": "self",
           "safe_navigation": false,
           "span": [
-            59,
+            61,
             4,
-            59,
+            61,
             23
           ]
         },
@@ -220,6 +274,46 @@
         },
         {
           "arguments": [
+            "\"active\""
+          ],
+          "block": false,
+          "conditional": true,
+          "control": "conditional",
+          "function": "(top-level)",
+          "line": 122,
+          "message": "puts",
+          "owner": "core",
+          "receiver": "self",
+          "safe_navigation": false,
+          "span": [
+            122,
+            2,
+            122,
+            15
+          ]
+        },
+        {
+          "arguments": [
+            "\"inactive\""
+          ],
+          "block": false,
+          "conditional": true,
+          "control": "conditional",
+          "function": "(top-level)",
+          "line": 124,
+          "message": "puts",
+          "owner": "core",
+          "receiver": "self",
+          "safe_navigation": false,
+          "span": [
+            124,
+            2,
+            124,
+            17
+          ]
+        },
+        {
+          "arguments": [
             "\"not ready\""
           ],
           "block": false,
@@ -236,6 +330,26 @@
             6,
             45,
             23
+          ]
+        },
+        {
+          "arguments": [
+            "a"
+          ],
+          "block": false,
+          "conditional": true,
+          "control": "iterates",
+          "function": "process",
+          "line": 49,
+          "message": "puts",
+          "owner": "RubySyntaxFactsCore",
+          "receiver": "self",
+          "safe_navigation": false,
+          "span": [
+            49,
+            6,
+            49,
+            12
           ]
         },
         {
@@ -267,15 +381,15 @@
           "conditional": false,
           "control": "always",
           "function": "(top-level)",
-          "line": 64,
+          "line": 79,
           "message": "private",
           "owner": "RubySyntaxFactsCore",
           "receiver": "self",
           "safe_navigation": false,
           "span": [
-            64,
+            79,
             2,
-            66,
+            81,
             5
           ]
         },
@@ -287,16 +401,36 @@
           "conditional": false,
           "control": "always",
           "function": "audit",
-          "line": 58,
+          "line": 60,
           "message": "puts",
           "owner": "RubySyntaxFactsCore",
           "receiver": "self",
           "safe_navigation": false,
           "span": [
-            58,
+            60,
             4,
-            58,
+            60,
             14
+          ]
+        },
+        {
+          "arguments": [
+            "name"
+          ],
+          "block": false,
+          "conditional": false,
+          "control": "always",
+          "function": "audit",
+          "line": 76,
+          "message": "audit",
+          "owner": "RubySyntaxFactsCore",
+          "receiver": "self",
+          "safe_navigation": false,
+          "span": [
+            76,
+            11,
+            76,
+            22
           ]
         },
         {
@@ -338,6 +472,48 @@
             14,
             28,
             59
+          ]
+        },
+        {
+          "arguments": [
+            "self.inline_class_private",
+            "helper(value)"
+          ],
+          "block": false,
+          "conditional": false,
+          "control": "always",
+          "function": "(top-level)",
+          "line": 83,
+          "message": "private",
+          "owner": "RubySyntaxFactsCore",
+          "receiver": "self",
+          "safe_navigation": false,
+          "span": [
+            83,
+            2,
+            85,
+            5
+          ]
+        },
+        {
+          "arguments": [
+            "self.inline_class_private2",
+            "helper(value)"
+          ],
+          "block": false,
+          "conditional": false,
+          "control": "always",
+          "function": "(top-level)",
+          "line": 87,
+          "message": "private_class_method",
+          "owner": "RubySyntaxFactsCore",
+          "receiver": "self",
+          "safe_navigation": false,
+          "span": [
+            87,
+            2,
+            89,
+            5
           ]
         },
         {
@@ -470,15 +646,55 @@
           "conditional": false,
           "control": "always",
           "function": "inline_private",
-          "line": 65,
+          "line": 80,
           "message": "helper",
           "owner": "RubySyntaxFactsCore",
           "receiver": "self",
           "safe_navigation": false,
           "span": [
-            65,
+            80,
             4,
-            65,
+            80,
+            17
+          ]
+        },
+        {
+          "arguments": [
+            "value"
+          ],
+          "block": false,
+          "conditional": false,
+          "control": "always",
+          "function": "self.inline_class_private",
+          "line": 84,
+          "message": "helper",
+          "owner": "RubySyntaxFactsCore",
+          "receiver": "self",
+          "safe_navigation": false,
+          "span": [
+            84,
+            4,
+            84,
+            17
+          ]
+        },
+        {
+          "arguments": [
+            "value"
+          ],
+          "block": false,
+          "conditional": false,
+          "control": "always",
+          "function": "self.inline_class_private2",
+          "line": 88,
+          "message": "helper",
+          "owner": "RubySyntaxFactsCore",
+          "receiver": "self",
+          "safe_navigation": false,
+          "span": [
+            88,
+            4,
+            88,
             17
           ]
         },
@@ -488,15 +704,15 @@
           "conditional": false,
           "control": "always",
           "function": "(top-level)",
-          "line": 55,
+          "line": 57,
           "message": "private",
           "owner": "RubySyntaxFactsCore",
           "receiver": "self",
           "safe_navigation": false,
           "span": [
-            55,
+            57,
             2,
-            55,
+            57,
             9
           ]
         },
@@ -516,6 +732,60 @@
             16,
             9,
             38
+          ]
+        },
+        {
+          "arguments": [],
+          "block": false,
+          "conditional": false,
+          "control": "always",
+          "function": "audit",
+          "line": 64,
+          "message": "count",
+          "owner": "RubySyntaxFactsCore",
+          "receiver": "self",
+          "safe_navigation": false,
+          "span": [
+            64,
+            6,
+            64,
+            11
+          ]
+        },
+        {
+          "arguments": [],
+          "block": false,
+          "conditional": false,
+          "control": "always",
+          "function": "ensure_only_test",
+          "line": 108,
+          "message": "foo",
+          "owner": "RubySyntaxFactsCore",
+          "receiver": "self",
+          "safe_navigation": false,
+          "span": [
+            108,
+            6,
+            108,
+            9
+          ]
+        },
+        {
+          "arguments": [],
+          "block": false,
+          "conditional": false,
+          "control": "always",
+          "function": "ensure_only_test",
+          "line": 110,
+          "message": "bar",
+          "owner": "RubySyntaxFactsCore",
+          "receiver": "self",
+          "safe_navigation": false,
+          "span": [
+            110,
+            6,
+            110,
+            9
           ]
         },
         {
@@ -575,6 +845,78 @@
         {
           "arguments": [],
           "block": false,
+          "conditional": false,
+          "control": "always",
+          "function": "rescue_test",
+          "line": 101,
+          "message": "bar",
+          "owner": "RubySyntaxFactsCore",
+          "receiver": "self",
+          "safe_navigation": false,
+          "span": [
+            101,
+            6,
+            101,
+            9
+          ]
+        },
+        {
+          "arguments": [],
+          "block": false,
+          "conditional": false,
+          "control": "always",
+          "function": "rescue_test",
+          "line": 102,
+          "message": "baz",
+          "owner": "RubySyntaxFactsCore",
+          "receiver": "self",
+          "safe_navigation": false,
+          "span": [
+            102,
+            6,
+            102,
+            9
+          ]
+        },
+        {
+          "arguments": [],
+          "block": false,
+          "conditional": false,
+          "control": "always",
+          "function": "rescue_test",
+          "line": 95,
+          "message": "foo",
+          "owner": "RubySyntaxFactsCore",
+          "receiver": "self",
+          "safe_navigation": false,
+          "span": [
+            95,
+            6,
+            95,
+            9
+          ]
+        },
+        {
+          "arguments": [],
+          "block": false,
+          "conditional": false,
+          "control": "always",
+          "function": "rescue_test",
+          "line": 99,
+          "message": "foo",
+          "owner": "RubySyntaxFactsCore",
+          "receiver": "self",
+          "safe_navigation": false,
+          "span": [
+            99,
+            6,
+            99,
+            9
+          ]
+        },
+        {
+          "arguments": [],
+          "block": false,
           "conditional": true,
           "control": "conditional",
           "function": "process",
@@ -624,24 +966,6 @@
             8,
             18,
             35
-          ]
-        },
-        {
-          "arguments": [],
-          "block": false,
-          "conditional": true,
-          "control": "iterates",
-          "function": "process",
-          "line": 49,
-          "message": "children",
-          "owner": "RubySyntaxFactsCore",
-          "receiver": "item",
-          "safe_navigation": false,
-          "span": [
-            49,
-            6,
-            49,
-            19
           ]
         },
         {
@@ -705,7 +1029,7 @@
           "control": "always",
           "function": "process",
           "line": 48,
-          "message": "flat_map",
+          "message": "each",
           "owner": "RubySyntaxFactsCore",
           "receiver": "items",
           "safe_navigation": false,
@@ -713,7 +1037,7 @@
             48,
             4,
             48,
-            18
+            14
           ]
         }
       ],
@@ -768,6 +1092,45 @@
       "file": "gems/fact-mine/examples/syntax-facts/ruby/core.rb",
       "functions": [
         {
+          "line": 106,
+          "name": "ensure_only_test",
+          "owner": "RubySyntaxFactsCore",
+          "params": [],
+          "span": [
+            106,
+            2,
+            112,
+            5
+          ],
+          "visibility": "private"
+        },
+        {
+          "line": 114,
+          "name": "ready?",
+          "owner": "RubySyntaxFactsCore",
+          "params": [],
+          "span": [
+            114,
+            2,
+            116,
+            5
+          ],
+          "visibility": "private"
+        },
+        {
+          "line": 118,
+          "name": "loaded?",
+          "owner": "RubySyntaxFactsCore",
+          "params": [],
+          "span": [
+            118,
+            2,
+            118,
+            33
+          ],
+          "visibility": "private"
+        },
+        {
           "line": 14,
           "name": "self.build",
           "owner": "RubySyntaxFactsCore",
@@ -809,64 +1172,94 @@
           "span": [
             26,
             2,
-            53,
+            55,
             5
           ],
           "visibility": "public"
         },
         {
-          "line": 57,
+          "line": 59,
           "name": "audit",
           "owner": "RubySyntaxFactsCore",
           "params": [
             "name"
           ],
           "span": [
-            57,
+            59,
             2,
-            62,
+            77,
             5
           ],
           "visibility": "private"
         },
         {
-          "line": 64,
+          "line": 79,
           "name": "inline_private",
           "owner": "RubySyntaxFactsCore",
           "params": [
             "value"
           ],
           "span": [
-            64,
+            79,
             10,
-            66,
+            81,
             5
           ],
           "visibility": "private"
         },
         {
-          "line": 68,
-          "name": "ready?",
+          "line": 83,
+          "name": "self.inline_class_private",
+          "owner": "RubySyntaxFactsCore",
+          "params": [
+            "value"
+          ],
+          "span": [
+            83,
+            10,
+            85,
+            5
+          ],
+          "visibility": "public"
+        },
+        {
+          "line": 87,
+          "name": "self.inline_class_private2",
+          "owner": "RubySyntaxFactsCore",
+          "params": [
+            "value"
+          ],
+          "span": [
+            87,
+            23,
+            89,
+            5
+          ],
+          "visibility": "public"
+        },
+        {
+          "line": 91,
+          "name": "one_line_return",
           "owner": "RubySyntaxFactsCore",
           "params": [],
           "span": [
-            68,
+            91,
             2,
-            70,
-            5
+            91,
+            37
           ],
           "visibility": "private"
         },
         {
-          "line": 72,
-          "name": "loaded?",
+          "line": 93,
+          "name": "rescue_test",
           "owner": "RubySyntaxFactsCore",
           "params": [],
           "span": [
-            72,
+            93,
             2,
-            72,
-            33
+            104,
+            5
           ],
           "visibility": "private"
         }
@@ -891,7 +1284,7 @@
           "span": [
             8,
             0,
-            73,
+            119,
             3
           ]
         }
@@ -899,13 +1292,13 @@
       "predicate_bodies": [
         {
           "body": "@status == :ready",
-          "line": 72,
+          "line": 118,
           "name": "loaded?",
           "owner": "RubySyntaxFactsCore",
           "span": [
-            72,
+            118,
             2,
-            72,
+            118,
             33
           ]
         }
@@ -913,14 +1306,62 @@
       "semantic_effects": [
         {
           "detail": "GLOBAL_STATE",
+          "function": "(top-level)",
+          "kind": "context_dependency",
+          "line": 121,
+          "span": [
+            121,
+            3,
+            121,
+            16
+          ]
+        },
+        {
+          "detail": "GLOBAL_STATE",
           "function": "audit",
           "kind": "context_dependency",
-          "line": 60,
+          "line": 62,
           "span": [
-            60,
+            62,
             4,
-            60,
+            62,
             17
+          ]
+        },
+        {
+          "detail": "GLOBAL_STATE",
+          "function": "audit",
+          "kind": "context_dependency",
+          "line": 73,
+          "span": [
+            73,
+            4,
+            73,
+            17
+          ]
+        },
+        {
+          "detail": "GLOBAL_STATE",
+          "function": "audit",
+          "kind": "context_dependency",
+          "line": 73,
+          "span": [
+            73,
+            4,
+            73,
+            22
+          ]
+        },
+        {
+          "detail": "backtick",
+          "function": "audit",
+          "kind": "hidden_io",
+          "line": 65,
+          "span": [
+            65,
+            4,
+            65,
+            8
           ]
         },
         {
@@ -949,25 +1390,61 @@
         },
         {
           "detail": "puts",
+          "function": "(top-level)",
+          "kind": "hidden_io",
+          "line": 122,
+          "span": [
+            122,
+            2,
+            122,
+            15
+          ]
+        },
+        {
+          "detail": "puts",
+          "function": "(top-level)",
+          "kind": "hidden_io",
+          "line": 124,
+          "span": [
+            124,
+            2,
+            124,
+            17
+          ]
+        },
+        {
+          "detail": "puts",
           "function": "audit",
           "kind": "hidden_io",
-          "line": 58,
+          "line": 60,
           "span": [
-            58,
+            60,
             4,
-            58,
+            60,
             14
+          ]
+        },
+        {
+          "detail": "puts",
+          "function": "process",
+          "kind": "hidden_io",
+          "line": 49,
+          "span": [
+            49,
+            6,
+            49,
+            12
           ]
         },
         {
           "detail": "send",
           "function": "audit",
           "kind": "dynamic_dispatch",
-          "line": 59,
+          "line": 61,
           "span": [
-            59,
+            61,
             4,
-            59,
+            61,
             23
           ]
         },
@@ -1011,14 +1488,40 @@
       "state_reads": [
         {
           "field": "GLOBAL_STATE",
+          "function": "(top-level)",
+          "line": 121,
+          "owner": "core",
+          "receiver": "self",
+          "span": [
+            121,
+            3,
+            121,
+            16
+          ]
+        },
+        {
+          "field": "GLOBAL_STATE",
           "function": "audit",
-          "line": 60,
+          "line": 62,
           "owner": "RubySyntaxFactsCore",
           "receiver": "self",
           "span": [
-            60,
+            62,
             4,
-            60,
+            62,
+            17
+          ]
+        },
+        {
+          "field": "GLOBAL_STATE",
+          "function": "audit",
+          "line": 73,
+          "owner": "RubySyntaxFactsCore",
+          "receiver": "self",
+          "span": [
+            73,
+            4,
+            73,
             17
           ]
         },
@@ -1036,16 +1539,16 @@
           ]
         },
         {
-          "field": "children",
-          "function": "process",
-          "line": 49,
+          "field": "count",
+          "function": "audit",
+          "line": 66,
           "owner": "RubySyntaxFactsCore",
-          "receiver": "item",
+          "receiver": "self",
           "span": [
-            49,
-            6,
-            49,
-            19
+            66,
+            10,
+            66,
+            16
           ]
         },
         {
@@ -1064,18 +1567,18 @@
         {
           "field": "count",
           "function": "ready?",
-          "line": 69,
+          "line": 115,
           "owner": "RubySyntaxFactsCore",
           "receiver": "self",
           "span": [
-            69,
+            115,
             4,
-            69,
+            115,
             10
           ]
         },
         {
-          "field": "flat_map",
+          "field": "each",
           "function": "process",
           "line": 48,
           "owner": "RubySyntaxFactsCore",
@@ -1084,7 +1587,7 @@
             48,
             4,
             48,
-            18
+            14
           ]
         },
         {
@@ -1153,28 +1656,15 @@
           ]
         },
         {
-          "field": "source",
-          "function": "audit",
-          "line": 61,
-          "owner": "RubySyntaxFactsCore",
-          "receiver": "self",
-          "span": [
-            61,
-            4,
-            61,
-            11
-          ]
-        },
-        {
           "field": "status",
           "function": "loaded?",
-          "line": 72,
+          "line": 118,
           "owner": "RubySyntaxFactsCore",
           "receiver": "self",
           "span": [
-            72,
+            118,
             16,
-            72,
+            118,
             23
           ]
         },
@@ -1194,13 +1684,13 @@
         {
           "field": "status",
           "function": "process",
-          "line": 52,
+          "line": 54,
           "owner": "RubySyntaxFactsCore",
           "receiver": "self",
           "span": [
-            52,
+            54,
             4,
-            52,
+            54,
             11
           ]
         },
@@ -1219,6 +1709,19 @@
         }
       ],
       "state_writes": [
+        {
+          "field": "GLOBAL_STATE",
+          "function": "audit",
+          "line": 73,
+          "owner": "RubySyntaxFactsCore",
+          "receiver": "self",
+          "span": [
+            73,
+            4,
+            73,
+            22
+          ]
+        },
         {
           "field": "count",
           "function": "initialize",

@@ -819,4 +819,446 @@ mod tests {
             .expect("git command");
         assert!(status.success(), "git {:?} failed", args);
     }
+
+    #[test]
+    fn test_is_binary_file() {
+        let dir = TempDir::new().expect("tempdir");
+        let elf_path = dir.path().join("elf");
+        fs::write(&elf_path, b"\x7fELFbody").unwrap();
+        assert!(is_binary_file(&elf_path));
+
+        let mz_path = dir.path().join("mz");
+        fs::write(&mz_path, b"MZbody").unwrap();
+        assert!(is_binary_file(&mz_path));
+
+        let null_path = dir.path().join("null");
+        fs::write(&null_path, b"hello\0world").unwrap();
+        assert!(is_binary_file(&null_path));
+
+        let txt_path = dir.path().join("txt.rs");
+        fs::write(&txt_path, b"fn main() {}").unwrap();
+        assert!(!is_binary_file(&txt_path));
+
+        // Test non-existent file
+        assert!(!is_binary_file(Path::new("nonexistent-binary-test-12345")));
+
+        // Test small files (bytes_read < 4)
+        let empty_path = dir.path().join("empty");
+        fs::write(&empty_path, b"").unwrap();
+        assert!(!is_binary_file(&empty_path));
+
+        let small_path = dir.path().join("small");
+        fs::write(&small_path, b"abc").unwrap();
+        assert!(!is_binary_file(&small_path));
+    }
+
+    #[test]
+    fn test_excluded_path() {
+        let options = Options {
+            excludes: vec!["**/foo/**".to_string(), "bar/baz".to_string()],
+            ..Options::default()
+        };
+
+        assert!(excluded_path(Path::new("/node_modules/foo.js"), &options));
+        assert!(excluded_path(Path::new("/zig-cache/bar"), &options));
+        assert!(excluded_path(Path::new("/foo/abc"), &options));
+        assert!(excluded_path(Path::new("dir/foo/abc"), &options));
+        assert!(excluded_path(Path::new("bar/baz"), &options));
+        assert!(excluded_path(Path::new("a/bar/baz"), &options));
+        assert!(!excluded_path(Path::new("src/main.rs"), &options));
+    }
+
+    #[test]
+    fn test_expand_target() {
+        let dir = TempDir::new().expect("tempdir");
+        let sub = dir.path().join("sub");
+        fs::create_dir(&sub).unwrap();
+
+        let f1 = sub.join("f1.rs");
+        fs::write(&f1, "fn main() {}").unwrap();
+
+        let f2 = sub.join("f2.rb");
+        fs::write(&f2, "def foo; end").unwrap();
+
+        let f3 = sub.join("f3.rs");
+        fs::write(&f3, b"\x7fELFbinary").unwrap();
+
+        let f4 = sub.join(".ignored.rs");
+        fs::write(&f4, "fn main() {}").unwrap();
+
+        let f5 = sub.join("all-tests.zig");
+        fs::write(&f5, "test {}").unwrap();
+
+        let f6 = sub.join("f6.rs");
+        fs::write(&f6, "fn main() {}").unwrap();
+
+        let mut files = Vec::new();
+        let options = Options {
+            excludes: vec!["f6.rs".to_string()],
+            ..Options::default()
+        };
+        expand_target(&sub, &options, &mut files).unwrap();
+
+        assert_eq!(files.len(), 2);
+        files.sort_by_key(|f| f.path.clone());
+        assert_eq!(files[0].path, f1);
+        assert_eq!(files[0].language, Language::Rust);
+        assert_eq!(files[1].path, f2);
+        assert_eq!(files[1].language, Language::Ruby);
+
+        // Test non-existent path
+        let mut files_nonexistent = Vec::new();
+        expand_target(Path::new("nonexistent-file-12345"), &options, &mut files_nonexistent).unwrap();
+        assert!(files_nonexistent.is_empty());
+
+        // Test excluded direct file target
+        let mut files_ex = Vec::new();
+        expand_target(&f6, &options, &mut files_ex).unwrap();
+        assert!(files_ex.is_empty());
+
+        // Test root directory name parsing fallback
+        let mut files_root = Vec::new();
+        push_source_file(Path::new("/"), &options, &mut files_root);
+        assert!(files_root.is_empty());
+    }
+
+    #[test]
+    fn test_run_detector_tasks() {
+        let res = run_detector_tasks_sequential(vec![
+            ("task_ok", Box::new(|| Ok(json!([1, 2, 3]))))
+        ]).unwrap();
+        assert_eq!(res.get("task_ok").unwrap(), &json!([1, 2, 3]));
+
+        let res_err = run_detector_tasks_sequential(vec![
+            ("task_err", Box::new(|| bail!("task failed")))
+        ]);
+        assert!(res_err.is_err());
+
+        let res_p = run_detector_tasks_parallel(vec![
+            ("task_ok", Box::new(|| Ok(json!([1, 2, 3]))))
+        ], 2).unwrap();
+        assert_eq!(res_p.get("task_ok").unwrap(), &json!([1, 2, 3]));
+
+        let res_p_err = run_detector_tasks_parallel(vec![
+            ("task_err", Box::new(|| bail!("task failed")))
+        ], 2);
+        assert!(res_p_err.is_err());
+    }
+
+    #[test]
+    fn test_state_heatmap_findings() {
+        let mut fields = BTreeMap::new();
+        let site1 = state_mesh::SiteInfo {
+            file: "file.rb".to_string(),
+            defn: "m1".to_string(),
+            line: 10,
+            recv: "self".to_string(),
+            span: [10, 1, 10, 5],
+        };
+        let site2 = state_mesh::SiteInfo {
+            file: "file.rb".to_string(),
+            defn: "m2".to_string(),
+            line: 20,
+            recv: "self".to_string(),
+            span: [20, 1, 20, 5],
+        };
+        // Add duplicate location with smaller span
+        let site3 = state_mesh::SiteInfo {
+            file: "file.rb".to_string(),
+            defn: "m1".to_string(),
+            line: 10,
+            recv: "self".to_string(),
+            span: [5, 1, 5, 5],
+        };
+        // Add duplicate location with larger span
+        let site4 = state_mesh::SiteInfo {
+            file: "file.rb".to_string(),
+            defn: "m1".to_string(),
+            line: 10,
+            recv: "self".to_string(),
+            span: [12, 1, 12, 5],
+        };
+        let re_derive = state_mesh::ReDerivationInfo {
+            file: "file.rb".to_string(),
+            defn: "m3".to_string(),
+            line: 30,
+            raw: "x == y".to_string(),
+            predicate: "p".to_string(),
+            canon: "c".to_string(),
+        };
+
+        fields.insert(
+            "@field".to_string(),
+            state_mesh::StateFieldRow {
+                messiness: 4.5,
+                rank: 1,
+                metrics: state_mesh::FieldMetricsRow {
+                    writes: 1,
+                    reads: 1,
+                    re_derivations: 1,
+                    scatter: 2,
+                    write_scatter: 1,
+                    read_scatter: 1,
+                    receiver_types: 1,
+                    pressure: 3,
+                    fix_churn: 0.0,
+                    percentiles: BTreeMap::new(),
+                },
+                writers: vec![site1, site3, site4],
+                readers: vec![site2],
+                re_derivations: vec![re_derive],
+            },
+        );
+
+        let report = state_mesh::StateMeshReport {
+            state_mesh: state_mesh::StateMeshMeta {
+                total_fields: 1,
+                total_writes: 1,
+                total_reads: 1,
+                total_re_derivations: 1,
+                min_writes: 1,
+                custom_fields: None,
+            },
+            fields,
+            hierarchy: Vec::new(),
+        };
+
+        let res = state_heatmap_findings(&report);
+        assert_eq!(res.len(), 1);
+        let row = &res[0];
+        assert_eq!(row.get("field").unwrap(), "@field");
+        assert_eq!(row.get("messiness").unwrap(), 4.5);
+    }
+
+    #[test]
+    fn test_git_roots_edges() {
+        // Test early return (all files inside current root)
+        let file_in = SourceFile {
+            path: PathBuf::from("src/decomplex/report_facts.rs"),
+            language: Language::Rust,
+        };
+        let res_in = git_roots_for_files(&[file_in]);
+        assert!(res_in.is_ok());
+
+        // Test error when not in a git repo
+        let file_out = SourceFile {
+            path: PathBuf::from("/non-existent-dir-12345/some-file.rb"),
+            language: Language::Ruby,
+        };
+        let res_out = git_roots_for_files(&[file_out]);
+        assert!(res_out.is_err());
+    }
+
+    #[test]
+    fn test_sequential_jobs_and_profiling() {
+        // Set profile env var and override jobs
+        std::env::set_var("DECOMPLEX_RUST_PROFILE", "1");
+        fact_mine_rust::parallel::set_jobs_for_process(Some(1)).unwrap();
+
+        let dir = TempDir::new().expect("tempdir");
+        let rb_file = dir.path().join("hello.rb");
+        fs::write(&rb_file, "def hello\n  puts \"hello\"\nend\n").unwrap();
+
+        let options = Options::default();
+        let result = collect(&[rb_file], &options).expect("collect");
+        assert!(result.is_object());
+
+        // Reset
+        std::env::remove_var("DECOMPLEX_RUST_PROFILE");
+        fact_mine_rust::parallel::set_jobs_for_process(None).unwrap();
+    }
+
+    #[test]
+    fn test_collect_and_facts_for_source_files() {
+        let dir = TempDir::new().expect("tempdir");
+        let rb_file = dir.path().join("hello.rb");
+        fs::write(&rb_file, "def hello\n  puts \"hello\"\nend\n").unwrap();
+
+        let rs_file = dir.path().join("hello.rs");
+        fs::write(&rs_file, "fn main() {\n  println!(\"hello\");\n}\n").unwrap();
+
+        let options = Options::default();
+        let result = collect(&[rb_file.clone(), rs_file.clone()], &options).expect("collect");
+        assert!(result.is_object());
+        let obj = result.as_object().unwrap();
+        assert_eq!(obj.get("format").unwrap(), FORMAT);
+        
+        let files_val = obj.get("files").unwrap().as_array().unwrap();
+        assert_eq!(files_val.len(), 2);
+
+        let options_lang = Options {
+            language: Some(Language::Ruby),
+            ..Options::default()
+        };
+        let result_lang = collect(&[dir.path().to_path_buf()], &options_lang).expect("collect with lang filter");
+        let obj_lang = result_lang.as_object().unwrap();
+        let files_lang = obj_lang.get("files").unwrap().as_array().unwrap();
+        assert_eq!(files_lang.len(), 1);
+
+        let empty_res = facts_for_source_files(&[], &options);
+        assert!(empty_res.is_err());
+    }
+
+    #[test]
+    fn test_git_errors() {
+        let err_res = git_root_for_dir(Path::new("/non-existent-dir-12345"));
+        assert!(err_res.is_err());
+
+        let err_ls = git_ls_files(Path::new("/non-existent-dir-12345"));
+        assert!(err_ls.is_err());
+    }
+
+    #[test]
+    fn test_normalize_path() {
+        let non_existent = Path::new("/non-existent-dir-12345/some-file.rb");
+        let normalized = normalize_path(non_existent);
+        assert_eq!(normalized, PathBuf::from("/non-existent-dir-12345/some-file.rb"));
+
+        let non_existent_relative = Path::new("non-existent-dir-12345/some-file.rb");
+        let normalized_relative = normalize_path(non_existent_relative);
+        assert!(normalized_relative.is_absolute());
+    }
+
+    #[test]
+    fn test_local_summaries_for_documents() {
+        let summary1: local_flow::MethodSummary = serde_json::from_value(json!({
+            "id": "m1",
+            "owner": "ClassA",
+            "name": "m1",
+            "file": "a.rb",
+            "line": 10,
+            "span": [10, 1, 10, 5],
+            "statements": [],
+            "boundaries": []
+        })).unwrap();
+
+        let summary2: local_flow::MethodSummary = serde_json::from_value(json!({
+            "id": "m2",
+            "owner": "ClassA",
+            "name": "m2",
+            "file": "b.rb",
+            "line": 20,
+            "span": [20, 1, 20, 5],
+            "statements": [],
+            "boundaries": []
+        })).unwrap();
+
+        let doc_a: Document = serde_json::from_value(json!({
+            "file": "a.rb",
+            "language": "ruby",
+            "owner_defs": [],
+            "call_sites": [],
+            "state_declarations": [],
+            "state_reads": [],
+            "state_writes": [],
+            "decision_sites": [],
+            "branch_decisions": [],
+            "branch_arms": [],
+            "dispatch_sites": [],
+            "semantic_effect_sites": [],
+            "local_complexity_scores": {},
+            "local_methods": [],
+            "predicate_aliases": [],
+            "comparison_uses": [],
+            "path_condition_sites": [],
+            "protocol_method_effects": [],
+            "protocol_call_paths": [],
+            "clone_candidates": [],
+            "redundant_nil_guards": [],
+            "immutable_struct_readers": {},
+            "immutable_struct_reader_types": {},
+            "type_aliases": {},
+            "method_param_types": {},
+            "state_param_origins": []
+        })).unwrap();
+
+        let summaries = vec![summary1, summary2];
+        
+        let res_owned = local_summaries_for_documents(&summaries, &[doc_a.clone()]);
+        assert_eq!(res_owned.len(), 1);
+        assert_eq!(res_owned[0].file, "a.rb");
+        assert!(matches!(res_owned, Cow::Owned(_)));
+
+        let doc_b: Document = serde_json::from_value(json!({
+            "file": "b.rb",
+            "language": "ruby",
+            "owner_defs": [],
+            "call_sites": [],
+            "state_declarations": [],
+            "state_reads": [],
+            "state_writes": [],
+            "decision_sites": [],
+            "branch_decisions": [],
+            "branch_arms": [],
+            "dispatch_sites": [],
+            "semantic_effect_sites": [],
+            "local_complexity_scores": {},
+            "local_methods": [],
+            "predicate_aliases": [],
+            "comparison_uses": [],
+            "path_condition_sites": [],
+            "protocol_method_effects": [],
+            "protocol_call_paths": [],
+            "clone_candidates": [],
+            "redundant_nil_guards": [],
+            "immutable_struct_readers": {},
+            "immutable_struct_reader_types": {},
+            "type_aliases": {},
+            "method_param_types": {},
+            "state_param_origins": []
+        })).unwrap();
+
+        let res_borrowed = local_summaries_for_documents(&summaries, &[doc_a, doc_b]);
+        assert_eq!(res_borrowed.len(), 2);
+        assert!(matches!(res_borrowed, Cow::Borrowed(_)));
+    }
+
+    #[test]
+    fn test_merge_reports_errors() {
+        let mut groups = BTreeMap::new();
+        let doc: Document = serde_json::from_value(json!({
+            "file": "a.rb",
+            "language": "ruby",
+            "owner_defs": [],
+            "call_sites": [],
+            "state_declarations": [],
+            "state_reads": [],
+            "state_writes": [],
+            "decision_sites": [],
+            "branch_decisions": [],
+            "branch_arms": [],
+            "dispatch_sites": [],
+            "semantic_effect_sites": [],
+            "local_complexity_scores": {},
+            "local_methods": [],
+            "predicate_aliases": [],
+            "comparison_uses": [],
+            "path_condition_sites": [],
+            "protocol_method_effects": [],
+            "protocol_call_paths": [],
+            "clone_candidates": [],
+            "redundant_nil_guards": [],
+            "immutable_struct_readers": {},
+            "immutable_struct_reader_types": {},
+            "type_aliases": {},
+            "method_param_types": {},
+            "state_param_origins": []
+        })).unwrap();
+        groups.insert(Language::Ruby, vec![doc]);
+
+        let res_obj = merge_object_reports(&groups, &["field"], |_docs| {
+            Ok(json!([1, 2, 3]))
+        });
+        assert!(res_obj.is_err());
+
+        let res_missing = merge_object_reports(&groups, &["field"], |_docs| {
+            Ok(json!({}))
+        });
+        assert!(res_missing.is_err());
+
+        let res_arr = merge_array_reports(&groups, |_docs| {
+            Ok(json!({}))
+        });
+        assert!(res_arr.is_err());
+    }
 }

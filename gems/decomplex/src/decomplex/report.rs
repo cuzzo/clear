@@ -1229,6 +1229,7 @@ fn zero_based_column_to_sarif(value: i64) -> i64 {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use serde_json::json;
 
     #[test]
     fn nav_splits_location_from_the_right() {
@@ -1241,5 +1242,647 @@ mod tests {
             slug("Structural Similarity (Type-2/3)"),
             "structural-similarity-type23"
         );
+    }
+
+    #[test]
+    fn test_report_comprehensive() {
+        let facts = json!({
+            "format": crate::decomplex::report_facts::FORMAT,
+            "files": ["file.rb"],
+            "detectors": {
+                "decision_pressure": [{
+                    "contract": "ContractA",
+                    "decisions": 5,
+                    "methods": 2,
+                    "essential": 1,
+                    "sites": ["file.rb:m:10"],
+                    "spans": {
+                        "file.rb:m:10": [10, 5, 12, 15]
+                    }
+                }],
+                "redundant_nil_guard": [{
+                    "at": "file.rb:m:10",
+                    "local": "x",
+                    "guard": "x.nil?",
+                    "proof": "x != nil"
+                }],
+                "state_heatmap": [{
+                    "field": "@state",
+                    "pressure": 10,
+                    "messiness": 8,
+                    "writes": 4,
+                    "reads": 6,
+                    "re_derivations": 1,
+                    "scatter": 2,
+                    "receiver_types": 3,
+                    "top_writers": ["file.rb:m1:20"],
+                    "top_readers": ["file.rb:m2:30"]
+                }],
+                "state_branch_density": [{
+                    "at": "file.rb:m:10",
+                    "decisions": 3,
+                    "state_refs": ["a", "b"],
+                    "score": 1.5,
+                    "predicate": "a && b"
+                }],
+                "temporal_ordering_pressure": [{
+                    "owner": "ClassA",
+                    "at": "file.rb:m:10",
+                    "score": 4.0,
+                    "public_methods": 5,
+                    "state_methods": 3,
+                    "writers": 2,
+                    "state_fields": ["x", "y"],
+                    "shared_fields": ["z"],
+                    "orderings": 2,
+                    "state_space": 4,
+                    "sites": ["file.rb:m:10"]
+                }],
+                "miner": {
+                    "missing_abstractions": [{
+                        "kind": "tuple",
+                        "support": 3,
+                        "scatter": 2,
+                        "rank": 4,
+                        "members": ["a", "b"],
+                        "sites": ["file.rb:m:10"]
+                    }],
+                    "neglected_conditions": [{
+                        "support": 2,
+                        "at": "file.rb:m:10",
+                        "missing": "cond",
+                        "pattern": ["a", "b"]
+                    }]
+                },
+                "semantic_alias": {
+                    "reification_misses": [{
+                        "predicate": "pred",
+                        "at": "file.rb:m:10",
+                        "raw": "x == 1"
+                    }],
+                    "alias_clusters": [{
+                        "names": ["a", "b"],
+                        "canon": "body",
+                        "sites": ["file.rb:m:10"]
+                    }]
+                },
+                "predicate_alias": {
+                    "alias_clusters": [{
+                        "names": ["a", "b"],
+                        "body": "x == 2",
+                        "sites": ["file.rb:m:10"]
+                    }]
+                },
+                "inconsistent_rename_clone": [{
+                    "at": "file.rb:m:10",
+                    "ref_at": "ref.rb:m:5",
+                    "ref_name": "x",
+                    "divergent": ["y"]
+                }],
+                "flay_similarity": [{
+                    "clone_type": "type-2",
+                    "mass": 20,
+                    "node": "node_a",
+                    "sites": ["file.rb:m:10", "file2.rb:m:20", "file3.rb:m:30", "file4.rb:m:40", "file5.rb:m:50"]
+                }],
+                "co_update": {
+                    "neglected_updates": [{
+                        "support": 2,
+                        "at": "file.rb:m:10",
+                        "has": "a",
+                        "missing": "b",
+                        "recv": "recv"
+                    }]
+                },
+                "derived_state": [{
+                    "at": "file.rb:m:10",
+                    "derived": "y",
+                    "source": "x",
+                    "derived_at": 5,
+                    "source_reassigned_at": 15
+                }],
+                "path_condition": {
+                    "neglected": [{
+                        "support": 2,
+                        "at": "file.rb:m:10",
+                        "missing": "cond",
+                        "guards": ["a", "b"]
+                    }]
+                },
+                "oversized_predicate": [{
+                    "at": "file.rb:m:10",
+                    "count": 5,
+                    "predicate": "a && b && c && d"
+                }],
+                "sequence_mine": {
+                    "broken": [{
+                        "confidence": 0.8,
+                        "support": 3,
+                        "at": "file.rb:m:10",
+                        "has": "a",
+                        "missing": "b"
+                    }]
+                },
+                "implicit_control_flow": {
+                    "ordered_protocols": [
+                        {
+                            "kind": "order_drift",
+                            "confidence": 0.9,
+                            "support": 2,
+                            "at": "file.rb:m:10",
+                            "observed": ["a", "b"],
+                            "protocol": ["a", "b", "c"],
+                            "dependency": ["dep"],
+                            "states": ["st"]
+                        },
+                        {
+                            "kind": "protocol_pressure",
+                            "support": 2,
+                            "at": "file.rb:m:10",
+                            "protocol": ["a", "b"],
+                            "dependency": ["dep"],
+                            "states": ["st"],
+                            "sites": ["file.rb:m:10", "file2.rb:m:20", "file3.rb:m:30", "file4.rb:m:40", "file5.rb:m:50"]
+                        }
+                    ]
+                },
+                "weighted_inlined_complexity": [{
+                    "at": "file.rb:m:10",
+                    "inlined": 15,
+                    "local": 5,
+                    "hidden": 10,
+                    "depth": 3,
+                    "call_chain": ["a", "b"],
+                    "single_caller_callees": ["c"],
+                    "reason": "heavy chain"
+                }],
+                "locality_drag": [{
+                    "at": "file.rb:m:10",
+                    "variable": "v",
+                    "used_at": 20,
+                    "defined_at": 5,
+                    "score": 3.5,
+                    "gap_lines": 15,
+                    "unrelated_statements": 5,
+                    "boundary_crossings": 2,
+                    "local_complexity": 3,
+                    "reason": "long gap",
+                    "setup_statements": 1,
+                    "definition_deps": ["d"],
+                    "use_reads": ["r"],
+                    "boundaries": [{"line": 12, "marker": "cross"}],
+                    "examples": [{"line": 15, "source": "x = 1"}]
+                }],
+                "operational_discontinuity": [
+                    {
+                        "at": "file.rb:m:10",
+                        "score": 4.0,
+                        "resets": 2,
+                        "dead_total": 3,
+                        "new_total": 4,
+                        "confidence": "high",
+                        "confidence_reasons": ["blank lines"],
+                        "reset_points": [{
+                            "line": 15,
+                            "text": "reset",
+                            "dead": ["x"],
+                            "new": ["y"],
+                            "continuing": ["z"]
+                        }]
+                    },
+                    {
+                        "at": "file.rb:m:10",
+                        "score": 2.0,
+                        "resets": 1,
+                        "dead_total": 1,
+                        "new_total": 1,
+                        "confidence": "low",
+                        "reset_points": [{
+                            "line": 15,
+                            "kind": "comment",
+                            "dead": ["x"],
+                            "new": ["y"]
+                        }]
+                    }
+                ],
+                "function_lcom": [
+                    {
+                        "mode": "late_join",
+                        "at": "file.rb:m:10",
+                        "score": 0.8,
+                        "components": 2,
+                        "locals": 3,
+                        "statements": 5,
+                        "component_vars": [["x", "y"]],
+                        "component_lines": [[10, 15]]
+                    },
+                    {
+                        "mode": "disjoint",
+                        "at": "file.rb:m:10",
+                        "score": 0.9,
+                        "components": 2,
+                        "locals": 2,
+                        "statements": 4,
+                        "component_vars": [["a"]],
+                        "component_lines": [[10]]
+                    }
+                ],
+                "false_simplicity": [{
+                    "kind": "dispatch",
+                    "scatter": 2,
+                    "support": 3,
+                    "detail": "delegates to x",
+                    "at": "file.rb:m:10",
+                    "sites": ["file.rb:m:10", "file2.rb:m:20"]
+                }],
+                "fat_union": {
+                    "fat_unions": [{
+                        "degenerate": true,
+                        "variant_set": ["A", "B"],
+                        "common": ["c"],
+                        "variant": ["v"],
+                        "scatter": 2,
+                        "at": "file.rb:m:10"
+                    }]
+                }
+            }
+        });
+
+        let report = Report::from_facts(&facts).unwrap();
+        
+        let md = report.to_markdown();
+        assert!(!md.is_empty());
+
+        let sarif = report.to_sarif();
+        assert!(!sarif.is_empty());
+
+        let conv = report.convergence_value();
+        assert!(!conv.is_null());
+
+        let root_clusters = report.root_clusters_value();
+        assert!(!root_clusters.is_null());
+
+        let sarif_val = report.to_sarif_value(true, true, None);
+        assert!(!sarif_val.is_null());
+
+        // Error checking path: missing detectors
+        let invalid_facts = json!({
+            "format": "invalid",
+            "files": []
+        });
+        assert!(Report::from_facts(&invalid_facts).is_err());
+    }
+
+    #[test]
+    fn test_report_empty_and_sorting_edges() {
+        let empty_facts = json!({
+            "format": crate::decomplex::report_facts::FORMAT,
+            "files": ["file.rb"],
+            "detectors": {
+                "decision_pressure": [],
+                "redundant_nil_guard": [],
+                "state_heatmap": [],
+                "state_branch_density": [],
+                "temporal_ordering_pressure": [],
+                "miner": {
+                    "missing_abstractions": [],
+                    "neglected_conditions": []
+                },
+                "semantic_alias": {
+                    "reification_misses": [],
+                    "alias_clusters": []
+                },
+                "predicate_alias": {
+                    "alias_clusters": []
+                },
+                "inconsistent_rename_clone": [],
+                "flay_similarity": [],
+                "co_update": {
+                    "neglected_updates": []
+                },
+                "derived_state": [],
+                "path_condition": {
+                    "neglected": []
+                },
+                "oversized_predicate": [],
+                "sequence_mine": {
+                    "broken": []
+                },
+                "implicit_control_flow": {
+                    "ordered_protocols": []
+                },
+                "weighted_inlined_complexity": [],
+                "locality_drag": [],
+                "operational_discontinuity": [],
+                "function_lcom": [],
+                "false_simplicity": [],
+                "fat_union": {
+                    "fat_unions": []
+                }
+            }
+        });
+        let report = Report::from_facts(&empty_facts).unwrap();
+        let md = report.to_markdown();
+        assert!(md.contains("Nothing flagged."));
+        assert!(md.contains("None (no unit flagged by >=2 detectors)."));
+        assert!(md.contains("None (no entity named by >=2 detectors)."));
+
+        let mut decision_pressures = Vec::new();
+        for i in 0..30 {
+            decision_pressures.push(json!({
+                "contract": format!("Contract{}", i),
+                "decisions": 5,
+                "methods": 2,
+                "essential": 0,
+                "sites": [format!("file.rb:m{}:10", i)]
+            }));
+        }
+        // Add two findings with same contract (message text) but different files (uris)
+        decision_pressures.push(json!({
+            "contract": "ContractA",
+            "decisions": 5,
+            "methods": 2,
+            "essential": 1,
+            "sites": ["file1.rb:m0:10"]
+        }));
+        decision_pressures.push(json!({
+            "contract": "ContractA",
+            "decisions": 5,
+            "methods": 2,
+            "essential": 1,
+            "sites": ["file2.rb:m0:10"]
+        }));
+        // Add two findings with same contract (message text) and same file (uri) but different lines (startLine)
+        decision_pressures.push(json!({
+            "contract": "ContractB",
+            "decisions": 5,
+            "methods": 2,
+            "essential": 1,
+            "sites": ["file1.rb:m0:10"]
+        }));
+        decision_pressures.push(json!({
+            "contract": "ContractB",
+            "decisions": 5,
+            "methods": 2,
+            "essential": 1,
+            "sites": ["file1.rb:m0:20"]
+        }));
+        // Add case dispatch to trigger fat_union = true
+        decision_pressures.push(json!({
+            "kind": "case_dispatch",
+            "members": ["Foo", "Bar"],
+            "sites": ["file.rb:fat:10"]
+        }));
+
+        let mut state_branch_densities = Vec::new();
+        for i in 0..30 {
+            state_branch_densities.push(json!({
+                "at": format!("file.rb:m{}:10", i),
+                "decisions": 3,
+                "state_refs": ["a"],
+                "score": 1.5,
+                "predicate": "a"
+            }));
+        }
+
+        let mut missing_abstractions = Vec::new();
+        for i in 0..25 {
+            missing_abstractions.push(json!({
+                "kind": "tuple",
+                "support": 3,
+                "scatter": 2,
+                "rank": 4,
+                "members": [format!("token{}", i), "other"],
+                "sites": [format!("file.rb:r{}:10", i)]
+            }));
+        }
+        // Add same members tuple to trigger fat_union cluster
+        missing_abstractions.push(json!({
+            "kind": "tuple",
+            "support": 3,
+            "scatter": 2,
+            "rank": 4,
+            "members": ["Foo", "Bar"],
+            "sites": ["file.rb:fat:10"]
+        }));
+
+        let mut path_conditions = Vec::new();
+        for i in 0..25 {
+            path_conditions.push(json!({
+                "support": 2,
+                "at": format!("file.rb:r{}:10", i),
+                "missing": "other",
+                "guards": [format!("token{}", i), "other"]
+            }));
+        }
+
+        let fat_union_finding = json!({
+            "degenerate": true,
+            "variant_set": ["fat_token"],
+            "common": [],
+            "variant": [],
+            "scatter": 2,
+            "at": "file.rb:fat:10"
+        });
+
+        let bad_spans_facts = json!({
+            "format": crate::decomplex::report_facts::FORMAT,
+            "files": ["file.rb"],
+            "detectors": {
+                "decision_pressure": [{
+                    "contract": "ContractA",
+                    "decisions": 5,
+                    "methods": 2,
+                    "essential": 1,
+                    "sites": ["file.rb:m:10"],
+                    "spans": {
+                        "file.rb:m:10": null
+                    }
+                }]
+            }
+        });
+        assert!(Report::from_facts(&bad_spans_facts).is_ok());
+
+        let malformed_spans_facts = json!({
+            "format": crate::decomplex::report_facts::FORMAT,
+            "files": ["file.rb"],
+            "detectors": {
+                "decision_pressure": [{
+                    "contract": "ContractA",
+                    "decisions": 5,
+                    "methods": 2,
+                    "essential": 1,
+                    "sites": ["file.rb:m:10"],
+                    "spans": {
+                        "file.rb:m:10": [10, 5, 5, 10]
+                    }
+                }]
+            }
+        });
+        assert!(Report::from_facts(&malformed_spans_facts).is_err());
+
+        let locality_drag_finding = json!({
+            "at": "file.rb:m:10",
+            "variable": "v",
+            "used_at": 20,
+            "defined_at": 5,
+            "score": 3.5,
+            "gap_lines": 15,
+            "unrelated_statements": 5,
+            "boundary_crossings": 2,
+            "local_complexity": 3,
+            "reason": "long gap",
+            "setup_statements": 0,
+            "definition_deps": [],
+            "use_reads": [],
+            "boundaries": [],
+            "examples": []
+        });
+
+        let flay_finding = json!({
+            "clone_type": "type-2",
+            "mass": 20,
+            "node": "node_a",
+            "sites": ["file.rb:m:10", "file2.rb:m:20"]
+        });
+
+        let order_drift_finding = json!({
+            "kind": "order_drift",
+            "confidence": 0.9,
+            "support": 2,
+            "at": "file.rb:m:10",
+            "observed": ["a"],
+            "protocol": ["a"],
+            "dependency": [],
+            "states": []
+        });
+
+        let protocol_pressure_finding = json!({
+            "kind": "protocol_pressure",
+            "support": 2,
+            "at": "file.rb:m:10",
+            "protocol": ["a"],
+            "dependency": [],
+            "states": [],
+            "sites": ["file.rb:m:10"]
+        });
+
+        let op_discont_finding = json!({
+            "at": "file.rb:m:10",
+            "score": 4.0,
+            "resets": 2,
+            "dead_total": 3,
+            "new_total": 4,
+            "reset_points": []
+        });
+
+        let lcom_finding = json!({
+            "mode": "disjoint",
+            "at": "file.rb:m:10",
+            "score": 0.9,
+            "components": 2,
+            "locals": 2,
+            "statements": 4,
+            "component_vars": [["a"]]
+        });
+
+        let state_heatmap_finding = json!({
+            "field": "@state",
+            "pressure": 10,
+            "messiness": 8,
+            "writes": 4,
+            "reads": 6,
+            "re_derivations": 1,
+            "scatter": 2,
+            "receiver_types": 3,
+            "top_writers": ["file.rb:m1:20"],
+            "top_readers": ["file.rb:m2:30"],
+            "at": "file.rb:m1:20"
+        });
+
+        let comprehensive_facts = json!({
+            "format": crate::decomplex::report_facts::FORMAT,
+            "files": ["file.rb"],
+            "detectors": {
+                "decision_pressure": decision_pressures,
+                "redundant_nil_guard": [],
+                "state_heatmap": [state_heatmap_finding],
+                "state_branch_density": state_branch_densities,
+                "temporal_ordering_pressure": [],
+                "miner": {
+                    "missing_abstractions": missing_abstractions,
+                    "neglected_conditions": []
+                },
+                "semantic_alias": {
+                    "reification_misses": [],
+                    "alias_clusters": []
+                },
+                "predicate_alias": {
+                    "alias_clusters": []
+                },
+                "inconsistent_rename_clone": [],
+                "flay_similarity": [flay_finding],
+                "co_update": {
+                    "neglected_updates": []
+                },
+                "derived_state": [],
+                "path_condition": {
+                    "neglected": path_conditions
+                },
+                "oversized_predicate": [],
+                "sequence_mine": {
+                    "broken": []
+                },
+                "implicit_control_flow": {
+                    "ordered_protocols": [order_drift_finding, protocol_pressure_finding]
+                },
+                "weighted_inlined_complexity": [],
+                "locality_drag": [locality_drag_finding],
+                "operational_discontinuity": [op_discont_finding],
+                "function_lcom": [lcom_finding],
+                "false_simplicity": [],
+                "fat_union": {
+                    "fat_unions": [fat_union_finding]
+                }
+            }
+        });
+
+        let mut rep = Report::from_facts(&comprehensive_facts).unwrap();
+        rep.sections.push(ReportSection::new("Unknown Section Title", 3, "desc", vec![
+            json!({"at": "file.rb:m:10"}),
+            json!({"at": "file.rb:10", "name": "foo"}),
+            json!({"at": "file.rb:10"}),
+        ]));
+        let markdown = rep.to_markdown();
+        assert!(markdown.contains("more)"));
+
+        let sarif_val = rep.to_sarif_value(true, true, Some(5));
+        assert!(!sarif_val.is_null());
+
+        let sarif_val_none = rep.to_sarif_value(true, true, None);
+        assert!(!sarif_val_none.is_null());
+    }
+
+    #[test]
+    fn test_nav_edges() {
+        assert_eq!(nav("file.rb:10"), "file.rb:10");
+        assert_eq!(nav("file.rb"), "file.rb");
+    }
+
+    #[test]
+    fn test_sarif_loc_parsing() {
+        let loc = parse_sarif_loc("file.rb:method");
+        assert_eq!(loc.path.unwrap(), "file.rb");
+        assert_eq!(loc.method.unwrap(), "method");
+        assert_eq!(loc.line, 1);
+    }
+
+    #[test]
+    fn test_sarif_locations_spans_empty() {
+        let finding = json!({
+            "spans": {}
+        });
+        let locs = sarif_locations_for_finding(&finding);
+        assert!(locs.is_empty());
     }
 }

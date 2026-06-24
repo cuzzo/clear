@@ -41,6 +41,15 @@ export class JavaScriptSyntaxFactsCore {
   #audit(name) {
     console.log(name);
     this.sink.send("record", name);
+    const me = this;
+    const processItem = ({ name, active }) => { console.log(name, active); };
+    try {
+      this.count += 1;
+    } catch (e) {
+      console.error(e);
+    } finally {
+      this.count = 0;
+    }
     return this.#status;
   }
 
@@ -49,7 +58,7 @@ export class JavaScriptSyntaxFactsCore {
   }
 }
 
-export function normalizeValue(input) {
-  return input ?? null;
+export function normalizeValue(input, defaultValue = null, ...rest) {
+  return input ?? defaultValue;
 }
 

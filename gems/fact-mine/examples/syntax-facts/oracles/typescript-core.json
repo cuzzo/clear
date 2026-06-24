@@ -116,6 +116,26 @@
         },
         {
           "arguments": [
+            "e"
+          ],
+          "block": false,
+          "conditional": false,
+          "control": "always",
+          "function": "audit",
+          "line": 62,
+          "message": "error",
+          "owner": "TypeScriptSyntaxFactsCore",
+          "receiver": "console",
+          "safe_navigation": false,
+          "span": [
+            62,
+            6,
+            62,
+            22
+          ]
+        },
+        {
+          "arguments": [
             "items[index]"
           ],
           "block": false,
@@ -132,6 +152,27 @@
             6,
             48,
             30
+          ]
+        },
+        {
+          "arguments": [
+            "name",
+            "active"
+          ],
+          "block": false,
+          "conditional": false,
+          "control": "always",
+          "function": "audit",
+          "line": 58,
+          "message": "log",
+          "owner": "TypeScriptSyntaxFactsCore",
+          "receiver": "console",
+          "safe_navigation": false,
+          "span": [
+            58,
+            57,
+            58,
+            82
           ]
         },
         {
@@ -308,35 +349,35 @@
           "span": [
             54,
             2,
-            58,
+            67,
             3
           ],
           "visibility": "private"
         },
         {
-          "line": 60,
+          "line": 69,
           "name": "ready",
           "owner": "TypeScriptSyntaxFactsCore",
           "params": [],
           "span": [
-            60,
+            69,
             2,
-            62,
+            71,
             3
           ],
           "visibility": "public"
         },
         {
-          "line": 65,
+          "line": 74,
           "name": "normalizeValue",
           "owner": "core",
           "params": [
             "input"
           ],
           "span": [
-            65,
+            74,
             7,
-            67,
+            76,
             1
           ],
           "visibility": "public"
@@ -351,13 +392,38 @@
           "span": [
             15,
             7,
-            63,
+            72,
             1
           ]
         }
       ],
-      "predicate_bodies": [],
+      "predicate_bodies": [
+        {
+          "body": "input ?? defaultValue",
+          "line": 74,
+          "name": "normalizeValue",
+          "owner": "core",
+          "span": [
+            74,
+            7,
+            76,
+            1
+          ]
+        }
+      ],
       "semantic_effects": [
+        {
+          "detail": "console.error",
+          "function": "audit",
+          "kind": "hidden_io",
+          "line": 62,
+          "span": [
+            62,
+            6,
+            62,
+            22
+          ]
+        },
         {
           "detail": "console.log",
           "function": "audit",
@@ -368,6 +434,18 @@
             4,
             55,
             21
+          ]
+        },
+        {
+          "detail": "console.log",
+          "function": "audit",
+          "kind": "hidden_io",
+          "line": 58,
+          "span": [
+            58,
+            57,
+            58,
+            82
           ]
         },
         {
@@ -413,13 +491,13 @@
         {
           "field": "count",
           "function": "ready",
-          "line": 61,
+          "line": 70,
           "owner": "TypeScriptSyntaxFactsCore",
           "receiver": "self",
           "span": [
-            61,
+            70,
             11,
-            61,
+            70,
             21
           ]
         },
@@ -434,6 +512,19 @@
             8,
             37,
             24
+          ]
+        },
+        {
+          "field": "error",
+          "function": "audit",
+          "line": 62,
+          "owner": "TypeScriptSyntaxFactsCore",
+          "receiver": "console",
+          "span": [
+            62,
+            6,
+            62,
+            19
           ]
         },
         {
@@ -473,6 +564,19 @@
             4,
             55,
             15
+          ]
+        },
+        {
+          "field": "log",
+          "function": "audit",
+          "line": 58,
+          "owner": "TypeScriptSyntaxFactsCore",
+          "receiver": "console",
+          "span": [
+            58,
+            57,
+            58,
+            68
           ]
         },
         {
@@ -569,13 +673,13 @@
         {
           "field": "status",
           "function": "audit",
-          "line": 57,
+          "line": 66,
           "owner": "TypeScriptSyntaxFactsCore",
           "receiver": "self",
           "span": [
-            57,
+            66,
             11,
-            57,
+            66,
             22
           ]
         },
@@ -607,6 +711,32 @@
         }
       ],
       "state_writes": [
+        {
+          "field": "count",
+          "function": "audit",
+          "line": 60,
+          "owner": "TypeScriptSyntaxFactsCore",
+          "receiver": "self",
+          "span": [
+            60,
+            6,
+            60,
+            21
+          ]
+        },
+        {
+          "field": "count",
+          "function": "audit",
+          "line": 64,
+          "owner": "TypeScriptSyntaxFactsCore",
+          "receiver": "self",
+          "span": [
+            64,
+            6,
+            64,
+            20
+          ]
+        },
         {
           "field": "count",
           "function": "process",

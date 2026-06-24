@@ -1,0 +1,153 @@
+{
+  "array_shapes": [],
+  "fields": [
+    {
+      "declared_type": null,
+      "id": "python\u0000/home/yahn/cheat/gems/fact-mine/examples/profile/python_sample.py\u0000Greeter\u0000field\u0000_db",
+      "language": "python",
+      "line": 9,
+      "name": "_db",
+      "owner": "Greeter",
+      "path": "/home/yahn/cheat/gems/fact-mine/examples/profile/python_sample.py",
+      "source": "syntax",
+      "span": [
+        9,
+        8,
+        9,
+        21
+      ],
+      "static_origin": "state_write"
+    }
+  ],
+  "hash_shapes": [],
+  "methods": [
+    {
+      "key": [
+        "Database",
+        "__init__",
+        "instance"
+      ],
+      "kind": "instance",
+      "language": "python",
+      "line": 4,
+      "name": "__init__",
+      "owner": "Database",
+      "params": [
+        "self"
+      ],
+      "path": "/home/yahn/cheat/gems/fact-mine/examples/profile/python_sample.py",
+      "signature": "def __init__(self):",
+      "source": {
+        "signature": "def __init__(self):",
+        "type_system": "python-typing"
+      },
+      "span": [
+        4,
+        4,
+        5,
+        29
+      ]
+    },
+    {
+      "key": [
+        "Greeter",
+        "__init__",
+        "instance"
+      ],
+      "kind": "instance",
+      "language": "python",
+      "line": 8,
+      "name": "__init__",
+      "owner": "Greeter",
+      "params": [
+        "self",
+        "db"
+      ],
+      "path": "/home/yahn/cheat/gems/fact-mine/examples/profile/python_sample.py",
+      "signature": "def __init__(self, db: Database):",
+      "source": {
+        "signature": "def __init__(self, db: Database):",
+        "type_system": "python-typing"
+      },
+      "span": [
+        8,
+        4,
+        9,
+        21
+      ]
+    },
+    {
+      "key": [
+        "Greeter",
+        "hello",
+        "instance"
+      ],
+      "kind": "instance",
+      "language": "python",
+      "line": 11,
+      "name": "hello",
+      "owner": "Greeter",
+      "params": [
+        "self",
+        "name"
+      ],
+      "path": "/home/yahn/cheat/gems/fact-mine/examples/profile/python_sample.py",
+      "signature": "def hello(self, name: str) -> str:",
+      "source": {
+        "signature": "def hello(self, name: str) -> str:",
+        "type_system": "python-typing"
+      },
+      "span": [
+        11,
+        4,
+        12,
+        30
+      ]
+    }
+  ],
+  "signatures": {
+    "Database\u0000__init__": "def __init__(self):",
+    "Greeter\u0000__init__": "def __init__(self, db: Database):",
+    "Greeter\u0000hello": "def hello(self, name: str) -> str:"
+  },
+  "state_param_origins": {},
+  "state_protocols": {},
+  "state_types": {},
+  "type_definitions": [
+    {
+      "id": "python\u0000/home/yahn/cheat/gems/fact-mine/examples/profile/python_sample.py\u0000Greeter\u0000method_signature\u0000__init__\u00008\u0000python-typing",
+      "kind": "method_signature",
+      "language": "python",
+      "line": 8,
+      "name": "__init__",
+      "owner": "Greeter",
+      "params": [
+        {
+          "name": "db",
+          "type": "Database"
+        }
+      ],
+      "path": "/home/yahn/cheat/gems/fact-mine/examples/profile/python_sample.py",
+      "signature": "def __init__(self, db: Database):",
+      "type_system": "python-typing"
+    },
+    {
+      "id": "python\u0000/home/yahn/cheat/gems/fact-mine/examples/profile/python_sample.py\u0000Greeter\u0000method_signature\u0000hello\u000011\u0000python-typing",
+      "kind": "method_signature",
+      "language": "python",
+      "line": 11,
+      "name": "hello",
+      "owner": "Greeter",
+      "params": [
+        {
+          "name": "name",
+          "type": "str"
+        }
+      ],
+      "path": "/home/yahn/cheat/gems/fact-mine/examples/profile/python_sample.py",
+      "return_type": "str:",
+      "signature": "def hello(self, name: str) -> str:",
+      "type_system": "python-typing"
+    }
+  ]
+}

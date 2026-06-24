@@ -1,0 +1,352 @@
+{
+  "children": [
+    {
+      "Node": {
+        "children": [
+          {
+            "Symbol": "main"
+          },
+          {
+            "Node": {
+              "children": [
+                "Nil",
+                "Nil",
+                {
+                  "Node": {
+                    "children": [
+                      {
+                        "Node": {
+                          "children": [
+                            {
+                              "Node": {
+                                "children": [],
+                                "first_column": 4,
+                                "first_lineno": 2,
+                                "last_column": 7,
+                                "last_lineno": 2,
+                                "text": "int",
+                                "type": "PRIMITIVE_TYPE"
+                              }
+                            },
+                            {
+                              "Node": {
+                                "children": [
+                                  {
+                                    "String": "i"
+                                  }
+                                ],
+                                "first_column": 8,
+                                "first_lineno": 2,
+                                "last_column": 9,
+                                "last_lineno": 2,
+                                "text": "i",
+                                "type": "LVAR"
+                              }
+                            }
+                          ],
+                          "first_column": 4,
+                          "first_lineno": 2,
+                          "last_column": 10,
+                          "last_lineno": 2,
+                          "text": "int i;",
+                          "type": "DECLARATION"
+                        }
+                      },
+                      {
+                        "Node": {
+                          "children": [
+                            {
+                              "Node": {
+                                "children": [
+                                  {
+                                    "Node": {
+                                      "children": [
+                                        {
+                                          "String": "i"
+                                        }
+                                      ],
+                                      "first_column": 16,
+                                      "first_lineno": 3,
+                                      "last_column": 17,
+                                      "last_lineno": 3,
+                                      "text": "i",
+                                      "type": "LVAR"
+                                    }
+                                  },
+                                  {
+                                    "Symbol": "<"
+                                  },
+                                  {
+                                    "Node": {
+                                      "children": [
+                                        {
+                                          "Node": {
+                                            "children": [],
+                                            "first_column": 20,
+                                            "first_lineno": 3,
+                                            "last_column": 22,
+                                            "last_lineno": 3,
+                                            "text": "10",
+                                            "type": "NUMBER_LITERAL"
+                                          }
+                                        }
+                                      ],
+                                      "first_column": 20,
+                                      "first_lineno": 3,
+                                      "last_column": 22,
+                                      "last_lineno": 3,
+                                      "text": "10",
+                                      "type": "LIST"
+                                    }
+                                  }
+                                ],
+                                "first_column": 16,
+                                "first_lineno": 3,
+                                "last_column": 22,
+                                "last_lineno": 3,
+                                "text": "i < 10",
+                                "type": "OPCALL"
+                              }
+                            },
+                            {
+                              "Node": {
+                                "children": [
+                                  {
+                                    "Node": {
+                                      "children": [
+                                        {
+                                          "Node": {
+                                            "children": [
+                                              {
+                                                "String": "i"
+                                              }
+                                            ],
+                                            "first_column": 12,
+                                            "first_lineno": 4,
+                                            "last_column": 13,
+                                            "last_lineno": 4,
+                                            "text": "i",
+                                            "type": "LVAR"
+                                          }
+                                        },
+                                        {
+                                          "Symbol": "=="
+                                        },
+                                        {
+                                          "Node": {
+                                            "children": [
+                                              {
+                                                "Node": {
+                                                  "children": [],
+                                                  "first_column": 17,
+                                                  "first_lineno": 4,
+                                                  "last_column": 18,
+                                                  "last_lineno": 4,
+                                                  "text": "5",
+                                                  "type": "NUMBER_LITERAL"
+                                                }
+                                              }
+                                            ],
+                                            "first_column": 17,
+                                            "first_lineno": 4,
+                                            "last_column": 18,
+                                            "last_lineno": 4,
+                                            "text": "5",
+                                            "type": "LIST"
+                                          }
+                                        }
+                                      ],
+                                      "first_column": 12,
+                                      "first_lineno": 4,
+                                      "last_column": 18,
+                                      "last_lineno": 4,
+                                      "text": "i == 5",
+                                      "type": "OPCALL"
+                                    }
+                                  },
+                                  {
+                                    "Node": {
+                                      "children": [],
+                                      "first_column": 20,
+                                      "first_lineno": 4,
+                                      "last_column": 29,
+                                      "last_lineno": 4,
+                                      "text": "continue;",
+                                      "type": "NEXT"
+                                    }
+                                  },
+                                  "Nil"
+                                ],
+                                "first_column": 8,
+                                "first_lineno": 4,
+                                "last_column": 29,
+                                "last_lineno": 4,
+                                "text": "if (i == 5) continue;",
+                                "type": "IF"
+                              }
+                            }
+                          ],
+                          "first_column": 4,
+                          "first_lineno": 3,
+                          "last_column": 5,
+                          "last_lineno": 5,
+                          "text": "for (i = 0; i < 10; i++) {\n        if (i == 5) continue;\n    }",
+                          "type": "FOR"
+                        }
+                      },
+                      {
+                        "Node": {
+                          "children": [
+                            {
+                              "Node": {
+                                "children": [
+                                  {
+                                    "String": "i"
+                                  }
+                                ],
+                                "first_column": 11,
+                                "first_lineno": 6,
+                                "last_column": 12,
+                                "last_lineno": 6,
+                                "text": "i",
+                                "type": "LVAR"
+                              }
+                            },
+                            {
+                              "Node": {
+                                "children": [
+                                  {
+                                    "Node": {
+                                      "children": [
+                                        {
+                                          "Node": {
+                                            "children": [],
+                                            "first_column": 13,
+                                            "first_lineno": 7,
+                                            "last_column": 14,
+                                            "last_lineno": 7,
+                                            "text": "1",
+                                            "type": "NUMBER_LITERAL"
+                                          }
+                                        }
+                                      ],
+                                      "first_column": 8,
+                                      "first_lineno": 7,
+                                      "last_column": 22,
+                                      "last_lineno": 7,
+                                      "text": "case 1: break;",
+                                      "type": "LIST"
+                                    }
+                                  },
+                                  {
+                                    "Node": {
+                                      "children": [],
+                                      "first_column": 13,
+                                      "first_lineno": 7,
+                                      "last_column": 14,
+                                      "last_lineno": 7,
+                                      "text": "1",
+                                      "type": "NUMBER_LITERAL"
+                                    }
+                                  },
+                                  {
+                                    "Node": {
+                                      "children": [
+                                        "Nil",
+                                        {
+                                          "Node": {
+                                            "children": [],
+                                            "first_column": 17,
+                                            "first_lineno": 8,
+                                            "last_column": 23,
+                                            "last_lineno": 8,
+                                            "text": "break;",
+                                            "type": "BREAK"
+                                          }
+                                        },
+                                        "Nil"
+                                      ],
+                                      "first_column": 8,
+                                      "first_lineno": 8,
+                                      "last_column": 23,
+                                      "last_lineno": 8,
+                                      "text": "default: break;",
+                                      "type": "WHEN"
+                                    }
+                                  }
+                                ],
+                                "first_column": 8,
+                                "first_lineno": 7,
+                                "last_column": 22,
+                                "last_lineno": 7,
+                                "text": "case 1: break;",
+                                "type": "WHEN"
+                              }
+                            }
+                          ],
+                          "first_column": 4,
+                          "first_lineno": 6,
+                          "last_column": 5,
+                          "last_lineno": 9,
+                          "text": "switch(i) {\n        case 1: break;\n        default: break;\n    }",
+                          "type": "CASE"
+                        }
+                      },
+                      {
+                        "Node": {
+                          "children": [
+                            {
+                              "Node": {
+                                "children": [],
+                                "first_column": 11,
+                                "first_lineno": 10,
+                                "last_column": 12,
+                                "last_lineno": 10,
+                                "text": "0",
+                                "type": "NUMBER_LITERAL"
+                              }
+                            }
+                          ],
+                          "first_column": 4,
+                          "first_lineno": 10,
+                          "last_column": 13,
+                          "last_lineno": 10,
+                          "text": "return 0;",
+                          "type": "RETURN"
+                        }
+                      }
+                    ],
+                    "first_column": 11,
+                    "first_lineno": 1,
+                    "last_column": 1,
+                    "last_lineno": 11,
+                    "text": "{\n    int i;\n    for (i = 0; i < 10; i++) {\n        if (i == 5) continue;\n    }\n    switch(i) {\n        case 1: break;\n        default: break;\n    }\n    return 0;\n}",
+                    "type": "BLOCK"
+                  }
+                }
+              ],
+              "first_column": 11,
+              "first_lineno": 1,
+              "last_column": 1,
+              "last_lineno": 11,
+              "text": "{\n    int i;\n    for (i = 0; i < 10; i++) {\n        if (i == 5) continue;\n    }\n    switch(i) {\n        case 1: break;\n        default: break;\n    }\n    return 0;\n}",
+              "type": "SCOPE"
+            }
+          }
+        ],
+        "first_column": 0,
+        "first_lineno": 1,
+        "last_column": 1,
+        "last_lineno": 11,
+        "text": "int main() {\n    int i;\n    for (i = 0; i < 10; i++) {\n        if (i == 5) continue;\n    }\n    switch(i) {\n        case 1: break;\n        default: break;\n    }\n    return 0;\n}",
+        "type": "DEFN"
+      }
+    }
+  ],
+  "first_column": 0,
+  "first_lineno": 1,
+  "last_column": 0,
+  "last_lineno": 12,
+  "text": "int main() {\n    int i;\n    for (i = 0; i < 10; i++) {\n        if (i == 5) continue;\n    }\n    switch(i) {\n        case 1: break;\n        default: break;\n    }\n    return 0;\n}\n",
+  "type": "ROOT"
+}

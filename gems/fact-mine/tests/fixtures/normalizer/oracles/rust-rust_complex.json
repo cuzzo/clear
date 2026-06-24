@@ -1,0 +1,354 @@
+{
+  "children": [
+    {
+      "Node": {
+        "children": [
+          {
+            "Symbol": "main"
+          },
+          {
+            "Node": {
+              "children": [
+                "Nil",
+                "Nil",
+                {
+                  "Node": {
+                    "children": [
+                      {
+                        "Node": {
+                          "children": [
+                            {
+                              "Node": {
+                                "children": [
+                                  {
+                                    "String": "x"
+                                  },
+                                  {
+                                    "Node": {
+                                      "children": [
+                                        {
+                                          "Node": {
+                                            "children": [],
+                                            "first_column": 18,
+                                            "first_lineno": 2,
+                                            "last_column": 19,
+                                            "last_lineno": 2,
+                                            "text": "1",
+                                            "type": "INTEGER_LITERAL"
+                                          }
+                                        },
+                                        {
+                                          "Node": {
+                                            "children": [
+                                              {
+                                                "Node": {
+                                                  "children": [
+                                                    {
+                                                      "Node": {
+                                                        "children": [],
+                                                        "first_column": 8,
+                                                        "first_lineno": 3,
+                                                        "last_column": 9,
+                                                        "last_lineno": 3,
+                                                        "text": "1",
+                                                        "type": "INTEGER_LITERAL"
+                                                      }
+                                                    }
+                                                  ],
+                                                  "first_column": 8,
+                                                  "first_lineno": 3,
+                                                  "last_column": 15,
+                                                  "last_lineno": 3,
+                                                  "text": "1 => 2,",
+                                                  "type": "LIST"
+                                                }
+                                              },
+                                              {
+                                                "Node": {
+                                                  "children": [],
+                                                  "first_column": 13,
+                                                  "first_lineno": 3,
+                                                  "last_column": 14,
+                                                  "last_lineno": 3,
+                                                  "text": "2",
+                                                  "type": "INTEGER_LITERAL"
+                                                }
+                                              },
+                                              {
+                                                "Node": {
+                                                  "children": [
+                                                    "Nil",
+                                                    {
+                                                      "Node": {
+                                                        "children": [],
+                                                        "first_column": 13,
+                                                        "first_lineno": 4,
+                                                        "last_column": 14,
+                                                        "last_lineno": 4,
+                                                        "text": "3",
+                                                        "type": "INTEGER_LITERAL"
+                                                      }
+                                                    },
+                                                    "Nil"
+                                                  ],
+                                                  "first_column": 8,
+                                                  "first_lineno": 4,
+                                                  "last_column": 15,
+                                                  "last_lineno": 4,
+                                                  "text": "_ => 3,",
+                                                  "type": "WHEN"
+                                                }
+                                              }
+                                            ],
+                                            "first_column": 8,
+                                            "first_lineno": 3,
+                                            "last_column": 15,
+                                            "last_lineno": 3,
+                                            "text": "1 => 2,",
+                                            "type": "WHEN"
+                                          }
+                                        }
+                                      ],
+                                      "first_column": 12,
+                                      "first_lineno": 2,
+                                      "last_column": 5,
+                                      "last_lineno": 5,
+                                      "text": "match 1 {\n        1 => 2,\n        _ => 3,\n    }",
+                                      "type": "CASE"
+                                    }
+                                  }
+                                ],
+                                "first_column": 4,
+                                "first_lineno": 2,
+                                "last_column": 6,
+                                "last_lineno": 5,
+                                "text": "let x = match 1 {\n        1 => 2,\n        _ => 3,\n    };",
+                                "type": "LASGN"
+                              }
+                            }
+                          ],
+                          "first_column": 4,
+                          "first_lineno": 2,
+                          "last_column": 6,
+                          "last_lineno": 5,
+                          "text": "let x = match 1 {\n        1 => 2,\n        _ => 3,\n    };",
+                          "type": "LET_DECLARATION"
+                        }
+                      },
+                      {
+                        "Node": {
+                          "children": [
+                            {
+                              "Node": {
+                                "children": [
+                                  {
+                                    "Node": {
+                                      "children": [],
+                                      "first_column": 8,
+                                      "first_lineno": 8,
+                                      "last_column": 13,
+                                      "last_lineno": 8,
+                                      "text": "break",
+                                      "type": "BREAK"
+                                    }
+                                  }
+                                ],
+                                "first_column": 9,
+                                "first_lineno": 7,
+                                "last_column": 5,
+                                "last_lineno": 9,
+                                "text": "{\n        break;\n    }",
+                                "type": "BLOCK"
+                              }
+                            }
+                          ],
+                          "first_column": 4,
+                          "first_lineno": 7,
+                          "last_column": 5,
+                          "last_lineno": 9,
+                          "text": "loop {\n        break;\n    }",
+                          "type": "LOOP_EXPRESSION"
+                        }
+                      },
+                      {
+                        "Node": {
+                          "children": [
+                            {
+                              "Node": {
+                                "children": [
+                                  {
+                                    "Node": {
+                                      "children": [
+                                        {
+                                          "String": "Some(y)"
+                                        },
+                                        {
+                                          "Node": {
+                                            "children": [
+                                              {
+                                                "Symbol": "Some"
+                                              },
+                                              {
+                                                "Node": {
+                                                  "children": [
+                                                    {
+                                                      "Node": {
+                                                        "children": [],
+                                                        "first_column": 26,
+                                                        "first_lineno": 11,
+                                                        "last_column": 27,
+                                                        "last_lineno": 11,
+                                                        "text": "1",
+                                                        "type": "INTEGER_LITERAL"
+                                                      }
+                                                    }
+                                                  ],
+                                                  "first_column": 21,
+                                                  "first_lineno": 11,
+                                                  "last_column": 28,
+                                                  "last_lineno": 11,
+                                                  "text": "Some(1)",
+                                                  "type": "LIST"
+                                                }
+                                              }
+                                            ],
+                                            "first_column": 21,
+                                            "first_lineno": 11,
+                                            "last_column": 28,
+                                            "last_lineno": 11,
+                                            "text": "Some(1)",
+                                            "type": "FCALL"
+                                          }
+                                        }
+                                      ],
+                                      "first_column": 7,
+                                      "first_lineno": 11,
+                                      "last_column": 28,
+                                      "last_lineno": 11,
+                                      "text": "let Some(y) = Some(1)",
+                                      "type": "LASGN"
+                                    }
+                                  }
+                                ],
+                                "first_column": 7,
+                                "first_lineno": 11,
+                                "last_column": 28,
+                                "last_lineno": 11,
+                                "text": "let Some(y) = Some(1)",
+                                "type": "LET_CONDITION"
+                              }
+                            },
+                            {
+                              "Node": {
+                                "children": [
+                                  {
+                                    "Node": {
+                                      "children": [
+                                        {
+                                          "String": "println"
+                                        }
+                                      ],
+                                      "first_column": 8,
+                                      "first_lineno": 12,
+                                      "last_column": 15,
+                                      "last_lineno": 12,
+                                      "text": "println",
+                                      "type": "LVAR"
+                                    }
+                                  },
+                                  {
+                                    "Node": {
+                                      "children": [
+                                        {
+                                          "Node": {
+                                            "children": [
+                                              {
+                                                "String": "\"{}\""
+                                              }
+                                            ],
+                                            "first_column": 17,
+                                            "first_lineno": 12,
+                                            "last_column": 21,
+                                            "last_lineno": 12,
+                                            "text": "\"{}\"",
+                                            "type": "STR"
+                                          }
+                                        },
+                                        {
+                                          "Node": {
+                                            "children": [
+                                              {
+                                                "String": "y"
+                                              }
+                                            ],
+                                            "first_column": 23,
+                                            "first_lineno": 12,
+                                            "last_column": 24,
+                                            "last_lineno": 12,
+                                            "text": "y",
+                                            "type": "LVAR"
+                                          }
+                                        }
+                                      ],
+                                      "first_column": 16,
+                                      "first_lineno": 12,
+                                      "last_column": 25,
+                                      "last_lineno": 12,
+                                      "text": "(\"{}\", y)",
+                                      "type": "TOKEN_TREE"
+                                    }
+                                  }
+                                ],
+                                "first_column": 8,
+                                "first_lineno": 12,
+                                "last_column": 25,
+                                "last_lineno": 12,
+                                "text": "println!(\"{}\", y)",
+                                "type": "MACRO_INVOCATION"
+                              }
+                            },
+                            "Nil"
+                          ],
+                          "first_column": 4,
+                          "first_lineno": 11,
+                          "last_column": 5,
+                          "last_lineno": 13,
+                          "text": "if let Some(y) = Some(1) {\n        println!(\"{}\", y);\n    }",
+                          "type": "IF"
+                        }
+                      }
+                    ],
+                    "first_column": 10,
+                    "first_lineno": 1,
+                    "last_column": 1,
+                    "last_lineno": 14,
+                    "text": "{\n    let x = match 1 {\n        1 => 2,\n        _ => 3,\n    };\n    \n    loop {\n        break;\n    }\n    \n    if let Some(y) = Some(1) {\n        println!(\"{}\", y);\n    }\n}",
+                    "type": "BLOCK"
+                  }
+                }
+              ],
+              "first_column": 10,
+              "first_lineno": 1,
+              "last_column": 1,
+              "last_lineno": 14,
+              "text": "{\n    let x = match 1 {\n        1 => 2,\n        _ => 3,\n    };\n    \n    loop {\n        break;\n    }\n    \n    if let Some(y) = Some(1) {\n        println!(\"{}\", y);\n    }\n}",
+              "type": "SCOPE"
+            }
+          }
+        ],
+        "first_column": 0,
+        "first_lineno": 1,
+        "last_column": 1,
+        "last_lineno": 14,
+        "text": "fn main() {\n    let x = match 1 {\n        1 => 2,\n        _ => 3,\n    };\n    \n    loop {\n        break;\n    }\n    \n    if let Some(y) = Some(1) {\n        println!(\"{}\", y);\n    }\n}",
+        "type": "DEFN"
+      }
+    }
+  ],
+  "first_column": 0,
+  "first_lineno": 1,
+  "last_column": 0,
+  "last_lineno": 15,
+  "text": "fn main() {\n    let x = match 1 {\n        1 => 2,\n        _ => 3,\n    };\n    \n    loop {\n        break;\n    }\n    \n    if let Some(y) = Some(1) {\n        println!(\"{}\", y);\n    }\n}\n",
+  "type": "ROOT"
+}

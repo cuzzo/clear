@@ -1,0 +1,208 @@
+{
+  "array_shapes": [],
+  "fields": [
+    {
+      "declared_type": "number",
+      "id": "typescript\u0000/home/yahn/cheat/gems/fact-mine/examples/profile/typescript_sample.ts\u0000Database\u0000field\u0000port",
+      "language": "typescript",
+      "line": 4,
+      "name": "port",
+      "owner": "Database",
+      "path": "/home/yahn/cheat/gems/fact-mine/examples/profile/typescript_sample.ts",
+      "source": "syntax",
+      "span": [
+        4,
+        4,
+        4,
+        30
+      ],
+      "static_origin": "state_declaration"
+    },
+    {
+      "declared_type": "Database",
+      "id": "typescript\u0000/home/yahn/cheat/gems/fact-mine/examples/profile/typescript_sample.ts\u0000Greeter\u0000field\u0000_db",
+      "language": "typescript",
+      "line": 8,
+      "name": "_db",
+      "owner": "Greeter",
+      "path": "/home/yahn/cheat/gems/fact-mine/examples/profile/typescript_sample.ts",
+      "source": "syntax",
+      "span": [
+        8,
+        4,
+        8,
+        25
+      ],
+      "static_origin": "state_declaration"
+    }
+  ],
+  "hash_shapes": [],
+  "methods": [
+    {
+      "key": [
+        "Greeter",
+        "constructor",
+        "instance"
+      ],
+      "kind": "instance",
+      "language": "typescript",
+      "line": 9,
+      "name": "constructor",
+      "owner": "Greeter",
+      "params": [
+        "db"
+      ],
+      "path": "/home/yahn/cheat/gems/fact-mine/examples/profile/typescript_sample.ts",
+      "signature": "constructor(db: Database) {",
+      "source": {
+        "signature": "constructor(db: Database) {",
+        "type_system": "typescript"
+      },
+      "span": [
+        9,
+        4,
+        11,
+        5
+      ]
+    },
+    {
+      "key": [
+        "Greeter",
+        "hello",
+        "instance"
+      ],
+      "kind": "instance",
+      "language": "typescript",
+      "line": 13,
+      "name": "hello",
+      "owner": "Greeter",
+      "params": [
+        "name"
+      ],
+      "path": "/home/yahn/cheat/gems/fact-mine/examples/profile/typescript_sample.ts",
+      "signature": "public hello(name: string): string {",
+      "source": {
+        "signature": "public hello(name: string): string {",
+        "type_system": "typescript"
+      },
+      "span": [
+        13,
+        4,
+        15,
+        5
+      ]
+    }
+  ],
+  "signatures": {
+    "Greeter\u0000constructor": "constructor(db: Database) {",
+    "Greeter\u0000hello": "public hello(name: string): string {"
+  },
+  "state_param_origins": {},
+  "state_protocols": {},
+  "state_type_edges": [
+    {
+      "kind": "state_type",
+      "label": "state _db",
+      "source": "Greeter",
+      "target": "Database",
+      "weight": 1
+    }
+  ],
+  "state_type_records": [
+    {
+      "declared_type": "number",
+      "field": "port",
+      "key": "Database\u0000port",
+      "language": "typescript",
+      "line": 4,
+      "owner": "Database",
+      "path": "/home/yahn/cheat/gems/fact-mine/examples/profile/typescript_sample.ts",
+      "span": [
+        4,
+        4,
+        4,
+        30
+      ]
+    },
+    {
+      "declared_type": "Database",
+      "field": "_db",
+      "key": "Greeter\u0000_db",
+      "language": "typescript",
+      "line": 8,
+      "owner": "Greeter",
+      "path": "/home/yahn/cheat/gems/fact-mine/examples/profile/typescript_sample.ts",
+      "span": [
+        8,
+        4,
+        8,
+        25
+      ]
+    }
+  ],
+  "state_types": {
+    "Database\u0000port": "number",
+    "Greeter\u0000_db": "Database"
+  },
+  "type_definitions": [
+    {
+      "id": "typescript\u0000/home/yahn/cheat/gems/fact-mine/examples/profile/typescript_sample.ts\u0000Greeter\u0000method_signature\u0000constructor\u00009\u0000typescript",
+      "kind": "method_signature",
+      "language": "typescript",
+      "line": 9,
+      "name": "constructor",
+      "owner": "Greeter",
+      "params": [
+        {
+          "name": "db",
+          "type": "Database"
+        }
+      ],
+      "path": "/home/yahn/cheat/gems/fact-mine/examples/profile/typescript_sample.ts",
+      "signature": "constructor(db: Database) {",
+      "type_system": "typescript"
+    },
+    {
+      "id": "typescript\u0000/home/yahn/cheat/gems/fact-mine/examples/profile/typescript_sample.ts\u0000Greeter\u0000method_signature\u0000hello\u000013\u0000typescript",
+      "kind": "method_signature",
+      "language": "typescript",
+      "line": 13,
+      "name": "hello",
+      "owner": "Greeter",
+      "params": [
+        {
+          "name": "name",
+          "type": "string"
+        }
+      ],
+      "path": "/home/yahn/cheat/gems/fact-mine/examples/profile/typescript_sample.ts",
+      "return_type": "string {",
+      "signature": "public hello(name: string): string {",
+      "type_system": "typescript"
+    },
+    {
+      "declared_type": "number",
+      "id": "typescript\u0000/home/yahn/cheat/gems/fact-mine/examples/profile/typescript_sample.ts\u0000Database\u0000state_field\u0000port\u00004\u0000typescript",
+      "kind": "state_field",
+      "language": "typescript",
+      "line": 4,
+      "name": "port",
+      "owner": "Database",
+      "path": "/home/yahn/cheat/gems/fact-mine/examples/profile/typescript_sample.ts",
+      "source": "syntax",
+      "type_system": "typescript"
+    },
+    {
+      "declared_type": "Database",
+      "id": "typescript\u0000/home/yahn/cheat/gems/fact-mine/examples/profile/typescript_sample.ts\u0000Greeter\u0000state_field\u0000_db\u00008\u0000typescript",
+      "kind": "state_field",
+      "language": "typescript",
+      "line": 8,
+      "name": "_db",
+      "owner": "Greeter",
+      "path": "/home/yahn/cheat/gems/fact-mine/examples/profile/typescript_sample.ts",
+      "source": "syntax",
+      "type_system": "typescript"
+    }
+  ]
+}

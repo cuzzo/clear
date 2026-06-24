@@ -53,6 +53,11 @@ class PythonSyntaxFactsCore:
 
     def _normalize(self, value: str | None = None):
         cleaned = value.strip() if value is not None else "missing"
+        chained = "hello" "world"
+        try:
+            self.count += 1
+        finally:
+            pass
         return cleaned
 
     def generator(self, values):
@@ -61,5 +66,11 @@ class PythonSyntaxFactsCore:
 
     def simple_with(self, resource):
         with resource:
+            pass
+
+    def options(self, a, b=1, *args, c=2, **kwargs):
+        try:
+            return a + b
+        finally:
             pass
 

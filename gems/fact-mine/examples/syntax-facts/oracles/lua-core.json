@@ -324,20 +324,20 @@
           "span": [
             40,
             0,
-            44,
+            45,
             3
           ],
           "visibility": "public"
         },
         {
-          "line": 46,
+          "line": 47,
           "name": "ready",
           "owner": "LuaSyntaxFactsCore",
           "params": [],
           "span": [
-            46,
+            47,
             0,
-            48,
+            49,
             3
           ],
           "visibility": "public"
@@ -427,13 +427,13 @@
         {
           "field": "count",
           "function": "ready",
-          "line": 47,
+          "line": 48,
           "owner": "LuaSyntaxFactsCore",
           "receiver": "self",
           "span": [
-            47,
+            48,
             9,
-            47,
+            48,
             19
           ]
         },
@@ -531,13 +531,13 @@
         {
           "field": "status",
           "function": "audit",
-          "line": 43,
+          "line": 44,
           "owner": "LuaSyntaxFactsCore",
           "receiver": "self",
           "span": [
-            43,
+            44,
             9,
-            43,
+            44,
             20
           ]
         },

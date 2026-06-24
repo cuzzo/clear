@@ -113,9 +113,6 @@ impl<'a> FunctionLcom<'a> {
             summary.statements.len(),
             terminal_join,
         );
-        if score < self.min_score {
-            return None;
-        }
 
         let at = format!("{}:{}:{}", summary.file, summary.name, summary.line);
         let mut spans = BTreeMap::new();
@@ -157,11 +154,7 @@ impl<'a> FunctionLcom<'a> {
         &self,
         summary: &'m local_flow::MethodSummary,
     ) -> &'m [local_flow::Statement] {
-        if summary.statements.len() <= 1 {
-            &[]
-        } else {
-            &summary.statements[..summary.statements.len() - 1]
-        }
+        &summary.statements[..summary.statements.len() - 1]
     }
 
     fn terminal_join(
@@ -169,9 +162,7 @@ impl<'a> FunctionLcom<'a> {
         summary: &local_flow::MethodSummary,
         pre_components: &[Component],
     ) -> bool {
-        let Some(terminal) = summary.statements.last() else {
-            return false;
-        };
+        let terminal = summary.statements.last().unwrap();
         let mut component_index = BTreeMap::new();
         for (index, component) in pre_components.iter().enumerate() {
             for name in &component.vars {
@@ -261,11 +252,9 @@ impl<'a> FunctionLcom<'a> {
                 }
                 visited.insert(current.clone());
                 component.insert(current.clone());
-                if let Some(neighbors) = adjacency.get(&current) {
-                    for neighbor in neighbors {
-                        if !visited.contains(neighbor) {
-                            stack.push(neighbor.clone());
-                        }
+                for neighbor in &adjacency[&current] {
+                    if !visited.contains(neighbor) {
+                        stack.push(neighbor.clone());
                     }
                 }
             }
@@ -309,7 +298,14 @@ mod tests {
                 { "index": 0, "line": 1, "end_line": 1, "span": [1,2,3,4], "source": "a = 1", "reads": [], "writes": ["a"], "dependencies": [], "co_uses": [] },
                 { "index": 1, "line": 2, "end_line": 2, "span": [1,2,3,4], "source": "b = 2", "reads": [], "writes": ["b"], "dependencies": [], "co_uses": [] },
                 { "index": 2, "line": 3, "end_line": 3, "span": [1,2,3,4], "source": "c = 3", "reads": [], "writes": ["c"], "dependencies": [], "co_uses": [] },
-                { "index": 3, "line": 4, "end_line": 4, "span": [1,2,3,4], "source": "d = 4", "reads": [], "writes": ["d"], "dependencies": [], "co_uses": [] }
+                { "index": 3, "line": 4, "end_line": 4, "span": [1,2,3,4], "source": "d = 4", "reads": [], "writes": ["d"], "dependencies": [], "co_uses": [] },
+                { "index": 4, "line": 5, "end_line": 5, "span": [1,2,3,4], "source": "d = 4", "reads": [], "writes": ["d"], "dependencies": [], "co_uses": [] },
+                { "index": 5, "line": 6, "end_line": 6, "span": [1,2,3,4], "source": "d = 4", "reads": [], "writes": ["d"], "dependencies": [], "co_uses": [] },
+                { "index": 6, "line": 7, "end_line": 7, "span": [1,2,3,4], "source": "d = 4", "reads": [], "writes": ["d"], "dependencies": [], "co_uses": [] },
+                { "index": 7, "line": 8, "end_line": 8, "span": [1,2,3,4], "source": "d = 4", "reads": [], "writes": ["d"], "dependencies": [], "co_uses": [] },
+                { "index": 8, "line": 9, "end_line": 9, "span": [1,2,3,4], "source": "d = 4", "reads": [], "writes": ["d"], "dependencies": [], "co_uses": [] },
+                { "index": 9, "line": 10, "end_line": 10, "span": [1,2,3,4], "source": "d = 4", "reads": [], "writes": ["d"], "dependencies": [], "co_uses": [] },
+                { "index": 10, "line": 11, "end_line": 11, "span": [1,2,3,4], "source": "d = 4", "reads": [], "writes": ["d"], "dependencies": [], "co_uses": [] }
             ], "boundaries": []
         })).unwrap();
 

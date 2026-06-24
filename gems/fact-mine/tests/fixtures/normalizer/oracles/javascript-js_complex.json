@@ -1,0 +1,504 @@
+{
+  "children": [
+    {
+      "Node": {
+        "children": [
+          {
+            "Node": {
+              "children": [
+                {
+                  "Node": {
+                    "children": [
+                      {
+                        "String": "{ a, b: [c, d] }"
+                      },
+                      {
+                        "Node": {
+                          "children": [
+                            {
+                              "String": "obj"
+                            }
+                          ],
+                          "first_column": 25,
+                          "first_lineno": 1,
+                          "last_column": 28,
+                          "last_lineno": 1,
+                          "text": "obj",
+                          "type": "LVAR"
+                        }
+                      }
+                    ],
+                    "first_column": 6,
+                    "first_lineno": 1,
+                    "last_column": 28,
+                    "last_lineno": 1,
+                    "text": "{ a, b: [c, d] } = obj",
+                    "type": "LASGN"
+                  }
+                }
+              ],
+              "first_column": 6,
+              "first_lineno": 1,
+              "last_column": 28,
+              "last_lineno": 1,
+              "text": "{ a, b: [c, d] } = obj",
+              "type": "VARIABLE_DECLARATOR"
+            }
+          }
+        ],
+        "first_column": 0,
+        "first_lineno": 1,
+        "last_column": 29,
+        "last_lineno": 1,
+        "text": "const { a, b: [c, d] } = obj;",
+        "type": "LEXICAL_DECLARATION"
+      }
+    },
+    {
+      "Node": {
+        "children": [
+          {
+            "Node": {
+              "children": [
+                {
+                  "Node": {
+                    "children": [
+                      {
+                        "String": "fn"
+                      },
+                      {
+                        "Node": {
+                          "children": [
+                            {
+                              "Node": {
+                                "children": [
+                                  "Nil",
+                                  "Nil",
+                                  {
+                                    "Node": {
+                                      "children": [
+                                        {
+                                          "Node": {
+                                            "children": [
+                                              {
+                                                "String": "x"
+                                              }
+                                            ],
+                                            "first_column": 21,
+                                            "first_lineno": 2,
+                                            "last_column": 22,
+                                            "last_lineno": 2,
+                                            "text": "x",
+                                            "type": "LVAR"
+                                          }
+                                        },
+                                        {
+                                          "Symbol": "+"
+                                        },
+                                        {
+                                          "Node": {
+                                            "children": [
+                                              {
+                                                "Node": {
+                                                  "children": [
+                                                    {
+                                                      "String": "y"
+                                                    }
+                                                  ],
+                                                  "first_column": 25,
+                                                  "first_lineno": 2,
+                                                  "last_column": 26,
+                                                  "last_lineno": 2,
+                                                  "text": "y",
+                                                  "type": "LVAR"
+                                                }
+                                              }
+                                            ],
+                                            "first_column": 25,
+                                            "first_lineno": 2,
+                                            "last_column": 26,
+                                            "last_lineno": 2,
+                                            "text": "y",
+                                            "type": "LIST"
+                                          }
+                                        }
+                                      ],
+                                      "first_column": 21,
+                                      "first_lineno": 2,
+                                      "last_column": 26,
+                                      "last_lineno": 2,
+                                      "text": "x + y",
+                                      "type": "OPCALL"
+                                    }
+                                  }
+                                ],
+                                "first_column": 21,
+                                "first_lineno": 2,
+                                "last_column": 26,
+                                "last_lineno": 2,
+                                "text": "x + y",
+                                "type": "SCOPE"
+                              }
+                            }
+                          ],
+                          "first_column": 11,
+                          "first_lineno": 2,
+                          "last_column": 26,
+                          "last_lineno": 2,
+                          "text": "(x, y) => x + y",
+                          "type": "LAMBDA"
+                        }
+                      }
+                    ],
+                    "first_column": 6,
+                    "first_lineno": 2,
+                    "last_column": 26,
+                    "last_lineno": 2,
+                    "text": "fn = (x, y) => x + y",
+                    "type": "LASGN"
+                  }
+                }
+              ],
+              "first_column": 6,
+              "first_lineno": 2,
+              "last_column": 26,
+              "last_lineno": 2,
+              "text": "fn = (x, y) => x + y",
+              "type": "VARIABLE_DECLARATOR"
+            }
+          }
+        ],
+        "first_column": 0,
+        "first_lineno": 2,
+        "last_column": 27,
+        "last_lineno": 2,
+        "text": "const fn = (x, y) => x + y;",
+        "type": "LEXICAL_DECLARATION"
+      }
+    },
+    {
+      "Node": {
+        "children": [
+          {
+            "Node": {
+              "children": [
+                {
+                  "Node": {
+                    "children": [
+                      {
+                        "String": "fn2"
+                      },
+                      {
+                        "Node": {
+                          "children": [
+                            {
+                              "Node": {
+                                "children": [
+                                  "Nil",
+                                  "Nil",
+                                  {
+                                    "Node": {
+                                      "children": [
+                                        {
+                                          "Node": {
+                                            "children": [
+                                              {
+                                                "Node": {
+                                                  "children": [
+                                                    {
+                                                      "String": "x"
+                                                    }
+                                                  ],
+                                                  "first_column": 26,
+                                                  "first_lineno": 3,
+                                                  "last_column": 27,
+                                                  "last_lineno": 3,
+                                                  "text": "x",
+                                                  "type": "LVAR"
+                                                }
+                                              },
+                                              {
+                                                "Symbol": "*"
+                                              },
+                                              {
+                                                "Node": {
+                                                  "children": [
+                                                    {
+                                                      "Node": {
+                                                        "children": [],
+                                                        "first_column": 30,
+                                                        "first_lineno": 3,
+                                                        "last_column": 31,
+                                                        "last_lineno": 3,
+                                                        "text": "2",
+                                                        "type": "NUMBER"
+                                                      }
+                                                    }
+                                                  ],
+                                                  "first_column": 30,
+                                                  "first_lineno": 3,
+                                                  "last_column": 31,
+                                                  "last_lineno": 3,
+                                                  "text": "2",
+                                                  "type": "LIST"
+                                                }
+                                              }
+                                            ],
+                                            "first_column": 26,
+                                            "first_lineno": 3,
+                                            "last_column": 31,
+                                            "last_lineno": 3,
+                                            "text": "x * 2",
+                                            "type": "OPCALL"
+                                          }
+                                        }
+                                      ],
+                                      "first_column": 19,
+                                      "first_lineno": 3,
+                                      "last_column": 32,
+                                      "last_lineno": 3,
+                                      "text": "return x * 2;",
+                                      "type": "RETURN"
+                                    }
+                                  }
+                                ],
+                                "first_column": 19,
+                                "first_lineno": 3,
+                                "last_column": 32,
+                                "last_lineno": 3,
+                                "text": "return x * 2;",
+                                "type": "SCOPE"
+                              }
+                            }
+                          ],
+                          "first_column": 12,
+                          "first_lineno": 3,
+                          "last_column": 34,
+                          "last_lineno": 3,
+                          "text": "x => { return x * 2; }",
+                          "type": "LAMBDA"
+                        }
+                      }
+                    ],
+                    "first_column": 6,
+                    "first_lineno": 3,
+                    "last_column": 34,
+                    "last_lineno": 3,
+                    "text": "fn2 = x => { return x * 2; }",
+                    "type": "LASGN"
+                  }
+                }
+              ],
+              "first_column": 6,
+              "first_lineno": 3,
+              "last_column": 34,
+              "last_lineno": 3,
+              "text": "fn2 = x => { return x * 2; }",
+              "type": "VARIABLE_DECLARATOR"
+            }
+          }
+        ],
+        "first_column": 0,
+        "first_lineno": 3,
+        "last_column": 35,
+        "last_lineno": 3,
+        "text": "const fn2 = x => { return x * 2; };",
+        "type": "LEXICAL_DECLARATION"
+      }
+    },
+    {
+      "Node": {
+        "children": [
+          {
+            "Node": {
+              "children": [
+                {
+                  "Node": {
+                    "children": [
+                      {
+                        "String": "z"
+                      },
+                      {
+                        "Node": {
+                          "children": [
+                            {
+                              "Node": {
+                                "children": [
+                                  {
+                                    "String": "cond"
+                                  }
+                                ],
+                                "first_column": 10,
+                                "first_lineno": 4,
+                                "last_column": 14,
+                                "last_lineno": 4,
+                                "text": "cond",
+                                "type": "LVAR"
+                              }
+                            },
+                            {
+                              "Node": {
+                                "children": [],
+                                "first_column": 17,
+                                "first_lineno": 4,
+                                "last_column": 21,
+                                "last_lineno": 4,
+                                "text": "true",
+                                "type": "TRUE"
+                              }
+                            },
+                            {
+                              "Node": {
+                                "children": [],
+                                "first_column": 24,
+                                "first_lineno": 4,
+                                "last_column": 29,
+                                "last_lineno": 4,
+                                "text": "false",
+                                "type": "FALSE"
+                              }
+                            }
+                          ],
+                          "first_column": 10,
+                          "first_lineno": 4,
+                          "last_column": 29,
+                          "last_lineno": 4,
+                          "text": "cond ? true : false",
+                          "type": "IF"
+                        }
+                      }
+                    ],
+                    "first_column": 6,
+                    "first_lineno": 4,
+                    "last_column": 29,
+                    "last_lineno": 4,
+                    "text": "z = cond ? true : false",
+                    "type": "LASGN"
+                  }
+                }
+              ],
+              "first_column": 6,
+              "first_lineno": 4,
+              "last_column": 29,
+              "last_lineno": 4,
+              "text": "z = cond ? true : false",
+              "type": "VARIABLE_DECLARATOR"
+            }
+          }
+        ],
+        "first_column": 0,
+        "first_lineno": 4,
+        "last_column": 30,
+        "last_lineno": 4,
+        "text": "const z = cond ? true : false;",
+        "type": "LEXICAL_DECLARATION"
+      }
+    },
+    {
+      "Node": {
+        "children": [
+          {
+            "Node": {
+              "children": [
+                {
+                  "Symbol": "B"
+                }
+              ],
+              "first_column": 6,
+              "first_lineno": 6,
+              "last_column": 7,
+              "last_lineno": 6,
+              "text": "B",
+              "type": "CONST"
+            }
+          },
+          "Nil",
+          {
+            "Node": {
+              "children": [
+                "Nil",
+                "Nil",
+                {
+                  "Node": {
+                    "children": [
+                      {
+                        "Symbol": "constructor"
+                      },
+                      {
+                        "Node": {
+                          "children": [
+                            "Nil",
+                            "Nil",
+                            {
+                              "Node": {
+                                "children": [
+                                  {
+                                    "Node": {
+                                      "children": [
+                                        "Nil"
+                                      ],
+                                      "first_column": 4,
+                                      "first_lineno": 8,
+                                      "last_column": 9,
+                                      "last_lineno": 8,
+                                      "text": "super",
+                                      "type": "SUPER"
+                                    }
+                                  },
+                                  {
+                                    "Symbol": "call"
+                                  },
+                                  "Nil"
+                                ],
+                                "first_column": 4,
+                                "first_lineno": 8,
+                                "last_column": 11,
+                                "last_lineno": 8,
+                                "text": "super()",
+                                "type": "CALL"
+                              }
+                            }
+                          ],
+                          "first_column": 4,
+                          "first_lineno": 8,
+                          "last_column": 11,
+                          "last_lineno": 8,
+                          "text": "super()",
+                          "type": "SCOPE"
+                        }
+                      }
+                    ],
+                    "first_column": 2,
+                    "first_lineno": 7,
+                    "last_column": 3,
+                    "last_lineno": 9,
+                    "text": "constructor() {\n    super();\n  }",
+                    "type": "DEFN"
+                  }
+                }
+              ],
+              "first_column": 2,
+              "first_lineno": 7,
+              "last_column": 3,
+              "last_lineno": 9,
+              "text": "constructor() {\n    super();\n  }",
+              "type": "SCOPE"
+            }
+          }
+        ],
+        "first_column": 0,
+        "first_lineno": 6,
+        "last_column": 1,
+        "last_lineno": 10,
+        "text": "class B {\n  constructor() {\n    super();\n  }\n}",
+        "type": "CLASS"
+      }
+    }
+  ],
+  "first_column": 0,
+  "first_lineno": 1,
+  "last_column": 0,
+  "last_lineno": 11,
+  "text": "const { a, b: [c, d] } = obj;\nconst fn = (x, y) => x + y;\nconst fn2 = x => { return x * 2; };\nconst z = cond ? true : false;\n\nclass B {\n  constructor() {\n    super();\n  }\n}\n",
+  "type": "ROOT"
+}

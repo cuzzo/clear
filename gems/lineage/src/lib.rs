@@ -3,19 +3,33 @@
 //! The crate is intentionally split around replaceable boundaries:
 //! VCS traversal, source boundary extraction, analysis, and storage.
 
+#[path = "db/engine.rs"]
 pub mod engine;
+#[path = "db/extract.rs"]
 pub mod extract;
+#[path = "db/git.rs"]
 pub mod git;
+#[path = "db/hazard.rs"]
 pub mod hazard;
+#[path = "ui/lsp.rs"]
 pub mod lsp;
+#[path = "db/model.rs"]
 pub mod model;
+#[path = "db/mutant.rs"]
 pub mod mutant;
+#[path = "db/quality.rs"]
 pub mod quality;
+#[path = "db/sarif.rs"]
 pub mod sarif;
+#[path = "db/stack_trace.rs"]
 pub mod stack_trace;
+#[path = "db/storage.rs"]
 pub mod storage;
+#[path = "db/test_exposure.rs"]
 pub mod test_exposure;
+#[path = "ui/ui.rs"]
 pub mod ui;
+#[path = "db/vcs.rs"]
 pub mod vcs;
 
 pub use engine::{EngineStats, LineageEngine};

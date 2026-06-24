@@ -195,6 +195,8 @@ fn main() -> Result<()> {
                 stats.fixes,
                 stats.changes
             );
+            let storage = Storage::open(&db)?;
+            storage.refresh_ui_summaries()?;
         }
         Command::Summary {
             db,

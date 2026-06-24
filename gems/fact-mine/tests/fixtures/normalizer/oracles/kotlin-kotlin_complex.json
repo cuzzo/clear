@@ -1,0 +1,736 @@
+{
+  "children": [
+    {
+      "Node": {
+        "children": [
+          {
+            "Node": {
+              "children": [
+                {
+                  "Symbol": "Billing"
+                }
+              ],
+              "first_column": 6,
+              "first_lineno": 1,
+              "last_column": 13,
+              "last_lineno": 1,
+              "text": "Billing",
+              "type": "CONST"
+            }
+          },
+          "Nil",
+          {
+            "Node": {
+              "children": [
+                "Nil",
+                "Nil",
+                {
+                  "Node": {
+                    "children": [
+                      {
+                        "Node": {
+                          "children": [
+                            {
+                              "Symbol": "mixed"
+                            },
+                            {
+                              "Node": {
+                                "children": [
+                                  "Nil",
+                                  "Nil",
+                                  {
+                                    "Node": {
+                                      "children": [
+                                        {
+                                          "Node": {
+                                            "children": [
+                                              {
+                                                "Node": {
+                                                  "children": [
+                                                    {
+                                                      "String": "result"
+                                                    },
+                                                    {
+                                                      "Node": {
+                                                        "children": [
+                                                          {
+                                                            "Node": {
+                                                              "children": [
+                                                                {
+                                                                  "Node": {
+                                                                    "children": [
+                                                                      {
+                                                                        "Node": {
+                                                                          "children": [
+                                                                            {
+                                                                              "String": "price"
+                                                                            }
+                                                                          ],
+                                                                          "first_column": 12,
+                                                                          "first_lineno": 4,
+                                                                          "last_column": 17,
+                                                                          "last_lineno": 4,
+                                                                          "text": "price",
+                                                                          "type": "LVAR"
+                                                                        }
+                                                                      },
+                                                                      {
+                                                                        "Symbol": "+"
+                                                                      },
+                                                                      {
+                                                                        "Node": {
+                                                                          "children": [
+                                                                            {
+                                                                              "Node": {
+                                                                                "children": [
+                                                                                  {
+                                                                                    "String": "tax"
+                                                                                  }
+                                                                                ],
+                                                                                "first_column": 20,
+                                                                                "first_lineno": 4,
+                                                                                "last_column": 23,
+                                                                                "last_lineno": 4,
+                                                                                "text": "tax",
+                                                                                "type": "LVAR"
+                                                                              }
+                                                                            }
+                                                                          ],
+                                                                          "first_column": 20,
+                                                                          "first_lineno": 4,
+                                                                          "last_column": 23,
+                                                                          "last_lineno": 4,
+                                                                          "text": "tax",
+                                                                          "type": "LIST"
+                                                                        }
+                                                                      }
+                                                                    ],
+                                                                    "first_column": 12,
+                                                                    "first_lineno": 4,
+                                                                    "last_column": 23,
+                                                                    "last_lineno": 4,
+                                                                    "text": "price + tax",
+                                                                    "type": "OPCALL"
+                                                                  }
+                                                                }
+                                                              ],
+                                                              "first_column": 25,
+                                                              "first_lineno": 3,
+                                                              "last_column": 9,
+                                                              "last_lineno": 5,
+                                                              "text": "{\n            price + tax\n        }",
+                                                              "type": "BLOCK"
+                                                            }
+                                                          },
+                                                          {
+                                                            "Node": {
+                                                              "children": [
+                                                                {
+                                                                  "Node": {
+                                                                    "children": [
+                                                                      {
+                                                                        "String": "e"
+                                                                      }
+                                                                    ],
+                                                                    "first_column": 17,
+                                                                    "first_lineno": 5,
+                                                                    "last_column": 18,
+                                                                    "last_lineno": 5,
+                                                                    "text": "e",
+                                                                    "type": "LVAR"
+                                                                  }
+                                                                },
+                                                                {
+                                                                  "Node": {
+                                                                    "children": [
+                                                                      {
+                                                                        "Node": {
+                                                                          "children": [
+                                                                            {
+                                                                              "String": "Exception"
+                                                                            }
+                                                                          ],
+                                                                          "first_column": 20,
+                                                                          "first_lineno": 5,
+                                                                          "last_column": 29,
+                                                                          "last_lineno": 5,
+                                                                          "text": "Exception",
+                                                                          "type": "LVAR"
+                                                                        }
+                                                                      }
+                                                                    ],
+                                                                    "first_column": 20,
+                                                                    "first_lineno": 5,
+                                                                    "last_column": 29,
+                                                                    "last_lineno": 5,
+                                                                    "text": "Exception",
+                                                                    "type": "USER_TYPE"
+                                                                  }
+                                                                },
+                                                                {
+                                                                  "Node": {
+                                                                    "children": [
+                                                                      {
+                                                                        "Node": {
+                                                                          "children": [],
+                                                                          "first_column": 12,
+                                                                          "first_lineno": 6,
+                                                                          "last_column": 13,
+                                                                          "last_lineno": 6,
+                                                                          "text": "0",
+                                                                          "type": "NUMBER_LITERAL"
+                                                                        }
+                                                                      }
+                                                                    ],
+                                                                    "first_column": 31,
+                                                                    "first_lineno": 5,
+                                                                    "last_column": 9,
+                                                                    "last_lineno": 7,
+                                                                    "text": "{\n            0\n        }",
+                                                                    "type": "BLOCK"
+                                                                  }
+                                                                }
+                                                              ],
+                                                              "first_column": 10,
+                                                              "first_lineno": 5,
+                                                              "last_column": 9,
+                                                              "last_lineno": 7,
+                                                              "text": "catch (e: Exception) {\n            0\n        }",
+                                                              "type": "CATCH_BLOCK"
+                                                            }
+                                                          },
+                                                          {
+                                                            "Node": {
+                                                              "children": [
+                                                                {
+                                                                  "Node": {
+                                                                    "children": [
+                                                                      {
+                                                                        "Node": {
+                                                                          "children": [
+                                                                            {
+                                                                              "Symbol": "println"
+                                                                            },
+                                                                            {
+                                                                              "Node": {
+                                                                                "children": [
+                                                                                  {
+                                                                                    "Node": {
+                                                                                      "children": [
+                                                                                        {
+                                                                                          "Node": {
+                                                                                            "children": [
+                                                                                              {
+                                                                                                "String": "\"Done\""
+                                                                                              }
+                                                                                            ],
+                                                                                            "first_column": 20,
+                                                                                            "first_lineno": 8,
+                                                                                            "last_column": 26,
+                                                                                            "last_lineno": 8,
+                                                                                            "text": "\"Done\"",
+                                                                                            "type": "STR"
+                                                                                          }
+                                                                                        }
+                                                                                      ],
+                                                                                      "first_column": 20,
+                                                                                      "first_lineno": 8,
+                                                                                      "last_column": 26,
+                                                                                      "last_lineno": 8,
+                                                                                      "text": "\"Done\"",
+                                                                                      "type": "VALUE_ARGUMENT"
+                                                                                    }
+                                                                                  }
+                                                                                ],
+                                                                                "first_column": 12,
+                                                                                "first_lineno": 8,
+                                                                                "last_column": 27,
+                                                                                "last_lineno": 8,
+                                                                                "text": "println(\"Done\")",
+                                                                                "type": "LIST"
+                                                                              }
+                                                                            }
+                                                                          ],
+                                                                          "first_column": 12,
+                                                                          "first_lineno": 8,
+                                                                          "last_column": 27,
+                                                                          "last_lineno": 8,
+                                                                          "text": "println(\"Done\")",
+                                                                          "type": "FCALL"
+                                                                        }
+                                                                      }
+                                                                    ],
+                                                                    "first_column": 18,
+                                                                    "first_lineno": 7,
+                                                                    "last_column": 9,
+                                                                    "last_lineno": 9,
+                                                                    "text": "{\n            println(\"Done\")\n        }",
+                                                                    "type": "BLOCK"
+                                                                  }
+                                                                }
+                                                              ],
+                                                              "first_column": 10,
+                                                              "first_lineno": 7,
+                                                              "last_column": 9,
+                                                              "last_lineno": 9,
+                                                              "text": "finally {\n            println(\"Done\")\n        }",
+                                                              "type": "FINALLY_BLOCK"
+                                                            }
+                                                          }
+                                                        ],
+                                                        "first_column": 21,
+                                                        "first_lineno": 3,
+                                                        "last_column": 9,
+                                                        "last_lineno": 9,
+                                                        "text": "try {\n            price + tax\n        } catch (e: Exception) {\n            0\n        } finally {\n            println(\"Done\")\n        }",
+                                                        "type": "TRY_EXPRESSION"
+                                                      }
+                                                    }
+                                                  ],
+                                                  "first_column": 8,
+                                                  "first_lineno": 3,
+                                                  "last_column": 9,
+                                                  "last_lineno": 9,
+                                                  "text": "val result = try {\n            price + tax\n        } catch (e: Exception) {\n            0\n        } finally {\n            println(\"Done\")\n        }",
+                                                  "type": "LASGN"
+                                                }
+                                              }
+                                            ],
+                                            "first_column": 8,
+                                            "first_lineno": 3,
+                                            "last_column": 9,
+                                            "last_lineno": 9,
+                                            "text": "val result = try {\n            price + tax\n        } catch (e: Exception) {\n            0\n        } finally {\n            println(\"Done\")\n        }",
+                                            "type": "PROPERTY_DECLARATION"
+                                          }
+                                        },
+                                        {
+                                          "Node": {
+                                            "children": [
+                                              {
+                                                "Node": {
+                                                  "children": [
+                                                    {
+                                                      "String": "result"
+                                                    }
+                                                  ],
+                                                  "first_column": 15,
+                                                  "first_lineno": 10,
+                                                  "last_column": 21,
+                                                  "last_lineno": 10,
+                                                  "text": "result",
+                                                  "type": "LVAR"
+                                                }
+                                              }
+                                            ],
+                                            "first_column": 8,
+                                            "first_lineno": 10,
+                                            "last_column": 21,
+                                            "last_lineno": 10,
+                                            "text": "return result",
+                                            "type": "RETURN"
+                                          }
+                                        }
+                                      ],
+                                      "first_column": 41,
+                                      "first_lineno": 2,
+                                      "last_column": 5,
+                                      "last_lineno": 11,
+                                      "text": "{\n        val result = try {\n            price + tax\n        } catch (e: Exception) {\n            0\n        } finally {\n            println(\"Done\")\n        }\n        return result\n    }",
+                                      "type": "BLOCK"
+                                    }
+                                  }
+                                ],
+                                "first_column": 41,
+                                "first_lineno": 2,
+                                "last_column": 5,
+                                "last_lineno": 11,
+                                "text": "{\n        val result = try {\n            price + tax\n        } catch (e: Exception) {\n            0\n        } finally {\n            println(\"Done\")\n        }\n        return result\n    }",
+                                "type": "SCOPE"
+                              }
+                            }
+                          ],
+                          "first_column": 4,
+                          "first_lineno": 2,
+                          "last_column": 5,
+                          "last_lineno": 11,
+                          "text": "fun mixed(price: Int, tax: Int): Int {\n        val result = try {\n            price + tax\n        } catch (e: Exception) {\n            0\n        } finally {\n            println(\"Done\")\n        }\n        return result\n    }",
+                          "type": "DEFN"
+                        }
+                      },
+                      {
+                        "Node": {
+                          "children": [
+                            {
+                              "Symbol": "loops"
+                            },
+                            {
+                              "Node": {
+                                "children": [
+                                  "Nil",
+                                  "Nil",
+                                  {
+                                    "Node": {
+                                      "children": [
+                                        {
+                                          "Node": {
+                                            "children": [
+                                              {
+                                                "Node": {
+                                                  "children": [
+                                                    {
+                                                      "Node": {
+                                                        "children": [
+                                                          {
+                                                            "String": "i"
+                                                          }
+                                                        ],
+                                                        "first_column": 13,
+                                                        "first_lineno": 14,
+                                                        "last_column": 14,
+                                                        "last_lineno": 14,
+                                                        "text": "i",
+                                                        "type": "LVAR"
+                                                      }
+                                                    }
+                                                  ],
+                                                  "first_column": 13,
+                                                  "first_lineno": 14,
+                                                  "last_column": 14,
+                                                  "last_lineno": 14,
+                                                  "text": "i",
+                                                  "type": "VARIABLE_DECLARATION"
+                                                }
+                                              },
+                                              {
+                                                "Node": {
+                                                  "children": [
+                                                    {
+                                                      "Node": {
+                                                        "children": [
+                                                          {
+                                                            "Node": {
+                                                              "children": [
+                                                                {
+                                                                  "Node": {
+                                                                    "children": [
+                                                                      {
+                                                                        "String": "i"
+                                                                      }
+                                                                    ],
+                                                                    "first_column": 16,
+                                                                    "first_lineno": 15,
+                                                                    "last_column": 17,
+                                                                    "last_lineno": 15,
+                                                                    "text": "i",
+                                                                    "type": "LVAR"
+                                                                  }
+                                                                },
+                                                                {
+                                                                  "Symbol": "%"
+                                                                },
+                                                                {
+                                                                  "Node": {
+                                                                    "children": [
+                                                                      {
+                                                                        "Node": {
+                                                                          "children": [],
+                                                                          "first_column": 20,
+                                                                          "first_lineno": 15,
+                                                                          "last_column": 21,
+                                                                          "last_lineno": 15,
+                                                                          "text": "2",
+                                                                          "type": "NUMBER_LITERAL"
+                                                                        }
+                                                                      }
+                                                                    ],
+                                                                    "first_column": 20,
+                                                                    "first_lineno": 15,
+                                                                    "last_column": 21,
+                                                                    "last_lineno": 15,
+                                                                    "text": "2",
+                                                                    "type": "LIST"
+                                                                  }
+                                                                }
+                                                              ],
+                                                              "first_column": 16,
+                                                              "first_lineno": 15,
+                                                              "last_column": 21,
+                                                              "last_lineno": 15,
+                                                              "text": "i % 2",
+                                                              "type": "OPCALL"
+                                                            }
+                                                          },
+                                                          {
+                                                            "Symbol": "=="
+                                                          },
+                                                          {
+                                                            "Node": {
+                                                              "children": [
+                                                                {
+                                                                  "Node": {
+                                                                    "children": [],
+                                                                    "first_column": 25,
+                                                                    "first_lineno": 15,
+                                                                    "last_column": 26,
+                                                                    "last_lineno": 15,
+                                                                    "text": "0",
+                                                                    "type": "NUMBER_LITERAL"
+                                                                  }
+                                                                }
+                                                              ],
+                                                              "first_column": 25,
+                                                              "first_lineno": 15,
+                                                              "last_column": 26,
+                                                              "last_lineno": 15,
+                                                              "text": "0",
+                                                              "type": "LIST"
+                                                            }
+                                                          }
+                                                        ],
+                                                        "first_column": 16,
+                                                        "first_lineno": 15,
+                                                        "last_column": 26,
+                                                        "last_lineno": 15,
+                                                        "text": "i % 2 == 0",
+                                                        "type": "OPCALL"
+                                                      }
+                                                    },
+                                                    {
+                                                      "Node": {
+                                                        "children": [
+                                                          {
+                                                            "String": "continue"
+                                                          }
+                                                        ],
+                                                        "first_column": 28,
+                                                        "first_lineno": 15,
+                                                        "last_column": 36,
+                                                        "last_lineno": 15,
+                                                        "text": "continue",
+                                                        "type": "LVAR"
+                                                      }
+                                                    },
+                                                    "Nil"
+                                                  ],
+                                                  "first_column": 12,
+                                                  "first_lineno": 15,
+                                                  "last_column": 36,
+                                                  "last_lineno": 15,
+                                                  "text": "if (i % 2 == 0) continue",
+                                                  "type": "IF"
+                                                }
+                                              }
+                                            ],
+                                            "first_column": 8,
+                                            "first_lineno": 14,
+                                            "last_column": 9,
+                                            "last_lineno": 16,
+                                            "text": "for (i in 0..10) {\n            if (i % 2 == 0) continue\n        }",
+                                            "type": "FOR"
+                                          }
+                                        },
+                                        {
+                                          "Node": {
+                                            "children": [
+                                              {
+                                                "Node": {
+                                                  "children": [
+                                                    {
+                                                      "String": "x"
+                                                    },
+                                                    {
+                                                      "Node": {
+                                                        "children": [],
+                                                        "first_column": 16,
+                                                        "first_lineno": 17,
+                                                        "last_column": 17,
+                                                        "last_lineno": 17,
+                                                        "text": "0",
+                                                        "type": "NUMBER_LITERAL"
+                                                      }
+                                                    }
+                                                  ],
+                                                  "first_column": 8,
+                                                  "first_lineno": 17,
+                                                  "last_column": 17,
+                                                  "last_lineno": 17,
+                                                  "text": "var x = 0",
+                                                  "type": "LASGN"
+                                                }
+                                              }
+                                            ],
+                                            "first_column": 8,
+                                            "first_lineno": 17,
+                                            "last_column": 17,
+                                            "last_lineno": 17,
+                                            "text": "var x = 0",
+                                            "type": "PROPERTY_DECLARATION"
+                                          }
+                                        },
+                                        {
+                                          "Node": {
+                                            "children": [
+                                              {
+                                                "Node": {
+                                                  "children": [
+                                                    {
+                                                      "Node": {
+                                                        "children": [
+                                                          {
+                                                            "String": "x"
+                                                          }
+                                                        ],
+                                                        "first_column": 15,
+                                                        "first_lineno": 18,
+                                                        "last_column": 16,
+                                                        "last_lineno": 18,
+                                                        "text": "x",
+                                                        "type": "LVAR"
+                                                      }
+                                                    },
+                                                    {
+                                                      "Symbol": "<"
+                                                    },
+                                                    {
+                                                      "Node": {
+                                                        "children": [
+                                                          {
+                                                            "Node": {
+                                                              "children": [],
+                                                              "first_column": 19,
+                                                              "first_lineno": 18,
+                                                              "last_column": 21,
+                                                              "last_lineno": 18,
+                                                              "text": "10",
+                                                              "type": "NUMBER_LITERAL"
+                                                            }
+                                                          }
+                                                        ],
+                                                        "first_column": 19,
+                                                        "first_lineno": 18,
+                                                        "last_column": 21,
+                                                        "last_lineno": 18,
+                                                        "text": "10",
+                                                        "type": "LIST"
+                                                      }
+                                                    }
+                                                  ],
+                                                  "first_column": 15,
+                                                  "first_lineno": 18,
+                                                  "last_column": 21,
+                                                  "last_lineno": 18,
+                                                  "text": "x < 10",
+                                                  "type": "OPCALL"
+                                                }
+                                              },
+                                              {
+                                                "Node": {
+                                                  "children": [
+                                                    {
+                                                      "Node": {
+                                                        "children": [
+                                                          {
+                                                            "Node": {
+                                                              "children": [
+                                                                {
+                                                                  "String": "x"
+                                                                }
+                                                              ],
+                                                              "first_column": 12,
+                                                              "first_lineno": 19,
+                                                              "last_column": 13,
+                                                              "last_lineno": 19,
+                                                              "text": "x",
+                                                              "type": "LVAR"
+                                                            }
+                                                          }
+                                                        ],
+                                                        "first_column": 12,
+                                                        "first_lineno": 19,
+                                                        "last_column": 15,
+                                                        "last_lineno": 19,
+                                                        "text": "x++",
+                                                        "type": "UNARY_EXPRESSION"
+                                                      }
+                                                    }
+                                                  ],
+                                                  "first_column": 23,
+                                                  "first_lineno": 18,
+                                                  "last_column": 9,
+                                                  "last_lineno": 20,
+                                                  "text": "{\n            x++\n        }",
+                                                  "type": "BLOCK"
+                                                }
+                                              }
+                                            ],
+                                            "first_column": 8,
+                                            "first_lineno": 18,
+                                            "last_column": 9,
+                                            "last_lineno": 20,
+                                            "text": "while (x < 10) {\n            x++\n        }",
+                                            "type": "WHILE_STATEMENT"
+                                          }
+                                        }
+                                      ],
+                                      "first_column": 16,
+                                      "first_lineno": 13,
+                                      "last_column": 5,
+                                      "last_lineno": 21,
+                                      "text": "{\n        for (i in 0..10) {\n            if (i % 2 == 0) continue\n        }\n        var x = 0\n        while (x < 10) {\n            x++\n        }\n    }",
+                                      "type": "BLOCK"
+                                    }
+                                  }
+                                ],
+                                "first_column": 16,
+                                "first_lineno": 13,
+                                "last_column": 5,
+                                "last_lineno": 21,
+                                "text": "{\n        for (i in 0..10) {\n            if (i % 2 == 0) continue\n        }\n        var x = 0\n        while (x < 10) {\n            x++\n        }\n    }",
+                                "type": "SCOPE"
+                              }
+                            }
+                          ],
+                          "first_column": 4,
+                          "first_lineno": 13,
+                          "last_column": 5,
+                          "last_lineno": 21,
+                          "text": "fun loops() {\n        for (i in 0..10) {\n            if (i % 2 == 0) continue\n        }\n        var x = 0\n        while (x < 10) {\n            x++\n        }\n    }",
+                          "type": "DEFN"
+                        }
+                      }
+                    ],
+                    "first_column": 14,
+                    "first_lineno": 1,
+                    "last_column": 1,
+                    "last_lineno": 22,
+                    "text": "{\n    fun mixed(price: Int, tax: Int): Int {\n        val result = try {\n            price + tax\n        } catch (e: Exception) {\n            0\n        } finally {\n            println(\"Done\")\n        }\n        return result\n    }\n    \n    fun loops() {\n        for (i in 0..10) {\n            if (i % 2 == 0) continue\n        }\n        var x = 0\n        while (x < 10) {\n            x++\n        }\n    }\n}",
+                    "type": "BLOCK"
+                  }
+                }
+              ],
+              "first_column": 14,
+              "first_lineno": 1,
+              "last_column": 1,
+              "last_lineno": 22,
+              "text": "{\n    fun mixed(price: Int, tax: Int): Int {\n        val result = try {\n            price + tax\n        } catch (e: Exception) {\n            0\n        } finally {\n            println(\"Done\")\n        }\n        return result\n    }\n    \n    fun loops() {\n        for (i in 0..10) {\n            if (i % 2 == 0) continue\n        }\n        var x = 0\n        while (x < 10) {\n            x++\n        }\n    }\n}",
+              "type": "SCOPE"
+            }
+          }
+        ],
+        "first_column": 0,
+        "first_lineno": 1,
+        "last_column": 1,
+        "last_lineno": 22,
+        "text": "class Billing {\n    fun mixed(price: Int, tax: Int): Int {\n        val result = try {\n            price + tax\n        } catch (e: Exception) {\n            0\n        } finally {\n            println(\"Done\")\n        }\n        return result\n    }\n    \n    fun loops() {\n        for (i in 0..10) {\n            if (i % 2 == 0) continue\n        }\n        var x = 0\n        while (x < 10) {\n            x++\n        }\n    }\n}",
+        "type": "CLASS"
+      }
+    }
+  ],
+  "first_column": 0,
+  "first_lineno": 1,
+  "last_column": 0,
+  "last_lineno": 23,
+  "text": "class Billing {\n    fun mixed(price: Int, tax: Int): Int {\n        val result = try {\n            price + tax\n        } catch (e: Exception) {\n            0\n        } finally {\n            println(\"Done\")\n        }\n        return result\n    }\n    \n    fun loops() {\n        for (i in 0..10) {\n            if (i % 2 == 0) continue\n        }\n        var x = 0\n        while (x < 10) {\n            x++\n        }\n    }\n}\n",
+  "type": "ROOT"
+}

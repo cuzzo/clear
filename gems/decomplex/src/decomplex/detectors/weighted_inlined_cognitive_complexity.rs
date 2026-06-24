@@ -362,7 +362,8 @@ mod tests {
             { "id": "a#f1", "owner": "a", "name": "f1", "file": "a.rb", "line": 2, "span": [2, 0, 3, 0], "statements": [], "boundaries": [] },
             { "id": "a#f2", "owner": "a", "name": "f2", "file": "a.rb", "line": 4, "span": [4, 0, 5, 0], "statements": [], "boundaries": [] },
             { "id": "a#f3", "owner": "a", "name": "f3", "file": "a.rb", "line": 6, "span": [6, 0, 7, 0], "statements": [], "boundaries": [] },
-            { "id": "a#f4", "owner": "a", "name": "f4", "file": "a.rb", "line": 8, "span": [8, 0, 9, 0], "statements": [], "boundaries": [] }
+            { "id": "a#f4", "owner": "a", "name": "f4", "file": "a.rb", "line": 8, "span": [8, 0, 9, 0], "statements": [], "boundaries": [] },
+            { "id": "a#f_missing_score", "owner": "a", "name": "f_missing_score", "file": "a.rb", "line": 10, "span": [10, 0, 11, 0], "statements": [], "boundaries": [] }
         ])).unwrap();
 
         let doc: Document = serde_json::from_value(json!({
@@ -372,10 +373,12 @@ mod tests {
                 { "name": "a", "file": "a.rb", "kind": "class", "line": 1, "span": [1, 0, 10, 0] }
             ],
             "function_defs": [
-                { "id": "a#f1", "name": "f1", "owner": "a", "file": "a.rb", "line": 2, "span": [2, 0, 3, 0], "visibility": "public", "body": body, "params": [], "signature": "" },
-                { "id": "a#f2", "name": "f2", "owner": "a", "file": "a.rb", "line": 4, "span": [4, 0, 5, 0], "visibility": "public", "body": body, "params": [], "signature": "" },
-                { "id": "a#f3", "name": "f3", "owner": "a", "file": "a.rb", "line": 6, "span": [6, 0, 7, 0], "visibility": "public", "body": body, "params": [], "signature": "" },
-                { "id": "a#f4", "name": "f4", "owner": "a", "file": "a.rb", "line": 8, "span": [8, 0, 9, 0], "visibility": "public", "body": body, "params": [], "signature": "" }
+                { "id": "a#f1", "name": "f1", "owner": "a", "file": "a.rb", "line": 2, "span": [2, 0, 3, 0], "visibility": "public", "body": body.clone(), "params": [], "signature": "" },
+                { "id": "a#f2", "name": "f2", "owner": "a", "file": "a.rb", "line": 4, "span": [4, 0, 5, 0], "visibility": "public", "body": body.clone(), "params": [], "signature": "" },
+                { "id": "a#f3", "name": "f3", "owner": "a", "file": "a.rb", "line": 6, "span": [6, 0, 7, 0], "visibility": "public", "body": body.clone(), "params": [], "signature": "" },
+                { "id": "a#f4", "name": "f4", "owner": "a", "file": "a.rb", "line": 8, "span": [8, 0, 9, 0], "visibility": "public", "body": body.clone(), "params": [], "signature": "" },
+                { "id": "a#f_missing_score", "name": "f_missing_score", "owner": "a", "file": "a.rb", "line": 10, "span": [10, 0, 11, 0], "visibility": "public", "body": body.clone(), "params": [], "signature": "" },
+                { "id": "a#f_missing_summary", "name": "f_missing_summary", "owner": "a", "file": "a.rb", "line": 12, "span": [12, 0, 13, 0], "visibility": "public", "body": body.clone(), "params": [], "signature": "" }
             ],
             "call_sites": [
                 {
@@ -392,11 +395,11 @@ mod tests {
                 },
                 {
                     "receiver": "self", "message": "f1", "file": "a.rb", "function": "f4", "owner": "a", "line": 8, "span": [8, 0, 9, 0],
-                    "conditional": false, "arguments": [], "control": "other_weight", "safe_navigation": false, "block": false
+                    "conditional": false, "arguments": [], "control": "always", "safe_navigation": false, "block": false
                 },
                 {
-                    "receiver": "self", "message": "f_unknown", "file": "a.rb", "function": "f1", "owner": "a", "line": 3, "span": [2, 0, 3, 0],
-                    "conditional": false, "arguments": [], "control": null, "safe_navigation": false, "block": false
+                    "receiver": "self", "message": "f_missing_summary", "file": "a.rb", "function": "f1", "owner": "a", "line": 3, "span": [2, 0, 3, 0],
+                    "conditional": false, "arguments": [], "control": "other_weight", "safe_navigation": false, "block": false
                 }
             ],
             "local_complexity_scores": {
@@ -409,5 +412,27 @@ mod tests {
 
         let res = scan_documents_with_summaries(&[doc], &summaries);
         assert!(!res.is_empty());
+    }
+
+    #[test]
+    fn test_analyzer_max_depth() {
+        let topology = structural_topology::Graph::new(vec![], vec![]);
+        let scores = BTreeMap::new();
+        let analyzer = Analyzer::new(topology, scores, 12.0, 15.0, 3);
+        assert_eq!(analyzer.edge_weight("other_weight"), 1.0);
+        
+        let edge = structural_topology::Edge {
+            r#type: "always".to_string(),
+            caller: "a".to_string(),
+            callee: "b".to_string(),
+            caller_name: "a".to_string(),
+            callee_name: "b".to_string(),
+            file: "foo.rb".to_string(),
+            line: 1,
+            span: [1, 0, 1, 10],
+            kind: "call".to_string(),
+            confidence: "exact".to_string(),
+        };
+        assert!((analyzer.contribution_weight(&edge, 3) - 0.1225).abs() < 1e-6);
     }
 }

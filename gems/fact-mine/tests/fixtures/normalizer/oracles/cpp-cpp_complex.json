@@ -1,0 +1,452 @@
+{
+  "children": [
+    {
+      "Node": {
+        "children": [
+          {
+            "Symbol": "main"
+          },
+          {
+            "Node": {
+              "children": [
+                "Nil",
+                "Nil",
+                {
+                  "Node": {
+                    "children": [
+                      {
+                        "Node": {
+                          "children": [
+                            {
+                              "Node": {
+                                "children": [
+                                  {
+                                    "Node": {
+                                      "children": [
+                                        {
+                                          "Node": {
+                                            "children": [],
+                                            "first_column": 14,
+                                            "first_lineno": 3,
+                                            "last_column": 15,
+                                            "last_lineno": 3,
+                                            "text": "1",
+                                            "type": "NUMBER_LITERAL"
+                                          }
+                                        }
+                                      ],
+                                      "first_column": 8,
+                                      "first_lineno": 3,
+                                      "last_column": 16,
+                                      "last_lineno": 3,
+                                      "text": "throw 1;",
+                                      "type": "THROW_STATEMENT"
+                                    }
+                                  }
+                                ],
+                                "first_column": 8,
+                                "first_lineno": 2,
+                                "last_column": 5,
+                                "last_lineno": 4,
+                                "text": "{\n        throw 1;\n    }",
+                                "type": "BLOCK"
+                              }
+                            },
+                            {
+                              "Node": {
+                                "children": [
+                                  {
+                                    "Node": {
+                                      "children": [
+                                        {
+                                          "Node": {
+                                            "children": [
+                                              {
+                                                "Node": {
+                                                  "children": [],
+                                                  "first_column": 13,
+                                                  "first_lineno": 4,
+                                                  "last_column": 16,
+                                                  "last_lineno": 4,
+                                                  "text": "int",
+                                                  "type": "PRIMITIVE_TYPE"
+                                                }
+                                              },
+                                              {
+                                                "Node": {
+                                                  "children": [
+                                                    {
+                                                      "String": "e"
+                                                    }
+                                                  ],
+                                                  "first_column": 17,
+                                                  "first_lineno": 4,
+                                                  "last_column": 18,
+                                                  "last_lineno": 4,
+                                                  "text": "e",
+                                                  "type": "LVAR"
+                                                }
+                                              }
+                                            ],
+                                            "first_column": 13,
+                                            "first_lineno": 4,
+                                            "last_column": 18,
+                                            "last_lineno": 4,
+                                            "text": "int e",
+                                            "type": "PARAMETER_DECLARATION"
+                                          }
+                                        }
+                                      ],
+                                      "first_column": 12,
+                                      "first_lineno": 4,
+                                      "last_column": 19,
+                                      "last_lineno": 4,
+                                      "text": "(int e)",
+                                      "type": "PARAMETER_LIST"
+                                    }
+                                  },
+                                  {
+                                    "Node": {
+                                      "children": [],
+                                      "first_column": 20,
+                                      "first_lineno": 4,
+                                      "last_column": 5,
+                                      "last_lineno": 5,
+                                      "text": "{\n    }",
+                                      "type": "BLOCK"
+                                    }
+                                  }
+                                ],
+                                "first_column": 6,
+                                "first_lineno": 4,
+                                "last_column": 5,
+                                "last_lineno": 5,
+                                "text": "catch (int e) {\n    }",
+                                "type": "CATCH_CLAUSE"
+                              }
+                            },
+                            {
+                              "Node": {
+                                "children": [
+                                  {
+                                    "Node": {
+                                      "children": [],
+                                      "first_column": 12,
+                                      "first_lineno": 5,
+                                      "last_column": 17,
+                                      "last_lineno": 5,
+                                      "text": "(...)",
+                                      "type": "PARAMETER_LIST"
+                                    }
+                                  },
+                                  {
+                                    "Node": {
+                                      "children": [],
+                                      "first_column": 18,
+                                      "first_lineno": 5,
+                                      "last_column": 5,
+                                      "last_lineno": 6,
+                                      "text": "{\n    }",
+                                      "type": "BLOCK"
+                                    }
+                                  }
+                                ],
+                                "first_column": 6,
+                                "first_lineno": 5,
+                                "last_column": 5,
+                                "last_lineno": 6,
+                                "text": "catch (...) {\n    }",
+                                "type": "CATCH_CLAUSE"
+                              }
+                            }
+                          ],
+                          "first_column": 4,
+                          "first_lineno": 2,
+                          "last_column": 5,
+                          "last_lineno": 6,
+                          "text": "try {\n        throw 1;\n    } catch (int e) {\n    } catch (...) {\n    }",
+                          "type": "TRY_STATEMENT"
+                        }
+                      },
+                      {
+                        "Node": {
+                          "children": [
+                            {
+                              "Node": {
+                                "children": [
+                                  {
+                                    "Node": {
+                                      "children": [],
+                                      "first_column": 4,
+                                      "first_lineno": 8,
+                                      "last_column": 8,
+                                      "last_lineno": 8,
+                                      "text": "auto",
+                                      "type": "AUTO"
+                                    }
+                                  }
+                                ],
+                                "first_column": 4,
+                                "first_lineno": 8,
+                                "last_column": 8,
+                                "last_lineno": 8,
+                                "text": "auto",
+                                "type": "PLACEHOLDER_TYPE_SPECIFIER"
+                              }
+                            },
+                            {
+                              "Node": {
+                                "children": [
+                                  {
+                                    "Node": {
+                                      "children": [
+                                        {
+                                          "String": "lambda"
+                                        },
+                                        {
+                                          "Node": {
+                                            "children": [
+                                              {
+                                                "Node": {
+                                                  "children": [],
+                                                  "first_column": 18,
+                                                  "first_lineno": 8,
+                                                  "last_column": 20,
+                                                  "last_lineno": 8,
+                                                  "text": "[]",
+                                                  "type": "LAMBDA_CAPTURE_SPECIFIER"
+                                                }
+                                              },
+                                              {
+                                                "Node": {
+                                                  "children": [
+                                                    {
+                                                      "Node": {
+                                                        "children": [
+                                                          {
+                                                            "Node": {
+                                                              "children": [
+                                                                {
+                                                                  "Node": {
+                                                                    "children": [],
+                                                                    "first_column": 21,
+                                                                    "first_lineno": 8,
+                                                                    "last_column": 24,
+                                                                    "last_lineno": 8,
+                                                                    "text": "int",
+                                                                    "type": "PRIMITIVE_TYPE"
+                                                                  }
+                                                                },
+                                                                {
+                                                                  "Node": {
+                                                                    "children": [
+                                                                      {
+                                                                        "String": "x"
+                                                                      }
+                                                                    ],
+                                                                    "first_column": 25,
+                                                                    "first_lineno": 8,
+                                                                    "last_column": 26,
+                                                                    "last_lineno": 8,
+                                                                    "text": "x",
+                                                                    "type": "LVAR"
+                                                                  }
+                                                                }
+                                                              ],
+                                                              "first_column": 21,
+                                                              "first_lineno": 8,
+                                                              "last_column": 26,
+                                                              "last_lineno": 8,
+                                                              "text": "int x",
+                                                              "type": "PARAMETER_DECLARATION"
+                                                            }
+                                                          }
+                                                        ],
+                                                        "first_column": 20,
+                                                        "first_lineno": 8,
+                                                        "last_column": 27,
+                                                        "last_lineno": 8,
+                                                        "text": "(int x)",
+                                                        "type": "PARAMETER_LIST"
+                                                      }
+                                                    }
+                                                  ],
+                                                  "first_column": 20,
+                                                  "first_lineno": 8,
+                                                  "last_column": 27,
+                                                  "last_lineno": 8,
+                                                  "text": "(int x)",
+                                                  "type": "ABSTRACT_FUNCTION_DECLARATOR"
+                                                }
+                                              },
+                                              {
+                                                "Node": {
+                                                  "children": [
+                                                    {
+                                                      "Node": {
+                                                        "children": [
+                                                          {
+                                                            "Node": {
+                                                              "children": [
+                                                                {
+                                                                  "Node": {
+                                                                    "children": [
+                                                                      {
+                                                                        "String": "x"
+                                                                      }
+                                                                    ],
+                                                                    "first_column": 37,
+                                                                    "first_lineno": 8,
+                                                                    "last_column": 38,
+                                                                    "last_lineno": 8,
+                                                                    "text": "x",
+                                                                    "type": "LVAR"
+                                                                  }
+                                                                },
+                                                                {
+                                                                  "Symbol": "*"
+                                                                },
+                                                                {
+                                                                  "Node": {
+                                                                    "children": [
+                                                                      {
+                                                                        "Node": {
+                                                                          "children": [],
+                                                                          "first_column": 41,
+                                                                          "first_lineno": 8,
+                                                                          "last_column": 42,
+                                                                          "last_lineno": 8,
+                                                                          "text": "2",
+                                                                          "type": "NUMBER_LITERAL"
+                                                                        }
+                                                                      }
+                                                                    ],
+                                                                    "first_column": 41,
+                                                                    "first_lineno": 8,
+                                                                    "last_column": 42,
+                                                                    "last_lineno": 8,
+                                                                    "text": "2",
+                                                                    "type": "LIST"
+                                                                  }
+                                                                }
+                                                              ],
+                                                              "first_column": 37,
+                                                              "first_lineno": 8,
+                                                              "last_column": 42,
+                                                              "last_lineno": 8,
+                                                              "text": "x * 2",
+                                                              "type": "OPCALL"
+                                                            }
+                                                          }
+                                                        ],
+                                                        "first_column": 30,
+                                                        "first_lineno": 8,
+                                                        "last_column": 43,
+                                                        "last_lineno": 8,
+                                                        "text": "return x * 2;",
+                                                        "type": "RETURN"
+                                                      }
+                                                    }
+                                                  ],
+                                                  "first_column": 28,
+                                                  "first_lineno": 8,
+                                                  "last_column": 45,
+                                                  "last_lineno": 8,
+                                                  "text": "{ return x * 2; }",
+                                                  "type": "BLOCK"
+                                                }
+                                              }
+                                            ],
+                                            "first_column": 18,
+                                            "first_lineno": 8,
+                                            "last_column": 45,
+                                            "last_lineno": 8,
+                                            "text": "[](int x) { return x * 2; }",
+                                            "type": "LAMBDA_EXPRESSION"
+                                          }
+                                        }
+                                      ],
+                                      "first_column": 9,
+                                      "first_lineno": 8,
+                                      "last_column": 45,
+                                      "last_lineno": 8,
+                                      "text": "lambda = [](int x) { return x * 2; }",
+                                      "type": "LASGN"
+                                    }
+                                  }
+                                ],
+                                "first_column": 9,
+                                "first_lineno": 8,
+                                "last_column": 45,
+                                "last_lineno": 8,
+                                "text": "lambda = [](int x) { return x * 2; }",
+                                "type": "INIT_DECLARATOR"
+                              }
+                            }
+                          ],
+                          "first_column": 4,
+                          "first_lineno": 8,
+                          "last_column": 46,
+                          "last_lineno": 8,
+                          "text": "auto lambda = [](int x) { return x * 2; };",
+                          "type": "DECLARATION"
+                        }
+                      },
+                      {
+                        "Node": {
+                          "children": [
+                            {
+                              "Node": {
+                                "children": [],
+                                "first_column": 11,
+                                "first_lineno": 9,
+                                "last_column": 12,
+                                "last_lineno": 9,
+                                "text": "0",
+                                "type": "NUMBER_LITERAL"
+                              }
+                            }
+                          ],
+                          "first_column": 4,
+                          "first_lineno": 9,
+                          "last_column": 13,
+                          "last_lineno": 9,
+                          "text": "return 0;",
+                          "type": "RETURN"
+                        }
+                      }
+                    ],
+                    "first_column": 11,
+                    "first_lineno": 1,
+                    "last_column": 1,
+                    "last_lineno": 10,
+                    "text": "{\n    try {\n        throw 1;\n    } catch (int e) {\n    } catch (...) {\n    }\n    \n    auto lambda = [](int x) { return x * 2; };\n    return 0;\n}",
+                    "type": "BLOCK"
+                  }
+                }
+              ],
+              "first_column": 11,
+              "first_lineno": 1,
+              "last_column": 1,
+              "last_lineno": 10,
+              "text": "{\n    try {\n        throw 1;\n    } catch (int e) {\n    } catch (...) {\n    }\n    \n    auto lambda = [](int x) { return x * 2; };\n    return 0;\n}",
+              "type": "SCOPE"
+            }
+          }
+        ],
+        "first_column": 0,
+        "first_lineno": 1,
+        "last_column": 1,
+        "last_lineno": 10,
+        "text": "int main() {\n    try {\n        throw 1;\n    } catch (int e) {\n    } catch (...) {\n    }\n    \n    auto lambda = [](int x) { return x * 2; };\n    return 0;\n}",
+        "type": "DEFN"
+      }
+    }
+  ],
+  "first_column": 0,
+  "first_lineno": 1,
+  "last_column": 0,
+  "last_lineno": 11,
+  "text": "int main() {\n    try {\n        throw 1;\n    } catch (int e) {\n    } catch (...) {\n    }\n    \n    auto lambda = [](int x) { return x * 2; };\n    return 0;\n}\n",
+  "type": "ROOT"
+}

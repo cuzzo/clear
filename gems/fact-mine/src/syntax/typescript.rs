@@ -127,14 +127,39 @@ impl NormalizedLanguageBehavior for TypeScriptNormalizedBehavior {
         _owner: &str,
     ) -> Option<StateDeclaration> {
         // Try structured children first: [name, type?, value?]
-        let child_nodes: Vec<&Node> = node.children.iter().filter_map(|c| match c {
+        let mut child_nodes: Vec<&Node> = node.children.iter().filter_map(|c| match c {
             Child::Node(n) => Some(n.as_ref()),
             _ => None,
         }).collect();
+
+        // Skip any leading modifiers
+        while !child_nodes.is_empty() {
+            let text = child_nodes[0].text.trim();
+            if matches!(
+                text,
+                "public"
+                    | "private"
+                    | "protected"
+                    | "readonly"
+                    | "static"
+                    | "declare"
+                    | "override"
+                    | "abstract"
+                    | "accessor"
+            ) {
+                child_nodes.remove(0);
+            } else {
+                break;
+            }
+        }
+
         if child_nodes.len() >= 2 {
             let name = child_nodes[0].text.trim();
             if is_simple_name(name) {
-                let type_text = child_nodes[1].text.trim().to_string();
+                let mut type_text = child_nodes[1].text.trim().to_string();
+                if type_text.starts_with(':') {
+                    type_text = type_text[1..].trim().to_string();
+                }
                 if !type_text.is_empty() && type_text != ":" && !type_text.starts_with('=') {
                     return Some(StateDeclaration {
                         field: name.to_string(),
@@ -149,8 +174,31 @@ impl NormalizedLanguageBehavior for TypeScriptNormalizedBehavior {
         }
         // Fallback: text-based (`name: Type`)
         let text = node.text.trim();
-        if let Some((name, rest)) = text.split_once(':') {
-            let name = name.trim();
+        if let Some((raw_name, rest)) = text.split_once(':') {
+            let mut name = raw_name.trim();
+            loop {
+                let mut stripped = false;
+                for modifier in [
+                    "public",
+                    "private",
+                    "protected",
+                    "readonly",
+                    "static",
+                    "declare",
+                    "override",
+                    "abstract",
+                    "accessor",
+                ] {
+                    if let Some(rest_name) = name.strip_prefix(modifier) {
+                        name = rest_name.trim();
+                        stripped = true;
+                        break;
+                    }
+                }
+                if !stripped {
+                    break;
+                }
+            }
             if is_simple_name(name) {
                 let type_text = rest.split('=').next().unwrap_or(rest).trim()
                     .trim_end_matches(',').trim_end_matches(';').to_string();
