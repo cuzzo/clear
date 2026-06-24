@@ -774,117 +774,139 @@ fn ui_router(state: UiServerState) -> Router {
         .layer(TraceLayer::new_for_http())
 }
 
-pub fn file_index(storage: &Storage) -> Result<Vec<UiFile>> {
-    file_index_with_scope(storage, &CoverageScope::all())
+pub fn file_index(storage: &Storage, repo: Option<&Path>) -> Result<Vec<UiFile>> {
+    file_index_with_scope(storage, &CoverageScope::all(), repo)
 }
 
-pub fn file_index_with_scope(storage: &Storage, scope: &CoverageScope) -> Result<Vec<UiFile>> {
+pub fn file_index_with_scope(
+    storage: &Storage,
+    scope: &CoverageScope,
+    repo: Option<&Path>,
+) -> Result<Vec<UiFile>> {
     let total_start = Instant::now();
     let sarif_counts = storage.sarif_finding_counts_by_file()?;
     let dark_arm_counts = sarif_dark_arm_counts_by_file(storage)?;
-    if let Some(files) =
+    let mut files = if let Some(files) =
         read_model_file_index_with_scope(storage, scope, &sarif_counts, &dark_arm_counts)?
     {
         profile_log("file_index.read_model_total", total_start);
-        return Ok(append_sarif_only_files(
+        append_sarif_only_files(
             files,
             scope,
             &sarif_counts,
             &dark_arm_counts,
             true,
-        ));
-    }
-    let line_start = Instant::now();
-    let line_stats = line_coverage_by_file(storage, scope)?;
-    profile_log("file_index.line_coverage_by_file", line_start);
-    let query_start = Instant::now();
-    let mut stmt = storage.connection().prepare(
-        r#"
-        WITH current_units AS (
-          SELECT
-            u.id,
-          COALESCE((
-            SELECT latest.path
-            FROM events latest
-            WHERE latest.unit_id = u.id
-              ORDER BY latest.timestamp DESC, latest.id DESC
-              LIMIT 1
-            ), u.original_path) AS current_path,
-            u.current_line_cov,
-            u.current_mutant_cov,
-            u.current_distinct_tests,
-            u.current_mutant_killed_tests
-          FROM logical_units u
-        ),
-        hazard_counts AS (
-          SELECT unit_id, COUNT(*) AS hazards
-          FROM unit_hazards
-          WHERE is_active = 1
-          GROUP BY unit_id
         )
-        SELECT
-          cu.current_path,
-          COUNT(DISTINCT cu.id) AS units,
-          COALESCE(SUM(hc.hazards), 0) AS hazards,
-          COALESCE(SUM(cu.current_distinct_tests), 0) AS distinct_tests,
-          COALESCE(SUM(cu.current_mutant_killed_tests), 0) AS mutant_killed_tests,
-          COALESCE(AVG(cu.current_line_cov), 0.0) AS line_coverage,
-          COALESCE(AVG(cu.current_mutant_cov), 0.0) AS mutant_coverage
-        FROM current_units cu
-        LEFT JOIN hazard_counts hc ON hc.unit_id = cu.id
-        WHERE cu.current_path <> ''
-        GROUP BY cu.current_path
-        ORDER BY hazards DESC, mutant_killed_tests DESC, distinct_tests DESC, cu.current_path
-        "#,
-    )?;
-    let rows = stmt.query_map([], |row| {
-        let path = row.get::<_, String>(0)?;
-        let fallback_line_coverage = row.get::<_, f64>(5)?;
-        let stats = line_stats.get(&path).copied().unwrap_or_default();
-        let sarif_findings = sarif_counts.get(&path).copied().unwrap_or_default();
-        let dark_arm_findings = dark_arm_counts.get(&path).copied().unwrap_or_default();
-        Ok(UiFile {
-            path,
-            units: row.get(1)?,
-            hazards: row.get(2)?,
-            sarif_findings,
-            dark_arm_findings,
-            evidence_covered_hazards: 0,
-            covered_hazards: 0,
-            distinct_tests: row.get(3)?,
-            mutant_killed_tests: row.get(4)?,
-            tracked_lines: stats.tracked,
-            covered_lines: stats.covered,
-            line_coverage: if stats.tracked > 0 {
-                percent(stats.covered, stats.tracked)
-            } else {
-                fallback_line_coverage
-            },
-            mutant_coverage: row.get(6)?,
-            mutant_verified_covered_lines: 0,
-            mutant_killed_covered_lines: 0,
-            stochastic_mutant_verified_covered_lines: 0,
-            stochastic_mutant_killed_covered_lines: 0,
-            invariant_mutant_verified_covered_lines: 0,
-            invariant_mutant_killed_covered_lines: 0,
-            multi_type_covered_lines: 0,
-            read_model: false,
-        })
-    })?;
-    let files = rows
-        .collect::<std::result::Result<Vec<_>, _>>()?
-        .into_iter()
-        .filter(|file| scope.allows(&file.path) && is_production_source_path(&file.path))
-        .collect();
-    profile_log("file_index.current_units", query_start);
-    profile_log("file_index.total", total_start);
-    Ok(append_sarif_only_files(
-        files,
-        scope,
-        &sarif_counts,
-        &dark_arm_counts,
-        false,
-    ))
+    } else {
+        let line_start = Instant::now();
+        let line_stats = line_coverage_by_file(storage, scope)?;
+        profile_log("file_index.line_coverage_by_file", line_start);
+        let query_start = Instant::now();
+        let mut stmt = storage.connection().prepare(
+            r#"
+            WITH current_units AS (
+              SELECT
+                u.id,
+              COALESCE((
+                SELECT latest.path
+                FROM events latest
+                WHERE latest.unit_id = u.id
+                  ORDER BY latest.timestamp DESC, latest.id DESC
+                  LIMIT 1
+                ), u.original_path) AS current_path,
+                u.current_line_cov,
+                u.current_mutant_cov,
+                u.current_distinct_tests,
+                u.current_mutant_killed_tests
+              FROM logical_units u
+            ),
+            hazard_counts AS (
+              SELECT unit_id, COUNT(*) AS hazards
+              FROM unit_hazards
+              WHERE is_active = 1
+              GROUP BY unit_id
+            )
+            SELECT
+              cu.current_path,
+              COUNT(DISTINCT cu.id) AS units,
+              COALESCE(SUM(hc.hazards), 0) AS hazards,
+              COALESCE(SUM(cu.current_distinct_tests), 0) AS distinct_tests,
+              COALESCE(SUM(cu.current_mutant_killed_tests), 0) AS mutant_killed_tests,
+              COALESCE(AVG(cu.current_line_cov), 0.0) AS line_coverage,
+              COALESCE(AVG(cu.current_mutant_cov), 0.0) AS mutant_coverage
+            FROM current_units cu
+            LEFT JOIN hazard_counts hc ON hc.unit_id = cu.id
+            WHERE cu.current_path <> ''
+            GROUP BY cu.current_path
+            ORDER BY hazards DESC, mutant_killed_tests DESC, distinct_tests DESC, cu.current_path
+            "#,
+        )?;
+        let rows = stmt.query_map([], |row| {
+            let path = row.get::<_, String>(0)?;
+            let fallback_line_coverage = row.get::<_, f64>(5)?;
+            let stats = line_stats.get(&path).copied().unwrap_or_default();
+            let sarif_findings = sarif_counts.get(&path).copied().unwrap_or_default();
+            let dark_arm_findings = dark_arm_counts.get(&path).copied().unwrap_or_default();
+            Ok(UiFile {
+                path,
+                units: row.get(1)?,
+                hazards: row.get(2)?,
+                sarif_findings,
+                dark_arm_findings,
+                evidence_covered_hazards: 0,
+                covered_hazards: 0,
+                distinct_tests: row.get(3)?,
+                mutant_killed_tests: row.get(4)?,
+                tracked_lines: stats.tracked,
+                covered_lines: stats.covered,
+                line_coverage: if stats.tracked > 0 {
+                    percent(stats.covered, stats.tracked)
+                } else {
+                    fallback_line_coverage
+                },
+                mutant_coverage: row.get(6)?,
+                mutant_verified_covered_lines: 0,
+                mutant_killed_covered_lines: 0,
+                stochastic_mutant_verified_covered_lines: 0,
+                stochastic_mutant_killed_covered_lines: 0,
+                invariant_mutant_verified_covered_lines: 0,
+                invariant_mutant_killed_covered_lines: 0,
+                multi_type_covered_lines: 0,
+                read_model: false,
+            })
+        })?;
+        let files = rows
+            .collect::<std::result::Result<Vec<_>, _>>()?
+            .into_iter()
+            .filter(|file| scope.allows(&file.path) && is_production_source_path(&file.path))
+            .collect();
+        profile_log("file_index.current_units", query_start);
+        profile_log("file_index.total", total_start);
+        append_sarif_only_files(
+            files,
+            scope,
+            &sarif_counts,
+            &dark_arm_counts,
+            false,
+        )
+    };
+
+    if let Some(r) = repo {
+        files.retain(|f| {
+            let full_path = r.join(&f.path);
+            if !full_path.is_file() {
+                return false;
+            }
+            if let Ok(metadata) = std::fs::metadata(&full_path) {
+                if metadata.len() == 0 {
+                    return false;
+                }
+            }
+            true
+        });
+    }
+
+    Ok(files)
 }
 
 fn append_sarif_only_files(
@@ -1205,7 +1227,7 @@ fn dashboard_summary_for_directory_with_scope_and_repo(
     let total_start = Instant::now();
     let directory = normalize_directory(directory);
     let files_start = Instant::now();
-    let files = file_index_with_scope(storage, scope)?;
+    let files = file_index_with_scope(storage, scope, repo)?;
     let uses_read_model = files.iter().any(|file| file.read_model);
     profile_log("dashboard.file_index", files_start);
     let mut top_hazard_files = files
@@ -2419,7 +2441,7 @@ async fn api_files_handler(State(state): State<UiServerState>) -> Response<Body>
         Err(error) => return error_json(StatusCode::INTERNAL_SERVER_ERROR, error),
     };
     let scope = CoverageScope::from_repo(state.repo.as_ref());
-    match file_index_with_scope(&storage, &scope) {
+    match file_index_with_scope(&storage, &scope, Some(state.repo.as_ref())) {
         Ok(files) => Json(files).into_response(),
         Err(error) => error_json(StatusCode::INTERNAL_SERVER_ERROR, error),
     }
@@ -4402,7 +4424,7 @@ fn render_index_page(
     filter: &str,
     sort: CoverageSort,
 ) -> Result<String> {
-    let files = file_index_with_scope(storage, scope)?;
+    let files = file_index_with_scope(storage, scope, Some(repo))?;
     let selected_path = selected
         .map(normalize_source_path)
         .filter(|path| !path.is_empty());
@@ -8015,7 +8037,7 @@ mod tests {
                 .unwrap();
         let line = payload.annotations.iter().find(|line| line.line == 2).unwrap();
         let dashboard = dashboard_summary(&storage).unwrap();
-        let files = file_index(&storage).unwrap();
+        let files = file_index(&storage, None).unwrap();
 
         assert_eq!(line.findings.len(), 1);
         assert_eq!(line.findings[0].tool, "SlopCop");
@@ -9456,7 +9478,7 @@ mod tests {
 
         storage.refresh_ui_summaries().unwrap();
 
-        let files = file_index(&storage).unwrap();
+        let files = file_index(&storage, None).unwrap();
         assert_eq!(files.len(), 1);
         assert!(files[0].read_model);
         assert_eq!(files[0].path, "src/a.rb");
