@@ -1594,18 +1594,40 @@ fn top_unit_hotspots(
             && path_in_directory(&summary.current_path, directory)
     });
     let signals = unit_signal_counts(storage)?;
+    let mut candidates = summaries
+        .into_iter()
+        .map(|summary| {
+            let signal = signals.get(&summary.id).cloned().unwrap_or_default();
+            let score = unit_hotspot_score(&summary, &signal);
+            (summary, signal, score)
+        })
+        .filter(|(_, _, score)| *score > 0.0)
+        .collect::<Vec<_>>();
+    candidates.sort_by(|left, right| {
+        right.2
+            .partial_cmp(&left.2)
+            .unwrap_or(std::cmp::Ordering::Equal)
+            .then_with(|| right.1.hazards.cmp(&left.1.hazards))
+            .then_with(|| right.1.sarif_findings.cmp(&left.1.sarif_findings))
+            .then_with(|| left.0.current_path.cmp(&right.0.current_path))
+            .then_with(|| left.0.name.cmp(&right.0.name))
+    });
+    candidates.truncate(12);
+
+    let top_summaries: Vec<_> = candidates.iter().map(|(s, _, _)| s.clone()).collect();
+    let top_ids: Vec<String> = top_summaries.iter().map(|s| s.id.clone()).collect();
     let spans = storage
-        .current_unit_spans()?
+        .current_unit_spans_for_ids(&top_ids)?
         .into_iter()
         .map(|span| (span.id, span.start_line))
         .collect::<HashMap<_, _>>();
     let current_spans = repo
-        .map(|repo| current_source_start_lines(repo, &summaries))
+        .map(|repo| current_source_start_lines(repo, &top_summaries))
         .unwrap_or_default();
-    let mut units = summaries
+
+    let final_units = candidates
         .into_iter()
-        .map(|summary| {
-            let signal = signals.get(&summary.id).cloned().unwrap_or_default();
+        .map(|(summary, signal, score)| {
             let key = (
                 summary.current_path.clone(),
                 summary.name.clone(),
@@ -1616,7 +1638,6 @@ fn top_unit_hotspots(
                 .copied()
                 .or_else(|| spans.get(&summary.id).copied())
                 .unwrap_or(1);
-            let score = unit_hotspot_score(&summary, &signal);
             UiUnitHotspot {
                 path: summary.current_path,
                 name: summary.name,
@@ -1633,20 +1654,9 @@ fn top_unit_hotspots(
                 distinct_tests: summary.current_distinct_tests,
             }
         })
-        .filter(|unit| unit.score > 0.0)
         .collect::<Vec<_>>();
-    units.sort_by(|left, right| {
-        right
-            .score
-            .partial_cmp(&left.score)
-            .unwrap_or(std::cmp::Ordering::Equal)
-            .then_with(|| right.hazards.cmp(&left.hazards))
-            .then_with(|| right.sarif_findings.cmp(&left.sarif_findings))
-            .then_with(|| left.path.cmp(&right.path))
-            .then_with(|| left.name.cmp(&right.name))
-    });
-    units.truncate(12);
-    Ok(units)
+
+    Ok(final_units)
 }
 
 #[derive(Debug, Default, Clone)]

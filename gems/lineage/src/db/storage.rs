@@ -319,6 +319,8 @@ impl Storage {
               ON sarif_findings(rule_id);
             CREATE INDEX IF NOT EXISTS idx_ui_file_summaries_path ON ui_file_summaries(path);
             CREATE INDEX IF NOT EXISTS idx_ui_warning_units_path ON ui_warning_units(current_path);
+            CREATE INDEX IF NOT EXISTS idx_events_path ON events(path);
+            CREATE INDEX IF NOT EXISTS idx_logical_units_original_path ON logical_units(original_path);
             "#,
         )?;
         self.ensure_logical_unit_column("start_line", "INTEGER DEFAULT 1")?;
@@ -1106,12 +1108,59 @@ impl Storage {
 
     pub fn current_unit_id_for_path_line(&self, path: &str, line: u32) -> Result<Option<String>> {
         Ok(self
-            .current_unit_spans()?
+            .current_unit_spans_for_path(path)?
             .into_iter()
             .filter(|span| span.path == path && line >= span.start_line && line <= span.end_line)
             .min_by_key(|span| (span.end_line.saturating_sub(span.start_line), span.id.clone()))
             .map(|span| span.id))
     }
+
+    pub fn current_unit_spans_for_path(&self, path: &str) -> Result<Vec<CurrentUnitSpan>> {
+        let mut stmt = self.conn.prepare(
+            r#"
+            WITH filtered_units AS (
+              SELECT id FROM logical_units WHERE original_path = ?1
+              UNION
+              SELECT unit_id AS id FROM events WHERE path = ?1
+            ),
+            latest_events AS (
+              SELECT *
+              FROM (
+                SELECT e.*,
+                       ROW_NUMBER() OVER (
+                         PARTITION BY e.unit_id
+                         ORDER BY e.timestamp DESC, e.id DESC
+                       ) AS rank
+                FROM events e
+                WHERE e.unit_id IN (SELECT id FROM filtered_units)
+              )
+              WHERE rank = 1
+            ),
+            current_units AS (
+              SELECT u.id,
+                     COALESCE(le.path, u.original_path) AS current_path,
+                     COALESCE(le.start_line, 1) AS start_line,
+                     COALESCE(le.end_line, le.start_line, 1) AS end_line
+              FROM logical_units u
+              LEFT JOIN latest_events le ON le.unit_id = u.id
+              WHERE u.id IN (SELECT id FROM filtered_units)
+            )
+            SELECT id, current_path, start_line, end_line
+            FROM current_units
+            WHERE current_path = ?1
+            "#,
+        )?;
+        let rows = stmt.query_map(params![path], |row| {
+            Ok(CurrentUnitSpan {
+                id: row.get(0)?,
+                path: row.get(1)?,
+                start_line: row.get::<_, i64>(2)?.max(1) as u32,
+                end_line: row.get::<_, i64>(3)?.max(1) as u32,
+            })
+        })?;
+        Ok(rows.collect::<std::result::Result<Vec<_>, _>>()?)
+    }
+
 
     pub fn current_unit_spans(&self) -> Result<Vec<CurrentUnitSpan>> {
         let mut stmt = self.conn.prepare(
@@ -1151,6 +1200,74 @@ impl Storage {
         })?;
         Ok(rows.collect::<std::result::Result<Vec<_>, _>>()?)
     }
+
+    pub fn current_unit_spans_for_ids(&self, ids: &[String]) -> Result<Vec<CurrentUnitSpan>> {
+        if ids.is_empty() {
+            return Ok(Vec::new());
+        }
+        let mut sql = String::new();
+        sql.push_str(r#"
+            WITH latest_events AS (
+              SELECT *
+              FROM (
+                SELECT e.*,
+                       ROW_NUMBER() OVER (
+                         PARTITION BY e.unit_id
+                         ORDER BY e.timestamp DESC, e.id DESC
+                       ) AS rank
+                FROM events e
+                WHERE e.unit_id IN (
+        "#);
+        for i in 0..ids.len() {
+            if i > 0 {
+                sql.push_str(", ");
+            }
+            sql.push_str(&format!("?{}", i + 1));
+        }
+        sql.push_str(r#"
+                )
+              )
+              WHERE rank = 1
+            ),
+            current_units AS (
+              SELECT u.id,
+                     COALESCE(le.path, u.original_path) AS current_path,
+                     COALESCE(le.start_line, 1) AS start_line,
+                     COALESCE(le.end_line, le.start_line, 1) AS end_line
+              FROM logical_units u
+              LEFT JOIN latest_events le ON le.unit_id = u.id
+              WHERE u.id IN (
+        "#);
+        for i in 0..ids.len() {
+            if i > 0 {
+                sql.push_str(", ");
+            }
+            sql.push_str(&format!("?{}", i + 1));
+        }
+        sql.push_str(r#"
+              )
+            )
+            SELECT id, current_path, start_line, end_line
+            FROM current_units
+            WHERE current_path <> ''
+        "#);
+
+        let mut stmt = self.conn.prepare(&sql)?;
+        let rows = stmt.query_map(rusqlite::params_from_iter(ids), |row| {
+            Ok(CurrentUnitSpan {
+                id: row.get(0)?,
+                path: row.get(1)?,
+                start_line: row.get::<_, i64>(2)?.max(1) as u32,
+                end_line: row.get::<_, i64>(3)?.max(1) as u32,
+            })
+        })?;
+        let mut out = Vec::new();
+        for r in rows {
+            out.push(r?);
+        }
+        Ok(out)
+    }
+
 
     pub fn sarif_findings_for_path(&self, path: &str) -> Result<Vec<SarifFinding>> {
         let mut stmt = self.conn.prepare(
@@ -1925,8 +2042,8 @@ impl Storage {
     }
 
     pub fn top_units(&self, limit: usize, only_prefixes: &[String]) -> Result<Vec<UnitSummary>> {
-        let mut stmt = self.conn.prepare(
-            r#"
+        let mut sql = String::new();
+        sql.push_str(r#"
             WITH db_clock AS (
               SELECT COALESCE(MAX(timestamp), 0) AS observed_at
               FROM (
@@ -1958,103 +2075,220 @@ impl Storage {
               )
               GROUP BY c.unit_id
             )
-            SELECT
-              u.id,
-              u.name,
-              u.type,
-              u.original_path,
-              COALESCE((
-                SELECT latest.path
-                FROM events latest
-                WHERE latest.unit_id = u.id
-                ORDER BY latest.timestamp DESC, latest.id DESC
-                LIMIT 1
-              ), u.original_path) AS current_path,
-              COUNT(e.id) AS total_events,
-              SUM(CASE WHEN e.event_type = 'CHANGE' THEN 1 ELSE 0 END) AS changes,
-              SUM(CASE WHEN e.event_type = 'MOVE' THEN 1 ELSE 0 END) AS moves,
-              SUM(CASE WHEN e.event_type = 'FIX' THEN 1 ELSE 0 END) AS fixes,
-              u.current_distinct_tests,
-              u.current_test_types,
-              u.current_mutant_verified_tests,
-              u.current_mutant_killed_tests,
-              u.last_test_exposure_at,
-              COALESCE(m.last_mutant_run_at, 0) AS last_mutant_run_at,
-              MAX(CASE WHEN e.event_type = 'FIX' AND e.semantic_change = 1 THEN e.timestamp ELSE 0 END) AS latest_fix_at,
-              MAX(CASE WHEN e.event_type = 'CHANGE' AND e.semantic_change = 1 THEN e.timestamp ELSE 0 END) AS latest_change_at,
-              SUM(CASE
-                WHEN u.last_test_exposure_at > 0
-                 AND e.event_type = 'FIX'
-                 AND e.semantic_change = 1
-                 AND e.timestamp > u.last_test_exposure_at
-                THEN 1 ELSE 0
-              END) AS fixes_after_test_exposure,
-              SUM(CASE
-                WHEN u.last_test_exposure_at > 0
-                 AND e.event_type = 'CHANGE'
-                 AND e.semantic_change = 1
-                 AND e.timestamp > u.last_test_exposure_at
-                THEN 1 ELSE 0
-              END) AS changes_after_test_exposure,
-              SUM(CASE
-                WHEN COALESCE(m.last_mutant_run_at, 0) > 0
-                 AND e.semantic_change = 1
-                 AND e.event_type IN ('FIX', 'CHANGE')
-                 AND e.timestamp > m.last_mutant_run_at
-                THEN 1 ELSE 0
-              END) AS semantic_changes_after_mutant_run,
-              CASE
-                WHEN COALESCE(m.last_mutant_run_at, 0) > 0
-                 AND clock.observed_at > m.last_mutant_run_at
-                THEN clock.observed_at - m.last_mutant_run_at
-                ELSE 0
-              END AS verification_stale_seconds,
-              COALESCE(r.reopened_count, 0) AS reopened_count
-            FROM logical_units u
-            JOIN events e ON e.unit_id = u.id
-            LEFT JOIN mutant_runs m ON m.unit_id = u.id
-            LEFT JOIN reopened r ON r.unit_id = u.id
-            CROSS JOIN db_clock clock
-            GROUP BY u.id, u.name, u.type, u.original_path,
-                     u.current_distinct_tests, u.current_test_types,
-                     u.current_mutant_verified_tests,
-                     u.current_mutant_killed_tests, u.last_test_exposure_at,
-                     m.last_mutant_run_at, r.reopened_count, clock.observed_at
-            "#,
-        )?;
+        "#);
 
-        let rows = stmt.query_map([], |row| {
-            let verification_stale_seconds = row.get::<_, i64>(20)?;
-            Ok(UnitSummary {
-                id: row.get(0)?,
-                name: row.get(1)?,
-                kind: row.get(2)?,
-                original_path: row.get(3)?,
-                current_path: row.get(4)?,
-                total_events: row.get(5)?,
-                changes: row.get(6)?,
-                moves: row.get(7)?,
-                fixes: row.get(8)?,
-                current_distinct_tests: row.get(9)?,
-                current_test_types: row.get(10)?,
-                current_mutant_verified_tests: row.get(11)?,
-                current_mutant_killed_tests: row.get(12)?,
-                last_test_exposure_at: row.get(13)?,
-                last_mutant_run_at: row.get(14)?,
-                latest_fix_at: row.get(15)?,
-                latest_change_at: row.get(16)?,
-                fixes_after_test_exposure: row.get(17)?,
-                changes_after_test_exposure: row.get(18)?,
-                semantic_changes_after_mutant_run: row.get(19)?,
-                verification_stale_seconds,
-                verification_staleness_score: verification_stale_seconds as f64 / 86_400.0,
-                reopened_count: row.get(21)?,
-                risk_score: 0.0,
-            })
-        })?;
+        let raw_summaries: Vec<UnitSummary> = if only_prefixes.is_empty() {
+            sql.push_str(r#"
+                SELECT
+                  u.id,
+                  u.name,
+                  u.type,
+                  u.original_path,
+                  COALESCE((
+                    SELECT latest.path
+                    FROM events latest
+                    WHERE latest.unit_id = u.id
+                    ORDER BY latest.timestamp DESC, latest.id DESC
+                    LIMIT 1
+                  ), u.original_path) AS current_path,
+                  COUNT(e.id) AS total_events,
+                  SUM(CASE WHEN e.event_type = 'CHANGE' THEN 1 ELSE 0 END) AS changes,
+                  SUM(CASE WHEN e.event_type = 'MOVE' THEN 1 ELSE 0 END) AS moves,
+                  SUM(CASE WHEN e.event_type = 'FIX' THEN 1 ELSE 0 END) AS fixes,
+                  u.current_distinct_tests,
+                  u.current_test_types,
+                  u.current_mutant_verified_tests,
+                  u.current_mutant_killed_tests,
+                  u.last_test_exposure_at,
+                  COALESCE(m.last_mutant_run_at, 0) AS last_mutant_run_at,
+                  MAX(CASE WHEN e.event_type = 'FIX' AND e.semantic_change = 1 THEN e.timestamp ELSE 0 END) AS latest_fix_at,
+                  MAX(CASE WHEN e.event_type = 'CHANGE' AND e.semantic_change = 1 THEN e.timestamp ELSE 0 END) AS latest_change_at,
+                  SUM(CASE
+                    WHEN u.last_test_exposure_at > 0
+                     AND e.event_type = 'FIX'
+                     AND e.semantic_change = 1
+                     AND e.timestamp > u.last_test_exposure_at
+                    THEN 1 ELSE 0
+                  END) AS fixes_after_test_exposure,
+                  SUM(CASE
+                    WHEN u.last_test_exposure_at > 0
+                     AND e.event_type = 'CHANGE'
+                     AND e.semantic_change = 1
+                     AND e.timestamp > u.last_test_exposure_at
+                    THEN 1 ELSE 0
+                  END) AS changes_after_test_exposure,
+                  SUM(CASE
+                    WHEN COALESCE(m.last_mutant_run_at, 0) > 0
+                     AND e.semantic_change = 1
+                     AND e.event_type IN ('FIX', 'CHANGE')
+                     AND e.timestamp > m.last_mutant_run_at
+                    THEN 1 ELSE 0
+                  END) AS semantic_changes_after_mutant_run,
+                  CASE
+                    WHEN COALESCE(m.last_mutant_run_at, 0) > 0
+                     AND clock.observed_at > m.last_mutant_run_at
+                    THEN clock.observed_at - m.last_mutant_run_at
+                    ELSE 0
+                  END AS verification_stale_seconds,
+                  COALESCE(r.reopened_count, 0) AS reopened_count
+                FROM logical_units u
+                JOIN events e ON e.unit_id = u.id
+                LEFT JOIN mutant_runs m ON m.unit_id = u.id
+                LEFT JOIN reopened r ON r.unit_id = u.id
+                CROSS JOIN db_clock clock
+                GROUP BY u.id, u.name, u.type, u.original_path,
+                         u.current_distinct_tests, u.current_test_types,
+                         u.current_mutant_verified_tests,
+                         u.current_mutant_killed_tests, u.last_test_exposure_at,
+                         m.last_mutant_run_at, r.reopened_count, clock.observed_at
+            "#);
+            let mut stmt = self.conn.prepare(&sql)?;
+            let rows = stmt.query_map([], |row| {
+                let verification_stale_seconds = row.get::<_, i64>(20)?;
+                Ok(UnitSummary {
+                    id: row.get(0)?,
+                    name: row.get(1)?,
+                    kind: row.get(2)?,
+                    original_path: row.get(3)?,
+                    current_path: row.get(4)?,
+                    total_events: row.get(5)?,
+                    changes: row.get(6)?,
+                    moves: row.get(7)?,
+                    fixes: row.get(8)?,
+                    current_distinct_tests: row.get(9)?,
+                    current_test_types: row.get(10)?,
+                    current_mutant_verified_tests: row.get(11)?,
+                    current_mutant_killed_tests: row.get(12)?,
+                    last_test_exposure_at: row.get(13)?,
+                    last_mutant_run_at: row.get(14)?,
+                    latest_fix_at: row.get(15)?,
+                    latest_change_at: row.get(16)?,
+                    fixes_after_test_exposure: row.get(17)?,
+                    changes_after_test_exposure: row.get(18)?,
+                    semantic_changes_after_mutant_run: row.get(19)?,
+                    verification_stale_seconds,
+                    verification_staleness_score: verification_stale_seconds as f64 / 86_400.0,
+                    reopened_count: row.get(21)?,
+                    risk_score: 0.0,
+                })
+            })?;
+            rows.collect::<Result<Vec<_>, _>>()?
+        } else {
+            sql.push_str(r#"
+                , filtered_units AS (
+                  SELECT * FROM (
+                    SELECT u.*,
+                           COALESCE((
+                             SELECT latest.path
+                             FROM events latest
+                             WHERE latest.unit_id = u.id
+                             ORDER BY latest.timestamp DESC, latest.id DESC
+                             LIMIT 1
+                           ), u.original_path) AS current_path
+                    FROM logical_units u
+                  )
+                  WHERE 
+            "#);
+            for i in 0..only_prefixes.len() {
+                if i > 0 {
+                    sql.push_str(" OR ");
+                }
+                sql.push_str(&format!("current_path LIKE ?{}", i + 1));
+            }
+            sql.push_str(r#"
+                )
+                SELECT
+                  u.id,
+                  u.name,
+                  u.type,
+                  u.original_path,
+                  u.current_path,
+                  COUNT(e.id) AS total_events,
+                  SUM(CASE WHEN e.event_type = 'CHANGE' THEN 1 ELSE 0 END) AS changes,
+                  SUM(CASE WHEN e.event_type = 'MOVE' THEN 1 ELSE 0 END) AS moves,
+                  SUM(CASE WHEN e.event_type = 'FIX' THEN 1 ELSE 0 END) AS fixes,
+                  u.current_distinct_tests,
+                  u.current_test_types,
+                  u.current_mutant_verified_tests,
+                  u.current_mutant_killed_tests,
+                  u.last_test_exposure_at,
+                  COALESCE(m.last_mutant_run_at, 0) AS last_mutant_run_at,
+                  MAX(CASE WHEN e.event_type = 'FIX' AND e.semantic_change = 1 THEN e.timestamp ELSE 0 END) AS latest_fix_at,
+                  MAX(CASE WHEN e.event_type = 'CHANGE' AND e.semantic_change = 1 THEN e.timestamp ELSE 0 END) AS latest_change_at,
+                  SUM(CASE
+                    WHEN u.last_test_exposure_at > 0
+                     AND e.event_type = 'FIX'
+                     AND e.semantic_change = 1
+                     AND e.timestamp > u.last_test_exposure_at
+                    THEN 1 ELSE 0
+                  END) AS fixes_after_test_exposure,
+                  SUM(CASE
+                    WHEN u.last_test_exposure_at > 0
+                     AND e.event_type = 'CHANGE'
+                     AND e.semantic_change = 1
+                     AND e.timestamp > u.last_test_exposure_at
+                    THEN 1 ELSE 0
+                  END) AS changes_after_test_exposure,
+                  SUM(CASE
+                    WHEN COALESCE(m.last_mutant_run_at, 0) > 0
+                     AND e.semantic_change = 1
+                     AND e.event_type IN ('FIX', 'CHANGE')
+                     AND e.timestamp > m.last_mutant_run_at
+                    THEN 1 ELSE 0
+                  END) AS semantic_changes_after_mutant_run,
+                  CASE
+                    WHEN COALESCE(m.last_mutant_run_at, 0) > 0
+                     AND clock.observed_at > m.last_mutant_run_at
+                    THEN clock.observed_at - m.last_mutant_run_at
+                    ELSE 0
+                  END AS verification_stale_seconds,
+                  COALESCE(r.reopened_count, 0) AS reopened_count
+                FROM filtered_units u
+                JOIN events e ON e.unit_id = u.id
+                LEFT JOIN mutant_runs m ON m.unit_id = u.id
+                LEFT JOIN reopened r ON r.unit_id = u.id
+                CROSS JOIN db_clock clock
+                GROUP BY u.id, u.name, u.type, u.original_path,
+                         u.current_distinct_tests, u.current_test_types,
+                         u.current_mutant_verified_tests,
+                         u.current_mutant_killed_tests, u.last_test_exposure_at,
+                         m.last_mutant_run_at, r.reopened_count, clock.observed_at
+            "#);
+            let mut stmt = self.conn.prepare(&sql)?;
+            let params: Vec<String> = only_prefixes.iter().map(|p| format!("{}%", p)).collect();
+            let rows = stmt.query_map(rusqlite::params_from_iter(params.iter()), |row| {
+                let verification_stale_seconds = row.get::<_, i64>(20)?;
+                Ok(UnitSummary {
+                    id: row.get(0)?,
+                    name: row.get(1)?,
+                    kind: row.get(2)?,
+                    original_path: row.get(3)?,
+                    current_path: row.get(4)?,
+                    total_events: row.get(5)?,
+                    changes: row.get(6)?,
+                    moves: row.get(7)?,
+                    fixes: row.get(8)?,
+                    current_distinct_tests: row.get(9)?,
+                    current_test_types: row.get(10)?,
+                    current_mutant_verified_tests: row.get(11)?,
+                    current_mutant_killed_tests: row.get(12)?,
+                    last_test_exposure_at: row.get(13)?,
+                    last_mutant_run_at: row.get(14)?,
+                    latest_fix_at: row.get(15)?,
+                    latest_change_at: row.get(16)?,
+                    fixes_after_test_exposure: row.get(17)?,
+                    changes_after_test_exposure: row.get(18)?,
+                    semantic_changes_after_mutant_run: row.get(19)?,
+                    verification_stale_seconds,
+                    verification_staleness_score: verification_stale_seconds as f64 / 86_400.0,
+                    reopened_count: row.get(21)?,
+                    risk_score: 0.0,
+                })
+            })?;
+            rows.collect::<Result<Vec<_>, _>>()?
+        };
 
-        let mut summaries = rows
-            .collect::<Result<Vec<_>, _>>()?
+        let mut summaries = raw_summaries
             .into_iter()
             .map(|summary| (summary.id.clone(), summary))
             .collect::<HashMap<_, _>>();
