@@ -526,6 +526,38 @@ RSpec.describe "nil-kill multi-language runtime pipeline" do
     end
   end
 
+  it "keeps Go name-type struct fields typed in static evidence" do
+    grammar = ENV["DECOMPLEX_TS_GO_PATH"]
+    skip "set DECOMPLEX_TS_GO_PATH to run Go Tree-sitter static evidence test" unless grammar && File.file?(grammar)
+
+    Dir.mktmpdir("nil-kill-go-static", NilKill::ROOT) do |dir|
+      src = File.join(dir, "src")
+      FileUtils.mkdir_p(src)
+      File.write(File.join(src, "slab.go"), <<~GO)
+        package util
+
+        type Slab struct {
+          I16 []int16
+          Count int
+        }
+      GO
+
+      evidence = NilKill::StaticEvidence.build([src], root: dir)
+      fields = evidence.fetch("fields")
+      report = NilKill::Report.allocate
+
+      expect(evidence.dig("facts", "state_types", "Slab\u0000I16")).to eq("[]int16")
+      expect(evidence.dig("facts", "state_types", "Slab\u0000Count")).to eq("int")
+      expect(fields).to include(a_hash_including(
+        "language" => "go",
+        "name" => "I16",
+        "declared_type" => "[]int16"
+      ))
+      expect(report.send(:static_field_finding, fields.find { |field| field["name"] == "I16" })).to be_nil
+      expect(report.send(:static_field_finding, fields.find { |field| field["name"] == "Count" })).to be_nil
+    end
+  end
+
   it "exposes provider capabilities from trace-spec" do
     spec = NilKill::Commands::TraceSpecCommand.new([]).spec
     languages = spec.fetch("language_capabilities").to_h { |cap| [cap.fetch("language"), cap] }

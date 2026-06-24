@@ -296,3 +296,23 @@ Do not give plugins direct database writes yet. This will let Lineage add
 Mutant, richer Codecov/GitHub artifact classification, Sentry-like
 providers, and language-specific quality tools without turning the core
 engine into a pile of provider-specific parsers.
+
+## Future Language Test Matrix
+
+To verify the generalization of the toolchain (Lineage, Boobytrap, SlopCop, Decomplex, Nil-Kill, Espalier), the following repositories are identified as "Gold Standard" test targets for tomorrow’s fire drill and future language support verification. These repos are in the 10k–25k LOC range with high-alpha logic and rigorous test suites.
+
+| Language | Repository | Approx. LOC | Test Target Focus |
+| :--- | :--- | :--- | :--- |
+| **C** | **[libuv](https://github.com/libuv/libuv)** | ~25,000 | **Lineage:** Rename stability and deep temporal risk tracking. |
+| **C++** | **[Google Test](https://github.com/google/googletest)** | ~20,000 | **SlopCop:** TSan/Loom gap detection in self-hosted test logic. |
+| **C#** | **[Polly](https://github.com/App-vNext/Polly)** | ~15,000 | **VOPR:** Resiliency and retry-loop simulation coverage. |
+| **Java** | **[Gson](https://github.com/google/gson)** | ~15,000 | **Nil-kill:** Complex reflection and nullability edge cases. |
+| **Kotlin** | **[Moshi](https://github.com/square/moshi)** | ~12,000 | **Type Pressure:** Native null-safety (the `?` syntax). |
+| **Swift** | **[Alamofire](https://github.com/Alamofire/Alamofire)** | ~18,000 | **Espalier:** High-fidelity async delegation mapping. |
+| **Lua** | **[Lapis](https://github.com/leafo/lapis)** | ~15,000 | **Universal Syntax:** Testing Tree-sitter normalization boundaries. |
+
+### Fire Drill Protocol
+1. **Lineage Build:** Run `lineage build` to verify performance and logical identity stability.
+2. **Decomplex Audit:** Run `decomplex report` to verify "Decision Pressure" and "Root Cause" accuracy.
+3. **SlopCop Check:** Verify "Constraint-Aware Coverage" (e.g., Go race-detector/Zig Loom gaps).
+4. **Nil-Kill Inference:** Run Nil-Kill to verify SMT solver consistency across language-specific type systems.

@@ -12,11 +12,14 @@ module NilKill
             next unless assoc.respond_to?(:key) && assoc.respond_to?(:value)
             key = hash_key_name(assoc.key)
             next unless key
-            @param_origins << param_origin_record(node, assoc.value, callee, :keyword, key, scope)
-            record_callsite_hash_shape(callee, :keyword, key, assoc.value)
-            record_callsite_array_element_shape(callee, :keyword, key, assoc.value)
+            value = assoc.value
+            next unless value
+            @param_origins << param_origin_record(node, value, callee, :keyword, key, scope)
+            record_callsite_hash_shape(callee, :keyword, key, value)
+            record_callsite_array_element_shape(callee, :keyword, key, value)
           end
         else
+          next unless arg
           @param_origins << param_origin_record(node, arg, callee, :positional, idx, scope)
           record_callsite_hash_shape(callee, :positional, idx, arg)
           record_callsite_array_element_shape(callee, :positional, idx, arg)

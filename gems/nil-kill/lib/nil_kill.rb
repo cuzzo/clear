@@ -62,6 +62,7 @@ require_relative "nil_kill/commands/collect_python_command"
 require_relative "nil_kill/commands/normalize_command"
 require_relative "nil_kill/commands/analyze_command"
 require_relative "nil_kill/commands/trace_spec_command"
+require_relative "nil_kill/commands/source_index_command"
 require_relative "nil_kill/cli"
 
 NilKill::CLI.new(ARGV).run if $PROGRAM_NAME == __FILE__

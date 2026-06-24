@@ -1,0 +1,401 @@
+#!/usr/bin/env ruby
+# frozen_string_literal: true
+
+require_relative "../lib/decomplex"
+
+def parser_name
+  ENV.fetch("DECOMPLEX_PARSER", "tree_sitter").to_s
+end
+
+def supported_exts
+  Decomplex::Syntax.supported_exts(parser: parser_name)
+end
+
+def no_files_message
+  "no supported source files"
+end
+
+def split_excludes(args)
+  excludes = []
+  files = []
+  queue = Array(args).dup
+  until queue.empty?
+    arg = queue.shift
+    case arg
+    when /\A--exclude=(.+)\z/
+      excludes << Regexp.last_match(1)
+    when "--exclude"
+      excludes << queue.shift.to_s unless queue.empty?
+    else
+      files << arg
+    end
+  end
+  [files, excludes]
+end
+
+def collect_files(args)
+  targets, excludes = split_excludes(args)
+  Decomplex::SourceFilter.collect(
+    targets,
+    parser: parser_name,
+    root: Dir.pwd,
+    exclude: excludes
+  )
+end
+
+# decomplex delta BASELINE.json FILE_OR_DIR...
+#   diff a fresh run against a saved baseline snapshot. Line-
+#   insensitive: a finding that only moved lines is "persisted".
+if ARGV[0] == "delta"
+  require_relative "../lib/decomplex/report"
+  baseline = ARGV[1]
+  abort "usage: decomplex delta BASELINE.json FILE..." unless baseline && File.file?(baseline)
+
+  files = collect_files(ARGV[2..])
+  abort no_files_message if files.empty?
+  rep = Decomplex::Report.new(files)
+  head = Decomplex::Delta.snapshot(rep.sections_data, rep.root_clusters)
+  base = Decomplex::Delta.load_snapshot(baseline)
+  puts Decomplex::Delta.to_markdown(Decomplex::Delta.diff(base, head))
+  exit 0
+end
+
+if ARGV[0] == "detector"
+  args = ARGV[1..]
+  detector = args&.shift
+  abort "usage: decomplex detector DETECTOR --engine=ruby|rust --json [--jobs=N] FILE..." unless detector
+
+  engine = "ruby"
+  json = false
+  compare = false
+  benchmark = false
+  detector_options = {}
+  args = args.reject do |arg|
+    case arg
+    when /\A--engine=(.+)\z/
+      engine = Regexp.last_match(1)
+      true
+    when "--json"
+      json = true
+      true
+    when "--compare-engines"
+      compare = true
+      true
+    when "--benchmark"
+      benchmark = true
+      true
+    when /\A--mass=(\d+)\z/
+      detector_options[:mass] = Integer(Regexp.last_match(1))
+      true
+    when /\A--fuzzy=(\d+)\z/
+      detector_options[:fuzzy] = Integer(Regexp.last_match(1))
+      true
+    when /\A--jobs=(\d+)\z/
+      detector_options[:jobs] = Integer(Regexp.last_match(1))
+      true
+    else
+      false
+    end
+  end
+  files = collect_files(args)
+  abort no_files_message if files.empty?
+
+  if compare
+    ok, ruby_json, rust_json = Decomplex::DetectorRunner.compare(detector, files, **detector_options)
+    unless ok
+      warn "decomplex detector #{detector} output differs between ruby and rust engines"
+      warn "--- ruby"
+      warn ruby_json
+      warn "--- rust"
+      warn rust_json
+      exit 1
+    end
+    puts ruby_json
+  elsif json
+    started = Process.clock_gettime(Process::CLOCK_MONOTONIC)
+    output = Decomplex::DetectorRunner.canonical_json(detector, files, engine: engine, **detector_options)
+    elapsed = Process.clock_gettime(Process::CLOCK_MONOTONIC) - started
+    if benchmark
+      warn format("decomplex detector=%s engine=%s files=%d elapsed=%.6fs",
+                  detector, engine, files.size, elapsed)
+    end
+    print output
+  else
+    abort "decomplex detector currently requires --json or --compare-engines"
+  end
+  exit 0
+end
+
+if ARGV[0] == "state-mesh"
+  require_relative "../lib/decomplex/state_mesh"
+  args = ARGV[1..]
+  out_path = nil
+  args = args.reject { |a| a =~ /\A--output=(.+)/ && (out_path = Regexp.last_match(1)) }
+  files = collect_files(args)
+  abort no_files_message if files.empty?
+  sm = Decomplex::StateMesh.scan(files)
+  sm.run
+  json = JSON.pretty_generate(sm.to_json_graph)
+  if out_path
+    File.write(out_path, json)
+    warn "wrote #{out_path} (#{files.size} files)"
+  else
+    puts json
+  end
+  exit 0
+end
+
+if ARGV[0] == "state-branches"
+  args = ARGV[1..]
+  out_path = nil
+  args = args.reject { |a| a =~ /\A--output=(.+)/ && (out_path = Regexp.last_match(1)) }
+  files = collect_files(args)
+  abort no_files_message if files.empty?
+  rows = Decomplex::StateBranchDensity.scan(files).findings
+  md = +"# Decomplex State-Based Branch Density\n\n"
+  md << "| # | method | state branches | refs | score |\n"
+  md << "|---|--------|----------------|------|-------|\n"
+  rows.each_with_index do |h, idx|
+    md << "| #{idx + 1} | `#{h[:at]}` | #{h[:decisions]} | " \
+          "`#{h[:state_refs].first(8).join(' | ')}` | #{h[:score]} |\n"
+  end
+  if out_path
+    File.write(out_path, md)
+    warn "wrote #{out_path} (#{files.size} files)"
+  else
+    puts md
+  end
+  exit 0
+end
+
+if ARGV[0] == "temporal-ordering"
+  args = ARGV[1..]
+  out_path = nil
+  args = args.reject { |a| a =~ /\A--output=(.+)/ && (out_path = Regexp.last_match(1)) }
+  files = collect_files(args)
+  abort no_files_message if files.empty?
+  rows = Decomplex::TemporalOrderingPressure.scan(files)
+  md = +"# Decomplex Temporal Ordering Pressure\n\n"
+  md << "| # | owner | score | public | state methods | writers | shared fields | flows | states |\n"
+  md << "|---|-------|-------|--------|---------------|---------|---------------|-------|--------|\n"
+  rows.each_with_index do |h, idx|
+    md << "| #{idx + 1} | `#{h[:owner]}` | #{h[:score]} | #{h[:public_methods]} | " \
+          "#{h[:state_methods]} | #{h[:writers]} | `#{h[:shared_fields].join(' | ')}` | " \
+          "#{h[:orderings]} | #{h[:state_space]} |\n"
+  end
+  if out_path
+    File.write(out_path, md)
+    warn "wrote #{out_path} (#{files.size} files)"
+  else
+    puts md
+  end
+  exit 0
+end
+
+if ["implicit-control-flow", "ordered-protocols"].include?(ARGV[0])
+  args = ARGV[1..]
+  out_path = nil
+  args = args.reject { |a| a =~ /\A--output=(.+)/ && (out_path = Regexp.last_match(1)) }
+  files = collect_files(args)
+  abort no_files_message if files.empty?
+  rows = Decomplex::ImplicitControlFlow.scan(files).ordered_protocols
+  md = +"# Decomplex Implicit Control Flow\n\n"
+  md << "| # | first site | kind | support | protocol | dependency | state |\n"
+  md << "|---|------------|------|---------|----------|------------|-------|\n"
+  rows.each_with_index do |h, idx|
+    md << "| #{idx + 1} | `#{h[:at]}` | #{h[:kind]} | #{h[:support]} | " \
+          "`#{h[:protocol].join(' -> ')}` | " \
+          "`#{h[:dependency].join(' | ')}` | `#{h[:states].join(' | ')}` |\n"
+  end
+  if out_path
+    File.write(out_path, md)
+    warn "wrote #{out_path} (#{files.size} files)"
+  else
+    puts md
+  end
+  exit 0
+end
+
+if ["weighted-inlined-complexity", "wicc"].include?(ARGV[0])
+  args = ARGV[1..]
+  out_path = nil
+  args = args.reject { |a| a =~ /\A--output=(.+)/ && (out_path = Regexp.last_match(1)) }
+  files = collect_files(args)
+  abort no_files_message if files.empty?
+  rows = Decomplex::WeightedInlinedCognitiveComplexity.scan(files)
+  md = +"# Decomplex Weighted Inlined Cognitive Complexity\n\n"
+  md << "| # | method | inlined | local | hidden | depth | single-caller helpers | chain |\n"
+  md << "|---|--------|---------|-------|--------|-------|-----------------------|-------|\n"
+  rows.each_with_index do |h, idx|
+    md << "| #{idx + 1} | `#{h[:at]}` | #{h[:inlined]} | #{h[:local]} | " \
+          "#{h[:hidden]} | #{h[:depth]} | `#{h[:single_caller_callees].join(' | ')}` | " \
+          "`#{h[:call_chain].join(' -> ')}` |\n"
+  end
+  if out_path
+    File.write(out_path, md)
+    warn "wrote #{out_path} (#{files.size} files)"
+  else
+    puts md
+  end
+  exit 0
+end
+
+if ["locality-drag", "dormant-locals"].include?(ARGV[0])
+  args = ARGV[1..]
+  out_path = nil
+  args = args.reject { |a| a =~ /\A--output=(.+)/ && (out_path = Regexp.last_match(1)) }
+  files = collect_files(args)
+  abort no_files_message if files.empty?
+  rows = Decomplex::LocalityDrag.scan(files)
+  md = +"# Decomplex Locality Drag\n\n"
+  md << "| # | method | local | score | gap | unrelated | setup ignored | boundaries | first use |\n"
+  md << "|---|--------|-------|-------|-----|-----------|---------------|------------|-----------|\n"
+  rows.each_with_index do |h, idx|
+    md << "| #{idx + 1} | `#{h[:at]}` | `#{h[:variable]}` | #{h[:score]} | " \
+          "#{h[:gap_lines]} | #{h[:unrelated_statements]} | #{h[:setup_statements]} | " \
+          "#{h[:boundary_crossings]} | #{h[:used_at]} |\n"
+  end
+  if out_path
+    File.write(out_path, md)
+    warn "wrote #{out_path} (#{files.size} files)"
+  else
+    puts md
+  end
+  exit 0
+end
+
+if ARGV[0] == "report"
+  require_relative "../lib/decomplex/report"
+  args = ARGV[1..]
+  out_path = nil
+  json_path = nil
+  sarif_path = nil
+  args = args.reject { |a| a =~ /\A--output=(.+)/ && (out_path = Regexp.last_match(1)) }
+  args = args.reject { |a| a =~ /\A--emit-json=(.+)/ && (json_path = Regexp.last_match(1)) }
+  args = args.reject { |a| a =~ /\A--sarif=(.+)/ && (sarif_path = Regexp.last_match(1)) }
+  files = collect_files(args)
+  abort no_files_message if files.empty?
+  rep = Decomplex::Report.new(files)
+  if json_path
+    File.write(json_path, rep.to_sarif)
+    warn "wrote SARIF report #{json_path}"
+  end
+  if sarif_path
+    File.write(sarif_path, rep.to_sarif)
+    warn "wrote SARIF report #{sarif_path}"
+  end
+  md = rep.to_markdown
+  if out_path
+    File.write(out_path, md)
+    warn "wrote #{out_path} (#{files.size} files)"
+  else
+    puts md
+  end
+  exit 0
+end
+
+if ARGV.empty? || ARGV[0] == "-h" || ARGV[0] == "--help"
+  warn <<~USAGE
+    decomplex -- decision-level duplication + neglected-condition detector
+
+      decomplex FILE_OR_DIR [FILE_OR_DIR ...]
+      decomplex report [--output=FILE] [--emit-json=FILE] [--sarif=FILE] [--exclude=GLOB] FILE_OR_DIR ...
+      decomplex detector DETECTOR --engine=ruby|rust --json [--benchmark] [--mass=N] [--fuzzy=N] [--jobs=N] FILE_OR_DIR ...
+      decomplex detector DETECTOR --compare-engines [--mass=N] [--fuzzy=N] [--jobs=N] FILE_OR_DIR ...
+      decomplex state-mesh [--output=FILE] [--exclude=GLOB] FILE_OR_DIR ...
+      decomplex state-branches [--output=FILE] [--exclude=GLOB] FILE_OR_DIR ...
+      decomplex temporal-ordering [--output=FILE] [--exclude=GLOB] FILE_OR_DIR ...
+      decomplex delta BASELINE.json FILE_OR_DIR ...
+
+    Reports:
+      MISSING ABSTRACTION  identical guard tuple recomputed across >=2
+                           decision units, ranked support x scatter.
+      NEGLECTED CONDITION  a site that is a high-support pattern minus
+                           one element -- a possible bug candidate.
+
+    Subcommands:
+      report       Full markdown report with all detectors
+      detector     Single-detector canonical JSON for migration/benchmarking
+      state-mesh   JSON graph of reader/writer hierarchy by field
+      state-branches
+                   Markdown table of branches whose predicate reads state
+      temporal-ordering
+                   Markdown table of public mutable lifecycle surfaces
+      implicit-control-flow
+                   Markdown table of state-dependent internal call-order pressure
+      ordered-protocols
+                   Alias for implicit-control-flow
+      weighted-inlined-complexity
+                   Markdown table of same-owner hidden cognitive complexity
+      wicc         Alias for weighted-inlined-complexity
+      locality-drag
+                   Markdown table of dormant locals in complex methods
+      dormant-locals
+                   Alias for locality-drag
+      delta        Before/after diff against a baseline snapshot
+
+    Common options:
+      --exclude PATTERN
+                   Exclude a path/glob from directory scans. May be repeated.
+                   Defaults already skip Zig caches, node_modules, and all-tests.zig.
+
+    v0 mines exact-match case/when dispatch + && conjunction only.
+  USAGE
+  exit 1
+end
+
+files = collect_files(ARGV)
+abort no_files_message if files.empty?
+
+miner = Decomplex::Miner.scan(files)
+
+ma = miner.missing_abstractions
+puts "=== MISSING ABSTRACTIONS (#{ma.size}) " \
+     "-- guard tuple recomputed across >=2 decision units ==="
+ma.first(40).each do |h|
+  puts format("\n[%s] support=%d scatter=%d rank=%d",
+              h[:kind], h[:support], h[:scatter], h[:rank])
+  puts "  tuple: #{h[:members].join(' | ')}"
+  h[:sites].first(8).each { |s| puts "    #{s}" }
+  puts "    ...(+#{h[:sites].size - 8} more)" if h[:sites].size > 8
+end
+
+nc = miner.neglected_conditions
+puts "\n\n=== NEGLECTED CONDITIONS (#{nc.size}) " \
+     "-- pattern minus one element, likely bug ==="
+nc.first(40).each do |h|
+  puts format("\n[support=%d] at %s", h[:support], h[:at])
+  puts "  full pattern: #{h[:pattern].join(' | ')}"
+  puts "  MISSING here: #{h[:missing]}"
+end
+
+cu = Decomplex::CoUpdate.scan(files)
+nu = cu.neglected_updates
+puts "\n\n=== NEGLECTED UPDATES (#{nu.size}) " \
+     "-- co-written state, one write missing (redundant-state desync) ==="
+nu.first(40).each do |h|
+  puts format("\n[support=%d] %s writes .%s but NOT .%s",
+              h[:support], h[:at], h[:has], h[:missing])
+  puts "  same-receiver write: #{h[:recv]}.#{h[:has]} = ..."
+  puts "  pair co-written elsewhere: .#{h[:pair][0]} + .#{h[:pair][1]}"
+end
+
+pa = Decomplex::PredicateAlias.scan(files)
+ac = pa.alias_clusters
+puts "\n\n=== PREDICATE ALIASES (#{ac.size}) " \
+     "-- one decision under multiple names (re-derived state) ==="
+ac.first(30).each do |h|
+  puts "\n  names: #{h[:names].join(' = ')}"
+  puts "  body : #{h[:body]}"
+  h[:sites].each { |s| puts "    #{s}" }
+end
+
+rm = pa.reification_misses(miner.sites)
+unless rm.empty?
+  puts "\n\n=== REIFICATION MISSES (#{rm.size}) " \
+       "-- existing predicate reinvented inline ==="
+  rm.first(30).each do |h|
+    puts "\n  predicate ##{h[:predicate]} == #{h[:body]}"
+    puts "  reinvented inline at #{h[:inline_at]}"
+  end
+end

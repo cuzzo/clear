@@ -28,7 +28,138 @@ module NilKill
     end
 
     def index_sources
-      StaticAnalysis.index_store(store: @store, targets: NilKill.target_dirs, root: ROOT)
+      if ENV.fetch("NIL_KILL_SOURCE_INDEX_ENGINE", "ruby") == "rust"
+        index_sources_from_native_bundle
+        return
+      end
+
+      if ENV.fetch("NIL_KILL_SOURCE_INDEX_ENGINE", "ruby") == "static_analysis"
+        StaticAnalysis.index_store(store: @store, targets: NilKill.target_dirs, root: ROOT)
+        return
+      end
+
+      SourceIndex.reset_global_shape_indexes
+      files = NilKill.target_files
+      warm_only = ENV["NIL_KILL_IDX_WARM_ONLY"] != "0"
+      files.each { |path| SourceIndex.new(path, warm_only: warm_only) }
+      files.each { |path| SourceIndex.new(path, warm_only: true) } if warm_only
+      reuse = ENV["NIL_KILL_IDX_REUSE"] != "0"
+      cached = nil
+      5.times do
+        before = SourceIndex.noreturn_methods.size
+        pass = reuse ? {} : nil
+        files.each { |path| idx = SourceIndex.new(path); pass[path] = idx if reuse }
+        if SourceIndex.noreturn_methods.size == before
+          cached = pass
+          break
+        end
+      end
+      files.each do |path|
+        idx = (cached && cached[path]) || SourceIndex.new(path)
+        append_source_index_facts(idx, target: true)
+        idx.methods.each do |method|
+          rec = @store.method_record([method["class"], method["method"], method["kind"], File.expand_path(method["path"], ROOT), method["line"]])
+          rec["source"] = method
+          rec["has_sig"] = method["has_sig"]
+        end
+      end
+      (NilKill.usage_scan_files - files).each do |path|
+        append_source_index_facts(SourceIndex.new(path, usage_only: true), target: false)
+      end
+    end
+
+    def append_source_index_facts(idx, target:)
+      @store.facts["files"][idx.rel] = idx.summary if target
+      @store.facts["unsigned_methods"].concat(idx.methods.reject { |m| m["has_sig"] }) if target
+      @store.facts["existing_sigs"].concat(idx.methods.select { |m| m["has_sig"] }) if target
+      @store.facts["tlet_sites"].concat(idx.tlet_sites) if target
+      @store.facts["dead_nil_checks"].concat(idx.dead_nil_checks) if target
+      @store.facts["deterministic_guards"].concat(idx.deterministic_guards) if target
+      @store.facts["struct_declarations"].concat(idx.struct_declarations) if target
+      @store.facts["struct_field_static"].concat(idx.struct_field_static) if target
+      @store.facts["tuple_arrays"].concat(idx.tuple_arrays) if target
+      @store.facts["hash_shapes"].concat(idx.hash_shapes) if target
+      @store.facts["collection_index_lookups"].concat(idx.collection_index_lookups) if target
+      @store.facts["hash_record_blockers"].concat(idx.hash_record_blockers) if target
+      @store.facts["hash_record_member_calls"].concat(idx.hash_record_member_calls) if target
+      @store.facts["type_normalizers"].concat(idx.type_normalizers) if target
+      @store.facts["dispatcher_inferences"].concat(idx.dispatcher_inferences) if target
+      @store.facts["return_origins"].concat(idx.return_origins) if target
+      @store.facts["param_origins"].concat(idx.param_origins) if target
+      (@store.facts["hash_record_escape_sites"] ||= []).concat(idx.hash_record_escape_sites) if target
+      (@store.facts["hidden_enum_observations"] ||= []).concat(idx.hidden_enum_observations) if target
+      (@store.facts["return_usage_sites"] ||= []).concat(idx.return_usage_sites)
+      (@store.facts["return_direct_usage_sites"] ||= []).concat(idx.return_direct_usage_sites)
+      (@store.facts["rescue_handlers"] ||= []).concat(idx.rescue_handlers)
+      return unless target
+
+      @store.facts["ivar_protocols"] ||= {}
+      idx.ivar_protocols.each do |(klass, ivar), methods|
+        key = "#{klass}\0#{ivar}"
+        @store.facts["ivar_protocols"][key] ||= []
+        @store.facts["ivar_protocols"][key] = (@store.facts["ivar_protocols"][key] + methods.to_a).uniq
+      end
+      @store.facts["ivar_param_origins"] ||= {}
+      idx.ivar_param_origins.each do |(klass, ivar), sources|
+        key = "#{klass}\0#{ivar}"
+        @store.facts["ivar_param_origins"][key] ||= []
+        @store.facts["ivar_param_origins"][key] = (@store.facts["ivar_param_origins"][key] + sources.to_a).uniq
+      end
+    end
+
+    def index_sources_from_native_bundle
+      bundle = native_source_index_bundle
+      facts = bundle.fetch("facts")
+      facts.each do |key, value|
+        case @store.facts[key]
+        when Array
+          @store.facts[key].concat(Array(value))
+        when Hash
+          @store.facts[key].merge!(value || {})
+        else
+          @store.facts[key] = value
+        end
+      end
+
+      Array(bundle["methods"]).each do |method|
+        source = method["source"] || method
+        key = method["key"] || [
+          source["class"],
+          source["method"],
+          source["kind"],
+          File.expand_path(source["path"], ROOT),
+          source["line"],
+        ]
+        rec = @store.method_record(key)
+        rec["source"] = source
+        rec["has_sig"] = source["has_sig"] || method["has_sig"]
+      end
+    end
+
+    def native_source_index_bundle
+      bin = native_source_index_binary
+      unless File.executable?(bin)
+        abort "nil-kill: missing native SourceIndexer #{NilKill.rel(bin)}; build with `cargo build --release --manifest-path gems/nil-kill/rust/Cargo.toml`"
+      end
+
+      args = ["source-index", "--root", ROOT]
+      NilKill.target_dirs.each { |dir| args.concat(["--target-dir", NilKill.rel(dir)]) }
+      NilKill.target_exclude_dirs.each { |dir| args.concat(["--exclude-dir", NilKill.rel(dir)]) }
+      target_files = NilKill.source_index_target_files
+      (NilKill.usage_scan_files - target_files).each { |path| args.concat(["--usage-file", path]) }
+      args.concat(target_files)
+
+      out, err, status = Open3.capture3(bin, *args)
+      abort "nil-kill native SourceIndexer failed: #{err}" unless status.success?
+
+      JSON.parse(out)
+    end
+
+    def native_source_index_binary
+      release = File.join(ROOT, "gems", "nil-kill", "rust", "target", "release", "nil-kill-rust")
+      return release if File.executable?(release)
+
+      File.join(ROOT, "gems", "nil-kill", "rust", "target", "debug", "nil-kill-rust")
     end
 
     def load_sorbet
