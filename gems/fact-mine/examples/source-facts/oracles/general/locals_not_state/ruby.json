@@ -42,12 +42,7 @@
               "values"
             ]
           ],
-          "dependencies": [
-            [
-              "total",
-              "values"
-            ]
-          ],
+          "dependencies": [],
           "reads": [
             "total",
             "values"
@@ -446,12 +441,7 @@
                 "values"
               ]
             ],
-            "dependencies": [
-              [
-                "total",
-                "values"
-              ]
-            ],
+            "dependencies": [],
             "end_line": 10,
             "index": 3,
             "line": 8,

@@ -28,7 +28,7 @@ pub(crate) mod visibility;
 pub(crate) mod zig;
 
 use crate::ast::RawNode;
-pub use crate::ast::Span;
+pub use crate::ast::{Span, Node, Child};
 use crate::parallel;
 use anyhow::{bail, Result};
 use serde::{Deserialize, Deserializer, Serialize};

@@ -1,5 +1,6 @@
 use crate::decomplex::detectors::local_flow::{self, MethodSummary, Statement};
 use crate::decomplex::syntax::{self, Document, Language, Span};
+use fact_mine_rust::syntax::{Child, Node};
 use anyhow::Result;
 use serde::Serialize;
 use std::collections::{BTreeMap, BTreeSet};
@@ -54,7 +55,7 @@ pub fn scan_summaries(summaries: &[MethodSummary]) -> Vec<DerivedStateRow> {
 }
 
 fn analyze_method(method: &MethodSummary) -> Vec<DerivedStateRow> {
-    analyze(&method.file, &method.name, &assignments(method))
+    analyze(method, &assignments(method))
 }
 
 fn assignments(method: &MethodSummary) -> Vec<Asgn> {
@@ -141,7 +142,9 @@ fn dependencies_for(statement: &Statement, name: &str) -> Vec<String> {
     deps
 }
 
-fn analyze(file: &str, defn: &str, asgns: &[Asgn]) -> Vec<DerivedStateRow> {
+fn analyze(method: &MethodSummary, asgns: &[Asgn]) -> Vec<DerivedStateRow> {
+    let file = &method.file;
+    let defn = &method.name;
     let mut out = Vec::new();
     for (i, b) in asgns.iter().enumerate() {
         if b.deps.is_empty() {
@@ -169,6 +172,34 @@ fn analyze(file: &str, defn: &str, asgns: &[Asgn]) -> Vec<DerivedStateRow> {
                 continue;
             }
 
+            // Check if b and reasn are in sibling blocks
+            let mut path_b = Vec::new();
+            let mut path_reasn = Vec::new();
+            if find_ancestors(&method.node, b.span, &mut path_b)
+                && find_ancestors(&method.node, reasn.span, &mut path_reasn)
+            {
+                let mut lca_index = 0;
+                while lca_index < path_b.len() && lca_index < path_reasn.len() {
+                    if path_b[lca_index].first_lineno != path_reasn[lca_index].first_lineno
+                        || path_b[lca_index].first_column != path_reasn[lca_index].first_column
+                        || path_b[lca_index].last_lineno != path_reasn[lca_index].last_lineno
+                        || path_b[lca_index].last_column != path_reasn[lca_index].last_column
+                    {
+                        break;
+                    }
+                    lca_index += 1;
+                }
+                let b_has_block = path_b[lca_index..]
+                    .iter()
+                    .any(|node| is_block_introducing(&node.r#type));
+                let reasn_has_block = path_reasn[lca_index..]
+                    .iter()
+                    .any(|node| is_block_introducing(&node.r#type));
+                if b_has_block && reasn_has_block {
+                    continue;
+                }
+            }
+
             let loc = format!("{}:{}:{}", file, defn, b.line);
             let mut spans = BTreeMap::new();
             spans.insert(loc.clone(), b.span);
@@ -187,6 +218,35 @@ fn analyze(file: &str, defn: &str, asgns: &[Asgn]) -> Vec<DerivedStateRow> {
         }
     }
     out
+}
+
+fn find_ancestors(node: &Node, target_span: Span, path: &mut Vec<Node>) -> bool {
+    let node_span = [
+        node.first_lineno,
+        node.first_column,
+        node.last_lineno,
+        node.last_column,
+    ];
+    path.push(node.clone());
+    if node_span == target_span {
+        return true;
+    }
+    for child in &node.children {
+        if let Child::Node(child_node) = child {
+            if find_ancestors(child_node, target_span, path) {
+                return true;
+            }
+        }
+    }
+    path.pop();
+    false
+}
+
+fn is_block_introducing(node_type: &str) -> bool {
+    matches!(
+        node_type,
+        "ITER" | "LAMBDA" | "FOR" | "WHILE" | "UNTIL" | "ARROW_FUNCTION" | "FUNCTION_EXPRESSION"
+    )
 }
 
 #[cfg(test)]
@@ -270,6 +330,63 @@ mod tests {
 
         // res[6] has derived = "c"
         assert_eq!(res[6].derived, "c");
+    }
+
+    #[test]
+    fn test_derived_state_sibling_blocks() {
+        let m_sibling: MethodSummary = serde_json::from_value(json!({
+            "id": "7", "owner": "T", "name": "m_sibling", "file": "b.rb", "line": 1, "span": [1,0,30,0],
+            "node": {
+                "type": "DEFN",
+                "first_lineno": 1, "first_column": 0, "last_lineno": 30, "last_column": 0,
+                "text": "def m_sibling...",
+                "children": [
+                    {
+                        "Node": {
+                            "type": "ITER",
+                            "first_lineno": 5, "first_column": 0, "last_lineno": 15, "last_column": 0,
+                            "text": "declarations.each...",
+                            "children": [
+                                {
+                                    "Node": {
+                                        "type": "LASGN",
+                                        "first_lineno": 10, "first_column": 0, "last_lineno": 10, "last_column": 0,
+                                        "text": "bucket = candidate",
+                                        "children": []
+                                    }
+                                }
+                            ]
+                        }
+                    },
+                    {
+                        "Node": {
+                            "type": "ITER",
+                            "first_lineno": 20, "first_column": 0, "last_lineno": 28, "last_column": 0,
+                            "text": "order.each...",
+                            "children": [
+                                {
+                                    "Node": {
+                                        "type": "LASGN",
+                                        "first_lineno": 25, "first_column": 0, "last_lineno": 25, "last_column": 0,
+                                        "text": "candidate = bucket",
+                                        "children": []
+                                    }
+                                }
+                            ]
+                        }
+                    }
+                ]
+            },
+            "statements": [
+                { "index": 0, "line": 10, "end_line": 10, "span": [10,0,10,0], "source": "bucket = candidate", "reads": [], "writes": ["bucket"], "dependencies": [["bucket", "candidate"]], "co_uses": [] },
+                { "index": 1, "line": 25, "end_line": 25, "span": [25,0,25,0], "source": "candidate = bucket", "reads": [], "writes": ["candidate"], "dependencies": [["candidate", "bucket"]], "co_uses": [] }
+            ], "boundaries": []
+        })).unwrap();
+
+        let res = scan_summaries(&[m_sibling]);
+        // BEFORE FIX: this will be 1 because 'bucket' on line 10 depends on 'candidate', which is reassigned on line 25
+        // AFTER FIX: it must be 0 because they are in sibling ITER blocks
+        assert_eq!(res.len(), 0);
     }
 }
 

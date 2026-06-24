@@ -522,13 +522,19 @@ impl<'a> LocalFlow<'a> {
                 }
             }
         });
-        let lhs_names = self.local_writes(node);
-        if !lhs_names.is_empty() {
-            let reads = self.local_reads(node, local_names, &lhs_names);
-            for lhs in lhs_names {
-                for read in &reads {
-                    if &lhs != read {
-                        deps.push((lhs.clone(), read.clone()));
+        let is_control_flow = matches!(
+            node.r#type.as_str(),
+            "IF" | "UNLESS" | "CASE" | "CASE2" | "WHEN" | "WHILE" | "UNTIL" | "FOR" | "ITER" | "BEGIN" | "RESCUE" | "ENSURE" | "COND" | "SWITCH" | "MATCH"
+        );
+        if !is_control_flow {
+            let lhs_names = self.local_writes(node);
+            if !lhs_names.is_empty() {
+                let reads = self.local_reads(node, local_names, &lhs_names);
+                for lhs in lhs_names {
+                    for read in &reads {
+                        if &lhs != read {
+                            deps.push((lhs.clone(), read.clone()));
+                        }
                     }
                 }
             }

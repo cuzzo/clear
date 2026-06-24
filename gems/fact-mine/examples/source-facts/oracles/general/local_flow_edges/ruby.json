@@ -96,64 +96,12 @@
           ],
           "dependencies": [
             [
-              "file",
-              "audit"
-            ],
-            [
-              "file",
-              "key"
-            ],
-            [
-              "file",
-              "meth"
-            ],
-            [
-              "file",
-              "rows"
-            ],
-            [
-              "file",
-              "sections"
-            ],
-            [
-              "key",
-              "audit"
-            ],
-            [
               "key",
               "file"
             ],
             [
               "key",
               "meth"
-            ],
-            [
-              "key",
-              "rows"
-            ],
-            [
-              "key",
-              "sections"
-            ],
-            [
-              "meth",
-              "audit"
-            ],
-            [
-              "meth",
-              "file"
-            ],
-            [
-              "meth",
-              "key"
-            ],
-            [
-              "meth",
-              "rows"
-            ],
-            [
-              "meth",
-              "sections"
             ]
           ],
           "reads": [
@@ -1075,64 +1023,12 @@
             ],
             "dependencies": [
               [
-                "file",
-                "audit"
-              ],
-              [
-                "file",
-                "key"
-              ],
-              [
-                "file",
-                "meth"
-              ],
-              [
-                "file",
-                "rows"
-              ],
-              [
-                "file",
-                "sections"
-              ],
-              [
-                "key",
-                "audit"
-              ],
-              [
                 "key",
                 "file"
               ],
               [
                 "key",
                 "meth"
-              ],
-              [
-                "key",
-                "rows"
-              ],
-              [
-                "key",
-                "sections"
-              ],
-              [
-                "meth",
-                "audit"
-              ],
-              [
-                "meth",
-                "file"
-              ],
-              [
-                "meth",
-                "key"
-              ],
-              [
-                "meth",
-                "rows"
-              ],
-              [
-                "meth",
-                "sections"
               ]
             ],
             "end_line": 18,
