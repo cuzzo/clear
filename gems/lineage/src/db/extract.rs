@@ -6,7 +6,7 @@ use streaming_iterator::StreamingIterator;
 
 pub const DEFAULT_CODE_EXTENSIONS: &[&str] = &[
     "rb", "zig", "py", "js", "jsx", "mjs", "cjs", "ts", "tsx", "lua", "c", "h", "cc", "cpp",
-    "cxx", "hh", "hpp", "hxx", "cs", "java", "swift", "kt", "kts", "go", "rs", "S",
+    "cxx", "hh", "hpp", "hxx", "cs", "java", "swift", "kt", "kts", "go", "rs", "php", "S",
 ];
 const DEFAULT_IGNORED_COMPONENTS: &[&str] = &[
     ".git",
@@ -257,10 +257,15 @@ enum TreeSitterAdapter {
     Cpp,
     CSharp,
     Go,
+    Java,
     JavaScript,
+    Kotlin,
+    Lua,
+    Php,
     Python,
     Ruby,
     Rust,
+    Swift,
     Tsx,
     TypeScript,
     Zig,
@@ -273,10 +278,15 @@ impl TreeSitterAdapter {
             "cc" | "cpp" | "cxx" | "hh" | "hpp" | "hxx" => Some(Self::Cpp),
             "cs" => Some(Self::CSharp),
             "go" => Some(Self::Go),
+            "java" => Some(Self::Java),
             "js" | "jsx" | "mjs" | "cjs" => Some(Self::JavaScript),
+            "kt" | "kts" => Some(Self::Kotlin),
+            "lua" => Some(Self::Lua),
+            "php" => Some(Self::Php),
             "py" | "pyi" => Some(Self::Python),
             "rb" => Some(Self::Ruby),
             "rs" => Some(Self::Rust),
+            "swift" => Some(Self::Swift),
             "tsx" => Some(Self::Tsx),
             "ts" => Some(Self::TypeScript),
             "zig" => Some(Self::Zig),
@@ -290,10 +300,15 @@ impl TreeSitterAdapter {
             Self::Cpp => tree_sitter_cpp::LANGUAGE.into(),
             Self::CSharp => tree_sitter_c_sharp::LANGUAGE.into(),
             Self::Go => tree_sitter_go::LANGUAGE.into(),
+            Self::Java => tree_sitter_java::LANGUAGE.into(),
             Self::JavaScript => tree_sitter_javascript::LANGUAGE.into(),
+            Self::Kotlin => tree_sitter_kotlin_ng::LANGUAGE.into(),
+            Self::Lua => tree_sitter_lua::LANGUAGE.into(),
+            Self::Php => tree_sitter_php::LANGUAGE_PHP.into(),
             Self::Python => tree_sitter_python::LANGUAGE.into(),
             Self::Ruby => tree_sitter_ruby::LANGUAGE.into(),
             Self::Rust => tree_sitter_rust::LANGUAGE.into(),
+            Self::Swift => tree_sitter_swift::LANGUAGE.into(),
             Self::Tsx => tree_sitter_typescript::LANGUAGE_TSX.into(),
             Self::TypeScript => tree_sitter_typescript::LANGUAGE_TYPESCRIPT.into(),
             Self::Zig => tree_sitter_zig::LANGUAGE.into(),
@@ -311,6 +326,11 @@ const CPP_QUERY: &str = include_str!("queries/cpp/tags.scm");
 const CS_QUERY: &str = include_str!("queries/csharp/tags.scm");
 const RUST_QUERY: &str = include_str!("queries/rust/tags.scm");
 const ZIG_QUERY: &str = include_str!("queries/zig/tags.scm");
+const JAVA_QUERY: &str = include_str!("queries/java/tags.scm");
+const KOTLIN_QUERY: &str = include_str!("queries/kotlin/tags.scm");
+const LUA_QUERY: &str = include_str!("queries/lua/tags.scm");
+const PHP_QUERY: &str = include_str!("queries/php/tags.scm");
+const SWIFT_QUERY: &str = include_str!("queries/swift/tags.scm");
 
 impl TreeSitterAdapter {
     fn query_str(self) -> &'static str {
@@ -325,6 +345,11 @@ impl TreeSitterAdapter {
             Self::CSharp => CS_QUERY,
             Self::Rust => RUST_QUERY,
             Self::Zig => ZIG_QUERY,
+            Self::Java => JAVA_QUERY,
+            Self::Kotlin => KOTLIN_QUERY,
+            Self::Lua => LUA_QUERY,
+            Self::Php => PHP_QUERY,
+            Self::Swift => SWIFT_QUERY,
         }
     }
 }
@@ -350,6 +375,11 @@ fn candidate_from_capture(
                 TreeSitterAdapter::CSharp => &["class_declaration", "struct_declaration", "record_declaration", "namespace_declaration"][..],
                 TreeSitterAdapter::Rust => &["struct_item", "enum_item", "trait_item", "union_item", "mod_item"][..],
                 TreeSitterAdapter::Zig => &["struct_declaration", "enum_declaration", "union_declaration", "variable_declaration"][..],
+                TreeSitterAdapter::Java => &["class_declaration", "interface_declaration", "enum_declaration", "record_declaration"][..],
+                TreeSitterAdapter::Kotlin => &["class_declaration", "object_declaration"][..],
+                TreeSitterAdapter::Lua => &[][..],
+                TreeSitterAdapter::Php => &["class_declaration", "interface_declaration", "trait_declaration", "namespace_definition"][..],
+                TreeSitterAdapter::Swift => &["class_declaration", "protocol_declaration"][..],
             };
             qualified_name(node, name, source, owner_kinds)
         }
@@ -404,6 +434,55 @@ fn candidate_from_capture(
                     zig_container_owner(node, source)
                         .map(|owner| format!("{owner}.{name}"))
                         .unwrap_or_else(|| name.to_string())
+                }
+                TreeSitterAdapter::Java => {
+                    qualified_name(
+                        node,
+                        name,
+                        source,
+                        &[
+                            "class_declaration",
+                            "interface_declaration",
+                            "enum_declaration",
+                            "record_declaration",
+                        ],
+                    )
+                }
+                TreeSitterAdapter::Kotlin => {
+                    qualified_name(
+                        node,
+                        name,
+                        source,
+                        &[
+                            "class_declaration",
+                            "object_declaration",
+                        ],
+                    )
+                }
+                TreeSitterAdapter::Lua => name.to_string(),
+                TreeSitterAdapter::Php => {
+                    qualified_name(
+                        node,
+                        name,
+                        source,
+                        &[
+                            "class_declaration",
+                            "interface_declaration",
+                            "trait_declaration",
+                            "namespace_definition",
+                        ],
+                    )
+                }
+                TreeSitterAdapter::Swift => {
+                    qualified_name(
+                        node,
+                        name,
+                        source,
+                        &[
+                            "class_declaration",
+                            "protocol_declaration",
+                        ],
+                    )
                 }
             }
         }
@@ -612,7 +691,8 @@ fn owner_name(node: Node<'_>, source: &str) -> Option<String> {
     match node.kind() {
         "class" | "module" | "class_definition" | "class_declaration" | "abstract_class_declaration"
         | "interface_declaration" | "record_declaration" | "struct_declaration" | "enum_declaration"
-        | "namespace_definition" | "namespace_declaration" | "internal_module" => {
+        | "namespace_definition" | "namespace_declaration" | "internal_module" | "object_declaration"
+        | "trait_declaration" | "protocol_declaration" => {
             field_text(node, "name", source).map(clean_owner_name)
         }
         "function_definition" | "function_declaration" | "method" | "method_definition"
@@ -1693,6 +1773,105 @@ export class Worker {
         let tsx_names: Vec<_> = tsx_units.iter().map(|u| u.name.as_str()).collect();
         assert!(tsx_names.contains(&"Component"));
 
+        // 12. Java class, interface, enum, record, constructor, method
+        let java_file = BlobFile {
+            path: "demo.java".into(),
+            contents: r#"
+                class MyClass {
+                    public MyClass() {}
+                    void myMethod() {}
+                }
+                interface MyInterface {}
+                enum MyEnum {}
+                record MyRecord(int x) {}
+            "#.into(),
+        };
+        let java_units = HeuristicExtractor::default().extract_units(&java_file);
+        let java_names: Vec<_> = java_units.iter().map(|u| u.name.as_str()).collect();
+        assert!(java_names.contains(&"MyClass"));
+        assert!(java_names.contains(&"MyClass.MyClass"));
+        assert!(java_names.contains(&"MyClass.myMethod"));
+        assert!(java_names.contains(&"MyInterface"));
+        assert!(java_names.contains(&"MyEnum"));
+        assert!(java_names.contains(&"MyRecord"));
+
+        // 13. Kotlin class, object, interface, fun
+        let kotlin_file = BlobFile {
+            path: "demo.kt".into(),
+            contents: r#"
+                class MyClass {
+                    fun myMethod() {}
+                }
+                object MyObject {}
+                interface MyInterface {}
+            "#.into(),
+        };
+        let kotlin_units = HeuristicExtractor::default().extract_units(&kotlin_file);
+        let kotlin_names: Vec<_> = kotlin_units.iter().map(|u| u.name.as_str()).collect();
+        assert!(kotlin_names.contains(&"MyClass"));
+        assert!(kotlin_names.contains(&"MyClass.myMethod"));
+        assert!(kotlin_names.contains(&"MyObject"));
+        assert!(kotlin_names.contains(&"MyInterface"));
+
+        // 14. Lua local & global functions
+        let lua_file = BlobFile {
+            path: "demo.lua".into(),
+            contents: r#"
+                local function myLocal() end
+                function myGlobal() end
+            "#.into(),
+        };
+        let lua_units = HeuristicExtractor::default().extract_units(&lua_file);
+        let lua_names: Vec<_> = lua_units.iter().map(|u| u.name.as_str()).collect();
+        assert!(lua_names.contains(&"myLocal"));
+        assert!(lua_names.contains(&"myGlobal"));
+
+        // 15. PHP namespace, class, interface, trait, method, function
+        let php_file = BlobFile {
+            path: "demo.php".into(),
+            contents: r#"
+                <?php
+                namespace MyNamespace;
+                interface MyInterface {}
+                trait MyTrait {}
+                class MyClass {
+                    function myMethod() {}
+                }
+                function myFunc() {}
+            "#.into(),
+        };
+        let php_units = HeuristicExtractor::default().extract_units(&php_file);
+        let php_names: Vec<_> = php_units.iter().map(|u| u.name.as_str()).collect();
+        assert!(php_names.contains(&"MyNamespace"));
+        assert!(php_names.contains(&"MyInterface"));
+        assert!(php_names.contains(&"MyTrait"));
+        assert!(php_names.contains(&"MyClass"));
+        assert!(php_names.contains(&"MyClass.myMethod"));
+        assert!(php_names.contains(&"myFunc"));
+
+        // 16. Swift class, struct, actor, protocol, extension, func, method
+        let swift_file = BlobFile {
+            path: "demo.swift".into(),
+            contents: r#"
+                class MyClass {
+                    func myMethod() {}
+                }
+                struct MyStruct {}
+                actor MyActor {}
+                protocol MyProto {}
+                extension MyClass {}
+                func myFunc() {}
+            "#.into(),
+        };
+        let swift_units = HeuristicExtractor::default().extract_units(&swift_file);
+        let swift_names: Vec<_> = swift_units.iter().map(|u| u.name.as_str()).collect();
+        assert!(swift_names.contains(&"MyClass"));
+        assert!(swift_names.contains(&"MyClass.myMethod"));
+        assert!(swift_names.contains(&"MyStruct"));
+        assert!(swift_names.contains(&"MyActor"));
+        assert!(swift_names.contains(&"MyProto"));
+        assert!(swift_names.contains(&"myFunc"));
+
         // 11. Unsupported path/extension checks
         let unsupported_file = BlobFile {
             path: "demo.unsupported".into(),
@@ -1814,7 +1993,7 @@ export class Worker {
         // Tree-sitter C declarator fallbacks
         let mut parser = Parser::new();
         parser.set_language(&tree_sitter_c::LANGUAGE.into()).unwrap();
-        let tree = parser.parse("typedef int (*FuncPtr)(int); typedef int IntArray[10];", None).unwrap();
+        let _tree = parser.parse("typedef int (*FuncPtr)(int); typedef int IntArray[10];", None).unwrap();
         let candidates = tree_sitter_candidates(
             &BlobFile { path: "demo.c".into(), contents: "typedef int (*FuncPtr)(int); typedef int IntArray[10];".into() },
             "c",
