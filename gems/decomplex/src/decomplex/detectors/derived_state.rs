@@ -142,6 +142,31 @@ fn dependencies_for(statement: &Statement, name: &str) -> Vec<String> {
     deps
 }
 
+fn span_contains(parent: Span, child: Span) -> bool {
+    let start_ok = parent[0] < child[0] || (parent[0] == child[0] && parent[1] <= child[1]);
+    let end_ok = parent[2] > child[2] || (parent[2] == child[2] && parent[3] >= child[3]);
+    start_ok && end_ok
+}
+
+fn is_local_helper(b: &Asgn, a: &str, asgns: &[Asgn]) -> bool {
+    let mut preceding = asgns
+        .iter()
+        .filter(|x| &x.name == a && x.statement_index <= b.statement_index)
+        .peekable();
+
+    if preceding.peek().is_none() {
+        return false;
+    }
+
+    preceding.all(|x| {
+        if x.statement_index < b.statement_index {
+            false
+        } else {
+            span_contains(b.span, x.span)
+        }
+    })
+}
+
 fn analyze(method: &MethodSummary, asgns: &[Asgn]) -> Vec<DerivedStateRow> {
     let file = &method.file;
     let defn = &method.name;
@@ -153,6 +178,10 @@ fn analyze(method: &MethodSummary, asgns: &[Asgn]) -> Vec<DerivedStateRow> {
 
         for a in &b.deps {
             if a == &b.name {
+                continue;
+            }
+
+            if is_local_helper(b, a, asgns) {
                 continue;
             }
 
@@ -401,6 +430,72 @@ mod tests {
         // BEFORE FIX: this will be 1 because 'bucket' on line 10 depends on 'candidate', which is reassigned on line 25
         // AFTER FIX: it must be 0 because they are in sibling ITER blocks
         assert_eq!(res.len(), 0);
+    }
+
+    #[test]
+    fn test_derived_state_local_helper() {
+        let m_local_helper: MethodSummary = serde_json::from_value(json!({
+            "id": "8", "owner": "T", "name": "m_local_helper", "file": "c.rs", "line": 1, "span": [1,0,30,0],
+            "statements": [
+                {
+                    "index": 0, "line": 5, "end_line": 15, "span": [5,0,15,0],
+                    "source": "let target_commit = { let mut stmt = 1; stmt };",
+                    "reads": [], "writes": ["target_commit", "stmt"],
+                    "dependencies": [["target_commit", "stmt"]], "co_uses": []
+                },
+                {
+                    "index": 1, "line": 20, "end_line": 20, "span": [20,0,20,0],
+                    "source": "let mut stmt = 2;",
+                    "reads": [], "writes": ["stmt"],
+                    "dependencies": [], "co_uses": []
+                },
+                {
+                    "index": 2, "line": 25, "end_line": 25, "span": [25,0,25,0],
+                    "source": "use(target_commit);",
+                    "reads": ["target_commit"], "writes": [],
+                    "dependencies": [], "co_uses": []
+                }
+            ], "boundaries": []
+        })).unwrap();
+
+        let res = scan_summaries(&[m_local_helper]);
+        assert_eq!(res.len(), 0);
+    }
+
+    #[test]
+    fn test_derived_state_non_local_helper() {
+        let m_non_local: MethodSummary = serde_json::from_value(json!({
+            "id": "9", "owner": "T", "name": "m_non_local", "file": "d.rs", "line": 1, "span": [1,0,30,0],
+            "statements": [
+                {
+                    "index": 0, "line": 2, "end_line": 2, "span": [2,0,2,0],
+                    "source": "let mut stmt = 0;",
+                    "reads": [], "writes": ["stmt"],
+                    "dependencies": [], "co_uses": []
+                },
+                {
+                    "index": 1, "line": 5, "end_line": 15, "span": [5,0,15,0],
+                    "source": "let target_commit = { stmt = 1; stmt };",
+                    "reads": [], "writes": ["target_commit", "stmt"],
+                    "dependencies": [["target_commit", "stmt"]], "co_uses": []
+                },
+                {
+                    "index": 2, "line": 20, "end_line": 20, "span": [20,0,20,0],
+                    "source": "let mut stmt = 2;",
+                    "reads": [], "writes": ["stmt"],
+                    "dependencies": [], "co_uses": []
+                },
+                {
+                    "index": 3, "line": 25, "end_line": 25, "span": [25,0,25,0],
+                    "source": "use(target_commit);",
+                    "reads": ["target_commit"], "writes": [],
+                    "dependencies": [], "co_uses": []
+                }
+            ], "boundaries": []
+        })).unwrap();
+
+        let res = scan_summaries(&[m_non_local]);
+        assert_eq!(res.len(), 1);
     }
 }
 
