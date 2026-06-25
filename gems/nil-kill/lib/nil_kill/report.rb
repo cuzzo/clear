@@ -2529,7 +2529,7 @@ module NilKill
         r["total"] += 1
         r["nilable"] += 1 if nilable_type?(type)
         inner = strip_nilable(type)
-        if untyped_type?(inner)
+        if untyped_type?(inner) || inner.include?("T.untyped")
           r["untyped"] += 1
         elsif weak_type?(inner)
           r["weak"] += 1
