@@ -1,7 +1,7 @@
 # frozen_string_literal: true
 
 require_relative "spec_helper"
-require_relative "../lib/nil_kill/z3_solver"
+require_relative "../lib/nil_kill/inference/z3_solver"
 
 RSpec.describe NilKill::Z3Solver do
   def solver_for(source)
