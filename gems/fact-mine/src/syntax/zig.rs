@@ -247,29 +247,33 @@ impl NormalizedLanguageBehavior for ZigNormalizedBehavior {
 
     fn initializer_writes(&self, node: &Node, _source_text: &str, span: Span) -> Vec<crate::syntax::normalized_behavior::NormalizedStateWrite> {
         let mut writes = Vec::new();
-        if node.r#type == "INITIALIZER_LIST" {
+        if node.r#type == "STRUCT_INITIALIZER" {
             let mut type_name = ".literal".to_string();
-            // In Zig, we can't easily get the parent from `Node`.
-            // For now, let's look for a type identifier inside children (if any).
+            // Look for the type identifier
             for child in &node.children {
                 if let crate::ast::Child::Node(child) = child {
-                    if child.r#type == "TYPE_IDENTIFIER" || child.r#type == "IDENTIFIER" {
+                    if child.r#type == "TYPE_IDENTIFIER" || child.r#type == "IDENTIFIER" || child.r#type == "CONST" || child.r#type == "LVAR" {
                         type_name = child.text.clone();
                     }
                 }
             }
             
-            for field in &node.children {
-                if let crate::ast::Child::Node(field) = field {
-                    if field.r#type == "FIELD_INITIALIZER" {
-                        for key in &field.children {
-                            if let crate::ast::Child::Node(key) = key {
-                                writes.push(crate::syntax::normalized_behavior::NormalizedStateWrite {
-                                    receiver: type_name.clone(),
-                                    field: key.text.clone(),
-                                    span,
-                                });
-                                break;
+            // Look for the initializer list
+            for child in &node.children {
+                if let crate::ast::Child::Node(child) = child {
+                    if child.r#type == "INITIALIZER_LIST" {
+                        for field in &child.children {
+                            if let crate::ast::Child::Node(field) = field {
+                                if field.r#type == "ASSIGNMENT_EXPRESSION" || field.r#type == "FIELD_INITIALIZER" || field.r#type == "LASGN" {
+                                    let text = field.text.split('=').next().unwrap_or("").trim().trim_start_matches('.');
+                                    if !text.is_empty() {
+                                        writes.push(crate::syntax::normalized_behavior::NormalizedStateWrite {
+                                            receiver: type_name.clone(),
+                                            field: text.to_string(),
+                                            span,
+                                        });
+                                    }
+                                }
                             }
                         }
                     }

@@ -12,23 +12,13 @@
     ],
     "neglected_updates": [
       {
-        "has": "timeout",
-        "missing": "stack_size",
-        "pair": [
-          "stack_size",
-          "timeout"
-        ],
-        "recv": ".literal",
-        "support": 3
-      },
-      {
         "has": "stack_size",
         "missing": "timeout",
         "pair": [
           "stack_size",
           "timeout"
         ],
-        "recv": ".literal",
+        "recv": "TaskConfig",
         "support": 3
       }
     ]

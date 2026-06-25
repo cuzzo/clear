@@ -256,7 +256,7 @@ impl NormalizedLanguageBehavior for GoNormalizedBehavior {
             
             for child in &node.children {
                 if let crate::ast::Child::Node(child) = child {
-                    if child.r#type == "TYPE_IDENTIFIER" || child.r#type == "IDENTIFIER" {
+                    if child.r#type == "TYPE_IDENTIFIER" || child.r#type == "IDENTIFIER" || child.r#type == "CONST" {
                         type_name = child.text.clone();
                     } else if child.r#type == "MAP_TYPE" || child.r#type == "SLICE_TYPE" || child.r#type == "ARRAY_TYPE" {
                         is_collection = true;
