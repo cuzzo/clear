@@ -1,1 +1,1 @@
-class Example { static void check(int input) { var cached = input + 1; input = 2; print(cached); } }
+class Example { void check() { this.cached = this.source + 1; this.source = 2; print(this.cached); } }

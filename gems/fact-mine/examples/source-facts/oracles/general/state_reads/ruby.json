@@ -6,12 +6,17 @@
       "statements": [
         {
           "co_uses": [],
-          "dependencies": [],
+          "dependencies": [
+            [
+              "@user",
+              "user"
+            ]
+          ],
           "reads": [
             "user"
           ],
           "writes": [
-            "user"
+            "@user"
           ]
         },
         {
@@ -19,7 +24,7 @@
           "dependencies": [],
           "reads": [],
           "writes": [
-            "status"
+            "@status"
           ]
         }
       ]
@@ -332,15 +337,18 @@
         "boundaries": [],
         "id": "SourceFactStateReads#initialize",
         "line": 4,
-        "local_contract_assignments": {
-          "user": "user"
-        },
+        "local_contract_assignments": {},
         "name": "initialize",
         "owner": "SourceFactStateReads",
         "statements": [
           {
             "co_uses": [],
-            "dependencies": [],
+            "dependencies": [
+              [
+                "@user",
+                "user"
+              ]
+            ],
             "end_line": 5,
             "index": 0,
             "line": 5,
@@ -355,7 +363,7 @@
               16
             ],
             "writes": [
-              "user"
+              "@user"
             ]
           },
           {
@@ -373,7 +381,7 @@
               19
             ],
             "writes": [
-              "status"
+              "@status"
             ]
           }
         ]

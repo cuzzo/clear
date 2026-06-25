@@ -83,7 +83,7 @@ impl AstNormalizationAdapter for PhpAstAdapter {
         }
         let field = php_member_name(node)?;
         let field = php_identifier_text(node_text(field, source));
-        (!field.is_empty()).then_some(field)
+        (!field.is_empty()).then_some(format!("$this->{field}"))
     }
 
     fn class_node(&self, node: TreeSitterNode<'_>) -> bool {

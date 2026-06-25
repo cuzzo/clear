@@ -1,6 +1,5 @@
-pub fn check(input_value: i32) void {
-    var input = input_value;
-    const cached = input + 1;
-    input = 2;
-    print(cached);
+pub fn check(self: *Self) void {
+    self.cached = self.source + 1;
+    self.source = 2;
+    print(self.cached);
 }

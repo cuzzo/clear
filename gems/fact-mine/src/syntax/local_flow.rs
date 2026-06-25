@@ -52,8 +52,8 @@ pub struct Boundary {
 const OWNER_TYPES: &[&str] = &["CLASS", "MODULE"];
 const METHOD_TYPES: &[&str] = &["DEFN", "DEFS"];
 const SKIP_NESTED_TYPES: &[&str] = &["CLASS", "MODULE", "DEFN", "DEFS", "LAMBDA"];
-const LOCAL_READ_TYPES: &[&str] = &["LVAR", "DVAR"];
-const LOCAL_WRITE_TYPES: &[&str] = &["LASGN", "DASGN"];
+const LOCAL_READ_TYPES: &[&str] = &["LVAR", "DVAR", "IVAR", "CVAR"];
+const LOCAL_WRITE_TYPES: &[&str] = &["LASGN", "DASGN", "IASGN", "CVASGN"];
 const STATEMENT_CONTAINER_TYPES: &[&str] = &[
     "BLOCK",
     "COMPOUND_STATEMENT",
@@ -595,11 +595,19 @@ fn textual_local_writes(source: &str, behavior: &dyn NormalizedLanguageBehavior)
     let Some((lhs, operator)) = split_assignment(source) else {
         return Vec::new();
     };
-    if lhs.contains('.')
+    let trimmed_lhs = lhs.trim();
+    let is_state_write = trimmed_lhs.starts_with("self.")
+        || trimmed_lhs.starts_with("this.")
+        || trimmed_lhs.starts_with("self->")
+        || trimmed_lhs.starts_with("this->")
+        || trimmed_lhs.starts_with("$this->")
+        || trimmed_lhs.starts_with('@');
+
+    if !is_state_write && (lhs.contains('.')
         || lhs.contains("->")
         || lhs.contains('[')
         || lhs.contains('(')
-        || lhs.contains(')')
+        || lhs.contains(')'))
     {
         return Vec::new();
     }
@@ -690,10 +698,63 @@ fn identifiers_with_positions(source: &str) -> Vec<IdentifierSpan> {
     let mut out = Vec::new();
     let mut index = 0;
     while index < bytes.len() {
+        let has_prefix = if index + 5 <= bytes.len() && &bytes[index..index+5] == b"self." {
+            Some(5)
+        } else if index + 5 <= bytes.len() && &bytes[index..index+5] == b"this." {
+            Some(5)
+        } else if index + 6 <= bytes.len() && &bytes[index..index+6] == b"self->" {
+            Some(6)
+        } else if index + 6 <= bytes.len() && &bytes[index..index+6] == b"this->" {
+            Some(6)
+        } else if index + 7 <= bytes.len() && &bytes[index..index+7] == b"$this->" {
+            Some(7)
+        } else {
+            None
+        };
+
+        if let Some(prefix_len) = has_prefix {
+            let start = index;
+            let val_start = index + prefix_len;
+            if val_start < bytes.len() && identifier_start(bytes[val_start]) {
+                let mut end = val_start + 1;
+                while end < bytes.len() && identifier_part(bytes[end]) {
+                    end += 1;
+                }
+                out.push(IdentifierSpan {
+                    name: source[start..end].to_string(),
+                    start,
+                });
+                index = end;
+                continue;
+            }
+        }
+
         let start = if bytes[index] == b'$' {
             let next = index + 1;
             if next < bytes.len() && identifier_start(bytes[next]) {
                 next
+            } else {
+                index += 1;
+                continue;
+            }
+        } else if bytes[index] == b'@' {
+            let next = index + 1;
+            let mut prefix_len = 1;
+            if next < bytes.len() && bytes[next] == b'@' {
+                prefix_len = 2;
+            }
+            let val_start = index + prefix_len;
+            if val_start < bytes.len() && identifier_start(bytes[val_start]) {
+                let mut end = val_start + 1;
+                while end < bytes.len() && identifier_part(bytes[end]) {
+                    end += 1;
+                }
+                out.push(IdentifierSpan {
+                    name: source[index..end].to_string(),
+                    start: index,
+                });
+                index = end;
+                continue;
             } else {
                 index += 1;
                 continue;

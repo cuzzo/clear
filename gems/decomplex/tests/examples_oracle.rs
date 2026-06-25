@@ -668,7 +668,7 @@ fn project_detector_output(detector: &str, output: Value) -> Value {
                 })
                 .collect(),
         ),
-        "derived-state" => rows(&output, &["derived", "source"]),
+        "derived-state" => canonicalize_derived_state_refs(&rows(&output, &["derived", "source"])),
         "superfluous-state" => rows(&output, &["field", "score", "classification", "writer_method_count", "reader_method_count", "ctorset"]),
         "implicit-control-flow" => json!({
             "ordered_protocols": project_protocols(field(&output, "ordered_protocols")),
@@ -945,13 +945,11 @@ fn canonical_state_refs(value: &Value) -> Vec<String> {
     let mut values = BTreeSet::new();
     for item in array(value) {
         let mut text = value_text(item);
-        if let Some(stripped) = text.strip_prefix('@') {
-            text = stripped.to_string();
-        }
-        if let Some(stripped) = text.strip_prefix("self.") {
-            text = stripped.to_string();
-        } else if let Some(stripped) = text.strip_prefix("this.") {
-            text = stripped.to_string();
+        for prefix in &["$this->", "this->", "self->", "this.", "self.", "@"] {
+            if let Some(stripped) = text.strip_prefix(prefix) {
+                text = stripped.to_string();
+                break;
+            }
         }
         values.insert(text);
     }
@@ -1089,5 +1087,40 @@ fn value_text(value: &Value) -> String {
         Value::String(text) => text.clone(),
         Value::Null => String::new(),
         _ => value.to_string(),
+    }
+}
+
+fn canonicalize_derived_state_refs(val: &Value) -> Value {
+    match val {
+        Value::Array(arr) => {
+            Value::Array(arr.iter().map(|item| {
+                match item {
+                    Value::Object(obj) => {
+                        let mut new_obj = Map::new();
+                        for (k, v) in obj {
+                            if k == "derived" || k == "source" {
+                                if let Value::String(s) = v {
+                                    let mut text = s.clone();
+                                    for prefix in &["$this->", "this->", "self->", "this.", "self.", "@"] {
+                                        if let Some(stripped) = text.strip_prefix(prefix) {
+                                            text = stripped.to_string();
+                                            break;
+                                        }
+                                    }
+                                    new_obj.insert(k.clone(), Value::String(format!("self.{}", text)));
+                                } else {
+                                    new_obj.insert(k.clone(), v.clone());
+                                }
+                            } else {
+                                new_obj.insert(k.clone(), v.clone());
+                            }
+                        }
+                        Value::Object(new_obj)
+                    }
+                    _ => item.clone(),
+                }
+            }).collect())
+        }
+        _ => val.clone(),
     }
 }

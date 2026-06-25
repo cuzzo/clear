@@ -11,25 +11,60 @@
               "obj"
             ]
           ],
-          "dependencies": [],
+          "dependencies": [
+            [
+              "self.cache",
+              "key"
+            ],
+            [
+              "self.cache",
+              "obj"
+            ],
+            [
+              "status",
+              "key"
+            ],
+            [
+              "status",
+              "obj"
+            ]
+          ],
           "reads": [
             "key",
             "obj"
           ],
-          "writes": []
+          "writes": [
+            "self.cache",
+            "status"
+          ]
+        },
+        {
+          "co_uses": [],
+          "dependencies": [
+            [
+              "self.cache",
+              "index"
+            ],
+            [
+              "status",
+              "index"
+            ]
+          ],
+          "reads": [
+            "index"
+          ],
+          "writes": [
+            "index",
+            "self.cache",
+            "status"
+          ]
         },
         {
           "co_uses": [],
           "dependencies": [],
           "reads": [
-            "index"
+            "self.cache"
           ],
-          "writes": []
-        },
-        {
-          "co_uses": [],
-          "dependencies": [],
-          "reads": [],
           "writes": []
         }
       ]
@@ -215,7 +250,24 @@
                 "obj"
               ]
             ],
-            "dependencies": [],
+            "dependencies": [
+              [
+                "self.cache",
+                "key"
+              ],
+              [
+                "self.cache",
+                "obj"
+              ],
+              [
+                "status",
+                "key"
+              ],
+              [
+                "status",
+                "obj"
+              ]
+            ],
             "end_line": 2,
             "index": 0,
             "line": 2,
@@ -230,11 +282,23 @@
               2,
               32
             ],
-            "writes": []
+            "writes": [
+              "self.cache",
+              "status"
+            ]
           },
           {
             "co_uses": [],
-            "dependencies": [],
+            "dependencies": [
+              [
+                "self.cache",
+                "index"
+              ],
+              [
+                "status",
+                "index"
+              ]
+            ],
             "end_line": 3,
             "index": 1,
             "line": 3,
@@ -248,7 +312,11 @@
               3,
               32
             ],
-            "writes": []
+            "writes": [
+              "index",
+              "self.cache",
+              "status"
+            ]
           },
           {
             "co_uses": [],
@@ -256,7 +324,9 @@
             "end_line": 4,
             "index": 2,
             "line": 4,
-            "reads": [],
+            "reads": [
+              "self.cache"
+            ],
             "source": "self.cache.clear()",
             "span": [
               4,

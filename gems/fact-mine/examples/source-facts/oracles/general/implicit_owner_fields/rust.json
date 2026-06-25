@@ -8,7 +8,9 @@
           "co_uses": [],
           "dependencies": [],
           "reads": [],
-          "writes": []
+          "writes": [
+            "self.field"
+          ]
         }
       ]
     }
@@ -71,7 +73,9 @@
         "boundaries": [],
         "id": "MyClass#myMethod",
         "line": 5,
-        "local_contract_assignments": {},
+        "local_contract_assignments": {
+          "self.field": "1"
+        },
         "name": "myMethod",
         "owner": "MyClass",
         "statements": [
@@ -89,7 +93,9 @@
               6,
               22
             ],
-            "writes": []
+            "writes": [
+              "self.field"
+            ]
           }
         ]
       }

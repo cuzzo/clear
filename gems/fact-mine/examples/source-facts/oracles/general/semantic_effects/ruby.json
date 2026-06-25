@@ -152,7 +152,7 @@
           "dependencies": [],
           "reads": [],
           "writes": [
-            "items"
+            "@items"
           ]
         }
       ]
@@ -877,9 +877,7 @@
         "boundaries": [],
         "id": "MyMutator#initialize",
         "line": 26,
-        "local_contract_assignments": {
-          "items": "[]"
-        },
+        "local_contract_assignments": {},
         "name": "initialize",
         "owner": "MyMutator",
         "statements": [
@@ -898,7 +896,7 @@
               15
             ],
             "writes": [
-              "items"
+              "@items"
             ]
           }
         ]

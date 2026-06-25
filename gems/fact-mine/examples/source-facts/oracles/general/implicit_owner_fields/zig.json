@@ -7,10 +7,10 @@
         {
           "co_uses": [],
           "dependencies": [],
-          "reads": [
-            "self"
-          ],
-          "writes": []
+          "reads": [],
+          "writes": [
+            "self.field"
+          ]
         }
       ]
     }
@@ -88,7 +88,9 @@
         "boundaries": [],
         "id": "MyClass#myMethod",
         "line": 3,
-        "local_contract_assignments": {},
+        "local_contract_assignments": {
+          "self.field": "1"
+        },
         "name": "myMethod",
         "owner": "MyClass",
         "statements": [
@@ -98,9 +100,7 @@
             "end_line": 4,
             "index": 0,
             "line": 4,
-            "reads": [
-              "self"
-            ],
+            "reads": [],
             "source": "self.field = 1;",
             "span": [
               4,
@@ -108,7 +108,9 @@
               4,
               23
             ],
-            "writes": []
+            "writes": [
+              "self.field"
+            ]
           }
         ]
       }

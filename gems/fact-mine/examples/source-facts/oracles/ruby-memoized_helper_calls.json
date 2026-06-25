@@ -7,8 +7,12 @@
         {
           "co_uses": [],
           "dependencies": [],
-          "reads": [],
-          "writes": []
+          "reads": [
+            "@owner_edges"
+          ],
+          "writes": [
+            "@owner_edges"
+          ]
         }
       ]
     },
@@ -193,7 +197,9 @@
             "end_line": 5,
             "index": 0,
             "line": 5,
-            "reads": [],
+            "reads": [
+              "@owner_edges"
+            ],
             "source": "@owner_edges ||= build_owner_edges",
             "span": [
               5,
@@ -201,7 +207,9 @@
               5,
               38
             ],
-            "writes": []
+            "writes": [
+              "@owner_edges"
+            ]
           }
         ]
       }

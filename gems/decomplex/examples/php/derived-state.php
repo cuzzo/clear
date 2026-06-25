@@ -1,6 +1,6 @@
 <?php
-function check($input) {
-  $cached = $input + 1;
-  $input = 2;
-  print($cached);
+function check() {
+  $this->cached = $this->source + 1;
+  $this->source = 2;
+  print($this->cached);
 }

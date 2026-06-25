@@ -21,7 +21,7 @@
           "dependencies": [],
           "reads": [],
           "writes": [
-            "ready"
+            "@ready"
           ]
         }
       ]
@@ -230,9 +230,7 @@
         "boundaries": [],
         "id": "SourceFactVisibility#prepare",
         "line": 10,
-        "local_contract_assignments": {
-          "ready": "true"
-        },
+        "local_contract_assignments": {},
         "name": "prepare",
         "owner": "SourceFactVisibility",
         "statements": [
@@ -251,7 +249,7 @@
               17
             ],
             "writes": [
-              "ready"
+              "@ready"
             ]
           }
         ]

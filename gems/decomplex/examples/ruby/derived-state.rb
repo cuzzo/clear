@@ -1,7 +1,7 @@
 # frozen_string_literal: true
 
-def check(input)
-  cached = input + 1
-  input = 2
-  puts cached
+def check
+  @cached = @source + 1
+  @source = 2
+  puts @cached
 end

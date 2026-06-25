@@ -9,7 +9,7 @@
           "dependencies": [],
           "reads": [],
           "writes": [
-            "x"
+            "@x"
           ]
         },
         {
@@ -1582,8 +1582,7 @@
         "id": "RubyCoverageParent::RubyCoverageChild#initialize",
         "line": 13,
         "local_contract_assignments": {
-          "global_var": "2",
-          "x": "1"
+          "global_var": "2"
         },
         "name": "initialize",
         "owner": "RubyCoverageParent::RubyCoverageChild",
@@ -1603,7 +1602,7 @@
               12
             ],
             "writes": [
-              "x"
+              "@x"
             ]
           },
           {
