@@ -1,0 +1,22 @@
+#!/usr/bin/env ruby
+# frozen_string_literal: true
+
+require_relative "../lib/ruby_to_clear"
+
+if ARGV.empty?
+  puts "Usage: ruby-to-clear <file.rb>"
+  exit 1
+end
+
+path = ARGV[0]
+unless File.exist?(path)
+  puts "File not found: #{path}"
+  exit 1
+end
+
+begin
+  puts RubyToClear.transpile_file(path)
+rescue StandardError => e
+  warn "Error: #{e.message}"
+  exit 1
+end
