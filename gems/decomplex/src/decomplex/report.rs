@@ -379,6 +379,7 @@ fn build_sections(detectors: &Value) -> Vec<ReportSection> {
         section("Decision Pressure", 1, "ELIMINABLE guard-pressure per loose contract (nil/is_a?/respond_to?/safe-nav/rescue-nil) -> tighten the contract once / nil-kill: DELETE. essential dispatch + pure c-uses are split out, NEVER summed (Rapps-Weyuker p-use; McCabe)", direct_array(detectors, "decision_pressure")),
         section("Redundant Nil Guards", 1, "nil checks / safe-nav dominated by an earlier non-nil proof -- delete repeated control flow or tighten the type", direct_array(detectors, "redundant_nil_guard")),
         section("State Heatmap", 1, "state fields ranked by write/read/re-derivation scatter -- tangled mutable state should get one owner", direct_array(detectors, "state_heatmap")).excluded_from_convergence(),
+        section("Superfluous State", 1, "state fields that could be eliminated entirely (dead state / intra-method pass-through / adjacent-call pass-through / derived cache)", direct_array(detectors, "superfluous_state")),
         section("State-Based Branch Density", 1, "branch decisions over mutable/object state -- state + control-flow pressure", direct_array(detectors, "state_branch_density")),
         section("Temporal Ordering Pressure", 1, "public mutable lifecycle surfaces that create implicit state-machine ordering", direct_array(detectors, "temporal_ordering_pressure")),
         section("Missing Abstractions", 1, "guard tuple recomputed across >=2 decision units", nested_array(miner, "missing_abstractions")),
@@ -497,6 +498,17 @@ fn render_finding(title: &str, h: &Value) -> String {
             rv::field(h, "local"),
             rv::field(h, "guard"),
             rv::field(h, "proof")
+        ),
+        "Superfluous State" => format!(
+            "- field `{}` -- classification: `{}` (score={:.3}, writers={}, readers={}, ctorset={})\n  - writes: {}\n  - reads: {}\n",
+            rv::field(h, "field"),
+            rv::field(h, "classification"),
+            rv::get(h, "score").and_then(|v| v.as_f64()).unwrap_or(0.0),
+            rv::field_usize(h, "writer_method_count"),
+            rv::field_usize(h, "reader_method_count"),
+            rv::field_bool(h, "ctorset"),
+            rv::array(h, "write_sites").iter().map(|site| nav(&rv::string(Some(site)))).collect::<Vec<_>>().join(" ; "),
+            rv::array(h, "read_sites").iter().map(|site| nav(&rv::string(Some(site)))).collect::<Vec<_>>().join(" ; ")
         ),
         "Missing Abstractions" => format!(
             "- **[{}]** support={} scatter={} rank={}\n  - tuple: `{}`\n  - {}\n",

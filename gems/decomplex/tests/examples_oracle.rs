@@ -4,7 +4,8 @@ use decomplex_rust::decomplex::detectors::{
     function_lcom, implicit_control_flow, inconsistent_rename_clone, local_flow, locality_drag,
     miner, operational_discontinuity, oversized_predicate, path_condition, predicate_alias,
     redundant_nil_guard, semantic_alias, sequence_mine, state_branch_density, state_mesh,
-    structural_topology, temporal_ordering_pressure, weighted_inlined_cognitive_complexity,
+    structural_topology, superfluous_state, temporal_ordering_pressure,
+    weighted_inlined_cognitive_complexity,
 };
 use decomplex_rust::decomplex::report::Report;
 use decomplex_rust::decomplex::syntax::{Document, Language, LocalComplexityScore};
@@ -385,6 +386,7 @@ fn run_detector(
             value(inconsistent_rename_clone::scan_files(files, language)?)
         }
         "derived-state" => value(derived_state::scan_files(files, language)?),
+        "superfluous-state" => value(superfluous_state::scan_files(files, language)?),
         "implicit-control-flow" | "ordered-protocol-mine" => {
             value(implicit_control_flow::scan_files(files, language)?)
         }
@@ -667,6 +669,7 @@ fn project_detector_output(detector: &str, output: Value) -> Value {
                 .collect(),
         ),
         "derived-state" => rows(&output, &["derived", "source"]),
+        "superfluous-state" => rows(&output, &["field", "score", "classification", "writer_method_count", "reader_method_count", "ctorset"]),
         "implicit-control-flow" => json!({
             "ordered_protocols": project_protocols(field(&output, "ordered_protocols")),
             "order_drift": project_protocols(field(&output, "order_drift")),

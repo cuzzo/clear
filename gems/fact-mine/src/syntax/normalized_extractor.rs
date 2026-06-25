@@ -266,10 +266,10 @@ impl<'a> Extractor<'a> {
     }
 
     fn scan_rescue(&mut self, node: &Node) {
-        let body = child_node(node, 0).unwrap();
-        let resbody = child_node(node, 1).unwrap();
-        for effect in self.behavior.rescue_semantic_effects(body, resbody) {
-            self.record_semantic_effect(node, &effect.kind, &effect.detail);
+        if let (Some(body), Some(resbody)) = (child_node(node, 0), child_node(node, 1)) {
+            for effect in self.behavior.rescue_semantic_effects(body, resbody) {
+                self.record_semantic_effect(node, &effect.kind, &effect.detail);
+            }
         }
         self.scan_children(node);
     }
@@ -287,15 +287,20 @@ impl<'a> Extractor<'a> {
     }
 
     fn scan_singleton_class(&mut self, node: &Node) {
-        let receiver = normalized_text(child_node(node, 0).unwrap());
-        if receiver != "self" {
-            self.record_semantic_effect(node, "metaprogramming", &format!("class << {receiver}"));
+        if let Some(recv_node) = child_node(node, 0) {
+            let receiver = normalized_text(recv_node);
+            if receiver != "self" {
+                self.record_semantic_effect(node, "metaprogramming", &format!("class << {receiver}"));
+            }
         }
         self.scan_children(node);
     }
 
     fn scan_if(&mut self, node: &Node) {
-        let condition = child_node(node, 0).unwrap();
+        let Some(condition) = child_node(node, 0) else {
+            self.scan_children(node);
+            return;
+        };
         if self.ternary_if_node(node) {
             if self.behavior.ternary_children_conditional(node) {
                 for child in child_nodes(node) {
