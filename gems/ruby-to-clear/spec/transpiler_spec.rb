@@ -29,11 +29,6 @@ RSpec.describe RubyToClear::Transpiler do
       expect_transpile('x = 10; "count: #{x + 1}"', "MUTABLE x = 10;\n\"count: ${(x + 1)}\";")
     end
 
-    it "transpiles regexes" do
-      expect_transpile("/\\s+|#.*$/", '"\\\\s+|#.*$";')
-      expect_transpile('x = 10; /regex #{x}/', "MUTABLE x = 10;\n\"regex ${x}\";")
-    end
-
     it "transpiles self" do
       expect_transpile("self", "self;")
     end
@@ -284,9 +279,169 @@ RSpec.describe RubyToClear::Transpiler do
     end
   end
 
-  describe "unsupported nodes" do
-    it "comments out unsupported node types" do
-      expect_transpile("@@count = 0", "# [UNSUPPORTED: ClassVariableWriteNode]\n# @@count = 0")
+  describe "unsupported/incorrect nodes in strict and lax mode" do
+    it "raises error on class variable in strict mode" do
+      expect {
+        RubyToClear.transpile("@@count = 0")
+      }.to raise_error(RubyToClear::Transpiler::TranspilationError, /Unsupported node ClassVariableWriteNode/)
+    end
+
+    it "comments out class variable in lax mode" do
+      res = RubyToClear.transpile("@@count = 0", raise_on_error: false)
+      expect(res.strip).to eq("# [UNSUPPORTED: ClassVariableWriteNode]\n# @@count = 0")
+    end
+  end
+
+  describe "regular expressions and gsub/sub validation" do
+    it "raises error on regex literal in strict mode" do
+      expect {
+        RubyToClear.transpile("/pattern/")
+      }.to raise_error(RubyToClear::Transpiler::TranspilationError, /Regular expressions are not supported/)
+    end
+
+    it "comments out regex literal in lax mode" do
+      res = RubyToClear.transpile("/pattern/", raise_on_error: false)
+      expect(res.strip).to eq("# [UNSUPPORTED: RegularExpressionNode]\n# /pattern/")
+    end
+
+    it "raises error on gsub with regex" do
+      expect {
+        RubyToClear.transpile("str = ''; str.gsub(/pat/, 'replacement')")
+      }.to raise_error(RubyToClear::Transpiler::TranspilationError, /gsub with regex or block is not supported/)
+    end
+
+    it "raises error on gsub with block" do
+      expect {
+        RubyToClear.transpile("str = ''; str.gsub('a') { 'b' }")
+      }.to raise_error(RubyToClear::Transpiler::TranspilationError, /gsub with regex or block is not supported/)
+    end
+
+    it "raises error on sub method call" do
+      expect {
+        RubyToClear.transpile("str = ''; str.sub('a', 'b')")
+      }.to raise_error(RubyToClear::Transpiler::TranspilationError, /gsub\/sub with dynamic regex, block, or invalid arguments is not supported/)
+    end
+  end
+
+  describe "pipeline translations validation" do
+    it "raises error on map without block" do
+      expect {
+        RubyToClear.transpile("list = []; list.map")
+      }.to raise_error(RubyToClear::Transpiler::TranspilationError, /map without a block is not supported/)
+    end
+
+    it "raises error on select without block" do
+      expect {
+        RubyToClear.transpile("list = []; list.select")
+      }.to raise_error(RubyToClear::Transpiler::TranspilationError, /select without a block is not supported/)
+    end
+
+    it "raises error on reduce without block" do
+      expect {
+        RubyToClear.transpile("list = []; list.reduce(0)")
+      }.to raise_error(RubyToClear::Transpiler::TranspilationError, /reduce without a block is not supported/)
+    end
+
+    it "raises error on each without block" do
+      expect {
+        RubyToClear.transpile("list = []; list.each")
+      }.to raise_error(RubyToClear::Transpiler::TranspilationError, /each without a block is not supported/)
+    end
+
+    it "raises error on map block with multiple statements" do
+      expect {
+        RubyToClear.transpile("list = []; list.map { |x| y = x * 2; y + 1 }")
+      }.to raise_error(RubyToClear::Transpiler::TranspilationError, /map block must be a single expression/)
+    end
+  end
+
+  describe "MultiWriteNode destructuring" do
+    it "translates swaps and literal array destructuring correctly" do
+      ruby_code = <<~RUBY
+        def swap_vars(a, b)
+          a, b = b, a
+        end
+      RUBY
+      expected_clear = <<~CLEAR
+        FN swap_vars(MUTABLE a: Auto, MUTABLE b: Auto) RETURNS !Auto ->
+          MUTABLE __tmp_multi_0 = b;
+          MUTABLE __tmp_multi_1 = a;
+          a = __tmp_multi_0;
+          b = __tmp_multi_1;
+        END
+      CLEAR
+      expect_transpile(ruby_code, expected_clear)
+    end
+
+    it "raises error on non-array value destructuring" do
+      expect {
+        RubyToClear.transpile("a, b = get_val")
+      }.to raise_error(RubyToClear::Transpiler::TranspilationError, /Destructuring is only supported for literal array values/)
+    end
+  end
+
+  describe "local variable scoping and parameter mutability inside def" do
+    it "pre-declares variables assigned inside conditionals at the def function start" do
+      ruby_code = <<~RUBY
+        def test_fn(cond)
+          if cond
+            x = 42
+          end
+          x
+        end
+      RUBY
+      expected_clear = <<~CLEAR
+        FN test_fn(cond: Auto) RETURNS !Auto ->
+          MUTABLE x = NIL;
+          IF cond THEN
+            x = 42;
+          END
+          x;
+        END
+      CLEAR
+      expect_transpile(ruby_code, expected_clear)
+    end
+
+    it "marks parameters as MUTABLE if they are reassigned in def body" do
+      ruby_code = <<~RUBY
+        def test_fn(p)
+          p = 10
+        end
+      RUBY
+      expected_clear = <<~CLEAR
+        FN test_fn(MUTABLE p: Auto) RETURNS !Auto ->
+          p = 10;
+        END
+      CLEAR
+      expect_transpile(ruby_code, expected_clear)
+    end
+  end
+
+  describe "keyword arguments and parameters validation" do
+    it "raises error on keyword arguments inside calls" do
+      expect {
+        RubyToClear.transpile("test_call(a: 1)")
+      }.to raise_error(RubyToClear::Transpiler::TranspilationError, /Keyword arguments are not supported/)
+    end
+
+    it "raises error on keyword parameters inside method signatures" do
+      expect {
+        RubyToClear.transpile("def my_func(a: 1); end")
+      }.to raise_error(RubyToClear::Transpiler::TranspilationError, /Keyword parameters are not supported/)
+    end
+  end
+
+  describe "exception handling (rescue) validation" do
+    it "raises error on begin-rescue blocks" do
+      expect {
+        RubyToClear.transpile("begin; do_something; rescue; handle_error; end")
+      }.to raise_error(RubyToClear::Transpiler::TranspilationError, /Exception handling \(rescue\) is not supported/)
+    end
+
+    it "raises error on inline rescue modifier" do
+      expect {
+        RubyToClear.transpile("do_something rescue handle_error")
+      }.to raise_error(RubyToClear::Transpiler::TranspilationError, /Exception handling \(rescue\) is not supported/)
     end
   end
 end

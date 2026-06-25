@@ -7,13 +7,17 @@ require_relative "method_registry"
 
 module RubyToClear
   class Transpiler
-    def initialize(source)
+    class TranspilationError < StandardError; end
+
+    def initialize(source, raise_on_error: true)
       @source = source
+      @raise_on_error = raise_on_error
       @indent_level = 0
       @declared_locals = Set.new
       @struct_fields = {}
       @current_class = nil
       @renames = {}
+      @mutable_params = nil
     end
 
     def transpile(program_node)
@@ -26,9 +30,20 @@ module RubyToClear
       node_name = node.class.name.split("::").last
       method_name = "visit_#{node_name.gsub(/(?<!^)(?=[A-Z])/, '_').downcase}"
       if respond_to?(method_name, true)
-        send(method_name, node)
+        res = send(method_name, node)
+        if res.is_a?(String) && res.include?("# [UNSUPPORTED:") &&
+           node_name != "StatementsNode" && node_name != "ProgramNode" &&
+           node_name != "ClassNode" && node_name != "DefNode"
+          if @raise_on_error
+            raise_unsupported("Unsupported construct #{node_name}", node)
+          else
+            comment_unsupported(node)
+          end
+        else
+          res
+        end
       else
-        comment_unsupported(node)
+        raise_unsupported("Unsupported node #{node_name}", node)
       end
     end
 
@@ -38,6 +53,37 @@ module RubyToClear
       yield
     ensure
       @renames = old_renames
+    end
+
+    def raise_unsupported(message, node)
+      loc = node.location
+      source_loc = "#{@source[0...loc.start_offset].count("\n") + 1}:#{loc.start_column}"
+      err_msg = "Unsupported Ruby syntax: #{message} at line #{source_loc}\nSource: #{loc.slice.strip}"
+      
+      if @raise_on_error
+        raise TranspilationError, err_msg
+      else
+        "# [UNSUPPORTED: #{node.class.name.split('::').last}]\n# #{loc.slice.gsub("\n", "\n# ")}"
+      end
+    end
+
+    def simple_block_expression?(block_node)
+      body_node = block_node.body
+      return false unless body_node.is_a?(Prism::StatementsNode)
+      return false unless body_node.body.size == 1
+      pure_expression?(body_node.body.first)
+    end
+
+    def pure_expression?(node)
+      return false unless node
+      case node.class.name.split("::").last
+      when "CallNode", "LocalVariableReadNode", "IntegerNode", "StringNode", "SymbolNode", "SelfNode",
+           "AndNode", "OrNode", "ParenthesesNode", "NilNode", "FalseNode", "TrueNode",
+           "ArrayNode", "HashNode", "RangeNode", "ConstantReadNode", "ConstantPathNode"
+        true
+      else
+        false
+      end
     end
 
     private
@@ -53,7 +99,54 @@ module RubyToClear
       @indent_level -= 1
     end
 
+    def check_arguments!(arguments_node)
+      return unless arguments_node
+      arguments_node.arguments.each do |arg|
+        if arg.is_a?(Prism::KeywordHashNode)
+          raise_unsupported("Keyword arguments are not supported", arg)
+        end
+      end
+    end
 
+    def check_parameters!(parameters_node)
+      return unless parameters_node
+      if !parameters_node.keywords.empty? || parameters_node.keyword_rest
+        raise_unsupported("Keyword parameters are not supported", parameters_node)
+      end
+    end
+
+    def collect_written_variables(node, parameter_names = Set.new, exclude_defs: false)
+      written = Set.new
+      walk = ->(n) do
+        return unless n
+        if exclude_defs && n.is_a?(Prism::DefNode)
+          return
+        end
+        if n.respond_to?(:name) && n.class.name.start_with?("Prism::LocalVariable") && 
+           (n.class.name.end_with?("WriteNode") || n.class.name.end_with?("TargetNode"))
+          written << n.name.to_s
+        end
+        n.child_nodes.each { |child| walk.call(child) if child }
+      end
+      walk.call(node)
+      written
+    end
+
+    def extract_parameter_names(def_node)
+      names = Set.new
+      return names unless def_node.parameters
+      
+      params = def_node.parameters
+      params.requireds.each { |p| names << p.name.to_s if p.respond_to?(:name) }
+      params.optionals.each { |p| names << p.name.to_s if p.respond_to?(:name) }
+      names << params.rest.name.to_s if params.rest && params.rest.respond_to?(:name)
+      params.posts.each { |p| names << p.name.to_s if p.respond_to?(:name) }
+      params.keywords.each { |p| names << p.name.to_s if p.respond_to?(:name) }
+      names << params.keyword_rest.name.to_s if params.keyword_rest && params.keyword_rest.respond_to?(:name)
+      names << params.block.name.to_s if params.block && params.block.respond_to?(:name)
+      
+      names
+    end
 
     # --- Node Visitors ---
 
@@ -61,19 +154,17 @@ module RubyToClear
       visit(node.statements)
     end
 
+
     def visit_statements_node(node)
       node.body.map do |stmt|
         code = visit(stmt)
-        # Skip empty lines
         next if code.empty?
 
-        # Append semicolon if it doesn't end with a semicolon, END, or isn't a comment/STRUCT definition
         unless code.end_with?(";") || code.end_with?("END") || code.start_with?("STRUCT ") || code.start_with?("#")
           code = "#{code};"
         end
 
-        # Indent every line of the statement
-        code.split("\n").map { |line| "#{indent}#{line}" }.join("\n")
+        code.split("\n").map { |line| line.start_with?(" ") ? line : "#{indent}#{line}" }.join("\n")
       end.compact.join("\n")
     end
 
@@ -148,7 +239,6 @@ module RubyToClear
     def visit_constant_write_node(node)
       name = node.name.to_s
 
-      # Check if value is a Struct.new(...) call
       if node.value.is_a?(Prism::CallNode) &&
          (node.value.receiver.nil? || (node.value.receiver.is_a?(Prism::ConstantReadNode) && node.value.receiver.name == :Struct)) &&
          node.value.name == :new
@@ -177,7 +267,8 @@ module RubyToClear
     end
 
     def visit_required_parameter_node(node)
-      "#{node.name}: Auto"
+      prefix = (@mutable_params && @mutable_params.include?(node.name.to_s)) ? "MUTABLE " : ""
+      "#{prefix}#{node.name}: Auto"
     end
 
     def visit_parameters_node(node)
@@ -326,20 +417,11 @@ module RubyToClear
     end
 
     def visit_regular_expression_node(node)
-      raw = node.location.slice.strip[1...-1]
-      "\"#{raw.gsub('\\', '\\\\\\\\')}\""
+      raise_unsupported("Regular expressions are not supported", node)
     end
 
     def visit_interpolated_regular_expression_node(node)
-      parts = node.parts.map do |part|
-        if part.is_a?(Prism::StringNode)
-          part.content.gsub('\\', '\\\\\\\\')
-        else
-          stmt_code = visit(part.statements)
-          "${#{stmt_code.delete_suffix(';')}}"
-        end
-      end.join
-      "\"#{parts}\""
+      raise_unsupported("Regular expressions are not supported", node)
     end
 
     def visit_interpolated_string_node(node)
@@ -360,6 +442,17 @@ module RubyToClear
     end
 
     def visit_call_node(node)
+      check_arguments!(node.arguments)
+
+      if node.name.to_s == "gsub" || node.name.to_s == "sub"
+        rec_code = node.receiver ? visit(node.receiver) : nil
+        if rec_code
+          translated = MethodRegistry.translate(node.name.to_s, rec_code, node, self)
+          return translated if translated
+        end
+        raise_unsupported("gsub/sub with dynamic regex, block, or invalid arguments is not supported", node)
+      end
+
       case node.name.to_s
       when "==", "!=", "<", "<=", ">", ">=", "+", "-", "*", "/", "%", "&&", "||", "&", "|"
         lhs = visit(node.receiver)
@@ -401,7 +494,7 @@ module RubyToClear
         args_list = node.arguments ? node.arguments.arguments.map { |arg| visit(arg) } : []
 
         if rec_code
-          translated = MethodRegistry.translate(name_str, rec_code, args_list, node.block, self)
+          translated = MethodRegistry.translate(name_str, rec_code, node, self)
           return translated if translated
         end
 
@@ -433,9 +526,16 @@ module RubyToClear
     end
 
     def visit_def_node(node)
+      check_parameters!(node.parameters)
+      
       name = node.name.to_s
+      param_names = extract_parameter_names(node)
+      written_vars = collect_written_variables(node.body, param_names)
+      written_params = param_names & written_vars
+      
+      @mutable_params = written_params
+      
       params = []
-
       if @current_class && !node.receiver
         params << "MUTABLE self: #{@current_class}"
       end
@@ -445,15 +545,86 @@ module RubyToClear
         params << params_str unless params_str.empty?
       end
 
+      old_declared = @declared_locals
+      @declared_locals = Set.new(param_names)
+      
+      local_vars_to_declare = (written_vars - param_names).to_a.sort
+      local_vars_to_declare.each { |var| @declared_locals << var }
+
       body_code = with_indent { visit(node.body) }
+      
+      decls_code = local_vars_to_declare.map do |var|
+        "#{indent}  MUTABLE #{var} = NIL;"
+      end.join("\n")
+
+      full_body = if decls_code.empty?
+        body_code
+      elsif body_code.empty?
+        decls_code
+      else
+        "#{decls_code}\n#{body_code}"
+      end
+
+      @declared_locals = old_declared
+      @mutable_params = nil
+
       ret_type = name == "initialize" ? "Void" : "!Auto"
       sig_name = name == "initialize" ? "initialize!" : name
 
-      "FN #{sig_name}(#{params.join(', ')}) RETURNS #{ret_type} ->\n#{body_code}\nEND"
+      "FN #{sig_name}(#{params.join(', ')}) RETURNS #{ret_type} ->\n#{full_body}\nEND"
     end
 
     def visit_block_argument_node(node)
       "&#{visit(node.expression)}"
+    end
+
+    def visit_multi_write_node(node)
+      unless node.value.is_a?(Prism::ArrayNode)
+        raise_unsupported("Destructuring is only supported for literal array values", node)
+      end
+      
+      lefts = node.lefts
+      rights = node.value.elements
+      
+      if lefts.length != rights.length
+        raise_unsupported("Multi-write left and right side lengths must match", node)
+      end
+      
+      temp_names = lefts.map.with_index { |_, idx| "__tmp_multi_#{idx}" }
+      
+      decls = []
+      assigns = []
+      
+      rights.each_with_index do |r, idx|
+        val = visit(r)
+        temp_name = temp_names[idx]
+        @declared_locals << temp_name
+        decls << "MUTABLE #{temp_name} = #{val}"
+      end
+      
+      lefts.each_with_index do |l, idx|
+        target_name = visit(l)
+        temp_name = temp_names[idx]
+        assigns << "#{target_name} = #{temp_name}"
+      end
+      
+      (decls + assigns).join(";\n")
+    end
+
+    def visit_rescue_node(node)
+      raise_unsupported("Exception handling (rescue) is not supported", node)
+    end
+
+    def visit_rescue_modifier_node(node)
+      raise_unsupported("Exception handling (rescue) is not supported", node)
+    end
+
+    def visit_begin_node(node)
+      if node.rescue_clause
+        raise_unsupported("Exception handling (rescue) is not supported", node)
+      else
+        visit(node.statements)
+      end
     end
 
     def format_consequent(consequent_node)
