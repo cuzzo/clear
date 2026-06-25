@@ -9,7 +9,7 @@
           "dependencies": [],
           "reads": [],
           "writes": [
-            "opened"
+            "@opened"
           ]
         }
       ]
@@ -23,7 +23,7 @@
           "dependencies": [],
           "reads": [],
           "writes": [
-            "opened"
+            "@opened"
           ]
         }
       ]
@@ -1739,9 +1739,7 @@
         "boundaries": [],
         "id": "SourceFactProtocolsNilClone#close",
         "line": 8,
-        "local_contract_assignments": {
-          "opened": "false"
-        },
+        "local_contract_assignments": {},
         "name": "close",
         "owner": "SourceFactProtocolsNilClone",
         "statements": [
@@ -1760,7 +1758,7 @@
               19
             ],
             "writes": [
-              "opened"
+              "@opened"
             ]
           }
         ]
@@ -1973,9 +1971,7 @@
         "boundaries": [],
         "id": "SourceFactProtocolsNilClone#open",
         "line": 4,
-        "local_contract_assignments": {
-          "opened": "true"
-        },
+        "local_contract_assignments": {},
         "name": "open",
         "owner": "SourceFactProtocolsNilClone",
         "statements": [
@@ -1994,7 +1990,7 @@
               18
             ],
             "writes": [
-              "opened"
+              "@opened"
             ]
           }
         ]

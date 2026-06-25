@@ -248,6 +248,50 @@ impl NormalizedLanguageBehavior for GoNormalizedBehavior {
             .unwrap_or_else(|| message.to_string())
     }
 
+    fn initializer_writes(&self, node: &Node, _source_text: &str, span: Span) -> Vec<crate::syntax::normalized_behavior::NormalizedStateWrite> {
+        let mut writes = Vec::new();
+        if node.r#type == "COMPOSITE_LITERAL" {
+            let mut type_name = ".literal".to_string();
+            let mut is_collection = false;
+            
+            for child in &node.children {
+                if let crate::ast::Child::Node(child) = child {
+                    if child.r#type == "TYPE_IDENTIFIER" || child.r#type == "IDENTIFIER" || child.r#type == "CONST" {
+                        type_name = child.text.clone();
+                    } else if child.r#type == "MAP_TYPE" || child.r#type == "SLICE_TYPE" || child.r#type == "ARRAY_TYPE" {
+                        is_collection = true;
+                    }
+                }
+            }
+            
+            if !is_collection {
+                for child in &node.children {
+                    if let crate::ast::Child::Node(child) = child {
+                        if child.r#type == "LITERAL_VALUE" {
+                            for field in &child.children {
+                                if let crate::ast::Child::Node(field) = field {
+                                    if field.r#type == "KEYED_ELEMENT" {
+                                        for key in &field.children {
+                                            if let crate::ast::Child::Node(key) = key {
+                                                writes.push(crate::syntax::normalized_behavior::NormalizedStateWrite {
+                                                    receiver: type_name.clone(),
+                                                    field: key.text.clone(),
+                                                    span,
+                                                });
+                                                break;
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        writes
+    }
+
     fn nil_guard_fact(&self, message: &str, subject: &str) -> Option<NormalizedNilGuardFact> {
         nil_guard_from_predicates(message, subject, GO_NIL_PREDICATES, GO_NON_NIL_PREDICATES)
     }
@@ -414,8 +458,9 @@ fn dotted_uppercase_reads(text: &str, line: usize, column: usize) -> Vec<Normali
             continue;
         }
         let receiver_start = text[..index]
-            .rfind(|ch: char| !(ch == '_' || ch.is_ascii_alphanumeric()))
-            .map(|offset| offset + 1)
+            .char_indices()
+            .rfind(|(_, ch)| !(*ch == '_' || ch.is_ascii_alphanumeric()))
+            .map(|(offset, ch)| offset + ch.len_utf8())
             .unwrap_or(0);
         let receiver = &text[receiver_start..index];
         let field_end = text[(index + 1)..]

@@ -4942,7 +4942,7 @@ if pre_init.is_empty() {
             return self.normalize_dotted_expression(args).into_iter().collect();
         }
         let raw_args = self.raw_named_children(args);
-        if raw_args.len() == 1 && self.dotted_call(raw_args[0]) {
+        if raw_args.len() == 1 && self.dotted_call(raw_args[0]) && self.call_node(raw_args[0]) {
             let source = self.wrap("SOURCE", Vec::new(), args);
             return self
                 .normalize_dotted_call_expression_with_source(raw_args[0], Some(&source))

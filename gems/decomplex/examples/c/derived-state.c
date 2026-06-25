@@ -1,1 +1,1 @@
-void check(int input) { int cached = input + 1; input = 2; print(cached); }
+void check() { self.cached = self.source + 1; self.source = 2; print(self.cached); }

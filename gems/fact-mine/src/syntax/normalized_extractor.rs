@@ -105,6 +105,7 @@ impl<'a> Extractor<'a> {
     fn scan(&mut self, node: &Node) {
         self.record_behavior_node_reads(node);
         self.record_behavior_node_calls(node);
+        self.record_behavior_initializer_writes(node);
         match node.r#type.as_str() {
             "CLASS" | "MODULE" | "INTERFACE_DECLARATION" => self.scan_owner(node),
             "DEFN" | "DEFS" | "METHOD_SIGNATURE" => self.scan_function(node),
@@ -768,6 +769,32 @@ impl<'a> Extractor<'a> {
                 continue;
             }
             self.append_call_site(projected, node, conditional, false);
+        }
+    }
+
+    fn record_behavior_initializer_writes(&mut self, node: &Node) {
+        let node_span = [node.first_lineno, node.first_column, node.last_lineno, node.last_column];
+        let init_writes = self.behavior.initializer_writes(node, &node.text, node_span);
+        for write in init_writes {
+            let key = (
+                write.field.clone(),
+                write.receiver.clone(),
+                self.current_function(),
+                self.file.clone(),
+                node.first_lineno,
+                write.span,
+            );
+            if self.seen_writes.insert(key) {
+                self.facts.state_writes.push(StateWrite {
+                    field: write.field,
+                    receiver: write.receiver,
+                    file: self.file.clone(),
+                    function: self.current_function(),
+                    line: node.first_lineno,
+                    span: write.span,
+                    owner: self.current_owner(),
+                });
+            }
         }
     }
 

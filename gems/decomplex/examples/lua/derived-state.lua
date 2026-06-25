@@ -1,1 +1,1 @@
-function check(input) local cached = input + 1; input = 2; print(cached) end
+function check() self.cached = self.source + 1; self.source = 2; print(self.cached) end

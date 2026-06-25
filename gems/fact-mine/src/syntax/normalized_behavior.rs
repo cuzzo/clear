@@ -424,6 +424,15 @@ pub(crate) trait NormalizedLanguageBehavior: Sync {
         false
     }
 
+    fn initializer_writes(&self, _node: &Node, _source_text: &str, _span: Span) -> Vec<NormalizedStateWrite> {
+        Vec::new()
+    }
+
+    /// Extract explicit 'this.' or 'self.' bindings
+    fn literal_state_writes(&self, _node: &Node, _normalized_text: &str) -> Vec<String> {
+        Vec::new()
+    }
+
     fn literal_state_refs(&self, _node: &Node, _normalized_text: &str) -> Vec<String> {
         Vec::new()
     }

@@ -11,20 +11,53 @@
               "obj"
             ]
           ],
-          "dependencies": [],
+          "dependencies": [
+            [
+              "self.cache",
+              "key"
+            ],
+            [
+              "self.cache",
+              "obj"
+            ],
+            [
+              "status",
+              "key"
+            ],
+            [
+              "status",
+              "obj"
+            ]
+          ],
           "reads": [
             "key",
             "obj"
           ],
-          "writes": []
+          "writes": [
+            "self.cache",
+            "status"
+          ]
         },
         {
           "co_uses": [],
-          "dependencies": [],
+          "dependencies": [
+            [
+              "self.cache",
+              "index"
+            ],
+            [
+              "status",
+              "index"
+            ]
+          ],
           "reads": [
             "index"
           ],
-          "writes": []
+          "writes": [
+            "index",
+            "self.cache",
+            "status"
+          ]
         },
         {
           "co_uses": [],
@@ -321,7 +354,24 @@
                 "obj"
               ]
             ],
-            "dependencies": [],
+            "dependencies": [
+              [
+                "self.cache",
+                "key"
+              ],
+              [
+                "self.cache",
+                "obj"
+              ],
+              [
+                "status",
+                "key"
+              ],
+              [
+                "status",
+                "obj"
+              ]
+            ],
             "end_line": 2,
             "index": 0,
             "line": 2,
@@ -336,11 +386,23 @@
               2,
               30
             ],
-            "writes": []
+            "writes": [
+              "self.cache",
+              "status"
+            ]
           },
           {
             "co_uses": [],
-            "dependencies": [],
+            "dependencies": [
+              [
+                "self.cache",
+                "index"
+              ],
+              [
+                "status",
+                "index"
+              ]
+            ],
             "end_line": 3,
             "index": 1,
             "line": 3,
@@ -354,7 +416,11 @@
               3,
               30
             ],
-            "writes": []
+            "writes": [
+              "index",
+              "self.cache",
+              "status"
+            ]
           },
           {
             "co_uses": [],

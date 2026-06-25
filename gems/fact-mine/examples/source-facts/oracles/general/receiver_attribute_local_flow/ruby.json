@@ -8,7 +8,7 @@
           "co_uses": [],
           "dependencies": [
             [
-              "repo",
+              "@repo",
               "row"
             ]
           ],
@@ -16,7 +16,7 @@
             "row"
           ],
           "writes": [
-            "repo"
+            "@repo"
           ]
         },
         {
@@ -527,8 +527,7 @@
         "id": "SourceFactReceiverAttributeLocalFlow#apply",
         "line": 4,
         "local_contract_assignments": {
-          "fact": "facts.status_for(row.file, row.name)",
-          "repo": "row.file"
+          "fact": "facts.status_for(row.file, row.name)"
         },
         "name": "apply",
         "owner": "SourceFactReceiverAttributeLocalFlow",
@@ -537,7 +536,7 @@
             "co_uses": [],
             "dependencies": [
               [
-                "repo",
+                "@repo",
                 "row"
               ]
             ],
@@ -555,7 +554,7 @@
               20
             ],
             "writes": [
-              "repo"
+              "@repo"
             ]
           },
           {

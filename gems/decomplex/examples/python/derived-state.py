@@ -1,4 +1,4 @@
-def check(input):
-    cached = input + 1
-    input = 2
-    print(cached)
+def check(self):
+    self.cached = self.source + 1
+    self.source = 2
+    print(self.cached)

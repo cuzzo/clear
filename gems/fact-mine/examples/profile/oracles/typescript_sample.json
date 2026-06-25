@@ -3,12 +3,12 @@
   "fields": [
     {
       "declared_type": "public port: number = 5432",
-      "id": "typescript\u0000/home/yahn/cheat/gems/fact-mine/examples/profile/typescript_sample.ts\u0000Database\u0000field\u0000port",
+      "id": "typescript\u0000/home/yahn/litedb/gems/fact-mine/examples/profile/typescript_sample.ts\u0000Database\u0000field\u0000port",
       "language": "typescript",
       "line": 4,
       "name": "port",
       "owner": "Database",
-      "path": "/home/yahn/cheat/gems/fact-mine/examples/profile/typescript_sample.ts",
+      "path": "/home/yahn/litedb/gems/fact-mine/examples/profile/typescript_sample.ts",
       "source": "syntax",
       "span": [
         4,
@@ -20,12 +20,12 @@
     },
     {
       "declared_type": "Database",
-      "id": "typescript\u0000/home/yahn/cheat/gems/fact-mine/examples/profile/typescript_sample.ts\u0000Greeter\u0000field\u0000_db",
+      "id": "typescript\u0000/home/yahn/litedb/gems/fact-mine/examples/profile/typescript_sample.ts\u0000Greeter\u0000field\u0000_db",
       "language": "typescript",
       "line": 8,
       "name": "_db",
       "owner": "Greeter",
-      "path": "/home/yahn/cheat/gems/fact-mine/examples/profile/typescript_sample.ts",
+      "path": "/home/yahn/litedb/gems/fact-mine/examples/profile/typescript_sample.ts",
       "source": "syntax",
       "span": [
         8,
@@ -52,7 +52,7 @@
       "params": [
         "db"
       ],
-      "path": "/home/yahn/cheat/gems/fact-mine/examples/profile/typescript_sample.ts",
+      "path": "/home/yahn/litedb/gems/fact-mine/examples/profile/typescript_sample.ts",
       "signature": "constructor(db: Database) {",
       "source": {
         "signature": "constructor(db: Database) {",
@@ -79,7 +79,7 @@
       "params": [
         "name"
       ],
-      "path": "/home/yahn/cheat/gems/fact-mine/examples/profile/typescript_sample.ts",
+      "path": "/home/yahn/litedb/gems/fact-mine/examples/profile/typescript_sample.ts",
       "signature": "public hello(name: string): string {",
       "source": {
         "signature": "public hello(name: string): string {",
@@ -106,7 +106,7 @@
       "line": 10,
       "owner": "Greeter",
       "param": "db",
-      "path": "/home/yahn/cheat/gems/fact-mine/examples/profile/typescript_sample.ts",
+      "path": "/home/yahn/litedb/gems/fact-mine/examples/profile/typescript_sample.ts",
       "span": [
         10,
         8,
@@ -138,7 +138,7 @@
       "language": "typescript",
       "line": 4,
       "owner": "Database",
-      "path": "/home/yahn/cheat/gems/fact-mine/examples/profile/typescript_sample.ts",
+      "path": "/home/yahn/litedb/gems/fact-mine/examples/profile/typescript_sample.ts",
       "span": [
         4,
         4,
@@ -153,7 +153,7 @@
       "language": "typescript",
       "line": 8,
       "owner": "Greeter",
-      "path": "/home/yahn/cheat/gems/fact-mine/examples/profile/typescript_sample.ts",
+      "path": "/home/yahn/litedb/gems/fact-mine/examples/profile/typescript_sample.ts",
       "span": [
         8,
         4,
@@ -168,7 +168,7 @@
   },
   "type_definitions": [
     {
-      "id": "typescript\u0000/home/yahn/cheat/gems/fact-mine/examples/profile/typescript_sample.ts\u0000Greeter\u0000method_signature\u0000constructor\u00009\u0000typescript",
+      "id": "typescript\u0000/home/yahn/litedb/gems/fact-mine/examples/profile/typescript_sample.ts\u0000Greeter\u0000method_signature\u0000constructor\u00009\u0000typescript",
       "kind": "method_signature",
       "language": "typescript",
       "line": 9,
@@ -180,12 +180,12 @@
           "type": "Database"
         }
       ],
-      "path": "/home/yahn/cheat/gems/fact-mine/examples/profile/typescript_sample.ts",
+      "path": "/home/yahn/litedb/gems/fact-mine/examples/profile/typescript_sample.ts",
       "signature": "constructor(db: Database) {",
       "type_system": "typescript"
     },
     {
-      "id": "typescript\u0000/home/yahn/cheat/gems/fact-mine/examples/profile/typescript_sample.ts\u0000Greeter\u0000method_signature\u0000hello\u000013\u0000typescript",
+      "id": "typescript\u0000/home/yahn/litedb/gems/fact-mine/examples/profile/typescript_sample.ts\u0000Greeter\u0000method_signature\u0000hello\u000013\u0000typescript",
       "kind": "method_signature",
       "language": "typescript",
       "line": 13,
@@ -197,32 +197,32 @@
           "type": "string"
         }
       ],
-      "path": "/home/yahn/cheat/gems/fact-mine/examples/profile/typescript_sample.ts",
+      "path": "/home/yahn/litedb/gems/fact-mine/examples/profile/typescript_sample.ts",
       "return_type": "string",
       "signature": "public hello(name: string): string {",
       "type_system": "typescript"
     },
     {
       "declared_type": "public port: number = 5432",
-      "id": "typescript\u0000/home/yahn/cheat/gems/fact-mine/examples/profile/typescript_sample.ts\u0000Database\u0000state_field\u0000port\u00004\u0000typescript",
+      "id": "typescript\u0000/home/yahn/litedb/gems/fact-mine/examples/profile/typescript_sample.ts\u0000Database\u0000state_field\u0000port\u00004\u0000typescript",
       "kind": "state_field",
       "language": "typescript",
       "line": 4,
       "name": "port",
       "owner": "Database",
-      "path": "/home/yahn/cheat/gems/fact-mine/examples/profile/typescript_sample.ts",
+      "path": "/home/yahn/litedb/gems/fact-mine/examples/profile/typescript_sample.ts",
       "source": "syntax",
       "type_system": "typescript"
     },
     {
       "declared_type": "Database",
-      "id": "typescript\u0000/home/yahn/cheat/gems/fact-mine/examples/profile/typescript_sample.ts\u0000Greeter\u0000state_field\u0000_db\u00008\u0000typescript",
+      "id": "typescript\u0000/home/yahn/litedb/gems/fact-mine/examples/profile/typescript_sample.ts\u0000Greeter\u0000state_field\u0000_db\u00008\u0000typescript",
       "kind": "state_field",
       "language": "typescript",
       "line": 8,
       "name": "_db",
       "owner": "Greeter",
-      "path": "/home/yahn/cheat/gems/fact-mine/examples/profile/typescript_sample.ts",
+      "path": "/home/yahn/litedb/gems/fact-mine/examples/profile/typescript_sample.ts",
       "source": "syntax",
       "type_system": "typescript"
     }

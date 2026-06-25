@@ -2,8 +2,8 @@
   "detector": "derived-state",
   "expected": [
     {
-      "derived": "cached",
-      "source": "input"
+      "derived": "self.cached",
+      "source": "self.source"
     }
   ],
   "options": {}
