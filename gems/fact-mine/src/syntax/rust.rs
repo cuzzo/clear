@@ -252,6 +252,20 @@ impl NormalizedLanguageBehavior for RustNormalizedBehavior {
     fn untyped_hash_type(&self) -> String {
         "HashMap<String, Value>".to_string()
     }
+
+    fn format_nilable_type(&self, type_text: &str) -> String {
+        if type_text.is_empty() || type_text == "nil" || type_text == "null" {
+            type_text.to_string()
+        } else if type_text.starts_with("Option<") {
+            type_text.to_string()
+        } else {
+            format!("Option<{}>", type_text)
+        }
+    }
+
+    fn untyped_type(&self) -> String {
+        "Value".to_string()
+    }
 }
 
 static BEHAVIOR: RustNormalizedBehavior = RustNormalizedBehavior;

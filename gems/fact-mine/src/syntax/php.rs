@@ -269,6 +269,40 @@ impl NormalizedLanguageBehavior for PhpNormalizedBehavior {
         }
         None
     }
+
+    fn format_array_type(&self, elem: &str) -> String {
+        format!("array<{}>", elem)
+    }
+
+    fn format_hash_type(&self, key: &str, val: &str) -> String {
+        format!("array<{}, {}>", key, val)
+    }
+
+    fn format_set_type(&self, elem: &str) -> String {
+        format!("array<{}, bool>", elem)
+    }
+
+    fn format_nilable_type(&self, type_text: &str) -> String {
+        if type_text.is_empty() || type_text == "nil" || type_text == "null" {
+            type_text.to_string()
+        } else if type_text.starts_with('?') {
+            type_text.to_string()
+        } else {
+            format!("?{}", type_text)
+        }
+    }
+
+    fn untyped_type(&self) -> String {
+        "mixed".to_string()
+    }
+
+    fn untyped_array_type(&self) -> String {
+        "array".to_string()
+    }
+
+    fn untyped_hash_type(&self) -> String {
+        "array".to_string()
+    }
 }
 
 static BEHAVIOR: PhpNormalizedBehavior = PhpNormalizedBehavior;
