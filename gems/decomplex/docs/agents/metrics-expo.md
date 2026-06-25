@@ -20,6 +20,7 @@ what it is and how to interpret it.
 - [Redundant Nil Guards (Tier 1)](#redundant-nil-guards-tier-1)
 - [State Heatmap (Tier 1)](#state-heatmap-tier-1)
 - [State-Based Branch Density (Tier 1)](#state-based-branch-density-tier-1)
+- [Superfluous State (Tier 1)](#superfluous-state-tier-1)
 - [Temporal Ordering Pressure (Tier 1)](#temporal-ordering-pressure-tier-1)
 - [Missing Abstractions (Tier 1)](#missing-abstractions-tier-1)
 - [Reification Misses (Tier 1)](#reification-misses-tier-1)
@@ -165,6 +166,80 @@ IF @cart != nil && @user_valid THEN ...
 are state-based branches. Cyclomatic complexity alone treats these like
 any other branch. Decomplex treats them as more important because the
 branch outcome depends on prior mutation and method order.
+
+### Superfluous State (Tier 1)
+
+Question: could this field simply be removed or converted to a local variable?
+
+Most codebases accumulate fields that are not really state. They are transit data that happen to be stored in an ivar/field because a developer needed to pass a value between methods, or fields that are initialized but never read. This detector identifies such fields and ranks them.
+
+#### Pattern 1: Dead State (written, never read)
+
+A field that is written to but never read anywhere in the codebase.
+
+```ruby
+CLASS BillingService
+  FN checkout(user, cart)
+    @last_checkout_time = Time.now  # <-- written, never read
+    processPayment(user, cart)
+  END
+END
+```
+
+**Fix:** Delete `@last_checkout_time` entirely.
+
+#### Pattern 2: Intra-Method Pass-Through (written and read within the same method)
+
+A field that is written and read exclusively within a single method body. The value never escapes the stack frame.
+
+```ruby
+CLASS BillingService
+  FN checkout(user, cart)
+    @total = cart.items.sum(&:price)  # <-- written
+    charge(user, @total)              # <-- read
+  END
+END
+```
+
+**Fix:** Replace `@total` with a local variable `total`.
+
+#### Pattern 3: Adjacent-Call Pass-Through (single-writer, single-reader with strict call order)
+
+A field with exactly one writer method and exactly one reader method, where every observed call site places the writer immediately before the reader.
+
+```ruby
+CLASS BillingService
+  FN set_user(user)
+    @user = user          # <-- only writer
+  END
+
+  FN validate
+    return unless @user   # <-- only reader
+  END
+
+  FN process(user)
+    set_user(user)        # <-- writer-then-reader adjacent calls
+    validate
+  END
+END
+```
+
+**Fix:** Pass the value directly as a parameter instead of using an instance variable: `validate(user)`.
+
+#### Pattern 4: Derived Cache (derived from other state, never independently mutated)
+
+A field that is derived entirely from other fields and never independently mutated.
+
+```ruby
+CLASS Cart
+  FN initialize(items)
+    @items = items
+    @total = items.sum(&:price)   # <-- derived cache of @items
+  END
+END
+```
+
+**Fix:** Recompute on read (e.g., via a helper method `total()`), or accept the caching tradeoff consciously.
 
 ### Implicit Control Flow (Tier 2)
 
