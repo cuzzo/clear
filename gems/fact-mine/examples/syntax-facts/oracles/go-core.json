@@ -689,6 +689,32 @@
       ],
       "state_writes": [
         {
+          "field": "Active",
+          "function": "Process",
+          "line": 42,
+          "owner": "GoSyntaxFactsCore",
+          "receiver": ".literal",
+          "span": [
+            42,
+            12,
+            42,
+            52
+          ]
+        },
+        {
+          "field": "Name",
+          "function": "Process",
+          "line": 42,
+          "owner": "GoSyntaxFactsCore",
+          "receiver": ".literal",
+          "span": [
+            42,
+            12,
+            42,
+            52
+          ]
+        },
+        {
           "field": "count",
           "function": "Process",
           "line": 55,
@@ -703,6 +729,19 @@
         },
         {
           "field": "lookup",
+          "function": "NewGoSyntaxFactsCore",
+          "line": 33,
+          "owner": "core",
+          "receiver": ".literal",
+          "span": [
+            33,
+            9,
+            33,
+            68
+          ]
+        },
+        {
+          "field": "lookup",
           "function": "Process",
           "line": 65,
           "owner": "GoSyntaxFactsCore",
@@ -712,6 +751,19 @@
             1,
             65,
             25
+          ]
+        },
+        {
+          "field": "status",
+          "function": "NewGoSyntaxFactsCore",
+          "line": 33,
+          "owner": "core",
+          "receiver": ".literal",
+          "span": [
+            33,
+            9,
+            33,
+            68
           ]
         }
       ]

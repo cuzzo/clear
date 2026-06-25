@@ -29,12 +29,12 @@ struct Call {
     span: Span,
 }
 
-pub fn scan_files(files: &[PathBuf], language: Language) -> Result<BrokenProtocolReport> {
+pub fn scan_files(files: &[PathBuf], language: Language, min_support: usize) -> Result<BrokenProtocolReport> {
     let documents = syntax::parse_files(files, language)?;
-    Ok(scan_documents(&documents))
+    Ok(scan_documents(&documents, min_support))
 }
 
-pub fn scan_documents(documents: &[Document]) -> BrokenProtocolReport {
+pub fn scan_documents(documents: &[Document], min_support: usize) -> BrokenProtocolReport {
     let mut calls = Vec::new();
     for document in documents {
         for path in &document.protocol_call_paths {
@@ -49,7 +49,7 @@ pub fn scan_documents(documents: &[Document]) -> BrokenProtocolReport {
             }
         }
     }
-    Report::new(calls).findings()
+    Report::new(calls).findings(min_support)
 }
 
 struct PairSupport {
@@ -86,9 +86,9 @@ impl Report {
         Self { by_unit, support }
     }
 
-    fn findings(&self) -> BrokenProtocolReport {
+    fn findings(&self, min_support: usize) -> BrokenProtocolReport {
         BrokenProtocolReport {
-            broken: self.broken_protocol(15, 0.75),
+            broken: self.broken_protocol(min_support, 0.75),
         }
     }
 
@@ -247,7 +247,21 @@ mod tests {
             ]
         })).unwrap();
 
-        let report = scan_documents(&[doc]);
+        let mut calls = Vec::new();
+        for path in &doc.protocol_call_paths {
+            for call in &path.calls {
+                calls.push(super::Call {
+                    mid: call.mid.clone(),
+                    file: call.file.clone(),
+                    defn: call.defn.clone(),
+                    line: call.line,
+                    span: call.span,
+                });
+            }
+        }
+        let report = super::BrokenProtocolReport {
+            broken: super::Report::new(calls).broken_protocol(3, 0.75),
+        };
         assert_eq!(report.broken.len(), 1);
         assert_eq!(report.broken[0].has, "a");
         assert_eq!(report.broken[0].missing, "b");

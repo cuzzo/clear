@@ -50,7 +50,7 @@ fn run_with_args(args: Vec<String>) -> Result<()> {
             language, files, ..
         } => {
             let language = Language::parse(&language)?;
-            let report = co_update::scan_files(&files, language)
+            let report = co_update::scan_files(&files, language, 10)
                 .with_context(|| "failed to scan co-update facts")?;
             println!("{}", serde_json::to_string(&report)?);
         }
@@ -222,7 +222,7 @@ fn run_with_args(args: Vec<String>) -> Result<()> {
             language, files, ..
         } => {
             let language = Language::parse(&language)?;
-            let findings = sequence_mine::scan_files(&files, language)
+            let findings = sequence_mine::scan_files(&files, language, 15)
                 .with_context(|| "failed to scan sequence-mine facts")?;
             println!("{}", serde_json::to_string(&findings)?);
         }
@@ -954,7 +954,7 @@ fn run_detector_on_fact_input(
 ) -> Result<Value> {
     let documents = input.documents.as_slice();
     match detector {
-        "co-update" => Ok(json!(co_update::scan_documents(documents))),
+        "co-update" => Ok(json!(co_update::scan_documents(documents, 10))),
         "decision-pressure" => {
             if input.local_methods.is_empty() {
                 Ok(json!(decision_pressure::scan_documents(documents)))
@@ -1037,7 +1037,7 @@ fn run_detector_on_fact_input(
         "path-condition" => Ok(json!({
             "neglected": path_condition::scan_documents(documents).neglected,
         })),
-        "sequence-mine" | "broken-protocol" => Ok(json!(sequence_mine::scan_documents(documents))),
+        "sequence-mine" | "broken-protocol" => Ok(json!(sequence_mine::scan_documents(documents, 15))),
         "function-lcom" => {
             if input.local_methods.is_empty() {
                 Ok(json!(function_lcom::scan_documents(documents)))

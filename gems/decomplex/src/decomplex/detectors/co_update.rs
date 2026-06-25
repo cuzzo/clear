@@ -39,12 +39,12 @@ struct Write {
     owner: String,
 }
 
-pub fn scan_files(files: &[PathBuf], language: Language) -> Result<CoUpdateReport> {
+pub fn scan_files(files: &[PathBuf], language: Language, min_support: usize) -> Result<CoUpdateReport> {
     let documents = syntax::parse_files(files, language)?;
-    Ok(scan_documents(&documents))
+    Ok(scan_documents(&documents, min_support))
 }
 
-pub fn scan_documents(documents: &[Document]) -> CoUpdateReport {
+pub fn scan_documents(documents: &[Document], min_support: usize) -> CoUpdateReport {
     let mut writes = Vec::new();
     for doc in documents {
         for w in &doc.state_writes {
@@ -53,8 +53,8 @@ pub fn scan_documents(documents: &[Document]) -> CoUpdateReport {
     }
     let report = Report::new(writes);
     CoUpdateReport {
-        co_written_pairs: report.co_written_pairs(10),
-        neglected_updates: report.neglected_updates(10),
+        co_written_pairs: report.co_written_pairs(min_support),
+        neglected_updates: report.neglected_updates(min_support),
     }
 }
 
@@ -425,7 +425,12 @@ mod tests {
             ]
         })).unwrap();
 
-        let report1 = scan_documents(&[doc1]);
+        let writes1 = doc1.state_writes.iter().map(super::write_from_state_write).collect();
+        let rep1 = super::Report::new(writes1);
+        let report1 = super::CoUpdateReport {
+            co_written_pairs: rep1.co_written_pairs(3),
+            neglected_updates: rep1.neglected_updates(3),
+        };
         assert_eq!(report1.co_written_pairs.len(), 1);
         assert_eq!(report1.co_written_pairs[0].pair, vec!["a", "b"]);
         assert_eq!(report1.co_written_pairs[0].support, 3);
@@ -510,7 +515,12 @@ mod tests {
             ]
         })).unwrap();
 
-        let report2 = scan_documents(&[doc2]);
+        let writes2 = doc2.state_writes.iter().map(super::write_from_state_write).collect();
+        let rep2 = super::Report::new(writes2);
+        let report2 = super::CoUpdateReport {
+            co_written_pairs: rep2.co_written_pairs(3),
+            neglected_updates: rep2.neglected_updates(3),
+        };
         assert_eq!(report2.co_written_pairs.len(), 1);
         assert_eq!(report2.co_written_pairs[0].pair, vec!["x", "y"]);
         assert_eq!(report2.co_written_pairs[0].support, 3);

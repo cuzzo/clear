@@ -362,7 +362,7 @@ fn run_detector(
     options: &Value,
 ) -> Result<Value> {
     match detector {
-        "co-update" => value(co_update::scan_files(files, language)?),
+        "co-update" => value(co_update::scan_files(files, language, option_usize(options, "min_support", 3)?)?),
         "decision-pressure" => value(decision_pressure::scan_files(files, language)?),
         "predicate-alias" | "predicate-aliases" => {
             value(predicate_alias::scan_files(files, language)?)
@@ -399,7 +399,7 @@ fn run_detector(
         }
         "oversized-predicate" => value(oversized_predicate::scan_files(files, language)?),
         "path-condition" => value(path_condition::scan_files(files, language)?),
-        "sequence-mine" | "broken-protocol" => value(sequence_mine::scan_files(files, language)?),
+        "sequence-mine" | "broken-protocol" => value(sequence_mine::scan_files(files, language, option_usize(options, "min_support", 3)?)?),
         "function-lcom" => value(function_lcom::scan_files(files, language)?),
         "false-simplicity" => value(false_simplicity::scan_files(files, language)?),
         "fat-union" => value(fat_union::scan_files(files, language)?),
@@ -415,8 +415,9 @@ fn run_detector_on_fact_input(
     fixture: &Value,
 ) -> Result<Value> {
     let documents = input.documents.as_slice();
+    let options = fixture.get("options").cloned().unwrap_or_else(|| json!({}));
     match detector {
-        "co-update" => value(co_update::scan_documents(documents)),
+        "co-update" => value(co_update::scan_documents(documents, option_usize(&options, "min_support", 3)?)),
         "decision-pressure" => {
             if input.local_methods.is_empty() {
                 value(decision_pressure::scan_documents(documents))
@@ -494,7 +495,7 @@ fn run_detector_on_fact_input(
             let report = path_condition::scan_documents(documents);
             value(json!({ "neglected": report.neglected }))
         }
-        "sequence-mine" | "broken-protocol" => value(sequence_mine::scan_documents(documents)),
+        "sequence-mine" | "broken-protocol" => value(sequence_mine::scan_documents(documents, option_usize(&options, "min_support", 3)?)),
         "function-lcom" => {
             if input.local_methods.is_empty() {
                 value(function_lcom::scan_documents(documents))

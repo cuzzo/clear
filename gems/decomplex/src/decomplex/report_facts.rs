@@ -211,7 +211,7 @@ fn detector_tasks<'a>(
         merge_object_reports(
             groups,
             &["co_written_pairs", "neglected_updates"],
-            |documents| json_value(co_update::scan_documents(documents)),
+            |documents| json_value(co_update::scan_documents(documents, 10)),
         )
     });
     detector_task!("predicate_alias", {
@@ -229,7 +229,7 @@ fn detector_tasks<'a>(
     });
     detector_task!("sequence_mine", {
         merge_object_reports(groups, &["broken"], |documents| {
-            json_value(sequence_mine::scan_documents(documents))
+            json_value(sequence_mine::scan_documents(documents, 15))
         })
         .map(rename_broken_protocol)
     });
