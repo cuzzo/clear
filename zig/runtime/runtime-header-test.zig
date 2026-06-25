@@ -65,21 +65,30 @@ fn schedulerThread(a: std.mem.Allocator) void {
     fp.scheduler_running = false;
 }
 
+var global_spawned_workers: usize = 0;
+
 fn startWorkers(threads: []std.Thread, n: usize) void {
+    global_spawned_workers = 0;
     for (threads[0..n]) |*t| {
         t.* = std.Thread.spawn(.{}, schedulerThread, .{alloc}) catch continue;
+        global_spawned_workers += 1;
     }
-    while (fp.global_registry.count() < n)
+    var wait_ms: usize = 0;
+    while (fp.global_registry.count() < global_spawned_workers) : (wait_ms += 1) {
+        if (wait_ms >= 5_000) @panic("Worker registration timed out");
         compat.sleepNs(1 * std.time.ns_per_ms);
+    }
 }
 
 fn stopWorkers(threads: []std.Thread, n: usize) void {
+    _ = n;
     global_shutdown.store(true, .release);
     fp.global_registry.notifyAll();
-    for (threads[0..n]) |*t| t.join();
+    for (threads[0..global_spawned_workers]) |*t| t.join();
     fp.global_registry.deinit(alloc);
     fp.global_registry = .{};
     global_shutdown.store(false, .release);
+    global_spawned_workers = 0;
 }
 
 test "FSM ctx allocation routes 64B, 128B, 256B, and oversized contexts" {
