@@ -2118,8 +2118,15 @@ fn count_lines(_lines: &[String], _start_line: usize, code: &str) -> usize {
 
 fn infer_literal_type(value: &str, language: &str) -> String {
     let value = value.trim();
+    let lang = language.to_lowercase();
     if value.is_empty() {
-        return "T.untyped".to_string();
+        return if lang == "javascript" || lang == "typescript" {
+            "any".to_string()
+        } else if lang == "python" {
+            "Any".to_string()
+        } else {
+            "T.untyped".to_string()
+        };
     }
     if value.starts_with('"') || value.starts_with('\'') {
         return "String".to_string();
@@ -2128,21 +2135,21 @@ fn infer_literal_type(value: &str, language: &str) -> String {
         return "Symbol".to_string();
     }
     if value == "true" || value == "false" {
-        return if language == "javascript" || language == "typescript" {
+        return if lang == "javascript" || lang == "typescript" {
             "boolean".to_string()
         } else {
             "T::Boolean".to_string()
         };
     }
     if value == "nil" || value == "null" || value == "None" {
-        return if language == "javascript" || language == "typescript" {
+        return if lang == "javascript" || lang == "typescript" {
             "null".to_string()
         } else {
             "NilClass".to_string()
         };
     }
     if value.parse::<i64>().is_ok() || value.parse::<f64>().is_ok() {
-        return if language == "javascript" || language == "typescript" || language == "lua" {
+        return if lang == "javascript" || lang == "typescript" || lang == "lua" {
             "number".to_string()
         } else if value.parse::<i64>().is_ok() {
             "Integer".to_string()
@@ -2156,10 +2163,24 @@ fn infer_literal_type(value: &str, language: &str) -> String {
         || value.starts_with("%w")
         || value.starts_with("%W")
     {
-        return "T::Array[T.untyped]".to_string();
+        return match lang.as_str() {
+            "python" => "List[Any]".to_string(),
+            "typescript" | "javascript" => "any[]".to_string(),
+            "go" => "[]any".to_string(),
+            "rust" => "Vec<Value>".to_string(),
+            "java" | "kotlin" => "List<Object>".to_string(),
+            _ => "T::Array[T.untyped]".to_string(),
+        };
     }
     if value.starts_with('{') {
-        return "T::Hash[T.untyped, T.untyped]".to_string();
+        return match lang.as_str() {
+            "python" => "Dict[Any, Any]".to_string(),
+            "typescript" | "javascript" => "Record<any, any>".to_string(),
+            "go" => "map[string]any".to_string(),
+            "rust" => "HashMap<String, Value>".to_string(),
+            "java" | "kotlin" => "Map<String, Object>".to_string(),
+            _ => "T::Hash[T.untyped, T.untyped]".to_string(),
+        };
     }
     if value.starts_with("%q") || value.starts_with("%Q") {
         return "String".to_string();
@@ -2170,7 +2191,13 @@ fn infer_literal_type(value: &str, language: &str) -> String {
     if value.chars().next().map_or(false, |c| c.is_uppercase()) {
         return value.to_string();
     }
-    "T.untyped".to_string()
+    if lang == "javascript" || lang == "typescript" {
+        "any".to_string()
+    } else if lang == "python" {
+        "Any".to_string()
+    } else {
+        "T.untyped".to_string()
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -4077,6 +4104,98 @@ const CORE_CLASS_CONSTANTS: &[&str] = &[
 ];
 
 impl<'a> NilKillVisitor<'a> {
+    fn untyped_type(&self) -> String {
+        match self.document.language {
+            crate::syntax::Language::Python => "Any".to_string(),
+            crate::syntax::Language::TypeScript | crate::syntax::Language::JavaScript => "any".to_string(),
+            _ => "T.untyped".to_string(),
+        }
+    }
+
+    fn untyped_hash_type(&self) -> String {
+        match self.document.language {
+            crate::syntax::Language::Python => "Dict[Any, Any]".to_string(),
+            crate::syntax::Language::TypeScript | crate::syntax::Language::JavaScript => "Record<any, any>".to_string(),
+            crate::syntax::Language::Go => "map[string]any".to_string(),
+            crate::syntax::Language::Rust => "HashMap<String, Value>".to_string(),
+            crate::syntax::Language::Java | crate::syntax::Language::Kotlin => "Map<String, Object>".to_string(),
+            _ => "T::Hash[T.untyped, T.untyped]".to_string(),
+        }
+    }
+
+    fn untyped_array_type(&self) -> String {
+        match self.document.language {
+            crate::syntax::Language::Python => "List[Any]".to_string(),
+            crate::syntax::Language::TypeScript | crate::syntax::Language::JavaScript => "any[]".to_string(),
+            crate::syntax::Language::Go => "[]any".to_string(),
+            crate::syntax::Language::Rust => "Vec<Value>".to_string(),
+            crate::syntax::Language::Java | crate::syntax::Language::Kotlin => "List<Object>".to_string(),
+            _ => "T::Array[T.untyped]".to_string(),
+        }
+    }
+
+    fn format_hash_type(&self, key: &str, val: &str) -> String {
+        match self.document.language {
+            crate::syntax::Language::Python => format!("Dict[{}, {}]", key, val),
+            crate::syntax::Language::TypeScript | crate::syntax::Language::JavaScript => format!("Record<{}, {}>", key, val),
+            crate::syntax::Language::Go => format!("map[{}]value_type", key),
+            crate::syntax::Language::Rust => format!("HashMap<{}, {}>", key, val),
+            crate::syntax::Language::Java | crate::syntax::Language::Kotlin => format!("Map<{}, {}>", key, val),
+            _ => format!("T::Hash[{}, {}]", key, val),
+        }
+    }
+
+    fn format_array_type(&self, elem: &str) -> String {
+        match self.document.language {
+            crate::syntax::Language::Python => format!("List[{}]", elem),
+            crate::syntax::Language::TypeScript | crate::syntax::Language::JavaScript => format!("{}[]", elem),
+            crate::syntax::Language::Go => format!("[]{}", elem),
+            crate::syntax::Language::Rust => format!("Vec<{}>", elem),
+            crate::syntax::Language::Java | crate::syntax::Language::Kotlin => format!("List<{}>", elem),
+            _ => format!("T::Array[{}]", elem),
+        }
+    }
+
+    fn format_set_type(&self, elem: &str) -> String {
+        match self.document.language {
+            crate::syntax::Language::Python => format!("Set[{}]", elem),
+            crate::syntax::Language::TypeScript | crate::syntax::Language::JavaScript => format!("Set<{}>", elem),
+            crate::syntax::Language::Go => format!("map[{} ]struct{{}}", elem),
+            crate::syntax::Language::Rust => format!("HashSet<{}>", elem),
+            crate::syntax::Language::Java | crate::syntax::Language::Kotlin => format!("Set<{}>", elem),
+            _ => format!("T::Set[{}]", elem),
+        }
+    }
+
+    fn format_nilable_type(&self, type_text: &str) -> String {
+        if type_text.is_empty() || type_text == "nil" || type_text == "null" || type_text == "None" {
+            return type_text.to_string();
+        }
+        match self.document.language {
+            crate::syntax::Language::Python => {
+                if type_text.starts_with("Optional[") {
+                    type_text.to_string()
+                } else {
+                    format!("Optional[{}]", type_text)
+                }
+            }
+            crate::syntax::Language::TypeScript | crate::syntax::Language::JavaScript => {
+                if type_text.contains(" | null") {
+                    type_text.to_string()
+                } else {
+                    format!("{} | null", type_text)
+                }
+            }
+            _ => {
+                if type_text == "NilClass" || type_text.starts_with("T.nilable(") {
+                    type_text.to_string()
+                } else {
+                    format!("T.nilable({})", type_text)
+                }
+            }
+        }
+    }
+
     fn visit(&mut self, node: &crate::ast::Node) {
         match node.r#type.as_str() {
             "CLASS" | "MODULE" | "INTERFACE_DECLARATION" => {
@@ -4648,16 +4767,19 @@ impl<'a> NilKillVisitor<'a> {
                                 if let Some(existing_type) = existing_type {
                                     if let Some(info) = collection_type_info(&existing_type) {
                                         if info.kind == "array" || info.kind == "set" {
-                                            let arg_type = self.expression_type(arg).unwrap_or_else(|| "T.untyped".to_string());
+                                            let arg_type = self.expression_type(arg).unwrap_or_else(|| self.untyped_type());
                                             let new_elem_type = if method == "concat" {
-                                                collection_type_info(&arg_type).and_then(|i| i.element).unwrap_or_else(|| "T.untyped".to_string())
+                                                collection_type_info(&arg_type).and_then(|i| i.element).unwrap_or_else(|| self.untyped_type())
                                             } else {
                                                 arg_type
                                             };
-                                            let existing_elem = info.element.unwrap_or_else(|| "T.untyped".to_string());
+                                            let existing_elem = info.element.unwrap_or_else(|| self.untyped_type());
                                             let merged_elem = merge_types(&existing_elem, &new_elem_type);
-                                            let kind_prefix = if existing_type.starts_with("T::Set") || existing_type.starts_with("Set") { "T::Set" } else { "T::Array" };
-                                            let updated_type = format!("{}[{}]", kind_prefix, merged_elem);
+                                            let updated_type = if existing_type.starts_with("T::Set") || existing_type.starts_with("Set") {
+                                                self.format_set_type(&merged_elem)
+                                            } else {
+                                                self.format_array_type(&merged_elem)
+                                            };
                                             if self.param_types.contains_key(&name) {
                                                 self.param_types.insert(name.clone(), updated_type);
                                             } else {
@@ -4677,13 +4799,13 @@ impl<'a> NilKillVisitor<'a> {
                                 if let Some(existing_type) = existing_type {
                                     if let Some(info) = collection_type_info(&existing_type) {
                                         if info.kind == "hash" {
-                                            let key_type = self.expression_type(key_arg).unwrap_or_else(|| "T.untyped".to_string());
-                                            let val_type = self.expression_type(val_arg).unwrap_or_else(|| "T.untyped".to_string());
-                                            let existing_key = info.element.unwrap_or_else(|| "T.untyped".to_string());
-                                            let existing_val = info.value.unwrap_or_else(|| "T.untyped".to_string());
+                                            let key_type = self.expression_type(key_arg).unwrap_or_else(|| self.untyped_type());
+                                            let val_type = self.expression_type(val_arg).unwrap_or_else(|| self.untyped_type());
+                                            let existing_key = info.element.unwrap_or_else(|| self.untyped_type());
+                                            let existing_val = info.value.unwrap_or_else(|| self.untyped_type());
                                             let merged_key = merge_types(&existing_key, &key_type);
                                             let merged_val = merge_types(&existing_val, &val_type);
-                                            let updated_type = format!("T::Hash[{}, {}]", merged_key, merged_val);
+                                            let updated_type = self.format_hash_type(&merged_key, &merged_val);
                                             if self.param_types.contains_key(&name) {
                                                 self.param_types.insert(name.clone(), updated_type);
                                             } else {
@@ -4695,22 +4817,22 @@ impl<'a> NilKillVisitor<'a> {
                             }
                         } else if method == "merge!" || method == "update" {
                             if let Some(arg) = args.first() {
-                                let arg_type = self.expression_type(arg).unwrap_or_else(|| "T.untyped".to_string());
+                                let arg_type = self.expression_type(arg).unwrap_or_else(|| self.untyped_type());
                                 if let Some(arg_info) = collection_type_info(&arg_type) {
                                     if arg_info.kind == "hash" {
-                                        let arg_key = arg_info.element.unwrap_or_else(|| "T.untyped".to_string());
-                                        let arg_val = arg_info.value.unwrap_or_else(|| "T.untyped".to_string());
+                                        let arg_key = arg_info.element.unwrap_or_else(|| self.untyped_type());
+                                        let arg_val = arg_info.value.unwrap_or_else(|| self.untyped_type());
                                         let existing_type = self.local_types.get(&name)
                                             .or_else(|| self.param_types.get(&name))
                                             .cloned();
                                         if let Some(existing_type) = existing_type {
                                             if let Some(info) = collection_type_info(&existing_type) {
                                                 if info.kind == "hash" {
-                                                    let existing_key = info.element.unwrap_or_else(|| "T.untyped".to_string());
-                                                    let existing_val = info.value.unwrap_or_else(|| "T.untyped".to_string());
+                                                    let existing_key = info.element.unwrap_or_else(|| self.untyped_type());
+                                                    let existing_val = info.value.unwrap_or_else(|| self.untyped_type());
                                                     let merged_key = merge_types(&existing_key, &arg_key);
                                                     let merged_val = merge_types(&existing_val, &arg_val);
-                                                    let updated_type = format!("T::Hash[{}, {}]", merged_key, merged_val);
+                                                    let updated_type = self.format_hash_type(&merged_key, &merged_val);
                                                     if self.param_types.contains_key(&name) {
                                                         self.param_types.insert(name.clone(), updated_type);
                                                     } else {
@@ -5322,7 +5444,7 @@ impl<'a> NilKillVisitor<'a> {
         }
         let value = static_sorbet_type(&types);
         if useful_type(&value) {
-            Some(nilable_type(&value))
+            Some(self.format_nilable_type(&value))
         } else {
             None
         }
@@ -5648,9 +5770,9 @@ impl<'a> NilKillVisitor<'a> {
                     .cloned()
                     .or_else(|| {
                         if self.local_hash_shapes.contains_key(&name) {
-                            Some("T::Hash[T.untyped, T.untyped]".to_string())
+                            Some(self.untyped_hash_type())
                         } else if self.local_array_shapes.contains_key(&name) {
-                            Some("T::Array[T.untyped]".to_string())
+                            Some(self.untyped_array_type())
                         } else {
                             None
                         }
@@ -5800,9 +5922,9 @@ impl<'a> NilKillVisitor<'a> {
                                 let inner = block_return_type
                                     .trim_start_matches("T.nilable(")
                                     .trim_end_matches(')');
-                                return Some(format!("T::Array[{}]", inner));
+                                return Some(self.format_array_type(inner));
                             } else {
-                                return Some(format!("T::Array[{}]", block_return_type));
+                                return Some(self.format_array_type(&block_return_type));
                             }
                         }
                     }
@@ -5870,7 +5992,7 @@ impl<'a> NilKillVisitor<'a> {
     fn literal_array_element_type(&self, node: &crate::ast::Node) -> Option<String> {
         let mut merged: Option<String> = None;
         for child in child_nodes(node) {
-            let child_ty = self.expression_type(child).unwrap_or_else(|| "T.untyped".to_string());
+            let child_ty = self.expression_type(child).unwrap_or_else(|| self.untyped_type());
             if let Some(ref m) = merged {
                 merged = Some(merge_types(m, &child_ty));
             } else {
@@ -5890,8 +6012,8 @@ impl<'a> NilKillVisitor<'a> {
                 if pair.r#type == "pair" || pair.r#type == "PAIR" || pair.r#type == "HASH" {
                     let Some(key_node) = child_node(pair, 0) else { continue; };
                     let Some(value_node) = child_node(pair, 1) else { continue; };
-                    let mut key_ty = self.expression_type(key_node).unwrap_or_else(|| "T.untyped".to_string());
-                    if key_ty == "T.untyped" {
+                    let mut key_ty = self.expression_type(key_node).unwrap_or_else(|| self.untyped_type());
+                    if key_ty == self.untyped_type() {
                         let text = key_node.text.trim();
                         if key_node.r#type == "label" 
                             || key_node.r#type == "hash_key_symbol" 
@@ -5900,7 +6022,7 @@ impl<'a> NilKillVisitor<'a> {
                             key_ty = "Symbol".to_string();
                         }
                     }
-                    let val_ty = self.expression_type(value_node).unwrap_or_else(|| "T.untyped".to_string());
+                    let val_ty = self.expression_type(value_node).unwrap_or_else(|| self.untyped_type());
                     
                     if let Some(ref k) = key_merged {
                         key_merged = Some(merge_types(k, &key_ty));
@@ -5920,8 +6042,8 @@ impl<'a> NilKillVisitor<'a> {
                 if chunk.len() == 2 {
                     let key_node = chunk[0];
                     let value_node = chunk[1];
-                    let mut key_ty = self.expression_type(key_node).unwrap_or_else(|| "T.untyped".to_string());
-                    if key_ty == "T.untyped" {
+                    let mut key_ty = self.expression_type(key_node).unwrap_or_else(|| self.untyped_type());
+                    if key_ty == self.untyped_type() {
                         let text = key_node.text.trim();
                         if key_node.r#type == "label" 
                             || key_node.r#type == "hash_key_symbol" 
@@ -5930,7 +6052,7 @@ impl<'a> NilKillVisitor<'a> {
                             key_ty = "Symbol".to_string();
                         }
                     }
-                    let val_ty = self.expression_type(value_node).unwrap_or_else(|| "T.untyped".to_string());
+                    let val_ty = self.expression_type(value_node).unwrap_or_else(|| self.untyped_type());
                     
                     if let Some(ref k) = key_merged {
                         key_merged = Some(merge_types(k, &key_ty));
@@ -5974,17 +6096,17 @@ impl<'a> NilKillVisitor<'a> {
             "RANGE" | "DOT2" | "DOT3" => Some("Range".to_string()),
             "ARRAY" | "LIST" => {
                 if let Some(elem_ty) = self.literal_array_element_type(node) {
-                    Some(format!("T::Array[{}]", elem_ty))
+                    Some(self.format_array_type(&elem_ty))
                 } else {
-                    Some("T::Array[T.untyped]".to_string())
+                    Some(self.untyped_array_type())
                 }
             }
-            "ZLIST" => Some("T::Array[T.untyped]".to_string()),
+            "ZLIST" => Some(self.untyped_array_type()),
             "HASH" => {
                 let (key_ty, val_ty) = self.literal_hash_element_types(node);
-                let k = key_ty.unwrap_or_else(|| "T.untyped".to_string());
-                let v = val_ty.unwrap_or_else(|| "T.untyped".to_string());
-                Some(format!("T::Hash[{}, {}]", k, v))
+                let k = key_ty.unwrap_or_else(|| self.untyped_type());
+                let v = val_ty.unwrap_or_else(|| self.untyped_type());
+                Some(self.format_hash_type(&k, &v))
             }
             "CALL" | "QCALL" => {
                 if let Some((receiver, method, _)) = match_call(node) {
@@ -7642,9 +7764,9 @@ impl<'a> NilKillVisitor<'a> {
                 }
                 if args[0].r#type == "RANGE" || args[0].r#type == "DOT2" || args[0].r#type == "DOT3"
                 {
-                    Some(format!("T::Array[{elem}]"))
+                    Some(self.format_array_type(&elem))
                 } else if self.expression_type(args[0]).as_deref() == Some("Integer") {
-                    Some(nilable_type(&elem))
+                    Some(self.format_nilable_type(&elem))
                 } else {
                     None
                 }
@@ -7654,7 +7776,7 @@ impl<'a> NilKillVisitor<'a> {
                 if value.is_empty() || value.contains("T.untyped") {
                     None
                 } else {
-                    Some(nilable_type(&value))
+                    Some(self.format_nilable_type(&value))
                 }
             }
             _ => None,
@@ -7684,7 +7806,7 @@ impl<'a> NilKillVisitor<'a> {
         }
         let value = static_sorbet_type(&types);
         if useful_type(&value) {
-            Some(nilable_type(&value))
+            Some(self.format_nilable_type(&value))
         } else {
             None
         }
@@ -8081,7 +8203,7 @@ impl<'a> NilKillVisitor<'a> {
                     }
                     let ty = self
                         .expression_type(arg)
-                        .unwrap_or_else(|| "T.untyped".to_string());
+                        .unwrap_or_else(|| self.untyped_type());
                     let key = state_key(&full_class, &fields[idx]);
                     if !self.is_prepass {
                         self.state_type_records.push(StateTypeRecord {
@@ -8129,7 +8251,7 @@ impl<'a> NilKillVisitor<'a> {
                             if let Some(field) = hash_key_name(key_node) {
                                 let ty = self
                                     .expression_type(value_node)
-                                    .unwrap_or_else(|| "T.untyped".to_string());
+                                    .unwrap_or_else(|| self.untyped_type());
                                 let key = state_key(&klass, &field);
                                 if !self.is_prepass {
                                     self.state_type_records.push(StateTypeRecord {
@@ -8179,7 +8301,7 @@ impl<'a> NilKillVisitor<'a> {
                 let class_name = if let Some(receiver_type) = self.expression_type(rec) {
                     receiver_type.replace("T.nilable(", "").replace(")", "")
                 } else {
-                    "T.untyped".to_string()
+                    self.untyped_type()
                 };
                 if let Some(shape) = self.hash_shape_for_value(val_node) {
                     self.struct_field_hash_shapes.insert((class_name.clone(), field.clone()), shape);
@@ -8255,7 +8377,7 @@ impl<'a> NilKillVisitor<'a> {
             keys.push(key.clone());
             let val_ty = self
                 .expression_type(value_node)
-                .unwrap_or_else(|| "T.untyped".to_string());
+                .unwrap_or_else(|| self.untyped_type());
             values.push(json!(val_ty));
             if let Some(shape) = self.hash_shape_for_value(value_node) {
                 value_hash_shapes.insert(key.clone(), shape);
@@ -8411,7 +8533,7 @@ impl<'a> NilKillVisitor<'a> {
                     if self.local_hash_shapes.contains_key(&name) || self.local_array_shapes.contains_key(&name) {
                         self.local_hash_shapes.remove(&name);
                         self.local_array_shapes.remove(&name);
-                        self.local_types.insert(name.clone(), "T.untyped".to_string());
+                        self.local_types.insert(name.clone(), self.untyped_type());
                     }
                 }
             }
@@ -8425,7 +8547,7 @@ impl<'a> NilKillVisitor<'a> {
                     if self.local_hash_shapes.contains_key(&name) || self.local_array_shapes.contains_key(&name) {
                         self.local_hash_shapes.remove(&name);
                         self.local_array_shapes.remove(&name);
-                        self.local_types.insert(name.clone(), "T.untyped".to_string());
+                        self.local_types.insert(name.clone(), self.untyped_type());
                     }
                 }
             } else if child.r#type == "pair" || child.r#type == "PAIR" || child.r#type == "HASH" {
@@ -8435,7 +8557,7 @@ impl<'a> NilKillVisitor<'a> {
                             if self.local_hash_shapes.contains_key(&name) || self.local_array_shapes.contains_key(&name) {
                                 self.local_hash_shapes.remove(&name);
                                 self.local_array_shapes.remove(&name);
-                                self.local_types.insert(name.clone(), "T.untyped".to_string());
+                                self.local_types.insert(name.clone(), self.untyped_type());
                             }
                         }
                     }
@@ -8472,12 +8594,12 @@ impl<'a> NilKillVisitor<'a> {
                         if let Some(key) = hash_key_name(key_node) {
                             let ty = self
                                 .expression_type(value_node)
-                                .unwrap_or_else(|| "T.untyped".to_string());
+                                .unwrap_or_else(|| self.untyped_type());
                             let typed_value = useful_type(&ty) || ty == "NilClass";
                             let shape_type = if typed_value {
                                 ty.clone()
                             } else {
-                                "T.untyped".to_string()
+                                self.untyped_type()
                             };
                             let entry = keys.entry(key.clone()).or_insert_with(|| json!([]));
                             if let Some(array) = entry.as_array_mut() {
