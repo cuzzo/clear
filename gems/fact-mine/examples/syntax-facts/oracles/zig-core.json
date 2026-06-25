@@ -533,6 +533,19 @@
         },
         {
           "field": "count",
+          "function": "init",
+          "line": 8,
+          "owner": "ZigSyntaxFactsCore",
+          "receiver": "ZigSyntaxFactsCore",
+          "span": [
+            8,
+            15,
+            8,
+            65
+          ]
+        },
+        {
+          "field": "count",
           "function": "process",
           "line": 24,
           "owner": "ZigSyntaxFactsCore",
@@ -555,6 +568,19 @@
             35,
             8,
             51
+          ]
+        },
+        {
+          "field": "status",
+          "function": "init",
+          "line": 8,
+          "owner": "ZigSyntaxFactsCore",
+          "receiver": "ZigSyntaxFactsCore",
+          "span": [
+            8,
+            15,
+            8,
+            65
           ]
         }
       ]
