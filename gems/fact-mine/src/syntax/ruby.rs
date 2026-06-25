@@ -1,4 +1,23 @@
+#[allow(unused_macros)]
+macro_rules! println {
+    ($($arg:tt)*) => {
+        if std::env::var("FACT_MINE_DEBUG").is_ok() {
+            std::println!($($arg)*);
+        }
+    };
+}
+
+#[allow(unused_macros)]
+macro_rules! eprintln {
+    ($($arg:tt)*) => {
+        if std::env::var("FACT_MINE_DEBUG").is_ok() {
+            std::eprintln!($($arg)*);
+        }
+    };
+}
+
 use super::effects::{effect_from_call_with_lexicon, EffectLexicon};
+
 use super::normalized_behavior::{
     eliminable_guard_from_call, matching_paren_index, NormalizedCallParts, NormalizedCallProjection,
     NormalizedLanguageBehavior, NormalizedNilGuardFact, NormalizedSemanticEffect,

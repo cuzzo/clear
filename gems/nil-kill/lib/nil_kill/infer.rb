@@ -218,7 +218,6 @@ module NilKill
         read_rewrites.uniq! { |rw| [rw["line"], rw["code"]] }
         next if read_rewrites.empty?
         blockers = hash_record_field_blockers(fields) + hash_record_param_signature_blockers(signatures)
-        STDERR.puts "DEBUG_1580: name=#{name.inspect}, signatures=#{signatures.inspect}, blockers=#{blockers.inspect}"
         @store.actions << base_action("promote_hash_record_to_struct", REVIEW, NilKill.rel(path), line,
           "promote local hash record #{name} to #{struct_name}; rewrite #{read_rewrites.size} literal field read(s)",
           { "name" => name, "struct_name" => struct_name, "scope" => group.first["enclosing_scope"].to_s.split("::").reject(&:empty?),
@@ -234,7 +233,6 @@ module NilKill
       existing = Array(@store.facts["existing_sigs"])
       methods_by_name = existing.group_by { |method| method["method"].to_s }
       Array(@store.facts["param_origins"]).filter_map do |origin|
-        STDERR.puts "DEBUG_ORIGIN: origin=#{origin.inspect}, path_match=#{origin["path"].to_s == path.to_s}, kind_match=#{origin["origin_kind"] == "local"}, shape_match=#{hash_record_shape_matches_shape?(origin["hash_shape"], shape)}"
         next unless origin["path"].to_s == path.to_s
         next unless origin["origin_kind"] == "local"
         next unless hash_record_shape_matches_shape?(origin["hash_shape"], shape)

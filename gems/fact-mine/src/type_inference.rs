@@ -1,6 +1,25 @@
 // Type inference visitor and analysis engine.
 
+#[allow(unused_macros)]
+macro_rules! println {
+    ($($arg:tt)*) => {
+        if std::env::var("FACT_MINE_DEBUG").is_ok() {
+            std::println!($($arg)*);
+        }
+    };
+}
+
+#[allow(unused_macros)]
+macro_rules! eprintln {
+    ($($arg:tt)*) => {
+        if std::env::var("FACT_MINE_DEBUG").is_ok() {
+            std::eprintln!($($arg)*);
+        }
+    };
+}
+
 use crate::syntax::{Document, Language};
+
 use crate::profile::{
     MethodRecord, FieldRecord, StructDeclaration, StateTypeRecord, StateProtocolRecord,
     StateParamOriginRecord, TypeDefinition, HashShape, ArrayShape, StateTypeEdge,

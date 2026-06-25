@@ -1,7 +1,26 @@
 // Profile extraction: mirrors FactMine::EspalierProfile (Ruby) in Rust.
 // Produces enriched static facts from a Document for Espalier or NilKill.
 
+#[allow(unused_macros)]
+macro_rules! println {
+    ($($arg:tt)*) => {
+        if std::env::var("FACT_MINE_DEBUG").is_ok() {
+            std::println!($($arg)*);
+        }
+    };
+}
+
+#[allow(unused_macros)]
+macro_rules! eprintln {
+    ($($arg:tt)*) => {
+        if std::env::var("FACT_MINE_DEBUG").is_ok() {
+            std::eprintln!($($arg)*);
+        }
+    };
+}
+
 use crate::syntax::{self, Document, Language};
+
 use serde::Serialize;
 use serde_json::{json, Value};
 use std::collections::{BTreeMap, BTreeSet};
