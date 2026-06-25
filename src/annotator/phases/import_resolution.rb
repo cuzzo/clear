@@ -18,7 +18,6 @@ module Annotator
           error!(node, :REQUIRE_NEEDS_IMPORTER)
         end
 
-        importer = T.must(importer)
         mod = if node.kind == :package
           importer.compile_package(node.path, caller_dir: import_source_dir)
         else

@@ -997,7 +997,7 @@ class ClearParser
     unless type_annotation
       error!(start_token, :MUTABLE_BARE_NEEDS_TYPE)
     end
-    value = synthesize_default_for_type(T.must(start_token), T.must(type_annotation))
+    value = synthesize_default_for_type(T.must(start_token), type_annotation)
     AST::VarDecl.new(start_token, name, type_annotation, value, true)
   end
 
@@ -1046,7 +1046,7 @@ class ClearParser
     AST::RequireNode.new(tok, path, namespace, kind)
   end
 
-  sig { params(visibility: Symbol).returns(AST::Node) }
+  sig { params(visibility: Symbol).returns(T.nilable(AST::Node)) }
   def parse_visibility_decl(visibility)
     consume(:KEYWORD)  # consume PUB or PRIVATE
     if match?(:KEYWORD, 'FN')
@@ -1066,7 +1066,7 @@ class ClearParser
 
   # EXTERN FN name(params) RETURNS type FROM "module_name";
   # EXTERN STRUCT Name { fields } FROM "module_name";
-  sig { returns(T.any(AST::ExternFnDecl, AST::ExternStructDecl)) }
+  sig { returns(T.nilable(T.any(AST::ExternFnDecl, AST::ExternStructDecl))) }
   def parse_extern_decl
     tok = consume(:KEYWORD, 'EXTERN')
     if match?(:KEYWORD, 'FN')
@@ -1657,7 +1657,7 @@ class ClearParser
     res = parse_requires_family_or_reentrance
     family = res[:family]
     error!(current, :EXPECTED_CAP_FAMILY) unless family
-    T.must(family)
+    family
   end
 
   # Legacy reentrance REQUIRES clauses can appear between the function header

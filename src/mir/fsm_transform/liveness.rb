@@ -251,6 +251,7 @@ module FsmTransform
     # Collect identifier reads anywhere in stmt's expressions.
     sig { params(stmt: T.untyped, into: T.nilable(T::Set[String])).void }
     def self.collect_uses(stmt, into)
+      return unless into
       walk_idents(stmt) { |name| into << name }
     end
 

@@ -460,7 +460,7 @@ module PipeAnalysis
       end
       ns = parse_batch_window_time_ns(opts["time"].value)
       error!(opts["time"], :WINDOW_TIME_BAD_FORMAT, got: opts["time"].value) unless ns
-      error!(opts["time"], :WINDOW_TIME_NEEDS_POSITIVE) if T.must(ns) <= 0
+      error!(opts["time"], :WINDOW_TIME_NEEDS_POSITIVE) if ns <= 0
     end
 
     # Determine input element type (works for arrays and all stream types)

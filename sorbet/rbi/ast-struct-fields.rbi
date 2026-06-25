@@ -1240,9 +1240,9 @@ end
 class FsmOps::BinOp
   sig { returns(T.any(String, T.untyped)) }
   def op; end
-  sig { returns(T.any(Expr, MIR::FieldGet, T.untyped)) }
+  sig { returns(T.any(FsmOps::Expr, MIR::FieldGet, T.untyped)) }
   def left; end
-  sig { returns(T.any(Expr, MIR::Lit, T.untyped)) }
+  sig { returns(T.any(FsmOps::Expr, MIR::Lit, T.untyped)) }
   def right; end
 end
 
@@ -1351,7 +1351,7 @@ class FsmOps::SubField
 end
 
 class FsmTransform::Liveness::Result
-  sig { returns(T::Hash[String, CrossSegmentVarFact]) }
+  sig { returns(T::Hash[String, FsmTransform::Liveness::CrossSegmentVarFact]) }
   def cross_segment_vars; end
 end
 
@@ -1600,7 +1600,7 @@ end
 class MIR::Call
   sig { returns(T.untyped) }
   def callee; end
-  sig { returns(T.any(T.untyped, T::Array[Emittable])) }
+  sig { returns(T.any(T.untyped, T::Array[MIR::Emittable])) }
   def args; end
   sig { returns(T.any(T.untyped, T::Boolean)) }
   def try_wrap; end
@@ -3271,12 +3271,6 @@ class MIR::DefaultValue
   def kind; end
 end
 
-class Slot
-  sig { returns(T.any(DeclarationNode, T.untyped)) }
-  def decl_node; end
-  sig { returns(Symbol) }
-  def kind; end
-end
 
 class AST::Capability
   sig { returns(T.any(Symbol, T.untyped)) }
@@ -3722,56 +3716,6 @@ class CleanupDecisionFrame
   def loop_depth; end
 end
 
-class DataflowStep
-  sig { returns(OwnershipState) }
-  def state; end
-end
-
-class DefId
-  sig { returns(T.any(Integer, T.untyped)) }
-  def value; end
-end
-
-class DoBranchPrefix
-  sig { returns(T::Boolean) }
-  def can_smash; end
-  sig { returns(T::Boolean) }
-  def parallel; end
-  sig { returns(T::Boolean) }
-  def pinned; end
-end
-
-class FrameBindingContext
-  sig { returns(T::Set[String]) }
-  def param_names; end
-  sig { returns(String) }
-  def receiver_name; end
-end
-
-class FreshHeapCopy
-  sig { returns(String) }
-  def zig_type; end
-end
-
-class FsmSegmentFacts
-  sig { returns(T.any(T.untyped, T::Array[T.untyped])) }
-  def ctx_reads; end
-end
-
-class FunctionFacts
-  sig { returns(T::Array[AssignmentNode]) }
-  def assignment_nodes; end
-  sig { returns(T::Hash[String, T::Array[AST::Locatable]]) }
-  def binding_values; end
-  sig { returns(T::Array[AST::Locatable]) }
-  def escape_nodes; end
-  sig { returns(T.any(LambdaIdentifierRefs, T.untyped)) }
-  def lambda_body_identifier_refs; end
-  sig { returns(T::Array[AST::Node]) }
-  def return_values; end
-  sig { returns(T::Hash[String, SymbolEntry]) }
-  def symbols; end
-end
 
 class InlineStoredAllocCheck
   sig { returns(Symbol) }
@@ -3963,22 +3907,12 @@ class Semantic::LocalFact
   def place_id; end
 end
 
-class SplitResult
-  sig { returns(T::Array[Segment]) }
-  def segments; end
-end
 
-class StdlibCallFacts
-  sig { returns(T.any(T::Array[StdlibCallArgFact], T::Array[T.untyped])) }
-  def args; end
-  sig { returns(CallOwnershipFacts) }
-  def ownership; end
-end
 
 class SymbolEntry
   sig { returns(T.any(T.untyped, T::Boolean)) }
   def mutable; end
-  sig { returns(T.any(AST::VarDecl, RegInput)) }
+  sig { returns(T.any(AST::VarDecl, Scope::RegInput)) }
   def reg; end
   sig { returns(T.any(Symbol, T.untyped)) }
   def storage; end
@@ -4203,7 +4137,7 @@ class CallArgumentFacts
   def is_give; end
   sig { returns(AST::Param) }
   def param; end
-  sig { returns(CallSignatureSite) }
+  sig { returns(FunctionAnalysis::CallSignatureSite) }
   def site; end
 end
 
@@ -4214,15 +4148,8 @@ class CallArityPlan
   def max_args; end
   sig { returns(Integer) }
   def min_args; end
-  sig { returns(CallSignatureSite) }
+  sig { returns(FunctionAnalysis::CallSignatureSite) }
   def site; end
-end
-
-class CallSignatureSite
-  sig { returns(String) }
-  def name; end
-  sig { returns(CallNode) }
-  def node; end
 end
 
 class CallSiteId
@@ -4265,14 +4192,6 @@ class CapabilityTransition
   def resolved_type; end
 end
 
-class CaptureContext
-  sig { returns(CaptureAnalysis) }
-  def analysis; end
-  sig { returns(Set) }
-  def locals; end
-  sig { returns(T::Boolean) }
-  def mark_moves; end
-end
 
 class CatchLoweringPlan
   sig { returns(T::Array[MIR::CatchClause]) }
@@ -4297,27 +4216,7 @@ class Contract
   def reentrant; end
 end
 
-class CrossSegmentVarFact
-  sig { returns(Integer) }
-  def first_def_seg; end
-end
 
-class DeclarationIndex
-  sig { returns(T::Array[AST::Locatable]) }
-  def body_statements; end
-  sig { returns(T::Array[ErrorTypeRegistration]) }
-  def error_type_registrations; end
-  sig { returns(T::Array[AST::ExternFnDecl]) }
-  def extern_function_declarations; end
-  sig { returns(T::Array[AST::FunctionDef]) }
-  def function_declarations; end
-  sig { returns(T::Array[AST::RequireNode]) }
-  def imports; end
-  sig { returns(T::Array[TypeDeclaration]) }
-  def type_declarations; end
-  sig { returns(T::Array[AST::UnionDef]) }
-  def union_method_declarations; end
-end
 
 class DestinationSourceFact
   sig { returns(T::Boolean) }
@@ -4391,10 +4290,6 @@ class FieldAccessPlan
   def union_payload; end
 end
 
-class Finalized
-  sig { returns(AliasOverrideTable) }
-  def alias_overrides_by_index; end
-end
 
 class FixScan
   sig { returns(T::Array[String]) }
@@ -4440,28 +4335,6 @@ class FunctionEntryPlan
   def takes_mir; end
 end
 
-class FunctionLoweringContext
-  sig { returns(CleanupBindingMap) }
-  def bindings; end
-  sig { returns(NameSet) }
-  def collection_params; end
-  sig { returns(T::Boolean) }
-  def has_catch; end
-  sig { returns(T::Boolean) }
-  def has_rt; end
-  sig { returns(T::Boolean) }
-  def heap_carry_return; end
-  sig { returns(NameSet) }
-  def heap_carry_return_vars; end
-  sig { returns(Set) }
-  def lowered_alloc_names; end
-  sig { returns(Set) }
-  def lowered_guarded_cleanup_names; end
-  sig { returns(NameSet) }
-  def mutable_scalar_params; end
-  sig { returns(T::Boolean) }
-  def tail_call; end
-end
 
 class FunctionParamFact
   sig { returns(String) }
@@ -4571,12 +4444,6 @@ class Logger
   def level; end
 end
 
-class LoweredBodyConstruction
-  sig { returns(OwnershipFinalizationContext) }
-  def finalization_context; end
-  sig { returns(T::Array[LoweredStmtPacket]) }
-  def packets; end
-end
 
 class LoweredModuleItems
   sig { returns(T::Array[MIR::Emittable]) }
@@ -4685,12 +4552,6 @@ class MIR::FsmLoweringResult
   def structure; end
 end
 
-class MIR::IfChainBranch
-  sig { returns(MatchBody) }
-  def body; end
-  sig { returns(MIR::Emittable) }
-  def cond; end
-end
 
 class MIR::IndexedStore
   sig { returns(FunctionSignature) }
@@ -4813,14 +4674,6 @@ class MatchSubjectPlan
   def expr_type; end
 end
 
-class MutableSnapshotPlan
-  sig { returns(Symbol) }
-  def alloc; end
-  sig { returns(T::Array[MutableSnapshotCap]) }
-  def capabilities; end
-  sig { returns(AST::WithBlock) }
-  def node; end
-end
 
 class MutualPlan
   sig { returns(String) }
@@ -4965,12 +4818,6 @@ class PipelineBindingUnnestChain
   def unnest_expr; end
 end
 
-class PipelineChain
-  sig { returns(AST::BinaryOp) }
-  def source; end
-  sig { returns(PipelineStageList) }
-  def stages; end
-end
 
 class PipelineConcurrentCallback
   sig { returns(MIR::FieldGet) }
@@ -5169,20 +5016,6 @@ class RegistryCall
   def suppress_try; end
 end
 
-class Result
-  sig { returns(AmbiguityMap) }
-  def ambiguous; end
-  sig { returns(T::Set[String]) }
-  def bg_heap; end
-  sig { returns(T::Hash[String, T::Array[AST::VarDecl]]) }
-  def bindings_by_function; end
-  sig { returns(EscapePlacementFacts) }
-  def placements; end
-  sig { returns(ResultMap) }
-  def resolved; end
-  sig { returns(UnresolvedMap) }
-  def unresolved; end
-end
 
 class RunResult
   sig { returns(Integer) }
@@ -5282,29 +5115,7 @@ class SyntheticLocalId
   def value; end
 end
 
-class TestThatEnv
-  sig { returns(TestLowering::TestBlockCtx) }
-  def ctx; end
-  sig { returns(LetAstMap) }
-  def let_ast_map; end
-  sig { returns(String) }
-  def tag_suffix; end
-  sig { returns(AST::WhenBlock) }
-  def when_block; end
-end
 
-class TypeAnnotationFacts
-  sig { returns(Type) }
-  def inner; end
-  sig { returns(T::Boolean) }
-  def inner_array; end
-  sig { returns(T::Boolean) }
-  def is_param; end
-  sig { returns(AnnotationNode) }
-  def node; end
-  sig { returns(Type) }
-  def type_obj; end
-end
 
 class TypeCapabilities
   sig { returns(T::Boolean) }
@@ -5343,18 +5154,6 @@ class VarDeclFacts
   def keyword_mutable; end
 end
 
-class WithCapabilityBindingContext
-  sig { returns(CapabilitySpec) }
-  def cap; end
-  sig { returns(T::Boolean) }
-  def needs_sort; end
-  sig { returns(AST::WithBlock) }
-  def node; end
-  sig { returns(String) }
-  def rt_name; end
-  sig { returns(String) }
-  def zig_var; end
-end
 
 class WorkFrame
   sig { returns(String) }
