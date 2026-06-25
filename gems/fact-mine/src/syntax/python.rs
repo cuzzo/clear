@@ -6,8 +6,8 @@ use super::normalized_behavior::{
 };
 use super::CallSite;
 use super::StateDeclaration;
-use crate::ast::{Node, Span};
 use crate::ast::Child;
+use crate::ast::{Node, Span};
 
 const PYTHON_CONTEXT_PAIRS: &[(&str, &[&str])] = &[
     ("time", &["time", "monotonic", "perf_counter"]),
@@ -210,14 +210,37 @@ impl NormalizedLanguageBehavior for PythonNormalizedBehavior {
         &self,
         node: &Node,
         _owner: &str,
+        in_method: bool,
     ) -> Option<StateDeclaration> {
+        if !node.text.contains(':') {
+            return None;
+        }
+        if !matches!(
+            node.r#type.as_str(),
+            "expression_statement"
+                | "annotated_assignment"
+                | "assignment"
+                | "IASGN"
+                | "ASSIGN"
+                | "LASGN"
+        ) {
+            return None;
+        }
+        if in_method && !node.text.trim().starts_with("self.") {
+            return None;
+        }
         // Try structured children first: [name_node, type_node?, value_node?]
-        let child_nodes: Vec<&Node> = node.children.iter().filter_map(|c| match c {
-            Child::Node(n) => Some(n.as_ref()),
-            _ => None,
-        }).collect();
+        let child_nodes: Vec<&Node> = node
+            .children
+            .iter()
+            .filter_map(|c| match c {
+                Child::Node(n) => Some(n.as_ref()),
+                _ => None,
+            })
+            .collect();
         if child_nodes.len() >= 2 {
-            let name = child_nodes[0].text.trim();
+            let raw_name = child_nodes[0].text.trim();
+            let name = raw_name.strip_prefix("self.").unwrap_or(raw_name);
             if is_simple_name(name) {
                 let type_text = child_nodes[1].text.trim().to_string();
                 if !type_text.is_empty() && type_text != ":" && !type_text.starts_with('=') {
@@ -234,11 +257,17 @@ impl NormalizedLanguageBehavior for PythonNormalizedBehavior {
         }
         // Fallback: text-based for nodes without structured children (`name: Type`)
         let text = node.text.trim();
-        if let Some((name, rest)) = text.split_once(':') {
-            let name = name.trim();
+        if let Some((raw_name, rest)) = text.split_once(':') {
+            let raw_name = raw_name.trim();
+            let name = raw_name.strip_prefix("self.").unwrap_or(raw_name);
             if is_simple_name(name) {
-                let type_text = rest.split('=').next().unwrap_or(rest).trim()
-                    .trim_end_matches(',').to_string();
+                let type_text = rest
+                    .split('=')
+                    .next()
+                    .unwrap_or(rest)
+                    .trim()
+                    .trim_end_matches(',')
+                    .to_string();
                 if !type_text.is_empty() && type_text != ":" {
                     return Some(StateDeclaration {
                         field: name.to_string(),
@@ -253,6 +282,41 @@ impl NormalizedLanguageBehavior for PythonNormalizedBehavior {
         }
         None
     }
+
+    fn format_array_type(&self, elem: &str) -> String {
+        format!("List[{elem}]")
+    }
+
+    fn format_hash_type(&self, key: &str, val: &str) -> String {
+        format!("Dict[{key}, {val}]")
+    }
+
+    fn format_set_type(&self, elem: &str) -> String {
+        format!("Set[{elem}]")
+    }
+
+    fn format_nilable_type(&self, type_text: &str) -> String {
+        if type_text.is_empty() || type_text == "nil" || type_text == "null" || type_text == "None" {
+            return type_text.to_string();
+        }
+        if type_text.starts_with("Optional[") {
+            type_text.to_string()
+        } else {
+            format!("Optional[{type_text}]")
+        }
+    }
+
+    fn untyped_type(&self) -> String {
+        "Any".to_string()
+    }
+
+    fn untyped_array_type(&self) -> String {
+        "List[Any]".to_string()
+    }
+
+    fn untyped_hash_type(&self) -> String {
+        "Dict[Any, Any]".to_string()
+    }
 }
 
 static BEHAVIOR: PythonNormalizedBehavior = PythonNormalizedBehavior;
@@ -260,7 +324,6 @@ static BEHAVIOR: PythonNormalizedBehavior = PythonNormalizedBehavior;
 pub(crate) fn behavior() -> &'static dyn NormalizedLanguageBehavior {
     &BEHAVIOR
 }
-
 
 fn span(node: &Node) -> Span {
     [
@@ -327,7 +390,6 @@ fn simple_dotted_part(value: &str) -> bool {
     !value.is_empty() && value.split('.').all(simple_identifier)
 }
 
-
 fn is_simple_name(name: &str) -> bool {
     !name.is_empty()
         && !name.contains(' ')
@@ -335,8 +397,13 @@ fn is_simple_name(name: &str) -> bool {
         && !name.contains('[')
         && !name.contains('<')
         && !name.contains('(')
-        && name.chars().next().map_or(false, |c| c == '_' || c.is_ascii_alphabetic())
-        && name.chars().all(|ch| ch == '_' || ch == '?' || ch == '!' || ch.is_ascii_alphanumeric())
+        && name
+            .chars()
+            .next()
+            .map_or(false, |c| c == '_' || c.is_ascii_alphabetic())
+        && name
+            .chars()
+            .all(|ch| ch == '_' || ch == '?' || ch == '!' || ch.is_ascii_alphanumeric())
 }
 
 fn simple_identifier(name: &str) -> bool {

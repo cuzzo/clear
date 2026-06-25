@@ -110,6 +110,10 @@ jobs:
       COVERAGE: "0"
     steps:
       - uses: actions/checkout@v4
+      - name: Install Z3
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y z3
       - uses: ruby/setup-ruby@v1
         with:
           ruby-version: ${{ env.RUBY_VERSION }}
@@ -118,23 +122,7 @@ jobs:
         with:
           node-version: 20
       - name: Install Tree-sitter grammars
-        run: |
-          npm install --no-save --package-lock=false --legacy-peer-deps \
-            tree-sitter-ruby@0.23.1 \
-            tree-sitter-python@0.25.0 \
-            tree-sitter-javascript@0.25.0 \
-            tree-sitter-typescript@0.23.2 \
-            tree-sitter-go@0.25.0 \
-            tree-sitter-rust@0.24.0 \
-            tree-sitter-php@0.24.2 \
-            @tree-sitter-grammars/tree-sitter-zig@1.1.2 \
-            @tree-sitter-grammars/tree-sitter-lua@0.4.1 \
-            tree-sitter-c@0.24.1 \
-            tree-sitter-cpp@0.23.4 \
-            tree-sitter-c-sharp@0.23.5 \
-            tree-sitter-java@0.23.5 \
-            tree-sitter-kotlin@0.3.8 \
-            tree-sitter-swift@0.7.1
+        run: npm install --legacy-peer-deps
       - uses: dtolnay/rust-toolchain@stable
       - name: Build fact-mine-rust binary
         run: cargo build --release --manifest-path gems/fact-mine/Cargo.toml
@@ -151,6 +139,10 @@ jobs:
       COVERAGE: "0"
     steps:
       - uses: actions/checkout@v4
+      - name: Install Z3
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y z3
       - uses: ruby/setup-ruby@v1
         with:
           ruby-version: ${{ env.RUBY_VERSION }}
@@ -159,23 +151,7 @@ jobs:
         with:
           node-version: 20
       - name: Install Tree-sitter grammars
-        run: |
-          npm install --no-save --package-lock=false --legacy-peer-deps \
-            tree-sitter-ruby@0.23.1 \
-            tree-sitter-python@0.25.0 \
-            tree-sitter-javascript@0.25.0 \
-            tree-sitter-typescript@0.23.2 \
-            tree-sitter-go@0.25.0 \
-            tree-sitter-rust@0.24.0 \
-            tree-sitter-php@0.24.2 \
-            @tree-sitter-grammars/tree-sitter-zig@1.1.2 \
-            @tree-sitter-grammars/tree-sitter-lua@0.4.1 \
-            tree-sitter-c@0.24.1 \
-            tree-sitter-cpp@0.23.4 \
-            tree-sitter-c-sharp@0.23.5 \
-            tree-sitter-java@0.23.5 \
-            tree-sitter-kotlin@0.3.8 \
-            tree-sitter-swift@0.7.1
+        run: npm install --legacy-peer-deps
       - uses: dtolnay/rust-toolchain@stable
       - name: Build Rust binaries
         run: |
@@ -1431,6 +1407,10 @@ jobs:
       - uses: actions/checkout@v4
         with:
           fetch-depth: 0
+      - name: Install Z3
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y z3
       - uses: dtolnay/rust-toolchain@stable
       - uses: ruby/setup-ruby@v1
         with:
@@ -1440,15 +1420,7 @@ jobs:
         with:
           node-version: 20
       - name: Install Tree-sitter grammars
-        run: |
-          npm install --no-save --package-lock=false \
-            tree-sitter-ruby@0.23.1 \
-            tree-sitter-python \
-            tree-sitter-javascript \
-            tree-sitter-typescript \
-            tree-sitter-go \
-            tree-sitter-rust \
-            @tree-sitter-grammars/tree-sitter-zig
+        run: npm install --legacy-peer-deps
       - name: Build Rust binaries
         run: |
           cargo build --release --manifest-path gems/fact-mine/Cargo.toml

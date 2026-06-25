@@ -352,7 +352,10 @@ mod tests {
 
     #[test]
     fn test_logical_file() {
-        assert_eq!(logical_file("gems/fact-mine/examples/foo.rb"), "gems/fact-mine/examples/foo.rb");
+        assert_eq!(
+            logical_file("gems/fact-mine/examples/foo.rb"),
+            "gems/fact-mine/examples/foo.rb"
+        );
         assert_eq!(logical_file("foo.rb"), "foo.rb");
     }
 
@@ -422,21 +425,33 @@ mod tests {
             protocol_call_paths: Vec::new(),
             clone_candidates: Vec::new(),
             redundant_nil_guards: Vec::new(),
-            immutable_struct_readers: vec![
-                ("OtherType".to_string(), vec!["b".to_string()]),
-            ].into_iter().collect(),
-            immutable_struct_reader_types: vec![
-                ("MyType".to_string(), vec![("a".to_string(), "OtherType".to_string())].into_iter().collect()),
-            ].into_iter().collect(),
+            immutable_struct_readers: vec![("OtherType".to_string(), vec!["b".to_string()])]
+                .into_iter()
+                .collect(),
+            immutable_struct_reader_types: vec![(
+                "MyType".to_string(),
+                vec![("a".to_string(), "OtherType".to_string())]
+                    .into_iter()
+                    .collect(),
+            )]
+            .into_iter()
+            .collect(),
             type_aliases: vec![
                 ("AliasType".to_string(), "MyType".to_string()),
                 // loop alias to test resolve_type_alias safety loop
                 ("Loop1".to_string(), "Loop2".to_string()),
                 ("Loop2".to_string(), "Loop1".to_string()),
-            ].into_iter().collect(),
-            method_param_types: vec![
-                ("foo".to_string(), vec![("obj".to_string(), "AliasType".to_string())].into_iter().collect()),
-            ].into_iter().collect(),
+            ]
+            .into_iter()
+            .collect(),
+            method_param_types: vec![(
+                "foo".to_string(),
+                vec![("obj".to_string(), "AliasType".to_string())]
+                    .into_iter()
+                    .collect(),
+            )]
+            .into_iter()
+            .collect(),
             state_param_origins: Vec::new(),
         };
 
@@ -463,10 +478,11 @@ mod tests {
         // test type alias resolution loop
         doc.method_param_types.insert(
             "loop_fn".to_string(),
-            vec![("obj".to_string(), "Loop1".to_string())].into_iter().collect(),
+            vec![("obj".to_string(), "Loop1".to_string())]
+                .into_iter()
+                .collect(),
         );
         let metadata_loop = SyntaxFactMetadata::from_documents(&[doc.clone()]);
         assert!(!metadata_loop.immutable_state_ref(&doc, "loop_fn", "obj.a"));
     }
 }
-

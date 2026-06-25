@@ -76,7 +76,11 @@ impl NormalizedLanguageBehavior for GoNormalizedBehavior {
         &self,
         node: &Node,
         _owner: &str,
+        in_method: bool,
     ) -> Option<super::StateDeclaration> {
+        if in_method {
+            return None;
+        }
         if node.r#type != "FIELD_DECLARATION" {
             return None;
         }
@@ -308,6 +312,40 @@ impl NormalizedLanguageBehavior for GoNormalizedBehavior {
 
     fn predicate_body_language_signal(&self, text: &str) -> bool {
         text.to_ascii_lowercase().contains("nil")
+    }
+
+    fn format_array_type(&self, elem: &str) -> String {
+        format!("[]{elem}")
+    }
+
+    fn format_hash_type(&self, key: &str, _val: &str) -> String {
+        format!("map[{key}]value_type")
+    }
+
+    fn format_set_type(&self, elem: &str) -> String {
+        format!("map[{elem}]struct{{}}")
+    }
+
+    fn untyped_array_type(&self) -> String {
+        "[]any".to_string()
+    }
+
+    fn untyped_hash_type(&self) -> String {
+        "map[string]any".to_string()
+    }
+
+    fn format_nilable_type(&self, type_text: &str) -> String {
+        if type_text.is_empty() || type_text == "nil" || type_text == "null" {
+            type_text.to_string()
+        } else if type_text.starts_with('*') {
+            type_text.to_string()
+        } else {
+            format!("*{}", type_text)
+        }
+    }
+
+    fn untyped_type(&self) -> String {
+        "any".to_string()
     }
 }
 

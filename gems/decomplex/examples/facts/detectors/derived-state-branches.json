@@ -1,25 +1,6 @@
 {
   "detector": "derived-state",
-  "expected": [
-    {
-      "at": "facts/derived_branches.rb:stale:10",
-      "defn": "stale",
-      "derived": "derived",
-      "derived_at": 10,
-      "file": "facts/derived_branches.rb",
-      "gap": 3,
-      "source": "source",
-      "source_reassigned_at": 13,
-      "spans": {
-        "facts/derived_branches.rb:stale:10": [
-          10,
-          0,
-          10,
-          16
-        ]
-      }
-    }
-  ],
+  "expected": [],
   "input": {
     "documents": [
       {

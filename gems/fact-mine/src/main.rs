@@ -32,6 +32,7 @@ fn run() -> Result<()> {
             profile,
             files,
             output,
+            language_override,
         } => {
             let profile = match profile.as_str() {
                 "espalier" => Profile::Espalier,
@@ -40,11 +41,14 @@ fn run() -> Result<()> {
             };
             let mut all_outputs = Vec::new();
             for file in &files {
-                let lang = file
-                    .extension()
-                    .and_then(|ext| ext.to_str())
-                    .and_then(|ext| Language::for_extension(&ext.to_ascii_lowercase()))
-                    .with_context(|| format!("cannot detect language for {}", file.display()))?;
+                let lang = if let Some(ref l) = language_override {
+                    Language::parse(l)?
+                } else {
+                    file.extension()
+                        .and_then(|ext| ext.to_str())
+                        .and_then(|ext| Language::for_extension(&ext.to_ascii_lowercase()))
+                        .with_context(|| format!("cannot detect language for {}", file.display()))?
+                };
                 let document = syntax::parse_file(file.clone(), lang)?;
                 all_outputs.push(profile::extract(&document, profile));
             }
@@ -70,6 +74,7 @@ enum Command {
         profile: String,
         files: Vec<PathBuf>,
         output: Option<PathBuf>,
+        language_override: Option<String>,
     },
 }
 
@@ -100,6 +105,7 @@ fn parse_args(args: Vec<String>) -> Result<Command> {
                 .next()
                 .with_context(|| "usage: fact-mine-rust profile {espalier|nil-kill} FILE...")?;
             let mut output = None;
+            let mut language_override = None;
             let mut files = Vec::new();
             while let Some(arg) = iter.next() {
                 match arg.as_str() {
@@ -109,9 +115,15 @@ fn parse_args(args: Vec<String>) -> Result<Command> {
                         ));
                     }
                     other if other.starts_with("--output=") => {
-                        output = Some(PathBuf::from(
-                            other.strip_prefix("--output=").unwrap(),
-                        ));
+                        output = Some(PathBuf::from(other.strip_prefix("--output=").unwrap()));
+                    }
+                    "--language" => {
+                        language_override =
+                            Some(iter.next().with_context(|| "--language requires a value")?);
+                    }
+                    other if other.starts_with("--language=") => {
+                        language_override =
+                            Some(other.strip_prefix("--language=").unwrap().to_string());
                     }
                     other if other.starts_with("--") => bail!("unsupported option: {other}"),
                     path => files.push(PathBuf::from(path)),
@@ -124,6 +136,7 @@ fn parse_args(args: Vec<String>) -> Result<Command> {
                 profile,
                 files,
                 output,
+                language_override,
             })
         }
         other => bail!("usage: fact-mine-rust {{syntax-facts|profile}} FILE... (got: {other})"),

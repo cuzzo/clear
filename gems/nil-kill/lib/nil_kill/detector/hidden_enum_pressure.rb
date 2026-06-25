@@ -34,8 +34,45 @@ module NilKill
     end
 
     def scan
-      @files.each { |path| scan_file(path) if File.file?(path) }
+      obs = @evidence.dig("facts", "hidden_enum_observations")
+      if obs && !obs.empty?
+        load_observations(obs)
+      else
+        @files.each { |path| scan_file(path) if File.file?(path) }
+      end
       rows.sort_by { |row| [-row["score"].to_i, row["path"].to_s, row["line"].to_i, row["slot"].to_s] }
+    end
+
+    def load_observations(observations)
+      observations.each do |obs|
+        slot = {
+          "key" => obs["key"],
+          "kind" => obs["kind"],
+          "path" => obs["path"],
+          "line" => obs["line"].to_i,
+          "owner" => obs["owner"],
+          "method" => obs["method"],
+          "method_kind" => obs["method_kind"],
+          "slot" => obs["slot"],
+          "type" => obs["type"]
+        }
+        entry = slot_entry(slot)
+
+        event = obs["event"]
+        values = obs["values"] || []
+        site = obs["site"] || {}
+
+        case event
+        when "decision"
+          merge_values(entry, values)
+          entry["decisions"] << site.merge("values" => values)
+        when "producer"
+          merge_values(entry, values)
+          entry["producers"] << site.merge("values" => values)
+        when "blocker"
+          entry["blockers"] << site
+        end
+      end
     end
 
     private
@@ -124,31 +161,10 @@ module NilKill
 
     def interesting_node(raw, syntax_context)
       case raw.kind
-      when "body_statement"
-        first = raw_children(syntax_context, raw).first
-        return syntax_context.wrap(raw, force: Syntax::CaseNode) if first&.kind == "case"
-        assignment_class = body_statement_assignment_class(raw, syntax_context)
-        return syntax_context.wrap(raw, force: assignment_class) if assignment_class && body_statement_assignment?(raw, syntax_context)
       when "case"
         syntax_context.wrap(raw, force: Syntax::CaseNode)
       when "call", "binary", "assignment", "operator_assignment", "element_reference"
         syntax_context.wrap(raw)
-      end
-    end
-
-    def body_statement_assignment?(raw, syntax_context)
-      children = raw_children(syntax_context, raw)
-      !body_statement_assignment_class(raw, syntax_context).nil? &&
-        children.any? { |child| !child.named? && child.text.to_s == "=" } &&
-        !children.any? { |child| !child.named? && %w[== != <= >= ===].include?(child.text.to_s) }
-    end
-
-    def body_statement_assignment_class(raw, syntax_context)
-      case raw_named_children(syntax_context, raw).first&.kind
-      when "identifier" then Syntax::LocalVariableWriteNode
-      when "instance_variable" then Syntax::InstanceVariableWriteNode
-      when "class_variable" then Syntax::ClassVariableWriteNode
-      when "global_variable" then Syntax::GlobalVariableWriteNode
       end
     end
 

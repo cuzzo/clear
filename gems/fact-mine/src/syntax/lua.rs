@@ -2,7 +2,7 @@ use super::effects::{effect_from_call_with_lexicon, EffectLexicon};
 use super::normalized_behavior::{
     eliminable_guard_from_call, nil_guard_from_predicates, NormalizedCallParts,
     NormalizedCallProjection, NormalizedLanguageBehavior, NormalizedNilGuardFact,
-    NormalizedSemanticEffect, NormalizedStateRead,
+    NormalizedSemanticEffect, NormalizedStateRead, NormalizedStateWrite,
 };
 use super::CallSite;
 use super::StateDeclaration;
@@ -60,6 +60,10 @@ const LUA_GUARD_MIDS: &[&str] = &["isNull", "is_null"];
 pub(crate) struct LuaNormalizedBehavior;
 
 impl NormalizedLanguageBehavior for LuaNormalizedBehavior {
+    fn self_member_receiver(&self, message: &str) -> String {
+        format!("self.{message}")
+    }
+
     fn project_call(
         &self,
         _node: &Node,
@@ -179,6 +183,34 @@ impl NormalizedLanguageBehavior for LuaNormalizedBehavior {
             .or_else(|| effect_from_call_with_lexicon(call, &LUA_EFFECT_LEXICON))
     }
 
+    fn local_assignment_writes(
+        &self,
+        field: Option<&str>,
+        _node: &Node,
+        default_span: Span,
+    ) -> Vec<NormalizedStateWrite> {
+        let Some(field) = field else {
+            return Vec::new();
+        };
+        let field_truncated = if let Some(pos) = field.find('[') {
+            field[..pos].trim()
+        } else {
+            field
+        };
+        if let Some(pos) = field_truncated.rfind(|c| c == '.' || c == ':') {
+            let receiver = &field_truncated[..pos];
+            let actual_field = &field_truncated[pos + 1..];
+            if simple_dotted_part(receiver) && simple_identifier(actual_field) {
+                return vec![NormalizedStateWrite {
+                    receiver: receiver.to_string(),
+                    field: actual_field.to_string(),
+                    span: default_span,
+                }];
+            }
+        }
+        Vec::new()
+    }
+
     fn local_flow_declaration_keyword(&self, keyword: &str) -> bool {
         keyword == "local"
     }
@@ -219,12 +251,47 @@ impl NormalizedLanguageBehavior for LuaNormalizedBehavior {
         &self,
         node: &Node,
         _owner: &str,
+        _in_method: bool,
     ) -> Option<StateDeclaration> {
         let text = node.text.trim();
         // Lua: table fields, pattern: name = value (no type annotation in Lua)
         // Lua doesn't have static types, so return None. State is detected via writes.
         let _ = text;
         None
+    }
+
+    fn format_array_type(&self, elem: &str) -> String {
+        format!("{}[]", elem)
+    }
+
+    fn format_hash_type(&self, key: &str, val: &str) -> String {
+        format!("table<{}, {}>", key, val)
+    }
+
+    fn format_set_type(&self, elem: &str) -> String {
+        format!("table<{}, boolean>", elem)
+    }
+
+    fn format_nilable_type(&self, type_text: &str) -> String {
+        if type_text.is_empty() || type_text == "nil" || type_text == "null" {
+            type_text.to_string()
+        } else if type_text.ends_with("|nil") || type_text.starts_with("nil|") {
+            type_text.to_string()
+        } else {
+            format!("{}|nil", type_text)
+        }
+    }
+
+    fn untyped_type(&self) -> String {
+        "any".to_string()
+    }
+
+    fn untyped_array_type(&self) -> String {
+        "any[]".to_string()
+    }
+
+    fn untyped_hash_type(&self) -> String {
+        "table".to_string()
     }
 }
 
@@ -361,8 +428,12 @@ fn dotted_member_reads(text: &str, line: usize, column: usize) -> Vec<Normalized
 fn lua_function_owner(text: &str) -> Option<String> {
     let source = text.trim_start();
     let rest = source.strip_prefix("function ")?;
-    let separator = rest.find(':')?;
-    let owner = &rest[..separator];
+    let name_part = match rest.find('(') {
+        Some(pos) => rest[..pos].trim(),
+        None => rest.trim(),
+    };
+    let separator = name_part.rfind(|c| c == ':' || c == '.')?;
+    let owner = &name_part[..separator];
     simple_dotted_part(owner).then(|| owner.to_string())
 }
 

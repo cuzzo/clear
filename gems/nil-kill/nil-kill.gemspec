@@ -18,6 +18,7 @@ Gem::Specification.new do |spec|
   spec.add_dependency "parlour"
   spec.add_dependency "rbs-trace"
   spec.add_dependency "sorbet-runtime"
+  spec.add_dependency "boobytrap", ">= 0.0.1"
 
   spec.add_development_dependency "parallel_rspec"
   spec.add_development_dependency "rspec"

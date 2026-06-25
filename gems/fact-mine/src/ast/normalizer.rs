@@ -2865,7 +2865,7 @@ impl<'source> TreeSitterNormalizer<'source> {
         &mut self,
         node: TreeSitterNode<'_>,
     ) -> Option<Node> {
-        if self.normalization_adapter.check_node_role(node, "field") {
+        if self.normalization_adapter.check_node_role(node, "field") || self.normalization_adapter.check_node_role(node, "pair") {
             let named = self.named_children(node);
             if named.len() >= 2 {
                 let key = named[0];
@@ -3400,18 +3400,27 @@ impl<'source> TreeSitterNormalizer<'source> {
             .named_children(block)
             .into_iter()
             .find(|child| self.normalization_adapter.check_node_role(*child, "block_parameters"))?;
-        let pre_init = self
-            .named_children(params)
-            .into_iter()
-            .filter(|param| self.normalization_adapter.check_node_role(*param, "destructured_parameter"))
-            .filter_map(|param| self.normalize_destructured_block_parameter(param))
-            .map(|node| Child::Node(Box::new(node)))
-            .collect::<Vec<_>>();
-        if pre_init.is_empty() {
-            None
-        } else {
-            Some(self.wrap("ARGS", pre_init, params))
+let mut pre_init = Vec::new();
+for param in self.named_children(params) {
+    if self.normalization_adapter.check_node_role(param, "destructured_parameter") {
+        if let Some(node) = self.normalize_destructured_block_parameter(param) {
+            pre_init.push(Child::Node(Box::new(node)));
         }
+    } else if let Some(name) = self.parameter_name(param) {
+        let lasgn = self.wrap(
+            "LASGN",
+            vec![Child::Symbol(name), Child::Nil],
+            param,
+        );
+        pre_init.push(Child::Node(Box::new(lasgn)));
+    }
+}
+if pre_init.is_empty() {
+    None
+} else {
+    Some(self.wrap("ARGS", pre_init, params))
+}
+
     }
 
     pub(in crate::ast) fn normalize_destructured_block_parameter(
@@ -3681,6 +3690,15 @@ impl<'source> TreeSitterNormalizer<'source> {
             .non_local_assignment_lhs(node, self.source)
         {
             return false;
+        }
+        if let Some(parent) = node.parent() {
+            if self.normalization_adapter.check_node_role(parent, "assignment") {
+                if let Some(left) = self.assignment_left(parent) {
+                    if self.same_ts_node(left, node) {
+                        return true;
+                    }
+                }
+            }
         }
         node.next_sibling()
             .map(|sibling| self.assignment_operator(node_text(sibling, self.source)))
@@ -5121,6 +5139,9 @@ impl<'source> TreeSitterNormalizer<'source> {
         &self,
         node: TreeSitterNode<'tree>,
     ) -> Option<TreeSitterNode<'tree>> {
+        if node.kind() == "annotated_assignment" {
+            return self.named_field(node, "name");
+        }
         self.named_field(node, "left")
             .or_else(|| self.named_children(node).into_iter().next())
     }
@@ -5129,6 +5150,9 @@ impl<'source> TreeSitterNormalizer<'source> {
         &self,
         node: TreeSitterNode<'tree>,
     ) -> Option<TreeSitterNode<'tree>> {
+        if node.kind() == "annotated_assignment" {
+            return self.named_field(node, "value");
+        }
         self.named_field(node, "right")
             .or_else(|| self.named_children(node).into_iter().nth(1))
     }
@@ -5321,9 +5345,12 @@ impl<'source> TreeSitterNormalizer<'source> {
         &mut self,
         node: TreeSitterNode<'_>,
     ) -> Option<Node> {
-        let right = node
-            .next_named_sibling()
-            .and_then(|sibling| self.normalize_node(sibling));
+        let right_node = if let Some(parent) = node.parent().filter(|p| self.normalization_adapter.check_node_role(*p, "assignment")) {
+            self.assignment_right(parent)
+        } else {
+            node.next_named_sibling()
+        };
+        let right = right_node.and_then(|sibling| self.normalize_node(sibling));
         let source = node.parent().unwrap_or(node);
         self.assignment_target(node, right.clone(), source)
             .or_else(|| {

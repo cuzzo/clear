@@ -381,10 +381,37 @@
             1
           ],
           "visibility": "public"
+        },
+        {
+          "line": 79,
+          "name": "send",
+          "owner": "Sink",
+          "params": [
+            "kind",
+            "value"
+          ],
+          "span": [
+            79,
+            2,
+            79,
+            41
+          ],
+          "visibility": "public"
         }
       ],
       "language": "typescript",
       "owners": [
+        {
+          "kind": "class",
+          "line": 10,
+          "name": "Account",
+          "span": [
+            10,
+            0,
+            13,
+            1
+          ]
+        },
         {
           "kind": "class",
           "line": 15,
@@ -393,6 +420,28 @@
             15,
             7,
             72,
+            1
+          ]
+        },
+        {
+          "kind": "class",
+          "line": 3,
+          "name": "User",
+          "span": [
+            3,
+            0,
+            8,
+            1
+          ]
+        },
+        {
+          "kind": "class",
+          "line": 78,
+          "name": "Sink",
+          "span": [
+            78,
+            0,
+            80,
             1
           ]
         }

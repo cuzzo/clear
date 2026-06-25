@@ -174,9 +174,7 @@
         "line": 1,
         "name": "method_two",
         "owner": "ruby",
-        "params": [
-          "e"
-        ],
+        "params": [],
         "visibility": "public"
       }
     ],

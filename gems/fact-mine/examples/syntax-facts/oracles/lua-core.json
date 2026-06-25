@@ -122,10 +122,10 @@
           "block": false,
           "conditional": false,
           "control": "always",
-          "function": "LuaSyntaxFactsCore.new",
+          "function": "new",
           "line": 10,
           "message": "setmetatable",
-          "owner": "core",
+          "owner": "LuaSyntaxFactsCore",
           "receiver": "self",
           "safe_navigation": false,
           "span": [
@@ -300,8 +300,8 @@
         },
         {
           "line": 4,
-          "name": "LuaSyntaxFactsCore.new",
-          "owner": "core",
+          "name": "new",
+          "owner": "LuaSyntaxFactsCore",
           "params": [
             "status",
             "sink"
@@ -386,7 +386,7 @@
         },
         {
           "detail": "setmetatable",
-          "function": "LuaSyntaxFactsCore.new",
+          "function": "new",
           "kind": "metaprogramming",
           "line": 10,
           "span": [

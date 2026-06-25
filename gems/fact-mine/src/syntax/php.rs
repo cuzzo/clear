@@ -6,8 +6,8 @@ use super::normalized_behavior::{
 };
 use super::CallSite;
 use super::StateDeclaration;
-use crate::ast::{Node, Span};
 use crate::ast::Child;
+use crate::ast::{Node, Span};
 
 const PHP_CONTEXT_PAIRS: &[(&str, &[&str])] = &[
     ("DateTime", &["createFromFormat"]),
@@ -174,12 +174,20 @@ impl NormalizedLanguageBehavior for PhpNormalizedBehavior {
         &self,
         node: &Node,
         _owner: &str,
+        in_method: bool,
     ) -> Option<StateDeclaration> {
+        if in_method {
+            return None;
+        }
         // Try structured children first: [name, type?, value?]
-        let child_nodes: Vec<&Node> = node.children.iter().filter_map(|c| match c {
-            Child::Node(n) => Some(n.as_ref()),
-            _ => None,
-        }).collect();
+        let child_nodes: Vec<&Node> = node
+            .children
+            .iter()
+            .filter_map(|c| match c {
+                Child::Node(n) => Some(n.as_ref()),
+                _ => None,
+            })
+            .collect();
         if child_nodes.len() >= 2 {
             let name = child_nodes[0].text.trim();
             if is_simple_name(name) {
@@ -198,15 +206,28 @@ impl NormalizedLanguageBehavior for PhpNormalizedBehavior {
         }
         let text = node.text.trim();
         // PHP: `public Type $name`, `private Type $name`, `Type $name`
-        let text = text.strip_prefix("public ").or_else(|| text.strip_prefix("private "))
-            .or_else(|| text.strip_prefix("protected ")).unwrap_or(text);
+        let text = text
+            .strip_prefix("public ")
+            .or_else(|| text.strip_prefix("private "))
+            .or_else(|| text.strip_prefix("protected "))
+            .unwrap_or(text);
         // After visibility modifier, pattern is `Type $name` or `Type $name = value`
         if let Some((name, _)) = text.split_once('=') {
             let parts: Vec<&str> = text.split_whitespace().collect();
             if parts.len() >= 2 {
-                let name = name.trim().split_whitespace().last().unwrap_or("").trim_start_matches('$');
-                if !name.is_empty() && name.chars().next().map_or(false, |c| c == '_' || c.is_ascii_alphabetic()) {
-                    let type_text = parts[..parts.len()-1].join(" ");
+                let name = name
+                    .trim()
+                    .split_whitespace()
+                    .last()
+                    .unwrap_or("")
+                    .trim_start_matches('$');
+                if !name.is_empty()
+                    && name
+                        .chars()
+                        .next()
+                        .map_or(false, |c| c == '_' || c.is_ascii_alphabetic())
+                {
+                    let type_text = parts[..parts.len() - 1].join(" ");
                     if !type_text.is_empty() {
                         return Some(StateDeclaration {
                             field: name.to_string(),
@@ -222,9 +243,18 @@ impl NormalizedLanguageBehavior for PhpNormalizedBehavior {
         }
         let parts: Vec<&str> = text.split_whitespace().collect();
         if parts.len() >= 2 {
-            let name = parts.last().unwrap().trim_start_matches('$').trim_end_matches(';');
-            if !name.is_empty() && name.chars().next().map_or(false, |c| c == '_' || c.is_ascii_alphabetic()) {
-                let type_text = parts[..parts.len()-1].join(" ");
+            let name = parts
+                .last()
+                .unwrap()
+                .trim_start_matches('$')
+                .trim_end_matches(';');
+            if !name.is_empty()
+                && name
+                    .chars()
+                    .next()
+                    .map_or(false, |c| c == '_' || c.is_ascii_alphabetic())
+            {
+                let type_text = parts[..parts.len() - 1].join(" ");
                 if !type_text.is_empty() {
                     return Some(StateDeclaration {
                         field: name.to_string(),
@@ -238,6 +268,40 @@ impl NormalizedLanguageBehavior for PhpNormalizedBehavior {
             }
         }
         None
+    }
+
+    fn format_array_type(&self, elem: &str) -> String {
+        format!("array<{}>", elem)
+    }
+
+    fn format_hash_type(&self, key: &str, val: &str) -> String {
+        format!("array<{}, {}>", key, val)
+    }
+
+    fn format_set_type(&self, elem: &str) -> String {
+        format!("array<{}, bool>", elem)
+    }
+
+    fn format_nilable_type(&self, type_text: &str) -> String {
+        if type_text.is_empty() || type_text == "nil" || type_text == "null" {
+            type_text.to_string()
+        } else if type_text.starts_with('?') {
+            type_text.to_string()
+        } else {
+            format!("?{}", type_text)
+        }
+    }
+
+    fn untyped_type(&self) -> String {
+        "mixed".to_string()
+    }
+
+    fn untyped_array_type(&self) -> String {
+        "array".to_string()
+    }
+
+    fn untyped_hash_type(&self) -> String {
+        "array".to_string()
     }
 }
 
@@ -351,6 +415,11 @@ fn is_simple_name(name: &str) -> bool {
         && !name.contains('[')
         && !name.contains('<')
         && !name.contains('(')
-        && name.chars().next().map_or(false, |c| c == '_' || c.is_ascii_alphabetic())
-        && name.chars().all(|ch| ch == '_' || ch == '?' || ch == '!' || ch.is_ascii_alphanumeric())
+        && name
+            .chars()
+            .next()
+            .map_or(false, |c| c == '_' || c.is_ascii_alphabetic())
+        && name
+            .chars()
+            .all(|ch| ch == '_' || ch == '?' || ch == '!' || ch.is_ascii_alphanumeric())
 }

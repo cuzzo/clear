@@ -64,6 +64,14 @@ module NilKill
         concat_fact("param_origins", facts["param_origins"])
         concat_fact("rbi_field_types", facts["rbi_field_types"])
         concat_fact("noreturn_methods", facts["noreturn_methods"])
+        concat_fact("type_normalizers", facts["type_normalizers"])
+        concat_fact("rescue_handlers", facts["rescue_handlers"])
+        concat_fact("return_usage_sites", facts["return_usage_sites"])
+        concat_fact("return_direct_usage_sites", facts["return_direct_usage_sites"])
+        concat_fact("hash_record_escape_sites", facts["hash_record_escape_sites"])
+        concat_fact("hidden_enum_observations", facts["hidden_enum_observations"])
+        concat_fact("dispatcher_inferences", facts["dispatcher_inferences"])
+        concat_fact("hash_record_member_calls", facts["hash_record_member_calls"])
         merge_fact_map("ivar_protocols", facts["ivar_protocols"])
         merge_fact_map("ivar_param_origins", facts["ivar_param_origins"])
       end
@@ -87,7 +95,7 @@ module NilKill
           next unless accepts_method?(method)
           next if annotation_path?(method["path"])
 
-          source = legacy_method_record(method, method_type_definitions[method_definition_key(method)])
+          source = legacy_method_record(method, find_definition_for(method, method_type_definitions))
           target = source["has_sig"] ? "existing_sigs" : "unsigned_methods"
           store.facts[target] << source
           rec = store.method_record([source["class"], source["method"], source["kind"], File.expand_path(source["path"], root), source["line"]])
@@ -121,6 +129,30 @@ module NilKill
           normalized_method_name(method["name"]),
           method["line"].to_i,
         ]
+      end
+
+      def find_definition_for(method, method_type_definitions)
+        key = method_definition_key(method)
+        candidates = [
+          key,
+          [key[0], key[1], key[2], key[3], 0],
+          [key[0], key[1], "", key[3], 0],
+          [key[0], key[1], "", key[3], key[4]],
+        ].uniq.map { |k| method_type_definitions[k] }.compact
+
+        return nil if candidates.empty?
+
+        merged = {}
+        candidates.each do |cand|
+          merged.merge!(cand) do |field_name, old_val, new_val|
+            if field_name == "params"
+              (Array(old_val) + Array(new_val)).uniq { |p| p["name"] }
+            else
+              new_val || old_val
+            end
+          end
+        end
+        merged
       end
 
       def legacy_method_record(method, definition)

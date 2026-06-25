@@ -9,6 +9,7 @@ license = "PolyForm-Noncommercial-1.0.0"
 name = "fact-mine-rust"
 path = "src/main.rs"
 
+
 [dependencies]
 anyhow = "1.0"
 serde = { version = "1.0", features = ["derive"] }

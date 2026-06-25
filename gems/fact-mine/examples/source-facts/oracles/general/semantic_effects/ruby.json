@@ -297,21 +297,21 @@
       {
         "child_fingerprints": [
           "assignment(id hash(hash(lit lit)))",
-          "assignment(id block(call(id id) body(assignment<[]=>(lit id argument_list(id)))))",
+          "assignment(id block(call(id id) body(parameters(id id) assignment<[]=>(lit id argument_list(id)))))",
           "assignment(id call<new>(id id argument_list(lit)))",
-          "block(call(id id) body(assignment(lit id argument_list(id) id)))",
+          "block(call(id id) body(parameters(id id) assignment(lit id argument_list(id) id)))",
           "argument_list(id id id)"
         ],
         "child_masses": [
           5,
-          9,
+          12,
           5,
-          9,
+          12,
           4
         ],
-        "fingerprint": "body_statement(assignment(id hash(hash(lit lit))) assignment(id block(call(id id) body(assignment<[]=>(lit id argument_list(id))))) assignment(id call<new>(id id argument_list(lit))) block(call(id id) body(assignment(lit id argument_list(id) id))) argument_list(id id id))",
+        "fingerprint": "body_statement(assignment(id hash(hash(lit lit))) assignment(id block(call(id id) body(parameters(id id) assignment<[]=>(lit id argument_list(id))))) assignment(id call<new>(id id argument_list(lit))) block(call(id id) body(parameters(id id) assignment(lit id argument_list(id) id))) argument_list(id id id))",
         "line": 17,
-        "mass": 33,
+        "mass": 39,
         "method_name": "shape_hash",
         "node_name": "body_statement"
       },
@@ -352,9 +352,9 @@
         "child_masses": [
           2
         ],
-        "fingerprint": "block(call(id id) body(assignment(lit id argument_list(id) id)))",
+        "fingerprint": "block(call(id id) body(parameters(id id) assignment(lit id argument_list(id) id)))",
         "line": 20,
-        "mass": 9,
+        "mass": 12,
         "method_name": "shape_hash",
         "node_name": "block"
       },
@@ -365,9 +365,9 @@
         "child_masses": [
           2
         ],
-        "fingerprint": "block(call(id id) body(assignment<[]=>(lit id argument_list(id))))",
+        "fingerprint": "block(call(id id) body(parameters(id id) assignment<[]=>(lit id argument_list(id))))",
         "line": 18,
-        "mass": 8,
+        "mass": 11,
         "method_name": "shape_hash",
         "node_name": "block"
       },
@@ -706,16 +706,16 @@
         "child_fingerprints": [
           "method(id body(parameters(id id) body_statement(call<puts>(id argument_list(id)) call<call>(id id argument_list(id)) call<send>(id argument_list(lit id)) id)))",
           "method(id body(parameters(id id) body_statement(assignment<[]=>(lit id argument_list(lit id)) call(lit call(id id) argument_list(id)))))",
-          "method(id body(parameters(id) body_statement(assignment(id hash(hash(lit lit))) assignment(id block(call(id id) body(assignment<[]=>(lit id argument_list(id))))) assignment(id call<new>(id id argument_list(lit))) block(call(id id) body(assignment(lit id argument_list(id) id))) argument_list(id id id))))"
+          "method(id body(parameters(id) body_statement(assignment(id hash(hash(lit lit))) assignment(id block(call(id id) body(parameters(id id) assignment<[]=>(lit id argument_list(id))))) assignment(id call<new>(id id argument_list(lit))) block(call(id id) body(parameters(id id) assignment(lit id argument_list(id) id))) argument_list(id id id))))"
         ],
         "child_masses": [
           18,
           16,
-          37
+          43
         ],
-        "fingerprint": "body_statement(method(id body(parameters(id id) body_statement(call<puts>(id argument_list(id)) call<call>(id id argument_list(id)) call<send>(id argument_list(lit id)) id))) method(id body(parameters(id id) body_statement(assignment<[]=>(lit id argument_list(lit id)) call(lit call(id id) argument_list(id))))) method(id body(parameters(id) body_statement(assignment(id hash(hash(lit lit))) assignment(id block(call(id id) body(assignment<[]=>(lit id argument_list(id))))) assignment(id call<new>(id id argument_list(lit))) block(call(id id) body(assignment(lit id argument_list(id) id))) argument_list(id id id)))))",
+        "fingerprint": "body_statement(method(id body(parameters(id id) body_statement(call<puts>(id argument_list(id)) call<call>(id id argument_list(id)) call<send>(id argument_list(lit id)) id))) method(id body(parameters(id id) body_statement(assignment<[]=>(lit id argument_list(lit id)) call(lit call(id id) argument_list(id))))) method(id body(parameters(id) body_statement(assignment(id hash(hash(lit lit))) assignment(id block(call(id id) body(parameters(id id) assignment<[]=>(lit id argument_list(id))))) assignment(id call<new>(id id argument_list(lit))) block(call(id id) body(parameters(id id) assignment(lit id argument_list(id) id))) argument_list(id id id)))))",
         "line": 4,
-        "mass": 72,
+        "mass": 78,
         "method_name": "(top-level)",
         "node_name": "body_statement"
       },
@@ -749,9 +749,9 @@
       {
         "child_fingerprints": [],
         "child_masses": [],
-        "fingerprint": "method(id body(parameters(id) body_statement(assignment(id hash(hash(lit lit))) assignment(id block(call(id id) body(assignment<[]=>(lit id argument_list(id))))) assignment(id call<new>(id id argument_list(lit))) block(call(id id) body(assignment(lit id argument_list(id) id))) argument_list(id id id))))",
+        "fingerprint": "method(id body(parameters(id) body_statement(assignment(id hash(hash(lit lit))) assignment(id block(call(id id) body(parameters(id id) assignment<[]=>(lit id argument_list(id))))) assignment(id call<new>(id id argument_list(lit))) block(call(id id) body(parameters(id id) assignment(lit id argument_list(id) id))) argument_list(id id id))))",
         "line": 16,
-        "mass": 37,
+        "mass": 43,
         "method_name": "shape_hash",
         "node_name": "defn"
       },

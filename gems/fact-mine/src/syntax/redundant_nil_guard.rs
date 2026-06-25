@@ -339,7 +339,9 @@ impl<'a> RedundantNilGuard<'a> {
 
     fn branch_nil_facts(&self, node: &Node, cond_truth: bool) -> Vec<NilFact> {
         if self.parenthesized_wrapper(node) {
-            let child = self.first_node_child(node).expect("wrapper must have node child");
+            let child = self
+                .first_node_child(node)
+                .expect("wrapper must have node child");
             return self.branch_nil_facts(child, cond_truth);
         }
 
@@ -579,11 +581,13 @@ mod tests {
     fn test_scan_files_and_sort_rows() {
         let prev_jobs = crate::parallel::job_count();
         crate::parallel::set_jobs_for_process(Some(2)).unwrap();
-        
-        let mut doc1: Document = serde_json::from_str(r#"{"file":"a.rb","language":"ruby"}"#).unwrap();
+
+        let mut doc1: Document =
+            serde_json::from_str(r#"{"file":"a.rb","language":"ruby"}"#).unwrap();
         doc1.redundant_nil_guards = serde_json::from_str(r#"[{"defn":"foo","line":10,"local":"x","guard":"safe","proof":"proof","file":"a.rb","span":[10,0,10,5],"at":"","spans":{}}]"#).unwrap();
 
-        let mut doc2: Document = serde_json::from_str(r#"{"file":"b.rb","language":"ruby"}"#).unwrap();
+        let mut doc2: Document =
+            serde_json::from_str(r#"{"file":"b.rb","language":"ruby"}"#).unwrap();
         doc2.redundant_nil_guards = serde_json::from_str(r#"[{"defn":"bar","line":20,"local":"y","guard":"safe","proof":"proof","file":"b.rb","span":[20,0,20,5],"at":"","spans":{}}]"#).unwrap();
 
         let results = scan_documents(&[doc2, doc1]); // reverse order to test sort_rows
@@ -630,7 +634,7 @@ mod tests {
             text: "my_name".to_string(),
         }));
         assert_eq!(s.child_name(&node_child), Some("my_name".to_string()));
-        
+
         // child_name fallback
         assert_eq!(s.child_name(&Child::Nil), None);
 
@@ -669,7 +673,7 @@ mod tests {
     fn test_nil_arg_edge_cases() {
         let s = scanner();
         assert!(!s.nil_arg(Some(&Child::Integer(42)))); // not Node
-        
+
         let nil_node = Node {
             r#type: "LIST".to_string(),
             children: vec![Child::Nil], // Child::Nil path
@@ -740,10 +744,7 @@ mod tests {
         let s = scanner();
         let opcall_no_child = Node {
             r#type: "OPCALL".to_string(),
-            children: vec![
-                Child::Nil,
-                Child::Symbol("!".to_string()),
-            ],
+            children: vec![Child::Nil, Child::Symbol("!".to_string())],
             first_lineno: 1,
             first_column: 0,
             last_lineno: 1,
@@ -758,17 +759,15 @@ mod tests {
         let s = scanner();
         let opcall_no_symbol = Node {
             r#type: "OPCALL".to_string(),
-            children: vec![
-                Child::Node(Box::new(Node {
-                    r#type: "LVAR".to_string(),
-                    children: vec![Child::Symbol("x".to_string())],
-                    first_lineno: 1,
-                    first_column: 0,
-                    last_lineno: 1,
-                    last_column: 0,
-                    text: "x".to_string(),
-                })),
-            ],
+            children: vec![Child::Node(Box::new(Node {
+                r#type: "LVAR".to_string(),
+                children: vec![Child::Symbol("x".to_string())],
+                first_lineno: 1,
+                first_column: 0,
+                last_lineno: 1,
+                last_column: 0,
+                text: "x".to_string(),
+            }))],
             first_lineno: 1,
             first_column: 0,
             last_lineno: 1,

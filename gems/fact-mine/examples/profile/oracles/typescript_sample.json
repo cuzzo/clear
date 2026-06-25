@@ -2,7 +2,7 @@
   "array_shapes": [],
   "fields": [
     {
-      "declared_type": "number",
+      "declared_type": "public port: number = 5432",
       "id": "typescript\u0000/home/yahn/cheat/gems/fact-mine/examples/profile/typescript_sample.ts\u0000Database\u0000field\u0000port",
       "language": "typescript",
       "line": 4,
@@ -97,7 +97,29 @@
     "Greeter\u0000constructor": "constructor(db: Database) {",
     "Greeter\u0000hello": "public hello(name: string): string {"
   },
-  "state_param_origins": {},
+  "state_param_origin_records": [
+    {
+      "field": "_db",
+      "function": "constructor",
+      "key": "Greeter\u0000_db",
+      "language": "typescript",
+      "line": 10,
+      "owner": "Greeter",
+      "param": "db",
+      "path": "/home/yahn/cheat/gems/fact-mine/examples/profile/typescript_sample.ts",
+      "span": [
+        10,
+        8,
+        10,
+        21
+      ]
+    }
+  ],
+  "state_param_origins": {
+    "Greeter\u0000_db": [
+      "db"
+    ]
+  },
   "state_protocols": {},
   "state_type_edges": [
     {
@@ -110,7 +132,7 @@
   ],
   "state_type_records": [
     {
-      "declared_type": "number",
+      "declared_type": "public port: number = 5432",
       "field": "port",
       "key": "Database\u0000port",
       "language": "typescript",
@@ -141,7 +163,7 @@
     }
   ],
   "state_types": {
-    "Database\u0000port": "number",
+    "Database\u0000port": "public port: number = 5432",
     "Greeter\u0000_db": "Database"
   },
   "type_definitions": [
@@ -176,12 +198,12 @@
         }
       ],
       "path": "/home/yahn/cheat/gems/fact-mine/examples/profile/typescript_sample.ts",
-      "return_type": "string {",
+      "return_type": "string",
       "signature": "public hello(name: string): string {",
       "type_system": "typescript"
     },
     {
-      "declared_type": "number",
+      "declared_type": "public port: number = 5432",
       "id": "typescript\u0000/home/yahn/cheat/gems/fact-mine/examples/profile/typescript_sample.ts\u0000Database\u0000state_field\u0000port\u00004\u0000typescript",
       "kind": "state_field",
       "language": "typescript",

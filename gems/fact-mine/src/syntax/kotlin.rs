@@ -1,13 +1,13 @@
 use super::effects::{effect_from_call_with_lexicon, EffectLexicon};
-use super::CallSite;
-use super::StateDeclaration;
-use crate::ast::{Node, Span};
-use crate::ast::Child;
 use super::normalized_behavior::{
     eliminable_guard_from_call, nil_guard_from_predicates, NormalizedCallParts,
     NormalizedCallProjection, NormalizedLanguageBehavior, NormalizedNilGuardFact,
     NormalizedSemanticEffect,
 };
+use super::CallSite;
+use super::StateDeclaration;
+use crate::ast::Child;
+use crate::ast::{Node, Span};
 
 const KOTLIN_CONTEXT_PAIRS: &[(&str, &[&str])] = &[
     (
@@ -201,50 +201,48 @@ impl NormalizedLanguageBehavior for KotlinNormalizedBehavior {
         &self,
         node: &Node,
         _owner: &str,
+        in_method: bool,
     ) -> Option<StateDeclaration> {
-        // Try structured children first: [name, type?, value?]
-        let child_nodes: Vec<&Node> = node.children.iter().filter_map(|c| match c {
-            Child::Node(n) => Some(n.as_ref()),
-            _ => None,
-        }).collect();
-        if child_nodes.len() >= 2 {
-            let name = child_nodes[0].text.trim();
-            if is_simple_name(name) {
-                let type_text = child_nodes[1].text.trim().to_string();
-                if !type_text.is_empty() && type_text != ":" && !type_text.starts_with('=') {
-                    return Some(StateDeclaration {
-                        field: name.to_string(),
-                        owner: String::new(),
-                        r#type: Some(type_text),
-                        file: String::new(),
-                        line: node.first_lineno,
-                        span: span(node),
-                    });
-                }
-            }
+        if in_method {
+            return None;
         }
-        let text = node.text.trim();
-        // Kotlin: `val name: Type` or `var name: Type`
-        let text = text.strip_prefix("val ").or_else(|| text.strip_prefix("var ")).unwrap_or(text);
-        if let Some((name, rest)) = text.split_once(':') {
-            let name = name.trim();
-            if !name.is_empty() && !name.contains(' ') && !name.contains('.')
-                && name.chars().next().map_or(false, |c| c == '_' || c.is_ascii_alphabetic())
-            {
-                let type_text = rest.split('=').next().unwrap_or(rest).trim().to_string();
-                if !type_text.is_empty() {
-                    return Some(StateDeclaration {
-                        field: name.to_string(),
-                        owner: String::new(),
-                        r#type: Some(type_text),
-                        file: String::new(),
-                        line: node.first_lineno,
-                        span: span(node),
-                    });
-                }
+        let text = node.text.lines().next().unwrap_or("").trim();
+        let (left, right) = text.split_once(':')?;
+        let name = left.split_whitespace().next_back()?;
+        if is_simple_name(name) && !is_keyword(name) {
+            let type_part = right.split('=').next()?.trim();
+            if !type_part.is_empty() {
+                return Some(StateDeclaration {
+                    field: name.to_string(),
+                    owner: String::new(),
+                    r#type: Some(type_part.to_string()),
+                    file: String::new(),
+                    line: node.first_lineno,
+                    span: span(node),
+                });
             }
         }
         None
+    }
+
+    fn format_array_type(&self, elem: &str) -> String {
+        format!("List<{elem}>")
+    }
+
+    fn format_hash_type(&self, key: &str, val: &str) -> String {
+        format!("Map<{key}, {val}>")
+    }
+
+    fn format_set_type(&self, elem: &str) -> String {
+        format!("Set<{elem}>")
+    }
+
+    fn untyped_array_type(&self) -> String {
+        "List<Object>".to_string()
+    }
+
+    fn untyped_hash_type(&self) -> String {
+        "Map<String, Object>".to_string()
     }
 }
 
@@ -287,6 +285,33 @@ fn is_simple_name(name: &str) -> bool {
         && !name.contains('[')
         && !name.contains('<')
         && !name.contains('(')
-        && name.chars().next().map_or(false, |c| c == '_' || c.is_ascii_alphabetic())
-        && name.chars().all(|ch| ch == '_' || ch == '?' || ch == '!' || ch.is_ascii_alphanumeric())
+        && name
+            .chars()
+            .next()
+            .map_or(false, |c| c == '_' || c.is_ascii_alphabetic())
+        && name
+            .chars()
+            .all(|ch| ch == '_' || ch == '?' || ch == '!' || ch.is_ascii_alphanumeric())
+}
+
+fn is_keyword(name: &str) -> bool {
+    matches!(
+        name,
+        "private"
+            | "public"
+            | "protected"
+            | "internal"
+            | "var"
+            | "val"
+            | "let"
+            | "const"
+            | "static"
+            | "final"
+            | "class"
+            | "interface"
+            | "fun"
+            | "function"
+            | "def"
+            | "void"
+    )
 }

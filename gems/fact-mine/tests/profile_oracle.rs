@@ -31,7 +31,10 @@ fn ruby_calculator_extracts_methods() -> Result<()> {
         .with_context(|| "missing 'add' method")?;
     assert_eq!(add_method.owner, "Calculator");
     assert_eq!(add_method.kind, "instance");
-    assert!(!add_method.signature.is_empty() || true, "signature optional without Sorbet sigs");
+    assert!(
+        !add_method.signature.is_empty() || true,
+        "signature optional without Sorbet sigs"
+    );
 
     let result_method = output
         .methods
@@ -58,31 +61,54 @@ fn profile_merge_combines_two_files() -> Result<()> {
     assert!(!out_greeter.methods.is_empty());
 
     // Inject state_protocols and state_param_origins to test merge logic
-    out_calc.state_protocols.insert("Service\u{0}client".to_string(), vec!["read".to_string()]);
-    out_greeter.state_protocols.insert("Service\u{0}client".to_string(), vec!["write".to_string()]);
+    out_calc
+        .state_protocols
+        .insert("Service\u{0}client".to_string(), vec!["read".to_string()]);
+    out_greeter
+        .state_protocols
+        .insert("Service\u{0}client".to_string(), vec!["write".to_string()]);
 
-    out_calc.state_param_origins.insert("Worker\u{0}run\u{0}param".to_string(), vec!["total".to_string()]);
-    out_greeter.state_param_origins.insert("Worker\u{0}run\u{0}param".to_string(), vec!["other".to_string()]);
+    out_calc.state_param_origins.insert(
+        "Worker\u{0}run\u{0}param".to_string(),
+        vec!["total".to_string()],
+    );
+    out_greeter.state_param_origins.insert(
+        "Worker\u{0}run\u{0}param".to_string(),
+        vec!["other".to_string()],
+    );
 
     // Inject NilKill fields to test nil_kill merge logic
-    out_calc.collection_index_lookups.push(serde_json::json!("lookup1"));
-    out_greeter.collection_index_lookups.push(serde_json::json!("lookup2"));
-    out_calc.hash_record_blockers.push(serde_json::json!("blocker"));
+    out_calc
+        .collection_index_lookups
+        .push(serde_json::json!("lookup1"));
+    out_greeter
+        .collection_index_lookups
+        .push(serde_json::json!("lookup2"));
+    out_calc
+        .hash_record_blockers
+        .push(serde_json::json!("blocker"));
     out_calc.tlet_sites.push(serde_json::json!("tlet"));
     out_calc.dead_nil_checks.push(serde_json::json!("dead"));
-    out_calc.deterministic_guards.push(serde_json::json!("guard"));
+    out_calc
+        .deterministic_guards
+        .push(serde_json::json!("guard"));
     out_calc.return_origins.push(serde_json::json!("origin"));
-    out_calc.noreturn_methods.push(serde_json::json!("noreturn"));
+    out_calc
+        .noreturn_methods
+        .push(serde_json::json!("noreturn"));
 
     let merged = profile::merge(vec![out_calc, out_greeter], Profile::NilKill);
     assert!(merged.methods.len() > 1, "merge should combine methods");
-    
+
     // Assert on merged state_protocols and state_param_origins
     let proto = merged.state_protocols.get("Service\u{0}client").unwrap();
     assert!(proto.contains(&"read".to_string()));
     assert!(proto.contains(&"write".to_string()));
 
-    let origins = merged.state_param_origins.get("Worker\u{0}run\u{0}param").unwrap();
+    let origins = merged
+        .state_param_origins
+        .get("Worker\u{0}run\u{0}param")
+        .unwrap();
     assert!(origins.contains(&"total".to_string()));
     assert!(origins.contains(&"other".to_string()));
 
@@ -118,15 +144,16 @@ fn nil_kill_profile_produces_same_core_structure() -> Result<()> {
 fn state_writes_without_declarations_extract_as_fields() -> Result<()> {
     use std::io::Write;
     let mut tmp = tempfile::NamedTempFile::new()?;
-    tmp.write_all(
-        b"class Worker\n  def run\n    @total = 0\n    @total += 1\n  end\nend\n",
-    )?;
+    tmp.write_all(b"class Worker\n  def run\n    @total = 0\n    @total += 1\n  end\nend\n")?;
     let path = tmp.path().to_path_buf();
 
     let document = syntax::parse_file(path, Language::Ruby)?;
     let output = profile::extract(&document, Profile::Espalier);
 
-    assert!(!output.fields.is_empty(), "state_writes should produce fields");
+    assert!(
+        !output.fields.is_empty(),
+        "state_writes should produce fields"
+    );
     let total = output
         .fields
         .iter()
@@ -176,10 +203,7 @@ fn profile_oracle_matches_ruby_output() -> Result<()> {
         if !fixture.is_file() {
             continue;
         }
-        let ext = fixture
-            .extension()
-            .and_then(|e| e.to_str())
-            .unwrap_or("");
+        let ext = fixture.extension().and_then(|e| e.to_str()).unwrap_or("");
         if ext == "json" {
             continue;
         }
@@ -201,8 +225,7 @@ fn profile_oracle_matches_ruby_output() -> Result<()> {
         let actual = profile::extract(&document, Profile::Espalier);
         let actual_json = serde_json::to_value(&actual)?;
 
-        let expected: Value =
-            serde_json::from_str(&fs::read_to_string(&oracle_path)?)?;
+        let expected: Value = serde_json::from_str(&fs::read_to_string(&oracle_path)?)?;
 
         let normalized = normalize_for_oracle(&actual_json, &expected);
         let expected_normalized = normalize_for_oracle(&expected, &expected);
@@ -235,8 +258,7 @@ fn normalize_for_oracle(value: &Value, expected: &Value) -> Value {
                     if key == "path" || key == "id" {
                         if let Value::String(path) = &normalized {
                             if let Some(idx) = path.find("examples/profile/") {
-                                normalized =
-                                    Value::String(path[idx..].to_string());
+                                normalized = Value::String(path[idx..].to_string());
                             }
                         }
                     }
@@ -251,12 +273,7 @@ fn normalize_for_oracle(value: &Value, expected: &Value) -> Value {
             }
             let mut normalized: Vec<Value> = actual_arr
                 .iter()
-                .map(|item| {
-                    normalize_for_oracle(
-                        item,
-                        expected_arr.first().unwrap_or(item),
-                    )
-                })
+                .map(|item| normalize_for_oracle(item, expected_arr.first().unwrap_or(item)))
                 .collect();
             // Sort for determinism
             normalized.sort_by(|a, b| {

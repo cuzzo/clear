@@ -61,17 +61,17 @@
       {
         "child_fingerprints": [
           "assignment(id)",
-          "block(call(id id) body(call(lit id argument_list(id))))",
+          "block(call(id id) body(parameters(id) call(lit id argument_list(id))))",
           "id"
         ],
         "child_masses": [
           1,
-          8,
+          10,
           1
         ],
-        "fingerprint": "body_statement(assignment(id) block(call(id id) body(call(lit id argument_list(id)))) id)",
+        "fingerprint": "body_statement(assignment(id) block(call(id id) body(parameters(id) call(lit id argument_list(id)))) id)",
         "line": 5,
-        "mass": 11,
+        "mass": 13,
         "method_name": "append_all",
         "node_name": "body_statement"
       },
@@ -82,9 +82,9 @@
         "child_masses": [
           2
         ],
-        "fingerprint": "block(call(id id) body(call(lit id argument_list(id))))",
+        "fingerprint": "block(call(id id) body(parameters(id) call(lit id argument_list(id))))",
         "line": 6,
-        "mass": 8,
+        "mass": 10,
         "method_name": "append_all",
         "node_name": "block"
       },
@@ -132,9 +132,9 @@
       {
         "child_fingerprints": [],
         "child_masses": [],
-        "fingerprint": "method(id body(parameters(id) body_statement(assignment(id) block(call(id id) body(call(lit id argument_list(id)))) id)))",
+        "fingerprint": "method(id body(parameters(id) body_statement(assignment(id) block(call(id id) body(parameters(id) call(lit id argument_list(id)))) id)))",
         "line": 4,
-        "mass": 15,
+        "mass": 17,
         "method_name": "append_all",
         "node_name": "defn"
       }

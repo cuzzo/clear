@@ -50,7 +50,11 @@ impl AstNormalizationAdapter for CppAstAdapter {
                 let mut stack = vec![decl];
                 while !stack.is_empty() {
                     let child = stack.remove(0);
-                    if child.kind() == "identifier" || child.kind() == "field_identifier" || child.kind() == "qualified_identifier" || child.kind() == "destructor_name" {
+                    if child.kind() == "identifier"
+                        || child.kind() == "field_identifier"
+                        || child.kind() == "qualified_identifier"
+                        || child.kind() == "destructor_name"
+                    {
                         return Some(super::super::node_text(child, source).to_string());
                     }
                     stack.extend(named_children(child));

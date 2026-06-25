@@ -10,6 +10,9 @@ require "pathname"
 require "set"
 require "shellwords"
 require "time"
+require "sorbet-runtime"
+require "boobytrap"
+require "boobytrap/coverage_providers"
 
 module NilKill
   ROOT = File.expand_path("../../..", __dir__)
@@ -22,7 +25,11 @@ module NilKill
   SORBET_PAYLOAD_DIR = File.join(TMP_DIR, "sorbet-payload")
 end
 
-require_relative "nil_kill/syntax"
+require_relative "nil_kill/tree_sitter_adapter"
+module NilKill
+  Syntax = TreeSitterAdapter
+end
+
 require_relative "nil_kill/util"
 require_relative "nil_kill/alias_recommendations"
 require_relative "nil_kill/schema/runtime_type"
@@ -39,17 +46,17 @@ require_relative "nil_kill/hash_shape_ops"
 require_relative "nil_kill/rbi_return_index"
 require_relative "nil_kill/store"
 require_relative "nil_kill/static_evidence"
+require_relative "nil_kill/source_index"
 require_relative "nil_kill/alias_recommendations"
 require_relative "nil_kill/fact_mine_static_facts"
 require_relative "nil_kill/inference/providers"
 require_relative "nil_kill/static_analysis"
-require_relative "nil_kill/fallibility_pressure"
+require_relative "nil_kill/detector/fallibility_pressure"
 require_relative "nil_kill/flow_graph"
-require_relative "nil_kill/hidden_enum_pressure"
+require_relative "nil_kill/detector/hidden_enum_pressure"
 require_relative "nil_kill/trace_plan"
 require_relative "nil_kill/infer"
 require_relative "nil_kill/slot_coverage"
-require_relative "nil_kill/espalier_evidence"
 require_relative "nil_kill/static_diff_audit"
 require_relative "nil_kill/source_instrumenter"
 require_relative "nil_kill/focus_hash_record"

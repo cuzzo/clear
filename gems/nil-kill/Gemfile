@@ -7,3 +7,4 @@ gem "espalier", path: "../espalier", require: false
 gem "fact-mine", path: "../fact-mine", require: false
 
 gemspec
+gem "boobytrap", path: "../boobytrap", require: false

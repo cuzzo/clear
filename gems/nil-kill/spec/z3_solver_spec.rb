@@ -1,7 +1,7 @@
 # frozen_string_literal: true
 
 require_relative "spec_helper"
-require_relative "../lib/nil_kill/z3_solver"
+require_relative "../lib/nil_kill/inference/z3_solver"
 
 RSpec.describe NilKill::Z3Solver do
   def solver_for(source)
@@ -138,5 +138,134 @@ RSpec.describe NilKill::Z3Solver do
     }
 
     expect(solver.preflight_rejection(action)).to eq("container candidate conflicts with receiver protocol use")
+  end
+
+  describe "#consistent?" do
+    it "returns true if the proposed return type matches the param type constraint, and false otherwise" do
+      Dir.mktmpdir("nil-kill-z3", File.join(NilKill::ROOT, "tmp")) do |dir|
+        path = File.join(dir, "sample.rb")
+        File.write(path, <<~RUBY)
+          class Example
+            def run_caller
+              callee(inferred_method)
+            end
+          end
+        RUBY
+        rel = Pathname.new(path).relative_path_from(Pathname.new(NilKill::ROOT)).to_s
+
+        evidence = {
+          "facts" => {
+            "existing_sigs" => [
+              {
+                "path" => rel,
+                "line" => 10,
+                "method" => "callee",
+                "sig" => "sig { params(x: Numeric).void }"
+              },
+              {
+                "path" => rel,
+                "line" => 2,
+                "method" => "inferred_method",
+                "sig" => "sig { returns(T.untyped) }"
+              }
+            ]
+          }
+        }
+
+        solver = described_class.new(evidence, [path])
+
+        action_consistent = {
+          "kind" => "fix_sig_return",
+          "path" => rel,
+          "line" => 2,
+          "data" => { "type" => "Float" }
+        }
+        expect(solver.consistent?([action_consistent])).to eq(true)
+
+        action_inconsistent = {
+          "kind" => "fix_sig_return",
+          "path" => rel,
+          "line" => 2,
+          "data" => { "type" => "String" }
+        }
+        expect(solver.consistent?([action_inconsistent])).to eq(false)
+      end
+    end
+  end
+
+  describe "#infer_unobserved_params" do
+    it "infers param types for unobserved methods from static call sites" do
+      Dir.mktmpdir("nil-kill-z3", File.join(NilKill::ROOT, "tmp")) do |dir|
+        path = File.join(dir, "sample.rb")
+        File.write(path, <<~RUBY)
+          class Example
+            def run_caller
+              unobserved_method("hello", 42)
+            end
+          end
+        RUBY
+        rel = Pathname.new(path).relative_path_from(Pathname.new(NilKill::ROOT)).to_s
+
+        evidence = {
+          "facts" => {
+            "existing_sigs" => []
+          },
+          "methods" => [
+            {
+              "calls" => 0,
+              "has_sig" => false,
+              "source" => {
+                "path" => rel,
+                "line" => 10,
+                "method" => "unobserved_method",
+                "scope" => ["Example"],
+                "params" => [
+                  { "name" => "a" },
+                  { "name" => "b" }
+                ]
+              }
+            }
+          ]
+        }
+
+        solver = described_class.new(evidence, [path])
+        actions = solver.infer_unobserved_params(evidence)
+
+        expect(actions).to include(a_hash_including(
+          "kind" => "add_sig",
+          "path" => rel,
+          "line" => 10,
+          "data" => a_hash_including(
+            "sig" => "sig { params(a: String, b: Integer).returns(T.untyped) }"
+          )
+        ))
+      end
+    end
+  end
+
+  describe "#provably_dead_safe_nav?" do
+    it "returns true if receiver is provably dead/non-nil, and false if receiver is assigned nil" do
+      Dir.mktmpdir("nil-kill-z3", File.join(NilKill::ROOT, "tmp")) do |dir|
+        path = File.join(dir, "sample.rb")
+        File.write(path, <<~RUBY)
+          def my_method(x)
+            val = nil
+            val.nil?
+          end
+        RUBY
+        rel = Pathname.new(path).relative_path_from(Pathname.new(NilKill::ROOT)).to_s
+
+        evidence = { "facts" => { "existing_sigs" => [] } }
+        solver = described_class.new(evidence, [path])
+
+        action_nil = {
+          "kind" => "replace_dead_nil_check",
+          "path" => rel,
+          "line" => 3,
+          "data" => { "code" => "val.nil?" }
+        }
+        expect(solver.provably_dead_safe_nav?(action_nil)).to eq(false)
+      end
+    end
   end
 end

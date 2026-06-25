@@ -860,16 +860,16 @@
       },
       {
         "child_fingerprints": [
-          "assignment(id block(call(id call(id block(call(id call<Array>(id argument_list(id))) body(body_statement(assignment(id call<repo_relative>(id argument_list(id id))) assignment(id call<expand_path>(id id argument_list(id id))) unless(call<file?>(id id argument_list(id))) block(call(id call<classify_file>(id id argument_list(id id hash(lit id) hash(lit id) hash(lit id)))) body(call<overlay_arm>(id argument_list(id id))))))))) body(argument_list(call<[]>(lit id argument_list(lit)) call(id call<[]>(lit id argument_list(lit))) call(id call<[]>(lit id argument_list(lit))) call(id call<[]>(lit id argument_list(lit)))))))",
+          "assignment(id block(call(id call(id block(call(id call<Array>(id argument_list(id))) body(parameters(id) body_statement(assignment(id call<repo_relative>(id argument_list(id id))) assignment(id call<expand_path>(id id argument_list(id id))) unless(call<file?>(id id argument_list(id))) block(call(id call<classify_file>(id id argument_list(id id hash(lit id) hash(lit id) hash(lit id)))) body(parameters(id) call<overlay_arm>(id argument_list(id id))))))))) body(parameters(id) argument_list(call<[]>(lit id argument_list(lit)) call(id call<[]>(lit id argument_list(lit))) call(id call<[]>(lit id argument_list(lit))) call(id call<[]>(lit id argument_list(lit)))))))",
           "id"
         ],
         "child_masses": [
-          69,
+          75,
           1
         ],
-        "fingerprint": "body_statement(assignment(id block(call(id call(id block(call(id call<Array>(id argument_list(id))) body(body_statement(assignment(id call<repo_relative>(id argument_list(id id))) assignment(id call<expand_path>(id id argument_list(id id))) unless(call<file?>(id id argument_list(id))) block(call(id call<classify_file>(id id argument_list(id id hash(lit id) hash(lit id) hash(lit id)))) body(call<overlay_arm>(id argument_list(id id))))))))) body(argument_list(call<[]>(lit id argument_list(lit)) call(id call<[]>(lit id argument_list(lit))) call(id call<[]>(lit id argument_list(lit))) call(id call<[]>(lit id argument_list(lit))))))) id)",
+        "fingerprint": "body_statement(assignment(id block(call(id call(id block(call(id call<Array>(id argument_list(id))) body(parameters(id) body_statement(assignment(id call<repo_relative>(id argument_list(id id))) assignment(id call<expand_path>(id id argument_list(id id))) unless(call<file?>(id id argument_list(id))) block(call(id call<classify_file>(id id argument_list(id id hash(lit id) hash(lit id) hash(lit id)))) body(parameters(id) call<overlay_arm>(id argument_list(id id))))))))) body(parameters(id) argument_list(call<[]>(lit id argument_list(lit)) call(id call<[]>(lit id argument_list(lit))) call(id call<[]>(lit id argument_list(lit))) call(id call<[]>(lit id argument_list(lit))))))) id)",
         "line": 23,
-        "mass": 71,
+        "mass": 77,
         "method_name": "chained_multiline",
         "node_name": "body_statement"
       },
@@ -878,30 +878,30 @@
           "assignment(id call<repo_relative>(id argument_list(id id)))",
           "assignment(id call<expand_path>(id id argument_list(id id)))",
           "unless(call<file?>(id id argument_list(id)))",
-          "block(call(id call<classify_file>(id id argument_list(id id hash(lit id) hash(lit id) hash(lit id)))) body(call<overlay_arm>(id argument_list(id id))))"
+          "block(call(id call<classify_file>(id id argument_list(id id hash(lit id) hash(lit id) hash(lit id)))) body(parameters(id) call<overlay_arm>(id argument_list(id id))))"
         ],
         "child_masses": [
           5,
           6,
           5,
-          21
+          23
         ],
-        "fingerprint": "body_statement(assignment(id call<repo_relative>(id argument_list(id id))) assignment(id call<expand_path>(id id argument_list(id id))) unless(call<file?>(id id argument_list(id))) block(call(id call<classify_file>(id id argument_list(id id hash(lit id) hash(lit id) hash(lit id)))) body(call<overlay_arm>(id argument_list(id id)))))",
+        "fingerprint": "body_statement(assignment(id call<repo_relative>(id argument_list(id id))) assignment(id call<expand_path>(id id argument_list(id id))) unless(call<file?>(id id argument_list(id))) block(call(id call<classify_file>(id id argument_list(id id hash(lit id) hash(lit id) hash(lit id)))) body(parameters(id) call<overlay_arm>(id argument_list(id id)))))",
         "line": 24,
-        "mass": 38,
+        "mass": 40,
         "method_name": "chained_multiline",
         "node_name": "body_statement"
       },
       {
         "child_fingerprints": [
-          "block(call(id call<Array>(id argument_list(id))) body(body_statement(assignment(id call<repo_relative>(id argument_list(id id))) assignment(id call<expand_path>(id id argument_list(id id))) unless(call<file?>(id id argument_list(id))) block(call(id call<classify_file>(id id argument_list(id id hash(lit id) hash(lit id) hash(lit id)))) body(call<overlay_arm>(id argument_list(id id)))))))"
+          "block(call(id call<Array>(id argument_list(id))) body(parameters(id) body_statement(assignment(id call<repo_relative>(id argument_list(id id))) assignment(id call<expand_path>(id id argument_list(id id))) unless(call<file?>(id id argument_list(id))) block(call(id call<classify_file>(id id argument_list(id id hash(lit id) hash(lit id) hash(lit id)))) body(parameters(id) call<overlay_arm>(id argument_list(id id)))))))"
         ],
         "child_masses": [
-          44
+          48
         ],
-        "fingerprint": "call(id block(call(id call<Array>(id argument_list(id))) body(body_statement(assignment(id call<repo_relative>(id argument_list(id id))) assignment(id call<expand_path>(id id argument_list(id id))) unless(call<file?>(id id argument_list(id))) block(call(id call<classify_file>(id id argument_list(id id hash(lit id) hash(lit id) hash(lit id)))) body(call<overlay_arm>(id argument_list(id id))))))))",
+        "fingerprint": "call(id block(call(id call<Array>(id argument_list(id))) body(parameters(id) body_statement(assignment(id call<repo_relative>(id argument_list(id id))) assignment(id call<expand_path>(id id argument_list(id id))) unless(call<file?>(id id argument_list(id))) block(call(id call<classify_file>(id id argument_list(id id hash(lit id) hash(lit id) hash(lit id)))) body(parameters(id) call<overlay_arm>(id argument_list(id id))))))))",
         "line": 23,
-        "mass": 45,
+        "mass": 49,
         "method_name": "chained_multiline",
         "node_name": "call"
       },
@@ -946,27 +946,27 @@
       },
       {
         "child_fingerprints": [
-          "call(id block(call(id call<Array>(id argument_list(id))) body(body_statement(assignment(id call<repo_relative>(id argument_list(id id))) assignment(id call<expand_path>(id id argument_list(id id))) unless(call<file?>(id id argument_list(id))) block(call(id call<classify_file>(id id argument_list(id id hash(lit id) hash(lit id) hash(lit id)))) body(call<overlay_arm>(id argument_list(id id))))))))"
+          "call(id block(call(id call<Array>(id argument_list(id))) body(parameters(id) body_statement(assignment(id call<repo_relative>(id argument_list(id id))) assignment(id call<expand_path>(id id argument_list(id id))) unless(call<file?>(id id argument_list(id))) block(call(id call<classify_file>(id id argument_list(id id hash(lit id) hash(lit id) hash(lit id)))) body(parameters(id) call<overlay_arm>(id argument_list(id id))))))))"
         ],
         "child_masses": [
-          45
+          49
         ],
-        "fingerprint": "call(id call(id block(call(id call<Array>(id argument_list(id))) body(body_statement(assignment(id call<repo_relative>(id argument_list(id id))) assignment(id call<expand_path>(id id argument_list(id id))) unless(call<file?>(id id argument_list(id))) block(call(id call<classify_file>(id id argument_list(id id hash(lit id) hash(lit id) hash(lit id)))) body(call<overlay_arm>(id argument_list(id id)))))))))",
+        "fingerprint": "call(id call(id block(call(id call<Array>(id argument_list(id))) body(parameters(id) body_statement(assignment(id call<repo_relative>(id argument_list(id id))) assignment(id call<expand_path>(id id argument_list(id id))) unless(call<file?>(id id argument_list(id))) block(call(id call<classify_file>(id id argument_list(id id hash(lit id) hash(lit id) hash(lit id)))) body(parameters(id) call<overlay_arm>(id argument_list(id id)))))))))",
         "line": 23,
-        "mass": 46,
+        "mass": 50,
         "method_name": "chained_multiline",
         "node_name": "call"
       },
       {
         "child_fingerprints": [
-          "call(id call(id block(call(id call<Array>(id argument_list(id))) body(body_statement(assignment(id call<repo_relative>(id argument_list(id id))) assignment(id call<expand_path>(id id argument_list(id id))) unless(call<file?>(id id argument_list(id))) block(call(id call<classify_file>(id id argument_list(id id hash(lit id) hash(lit id) hash(lit id)))) body(call<overlay_arm>(id argument_list(id id)))))))))"
+          "call(id call(id block(call(id call<Array>(id argument_list(id))) body(parameters(id) body_statement(assignment(id call<repo_relative>(id argument_list(id id))) assignment(id call<expand_path>(id id argument_list(id id))) unless(call<file?>(id id argument_list(id))) block(call(id call<classify_file>(id id argument_list(id id hash(lit id) hash(lit id) hash(lit id)))) body(parameters(id) call<overlay_arm>(id argument_list(id id)))))))))"
         ],
         "child_masses": [
-          46
+          50
         ],
-        "fingerprint": "block(call(id call(id block(call(id call<Array>(id argument_list(id))) body(body_statement(assignment(id call<repo_relative>(id argument_list(id id))) assignment(id call<expand_path>(id id argument_list(id id))) unless(call<file?>(id id argument_list(id))) block(call(id call<classify_file>(id id argument_list(id id hash(lit id) hash(lit id) hash(lit id)))) body(call<overlay_arm>(id argument_list(id id))))))))) body(argument_list(call<[]>(lit id argument_list(lit)) call(id call<[]>(lit id argument_list(lit))) call(id call<[]>(lit id argument_list(lit))) call(id call<[]>(lit id argument_list(lit))))))",
+        "fingerprint": "block(call(id call(id block(call(id call<Array>(id argument_list(id))) body(parameters(id) body_statement(assignment(id call<repo_relative>(id argument_list(id id))) assignment(id call<expand_path>(id id argument_list(id id))) unless(call<file?>(id id argument_list(id))) block(call(id call<classify_file>(id id argument_list(id id hash(lit id) hash(lit id) hash(lit id)))) body(parameters(id) call<overlay_arm>(id argument_list(id id))))))))) body(parameters(id) argument_list(call<[]>(lit id argument_list(lit)) call(id call<[]>(lit id argument_list(lit))) call(id call<[]>(lit id argument_list(lit))) call(id call<[]>(lit id argument_list(lit))))))",
         "line": 23,
-        "mass": 68,
+        "mass": 74,
         "method_name": "chained_multiline",
         "node_name": "block"
       },
@@ -977,9 +977,9 @@
         "child_masses": [
           4
         ],
-        "fingerprint": "block(call(id call<Array>(id argument_list(id))) body(body_statement(assignment(id call<repo_relative>(id argument_list(id id))) assignment(id call<expand_path>(id id argument_list(id id))) unless(call<file?>(id id argument_list(id))) block(call(id call<classify_file>(id id argument_list(id id hash(lit id) hash(lit id) hash(lit id)))) body(call<overlay_arm>(id argument_list(id id)))))))",
+        "fingerprint": "block(call(id call<Array>(id argument_list(id))) body(parameters(id) body_statement(assignment(id call<repo_relative>(id argument_list(id id))) assignment(id call<expand_path>(id id argument_list(id id))) unless(call<file?>(id id argument_list(id))) block(call(id call<classify_file>(id id argument_list(id id hash(lit id) hash(lit id) hash(lit id)))) body(parameters(id) call<overlay_arm>(id argument_list(id id)))))))",
         "line": 23,
-        "mass": 44,
+        "mass": 48,
         "method_name": "chained_multiline",
         "node_name": "block"
       },
@@ -990,9 +990,9 @@
         "child_masses": [
           15
         ],
-        "fingerprint": "block(call(id call<classify_file>(id id argument_list(id id hash(lit id) hash(lit id) hash(lit id)))) body(call<overlay_arm>(id argument_list(id id))))",
+        "fingerprint": "block(call(id call<classify_file>(id id argument_list(id id hash(lit id) hash(lit id) hash(lit id)))) body(parameters(id) call<overlay_arm>(id argument_list(id id))))",
         "line": 28,
-        "mass": 21,
+        "mass": 23,
         "method_name": "chained_multiline",
         "node_name": "block"
       },
@@ -1797,17 +1797,17 @@
           "method(id body(parameters(id) call<assert_equal>(id argument_list(lit call<dig>(id id argument_list(lit lit lit lit lit))))))",
           "method(id body(parameters(id id id id id) block(call<with_env>(id argument_list(lit lit)) body(body_statement(call<assert_empty>(id argument_list(call<classify_file>(id id argument_list(id id hash(lit id))))) call<assert_nil>(id argument_list(call<lookup>(id colon2(id id) argument_list(id id lit lit)))))))))",
           "method(id body(parameters(id id id) body_statement(call<map>(id id argument_list(block_pass(lit))) call<map>(id call<classify_file>(id id argument_list(call(id id) call(id id))) argument_list(block_pass(lit))) call<map>(id call<classify_file>(id id argument_list(call(id id) call(id id) hash(lit argument_list(lit)))) argument_list(block_pass(lit))))))",
-          "method(id body(parameters(id id id id id) body_statement(assignment(id block(call(id call(id block(call(id call<Array>(id argument_list(id))) body(body_statement(assignment(id call<repo_relative>(id argument_list(id id))) assignment(id call<expand_path>(id id argument_list(id id))) unless(call<file?>(id id argument_list(id))) block(call(id call<classify_file>(id id argument_list(id id hash(lit id) hash(lit id) hash(lit id)))) body(call<overlay_arm>(id argument_list(id id))))))))) body(argument_list(call<[]>(lit id argument_list(lit)) call(id call<[]>(lit id argument_list(lit))) call(id call<[]>(lit id argument_list(lit))) call(id call<[]>(lit id argument_list(lit))))))) id)))"
+          "method(id body(parameters(id id id id id) body_statement(assignment(id block(call(id call(id block(call(id call<Array>(id argument_list(id))) body(parameters(id) body_statement(assignment(id call<repo_relative>(id argument_list(id id))) assignment(id call<expand_path>(id id argument_list(id id))) unless(call<file?>(id id argument_list(id))) block(call(id call<classify_file>(id id argument_list(id id hash(lit id) hash(lit id) hash(lit id)))) body(parameters(id) call<overlay_arm>(id argument_list(id id))))))))) body(parameters(id) argument_list(call<[]>(lit id argument_list(lit)) call(id call<[]>(lit id argument_list(lit))) call(id call<[]>(lit id argument_list(lit))) call(id call<[]>(lit id argument_list(lit))))))) id)))"
         ],
         "child_masses": [
           15,
           35,
           38,
-          79
+          85
         ],
-        "fingerprint": "body_statement(method(id body(parameters(id) call<assert_equal>(id argument_list(lit call<dig>(id id argument_list(lit lit lit lit lit)))))) method(id body(parameters(id id id id id) block(call<with_env>(id argument_list(lit lit)) body(body_statement(call<assert_empty>(id argument_list(call<classify_file>(id id argument_list(id id hash(lit id))))) call<assert_nil>(id argument_list(call<lookup>(id colon2(id id) argument_list(id id lit lit))))))))) method(id body(parameters(id id id) body_statement(call<map>(id id argument_list(block_pass(lit))) call<map>(id call<classify_file>(id id argument_list(call(id id) call(id id))) argument_list(block_pass(lit))) call<map>(id call<classify_file>(id id argument_list(call(id id) call(id id) hash(lit argument_list(lit)))) argument_list(block_pass(lit)))))) method(id body(parameters(id id id id id) body_statement(assignment(id block(call(id call(id block(call(id call<Array>(id argument_list(id))) body(body_statement(assignment(id call<repo_relative>(id argument_list(id id))) assignment(id call<expand_path>(id id argument_list(id id))) unless(call<file?>(id id argument_list(id))) block(call(id call<classify_file>(id id argument_list(id id hash(lit id) hash(lit id) hash(lit id)))) body(call<overlay_arm>(id argument_list(id id))))))))) body(argument_list(call<[]>(lit id argument_list(lit)) call(id call<[]>(lit id argument_list(lit))) call(id call<[]>(lit id argument_list(lit))) call(id call<[]>(lit id argument_list(lit))))))) id))))",
+        "fingerprint": "body_statement(method(id body(parameters(id) call<assert_equal>(id argument_list(lit call<dig>(id id argument_list(lit lit lit lit lit)))))) method(id body(parameters(id id id id id) block(call<with_env>(id argument_list(lit lit)) body(body_statement(call<assert_empty>(id argument_list(call<classify_file>(id id argument_list(id id hash(lit id))))) call<assert_nil>(id argument_list(call<lookup>(id colon2(id id) argument_list(id id lit lit))))))))) method(id body(parameters(id id id) body_statement(call<map>(id id argument_list(block_pass(lit))) call<map>(id call<classify_file>(id id argument_list(call(id id) call(id id))) argument_list(block_pass(lit))) call<map>(id call<classify_file>(id id argument_list(call(id id) call(id id) hash(lit argument_list(lit)))) argument_list(block_pass(lit)))))) method(id body(parameters(id id id id id) body_statement(assignment(id block(call(id call(id block(call(id call<Array>(id argument_list(id))) body(parameters(id) body_statement(assignment(id call<repo_relative>(id argument_list(id id))) assignment(id call<expand_path>(id id argument_list(id id))) unless(call<file?>(id id argument_list(id))) block(call(id call<classify_file>(id id argument_list(id id hash(lit id) hash(lit id) hash(lit id)))) body(parameters(id) call<overlay_arm>(id argument_list(id id))))))))) body(parameters(id) argument_list(call<[]>(lit id argument_list(lit)) call(id call<[]>(lit id argument_list(lit))) call(id call<[]>(lit id argument_list(lit))) call(id call<[]>(lit id argument_list(lit))))))) id))))",
         "line": 4,
-        "mass": 168,
+        "mass": 174,
         "method_name": "(top-level)",
         "node_name": "body_statement"
       },
@@ -1823,9 +1823,9 @@
       {
         "child_fingerprints": [],
         "child_masses": [],
-        "fingerprint": "method(id body(parameters(id id id id id) body_statement(assignment(id block(call(id call(id block(call(id call<Array>(id argument_list(id))) body(body_statement(assignment(id call<repo_relative>(id argument_list(id id))) assignment(id call<expand_path>(id id argument_list(id id))) unless(call<file?>(id id argument_list(id))) block(call(id call<classify_file>(id id argument_list(id id hash(lit id) hash(lit id) hash(lit id)))) body(call<overlay_arm>(id argument_list(id id))))))))) body(argument_list(call<[]>(lit id argument_list(lit)) call(id call<[]>(lit id argument_list(lit))) call(id call<[]>(lit id argument_list(lit))) call(id call<[]>(lit id argument_list(lit))))))) id)))",
+        "fingerprint": "method(id body(parameters(id id id id id) body_statement(assignment(id block(call(id call(id block(call(id call<Array>(id argument_list(id))) body(parameters(id) body_statement(assignment(id call<repo_relative>(id argument_list(id id))) assignment(id call<expand_path>(id id argument_list(id id))) unless(call<file?>(id id argument_list(id))) block(call(id call<classify_file>(id id argument_list(id id hash(lit id) hash(lit id) hash(lit id)))) body(parameters(id) call<overlay_arm>(id argument_list(id id))))))))) body(parameters(id) argument_list(call<[]>(lit id argument_list(lit)) call(id call<[]>(lit id argument_list(lit))) call(id call<[]>(lit id argument_list(lit))) call(id call<[]>(lit id argument_list(lit))))))) id)))",
         "line": 22,
-        "mass": 79,
+        "mass": 85,
         "method_name": "chained_multiline",
         "node_name": "defn"
       },

@@ -39,6 +39,22 @@ const PYTHON_BODY_FIELD_KINDS: &[&str] = &[
 pub(crate) struct PythonAstAdapter;
 
 impl AstNormalizationAdapter for PythonAstAdapter {
+    fn state_field_name(&self, node: TreeSitterNode<'_>, source: &str) -> Option<String> {
+        if node.kind() != "attribute" {
+            return None;
+        }
+        let named = named_children(node);
+        if named.len() < 2 {
+            return None;
+        }
+        let receiver = node_text(named[0], source);
+        if receiver != "self" {
+            return None;
+        }
+        let field = node_text(named[1], source);
+        (!field.is_empty()).then_some(format!("@{field}"))
+    }
+
     fn yield_statement(&self, node: TreeSitterNode<'_>, source: &str) -> bool {
         if !matches!(
             node.kind(),
@@ -153,6 +169,7 @@ impl AstNormalizationAdapter for PythonAstAdapter {
                     && matches!(
                         statement_children[0].kind(),
                         "assignment"
+                            | "annotated_assignment"
                             | "augmented_assignment"
                             | "binary_operator"
                             | "string"

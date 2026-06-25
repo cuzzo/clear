@@ -174,18 +174,18 @@
         "child_fingerprints": [
           "assignment(id call(id id))",
           "assignment(id)",
-          "block(call(id id) body(if(call(id id) call(lit id argument_list(call(id id))))))",
+          "block(call(id id) body(parameters(id) if(call(id id) call(lit id argument_list(call(id id))))))",
           "if(call(id id) call(id id))"
         ],
         "child_masses": [
           3,
           1,
-          12,
+          14,
           5
         ],
-        "fingerprint": "body_statement(assignment(id call(id id)) assignment(id) block(call(id id) body(if(call(id id) call(lit id argument_list(call(id id)))))) if(call(id id) call(id id)))",
+        "fingerprint": "body_statement(assignment(id call(id id)) assignment(id) block(call(id id) body(parameters(id) if(call(id id) call(lit id argument_list(call(id id)))))) if(call(id id) call(id id)))",
         "line": 5,
-        "mass": 22,
+        "mass": 24,
         "method_name": "process",
         "node_name": "body_statement"
       },
@@ -239,9 +239,9 @@
         "child_masses": [
           2
         ],
-        "fingerprint": "block(call(id id) body(if(call(id id) call(lit id argument_list(call(id id))))))",
+        "fingerprint": "block(call(id id) body(parameters(id) if(call(id id) call(lit id argument_list(call(id id))))))",
         "line": 7,
-        "mass": 12,
+        "mass": 14,
         "method_name": "process",
         "node_name": "block"
       },
@@ -341,9 +341,9 @@
       {
         "child_fingerprints": [],
         "child_masses": [],
-        "fingerprint": "method(id body(parameters(id id) body_statement(assignment(id call(id id)) assignment(id) block(call(id id) body(if(call(id id) call(lit id argument_list(call(id id)))))) if(call(id id) call(id id)))))",
+        "fingerprint": "method(id body(parameters(id id) body_statement(assignment(id call(id id)) assignment(id) block(call(id id) body(parameters(id) if(call(id id) call(lit id argument_list(call(id id)))))) if(call(id id) call(id id)))))",
         "line": 4,
-        "mass": 27,
+        "mass": 29,
         "method_name": "process",
         "node_name": "defn"
       }

@@ -115,6 +115,30 @@ module NilKill
       .sort
   end
 
+  def source_index_target_files
+    extensions = source_index_extensions
+    target_dirs.flat_map do |target|
+      if File.directory?(target)
+        extensions.flat_map { |ext| Dir.glob(File.join(target, "**", "*#{ext}")) }
+      else
+        [target]
+      end
+    end
+      .select { |path| File.file?(path) }
+      .reject { |path| target_excluded?(path) }
+      .select { |path| extensions.include?(File.extname(path).downcase) }
+      .uniq
+      .sort
+  end
+
+  def source_index_extensions
+    if defined?(Languages)
+      Languages::Registry.registered_providers.flat_map(&:extensions).map(&:downcase).uniq.sort
+    else
+      [".rb"]
+    end
+  end
+
   # Every .rb file the usage-detection passes (e.g. `unused_return_methods`)
   # should walk to decide whether a method is actually called. Has to include
   # spec/, tools/, etc., not just `target_dirs`: a method only used by a spec

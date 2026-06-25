@@ -1,5 +1,6 @@
 use crate::decomplex::detectors::local_flow::{self, MethodSummary, Statement};
 use crate::decomplex::syntax::{self, Document, Language, Span};
+use fact_mine_rust::syntax::{Child, Node};
 use anyhow::Result;
 use serde::Serialize;
 use std::collections::{BTreeMap, BTreeSet};
@@ -54,7 +55,7 @@ pub fn scan_summaries(summaries: &[MethodSummary]) -> Vec<DerivedStateRow> {
 }
 
 fn analyze_method(method: &MethodSummary) -> Vec<DerivedStateRow> {
-    analyze(&method.file, &method.name, &assignments(method))
+    analyze(method, &assignments(method))
 }
 
 fn assignments(method: &MethodSummary) -> Vec<Asgn> {
@@ -141,7 +142,34 @@ fn dependencies_for(statement: &Statement, name: &str) -> Vec<String> {
     deps
 }
 
-fn analyze(file: &str, defn: &str, asgns: &[Asgn]) -> Vec<DerivedStateRow> {
+fn span_contains(parent: Span, child: Span) -> bool {
+    let start_ok = parent[0] < child[0] || (parent[0] == child[0] && parent[1] <= child[1]);
+    let end_ok = parent[2] > child[2] || (parent[2] == child[2] && parent[3] >= child[3]);
+    start_ok && end_ok
+}
+
+fn is_local_helper(b: &Asgn, a: &str, asgns: &[Asgn]) -> bool {
+    let mut preceding = asgns
+        .iter()
+        .filter(|x| &x.name == a && x.statement_index <= b.statement_index)
+        .peekable();
+
+    if preceding.peek().is_none() {
+        return false;
+    }
+
+    preceding.all(|x| {
+        if x.statement_index < b.statement_index {
+            false
+        } else {
+            span_contains(b.span, x.span)
+        }
+    })
+}
+
+fn analyze(method: &MethodSummary, asgns: &[Asgn]) -> Vec<DerivedStateRow> {
+    let file = &method.file;
+    let defn = &method.name;
     let mut out = Vec::new();
     for (i, b) in asgns.iter().enumerate() {
         if b.deps.is_empty() {
@@ -150,6 +178,10 @@ fn analyze(file: &str, defn: &str, asgns: &[Asgn]) -> Vec<DerivedStateRow> {
 
         for a in &b.deps {
             if a == &b.name {
+                continue;
+            }
+
+            if is_local_helper(b, a, asgns) {
                 continue;
             }
 
@@ -167,6 +199,42 @@ fn analyze(file: &str, defn: &str, asgns: &[Asgn]) -> Vec<DerivedStateRow> {
                 .any(|x| &x.name == &b.name && x.statement_index >= reasn.statement_index);
             if recomputed {
                 continue;
+            }
+
+            // Is the derived variable b read at or after a's reassignment?
+            let is_read_after_reasn = method.statements.iter().any(|stmt| {
+                stmt.index >= reasn.statement_index && stmt.reads.contains(&b.name)
+            });
+            if !is_read_after_reasn {
+                continue;
+            }
+
+            // Check if b and reasn are in sibling blocks
+            let mut path_b = Vec::new();
+            let mut path_reasn = Vec::new();
+            if find_ancestors(&method.node, b.span, &mut path_b)
+                && find_ancestors(&method.node, reasn.span, &mut path_reasn)
+            {
+                let mut lca_index = 0;
+                while lca_index < path_b.len() && lca_index < path_reasn.len() {
+                    if path_b[lca_index].first_lineno != path_reasn[lca_index].first_lineno
+                        || path_b[lca_index].first_column != path_reasn[lca_index].first_column
+                        || path_b[lca_index].last_lineno != path_reasn[lca_index].last_lineno
+                        || path_b[lca_index].last_column != path_reasn[lca_index].last_column
+                    {
+                        break;
+                    }
+                    lca_index += 1;
+                }
+                let b_has_block = path_b[lca_index..]
+                    .iter()
+                    .any(|node| is_block_introducing(&node.r#type));
+                let reasn_has_block = path_reasn[lca_index..]
+                    .iter()
+                    .any(|node| is_block_introducing(&node.r#type));
+                if b_has_block && reasn_has_block {
+                    continue;
+                }
             }
 
             let loc = format!("{}:{}:{}", file, defn, b.line);
@@ -189,6 +257,35 @@ fn analyze(file: &str, defn: &str, asgns: &[Asgn]) -> Vec<DerivedStateRow> {
     out
 }
 
+fn find_ancestors(node: &Node, target_span: Span, path: &mut Vec<Node>) -> bool {
+    let node_span = [
+        node.first_lineno,
+        node.first_column,
+        node.last_lineno,
+        node.last_column,
+    ];
+    path.push(node.clone());
+    if node_span == target_span {
+        return true;
+    }
+    for child in &node.children {
+        if let Child::Node(child_node) = child {
+            if find_ancestors(child_node, target_span, path) {
+                return true;
+            }
+        }
+    }
+    path.pop();
+    false
+}
+
+fn is_block_introducing(node_type: &str) -> bool {
+    matches!(
+        node_type,
+        "ITER" | "LAMBDA" | "FOR" | "WHILE" | "UNTIL" | "ARROW_FUNCTION" | "FUNCTION_EXPRESSION"
+    )
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -200,7 +297,8 @@ mod tests {
             "id": "1", "owner": "T", "name": "m1", "file": "b.rb", "line": 1, "span": [1,2,3,4],
             "statements": [
                 { "index": 0, "line": 10, "end_line": 10, "span": [1,2,3,4], "source": "b = a", "reads": [], "writes": ["b"], "dependencies": [["b", "a"]], "co_uses": [] },
-                { "index": 1, "line": 14, "end_line": 14, "span": [1,2,3,4], "source": "a = 2", "reads": [], "writes": ["a"], "dependencies": [], "co_uses": [] }
+                { "index": 1, "line": 14, "end_line": 14, "span": [1,2,3,4], "source": "a = 2", "reads": [], "writes": ["a"], "dependencies": [], "co_uses": [] },
+                { "index": 2, "line": 20, "end_line": 20, "span": [1,2,3,4], "source": "use(b)", "reads": ["b"], "writes": [], "dependencies": [], "co_uses": [] }
             ], "boundaries": []
         })).unwrap();
 
@@ -208,7 +306,8 @@ mod tests {
             "id": "2", "owner": "T", "name": "m1", "file": "a.rb", "line": 1, "span": [1,2,3,4],
             "statements": [
                 { "index": 0, "line": 10, "end_line": 10, "span": [1,2,3,4], "source": "b = a", "reads": [], "writes": ["b"], "dependencies": [["b", "a"]], "co_uses": [] },
-                { "index": 1, "line": 14, "end_line": 14, "span": [1,2,3,4], "source": "a = 2", "reads": [], "writes": ["a"], "dependencies": [], "co_uses": [] }
+                { "index": 1, "line": 14, "end_line": 14, "span": [1,2,3,4], "source": "a = 2", "reads": [], "writes": ["a"], "dependencies": [], "co_uses": [] },
+                { "index": 2, "line": 20, "end_line": 20, "span": [1,2,3,4], "source": "use(b)", "reads": ["b"], "writes": [], "dependencies": [], "co_uses": [] }
             ], "boundaries": []
         })).unwrap();
 
@@ -216,7 +315,8 @@ mod tests {
             "id": "3", "owner": "T", "name": "m2", "file": "b.rb", "line": 1, "span": [1,2,3,4],
             "statements": [
                 { "index": 0, "line": 10, "end_line": 10, "span": [1,2,3,4], "source": "b = a", "reads": [], "writes": ["b"], "dependencies": [["b", "a"]], "co_uses": [] },
-                { "index": 1, "line": 15, "end_line": 15, "span": [1,2,3,4], "source": "a = 2", "reads": [], "writes": ["a"], "dependencies": [], "co_uses": [] }
+                { "index": 1, "line": 15, "end_line": 15, "span": [1,2,3,4], "source": "a = 2", "reads": [], "writes": ["a"], "dependencies": [], "co_uses": [] },
+                { "index": 2, "line": 20, "end_line": 20, "span": [1,2,3,4], "source": "use(b)", "reads": ["b"], "writes": [], "dependencies": [], "co_uses": [] }
             ], "boundaries": []
         })).unwrap();
 
@@ -224,7 +324,8 @@ mod tests {
             "id": "4", "owner": "T", "name": "m3", "file": "b.rb", "line": 1, "span": [1,2,3,4],
             "statements": [
                 { "index": 0, "line": 11, "end_line": 11, "span": [1,2,3,4], "source": "b = a", "reads": [], "writes": ["b"], "dependencies": [["b", "a"]], "co_uses": [] },
-                { "index": 1, "line": 15, "end_line": 15, "span": [1,2,3,4], "source": "a = 2", "reads": [], "writes": ["a"], "dependencies": [], "co_uses": [] }
+                { "index": 1, "line": 15, "end_line": 15, "span": [1,2,3,4], "source": "a = 2", "reads": [], "writes": ["a"], "dependencies": [], "co_uses": [] },
+                { "index": 2, "line": 20, "end_line": 20, "span": [1,2,3,4], "source": "use(b)", "reads": ["b"], "writes": [], "dependencies": [], "co_uses": [] }
             ], "boundaries": []
         })).unwrap();
 
@@ -232,7 +333,8 @@ mod tests {
             "id": "5", "owner": "T", "name": "m4", "file": "b.rb", "line": 1, "span": [1,2,3,4],
             "statements": [
                 { "index": 0, "line": 11, "end_line": 11, "span": [1,2,3,4], "source": "c = a", "reads": [], "writes": ["c"], "dependencies": [["c", "a"]], "co_uses": [] },
-                { "index": 1, "line": 15, "end_line": 15, "span": [1,2,3,4], "source": "a = 2", "reads": [], "writes": ["a"], "dependencies": [], "co_uses": [] }
+                { "index": 1, "line": 15, "end_line": 15, "span": [1,2,3,4], "source": "a = 2", "reads": [], "writes": ["a"], "dependencies": [], "co_uses": [] },
+                { "index": 2, "line": 20, "end_line": 20, "span": [1,2,3,4], "source": "use(c)", "reads": ["c"], "writes": [], "dependencies": [], "co_uses": [] }
             ], "boundaries": []
         })).unwrap();
 
@@ -240,7 +342,8 @@ mod tests {
             "id": "6", "owner": "T", "name": "m5", "file": "b.rb", "line": 1, "span": [1,2,3,4],
             "statements": [
                 { "index": 0, "line": 11, "end_line": 11, "span": [1,2,3,4], "source": "b = a; b = c", "reads": [], "writes": ["b"], "dependencies": [["b", "a"], ["b", "c"]], "co_uses": [] },
-                { "index": 1, "line": 15, "end_line": 15, "span": [1,2,3,4], "source": "a = 2; c = 2", "reads": [], "writes": ["a", "c"], "dependencies": [], "co_uses": [] }
+                { "index": 1, "line": 15, "end_line": 15, "span": [1,2,3,4], "source": "a = 2; c = 2", "reads": [], "writes": ["a", "c"], "dependencies": [], "co_uses": [] },
+                { "index": 2, "line": 20, "end_line": 20, "span": [1,2,3,4], "source": "use(b)", "reads": ["b"], "writes": [], "dependencies": [], "co_uses": [] }
             ], "boundaries": []
         })).unwrap();
 
@@ -270,6 +373,129 @@ mod tests {
 
         // res[6] has derived = "c"
         assert_eq!(res[6].derived, "c");
+    }
+
+    #[test]
+    fn test_derived_state_sibling_blocks() {
+        let m_sibling: MethodSummary = serde_json::from_value(json!({
+            "id": "7", "owner": "T", "name": "m_sibling", "file": "b.rb", "line": 1, "span": [1,0,30,0],
+            "node": {
+                "type": "DEFN",
+                "first_lineno": 1, "first_column": 0, "last_lineno": 30, "last_column": 0,
+                "text": "def m_sibling...",
+                "children": [
+                    {
+                        "Node": {
+                            "type": "ITER",
+                            "first_lineno": 5, "first_column": 0, "last_lineno": 15, "last_column": 0,
+                            "text": "declarations.each...",
+                            "children": [
+                                {
+                                    "Node": {
+                                        "type": "LASGN",
+                                        "first_lineno": 10, "first_column": 0, "last_lineno": 10, "last_column": 0,
+                                        "text": "bucket = candidate",
+                                        "children": []
+                                    }
+                                }
+                            ]
+                        }
+                    },
+                    {
+                        "Node": {
+                            "type": "ITER",
+                            "first_lineno": 20, "first_column": 0, "last_lineno": 28, "last_column": 0,
+                            "text": "order.each...",
+                            "children": [
+                                {
+                                    "Node": {
+                                        "type": "LASGN",
+                                        "first_lineno": 25, "first_column": 0, "last_lineno": 25, "last_column": 0,
+                                        "text": "candidate = bucket",
+                                        "children": []
+                                    }
+                                }
+                            ]
+                        }
+                    }
+                ]
+            },
+            "statements": [
+                { "index": 0, "line": 10, "end_line": 10, "span": [10,0,10,0], "source": "bucket = candidate", "reads": [], "writes": ["bucket"], "dependencies": [["bucket", "candidate"]], "co_uses": [] },
+                { "index": 1, "line": 25, "end_line": 25, "span": [25,0,25,0], "source": "candidate = bucket", "reads": [], "writes": ["candidate"], "dependencies": [["candidate", "bucket"]], "co_uses": [] }
+            ], "boundaries": []
+        })).unwrap();
+
+        let res = scan_summaries(&[m_sibling]);
+        // BEFORE FIX: this will be 1 because 'bucket' on line 10 depends on 'candidate', which is reassigned on line 25
+        // AFTER FIX: it must be 0 because they are in sibling ITER blocks
+        assert_eq!(res.len(), 0);
+    }
+
+    #[test]
+    fn test_derived_state_local_helper() {
+        let m_local_helper: MethodSummary = serde_json::from_value(json!({
+            "id": "8", "owner": "T", "name": "m_local_helper", "file": "c.rs", "line": 1, "span": [1,0,30,0],
+            "statements": [
+                {
+                    "index": 0, "line": 5, "end_line": 15, "span": [5,0,15,0],
+                    "source": "let target_commit = { let mut stmt = 1; stmt };",
+                    "reads": [], "writes": ["target_commit", "stmt"],
+                    "dependencies": [["target_commit", "stmt"]], "co_uses": []
+                },
+                {
+                    "index": 1, "line": 20, "end_line": 20, "span": [20,0,20,0],
+                    "source": "let mut stmt = 2;",
+                    "reads": [], "writes": ["stmt"],
+                    "dependencies": [], "co_uses": []
+                },
+                {
+                    "index": 2, "line": 25, "end_line": 25, "span": [25,0,25,0],
+                    "source": "use(target_commit);",
+                    "reads": ["target_commit"], "writes": [],
+                    "dependencies": [], "co_uses": []
+                }
+            ], "boundaries": []
+        })).unwrap();
+
+        let res = scan_summaries(&[m_local_helper]);
+        assert_eq!(res.len(), 0);
+    }
+
+    #[test]
+    fn test_derived_state_non_local_helper() {
+        let m_non_local: MethodSummary = serde_json::from_value(json!({
+            "id": "9", "owner": "T", "name": "m_non_local", "file": "d.rs", "line": 1, "span": [1,0,30,0],
+            "statements": [
+                {
+                    "index": 0, "line": 2, "end_line": 2, "span": [2,0,2,0],
+                    "source": "let mut stmt = 0;",
+                    "reads": [], "writes": ["stmt"],
+                    "dependencies": [], "co_uses": []
+                },
+                {
+                    "index": 1, "line": 5, "end_line": 15, "span": [5,0,15,0],
+                    "source": "let target_commit = { stmt = 1; stmt };",
+                    "reads": [], "writes": ["target_commit", "stmt"],
+                    "dependencies": [["target_commit", "stmt"]], "co_uses": []
+                },
+                {
+                    "index": 2, "line": 20, "end_line": 20, "span": [20,0,20,0],
+                    "source": "let mut stmt = 2;",
+                    "reads": [], "writes": ["stmt"],
+                    "dependencies": [], "co_uses": []
+                },
+                {
+                    "index": 3, "line": 25, "end_line": 25, "span": [25,0,25,0],
+                    "source": "use(target_commit);",
+                    "reads": ["target_commit"], "writes": [],
+                    "dependencies": [], "co_uses": []
+                }
+            ], "boundaries": []
+        })).unwrap();
+
+        let res = scan_summaries(&[m_non_local]);
+        assert_eq!(res.len(), 1);
     }
 }
 

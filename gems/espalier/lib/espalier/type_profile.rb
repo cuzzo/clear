@@ -457,15 +457,15 @@ module FactMine
     module_function
 
     def supported_exts(parser: "tree_sitter")
-      %w[.rb .py .js .ts .go .rs .zig .c .cpp .cs .kt]
+      %w[.rb .py .pyi .js .ts .tsx .go .rs .zig .c .cpp .cs .kt .java .swift .php .lua .h .hpp]
     end
 
     def language_for(file)
       case File.extname(file).downcase
       when ".rb" then "ruby"
-      when ".py" then "python"
+      when ".py", ".pyi" then "python"
       when ".js" then "javascript"
-      when ".ts" then "typescript"
+      when ".ts", ".tsx" then "typescript"
       when ".go" then "go"
       when ".rs" then "rust"
       when ".zig" then "zig"
@@ -473,6 +473,12 @@ module FactMine
       when ".cpp" then "cpp"
       when ".cs" then "csharp"
       when ".kt" then "kotlin"
+      when ".java" then "java"
+      when ".swift" then "swift"
+      when ".php" then "php"
+      when ".lua" then "lua"
+      when ".h" then "c"
+      when ".hpp" then "cpp"
       else "generic"
       end
     end

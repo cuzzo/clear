@@ -96,64 +96,12 @@
           ],
           "dependencies": [
             [
-              "file",
-              "audit"
-            ],
-            [
-              "file",
-              "key"
-            ],
-            [
-              "file",
-              "meth"
-            ],
-            [
-              "file",
-              "rows"
-            ],
-            [
-              "file",
-              "sections"
-            ],
-            [
-              "key",
-              "audit"
-            ],
-            [
               "key",
               "file"
             ],
             [
               "key",
               "meth"
-            ],
-            [
-              "key",
-              "rows"
-            ],
-            [
-              "key",
-              "sections"
-            ],
-            [
-              "meth",
-              "audit"
-            ],
-            [
-              "meth",
-              "file"
-            ],
-            [
-              "meth",
-              "key"
-            ],
-            [
-              "meth",
-              "rows"
-            ],
-            [
-              "meth",
-              "sections"
             ]
           ],
           "reads": [
@@ -488,20 +436,20 @@
         "child_fingerprints": [
           "assignment(id)",
           "unless(and(id call<file?>(id id argument_list(id))) call<skip>(id argument_list(lit)))",
-          "block(call(id id) body(body_statement(unless(id) block(call(id id) body(body_statement(assignment(call<parse_loc>(id argument_list(call(id id))) argument_list(id id)) unless(and(id call(lit call(id id)) id call(lit call(id id)))) assignment(id argument_list(id id)) call(lit id argument_list(lit))))))))",
+          "block(call(id id) body(parameters(id id) body_statement(unless(id) block(call(id id) body(parameters(id) body_statement(assignment(call<parse_loc>(id argument_list(call(id id))) argument_list(id id)) unless(and(id call(lit call(id id)) id call(lit call(id id)))) assignment(id argument_list(id id)) call(lit id argument_list(lit))))))))",
           "call<assert_empty>(id argument_list(call(id id)))",
           "id"
         ],
         "child_masses": [
           1,
           10,
-          38,
+          43,
           4,
           1
         ],
-        "fingerprint": "body_statement(assignment(id) unless(and(id call<file?>(id id argument_list(id))) call<skip>(id argument_list(lit))) block(call(id id) body(body_statement(unless(id) block(call(id id) body(body_statement(assignment(call<parse_loc>(id argument_list(call(id id))) argument_list(id id)) unless(and(id call(lit call(id id)) id call(lit call(id id)))) assignment(id argument_list(id id)) call(lit id argument_list(lit)))))))) call<assert_empty>(id argument_list(call(id id))) id)",
+        "fingerprint": "body_statement(assignment(id) unless(and(id call<file?>(id id argument_list(id))) call<skip>(id argument_list(lit))) block(call(id id) body(parameters(id id) body_statement(unless(id) block(call(id id) body(parameters(id) body_statement(assignment(call<parse_loc>(id argument_list(call(id id))) argument_list(id id)) unless(and(id call(lit call(id id)) id call(lit call(id id)))) assignment(id argument_list(id id)) call(lit id argument_list(lit)))))))) call<assert_empty>(id argument_list(call(id id))) id)",
         "line": 5,
-        "mass": 55,
+        "mass": 60,
         "method_name": "build",
         "node_name": "body_statement"
       },
@@ -538,9 +486,9 @@
         "child_masses": [
           2
         ],
-        "fingerprint": "block(call(id id) body(body_statement(assignment(call<parse_loc>(id argument_list(call(id id))) argument_list(id id)) unless(and(id call(lit call(id id)) id call(lit call(id id)))) assignment(id argument_list(id id)) call(lit id argument_list(lit)))))",
-        "line": 11,
-        "mass": 31,
+        "fingerprint": "block(call(id id) body(parameters(id id) body_statement(unless(id) block(call(id id) body(parameters(id) body_statement(assignment(call<parse_loc>(id argument_list(call(id id))) argument_list(id id)) unless(and(id call(lit call(id id)) id call(lit call(id id)))) assignment(id argument_list(id id)) call(lit id argument_list(lit))))))))",
+        "line": 8,
+        "mass": 43,
         "method_name": "build",
         "node_name": "block"
       },
@@ -551,9 +499,9 @@
         "child_masses": [
           2
         ],
-        "fingerprint": "block(call(id id) body(body_statement(unless(id) block(call(id id) body(body_statement(assignment(call<parse_loc>(id argument_list(call(id id))) argument_list(id id)) unless(and(id call(lit call(id id)) id call(lit call(id id)))) assignment(id argument_list(id id)) call(lit id argument_list(lit))))))))",
-        "line": 8,
-        "mass": 38,
+        "fingerprint": "block(call(id id) body(parameters(id) body_statement(assignment(call<parse_loc>(id argument_list(call(id id))) argument_list(id id)) unless(and(id call(lit call(id id)) id call(lit call(id id)))) assignment(id argument_list(id id)) call(lit id argument_list(lit)))))",
+        "line": 11,
+        "mass": 33,
         "method_name": "build",
         "node_name": "block"
       },
@@ -864,24 +812,24 @@
       {
         "child_fingerprints": [
           "unless(id)",
-          "block(call(id id) body(body_statement(assignment(call<parse_loc>(id argument_list(call(id id))) argument_list(id id)) unless(and(id call(lit call(id id)) id call(lit call(id id)))) assignment(id argument_list(id id)) call(lit id argument_list(lit)))))"
+          "block(call(id id) body(parameters(id) body_statement(assignment(call<parse_loc>(id argument_list(call(id id))) argument_list(id id)) unless(and(id call(lit call(id id)) id call(lit call(id id)))) assignment(id argument_list(id id)) call(lit id argument_list(lit)))))"
         ],
         "child_masses": [
           2,
-          31
+          33
         ],
-        "fingerprint": "body_statement(unless(id) block(call(id id) body(body_statement(assignment(call<parse_loc>(id argument_list(call(id id))) argument_list(id id)) unless(and(id call(lit call(id id)) id call(lit call(id id)))) assignment(id argument_list(id id)) call(lit id argument_list(lit))))))",
+        "fingerprint": "body_statement(unless(id) block(call(id id) body(parameters(id) body_statement(assignment(call<parse_loc>(id argument_list(call(id id))) argument_list(id id)) unless(and(id call(lit call(id id)) id call(lit call(id id)))) assignment(id argument_list(id id)) call(lit id argument_list(lit))))))",
         "line": 9,
-        "mass": 34,
+        "mass": 36,
         "method_name": "build",
         "node_name": "body_statement"
       },
       {
         "child_fingerprints": [],
         "child_masses": [],
-        "fingerprint": "method(id body(parameters(id id id) body_statement(assignment(id) unless(and(id call<file?>(id id argument_list(id))) call<skip>(id argument_list(lit))) block(call(id id) body(body_statement(unless(id) block(call(id id) body(body_statement(assignment(call<parse_loc>(id argument_list(call(id id))) argument_list(id id)) unless(and(id call(lit call(id id)) id call(lit call(id id)))) assignment(id argument_list(id id)) call(lit id argument_list(lit)))))))) call<assert_empty>(id argument_list(call(id id))) id)))",
+        "fingerprint": "method(id body(parameters(id id id) body_statement(assignment(id) unless(and(id call<file?>(id id argument_list(id))) call<skip>(id argument_list(lit))) block(call(id id) body(parameters(id id) body_statement(unless(id) block(call(id id) body(parameters(id) body_statement(assignment(call<parse_loc>(id argument_list(call(id id))) argument_list(id id)) unless(and(id call(lit call(id id)) id call(lit call(id id)))) assignment(id argument_list(id id)) call(lit id argument_list(lit)))))))) call<assert_empty>(id argument_list(call(id id))) id)))",
         "line": 4,
-        "mass": 61,
+        "mass": 66,
         "method_name": "build",
         "node_name": "defn"
       }
@@ -1075,64 +1023,12 @@
             ],
             "dependencies": [
               [
-                "file",
-                "audit"
-              ],
-              [
-                "file",
-                "key"
-              ],
-              [
-                "file",
-                "meth"
-              ],
-              [
-                "file",
-                "rows"
-              ],
-              [
-                "file",
-                "sections"
-              ],
-              [
-                "key",
-                "audit"
-              ],
-              [
                 "key",
                 "file"
               ],
               [
                 "key",
                 "meth"
-              ],
-              [
-                "key",
-                "rows"
-              ],
-              [
-                "key",
-                "sections"
-              ],
-              [
-                "meth",
-                "audit"
-              ],
-              [
-                "meth",
-                "file"
-              ],
-              [
-                "meth",
-                "key"
-              ],
-              [
-                "meth",
-                "rows"
-              ],
-              [
-                "meth",
-                "sections"
               ]
             ],
             "end_line": 18,

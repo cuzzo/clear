@@ -148,6 +148,41 @@ impl NormalizedLanguageBehavior for JavaScriptNormalizedBehavior {
     fn predicate_body_language_signal(&self, text: &str) -> bool {
         text.to_ascii_lowercase().contains("null") || text.contains("??")
     }
+
+    fn format_array_type(&self, elem: &str) -> String {
+        format!("{elem}[]")
+    }
+
+    fn format_hash_type(&self, key: &str, val: &str) -> String {
+        format!("Record<{key}, {val}>")
+    }
+
+    fn format_set_type(&self, elem: &str) -> String {
+        format!("Set<{elem}>")
+    }
+
+    fn format_nilable_type(&self, type_text: &str) -> String {
+        if type_text.is_empty() || type_text == "nil" || type_text == "null" || type_text == "None" {
+            return type_text.to_string();
+        }
+        if type_text.contains(" | null") {
+            type_text.to_string()
+        } else {
+            format!("{type_text} | null")
+        }
+    }
+
+    fn untyped_type(&self) -> String {
+        "any".to_string()
+    }
+
+    fn untyped_array_type(&self) -> String {
+        "any[]".to_string()
+    }
+
+    fn untyped_hash_type(&self) -> String {
+        "Record<any, any>".to_string()
+    }
 }
 
 static BEHAVIOR: JavaScriptNormalizedBehavior = JavaScriptNormalizedBehavior;

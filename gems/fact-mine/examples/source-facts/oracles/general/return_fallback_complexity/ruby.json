@@ -43,10 +43,6 @@
             [
               "field",
               "receiver"
-            ],
-            [
-              "field",
-              "state_types"
             ]
           ],
           "reads": [
@@ -567,10 +563,6 @@
               [
                 "field",
                 "receiver"
-              ],
-              [
-                "field",
-                "state_types"
               ]
             ],
             "end_line": 10,

@@ -5,6 +5,7 @@ mod architecture_test;
 mod ast;
 pub mod parallel;
 pub mod profile;
+pub mod type_inference;
 pub mod syntax;
 pub mod syntax_oracle;
 

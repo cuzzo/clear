@@ -6,6 +6,11 @@ PATH
       sorbet-runtime
 
 PATH
+  remote: gems/boobytrap
+  specs:
+    boobytrap (0.0.1)
+
+PATH
   remote: gems/decomplex
   specs:
     decomplex (0.0.1)
@@ -29,6 +34,7 @@ PATH
   remote: gems/nil-kill
   specs:
     nil-kill (0.1.0)
+      boobytrap (>= 0.0.1)
       decomplex (= 0.0.1)
       espalier (>= 0.0.1)
       parlour
@@ -304,6 +310,7 @@ PLATFORMS
 
 DEPENDENCIES
   auto-type!
+  boobytrap!
   byebug (~> 12.0)
   csv
   debride

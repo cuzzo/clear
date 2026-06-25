@@ -40,7 +40,7 @@ This document identifies the remaining Ruby-specific and Sorbet-specific "tendri
 
 1. **Phase 1: Fact Abstraction.** Move Z3 evidence extraction from `static_evidence.rb` into the `Language::Provider` interface.
 2. **Phase 2: Type Indexer Generalization.** Create a generic interface for "External Type Definitions" (replacing the RBI-only logic).
-3. **Phase 3: Integration with Boobytrap.** Swap Ruby-specific coverage loading for the generalized Boobytrap provider registry.
+3. **Phase 3: Integration with Boobytrap.** Swap Ruby-specific coverage loading for the generalized Boobytrap provider registry. (Completed)
 4. **Phase 4: Multi-Language Rewrite Support.** Implement the first Python null-guard rewrite in Auto-type using the Hybrid LLM model.
 
 ## 5. Conclusion

@@ -1,7 +1,7 @@
 use super::{
     normalized_behavior::{
-        NormalizedCallParts, NormalizedCallProjection, NormalizedLanguageBehavior,
-        NormalizedOwner, NormalizedStateRead,
+        NormalizedCallParts, NormalizedCallProjection, NormalizedLanguageBehavior, NormalizedOwner,
+        NormalizedStateRead,
     },
     BranchArm, BranchDecision, CallSite, ComparisonUse, DecisionSite, DispatchSite, FunctionDef,
     OwnerDef, PathConditionSite, PredicateAlias, RawNode, SemanticEffectSite, StateDeclaration,
@@ -106,8 +106,8 @@ impl<'a> Extractor<'a> {
         self.record_behavior_node_reads(node);
         self.record_behavior_node_calls(node);
         match node.r#type.as_str() {
-            "CLASS" | "MODULE" => self.scan_owner(node),
-            "DEFN" | "DEFS" => self.scan_function(node),
+            "CLASS" | "MODULE" | "INTERFACE_DECLARATION" => self.scan_owner(node),
+            "DEFN" | "DEFS" | "METHOD_SIGNATURE" => self.scan_function(node),
             "HASH" => self.scan_children(node),
             "IF" | "UNLESS" => self.scan_if(node),
             "FOR" | "WHILE" | "UNTIL" => self.scan_loop(node),
@@ -128,10 +128,7 @@ impl<'a> Extractor<'a> {
             "OPCALL" => self.scan_operator_call(node),
             "OP_ASGN1" | "OP_ASGN2" => self.scan_operator_assignment(node),
             _ => {
-                if let Some(owner) = self
-                    .behavior
-                    .declarative_owner(node, &self.current_owner())
-                {
+                if let Some(owner) = self.behavior.declarative_owner(node, &self.current_owner()) {
                     self.scan_declarative_owner(node, owner);
                 } else {
                     self.scan_children(node);
@@ -292,11 +289,7 @@ impl<'a> Extractor<'a> {
     fn scan_singleton_class(&mut self, node: &Node) {
         let receiver = normalized_text(child_node(node, 0).unwrap());
         if receiver != "self" {
-            self.record_semantic_effect(
-                node,
-                "metaprogramming",
-                &format!("class << {receiver}"),
-            );
+            self.record_semantic_effect(node, "metaprogramming", &format!("class << {receiver}"));
         }
         self.scan_children(node);
     }
@@ -414,7 +407,7 @@ impl<'a> Extractor<'a> {
         if let (Some(receiver), Some(field)) = (child_node(node, 0), child_symbol(node, 1)) {
             let field = field.trim_end_matches('=').to_string();
             let field = self.behavior.clean_identifier(&field);
-            if field != "[]" {
+            if field != "[]" || state_receiver_field(&self.receiver_text(receiver)).is_some() {
                 effect_detail = format!("{field}=");
                 let raw_receiver_name = self.receiver_text(receiver);
                 let receiver_name = self.behavior.clean_receiver(&raw_receiver_name);
@@ -623,11 +616,15 @@ impl<'a> Extractor<'a> {
     }
 
     fn scan_local_assignment(&mut self, node: &Node) {
-        let field = first_string_or_symbol(node);
-        let field_clean = field.as_deref().map(|f| self.behavior.clean_identifier(f));
+        if let Some(owner) = self.behavior.declarative_owner(node, &self.current_owner()) {
+            self.scan_declarative_owner(node, owner);
+            return;
+        }
+        let field =
+            first_string_or_symbol(node).or_else(|| child_node(node, 0).map(|n| n.text.clone()));
         let writes = self
             .behavior
-            .local_assignment_writes(field_clean.as_deref(), node, span(node));
+            .local_assignment_writes(field.as_deref(), node, span(node));
         if !writes.is_empty() {
             for write in writes {
                 self.record_state_write_target_span(write.receiver, write.field, node, write.span);
@@ -1030,16 +1027,25 @@ impl<'a> Extractor<'a> {
     fn collect_owner_fields_from_children(&mut self, node: &Node) {
         let owner = self.current_owner();
         for child in child_nodes(node) {
-            self.collect_owner_fields_from_node(&owner, child);
+            self.collect_owner_fields_from_node(&owner, child, false);
         }
     }
 
-    fn collect_owner_fields_from_node(&mut self, owner: &str, node: &Node) {
-        if matches!(node.r#type.as_str(), "DEFN" | "DEFS" | "CLASS" | "MODULE") {
+    fn collect_owner_fields_from_node(&mut self, owner: &str, node: &Node, in_method: bool) {
+        if matches!(
+            node.r#type.as_str(),
+            "CLASS" | "MODULE" | "INTERFACE_DECLARATION"
+        ) {
             return;
         }
 
-        if let Some(mut declaration) = self.behavior.state_declaration_from_node(node, owner) {
+        let is_method =
+            in_method || matches!(node.r#type.as_str(), "DEFN" | "DEFS" | "METHOD_SIGNATURE");
+
+        if let Some(mut declaration) = self
+            .behavior
+            .state_declaration_from_node(node, owner, is_method)
+        {
             declaration.field = self.behavior.clean_identifier(&declaration.field);
             declaration.file = self.file.clone();
             declaration.owner = owner.to_string();
@@ -1074,7 +1080,7 @@ impl<'a> Extractor<'a> {
                 }
             }
             for child in child_nodes(node) {
-                self.collect_owner_fields_from_node(owner, child);
+                self.collect_owner_fields_from_node(owner, child, is_method);
                 if child.r#type == "LVAR" {
                     if let Some(name) = first_string_or_symbol(child) {
                         if simple_identifier(&name) {
@@ -1087,7 +1093,7 @@ impl<'a> Extractor<'a> {
         }
 
         for child in child_nodes(node) {
-            self.collect_owner_fields_from_node(owner, child);
+            self.collect_owner_fields_from_node(owner, child, is_method);
         }
     }
 
@@ -1358,7 +1364,7 @@ impl<'a> Extractor<'a> {
     }
 
     fn argument_values(&self, node: &Node) -> Vec<String> {
-        if matches!(node.r#type.as_str(), "DEFN" | "DEFS") {
+        if matches!(node.r#type.as_str(), "DEFN" | "DEFS" | "METHOD_SIGNATURE") {
             let mut out = Vec::new();
             if let Some(name) = function_name(node) {
                 out.push(name);
@@ -1624,6 +1630,17 @@ fn function_name_with_behavior(
     match name.as_deref() {
         Some("") | None => behavior.function_name_from_text(&node.text),
         Some(name) if name.contains(':') => name.split_once(':').map(|(_, tail)| tail.to_string()),
+        Some(name) if name.contains('.') => {
+            if let Some((receiver, tail)) = name.split_once('.') {
+                if receiver == "self" || receiver == "this" {
+                    Some(name.to_string())
+                } else {
+                    Some(tail.to_string())
+                }
+            } else {
+                Some(name.to_string())
+            }
+        }
         Some(_) => name,
     }
 }
@@ -1635,7 +1652,7 @@ fn function_scope(node: &Node) -> Option<&Node> {
 fn scope_child(node: &Node) -> Option<&Node> {
     child_nodes(node)
         .into_iter()
-        .find(|child| child.r#type == "SCOPE")
+        .find(|child| child.r#type == "SCOPE" || child.r#type == "INTERFACE_BODY")
 }
 
 fn scope_body(scope: &Node) -> Option<&Node> {
@@ -1954,9 +1971,9 @@ fn raw_kind(node: &Node) -> &str {
         "ROOT" => "program",
         "SCOPE" => "body",
         "ARGS" => "parameters",
-        "CLASS" => "class",
+        "CLASS" | "INTERFACE_DECLARATION" => "class",
         "MODULE" => "module",
-        "DEFN" | "DEFS" => "method",
+        "DEFN" | "DEFS" | "METHOD_SIGNATURE" => "method",
         "IF" => "if",
         "UNLESS" => "unless",
         "CASE" | "CASE2" => "case",
@@ -2215,42 +2232,72 @@ fn span_contains(outer: Span, inner: Span) -> bool {
 /// Children are typically [name, type?, value?] — the type is the child after the name.
 fn extract_type_from_field_node(node: &Node, field_name: &str) -> Option<String> {
     let child_nodes = child_nodes(node);
-    // Find the field name child, then take the next child as the type
     for (i, child) in child_nodes.iter().enumerate() {
-        // Match the field name child: could be Symbol, LVAR, or identifier node
         let is_name = child.text.trim() == field_name
             || child.r#type == "LVAR"
             || child.r#type == "CVAR"
-            || child.r#type == "identifier";
-        if is_name && i + 1 < child_nodes.len() {
-            let type_child = child_nodes[i + 1];
-            let type_text = type_child.text.trim().to_string();
-            if !type_text.is_empty()
-                && type_text != ":"
-                && !type_text.starts_with('=')
-                && !type_text.starts_with('(')
-                && !type_text.starts_with('{')
-            {
-                return Some(type_text);
+            || child.r#type == "identifier"
+            || child.r#type == "field_identifier";
+        if is_name {
+            if i + 1 < child_nodes.len() {
+                let type_child = child_nodes[i + 1];
+                let type_text = type_child.text.trim().to_string();
+                if is_valid_type_text(&type_text) {
+                    return Some(type_text);
+                }
+            }
+            if i > 0 {
+                let type_child = child_nodes[i - 1];
+                let type_text = type_child.text.trim().to_string();
+                if is_valid_type_text(&type_text) {
+                    return Some(type_text);
+                }
             }
         }
     }
-    // Fallback: text-based extraction for languages where children aren't structured
-    let text = node.text.trim();
-    let after_name = text
-        .find(field_name)
-        .map(|idx| text[idx + field_name.len()..].trim_start())?;
-    let after_name = after_name.strip_prefix(':').unwrap_or(after_name).trim_start();
-    let type_text = after_name.split('=').next()?.trim();
-    if type_text.is_empty()
-        || type_text == ";"
-        || type_text.starts_with('(')
-        || type_text.starts_with("{")
-        || type_text == "?"
-    {
-        return None;
+    let text = node.text.trim().trim_end_matches(';').trim();
+    if let Some(idx) = text.find(field_name) {
+        let after_name = text[idx + field_name.len()..].trim_start();
+        let after_name = after_name
+            .strip_prefix(':')
+            .unwrap_or(after_name)
+            .trim_start();
+        if let Some(postfix_type) = after_name.split('=').next() {
+            let postfix_type = postfix_type.trim();
+            if is_valid_type_text(postfix_type) {
+                return Some(postfix_type.to_string());
+            }
+        }
+        let before_name = text[..idx].trim_end();
+        if let Some(last_part) = before_name.split(|c| c == '=' || c == ':').last() {
+            let last_part = last_part.trim();
+            let mut parts = last_part.split_whitespace().collect::<Vec<_>>();
+            while !parts.is_empty()
+                && matches!(
+                    parts[0],
+                    "const" | "public" | "private" | "protected" | "static" | "mutable" | "virtual"
+                )
+            {
+                parts.remove(0);
+            }
+            let prefix_type = parts.join(" ");
+            if is_valid_type_text(&prefix_type) {
+                return Some(prefix_type);
+            }
+        }
     }
-    Some(type_text.to_string())
+    None
+}
+
+fn is_valid_type_text(text: &str) -> bool {
+    let t = text.trim();
+    !t.is_empty()
+        && t != ":"
+        && !t.starts_with('=')
+        && !t.starts_with('(')
+        && !t.starts_with('{')
+        && t != ";"
+        && t != "?"
 }
 
 fn simple_identifier(value: &str) -> bool {
@@ -2288,8 +2335,10 @@ fn effect_key(site: &SemanticEffectSite) -> (String, String, String, usize, Span
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::syntax::normalized_behavior::{NormalizedLanguageBehavior, NormalizedCallProjection};
-    use crate::ast::{Node, Child};
+    use crate::ast::{Child, Node};
+    use crate::syntax::normalized_behavior::{
+        NormalizedCallProjection, NormalizedLanguageBehavior,
+    };
     use std::path::Path;
 
     #[derive(Default)]
@@ -2306,35 +2355,49 @@ mod tests {
 
     impl NormalizedLanguageBehavior for CustomBehavior {
         fn mutating_receiver_message(&self, message: &str) -> bool {
-            self.mutating_receiver_message_impl.map(|f| f(message)).unwrap_or(false)
+            self.mutating_receiver_message_impl
+                .map(|f| f(message))
+                .unwrap_or(false)
         }
-        
+
         fn field_name_from_declaration(&self, node: &Node) -> Option<String> {
             self.field_name_from_declaration_impl.and_then(|f| f(node))
         }
 
         fn node_call_projections(&self, node: &Node) -> Vec<NormalizedCallProjection> {
-            self.node_call_projections_impl.map(|f| f(node)).unwrap_or_default()
+            self.node_call_projections_impl
+                .map(|f| f(node))
+                .unwrap_or_default()
         }
 
         fn stream_insertion_operator(&self, node: &Node) -> bool {
-            self.stream_insertion_operator_impl.map(|f| f(node)).unwrap_or(false)
+            self.stream_insertion_operator_impl
+                .map(|f| f(node))
+                .unwrap_or(false)
         }
 
         fn suppress_branch_decision(&self, node: &Node) -> bool {
-            self.suppress_branch_decision_impl.map(|f| f(node)).unwrap_or(false)
+            self.suppress_branch_decision_impl
+                .map(|f| f(node))
+                .unwrap_or(false)
         }
 
         fn state_read_uses_access_span(&self, call: &NormalizedCallProjection) -> bool {
-            self.state_read_uses_access_span_impl.map(|f| f(call)).unwrap_or(false)
+            self.state_read_uses_access_span_impl
+                .map(|f| f(call))
+                .unwrap_or(false)
         }
 
         fn case_predicate_text(&self, text: &str) -> String {
-            self.case_predicate_text_impl.map(|f| f(text)).unwrap_or_else(|| text.to_string())
+            self.case_predicate_text_impl
+                .map(|f| f(text))
+                .unwrap_or_else(|| text.to_string())
         }
 
         fn suppress_call_site(&self, node: &Node, call: &NormalizedCallProjection) -> bool {
-            self.suppress_call_site_impl.map(|f| f(node, call)).unwrap_or(false)
+            self.suppress_call_site_impl
+                .map(|f| f(node, call))
+                .unwrap_or(false)
         }
     }
 
@@ -2362,7 +2425,11 @@ mod tests {
     fn test_extractor_record_call_not_a_call() {
         let behavior = CustomBehavior::default();
         let not_a_call = mock_node("NOT_A_CALL", vec![], "");
-        let iter_node = mock_node("ITER", vec![Child::Node(Box::new(not_a_call)), Child::Nil], "");
+        let iter_node = mock_node(
+            "ITER",
+            vec![Child::Node(Box::new(not_a_call)), Child::Nil],
+            "",
+        );
         let facts = extract(Path::new("test.rb"), &[], &iter_node, &behavior);
         assert!(facts.call_sites.is_empty());
     }
@@ -2380,7 +2447,11 @@ mod tests {
         let behavior = CustomBehavior::default();
         let op1 = mock_node("OP_ASGN1", vec![], "op");
         let op2 = mock_node("OP_ASGN1", vec![], "op");
-        let block = mock_node("BLOCK", vec![Child::Node(Box::new(op1)), Child::Node(Box::new(op2))], "");
+        let block = mock_node(
+            "BLOCK",
+            vec![Child::Node(Box::new(op1)), Child::Node(Box::new(op2))],
+            "",
+        );
         let facts = extract(Path::new("test.rb"), &[], &block, &behavior);
         assert_eq!(facts.semantic_effect_sites.len(), 1);
     }
@@ -2389,10 +2460,24 @@ mod tests {
     fn test_extractor_record_dispatch_site_empty_predicate() {
         let mut behavior = CustomBehavior::default();
         behavior.case_predicate_text_impl = Some(|_| "".to_string());
-        
-        let when = mock_node("WHEN", vec![Child::Symbol("X".to_string()), Child::Node(Box::new(mock_node("LVAR", vec![], "")))], "");
+
+        let when = mock_node(
+            "WHEN",
+            vec![
+                Child::Symbol("X".to_string()),
+                Child::Node(Box::new(mock_node("LVAR", vec![], ""))),
+            ],
+            "",
+        );
         let whens_list = mock_node("WHENS", vec![Child::Node(Box::new(when))], "");
-        let case_node = mock_node("CASE", vec![Child::Node(Box::new(mock_node("LVAR", vec![], ""))), Child::Node(Box::new(whens_list))], "");
+        let case_node = mock_node(
+            "CASE",
+            vec![
+                Child::Node(Box::new(mock_node("LVAR", vec![], ""))),
+                Child::Node(Box::new(whens_list)),
+            ],
+            "",
+        );
         let facts = extract(Path::new("test.rb"), &[], &case_node, &behavior);
         assert!(facts.dispatch_sites.is_empty());
     }
@@ -2401,18 +2486,36 @@ mod tests {
     fn test_extractor_state_declaration_types() {
         let mut behavior = CustomBehavior::default();
         behavior.field_name_from_declaration_impl = Some(|_| Some("my_field".to_string()));
-        
-        let field_node = mock_node("FIELD_DECLARATION", vec![
-            Child::Node(Box::new(mock_node("identifier", vec![], "my_field"))),
-            Child::Node(Box::new(mock_node("type", vec![], "my_type")))
-        ], "my_field : my_type");
-        
-        let class_scope = mock_node("SCOPE", vec![Child::Nil, Child::Nil, Child::Node(Box::new(field_node))], "");
-        let class_node = mock_node("CLASS", vec![Child::Symbol("MyClass".to_string()), Child::Node(Box::new(class_scope))], "class MyClass");
-        
+
+        let field_node = mock_node(
+            "FIELD_DECLARATION",
+            vec![
+                Child::Node(Box::new(mock_node("identifier", vec![], "my_field"))),
+                Child::Node(Box::new(mock_node("type", vec![], "my_type"))),
+            ],
+            "my_field : my_type",
+        );
+
+        let class_scope = mock_node(
+            "SCOPE",
+            vec![Child::Nil, Child::Nil, Child::Node(Box::new(field_node))],
+            "",
+        );
+        let class_node = mock_node(
+            "CLASS",
+            vec![
+                Child::Symbol("MyClass".to_string()),
+                Child::Node(Box::new(class_scope)),
+            ],
+            "class MyClass",
+        );
+
         let facts = extract(Path::new("test.rb"), &[], &class_node, &behavior);
         assert_eq!(facts.state_declarations.len(), 1);
-        assert_eq!(facts.state_declarations[0].r#type, Some("my_type".to_string()));
+        assert_eq!(
+            facts.state_declarations[0].r#type,
+            Some("my_type".to_string())
+        );
     }
 
     #[test]
@@ -2425,8 +2528,14 @@ mod tests {
 
     #[test]
     fn test_dispatch_equality_left_constant() {
-        assert_eq!(dispatch_equality("MyEnum == x"), Some(("x".to_string(), "MyEnum".to_string())));
-        assert_eq!(dispatch_equality("x == MyEnum"), Some(("x".to_string(), "MyEnum".to_string())));
+        assert_eq!(
+            dispatch_equality("MyEnum == x"),
+            Some(("x".to_string(), "MyEnum".to_string()))
+        );
+        assert_eq!(
+            dispatch_equality("x == MyEnum"),
+            Some(("x".to_string(), "MyEnum".to_string()))
+        );
     }
 
     #[test]
@@ -2504,7 +2613,11 @@ mod tests {
         let block_with_ret = mock_node("BLOCK", vec![Child::Node(Box::new(ret.clone()))], "");
         assert_eq!(tail_return(&block_with_ret), Some(&ret));
 
-        let block_nested = mock_node("BLOCK", vec![Child::Node(Box::new(block_with_ret.clone()))], "");
+        let block_nested = mock_node(
+            "BLOCK",
+            vec![Child::Node(Box::new(block_with_ret.clone()))],
+            "",
+        );
         assert_eq!(tail_return(&block_nested), Some(&ret));
 
         let block_non_ret = mock_node("BLOCK", vec![Child::Node(Box::new(non_ret))], "");
@@ -2526,7 +2639,10 @@ mod tests {
         assert_eq!(state_receiver_field("@"), None);
         assert_eq!(state_receiver_field("$field"), Some("field".to_string()));
         assert_eq!(state_receiver_field("$"), None);
-        assert_eq!(state_receiver_field("self.field"), Some("field".to_string()));
+        assert_eq!(
+            state_receiver_field("self.field"),
+            Some("field".to_string())
+        );
         assert_eq!(state_receiver_field("self.invalid-field"), None);
         assert_eq!(state_receiver_field("other"), None);
     }
@@ -2540,37 +2656,63 @@ mod tests {
         let mut multi_line_node = mock_node("LVAR", vec![], "x\ny");
         multi_line_node.first_lineno = 1;
         multi_line_node.last_lineno = 2;
-        assert_eq!(target_name_span("x", &multi_line_node), span(&multi_line_node));
+        assert_eq!(
+            target_name_span("x", &multi_line_node),
+            span(&multi_line_node)
+        );
     }
 
     #[test]
     fn test_extract_type_from_field_node_type_restrictions() {
-        let field_node = mock_node("FIELD_DECLARATION", vec![
-            Child::Node(Box::new(mock_node("identifier", vec![], "my_field"))),
-            Child::Node(Box::new(mock_node("type", vec![], ":")))
-        ], "my_field : ");
+        let field_node = mock_node(
+            "FIELD_DECLARATION",
+            vec![
+                Child::Node(Box::new(mock_node("identifier", vec![], "my_field"))),
+                Child::Node(Box::new(mock_node("type", vec![], ":"))),
+            ],
+            "my_field : ",
+        );
         assert_eq!(extract_type_from_field_node(&field_node, "my_field"), None);
 
-        let field_node_paren = mock_node("FIELD_DECLARATION", vec![
-            Child::Node(Box::new(mock_node("identifier", vec![], "my_field"))),
-            Child::Node(Box::new(mock_node("type", vec![], "(type)")))
-        ], "my_field (type)");
-        assert_eq!(extract_type_from_field_node(&field_node_paren, "my_field"), None);
+        let field_node_paren = mock_node(
+            "FIELD_DECLARATION",
+            vec![
+                Child::Node(Box::new(mock_node("identifier", vec![], "my_field"))),
+                Child::Node(Box::new(mock_node("type", vec![], "(type)"))),
+            ],
+            "my_field (type)",
+        );
+        assert_eq!(
+            extract_type_from_field_node(&field_node_paren, "my_field"),
+            None
+        );
 
         let fallback_node = mock_node("FIELD_DECLARATION", vec![], "my_field = ?");
-        assert_eq!(extract_type_from_field_node(&fallback_node, "my_field"), None);
+        assert_eq!(
+            extract_type_from_field_node(&fallback_node, "my_field"),
+            None
+        );
 
         // type_text starts with "{"
         let field_node_brace = mock_node("FIELD_DECLARATION", vec![], "my_field : {T}");
-        assert_eq!(extract_type_from_field_node(&field_node_brace, "my_field"), None);
+        assert_eq!(
+            extract_type_from_field_node(&field_node_brace, "my_field"),
+            None
+        );
 
         // type_text == "?"
         let field_node_question = mock_node("FIELD_DECLARATION", vec![], "my_field : ?");
-        assert_eq!(extract_type_from_field_node(&field_node_question, "my_field"), None);
+        assert_eq!(
+            extract_type_from_field_node(&field_node_question, "my_field"),
+            None
+        );
 
         // valid type returning Some
         let field_node_valid = mock_node("FIELD_DECLARATION", vec![], "my_field : MyClass");
-        assert_eq!(extract_type_from_field_node(&field_node_valid, "my_field"), Some("MyClass".to_string()));
+        assert_eq!(
+            extract_type_from_field_node(&field_node_valid, "my_field"),
+            Some("MyClass".to_string())
+        );
     }
 
     #[test]
@@ -2581,9 +2723,15 @@ mod tests {
         assert!(extractor.when_patterns(&when).is_empty());
 
         // case_source == "default" returns empty Vec (covers line 1191)
-        let when_default = mock_node("WHEN", vec![
-            Child::Node(Box::new(mock_node("case", vec![], "case default:\n")))
-        ], "");
+        let when_default = mock_node(
+            "WHEN",
+            vec![Child::Node(Box::new(mock_node(
+                "case",
+                vec![],
+                "case default:\n",
+            )))],
+            "",
+        );
         assert!(extractor.when_patterns(&when_default).is_empty());
     }
 
@@ -2591,22 +2739,30 @@ mod tests {
     fn test_function_scope_no_body() {
         let behavior = CustomBehavior::default();
         let mut extractor = Extractor::new(Path::new("test.rb"), &[], &behavior);
-        
+
         // DEFN with scope that has no body child (length <= 2)
         let scope_node = mock_node("SCOPE", vec![], "");
-        let defn_node = mock_node("DEFN", vec![
-            Child::Node(Box::new(mock_node("identifier", vec![], "foo"))),
-            Child::Node(Box::new(scope_node.clone())),
-        ], "");
-        
+        let defn_node = mock_node(
+            "DEFN",
+            vec![
+                Child::Node(Box::new(mock_node("identifier", vec![], "foo"))),
+                Child::Node(Box::new(scope_node.clone())),
+            ],
+            "",
+        );
+
         extractor.scan(&defn_node);
 
         // DEFS with scope that has no body child
-        let defs_node = mock_node("DEFS", vec![
-            Child::Node(Box::new(mock_node("receiver", vec![], "self"))),
-            Child::Node(Box::new(mock_node("identifier", vec![], "bar"))),
-            Child::Node(Box::new(scope_node)),
-        ], "");
+        let defs_node = mock_node(
+            "DEFS",
+            vec![
+                Child::Node(Box::new(mock_node("receiver", vec![], "self"))),
+                Child::Node(Box::new(mock_node("identifier", vec![], "bar"))),
+                Child::Node(Box::new(scope_node)),
+            ],
+            "",
+        );
         extractor.scan(&defs_node);
 
         // DEFS with no scope (function_scope is None)
@@ -2622,20 +2778,26 @@ mod tests {
         // child.r#type == "LVAR" but first_string_or_symbol is None
         // Must be child of FIELD_DECLARATION node to go through iteration inside collect_owner_fields_from_node
         let lvar_empty = mock_node("LVAR", vec![], "");
-        let field_decl_empty = mock_node("FIELD_DECLARATION", vec![
-            Child::Node(Box::new(lvar_empty)),
-        ], "");
-        extractor.collect_owner_fields_from_node("MyOwner", &field_decl_empty);
+        let field_decl_empty = mock_node(
+            "FIELD_DECLARATION",
+            vec![Child::Node(Box::new(lvar_empty))],
+            "",
+        );
+        extractor.collect_owner_fields_from_node("MyOwner", &field_decl_empty, false);
 
         // child.r#type == "LVAR" with valid simple name to cover line 1083
         extractor.owners.push("MyOwner".to_string());
-        let lvar_valid = mock_node("LVAR", vec![
-            Child::Symbol("my_field".to_string())
-        ], "my_field");
-        let field_decl_valid = mock_node("FIELD_DECLARATION", vec![
-            Child::Node(Box::new(lvar_valid)),
-        ], "");
-        extractor.collect_owner_fields_from_node("MyOwner", &field_decl_valid);
+        let lvar_valid = mock_node(
+            "LVAR",
+            vec![Child::Symbol("my_field".to_string())],
+            "my_field",
+        );
+        let field_decl_valid = mock_node(
+            "FIELD_DECLARATION",
+            vec![Child::Node(Box::new(lvar_valid))],
+            "",
+        );
+        extractor.collect_owner_fields_from_node("MyOwner", &field_decl_valid, false);
         assert!(extractor.owner_field("my_field"));
 
         // CALL with call_parts returning None inside collect_state_refs
@@ -2644,14 +2806,17 @@ mod tests {
         extractor.collect_state_refs(&call_empty, &mut refs);
 
         // OPCALL with 3 children where operator is + (not comparison) to cover line 482
-        let op_node = mock_node("OPCALL", vec![
-            Child::Node(Box::new(mock_node("left", vec![], "a"))),
-            Child::Node(Box::new(mock_node("operator", vec![], "+"))),
-            Child::Node(Box::new(mock_node("right", vec![], "b"))),
-        ], "");
+        let op_node = mock_node(
+            "OPCALL",
+            vec![
+                Child::Node(Box::new(mock_node("left", vec![], "a"))),
+                Child::Node(Box::new(mock_node("operator", vec![], "+"))),
+                Child::Node(Box::new(mock_node("right", vec![], "b"))),
+            ],
+            "",
+        );
         extractor.scan(&op_node);
     }
-
 
     #[test]
     fn test_extractor_receiver_text_empty_lvar() {
@@ -2664,15 +2829,17 @@ mod tests {
     #[test]
     fn test_record_behavior_node_calls_suppressed() {
         let mut behavior = CustomBehavior::default();
-        behavior.node_call_projections_impl = Some(|_| vec![NormalizedCallProjection {
-            receiver: "self".to_string(),
-            message: "foo".to_string(),
-            arguments: Vec::new(),
-            access_span: [1, 0, 1, 5],
-            span: [1, 0, 1, 5],
-        }]);
+        behavior.node_call_projections_impl = Some(|_| {
+            vec![NormalizedCallProjection {
+                receiver: "self".to_string(),
+                message: "foo".to_string(),
+                arguments: Vec::new(),
+                access_span: [1, 0, 1, 5],
+                span: [1, 0, 1, 5],
+            }]
+        });
         behavior.suppress_call_site_impl = Some(|_, _| true);
-        
+
         let mut extractor = Extractor::new(Path::new("test.rb"), &[], &behavior);
         let node = mock_node("LVAR", vec![], "");
         extractor.record_behavior_node_calls(&node);
@@ -2706,10 +2873,14 @@ mod tests {
     #[test]
     fn test_extractor_scan_function_body_none() {
         let behavior = CustomBehavior::default();
-        let defn_node = mock_node("DEFN", vec![
-            Child::Symbol("my_func".to_string()),
-            Child::Node(Box::new(mock_node("SCOPE", vec![Child::Nil], "")))
-        ], "def my_func\nend");
+        let defn_node = mock_node(
+            "DEFN",
+            vec![
+                Child::Symbol("my_func".to_string()),
+                Child::Node(Box::new(mock_node("SCOPE", vec![Child::Nil], ""))),
+            ],
+            "def my_func\nend",
+        );
         let facts = extract(Path::new("test.rb"), &[], &defn_node, &behavior);
         assert!(facts.function_defs.iter().any(|f| f.name == "my_func"));
     }
@@ -2735,7 +2906,11 @@ mod tests {
     #[test]
     fn test_extractor_scan_operator_call_non_comparison() {
         let behavior = CustomBehavior::default();
-        let opcall = mock_node("OPCALL", vec![Child::Nil, Child::Symbol("+".to_string())], "");
+        let opcall = mock_node(
+            "OPCALL",
+            vec![Child::Nil, Child::Symbol("+".to_string())],
+            "",
+        );
         let facts = extract(Path::new("test.rb"), &[], &opcall, &behavior);
         assert!(facts.comparison_uses.is_empty());
     }
@@ -2745,7 +2920,11 @@ mod tests {
         let behavior = CustomBehavior::default();
         let call1 = mock_node("VCALL", vec![Child::Symbol("foo".to_string())], "foo");
         let call2 = mock_node("VCALL", vec![Child::Symbol("foo".to_string())], "foo");
-        let block = mock_node("BLOCK", vec![Child::Node(Box::new(call1)), Child::Node(Box::new(call2))], "");
+        let block = mock_node(
+            "BLOCK",
+            vec![Child::Node(Box::new(call1)), Child::Node(Box::new(call2))],
+            "",
+        );
         let facts = extract(Path::new("test.rb"), &[], &block, &behavior);
         assert_eq!(facts.call_sites.len(), 1);
     }
@@ -2754,8 +2933,19 @@ mod tests {
     fn test_collect_owner_fields_non_simple_identifier() {
         let behavior = CustomBehavior::default();
         let child = mock_node("LVAR", vec![Child::Symbol("123foo".to_string())], "");
-        let class_scope = mock_node("SCOPE", vec![Child::Nil, Child::Nil, Child::Node(Box::new(child))], "");
-        let class_node = mock_node("CLASS", vec![Child::Symbol("MyClass".to_string()), Child::Node(Box::new(class_scope))], "class MyClass");
+        let class_scope = mock_node(
+            "SCOPE",
+            vec![Child::Nil, Child::Nil, Child::Node(Box::new(child))],
+            "",
+        );
+        let class_node = mock_node(
+            "CLASS",
+            vec![
+                Child::Symbol("MyClass".to_string()),
+                Child::Node(Box::new(class_scope)),
+            ],
+            "class MyClass",
+        );
         let facts = extract(Path::new("test.rb"), &[], &class_node, &behavior);
         assert!(facts.state_declarations.is_empty());
     }
@@ -2826,14 +3016,17 @@ mod tests {
         let behavior = CustomBehavior::default();
         let node = mock_node("CLASS", vec![], "class MyClass");
         assert_eq!(owner_name_span("", &node, &behavior), span(&node));
-        assert_eq!(owner_name_span("NonExistent", &node, &behavior), span(&node));
+        assert_eq!(
+            owner_name_span("NonExistent", &node, &behavior),
+            span(&node)
+        );
     }
 
     #[test]
     fn test_single_expression_non_block() {
         let block_multi = mock_node("BLOCK", vec![Child::Nil, Child::Nil], "");
         assert_eq!(single_expression(&block_multi), None);
-        
+
         let non_block = mock_node("LVAR", vec![], "");
         assert_eq!(single_expression(&non_block), Some(&non_block));
     }
@@ -2843,7 +3036,7 @@ mod tests {
         let behavior = CustomBehavior::default();
         let node_bracket = mock_node("ATTRASGN", vec![], "a[b]");
         assert!(!hidden_assignment_mutation(&node_bracket, None, &behavior));
-        
+
         let node_attr = mock_node("ATTRASGN", vec![], "a.b");
         assert!(!hidden_assignment_mutation(&node_attr, None, &behavior));
     }
@@ -2853,13 +3046,15 @@ mod tests {
         let behavior = CustomBehavior::default();
         assert!(!behavior.stream_insertion_operator(&mock_node("LVAR", vec![], "")));
         assert!(!behavior.suppress_branch_decision(&mock_node("LVAR", vec![], "")));
-        assert!(!behavior.state_read_uses_access_span(&NormalizedCallProjection {
-            receiver: "self".to_string(),
-            message: "foo".to_string(),
-            arguments: Vec::new(),
-            access_span: [1, 0, 1, 5],
-            span: [1, 0, 1, 5],
-        }));
+        assert!(
+            !behavior.state_read_uses_access_span(&NormalizedCallProjection {
+                receiver: "self".to_string(),
+                message: "foo".to_string(),
+                arguments: Vec::new(),
+                access_span: [1, 0, 1, 5],
+                span: [1, 0, 1, 5],
+            })
+        );
     }
 
     #[test]
@@ -2898,7 +3093,7 @@ mod tests {
             block: false,
         };
         let call_outside = CallSite {
-            receiver: "active".to_string(), // match predicate
+            receiver: "active".to_string(),     // match predicate
             message: "bar_method=".to_string(), // has trailing '=' to cover trim_end_matches
             file: "test.rb".to_string(),
             function: "foo".to_string(),
@@ -2915,7 +3110,12 @@ mod tests {
         // call_inside is filtered out because it is inside [1, 0, 1, 10]
         // call_outside is kept because it is outside [1, 0, 1, 10]
         // it maps to "bar_method" (trim_end_matches('=') covers lines 2036-2038)
-        let outside = dispatch_members_outside_any(&[call_inside, call_outside], "active", "foo", &[[1, 0, 1, 10]]);
+        let outside = dispatch_members_outside_any(
+            &[call_inside, call_outside],
+            "active",
+            "foo",
+            &[[1, 0, 1, 10]],
+        );
         assert_eq!(outside, vec!["bar_method".to_string()]);
     }
 }

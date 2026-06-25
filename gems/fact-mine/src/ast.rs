@@ -12,7 +12,7 @@ mod normalizer;
 pub(in crate::ast) use normalizer::TreeSitterNormalizer;
 
 pub type Span = [usize; 4];
-const COMPARISON_OPERATORS: &[&str] = &["==", "!=", "===", "!==", "<", "<=", ">", ">="];
+const COMPARISON_OPERATORS: &[&str] = &["<=>", "==", "!=", "===", "!==", "<", "<=", ">", ">="];
 const OPERATOR_CALL_OPERATORS: &[&str] = &[
     "+", "-", "*", "/", "%", "**", "|", "&", "^", "<<", ">>", "=~", "!~",
 ];
@@ -610,7 +610,7 @@ fn exact_integer_text(text: &str) -> bool {
 }
 
 fn comparison_operator_from_text(text: &str) -> Option<String> {
-    for operator in ["===", "!==", "==", "!=", "<=", ">=", "<", ">"] {
+    for operator in ["<=>", "===", "!==", "==", "!=", "<=", ">=", "<", ">"] {
         if text.contains(operator) {
             return Some(operator.to_string());
         }
@@ -668,16 +668,36 @@ pub(crate) mod tests {
         let _ = fs::remove_file(&file_path);
 
         // 2. body_stmts validation error exits
-        let defn = Node { r#type: "DEFS".to_string(), children: vec![], first_lineno: 0, first_column: 0, last_lineno: 0, last_column: 0, text: "".to_string() };
+        let defn = Node {
+            r#type: "DEFS".to_string(),
+            children: vec![],
+            first_lineno: 0,
+            first_column: 0,
+            last_lineno: 0,
+            last_column: 0,
+            text: "".to_string(),
+        };
         assert!(body_stmts(&defn).is_empty());
 
         let defn2 = Node {
             r#type: "DEF".to_string(),
             children: vec![
                 Child::Symbol("name".to_string()),
-                Child::Node(Box::new(Node { r#type: "NOT_SCOPE".to_string(), children: vec![], first_lineno: 0, first_column: 0, last_lineno: 0, last_column: 0, text: "".to_string() })),
+                Child::Node(Box::new(Node {
+                    r#type: "NOT_SCOPE".to_string(),
+                    children: vec![],
+                    first_lineno: 0,
+                    first_column: 0,
+                    last_lineno: 0,
+                    last_column: 0,
+                    text: "".to_string(),
+                })),
             ],
-            first_lineno: 0, first_column: 0, last_lineno: 0, last_column: 0, text: "".to_string()
+            first_lineno: 0,
+            first_column: 0,
+            last_lineno: 0,
+            last_column: 0,
+            text: "".to_string(),
         };
         assert!(body_stmts(&defn2).is_empty());
 
@@ -688,19 +708,39 @@ pub(crate) mod tests {
                 Child::Node(Box::new(Node {
                     r#type: "SCOPE".to_string(),
                     children: vec![Child::Symbol("args".to_string())], // length < 3
-                    first_lineno: 0, first_column: 0, last_lineno: 0, last_column: 0, text: "".to_string()
+                    first_lineno: 0,
+                    first_column: 0,
+                    last_lineno: 0,
+                    last_column: 0,
+                    text: "".to_string(),
                 })),
             ],
-            first_lineno: 0, first_column: 0, last_lineno: 0, last_column: 0, text: "".to_string()
+            first_lineno: 0,
+            first_column: 0,
+            last_lineno: 0,
+            last_column: 0,
+            text: "".to_string(),
         };
         assert!(body_stmts(&defn3).is_empty());
 
         // 3. flatten_and for CONDITION_CLAUSE with exactly one child
-        let child = Node { r#type: "IDENTIFIER".to_string(), children: vec![], first_lineno: 0, first_column: 0, last_lineno: 0, last_column: 0, text: "foo".to_string() };
+        let child = Node {
+            r#type: "IDENTIFIER".to_string(),
+            children: vec![],
+            first_lineno: 0,
+            first_column: 0,
+            last_lineno: 0,
+            last_column: 0,
+            text: "foo".to_string(),
+        };
         let cond = Node {
             r#type: "CONDITION_CLAUSE".to_string(),
             children: vec![Child::Node(Box::new(child.clone()))],
-            first_lineno: 0, first_column: 0, last_lineno: 0, last_column: 0, text: "foo".to_string()
+            first_lineno: 0,
+            first_column: 0,
+            last_lineno: 0,
+            last_column: 0,
+            text: "foo".to_string(),
         };
         let flattened = flatten_and(&cond);
         assert_eq!(flattened.len(), 1);
@@ -708,16 +748,21 @@ pub(crate) mod tests {
 
         // 4. question_colon_ternary_parts & ternary_separator_bytes
         let mut js_parser = Parser::new();
-        js_parser.set_language(&tree_sitter_javascript::LANGUAGE.into()).unwrap();
-        
+        js_parser
+            .set_language(&tree_sitter_javascript::LANGUAGE.into())
+            .unwrap();
+
         let js_tree = js_parser.parse("a ? b : c", None).unwrap();
         let js_node = js_tree.root_node().child(0).unwrap().child(0).unwrap(); // ternary_expression
-        let parts = question_colon_ternary_parts(js_node, "a ? b : c", &["ternary_expression"]).unwrap();
+        let parts =
+            question_colon_ternary_parts(js_node, "a ? b : c", &["ternary_expression"]).unwrap();
         assert_eq!(parts.positive.len(), 1);
         assert_eq!(parts.negative.len(), 1);
 
         // swapped source to trigger positive/negative empty bounds check
-        assert!(question_colon_ternary_parts(js_node, "a : b ? c", &["ternary_expression"]).is_none());
+        assert!(
+            question_colon_ternary_parts(js_node, "a : b ? c", &["ternary_expression"]).is_none()
+        );
 
         // invalid kind check
         assert!(question_colon_ternary_parts(js_node, "a ? b : c", &["different_kind"]).is_none());
@@ -740,7 +785,14 @@ pub(crate) mod tests {
 
         // 8. literal_symbol_arguments
         let extracted = literal_symbol_arguments("foo: :123 :symbol :another? :bad:");
-        assert_eq!(extracted, vec!["symbol".to_string(), "another?".to_string(), "bad".to_string()]);
+        assert_eq!(
+            extracted,
+            vec![
+                "symbol".to_string(),
+                "another?".to_string(),
+                "bad".to_string()
+            ]
+        );
 
         // 9. exact_bare_identifier_text boundary checks
         assert!(!exact_bare_identifier_text(""));
@@ -764,25 +816,60 @@ pub(crate) mod tests {
 
         // Cover literal_symbol_arguments with symbol at the end of string (None branch of char search)
         let extracted_end = literal_symbol_arguments("foo: :123 :symbol :another? :bad: :end");
-        assert_eq!(extracted_end, vec!["symbol".to_string(), "another?".to_string(), "bad".to_string(), "end".to_string()]);
+        assert_eq!(
+            extracted_end,
+            vec![
+                "symbol".to_string(),
+                "another?".to_string(),
+                "bad".to_string(),
+                "end".to_string()
+            ]
+        );
 
         // Cover comparison_operator_from_text return Some branch
-        assert_eq!(comparison_operator_from_text("a == b"), Some("==".to_string()));
+        assert_eq!(
+            comparison_operator_from_text("a == b"),
+            Some("==".to_string())
+        );
 
         // Cover CONDITION_CLAUSE with 0 and 2 children in flatten_and
         let cond_empty = Node {
             r#type: "CONDITION_CLAUSE".to_string(),
             children: vec![],
-            first_lineno: 0, first_column: 0, last_lineno: 0, last_column: 0, text: "".to_string()
+            first_lineno: 0,
+            first_column: 0,
+            last_lineno: 0,
+            last_column: 0,
+            text: "".to_string(),
         };
         assert_eq!(flatten_and(&cond_empty).len(), 1);
 
-        let child1 = Node { r#type: "IDENTIFIER".to_string(), children: vec![], first_lineno: 0, first_column: 0, last_lineno: 0, last_column: 0, text: "foo".to_string() };
-        let child2 = Node { r#type: "IDENTIFIER".to_string(), children: vec![], first_lineno: 0, first_column: 0, last_lineno: 0, last_column: 0, text: "bar".to_string() };
+        let child1 = Node {
+            r#type: "IDENTIFIER".to_string(),
+            children: vec![],
+            first_lineno: 0,
+            first_column: 0,
+            last_lineno: 0,
+            last_column: 0,
+            text: "foo".to_string(),
+        };
+        let child2 = Node {
+            r#type: "IDENTIFIER".to_string(),
+            children: vec![],
+            first_lineno: 0,
+            first_column: 0,
+            last_lineno: 0,
+            last_column: 0,
+            text: "bar".to_string(),
+        };
         let cond_two = Node {
             r#type: "CONDITION_CLAUSE".to_string(),
             children: vec![Child::Node(Box::new(child1)), Child::Node(Box::new(child2))],
-            first_lineno: 0, first_column: 0, last_lineno: 0, last_column: 0, text: "foo bar".to_string()
+            first_lineno: 0,
+            first_column: 0,
+            last_lineno: 0,
+            last_column: 0,
+            text: "foo bar".to_string(),
         };
         assert_eq!(flatten_and(&cond_two).len(), 1);
 
@@ -790,7 +877,7 @@ pub(crate) mod tests {
         // We parse "a ? : c" where positive child is missing
         let js_tree_err = js_parser.parse("a ? : c", None).unwrap();
         let js_node_err = js_tree_err.root_node().child(0).unwrap().child(0).unwrap(); // ternary_expression or error
-        // Let's invoke question_colon_ternary_parts on it (it returns None because positive is empty)
+                                                                                       // Let's invoke question_colon_ternary_parts on it (it returns None because positive is empty)
         let _ = question_colon_ternary_parts(js_node_err, "a ? : c", &["ternary_expression"]);
     }
 
@@ -811,7 +898,3 @@ pub fn run_base_adapter_defaults_tests() {
 pub fn run_normalizer_uncovered_paths_tests() {
     normalizer::run_normalizer_uncovered_paths_tests();
 }
-
-
-
-

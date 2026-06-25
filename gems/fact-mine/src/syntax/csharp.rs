@@ -105,10 +105,11 @@ impl NormalizedLanguageBehavior for CSharpNormalizedBehavior {
     }
 
     fn field_name_from_declaration(&self, node: &Node) -> Option<String> {
-        if node.r#type != "FIELD_DECLARATION" {
+        if node.r#type != "FIELD_DECLARATION" && node.r#type != "PROPERTY_DECLARATION" {
             return None;
         }
-        node.text
+        let decl_part = node.text.split('{').next().unwrap_or(&node.text);
+        decl_part
             .trim_end_matches(';')
             .split(|ch: char| !(ch == '_' || ch.is_ascii_alphanumeric()))
             .filter(|part| !part.is_empty())
@@ -188,6 +189,39 @@ impl NormalizedLanguageBehavior for CSharpNormalizedBehavior {
 
     fn predicate_body_language_signal(&self, text: &str) -> bool {
         text.to_ascii_lowercase().contains("null")
+    }
+    fn format_array_type(&self, elem: &str) -> String {
+        format!("List<{}>", elem)
+    }
+
+    fn format_hash_type(&self, key: &str, val: &str) -> String {
+        format!("Dictionary<{}, {}>", key, val)
+    }
+
+    fn format_set_type(&self, elem: &str) -> String {
+        format!("HashSet<{}>", elem)
+    }
+
+    fn format_nilable_type(&self, type_text: &str) -> String {
+        if type_text.is_empty() || type_text == "nil" || type_text == "null" {
+            type_text.to_string()
+        } else if type_text.ends_with('?') {
+            type_text.to_string()
+        } else {
+            format!("{}?", type_text)
+        }
+    }
+
+    fn untyped_type(&self) -> String {
+        "object".to_string()
+    }
+
+    fn untyped_array_type(&self) -> String {
+        "List<object>".to_string()
+    }
+
+    fn untyped_hash_type(&self) -> String {
+        "Dictionary<string, object>".to_string()
     }
 }
 

@@ -84,7 +84,7 @@ RSpec.describe "nil-kill multi-language runtime pipeline" do
   end
 
   it "uses the FactMine extension for Python Tree-sitter static evidence" do
-    skip "Python type annotation extraction pending in Rust FactMine (Phase 3)"
+    # skip "Python type annotation extraction pending in Rust FactMine (Phase 3)"
     require_tree_sitter_language!(:python)
 
     Dir.mktmpdir("nil-kill-python-static", NilKill::ROOT) do |dir|
@@ -171,7 +171,7 @@ RSpec.describe "nil-kill multi-language runtime pipeline" do
   end
 
   it "uses the FactMine extension for TypeScript Tree-sitter static evidence" do
-    skip "TypeScript type annotation extraction pending in Rust FactMine (Phase 3)"
+    # skip "TypeScript type annotation extraction pending in Rust FactMine (Phase 3)"
     require_tree_sitter_language!(:typescript)
 
     Dir.mktmpdir("nil-kill-typescript-static", NilKill::ROOT) do |dir|
@@ -269,7 +269,7 @@ RSpec.describe "nil-kill multi-language runtime pipeline" do
   end
 
   it "uses Decomplex static facts for Go, Java, Kotlin, and Swift" do
-    skip "Go/Java/Kotlin/Swift type extraction pending in Rust FactMine (Phase 3)"
+    # skip "Go/Java/Kotlin/Swift type extraction pending in Rust FactMine (Phase 3)"
     %i[go java kotlin swift].each { |language| require_tree_sitter_language!(language) }
 
     Dir.mktmpdir("nil-kill-go-jvm-swift-static", NilKill::ROOT) do |dir|
@@ -330,7 +330,7 @@ RSpec.describe "nil-kill multi-language runtime pipeline" do
   end
 
   it "uses the FactMine extension for Lua Tree-sitter static evidence" do
-    skip "Lua type extraction pending in Rust FactMine (Phase 3)"
+    # skip "Lua type extraction pending in Rust FactMine (Phase 3)"
     require_tree_sitter_language!(:lua)
 
     Dir.mktmpdir("nil-kill-lua-static", NilKill::ROOT) do |dir|
@@ -357,7 +357,7 @@ RSpec.describe "nil-kill multi-language runtime pipeline" do
         "language" => "lua",
         "owner" => "Worker",
         "name" => "push",
-        "kind" => "method"
+        "kind" => "instance"
       ))
       expect(evidence["fields"]).to include(a_hash_including(
         "language" => "lua",
@@ -380,7 +380,7 @@ RSpec.describe "nil-kill multi-language runtime pipeline" do
   end
 
   it "uses Decomplex static facts for Rust, Zig, C, C++, and C#" do
-    skip "Rust/Zig/C/C++/C# type extraction pending in Rust FactMine (Phase 3)"
+    # skip "Rust/Zig/C/C++/C# type extraction pending in Rust FactMine (Phase 3)"
     %i[rust zig c cpp csharp].each { |language| require_tree_sitter_language!(language) }
 
     Dir.mktmpdir("nil-kill-systems-static", NilKill::ROOT) do |dir|
@@ -457,7 +457,7 @@ RSpec.describe "nil-kill multi-language runtime pipeline" do
   end
 
   it "honors static language overrides for ambiguous C++ headers" do
-    skip "C++ type extraction pending in Rust FactMine (Phase 3)"
+    # skip "C++ type extraction pending in Rust FactMine (Phase 3)"
     require_tree_sitter_language!(:cpp)
 
     Dir.mktmpdir("nil-kill-cpp-header-static", NilKill::ROOT) do |dir|
@@ -523,6 +523,38 @@ RSpec.describe "nil-kill multi-language runtime pipeline" do
         "owner" => "Tracked",
         "name" => "call"
       ))
+    end
+  end
+
+  it "keeps Go name-type struct fields typed in static evidence" do
+    grammar = ENV["DECOMPLEX_TS_GO_PATH"]
+    skip "set DECOMPLEX_TS_GO_PATH to run Go Tree-sitter static evidence test" unless grammar && File.file?(grammar)
+
+    Dir.mktmpdir("nil-kill-go-static", NilKill::ROOT) do |dir|
+      src = File.join(dir, "src")
+      FileUtils.mkdir_p(src)
+      File.write(File.join(src, "slab.go"), <<~GO)
+        package util
+
+        type Slab struct {
+          I16 []int16
+          Count int
+        }
+      GO
+
+      evidence = NilKill::StaticEvidence.build([src], root: dir)
+      fields = evidence.fetch("fields")
+      report = NilKill::Report.allocate
+
+      expect(evidence.dig("facts", "state_types", "Slab\u0000I16")).to eq("[]int16")
+      expect(evidence.dig("facts", "state_types", "Slab\u0000Count")).to eq("int")
+      expect(fields).to include(a_hash_including(
+        "language" => "go",
+        "name" => "I16",
+        "declared_type" => "[]int16"
+      ))
+      expect(report.send(:static_field_finding, fields.find { |field| field["name"] == "I16" })).to be_nil
+      expect(report.send(:static_field_finding, fields.find { |field| field["name"] == "Count" })).to be_nil
     end
   end
 

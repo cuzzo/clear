@@ -5,17 +5,9 @@
       "method": "tree_sitter?",
       "statements": [
         {
-          "co_uses": [
-            [
-              "DECOMPLEX_PARSER",
-              "tree_sitter"
-            ]
-          ],
+          "co_uses": [],
           "dependencies": [],
-          "reads": [
-            "DECOMPLEX_PARSER",
-            "tree_sitter"
-          ],
+          "reads": [],
           "writes": []
         }
       ]
@@ -319,10 +311,7 @@
         "line": 4,
         "name": "tree_sitter?",
         "owner": "SourceFactComparisonReceiverCanonicalization",
-        "params": [
-          "DECOMPLEX_PARSER",
-          "tree_sitter"
-        ],
+        "params": [],
         "visibility": "public"
       },
       {
@@ -392,20 +381,12 @@
         "owner": "SourceFactComparisonReceiverCanonicalization",
         "statements": [
           {
-            "co_uses": [
-              [
-                "DECOMPLEX_PARSER",
-                "tree_sitter"
-              ]
-            ],
+            "co_uses": [],
             "dependencies": [],
             "end_line": 5,
             "index": 0,
             "line": 5,
-            "reads": [
-              "DECOMPLEX_PARSER",
-              "tree_sitter"
-            ],
+            "reads": [],
             "source": "ENV.fetch(\"DECOMPLEX_PARSER\", \"tree_sitter\").to_s.tr(\"-\", \"_\") == \"tree_sitter\"",
             "span": [
               5,

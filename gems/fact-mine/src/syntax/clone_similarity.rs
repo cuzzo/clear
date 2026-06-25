@@ -386,8 +386,14 @@ mod tests {
             text: "".to_string(),
         }));
         assert_eq!(normalized_scalar_token(&child_node), None);
-        assert_eq!(normalized_scalar_token(&Child::Integer(42)), Some("lit".to_string()));
-        assert_eq!(normalized_scalar_token(&Child::Bool(true)), Some("id".to_string()));
+        assert_eq!(
+            normalized_scalar_token(&Child::Integer(42)),
+            Some("lit".to_string())
+        );
+        assert_eq!(
+            normalized_scalar_token(&Child::Bool(true)),
+            Some("id".to_string())
+        );
         assert_eq!(normalized_scalar_token(&Child::Nil), None);
     }
 

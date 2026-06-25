@@ -522,13 +522,32 @@ impl<'a> LocalFlow<'a> {
                 }
             }
         });
-        let lhs_names = self.local_writes(node);
-        if !lhs_names.is_empty() {
-            let reads = self.local_reads(node, local_names, &lhs_names);
-            for lhs in lhs_names {
-                for read in &reads {
-                    if &lhs != read {
-                        deps.push((lhs.clone(), read.clone()));
+        let is_control_flow = matches!(
+            node.r#type.as_str(),
+            "IF" | "UNLESS"
+                | "CASE"
+                | "CASE2"
+                | "WHEN"
+                | "WHILE"
+                | "UNTIL"
+                | "FOR"
+                | "ITER"
+                | "BEGIN"
+                | "RESCUE"
+                | "ENSURE"
+                | "COND"
+                | "SWITCH"
+                | "MATCH"
+        );
+        if !is_control_flow {
+            let lhs_names = self.local_writes(node);
+            if !lhs_names.is_empty() {
+                let reads = self.local_reads(node, local_names, &lhs_names);
+                for lhs in lhs_names {
+                    for read in &reads {
+                        if &lhs != read {
+                            deps.push((lhs.clone(), read.clone()));
+                        }
                     }
                 }
             }
@@ -834,7 +853,8 @@ mod tests {
     fn test_scan_documents_parallel() {
         let prev_jobs = parallel::job_count();
         parallel::set_jobs_for_process(Some(2)).unwrap();
-        let mut doc1: Document = serde_json::from_str(r#"{"file":"a.rb","language":"ruby"}"#).unwrap();
+        let mut doc1: Document =
+            serde_json::from_str(r#"{"file":"a.rb","language":"ruby"}"#).unwrap();
         doc1.local_methods = vec![MethodSummary {
             id: "a".to_string(),
             owner: "A".to_string(),
@@ -847,7 +867,8 @@ mod tests {
             boundaries: Vec::new(),
         }];
 
-        let mut doc2: Document = serde_json::from_str(r#"{"file":"b.rb","language":"ruby"}"#).unwrap();
+        let mut doc2: Document =
+            serde_json::from_str(r#"{"file":"b.rb","language":"ruby"}"#).unwrap();
         doc2.local_methods = vec![MethodSummary {
             id: "b".to_string(),
             owner: "B".to_string(),
@@ -999,10 +1020,10 @@ mod tests {
         let behavior = crate::syntax::lua::behavior();
         // empty identifiers
         assert!(textual_local_writes("1 + 2", behavior).is_empty());
-        
+
         // declaration like lhs
         assert!(declaration_like_lhs("local x", behavior));
-        
+
         // simple_identifier check
         assert!(!simple_identifier("123foo"));
 
@@ -1017,7 +1038,10 @@ mod tests {
 
         // first false, second true
         let lua_behavior = crate::syntax::lua::behavior();
-        assert_eq!(textual_local_writes("local a, b := 1", lua_behavior), vec!["a", "b"]);
+        assert_eq!(
+            textual_local_writes("local a, b := 1", lua_behavior),
+            vec!["a", "b"]
+        );
 
         // first false, second false, third true
         assert_eq!(textual_local_writes("a := 1", behavior), vec!["a"]);
@@ -1095,10 +1119,7 @@ mod tests {
         };
         let node = Node {
             r#type: "LASGN".to_string(),
-            children: vec![
-                Child::Symbol("x".to_string()),
-                Child::Node(Box::new(rhs)),
-            ],
+            children: vec![Child::Symbol("x".to_string()), Child::Node(Box::new(rhs))],
             first_lineno: 1,
             first_column: 0,
             last_lineno: 1,

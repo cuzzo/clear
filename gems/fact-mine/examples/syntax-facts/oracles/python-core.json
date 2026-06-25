@@ -547,7 +547,7 @@
       ],
       "state_writes": [
         {
-          "field": "_lock",
+          "field": "@_lock",
           "function": "__init__",
           "line": 8,
           "owner": "PythonSyntaxFactsCore",
@@ -560,7 +560,7 @@
           ]
         },
         {
-          "field": "count",
+          "field": "@count",
           "function": "__init__",
           "line": 10,
           "owner": "PythonSyntaxFactsCore",
@@ -573,7 +573,7 @@
           ]
         },
         {
-          "field": "resource",
+          "field": "@resource",
           "function": "__init__",
           "line": 9,
           "owner": "PythonSyntaxFactsCore",

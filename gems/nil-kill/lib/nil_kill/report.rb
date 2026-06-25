@@ -1338,6 +1338,8 @@ module NilKill
       case node
       when Syntax::DefNode
         mark_return_usage(node.body, :return, names, usage)
+      when Syntax::BodyStatementNode, Syntax::BeginNode
+        mark_return_usage(node.statements, context, names, usage)
       when Syntax::StatementsNode
         body = node.body || []
         body.each_with_index do |child, idx|
@@ -3694,6 +3696,8 @@ module NilKill
       case node
       when Syntax::DefNode
         mark_return_usage_graph(node.body, :return, node.name, candidate_names, method_return_types, used, return_edges)
+      when Syntax::BodyStatementNode, Syntax::BeginNode
+        mark_return_usage_graph(node.statements, context, current_method, candidate_names, method_return_types, used, return_edges)
       when Syntax::StatementsNode
         body = node.body || []
         body.each_with_index do |child, idx|

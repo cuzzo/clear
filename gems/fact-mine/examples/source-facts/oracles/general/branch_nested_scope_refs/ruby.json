@@ -358,16 +358,16 @@
       },
       {
         "child_fingerprints": [
-          "block(call(id id) body(call(id call<effect_list>(id argument_list(id lit)))))",
+          "block(call(id id) body(parameters(id) call(id call<effect_list>(id argument_list(id lit)))))",
           "return(bool)"
         ],
         "child_masses": [
-          9,
+          11,
           2
         ],
-        "fingerprint": "if(block(call(id id) body(call(id call<effect_list>(id argument_list(id lit))))) return(bool))",
+        "fingerprint": "if(block(call(id id) body(parameters(id) call(id call<effect_list>(id argument_list(id lit))))) return(bool))",
         "line": 5,
-        "mass": 12,
+        "mass": 14,
         "method_name": "nested_blocks",
         "node_name": "if"
       },
@@ -483,9 +483,9 @@
         "child_masses": [
           2
         ],
-        "fingerprint": "block(call(id id) body(body_statement(if(call(lit call(id id) argument_list(lit))) call<touch>(id argument_list(id)))))",
+        "fingerprint": "block(call(id id) body(parameters(id) body_statement(if(call(lit call(id id) argument_list(lit))) call<touch>(id argument_list(id)))))",
         "line": 20,
-        "mass": 14,
+        "mass": 16,
         "method_name": "do_block_branch",
         "node_name": "block"
       },
@@ -496,9 +496,9 @@
         "child_masses": [
           2
         ],
-        "fingerprint": "block(call(id id) body(call(id call<effect_list>(id argument_list(id lit)))))",
+        "fingerprint": "block(call(id id) body(parameters(id) call(id call<effect_list>(id argument_list(id lit)))))",
         "line": 5,
-        "mass": 9,
+        "mass": 11,
         "method_name": "nested_blocks",
         "node_name": "block"
       },
@@ -509,9 +509,9 @@
         "child_masses": [
           2
         ],
-        "fingerprint": "block(call(id id) body(if(call(lit call(id id) argument_list(call(id id))) call<touch>(id argument_list(call(id id))))))",
+        "fingerprint": "block(call(id id) body(parameters(id) if(call(lit call(id id) argument_list(call(id id))) call<touch>(id argument_list(call(id id))))))",
         "line": 7,
-        "mass": 15,
+        "mass": 17,
         "method_name": "nested_blocks",
         "node_name": "block"
       },
@@ -742,16 +742,16 @@
       },
       {
         "child_fingerprints": [
-          "if(block(call(id id) body(call(id call<effect_list>(id argument_list(id lit))))) return(bool))",
-          "block(call(id id) body(if(call(lit call(id id) argument_list(call(id id))) call<touch>(id argument_list(call(id id))))))"
+          "if(block(call(id id) body(parameters(id) call(id call<effect_list>(id argument_list(id lit))))) return(bool))",
+          "block(call(id id) body(parameters(id) if(call(lit call(id id) argument_list(call(id id))) call<touch>(id argument_list(call(id id))))))"
         ],
         "child_masses": [
-          12,
-          15
+          14,
+          17
         ],
-        "fingerprint": "body_statement(if(block(call(id id) body(call(id call<effect_list>(id argument_list(id lit))))) return(bool)) block(call(id id) body(if(call(lit call(id id) argument_list(call(id id))) call<touch>(id argument_list(call(id id)))))))",
+        "fingerprint": "body_statement(if(block(call(id id) body(parameters(id) call(id call<effect_list>(id argument_list(id lit))))) return(bool)) block(call(id id) body(parameters(id) if(call(lit call(id id) argument_list(call(id id))) call<touch>(id argument_list(call(id id)))))))",
         "line": 5,
-        "mass": 28,
+        "mass": 32,
         "method_name": "nested_blocks",
         "node_name": "body_statement"
       },
@@ -828,36 +828,36 @@
       },
       {
         "child_fingerprints": [
-          "method(id body(parameters(id id) body_statement(if(block(call(id id) body(call(id call<effect_list>(id argument_list(id lit))))) return(bool)) block(call(id id) body(if(call(lit call(id id) argument_list(call(id id))) call<touch>(id argument_list(call(id id)))))))))",
+          "method(id body(parameters(id id) body_statement(if(block(call(id id) body(parameters(id) call(id call<effect_list>(id argument_list(id lit))))) return(bool)) block(call(id id) body(parameters(id) if(call(lit call(id id) argument_list(call(id id))) call<touch>(id argument_list(call(id id)))))))))",
           "method(id body(parameters(id) case(call(id id) when(argument_list(lit) hash(hash(lit if(call(id id) lit lit))) hash(hash(lit if(call(id id) lit lit)))))))",
-          "method(id body(parameters(id) block(call(id id) body(body_statement(if(call(lit call(id id) argument_list(lit))) call<touch>(id argument_list(id)))))))"
+          "method(id body(parameters(id) block(call(id id) body(parameters(id) body_statement(if(call(lit call(id id) argument_list(lit))) call<touch>(id argument_list(id)))))))"
         ],
         "child_masses": [
-          33,
+          37,
           26,
-          18
+          20
         ],
-        "fingerprint": "body_statement(method(id body(parameters(id id) body_statement(if(block(call(id id) body(call(id call<effect_list>(id argument_list(id lit))))) return(bool)) block(call(id id) body(if(call(lit call(id id) argument_list(call(id id))) call<touch>(id argument_list(call(id id))))))))) method(id body(parameters(id) case(call(id id) when(argument_list(lit) hash(hash(lit if(call(id id) lit lit))) hash(hash(lit if(call(id id) lit lit))))))) method(id body(parameters(id) block(call(id id) body(body_statement(if(call(lit call(id id) argument_list(lit))) call<touch>(id argument_list(id))))))))",
+        "fingerprint": "body_statement(method(id body(parameters(id id) body_statement(if(block(call(id id) body(parameters(id) call(id call<effect_list>(id argument_list(id lit))))) return(bool)) block(call(id id) body(parameters(id) if(call(lit call(id id) argument_list(call(id id))) call<touch>(id argument_list(call(id id))))))))) method(id body(parameters(id) case(call(id id) when(argument_list(lit) hash(hash(lit if(call(id id) lit lit))) hash(hash(lit if(call(id id) lit lit))))))) method(id body(parameters(id) block(call(id id) body(parameters(id) body_statement(if(call(lit call(id id) argument_list(lit))) call<touch>(id argument_list(id))))))))",
         "line": 4,
-        "mass": 78,
+        "mass": 84,
         "method_name": "(top-level)",
         "node_name": "body_statement"
       },
       {
         "child_fingerprints": [],
         "child_masses": [],
-        "fingerprint": "method(id body(parameters(id id) body_statement(if(block(call(id id) body(call(id call<effect_list>(id argument_list(id lit))))) return(bool)) block(call(id id) body(if(call(lit call(id id) argument_list(call(id id))) call<touch>(id argument_list(call(id id)))))))))",
+        "fingerprint": "method(id body(parameters(id id) body_statement(if(block(call(id id) body(parameters(id) call(id call<effect_list>(id argument_list(id lit))))) return(bool)) block(call(id id) body(parameters(id) if(call(lit call(id id) argument_list(call(id id))) call<touch>(id argument_list(call(id id)))))))))",
         "line": 4,
-        "mass": 33,
+        "mass": 37,
         "method_name": "nested_blocks",
         "node_name": "defn"
       },
       {
         "child_fingerprints": [],
         "child_masses": [],
-        "fingerprint": "method(id body(parameters(id) block(call(id id) body(body_statement(if(call(lit call(id id) argument_list(lit))) call<touch>(id argument_list(id)))))))",
+        "fingerprint": "method(id body(parameters(id) block(call(id id) body(parameters(id) body_statement(if(call(lit call(id id) argument_list(lit))) call<touch>(id argument_list(id)))))))",
         "line": 19,
-        "mass": 18,
+        "mass": 20,
         "method_name": "do_block_branch",
         "node_name": "defn"
       },

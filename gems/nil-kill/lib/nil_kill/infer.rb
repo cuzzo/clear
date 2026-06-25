@@ -11,13 +11,22 @@ module NilKill
     end
 
     def run
+      # Phase 1: Ingestion & Normalization
       load_runtime
       index_sources
       load_sorbet if @run_sorbet
-      build_actions
+
+      # Phase 2: Flow Propagation & Constraint Solving
       build_flow_graph
+
+      # Phase 3: Stateful Pressure Scanning (independent of parsing)
       build_fallibility_pressure
       build_hidden_enum_pressure
+
+      # Phase 4: Action Generation
+      build_actions
+
+      # Phase 5: Output Rendering
       evidence = @store.to_h
       @store.write(evidence)
       Report.new([], evidence: evidence).run
@@ -28,7 +37,78 @@ module NilKill
     end
 
     def index_sources
-      StaticAnalysis.index_store(store: @store, targets: NilKill.target_dirs, root: ROOT)
+      if ENV.fetch("NIL_KILL_SOURCE_INDEX_ENGINE", "static_analysis") == "static_analysis"
+        StaticAnalysis.index_store(store: @store, targets: NilKill.target_dirs, root: ROOT)
+        return
+      end
+
+      SourceIndex.reset_global_shape_indexes
+      files = NilKill.target_files
+      warm_only = ENV["NIL_KILL_IDX_WARM_ONLY"] != "0"
+      files.each { |path| SourceIndex.new(path, warm_only: warm_only) }
+      files.each { |path| SourceIndex.new(path, warm_only: true) } if warm_only
+      reuse = ENV["NIL_KILL_IDX_REUSE"] != "0"
+      cached = nil
+      5.times do
+        before = SourceIndex.noreturn_methods.size
+        pass = reuse ? {} : nil
+        files.each { |path| idx = SourceIndex.new(path); pass[path] = idx if reuse }
+        if SourceIndex.noreturn_methods.size == before
+          cached = pass
+          break
+        end
+      end
+      files.each do |path|
+        idx = (cached && cached[path]) || SourceIndex.new(path)
+        append_source_index_facts(idx, target: true)
+        idx.methods.each do |method|
+          rec = @store.method_record([method["class"], method["method"], method["kind"], File.expand_path(method["path"], ROOT), method["line"]])
+          rec["source"] = method
+          rec["has_sig"] = method["has_sig"]
+        end
+      end
+      (NilKill.usage_scan_files - files).each do |path|
+        append_source_index_facts(SourceIndex.new(path, usage_only: true), target: false)
+      end
+    end
+
+    def append_source_index_facts(idx, target:)
+      @store.facts["files"][idx.rel] = idx.summary if target
+      @store.facts["unsigned_methods"].concat(idx.methods.reject { |m| m["has_sig"] }) if target
+      @store.facts["existing_sigs"].concat(idx.methods.select { |m| m["has_sig"] }) if target
+      @store.facts["tlet_sites"].concat(idx.tlet_sites) if target
+      @store.facts["dead_nil_checks"].concat(idx.dead_nil_checks) if target
+      @store.facts["deterministic_guards"].concat(idx.deterministic_guards) if target
+      @store.facts["struct_declarations"].concat(idx.struct_declarations) if target
+      @store.facts["struct_field_static"].concat(idx.struct_field_static) if target
+      @store.facts["tuple_arrays"].concat(idx.tuple_arrays) if target
+      @store.facts["hash_shapes"].concat(idx.hash_shapes) if target
+      @store.facts["collection_index_lookups"].concat(idx.collection_index_lookups) if target
+      @store.facts["hash_record_blockers"].concat(idx.hash_record_blockers) if target
+      @store.facts["hash_record_member_calls"].concat(idx.hash_record_member_calls) if target
+      @store.facts["type_normalizers"].concat(idx.type_normalizers) if target
+      @store.facts["dispatcher_inferences"].concat(idx.dispatcher_inferences) if target
+      @store.facts["return_origins"].concat(idx.return_origins) if target
+      @store.facts["param_origins"].concat(idx.param_origins) if target
+      (@store.facts["hash_record_escape_sites"] ||= []).concat(idx.hash_record_escape_sites) if target
+      (@store.facts["hidden_enum_observations"] ||= []).concat(idx.hidden_enum_observations) if target
+      (@store.facts["return_usage_sites"] ||= []).concat(idx.return_usage_sites)
+      (@store.facts["return_direct_usage_sites"] ||= []).concat(idx.return_direct_usage_sites)
+      (@store.facts["rescue_handlers"] ||= []).concat(idx.rescue_handlers)
+      return unless target
+
+      @store.facts["ivar_protocols"] ||= {}
+      idx.ivar_protocols.each do |(klass, ivar), methods|
+        key = "#{klass}\0#{ivar}"
+        @store.facts["ivar_protocols"][key] ||= []
+        @store.facts["ivar_protocols"][key] = (@store.facts["ivar_protocols"][key] + methods.to_a).uniq
+      end
+      @store.facts["ivar_param_origins"] ||= {}
+      idx.ivar_param_origins.each do |(klass, ivar), sources|
+        key = "#{klass}\0#{ivar}"
+        @store.facts["ivar_param_origins"][key] ||= []
+        @store.facts["ivar_param_origins"][key] = (@store.facts["ivar_param_origins"][key] + sources.to_a).uniq
+      end
     end
 
     def load_sorbet
@@ -116,6 +196,7 @@ module NilKill
     def propose_hash_record_struct_actions
       shapes_by_site = Array(@store.facts["hash_shapes"]).each_with_object({}) do |shape, index|
         index[[shape["path"], shape["line"].to_i, shape["code"].to_s]] = shape
+        index[[shape["path"], shape["line"].to_i]] ||= shape
       end
       lookups = Array(@store.facts["collection_index_lookups"]).select do |lookup|
         origin = lookup["origin"] || {}
@@ -126,7 +207,7 @@ module NilKill
       end
       lookups.group_by { |lookup| [lookup.dig("origin", "path"), lookup.dig("origin", "line").to_i, lookup.dig("origin", "name"), lookup.dig("origin", "code").to_s] }.each do |(path, line, name, code), group|
         next if path.to_s.empty? || line <= 0 || name.to_s.empty? || code.to_s.empty?
-        shape = shapes_by_site[[path, line, code]]
+        shape = shapes_by_site[[path, line, code]] || shapes_by_site[[path, line]]
         next unless shape
         fields = hash_record_struct_fields(shape)
         next if fields.size < 2
@@ -137,7 +218,7 @@ module NilKill
         read_rewrites.uniq! { |rw| [rw["line"], rw["code"]] }
         next if read_rewrites.empty?
         blockers = hash_record_field_blockers(fields) + hash_record_param_signature_blockers(signatures)
-        @store.actions << base_action("promote_hash_record_to_struct", REVIEW, path, line,
+        @store.actions << base_action("promote_hash_record_to_struct", REVIEW, NilKill.rel(path), line,
           "promote local hash record #{name} to #{struct_name}; rewrite #{read_rewrites.size} literal field read(s)",
           { "name" => name, "struct_name" => struct_name, "scope" => group.first["enclosing_scope"].to_s.split("::").reject(&:empty?),
             "literal" => { "line" => line, "code" => code },
@@ -218,7 +299,7 @@ module NilKill
           end
         end
         blockers = hash_record_field_blockers(fields)
-        @store.actions << base_action("promote_hash_record_to_struct", REVIEW, path, source["line"],
+        @store.actions << base_action("promote_hash_record_to_struct", REVIEW, NilKill.rel(path), source["line"],
           "promote hash record returned by #{callee} to #{struct_name}; rewrite #{read_rewrites.size} forwarded field read(s)",
           { "name" => name, "struct_name" => struct_name, "scope" => scope.to_s.split("::").reject(&:empty?),
             "literal" => { "line" => source["line"], "code" => source["code"] },
@@ -379,7 +460,7 @@ module NilKill
         else
           (producers + consumers).min_by { |site| [site["path"].to_s, site["line"].to_i] }
         end
-        @store.actions << base_action("promote_hash_record_cluster_to_struct", REVIEW, first["path"], first["line"],
+        @store.actions << base_action("promote_hash_record_cluster_to_struct", REVIEW, NilKill.rel(first["path"]), first["line"],
           "plan #{row["type_name"] || row["struct_name"]} from #{row["shape_count"]} hash literal shape(s), #{row["total_pressure"]} pressure slot(s)",
           { "struct_name" => row["struct_name"], "type_name" => row["type_name"], "scope" => row["scope"], "struct_path" => row["struct_path"], "fields" => row["fields"],
             "nested_structs" => row["nested_structs"],
@@ -923,10 +1004,27 @@ module NilKill
 
       # Fast path: use indexed return-usage facts when available
       if evidence.dig("facts", "return_usage_sites")&.any?
+        method_return_types = unambiguous_method_return_types(evidence)
         evidence["facts"]["return_usage_sites"].each do |site|
-          name = site["name"].to_s
-          used << name.to_sym if candidate_names.include?(name.to_sym)
+          name = site["name"].to_s.to_sym
+          next unless candidate_names.include?(name)
+          context = site["context"].to_s
+          current_method_name = site["current_method"].to_s
+          current_method = current_method_name.empty? ? nil : current_method_name.to_sym
+          if context == "return" && current_method && candidate_names.include?(current_method)
+            ret_type = method_return_types[current_method]
+            if ret_type && ret_type != "void" && ret_type != "T.untyped"
+              used << name
+            else
+              return_edges[current_method] << name
+            end
+          elsif context == "return" && method_return_types[current_method] != "void"
+            used << name
+          elsif context == "value"
+            used << name
+          end
         end
+        propagate_return_usage!(used, return_edges)
       else
         method_return_types = unambiguous_method_return_types(evidence)
         NilKill.usage_scan_files.each do |path|
@@ -968,6 +1066,8 @@ module NilKill
       case node
       when Syntax::DefNode
         mark_return_usage_graph(node.body, :return, node.name, candidate_names, method_return_types, used, return_edges)
+      when Syntax::BodyStatementNode, Syntax::BeginNode
+        mark_return_usage_graph(node.statements, context, current_method, candidate_names, method_return_types, used, return_edges)
       when Syntax::StatementsNode
         body = node.body || []
         body.each_with_index do |child, idx|

@@ -28,7 +28,7 @@ pub(crate) mod visibility;
 pub(crate) mod zig;
 
 use crate::ast::RawNode;
-pub use crate::ast::Span;
+pub use crate::ast::{Child, Node, Span};
 use crate::parallel;
 use anyhow::{bail, Result};
 use serde::{Deserialize, Deserializer, Serialize};
@@ -99,7 +99,7 @@ impl Language {
     pub fn for_extension(extension: &str) -> Option<Self> {
         match extension {
             "rb" => Some(Self::Ruby),
-            "py" => Some(Self::Python),
+            "py" | "pyi" => Some(Self::Python),
             "js" | "jsx" | "mjs" | "cjs" => Some(Self::JavaScript),
             "java" => Some(Self::Java),
             "ts" | "tsx" => Some(Self::TypeScript),
@@ -526,6 +526,8 @@ mod tests {
         std::env::remove_var("DECOMPLEX_RUST_PROFILE");
 
         let core_owners = core_owner_names(&doc);
-        assert!(core_owners.is_empty() || core_owners.contains(&"Object") || core_owners.contains(&""));
+        assert!(
+            core_owners.is_empty() || core_owners.contains(&"Object") || core_owners.contains(&"")
+        );
     }
 }

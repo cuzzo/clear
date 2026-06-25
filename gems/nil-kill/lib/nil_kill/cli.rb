@@ -22,7 +22,6 @@ module NilKill
       when "normalize" then Commands::NormalizeCommand.new(@argv).run
       when "analyze" then Commands::AnalyzeCommand.new(@argv).run
       when "trace-spec" then Commands::TraceSpecCommand.new(@argv).run
-      when "espalier-evidence" then EspalierEvidence.new(@argv).run
       when "focus-hash-record" then FocusHashRecord.new(@argv).run
       when "report" then guard_fresh_evidence! unless explicit_evidence_path?(@argv); Report.new(@argv).run
       when "struct-rbi" then StructRBI.new(@argv).run
@@ -296,7 +295,6 @@ module NilKill
           bundle exec tools/nil-kill normalize [--root DIR] --static static.json [--traces traces/] [--output evidence.json]
           bundle exec tools/nil-kill analyze [--evidence evidence.json] [--output evidence.json]
           bundle exec tools/nil-kill trace-spec
-          bundle exec tools/nil-kill espalier-evidence [--output tmp/nil-kill/espalier-evidence.json]
           bundle exec tools/nil-kill focus-hash-record STRUCT [--targets path[:path...]]
           bundle exec tools/nil-kill report [--evidence evidence.json] [--format markdown|sarif|json] [--json report.sarif] [--sarif report.sarif] [--with-links] [--output-path PATH] [--hygiene]
           bundle exec tools/nil-kill struct-rbi [--complete] [--output sorbet/rbi/nil-kill-structs.rbi]
