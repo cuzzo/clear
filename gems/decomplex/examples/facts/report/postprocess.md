@@ -14,6 +14,7 @@
 - [Decision Pressure (1)](#decision-pressure-1)
 - [Redundant Nil Guards (0)](#redundant-nil-guards-0)
 - [State Heatmap (0)](#state-heatmap-0)
+- [Superfluous State (0)](#superfluous-state-0)
 - [State-Based Branch Density (1)](#statebased-branch-density-1)
 - [Temporal Ordering Pressure (0)](#temporal-ordering-pressure-0)
 - [Missing Abstractions (1)](#missing-abstractions-1)
@@ -96,6 +97,11 @@ None.
 
 ## State Heatmap (0)
 _state fields ranked by write/read/re-derivation scatter -- tangled mutable state should get one owner_
+
+None.
+
+## Superfluous State (0)
+_state fields that could be eliminated entirely (dead state / intra-method pass-through / adjacent-call pass-through / derived cache)_
 
 None.
 
@@ -215,7 +221,7 @@ None.
 
 ## Run Summary
 - Files analyzed: 1
-- Detectors: 25 (all shipped, self-tested)
+- Detectors: 26 (all shipped, self-tested)
 - Convergence: 1 unit(s) flagged by >=2 independent detectors
 - Root-cause clusters: 6 (one fix collapses each)
 - Total candidates: 11

@@ -3,7 +3,7 @@ use crate::decomplex::detectors::{
     function_lcom, implicit_control_flow, inconsistent_rename_clone, local_flow, locality_drag,
     miner, operational_discontinuity, oversized_predicate, path_condition, predicate_alias,
     redundant_nil_guard, semantic_alias, sequence_mine, state_branch_density, state_mesh,
-    temporal_ordering_pressure, weighted_inlined_cognitive_complexity,
+    superfluous_state, temporal_ordering_pressure, weighted_inlined_cognitive_complexity,
 };
 use crate::decomplex::parallel;
 use crate::decomplex::syntax::{self, Document, Language};
@@ -330,6 +330,11 @@ fn detector_tasks<'a>(
         json_value(operational_discontinuity::scan_summaries(
             &shared.local_summaries,
         ))
+    });
+    detector_task!("superfluous_state", {
+        merge_array_reports(groups, |documents| {
+            json_value(superfluous_state::scan_documents(documents))
+        })
     });
     tasks
 }

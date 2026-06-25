@@ -22,3 +22,4 @@ pub mod state_mesh;
 pub mod structural_topology;
 pub mod temporal_ordering_pressure;
 pub mod weighted_inlined_cognitive_complexity;
+pub mod superfluous_state;
