@@ -36,6 +36,7 @@ struct Write {
     defn: String,
     line: usize,
     span: Span,
+    owner: String,
 }
 
 pub fn scan_files(files: &[PathBuf], language: Language) -> Result<CoUpdateReport> {
@@ -77,7 +78,50 @@ fn write_from_state_write(w: &StateWrite) -> Write {
         defn: w.function.clone(),
         line: w.line,
         span: w.span,
+        owner: w.owner.clone(),
     }
+}
+
+fn file_stem(file: &str) -> Option<String> {
+    std::path::Path::new(file)
+        .file_stem()
+        .and_then(|s| s.to_str())
+        .map(|s| s.to_string())
+}
+
+fn is_dynamic_language(file: &str) -> bool {
+    if let Some(ext) = std::path::Path::new(file).extension().and_then(|e| e.to_str()) {
+        matches!(ext, "rb" | "py" | "js" | "php" | "lua")
+    } else {
+        false
+    }
+}
+
+fn is_unknown(w: &Write) -> bool {
+    if w.owner.is_empty() || w.owner == "Object" || w.owner == "(unknown)" {
+        return true;
+    }
+    if is_dynamic_language(&w.file) && w.recv != "self" && w.recv != "this" {
+        return true;
+    }
+    if let Some(stem) = file_stem(&w.file) {
+        if w.owner.eq_ignore_ascii_case(&stem) {
+            return true;
+        }
+    }
+    false
+}
+
+fn can_pair(w1: &Write, w2: &Write) -> bool {
+    if !w1.recv.is_empty() && w1.recv == w2.recv {
+        if w1.owner == w2.owner || is_unknown(w1) || is_unknown(w2) {
+            return true;
+        }
+    }
+    if !is_unknown(w1) && !is_unknown(w2) && w1.owner == w2.owner {
+        return true;
+    }
+    false
 }
 
 struct Report {
@@ -107,25 +151,46 @@ impl Report {
         Self { writes, by_unit }
     }
 
+    fn pair_owners(&self) -> BTreeMap<Vec<String>, BTreeSet<String>> {
+        let mut pair_owners: BTreeMap<Vec<String>, BTreeSet<String>> = BTreeMap::new();
+        for (_unit, ws) in &self.by_unit {
+            for i in 0..ws.len() {
+                for j in i + 1..ws.len() {
+                    let w1 = &ws[i];
+                    let w2 = &ws[j];
+                    if w1.attr != w2.attr && can_pair(w1, w2) {
+                        let mut pair = vec![w1.attr.clone(), w2.attr.clone()];
+                        pair.sort();
+
+                        let owner_ctx = if is_unknown(w1) || is_unknown(w2) {
+                            "".to_string()
+                        } else {
+                            w1.owner.clone()
+                        };
+                        pair_owners.entry(pair).or_default().insert(owner_ctx);
+                    }
+                }
+            }
+        }
+        pair_owners
+    }
+
     fn co_written_pairs(&self, min_support: usize) -> Vec<CoWrittenPair> {
         let mut keys = Vec::new();
-        let mut counts: BTreeMap<Vec<String>, Vec<(String, String)>> = BTreeMap::new();
+        let mut counts: BTreeMap<Vec<String>, BTreeSet<(String, String)>> = BTreeMap::new();
         for (unit, ws) in &self.by_unit {
-            let mut attrs: Vec<_> = ws
-                .iter()
-                .map(|w| w.attr.clone())
-                .collect::<BTreeSet<_>>()
-                .into_iter()
-                .collect();
-            attrs.sort();
-
-            for i in 0..attrs.len() {
-                for j in i + 1..attrs.len() {
-                    let pair = vec![attrs[i].clone(), attrs[j].clone()];
-                    if !counts.contains_key(&pair) {
-                        keys.push(pair.clone());
+            for i in 0..ws.len() {
+                for j in i + 1..ws.len() {
+                    let w1 = &ws[i];
+                    let w2 = &ws[j];
+                    if w1.attr != w2.attr && can_pair(w1, w2) {
+                        let mut pair = vec![w1.attr.clone(), w2.attr.clone()];
+                        pair.sort();
+                        if !counts.contains_key(&pair) {
+                            keys.push(pair.clone());
+                        }
+                        counts.entry(pair).or_default().insert(unit.clone());
                     }
-                    counts.entry(pair).or_default().push(unit.clone());
                 }
             }
         }
@@ -151,6 +216,7 @@ impl Report {
 
     fn neglected_updates(&self, min_support: usize) -> Vec<NeglectedUpdate> {
         let pairs = self.co_written_pairs(min_support);
+        let pair_owners = self.pair_owners();
         let mut out = Vec::new();
 
         for ((file, defn), ws) in &self.by_unit {
@@ -169,18 +235,28 @@ impl Report {
 
                 if let (Some(has), Some(miss)) = (has, miss) {
                     if let Some(w) = ws.iter().find(|x| &x.attr == has) {
-                        let loc = format!("{}:{}:{}", file, defn, w.line);
-                        let mut spans = BTreeMap::new();
-                        spans.insert(loc.clone(), w.span);
-                        out.push(NeglectedUpdate {
-                            pair: p.pair.clone(),
-                            support: p.support,
-                            has: has.clone(),
-                            missing: miss.clone(),
-                            at: loc,
-                            spans,
-                            recv: w.recv.clone(),
-                        });
+                        let matches = if is_unknown(w) {
+                            true
+                        } else if let Some(owners) = pair_owners.get(&p.pair) {
+                            owners.contains("") || owners.contains(&w.owner)
+                        } else {
+                            false
+                        };
+
+                        if matches {
+                            let loc = format!("{}:{}:{}", file, defn, w.line);
+                            let mut spans = BTreeMap::new();
+                            spans.insert(loc.clone(), w.span);
+                            out.push(NeglectedUpdate {
+                                pair: p.pair.clone(),
+                                support: p.support,
+                                has: has.clone(),
+                                missing: miss.clone(),
+                                at: loc,
+                                spans,
+                                recv: w.recv.clone(),
+                            });
+                        }
                     }
                 }
             }
@@ -233,6 +309,179 @@ mod tests {
         let r = Report::new(vec![w1, w2]);
         let pairs = r.co_written_pairs(2);
         assert!(pairs.is_empty());
+    }
+
+    #[test]
+    fn test_co_update_dynamic_mapping() {
+        // Scenario 1: Pair is co-written in a KNOWN object context, but missed in an UNKNOWN context.
+        let doc1: Document = serde_json::from_value(json!({
+            "file": "known_to_unknown.rb",
+            "language": "ruby",
+            "state_writes": [
+                // Unit 1: set_both (known context)
+                {
+                    "field": "a",
+                    "receiver": "self",
+                    "file": "known_to_unknown.rb",
+                    "function": "set_both",
+                    "line": 1,
+                    "span": [1, 1, 1, 10],
+                    "owner": "KnownClass"
+                },
+                {
+                    "field": "b",
+                    "receiver": "self",
+                    "file": "known_to_unknown.rb",
+                    "function": "set_both",
+                    "line": 2,
+                    "span": [2, 1, 2, 10],
+                    "owner": "KnownClass"
+                },
+                // Unit 2: set_both_again (known context)
+                {
+                    "field": "a",
+                    "receiver": "self",
+                    "file": "known_to_unknown.rb",
+                    "function": "set_both_again",
+                    "line": 5,
+                    "span": [5, 1, 5, 10],
+                    "owner": "KnownClass"
+                },
+                {
+                    "field": "b",
+                    "receiver": "self",
+                    "file": "known_to_unknown.rb",
+                    "function": "set_both_again",
+                    "line": 6,
+                    "span": [6, 1, 6, 10],
+                    "owner": "KnownClass"
+                },
+                // Unit 3: set_both_third (known context)
+                {
+                    "field": "a",
+                    "receiver": "self",
+                    "file": "known_to_unknown.rb",
+                    "function": "set_both_third",
+                    "line": 10,
+                    "span": [10, 1, 10, 10],
+                    "owner": "KnownClass"
+                },
+                {
+                    "field": "b",
+                    "receiver": "self",
+                    "file": "known_to_unknown.rb",
+                    "function": "set_both_third",
+                    "line": 11,
+                    "span": [11, 1, 11, 10],
+                    "owner": "KnownClass"
+                },
+                // Unit 4: misses_b (unknown context - receiver is local variable)
+                {
+                    "field": "a",
+                    "receiver": "unknown_obj",
+                    "file": "known_to_unknown.rb",
+                    "function": "misses_b",
+                    "line": 15,
+                    "span": [15, 1, 15, 10],
+                    "owner": "known_to_unknown"
+                }
+            ]
+        })).unwrap();
+
+        let report1 = scan_documents(&[doc1]);
+        assert_eq!(report1.co_written_pairs.len(), 1);
+        assert_eq!(report1.co_written_pairs[0].pair, vec!["a", "b"]);
+        assert_eq!(report1.co_written_pairs[0].support, 3);
+        
+        assert_eq!(report1.neglected_updates.len(), 1);
+        assert_eq!(report1.neglected_updates[0].has, "a");
+        assert_eq!(report1.neglected_updates[0].missing, "b");
+        assert_eq!(report1.neglected_updates[0].recv, "unknown_obj");
+
+        // Scenario 2: Pair is co-written in an UNKNOWN context, but missed in a KNOWN context.
+        let doc2: Document = serde_json::from_value(json!({
+            "file": "unknown_to_known.rb",
+            "language": "ruby",
+            "state_writes": [
+                // Unit 1: stable_one (unknown context - receiver node)
+                {
+                    "field": "x",
+                    "receiver": "node",
+                    "file": "unknown_to_known.rb",
+                    "function": "stable_one",
+                    "line": 1,
+                    "span": [1, 1, 1, 10],
+                    "owner": "unknown_to_known"
+                },
+                {
+                    "field": "y",
+                    "receiver": "node",
+                    "file": "unknown_to_known.rb",
+                    "function": "stable_one",
+                    "line": 2,
+                    "span": [2, 1, 2, 10],
+                    "owner": "unknown_to_known"
+                },
+                // Unit 2: stable_two (unknown context - receiver node)
+                {
+                    "field": "x",
+                    "receiver": "node",
+                    "file": "unknown_to_known.rb",
+                    "function": "stable_two",
+                    "line": 5,
+                    "span": [5, 1, 5, 10],
+                    "owner": "unknown_to_known"
+                },
+                {
+                    "field": "y",
+                    "receiver": "node",
+                    "file": "unknown_to_known.rb",
+                    "function": "stable_two",
+                    "line": 6,
+                    "span": [6, 1, 6, 10],
+                    "owner": "unknown_to_known"
+                },
+                // Unit 3: stable_three (unknown context - receiver node)
+                {
+                    "field": "x",
+                    "receiver": "node",
+                    "file": "unknown_to_known.rb",
+                    "function": "stable_three",
+                    "line": 10,
+                    "span": [10, 1, 10, 10],
+                    "owner": "unknown_to_known"
+                },
+                {
+                    "field": "y",
+                    "receiver": "node",
+                    "file": "unknown_to_known.rb",
+                    "function": "stable_three",
+                    "line": 11,
+                    "span": [11, 1, 11, 10],
+                    "owner": "unknown_to_known"
+                },
+                // Unit 4: misses_y (known context)
+                {
+                    "field": "x",
+                    "receiver": "self",
+                    "file": "unknown_to_known.rb",
+                    "function": "misses_y",
+                    "line": 15,
+                    "span": [15, 1, 15, 10],
+                    "owner": "KnownClass2"
+                }
+            ]
+        })).unwrap();
+
+        let report2 = scan_documents(&[doc2]);
+        assert_eq!(report2.co_written_pairs.len(), 1);
+        assert_eq!(report2.co_written_pairs[0].pair, vec!["x", "y"]);
+        assert_eq!(report2.co_written_pairs[0].support, 3);
+
+        assert_eq!(report2.neglected_updates.len(), 1);
+        assert_eq!(report2.neglected_updates[0].has, "x");
+        assert_eq!(report2.neglected_updates[0].missing, "y");
+        assert_eq!(report2.neglected_updates[0].recv, "self");
     }
 }
 

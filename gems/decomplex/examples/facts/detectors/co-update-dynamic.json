@@ -1,0 +1,277 @@
+{
+  "detector": "co-update",
+  "expected": {
+    "co_written_pairs": [
+      {
+        "pair": [
+          "a",
+          "b"
+        ],
+        "sites": [
+          "facts/co_update_dynamic.rb:set_both",
+          "facts/co_update_dynamic.rb:set_both_again",
+          "facts/co_update_dynamic.rb:set_both_third"
+        ],
+        "support": 3
+      },
+      {
+        "pair": [
+          "x",
+          "y"
+        ],
+        "sites": [
+          "facts/co_update_dynamic.rb:stable_one",
+          "facts/co_update_dynamic.rb:stable_three",
+          "facts/co_update_dynamic.rb:stable_two"
+        ],
+        "support": 3
+      }
+    ],
+    "neglected_updates": [
+      {
+        "at": "facts/co_update_dynamic.rb:misses_b:15",
+        "has": "a",
+        "missing": "b",
+        "pair": [
+          "a",
+          "b"
+        ],
+        "recv": "unknown_obj",
+        "spans": {
+          "facts/co_update_dynamic.rb:misses_b:15": [
+            15,
+            1,
+            15,
+            10
+          ]
+        },
+        "support": 3
+      },
+      {
+        "at": "facts/co_update_dynamic.rb:misses_y:35",
+        "has": "x",
+        "missing": "y",
+        "pair": [
+          "x",
+          "y"
+        ],
+        "recv": "self",
+        "spans": {
+          "facts/co_update_dynamic.rb:misses_y:35": [
+            35,
+            1,
+            35,
+            10
+          ]
+        },
+        "support": 3
+      }
+    ]
+  },
+  "input": {
+    "documents": [
+      {
+        "file": "facts/co_update_dynamic.rb",
+        "language": "ruby",
+        "state_writes": [
+          {
+            "field": "a",
+            "file": "facts/co_update_dynamic.rb",
+            "function": "set_both",
+            "line": 1,
+            "owner": "KnownClass",
+            "receiver": "self",
+            "span": [
+              1,
+              1,
+              1,
+              10
+            ]
+          },
+          {
+            "field": "b",
+            "file": "facts/co_update_dynamic.rb",
+            "function": "set_both",
+            "line": 2,
+            "owner": "KnownClass",
+            "receiver": "self",
+            "span": [
+              2,
+              1,
+              2,
+              10
+            ]
+          },
+          {
+            "field": "a",
+            "file": "facts/co_update_dynamic.rb",
+            "function": "set_both_again",
+            "line": 5,
+            "owner": "KnownClass",
+            "receiver": "self",
+            "span": [
+              5,
+              1,
+              5,
+              10
+            ]
+          },
+          {
+            "field": "b",
+            "file": "facts/co_update_dynamic.rb",
+            "function": "set_both_again",
+            "line": 6,
+            "owner": "KnownClass",
+            "receiver": "self",
+            "span": [
+              6,
+              1,
+              6,
+              10
+            ]
+          },
+          {
+            "field": "a",
+            "file": "facts/co_update_dynamic.rb",
+            "function": "set_both_third",
+            "line": 10,
+            "owner": "KnownClass",
+            "receiver": "self",
+            "span": [
+              10,
+              1,
+              10,
+              10
+            ]
+          },
+          {
+            "field": "b",
+            "file": "facts/co_update_dynamic.rb",
+            "function": "set_both_third",
+            "line": 11,
+            "owner": "KnownClass",
+            "receiver": "self",
+            "span": [
+              11,
+              1,
+              11,
+              10
+            ]
+          },
+          {
+            "field": "a",
+            "file": "facts/co_update_dynamic.rb",
+            "function": "misses_b",
+            "line": 15,
+            "owner": "co_update_dynamic",
+            "receiver": "unknown_obj",
+            "span": [
+              15,
+              1,
+              15,
+              10
+            ]
+          },
+          {
+            "field": "x",
+            "file": "facts/co_update_dynamic.rb",
+            "function": "stable_one",
+            "line": 20,
+            "owner": "co_update_dynamic",
+            "receiver": "node",
+            "span": [
+              20,
+              1,
+              20,
+              10
+            ]
+          },
+          {
+            "field": "y",
+            "file": "facts/co_update_dynamic.rb",
+            "function": "stable_one",
+            "line": 21,
+            "owner": "co_update_dynamic",
+            "receiver": "node",
+            "span": [
+              21,
+              1,
+              21,
+              10
+            ]
+          },
+          {
+            "field": "x",
+            "file": "facts/co_update_dynamic.rb",
+            "function": "stable_two",
+            "line": 25,
+            "owner": "co_update_dynamic",
+            "receiver": "node",
+            "span": [
+              25,
+              1,
+              25,
+              10
+            ]
+          },
+          {
+            "field": "y",
+            "file": "facts/co_update_dynamic.rb",
+            "function": "stable_two",
+            "line": 26,
+            "owner": "co_update_dynamic",
+            "receiver": "node",
+            "span": [
+              26,
+              1,
+              26,
+              10
+            ]
+          },
+          {
+            "field": "x",
+            "file": "facts/co_update_dynamic.rb",
+            "function": "stable_three",
+            "line": 30,
+            "owner": "co_update_dynamic",
+            "receiver": "node",
+            "span": [
+              30,
+              1,
+              30,
+              10
+            ]
+          },
+          {
+            "field": "y",
+            "file": "facts/co_update_dynamic.rb",
+            "function": "stable_three",
+            "line": 31,
+            "owner": "co_update_dynamic",
+            "receiver": "node",
+            "span": [
+              31,
+              1,
+              31,
+              10
+            ]
+          },
+          {
+            "field": "x",
+            "file": "facts/co_update_dynamic.rb",
+            "function": "misses_y",
+            "line": 35,
+            "owner": "KnownClass2",
+            "receiver": "self",
+            "span": [
+              35,
+              1,
+              35,
+              10
+            ]
+          }
+        ]
+      }
+    ]
+  }
+}
