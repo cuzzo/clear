@@ -10,5 +10,11 @@
     "path": "src/annotator/helpers/effects.rb",
     "code": "reason.nil?",
     "note": "boolean expression — reason.nil? is not a nil-with-default pattern; the result is assigned to fsm_eligible"
+  },
+  {
+    "kind": "add_sig",
+    "path": "src/mir/fsm_transform.rb",
+    "code": "BgTransformValue",
+    "note": "Avoid circular load-order dependency on MIRLoweringConcurrency::BgTransformValue"
   }
 ]

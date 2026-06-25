@@ -59,6 +59,7 @@ module NilKill
 
     def collect_methods
       @files.each do |path|
+        puts "Scanning: #{path}"
         parsed = NilKill.cached_parse_file(path)
         next unless parsed.success?
 

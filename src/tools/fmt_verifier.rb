@@ -29,6 +29,8 @@ module FmtVerifier
   extend T::Sig
 
   Result = Struct.new(:path, :ok, :error, :diff_excerpt) do
+    extend T::Sig
+    sig { returns(String) }
     def status_label
       return "OK" if ok
       return "ERROR" if error
@@ -42,6 +44,7 @@ module FmtVerifier
   # source_dir: directory used by the importer to resolve REQUIRE paths.
   # Defaults to the file's containing directory, which is what `clear`
   # itself uses when transpiling that file directly.
+  sig { params(cht_path: String, source_dir: T.nilable(String)).returns(FmtVerifier::Result) }
   def self.verify(cht_path, source_dir: nil)
     abs_path   = File.expand_path(cht_path)
     source_dir ||= File.dirname(abs_path)
@@ -90,6 +93,7 @@ module FmtVerifier
   # Verify every .cht file under `dir` (recursive). Useful for sweeping
   # large corpora like benchmarks/ or examples/. Returns an Array of
   # Results in path order.
+  sig { params(dir: String).returns(Array) }
   def self.verify_dir(dir)
     paths = Dir.glob(File.join(dir, '**', '*.cht')).sort
     paths.map { |p| verify(p) }
@@ -98,6 +102,7 @@ module FmtVerifier
   # Print a one-line summary per result and a totals footer.
   # Returns the count of non-OK results so callers can use it as an
   # exit code: zero on clean, positive on any failure.
+  sig { params(results: Array, io: StringIO).returns(Integer) }
   def self.report(results, io: $stdout)
     fail_count = 0
     results.each do |r|
@@ -123,6 +128,7 @@ module FmtVerifier
 
   # ---- internals ----
 
+  sig { params(cheat_code: String, source_dir: String).returns(String) }
   def self.transpile(cheat_code, source_dir)
     importer = ModuleImporter.new(base_dir: source_dir, use_mir: true)
     ZigTranspiler.new(importer: importer, source_dir: source_dir).transpile(cheat_code)
@@ -131,6 +137,7 @@ module FmtVerifier
   # Use shell `diff -u` for a familiar unified diff. Truncates to the
   # first ~40 lines of context — enough to see what shifted, not so
   # much that a sweep of N files spams the terminal.
+  sig { params(before: String, after: String, max_lines: Integer).returns(String) }
   def self.diff_excerpt(before, after, max_lines: 40)
     Tempfile.create do |bf|
       Tempfile.create do |af|

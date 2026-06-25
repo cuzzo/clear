@@ -61,6 +61,7 @@ module PredicateRewriter
   # No source rewrite is offered — the bug is "the comparison is
   # meaningless," not "the syntax is wrong" — so the finding has no
   # auto-fix; the user has to decide what they meant.
+  sig { params(source: String).returns(T.untyped) }
   def self.lint!(source)
     return unless FixCollector.enabled?
     tokens = ::Lexer.new(source).tokenize
@@ -70,6 +71,7 @@ module PredicateRewriter
     # Lint is best-effort; a malformed file just yields no findings.
   end
 
+  sig { params(node: T.untyped).returns(T.nilable(Array)) }
   def self.walk_lint(node)
     return if terminal?(node)
     if node.is_a?(Array)
@@ -83,6 +85,7 @@ module PredicateRewriter
 
   # `coll.length() >= 0` is always true (length is unsigned).
   # `coll.length() <  0` is always false.
+  sig { params(node: AST::BinaryOp).returns(T.nilable(Array)) }
   def self.emit_length_lint(node)
     return unless length_call?(node.left)
     lit = int_lit_value(node.right)
@@ -96,6 +99,7 @@ module PredicateRewriter
     end
   end
 
+  sig { params(node: AST::BinaryOp, message: String).returns(Array) }
   def self.push_always_finding(node, message)
     anchor = node.token ? node.token : nil
     return unless anchor
@@ -111,6 +115,7 @@ module PredicateRewriter
 
   # ---- AST traversal ----
 
+  sig { params(node: T.untyped, source: String, edits: Array).returns(T.nilable(Array)) }
   def self.walk(node, source, edits)
     return if terminal?(node)
     if node.is_a?(Array)
@@ -126,11 +131,13 @@ module PredicateRewriter
     edits << edit if edit
   end
 
+  sig { params(n: T.untyped).returns(T::Boolean) }
   def self.terminal?(n)
     n.nil? || n.is_a?(Symbol) || n.is_a?(String) || n.is_a?(Integer) ||
       n.is_a?(Float) || n.is_a?(TrueClass) || n.is_a?(FalseClass)
   end
 
+  sig { params(node: T.untyped, source: String).returns(T.nilable(PredicateRewriter::Edit)) }
   def self.match_pattern(node, source)
     return nil unless node.is_a?(AST::BinaryOp)
     match_nil_compare(node, source) ||
@@ -170,6 +177,7 @@ module PredicateRewriter
     )
   end
 
+  sig { params(node: T.untyped).returns(T::Boolean) }
   def self.nil_literal?(node)
     node.is_a?(AST::Literal) && node.type == :NIL
   end
@@ -218,6 +226,7 @@ module PredicateRewriter
     )
   end
 
+  sig { params(node: T.untyped).returns(T::Boolean) }
   def self.length_call?(node)
     node.is_a?(AST::MethodCall) && node.name == "length"
   end
@@ -315,6 +324,7 @@ module PredicateRewriter
   # textual span. For a MethodCall `expr.method(...)` this is the
   # leftmost position of `expr`; for a chain `a.b.c.method()` it's
   # `a`'s position. Walks the AST recursively.
+  sig { params(node: T.untyped, source: String).returns(Integer) }
   def self.leftmost_offset(node, source)
     case node
     when AST::MethodCall
@@ -332,6 +342,7 @@ module PredicateRewriter
   # or method-call form; we approximate by walking a balanced-paren
   # scan from the node's leftmost-token position. Returns nil if the
   # walk hits an unmatched close.
+  sig { params(node: T.untyped, source: String).returns(Integer) }
   def self.rightmost_compact_offset(node, source)
     start = leftmost_offset(node, source)
     return nil unless start

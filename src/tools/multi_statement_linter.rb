@@ -88,6 +88,7 @@ module MultiStatementLinter
     counts
   end
 
+  sig { params(source: String, line_no: Integer).returns(String) }
   def self.emit_finding(source, line_no)
     line_text = source.lines[line_no - 1] || ""
     anchor = Struct.new(:line, :column).new(line_no, 1)

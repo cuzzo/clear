@@ -117,6 +117,7 @@ module Pprof
     # pprof to load the binary itself; addr2line resolved everything at
     # convert time. Returns the mapping id; the first call also sets
     # the primary mapping that all Locations attach to by default.
+    sig { params(binary: String, build_id: String).returns(Integer) }
     def add_mapping(binary:, build_id: '')
       mapping = {
         id: @next_mapping_id,
@@ -276,6 +277,7 @@ module Pprof
       sub
     end
 
+    sig { params(m: Hash).returns(String) }
     def encode_mapping(m)
       buf = Wire.field_varint(1, m[:id])
       buf += Wire.field_varint(5, m[:filename_idx])

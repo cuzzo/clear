@@ -139,7 +139,7 @@ module DiagnosticExamples
   # Walk forward from `start_idx` (line of `describe ... do`) and find
   # the `end` line at the same indentation level. Returns the index or
   # nil if the file is malformed.
-  sig { params(lines: T.untyped, start_idx: T.untyped, indent: T.untyped).returns(T.untyped) }
+  sig { params(lines: T.untyped, start_idx: T.untyped, indent: T.nilable(Integer)).returns(T.untyped) }
   def self.find_block_end(lines, start_idx, indent)
     depth = 1
     k = start_idx + 1

@@ -188,7 +188,7 @@ module FsmTransform
     # inside the body and stash into ctx.sp; subsequent steps
     # reference ctx.sp, not the original identifiers, so no extra
     # tail reads are recorded here.
-    sig { params(seg: T.untyped, uses_by_seg: T.untyped).void }
+    sig { params(seg: T.untyped, uses_by_seg: T::Hash[Integer, T::Set[String]]).void }
     def self.collect_tail_uses(seg, uses_by_seg)
       tail = seg.tail
       case tail
@@ -249,7 +249,7 @@ module FsmTransform
     end
 
     # Collect identifier reads anywhere in stmt's expressions.
-    sig { params(stmt: T.untyped, into: T.untyped).returns(T.untyped) }
+    sig { params(stmt: T.untyped, into: T.nilable(T::Set[String])).void }
     def self.collect_uses(stmt, into)
       walk_idents(stmt) { |name| into << name }
     end

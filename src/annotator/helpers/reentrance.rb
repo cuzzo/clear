@@ -525,7 +525,7 @@ module ReentranceBridge
   # cycle member AND prepend `!` to each return type. Asserts at
   # runtime that the cycle is logically impossible; raises System
   # UnexpectedRecursion if violated.
-  sig { params(fn_node: AST::FunctionDef).returns(T.untyped) }
+  sig { params(fn_node: AST::FunctionDef).void }
   def emit_mutual_thunk_unsupported!(fn_node)
     T.bind(self, SemanticAnnotator) rescue nil
     fn_nodes = function_node_map

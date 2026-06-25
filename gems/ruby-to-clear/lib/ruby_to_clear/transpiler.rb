@@ -86,6 +86,101 @@ module RubyToClear
       end
     end
 
+    def parse_sig(sig_call_node)
+      param_types = {}
+      return_type = "Auto"
+      
+      return [param_types, return_type] unless sig_call_node&.block
+      
+      body_node = sig_call_node.block.body
+      return [param_types, return_type] unless body_node.is_a?(Prism::StatementsNode)
+      
+      body_node.body.each do |stmt|
+        walk_sig_chain = ->(call_node) do
+          return unless call_node.is_a?(Prism::CallNode)
+          
+          case call_node.name.to_s
+          when "void"
+            return_type = "Void"
+          when "returns"
+            if call_node.arguments && call_node.arguments.arguments.first
+              return_type = convert_sorbet_type(call_node.arguments.arguments.first)
+            end
+          when "params"
+            if call_node.arguments && call_node.arguments.arguments.first.is_a?(Prism::KeywordHashNode)
+              call_node.arguments.arguments.first.elements.each do |assoc|
+                if assoc.is_a?(Prism::AssocNode)
+                  param_name = assoc.key.value.to_s
+                  param_type = convert_sorbet_type(assoc.value)
+                  param_types[param_name] = param_type
+                end
+              end
+            end
+          end
+          
+          walk_sig_chain.call(call_node.receiver) if call_node.receiver
+        end
+        
+        walk_sig_chain.call(stmt)
+      end
+      
+      [param_types, return_type]
+    end
+
+    def convert_sorbet_type(node)
+      return "Auto" unless node
+      
+      case node.class.name.split("::").last
+      when "ConstantReadNode"
+        name = node.name.to_s
+        case name
+        when "Integer" then "Int64"
+        when "Float" then "Float64"
+        when "String" then "String"
+        when "Symbol" then "Auto"
+        when "NilClass" then "Void"
+        when "Boolean" then "Bool"
+        when "TrueClass", "FalseClass" then "Bool"
+        else name
+        end
+      when "ConstantPathNode"
+        path = node.location.slice.strip
+        case path
+        when "T::Boolean" then "Bool"
+        else path.gsub("::", ".")
+        end
+      when "CallNode"
+        if node.receiver && node.receiver.location.slice.strip == "T"
+          case node.name.to_s
+          when "nilable"
+            inner = convert_sorbet_type(node.arguments&.arguments&.first)
+            return "?#{inner}"
+          when "any"
+            args = node.arguments ? node.arguments.arguments : []
+            non_nil_args = args.reject { |a| a.location.slice.strip == "NilClass" }
+            if non_nil_args.length == 1
+              inner = convert_sorbet_type(non_nil_args.first)
+              return "?#{inner}"
+            else
+              return "Auto"
+            end
+          end
+        end
+        
+        if node.name.to_s == "[]"
+          receiver_name = node.receiver ? node.receiver.location.slice.strip : ""
+          if receiver_name == "T::Array" || receiver_name == "Array"
+            inner = convert_sorbet_type(node.arguments&.arguments&.first)
+            return "#{inner}[]"
+          end
+        end
+        
+        "Auto"
+      else
+        "Auto"
+      end
+    end
+
     private
 
     def indent
@@ -103,16 +198,19 @@ module RubyToClear
       return unless arguments_node
       arguments_node.arguments.each do |arg|
         if arg.is_a?(Prism::KeywordHashNode)
-          raise_unsupported("Keyword arguments are not supported", arg)
+          res = raise_unsupported("Keyword arguments are not supported", arg)
+          return res if res.is_a?(String) && res.include?("# [UNSUPPORTED:")
         end
       end
+      nil
     end
 
     def check_parameters!(parameters_node)
       return unless parameters_node
       if !parameters_node.keywords.empty? || parameters_node.keyword_rest
-        raise_unsupported("Keyword parameters are not supported", parameters_node)
+        return raise_unsupported("Keyword parameters are not supported", parameters_node)
       end
+      nil
     end
 
     def collect_written_variables(node, parameter_names = Set.new, exclude_defs: false)
@@ -156,8 +254,22 @@ module RubyToClear
 
 
     def visit_statements_node(node)
+      last_sig = nil
       node.body.map do |stmt|
+        if stmt.is_a?(Prism::CallNode) && stmt.name.to_s == "sig"
+          last_sig = stmt
+          next nil
+        end
+
+        if stmt.is_a?(Prism::DefNode)
+          @current_sig = last_sig
+          last_sig = nil
+        else
+          last_sig = nil
+        end
+
         code = visit(stmt)
+        @current_sig = nil
         next if code.empty?
 
         unless code.end_with?(";") || code.end_with?("END") || code.start_with?("STRUCT ") || code.start_with?("#")
@@ -312,7 +424,8 @@ module RubyToClear
 
     def visit_required_parameter_node(node)
       prefix = (@mutable_params && @mutable_params.include?(node.name.to_s)) ? "MUTABLE " : ""
-      "#{prefix}#{node.name}: Auto"
+      type = (@param_types && @param_types[node.name.to_s]) || "Auto"
+      "#{prefix}#{node.name}: #{type}"
     end
 
     def visit_parameters_node(node)
@@ -323,8 +436,9 @@ module RubyToClear
 
     def visit_optional_parameter_node(node)
       prefix = (@mutable_params && @mutable_params.include?(node.name.to_s)) ? "MUTABLE " : ""
+      type = (@param_types && @param_types[node.name.to_s]) || "Auto"
       default_val = visit(node.value)
-      "#{prefix}#{node.name} = #{default_val}: Auto"
+      "#{prefix}#{node.name} = #{default_val}: #{type}"
     end
 
     def visit_array_node(node)
@@ -469,11 +583,11 @@ module RubyToClear
     end
 
     def visit_regular_expression_node(node)
-      raise_unsupported("Regular expressions are not supported", node)
+      return raise_unsupported("Regular expressions are not supported", node)
     end
 
     def visit_interpolated_regular_expression_node(node)
-      raise_unsupported("Regular expressions are not supported", node)
+      return raise_unsupported("Regular expressions are not supported", node)
     end
 
     def visit_interpolated_string_node(node)
@@ -494,7 +608,8 @@ module RubyToClear
     end
 
     def visit_call_node(node)
-      check_arguments!(node.arguments)
+      chk = check_arguments!(node.arguments)
+      return chk if chk.is_a?(String) && chk.include?("# [UNSUPPORTED:")
 
       if node.name.to_s == "gsub" || node.name.to_s == "sub"
         rec_code = node.receiver ? visit(node.receiver) : nil
@@ -502,7 +617,7 @@ module RubyToClear
           translated = MethodRegistry.translate(node.name.to_s, rec_code, node, self)
           return translated if translated
         end
-        raise_unsupported("gsub/sub with dynamic regex, block, or invalid arguments is not supported", node)
+        return raise_unsupported("gsub/sub with dynamic regex, block, or invalid arguments is not supported", node)
       end
 
       case node.name.to_s
@@ -578,9 +693,13 @@ module RubyToClear
     end
 
     def visit_def_node(node)
-      check_parameters!(node.parameters)
+      chk = check_parameters!(node.parameters)
+      return chk if chk.is_a?(String) && chk.include?("# [UNSUPPORTED:")
       
       name = node.name.to_s
+      param_types, sig_return_type = parse_sig(@current_sig)
+      @param_types = param_types
+
       param_names = extract_parameter_names(node)
       written_vars = collect_written_variables(node.body, param_names)
       written_params = param_names & written_vars
@@ -619,8 +738,15 @@ module RubyToClear
 
       @declared_locals = old_declared
       @mutable_params = nil
+      @param_types = nil
 
-      ret_type = name == "initialize" ? "Void" : "!Auto"
+      ret_type = if name == "initialize"
+        "Void"
+      elsif sig_return_type != "Auto"
+        sig_return_type
+      else
+        "!Auto"
+      end
       sig_name = name == "initialize" ? "initialize!" : name
 
       "FN #{sig_name}(#{params.join(', ')}) RETURNS #{ret_type} ->\n#{full_body}\nEND"
@@ -632,14 +758,14 @@ module RubyToClear
 
     def visit_multi_write_node(node)
       unless node.value.is_a?(Prism::ArrayNode)
-        raise_unsupported("Destructuring is only supported for literal array values", node)
+        return raise_unsupported("Destructuring is only supported for literal array values", node)
       end
       
       lefts = node.lefts
       rights = node.value.elements
       
       if lefts.length != rights.length
-        raise_unsupported("Multi-write left and right side lengths must match", node)
+        return raise_unsupported("Multi-write left and right side lengths must match", node)
       end
       
       temp_names = lefts.map.with_index { |_, idx| "__tmp_multi_#{idx}" }
@@ -664,16 +790,16 @@ module RubyToClear
     end
 
     def visit_rescue_node(node)
-      raise_unsupported("Exception handling (rescue) is not supported", node)
+      return raise_unsupported("Exception handling (rescue) is not supported", node)
     end
 
     def visit_rescue_modifier_node(node)
-      raise_unsupported("Exception handling (rescue) is not supported", node)
+      return raise_unsupported("Exception handling (rescue) is not supported", node)
     end
 
     def visit_begin_node(node)
       if node.rescue_clause
-        raise_unsupported("Exception handling (rescue) is not supported", node)
+        return raise_unsupported("Exception handling (rescue) is not supported", node)
       else
         visit(node.statements)
       end

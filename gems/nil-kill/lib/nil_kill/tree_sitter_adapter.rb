@@ -7,6 +7,8 @@ module NilKill
     VERSION = "tree-sitter"
 
     def self.parse(source, path: nil)
+      source = source.to_s
+      source = source.dup.force_encoding("UTF-8") if source.encoding != Encoding::UTF_8
       parser = Espalier::TreeSitter.parser_for(:ruby)
       tree = parser.parse(source)
       Context.new(source, tree, path)
@@ -34,7 +36,7 @@ module NilKill
     end
 
     class Context
-      attr_reader :source, :tree, :root, :path, :child_map
+      attr_reader :tree, :root, :path, :child_map
 
       def initialize(source, tree, path)
         @source = source
@@ -43,6 +45,10 @@ module NilKill
         @path = path
         @cache = {}
         build_child_map!
+      end
+
+      def source
+        @binary_source ||= @source.b
       end
 
       def success?
@@ -64,7 +70,7 @@ module NilKill
         klass = force || class_for_type(raw.type, raw)
         return nil unless klass
         
-        key = [raw.start_byte, raw.end_byte, klass.name]
+        key = [raw.start_byte, raw.end_byte, raw.type, klass.name]
         @cache[key] ||= klass.new(self, raw)
       end
 

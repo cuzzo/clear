@@ -1063,18 +1063,18 @@ class BinaryOpResult
   def left_coercion; end
   sig { returns(T.untyped) }
   def right_coercion; end
-  sig { returns(T.untyped) }
+  sig { returns(Symbol) }
   def storage; end
-  sig { returns(T.untyped) }
+  sig { returns(String) }
   def error; end
 end
 
 class Capabilities::Conflict
-  sig { returns(T::Array[T.untyped]) }
+  sig { returns(T::Array[Symbol]) }
   def set_a; end
-  sig { returns(T::Array[T.untyped]) }
+  sig { returns(T::Array[Symbol]) }
   def set_b; end
-  sig { returns(T.untyped) }
+  sig { returns(String) }
   def message; end
 end
 
@@ -1093,13 +1093,13 @@ class CapabilityHelper::CaptureAnalysis
   def has_outer_ref; end
   sig { returns(T.untyped) }
   def has_non_escaping_capture; end
-  sig { returns(T.untyped) }
+  sig { returns(T::Hash[String, Type]) }
   def captures; end
   sig { returns(T.untyped) }
   def capture_symbols; end
   sig { returns(T::Hash[String, Schemas::ResourceClosePlan]) }
   def close_plans; end
-  sig { returns(T.untyped) }
+  sig { returns(T::Set[String]) }
   def pointer_captures; end
   sig { returns(T.untyped) }
   def string_captures; end
@@ -1170,7 +1170,7 @@ class CompilerFrontend::Result
   def ast; end
   sig { returns(SemanticAnnotator) }
   def annotator; end
-  sig { returns(T.untyped) }
+  sig { returns(T::Hash[String, AST::FunctionDef]) }
   def fn_nodes; end
   sig { returns(T.untyped) }
   def fn_sigs; end
@@ -1238,11 +1238,11 @@ class FsmOps::AssignField
 end
 
 class FsmOps::BinOp
-  sig { returns(String) }
+  sig { returns(T.any(String, T.untyped)) }
   def op; end
-  sig { returns(MIR::FieldGet) }
+  sig { returns(T.any(Expr, MIR::FieldGet, T.untyped)) }
   def left; end
-  sig { returns(MIR::Lit) }
+  sig { returns(T.any(Expr, MIR::Lit, T.untyped)) }
   def right; end
 end
 
@@ -1284,7 +1284,7 @@ class FsmOps::IfFieldSubLtZeroReturnCall
 end
 
 class FsmOps::IntCast
-  sig { returns(String) }
+  sig { returns(T.any(String, T.untyped)) }
   def zig_type; end
   sig { returns(T.untyped) }
   def expr; end
@@ -1330,7 +1330,7 @@ class FsmOps::StateFieldDecl
   def name; end
   sig { returns(String) }
   def zig_type; end
-  sig { returns(MIR::Emittable) }
+  sig { returns(T.any(MIR::AddressOf, MIR::Lit, MIR::Undef)) }
   def default_value; end
 end
 
@@ -1351,7 +1351,7 @@ class FsmOps::SubField
 end
 
 class FsmTransform::Liveness::Result
-  sig { returns(T.untyped) }
+  sig { returns(T::Hash[String, CrossSegmentVarFact]) }
   def cross_segment_vars; end
 end
 
@@ -1415,7 +1415,7 @@ end
 class FsmTransform::Segments::Segment
   sig { returns(Integer) }
   def index; end
-  sig { returns(T::Array[T.untyped]) }
+  sig { returns(T.any(AST::RawBody, T.untyped, T::Array[T.untyped])) }
   def stmts; end
   sig { returns(T.untyped) }
   def tail; end
@@ -1600,9 +1600,9 @@ end
 class MIR::Call
   sig { returns(T.untyped) }
   def callee; end
-  sig { returns(T.untyped) }
+  sig { returns(T.any(T.untyped, T::Array[Emittable])) }
   def args; end
-  sig { returns(T.any(T::Boolean, T::Hash[T.untyped, T.untyped])) }
+  sig { returns(T.any(T.untyped, T::Boolean)) }
   def try_wrap; end
   sig { returns(T.untyped) }
   def heap_provenance; end
@@ -2313,22 +2313,22 @@ class MIR::MethodCall
 end
 
 class MIR::MoveMark
-  sig { returns(T.untyped) }
+  sig { returns(String) }
   def name; end
 end
 
 class MIR::MutualThunkTrampoline
-  sig { returns(T.untyped) }
+  sig { returns(String) }
   def fn_name; end
   sig { returns(Type) }
   def return_type; end
-  sig { returns(T.untyped) }
+  sig { returns(T::Array[MIR::ThunkVariant]) }
   def variants; end
-  sig { returns(T.untyped) }
+  sig { returns(String) }
   def initial_variant; end
-  sig { returns(T.untyped) }
+  sig { returns(T::Array[MIR::ThunkFrameInit]) }
   def initial_fields; end
-  sig { returns(T.untyped) }
+  sig { returns(T::Array[MIR::MutualThunkArm]) }
   def arms; end
   sig { returns(Symbol) }
   def yield_policy; end
@@ -2801,19 +2801,19 @@ class MIR::TestDef
 end
 
 class MIR::ThunkTrampoline
-  sig { returns(T.untyped) }
+  sig { returns(String) }
   def fn_name; end
   sig { returns(Type) }
   def return_type; end
-  sig { returns(T.untyped) }
+  sig { returns(T::Array[MIR::ThunkFrameField]) }
   def param_fields; end
-  sig { returns(T.untyped) }
+  sig { returns(T::Array[MIR::ThunkFrameInit]) }
   def param_init_fields; end
-  sig { returns(T.untyped) }
+  sig { returns(T::Array[MIR::ThunkBaseCase]) }
   def base_cases; end
-  sig { returns(T.untyped) }
+  sig { returns(T::Array[MIR::ThunkFrameInit]) }
   def recurse_arg_inits; end
-  sig { returns(T.untyped) }
+  sig { returns(MIR::Node) }
   def combine_lhs; end
   sig { returns(Symbol) }
   def combine_op; end
@@ -2931,6 +2931,8 @@ class MIRPass::WalkCtx
   def bindings; end
   sig { returns(T.untyped) }
   def promo; end
+  sig { returns(CleanupClassifier::FrozenCleanupFacts) }
+  def cleanup_facts; end
 end
 
 class ModuleImporter::CompiledModule
@@ -2962,18 +2964,18 @@ end
 class OwnershipDataflow::OwnerEntry
   sig { returns(T.untyped) }
   def state; end
-  sig { returns(T.untyped) }
+  sig { returns(Symbol) }
   def allocator; end
-  sig { returns(T.untyped) }
+  sig { returns(T::Boolean) }
   def needs_cleanup; end
 end
 
 class OwnershipGraph::Edge
   sig { returns(T.untyped) }
   def from; end
-  sig { returns(T.untyped) }
+  sig { returns(String) }
   def to; end
-  sig { returns(T.untyped) }
+  sig { returns(Symbol) }
   def kind; end
 end
 
@@ -3033,7 +3035,7 @@ class ThunkTransform::RecursiveSplitter::MutualPlan
 end
 
 class ThunkTransform::RecursiveSplitter::MutualThunkPlan
-  sig { returns(T.untyped) }
+  sig { returns(T::Array[AST::FunctionDef]) }
   def cycle_fns; end
   sig { returns(T.untyped) }
   def own_plan; end
@@ -3051,3 +3053,2318 @@ class ThunkTransform::RecursiveSplitter::Plan
   sig { returns(T.untyped) }
   def final_return; end
 end
+class Fix
+  sig { returns(T.any(Symbol, T.untyped)) }
+  def confidence; end
+end
+
+class Edit
+  sig { returns(Span) }
+  def span; end
+end
+
+class Span
+  sig { returns(T.any(Integer, T.untyped)) }
+  def col; end
+end
+
+class Type
+  sig { returns(T.any(Symbol, T.untyped)) }
+  def location; end
+  sig { returns(T.any(Symbol, T.untyped)) }
+  def collection; end
+  sig { returns(T.any(Symbol, T.untyped)) }
+  def layout; end
+  sig { returns(T::Boolean) }
+  def auto; end
+  sig { returns(T.any(Symbol, T.untyped)) }
+  def sync; end
+  sig { returns(T::Boolean) }
+  def observable; end
+  sig { returns(Symbol) }
+  def observable_terminal; end
+end
+
+class MIR::BindingMaterialization
+  sig { returns(T::Boolean) }
+  def mutable; end
+  sig { returns(T.any(T.untyped, Type)) }
+  def type_info; end
+  sig { returns(Symbol) }
+  def scope; end
+  sig { returns(String) }
+  def suppression; end
+  sig { returns(Type) }
+  def annotation; end
+end
+
+class MIR::EnumTag
+  sig { returns(T.any(String, T.untyped)) }
+  def variant; end
+end
+
+class StageSpec
+  sig { returns(Symbol) }
+  def name; end
+  sig { returns(String) }
+  def producer; end
+end
+
+class BinaryOperationPlan
+  sig { returns(BinaryOperandFacts) }
+  def facts; end
+  sig { returns(Symbol) }
+  def kind; end
+  sig { returns(T.any(Symbol, T.untyped)) }
+  def builtin; end
+  sig { returns(Symbol) }
+  def tag_source; end
+  sig { returns(String) }
+  def optional_capture; end
+  sig { returns(String) }
+  def type_arg; end
+end
+
+class Schemas::StructSchema
+  sig { returns(T.any(T.untyped, T::Hash[String, AST::StructField])) }
+  def fields; end
+  sig { returns(T.any(T.untyped, T::Array[T.untyped])) }
+  def type_params; end
+  sig { returns(T.any(Symbol, T.untyped)) }
+  def visibility; end
+  sig { returns(Schemas::StructSchema::MethodsMap) }
+  def methods; end
+end
+
+class DestinationPlacementPlan
+  sig { returns(Symbol) }
+  def action; end
+end
+
+class MIR::OwnershipTransferPlan
+  sig { returns(T.any(T.untyped, T::Boolean)) }
+  def move_guarded; end
+  sig { returns(T.any(Symbol, T.untyped)) }
+  def target; end
+end
+
+class MIR::StructInitField
+  sig { returns(T.any(String, Symbol, T.any(String, Symbol))) }
+  def name; end
+end
+
+class PipelineSite
+  sig { returns(T.any(AST::BinaryOp, T.untyped)) }
+  def options; end
+end
+
+class AST::MatchCase
+  sig { returns(T.any(AST::RawBody, T::Array[T.untyped])) }
+  def body; end
+  sig { returns(Symbol) }
+  def kind; end
+end
+
+class AST::Param
+  sig { returns(T.any(T.untyped, T::Boolean)) }
+  def required; end
+end
+
+class ObservablePublishSpec
+  sig { returns(Symbol) }
+  def expr; end
+  sig { returns(Symbol) }
+  def gate; end
+  sig { returns(String) }
+  def publish_method; end
+end
+
+class ObservableTerminalSpec
+  sig { returns(ObservablePublishSpec) }
+  def publish; end
+end
+
+class PipelineRangeFoldPlan
+  sig { returns(T::Array[MIR::Let]) }
+  def acc_init_stmts; end
+  sig { returns(T.any(T::Array[MIR::IfStmt], T::Array[MIR::Set], T::Array[T.untyped])) }
+  def loop_acc_stmts; end
+  sig { returns(T.any(T::Array[MIR::IfStmt], T::Array[T.untyped])) }
+  def post_loop_stmts; end
+  sig { returns(T.any(MIR::Conditional, MIR::Ident)) }
+  def result_expr; end
+end
+
+class CaptureSpec
+  sig { returns(T.any(CaptureCleanupPlan, T.untyped)) }
+  def cleanup_plan; end
+  sig { returns(String) }
+  def field_type_zig; end
+  sig { returns(T.any(MIR::AddressOf, MIR::Ident)) }
+  def init_value_mir; end
+end
+
+class EscapeSink
+  sig { returns(Symbol) }
+  def handler; end
+  sig { returns(Symbol) }
+  def name; end
+end
+
+class FixableHelper::CapabilityFixCandidate
+  sig { returns(Symbol) }
+  def description_code; end
+  sig { returns(String) }
+  def sigil; end
+  sig { returns(T::Hash[Symbol, String]) }
+  def description_params; end
+end
+
+class FsmSegmentSpec
+  sig { returns(T.any(T.untyped, T::Array[T.untyped])) }
+  def body_stmts; end
+  sig { returns(T.any(T.untyped, T::Boolean)) }
+  def suppress_runtime_ref; end
+  sig { returns(T.any(T.untyped, T::Array[MIR::Set])) }
+  def pre_body_stmts; end
+end
+
+class FunctionSignature
+  sig { returns(T.any(T.untyped, T::Array[T.untyped])) }
+  def return_lifetime; end
+  sig { returns(T.any(Symbol, T.untyped)) }
+  def visibility; end
+  sig { returns(T.any(T.untyped, T::Boolean)) }
+  def intrinsic; end
+  sig { returns(T.any(T.untyped, T::Array[Symbol], T::Array[T.untyped])) }
+  def type_params; end
+  sig { returns(T.any(T.untyped, T::Boolean)) }
+  def extern; end
+  sig { returns(T.any(T.untyped, T::Hash[T.untyped, T.untyped])) }
+  def extern_effects; end
+  sig { returns(T.any(T.untyped, T::Array[Symbol])) }
+  def fn_type_params; end
+  sig { returns(T.any(T.untyped, T::Array[Symbol])) }
+  def owner_type_params; end
+  sig { returns(T.any(FunctionReturn, T.untyped)) }
+  def return_def; end
+end
+
+class MIR::ContextFieldDecl
+  sig { returns(T.any(String, T.untyped)) }
+  def name; end
+  sig { returns(T.any(String, T.untyped)) }
+  def type_zig; end
+  sig { returns(T.any(MIR::Lit, MIR::Undef, T.untyped)) }
+  def default_value; end
+end
+
+class PipelineSourceFact
+  sig { returns(T.any(Symbol, T.untyped)) }
+  def item_type; end
+  sig { returns(Symbol) }
+  def kind; end
+end
+
+class MIR::DefaultValue
+  sig { returns(Symbol) }
+  def kind; end
+end
+
+class Slot
+  sig { returns(T.any(DeclarationNode, T.untyped)) }
+  def decl_node; end
+  sig { returns(Symbol) }
+  def kind; end
+end
+
+class AST::Capability
+  sig { returns(T.any(Symbol, T.untyped)) }
+  def capability; end
+end
+
+class AST::ErrorAction
+  sig { returns(T.any(T.noreturn, T.untyped)) }
+  def token; end
+end
+
+class AST::ErrorSelector
+  sig { returns(T.any(Symbol, T.untyped)) }
+  def form; end
+  sig { returns(Symbol) }
+  def name; end
+end
+
+class AST::ThenStep
+  sig { returns(T.any(AST::Node, T.untyped)) }
+  def expr; end
+end
+
+class Annotator::Phases::BgSpawnDecision
+  sig { returns(Symbol) }
+  def spawn_form; end
+end
+
+class FixableFinding
+  sig { returns(T.any(Symbol, T.untyped)) }
+  def category; end
+  sig { returns(T.any(T::Array[Fix], T::Array[T.untyped])) }
+  def fixes; end
+  sig { returns(T.any(Symbol, T.untyped)) }
+  def level; end
+  sig { returns(T.any(String, T.untyped)) }
+  def message; end
+end
+
+class Formatter::FormatLexer::Token
+  sig { returns(T.any(Integer, T.untyped)) }
+  def col; end
+  sig { returns(T.any(Integer, T.untyped)) }
+  def line; end
+  sig { returns(String) }
+  def raw; end
+  sig { returns(Symbol) }
+  def type; end
+end
+
+class FsmLockErrorArmSplit
+  sig { returns(T.any(T.untyped, T::Array[MIR::Set], T::Array[T.untyped])) }
+  def body_stmts; end
+  sig { returns(Symbol) }
+  def exit_kind; end
+end
+
+class LoweredItemTarget
+  sig { returns(T.any(T.untyped, T::Array[MIR::Emittable])) }
+  def items; end
+end
+
+class OwnedSinkPlan
+  sig { returns(Symbol) }
+  def action; end
+  sig { returns(Symbol) }
+  def target_alloc; end
+end
+
+class OwnerEntry
+  sig { returns(T.any(Symbol, T.untyped)) }
+  def allocator; end
+  sig { returns(T.any(T.untyped, T::Boolean)) }
+  def needs_cleanup; end
+  sig { returns(T.any(Symbol, T.untyped)) }
+  def state; end
+end
+
+class Schemas::ResourceSchema
+  sig { returns(T.any(Schemas::ResourceClosePlan, T.untyped)) }
+  def close_plan; end
+  sig { returns(T.any(Schemas::ResourceSchema::StaticMethodsMap, T::Hash[String, T::Hash[Symbol, T.untyped]])) }
+  def static_methods; end
+  sig { returns(T.any(T.untyped, T::Hash[String, AST::StructField])) }
+  def fields; end
+  sig { returns(T.any(T.untyped, T::Array[T.untyped])) }
+  def type_params; end
+  sig { returns(Schemas::ResourceSchema::MethodsMap) }
+  def methods; end
+end
+
+class Schemas::UnionSchema
+  sig { returns(T.any(Schemas::UnionSchema::VariantInputMap, T.untyped)) }
+  def variants; end
+  sig { returns(T.any(T.untyped, T::Array[T.untyped])) }
+  def type_params; end
+  sig { returns(T.any(Symbol, T.untyped)) }
+  def visibility; end
+end
+
+class TypeFsmForEachDescriptor
+  sig { returns(Symbol) }
+  def kind; end
+  sig { returns(String) }
+  def var_zig_type; end
+  sig { returns(String) }
+  def advance_method; end
+  sig { returns(T::Boolean) }
+  def deref; end
+  sig { returns(String) }
+  def init_method; end
+  sig { returns(String) }
+  def slice_suffix; end
+end
+
+class CleanupDecision
+  sig { returns(T.any(T.untyped, T::Boolean)) }
+  def has_moved_guard; end
+  sig { returns(T.any(T.untyped, T::Boolean)) }
+  def needs_cleanup; end
+end
+
+class MIR::FsmDestroyCleanup
+  sig { returns(Symbol) }
+  def source_kind; end
+  sig { returns(MIR::FieldGet) }
+  def target; end
+  sig { returns(MIR::FieldGet) }
+  def allocator; end
+  sig { returns(MIR::FieldGet) }
+  def guard; end
+end
+
+class MIR::OwnershipConsumptionFact
+  sig { returns(T.any(T.untyped, T::Boolean)) }
+  def covers_consuming_params; end
+  sig { returns(T.any(T.untyped, T::Array[MIR::OwnershipOperandFact], T::Array[T.untyped])) }
+  def operands; end
+  sig { returns(T.any(String, T.untyped)) }
+  def source; end
+  sig { returns(T.any(Symbol, T.untyped)) }
+  def target; end
+end
+
+class MIR::RegistryCall
+  sig { returns(T::Array[MIR::RegistryCallArg]) }
+  def args; end
+  sig { returns(T.any(String, T.untyped)) }
+  def reason; end
+end
+
+class MIR::RegistryCallArg
+  sig { returns(T.any(MIR::Emittable, MIR::FieldGet, T.untyped)) }
+  def expr; end
+end
+
+class PipelineContextState
+  sig { returns(T.any(T.untyped, T::Boolean)) }
+  def soa_each_mode; end
+  sig { returns(T.any(PipelineSoaFieldSet, T.untyped)) }
+  def soa_needed_fields; end
+  sig { returns(T.any(T.untyped, T::Boolean)) }
+  def soa_rewrite_active; end
+end
+
+class RuntimeCallSpec
+  sig { returns(String) }
+  def callee; end
+end
+
+class Semantic::SuspendPointFact
+  sig { returns(Semantic::SuspendPointId) }
+  def id; end
+end
+
+class Semantic::SuspendPointId
+  sig { returns(Integer) }
+  def value; end
+end
+
+class StdLibTypeBinding
+  sig { returns(Symbol) }
+  def name; end
+end
+
+class String
+  sig { returns(String) }
+  def encoding; end
+end
+
+class TypeShape
+  sig { returns(T.any(Symbol, T.untyped)) }
+  def raw; end
+  sig { returns(T::Boolean) }
+  def auto; end
+  sig { returns(T::Boolean) }
+  def tense; end
+end
+
+class AST::ErrorClause
+  sig { returns(T::Array[AST::ErrorSelector]) }
+  def selectors; end
+end
+
+class AST::PatternField
+  sig { returns(T.any(Symbol, T.untyped)) }
+  def value; end
+end
+
+class CallOwnershipFacts
+  sig { returns(T.any(T.untyped, T::Array[T.untyped])) }
+  def consumed_names; end
+  sig { returns(T.any(Set, T::Set[Integer])) }
+  def takes_indices; end
+  sig { returns(T::Array[MIR::OwnershipOperandFact]) }
+  def consumed_operands; end
+end
+
+class CaptureCleanupPlan
+  sig { returns(T.any(T.untyped, Type)) }
+  def mirror_type; end
+end
+
+class Edge
+  sig { returns(T.any(String, T.untyped)) }
+  def from; end
+  sig { returns(T.any(Symbol, T.untyped)) }
+  def kind; end
+  sig { returns(T.any(String, T.untyped)) }
+  def to; end
+end
+
+class FmtVerifier::Result
+  sig { returns(T::Boolean) }
+  def ok; end
+end
+
+class LockSccFrame
+  sig { returns(T::Boolean) }
+  def expanded; end
+  sig { returns(T.any(Symbol, T.untyped)) }
+  def node; end
+end
+
+class MIRLowering
+  sig { returns(MIRLoweringInput) }
+  def input; end
+end
+
+class MIRLoweringInput
+  sig { returns(T.any(T.untyped, T::Hash[T.untyped, T.untyped])) }
+  def enum_schemas; end
+  sig { returns(T.any(T.untyped, T::Hash[T.untyped, T.untyped])) }
+  def fn_sigs; end
+  sig { returns(T.any(T.untyped, T::Hash[T.untyped, T.untyped])) }
+  def moved_guard_info; end
+  sig { returns(String) }
+  def source_dir; end
+  sig { returns(T.any(T.untyped, T::Hash[T.untyped, T.untyped])) }
+  def struct_schemas; end
+  sig { returns(T.any(T.untyped, T::Hash[T.untyped, T.untyped])) }
+  def union_schemas; end
+  sig { returns(T::Boolean) }
+  def debug_mode; end
+end
+
+class MapParts
+  sig { returns(T.any(Symbol, T::Array[T.untyped])) }
+  def key_type_raw; end
+  sig { returns(T::Boolean) }
+  def map; end
+  sig { returns(Symbol) }
+  def value_type_raw; end
+end
+
+class ModuleImporter
+  sig { returns(T.any(String, T.untyped)) }
+  def base_dir; end
+  sig { returns(T::Boolean) }
+  def use_mir; end
+  sig { returns(T.any(T::Hash[String, String], T::Hash[T.untyped, T.untyped])) }
+  def pkg_paths; end
+end
+
+class MoveInto
+  sig { returns(String) }
+  def zig_type; end
+end
+
+class OwnershipFactTarget
+  sig { returns(MIR::Node) }
+  def expr; end
+  sig { returns(T::Boolean) }
+  def include_owned_result; end
+  sig { returns(T::Boolean) }
+  def include_transfer_contract; end
+  sig { returns(String) }
+  def name; end
+end
+
+class OwnershipFinalizationContext
+  sig { returns(T.any(Set, T::Set[String])) }
+  def body_alloc_mark_names; end
+  sig { returns(T.any(Set, T::Set[String])) }
+  def body_transfer_mark_names; end
+  sig { returns(T.any(T.untyped, T::Set[String])) }
+  def guarded_cleanup_names; end
+  sig { returns(T.any(T.untyped, T::Set[String])) }
+  def inherited_alloc_names; end
+  sig { returns(Set) }
+  def move_mark_names; end
+  sig { returns(Set) }
+  def transfer_mark_names; end
+end
+
+class OwnershipTransferTarget
+  sig { returns(T.any(String, T.untyped)) }
+  def name; end
+  sig { returns(T.any(Symbol, T.untyped)) }
+  def target; end
+end
+
+class PipelineIndexPreparedValue
+  sig { returns(T.any(T.untyped, T::Boolean)) }
+  def owns_heap; end
+  sig { returns(T.any(T.untyped, T::Array[MIR::AllocMark], T::Array[T.untyped])) }
+  def setup_stmts; end
+  sig { returns(T.any(MIR::Ident, MIR::Node, T.untyped)) }
+  def value; end
+end
+
+class PredicateContext
+  sig { returns(Symbol) }
+  def kind; end
+  sig { returns(T.any(T::Array[String], T::Array[T.untyped])) }
+  def param_names; end
+  sig { returns(T.any(Set, T.untyped)) }
+  def rejected_param_names; end
+end
+
+class PromotedLocalFact
+  sig { returns(String) }
+  def name; end
+  sig { returns(T.any(String, T.untyped)) }
+  def type_zig; end
+  sig { returns(T::Boolean) }
+  def is_suspend_result; end
+end
+
+class ResourceCloseAction
+  sig { returns(T.any(String, T.untyped)) }
+  def name; end
+  sig { returns(T.any(Integer, T.untyped)) }
+  def runtime_heap_alloc_args; end
+  sig { returns(T::Array[String]) }
+  def field_path; end
+end
+
+class AST::Binding
+  sig { returns(T.any(String, T.untyped)) }
+  def name; end
+end
+
+class AST::CatchFilter
+  sig { returns(Symbol) }
+  def form; end
+end
+
+class AST::PipelineShardContext
+  sig { returns(T.any(AST::Identifier, T.untyped)) }
+  def map_var; end
+  sig { returns(T::Boolean) }
+  def auto_detected; end
+  sig { returns(T::Boolean) }
+  def body_allocates_frame; end
+  sig { returns(T::Boolean) }
+  def key_allocates_frame; end
+end
+
+class AnalysisFacts
+  sig { returns(T.any(T.untyped, T::Boolean)) }
+  def intrinsic_fixed_arg_list; end
+  sig { returns(T.any(T.untyped, T::Boolean)) }
+  def intrinsic_varargs; end
+end
+
+class ArrayParts
+  sig { returns(T.any(T::Array[T.untyped], T::Boolean)) }
+  def array; end
+  sig { returns(Symbol) }
+  def element_type_raw; end
+end
+
+class AssignmentTargetPlan
+  sig { returns(T.any(MIR::Ident, T.untyped)) }
+  def target; end
+end
+
+class BgBodyMaterialization
+  sig { returns(T::Array[MIR::Node]) }
+  def emit_body; end
+  sig { returns(T::Array[MIR::Node]) }
+  def run_body; end
+end
+
+class BgPrefix
+  sig { returns(T::Boolean) }
+  def arena; end
+  sig { returns(T::Boolean) }
+  def can_smash; end
+  sig { returns(T::Boolean) }
+  def parallel; end
+  sig { returns(T::Boolean) }
+  def pinned; end
+end
+
+class BinaryOperandFacts
+  sig { returns(T.any(BinaryIntArithmeticFacts, T.untyped)) }
+  def int_arithmetic; end
+  sig { returns(T.any(AST::BinaryOp, T.untyped)) }
+  def node; end
+end
+
+class BindingFlowFacts
+  sig { returns(T.any(T.untyped, T::Boolean)) }
+  def valid; end
+end
+
+class BodyId
+  sig { returns(T.any(Integer, T.untyped)) }
+  def value; end
+end
+
+class ByValue
+  sig { returns(String) }
+  def zig_type; end
+end
+
+class CleanupDecisionFrame
+  sig { returns(T.any(T.untyped, T::Array[AST::Node])) }
+  def body; end
+  sig { returns(T.any(Integer, T.untyped)) }
+  def loop_depth; end
+end
+
+class DataflowStep
+  sig { returns(OwnershipState) }
+  def state; end
+end
+
+class DefId
+  sig { returns(T.any(Integer, T.untyped)) }
+  def value; end
+end
+
+class DoBranchPrefix
+  sig { returns(T::Boolean) }
+  def can_smash; end
+  sig { returns(T::Boolean) }
+  def parallel; end
+  sig { returns(T::Boolean) }
+  def pinned; end
+end
+
+class FrameBindingContext
+  sig { returns(T::Set[String]) }
+  def param_names; end
+  sig { returns(String) }
+  def receiver_name; end
+end
+
+class FreshHeapCopy
+  sig { returns(String) }
+  def zig_type; end
+end
+
+class FsmSegmentFacts
+  sig { returns(T.any(T.untyped, T::Array[T.untyped])) }
+  def ctx_reads; end
+end
+
+class FunctionFacts
+  sig { returns(T::Array[AssignmentNode]) }
+  def assignment_nodes; end
+  sig { returns(T::Hash[String, T::Array[AST::Locatable]]) }
+  def binding_values; end
+  sig { returns(T::Array[AST::Locatable]) }
+  def escape_nodes; end
+  sig { returns(T.any(LambdaIdentifierRefs, T.untyped)) }
+  def lambda_body_identifier_refs; end
+  sig { returns(T::Array[AST::Node]) }
+  def return_values; end
+  sig { returns(T::Hash[String, SymbolEntry]) }
+  def symbols; end
+end
+
+class InlineStoredAllocCheck
+  sig { returns(Symbol) }
+  def label; end
+end
+
+class IntrinsicAllocationContract
+  sig { returns(T.any(T.untyped, T::Array[T.untyped])) }
+  def alloc; end
+end
+
+class IntrinsicBehaviorContract
+  sig { returns(T.any(T.untyped, T::Array[T.untyped])) }
+  def error_kind; end
+end
+
+class IntrinsicEmit
+  sig { returns(T.any(Symbol, T.untyped)) }
+  def registry; end
+  sig { returns(T::Boolean) }
+  def allocates; end
+end
+
+class IntrinsicOwnershipContract
+  sig { returns(T.any(T::Array[T.untyped], T::Set[Integer])) }
+  def argument_takes_indices; end
+  sig { returns(T::Set[Integer]) }
+  def takes_indices; end
+end
+
+class IntrinsicTemplateContract
+  sig { returns(T.any(T.untyped, T::Array[T.untyped])) }
+  def bc; end
+end
+
+class LockEdge
+  sig { returns(T.any(String, T.untyped)) }
+  def fn_name; end
+end
+
+class MIR::CatchReassign
+  sig { returns(String) }
+  def name; end
+end
+
+class MIR::ExternTrampoline
+  sig { returns(String) }
+  def callee_name; end
+  sig { returns(T::Array[MIR::ExternTrampolineArg]) }
+  def runtime_args; end
+  sig { returns(String) }
+  def method_name; end
+end
+
+class MIR::FailureAction
+  sig { returns(String) }
+  def default_message; end
+  sig { returns(Symbol) }
+  def error_kind; end
+  sig { returns(Symbol) }
+  def error_type; end
+  sig { returns(T.any(AST::ErrorActionKind, T.untyped)) }
+  def kind; end
+  sig { returns(String) }
+  def line; end
+  sig { returns(T::Array[MIR::Emittable]) }
+  def body; end
+end
+
+class MIR::FiberSpawnCall
+  sig { returns(String) }
+  def ctx_type; end
+  sig { returns(String) }
+  def ctx_var; end
+  sig { returns(MIR::TaskConfigPlan) }
+  def task_config; end
+  sig { returns(T::Boolean) }
+  def pass_ctx_by_address; end
+  sig { returns(String) }
+  def runtime_name; end
+end
+
+class MIR::FsmOwnershipFact
+  sig { returns(T.any(T.untyped, T::Boolean)) }
+  def move_guarded; end
+  sig { returns(Symbol) }
+  def target; end
+  sig { returns(T.any(Symbol, T.untyped)) }
+  def target_alloc; end
+end
+
+class MIR::OwnershipContract
+  sig { returns(T::Boolean) }
+  def covers_consuming_params; end
+end
+
+class MIR::ProfileTaskSite
+  sig { returns(Integer) }
+  def column; end
+  sig { returns(Symbol) }
+  def form; end
+  sig { returns(Integer) }
+  def line; end
+end
+
+class MIR::ThunkBaseCase
+  sig { returns(MIR::Node) }
+  def cond; end
+  sig { returns(MIR::Node) }
+  def value; end
+end
+
+class MIRPass
+  sig { returns(T::Hash[String, AST::FunctionDef]) }
+  def fn_nodes; end
+end
+
+class Node
+  sig { returns(T.any(Symbol, T.untyped)) }
+  def kind; end
+  sig { returns(T.any(Integer, T.untyped)) }
+  def line; end
+  sig { returns(String) }
+  def path; end
+  sig { returns(T.any(Integer, T.untyped)) }
+  def scope_depth; end
+  sig { returns(Symbol) }
+  def state; end
+  sig { returns(T.any(T.untyped, Type)) }
+  def type_info; end
+end
+
+class PipelineConcurrentBcExpression
+  sig { returns(T.any(AST::Node, T.untyped)) }
+  def expr; end
+  sig { returns(T.any(Symbol, T.untyped)) }
+  def policy; end
+end
+
+class PipelineConcurrentSourcePointer
+  sig { returns(MIR::AddressOf) }
+  def pointer; end
+end
+
+class PipelineRangeChain
+  sig { returns(AST::Node) }
+  def source; end
+  sig { returns(T.any(T::Array[AST::Node], T::Array[T.untyped])) }
+  def stages; end
+end
+
+class ReturnOwnershipPlan
+  sig { returns(T.any(Set, T::Set[String])) }
+  def consumed_root_names; end
+  sig { returns(Set) }
+  def converted_cleanup_names; end
+  sig { returns(T::Set[String]) }
+  def direct_value_names; end
+  sig { returns(T.any(Set, T::Set[String])) }
+  def explicit_return_names; end
+  sig { returns(T::Set[String]) }
+  def move_guard_required_names; end
+  sig { returns(T.any(Set, T::Set[String])) }
+  def moved_root_names; end
+  sig { returns(T::Set[String]) }
+  def transfer_required_names; end
+  sig { returns(T.any(MIR::Ident, T.untyped)) }
+  def value; end
+end
+
+class Schemas::EnumSchema
+  sig { returns(T.any(T.untyped, T::Array[String])) }
+  def variants; end
+  sig { returns(T.any(Symbol, T.untyped)) }
+  def visibility; end
+end
+
+class Schemas::InlineStructVariant
+  sig { returns(T.any(Schemas::InlineStructVariant::FieldInputMap, T::Hash[T.untyped, T.untyped])) }
+  def fields; end
+end
+
+class Semantic::LocalFact
+  sig { returns(Semantic::LocalId) }
+  def id; end
+  sig { returns(String) }
+  def name; end
+  sig { returns(Semantic::PlaceId) }
+  def place_id; end
+end
+
+class SplitResult
+  sig { returns(T::Array[Segment]) }
+  def segments; end
+end
+
+class StdlibCallFacts
+  sig { returns(T.any(T::Array[StdlibCallArgFact], T::Array[T.untyped])) }
+  def args; end
+  sig { returns(CallOwnershipFacts) }
+  def ownership; end
+end
+
+class SymbolEntry
+  sig { returns(T.any(T.untyped, T::Boolean)) }
+  def mutable; end
+  sig { returns(T.any(AST::VarDecl, RegInput)) }
+  def reg; end
+  sig { returns(T.any(Symbol, T.untyped)) }
+  def storage; end
+  sig { returns(T.any(SymbolEntry::TypeInput, T.untyped)) }
+  def type; end
+  sig { returns(T::Set[Symbol]) }
+  def capabilities; end
+  sig { returns(T::Boolean) }
+  def rebindable; end
+  sig { returns(Integer) }
+  def size; end
+end
+
+class SyntheticFinding
+  sig { returns(T.any(Symbol, T.untyped)) }
+  def category; end
+  sig { returns(Symbol) }
+  def level; end
+  sig { returns(T.any(String, T.untyped)) }
+  def message; end
+  sig { returns(T.any(SyntheticToken, T.untyped)) }
+  def token; end
+end
+
+class SyntheticToken
+  sig { returns(Integer) }
+  def column; end
+  sig { returns(Integer) }
+  def line; end
+  sig { returns(String) }
+  def value; end
+end
+
+class ::AST::Param
+  sig { returns(String) }
+  def name; end
+  sig { returns(Type) }
+  def type; end
+end
+
+class AST::CatchClause
+  sig { returns(T::Array[AST::CatchItem]) }
+  def items; end
+end
+
+class AST::DeferredDrop
+  sig { returns(T::Boolean) }
+  def resource; end
+end
+
+class AST::PipelineShardedAccess
+  sig { returns(String) }
+  def map_name; end
+end
+
+class AllocatingResultFact
+  sig { returns(String) }
+  def name; end
+end
+
+class Annotator::Phases::FunctionBodySummary
+  sig { returns(String) }
+  def name; end
+end
+
+class AutoLockAssignmentFacts
+  sig { returns(String) }
+  def alias_var; end
+  sig { returns(Symbol) }
+  def alloc_sym; end
+  sig { returns(String) }
+  def field; end
+  sig { returns(String) }
+  def guard_var; end
+  sig { returns(String) }
+  def zig_var; end
+end
+
+class BgCaptureMaterialization
+  sig { returns(T::Array[MIR::ContextFieldDecl]) }
+  def capture_fields; end
+  sig { returns(T::Array[MIR::StructInitField]) }
+  def capture_inits; end
+end
+
+class BgFsmTransformContext
+  sig { returns(BgBodyMaterialization) }
+  def body; end
+  sig { returns(BgCaptureMaterialization) }
+  def capture; end
+  sig { returns(T::Hash[String, Schemas::ResourceClosePlan]) }
+  def capture_close_plans; end
+  sig { returns(T::Hash[String, Type]) }
+  def captured; end
+  sig { returns(BgLoweringNames) }
+  def names; end
+  sig { returns(AST::BgBlock) }
+  def node; end
+  sig { returns(T::Set[String]) }
+  def pointer_captures; end
+  sig { returns(BgSchedulerPlan) }
+  def scheduler; end
+  sig { returns(BgTypePlan) }
+  def types; end
+end
+
+class BgLoweringNames
+  sig { returns(String) }
+  def alloc_var; end
+  sig { returns(String) }
+  def bg_rt; end
+  sig { returns(String) }
+  def blk_label; end
+  sig { returns(String) }
+  def ctx_type; end
+  sig { returns(String) }
+  def ctx_var; end
+  sig { returns(String) }
+  def promise_var; end
+end
+
+class BgSchedulerPlan
+  sig { returns(MIR::ProfileTaskSite) }
+  def profile_site; end
+  sig { returns(MIR::TaskConfigPlan) }
+  def profiled_task_cfg; end
+  sig { returns(Integer) }
+  def site_col; end
+  sig { returns(Integer) }
+  def site_line; end
+  sig { returns(MIR::FiberSpawnCall) }
+  def spawn_call; end
+end
+
+class BgTypePlan
+  sig { returns(Type) }
+  def inner_type; end
+  sig { returns(T::Boolean) }
+  def is_void; end
+end
+
+class BinaryIntArithmeticFacts
+  sig { returns(T::Boolean) }
+  def both_int; end
+  sig { returns(T::Boolean) }
+  def has_comptime_number_literal; end
+  sig { returns(T::Boolean) }
+  def has_float_coercion; end
+end
+
+class BindingAuditRecord
+  sig { returns(T::Boolean) }
+  def captured_bg; end
+  sig { returns(T::Boolean) }
+  def captured_parallel; end
+  sig { returns(String) }
+  def fn; end
+  sig { returns(T::Boolean) }
+  def mutated; end
+  sig { returns(Symbol) }
+  def storage; end
+  sig { returns(String) }
+  def var; end
+end
+
+class BindingCleanupFacts
+  sig { returns(T::Boolean) }
+  def empty_initializer; end
+  sig { returns(T::Boolean) }
+  def mutable_binding_mutated; end
+end
+
+class BindingLifecycleFacts
+  sig { returns(Symbol) }
+  def storage; end
+end
+
+class BodyScanSummary
+  sig { returns(Set) }
+  def callees; end
+  sig { returns(T::Boolean) }
+  def has_fnptr_call; end
+  sig { returns(Set) }
+  def propagating_callees; end
+  sig { returns(T::Boolean) }
+  def raises_directly; end
+end
+
+class BoundaryTypeViolation
+  sig { returns(String) }
+  def class_name; end
+  sig { returns(String) }
+  def location; end
+  sig { returns(String) }
+  def type_name; end
+end
+
+class BufferSetup
+  sig { returns(MIR::DeferStmt) }
+  def defer_stmt; end
+  sig { returns(MIR::Let) }
+  def var_decl; end
+end
+
+class CallArgFacts
+  sig { returns(AST::Node) }
+  def ast_arg; end
+  sig { returns(Type) }
+  def callee_param_type; end
+  sig { returns(T::Boolean) }
+  def copy_to_owning; end
+  sig { returns(Integer) }
+  def param_index; end
+end
+
+class CallArgumentFacts
+  sig { returns(AST::Locatable) }
+  def arg_node; end
+  sig { returns(Integer) }
+  def index; end
+  sig { returns(T::Boolean) }
+  def is_give; end
+  sig { returns(AST::Param) }
+  def param; end
+  sig { returns(CallSignatureSite) }
+  def site; end
+end
+
+class CallArityPlan
+  sig { returns(Integer) }
+  def given_args; end
+  sig { returns(Integer) }
+  def max_args; end
+  sig { returns(Integer) }
+  def min_args; end
+  sig { returns(CallSignatureSite) }
+  def site; end
+end
+
+class CallSignatureSite
+  sig { returns(String) }
+  def name; end
+  sig { returns(CallNode) }
+  def node; end
+end
+
+class CallSiteId
+  sig { returns(Integer) }
+  def value; end
+end
+
+class CapabilityId
+  sig { returns(Integer) }
+  def value; end
+end
+
+class CapabilityPlan::CapabilityTargetFact
+  sig { returns(T::Boolean) }
+  def field_target; end
+  sig { returns(T::Boolean) }
+  def index_target; end
+  sig { returns(T::Boolean) }
+  def live_symbol_refreshed; end
+  sig { returns(Type) }
+  def resolved_type; end
+  sig { returns(String) }
+  def target_label; end
+end
+
+class CapabilityRequest
+  sig { returns(T::Boolean) }
+  def alias_mutable; end
+end
+
+class CapabilityTargetFact
+  sig { returns(T::Boolean) }
+  def live_symbol_refreshed; end
+  sig { returns(Type) }
+  def source_type; end
+end
+
+class CapabilityTransition
+  sig { returns(Type) }
+  def resolved_type; end
+end
+
+class CaptureContext
+  sig { returns(CaptureAnalysis) }
+  def analysis; end
+  sig { returns(Set) }
+  def locals; end
+  sig { returns(T::Boolean) }
+  def mark_moves; end
+end
+
+class CatchLoweringPlan
+  sig { returns(T::Array[MIR::CatchClause]) }
+  def clauses; end
+  sig { returns(MIR::CatchDefaultAction) }
+  def default_action; end
+end
+
+class CleanupDecisionFacts
+  sig { returns(T::Set[String]) }
+  def loop_declared_names; end
+  sig { returns(T::Set[String]) }
+  def match_takes_vars; end
+end
+
+class Contract
+  sig { returns(T::Boolean) }
+  def extern; end
+  sig { returns(T::Boolean) }
+  def intrinsic; end
+  sig { returns(T::Boolean) }
+  def reentrant; end
+end
+
+class CrossSegmentVarFact
+  sig { returns(Integer) }
+  def first_def_seg; end
+end
+
+class DeclarationIndex
+  sig { returns(T::Array[AST::Locatable]) }
+  def body_statements; end
+  sig { returns(T::Array[ErrorTypeRegistration]) }
+  def error_type_registrations; end
+  sig { returns(T::Array[AST::ExternFnDecl]) }
+  def extern_function_declarations; end
+  sig { returns(T::Array[AST::FunctionDef]) }
+  def function_declarations; end
+  sig { returns(T::Array[AST::RequireNode]) }
+  def imports; end
+  sig { returns(T::Array[TypeDeclaration]) }
+  def type_declarations; end
+  sig { returns(T::Array[AST::UnionDef]) }
+  def union_method_declarations; end
+end
+
+class DestinationSourceFact
+  sig { returns(T::Boolean) }
+  def borrowed; end
+  sig { returns(T::Boolean) }
+  def heap_owned_result; end
+  sig { returns(T::Boolean) }
+  def owner_transfer; end
+end
+
+class Document
+  sig { returns(String) }
+  def text; end
+  sig { returns(String) }
+  def uri; end
+  sig { returns(Integer) }
+  def version; end
+end
+
+class Emit::FsmEmitContext
+  sig { returns(T::Boolean) }
+  def arena_init_flag; end
+  sig { returns(T::Boolean) }
+  def is_void; end
+  sig { returns(T::Boolean) }
+  def parallel; end
+end
+
+class EncounteredCallArgument
+  sig { returns(T::Boolean) }
+  def mutable; end
+  sig { returns(String) }
+  def name; end
+end
+
+class EscapePlacementFact
+  sig { returns(String) }
+  def fn_name; end
+  sig { returns(Symbol) }
+  def reason; end
+end
+
+class ExpandedLockSegment
+  sig { returns(T::Array[FsmSegmentSpec]) }
+  def appended_specs; end
+  sig { returns(T::Array[MIR::ContextFieldDecl]) }
+  def extra_fields; end
+  sig { returns(FsmSegmentSpec) }
+  def lock_try_spec; end
+end
+
+class FallibleClauseFact
+  sig { returns(T::Array[MIR::Emittable]) }
+  def action_mir; end
+  sig { returns(String) }
+  def alias_name; end
+  sig { returns(String) }
+  def var_name; end
+end
+
+class FieldAccessPlan
+  sig { returns(String) }
+  def field; end
+  sig { returns(T::Boolean) }
+  def indirect; end
+  sig { returns(Symbol) }
+  def path; end
+  sig { returns(MIR::Node) }
+  def target; end
+  sig { returns(T::Boolean) }
+  def union_payload; end
+end
+
+class Finalized
+  sig { returns(AliasOverrideTable) }
+  def alias_overrides_by_index; end
+end
+
+class FixScan
+  sig { returns(T::Array[String]) }
+  def fix_lines; end
+end
+
+class FnSig
+  sig { returns(Integer) }
+  def start; end
+  sig { returns(Array) }
+  def toks; end
+end
+
+class ForEachPlan
+  sig { returns(T::Array[MIR::Node]) }
+  def collection_setup; end
+  sig { returns(T::Boolean) }
+  def mutable; end
+  sig { returns(MIR::Ident) }
+  def rt; end
+  sig { returns(T::Boolean) }
+  def tight; end
+end
+
+class ForRangePlan
+  sig { returns(String) }
+  def iter_var; end
+  sig { returns(MIR::Ident) }
+  def rt; end
+  sig { returns(T::Boolean) }
+  def tight; end
+end
+
+class FunctionContext
+  sig { returns(String) }
+  def name; end
+end
+
+class FunctionEntryPlan
+  sig { returns(T::Array[MIR::Node]) }
+  def prologue; end
+  sig { returns(T::Array[MIR::Node]) }
+  def takes_mir; end
+end
+
+class FunctionLoweringContext
+  sig { returns(CleanupBindingMap) }
+  def bindings; end
+  sig { returns(NameSet) }
+  def collection_params; end
+  sig { returns(T::Boolean) }
+  def has_catch; end
+  sig { returns(T::Boolean) }
+  def has_rt; end
+  sig { returns(T::Boolean) }
+  def heap_carry_return; end
+  sig { returns(NameSet) }
+  def heap_carry_return_vars; end
+  sig { returns(Set) }
+  def lowered_alloc_names; end
+  sig { returns(Set) }
+  def lowered_guarded_cleanup_names; end
+  sig { returns(NameSet) }
+  def mutable_scalar_params; end
+  sig { returns(T::Boolean) }
+  def tail_call; end
+end
+
+class FunctionParamFact
+  sig { returns(String) }
+  def name; end
+  sig { returns(AST::Param) }
+  def param; end
+end
+
+class GenericParts
+  sig { returns(Symbol) }
+  def generic_base_raw; end
+  sig { returns(T::Boolean) }
+  def generic_instance; end
+end
+
+class HashLiteralPlan
+  sig { returns(Type) }
+  def type_info; end
+end
+
+class IndexAccessPlan
+  sig { returns(T::Boolean) }
+  def needs_mut_ref; end
+  sig { returns(T::Boolean) }
+  def optional; end
+end
+
+class IndexedAssignmentDispatch
+  sig { returns(MIR::InlineAllocMetadata) }
+  def resolved_allocs; end
+end
+
+class ItemSetup
+  sig { returns(String) }
+  def items_ident; end
+end
+
+class LightweightSnapshot
+  sig { returns(Integer) }
+  def edge_count; end
+  sig { returns(T::Hash[PlaceId, Symbol]) }
+  def move_actions; end
+  sig { returns(T::Hash[PlaceId, Integer]) }
+  def move_cols; end
+  sig { returns(T::Hash[PlaceId, Integer]) }
+  def move_lines; end
+  sig { returns(T::Hash[PlaceId, Symbol]) }
+  def states; end
+end
+
+class ListLiteralPlan
+  sig { returns(Type) }
+  def type_info; end
+end
+
+class LocalBindingFacts
+  sig { returns(T::Hash[String, CleanupEntry]) }
+  def entries; end
+  sig { returns(T::Array[AST::Node]) }
+  def frame_decls; end
+  sig { returns(T::Array[AST::Node]) }
+  def iteration_frame_decls; end
+  sig { returns(T::Set[String]) }
+  def names; end
+end
+
+class LocalId
+  sig { returns(Integer) }
+  def value; end
+end
+
+class LocationToken
+  sig { returns(Integer) }
+  def column; end
+end
+
+class LockBindingPlan
+  sig { returns(String) }
+  def guard_var; end
+  sig { returns(MIR::Emittable) }
+  def lock_expr; end
+end
+
+class LockClauseSite
+  sig { returns(AST::WithBlock) }
+  def node; end
+end
+
+class LockGraph
+  sig { returns(T::Hash[Symbol, T::Set[Symbol]]) }
+  def adj; end
+  sig { returns(T::Array[LockEdge]) }
+  def edges; end
+  sig { returns(T::Set[Symbol]) }
+  def nodes; end
+end
+
+class LockHeldCallSite
+  sig { returns(String) }
+  def callee; end
+  sig { returns(Lexer::Token) }
+  def site_token; end
+end
+
+class Logger
+  sig { returns(Symbol) }
+  def level; end
+end
+
+class LoweredBodyConstruction
+  sig { returns(OwnershipFinalizationContext) }
+  def finalization_context; end
+  sig { returns(T::Array[LoweredStmtPacket]) }
+  def packets; end
+end
+
+class LoweredModuleItems
+  sig { returns(T::Array[MIR::Emittable]) }
+  def items; end
+  sig { returns(T::Array[MIR::Emittable]) }
+  def type_items; end
+end
+
+class MIR::BgStreamPlan
+  sig { returns(String) }
+  def alloc_var; end
+  sig { returns(String) }
+  def blk_label; end
+  sig { returns(T::Array[MIR::Node]) }
+  def body; end
+  sig { returns(T::Array[MIR::ContextFieldDecl]) }
+  def capture_fields; end
+  sig { returns(T::Array[MIR::StructInitField]) }
+  def capture_inits; end
+  sig { returns(String) }
+  def ctx_type; end
+  sig { returns(String) }
+  def ctx_var; end
+  sig { returns(String) }
+  def local_stream; end
+  sig { returns(MIR::FiberSpawnCall) }
+  def spawn_call; end
+  sig { returns(String) }
+  def stream_var; end
+end
+
+class MIR::BoundaryCaptureFact
+  sig { returns(String) }
+  def name; end
+  sig { returns(T::Boolean) }
+  def parallel_safe; end
+  sig { returns(T::Boolean) }
+  def requires_pinned; end
+  sig { returns(T::Boolean) }
+  def scheduler_affine; end
+end
+
+class MIR::CaptureCleanupAction
+  sig { returns(MIR::FieldGet) }
+  def target; end
+end
+
+class MIR::CatchClause
+  sig { returns(MIR::CatchClauseMeta) }
+  def meta; end
+end
+
+class MIR::DoBlockPlan
+  sig { returns(T::Array[MIR::DoBranchPlan]) }
+  def branches; end
+  sig { returns(String) }
+  def wg_var; end
+end
+
+class MIR::DoBranchPlan
+  sig { returns(String) }
+  def raw_args_name; end
+  sig { returns(String) }
+  def raw_rt_name; end
+  sig { returns(String) }
+  def wg_var; end
+end
+
+class MIR::EnumSwitchPattern
+  sig { returns(String) }
+  def variant; end
+end
+
+class MIR::ExecutionBoundaryFact
+  sig { returns(T::Array[MIR::BoundaryCaptureFact]) }
+  def captures; end
+  sig { returns(Symbol) }
+  def dispatch; end
+  sig { returns(Symbol) }
+  def kind; end
+end
+
+class MIR::FsmCaptureFact
+  sig { returns(Symbol) }
+  def cleanup_at; end
+end
+
+class MIR::FsmDestroyLockRelease
+  sig { returns(MIR::Ident) }
+  def lock_ref; end
+  sig { returns(String) }
+  def name; end
+  sig { returns(String) }
+  def unlock_method; end
+end
+
+class MIR::FsmDestroyStmt
+  sig { returns(Symbol) }
+  def source_kind; end
+end
+
+class MIR::FsmLoweringResult
+  sig { returns(MIR::FsmGenericBody) }
+  def body; end
+  sig { returns(MIR::FsmStructure) }
+  def structure; end
+end
+
+class MIR::IfChainBranch
+  sig { returns(MatchBody) }
+  def body; end
+  sig { returns(MIR::Emittable) }
+  def cond; end
+end
+
+class MIR::IndexedStore
+  sig { returns(FunctionSignature) }
+  def entry; end
+  sig { returns(MIR::Node) }
+  def index; end
+  sig { returns(Symbol) }
+  def map_kind; end
+  sig { returns(MIR::Node) }
+  def target; end
+end
+
+class MIR::LoweredBodyId
+  sig { returns(T::Array[MIR::LoweredNodeId]) }
+  def node_ids; end
+end
+
+class MIR::MutualThunkArm
+  sig { returns(T::Array[MIR::ThunkBaseCase]) }
+  def base_cases; end
+  sig { returns(T::Array[MIR::ThunkFrameInit]) }
+  def target_arg_inits; end
+  sig { returns(String) }
+  def variant_name; end
+end
+
+class MIR::ObservableConsumerSpawn
+  sig { returns(String) }
+  def acc_name; end
+  sig { returns(Integer) }
+  def id; end
+end
+
+class MIR::Placement::BindingFact
+  sig { returns(T::Boolean) }
+  def heap_return; end
+  sig { returns(String) }
+  def name; end
+  sig { returns(Type) }
+  def type_info; end
+end
+
+class MIR::ShardConcurrentEach
+  sig { returns(T::Array[MIR::StructInitField]) }
+  def capture_inits; end
+  sig { returns(Type) }
+  def key_type; end
+  sig { returns(String) }
+  def map_var_name; end
+end
+
+class MIR::SortedLockAcquireEntry
+  sig { returns(String) }
+  def alias_name; end
+  sig { returns(String) }
+  def guard_var; end
+  sig { returns(String) }
+  def held_var; end
+  sig { returns(String) }
+  def method_name; end
+end
+
+class MIR::TaskConfigPlan
+  sig { returns(Integer) }
+  def profile_site_id; end
+end
+
+class MIR::ThunkVariant
+  sig { returns(String) }
+  def name; end
+  sig { returns(T::Array[MIR::ThunkFrameField]) }
+  def param_fields; end
+end
+
+class MIR::UnionTypeVariant
+  sig { returns(String) }
+  def name; end
+end
+
+class MIR::WithMatchArm
+  sig { returns(String) }
+  def guard_var; end
+end
+
+class MIRLoweringGeneratedId
+  sig { returns(MIRLoweringCounterKind) }
+  def kind; end
+end
+
+class MIRLoweringState
+  sig { returns(MIRLoweringCapabilityState) }
+  def capabilities; end
+  sig { returns(MIRLoweringCaptureState) }
+  def capture; end
+  sig { returns(MIRLoweringCounters) }
+  def counters; end
+  sig { returns(MIRLoweringFunctions::FunctionState) }
+  def function_state; end
+  sig { returns(MIRLoweringInput) }
+  def input; end
+  sig { returns(MIRLoweringOwnershipState) }
+  def ownership; end
+  sig { returns(MIRLoweringProgramState) }
+  def program; end
+  sig { returns(MIRLoweringRuntimeState) }
+  def runtime; end
+  sig { returns(MIRLoweringSchemas) }
+  def schemas; end
+  sig { returns(MIRLoweringTestState) }
+  def test; end
+end
+
+class MatchLoweringFacts
+  sig { returns(T::Boolean) }
+  def is_union; end
+end
+
+class MatchSubjectPlan
+  sig { returns(Type) }
+  def expr_type; end
+end
+
+class MutableSnapshotPlan
+  sig { returns(Symbol) }
+  def alloc; end
+  sig { returns(T::Array[MutableSnapshotCap]) }
+  def capabilities; end
+  sig { returns(AST::WithBlock) }
+  def node; end
+end
+
+class MutualPlan
+  sig { returns(String) }
+  def target_fn; end
+end
+
+class MutualTailCall
+  sig { returns(String) }
+  def name; end
+end
+
+class NextExprPlan
+  sig { returns(Type) }
+  def promise_type; end
+end
+
+class Options
+  sig { returns(T::Boolean) }
+  def dry_run; end
+  sig { returns(Integer) }
+  def loop_max; end
+  sig { returns(T::Boolean) }
+  def loop_until_clean; end
+  sig { returns(T::Array[String]) }
+  def paths; end
+  sig { returns(T::Boolean) }
+  def take_first; end
+end
+
+class OrExitFacts
+  sig { returns(Integer) }
+  def line; end
+end
+
+class OrRescueFacts
+  sig { returns(T::Boolean) }
+  def left_is_error; end
+  sig { returns(Integer) }
+  def line; end
+end
+
+class OwnedSinkSourceFact
+  sig { returns(T::Boolean) }
+  def already_owned_value; end
+  sig { returns(T::Boolean) }
+  def borrowed_union_sink; end
+  sig { returns(T::Boolean) }
+  def existing_owned_source; end
+  sig { returns(T::Boolean) }
+  def moved_without_copy; end
+  sig { returns(T::Boolean) }
+  def owned_parameter; end
+  sig { returns(Symbol) }
+  def source_alloc; end
+end
+
+class OwnershipContract
+  sig { returns(T::Boolean) }
+  def covers_consuming_params; end
+end
+
+class OwnershipEffect
+  sig { returns(String) }
+  def target_var; end
+end
+
+class OwnershipPreparationPlan
+  sig { returns(T::Set[String]) }
+  def can_fail_fns; end
+  sig { returns(AST::FunctionDef) }
+  def function; end
+end
+
+class OwnershipTransferPlan
+  sig { returns(T::Boolean) }
+  def move_guarded; end
+end
+
+class PipeArityPlan
+  sig { returns(Integer) }
+  def given_args; end
+  sig { returns(Integer) }
+  def max_args; end
+  sig { returns(Integer) }
+  def min_args; end
+end
+
+class PipelineAllocMarkFact
+  sig { returns(MIR::AllocMark) }
+  def mark; end
+end
+
+class PipelineBatchWindowPlan
+  sig { returns(AST::Node) }
+  def list_node; end
+  sig { returns(String) }
+  def placeholder_var; end
+  sig { returns(MIR::Lit) }
+  def size_mir; end
+  sig { returns(AST::BinaryOp) }
+  def smooth_node; end
+  sig { returns(String) }
+  def timeout_ns; end
+end
+
+class PipelineBindingFoldPlan
+  sig { returns(T::Array[MIR::Emittable]) }
+  def init_stmts; end
+  sig { returns(T::Array[MIR::Emittable]) }
+  def loop_body_stmts; end
+  sig { returns(T::Array[MIR::Emittable]) }
+  def post_inner_stmts; end
+  sig { returns(MIR::Node) }
+  def result_expr; end
+end
+
+class PipelineBindingNames
+  sig { returns(String) }
+  def accumulator; end
+  sig { returns(String) }
+  def count; end
+  sig { returns(String) }
+  def found; end
+  sig { returns(String) }
+  def result; end
+  sig { returns(String) }
+  def source; end
+  sig { returns(String) }
+  def sum; end
+  sig { returns(String) }
+  def unnest; end
+  sig { returns(String) }
+  def value; end
+end
+
+class PipelineBindingUnnestChain
+  sig { returns(String) }
+  def outer_binding; end
+  sig { returns(T::Array[AST::Node]) }
+  def stages; end
+  sig { returns(AST::Node) }
+  def unnest_expr; end
+end
+
+class PipelineChain
+  sig { returns(AST::BinaryOp) }
+  def source; end
+  sig { returns(PipelineStageList) }
+  def stages; end
+end
+
+class PipelineConcurrentCallback
+  sig { returns(MIR::FieldGet) }
+  def apply_ident; end
+  sig { returns(MIR::AddressOf) }
+  def context_arg; end
+  sig { returns(MIR::StructDef) }
+  def ctx_def; end
+  sig { returns(MIR::Let) }
+  def ctx_let; end
+  sig { returns(String) }
+  def ctx_name; end
+  sig { returns(String) }
+  def ctx_var; end
+  sig { returns(Integer) }
+  def id; end
+end
+
+class PipelineConcurrentInvocation
+  sig { returns(T::Array[MIR::StructInit]) }
+  def bounded_runtime_args; end
+  sig { returns(MIR::Lit) }
+  def parallel; end
+  sig { returns(MIR::StructInit) }
+  def task_config; end
+  sig { returns(MIR::Cast) }
+  def worker_count; end
+end
+
+class PipelineConcurrentPlan
+  sig { returns(AST::ConcurrentOp) }
+  def conc_op; end
+  sig { returns(T::Boolean) }
+  def list_each_mutates_placeholder; end
+  sig { returns(AST::BinaryOp) }
+  def smooth_node; end
+  sig { returns(AST::Node) }
+  def terminal_kind; end
+end
+
+class PipelineEachPlan
+  sig { returns(AST::EachOp) }
+  def each_op; end
+  sig { returns(AST::Node) }
+  def list_node; end
+end
+
+class PipelineEachSoaBody
+  sig { returns(T::Array[MIR::Emittable]) }
+  def body; end
+  sig { returns(T::Array[String]) }
+  def fields; end
+end
+
+class PipelineLazyRangePrefix
+  sig { returns(String) }
+  def initial_capture; end
+  sig { returns(T::Boolean) }
+  def item_used; end
+  sig { returns(String) }
+  def item_var; end
+  sig { returns(T::Array[MIR::Emittable]) }
+  def outer_stmts; end
+  sig { returns(T::Array[MIR::Emittable]) }
+  def stage_stmts; end
+end
+
+class PipelineLowerHeadResult
+  sig { returns(T::Array[MIR::Emittable]) }
+  def pending; end
+end
+
+class PipelineLoweringBridge
+  sig { returns(MIREmitter) }
+  def emitter; end
+  sig { returns(MIRLowering) }
+  def lowering; end
+end
+
+class PipelineMaterializer
+  sig { returns(PipelineMaterializer::RuntimeHost) }
+  def host; end
+end
+
+class PipelineNamedBinding
+  sig { returns(String) }
+  def name; end
+  sig { returns(String) }
+  def zig; end
+end
+
+class PipelineOperationPlan
+  sig { returns(PipelineExecutionKind) }
+  def execution; end
+  sig { returns(PipelineSemanticFacts) }
+  def facts; end
+  sig { returns(AST::Node) }
+  def rhs; end
+  sig { returns(PipelineSite) }
+  def site; end
+  sig { returns(PipelineSourcePlan) }
+  def source; end
+  sig { returns(PipelineTerminalPlan) }
+  def terminal; end
+end
+
+class PipelinePublishSpec
+  sig { returns(T::Boolean) }
+  def transfers_item_on_success; end
+end
+
+class PipelineRangeFoldNames
+  sig { returns(String) }
+  def acc; end
+  sig { returns(String) }
+  def cnt; end
+  sig { returns(String) }
+  def found; end
+  sig { returns(String) }
+  def result; end
+  sig { returns(String) }
+  def sum; end
+  sig { returns(String) }
+  def val; end
+end
+
+class PipelineRangeLowerer
+  sig { returns(PipelineRangeLowerer::RuntimeHost) }
+  def host; end
+end
+
+class PipelineSemanticFacts
+  sig { returns(T::Boolean) }
+  def bc_target; end
+  sig { returns(PipelineSourceKind) }
+  def source_kind; end
+  sig { returns(PipelineTerminalKind) }
+  def terminal_kind; end
+end
+
+class PipelineShardContext
+  sig { returns(T::Boolean) }
+  def body_allocates_frame; end
+  sig { returns(T::Boolean) }
+  def key_allocates_frame; end
+end
+
+class PipelineSourcePlan
+  sig { returns(PipelineSourceKind) }
+  def kind; end
+end
+
+class PipelineSourceShape
+  sig { returns(T::Boolean) }
+  def bc_target; end
+  sig { returns(T::Boolean) }
+  def named_source; end
+end
+
+class PipelineTerminalPlan
+  sig { returns(PipelineTerminalKind) }
+  def kind; end
+  sig { returns(AST::Node) }
+  def node; end
+end
+
+class PlaceId
+  sig { returns(Integer) }
+  def value; end
+end
+
+class PredicateCallSite
+  sig { returns(T.any(AST::FuncCall, AST::MethodCall)) }
+  def call; end
+  sig { returns(String) }
+  def callee; end
+end
+
+class PredicateId
+  sig { returns(Integer) }
+  def value; end
+end
+
+class RcClone
+  sig { returns(String) }
+  def zig_type; end
+end
+
+class Refuse
+  sig { returns(Symbol) }
+  def reason; end
+end
+
+class RegistryCall
+  sig { returns(T::Boolean) }
+  def suppress_try; end
+end
+
+class Result
+  sig { returns(AmbiguityMap) }
+  def ambiguous; end
+  sig { returns(T::Set[String]) }
+  def bg_heap; end
+  sig { returns(T::Hash[String, T::Array[AST::VarDecl]]) }
+  def bindings_by_function; end
+  sig { returns(EscapePlacementFacts) }
+  def placements; end
+  sig { returns(ResultMap) }
+  def resolved; end
+  sig { returns(UnresolvedMap) }
+  def unresolved; end
+end
+
+class RunResult
+  sig { returns(Integer) }
+  def edits_applied; end
+  sig { returns(Integer) }
+  def passes; end
+end
+
+class Schemas::ResourceCloseAction
+  sig { returns(String) }
+  def name; end
+end
+
+class Schemas::ResourceClosePlan
+  sig { returns(T::Array[Schemas::ResourceCloseAction]) }
+  def actions; end
+end
+
+class Scope::ScopeTypeEntry
+  sig { returns(Scope::ScopeTypeSchema) }
+  def schema; end
+end
+
+class ScopeId
+  sig { returns(Integer) }
+  def value; end
+end
+
+class Semantic::CallSiteFact
+  sig { returns(String) }
+  def callee_name; end
+  sig { returns(T::Boolean) }
+  def fn_var_call; end
+  sig { returns(Semantic::CallSiteId) }
+  def id; end
+end
+
+class SemanticAnnotator
+  sig { returns(T::Boolean) }
+  def strict_test; end
+end
+
+class SemanticIndex
+  sig { returns(Annotator::FunctionRegistry) }
+  def function_registry; end
+  sig { returns(Semantic::SemanticIdIndex) }
+  def id_index; end
+  sig { returns(AST::Program) }
+  def program; end
+end
+
+class SharedGenericArg
+  sig { returns(String) }
+  def name; end
+  sig { returns(Type) }
+  def type; end
+end
+
+class SnapshotTxnViolation
+  sig { returns(Symbol) }
+  def effect; end
+  sig { returns(String) }
+  def fn; end
+end
+
+class StageRecord
+  sig { returns(String) }
+  def label; end
+  sig { returns(Integer) }
+  def sequence; end
+end
+
+class StdLibGlobalBinding
+  sig { returns(String) }
+  def name; end
+  sig { returns(Symbol) }
+  def storage; end
+end
+
+class StdlibArgumentMaterialization
+  sig { returns(T::Array[MIR::Node]) }
+  def mir_args; end
+end
+
+class StreamYieldFrame
+  sig { returns(AST::BgStreamBlock) }
+  def node; end
+end
+
+class SuspendPointId
+  sig { returns(Integer) }
+  def value; end
+end
+
+class SyntheticLocalId
+  sig { returns(Integer) }
+  def value; end
+end
+
+class TestThatEnv
+  sig { returns(TestLowering::TestBlockCtx) }
+  def ctx; end
+  sig { returns(LetAstMap) }
+  def let_ast_map; end
+  sig { returns(String) }
+  def tag_suffix; end
+  sig { returns(AST::WhenBlock) }
+  def when_block; end
+end
+
+class TypeAnnotationFacts
+  sig { returns(Type) }
+  def inner; end
+  sig { returns(T::Boolean) }
+  def inner_array; end
+  sig { returns(T::Boolean) }
+  def is_param; end
+  sig { returns(AnnotationNode) }
+  def node; end
+  sig { returns(Type) }
+  def type_obj; end
+end
+
+class TypeCapabilities
+  sig { returns(T::Boolean) }
+  def observable; end
+  sig { returns(T::Boolean) }
+  def polymorphic_shared; end
+  sig { returns(T::Boolean) }
+  def soa; end
+end
+
+class TypeId
+  sig { returns(String) }
+  def key; end
+end
+
+class UnionVariantLoweringFact
+  sig { returns(String) }
+  def owner_name; end
+end
+
+class UnitVariantAccess
+  sig { returns(Symbol) }
+  def type_name; end
+end
+
+class VarDeclFacts
+  sig { returns(T::Boolean) }
+  def actually_mutated; end
+  sig { returns(T::Boolean) }
+  def forced_var; end
+  sig { returns(Type) }
+  def ft; end
+  sig { returns(T::Boolean) }
+  def heap_return_var; end
+  sig { returns(T::Boolean) }
+  def keyword_mutable; end
+end
+
+class WithCapabilityBindingContext
+  sig { returns(CapabilitySpec) }
+  def cap; end
+  sig { returns(T::Boolean) }
+  def needs_sort; end
+  sig { returns(AST::WithBlock) }
+  def node; end
+  sig { returns(String) }
+  def rt_name; end
+  sig { returns(String) }
+  def zig_var; end
+end
+
+class WorkFrame
+  sig { returns(String) }
+  def stage_label; end
+  sig { returns(Float) }
+  def started_at; end
+end
+
+class ZigTranspiler
+  sig { returns(ModuleImporter) }
+  def importer; end
+end
+

@@ -65,7 +65,7 @@ module AutoType
         @z3_solver = init_z3_solver(evidence)
         emit_z3_inferred_actions(@z3_solver, evidence) if @z3_solver
         high_actions = evidence["actions"].select do |action|
-          next false unless action["confidence"] == NilKill::HIGH
+          next false unless action["confidence"] == NilKill::HIGH || (action["confidence"] == NilKill::REVIEW && action["kind"] == "add_sig")
           next false if @skipped.include?(fingerprint(action))
           next false if permanently_skipped?(action)
           next false if z3_preflight_skip?(action)

@@ -20,6 +20,7 @@ module PprofConverter
   # Run all available converters for a `.profile/` directory. Returns
   # a hash of {name => path} for files actually written. Missing input
   # files are silently skipped.
+  sig { params(profile_dir: T.nilable(String)).returns(Hash) }
   def self.convert_all(profile_dir)
     return {} unless profile_dir
 
@@ -52,6 +53,7 @@ module PprofConverter
   # views show the per-channel breakdown with stable identifiers.
   # Sample columns: pushes / pops / push_blocked / pop_blocked /
   # max_depth (capacity travels as a label).
+  sig { params(profile_dir: String, binary: T.nilable(String)).returns(T.nilable(String)) }
   def self.convert_channels(profile_dir, binary)
     src = File.join(profile_dir, 'channels.txt')
     return nil unless File.exist?(src)
@@ -102,6 +104,7 @@ module PprofConverter
   #   alloc_space   (bytes)  = total bytes allocated at this site
   #   inuse_objects (count)  = currently-live objects (allocs - frees)
   #   inuse_space   (bytes)  = currently-live bytes  (bytes - free_bytes)
+  sig { params(profile_dir: String, binary: T.nilable(String)).returns(T.nilable(String)) }
   def self.convert_alloc(profile_dir, binary)
     src = File.join(profile_dir, 'alloc.txt')
     return nil unless File.exist?(src)
@@ -188,6 +191,7 @@ module PprofConverter
   # Mirrors Go's mutex profile shape (contention count + delay ns).
   # We add hold-time columns since the runtime tracks both, and the
   # split read/write columns so the pprof user can drill into either.
+  sig { params(profile_dir: String, binary: T.nilable(String)).returns(T.nilable(String)) }
   def self.convert_locks(profile_dir, binary)
     src = File.join(profile_dir, 'locks.txt')
     return nil unless File.exist?(src)
@@ -252,6 +256,7 @@ module PprofConverter
   # MVCC cells track read/commit/retry counts and per-cell struct size.
   # Reported columns let the pprof user spot COW-thrash (high commits
   # x large struct), retry storms, and read-heavy cells worth keeping.
+  sig { params(profile_dir: String, binary: T.nilable(String)).returns(T.nilable(String)) }
   def self.convert_mvcc(profile_dir, binary)
     src = File.join(profile_dir, 'mvcc.txt')
     return nil unless File.exist?(src)
@@ -305,6 +310,7 @@ module PprofConverter
   # `go install github.com/google/perf_data_converter/src/cmd/perf_to_profile`).
   # If the tool is not on PATH we leave perf.data in place and return
   # nil; the caller surfaces a one-line install hint.
+  sig { params(profile_dir: String).returns(T.nilable(String)) }
   def self.convert_perf(profile_dir)
     src = File.join(profile_dir, 'perf.data')
     return nil unless File.exist?(src)
@@ -321,6 +327,7 @@ module PprofConverter
   # Read whitespace-separated columns from a profile text file,
   # skipping `#` comment lines and blank lines. Filters rows that are
   # shorter than `min_cols` (header lines, partial dumps).
+  sig { params(path: String, min_cols: Integer).returns(Array) }
   def self.parse_columns(path, min_cols)
     File.readlines(path).each_with_object([]) do |line, acc|
       next if line.start_with?('#') || line.strip.empty?
@@ -391,6 +398,7 @@ module PprofConverter
   # path, so we match the basename pattern that signals user code.
   # addr2line may append "(discriminator N)" or other metadata after
   # the line number; strip that before extracting the basename.
+  sig { params(addr2line_file: String, _zig_path: String).returns(T::Boolean) }
   def self.file_is_transpiled_zig?(addr2line_file, _zig_path)
     return false unless addr2line_file
     bare = addr2line_file.sub(/:\d+\b.*\z/, '')

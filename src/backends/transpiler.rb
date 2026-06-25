@@ -155,7 +155,7 @@ class ZigTranspiler
     service: "Huge", unbounded: "Huge"
   }.freeze, T::Hash[Symbol, String])
 
-  sig { params(main_fn: T.nilable(AST::FunctionDef), override: T.untyped).returns(String) }
+  sig { params(main_fn: T.nilable(AST::FunctionDef), override: T.nilable(Symbol)).returns(String) }
   def main_stack_variant(main_fn, override: nil)
     tier = override&.to_sym || main_fn&.stack_tier || :standard
     MAIN_STACK_VARIANTS.fetch(tier, "Standard")

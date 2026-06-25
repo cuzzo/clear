@@ -494,7 +494,7 @@ module MIRHoistLowering
     block
   end
 
-  sig { params(blk: T.proc.returns(T.untyped)).returns([T.untyped, T::Array[T.untyped]]) }
+  sig { params(blk: T.proc.returns(T::Array[T.untyped])).returns([T.untyped, T::Array[T.untyped]]) }
   def lower_head(&blk)
     T.bind(self, MIRLowering) rescue nil
     prev = function_state.pending_stmts

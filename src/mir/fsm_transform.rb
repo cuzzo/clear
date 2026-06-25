@@ -62,7 +62,7 @@ module FsmTransform
   #   :promoted_decls, :capture_inits, :rt_name, :pin_mode,
   #   :inner_zig, :is_void, :arena_init_flag, :id, :bg_rt,
   #   :ctx_type, :promise_zig, :blk_label, :capture_fields
-  sig { params(bg_block: T.untyped, ctx: T.untyped, lowering: T.untyped).returns(T.nilable(MIR::FsmLoweringResult)) }
+  sig { params(bg_block: T.untyped, ctx: T::Hash[Symbol, BgTransformValue], lowering: T.untyped).returns(T.nilable(MIR::FsmLoweringResult)) }
   def self.transform(bg_block, ctx, lowering)
     T.bind(self, T.untyped) rescue nil
     suspend_points = bg_block.fsm_suspend_points || []

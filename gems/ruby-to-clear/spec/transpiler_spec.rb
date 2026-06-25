@@ -456,4 +456,20 @@ RSpec.describe RubyToClear::Transpiler do
       expect_transpile("def my_func(a, b = 42); end", "FN my_func(a: Auto, b = 42: Auto) RETURNS !Auto ->\n\nEND")
     end
   end
+
+  describe "Sorbet sig type parsing" do
+    it "compiles method signatures with explicit parameter and return types" do
+      ruby_code = <<~RUBY
+        sig { params(x: Integer, y: T.nilable(String), z: T::Array[Token]).returns(Void) }
+        def my_method(x, y, z)
+        end
+      RUBY
+      expected_clear = <<~CLEAR
+        FN my_method(x: Int64, y: ?String, z: Token[]) RETURNS Void ->
+
+        END
+      CLEAR
+      expect_transpile(ruby_code, expected_clear)
+    end
+  end
 end

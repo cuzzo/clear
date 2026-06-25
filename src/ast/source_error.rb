@@ -32,7 +32,7 @@ module ErrorHelper
   # `%{name}` interpolation against the hash. Legacy positional args
   # against `%s`/`%d` still work for the (shrinking) set of templates
   # that haven't been migrated to named form yet.
-  sig { params(node_or_token: T.untyped, code_or_message: T.untyped, args: String, kwargs: T.untyped).returns(T.untyped) }
+  sig { params(node_or_token: T.untyped, code_or_message: T.untyped, args: String, kwargs: T.untyped).returns(T.noreturn) }
   def error!(node_or_token, code_or_message, *args, **kwargs)
     T.bind(self, T.untyped) rescue nil
     token = diagnostic_token(node_or_token)
