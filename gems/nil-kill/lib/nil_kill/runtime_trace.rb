@@ -1387,6 +1387,46 @@ module NilKillRuntimeTrace
     nil
   end
 
+  def self.install_tstruct_hook
+    return unless defined?(T::Struct)
+    return if T::Struct.instance_variable_get(:@__nil_kill_attached)
+    T::Struct.instance_variable_set(:@__nil_kill_attached, true)
+
+    T::Struct.prepend(Module.new do
+      def initialize(*args, **kw, &blk)
+        class_name = NilKillRuntimeTrace.safe_module_name(self.class) || "AnonymousTStruct"
+        kw.each do |field, value|
+          NilKillRuntimeTrace.record_struct_field(self.class, class_name, field, value)
+        end
+        super(*args, **kw, &blk)
+      end
+    end)
+
+    return unless defined?(T::Props::ClassMethods)
+    return if T::Props::ClassMethods.instance_variable_get(:@__nil_kill_attached)
+    T::Props::ClassMethods.instance_variable_set(:@__nil_kill_attached, true)
+
+    T::Props::ClassMethods.prepend(Module.new do
+      def prop(*args, **kw, &blk)
+        super(*args, **kw, &blk)
+        name = args.first
+        writer_name = "#{name}="
+        if method_defined?(writer_name) || private_method_defined?(writer_name)
+          unless const_defined?(:NilKillPropWriters, false)
+            const_set(:NilKillPropWriters, Module.new)
+            prepend(const_get(:NilKillPropWriters))
+          end
+          
+          const_get(:NilKillPropWriters).define_method(writer_name) do |val|
+            class_name = self.class.name || "AnonymousTStruct"
+            NilKillRuntimeTrace.record_struct_field(self.class, class_name, name, val)
+            super(val)
+          end
+        end
+      end
+    end)
+  end
+
   def self.install_collection_hook
     install_array_hook
     install_hash_hook
@@ -1878,6 +1918,7 @@ if ENV["NIL_KILL_TRACE"] == "1"
   NilKillRuntimeTrace.install_struct_hook
   NilKillRuntimeTrace.install_data_hook
   NilKillRuntimeTrace.install_open_struct_hook
+  NilKillRuntimeTrace.install_tstruct_hook
   NilKillRuntimeTrace.install_collection_hook unless ENV["NIL_KILL_TRACE_COLLECTIONS"] == "0"
   TracePoint.new(:end) { NilKillRuntimeTrace.install_tlet_hook }.enable
   TracePoint.new(:end) do
