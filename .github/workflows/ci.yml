@@ -428,17 +428,17 @@ jobs:
             --head=HEAD \
             --out-dir=tmp/lint-sarif
       - name: Upload RuboCop SARIF
-        uses: github/codeql-action/upload-sarif@v3
+        uses: github/codeql-action/upload-sarif@v4
         with:
           sarif_file: tmp/lint-sarif/rubocop.sarif
           category: rubocop-lint
       - name: Upload Clippy SARIF
-        uses: github/codeql-action/upload-sarif@v3
+        uses: github/codeql-action/upload-sarif@v4
         with:
           sarif_file: tmp/lint-sarif/clippy.sarif
           category: clippy-lint
       - name: Upload Zig AST Check SARIF
-        uses: github/codeql-action/upload-sarif@v3
+        uses: github/codeql-action/upload-sarif@v4
         with:
           sarif_file: tmp/lint-sarif/zig-ast-check.sarif
           category: zig-ast-check
@@ -1317,7 +1317,7 @@ jobs:
             --json=tmp/slopcop-report.json \
             --sarif=tmp/slopcop-report.sarif
       - name: Upload SlopCop report SARIF
-        uses: github/codeql-action/upload-sarif@v3
+        uses: github/codeql-action/upload-sarif@v4
         with:
           sarif_file: tmp/slopcop-report.sarif
       - uses: actions/upload-artifact@v4
@@ -1372,7 +1372,7 @@ jobs:
             --sarif=tmp/slopcop-zig-constraints.sarif \
             --markdown=tmp/slopcop-zig-constraints.md
       - name: Upload SlopCop constraint SARIF
-        uses: github/codeql-action/upload-sarif@v3
+        uses: github/codeql-action/upload-sarif@v4
         with:
           sarif_file: tmp/slopcop-zig-constraints.sarif
       - uses: actions/upload-artifact@v4
@@ -1468,27 +1468,27 @@ jobs:
             --decomplex-binary=./gems/decomplex/target/release/decomplex-rust \
             "${coverage_args[@]}"
       - name: Upload Decomplex SARIF
-        uses: github/codeql-action/upload-sarif@v3
+        uses: github/codeql-action/upload-sarif@v4
         with:
           sarif_file: tmp/generalized-gems-sarif/decomplex.sarif
           category: decomplex
       - name: Upload Boobytrap SARIF
-        uses: github/codeql-action/upload-sarif@v3
+        uses: github/codeql-action/upload-sarif@v4
         with:
           sarif_file: tmp/generalized-gems-sarif/boobytrap.sarif
           category: boobytrap
       - name: Upload SlopCop SARIF
-        uses: github/codeql-action/upload-sarif@v3
+        uses: github/codeql-action/upload-sarif@v4
         with:
           sarif_file: tmp/generalized-gems-sarif/slopcop.sarif
           category: slopcop
       - name: Upload Espalier SARIF
-        uses: github/codeql-action/upload-sarif@v3
+        uses: github/codeql-action/upload-sarif@v4
         with:
           sarif_file: tmp/generalized-gems-sarif/espalier.sarif
           category: espalier
       - name: Upload Nil-Kill SARIF
-        uses: github/codeql-action/upload-sarif@v3
+        uses: github/codeql-action/upload-sarif@v4
         with:
           sarif_file: tmp/generalized-gems-sarif/nil-kill.sarif
           category: nil-kill
@@ -1566,7 +1566,7 @@ jobs:
             bundle exec ruby tools/diff_bucket_summary.rb "origin/${{ github.event.pull_request.base.ref }}" --format markdown --src-visibility --type-guardrails-sarif tmp/src-type-guardrails.sarif \
             > tmp/diff-bucket-summary.md
       - name: Upload Src Type Guardrails SARIF
-        uses: github/codeql-action/upload-sarif@v3
+        uses: github/codeql-action/upload-sarif@v4
         with:
           sarif_file: tmp/src-type-guardrails.sarif
           category: src-type-guardrails
