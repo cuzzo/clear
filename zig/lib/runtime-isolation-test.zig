@@ -15,6 +15,8 @@ const alloc = std.heap.c_allocator;
 var global_ebr_ctx: ebr.EbrContext = .{};
 var global_stack_pool: fm.StackPool = undefined;
 var global_shutdown = std.atomic.Value(bool).init(false);
+var global_spawned_workers: usize = 0;
+var global_failed_workers = std.atomic.Value(usize).init(0);
 
 fn initWorkerGlobals() void {
     global_stack_pool = fm.StackPool.init(alloc);
@@ -25,7 +27,10 @@ fn deinitWorkerGlobals() void {
 }
 
 fn schedulerThread(a: std.mem.Allocator) void {
-    var sched = fp.Scheduler.init(a, &global_ebr_ctx, &global_stack_pool) catch return;
+    var sched = fp.Scheduler.init(a, &global_ebr_ctx, &global_stack_pool) catch {
+        _ = global_failed_workers.fetchAdd(1, .release);
+        return;
+    };
     defer sched.deinit();
     sched.global_shutdown = &global_shutdown;
     sched.shutdown_on_idle = false;
@@ -36,21 +41,36 @@ fn schedulerThread(a: std.mem.Allocator) void {
 }
 
 fn startWorkers(threads: []std.Thread, n: usize) void {
+    global_spawned_workers = 0;
+    global_failed_workers.store(0, .release);
     for (threads[0..n]) |*t| {
         t.* = std.Thread.spawn(.{}, schedulerThread, .{alloc}) catch continue;
+        global_spawned_workers += 1;
     }
-    while (fp.global_registry.count() < n) {
+    var wait_ms: usize = 0;
+    while (true) : (wait_ms += 1) {
+        const live = fp.global_registry.count();
+        const failed = global_failed_workers.load(.acquire);
+        if (live + failed >= global_spawned_workers) {
+            if (live < global_spawned_workers) {
+                @panic("One or more worker schedulers failed to initialize");
+            }
+            break;
+        }
+        if (wait_ms >= 5_000) @panic("Worker registration timed out");
         compat.sleepNs(1 * std.time.ns_per_ms);
     }
 }
 
 fn stopWorkers(threads: []std.Thread, n: usize) void {
+    _ = n;
     global_shutdown.store(true, .release);
     fp.global_registry.notifyAll();
-    for (threads[0..n]) |*t| t.join();
+    for (threads[0..global_spawned_workers]) |*t| t.join();
     fp.global_registry.deinit(alloc);
     fp.global_registry = .{};
     global_shutdown.store(false, .release);
+    global_spawned_workers = 0;
 }
 
 const MainTaskStatus = struct {

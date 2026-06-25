@@ -106,6 +106,8 @@ var global_shutdown = std.atomic.Value(bool).init(false);
 // in the writer-heavy / 5-scheduler tests under taskset -c 0,1.
 var post_run_workers = std.atomic.Value(usize).init(0);
 var deinit_phase = std.atomic.Value(bool).init(false);
+var global_spawned_workers: usize = 0;
+var global_started_workers = std.atomic.Value(usize).init(0);
 
 fn schedulerThread(a: std.mem.Allocator) void {
     var sched = Scheduler.init(a, &global_ebr, &stack_pool) catch return;
@@ -113,6 +115,7 @@ fn schedulerThread(a: std.mem.Allocator) void {
     sched.shutdown_on_idle = false;
     fp.active_scheduler = &sched;
     fp.scheduler_running = true;
+    _ = global_started_workers.fetchAdd(1, .release);
     sched.run();
     fp.scheduler_running = false;
 
@@ -132,32 +135,42 @@ fn schedulerThread(a: std.mem.Allocator) void {
 }
 
 fn startWorkers(threads: []std.Thread, n: usize) void {
+    global_spawned_workers = 0;
+    global_started_workers.store(0, .release);
     for (threads[0..n]) |*t| {
         t.* = std.Thread.spawn(.{}, schedulerThread, .{test_alloc}) catch continue;
+        global_spawned_workers += 1;
     }
-    while (fp.global_registry.count() < n) {
+    var wait_ms: usize = 0;
+    while (fp.global_registry.count() < global_spawned_workers) : (wait_ms += 1) {
+        if (wait_ms >= 5_000) @panic("Worker registration timed out");
         compat.sleepNs(1 * std.time.ns_per_ms);
     }
 }
 
 fn stopWorkers(threads: []std.Thread, n: usize) void {
+    _ = n;
     global_shutdown.store(true, .release);
     fp.global_registry.notifyAll();
-    // Wait for every worker to exit run(). Past this fence, no
-    // worker can issue a submitRemote* into a peer's channels.
-    while (post_run_workers.load(.acquire) < n) {
+    // Wait for every worker that started to exit run().
+    const started = global_started_workers.load(.acquire);
+    var wait_ms: usize = 0;
+    while (post_run_workers.load(.acquire) < started) : (wait_ms += 1) {
+        if (wait_ms >= 5_000) @panic("Worker stop timed out");
         compat.sleepNs(1 * std.time.ns_per_ms);
     }
     // Now safe to release the deinit barrier — all sched.deinit()
     // calls run concurrently, but none can race a peer's submit
     // because all peers are also past run().
     deinit_phase.store(true, .release);
-    for (threads[0..n]) |*t| t.join();
+    for (threads[0..global_spawned_workers]) |*t| t.join();
     // Reset for the next test in the file (each test calls
     // startWorkers/stopWorkers in sequence).
     global_shutdown.store(false, .release);
     post_run_workers.store(0, .release);
     deinit_phase.store(false, .release);
+    global_spawned_workers = 0;
+    global_started_workers.store(0, .release);
 }
 
 // Multi-scheduler shape: 2 worker schedulers on 2 OS threads + main on a
