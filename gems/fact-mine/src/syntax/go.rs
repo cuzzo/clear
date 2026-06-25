@@ -248,6 +248,39 @@ impl NormalizedLanguageBehavior for GoNormalizedBehavior {
             .unwrap_or_else(|| message.to_string())
     }
 
+    fn initializer_writes(&self, node: &Node, _source_text: &str, span: Span) -> Vec<crate::syntax::normalized_behavior::NormalizedStateWrite> {
+        let mut writes = Vec::new();
+        if node.r#type == "COMPOSITE_LITERAL" {
+            let mut type_name = ".literal".to_string();
+            for child in &node.children {
+                if let crate::ast::Child::Node(child) = child {
+                    if child.r#type == "TYPE_IDENTIFIER" || child.r#type == "IDENTIFIER" {
+                        type_name = child.text.clone();
+                    }
+                    if child.r#type == "LITERAL_VALUE" {
+                        for field in &child.children {
+                            if let crate::ast::Child::Node(field) = field {
+                                if field.r#type == "KEYED_ELEMENT" {
+                                    for key in &field.children {
+                                        if let crate::ast::Child::Node(key) = key {
+                                            writes.push(crate::syntax::normalized_behavior::NormalizedStateWrite {
+                                                receiver: type_name.clone(),
+                                                field: key.text.clone(),
+                                                span,
+                                            });
+                                            break;
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        writes
+    }
+
     fn nil_guard_fact(&self, message: &str, subject: &str) -> Option<NormalizedNilGuardFact> {
         nil_guard_from_predicates(message, subject, GO_NIL_PREDICATES, GO_NON_NIL_PREDICATES)
     }

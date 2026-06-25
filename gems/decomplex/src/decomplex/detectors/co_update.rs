@@ -175,6 +175,30 @@ impl Report {
         pair_owners
     }
 
+    fn pair_recvs(&self) -> BTreeMap<Vec<String>, BTreeSet<String>> {
+        let mut pair_recvs: BTreeMap<Vec<String>, BTreeSet<String>> = BTreeMap::new();
+        for (_unit, ws) in &self.by_unit {
+            for i in 0..ws.len() {
+                for j in i + 1..ws.len() {
+                    let w1 = &ws[i];
+                    let w2 = &ws[j];
+                    if w1.attr != w2.attr && can_pair(w1, w2) {
+                        let mut pair = vec![w1.attr.clone(), w2.attr.clone()];
+                        pair.sort();
+                        let entry = pair_recvs.entry(pair).or_default();
+                        if !w1.recv.is_empty() {
+                            entry.insert(w1.recv.clone());
+                        }
+                        if !w2.recv.is_empty() {
+                            entry.insert(w2.recv.clone());
+                        }
+                    }
+                }
+            }
+        }
+        pair_recvs
+    }
+
     fn co_written_pairs(&self, min_support: usize) -> Vec<CoWrittenPair> {
         let mut keys = Vec::new();
         let mut counts: BTreeMap<Vec<String>, BTreeSet<(String, String)>> = BTreeMap::new();
@@ -217,6 +241,7 @@ impl Report {
     fn neglected_updates(&self, min_support: usize) -> Vec<NeglectedUpdate> {
         let pairs = self.co_written_pairs(min_support);
         let pair_owners = self.pair_owners();
+        let pair_recvs = self.pair_recvs();
         let mut out = Vec::new();
 
         for ((file, defn), ws) in &self.by_unit {
@@ -235,7 +260,7 @@ impl Report {
 
                 if let (Some(has), Some(miss)) = (has, miss) {
                     if let Some(w) = ws.iter().find(|x| &x.attr == has) {
-                        let matches = if is_unknown(w) {
+                        let matches_owner = if is_unknown(w) {
                             true
                         } else if let Some(owners) = pair_owners.get(&p.pair) {
                             owners.contains("") || owners.contains(&w.owner)
@@ -243,7 +268,19 @@ impl Report {
                             false
                         };
 
-                        if matches {
+                        let matches_recv = if is_dynamic_language(file) {
+                            true
+                        } else if let Some(recvs) = pair_recvs.get(&p.pair) {
+                            if recvs.contains(&w.recv) {
+                                true
+                            } else {
+                                w.recv.is_empty() || w.recv == "self" || w.recv == "this" || recvs.contains("self") || recvs.contains("this")
+                            }
+                        } else {
+                            true
+                        };
+
+                        if matches_owner && matches_recv {
                             let loc = format!("{}:{}:{}", file, defn, w.line);
                             let mut spans = BTreeMap::new();
                             spans.insert(loc.clone(), w.span);

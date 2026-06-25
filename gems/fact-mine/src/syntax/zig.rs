@@ -245,6 +245,40 @@ impl NormalizedLanguageBehavior for ZigNormalizedBehavior {
         pattern_values.into_iter().take(1).collect()
     }
 
+    fn initializer_writes(&self, node: &Node, _source_text: &str, span: Span) -> Vec<crate::syntax::normalized_behavior::NormalizedStateWrite> {
+        let mut writes = Vec::new();
+        if node.r#type == "INIT_LIST" {
+            let mut type_name = ".literal".to_string();
+            // In Zig, we can't easily get the parent from `Node`.
+            // For now, let's look for a type identifier inside children (if any).
+            for child in &node.children {
+                if let crate::ast::Child::Node(child) = child {
+                    if child.r#type == "TYPE_IDENTIFIER" || child.r#type == "IDENTIFIER" {
+                        type_name = child.text.clone();
+                    }
+                }
+            }
+            
+            for field in &node.children {
+                if let crate::ast::Child::Node(field) = field {
+                    if field.r#type == "FIELD_INIT" {
+                        for key in &field.children {
+                            if let crate::ast::Child::Node(key) = key {
+                                writes.push(crate::syntax::normalized_behavior::NormalizedStateWrite {
+                                    receiver: type_name.clone(),
+                                    field: key.text.clone(),
+                                    span,
+                                });
+                                break;
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        writes
+    }
+
     fn wrap_branch_predicate(&self, _branch: &Node) -> bool {
         false
     }

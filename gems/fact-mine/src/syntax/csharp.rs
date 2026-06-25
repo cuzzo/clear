@@ -73,6 +73,45 @@ impl NormalizedLanguageBehavior for CSharpNormalizedBehavior {
         format!("this.{message}")
     }
 
+    fn initializer_writes(&self, node: &Node, _source_text: &str, span: Span) -> Vec<crate::syntax::normalized_behavior::NormalizedStateWrite> {
+        let mut writes = Vec::new();
+        if node.r#type == "OBJECT_CREATION_EXPRESSION" {
+            let mut type_name = ".literal".to_string();
+            for child in &node.children {
+                if let crate::ast::Child::Node(child) = child {
+                    if child.r#type == "IDENTIFIER" || child.r#type == "TYPE_IDENTIFIER" || child.r#type == "LVAR" {
+                        type_name = child.text.clone();
+                    }
+                    if child.r#type == "INITIALIZER_EXPRESSION" {
+                        for grand_child in &child.children {
+                            if let crate::ast::Child::Node(grand_child) = grand_child {
+                                if grand_child.r#type == "LASGN" || grand_child.r#type == "ASSIGNMENT_EXPRESSION" || grand_child.r#type == "ASSIGNMENT" {
+                                    for key in &grand_child.children {
+                                        if let crate::ast::Child::String(key_text) = key {
+                                            writes.push(crate::syntax::normalized_behavior::NormalizedStateWrite {
+                                                receiver: type_name.clone(),
+                                                field: key_text.clone(),
+                                                span,
+                                            });
+                                        } else if let crate::ast::Child::Node(key_node) = key {
+                                            writes.push(crate::syntax::normalized_behavior::NormalizedStateWrite {
+                                                receiver: type_name.clone(),
+                                                field: key_node.text.clone(),
+                                                span,
+                                            });
+                                        }
+                                        break;
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        writes
+    }
+
     fn function_visibility(&self, _name: &str, node: &Node, _lines: &[String]) -> String {
         let text = node.text.trim_start();
         if text.starts_with("public ") {

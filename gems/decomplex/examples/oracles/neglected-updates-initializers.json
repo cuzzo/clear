@@ -1,0 +1,36 @@
+{
+  "detector": "co-update",
+  "expected": {
+    "co_written_pairs": [
+      {
+        "pair": [
+          "stack_size",
+          "timeout"
+        ],
+        "support": 3
+      }
+    ],
+    "neglected_updates": [
+      {
+        "has": "timeout",
+        "missing": "stack_size",
+        "pair": [
+          "stack_size",
+          "timeout"
+        ],
+        "recv": ".literal",
+        "support": 3
+      },
+      {
+        "has": "stack_size",
+        "missing": "timeout",
+        "pair": [
+          "stack_size",
+          "timeout"
+        ],
+        "recv": ".literal",
+        "support": 3
+      }
+    ]
+  }
+}
