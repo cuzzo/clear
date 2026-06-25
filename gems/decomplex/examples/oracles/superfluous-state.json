@@ -1,0 +1,38 @@
+{
+  "detector": "superfluous-state",
+  "expected": [
+    {
+      "classification": "intra_method",
+      "ctorset": false,
+      "field": "intra_state",
+      "reader_method_count": 1,
+      "score": 5.0,
+      "writer_method_count": 1
+    },
+    {
+      "classification": "adjacent_call",
+      "ctorset": false,
+      "field": "adjacent_state",
+      "reader_method_count": 1,
+      "score": 2.5,
+      "writer_method_count": 1
+    },
+    {
+      "classification": "dead_state",
+      "ctorset": false,
+      "field": "dead_state",
+      "reader_method_count": 0,
+      "score": 0.85,
+      "writer_method_count": 1
+    },
+    {
+      "classification": "derived_cache",
+      "ctorset": false,
+      "field": "cache_state",
+      "reader_method_count": 2,
+      "score": 0.3333333333333333,
+      "writer_method_count": 1
+    }
+  ],
+  "options": {}
+}

@@ -4,7 +4,8 @@ use decomplex_rust::decomplex::detectors::{
     function_lcom, implicit_control_flow, inconsistent_rename_clone, local_flow, locality_drag,
     miner, operational_discontinuity, oversized_predicate, path_condition, predicate_alias,
     redundant_nil_guard, semantic_alias, sequence_mine, state_branch_density, state_mesh,
-    structural_topology, temporal_ordering_pressure, weighted_inlined_cognitive_complexity,
+    structural_topology, superfluous_state, temporal_ordering_pressure,
+    weighted_inlined_cognitive_complexity,
 };
 use decomplex_rust::decomplex::parallel;
 use decomplex_rust::decomplex::report::Report;
@@ -131,6 +132,14 @@ fn run_with_args(args: Vec<String>) -> Result<()> {
             let language = Language::parse(&language)?;
             let report = derived_state::scan_files(&files, language)
                 .with_context(|| "failed to scan derived-state facts")?;
+            println!("{}", serde_json::to_string(&report)?);
+        }
+        Command::SuperfluousState {
+            language, files, ..
+        } => {
+            let language = Language::parse(&language)?;
+            let report = superfluous_state::scan_files(&files, language)
+                .with_context(|| "failed to scan superfluous-state facts")?;
             println!("{}", serde_json::to_string(&report)?);
         }
         Command::ImplicitControlFlow {
@@ -356,6 +365,11 @@ enum Command {
         files: Vec<PathBuf>,
         jobs: Option<usize>,
     },
+    SuperfluousState {
+        language: String,
+        files: Vec<PathBuf>,
+        jobs: Option<usize>,
+    },
     ImplicitControlFlow {
         language: String,
         files: Vec<PathBuf>,
@@ -467,6 +481,7 @@ impl Command {
             | Self::StateMesh { jobs, .. }
             | Self::InconsistentRenameClone { jobs, .. }
             | Self::DerivedState { jobs, .. }
+            | Self::SuperfluousState { jobs, .. }
             | Self::ImplicitControlFlow { jobs, .. }
             | Self::WeightedInlinedComplexity { jobs, .. }
             | Self::LocalityDrag { jobs, .. }
@@ -670,6 +685,17 @@ fn parse_args(args: Vec<String>) -> Result<Command> {
                 bail!("derived-state requires at least one file");
             }
             Ok(Command::DerivedState {
+                language,
+                files,
+                jobs,
+            })
+        }
+        "superfluous-state" => {
+            let (language, files, jobs) = parse_language_files_and_jobs(cursor.collect())?;
+            if files.is_empty() {
+                bail!("superfluous-state requires at least one file");
+            }
+            Ok(Command::SuperfluousState {
                 language,
                 files,
                 jobs,
@@ -1354,6 +1380,7 @@ mod tests {
         assert!(run_cli(&["state-mesh", "--language=ruby", &get_path("examples/ruby/state-mesh.rb")]).is_ok());
         assert!(run_cli(&["inconsistent-rename-clone", "--language=ruby", &get_path("examples/ruby/inconsistent-rename-clone.rb")]).is_ok());
         assert!(run_cli(&["derived-state", "--language=ruby", &get_path("examples/ruby/derived-state.rb")]).is_ok());
+        assert!(run_cli(&["superfluous-state", "--language=ruby", &get_path("examples/ruby/superfluous-state.rb")]).is_ok());
         assert!(run_cli(&["implicit-control-flow", "--language=ruby", &get_path("examples/ruby/implicit-control-flow.rb")]).is_ok());
         assert!(run_cli(&["weighted-inlined-complexity", "--language=ruby", &get_path("examples/ruby/weighted-inlined-complexity.rb")]).is_ok());
         assert!(run_cli(&["locality-drag", "--language=ruby", &get_path("examples/ruby/locality-drag.rb")]).is_ok());
