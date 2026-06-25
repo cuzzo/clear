@@ -33,6 +33,10 @@ RSpec.describe RubyToClear::Transpiler do
       expect_transpile("/\\s+|#.*$/", '"\\\\s+|#.*$";')
       expect_transpile('x = 10; /regex #{x}/', "MUTABLE x = 10;\n\"regex ${x}\";")
     end
+
+    it "transpiles self" do
+      expect_transpile("self", "self;")
+    end
   end
 
   describe "variable assignments and reads" do
@@ -242,6 +246,11 @@ RSpec.describe RubyToClear::Transpiler do
       ruby_code = "nums = []; nums.map { |x| x * 2 }"
       expected_clear = "MUTABLE nums = [];\nnums |> SELECT (_ * 2);"
       expect_transpile(ruby_code, expected_clear)
+    end
+
+    it "transpiles map and select with block arguments" do
+      expect_transpile("nums = []; nums.map(&:to_s)", "MUTABLE nums = [];\nnums |> SELECT _.toString();")
+      expect_transpile("nums = []; nums.select(&:even?)", "MUTABLE nums = [];\nnums |> WHERE _.even?();")
     end
 
     it "transpiles select and filter" do

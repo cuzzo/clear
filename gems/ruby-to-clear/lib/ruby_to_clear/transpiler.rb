@@ -98,6 +98,19 @@ module RubyToClear
       @renames[name] || name
     end
 
+    def visit_self_node(node)
+      "self"
+    end
+
+    def visit_local_variable_target_node(node)
+      name = node.name.to_s
+      @renames[name] || name
+    end
+
+    def visit_block_parameters_node(node)
+      visit(node.parameters)
+    end
+
     def visit_instance_variable_read_node(node)
       "self.#{node.name.to_s.delete_prefix('@')}"
     end
@@ -437,6 +450,10 @@ module RubyToClear
       sig_name = name == "initialize" ? "initialize!" : name
 
       "FN #{sig_name}(#{params.join(', ')}) RETURNS #{ret_type} ->\n#{body_code}\nEND"
+    end
+
+    def visit_block_argument_node(node)
+      "&#{visit(node.expression)}"
     end
 
     def format_consequent(consequent_node)

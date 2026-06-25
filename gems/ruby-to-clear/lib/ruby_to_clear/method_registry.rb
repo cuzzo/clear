@@ -21,10 +21,16 @@ module RubyToClear
 
     register("map") do |receiver, args, block_node, transpiler|
       if block_node
-        param_name = block_node.parameters&.parameters&.requireds&.first&.name&.to_s
-        transpiler.with_renames({ param_name => "_" }) do
-          block_body = transpiler.visit(block_node.body)
-          "#{receiver} |> SELECT #{block_body}"
+        if block_node.class.name.split("::").last == "BlockArgumentNode"
+          method_name = block_node.expression.value.to_s
+          method_name = "toString" if method_name == "to_s"
+          "#{receiver} |> SELECT _.#{method_name}()"
+        else
+          param_name = block_node.parameters&.parameters&.requireds&.first&.name&.to_s
+          transpiler.with_renames({ param_name => "_" }) do
+            block_body = transpiler.visit(block_node.body)
+            "#{receiver} |> SELECT #{block_body}"
+          end
         end
       else
         "#{receiver} |> SELECT _"
@@ -37,10 +43,15 @@ module RubyToClear
 
     register("select") do |receiver, args, block_node, transpiler|
       if block_node
-        param_name = block_node.parameters&.parameters&.requireds&.first&.name&.to_s
-        transpiler.with_renames({ param_name => "_" }) do
-          block_body = transpiler.visit(block_node.body)
-          "#{receiver} |> WHERE #{block_body}"
+        if block_node.class.name.split("::").last == "BlockArgumentNode"
+          method_name = block_node.expression.value.to_s
+          "#{receiver} |> WHERE _.#{method_name}()"
+        else
+          param_name = block_node.parameters&.parameters&.requireds&.first&.name&.to_s
+          transpiler.with_renames({ param_name => "_" }) do
+            block_body = transpiler.visit(block_node.body)
+            "#{receiver} |> WHERE #{block_body}"
+          end
         end
       else
         receiver
