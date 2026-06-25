@@ -9,7 +9,6 @@ impl AstNormalizationAdapter for CSharpAstAdapter {
         matches!(node.kind(), "invocation_expression")
     }
 
-
     fn loop_node_type(&self, kind: &str) -> Option<&'static str> {
         matches!(kind, "foreach_statement").then_some("FOR")
     }

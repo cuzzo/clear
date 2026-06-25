@@ -137,43 +137,43 @@
       {
         "child_fingerprints": [
           "assignment(id call(id string_array(bare_string(lit) bare_string(lit))))",
-          "method(id body(parameters(id) block(call(id block(call(id id) body(call<join>(id colon2(id id) argument_list(id id))))) body(call<file?>(id colon2(id id) argument_list(id))))))",
+          "method(id body(parameters(id) block(call(id block(call(id id) body(parameters(id) call<join>(id colon2(id id) argument_list(id id))))) body(parameters(id) call<file?>(id colon2(id id) argument_list(id))))))",
           "method(id body(parameters(id) body_statement(call<join>(id colon2(id id) argument_list(id lit)) call<file?>(id colon2(id id) argument_list(id)))))"
         ],
         "child_masses": [
           7,
-          22,
+          26,
           16
         ],
-        "fingerprint": "body_statement(assignment(id call(id string_array(bare_string(lit) bare_string(lit)))) method(id body(parameters(id) block(call(id block(call(id id) body(call<join>(id colon2(id id) argument_list(id id))))) body(call<file?>(id colon2(id id) argument_list(id)))))) method(id body(parameters(id) body_statement(call<join>(id colon2(id id) argument_list(id lit)) call<file?>(id colon2(id id) argument_list(id))))))",
+        "fingerprint": "body_statement(assignment(id call(id string_array(bare_string(lit) bare_string(lit)))) method(id body(parameters(id) block(call(id block(call(id id) body(parameters(id) call<join>(id colon2(id id) argument_list(id id))))) body(parameters(id) call<file?>(id colon2(id id) argument_list(id)))))) method(id body(parameters(id) body_statement(call<join>(id colon2(id id) argument_list(id lit)) call<file?>(id colon2(id id) argument_list(id))))))",
         "line": 4,
-        "mass": 46,
+        "mass": 50,
         "method_name": "(top-level)",
         "node_name": "body_statement"
       },
       {
         "child_fingerprints": [
-          "block(call(id id) body(call<join>(id colon2(id id) argument_list(id id))))"
+          "block(call(id id) body(parameters(id) call<join>(id colon2(id id) argument_list(id id))))"
         ],
         "child_masses": [
-          10
+          12
         ],
-        "fingerprint": "call(id block(call(id id) body(call<join>(id colon2(id id) argument_list(id id)))))",
+        "fingerprint": "call(id block(call(id id) body(parameters(id) call<join>(id colon2(id id) argument_list(id id)))))",
         "line": 7,
-        "mass": 11,
+        "mass": 13,
         "method_name": "resolve",
         "node_name": "call"
       },
       {
         "child_fingerprints": [
-          "call(id block(call(id id) body(call<join>(id colon2(id id) argument_list(id id)))))"
+          "call(id block(call(id id) body(parameters(id) call<join>(id colon2(id id) argument_list(id id)))))"
         ],
         "child_masses": [
-          11
+          13
         ],
-        "fingerprint": "block(call(id block(call(id id) body(call<join>(id colon2(id id) argument_list(id id))))) body(call<file?>(id colon2(id id) argument_list(id))))",
+        "fingerprint": "block(call(id block(call(id id) body(parameters(id) call<join>(id colon2(id id) argument_list(id id))))) body(parameters(id) call<file?>(id colon2(id id) argument_list(id))))",
         "line": 7,
-        "mass": 18,
+        "mass": 22,
         "method_name": "resolve",
         "node_name": "block"
       },
@@ -184,9 +184,9 @@
         "child_masses": [
           2
         ],
-        "fingerprint": "block(call(id id) body(call<join>(id colon2(id id) argument_list(id id))))",
+        "fingerprint": "block(call(id id) body(parameters(id) call<join>(id colon2(id id) argument_list(id id))))",
         "line": 7,
-        "mass": 10,
+        "mass": 12,
         "method_name": "resolve",
         "node_name": "block"
       },
@@ -350,9 +350,9 @@
       {
         "child_fingerprints": [],
         "child_masses": [],
-        "fingerprint": "method(id body(parameters(id) block(call(id block(call(id id) body(call<join>(id colon2(id id) argument_list(id id))))) body(call<file?>(id colon2(id id) argument_list(id))))))",
+        "fingerprint": "method(id body(parameters(id) block(call(id block(call(id id) body(parameters(id) call<join>(id colon2(id id) argument_list(id id))))) body(parameters(id) call<file?>(id colon2(id id) argument_list(id))))))",
         "line": 6,
-        "mass": 22,
+        "mass": 26,
         "method_name": "resolve",
         "node_name": "defn"
       },

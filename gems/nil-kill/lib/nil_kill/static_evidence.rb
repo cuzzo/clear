@@ -11,6 +11,9 @@ end
 module NilKill
   class StaticEvidence
     def self.build(targets = nil, root: NilKill::ROOT, language: nil, vcs: nil, include_annotations: true)
+      if defined?(NilKill::SourceIndex)
+        ENV["FACT_MINE_NORETURN_METHODS"] = NilKill::SourceIndex.noreturn_methods.to_a.join(",")
+      end
       evidence = Espalier::StaticEvidence.build(
         targets,
         root: root,
@@ -112,7 +115,7 @@ module NilKill
         name
       end
 
-      def walk(node, namespace, definitions, visited = Set.new)
+      def walk(node, namespace, definitions, in_method = false, visited = Set.new)
         return unless node
         return if visited.include?(node.object_id)
         visited.add(node.object_id)
@@ -121,7 +124,7 @@ module NilKill
         when NilKill::Syntax::ClassNode, NilKill::Syntax::ModuleNode
           name = node.constant_path&.slice&.to_s
           if name
-            walk(node.body, namespace + [name], definitions, visited)
+            walk(node.body, namespace + [name], definitions, in_method, visited)
           end
         when NilKill::Syntax::ConstantWriteNode
           val = node.value
@@ -145,45 +148,47 @@ module NilKill
             end
 
             if val.block && val.block.body
-              walk(val.block.body, namespace + [node.name.to_s], definitions, visited)
+              walk(val.block.body, namespace + [node.name.to_s], definitions, in_method, visited)
             end
           end
         when NilKill::Syntax::CallNode
-          if node.name == :include && node.receiver.nil?
-            args = node.arguments&.arguments || []
-            args.each do |arg|
-              module_name = arg.slice.to_s
-              qualified_name = resolve_module_name(module_name, namespace)
-              owner_name = namespace.join("::")
-              definitions << {
-                "id" => ["ruby", @rel_path, owner_name, "included_module", qualified_name, node.location.start_line].map(&:to_s).join("\u0000"),
-                "language" => "ruby",
-                "kind" => "included_module",
-                "path" => @rel_path,
-                "owner" => owner_name,
-                "name" => qualified_name,
-                "line" => node.location.start_line
-              }
-            end
-          elsif %i[const prop].include?(node.name) && node.receiver.nil?
-            args = node.arguments&.arguments || []
-            if args.size >= 2
-              field_arg = args[0]
-              type_arg = args[1]
-              if field_arg.is_a?(NilKill::Syntax::SymbolNode)
-                field_name = field_arg.slice.to_s.delete_prefix(":")
-                class_name = namespace.join("::")
+          if !in_method
+            if node.name == :include && node.receiver.nil?
+              args = node.arguments&.arguments || []
+              args.each do |arg|
+                module_name = arg.slice.to_s
+                qualified_name = resolve_module_name(module_name, namespace)
+                owner_name = namespace.join("::")
                 definitions << {
-                  "id" => ["ruby", @rel_path, class_name, "state_field", field_name, node.location.start_line, "sorbet"].map(&:to_s).join("\u0000"),
+                  "id" => ["ruby", @rel_path, owner_name, "included_module", qualified_name, node.location.start_line].map(&:to_s).join("\u0000"),
                   "language" => "ruby",
-                  "type_system" => "sorbet",
-                  "kind" => "state_field",
+                  "kind" => "included_module",
                   "path" => @rel_path,
-                  "owner" => class_name,
-                  "name" => field_name,
-                  "line" => node.location.start_line,
-                  "declared_type" => type_arg.slice
+                  "owner" => owner_name,
+                  "name" => qualified_name,
+                  "line" => node.location.start_line
                 }
+              end
+            elsif %i[const prop].include?(node.name) && node.receiver.nil?
+              args = node.arguments&.arguments || []
+              if args.size >= 2
+                field_arg = args[0]
+                type_arg = args[1]
+                if field_arg.is_a?(NilKill::Syntax::SymbolNode)
+                  field_name = field_arg.slice.to_s.delete_prefix(":")
+                  class_name = namespace.join("::")
+                  definitions << {
+                    "id" => ["ruby", @rel_path, class_name, "state_field", field_name, node.location.start_line, "sorbet"].map(&:to_s).join("\u0000"),
+                    "language" => "ruby",
+                    "type_system" => "sorbet",
+                    "kind" => "state_field",
+                    "path" => @rel_path,
+                    "owner" => class_name,
+                    "name" => field_name,
+                    "line" => node.location.start_line,
+                    "declared_type" => type_arg.slice
+                  }
+                end
               end
             end
           end
@@ -213,7 +218,9 @@ module NilKill
         if node.class.name.to_s.end_with?("StatementsNode", "BodyStatementNode")
           stmts = node.child_nodes
           stmts.each_with_index do |child, idx|
+            child_in_method = in_method
             if child.is_a?(NilKill::Syntax::DefNode)
+              child_in_method = true
               prev_stmt = idx.positive? ? stmts[idx - 1] : nil
               if prev_stmt.is_a?(NilKill::Syntax::CallNode) && prev_stmt.name == :sig
                 sig_info = extract_sig_from_node(prev_stmt)
@@ -238,10 +245,10 @@ module NilKill
                 }
               end
             end
-            walk(child, namespace, definitions, visited)
+            walk(child, namespace, definitions, child_in_method, visited)
           end
         elsif node.respond_to?(:child_nodes)
-          node.child_nodes.each { |child| walk(child, namespace, definitions, visited) }
+          node.child_nodes.each { |child| walk(child, namespace, definitions, in_method, visited) }
         end
       end
 

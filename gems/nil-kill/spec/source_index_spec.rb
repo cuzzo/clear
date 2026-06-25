@@ -2097,6 +2097,7 @@ RSpec.describe NilKill::SourceIndex do
       idx = described_class.new(path)
       origin = idx.param_origins.find { |entry| entry["callee"] == "takes" && entry["code"] == "String" }
 
+      puts "PARAM ORIGINS: #{idx.param_origins.inspect}"
       expect(origin).to include(
         "origin_kind" => "static",
         "type" => "T.class_of(String)"

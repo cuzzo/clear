@@ -60,18 +60,24 @@ mod tests {
     fn test_rust_adapter_fallback_paths() {
         let adapter = RustAstAdapter;
         let mut parser = Parser::new();
-        parser.set_language(&tree_sitter_rust::LANGUAGE.into()).unwrap();
-        
+        parser
+            .set_language(&tree_sitter_rust::LANGUAGE.into())
+            .unwrap();
+
         let tree = parser.parse("struct Widget;", None).unwrap();
         let struct_node = tree.root_node().child(0).unwrap();
         assert_eq!(struct_node.kind(), "struct_item");
-        
-        let owner_name_node = adapter.class_like_owner_name(struct_node, "struct Widget;").unwrap();
+
+        let owner_name_node = adapter
+            .class_like_owner_name(struct_node, "struct Widget;")
+            .unwrap();
         assert_eq!(owner_name_node.kind(), "type_identifier");
 
         let tree2 = parser.parse("impl Widget { }", None).unwrap();
         let impl_node = tree2.root_node().child(0).unwrap();
-        let body_node = adapter.class_like_owner_body(impl_node, "impl Widget { }").unwrap();
+        let body_node = adapter
+            .class_like_owner_body(impl_node, "impl Widget { }")
+            .unwrap();
         assert_eq!(body_node.kind(), "declaration_list");
 
         let tree3 = parser.parse("extern \"C\" { }", None).unwrap();
@@ -92,9 +98,10 @@ mod tests {
             }
         }
         if let Some(target_node) = found {
-            let body_node2 = adapter.class_like_owner_body(target_node, "extern \"C\" { }").unwrap();
+            let body_node2 = adapter
+                .class_like_owner_body(target_node, "extern \"C\" { }")
+                .unwrap();
             assert_eq!(body_node2.kind(), "declaration_list");
         }
     }
 }
-

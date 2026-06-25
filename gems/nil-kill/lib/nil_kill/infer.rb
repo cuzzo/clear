@@ -1003,10 +1003,27 @@ module NilKill
 
       # Fast path: use indexed return-usage facts when available
       if evidence.dig("facts", "return_usage_sites")&.any?
+        method_return_types = unambiguous_method_return_types(evidence)
         evidence["facts"]["return_usage_sites"].each do |site|
-          name = site["name"].to_s
-          used << name.to_sym if candidate_names.include?(name.to_sym)
+          name = site["name"].to_s.to_sym
+          next unless candidate_names.include?(name)
+          context = site["context"].to_s
+          current_method_name = site["current_method"].to_s
+          current_method = current_method_name.empty? ? nil : current_method_name.to_sym
+          if context == "return" && current_method && candidate_names.include?(current_method)
+            ret_type = method_return_types[current_method]
+            if ret_type && ret_type != "void" && ret_type != "T.untyped"
+              used << name
+            else
+              return_edges[current_method] << name
+            end
+          elsif context == "return" && method_return_types[current_method] != "void"
+            used << name
+          elsif context == "value"
+            used << name
+          end
         end
+        propagate_return_usage!(used, return_edges)
       else
         method_return_types = unambiguous_method_return_types(evidence)
         NilKill.usage_scan_files.each do |path|

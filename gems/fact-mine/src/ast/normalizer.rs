@@ -3400,18 +3400,27 @@ impl<'source> TreeSitterNormalizer<'source> {
             .named_children(block)
             .into_iter()
             .find(|child| self.normalization_adapter.check_node_role(*child, "block_parameters"))?;
-        let pre_init = self
-            .named_children(params)
-            .into_iter()
-            .filter(|param| self.normalization_adapter.check_node_role(*param, "destructured_parameter"))
-            .filter_map(|param| self.normalize_destructured_block_parameter(param))
-            .map(|node| Child::Node(Box::new(node)))
-            .collect::<Vec<_>>();
-        if pre_init.is_empty() {
-            None
-        } else {
-            Some(self.wrap("ARGS", pre_init, params))
+let mut pre_init = Vec::new();
+for param in self.named_children(params) {
+    if self.normalization_adapter.check_node_role(param, "destructured_parameter") {
+        if let Some(node) = self.normalize_destructured_block_parameter(param) {
+            pre_init.push(Child::Node(Box::new(node)));
         }
+    } else if let Some(name) = self.parameter_name(param) {
+        let lasgn = self.wrap(
+            "LASGN",
+            vec![Child::Symbol(name), Child::Nil],
+            param,
+        );
+        pre_init.push(Child::Node(Box::new(lasgn)));
+    }
+}
+if pre_init.is_empty() {
+    None
+} else {
+    Some(self.wrap("ARGS", pre_init, params))
+}
+
     }
 
     pub(in crate::ast) fn normalize_destructured_block_parameter(

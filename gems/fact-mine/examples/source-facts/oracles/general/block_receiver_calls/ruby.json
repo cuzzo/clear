@@ -105,17 +105,17 @@
       {
         "child_fingerprints": [
           "assignment(id)",
-          "block(call(id id) body(body_statement(call(lit id argument_list(call(id id))) block(call(id call(id id)) body(call(id id))))))",
+          "block(call(id id) body(parameters(id) body_statement(call(lit id argument_list(call(id id))) block(call(id call(id id)) body(parameters(id) call(id id))))))",
           "id"
         ],
         "child_masses": [
           1,
-          17,
+          21,
           1
         ],
-        "fingerprint": "body_statement(assignment(id) block(call(id id) body(body_statement(call(lit id argument_list(call(id id))) block(call(id call(id id)) body(call(id id)))))) id)",
+        "fingerprint": "body_statement(assignment(id) block(call(id id) body(parameters(id) body_statement(call(lit id argument_list(call(id id))) block(call(id call(id id)) body(parameters(id) call(id id)))))) id)",
         "line": 5,
-        "mass": 20,
+        "mass": 24,
         "method_name": "collect",
         "node_name": "body_statement"
       },
@@ -126,9 +126,9 @@
         "child_masses": [
           3
         ],
-        "fingerprint": "block(call(id call(id id)) body(call(id id)))",
+        "fingerprint": "block(call(id call(id id)) body(parameters(id) call(id id)))",
         "line": 8,
-        "mass": 7,
+        "mass": 9,
         "method_name": "collect",
         "node_name": "block"
       },
@@ -152,9 +152,9 @@
         "child_masses": [
           2
         ],
-        "fingerprint": "block(call(id id) body(body_statement(call(lit id argument_list(call(id id))) block(call(id call(id id)) body(call(id id))))))",
+        "fingerprint": "block(call(id id) body(parameters(id) body_statement(call(lit id argument_list(call(id id))) block(call(id call(id id)) body(parameters(id) call(id id))))))",
         "line": 6,
-        "mass": 17,
+        "mass": 21,
         "method_name": "collect",
         "node_name": "block"
       },
@@ -174,15 +174,15 @@
       {
         "child_fingerprints": [
           "call(lit id argument_list(call(id id)))",
-          "block(call(id call(id id)) body(call(id id)))"
+          "block(call(id call(id id)) body(parameters(id) call(id id)))"
         ],
         "child_masses": [
           5,
-          7
+          9
         ],
-        "fingerprint": "body_statement(call(lit id argument_list(call(id id))) block(call(id call(id id)) body(call(id id))))",
+        "fingerprint": "body_statement(call(lit id argument_list(call(id id))) block(call(id call(id id)) body(parameters(id) call(id id))))",
         "line": 7,
-        "mass": 13,
+        "mass": 15,
         "method_name": "collect",
         "node_name": "body_statement"
       },
@@ -256,9 +256,9 @@
       {
         "child_fingerprints": [],
         "child_masses": [],
-        "fingerprint": "method(id body(parameters(id) body_statement(assignment(id) block(call(id id) body(body_statement(call(lit id argument_list(call(id id))) block(call(id call(id id)) body(call(id id)))))) id)))",
+        "fingerprint": "method(id body(parameters(id) body_statement(assignment(id) block(call(id id) body(parameters(id) body_statement(call(lit id argument_list(call(id id))) block(call(id call(id id)) body(parameters(id) call(id id)))))) id)))",
         "line": 4,
-        "mass": 24,
+        "mass": 28,
         "method_name": "collect",
         "node_name": "defn"
       }

@@ -904,9 +904,9 @@ impl<'source> TreeSitterNormalizer<'source> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::syntax::Language;
     use crate::syntax::parser_grammar::grammar_for_language;
-    use tree_sitter::{Parser as TreeSitterParser, Node as TreeSitterNode};
+    use crate::syntax::Language;
+    use tree_sitter::{Node as TreeSitterNode, Parser as TreeSitterParser};
 
     fn raw_tree(source: &str) -> tree_sitter::Tree {
         let mut parser = TreeSitterParser::new();
@@ -965,7 +965,9 @@ mod tests {
         collect_all_nodes(node, &mut nodes);
         if let Some(elsif_node) = nodes.iter().find(|n| n.kind() == "elsif") {
             assert!(adapter.elsif_statement(*elsif_node, "if a; elsif b; end\n"));
-            assert!(adapter.elsif_parts(*elsif_node, "if a; elsif b; end\n").is_some());
+            assert!(adapter
+                .elsif_parts(*elsif_node, "if a; elsif b; end\n")
+                .is_some());
         }
         assert!(adapter.elsif_parts(node, "if a; elsif b; end\n").is_none());
 
@@ -1005,7 +1007,10 @@ mod tests {
         assert_eq!(adapter.conditional_node_type("unless"), Some("UNLESS"));
         assert_eq!(adapter.conditional_node_type("other"), None);
         assert_eq!(adapter.conditional_keyword_node_type("if"), Some("IF"));
-        assert_eq!(adapter.conditional_keyword_node_type("unless"), Some("UNLESS"));
+        assert_eq!(
+            adapter.conditional_keyword_node_type("unless"),
+            Some("UNLESS")
+        );
         assert_eq!(adapter.conditional_keyword_node_type("other"), None);
         assert_eq!(adapter.modifier_node_type("if"), Some("IF"));
         assert_eq!(adapter.modifier_node_type("unless"), Some("UNLESS"));
@@ -1028,8 +1033,12 @@ mod tests {
         if let Some(rescue_node) = nodes.iter().find(|n| n.kind() == "rescue") {
             assert!(adapter.rescue_clause(*rescue_node));
             assert!(adapter.rescue_clause_handler(*rescue_node).is_some());
-            assert!(!adapter.rescue_clause_exceptions(*rescue_node, "begin; a; rescue StandardError, CustomError => e; nil; end\n").is_empty());
+            assert!(!adapter
+                .rescue_clause_exceptions(
+                    *rescue_node,
+                    "begin; a; rescue StandardError, CustomError => e; nil; end\n"
+                )
+                .is_empty());
         }
     }
 }
-

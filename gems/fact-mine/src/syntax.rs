@@ -28,7 +28,7 @@ pub(crate) mod visibility;
 pub(crate) mod zig;
 
 use crate::ast::RawNode;
-pub use crate::ast::{Span, Node, Child};
+pub use crate::ast::{Child, Node, Span};
 use crate::parallel;
 use anyhow::{bail, Result};
 use serde::{Deserialize, Deserializer, Serialize};
@@ -526,6 +526,8 @@ mod tests {
         std::env::remove_var("DECOMPLEX_RUST_PROFILE");
 
         let core_owners = core_owner_names(&doc);
-        assert!(core_owners.is_empty() || core_owners.contains(&"Object") || core_owners.contains(&""));
+        assert!(
+            core_owners.is_empty() || core_owners.contains(&"Object") || core_owners.contains(&"")
+        );
     }
 }

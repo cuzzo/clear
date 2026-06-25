@@ -58,7 +58,6 @@ impl AstNormalizationAdapter for PhpAstAdapter {
         (!args.is_empty()).then_some(args)
     }
 
-
     fn loop_node_type(&self, kind: &str) -> Option<&'static str> {
         (kind == "foreach_statement").then_some("FOR")
     }

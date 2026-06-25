@@ -267,16 +267,16 @@
       },
       {
         "child_fingerprints": [
-          "block(call(id id) body(call(lit call(id id))))",
+          "block(call(id id) body(parameters(id) call(lit call(id id))))",
           "return(bool)"
         ],
         "child_masses": [
-          7,
+          9,
           2
         ],
-        "fingerprint": "if(block(call(id id) body(call(lit call(id id)))) return(bool))",
+        "fingerprint": "if(block(call(id id) body(parameters(id) call(lit call(id id)))) return(bool))",
         "line": 7,
-        "mass": 10,
+        "mass": 12,
         "method_name": "checks",
         "node_name": "if"
       },
@@ -347,9 +347,9 @@
         "child_masses": [
           2
         ],
-        "fingerprint": "block(call(id id) body(call(lit call(id id))))",
+        "fingerprint": "block(call(id id) body(parameters(id) call(lit call(id id))))",
         "line": 7,
-        "mass": 7,
+        "mass": 9,
         "method_name": "checks",
         "node_name": "block"
       },
@@ -541,16 +541,16 @@
       },
       {
         "child_fingerprints": [
-          "method(id body(parameters(id id) body_statement(unless(call(id colon2(id id)) return(bool)) unless(call(id colon2(id id)) return(bool)) if(block(call(id id) body(call(lit call(id id)))) return(bool)) case(call(id call<extname>(id colon2(id id) argument_list(id))) when(argument_list(lit) bool bool)))))",
+          "method(id body(parameters(id id) body_statement(unless(call(id colon2(id id)) return(bool)) unless(call(id colon2(id id)) return(bool)) if(block(call(id id) body(parameters(id) call(lit call(id id)))) return(bool)) case(call(id call<extname>(id colon2(id id) argument_list(id))) when(argument_list(lit) bool bool)))))",
           "method(id body(parameters(id) rescue(case(call(id call<extname>(id colon2(id id) argument_list(id))) when(argument_list(lit) bool bool)) resbody(argument_list(id) bool))))"
         ],
         "child_masses": [
-          40,
+          42,
           21
         ],
-        "fingerprint": "body_statement(method(id body(parameters(id id) body_statement(unless(call(id colon2(id id)) return(bool)) unless(call(id colon2(id id)) return(bool)) if(block(call(id id) body(call(lit call(id id)))) return(bool)) case(call(id call<extname>(id colon2(id id) argument_list(id))) when(argument_list(lit) bool bool))))) method(id body(parameters(id) rescue(case(call(id call<extname>(id colon2(id id) argument_list(id))) when(argument_list(lit) bool bool)) resbody(argument_list(id) bool)))))",
+        "fingerprint": "body_statement(method(id body(parameters(id id) body_statement(unless(call(id colon2(id id)) return(bool)) unless(call(id colon2(id id)) return(bool)) if(block(call(id id) body(parameters(id) call(lit call(id id)))) return(bool)) case(call(id call<extname>(id colon2(id id) argument_list(id))) when(argument_list(lit) bool bool))))) method(id body(parameters(id) rescue(case(call(id call<extname>(id colon2(id id) argument_list(id))) when(argument_list(lit) bool bool)) resbody(argument_list(id) bool)))))",
         "line": 4,
-        "mass": 62,
+        "mass": 64,
         "method_name": "(top-level)",
         "node_name": "body_statement"
       },
@@ -558,27 +558,27 @@
         "child_fingerprints": [
           "unless(call(id colon2(id id)) return(bool))",
           "unless(call(id colon2(id id)) return(bool))",
-          "if(block(call(id id) body(call(lit call(id id)))) return(bool))",
+          "if(block(call(id id) body(parameters(id) call(lit call(id id)))) return(bool))",
           "case(call(id call<extname>(id colon2(id id) argument_list(id))) when(argument_list(lit) bool bool))"
         ],
         "child_masses": [
           6,
           6,
-          10,
+          12,
           12
         ],
-        "fingerprint": "body_statement(unless(call(id colon2(id id)) return(bool)) unless(call(id colon2(id id)) return(bool)) if(block(call(id id) body(call(lit call(id id)))) return(bool)) case(call(id call<extname>(id colon2(id id) argument_list(id))) when(argument_list(lit) bool bool)))",
+        "fingerprint": "body_statement(unless(call(id colon2(id id)) return(bool)) unless(call(id colon2(id id)) return(bool)) if(block(call(id id) body(parameters(id) call(lit call(id id)))) return(bool)) case(call(id call<extname>(id colon2(id id) argument_list(id))) when(argument_list(lit) bool bool)))",
         "line": 5,
-        "mass": 35,
+        "mass": 37,
         "method_name": "checks",
         "node_name": "body_statement"
       },
       {
         "child_fingerprints": [],
         "child_masses": [],
-        "fingerprint": "method(id body(parameters(id id) body_statement(unless(call(id colon2(id id)) return(bool)) unless(call(id colon2(id id)) return(bool)) if(block(call(id id) body(call(lit call(id id)))) return(bool)) case(call(id call<extname>(id colon2(id id) argument_list(id))) when(argument_list(lit) bool bool)))))",
+        "fingerprint": "method(id body(parameters(id id) body_statement(unless(call(id colon2(id id)) return(bool)) unless(call(id colon2(id id)) return(bool)) if(block(call(id id) body(parameters(id) call(lit call(id id)))) return(bool)) case(call(id call<extname>(id colon2(id id) argument_list(id))) when(argument_list(lit) bool bool)))))",
         "line": 4,
-        "mass": 40,
+        "mass": 42,
         "method_name": "checks",
         "node_name": "defn"
       },

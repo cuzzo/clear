@@ -6,8 +6,8 @@ use super::normalized_behavior::{
 };
 use super::CallSite;
 use super::StateDeclaration;
-use crate::ast::{Node, Span};
 use crate::ast::Child;
+use crate::ast::{Node, Span};
 
 const RUST_CONTEXT_PAIRS: &[(&str, &[&str])] = &[("SystemTime", &["now"]), ("Instant", &["now"])];
 
@@ -206,10 +206,14 @@ impl NormalizedLanguageBehavior for RustNormalizedBehavior {
             return None;
         }
         // Try structured children first: [name, type?, value?]
-        let child_nodes: Vec<&Node> = node.children.iter().filter_map(|c| match c {
-            Child::Node(n) => Some(n.as_ref()),
-            _ => None,
-        }).collect();
+        let child_nodes: Vec<&Node> = node
+            .children
+            .iter()
+            .filter_map(|c| match c {
+                Child::Node(n) => Some(n.as_ref()),
+                _ => None,
+            })
+            .collect();
         if child_nodes.len() >= 2 {
             let name = child_nodes[0].text.trim();
             if is_simple_name(name) {
@@ -345,7 +349,9 @@ mod tests {
             last_column: 15,
             text: "my_field: usize".to_string(),
         };
-        let decl = behavior.state_declaration_from_node(&field_node, "Widget", false).unwrap();
+        let decl = behavior
+            .state_declaration_from_node(&field_node, "Widget", false)
+            .unwrap();
         assert_eq!(decl.field, "my_field");
         assert_eq!(decl.r#type, Some("usize".to_string()));
 
@@ -377,8 +383,9 @@ mod tests {
             last_column: 11,
             text: "my field: :".to_string(),
         };
-        assert!(behavior.state_declaration_from_node(&colon_field_node, "Widget", false).is_none());
-
+        assert!(behavior
+            .state_declaration_from_node(&colon_field_node, "Widget", false)
+            .is_none());
 
         let multiline_node = Node {
             r#type: "CLASS".to_string(),
@@ -389,7 +396,9 @@ mod tests {
             last_column: 1,
             text: "\n    struct Widget {\n}".to_string(),
         };
-        let span = behavior.owner_name_span("Widget", &multiline_node, [20, 0, 22, 1]).unwrap();
+        let span = behavior
+            .owner_name_span("Widget", &multiline_node, [20, 0, 22, 1])
+            .unwrap();
         assert_eq!(span, [20, 0, 22, 1]);
 
         let end_offset_zero_node = Node {
@@ -401,7 +410,9 @@ mod tests {
             last_column: 17,
             text: "}\n    struct Widget".to_string(),
         };
-        let span2 = behavior.owner_name_span("Widget", &end_offset_zero_node, [30, 5, 31, 17]).unwrap();
+        let span2 = behavior
+            .owner_name_span("Widget", &end_offset_zero_node, [30, 5, 31, 17])
+            .unwrap();
         assert_eq!(span2, [30, 5, 31, 17]);
     }
 }
@@ -413,6 +424,11 @@ fn is_simple_name(name: &str) -> bool {
         && !name.contains('[')
         && !name.contains('<')
         && !name.contains('(')
-        && name.chars().next().map_or(false, |c| c == '_' || c.is_ascii_alphabetic())
-        && name.chars().all(|ch| ch == '_' || ch == '?' || ch == '!' || ch.is_ascii_alphanumeric())
+        && name
+            .chars()
+            .next()
+            .map_or(false, |c| c == '_' || c.is_ascii_alphabetic())
+        && name
+            .chars()
+            .all(|ch| ch == '_' || ch == '?' || ch == '!' || ch.is_ascii_alphanumeric())
 }

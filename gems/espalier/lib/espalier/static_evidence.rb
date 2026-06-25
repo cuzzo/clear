@@ -241,8 +241,16 @@ module Espalier
       dead_nil_checks = Array(facts["dead_nil_checks"])
       deterministic_guards = Array(facts["deterministic_guards"])
       return_origins = Array(facts["return_origins"])
+      param_origins = Array(facts["param_origins"])
       noreturn_methods = Array(facts["noreturn_methods"])
       hash_record_escape_sites = Array(facts["hash_record_escape_sites"])
+      type_normalizers = Array(facts["type_normalizers"])
+      rescue_handlers = Array(facts["rescue_handlers"])
+      return_usage_sites = Array(facts["return_usage_sites"])
+      return_direct_usage_sites = Array(facts["return_direct_usage_sites"])
+      hidden_enum_observations = Array(facts["hidden_enum_observations"])
+      dispatcher_inferences = Array(facts["dispatcher_inferences"])
+      hash_record_member_calls = Array(facts["hash_record_member_calls"])
 
       # Collect languages of owners to know if they need @ prepended for fields
       owner_languages = {}
@@ -330,12 +338,20 @@ module Espalier
           "dead_nil_checks" => dead_nil_checks.sort_by { |f| [f["path"].to_s, f["line"].to_i, f["kind"].to_s] },
           "deterministic_guards" => deterministic_guards.sort_by { |f| [f["path"].to_s, f["line"].to_i, f["code"].to_s] },
           "return_origins" => return_origins.sort_by { |o| [o["path"].to_s, o["line"].to_i, o["method"].to_s] },
+          "param_origins" => param_origins.sort_by { |o| [o["path"].to_s, o["line"].to_i, o["callee"].to_s] },
           "noreturn_methods" => noreturn_methods.sort_by { |m| [m["path"].to_s, m["owner"].to_s, m["name"].to_s] },
           "hash_record_escape_sites" => hash_record_escape_sites.sort_by { |s| [s["path"].to_s, s["line"].to_i] },
           "rbi_field_types" => rbi_field_types.sort_by { |r| [r["class"].to_s, r["field"].to_s] },
           "ivar_runtime" => [],
           "ivar_protocols" => state_protocols,
           "ivar_param_origins" => state_param_origins,
+          "type_normalizers" => type_normalizers.sort_by { |f| [f["path"].to_s, f["line"].to_i] },
+          "rescue_handlers" => rescue_handlers.sort_by { |f| [f["path"].to_s, f["line"].to_i] },
+          "return_usage_sites" => return_usage_sites.sort_by { |f| [f["path"].to_s, f["line"].to_i] },
+          "return_direct_usage_sites" => return_direct_usage_sites.sort_by { |f| [f["path"].to_s, f["line"].to_i] },
+          "hidden_enum_observations" => hidden_enum_observations.sort_by { |f| [f["path"].to_s, f["line"].to_i] },
+          "dispatcher_inferences" => dispatcher_inferences.sort_by { |f| [f["path"].to_s, f["line"].to_i] },
+          "hash_record_member_calls" => hash_record_member_calls.sort_by { |f| [f["path"].to_s, f["line"].to_i] },
         },
         "summary" => {
           "files" => files.size,

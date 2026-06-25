@@ -115,19 +115,15 @@ fn parse_args(args: Vec<String>) -> Result<Command> {
                         ));
                     }
                     other if other.starts_with("--output=") => {
-                        output = Some(PathBuf::from(
-                            other.strip_prefix("--output=").unwrap(),
-                        ));
+                        output = Some(PathBuf::from(other.strip_prefix("--output=").unwrap()));
                     }
                     "--language" => {
-                        language_override = Some(
-                            iter.next().with_context(|| "--language requires a value")?,
-                        );
+                        language_override =
+                            Some(iter.next().with_context(|| "--language requires a value")?);
                     }
                     other if other.starts_with("--language=") => {
-                        language_override = Some(
-                            other.strip_prefix("--language=").unwrap().to_string(),
-                        );
+                        language_override =
+                            Some(other.strip_prefix("--language=").unwrap().to_string());
                     }
                     other if other.starts_with("--") => bail!("unsupported option: {other}"),
                     path => files.push(PathBuf::from(path)),

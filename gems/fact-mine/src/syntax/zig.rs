@@ -173,7 +173,12 @@ impl NormalizedLanguageBehavior for ZigNormalizedBehavior {
         }
     }
 
-    fn state_declaration_from_node(&self, node: &Node, _owner: &str, in_method: bool) -> Option<StateDeclaration> {
+    fn state_declaration_from_node(
+        &self,
+        node: &Node,
+        _owner: &str,
+        in_method: bool,
+    ) -> Option<StateDeclaration> {
         if in_method {
             return None;
         }
@@ -230,7 +235,6 @@ impl NormalizedLanguageBehavior for ZigNormalizedBehavior {
             "private".to_string()
         }
     }
-
 
     fn parameter_name_from_signature(&self, param: &str) -> Option<String> {
         let before_colon = param.split_once(':')?.0.trim();
@@ -394,31 +398,43 @@ mod tests {
     fn test_zig_behavior_uncovered_paths() {
         let behavior = ZigNormalizedBehavior;
 
-        let reads_no_dot = behavior.literal_state_reads(&node("READ", "val"), "val", [1, 2, 3, 4], "");
+        let reads_no_dot =
+            behavior.literal_state_reads(&node("READ", "val"), "val", [1, 2, 3, 4], "");
         assert!(reads_no_dot.is_empty());
 
-        let reads_invalid_ident = behavior.literal_state_reads(&node("READ", ".1val"), ".1val", [1, 2, 3, 4], "");
+        let reads_invalid_ident =
+            behavior.literal_state_reads(&node("READ", ".1val"), ".1val", [1, 2, 3, 4], "");
         assert!(reads_invalid_ident.is_empty());
 
         let fn_node = node("FN", "pub fn my_fun(self: *Self) { return struct {}; }");
-        let owner = behavior.body_owner_for_function("my_fun", &fn_node, "File", "File").unwrap();
+        let owner = behavior
+            .body_owner_for_function("my_fun", &fn_node, "File", "File")
+            .unwrap();
         assert_eq!(owner.name, "my_fun");
 
         let fn_node_invalid = node("FN", "invalid_start fn my_fun() {}");
-        assert!(behavior.body_owner_for_function("my_fun", &fn_node_invalid, "File", "File").is_none());
+        assert!(behavior
+            .body_owner_for_function("my_fun", &fn_node_invalid, "File", "File")
+            .is_none());
 
         let fn_node_not_struct = node("FN", "fn my_fun() { return struct; }");
-        assert!(behavior.body_owner_for_function("other_fun", &fn_node_not_struct, "File", "File").is_none());
+        assert!(behavior
+            .body_owner_for_function("other_fun", &fn_node_not_struct, "File", "File")
+            .is_none());
 
         let mut child_node = node("LVAR", "");
         child_node.children = vec![Child::Integer(42)];
         let mut container_node = node("CONTAINER_FIELD", "");
         container_node.children = vec![Child::Node(Box::new(child_node))];
-        assert!(behavior.state_declaration_from_node(&container_node, "Widget", false).is_none());
+        assert!(behavior
+            .state_declaration_from_node(&container_node, "Widget", false)
+            .is_none());
 
         let mut container_node_no_lvar = node("CONTAINER_FIELD", "");
         container_node_no_lvar.children = vec![Child::Node(Box::new(node("NOT_LVAR", "")))];
-        assert!(behavior.state_declaration_from_node(&container_node_no_lvar, "Widget", false).is_none());
+        assert!(behavior
+            .state_declaration_from_node(&container_node_no_lvar, "Widget", false)
+            .is_none());
 
         assert!(behavior.local_flow_declaration_keyword("const"));
         assert!(behavior.local_flow_declaration_keyword("var"));
@@ -436,7 +452,9 @@ mod tests {
             last_column: 5,
             text: "first\nsecond".to_string(),
         };
-        assert!(behavior.owner_name_span("Widget", &multiline_node, [10, 0, 12, 5]).is_some());
+        assert!(behavior
+            .owner_name_span("Widget", &multiline_node, [10, 0, 12, 5])
+            .is_some());
 
         let multiline_write_node = Node {
             r#type: "ASSIGN".to_string(),
@@ -447,7 +465,8 @@ mod tests {
             last_column: 5,
             text: "self.field\nvalue".to_string(),
         };
-        let write_span = behavior.state_write_span("self", "field", &multiline_write_node, [10, 0, 12, 5]);
+        let write_span =
+            behavior.state_write_span("self", "field", &multiline_write_node, [10, 0, 12, 5]);
         assert_eq!(write_span, [10, 0, 12, 5]);
 
         let multiline_read_node = Node {
@@ -459,7 +478,8 @@ mod tests {
             last_column: 5,
             text: ".my_field\nother".to_string(),
         };
-        let reads_multiline = behavior.literal_state_reads(&multiline_read_node, ".my_field", [10, 0, 12, 5], "");
+        let reads_multiline =
+            behavior.literal_state_reads(&multiline_read_node, ".my_field", [10, 0, 12, 5], "");
         assert_eq!(reads_multiline.len(), 1);
         assert_eq!(reads_multiline[0].span, [10, 0, 12, 5]);
 
@@ -472,16 +492,25 @@ mod tests {
             last_column: 15,
             text: "    .my_field  ".to_string(),
         };
-        let reads_source_empty = behavior.literal_state_reads(&single_line_read, ".my_field", [10, 0, 10, 15], "");
+        let reads_source_empty =
+            behavior.literal_state_reads(&single_line_read, ".my_field", [10, 0, 10, 15], "");
         assert_eq!(reads_source_empty.len(), 1);
         assert_eq!(reads_source_empty[0].span, [10, 4, 10, 13]);
 
-        let reads_not_found = behavior.literal_state_reads(&single_line_read, ".other_field", [10, 0, 10, 15], "    .my_field  ");
+        let reads_not_found = behavior.literal_state_reads(
+            &single_line_read,
+            ".other_field",
+            [10, 0, 10, 15],
+            "    .my_field  ",
+        );
         assert_eq!(reads_not_found.len(), 1);
         assert_eq!(reads_not_found[0].span, [10, 0, 10, 15]);
 
         let fn_with_ptr = "fn init(self: *Self, value: usize)";
-        assert_eq!(behavior.owner_for_function("init", &node("FN", fn_with_ptr), "File", "File"), "Self");
+        assert_eq!(
+            behavior.owner_for_function("init", &node("FN", fn_with_ptr), "File", "File"),
+            "Self"
+        );
 
         let multiline_struct_node = Node {
             r#type: "CLASS".to_string(),
@@ -492,7 +521,9 @@ mod tests {
             last_column: 1,
             text: "\n    struct Widget {\n}".to_string(),
         };
-        let span = behavior.owner_name_span("Widget", &multiline_struct_node, [20, 0, 22, 1]).unwrap();
+        let span = behavior
+            .owner_name_span("Widget", &multiline_struct_node, [20, 0, 22, 1])
+            .unwrap();
         assert_eq!(span[0], 21);
         assert_eq!(span[2], 22);
 
@@ -505,9 +536,10 @@ mod tests {
             last_column: 17,
             text: "}\n    struct Widget".to_string(),
         };
-        let span_zig = behavior.owner_name_span("Widget", &end_offset_zero_node_zig, [30, 5, 31, 17]).unwrap();
+        let span_zig = behavior
+            .owner_name_span("Widget", &end_offset_zero_node_zig, [30, 5, 31, 17])
+            .unwrap();
         assert_eq!(span_zig[0], 31);
         assert_eq!(span_zig[2], 30);
     }
 }
-

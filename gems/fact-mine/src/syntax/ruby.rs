@@ -206,6 +206,52 @@ impl NormalizedLanguageBehavior for RubyNormalizedBehavior {
         call.receiver == "self"
     }
 
+    fn declarative_owner(
+        &self,
+        node: &Node,
+        current_owner: &str,
+    ) -> Option<super::normalized_behavior::NormalizedOwner> {
+        if node.r#type != "LASGN" && node.r#type != "CASGN" {
+            return None;
+        }
+        let var_name = node.children.iter().find_map(|child| match child {
+            ast::Child::Symbol(value) | ast::Child::String(value) => Some(value.clone()),
+            _ => None,
+        })?;
+        if var_name.is_empty() || !var_name.chars().next().unwrap().is_ascii_uppercase() {
+            return None;
+        }
+        let val_node = node.children.get(1).and_then(ast::node)?;
+        let actual_val = if val_node.r#type == "ITER" {
+            val_node
+                .children
+                .first()
+                .and_then(ast::node)
+                .unwrap_or(val_node)
+        } else {
+            val_node
+        };
+        if actual_val.r#type == "CALL" || actual_val.r#type == "QCALL" {
+            let receiver = actual_val.children.first().and_then(ast::node)?;
+            let method = actual_val.children.get(1).and_then(|child| match child {
+                ast::Child::Symbol(s) | ast::Child::String(s) => Some(s.clone()),
+                _ => None,
+            })?;
+            if method == "new" && receiver.text == "Struct" {
+                let name = if current_owner.is_empty() {
+                    var_name
+                } else {
+                    format!("{current_owner}::{var_name}")
+                };
+                return Some(super::normalized_behavior::NormalizedOwner {
+                    name,
+                    kind: "struct".to_string(),
+                });
+            }
+        }
+        None
+    }
+
     fn self_member_receiver(&self, message: &str) -> String {
         format!("self.{message}")
     }
@@ -220,6 +266,203 @@ impl NormalizedLanguageBehavior for RubyNormalizedBehavior {
     fn clean_receiver(&self, receiver: &str) -> String {
         let mut t = receiver.replace('@', "");
         t.replace('$', "")
+    }
+
+    fn is_type_guard(&self, message: &str) -> bool {
+        RUBY_GUARD_MIDS.contains(&message) && message != "nil?" && message != "respond_to?"
+    }
+
+    fn is_nil_check(&self, message: &str) -> bool {
+        message == "nil?"
+    }
+
+    fn is_type_normalizer(&self, receiver: &str, message: &str) -> bool {
+        receiver == "T" && message == "let"
+    }
+
+    fn is_type_cast(&self, receiver: &str, message: &str) -> bool {
+        receiver == "T" && (message == "cast" || message == "must")
+    }
+
+    fn struct_declaration_fields(&self, node: &Node) -> Option<Vec<String>> {
+        let val_node = node.children.get(1).and_then(ast::node)?;
+        let actual_val = if val_node.r#type == "ITER" {
+            val_node
+                .children
+                .first()
+                .and_then(ast::node)
+                .unwrap_or(val_node)
+        } else {
+            val_node
+        };
+
+        let args_node = actual_val.children.get(2).and_then(ast::node)?;
+        let mut fields = Vec::new();
+        for arg in &args_node.children {
+            if let Some(arg_node) = ast::node(arg) {
+                if arg_node.r#type == "LIT"
+                    || arg_node.r#type == "SYMBOL"
+                    || arg_node.r#type == "SYM"
+                {
+                    let field_name = arg_node.text.trim_start_matches(':').to_string();
+                    if !field_name.is_empty() {
+                        fields.push(field_name);
+                    }
+                }
+            }
+        }
+        Some(fields)
+    }
+
+    fn static_return_type(&self, message: &str, receiver_type: Option<&str>) -> Option<String> {
+        let r = receiver_type.unwrap_or("T.untyped");
+        let (receiver_bare, _) = if r.starts_with("T.nilable(") && r.ends_with(')') {
+            let bare = r["T.nilable(".len()..r.len() - 1].to_string();
+            (bare, true)
+        } else {
+            (r.to_string(), false)
+        };
+
+        if message == "==" || message == "!=" || message == "===" || message == "<<" || message == ">>" || message == "<" || message == "<=" || message == ">" || message == ">=" {
+            return Some("T::Boolean".to_string());
+        }
+        if message == "<=>" {
+            return Some("T.nilable(Integer)".to_string());
+        }
+        if message == "hash" {
+            return Some("Integer".to_string());
+        }
+        if message == "inspect" {
+            return Some("String".to_string());
+        }
+        if message == "clone" || message == "dup" || message == "freeze" || message == "taint" || message == "untaint" || message == "+" || message == "-" || message == "*" || message == "/" || message == "%" || message == "**" || message == "&" || message == "|" || message == "^" || message == "~" || message == "+@" || message == "-@" {
+            return receiver_type.map(|t| t.to_string());
+        }
+
+        if message == "to_s" || message == "to_str" || message == "name" {
+            return Some("String".to_string());
+        }
+        if message == "to_sym" || message == "intern" {
+            return Some("Symbol".to_string());
+        }
+        if message == "to_i"
+            || message == "to_int"
+            || message == "size"
+            || message == "length"
+            || message == "count"
+        {
+            return Some("Integer".to_string());
+        }
+        if message == "to_f" {
+            return Some("Float".to_string());
+        }
+        if message == "to_a" || message == "to_ary" {
+            return Some("T::Array[T.untyped]".to_string());
+        }
+        if message == "to_h" || message == "to_hash" {
+            return Some("T::Hash[T.untyped, T.untyped]".to_string());
+        }
+        if message == "include?"
+            || message == "empty?"
+            || message == "nil?"
+            || message == "is_a?"
+            || message == "kind_of?"
+            || message == "instance_of?"
+            || message == "respond_to?"
+            || message == "has_key?"
+            || message == "key?"
+            || message == "has_value?"
+            || message == "value?"
+            || message == "any?"
+            || message == "all?"
+            || message == "none?"
+            || message == "one?"
+        {
+            return Some("T::Boolean".to_string());
+        }
+        if message == "class" {
+            return Some("Class".to_string());
+        }
+        if r == "String" {
+            if message == "upcase"
+                || message == "downcase"
+                || message == "capitalize"
+                || message == "swapcase"
+                || message == "strip"
+                || message == "lstrip"
+                || message == "rstrip"
+                || message == "chomp"
+                || message == "chop"
+                || message == "gsub"
+                || message == "sub"
+                || message == "reverse"
+            {
+                return Some("String".to_string());
+            }
+            if message == "split" || message == "chars" || message == "lines" {
+                return Some("T::Array[String]".to_string());
+            }
+        }
+        None
+    }
+
+    fn propagated_collection_return_type(
+        &self,
+        message: &str,
+        receiver_type: Option<&str>,
+    ) -> Option<String> {
+        let r = receiver_type.unwrap_or("T.untyped");
+        if message == "first"
+            || message == "last"
+            || message == "pop"
+            || message == "shift"
+            || message == "sample"
+        {
+            if r.starts_with("T::Array[") && r.ends_with(']') {
+                let inner = &r[9..r.len() - 1];
+                return Some(format!("T.nilable({})", inner));
+            }
+        }
+        if message == "map" || message == "select" || message == "reject" || message == "filter" || message == "sort" || message == "compact" || message == "split" {
+            return Some("T::Array[T.untyped]".to_string());
+        }
+        if message == "compact" {
+            if r.starts_with("T::Array[") && r.ends_with(']') {
+                let inner = &r[9..r.len() - 1];
+                let no_nil = inner.trim_start_matches("T.nilable(").trim_end_matches(')');
+                return Some(format!("T::Array[{}]", no_nil));
+            }
+        }
+        if message == "flatten" {
+            if r.starts_with("T::Array[T::Array[") {
+                let inner = &r[18..r.len() - 2];
+                return Some(format!("T::Array[{}]", inner));
+            }
+        }
+        if message == "keys" {
+            if r.starts_with("T::Hash[") {
+                if let Some((k, _)) = r[8..r.len() - 1].split_once(", ") {
+                    return Some(format!("T::Array[{}]", k));
+                }
+            }
+        }
+        if message == "values" {
+            if r.starts_with("T::Hash[") {
+                if let Some((_, v)) = r[8..r.len() - 1].split_once(", ") {
+                    return Some(format!("T::Array[{}]", v));
+                }
+            }
+        }
+        None
+    }
+
+    fn is_noreturn_method(&self, message: &str) -> bool {
+        message == "raise"
+            || message == "fail"
+            || message == "abort"
+            || message == "exit"
+            || message == "exit!"
+            || message == "panic"
     }
 
     fn emit_index_call_site(&self, _node: &Node, _call: &NormalizedCallProjection) -> bool {
@@ -495,17 +738,39 @@ struct RubyMetadata {
 
 fn ruby_metadata(source: &str, functions: &[FunctionDef]) -> RubyMetadata {
     RubyMetadata {
-        immutable_struct_readers: reader_sets_to_vecs(immutable_struct_reader_sets(source)),
-        immutable_struct_reader_types: immutable_struct_reader_types(source),
+        immutable_struct_readers: reader_sets_to_vecs(immutable_struct_reader_sets(
+            source, functions,
+        )),
+        immutable_struct_reader_types: immutable_struct_reader_types(source, functions),
         type_aliases: type_aliases(source),
         method_param_types: method_param_types(source, functions),
     }
 }
 
-fn immutable_struct_reader_sets(source: &str) -> BTreeMap<String, BTreeSet<String>> {
+fn immutable_struct_reader_sets(
+    source: &str,
+    functions: &[FunctionDef],
+) -> BTreeMap<String, BTreeSet<String>> {
     let mut readers: BTreeMap<String, BTreeSet<String>> = BTreeMap::new();
     let mut class_stack = Vec::new();
-    for line in source.lines() {
+    let method_ranges: Vec<(usize, usize)> =
+        functions.iter().map(|f| (f.span[0], f.span[2])).collect();
+    eprintln!(
+        "IMMUTABLE_STRUCT_READER_SETS: functions={:?}, method_ranges={:?}",
+        functions
+            .iter()
+            .map(|f| (&f.name, &f.span))
+            .collect::<Vec<_>>(),
+        method_ranges
+    );
+    for (idx, line) in source.lines().enumerate() {
+        let line_num = idx + 1;
+        if method_ranges
+            .iter()
+            .any(|&(start, end)| line_num >= start && line_num <= end)
+        {
+            continue;
+        }
         let stripped = line.trim();
         if let Some(name) = stripped
             .strip_prefix("class ")
@@ -547,10 +812,22 @@ fn reader_sets_to_vecs(
         .collect()
 }
 
-fn immutable_struct_reader_types(source: &str) -> BTreeMap<String, BTreeMap<String, String>> {
+fn immutable_struct_reader_types(
+    source: &str,
+    functions: &[FunctionDef],
+) -> BTreeMap<String, BTreeMap<String, String>> {
     let mut reader_types: BTreeMap<String, BTreeMap<String, String>> = BTreeMap::new();
     let mut class_stack = Vec::new();
-    for line in source.lines() {
+    let method_ranges: Vec<(usize, usize)> =
+        functions.iter().map(|f| (f.span[0], f.span[2])).collect();
+    for (idx, line) in source.lines().enumerate() {
+        let line_num = idx + 1;
+        if method_ranges
+            .iter()
+            .any(|&(start, end)| line_num >= start && line_num <= end)
+        {
+            continue;
+        }
         let stripped = line.trim();
         if let Some(name) = stripped
             .strip_prefix("class ")
@@ -561,33 +838,28 @@ fn immutable_struct_reader_types(source: &str) -> BTreeMap<String, BTreeMap<Stri
             continue;
         }
         if let Some(owner) = class_stack.last() {
-            if let Some((field, type_name)) = stripped
-                .strip_prefix("const :")
-                .and_then(|rest| rest.split_once(','))
-                .map(|(field, type_name)| {
-                    (
-                        field
-                            .split(|ch: char| !ch.is_ascii_alphanumeric() && ch != '_')
-                            .next()
-                            .unwrap_or("")
-                            .trim(),
-                        type_name
-                            .trim()
-                            .split(|ch: char| {
-                                !matches!(ch, ':' | '_' | 'A'..='Z' | 'a'..='z' | '0'..='9')
-                            })
-                            .next()
-                            .unwrap_or("")
-                            .trim(),
-                    )
-                })
-                .filter(|(field, type_name)| !field.is_empty() && constant_path(type_name))
-            {
-                reader_types
-                    .entry(owner.clone())
-                    .or_default()
-                    .insert(field.to_string(), type_name.to_string());
-                continue;
+            let mut line_rest = None;
+            if stripped.starts_with("const :") {
+                line_rest = Some(&stripped["const :".len()..]);
+            } else if stripped.starts_with("prop :") {
+                line_rest = Some(&stripped["prop :".len()..]);
+            }
+            if let Some(rest) = line_rest {
+                let parts = split_top_level_params_local(rest);
+                if parts.len() >= 2 {
+                    let field = parts[0].trim().trim_start_matches(':').trim();
+                    let type_name = parts[1].trim();
+                    let field_clean: String = field
+                        .chars()
+                        .filter(|c| c.is_alphanumeric() || *c == '_')
+                        .collect();
+                    if !field_clean.is_empty() && is_valid_type(type_name) {
+                        reader_types
+                            .entry(owner.clone())
+                            .or_default()
+                            .insert(field_clean, type_name.to_string());
+                    }
+                }
             }
         }
         if !class_stack.is_empty() && stripped.trim_end_matches(';') == "end" {
@@ -645,7 +917,11 @@ fn type_aliases(source: &str) -> BTreeMap<String, String> {
                         let mut current_line = i;
                         let mut block_text = String::new();
                         while current_line < lines.len() {
-                            let text = if current_line == i { rest } else { lines[current_line] };
+                            let text = if current_line == i {
+                                rest
+                            } else {
+                                lines[current_line]
+                            };
                             for ch in text.chars() {
                                 if ch == '{' {
                                     depth += 1;
@@ -669,12 +945,19 @@ fn type_aliases(source: &str) -> BTreeMap<String, String> {
                             current_line += 1;
                         }
                         target = block_text.trim().to_string();
-                    } else if rest.contains(" do") || rest.ends_with(" do") || (i + 1 < lines.len() && lines[i+1].starts_with("do")) {
+                    } else if rest.contains(" do")
+                        || rest.ends_with(" do")
+                        || (i + 1 < lines.len() && lines[i + 1].starts_with("do"))
+                    {
                         let mut current_line = i;
                         let mut block_lines = Vec::new();
                         let mut started = false;
                         while current_line < lines.len() {
-                            let text = if current_line == i { rest } else { lines[current_line] };
+                            let text = if current_line == i {
+                                rest
+                            } else {
+                                lines[current_line]
+                            };
                             if !started {
                                 if let Some((_, right)) = text.split_once("do") {
                                     let right_trimmed = right.trim();
@@ -684,7 +967,10 @@ fn type_aliases(source: &str) -> BTreeMap<String, String> {
                                     started = true;
                                 }
                             } else {
-                                if text == "end" || text.starts_with("end ") || text.ends_with(" end") {
+                                if text == "end"
+                                    || text.starts_with("end ")
+                                    || text.ends_with(" end")
+                                {
                                     let (left, _) = text.split_once("end").unwrap();
                                     let left_trimmed = left.trim();
                                     if !left_trimmed.is_empty() {
@@ -721,7 +1007,6 @@ fn type_aliases(source: &str) -> BTreeMap<String, String> {
     aliases
 }
 
-
 fn method_param_types(
     source: &str,
     functions: &[FunctionDef],
@@ -738,13 +1023,48 @@ fn method_param_types(
         .collect()
 }
 
+fn is_valid_type(value: &str) -> bool {
+    let trimmed = value.trim();
+    if trimmed.is_empty() {
+        return false;
+    }
+    trimmed.starts_with(|c: char| c.is_ascii_uppercase())
+        || trimmed.starts_with("T.")
+        || trimmed.starts_with("::")
+}
+
+fn split_top_level_params_local(params: &str) -> Vec<String> {
+    let mut out = Vec::new();
+    let mut depth = 0u32;
+    let mut start = 0usize;
+    for (i, c) in params.char_indices() {
+        match c {
+            '(' | '<' | '[' | '{' => depth += 1,
+            ')' | '>' | ']' | '}' => depth = depth.saturating_sub(1),
+            ',' if depth == 0 => {
+                out.push(params[start..i].to_string());
+                start = i + 1;
+            }
+            _ => {}
+        }
+    }
+    let remainder = params[start..].trim().to_string();
+    if !remainder.is_empty() {
+        out.push(remainder);
+    }
+    out
+}
+
 fn sig_param_types(source: &str, function_line: usize) -> BTreeMap<String, String> {
     let lines = source.lines().collect::<Vec<_>>();
     let mut sig_lines = Vec::new();
     let mut cursor = function_line.saturating_sub(2);
     while let Some(line) = lines.get(cursor) {
         let stripped = line.trim();
-        if stripped.starts_with("def ") || stripped.starts_with("class ") || stripped.starts_with("module ") {
+        if stripped.starts_with("def ")
+            || stripped.starts_with("class ")
+            || stripped.starts_with("module ")
+        {
             return BTreeMap::new();
         }
         if !stripped.is_empty() {
@@ -763,23 +1083,42 @@ fn sig_param_types(source: &str, function_line: usize) -> BTreeMap<String, Strin
     if !sig.trim_start().starts_with("sig") {
         return BTreeMap::new();
     }
-    let Some(params_start) = sig.find("params(").map(|index| index + "params(".len()) else {
+    let marker = "params(";
+    let Some(params_start_idx) = sig.find(marker) else {
         return BTreeMap::new();
     };
-    let rest = &sig[params_start..];
-    let Some(params_end) = rest.find(')') else {
+    let inner = &sig[params_start_idx + marker.len()..];
+    let mut depth = 1u32;
+    let mut params_end_idx = None;
+    for (i, c) in inner.char_indices() {
+        match c {
+            '(' => depth += 1,
+            ')' => {
+                depth -= 1;
+                if depth == 0 {
+                    params_end_idx = Some(i);
+                    break;
+                }
+            }
+            _ => {}
+        }
+    }
+    let Some(end_idx) = params_end_idx else {
         return BTreeMap::new();
     };
-    rest[..params_end]
-        .split(',')
-        .filter_map(|part| {
-            let (name, type_name) = part.split_once(':')?;
+    let params_str = &inner[..end_idx];
+
+    let mut out = BTreeMap::new();
+    for entry in split_top_level_params_local(params_str) {
+        if let Some((name, type_name)) = entry.split_once(':') {
             let name = name.trim();
             let type_name = type_name.trim();
-            (identifier(name) && constant_path(type_name))
-                .then(|| (name.to_string(), type_name.to_string()))
-        })
-        .collect()
+            if identifier(name) && is_valid_type(type_name) {
+                out.insert(name.to_string(), type_name.to_string());
+            }
+        }
+    }
+    out
 }
 
 fn identifier(value: &str) -> bool {
@@ -845,7 +1184,7 @@ mod tests {
             end
             class 
             module 
-            "#
+            "#,
         );
         assert_eq!(aliases.len(), 7);
         assert!(aliases.contains_key("TopLevelAlias"));
@@ -858,5 +1197,3 @@ mod tests {
         assert!(!aliases.contains_key("Nested::Child::MyAliasEmpty"));
     }
 }
-
-

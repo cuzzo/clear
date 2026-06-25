@@ -132,6 +132,42 @@ pub(crate) trait NormalizedLanguageBehavior: Sync {
         false
     }
 
+    fn is_type_guard(&self, _message: &str) -> bool {
+        false
+    }
+
+    fn is_nil_check(&self, _message: &str) -> bool {
+        false
+    }
+
+    fn is_type_normalizer(&self, _receiver: &str, _message: &str) -> bool {
+        false
+    }
+
+    fn is_type_cast(&self, _receiver: &str, _message: &str) -> bool {
+        false
+    }
+
+    fn struct_declaration_fields(&self, _node: &Node) -> Option<Vec<String>> {
+        None
+    }
+
+    fn static_return_type(&self, _message: &str, _receiver_type: Option<&str>) -> Option<String> {
+        None
+    }
+
+    fn propagated_collection_return_type(
+        &self,
+        _message: &str,
+        _receiver_type: Option<&str>,
+    ) -> Option<String> {
+        None
+    }
+
+    fn is_noreturn_method(&self, _message: &str) -> bool {
+        false
+    }
+
     fn emit_index_call_site(&self, _node: &Node, _call: &NormalizedCallProjection) -> bool {
         false
     }
@@ -161,7 +197,12 @@ pub(crate) trait NormalizedLanguageBehavior: Sync {
         None
     }
 
-    fn state_declaration_from_node(&self, _node: &Node, _owner: &str, _in_method: bool) -> Option<StateDeclaration> {
+    fn state_declaration_from_node(
+        &self,
+        _node: &Node,
+        _owner: &str,
+        _in_method: bool,
+    ) -> Option<StateDeclaration> {
         None
     }
 
@@ -594,7 +635,7 @@ mod tests {
         let full = [1, 0, 1, 10];
         let acc = [1, 0, 1, 5];
         assert_eq!(b.call_site_span(&node, &parts, full, acc, "func"), full);
-        
+
         let bo = TestBehaviorOverride;
         assert_eq!(bo.call_site_span(&node, &parts, full, acc, "func"), acc);
 
@@ -608,20 +649,22 @@ mod tests {
         assert!(b.nil_guard_fact("msg", "sub").is_none());
         assert!(!b.local_flow_declaration_keyword("key"));
         assert!(!b.local_flow_keyword("name"));
-        assert!(b.semantic_effect_for_call(&CallSite {
-            receiver: "".to_string(),
-            message: "".to_string(),
-            file: "".to_string(),
-            function: "".to_string(),
-            owner: "".to_string(),
-            line: 0,
-            span: [0,0,0,0],
-            conditional: false,
-            arguments: Vec::new(),
-            control: None,
-            safe_navigation: false,
-            block: false,
-        }).is_none());
+        assert!(b
+            .semantic_effect_for_call(&CallSite {
+                receiver: "".to_string(),
+                message: "".to_string(),
+                file: "".to_string(),
+                function: "".to_string(),
+                owner: "".to_string(),
+                line: 0,
+                span: [0, 0, 0, 0],
+                conditional: false,
+                arguments: Vec::new(),
+                control: None,
+                safe_navigation: false,
+                block: false,
+            })
+            .is_none());
         assert!(b.core_owner_names().is_empty());
     }
 

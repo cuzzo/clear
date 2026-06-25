@@ -258,9 +258,9 @@
         "child_masses": [
           4
         ],
-        "fingerprint": "block(call(id call<decorate>(id argument_list(id))) body(assignment<[]=>(lit id argument_list(call(id id) bool))))",
+        "fingerprint": "block(call(id call<decorate>(id argument_list(id))) body(parameters(id id) assignment<[]=>(lit id argument_list(call(id id) bool))))",
         "line": 19,
-        "mass": 12,
+        "mass": 15,
         "method_name": "helper_result",
         "node_name": "block"
       },
@@ -271,9 +271,9 @@
         "child_masses": [
           5
         ],
-        "fingerprint": "block(call(id call<first>(id id argument_list(id))) body(call<result>(id colon2(id id) argument_list(hash(lit call(id id))))))",
+        "fingerprint": "block(call(id call<first>(id id argument_list(id))) body(parameters(id) call<result>(id colon2(id id) argument_list(hash(lit call(id id))))))",
         "line": 5,
-        "mass": 15,
+        "mass": 17,
         "method_name": "results",
         "node_name": "block"
       },
@@ -299,9 +299,9 @@
         "child_masses": [
           2
         ],
-        "fingerprint": "block(call(id id) body(call(id id)))",
+        "fingerprint": "block(call(id id) body(parameters(id) call(id id)))",
         "line": 15,
-        "mass": 6,
+        "mass": 8,
         "method_name": "provider_paths",
         "node_name": "block"
       },
@@ -568,49 +568,49 @@
       },
       {
         "child_fingerprints": [
-          "method(id body(block(call(id call<first>(id id argument_list(id))) body(call<result>(id colon2(id id) argument_list(hash(lit call(id id))))))))",
+          "method(id body(block(call(id call<first>(id id argument_list(id))) body(parameters(id) call<result>(id colon2(id id) argument_list(hash(lit call(id id))))))))",
           "method(id body(parameters(id) call<new>(id id argument_list(id))))",
-          "method(id body(block(call(id id) body(call(id id)))))",
-          "method(id body(parameters(id) block(call(id call<decorate>(id argument_list(id))) body(assignment<[]=>(lit id argument_list(call(id id) bool))))))",
+          "method(id body(block(call(id id) body(parameters(id) call(id id)))))",
+          "method(id body(parameters(id) block(call(id call<decorate>(id argument_list(id))) body(parameters(id id) assignment<[]=>(lit id argument_list(call(id id) bool))))))",
           "method(id body(parameters(id) body_statement(call<file?>(id colon2(id id) argument_list(id)) call(id id))))"
         ],
         "child_masses": [
-          17,
+          19,
           8,
-          8,
-          16,
+          10,
+          19,
           12
         ],
-        "fingerprint": "body_statement(method(id body(block(call(id call<first>(id id argument_list(id))) body(call<result>(id colon2(id id) argument_list(hash(lit call(id id)))))))) method(id body(parameters(id) call<new>(id id argument_list(id)))) method(id body(block(call(id id) body(call(id id))))) method(id body(parameters(id) block(call(id call<decorate>(id argument_list(id))) body(assignment<[]=>(lit id argument_list(call(id id) bool)))))) method(id body(parameters(id) body_statement(call<file?>(id colon2(id id) argument_list(id)) call(id id)))))",
+        "fingerprint": "body_statement(method(id body(block(call(id call<first>(id id argument_list(id))) body(parameters(id) call<result>(id colon2(id id) argument_list(hash(lit call(id id)))))))) method(id body(parameters(id) call<new>(id id argument_list(id)))) method(id body(block(call(id id) body(parameters(id) call(id id))))) method(id body(parameters(id) block(call(id call<decorate>(id argument_list(id))) body(parameters(id id) assignment<[]=>(lit id argument_list(call(id id) bool)))))) method(id body(parameters(id) body_statement(call<file?>(id colon2(id id) argument_list(id)) call(id id)))))",
         "line": 4,
-        "mass": 62,
+        "mass": 69,
         "method_name": "(top-level)",
         "node_name": "body_statement"
       },
       {
         "child_fingerprints": [],
         "child_masses": [],
-        "fingerprint": "method(id body(block(call(id call<first>(id id argument_list(id))) body(call<result>(id colon2(id id) argument_list(hash(lit call(id id))))))))",
+        "fingerprint": "method(id body(block(call(id call<first>(id id argument_list(id))) body(parameters(id) call<result>(id colon2(id id) argument_list(hash(lit call(id id))))))))",
         "line": 4,
-        "mass": 17,
+        "mass": 19,
         "method_name": "results",
         "node_name": "defn"
       },
       {
         "child_fingerprints": [],
         "child_masses": [],
-        "fingerprint": "method(id body(block(call(id id) body(call(id id)))))",
+        "fingerprint": "method(id body(block(call(id id) body(parameters(id) call(id id)))))",
         "line": 14,
-        "mass": 8,
+        "mass": 10,
         "method_name": "provider_paths",
         "node_name": "defn"
       },
       {
         "child_fingerprints": [],
         "child_masses": [],
-        "fingerprint": "method(id body(parameters(id) block(call(id call<decorate>(id argument_list(id))) body(assignment<[]=>(lit id argument_list(call(id id) bool))))))",
+        "fingerprint": "method(id body(parameters(id) block(call(id call<decorate>(id argument_list(id))) body(parameters(id id) assignment<[]=>(lit id argument_list(call(id id) bool))))))",
         "line": 18,
-        "mass": 16,
+        "mass": 19,
         "method_name": "helper_result",
         "node_name": "defn"
       },

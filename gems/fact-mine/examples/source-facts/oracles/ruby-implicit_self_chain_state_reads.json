@@ -260,16 +260,16 @@
       },
       {
         "child_fingerprints": [
-          "block(call(id id) body(call(lit call(id id) argument_list(lit))))",
-          "block(call(id call<Array>(id argument_list(id))) body(call(id id)))"
+          "block(call(id id) body(parameters(id) call(lit call(id id) argument_list(lit))))",
+          "block(call(id call<Array>(id argument_list(id))) body(parameters(id) call(id id)))"
         ],
         "child_masses": [
-          9,
-          8
+          11,
+          10
         ],
-        "fingerprint": "body_statement(block(call(id id) body(call(lit call(id id) argument_list(lit)))) block(call(id call<Array>(id argument_list(id))) body(call(id id))))",
+        "fingerprint": "body_statement(block(call(id id) body(parameters(id) call(lit call(id id) argument_list(lit)))) block(call(id call<Array>(id argument_list(id))) body(parameters(id) call(id id))))",
         "line": 9,
-        "mass": 18,
+        "mass": 22,
         "method_name": "filtered",
         "node_name": "body_statement"
       },
@@ -280,9 +280,9 @@
         "child_masses": [
           4
         ],
-        "fingerprint": "block(call(id call<Array>(id argument_list(id))) body(call(id id)))",
+        "fingerprint": "block(call(id call<Array>(id argument_list(id))) body(parameters(id) call(id id)))",
         "line": 10,
-        "mass": 8,
+        "mass": 10,
         "method_name": "filtered",
         "node_name": "block"
       },
@@ -323,9 +323,9 @@
         "child_masses": [
           2
         ],
-        "fingerprint": "block(call(id id) body(call(lit call(id id) argument_list(lit))))",
+        "fingerprint": "block(call(id id) body(parameters(id) call(lit call(id id) argument_list(lit))))",
         "line": 14,
-        "mass": 9,
+        "mass": 11,
         "method_name": "owner_nodes",
         "node_name": "block"
       },
@@ -336,9 +336,9 @@
         "child_masses": [
           2
         ],
-        "fingerprint": "block(call(id id) body(call(lit call(id id) argument_list(lit))))",
+        "fingerprint": "block(call(id id) body(parameters(id) call(lit call(id id) argument_list(lit))))",
         "line": 9,
-        "mass": 9,
+        "mass": 11,
         "method_name": "filtered",
         "node_name": "block"
       },
@@ -542,30 +542,30 @@
       {
         "child_fingerprints": [
           "method(id id body(parameters(id) call(id call<new>(id argument_list(id)))))",
-          "method(id body(parameters(id) body_statement(block(call(id id) body(call(lit call(id id) argument_list(lit)))) block(call(id call<Array>(id argument_list(id))) body(call(id id))))))",
-          "method(id body(block(call(id id) body(call(lit call(id id) argument_list(lit))))))",
+          "method(id body(parameters(id) body_statement(block(call(id id) body(parameters(id) call(lit call(id id) argument_list(lit)))) block(call(id call<Array>(id argument_list(id))) body(parameters(id) call(id id))))))",
+          "method(id body(block(call(id id) body(parameters(id) call(lit call(id id) argument_list(lit))))))",
           "method(id body(parameters(id) call(id call<new>(id id argument_list(id)))))",
           "method(id body(id))"
         ],
         "child_masses": [
           9,
-          22,
-          11,
+          26,
+          13,
           9,
           3
         ],
-        "fingerprint": "body_statement(method(id id body(parameters(id) call(id call<new>(id argument_list(id))))) method(id body(parameters(id) body_statement(block(call(id id) body(call(lit call(id id) argument_list(lit)))) block(call(id call<Array>(id argument_list(id))) body(call(id id)))))) method(id body(block(call(id id) body(call(lit call(id id) argument_list(lit)))))) method(id body(parameters(id) call(id call<new>(id id argument_list(id))))) method(id body(id)))",
+        "fingerprint": "body_statement(method(id id body(parameters(id) call(id call<new>(id argument_list(id))))) method(id body(parameters(id) body_statement(block(call(id id) body(parameters(id) call(lit call(id id) argument_list(lit)))) block(call(id call<Array>(id argument_list(id))) body(parameters(id) call(id id)))))) method(id body(block(call(id id) body(parameters(id) call(lit call(id id) argument_list(lit)))))) method(id body(parameters(id) call(id call<new>(id id argument_list(id))))) method(id body(id)))",
         "line": 4,
-        "mass": 55,
+        "mass": 61,
         "method_name": "(top-level)",
         "node_name": "body_statement"
       },
       {
         "child_fingerprints": [],
         "child_masses": [],
-        "fingerprint": "method(id body(block(call(id id) body(call(lit call(id id) argument_list(lit))))))",
+        "fingerprint": "method(id body(block(call(id id) body(parameters(id) call(lit call(id id) argument_list(lit))))))",
         "line": 13,
-        "mass": 11,
+        "mass": 13,
         "method_name": "owner_nodes",
         "node_name": "defn"
       },
@@ -581,9 +581,9 @@
       {
         "child_fingerprints": [],
         "child_masses": [],
-        "fingerprint": "method(id body(parameters(id) body_statement(block(call(id id) body(call(lit call(id id) argument_list(lit)))) block(call(id call<Array>(id argument_list(id))) body(call(id id))))))",
+        "fingerprint": "method(id body(parameters(id) body_statement(block(call(id id) body(parameters(id) call(lit call(id id) argument_list(lit)))) block(call(id call<Array>(id argument_list(id))) body(parameters(id) call(id id))))))",
         "line": 8,
-        "mass": 22,
+        "mass": 26,
         "method_name": "filtered",
         "node_name": "defn"
       },

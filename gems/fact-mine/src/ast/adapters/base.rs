@@ -44,7 +44,13 @@ pub(crate) trait AstNormalizationAdapter: Sync {
             ),
             "subshell" => kind == "subshell",
             "operator_assignment" => kind == "operator_assignment",
-            "assignment" => matches!(kind, "assignment" | "assignment_expression" | "assignment_statement" | "annotated_assignment"),
+            "assignment" => matches!(
+                kind,
+                "assignment"
+                    | "assignment_expression"
+                    | "assignment_statement"
+                    | "annotated_assignment"
+            ),
             "variable_declarator" => kind == "variable_declarator",
             "super" => kind == "super",
             "return_or_break" => matches!(
@@ -76,47 +82,101 @@ pub(crate) trait AstNormalizationAdapter: Sync {
             "symbol" => matches!(kind, "simple_symbol" | "symbol"),
             "argument_list" => kind == "argument_list" || kind == "arguments",
             "call" => kind == "call",
-            "element_reference" => matches!(kind, "element_reference" | "subscript" | "subscript_expression" | "bracket_index_expression" | "table_index_expression"),
-            "multiple_assignment_left" => kind == "left_assignment_list" || (kind == "variable_list" && raw_named_children(node).len() > 1),
+            "element_reference" => matches!(
+                kind,
+                "element_reference"
+                    | "subscript"
+                    | "subscript_expression"
+                    | "bracket_index_expression"
+                    | "table_index_expression"
+            ),
+            "multiple_assignment_left" => {
+                kind == "left_assignment_list"
+                    || (kind == "variable_list" && raw_named_children(node).len() > 1)
+            }
             "exceptions" => kind == "exceptions",
             "hash_key_symbol" => kind == "hash_key_symbol",
             "body_statement" => kind == "body_statement",
             "block_parameters" => kind == "block_parameters",
             "destructured_parameter" => kind == "destructured_parameter",
-            "optional_or_keyword_parameter" => matches!(kind, "optional_parameter" | "keyword_parameter"),
+            "optional_or_keyword_parameter" => {
+                matches!(kind, "optional_parameter" | "keyword_parameter")
+            }
             "expression_list" => kind == "expression_list" || kind == "variable_list",
             "short_var_declaration" => kind == "short_var_declaration",
             "navigation_suffix" => kind == "navigation_suffix",
             "match_block" => kind == "match_block",
             "method_parameters" => kind == "method_parameters",
-            "parameter_child" => matches!(kind, "parameters" | "parameter_list" | "formal_parameters" | "function_value_parameters" | "method_parameters"),
+            "parameter_child" => matches!(
+                kind,
+                "parameters"
+                    | "parameter_list"
+                    | "formal_parameters"
+                    | "function_value_parameters"
+                    | "method_parameters"
+            ),
             "splat_or_rest" => matches!(kind, "splat" | "splat_parameter" | "rest_assignment"),
-            "constant" => matches!(kind, "constant" | "scope_resolution" | "type_identifier" | "scoped_type_identifier"),
+            "constant" => matches!(
+                kind,
+                "constant" | "scope_resolution" | "type_identifier" | "scoped_type_identifier"
+            ),
             "block_or_do_block" => matches!(kind, "block" | "do_block"),
             "string_content_or_interpolation" => matches!(kind, "string_content" | "interpolation"),
             "string_content" => matches!(kind, "string_content" | "string_fragment"),
             "regex_or_literal" => matches!(kind, "regex" | "regex_literal"),
-            "assignment_or_augmented" => matches!(kind, "assignment" | "augmented_assignment" | "annotated_assignment"),
+            "assignment_or_augmented" => matches!(
+                kind,
+                "assignment" | "augmented_assignment" | "annotated_assignment"
+            ),
             "unary" => kind == "unary",
-            "block_wrapper" => matches!(kind, "body_statement" | "block_body" | "statement" | "statement_block" | "block"),
+            "block_wrapper" => matches!(
+                kind,
+                "body_statement" | "block_body" | "statement" | "statement_block" | "block"
+            ),
             "dotted_name" => kind == "dotted_name",
             "type" => kind == "type",
             "union_type" => kind == "union_type",
             "generic_type" => kind == "generic_type",
             "attribute" => kind == "attribute",
-            "string" => matches!(kind, "string" | "string_content" | "string_literal" | "interpreted_string_literal" | "raw_string_literal"),
+            "string" => matches!(
+                kind,
+                "string"
+                    | "string_content"
+                    | "string_literal"
+                    | "interpreted_string_literal"
+                    | "raw_string_literal"
+            ),
             "list" => kind == "list",
             "expression_statement" => kind == "expression_statement",
             "else" => kind == "else",
             "then" => kind == "then",
             "if_statement" => kind == "if_statement",
             "switch_default" => kind == "switch_default",
-            "scope_resolution_or_scoped_type" => matches!(kind, "scope_resolution" | "scoped_type_identifier"),
+            "scope_resolution_or_scoped_type" => {
+                matches!(kind, "scope_resolution" | "scoped_type_identifier")
+            }
             "field" => kind == "field",
             "module" => kind == "module",
             "yield" => kind == "yield",
             "integer" => kind == "integer",
-            "block_child" => matches!(kind, "body_statement" | "block_body" | "block" | "do_block" | "class_body" | "compound_statement" | "declaration_list" | "function_body" | "match_block" | "statement_block" | "statement_list" | "statements" | "switch_body" | "then" | "control_structure_body"),
+            "block_child" => matches!(
+                kind,
+                "body_statement"
+                    | "block_body"
+                    | "block"
+                    | "do_block"
+                    | "class_body"
+                    | "compound_statement"
+                    | "declaration_list"
+                    | "function_body"
+                    | "match_block"
+                    | "statement_block"
+                    | "statement_list"
+                    | "statements"
+                    | "switch_body"
+                    | "then"
+                    | "control_structure_body"
+            ),
             "type_leaf" => matches!(kind, "ellipsis" | "identifier" | "nil" | "none" | "null"),
             _ => false,
         }
@@ -1021,11 +1081,7 @@ pub(crate) trait AstNormalizationAdapter: Sync {
     fn is_pattern_node_kind(&self, kind: &str) -> bool {
         matches!(
             kind,
-            "pattern"
-                | "case_pattern"
-                | "match_pattern"
-                | "switch_pattern"
-                | "when_condition"
+            "pattern" | "case_pattern" | "match_pattern" | "switch_pattern" | "when_condition"
         )
     }
 
@@ -1082,10 +1138,7 @@ pub(crate) trait AstNormalizationAdapter: Sync {
     }
 
     fn is_inline_def_receiver_kind(&self, kind: &str) -> bool {
-        matches!(
-            kind,
-            "self" | "this" | "constant" | "scope_resolution"
-        )
+        matches!(kind, "self" | "this" | "constant" | "scope_resolution")
     }
 
     fn is_boolean_statement_wrapper_kind(&self, kind: &str) -> bool {
@@ -1103,17 +1156,11 @@ pub(crate) trait AstNormalizationAdapter: Sync {
     }
 
     fn is_infix_target_kind(&self, kind: &str) -> bool {
-        matches!(
-            kind,
-            "binary" | "binary_expression" | "comparison_operator"
-        )
+        matches!(kind, "binary" | "binary_expression" | "comparison_operator")
     }
 
     fn is_call_block_or_arg_kind(&self, kind: &str) -> bool {
-        matches!(
-            kind,
-            "block" | "do_block" | "argument_list" | "arguments"
-        )
+        matches!(kind, "block" | "do_block" | "argument_list" | "arguments")
     }
 
     fn is_member_read_kind(&self, kind: &str) -> bool {
@@ -1614,7 +1661,9 @@ pub(crate) mod tests {
 
         // Parse a dummy node to test node-accepting methods
         let mut parser = Parser::new();
-        parser.set_language(&tree_sitter_rust::LANGUAGE.into()).unwrap();
+        parser
+            .set_language(&tree_sitter_rust::LANGUAGE.into())
+            .unwrap();
         let tree = parser.parse("fn foo() { yield 1; }", None).unwrap();
         let root = tree.root_node();
         let fn_node = root.child(0).unwrap();
@@ -1627,76 +1676,145 @@ pub(crate) mod tests {
         assert!(!adapter.rescue_modifier_statement(fn_node, "fn foo() { yield 1; }"));
         assert!(!adapter.ensure_clause_statement(fn_node, "fn foo() { yield 1; }"));
         assert!(!adapter.ternary_statement(fn_node, "fn foo() { yield 1; }"));
-        assert!(adapter.ternary_parts(fn_node, "fn foo() { yield 1; }").is_none());
+        assert!(adapter
+            .ternary_parts(fn_node, "fn foo() { yield 1; }")
+            .is_none());
         assert!(!adapter.case_argument_list(fn_node, "fn foo() { yield 1; }"));
         assert!(!adapter.case_arm(fn_node, "fn foo() { yield 1; }"));
-        assert!(adapter.case_arm_body_nodes(fn_node, "fn foo() { yield 1; }").is_none());
-        assert!(adapter.case_arm_pattern_nodes(fn_node, "fn foo() { yield 1; }").is_none());
-        assert!(adapter.case_else_node(fn_node, "fn foo() { yield 1; }").is_none());
+        assert!(adapter
+            .case_arm_body_nodes(fn_node, "fn foo() { yield 1; }")
+            .is_none());
+        assert!(adapter
+            .case_arm_pattern_nodes(fn_node, "fn foo() { yield 1; }")
+            .is_none());
+        assert!(adapter
+            .case_else_node(fn_node, "fn foo() { yield 1; }")
+            .is_none());
         assert!(!adapter.case_else_node_kind(fn_node, "fn foo() { yield 1; }"));
         assert!(!adapter.case_else_arm(fn_node, "fn foo() { yield 1; }"));
         assert!(!adapter.leading_function_statement(fn_node, "fn foo() { yield 1; }"));
-        assert!(adapter.leading_function_target(fn_node, "fn foo() { yield 1; }").is_none());
+        assert!(adapter
+            .leading_function_target(fn_node, "fn foo() { yield 1; }")
+            .is_none());
         assert!(!adapter.leading_owner_statement(fn_node, "fn foo() { yield 1; }"));
-        assert!(adapter.leading_owner_target(fn_node, "fn foo() { yield 1; }").is_none());
+        assert!(adapter
+            .leading_owner_target(fn_node, "fn foo() { yield 1; }")
+            .is_none());
         assert!(!adapter.leading_if_statement(fn_node, "fn foo() { yield 1; }"));
-        assert!(adapter.leading_if_target(fn_node, "fn foo() { yield 1; }").is_none());
+        assert!(adapter
+            .leading_if_target(fn_node, "fn foo() { yield 1; }")
+            .is_none());
         assert!(!adapter.leading_case_statement(fn_node, "fn foo() { yield 1; }"));
-        assert!(adapter.leading_case_target(fn_node, "fn foo() { yield 1; }").is_none());
+        assert!(adapter
+            .leading_case_target(fn_node, "fn foo() { yield 1; }")
+            .is_none());
         assert!(!adapter.leading_loop_statement(fn_node, "fn foo() { yield 1; }"));
-        assert!(adapter.leading_loop_target(fn_node, "fn foo() { yield 1; }").is_none());
+        assert!(adapter
+            .leading_loop_target(fn_node, "fn foo() { yield 1; }")
+            .is_none());
         assert!(!adapter.rescue_body_statement(fn_node, "fn foo() { yield 1; }"));
-        assert!(adapter.rescue_body_target(fn_node, "fn foo() { yield 1; }").is_none());
-        assert!(adapter.rescue_body_nodes(fn_node, "fn foo() { yield 1; }").is_empty());
-        assert!(adapter.rescue_clauses(fn_node, "fn foo() { yield 1; }").is_empty());
-        assert!(adapter.rescue_clause_exceptions(fn_node, "fn foo() { yield 1; }").is_empty());
-        assert!(adapter.rescue_clause_exceptions_source(fn_node, "fn foo() { yield 1; }").is_none());
-        assert!(adapter.rescue_clause_exception_variable_name(fn_node).is_none());
-        assert!(adapter.rescue_clause_exception_variable_source(fn_node).is_none());
+        assert!(adapter
+            .rescue_body_target(fn_node, "fn foo() { yield 1; }")
+            .is_none());
+        assert!(adapter
+            .rescue_body_nodes(fn_node, "fn foo() { yield 1; }")
+            .is_empty());
+        assert!(adapter
+            .rescue_clauses(fn_node, "fn foo() { yield 1; }")
+            .is_empty());
+        assert!(adapter
+            .rescue_clause_exceptions(fn_node, "fn foo() { yield 1; }")
+            .is_empty());
+        assert!(adapter
+            .rescue_clause_exceptions_source(fn_node, "fn foo() { yield 1; }")
+            .is_none());
+        assert!(adapter
+            .rescue_clause_exception_variable_name(fn_node)
+            .is_none());
+        assert!(adapter
+            .rescue_clause_exception_variable_source(fn_node)
+            .is_none());
         assert!(adapter.rescue_clause_handler(fn_node).is_none());
         assert!(!adapter.ensure_body_statement(fn_node, "fn foo() { yield 1; }"));
-        assert!(adapter.ensure_body_target(fn_node, "fn foo() { yield 1; }").is_none());
-        assert!(adapter.ensure_body_nodes(fn_node, "fn foo() { yield 1; }").is_empty());
+        assert!(adapter
+            .ensure_body_target(fn_node, "fn foo() { yield 1; }")
+            .is_none());
+        assert!(adapter
+            .ensure_body_nodes(fn_node, "fn foo() { yield 1; }")
+            .is_empty());
         assert!(!adapter.ensure_clause_kind(fn_node));
-        assert!(adapter.ensure_clause(fn_node, "fn foo() { yield 1; }").is_none());
+        assert!(adapter
+            .ensure_clause(fn_node, "fn foo() { yield 1; }")
+            .is_none());
         assert!(adapter.ensure_clause_body(fn_node).is_none());
         assert!(!adapter.instance_variable(fn_node, "fn foo() { yield 1; }"));
         assert!(!adapter.global_variable(fn_node, "fn foo() { yield 1; }"));
         assert!(!adapter.literal_fragment_assignment_context(fn_node, "fn foo() { yield 1; }"));
-        assert!(adapter.array_literal_target(fn_node, "fn foo() { yield 1; }").is_none());
-        assert!(!adapter.array_literal_values(fn_node, "fn foo() { yield 1; }").is_empty());
+        assert!(adapter
+            .array_literal_target(fn_node, "fn foo() { yield 1; }")
+            .is_none());
+        assert!(!adapter
+            .array_literal_values(fn_node, "fn foo() { yield 1; }")
+            .is_empty());
         assert!(!adapter.element_reference_statement(fn_node, "fn foo() { yield 1; }"));
-        assert!(adapter.element_reference_target(fn_node, "fn foo() { yield 1; }").is_none());
-        assert!(adapter.element_reference_receiver(fn_node, "fn foo() { yield 1; }").is_some());
-        assert!(!adapter.element_reference_arguments(fn_node, "fn foo() { yield 1; }").is_empty());
-        assert!(adapter.statement_wrapped_call_target(fn_node, "fn foo() { yield 1; }").is_none());
+        assert!(adapter
+            .element_reference_target(fn_node, "fn foo() { yield 1; }")
+            .is_none());
+        assert!(adapter
+            .element_reference_receiver(fn_node, "fn foo() { yield 1; }")
+            .is_some());
+        assert!(!adapter
+            .element_reference_arguments(fn_node, "fn foo() { yield 1; }")
+            .is_empty());
+        assert!(adapter
+            .statement_wrapped_call_target(fn_node, "fn foo() { yield 1; }")
+            .is_none());
         assert!(!adapter.inline_def_wrapper_mid(""));
-        assert_eq!(adapter.inline_def_function_text_source(fn_node, "fn foo() { yield 1; }"), fn_node);
-        assert!(adapter.normalized_for_parts(fn_node, "fn foo() { yield 1; }").is_none());
-        assert!(adapter.normalized_with_parts(fn_node, "fn foo() { yield 1; }").is_none());
+        assert_eq!(
+            adapter.inline_def_function_text_source(fn_node, "fn foo() { yield 1; }"),
+            fn_node
+        );
+        assert!(adapter
+            .normalized_for_parts(fn_node, "fn foo() { yield 1; }")
+            .is_none());
+        assert!(adapter
+            .normalized_with_parts(fn_node, "fn foo() { yield 1; }")
+            .is_none());
         assert!(!adapter.bare_const_call_function(fn_node));
-        assert!(adapter.function_parameter_nodes(fn_node, "fn foo() { yield 1; }").is_none());
+        assert!(adapter
+            .function_parameter_nodes(fn_node, "fn foo() { yield 1; }")
+            .is_none());
         assert!(!adapter.heredoc_content_node(fn_node));
         assert!(!adapter.heredoc_call_for_body(fn_node, ""));
         assert!(adapter.descendant(fn_node, &["nonexistent"]).is_none());
 
         // Test MockAdapterForRescue / MockAdapterForEnsure / MockAdapterWithKeyword
         let rescue_adapter = MockAdapterForRescue;
-        assert!(rescue_adapter.rescue_body_nodes(fn_node, "fn foo() { yield 1; }").is_empty());
+        assert!(rescue_adapter
+            .rescue_body_nodes(fn_node, "fn foo() { yield 1; }")
+            .is_empty());
 
         let ensure_adapter = MockAdapterForEnsure;
-        assert!(!ensure_adapter.ensure_body_nodes(fn_node, "fn foo() { yield 1; }").is_empty());
-        assert!(ensure_adapter.ensure_clause(fn_node, "fn foo() { yield 1; }").is_some());
+        assert!(!ensure_adapter
+            .ensure_body_nodes(fn_node, "fn foo() { yield 1; }")
+            .is_empty());
+        assert!(ensure_adapter
+            .ensure_clause(fn_node, "fn foo() { yield 1; }")
+            .is_some());
 
         // JS loop tests
         let mut js_parser = Parser::new();
-        js_parser.set_language(&tree_sitter_javascript::LANGUAGE.into()).unwrap();
+        js_parser
+            .set_language(&tree_sitter_javascript::LANGUAGE.into())
+            .unwrap();
         let js_loop_tree = js_parser.parse("while(true){}", None).unwrap();
         let js_loop_stmt = js_loop_tree.root_node().child(0).unwrap(); // while_statement
         let _js_body_stmt = js_loop_stmt.child(2).unwrap(); // statement
 
         let mut ruby_parser = Parser::new();
-        ruby_parser.set_language(&tree_sitter_ruby::LANGUAGE.into()).unwrap();
+        ruby_parser
+            .set_language(&tree_sitter_ruby::LANGUAGE.into())
+            .unwrap();
         let ruby_tree_fn = ruby_parser.parse("def foo; x = 1; end", None).unwrap();
         let ruby_method = ruby_tree_fn.root_node().child(0).unwrap(); // method
         let ruby_body = (0..ruby_method.child_count())
@@ -1705,26 +1823,38 @@ pub(crate) mod tests {
             .unwrap_or(ruby_method);
 
         let kw_adapter = MockAdapterWithKeyword;
-        assert!(kw_adapter.leading_function_target(ruby_body, "def foo; x = 1; end").is_some());
+        assert!(kw_adapter
+            .leading_function_target(ruby_body, "def foo; x = 1; end")
+            .is_some());
 
-        let ruby_loop_tree = ruby_parser.parse("def bar; while true; end; end", None).unwrap();
+        let ruby_loop_tree = ruby_parser
+            .parse("def bar; while true; end; end", None)
+            .unwrap();
         let ruby_loop_method = ruby_loop_tree.root_node().child(0).unwrap();
         let ruby_loop_body = (0..ruby_loop_method.child_count())
             .map(|i| ruby_loop_method.child(i).unwrap())
             .find(|c| c.kind() == "body_statement")
             .unwrap_or(ruby_loop_method);
-        assert!(adapter.leading_loop_target(ruby_loop_body, "def bar; while true; end; end").is_some());
+        assert!(adapter
+            .leading_loop_target(ruby_loop_body, "def bar; while true; end; end")
+            .is_some());
 
         // concatenated_string
         let js_str_tree = js_parser.parse("\"foo\"", None).unwrap();
         let js_str_node = js_str_tree.root_node().child(0).unwrap().child(0).unwrap();
-        assert!(adapter.concatenated_string_statement(ruby_body, "def foo; x = 1; end", &[js_str_node, js_str_node]));
+        assert!(adapter.concatenated_string_statement(
+            ruby_body,
+            "def foo; x = 1; end",
+            &[js_str_node, js_str_node]
+        ));
 
         // literal_fragment_assignment_context root (no parent) and Ruby grandparent interpolation
         assert!(!adapter.literal_fragment_assignment_context(root, "fn foo() { yield 1; }"));
 
         let mut ruby_parser = Parser::new();
-        ruby_parser.set_language(&tree_sitter_ruby::LANGUAGE.into()).unwrap();
+        ruby_parser
+            .set_language(&tree_sitter_ruby::LANGUAGE.into())
+            .unwrap();
         let ruby_tree = ruby_parser.parse("\"hello #{name}\"", None).unwrap();
         let string_node = (0..ruby_tree.root_node().child_count())
             .map(|i| ruby_tree.root_node().child(i).unwrap())
@@ -1738,8 +1868,12 @@ pub(crate) mod tests {
 
         // Extra coverage cases for remaining missed lines in base.rs
         // class_like_owner_name and class_like_owner_body (lines 867-873, 875-881)
-        assert!(adapter.class_like_owner_name(fn_node, "fn foo() { yield 1; }").is_none());
-        assert!(adapter.class_like_owner_body(fn_node, "fn foo() { yield 1; }").is_none());
+        assert!(adapter
+            .class_like_owner_name(fn_node, "fn foo() { yield 1; }")
+            .is_none());
+        assert!(adapter
+            .class_like_owner_body(fn_node, "fn foo() { yield 1; }")
+            .is_none());
 
         // template string grandparent checks (line 948)
         let js_tpl_tree = js_parser.parse("`hello ${x}`", None).unwrap();
@@ -1748,15 +1882,22 @@ pub(crate) mod tests {
         assert!(!adapter.literal_fragment_assignment_context(js_frag_node, "`hello ${x}`"));
 
         // leading_loop_statement named children count (line 339) and leading_loop_target matching text (line 355)
-        let ruby_loop_tree2 = ruby_parser.parse("def bar;while true;x = 1;end end", None).unwrap();
+        let ruby_loop_tree2 = ruby_parser
+            .parse("def bar;while true;x = 1;end end", None)
+            .unwrap();
         let ruby_loop_method2 = ruby_loop_tree2.root_node().child(0).unwrap();
         let ruby_loop_body2 = (0..ruby_loop_method2.child_count())
             .map(|i| ruby_loop_method2.child(i).unwrap())
             .find(|c| c.kind() == "body_statement")
             .unwrap();
-        let loop_target = adapter.leading_loop_target(ruby_loop_body2, "def bar;while true;x = 1;end end").unwrap();
+        let loop_target = adapter
+            .leading_loop_target(ruby_loop_body2, "def bar;while true;x = 1;end end")
+            .unwrap();
         eprintln!("LOOP TARGET KIND: {}", loop_target.kind());
-        eprintln!("LOOP TARGET TEXT: {}", node_text(loop_target, "def bar;while true;x = 1;end end"));
+        eprintln!(
+            "LOOP TARGET TEXT: {}",
+            node_text(loop_target, "def bar;while true;x = 1;end end")
+        );
         for child in loop_target.children(&mut loop_target.walk()) {
             eprintln!("  CHILD: {}, named: {}", child.kind(), child.is_named());
         }
@@ -1774,27 +1915,37 @@ pub(crate) mod tests {
                 Some(node)
             }
         }
-        assert!(MockEnsureMissingClause.ensure_body_nodes(fn_node, "fn foo() { yield 1; }").is_empty());
+        assert!(MockEnsureMissingClause
+            .ensure_body_nodes(fn_node, "fn foo() { yield 1; }")
+            .is_empty());
 
         // array_literal_target bracketed case (line 513)
         let js_bracket_tree = js_parser.parse("[1, 2]", None).unwrap();
         let js_bracket_node = js_bracket_tree.root_node().child(0).unwrap(); // expression_statement
-        assert!(adapter.array_literal_target(js_bracket_node, "[1, 2]").is_some());
+        assert!(adapter
+            .array_literal_target(js_bracket_node, "[1, 2]")
+            .is_some());
 
         // array_literal_target semicolon stripped child case (line 534)
         let js_semi_tree = js_parser.parse("[1, 2];", None).unwrap();
         let js_semi_node = js_semi_tree.root_node().child(0).unwrap(); // expression_statement
-        assert!(adapter.array_literal_target(js_semi_node, "[1, 2];").is_some());
+        assert!(adapter
+            .array_literal_target(js_semi_node, "[1, 2];")
+            .is_some());
 
         // element_reference_target semicolon stripped child case (line 579)
         let js_ref_semi_tree = js_parser.parse("a[i];", None).unwrap();
         let js_ref_semi_node = js_ref_semi_tree.root_node().child(0).unwrap(); // expression_statement
-        assert!(adapter.element_reference_target(js_ref_semi_node, "a[i];").is_some());
+        assert!(adapter
+            .element_reference_target(js_ref_semi_node, "a[i];")
+            .is_some());
 
         // element_reference_target element_reference_shape fallback case (line 583)
         let js_ref_shape_tree = js_parser.parse("a[i]", None).unwrap();
         let js_ref_shape_node = js_ref_shape_tree.root_node().child(0).unwrap(); // expression_statement
-        assert!(adapter.element_reference_target(js_ref_shape_node, "a[i]").is_some());
+        assert!(adapter
+            .element_reference_target(js_ref_shape_node, "a[i]")
+            .is_some());
     }
 
     #[test]

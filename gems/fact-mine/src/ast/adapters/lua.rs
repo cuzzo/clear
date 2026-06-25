@@ -67,8 +67,10 @@ impl AstNormalizationAdapter for LuaAstAdapter {
             {
                 return NamedChildrenAction::Drop;
             }
-            if matches!(children[0].kind(), "dot_index_expression" | "table_index_expression")
-                && node_text(node, source) == node_text(children[0], source)
+            if matches!(
+                children[0].kind(),
+                "dot_index_expression" | "table_index_expression"
+            ) && node_text(node, source) == node_text(children[0], source)
             {
                 return NamedChildrenAction::Recurse(children[0]);
             }

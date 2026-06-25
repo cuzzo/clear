@@ -1,4 +1,9 @@
 PATH
+  remote: ../boobytrap
+  specs:
+    boobytrap (0.0.1)
+
+PATH
   remote: ../decomplex
   specs:
     decomplex (0.0.1)
@@ -22,6 +27,7 @@ PATH
   remote: .
   specs:
     nil-kill (0.1.0)
+      boobytrap (>= 0.0.1)
       decomplex (= 0.0.1)
       espalier (>= 0.0.1)
       parlour
@@ -98,6 +104,7 @@ PLATFORMS
   x86_64-linux-gnu
 
 DEPENDENCIES
+  boobytrap!
   decomplex!
   espalier!
   fact-mine!

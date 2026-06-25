@@ -7,8 +7,8 @@ use super::normalized_behavior::{
 };
 use super::CallSite;
 use super::StateDeclaration;
-use crate::ast::{Node, Span};
 use crate::ast::Child;
+use crate::ast::{Node, Span};
 
 const TYPESCRIPT_NIL_PREDICATES: &[&str] = &["isNull", "is_null"];
 const TYPESCRIPT_NON_NIL_PREDICATES: &[&str] = &["isSome", "is_some", "present"];
@@ -130,7 +130,10 @@ impl NormalizedLanguageBehavior for TypeScriptNormalizedBehavior {
         let has_modifier = node.children.iter().any(|c| match c {
             Child::Node(n) => {
                 let text = n.text.trim();
-                matches!(text, "public" | "private" | "protected" | "readonly" | "static")
+                matches!(
+                    text,
+                    "public" | "private" | "protected" | "readonly" | "static"
+                )
             }
             _ => false,
         });
@@ -139,10 +142,14 @@ impl NormalizedLanguageBehavior for TypeScriptNormalizedBehavior {
             if node.r#type != "ATTRASGN" && node.r#type != "IASGN" {
                 return None;
             }
-            let starts_with_this = node.children.first().and_then(|c| match c {
-                Child::Node(n) => Some(n.text.trim().starts_with("this.")),
-                _ => None,
-            }).unwrap_or(false);
+            let starts_with_this = node
+                .children
+                .first()
+                .and_then(|c| match c {
+                    Child::Node(n) => Some(n.text.trim().starts_with("this.")),
+                    _ => None,
+                })
+                .unwrap_or(false);
             if !has_modifier && !starts_with_this {
                 return None;
             }
@@ -153,10 +160,14 @@ impl NormalizedLanguageBehavior for TypeScriptNormalizedBehavior {
         }
 
         // Try structured children first: [name, type?, value?]
-        let mut child_nodes: Vec<&Node> = node.children.iter().filter_map(|c| match c {
-            Child::Node(n) => Some(n.as_ref()),
-            _ => None,
-        }).collect();
+        let mut child_nodes: Vec<&Node> = node
+            .children
+            .iter()
+            .filter_map(|c| match c {
+                Child::Node(n) => Some(n.as_ref()),
+                _ => None,
+            })
+            .collect();
 
         // Skip any leading modifiers
         while !child_nodes.is_empty() {
@@ -187,7 +198,11 @@ impl NormalizedLanguageBehavior for TypeScriptNormalizedBehavior {
                 if type_text.starts_with(':') {
                     type_text = type_text[1..].trim().to_string();
                 }
-                if !type_text.is_empty() && type_text != ":" && !type_text.starts_with('=') && !type_text.starts_with('(') {
+                if !type_text.is_empty()
+                    && type_text != ":"
+                    && !type_text.starts_with('=')
+                    && !type_text.starts_with('(')
+                {
                     return Some(StateDeclaration {
                         field: name.to_string(),
                         owner: String::new(),
@@ -228,8 +243,14 @@ impl NormalizedLanguageBehavior for TypeScriptNormalizedBehavior {
                 }
             }
             if is_simple_name(name) {
-                let type_text = rest.split('=').next().unwrap_or(rest).trim()
-                    .trim_end_matches(',').trim_end_matches(';').to_string();
+                let type_text = rest
+                    .split('=')
+                    .next()
+                    .unwrap_or(rest)
+                    .trim()
+                    .trim_end_matches(',')
+                    .trim_end_matches(';')
+                    .to_string();
                 if !type_text.is_empty() && type_text != ":" && !type_text.starts_with('(') {
                     return Some(StateDeclaration {
                         field: name.to_string(),
@@ -274,6 +295,11 @@ fn is_simple_name(name: &str) -> bool {
         && !name.contains('[')
         && !name.contains('<')
         && !name.contains('(')
-        && name.chars().next().map_or(false, |c| c == '_' || c.is_ascii_alphabetic())
-        && name.chars().all(|ch| ch == '_' || ch == '?' || ch == '!' || ch.is_ascii_alphanumeric())
+        && name
+            .chars()
+            .next()
+            .map_or(false, |c| c == '_' || c.is_ascii_alphabetic())
+        && name
+            .chars()
+            .all(|ch| ch == '_' || ch == '?' || ch == '!' || ch.is_ascii_alphanumeric())
 }
