@@ -13,7 +13,8 @@ options = {
   risk: nil,
   manifest: nil,
   exclude: [],
-  fact_mine: nil
+  fact_mine: nil,
+  vcs: nil
 }
 
 def report_link_base(output)
@@ -49,6 +50,10 @@ OptionParser.new do |opts|
 
   opts.on("--exclude PATTERN", "Exclude a path/glob from directory scans. May be repeated.") do |pattern|
     options[:exclude] << pattern
+  end
+
+  opts.on("--vcs VCS", "Only parse files tracked by VCS (e.g. git)") do |v|
+    options[:vcs] = v
   end
 
   opts.on("--fact-mine FILE", "Use previously mined fact file") do |f|
@@ -131,7 +136,7 @@ if options[:risk] && File.exist?(options[:risk])
 end
 
 # Extract Static Skeletons
-evidence = Espalier::StaticEvidence.build(targets, root: Dir.pwd)
+evidence = Espalier::StaticEvidence.build(targets, root: Dir.pwd, vcs: options[:vcs])
 
 # Group flat evidence into module structures expected by aggregator/analyzers
 modules = Espalier::StaticEvidence.project_modules(evidence)

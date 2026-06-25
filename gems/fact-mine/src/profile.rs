@@ -3464,11 +3464,6 @@ struct StateParamVisitor<'a> {
 
 impl<'a> StateParamVisitor<'a> {
     fn visit(&mut self, node: &crate::ast::Node) {
-        eprintln!(
-            "VISIT: type={}, text={}",
-            node.r#type,
-            node.text.replace('\n', " ")
-        );
         match node.r#type.as_str() {
             "LASGN" | "CASGN" => {
                 let mut pushed = false;
