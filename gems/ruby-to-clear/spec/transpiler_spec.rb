@@ -267,6 +267,12 @@ RSpec.describe RubyToClear::Transpiler do
       expected_clear = "MUTABLE nums = [];\nMUTABLE x = 1;\nnums.contains?(x);"
       expect_transpile(ruby_code, expected_clear)
     end
+
+    it "transpiles each" do
+      ruby_code = "nums = []; nums.each { |x| puts x }"
+      expected_clear = "MUTABLE nums = [];\nnums |> EACH { puts(_); };"
+      expect_transpile(ruby_code, expected_clear)
+    end
   end
 
   describe "unsupported nodes" do

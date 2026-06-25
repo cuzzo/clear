@@ -76,5 +76,17 @@ module RubyToClear
     register("include?") do |receiver, args, block_node, transpiler|
       "#{receiver}.contains?(#{args.join(', ')})"
     end
+
+    register("each") do |receiver, args, block_node, transpiler|
+      if block_node
+        param_name = block_node.parameters&.parameters&.requireds&.first&.name&.to_s
+        transpiler.with_renames({ param_name => "_" }) do
+          block_body = transpiler.visit(block_node.body)
+          "#{receiver} |> EACH { #{block_body} }"
+        end
+      else
+        receiver
+      end
+    end
   end
 end
