@@ -1,6 +1,7 @@
 # frozen_string_literal: true
 
 require "json"
+require_relative "type_profile"
 
 module Espalier
   # Normalizes Nil-Kill Espalier evidence across legacy Ruby ivar facts and the
@@ -11,7 +12,7 @@ module Espalier
     def self.load(path)
       return empty unless path && File.exist?(path)
 
-      new(JSON.parse(File.read(path)))
+      new(FactMine::Syntax::TypeExpr.wrap_types!(JSON.parse(File.read(path))))
     rescue StandardError
       empty
     end

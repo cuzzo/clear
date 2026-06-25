@@ -14,6 +14,10 @@ require "sorbet-runtime"
 require "boobytrap"
 require "boobytrap/coverage_providers"
 
+# Ensure espalier is on load path and require type_profile to load FactMine::Syntax::TypeExpr
+$LOAD_PATH.unshift(File.expand_path("../../espalier/lib", __dir__)) unless $LOAD_PATH.include?(File.expand_path("../../espalier/lib", __dir__))
+require "espalier/type_profile"
+
 module NilKill
   ROOT = File.expand_path("../../..", __dir__)
   TMP_DIR = File.expand_path(ENV.fetch("NIL_KILL_TMP_DIR", File.join(ROOT, "tmp", "nil-kill")), ROOT)

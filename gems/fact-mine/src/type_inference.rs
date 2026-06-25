@@ -30,6 +30,431 @@ use serde_json::{json, Value};
 use std::collections::{BTreeMap, BTreeSet};
 use crate::ast::{Node, Span, Child};
 
+use serde::{Serialize, Deserialize};
+
+#[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
+#[serde(tag = "kind", content = "data")]
+pub enum TypeExpr {
+    Untyped,
+    NilClass,
+    Primitive(String),
+    Nilable(Box<TypeExpr>),
+    Array(Box<TypeExpr>),
+    Hash {
+        key: Box<TypeExpr>,
+        value: Box<TypeExpr>,
+    },
+    Set(Box<TypeExpr>),
+    Union(Vec<TypeExpr>),
+}
+
+impl TypeExpr {
+    fn has_balanced_delimiters(s: &str, open: char, close: char) -> bool {
+        let mut depth = 0;
+        for c in s.chars() {
+            if c == open {
+                depth += 1;
+            } else if c == close {
+                depth -= 1;
+                if depth < 0 {
+                    return false;
+                }
+            }
+        }
+        depth == 0
+    }
+
+    pub fn parse(s: &str, language: &str) -> Self {
+        let s = s.trim();
+        if s.is_empty() {
+            return TypeExpr::Untyped;
+        }
+        match language {
+            "ruby" => Self::parse_ruby(s),
+            "python" => Self::parse_python(s),
+            "typescript" | "javascript" => Self::parse_typescript(s),
+            "go" => Self::parse_go(s),
+            _ => Self::parse_generic(s),
+        }
+    }
+
+    fn parse_ruby(s: &str) -> Self {
+        if s == "T.untyped" || s == "untyped" {
+            return TypeExpr::Untyped;
+        }
+        if s == "NilClass" || s == "nil" {
+            return TypeExpr::NilClass;
+        }
+        if s.starts_with("T.nilable(") && s.ends_with(')') {
+            let inner = &s["T.nilable(".len()..s.len() - 1];
+            if Self::has_balanced_delimiters(inner, '(', ')') {
+                return TypeExpr::Nilable(Box::new(Self::parse_ruby(inner)));
+            }
+        }
+        if (s.starts_with("T::Array[") || s.starts_with("Array[")) && s.ends_with(']') {
+            let prefix_len = if s.starts_with("T::") { "T::Array[".len() } else { "Array[".len() };
+            let inner = &s[prefix_len..s.len() - 1];
+            return TypeExpr::Array(Box::new(Self::parse_ruby(inner)));
+        }
+        if (s.starts_with("T::Hash[") || s.starts_with("Hash[")) && s.ends_with(']') {
+            let prefix_len = if s.starts_with("T::") { "T::Hash[".len() } else { "Hash[".len() };
+            let inner = &s[prefix_len..s.len() - 1];
+            let parts = split_top_level_params(inner);
+            if parts.len() == 2 {
+                return TypeExpr::Hash {
+                    key: Box::new(Self::parse_ruby(&parts[0])),
+                    value: Box::new(Self::parse_ruby(&parts[1])),
+                };
+            }
+        }
+        if (s.starts_with("T::Set[") || s.starts_with("Set[")) && s.ends_with(']') {
+            let prefix_len = if s.starts_with("T::") { "T::Set[".len() } else { "Set[".len() };
+            let inner = &s[prefix_len..s.len() - 1];
+            return TypeExpr::Set(Box::new(Self::parse_ruby(inner)));
+        }
+        if s.starts_with("T.any(") && s.ends_with(')') {
+            let inner = &s["T.any(".len()..s.len() - 1];
+            if Self::has_balanced_delimiters(inner, '(', ')') {
+                let parts = split_top_level_params(inner);
+                return TypeExpr::Union(parts.iter().map(|p| Self::parse_ruby(p)).collect());
+            }
+        }
+        TypeExpr::Primitive(s.to_string())
+    }
+
+    fn parse_python(s: &str) -> Self {
+        if s == "Any" || s == "any" {
+            return TypeExpr::Untyped;
+        }
+        if s == "None" {
+            return TypeExpr::NilClass;
+        }
+        if s.starts_with("Optional[") && s.ends_with(']') {
+            let inner = &s["Optional[".len()..s.len() - 1];
+            return TypeExpr::Nilable(Box::new(Self::parse_python(inner)));
+        }
+        if (s.starts_with("List[") || s.starts_with("list[")) && s.ends_with(']') {
+            let prefix_len = if s.starts_with('L') { "List[".len() } else { "list[".len() };
+            let inner = &s[prefix_len..s.len() - 1];
+            return TypeExpr::Array(Box::new(Self::parse_python(inner)));
+        }
+        if (s.starts_with("Dict[") || s.starts_with("dict[")) && s.ends_with(']') {
+            let prefix_len = if s.starts_with('D') { "Dict[".len() } else { "dict[".len() };
+            let inner = &s[prefix_len..s.len() - 1];
+            let parts = split_top_level_params(inner);
+            if parts.len() == 2 {
+                return TypeExpr::Hash {
+                    key: Box::new(Self::parse_python(&parts[0])),
+                    value: Box::new(Self::parse_python(&parts[1])),
+                };
+            }
+        }
+        if (s.starts_with("Set[") || s.starts_with("set[")) && s.ends_with(']') {
+            let prefix_len = if s.starts_with('S') { "Set[".len() } else { "set[".len() };
+            let inner = &s[prefix_len..s.len() - 1];
+            return TypeExpr::Set(Box::new(Self::parse_python(inner)));
+        }
+        if s.starts_with("Union[") && s.ends_with(']') {
+            let inner = &s["Union[".len()..s.len() - 1];
+            let parts = split_top_level_params(inner);
+            let mut has_none = false;
+            let mut non_none_parts = Vec::new();
+            for part in parts {
+                let parsed = Self::parse_python(&part);
+                if parsed == TypeExpr::NilClass {
+                    has_none = true;
+                } else {
+                    non_none_parts.push(parsed);
+                }
+            }
+            let base = if non_none_parts.is_empty() {
+                TypeExpr::Untyped
+            } else if non_none_parts.len() == 1 {
+                non_none_parts.into_iter().next().unwrap()
+            } else {
+                TypeExpr::Union(non_none_parts)
+            };
+            return if has_none {
+                TypeExpr::Nilable(Box::new(base))
+            } else {
+                base
+            };
+        }
+        if s.contains('|') {
+            let parts: Vec<&str> = s.split('|').map(|p| p.trim()).collect();
+            let mut has_none = false;
+            let mut non_none_parts = Vec::new();
+            for part in parts {
+                let parsed = Self::parse_python(part);
+                if parsed == TypeExpr::NilClass {
+                    has_none = true;
+                } else {
+                    non_none_parts.push(parsed);
+                }
+            }
+            let base = if non_none_parts.is_empty() {
+                TypeExpr::Untyped
+            } else if non_none_parts.len() == 1 {
+                non_none_parts.into_iter().next().unwrap()
+            } else {
+                TypeExpr::Union(non_none_parts)
+            };
+            return if has_none {
+                TypeExpr::Nilable(Box::new(base))
+            } else {
+                base
+            };
+        }
+        TypeExpr::Primitive(s.to_string())
+    }
+
+    fn parse_typescript(s: &str) -> Self {
+        if s == "any" || s == "unknown" {
+            return TypeExpr::Untyped;
+        }
+        if s == "null" || s == "undefined" {
+            return TypeExpr::NilClass;
+        }
+        if s.starts_with("Array<") && s.ends_with('>') {
+            let inner = &s["Array<".len()..s.len() - 1];
+            return TypeExpr::Array(Box::new(Self::parse_typescript(inner)));
+        }
+        if s.starts_with("Record<") && s.ends_with('>') {
+            let inner = &s["Record<".len()..s.len() - 1];
+            let parts = split_top_level_params(inner);
+            if parts.len() == 2 {
+                return TypeExpr::Hash {
+                    key: Box::new(Self::parse_typescript(&parts[0])),
+                    value: Box::new(Self::parse_typescript(&parts[1])),
+                };
+            }
+        }
+        if s.starts_with("Set<") && s.ends_with('>') {
+            let inner = &s["Set<".len()..s.len() - 1];
+            return TypeExpr::Set(Box::new(Self::parse_typescript(inner)));
+        }
+        if s.ends_with("[]") {
+            let inner = &s[..s.len() - 2];
+            return TypeExpr::Array(Box::new(Self::parse_typescript(inner)));
+        }
+        if s.contains('|') {
+            let parts: Vec<&str> = s.split('|').map(|p| p.trim()).collect();
+            let mut has_null = false;
+            let mut non_null_parts = Vec::new();
+            for part in parts {
+                let parsed = Self::parse_typescript(part);
+                if parsed == TypeExpr::NilClass {
+                    has_null = true;
+                } else {
+                    non_null_parts.push(parsed);
+                }
+            }
+            let base = if non_null_parts.is_empty() {
+                TypeExpr::Untyped
+            } else if non_null_parts.len() == 1 {
+                non_null_parts.into_iter().next().unwrap()
+            } else {
+                TypeExpr::Union(non_null_parts)
+            };
+            return if has_null {
+                TypeExpr::Nilable(Box::new(base))
+            } else {
+                base
+            };
+        }
+        TypeExpr::Primitive(s.to_string())
+    }
+
+    fn parse_go(s: &str) -> Self {
+        if s.starts_with('*') {
+            return TypeExpr::Nilable(Box::new(Self::parse_go(&s[1..])));
+        }
+        if s.starts_with("[]") {
+            return TypeExpr::Array(Box::new(Self::parse_go(&s[2..])));
+        }
+        if s.starts_with("map[") {
+            let mut depth = 0;
+            let mut close_idx = None;
+            for (i, c) in s.char_indices() {
+                if c == '[' {
+                    depth += 1;
+                } else if c == ']' {
+                    depth -= 1;
+                    if depth == 0 {
+                        close_idx = Some(i);
+                        break;
+                    }
+                }
+            }
+            if let Some(close) = close_idx {
+                let key = &s[4..close];
+                let value = &s[close + 1..];
+                return TypeExpr::Hash {
+                    key: Box::new(Self::parse_go(key)),
+                    value: Box::new(Self::parse_go(value)),
+                };
+            }
+        }
+        TypeExpr::Primitive(s.to_string())
+    }
+
+    fn parse_generic(s: &str) -> Self {
+        Self::parse_ruby(s)
+    }
+
+    pub fn to_sorbet_string(&self) -> String {
+        match self {
+            TypeExpr::Untyped => "T.untyped".to_string(),
+            TypeExpr::NilClass => "NilClass".to_string(),
+            TypeExpr::Primitive(s) => s.clone(),
+            TypeExpr::Nilable(inner) => format!("T.nilable({})", inner.to_sorbet_string()),
+            TypeExpr::Array(inner) => format!("T::Array[{}]", inner.to_sorbet_string()),
+            TypeExpr::Hash { key, value } => format!(
+                "T::Hash[{}, {}]",
+                key.to_sorbet_string(),
+                value.to_sorbet_string()
+            ),
+            TypeExpr::Set(inner) => format!("T::Set[{}]", inner.to_sorbet_string()),
+            TypeExpr::Union(elements) => {
+                let parts: Vec<String> = elements.iter().map(|e| e.to_sorbet_string()).collect();
+                format!("T.any({})", parts.join(", "))
+            }
+        }
+    }
+
+    pub fn is_non_nil(&self) -> bool {
+        match self {
+            TypeExpr::Untyped => false,
+            TypeExpr::NilClass => false,
+            TypeExpr::Nilable(_) => false,
+            TypeExpr::Union(parts) => parts.iter().all(|p| p.is_non_nil()),
+            _ => true,
+        }
+    }
+
+    pub fn is_useful(&self) -> bool {
+        !matches!(self, TypeExpr::Untyped)
+    }
+
+    pub fn is_weak(&self) -> bool {
+        match self {
+            TypeExpr::Untyped => true,
+            TypeExpr::Nilable(inner) => inner.is_weak(),
+            TypeExpr::Array(inner) => inner.is_weak(),
+            TypeExpr::Hash { key, value } => key.is_weak() || value.is_weak(),
+            TypeExpr::Set(inner) => inner.is_weak(),
+            TypeExpr::Union(parts) => parts.iter().any(|p| p.is_weak()),
+            _ => false,
+        }
+    }
+
+    pub fn strip_nilable(&self) -> Self {
+        match self {
+            TypeExpr::Nilable(inner) => *inner.clone(),
+            _ => self.clone(),
+        }
+    }
+
+    pub fn make_nilable(&self) -> Self {
+        match self {
+            TypeExpr::Untyped => TypeExpr::Untyped,
+            TypeExpr::NilClass => TypeExpr::NilClass,
+            TypeExpr::Nilable(_) => self.clone(),
+            _ => TypeExpr::Nilable(Box::new(self.clone())),
+        }
+    }
+
+    pub fn merge(types: &[TypeExpr]) -> TypeExpr {
+        let mut has_nil = false;
+        let mut others = BTreeSet::new();
+        for ty in types {
+            match ty {
+                TypeExpr::Untyped => {}
+                TypeExpr::NilClass => {
+                    has_nil = true;
+                }
+                TypeExpr::Nilable(inner) => {
+                    has_nil = true;
+                    others.insert(*inner.clone());
+                }
+                TypeExpr::Union(parts) => {
+                    for part in parts {
+                        if matches!(part, TypeExpr::NilClass) {
+                            has_nil = true;
+                        } else {
+                            others.insert(part.clone());
+                        }
+                    }
+                }
+                _ => {
+                    others.insert(ty.clone());
+                }
+            }
+        }
+        
+        let noreturn = TypeExpr::Primitive("T.noreturn".to_string());
+        if others.contains(&noreturn) {
+            if others.len() == 1 {
+                return if has_nil {
+                    TypeExpr::NilClass
+                } else {
+                    noreturn
+                };
+            }
+            others.remove(&noreturn);
+        }
+
+        if others.is_empty() && has_nil {
+            return TypeExpr::NilClass;
+        }
+        if others.is_empty() {
+            return TypeExpr::Untyped;
+        }
+
+        let base = if others.iter().all(|ty| {
+            if let TypeExpr::Primitive(s) = ty {
+                s == "TrueClass" || s == "FalseClass" || s == "T::Boolean"
+            } else {
+                false
+            }
+        }) {
+            TypeExpr::Primitive("T::Boolean".to_string())
+        } else if others.len() == 1 {
+            others.into_iter().next().unwrap()
+        } else {
+            TypeExpr::Untyped
+        };
+
+        if base == TypeExpr::Untyped {
+            return TypeExpr::Untyped;
+        }
+
+        if has_nil {
+            TypeExpr::Nilable(Box::new(base))
+        } else {
+            base
+        }
+    }
+}
+
+impl std::fmt::Display for TypeExpr {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{}", self.to_sorbet_string())
+    }
+}
+
+impl From<&str> for TypeExpr {
+    fn from(s: &str) -> Self {
+        TypeExpr::parse(s, "ruby")
+    }
+}
+
+impl From<String> for TypeExpr {
+    fn from(s: String) -> Self {
+        TypeExpr::parse(&s, "ruby")
+    }
+}
+
 #[derive(Clone, Debug, Eq, PartialEq)]
 enum LiteralStaticValue {
     String(String),
@@ -54,25 +479,20 @@ fn unquote(s: &str) -> String {
     }
 }
 
-fn is_non_nil_type(t: &str) -> bool {
-    !t.is_empty() && t != "T.untyped" && t != "NilClass" && !t.contains("T.nilable")
+fn is_non_nil_type(t: &TypeExpr) -> bool {
+    t.is_non_nil()
 }
 
-fn useful_type(t: &str) -> bool {
-    !t.is_empty() && t != "T.untyped"
+fn useful_type(t: &TypeExpr) -> bool {
+    t.is_useful()
 }
 
-fn weak_type(t: &str) -> bool {
-    t.contains("T.untyped") || t.contains("[T.untyped") || t.contains(", T.untyped")
+fn weak_type(t: &TypeExpr) -> bool {
+    t.is_weak()
 }
 
-fn strip_nilable_type(type_text: &str) -> String {
-    let text = type_text.trim();
-    if text.starts_with("T.nilable(") && text.ends_with(')') {
-        extract_call_args(text, "T.nilable").unwrap_or_else(|| text.to_string())
-    } else {
-        text.to_string()
-    }
+fn strip_nilable_type(t: &TypeExpr) -> TypeExpr {
+    t.strip_nilable()
 }
 
 fn extract_return_type(sig: &str) -> Option<String> {
@@ -99,53 +519,15 @@ fn extract_call_args(source: &str, name: &str) -> Option<String> {
     None
 }
 
-fn static_sorbet_type(types: &[String]) -> String {
-    let mut has_nil = false;
-    let mut others = BTreeSet::new();
-    for ty in types.iter().filter(|ty| !ty.is_empty()) {
-        if ty == "NilClass" {
-            has_nil = true;
-        } else if ty.starts_with("T.nilable(") && ty.ends_with(')') {
-            has_nil = true;
-            others.insert(strip_nilable_type(ty));
-        } else {
-            others.insert(normalize_static_sorbet_type(ty));
+fn static_sorbet_type(types: &[String], language: &str) -> TypeExpr {
+    let mut parsed_types = Vec::new();
+    for ty in types {
+        if !ty.is_empty() {
+            let normalized = normalize_static_sorbet_type(ty);
+            parsed_types.push(TypeExpr::parse(&normalized, language));
         }
     }
-    if others.contains("T.noreturn") {
-        if others.len() == 1 {
-            return if has_nil {
-                "NilClass".to_string()
-            } else {
-                "T.noreturn".to_string()
-            };
-        }
-        others.remove("T.noreturn");
-    }
-    if others.is_empty() && has_nil {
-        return "NilClass".to_string();
-    }
-    if others.is_empty() {
-        return "T.untyped".to_string();
-    }
-    let base = if others
-        .iter()
-        .all(|ty| matches!(ty.as_str(), "TrueClass" | "FalseClass" | "T::Boolean"))
-    {
-        "T::Boolean".to_string()
-    } else if others.len() == 1 {
-        others.into_iter().next().unwrap()
-    } else {
-        "T.untyped".to_string()
-    };
-    if base == "T.untyped" {
-        return base;
-    }
-    if has_nil {
-        format!("T.nilable({base})")
-    } else {
-        base
-    }
+    TypeExpr::merge(&parsed_types)
 }
 
 fn normalize_static_sorbet_type(type_text: &str) -> String {
@@ -300,7 +682,7 @@ pub(crate) fn collect_prepass_facts(
     node: &crate::ast::Node,
     language: Language,
     current_owners: &mut Vec<String>,
-    ivar_tlet_types: &mut BTreeMap<(String, String), String>,
+    ivar_tlet_types: &mut BTreeMap<(String, String), TypeExpr>,
 ) {
     match node.r#type.as_str() {
         "LASGN" | "CASGN" => {
@@ -341,9 +723,12 @@ pub(crate) fn collect_prepass_facts(
                                 let type_text = type_node.text.trim().to_string();
                                 if !type_text.is_empty() && type_text != "T.untyped" {
                                     if let Some(class_name) = current_owners.last() {
-                                        println!("IASGN inserting {:?} for {:?}", type_text, (class_name.clone(), ivar_name.clone()));
-                                        ivar_tlet_types
-                                            .insert((class_name.clone(), ivar_name), type_text);
+                                        let ty_expr = TypeExpr::parse(&type_text, language.as_str());
+                                        if ty_expr.is_useful() {
+                                            println!("IASGN inserting {:?} for {:?}", ty_expr, (class_name.clone(), ivar_name.clone()));
+                                            ivar_tlet_types
+                                                .insert((class_name.clone(), ivar_name), ty_expr);
+                                        }
                                     }
                                 }
                             }
@@ -374,10 +759,10 @@ pub(crate) struct TypeInferenceVisitor<'a> {
     pub(crate) current_method_line: usize,
     pub(crate) current_method_end_line: usize,
     pub(crate) current_params: Vec<String>,
-    pub(crate) param_types: BTreeMap<String, String>,
-    pub(crate) local_types: BTreeMap<String, String>,
+    pub(crate) param_types: BTreeMap<String, TypeExpr>,
+    pub(crate) local_types: BTreeMap<String, TypeExpr>,
     pub(crate) in_conditional: bool,
-    pub(crate) ivar_tlet_types: BTreeMap<(String, String), String>,
+    pub(crate) ivar_tlet_types: BTreeMap<(String, String), TypeExpr>,
     pub(crate) signatures: BTreeMap<String, String>,
     pub(crate) tlet_sites: &'a mut Vec<serde_json::Value>,
     pub(crate) dead_nil_checks: &'a mut Vec<serde_json::Value>,
@@ -411,7 +796,7 @@ pub(crate) struct TypeInferenceVisitor<'a> {
     pub(crate) method_param_array_shapes: BTreeMap<(String, String, String), serde_json::Value>,
     pub(crate) method_return_hash_shapes: BTreeMap<(String, String), serde_json::Value>,
     pub(crate) method_return_array_shapes: BTreeMap<(String, String), serde_json::Value>,
-    pub(crate) inferred_return_types: BTreeMap<(String, String), String>,
+    pub(crate) inferred_return_types: BTreeMap<(String, String), TypeExpr>,
     pub(crate) unconditional_vars: BTreeSet<String>,
 }
 
@@ -462,6 +847,9 @@ const CORE_CLASS_CONSTANTS: &[&str] = &[
 ];
 
 impl<'a> TypeInferenceVisitor<'a> {
+    fn parse_type(&self, s: &str) -> TypeExpr {
+        TypeExpr::parse(s, self.document.language.as_str())
+    }
     
 
     
@@ -549,8 +937,9 @@ impl<'a> TypeInferenceVisitor<'a> {
                             .or_else(|| self.document.method_param_types.get(&func_name));
                         if let Some(types) = types_opt {
                             for (pname, ptype) in types {
-                                if useful_type(ptype) {
-                                    self.param_types.insert(pname.clone(), ptype.clone());
+                                let ty_expr = self.parse_type(ptype);
+                                if ty_expr.is_useful() {
+                                    self.param_types.insert(pname.clone(), ty_expr);
                                 }
                             }
                         }
@@ -637,8 +1026,8 @@ impl<'a> TypeInferenceVisitor<'a> {
                             })
                             .collect::<Vec<_>>();
 
-                        let mut candidate = static_sorbet_type(&source_types);
-                        if candidate == "NilClass"
+                        let mut candidate = static_sorbet_type(&source_types, self.document.language.as_str());
+                        if candidate == TypeExpr::NilClass
                             && sources.iter().any(|s| {
                                 matches!(
                                     s.get("kind").and_then(Value::as_str),
@@ -646,7 +1035,7 @@ impl<'a> TypeInferenceVisitor<'a> {
                                 )
                             })
                         {
-                            candidate = "T.untyped".to_string();
+                            candidate = TypeExpr::Untyped;
                         }
                         let useful = useful_type(&candidate);
                         let has_untyped_call = sources
@@ -711,7 +1100,7 @@ impl<'a> TypeInferenceVisitor<'a> {
                                 "implicit": explicit.is_empty(),
                                 "return_syntax": return_syntax(explicit.is_empty(), implicit_present),
                                 "control_shape": return_control_shape(&explicit, implicit_expr, implicit_present),
-                                "candidate_type": if useful { &candidate } else { "T.untyped" },
+                                "candidate_type": if useful { &candidate } else { &TypeExpr::Untyped },
                                 "confidence": confidence,
                                 "sources": sources,
                                 "blockers": blockers.into_iter().collect::<Vec<_>>(),
@@ -819,20 +1208,8 @@ impl<'a> TypeInferenceVisitor<'a> {
                         
                         let merged = match (t_val, e_val) {
                             (Some(t), Some(e)) => merge_types(t, e),
-                            (Some(t), None) => {
-                                if t.starts_with("T.nilable(") {
-                                    t.clone()
-                                } else {
-                                    format!("T.nilable({})", t)
-                                }
-                            }
-                            (None, Some(e)) => {
-                                if e.starts_with("T.nilable(") {
-                                    e.clone()
-                                } else {
-                                    format!("T.nilable({})", e)
-                                }
-                            }
+                            (Some(t), None) => t.make_nilable(),
+                            (None, Some(e)) => e.make_nilable(),
                             _ => unreachable!(),
                         };
                         merged_local_types.insert(key.clone(), merged);
@@ -1039,18 +1416,18 @@ impl<'a> TypeInferenceVisitor<'a> {
                                 if let Some(existing_type) = existing_type {
                                     if let Some(info) = collection_type_info(&existing_type) {
                                         if info.kind == "array" || info.kind == "set" {
-                                            let arg_type = self.expression_type(arg).unwrap_or_else(|| self.behavior.untyped_type());
+                                            let arg_type = self.expression_type(arg).unwrap_or(TypeExpr::Untyped);
                                             let new_elem_type = if method == "concat" {
-                                                collection_type_info(&arg_type).and_then(|i| i.element).unwrap_or_else(|| self.behavior.untyped_type())
+                                                collection_type_info(&arg_type).and_then(|i| i.element).unwrap_or(TypeExpr::Untyped)
                                             } else {
                                                 arg_type
                                             };
-                                            let existing_elem = info.element.unwrap_or_else(|| self.behavior.untyped_type());
+                                            let existing_elem = info.element.unwrap_or(TypeExpr::Untyped);
                                             let merged_elem = merge_types(&existing_elem, &new_elem_type);
-                                            let updated_type = if existing_type.starts_with("T::Set") || existing_type.starts_with("Set") {
-                                                self.behavior.format_set_type(&merged_elem)
+                                            let updated_type = if matches!(existing_type, TypeExpr::Set(_)) || existing_type.to_sorbet_string().starts_with("T::Set") || existing_type.to_sorbet_string().starts_with("Set") {
+                                                TypeExpr::Set(Box::new(merged_elem))
                                             } else {
-                                                self.behavior.format_array_type(&merged_elem)
+                                                TypeExpr::Array(Box::new(merged_elem))
                                             };
                                             if self.param_types.contains_key(&name) {
                                                 self.param_types.insert(name.clone(), updated_type);
@@ -1071,13 +1448,16 @@ impl<'a> TypeInferenceVisitor<'a> {
                                 if let Some(existing_type) = existing_type {
                                     if let Some(info) = collection_type_info(&existing_type) {
                                         if info.kind == "hash" {
-                                            let key_type = self.expression_type(key_arg).unwrap_or_else(|| self.behavior.untyped_type());
-                                            let val_type = self.expression_type(val_arg).unwrap_or_else(|| self.behavior.untyped_type());
-                                            let existing_key = info.element.unwrap_or_else(|| self.behavior.untyped_type());
-                                            let existing_val = info.value.unwrap_or_else(|| self.behavior.untyped_type());
+                                            let key_type = self.expression_type(key_arg).unwrap_or(TypeExpr::Untyped);
+                                            let val_type = self.expression_type(val_arg).unwrap_or(TypeExpr::Untyped);
+                                            let existing_key = info.element.unwrap_or(TypeExpr::Untyped);
+                                            let existing_val = info.value.unwrap_or(TypeExpr::Untyped);
                                             let merged_key = merge_types(&existing_key, &key_type);
                                             let merged_val = merge_types(&existing_val, &val_type);
-                                            let updated_type = self.behavior.format_hash_type(&merged_key, &merged_val);
+                                            let updated_type = TypeExpr::Hash {
+                                                key: Box::new(merged_key),
+                                                value: Box::new(merged_val),
+                                            };
                                             if self.param_types.contains_key(&name) {
                                                 self.param_types.insert(name.clone(), updated_type);
                                             } else {
@@ -1089,22 +1469,25 @@ impl<'a> TypeInferenceVisitor<'a> {
                             }
                         } else if method == "merge!" || method == "update" {
                             if let Some(arg) = args.first() {
-                                let arg_type = self.expression_type(arg).unwrap_or_else(|| self.behavior.untyped_type());
+                                let arg_type = self.expression_type(arg).unwrap_or(TypeExpr::Untyped);
                                 if let Some(arg_info) = collection_type_info(&arg_type) {
                                     if arg_info.kind == "hash" {
-                                        let arg_key = arg_info.element.unwrap_or_else(|| self.behavior.untyped_type());
-                                        let arg_val = arg_info.value.unwrap_or_else(|| self.behavior.untyped_type());
+                                        let arg_key = arg_info.element.unwrap_or(TypeExpr::Untyped);
+                                        let arg_val = arg_info.value.unwrap_or(TypeExpr::Untyped);
                                         let existing_type = self.local_types.get(&name)
                                             .or_else(|| self.param_types.get(&name))
                                             .cloned();
                                         if let Some(existing_type) = existing_type {
                                             if let Some(info) = collection_type_info(&existing_type) {
                                                 if info.kind == "hash" {
-                                                    let existing_key = info.element.unwrap_or_else(|| self.behavior.untyped_type());
-                                                    let existing_val = info.value.unwrap_or_else(|| self.behavior.untyped_type());
+                                                    let existing_key = info.element.unwrap_or(TypeExpr::Untyped);
+                                                    let existing_val = info.value.unwrap_or(TypeExpr::Untyped);
                                                     let merged_key = merge_types(&existing_key, &arg_key);
                                                     let merged_val = merge_types(&existing_val, &arg_val);
-                                                    let updated_type = self.behavior.format_hash_type(&merged_key, &merged_val);
+                                                    let updated_type = TypeExpr::Hash {
+                                                        key: Box::new(merged_key),
+                                                        value: Box::new(merged_val),
+                                                    };
                                                     if self.param_types.contains_key(&name) {
                                                         self.param_types.insert(name.clone(), updated_type);
                                                     } else {
@@ -1140,7 +1523,7 @@ impl<'a> TypeInferenceVisitor<'a> {
                                 if method == "let" && receiver.text == "T" {
                                     let arg_nodes = call_arguments(args_node);
                                     if let Some(type_node) = arg_nodes.get(1) {
-                                        resolved_type = Some(type_node.text.trim().to_string());
+                                        resolved_type = Some(TypeExpr::parse(&type_node.text.trim(), self.document.language.as_str()));
                                     }
                                 }
                             }
@@ -1151,11 +1534,7 @@ impl<'a> TypeInferenceVisitor<'a> {
                                 if useful_type(&ty) {
                                     let is_conditional = self.in_conditional && !self.unconditional_vars.contains(&var_name);
                                     let ty = if is_conditional {
-                                        if ty.starts_with("T.nilable(") {
-                                            ty
-                                        } else {
-                                            format!("T.nilable({})", ty)
-                                        }
+                                        ty.make_nilable()
                                     } else {
                                         ty
                                     };
@@ -1382,7 +1761,7 @@ impl<'a> TypeInferenceVisitor<'a> {
         }
         let (origin_kind, origin_name) = self.predicate_origin(receiver);
         let receiver_type = self.deterministic_guard_subject_type(receiver)?;
-        if receiver_type != "NilClass" && !receiver_type.starts_with("T.nilable(") {
+        if receiver_type != TypeExpr::NilClass && !matches!(receiver_type, TypeExpr::Nilable(_)) {
             return Some(self.deterministic_guard_result(
                 false,
                 "nil_check",
@@ -1394,7 +1773,7 @@ impl<'a> TypeInferenceVisitor<'a> {
                 origin_name,
             ));
         }
-        if receiver_type == "NilClass" {
+        if receiver_type == TypeExpr::NilClass {
             return Some(self.deterministic_guard_result(
                 true,
                 "nil_check",
@@ -1441,20 +1820,15 @@ impl<'a> TypeInferenceVisitor<'a> {
 
     fn class_guard_truth(
         &self,
-        receiver_type: &str,
+        receiver_type: &TypeExpr,
         class_name: &str,
         exact: bool,
     ) -> Option<bool> {
-        let raw = receiver_type.trim();
-        if raw.is_empty()
-            || raw == "T.untyped"
-            || raw.contains("T.any(")
-            || raw.starts_with("T.nilable(")
-        {
+        if matches!(receiver_type, TypeExpr::Untyped | TypeExpr::Union(_) | TypeExpr::Nilable(_)) {
             return None;
         }
-        let normalized = strip_nilable_type(raw);
-        let bare = self.bare_class_name(&normalized);
+        let normalized = strip_nilable_type(receiver_type);
+        let bare = self.bare_class_name(&normalized.to_sorbet_string());
         let wanted = self.bare_class_name(class_name);
         if exact && self.known_disjoint_guard_classes(&bare, &wanted) {
             return Some(false);
@@ -1540,7 +1914,7 @@ impl<'a> TypeInferenceVisitor<'a> {
         ))
     }
 
-    fn deterministic_guard_subject_type(&self, node: &crate::ast::Node) -> Option<String> {
+    fn deterministic_guard_subject_type(&self, node: &crate::ast::Node) -> Option<TypeExpr> {
         match node.r#type.as_str() {
             "LVAR" | "DVAR" => {
                 let name = node_symbol(node)?;
@@ -1675,7 +2049,7 @@ impl<'a> TypeInferenceVisitor<'a> {
         receiver: &crate::ast::Node,
         index: &crate::ast::Node,
         extra_hash_shapes: &std::collections::BTreeMap<String, serde_json::Value>,
-    ) -> Option<String> {
+    ) -> Option<TypeExpr> {
         let shape = match receiver.r#type.as_str() {
             "LVAR" | "DVAR" => {
                 let name = node_symbol(receiver)?;
@@ -1697,15 +2071,20 @@ impl<'a> TypeInferenceVisitor<'a> {
             .and_then(|keys| keys.get(&key))
             .and_then(Value::as_array)?
             .iter()
-            .filter_map(Value::as_str)
-            .map(ToString::to_string)
+            .filter_map(|v| {
+                if let Some(s) = v.as_str() {
+                    Some(TypeExpr::parse(s, "ruby"))
+                } else {
+                    serde_json::from_value::<TypeExpr>(v.clone()).ok()
+                }
+            })
             .collect::<Vec<_>>();
         if types.is_empty() {
             return None;
         }
-        let value = static_sorbet_type(&types);
-        if useful_type(&value) {
-            Some(self.behavior.format_nilable_type(&value))
+        let value = TypeExpr::merge(&types);
+        if value.is_useful() {
+            Some(value.make_nilable())
         } else {
             None
         }
@@ -1741,10 +2120,10 @@ impl<'a> TypeInferenceVisitor<'a> {
                         if let Some(key) = hash_key_name(key_node) {
                             let ty = self
                                 .expression_type(value_node)
-                                .unwrap_or_else(|| "T.untyped".to_string());
-                            let typed_value = useful_type(&ty) || ty == "NilClass";
+                                .unwrap_or(TypeExpr::Untyped);
+                            let typed_value = useful_type(&ty) || ty == TypeExpr::NilClass;
                             let shape_type = if typed_value {
-                                ty.clone()
+                                ty.to_sorbet_string()
                             } else {
                                 "T.untyped".to_string()
                             };
@@ -1977,7 +2356,7 @@ impl<'a> TypeInferenceVisitor<'a> {
         }
     }
 
-    fn ivar_expression_type(&self, name: &str) -> Option<String> {
+    fn ivar_expression_type(&self, name: &str) -> Option<TypeExpr> {
         let current_class = self.current_owners.last()?;
         let mut class_chain = current_class.split("::").collect::<Vec<_>>();
         while !class_chain.is_empty() {
@@ -1998,28 +2377,28 @@ impl<'a> TypeInferenceVisitor<'a> {
         &self,
         receiver: &crate::ast::Node,
         index: &crate::ast::Node,
-    ) -> Option<String> {
+    ) -> Option<TypeExpr> {
         self.hash_shape_index_type_readonly_with_shapes(receiver, index, &std::collections::BTreeMap::new())
     }
 
-    fn expression_type(&self, node: &crate::ast::Node) -> Option<String> {
+    fn expression_type(&self, node: &crate::ast::Node) -> Option<TypeExpr> {
         self.expression_type_with_locals(node, &std::collections::BTreeMap::new())
     }
 
     fn expression_type_with_locals(
         &self,
         node: &crate::ast::Node,
-        extra_locals: &std::collections::BTreeMap<String, String>,
-    ) -> Option<String> {
+        extra_locals: &std::collections::BTreeMap<String, TypeExpr>,
+    ) -> Option<TypeExpr> {
         self.expression_type_with_locals_and_shapes(node, extra_locals, &std::collections::BTreeMap::new())
     }
 
     fn expression_type_with_locals_and_shapes(
         &self,
         node: &crate::ast::Node,
-        extra_locals: &std::collections::BTreeMap<String, String>,
+        extra_locals: &std::collections::BTreeMap<String, TypeExpr>,
         extra_hash_shapes: &std::collections::BTreeMap<String, serde_json::Value>,
-    ) -> Option<String> {
+    ) -> Option<TypeExpr> {
         match node.r#type.as_str() {
             "LVAR" | "DVAR" => {
                 let name = node_symbol(node)?;
@@ -2030,9 +2409,9 @@ impl<'a> TypeInferenceVisitor<'a> {
                     .cloned()
                     .or_else(|| {
                         if self.local_hash_shapes.contains_key(&name) {
-                            Some(self.behavior.untyped_hash_type())
+                            Some(TypeExpr::parse(&self.behavior.untyped_hash_type(), self.document.language.as_str()))
                         } else if self.local_array_shapes.contains_key(&name) {
-                            Some(self.behavior.untyped_array_type())
+                            Some(TypeExpr::parse(&self.behavior.untyped_array_type(), self.document.language.as_str()))
                         } else {
                             None
                         }
@@ -2047,12 +2426,12 @@ impl<'a> TypeInferenceVisitor<'a> {
                 let right = child_node(node, 1).and_then(|c| self.expression_type_with_locals_and_shapes(c, extra_locals, extra_hash_shapes));
                 let mut non_nil = Vec::new();
                 if let Some(ref l) = left {
-                    if l != "NilClass" {
+                    if *l != TypeExpr::NilClass {
                         non_nil.push(l.clone());
                     }
                 }
                 if let Some(ref r) = right {
-                    if r != "NilClass" {
+                    if *r != TypeExpr::NilClass {
                         non_nil.push(r.clone());
                     }
                 }
@@ -2075,24 +2454,24 @@ impl<'a> TypeInferenceVisitor<'a> {
         }
     }
 
-    fn static_expression_type(&self, node: &crate::ast::Node) -> Option<String> {
+    fn static_expression_type(&self, node: &crate::ast::Node) -> Option<TypeExpr> {
         self.static_expression_type_with_locals(node, &std::collections::BTreeMap::new())
     }
 
     fn static_expression_type_with_locals(
         &self,
         node: &crate::ast::Node,
-        extra_locals: &std::collections::BTreeMap<String, String>,
-    ) -> Option<String> {
+        extra_locals: &std::collections::BTreeMap<String, TypeExpr>,
+    ) -> Option<TypeExpr> {
         self.static_expression_type_with_locals_and_shapes(node, extra_locals, &std::collections::BTreeMap::new())
     }
 
     fn static_expression_type_with_locals_and_shapes(
         &self,
         node: &crate::ast::Node,
-        extra_locals: &std::collections::BTreeMap<String, String>,
+        extra_locals: &std::collections::BTreeMap<String, TypeExpr>,
         extra_hash_shapes: &std::collections::BTreeMap<String, serde_json::Value>,
-    ) -> Option<String> {
+    ) -> Option<TypeExpr> {
         let is_iter = node.r#type == "ITER";
         let call_node = if is_iter {
             child_node(node, 0).unwrap_or(node)
@@ -2177,12 +2556,10 @@ impl<'a> TypeInferenceVisitor<'a> {
                         if let Some(block_return_type) = self.expression_type_with_locals_and_shapes(body_expr, &next_locals, &next_hash_shapes) {
                             println!("DEBUG static_expression_type ITER map/collect block_return_type={:?}", block_return_type);
                             if callee == "filter_map" {
-                                let inner = block_return_type
-                                    .trim_start_matches("T.nilable(")
-                                    .trim_end_matches(')');
-                                return Some(self.behavior.format_array_type(inner));
+                                let inner = block_return_type.strip_nilable();
+                                return Some(TypeExpr::parse(&self.behavior.format_array_type(&inner.to_sorbet_string()), self.document.language.as_str()));
                             } else {
-                                return Some(self.behavior.format_array_type(&block_return_type));
+                                return Some(TypeExpr::parse(&self.behavior.format_array_type(&block_return_type.to_sorbet_string()), self.document.language.as_str()));
                             }
                         }
                     }
@@ -2207,31 +2584,30 @@ impl<'a> TypeInferenceVisitor<'a> {
                 }
             }
             let class_name = if call_node.r#type == "CALL" || call_node.r#type == "QCALL" || call_node.r#type == "OPCALL" {
-                receiver_type.clone().unwrap_or_default()
+                receiver_type.as_ref().map(|t| t.strip_nilable().to_sorbet_string()).unwrap_or_default()
             } else {
                 self.current_owners.last().cloned().unwrap_or_default()
             };
-            let class_name = class_name.replace("T.nilable(", "").replace(")", "");
             let key = (class_name, callee.clone());
             if let Some(ty) = self.inferred_return_types.get(&key) {
                 return Some(ty.clone());
             }
 
-            if let Some(ty) = self.behavior.static_call_return_type(node, &callee, receiver_type.as_deref()) {
-                return Some(ty);
+            if let Some(ty) = self.behavior.static_call_return_type(node, &callee, receiver_type.as_ref().map(|t| t.to_sorbet_string()).as_deref()) {
+                return Some(TypeExpr::parse(&ty, self.document.language.as_str()));
             }
-            if let Some(ty) = self.behavior.static_return_type(&callee, receiver_type.as_deref()) {
-                return Some(ty);
+            if let Some(ty) = self.behavior.static_return_type(&callee, receiver_type.as_ref().map(|t| t.to_sorbet_string()).as_deref()) {
+                return Some(TypeExpr::parse(&ty, self.document.language.as_str()));
             }
-            if let Some(ty) = self.behavior.propagated_collection_return_type(&callee, receiver_type.as_deref()) {
-                return Some(ty);
+            if let Some(ty) = self.behavior.propagated_collection_return_type(&callee, receiver_type.as_ref().map(|t| t.to_sorbet_string()).as_deref()) {
+                return Some(TypeExpr::parse(&ty, self.document.language.as_str()));
             }
         }
         self.constant_expression_type(node)
             .or_else(|| self.literal_type(node))
     }
 
-    fn constant_expression_type(&self, node: &crate::ast::Node) -> Option<String> {
+    fn constant_expression_type(&self, node: &crate::ast::Node) -> Option<TypeExpr> {
         if node.r#type == "CONST" || node.r#type == "COLON2" || node.r#type == "COLON3" {
             let name = node.text.trim().to_string();
             if !name.is_empty() {
@@ -2239,19 +2615,19 @@ impl<'a> TypeInferenceVisitor<'a> {
                 if CORE_CLASS_CONSTANTS.contains(&bare.as_str())
                     || self.document.type_aliases.contains_key(&bare)
                 {
-                    return Some(format!("T.class_of({name})"));
+                    return Some(TypeExpr::parse(&format!("T.class_of({name})"), "ruby"));
                 }
             }
         }
         None
     }
 
-    fn literal_array_element_type(&self, node: &crate::ast::Node) -> Option<String> {
-        let mut merged: Option<String> = None;
+    fn literal_array_element_type(&self, node: &crate::ast::Node) -> Option<TypeExpr> {
+        let mut merged: Option<TypeExpr> = None;
         for child in child_nodes(node) {
-            let child_ty = self.expression_type(child).unwrap_or_else(|| self.behavior.untyped_type());
+            let child_ty = self.expression_type(child).unwrap_or(TypeExpr::Untyped);
             if let Some(ref m) = merged {
-                merged = Some(merge_types(m, &child_ty));
+                merged = Some(TypeExpr::merge(&[m.clone(), child_ty]));
             } else {
                 merged = Some(child_ty);
             }
@@ -2259,36 +2635,36 @@ impl<'a> TypeInferenceVisitor<'a> {
         merged
     }
 
-    fn literal_hash_element_types(&self, node: &crate::ast::Node) -> (Option<String>, Option<String>) {
+    fn literal_hash_element_types(&self, node: &crate::ast::Node) -> (Option<TypeExpr>, Option<TypeExpr>) {
         let children = child_nodes(node);
-        let mut key_merged: Option<String> = None;
-        let mut val_merged: Option<String> = None;
+        let mut key_merged: Option<TypeExpr> = None;
+        let mut val_merged: Option<TypeExpr> = None;
         let has_pair_nodes = children.first().map(|c| c.r#type == "pair" || c.r#type == "PAIR" || c.r#type == "HASH").unwrap_or(false);
         if has_pair_nodes {
             for pair in children {
                 if pair.r#type == "pair" || pair.r#type == "PAIR" || pair.r#type == "HASH" {
                     let Some(key_node) = child_node(pair, 0) else { continue; };
                     let Some(value_node) = child_node(pair, 1) else { continue; };
-                    let mut key_ty = self.expression_type(key_node).unwrap_or_else(|| self.behavior.untyped_type());
-                    if key_ty == self.behavior.untyped_type() {
+                    let mut key_ty = self.expression_type(key_node).unwrap_or(TypeExpr::Untyped);
+                    if key_ty == TypeExpr::Untyped {
                         let text = key_node.text.trim();
                         if key_node.r#type == "label" 
                             || key_node.r#type == "hash_key_symbol" 
                             || key_node.r#type == "LIT" && !text.starts_with('"') && !text.starts_with('\'') && !text.parse::<f64>().is_ok()
                         {
-                            key_ty = "Symbol".to_string();
+                            key_ty = TypeExpr::Primitive("Symbol".to_string());
                         }
                     }
-                    let val_ty = self.expression_type(value_node).unwrap_or_else(|| self.behavior.untyped_type());
+                    let val_ty = self.expression_type(value_node).unwrap_or(TypeExpr::Untyped);
                     
                     if let Some(ref k) = key_merged {
-                        key_merged = Some(merge_types(k, &key_ty));
+                        key_merged = Some(TypeExpr::merge(&[k.clone(), key_ty]));
                     } else {
                         key_merged = Some(key_ty);
                     }
                     
                     if let Some(ref v) = val_merged {
-                        val_merged = Some(merge_types(v, &val_ty));
+                        val_merged = Some(TypeExpr::merge(&[v.clone(), val_ty]));
                     } else {
                         val_merged = Some(val_ty);
                     }
@@ -2299,26 +2675,26 @@ impl<'a> TypeInferenceVisitor<'a> {
                 if chunk.len() == 2 {
                     let key_node = chunk[0];
                     let value_node = chunk[1];
-                    let mut key_ty = self.expression_type(key_node).unwrap_or_else(|| self.behavior.untyped_type());
-                    if key_ty == self.behavior.untyped_type() {
+                    let mut key_ty = self.expression_type(key_node).unwrap_or(TypeExpr::Untyped);
+                    if key_ty == TypeExpr::Untyped {
                         let text = key_node.text.trim();
                         if key_node.r#type == "label" 
                             || key_node.r#type == "hash_key_symbol" 
                             || key_node.r#type == "LIT" && !text.starts_with('"') && !text.starts_with('\'') && !text.parse::<f64>().is_ok()
                         {
-                            key_ty = "Symbol".to_string();
+                            key_ty = TypeExpr::Primitive("Symbol".to_string());
                         }
                     }
-                    let val_ty = self.expression_type(value_node).unwrap_or_else(|| self.behavior.untyped_type());
+                    let val_ty = self.expression_type(value_node).unwrap_or(TypeExpr::Untyped);
                     
                     if let Some(ref k) = key_merged {
-                        key_merged = Some(merge_types(k, &key_ty));
+                        key_merged = Some(TypeExpr::merge(&[k.clone(), key_ty]));
                     } else {
                         key_merged = Some(key_ty);
                     }
                     
                     if let Some(ref v) = val_merged {
-                        val_merged = Some(merge_types(v, &val_ty));
+                        val_merged = Some(TypeExpr::merge(&[v.clone(), val_ty]));
                     } else {
                         val_merged = Some(val_ty);
                     }
@@ -2328,47 +2704,50 @@ impl<'a> TypeInferenceVisitor<'a> {
         (key_merged, val_merged)
     }
 
-    fn literal_type(&self, node: &crate::ast::Node) -> Option<String> {
+    fn literal_type(&self, node: &crate::ast::Node) -> Option<TypeExpr> {
         match node.r#type.as_str() {
-            "STR" | "DSTR" | "STRING" | "STRING_LITERAL" => Some("String".to_string()),
-            "SYM" | "SYMBOL" | "hash_key_symbol" | "label" => Some("Symbol".to_string()),
+            "STR" | "DSTR" | "STRING" | "STRING_LITERAL" => Some(TypeExpr::Primitive("String".to_string())),
+            "SYM" | "SYMBOL" | "hash_key_symbol" | "label" => Some(TypeExpr::Primitive("Symbol".to_string())),
             "LIT" => {
                 let text = node.text.trim();
                 if text.starts_with(':') {
-                    Some("Symbol".to_string())
+                    Some(TypeExpr::Primitive("Symbol".to_string()))
                 } else if text.starts_with('"') || text.starts_with('\'') {
-                    Some("String".to_string())
+                    Some(TypeExpr::Primitive("String".to_string()))
                 } else if text.parse::<i64>().is_ok() {
-                    Some("Integer".to_string())
+                    Some(TypeExpr::Primitive("Integer".to_string()))
                 } else if text.parse::<f64>().is_ok() {
-                    Some("Float".to_string())
+                    Some(TypeExpr::Primitive("Float".to_string()))
                 } else {
                     None
                 }
             }
-            "INT" | "INTEGER" | "NUM" | "NUMBER" => Some("Integer".to_string()),
-            "FLOAT" => Some("Float".to_string()),
-            "TRUE" | "FALSE" => Some("T::Boolean".to_string()),
-            "NIL" => Some("NilClass".to_string()),
-            "RANGE" | "DOT2" | "DOT3" => Some("Range".to_string()),
+            "INT" | "INTEGER" | "NUM" | "NUMBER" => Some(TypeExpr::Primitive("Integer".to_string())),
+            "FLOAT" => Some(TypeExpr::Primitive("Float".to_string())),
+            "TRUE" | "FALSE" => Some(TypeExpr::Primitive("T::Boolean".to_string())),
+            "NIL" => Some(TypeExpr::NilClass),
+            "RANGE" | "DOT2" | "DOT3" => Some(TypeExpr::Primitive("Range".to_string())),
             "ARRAY" | "LIST" => {
                 if let Some(elem_ty) = self.literal_array_element_type(node) {
-                    Some(self.behavior.format_array_type(&elem_ty))
+                    Some(TypeExpr::Array(Box::new(elem_ty)))
                 } else {
-                    Some(self.behavior.untyped_array_type())
+                    Some(TypeExpr::Array(Box::new(TypeExpr::Untyped)))
                 }
             }
-            "ZLIST" => Some(self.behavior.untyped_array_type()),
+            "ZLIST" => Some(TypeExpr::Array(Box::new(TypeExpr::Untyped))),
             "HASH" => {
                 let (key_ty, val_ty) = self.literal_hash_element_types(node);
-                let k = key_ty.unwrap_or_else(|| self.behavior.untyped_type());
-                let v = val_ty.unwrap_or_else(|| self.behavior.untyped_type());
-                Some(self.behavior.format_hash_type(&k, &v))
+                let k = key_ty.unwrap_or(TypeExpr::Untyped);
+                let v = val_ty.unwrap_or(TypeExpr::Untyped);
+                Some(TypeExpr::Hash {
+                    key: Box::new(k),
+                    value: Box::new(v),
+                })
             }
             "CALL" | "QCALL" => {
                 if let Some((receiver, method, _)) = match_call(node) {
                     if method == "new" {
-                        return Some(receiver.text.clone());
+                        return Some(TypeExpr::Primitive(receiver.text.clone()));
                     }
                 }
                 None
@@ -2377,15 +2756,15 @@ impl<'a> TypeInferenceVisitor<'a> {
         }
     }
 
-    fn known_return_type(&self, name: &str) -> Option<String> {
+    fn known_return_type(&self, name: &str) -> Option<TypeExpr> {
         if let Some(ty) = self.behavior.known_return_type(name) {
-            return Some(ty);
+            return Some(self.parse_type(&ty));
         }
         let suffix = format!("\u{0}{}", name);
         for (key, sig) in &self.signatures {
             if key.ends_with(&suffix) {
                 if let Some(ret) = extract_return_type(sig) {
-                    return Some(ret);
+                    return Some(self.parse_type(&ret));
                 }
             }
         }
@@ -2471,7 +2850,7 @@ impl<'a> TypeInferenceVisitor<'a> {
                 }
             }
         }
-        self.known_return_type(&name).as_deref() == Some("T.noreturn")
+        self.known_return_type(&name).is_some_and(|t| t == TypeExpr::Primitive("T.noreturn".to_string()))
     }
 
     fn return_sources_for(
@@ -2680,7 +3059,7 @@ impl<'a> TypeInferenceVisitor<'a> {
             if let Some(ty) = self.expression_type(node) {
                 if useful_type(&ty) {
                     return vec![
-                        json!({"kind": if ty == "NilClass" { "nil" } else { "static" }, "type": ty, "line": node_line, "code": code}),
+                        json!({"kind": if ty == TypeExpr::NilClass { "nil" } else { "static" }, "type": ty, "line": node_line, "code": code}),
                     ];
                 }
             }
@@ -2692,7 +3071,7 @@ impl<'a> TypeInferenceVisitor<'a> {
         }
         if let Some(ty) = self.expression_type(node) {
             return vec![
-                json!({"kind": if ty == "NilClass" { "nil" } else { "static" }, "type": ty, "line": node_line, "code": code}),
+                json!({"kind": if ty == TypeExpr::NilClass { "nil" } else { "static" }, "type": ty, "line": node_line, "code": code}),
             ];
         }
         blockers.insert(format!(
@@ -3670,7 +4049,7 @@ impl<'a> TypeInferenceVisitor<'a> {
         if let Some((rec, callee, args_node)) = match_call(node) {
             let mut class_name = "".to_string();
             if let Some(receiver_type) = self.expression_type(rec) {
-                class_name = receiver_type.replace("T.nilable(", "").replace(")", "");
+                class_name = receiver_type.strip_nilable().to_sorbet_string();
             }
             if class_name.is_empty() && rec.text.trim() == "self" {
                 class_name = self.current_owners.last().cloned().unwrap_or_default();
@@ -3714,7 +4093,7 @@ impl<'a> TypeInferenceVisitor<'a> {
         let mut class_name = "".to_string();
         if let Some(r) = rec {
             if let Some(receiver_type) = self.expression_type(r) {
-                class_name = receiver_type.replace("T.nilable(", "").replace(")", "");
+                class_name = receiver_type.strip_nilable().to_sorbet_string();
             }
             if class_name.is_empty() && r.text.trim() == "self" {
                 class_name = self.current_owners.last().cloned().unwrap_or_default();
@@ -3834,7 +4213,7 @@ impl<'a> TypeInferenceVisitor<'a> {
                 if let Some(ret) = self.known_return_type(method) {
                     ty = Some(ret);
                     origin_kind = "typed_return".to_string();
-                } else if ty.as_deref().is_some_and(useful_type) {
+                } else if ty.as_ref().is_some_and(useful_type) {
                     origin_kind = "typed_return".to_string();
                 } else {
                     origin_kind = "untyped_return".to_string();
@@ -3893,7 +4272,7 @@ impl<'a> TypeInferenceVisitor<'a> {
                 if let Some(ty) = self.constant_expression_type(node) {
                     reasons.insert(format!(
                         "literal/static expression {}",
-                        static_expression_reason(&ty)
+                        static_expression_reason(&ty.to_sorbet_string())
                     ));
                 } else {
                     reasons.insert(format!(
@@ -3915,7 +4294,7 @@ impl<'a> TypeInferenceVisitor<'a> {
                 if let Some(ty) = self.expression_type(node) {
                     reasons.insert(format!(
                         "literal/static expression {}",
-                        static_expression_reason(&ty)
+                        static_expression_reason(&ty.to_sorbet_string())
                     ));
                     return;
                 }
@@ -3933,7 +4312,7 @@ impl<'a> TypeInferenceVisitor<'a> {
                 if let Some(ty) = self.literal_type(node) {
                     reasons.insert(format!(
                         "literal/static expression {}",
-                        static_expression_reason(&ty)
+                        static_expression_reason(&ty.to_sorbet_string())
                     ));
                     return;
                 }
@@ -3965,7 +4344,7 @@ impl<'a> TypeInferenceVisitor<'a> {
         }
         let receiver_type = self.expression_type(receiver);
         println!("DEBUG inspect_index_lookup: receiver={}, receiver_type={:?}, local_hash_shapes={:?}, local_array_shapes={:?}", receiver.text, receiver_type, self.local_hash_shapes, self.local_array_shapes);
-        let lookup_type = self.collection_index_return_type(node, receiver_type.as_deref());
+        let lookup_type = self.collection_index_return_type(node, receiver_type.as_ref());
         let index_type = self.expression_type(args[0]);
         let origin = self.receiver_collection_origin(receiver);
 
@@ -3981,7 +4360,7 @@ impl<'a> TypeInferenceVisitor<'a> {
             "receiver_type": receiver_type,
             "index_type": index_type,
             "lookup_type": lookup_type,
-            "status": collection_index_status(receiver_type.as_deref(), lookup_type.as_deref()),
+            "status": collection_index_status(receiver_type.as_ref(), lookup_type.as_ref()),
             "origin": origin,
         }));
     }
@@ -3989,8 +4368,8 @@ impl<'a> TypeInferenceVisitor<'a> {
     fn collection_index_return_type(
         &mut self,
         node: &crate::ast::Node,
-        receiver_type: Option<&str>,
-    ) -> Option<String> {
+        receiver_type: Option<&TypeExpr>,
+    ) -> Option<TypeExpr> {
         let Some((receiver, _, args_node)) = match_call(node) else {
             return None;
         };
@@ -4003,28 +4382,28 @@ impl<'a> TypeInferenceVisitor<'a> {
                 return Some(shape_type);
             }
         }
-        let info = collection_type_info(receiver_type.unwrap_or(""))?;
+        let info = collection_type_info(receiver_type?)?;
         match info.kind.as_str() {
             "array" => {
                 let elem = info.element?;
-                if elem.is_empty() || elem.contains("T.untyped") {
+                if elem == TypeExpr::Untyped {
                     return None;
                 }
                 if args[0].r#type == "RANGE" || args[0].r#type == "DOT2" || args[0].r#type == "DOT3"
                 {
-                    Some(self.behavior.format_array_type(&elem))
-                } else if self.expression_type(args[0]).as_deref() == Some("Integer") {
-                    Some(self.behavior.format_nilable_type(&elem))
+                    Some(TypeExpr::Array(Box::new(elem)))
+                } else if self.expression_type(args[0]).is_some_and(|t| t.to_sorbet_string() == "Integer") {
+                    Some(elem.make_nilable())
                 } else {
                     None
                 }
             }
             "hash" => {
                 let value = info.value?;
-                if value.is_empty() || value.contains("T.untyped") {
+                if value == TypeExpr::Untyped {
                     None
                 } else {
-                    Some(self.behavior.format_nilable_type(&value))
+                    Some(value.make_nilable())
                 }
             }
             _ => None,
@@ -4035,7 +4414,7 @@ impl<'a> TypeInferenceVisitor<'a> {
         &mut self,
         receiver: Option<&crate::ast::Node>,
         index: &crate::ast::Node,
-    ) -> Option<String> {
+    ) -> Option<TypeExpr> {
         let shape = self.hash_shape_for_receiver(receiver?)?;
         if shape.get("poisoned").and_then(Value::as_bool) == Some(true) {
             return None;
@@ -4049,12 +4428,9 @@ impl<'a> TypeInferenceVisitor<'a> {
             .filter_map(Value::as_str)
             .map(ToString::to_string)
             .collect::<Vec<_>>();
-        if types.is_empty() {
-            return None;
-        }
-        let value = static_sorbet_type(&types);
+        let value = static_sorbet_type(&types, self.document.language.as_str());
         if useful_type(&value) {
-            Some(self.behavior.format_nilable_type(&value))
+            Some(value.make_nilable())
         } else {
             None
         }
@@ -4451,7 +4827,7 @@ impl<'a> TypeInferenceVisitor<'a> {
                     }
                     let ty = self
                         .expression_type(arg)
-                        .unwrap_or_else(|| self.behavior.untyped_type());
+                        .unwrap_or(TypeExpr::Untyped);
                     let key = state_key(&full_class, &fields[idx]);
                     if !self.is_prepass {
                         self.state_type_records.push(StateTypeRecord {
@@ -4499,7 +4875,7 @@ impl<'a> TypeInferenceVisitor<'a> {
                             if let Some(field) = hash_key_name(key_node) {
                                 let ty = self
                                     .expression_type(value_node)
-                                    .unwrap_or_else(|| self.behavior.untyped_type());
+                                    .unwrap_or(TypeExpr::Untyped);
                                 let key = state_key(&klass, &field);
                                 if !self.is_prepass {
                                     self.state_type_records.push(StateTypeRecord {
@@ -4547,7 +4923,7 @@ impl<'a> TypeInferenceVisitor<'a> {
                     .map(|n| *n)
                     .unwrap_or(args_node);
                 let class_name = if let Some(receiver_type) = self.expression_type(rec) {
-                    receiver_type.replace("T.nilable(", "").replace(")", "")
+                    receiver_type.strip_nilable().to_sorbet_string()
                 } else {
                     self.behavior.untyped_type()
                 };
@@ -4625,7 +5001,7 @@ impl<'a> TypeInferenceVisitor<'a> {
             keys.push(key.clone());
             let val_ty = self
                 .expression_type(value_node)
-                .unwrap_or_else(|| self.behavior.untyped_type());
+                .unwrap_or(TypeExpr::Untyped);
             values.push(json!(val_ty));
             if let Some(shape) = self.hash_shape_for_value(value_node) {
                 value_hash_shapes.insert(key.clone(), shape);
@@ -4781,7 +5157,7 @@ impl<'a> TypeInferenceVisitor<'a> {
                     if self.local_hash_shapes.contains_key(&name) || self.local_array_shapes.contains_key(&name) {
                         self.local_hash_shapes.remove(&name);
                         self.local_array_shapes.remove(&name);
-                        self.local_types.insert(name.clone(), self.behavior.untyped_type());
+                        self.local_types.insert(name.clone(), TypeExpr::Untyped);
                     }
                 }
             }
@@ -4795,7 +5171,7 @@ impl<'a> TypeInferenceVisitor<'a> {
                     if self.local_hash_shapes.contains_key(&name) || self.local_array_shapes.contains_key(&name) {
                         self.local_hash_shapes.remove(&name);
                         self.local_array_shapes.remove(&name);
-                        self.local_types.insert(name.clone(), self.behavior.untyped_type());
+                        self.local_types.insert(name.clone(), TypeExpr::Untyped);
                     }
                 }
             } else if child.r#type == "pair" || child.r#type == "PAIR" || child.r#type == "HASH" {
@@ -4805,7 +5181,7 @@ impl<'a> TypeInferenceVisitor<'a> {
                             if self.local_hash_shapes.contains_key(&name) || self.local_array_shapes.contains_key(&name) {
                                 self.local_hash_shapes.remove(&name);
                                 self.local_array_shapes.remove(&name);
-                                self.local_types.insert(name.clone(), self.behavior.untyped_type());
+                                self.local_types.insert(name.clone(), TypeExpr::Untyped);
                             }
                         }
                     }
@@ -4842,18 +5218,18 @@ impl<'a> TypeInferenceVisitor<'a> {
                         if let Some(key) = hash_key_name(key_node) {
                             let ty = self
                                 .expression_type(value_node)
-                                .unwrap_or_else(|| self.behavior.untyped_type());
-                            let typed_value = useful_type(&ty) || ty == "NilClass";
+                                .unwrap_or(TypeExpr::Untyped);
+                            let typed_value = useful_type(&ty) || ty == TypeExpr::NilClass;
                             let shape_type = if typed_value {
                                 ty.clone()
                             } else {
-                                self.behavior.untyped_type()
+                                TypeExpr::Untyped
                             };
                             let entry = keys.entry(key.clone()).or_insert_with(|| json!([]));
                             if let Some(array) = entry.as_array_mut() {
                                 if !array
                                     .iter()
-                                    .any(|entry| entry.as_str() == Some(&shape_type))
+                                    .any(|entry| entry == &json!(shape_type))
                                 {
                                     array.push(json!(shape_type));
                                 }
@@ -5058,7 +5434,7 @@ impl<'a> TypeInferenceVisitor<'a> {
         let (rec, method, _) = match_call(node)?;
         let mut found_shape = None;
         if let Some(receiver_type) = self.expression_type(rec) {
-            let class = receiver_type.replace("T.nilable(", "").replace(")", "");
+            let class = receiver_type.strip_nilable().to_sorbet_string();
             let key = (class, method.clone());
             found_shape = self.struct_field_hash_shapes.get(&key).cloned();
         }
@@ -5078,7 +5454,7 @@ impl<'a> TypeInferenceVisitor<'a> {
         let (rec, method, _) = match_call(node)?;
         let mut found_shape = None;
         if let Some(receiver_type) = self.expression_type(rec) {
-            let class = receiver_type.replace("T.nilable(", "").replace(")", "");
+            let class = receiver_type.strip_nilable().to_sorbet_string();
             let key = (class, method.clone());
             found_shape = self.struct_field_array_shapes.get(&key).cloned();
         }
@@ -5250,11 +5626,14 @@ fn nilable_type(type_text: &str) -> String {
     }
 }
 
-fn collection_index_status(receiver_type: Option<&str>, lookup_type: Option<&str>) -> &'static str {
+fn collection_index_status(receiver_type: Option<&TypeExpr>, lookup_type: Option<&TypeExpr>) -> &'static str {
     if lookup_type.is_some_and(|ty| useful_type(ty) && !weak_type(ty)) {
         return "typed lookup";
     }
-    let text = receiver_type.unwrap_or("");
+    let Some(ty) = receiver_type else {
+        return "unknown receiver type";
+    };
+    let text = ty.to_sorbet_string();
     if text.is_empty() {
         return "unknown receiver type";
     }
@@ -5265,6 +5644,7 @@ fn collection_index_status(receiver_type: Option<&str>, lookup_type: Option<&str
         || text.starts_with("Hash")
         || text.starts_with("T::Array")
         || text.starts_with("T::Hash")
+        || matches!(ty, TypeExpr::Array(_) | TypeExpr::Hash { .. } | TypeExpr::Set(_))
     {
         return "typed collection receiver";
     }
@@ -5287,46 +5667,29 @@ fn sorbet_type_index_syntax(text: &str) -> bool {
 
 struct CollectionInfo {
     kind: String,
-    element: Option<String>,
-    value: Option<String>,
+    element: Option<TypeExpr>,
+    value: Option<TypeExpr>,
 }
 
-fn collection_type_info(type_text: &str) -> Option<CollectionInfo> {
-    let raw = strip_nilable_type(type_text.trim());
-    if raw.is_empty() {
-        return None;
+fn collection_type_info(ty: &TypeExpr) -> Option<CollectionInfo> {
+    match ty.strip_nilable() {
+        TypeExpr::Array(inner) => Some(CollectionInfo {
+            kind: "array".to_string(),
+            element: Some(*inner.clone()),
+            value: None,
+        }),
+        TypeExpr::Set(inner) => Some(CollectionInfo {
+            kind: "set".to_string(),
+            element: Some(*inner.clone()),
+            value: None,
+        }),
+        TypeExpr::Hash { key, value } => Some(CollectionInfo {
+            kind: "hash".to_string(),
+            element: Some(*key.clone()),
+            value: Some(*value.clone()),
+        }),
+        _ => None,
     }
-    parse_collection_type(&raw)
-}
-
-fn parse_collection_type(raw: &str) -> Option<CollectionInfo> {
-    for (prefix, kind) in [
-        ("T::Array", "array"),
-        ("Array", "array"),
-        ("T::Hash", "hash"),
-        ("Hash", "hash"),
-        ("T::Set", "set"),
-        ("Set", "set"),
-    ] {
-        if raw == prefix {
-            return Some(CollectionInfo {
-                kind: kind.to_string(),
-                element: None,
-                value: None,
-            });
-        }
-        let bracket = format!("{prefix}[");
-        if raw.starts_with(&bracket) && raw.ends_with(']') {
-            let inner = &raw[bracket.len()..raw.len() - 1];
-            let parts = split_top_level_params(inner);
-            return Some(CollectionInfo {
-                kind: kind.to_string(),
-                element: parts.first().cloned(),
-                value: parts.get(1).cloned(),
-            });
-        }
-    }
-    None
 }
 
 fn collect_block_param_names(args_node: &crate::ast::Node) -> Vec<String> {
@@ -5487,8 +5850,9 @@ fn collect_dispatch_arms(
     }
 }
 
-fn tuple_confidence(types: &[String]) -> &'static str {
-    let constants = types
+fn tuple_confidence(types: &[TypeExpr]) -> &'static str {
+    let str_types: Vec<String> = types.iter().map(|t| t.to_sorbet_string()).collect();
+    let constants = str_types
         .iter()
         .filter(|ty| leading_constant_path(ty).is_some())
         .collect::<Vec<_>>();
@@ -5502,7 +5866,7 @@ fn tuple_confidence(types: &[String]) -> &'static str {
     if namespaces.len() == 1 && constants.len() == types.len() {
         return "review";
     }
-    let unique = types.iter().collect::<BTreeSet<_>>();
+    let unique = str_types.iter().collect::<BTreeSet<_>>();
     if unique.len() == types.len() {
         "high"
     } else {
@@ -5540,36 +5904,8 @@ fn collect_assigned_vars(node: &crate::ast::Node, vars: &mut BTreeSet<String>) {
     }
 }
 
-fn merge_types(existing: &str, new_ty: &str) -> String {
-    if existing == new_ty {
-        return existing.to_string();
-    }
-    if existing == "T.untyped" {
-        return new_ty.to_string();
-    }
-    if new_ty == "T.untyped" {
-        return existing.to_string();
-    }
-    if existing == "NilClass" {
-        if new_ty.starts_with("T.nilable(") {
-            return new_ty.to_string();
-        } else {
-            return format!("T.nilable({})", new_ty);
-        }
-    }
-    if new_ty == "NilClass" {
-        if existing.starts_with("T.nilable(") {
-            return existing.to_string();
-        } else {
-            return format!("T.nilable({})", existing);
-        }
-    }
-    let clean_exist = existing.replace("T.nilable(", "").replace(")", "");
-    let clean_new = new_ty.replace("T.nilable(", "").replace(")", "");
-    if clean_exist == clean_new {
-        return format!("T.nilable({})", clean_exist);
-    }
-    "T.untyped".to_string()
+fn merge_types(existing: &TypeExpr, new_ty: &TypeExpr) -> TypeExpr {
+    TypeExpr::merge(&[existing.clone(), new_ty.clone()])
 }
 
 

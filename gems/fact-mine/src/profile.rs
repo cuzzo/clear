@@ -20,6 +20,7 @@ macro_rules! eprintln {
 }
 
 use crate::syntax::{self, Document, Language};
+use crate::type_inference::TypeExpr;
 
 use serde::Serialize;
 use serde_json::{json, Value};
@@ -41,7 +42,7 @@ pub struct ProfileOutput {
     pub fields: Vec<FieldRecord>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub struct_declarations: Vec<StructDeclaration>,
-    pub state_types: BTreeMap<String, String>,
+    pub state_types: BTreeMap<String, TypeExpr>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub state_type_records: Vec<StateTypeRecord>,
     pub state_protocols: BTreeMap<String, Vec<String>>,
@@ -149,7 +150,7 @@ pub struct FieldRecord {
     pub name: String,
     pub line: usize,
     pub span: Option<[usize; 4]>,
-    pub declared_type: Option<String>,
+    pub declared_type: Option<TypeExpr>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub type_references: Vec<serde_json::Value>,
     pub static_origin: String,
@@ -162,7 +163,7 @@ pub struct StateTypeRecord {
     pub path: String,
     pub owner: String,
     pub field: String,
-    pub declared_type: String,
+    pub declared_type: TypeExpr,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub type_references: Vec<serde_json::Value>,
     pub line: usize,
@@ -209,11 +210,11 @@ pub struct TypeDefinition {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub signature: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub return_type: Option<String>,
+    pub return_type: Option<TypeExpr>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
-    pub params: Vec<BTreeMap<String, String>>,
+    pub params: Vec<serde_json::Value>,
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub declared_type: Option<String>,
+    pub declared_type: Option<TypeExpr>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub target: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -967,7 +968,7 @@ fn extract_fields(document: &Document, language: &str, path: &str) -> Vec<FieldR
             name,
             line: state.line,
             span: Some(state.span),
-            declared_type: state.r#type.clone(),
+            declared_type: state.r#type.as_ref().map(|t| TypeExpr::parse(t, language)),
             type_references: Vec::new(),
             static_origin: "state_declaration".to_string(),
             source: "syntax".to_string(),
@@ -1032,7 +1033,7 @@ fn extract_state_types(
     document: &Document,
     language: &str,
     path: &str,
-) -> (BTreeMap<String, String>, Vec<StateTypeRecord>) {
+) -> (BTreeMap<String, TypeExpr>, Vec<StateTypeRecord>) {
     let mut types = BTreeMap::new();
     let mut records = Vec::new();
 
@@ -1041,16 +1042,17 @@ fn extract_state_types(
             Some(t) if !t.is_empty() => t.clone(),
             _ => continue,
         };
+        let type_expr = TypeExpr::parse(&type_text, language);
         let name = state.field.clone();
         let key = state_key(&state.owner, &name);
-        types.insert(key.clone(), type_text.clone());
+        types.insert(key.clone(), type_expr.clone());
 
         records.push(StateTypeRecord {
             language: language.to_string(),
             path: path.to_string(),
             owner: state.owner.clone(),
             field: name,
-            declared_type: type_text,
+            declared_type: type_expr,
             type_references: Vec::new(),
             line: state.line,
             span: Some(state.span),
@@ -1243,6 +1245,16 @@ fn extract_type_definitions(
             continue;
         }
 
+        let return_type_expr = return_type.map(|t| TypeExpr::parse(&t, language));
+        let params_json: Vec<serde_json::Value> = params.into_iter().map(|p| {
+            let p_name = p.get("name").cloned().unwrap_or_default();
+            let p_type_str = p.get("type").cloned().unwrap_or_default();
+            json!({
+                "name": p_name,
+                "type": TypeExpr::parse(&p_type_str, language)
+            })
+        }).collect();
+
         let mut clean_name = fn_def.name.clone();
         if clean_name.starts_with("self.") {
             clean_name = clean_name.strip_prefix("self.").unwrap().to_string();
@@ -1267,8 +1279,8 @@ fn extract_type_definitions(
             name: clean_name,
             line: fn_def.line,
             signature: Some(sig),
-            return_type,
-            params,
+            return_type: return_type_expr,
+            params: params_json,
             declared_type: None,
             target: None,
             source: None,
@@ -1325,7 +1337,7 @@ fn extract_type_definitions(
             signature: None,
             return_type: None,
             params: Vec::new(),
-            declared_type: Some(type_text),
+            declared_type: Some(TypeExpr::parse(&type_text, language)),
             target: None,
             source: Some("syntax".to_string()),
         });
@@ -1346,13 +1358,13 @@ fn extract_type_definitions(
             .map(|fd| fd.line)
             .unwrap_or(0);
         let ts = language_type_system(language);
-        let params: Vec<BTreeMap<String, String>> = param_types
+        let params: Vec<serde_json::Value> = param_types
             .iter()
             .map(|(pname, ptype)| {
-                let mut map = BTreeMap::new();
-                map.insert("name".to_string(), pname.clone());
-                map.insert("type".to_string(), ptype.clone());
-                map
+                json!({
+                    "name": pname,
+                    "type": TypeExpr::parse(ptype, language)
+                })
             })
             .collect();
 
@@ -2429,9 +2441,8 @@ pub(crate) mod tests {
         assert_eq!(
             output
                 .state_types
-                .get("Greeter\u{0}@name")
-                .map(|s| s.as_str()),
-            Some("String")
+                .get("Greeter\u{0}@name"),
+            Some(&TypeExpr::Primitive("String".to_string()))
         );
     }
 

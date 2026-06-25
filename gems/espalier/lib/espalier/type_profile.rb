@@ -4,6 +4,108 @@ require "set"
 
 module FactMine
   module Syntax
+    class TypeExpr < String
+      attr_reader :kind, :data
+
+      def initialize(kind, data = nil)
+        @kind = kind
+        @data = data
+        super(to_sorbet_string)
+      end
+
+      def to_sorbet_string
+        case @kind
+        when "Untyped"
+          "T.untyped"
+        when "NilClass"
+          "NilClass"
+        when "Primitive"
+          @data.to_s
+        when "Nilable"
+          "T.nilable(#{TypeExpr.from_json(@data)})"
+        when "Array"
+          "T::Array[#{TypeExpr.from_json(@data)}]"
+        when "Hash"
+          key = TypeExpr.from_json(@data["key"])
+          val = TypeExpr.from_json(@data["value"])
+          "T::Hash[#{key}, #{val}]"
+        when "Set"
+          "T::Set[#{TypeExpr.from_json(@data)}]"
+        when "Union"
+          parts = Array(@data).map { |d| TypeExpr.from_json(d) }
+          "T.any(#{parts.join(', ')})"
+        else
+          @kind.to_s
+        end
+      end
+
+      def self.from_json(val)
+        return nil if val.nil?
+        case val
+        when TypeExpr
+          val
+        when Hash
+          if val.key?("kind") && %w[Untyped NilClass Primitive Nilable Array Hash Set Union].include?(val["kind"])
+            TypeExpr.new(val["kind"], val["data"])
+          else
+            val
+          end
+        else
+          val
+        end
+      end
+
+      def self.wrap_types!(val)
+        case val
+        when Hash
+          if val.key?("kind") && %w[Untyped NilClass Primitive Nilable Array Hash Set Union].include?(val["kind"])
+            return TypeExpr.new(val["kind"], val["data"])
+          end
+          if val.frozen?
+            val = val.dup
+          end
+          val.each do |k, v|
+            val[k] = wrap_types!(v)
+          end
+          val
+        when Array
+          if val.frozen?
+            val = val.dup
+          end
+          val.map! { |v| wrap_types!(v) }
+          val
+        else
+          val
+        end
+      end
+
+      def self.unwrap_types(val)
+        case val
+        when TypeExpr
+          val.as_json
+        when Hash
+          val.each_with_object({}) do |(k, v), h|
+            h[k] = unwrap_types(v)
+          end
+        when Array
+          val.map { |v| unwrap_types(v) }
+        else
+          val
+        end
+      end
+
+      def as_json(options = nil)
+        {
+          "kind" => @kind,
+          "data" => TypeExpr.unwrap_types(@data)
+        }.compact
+      end
+
+      def to_json(*args)
+        as_json.to_json(*args)
+      end
+    end
+
     class TypeProfile
       DEFAULT_MAX_UNION_TYPES = 3
 

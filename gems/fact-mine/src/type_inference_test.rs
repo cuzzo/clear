@@ -8,6 +8,10 @@ mod tests {
         serde_json::from_str(r#"{"file":"test.rb","language":"ruby"}"#).unwrap()
     }
 
+    fn get_type_str(ty: Option<TypeExpr>) -> Option<String> {
+        ty.map(|t| t.to_sorbet_string())
+    }
+
     #[test]
     fn test_unquote_edge_cases() {
         assert_eq!(unquote("\"a\""), "a");
@@ -25,25 +29,25 @@ mod tests {
 
     #[test]
     fn test_static_sorbet_type_noreturn() {
-        assert_eq!(static_sorbet_type(&["T.noreturn".to_string()]), "T.noreturn");
-        assert_eq!(static_sorbet_type(&["T.noreturn".to_string(), "NilClass".to_string()]), "NilClass");
-        assert_eq!(static_sorbet_type(&["T.noreturn".to_string(), "Integer".to_string()]), "Integer");
+        assert_eq!(static_sorbet_type(&["T.noreturn".to_string()], "ruby").to_sorbet_string(), "T.noreturn");
+        assert_eq!(static_sorbet_type(&["T.noreturn".to_string(), "NilClass".to_string()], "ruby").to_sorbet_string(), "NilClass");
+        assert_eq!(static_sorbet_type(&["T.noreturn".to_string(), "Integer".to_string()], "ruby").to_sorbet_string(), "Integer");
         assert_eq!(extract_return_type("sig { returns(Integer) }"), Some("Integer".to_string()));
-        assert_eq!(static_sorbet_type(&["T.nilable(Integer)".to_string()]), "T.nilable(Integer)");
+        assert_eq!(static_sorbet_type(&["T.nilable(Integer)".to_string()], "ruby").to_sorbet_string(), "T.nilable(Integer)");
     }
 
     #[test]
     fn test_merge_types_full() {
-        assert_eq!(merge_types("Int", "Int"), "Int");
-        assert_eq!(merge_types("T.untyped", "Int"), "Int");
-        assert_eq!(merge_types("Int", "T.untyped"), "Int");
-        assert_eq!(merge_types("NilClass", "T.nilable(Int)"), "T.nilable(Int)");
-        assert_eq!(merge_types("NilClass", "Int"), "T.nilable(Int)");
-        assert_eq!(merge_types("T.nilable(Int)", "NilClass"), "T.nilable(Int)");
-        assert_eq!(merge_types("Int", "NilClass"), "T.nilable(Int)");
-        assert_eq!(merge_types("T.nilable(Int)", "Int"), "T.nilable(Int)");
-        assert_eq!(merge_types("Int", "T.nilable(Int)"), "T.nilable(Int)");
-        assert_eq!(merge_types("Int", "String"), "T.untyped");
+        assert_eq!(merge_types(&TypeExpr::from("Int"), &TypeExpr::from("Int")).to_sorbet_string(), "Int");
+        assert_eq!(merge_types(&TypeExpr::from("T.untyped"), &TypeExpr::from("Int")).to_sorbet_string(), "Int");
+        assert_eq!(merge_types(&TypeExpr::from("Int"), &TypeExpr::from("T.untyped")).to_sorbet_string(), "Int");
+        assert_eq!(merge_types(&TypeExpr::from("NilClass"), &TypeExpr::from("T.nilable(Int)")).to_sorbet_string(), "T.nilable(Int)");
+        assert_eq!(merge_types(&TypeExpr::from("NilClass"), &TypeExpr::from("Int")).to_sorbet_string(), "T.nilable(Int)");
+        assert_eq!(merge_types(&TypeExpr::from("T.nilable(Int)"), &TypeExpr::from("NilClass")).to_sorbet_string(), "T.nilable(Int)");
+        assert_eq!(merge_types(&TypeExpr::from("Int"), &TypeExpr::from("NilClass")).to_sorbet_string(), "T.nilable(Int)");
+        assert_eq!(merge_types(&TypeExpr::from("T.nilable(Int)"), &TypeExpr::from("Int")).to_sorbet_string(), "T.nilable(Int)");
+        assert_eq!(merge_types(&TypeExpr::from("Int"), &TypeExpr::from("T.nilable(Int)")).to_sorbet_string(), "T.nilable(Int)");
+        assert_eq!(merge_types(&TypeExpr::from("Int"), &TypeExpr::from("String")).to_sorbet_string(), "T.untyped");
     }
 
     #[test]
@@ -252,12 +256,12 @@ mod tests {
             current_method_line: 1,
             current_method_end_line: 10,
             current_params: vec!["param1".to_string()],
-            param_types: [("param1".to_string(), "Integer".to_string())].into_iter().collect(),
-            local_types: [("local1".to_string(), "String".to_string())].into_iter().collect(),
+            param_types: [("param1".to_string(), TypeExpr::from("Integer"))].into_iter().collect(),
+            local_types: [("local1".to_string(), TypeExpr::from("String"))].into_iter().collect(),
             in_conditional: false,
             ivar_tlet_types: [
-                (("MyClass".to_string(), "ivar1".to_string()), "Float".to_string()),
-                (("MyClass".to_string(), "ivar_empty".to_string()), "".to_string()),
+                (("MyClass".to_string(), "ivar1".to_string()), TypeExpr::from("Float")),
+                (("MyClass".to_string(), "ivar_empty".to_string()), TypeExpr::from("")),
             ].into_iter().collect(),
             signatures: BTreeMap::new(),
             tlet_sites: &mut tlet_sites,
@@ -302,9 +306,9 @@ mod tests {
         assert!(visitor.known_disjoint_guard_classes("T::Boolean", "Integer"));
         assert!(visitor.known_disjoint_guard_classes("Integer", "T::Boolean"));
 
-        assert_eq!(visitor.ivar_expression_type("ivar1"), Some("Float".to_string()));
-        assert_eq!(visitor.ivar_expression_type("ivar_empty"), None);
-        assert_eq!(visitor.ivar_expression_type("ivar_missing"), None);
+        assert_eq!(get_type_str(visitor.ivar_expression_type("ivar1")), Some("Float".to_string()));
+        assert_eq!(get_type_str(visitor.ivar_expression_type("ivar_empty")), None);
+        assert_eq!(get_type_str(visitor.ivar_expression_type("ivar_missing")), None);
 
         assert_eq!(visitor.literal_numeric_value(&LiteralStaticValue::Integer(42)), Some(42.0));
         assert_eq!(visitor.literal_numeric_value(&LiteralStaticValue::Float("3.14".to_string())), Some(3.14));
@@ -679,10 +683,10 @@ mod tests {
             current_method_line: 0,
             current_method_end_line: 0,
             current_params: vec!["x".to_string()],
-            param_types: [("x".to_string(), "String".to_string())].into_iter().collect(),
+            param_types: [("x".to_string(), TypeExpr::from("String"))].into_iter().collect(),
             local_types: [
-                ("y".to_string(), "NilClass".to_string()),
-                ("z".to_string(), "T.nilable(Integer)".to_string())
+                ("y".to_string(), TypeExpr::from("NilClass")),
+                ("z".to_string(), TypeExpr::from("T.nilable(Integer)"))
             ].into_iter().collect(),
             in_conditional: false,
             ivar_tlet_types: BTreeMap::new(),
@@ -827,7 +831,7 @@ mod tests {
         assert!(res_z.is_none());
 
         // class_guard_truth tests
-        assert_eq!(visitor.class_guard_truth("Integer", "String", true), Some(false));
+        assert_eq!(visitor.class_guard_truth(&TypeExpr::from("Integer"), "String", true), Some(false));
 
         // known_disjoint_guard_classes tests
         assert!(!visitor.known_disjoint_guard_classes("T::Boolean", "TrueClass"));
@@ -1103,10 +1107,10 @@ mod tests {
         };
 
         let mut extra_locals = BTreeMap::new();
-        extra_locals.insert("v".to_string(), "String".to_string());
+        extra_locals.insert("v".to_string(), TypeExpr::from("String"));
 
         assert_eq!(
-            visitor.expression_type_with_locals(&lvar_node, &extra_locals),
+            get_type_str(visitor.expression_type_with_locals(&lvar_node, &extra_locals)),
             Some("String".to_string())
         );
 
@@ -1139,10 +1143,7 @@ mod tests {
             "text": "1 || 2"
         }"#).unwrap();
 
-        assert_eq!(
-            visitor.expression_type(&or_node),
-            Some("Integer".to_string())
-        );
+        assert_eq!(get_type_str(visitor.expression_type(&or_node)), Some("Integer".to_string()));
     }
 
     fn create_visitor<'a>(
@@ -1416,7 +1417,7 @@ mod tests {
             "first_lineno": 1, "first_column": 1, "last_lineno": 1, "last_column": 20, "text": "class Klass; @ivar = T.let(@ivar, String); end"
         }"#).unwrap();
         collect_prepass_facts(&class_node, Language::Ruby, &mut owners, &mut ivar_tlet);
-        assert_eq!(ivar_tlet.get(&("Klass".to_string(), "@ivar".to_string())), Some(&"String".to_string()));
+        assert_eq!(get_type_str(ivar_tlet.get(&("Klass".to_string(), "@ivar".to_string())).cloned()), Some("String".to_string()));
 
         // 2. return_control_shape / branching_return_expression
         let explicit_ret: crate::ast::Node = serde_json::from_str(r#"{
@@ -1438,7 +1439,7 @@ mod tests {
         assert_eq!(return_control_shape(&explicit_nodes, None, false), "branching");
 
         // 3. IF/UNLESS local type merging with None (branching merges)
-        visitor.local_types.insert("my_var".to_string(), "Integer".to_string());
+        visitor.local_types.insert("my_var".to_string(), TypeExpr::from("Integer"));
         // We will visit an IF statement manually
         let if_node: crate::ast::Node = serde_json::from_str(r#"{
             "type": "IF",
@@ -1457,10 +1458,10 @@ mod tests {
             "first_lineno": 1, "first_column": 1, "last_lineno": 1, "last_column": 20, "text": "if true; my_var = \"hi\"; end"
         }"#).unwrap();
         visitor.visit(&if_node);
-        assert_eq!(visitor.local_types.get("my_var").cloned(), Some("Integer".to_string()));
+        assert_eq!(get_type_str(visitor.local_types.get("my_var").cloned()), Some("Integer".to_string()));
 
         // Also test IF where the else branch assigns and then doesn't
-        visitor.local_types.insert("my_var2".to_string(), "Integer".to_string());
+        visitor.local_types.insert("my_var2".to_string(), TypeExpr::from("Integer"));
         let if_node2: crate::ast::Node = serde_json::from_str(r#"{
             "type": "IF",
             "children": [
@@ -1478,7 +1479,7 @@ mod tests {
             "first_lineno": 1, "first_column": 1, "last_lineno": 1, "last_column": 20, "text": "if true; else my_var2 = \"hi\"; end"
         }"#).unwrap();
         visitor.visit(&if_node2);
-        assert_eq!(visitor.local_types.get("my_var2").cloned(), Some("Integer".to_string()));
+        assert_eq!(get_type_str(visitor.local_types.get("my_var2").cloned()), Some("Integer".to_string()));
 
         // Test uninitialized variable assigned in then branch (merges to T.nilable)
         let if_node3: crate::ast::Node = serde_json::from_str(r#"{
@@ -1498,7 +1499,7 @@ mod tests {
             "first_lineno": 1, "first_column": 1, "last_lineno": 1, "last_column": 20, "text": "if true; my_var3 = \"hi\"; end"
         }"#).unwrap();
         visitor.visit(&if_node3);
-        assert_eq!(visitor.local_types.get("my_var3").cloned(), Some("T.nilable(String)".to_string()));
+        assert_eq!(get_type_str(visitor.local_types.get("my_var3").cloned()), Some("T.nilable(String)".to_string()));
 
         // 4. AND / OR / WHILE / UNTIL / CASE
         let case_node: crate::ast::Node = serde_json::from_str(r#"{
@@ -1519,7 +1520,7 @@ mod tests {
         visitor.visit(&case_node);
 
         // 5. ITER on a Hash and Array
-        visitor.local_types.insert("my_hash".to_string(), "T::Hash[Symbol, Integer]".to_string());
+        visitor.local_types.insert("my_hash".to_string(), TypeExpr::from("T::Hash[Symbol, Integer]"));
         let iter_hash_node: crate::ast::Node = serde_json::from_str(r#"{
             "type": "ITER",
             "children": [
@@ -1560,7 +1561,7 @@ mod tests {
         visitor.visit(&iter_hash_node);
 
         // ITER on Array
-        visitor.local_types.insert("my_array".to_string(), "T::Array[String]".to_string());
+        visitor.local_types.insert("my_array".to_string(), TypeExpr::from("T::Array[String]"));
         let iter_array_node: crate::ast::Node = serde_json::from_str(r#"{
             "type": "ITER",
             "children": [
@@ -1594,7 +1595,7 @@ mod tests {
 
         // 6. Mutation type tracking
         // array append: arr << val
-        visitor.local_types.insert("my_array2".to_string(), "T::Array[String]".to_string());
+        visitor.local_types.insert("my_array2".to_string(), TypeExpr::from("T::Array[String]"));
         let append_node: crate::ast::Node = serde_json::from_str(r#"{
             "type": "CALL",
             "children": [
@@ -1611,10 +1612,10 @@ mod tests {
             "first_lineno": 1, "first_column": 1, "last_lineno": 1, "last_column": 15, "text": "my_array2 << 1"
         }"#).unwrap();
         visitor.visit(&append_node);
-        assert_eq!(visitor.local_types.get("my_array2").cloned(), Some("T::Array[T.untyped]".to_string()));
+        assert_eq!(get_type_str(visitor.local_types.get("my_array2").cloned()), Some("T::Array[T.untyped]".to_string()));
  
         // hash assignment: hash[key] = val
-        visitor.local_types.insert("my_hash2".to_string(), "T::Hash[Symbol, String]".to_string());
+        visitor.local_types.insert("my_hash2".to_string(), TypeExpr::from("T::Hash[Symbol, String]"));
         let hash_set_node: crate::ast::Node = serde_json::from_str(r#"{
             "type": "CALL",
             "children": [
@@ -1632,11 +1633,11 @@ mod tests {
             "first_lineno": 1, "first_column": 1, "last_lineno": 1, "last_column": 15, "text": "my_hash2[:a] = 1"
         }"#).unwrap();
         visitor.visit(&hash_set_node);
-        assert_eq!(visitor.local_types.get("my_hash2").cloned(), Some("T::Hash[Symbol, T.untyped]".to_string()));
+        assert_eq!(get_type_str(visitor.local_types.get("my_hash2").cloned()), Some("T::Hash[Symbol, T.untyped]".to_string()));
  
         // hash merge!: hash.merge!(other)
-        visitor.local_types.insert("my_hash3".to_string(), "T::Hash[Symbol, String]".to_string());
-        visitor.local_types.insert("other_hash".to_string(), "T::Hash[Symbol, Integer]".to_string());
+        visitor.local_types.insert("my_hash3".to_string(), TypeExpr::from("T::Hash[Symbol, String]"));
+        visitor.local_types.insert("other_hash".to_string(), TypeExpr::from("T::Hash[Symbol, Integer]"));
         let merge_node: crate::ast::Node = serde_json::from_str(r#"{
             "type": "CALL",
             "children": [
@@ -1653,10 +1654,10 @@ mod tests {
             "first_lineno": 1, "first_column": 1, "last_lineno": 1, "last_column": 20, "text": "my_hash3.merge!(other_hash)"
         }"#).unwrap();
         visitor.visit(&merge_node);
-        assert_eq!(visitor.local_types.get("my_hash3").cloned(), Some("T::Hash[Symbol, T.untyped]".to_string()));
+        assert_eq!(get_type_str(visitor.local_types.get("my_hash3").cloned()), Some("T::Hash[Symbol, T.untyped]".to_string()));
 
         // 7. provably_non_nil and guards
-        visitor.local_types.insert("non_nil_v".to_string(), "String".to_string());
+        visitor.local_types.insert("non_nil_v".to_string(), TypeExpr::from("String"));
         let non_nil_node: crate::ast::Node = serde_json::from_str(r#"{
             "type": "LVAR",
             "children": [{"Symbol": "non_nil_v"}],
@@ -1686,7 +1687,7 @@ mod tests {
         assert!(!visitor.dead_nil_checks.is_empty());
 
         // Class guards and subclass/disjointness
-        visitor.local_types.insert("my_int".to_string(), "Integer".to_string());
+        visitor.local_types.insert("my_int".to_string(), TypeExpr::from("Integer"));
         let class_guard_node: crate::ast::Node = serde_json::from_str(r#"{
             "type": "IF",
             "children": [
@@ -1947,7 +1948,7 @@ mod tests {
 
         // Struct field shapes
         visitor.struct_field_hash_shapes.insert(("MyStructClass".to_string(), "field_a".to_string()), json!({"keys": {}}));
-        visitor.local_types.insert("my_struct_inst".to_string(), "MyStructClass".to_string());
+        visitor.local_types.insert("my_struct_inst".to_string(), TypeExpr::from("MyStructClass"));
         let struct_field_call_node: crate::ast::Node = serde_json::from_str(r#"{
             "type": "CALL",
             "children": [
@@ -2225,11 +2226,11 @@ mod tests {
         assert!(visitor.deterministic_class_predicate_result(&class_guard_empty_arg).is_none());
 
         // 11. class_guard_truth edge cases:
-        assert_eq!(visitor.class_guard_truth("T.untyped", "String", false), None);
-        assert_eq!(visitor.class_guard_truth("T.nilable(String)", "String", false), None);
-        assert_eq!(visitor.class_guard_truth("", "String", false), None);
+        assert_eq!(visitor.class_guard_truth(&TypeExpr::from("T.untyped"), "String", false), None);
+        assert_eq!(visitor.class_guard_truth(&TypeExpr::from("T.nilable(String)"), "String", false), None);
+        assert_eq!(visitor.class_guard_truth(&TypeExpr::from(""), "String", false), None);
         // normalized empty case:
-        assert_eq!(visitor.class_guard_truth("T.nilable()", "String", false), None);
+        assert_eq!(visitor.class_guard_truth(&TypeExpr::from("T.nilable()"), "String", false), None);
 
         // 12. bare_class_name
         assert_eq!(visitor.bare_class_name("T::Array[String]"), "Array");
@@ -2302,7 +2303,7 @@ mod tests {
             ],
             "first_lineno": 1, "first_column": 1, "last_lineno": 1, "last_column": 10, "text": "1 + 2"
         }"#).unwrap();
-        assert_eq!(visitor.static_expression_type(&opcall_node), Some("Integer".to_string()));
+        assert_eq!(get_type_str(visitor.static_expression_type(&opcall_node)), Some("Integer".to_string()));
 
         // Collection iteration types (each/map details)
         let iter_untyped_rec: crate::ast::Node = serde_json::from_str(r#"{
@@ -2335,7 +2336,7 @@ mod tests {
             "first_lineno": 1, "first_column": 1, "last_lineno": 1, "last_column": 20, "text": "c.each { |k, v| }"
         }"#).unwrap();
         let mut extra_locals = BTreeMap::new();
-        extra_locals.insert("c".to_string(), "T::Hash[Symbol, String]".to_string());
+        extra_locals.insert("c".to_string(), TypeExpr::from("T::Hash[Symbol, String]"));
         assert!(visitor.static_expression_type_with_locals(&iter_untyped_rec, &extra_locals).is_some());
 
         // Array element type iteration details
@@ -2368,7 +2369,7 @@ mod tests {
             "first_lineno": 1, "first_column": 1, "last_lineno": 1, "last_column": 20, "text": "a.each { |elem| }"
         }"#).unwrap();
         let mut extra_locals_arr = BTreeMap::new();
-        extra_locals_arr.insert("a".to_string(), "T::Array[String]".to_string());
+        extra_locals_arr.insert("a".to_string(), TypeExpr::from("T::Array[String]"));
         assert!(visitor.static_expression_type_with_locals(&iter_arr, &extra_locals_arr).is_some());
 
         // 18. expression_type on empty array / empty hash
@@ -2377,7 +2378,7 @@ mod tests {
             "children": [],
             "first_lineno": 1, "first_column": 1, "last_lineno": 1, "last_column": 2, "text": "[]"
         }"#).unwrap();
-        assert_eq!(visitor.expression_type(&empty_arr), Some("T::Array[T.untyped]".to_string()));
+        assert_eq!(get_type_str(visitor.expression_type(&empty_arr)), Some("T::Array[T.untyped]".to_string()));
 
         // 19. literal_type on LIT float value
         let float_lit: crate::ast::Node = serde_json::from_str(r#"{
@@ -2385,7 +2386,7 @@ mod tests {
             "children": [],
             "first_lineno": 1, "first_column": 1, "last_lineno": 1, "last_column": 5, "text": "3.14"
         }"#).unwrap();
-        assert_eq!(visitor.expression_type(&float_lit), Some("Float".to_string()));
+        assert_eq!(get_type_str(visitor.expression_type(&float_lit)), Some("Float".to_string()));
 
         // 20. noreturn_body with empty branches (IF/UNLESS)
         let noreturn_if_empty: crate::ast::Node = serde_json::from_str(r#"{
@@ -2523,7 +2524,7 @@ mod tests {
         visitor.collect_hidden_enum_observations_node(&include_node, &record, &params_map);
 
         // 26. inspect_dead_nil_check nil check and safe_nav on a non-nil receiver
-        visitor.local_types.insert("nn".to_string(), "String".to_string());
+        visitor.local_types.insert("nn".to_string(), TypeExpr::from("String"));
         let nil_check_node: crate::ast::Node = serde_json::from_str(r#"{
             "type": "CALL",
             "children": [
@@ -2603,7 +2604,7 @@ mod tests {
             "type": "SYMBOL", "children": [], "first_lineno":1, "first_column":1, "last_lineno":1, "last_column":2, "text":":a"
         }"#).unwrap();
         visitor.local_hash_shapes.insert("h_idx".to_string(), json!({"keys": {"a": ["String"]}}));
-        assert_eq!(visitor.hash_shape_index_type_readonly(&hash_idx_recv, &hash_idx_key), Some("T.nilable(String)".to_string()));
+        assert_eq!(get_type_str(visitor.hash_shape_index_type_readonly(&hash_idx_recv, &hash_idx_key)), Some("T.nilable(String)".to_string()));
 
         // 29. GVASGN inspect_ivar_container_origin / inspect_struct_declaration
         let gvasgn_node: crate::ast::Node = serde_json::from_str(r#"{
@@ -2989,12 +2990,12 @@ mod tests {
         assert_eq!(entries[1], ("b".to_string(), "String".to_string()));
 
         // 3. collection_index_status
-        assert_eq!(collection_index_status(Some("T.untyped"), None), "weak collection receiver");
-        assert_eq!(collection_index_status(Some("Array<Integer>"), None), "typed collection receiver");
-        assert_eq!(collection_index_status(Some("Hash<Symbol, String>"), None), "typed collection receiver");
-        assert_eq!(collection_index_status(Some("T::Array[Integer]"), None), "typed collection receiver");
-        assert_eq!(collection_index_status(Some("T::Hash[Symbol, String]"), None), "typed collection receiver");
-        assert_eq!(collection_index_status(Some("String"), None), "non-collection or unresolved receiver");
+        assert_eq!(collection_index_status(Some(&TypeExpr::from("T.untyped")), None), "weak collection receiver");
+        assert_eq!(collection_index_status(Some(&TypeExpr::from("Array<Integer>")), None), "typed collection receiver");
+        assert_eq!(collection_index_status(Some(&TypeExpr::from("Hash<Symbol, String>")), None), "typed collection receiver");
+        assert_eq!(collection_index_status(Some(&TypeExpr::from("T::Array[Integer]")), None), "typed collection receiver");
+        assert_eq!(collection_index_status(Some(&TypeExpr::from("T::Hash[Symbol, String]")), None), "typed collection receiver");
+        assert_eq!(collection_index_status(Some(&TypeExpr::from("String")), None), "non-collection or unresolved receiver");
 
         // 4. dispatch_helper_call
         let node_fcall = make_node(
@@ -3069,7 +3070,7 @@ mod tests {
         let mut current_owners = vec![];
         let mut ivar_tlet_types = std::collections::BTreeMap::new();
         collect_prepass_facts(&class_node, Language::Ruby, &mut current_owners, &mut ivar_tlet_types);
-        assert_eq!(ivar_tlet_types.get(&("MyClass".to_string(), "@my_ivar".to_string())), Some(&"Integer".to_string()));
+        assert_eq!(get_type_str(ivar_tlet_types.get(&("MyClass".to_string(), "@my_ivar".to_string())).cloned()), Some("Integer".to_string()));
 
         // 6. collect_return_usage_site_context direct_usage variants
         let node_arg_list = make_node(
@@ -3346,7 +3347,7 @@ mod tests {
             "if true; nil; else; else_var = 1; end"
         );
         visitor.visit(&node_if);
-        assert_eq!(visitor.local_types.get("else_var").unwrap(), "T.nilable(Integer)");
+        assert_eq!(visitor.local_types.get("else_var").unwrap().to_sorbet_string(), "T.nilable(Integer)");
 
         visitor.unconditional_vars.insert("else_var_uncond".to_string());
         let node_if_uncond = make_node(
@@ -3366,7 +3367,7 @@ mod tests {
             "if true; nil; else; else_var_uncond = 1; end"
         );
         visitor.visit(&node_if_uncond);
-        assert_eq!(visitor.local_types.get("else_var_uncond").unwrap(), "T.nilable(Integer)");
+        assert_eq!(visitor.local_types.get("else_var_uncond").unwrap().to_sorbet_string(), "T.nilable(Integer)");
 
         // 13. collect_prepass_facts empty owners IASGN
         let mut empty_owners = vec![];
@@ -3424,9 +3425,9 @@ mod tests {
         visitor.visit(&node_iter_no_args);
 
         // 17. Collection iteration zero params or invalid collection types
-        visitor.local_types.insert("my_hash_zero".to_string(), "T::Hash[Symbol, Integer]".to_string());
-        visitor.local_types.insert("my_array_zero".to_string(), "T::Array[String]".to_string());
-        visitor.local_types.insert("my_string_each".to_string(), "String".to_string());
+        visitor.local_types.insert("my_hash_zero".to_string(), TypeExpr::from("T::Hash[Symbol, Integer]"));
+        visitor.local_types.insert("my_array_zero".to_string(), TypeExpr::from("T::Array[String]"));
+        visitor.local_types.insert("my_string_each".to_string(), TypeExpr::from("String"));
 
         let iter_hash_zero = make_node(
             "ITER",
@@ -3499,7 +3500,7 @@ mod tests {
         visitor.visit(&iter_string);
 
         // 17.5 iteration with untyped collection elements (none type)
-        visitor.local_types.insert("my_hash_none".to_string(), "T::Hash".to_string());
+        visitor.local_types.insert("my_hash_none".to_string(), TypeExpr::from("T::Hash"));
         let iter_hash_none = make_node(
             "ITER",
             vec![
@@ -3529,7 +3530,7 @@ mod tests {
         );
         visitor.visit(&iter_hash_none);
 
-        visitor.local_types.insert("my_array_none".to_string(), "T::Array".to_string());
+        visitor.local_types.insert("my_array_none".to_string(), TypeExpr::from("T::Array"));
         let iter_array_none = make_node(
             "ITER",
             vec![
@@ -3557,8 +3558,8 @@ mod tests {
         visitor.visit(&iter_array_none);
 
         // 18. CALL parameter type update (merge!)
-        visitor.param_types.insert("my_param_hash".to_string(), "T::Hash[Symbol, Integer]".to_string());
-        visitor.local_types.insert("other_hash".to_string(), "T::Hash[Symbol, Integer]".to_string());
+        visitor.param_types.insert("my_param_hash".to_string(), TypeExpr::from("T::Hash[Symbol, Integer]"));
+        visitor.local_types.insert("other_hash".to_string(), TypeExpr::from("T::Hash[Symbol, Integer]"));
         let node_merge_param = make_node(
             "CALL",
             vec![
@@ -3573,10 +3574,10 @@ mod tests {
             "my_param_hash.merge!(other_hash)"
         );
         visitor.visit(&node_merge_param);
-        assert_eq!(visitor.param_types.get("my_param_hash").unwrap(), "T::Hash[Symbol, Integer]");
+        assert_eq!(visitor.param_types.get("my_param_hash").unwrap().to_sorbet_string(), "T::Hash[Symbol, Integer]");
 
         // 19. CALL push edge cases
-        visitor.local_types.insert("push_no_args".to_string(), "T::Array[String]".to_string());
+        visitor.local_types.insert("push_no_args".to_string(), TypeExpr::from("T::Array[String]"));
         let node_push_no_args = make_node(
             "CALL",
             vec![
@@ -3603,7 +3604,7 @@ mod tests {
         );
         visitor.visit(&node_push_no_type);
 
-        visitor.local_types.insert("push_non_col".to_string(), "String".to_string());
+        visitor.local_types.insert("push_non_col".to_string(), TypeExpr::from("String"));
         let node_push_non_col = make_node(
             "CALL",
             vec![
@@ -3619,7 +3620,7 @@ mod tests {
         );
         visitor.visit(&node_push_non_col);
 
-        visitor.local_types.insert("push_hash".to_string(), "T::Hash[Symbol, Integer]".to_string());
+        visitor.local_types.insert("push_hash".to_string(), TypeExpr::from("T::Hash[Symbol, Integer]"));
         let node_push_hash = make_node(
             "CALL",
             vec![
@@ -3636,7 +3637,7 @@ mod tests {
         visitor.visit(&node_push_hash);
 
         // 20. CALL []= edge cases
-        visitor.local_types.insert("bracket_few_args".to_string(), "T::Hash[Symbol, Integer]".to_string());
+        visitor.local_types.insert("bracket_few_args".to_string(), TypeExpr::from("T::Hash[Symbol, Integer]"));
         let node_bracket_few_args = make_node(
             "CALL",
             vec![
@@ -3652,7 +3653,7 @@ mod tests {
         );
         visitor.visit(&node_bracket_few_args);
 
-        visitor.local_types.insert("bracket_non_col".to_string(), "String".to_string());
+        visitor.local_types.insert("bracket_non_col".to_string(), TypeExpr::from("String"));
         let node_bracket_non_col = make_node(
             "CALL",
             vec![
@@ -3672,7 +3673,7 @@ mod tests {
         visitor.visit(&node_bracket_non_col);
 
         // 21. CALL merge! edge cases
-        visitor.local_types.insert("merge_no_args".to_string(), "T::Hash[Symbol, Integer]".to_string());
+        visitor.local_types.insert("merge_no_args".to_string(), TypeExpr::from("T::Hash[Symbol, Integer]"));
         let node_merge_no_args = make_node(
             "CALL",
             vec![
@@ -3684,8 +3685,8 @@ mod tests {
         );
         visitor.visit(&node_merge_no_args);
 
-        visitor.local_types.insert("merge_arg_non_hash".to_string(), "T::Hash[Symbol, Integer]".to_string());
-        visitor.local_types.insert("non_hash_arg".to_string(), "String".to_string());
+        visitor.local_types.insert("merge_arg_non_hash".to_string(), TypeExpr::from("T::Hash[Symbol, Integer]"));
+        visitor.local_types.insert("non_hash_arg".to_string(), TypeExpr::from("String"));
         let node_merge_arg_non_hash = make_node(
             "CALL",
             vec![
@@ -3716,7 +3717,7 @@ mod tests {
         );
         visitor.visit(&node_merge_no_type);
 
-        visitor.local_types.insert("merge_non_col".to_string(), "String".to_string());
+        visitor.local_types.insert("merge_non_col".to_string(), TypeExpr::from("String"));
         let node_merge_non_col = make_node(
             "CALL",
             vec![
@@ -3733,7 +3734,7 @@ mod tests {
         visitor.visit(&node_merge_non_col);
 
         // 22. merge! where receiver is Array (not Hash)
-        visitor.local_types.insert("merge_rec_array".to_string(), "T::Array[Integer]".to_string());
+        visitor.local_types.insert("merge_rec_array".to_string(), TypeExpr::from("T::Array[Integer]"));
         let node_merge_rec_array = make_node(
             "CALL",
             vec![
@@ -3750,7 +3751,7 @@ mod tests {
         visitor.visit(&node_merge_rec_array);
 
         // 23. merge! where argument is Array (not Hash)
-        visitor.local_types.insert("some_array".to_string(), "T::Array[Integer]".to_string());
+        visitor.local_types.insert("some_array".to_string(), TypeExpr::from("T::Array[Integer]"));
         let node_merge_arg_array = make_node(
             "CALL",
             vec![
@@ -3787,7 +3788,7 @@ mod tests {
         visitor.visit(&node_nil_check);
 
         // 26. nil? call with non-nil type (dead check)
-        visitor.local_types.insert("y".to_string(), "Integer".to_string());
+        visitor.local_types.insert("y".to_string(), TypeExpr::from("Integer"));
         let node_nil_check_dead = make_node(
             "CALL",
             vec![
@@ -3861,12 +3862,12 @@ mod tests {
 
         // 32. static_sorbet_type edge cases
         // - starts_with T.nilable( but ends with unmatched paren to hit line 72 in strip_nilable_type
-        assert_eq!(strip_nilable_type("T.nilable(foo(bar)"), "T.nilable(foo(bar)");
-        assert_eq!(strip_nilable_type("T.nilable(Int)"), "Int");
+        assert_eq!(strip_nilable_type(&TypeExpr::from("T.nilable(foo(bar)")).to_sorbet_string(), "T.nilable(foo(bar)");
+        assert_eq!(strip_nilable_type(&TypeExpr::from("T.nilable(Int)")).to_sorbet_string(), "Int");
         // - static_sorbet_type has_nil but no others to hit line 126
-        assert_eq!(static_sorbet_type(&["NilClass".to_string()]), "NilClass");
+        assert_eq!(static_sorbet_type(&["NilClass".to_string()], "ruby").to_sorbet_string(), "NilClass");
         // - static_sorbet_type others.len() > 1 to hit line 139 and 142
-        assert_eq!(static_sorbet_type(&["Integer".to_string(), "String".to_string()]), "T.untyped");
+        assert_eq!(static_sorbet_type(&["Integer".to_string(), "String".to_string()], "ruby").to_sorbet_string(), "T.untyped");
 
         // 33. visit CLASS/MODULE qualified name when current_owners is not empty to hit line 486
         visitor.current_owners = vec!["Outer".to_string()];
@@ -3899,7 +3900,7 @@ mod tests {
 
         // 35. local / param type updates on Set receiver, param types check, concat call
         // Set receiver, is param, update_type format_set_type (line 1051, 1056)
-        visitor.param_types.insert("my_set_param".to_string(), "T::Set[Integer]".to_string());
+        visitor.param_types.insert("my_set_param".to_string(), TypeExpr::from("T::Set[Integer]"));
         let node_set_push = make_node(
             "CALL",
             vec![
@@ -3916,8 +3917,8 @@ mod tests {
         visitor.visit(&node_set_push);
 
         // concat method call (line 1044)
-        visitor.local_types.insert("my_arr_local".to_string(), "T::Array[Integer]".to_string());
-        visitor.local_types.insert("other_arr_local".to_string(), "T::Array[String]".to_string());
+        visitor.local_types.insert("my_arr_local".to_string(), TypeExpr::from("T::Array[Integer]"));
+        visitor.local_types.insert("other_arr_local".to_string(), TypeExpr::from("T::Array[String]"));
         let node_concat = make_node(
             "CALL",
             vec![
@@ -3934,7 +3935,7 @@ mod tests {
         visitor.visit(&node_concat);
 
         // append method where argument is a hash literal to hit line 1034
-        visitor.local_types.insert("my_arr_for_hash".to_string(), "T::Array[T.untyped]".to_string());
+        visitor.local_types.insert("my_arr_for_hash".to_string(), TypeExpr::from("T::Array[T.untyped]"));
         let node_push_hash_lit = make_node(
             "CALL",
             vec![
@@ -3962,7 +3963,7 @@ mod tests {
         visitor.visit(&node_push_hash_lit);
 
         // 36. []= method where receiver is in param_types to hit line 1082, 1086, 1088
-        visitor.param_types.insert("my_hash_param".to_string(), "T::Hash[Symbol, Integer]".to_string());
+        visitor.param_types.insert("my_hash_param".to_string(), TypeExpr::from("T::Hash[Symbol, Integer]"));
         let node_hash_assign = make_node(
             "CALL",
             vec![
@@ -3982,7 +3983,7 @@ mod tests {
         visitor.visit(&node_hash_assign);
 
         // 37. conditional assignment with existing T.nilable( to hit line 1155
-        visitor.local_types.insert("cond_var".to_string(), "T.nilable(Integer)".to_string());
+        visitor.local_types.insert("cond_var".to_string(), TypeExpr::from("T.nilable(Integer)"));
         let node_cond_assign = make_node(
             "IF",
             vec![
@@ -4295,7 +4296,7 @@ mod tests {
 
         // 55. deterministic_class_predicate_result / class_guard_truth edge cases to hit 1346, 1347, 1415, 1466, 1473, 1474
         // valid class guard returning Some
-        visitor.local_types.insert("guard_x".to_string(), "Integer".to_string());
+        visitor.local_types.insert("guard_x".to_string(), TypeExpr::from("Integer"));
         let class_guard_node = make_node(
             "CALL",
             vec![
@@ -4344,9 +4345,9 @@ mod tests {
         assert!(visitor.deterministic_class_predicate_result(&non_type_guard_node).is_none());
 
         // class_guard_truth edge cases
-        assert_eq!(visitor.class_guard_truth("Integer", "Integer", true), None); // exact true disjoint false -> 1466
-        assert_eq!(visitor.class_guard_truth("Integer", "String", false), Some(false)); // disjoint true -> 1473
-        assert_eq!(visitor.class_guard_truth("MyClass", "OtherClass", false), None); // disjoint false -> 1474
+        assert_eq!(visitor.class_guard_truth(&TypeExpr::from("Integer"), "Integer", true), None); // exact true disjoint false -> 1466
+        assert_eq!(visitor.class_guard_truth(&TypeExpr::from("Integer"), "String", false), Some(false)); // disjoint true -> 1473
+        assert_eq!(visitor.class_guard_truth(&TypeExpr::from("MyClass"), "OtherClass", false), None); // disjoint false -> 1474
 
         // 56. deterministic_literal_comparison_result edge cases to hit 1526, 1531, 1534-1538
         let comp_bad_method = make_node(
@@ -4392,10 +4393,10 @@ mod tests {
 
         // 57. deterministic_guard_subject_type IVAR, fallback to static_expression_type to hit 1561-1563, 1565
         visitor.current_owners = vec!["MyClass".to_string()];
-        visitor.ivar_tlet_types.insert(("MyClass".to_string(), "@my_ivar".to_string()), "String".to_string());
+        visitor.ivar_tlet_types.insert(("MyClass".to_string(), "@my_ivar".to_string()), TypeExpr::from("String"));
         let ivar_node = make_node("IVAR", vec![make_symbol("@my_ivar")], "@my_ivar");
-        assert_eq!(visitor.deterministic_guard_subject_type(&ivar_node), Some("String".to_string()));
-        assert_eq!(visitor.deterministic_guard_subject_type(&true_node), Some("T::Boolean".to_string()));
+        assert_eq!(get_type_str(visitor.deterministic_guard_subject_type(&ivar_node)), Some("String".to_string()));
+        assert_eq!(get_type_str(visitor.deterministic_guard_subject_type(&true_node)), Some("T::Boolean".to_string()));
 
         // 58. literal_static_value for fallback nodes to hit 1587-1596
         let node_int = make_node("INTEGER", vec![], "123");
@@ -4778,7 +4779,7 @@ mod tests {
         visitor.visit(&node_if_empty);
 
         // []= on a receiver variable with an Array type to hit line 1086
-        visitor.local_types.insert("bracket_arr_rec".to_string(), "T::Array[Integer]".to_string());
+        visitor.local_types.insert("bracket_arr_rec".to_string(), TypeExpr::from("T::Array[Integer]"));
         let node_bracket_arr_rec = make_node(
             "CALL",
             vec![
@@ -4840,10 +4841,7 @@ mod tests {
         // 72. LVAR has local hash shape but no type in expression_type_with_locals_and_shapes to hit line 2039
         visitor.local_hash_shapes.insert("no_type_hash".to_string(), json!({"keys": {}}));
         let no_type_hash_node = make_node("LVAR", vec![make_symbol("no_type_hash")], "no_type_hash");
-        assert_eq!(
-            visitor.expression_type_with_locals_and_shapes(&no_type_hash_node, &BTreeMap::new(), &BTreeMap::new()),
-            Some(visitor.behavior.untyped_hash_type())
-        );
+        assert_eq!(get_type_str(visitor.expression_type_with_locals_and_shapes(&no_type_hash_node, &BTreeMap::new(), &BTreeMap::new())), Some(visitor.behavior.untyped_hash_type()));
 
         // 73. OR / AND left == right == Some("NilClass") in expression_type_with_locals_and_shapes to hit line 2078
         let node_or_nil = make_node(
@@ -4854,13 +4852,10 @@ mod tests {
             ],
             "nil || nil"
         );
-        assert_eq!(
-            visitor.expression_type_with_locals_and_shapes(&node_or_nil, &BTreeMap::new(), &BTreeMap::new()),
-            Some("NilClass".to_string())
-        );
+        assert_eq!(get_type_str(visitor.expression_type_with_locals_and_shapes(&node_or_nil, &BTreeMap::new(), &BTreeMap::new())), Some("NilClass".to_string()));
 
         // 74. ITER node read-only expression_type lookup to hit lines 2125-2204
-        visitor.local_types.insert("a".to_string(), "T::Array[Integer]".to_string());
+        visitor.local_types.insert("a".to_string(), TypeExpr::from("T::Array[Integer]"));
         visitor.static_expression_type(&iter_arr);
 
         // 75. ITER map node read-only expression_type lookup to hit lines 2172-2197
@@ -4925,11 +4920,8 @@ mod tests {
             ],
             "first_lineno": 1, "first_column": 1, "last_lineno": 1, "last_column": 20, "text": "a.filter_map { |elem| elem }"
         }"#).unwrap();
-        visitor.local_types.insert("a".to_string(), "T::Array[T.nilable(Integer)]".to_string());
-        assert_eq!(
-            visitor.static_expression_type(&iter_filter_map_nilable),
-            Some("T::Array[Integer]".to_string())
-        );
+        visitor.local_types.insert("a".to_string(), TypeExpr::from("T::Array[T.nilable(Integer)]"));
+        assert_eq!(get_type_str(visitor.static_expression_type(&iter_filter_map_nilable)), Some("T::Array[Integer]".to_string()));
 
         // 77. ITER each node with a hash receiver to hit lines 2146-2159
         let iter_hash: crate::ast::Node = serde_json::from_str(r#"{
@@ -4961,7 +4953,7 @@ mod tests {
             ],
             "first_lineno": 1, "first_column": 1, "last_lineno": 1, "last_column": 20, "text": "h.each { |k, v| }"
         }"#).unwrap();
-        visitor.local_types.insert("h".to_string(), "T::Hash[Symbol, Integer]".to_string());
+        visitor.local_types.insert("h".to_string(), TypeExpr::from("T::Hash[Symbol, Integer]"));
         visitor.static_expression_type(&iter_hash);
 
         // 78. CALL [] with shapes lookup to hit line 2211
@@ -4981,14 +4973,14 @@ mod tests {
         visitor.static_expression_type(&node_bracket_lookup);
 
         // 79. inferred_return_types lookup in static_expression_type to hit line 2225
-        visitor.inferred_return_types.insert(("MyClass".to_string(), "my_inferred_method".to_string()), "String".to_string());
+        visitor.inferred_return_types.insert(("MyClass".to_string(), "my_inferred_method".to_string()), TypeExpr::from("String"));
         visitor.current_owners = vec!["MyClass".to_string()];
         let call_inferred = make_node(
             "VCALL",
             vec![make_symbol("my_inferred_method")],
             "my_inferred_method"
         );
-        assert_eq!(visitor.static_expression_type(&call_inferred), Some("String".to_string()));
+        assert_eq!(get_type_str(visitor.static_expression_type(&call_inferred)), Some("String".to_string()));
 
         // 80. static_call_return_type lookup to hit line 2229
         let call_array_index = make_node(
@@ -5004,8 +4996,8 @@ mod tests {
             ],
             "my_arr_local[0]"
         );
-        visitor.local_types.insert("my_arr_local".to_string(), "T::Array[Integer]".to_string());
-        assert_eq!(visitor.static_expression_type(&call_array_index), Some("T.nilable(Integer)".to_string()));
+        visitor.local_types.insert("my_arr_local".to_string(), TypeExpr::from("T::Array[Integer]"));
+        assert_eq!(get_type_str(visitor.static_expression_type(&call_array_index)), Some("T.nilable(Integer)".to_string()));
 
         // 81. propagated_collection_return_type lookup to hit line 2235
         let call_concat = make_node(
@@ -5021,7 +5013,7 @@ mod tests {
             ],
             "my_arr_local.concat(other_arr_local)"
         );
-        assert_eq!(visitor.static_expression_type(&call_concat), Some("T::Array[Integer]".to_string()));
+        assert_eq!(get_type_str(visitor.static_expression_type(&call_concat)), Some("T::Array[Integer]".to_string()));
 
         // 82. Flat hash elements lookup to hit lines 2307-2333 and HASH literal type case (line 2371)
         let flat_hash_node = make_node(
@@ -5044,11 +5036,11 @@ mod tests {
             ],
             "Foo.new"
         );
-        assert_eq!(visitor.literal_type(&call_new_node), Some("Foo".to_string()));
+        assert_eq!(get_type_str(visitor.literal_type(&call_new_node)), Some("Foo".to_string()));
 
         // 84. signatures return type extraction in known_return_type to hit lines 2395-2397
         visitor.signatures.insert("MyClass\u{0}my_sig_method".to_string(), "sig { returns(Integer) }".to_string());
-        assert_eq!(visitor.known_return_type("my_sig_method"), Some("Integer".to_string()));
+        assert_eq!(get_type_str(visitor.known_return_type("my_sig_method")), Some("Integer".to_string()));
 
         // 85. IF node where both then and else are noreturn to hit lines 2416-2418
         let node_noreturn_if = make_node(
@@ -5360,7 +5352,7 @@ mod tests {
             ],
             "no_type_hash_with_key[:a]"
         );
-        assert_eq!(visitor.static_expression_type(&node_bracket_lookup_with_key), Some("T.nilable(Integer)".to_string()));
+        assert_eq!(get_type_str(visitor.static_expression_type(&node_bracket_lookup_with_key)), Some("T.nilable(Integer)".to_string()));
 
         let fcall_bracket = make_node(
             "FCALL",

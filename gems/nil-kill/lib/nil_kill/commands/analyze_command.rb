@@ -11,7 +11,7 @@ module NilKill
       def run
         evidence_path = option("--evidence") || File.join(TMP_DIR, "evidence.json")
         output = option("--output") || evidence_path
-        evidence = JSON.parse(File.read(evidence_path))
+        evidence = FactMine::Syntax::TypeExpr.wrap_types!(JSON.parse(File.read(evidence_path)))
         abort "analyze requires normalized schema_version 2 evidence" unless Schema::EvidenceBundle.v2?(evidence)
         evidence["actions"] = Analyzers::RuntimeEvidenceAnalyzer.new(evidence).analyze
         FileUtils.mkdir_p(File.dirname(output))
