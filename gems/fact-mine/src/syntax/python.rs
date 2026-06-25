@@ -282,6 +282,41 @@ impl NormalizedLanguageBehavior for PythonNormalizedBehavior {
         }
         None
     }
+
+    fn format_array_type(&self, elem: &str) -> String {
+        format!("List[{elem}]")
+    }
+
+    fn format_hash_type(&self, key: &str, val: &str) -> String {
+        format!("Dict[{key}, {val}]")
+    }
+
+    fn format_set_type(&self, elem: &str) -> String {
+        format!("Set[{elem}]")
+    }
+
+    fn format_nilable_type(&self, type_text: &str) -> String {
+        if type_text.is_empty() || type_text == "nil" || type_text == "null" || type_text == "None" {
+            return type_text.to_string();
+        }
+        if type_text.starts_with("Optional[") {
+            type_text.to_string()
+        } else {
+            format!("Optional[{type_text}]")
+        }
+    }
+
+    fn untyped_type(&self) -> String {
+        "Any".to_string()
+    }
+
+    fn untyped_array_type(&self) -> String {
+        "List[Any]".to_string()
+    }
+
+    fn untyped_hash_type(&self) -> String {
+        "Dict[Any, Any]".to_string()
+    }
 }
 
 static BEHAVIOR: PythonNormalizedBehavior = PythonNormalizedBehavior;

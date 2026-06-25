@@ -313,6 +313,26 @@ impl NormalizedLanguageBehavior for GoNormalizedBehavior {
     fn predicate_body_language_signal(&self, text: &str) -> bool {
         text.to_ascii_lowercase().contains("nil")
     }
+
+    fn format_array_type(&self, elem: &str) -> String {
+        format!("[]{elem}")
+    }
+
+    fn format_hash_type(&self, key: &str, _val: &str) -> String {
+        format!("map[{key}]value_type")
+    }
+
+    fn format_set_type(&self, elem: &str) -> String {
+        format!("map[{elem}]struct{{}}")
+    }
+
+    fn untyped_array_type(&self) -> String {
+        "[]any".to_string()
+    }
+
+    fn untyped_hash_type(&self) -> String {
+        "map[string]any".to_string()
+    }
 }
 
 static BEHAVIOR: GoNormalizedBehavior = GoNormalizedBehavior;

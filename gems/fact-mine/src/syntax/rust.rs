@@ -232,6 +232,26 @@ impl NormalizedLanguageBehavior for RustNormalizedBehavior {
         }
         None
     }
+
+    fn format_array_type(&self, elem: &str) -> String {
+        format!("Vec<{elem}>")
+    }
+
+    fn format_hash_type(&self, key: &str, val: &str) -> String {
+        format!("HashMap<{key}, {val}>")
+    }
+
+    fn format_set_type(&self, elem: &str) -> String {
+        format!("HashSet<{elem}>")
+    }
+
+    fn untyped_array_type(&self) -> String {
+        "Vec<Value>".to_string()
+    }
+
+    fn untyped_hash_type(&self) -> String {
+        "HashMap<String, Value>".to_string()
+    }
 }
 
 static BEHAVIOR: RustNormalizedBehavior = RustNormalizedBehavior;

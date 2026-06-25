@@ -165,6 +165,10 @@ pub(crate) trait NormalizedLanguageBehavior: Sync {
         None
     }
 
+    fn known_return_type(&self, _name: &str) -> Option<String> {
+        None
+    }
+
     fn propagated_collection_return_type(
         &self,
         _message: &str,
@@ -533,6 +537,41 @@ pub(crate) trait NormalizedLanguageBehavior: Sync {
         _resbody: &Node,
     ) -> Vec<NormalizedSemanticEffect> {
         Vec::new()
+    }
+
+    fn format_array_type(&self, elem: &str) -> String {
+        format!("T::Array[{}]", elem)
+    }
+
+    fn format_hash_type(&self, key: &str, val: &str) -> String {
+        format!("T::Hash[{}, {}]", key, val)
+    }
+
+    fn format_set_type(&self, elem: &str) -> String {
+        format!("T::Set[{}]", elem)
+    }
+
+    fn format_nilable_type(&self, type_text: &str) -> String {
+        if type_text.is_empty() || type_text == "nil" || type_text == "null" || type_text == "None" {
+            return type_text.to_string();
+        }
+        if type_text == "NilClass" || type_text.starts_with("T.nilable(") {
+            type_text.to_string()
+        } else {
+            format!("T.nilable({})", type_text)
+        }
+    }
+
+    fn untyped_type(&self) -> String {
+        "T.untyped".to_string()
+    }
+
+    fn untyped_array_type(&self) -> String {
+        "T::Array[T.untyped]".to_string()
+    }
+
+    fn untyped_hash_type(&self) -> String {
+        "T::Hash[T.untyped, T.untyped]".to_string()
     }
 }
 

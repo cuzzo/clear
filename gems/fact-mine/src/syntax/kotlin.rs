@@ -224,6 +224,26 @@ impl NormalizedLanguageBehavior for KotlinNormalizedBehavior {
         }
         None
     }
+
+    fn format_array_type(&self, elem: &str) -> String {
+        format!("List<{elem}>")
+    }
+
+    fn format_hash_type(&self, key: &str, val: &str) -> String {
+        format!("Map<{key}, {val}>")
+    }
+
+    fn format_set_type(&self, elem: &str) -> String {
+        format!("Set<{elem}>")
+    }
+
+    fn untyped_array_type(&self) -> String {
+        "List<Object>".to_string()
+    }
+
+    fn untyped_hash_type(&self) -> String {
+        "Map<String, Object>".to_string()
+    }
 }
 
 static BEHAVIOR: KotlinNormalizedBehavior = KotlinNormalizedBehavior;

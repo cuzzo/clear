@@ -369,6 +369,17 @@ impl NormalizedLanguageBehavior for RubyNormalizedBehavior {
         Some(fields)
     }
 
+    fn known_return_type(&self, name: &str) -> Option<String> {
+        match name {
+            "puts" | "print" | "warn" => Some("NilClass".to_string()),
+            "to_s" | "to_str" | "inspect" => Some("String".to_string()),
+            "to_i" | "size" | "length" | "count" | "hash" => Some("Integer".to_string()),
+            "to_f" => Some("Float".to_string()),
+            "nil?" | "empty?" | "include?" | "any?" | "all?" | "none?" | "one?" | "key?" | "has_key?" | "!" => Some("T::Boolean".to_string()),
+            _ => None,
+        }
+    }
+
     fn static_return_type(&self, message: &str, receiver_type: Option<&str>) -> Option<String> {
         let r = receiver_type.unwrap_or("T.untyped");
         let (receiver_bare, _) = if r.starts_with("T.nilable(") && r.ends_with(')') {
