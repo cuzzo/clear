@@ -196,6 +196,7 @@ module NilKill
     def propose_hash_record_struct_actions
       shapes_by_site = Array(@store.facts["hash_shapes"]).each_with_object({}) do |shape, index|
         index[[shape["path"], shape["line"].to_i, shape["code"].to_s]] = shape
+        index[[shape["path"], shape["line"].to_i]] ||= shape
       end
       lookups = Array(@store.facts["collection_index_lookups"]).select do |lookup|
         origin = lookup["origin"] || {}
@@ -206,7 +207,7 @@ module NilKill
       end
       lookups.group_by { |lookup| [lookup.dig("origin", "path"), lookup.dig("origin", "line").to_i, lookup.dig("origin", "name"), lookup.dig("origin", "code").to_s] }.each do |(path, line, name, code), group|
         next if path.to_s.empty? || line <= 0 || name.to_s.empty? || code.to_s.empty?
-        shape = shapes_by_site[[path, line, code]]
+        shape = shapes_by_site[[path, line, code]] || shapes_by_site[[path, line]]
         next unless shape
         fields = hash_record_struct_fields(shape)
         next if fields.size < 2
@@ -217,7 +218,8 @@ module NilKill
         read_rewrites.uniq! { |rw| [rw["line"], rw["code"]] }
         next if read_rewrites.empty?
         blockers = hash_record_field_blockers(fields) + hash_record_param_signature_blockers(signatures)
-        @store.actions << base_action("promote_hash_record_to_struct", REVIEW, path, line,
+        STDERR.puts "DEBUG_1580: name=#{name.inspect}, signatures=#{signatures.inspect}, blockers=#{blockers.inspect}"
+        @store.actions << base_action("promote_hash_record_to_struct", REVIEW, NilKill.rel(path), line,
           "promote local hash record #{name} to #{struct_name}; rewrite #{read_rewrites.size} literal field read(s)",
           { "name" => name, "struct_name" => struct_name, "scope" => group.first["enclosing_scope"].to_s.split("::").reject(&:empty?),
             "literal" => { "line" => line, "code" => code },
@@ -232,6 +234,7 @@ module NilKill
       existing = Array(@store.facts["existing_sigs"])
       methods_by_name = existing.group_by { |method| method["method"].to_s }
       Array(@store.facts["param_origins"]).filter_map do |origin|
+        STDERR.puts "DEBUG_ORIGIN: origin=#{origin.inspect}, path_match=#{origin["path"].to_s == path.to_s}, kind_match=#{origin["origin_kind"] == "local"}, shape_match=#{hash_record_shape_matches_shape?(origin["hash_shape"], shape)}"
         next unless origin["path"].to_s == path.to_s
         next unless origin["origin_kind"] == "local"
         next unless hash_record_shape_matches_shape?(origin["hash_shape"], shape)
@@ -298,7 +301,7 @@ module NilKill
           end
         end
         blockers = hash_record_field_blockers(fields)
-        @store.actions << base_action("promote_hash_record_to_struct", REVIEW, path, source["line"],
+        @store.actions << base_action("promote_hash_record_to_struct", REVIEW, NilKill.rel(path), source["line"],
           "promote hash record returned by #{callee} to #{struct_name}; rewrite #{read_rewrites.size} forwarded field read(s)",
           { "name" => name, "struct_name" => struct_name, "scope" => scope.to_s.split("::").reject(&:empty?),
             "literal" => { "line" => source["line"], "code" => source["code"] },
@@ -459,7 +462,7 @@ module NilKill
         else
           (producers + consumers).min_by { |site| [site["path"].to_s, site["line"].to_i] }
         end
-        @store.actions << base_action("promote_hash_record_cluster_to_struct", REVIEW, first["path"], first["line"],
+        @store.actions << base_action("promote_hash_record_cluster_to_struct", REVIEW, NilKill.rel(first["path"]), first["line"],
           "plan #{row["type_name"] || row["struct_name"]} from #{row["shape_count"]} hash literal shape(s), #{row["total_pressure"]} pressure slot(s)",
           { "struct_name" => row["struct_name"], "type_name" => row["type_name"], "scope" => row["scope"], "struct_path" => row["struct_path"], "fields" => row["fields"],
             "nested_structs" => row["nested_structs"],

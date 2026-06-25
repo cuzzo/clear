@@ -125,9 +125,7 @@
         "line": 1,
         "name": "method_three",
         "owner": "ruby",
-        "params": [
-          "1"
-        ],
+        "params": [],
         "visibility": "public"
       },
       {

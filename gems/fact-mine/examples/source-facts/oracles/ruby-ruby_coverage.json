@@ -534,12 +534,12 @@
     "clone_candidates": [
       {
         "child_fingerprints": [
-          "argument_list(hash(hash(id id)))"
+          "argument_list(hash(hash(lit id)))"
         ],
         "child_masses": [
           5
         ],
-        "fingerprint": "call<Hash>(id argument_list(hash(hash(id id))))",
+        "fingerprint": "call<Hash>(id argument_list(hash(hash(lit id))))",
         "line": 7,
         "mass": 6,
         "method_name": "(top-level)",
@@ -679,7 +679,7 @@
       },
       {
         "child_fingerprints": [
-          "assignment(id block(call(id id) body(call<any>(id id argument_list(id call<Hash>(id argument_list(hash(hash(id id)))))))))",
+          "assignment(id block(call(id id) body(call<any>(id id argument_list(id call<Hash>(id argument_list(hash(hash(lit id)))))))))",
           "assignment(id block(call(id id) body(id)))",
           "assignment(id call<type_alias>(id id argument_list(id)))",
           "method(id body(body_statement(assignment(id lit) assignment(id lit))))",
@@ -698,7 +698,7 @@
           15,
           67
         ],
-        "fingerprint": "body_statement(assignment(id block(call(id id) body(call<any>(id id argument_list(id call<Hash>(id argument_list(hash(hash(id id))))))))) assignment(id block(call(id id) body(id))) assignment(id call<type_alias>(id id argument_list(id))) method(id body(body_statement(assignment(id lit) assignment(id lit)))) block(id body(call(id call<params>(id argument_list(hash(lit id)))))) method(id body(parameters(id id) body_statement(super(argument_list(id splat_argument(id))) yield(argument_list(id))))) method(id body(parameters(id assignment(id bool)) body_statement(if(call(id id) call<puts>(id argument_list(lit))) call(id id)))) method(id body(body_statement(if(call(lit call(lit id) argument_list(lit)) call<puts>(id argument_list(lit)) if(call(lit call(id id) argument_list(lit)) call<puts>(id argument_list(lit)) if(call(lit id argument_list(lit)) call<puts>(id argument_list(lit)) call<puts>(id argument_list(lit))))) case(id when(argument_list(lit) call<puts>(id argument_list(lit)))) rescue(call<puts>(id argument_list(lit)) resbody(argument_list(id) body_statement(assignment(id) nil))) rescue(call<puts>(id argument_list(lit)) resbody(nil)) while(id bool lit) until(id bool lit) lit sclass(id body(method(id)))))))",
+        "fingerprint": "body_statement(assignment(id block(call(id id) body(call<any>(id id argument_list(id call<Hash>(id argument_list(hash(hash(lit id))))))))) assignment(id block(call(id id) body(id))) assignment(id call<type_alias>(id id argument_list(id))) method(id body(body_statement(assignment(id lit) assignment(id lit)))) block(id body(call(id call<params>(id argument_list(hash(lit id)))))) method(id body(parameters(id id) body_statement(super(argument_list(id splat_argument(id))) yield(argument_list(id))))) method(id body(parameters(id assignment(id bool)) body_statement(if(call(id id) call<puts>(id argument_list(lit))) call(id id)))) method(id body(body_statement(if(call(lit call(lit id) argument_list(lit)) call<puts>(id argument_list(lit)) if(call(lit call(id id) argument_list(lit)) call<puts>(id argument_list(lit)) if(call(lit id argument_list(lit)) call<puts>(id argument_list(lit)) call<puts>(id argument_list(lit))))) case(id when(argument_list(lit) call<puts>(id argument_list(lit)))) rescue(call<puts>(id argument_list(lit)) resbody(argument_list(id) body_statement(assignment(id) nil))) rescue(call<puts>(id argument_list(lit)) resbody(nil)) while(id bool lit) until(id bool lit) lit sclass(id body(method(id)))))))",
         "line": 7,
         "mass": 139,
         "method_name": "(top-level)",
@@ -801,7 +801,7 @@
         "child_masses": [
           2
         ],
-        "fingerprint": "block(call(id id) body(call<any>(id id argument_list(id call<Hash>(id argument_list(hash(hash(id id))))))))",
+        "fingerprint": "block(call(id id) body(call<any>(id id argument_list(id call<Hash>(id argument_list(hash(hash(lit id))))))))",
         "line": 7,
         "mass": 14,
         "method_name": "(top-level)",
@@ -914,29 +914,16 @@
       },
       {
         "child_fingerprints": [
-          "hash(hash(id id))"
+          "hash(hash(lit id))"
         ],
         "child_masses": [
           4
         ],
-        "fingerprint": "argument_list(hash(hash(id id)))",
+        "fingerprint": "argument_list(hash(hash(lit id)))",
         "line": 7,
         "mass": 5,
         "method_name": "(top-level)",
         "node_name": "argument_list"
-      },
-      {
-        "child_fingerprints": [
-          "hash(id id)"
-        ],
-        "child_masses": [
-          3
-        ],
-        "fingerprint": "hash(hash(id id))",
-        "line": 7,
-        "mass": 4,
-        "method_name": "(top-level)",
-        "node_name": "hash"
       },
       {
         "child_fingerprints": [
@@ -953,14 +940,27 @@
       },
       {
         "child_fingerprints": [
+          "hash(lit id)"
+        ],
+        "child_masses": [
+          3
+        ],
+        "fingerprint": "hash(hash(lit id))",
+        "line": 7,
+        "mass": 4,
+        "method_name": "(top-level)",
+        "node_name": "hash"
+      },
+      {
+        "child_fingerprints": [
           "id",
-          "argument_list(id call<Hash>(id argument_list(hash(hash(id id)))))"
+          "argument_list(id call<Hash>(id argument_list(hash(hash(lit id)))))"
         ],
         "child_masses": [
           1,
           8
         ],
-        "fingerprint": "call<any>(id id argument_list(id call<Hash>(id argument_list(hash(hash(id id))))))",
+        "fingerprint": "call<any>(id id argument_list(id call<Hash>(id argument_list(hash(hash(lit id))))))",
         "line": 7,
         "mass": 10,
         "method_name": "(top-level)",
@@ -999,32 +999,17 @@
       {
         "child_fingerprints": [
           "id",
-          "call<Hash>(id argument_list(hash(hash(id id))))"
+          "call<Hash>(id argument_list(hash(hash(lit id))))"
         ],
         "child_masses": [
           1,
           6
         ],
-        "fingerprint": "argument_list(id call<Hash>(id argument_list(hash(hash(id id)))))",
+        "fingerprint": "argument_list(id call<Hash>(id argument_list(hash(hash(lit id)))))",
         "line": 7,
         "mass": 8,
         "method_name": "(top-level)",
         "node_name": "argument_list"
-      },
-      {
-        "child_fingerprints": [
-          "id",
-          "id"
-        ],
-        "child_masses": [
-          1,
-          1
-        ],
-        "fingerprint": "hash(id id)",
-        "line": 7,
-        "mass": 3,
-        "method_name": "(top-level)",
-        "node_name": "hash"
       },
       {
         "child_fingerprints": [
@@ -1252,6 +1237,21 @@
         ],
         "fingerprint": "hash(lit id)",
         "line": 18,
+        "mass": 3,
+        "method_name": "(top-level)",
+        "node_name": "hash"
+      },
+      {
+        "child_fingerprints": [
+          "lit",
+          "id"
+        ],
+        "child_masses": [
+          1,
+          1
+        ],
+        "fingerprint": "hash(lit id)",
+        "line": 7,
         "mass": 3,
         "method_name": "(top-level)",
         "node_name": "hash"

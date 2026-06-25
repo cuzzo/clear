@@ -2865,7 +2865,7 @@ impl<'source> TreeSitterNormalizer<'source> {
         &mut self,
         node: TreeSitterNode<'_>,
     ) -> Option<Node> {
-        if self.normalization_adapter.check_node_role(node, "field") {
+        if self.normalization_adapter.check_node_role(node, "field") || self.normalization_adapter.check_node_role(node, "pair") {
             let named = self.named_children(node);
             if named.len() >= 2 {
                 let key = named[0];

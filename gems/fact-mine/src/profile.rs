@@ -76,6 +76,10 @@ pub struct ProfileOutput {
     pub param_origins: Vec<serde_json::Value>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub tuple_arrays: Vec<serde_json::Value>,
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub struct_field_hash_shapes: BTreeMap<String, serde_json::Value>,
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub struct_field_array_shapes: BTreeMap<String, serde_json::Value>,
 }
 
 #[derive(Clone, Debug, Serialize)]
@@ -287,6 +291,8 @@ pub fn extract(document: &Document, profile: Profile) -> ProfileOutput {
     let mut hash_record_member_calls = Vec::new();
     let mut param_origins = Vec::new();
     let mut tuple_arrays = Vec::new();
+    let mut struct_field_hash_shapes_out = BTreeMap::new();
+    let mut struct_field_array_shapes_out = BTreeMap::new();
 
     let mut pre_registered_noreturns = std::collections::HashSet::new();
     if let Ok(env_val) = std::env::var("FACT_MINE_NORETURN_METHODS") {
@@ -298,7 +304,9 @@ pub fn extract(document: &Document, profile: Profile) -> ProfileOutput {
         }
     }
 
-    collection_index_lookups = extract_collection_index_lookups(&lines, document, &path);
+    if !nil_kill {
+        collection_index_lookups = extract_collection_index_lookups(&lines, document, &path);
+    }
     if nil_kill {
         if let Some(ref root) = root_node {
             let mut ivar_tlet_types = BTreeMap::new();
@@ -320,6 +328,98 @@ pub fn extract(document: &Document, profile: Profile) -> ProfileOutput {
                 &mut struct_declarations,
                 &*behavior,
             );
+            let mut method_param_hash_shapes = BTreeMap::new();
+            let mut method_param_array_shapes = BTreeMap::new();
+            let mut method_return_hash_shapes = BTreeMap::new();
+            let mut method_return_array_shapes = BTreeMap::new();
+            let mut struct_field_hash_shapes = BTreeMap::new();
+            let mut struct_field_array_shapes = BTreeMap::new();
+            if let Ok(path_str) = std::env::var("FACT_MINE_GLOBAL_SHAPES_FILE") {
+                if let Ok(content) = std::fs::read_to_string(path_str) {
+                    if let Ok(val) = serde_json::from_str::<serde_json::Value>(&content) {
+                        if let Some(hash_map) = val.get("struct_field_hash_shapes").and_then(|v| v.as_object()) {
+                            for (k, v) in hash_map {
+                                let parts: Vec<&str> = k.split('\u{0}').collect();
+                                if parts.len() == 2 {
+                                    struct_field_hash_shapes.insert((parts[0].to_string(), parts[1].to_string()), v.clone());
+                                }
+                            }
+                        }
+                        if let Some(array_map) = val.get("struct_field_array_shapes").and_then(|v| v.as_object()) {
+                            for (k, v) in array_map {
+                                let parts: Vec<&str> = k.split('\u{0}').collect();
+                                if parts.len() == 2 {
+                                    struct_field_array_shapes.insert((parts[0].to_string(), parts[1].to_string()), v.clone());
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+            let mut inferred_return_types = BTreeMap::new();
+
+            for _ in 0..3 {
+                let mut visitor = NilKillVisitor {
+                    behavior,
+                    document,
+                    lines: &lines,
+                    path: &path,
+                    current_owners: Vec::new(),
+                    current_method: None,
+                    current_method_kind: String::new(),
+                    current_method_line: 0,
+                    current_method_end_line: 0,
+                    current_params: Vec::new(),
+                    param_types: BTreeMap::new(),
+                    local_types: BTreeMap::new(),
+                    in_conditional: false,
+                    ivar_tlet_types: ivar_tlet_types.clone(),
+                    signatures: signatures_map.clone(),
+                    tlet_sites: &mut tlet_sites,
+                    dead_nil_checks: &mut dead_nil_checks,
+                    deterministic_guards: &mut deterministic_guards,
+                    return_origins: &mut return_origins,
+                    noreturn_methods: &mut noreturn_methods,
+                    collection_index_lookups: &mut collection_index_lookups,
+                    hash_record_blockers: &mut hash_record_blockers,
+                    type_normalizers: &mut type_normalizers,
+                    rescue_handlers: &mut rescue_handlers,
+                    return_usage_sites: &mut return_usage_sites,
+                    return_direct_usage_sites: &mut return_direct_usage_sites,
+                    hash_record_escape_sites: &mut hash_record_escape_sites,
+                    hidden_enum_observations: &mut hidden_enum_observations,
+                    dispatcher_inferences: &mut dispatcher_inferences,
+                    hash_record_member_calls: &mut hash_record_member_calls,
+                    param_origins: &mut param_origins,
+                    struct_declarations: &mut struct_declarations,
+                    state_type_records: &mut state_type_records,
+                    hash_shapes: &mut hash_shapes,
+                    tuple_arrays: &mut tuple_arrays,
+                    local_hash_shapes: BTreeMap::new(),
+                    local_array_shapes: BTreeMap::new(),
+                    local_container_origins: BTreeMap::new(),
+                    ivar_container_origins: BTreeMap::new(),
+                    struct_field_hash_shapes,
+                    struct_field_array_shapes,
+                    pre_registered_noreturns: &pre_registered_noreturns,
+                    is_prepass: true,
+                    method_param_hash_shapes,
+                    method_param_array_shapes,
+                    method_return_hash_shapes,
+                    method_return_array_shapes,
+                    inferred_return_types,
+                    unconditional_vars: BTreeSet::new(),
+                };
+                visitor.visit(root);
+                method_param_hash_shapes = visitor.method_param_hash_shapes;
+                method_param_array_shapes = visitor.method_param_array_shapes;
+                method_return_hash_shapes = visitor.method_return_hash_shapes;
+                method_return_array_shapes = visitor.method_return_array_shapes;
+                struct_field_hash_shapes = visitor.struct_field_hash_shapes;
+                struct_field_array_shapes = visitor.struct_field_array_shapes;
+                inferred_return_types = visitor.inferred_return_types;
+            }
+
             let mut visitor = NilKillVisitor {
                 behavior,
                 document,
@@ -333,6 +433,7 @@ pub fn extract(document: &Document, profile: Profile) -> ProfileOutput {
                 current_params: Vec::new(),
                 param_types: BTreeMap::new(),
                 local_types: BTreeMap::new(),
+                in_conditional: false,
                 ivar_tlet_types,
                 signatures: signatures_map,
                 tlet_sites: &mut tlet_sites,
@@ -359,14 +460,27 @@ pub fn extract(document: &Document, profile: Profile) -> ProfileOutput {
                 local_array_shapes: BTreeMap::new(),
                 local_container_origins: BTreeMap::new(),
                 ivar_container_origins: BTreeMap::new(),
-                struct_field_hash_shapes: BTreeMap::new(),
-                struct_field_array_shapes: BTreeMap::new(),
+                struct_field_hash_shapes,
+                struct_field_array_shapes,
                 pre_registered_noreturns: &pre_registered_noreturns,
+                is_prepass: false,
+                method_param_hash_shapes,
+                method_param_array_shapes,
+                method_return_hash_shapes,
+                method_return_array_shapes,
+                inferred_return_types,
+                unconditional_vars: BTreeSet::new(),
             };
             visitor.visit(root);
             visitor.collect_return_usage_site_context(root, "statement", None, None, false);
             visitor.collect_return_usage_site_context(root, "statement", None, None, true);
             visitor.collect_hash_record_escape_sites(root);
+            struct_field_hash_shapes_out = visitor.struct_field_hash_shapes.iter().map(|((c, f), v)| {
+                (format!("{}\u{0}{}", c, f), v.clone())
+            }).collect();
+            struct_field_array_shapes_out = visitor.struct_field_array_shapes.iter().map(|((c, f), v)| {
+                (format!("{}\u{0}{}", c, f), v.clone())
+            }).collect();
         }
     }
 
@@ -403,6 +517,8 @@ pub fn extract(document: &Document, profile: Profile) -> ProfileOutput {
         hash_record_member_calls,
         param_origins,
         tuple_arrays,
+        struct_field_hash_shapes: struct_field_hash_shapes_out,
+        struct_field_array_shapes: struct_field_array_shapes_out,
     }
 }
 
@@ -441,6 +557,8 @@ pub fn merge(outputs: Vec<ProfileOutput>, profile: Profile) -> ProfileOutput {
     let mut hash_record_member_calls = Vec::new();
     let mut param_origins = Vec::new();
     let mut tuple_arrays = Vec::new();
+    let mut struct_field_hash_shapes = BTreeMap::new();
+    let mut struct_field_array_shapes = BTreeMap::new();
 
     for output in outputs {
         methods.extend(output.methods);
@@ -482,6 +600,8 @@ pub fn merge(outputs: Vec<ProfileOutput>, profile: Profile) -> ProfileOutput {
             hash_record_member_calls.extend(output.hash_record_member_calls);
             param_origins.extend(output.param_origins);
             tuple_arrays.extend(output.tuple_arrays);
+            struct_field_hash_shapes.extend(output.struct_field_hash_shapes);
+            struct_field_array_shapes.extend(output.struct_field_array_shapes);
         }
     }
 
@@ -527,6 +647,8 @@ pub fn merge(outputs: Vec<ProfileOutput>, profile: Profile) -> ProfileOutput {
         hash_record_member_calls,
         param_origins,
         tuple_arrays,
+        struct_field_hash_shapes,
+        struct_field_array_shapes,
     }
 }
 
@@ -2339,9 +2461,11 @@ pub(crate) mod tests {
         let file_path = file_path_buf.to_str().unwrap().to_string();
 
         let source_content = r#"# Ruby source
-def hello(name)
-  user[:name]
-  user.fetch(:id)
+class Greeter
+  def hello(name)
+    user[:name]
+    user.fetch(:id)
+  end
 end
 
 sig do
@@ -3202,6 +3326,17 @@ fn child_nodes(node: &crate::ast::Node) -> Vec<&crate::ast::Node> {
         .collect()
 }
 
+fn call_arguments<'a>(args_node: &'a crate::ast::Node) -> Vec<&'a crate::ast::Node> {
+    let t = args_node.r#type.as_str();
+    if t == "argument_list" || t == "arguments" || t == "parenthesized_arguments" || t == "ARGUMENTS" || t == "ARGUMENT_LIST" || t == "LIST" || t == "list" {
+        child_nodes(args_node)
+    } else if t.is_empty() {
+        vec![]
+    } else {
+        vec![args_node]
+    }
+}
+
 fn child_symbol(node: &crate::ast::Node, index: usize) -> Option<String> {
     match node.children.get(index)? {
         crate::ast::Child::Symbol(value) | crate::ast::Child::String(value) => Some(value.clone()),
@@ -3341,7 +3476,7 @@ impl<'a> StateParamVisitor<'a> {
                         final_func_name, owner, node.first_lineno
                     );
                     if let Some(fn_def) = self.document.function_defs.iter().find(|fd| {
-                        fd.name == final_func_name
+                        (fd.name == final_func_name || (node.r#type == "DEFS" && fd.name == format!("self.{}", final_func_name)))
                             && (fd.line == node.first_lineno || fd.owner == owner)
                     }) {
                         let old_alias = self.current_receiver_alias.clone();
@@ -3473,7 +3608,7 @@ impl<'a> StateParamVisitor<'a> {
                 eprintln!("  field_symbol={}, receiver_text={}, is_self={}, field_name={:?}, params={:?}, args_node={}", field_symbol, receiver_text, is_self, field_name, fn_def.params, args_node.text);
 
                 if let Some(field) = field_name {
-                    let arg_children = child_nodes(args_node);
+                    let arg_children = call_arguments(args_node);
                     let val_node = arg_children
                         .last()
                         .map(|n| *n)
@@ -3653,7 +3788,7 @@ fn get_empty_node() -> &'static crate::ast::Node {
 fn match_call<'a>(
     node: &'a crate::ast::Node,
 ) -> Option<(&'a crate::ast::Node, String, &'a crate::ast::Node)> {
-    if node.r#type == "CALL" || node.r#type == "QCALL" || node.r#type == "OPCALL" {
+    if node.r#type == "CALL" || node.r#type == "QCALL" || node.r#type == "OPCALL" || node.r#type == "ATTRASGN" {
         let receiver = match node.children.get(0)? {
             crate::ast::Child::Node(n) => n.as_ref(),
             _ => return None,
@@ -3677,17 +3812,28 @@ fn child_node(node: &crate::ast::Node, index: usize) -> Option<&crate::ast::Node
 }
 
 fn node_symbol(node: &crate::ast::Node) -> Option<String> {
-    node.children.iter().find_map(|child| match child {
+    let sym = node.children.iter().find_map(|child| match child {
         crate::ast::Child::Symbol(value) | crate::ast::Child::String(value) => Some(value.clone()),
         _ => None,
-    })
+    });
+    if sym.is_none() && (node.r#type == "VCALL" || node.r#type == "FCALL") {
+        let txt = node.text.trim().to_string();
+        if !txt.is_empty() {
+            if let Some(idx) = txt.find('(') {
+                return Some(txt[..idx].trim().to_string());
+            }
+            return Some(txt);
+        }
+    }
+    sym
 }
+
 
 fn implicit_return_expression(node: &crate::ast::Node) -> Option<&crate::ast::Node> {
     match node.r#type.as_str() {
         "BLOCK" | "STATEMENTS" | "BEGIN" | "ELSE" | "PAREN" | "SCOPE" | "ROOT" => {
             let ns = child_nodes(node);
-            ns.last().copied()
+            ns.last().and_then(|&n| implicit_return_expression(n))
         }
         _ => Some(node),
     }
@@ -3805,7 +3951,7 @@ fn collect_prepass_facts(
                 if let Some(val_node) = child_node(node, 1) {
                     if let Some((receiver, method, args_node)) = match_call(val_node) {
                         if method == "let" && receiver.text == "T" {
-                            let arg_nodes = child_nodes(args_node);
+                            let arg_nodes = call_arguments(args_node);
                             if let Some(type_node) = arg_nodes.get(1) {
                                 let type_text = type_node.text.trim().to_string();
                                 if !type_text.is_empty() && type_text != "T.untyped" {
@@ -3845,6 +3991,7 @@ struct NilKillVisitor<'a> {
     current_params: Vec<String>,
     param_types: BTreeMap<String, String>,
     local_types: BTreeMap<String, String>,
+    in_conditional: bool,
     ivar_tlet_types: BTreeMap<(String, String), String>,
     signatures: BTreeMap<String, String>,
     tlet_sites: &'a mut Vec<serde_json::Value>,
@@ -3874,6 +4021,13 @@ struct NilKillVisitor<'a> {
     struct_field_hash_shapes: BTreeMap<(String, String), serde_json::Value>,
     struct_field_array_shapes: BTreeMap<(String, String), serde_json::Value>,
     pre_registered_noreturns: &'a std::collections::HashSet<String>,
+    is_prepass: bool,
+    method_param_hash_shapes: BTreeMap<(String, String, String), serde_json::Value>,
+    method_param_array_shapes: BTreeMap<(String, String, String), serde_json::Value>,
+    method_return_hash_shapes: BTreeMap<(String, String), serde_json::Value>,
+    method_return_array_shapes: BTreeMap<(String, String), serde_json::Value>,
+    inferred_return_types: BTreeMap<(String, String), String>,
+    unconditional_vars: BTreeSet<String>,
 }
 
 const CORE_RUNTIME_GUARD_CLASSES: &[&str] = &[
@@ -3955,7 +4109,8 @@ impl<'a> NilKillVisitor<'a> {
                     };
 
                     if let Some(fn_def) = self.document.function_defs.iter().find(|fd| {
-                        fd.name == func_name && (fd.line == node.first_lineno || fd.owner == owner)
+                        (fd.name == func_name || (node.r#type == "DEFS" && fd.name == format!("self.{}", func_name)))
+                            && (fd.line == node.first_lineno || fd.owner == owner)
                     }) {
                         eprintln!(
                             "NilKillVisitor matched: name={}, owner={}, line={}",
@@ -3966,10 +4121,16 @@ impl<'a> NilKillVisitor<'a> {
                         let old_method_line = self.current_method_line;
                         let old_method_end_line = self.current_method_end_line;
                         let old_params = self.current_params.clone();
-                        let old_param_types = self.param_types.clone();
-                        let old_local_types = self.local_types.clone();
-
+                        let old_param_types = std::mem::take(&mut self.param_types);
+                        let old_local_types = std::mem::take(&mut self.local_types);
+                        let old_local_hash_shapes = std::mem::take(&mut self.local_hash_shapes);
+                        let old_local_array_shapes = std::mem::take(&mut self.local_array_shapes);
+                        let old_local_container_origins = std::mem::take(&mut self.local_container_origins);
+                        let old_unconditional_vars = std::mem::take(&mut self.unconditional_vars);
+                        let old_in_conditional = self.in_conditional;
+ 
                         self.current_method = Some(func_name.clone());
+                        self.in_conditional = false;
                         self.current_method_kind = kind.clone();
                         self.current_method_line = node.first_lineno;
                         self.current_method_end_line = node.last_lineno;
@@ -3995,9 +4156,9 @@ impl<'a> NilKillVisitor<'a> {
                             }
                         }
 
-                        // Populate local_container_origins with method parameters
+                        // Populate local_container_origins with method parameters and parameter shapes
                         eprintln!("DEBUG: DEFN/DEFS matched method: {}, current_params: {:?}", func_name, self.current_params);
-                        for param_name in &self.current_params {
+                        for (idx, param_name) in self.current_params.iter().enumerate() {
                             let origin = json!({
                                 "kind": "method parameter",
                                 "name": param_name,
@@ -4006,24 +4167,37 @@ impl<'a> NilKillVisitor<'a> {
                             });
                             eprintln!("DEBUG: inserting method parameter origin for {}: {:?}", param_name, origin);
                             self.local_container_origins.insert(param_name.clone(), origin);
+
+                            if let Some(shape) = self.get_method_param_hash_shape(&owner, &func_name, param_name)
+                                .or_else(|| self.get_method_param_hash_shape(&owner, &func_name, &idx.to_string()))
+                            {
+                                self.local_hash_shapes.insert(param_name.clone(), shape);
+                            }
+                            if let Some(shape) = self.get_method_param_array_shape(&owner, &func_name, param_name)
+                                .or_else(|| self.get_method_param_array_shape(&owner, &func_name, &idx.to_string()))
+                            {
+                                self.local_array_shapes.insert(param_name.clone(), shape);
+                            }
                         }
 
                         let body = child_node(node, if node.r#type == "DEFS" { 2 } else { 1 });
                         if let Some(body_node) = body {
                             self.visit(body_node);
 
-                            let params_list = self.current_params_json(node);
-                            let record = json!({
-                                "path": self.path,
-                                "line": node.first_lineno,
-                                "class": owner,
-                                "method": func_name,
-                                "kind": kind,
-                                "params": params_list,
-                            });
-                            self.collect_type_normalizers(body_node, &record);
-                            self.collect_hidden_enum_observations(body_node, &record);
-                            self.inspect_dispatcher(body_node, node.first_lineno);
+                            if !self.is_prepass {
+                                let params_list = self.current_params_json(node);
+                                let record = json!({
+                                    "path": self.path,
+                                    "line": node.first_lineno,
+                                    "class": owner,
+                                    "method": func_name,
+                                    "kind": kind,
+                                    "params": params_list,
+                                });
+                                self.collect_type_normalizers(body_node, &record);
+                                self.collect_hidden_enum_observations(body_node, &record);
+                                self.inspect_dispatcher(body_node, node.first_lineno);
+                            }
                         }
 
                         let explicit = body
@@ -4049,7 +4223,7 @@ impl<'a> NilKillVisitor<'a> {
                         let mut sources = Vec::new();
                         let mut blockers = BTreeSet::new();
                         for expr in &expressions {
-                            sources.extend(self.return_sources_for(expr, &mut blockers));
+                            sources.extend(self.return_sources_for(expr, body, &mut blockers));
                         }
                         if expressions.is_empty() || sources.is_empty() {
                             blockers.insert("no return expression found".to_string());
@@ -4091,34 +4265,72 @@ impl<'a> NilKillVisitor<'a> {
                             "blocked"
                         };
 
-                        self.return_origins.push(json!({
-                            "path": self.path,
-                            "line": node.first_lineno,
-                            "end_line": node.last_lineno,
-                            "class": owner,
-                            "method": func_name,
-                            "kind": kind,
-                            "implicit": explicit.is_empty(),
-                            "return_syntax": return_syntax(explicit.is_empty(), implicit_present),
-                            "control_shape": return_control_shape(&explicit, implicit_expr, implicit_present),
-                            "candidate_type": if useful { &candidate } else { "T.untyped" },
-                            "confidence": confidence,
-                            "sources": sources,
-                            "blockers": blockers.into_iter().collect::<Vec<_>>(),
-                            "hash_shape": Value::Null,
-                            "array_element_shape": Value::Null,
-                        }));
+                        eprintln!("DEBUG: method={:?}, expressions={:?}", func_name, expressions.iter().map(|e| (&e.r#type, &e.text)).collect::<Vec<_>>());
+                        let mut ret_hash_shape = None;
+                        for expr in &expressions {
+                            if let Some(shape) = self.hash_shape_for_value(expr) {
+                                if let Some(existing) = ret_hash_shape {
+                                    ret_hash_shape = Some(merge_hash_record_shapes(existing, shape));
+                                } else {
+                                    ret_hash_shape = Some(shape);
+                                }
+                            }
+                        }
+                        if let Some(ref shape) = ret_hash_shape {
+                            let key = (owner.clone(), func_name.clone());
+                            self.method_return_hash_shapes.insert(key, shape.clone());
+                        }
 
-                        let is_noreturn = !self.has_explicit_return(body)
-                            && body.is_some_and(|b| self.noreturn_body(b));
-                        if is_noreturn {
-                            self.noreturn_methods.push(json!({
-                                "name": func_name,
+                        let mut ret_array_shape = None;
+                        for expr in &expressions {
+                            if let Some(shape) = self.array_element_shape_for_value(expr) {
+                                if let Some(existing) = ret_array_shape {
+                                    ret_array_shape = Some(merge_hash_record_shapes(existing, shape));
+                                } else {
+                                    ret_array_shape = Some(shape);
+                                }
+                            }
+                        }
+                        if let Some(ref shape) = ret_array_shape {
+                            let key = (owner.clone(), func_name.clone());
+                            self.method_return_array_shapes.insert(key, shape.clone());
+                        }
+
+                        if useful {
+                            let key = (owner.clone(), func_name.clone());
+                            self.inferred_return_types.insert(key, candidate.clone());
+                        }
+
+                        if !self.is_prepass {
+                            self.return_origins.push(json!({
                                 "path": self.path,
                                 "line": node.first_lineno,
+                                "end_line": node.last_lineno,
                                 "class": owner,
+                                "method": func_name,
                                 "kind": kind,
+                                "implicit": explicit.is_empty(),
+                                "return_syntax": return_syntax(explicit.is_empty(), implicit_present),
+                                "control_shape": return_control_shape(&explicit, implicit_expr, implicit_present),
+                                "candidate_type": if useful { &candidate } else { "T.untyped" },
+                                "confidence": confidence,
+                                "sources": sources,
+                                "blockers": blockers.into_iter().collect::<Vec<_>>(),
+                                "hash_shape": ret_hash_shape.unwrap_or(Value::Null),
+                                "array_element_shape": ret_array_shape.unwrap_or(Value::Null),
                             }));
+
+                            let is_noreturn = !self.has_explicit_return(body)
+                                && body.is_some_and(|b| self.noreturn_body(b));
+                            if is_noreturn {
+                                self.noreturn_methods.push(json!({
+                                    "name": func_name,
+                                    "path": self.path,
+                                    "line": node.first_lineno,
+                                    "class": owner,
+                                    "kind": kind,
+                                }));
+                            }
                         }
 
                         self.current_method = old_method;
@@ -4128,16 +4340,289 @@ impl<'a> NilKillVisitor<'a> {
                         self.current_params = old_params;
                         self.param_types = old_param_types;
                         self.local_types = old_local_types;
+                        self.local_hash_shapes = old_local_hash_shapes;
+                        self.local_array_shapes = old_local_array_shapes;
+                        self.local_container_origins = old_local_container_origins;
+                        self.unconditional_vars = old_unconditional_vars;
+                        self.in_conditional = old_in_conditional;
                     }
                 }
             }
             "IF" | "UNLESS" => {
                 self.inspect_branch_guard(node, node.r#type == "UNLESS");
+                let children = child_nodes(node);
+                if !children.is_empty() {
+                    self.visit(children[0]);
+                    
+                    let mut then_vars = BTreeSet::new();
+                    if let Some(then_node) = children.get(1) {
+                        collect_assigned_vars(then_node, &mut then_vars);
+                    }
+                    let mut else_vars = BTreeSet::new();
+                    if let Some(else_node) = children.get(2) {
+                        collect_assigned_vars(else_node, &mut else_vars);
+                    }
+                    let common_vars: BTreeSet<String> = then_vars.intersection(&else_vars).cloned().collect();
+                    self.unconditional_vars.extend(common_vars);
+                    
+                    let before_local_types = self.local_types.clone();
+                    let before_hash_shapes = self.local_hash_shapes.clone();
+                    let before_array_shapes = self.local_array_shapes.clone();
+                    
+                    let mut then_local_types = before_local_types.clone();
+                    let mut then_hash_shapes = before_hash_shapes.clone();
+                    let mut then_array_shapes = before_array_shapes.clone();
+                    
+                    if let Some(then_node) = children.get(1) {
+                        self.local_types = before_local_types.clone();
+                        self.local_hash_shapes = before_hash_shapes.clone();
+                        self.local_array_shapes = before_array_shapes.clone();
+                        
+                        let old_cond = self.in_conditional;
+                        self.in_conditional = true;
+                        self.visit(then_node);
+                        self.in_conditional = old_cond;
+                        
+                        then_local_types = self.local_types.clone();
+                        then_hash_shapes = self.local_hash_shapes.clone();
+                        then_array_shapes = self.local_array_shapes.clone();
+                    }
+                    
+                    let mut else_local_types = before_local_types.clone();
+                    let mut else_hash_shapes = before_hash_shapes.clone();
+                    let mut else_array_shapes = before_array_shapes.clone();
+                    
+                    if let Some(else_node) = children.get(2) {
+                        self.local_types = before_local_types.clone();
+                        self.local_hash_shapes = before_hash_shapes.clone();
+                        self.local_array_shapes = before_array_shapes.clone();
+                        
+                        let old_cond = self.in_conditional;
+                        self.in_conditional = true;
+                        self.visit(else_node);
+                        self.in_conditional = old_cond;
+                        
+                        else_local_types = self.local_types.clone();
+                        else_hash_shapes = self.local_hash_shapes.clone();
+                        else_array_shapes = self.local_array_shapes.clone();
+                    }
+                    
+                    let all_keys: BTreeSet<String> = then_local_types.keys()
+                        .chain(else_local_types.keys())
+                        .cloned()
+                        .collect();
+                        
+                    let mut merged_local_types = BTreeMap::new();
+                    for key in &all_keys {
+                        let t_val = then_local_types.get(key);
+                        let e_val = else_local_types.get(key);
+                        let b_val = before_local_types.get(key);
+                        
+                        let merged = match (t_val, e_val) {
+                            (Some(t), Some(e)) => merge_types(t, e),
+                            (Some(t), None) => {
+                                if let Some(b) = b_val {
+                                    merge_types(t, b)
+                                } else {
+                                    if t.starts_with("T.nilable(") {
+                                        t.clone()
+                                    } else {
+                                        format!("T.nilable({})", t)
+                                    }
+                                }
+                            }
+                            (None, Some(e)) => {
+                                if let Some(b) = b_val {
+                                    merge_types(b, e)
+                                } else {
+                                    if e.starts_with("T.nilable(") {
+                                        e.clone()
+                                    } else {
+                                        format!("T.nilable({})", e)
+                                    }
+                                }
+                            }
+                            (None, None) => unreachable!(),
+                        };
+                        merged_local_types.insert(key.clone(), merged);
+                    }
+                    
+                    let all_hash_keys: BTreeSet<String> = then_hash_shapes.keys()
+                        .chain(else_hash_shapes.keys())
+                        .cloned()
+                        .collect();
+                    let mut merged_hash_shapes = BTreeMap::new();
+                    for key in &all_hash_keys {
+                        let t_val = then_hash_shapes.get(key);
+                        let e_val = else_hash_shapes.get(key);
+                        if let (Some(t), Some(e)) = (t_val, e_val) {
+                            merged_hash_shapes.insert(key.clone(), merge_hash_record_shapes(t.clone(), e.clone()));
+                        }
+                    }
+                    
+                    let all_array_keys: BTreeSet<String> = then_array_shapes.keys()
+                        .chain(else_array_shapes.keys())
+                        .cloned()
+                        .collect();
+                    let mut merged_array_shapes = BTreeMap::new();
+                    for key in &all_array_keys {
+                        let t_val = then_array_shapes.get(key);
+                        let e_val = else_array_shapes.get(key);
+                        if let (Some(t), Some(e)) = (t_val, e_val) {
+                            merged_array_shapes.insert(key.clone(), merge_hash_record_shapes(t.clone(), e.clone()));
+                        }
+                    }
+                    
+                    self.local_types = merged_local_types;
+                    self.local_hash_shapes = merged_hash_shapes;
+                    self.local_array_shapes = merged_array_shapes;
+                }
+            }
+            "AND" | "OR" | "WHILE" | "UNTIL" => {
+                let children = child_nodes(node);
+                if !children.is_empty() {
+                    self.visit(children[0]);
+                    let old_cond = self.in_conditional;
+                    self.in_conditional = true;
+                    for child in children.iter().skip(1) {
+                        self.visit(child);
+                    }
+                    self.in_conditional = old_cond;
+                }
+            }
+            "CASE" => {
+                let children = child_nodes(node);
+                if !children.is_empty() {
+                    self.visit(children[0]);
+                    let old_cond = self.in_conditional;
+                    self.in_conditional = true;
+                    for child in children.iter().skip(1) {
+                        self.visit(child);
+                    }
+                    self.in_conditional = old_cond;
+                }
+            }
+            "WHEN" | "IN" | "RESCUE" | "RESBODY" => {
+                let old_cond = self.in_conditional;
+                self.in_conditional = true;
                 for child in child_nodes(node) {
                     self.visit(child);
                 }
+                self.in_conditional = old_cond;
             }
-            "CALL" | "QCALL" | "FCALL" | "VCALL" => {
+            "ITER" => {
+                let call_node = child_node(node, 0);
+                let block_node = child_node(node, 1);
+
+                let old_local_types = self.local_types.clone();
+                let old_local_hash_shapes = self.local_hash_shapes.clone();
+                let old_local_array_shapes = self.local_array_shapes.clone();
+                let old_local_container_origins = self.local_container_origins.clone();
+
+                let mut args_node = None;
+                if let Some(block) = block_node {
+                    for child in child_nodes(block) {
+                        if child.r#type == "ARGS" {
+                            args_node = Some(child);
+                            break;
+                        }
+                    }
+                }
+
+                let param_names = if let Some(args) = args_node {
+                    collect_block_param_names(args)
+                } else {
+                    Vec::new()
+                };
+
+                if let Some(call) = call_node {
+                    if let Some((rec, method, _)) = match_call(call) {
+                        if matches!(
+                            method.as_str(),
+                            "each"
+                                | "map"
+                                | "collect"
+                                | "filter_map"
+                                | "select"
+                                | "reject"
+                                | "find"
+                                | "detect"
+                                | "any?"
+                                | "all?"
+                                | "none?"
+                                | "one?"
+                        ) {
+                            if let Some(receiver_type) = self.expression_type(rec) {
+                                if let Some(info) = collection_type_info(&receiver_type) {
+                                    if info.kind == "hash" {
+                                        if let Some(p0) = param_names.get(0) {
+                                            if let Some(ref key_ty) = info.element {
+                                                if useful_type(key_ty) {
+                                                    self.local_types.insert(p0.clone(), key_ty.clone());
+                                                }
+                                            }
+                                        }
+                                        if let Some(p1) = param_names.get(1) {
+                                            if let Some(ref val_ty) = info.value {
+                                                if useful_type(val_ty) {
+                                                    self.local_types.insert(p1.clone(), val_ty.clone());
+                                                }
+                                            }
+                                        }
+                                    } else {
+                                        if let Some(p0) = param_names.get(0) {
+                                            if let Some(ref elem_ty) = info.element {
+                                                if useful_type(elem_ty) {
+                                                    self.local_types.insert(p0.clone(), elem_ty.clone());
+                                                }
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+
+                            if let Some(p0) = param_names.get(0) {
+                                if let Some(shape) = self.array_element_shape_for_receiver(Some(rec)) {
+                                    self.local_hash_shapes.insert(p0.clone(), shape);
+                                }
+                                if let Some(origin) = self.container_origin_for_value(rec, p0) {
+                                    let kind = origin.get("kind").and_then(serde_json::Value::as_str).unwrap_or("");
+                                    if kind == "method parameter" || kind == "instance variable" {
+                                        self.local_container_origins.insert(p0.clone(), origin);
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+
+                let old_cond = self.in_conditional;
+                self.in_conditional = true;
+                for child in child_nodes(node) {
+                    self.visit(child);
+                }
+                self.in_conditional = old_cond;
+
+                self.local_types = old_local_types;
+                for p in &param_names {
+                    if let Some(old_val) = old_local_hash_shapes.get(p) {
+                        self.local_hash_shapes.insert(p.clone(), old_val.clone());
+                    } else {
+                        self.local_hash_shapes.remove(p);
+                    }
+                    if let Some(old_val) = old_local_array_shapes.get(p) {
+                        self.local_array_shapes.insert(p.clone(), old_val.clone());
+                    } else {
+                        self.local_array_shapes.remove(p);
+                    }
+                    if let Some(old_val) = old_local_container_origins.get(p) {
+                        self.local_container_origins.insert(p.clone(), old_val.clone());
+                    } else {
+                        self.local_container_origins.remove(p);
+                    }
+                }
+            }
+            "CALL" | "QCALL" | "FCALL" | "VCALL" | "OPCALL" | "ATTRASGN" => {
                 self.inspect_call_node(node);
                 self.inspect_index_lookup(node);
                 self.inspect_hash_record_blocker(node);
@@ -4145,6 +4630,102 @@ impl<'a> NilKillVisitor<'a> {
                 self.inspect_struct_constructor(node);
                 self.inspect_class_constructor_fields(node);
                 self.inspect_param_origins(node);
+                self.inspect_attribute_assignment(node);
+                self.check_local_escapes_and_mutations(node);
+
+                if let Some((rec, method, args_node)) = match_call(node) {
+                    if rec.r#type == "LVAR" || rec.r#type == "DVAR" {
+                        let name = node_symbol(rec).unwrap_or_else(|| rec.text.trim().to_string());
+                        let args = call_arguments(args_node);
+                        if collection_append_method(&method) {
+                            if let Some(arg) = args.first() {
+                                if let Some(shape) = self.hash_shape_for_value(arg) {
+                                    self.local_array_shapes.insert(name.clone(), shape);
+                                }
+                                let existing_type = self.local_types.get(&name)
+                                    .or_else(|| self.param_types.get(&name))
+                                    .cloned();
+                                if let Some(existing_type) = existing_type {
+                                    if let Some(info) = collection_type_info(&existing_type) {
+                                        if info.kind == "array" || info.kind == "set" {
+                                            let arg_type = self.expression_type(arg).unwrap_or_else(|| "T.untyped".to_string());
+                                            let new_elem_type = if method == "concat" {
+                                                collection_type_info(&arg_type).and_then(|i| i.element).unwrap_or_else(|| "T.untyped".to_string())
+                                            } else {
+                                                arg_type
+                                            };
+                                            let existing_elem = info.element.unwrap_or_else(|| "T.untyped".to_string());
+                                            let merged_elem = merge_types(&existing_elem, &new_elem_type);
+                                            let kind_prefix = if existing_type.starts_with("T::Set") || existing_type.starts_with("Set") { "T::Set" } else { "T::Array" };
+                                            let updated_type = format!("{}[{}]", kind_prefix, merged_elem);
+                                            if self.param_types.contains_key(&name) {
+                                                self.param_types.insert(name.clone(), updated_type);
+                                            } else {
+                                                self.local_types.insert(name.clone(), updated_type);
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                        } else if method == "[]=" {
+                            if args.len() >= 2 {
+                                let key_arg = args[0];
+                                let val_arg = args[1];
+                                let existing_type = self.local_types.get(&name)
+                                    .or_else(|| self.param_types.get(&name))
+                                    .cloned();
+                                if let Some(existing_type) = existing_type {
+                                    if let Some(info) = collection_type_info(&existing_type) {
+                                        if info.kind == "hash" {
+                                            let key_type = self.expression_type(key_arg).unwrap_or_else(|| "T.untyped".to_string());
+                                            let val_type = self.expression_type(val_arg).unwrap_or_else(|| "T.untyped".to_string());
+                                            let existing_key = info.element.unwrap_or_else(|| "T.untyped".to_string());
+                                            let existing_val = info.value.unwrap_or_else(|| "T.untyped".to_string());
+                                            let merged_key = merge_types(&existing_key, &key_type);
+                                            let merged_val = merge_types(&existing_val, &val_type);
+                                            let updated_type = format!("T::Hash[{}, {}]", merged_key, merged_val);
+                                            if self.param_types.contains_key(&name) {
+                                                self.param_types.insert(name.clone(), updated_type);
+                                            } else {
+                                                self.local_types.insert(name.clone(), updated_type);
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                        } else if method == "merge!" || method == "update" {
+                            if let Some(arg) = args.first() {
+                                let arg_type = self.expression_type(arg).unwrap_or_else(|| "T.untyped".to_string());
+                                if let Some(arg_info) = collection_type_info(&arg_type) {
+                                    if arg_info.kind == "hash" {
+                                        let arg_key = arg_info.element.unwrap_or_else(|| "T.untyped".to_string());
+                                        let arg_val = arg_info.value.unwrap_or_else(|| "T.untyped".to_string());
+                                        let existing_type = self.local_types.get(&name)
+                                            .or_else(|| self.param_types.get(&name))
+                                            .cloned();
+                                        if let Some(existing_type) = existing_type {
+                                            if let Some(info) = collection_type_info(&existing_type) {
+                                                if info.kind == "hash" {
+                                                    let existing_key = info.element.unwrap_or_else(|| "T.untyped".to_string());
+                                                    let existing_val = info.value.unwrap_or_else(|| "T.untyped".to_string());
+                                                    let merged_key = merge_types(&existing_key, &arg_key);
+                                                    let merged_val = merge_types(&existing_val, &arg_val);
+                                                    let updated_type = format!("T::Hash[{}, {}]", merged_key, merged_val);
+                                                    if self.param_types.contains_key(&name) {
+                                                        self.param_types.insert(name.clone(), updated_type);
+                                                    } else {
+                                                        self.local_types.insert(name.clone(), updated_type);
+                                                    }
+                                                }
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+
                 for child in child_nodes(node) {
                     self.visit(child);
                 }
@@ -4164,7 +4745,7 @@ impl<'a> NilKillVisitor<'a> {
                             let mut resolved_type = None;
                             if let Some((receiver, method, args_node)) = match_call(val_node) {
                                 if method == "let" && receiver.text == "T" {
-                                    let arg_nodes = child_nodes(args_node);
+                                    let arg_nodes = call_arguments(args_node);
                                     if let Some(type_node) = arg_nodes.get(1) {
                                         resolved_type = Some(type_node.text.trim().to_string());
                                     }
@@ -4175,7 +4756,22 @@ impl<'a> NilKillVisitor<'a> {
                             }
                             if let Some(ty) = resolved_type {
                                 if useful_type(&ty) {
-                                    self.local_types.insert(var_name.clone(), ty);
+                                    let is_conditional = self.in_conditional && !self.unconditional_vars.contains(&var_name);
+                                    let ty = if is_conditional {
+                                        if ty.starts_with("T.nilable(") {
+                                            ty
+                                        } else {
+                                            format!("T.nilable({})", ty)
+                                        }
+                                    } else {
+                                        ty
+                                    };
+                                    let merged = if let Some(existing) = self.local_types.get(&var_name) {
+                                        merge_types(existing, &ty)
+                                    } else {
+                                        ty
+                                    };
+                                    self.local_types.insert(var_name.clone(), merged);
                                 }
                             }
                         }
@@ -4206,12 +4802,14 @@ impl<'a> NilKillVisitor<'a> {
                 }
             }
             "ARRAY" | "LIST" => {
+                self.check_literal_escapes(node);
                 self.inspect_array_literal(node);
                 for child in child_nodes(node) {
                     self.visit(child);
                 }
             }
             "HASH" => {
+                self.check_literal_escapes(node);
                 self.inspect_hash_literal(node);
                 for child in child_nodes(node) {
                     self.visit(child);
@@ -4233,10 +4831,13 @@ impl<'a> NilKillVisitor<'a> {
     }
 
     fn inspect_call_node(&mut self, node: &crate::ast::Node) {
+        if self.is_prepass {
+            return;
+        }
         if node.r#type == "CALL" || node.r#type == "QCALL" {
             if let Some((receiver, method, args_node)) = match_call(node) {
                 if method == "let" && receiver.text == "T" {
-                    let arg_nodes = child_nodes(args_node);
+                    let arg_nodes = call_arguments(args_node);
                     self.tlet_sites.push(json!({
                         "path": self.path,
                         "line": node.first_lineno,
@@ -4420,7 +5021,7 @@ impl<'a> NilKillVisitor<'a> {
         if !self.behavior.is_type_guard(&method) {
             return None;
         }
-        let arg_nodes = child_nodes(args_node);
+        let arg_nodes = call_arguments(args_node);
         if arg_nodes.len() != 1 {
             return None;
         }
@@ -4531,7 +5132,7 @@ impl<'a> NilKillVisitor<'a> {
         if !matches!(method.as_str(), "==" | "!=" | ">" | ">=" | "<" | "<=") {
             return None;
         }
-        let arg_nodes = child_nodes(args_node);
+        let arg_nodes = call_arguments(args_node);
         if arg_nodes.len() != 1 {
             return None;
         }
@@ -4645,7 +5246,7 @@ impl<'a> NilKillVisitor<'a> {
             "CALL" | "QCALL" => {
                 let (_, method, args_node) =
                     match_call(node).unwrap_or((node, String::new(), node));
-                let arg_nodes = child_nodes(args_node);
+                let arg_nodes = call_arguments(args_node);
                 if arg_nodes.is_empty() {
                     return (Some("attr".to_string()), Some(method));
                 }
@@ -4686,20 +5287,311 @@ impl<'a> NilKillVisitor<'a> {
         }
     }
 
-    fn expression_type(&self, node: &crate::ast::Node) -> Option<String> {
-        match node.r#type.as_str() {
+    fn hash_shape_index_type_readonly_with_shapes(
+        &self,
+        receiver: &crate::ast::Node,
+        index: &crate::ast::Node,
+        extra_hash_shapes: &std::collections::BTreeMap<String, serde_json::Value>,
+    ) -> Option<String> {
+        let shape = match receiver.r#type.as_str() {
             "LVAR" | "DVAR" => {
-                let name = node_symbol(node)?;
-                self.param_types
-                    .get(&name)
-                    .or_else(|| self.local_types.get(&name))
-                    .cloned()
+                let name = node_symbol(receiver)?;
+                extra_hash_shapes.get(&name).cloned()
+                    .or_else(|| self.local_hash_shapes.get(&name).cloned())?
             }
-            "IVAR" => {
-                let name = node_symbol(node)?;
-                self.ivar_expression_type(&name)
+            "CALL" | "QCALL" | "OPCALL" | "FCALL" | "VCALL" => {
+                let (class_name, method, _) = self.get_call_info(receiver)?;
+                self.method_return_hash_shape_for_call(&class_name, &method)?
             }
-            _ => self.static_expression_type(node),
+            _ => return None,
+        };
+        if shape.get("poisoned").and_then(Value::as_bool) == Some(true) {
+            return None;
+        }
+        let key = hash_key_name(index)?;
+        let types = shape
+            .get("keys")
+            .and_then(|keys| keys.get(&key))
+            .and_then(Value::as_array)?
+            .iter()
+            .filter_map(Value::as_str)
+            .map(ToString::to_string)
+            .collect::<Vec<_>>();
+        if types.is_empty() {
+            return None;
+        }
+        let value = static_sorbet_type(&types);
+        if useful_type(&value) {
+            Some(nilable_type(&value))
+        } else {
+            None
+        }
+    }
+
+    fn hash_shape_for_value_readonly(
+        &self,
+        value: &crate::ast::Node,
+        extra_hash_shapes: &std::collections::BTreeMap<String, serde_json::Value>,
+    ) -> Option<Value> {
+        match value.r#type.as_str() {
+            "LASGN" | "DASGN" | "IASGN" | "CASGN" | "CVASGN" | "GVASGN" | "ATTRASGN" => {
+                let val_node = if value.r#type == "ATTRASGN" {
+                    child_node(value, 2).and_then(|args| child_nodes(args).last().copied())
+                } else {
+                    child_node(value, 1)
+                };
+                val_node.and_then(|val| self.hash_shape_for_value_readonly(val, extra_hash_shapes))
+            }
+            "HASH" => {
+                let mut keys = serde_json::Map::new();
+                let mut value_hash_shapes = serde_json::Map::new();
+                let mut value_array_shapes = serde_json::Map::new();
+                let mut poisoned = false;
+                for pair in child_nodes(value) {
+                    if pair.r#type == "pair" || pair.r#type == "PAIR" || pair.r#type == "HASH" {
+                        let Some(key_node) = child_node(pair, 0) else {
+                            continue;
+                        };
+                        let Some(value_node) = child_node(pair, 1) else {
+                            continue;
+                        };
+                        if let Some(key) = hash_key_name(key_node) {
+                            let ty = self
+                                .expression_type(value_node)
+                                .unwrap_or_else(|| "T.untyped".to_string());
+                            let typed_value = useful_type(&ty) || ty == "NilClass";
+                            let shape_type = if typed_value {
+                                ty.clone()
+                            } else {
+                                "T.untyped".to_string()
+                            };
+                            let entry = keys.entry(key.clone()).or_insert_with(|| json!([]));
+                            if let Some(array) = entry.as_array_mut() {
+                                if !array
+                                    .iter()
+                                    .any(|entry| entry.as_str() == Some(&shape_type))
+                                {
+                                    array.push(json!(shape_type));
+                                }
+                            }
+                            if typed_value {
+                                if let Some(nested) = self.hash_shape_for_value_readonly(value_node, extra_hash_shapes) {
+                                    value_hash_shapes.insert(key.clone(), nested);
+                                }
+                                if let Some(nested) = self.array_element_shape_for_value_readonly(value_node, extra_hash_shapes)
+                                {
+                                    value_array_shapes.insert(key, nested);
+                                }
+                            }
+                        } else {
+                            poisoned = true;
+                        }
+                    }
+                }
+                Some(json!({
+                    "keys": keys,
+                    "value_hash_shapes": value_hash_shapes,
+                    "value_array_element_shapes": value_array_shapes,
+                    "poisoned": poisoned,
+                }))
+            }
+            "LVAR" | "DVAR" => {
+                let name = node_symbol(value).unwrap_or_else(|| value.text.trim().to_string());
+                extra_hash_shapes.get(&name).cloned()
+                    .or_else(|| self.local_hash_shapes.get(&name).cloned())
+            }
+            "CALL" | "QCALL" | "OPCALL" | "FCALL" | "VCALL" => {
+                if let Some((class_name, method, args_node)) = self.get_call_info(value) {
+                    if value.r#type != "FCALL" && value.r#type != "VCALL" {
+                        if let Some((rec, _, _)) = match_call(value) {
+                            if (self.behavior.is_type_normalizer(&rec.text, &method)
+                                || self.behavior.is_type_cast(&rec.text, &method))
+                            {
+                                let arg_nodes = call_arguments(args_node);
+                                return arg_nodes
+                                    .first()
+                                    .and_then(|arg| self.hash_shape_for_value_readonly(arg, extra_hash_shapes));
+                            } else if matches!(method.as_str(), "first" | "last" | "shift" | "pop" | "sample" | "[]" | "at") {
+                                return self.array_element_shape_for_receiver_readonly(Some(rec), extra_hash_shapes);
+                            }
+                        }
+                    }
+                    if let Some(shape) = self.method_return_hash_shape_for_call(&class_name, &method) {
+                        Some(shape)
+                    } else if value.r#type != "FCALL" && value.r#type != "VCALL" {
+                        self.struct_field_hash_shape_for_call(value)
+                    } else {
+                        None
+                    }
+                } else {
+                    None
+                }
+            }
+            _ => None,
+        }
+    }
+
+    fn array_element_shape_for_value_readonly(
+        &self,
+        value: &crate::ast::Node,
+        extra_hash_shapes: &std::collections::BTreeMap<String, serde_json::Value>,
+    ) -> Option<Value> {
+        match value.r#type.as_str() {
+            "LASGN" | "DASGN" | "IASGN" | "CASGN" | "CVASGN" | "GVASGN" | "ATTRASGN" => {
+                let val_node = if value.r#type == "ATTRASGN" {
+                    child_node(value, 2).and_then(|args| child_nodes(args).last().copied())
+                } else {
+                    child_node(value, 1)
+                };
+                val_node.and_then(|val| self.array_element_shape_for_value_readonly(val, extra_hash_shapes))
+            }
+            "ARRAY" | "LIST" => {
+                let shapes = child_nodes(value)
+                    .into_iter()
+                    .filter_map(|elem| self.hash_shape_for_value_readonly(elem, extra_hash_shapes))
+                    .collect::<Vec<_>>();
+                if shapes.is_empty() {
+                    None
+                } else {
+                    shapes.into_iter().reduce(merge_hash_record_shapes)
+                }
+            }
+            "LVAR" | "DVAR" => {
+                let name = node_symbol(value).unwrap_or_else(|| value.text.trim().to_string());
+                extra_hash_shapes.get(&name).cloned()
+                    .or_else(|| self.local_array_shapes.get(&name).cloned())
+            }
+            "CALL" | "QCALL" | "OPCALL" | "FCALL" | "VCALL" => {
+                if let Some((class_name, method, args_node)) = self.get_call_info(value) {
+                    if value.r#type != "FCALL" && value.r#type != "VCALL" {
+                        if let Some((rec, _, _)) = match_call(value) {
+                            if (self.behavior.is_type_normalizer(&rec.text, &method)
+                                || self.behavior.is_type_cast(&rec.text, &method))
+                            {
+                                let arg_nodes = call_arguments(args_node);
+                                return arg_nodes
+                                    .first()
+                                    .and_then(|arg| self.array_element_shape_for_value_readonly(arg, extra_hash_shapes));
+                            } else if matches!(method.as_str(), "first" | "last" | "shift" | "pop" | "sample" | "[]" | "at") {
+                                return self.array_element_shape_for_receiver_readonly(Some(rec), extra_hash_shapes);
+                            }
+                        }
+                    }
+                    if let Some(shape) = self.method_return_array_shape_for_call(&class_name, &method) {
+                        Some(shape)
+                    } else if value.r#type != "FCALL" && value.r#type != "VCALL" {
+                        self.struct_field_array_shape_for_call(value)
+                    } else {
+                        None
+                    }
+                } else {
+                    None
+                }
+            }
+            "ITER" => {
+                if let Some(call_node) = child_node(value, 0) {
+                    if let Some((_, method, _)) = match_call(call_node) {
+                        if method == "map" || method == "collect" {
+                            let mut p0_name = None;
+                            if let Some(block) = child_node(value, 1) {
+                                let mut args_node = None;
+                                for child in child_nodes(&block) {
+                                    if child.r#type == "ARGS" {
+                                        args_node = Some(child);
+                                        break;
+                                    }
+                                }
+                                if let Some(args) = args_node {
+                                    let param_names = collect_block_param_names(&args);
+                                    if let Some(p0) = param_names.get(0) {
+                                        p0_name = Some(p0.clone());
+                                    }
+                                }
+                            }
+                            let mut next_hash_shapes = extra_hash_shapes.clone();
+                            if let Some(ref p0) = p0_name {
+                                if let Some((rec, _, _)) = match_call(call_node) {
+                                    if let Some(shape) = self.array_element_shape_for_receiver_readonly(Some(rec), extra_hash_shapes) {
+                                        next_hash_shapes.insert(p0.clone(), shape);
+                                    }
+                                }
+                            }
+
+                            let mut res = None;
+                            if let Some(body_node) = child_nodes(value).last() {
+                                let body_expr = implicit_return_expression(body_node).unwrap_or(body_node);
+                                res = self.hash_shape_for_value_readonly(body_expr, &next_hash_shapes);
+                            }
+                            res
+                        } else {
+                            None
+                        }
+                    } else {
+                        None
+                    }
+                } else {
+                    None
+                }
+            }
+            _ => None,
+        }
+    }
+
+    fn array_element_shape_for_receiver_readonly(
+        &self,
+        receiver: Option<&crate::ast::Node>,
+        extra_hash_shapes: &std::collections::BTreeMap<String, serde_json::Value>,
+    ) -> Option<Value> {
+        let receiver = receiver?;
+        if receiver.r#type == "ITER" {
+            if let Some(call) = child_node(receiver, 0) {
+                if let Some((_, method, _)) = match_call(call) {
+                    if method == "map" || method == "collect" || method == "filter_map" {
+                        if let Some(body_node) = child_nodes(receiver).last() {
+                            let body_expr = implicit_return_expression(body_node).unwrap_or(body_node);
+                            return self.hash_shape_for_value_readonly(body_expr, extra_hash_shapes);
+                        }
+                    }
+                }
+            }
+            return child_node(receiver, 0).and_then(|c| self.array_element_shape_for_receiver_readonly(Some(c), extra_hash_shapes));
+        }
+        match receiver.r#type.as_str() {
+            "LVAR" | "DVAR" => {
+                let name =
+                    node_symbol(receiver).unwrap_or_else(|| receiver.text.trim().to_string());
+                extra_hash_shapes.get(&name).cloned()
+                    .or_else(|| self.local_array_shapes.get(&name).cloned())
+            }
+            "ARRAY" | "LIST" => self.array_element_shape_for_value_readonly(receiver, extra_hash_shapes),
+            "CALL" | "QCALL" | "OPCALL" | "FCALL" | "VCALL" => {
+                if let Some((class_name, method, args_node)) = self.get_call_info(receiver) {
+                    if receiver.r#type != "FCALL" && receiver.r#type != "VCALL" {
+                        if let Some((rec, _, _)) = match_call(receiver) {
+                            if (self.behavior.is_type_normalizer(&rec.text, &method)
+                                || self.behavior.is_type_cast(&rec.text, &method))
+                            {
+                                let arg_nodes = call_arguments(args_node);
+                                return arg_nodes
+                                    .first()
+                                    .and_then(|arg| self.array_element_shape_for_receiver_readonly(Some(arg), extra_hash_shapes));
+                            } else if matches!(method.as_str(), "select" | "reject" | "compact") {
+                                return self.array_element_shape_for_receiver_readonly(Some(rec), extra_hash_shapes);
+                            }
+                        }
+                    }
+                    if let Some(shape) = self.method_return_array_shape_for_call(&class_name, &method) {
+                        Some(shape)
+                    } else if receiver.r#type != "FCALL" && receiver.r#type != "VCALL" {
+                        self.struct_field_array_shape_for_call(receiver)
+                    } else {
+                        None
+                    }
+                } else {
+                    None
+                }
+            }
+            _ => None,
         }
     }
 
@@ -4720,23 +5612,235 @@ impl<'a> NilKillVisitor<'a> {
         None
     }
 
+    fn hash_shape_index_type_readonly(
+        &self,
+        receiver: &crate::ast::Node,
+        index: &crate::ast::Node,
+    ) -> Option<String> {
+        self.hash_shape_index_type_readonly_with_shapes(receiver, index, &std::collections::BTreeMap::new())
+    }
+
+    fn expression_type(&self, node: &crate::ast::Node) -> Option<String> {
+        self.expression_type_with_locals(node, &std::collections::BTreeMap::new())
+    }
+
+    fn expression_type_with_locals(
+        &self,
+        node: &crate::ast::Node,
+        extra_locals: &std::collections::BTreeMap<String, String>,
+    ) -> Option<String> {
+        self.expression_type_with_locals_and_shapes(node, extra_locals, &std::collections::BTreeMap::new())
+    }
+
+    fn expression_type_with_locals_and_shapes(
+        &self,
+        node: &crate::ast::Node,
+        extra_locals: &std::collections::BTreeMap<String, String>,
+        extra_hash_shapes: &std::collections::BTreeMap<String, serde_json::Value>,
+    ) -> Option<String> {
+        match node.r#type.as_str() {
+            "LVAR" | "DVAR" => {
+                let name = node_symbol(node)?;
+                extra_locals
+                    .get(&name)
+                    .or_else(|| self.param_types.get(&name))
+                    .or_else(|| self.local_types.get(&name))
+                    .cloned()
+                    .or_else(|| {
+                        if self.local_hash_shapes.contains_key(&name) {
+                            Some("T::Hash[T.untyped, T.untyped]".to_string())
+                        } else if self.local_array_shapes.contains_key(&name) {
+                            Some("T::Array[T.untyped]".to_string())
+                        } else {
+                            None
+                        }
+                    })
+            }
+            "IVAR" => {
+                let name = node_symbol(node)?;
+                self.ivar_expression_type(&name)
+            }
+            "OR" | "AND" => {
+                let left = child_node(node, 0).and_then(|c| self.expression_type_with_locals_and_shapes(c, extra_locals, extra_hash_shapes));
+                let right = child_node(node, 1).and_then(|c| self.expression_type_with_locals_and_shapes(c, extra_locals, extra_hash_shapes));
+                let mut non_nil = Vec::new();
+                if let Some(ref l) = left {
+                    if l != "NilClass" {
+                        non_nil.push(l.clone());
+                    }
+                }
+                if let Some(ref r) = right {
+                    if r != "NilClass" {
+                        non_nil.push(r.clone());
+                    }
+                }
+                let mut normalized = non_nil
+                    .iter()
+                    .map(|ty| strip_nilable_type(ty))
+                    .collect::<Vec<_>>();
+                normalized.sort();
+                normalized.dedup();
+                if normalized.len() == 1 && useful_type(&normalized[0]) {
+                    return Some(normalized[0].clone());
+                }
+                if non_nil.len() == 1 && useful_type(&non_nil[0]) {
+                    return Some(non_nil[0].clone());
+                }
+                if left == right && left.as_ref().is_some_and(|l| useful_type(l)) {
+                    return left;
+                }
+                None
+            }
+            _ => self.static_expression_type_with_locals_and_shapes(node, extra_locals, extra_hash_shapes),
+        }
+    }
+
     fn static_expression_type(&self, node: &crate::ast::Node) -> Option<String> {
-        if node.r#type == "CALL" || node.r#type == "QCALL" || node.r#type == "FCALL" || node.r#type == "VCALL" || node.r#type == "OPCALL" {
-            let callee = match node.r#type.as_str() {
-                "VCALL" | "FCALL" => node_symbol(node).unwrap_or_default(),
+        self.static_expression_type_with_locals(node, &std::collections::BTreeMap::new())
+    }
+
+    fn static_expression_type_with_locals(
+        &self,
+        node: &crate::ast::Node,
+        extra_locals: &std::collections::BTreeMap<String, String>,
+    ) -> Option<String> {
+        self.static_expression_type_with_locals_and_shapes(node, extra_locals, &std::collections::BTreeMap::new())
+    }
+
+    fn static_expression_type_with_locals_and_shapes(
+        &self,
+        node: &crate::ast::Node,
+        extra_locals: &std::collections::BTreeMap<String, String>,
+        extra_hash_shapes: &std::collections::BTreeMap<String, serde_json::Value>,
+    ) -> Option<String> {
+        let is_iter = node.r#type == "ITER";
+        let call_node = if is_iter {
+            child_node(node, 0).unwrap_or(node)
+        } else {
+            node
+        };
+        if call_node.r#type == "CALL" || call_node.r#type == "QCALL" || call_node.r#type == "FCALL" || call_node.r#type == "VCALL" || call_node.r#type == "OPCALL" {
+            let callee = match call_node.r#type.as_str() {
+                "VCALL" | "FCALL" => node_symbol(call_node).unwrap_or_default(),
                 "CALL" | "QCALL" | "OPCALL" => {
-                    let (_, method, _) = match_call(node).unwrap_or((node, String::new(), node));
+                    let (_, method, _) = match_call(call_node).unwrap_or((call_node, String::new(), call_node));
                     method
                 }
                 _ => String::new(),
             };
-            let receiver = if node.r#type == "CALL" || node.r#type == "QCALL" || node.r#type == "OPCALL" {
-                child_node(node, 0)
+            let receiver = if call_node.r#type == "CALL" || call_node.r#type == "QCALL" || call_node.r#type == "OPCALL" {
+                child_node(call_node, 0)
             } else {
                 None
             };
-            let receiver_type = receiver.and_then(|r| self.expression_type(r));
+            let receiver_type = receiver.and_then(|r| self.expression_type_with_locals_and_shapes(r, extra_locals, extra_hash_shapes));
+            if is_iter {
+                println!("DEBUG static_expression_type ITER: callee={}, receiver_type={:?}", callee, receiver_type);
+                let block_node = child_node(node, 1);
+                let mut args_node = None;
+                if let Some(block) = block_node {
+                    for child in child_nodes(block) {
+                        if child.r#type == "ARGS" {
+                            args_node = Some(child);
+                            break;
+                        }
+                    }
+                }
+                let param_names = if let Some(args) = args_node {
+                    collect_block_param_names(args)
+                } else {
+                    Vec::new()
+                };
+                let mut next_locals = extra_locals.clone();
+                if let Some(ref receiver_type) = receiver_type {
+                    if let Some(info) = collection_type_info(receiver_type) {
+                        if info.kind == "hash" {
+                            if let Some(p0) = param_names.get(0) {
+                                if let Some(key_ty) = info.element.as_ref() {
+                                    if useful_type(key_ty) {
+                                        next_locals.insert(p0.clone(), key_ty.clone());
+                                    }
+                                }
+                            }
+                            if let Some(p1) = param_names.get(1) {
+                                if let Some(val_ty) = info.value.as_ref() {
+                                    if useful_type(val_ty) {
+                                        next_locals.insert(p1.clone(), val_ty.clone());
+                                    }
+                                }
+                            }
+                        } else {
+                            if let Some(p0) = param_names.get(0) {
+                                if let Some(elem_ty) = info.element.as_ref() {
+                                    if useful_type(elem_ty) {
+                                        next_locals.insert(p0.clone(), elem_ty.clone());
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+
+                if callee == "map" || callee == "collect" || callee == "filter_map" {
+                    if let Some(body_node) = child_nodes(node).last() {
+                        let body_expr = implicit_return_expression(body_node).unwrap_or(body_node);
+                        
+                        let mut next_hash_shapes = extra_hash_shapes.clone();
+                        if let Some(p0) = param_names.get(0) {
+                            if let Some(rec) = receiver {
+                                if let Some(shape) = self.array_element_shape_for_receiver_readonly(Some(rec), extra_hash_shapes) {
+                                    next_hash_shapes.insert(p0.clone(), shape);
+                                }
+                            }
+                        }
+
+                        if let Some(block_return_type) = self.expression_type_with_locals_and_shapes(body_expr, &next_locals, &next_hash_shapes) {
+                            println!("DEBUG static_expression_type ITER map/collect block_return_type={:?}", block_return_type);
+                            if callee == "filter_map" {
+                                let inner = block_return_type
+                                    .trim_start_matches("T.nilable(")
+                                    .trim_end_matches(')');
+                                return Some(format!("T::Array[{}]", inner));
+                            } else {
+                                return Some(format!("T::Array[{}]", block_return_type));
+                            }
+                        }
+                    }
+                }
+                if callee == "select" || callee == "reject" || callee == "filter" || callee == "each" || callee == "each_pair" || callee == "each_key" || callee == "each_value" {
+                    if let Some(ref r_ty) = receiver_type {
+                        println!("DEBUG static_expression_type ITER returning receiver_type={:?}", r_ty);
+                        return Some(r_ty.clone());
+                    }
+                }
+            }
+            if callee == "[]" || callee == "fetch" {
+                if let Some(receiver) = receiver {
+                    if let Some((_, _, args_node)) = match_call(call_node) {
+                        let args = call_arguments(args_node);
+                        if args.len() == 1 {
+                            if let Some(shape_type) = self.hash_shape_index_type_readonly_with_shapes(receiver, args[0], extra_hash_shapes) {
+                                return Some(shape_type);
+                            }
+                        }
+                    }
+                }
+            }
+            let class_name = if call_node.r#type == "CALL" || call_node.r#type == "QCALL" || call_node.r#type == "OPCALL" {
+                receiver_type.clone().unwrap_or_default()
+            } else {
+                self.current_owners.last().cloned().unwrap_or_default()
+            };
+            let class_name = class_name.replace("T.nilable(", "").replace(")", "");
+            let key = (class_name, callee.clone());
+            if let Some(ty) = self.inferred_return_types.get(&key) {
+                return Some(ty.clone());
+            }
+
             let behavior = crate::syntax::normalized_behavior::behavior(self.document.language);
+            if let Some(ty) = behavior.static_call_return_type(node, &callee, receiver_type.as_deref()) {
+                return Some(ty);
+            }
             if let Some(ty) = behavior.static_return_type(&callee, receiver_type.as_deref()) {
                 return Some(ty);
             }
@@ -4763,14 +5867,98 @@ impl<'a> NilKillVisitor<'a> {
         None
     }
 
+    fn literal_array_element_type(&self, node: &crate::ast::Node) -> Option<String> {
+        let mut merged: Option<String> = None;
+        for child in child_nodes(node) {
+            let child_ty = self.expression_type(child).unwrap_or_else(|| "T.untyped".to_string());
+            if let Some(ref m) = merged {
+                merged = Some(merge_types(m, &child_ty));
+            } else {
+                merged = Some(child_ty);
+            }
+        }
+        merged
+    }
+
+    fn literal_hash_element_types(&self, node: &crate::ast::Node) -> (Option<String>, Option<String>) {
+        let children = child_nodes(node);
+        let mut key_merged: Option<String> = None;
+        let mut val_merged: Option<String> = None;
+        let has_pair_nodes = children.first().map(|c| c.r#type == "pair" || c.r#type == "PAIR" || c.r#type == "HASH").unwrap_or(false);
+        if has_pair_nodes {
+            for pair in children {
+                if pair.r#type == "pair" || pair.r#type == "PAIR" || pair.r#type == "HASH" {
+                    let Some(key_node) = child_node(pair, 0) else { continue; };
+                    let Some(value_node) = child_node(pair, 1) else { continue; };
+                    let mut key_ty = self.expression_type(key_node).unwrap_or_else(|| "T.untyped".to_string());
+                    if key_ty == "T.untyped" {
+                        let text = key_node.text.trim();
+                        if key_node.r#type == "label" 
+                            || key_node.r#type == "hash_key_symbol" 
+                            || key_node.r#type == "LIT" && !text.starts_with('"') && !text.starts_with('\'') && !text.parse::<f64>().is_ok()
+                        {
+                            key_ty = "Symbol".to_string();
+                        }
+                    }
+                    let val_ty = self.expression_type(value_node).unwrap_or_else(|| "T.untyped".to_string());
+                    
+                    if let Some(ref k) = key_merged {
+                        key_merged = Some(merge_types(k, &key_ty));
+                    } else {
+                        key_merged = Some(key_ty);
+                    }
+                    
+                    if let Some(ref v) = val_merged {
+                        val_merged = Some(merge_types(v, &val_ty));
+                    } else {
+                        val_merged = Some(val_ty);
+                    }
+                }
+            }
+        } else {
+            for chunk in children.chunks(2) {
+                if chunk.len() == 2 {
+                    let key_node = chunk[0];
+                    let value_node = chunk[1];
+                    let mut key_ty = self.expression_type(key_node).unwrap_or_else(|| "T.untyped".to_string());
+                    if key_ty == "T.untyped" {
+                        let text = key_node.text.trim();
+                        if key_node.r#type == "label" 
+                            || key_node.r#type == "hash_key_symbol" 
+                            || key_node.r#type == "LIT" && !text.starts_with('"') && !text.starts_with('\'') && !text.parse::<f64>().is_ok()
+                        {
+                            key_ty = "Symbol".to_string();
+                        }
+                    }
+                    let val_ty = self.expression_type(value_node).unwrap_or_else(|| "T.untyped".to_string());
+                    
+                    if let Some(ref k) = key_merged {
+                        key_merged = Some(merge_types(k, &key_ty));
+                    } else {
+                        key_merged = Some(key_ty);
+                    }
+                    
+                    if let Some(ref v) = val_merged {
+                        val_merged = Some(merge_types(v, &val_ty));
+                    } else {
+                        val_merged = Some(val_ty);
+                    }
+                }
+            }
+        }
+        (key_merged, val_merged)
+    }
+
     fn literal_type(&self, node: &crate::ast::Node) -> Option<String> {
         match node.r#type.as_str() {
             "STR" | "DSTR" | "STRING" | "STRING_LITERAL" => Some("String".to_string()),
-            "SYM" | "SYMBOL" => Some("Symbol".to_string()),
+            "SYM" | "SYMBOL" | "hash_key_symbol" | "label" => Some("Symbol".to_string()),
             "LIT" => {
                 let text = node.text.trim();
                 if text.starts_with(':') {
                     Some("Symbol".to_string())
+                } else if text.starts_with('"') || text.starts_with('\'') {
+                    Some("String".to_string())
                 } else if text.parse::<i64>().is_ok() {
                     Some("Integer".to_string())
                 } else if text.parse::<f64>().is_ok() {
@@ -4784,8 +5972,20 @@ impl<'a> NilKillVisitor<'a> {
             "TRUE" | "FALSE" => Some("T::Boolean".to_string()),
             "NIL" => Some("NilClass".to_string()),
             "RANGE" | "DOT2" | "DOT3" => Some("Range".to_string()),
-            "ARRAY" | "LIST" => Some("T::Array[T.untyped]".to_string()),
-            "HASH" => Some("T::Hash[T.untyped, T.untyped]".to_string()),
+            "ARRAY" | "LIST" => {
+                if let Some(elem_ty) = self.literal_array_element_type(node) {
+                    Some(format!("T::Array[{}]", elem_ty))
+                } else {
+                    Some("T::Array[T.untyped]".to_string())
+                }
+            }
+            "ZLIST" => Some("T::Array[T.untyped]".to_string()),
+            "HASH" => {
+                let (key_ty, val_ty) = self.literal_hash_element_types(node);
+                let k = key_ty.unwrap_or_else(|| "T.untyped".to_string());
+                let v = val_ty.unwrap_or_else(|| "T.untyped".to_string());
+                Some(format!("T::Hash[{}, {}]", k, v))
+            }
             "CALL" | "QCALL" => {
                 if let Some((receiver, method, _)) = match_call(node) {
                     if method == "new" {
@@ -4906,13 +6106,14 @@ impl<'a> NilKillVisitor<'a> {
     fn return_sources_for(
         &self,
         node: &crate::ast::Node,
+        body: Option<&crate::ast::Node>,
         blockers: &mut BTreeSet<String>,
     ) -> Vec<Value> {
         let node_line = node.first_lineno;
         let code = node.text.clone();
         if node.r#type == "RETURN" {
             if let Some(arg) = child_node(node, 0) {
-                return self.return_sources_for(arg, blockers);
+                return self.return_sources_for(arg, body, blockers);
             }
             return vec![
                 json!({"kind": "nil", "type": "NilClass", "line": Value::Null, "code": "return"}),
@@ -4923,7 +6124,7 @@ impl<'a> NilKillVisitor<'a> {
             "BLOCK" | "STATEMENTS" | "BEGIN" | "ELSE" | "PAREN" | "SCOPE" | "ROOT"
         ) {
             if let Some(expr) = implicit_return_expression(node) {
-                return self.return_sources_for(expr, blockers);
+                return self.return_sources_for(expr, body, blockers);
             }
         }
         if matches!(node.r#type.as_str(), "IVAR" | "CVAR" | "GVAR") {
@@ -4940,12 +6141,12 @@ impl<'a> NilKillVisitor<'a> {
             let mut out = Vec::new();
             if let Some(then_branch) = child_node(node, 1) {
                 if let Some(expr) = implicit_return_expression(then_branch) {
-                    out.extend(self.return_sources_for(expr, blockers));
+                    out.extend(self.return_sources_for(expr, body, blockers));
                 }
             }
             if let Some(else_branch) = child_node(node, 2) {
                 if let Some(expr) = implicit_return_expression(else_branch) {
-                    out.extend(self.return_sources_for(expr, blockers));
+                    out.extend(self.return_sources_for(expr, body, blockers));
                 }
             } else {
                 out.push(json!({"kind": "nil", "type": "NilClass", "line": node_line, "code": "implicit else"}));
@@ -4960,9 +6161,9 @@ impl<'a> NilKillVisitor<'a> {
                 .filter_map(crate::ast::node)
                 .filter(|child| child.r#type == "WHEN" || child.r#type == "IN");
             for arm in when_arms {
-                if let Some(body) = child_node(arm, 1) {
-                    if let Some(expr) = implicit_return_expression(body) {
-                        out.extend(self.return_sources_for(expr, blockers));
+                if let Some(body_arm) = child_node(arm, 1) {
+                    if let Some(expr) = implicit_return_expression(body_arm) {
+                        out.extend(self.return_sources_for(expr, body, blockers));
                     }
                 }
             }
@@ -4975,7 +6176,7 @@ impl<'a> NilKillVisitor<'a> {
                 });
             if let Some(alt) = else_br {
                 if let Some(expr) = implicit_return_expression(alt) {
-                    out.extend(self.return_sources_for(expr, blockers));
+                    out.extend(self.return_sources_for(expr, body, blockers));
                 }
             }
             if out.is_empty() {
@@ -4991,27 +6192,42 @@ impl<'a> NilKillVisitor<'a> {
                 json!({"kind": "nil", "type": "NilClass", "line": node_line, "code": code}),
             ];
         }
-        if node.r#type == "CALL"
-            || node.r#type == "QCALL"
-            || node.r#type == "FCALL"
-            || node.r#type == "VCALL"
-            || node.r#type == "OPCALL"
+        let call_node = if node.r#type == "ITER" {
+            child_node(node, 0).unwrap_or(node)
+        } else {
+            node
+        };
+        if call_node.r#type == "CALL"
+            || call_node.r#type == "QCALL"
+            || call_node.r#type == "FCALL"
+            || call_node.r#type == "VCALL"
+            || call_node.r#type == "OPCALL"
         {
-            let callee = match node.r#type.as_str() {
-                "VCALL" | "FCALL" => node_symbol(node).unwrap_or_default(),
+            let callee = match call_node.r#type.as_str() {
+                "VCALL" | "FCALL" => node_symbol(call_node).unwrap_or_default(),
                 "CALL" | "QCALL" | "OPCALL" => {
-                    let (_, method, _) = match_call(node).unwrap_or((node, String::new(), node));
+                    let (_, method, _) = match_call(call_node).unwrap_or((call_node, String::new(), call_node));
                     method
                 }
                 _ => String::new(),
             };
-            println!("DEBUG extract_return_usage_sites: node.type={}, callee='{}', text='{}'", node.r#type, callee, node.text);
-            if node.r#type == "QCALL" {
-                if let Some(ret) = self.known_return_type(&callee) {
-                    if useful_type(&ret) {
-                        return vec![
-                            json!({"kind": "safe_call", "callee": callee, "type": format!("T.nilable({})", ret), "line": node_line, "code": code, "stdlib": Value::Null}),
-                        ];
+            let receiver = if call_node.r#type == "CALL" || call_node.r#type == "QCALL" || call_node.r#type == "OPCALL" {
+                child_node(call_node, 0)
+            } else {
+                None
+            };
+            let receiver_type = receiver.and_then(|r| self.expression_type(r));
+            let is_global_receiver = receiver.map(|r| r.r#type == "GVAR").unwrap_or(false);
+
+            println!("DEBUG extract_return_usage_sites: node.type={}, callee='{}', text='{}'", call_node.r#type, callee, call_node.text);
+            if call_node.r#type == "QCALL" {
+                if !is_global_receiver {
+                    if let Some(ret) = self.known_return_type(&callee) {
+                        if useful_type(&ret) {
+                            return vec![
+                                json!({"kind": "safe_call", "callee": callee, "type": format!("T.nilable({})", ret), "line": node_line, "code": code, "stdlib": Value::Null}),
+                            ];
+                        }
                     }
                 }
                 blockers.insert(format!(
@@ -5020,20 +6236,27 @@ impl<'a> NilKillVisitor<'a> {
                 ));
                 return vec![
                     json!({"kind": "nil", "type": "NilClass", "line": node_line, "code": code}),
-                    json!({"kind": "call_untyped", "callee": callee, "line": node_line, "code": code}),
+                    json!({"kind": "call_untyped", "callee": callee, "receiver_type": receiver_type, "line": node_line, "code": code}),
                 ];
             }
-            if let Some(ret) = self.known_return_type(&callee) {
-                if useful_type(&ret) {
-                    return vec![
-                        json!({"kind": "typed_call", "callee": callee, "type": ret, "line": node_line, "code": code, "stdlib": Value::Null}),
-                    ];
+            if !is_global_receiver {
+                if let Some(ret) = self.known_return_type(&callee) {
+                    if useful_type(&ret) {
+                        return vec![
+                            json!({"kind": "typed_call", "callee": callee, "type": ret, "line": node_line, "code": code, "stdlib": Value::Null}),
+                        ];
+                    }
                 }
             }
             if let Some(expr_type) = self.expression_type(node) {
                 if useful_type(&expr_type) {
+                    let kind = if call_node.r#type == "QCALL" {
+                        "safe_call"
+                    } else {
+                        "typed_call_inferred"
+                    };
                     return vec![
-                        json!({"kind": "static", "callee": callee, "type": expr_type, "line": node_line, "code": code}),
+                        json!({"kind": kind, "callee": callee, "type": expr_type, "line": node_line, "code": code}),
                     ];
                 }
             }
@@ -5042,7 +6265,7 @@ impl<'a> NilKillVisitor<'a> {
                 self.path
             ));
             return vec![
-                json!({"kind": "call_untyped", "callee": callee, "line": node_line, "code": code}),
+                json!({"kind": "call_untyped", "callee": callee, "receiver_type": receiver_type, "line": node_line, "code": code}),
             ];
         }
         if matches!(
@@ -5050,8 +6273,51 @@ impl<'a> NilKillVisitor<'a> {
             "LASGN" | "DASGN" | "IASGN" | "CASGN" | "CVASGN" | "GVASGN"
         ) {
             if let Some(value) = child_node(node, 1) {
-                return self.return_sources_for(value, blockers);
+                return self.return_sources_for(value, body, blockers);
             }
+        }
+        if node.r#type == "ATTRASGN" {
+            if let Some(args_node) = child_node(node, 2) {
+                let arg_children = call_arguments(args_node);
+                let val_node = arg_children
+                    .last()
+                    .map(|n| *n)
+                    .unwrap_or(args_node);
+                return self.return_sources_for(val_node, body, blockers);
+            }
+        }
+        if node.r#type == "OP_ASGN1" {
+            if let Some(val_node) = child_node(node, 3) {
+                return self.return_sources_for(val_node, body, blockers);
+            }
+        }
+        if node.r#type == "OP_ASGN2" {
+            if let Some(val_node) = child_node(node, 4) {
+                return self.return_sources_for(val_node, body, blockers);
+            }
+        }
+        if matches!(node.r#type.as_str(), "LVAR" | "DVAR") {
+            let name = node_symbol(node).unwrap_or_else(|| node.text.trim().to_string());
+            let is_escaped = body.is_some_and(|b| self.escape_uses_of_local(b, &name));
+            if is_escaped {
+                blockers.insert(format!(
+                    "escaped local variable {code} at {}:{node_line}",
+                    self.path
+                ));
+                return vec![json!({"kind": "unknown", "line": node_line, "code": code, "unknown_reasons": []})];
+            }
+            if let Some(ty) = self.expression_type(node) {
+                if useful_type(&ty) {
+                    return vec![
+                        json!({"kind": if ty == "NilClass" { "nil" } else { "static" }, "type": ty, "line": node_line, "code": code}),
+                    ];
+                }
+            }
+            blockers.insert(format!(
+                "untyped local variable {code} (LocalVariableReadNode) at {}:{node_line}",
+                self.path
+            ));
+            return vec![json!({"kind": "unknown", "line": node_line, "code": code, "unknown_reasons": []})];
         }
         if let Some(ty) = self.expression_type(node) {
             return vec![
@@ -5149,7 +6415,7 @@ impl<'a> NilKillVisitor<'a> {
                 .map_or(false, |m| self.behavior.is_type_guard(m))
         {
             if let Some((receiver, _, args_node)) = match_call(node) {
-                let arg_nodes = child_nodes(args_node);
+                let arg_nodes = call_arguments(args_node);
                 if arg_nodes.len() == 1 && arg_nodes[0].text == "Type" {
                     let (origin_kind, origin_name) =
                         self.classify_origin(receiver, param_names, assigns, 0);
@@ -5194,7 +6460,7 @@ impl<'a> NilKillVisitor<'a> {
             "CALL" | "QCALL" | "OPCALL" => {
                 if let Some((_, method, args_node)) = match_call(node) {
                     if method == "[]" {
-                        let arg_nodes = child_nodes(args_node);
+                        let arg_nodes = call_arguments(args_node);
                         let key = arg_nodes
                             .first()
                             .and_then(|key| hash_key_name(key).map(|k| format!(":{k}")));
@@ -5202,7 +6468,7 @@ impl<'a> NilKillVisitor<'a> {
                             "hashkey".to_string(),
                             key.map(Value::String).unwrap_or(Value::Null),
                         )
-                    } else if !child_nodes(args_node).is_empty() {
+                    } else if !call_arguments(args_node).is_empty() {
                         ("call".to_string(), json!(method))
                     } else {
                         ("attr".to_string(), json!(method))
@@ -5210,6 +6476,14 @@ impl<'a> NilKillVisitor<'a> {
                 } else {
                     ("call".to_string(), Value::Null)
                 }
+            }
+            "FCALL" => {
+                let name = node_symbol(node).unwrap_or_else(|| node.text.trim().to_string());
+                ("call".to_string(), json!(name))
+            }
+            "VCALL" => {
+                let name = node_symbol(node).unwrap_or_else(|| node.text.trim().to_string());
+                ("attr".to_string(), json!(name))
             }
             _ => ("local".to_string(), Value::Null),
         }
@@ -5245,7 +6519,7 @@ impl<'a> NilKillVisitor<'a> {
                 let name = node_symbol(node).unwrap_or_default();
                 if matches!(name.as_str(), "==" | "!=" | "===") {
                     if let Some((receiver, _, args_node)) = match_call(node) {
-                        let arg_nodes = child_nodes(args_node);
+                        let arg_nodes = call_arguments(args_node);
                         if arg_nodes.len() == 1 {
                             let arg = arg_nodes[0];
                             if let Some(slot) = self.hidden_enum_slot_for(receiver, record, params)
@@ -5269,7 +6543,7 @@ impl<'a> NilKillVisitor<'a> {
                     }
                 } else if matches!(name.as_str(), "include?" | "member?" | "key?") {
                     if let Some((receiver, _, args_node)) = match_call(node) {
-                        let arg_nodes = child_nodes(args_node);
+                        let arg_nodes = call_arguments(args_node);
                         if arg_nodes.len() == 1 {
                             let arg = arg_nodes[0];
                             if let Some(slot) = self.hidden_enum_slot_for(arg, record, params) {
@@ -5663,7 +6937,7 @@ impl<'a> NilKillVisitor<'a> {
                         direct_usage,
                     );
                     let arg_context = if direct_usage { "return" } else { "value" };
-                    for arg in child_nodes(args_node) {
+                    for arg in call_arguments(args_node) {
                         self.collect_return_usage_site_context(
                             arg,
                             arg_context,
@@ -5789,7 +7063,7 @@ impl<'a> NilKillVisitor<'a> {
                 && node_symbol(node).is_some_and(|name| collection_append_method(&name))
             {
                 if let Some((_, _, args_node)) = match_call(node) {
-                    if child_nodes(args_node).into_iter().any(|arg| arg == target) {
+                    if call_arguments(args_node).into_iter().any(|arg| arg == target) {
                         found = true;
                         return;
                     }
@@ -5808,7 +7082,7 @@ impl<'a> NilKillVisitor<'a> {
                 && node_symbol(node).as_deref() == Some("[]=")
             {
                 if let Some((_, _, args_node)) = match_call(node) {
-                    if child_nodes(args_node).last().copied() == Some(target) {
+                    if call_arguments(args_node).last().copied() == Some(target) {
                         found = true;
                     }
                 }
@@ -5845,9 +7119,29 @@ impl<'a> NilKillVisitor<'a> {
             if escapes {
                 return;
             }
-            if node.r#type == "CALL" || node.r#type == "QCALL" {
-                if let Some((_, _, args_node)) = match_call(node) {
-                    if child_nodes(args_node).into_iter().any(|arg| {
+            if node.r#type == "CALL" || node.r#type == "QCALL" || node.r#type == "FCALL" || node.r#type == "VCALL" {
+                let opt_method = match node.r#type.as_str() {
+                    "VCALL" | "FCALL" => node_symbol(node),
+                    "CALL" | "QCALL" => match_call(node).map(|(_, method, _)| method),
+                    _ => None,
+                };
+                if let Some(method) = opt_method {
+                    if self.current_method.as_ref() == Some(&method) {
+                        return;
+                    }
+                    let args_node = match node.r#type.as_str() {
+                        "VCALL" | "FCALL" => {
+                            node.children.iter().find_map(|c| match c {
+                                crate::ast::Child::Node(n) => Some(n.as_ref()),
+                                _ => None,
+                            }).unwrap_or(node)
+                        }
+                        "CALL" | "QCALL" => {
+                            match_call(node).map(|(_, _, args)| args).unwrap_or(node)
+                        }
+                        _ => node,
+                    };
+                    if call_arguments(args_node).into_iter().any(|arg| {
                         (arg.r#type == "LVAR" || arg.r#type == "DVAR")
                             && node_symbol(arg).as_deref() == Some(name)
                     }) {
@@ -5861,17 +7155,158 @@ impl<'a> NilKillVisitor<'a> {
                     (child.r#type == "LVAR" || child.r#type == "DVAR")
                         && node_symbol(child).as_deref() == Some(name)
                 }) {
-                    escapes = true;
+                    let mut is_recursive_arg_list = false;
+                    if let Some(parent) = self.find_parent(root, node) {
+                        if parent.r#type == "FCALL" || parent.r#type == "VCALL" {
+                            if let Some(callee) = node_symbol(parent) {
+                                if self.current_method.as_ref() == Some(&callee) {
+                                    is_recursive_arg_list = true;
+                                }
+                            }
+                        } else if parent.r#type == "CALL" || parent.r#type == "QCALL" {
+                            if let Some((_, callee, _)) = match_call(parent) {
+                                if self.current_method.as_ref() == Some(&callee) {
+                                    is_recursive_arg_list = true;
+                                }
+                            }
+                        }
+                    }
+                    if !is_recursive_arg_list {
+                        escapes = true;
+                    }
                 }
             }
         });
         escapes
     }
 
-    fn inspect_param_origins(&mut self, node: &crate::ast::Node) {
-        let (callee, args_node) = if let Some((_, callee, args_node)) = match_call(node) {
-            (callee, args_node)
-        } else if node.r#type == "FCALL" || node.r#type == "SUPER" {
+    fn get_method_param_hash_shape(&self, class_name: &str, method_name: &str, param: &str) -> Option<Value> {
+        let methods = if method_name == "initialize" {
+            vec!["initialize".to_string(), "new".to_string()]
+        } else if method_name == "new" {
+            vec!["new".to_string(), "initialize".to_string()]
+        } else {
+            vec![method_name.to_string()]
+        };
+        for m in &methods {
+            if let Some(shape) = self.method_param_hash_shapes.get(&(class_name.to_string(), m.clone(), param.to_string())) {
+                return Some(shape.clone());
+            }
+            if class_name != "" {
+                if let Some(shape) = self.method_param_hash_shapes.get(&("".to_string(), m.clone(), param.to_string())) {
+                    return Some(shape.clone());
+                }
+            }
+            let matching = self.method_param_hash_shapes.iter()
+                .filter(|((_, m_name, p), _)| m_name == m && p == param)
+                .map(|(_, shape)| shape)
+                .collect::<Vec<_>>();
+            if !matching.is_empty() {
+                return Some(matching[0].clone());
+            }
+        }
+        if method_name == "initialize" {
+            if let Some(shape) = self.struct_field_hash_shapes.get(&(class_name.to_string(), param.to_string())) {
+                return Some(shape.clone());
+            }
+        }
+        None
+    }
+
+    fn get_method_param_array_shape(&self, class_name: &str, method_name: &str, param: &str) -> Option<Value> {
+        let methods = if method_name == "initialize" {
+            vec!["initialize".to_string(), "new".to_string()]
+        } else if method_name == "new" {
+            vec!["new".to_string(), "initialize".to_string()]
+        } else {
+            vec![method_name.to_string()]
+        };
+        for m in &methods {
+            if let Some(shape) = self.method_param_array_shapes.get(&(class_name.to_string(), m.clone(), param.to_string())) {
+                return Some(shape.clone());
+            }
+            if class_name != "" {
+                if let Some(shape) = self.method_param_array_shapes.get(&("".to_string(), m.clone(), param.to_string())) {
+                    return Some(shape.clone());
+                }
+            }
+            let matching = self.method_param_array_shapes.iter()
+                .filter(|((_, m_name, p), _)| m_name == m && p == param)
+                .map(|(_, shape)| shape)
+                .collect::<Vec<_>>();
+            if !matching.is_empty() {
+                return Some(matching[0].clone());
+            }
+        }
+        if method_name == "initialize" {
+            if let Some(shape) = self.struct_field_array_shapes.get(&(class_name.to_string(), param.to_string())) {
+                return Some(shape.clone());
+            }
+        }
+        None
+    }
+
+    fn method_return_hash_shape_for_call(&self, class_name: &str, method_name: &str) -> Option<Value> {
+        if let Some(shape) = self.method_return_hash_shapes.get(&(class_name.to_string(), method_name.to_string())) {
+            return Some(shape.clone());
+        }
+        if class_name != "" {
+            if let Some(shape) = self.method_return_hash_shapes.get(&("".to_string(), method_name.to_string())) {
+                return Some(shape.clone());
+            }
+        }
+        let matching = self.method_return_hash_shapes.iter()
+            .filter(|((_, m), _)| m == method_name)
+            .map(|(_, shape)| shape)
+            .collect::<Vec<_>>();
+        if !matching.is_empty() {
+            return Some(matching[0].clone());
+        }
+        if !method_name.ends_with('=') {
+            let setter = format!("{}=", method_name);
+            if let Some(shape) = self.get_method_param_hash_shape(class_name, &setter, "0") {
+                return Some(shape);
+            }
+        }
+        None
+    }
+
+    fn method_return_array_shape_for_call(&self, class_name: &str, method_name: &str) -> Option<Value> {
+        if let Some(shape) = self.method_return_array_shapes.get(&(class_name.to_string(), method_name.to_string())) {
+            return Some(shape.clone());
+        }
+        if class_name != "" {
+            if let Some(shape) = self.method_return_array_shapes.get(&("".to_string(), method_name.to_string())) {
+                return Some(shape.clone());
+            }
+        }
+        let matching = self.method_return_array_shapes.iter()
+            .filter(|((_, m), _)| m == method_name)
+            .map(|(_, shape)| shape)
+            .collect::<Vec<_>>();
+        if !matching.is_empty() {
+            return Some(matching[0].clone());
+        }
+        if !method_name.ends_with('=') {
+            let setter = format!("{}=", method_name);
+            if let Some(shape) = self.get_method_param_array_shape(class_name, &setter, "0") {
+                return Some(shape);
+            }
+        }
+        None
+    }
+
+    fn get_call_info<'tree>(&self, node: &'tree crate::ast::Node) -> Option<(String, String, &'tree crate::ast::Node)> {
+        if let Some((rec, callee, args_node)) = match_call(node) {
+            let mut class_name = "".to_string();
+            if let Some(receiver_type) = self.expression_type(rec) {
+                class_name = receiver_type.replace("T.nilable(", "").replace(")", "");
+            }
+            if class_name.is_empty() && rec.text.trim() == "self" {
+                class_name = self.current_owners.last().cloned().unwrap_or_default();
+            }
+            Some((class_name, callee, args_node))
+        } else if node.r#type == "FCALL" || node.r#type == "VCALL" || node.r#type == "SUPER" {
             let callee = node_symbol(node).unwrap_or_else(|| {
                 if node.r#type == "SUPER" { "super".to_string() } else { "".to_string() }
             });
@@ -5879,7 +7314,25 @@ impl<'a> NilKillVisitor<'a> {
                 crate::ast::Child::Node(n) => Some(n.as_ref()),
                 _ => None,
             }).unwrap_or(node);
-            (callee, args_node)
+            let class_name = self.current_owners.last().cloned().unwrap_or_default();
+            Some((class_name, callee, args_node))
+        } else {
+            None
+        }
+    }
+
+    fn inspect_param_origins(&mut self, node: &crate::ast::Node) {
+        let (callee, args_node, rec) = if let Some((rec, callee, args_node)) = match_call(node) {
+            (callee, args_node, Some(rec))
+        } else if node.r#type == "FCALL" || node.r#type == "VCALL" || node.r#type == "SUPER" {
+            let callee = node_symbol(node).unwrap_or_else(|| {
+                if node.r#type == "SUPER" { "super".to_string() } else { "".to_string() }
+            });
+            let args_node = node.children.iter().find_map(|c| match c {
+                crate::ast::Child::Node(n) => Some(n.as_ref()),
+                _ => None,
+            }).unwrap_or(node);
+            (callee, args_node, None)
         } else {
             return;
         };
@@ -5887,70 +7340,111 @@ impl<'a> NilKillVisitor<'a> {
         if callee == "defined?" || callee == "" {
             return;
         }
-        let args = child_nodes(args_node);
+
+        let mut class_name = "".to_string();
+        if let Some(r) = rec {
+            if let Some(receiver_type) = self.expression_type(r) {
+                class_name = receiver_type.replace("T.nilable(", "").replace(")", "");
+            }
+            if class_name.is_empty() && r.text.trim() == "self" {
+                class_name = self.current_owners.last().cloned().unwrap_or_default();
+            }
+        } else {
+            class_name = self.current_owners.last().cloned().unwrap_or_default();
+        }
+
+        let args = call_arguments(args_node);
         let mut positional_idx = 0usize;
         let mut counted_keyword_group = false;
-            for arg in args.iter() {
-                if arg.r#type == "pair" || arg.r#type == "PAIR" {
-                    if let Some(key_node) = child_node(arg, 0) {
-                        if let Some(key) = hash_key_name(key_node) {
-                            if let Some(value) = child_node(arg, 1) {
-                                let record =
-                                    self.param_origin_record(node, value, &callee, "keyword", &key);
+        for arg in args.iter() {
+            let is_keyword_pair = if arg.r#type == "pair" || arg.r#type == "PAIR" {
+                true
+            } else if arg.r#type == "HASH" {
+                if let Some(key_node) = child_node(arg, 0) {
+                    hash_key_name(key_node).is_some()
+                } else {
+                    false
+                }
+            } else {
+                false
+            };
+
+            if is_keyword_pair {
+                if let Some(key_node) = child_node(arg, 0) {
+                    if let Some(key) = hash_key_name(key_node) {
+                        if let Some(value) = child_node(arg, 1) {
+                            let record =
+                                self.param_origin_record(node, value, &callee, "keyword", &key);
+                            if !self.is_prepass {
                                 self.param_origins.push(record);
-                                self.record_callsite_hash_shape(&callee, "keyword", &key, value);
-                                self.record_callsite_array_element_shape(
-                                    &callee, "keyword", &key, value,
-                                );
                             }
+                            self.record_callsite_hash_shape(&class_name, &callee, "keyword", &key, value);
+                            self.record_callsite_array_element_shape(
+                                &class_name, &callee, "keyword", &key, value,
+                            );
                         }
                     }
-                    if !counted_keyword_group {
-                        positional_idx += 1;
-                        counted_keyword_group = true;
-                    }
-                } else {
-                    let record = self.param_origin_record(
-                        node,
-                        *arg,
-                        &callee,
-                        "positional",
-                        &positional_idx.to_string(),
-                    );
-                    self.param_origins.push(record);
-                    self.record_callsite_hash_shape(
-                        &callee,
-                        "positional",
-                        &positional_idx.to_string(),
-                        *arg,
-                    );
-                    self.record_callsite_array_element_shape(
-                        &callee,
-                        "positional",
-                        &positional_idx.to_string(),
-                        *arg,
-                    );
-                    positional_idx += 1;
                 }
+                if !counted_keyword_group {
+                    positional_idx += 1;
+                    counted_keyword_group = true;
+                }
+            } else {
+                let record = self.param_origin_record(
+                    node,
+                    *arg,
+                    &callee,
+                    "positional",
+                    &positional_idx.to_string(),
+                );
+                if !self.is_prepass {
+                    self.param_origins.push(record);
+                }
+                self.record_callsite_hash_shape(
+                    &class_name,
+                    &callee,
+                    "positional",
+                    &positional_idx.to_string(),
+                    *arg,
+                );
+                self.record_callsite_array_element_shape(
+                    &class_name,
+                    &callee,
+                    "positional",
+                    &positional_idx.to_string(),
+                    *arg,
+                );
+                positional_idx += 1;
             }
         }
+    }
 
     fn record_callsite_hash_shape(
         &mut self,
-        _callee: &str,
+        class_name: &str,
+        callee: &str,
         _kind: &str,
-        _slot: &str,
-        _arg: &crate::ast::Node,
+        slot: &str,
+        arg: &crate::ast::Node,
     ) {
+        if let Some(shape) = self.hash_shape_for_value(arg) {
+            let key = (class_name.to_string(), callee.to_string(), slot.to_string());
+            self.method_param_hash_shapes.insert(key, shape);
+        }
     }
 
     fn record_callsite_array_element_shape(
         &mut self,
-        _callee: &str,
+        class_name: &str,
+        callee: &str,
         _kind: &str,
-        _slot: &str,
-        _arg: &crate::ast::Node,
+        slot: &str,
+        arg: &crate::ast::Node,
     ) {
+        if let Some(shape) = self.array_element_shape_for_value(arg) {
+            let key = (class_name.to_string(), callee.to_string(), slot.to_string());
+            self.method_param_array_shapes.insert(key, shape);
+        }
     }
 
     fn param_origin_record(
@@ -5964,7 +7458,7 @@ impl<'a> NilKillVisitor<'a> {
         let mut ty = self.expression_type(arg);
         let mut origin_kind = if ty.is_some() { "static" } else { "unknown" }.to_string();
         let mut source_method = None::<String>;
-        if arg.r#type == "CALL" || arg.r#type == "QCALL" || arg.r#type == "OPCALL" {
+        if arg.r#type == "CALL" || arg.r#type == "QCALL" || arg.r#type == "OPCALL" || arg.r#type == "VCALL" || arg.r#type == "FCALL" {
             source_method = node_symbol(arg);
             if let Some(ref method) = source_method {
                 if let Some(ret) = self.known_return_type(method) {
@@ -5979,6 +7473,10 @@ impl<'a> NilKillVisitor<'a> {
         } else if arg.r#type == "LVAR" || arg.r#type == "DVAR" {
             origin_kind = "local".to_string();
         }
+        let mut code = arg.text.clone();
+        while code.starts_with('(') && code.ends_with(')') {
+            code = code[1..code.len() - 1].to_string();
+        }
         json!({
             "path": self.path,
             "line": call_node.first_lineno,
@@ -5990,7 +7488,7 @@ impl<'a> NilKillVisitor<'a> {
             "receiver": call_receiver_name(call_node),
             "source_method": source_method,
             "type": ty,
-            "code": arg.text.clone(),
+            "code": code,
             "hash_shape": self.hash_shape_for_value(arg),
             "array_element_shape": self.array_element_shape_for_value(arg),
             "unknown_reasons": if origin_kind == "unknown" { self.unknown_expression_reasons(arg) } else { Vec::<String>::new() },
@@ -6043,7 +7541,7 @@ impl<'a> NilKillVisitor<'a> {
                 reasons.insert("struct/array/collection value Hash".to_string());
                 return;
             }
-            "CALL" | "QCALL" | "OPCALL" => {
+            "CALL" | "QCALL" | "OPCALL" | "VCALL" | "FCALL" => {
                 if let Some(ty) = self.expression_type(node) {
                     reasons.insert(format!(
                         "literal/static expression {}",
@@ -6078,6 +7576,9 @@ impl<'a> NilKillVisitor<'a> {
     }
 
     fn inspect_index_lookup(&mut self, node: &crate::ast::Node) {
+        if self.is_prepass {
+            return;
+        }
         let name = node_symbol(node).unwrap_or_default();
         if name != "[]" && name != "fetch" {
             return;
@@ -6088,11 +7589,12 @@ impl<'a> NilKillVisitor<'a> {
         if sorbet_type_index_syntax(&receiver.text) {
             return;
         }
-        let args = child_nodes(args_node);
+        let args = call_arguments(args_node);
         if args.is_empty() || (name == "fetch" && args.len() > 1) {
             return;
         }
         let receiver_type = self.expression_type(receiver);
+        println!("DEBUG inspect_index_lookup: receiver={}, receiver_type={:?}, local_hash_shapes={:?}, local_array_shapes={:?}", receiver.text, receiver_type, self.local_hash_shapes, self.local_array_shapes);
         let lookup_type = self.collection_index_return_type(node, receiver_type.as_deref());
         let index_type = self.expression_type(args[0]);
         let origin = self.receiver_collection_origin(receiver);
@@ -6122,7 +7624,7 @@ impl<'a> NilKillVisitor<'a> {
         let Some((receiver, _, args_node)) = match_call(node) else {
             return None;
         };
-        let args = child_nodes(args_node);
+        let args = call_arguments(args_node);
         if args.len() != 1 {
             return None;
         }
@@ -6189,24 +7691,38 @@ impl<'a> NilKillVisitor<'a> {
     }
 
     fn hash_shape_for_receiver(&mut self, receiver: &crate::ast::Node) -> Option<Value> {
+        if receiver.r#type == "ITER" {
+            return child_node(receiver, 0).and_then(|c| self.hash_shape_for_receiver(c));
+        }
         match receiver.r#type.as_str() {
             "LVAR" | "DVAR" => {
                 let name =
                     node_symbol(receiver).unwrap_or_else(|| receiver.text.trim().to_string());
                 self.local_hash_shapes.get(&name).cloned()
             }
-            "HASH" => self.hash_shape_for_value(receiver),
-            "CALL" | "QCALL" | "OPCALL" => {
-                if let Some((rec, method, args_node)) = match_call(receiver) {
-                    if (self.behavior.is_type_normalizer(&rec.text, &method)
-                        || self.behavior.is_type_cast(&rec.text, &method))
-                    {
-                        let arg_nodes = child_nodes(args_node);
-                        arg_nodes
-                            .first()
-                            .and_then(|arg| self.hash_shape_for_receiver(arg))
-                    } else {
+            "HASH" | "OR" | "AND" => self.hash_shape_for_value(receiver),
+            "CALL" | "QCALL" | "OPCALL" | "FCALL" | "VCALL" => {
+                if let Some((class_name, method, args_node)) = self.get_call_info(receiver) {
+                    if receiver.r#type != "FCALL" && receiver.r#type != "VCALL" {
+                        if let Some((rec, _, _)) = match_call(receiver) {
+                            if (self.behavior.is_type_normalizer(&rec.text, &method)
+                                || self.behavior.is_type_cast(&rec.text, &method))
+                            {
+                                let arg_nodes = call_arguments(args_node);
+                                return arg_nodes
+                                    .first()
+                                    .and_then(|arg| self.hash_shape_for_receiver(arg));
+                            } else if matches!(method.as_str(), "first" | "last" | "shift" | "pop" | "sample" | "[]" | "at") {
+                                return self.array_element_shape_for_receiver(Some(rec));
+                            }
+                        }
+                    }
+                    if let Some(shape) = self.method_return_hash_shape_for_call(&class_name, &method) {
+                        Some(shape)
+                    } else if receiver.r#type != "FCALL" && receiver.r#type != "VCALL" {
                         self.struct_field_hash_shape_for_call(receiver)
+                    } else {
+                        None
                     }
                 } else {
                     None
@@ -6221,24 +7737,46 @@ impl<'a> NilKillVisitor<'a> {
         receiver: Option<&crate::ast::Node>,
     ) -> Option<Value> {
         let receiver = receiver?;
+        if receiver.r#type == "ITER" {
+            if let Some(call) = child_node(receiver, 0) {
+                if let Some((_, method, _)) = match_call(call) {
+                    if method == "map" || method == "collect" || method == "filter_map" {
+                        if let Some(body_node) = child_nodes(receiver).last() {
+                            let body_expr = implicit_return_expression(body_node).unwrap_or(body_node);
+                            return self.hash_shape_for_value(body_expr);
+                        }
+                    }
+                }
+            }
+            return child_node(receiver, 0).and_then(|c| self.array_element_shape_for_receiver(Some(c)));
+        }
         match receiver.r#type.as_str() {
             "LVAR" | "DVAR" => {
                 let name =
                     node_symbol(receiver).unwrap_or_else(|| receiver.text.trim().to_string());
                 self.local_array_shapes.get(&name).cloned()
             }
-            "ARRAY" | "LIST" => self.array_element_shape_for_value(receiver),
-            "CALL" | "QCALL" | "OPCALL" => {
-                if let Some((rec, method, args_node)) = match_call(receiver) {
-                    if (self.behavior.is_type_normalizer(&rec.text, &method)
-                        || self.behavior.is_type_cast(&rec.text, &method))
-                    {
-                        let arg_nodes = child_nodes(args_node);
-                        arg_nodes
-                            .first()
-                            .and_then(|arg| self.array_element_shape_for_receiver(Some(arg)))
-                    } else if matches!(method.as_str(), "select" | "reject" | "compact") {
-                        self.array_element_shape_for_receiver(Some(rec))
+            "ARRAY" | "LIST" | "OR" | "AND" => self.array_element_shape_for_value(receiver),
+            "CALL" | "QCALL" | "OPCALL" | "FCALL" | "VCALL" => {
+                if let Some((class_name, method, args_node)) = self.get_call_info(receiver) {
+                    if receiver.r#type != "FCALL" && receiver.r#type != "VCALL" {
+                        if let Some((rec, _, _)) = match_call(receiver) {
+                            if (self.behavior.is_type_normalizer(&rec.text, &method)
+                                || self.behavior.is_type_cast(&rec.text, &method))
+                            {
+                                let arg_nodes = call_arguments(args_node);
+                                return arg_nodes
+                                    .first()
+                                    .and_then(|arg| self.array_element_shape_for_receiver(Some(arg)));
+                            } else if matches!(method.as_str(), "select" | "reject" | "compact") {
+                                return self.array_element_shape_for_receiver(Some(rec));
+                            }
+                        }
+                    }
+                    if let Some(shape) = self.method_return_array_shape_for_call(&class_name, &method) {
+                        Some(shape)
+                    } else if receiver.r#type != "FCALL" && receiver.r#type != "VCALL" {
+                        self.struct_field_array_shape_for_call(receiver)
                     } else {
                         None
                     }
@@ -6277,7 +7815,7 @@ impl<'a> NilKillVisitor<'a> {
             "ARRAY" | "LIST" | "HASH" => self
                 .container_origin_for_value(node, "literal")
                 .unwrap_or_else(|| json!({"kind": node.r#type.clone(), "code": node.text.clone()})),
-            "CALL" | "QCALL" | "OPCALL" => {
+            "CALL" | "QCALL" | "OPCALL" | "FCALL" | "VCALL" => {
                 if let Some(shape) = self.hash_shape_for_receiver(node) {
                     json!({"kind": "local hash shape", "name": node.text.clone(), "path": self.path, "line": node.first_lineno, "shape": shape})
                 } else {
@@ -6330,7 +7868,7 @@ impl<'a> NilKillVisitor<'a> {
                 let mut key_types = BTreeSet::new();
                 let mut value_types = BTreeSet::new();
                 for pair in child_nodes(value) {
-                    if pair.r#type == "pair" || pair.r#type == "PAIR" {
+                    if pair.r#type == "pair" || pair.r#type == "PAIR" || pair.r#type == "HASH" {
                         if let Some(key) = child_node(pair, 0) {
                             if let Some(ty) = self.expression_type(key) {
                                 key_types.insert(ty);
@@ -6365,7 +7903,7 @@ impl<'a> NilKillVisitor<'a> {
                     merge_value(origin, &[("name", json!(name)), ("alias_of", json!(text))])
                 })
             }
-            "CALL" | "QCALL" | "OPCALL" => {
+            "CALL" | "QCALL" | "OPCALL" | "FCALL" | "VCALL" => {
                 let callee = node_symbol(value).unwrap_or_default();
                 Some(json!({
                     "kind": "forwarded return",
@@ -6381,10 +7919,13 @@ impl<'a> NilKillVisitor<'a> {
     }
 
     fn inspect_hash_record_blocker(&mut self, node: &crate::ast::Node) {
+        if self.is_prepass {
+            return;
+        }
         let Some((receiver, name, args_node)) = match_call(node) else {
             return;
         };
-        let args = child_nodes(args_node);
+        let args = call_arguments(args_node);
         if name == "[]" || name == "fetch" {
             if name == "fetch" && args.len() > 1 {
                 return;
@@ -6444,6 +7985,9 @@ impl<'a> NilKillVisitor<'a> {
     }
 
     fn inspect_hash_record_member_call(&mut self, node: &crate::ast::Node) {
+        if self.is_prepass {
+            return;
+        }
         let Some((receiver, name, _)) = match_call(node) else {
             return;
         };
@@ -6454,7 +7998,7 @@ impl<'a> NilKillVisitor<'a> {
         let Some((inner_receiver, _, args_node)) = match_call(receiver) else {
             return;
         };
-        let args = child_nodes(args_node);
+        let args = call_arguments(args_node);
         if receiver_name == "fetch" && args.len() > 1 {
             return;
         }
@@ -6527,7 +8071,7 @@ impl<'a> NilKillVisitor<'a> {
             if let Some(decl) = self.find_struct_declaration(&klass) {
                 let full_class = decl.class.clone();
                 let fields = decl.fields.clone();
-                let args = child_nodes(args_node);
+                let args = call_arguments(args_node);
                 for (idx, arg) in args.iter().enumerate() {
                     if idx >= fields.len() {
                         continue;
@@ -6539,22 +8083,24 @@ impl<'a> NilKillVisitor<'a> {
                         .expression_type(arg)
                         .unwrap_or_else(|| "T.untyped".to_string());
                     let key = state_key(&full_class, &fields[idx]);
-                    self.state_type_records.push(StateTypeRecord {
-                        language: self.document.language.as_str().to_string(),
-                        path: self.path.to_string(),
-                        owner: full_class.clone(),
-                        field: fields[idx].clone(),
-                        declared_type: ty,
-                        type_references: Vec::new(),
-                        line: node.first_lineno,
-                        span: Some([
-                            node.first_lineno,
-                            node.first_column,
-                            node.last_lineno,
-                            node.last_column,
-                        ]),
-                        key,
-                    });
+                    if !self.is_prepass {
+                        self.state_type_records.push(StateTypeRecord {
+                            language: self.document.language.as_str().to_string(),
+                            path: self.path.to_string(),
+                            owner: full_class.clone(),
+                            field: fields[idx].clone(),
+                            declared_type: ty,
+                            type_references: Vec::new(),
+                            line: node.first_lineno,
+                            span: Some([
+                                node.first_lineno,
+                                node.first_column,
+                                node.last_lineno,
+                                node.last_column,
+                            ]),
+                            key,
+                        });
+                    }
                     if let Some(shape) = self.hash_shape_for_value(arg) {
                         self.struct_field_hash_shapes.insert((full_class.clone(), fields[idx].clone()), shape);
                     }
@@ -6575,9 +8121,9 @@ impl<'a> NilKillVisitor<'a> {
             if klass.is_empty() || klass == "Struct" {
                 return;
             }
-            let args = child_nodes(args_node);
+            let args = call_arguments(args_node);
             for arg in args {
-                if arg.r#type == "pair" || arg.r#type == "PAIR" {
+                if arg.r#type == "pair" || arg.r#type == "PAIR" || arg.r#type == "HASH" {
                     if let Some(value_node) = child_node(arg, 1) {
                         if let Some(key_node) = child_node(arg, 0) {
                             if let Some(field) = hash_key_name(key_node) {
@@ -6585,26 +8131,30 @@ impl<'a> NilKillVisitor<'a> {
                                     .expression_type(value_node)
                                     .unwrap_or_else(|| "T.untyped".to_string());
                                 let key = state_key(&klass, &field);
-                                self.state_type_records.push(StateTypeRecord {
-                                    language: self.document.language.as_str().to_string(),
-                                    path: self.path.to_string(),
-                                    owner: klass.clone(),
-                                    field: field.clone(),
-                                    declared_type: ty,
-                                    type_references: Vec::new(),
-                                    line: node.first_lineno,
-                                    span: Some([
-                                        node.first_lineno,
-                                        node.first_column,
-                                        node.last_lineno,
-                                        node.last_column,
-                                    ]),
-                                    key,
-                                });
+                                if !self.is_prepass {
+                                    self.state_type_records.push(StateTypeRecord {
+                                        language: self.document.language.as_str().to_string(),
+                                        path: self.path.to_string(),
+                                        owner: klass.clone(),
+                                        field: field.clone(),
+                                        declared_type: ty,
+                                        type_references: Vec::new(),
+                                        line: node.first_lineno,
+                                        span: Some([
+                                            node.first_lineno,
+                                            node.first_column,
+                                            node.last_lineno,
+                                            node.last_column,
+                                        ]),
+                                        key,
+                                    });
+                                }
                                 if let Some(shape) = self.hash_shape_for_value(value_node) {
+                                    println!("DEBUG inspect_class_constructor_fields: inserting hash shape class={}, field={}, shape={:?}", klass, field, shape);
                                     self.struct_field_hash_shapes.insert((klass.clone(), field.clone()), shape);
                                 }
                                 if let Some(shape) = self.array_element_shape_for_value(value_node) {
+                                    println!("DEBUG inspect_class_constructor_fields: inserting array shape class={}, field={}, shape={:?}", klass, field, shape);
                                     self.struct_field_array_shapes.insert((klass.clone(), field.clone()), shape);
                                 }
                             }
@@ -6617,7 +8167,34 @@ impl<'a> NilKillVisitor<'a> {
 
     fn inspect_struct_declaration(&mut self, _node: &crate::ast::Node) {}
 
+    fn inspect_attribute_assignment(&mut self, node: &crate::ast::Node) {
+        if let Some((rec, method, args_node)) = match_call(node) {
+            if method.ends_with('=') {
+                let field = method.trim_end_matches('=').to_string();
+                let arg_children = call_arguments(args_node);
+                let val_node = arg_children
+                    .last()
+                    .map(|n| *n)
+                    .unwrap_or(args_node);
+                let class_name = if let Some(receiver_type) = self.expression_type(rec) {
+                    receiver_type.replace("T.nilable(", "").replace(")", "")
+                } else {
+                    "T.untyped".to_string()
+                };
+                if let Some(shape) = self.hash_shape_for_value(val_node) {
+                    self.struct_field_hash_shapes.insert((class_name.clone(), field.clone()), shape);
+                }
+                if let Some(shape) = self.array_element_shape_for_value(val_node) {
+                    self.struct_field_array_shapes.insert((class_name, field), shape);
+                }
+            }
+        }
+    }
+
     fn inspect_array_literal(&mut self, node: &crate::ast::Node) {
+        if self.is_prepass {
+            return;
+        }
         let elements = child_nodes(node);
         if elements.len() < 2
             || elements.iter().any(|elem| {
@@ -6649,6 +8226,9 @@ impl<'a> NilKillVisitor<'a> {
     }
 
     fn inspect_hash_literal(&mut self, node: &crate::ast::Node) {
+        if self.is_prepass {
+            return;
+        }
         let pairs: Vec<&crate::ast::Node> = child_nodes(node)
             .into_iter()
             .filter(|child| {
@@ -6760,56 +8340,129 @@ impl<'a> NilKillVisitor<'a> {
             return;
         };
 
-        if let Some(shape) = self.hash_shape_for_value(value) {
+        if let Some(shape) = self.hash_shape_for_receiver(value) {
             self.local_hash_shapes.insert(name.clone(), shape);
-        } else if self.preserve_hash_shape_assignment(value) {
-            let src = node_symbol(value).unwrap_or_else(|| value.text.trim().to_string());
-            if let Some(shape) = self.local_hash_shapes.get(&src).cloned() {
-                self.local_hash_shapes.insert(name.clone(), shape);
-            }
         } else {
             self.local_hash_shapes.remove(&name);
         }
 
-        if let Some(shape) = self.array_element_shape_for_value(value) {
+        if let Some(shape) = self.array_element_shape_for_receiver(Some(value)) {
             self.local_array_shapes.insert(name.clone(), shape);
-        } else if self.preserve_array_element_shape_assignment(value) {
-            let src = node_symbol(value).unwrap_or_else(|| value.text.trim().to_string());
-            if let Some(shape) = self.local_array_shapes.get(&src).cloned() {
-                self.local_array_shapes.insert(name.clone(), shape);
-            }
         } else {
             self.local_array_shapes.remove(&name);
         }
     }
 
-    fn preserve_hash_shape_assignment(&self, value: &crate::ast::Node) -> bool {
-        if value.r#type == "LVAR" || value.r#type == "DVAR" {
-            let src = node_symbol(value).unwrap_or_else(|| value.text.trim().to_string());
-            self.local_hash_shapes.contains_key(&src)
+    fn check_local_escapes_and_mutations(&mut self, node: &crate::ast::Node) {
+        if let Some((rec, method, args_node)) = match_call(node) {
+            if rec.r#type == "LVAR" || rec.r#type == "DVAR" {
+                if let Some(name) = node_symbol(rec) {
+                    if matches!(method.as_str(), "[]=" | "merge!" | "update" | "delete" | "clear" | "shift") {
+                        if self.local_hash_shapes.contains_key(&name) || self.local_array_shapes.contains_key(&name) {
+                            self.local_hash_shapes.remove(&name);
+                            self.local_array_shapes.remove(&name);
+                        }
+                    }
+                }
+            }
+        }
+
+        let (callee, args_node) = if let Some((_, callee, args_node)) = match_call(node) {
+            (callee, args_node)
+        } else if node.r#type == "FCALL" || node.r#type == "VCALL" || node.r#type == "SUPER" {
+            let callee = node_symbol(node).unwrap_or_default();
+            let args_node = node.children.iter().find_map(|c| match c {
+                crate::ast::Child::Node(n) => Some(n.as_ref()),
+                _ => None,
+            }).unwrap_or(node);
+            (callee, args_node)
         } else {
-            false
+            return;
+        };
+
+        if matches!(
+            callee.as_str(),
+            "[]" | "fetch"
+                | "each"
+                | "each_pair"
+                | "each_key"
+                | "each_value"
+                | "present?"
+                | "nil?"
+                | "blank?"
+                | "<<"
+                | "push"
+                | "unshift"
+                | "append"
+                | "prepend"
+                | "concat"
+                | "add"
+                | "[]="
+                | "merge"
+                | "merge!"
+                | "update"
+        ) {
+            return;
+        }
+
+        for arg in call_arguments(args_node) {
+            if arg.r#type == "LVAR" || arg.r#type == "DVAR" {
+                if let Some(name) = node_symbol(arg) {
+                    if self.local_hash_shapes.contains_key(&name) || self.local_array_shapes.contains_key(&name) {
+                        self.local_hash_shapes.remove(&name);
+                        self.local_array_shapes.remove(&name);
+                        self.local_types.insert(name.clone(), "T.untyped".to_string());
+                    }
+                }
+            }
         }
     }
 
-    fn preserve_array_element_shape_assignment(&self, value: &crate::ast::Node) -> bool {
-        if value.r#type == "LVAR" || value.r#type == "DVAR" {
-            let src = node_symbol(value).unwrap_or_else(|| value.text.trim().to_string());
-            self.local_array_shapes.contains_key(&src)
-        } else {
-            false
+    fn check_literal_escapes(&mut self, node: &crate::ast::Node) {
+        for child in child_nodes(node) {
+            if child.r#type == "LVAR" || child.r#type == "DVAR" {
+                if let Some(name) = node_symbol(child) {
+                    if self.local_hash_shapes.contains_key(&name) || self.local_array_shapes.contains_key(&name) {
+                        self.local_hash_shapes.remove(&name);
+                        self.local_array_shapes.remove(&name);
+                        self.local_types.insert(name.clone(), "T.untyped".to_string());
+                    }
+                }
+            } else if child.r#type == "pair" || child.r#type == "PAIR" || child.r#type == "HASH" {
+                if let Some(val_node) = child_node(child, 1) {
+                    if val_node.r#type == "LVAR" || val_node.r#type == "DVAR" {
+                        if let Some(name) = node_symbol(val_node) {
+                            if self.local_hash_shapes.contains_key(&name) || self.local_array_shapes.contains_key(&name) {
+                                self.local_hash_shapes.remove(&name);
+                                self.local_array_shapes.remove(&name);
+                                self.local_types.insert(name.clone(), "T.untyped".to_string());
+                            }
+                        }
+                    }
+                }
+            }
         }
     }
 
     fn hash_shape_for_value(&mut self, value: &crate::ast::Node) -> Option<Value> {
         match value.r#type.as_str() {
+            "LASGN" | "DASGN" | "IASGN" | "CASGN" | "CVASGN" | "GVASGN" | "ATTRASGN" => {
+                let val_node = if value.r#type == "ATTRASGN" {
+                    child_node(value, 2).and_then(|args| child_nodes(args).last().copied())
+                } else {
+                    child_node(value, 1)
+                };
+                eprintln!("DEBUG hash_shape_for_value: type={}, val_node={:?}", value.r#type, val_node.map(|n| &n.r#type));
+                val_node.and_then(|val| self.hash_shape_for_value(val))
+            }
             "HASH" => {
+                eprintln!("DEBUG hash_shape_for_value HASH node: text={}, children={:?}", value.text, child_nodes(value).iter().map(|c| &c.r#type).collect::<Vec<_>>());
                 let mut keys = serde_json::Map::new();
                 let mut value_hash_shapes = serde_json::Map::new();
                 let mut value_array_shapes = serde_json::Map::new();
                 let mut poisoned = false;
                 for pair in child_nodes(value) {
-                    if pair.r#type == "pair" || pair.r#type == "PAIR" {
+                    if pair.r#type == "pair" || pair.r#type == "PAIR" || pair.r#type == "HASH" {
                         let Some(key_node) = child_node(pair, 0) else {
                             continue;
                         };
@@ -6860,20 +8513,41 @@ impl<'a> NilKillVisitor<'a> {
                 let name = node_symbol(value).unwrap_or_else(|| value.text.trim().to_string());
                 self.local_hash_shapes.get(&name).cloned()
             }
-            "CALL" | "QCALL" | "OPCALL" => {
-                if let Some((rec, method, args_node)) = match_call(value) {
-                    if (self.behavior.is_type_normalizer(&rec.text, &method)
-                        || self.behavior.is_type_cast(&rec.text, &method))
-                    {
-                        let arg_nodes = child_nodes(args_node);
-                        arg_nodes
-                            .first()
-                            .and_then(|arg| self.hash_shape_for_value(arg))
-                    } else {
+            "CALL" | "QCALL" | "OPCALL" | "FCALL" | "VCALL" => {
+                if let Some((class_name, method, args_node)) = self.get_call_info(value) {
+                    if value.r#type != "FCALL" && value.r#type != "VCALL" {
+                        if let Some((rec, _, _)) = match_call(value) {
+                            if (self.behavior.is_type_normalizer(&rec.text, &method)
+                                || self.behavior.is_type_cast(&rec.text, &method))
+                            {
+                                let arg_nodes = call_arguments(args_node);
+                                return arg_nodes
+                                    .first()
+                                    .and_then(|arg| self.hash_shape_for_value(arg));
+                            } else if matches!(method.as_str(), "first" | "last" | "shift" | "pop" | "sample" | "[]" | "at") {
+                                return self.array_element_shape_for_receiver(Some(rec));
+                            }
+                        }
+                    }
+                    if let Some(shape) = self.method_return_hash_shape_for_call(&class_name, &method) {
+                        Some(shape)
+                    } else if value.r#type != "FCALL" && value.r#type != "VCALL" {
                         self.struct_field_hash_shape_for_call(value)
+                    } else {
+                        None
                     }
                 } else {
                     None
+                }
+            }
+            "OR" | "AND" => {
+                let left = child_node(value, 0).and_then(|c| self.hash_shape_for_value(c));
+                let right = child_node(value, 1).and_then(|c| self.hash_shape_for_value(c));
+                match (left, right) {
+                    (Some(l), Some(r)) => Some(merge_hash_record_shapes(l, r)),
+                    (Some(l), None) => Some(l),
+                    (None, Some(r)) => Some(r),
+                    (None, None) => None,
                 }
             }
             _ => None,
@@ -6882,6 +8556,14 @@ impl<'a> NilKillVisitor<'a> {
 
     fn array_element_shape_for_value(&mut self, value: &crate::ast::Node) -> Option<Value> {
         match value.r#type.as_str() {
+            "LASGN" | "DASGN" | "IASGN" | "CASGN" | "CVASGN" | "GVASGN" | "ATTRASGN" => {
+                let val_node = if value.r#type == "ATTRASGN" {
+                    child_node(value, 2).and_then(|args| child_nodes(args).last().copied())
+                } else {
+                    child_node(value, 1)
+                };
+                val_node.and_then(|val| self.array_element_shape_for_value(val))
+            }
             "ARRAY" | "LIST" => {
                 let shapes = child_nodes(value)
                     .into_iter()
@@ -6897,40 +8579,150 @@ impl<'a> NilKillVisitor<'a> {
                 let name = node_symbol(value).unwrap_or_else(|| value.text.trim().to_string());
                 self.local_array_shapes.get(&name).cloned()
             }
-            "CALL" | "QCALL" | "OPCALL" => {
-                if let Some((rec, method, args_node)) = match_call(value) {
-                    if (self.behavior.is_type_normalizer(&rec.text, &method)
-                        || self.behavior.is_type_cast(&rec.text, &method))
-                    {
-                        let arg_nodes = child_nodes(args_node);
-                        arg_nodes
-                            .first()
-                            .and_then(|arg| self.array_element_shape_for_value(arg))
-                    } else {
+            "CALL" | "QCALL" | "OPCALL" | "FCALL" | "VCALL" => {
+                if let Some((class_name, method, args_node)) = self.get_call_info(value) {
+                    if value.r#type != "FCALL" && value.r#type != "VCALL" {
+                        if let Some((rec, _, _)) = match_call(value) {
+                            if (self.behavior.is_type_normalizer(&rec.text, &method)
+                                || self.behavior.is_type_cast(&rec.text, &method))
+                            {
+                                let arg_nodes = call_arguments(args_node);
+                                return arg_nodes
+                                    .first()
+                                    .and_then(|arg| self.array_element_shape_for_value(arg));
+                            } else if matches!(method.as_str(), "first" | "last" | "shift" | "pop" | "sample" | "[]" | "at") {
+                                return self.array_element_shape_for_receiver(Some(rec));
+                            }
+                        }
+                    }
+                    if let Some(shape) = self.method_return_array_shape_for_call(&class_name, &method) {
+                        Some(shape)
+                    } else if value.r#type != "FCALL" && value.r#type != "VCALL" {
                         self.struct_field_array_shape_for_call(value)
+                    } else {
+                        None
                     }
                 } else {
                     None
+                }
+            }
+            "ITER" => {
+                println!("DEBUG array_element_shape_for_value ITER: value.text={}", value.text);
+                if let Some(call_node) = child_node(value, 0) {
+                    println!("DEBUG array_element_shape_for_value ITER call_node: {}", call_node.text);
+                    if let Some((_, method, _)) = match_call(call_node) {
+                        println!("DEBUG array_element_shape_for_value ITER method: {}", method);
+                        if method == "map" || method == "collect" {
+                            let mut p0_name = None;
+                            if let Some(block) = child_node(value, 1) {
+                                let mut args_node = None;
+                                for child in child_nodes(&block) {
+                                    if child.r#type == "ARGS" {
+                                        args_node = Some(child);
+                                        break;
+                                    }
+                                }
+                                if let Some(args) = args_node {
+                                    let param_names = collect_block_param_names(&args);
+                                    if let Some(p0) = param_names.get(0) {
+                                        p0_name = Some(p0.clone());
+                                    }
+                                }
+                            }
+                            let old_shape = p0_name.as_ref().and_then(|p0| self.local_hash_shapes.get(p0).cloned());
+                            if let Some(ref p0) = p0_name {
+                                if let Some((rec, _, _)) = match_call(call_node) {
+                                    if let Some(shape) = self.array_element_shape_for_receiver(Some(rec)) {
+                                        self.local_hash_shapes.insert(p0.clone(), shape);
+                                    }
+                                }
+                            }
+
+                            let mut res = None;
+                            if let Some(body_node) = child_nodes(value).last() {
+                                println!("DEBUG array_element_shape_for_value ITER body_node: {}, type={}", body_node.text, body_node.r#type);
+                                let body_expr = implicit_return_expression(body_node).unwrap_or(body_node);
+                                println!("DEBUG array_element_shape_for_value ITER body_expr: {}, type={}", body_expr.text, body_expr.r#type);
+                                res = self.hash_shape_for_value(body_expr);
+                                println!("DEBUG array_element_shape_for_value ITER result: {:?}", res);
+                            } else {
+                                println!("DEBUG array_element_shape_for_value ITER body_node is None");
+                            }
+
+                            if let Some(ref p0) = p0_name {
+                                if let Some(old) = old_shape {
+                                    self.local_hash_shapes.insert(p0.clone(), old);
+                                } else {
+                                    self.local_hash_shapes.remove(p0);
+                                }
+                            }
+                            res
+                        } else {
+                            println!("DEBUG array_element_shape_for_value ITER method is not map/collect");
+                            None
+                        }
+                    } else {
+                        println!("DEBUG array_element_shape_for_value ITER match_call failed");
+                        None
+                    }
+                } else {
+                    println!("DEBUG array_element_shape_for_value ITER call_node is None");
+                    None
+                }
+            }
+            "OR" | "AND" => {
+                let left = child_node(value, 0).and_then(|c| self.array_element_shape_for_value(c));
+                let right = child_node(value, 1).and_then(|c| self.array_element_shape_for_value(c));
+                match (left, right) {
+                    (Some(l), Some(r)) => Some(merge_hash_record_shapes(l, r)),
+                    (Some(l), None) => Some(l),
+                    (None, Some(r)) => Some(r),
+                    (None, None) => None,
                 }
             }
             _ => None,
         }
     }
 
-    fn struct_field_hash_shape_for_call(&mut self, node: &crate::ast::Node) -> Option<Value> {
+    fn struct_field_hash_shape_for_call(&self, node: &crate::ast::Node) -> Option<Value> {
         let (rec, method, _) = match_call(node)?;
-        let receiver_type = self.expression_type(rec)?;
-        let class = receiver_type.replace("T.nilable(", "").replace(")", "");
-        let key = (class, method);
-        self.struct_field_hash_shapes.get(&key).cloned()
+        let mut found_shape = None;
+        if let Some(receiver_type) = self.expression_type(rec) {
+            let class = receiver_type.replace("T.nilable(", "").replace(")", "");
+            let key = (class, method.clone());
+            found_shape = self.struct_field_hash_shapes.get(&key).cloned();
+        }
+        if found_shape.is_none() {
+            let matching_shapes = self.struct_field_hash_shapes.iter()
+                .filter(|((_, field), _)| field == &method)
+                .map(|(_, shape)| shape)
+                .collect::<Vec<_>>();
+            if matching_shapes.len() == 1 {
+                found_shape = Some(matching_shapes[0].clone());
+            }
+        }
+        found_shape
     }
 
-    fn struct_field_array_shape_for_call(&mut self, node: &crate::ast::Node) -> Option<Value> {
+    fn struct_field_array_shape_for_call(&self, node: &crate::ast::Node) -> Option<Value> {
         let (rec, method, _) = match_call(node)?;
-        let receiver_type = self.expression_type(rec)?;
-        let class = receiver_type.replace("T.nilable(", "").replace(")", "");
-        let key = (class, method);
-        self.struct_field_array_shapes.get(&key).cloned()
+        let mut found_shape = None;
+        if let Some(receiver_type) = self.expression_type(rec) {
+            let class = receiver_type.replace("T.nilable(", "").replace(")", "");
+            let key = (class, method.clone());
+            found_shape = self.struct_field_array_shapes.get(&key).cloned();
+        }
+        if found_shape.is_none() {
+            let matching_shapes = self.struct_field_array_shapes.iter()
+                .filter(|((_, field), _)| field == &method)
+                .map(|(_, shape)| shape)
+                .collect::<Vec<_>>();
+            if matching_shapes.len() == 1 {
+                found_shape = Some(matching_shapes[0].clone());
+            }
+        }
+        println!("DEBUG struct_field_array_shape_for_call: node={}, method={}, found={:?}", node.text, method, found_shape);
+        found_shape
     }
 }
 
@@ -6945,15 +8737,28 @@ fn hash_key_name(node: &crate::ast::Node) -> Option<String> {
             )
         }
         "LIT" => {
-            let text = node.text.trim();
-            if text.starts_with(':') {
-                Some(text.trim_start_matches(':').trim_end_matches(':').to_string())
+            if let Some(sym) = node_symbol(node) {
+                let s = sym.trim_start_matches(':').trim_end_matches(':').to_string();
+                Some(unquote(&s))
+            } else {
+                let text = node.text.trim();
+                if text.starts_with(':') || text.ends_with(':') {
+                    Some(text.trim_start_matches(':').trim_end_matches(':').to_string())
+                } else {
+                    None
+                }
+            }
+        }
+        "STR" | "STRING" | "STRING_LITERAL" => Some(unquote(&node.text)),
+        "LVAR" | "DVAR" | "IVAR" | "CVAR" | "GVAR" | "CALL" | "QCALL" | "OPCALL" | "VCALL" | "FCALL" => None,
+        _ => {
+            if let Some(sym) = node_symbol(node) {
+                let s = sym.trim_start_matches(':').trim_end_matches(':').to_string();
+                Some(unquote(&s))
             } else {
                 None
             }
         }
-        "STR" | "STRING" | "STRING_LITERAL" => Some(unquote(&node.text)),
-        _ => None,
     }
 }
 
@@ -7006,7 +8811,7 @@ fn hidden_enum_literal_values(node: &crate::ast::Node) -> Vec<Value> {
 fn collection_append_method(name: &str) -> bool {
     matches!(
         name,
-        "<<" | "push" | "unshift" | "append" | "prepend" | "concat"
+        "<<" | "push" | "unshift" | "append" | "prepend" | "concat" | "add"
     )
 }
 
@@ -7154,6 +8959,20 @@ fn parse_collection_type(raw: &str) -> Option<CollectionInfo> {
     None
 }
 
+fn collect_block_param_names(args_node: &crate::ast::Node) -> Vec<String> {
+    let mut names = Vec::new();
+    for child in child_nodes(args_node) {
+        if child.r#type == "LASGN" || child.r#type == "DASGN" || child.r#type == "LVAR" || child.r#type == "DVAR" {
+            if let Some(name) = node_symbol(child) {
+                names.push(name);
+            } else {
+                names.push(child.text.trim().to_string());
+            }
+        }
+    }
+    names
+}
+
 fn extract_param_entries(sig: &str) -> Vec<(String, String)> {
     let Some(params) = extract_call_args(sig, "params") else {
         return Vec::new();
@@ -7234,7 +9053,7 @@ fn dispatch_helper_call(when_node: &crate::ast::Node, param_name: &str) -> Optio
     if expr.r#type == "FCALL" {
         let name = node_symbol(expr)?;
         if let Some(args_node) = child_node(expr, 1) {
-            let args = child_nodes(args_node);
+            let args = call_arguments(args_node);
             if args.len() == 1 {
                 let arg = args[0];
                 if (arg.r#type == "LVAR" || arg.r#type == "DVAR") && arg.text.trim() == param_name {
@@ -7245,7 +9064,7 @@ fn dispatch_helper_call(when_node: &crate::ast::Node, param_name: &str) -> Optio
     } else if expr.r#type == "CALL" || expr.r#type == "QCALL" {
         let (receiver, method, args_node) = match_call(expr)?;
         if receiver.r#type == "self" || receiver.text.trim() == "self" {
-            let args = child_nodes(args_node);
+            let args = call_arguments(args_node);
             if args.len() == 1 {
                 let arg = args[0];
                 if (arg.r#type == "LVAR" || arg.r#type == "DVAR") && arg.text.trim() == param_name {
@@ -7255,6 +9074,16 @@ fn dispatch_helper_call(when_node: &crate::ast::Node, param_name: &str) -> Optio
         }
     }
     None
+}
+
+fn collect_classes(node: &crate::ast::Node, classes: &mut Vec<String>) {
+    if node.r#type == "CONST" || node.r#type == "COLON2" || node.r#type == "COLON3" {
+        classes.push(node.text.trim().to_string());
+    } else if node.r#type == "LIST" {
+        for child in child_nodes(node) {
+            collect_classes(child, classes);
+        }
+    }
 }
 
 fn collect_dispatch_arms(
@@ -7272,20 +9101,10 @@ fn collect_dispatch_arms(
                 let children = child_nodes(child);
                 if children.len() >= 2 {
                     let count = children.len() - 1;
-                    let classes = children
-                        .iter()
-                        .take(count)
-                        .filter_map(|candidate| {
-                            if candidate.r#type == "CONST"
-                                || candidate.r#type == "COLON2"
-                                || candidate.r#type == "COLON3"
-                            {
-                                Some(candidate.text.trim().to_string())
-                            } else {
-                                None
-                            }
-                        })
-                        .collect::<Vec<_>>();
+                    let mut classes = Vec::new();
+                    for candidate in children.iter().take(count) {
+                        collect_classes(candidate, &mut classes);
+                    }
                     if !classes.is_empty() {
                         arms.push((helper, classes));
                     }
@@ -7338,4 +9157,47 @@ fn leading_constant_path(type_text: &str) -> Option<&str> {
             .is_some_and(|ch| ch.is_ascii_uppercase())
     });
     valid.then_some(prefix)
+}
+
+fn collect_assigned_vars(node: &crate::ast::Node, vars: &mut BTreeSet<String>) {
+    if node.r#type == "LASGN" || node.r#type == "DASGN" {
+        if let Some(name) = node_symbol(node) {
+            vars.insert(name);
+        }
+    }
+    for child in child_nodes(node) {
+        collect_assigned_vars(child, vars);
+    }
+}
+
+fn merge_types(existing: &str, new_ty: &str) -> String {
+    if existing == new_ty {
+        return existing.to_string();
+    }
+    if existing == "T.untyped" {
+        return new_ty.to_string();
+    }
+    if new_ty == "T.untyped" {
+        return existing.to_string();
+    }
+    if existing == "NilClass" {
+        if new_ty.starts_with("T.nilable(") {
+            return new_ty.to_string();
+        } else {
+            return format!("T.nilable({})", new_ty);
+        }
+    }
+    if new_ty == "NilClass" {
+        if existing.starts_with("T.nilable(") {
+            return existing.to_string();
+        } else {
+            return format!("T.nilable({})", existing);
+        }
+    }
+    let clean_exist = existing.replace("T.nilable(", "").replace(")", "");
+    let clean_new = new_ty.replace("T.nilable(", "").replace(")", "");
+    if clean_exist == clean_new {
+        return format!("T.nilable({})", clean_exist);
+    }
+    "T.untyped".to_string()
 }

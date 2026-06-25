@@ -352,6 +352,8 @@ module Espalier
           "hidden_enum_observations" => hidden_enum_observations.sort_by { |f| [f["path"].to_s, f["line"].to_i] },
           "dispatcher_inferences" => dispatcher_inferences.sort_by { |f| [f["path"].to_s, f["line"].to_i] },
           "hash_record_member_calls" => hash_record_member_calls.sort_by { |f| [f["path"].to_s, f["line"].to_i] },
+          "struct_field_hash_shapes" => facts["struct_field_hash_shapes"] || {},
+          "struct_field_array_shapes" => facts["struct_field_array_shapes"] || {},
         },
         "summary" => {
           "files" => files.size,

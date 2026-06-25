@@ -1,5 +1,26 @@
 {
-  "array_shapes": [],
+  "array_shapes": [
+    {
+      "code": "T.any(Schemas::EnumSchema, Schemas::StructSchema)",
+      "line": 6,
+      "path": "/home/yahn/cheat/gems/fact-mine/examples/profile/ruby_type_aliases.rb",
+      "size": 0,
+      "tuple_types": [
+        "Schemas::EnumSchema",
+        "Schemas::StructSchema"
+      ]
+    }
+  ],
+  "collection_index_lookups": [
+    {
+      "code": "T::Array[AST::Node]",
+      "line": 4,
+      "origin": {
+        "kind": "hash literal"
+      },
+      "path": "/home/yahn/cheat/gems/fact-mine/examples/profile/ruby_type_aliases.rb"
+    }
+  ],
   "fields": [],
   "hash_shapes": [],
   "methods": [],

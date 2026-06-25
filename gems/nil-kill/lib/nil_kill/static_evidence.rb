@@ -1,6 +1,9 @@
 # typed: false
 # frozen_string_literal: true
 
+require "tempfile"
+require "json"
+
 begin
   require "espalier/static_evidence"
 rescue LoadError
@@ -8,40 +11,59 @@ rescue LoadError
   require "espalier/static_evidence"
 end
 
+
 module NilKill
   class StaticEvidence
     def self.build(targets = nil, root: NilKill::ROOT, language: nil, vcs: nil, include_annotations: true)
       if defined?(NilKill::SourceIndex)
         ENV["FACT_MINE_NORETURN_METHODS"] = NilKill::SourceIndex.noreturn_methods.to_a.join(",")
       end
-      evidence = Espalier::StaticEvidence.build(
-        targets,
-        root: root,
-        language: language,
-        vcs: vcs,
-        include_annotations: include_annotations
-      )
-      if evidence["facts"] && evidence["facts"]["type_definitions"]
-        class_fields = Set.new(Array(evidence["fields"]).map { |f| [f["owner"], f["name"]] })
-        evidence["facts"]["type_definitions"].each do |d|
-          if d["kind"] == "state_field" && !d["name"].to_s.start_with?("@")
-            lang = d["language"]
-            if %w[ruby python javascript typescript].include?(lang.to_s)
-              if class_fields.include?([d["owner"], d["name"]]) && d["owner"] != "Client"
-                old_name = d["name"]
-                new_name = "@#{old_name}"
-                d["name"] = new_name
-                if d["id"]
-                  d["id"] = d["id"].gsub("\u0000#{old_name}\u0000", "\u0000#{new_name}\u0000")
+      tmp_shapes = nil
+      if defined?(NilKill::SourceIndex) && (NilKill::SourceIndex.global_struct_field_hash_shapes&.any? || NilKill::SourceIndex.global_struct_field_array_shapes&.any?)
+        tmp_shapes = Tempfile.new(["nil-kill-global-shapes", ".json"])
+        tmp_shapes.write(JSON.pretty_generate({
+          "struct_field_hash_shapes" => NilKill::SourceIndex.global_struct_field_hash_shapes || {},
+          "struct_field_array_shapes" => NilKill::SourceIndex.global_struct_field_array_shapes || {}
+        }))
+        tmp_shapes.close
+        ENV["FACT_MINE_GLOBAL_SHAPES_FILE"] = tmp_shapes.path
+      end
+
+      begin
+        evidence = Espalier::StaticEvidence.build(
+          targets,
+          root: root,
+          language: language,
+          vcs: vcs,
+          include_annotations: include_annotations
+        )
+        if evidence["facts"] && evidence["facts"]["type_definitions"]
+          class_fields = Set.new(Array(evidence["fields"]).map { |f| [f["owner"], f["name"]] })
+          evidence["facts"]["type_definitions"].each do |d|
+            if d["kind"] == "state_field" && !d["name"].to_s.start_with?("@")
+              lang = d["language"]
+              if %w[ruby python javascript typescript].include?(lang.to_s)
+                if class_fields.include?([d["owner"], d["name"]]) && d["owner"] != "Client"
+                  old_name = d["name"]
+                  new_name = "@#{old_name}"
+                  d["name"] = new_name
+                  if d["id"]
+                    d["id"] = d["id"].gsub("\u0000#{old_name}\u0000", "\u0000#{new_name}\u0000")
+                  end
                 end
               end
             end
           end
         end
+        overlay_nil_kill_language_capabilities!(evidence)
+        append_ruby_struct_definitions!(evidence, root)
+        evidence
+      ensure
+        if tmp_shapes
+          tmp_shapes.unlink
+          ENV.delete("FACT_MINE_GLOBAL_SHAPES_FILE")
+        end
       end
-      overlay_nil_kill_language_capabilities!(evidence)
-      append_ruby_struct_definitions!(evidence, root)
-      evidence
     end
 
     def self.append_ruby_struct_definitions!(evidence, root)

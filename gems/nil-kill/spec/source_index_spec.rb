@@ -447,7 +447,6 @@ RSpec.describe NilKill::SourceIndex do
       store.facts["param_origins"].concat(idx.param_origins)
       infer = NilKill::Infer.allocate
       infer.instance_variable_set(:@store, store)
-
       infer.send(:propose_hash_record_cluster_actions)
 
       action = store.actions.find do |candidate|
@@ -499,7 +498,6 @@ RSpec.describe NilKill::SourceIndex do
       store.facts["param_origins"].concat(idx.param_origins)
       infer = NilKill::Infer.allocate
       infer.instance_variable_set(:@store, store)
-
       infer.send(:propose_hash_record_cluster_actions)
 
       action = store.actions.find do |candidate|
@@ -1320,7 +1318,7 @@ RSpec.describe NilKill::SourceIndex do
       expect(origins["branch_hash_lookup"]).to include("confidence" => "strong", "candidate_type" => "T.nilable(String)")
       expect(origins["branch_hash_conflict"]).to include("confidence" => "blocked", "candidate_type" => "T.untyped")
       expect(origins["array_of_records"]).to include("confidence" => "strong", "candidate_type" => "T::Array[T.nilable(String)]")
-      expect(origins["make_entry"]).to include("confidence" => "weak", "candidate_type" => "T::Hash[T.untyped, T.untyped]")
+      expect(origins["make_entry"]).to include("confidence" => "weak", "candidate_type" => "T::Hash[Symbol, T.untyped]")
       expect(origins["make_entry"]["hash_shape"]).to include("keys" => include("expr" => ["String"], "token" => ["Symbol"]))
       expect(origins["assign_entry"]["hash_shape"]).to include("keys" => include("expr" => ["String"], "token" => ["Symbol"]))
       expect(origins["forwarded_hash_lookup"]).to include("confidence" => "strong", "candidate_type" => "T.nilable(Symbol)")
@@ -1589,7 +1587,8 @@ RSpec.describe NilKill::SourceIndex do
 
           def run(key)
             dims = {ownership: nil, sync: nil}
-            helper(dims, key)
+            other = dims
+            helper(other, key)
             dims[:ownership]
           end
         end
@@ -1843,7 +1842,7 @@ RSpec.describe NilKill::SourceIndex do
       end
       returns = idx.return_origins.each_with_object({}) { |entry, h| h[entry["method"]] = entry }
 
-      expect(returns.fetch("build_caps")).to include("confidence" => "weak", "candidate_type" => "T::Array[T::Hash[T.untyped, T.untyped]]")
+      expect(returns.fetch("build_caps")).to include("confidence" => "weak", "candidate_type" => "T::Array[T::Hash[Symbol, T.untyped]]")
       expect(origins.fetch("c[:capability]")).to include("origin_kind" => "typed_return", "type" => "T.nilable(Symbol)")
       expect(origins.fetch("c[:var_node]")).to include("origin_kind" => "typed_return", "type" => "T.nilable(String)")
     end
@@ -2002,8 +2001,8 @@ RSpec.describe NilKill::SourceIndex do
     previous = NilKill.instance_variable_get(:@rbi_return_index)
     fake_index = Object.new
     def fake_index.return_type(name, receiver_type = nil)
-      return "String" if name == "join" && receiver_type == "T::Array[T.untyped]"
-      return "T::Array[T.untyped]" if name == "map" && receiver_type == "T::Array[T.untyped]"
+      return "String" if name == "join" && receiver_type&.start_with?("T::Array[")
+      return "T::Array[T.untyped]" if name == "map" && receiver_type&.start_with?("T::Array[")
       nil
     end
     NilKill.instance_variable_set(:@rbi_return_index, fake_index)
@@ -2096,8 +2095,6 @@ RSpec.describe NilKill::SourceIndex do
 
       idx = described_class.new(path)
       origin = idx.param_origins.find { |entry| entry["callee"] == "takes" && entry["code"] == "String" }
-
-      puts "PARAM ORIGINS: #{idx.param_origins.inspect}"
       expect(origin).to include(
         "origin_kind" => "static",
         "type" => "T.class_of(String)"

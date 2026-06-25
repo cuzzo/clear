@@ -7,9 +7,7 @@
         {
           "co_uses": [],
           "dependencies": [],
-          "reads": [
-            "top"
-          ],
+          "reads": [],
           "writes": []
         }
       ]
@@ -675,9 +673,7 @@
         "line": 4,
         "name": "results",
         "owner": "SourceFactStateReadChainsAndConstants",
-        "params": [
-          "top"
-        ],
+        "params": [],
         "visibility": "public"
       }
     ],
@@ -855,9 +851,7 @@
             "end_line": 7,
             "index": 0,
             "line": 5,
-            "reads": [
-              "top"
-            ],
+            "reads": [],
             "source": "@ranked.first(@top).map do |row| Custom::Sarif.result(path: row.file) end",
             "span": [
               5,

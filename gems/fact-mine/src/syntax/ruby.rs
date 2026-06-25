@@ -1,6 +1,6 @@
 use super::effects::{effect_from_call_with_lexicon, EffectLexicon};
 use super::normalized_behavior::{
-    eliminable_guard_from_call, NormalizedCallParts, NormalizedCallProjection,
+    eliminable_guard_from_call, matching_paren_index, NormalizedCallParts, NormalizedCallProjection,
     NormalizedLanguageBehavior, NormalizedNilGuardFact, NormalizedSemanticEffect,
     NormalizedVisibilityEvent, SyntaxMetadata,
 };
@@ -164,6 +164,50 @@ const RUBY_EFFECT_LEXICON: EffectLexicon = EffectLexicon {
 pub(crate) struct RubyNormalizedBehavior;
 
 impl NormalizedLanguageBehavior for RubyNormalizedBehavior {
+    fn static_call_return_type(
+        &self,
+        node: &Node,
+        message: &str,
+        receiver_type: Option<&str>,
+    ) -> Option<String> {
+        if message == "[]" {
+            if let Some(r) = receiver_type {
+                let r = r.trim();
+                if (r.starts_with("T::Array[") || r.starts_with("Array[")) && r.ends_with(']') {
+                    let prefix_len = if r.starts_with("T::Array[") { 9 } else { 6 };
+                    let inner = &r[prefix_len..r.len() - 1];
+                    let mut is_range = false;
+                    let call_node = if node.r#type == "ITER" {
+                        node.children.first().and_then(ast::node).unwrap_or(node)
+                    } else {
+                        node
+                    };
+                    if let Some(args_node) = call_node.children.get(2).and_then(ast::node) {
+                        let first_arg = args_node.children.first().and_then(ast::node);
+                        if let Some(arg) = first_arg {
+                            if arg.r#type == "RANGE" || arg.r#type == "DOT2" || arg.r#type == "DOT3" {
+                                is_range = true;
+                            }
+                        }
+                    }
+                    if is_range {
+                        return Some(format!("T::Array[{}]", inner));
+                    } else {
+                        return Some(wrap_nilable(inner));
+                    }
+                }
+                if (r.starts_with("T::Hash[") || r.starts_with("Hash[")) && r.ends_with(']') {
+                    let prefix_len = if r.starts_with("T::Hash[") { 8 } else { 5 };
+                    let inner = &r[prefix_len..r.len() - 1];
+                    if let Some((_, v)) = inner.split_once(", ") {
+                        return Some(wrap_nilable(v.trim()));
+                    }
+                }
+            }
+        }
+        None
+    }
+
     fn mutating_receiver_message(&self, message: &str) -> bool {
         matches!(
             message,
@@ -190,6 +234,17 @@ impl NormalizedLanguageBehavior for RubyNormalizedBehavior {
                 | "update"
                 | "write"
         ) || (message.ends_with('!') && !matches!(message, "!=" | "!~"))
+    }
+
+    fn parameter_list_source(&self, source: &str) -> String {
+        let first_line = source.lines().next().unwrap_or("");
+        let Some(open_index) = first_line.find('(') else {
+            return String::new();
+        };
+        let Some(close_index) = matching_paren_index(source, open_index) else {
+            return String::new();
+        };
+        source[(open_index + 1)..close_index].to_string()
     }
 
     fn syntax_metadata(&self, source: &str, functions: &[FunctionDef]) -> SyntaxMetadata {
@@ -323,7 +378,7 @@ impl NormalizedLanguageBehavior for RubyNormalizedBehavior {
             (r.to_string(), false)
         };
 
-        if message == "==" || message == "!=" || message == "===" || message == "<<" || message == ">>" || message == "<" || message == "<=" || message == ">" || message == ">=" {
+        if message == "==" || message == "!=" || message == "===" || message == ">>" || message == "<" || message == "<=" || message == ">" || message == ">=" {
             return Some("T::Boolean".to_string());
         }
         if message == "<=>" {
@@ -335,7 +390,7 @@ impl NormalizedLanguageBehavior for RubyNormalizedBehavior {
         if message == "inspect" {
             return Some("String".to_string());
         }
-        if message == "clone" || message == "dup" || message == "freeze" || message == "taint" || message == "untaint" || message == "+" || message == "-" || message == "*" || message == "/" || message == "%" || message == "**" || message == "&" || message == "|" || message == "^" || message == "~" || message == "+@" || message == "-@" {
+        if message == "clone" || message == "dup" || message == "freeze" || message == "taint" || message == "untaint" || message == "+" || message == "-" || message == "*" || message == "/" || message == "%" || message == "**" || message == "&" || message == "|" || message == "^" || message == "~" || message == "+@" || message == "-@" || message == "<<" {
             return receiver_type.map(|t| t.to_string());
         }
 
@@ -412,6 +467,9 @@ impl NormalizedLanguageBehavior for RubyNormalizedBehavior {
         receiver_type: Option<&str>,
     ) -> Option<String> {
         let r = receiver_type.unwrap_or("T.untyped");
+        if message == "concat" || message == "push" || message == "unshift" || message == "append" {
+            return receiver_type.map(|t| t.to_string());
+        }
         if message == "first"
             || message == "last"
             || message == "pop"
@@ -420,10 +478,10 @@ impl NormalizedLanguageBehavior for RubyNormalizedBehavior {
         {
             if r.starts_with("T::Array[") && r.ends_with(']') {
                 let inner = &r[9..r.len() - 1];
-                return Some(format!("T.nilable({})", inner));
+                return Some(wrap_nilable(inner));
             }
         }
-        if message == "map" || message == "select" || message == "reject" || message == "filter" || message == "sort" || message == "compact" || message == "split" {
+        if message == "map" || message == "select" || message == "reject" || message == "filter" || message == "sort" || message == "split" {
             return Some("T::Array[T.untyped]".to_string());
         }
         if message == "compact" {
@@ -451,6 +509,21 @@ impl NormalizedLanguageBehavior for RubyNormalizedBehavior {
                 if let Some((_, v)) = r[8..r.len() - 1].split_once(", ") {
                     return Some(format!("T::Array[{}]", v));
                 }
+            }
+        }
+        if message == "join" {
+            if r.starts_with("T::Array[") || r == "Array" {
+                return Some("String".to_string());
+            }
+        }
+        if message == "to_a" {
+            if r.starts_with("T::Array[") || r.starts_with("T::Hash[") || r.starts_with("T::Set[") {
+                return Some(r.to_string());
+            }
+        }
+        if message == "to_h" {
+            if r.starts_with("T::Hash[") || r.starts_with("T::Array[") {
+                return Some(r.to_string());
             }
         }
         None
@@ -1134,6 +1207,16 @@ fn constant_path(value: &str) -> bool {
             && chars.all(|ch| ch == '_' || ch.is_ascii_alphanumeric())
     })
 }
+
+fn wrap_nilable(ty: &str) -> String {
+    let t = ty.trim();
+    if t == "T.untyped" || t == "NilClass" || t.starts_with("T.nilable(") {
+        t.to_string()
+    } else {
+        format!("T.nilable({t})")
+    }
+}
+
 
 #[cfg(test)]
 mod tests {

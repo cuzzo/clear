@@ -156,6 +156,15 @@ pub(crate) trait NormalizedLanguageBehavior: Sync {
         None
     }
 
+    fn static_call_return_type(
+        &self,
+        _node: &Node,
+        _message: &str,
+        _receiver_type: Option<&str>,
+    ) -> Option<String> {
+        None
+    }
+
     fn propagated_collection_return_type(
         &self,
         _message: &str,
@@ -581,7 +590,7 @@ pub(crate) fn behavior(language: Language) -> &'static dyn NormalizedLanguageBeh
     }
 }
 
-fn matching_paren_index(source: &str, open_index: usize) -> Option<usize> {
+pub(crate) fn matching_paren_index(source: &str, open_index: usize) -> Option<usize> {
     let mut depth = 0usize;
     for (index, ch) in source
         .char_indices()
