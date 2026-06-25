@@ -217,7 +217,9 @@ mod tests {
             "language": "ruby",
             "state_writes": [
                 { "field": "dead_state", "receiver": "self", "file": "example.rb", "function": "m1", "line": 5, "span": [5, 1, 5, 10], "owner": "Class" },
-                { "field": "intra_var", "receiver": "self", "file": "example.rb", "function": "m2", "line": 10, "span": [10, 1, 10, 10], "owner": "Class" }
+                { "field": "intra_var", "receiver": "self", "file": "example.rb", "function": "m2", "line": 10, "span": [10, 1, 10, 10], "owner": "Class" },
+                // Non-self writes to test filters
+                { "field": "other_var", "receiver": "other", "file": "example.rb", "function": "m2", "line": 11, "span": [11, 1, 11, 10], "owner": "Class" }
             ],
             "state_reads": [
                 { "field": "intra_var", "receiver": "self", "file": "example.rb", "function": "m2", "line": 12, "span": [12, 1, 12, 10], "owner": "Class" }
@@ -234,5 +236,121 @@ mod tests {
         assert_eq!(findings[1].field, "dead_state");
         assert_eq!(findings[1].classification, "dead_state");
         assert_eq!(findings[1].score, 0.85);
+    }
+
+    #[test]
+    fn test_superfluous_state_edge_cases() {
+        // 1. Read-before-write in same method (disqualifies intra-method)
+        // 2. Constructor-set only (ctorset)
+        // 3. Score below threshold (< 0.1)
+        // 4. Derived cache (read & write in different methods, not adjacent)
+        // 5. Adjacent call bonus
+        let doc: Document = serde_json::from_value(json!({
+            "file": "example.rb",
+            "language": "ruby",
+            "state_writes": [
+                // Read-before-write
+                { "field": "rbw", "receiver": "self", "file": "example.rb", "function": "m1", "line": 10, "span": [10, 1, 10, 10], "owner": "Class" },
+                // Constructor-set only (ctorset) -> written in initialize, read in m2
+                { "field": "ctor_var", "receiver": "self", "file": "example.rb", "function": "initialize", "line": 5, "span": [5, 1, 5, 10], "owner": "Class" },
+                // Low-score variable (large wc * rc -> base score too low)
+                { "field": "low_score", "receiver": "self", "file": "example.rb", "function": "w1", "line": 20, "span": [20, 1, 20, 10], "owner": "Class" },
+                { "field": "low_score", "receiver": "self", "file": "example.rb", "function": "w2", "line": 21, "span": [21, 1, 21, 10], "owner": "Class" },
+                { "field": "low_score", "receiver": "self", "file": "example.rb", "function": "w3", "line": 22, "span": [22, 1, 22, 10], "owner": "Class" },
+                { "field": "low_score", "receiver": "self", "file": "example.rb", "function": "w4", "line": 23, "span": [23, 1, 23, 10], "owner": "Class" },
+                // Derived cache (different methods, no adjacency info)
+                { "field": "derived", "receiver": "self", "file": "example.rb", "function": "m3", "line": 30, "span": [30, 1, 30, 10], "owner": "Class" },
+                // Adjacent call
+                { "field": "adj", "receiver": "self", "file": "example.rb", "function": "set_val", "line": 40, "span": [40, 1, 40, 10], "owner": "Class" }
+            ],
+            "state_reads": [
+                // Read-before-write read at line 8
+                { "field": "rbw", "receiver": "self", "file": "example.rb", "function": "m1", "line": 8, "span": [8, 1, 8, 10], "owner": "Class" },
+                // Constructor-set read
+                { "field": "ctor_var", "receiver": "self", "file": "example.rb", "function": "m2", "line": 15, "span": [15, 1, 15, 10], "owner": "Class" },
+                // Low score reads
+                { "field": "low_score", "receiver": "self", "file": "example.rb", "function": "r1", "line": 25, "span": [25, 1, 25, 10], "owner": "Class" },
+                { "field": "low_score", "receiver": "self", "file": "example.rb", "function": "r2", "line": 26, "span": [26, 1, 26, 10], "owner": "Class" },
+                { "field": "low_score", "receiver": "self", "file": "example.rb", "function": "r3", "line": 27, "span": [27, 1, 27, 10], "owner": "Class" },
+                // Derived cache read
+                { "field": "derived", "receiver": "self", "file": "example.rb", "function": "m4", "line": 35, "span": [35, 1, 35, 10], "owner": "Class" },
+                // Adjacent call read
+                { "field": "adj", "receiver": "self", "file": "example.rb", "function": "get_val", "line": 45, "span": [45, 1, 45, 10], "owner": "Class" }
+            ],
+            "protocol_call_paths": [
+                {
+                    "file": "example.rb", "name": "caller", "line": 50, "owner": "Class",
+                    "calls": [
+                        { "mid": "set_val", "file": "example.rb", "owner": "Class", "defn": "caller", "line": 51, "span": [51, 1, 51, 10] },
+                        { "mid": "get_val", "file": "example.rb", "owner": "Class", "defn": "caller", "line": 52, "span": [52, 1, 52, 10] }
+                    ]
+                }
+            ],
+            "protocol_method_effects": [
+                {
+                    "file": "example.rb", "owner": "Class", "name": "set_val", "line": 40,
+                    "reads": [], "writes": ["adj"]
+                },
+                {
+                    "file": "example.rb", "owner": "Class", "name": "get_val", "line": 45,
+                    "reads": ["adj"], "writes": []
+                }
+            ]
+        })).unwrap();
+
+        let findings = scan_documents(&[doc]);
+
+        // Validate "low_score" is excluded (base = 1/(12+1) = 0.076 < 0.1)
+        assert!(!findings.iter().any(|f| f.field == "low_score"));
+
+        // Validate "rbw" (Read-Before-Write) is classified as derived_cache since it's disqualified from intra_method
+        let rbw = findings.iter().find(|f| f.field == "rbw").unwrap();
+        assert_eq!(rbw.classification, "derived_cache");
+        assert_eq!(rbw.score, 0.5); // base (1/2) * intra_bonus (1) * ctor_penalty (1)
+
+        // Validate "ctor_var" has the 0.33x penalty
+        let ctor = findings.iter().find(|f| f.field == "ctor_var").unwrap();
+        assert!(ctor.ctorset);
+        assert_eq!(ctor.classification, "derived_cache");
+        assert!((ctor.score - 0.165).abs() < 0.01); // base (1/2) * ctor_penalty (0.33) = 0.165
+
+        // Validate "derived" is classified as derived_cache
+        let derived = findings.iter().find(|f| f.field == "derived").unwrap();
+        assert_eq!(derived.classification, "derived_cache");
+        assert_eq!(derived.score, 0.5);
+
+        // Validate "adj" is classified as adjacent_call with a 5.0x bonus
+        let adj = findings.iter().find(|f| f.field == "adj").unwrap();
+        assert_eq!(adj.classification, "adjacent_call");
+        assert_eq!(adj.score, 2.5); // base (1/2) * adj_bonus (5) = 2.5
+        assert_eq!(adj.adjacent_sites, Some(vec!["adj".to_string()]));
+    }
+
+    #[test]
+    fn test_sorting_and_scan_files() {
+        // Check sorting behavior for equal scores (alphabetical sorting of field names)
+        let doc: Document = serde_json::from_value(json!({
+            "file": "example.rb",
+            "language": "ruby",
+            "state_writes": [
+                { "field": "y_field", "receiver": "self", "file": "example.rb", "function": "m1", "line": 5, "span": [5, 1, 5, 10], "owner": "Class" },
+                { "field": "x_field", "receiver": "self", "file": "example.rb", "function": "m2", "line": 10, "span": [10, 1, 10, 10], "owner": "Class" }
+            ],
+            "state_reads": []
+        })).unwrap();
+
+        let findings = scan_documents(&[doc]);
+        assert_eq!(findings.len(), 2);
+        assert_eq!(findings[0].field, "x_field"); // sorted alphabetically before y_field since both have score 0.85
+        assert_eq!(findings[1].field, "y_field");
+
+        // Validate scan_files does not panic
+        let temp_dir = tempfile::tempdir().unwrap();
+        let file_path = temp_dir.path().join("test.rb");
+        std::fs::write(&file_path, "def foo\n  @x = 1\nend\n").unwrap();
+        let results = scan_files(&[file_path], Language::Ruby).unwrap();
+        assert_eq!(results.len(), 1);
+        assert_eq!(results[0].field, "x");
+        assert_eq!(results[0].classification, "dead_state");
     }
 }
