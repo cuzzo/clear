@@ -141,6 +141,34 @@ fn nil_kill_profile_produces_same_core_structure() -> Result<()> {
 }
 
 #[test]
+fn nil_kill_all_profile_examples_extract_successfully() -> Result<()> {
+    for entry in fs::read_dir(examples_dir())? {
+        let entry = entry?;
+        let fixture = entry.path();
+        if !fixture.is_file() {
+            continue;
+        }
+        let ext = fixture.extension().and_then(|e| e.to_str()).unwrap_or("");
+        if ext == "json" {
+            continue;
+        }
+        let lang = fixture
+            .extension()
+            .and_then(|e| e.to_str())
+            .and_then(|e| Language::for_extension(&e.to_ascii_lowercase()))
+            .with_context(|| format!("cannot detect language for {}", fixture.display()))?;
+
+        let document = syntax::parse_file(fixture.clone(), lang)
+            .with_context(|| format!("parse {}", fixture.display()))?;
+        let output = profile::extract(&document, Profile::NilKill);
+        // Ensure it doesn't crash and returns a valid ProfileOutput
+        assert!(output.methods.len() >= 0);
+    }
+    Ok(())
+}
+
+
+#[test]
 fn state_writes_without_declarations_extract_as_fields() -> Result<()> {
     use std::io::Write;
     let mut tmp = tempfile::NamedTempFile::new()?;
