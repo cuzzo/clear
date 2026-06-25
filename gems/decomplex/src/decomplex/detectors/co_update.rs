@@ -53,8 +53,8 @@ pub fn scan_documents(documents: &[Document]) -> CoUpdateReport {
     }
     let report = Report::new(writes);
     CoUpdateReport {
-        co_written_pairs: report.co_written_pairs(3),
-        neglected_updates: report.neglected_updates(3),
+        co_written_pairs: report.co_written_pairs(10),
+        neglected_updates: report.neglected_updates(10),
     }
 }
 

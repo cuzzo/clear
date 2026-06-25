@@ -88,7 +88,7 @@ impl Report {
 
     fn findings(&self) -> BrokenProtocolReport {
         BrokenProtocolReport {
-            broken: self.broken_protocol(4, 0.75),
+            broken: self.broken_protocol(15, 0.75),
         }
     }
 

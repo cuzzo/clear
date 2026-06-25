@@ -361,8 +361,9 @@ fn member_segments(text: &str) -> Vec<(String, String, usize, usize)> {
             continue;
         }
         let receiver_start = text[..index]
-            .rfind(|ch: char| !(ch == '_' || ch == '?' || ch == '.' || ch.is_ascii_alphanumeric()))
-            .map(|offset| offset + 1)
+            .char_indices()
+            .rfind(|(_, ch)| !(*ch == '_' || *ch == '?' || *ch == '.' || ch.is_ascii_alphanumeric()))
+            .map(|(offset, ch)| offset + ch.len_utf8())
             .unwrap_or(0);
         let field_start = index + separator_len;
         let field_end = text[field_start..]
