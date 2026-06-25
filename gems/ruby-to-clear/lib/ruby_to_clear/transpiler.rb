@@ -230,6 +230,50 @@ module RubyToClear
       end
     end
 
+    def visit_local_variable_operator_write_node(node)
+      name = node.name.to_s
+      name = @renames[name] || name
+      op = node.operator.to_s.delete_suffix("=")
+      val = visit(node.value)
+      if @declared_locals.include?(name)
+        "#{name} = (#{name} #{op} #{val})"
+      else
+        @declared_locals << name
+        "MUTABLE #{name} = #{val}"
+      end
+    end
+
+    def visit_instance_variable_operator_write_node(node)
+      name = node.name.to_s.delete_prefix("@")
+      op = node.operator.to_s.delete_suffix("=")
+      val = visit(node.value)
+      "self.#{name} = (self.#{name} #{op} #{val})"
+    end
+
+    def visit_local_variable_or_write_node(node)
+      name = node.name.to_s
+      name = @renames[name] || name
+      val = visit(node.value)
+      if @declared_locals.include?(name)
+        "#{name} = (#{name} || #{val})"
+      else
+        @declared_locals << name
+        "MUTABLE #{name} = #{val}"
+      end
+    end
+
+    def visit_local_variable_and_write_node(node)
+      name = node.name.to_s
+      name = @renames[name] || name
+      val = visit(node.value)
+      if @declared_locals.include?(name)
+        "#{name} = (#{name} && #{val})"
+      else
+        @declared_locals << name
+        "MUTABLE #{name} = #{val}"
+      end
+    end
+
     def visit_instance_variable_write_node(node)
       name = node.name.to_s.delete_prefix("@")
       val = visit(node.value)
@@ -272,7 +316,15 @@ module RubyToClear
     end
 
     def visit_parameters_node(node)
-      node.requireds.map { |param| visit(param) }.join(", ")
+      requireds = node.requireds.map { |param| visit(param) }
+      optionals = node.optionals.map { |param| visit(param) }
+      (requireds + optionals).join(", ")
+    end
+
+    def visit_optional_parameter_node(node)
+      prefix = (@mutable_params && @mutable_params.include?(node.name.to_s)) ? "MUTABLE " : ""
+      default_val = visit(node.value)
+      "#{prefix}#{node.name} = #{default_val}: Auto"
     end
 
     def visit_array_node(node)

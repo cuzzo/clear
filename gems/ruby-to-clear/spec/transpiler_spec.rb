@@ -444,4 +444,16 @@ RSpec.describe RubyToClear::Transpiler do
       }.to raise_error(RubyToClear::Transpiler::TranspilationError, /Exception handling \(rescue\) is not supported/)
     end
   end
+
+  describe "compound assignments and optional parameters" do
+    it "translates local and instance variable operator writes (+=, ||=, etc.)" do
+      expect_transpile("x = 10; x += 5", "MUTABLE x = 10;\nx = (x + 5);")
+      expect_transpile("x = 10; x ||= 5", "MUTABLE x = 10;\nx = (x || 5);")
+      expect_transpile("@val = 10; @val += 5", "self.val = 10;\nself.val = (self.val + 5);")
+    end
+
+    it "translates optional parameters in def signatures" do
+      expect_transpile("def my_func(a, b = 42); end", "FN my_func(a: Auto, b = 42: Auto) RETURNS !Auto ->\n\nEND")
+    end
+  end
 end
