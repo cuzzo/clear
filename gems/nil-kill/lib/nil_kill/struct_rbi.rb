@@ -88,6 +88,27 @@ module NilKill
         line.scan(/for argument `([a-z_]\w*)`/).each { |m| methods << m[0] }
         line.scan(/result type of method `([a-z_]\w*[?!]?)`/).each { |m| methods << m[0].sub(/[?!]\z/, "") }
       end
+
+      # 3. Direct errors referencing the generated RBI file by line number.
+      if @output
+        path = File.expand_path(@output, ROOT)
+        if File.file?(path)
+          lines = File.readlines(path)
+          rel_path = NilKill.rel(path)
+          srb_output.scan(/(?:#{Regexp.escape(path)}|#{Regexp.escape(rel_path)}):(\d+):/).each do |m|
+            line_idx = m[0].to_i - 1
+            # Look around line_idx for a method definition. Check line_idx and next 4 lines.
+            (line_idx..(line_idx + 4)).each do |i|
+              next unless lines[i]
+              if lines[i] =~ /^\s*def\s+([a-zA-Z_]\w*[?!]?)/
+                methods << $1.sub(/[?!]\z/, "")
+                break
+              end
+            end
+          end
+        end
+      end
+
       methods
     end
 

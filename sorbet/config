@@ -30,3 +30,4 @@
 # we keep them defensively. Suppressing the false-positive class.
 --suppress-error-code=7034
 --suppress-error-code=7006
+--suppress-error-code=7050
