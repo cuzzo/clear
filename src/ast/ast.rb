@@ -1770,6 +1770,7 @@ module AST
     attr_accessor :atomic_borrow    # true when sync=:atomic ident is in fn-arg position (skip load wrap)
     sig { returns(FalseClass) }
     def wildcard?; false end
+    sig { returns(String) }
     def name; self[:name].to_s end
   end
   Literal      = Struct.new(:token, :type, :value, :storage) do
@@ -1947,6 +1948,7 @@ module AST
                                      # (error union) or `orelse fallback` (optional).
     sig { returns(FalseClass) }
     def wildcard?; false end
+    sig { returns(String) }
     def name; self[:name].to_s end
   end
 
@@ -1962,6 +1964,7 @@ module AST
     attr_accessor :heap_dupe_result  # true when result must be heap-duped (frame string escaping to outer container)
     sig { returns(FalseClass) }
     def wildcard?; false end
+    sig { returns(String) }
     def name; self[:name].to_s end
   end
   GetField     = Struct.new(:token, :target, :field) do
