@@ -64,7 +64,8 @@ run unit-specs bundle exec prspec spec/
 # golden timeout can trip even when the VM is healthy. Keep the override
 # scoped to nil-kill collection so ordinary integration specs stay strict.
 run integration-specs env MINIVM_GOLDEN_TIMEOUT_SECONDS="${NIL_KILL_MINIVM_GOLDEN_TIMEOUT_SECONDS:-120}" bundle exec prspec spec/ --tag integration
-run nil-kill-specs bundle exec prspec gems/nil-kill/spec/
+run nil-kill-specs bash -c 'export NIL_KILL_TMP_DIR="tmp/nil-kill-spec-$$"; bundle exec prspec gems/nil-kill/spec/; status=$?; rm -rf "$NIL_KILL_TMP_DIR"; exit $status'
+
 
 # 4. Transpile-tests corpus. gen.rb --single is the same Ruby pipeline
 #    (CompilerFrontend + MIRLowering + MIRChecker + MIREmitter) the

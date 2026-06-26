@@ -752,7 +752,11 @@ module AutoType
     end
 
     def find_sig_idx(lines, def_idx)
-      (def_idx - 1).downto([def_idx - 5, 0].max) { |i| return i if lines[i]&.match?(/\bsig\s*\{/) }
+      (def_idx - 1).downto([def_idx - 5, 0].max) do |i|
+        line = lines[i]
+        return nil if line&.match?(DEF_HEADER)
+        return i if line&.match?(/\bsig\s*\{/)
+      end
       nil
     end
 

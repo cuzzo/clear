@@ -169,9 +169,17 @@ module NilKill
         install_inplace_restore_traps!
         SourceInstrumenter.new.run_in_place(snapshot_dir)
       end
+      require "etc"
+      jobs = ENV["NK_JOBS"] || ENV["NIL_KILL_JOBS"] || Etc.nprocessors.to_s rescue "4"
       tracer = File.expand_path("runtime_trace.rb", __dir__)
       rubyopt = (ENV["RUBYOPT"].to_s.split + ["-r#{tracer}"]).join(" ")
-      env = ENV.to_h.merge("NIL_KILL_TRACE" => "1", "RUBYOPT" => rubyopt)
+      env = ENV.to_h.merge(
+        "NIL_KILL_TRACE" => "1",
+        "RUBYOPT" => rubyopt,
+        "WORKERS" => ENV["WORKERS"] || jobs,
+        "NK_JOBS" => ENV["NK_JOBS"] || jobs,
+        "NIL_KILL_JOBS" => ENV["NIL_KILL_JOBS"] || jobs
+      )
       # Source-wrap path: targeted TracePoints off by default (the
       # injected recorder is authoritative). No NIL_KILL_INSTRUMENTED_ROOT
       # any more -- the wrapped file IS the real src path.
