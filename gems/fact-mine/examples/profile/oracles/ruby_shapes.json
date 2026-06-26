@@ -30,12 +30,25 @@
       "line": 4,
       "path": "/home/yahn/cheat/gems/fact-mine/examples/profile/ruby_shapes.rb",
       "value_types": [
-        "Symbol",
-        "T.untyped",
-        "T.untyped",
-        "T.untyped",
-        "T.untyped",
-        "T.untyped"
+        {
+          "data": "Symbol",
+          "kind": "Primitive"
+        },
+        {
+          "kind": "Untyped"
+        },
+        {
+          "kind": "Untyped"
+        },
+        {
+          "kind": "Untyped"
+        },
+        {
+          "kind": "Untyped"
+        },
+        {
+          "kind": "Untyped"
+        }
       ]
     }
   ],

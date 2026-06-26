@@ -226,7 +226,7 @@ pub struct HashShape {
     pub path: String,
     pub line: usize,
     pub keys: Vec<String>,
-    pub value_types: Vec<String>,
+    pub value_types: Vec<serde_json::Value>,
     pub code: String,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub value_hash_shapes: Option<BTreeMap<String, serde_json::Value>>,
@@ -1830,9 +1830,9 @@ fn try_extract_hash_shape(
         return None;
     }
     let keys: Vec<String> = pairs.iter().map(|(k, _)| k.clone()).collect();
-    let value_types: Vec<String> = pairs
+    let value_types: Vec<serde_json::Value> = pairs
         .iter()
-        .map(|(_, v)| infer_literal_type(v, language))
+        .map(|(_, v)| json!(TypeExpr::parse(&infer_literal_type(v, language), language)))
         .collect();
     Some(HashShape {
         path: path.to_string(),
@@ -2050,11 +2050,11 @@ fn collect_hash_shapes_from_ast(
                         keys.push(key_text);
 
                         let val_type = if let Some(val_node) = pair_children.get(1) {
-                            infer_literal_type(&val_node.text, language)
+                            TypeExpr::parse(&infer_literal_type(&val_node.text, language), language)
                         } else {
-                            "T.untyped".to_string()
+                            TypeExpr::Untyped
                         };
-                        value_types.push(val_type);
+                        value_types.push(json!(val_type));
                     }
                 }
             }

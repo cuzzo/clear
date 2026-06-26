@@ -491,6 +491,16 @@ fn weak_type(t: &TypeExpr) -> bool {
     t.is_weak()
 }
 
+fn get_type_str(value: &Value) -> Option<String> {
+    if let Some(s) = value.as_str() {
+        Some(s.to_string())
+    } else if let Ok(type_expr) = serde_json::from_value::<TypeExpr>(value.clone()) {
+        Some(type_expr.to_sorbet_string())
+    } else {
+        None
+    }
+}
+
 fn strip_nilable_type(t: &TypeExpr) -> TypeExpr {
     t.strip_nilable()
 }
@@ -1021,8 +1031,7 @@ impl<'a> TypeInferenceVisitor<'a> {
                             .iter()
                             .filter_map(|s| {
                                 s.get("type")
-                                    .and_then(Value::as_str)
-                                    .map(ToString::to_string)
+                                    .and_then(get_type_str)
                             })
                             .collect::<Vec<_>>();
 
@@ -2073,7 +2082,7 @@ impl<'a> TypeInferenceVisitor<'a> {
             .iter()
             .filter_map(|v| {
                 if let Some(s) = v.as_str() {
-                    Some(TypeExpr::parse(s, "ruby"))
+                    Some(TypeExpr::parse(&normalize_static_sorbet_type(s), "ruby"))
                 } else {
                     serde_json::from_value::<TypeExpr>(v.clone()).ok()
                 }
@@ -3344,7 +3353,7 @@ impl<'a> TypeInferenceVisitor<'a> {
                     "method": record["method"],
                     "method_kind": record["kind"],
                     "slot": name,
-                    "type": param.get("type").and_then(Value::as_str).unwrap_or(""),
+                    "type": param.get("type").and_then(get_type_str).unwrap_or_default(),
                 }))
             }
             "IVAR" | "CVAR" => {
@@ -4425,10 +4434,18 @@ impl<'a> TypeInferenceVisitor<'a> {
             .and_then(|keys| keys.get(&key))
             .and_then(Value::as_array)?
             .iter()
-            .filter_map(Value::as_str)
-            .map(ToString::to_string)
+            .filter_map(|v| {
+                if let Some(s) = v.as_str() {
+                    Some(TypeExpr::parse(&normalize_static_sorbet_type(s), self.document.language.as_str()))
+                } else {
+                    serde_json::from_value::<TypeExpr>(v.clone()).ok()
+                }
+            })
             .collect::<Vec<_>>();
-        let value = static_sorbet_type(&types, self.document.language.as_str());
+        if types.is_empty() {
+            return None;
+        }
+        let value = TypeExpr::merge(&types);
         if useful_type(&value) {
             Some(value.make_nilable())
         } else {
@@ -5017,10 +5034,7 @@ impl<'a> TypeInferenceVisitor<'a> {
             path: self.path.to_string(),
             line: node.first_lineno,
             keys: keys.clone(),
-            value_types: values
-                .iter()
-                .filter_map(|v| v.as_str().map(|s| s.to_string()))
-                .collect(),
+            value_types: values.clone(),
             code: node.text.clone(),
             value_hash_shapes: if value_hash_shapes.is_empty() {
                 None
@@ -5687,6 +5701,21 @@ fn collection_type_info(ty: &TypeExpr) -> Option<CollectionInfo> {
             kind: "hash".to_string(),
             element: Some(*key.clone()),
             value: Some(*value.clone()),
+        }),
+        TypeExpr::Primitive(s) if s == "Array" => Some(CollectionInfo {
+            kind: "array".to_string(),
+            element: Some(TypeExpr::Untyped),
+            value: None,
+        }),
+        TypeExpr::Primitive(s) if s == "Set" => Some(CollectionInfo {
+            kind: "set".to_string(),
+            element: Some(TypeExpr::Untyped),
+            value: None,
+        }),
+        TypeExpr::Primitive(s) if s == "Hash" => Some(CollectionInfo {
+            kind: "hash".to_string(),
+            element: Some(TypeExpr::Untyped),
+            value: Some(TypeExpr::Untyped),
         }),
         _ => None,
     }
