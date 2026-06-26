@@ -285,7 +285,7 @@ module NilKill
       def load_legacy_methods!(store, runtime_dir)
         Dir.glob(File.join(runtime_dir, "methods-*.jsonl")).each do |file|
           File.foreach(file) do |line|
-            obs = JSON.parse(line)
+            obs = JSON.parse(line) rescue next
             next unless NilKill.target_path?(obs["path"])
             key = [obs["class"], obs["method"], obs["kind"], obs["path"], obs["line"]]
             rec = store.method_record(key)
@@ -317,7 +317,7 @@ module NilKill
         runtime_edges = {}
         Dir.glob(File.join(runtime_dir, "method-edges-*.jsonl")).each do |file|
           File.foreach(file) do |line|
-            obs = JSON.parse(line)
+            obs = JSON.parse(line) rescue next
             caller = legacy_runtime_edge_endpoint(obs["caller"])
             callee = legacy_runtime_edge_endpoint(obs["callee"])
             next unless caller && callee
@@ -347,7 +347,7 @@ module NilKill
       def load_legacy_tlets!(store, runtime_dir)
         Dir.glob(File.join(runtime_dir, "tlets-*.jsonl")).each do |file|
           File.foreach(file) do |line|
-            obs = JSON.parse(line)
+            obs = JSON.parse(line) rescue next
             next unless NilKill.target_path?(obs["path"])
             key = "#{obs["path"]}:#{obs["line"]}"
             rec = (store.tlets[key] ||= { "path" => obs["path"], "line" => obs["line"], "calls" => 0, "classes" => [] })
@@ -360,7 +360,7 @@ module NilKill
       def load_legacy_fact_file!(store, runtime_dir, pattern, fact_key, target_filter: true)
         Dir.glob(File.join(runtime_dir, pattern)).each do |file|
           File.foreach(file) do |line|
-            obs = JSON.parse(line)
+            obs = JSON.parse(line) rescue next
             next if target_filter && !NilKill.target_path?(obs["path"])
             store.facts[fact_key] ||= []
             store.facts[fact_key] << obs
@@ -372,7 +372,7 @@ module NilKill
         cov = Hash.new { |h, k| h[k] = [] }
         Dir.glob(File.join(runtime_dir, "coverage-*.jsonl")).each do |file|
           File.foreach(file) do |line|
-            obs = JSON.parse(line)
+            obs = JSON.parse(line) rescue next
             next unless NilKill.target_path?(obs["path"])
             cov[NilKill.rel(obs["path"])].concat(Array(obs["lines"]))
           end
