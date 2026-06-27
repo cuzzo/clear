@@ -157,7 +157,7 @@ module Espalier
       return empty_evidence if files.empty?
 
       if ENV["FACT_MINE_FACTS_FILE"] && !ENV["FACT_MINE_FACTS_FILE"].empty?
-        facts_by_file = JSON.parse(File.read(ENV["FACT_MINE_FACTS_FILE"]))
+        facts_by_file = FactMine::Syntax::TypeExpr.wrap_types!(JSON.parse(File.read(ENV["FACT_MINE_FACTS_FILE"])))
         return build_from_rust_facts(facts_by_file, files)
       end
 
@@ -171,7 +171,7 @@ module Espalier
       ok = system(*args)
       raise "fact-mine-rust failed with exit status #{$?.exitstatus}" unless ok
 
-      facts_by_file = JSON.parse(File.read(tmp.path))
+      facts_by_file = FactMine::Syntax::TypeExpr.wrap_types!(JSON.parse(File.read(tmp.path)))
       build_from_rust_facts(facts_by_file, files)
     ensure
       tmp&.unlink
@@ -508,7 +508,7 @@ module Espalier
       ok = system(FACT_MINE_RUST_BINARY, "profile", "nil-kill", "--output", tmp.path, file)
       return [] unless ok
 
-      JSON.parse(File.read(tmp.path)).fetch("type_definitions", [])
+      FactMine::Syntax::TypeExpr.wrap_types!(JSON.parse(File.read(tmp.path))).fetch("type_definitions", [])
     rescue StandardError
       []
     ensure

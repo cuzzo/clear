@@ -3,7 +3,7 @@
     {
       "code": "[1, \"two\", :three, true, nil, CustomClass]",
       "line": 14,
-      "path": "/home/yahn/litedb/gems/fact-mine/examples/profile/ruby_shapes.rb",
+      "path": "/home/yahn/cheat/gems/fact-mine/examples/profile/ruby_shapes.rb",
       "size": 0,
       "tuple_types": [
         "Integer",
@@ -28,14 +28,27 @@
         "CustomClass"
       ],
       "line": 4,
-      "path": "/home/yahn/litedb/gems/fact-mine/examples/profile/ruby_shapes.rb",
+      "path": "/home/yahn/cheat/gems/fact-mine/examples/profile/ruby_shapes.rb",
       "value_types": [
-        "Symbol",
-        "T.untyped",
-        "T.untyped",
-        "T.untyped",
-        "T.untyped",
-        "T.untyped"
+        {
+          "data": "Symbol",
+          "kind": "Primitive"
+        },
+        {
+          "kind": "Untyped"
+        },
+        {
+          "kind": "Untyped"
+        },
+        {
+          "kind": "Untyped"
+        },
+        {
+          "kind": "Untyped"
+        },
+        {
+          "kind": "Untyped"
+        }
       ]
     }
   ],
@@ -52,7 +65,7 @@
       "name": "initialize",
       "owner": "RubyShapes",
       "params": [],
-      "path": "/home/yahn/litedb/gems/fact-mine/examples/profile/ruby_shapes.rb",
+      "path": "/home/yahn/cheat/gems/fact-mine/examples/profile/ruby_shapes.rb",
       "signature": "",
       "source": {},
       "span": [

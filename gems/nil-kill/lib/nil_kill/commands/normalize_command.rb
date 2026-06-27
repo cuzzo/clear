@@ -13,7 +13,7 @@ module NilKill
         output = option("--output") || File.join(TMP_DIR, "evidence.json")
         analyze = !@argv.delete("--no-analyze")
         explicit_traces = options("--traces")
-        static = JSON.parse(File.read(static_path))
+        static = FactMine::Syntax::TypeExpr.wrap_types!(JSON.parse(File.read(static_path)))
         root = File.expand_path(option("--root") || static["root"] || ROOT)
         traces = explicit_traces.empty? ? default_trace_paths(static) : explicit_traces
         bundle = Runtime::Normalizer.new(root: root).normalize(static: static, trace_paths: traces, analyze: analyze)

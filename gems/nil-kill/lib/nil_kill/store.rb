@@ -49,7 +49,7 @@ module NilKill
 
     def self.read
       abort "missing #{NilKill.rel(EVIDENCE_PATH)}; run `bundle exec tools/nil-kill infer` first" unless File.exist?(EVIDENCE_PATH)
-      JSON.parse(File.read(EVIDENCE_PATH))
+      FactMine::Syntax::TypeExpr.wrap_types!(JSON.parse(File.read(EVIDENCE_PATH)))
     end
   end
 end

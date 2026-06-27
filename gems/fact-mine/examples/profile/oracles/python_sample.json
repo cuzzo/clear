@@ -2,13 +2,16 @@
   "array_shapes": [],
   "fields": [
     {
-      "declared_type": "int",
-      "id": "python\u0000/home/yahn/litedb/gems/fact-mine/examples/profile/python_sample.py\u0000Database\u0000field\u0000port",
+      "declared_type": {
+        "data": "int",
+        "kind": "Primitive"
+      },
+      "id": "python\u0000/home/yahn/cheat/gems/fact-mine/examples/profile/python_sample.py\u0000Database\u0000field\u0000port",
       "language": "python",
       "line": 5,
       "name": "port",
       "owner": "Database",
-      "path": "/home/yahn/litedb/gems/fact-mine/examples/profile/python_sample.py",
+      "path": "/home/yahn/cheat/gems/fact-mine/examples/profile/python_sample.py",
       "source": "syntax",
       "span": [
         5,
@@ -20,12 +23,12 @@
     },
     {
       "declared_type": null,
-      "id": "python\u0000/home/yahn/litedb/gems/fact-mine/examples/profile/python_sample.py\u0000Database\u0000field\u0000@port",
+      "id": "python\u0000/home/yahn/cheat/gems/fact-mine/examples/profile/python_sample.py\u0000Database\u0000field\u0000@port",
       "language": "python",
       "line": 5,
       "name": "@port",
       "owner": "Database",
-      "path": "/home/yahn/litedb/gems/fact-mine/examples/profile/python_sample.py",
+      "path": "/home/yahn/cheat/gems/fact-mine/examples/profile/python_sample.py",
       "source": "syntax",
       "span": [
         5,
@@ -37,12 +40,12 @@
     },
     {
       "declared_type": null,
-      "id": "python\u0000/home/yahn/litedb/gems/fact-mine/examples/profile/python_sample.py\u0000Greeter\u0000field\u0000@_db",
+      "id": "python\u0000/home/yahn/cheat/gems/fact-mine/examples/profile/python_sample.py\u0000Greeter\u0000field\u0000@_db",
       "language": "python",
       "line": 9,
       "name": "@_db",
       "owner": "Greeter",
-      "path": "/home/yahn/litedb/gems/fact-mine/examples/profile/python_sample.py",
+      "path": "/home/yahn/cheat/gems/fact-mine/examples/profile/python_sample.py",
       "source": "syntax",
       "span": [
         9,
@@ -69,7 +72,7 @@
       "params": [
         "self"
       ],
-      "path": "/home/yahn/litedb/gems/fact-mine/examples/profile/python_sample.py",
+      "path": "/home/yahn/cheat/gems/fact-mine/examples/profile/python_sample.py",
       "signature": "def __init__(self):",
       "source": {
         "signature": "def __init__(self):",
@@ -97,7 +100,7 @@
         "self",
         "db"
       ],
-      "path": "/home/yahn/litedb/gems/fact-mine/examples/profile/python_sample.py",
+      "path": "/home/yahn/cheat/gems/fact-mine/examples/profile/python_sample.py",
       "signature": "def __init__(self, db: Database):",
       "source": {
         "signature": "def __init__(self, db: Database):",
@@ -125,7 +128,7 @@
         "self",
         "name"
       ],
-      "path": "/home/yahn/litedb/gems/fact-mine/examples/profile/python_sample.py",
+      "path": "/home/yahn/cheat/gems/fact-mine/examples/profile/python_sample.py",
       "signature": "def hello(self, name: str) -> str:",
       "source": {
         "signature": "def hello(self, name: str) -> str:",
@@ -153,7 +156,7 @@
       "line": 9,
       "owner": "Greeter",
       "param": "db",
-      "path": "/home/yahn/litedb/gems/fact-mine/examples/profile/python_sample.py",
+      "path": "/home/yahn/cheat/gems/fact-mine/examples/profile/python_sample.py",
       "span": [
         9,
         8,
@@ -170,13 +173,16 @@
   "state_protocols": {},
   "state_type_records": [
     {
-      "declared_type": "int",
+      "declared_type": {
+        "data": "int",
+        "kind": "Primitive"
+      },
       "field": "port",
       "key": "Database\u0000port",
       "language": "python",
       "line": 5,
       "owner": "Database",
-      "path": "/home/yahn/litedb/gems/fact-mine/examples/profile/python_sample.py",
+      "path": "/home/yahn/cheat/gems/fact-mine/examples/profile/python_sample.py",
       "span": [
         5,
         8,
@@ -186,11 +192,14 @@
     }
   ],
   "state_types": {
-    "Database\u0000port": "int"
+    "Database\u0000port": {
+      "data": "int",
+      "kind": "Primitive"
+    }
   },
   "type_definitions": [
     {
-      "id": "python\u0000/home/yahn/litedb/gems/fact-mine/examples/profile/python_sample.py\u0000Greeter\u0000method_signature\u0000__init__\u00008\u0000python-typing",
+      "id": "python\u0000/home/yahn/cheat/gems/fact-mine/examples/profile/python_sample.py\u0000Greeter\u0000method_signature\u0000__init__\u00008\u0000python-typing",
       "kind": "method_signature",
       "language": "python",
       "line": 8,
@@ -199,15 +208,18 @@
       "params": [
         {
           "name": "db",
-          "type": "Database"
+          "type": {
+            "data": "Database",
+            "kind": "Primitive"
+          }
         }
       ],
-      "path": "/home/yahn/litedb/gems/fact-mine/examples/profile/python_sample.py",
+      "path": "/home/yahn/cheat/gems/fact-mine/examples/profile/python_sample.py",
       "signature": "def __init__(self, db: Database):",
       "type_system": "python-typing"
     },
     {
-      "id": "python\u0000/home/yahn/litedb/gems/fact-mine/examples/profile/python_sample.py\u0000Greeter\u0000method_signature\u0000hello\u000011\u0000python-typing",
+      "id": "python\u0000/home/yahn/cheat/gems/fact-mine/examples/profile/python_sample.py\u0000Greeter\u0000method_signature\u0000hello\u000011\u0000python-typing",
       "kind": "method_signature",
       "language": "python",
       "line": 11,
@@ -216,23 +228,32 @@
       "params": [
         {
           "name": "name",
-          "type": "str"
+          "type": {
+            "data": "str",
+            "kind": "Primitive"
+          }
         }
       ],
-      "path": "/home/yahn/litedb/gems/fact-mine/examples/profile/python_sample.py",
-      "return_type": "str",
+      "path": "/home/yahn/cheat/gems/fact-mine/examples/profile/python_sample.py",
+      "return_type": {
+        "data": "str",
+        "kind": "Primitive"
+      },
       "signature": "def hello(self, name: str) -> str:",
       "type_system": "python-typing"
     },
     {
-      "declared_type": "int",
-      "id": "python\u0000/home/yahn/litedb/gems/fact-mine/examples/profile/python_sample.py\u0000Database\u0000state_field\u0000port\u00005\u0000python-typing",
+      "declared_type": {
+        "data": "int",
+        "kind": "Primitive"
+      },
+      "id": "python\u0000/home/yahn/cheat/gems/fact-mine/examples/profile/python_sample.py\u0000Database\u0000state_field\u0000port\u00005\u0000python-typing",
       "kind": "state_field",
       "language": "python",
       "line": 5,
       "name": "port",
       "owner": "Database",
-      "path": "/home/yahn/litedb/gems/fact-mine/examples/profile/python_sample.py",
+      "path": "/home/yahn/cheat/gems/fact-mine/examples/profile/python_sample.py",
       "source": "syntax",
       "type_system": "python-typing"
     }

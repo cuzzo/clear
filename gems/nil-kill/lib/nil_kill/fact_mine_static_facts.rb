@@ -40,7 +40,7 @@ module NilKill
         ok = system(*args)
         raise "fact-mine-rust failed with status #{$?.exitstatus}" unless ok
 
-        data = JSON.parse(File.read(out_tmp.path))
+        data = FactMine::Syntax::TypeExpr.wrap_types!(JSON.parse(File.read(out_tmp.path)))
         
         symbolized = {}
         data.each do |key, val|

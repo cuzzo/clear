@@ -290,6 +290,10 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+      - name: Install Z3
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y z3
       - uses: ruby/setup-ruby@v1
         with:
           ruby-version: ${{ env.RUBY_VERSION }}
@@ -299,16 +303,22 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: 20
-      - name: Install Tree-sitter Ruby grammar
-        run: npm install --no-save --package-lock=false tree-sitter-ruby@0.23.1
+      - name: Install Tree-sitter grammars
+        run: npm install --legacy-peer-deps
       - uses: dtolnay/rust-toolchain@stable
       - uses: taiki-e/install-action@cargo-llvm-cov
       - name: Run cargo llvm-cov for FactMine
         run: |
           mkdir -p tmp/fact-mine-rust-coverage
-          cargo llvm-cov \
+          cargo llvm-cov clean --manifest-path gems/fact-mine/Cargo.toml
+          cargo llvm-cov --no-report --manifest-path gems/fact-mine/Cargo.toml --all-features
+          cargo build --manifest-path gems/decomplex/Cargo.toml
+          FACT_MINE_RUST_BINARY=${{ github.workspace }}/gems/fact-mine/target/llvm-cov-target/debug/fact-mine-rust \
+          DECOMPLEX_RUST_BINARY=${{ github.workspace }}/gems/decomplex/target/debug/decomplex-rust \
+          LLVM_PROFILE_FILE='${{ github.workspace }}/gems/fact-mine/target/llvm-cov-target/fact-mine-%p-%32m.profraw' \
+          bundle exec ruby tools/run_ruby_gem_coverage.rb
+          cargo llvm-cov report \
             --manifest-path gems/fact-mine/Cargo.toml \
-            --all-features \
             --cobertura \
             --output-path ${{ github.workspace }}/tmp/fact-mine-rust-coverage/cobertura.xml
       - uses: actions/upload-artifact@v4
@@ -322,6 +332,7 @@ jobs:
           flags: fact-mine-rust
           fail_ci_if_error: false
           token: ${{ secrets.CODECOV_TOKEN }}
+
 
   decomplex-rust-coverage:
     name: Decomplex Rust coverage

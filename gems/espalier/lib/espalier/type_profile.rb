@@ -4,6 +4,220 @@ require "set"
 
 module FactMine
   module Syntax
+    class TypeExpr < String
+      attr_reader :kind, :data, :language
+
+      def initialize(kind, data = nil, language = nil)
+        @kind = kind
+        @data = data
+        @language = language
+        super(to_lang_string)
+      end
+
+      def to_lang_string
+        case @language
+        when "python"
+          to_python_string
+        when "typescript", "javascript"
+          to_typescript_string
+        when "go"
+          to_go_string
+        else
+          to_sorbet_string
+        end
+      end
+
+      def to_sorbet_string
+        case @kind
+        when "Untyped"
+          "T.untyped"
+        when "NilClass"
+          "NilClass"
+        when "Primitive"
+          @data.to_s
+        when "Nilable"
+          "T.nilable(#{TypeExpr.from_json(@data, @language)})"
+        when "Array"
+          "T::Array[#{TypeExpr.from_json(@data, @language)}]"
+        when "Hash"
+          key = TypeExpr.from_json(@data["key"], @language)
+          val = TypeExpr.from_json(@data["value"], @language)
+          "T::Hash[#{key}, #{val}]"
+        when "Set"
+          "T::Set[#{TypeExpr.from_json(@data, @language)}]"
+        when "Union"
+          parts = Array(@data).map { |d| TypeExpr.from_json(d, @language) }
+          "T.any(#{parts.join(', ')})"
+        else
+          @kind.to_s
+        end
+      end
+
+      def to_python_string
+        case @kind
+        when "Untyped"
+          "Any"
+        when "NilClass"
+          "None"
+        when "Primitive"
+          @data.to_s
+        when "Nilable"
+          inner = TypeExpr.from_json(@data, @language)
+          "#{inner} | None"
+        when "Array"
+          "list[#{TypeExpr.from_json(@data, @language)}]"
+        when "Hash"
+          key = TypeExpr.from_json(@data["key"], @language)
+          val = TypeExpr.from_json(@data["value"], @language)
+          "dict[#{key}, #{val}]"
+        when "Set"
+          "set[#{TypeExpr.from_json(@data, @language)}]"
+        when "Union"
+          parts = Array(@data).map { |d| TypeExpr.from_json(d, @language) }
+          parts.join(' | ')
+        else
+          @kind.to_s
+        end
+      end
+
+      def to_typescript_string
+        case @kind
+        when "Untyped"
+          "any"
+        when "NilClass"
+          "null"
+        when "Primitive"
+          @data.to_s
+        when "Nilable"
+          inner = TypeExpr.from_json(@data, @language)
+          "#{inner} | null"
+        when "Array"
+          "#{TypeExpr.from_json(@data, @language)}[]"
+        when "Hash"
+          key = TypeExpr.from_json(@data["key"], @language)
+          val = TypeExpr.from_json(@data["value"], @language)
+          "Record<#{key}, #{val}>"
+        when "Set"
+          "Set<#{TypeExpr.from_json(@data, @language)}>"
+        when "Union"
+          parts = Array(@data).map { |d| TypeExpr.from_json(d, @language) }
+          parts.join(' | ')
+        else
+          @kind.to_s
+        end
+      end
+
+      def to_go_string
+        case @kind
+        when "Untyped"
+          "any"
+        when "NilClass"
+          "nil"
+        when "Primitive"
+          @data.to_s
+        when "Nilable"
+          inner = TypeExpr.from_json(@data, @language)
+          "*#{inner}"
+        when "Array"
+          "[]#{TypeExpr.from_json(@data, @language)}"
+        when "Hash"
+          key = TypeExpr.from_json(@data["key"], @language)
+          val = TypeExpr.from_json(@data["value"], @language)
+          "map[#{key}]#{val}"
+        when "Set"
+          "map[#{TypeExpr.from_json(@data, @language)}]bool"
+        when "Union"
+          "any"
+        else
+          @kind.to_s
+        end
+      end
+
+      def self.from_json(val, language = nil)
+        return nil if val.nil?
+        case val
+        when TypeExpr
+          val
+        when Hash
+          if val.key?("kind") && %w[Untyped NilClass Primitive Nilable Array Hash Set Union].include?(val["kind"])
+            TypeExpr.new(val["kind"], val["data"], language)
+          else
+            val
+          end
+        else
+          val
+        end
+      end
+
+      def self.wrap_types!(val, current_lang = nil)
+        case val
+        when Hash
+          if val.key?("language")
+            current_lang = val["language"].to_s.downcase
+          end
+          if val.key?("methods") || val.key?("fields") || val.key?("type_definitions") || val.key?("facts")
+            langs = []
+            langs << val["language"] if val["language"]
+            if val["methods"].is_a?(Array)
+              langs.concat(val["methods"].map { |m| m["language"] })
+            end
+            if val["fields"].is_a?(Array)
+              langs.concat(val["fields"].map { |f| f["language"] })
+            end
+            if val["type_definitions"].is_a?(Array)
+              langs.concat(val["type_definitions"].map { |d| d["language"] })
+            end
+            current_lang = langs.compact.map(&:to_s).reject(&:empty?).first&.downcase
+          end
+
+          if val.key?("kind") && %w[Untyped NilClass Primitive Nilable Array Hash Set Union].include?(val["kind"])
+            return TypeExpr.new(val["kind"], val["data"], current_lang)
+          end
+          if val.frozen?
+            val = val.dup
+          end
+          val.each do |k, v|
+            val[k] = wrap_types!(v, current_lang)
+          end
+          val
+        when Array
+          if val.frozen?
+            val = val.dup
+          end
+          val.map! { |v| wrap_types!(v, current_lang) }
+          val
+        else
+          val
+        end
+      end
+
+      def self.unwrap_types(val)
+        case val
+        when TypeExpr
+          val.as_json
+        when Hash
+          val.each_with_object({}) do |(k, v), h|
+            h[k] = unwrap_types(v)
+          end
+        when Array
+          val.map { |v| unwrap_types(v) }
+        else
+          val
+        end
+      end
+
+      def as_json(options = nil)
+        {
+          "kind" => @kind,
+          "data" => TypeExpr.unwrap_types(@data)
+        }.compact
+      end
+
+      def to_json(*args)
+        as_json.to_json(*args)
+      end
+    end
+
     class TypeProfile
       DEFAULT_MAX_UNION_TYPES = 3
 

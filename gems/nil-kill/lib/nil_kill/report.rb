@@ -191,7 +191,7 @@ module NilKill
     end
 
     def read_evidence
-      return JSON.parse(File.read(@evidence_path)) if @evidence_path
+      return FactMine::Syntax::TypeExpr.wrap_types!(JSON.parse(File.read(@evidence_path))) if @evidence_path
 
       Store.read
     end
