@@ -1598,7 +1598,27 @@ module NilKillRuntimeTrace
         kw.each { |field, value| NilKillRuntimeTrace.record_struct_field(self.class, class_name, field, value) }
         super(*args, **kw, &blk)
       end
+
+      define_method(:[]=) do |field, value|
+        class_name = NilKillRuntimeTrace.safe_module_name(self.class) || "AnonymousStruct"
+        field_sym = field.to_sym rescue nil
+        if field_sym && fields.include?(field_sym)
+          NilKillRuntimeTrace.record_struct_field(self.class, class_name, field_sym, value)
+        end
+        super(field, value)
+      end
     end)
+
+    fields.each do |field|
+      setter = "#{field}="
+      if !klass.method_defined?(setter) || klass.instance_method(setter).source_location.nil?
+        klass.define_method(setter) do |value|
+          class_name = NilKillRuntimeTrace.safe_module_name(self.class) || "AnonymousStruct"
+          NilKillRuntimeTrace.record_struct_field(self.class, class_name, field, value)
+          self[field] = value
+        end
+      end
+    end
   end
 
   def self.attach_data(klass)

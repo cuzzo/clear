@@ -35,6 +35,19 @@ module NilKill
       }
     end
 
+    def method_record_by_key_str(key_str)
+      @methods[key_str] ||= {
+        "key" => yield, "calls" => 0, "ok_calls" => 0, "raised_calls" => 0,
+        "params_by_name" => {}, "params_ok" => {}, "params_raised" => {}, "param_elem" => {}, "param_kv" => {},
+        "param_elem_shapes" => {}, "param_kv_shapes" => {},
+        "param_sites" => {}, "param_sites_ok" => {}, "param_sites_raised" => {},
+        "param_traces" => {}, "param_traces_ok" => {}, "param_traces_raised" => {},
+        "returns" => [], "return_elem" => [], "return_kv" => [[], []],
+        "return_elem_shapes" => [], "return_kv_shapes" => [[], []], "raised" => [],
+        "source" => nil, "has_sig" => false,
+      }
+    end
+
     def to_h
       { "version" => 1, "generated_at" => Time.now.utc.iso8601, "target_dirs" => NilKill.target_dirs.map { |d| NilKill.rel(d) },
         "target_exclude_dirs" => NilKill.target_exclude_dirs.map { |d| NilKill.rel(d) },
