@@ -125,6 +125,7 @@ module Boobytrap
         cmd = [go_helper, "--repo", @repo]
         cmd += ["--coverage", resultset] if resultset
         cmd += ["--fix-re", fix_re.source] if fix_re
+        cmd += ["--decomplex-facts", decomplex_facts] if decomplex_facts
 
         begin
           go_out = IO.popen(cmd, &:read)
@@ -193,6 +194,31 @@ module Boobytrap
               gaps = static_gaps.merge(gaps)
             end
 
+            if data["decomplex_scores"]
+              decomplex_scores = {}
+              data["decomplex_scores"].each do |entry|
+                decomplex_scores[[entry["file"], entry["method"]]] = DecomplexRisk::Score.new(
+                  score: entry["score"],
+                  findings: entry["findings"].map { |f| { type: f["type"] } },
+                  detectors: entry["detectors"]
+                )
+              end
+            end
+
+            if data["state_branch_density"]
+              @state_branch_density = data["state_branch_density"].map do |h|
+                {
+                  file: h["file"],
+                  method: h["method"],
+                  score: h["score"],
+                  decisions: h["decisions"],
+                  at: h["at"],
+                  state_refs: h["state_refs"],
+                  predicate: h["predicate"]
+                }
+              end
+            end
+
             @gaps = gaps
             @have_cov = has_coverage || !gaps.empty?
             @coverage_mode = coverage_mode(coverage, source_files, gaps)
@@ -234,7 +260,7 @@ module Boobytrap
         if has_coverage || DecomplexRisk.tree_sitter?
           static_files = DecomplexRisk.tree_sitter? ? (source_files - covered_files) : []
           method_files = (covered_files + static_files).uniq
-          decomplex_scores = DecomplexRisk.score(
+          decomplex_scores ||= DecomplexRisk.score(
             method_files.map { |rel| ::File.join(@repo, rel) },
             root: @repo
           )
@@ -840,7 +866,7 @@ module Boobytrap
           source_file?(rel, parser: "tree_sitter")
       end
       files = current_source_files if DecomplexRisk.tree_sitter? && files.empty?
-      findings = DecomplexRisk.state_branch_density(
+      findings = @state_branch_density || DecomplexRisk.state_branch_density(
         files.map { |rel| ::File.join(@repo, rel) },
         root: @repo
       )

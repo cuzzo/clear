@@ -17,11 +17,35 @@ import (
 )
 
 type Output struct {
-	FixCommits int                 `json:"fix_commits"`
-	FixScores  map[string]float64  `json:"fix_scores"`
-	Blast      []BlastRow          `json:"blast_radius"`
-	Coverage   *CoverageDataset    `json:"coverage,omitempty"`
-	Gaps       map[string]FileGap  `json:"gaps,omitempty"`
+	FixCommits         int                     `json:"fix_commits"`
+	FixScores          map[string]float64      `json:"fix_scores"`
+	Blast              []BlastRow              `json:"blast_radius"`
+	Coverage           *CoverageDataset        `json:"coverage,omitempty"`
+	Gaps               map[string]FileGap      `json:"gaps,omitempty"`
+	DecomplexScores    []DecomplexScoreEntry   `json:"decomplex_scores,omitempty"`
+	StateBranchDensity []StateBranchDensityRow `json:"state_branch_density,omitempty"`
+}
+
+type DecomplexScoreEntry struct {
+	File      string    `json:"file"`
+	Method    string    `json:"method"`
+	Score     int       `json:"score"`
+	Findings  []Finding `json:"findings"`
+	Detectors []string  `json:"detectors"`
+}
+
+type Finding struct {
+	Type string `json:"type"`
+}
+
+type StateBranchDensityRow struct {
+	File      string      `json:"file"`
+	Method    string      `json:"method"`
+	Score     float64     `json:"score"`
+	Decisions int         `json:"decisions"`
+	At        interface{} `json:"at"`
+	StateRefs []string    `json:"state_refs"`
+	Predicate string      `json:"predicate"`
 }
 
 type BlastRow struct {
@@ -58,6 +82,7 @@ type Event struct {
 func main() {
 	repoPath := flag.String("repo", "", "Path to repository")
 	covPath := flag.String("coverage", "", "Path to coverage JSON")
+	decomplexFactsPath := flag.String("decomplex-facts", "", "Path to decomplex facts JSON")
 	fixRePat := flag.String("fix-re", `\b(fix(es|ed)?|bug\s*fix|close[sd]?)\b`, "Regex for fix commits")
 	flag.Parse()
 
@@ -98,12 +123,25 @@ func main() {
 		}
 	}
 
+	// 3. Process Decomplex facts if supplied
+	var decomplexScores []DecomplexScoreEntry
+	var densityRows []StateBranchDensityRow
+	if *decomplexFactsPath != "" {
+		decomplexScores, densityRows, err = processDecomplexFacts(*decomplexFactsPath, absRepo)
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "Error processing decomplex facts: %v\n", err)
+			os.Exit(1)
+		}
+	}
+
 	out := Output{
-		FixCommits: len(events),
-		FixScores:  scores,
-		Blast:      blast,
-		Coverage:   covDataset,
-		Gaps:       gaps,
+		FixCommits:         len(events),
+		FixScores:          scores,
+		Blast:              blast,
+		Coverage:           covDataset,
+		Gaps:               gaps,
+		DecomplexScores:    decomplexScores,
+		StateBranchDensity: densityRows,
 	}
 
 	enc := json.NewEncoder(os.Stdout)
@@ -438,15 +476,185 @@ func mergeBranches(target map[string]map[string]int, source map[string]interface
 	return target
 }
 
-func relpath(abs, root string) string {
-	absClean := filepath.Clean(abs)
-	rootClean := filepath.Clean(root)
-	if absClean == rootClean {
+func relpath(file, root string) string {
+	realRoot, err := filepath.EvalSymlinks(root)
+	if err != nil {
+		realRoot = root
+	}
+	realRoot = filepath.Clean(realRoot)
+
+	realFile, err := filepath.EvalSymlinks(file)
+	if err != nil {
+		realFile = file
+	}
+	realFile = filepath.Clean(realFile)
+
+	rel, err := filepath.Rel(realRoot, realFile)
+	if err != nil {
+		trimmed := strings.TrimPrefix(filepath.Clean(file), filepath.Clean(root)+"/")
+		return trimmed
+	}
+	if rel == "." {
 		return ""
 	}
-	rel, err := filepath.Rel(rootClean, absClean)
-	if err != nil {
-		return abs
-	}
 	return rel
+}
+
+func parseSite(site string, repoRoot string) (string, string, int, bool) {
+	parts := strings.Split(site, ":")
+	if len(parts) < 3 {
+		return "", "", 0, false
+	}
+	lineStr := parts[len(parts)-1]
+	methodName := parts[len(parts)-2]
+	filePath := strings.Join(parts[:len(parts)-2], ":")
+
+	line, err := strconv.Atoi(lineStr)
+	if err != nil {
+		return "", "", 0, false
+	}
+
+	return relpath(filePath, repoRoot), methodName, line, true
+}
+
+func extractSites(payload interface{}) []string {
+	var sites []string
+	switch val := payload.(type) {
+	case []interface{}:
+		for _, item := range val {
+			if m, ok := item.(map[string]interface{}); ok {
+				if s, ok := m["sites"]; ok {
+					if arr, ok := s.([]interface{}); ok {
+						for _, sVal := range arr {
+							if str, ok := sVal.(string); ok {
+								sites = append(sites, str)
+							}
+						}
+					}
+				}
+			}
+		}
+	case map[string]interface{}:
+		for _, v := range val {
+			sites = append(sites, extractSites(v)...)
+		}
+	}
+	return sites
+}
+
+func processDecomplexFacts(factsPath string, absRepo string) ([]DecomplexScoreEntry, []StateBranchDensityRow, error) {
+	data, err := os.ReadFile(factsPath)
+	if err != nil {
+		return nil, nil, err
+	}
+
+	var raw map[string]interface{}
+	if err := json.Unmarshal(data, &raw); err != nil {
+		return nil, nil, err
+	}
+
+	// 1. Process detectors for Decomplex scores
+	detectorsData, _ := raw["detectors"].(map[string]interface{})
+	
+	type methodKey struct {
+		file   string
+		method string
+	}
+	
+	// Map to keep unique detectors for detectors field
+	methodUniqueDetectors := make(map[methodKey]map[string]bool)
+	// Slice to keep all findings (with duplicates)
+	methodFindings := make(map[methodKey][]Finding)
+	// Sort detector names alphabetically to match facts file key order
+	var detectorNames []string
+	for name := range detectorsData {
+		detectorNames = append(detectorNames, name)
+	}
+	sort.Strings(detectorNames)
+	for _, detectorName := range detectorNames {
+		payload := detectorsData[detectorName]
+		for _, site := range extractSites(payload) {
+			relFile, methodName, _, ok := parseSite(site, absRepo)
+			if !ok {
+				continue
+			}
+			key := methodKey{file: relFile, method: methodName}
+			
+			if _, exists := methodUniqueDetectors[key]; !exists {
+				methodUniqueDetectors[key] = make(map[string]bool)
+			}
+			methodUniqueDetectors[key][detectorName] = true
+			
+			methodFindings[key] = append(methodFindings[key], Finding{Type: detectorName})
+		}
+	}
+	
+	// Convert to DecomplexScoreEntry slice
+	var decomplexScores []DecomplexScoreEntry
+	for key, findingsList := range methodFindings {
+		var detectors []string
+		for d := range methodUniqueDetectors[key] {
+			detectors = append(detectors, d)
+		}
+		sort.Strings(detectors)
+		
+		decomplexScores = append(decomplexScores, DecomplexScoreEntry{
+			File:      key.file,
+			Method:    key.method,
+			Score:     len(detectors),
+			Findings:  findingsList,
+			Detectors: detectors,
+		})
+	}
+	
+	sort.Slice(decomplexScores, func(i, j int) bool {
+		if decomplexScores[i].File != decomplexScores[j].File {
+			return decomplexScores[i].File < decomplexScores[j].File
+		}
+		return decomplexScores[i].Method < decomplexScores[j].Method
+	})
+
+	// 2. Process state_branch_density
+	var densityRows []StateBranchDensityRow
+	if detectorsData != nil {
+		if densityDataVal, ok := detectorsData["state_branch_density"]; ok {
+			if densityArr, ok := densityDataVal.([]interface{}); ok {
+				for _, entryVal := range densityArr {
+					if entry, ok := entryVal.(map[string]interface{}); ok {
+						fileStr, _ := entry["file"].(string)
+						methodStr, _ := entry["method"].(string)
+						scoreNum, _ := entry["score"].(float64)
+						decisionsNum, _ := entry["decisions"].(float64)
+						stateRefsArr, _ := entry["state_refs"].([]interface{})
+						var stateRefs []string
+						for _, refVal := range stateRefsArr {
+							if rStr, ok := refVal.(string); ok {
+								stateRefs = append(stateRefs, rStr)
+							}
+						}
+						predicateStr, _ := entry["predicate"].(string)
+						
+						densityRows = append(densityRows, StateBranchDensityRow{
+							File:      relpath(fileStr, absRepo),
+							Method:    methodStr,
+							Score:     scoreNum,
+							Decisions: int(decisionsNum),
+							At:        entry["at"],
+							StateRefs: stateRefs,
+							Predicate: predicateStr,
+						})
+					}
+				}
+			}
+		}
+	}
+	
+	sort.Slice(densityRows, func(i, j int) bool {
+		if densityRows[i].File != densityRows[j].File {
+			return densityRows[i].File < densityRows[j].File
+		}
+		return densityRows[i].Method < densityRows[j].Method
+	})
+
+	return decomplexScores, densityRows, nil
 }
