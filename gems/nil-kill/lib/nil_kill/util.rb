@@ -177,6 +177,7 @@ module NilKill
     has_nil = classes.include?("NilClass")
     others = classes.reject { |c| c == "NilClass" || c.include?("#") || c.start_with?("Sorbet::Private::") }
     return "T.untyped" if others.empty?
+    others = collapse_node_types(others)
     base =
       if others.all? { |c| c == "TrueClass" || c == "FalseClass" }
         "T::Boolean"
@@ -189,6 +190,36 @@ module NilKill
       end
     return "T.untyped" if base == "T.untyped"
     has_nil && allow_nilable ? "T.nilable(#{base})" : base
+  end
+
+  def ast_node_type?(type)
+    type == "AST::Node" ||
+      (type.to_s.match?(/\AAST::[A-Z]\w+\z/) && !%w[AST::Type AST::Scope AST::SymbolEntry AST::Param AST::Diagnostic AST::SourceError AST::DiagnosticBucket].include?(type.to_s))
+  end
+
+  def mir_node_type?(type)
+    type == "MIR::Node" ||
+      type == "MIR::Emittable" ||
+      type.to_s.match?(/\AMIR::[A-Z]\w+\z/)
+  end
+
+  def collapse_node_types(others)
+    return others if others.size <= 1
+    has_ast = others.any? { |t| ast_node_type?(t) }
+    has_mir = others.any? { |t| mir_node_type?(t) }
+    if has_ast || has_mir
+      others.map do |t|
+        if ast_node_type?(t)
+          "AST::Node"
+        elsif mir_node_type?(t)
+          "MIR::Node"
+        else
+          t
+        end
+      end.uniq
+    else
+      others
+    end
   end
 
   def useful_type?(type)
@@ -235,7 +266,8 @@ module NilKill
         others << normalize_static_sorbet_type(type)
       end
     end
-    others = others.uniq.sort
+    others = others.uniq
+    others = collapse_node_types(others).sort
     if others.include?("T.noreturn")
       return has_nil ? "NilClass" : "T.noreturn" if others == ["T.noreturn"]
       others.delete("T.noreturn")
