@@ -202,7 +202,7 @@ module WithMatchCheck
   #
   # The check only runs for plain WITH. WITH MATCH, VIEW, MATERIALIZED VIEW,
   # and SNAPSHOT have their own dispatch shapes.
-  sig { params(node: AST::WithBlock, bound_params: T::Set[String], requires_map: T::Hash[String, T.untyped], fn: AST::FunctionDef, error_handler: Proc).returns(T.nilable(FsmOps::CallExpr)) }
+  sig { params(node: AST::WithBlock, bound_params: T::Set[String], requires_map: T::Hash[String, T::Set[Symbol]], fn: AST::FunctionDef, error_handler: Proc).returns(T.nilable(FsmOps::CallExpr)) }
   def self.enforce_polymorphic_iff_rule!(node, bound_params, requires_map,
                                          fn, error_handler)
     return if node.view_kind || node.snapshot_mode
@@ -355,7 +355,7 @@ module WithMatchCheck
     fam ? Set[fam] : Set.new
   end
 
-  sig { params(family_set: T::Set[T.untyped]).returns(T::Set[T.untyped]) }
+  sig { params(family_set: T::Set[Symbol]).returns(T::Set[Symbol]) }
   def self.expand_snapshotted(family_set)
     return family_set unless family_set.include?(:SNAPSHOTTED)
     out = family_set - [:SNAPSHOTTED]

@@ -21,6 +21,15 @@
 --ignore=gems/fact-mine/
 --ignore=gems/ruby-to-clear/
 --ignore=dump_tree.rb
+--ignore=check_util.rb
+--ignore=debug_ruby.rb
+--ignore=repro_unary.rb
+--ignore=scratch_static.rb
+--ignore=scratch_static_keys.rb
+--ignore=scratch_static_keys2.rb
+--ignore=scratch_test.rb
+--ignore=test_trace_plan_2.rb
+--ignore=test_trace_plan_bug.rb
 
 # Suppress dead-code/unreachable warnings on defensive guards.
 # The autogen tracer captures observation-tight types, so methods'

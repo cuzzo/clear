@@ -225,9 +225,14 @@ module NilKillRuntimeTrace
   def self.sample_struct_field?(klass_name, field)
     plan = trace_plan
     return true unless plan
-    short = klass_name.to_s.split("::").last
-    plan.dig("struct_fields", [klass_name.to_s, field.to_s].join("\0")) == true ||
-      plan.dig("struct_fields", [short, field.to_s].join("\0")) == true
+    
+    parts = klass_name.to_s.split("::")
+    (1..parts.length).each do |i|
+      suffix = parts[-i..-1].join("::")
+      return true if plan.dig("struct_fields", [suffix, field.to_s].join("\0")) == true
+    end
+    
+    false
   end
 
   # In-place instrumentation: the wrapped file IS at its real src
@@ -1392,13 +1397,32 @@ module NilKillRuntimeTrace
     return if T::Struct.instance_variable_get(:@__nil_kill_attached)
     T::Struct.instance_variable_set(:@__nil_kill_attached, true)
 
+    T::Struct.singleton_class.prepend(Module.new do
+      def inherited(child)
+        super
+        loc = caller_locations(1, 1)&.first
+        path = loc && File.expand_path(loc.absolute_path || loc.path, NilKillRuntimeTrace::ROOT)
+        if path && NilKillRuntimeTrace.target_path?(path)
+          child.instance_variable_set(:@__nil_kill_struct_path, path)
+          child.instance_variable_set(:@__nil_kill_struct_line, loc.lineno)
+        end
+      end
+    end)
+
     T::Struct.prepend(Module.new do
       def initialize(*args, **kw, &blk)
-        class_name = NilKillRuntimeTrace.safe_module_name(self.class) || "AnonymousTStruct"
-        kw.each do |field, value|
-          NilKillRuntimeTrace.record_struct_field(self.class, class_name, field, value)
-        end
         super(*args, **kw, &blk)
+        class_name = NilKillRuntimeTrace.safe_module_name(self.class) || "AnonymousTStruct"
+        if self.class.respond_to?(:props)
+          self.class.props.keys.each do |field|
+            value = self.send(field) rescue nil
+            NilKillRuntimeTrace.record_struct_field(self.class, class_name, field, value)
+          end
+        else
+          kw.each do |field, value|
+            NilKillRuntimeTrace.record_struct_field(self.class, class_name, field, value)
+          end
+        end
       end
     end)
   end

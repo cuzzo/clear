@@ -1098,7 +1098,7 @@ module AST
     # @yield [name] Block to look up struct schema by name
     # @return [Symbol] The storage location
     #
-    sig { params(final_type: T.any(Symbol, Type), schema_lookup: SchemaLookup).returns(Symbol) }
+    sig { params(final_type: T.any(Symbol, Type), schema_lookup: T.nilable(SchemaLookup)).returns(Symbol) }
     def finalize_storage!(final_type, &schema_lookup)
       T.bind(self, T.untyped) rescue nil
       # Normalize the Symbol|Type input to a Type once at the seam, so

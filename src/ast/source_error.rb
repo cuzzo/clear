@@ -65,7 +65,7 @@ module ErrorHelper
 
   # Try the hash form first when applicable; fall back to positional;
   # surface any internal mismatch as an "Internal Args Error" suffix.
-  sig { params(template: String, args: T::Array[String], kwargs: T::Hash[Symbol, T.untyped]).returns(String) }
+  sig { params(template: String, args: T::Array[String], kwargs: T::Hash[Symbol, T::Array[Symbol]]).returns(String) }
   def format_diagnostic_template(template, args, kwargs)
     T.bind(self, T.untyped) rescue nil
     if !kwargs.empty? || template.include?("%{")

@@ -1,4 +1,6 @@
 # typed: strict
+require "sorbet-runtime"
+
 require_relative "diagnostic_registry"
 require_relative "../semantic/ownership_graph"
 
@@ -72,7 +74,7 @@ module DiagnosticExamples
     all[code.to_sym]
   end
 
-  sig { params(spec_files: T.untyped).returns(T::Hash[T.untyped, T.untyped]) }
+  sig { params(spec_files: T.untyped).returns(T::Hash[Symbol, T::Hash[Symbol, T.untyped]]) }
   def self.load!(spec_files = DEFAULT_SPEC_FILES)
     out = {}
     spec_files.each do |path|
@@ -163,7 +165,7 @@ module DiagnosticExamples
   # body satisfies `expecting_raise` (true == contains `raise_error`,
   # false == does not). Extract the first `<<~CLEAR ... CLEAR` heredoc
   # body within that `it`.
-  sig { params(block_lines: T.untyped, expecting_raise: T.untyped).returns(T.nilable(String)) }
+  sig { params(block_lines: T.untyped, expecting_raise: T::Boolean).returns(T.nilable(String)) }
   def self.extract_first_heredoc_in_it(block_lines, expecting_raise:)
     block_lines.each_with_index do |line, i|
       next unless line =~ /^(\s*)it\b/

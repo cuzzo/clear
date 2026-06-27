@@ -583,7 +583,7 @@ module AutoType
 
     def snapshot_files(actions)
       actions.flat_map { |action| snapshot_paths_for_action(action) }.uniq.each_with_object({}) do |rel_path, snapshot|
-        path = File.join(NilKill::ROOT, rel_path)
+        path = File.expand_path(rel_path, NilKill::ROOT)
         snapshot[path] = File.read(path) if File.file?(path)
       end
     end

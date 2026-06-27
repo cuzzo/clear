@@ -663,7 +663,7 @@ module ReentranceBridge
     scc.to_a
   end
 
-  sig { params(graph: T::Hash[String, T::Set[T.untyped]], start: String).returns(T::Set[String]) }
+  sig { params(graph: T::Hash[String, T::Set[String]], start: String).returns(T::Set[String]) }
   def compute_reachable(graph, start)
     T.bind(self, SemanticAnnotator) rescue nil
     seen = Set.new

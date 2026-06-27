@@ -57,6 +57,7 @@ module NilKill
         end
         overlay_nil_kill_language_capabilities!(evidence)
         append_ruby_struct_definitions!(evidence, root)
+        resolve_struct_declaration_classes!(evidence)
         evidence
       ensure
         if tmp_shapes
@@ -329,5 +330,47 @@ module NilKill
       evidence
     end
     private_class_method :overlay_nil_kill_language_capabilities!
+
+    def self.resolve_struct_declaration_classes!(evidence)
+      return unless evidence && evidence["facts"] && evidence["facts"]["struct_declarations"] && evidence["facts"]["type_definitions"]
+
+      # Build a map of [path, unqualified_class] -> fully_qualified_class
+      fq_map = {}
+      Array(evidence["facts"]["type_definitions"]).each do |d|
+        next unless d["kind"] == "state_field" || d["kind"] == "method_signature"
+        owner = d["owner"].to_s
+        next if owner.empty?
+        unqualified = owner.split("::").last
+        fq_map[[d["path"].to_s, unqualified]] = owner
+      end
+
+      # Pre-populate fallback path -> owners lookup
+      by_path = Hash.new { |h, k| h[k] = Set.new }
+      Array(evidence["facts"]["type_definitions"]).each do |d|
+        owner = d["owner"].to_s
+        by_path[d["path"].to_s].add(owner) unless owner.empty?
+      end
+      Array(evidence["methods"]).each do |m|
+        owner = m["owner"].to_s
+        by_path[m["path"].to_s].add(owner) unless owner.empty?
+      end
+
+      Array(evidence["facts"]["struct_declarations"]).each do |decl|
+        decl_class = decl["class"].to_s
+        next if decl_class.include?("::") # already qualified
+
+        fq = fq_map[[decl["path"].to_s, decl_class]]
+        unless fq
+          # Try fallback: find any owner in by_path[decl["path"]] that ends with "::decl_class"
+          candidates = by_path[decl["path"].to_s].select { |owner| owner.end_with?("::#{decl_class}") }
+          fq = candidates.first if candidates.size == 1
+        end
+
+        if fq
+          decl["class"] = fq
+        end
+      end
+    end
+    private_class_method :resolve_struct_declaration_classes!
   end
 end

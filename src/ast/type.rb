@@ -3092,7 +3092,7 @@ class Type
   # Replaces the repeated inline pattern:
   #   ti = node.full_type rescue nil
   #   ti = Type.new(ti) if ti && !ti.is_a?(Type)
-  sig { params(node: TypeNodeInput).returns(T.nilable(Type)) }
+  sig { params(node: T.untyped).returns(T.nilable(Type)) }
   def self.from_node(node)
     return nil unless node
     t = node.respond_to?(:full_type) ? T.unsafe(node).full_type : node
@@ -3105,7 +3105,7 @@ class Type
     end
   end
 
-  sig { params(node: TypeNodeInput, context: String).returns(Type) }
+  sig { params(node: T.untyped, context: String).returns(Type) }
   def self.from_node!(node, context: "post-annotation MIR")
     t = from_node(node)
     raise "#{context}: missing type info for #{node.class}" unless t

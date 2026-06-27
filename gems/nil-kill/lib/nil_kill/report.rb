@@ -2338,7 +2338,7 @@ module NilKill
       Array(evidence.dig("facts", "struct_declarations")).each do |decl|
         Array(decl["fields"]).each do |field|
           next if strong_static.include?([decl["class"].to_s, field.to_s])
-          type = rbi[[decl["class"], field]]
+          type = decl.dig("field_types", field.to_s) || rbi[[decl["class"], field]]
           next if type && !untyped_type?(strip_nilable(type.to_s))
           observed = rt[[decl["class"].to_s, field.to_s]].uniq
           non_nil = observed.reject { |c| c == "NilClass" || c.to_s.empty? }
