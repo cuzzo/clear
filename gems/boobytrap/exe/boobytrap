@@ -46,7 +46,7 @@ usage unless ARGV[0] == "report"
 
 opts = { repo: ".", coverage: "coverage/.resultset.json",
          output: nil, sarif: nil, json: nil, top: 40, only: [], files: [], mutation: nil, test_exposure: nil,
-         lineage: nil, lineage_command: nil, exclude: [] }
+         lineage: nil, lineage_command: nil, exclude: [], decomplex_facts: nil }
 args = ARGV[1..].dup
 until args.empty?
   a = args.shift
@@ -64,6 +64,7 @@ until args.empty?
   when /\A--lineage-command=(.+)/ then opts[:lineage_command] = Regexp.last_match(1)
   when /\A--exclude=(.+)/   then opts[:exclude] << Regexp.last_match(1)
   when "--exclude"          then opts[:exclude] << args.shift.to_s
+  when /\A--decomplex-facts=(.+)/ then opts[:decomplex_facts] = Regexp.last_match(1)
   else usage
   end
 end
@@ -78,7 +79,8 @@ report = Boobytrap::Report.new(
   test_exposure: opts[:test_exposure],
   lineage: opts[:lineage],
   lineage_command: opts[:lineage_command],
-  exclude: opts[:exclude]
+  exclude: opts[:exclude],
+  decomplex_facts: opts[:decomplex_facts]
 )
 
 if opts[:sarif]

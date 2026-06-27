@@ -99,7 +99,8 @@ module Boobytrap
     # WHICH files are ranked. Empty = whole repo.
     def initialize(repo:, resultset:, fix_re: Bugspots::FIX_RE, top: 40, only: [], files: [],
                    mutation: nil, test_exposure: nil, exclude: [], lineage: nil,
-                   lineage_command: nil)
+                   lineage_command: nil, decomplex_facts: nil)
+      ENV["DECOMPLEX_FACTS_FILE"] = decomplex_facts if decomplex_facts
       @repo = ::File.realpath(repo)
       @top = top
       @only = Array(only).map { |p| p.sub(%r{\A\./}, "").chomp("/") }.reject(&:empty?)

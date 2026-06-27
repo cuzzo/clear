@@ -18,14 +18,16 @@ module Boobytrap
     def score(files, root:)
       return {} if files.empty?
 
-      # Use decomplex-rust facts
-      require "tempfile"
-      tmp = Tempfile.new(["decomplex-facts", ".json"])
-      tmp.close
-      ok = system(DECOMPLEX_RUST_BINARY, "facts", "--output", tmp.path, *files)
-      return {} unless ok
-
-      data = JSON.parse(File.read(tmp.path))
+      data = if ENV["DECOMPLEX_FACTS_FILE"] && File.file?(ENV["DECOMPLEX_FACTS_FILE"])
+               JSON.parse(File.read(ENV["DECOMPLEX_FACTS_FILE"]))
+             else
+               require "tempfile"
+               tmp = Tempfile.new(["decomplex-facts", ".json"])
+               tmp.close
+               ok = system(DECOMPLEX_RUST_BINARY, "facts", "--output", tmp.path, *files)
+               return {} unless ok
+               JSON.parse(File.read(tmp.path))
+             end
       detectors_data = data["detectors"] || {}
       
       method_data = Hash.new { |h, k| h[k] = { findings: [], detectors: [] } }
@@ -60,7 +62,7 @@ module Boobytrap
       warn "boobytrap: decomplex risk unavailable: #{e.message}" if ENV["BOOBYTRAP_DEBUG"]
       {}
     ensure
-      tmp&.unlink
+      tmp&.unlink if defined?(tmp) && tmp
     end
 
     def extract_sites(payload)
@@ -82,13 +84,16 @@ module Boobytrap
     def state_branch_density(files, root:)
       return [] if files.empty?
       
-      require "tempfile"
-      tmp = Tempfile.new(["decomplex-facts", ".json"])
-      tmp.close
-      ok = system(DECOMPLEX_RUST_BINARY, "facts", "--output", tmp.path, *files)
-      return [] unless ok
-
-      data = JSON.parse(File.read(tmp.path))
+      data = if ENV["DECOMPLEX_FACTS_FILE"] && File.file?(ENV["DECOMPLEX_FACTS_FILE"])
+               JSON.parse(File.read(ENV["DECOMPLEX_FACTS_FILE"]))
+             else
+               require "tempfile"
+               tmp = Tempfile.new(["decomplex-facts", ".json"])
+               tmp.close
+               ok = system(DECOMPLEX_RUST_BINARY, "facts", "--output", tmp.path, *files)
+               return [] unless ok
+               JSON.parse(File.read(tmp.path))
+             end
       density_data = data.dig("detectors", "state_branch_density") || []
       
       density_data.map do |h|
@@ -106,7 +111,7 @@ module Boobytrap
       warn "boobytrap: decomplex state-branch density unavailable: #{e.message}" if ENV["BOOBYTRAP_DEBUG"]
       []
     ensure
-      tmp&.unlink
+      tmp&.unlink if defined?(tmp) && tmp
     end
 
     def load_decomplex_syntax
