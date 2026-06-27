@@ -256,7 +256,7 @@ module LintFixRewriter
     decl_t.resolved == inf_t.resolved
   end
 
-  sig { params(t: T.untyped).returns(T.nilable(Type)) }
+  sig { params(t: T.nilable(T.any(String, Symbol, Type))).returns(T.nilable(Type)) }
   def self.to_type(t)
     return nil if t.nil?
     return t if t.respond_to?(:resolved) && t.respond_to?(:any_sync?)

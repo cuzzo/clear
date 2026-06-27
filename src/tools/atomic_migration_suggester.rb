@@ -61,7 +61,7 @@ module AtomicMigrationSuggester
   # Eligibility: STRUCT with exactly one Int64/Float64/Bool field
   # under :locked sync (NOT :write_locked -- RWLocks don't map cleanly
   # to a single Atomic primitive).
-  sig { params(node: T.untyped, annotator: SemanticAnnotator).returns(T.nilable(Hash)) }
+  sig { params(node: AST::Node, annotator: SemanticAnnotator).returns(T.nilable(Hash)) }
   def self.candidate_decl_info(node, annotator)
     return nil unless node.is_a?(AST::VarDecl) || node.is_a?(AST::BindExpr)
     return nil unless node.name.is_a?(String)
@@ -132,7 +132,7 @@ module AtomicMigrationSuggester
     body.all? { |stmt| stmt_eligible?(stmt, alias_name, field_name) }
   end
 
-  sig { params(stmt: T.untyped, alias_name: String, field_name: String).returns(T::Boolean) }
+  sig { params(stmt: AST::Node, alias_name: String, field_name: String).returns(T::Boolean) }
   def self.stmt_eligible?(stmt, alias_name, field_name)
     case stmt
     when AST::Assignment

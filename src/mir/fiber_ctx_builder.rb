@@ -413,7 +413,7 @@ module FiberCtxBuilder
     Result.new(specs: specs, capture_map: map, capture_symbols: analysis&.capture_symbols || {})
   end
 
-  sig { params(type_obj: T.untyped, schema_lookup: T.nilable(Proc)).returns(T::Boolean) }
+  sig { params(type_obj: T.any(Object, Type), schema_lookup: T.nilable(Proc)).returns(T::Boolean) }
   def self.needs_move_capture_cleanup?(type_obj, schema_lookup = nil)
     ti = type_obj.is_a?(Type) ? type_obj : Type.new(type_obj)
     return false if ti.primitive? || ti.void? || ti.any? || ti.rodata? || ti.borrowed_reference?
@@ -422,7 +422,7 @@ module FiberCtxBuilder
     false
   end
 
-  sig { params(type_obj: T.untyped, schema_lookup: T.nilable(Proc), capture_symbol: T.nilable(SymbolEntry)).returns(T::Boolean) }
+  sig { params(type_obj: Type, schema_lookup: T.nilable(Proc), capture_symbol: T.nilable(SymbolEntry)).returns(T::Boolean) }
   def self.needs_fresh_heap_capture_cleanup?(type_obj, schema_lookup = nil, capture_symbol = nil)
     ti = type_obj.is_a?(Type) ? Type.new(type_obj) : Type.new(type_obj)
     return true if ti.any_sync? || ti.any_rc? || symbol_capture_value_needs_cleanup?(capture_symbol)
@@ -433,7 +433,7 @@ module FiberCtxBuilder
     false
   end
 
-  sig { params(type_obj: T.untyped, schema_lookup: T.nilable(Proc), capture_symbol: T.nilable(SymbolEntry)).returns(T::Boolean) }
+  sig { params(type_obj: T.any(Object, Type), schema_lookup: T.nilable(Proc), capture_symbol: T.nilable(SymbolEntry)).returns(T::Boolean) }
   def self.needs_capture_value_cleanup?(type_obj, schema_lookup = nil, capture_symbol = nil)
     ti = type_obj.is_a?(Type) ? type_obj : Type.new(type_obj)
     return false if ti.void? || ti.any? || ti.rodata? || ti.borrowed_reference?

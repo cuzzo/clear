@@ -89,7 +89,7 @@ class FunctionReturn
   # host-method dispatch. Always returns a Type, never nil.
   sig do
     params(receiver: T.nilable(Type), args: T::Array[T.untyped],
-           host: T.untyped).returns(Type)
+           host: T.nilable(SemanticAnnotator)).returns(Type)
   end
   def resolve(receiver, args = [], host = nil)
     case kind

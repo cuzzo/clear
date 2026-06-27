@@ -225,7 +225,7 @@ module MIRLoweringExpressions
     end
   end
 
-  sig { params(value: T.untyped).returns(String) }
+  sig { params(value: T.any(Float, Integer)).returns(String) }
   def float_literal_text(value)
     s = value.to_s
     value == T.unsafe(value).to_i && !s.include?('.') ? "#{s}.0" : s

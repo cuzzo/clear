@@ -284,8 +284,8 @@ module PassWorkProfiler
         ast_root: T.nilable(ProfileWalkValue),
         mir_root: T.nilable(ProfileWalkValue),
         token_count: T.nilable(Integer),
-        block: T.proc.returns(T.untyped)
-      ).returns(T.untyped)
+        block: T.proc.returns(T.any(Float, Symbol))
+      ).returns(T.any(Float, Symbol))
     end
     def measure(label, ast_root: nil, mir_root: nil, token_count: nil, &block)
       record = T.let(nil, T.nilable(StageRecord))
@@ -317,7 +317,7 @@ module PassWorkProfiler
       record_for(current_label).add_work(kind, units, seconds, exclusive_seconds)
     end
 
-    sig { params(kind: String, units: Integer, block: T.proc.returns(T.untyped)).returns(T.untyped) }
+    sig { params(kind: String, units: Integer, block: T.proc.returns(Symbol)).returns(Symbol) }
     def measure_work(kind, units: 0, &block)
       frame = T.let(nil, T.nilable(WorkFrame))
       frame = WorkFrame.new(

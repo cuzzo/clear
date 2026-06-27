@@ -458,7 +458,7 @@ module MIRHoistLowering
     stmts
   end
 
-  sig { params(blk: T.proc.returns(T.untyped)).returns(T.untyped) }
+  sig { params(blk: T.proc.returns(MIR::Node)).returns(MIR::Node) }
   def lower_scoped(&blk)
     T.bind(self, MIRLowering) rescue nil
     prev = function_state.pending_stmts
@@ -1082,7 +1082,7 @@ module MIRHoistLowering
     nil
   end
 
-  sig { params(value: T.untyped, old_child: T.untyped, new_child: T.untyped).returns(T::Boolean) }
+  sig { params(value: T.untyped, old_child: MIR::Node, new_child: T.untyped).returns(T::Boolean) }
   def replace_mir_expr_in_value!(value, old_child, new_child)
     case value
     when Array

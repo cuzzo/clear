@@ -83,7 +83,7 @@ class AutoSlotId
     [@kind, @fn_name, @index, @decl_id].hash
   end
 
-  sig { params(other: T.untyped).returns(T::Boolean) }
+  sig { params(other: AutoSlotId).returns(T::Boolean) }
   def eql?(other)
     return false unless other.is_a?(AutoSlotId)
     @kind == other.kind &&

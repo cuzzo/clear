@@ -456,7 +456,7 @@ class Type
   OBSERVABLE_TERMINALS_CACHE = T.let({}, ObservableTerminalRegistry)
   OBSERVABLE_WRAPPERS_CACHE = T.let({}, ObservableWrapperRegistry)
 
-  sig { params(value: T.untyped).returns(T::Boolean) }
+  sig { params(value: Type).returns(T::Boolean) }
   def self.indirect_type?(value)
     return false unless value.is_a?(Type)
 
@@ -1438,7 +1438,7 @@ class Type
     resolved == other.to_sym || raw == other
   end
 
-  sig { returns(T.untyped) }
+  sig { returns(T.any(FunctionSignature, Symbol)) }
   def raw
     shape.raw
   end
@@ -3170,7 +3170,7 @@ class Type
 
   private
 
-  sig { params(field_type: Type, schema: T.untyped).returns(Type) }
+  sig { params(field_type: Type, schema: Schemas::StructSchema).returns(Type) }
   def substitute_generic_schema_field_type(field_type, schema)
     return field_type unless generic_instance?
     params = schema.respond_to?(:type_params) ? schema.type_params : []
@@ -3661,12 +3661,12 @@ module TypeHelper
     extend T::Sig
 
   # Coerce input to Type object if needed
-  sig { params(input: T.untyped).returns(Type) }
+  sig { params(input: T.nilable(T.any(Symbol, Type))).returns(Type) }
   def to_type(input)
     input.is_a?(Type) ? input : Type.new(input)
   end
 
-  sig { params(source_type: T.untyped, target_type: T.untyped).returns(T::Boolean) }
+  sig { params(source_type: T.nilable(T.any(Symbol, Type)), target_type: T.untyped).returns(T::Boolean) }
   def is_safe_autocast?(source_type, target_type)
     to_type(target_type).accepts?(to_type(source_type))
   end

@@ -165,7 +165,7 @@ class Lexer
 
   private
 
-  sig { params(start_col: Integer).returns(T.untyped) }
+  sig { params(start_col: Integer).void }
   def read_interpolated_string(start_col)
     buffer = ""
     chunk_start_col = T.let(start_col, Integer) # Track where the *current* text buffer started
@@ -290,7 +290,7 @@ class Lexer
     raise "Lexer Error: Unclosed interpolation %{...}"
   end
 
-  sig { params(type: Symbol, val: T.untyped, col: Integer).returns(Integer) }
+  sig { params(type: Symbol, val: T.any(Float, Integer, String), col: Integer).returns(Integer) }
   def add(type, val, col)
     @tokens << Token.new(type, val, @line, col)
     # Automatically update position based on the last matched string

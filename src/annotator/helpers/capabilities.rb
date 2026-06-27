@@ -1035,7 +1035,7 @@ module CapabilityHelper
     fact.resolved_type.untyped? ? fact.declared_source_type : fact.resolved_type
   end
 
-  sig { params(type: T.untyped).returns(Type) }
+  sig { params(type: Type).returns(Type) }
   def capability_alias_type(type)
     T.bind(self, SemanticAnnotator) rescue nil
     t = Type.new(type)
@@ -1232,7 +1232,7 @@ module CapabilityHelper
     end
   end
 
-  sig { params(blk: T.untyped).returns(T.untyped) }
+  sig { params(blk: T.untyped).returns(T.nilable(T.any(SymbolEntry, Type))) }
   def without_capture_moves(&blk)
     T.bind(self, SemanticAnnotator)
     phase_receiver_state.capture_move_suppression_depth += 1

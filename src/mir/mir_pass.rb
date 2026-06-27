@@ -483,7 +483,7 @@ class MIRPass
   end
 
   # Recurse into control flow branches to transform nested bodies.
-  sig { params(stmt: T.untyped, ctx: MIRPass::WalkCtx).void }
+  sig { params(stmt: AST::Node, ctx: MIRPass::WalkCtx).void }
   def recurse_branches!(stmt, ctx)
     branch_ctx = if stmt.is_a?(AST::BgBlock) || stmt.is_a?(AST::BgStreamBlock)
       ctx.with(cleanup_facts: bg_inner_facts(stmt, ctx.cleanup_facts))

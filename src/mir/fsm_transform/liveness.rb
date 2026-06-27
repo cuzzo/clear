@@ -158,7 +158,7 @@ module FsmTransform
     # Targets a segment's tail can transition to (for cycle
     # detection). Linear suspends implicitly fall through to
     # seg.index + 1.
-    sig { params(seg: T.untyped).returns(T::Array[Integer]) }
+    sig { params(seg: FsmTransform::Segments::Segment).returns(T::Array[Integer]) }
     def self.tail_targets(seg)
       case seg.tail
       when Segments::Done                          then []
@@ -188,7 +188,7 @@ module FsmTransform
     # inside the body and stash into ctx.sp; subsequent steps
     # reference ctx.sp, not the original identifiers, so no extra
     # tail reads are recorded here.
-    sig { params(seg: T.untyped, uses_by_seg: T::Hash[Integer, T::Set[String]]).void }
+    sig { params(seg: FsmTransform::Segments::Segment, uses_by_seg: T::Hash[Integer, T::Set[String]]).void }
     def self.collect_tail_uses(seg, uses_by_seg)
       tail = seg.tail
       case tail
@@ -209,7 +209,7 @@ module FsmTransform
     # Type resolution mirrors the legacy collect_fsm_promoted_locals
     # fallback chain so consumers (FSM ctx-field decl emission)
     # always have a usable type.
-    sig { params(stmt: T.untyped, into: T.untyped).void }
+    sig { params(stmt: T.any(AST::Node, MIR::Node), into: T.untyped).void }
     def self.collect_defs(stmt, into)
       case stmt
       when AST::VarDecl, AST::BindExpr

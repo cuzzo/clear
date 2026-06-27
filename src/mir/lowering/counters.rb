@@ -24,14 +24,14 @@ class MIRLoweringGeneratedId < T::Struct
   const :kind, MIRLoweringCounterKind
   const :value, Integer
 
-  sig { params(other: T.untyped).returns(T::Boolean) }
+  sig { params(other: MIRLoweringGeneratedId).returns(T::Boolean) }
   def ==(other)
     return false unless other.is_a?(MIRLoweringGeneratedId)
 
     other.kind == kind && other.value == value
   end
 
-  sig { params(other: T.untyped).returns(T::Boolean) }
+  sig { params(other: MIRLoweringGeneratedId).returns(T::Boolean) }
   def eql?(other)
     self == other
   end

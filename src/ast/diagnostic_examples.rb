@@ -63,13 +63,13 @@ module DiagnosticExamples
 
   # Public entry point. Parses each spec file once, memoises results.
   # Returns a hash { CODE_SYM => { bad:, fix:, good:, file:, line: } }.
-  sig { returns(T.untyped) }
+  sig { returns(T::Hash[Symbol, T::Hash[Symbol, T.untyped]]) }
   def self.all
     @all = T.let(@all, T.untyped)
     @all ||= load!
   end
 
-  sig { params(code: T.untyped).returns(T.nilable(Example)) }
+  sig { params(code: Symbol).returns(T.nilable(Example)) }
   def self.lookup(code)
     all[code.to_sym]
   end
@@ -86,7 +86,7 @@ module DiagnosticExamples
 
   # ---- internals ----
 
-  sig { params(path: T.untyped, out: T.untyped).returns(NilClass) }
+  sig { params(path: String, out: T.untyped).returns(NilClass) }
   def self.scan_file(path, out)
     lines = File.readlines(path)
     i = T.let(0, Integer)
@@ -141,7 +141,7 @@ module DiagnosticExamples
   # Walk forward from `start_idx` (line of `describe ... do`) and find
   # the `end` line at the same indentation level. Returns the index or
   # nil if the file is malformed.
-  sig { params(lines: T.untyped, start_idx: T.untyped, indent: T.nilable(Integer)).returns(T.untyped) }
+  sig { params(lines: T.untyped, start_idx: Integer, indent: T.nilable(Integer)).returns(T.untyped) }
   def self.find_block_end(lines, start_idx, indent)
     depth = 1
     k = start_idx + 1

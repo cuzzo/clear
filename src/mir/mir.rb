@@ -329,14 +329,14 @@ module MIR
 
     const :value, Integer
 
-    sig { params(other: T.untyped).returns(T::Boolean) }
+    sig { params(other: MIR::LoweredNodeId).returns(T::Boolean) }
     def ==(other)
       return false unless other.is_a?(LoweredNodeId)
 
       other.value == value
     end
 
-    sig { params(other: T.untyped).returns(T::Boolean) }
+    sig { params(other: MIR::LoweredNodeId).returns(T::Boolean) }
     def eql?(other)
       self == other
     end
@@ -353,14 +353,14 @@ module MIR
 
     const :node_ids, T::Array[LoweredNodeId]
 
-    sig { params(other: T.untyped).returns(T::Boolean) }
+    sig { params(other: MIR::LoweredBodyId).returns(T::Boolean) }
     def ==(other)
       return false unless other.is_a?(LoweredBodyId)
 
       other.node_ids == node_ids
     end
 
-    sig { params(other: T.untyped).returns(T::Boolean) }
+    sig { params(other: MIR::LoweredBodyId).returns(T::Boolean) }
     def eql?(other)
       self == other
     end
@@ -4968,7 +4968,7 @@ module MIR
   # intended map of remaining reader-migration work.
   module StdlibDefFsCoercion
     extend T::Sig
-    sig { params(v: T.untyped).returns(T.untyped) }
+    sig { params(v: T.untyped).returns(T.nilable(FunctionSignature)) }
     def stdlib_def=(v)
       super(IntrinsicRegistry.fs(v))
     end

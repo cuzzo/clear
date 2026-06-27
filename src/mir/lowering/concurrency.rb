@@ -1236,7 +1236,7 @@ module MIRLoweringConcurrency
     type_info.inf_stream? || type_info.open_stream? || type_info.bounded_stream?
   end
 
-  sig { params(node: AST::NextExpr, alloc_sym: Symbol).returns(T.untyped) }
+  sig { params(node: AST::NextExpr, alloc_sym: Symbol).returns(MIR::Node) }
   def lower_next_expr(node, alloc_sym = :frame)
     T.bind(self, MIRLowering) rescue nil
     plan = next_expr_plan(node, alloc_sym)

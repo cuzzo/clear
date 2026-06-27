@@ -1067,7 +1067,7 @@ class MIREmitter
     stmts.filter_map { |s| emit_flow_stmt(s, return_kind) }.join("\n")
   end
 
-  sig { params(stmt: T.untyped, return_kind: Symbol).returns(T.nilable(String)) }
+  sig { params(stmt: MIR::Node, return_kind: Symbol).returns(T.nilable(String)) }
   def emit_flow_stmt(stmt, return_kind)
     case stmt
     when MIR::ReturnStmt

@@ -48,7 +48,7 @@ module AtomicPtrMigrationSuggester
 
   # Eligibility: STRUCT under :locked / :write_locked / :versioned sync. The
   # doctor gates :versioned candidates further with mvcc-profile signals.
-  sig { params(node: T.untyped, _annotator: SemanticAnnotator).returns(T.nilable(Hash)) }
+  sig { params(node: AST::Node, _annotator: SemanticAnnotator).returns(T.nilable(Hash)) }
   def self.candidate_decl_info(node, _annotator)
     return nil unless node.is_a?(AST::VarDecl) || node.is_a?(AST::BindExpr)
     return nil unless node.name.is_a?(String)

@@ -243,7 +243,7 @@ module MethodRewriter
     :GetIndex, :StructLit, :ListLit, :HashLit, :StringLit
   ].freeze
 
-  sig { params(node: T.untyped, text: String).returns(T::Boolean) }
+  sig { params(node: AST::Node, text: String).returns(T::Boolean) }
   def self.needs_parens?(node, text)
     stripped = text.strip
     return false if stripped.start_with?('(') && stripped.end_with?(')')

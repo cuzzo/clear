@@ -337,7 +337,7 @@ class FunctionSignature
     intrinsic_contract(borrows: :all)
   end
 
-  sig { params(sig: FunctionSignature, fn: T.untyped).returns(FunctionSignature) }
+  sig { params(sig: FunctionSignature, fn: T.any(AST::Node, Object, T.untyped)).returns(FunctionSignature) }
   def self.sync_from_function_def!(sig, fn)
     T.cast(sig.send(:sync_from_function_def!, fn), FunctionSignature)
   end
@@ -668,7 +668,7 @@ class FunctionSignature
     val.nil? ? Type.new(:Void) : Type.new(val)
   end
 
-  sig { params(fn: T.untyped).returns(FunctionSignature) }
+  sig { params(fn: T.any(AST::Node, Object, T.untyped)).returns(FunctionSignature) }
   def sync_from_function_def!(fn)
     @facts.needs_rt = fn.needs_rt if fn.respond_to?(:needs_rt)
     @facts.can_fail = fn.can_fail if fn.respond_to?(:can_fail)

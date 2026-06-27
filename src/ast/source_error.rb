@@ -32,7 +32,7 @@ module ErrorHelper
   # `%{name}` interpolation against the hash. Legacy positional args
   # against `%s`/`%d` still work for the (shrinking) set of templates
   # that haven't been migrated to named form yet.
-  sig { params(node_or_token: T.untyped, code_or_message: T.untyped, args: String, kwargs: T.untyped).returns(T.noreturn) }
+  sig { params(node_or_token: T.untyped, code_or_message: T.any(String, Symbol), args: String, kwargs: T.untyped).returns(T.noreturn) }
   def error!(node_or_token, code_or_message, *args, **kwargs)
     T.bind(self, T.untyped) rescue nil
     token = diagnostic_token(node_or_token)
@@ -101,7 +101,7 @@ module ErrorHelper
   end
 
   # Non-fatal compiler note (printed to stderr, does not halt compilation).
-  sig { params(node_or_token: T.untyped, message: String).void }
+  sig { params(node_or_token: AST::Node, message: String).void }
   def note!(node_or_token, message)
     T.bind(self, T.untyped) rescue nil
     token = diagnostic_token(node_or_token)
@@ -109,7 +109,7 @@ module ErrorHelper
     $stderr.puts "\e[36m[Note]\e[0m #{message}#{loc}"
   end
 
-  sig { params(node_or_token: T.untyped, message: String).returns(NilClass) }
+  sig { params(node_or_token: AST::Node, message: String).returns(NilClass) }
   def warning!(node_or_token, message)
     T.bind(self, T.untyped) rescue nil
     token = diagnostic_token(node_or_token)
@@ -144,7 +144,7 @@ module ErrorHelper
       message: T.nilable(String),
       code: T.nilable(Symbol),
       level: Symbol,
-      raise_in_collector: T.untyped,
+      raise_in_collector: T::Boolean,
       kwargs: T.untyped
     ).returns(T.untyped)
   end

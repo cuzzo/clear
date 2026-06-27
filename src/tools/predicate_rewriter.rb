@@ -61,7 +61,7 @@ module PredicateRewriter
   # No source rewrite is offered — the bug is "the comparison is
   # meaningless," not "the syntax is wrong" — so the finding has no
   # auto-fix; the user has to decide what they meant.
-  sig { params(source: String).returns(T.untyped) }
+  sig { params(source: String).void }
   def self.lint!(source)
     return unless FixCollector.enabled?
     tokens = ::Lexer.new(source).tokenize
@@ -177,7 +177,7 @@ module PredicateRewriter
     )
   end
 
-  sig { params(node: T.untyped).returns(T::Boolean) }
+  sig { params(node: AST::Node).returns(T::Boolean) }
   def self.nil_literal?(node)
     node.is_a?(AST::Literal) && node.type == :NIL
   end
@@ -226,7 +226,7 @@ module PredicateRewriter
     )
   end
 
-  sig { params(node: T.untyped).returns(T::Boolean) }
+  sig { params(node: AST::Node).returns(T::Boolean) }
   def self.length_call?(node)
     node.is_a?(AST::MethodCall) && node.name == "length"
   end
@@ -342,7 +342,7 @@ module PredicateRewriter
   # or method-call form; we approximate by walking a balanced-paren
   # scan from the node's leftmost-token position. Returns nil if the
   # walk hits an unmatched close.
-  sig { params(node: T.untyped, source: String).returns(Integer) }
+  sig { params(node: AST::Node, source: String).returns(Integer) }
   def self.rightmost_compact_offset(node, source)
     start = leftmost_offset(node, source)
     return nil unless start
