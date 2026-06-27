@@ -312,7 +312,9 @@ jobs:
           mkdir -p tmp/fact-mine-rust-coverage
           cargo llvm-cov clean --manifest-path gems/fact-mine/Cargo.toml
           cargo llvm-cov --no-report --manifest-path gems/fact-mine/Cargo.toml --all-features
+          cargo build --manifest-path gems/decomplex/Cargo.toml
           FACT_MINE_RUST_BINARY=${{ github.workspace }}/gems/fact-mine/target/llvm-cov-target/debug/fact-mine-rust \
+          DECOMPLEX_RUST_BINARY=${{ github.workspace }}/gems/decomplex/target/debug/decomplex-rust \
           LLVM_PROFILE_FILE='${{ github.workspace }}/gems/fact-mine/target/llvm-cov-target/fact-mine-%p-%32m.profraw' \
           bundle exec ruby tools/run_ruby_gem_coverage.rb
           cargo llvm-cov report \
