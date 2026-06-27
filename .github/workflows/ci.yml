@@ -310,7 +310,7 @@ jobs:
       - name: Run cargo llvm-cov for FactMine
         run: |
           mkdir -p tmp/fact-mine-rust-coverage
-          cargo llvm-cov clean
+          cargo llvm-cov clean --manifest-path gems/fact-mine/Cargo.toml
           cargo llvm-cov --no-report --manifest-path gems/fact-mine/Cargo.toml --all-features
           FACT_MINE_RUST_BINARY=${{ github.workspace }}/gems/fact-mine/target/llvm-cov-target/debug/fact-mine-rust \
           LLVM_PROFILE_FILE='${{ github.workspace }}/gems/fact-mine/target/llvm-cov-target/fact-mine-%p-%32m.profraw' \
