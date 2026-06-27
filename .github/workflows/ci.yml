@@ -319,7 +319,6 @@ jobs:
           bundle exec ruby tools/run_ruby_gem_coverage.rb
           cargo llvm-cov report \
             --manifest-path gems/fact-mine/Cargo.toml \
-            --all-features \
             --cobertura \
             --output-path ${{ github.workspace }}/tmp/fact-mine-rust-coverage/cobertura.xml
       - uses: actions/upload-artifact@v4
