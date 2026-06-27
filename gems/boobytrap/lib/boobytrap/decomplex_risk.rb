@@ -212,9 +212,19 @@ module Decomplex
       end
     end
 
+    @cache = {}
+
+    class << self
+      attr_accessor :cache
+    end
+
     module_function
 
     def parse(file, parser: "tree_sitter", language: nil)
+      @cache ||= {}
+      key = [::File.expand_path(file), parser, language]
+      return @cache[key] if @cache.key?(key)
+
       lang = language || language_for(file)
       bin = ENV.fetch("FACT_MINE_RUST_BINARY", File.expand_path("../../../fact-mine/target/release/fact-mine-rust", __dir__))
       return Document.new([], lang) unless File.executable?(bin)
@@ -230,6 +240,44 @@ module Decomplex
       Document.new(arms, lang)
     rescue StandardError
       Document.new([], lang || "generic")
+    end
+
+    def batch_parse(files)
+      @cache ||= {}
+      bin = ENV.fetch("FACT_MINE_RUST_BINARY", File.expand_path("../../../fact-mine/target/release/fact-mine-rust", __dir__))
+      return unless File.executable?(bin)
+
+      # Group files by their language to pass the correct --language parameter
+      files_by_lang = files.group_by { |f| language_for(f) }
+
+      files_by_lang.each do |lang, lang_files|
+        lang_files.each_slice(1000) do |slice|
+          cmd = [bin, "syntax-facts", "--language", lang] + slice
+          stdout, stderr, status = Open3.capture3(*cmd)
+          unless status.success?
+            warn "boobytrap batch_parse failed for #{lang} slice of #{slice.size} files: #{stderr.to_s.strip}" if ENV["BOOBYTRAP_DEBUG"]
+            next
+          end
+
+          begin
+            data = JSON.parse(stdout)
+            (data["documents"] || []).each do |doc_data|
+              file = doc_data["file"]
+              next unless file
+
+              abs_file = ::File.expand_path(file)
+              doc_lang = doc_data["language"] || lang
+              arms_data = doc_data["branch_arms"] || []
+              arms = arms_data.map { |arm_data| BranchArm.new(arm_data) }
+              
+              @cache[[abs_file, "tree_sitter", nil]] = Document.new(arms, doc_lang)
+              @cache[[abs_file, "tree_sitter", doc_lang]] = @cache[[abs_file, "tree_sitter", nil]]
+            end
+          rescue StandardError
+            # fallback to on-demand parsing if JSON parsing fails
+          end
+        end
+      end
     end
 
     def language_for(file)

@@ -250,6 +250,9 @@ func computeBugspots(events []Event) (map[string]float64, []BlastRow) {
 			pairs = append(pairs, partnerPair{p, w})
 		}
 		sort.Slice(pairs, func(i, j int) bool {
+			if pairs[i].weight == pairs[j].weight {
+				return pairs[i].name < pairs[j].name
+			}
 			return pairs[i].weight > pairs[j].weight
 		})
 

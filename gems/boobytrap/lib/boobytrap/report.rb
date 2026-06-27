@@ -116,6 +116,9 @@ module Boobytrap
         command: lineage_command,
         current_only: true
       )
+      if DecomplexRisk.tree_sitter?
+        Decomplex::Syntax.batch_parse(current_source_files.map { |rel| ::File.join(@repo, rel) })
+      end
       go_success = false
       go_helper = ::File.expand_path("../../bin/boobytrap-helper", __dir__)
       if ::File.file?(go_helper)
