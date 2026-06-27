@@ -182,6 +182,7 @@ module Boobytrap
 
     def method_ranges_for_file(abs, lines)
       return fallback_function_ranges(lines) unless tree_sitter_source_for_coverage?(abs)
+      return fallback_function_ranges(lines) unless defined?(Decomplex::Syntax::Document) && Decomplex::Syntax::Document.method_defined?(:function_defs)
 
       doc = Decomplex::Syntax.parse(abs, parser: "tree_sitter")
       ranges = doc.function_defs.map do |fn|

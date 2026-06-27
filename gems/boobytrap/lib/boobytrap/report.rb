@@ -116,9 +116,7 @@ module Boobytrap
         command: lineage_command,
         current_only: true
       )
-      if DecomplexRisk.tree_sitter?
-        Decomplex::Syntax.batch_parse(current_source_files.map { |rel| ::File.join(@repo, rel) })
-      end
+
       go_success = false
       go_helper = ::File.expand_path("../../bin/boobytrap-helper", __dir__)
       if ::File.file?(go_helper)
@@ -128,6 +126,17 @@ module Boobytrap
         cmd += ["--decomplex-facts", decomplex_facts] if decomplex_facts
         cmd += ["--mutation", mutation] if mutation
         cmd += ["--test-exposure", test_exposure] if test_exposure
+
+        static_tmp_path = nil
+        if DecomplexRisk.tree_sitter?
+          require 'tempfile'
+          static_files = current_source_files
+          tmp = Tempfile.new(['boobytrap-static', '.json'])
+          tmp.write(JSON.dump(static_files))
+          tmp.close
+          static_tmp_path = tmp.path
+          cmd += ["--static-files-file", static_tmp_path]
+        end
 
         begin
           go_out = IO.popen(cmd, &:read)
@@ -191,10 +200,6 @@ module Boobytrap
             gaps = filter_paths(gaps)
 
             source_files = current_source_files
-            if DecomplexRisk.tree_sitter?
-              static_gaps = filter_paths(CoverageGap.from_static(source_files - covered_files, root: @repo))
-              gaps = static_gaps.merge(gaps)
-            end
 
             if data["decomplex_scores"]
               decomplex_scores = {}
@@ -233,6 +238,24 @@ module Boobytrap
                                      TestExposureFacts.empty
                                    end
 
+            if data["decomplex_syntax"] && DecomplexRisk.load_decomplex_syntax
+              cache = Decomplex::Syntax.instance_variable_get(:@cache) || {}
+              data["decomplex_syntax"].each do |doc_data|
+                file = doc_data["file"]
+                next unless file
+
+                abs_file = ::File.expand_path(file)
+                doc_lang = doc_data["language"]
+                arms_data = doc_data["branch_arms"] || []
+                arms = arms_data.map { |arm_data| Decomplex::Syntax::BranchArm.new(arm_data) }
+                doc = Decomplex::Syntax::Document.new(arms, doc_lang)
+
+                cache[[abs_file, "tree_sitter", nil]] = doc
+                cache[[abs_file, "tree_sitter", doc_lang]] = doc
+              end
+              Decomplex::Syntax.instance_variable_set(:@cache, cache)
+            end
+
             @gaps = gaps
             @have_cov = has_coverage || !gaps.empty?
             @coverage_mode = coverage_mode(coverage, source_files, gaps)
@@ -240,10 +263,15 @@ module Boobytrap
           end
         rescue StandardError => e
           warn "Go helper failed: #{e.message}"
+        ensure
+          File.delete(static_tmp_path) if static_tmp_path && File.file?(static_tmp_path)
         end
       end
 
       if !go_success
+        if DecomplexRisk.tree_sitter?
+          Decomplex::Syntax.batch_parse(current_source_files.map { |rel| ::File.join(@repo, rel) })
+        end
         @mutation_facts = MutationFacts.load(mutation, root: @repo)
         @test_exposure_facts = TestExposureFacts.load(test_exposure, root: @repo)
         events = Bugspots.events_from_git(@repo, fix_re: fix_re)

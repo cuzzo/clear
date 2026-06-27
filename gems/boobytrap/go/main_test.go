@@ -386,3 +386,31 @@ func TestProcessTestExposureFacts(t *testing.T) {
 		t.Errorf("expected 2 branch hits, got %d", len(out.BranchHits))
 	}
 }
+
+func TestProcessStaticGaps(t *testing.T) {
+	tmp, err := os.MkdirTemp("", "boobytrap-static-test")
+	if err != nil {
+		t.Fatalf("failed to create temp dir: %v", err)
+	}
+	defer os.RemoveAll(tmp)
+
+	// Create a mock list of files
+	content := `["src/x.rb", "src/y.py"]`
+	writeTempFile(t, tmp, "static.json", content)
+
+	// Mock covDataset where src/x.rb is covered, src/y.py is not
+	covDataset := &CoverageDataset{
+		Files: map[string]FileCoverage{
+			filepath.Join(tmp, "src/x.rb"): {},
+		},
+	}
+
+	// Test findFactMineRustBinary fallback behavior when binary is missing
+	gaps, _, err := processStaticGaps(filepath.Join(tmp, "static.json"), tmp, covDataset)
+	if err != nil {
+		t.Fatalf("processStaticGaps failed: %v", err)
+	}
+	if len(gaps) != 0 {
+		t.Errorf("expected 0 gaps (binary missing), got %d", len(gaps))
+	}
+}

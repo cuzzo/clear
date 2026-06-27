@@ -13,7 +13,9 @@ import (
 	"regexp"
 	"sort"
 	"strconv"
+	"runtime"
 	"strings"
+	"sync"
 )
 
 type Output struct {
@@ -26,6 +28,7 @@ type Output struct {
 	StateBranchDensity []StateBranchDensityRow `json:"state_branch_density,omitempty"`
 	MutationFacts      *MutationFactsOutput    `json:"mutation_facts,omitempty"`
 	TestExposure       *TestExposurePayload    `json:"test_exposure,omitempty"`
+	DecomplexSyntax    []FactMineDoc           `json:"decomplex_syntax,omitempty"`
 }
 
 type MutationFactsOutput struct {
@@ -132,6 +135,7 @@ func main() {
 	decomplexFactsPath := flag.String("decomplex-facts", "", "Path to decomplex facts JSON")
 	mutationPath := flag.String("mutation", "", "Path to mutation facts JSON")
 	testExposurePath := flag.String("test-exposure", "", "Path to test exposure facts JSON")
+	staticFilesPath := flag.String("static-files-file", "", "Path to JSON file containing list of static files to analyze")
 	fixRePat := flag.String("fix-re", `\b(fix(es|ed)?|bug\s*fix|close[sd]?)\b`, "Regex for fix commits")
 	flag.Parse()
 
@@ -158,7 +162,6 @@ func main() {
 		fmt.Fprintf(os.Stderr, "Error reading git events: %v\n", err)
 		os.Exit(1)
 	}
-
 	scores, blast := computeBugspots(events)
 
 	// 2. Process Coverage if supplied
@@ -203,6 +206,29 @@ func main() {
 		}
 	}
 
+	// 6. Process Static Files if supplied
+	var staticGaps map[string]FileGap
+	var staticDocs []FactMineDoc
+	if *staticFilesPath != "" {
+		staticGaps, staticDocs, err = processStaticGaps(*staticFilesPath, absRepo, covDataset)
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "Error processing static gaps: %v\n", err)
+			os.Exit(1)
+		}
+	}
+
+	// Merge static gaps into gaps (coverage takes precedence)
+	if len(staticGaps) > 0 {
+		if gaps == nil {
+			gaps = make(map[string]FileGap)
+		}
+		for k, v := range staticGaps {
+			if _, exists := gaps[k]; !exists {
+				gaps[k] = v
+			}
+		}
+	}
+
 	out := Output{
 		FixCommits:         len(events),
 		FixScores:          scores,
@@ -213,6 +239,7 @@ func main() {
 		StateBranchDensity: densityRows,
 		MutationFacts:      mutationOutput,
 		TestExposure:       testExposureOutput,
+		DecomplexSyntax:    staticDocs,
 	}
 
 	enc := json.NewEncoder(os.Stdout)
@@ -430,21 +457,18 @@ func processCoverage(covPath, repo string) (*CoverageDataset, map[string]FileGap
 				continue
 			}
 
-			absFile, err := filepath.EvalSymlinks(file)
-			if err != nil {
-				absFile = file
+			absFile := file
+			if !filepath.IsAbs(file) {
+				absFile = filepath.Join(repo, file)
 			}
-			absFile, err = filepath.Abs(absFile)
-			if err != nil {
-				absFile = file
-			}
+			absFile = filepath.Clean(absFile)
 
 			dst, exists := files[absFile]
 			if !exists {
 				dst = FileCoverage{
 					Lines:      []*int{},
 					Branches:   make(map[string]map[string]int),
-					SourcePath: relpath(absFile, repo),
+					SourcePath: relpathNoEval(absFile, repo),
 				}
 			}
 
@@ -481,7 +505,7 @@ func processCoverage(covPath, repo string) (*CoverageDataset, map[string]FileGap
 				}
 			}
 			if total > 0 {
-				gaps[relpath(absFile, repo)] = FileGap{
+				gaps[relpathNoEval(absFile, repo)] = FileGap{
 					Total:     total,
 					Uncovered: uncov,
 					Gap:       float64(uncov) / float64(total),
@@ -561,6 +585,26 @@ func relpath(file, root string) string {
 	realFile = filepath.Clean(realFile)
 
 	rel, err := filepath.Rel(realRoot, realFile)
+	if err != nil {
+		trimmed := strings.TrimPrefix(filepath.Clean(file), filepath.Clean(root)+"/")
+		return trimmed
+	}
+	if rel == "." {
+		return ""
+	}
+	return rel
+}
+
+func relpathNoEval(file, root string) string {
+	absRoot, err := filepath.Abs(root)
+	if err != nil {
+		absRoot = root
+	}
+	absFile, err := filepath.Abs(file)
+	if err != nil {
+		absFile = file
+	}
+	rel, err := filepath.Rel(filepath.Clean(absRoot), filepath.Clean(absFile))
 	if err != nil {
 		trimmed := strings.TrimPrefix(filepath.Clean(file), filepath.Clean(root)+"/")
 		return trimmed
@@ -1001,4 +1045,168 @@ func processTestExposureFacts(path string, absRepo string) (*TestExposurePayload
 		}
 	}
 	return payload, nil
+}
+
+type FactMineOutput struct {
+	Documents []FactMineDoc `json:"documents"`
+}
+
+type FactMineDoc struct {
+	File       string            `json:"file"`
+	Language   string            `json:"language"`
+	BranchArms []json.RawMessage `json:"branch_arms"`
+}
+
+func processStaticGaps(staticFilesFile string, absRepo string, covDataset *CoverageDataset) (map[string]FileGap, []FactMineDoc, error) {
+	data, err := os.ReadFile(staticFilesFile)
+	if err != nil {
+		return nil, nil, err
+	}
+	var allFiles []string
+	if err := json.Unmarshal(data, &allFiles); err != nil {
+		return nil, nil, err
+	}
+	if len(allFiles) == 0 {
+		return nil, nil, nil
+	}
+	var files []string
+	for _, f := range allFiles {
+		abs := f
+		if !filepath.IsAbs(f) {
+			abs = filepath.Join(absRepo, f)
+		}
+		abs = filepath.Clean(abs)
+		covered := false
+		if covDataset != nil && covDataset.Files != nil {
+			if _, ok := covDataset.Files[abs]; ok {
+				covered = true
+			}
+		}
+		if !covered {
+			files = append(files, f)
+		}
+	}
+	if len(files) == 0 {
+		return nil, nil, nil
+	}
+	bin := findFactMineRustBinary(absRepo)
+	if _, err := os.Stat(bin); err != nil {
+		return nil, nil, nil
+	}
+	filesByLang := make(map[string][]string)
+	for _, f := range files {
+		lang := languageFor(f)
+		filesByLang[lang] = append(filesByLang[lang], f)
+	}
+	gaps := make(map[string]FileGap)
+	var allDocs []FactMineDoc
+	var mu sync.Mutex
+	var wg sync.WaitGroup
+
+	numCPU := runtime.NumCPU()
+	if numCPU > 8 {
+		numCPU = 8
+	}
+	sem := make(chan struct{}, numCPU)
+
+	for lang, langFiles := range filesByLang {
+		if lang == "generic" {
+			continue
+		}
+		for i := 0; i < len(langFiles); i += 1000 {
+			end := i + 1000
+			if end > len(langFiles) {
+				end = len(langFiles)
+			}
+			chunk := langFiles[i:end]
+
+			wg.Add(1)
+			go func(l string, filesSlice []string) {
+				defer wg.Done()
+				sem <- struct{}{}
+				defer func() { <-sem }()
+
+				var absSlice []string
+				for _, f := range filesSlice {
+					absSlice = append(absSlice, filepath.Join(absRepo, f))
+				}
+
+				args := append([]string{"syntax-facts", "--language", l}, absSlice...)
+				cmd := exec.Command(bin, args...)
+				var stdout bytes.Buffer
+				var stderr bytes.Buffer
+				cmd.Stdout = &stdout
+				cmd.Stderr = &stderr
+
+				if err := cmd.Run(); err != nil {
+					if os.Getenv("BOOBYTRAP_DEBUG") != "" {
+						fmt.Fprintf(os.Stderr, "Go helper batch_parse failed for %s slice: %v, stderr: %s\n", l, err, stderr.String())
+					}
+					return
+				}
+
+				var fmOut FactMineOutput
+				if err := json.Unmarshal(stdout.Bytes(), &fmOut); err != nil {
+					return
+				}
+
+				mu.Lock()
+				defer mu.Unlock()
+				for _, doc := range fmOut.Documents {
+					allDocs = append(allDocs, doc)
+					total := len(doc.BranchArms)
+					if total > 0 {
+						rel := relpathNoEval(doc.File, absRepo)
+						gaps[rel] = FileGap{
+							Total:     total,
+							Uncovered: total,
+							Gap:       1.0,
+						}
+					}
+				}
+			}(lang, chunk)
+		}
+	}
+	wg.Wait()
+	return gaps, allDocs, nil
+}
+
+func findFactMineRustBinary(repoRoot string) string {
+	if envBin := os.Getenv("FACT_MINE_RUST_BINARY"); envBin != "" {
+		return envBin
+	}
+	sibling := filepath.Join(repoRoot, "gems/fact-mine/target/release/fact-mine-rust")
+	if _, err := os.Stat(sibling); err == nil {
+		return sibling
+	}
+	return "fact-mine-rust"
+}
+
+func languageFor(file string) string {
+	switch strings.ToLower(filepath.Ext(file)) {
+	case ".rb":
+		return "ruby"
+	case ".py":
+		return "python"
+	case ".js":
+		return "javascript"
+	case ".ts":
+		return "typescript"
+	case ".go":
+		return "go"
+	case ".rs":
+		return "rust"
+	case ".zig":
+		return "zig"
+	case ".c":
+		return "c"
+	case ".cpp":
+		return "cpp"
+	case ".cs":
+		return "csharp"
+	case ".kt":
+		return "kotlin"
+	default:
+		return "generic"
+	}
 }

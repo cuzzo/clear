@@ -79,24 +79,33 @@ class MethodGapCovTest < Minitest::Test
   end
 
   def test_method_ranges_for_file
-    Boobytrap::MethodGap.stub :tree_sitter_source_for_coverage?, true do
-      doc = Minitest::Mock.new
-      fn = Minitest::Mock.new
-      fn.expect :span, [1, 0, 3, 0]
-      fn.expect :span, [1, 0, 3, 0]
-      fn.expect :name, "test_fn"
-      doc.expect :function_defs, [fn]
-      
-      Decomplex::Syntax.stub :parse, doc do
-        res = Boobytrap::MethodGap.send(:method_ranges_for_file, "a.rb", ["def test_fn", "end"])
-        assert_equal 1, res.length
-        assert_equal 1, res.first[:first_line]
-        assert_equal 3, res.first[:last_line]
-        assert_equal "test_fn", res.first[:name]
+    Decomplex::Syntax::Document.class_eval do
+      def function_defs; end
+    end
+    begin
+      Boobytrap::MethodGap.stub :tree_sitter_source_for_coverage?, true do
+        doc = Minitest::Mock.new
+        fn = Minitest::Mock.new
+        fn.expect :span, [1, 0, 3, 0]
+        fn.expect :span, [1, 0, 3, 0]
+        fn.expect :name, "test_fn"
+        doc.expect :function_defs, [fn]
+        
+        Decomplex::Syntax.stub :parse, doc do
+          res = Boobytrap::MethodGap.send(:method_ranges_for_file, "a.rb", ["def test_fn", "end"])
+          assert_equal 1, res.length
+          assert_equal 1, res.first[:first_line]
+          assert_equal 3, res.first[:last_line]
+          assert_equal "test_fn", res.first[:name]
+        end
+        
+        fn.verify
+        doc.verify
       end
-      
-      fn.verify
-      doc.verify
+    ensure
+      Decomplex::Syntax::Document.class_eval do
+        remove_method :function_defs if method_defined?(:function_defs)
+      end
     end
   end
 end
