@@ -115,30 +115,116 @@ module Boobytrap
         command: lineage_command,
         current_only: true
       )
-      events = Bugspots.events_from_git(@repo, fix_re: fix_re)
-      @fix_commits = events.size
-      scores = filter_paths(Bugspots.score(events))
-      @fix_scores = scores
-      @fix_max = [scores.values.max || 0.0, 1.0].max
-      @blast_radius = filter_blast(Bugspots.blast_radius(events))
-      source_files = current_source_files
-      coverage = resultset ? CoverageData.load(resultset, root: @repo) : nil
-      has_coverage = coverage && !coverage.empty?
-      covered_files = if has_coverage
-                        filter_paths(coverage.covered_files(root: @repo).to_h { |rel| [rel, true] }).keys.select do |rel|
-                          source_file?(rel, parser: "tree_sitter")
-                        end
-                      else
-                        []
-                      end
-      gaps = has_coverage ? filter_paths(CoverageGap.from_coverage(coverage, root: @repo)) : {}
-      if DecomplexRisk.tree_sitter?
-        static_gaps = filter_paths(CoverageGap.from_static(source_files - covered_files, root: @repo))
-        gaps = static_gaps.merge(gaps)
+      go_success = false
+      go_helper = ::File.expand_path("../../bin/boobytrap-helper", __dir__)
+      if ::File.file?(go_helper)
+        cmd = [go_helper, "--repo", @repo]
+        cmd += ["--coverage", resultset] if resultset
+        cmd += ["--fix-re", fix_re.source] if fix_re
+
+        begin
+          go_out = IO.popen(cmd, &:read)
+          if $?.success?
+            data = JSON.parse(go_out)
+            @fix_commits = data["fix_commits"]
+            scores = filter_paths(data["fix_scores"])
+            @fix_scores = scores
+            @fix_max = [scores.values.max || 0.0, 1.0].max
+
+            @blast_radius = filter_blast(
+              (data["blast_radius"] || []).map do |r|
+                Bugspots::Blast.new(
+                  file: r["file"],
+                  score: r["score"],
+                  fixes: r["fixes"],
+                  avg_touched: r["avg_touched"],
+                  max_touched: r["max_touched"],
+                  partners: r["partners"]
+                )
+              end
+            )
+
+            if data["coverage"]
+              cov_files = {}
+              data["coverage"]["files"].each do |abs, cov|
+                cov_files[abs] = CoverageData::FileCoverage.new(
+                  file: abs,
+                  lines: cov["lines"],
+                  branches: cov["branches"],
+                  branch_arms: [],
+                  source_path: cov["source_path"],
+                  language: CoverageData.language_for(abs),
+                  format: :simplecov
+                )
+              end
+              coverage = CoverageData::Dataset.new(path: resultset, files: cov_files)
+            else
+              coverage = nil
+            end
+
+            has_coverage = coverage && !coverage.empty?
+            covered_files = if has_coverage
+                              filter_paths(coverage.covered_files(root: @repo).to_h { |rel| [rel, true] }).keys.select do |rel|
+                                source_file?(rel, parser: "tree_sitter")
+                              end
+                            else
+                              []
+                            end
+
+            gaps = {}
+            if data["gaps"]
+              data["gaps"].each do |rel, g|
+                gaps[rel] = CoverageGap::File_.new(
+                  total: g["total"],
+                  uncovered: g["uncovered"],
+                  gap: g["gap"]
+                )
+              end
+            end
+            gaps = filter_paths(gaps)
+
+            source_files = current_source_files
+            if DecomplexRisk.tree_sitter?
+              static_gaps = filter_paths(CoverageGap.from_static(source_files - covered_files, root: @repo))
+              gaps = static_gaps.merge(gaps)
+            end
+
+            @gaps = gaps
+            @have_cov = has_coverage || !gaps.empty?
+            @coverage_mode = coverage_mode(coverage, source_files, gaps)
+            go_success = true
+          end
+        rescue StandardError => e
+          warn "Go helper failed: #{e.message}"
+        end
       end
-      @gaps = gaps
-      @have_cov = has_coverage || !gaps.empty?
-      @coverage_mode = coverage_mode(coverage, source_files, gaps)
+
+      if !go_success
+        events = Bugspots.events_from_git(@repo, fix_re: fix_re)
+        @fix_commits = events.size
+        scores = filter_paths(Bugspots.score(events))
+        @fix_scores = scores
+        @fix_max = [scores.values.max || 0.0, 1.0].max
+        @blast_radius = filter_blast(Bugspots.blast_radius(events))
+        source_files = current_source_files
+        coverage = resultset ? CoverageData.load(resultset, root: @repo) : nil
+        has_coverage = coverage && !coverage.empty?
+        covered_files = if has_coverage
+                          filter_paths(coverage.covered_files(root: @repo).to_h { |rel| [rel, true] }).keys.select do |rel|
+                            source_file?(rel, parser: "tree_sitter")
+                          end
+                        else
+                          []
+                        end
+        gaps = has_coverage ? filter_paths(CoverageGap.from_coverage(coverage, root: @repo)) : {}
+        if DecomplexRisk.tree_sitter?
+          static_gaps = filter_paths(CoverageGap.from_static(source_files - covered_files, root: @repo))
+          gaps = static_gaps.merge(gaps)
+        end
+        @gaps = gaps
+        @have_cov = has_coverage || !gaps.empty?
+        @coverage_mode = coverage_mode(coverage, source_files, gaps)
+      end
       @ranked, @unmeasured = Hotspot.rank(scores, gaps)
       @method_gaps =
         if has_coverage || DecomplexRisk.tree_sitter?
