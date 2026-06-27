@@ -334,6 +334,8 @@ module NilKill
     def self.resolve_struct_declaration_classes!(evidence)
       return unless evidence && evidence["facts"] && evidence["facts"]["struct_declarations"] && evidence["facts"]["type_definitions"]
 
+      normalize_path = ->(p) { p.to_s.empty? ? "" : File.expand_path(p.to_s, NilKill::ROOT) }
+
       # Build a map of [path, unqualified_class] -> fully_qualified_class
       fq_map = {}
       Array(evidence["facts"]["type_definitions"]).each do |d|
@@ -341,28 +343,29 @@ module NilKill
         owner = d["owner"].to_s
         next if owner.empty?
         unqualified = owner.split("::").last
-        fq_map[[d["path"].to_s, unqualified]] = owner
+        fq_map[[normalize_path.call(d["path"]), unqualified]] = owner
       end
 
       # Pre-populate fallback path -> owners lookup
       by_path = Hash.new { |h, k| h[k] = Set.new }
       Array(evidence["facts"]["type_definitions"]).each do |d|
         owner = d["owner"].to_s
-        by_path[d["path"].to_s].add(owner) unless owner.empty?
+        by_path[normalize_path.call(d["path"])].add(owner) unless owner.empty?
       end
       Array(evidence["methods"]).each do |m|
         owner = m["owner"].to_s
-        by_path[m["path"].to_s].add(owner) unless owner.empty?
+        by_path[normalize_path.call(m["path"])].add(owner) unless owner.empty?
       end
 
       Array(evidence["facts"]["struct_declarations"]).each do |decl|
         decl_class = decl["class"].to_s
         next if decl_class.include?("::") # already qualified
 
-        fq = fq_map[[decl["path"].to_s, decl_class]]
+        decl_path = normalize_path.call(decl["path"])
+        fq = fq_map[[decl_path, decl_class]]
         unless fq
-          # Try fallback: find any owner in by_path[decl["path"]] that ends with "::decl_class"
-          candidates = by_path[decl["path"].to_s].select { |owner| owner.end_with?("::#{decl_class}") }
+          # Try fallback: find any owner in by_path[decl_path] that ends with "::decl_class"
+          candidates = by_path[decl_path].select { |owner| owner.end_with?("::#{decl_class}") }
           fq = candidates.first if candidates.size == 1
         end
 
