@@ -290,3 +290,99 @@ func writeTempFile(t *testing.T, dir, filename, content string) {
 		t.Fatalf("failed to write temp file: %v", err)
 	}
 }
+
+func TestProcessMutationFacts(t *testing.T) {
+	tmp, err := os.MkdirTemp("", "boobytrap-mutation-test")
+	if err != nil {
+		t.Fatalf("failed to create temp dir: %v", err)
+	}
+	defer os.RemoveAll(tmp)
+
+	content := `{
+		"schema": "mutant-facts/v1",
+		"subjects": [
+			{ "file": "src/x.rb", "method": "Owner#call", "kill_rate": "82.4%", "gate_status": "advisory" },
+			{ "file": "src/y.rb", "method": "User#name", "kill_rate": 0.5, "gate_status": "hard" }
+		]
+	}`
+	writeTempFile(t, tmp, "mutation.json", content)
+
+	out, err := processMutationFacts(filepath.Join(tmp, "mutation.json"), tmp)
+	if err != nil {
+		t.Fatalf("processMutationFacts failed: %v", err)
+	}
+
+	if !out.Active {
+		t.Errorf("expected Active to be true")
+	}
+	if len(out.Subjects) != 2 {
+		t.Fatalf("expected 2 subjects, got %d", len(out.Subjects))
+	}
+
+	if out.Subjects[0].File != "src/x.rb" || out.Subjects[0].Method != "Owner#call" || *out.Subjects[0].KillRate != 82.4 || out.Subjects[0].GateStatus != "advisory" {
+		t.Errorf("subject 0 mismatch: %+v", out.Subjects[0])
+	}
+	if out.Subjects[1].File != "src/y.rb" || out.Subjects[1].Method != "User#name" || *out.Subjects[1].KillRate != 50.0 || out.Subjects[1].GateStatus != "hard" {
+		t.Errorf("subject 1 mismatch: %+v", out.Subjects[1])
+	}
+}
+
+func TestProcessTestExposureFacts(t *testing.T) {
+	tmp, err := os.MkdirTemp("", "boobytrap-exposure-test")
+	if err != nil {
+		t.Fatalf("failed to create temp dir: %v", err)
+	}
+	defer os.RemoveAll(tmp)
+
+	content := `{
+		"hits": [
+			{ "file": "src/a.rb", "function": "foo", "id": "t1", "type": "spec", "mutation": "killed", "line": 10 }
+		],
+		"files": [
+			{
+				"file": "src/b.rb",
+				"functions": [
+					{
+						"name": "bar",
+						"tests": [
+							{ "id": "t2", "type": "spec", "mutation": "survived" }
+						]
+					}
+				],
+				"lines": [
+					{
+						"line": 20,
+						"tests": [
+							{ "id": "t3", "type": "spec", "mutation": "none" }
+						]
+					}
+				],
+				"branches": [
+					{
+						"branch_id": "b1",
+						"line": 30,
+						"tests": [
+							{ "id": "t4", "type": "spec", "mutation": "killed" }
+						]
+					}
+				]
+			}
+		]
+	}`
+	writeTempFile(t, tmp, "exposure.json", content)
+
+	out, err := processTestExposureFacts(filepath.Join(tmp, "exposure.json"), tmp)
+	if err != nil {
+		t.Fatalf("processTestExposureFacts failed: %v", err)
+	}
+
+	if len(out.MethodHits) != 2 {
+		t.Errorf("expected 2 method hits, got %d", len(out.MethodHits))
+	}
+	if len(out.LineHits) != 2 {
+		t.Errorf("expected 2 line hits, got %d", len(out.LineHits))
+	}
+	if len(out.BranchHits) != 2 {
+		t.Errorf("expected 2 branch hits, got %d", len(out.BranchHits))
+	}
+}

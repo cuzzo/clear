@@ -169,6 +169,35 @@ module Boobytrap
       )
     end
 
+    def load_from_data(payload, label:)
+      return empty if payload.nil?
+
+      index = empty(active: true, label: label)
+      (payload["method_hits"] || []).each do |entry|
+        hit = hit_from_payload(entry["hit"])
+        add_method_hit!(index, entry["file"], entry["method"], hit)
+      end
+      (payload["line_hits"] || []).each do |entry|
+        hit = hit_from_payload(entry["hit"])
+        add_line_hit!(index, entry["file"], entry["line"], hit)
+      end
+      (payload["branch_hits"] || []).each do |entry|
+        hit = hit_from_payload(entry["hit"])
+        add_branch_hit!(index, entry["file"], entry["branch_id"], hit)
+      end
+      index
+    end
+
+    def hit_from_payload(entry)
+      Hit.new(
+        test_id: entry["test_id"].to_s,
+        test_type: entry["test_type"].to_s,
+        mutation_status: entry["mutation_status"].to_s,
+        line: entry["line"].to_i,
+        branch_id: entry["branch_id"].to_s
+      )
+    end
+
     def load(path, root:)
       return empty unless path && ::File.file?(path)
 

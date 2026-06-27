@@ -24,6 +24,53 @@ type Output struct {
 	Gaps               map[string]FileGap      `json:"gaps,omitempty"`
 	DecomplexScores    []DecomplexScoreEntry   `json:"decomplex_scores,omitempty"`
 	StateBranchDensity []StateBranchDensityRow `json:"state_branch_density,omitempty"`
+	MutationFacts      *MutationFactsOutput    `json:"mutation_facts,omitempty"`
+	TestExposure       *TestExposurePayload    `json:"test_exposure,omitempty"`
+}
+
+type MutationFactsOutput struct {
+	Active   bool           `json:"active"`
+	Subjects []MutationFact `json:"subjects"`
+}
+
+type MutationFact struct {
+	File       string   `json:"file"`
+	Method     string   `json:"method"`
+	KillRate   *float64 `json:"kill_rate"`
+	GateStatus string   `json:"gate_status"`
+}
+
+type TestExposurePayload struct {
+	MethodHits []MethodHitEntry `json:"method_hits,omitempty"`
+	LineHits   []LineHitEntry   `json:"line_hits,omitempty"`
+	BranchHits []BranchHitEntry `json:"branch_hits,omitempty"`
+}
+
+type MethodHitEntry struct {
+	File   string `json:"file"`
+	Method string `json:"method"`
+	Hit    Hit    `json:"hit"`
+}
+
+type LineHitEntry struct {
+	File string `json:"file"`
+	Line int    `json:"line"`
+	Hit  Hit    `json:"hit"`
+}
+
+type BranchHitEntry struct {
+	File     string `json:"file"`
+	BranchID string `json:"branch_id"`
+	Line     int    `json:"line"`
+	Hit      Hit    `json:"hit"`
+}
+
+type Hit struct {
+	TestID         string `json:"test_id"`
+	TestType       string `json:"test_type"`
+	MutationStatus string `json:"mutation_status"`
+	Line           int    `json:"line"`
+	BranchID       string `json:"branch_id"`
 }
 
 type DecomplexScoreEntry struct {
@@ -83,6 +130,8 @@ func main() {
 	repoPath := flag.String("repo", "", "Path to repository")
 	covPath := flag.String("coverage", "", "Path to coverage JSON")
 	decomplexFactsPath := flag.String("decomplex-facts", "", "Path to decomplex facts JSON")
+	mutationPath := flag.String("mutation", "", "Path to mutation facts JSON")
+	testExposurePath := flag.String("test-exposure", "", "Path to test exposure facts JSON")
 	fixRePat := flag.String("fix-re", `\b(fix(es|ed)?|bug\s*fix|close[sd]?)\b`, "Regex for fix commits")
 	flag.Parse()
 
@@ -134,6 +183,26 @@ func main() {
 		}
 	}
 
+	// 4. Process Mutation facts if supplied
+	var mutationOutput *MutationFactsOutput
+	if *mutationPath != "" {
+		mutationOutput, err = processMutationFacts(*mutationPath, absRepo)
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "Error processing mutation facts: %v\n", err)
+			os.Exit(1)
+		}
+	}
+
+	// 5. Process Test Exposure facts if supplied
+	var testExposureOutput *TestExposurePayload
+	if *testExposurePath != "" {
+		testExposureOutput, err = processTestExposureFacts(*testExposurePath, absRepo)
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "Error processing test exposure facts: %v\n", err)
+			os.Exit(1)
+		}
+	}
+
 	out := Output{
 		FixCommits:         len(events),
 		FixScores:          scores,
@@ -142,6 +211,8 @@ func main() {
 		Gaps:               gaps,
 		DecomplexScores:    decomplexScores,
 		StateBranchDensity: densityRows,
+		MutationFacts:      mutationOutput,
+		TestExposure:       testExposureOutput,
 	}
 
 	enc := json.NewEncoder(os.Stdout)
@@ -657,4 +728,277 @@ func processDecomplexFacts(factsPath string, absRepo string) ([]DecomplexScoreEn
 	})
 
 	return decomplexScores, densityRows, nil
+}
+
+func parseKillRate(val interface{}) *float64 {
+	if val == nil {
+		return nil
+	}
+	text := fmt.Sprintf("%v", val)
+	text = strings.TrimSuffix(text, "%")
+	rate, err := strconv.ParseFloat(text, 64)
+	if err != nil {
+		return nil
+	}
+	if rate <= 1.0 {
+		rate *= 100.0
+	}
+	return &rate
+}
+
+func normalizeFile(file string, repoRoot string) string {
+	if file == "" {
+		return ""
+	}
+	var abs string
+	if filepath.IsAbs(file) {
+		abs = filepath.Clean(file)
+	} else {
+		abs = filepath.Join(repoRoot, file)
+	}
+	realFile, err := filepath.EvalSymlinks(abs)
+	if err != nil {
+		realFile = abs
+	}
+	return cleanFile(relpath(realFile, repoRoot))
+}
+
+func cleanFile(file string) string {
+	cleaned := strings.ReplaceAll(file, "\\", "/")
+	cleaned = strings.TrimPrefix(cleaned, "./")
+	return cleaned
+}
+
+func processMutationFacts(path string, absRepo string) (*MutationFactsOutput, error) {
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return nil, err
+	}
+	var raw map[string]interface{}
+	if err := json.Unmarshal(data, &raw); err != nil {
+		return nil, err
+	}
+	subjectsVal, ok := raw["subjects"]
+	if !ok {
+		subjectsVal = raw["subjects"]
+	}
+	subjectsArr, ok := subjectsVal.([]interface{})
+	if !ok {
+		return &MutationFactsOutput{Active: true, Subjects: []MutationFact{}}, nil
+	}
+	var subjects []MutationFact
+	for _, itemVal := range subjectsArr {
+		item, ok := itemVal.(map[string]interface{})
+		if !ok {
+			continue
+		}
+		fileStr, _ := item["file"].(string)
+		methodStr, _ := item["method"].(string)
+		gateStr, _ := item["gate_status"].(string)
+		rate := parseKillRate(item["kill_rate"])
+		normFile := normalizeFile(fileStr, absRepo)
+		if normFile == "" || methodStr == "" {
+			continue
+		}
+		subjects = append(subjects, MutationFact{
+			File:       normFile,
+			Method:     methodStr,
+			KillRate:   rate,
+			GateStatus: gateStr,
+		})
+	}
+	return &MutationFactsOutput{Active: true, Subjects: subjects}, nil
+}
+
+func stringVal(item map[string]interface{}, keys ...string) string {
+	for _, k := range keys {
+		if v, ok := item[k]; ok {
+			return fmt.Sprintf("%v", v)
+		}
+	}
+	return ""
+}
+
+func intVal(item map[string]interface{}, keys ...string) int {
+	for _, k := range keys {
+		if v, ok := item[k]; ok {
+			if f, ok := v.(float64); ok {
+				return int(f)
+			}
+			if s, ok := v.(string); ok {
+				if i, err := strconv.Atoi(s); err == nil {
+					return i
+				}
+			}
+		}
+	}
+	return 0
+}
+
+func hitFromMap(entry map[string]interface{}, line int, branchID string) Hit {
+	testID := stringVal(entry, "test_id", "id")
+	testType := stringVal(entry, "test_type", "type")
+	mutStatus := stringVal(entry, "mutation_status", "mutant_status", "mutation")
+	entryLine := intVal(entry, "line")
+	if line != 0 {
+		entryLine = line
+	}
+	entryBranchID := stringVal(entry, "branch_id")
+	if branchID != "" {
+		entryBranchID = branchID
+	}
+	return Hit{
+		TestID:         testID,
+		TestType:       testType,
+		MutationStatus: mutStatus,
+		Line:           entryLine,
+		BranchID:       entryBranchID,
+	}
+}
+
+func processTestExposureFacts(path string, absRepo string) (*TestExposurePayload, error) {
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return nil, err
+	}
+	var raw map[string]interface{}
+	if err := json.Unmarshal(data, &raw); err != nil {
+		return nil, err
+	}
+	payload := &TestExposurePayload{}
+	if hitsVal, ok := raw["hits"]; ok {
+		if hitsArr, ok := hitsVal.([]interface{}); ok {
+			for _, entryVal := range hitsArr {
+				entry, ok := entryVal.(map[string]interface{})
+				if !ok {
+					continue
+				}
+				fileStr := stringVal(entry, "file")
+				normFile := normalizeFile(fileStr, absRepo)
+				if normFile == "" {
+					continue
+				}
+				method := stringVal(entry, "function", "method", "defn")
+				hit := hitFromMap(entry, 0, "")
+				if method != "" {
+					payload.MethodHits = append(payload.MethodHits, MethodHitEntry{
+						File:   normFile,
+						Method: method,
+						Hit:    hit,
+					})
+				}
+				if hit.Line > 0 {
+					payload.LineHits = append(payload.LineHits, LineHitEntry{
+						File: normFile,
+						Line: hit.Line,
+						Hit:  hit,
+					})
+				}
+				if hit.BranchID != "" || hit.Line > 0 {
+					payload.BranchHits = append(payload.BranchHits, BranchHitEntry{
+						File:     normFile,
+						BranchID: hit.BranchID,
+						Line:     hit.Line,
+						Hit:      hit,
+					})
+				}
+			}
+		}
+	}
+	if filesVal, ok := raw["files"]; ok {
+		if filesArr, ok := filesVal.([]interface{}); ok {
+			for _, fileEntryVal := range filesArr {
+				fileEntry, ok := fileEntryVal.(map[string]interface{})
+				if !ok {
+					continue
+				}
+				fileStr := stringVal(fileEntry, "file")
+				normFile := normalizeFile(fileStr, absRepo)
+				if normFile == "" {
+					continue
+				}
+				if fnsVal, ok := fileEntry["functions"]; ok {
+					if fnsArr, ok := fnsVal.([]interface{}); ok {
+						for _, fnVal := range fnsArr {
+							fn, ok := fnVal.(map[string]interface{})
+							if !ok {
+								continue
+							}
+							method := stringVal(fn, "name", "method", "function")
+							if method == "" {
+								continue
+							}
+							if testsVal, ok := fn["tests"]; ok {
+								if testsArr, ok := testsVal.([]interface{}); ok {
+									for _, testVal := range testsArr {
+										if test, ok := testVal.(map[string]interface{}); ok {
+											payload.MethodHits = append(payload.MethodHits, MethodHitEntry{
+												File:   normFile,
+												Method: method,
+												Hit:    hitFromMap(test, 0, ""),
+											})
+										}
+									}
+								}
+							}
+						}
+					}
+				}
+				if linesVal, ok := fileEntry["lines"]; ok {
+					if linesArr, ok := linesVal.([]interface{}); ok {
+						for _, lineEntryVal := range linesArr {
+							lineEntry, ok := lineEntryVal.(map[string]interface{})
+							if !ok {
+								continue
+							}
+							line := intVal(lineEntry, "line")
+							if line <= 0 {
+								continue
+							}
+							if testsVal, ok := lineEntry["tests"]; ok {
+								if testsArr, ok := testsVal.([]interface{}); ok {
+									for _, testVal := range testsArr {
+										if test, ok := testVal.(map[string]interface{}); ok {
+											payload.LineHits = append(payload.LineHits, LineHitEntry{
+												File: normFile,
+												Line: line,
+												Hit:  hitFromMap(test, line, ""),
+											})
+										}
+									}
+								}
+							}
+						}
+					}
+				}
+				if branchesVal, ok := fileEntry["branches"]; ok {
+					if branchesArr, ok := branchesVal.([]interface{}); ok {
+						for _, branchEntryVal := range branchesArr {
+							branchEntry, ok := branchEntryVal.(map[string]interface{})
+							if !ok {
+								continue
+							}
+							branchID := stringVal(branchEntry, "branch_id", "id")
+							line := intVal(branchEntry, "line")
+							if testsVal, ok := branchEntry["tests"]; ok {
+								if testsArr, ok := testsVal.([]interface{}); ok {
+									for _, testVal := range testsArr {
+										if test, ok := testVal.(map[string]interface{}); ok {
+											payload.BranchHits = append(payload.BranchHits, BranchHitEntry{
+												File:     normFile,
+												BranchID: branchID,
+												Line:     line,
+												Hit:      hitFromMap(test, line, branchID),
+											})
+										}
+									}
+								}
+							}
+						}
+					}
+				}
+			}
+		}
+	}
+	return payload, nil
 }

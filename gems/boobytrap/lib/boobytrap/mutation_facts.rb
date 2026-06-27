@@ -89,6 +89,27 @@ module Boobytrap
       Index.new(facts: {}, active: active, label: label)
     end
 
+    def load_from_data(payload, label:)
+      return empty if payload.nil? || !payload["active"]
+
+      subjects = Array(payload["subjects"])
+      facts = {}
+      subjects.each do |subject|
+        fact = Fact.new(
+          file: subject["file"],
+          method: subject["method"],
+          kill_rate: subject["kill_rate"],
+          gate_status: subject["gate_status"]
+        )
+        method_aliases(fact.method).each do |method|
+          facts[[fact.file, method]] ||= fact
+        end
+        facts[[fact.file, FILE_DEFAULT]] ||= fact if wildcard_method?(fact.method)
+      end
+      add_global_unique_methods!(facts)
+      Index.new(facts: facts, active: true, label: label)
+    end
+
     def load(path, root:)
       return empty unless path && ::File.file?(path)
 

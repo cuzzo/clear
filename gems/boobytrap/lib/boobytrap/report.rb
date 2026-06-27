@@ -106,8 +106,8 @@ module Boobytrap
       @only = Array(only).map { |p| p.sub(%r{\A\./}, "").chomp("/") }.reject(&:empty?)
       @files = normalize_file_scope(files)
       @exclude = Array(exclude)
-      @mutation_facts = MutationFacts.load(mutation, root: @repo)
-      @test_exposure_facts = TestExposureFacts.load(test_exposure, root: @repo)
+      @mutation_facts = nil
+      @test_exposure_facts = nil
       @lineage = LineageRisk.load(
         lineage,
         repo: @repo,
@@ -126,6 +126,8 @@ module Boobytrap
         cmd += ["--coverage", resultset] if resultset
         cmd += ["--fix-re", fix_re.source] if fix_re
         cmd += ["--decomplex-facts", decomplex_facts] if decomplex_facts
+        cmd += ["--mutation", mutation] if mutation
+        cmd += ["--test-exposure", test_exposure] if test_exposure
 
         begin
           go_out = IO.popen(cmd, &:read)
@@ -219,6 +221,18 @@ module Boobytrap
               end
             end
 
+            @mutation_facts = if data["mutation_facts"]
+                                MutationFacts.load_from_data(data["mutation_facts"], label: ::File.basename(mutation))
+                              else
+                                MutationFacts.empty
+                              end
+
+            @test_exposure_facts = if data["test_exposure"]
+                                     TestExposureFacts.load_from_data(data["test_exposure"], label: ::File.basename(test_exposure))
+                                   else
+                                     TestExposureFacts.empty
+                                   end
+
             @gaps = gaps
             @have_cov = has_coverage || !gaps.empty?
             @coverage_mode = coverage_mode(coverage, source_files, gaps)
@@ -230,6 +244,8 @@ module Boobytrap
       end
 
       if !go_success
+        @mutation_facts = MutationFacts.load(mutation, root: @repo)
+        @test_exposure_facts = TestExposureFacts.load(test_exposure, root: @repo)
         events = Bugspots.events_from_git(@repo, fix_re: fix_re)
         @fix_commits = events.size
         scores = filter_paths(Bugspots.score(events))
