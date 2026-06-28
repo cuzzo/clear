@@ -197,14 +197,18 @@ begin
   args = ["report", "--repo=#{repo}", "--output=#{File.join(out_dir, "boobytrap.md")}", "--json=#{File.join(out_dir, "boobytrap.sarif")}", "--top=#{options[:top]}"]
   args << "--coverage=#{coverage}" if coverage && !coverage.empty?
   options[:exclude].each { |e| args << "--exclude=#{e}" }
-  args << "--files=#{rel_files.join(",")}" if rel_files && !rel_files.empty?
-  system(boobytrap_bin, *args)
+  unless system(boobytrap_bin, *args)
+    abort "Failed to execute boobytrap: #{boobytrap_bin} #{args.join(' ')}"
+  end
 
   # Share Boobytrap's computed churn output with SlopCop to avoid re-deriving
   helper_args = ["--repo=#{repo}"]
   helper_args << "--coverage=#{coverage}" if coverage && !coverage.empty?
   out, status = Open3.capture2(boobytrap_bin, *helper_args)
-  fix_scores = status.success? ? (JSON.parse(out)["fix_scores"] || {}) : {}
+  unless status.success?
+    abort "Failed to execute boobytrap helper: #{boobytrap_bin} #{helper_args.join(' ')}\nOutput:\n#{out}"
+  end
+  fix_scores = (JSON.parse(out)["fix_scores"] || {})
 
   require "tempfile"
   churn_temp = Tempfile.new(["boobytrap-churn", ".json"])
