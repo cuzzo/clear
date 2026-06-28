@@ -47,7 +47,7 @@ module NilKill
       return true unless z3_available?
       constraints = collect_constraints(actions)
       return true if constraints.empty?
-      sat?(constraints)
+      sat?(constraints, actions)
     end
 
     # A3: For methods never observed in the corpus, infer param types from
@@ -607,8 +607,9 @@ module NilKill
 
     # ---------- Z3 SMT2 ----------
 
-    def sat?(constraints)
-      smt2 = build_smt2(constraints)
+    def sat?(constraints, actions = [])
+      return true unless z3_available?
+      smt2 = build_smt2(constraints, actions)
       out, _err, _status = Open3.capture3("z3 -smt2 -in", stdin_data: smt2)
       # Returns true (SAT = consistent) unless Z3 explicitly says "unsat"
       !out.strip.start_with?("unsat")
@@ -616,6 +617,243 @@ module NilKill
       true # z3 not on PATH
     rescue Errno::ETIMEDOUT, Timeout::Error
       true # z3 timed out -- assume consistent
+    end
+
+    def clean_name(str)
+      str.to_s.gsub('::', '__').gsub('@', '_AT_').gsub('?', '_Q_').gsub('!', '_E_').gsub(/[^\w]/, '_')
+    end
+
+    def param_var(class_name, method_name, param_name)
+      "v_p__#{clean_name(class_name)}__#{clean_name(method_name)}__#{clean_name(param_name)}"
+    end
+
+    def return_var(class_name, method_name, kind)
+      "v_r__#{clean_name(class_name)}__#{clean_name(method_name)}__#{clean_name(kind)}"
+    end
+
+    def field_var(class_name, field_name)
+      "v_f__#{clean_name(class_name)}__#{clean_name(field_name)}"
+    end
+
+    def ivar_var(class_name, ivar_name)
+      "v_i__#{clean_name(class_name)}__#{clean_name(ivar_name)}"
+    end
+
+    def method_rec_by_location
+      @method_rec_by_location ||= begin
+        h = {}
+        [@evidence.dig("facts", "existing_sigs"), @evidence.dig("facts", "unsigned_methods")].compact.flatten.each do |rec|
+          h["#{rec["path"]}:#{rec["line"]}"] = rec
+        end
+        h
+      end
+    end
+
+    def populate_all_types
+      # 1. Registration from existing signatures
+      [@evidence.dig("facts", "existing_sigs"), @evidence.dig("facts", "unsigned_methods")].compact.flatten.each do |rec|
+        Array(rec["params"]).each do |p|
+          type_id(p["type"].to_s) if p["type"]
+        end
+        if rec["sig"]
+          ret = extract_return_type(rec["sig"].to_s)
+          type_id(ret) if ret
+        end
+      end
+
+      # 2. Struct fields
+      Array(@evidence.dig("facts", "struct_declarations")).each do |decl|
+        Hash(decl["field_types"]).each_value do |t|
+          type_id(t.to_s)
+        end
+      end
+
+      # 3. Param origins / Return origins
+      Array(@evidence.dig("facts", "param_origins")).each do |p|
+        type_id(p["type"].to_s) if p["type"]
+      end
+      Array(@evidence.dig("facts", "return_origins")).each do |r|
+        type_id(r["candidate_type"].to_s) if r["candidate_type"]
+        Array(r["sources"]).each do |src|
+          type_id(src["type"].to_s) if src["type"]
+        end
+      end
+
+      type_id("NilClass")
+      type_id("T.untyped")
+    end
+
+    def declare_all_variables(lines)
+      @declared_vars = Set.new
+
+      # 1. Methods (Existing / Unsigned)
+      [@evidence.dig("facts", "existing_sigs"), @evidence.dig("facts", "unsigned_methods")].compact.flatten.each do |rec|
+        class_name = rec["class"].to_s
+        method_name = rec["method"].to_s
+        kind = rec["kind"].to_s
+
+        declare_var(lines, return_var(class_name, method_name, kind))
+
+        Array(rec["params"]).each do |param|
+          p_name = param["name"].to_s
+          declare_var(lines, param_var(class_name, method_name, p_name))
+        end
+      end
+
+      # 2. Struct fields
+      Array(@evidence.dig("facts", "struct_declarations")).each do |decl|
+        class_name = decl["class"].to_s
+        Array(decl["fields"]).each do |field|
+          declare_var(lines, field_var(class_name, field.to_s))
+        end
+      end
+
+      # 3. Ivars
+      Array(@evidence.dig("facts", "ivar_param_origins")).each do |key, _|
+        class_name, ivar_name = key.split("\0", 2)
+        declare_var(lines, ivar_var(class_name, ivar_name))
+      end
+    end
+
+    def declare_var(lines, var_name)
+      return if @declared_vars.include?(var_name)
+      @declared_vars.add(var_name)
+      lines << "(declare-const #{var_name} Int)"
+      lines << "(assert (and (>= #{var_name} 0) (< #{var_name} #{@type_ids.size})))"
+    end
+
+    def assert_existing_types(lines)
+      [@evidence.dig("facts", "existing_sigs"), @evidence.dig("facts", "unsigned_methods")].compact.flatten.each do |rec|
+        class_name = rec["class"].to_s
+        method_name = rec["method"].to_s
+        kind = rec["kind"].to_s
+
+        # 1. Param signature types
+        Array(rec["params"]).each do |param|
+          p_name = param["name"].to_s
+          type_str = param["type"].to_s
+          if !type_str.empty? && type_str != "T.untyped"
+            t_id = type_id(type_str)
+            p_var = param_var(class_name, method_name, p_name)
+            lines << "(assert (= #{p_var} #{t_id}))" if @declared_vars.include?(p_var)
+          end
+        end
+
+        # 2. Return signature type
+        if rec["sig"]
+          ret = extract_return_type(rec["sig"].to_s)
+          if ret && !ret.empty? && ret != "T.untyped" && ret != "void"
+            t_id = type_id(ret)
+            ret_var = return_var(class_name, method_name, kind)
+            lines << "(assert (= #{ret_var} #{t_id}))" if @declared_vars.include?(ret_var)
+          end
+        end
+      end
+
+      # 3. Struct field static/RBI types
+      Array(@evidence.dig("facts", "struct_declarations")).each do |decl|
+        class_name = decl["class"].to_s
+        Hash(decl["field_types"]).each do |field, type|
+          type_str = type.to_s
+          if !type_str.empty? && type_str != "T.untyped"
+            t_id = type_id(type_str)
+            f_var = field_var(class_name, field.to_s)
+            lines << "(assert (= #{f_var} #{t_id}))" if @declared_vars.include?(f_var)
+          end
+        end
+      end
+    end
+
+    def build_method_param_variable_map
+      @method_param_vars = Hash.new { |h, k| h[k] = [] }
+
+      [@evidence.dig("facts", "existing_sigs"), @evidence.dig("facts", "unsigned_methods")].compact.flatten.each do |rec|
+        class_name = rec["class"].to_s
+        method_name = rec["method"].to_s
+
+        Array(rec["params"]).each_with_index do |param, idx|
+          p_name = param["name"].to_s
+          p_var = param_var(class_name, method_name, p_name)
+          next unless @declared_vars.include?(p_var)
+
+          # Index by keyword (name)
+          @method_param_vars[[method_name, p_name]] << p_var
+          # Index by positional (index as string)
+          @method_param_vars[[method_name, idx.to_s]] << p_var
+        end
+      end
+    end
+
+    def assert_data_flow_constraints(lines)
+      build_method_param_variable_map
+
+      # 1. Ivar assignments from params
+      Array(@evidence.dig("facts", "ivar_param_origins")).each do |key, params|
+        class_name, ivar_name = key.split("\0", 2)
+        ivar_var_name = ivar_var(class_name, ivar_name)
+        next unless @declared_vars.include?(ivar_var_name)
+
+        Array(params).each do |p_name|
+          p_var = param_var(class_name, "initialize", p_name.to_s)
+          if @declared_vars.include?(p_var)
+            lines << "(assert (is-sub #{p_var} #{ivar_var_name}))"
+          end
+        end
+      end
+
+      # 2. Return origins
+      Array(@evidence.dig("facts", "return_origins")).each do |r|
+        class_name = r["class"].to_s
+        method_name = r["method"].to_s
+        kind = r["kind"].to_s
+        ret_var = return_var(class_name, method_name, kind)
+        next unless @declared_vars.include?(ret_var)
+
+        Array(r["sources"]).each do |src|
+          code = src["code"].to_s
+          type = src["type"].to_s
+
+          if code.start_with?("@")
+            ivar_var_name = ivar_var(class_name, code)
+            if @declared_vars.include?(ivar_var_name)
+              lines << "(assert (is-sub #{ivar_var_name} #{ret_var}))"
+            end
+          elsif !type.empty? && type != "T.untyped"
+            t_id = type_id(type)
+            lines << "(assert (is-sub #{t_id} #{ret_var}))"
+          end
+        end
+      end
+
+      # 3. Param origins (calls)
+      Array(@evidence.dig("facts", "param_origins")).each do |p|
+        callee = p["callee"].to_s
+        slot = p["slot"].to_s
+        enclosing_scope = p["enclosing_scope"].to_s
+        source_method = p["source_method"].to_s
+        code = p["code"].to_s
+        type = p["type"].to_s
+
+        candidates = @method_param_vars[[callee, slot]]
+        next if candidates.empty?
+
+        candidates.each do |p_var|
+          if code.start_with?("@")
+            ivar_var_name = ivar_var(enclosing_scope, code)
+            if @declared_vars.include?(ivar_var_name)
+              lines << "(assert (is-sub #{ivar_var_name} #{p_var}))"
+            end
+          elsif !type.empty? && type != "T.untyped"
+            t_id = type_id(type)
+            lines << "(assert (is-sub #{t_id} #{p_var}))"
+          elsif !code.empty? && code =~ /\A[a-z_][a-z0-9_]*\z/
+            caller_p_var = param_var(enclosing_scope, source_method, code)
+            if @declared_vars.include?(caller_p_var)
+              lines << "(assert (is-sub #{caller_p_var} #{p_var}))"
+            end
+          end
+        end
+      end
     end
 
     def build_subtype_cases
@@ -722,17 +960,52 @@ module NilKill
       subtype_cases.uniq
     end
 
-    def build_smt2(constraints)
+    def build_smt2(constraints, actions = [])
       lines = []
       lines << "(set-logic QF_LIA)"
 
-      # Build subtype cases before declaring constants (need full type_ids)
+      populate_all_types
+
       subtype_cases = build_subtype_cases
 
       lines << "; subtype predicate over type integer IDs"
       lines << "(define-fun is-sub ((a Int) (b Int)) Bool"
       lines << "  (or #{subtype_cases.join(" ")}))"
 
+      declare_all_variables(lines)
+      assert_existing_types(lines)
+      assert_data_flow_constraints(lines)
+
+      # 1. Assert proposed changes from actions as constraints
+      actions.each do |action|
+        proposed = action.dig("data", "type").to_s
+        next unless proposed && proposed != "T.untyped"
+
+        rec = method_rec_by_location["#{action["path"]}:#{action["line"]}"]
+        next unless rec
+
+        class_name = rec["class"].to_s
+        method_name = rec["method"].to_s
+        kind = rec["kind"].to_s
+
+        case action["kind"]
+        when "fix_sig_return"
+          ret_var = return_var(class_name, method_name, kind)
+          if @declared_vars.include?(ret_var)
+            t_id = type_id(proposed)
+            lines << "(assert (= #{ret_var} #{t_id}))"
+          end
+        when "fix_sig_param", "narrow_generic_param"
+          p_name = action.dig("data", "name").to_s
+          p_var = param_var(class_name, method_name, p_name)
+          if @declared_vars.include?(p_var)
+            t_id = type_id(proposed)
+            lines << "(assert (= #{p_var} #{t_id}))"
+          end
+        end
+      end
+
+      # 2. Original constraints
       constraints.each do |proposed_id, param_id|
         # Assertion: proposed_return IS a subtype of param_type.
         # If it is NOT, Z3 returns UNSAT.

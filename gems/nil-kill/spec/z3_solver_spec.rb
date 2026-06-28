@@ -261,6 +261,172 @@ RSpec.describe NilKill::Z3Solver do
         expect(solver.send(:sat?, [[17, 15]])).to eq(false)
       end
     end
+
+    it "propagates data flow and assignment constraints transitively through Z3" do
+      Dir.mktmpdir("nil-kill-z3", File.join(NilKill::ROOT, "tmp")) do |dir|
+        path = File.join(dir, "flow.rb")
+        File.write(path, <<~RUBY)
+          class FlowExample
+            def initialize(val)
+              @ivar = val
+            end
+            def read_val
+              @ivar
+            end
+            def callee(arg)
+              callee_target(arg)
+            end
+            def callee_target(x)
+            end
+          end
+        RUBY
+        rel = Pathname.new(path).relative_path_from(Pathname.new(NilKill::ROOT)).to_s
+
+        evidence = {
+          "facts" => {
+            "existing_sigs" => [
+              {
+                "path" => rel,
+                "line" => 2,
+                "class" => "FlowExample",
+                "method" => "initialize",
+                "kind" => "instance",
+                "params" => [{ "name" => "val", "type" => "T.untyped" }]
+              },
+              {
+                "path" => rel,
+                "line" => 5,
+                "class" => "FlowExample",
+                "method" => "read_val",
+                "kind" => "instance",
+                "params" => [],
+                "sig" => "sig { params().returns(Integer) }"
+              },
+              {
+                "path" => rel,
+                "line" => 8,
+                "class" => "FlowExample",
+                "method" => "callee",
+                "kind" => "instance",
+                "params" => [{ "name" => "arg", "type" => "T.untyped" }]
+              },
+              {
+                "path" => rel,
+                "line" => 11,
+                "class" => "FlowExample",
+                "method" => "callee_target",
+                "kind" => "instance",
+                "params" => [{ "name" => "x", "type" => "Integer" }],
+                "sig" => "sig { params(x: Integer).void }"
+              }
+            ],
+            "struct_declarations" => [
+              {
+                "class" => "FlowExample",
+                "fields" => ["some_field"],
+                "field_types" => { "some_field" => "String" }
+              }
+            ],
+            "ivar_param_origins" => {
+              "FlowExample\0@ivar" => ["val"]
+            },
+            "return_origins" => [
+              {
+                "class" => "FlowExample",
+                "method" => "read_val",
+                "kind" => "instance",
+                "sources" => [
+                  { "code" => "@ivar", "type" => "" },
+                  { "code" => "123", "type" => "Integer" }
+                ]
+              }
+            ],
+            "param_origins" => [
+              {
+                "callee" => "callee_target",
+                "slot" => "x",
+                "enclosing_scope" => "FlowExample",
+                "source_method" => "callee",
+                "code" => "arg",
+                "type" => ""
+              },
+              {
+                "callee" => "callee_target",
+                "slot" => "x",
+                "enclosing_scope" => "FlowExample",
+                "source_method" => "callee",
+                "code" => "@ivar",
+                "type" => ""
+              },
+              {
+                "callee" => "callee_target",
+                "slot" => "x",
+                "enclosing_scope" => "FlowExample",
+                "source_method" => "callee",
+                "code" => "some_call",
+                "type" => "Integer"
+              }
+            ]
+          }
+        }
+
+        solver = described_class.new(evidence, [path])
+
+        # Test 1: consistent? checks
+        # If we propose "arg" of callee as String:
+        # Since arg is passed to callee_target(x), and x expects Integer,
+        # String is not a subtype of Integer -> should return false (UNSAT)
+        action_inconsistent_param = {
+          "kind" => "fix_sig_param",
+          "path" => rel,
+          "line" => 8,
+          "data" => { "name" => "arg", "type" => "String" }
+        }
+        expect(solver.send(:sat?, [], [action_inconsistent_param])).to eq(false)
+
+        # Proposing "arg" as Integer -> true (SAT)
+        action_consistent_param = {
+          "kind" => "fix_sig_param",
+          "path" => rel,
+          "line" => 8,
+          "data" => { "name" => "arg", "type" => "Integer" }
+        }
+        expect(solver.send(:sat?, [], [action_consistent_param])).to eq(true)
+
+        # Test 2: Ivar and Return propagation
+        # If we propose "val" of initialize as String, and "read_val" return as Integer:
+        # initialize(val: String) -> @ivar (String) -> read_val (returns String).
+        # Asserting read_val returns Integer: String <= Integer -> UNSAT.
+        action_initialize = {
+          "kind" => "fix_sig_param",
+          "path" => rel,
+          "line" => 2,
+          "data" => { "name" => "val", "type" => "String" }
+        }
+        action_read_val = {
+          "kind" => "fix_sig_return",
+          "path" => rel,
+          "line" => 5,
+          "data" => { "type" => "Integer" }
+        }
+        expect(solver.send(:sat?, [], [action_initialize, action_read_val])).to eq(false)
+
+        # If both are Integer -> SAT
+        action_initialize_integer = {
+          "kind" => "fix_sig_param",
+          "path" => rel,
+          "line" => 2,
+          "data" => { "name" => "val", "type" => "Integer" }
+        }
+        action_read_val_integer = {
+          "kind" => "fix_sig_return",
+          "path" => rel,
+          "line" => 5,
+          "data" => { "type" => "Integer" }
+        }
+        expect(solver.send(:sat?, [], [action_initialize_integer, action_read_val_integer])).to eq(true)
+      end
+    end
   end
 
   describe "#infer_unobserved_params" do
