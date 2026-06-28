@@ -1580,7 +1580,6 @@ func (s *stringSlice) Set(value string) error {
 }
 
 func getSourceFilesFromRuby(repo string, only []string, files string, exclude []string) ([]string, error) {
-	rubyBin := "ruby"
 	inlineScript := `
       require "espalier/type_profile"
       require "json"
@@ -1601,8 +1600,14 @@ func getSourceFilesFromRuby(repo string, only []string, files string, exclude []
       end
       puts JSON.dump(res)
 	`
-	cmd := exec.Command(rubyBin, "-e", inlineScript,
-		repo, strings.Join(only, ","), files, strings.Join(exclude, ","))
+	var cmd *exec.Cmd
+	if os.Getenv("BUNDLE_GEMFILE") != "" {
+		cmd = exec.Command("bundle", "exec", "ruby", "-e", inlineScript,
+			repo, strings.Join(only, ","), files, strings.Join(exclude, ","))
+	} else {
+		cmd = exec.Command("ruby", "-e", inlineScript,
+			repo, strings.Join(only, ","), files, strings.Join(exclude, ","))
+	}
 
 	var stdout bytes.Buffer
 	var stderr bytes.Buffer
