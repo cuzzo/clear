@@ -1446,6 +1446,10 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y z3
       - uses: dtolnay/rust-toolchain@stable
+      - uses: actions/setup-go@v5
+        with:
+          go-version: '1.22'
+          cache-dependency-path: gems/boobytrap/go.sum
       - uses: ruby/setup-ruby@v1
         with:
           ruby-version: ${{ env.RUBY_VERSION }}
