@@ -58,7 +58,7 @@ def repo_relative(path, repo)
 end
 
 def default_files(repo, exclude)
-  if Boobytrap::DecomplexRisk.load_decomplex_source_filter
+  if SlopCop::DecomplexRisk.load_decomplex_source_filter
     roots = %w[app lib src].map { |root| File.join(repo, root) }
     return Decomplex::SourceFilter.collect(
       roots,
@@ -73,7 +73,7 @@ end
 
 def filter_files(files, repo, exclude)
   Array(files).select do |file|
-    Boobytrap::DecomplexRisk.source_file?(
+    SlopCop::DecomplexRisk.source_file?(
       file,
       root: repo,
       parser: selected_parser,
