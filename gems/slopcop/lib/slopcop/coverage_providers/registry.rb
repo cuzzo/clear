@@ -1,6 +1,6 @@
 # frozen_string_literal: true
 
-module Boobytrap
+module SlopCop
   module CoverageProviders
     Capability = Struct.new(:language, :line_coverage, :branch_coverage,
                             :native_branch_coverage, :notes,
@@ -26,11 +26,11 @@ module Boobytrap
 
     def load(path, root:)
       resolved, provider = resolve(path, root: root)
-      return Boobytrap::CoverageData.empty_dataset(path) unless resolved && provider
+      return SlopCop::CoverageData.empty_dataset(path) unless resolved && provider
 
       provider.load(resolved, root: root)
     rescue JSON::ParserError, REXML::ParseException, Errno::ENOENT
-      Boobytrap::CoverageData.empty_dataset(path)
+      SlopCop::CoverageData.empty_dataset(path)
     end
 
     def resolve(path, root:)

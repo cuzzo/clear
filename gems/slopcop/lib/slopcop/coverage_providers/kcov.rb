@@ -1,6 +1,6 @@
 # frozen_string_literal: true
 
-module Boobytrap
+module SlopCop
   module CoverageProviders
     module KCov
       DIRECTORY_CANDIDATES = %w[
@@ -54,4 +54,4 @@ module Boobytrap
   end
 end
 
-Boobytrap::CoverageProviders.register(Boobytrap::CoverageProviders::KCov)
+SlopCop::CoverageProviders.register(SlopCop::CoverageProviders::KCov)

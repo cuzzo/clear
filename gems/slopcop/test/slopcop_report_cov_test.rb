@@ -13,7 +13,7 @@ class SlopcopReportCovTest < Minitest::Test
     Dir.mktmpdir do |dir|
       resultset = "#{dir}/rs.json"
       File.write(resultset, "{}")
-      Boobytrap::CoverageData.stub :load, {} do
+      SlopCop::CoverageData.stub :load, {} do
         assert_equal({}, SlopCop::Classifier.merged_branches(resultset, "a.rb", root: dir))
       end
     end
@@ -106,7 +106,7 @@ class SlopcopReportCovTest < Minitest::Test
   end
 
   def test_classifier_coverage_for_rescue
-    Boobytrap::CoverageData.stub :load, ->(*) { raise StandardError, "load error" } do
+    SlopCop::CoverageData.stub :load, ->(*) { raise StandardError, "load error" } do
       assert_nil SlopCop::Classifier.coverage_for("/some/file", "a.rb")
     end
   end
@@ -184,7 +184,7 @@ class SlopcopReportCovTest < Minitest::Test
       ENV["BOOBYTRAP_CHURN_FILE"] = churn_file
       
       # Mock Coverage data and DecomplexVerdict
-      Boobytrap::CoverageData.stub :load, {} do
+      SlopCop::CoverageData.stub :load, {} do
         SlopCop::DecomplexVerdict.stub :index, { status: :ok, spans: {}, m_all: {}, m_spur: {}, m_devw: {} } do
           out = SlopCop::Rollup.run(files: ["a.rb"], repo: dir, resultset: nil)
           assert_equal :ok, out[:decomplex_status]
@@ -197,7 +197,7 @@ class SlopcopReportCovTest < Minitest::Test
 
   def test_rollup_run_bugspots_standard_error
     Dir.mktmpdir do |dir|
-      Boobytrap::Bugspots.stub :from_git, ->(*) { raise StandardError, "git error" } do
+      SlopCop::Bugspots.stub :from_git, ->(*) { raise StandardError, "git error" } do
         SlopCop::DecomplexVerdict.stub :index, { status: :ok, spans: {}, m_all: {}, m_spur: {}, m_devw: {} } do
           out = SlopCop::Rollup.run(files: ["a.rb"], repo: dir, resultset: nil)
           assert_equal :ok, out[:decomplex_status]
@@ -266,7 +266,7 @@ class SlopcopReportCovTest < Minitest::Test
         
         # Stub tree_sitter_coverage_file? to force it into coverage path
         SlopCop::Classifier.stub :tree_sitter_coverage_file?, true do
-          Boobytrap::CoverageData.stub :branch_arm_coverage, [dummy_covered_arm_1, dummy_covered_arm_1_sibling, dummy_covered_arm_2, dummy_covered_arm_2_sibling] do
+          SlopCop::CoverageData.stub :branch_arm_coverage, [dummy_covered_arm_1, dummy_covered_arm_1_sibling, dummy_covered_arm_2, dummy_covered_arm_2_sibling] do
             mock_detectors = {
               "false_simplicity" => {
                 "sites" => ["#{file}:foo:2"],
@@ -293,9 +293,9 @@ class SlopcopReportCovTest < Minitest::Test
                 end
               end.new
               
-              Boobytrap::MutationFacts.stub :load, dummy_facts do
-                Boobytrap::Bugspots.stub :from_git, { "a.rb" => 5.0 } do
-                  Boobytrap::DecomplexRisk.stub :source_file?, true do
+              SlopCop::MutationFacts.stub :load, dummy_facts do
+                SlopCop::Bugspots.stub :from_git, { "a.rb" => 5.0 } do
+                  SlopCop::DecomplexRisk.stub :source_file?, true do
                     out = SlopCop::Rollup.run(files: ["a.rb"], repo: dir, resultset: "/dummy-cov.json")
                     assert_equal :ok, out[:decomplex_status]
                     refute_empty out[:top_gaps]
@@ -335,7 +335,7 @@ class SlopcopReportCovTest < Minitest::Test
       }
       
       SlopCop::Classifier.stub :get_branch_arms, [mock_arm] do
-        Boobytrap::DecomplexRisk.stub :source_file?, true do
+        SlopCop::DecomplexRisk.stub :source_file?, true do
           report = SlopCop::Report.new(files: ["a.rb"], repo: dir, resultset: nil)
           
           assert_includes report.decomplex_banner(:error), "decomplex signal UNAVAILABLE"

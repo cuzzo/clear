@@ -1,9 +1,9 @@
 # frozen_string_literal: true
 
 require_relative "classifier"
-# Consume the sibling boobytrap gem for the churn signal -- do NOT
-# re-derive it (boundary: own categorization, consume churn).
-require_relative "../../../boobytrap/lib/boobytrap"
+require_relative "bugspots"
+require_relative "decomplex_risk"
+require_relative "mutation_facts"
 # Optionally consume decomplex: the negative `spurious` filter (a gap
 # whose decision is redundant -- refactor, don't test) and the
 # positive structural-deviance amplifier on genuine gaps. Read-only,
@@ -42,7 +42,7 @@ module SlopCop
                 JSON.parse(File.read(ENV["BOOBYTRAP_CHURN_FILE"]))
               else
                 begin
-                  Boobytrap::Bugspots.from_git(repo)
+                  SlopCop::Bugspots.from_git(repo)
                 rescue StandardError
                   {}
                 end
@@ -55,7 +55,7 @@ module SlopCop
 
       abs_for = {}
       files.each do |file|
-        next unless Boobytrap::DecomplexRisk.source_file?(
+        next unless SlopCop::DecomplexRisk.source_file?(
           file,
           root: repo,
           parser: "tree_sitter",
@@ -68,7 +68,7 @@ module SlopCop
       end
       # decomplex verdict, keyed [abs, method]. {} if decomplex absent.
       dv = DecomplexVerdict.index(abs_for.values)
-      mutation_facts = Boobytrap::MutationFacts.load(mutation, root: repo)
+      mutation_facts = SlopCop::MutationFacts.load(mutation, root: repo)
 
       per_file = {}
       gaps = []
@@ -138,14 +138,14 @@ module SlopCop
           x[:verification] = fact.summary
           x[:mutation_kill_rate] = fact.kill_rate
           x[:mutation_gate_status] = fact.gate_status
-          x[:risk_profile] = Boobytrap::MutationFacts.profile(
+          x[:risk_profile] = SlopCop::MutationFacts.profile(
             fact,
             active: true,
             complexity: x[:deviance],
             history: x[:churn],
             coverage_gap: 1.0
           )
-          x[:verification_multiplier] = Boobytrap::MutationFacts.risk_multiplier(
+          x[:verification_multiplier] = SlopCop::MutationFacts.risk_multiplier(
             fact,
             active: true,
             complexity: x[:deviance],

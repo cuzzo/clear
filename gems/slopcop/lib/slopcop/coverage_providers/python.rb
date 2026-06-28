@@ -1,6 +1,6 @@
 # frozen_string_literal: true
 
-module Boobytrap
+module SlopCop
   module CoverageProviders
     module Python
       module_function
@@ -134,5 +134,5 @@ module Boobytrap
   end
 end
 
-Boobytrap::CoverageProviders.register(Boobytrap::CoverageProviders::Python)
-Boobytrap::CoverageProviders.register_language(Boobytrap::CoverageProviders::Python)
+SlopCop::CoverageProviders.register(SlopCop::CoverageProviders::Python)
+SlopCop::CoverageProviders.register_language(SlopCop::CoverageProviders::Python)

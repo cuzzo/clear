@@ -1,6 +1,6 @@
 # frozen_string_literal: true
 
-module Boobytrap
+module SlopCop
   module CoverageProviders
     module SimpleCov
       module_function
@@ -24,4 +24,4 @@ module Boobytrap
   end
 end
 
-Boobytrap::CoverageProviders.register(Boobytrap::CoverageProviders::SimpleCov)
+SlopCop::CoverageProviders.register(SlopCop::CoverageProviders::SimpleCov)

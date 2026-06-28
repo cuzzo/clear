@@ -1,6 +1,6 @@
 # frozen_string_literal: true
 
-module Boobytrap
+module SlopCop
   module CoverageProviders
     module NativeBranchJson
       CANDIDATES = %w[
@@ -34,4 +34,4 @@ module Boobytrap
   end
 end
 
-Boobytrap::CoverageProviders.register(Boobytrap::CoverageProviders::NativeBranchJson)
+SlopCop::CoverageProviders.register(SlopCop::CoverageProviders::NativeBranchJson)

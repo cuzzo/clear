@@ -1,6 +1,6 @@
 # frozen_string_literal: true
 
-module Boobytrap
+module SlopCop
   # Vendored bugspots scoring: Google's rolling, time-decayed
   # bug-fix-locality prediction (Lewis et al., ICSE'13; Igor Wiedler's
   # `bugspots` is the canonical Ruby port). We do NOT shell out to the

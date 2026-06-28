@@ -2,7 +2,7 @@
 
 require "json"
 
-module Boobytrap
+module SlopCop
   # Normalized mutation-testing evidence keyed by source file and method.
   #
   # Expected input:

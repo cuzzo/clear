@@ -143,6 +143,8 @@ func main() {
 	var only stringSlice
 	var exclude stringSlice
 	var files *string
+	var lineageDBPath *string
+	var lineageCommand *string
 
 	isReportSubcommand := len(os.Args) >= 2 && os.Args[1] == "report"
 
@@ -161,6 +163,8 @@ func main() {
 		fs.Var(&only, "only", "restrict ranking to path prefix")
 		fs.Var(&exclude, "exclude", "exclude glob pattern")
 		files = fs.String("files", "", "restrict ranking to exact source files")
+		lineageDBPath = fs.String("lineage-db", "", "Path to lineage SQLite database")
+		lineageCommand = fs.String("lineage-command", "", "Custom lineage summary command")
 
 		fs.Parse(os.Args[2:])
 	} else {
@@ -177,6 +181,8 @@ func main() {
 		testExposurePath = flag.String("test-exposure", "", "Path to test exposure facts JSON")
 		staticFilesPath = flag.String("static-files-file", "", "Path to JSON file containing list of static files to analyze")
 		fixRePat = flag.String("fix-re", `\b(fix(es|ed)?|bug\s*fix|close[sd]?)\b`, "Regex for fix commits")
+		lineageDBPath = flag.String("lineage-db", "", "Path to lineage SQLite database")
+		lineageCommand = flag.String("lineage-command", "", "Custom lineage summary command")
 		flag.Parse()
 	}
 
@@ -308,58 +314,288 @@ func main() {
 	}
 
 	if isReportSubcommand {
-		tmpGoDataFile, err := os.CreateTemp("", "boobytrap-go-data-*.json")
-		if err != nil {
-			fmt.Fprintf(os.Stderr, "Error creating temp file: %v\n", err)
-			os.Exit(1)
+		var lineageDBPathStr string
+		if lineageDBPath != nil {
+			lineageDBPathStr = *lineageDBPath
 		}
-		defer os.Remove(tmpGoDataFile.Name())
-
-		goDataJSON, err := json.Marshal(out)
-		if err != nil {
-			fmt.Fprintf(os.Stderr, "Error marshaling output: %v\n", err)
-			os.Exit(1)
-		}
-		if _, err := tmpGoDataFile.Write(goDataJSON); err != nil {
-			fmt.Fprintf(os.Stderr, "Error writing to temp file: %v\n", err)
-			os.Exit(1)
-		}
-		tmpGoDataFile.Close()
-
-		formatterPath, err := findFormatterScript(absRepo)
-		if err != nil {
-			fmt.Fprintf(os.Stderr, "Error finding formatter script: %v\n", err)
-			os.Exit(1)
+		var lineageCommandStr string
+		if lineageCommand != nil {
+			lineageCommandStr = *lineageCommand
 		}
 
-		args := []string{
-			formatterPath,
-			"--go-data-path=" + tmpGoDataFile.Name(),
-			"--repo=" + *repoPath,
-			"--top=" + strconv.Itoa(*top),
-		}
-		if *output != "" {
-			args = append(args, "--output="+*output)
-		}
-		if *jsonPath != "" {
-			args = append(args, "--json="+*jsonPath)
-		}
-		for _, o := range only {
-			args = append(args, "--only="+o)
-		}
-		for _, e := range exclude {
-			args = append(args, "--exclude="+e)
-		}
+		var filesSlice []string
 		if *files != "" {
-			args = append(args, "--files="+*files)
+			filesSlice = strings.Split(*files, ",")
 		}
 
-		cmd := exec.Command("ruby", args...)
-		cmd.Stdout = os.Stdout
-		cmd.Stderr = os.Stderr
-		if err := cmd.Run(); err != nil {
-			os.Exit(1)
+		ranked, unmeasured := rankHotspots(scores, gaps)
+
+		var filteredRanked []HotspotRow
+		for _, r := range ranked {
+			if inScope(r.File, only, filesSlice) {
+				filteredRanked = append(filteredRanked, r)
+			}
 		}
+		var filteredUnmeasured []UnmeasuredEntry
+		for _, u := range unmeasured {
+			if inScope(u.File, only, filesSlice) {
+				filteredUnmeasured = append(filteredUnmeasured, u)
+			}
+		}
+
+		decomplexMap := make(map[MethodKey]DecomplexScoreEntry)
+		for _, ds := range decomplexScores {
+			decomplexMap[MethodKey{File: ds.File, Method: ds.Method}] = ds
+		}
+
+		var methodGaps []MethodGapRow
+		var staticFiles []string
+		if *staticFilesPath != "" {
+			data, err := os.ReadFile(*staticFilesPath)
+			if err == nil {
+				json.Unmarshal(data, &staticFiles)
+			}
+		}
+
+		haveCov := covDataset != nil && len(covDataset.Files) > 0
+		if haveCov {
+			methodGaps = computeMethodGapsFromCoverage(covDataset, absRepo, decomplexMap)
+		} else {
+			methodGaps = computeMethodGapsFromStatic(staticFiles, absRepo, decomplexMap, staticDocs)
+		}
+
+		fixMax := 0.0
+		for _, s := range scores {
+			if s > fixMax {
+				fixMax = s
+			}
+		}
+		if fixMax <= 0.0 {
+			fixMax = 1.0
+		}
+
+		mutationActive := mutationOutput != nil && mutationOutput.Active
+		mutationMap := make(map[MethodKey]MutationFact)
+		if mutationActive {
+			groupedMutation := make(map[string][]MutationFact)
+			for _, mf := range mutationOutput.Subjects {
+				key := MethodKey{File: mf.File, Method: mf.Method}
+				mutationMap[key] = mf
+				if mf.File != "\x00global" && mf.Method != "*" && !strings.HasSuffix(mf.Method, "*") {
+					groupedMutation[mf.Method] = append(groupedMutation[mf.Method], mf)
+				}
+			}
+			for method, candidates := range groupedMutation {
+				seen := make(map[MethodKey]bool)
+				var unique []MutationFact
+				for _, c := range candidates {
+					k := MethodKey{File: c.File, Method: c.Method}
+					if !seen[k] {
+						seen[k] = true
+						unique = append(unique, c)
+					}
+				}
+				if len(unique) == 1 {
+					keyGlobal := MethodKey{File: "\x00global", Method: method}
+					mutationMap[keyGlobal] = unique[0]
+				}
+			}
+		}
+
+		testExposureActive := testExposureOutput != nil
+
+		for i := range methodGaps {
+			row := &methodGaps[i]
+			fixNorm := math.Round((scores[row.File]/fixMax)*1000) / 1000
+			row.FixNorm = fixNorm
+			row.Risk = row.Risk * (1.0 + fixNorm)
+
+			structuralScore := float64(row.DecomplexScore) + float64(row.StateWrites) + (float64(row.UncoveredBranches) / 2.0)
+
+			if mutationActive {
+				row.VerificationStatus = "no mutation"
+				mf := lookupMutationFact(mutationMap, row.File, row.Name)
+				if mf != nil {
+					row.VerificationStatus = mutationSummary(mf.KillRate, mf.GateStatus)
+					row.MutationKillRate = mf.KillRate
+					row.MutationGateStatus = mf.GateStatus
+				}
+				row.RiskProfile = mutationProfile(mf, true, structuralScore, fixNorm, row.LineGap)
+				row.VerificationMultiplier = mutationRiskMultiplier(mf, true, structuralScore, fixNorm, row.LineGap)
+				row.Risk = row.Risk * row.VerificationMultiplier
+			}
+
+			if testExposureActive {
+				agg := buildTestExposureAggregated(testExposureOutput, row.File, row.Name, row.FirstLine, row.LastLine)
+				row.TestExposureStatus = testExposureSummary(agg)
+				row.TestExposureProfile = testExposureProfile(agg, true)
+
+				allHits := append([]TestExposureHit{}, agg.FunctionTests...)
+				for _, hList := range agg.LineTests {
+					allHits = append(allHits, hList...)
+				}
+				for _, hList := range agg.BranchTests {
+					allHits = append(allHits, hList...)
+				}
+				row.DistinctTestCount = len(uniqueTestIDs(allHits))
+				testedLines := 0
+				for _, hList := range agg.LineTests {
+					if len(hList) > 0 {
+						testedLines++
+					}
+				}
+				row.TestedLineCount = testedLines
+				testedBranches := 0
+				for _, hList := range agg.BranchTests {
+					if len(hList) > 0 {
+						testedBranches++
+					}
+				}
+				row.TestedBranchCount = testedBranches
+
+				mutantVerified := make(map[string]bool)
+				mutantKilled := make(map[string]bool)
+				for _, h := range allHits {
+					if isHitMutation(h) {
+						mutantVerified[h.TestID] = true
+					}
+					if isHitKilled(h) {
+						mutantKilled[h.TestID] = true
+					}
+				}
+				row.MutantVerifiedTestCount = len(mutantVerified)
+				row.MutantKilledTestCount = len(mutantKilled)
+
+				row.TestExposureMultiplier = testExposureMultiplier(agg, true, structuralScore, fixNorm, row.LineGap)
+				row.Risk = row.Risk * row.TestExposureMultiplier
+			}
+			row.Risk = math.Round(row.Risk*10000) / 10000
+		}
+
+		lineageIndex := loadLineage(lineageDBPathStr, absRepo, only, *top, lineageCommandStr)
+		if lineageIndex.Status == "ok" {
+			lineageMax := 0.0
+			for _, u := range lineageIndex.Units {
+				if u.RiskScore > lineageMax {
+					lineageMax = u.RiskScore
+				}
+			}
+			if lineageMax <= 0.0 {
+				lineageMax = 1.0
+			}
+
+			for i := range methodGaps {
+				row := &methodGaps[i]
+				key := MethodKey{File: row.File, Method: row.Name}
+				if u, exists := lineageIndex.Index[key]; exists {
+					row.LineageScore = u.RiskScore
+					row.LineageFixes = u.Fixes
+					row.LineageChanges = u.Changes
+					row.LineageMoves = u.Moves
+					lineageNorm := u.RiskScore / lineageMax
+					row.Risk = row.Risk * (1.0 + lineageNorm)
+
+					if !testExposureActive && u.CurrentDistinctTests > 0 {
+						row.TestExposureStatus = lineageTestExposureStatus(u)
+						row.TestExposureProfile = lineageExposureProfile(u)
+						row.DistinctTestCount = u.CurrentDistinctTests
+						row.MutantVerifiedTestCount = u.CurrentMutantVerifiedTests
+						row.MutantKilledTestCount = u.CurrentMutantKilledTests
+						structuralScore := float64(row.DecomplexScore) + float64(row.StateWrites) + (float64(row.UncoveredBranches) / 2.0)
+						row.TestExposureMultiplier = lineageExposureMultiplier(u, true, structuralScore, row.FixNorm, row.LineGap)
+						row.Risk = row.Risk * row.TestExposureMultiplier
+					}
+					row.Risk = math.Round(row.Risk*10000) / 10000
+				}
+			}
+		}
+
+		stateBranchHotspotsList := buildStateBranchHotspots(densityRows, methodGaps, scores, fixMax, gaps)
+
+		var filteredBlast []BlastRow
+		for _, b := range blast {
+			absPath := filepath.Join(absRepo, b.File)
+			if _, err := os.Stat(absPath); err != nil {
+				continue
+			}
+			if inScope(b.File, only, filesSlice) {
+				filteredBlast = append(filteredBlast, b)
+			}
+		}
+
+		sort.Slice(methodGaps, func(i, j int) bool {
+			if methodGaps[i].Risk != methodGaps[j].Risk {
+				return methodGaps[i].Risk > methodGaps[j].Risk
+			}
+			if methodGaps[i].MissedLines != methodGaps[j].MissedLines {
+				return methodGaps[i].MissedLines > methodGaps[j].MissedLines
+			}
+			if methodGaps[i].File != methodGaps[j].File {
+				return methodGaps[i].File < methodGaps[j].File
+			}
+			return methodGaps[i].FirstLine < methodGaps[j].FirstLine
+		})
+
+		covLabel := ""
+		if *covPath != "" {
+			covLabel = filepath.Base(*covPath)
+		}
+
+		md := generateMarkdown(
+			absRepo,
+			only,
+			filesSlice,
+			len(events),
+			filteredRanked,
+			filteredUnmeasured,
+			methodGaps,
+			stateBranchHotspotsList,
+			filteredBlast,
+			lineageIndex,
+			haveCov,
+			covLabel,
+			mutationActive,
+			filepath.Base(*mutationPath),
+			testExposureActive,
+			filepath.Base(*testExposurePath),
+			*top,
+		)
+
+		if *output != "" {
+			if err := os.WriteFile(*output, []byte(md), 0644); err != nil {
+				fmt.Fprintf(os.Stderr, "Error writing output report: %v\n", err)
+				os.Exit(1)
+			}
+		} else {
+			fmt.Print(md)
+		}
+
+		if *jsonPath != "" {
+			sarif := generateSarif(
+				absRepo,
+				only,
+				filesSlice,
+				len(events),
+				filteredRanked,
+				filteredUnmeasured,
+				methodGaps,
+				stateBranchHotspotsList,
+				filteredBlast,
+				lineageIndex,
+				haveCov,
+				covLabel,
+				mutationActive,
+				filepath.Base(*mutationPath),
+				testExposureActive,
+				filepath.Base(*testExposurePath),
+				*top,
+			)
+			if err := os.WriteFile(*jsonPath, []byte(sarif), 0644); err != nil {
+				fmt.Fprintf(os.Stderr, "Error writing json report: %v\n", err)
+				os.Exit(1)
+			}
+		}
+
 		os.Exit(0)
 	} else {
 		enc := json.NewEncoder(os.Stdout)
@@ -1346,23 +1582,26 @@ func (s *stringSlice) Set(value string) error {
 func getSourceFilesFromRuby(repo string, only []string, files string, exclude []string) ([]string, error) {
 	rubyBin := "ruby"
 	inlineScript := `
-      require "boobytrap/report"
-      class Dummy < Boobytrap::Report
-        def initialize(repo, only, files, exclude)
-          @repo = repo
-          @only = only
-          @files = files
-          @exclude = exclude
-        end
-      end
+      require "espalier/type_profile"
+      require "json"
       repo = ARGV[0]
       only = ARGV[1] == "" ? [] : ARGV[1].split(",")
       files = ARGV[2] == "" ? [] : ARGV[2].split(",")
       exclude = ARGV[3] == "" ? [] : ARGV[3].split(",")
-      d = Dummy.new(repo, only, files, exclude)
-      puts JSON.dump(d.current_source_files)
+      if files.any?
+        res = files.map { |f| File.expand_path(f, repo) }
+                   .select { |f| File.file?(f) && Decomplex::SourceFilter.source_file?(f, root: repo, exclude: exclude) }
+                   .map { |f| Decomplex::SourceFilter.relative_path(f, repo) }
+      else
+        res = Decomplex::SourceFilter.collect(repo, root: repo, exclude: exclude)
+                                     .map { |f| Decomplex::SourceFilter.relative_path(f, repo) }
+        if only.any?
+          res = res.select { |rel| only.any? { |p| rel == p || rel.start_with?("#{p}/") } }
+        end
+      end
+      puts JSON.dump(res)
 	`
-	cmd := exec.Command(rubyBin, "-Igems/boobytrap/lib", "-Ilib", "-e", inlineScript,
+	cmd := exec.Command(rubyBin, "-e", inlineScript,
 		repo, strings.Join(only, ","), files, strings.Join(exclude, ","))
 
 	var stdout bytes.Buffer
@@ -1380,10 +1619,23 @@ func getSourceFilesFromRuby(repo string, only []string, files string, exclude []
 	return res, nil
 }
 
-func findFormatterScript(repoRoot string) (string, error) {
-	path := filepath.Join(repoRoot, "gems/boobytrap/lib/boobytrap/formatter.rb")
-	if _, err := os.Stat(path); err == nil {
-		return path, nil
+func inScope(rel string, only []string, files []string) bool {
+	if len(files) > 0 {
+		for _, f := range files {
+			if rel == f {
+				return true
+			}
+		}
+		return false
 	}
-	return "", fmt.Errorf("formatter.rb not found at %s", path)
+	if len(only) == 0 {
+		return true
+	}
+	for _, p := range only {
+		if rel == p || strings.HasPrefix(rel, p+"/") {
+			return true
+		}
+	}
+	return false
 }
+

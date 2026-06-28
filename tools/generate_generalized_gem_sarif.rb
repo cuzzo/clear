@@ -13,7 +13,6 @@ $LOAD_PATH.unshift(File.join(ROOT, "gems/slopcop/lib"))
 $LOAD_PATH.unshift(File.join(ROOT, "gems/espalier/lib"))
 $LOAD_PATH.unshift(File.join(ROOT, "gems/nil-kill/lib"))
 
-require "boobytrap"
 require "slopcop"
 require "espalier"
 require "nil_kill"
@@ -187,37 +186,29 @@ begin
     end
   end
 
-  if options[:decomplex_binary]
-    run_decomplex_rust(options[:decomplex_binary], rel_files, out_dir, repo)
+  decomplex_bin = options[:decomplex_binary] || File.join(ROOT, "gems/decomplex/target/release/decomplex-rust")
+  if File.executable?(decomplex_bin)
+    run_decomplex_rust(decomplex_bin, rel_files, out_dir, repo)
   else
-    Dir.chdir(repo) do
-      decomplex = Decomplex::Report.new(rel_files)
-      write(
-        File.join(out_dir, "decomplex.sarif"),
-        decomplex.to_sarif(
-          include_snapshot: false,
-          include_finding_payload: false,
-          max_results: DECOMPLEX_SARIF_MAX_RESULTS
-        )
-      )
-      write(File.join(out_dir, "decomplex.md"), decomplex.to_markdown)
-    end
+    abort "decomplex-rust binary not found at #{decomplex_bin}. Please build it or pass --decomplex-binary"
   end
 
-  boobytrap = Boobytrap::Report.new(
-    repo: repo,
-    resultset: coverage,
-    files: rel_files,
-    top: options[:top],
-    exclude: options[:exclude]
-  )
-  write(File.join(out_dir, "boobytrap.sarif"), boobytrap.to_sarif)
-  write(File.join(out_dir, "boobytrap.md"), boobytrap.to_markdown)
+  boobytrap_bin = File.join(ROOT, "gems/boobytrap/exe/boobytrap")
+  args = ["report", "--repo=#{repo}", "--output=#{File.join(out_dir, "boobytrap.md")}", "--json=#{File.join(out_dir, "boobytrap.sarif")}", "--top=#{options[:top]}"]
+  args << "--coverage=#{coverage}" if coverage && !coverage.empty?
+  options[:exclude].each { |e| args << "--exclude=#{e}" }
+  args << "--files=#{rel_files.join(",")}" if rel_files && !rel_files.empty?
+  system(boobytrap_bin, *args)
 
   # Share Boobytrap's computed churn output with SlopCop to avoid re-deriving
+  helper_args = ["--repo=#{repo}"]
+  helper_args << "--coverage=#{coverage}" if coverage && !coverage.empty?
+  out, status = Open3.capture2(boobytrap_bin, *helper_args)
+  fix_scores = status.success? ? (JSON.parse(out)["fix_scores"] || {}) : {}
+
   require "tempfile"
   churn_temp = Tempfile.new(["boobytrap-churn", ".json"])
-  churn_temp.write(JSON.generate(boobytrap.fix_scores))
+  churn_temp.write(JSON.generate(fix_scores))
   churn_temp.close
   ENV["BOOBYTRAP_CHURN_FILE"] = churn_temp.path
 

@@ -5,7 +5,7 @@ require "json"
 require "rexml/document"
 require "rexml/xpath"
 
-module Boobytrap
+module SlopCop
   # Normalized coverage input for Boobytrap and SlopCop.
   #
   # Supported inputs:

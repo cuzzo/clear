@@ -1,6 +1,6 @@
 # frozen_string_literal: true
 
-module Boobytrap
+module SlopCop
   module CoverageProviders
     module NilKillJsonl
       module_function
@@ -48,4 +48,4 @@ module Boobytrap
   end
 end
 
-Boobytrap::CoverageProviders.register(Boobytrap::CoverageProviders::NilKillJsonl)
+SlopCop::CoverageProviders.register(SlopCop::CoverageProviders::NilKillJsonl)

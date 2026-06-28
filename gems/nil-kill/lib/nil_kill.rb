@@ -11,8 +11,6 @@ require "set"
 require "shellwords"
 require "time"
 require "sorbet-runtime"
-require "boobytrap"
-require "boobytrap/coverage_providers"
 
 # Ensure espalier is on load path and require type_profile to load FactMine::Syntax::TypeExpr
 $LOAD_PATH.unshift(File.expand_path("../../espalier/lib", __dir__)) unless $LOAD_PATH.include?(File.expand_path("../../espalier/lib", __dir__))

@@ -1,6 +1,6 @@
 # frozen_string_literal: true
 
-module Boobytrap
+module SlopCop
   module CoverageProviders
     module Zig
       module_function
@@ -28,4 +28,4 @@ module Boobytrap
   end
 end
 
-Boobytrap::CoverageProviders.register_language(Boobytrap::CoverageProviders::Zig)
+SlopCop::CoverageProviders.register_language(SlopCop::CoverageProviders::Zig)

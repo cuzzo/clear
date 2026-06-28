@@ -414,3 +414,80 @@ func TestProcessStaticGaps(t *testing.T) {
 		t.Errorf("expected 0 gaps (binary missing), got %d", len(gaps))
 	}
 }
+
+func TestReportSubcommand(t *testing.T) {
+	if os.Getenv("BE_REPORT_TEST") == "1" {
+		os.Args = []string{
+			"cmd",
+			"report",
+			"--repo=" + os.Getenv("TEST_REPO"),
+			"--coverage=" + os.Getenv("TEST_COVERAGE"),
+			"--output=" + os.Getenv("TEST_OUTPUT"),
+			"--json=" + os.Getenv("TEST_JSON"),
+		}
+		flag.CommandLine = flag.NewFlagSet(os.Args[0], flag.ContinueOnError)
+		main()
+		return
+	}
+
+	dir := t.TempDir()
+	runCmd(t, dir, "git", "init", "-q")
+	runCmd(t, dir, "git", "config", "user.email", "test@test.com")
+	runCmd(t, dir, "git", "config", "user.name", "test")
+	writeTempFile(t, dir, "a.go", "package main\n")
+	runCmd(t, dir, "git", "add", "a.go")
+	runCmd(t, dir, "git", "commit", "-qm", "Fix issue")
+
+	covData := map[string]interface{}{
+		"RSpec": map[string]interface{}{
+			"coverage": map[string]interface{}{
+				filepath.Join(dir, "a.go"): map[string]interface{}{
+					"lines": []interface{}{1.0},
+				},
+			},
+		},
+	}
+	covBytes, _ := json.Marshal(covData)
+	covFile := filepath.Join(dir, "coverage.json")
+	if err := os.WriteFile(covFile, covBytes, 0644); err != nil {
+		t.Fatalf("failed to write coverage json: %v", err)
+	}
+
+	markdownFile := filepath.Join(dir, "report.md")
+	sarifFile := filepath.Join(dir, "report.sarif")
+
+	cmd := exec.Command(os.Args[0], "-test.run=TestReportSubcommand")
+	cmd.Env = append(os.Environ(),
+		"BE_REPORT_TEST=1",
+		"TEST_REPO="+dir,
+		"TEST_COVERAGE="+covFile,
+		"TEST_OUTPUT="+markdownFile,
+		"TEST_JSON="+sarifFile,
+	)
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		t.Fatalf("report subcommand failed: %v, output: %s", err, string(out))
+	}
+
+	// Verify markdown file was written
+	mdContent, err := os.ReadFile(markdownFile)
+	if err != nil {
+		t.Fatalf("failed to read markdown file: %v", err)
+	}
+	if !regexp.MustCompile(`# Boobytrap Report`).Match(mdContent) {
+		t.Errorf("markdown report missing header, got: %s", string(mdContent))
+	}
+
+	// Verify sarif file was written
+	sarifContent, err := os.ReadFile(sarifFile)
+	if err != nil {
+		t.Fatalf("failed to read sarif file: %v", err)
+	}
+	var doc SarifDoc
+	if err := json.Unmarshal(sarifContent, &doc); err != nil {
+		t.Fatalf("failed to unmarshal sarif content: %v, content: %s", err, string(sarifContent))
+	}
+	if doc.Version != "2.1.0" {
+		t.Errorf("unexpected sarif version: %s", doc.Version)
+	}
+}

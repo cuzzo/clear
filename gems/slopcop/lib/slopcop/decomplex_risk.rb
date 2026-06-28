@@ -2,7 +2,7 @@
 
 require "json"
 
-module Boobytrap
+module SlopCop
   # Read-only bridge to Decomplex's rust binary output. Boobytrap uses
   # this as a method-risk signal.
   module DecomplexRisk
