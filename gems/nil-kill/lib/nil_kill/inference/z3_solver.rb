@@ -21,6 +21,7 @@
 #   observed nil). Retires the nil-kill-skip.json workaround for these cases.
 
 require 'open3'
+require 'set'
 
 module NilKill
   class Z3Solver
@@ -617,27 +618,116 @@ module NilKill
       true # z3 timed out -- assume consistent
     end
 
-    def build_smt2(constraints)
-      lines = []
-      lines << "(set-logic QF_LIA)"
-
-      # Build subtype cases before declaring constants (need full type_ids)
+    def build_subtype_cases
       subtype_cases = ["(= a b)"]
 
+      # 1. Build the inheritance graph from source files
+      graph = Hash.new { |h, k| h[k] = Set.new }
+
+      # Pre-populate with built-in subtypes
+      BUILT_IN_SUBTYPES.each do |sub, sups|
+        sups.each { |sup| graph[sub].add(sup) }
+      end
+
+      # Unqualified name map for type_ids: "Node" => ["AST::Node", "MIR::Node"]
+      unqualified_map = Hash.new { |h, k| h[k] = [] }
+      @type_ids.each_key do |type_str|
+        base = type_str.start_with?("T.nilable(") ? type_str[10..-2] : type_str
+        base_name = base.split("::").last
+        unqualified_map[base_name] << base if base_name
+      end
+
+      # Scan source files for class declarations
+      @source_files.each do |path|
+        next unless File.file?(path)
+        begin
+          content = File.read(path)
+          content.scan(/class\s+([A-Za-z0-9_:]+)\s*<\s*([A-Za-z0-9_:]+)/) do |cls, sup|
+            cls_base = cls.split("::").last
+            sup_base = sup.split("::").last
+
+            cls_candidates = unqualified_map[cls_base]
+            sup_candidates = unqualified_map[sup_base]
+
+            cls_candidates.each do |c_fq|
+              sup_candidates.each do |s_fq|
+                c_prefix = c_fq.split("::")[0..-2]
+                s_prefix = s_fq.split("::")[0..-2]
+                if c_prefix == s_prefix || s_fq == "Node" || s_fq == "MIR::Node"
+                  graph[c_fq].add(s_fq)
+                end
+              end
+            end
+          end
+        rescue StandardError
+          # Safe fallback if file read fails
+        end
+      end
+
+      # 2. Compute transitive closure of base types
+      transitive = Set.new
+      @type_ids.each_key do |type_str|
+        base_type = type_str.start_with?("T.nilable(") ? type_str[10..-2] : type_str
+
+        visited = Set.new
+        queue = [base_type]
+        while (current = queue.shift)
+          next if visited.include?(current)
+          visited.add(current)
+
+          if current != base_type
+            transitive.add([base_type, current])
+          end
+
+          parents = graph[current]
+          queue.concat(parents.to_a) if parents
+        end
+      end
+
+      # 3. Add transitive relations to subtyping cases
+      transitive.each do |sub, sup|
+        sub_id = @type_ids[sub]
+        sup_id = @type_ids[sup]
+        subtype_cases << "(and (= a #{sub_id}) (= b #{sup_id}))" if sub_id && sup_id
+      end
+
+      # 4. Generate nilable variants for all type combinations
       @type_ids.each do |type_str, id|
         if type_str.start_with?("T.nilable(")
           inner = type_str[10..-2]
           inner_id = @type_ids[inner]
           nil_id   = @type_ids["NilClass"]
+
+          # Direct nilable rules
           subtype_cases << "(and (= a #{inner_id}) (= b #{id}))" if inner_id
           subtype_cases << "(and (= a #{nil_id}) (= b #{id}))" if nil_id
-        end
 
-        BUILT_IN_SUBTYPES.fetch(type_str, []).each do |sup|
-          sup_id = @type_ids[sup]
-          subtype_cases << "(and (= a #{id}) (= b #{sup_id}))" if sup_id
+          # Transitive nilable rules:
+          # If X < Y, then:
+          # - X < T.nilable(Y)
+          # - T.nilable(X) < T.nilable(Y)
+          transitive.each do |sub, sup|
+            if sup == inner # Y is the inner type of this nilable
+              sub_id = @type_ids[sub]
+              subtype_cases << "(and (= a #{sub_id}) (= b #{id}))" if sub_id
+
+              nilable_sub = "T.nilable(#{sub})"
+              nilable_sub_id = @type_ids[nilable_sub]
+              subtype_cases << "(and (= a #{nilable_sub_id}) (= b #{id}))" if nilable_sub_id
+            end
+          end
         end
       end
+
+      subtype_cases.uniq
+    end
+
+    def build_smt2(constraints)
+      lines = []
+      lines << "(set-logic QF_LIA)"
+
+      # Build subtype cases before declaring constants (need full type_ids)
+      subtype_cases = build_subtype_cases
 
       lines << "; subtype predicate over type integer IDs"
       lines << "(define-fun is-sub ((a Int) (b Int)) Bool"

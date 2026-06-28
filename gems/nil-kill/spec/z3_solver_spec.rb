@@ -191,6 +191,76 @@ RSpec.describe NilKill::Z3Solver do
         expect(solver.consistent?([action_inconsistent])).to eq(false)
       end
     end
+
+    it "resolves transitive subclass subtyping and nilability bounds correctly" do
+      Dir.mktmpdir("nil-kill-z3", File.join(NilKill::ROOT, "tmp")) do |dir|
+        path = File.join(dir, "hierarchy.rb")
+        File.write(path, <<~RUBY)
+          class Grandparent; end
+          class Parent < Grandparent; end
+          class Child < Parent; end
+          class Unrelated; end
+        RUBY
+        rel = Pathname.new(path).relative_path_from(Pathname.new(NilKill::ROOT)).to_s
+
+        evidence = {
+          "facts" => {
+            "existing_sigs" => [
+              {
+                "path" => rel,
+                "line" => 10,
+                "method" => "callee",
+                "sig" => "sig { params(x: Grandparent).void }"
+              },
+              {
+                "path" => rel,
+                "line" => 20,
+                "method" => "nilable_callee",
+                "sig" => "sig { params(x: T.nilable(Grandparent)).void }"
+              },
+              {
+                "path" => rel,
+                "line" => 2,
+                "method" => "inferred_method",
+                "sig" => "sig { returns(T.untyped) }"
+              }
+            ]
+          }
+        }
+
+        solver = described_class.new(evidence, [path])
+        solver.instance_eval do
+          @type_ids = {
+            "Child" => 10,
+            "Parent" => 11,
+            "Grandparent" => 12,
+            "Unrelated" => 13,
+            "NilClass" => 14,
+            "T.nilable(Grandparent)" => 15,
+            "T.nilable(Child)" => 16,
+            "String" => 17
+          }
+        end
+
+        # Child is a subtype of Grandparent -> true
+        expect(solver.send(:sat?, [[10, 12]])).to eq(true)
+
+        # Child is a subtype of T.nilable(Grandparent) -> true
+        expect(solver.send(:sat?, [[10, 15]])).to eq(true)
+
+        # T.nilable(Child) is a subtype of T.nilable(Grandparent) -> true
+        expect(solver.send(:sat?, [[16, 15]])).to eq(true)
+
+        # NilClass is a subtype of T.nilable(Grandparent) -> true
+        expect(solver.send(:sat?, [[14, 15]])).to eq(true)
+
+        # Unrelated is NOT a subtype of Grandparent -> false
+        expect(solver.send(:sat?, [[13, 12]])).to eq(false)
+
+        # String is NOT a subtype of T.nilable(Grandparent) -> false
+        expect(solver.send(:sat?, [[17, 15]])).to eq(false)
+      end
+    end
   end
 
   describe "#infer_unobserved_params" do
