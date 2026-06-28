@@ -1,6 +1,6 @@
 # frozen_string_literal: true
 
-require_relative "../../../boobytrap/lib/boobytrap/coverage_data"
+require_relative "coverage_data"
 require_relative "lexicon"
 
 module SlopCop
@@ -69,7 +69,7 @@ module SlopCop
     def coverage_dataset(resultset, root:)
       @coverage_cache ||= {}
       key = [File.expand_path(resultset), File.expand_path(root)]
-      @coverage_cache[key] ||= Boobytrap::CoverageData.load(resultset, root: root)
+      @coverage_cache[key] ||= SlopCop::CoverageData.load(resultset, root: root)
     end
 
     def classify_static_file(abspath, ffi_boundary: [], diagnostic_mids: [])
@@ -120,7 +120,7 @@ module SlopCop
         )
       end
 
-      covered_arms = Boobytrap::CoverageData.branch_arm_coverage(file_coverage, doc_arms)
+      covered_arms = SlopCop::CoverageData.branch_arm_coverage(file_coverage, doc_arms)
       groups = covered_arms.group_by do |arm_cov|
         arm = arm_cov.arm
         [arm.kind, arm.decision_line, arm.decision_span]

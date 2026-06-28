@@ -152,7 +152,7 @@ class ConstraintsAuditTest < Minitest::Test
       
       dataset = DummyDataset.new(abs_path => cov_file)
       
-      Boobytrap::CoverageData.stub :load, dataset do
+      SlopCop::CoverageData.stub :load, dataset do
         evidence.add("loom", "example.zig")
       end
       

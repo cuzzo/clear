@@ -1,0 +1,301 @@
+{
+  "version": "2.1.0",
+  "$schema": "https://json.schemastore.org/sarif-2.1.0.json",
+  "runs": [
+    {
+      "tool": {
+        "driver": {
+          "name": "Boobytrap",
+          "informationUri": "https://github.com/codeforreno/litedb",
+          "rules": [
+            {
+              "id": "boobytrap.file-hotspot",
+              "name": "File Hotspot",
+              "shortDescription": {
+                "text": "Time-decayed fix churn overlaps with branch coverage gap"
+              },
+              "defaultConfiguration": {
+                "level": "warning"
+              }
+            },
+            {
+              "id": "boobytrap.dark-method",
+              "name": "Mostly Uncovered Method",
+              "shortDescription": {
+                "text": "Non-trivial method has very low executable line coverage"
+              },
+              "defaultConfiguration": {
+                "level": "warning"
+              }
+            },
+            {
+              "id": "boobytrap.state-branch-hotspot",
+              "name": "State Branch Hotspot",
+              "shortDescription": {
+                "text": "State-based branch density overlaps with fix history or coverage gaps"
+              },
+              "defaultConfiguration": {
+                "level": "warning"
+              }
+            },
+            {
+              "id": "boobytrap.fix-blast-radius",
+              "name": "Fix Blast Radius",
+              "shortDescription": {
+                "text": "File repeatedly participates in multi-file bug fixes"
+              },
+              "defaultConfiguration": {
+                "level": "note"
+              }
+            },
+            {
+              "id": "boobytrap.lineage-unit-risk",
+              "name": "Lineage Unit Risk",
+              "shortDescription": {
+                "text": "Logical unit has decayed semantic change/fix risk"
+              },
+              "defaultConfiguration": {
+                "level": "note"
+              }
+            },
+            {
+              "id": "boobytrap.fixed-unmeasured",
+              "name": "Fixed But Unmeasured",
+              "shortDescription": {
+                "text": "Historically fixed source file has no branch coverage data"
+              },
+              "defaultConfiguration": {
+                "level": "warning"
+              }
+            }
+          ]
+        }
+      },
+      "results": [
+        {
+          "ruleId": "boobytrap.dark-method",
+          "ruleIndex": 1,
+          "level": "warning",
+          "message": {
+            "text": "mostly uncovered method: a.go:3 testFunc risk=15.00"
+          },
+          "locations": [
+            {
+              "physicalLocation": {
+                "artifactLocation": {
+                  "uri": "a.go"
+                },
+                "region": {
+                  "startLine": 3,
+                  "endLine": 9
+                }
+              }
+            }
+          ],
+          "properties": {
+            "covered_lines": 0,
+            "dark_arm": false,
+            "decomplex_detectors": [
+              "unused_return"
+            ],
+            "decomplex_findings": [
+              {
+                "type": "unused_return"
+              }
+            ],
+            "decomplex_score": 1,
+            "distinct_test_count": 0,
+            "executable_lines": 6,
+            "file": "a.go",
+            "first_line": 3,
+            "fix_norm": 1,
+            "last_line": 9,
+            "line_gap": 1,
+            "lineage_changes": 0,
+            "lineage_fixes": 0,
+            "lineage_moves": 0,
+            "lineage_score": 0,
+            "missed_lines": 6,
+            "mutant_killed_test_count": 0,
+            "mutant_verified_test_count": 0,
+            "mutation_gate_status": "",
+            "mutation_kill_rate": null,
+            "name": "testFunc",
+            "risk": 15,
+            "risk_profile": "",
+            "source_format": "boobytrap.report.v1",
+            "state_writes": 0,
+            "test_exposure_multiplier": 0,
+            "test_exposure_profile": "",
+            "test_exposure_status": "",
+            "tested_branch_count": 0,
+            "tested_line_count": 0,
+            "uncovered_branches": 0,
+            "verification_multiplier": 0,
+            "verification_status": ""
+          }
+        },
+        {
+          "ruleId": "boobytrap.state-branch-hotspot",
+          "ruleIndex": 2,
+          "level": "warning",
+          "message": {
+            "text": "state branch hotspot: b.py testFunc risk=5.00"
+          },
+          "locations": [
+            {
+              "physicalLocation": {
+                "artifactLocation": {
+                  "uri": "b.py"
+                },
+                "region": {
+                  "startLine": 1
+                }
+              }
+            }
+          ],
+          "properties": {
+            "at": "[REPO_ROOT]/b.py:testFunc:1",
+            "branch_gap": 0,
+            "dark_branches": 0,
+            "decisions": 4,
+            "file": "b.py",
+            "fix_norm": 1,
+            "line_gap": 0,
+            "method": "testFunc",
+            "predicate": "cond",
+            "risk": 5,
+            "score": 2.5,
+            "source_format": "boobytrap.report.v1",
+            "state_refs": [
+              "x",
+              "y"
+            ]
+          }
+        },
+        {
+          "ruleId": "boobytrap.state-branch-hotspot",
+          "ruleIndex": 2,
+          "level": "warning",
+          "message": {
+            "text": "state branch hotspot: a.go testFunc risk=0.00"
+          },
+          "locations": [
+            {
+              "physicalLocation": {
+                "artifactLocation": {
+                  "uri": "a.go"
+                },
+                "region": {
+                  "startLine": 3
+                }
+              }
+            }
+          ],
+          "properties": {
+            "at": "[REPO_ROOT]/a.go:testFunc:3",
+            "branch_gap": 0,
+            "dark_branches": 0,
+            "decisions": 4,
+            "file": "a.go",
+            "fix_norm": 1,
+            "line_gap": 1,
+            "method": "testFunc",
+            "predicate": "cond",
+            "risk": 0,
+            "score": 2.5,
+            "source_format": "boobytrap.report.v1",
+            "state_refs": [
+              "x",
+              "y"
+            ]
+          }
+        },
+        {
+          "ruleId": "boobytrap.fix-blast-radius",
+          "ruleIndex": 3,
+          "level": "note",
+          "message": {
+            "text": "fix blast radius: a.go score=1"
+          },
+          "locations": [
+            {
+              "physicalLocation": {
+                "artifactLocation": {
+                  "uri": "a.go"
+                },
+                "region": {
+                  "startLine": 1
+                }
+              }
+            }
+          ],
+          "properties": {
+            "avg_touched": 3,
+            "file": "a.go",
+            "fixes": 1,
+            "max_touched": 3,
+            "partners": [
+              [
+                "b.py",
+                0.5
+              ],
+              [
+                "c.rb",
+                0.5
+              ]
+            ],
+            "score": 1,
+            "source_format": "boobytrap.report.v1"
+          }
+        },
+        {
+          "ruleId": "boobytrap.fixed-unmeasured",
+          "ruleIndex": 5,
+          "level": "warning",
+          "message": {
+            "text": "fixed but unmeasured: a.go fix_norm=1"
+          },
+          "locations": [
+            {
+              "physicalLocation": {
+                "artifactLocation": {
+                  "uri": "a.go"
+                },
+                "region": {
+                  "startLine": 1
+                }
+              }
+            }
+          ],
+          "properties": {
+            "file": "a.go",
+            "fix": 0.5,
+            "fix_norm": 1,
+            "source_format": "boobytrap.report.v1"
+          }
+        }
+      ],
+      "properties": {
+        "format": "boobytrap.report.sarif.v1",
+        "summary": {
+          "coverage_mode": "absent",
+          "files_ranked": 0,
+          "fix_commits": 1,
+          "fixed_but_unmeasured": 1,
+          "lineage": "not supplied",
+          "mutation_facts": "not supplied",
+          "repo": "[REPO_ROOT]",
+          "scope": {
+            "files": null,
+            "only": [
+              "a.go"
+            ]
+          },
+          "state_branch_hotspots": 2,
+          "test_exposure_facts": "not supplied"
+        }
+      }
+    }
+  ]
+}

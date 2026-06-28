@@ -1,6 +1,6 @@
 # frozen_string_literal: true
 
-require_relative "../../../../boobytrap/lib/boobytrap/coverage_data"
+require_relative "../coverage_data"
 
 module SlopCop
   module Constraints
@@ -25,7 +25,7 @@ module SlopCop
 
       def add(type, path)
         resolved = File.expand_path(path, repo)
-        dataset = Boobytrap::CoverageData.load(resolved, root: repo)
+        dataset = SlopCop::CoverageData.load(resolved, root: repo)
         @datasets[type.to_s] << dataset unless dataset.empty?
       end
 

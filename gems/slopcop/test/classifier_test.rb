@@ -272,7 +272,7 @@ class ClassifierTest < Minitest::Test
             }
         };
       ZIG
-      catalog = Boobytrap::CoverageData.branch_catalog(["src/worker.zig"], root: dir)
+      catalog = SlopCop::CoverageData.branch_catalog(["src/worker.zig"], root: dir)
       file_entry = catalog.fetch("files").first
       file_entry["lines"] = { "4" => 1, "5" => 1, "6" => 1, "8" => 0, "9" => 0 }
       file_entry["arms"] = file_entry.fetch("arms").map do |arm|
