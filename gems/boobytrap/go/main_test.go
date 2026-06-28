@@ -3,6 +3,7 @@ package main
 import (
 	"encoding/json"
 	"flag"
+	"fmt"
 	"math"
 	"os"
 	"os/exec"
@@ -424,6 +425,12 @@ func TestReportSubcommand(t *testing.T) {
 			"--coverage=" + os.Getenv("TEST_COVERAGE"),
 			"--output=" + os.Getenv("TEST_OUTPUT"),
 			"--json=" + os.Getenv("TEST_JSON"),
+			"--decomplex-facts=" + os.Getenv("TEST_DECOMPLEX"),
+			"--mutation=" + os.Getenv("TEST_MUTATION"),
+			"--test-exposure=" + os.Getenv("TEST_EXPOSURE"),
+			"--lineage-db=" + os.Getenv("TEST_LINEAGE_DB"),
+			"--lineage-command=" + os.Getenv("TEST_LINEAGE_COMMAND"),
+			"--only=a.go",
 		}
 		flag.CommandLine = flag.NewFlagSet(os.Args[0], flag.ContinueOnError)
 		main()
@@ -434,15 +441,34 @@ func TestReportSubcommand(t *testing.T) {
 	runCmd(t, dir, "git", "init", "-q")
 	runCmd(t, dir, "git", "config", "user.email", "test@test.com")
 	runCmd(t, dir, "git", "config", "user.name", "test")
-	writeTempFile(t, dir, "a.go", "package main\n")
+
+	// 1. Create mock source file
+	srcFileContent := `package main
+
+func testFunc() {
+	x := 1
+	y := 2
+	z := 3
+	a := 4
+	b := 5
+}
+`
+	writeTempFile(t, dir, "a.go", srcFileContent)
 	runCmd(t, dir, "git", "add", "a.go")
 	runCmd(t, dir, "git", "commit", "-qm", "Fix issue")
 
+	// 2. Create mock coverage.json with lines and branches
 	covData := map[string]interface{}{
 		"RSpec": map[string]interface{}{
 			"coverage": map[string]interface{}{
 				filepath.Join(dir, "a.go"): map[string]interface{}{
-					"lines": []interface{}{1.0},
+					"lines": []interface{}{1.0, nil, 1.0, 1.0, 1.0, 1.0, 0.0, 0.0, 1.0},
+					"branches": map[string]interface{}{
+						"[:if,0,3,1,3,9]": map[string]interface{}{
+							"[:then,1,3,1,3,4]": 0.0,
+							"[:else,2,3,5,3,9]": 1.0,
+						},
+					},
 				},
 			},
 		},
@@ -453,8 +479,73 @@ func TestReportSubcommand(t *testing.T) {
 		t.Fatalf("failed to write coverage json: %v", err)
 	}
 
+	// 3. Create mock decomplex.json
+	decomplexContent := fmt.Sprintf(`{
+		"detectors": {
+			"unused_return": [
+				{
+					"sites": ["%s:testFunc:3"]
+				}
+			],
+			"state_branch_density": [
+				{
+					"file": "%s",
+					"method": "testFunc",
+					"score": 2.5,
+					"decisions": 4,
+					"state_refs": ["x", "y"],
+					"predicate": "cond",
+					"at": "%s:testFunc:3"
+				}
+			]
+		}
+	}`, filepath.Join(dir, "a.go"), filepath.Join(dir, "a.go"), filepath.Join(dir, "a.go"))
+	decomplexFile := filepath.Join(dir, "decomplex.json")
+	os.WriteFile(decomplexFile, []byte(decomplexContent), 0644)
+
+	// 4. Create mock mutation.json
+	mutationContent := `{
+		"schema": "mutant-facts/v1",
+		"subjects": [
+			{ "file": "a.go", "method": "testFunc", "kill_rate": "82.4%", "gate_status": "advisory" }
+		]
+	}`
+	mutationFile := filepath.Join(dir, "mutation.json")
+	os.WriteFile(mutationFile, []byte(mutationContent), 0644)
+
+	// 5. Create mock exposure.json
+	exposureContent := `{
+		"hits": [
+			{ "file": "a.go", "function": "testFunc", "id": "t1", "type": "spec", "mutation": "killed", "line": 3 }
+		],
+		"files": [
+			{
+				"file": "a.go",
+				"functions": [
+					{
+						"name": "testFunc",
+						"tests": [
+							{ "id": "t2", "type": "spec", "mutation": "survived" }
+						]
+					}
+				]
+			}
+		]
+	}`
+	exposureFile := filepath.Join(dir, "exposure.json")
+	os.WriteFile(exposureFile, []byte(exposureContent), 0644)
+
+	// 6. Output and SARIF file destinations
 	markdownFile := filepath.Join(dir, "report.md")
 	sarifFile := filepath.Join(dir, "report.sarif")
+
+	mockLineagePath := filepath.Join(dir, "mock-lineage")
+	mockLineageContent := `#!/bin/sh
+echo '[{"current_path":"a.go","name":"testFunc","risk_score":10.5,"fixes":2,"changes":5,"moves":1,"current_distinct_tests":3,"current_mutant_verified_tests":2,"current_mutant_killed_tests":1}]'`
+	if err := os.WriteFile(mockLineagePath, []byte(mockLineageContent), 0755); err != nil {
+		t.Fatalf("failed to write mock lineage: %v", err)
+	}
+	lineageCommand := mockLineagePath
 
 	cmd := exec.Command(os.Args[0], "-test.run=TestReportSubcommand")
 	cmd.Env = append(os.Environ(),
@@ -463,6 +554,11 @@ func TestReportSubcommand(t *testing.T) {
 		"TEST_COVERAGE="+covFile,
 		"TEST_OUTPUT="+markdownFile,
 		"TEST_JSON="+sarifFile,
+		"TEST_DECOMPLEX="+decomplexFile,
+		"TEST_MUTATION="+mutationFile,
+		"TEST_EXPOSURE="+exposureFile,
+		"TEST_LINEAGE_DB="+covFile,
+		"TEST_LINEAGE_COMMAND="+lineageCommand,
 	)
 	out, err := cmd.CombinedOutput()
 	if err != nil {
@@ -489,5 +585,183 @@ func TestReportSubcommand(t *testing.T) {
 	}
 	if doc.Version != "2.1.0" {
 		t.Errorf("unexpected sarif version: %s", doc.Version)
+	}
+}
+
+func TestReportSubcommandMinimal(t *testing.T) {
+	if os.Getenv("BE_REPORT_MINIMAL_TEST") == "1" {
+		os.Args = []string{
+			"cmd",
+			"report",
+			"--repo=" + os.Getenv("TEST_REPO"),
+			"--coverage=",
+			"--output=" + os.Getenv("TEST_OUTPUT"),
+			"--json=" + os.Getenv("TEST_JSON"),
+			"--decomplex-facts=" + os.Getenv("TEST_DECOMPLEX"),
+			"--static-files-file=" + os.Getenv("TEST_STATIC_FILES"),
+			"--lineage-db=" + os.Getenv("TEST_LINEAGE_DB"),
+			"--lineage-command=" + os.Getenv("TEST_LINEAGE_COMMAND"),
+			"--files=b.py",
+		}
+		flag.CommandLine = flag.NewFlagSet(os.Args[0], flag.ContinueOnError)
+		main()
+		return
+	}
+
+	dir := t.TempDir()
+	runCmd(t, dir, "git", "init", "-q")
+	runCmd(t, dir, "git", "config", "user.email", "test@test.com")
+	runCmd(t, dir, "git", "config", "user.name", "test")
+
+	// 1. Create mock Python and other source files
+	srcFileContent := `def testFunc():
+    x = 1
+    y = 2
+    z = 3
+    a = 4
+    b = 5
+`
+	writeTempFile(t, dir, "b.py", srcFileContent)
+	writeTempFile(t, dir, "c.rb", "def foo\n  x = 1\nend\n")
+	writeTempFile(t, dir, "d.go", "package main\n")
+	runCmd(t, dir, "git", "add", "b.py" ,"c.rb", "d.go")
+	runCmd(t, dir, "git", "commit", "-qm", "Fix issue")
+
+	// 2. Create static-files JSON containing our files
+	staticFilesContent := `["b.py", "c.rb", "d.go"]`
+	staticFilesFile := filepath.Join(dir, "static.json")
+	os.WriteFile(staticFilesFile, []byte(staticFilesContent), 0644)
+
+	// 3. Create mock decomplex.json
+	decomplexContent := fmt.Sprintf(`{
+		"detectors": {
+			"unused_return": [
+				{
+					"sites": ["%s:testFunc:1"]
+				}
+			],
+			"state_branch_density": [
+				{
+					"file": "%s",
+					"method": "testFunc",
+					"score": 2.5,
+					"decisions": 4,
+					"state_refs": ["x", "y"],
+					"predicate": "cond",
+					"at": "%s:testFunc:1"
+				}
+			]
+		}
+	}`, filepath.Join(dir, "b.py"), filepath.Join(dir, "b.py"), filepath.Join(dir, "b.py"))
+	decomplexFile := filepath.Join(dir, "decomplex.json")
+	os.WriteFile(decomplexFile, []byte(decomplexContent), 0644)
+
+	// 4. Output and SARIF file destinations
+	markdownFile := filepath.Join(dir, "report.md")
+	sarifFile := filepath.Join(dir, "report.sarif")
+
+	mockLineagePath := filepath.Join(dir, "mock-lineage")
+	mockLineageContent := `#!/bin/sh
+echo '[{"current_path":"b.py","name":"testFunc","risk_score":10.5,"fixes":2,"changes":5,"moves":1,"current_distinct_tests":3,"current_mutant_verified_tests":2,"current_mutant_killed_tests":1,"current_test_types":"spec;unit"}]'`
+	if err := os.WriteFile(mockLineagePath, []byte(mockLineageContent), 0755); err != nil {
+		t.Fatalf("failed to write mock lineage: %v", err)
+	}
+	lineageCommand := mockLineagePath
+
+	// 5. Create mock fact-mine script to mock fact-mine-rust binary output
+	mockFactMinePath := filepath.Join(dir, "mock-fact-mine")
+	mockFactMineContent := fmt.Sprintf(`#!/bin/sh
+echo '{"documents":[{"file":"%s","branch_arms":[{"line":3,"span":[3,1,3,10],"decision_line":2}]},{"file":"%s","branch_arms":[{"line":2,"span":[2,1,2,10],"decision_line":1}]}]}'`,
+		filepath.Join(dir, "b.py"), filepath.Join(dir, "c.rb"))
+	if err := os.WriteFile(mockFactMinePath, []byte(mockFactMineContent), 0755); err != nil {
+		t.Fatalf("failed to write mock fact-mine: %v", err)
+	}
+
+	cmd := exec.Command(os.Args[0], "-test.run=TestReportSubcommandMinimal")
+	cmd.Env = append(os.Environ(),
+		"BE_REPORT_MINIMAL_TEST=1",
+		"TEST_REPO="+dir,
+		"TEST_OUTPUT="+markdownFile,
+		"TEST_JSON="+sarifFile,
+		"TEST_DECOMPLEX="+decomplexFile,
+		"TEST_STATIC_FILES="+staticFilesFile,
+		"TEST_LINEAGE_DB="+decomplexFile,
+		"TEST_LINEAGE_COMMAND="+lineageCommand,
+		"FACT_MINE_RUST_BINARY="+mockFactMinePath,
+	)
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		t.Fatalf("report subcommand minimal failed: %v, output: %s", err, string(out))
+	}
+
+	// Verify markdown file was written
+	mdContent, err := os.ReadFile(markdownFile)
+	if err != nil {
+		t.Fatalf("failed to read markdown file: %v", err)
+	}
+	if !regexp.MustCompile(`# Boobytrap Report`).Match(mdContent) {
+		t.Errorf("markdown report missing header, got: %s", string(mdContent))
+	}
+}
+
+func TestReportSubcommandSimple(t *testing.T) {
+	if os.Getenv("BE_REPORT_SIMPLE_TEST") == "1" {
+		os.Args = []string{
+			"cmd",
+			"report",
+			"--repo=" + os.Getenv("TEST_REPO"),
+			"--coverage=",
+			"--output=" + os.Getenv("TEST_OUTPUT"),
+			"--json=" + os.Getenv("TEST_JSON"),
+			"--decomplex-facts=" + os.Getenv("TEST_DECOMPLEX"),
+		}
+		flag.CommandLine = flag.NewFlagSet(os.Args[0], flag.ContinueOnError)
+		main()
+		return
+	}
+
+	dir := t.TempDir()
+	runCmd(t, dir, "git", "init", "-q")
+	runCmd(t, dir, "git", "config", "user.email", "test@test.com")
+	runCmd(t, dir, "git", "config", "user.name", "test")
+
+	srcFileContent := `func simple() {
+	x := 1
+	y := 2
+	z := 3
+	a := 4
+	b := 5
+}
+`
+	writeTempFile(t, dir, "a.go", srcFileContent)
+	runCmd(t, dir, "git", "add", "a.go")
+	runCmd(t, dir, "git", "commit", "-qm", "Init")
+
+	decomplexContent := fmt.Sprintf(`{
+		"detectors": {
+			"unused_return": [
+				{
+					"sites": ["%s:simple:1"]
+				}
+			]
+		}
+	}`, filepath.Join(dir, "a.go"))
+	decomplexFile := filepath.Join(dir, "decomplex.json")
+	os.WriteFile(decomplexFile, []byte(decomplexContent), 0644)
+
+	markdownFile := filepath.Join(dir, "report.md")
+	sarifFile := filepath.Join(dir, "report.sarif")
+
+	cmd := exec.Command(os.Args[0], "-test.run=TestReportSubcommandSimple")
+	cmd.Env = append(os.Environ(),
+		"BE_REPORT_SIMPLE_TEST=1",
+		"TEST_REPO="+dir,
+		"TEST_OUTPUT="+markdownFile,
+		"TEST_JSON="+sarifFile,
+		"TEST_DECOMPLEX="+decomplexFile,
+	)
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		t.Fatalf("report subcommand simple failed: %v, output: %s", err, string(out))
 	}
 }
