@@ -218,6 +218,74 @@ func TestProcessCoverageErrors(t *testing.T) {
 	}
 }
 
+func TestProcessCoverageMultiple(t *testing.T) {
+	dir := t.TempDir()
+	f1 := filepath.Join(dir, "cov1.json")
+	f2 := filepath.Join(dir, "cov2.json")
+
+	covData1 := map[string]interface{}{
+		"RSpec": map[string]interface{}{
+			"coverage": map[string]interface{}{
+				filepath.Join(dir, "a.go"): map[string]interface{}{
+					"lines": []interface{}{1.0, nil, 0.0},
+					"branches": map[string]interface{}{
+						"[:if,0,3,1,3,9]": map[string]interface{}{
+							"[:then,1,3,1,3,4]": 0.0,
+						},
+					},
+				},
+			},
+		},
+	}
+	covBytes1, _ := json.Marshal(covData1)
+	os.WriteFile(f1, covBytes1, 0644)
+
+	covData2 := map[string]interface{}{
+		"RSpec": map[string]interface{}{
+			"coverage": map[string]interface{}{
+				filepath.Join(dir, "a.go"): map[string]interface{}{
+					"lines": []interface{}{nil, 2.0, 1.0},
+					"branches": map[string]interface{}{
+						"[:if,0,3,1,3,9]": map[string]interface{}{
+							"[:then,1,3,1,3,4]": 1.0,
+							"[:else,2,3,5,3,9]": 0.0,
+						},
+					},
+				},
+			},
+		},
+	}
+	covBytes2, _ := json.Marshal(covData2)
+	os.WriteFile(f2, covBytes2, 0644)
+
+	covList := f1 + string(filepath.ListSeparator) + f2
+	dataset, gaps, err := processCoverage(covList, dir)
+	if err != nil {
+		t.Fatalf("failed to process multiple coverage files: %v", err)
+	}
+
+	fc, ok := dataset.Files[filepath.Join(dir, "a.go")]
+	if !ok {
+		t.Fatalf("expected file coverage for a.go")
+	}
+
+	if len(fc.Lines) != 3 || *fc.Lines[0] != 1 || *fc.Lines[1] != 2 || *fc.Lines[2] != 1 {
+		t.Errorf("line coverage mismatch: %+v", fc.Lines)
+	}
+
+	if fc.Branches["[:if,0,3,1,3,9]"]["[:then,1,3,1,3,4]"] != 1 {
+		t.Errorf("branch then mismatch: %v", fc.Branches)
+	}
+	if fc.Branches["[:if,0,3,1,3,9]"]["[:else,2,3,5,3,9]"] != 0 {
+		t.Errorf("branch else mismatch: %v", fc.Branches)
+	}
+
+	gap, ok := gaps["a.go"]
+	if !ok || gap.Total != 2 || gap.Uncovered != 1 {
+		t.Errorf("gap mismatch: %+v", gap)
+	}
+}
+
 func TestMainFunction(t *testing.T) {
 	dir := t.TempDir()
 	runCmd(t, dir, "git", "init", "-q")
