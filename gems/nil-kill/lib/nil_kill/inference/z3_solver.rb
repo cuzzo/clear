@@ -22,6 +22,7 @@
 
 require 'open3'
 require 'set'
+require 'timeout'
 
 module NilKill
   class Z3Solver
@@ -607,15 +608,22 @@ module NilKill
 
     # ---------- Z3 SMT2 ----------
 
-    def sat?(constraints, actions = [])
+    def sat?(constraints, actions = [], extra_assertions: [])
       return true unless z3_available?
-      smt2 = build_smt2(constraints, actions)
-      out, _err, _status = Open3.capture3("z3 -smt2 -in", stdin_data: smt2)
+      smt2 = build_smt2(constraints, actions, extra_assertions: extra_assertions)
+      out = ""
+      begin
+        Timeout.timeout(10) do
+          out, _err, _status = Open3.capture3("z3 -smt2 -in -t:8000", stdin_data: smt2)
+        end
+      rescue Timeout::Error
+        return true
+      end
       # Returns true (SAT = consistent) unless Z3 explicitly says "unsat"
       !out.strip.start_with?("unsat")
     rescue Errno::ENOENT
       true # z3 not on PATH
-    rescue Errno::ETIMEDOUT, Timeout::Error
+    rescue Errno::ETIMEDOUT
       true # z3 timed out -- assume consistent
     end
 
@@ -800,7 +808,13 @@ module NilKill
           if !type_str.empty? && type_str != "T.untyped"
             t_id = type_id(type_str)
             p_var = param_var(class_name, method_name, p_name)
-            lines << "(assert (= #{p_var} #{t_id}))" if @declared_vars.include?(p_var)
+            if @declared_vars.include?(p_var)
+              expr = "(= #{p_var} #{t_id})"
+              if @disabled_assertions.nil? || !@disabled_assertions.include?(expr)
+                lines << "(assert #{expr})"
+                @fixed_vars.add(p_var)
+              end
+            end
           end
         end
 
@@ -810,7 +824,13 @@ module NilKill
           if ret && !ret.empty? && ret != "T.untyped" && ret != "void"
             t_id = type_id(ret)
             ret_var = return_var(class_name, method_name, kind)
-            lines << "(assert (= #{ret_var} #{t_id}))" if @declared_vars.include?(ret_var)
+            if @declared_vars.include?(ret_var)
+              expr = "(= #{ret_var} #{t_id})"
+              if @disabled_assertions.nil? || !@disabled_assertions.include?(expr)
+                lines << "(assert #{expr})"
+                @fixed_vars.add(ret_var)
+              end
+            end
           end
         end
       end
@@ -823,7 +843,13 @@ module NilKill
           if !type_str.empty? && type_str != "T.untyped"
             t_id = type_id(type_str)
             f_var = field_var(class_name, field.to_s)
-            lines << "(assert (= #{f_var} #{t_id}))" if @declared_vars.include?(f_var)
+            if @declared_vars.include?(f_var)
+              expr = "(= #{f_var} #{t_id})"
+              if @disabled_assertions.nil? || !@disabled_assertions.include?(expr)
+                lines << "(assert #{expr})"
+                @fixed_vars.add(f_var)
+              end
+            end
           end
         end
       end
@@ -849,8 +875,9 @@ module NilKill
       end
     end
 
-    def assert_data_flow_constraints(lines)
+    def assert_data_flow_constraints(lines, soft: false)
       build_method_param_variable_map
+      assert_cmd = soft ? "assert-soft" : "assert"
 
       # 1. Ivar assignments from params
       Array(@evidence.dig("facts", "ivar_param_origins")).each do |key, params|
@@ -861,7 +888,10 @@ module NilKill
         Array(params).each do |p_name|
           p_var = param_var(class_name, "initialize", p_name.to_s)
           if @declared_vars.include?(p_var)
-            lines << "(assert (is-sub #{p_var} #{ivar_var_name}))"
+            expr = "(is-sub #{p_var} #{ivar_var_name})"
+            if @disabled_assertions.nil? || !@disabled_assertions.include?(expr)
+              lines << "(#{assert_cmd} #{expr})"
+            end
           end
         end
       end
@@ -881,11 +911,17 @@ module NilKill
           if code.start_with?("@")
             ivar_var_name = ivar_var(class_name, code)
             if @declared_vars.include?(ivar_var_name)
-              lines << "(assert (is-sub #{ivar_var_name} #{ret_var}))"
+              expr = "(is-sub #{ivar_var_name} #{ret_var})"
+              if @disabled_assertions.nil? || !@disabled_assertions.include?(expr)
+                lines << "(#{assert_cmd} #{expr})"
+              end
             end
           elsif !type.empty? && type != "T.untyped"
             t_id = type_id(type)
-            lines << "(assert (is-sub #{t_id} #{ret_var}))"
+            expr = "(is-sub #{t_id} #{ret_var})"
+            if @disabled_assertions.nil? || !@disabled_assertions.include?(expr)
+              lines << "(#{assert_cmd} #{expr})"
+            end
           end
         end
       end
@@ -906,15 +942,24 @@ module NilKill
           if code.start_with?("@")
             ivar_var_name = ivar_var(enclosing_scope, code)
             if @declared_vars.include?(ivar_var_name)
-              lines << "(assert (is-sub #{ivar_var_name} #{p_var}))"
+              expr = "(is-sub #{ivar_var_name} #{p_var})"
+              if @disabled_assertions.nil? || !@disabled_assertions.include?(expr)
+                lines << "(#{assert_cmd} #{expr})"
+              end
             end
           elsif !type.empty? && type != "T.untyped"
             t_id = type_id(type)
-            lines << "(assert (is-sub #{t_id} #{p_var}))"
+            expr = "(is-sub #{t_id} #{p_var})"
+            if @disabled_assertions.nil? || !@disabled_assertions.include?(expr)
+              lines << "(#{assert_cmd} #{expr})"
+            end
           elsif !code.empty? && code =~ /\A[a-z_][a-z0-9_]*\z/
             caller_p_var = param_var(enclosing_scope, source_method, code)
             if @declared_vars.include?(caller_p_var)
-              lines << "(assert (is-sub #{caller_p_var} #{p_var}))"
+              expr = "(is-sub #{caller_p_var} #{p_var})"
+              if @disabled_assertions.nil? || !@disabled_assertions.include?(expr)
+                lines << "(#{assert_cmd} #{expr})"
+              end
             end
           end
         end
@@ -988,6 +1033,7 @@ module NilKill
       end
 
       # 3. Add transitive relations to subtyping cases
+      @transitive_set = transitive
       transitive.each do |sub, sup|
         sub_id = @type_ids[sub]
         sup_id = @type_ids[sup]
@@ -1022,13 +1068,48 @@ module NilKill
         end
       end
 
+      untyped_id = @type_ids["T.untyped"]
+      subtype_cases << "(= b #{untyped_id})" if untyped_id
+
+      nilable_untyped_id = @type_ids["T.nilable(T.untyped)"]
+      subtype_cases << "(= b #{nilable_untyped_id})" if nilable_untyped_id
+
+      # 5. Map relative/unqualified type names to fully qualified counterparts
+      @type_ids.each do |type_str, id|
+        base = type_str.start_with?("T.nilable(") ? type_str[10..-2] : type_str
+        next if base.include?("::")
+
+        base_name = base
+        candidates = unqualified_map[base_name] || []
+        candidates.each do |cand|
+          next if cand == base
+          cand_id = @type_ids[cand]
+          if cand_id
+            subtype_cases << "(and (= a #{id}) (= b #{cand_id}))"
+            subtype_cases << "(and (= a #{cand_id}) (= b #{id}))"
+          end
+
+          nilable_cand = "T.nilable(#{cand})"
+          nilable_cand_id = @type_ids[nilable_cand]
+          nilable_self = type_str.start_with?("T.nilable(") ? type_str : "T.nilable(#{type_str})"
+          nilable_self_id = @type_ids[nilable_self]
+
+          if nilable_cand_id && nilable_self_id
+            subtype_cases << "(and (= a #{nilable_self_id}) (= b #{nilable_cand_id}))"
+            subtype_cases << "(and (= a #{nilable_cand_id}) (= b #{nilable_self_id}))"
+          end
+        end
+      end
+
       subtype_cases.uniq
     end
 
-    def build_smt2(constraints, actions = [])
+    def build_smt2(constraints, actions = [], soft_dataflow: false, extra_assertions: [])
       lines = []
+      lines << "(set-option :timeout 10000)"
       lines << "(set-logic QF_LIA)"
 
+      @fixed_vars = Set.new
       populate_all_types(actions)
 
       subtype_cases = build_subtype_cases
@@ -1038,8 +1119,13 @@ module NilKill
       lines << "  (or #{subtype_cases.join(" ")}))"
 
       declare_all_variables(lines)
+
+      if @disabled_assertions.nil?
+        initialize_clean_base_model
+      end
+
       assert_existing_types(lines)
-      assert_data_flow_constraints(lines)
+      assert_data_flow_constraints(lines, soft: soft_dataflow)
 
       # 1. Assert proposed changes from actions as constraints
       actions.each do |action|
@@ -1077,6 +1163,11 @@ module NilKill
         lines << "(assert (is-sub #{proposed_id} #{param_id}))"
       end
 
+      # 3. Extra assertions
+      extra_assertions.each do |expr|
+        lines << "(assert #{expr})"
+      end
+
       lines << "(check-sat)"
       lines.join("\n") + "\n"
     end
@@ -1084,33 +1175,508 @@ module NilKill
     def solve_types(actions = [])
       return {} unless z3_available?
 
-      smt2 = build_smt2([], actions)
+      build_smt2([], [], soft_dataflow: false) if @disabled_assertions.nil?
 
-      # Append optimization objectives for all declared variables
-      optimize_lines = []
-      @declared_vars.each do |var|
-        optimize_lines << "(maximize #{var})"
+      subtype_cases = build_subtype_cases
+      prefix_lines = []
+      prefix_lines << "(set-option :timeout 10000)"
+      prefix_lines << "(set-logic QF_LIA)"
+      prefix_lines << "(define-fun is-sub ((a Int) (b Int)) Bool (or #{subtype_cases.join(" ")}))"
+      declare_all_variables(prefix_lines)
+      assert_existing_types(prefix_lines)
+      assert_data_flow_constraints(prefix_lines, soft: false)
+
+      prefix_smt = prefix_lines.join("\n") + "\n"
+
+      action_assertions = []
+      action_to_expr = {}
+      actions.each do |action|
+        proposed = action.dig("data", "type").to_s
+        proposed = extract_return_type(action.dig("data", "sig").to_s) if action["kind"] == "add_sig"
+        next unless proposed && proposed != "T.untyped"
+
+        rec = method_rec_by_location["#{action["path"]}:#{action["line"]}"]
+        next unless rec
+
+        class_name = rec["class"].to_s
+        method_name = rec["method"].to_s
+        kind = rec["kind"].to_s
+
+        case action["kind"]
+        when "fix_sig_return"
+          ret_var = return_var(class_name, method_name, kind)
+          if @declared_vars.include?(ret_var)
+            expr = "(= #{ret_var} #{type_id(proposed)})"
+            action_assertions << expr
+            action_to_expr[action] = expr
+          end
+        when "fix_sig_param", "narrow_generic_param"
+          p_name = action.dig("data", "name").to_s
+          p_var = param_var(class_name, method_name, p_name)
+          if @declared_vars.include?(p_var)
+            expr = "(= #{p_var} #{type_id(proposed)})"
+            action_assertions << expr
+            action_to_expr[action] = expr
+          end
+        when "add_struct_field_sig"
+          klass = action.dig("data", "class").to_s
+          field = action.dig("data", "field").to_s
+          f_var = field_var(klass, field)
+          if @declared_vars.include?(f_var)
+            expr = "(= #{f_var} #{type_id(proposed)})"
+            action_assertions << expr
+            action_to_expr[action] = expr
+          end
+          i_var = ivar_var(klass, field)
+          if @declared_vars.include?(i_var)
+            expr = "(= #{i_var} #{type_id(proposed)})"
+            action_assertions << expr
+            action_to_expr[action] = expr
+          end
+        end
       end
-      optimize_lines << "(check-sat)"
-      optimize_lines << "(get-model)"
 
-      # Replace original check-sat with the optimization queries
-      smt2_opt = smt2.sub("(check-sat)\n", optimize_lines.join("\n") + "\n")
+      clean_action_exprs = []
+      if action_assertions.any?
+        require 'tempfile'
+        temp = Tempfile.new(["z3_actions", ".json"])
+        begin
+          temp_payload = {
+            "prefix" => prefix_smt,
+            "assertions" => action_assertions
+          }
+          temp.write(JSON.generate(temp_payload))
+          temp.flush
 
-      out, _err, _status = Open3.capture3("z3 -smt2 -in", stdin_data: smt2_opt)
-      return {} if out.strip.start_with?("unsat")
+          cleaner_bin = File.expand_path("bin/z3_cleaner")
+          unless File.exist?(cleaner_bin)
+            cleaner_bin = File.expand_path("../../../../../../bin/z3_cleaner", __FILE__)
+          end
+
+          if File.exist?(cleaner_bin)
+            out, _err, status = Open3.capture3("#{cleaner_bin} #{temp.path}")
+            if status.success? && out && !out.strip.empty?
+              clean_action_exprs = JSON.parse(out) || []
+            else
+              clean_action_exprs = []
+            end
+          else
+            clean_action_exprs = []
+          end
+        rescue StandardError
+          clean_action_exprs = []
+        ensure
+          temp.close
+          temp.unlink
+        end
+      end
+      # Local BFS type propagation
+      forward_graph = Hash.new { |h, k| h[k] = Set.new }
+      concrete_inputs = Hash.new { |h, k| h[k] = Set.new }
+
+      # 1. Existing sigs
+      [@evidence.dig("facts", "existing_sigs"), @evidence.dig("facts", "unsigned_methods")].compact.flatten.each do |rec|
+        class_name = rec["class"].to_s
+        method_name = rec["method"].to_s
+        kind = rec["kind"].to_s
+
+        Array(rec["params"]).each do |param|
+          p_name = param["name"].to_s
+          type_str = param["type"].to_s
+          if !type_str.empty? && type_str != "T.untyped"
+            p_var = param_var(class_name, method_name, p_name)
+            concrete_inputs[p_var].add(type_str) if @declared_vars.include?(p_var)
+          end
+        end
+
+        if rec["sig"]
+          ret = extract_return_type(rec["sig"].to_s)
+          if ret && !ret.empty? && ret != "T.untyped" && ret != "void"
+            ret_var = return_var(class_name, method_name, kind)
+            concrete_inputs[ret_var].add(ret) if @declared_vars.include?(ret_var)
+          end
+        end
+      end
+
+      # 2. Struct fields
+      Array(@evidence.dig("facts", "struct_declarations")).each do |decl|
+        class_name = decl["class"].to_s
+        Hash(decl["field_types"]).each do |field, type|
+          type_str = type.to_s
+          if !type_str.empty? && type_str != "T.untyped"
+            f_var = field_var(class_name, field.to_s)
+            concrete_inputs[f_var].add(type_str) if @declared_vars.include?(f_var)
+          end
+        end
+      end
+
+      # 3. Ivar assignments
+      Array(@evidence.dig("facts", "ivar_param_origins")).each do |key, params|
+        class_name, ivar_name = key.split("\0", 2)
+        ivar_var_name = ivar_var(class_name, ivar_name)
+        next unless @declared_vars.include?(ivar_var_name)
+        Array(params).each do |p_name|
+          p_var = param_var(class_name, "initialize", p_name.to_s)
+          forward_graph[p_var].add(ivar_var_name) if @declared_vars.include?(p_var)
+        end
+      end
+
+      # 4. Return origins
+      Array(@evidence.dig("facts", "return_origins")).each do |r|
+        class_name = r["class"].to_s
+        method_name = r["method"].to_s
+        kind = r["kind"].to_s
+        ret_var = return_var(class_name, method_name, kind)
+        next unless @declared_vars.include?(ret_var)
+
+        Array(r["sources"]).each do |src|
+          code = src["code"].to_s
+          type = src["type"].to_s
+
+          if code.start_with?("@")
+            ivar_var_name = ivar_var(class_name, code)
+            forward_graph[ivar_var_name].add(ret_var) if @declared_vars.include?(ivar_var_name)
+          elsif !type.empty? && type != "T.untyped"
+            concrete_inputs[ret_var].add(type)
+          end
+        end
+      end
+
+      # 5. Param origins (calls)
+      build_method_param_variable_map
+      Array(@evidence.dig("facts", "param_origins")).each do |p|
+        callee = p["callee"].to_s
+        slot = p["slot"].to_s
+        enclosing_scope = p["enclosing_scope"].to_s
+        source_method = p["source_method"].to_s
+        code = p["code"].to_s
+        type = p["type"].to_s
+
+        candidates = @method_param_vars[[callee, slot]]
+        next if candidates.empty?
+
+        candidates.each do |p_var|
+          if code.start_with?("@")
+            ivar_var_name = ivar_var(enclosing_scope, code)
+            forward_graph[ivar_var_name].add(p_var) if @declared_vars.include?(ivar_var_name)
+          elsif !type.empty? && type != "T.untyped"
+            concrete_inputs[p_var].add(type) if @declared_vars.include?(p_var)
+          elsif !code.empty? && code =~ /\A[a-z_][a-z0-9_]*\z/
+            caller_p_var = param_var(enclosing_scope, source_method, code)
+            forward_graph[caller_p_var].add(p_var) if @declared_vars.include?(caller_p_var)
+          end
+        end
+      end
+
+      is_subtype = lambda do |t1, t2|
+        return true if t1 == t2
+        return true if t2 == "T.untyped" || t2 == "T.nilable(T.untyped)"
+        return true if t1 == "NilClass" && t2.start_with?("T.nilable(")
+
+        inner1 = t1.start_with?("T.nilable(") ? t1[10..-2] : t1
+        inner2 = t2.start_with?("T.nilable(") ? t2[10..-2] : t2
+        return true if inner1 == inner2
+        @transitive_set ||= Set.new
+        @transitive_set.include?([inner1, inner2])
+      end
+
+      merge_types = lambda do |t1, t2|
+        return t2 if t1.nil? || t1 == "T.untyped"
+        return t1 if t2.nil? || t2 == "T.untyped"
+        return t1 if t1 == t2
+        if is_subtype.call(t1, t2)
+          t2
+        elsif is_subtype.call(t2, t1)
+          t1
+        else
+          "T.untyped"
+        end
+      end
 
       solved = {}
-      id_to_type = @type_ids.invert
+      queue = []
 
-      out.scan(/\(define-fun\s+(\w+)\s+\(\)\s+Int\s+(\d+)\)/) do |var_name, val_str|
-        val = val_str.to_i
-        type_str = id_to_type[val]
-        solved[var_name] = type_str if type_str
+      # 1. Initialize concrete inputs
+      concrete_inputs.each do |var, types_set|
+        types_set.each do |t|
+          solved[var] = merge_types.call(solved[var], t)
+        end
+        queue << var if solved[var]
+      end
+
+      # 2. Add clean actions
+      clean_action_exprs_set = clean_action_exprs.to_set
+      actions.each do |action|
+        expr = action_to_expr[action]
+        next unless expr && clean_action_exprs_set.include?(expr)
+
+        proposed = action.dig("data", "type").to_s
+        proposed = extract_return_type(action.dig("data", "sig").to_s) if action["kind"] == "add_sig"
+        next unless proposed && proposed != "T.untyped"
+
+        rec = method_rec_by_location["#{action["path"]}:#{action["line"]}"]
+        next unless rec
+
+        class_name = rec["class"].to_s
+        method_name = rec["method"].to_s
+        kind = rec["kind"].to_s
+
+        var_name = nil
+        case action["kind"]
+        when "fix_sig_return"
+          var_name = return_var(class_name, method_name, kind)
+        when "fix_sig_param", "narrow_generic_param"
+          p_name = action.dig("data", "name").to_s
+          var_name = param_var(class_name, method_name, p_name)
+        when "add_struct_field_sig"
+          klass = action.dig("data", "class").to_s
+          field = action.dig("data", "field").to_s
+          var_name = field_var(klass, field)
+          i_var = ivar_var(klass, field)
+          if @declared_vars.include?(i_var)
+            solved[i_var] = merge_types.call(solved[i_var], proposed)
+            queue << i_var
+          end
+        end
+
+        if var_name && @declared_vars.include?(var_name)
+          solved[var_name] = merge_types.call(solved[var_name], proposed)
+          queue << var_name
+        end
+      end
+
+      # 3. BFS propagation
+      visited = Set.new
+      while queue.any?
+        u = queue.shift
+        next if visited.include?(u)
+        visited.add(u)
+
+        u_type = solved[u]
+        next if u_type.nil? || u_type == "T.untyped"
+
+        forward_graph[u].each do |v|
+          old_type = solved[v]
+          new_type = merge_types.call(old_type, u_type)
+          if new_type != old_type
+            solved[v] = new_type
+            visited.delete(v)
+            queue << v
+          end
+        end
       end
 
       solved
     end
+
+
+    def inferred_actions(candidate_actions = [])
+      solved = solve_types(candidate_actions)
+      return [] if solved.empty?
+
+      actions = []
+      candidate_actions.each do |action|
+        proposed = action.dig("data", "type").to_s
+        proposed = extract_return_type(action.dig("data", "sig").to_s) if action["kind"] == "add_sig"
+        next unless proposed && proposed != "T.untyped"
+
+        rec = method_rec_by_location["#{action["path"]}:#{action["line"]}"]
+        next unless rec
+
+        class_name = rec["class"].to_s
+        method_name = rec["method"].to_s
+        kind = rec["kind"].to_s
+
+        consistent = false
+        case action["kind"]
+        when "fix_sig_return"
+          ret_var = return_var(class_name, method_name, kind)
+          consistent = (solved[ret_var] == proposed)
+        when "fix_sig_param", "narrow_generic_param"
+          p_name = action.dig("data", "name").to_s
+          p_var = param_var(class_name, method_name, p_name)
+          consistent = (solved[p_var] == proposed)
+        when "add_struct_field_sig"
+          klass = action.dig("data", "class").to_s
+          field = action.dig("data", "field").to_s
+          f_var = field_var(klass, field)
+          i_var = ivar_var(klass, field)
+          consistent = (solved[f_var] == proposed || solved[i_var] == proposed)
+        end
+
+        if consistent
+          actions << action
+        end
+      end
+
+      actions
+    end
+
+    def initialize_clean_base_model
+      @disabled_assertions = Set.new
+      return unless z3_available?
+
+      subtype_cases = build_subtype_cases
+      prefix_lines = []
+      prefix_lines << "(set-option :timeout 10000)"
+      prefix_lines << "(set-logic QF_LIA)"
+      prefix_lines << "(define-fun is-sub ((a Int) (b Int)) Bool (or #{subtype_cases.join(" ")}))"
+      declare_all_variables(prefix_lines)
+
+      local_assertions = []
+
+      # 1. Existing sigs
+      [@evidence.dig("facts", "existing_sigs"), @evidence.dig("facts", "unsigned_methods")].compact.flatten.each do |rec|
+        class_name = rec["class"].to_s
+        method_name = rec["method"].to_s
+        kind = rec["kind"].to_s
+
+        Array(rec["params"]).each do |param|
+          p_name = param["name"].to_s
+          type_str = param["type"].to_s
+          if !type_str.empty? && type_str != "T.untyped"
+            t_id = type_id(type_str)
+            p_var = param_var(class_name, method_name, p_name)
+            if @declared_vars.include?(p_var)
+              local_assertions << "(= #{p_var} #{t_id})"
+            end
+          end
+        end
+
+        if rec["sig"]
+          ret = extract_return_type(rec["sig"].to_s)
+          if ret && !ret.empty? && ret != "T.untyped" && ret != "void"
+            t_id = type_id(ret)
+            ret_var = return_var(class_name, method_name, kind)
+            if @declared_vars.include?(ret_var)
+              local_assertions << "(= #{ret_var} #{t_id})"
+            end
+          end
+        end
+      end
+
+      # 2. Struct fields
+      Array(@evidence.dig("facts", "struct_declarations")).each do |decl|
+        class_name = decl["class"].to_s
+        Hash(decl["field_types"]).each do |field, type|
+          type_str = type.to_s
+          if !type_str.empty? && type_str != "T.untyped"
+            t_id = type_id(type_str)
+            f_var = field_var(class_name, field.to_s)
+            if @declared_vars.include?(f_var)
+              local_assertions << "(= #{f_var} #{t_id})"
+            end
+          end
+        end
+      end
+
+      # 3. Data flow constraints
+      build_method_param_variable_map
+
+      # Ivar assignments
+      Array(@evidence.dig("facts", "ivar_param_origins")).each do |key, params|
+        class_name, ivar_name = key.split("\0", 2)
+        ivar_var_name = ivar_var(class_name, ivar_name)
+        next unless @declared_vars.include?(ivar_var_name)
+
+        Array(params).each do |p_name|
+          p_var = param_var(class_name, "initialize", p_name.to_s)
+          if @declared_vars.include?(p_var)
+            local_assertions << "(is-sub #{p_var} #{ivar_var_name})"
+          end
+        end
+      end
+
+      # Return origins
+      Array(@evidence.dig("facts", "return_origins")).each do |r|
+        class_name = r["class"].to_s
+        method_name = r["method"].to_s
+        kind = r["kind"].to_s
+        ret_var = return_var(class_name, method_name, kind)
+        next unless @declared_vars.include?(ret_var)
+
+        Array(r["sources"]).each do |src|
+          code = src["code"].to_s
+          type = src["type"].to_s
+
+          if code.start_with?("@")
+            ivar_var_name = ivar_var(class_name, code)
+            if @declared_vars.include?(ivar_var_name)
+              local_assertions << "(is-sub #{ivar_var_name} #{ret_var})"
+            end
+          elsif !type.empty? && type != "T.untyped"
+            t_id = type_id(type)
+            local_assertions << "(is-sub #{t_id} #{ret_var})"
+          end
+        end
+      end
+
+      # Param origins (calls)
+      Array(@evidence.dig("facts", "param_origins")).each do |p|
+        callee = p["callee"].to_s
+        slot = p["slot"].to_s
+        enclosing_scope = p["enclosing_scope"].to_s
+        source_method = p["source_method"].to_s
+        code = p["code"].to_s
+        type = p["type"].to_s
+
+        candidates = @method_param_vars[[callee, slot]]
+        next if candidates.empty?
+
+        candidates.each do |p_var|
+          if code.start_with?("@")
+            ivar_var_name = ivar_var(enclosing_scope, code)
+            if @declared_vars.include?(ivar_var_name)
+              local_assertions << "(is-sub #{ivar_var_name} #{p_var})"
+            end
+          elsif !type.empty? && type != "T.untyped"
+            t_id = type_id(type)
+            local_assertions << "(is-sub #{t_id} #{p_var})"
+          elsif !code.empty? && code =~ /\A[a-z_][a-z0-9_]*\z/
+            caller_p_var = param_var(enclosing_scope, source_method, code)
+            if @declared_vars.include?(caller_p_var)
+              local_assertions << "(is-sub #{caller_p_var} #{p_var})"
+            end
+          end
+        end
+      end
+
+      # Run the Go cleaner via JSON tempfile
+      require 'tempfile'
+      temp = Tempfile.new(["z3_input", ".json"])
+      begin
+        temp_payload = {
+          "prefix" => prefix_lines.join("\n") + "\n",
+          "assertions" => local_assertions
+        }
+        temp.write(JSON.generate(temp_payload))
+        temp.flush
+
+        cleaner_bin = File.expand_path("bin/z3_cleaner")
+        unless File.exist?(cleaner_bin)
+          cleaner_bin = File.expand_path("../../../../../../bin/z3_cleaner", __FILE__)
+        end
+
+        if File.exist?(cleaner_bin)
+          out, _err, status = Open3.capture3("#{cleaner_bin} #{temp.path}")
+          if status.success? && out && !out.strip.empty?
+            clean_assertions = JSON.parse(out)
+            @disabled_assertions = local_assertions.to_set - (clean_assertions || []).to_set
+          else
+            @disabled_assertions = Set.new
+          end
+        else
+          @disabled_assertions = Set.new
+        end
+      rescue StandardError
+        @disabled_assertions = Set.new
+      ensure
+        temp.close
+        temp.unlink
+      end
+    end
+
+    public :solve_types, :inferred_actions
 
     # ---------- z3 availability ----------
 

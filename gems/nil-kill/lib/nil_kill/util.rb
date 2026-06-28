@@ -390,9 +390,17 @@ module NilKill
     others = classes.reject { |c| c == "NilClass" || c.include?("#") || c.start_with?("Sorbet::Private::") }
     return nil if others.empty?
     return "T::Boolean" if others.sort == %w[FalseClass TrueClass]
-    return nil unless others.size == 1
-    klass = others.first
-    return nil if klass.start_with?("AST::") || klass.start_with?("MIR::")
+    
+    if others.size > 1 && others.all? { |c| c.start_with?("AST::") }
+      klass = "AST::Node"
+    elsif others.size > 1 && others.all? { |c| c.start_with?("MIR::") }
+      klass = "MIR::Node"
+    else
+      return nil unless others.size == 1
+      klass = others.first
+      return nil if klass.start_with?("AST::") || klass.start_with?("MIR::")
+    end
+
     has_nil ? "T.nilable(#{klass})" : klass
   end
 
@@ -409,7 +417,6 @@ module NilKill
     when "class"
       klass = shape["name"].to_s
       return nil if klass.empty? || klass == "T.untyped" || klass.include?("#") || klass.start_with?("Sorbet::Private::")
-      return nil if klass.start_with?("AST::") || klass.start_with?("MIR::")
       klass
     when "array"
       elem = shape_union_type(shape["elements"])
@@ -451,6 +458,13 @@ module NilKill
     types = parsed_shapes.filter_map { |shape| shape_type(shape) }.uniq.sort
     has_nil = types.delete("NilClass")
     return nil if types.empty?
+
+    if types.all? { |t| t.start_with?("AST::") }
+      types = ["AST::Node"]
+    elsif types.all? { |t| t.start_with?("MIR::") }
+      types = ["MIR::Node"]
+    end
+
     return "T.untyped" if types.size > MAX_SHAPE_UNION_TYPES
     type = types == %w[FalseClass TrueClass] ? "T::Boolean" : (types.one? ? types.first : "T.any(#{types.join(", ")})")
     type = "T.nilable(#{type})" if has_nil

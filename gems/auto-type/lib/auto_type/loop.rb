@@ -114,6 +114,11 @@ module AutoType
           puts "narrow-tlet review actions: #{review_narrow_tlet.size}"
           high_actions.concat(review_narrow_tlet)
         end
+        if @z3_solver
+          before_count = high_actions.size
+          high_actions = @z3_solver.inferred_actions(high_actions)
+          puts "Z3 SMT global consistency filter: kept #{high_actions.size} of #{before_count} action(s)"
+        end
         high = high_actions.size
         puts "high-confidence actions: #{high}"
         break if high.zero?
