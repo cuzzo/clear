@@ -649,38 +649,103 @@ module NilKill
       end
     end
 
-    def populate_all_types
-      # 1. Registration from existing signatures
+    def populate_all_types(actions = [])
+      return unless @type_ids.empty?
+
+      # Collect all type strings first
+      types = Set.new
       [@evidence.dig("facts", "existing_sigs"), @evidence.dig("facts", "unsigned_methods")].compact.flatten.each do |rec|
-        Array(rec["params"]).each do |p|
-          type_id(p["type"].to_s) if p["type"]
-        end
+        Array(rec["params"]).each { |p| types.add(p["type"].to_s) if p["type"] }
         if rec["sig"]
           ret = extract_return_type(rec["sig"].to_s)
-          type_id(ret) if ret
+          types.add(ret) if ret
         end
       end
-
-      # 2. Struct fields
       Array(@evidence.dig("facts", "struct_declarations")).each do |decl|
-        Hash(decl["field_types"]).each_value do |t|
-          type_id(t.to_s)
-        end
+        Hash(decl["field_types"]).each_value { |t| types.add(t.to_s) }
       end
-
-      # 3. Param origins / Return origins
-      Array(@evidence.dig("facts", "param_origins")).each do |p|
-        type_id(p["type"].to_s) if p["type"]
-      end
+      Array(@evidence.dig("facts", "param_origins")).each { |p| types.add(p["type"].to_s) if p["type"] }
       Array(@evidence.dig("facts", "return_origins")).each do |r|
-        type_id(r["candidate_type"].to_s) if r["candidate_type"]
-        Array(r["sources"]).each do |src|
-          type_id(src["type"].to_s) if src["type"]
+        types.add(r["candidate_type"].to_s) if r["candidate_type"]
+        Array(r["sources"]).each { |src| types.add(src["type"].to_s) if src["type"] }
+      end
+      Array(actions).each do |action|
+        proposed = action.dig("data", "type").to_s
+        types.add(proposed) unless proposed.empty?
+      end
+      types.add("NilClass")
+      types.add("T.untyped")
+
+      # Build the inheritance graph for sorting
+      graph = Hash.new { |h, k| h[k] = Set.new }
+      BUILT_IN_SUBTYPES.each { |sub, sups| sups.each { |sup| graph[sub].add(sup) } }
+
+      # Scan class declarations from source files
+      unqualified_map = Hash.new { |h, k| h[k] = [] }
+      types.each do |type_str|
+        base = type_str.start_with?("T.nilable(") ? type_str[10..-2] : type_str
+        base_name = base.split("::").last
+        unqualified_map[base_name] << base if base_name
+      end
+
+      @source_files.each do |path|
+        next unless File.file?(path)
+        begin
+          content = File.read(path)
+          content.scan(/class\s+([A-Za-z0-9_:]+)\s*<\s*([A-Za-z0-9_:]+)/) do |cls, sup|
+            cls_base = cls.split("::").last
+            sup_base = sup.split("::").last
+            cls_candidates = unqualified_map[cls_base]
+            sup_candidates = unqualified_map[sup_base]
+            cls_candidates.each do |c_fq|
+              sup_candidates.each do |s_fq|
+                c_prefix = c_fq.split("::")[0..-2]
+                s_prefix = s_fq.split("::")[0..-2]
+                if c_prefix == s_prefix || s_fq == "Node" || s_fq == "MIR::Node"
+                  graph[c_fq].add(s_fq)
+                end
+              end
+            end
+          end
+        rescue StandardError
         end
       end
 
-      type_id("NilClass")
-      type_id("T.untyped")
+      # Perform topological sort: parents (supertypes) first -> children (subtypes) after
+      sorted = []
+      visited = {} # type => :visiting or :visited
+
+      visit = lambda do |u|
+        next if visited[u] == :visited
+        visited[u] = :visiting
+
+        if u.start_with?("T.nilable(")
+          inner = u[10..-2]
+          visit.call(inner) if types.include?(inner)
+
+          # Parents of inner type converted to nilable are parents of this nilable
+          parents = graph[inner]
+          parents.each do |p|
+            nilable_p = "T.nilable(#{p})"
+            visit.call(nilable_p) if types.include?(nilable_p)
+          end
+        else
+          parents = graph[u]
+          parents.each { |p| visit.call(p) if types.include?(p) }
+        end
+
+        visited[u] = :visited
+        sorted << u
+      end
+
+      visit.call("T.untyped")
+      visit.call("NilClass")
+      types.each { |t| visit.call(t) }
+
+      @type_ids = {}
+      sorted.each_with_index do |type_str, idx|
+        @type_ids[type_str] = idx
+      end
     end
 
     def declare_all_variables(lines)
@@ -964,7 +1029,7 @@ module NilKill
       lines = []
       lines << "(set-logic QF_LIA)"
 
-      populate_all_types
+      populate_all_types(actions)
 
       subtype_cases = build_subtype_cases
 
@@ -1014,6 +1079,37 @@ module NilKill
 
       lines << "(check-sat)"
       lines.join("\n") + "\n"
+    end
+
+    def solve_types(actions = [])
+      return {} unless z3_available?
+
+      smt2 = build_smt2([], actions)
+
+      # Append optimization objectives for all declared variables
+      optimize_lines = []
+      @declared_vars.each do |var|
+        optimize_lines << "(maximize #{var})"
+      end
+      optimize_lines << "(check-sat)"
+      optimize_lines << "(get-model)"
+
+      # Replace original check-sat with the optimization queries
+      smt2_opt = smt2.sub("(check-sat)\n", optimize_lines.join("\n") + "\n")
+
+      out, _err, _status = Open3.capture3("z3 -smt2 -in", stdin_data: smt2_opt)
+      return {} if out.strip.start_with?("unsat")
+
+      solved = {}
+      id_to_type = @type_ids.invert
+
+      out.scan(/\(define-fun\s+(\w+)\s+\(\)\s+Int\s+(\d+)\)/) do |var_name, val_str|
+        val = val_str.to_i
+        type_str = id_to_type[val]
+        solved[var_name] = type_str if type_str
+      end
+
+      solved
     end
 
     # ---------- z3 availability ----------

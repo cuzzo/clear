@@ -504,4 +504,131 @@ RSpec.describe NilKill::Z3Solver do
       end
     end
   end
+
+  describe "#solve_types" do
+    it "solves variables and returns the most specific types based on subtyping constraints" do
+      Dir.mktmpdir("nil-kill-z3", File.join(NilKill::ROOT, "tmp")) do |dir|
+        path = File.join(dir, "solve.rb")
+        File.write(path, <<~RUBY)
+          class Parent; end
+          class Child < Parent; end
+          class SolveExample
+            def initialize(val)
+              @ivar = val
+            end
+            def get_val
+              @ivar
+            end
+          end
+        RUBY
+        rel = Pathname.new(path).relative_path_from(Pathname.new(NilKill::ROOT)).to_s
+
+        evidence = {
+          "facts" => {
+            "existing_sigs" => [
+              {
+                "path" => rel,
+                "line" => 3,
+                "class" => "SolveExample",
+                "method" => "initialize",
+                "kind" => "instance",
+                "params" => [{ "name" => "val", "type" => "T.untyped" }]
+              },
+              {
+                "path" => rel,
+                "line" => 6,
+                "class" => "SolveExample",
+                "method" => "get_val",
+                "kind" => "instance",
+                "params" => []
+              }
+            ],
+            "ivar_param_origins" => {
+              "SolveExample\0@ivar" => ["val"]
+            },
+            "return_origins" => [
+              {
+                "class" => "SolveExample",
+                "method" => "get_val",
+                "kind" => "instance",
+                "sources" => [{ "code" => "@ivar", "type" => "" }]
+              }
+            ]
+          }
+        }
+
+        solver = described_class.new(evidence, [path])
+        
+        solver.instance_eval do
+          @type_ids = {
+            "T.untyped" => 0,
+            "NilClass" => 1,
+            "Parent" => 2,
+            "Child" => 3
+          }
+        end
+
+        action = {
+          "kind" => "fix_sig_param",
+          "path" => rel,
+          "line" => 3,
+          "data" => { "name" => "val", "type" => "Child" }
+        }
+
+        solved = solver.send(:solve_types, [action])
+        
+        ret_var_name = solver.send(:return_var, "SolveExample", "get_val", "instance")
+        expect(solved[ret_var_name]).to eq("Child")
+      end
+    end
+
+    it "scans and topologically sorts class inheritance structures from source files" do
+      Dir.mktmpdir("nil-kill-z3", File.join(NilKill::ROOT, "tmp")) do |dir|
+        path = File.join(dir, "sort.rb")
+        File.write(path, <<~RUBY)
+          class Parent; end
+          class Child < Parent; end
+        RUBY
+        rel = Pathname.new(path).relative_path_from(Pathname.new(NilKill::ROOT)).to_s
+
+        evidence = {
+          "facts" => {
+            "existing_sigs" => [
+              {
+                "path" => rel,
+                "line" => 1,
+                "class" => "Parent",
+                "method" => "foo",
+                "kind" => "instance",
+                "params" => [
+                  { "name" => "x", "type" => "T.nilable(Child)" },
+                  { "name" => "y", "type" => "Child" }
+                ],
+                "sig" => "sig { params(x: T.nilable(Child)).returns(Parent) }"
+              }
+            ]
+          }
+        }
+
+        solver = described_class.new(evidence, [path])
+        action = {
+          "kind" => "fix_sig_param",
+          "path" => rel,
+          "line" => 1,
+          "data" => { "name" => "x", "type" => "T.nilable(Parent)" }
+        }
+
+        # This triggers build_smt2, which calls populate_all_types with action
+        solver.send(:build_smt2, [], [action])
+
+        type_ids = solver.instance_variable_get(:@type_ids)
+
+        expect(type_ids).to include("Parent", "Child", "T.nilable(Child)", "T.nilable(Parent)")
+
+        # Verify topological sort order: supertype (Parent) before subtype (Child)
+        expect(type_ids["Parent"]).to be < type_ids["Child"]
+        expect(type_ids["T.nilable(Parent)"]).to be < type_ids["T.nilable(Child)"]
+      end
+    end
+  end
 end
