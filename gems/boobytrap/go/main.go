@@ -130,14 +130,55 @@ type Event struct {
 }
 
 func main() {
-	repoPath := flag.String("repo", "", "Path to repository")
-	covPath := flag.String("coverage", "", "Path to coverage JSON")
-	decomplexFactsPath := flag.String("decomplex-facts", "", "Path to decomplex facts JSON")
-	mutationPath := flag.String("mutation", "", "Path to mutation facts JSON")
-	testExposurePath := flag.String("test-exposure", "", "Path to test exposure facts JSON")
-	staticFilesPath := flag.String("static-files-file", "", "Path to JSON file containing list of static files to analyze")
-	fixRePat := flag.String("fix-re", `\b(fix(es|ed)?|bug\s*fix|close[sd]?)\b`, "Regex for fix commits")
-	flag.Parse()
+	var repoPath *string
+	var covPath *string
+	var decomplexFactsPath *string
+	var mutationPath *string
+	var testExposurePath *string
+	var staticFilesPath *string
+	var fixRePat *string
+	var output *string
+	var jsonPath *string
+	var top *int
+	var only stringSlice
+	var exclude stringSlice
+	var files *string
+
+	isReportSubcommand := len(os.Args) >= 2 && os.Args[1] == "report"
+
+	if isReportSubcommand {
+		fs := flag.NewFlagSet("report", flag.ExitOnError)
+		repoPath = fs.String("repo", ".", "Path to repository")
+		covPath = fs.String("coverage", "coverage/.resultset.json", "Path to coverage JSON")
+		decomplexFactsPath = fs.String("decomplex-facts", "", "Path to decomplex facts JSON")
+		mutationPath = fs.String("mutation", "", "Path to mutation facts JSON")
+		testExposurePath = fs.String("test-exposure", "", "Path to test exposure facts JSON")
+		staticFilesPath = fs.String("static-files-file", "", "Path to JSON file containing list of static files to analyze")
+		fixRePat = fs.String("fix-re", `\b(fix(es|ed)?|bug\s*fix|close[sd]?)\b`, "Regex for fix commits")
+		output = fs.String("output", "", "Path to output Markdown file")
+		jsonPath = fs.String("json", "", "Path to output SARIF JSON file")
+		top = fs.Int("top", 40, "Limit ranking table size")
+		fs.Var(&only, "only", "restrict ranking to path prefix")
+		fs.Var(&exclude, "exclude", "exclude glob pattern")
+		files = fs.String("files", "", "restrict ranking to exact source files")
+
+		fs.Parse(os.Args[2:])
+	} else {
+		if len(os.Args) >= 2 && (os.Args[1] == "-h" || os.Args[1] == "--help") {
+			fmt.Println("Usage: boobytrap report [options]")
+			flag.PrintDefaults()
+			os.Exit(0)
+		}
+
+		repoPath = flag.String("repo", "", "Path to repository")
+		covPath = flag.String("coverage", "", "Path to coverage JSON")
+		decomplexFactsPath = flag.String("decomplex-facts", "", "Path to decomplex facts JSON")
+		mutationPath = flag.String("mutation", "", "Path to mutation facts JSON")
+		testExposurePath = flag.String("test-exposure", "", "Path to test exposure facts JSON")
+		staticFilesPath = flag.String("static-files-file", "", "Path to JSON file containing list of static files to analyze")
+		fixRePat = flag.String("fix-re", `\b(fix(es|ed)?|bug\s*fix|close[sd]?)\b`, "Regex for fix commits")
+		flag.Parse()
+	}
 
 	if *repoPath == "" {
 		fmt.Fprintln(os.Stderr, "Error: --repo is required")
@@ -148,6 +189,30 @@ func main() {
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "Error resolving repo path: %v\n", err)
 		os.Exit(1)
+	}
+
+	if isReportSubcommand {
+		srcFiles, err := getSourceFilesFromRuby(absRepo, only, *files, exclude)
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "Error getting source files: %v\n", err)
+			os.Exit(1)
+		}
+
+		tmpStaticFile, err := os.CreateTemp("", "boobytrap-static-*.json")
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "Error creating temp file: %v\n", err)
+			os.Exit(1)
+		}
+		defer os.Remove(tmpStaticFile.Name())
+
+		srcFilesJSON, _ := json.Marshal(srcFiles)
+		if _, err := tmpStaticFile.Write(srcFilesJSON); err != nil {
+			fmt.Fprintf(os.Stderr, "Error writing to temp file: %v\n", err)
+			os.Exit(1)
+		}
+		tmpStaticFile.Close()
+
+		*staticFilesPath = tmpStaticFile.Name()
 	}
 
 	fixRe, err := regexp.Compile("(?i)" + *fixRePat)
@@ -242,10 +307,66 @@ func main() {
 		DecomplexSyntax:    staticDocs,
 	}
 
-	enc := json.NewEncoder(os.Stdout)
-	if err := enc.Encode(out); err != nil {
-		fmt.Fprintf(os.Stderr, "Error encoding output: %v\n", err)
-		os.Exit(1)
+	if isReportSubcommand {
+		tmpGoDataFile, err := os.CreateTemp("", "boobytrap-go-data-*.json")
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "Error creating temp file: %v\n", err)
+			os.Exit(1)
+		}
+		defer os.Remove(tmpGoDataFile.Name())
+
+		goDataJSON, err := json.Marshal(out)
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "Error marshaling output: %v\n", err)
+			os.Exit(1)
+		}
+		if _, err := tmpGoDataFile.Write(goDataJSON); err != nil {
+			fmt.Fprintf(os.Stderr, "Error writing to temp file: %v\n", err)
+			os.Exit(1)
+		}
+		tmpGoDataFile.Close()
+
+		formatterPath, err := findFormatterScript(absRepo)
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "Error finding formatter script: %v\n", err)
+			os.Exit(1)
+		}
+
+		args := []string{
+			formatterPath,
+			"--go-data-path=" + tmpGoDataFile.Name(),
+			"--repo=" + *repoPath,
+			"--top=" + strconv.Itoa(*top),
+		}
+		if *output != "" {
+			args = append(args, "--output="+*output)
+		}
+		if *jsonPath != "" {
+			args = append(args, "--json="+*jsonPath)
+		}
+		for _, o := range only {
+			args = append(args, "--only="+o)
+		}
+		for _, e := range exclude {
+			args = append(args, "--exclude="+e)
+		}
+		if *files != "" {
+			args = append(args, "--files="+*files)
+		}
+
+		cmd := exec.Command("ruby", args...)
+		cmd.Stdout = os.Stdout
+		cmd.Stderr = os.Stderr
+		if err := cmd.Run(); err != nil {
+			os.Exit(1)
+		}
+		os.Exit(0)
+	} else {
+		enc := json.NewEncoder(os.Stdout)
+		if err := enc.Encode(out); err != nil {
+			fmt.Fprintf(os.Stderr, "Error encoding output: %v\n", err)
+			os.Exit(1)
+		}
 	}
 }
 
@@ -1209,4 +1330,60 @@ func languageFor(file string) string {
 	default:
 		return "generic"
 	}
+}
+
+type stringSlice []string
+
+func (s *stringSlice) String() string {
+	return strings.Join(*s, ",")
+}
+
+func (s *stringSlice) Set(value string) error {
+	*s = append(*s, value)
+	return nil
+}
+
+func getSourceFilesFromRuby(repo string, only []string, files string, exclude []string) ([]string, error) {
+	rubyBin := "ruby"
+	inlineScript := `
+      require "boobytrap/report"
+      class Dummy < Boobytrap::Report
+        def initialize(repo, only, files, exclude)
+          @repo = repo
+          @only = only
+          @files = files
+          @exclude = exclude
+        end
+      end
+      repo = ARGV[0]
+      only = ARGV[1] == "" ? [] : ARGV[1].split(",")
+      files = ARGV[2] == "" ? [] : ARGV[2].split(",")
+      exclude = ARGV[3] == "" ? [] : ARGV[3].split(",")
+      d = Dummy.new(repo, only, files, exclude)
+      puts JSON.dump(d.current_source_files)
+	`
+	cmd := exec.Command(rubyBin, "-Igems/boobytrap/lib", "-Ilib", "-e", inlineScript,
+		repo, strings.Join(only, ","), files, strings.Join(exclude, ","))
+
+	var stdout bytes.Buffer
+	var stderr bytes.Buffer
+	cmd.Stdout = &stdout
+	cmd.Stderr = &stderr
+	if err := cmd.Run(); err != nil {
+		return nil, fmt.Errorf("failed to get source files from ruby: %v, stderr: %s", err, stderr.String())
+	}
+
+	var res []string
+	if err := json.Unmarshal(stdout.Bytes(), &res); err != nil {
+		return nil, err
+	}
+	return res, nil
+}
+
+func findFormatterScript(repoRoot string) (string, error) {
+	path := filepath.Join(repoRoot, "gems/boobytrap/lib/boobytrap/formatter.rb")
+	if _, err := os.Stat(path); err == nil {
+		return path, nil
+	}
+	return "", fmt.Errorf("formatter.rb not found at %s", path)
 }

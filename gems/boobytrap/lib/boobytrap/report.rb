@@ -97,9 +97,9 @@ module Boobytrap
     # global fix-history time span is deliberately UNCHANGED -- recency
     # weighting stays consistent with the whole project; we only filter
     # WHICH files are ranked. Empty = whole repo.
-    def initialize(repo:, resultset:, fix_re: Bugspots::FIX_RE, top: 40, only: [], files: [],
+    def initialize(repo:, resultset: nil, fix_re: Bugspots::FIX_RE, top: 40, only: [], files: [],
                    mutation: nil, test_exposure: nil, exclude: [], lineage: nil,
-                   lineage_command: nil, decomplex_facts: nil)
+                   lineage_command: nil, decomplex_facts: nil, go_data: nil)
       ENV["DECOMPLEX_FACTS_FILE"] = decomplex_facts if decomplex_facts
       @repo = ::File.realpath(repo)
       @top = top
@@ -118,8 +118,134 @@ module Boobytrap
       )
 
       go_success = false
-      go_helper = ::File.expand_path("../../bin/boobytrap-helper", __dir__)
-      if ::File.file?(go_helper)
+      if go_data
+        data = go_data
+        begin
+          source_files = current_source_files
+          @fix_commits = data["fix_commits"]
+          scores = filter_paths(data["fix_scores"])
+          @fix_scores = scores
+          @fix_max = [scores.values.max || 0.0, 1.0].max
+
+          @blast_radius = filter_blast(
+            (data["blast_radius"] || []).map do |r|
+              Bugspots::Blast.new(
+                file: r["file"],
+                score: r["score"],
+                fixes: r["fixes"],
+                avg_touched: r["avg_touched"],
+                max_touched: r["max_touched"],
+                partners: r["partners"]
+              )
+            end
+          )
+
+          has_coverage = false
+          coverage = nil
+          covered_files = []
+          if data["coverage"]
+            has_coverage = true
+            # Reconstruct CoverageData/Dataset if needed or just mock it since report.rb uses it for coverage_mode
+            # Actually, let's build the minimum CoverageData required
+            files_hash = {}
+            data["coverage"]["files"].each do |f, c|
+              lines = (c["lines"] || []).map { |v| v }
+              branches = {}
+              (c["branches"] || {}).each do |p, arms|
+                branches[p] = {}
+                (arms || {}).each { |k, v| branches[p][k] = v.to_i }
+              end
+              files_hash[f] = CoverageData::FileCoverage.new(
+                file: f,
+                lines: lines,
+                branches: branches,
+                format: :simplecov,
+                source_path: c["source_path"]
+              )
+            end
+            coverage = CoverageData::Dataset.new(files: files_hash)
+            covered_files = filter_paths(coverage.covered_files(root: @repo).to_h { |rel| [rel, true] }).keys.select do |rel|
+              source_file?(rel, parser: "tree_sitter")
+            end
+          end
+
+          if data["decomplex_syntax"] && DecomplexRisk.load_decomplex_syntax
+            cache = Decomplex::Syntax.instance_variable_get(:@cache) || {}
+            data["decomplex_syntax"].each do |doc_data|
+              file = doc_data["file"]
+              next unless file
+
+              abs_file = ::File.expand_path(file)
+              doc_lang = doc_data["language"]
+              arms_data = doc_data["branch_arms"] || []
+              arms = arms_data.map { |arm_data| Decomplex::Syntax::BranchArm.new(arm_data) }
+              doc = Decomplex::Syntax::Document.new(arms, doc_lang)
+
+              cache[[abs_file, "tree_sitter", nil]] = doc
+              cache[[abs_file, "tree_sitter", doc_lang]] = doc
+            end
+            Decomplex::Syntax.instance_variable_set(:@cache, cache)
+          end
+
+          gaps = {}
+          if data["gaps"]
+            data["gaps"].each do |rel, g|
+              gaps[rel] = CoverageGap::File_.new(
+                total: g["total"],
+                uncovered: g["uncovered"],
+                gap: g["gap"]
+              )
+            end
+          end
+          gaps = filter_paths(gaps)
+
+          if data["decomplex_scores"]
+            decomplex_scores = {}
+            data["decomplex_scores"].each do |entry|
+              decomplex_scores[[entry["file"], entry["method"]]] = DecomplexRisk::Score.new(
+                score: entry["score"],
+                findings: entry["findings"].map { |f| { type: f["type"] } },
+                detectors: entry["detectors"] || []
+              )
+            end
+          end
+
+          if data["state_branch_density"]
+            @state_branch_density = data["state_branch_density"].map do |h|
+              {
+                file: h["file"],
+                method: h["method"],
+                score: h["score"],
+                decisions: h["decisions"],
+                at: h["at"],
+                state_refs: h["state_refs"],
+                predicate: h["predicate"]
+              }
+            end
+          end
+
+          @mutation_facts = if data["mutation_facts"]
+                              MutationFacts.load_from_data(data["mutation_facts"], label: "mutation")
+                            else
+                              MutationFacts.empty
+                            end
+
+          @test_exposure_facts = if data["test_exposure"]
+                                   TestExposureFacts.load_from_data(data["test_exposure"], label: "test_exposure")
+                                 else
+                                   TestExposureFacts.empty
+                                 end
+
+          @gaps = gaps
+          @have_cov = has_coverage || !gaps.empty?
+          @coverage_mode = coverage_mode(coverage, source_files, gaps)
+          go_success = true
+        rescue StandardError => e
+          warn "Error loading go_data: #{e.message}"
+        end
+      else
+        go_helper = ::File.expand_path("../../bin/boobytrap-helper", __dir__)
+        if ::File.file?(go_helper)
         cmd = [go_helper, "--repo", @repo]
         cmd += ["--coverage", resultset] if resultset
         cmd += ["--fix-re", fix_re.source] if fix_re
@@ -267,6 +393,7 @@ module Boobytrap
           File.delete(static_tmp_path) if static_tmp_path && File.file?(static_tmp_path)
         end
       end
+    end
 
       if !go_success
         if DecomplexRisk.tree_sitter?

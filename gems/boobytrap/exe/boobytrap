@@ -1,102 +1,10 @@
 #!/usr/bin/env ruby
 # frozen_string_literal: true
 
-require_relative "../lib/boobytrap"
-
-def usage
-  warn <<~U
-    boobytrap -- defect-risk hotspots (bugspots fix-churn x branch gap)
-
-      boobytrap report [--repo=.] [--coverage=coverage/.resultset.json] \\
-                       [--top=40] [--only=PATH ...] [--files=a.rb,b.rb] \\
-                       [--mutation=mutant-facts.json] \\
-                       [--test-exposure=test-exposure.json] \\
-                       [--lineage-db=lineage.sqlite] [--exclude=GLOB ...]
-
-    --coverage   SimpleCov .resultset.json, kcov output directory,
-                 kcov Cobertura XML, or kcov codecov JSON
-    --only=PATH  restrict ranking to a repo-relative path prefix
-                 (repeatable, e.g. --only=src/ --only=lib/). The fix
-                 time-decay baseline stays over the whole history;
-                 only WHICH files are ranked is filtered.
-    --files      restrict ranking to exact repo-relative source files
-                 (comma-separated; useful for PR-diff SARIF).
-    --mutation   mutant-facts/v1 JSON with file/method kill-rate and
-                 gate status; used to separate safe complexity from
-                 weakly verified empirical risk.
-    --test-exposure
-                 test-exposure/v1 JSON with distinct test hits by
-                 function, line, branch, test type, and mutation status.
-    --lineage-db Lineage SQLite database. When supplied, Boobytrap adds
-                 logical-unit history and boosts matching method risk.
-    --json       emit SARIF 2.1.0 JSON (same payload as --sarif).
-    --exclude    exclude a path/glob from source scans and rankings.
-                 May be repeated; defaults already skip Zig caches,
-                 node_modules, and all-tests.zig.
-
-    The report also tracks state-based branch hotspots from Decomplex
-    and time-decayed multi-file fix blast radius. With no --coverage
-    (or a missing file) only fix-churn-backed sections are shown.
-  U
-  exit 1
+go_helper = File.expand_path("../bin/boobytrap-helper", __dir__)
+unless File.file?(go_helper)
+  # Compile it if we are in dev mode
+  system("go", "build", "-o", go_helper, File.expand_path("../go/main.go", __dir__))
 end
 
-usage if ARGV.empty? || %w[-h --help].include?(ARGV[0])
-usage unless ARGV[0] == "report"
-
-opts = { repo: ".", coverage: "coverage/.resultset.json",
-         output: nil, sarif: nil, json: nil, top: 40, only: [], files: [], mutation: nil, test_exposure: nil,
-         lineage: nil, lineage_command: nil, exclude: [], decomplex_facts: nil }
-args = ARGV[1..].dup
-until args.empty?
-  a = args.shift
-  case a
-  when /\A--repo=(.+)/      then opts[:repo] = Regexp.last_match(1)
-  when /\A--coverage=(.+)/  then opts[:coverage] = Regexp.last_match(1)
-  when /\A--output=(.+)/    then opts[:output] = Regexp.last_match(1)
-  when /\A--json=(.+)/      then opts[:json] = Regexp.last_match(1)
-  when /\A--top=(\d+)/      then opts[:top] = Regexp.last_match(1).to_i
-  when /\A--only=(.+)/      then opts[:only] << Regexp.last_match(1)
-  when /\A--files=(.+)/     then opts[:files].concat(Regexp.last_match(1).split(","))
-  when /\A--mutation=(.+)/  then opts[:mutation] = Regexp.last_match(1)
-  when /\A--test-exposure=(.+)/ then opts[:test_exposure] = Regexp.last_match(1)
-  when /\A--lineage-db=(.+)/ then opts[:lineage] = Regexp.last_match(1)
-  when /\A--lineage-command=(.+)/ then opts[:lineage_command] = Regexp.last_match(1)
-  when /\A--exclude=(.+)/   then opts[:exclude] << Regexp.last_match(1)
-  when "--exclude"          then opts[:exclude] << args.shift.to_s
-  when /\A--decomplex-facts=(.+)/ then opts[:decomplex_facts] = Regexp.last_match(1)
-  else usage
-  end
-end
-
-report = Boobytrap::Report.new(
-  repo: opts[:repo],
-  resultset: opts[:coverage],
-  top: opts[:top],
-  only: opts[:only],
-  files: opts[:files],
-  mutation: opts[:mutation],
-  test_exposure: opts[:test_exposure],
-  lineage: opts[:lineage],
-  lineage_command: opts[:lineage_command],
-  exclude: opts[:exclude],
-  decomplex_facts: opts[:decomplex_facts]
-)
-
-if opts[:sarif]
-  warn "wrote #{opts[:sarif]}"
-end
-
-if opts[:json]
-  File.write(opts[:json], report.to_json)
-  warn "wrote #{opts[:json]}"
-end
-
-md = report.to_markdown
-
-if opts[:output]
-  File.write(opts[:output], md)
-  warn "wrote #{opts[:output]}"
-else
-  puts md
-end
+exec(go_helper, *ARGV)
