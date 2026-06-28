@@ -9,8 +9,11 @@ import (
 	"os/exec"
 	"path/filepath"
 	"regexp"
+	"strings"
 	"testing"
 )
+
+var update = flag.Bool("update", false, "update golden files")
 
 func ptr(v int) *int {
 	return &v
@@ -763,5 +766,267 @@ func TestReportSubcommandSimple(t *testing.T) {
 	out, err := cmd.CombinedOutput()
 	if err != nil {
 		t.Fatalf("report subcommand simple failed: %v, output: %s", err, string(out))
+	}
+}
+
+func TestReportSubcommandGolden(t *testing.T) {
+	if os.Getenv("BE_REPORT_GOLDEN_TEST") == "1" {
+		os.Args = []string{
+			"cmd",
+			"report",
+			"--repo=" + os.Getenv("TEST_REPO"),
+			"--coverage=" + os.Getenv("TEST_COVERAGE"),
+			"--output=" + os.Getenv("TEST_OUTPUT"),
+			"--json=" + os.Getenv("TEST_JSON"),
+			"--decomplex-facts=" + os.Getenv("TEST_DECOMPLEX"),
+			"--mutation=" + os.Getenv("TEST_MUTATION"),
+			"--test-exposure=" + os.Getenv("TEST_EXPOSURE"),
+			"--static-files-file=" + os.Getenv("TEST_STATIC_FILES"),
+			"--lineage-db=" + os.Getenv("TEST_LINEAGE_DB"),
+			"--lineage-command=" + os.Getenv("TEST_LINEAGE_COMMAND"),
+			"--only=a.go",
+			"--files=" + os.Getenv("TEST_FILES"),
+		}
+		flag.CommandLine = flag.NewFlagSet(os.Args[0], flag.ContinueOnError)
+		main()
+		return
+	}
+
+	dir := t.TempDir()
+	runCmd(t, dir, "git", "init", "-q")
+	runCmd(t, dir, "git", "config", "user.email", "test@test.com")
+	runCmd(t, dir, "git", "config", "user.name", "test")
+
+	// 1. Mock source files
+	srcGo := `package main
+
+func testFunc() {
+	x := 1
+	y := 2
+	z := 3
+	a := 4
+	b := 5
+}
+`
+	srcPy := `def testFunc():
+    x = 1
+    y = 2
+    z = 3
+    a = 4
+    b = 5
+`
+	writeTempFile(t, dir, "a.go", srcGo)
+	writeTempFile(t, dir, "b.py", srcPy)
+	writeTempFile(t, dir, "c.rb", "def foo\n  x = 1\nend\n")
+	runCmd(t, dir, "git", "add", "a.go", "b.py", "c.rb")
+	runCmd(t, dir, "git", "commit", "-qm", "Fix issue")
+
+	// 2. Coverage JSON
+	covData := map[string]interface{}{
+		"RSpec": map[string]interface{}{
+			"coverage": map[string]interface{}{
+				filepath.Join(dir, "a.go"): map[string]interface{}{
+					"lines": []interface{}{1.0, nil, 1.0, 1.0, 1.0, 1.0, 0.0, 0.0, 1.0},
+					"branches": map[string]interface{}{
+						"[:if,0,3,1,3,9]": map[string]interface{}{
+							"[:then,1,3,1,3,4]": 0.0,
+							"[:else,2,3,5,3,9]": 1.0,
+						},
+					},
+				},
+			},
+		},
+	}
+	covBytes, _ := json.Marshal(covData)
+	covFile := filepath.Join(dir, "coverage.json")
+	os.WriteFile(covFile, covBytes, 0644)
+
+	// 3. Decomplex JSON
+	decomplexContent := fmt.Sprintf(`{
+		"detectors": {
+			"unused_return": [
+				{
+					"sites": ["%s:testFunc:3", "%s:testFunc:1"]
+				}
+			],
+			"state_branch_density": [
+				{
+					"file": "%s",
+					"method": "testFunc",
+					"score": 2.5,
+					"decisions": 4,
+					"state_refs": ["x", "y"],
+					"predicate": "cond",
+					"at": "%s:testFunc:3"
+				},
+				{
+					"file": "%s",
+					"method": "testFunc",
+					"score": 2.5,
+					"decisions": 4,
+					"state_refs": ["x", "y"],
+					"predicate": "cond",
+					"at": "%s:testFunc:1"
+				}
+			]
+		}
+	}`, filepath.Join(dir, "a.go"), filepath.Join(dir, "b.py"), filepath.Join(dir, "a.go"), filepath.Join(dir, "a.go"), filepath.Join(dir, "b.py"), filepath.Join(dir, "b.py"))
+	decomplexFile := filepath.Join(dir, "decomplex.json")
+	os.WriteFile(decomplexFile, []byte(decomplexContent), 0644)
+
+	// 4. Mutation JSON
+	mutationContent := `{
+		"schema": "mutant-facts/v1",
+		"subjects": [
+			{ "file": "a.go", "method": "testFunc", "kill_rate": "82.4%", "gate_status": "advisory" }
+		]
+	}`
+	mutationFile := filepath.Join(dir, "mutation.json")
+	os.WriteFile(mutationFile, []byte(mutationContent), 0644)
+
+	// 5. Exposure JSON
+	exposureContent := `{
+		"hits": [
+			{ "file": "a.go", "function": "testFunc", "id": "t1", "type": "spec", "mutation": "killed", "line": 3 }
+		],
+		"files": [
+			{
+				"file": "a.go",
+				"functions": [
+					{
+						"name": "testFunc",
+						"tests": [
+							{ "id": "t2", "type": "spec", "mutation": "survived" }
+						]
+					}
+				]
+			}
+		]
+	}`
+	exposureFile := filepath.Join(dir, "exposure.json")
+	os.WriteFile(exposureFile, []byte(exposureContent), 0644)
+
+	// 6. Lineage mocks
+	mockLineagePath := filepath.Join(dir, "mock-lineage")
+	mockLineageContent := `#!/bin/sh
+echo '[{"current_path":"a.go","name":"testFunc","risk_score":10.5,"fixes":2,"changes":5,"moves":1,"current_distinct_tests":3,"current_mutant_verified_tests":2,"current_mutant_killed_tests":1},{"current_path":"b.py","name":"testFunc","risk_score":10.5,"fixes":2,"changes":5,"moves":1,"current_distinct_tests":3,"current_mutant_verified_tests":2,"current_mutant_killed_tests":1,"current_test_types":"spec;unit"}]'`
+	os.WriteFile(mockLineagePath, []byte(mockLineageContent), 0755)
+	lineageCommand := mockLineagePath
+
+	// 7. Mock fact-mine
+	mockFactMinePath := filepath.Join(dir, "mock-fact-mine")
+	mockFactMineContent := fmt.Sprintf(`#!/bin/sh
+echo '{"documents":[{"file":"%s","branch_arms":[{"line":3,"span":[3,1,3,10],"decision_line":2}]},{"file":"%s","branch_arms":[{"line":2,"span":[2,1,2,10],"decision_line":1}]}]}'`,
+		filepath.Join(dir, "b.py"), filepath.Join(dir, "c.rb"))
+	os.WriteFile(mockFactMinePath, []byte(mockFactMineContent), 0755)
+
+	// Static files JSON
+	staticFilesContent := `["b.py", "c.rb", "d.go"]`
+	staticFilesFile := filepath.Join(dir, "static.json")
+	os.WriteFile(staticFilesFile, []byte(staticFilesContent), 0644)
+
+	// Exec runs helper
+	runGoldenSubcommand := func(name string, env map[string]string) (string, string) {
+		markdownFile := filepath.Join(dir, "report_"+name+".md")
+		sarifFile := filepath.Join(dir, "report_"+name+".sarif")
+
+		cmd := exec.Command(os.Args[0], "-test.run=TestReportSubcommandGolden")
+		cmd.Env = append(os.Environ(), "BE_REPORT_GOLDEN_TEST=1", "TEST_REPO="+dir, "TEST_OUTPUT="+markdownFile, "TEST_JSON="+sarifFile)
+		for k, v := range env {
+			cmd.Env = append(cmd.Env, k+"="+v)
+		}
+		out, err := cmd.CombinedOutput()
+		if err != nil {
+			t.Fatalf("report subcommand golden run %s failed: %v, output: %s", name, err, string(out))
+		}
+
+		mdBytes, err := os.ReadFile(markdownFile)
+		if err != nil {
+			t.Fatalf("failed to read generated md: %v", err)
+		}
+		sarifBytes, err := os.ReadFile(sarifFile)
+		if err != nil {
+			t.Fatalf("failed to read generated sarif: %v", err)
+		}
+
+		normalizedMd := strings.ReplaceAll(string(mdBytes), filepath.ToSlash(dir), "[REPO_ROOT]")
+		normalizedMd = strings.ReplaceAll(normalizedMd, dir, "[REPO_ROOT]")
+
+		normalizedSarif := strings.ReplaceAll(string(sarifBytes), filepath.ToSlash(dir), "[REPO_ROOT]")
+		normalizedSarif = strings.ReplaceAll(normalizedSarif, dir, "[REPO_ROOT]")
+
+		return normalizedMd, normalizedSarif
+	}
+
+	// RUN 1: Full empirical run
+	md1, sarif1 := runGoldenSubcommand("full", map[string]string{
+		"TEST_COVERAGE":        covFile,
+		"TEST_DECOMPLEX":       decomplexFile,
+		"TEST_MUTATION":        mutationFile,
+		"TEST_EXPOSURE":        exposureFile,
+		"TEST_LINEAGE_DB":      covFile,
+		"TEST_LINEAGE_COMMAND": lineageCommand,
+	})
+
+	// RUN 2: Minimal static run
+	md2, sarif2 := runGoldenSubcommand("minimal", map[string]string{
+		"TEST_COVERAGE":         "",
+		"TEST_DECOMPLEX":        decomplexFile,
+		"TEST_STATIC_FILES":     staticFilesFile,
+		"TEST_LINEAGE_DB":       covFile,
+		"TEST_LINEAGE_COMMAND":  lineageCommand,
+		"FACT_MINE_RUST_BINARY": mockFactMinePath,
+		"TEST_FILES":            "b.py",
+	})
+
+	// RUN 3: Simple run
+	md3, sarif3 := runGoldenSubcommand("simple", map[string]string{
+		"TEST_DECOMPLEX": decomplexFile,
+	})
+
+	type goldenPair struct {
+		mdPath, sarifPath string
+		mdText, sarifText string
+	}
+
+	goldens := []goldenPair{
+		{"testdata/report.golden.md", "testdata/report.golden.sarif", md1, sarif1},
+		{"testdata/report_minimal.golden.md", "testdata/report_minimal.golden.sarif", md2, sarif2},
+		{"testdata/report_simple.golden.md", "testdata/report_simple.golden.sarif", md3, sarif3},
+	}
+
+	if *update {
+		if err := os.MkdirAll("testdata", 0755); err != nil {
+			t.Fatalf("failed to create testdata dir: %v", err)
+		}
+		for _, g := range goldens {
+			if err := os.WriteFile(g.mdPath, []byte(g.mdText), 0644); err != nil {
+				t.Fatalf("failed to write golden md: %v", err)
+			}
+			if err := os.WriteFile(g.sarifPath, []byte(g.sarifText), 0644); err != nil {
+				t.Fatalf("failed to write golden sarif: %v", err)
+			}
+		}
+		t.Log("Successfully updated golden files.")
+		return
+	}
+
+	// Compare with goldens
+	for _, g := range goldens {
+		goldenMdBytes, err := os.ReadFile(g.mdPath)
+		if err != nil {
+			t.Fatalf("failed to read golden md file: %v (run go test with -update to generate)", err)
+		}
+		goldenSarifBytes, err := os.ReadFile(g.sarifPath)
+		if err != nil {
+			t.Fatalf("failed to read golden sarif file: %v (run go test with -update to generate)", err)
+		}
+
+		if g.mdText != string(goldenMdBytes) {
+			t.Errorf("Markdown output mismatch for %s! Expected:\n%s\n\nGot:\n%s", g.mdPath, string(goldenMdBytes), g.mdText)
+		}
+		if g.sarifText != string(goldenSarifBytes) {
+			t.Errorf("SARIF output mismatch for %s! Expected:\n%s\n\nGot:\n%s", g.sarifPath, string(goldenSarifBytes), g.sarifText)
+		}
 	}
 }
