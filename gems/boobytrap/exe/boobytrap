@@ -1,10 +1,11 @@
-#!/usr/bin/env ruby
-# frozen_string_literal: true
+#!/usr/bin/env bash
+set -e
 
-go_helper = File.expand_path("../bin/boobytrap-helper", __dir__)
-unless File.file?(go_helper)
-  # Compile it if we are in dev mode
-  system("go", "build", "-o", go_helper, File.expand_path("../go/main.go", __dir__))
-end
+DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" >/dev/null 2>&1 && pwd)"
+HELPER="$DIR/../bin/boobytrap-helper"
 
-exec(go_helper, *ARGV)
+if [ ! -f "$HELPER" ]; then
+    (cd "$DIR/../go" && go build -o "../bin/boobytrap-helper" main.go report.go report_formatting.go)
+fi
+
+exec "$HELPER" "$@"
