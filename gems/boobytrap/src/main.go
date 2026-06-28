@@ -4,6 +4,7 @@ import (
 	"bufio"
 	"bytes"
 	"encoding/json"
+	"encoding/xml"
 	"flag"
 	"fmt"
 	"math"
@@ -778,6 +779,26 @@ func computeBugspots(events []Event) (map[string]float64, []BlastRow) {
 	return scores, blast
 }
 
+type CoberturaLine struct {
+	Number int `xml:"number,attr"`
+	Hits   int `xml:"hits,attr"`
+}
+
+type CoberturaClass struct {
+	Filename string          `xml:"filename,attr"`
+	Lines    []CoberturaLine `xml:"lines>line"`
+}
+
+type CoberturaPackage struct {
+	Classes []CoberturaClass `xml:"classes>class"`
+}
+
+type CoberturaCoverage struct {
+	XMLName  xml.Name           `xml:"coverage"`
+	Sources  []string           `xml:"sources>source"`
+	Packages []CoberturaPackage `xml:"packages>package"`
+}
+
 func processCoverage(covPath, repo string) (*CoverageDataset, map[string]FileGap, error) {
 	files := make(map[string]FileCoverage)
 	paths := filepath.SplitList(covPath)
@@ -791,64 +812,124 @@ func processCoverage(covPath, repo string) (*CoverageDataset, map[string]FileGap
 			return nil, nil, err
 		}
 
-		// We parse the raw SimpleCov JSON into an unstructured map first
-		var raw map[string]interface{}
-		if err := json.Unmarshal(data, &raw); err != nil {
-			return nil, nil, err
-		}
+		if bytes.HasPrefix(bytes.TrimSpace(data), []byte("<")) {
+			var xmlCov CoberturaCoverage
+			if err := xml.Unmarshal(data, &xmlCov); err != nil {
+				return nil, nil, err
+			}
+			for _, pkg := range xmlCov.Packages {
+				for _, class := range pkg.Classes {
+					filename := class.Filename
+					if filename == "" {
+						continue
+					}
+					absFile := filename
+					if !filepath.IsAbs(filename) {
+						resolved := false
+						for _, source := range xmlCov.Sources {
+							candidate := source
+							if !filepath.IsAbs(source) {
+								candidate = filepath.Join(repo, source)
+							}
+							candidate = filepath.Join(candidate, filename)
+							if _, err := os.Stat(candidate); err == nil {
+								absFile = filepath.Clean(candidate)
+								resolved = true
+								break
+							}
+						}
+						if !resolved {
+							absFile = filepath.Clean(filepath.Join(repo, filename))
+						}
+					}
 
-		// Format definition: SimpleCov resultset JSON
-		// Maps: entryName -> { "coverage" -> { filePath -> { "lines" -> [...], "branches" -> { ... } } } }
-		for _, entryVal := range raw {
-			entry, ok := entryVal.(map[string]interface{})
-			if !ok {
-				continue
+					dst, exists := files[absFile]
+					if !exists {
+						dst = FileCoverage{
+							Lines:      []*int{},
+							Branches:   make(map[string]map[string]int),
+							SourcePath: relpathNoEval(absFile, repo),
+						}
+					}
+
+					for _, line := range class.Lines {
+						number := line.Number
+						if number <= 0 {
+							continue
+						}
+						for len(dst.Lines) < number {
+							dst.Lines = append(dst.Lines, nil)
+						}
+						hits := line.Hits
+						if dst.Lines[number-1] == nil {
+							dst.Lines[number-1] = &hits
+						} else {
+							*dst.Lines[number-1] += hits
+						}
+					}
+					files[absFile] = dst
+				}
 			}
-			covMapVal, ok := entry["coverage"]
-			if !ok {
-				continue
-			}
-			covMap, ok := covMapVal.(map[string]interface{})
-			if !ok {
-				continue
+		} else {
+			// We parse the raw SimpleCov JSON into an unstructured map first
+			var raw map[string]interface{}
+			if err := json.Unmarshal(data, &raw); err != nil {
+				return nil, nil, err
 			}
 
-			for file, covDataVal := range covMap {
-				covData, ok := covDataVal.(map[string]interface{})
+			// Format definition: SimpleCov resultset JSON
+			// Maps: entryName -> { "coverage" -> { filePath -> { "lines" -> [...], "branches" -> { ... } } } }
+			for _, entryVal := range raw {
+				entry, ok := entryVal.(map[string]interface{})
+				if !ok {
+					continue
+				}
+				covMapVal, ok := entry["coverage"]
+				if !ok {
+					continue
+				}
+				covMap, ok := covMapVal.(map[string]interface{})
 				if !ok {
 					continue
 				}
 
-				absFile := file
-				if !filepath.IsAbs(file) {
-					absFile = filepath.Join(repo, file)
-				}
-				absFile = filepath.Clean(absFile)
-
-				dst, exists := files[absFile]
-				if !exists {
-					dst = FileCoverage{
-						Lines:      []*int{},
-						Branches:   make(map[string]map[string]int),
-						SourcePath: relpathNoEval(absFile, repo),
+				for file, covDataVal := range covMap {
+					covData, ok := covDataVal.(map[string]interface{})
+					if !ok {
+						continue
 					}
-				}
 
-				// Merge lines
-				if linesVal, ok := covData["lines"]; ok {
-					if linesArr, ok := linesVal.([]interface{}); ok {
-						dst.Lines = mergeLines(dst.Lines, linesArr)
+					absFile := file
+					if !filepath.IsAbs(file) {
+						absFile = filepath.Join(repo, file)
 					}
-				}
+					absFile = filepath.Clean(absFile)
 
-				// Merge branches
-				if branchesVal, ok := covData["branches"]; ok {
-					if branchesMap, ok := branchesVal.(map[string]interface{}); ok {
-						dst.Branches = mergeBranches(dst.Branches, branchesMap)
+					dst, exists := files[absFile]
+					if !exists {
+						dst = FileCoverage{
+							Lines:      []*int{},
+							Branches:   make(map[string]map[string]int),
+							SourcePath: relpathNoEval(absFile, repo),
+						}
 					}
-				}
 
-				files[absFile] = dst
+					// Merge lines
+					if linesVal, ok := covData["lines"]; ok {
+						if linesArr, ok := linesVal.([]interface{}); ok {
+							dst.Lines = mergeLines(dst.Lines, linesArr)
+						}
+					}
+
+					// Merge branches
+					if branchesVal, ok := covData["branches"]; ok {
+						if branchesMap, ok := branchesVal.(map[string]interface{}); ok {
+							dst.Branches = mergeBranches(dst.Branches, branchesMap)
+						}
+					}
+
+					files[absFile] = dst
+				}
 			}
 		}
 	}

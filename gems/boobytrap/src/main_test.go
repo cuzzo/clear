@@ -286,6 +286,49 @@ func TestProcessCoverageMultiple(t *testing.T) {
 	}
 }
 
+func TestProcessCoverageXML(t *testing.T) {
+	dir := t.TempDir()
+	xmlFile := filepath.Join(dir, "cobertura.xml")
+
+	xmlContent := `<?xml version="1.0" ?>
+<coverage>
+  <sources>
+    <source>src</source>
+  </sources>
+  <packages>
+    <package name="main">
+      <classes>
+        <class filename="a.go" name="main">
+          <lines>
+            <line hits="1" number="1" />
+            <line hits="0" number="2" />
+            <line hits="5" number="3" />
+          </lines>
+        </class>
+      </classes>
+    </package>
+  </packages>
+</coverage>`
+	os.WriteFile(xmlFile, []byte(xmlContent), 0644)
+
+	os.MkdirAll(filepath.Join(dir, "src"), 0755)
+	os.WriteFile(filepath.Join(dir, "src", "a.go"), []byte("package main\n"), 0644)
+
+	dataset, _, err := processCoverage(xmlFile, dir)
+	if err != nil {
+		t.Fatalf("failed to process xml coverage: %v", err)
+	}
+
+	fc, ok := dataset.Files[filepath.Clean(filepath.Join(dir, "src", "a.go"))]
+	if !ok {
+		t.Fatalf("expected file coverage for src/a.go")
+	}
+
+	if len(fc.Lines) != 3 || *fc.Lines[0] != 1 || *fc.Lines[1] != 0 || *fc.Lines[2] != 5 {
+		t.Errorf("line coverage mismatch: %+v", fc.Lines)
+	}
+}
+
 func TestMainFunction(t *testing.T) {
 	dir := t.TempDir()
 	runCmd(t, dir, "git", "init", "-q")
