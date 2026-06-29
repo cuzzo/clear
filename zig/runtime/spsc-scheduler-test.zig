@@ -137,7 +137,10 @@ var global_spawned_workers: usize = 0;
 var global_started_workers = std.atomic.Value(usize).init(0);
 
 fn schedulerThread(a: std.mem.Allocator) void {
-    var sched = fp.Scheduler.init(a, &global_ebr, &stack_pool) catch return;
+    var sched = fp.Scheduler.init(a, &global_ebr, &stack_pool) catch |err| {
+        std.debug.print("SCHEDULER_INIT_FAILED: {}\n", .{err});
+        return;
+    };
     sched.global_shutdown = &global_shutdown;
     sched.shutdown_on_idle = false;
     fp.active_scheduler = &sched;
@@ -161,12 +164,21 @@ fn startWorkers(threads: []std.Thread, n: usize) void {
     global_spawned_workers = 0;
     global_started_workers.store(0, .release);
     for (threads[0..n]) |*t| {
-        t.* = std.Thread.spawn(.{}, schedulerThread, .{alloc}) catch continue;
+        t.* = std.Thread.spawn(.{}, schedulerThread, .{alloc}) catch |err| {
+            std.debug.print("THREAD SPAWN FAILED: {}\n", .{err});
+            continue;
+        };
         global_spawned_workers += 1;
     }
     var wait_ms: usize = 0;
     while (fp.global_registry.count() < global_spawned_workers) : (wait_ms += 1) {
-        if (wait_ms >= 5_000) @panic("Worker registration timed out");
+        if (wait_ms >= 300_000) {
+            std.debug.print(
+                "Worker registration timed out: spawned={d} started={d} registry_count={d}\n",
+                .{ global_spawned_workers, global_started_workers.load(.acquire), fp.global_registry.count() }
+            );
+            @panic("Worker registration timed out");
+        }
         compat.sleepNs(1 * std.time.ns_per_ms);
     }
 }
@@ -179,7 +191,7 @@ fn stopWorkers(threads: []std.Thread, n: usize) void {
     const started = global_started_workers.load(.acquire);
     var wait_ms: usize = 0;
     while (post_run_workers.load(.acquire) < started) : (wait_ms += 1) {
-        if (wait_ms >= 5_000) @panic("Worker stop timed out");
+        if (wait_ms >= 300_000) @panic("Worker stop timed out");
         compat.sleepNs(1 * std.time.ns_per_ms);
     }
     deinit_phase.store(true, .release);

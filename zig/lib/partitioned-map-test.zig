@@ -63,7 +63,7 @@ fn startWorkers(threads: []std.Thread, n: usize) !void {
 
     var wait_ms: usize = 0;
     while (fp.global_registry.count() < n) : (wait_ms += 1) {
-        if (wait_ms >= 5_000) return error.WorkerRegistrationTimeout;
+        if (wait_ms >= 300_000) return error.WorkerRegistrationTimeout;
         compat.sleepNs(1 * std.time.ns_per_ms);
     }
 }

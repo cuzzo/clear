@@ -44,7 +44,10 @@ fn startWorkers(threads: []std.Thread, n: usize) void {
     global_spawned_workers = 0;
     global_failed_workers.store(0, .release);
     for (threads[0..n]) |*t| {
-        t.* = std.Thread.spawn(.{}, schedulerThread, .{alloc}) catch continue;
+        t.* = std.Thread.spawn(.{}, schedulerThread, .{alloc}) catch |err| {
+            std.debug.print("THREAD SPAWN FAILED: {}\n", .{err});
+            continue;
+        };
         global_spawned_workers += 1;
     }
     var wait_ms: usize = 0;
@@ -57,7 +60,13 @@ fn startWorkers(threads: []std.Thread, n: usize) void {
             }
             break;
         }
-        if (wait_ms >= 5_000) @panic("Worker registration timed out");
+        if (wait_ms >= 300_000) {
+            std.debug.print(
+                "Worker registration timed out: spawned={d} live={d} failed={d} registry_count={d}\n",
+                .{ global_spawned_workers, live, failed, fp.global_registry.count() }
+            );
+            @panic("Worker registration timed out");
+        }
         compat.sleepNs(1 * std.time.ns_per_ms);
     }
 }

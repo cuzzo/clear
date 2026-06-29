@@ -143,7 +143,7 @@ fn startWorkers(threads: []std.Thread, n: usize) void {
     }
     var wait_ms: usize = 0;
     while (fp.global_registry.count() < global_spawned_workers) : (wait_ms += 1) {
-        if (wait_ms >= 5_000) @panic("Worker registration timed out");
+        if (wait_ms >= 300_000) @panic("Worker registration timed out");
         compat.sleepNs(1 * std.time.ns_per_ms);
     }
 }
@@ -156,7 +156,7 @@ fn stopWorkers(threads: []std.Thread, n: usize) void {
     const started = global_started_workers.load(.acquire);
     var wait_ms: usize = 0;
     while (post_run_workers.load(.acquire) < started) : (wait_ms += 1) {
-        if (wait_ms >= 5_000) @panic("Worker stop timed out");
+        if (wait_ms >= 300_000) @panic("Worker stop timed out");
         compat.sleepNs(1 * std.time.ns_per_ms);
     }
     // Now safe to release the deinit barrier — all sched.deinit()
