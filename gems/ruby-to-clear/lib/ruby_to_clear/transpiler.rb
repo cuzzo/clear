@@ -516,6 +516,10 @@ module RubyToClear
       node.value.to_s
     end
 
+    def visit_float_node(node)
+      node.value.to_s
+    end
+
     def visit_string_node(node)
       "\"#{node.content}\""
     end
@@ -1168,6 +1172,10 @@ module RubyToClear
     end
 
     def visit_rescue_modifier_node(node)
+      if node.rescue_expression.is_a?(Prism::NilNode) && sorbet_call?(node.expression, "bind")
+        return ""
+      end
+
       return raise_unsupported("Exception handling (rescue) is not supported", node)
     end
 

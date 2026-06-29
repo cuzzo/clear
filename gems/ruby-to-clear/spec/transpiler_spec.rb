@@ -11,6 +11,7 @@ RSpec.describe RubyToClear::Transpiler do
   describe "basic expressions and literals" do
     it "transpiles leaf nodes correctly" do
       expect_transpile("123", "123;")
+      expect_transpile("0.5", "0.5;")
       expect_transpile('"hello"', '"hello";')
       expect_transpile(":my_sym", ".my_sym;")
       expect_transpile("nil", "NIL;")
@@ -811,6 +812,22 @@ RSpec.describe RubyToClear::Transpiler do
       expect {
         RubyToClear.transpile("begin; do_something; rescue; handle_error; end")
       }.to raise_error(RubyToClear::Transpiler::TranspilationError, /Exception handling \(rescue\) is not supported/)
+    end
+
+    it "drops Sorbet bind rescue nil metadata" do
+      ruby_code = <<~RUBY
+        def bound
+          T.bind(self, Thing) rescue nil
+          x = 1
+        end
+      RUBY
+      expected_clear = <<~CLEAR
+        FN bound() RETURNS !Auto ->
+          MUTABLE x = NIL;
+          x = 1;
+        END
+      CLEAR
+      expect_transpile(ruby_code, expected_clear)
     end
 
     it "raises error on inline rescue modifier" do
