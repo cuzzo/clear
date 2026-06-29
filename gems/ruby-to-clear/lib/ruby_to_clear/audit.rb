@@ -1,64 +1,63 @@
-#!/usr/bin/env ruby
-# Prism-based Ruby -> CLEAR migration audit scaffold.
-#
-# This is intentionally not a full translator yet. It sizes the source surface
-# that the translator must cover and highlights the CallNode/BlockNode idioms
-# that drive most of the migration work.
-#
-# Usage:
-#   ruby tools/ruby-to-clear.rb
-#   ruby tools/ruby-to-clear.rb --top 40
-#   ruby tools/ruby-to-clear.rb --glob 'src/**/*.rb' --markdown
+# frozen_string_literal: true
 
-require "optparse"
 require "prism"
 
-ROOT = File.expand_path("..", __dir__)
+module RubyToClear
+  # Prism-based Ruby -> CLEAR migration audit.
+  #
+  # This is intentionally not a full translator. It sizes the source surface
+  # that the translator must cover and highlights the CallNode/BlockNode idioms
+  # that should drive the migration roadmap.
+  class Audit
+    CONTROL_NODE_NAMES = %w[
+      ReturnNode BreakNode NextNode RescueNode RescueModifierNode EnsureNode
+      YieldNode SuperNode ForwardingSuperNode
+    ].freeze
 
-class RubyToClearAudit
-  CONTROL_NODE_NAMES = %w[
-    ReturnNode BreakNode NextNode RescueNode RescueModifierNode EnsureNode
-    YieldNode SuperNode ForwardingSuperNode
-  ].freeze
+    DYNAMIC_CALLS = %w[
+      send public_send const_get instance_variable_get define_method
+      method_missing eval instance_eval
+    ].freeze
 
-  DYNAMIC_CALLS = %w[
-    send public_send const_get instance_variable_get define_method
-    method_missing eval instance_eval
-  ].freeze
+    STDLIB_RECEIVERS = %w[
+      File Dir Pathname JSON YAML OptionParser Open3 Set StringScanner Regexp
+    ].freeze
 
-  STDLIB_RECEIVERS = %w[
-    File Dir Pathname JSON YAML OptionParser Open3 Set StringScanner Regexp
-  ].freeze
+    attr_reader :files, :node_counts, :parse_errors
 
-  attr_reader :files, :node_counts, :parse_errors
+    def self.files_for(root:, glob:)
+      expanded_root = File.expand_path(root)
+      Dir[File.join(expanded_root, glob)].sort
+    end
 
-  def initialize(files, top:)
-    @files = files
-    @top = top
-    @node_counts = Hash.new(0)
-    @parse_errors = []
-    @total_nodes = 0
+    def initialize(files, top:, root: Dir.pwd)
+      @root = File.expand_path(root)
+      @files = files
+      @top = top
+      @node_counts = Hash.new(0)
+      @parse_errors = []
+      @total_nodes = 0
 
-    @call_names = Hash.new(0)
-    @call_receiver_kinds = Hash.new(0)
-    @call_receiver_names = Hash.new(0)
-    @call_arg_shapes = Hash.new(0)
-    @call_shapes = Hash.new(0)
-    @call_with_block = Hash.new(0)
-    @call_block_kinds = Hash.new(0)
-    @dynamic_calls = Hash.new(0)
-    @stdlib_calls = Hash.new(0)
-    @sorbet_calls = Hash.new(0)
-    @call_samples = Hash.new { |h, k| h[k] = [] }
+      @call_names = Hash.new(0)
+      @call_receiver_kinds = Hash.new(0)
+      @call_receiver_names = Hash.new(0)
+      @call_arg_shapes = Hash.new(0)
+      @call_shapes = Hash.new(0)
+      @call_with_block = Hash.new(0)
+      @call_block_kinds = Hash.new(0)
+      @dynamic_calls = Hash.new(0)
+      @stdlib_calls = Hash.new(0)
+      @sorbet_calls = Hash.new(0)
+      @call_samples = Hash.new { |h, k| h[k] = [] }
 
-    @block_callees = Hash.new(0)
-    @block_receiver_kinds = Hash.new(0)
-    @block_param_shapes = Hash.new(0)
-    @block_body_buckets = Hash.new(0)
-    @block_control_nodes = Hash.new(0)
-    @block_shapes = Hash.new(0)
-    @block_samples = Hash.new { |h, k| h[k] = [] }
-  end
+      @block_callees = Hash.new(0)
+      @block_receiver_kinds = Hash.new(0)
+      @block_param_shapes = Hash.new(0)
+      @block_body_buckets = Hash.new(0)
+      @block_control_nodes = Hash.new(0)
+      @block_shapes = Hash.new(0)
+      @block_samples = Hash.new { |h, k| h[k] = [] }
+    end
 
   def run
     files.each { |path| parse_file(path) }
@@ -294,7 +293,7 @@ class RubyToClearAudit
   end
 
   def relative(path)
-    path.start_with?(ROOT) ? path.delete_prefix("#{ROOT}/") : path
+    path.start_with?(@root) ? path.delete_prefix("#{@root}/") : path
   end
 
   def render_coverage(out)
@@ -395,25 +394,5 @@ class RubyToClearAudit
   def escape_md(value)
     value.to_s.gsub("|", "\\|")
   end
+  end
 end
-
-options = {
-  glob: "src/**/*.rb",
-  top: 25,
-  markdown: true
-}
-
-OptionParser.new do |opts|
-  opts.banner = "Usage: ruby tools/ruby-to-clear.rb [options]"
-  opts.on("--glob GLOB", "Ruby file glob relative to repo root") { |v| options[:glob] = v }
-  opts.on("--top N", Integer, "Rows per table, default 25") { |v| options[:top] = v }
-  opts.on("--[no-]markdown", "Emit markdown, default true") { |v| options[:markdown] = v }
-end.parse!
-
-files = Dir[File.join(ROOT, options[:glob])].sort
-abort "no files matched #{options[:glob]}" if files.empty?
-
-audit = RubyToClearAudit.new(files, top: options[:top])
-audit.run
-
-puts audit.render_markdown

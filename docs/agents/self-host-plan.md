@@ -109,10 +109,10 @@ Refactor by blocker category, not by file.
 
 ## Prism Audit Findings
 
-The first migration audit script lives at `tools/ruby-to-clear.rb` and is run as:
+The first migration audit command lives in the `ruby-to-clear` gem and is run as:
 
 ```text
-ruby tools/ruby-to-clear.rb --top 30
+ruby gems/ruby-to-clear/exe/ruby-to-clear-audit --top 30
 ```
 
 Current `src/**/*.rb` results:

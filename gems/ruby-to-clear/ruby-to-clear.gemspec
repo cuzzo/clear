@@ -12,7 +12,7 @@ Gem::Specification.new do |spec|
 
   spec.files = Dir.glob("{exe,lib}/**/*", base: __dir__).select { |path| File.file?(File.join(__dir__, path)) }
   spec.bindir = "exe"
-  spec.executables = ["ruby-to-clear"]
+  spec.executables = ["ruby-to-clear", "ruby-to-clear-audit"]
   spec.require_paths = ["lib"]
 
   spec.add_dependency "prism", ">= 0.19.0"
