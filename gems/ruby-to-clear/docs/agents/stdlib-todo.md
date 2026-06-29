@@ -7,6 +7,11 @@ self-hosting path, ordered by migration importance. The transpiler should map to
 these primitives only when the call shape is direct and efficient. It should not
 grow a Ruby compatibility runtime.
 
+The preferred stdlib shape is C/Zig-like free functions and explicit data
+structures, with functional pipeline helpers where that makes compiler code
+clearer. Do not mirror Ruby's object model, module system, or mixin behavior in
+the stdlib just because the source uses those surfaces.
+
 ## P0: Files, Directories, And Paths
 
 Audit evidence:

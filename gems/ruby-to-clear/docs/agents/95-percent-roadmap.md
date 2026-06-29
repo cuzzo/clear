@@ -12,6 +12,32 @@ This roadmap assumes the CLEAR-side stdlib primitives already exist. Work here
 is scoped to the Ruby-to-CLEAR transpiler and small Ruby source refactors where
 dynamic Ruby cannot be translated efficiently.
 
+## Language Design Guardrails
+
+The transpiler must not make executive language-design decisions for CLEAR.
+Ruby source contains classes, modules, mixins, and dynamic dispatch, but those
+features should not automatically become CLEAR namespaces, modules,
+traits/interfaces, or an OOP runtime.
+
+When a Ruby construct has no existing direct CLEAR shape, the first question is
+whether CLEAR can get by without adding that feature. The preferred direction is
+closer to C/Zig plus accessible functional programming: free functions,
+explicit data, structs, UFCS-style calls, pipelines, and local state where it is
+actually needed. A useful mental model is closer to OCaml with UFCS and explicit
+state than to Java or Ruby.
+
+For migration output, this means:
+
+- Ruby classes should lower only where they are really static data plus
+  functions over that data.
+- Ruby modules should preserve organization and source location, but should not
+  imply a new CLEAR module/namespace feature.
+- Ruby mixins, interfaces-by-convention, and dynamic dispatch should become
+  localized TODOs or source refactor targets unless an existing CLEAR pattern
+  handles them directly.
+- If the transpiler needs a new CLEAR language feature to translate a construct,
+  it should emit a TODO and escalate that as a separate design decision.
+
 ## Baseline
 
 Whole-codebase audit over `src/**/*.rb`:
@@ -60,7 +86,7 @@ recover structure before optimizing smaller call translations.
 
 ## Ordered Epics
 
-### 1. Preserve Ruby Module Structure
+### 1. Preserve Ruby Module Structure Without Designing Namespaces
 
 Audit signal:
 
@@ -70,12 +96,14 @@ Audit signal:
 
 Implementation:
 
-- Add `ModuleNode` lowering that emits a stable namespace/comment boundary and
+- Add `ModuleNode` lowering that emits a stable migration/comment boundary and
   translates the body.
-- Do not create a Ruby module runtime. CLEAR already uses file/package
-  namespace through `REQUIRE`; Ruby module names should be migration structure,
-  generated prefixes, or comments.
-- Preserve nested module names for generated symbol names and TODO locations.
+- Do not create a Ruby module runtime, trait/interface system, or new namespace
+  mechanism from the transpiler.
+- Preserve nested module names for TODO locations and collision diagnostics.
+- Emit flat declarations where that is valid CLEAR. If flattening creates a
+  collision or ambiguity, emit a localized TODO instead of choosing a new
+  namespacing scheme.
 - Treat mixin declarations (`include`, `extend`) as metadata or localized TODOs,
   not runtime emulation.
 
@@ -84,6 +112,7 @@ Acceptance:
 - `ModuleNode` disappears from unsupported-output audit results.
 - Large files under `src/mir`, `src/annotator`, `src/ast`, `src/backends`,
   `src/semantic`, and `src/lsp` become partial instead of fully commented.
+- The emitted CLEAR does not rely on a new language-level namespace decision.
 
 Expected impact:
 
@@ -177,11 +206,16 @@ Implementation:
 - Improve `T::Struct`, plain `Struct.new`, and constant-record output where
   field sets are static.
 - Support singleton/class methods where the receiver is statically known.
+- Translate Ruby class-like code only into structs plus functions/UFCS when the
+  data and method set are static. Inheritance, mixins, and interface-like
+  behavior should remain TODO/refactor targets unless CLEAR already has a direct
+  construct for the specific case.
 
 Acceptance:
 
 - Declaration-only Ruby syntax should rarely contribute unsupported LoC.
 - Unsupported declaration semantics are one-line TODOs, not whole-file comments.
+- No class/mixin handler introduces hidden OOP semantics.
 
 Expected impact:
 

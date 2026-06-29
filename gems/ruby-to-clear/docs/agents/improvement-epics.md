@@ -12,11 +12,27 @@ localized comments/TODOs that are easy to repair by hand.
 
 - Do not emulate the Ruby object model in CLEAR.
 - Do not add a general runtime compatibility layer for Ruby semantics.
+- Do not let the transpiler decide that CLEAR needs namespaces, modules,
+  traits/interfaces, mixins, inheritance, or other mainstream OOP features.
 - Do not translate code when the generated CLEAR would be meaningfully less
   direct or less efficient than handwritten CLEAR.
 - Do not hide uncertainty behind helpers with Ruby-like behavior.
 - Do not treat "more accepted Ruby syntax" as success unless the emitted CLEAR
   is mechanically clear, efficient, and reviewable.
+
+## Language Direction
+
+CLEAR should lean closer to C/Zig with accessible functional programming than
+to Java, Ruby, or other class-heavy OOP languages. The expected target style is
+free functions, explicit values, structs, UFCS-style calls, pipelines, and state
+where it is useful. A good north star is closer to OCaml with UFCS and explicit
+state than to Ruby's object model.
+
+When Ruby source uses classes, modules, mixins, or interface-by-convention
+patterns, the transpiler should first ask whether CLEAR can get by without the
+corresponding OOP feature. If the answer is not already clear from existing
+CLEAR semantics, emit a localized TODO and treat it as a separate language or
+source-refactor decision.
 
 ## Success Criteria
 
@@ -26,6 +42,8 @@ localized comments/TODOs that are easy to repair by hand.
 - The output is deterministic and source-oriented enough for manual repair.
 - The audit process identifies the next highest-value handler by observed
   source frequency and risk, not by speculation.
+- Any new CLEAR language surface proposed by migration is explicitly reviewed
+  outside the transpiler implementation.
 
 ## Epic 1: Partial Translation Instead Of Whole-Subtree Loss
 
@@ -193,6 +211,8 @@ Direction:
 - Drop Sorbet-only runtime DSL output when it has no CLEAR runtime meaning.
 - Translate `Struct.new`, `T::Struct`, simple attrs, and constant records into
   explicit CLEAR structs when field sets are static.
+- Avoid treating Ruby classes, mixins, or Sorbet interface shapes as evidence
+  that CLEAR should add class, trait, or interface semantics.
 - Use shape metadata to improve constructor and collection literal output.
 
 Acceptance:
