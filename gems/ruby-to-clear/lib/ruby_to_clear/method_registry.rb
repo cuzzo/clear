@@ -47,6 +47,29 @@ module RubyToClear
       end
     end
 
+    def self.block_expression(receiver, node, transpiler, method_label)
+      block_node = node.block
+      unless block_node
+        transpiler.raise_unsupported("#{method_label} without a block is not supported", node)
+      end
+
+      if block_node.is_a?(Prism::BlockArgumentNode)
+        method_name = block_node.expression.value.to_s
+        method_name = "toString" if method_name == "to_s"
+        "_.#{method_name}()"
+      elsif block_node.is_a?(Prism::BlockNode)
+        unless transpiler.simple_block_expression?(block_node)
+          transpiler.raise_unsupported("#{method_label} block must be a single expression", node)
+        end
+        param_name = block_node.parameters&.parameters&.requireds&.first&.name&.to_s
+        transpiler.with_renames({ param_name => "_" }) do
+          transpiler.visit(block_node.body.body.first)
+        end
+      else
+        transpiler.raise_unsupported("Unsupported #{method_label} block type: #{block_node.class.name}", node)
+      end
+    end
+
     # --- Registrations ---
 
     register("map") do |receiver, node, transpiler|
@@ -116,6 +139,52 @@ module RubyToClear
         receiver_kind: context.receiver_kind,
         receiver_name: context.receiver_name
       )
+    end
+
+    register("reject") do |receiver, node, transpiler|
+      block_body = block_expression(receiver, node, transpiler, "reject")
+      "#{receiver} |> WHERE !(#{block_body})"
+    end
+
+    register("any?") do |receiver, node, transpiler|
+      block_body = block_expression(receiver, node, transpiler, "any?")
+      "#{receiver} |> ANY #{block_body}"
+    end
+
+    register("all?") do |receiver, node, transpiler|
+      block_body = block_expression(receiver, node, transpiler, "all?")
+      "#{receiver} |> ALL #{block_body}"
+    end
+
+    register("find") do |receiver, node, transpiler|
+      block_body = block_expression(receiver, node, transpiler, "find")
+      "#{receiver} |> FIND #{block_body}"
+    end
+
+    register("detect") do |context|
+      translate(
+        "find",
+        context.receiver_code,
+        context.node,
+        context.transpiler,
+        receiver_kind: context.receiver_kind,
+        receiver_name: context.receiver_name
+      )
+    end
+
+    register("filter_map") do |receiver, node, transpiler|
+      block_body = block_expression(receiver, node, transpiler, "filter_map")
+      "#{receiver} |> SELECT #{block_body} |> WHERE _ != NIL"
+    end
+
+    register("flat_map") do |receiver, node, transpiler|
+      block_body = block_expression(receiver, node, transpiler, "flat_map")
+      "#{receiver} |> UNNEST #{block_body}"
+    end
+
+    register("sort_by") do |receiver, node, transpiler|
+      block_body = block_expression(receiver, node, transpiler, "sort_by")
+      "#{receiver} |> ORDER_BY #{block_body}"
     end
 
     register("reduce") do |receiver, node, transpiler|
