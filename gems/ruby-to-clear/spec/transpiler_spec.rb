@@ -482,6 +482,12 @@ RSpec.describe RubyToClear::Transpiler do
         RubyToClear.transpile("list = []; list.map { |x| y = x * 2; y + 1 }")
       }.to raise_error(RubyToClear::Transpiler::TranspilationError, /map block must be a single expression/)
     end
+
+    it "raises error on destructured pipeline block parameters" do
+      expect {
+        RubyToClear.transpile("pairs = []; pairs.find { |(left, right)| left }")
+      }.to raise_error(RubyToClear::Transpiler::TranspilationError, /block parameter destructuring is not supported/)
+    end
   end
 
   describe "MultiWriteNode destructuring" do
@@ -553,10 +559,24 @@ RSpec.describe RubyToClear::Transpiler do
       }.to raise_error(RubyToClear::Transpiler::TranspilationError, /Keyword arguments are not supported/)
     end
 
-    it "raises error on keyword parameters inside method signatures" do
+    it "translates static keyword parameters as ordinary CLEAR parameters" do
+      ruby_code = <<~RUBY
+        def my_func(a, b:, c: 1)
+          b
+        end
+      RUBY
+      expected_clear = <<~CLEAR
+        FN my_func(a: Auto, b: Auto, c = 1: Auto) RETURNS !Auto ->
+          b;
+        END
+      CLEAR
+      expect_transpile(ruby_code, expected_clear)
+    end
+
+    it "raises error on keyword rest parameters inside method signatures" do
       expect {
-        RubyToClear.transpile("def my_func(a: 1); end")
-      }.to raise_error(RubyToClear::Transpiler::TranspilationError, /Keyword parameters are not supported/)
+        RubyToClear.transpile("def my_func(**kwargs); end")
+      }.to raise_error(RubyToClear::Transpiler::TranspilationError, /Keyword rest parameters are not supported/)
     end
   end
 

@@ -64,10 +64,35 @@ module RubyToClear
       "#{clear_name}(#{args.join(', ')})"
     end
 
+    def self.unsupported_result?(value)
+      value.is_a?(String) && value.include?("# [UNSUPPORTED:")
+    end
+
+    def self.block_required_parameter_names(node, block_node, transpiler, method_label, min:, max:)
+      params = block_node.parameters&.parameters
+      requireds = params&.requireds || []
+
+      if params && (params.optionals.any? || params.rest || params.posts.any? ||
+                    params.keywords.any? || params.keyword_rest || params.block)
+        return transpiler.raise_unsupported("#{method_label} block parameter shape is not supported", node)
+      end
+
+      unless requireds.length >= min && requireds.length <= max
+        expected = min == max ? min.to_s : "#{min}..#{max}"
+        return transpiler.raise_unsupported("#{method_label} block expects #{expected} required parameters", node)
+      end
+
+      unless requireds.all? { |param| param.respond_to?(:name) }
+        return transpiler.raise_unsupported("#{method_label} block parameter destructuring is not supported", node)
+      end
+
+      requireds.map { |param| param.name.to_s }
+    end
+
     def self.block_expression(receiver, node, transpiler, method_label)
       block_node = node.block
       unless block_node
-        transpiler.raise_unsupported("#{method_label} without a block is not supported", node)
+        return transpiler.raise_unsupported("#{method_label} without a block is not supported", node)
       end
 
       if block_node.is_a?(Prism::BlockArgumentNode)
@@ -76,9 +101,12 @@ module RubyToClear
         "_.#{method_name}()"
       elsif block_node.is_a?(Prism::BlockNode)
         unless transpiler.simple_block_expression?(block_node)
-          transpiler.raise_unsupported("#{method_label} block must be a single expression", node)
+          return transpiler.raise_unsupported("#{method_label} block must be a single expression", node)
         end
-        param_name = block_node.parameters&.parameters&.requireds&.first&.name&.to_s
+        param_names = block_required_parameter_names(node, block_node, transpiler, method_label, min: 0, max: 1)
+        return param_names if unsupported_result?(param_names)
+
+        param_name = param_names.first
         transpiler.with_renames({ param_name => "_" }) do
           transpiler.visit(block_node.body.body.first)
         end

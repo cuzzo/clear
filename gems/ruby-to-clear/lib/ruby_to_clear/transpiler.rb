@@ -233,8 +233,8 @@ module RubyToClear
 
     def check_parameters!(parameters_node)
       return unless parameters_node
-      if !parameters_node.keywords.empty? || parameters_node.keyword_rest
-        return raise_unsupported("Keyword parameters are not supported", parameters_node)
+      if parameters_node.keyword_rest
+        return raise_unsupported("Keyword rest parameters are not supported", parameters_node.keyword_rest)
       end
       nil
     end
@@ -525,10 +525,24 @@ module RubyToClear
     def visit_parameters_node(node)
       requireds = node.requireds.map { |param| visit(param) }
       optionals = node.optionals.map { |param| visit(param) }
-      (requireds + optionals).join(", ")
+      keywords = node.keywords.map { |param| visit(param) }
+      (requireds + optionals + keywords).join(", ")
     end
 
     def visit_optional_parameter_node(node)
+      prefix = (@mutable_params && @mutable_params.include?(node.name.to_s)) ? "MUTABLE " : ""
+      type = (@param_types && @param_types[node.name.to_s]) || "Auto"
+      default_val = visit(node.value)
+      "#{prefix}#{node.name} = #{default_val}: #{type}"
+    end
+
+    def visit_required_keyword_parameter_node(node)
+      prefix = (@mutable_params && @mutable_params.include?(node.name.to_s)) ? "MUTABLE " : ""
+      type = (@param_types && @param_types[node.name.to_s]) || "Auto"
+      "#{prefix}#{node.name}: #{type}"
+    end
+
+    def visit_optional_keyword_parameter_node(node)
       prefix = (@mutable_params && @mutable_params.include?(node.name.to_s)) ? "MUTABLE " : ""
       type = (@param_types && @param_types[node.name.to_s]) || "Auto"
       default_val = visit(node.value)
