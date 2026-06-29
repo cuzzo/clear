@@ -3,13 +3,15 @@
 
 # Generates the Zola site content from in-repo markdown.
 #
-# docs/ is the single source of truth. Each section below maps a set
-# of source files to a Zola section under site/content/. Front matter
-# (title from the first `# ` heading, date/updated from git history)
-# is injected; markdown links between any two generated files are
-# rewritten to Zola internal links so they resolve on the site.
-# Generated files are git-ignored (see site/.gitignore); CI runs this
-# before `zola build`.
+# docs/ is the public markdown source for the site. Most docs are authored
+# directly under docs/. The stdlib reference is generated first from
+# code-owned heredocs in tools/stdlib_docs.rb, then treated like the rest of
+# docs/. Each section below maps a set of source files to a Zola section under
+# site/content/. Front matter (title from the first `# ` heading, date/updated
+# from git history) is injected; markdown links between any two generated files
+# are rewritten to Zola internal links so they resolve on the site. Generated
+# site files are git-ignored (see site/.gitignore); CI runs this before
+# `zola build`.
 #
 #   ruby tools/gen_site.rb
 
@@ -18,6 +20,10 @@ require "shellwords"
 require "set"
 
 ROOT = File.expand_path("..", __dir__)
+
+require_relative "stdlib_docs"
+
+StdlibDocs.generate!(root: ROOT)
 
 def slug_from_basename(abs) = File.basename(abs, ".md")
 
