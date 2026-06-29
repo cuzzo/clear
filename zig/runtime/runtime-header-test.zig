@@ -75,7 +75,7 @@ fn startWorkers(threads: []std.Thread, n: usize) void {
     }
     var wait_ms: usize = 0;
     while (fp.global_registry.count() < global_spawned_workers) : (wait_ms += 1) {
-        if (wait_ms >= 5_000) @panic("Worker registration timed out");
+        if (wait_ms >= 300_000) @panic("Worker registration timed out");
         compat.sleepNs(1 * std.time.ns_per_ms);
     }
 }

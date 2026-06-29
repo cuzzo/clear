@@ -1204,11 +1204,7 @@ pub const Scheduler = struct {
     }
 
     pub fn run(self: *Scheduler) void {
-
-        // Install alternate signal stack on this OS thread before any
-        // fiber runs. See sig_alt_stack docs above.
         ensureSignalAltStack();
-
         const my_id = std.Thread.getCurrentId();
 
         // CRITICAL: clear thread-locals on exit, regardless of how we
@@ -2332,32 +2328,29 @@ pub const SchedulerRegistry = struct {
     /// falls back to appending at len.  This prevents len from growing
     /// unboundedly when threads are repeatedly spawned and killed.
     pub fn register(self: *SchedulerRegistry, allocator: std.mem.Allocator, id: std.Thread.Id, sched: *Scheduler) !void {
+        self.id_mutex.lock();
+        defer self.id_mutex.unlock();
+
         // 1. Scan existing slots for a null hole (left by unregister).
         const n = self.len.load(.acquire);
         for (self.slots[0..n], 0..) |*slot, slot_idx| {
-            // CAS null → sched.  If another thread races us for the same
-            // hole, exactly one wins; the loser continues scanning.
-            if (slot.cmpxchgStrong(null, sched, .acq_rel, .monotonic) == null) {
+            if (slot.load(.acquire) == null) {
+                slot.store(sched, .release);
                 sched.index = @intCast(slot_idx);
-                // Won the slot — record in id_map and return.
-                self.id_mutex.lock();
-                defer self.id_mutex.unlock();
                 try self.id_map.put(allocator, id, sched);
                 return;
             }
         }
 
         // 2. No holes — append at the end.
-        const idx = self.len.fetchAdd(1, .acq_rel);
+        const idx = self.len.load(.acquire);
         if (idx >= MAX) {
-            _ = self.len.fetchSub(1, .acq_rel);
             return error.RegistryFull;
         }
-        sched.index = @intCast(idx);
         self.slots[idx].store(sched, .release);
+        self.len.store(idx + 1, .release);
+        sched.index = @intCast(idx);
 
-        self.id_mutex.lock();
-        defer self.id_mutex.unlock();
         try self.id_map.put(allocator, id, sched);
     }
 
@@ -2366,9 +2359,10 @@ pub const SchedulerRegistry = struct {
     /// The hole will be reclaimed by the next register() call.
     pub fn unregister(self: *SchedulerRegistry, id: std.Thread.Id) void {
         self.id_mutex.lock();
+        defer self.id_mutex.unlock();
+
         const sched_opt = self.id_map.get(id);
         _ = self.id_map.remove(id);
-        self.id_mutex.unlock();
 
         if (sched_opt) |sched| {
             const n = self.len.load(.acquire);
