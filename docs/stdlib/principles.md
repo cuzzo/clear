@@ -58,55 +58,69 @@ File and network IO are the test case. CLEAR should not make ordinary IO
 as hard as Java or Zig.
 
 ```ruby clear illustrative
-text = fs.read("config.clear");
-lines = fs.readLines("users.txt");
-fs.write("out.txt", report);
+text = fs.read("config.clear") OR RAISE;
+lines = fs.readLines("users.txt") OR RAISE;
+fs.write("out.txt", report) OR RAISE;
 ```
 
 Pipelines should default to using streams internally where that is the
-efficient strategy, especially for IO and large inputs. But unless the
-user requests another shape, the final result should be the high-level
-collection users expect: usually a list.
+efficient strategy, especially for IO and large inputs. A pipeline can be
+collected implicitly by its destination type, or explicitly with a
+terminal such as `COLLECT_LIST`, `COLLECT_SET`, `COLLECT_MAP`, or
+`AS_STREAM`.
 
 ```ruby clear illustrative
-users = fs.lines("users.csv")
+users = (fs.readLines("users.csv") OR RAISE)
     |> MAP { parseUser(_) }
     |> SELECT { _.active?() };
 ```
 
-The implementation may stream `users.csv` line by line. Because the user
-did not request a stream result, the final value collects into a list.
+The implementation may stream `users.csv` line by line. Because the
+assignment target is a list, the final value collects into that list.
 
 Users who want a stream, map, set, or another collection request it
 explicitly:
 
 ```ruby clear illustrative
-active_stream = fs.lines("users.csv")
+active_stream = (fs.readLines("users.csv") OR RAISE)
     |> MAP { parseUser(_) }
     |> SELECT { _.active?() }
     |> AS_STREAM;
 
-users_by_id = fs.lines("users.csv")
+users_by_id = (fs.readLines("users.csv") OR RAISE)
     |> MAP { parseUser(_) }
     |> COLLECT_MAP { _.id => _ };
 
-unique_domains = fs.lines("emails.txt")
+unique_domains = (fs.readLines("emails.txt") OR RAISE)
     |> MAP { domainOf(_) }
     |> COLLECT_SET;
 ```
 
 The exact names are not final. The principle is final: stream internally
-where practical, collect to a list by default, and make other result
-shapes explicit.
+where practical, collect from the explicit terminal or destination type,
+and never insert hidden sorts or other semantic work during collection.
+
+Ordering is explicit. Directory scans and globbing should be unsorted
+streams unless the user asks otherwise:
+
+```ruby clear illustrative
+files = fs.glob("src/**/*.cht") OR RAISE;
+sorted = files |> ORDER_BY _;
+```
+
+A future `SORT` shorthand may sort by the singular value, but that
+depends on the traits/interfaces or duck-typed ordering decision. Today
+`ORDER_BY` is the explicit sortable pipeline operator.
 
 ## Key Decisions Before Self-Host Implementation
 
-1. Confirm pipeline result defaults: stream internally where practical,
-   collect to lists unless another shape is requested.
+1. Confirm pipeline result defaults: stream internally where practical;
+   collect according to explicit terminal or destination type.
 2. Choose explicit collection target syntax: `AS_STREAM`, `COLLECT_LIST`,
    `COLLECT_MAP`, `COLLECT_SET`, and typed collection targets.
-3. Choose the fallibility model for stdlib APIs: native error unions,
-   named `Result`, ergonomic `try`, or a combination.
+3. Define the named error taxonomy and future `Result` relationship;
+   prototype stdlib APIs use native `!T` fallibility and `OR`
+   propagation.
 4. Decide which effects are public stdlib contracts for self-host
    packages: file read/write, process/env, network read/write, time,
    random, allocation, blocking, and extern.

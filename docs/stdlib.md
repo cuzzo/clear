@@ -47,6 +47,10 @@ must exist, but ordinary file IO, pipelines, string work, and collection
 transforms should not require users to start with handles, buffers,
 allocators, or stream machinery.
 
+Fallible stdlib APIs use CLEAR's `!T` fallible tense. If a caller does
+not handle the error inline with `OR ...`, it bubbles through the caller's
+fallible return path. We will not hide IO or parsing errors like Ruby.
+
 Illustrative examples use `ruby clear illustrative` fences. They are
 design examples and may not compile until the corresponding package moves
 beyond `planned`.

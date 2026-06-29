@@ -83,44 +83,44 @@ File and network IO are the clearest examples.
 CLEAR should not make opening files or doing file/network IO as hard as Java or
 Zig for ordinary users. A user should be able to write obvious high-level code:
 
-```ruby
-text = fs.read("config.clear");
-lines = fs.readLines("users.txt");
-fs.write("out.txt", report);
+```ruby clear illustrative
+text = fs.read("config.clear") OR RAISE;
+lines = fs.readLines("users.txt") OR RAISE;
+fs.write("out.txt", report) OR RAISE;
 ```
 
 The same principle applies to pipelines. The pipeline system should default to
 using streams internally where it can, because streaming is the right execution
-strategy for IO and large inputs. But the default result should still be the
-collection high-level users expect: usually a list.
+strategy for IO and large inputs. The final result should be driven by an
+explicit terminal or destination type.
 
 Illustrative shape:
 
-```ruby
-users = fs.lines("users.csv")
+```ruby clear illustrative
+users: User[] = (fs.readLines("users.csv") OR RAISE)
     |> MAP { parseUser(_) }
     |> SELECT { _.active?() };
 ```
 
 The implementation should be free to stream `users.csv` line by line. The user
 should not need to opt into streaming just to avoid a bad implementation. But
-because the pipeline result is not explicitly requested as a stream, the final
-value should collect into a list.
+because the assignment target is a list, the final value should collect into a
+list.
 
 If the user wants a stream, hashmap, set, or another collection, they should ask
 for it explicitly:
 
-```ruby
-active_stream = fs.lines("users.csv")
+```ruby clear illustrative
+active_stream = (fs.readLines("users.csv") OR RAISE)
     |> MAP { parseUser(_) }
     |> SELECT { _.active?() }
     |> AS_STREAM;
 
-users_by_id = fs.lines("users.csv")
+users_by_id = (fs.readLines("users.csv") OR RAISE)
     |> MAP { parseUser(_) }
     |> COLLECT_MAP { _.id => _ };
 
-unique_domains = fs.lines("emails.txt")
+unique_domains = (fs.readLines("emails.txt") OR RAISE)
     |> MAP { domainOf(_) }
     |> COLLECT_SET;
 ```
@@ -128,10 +128,21 @@ unique_domains = fs.lines("emails.txt")
 The exact names are not settled. The principle is settled:
 
 - streams are a preferred internal execution strategy;
-- lists are the default collected result for high-level pipelines;
-- other result shapes are explicit;
+- result shape comes from an explicit terminal or destination type;
+- directory scans, globbing, and collection do not insert hidden sorts;
 - systems programmers can request stream/control forms without fighting the
   high-level API.
+
+Ordering is explicit:
+
+```ruby clear illustrative
+files = fs.glob("src/**/*.cht") OR RAISE;
+sorted = files |> ORDER_BY _;
+```
+
+`ORDER_BY` is the current explicit sort-by-key operator. A future `SORT`
+shorthand for sorting by the singular value depends on the traits/interfaces
+or duck-typed ordering decision.
 
 This is the kind of tradeoff CLEAR should make repeatedly. A systems language
 might require explicit stream types everywhere. CLEAR should infer and use the
@@ -185,7 +196,8 @@ perform file reads.
 Prefer names that read naturally in pipelines and UFCS:
 
 - Ruby/Elixir-style collection names: `map`, `select`, `reject`, `filterMap`,
-  `flatMap`, `find`, `any?`, `all?`, `reduce`, `sortBy`.
+  `flatMap`, `find`, `any?`, `all?`, `reduce`; pipeline ordering uses
+  `ORDER_BY`.
 - Ruby-style predicates when they are compact and obvious: `empty?`,
   `present?`, `nil?`, `startsWith?`, `endsWith?`.
 - Systems names only at systems boundaries: `open`, `close`, `flush`, `sync`,
@@ -200,11 +212,11 @@ Default choices should be optimized for high-level users:
 
 | Area | Default | Explicit lower-level path |
 | --- | --- | --- |
-| Pipeline result | collect to list | `AS_STREAM`, `COLLECT_MAP`, `COLLECT_SET`, fixed array |
+| Pipeline result | destination type or explicit terminal | `AS_STREAM`, `COLLECT_LIST`, `COLLECT_MAP`, `COLLECT_SET`, fixed array |
 | File read | read whole text or lines | open handle, stream lines, read bytes, read into buffer |
 | Network read | message/bytes helper where possible | socket/client resource and stream control |
 | Strings | UTF-8 text operations | byte buffers and byte indexing |
-| Errors | ergonomic fallible call syntax | explicit result/error handling |
+| Errors | `!T` fallibility with `OR` propagation | named error taxonomy and explicit result handling |
 | Effects | inferred and documented | strict declarations and package permissions |
 | Allocation | implicit safe allocation | reserve/capacity/allocator-aware APIs |
 | Mutation | immutable/new collection transforms | explicit mutating names |
@@ -217,14 +229,14 @@ The self-host project can implement a lot with existing intrinsics and thin
 source packages, but these decisions should be made before most stdlib work
 lands:
 
-1. **Pipeline result defaults.** Confirm that pipelines use streams internally
-   where practical and collect to lists unless the user explicitly requests a
-   stream, map, set, fixed array, or other result shape.
+1. **Pipeline result defaults.** Pipelines use streams internally where
+   practical and collect according to explicit terminal or destination type.
 2. **Explicit collection request syntax.** Choose names and syntax for
    `AS_STREAM`, `COLLECT_LIST`, `COLLECT_MAP`, `COLLECT_SET`, and typed
    collection targets.
-3. **Error model.** Decide whether fallible stdlib APIs expose native error
-   unions, a named `Result`, ergonomic `try`, or a combination.
+3. **Error model.** Prototype stdlib APIs expose native `!T` fallibility and
+   `OR` propagation. The remaining decision is the named error taxonomy and
+   future relationship to `Result`.
 4. **Effect visibility.** Decide which effects are public stdlib contracts for
    self-host packages: file read/write, process/env, network read/write, time,
    random, allocation, blocking, and extern.
@@ -241,9 +253,9 @@ lands:
    convenience functions versus explicit handle/builder/scanner/stream APIs.
 10. **String and bytes split.** Decide byte indexing, codepoint indexing,
     invalid UTF-8 handling, and conversions between `String` and byte buffers.
-11. **Deterministic ordering.** Decide whether map/set iteration, directory
-    listing, globbing, JSON object generation, and diagnostic output sort by
-    default or require explicit sorted variants.
+11. **Ordering.** Directory listing and globbing should be unsorted streams by
+    default. Decide the explicit ordered variants and future `SORT`/ordering
+    interface for maps, sets, JSON object generation, and diagnostics.
 12. **Generic and iterator model.** Decide how collection functions specialize
     without importing a class/trait/interface model that CLEAR does not want.
 13. **Mutation convention.** Decide how mutating collection/string operations

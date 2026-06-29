@@ -145,8 +145,10 @@ honesty, not for exposing every low-level helper directly to users.
 4. Make effects part of stdlib contracts. File, network, process, allocation,
    blocking, randomness, and time are observable capabilities, not casual
    helpers.
-5. Prefer deterministic compiler tooling. Map/set iteration and filesystem
-   traversal need explicit sorted variants when output order matters.
+5. Prefer explicit ordering for compiler tooling. Map/set iteration and
+   filesystem traversal should stay natural unless output order matters; use
+   `ORDER_BY` or dedicated ordered variants when deterministic output is part
+   of the contract.
 6. Use UFCS and pipelines as the ergonomic layer. A function should be usable as
    `map(xs, fn)` and `xs.map(fn)` or `xs |> MAP { ... }` where the compiler can
    lower it efficiently.
@@ -164,10 +166,10 @@ honesty, not for exposing every low-level helper directly to users.
 The first stdlib epic is a documentation pipeline and public spec, not a
 library implementation.
 
-The source of truth should be public markdown under `docs/`, because the
-existing GitHub Pages workflow already publishes that through Zola. The initial
-page should be `docs/stdlib.md`, and later expansion can split it into
-`docs/stdlib/*.md` if the Zola generator gains nested section support.
+The source of truth is authored stdlib documentation embedded in
+`tools/stdlib_docs.rb` and generated into split public pages under `docs/`.
+This keeps planned APIs close to implementation metadata while still publishing
+readable package pages through the static site generator.
 
 The public docs should include:
 
@@ -227,7 +229,7 @@ intrinsic row itself.
 
 | Area | Prefer CLEAR | Use Zig only for |
 | --- | --- | --- |
-| Collection transforms | `map`, `filter`, `reject`, `reduce`, `sortBy` wrappers and policies | Backing storage primitives, hashing kernels, sort kernels if needed |
+| Collection transforms | `map`, `filter`, `reject`, `reduce`, `ORDER_BY` wrappers and policies | Backing storage primitives, hashing kernels, sort kernels if needed |
 | Strings | API composition, trimming/splitting policy, formatting wrappers | UTF-8 validation/iteration kernels, allocation-heavy builders |
 | Regex/scanner | Explicit `Match` and `Scanner` API surface | Regex engine, DFA/NFA execution, byte scanning hot loops |
 | Files/path | Path API, ordering policy, error normalization | Syscalls, open/read/write/stat, platform path quirks |
@@ -265,7 +267,7 @@ Launch data structures:
 - Fixed arrays and slices.
 - Growable list/vector.
 - Hash map and set.
-- Ordered map/set or sorted views where deterministic output matters.
+- Ordered map/set or ordered views where deterministic output matters.
 - Range.
 - Pool/slab for compiler and runtime structures.
 - Queue/deque only if the compiler or scheduler needs it before launch.
@@ -283,8 +285,8 @@ Launch transforms:
 | `reduce`/`fold` | Elixir `reduce`, Ruby `inject` | Explicit accumulator type and return |
 | `any?`/`all?` | Ruby predicates | Short-circuit where possible |
 | `find` | Ruby `find` | Return `?T`; no exception or sentinel |
-| `sortBy` | Ruby `sort_by` | Stable sort for compiler output |
-| `keys`/`values`/`pairs` | Ruby hash helpers | Deterministic sorted variants for tool output |
+| `ORDER_BY` | Ruby `sort_by` | Explicit stable sort-by-key for compiler output |
+| `keys`/`values`/`pairs` | Ruby hash helpers | Natural traversal plus explicit ordered variants for tool output |
 
 Self-host requirement: P0. The ruby-to-clear audit shows `each`, `map`,
 `any?`, `filter_map`, `select`, `flat_map`, `find`, `reject`,
@@ -297,8 +299,8 @@ Implementation direction:
   pipeline primitive.
 - Keep backing storage and mutation primitives intrinsic until CLEAR can express
   the same allocation and ownership contracts.
-- Add sorted/deterministic variants before relying on map/set traversal for
-  compiler output.
+- Add explicit `ORDER_BY`/ordered variants before relying on map/set traversal
+  for compiler output.
 
 Decision gates:
 
@@ -368,12 +370,13 @@ overflow-trapping arithmetic.
 
 Launch surface:
 
-- `readFile`, `readLines`, `writeFile`, `appendFile`, `deleteFile`.
+- `fs.read`, `fs.readLines`, `fs.write`, `fs.append`, `fs.delete`.
 - `File.open`, `File.create`, `fileReadAll`, `fileWrite`, resource close.
-- `fileExists?`, `regularFile?`, `dirExists?`, `symlinkExists?`.
-- `fileSize`, `fileModifiedTime`, permissions where needed.
-- `joinPath`, `expandPath`, `baseName`, `dirName`, `relativePath`.
-- `listDir`, `listAll`, `globPaths`, recursive walk.
+- `fs.exists?`, `fs.file?`, `fs.dir?`, `fs.symlink?`.
+- `fs.size`, `fs.mtime`, permissions where needed.
+- `path.join`, `path.expand`, `path.basename`, `path.dirname`,
+  `path.relative`.
+- `fs.list`, `fs.glob`, recursive walk.
 
 Self-host requirement: P0. The Ruby compiler uses `File.exist?`, `File.join`,
 `File.expand_path`, `File.readlines`, `File.read`, `File.basename`,
@@ -383,8 +386,8 @@ related helpers.
 Implementation direction:
 
 - Use Zig/syscall intrinsics for IO and metadata.
-- Write path normalization, sorting, filtering, line splitting, and glob result
-  policy in CLEAR when possible.
+- Write path normalization, filtering, line splitting, explicit ordering
+  helpers, and glob result policy in CLEAR when possible.
 - Make file APIs effectful: `FILE_READ`, `FILE_WRITE`, and allocation should be
   visible to the compiler.
 
@@ -392,10 +395,11 @@ Decision gates:
 
 - Cross-platform path semantics at launch. Linux-only is acceptable if stated;
   silent partial portability is not.
-- Error model: return `!T`, `Result<T, FsError>`, or raise compiler-known
-  errors. Pick one public convention before expanding APIs.
-- Determinism: decide whether directory/glob results are sorted by default or
-  require `sortedGlobPaths`.
+- Error model: prototype APIs return `!T`; define named filesystem errors and
+  their future relationship to `Result` before broadening the surface.
+- Ordering: directory listing and globbing return unsorted streams by default;
+  deterministic compiler output should opt in with `ORDER_BY` or ordered
+  helpers.
 
 ### Network
 
@@ -541,7 +545,7 @@ compiler code without stabilizing a huge surface.
 | Priority | Component | Launch commitment |
 | --- | --- | --- |
 | P0 | Core/prelude | primitives, option/result/error convention, predicates, format/print |
-| P0 | Collections | list, slice, map, set, range, transforms, deterministic sorted views |
+| P0 | Collections | list, slice, map, set, range, transforms, explicit ordering views |
 | P0 | Strings/bytes | UTF-8 string, byte operations, split/join/trim/search/replace/builder |
 | P0 | File/path/dir | read/write/stat/list/glob/path helpers with effects |
 | P0 | Testing | assertions, diffs, expected errors, oracle/golden helpers |
@@ -563,7 +567,7 @@ general-purpose launch niceties:
    mtime, symlink helpers if still present.
 2. Collections and transforms used by the transpiler output: list, map, set,
    `each`, `map`, `select`, `reject`, `filterMap`, `flatMap`, `find`, `any?`,
-   `all?`, `sum`, `count`, `sortBy`, `keys`, `values`, `pairs`,
+   `all?`, `sum`, `count`, `ORDER_BY`, `keys`, `values`, `pairs`,
    indexed iteration, and accumulator iteration.
 3. Strings and scanners for lexer/parser code: byte access, codepoint count,
    split lines, substring, replace, regex escape, explicit match result,
@@ -581,7 +585,8 @@ stdlib.
 These should be settled before building a narrow compiler-only stdlib, because
 they affect public API shape and will be expensive to unwind:
 
-1. Error convention: native error unions, named `Result`, or a combination.
+1. Error taxonomy and `Result` relationship. Prototype APIs use native `!T`
+   fallibility and `OR` propagation.
 2. Effect names and enforcement for file, network, process, env, time, random,
    blocking, allocation, and extern calls.
 3. Capability permissions for packages: how a package declares it may read
@@ -590,8 +595,9 @@ they affect public API shape and will be expensive to unwind:
 5. Byte buffer type and conversion rules between `String` and bytes.
 6. Iterator/pipeline model for collection transforms without traits or classes.
 7. Generic specialization model for collection functions and maps/sets.
-8. Deterministic ordering policy for maps, sets, directory listings, globbing,
-   JSON objects, and diagnostics.
+8. Ordering policy for maps, sets, JSON objects, and diagnostics. Directory
+   listings and globbing are unsorted streams by default; deterministic output
+   opts into `ORDER_BY` or ordered helpers.
 9. Regex subset and explicit match-result data model.
 10. Package visibility, versioning, and stdlib compatibility promise.
 11. Test declaration lowering: compiler syntax vs `pkg:testing` library calls.

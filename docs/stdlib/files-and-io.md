@@ -18,25 +18,33 @@ work.
 
 | API | Status | Notes |
 | --- | --- | --- |
-| `fs.read(path)` | `self-host required` | Read full UTF-8 text. |
-| `fs.readBytes(path)` | `self-host required` | Read full byte buffer. |
-| `fs.readLines(path)` | `self-host required` | Read text and split lines. |
-| `fs.write(path, content)` | `self-host required` | Write text or bytes. |
+| `fs.read(path)` | `prototype`, `self-host required` | Read full UTF-8 text, returns `!String`. |
+| `fs.readBytes(path)` | `planned`, `self-host required` | Read full byte buffer. |
+| `fs.readLines(path)` | `planned`, `self-host required` | Target return: `!~String[]`, a fallible stream of lines. |
+| `fs.write(path, content)` | `prototype`, `self-host required` | Write text, returns `!Void`. |
 | `fs.append(path, content)` | `planned` | Tooling convenience. |
 | `fs.exists?(path)` | `self-host required` | File or directory exists. |
 | `fs.file?(path)` | `self-host required` | Regular file predicate. |
 | `fs.dir?(path)` | `self-host required` | Directory predicate. |
 | `fs.symlink?(path)` | `self-host required` | Symlink predicate. |
-| `fs.size(path)` | `self-host required` | File size. |
+| `fs.size(path)` | `prototype`, `self-host required` | File size, returns `!Int64`; current wrapper converts the old sentinel intrinsic to fallibility. |
 | `fs.mtime(path)` | `self-host required` | File modified time. |
-| `fs.list(path)` | `self-host required` | Directory entries; deterministic policy required. |
-| `fs.glob(pattern)` | `self-host required` | Glob paths; deterministic policy required. |
+| `fs.list(path)` | `planned`, `self-host required` | Unsorted stream of directory entries. |
+| `fs.glob(pattern)` | `planned`, `self-host required` | Unsorted stream of matching paths. |
 
 ```ruby clear illustrative
-source = fs.read("src/ast/parser.cht");
-lines = fs.readLines("src/ast/lexer.cht");
-fs.write("build/report.txt", report);
+source = fs.read("src/ast/parser.cht") OR RAISE;
+lines = fs.readLines("src/ast/lexer.cht") OR RAISE;
+fs.write("build/report.txt", report) OR RAISE;
+
+ordered_files = (fs.glob("src/**/*.cht") OR RAISE)
+    |> ORDER_BY _;
 ```
+
+The current `pkg:fs` prototype can compile `read`, collected
+`readLines`, `write`, and fallible `size` over existing intrinsics. The
+desired `readLines(path) RETURNS !~String[]` surface is blocked on
+parser/type support for a fallible stream container.
 
 ## Stateful File API
 
@@ -66,5 +74,6 @@ recent = file.lines()
 - Error/fallibility model for failed IO.
 - Resource auto-close semantics for high-level helpers.
 - Stream lifetime rules when a stream is derived from a file handle.
-- Deterministic ordering for `list` and `glob`.
+- `ORDER_BY` versus future `SORT` shorthand once ordering
+  traits/interfaces are designed.
 - Linux-first versus cross-platform path behavior for v0.3.

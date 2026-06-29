@@ -288,3 +288,20 @@ RSpec.describe "pkg:testing — first-party stdlib package resolution" do
     expect { transpile(src) }.to raise_error(/unknown package 'nonexistent_package_xyz'/)
   end
 end
+
+RSpec.describe "pkg:fs — first-party stdlib package resolution" do
+  def transpile(src)
+    ZigTranspiler.new.transpile(src)
+  end
+
+  it "resolves `REQUIRE \"pkg:fs\"` without an explicit --pkg flag" do
+    src = <<~CLEAR
+      REQUIRE "pkg:fs"
+
+      FN main() RETURNS Void ->
+        RETURN;
+      END
+    CLEAR
+    expect { transpile(src) }.not_to raise_error
+  end
+end

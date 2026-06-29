@@ -40,19 +40,25 @@ ownership, effects, and capability use.
 | `any?`, `all?` | `self-host required` | Short-circuit predicates. |
 | `find` | `self-host required` | Returns `?T`. |
 | `sum`, `count` | `self-host required` | Numeric and predicate aggregation. |
-| `sort`, `sortBy` | `self-host required` | Stable sort for compiler/tool output. |
-| `keys`, `values`, `pairs` | `self-host required` | Map traversal; sorted variants needed. |
+| `ORDER_BY` | `self-host required` | Explicit sort by key expression. |
+| `keys`, `values`, `pairs` | `self-host required` | Map traversal; explicit ordered variants where output order matters. |
 | `indexed` | `self-host required` | Replacement for Ruby `each_with_index`. |
 | `withObject` / `foldInto` | `self-host required` | Replacement for Ruby `each_with_object`. |
 
 ## Pipeline Result Defaults
 
-Pipelines may stream internally, but collect to lists by default.
+Pipelines may stream internally, but collection is determined by explicit
+terminal or destination type. A `~T[]` destination keeps a stream; a
+`T[]` or `T[]@list` destination collects to a list; a `HashMap<K,V>`
+destination collects to a map if the pipeline shape supplies keys.
 
 ```ruby clear illustrative
-names = users
+names: String[] = users
     |> SELECT { _.active?() }
     |> MAP { _.name };
+
+names_stream: ~String[] = users
+    |> SELECT { _.name };
 ```
 
 Other result shapes are explicit:
@@ -70,6 +76,7 @@ unique_names = users
 
 - Exact syntax for `AS_STREAM`, `COLLECT_LIST`, `COLLECT_MAP`, and
   `COLLECT_SET`.
-- Whether map/set traversal sorts by default or exposes sorted variants.
+- How `SORT` differs from `ORDER_BY` after ordering traits/interfaces are
+  designed.
 - Generic specialization without importing a class/trait/interface model.
 - Mutating operation names for `map!`, `<<`, `[]=`, and update forms.

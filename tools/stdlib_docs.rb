@@ -71,6 +71,10 @@ module StdlibDocs
       transforms should not require users to start with handles, buffers,
       allocators, or stream machinery.
 
+      Fallible stdlib APIs use CLEAR's `!T` fallible tense. If a caller does
+      not handle the error inline with `OR ...`, it bubbles through the caller's
+      fallible return path. We will not hide IO or parsing errors like Ruby.
+
       Illustrative examples use `ruby clear illustrative` fences. They are
       design examples and may not compile until the corresponding package moves
       beyond `planned`.
@@ -130,55 +134,69 @@ module StdlibDocs
       as hard as Java or Zig.
 
       ```ruby clear illustrative
-      text = fs.read("config.clear");
-      lines = fs.readLines("users.txt");
-      fs.write("out.txt", report);
+      text = fs.read("config.clear") OR RAISE;
+      lines = fs.readLines("users.txt") OR RAISE;
+      fs.write("out.txt", report) OR RAISE;
       ```
 
       Pipelines should default to using streams internally where that is the
-      efficient strategy, especially for IO and large inputs. But unless the
-      user requests another shape, the final result should be the high-level
-      collection users expect: usually a list.
+      efficient strategy, especially for IO and large inputs. A pipeline can be
+      collected implicitly by its destination type, or explicitly with a
+      terminal such as `COLLECT_LIST`, `COLLECT_SET`, `COLLECT_MAP`, or
+      `AS_STREAM`.
 
       ```ruby clear illustrative
-      users = fs.lines("users.csv")
+      users = (fs.readLines("users.csv") OR RAISE)
           |> MAP { parseUser(_) }
           |> SELECT { _.active?() };
       ```
 
-      The implementation may stream `users.csv` line by line. Because the user
-      did not request a stream result, the final value collects into a list.
+      The implementation may stream `users.csv` line by line. Because the
+      assignment target is a list, the final value collects into that list.
 
       Users who want a stream, map, set, or another collection request it
       explicitly:
 
       ```ruby clear illustrative
-      active_stream = fs.lines("users.csv")
+      active_stream = (fs.readLines("users.csv") OR RAISE)
           |> MAP { parseUser(_) }
           |> SELECT { _.active?() }
           |> AS_STREAM;
 
-      users_by_id = fs.lines("users.csv")
+      users_by_id = (fs.readLines("users.csv") OR RAISE)
           |> MAP { parseUser(_) }
           |> COLLECT_MAP { _.id => _ };
 
-      unique_domains = fs.lines("emails.txt")
+      unique_domains = (fs.readLines("emails.txt") OR RAISE)
           |> MAP { domainOf(_) }
           |> COLLECT_SET;
       ```
 
       The exact names are not final. The principle is final: stream internally
-      where practical, collect to a list by default, and make other result
-      shapes explicit.
+      where practical, collect from the explicit terminal or destination type,
+      and never insert hidden sorts or other semantic work during collection.
+
+      Ordering is explicit. Directory scans and globbing should be unsorted
+      streams unless the user asks otherwise:
+
+      ```ruby clear illustrative
+      files = fs.glob("src/**/*.cht") OR RAISE;
+      sorted = files |> ORDER_BY _;
+      ```
+
+      A future `SORT` shorthand may sort by the singular value, but that
+      depends on the traits/interfaces or duck-typed ordering decision. Today
+      `ORDER_BY` is the explicit sortable pipeline operator.
 
       ## Key Decisions Before Self-Host Implementation
 
-      1. Confirm pipeline result defaults: stream internally where practical,
-         collect to lists unless another shape is requested.
+      1. Confirm pipeline result defaults: stream internally where practical;
+         collect according to explicit terminal or destination type.
       2. Choose explicit collection target syntax: `AS_STREAM`, `COLLECT_LIST`,
          `COLLECT_MAP`, `COLLECT_SET`, and typed collection targets.
-      3. Choose the fallibility model for stdlib APIs: native error unions,
-         named `Result`, ergonomic `try`, or a combination.
+      3. Define the named error taxonomy and future `Result` relationship;
+         prototype stdlib APIs use native `!T` fallibility and `OR`
+         propagation.
       4. Decide which effects are public stdlib contracts for self-host
          packages: file read/write, process/env, network read/write, time,
          random, allocation, blocking, and extern.
@@ -225,19 +243,25 @@ module StdlibDocs
       | `any?`, `all?` | `self-host required` | Short-circuit predicates. |
       | `find` | `self-host required` | Returns `?T`. |
       | `sum`, `count` | `self-host required` | Numeric and predicate aggregation. |
-      | `sort`, `sortBy` | `self-host required` | Stable sort for compiler/tool output. |
-      | `keys`, `values`, `pairs` | `self-host required` | Map traversal; sorted variants needed. |
+      | `ORDER_BY` | `self-host required` | Explicit sort by key expression. |
+      | `keys`, `values`, `pairs` | `self-host required` | Map traversal; explicit ordered variants where output order matters. |
       | `indexed` | `self-host required` | Replacement for Ruby `each_with_index`. |
       | `withObject` / `foldInto` | `self-host required` | Replacement for Ruby `each_with_object`. |
 
       ## Pipeline Result Defaults
 
-      Pipelines may stream internally, but collect to lists by default.
+      Pipelines may stream internally, but collection is determined by explicit
+      terminal or destination type. A `~T[]` destination keeps a stream; a
+      `T[]` or `T[]@list` destination collects to a list; a `HashMap<K,V>`
+      destination collects to a map if the pipeline shape supplies keys.
 
       ```ruby clear illustrative
-      names = users
+      names: String[] = users
           |> SELECT { _.active?() }
           |> MAP { _.name };
+
+      names_stream: ~String[] = users
+          |> SELECT { _.name };
       ```
 
       Other result shapes are explicit:
@@ -255,7 +279,8 @@ module StdlibDocs
 
       - Exact syntax for `AS_STREAM`, `COLLECT_LIST`, `COLLECT_MAP`, and
         `COLLECT_SET`.
-      - Whether map/set traversal sorts by default or exposes sorted variants.
+      - How `SORT` differs from `ORDER_BY` after ordering traits/interfaces are
+        designed.
       - Generic specialization without importing a class/trait/interface model.
       - Mutating operation names for `map!`, `<<`, `[]=`, and update forms.
     MD
@@ -274,25 +299,33 @@ module StdlibDocs
 
       | API | Status | Notes |
       | --- | --- | --- |
-      | `fs.read(path)` | `self-host required` | Read full UTF-8 text. |
-      | `fs.readBytes(path)` | `self-host required` | Read full byte buffer. |
-      | `fs.readLines(path)` | `self-host required` | Read text and split lines. |
-      | `fs.write(path, content)` | `self-host required` | Write text or bytes. |
+      | `fs.read(path)` | `prototype`, `self-host required` | Read full UTF-8 text, returns `!String`. |
+      | `fs.readBytes(path)` | `planned`, `self-host required` | Read full byte buffer. |
+      | `fs.readLines(path)` | `planned`, `self-host required` | Target return: `!~String[]`, a fallible stream of lines. |
+      | `fs.write(path, content)` | `prototype`, `self-host required` | Write text, returns `!Void`. |
       | `fs.append(path, content)` | `planned` | Tooling convenience. |
       | `fs.exists?(path)` | `self-host required` | File or directory exists. |
       | `fs.file?(path)` | `self-host required` | Regular file predicate. |
       | `fs.dir?(path)` | `self-host required` | Directory predicate. |
       | `fs.symlink?(path)` | `self-host required` | Symlink predicate. |
-      | `fs.size(path)` | `self-host required` | File size. |
+      | `fs.size(path)` | `prototype`, `self-host required` | File size, returns `!Int64`; current wrapper converts the old sentinel intrinsic to fallibility. |
       | `fs.mtime(path)` | `self-host required` | File modified time. |
-      | `fs.list(path)` | `self-host required` | Directory entries; deterministic policy required. |
-      | `fs.glob(pattern)` | `self-host required` | Glob paths; deterministic policy required. |
+      | `fs.list(path)` | `planned`, `self-host required` | Unsorted stream of directory entries. |
+      | `fs.glob(pattern)` | `planned`, `self-host required` | Unsorted stream of matching paths. |
 
       ```ruby clear illustrative
-      source = fs.read("src/ast/parser.cht");
-      lines = fs.readLines("src/ast/lexer.cht");
-      fs.write("build/report.txt", report);
+      source = fs.read("src/ast/parser.cht") OR RAISE;
+      lines = fs.readLines("src/ast/lexer.cht") OR RAISE;
+      fs.write("build/report.txt", report) OR RAISE;
+
+      ordered_files = (fs.glob("src/**/*.cht") OR RAISE)
+          |> ORDER_BY _;
       ```
+
+      The current `pkg:fs` prototype can compile `read`, collected
+      `readLines`, `write`, and fallible `size` over existing intrinsics. The
+      desired `readLines(path) RETURNS !~String[]` surface is blocked on
+      parser/type support for a fallible stream container.
 
       ## Stateful File API
 
@@ -322,7 +355,8 @@ module StdlibDocs
       - Error/fallibility model for failed IO.
       - Resource auto-close semantics for high-level helpers.
       - Stream lifetime rules when a stream is derived from a file handle.
-      - Deterministic ordering for `list` and `glob`.
+      - `ORDER_BY` versus future `SORT` shorthand once ordering
+        traits/interfaces are designed.
       - Linux-first versus cross-platform path behavior for v0.3.
     MD
     page("stdlib/strings-and-bytes.md", <<~MD),
