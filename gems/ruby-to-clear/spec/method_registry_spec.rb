@@ -20,7 +20,7 @@ RSpec.describe RubyToClear::MethodRegistry do
     end
 
     expect(RubyToClear.transpile('"abc".size').strip).to eq('"abc".byteLen();')
-    expect(RubyToClear.transpile("items = []; items.size").strip).to eq("MUTABLE items = [];\nitems.len();")
+    expect(RubyToClear.transpile("items = get_items; items.size").strip).to eq("MUTABLE items = get_items();\nitems.len();")
   end
 
   it "prefers receiver-name handlers over receiver-kind handlers" do

@@ -12,6 +12,7 @@ module RubyToClear
       :receiver_code,
       :receiver_kind,
       :receiver_name,
+      :receiver_shape,
       :node,
       :transpiler,
       keyword_init: true
@@ -45,12 +46,13 @@ module RubyToClear
       REGISTRY[[receiver.to_s, ruby_name.to_s]] = block
     end
 
-    def self.translate(ruby_name, receiver, node, transpiler, receiver_kind: nil, receiver_name: nil)
+    def self.translate(ruby_name, receiver, node, transpiler, receiver_kind: nil, receiver_name: nil, receiver_shape: nil)
       context = CallContext.new(
         ruby_name: ruby_name.to_s,
         receiver_code: receiver,
         receiver_kind: receiver_kind&.to_s,
         receiver_name: receiver_name&.to_s,
+        receiver_shape: receiver_shape&.to_s,
         node: node,
         transpiler: transpiler
       )
@@ -63,6 +65,7 @@ module RubyToClear
     def self.lookup(context)
       REGISTRY[[context.receiver_name, context.ruby_name]] ||
         REGISTRY[[context.receiver_kind, context.ruby_name]] ||
+        REGISTRY[[context.receiver_shape, context.ruby_name]] ||
         (context.receiver_code ? REGISTRY[["any", context.ruby_name]] : nil)
     end
 
@@ -80,6 +83,18 @@ module RubyToClear
 
     def self.arguments(context)
       argument_nodes(context).map { |arg| context.transpiler.visit(arg) }
+    end
+
+    def self.static_first_argument_name(context)
+      arg = argument_nodes(context).first
+      case arg
+      when Prism::ConstantReadNode
+        arg.name.to_s
+      when Prism::SymbolNode
+        arg.value.to_s
+      when Prism::StringNode
+        arg.content
+      end
     end
 
     def self.static_call(context, clear_name, min:, max: min)
@@ -259,6 +274,24 @@ module RubyToClear
     def self.mutable_receiver?(receiver)
       receiver.match?(/\A[a-z_]\w*\z/)
     end
+
+    def self.static_ruby_type_for_shape(shape)
+      case shape.to_s
+      when "array" then "Array"
+      when "hash" then "Hash"
+      when "string" then "String"
+      when "symbol" then "Symbol"
+      when "nil" then "NilClass"
+      when "bool" then "Boolean"
+      when "numeric" then "Numeric"
+      end
+    end
+
+    SHAPE_METHODS = {
+      "array" => %w[any? all? collect each empty? filter filter_map find flat_map include? join length map map! reduce reject reverse reverse_each select size sort_by sum],
+      "hash" => %w[any? each each_key each_pair each_value empty? include? key? keys length size values],
+      "string" => %w[delete_prefix empty? end_with? include? index length lines size split start_with? strip]
+    }.freeze
 
     def self.block_value_lowering(node, transpiler, method_label, min_params: 0, max_params: 1)
       block_node = node.block
@@ -517,6 +550,79 @@ module RubyToClear
       args.empty? ? "Set[]" : "[#{args.join(', ')}] |> DISTINCT _"
     end
 
+    %w[array string].each do |shape|
+      register("length", receiver: shape) do |context|
+        "#{context.receiver_code}.length()"
+      end
+
+      register("size", receiver: shape) do |context|
+        "#{context.receiver_code}.length()"
+      end
+
+      register("empty?", receiver: shape) do |context|
+        "(#{context.receiver_code}.length() == 0)"
+      end
+    end
+
+    register("length", receiver: "hash") do |context|
+      "#{context.receiver_code}.count()"
+    end
+
+    register("size", receiver: "hash") do |context|
+      "#{context.receiver_code}.count()"
+    end
+
+    register("empty?", receiver: "hash") do |context|
+      "(#{context.receiver_code}.count() == 0)"
+    end
+
+    register("split", receiver: "string") do |context|
+      args = arguments(context)
+      separator = args.first || "\"\\n\""
+      "#{context.receiver_code}.split(#{separator})"
+    end
+
+    register("delete_prefix", receiver: "string") do |context|
+      args = arguments(context)
+      unless args.length == 1
+        next context.transpiler.raise_unsupported("delete_prefix expects 1 argument", context.node)
+      end
+
+      "#{context.receiver_code}.deletePrefix(#{args.first})"
+    end
+
+    register("nil?") do |receiver, _node, _transpiler|
+      "(#{receiver} == NIL)"
+    end
+
+    register("is_a?") do |context|
+      expected = static_first_argument_name(context)
+      unless expected
+        next context.transpiler.raise_unsupported("is_a? requires a static type argument", context.node)
+      end
+
+      actual = static_ruby_type_for_shape(context.receiver_shape)
+      unless actual
+        next context.transpiler.raise_unsupported("is_a? requires a static receiver shape", context.node)
+      end
+
+      actual == expected ? "TRUE" : "FALSE"
+    end
+
+    register("respond_to?") do |context|
+      method_name = static_first_argument_name(context)
+      unless method_name
+        next context.transpiler.raise_unsupported("respond_to? requires a static method name", context.node)
+      end
+
+      methods = SHAPE_METHODS[context.receiver_shape.to_s]
+      unless methods
+        next context.transpiler.raise_unsupported("respond_to? requires a static receiver shape", context.node)
+      end
+
+      methods.include?(method_name) ? "TRUE" : "FALSE"
+    end
+
     register("strip") do |receiver, _node, _transpiler|
       "#{receiver}.trim()"
     end
@@ -570,7 +676,8 @@ module RubyToClear
         context.node,
         context.transpiler,
         receiver_kind: context.receiver_kind,
-        receiver_name: context.receiver_name
+        receiver_name: context.receiver_name,
+        receiver_shape: context.receiver_shape
       )
     end
 
@@ -585,7 +692,8 @@ module RubyToClear
         context.node,
         context.transpiler,
         receiver_kind: context.receiver_kind,
-        receiver_name: context.receiver_name
+        receiver_name: context.receiver_name,
+        receiver_shape: context.receiver_shape
       )
     end
 
@@ -623,7 +731,8 @@ module RubyToClear
         context.node,
         context.transpiler,
         receiver_kind: context.receiver_kind,
-        receiver_name: context.receiver_name
+        receiver_name: context.receiver_name,
+        receiver_shape: context.receiver_shape
       )
     end
 
@@ -666,7 +775,8 @@ module RubyToClear
         context.node,
         context.transpiler,
         receiver_kind: context.receiver_kind,
-        receiver_name: context.receiver_name
+        receiver_name: context.receiver_name,
+        receiver_shape: context.receiver_shape
       )
     end
 

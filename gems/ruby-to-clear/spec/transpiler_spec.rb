@@ -454,6 +454,34 @@ RSpec.describe RubyToClear::Transpiler do
       expect_transpile('parts = []; parts.join', "MUTABLE parts = [];\nparts.join(\"\");")
     end
 
+    it "uses receiver-shape tracking for overloaded collection and string calls" do
+      expect_transpile('items = []; items.empty?', "MUTABLE items = [];\n(items.length() == 0);")
+      expect_transpile('items = []; items.size', "MUTABLE items = [];\nitems.length();")
+      expect_transpile('table = {}; table.empty?', "MUTABLE table = {};\n(table.count() == 0);")
+      expect_transpile('table = {}; table.size', "MUTABLE table = {};\ntable.count();")
+      expect_transpile('name = "abc"; name.empty?', "MUTABLE name = \"abc\";\n(name.length() == 0);")
+      expect_transpile('name = "abc"; name.split("b")', "MUTABLE name = \"abc\";\nname.split(\"b\");")
+      expect_transpile('name = "abc"; name.delete_prefix("a")', "MUTABLE name = \"abc\";\nname.deletePrefix(\"a\");")
+    end
+
+    it "statically lowers simple nil and type/reflection checks when receiver shape is known" do
+      expect_transpile('items = []; items.nil?', "MUTABLE items = [];\n(items == NIL);")
+      expect_transpile('items = []; items.is_a?(Array)', "MUTABLE items = [];\nTRUE;")
+      expect_transpile('items = []; items.is_a?(Hash)', "MUTABLE items = [];\nFALSE;")
+      expect_transpile('table = {}; table.respond_to?(:keys)', "MUTABLE table = {};\nTRUE;")
+      expect_transpile('table = {}; table.respond_to?(:strip)', "MUTABLE table = {};\nFALSE;")
+    end
+
+    it "rejects dynamic type/reflection checks that survive static shape tracking" do
+      expect {
+        RubyToClear.transpile('items = unknown; items.respond_to?(method_name)')
+      }.to raise_error(RubyToClear::Transpiler::TranspilationError, /respond_to\? requires a static method name/)
+
+      expect {
+        RubyToClear.transpile('items = unknown; items.is_a?(klass)')
+      }.to raise_error(RubyToClear::Transpiler::TranspilationError, /is_a\? requires a static type argument/)
+    end
+
     it "transpiles Set constructors to CLEAR set-producing expressions" do
       expect_transpile('Set.new', 'Set[];')
       expect_transpile('Set.new([1, 2, 1])', '[1, 2, 1] |> DISTINCT _;')

@@ -37,6 +37,7 @@ module RubyToClear
       @type_aliases = {}
       @required_packages = Set.new
       @current_function_can_fail = false
+      @local_shapes = {}
     end
 
     def transpile(program_node)
@@ -310,6 +311,57 @@ module RubyToClear
       [args.first, convert_sorbet_type(args[1])]
     end
 
+    def inferred_shape(node)
+      return nil unless node
+
+      if (typed_value = sorbet_typed_value(node))
+        return inferred_shape(typed_value.first)
+      end
+
+      if (unwrapped = sorbet_unwrapped_value(node))
+        return inferred_shape(unwrapped)
+      end
+
+      case node
+      when Prism::ArrayNode
+        "array"
+      when Prism::HashNode, Prism::KeywordHashNode
+        "hash"
+      when Prism::StringNode, Prism::InterpolatedStringNode
+        "string"
+      when Prism::SymbolNode
+        "symbol"
+      when Prism::IntegerNode, Prism::FloatNode
+        "numeric"
+      when Prism::NilNode
+        "nil"
+      when Prism::TrueNode, Prism::FalseNode
+        "bool"
+      when Prism::LocalVariableReadNode
+        @local_shapes[node.name.to_s]
+      when Prism::CallNode
+        inferred_call_shape(node)
+      end
+    end
+
+    def inferred_call_shape(node)
+      receiver_name = registry_receiver_name(node.receiver)
+      receiver_shape = node.receiver ? registry_receiver_shape(node.receiver) : nil
+
+      case node.name.to_s
+      when "readlines"
+        return "array" if receiver_name == "File"
+      when "split", "lines"
+        return "array" if receiver_shape == "string"
+      when "keys", "values"
+        return "array" if receiver_shape == "hash"
+      when "map", "collect", "select", "filter", "reject", "filter_map", "flat_map", "sort_by"
+        return "array" if receiver_shape == "array"
+      end
+
+      nil
+    end
+
     def sorbet_type_alias_value(node)
       return nil unless sorbet_call?(node, "type_alias")
       return nil unless node.block&.body.is_a?(Prism::StatementsNode)
@@ -505,10 +557,13 @@ module RubyToClear
       end
 
       val = visit(value_node)
+      shape = inferred_shape(value_node)
       if @declared_locals.include?(name)
+        @local_shapes[name] = shape
         "#{name} = #{val}"
       else
         @declared_locals << name
+        @local_shapes[name] = shape
         typed = type_annotation && type_annotation != "Auto" ? ": #{type_annotation}" : ""
         "MUTABLE #{name}#{typed} = #{val}"
       end
@@ -838,7 +893,8 @@ module RubyToClear
             node,
             self,
             receiver_kind: registry_receiver_kind(node.receiver),
-            receiver_name: registry_receiver_name(node.receiver)
+            receiver_name: registry_receiver_name(node.receiver),
+            receiver_shape: registry_receiver_shape(node.receiver)
           )
           return translated if translated
         end
@@ -863,7 +919,8 @@ module RubyToClear
             node,
             self,
             receiver_kind: registry_receiver_kind(node.receiver),
-            receiver_name: registry_receiver_name(node.receiver)
+            receiver_name: registry_receiver_name(node.receiver),
+            receiver_shape: registry_receiver_shape(node.receiver)
           )
           return translated if translated
         end
@@ -891,7 +948,8 @@ module RubyToClear
             node,
             self,
             receiver_kind: registry_receiver_kind(node.receiver),
-            receiver_name: registry_receiver_name(node.receiver)
+            receiver_name: registry_receiver_name(node.receiver),
+            receiver_shape: registry_receiver_shape(node.receiver)
           )
           return translated if translated
 
@@ -917,7 +975,8 @@ module RubyToClear
             node,
             self,
             receiver_kind: registry_receiver_kind(node.receiver),
-            receiver_name: registry_receiver_name(node.receiver)
+            receiver_name: registry_receiver_name(node.receiver),
+            receiver_shape: registry_receiver_shape(node.receiver)
           )
           return translated if translated
         else
@@ -927,7 +986,8 @@ module RubyToClear
             node,
             self,
             receiver_kind: "implicit",
-            receiver_name: nil
+            receiver_name: nil,
+            receiver_shape: nil
           )
           return translated if translated
         end
@@ -1007,8 +1067,10 @@ module RubyToClear
 
       old_declared = @declared_locals
       old_function_can_fail = @current_function_can_fail
+      old_local_shapes = @local_shapes
       @declared_locals = Set.new(param_names)
       @current_function_can_fail = false
+      @local_shapes = {}
       
       local_vars_to_declare = (written_vars - param_names).to_a.sort
       local_vars_to_declare.each { |var| @declared_locals << var }
@@ -1030,6 +1092,7 @@ module RubyToClear
       function_can_fail = @current_function_can_fail
       @declared_locals = old_declared
       @current_function_can_fail = old_function_can_fail
+      @local_shapes = old_local_shapes
       @mutable_params = nil
       @param_types = nil
 
@@ -1164,6 +1227,31 @@ module RubyToClear
       end
     rescue StandardError
       nil
+    end
+
+    def registry_receiver_shape(receiver)
+      return nil unless receiver
+
+      case receiver
+      when Prism::ArrayNode
+        "array"
+      when Prism::HashNode, Prism::KeywordHashNode
+        "hash"
+      when Prism::StringNode, Prism::InterpolatedStringNode
+        "string"
+      when Prism::SymbolNode
+        "symbol"
+      when Prism::IntegerNode, Prism::FloatNode
+        "numeric"
+      when Prism::NilNode
+        "nil"
+      when Prism::TrueNode, Prism::FalseNode
+        "bool"
+      when Prism::LocalVariableReadNode
+        @local_shapes[receiver.name.to_s]
+      else
+        inferred_shape(receiver)
+      end
     end
 
     def comment_unsupported(node)
