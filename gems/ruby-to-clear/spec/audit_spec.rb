@@ -18,6 +18,9 @@ RSpec.describe RubyToClear::Audit do
           values = Set.new([1, 2, 3])
           names = values.map { |value| value.to_s }
           File.read("input.txt")
+          File.join("tmp", "input.txt")
+          { a: 1 }.size
+          "a:b".split(":")
         RUBY
       )
 
@@ -30,11 +33,18 @@ RSpec.describe RubyToClear::Audit do
       expect(report).to include("## Translation Coverage")
       expect(report).to include("useful LoC coverage")
       expect(report).to include("## Roadmap Suggestions")
+      expect(report).to include("## Now-Unlocked Work")
+      expect(report).to include("Safe Block Lowering Candidates")
+      expect(report).to include("High-Confidence Stdlib Adapter Calls")
+      expect(report).to include("Receiver-Shape Call Candidates")
       expect(report).to include("Ranked Next Work")
       expect(report).to include("CallNode")
       expect(report).to include("map")
       expect(report).to include("Set.new")
       expect(report).to include("File.read")
+      expect(report).to include("File.join -> path.join")
+      expect(report).to include("hash_literal.size")
+      expect(report).to include("string_literal.split")
       expect(report).to include("BlockNode")
       expect(report).to include("src/sample.rb")
     end

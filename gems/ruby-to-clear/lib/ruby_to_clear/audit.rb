@@ -41,6 +41,65 @@ module RubyToClear
       File Dir Pathname JSON YAML OptionParser Open3 Set StringScanner Regexp
     ].freeze
 
+    SAFE_BLOCK_LOWERINGS = {
+      "all?" => "value block predicate",
+      "any?" => "value block predicate",
+      "collect" => "value pipeline stage",
+      "each" => "effect block stage",
+      "each_key" => "effect block stage",
+      "each_value" => "effect block stage",
+      "filter" => "value pipeline stage",
+      "filter_map" => "value pipeline stage",
+      "find" => "value block search",
+      "flat_map" => "value pipeline stage",
+      "map" => "value pipeline stage",
+      "map!" => "mutable value pipeline stage",
+      "reduce" => "accumulator block",
+      "reject" => "value pipeline stage",
+      "reverse_each" => "multi-stage effect block",
+      "select" => "value pipeline stage",
+      "sort_by" => "ordering value pipeline stage",
+      "sum" => "aggregate value block"
+    }.freeze
+
+    HIGH_CONFIDENCE_STDLIB_CALLS = {
+      "Dir.children" => "fs.list",
+      "Dir.entries" => "fs.list",
+      "Dir.exist?" => "fs.dir?",
+      "Dir.exists?" => "fs.dir?",
+      "Dir.glob" => "fs.glob",
+      "Dir.pwd" => "fs.pwd",
+      "File.basename" => "path.basename",
+      "File.binwrite" => "fs.writeBytes",
+      "File.delete" => "fs.remove",
+      "File.directory?" => "fs.dir?",
+      "File.dirname" => "path.dirname",
+      "File.exist?" => "fs.exists?",
+      "File.exists?" => "fs.exists?",
+      "File.expand_path" => "path.expand",
+      "File.file?" => "fs.file?",
+      "File.foreach" => "fs.readLines |> EACH",
+      "File.join" => "path.join",
+      "File.mtime" => "fs.mtime",
+      "File.read" => "fs.read",
+      "File.readlines" => "fs.readLines",
+      "File.readlink" => "fs.readlink",
+      "File.size" => "fs.size",
+      "File.symlink" => "fs.symlink",
+      "File.symlink?" => "fs.symlink?",
+      "File.write" => "fs.write"
+    }.freeze
+
+    RECEIVER_SHAPE_METHODS = %w[
+      delete_prefix empty? include? is_a? keys length lines nil? respond_to?
+      size split values
+    ].freeze
+
+    SHAPE_TRACKABLE_RECEIVERS = %w[
+      array_literal bool_literal call_result hash_literal local nil_literal
+      numeric_literal string_literal symbol_literal
+    ].freeze
+
     attr_reader :files, :node_counts, :parse_errors, :transpile_results
 
     def self.files_for(root:, glob:)
@@ -73,6 +132,8 @@ module RubyToClear
       @stdlib_calls = Hash.new(0)
       @sorbet_calls = Hash.new(0)
       @call_samples = Hash.new { |h, k| h[k] = [] }
+      @stdlib_unlocked_calls = Hash.new(0)
+      @receiver_shape_candidates = Hash.new(0)
 
       @block_callees = Hash.new(0)
       @block_receiver_kinds = Hash.new(0)
@@ -81,6 +142,8 @@ module RubyToClear
       @block_control_nodes = Hash.new(0)
       @block_shapes = Hash.new(0)
       @block_samples = Hash.new { |h, k| h[k] = [] }
+      @safe_block_lowering_candidates = Hash.new(0)
+      @block_control_flow_gaps = Hash.new(0)
     end
 
   def run
@@ -113,6 +176,10 @@ module RubyToClear
     out << "## BlockNode Breakdown"
     out << ""
     render_block_breakdown(out)
+    out << ""
+    out << "## Now-Unlocked Work"
+    out << ""
+    render_unlocked_work(out)
     out << ""
     out << "## Roadmap Suggestions"
     out << ""
@@ -225,7 +292,14 @@ module RubyToClear
     elsif STDLIB_RECEIVERS.include?(receiver_name.to_s)
       key = "#{receiver_name}.#{name}"
       @stdlib_calls[key] += 1
+      if (clear_name = HIGH_CONFIDENCE_STDLIB_CALLS[key])
+        @stdlib_unlocked_calls["#{key} -> #{clear_name}"] += 1
+      end
       add_sample(@call_samples[key], path, node)
+    end
+
+    if RECEIVER_SHAPE_METHODS.include?(name) && SHAPE_TRACKABLE_RECEIVERS.include?(receiver_kind)
+      @receiver_shape_candidates["#{receiver_kind}.#{name}"] += 1
     end
   end
 
@@ -243,8 +317,13 @@ module RubyToClear
     @block_shapes[shape] += 1
     add_sample(@block_samples[callee], path, block_node)
 
+    if (lowering = SAFE_BLOCK_LOWERINGS[callee])
+      @safe_block_lowering_candidates["#{callee} | #{lowering} | #{params} | #{body_bucket}"] += 1
+    end
+
     control_counts(block_node).each do |control_name, count|
       @block_control_nodes[control_name] += count
+      @block_control_flow_gaps["#{callee} block contains #{control_name}"] += count
     end
   end
 
@@ -448,6 +527,18 @@ module RubyToClear
     out << table("Control Nodes Inside Blocks", ["count", "node"], top(@block_control_nodes))
     out << ""
     out << table("Top Block Shapes", ["count", "shape"], top(@block_shapes))
+  end
+
+  def render_unlocked_work(out)
+    out << "These buckets are high-confidence follow-up work because they fit the current pipeline, fs/path, and receiver-shape translation model."
+    out << ""
+    out << table("Safe Block Lowering Candidates", ["count", "bucket"], top(@safe_block_lowering_candidates))
+    out << ""
+    out << table("High-Confidence Stdlib Adapter Calls", ["count", "call -> CLEAR"], top(@stdlib_unlocked_calls))
+    out << ""
+    out << table("Receiver-Shape Call Candidates", ["count", "receiver.method"], top(@receiver_shape_candidates))
+    out << ""
+    out << table("Block Control-Flow TODOs", ["count", "bucket"], top(@block_control_flow_gaps))
   end
 
   def render_roadmap(out)
