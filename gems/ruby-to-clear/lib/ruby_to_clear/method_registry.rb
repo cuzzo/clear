@@ -2,6 +2,11 @@
 
 module RubyToClear
   module MethodRegistry
+    UNSAFE_VALUE_BLOCK_NODES = %w[
+      ReturnNode BreakNode NextNode YieldNode SuperNode ForwardingSuperNode
+      RescueNode RescueModifierNode EnsureNode
+    ].freeze
+
     CallContext = Struct.new(
       :ruby_name,
       :receiver_code,
@@ -89,6 +94,46 @@ module RubyToClear
       requireds.map { |param| param.name.to_s }
     end
 
+    def self.unsafe_value_block_node(block_node)
+      found = nil
+      walk = lambda do |node|
+        return unless node.is_a?(Prism::Node)
+        return if found
+        return if node != block_node && node.is_a?(Prism::BlockNode)
+
+        node_name = node.class.name.split("::").last
+        if UNSAFE_VALUE_BLOCK_NODES.include?(node_name)
+          found = node_name
+          return
+        end
+
+        node.child_nodes.each { |child| walk.call(child) if child }
+      end
+      walk.call(block_node)
+      found
+    end
+
+    def self.render_block_value(block_node, transpiler)
+      body = block_node.body
+      unless body.is_a?(Prism::StatementsNode) && body.body.any?
+        return transpiler.raise_unsupported("Pipeline block must contain at least one expression", block_node)
+      end
+
+      statements = body.body
+      return transpiler.visit(statements.first) if statements.length == 1
+
+      rendered = statements.map.with_index do |stmt, index|
+        code = transpiler.visit(stmt)
+        code = "#{code};" if index < statements.length - 1 &&
+                             !code.end_with?(";") &&
+                             !code.end_with?("END") &&
+                             !code.lstrip.start_with?("#")
+        code.split("\n").map { |line| "  #{line}" }.join("\n")
+      end
+
+      "{\n#{rendered.join("\n")}\n}"
+    end
+
     def self.block_expression(receiver, node, transpiler, method_label)
       block_node = node.block
       unless block_node
@@ -100,15 +145,16 @@ module RubyToClear
         method_name = "toString" if method_name == "to_s"
         "_.#{method_name}()"
       elsif block_node.is_a?(Prism::BlockNode)
-        unless transpiler.simple_block_expression?(block_node)
-          return transpiler.raise_unsupported("#{method_label} block must be a single expression", node)
-        end
         param_names = block_required_parameter_names(node, block_node, transpiler, method_label, min: 0, max: 1)
         return param_names if unsupported_result?(param_names)
 
         param_name = param_names.first
         transpiler.with_renames({ param_name => "_" }) do
-          transpiler.visit(block_node.body.body.first)
+          if (unsafe = unsafe_value_block_node(block_node))
+            next transpiler.raise_unsupported("#{method_label} block contains unsupported #{unsafe}", node)
+          end
+
+          render_block_value(block_node, transpiler)
         end
       else
         transpiler.raise_unsupported("Unsupported #{method_label} block type: #{block_node.class.name}", node)
@@ -324,27 +370,10 @@ module RubyToClear
     end
 
     register("map") do |receiver, node, transpiler|
-      block_node = node.block
-      unless block_node
-        transpiler.raise_unsupported("map without a block is not supported", node)
-      end
+      block_body = block_expression(receiver, node, transpiler, "map")
+      next block_body if unsupported_result?(block_body)
 
-      if block_node.is_a?(Prism::BlockArgumentNode)
-        method_name = block_node.expression.value.to_s
-        method_name = "toString" if method_name == "to_s"
-        "#{receiver} |> SELECT _.#{method_name}()"
-      elsif block_node.is_a?(Prism::BlockNode)
-        unless transpiler.simple_block_expression?(block_node)
-          transpiler.raise_unsupported("map block must be a single expression", node)
-        end
-        param_name = block_node.parameters&.parameters&.requireds&.first&.name&.to_s
-        transpiler.with_renames({ param_name => "_" }) do
-          block_body = transpiler.visit(block_node.body.body.first)
-          "#{receiver} |> SELECT #{block_body}"
-        end
-      else
-        transpiler.raise_unsupported("Unsupported map block type: #{block_node.class.name}", node)
-      end
+      "#{receiver} |> SELECT #{block_body}"
     end
 
     register("collect") do |context|
@@ -359,26 +388,10 @@ module RubyToClear
     end
 
     register("select") do |receiver, node, transpiler|
-      block_node = node.block
-      unless block_node
-        transpiler.raise_unsupported("select without a block is not supported", node)
-      end
+      block_body = block_expression(receiver, node, transpiler, "select")
+      next block_body if unsupported_result?(block_body)
 
-      if block_node.is_a?(Prism::BlockArgumentNode)
-        method_name = block_node.expression.value.to_s
-        "#{receiver} |> WHERE _.#{method_name}()"
-      elsif block_node.is_a?(Prism::BlockNode)
-        unless transpiler.simple_block_expression?(block_node)
-          transpiler.raise_unsupported("select block must be a single expression", node)
-        end
-        param_name = block_node.parameters&.parameters&.requireds&.first&.name&.to_s
-        transpiler.with_renames({ param_name => "_" }) do
-          block_body = transpiler.visit(block_node.body.body.first)
-          "#{receiver} |> WHERE #{block_body}"
-        end
-      else
-        transpiler.raise_unsupported("Unsupported select block type: #{block_node.class.name}", node)
-      end
+      "#{receiver} |> WHERE #{block_body}"
     end
 
     register("filter") do |context|
@@ -394,21 +407,29 @@ module RubyToClear
 
     register("reject") do |receiver, node, transpiler|
       block_body = block_expression(receiver, node, transpiler, "reject")
+      next block_body if unsupported_result?(block_body)
+
       "#{receiver} |> WHERE !(#{block_body})"
     end
 
     register("any?") do |receiver, node, transpiler|
       block_body = block_expression(receiver, node, transpiler, "any?")
+      next block_body if unsupported_result?(block_body)
+
       "#{receiver} |> ANY #{block_body}"
     end
 
     register("all?") do |receiver, node, transpiler|
       block_body = block_expression(receiver, node, transpiler, "all?")
+      next block_body if unsupported_result?(block_body)
+
       "#{receiver} |> ALL #{block_body}"
     end
 
     register("find") do |receiver, node, transpiler|
       block_body = block_expression(receiver, node, transpiler, "find")
+      next block_body if unsupported_result?(block_body)
+
       "#{receiver} |> FIND #{block_body}"
     end
 
@@ -425,16 +446,22 @@ module RubyToClear
 
     register("filter_map") do |receiver, node, transpiler|
       block_body = block_expression(receiver, node, transpiler, "filter_map")
+      next block_body if unsupported_result?(block_body)
+
       "#{receiver} |> SELECT #{block_body} |> WHERE _ != NIL"
     end
 
     register("flat_map") do |receiver, node, transpiler|
       block_body = block_expression(receiver, node, transpiler, "flat_map")
+      next block_body if unsupported_result?(block_body)
+
       "#{receiver} |> UNNEST #{block_body}"
     end
 
     register("sort_by") do |receiver, node, transpiler|
       block_body = block_expression(receiver, node, transpiler, "sort_by")
+      next block_body if unsupported_result?(block_body)
+
       "#{receiver} |> ORDER_BY #{block_body}"
     end
 

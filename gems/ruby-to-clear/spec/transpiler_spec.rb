@@ -507,10 +507,32 @@ RSpec.describe RubyToClear::Transpiler do
       }.to raise_error(RubyToClear::Transpiler::TranspilationError, /each without a block is not supported/)
     end
 
-    it "raises error on map block with multiple statements" do
+    it "translates multi-statement pipeline blocks with implicit final expression values" do
+      ruby_code = "list = []; list.map { |x| y = x * 2; y + 1 }"
+      expected_clear = <<~CLEAR
+        MUTABLE list = [];
+        list |> SELECT {
+          MUTABLE y = (_ * 2);
+          (y + 1)
+        };
+      CLEAR
+      expect_transpile(ruby_code, expected_clear)
+
+      ruby_code = "list = []; list.select { |x| y = x * 2; y > 10 }"
+      expected_clear = <<~CLEAR
+        MUTABLE list = [];
+        list |> WHERE {
+          MUTABLE y = (_ * 2);
+          (y > 10)
+        };
+      CLEAR
+      expect_transpile(ruby_code, expected_clear)
+    end
+
+    it "raises error on nonlocal control flow inside pipeline value blocks" do
       expect {
-        RubyToClear.transpile("list = []; list.map { |x| y = x * 2; y + 1 }")
-      }.to raise_error(RubyToClear::Transpiler::TranspilationError, /map block must be a single expression/)
+        RubyToClear.transpile("list = []; list.map { |x| return x }")
+      }.to raise_error(RubyToClear::Transpiler::TranspilationError, /map block contains unsupported ReturnNode/)
     end
 
     it "raises error on destructured pipeline block parameters" do
