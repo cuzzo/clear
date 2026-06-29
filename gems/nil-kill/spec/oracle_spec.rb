@@ -39,10 +39,10 @@ RSpec.describe "NilKill Oracle Tests" do
           store.instance_variable_set(:@facts, input_data["facts"])
           
           # Run the deterministic parts of the pipeline (skip I/O and scraping)
-          infer.send(:build_flow_graph)
-          infer.send(:build_fallibility_pressure)
-          infer.send(:build_hidden_enum_pressure)
-          infer.send(:build_actions)
+          infer.send(:delegate_to_rust, input_data)
+          
+          
+          
           
           # Extract the result
           actual_actions = store.actions
