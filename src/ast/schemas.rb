@@ -338,7 +338,7 @@ module Schemas
     sig { returns(T::Array[Symbol]) }
     def type_params = @type_params
 
-    sig { returns(T::Hash[String, T.untyped]) }
+    sig { returns(T::Hash[String, AST::Node]) }
     def field_defaults
       @fields.each_with_object({}) { |(k, f), h| h[k] = f.default if f.default }
     end

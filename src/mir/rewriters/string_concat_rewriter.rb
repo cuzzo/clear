@@ -16,7 +16,7 @@ require_relative "../../ast/type"
 class StringConcatRewriter
     extend T::Sig
 
-  sig { params(ast: AST::Program).returns(T::Array[T.untyped]) }
+  sig { params(ast: AST::Program).returns(T::Array[AST::Node]) }
   def rewrite!(ast)
     ast.statements.each { |stmt| rewrite_in_node!(stmt) }
   end

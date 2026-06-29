@@ -905,7 +905,7 @@ module MIRLoweringCapabilities
     out
   end
 
-  sig { params(node: AST::WithBlock, body_mir: T::Array[T.untyped], with_label: T.nilable(String)).returns(T::Array[T.untyped]) }
+  sig { params(node: AST::WithBlock, body_mir: T::Array[T.untyped], with_label: T.nilable(String)).returns(T::Array[MIR::Node]) }
   def wrap_body_with_guard(node, body_mir, with_label)
     T.bind(self, MIRLowering) rescue nil
     guard_cond = combined_guard_cond(node)
