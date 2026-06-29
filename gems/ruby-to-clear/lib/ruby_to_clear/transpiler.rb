@@ -685,20 +685,36 @@ module RubyToClear
     end
 
     def visit_interpolated_string_node(node)
-      parts = node.parts.map do |part|
-        if part.is_a?(Prism::StringNode)
-          part.content
-        else
-          stmt_code = visit(part.statements)
-          "${#{stmt_code.delete_suffix(';')}}"
-        end
-      end.join
+      parts = node.parts.map { |part| interpolated_string_part(part) }.join
       "\"#{parts}\""
     end
 
     def visit_embedded_statements_node(node)
-      stmt_code = visit(node.statements)
-      "${#{stmt_code.delete_suffix(';')}}"
+      "${#{embedded_statement_expression(node)}}"
+    end
+
+    def interpolated_string_part(part)
+      case part
+      when Prism::StringNode
+        part.content
+      when Prism::EmbeddedStatementsNode
+        "${#{embedded_statement_expression(part)}}"
+      when Prism::InterpolatedStringNode
+        part.parts.map { |nested_part| interpolated_string_part(nested_part) }.join
+      else
+        visit(part).delete_suffix(";")
+      end
+    end
+
+    def embedded_statement_expression(node)
+      statements = node.statements
+      return "" unless statements
+
+      unless statements.body.length == 1
+        return raise_unsupported("String interpolation must contain a single expression", node)
+      end
+
+      visit(statements.body.first).delete_suffix(";")
     end
 
     def visit_call_node(node)

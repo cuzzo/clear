@@ -27,6 +27,14 @@ RSpec.describe RubyToClear::Transpiler do
     it "transpiles string interpolations" do
       expect_transpile('x = 10; "count: #{x}"', "MUTABLE x = 10;\n\"count: ${x}\";")
       expect_transpile('x = 10; "count: #{x + 1}"', "MUTABLE x = 10;\n\"count: ${(x + 1)}\";")
+      expect_transpile('x = 10; "count: #{x}" " total"', "MUTABLE x = 10;\n\"count: ${x} total\";")
+      expect_transpile("x = 10; \"count: \#{x}\" \\\n  \" total\"", "MUTABLE x = 10;\n\"count: ${x} total\";")
+    end
+
+    it "rejects multi-statement string interpolation" do
+      expect {
+        RubyToClear.transpile('"count: #{x = 1; x}"')
+      }.to raise_error(RubyToClear::Transpiler::TranspilationError, /String interpolation must contain a single expression/)
     end
 
     it "transpiles self" do
