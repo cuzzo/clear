@@ -104,6 +104,14 @@ module RubyToClear
       fallible ? "#{call} OR RAISE" : call
     end
 
+    def self.fs_call(context, clear_name, min:, max: min, fallible: false)
+      package_call(context, "fs", clear_name, min: min, max: max, fallible: fallible)
+    end
+
+    def self.path_call(context, clear_name, min:, max: min)
+      package_call(context, "path", clear_name, min: min, max: max)
+    end
+
     def self.unsupported_result?(value)
       value.is_a?(String) && value.include?("# [UNSUPPORTED:")
     end
@@ -336,11 +344,11 @@ module RubyToClear
     # --- Registrations ---
 
     register("read", receiver: "File") do |context|
-      package_call(context, "fs", "read", min: 1, max: 1, fallible: true)
+      fs_call(context, "read", min: 1, max: 1, fallible: true)
     end
 
     register("readlines", receiver: "File") do |context|
-      package_call(context, "fs", "readLines", min: 1, max: 1, fallible: true)
+      fs_call(context, "readLines", min: 1, max: 1, fallible: true)
     end
 
     register("foreach", receiver: "File") do |context|
@@ -363,87 +371,91 @@ module RubyToClear
     end
 
     register("write", receiver: "File") do |context|
-      package_call(context, "fs", "write", min: 2, max: 2, fallible: true)
+      fs_call(context, "write", min: 2, max: 2, fallible: true)
     end
 
     register("binwrite", receiver: "File") do |context|
-      package_call(context, "fs", "write", min: 2, max: 2, fallible: true)
+      fs_call(context, "write", min: 2, max: 2, fallible: true)
     end
 
     register("size", receiver: "File") do |context|
-      package_call(context, "fs", "size", min: 1, max: 1, fallible: true)
+      fs_call(context, "size", min: 1, max: 1, fallible: true)
     end
 
     register("exist?", receiver: "File") do |context|
-      static_call(context, "fileExists?", min: 1, max: 1)
+      fs_call(context, "exists?", min: 1, max: 1)
     end
 
     register("exists?", receiver: "File") do |context|
-      static_call(context, "fileExists?", min: 1, max: 1)
+      fs_call(context, "exists?", min: 1, max: 1)
     end
 
     register("file?", receiver: "File") do |context|
-      static_call(context, "regularFile?", min: 1, max: 1)
+      fs_call(context, "file?", min: 1, max: 1)
+    end
+
+    register("directory?", receiver: "File") do |context|
+      fs_call(context, "dir?", min: 1, max: 1)
     end
 
     register("delete", receiver: "File") do |context|
-      static_call(context, "deleteFile", min: 1, max: 1)
+      fs_call(context, "delete", min: 1, max: 1, fallible: true)
     end
 
     register("mtime", receiver: "File") do |context|
-      static_call(context, "fileModifiedTime", min: 1, max: 1)
+      fs_call(context, "mtime", min: 1, max: 1, fallible: true)
     end
 
     register("readlink", receiver: "File") do |context|
-      static_call(context, "readLink", min: 1, max: 1)
+      fs_call(context, "readLink", min: 1, max: 1, fallible: true)
     end
 
     register("symlink", receiver: "File") do |context|
-      static_call(context, "createSymlink", min: 2, max: 2)
+      fs_call(context, "symlink", min: 2, max: 2, fallible: true)
     end
 
     register("symlink?", receiver: "File") do |context|
-      static_call(context, "symlinkExists?", min: 1, max: 1)
+      fs_call(context, "symlink?", min: 1, max: 1)
     end
 
     register("join", receiver: "File") do |context|
-      static_call(context, "joinPath", min: 1, max: 64)
+      path_call(context, "join", min: 1, max: 64)
     end
 
     register("expand_path", receiver: "File") do |context|
-      static_call(context, "expandPath", min: 1, max: 2)
+      path_call(context, "expand", min: 1, max: 2)
     end
 
     register("basename", receiver: "File") do |context|
-      static_call(context, "baseName", min: 1, max: 2)
+      path_call(context, "basename", min: 1, max: 2)
     end
 
     register("dirname", receiver: "File") do |context|
-      static_call(context, "dirName", min: 1, max: 1)
+      path_call(context, "dirname", min: 1, max: 1)
     end
 
     register("glob", receiver: "Dir") do |context|
-      static_call(context, "globPaths", min: 1, max: 1)
+      fs_call(context, "glob", min: 1, max: 1, fallible: true)
     end
 
     register("exist?", receiver: "Dir") do |context|
-      static_call(context, "dirExists?", min: 1, max: 1)
+      fs_call(context, "dir?", min: 1, max: 1)
     end
 
     register("exists?", receiver: "Dir") do |context|
-      static_call(context, "dirExists?", min: 1, max: 1)
+      fs_call(context, "dir?", min: 1, max: 1)
     end
 
     register("children", receiver: "Dir") do |context|
-      static_call(context, "listDir", min: 1, max: 1)
+      fs_call(context, "list", min: 1, max: 1, fallible: true)
     end
 
     register("entries", receiver: "Dir") do |context|
-      static_call(context, "listAll", min: 1, max: 1)
+      fs_call(context, "listAll", min: 1, max: 1, fallible: true)
     end
 
     register("pwd", receiver: "Dir") do |context|
-      static_call(context, "currentDirectory", min: 0, max: 0)
+      fs_call(context, "pwd", min: 0, max: 0, fallible: true)
     end
 
     register("parse", receiver: "JSON") do |context|
