@@ -323,7 +323,6 @@ class ClassifierTest < Minitest::Test
 
       with_env("DECOMPLEX_PARSER", nil) do
         arms = C.classify_file(coverage, file, root: dir)
-
         refute_empty arms
         assert arms.all? { |arm| arm.source == :coverage_py }
         assert_equal ["choose"], arms.map(&:defn)

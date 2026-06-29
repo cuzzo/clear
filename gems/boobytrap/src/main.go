@@ -108,6 +108,16 @@ type BlastRow struct {
 	Partners   [][2]interface{} `json:"partners"`
 }
 
+type NativeBranchArm struct {
+	BranchID     string `json:"branch_id"`
+	ArmID        string `json:"arm_id"`
+	Kind         string `json:"kind"`
+	Member       string `json:"member"`
+	DecisionSpan []int  `json:"decision_span"`
+	ArmSpan      []int  `json:"arm_span"`
+	Hits         int    `json:"hits"`
+}
+
 type CoverageDataset struct {
 	Files map[string]FileCoverage `json:"files"`
 }
@@ -116,6 +126,9 @@ type FileCoverage struct {
 	Lines      []*int                    `json:"lines"`
 	Branches   map[string]map[string]int `json:"branches"`
 	SourcePath string                    `json:"source_path"`
+	BranchArms []NativeBranchArm         `json:"branch_arms"`
+	Format     string                    `json:"format"`
+	Language   string                    `json:"language"`
 }
 
 type FileGap struct {
@@ -146,6 +159,7 @@ func main() {
 	var files *string
 	var lineageDBPath *string
 	var lineageCommand *string
+	var parseCoverageOnly *bool
 
 	isReportSubcommand := len(os.Args) >= 2 && os.Args[1] == "report"
 
@@ -166,6 +180,7 @@ func main() {
 		files = fs.String("files", "", "restrict ranking to exact source files")
 		lineageDBPath = fs.String("lineage-db", "", "Path to lineage SQLite database")
 		lineageCommand = fs.String("lineage-command", "", "Custom lineage summary command")
+		parseCoverageOnly = fs.Bool("parse-coverage-only", false, "Parse coverage and dump normalized JSON to stdout, then exit")
 
 		fs.Parse(os.Args[2:])
 	} else {
@@ -184,7 +199,34 @@ func main() {
 		fixRePat = flag.String("fix-re", `\b(fix(es|ed)?|bug\s*fix|close[sd]?)\b`, "Regex for fix commits")
 		lineageDBPath = flag.String("lineage-db", "", "Path to lineage SQLite database")
 		lineageCommand = flag.String("lineage-command", "", "Custom lineage summary command")
+		parseCoverageOnly = flag.Bool("parse-coverage-only", false, "Parse coverage and dump normalized JSON to stdout, then exit")
 		flag.Parse()
+	}
+
+	if *parseCoverageOnly {
+		if *covPath == "" {
+			fmt.Fprintln(os.Stderr, "Error: --coverage is required for --parse-coverage-only")
+			os.Exit(1)
+		}
+		absRepo := "."
+		if *repoPath != "" {
+			var err error
+			absRepo, err = filepath.Abs(*repoPath)
+			if err != nil {
+				absRepo = "."
+			}
+		}
+		covDataset, _, err := processCoverage(*covPath, absRepo)
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "Error processing coverage: %v\n", err)
+			os.Exit(1)
+		}
+		enc := json.NewEncoder(os.Stdout)
+		if err := enc.Encode(covDataset); err != nil {
+			fmt.Fprintf(os.Stderr, "Error encoding output: %v\n", err)
+			os.Exit(1)
+		}
+		os.Exit(0)
 	}
 
 	if *repoPath == "" {
@@ -779,6 +821,344 @@ func computeBugspots(events []Event) (map[string]float64, []BlastRow) {
 	return scores, blast
 }
 
+type NilKillBranchCoverage struct {
+	Format string `json:"format"`
+	Root   string `json:"root"`
+	Files  []struct {
+		Path     string `json:"path"`
+		File     string `json:"file"`
+		Filename string `json:"filename"`
+		Language string `json:"language"`
+		Lines    interface{} `json:"lines"` // can be array or map
+		Arms     []struct {
+			BranchID     string      `json:"branch_id"`
+			ArmID        string      `json:"arm_id"`
+			Kind         string      `json:"kind"`
+			Member       string      `json:"member"`
+			Label        string      `json:"label"`
+			Arm          string      `json:"arm"`
+			DecisionSpan interface{} `json:"decision_span"`
+			ArmSpan      interface{} `json:"arm_span"`
+			Span         interface{} `json:"span"`
+			Hits         interface{} `json:"hits"`
+			Count        interface{} `json:"count"`
+			SampleCount  interface{} `json:"sample_count"`
+		} `json:"arms"`
+	} `json:"files"`
+}
+
+type KcovCodecov struct {
+	Coverage map[string]map[string]interface{} `json:"coverage"`
+}
+
+type NilKillJsonlLine struct {
+	Path  string      `json:"path"`
+	Lines interface{} `json:"lines"`
+}
+
+func parseIntList(val interface{}) []int {
+	if val == nil {
+		return nil
+	}
+	arr, ok := val.([]interface{})
+	if !ok {
+		return nil
+	}
+	res := make([]int, 0, len(arr))
+	for _, item := range arr {
+		if num, ok := item.(float64); ok {
+			res = append(res, int(num))
+		}
+	}
+	return res
+}
+
+func parseInt(val interface{}) int {
+	if val == nil {
+		return 0
+	}
+	if num, ok := val.(float64); ok {
+		return int(num)
+	}
+	return 0
+}
+
+func parseNilKillLines(val interface{}) []*int {
+	if val == nil {
+		return nil
+	}
+	if arr, ok := val.([]interface{}); ok {
+		maxLine := 0
+		for _, item := range arr {
+			if num, ok := item.(float64); ok {
+				lineNum := int(num)
+				if lineNum > maxLine {
+					maxLine = lineNum
+				}
+			}
+		}
+		res := make([]*int, maxLine)
+		for _, item := range arr {
+			if num, ok := item.(float64); ok {
+				lineNum := int(num)
+				if lineNum > 0 {
+					hits := 1
+					res[lineNum-1] = &hits
+				}
+			}
+		}
+		return res
+	}
+	if m, ok := val.(map[string]interface{}); ok {
+		maxLine := 0
+		for k := range m {
+			if lineNum, err := strconv.Atoi(k); err == nil {
+				if lineNum > maxLine {
+					maxLine = lineNum
+				}
+			}
+		}
+		res := make([]*int, maxLine)
+		for k, hitVal := range m {
+			if lineNum, err := strconv.Atoi(k); err == nil {
+				if lineNum > 0 {
+					hits := parseInt(hitVal)
+					res[lineNum-1] = &hits
+				}
+			}
+		}
+		return res
+	}
+	return nil
+}
+
+func detectLanguage(path string) string {
+	ext := strings.ToLower(filepath.Ext(path))
+	switch ext {
+	case ".rb":
+		return "ruby"
+	case ".py":
+		return "python"
+	case ".js", ".jsx", ".mjs", ".cjs":
+		return "javascript"
+	case ".ts", ".tsx":
+		return "typescript"
+	case ".go":
+		return "go"
+	case ".rs":
+		return "rust"
+	case ".zig":
+		return "zig"
+	case ".c", ".h":
+		return "c"
+	case ".cpp", ".cc", ".cxx", ".hh", ".hpp", ".hxx":
+		return "cpp"
+	case ".cs":
+		return "csharp"
+	case ".java":
+		return "java"
+	case ".kt", ".kts":
+		return "kotlin"
+	case ".swift":
+		return "swift"
+	case ".php":
+		return "php"
+	case ".lua":
+		return "lua"
+	}
+	return ""
+}
+
+func parseNilKillJsonl(data []byte, repo string, files map[string]FileCoverage) error {
+	scanner := bufio.NewScanner(bytes.NewReader(data))
+	for scanner.Scan() {
+		line := bytes.TrimSpace(scanner.Bytes())
+		if len(line) == 0 {
+			continue
+		}
+		var item NilKillJsonlLine
+		if err := json.Unmarshal(line, &item); err != nil {
+			return err
+		}
+		if item.Path == "" {
+			continue
+		}
+		absFile := item.Path
+		if !filepath.IsAbs(absFile) {
+			absFile = filepath.Join(repo, absFile)
+		}
+		absFile = filepath.Clean(absFile)
+
+		dst, exists := files[absFile]
+		if !exists {
+			dst = FileCoverage{
+				Lines:      []*int{},
+				Branches:   make(map[string]map[string]int),
+				SourcePath: relpathNoEval(absFile, repo),
+				Format:     "nil_kill_jsonl",
+				Language:   detectLanguage(absFile),
+			}
+		}
+
+		lines := parseNilKillLines(item.Lines)
+		dst.Lines = mergeLines(dst.Lines, convertLinesToInterface(lines))
+		files[absFile] = dst
+	}
+	return nil
+}
+
+func convertLinesToInterface(lines []*int) []interface{} {
+	res := make([]interface{}, len(lines))
+	for i, v := range lines {
+		if v != nil {
+			res[i] = float64(*v)
+		}
+	}
+	return res
+}
+
+func parseKcovCodecov(data []byte, repo string, files map[string]FileCoverage) error {
+	var kcov KcovCodecov
+	if err := json.Unmarshal(data, &kcov); err != nil {
+		return err
+	}
+	for file, lineHits := range kcov.Coverage {
+		absFile := file
+		if !filepath.IsAbs(file) {
+			absFile = filepath.Join(repo, file)
+		}
+		absFile = filepath.Clean(absFile)
+
+		dst, exists := files[absFile]
+		if !exists {
+			dst = FileCoverage{
+				Lines:      []*int{},
+				Branches:   make(map[string]map[string]int),
+				SourcePath: relpathNoEval(absFile, repo),
+				Format:     "kcov_codecov",
+				Language:   detectLanguage(absFile),
+			}
+		}
+
+		for lineStr, hitsVal := range lineHits {
+			lineNum, err := strconv.Atoi(lineStr)
+			if err != nil || lineNum <= 0 {
+				continue
+			}
+			hits := parseInt(hitsVal)
+			for len(dst.Lines) < lineNum {
+				dst.Lines = append(dst.Lines, nil)
+			}
+			if dst.Lines[lineNum-1] == nil {
+				dst.Lines[lineNum-1] = &hits
+			} else {
+				*dst.Lines[lineNum-1] += hits
+			}
+		}
+		files[absFile] = dst
+	}
+	return nil
+}
+
+func parseNilKillBranchCoverage(data []byte, repo string, files map[string]FileCoverage) error {
+	var nk NilKillBranchCoverage
+	if err := json.Unmarshal(data, &nk); err != nil {
+		return err
+	}
+	covRoot := nk.Root
+	if covRoot == "" {
+		covRoot = repo
+	} else if !filepath.IsAbs(covRoot) {
+		covRoot = filepath.Join(repo, covRoot)
+	}
+	covRoot = filepath.Clean(covRoot)
+
+	for _, entry := range nk.Files {
+		rel := entry.Path
+		if rel == "" {
+			rel = entry.File
+		}
+		if rel == "" {
+			rel = entry.Filename
+		}
+		if rel == "" {
+			continue
+		}
+
+		absFile := rel
+		if !filepath.IsAbs(rel) {
+			candidate := filepath.Clean(filepath.Join(covRoot, rel))
+			if _, err := os.Stat(candidate); err == nil {
+				absFile = candidate
+			} else {
+				absFile = filepath.Clean(filepath.Join(repo, rel))
+			}
+		}
+
+		dst, exists := files[absFile]
+		if !exists {
+			dst = FileCoverage{
+				Lines:      []*int{},
+				Branches:   make(map[string]map[string]int),
+				SourcePath: relpathNoEval(absFile, repo),
+				Format:     "nil_kill_branch",
+				Language:   entry.Language,
+			}
+		}
+		if dst.Language == "" {
+			dst.Language = detectLanguage(absFile)
+		}
+
+		lines := parseNilKillLines(entry.Lines)
+		dst.Lines = mergeLines(dst.Lines, convertLinesToInterface(lines))
+
+		for _, arm := range entry.Arms {
+			armSpan := parseIntList(arm.ArmSpan)
+			if len(armSpan) == 0 {
+				armSpan = parseIntList(arm.Span)
+			}
+			decisionSpan := parseIntList(arm.DecisionSpan)
+			if len(armSpan) != 4 || len(decisionSpan) != 4 {
+				continue
+			}
+
+			hits := 0
+			if arm.Hits != nil {
+				hits = parseInt(arm.Hits)
+			} else if arm.Count != nil {
+				hits = parseInt(arm.Count)
+			} else if arm.SampleCount != nil {
+				hits = parseInt(arm.SampleCount)
+			}
+
+			kind := arm.Kind
+			if kind == "" {
+				kind = "branch"
+			}
+			member := arm.Member
+			if member == "" {
+				member = arm.Label
+			}
+			if member == "" {
+				member = arm.Arm
+			}
+
+			dst.BranchArms = append(dst.BranchArms, NativeBranchArm{
+				BranchID:     arm.BranchID,
+				ArmID:        arm.ArmID,
+				Kind:         kind,
+				Member:       member,
+				DecisionSpan: decisionSpan,
+				ArmSpan:      armSpan,
+				Hits:         hits,
+			})
+		}
+
+		files[absFile] = dst
+	}
+	return nil
+}
+
 type CoberturaLine struct {
 	Number int `xml:"number,attr"`
 	Hits   int `xml:"hits,attr"`
@@ -812,7 +1192,8 @@ func processCoverage(covPath, repo string) (*CoverageDataset, map[string]FileGap
 			return nil, nil, err
 		}
 
-		if bytes.HasPrefix(bytes.TrimSpace(data), []byte("<")) {
+		trimmed := bytes.TrimSpace(data)
+		if bytes.HasPrefix(trimmed, []byte("<")) {
 			var xmlCov CoberturaCoverage
 			if err := xml.Unmarshal(data, &xmlCov); err != nil {
 				return nil, nil, err
@@ -849,6 +1230,8 @@ func processCoverage(covPath, repo string) (*CoverageDataset, map[string]FileGap
 							Lines:      []*int{},
 							Branches:   make(map[string]map[string]int),
 							SourcePath: relpathNoEval(absFile, repo),
+							Format:     "kcov_cobertura",
+							Language:   detectLanguage(absFile),
 						}
 					}
 
@@ -871,70 +1254,106 @@ func processCoverage(covPath, repo string) (*CoverageDataset, map[string]FileGap
 				}
 			}
 		} else {
-			// We parse the raw SimpleCov JSON into an unstructured map first
-			var raw map[string]interface{}
-			if err := json.Unmarshal(data, &raw); err != nil {
-				return nil, nil, err
-			}
-
-			// Format definition: SimpleCov resultset JSON
-			// Maps: entryName -> { "coverage" -> { filePath -> { "lines" -> [...], "branches" -> { ... } } } }
-			for _, entryVal := range raw {
-				entry, ok := entryVal.(map[string]interface{})
-				if !ok {
-					continue
+			isJsonl := strings.HasSuffix(strings.ToLower(path), ".jsonl") || (len(trimmed) > 0 && trimmed[0] != '{')
+			if isJsonl {
+				if err := parseNilKillJsonl(data, repo, files); err != nil {
+					return nil, nil, err
 				}
-				covMapVal, ok := entry["coverage"]
-				if !ok {
-					continue
-				}
-				covMap, ok := covMapVal.(map[string]interface{})
-				if !ok {
-					continue
+			} else {
+				var raw map[string]interface{}
+				if err := json.Unmarshal(data, &raw); err != nil {
+					return nil, nil, err
 				}
 
-				for file, covDataVal := range covMap {
-					covData, ok := covDataVal.(map[string]interface{})
-					if !ok {
-						continue
+				if format, ok := raw["format"].(string); ok && format == "nil-kill.branch-coverage" {
+					if err := parseNilKillBranchCoverage(data, repo, files); err != nil {
+						return nil, nil, err
 					}
-
-					absFile := file
-					if !filepath.IsAbs(file) {
-						absFile = filepath.Join(repo, file)
+				} else if isPythonCoverageJson(raw) {
+					if err := parsePythonCoverageJson(data, repo, files); err != nil {
+						return nil, nil, err
 					}
-					absFile = filepath.Clean(absFile)
-
-					dst, exists := files[absFile]
-					if !exists {
-						dst = FileCoverage{
-							Lines:      []*int{},
-							Branches:   make(map[string]map[string]int),
-							SourcePath: relpathNoEval(absFile, repo),
+				} else {
+					isKcov := false
+					if _, ok := raw["coverage"]; ok {
+						if covMap, ok := raw["coverage"].(map[string]interface{}); ok {
+							for _, v := range covMap {
+								if linesMap, ok := v.(map[string]interface{}); ok {
+									for k := range linesMap {
+										if _, err := strconv.Atoi(k); err == nil {
+											isKcov = true
+											break
+										}
+									}
+								}
+								break
+							}
 						}
 					}
 
-					// Merge lines
-					if linesVal, ok := covData["lines"]; ok {
-						if linesArr, ok := linesVal.([]interface{}); ok {
-							dst.Lines = mergeLines(dst.Lines, linesArr)
+					if isKcov {
+						if err := parseKcovCodecov(data, repo, files); err != nil {
+							return nil, nil, err
+						}
+					} else {
+						for _, entryVal := range raw {
+							entry, ok := entryVal.(map[string]interface{})
+							if !ok {
+								continue
+							}
+							covMapVal, ok := entry["coverage"]
+							if !ok {
+								continue
+							}
+							covMap, ok := covMapVal.(map[string]interface{})
+							if !ok {
+								continue
+							}
+
+							for file, covDataVal := range covMap {
+								covData, ok := covDataVal.(map[string]interface{})
+								if !ok {
+									continue
+								}
+
+								absFile := file
+								if !filepath.IsAbs(file) {
+									absFile = filepath.Join(repo, file)
+								}
+								absFile = filepath.Clean(absFile)
+
+								dst, exists := files[absFile]
+								if !exists {
+									dst = FileCoverage{
+										Lines:      []*int{},
+										Branches:   make(map[string]map[string]int),
+										SourcePath: relpathNoEval(absFile, repo),
+										Format:     "simplecov",
+										Language:   detectLanguage(absFile),
+									}
+								}
+
+								if linesVal, ok := covData["lines"]; ok {
+									if linesArr, ok := linesVal.([]interface{}); ok {
+										dst.Lines = mergeLines(dst.Lines, linesArr)
+									}
+								}
+
+								if branchesVal, ok := covData["branches"]; ok {
+									if branchesMap, ok := branchesVal.(map[string]interface{}); ok {
+										dst.Branches = mergeBranches(dst.Branches, branchesMap)
+									}
+								}
+
+								files[absFile] = dst
+							}
 						}
 					}
-
-					// Merge branches
-					if branchesVal, ok := covData["branches"]; ok {
-						if branchesMap, ok := branchesVal.(map[string]interface{}); ok {
-							dst.Branches = mergeBranches(dst.Branches, branchesMap)
-						}
-					}
-
-					files[absFile] = dst
 				}
 			}
 		}
 	}
 
-	// Compute Coverage Gaps
 	gaps := make(map[string]FileGap)
 	for absFile, cov := range files {
 		if len(cov.Branches) > 0 {
@@ -946,6 +1365,22 @@ func processCoverage(covPath, repo string) (*CoverageDataset, map[string]FileGap
 					if count == 0 {
 						uncov++
 					}
+				}
+			}
+			if total > 0 {
+				gaps[relpathNoEval(absFile, repo)] = FileGap{
+					Total:     total,
+					Uncovered: uncov,
+					Gap:       float64(uncov) / float64(total),
+				}
+			}
+		} else if len(cov.BranchArms) > 0 {
+			total := 0
+			uncov := 0
+			for _, arm := range cov.BranchArms {
+				total++
+				if arm.Hits == 0 {
+					uncov++
 				}
 			}
 			if total > 0 {
@@ -1729,5 +2164,223 @@ func inScope(rel string, only []string, files []string) bool {
 		}
 	}
 	return false
+}
+
+type PythonCoverageJson struct {
+	Files map[string]PythonFileCoverage `json:"files"`
+}
+
+type PythonFileCoverage struct {
+	ExecutedLines    []int   `json:"executed_lines"`
+	MissingLines     []int   `json:"missing_lines"`
+	ExecutedBranches [][]int `json:"executed_branches"`
+	MissingBranches  [][]int `json:"missing_branches"`
+}
+
+type SyntaxFactsOutput struct {
+	Documents []SyntaxFactsDoc `json:"documents"`
+}
+
+type SyntaxFactsDoc struct {
+	BranchArms []SyntaxFactsArm `json:"branch_arms"`
+}
+
+type SyntaxFactsArm struct {
+	BranchID     string `json:"branch_id"`
+	ArmID        string `json:"arm_id"`
+	Kind         string `json:"kind"`
+	Member       string `json:"member"`
+	DecisionLine int    `json:"decision_line"`
+	DecisionSpan []int  `json:"decision_span"`
+	ArmLine      int    `json:"line"`
+	ArmSpan      []int  `json:"span"`
+}
+
+func findDecomplexBinary(repoRoot string) string {
+	if envBin := os.Getenv("DECOMPLEX_RUST_BINARY"); envBin != "" {
+		return envBin
+	}
+	sibling := filepath.Join(repoRoot, "gems/decomplex/target/release/decomplex-rust")
+	if _, err := os.Stat(sibling); err == nil {
+		return sibling
+	}
+	siblingDebug := filepath.Join(repoRoot, "gems/decomplex/target/debug/decomplex-rust")
+	if _, err := os.Stat(siblingDebug); err == nil {
+		return siblingDebug
+	}
+
+	if exePath, err := os.Executable(); err == nil {
+		exeDir := filepath.Dir(exePath)
+		gemsDir := filepath.Clean(filepath.Join(exeDir, "..", ".."))
+		siblingRel := filepath.Join(gemsDir, "decomplex/target/release/decomplex-rust")
+		if _, err := os.Stat(siblingRel); err == nil {
+			return siblingRel
+		}
+		siblingRelDebug := filepath.Join(gemsDir, "decomplex/target/debug/decomplex-rust")
+		if _, err := os.Stat(siblingRelDebug); err == nil {
+			return siblingRelDebug
+		}
+	}
+
+	return "decomplex-rust"
+}
+
+func isPythonCoverageJson(raw map[string]interface{}) bool {
+	filesVal, ok := raw["files"]
+	if !ok {
+		return false
+	}
+	filesMap, ok := filesVal.(map[string]interface{})
+	if !ok {
+		return false
+	}
+	for _, v := range filesMap {
+		entry, ok := v.(map[string]interface{})
+		if !ok {
+			continue
+		}
+		if _, ok := entry["executed_lines"]; ok {
+			return true
+		}
+		if _, ok := entry["missing_lines"]; ok {
+			return true
+		}
+		if _, ok := entry["executed_branches"]; ok {
+			return true
+		}
+		if _, ok := entry["missing_branches"]; ok {
+			return true
+		}
+	}
+	return false
+}
+
+func parsePythonCoverageJson(data []byte, repo string, files map[string]FileCoverage) error {
+	var pyCov PythonCoverageJson
+	if err := json.Unmarshal(data, &pyCov); err != nil {
+		return err
+	}
+
+	decomplexBin := findDecomplexBinary(repo)
+
+	for file, entry := range pyCov.Files {
+		absFile := file
+		if !filepath.IsAbs(file) {
+			absFile = filepath.Join(repo, file)
+		}
+		absFile = filepath.Clean(absFile)
+
+		if _, err := os.Stat(absFile); err != nil {
+			continue
+		}
+
+		dst, exists := files[absFile]
+		if !exists {
+			dst = FileCoverage{
+				Lines:      []*int{},
+				Branches:   make(map[string]map[string]int),
+				SourcePath: relpathNoEval(absFile, repo),
+				Format:     "coverage_py",
+				Language:   "python",
+			}
+		}
+
+		// Normalize lines
+		for _, line := range entry.ExecutedLines {
+			if line <= 0 {
+				continue
+			}
+			for len(dst.Lines) < line {
+				dst.Lines = append(dst.Lines, nil)
+			}
+			hits := 1
+			if dst.Lines[line-1] == nil {
+				dst.Lines[line-1] = &hits
+			} else {
+				*dst.Lines[line-1] += hits
+			}
+		}
+		for _, line := range entry.MissingLines {
+			if line <= 0 {
+				continue
+			}
+			for len(dst.Lines) < line {
+				dst.Lines = append(dst.Lines, nil)
+			}
+			if dst.Lines[line-1] == nil {
+				hits := 0
+				dst.Lines[line-1] = &hits
+			}
+		}
+
+		executedArcs := normalizeArcs(entry.ExecutedBranches)
+		missingArcs := normalizeArcs(entry.MissingBranches)
+
+		if len(executedArcs) > 0 || len(missingArcs) > 0 {
+			cmd := exec.Command(decomplexBin, "syntax-facts", "--language", "python", absFile)
+			var stdout bytes.Buffer
+			var stderr bytes.Buffer
+			cmd.Stdout = &stdout
+			cmd.Stderr = &stderr
+			if err := cmd.Run(); err == nil {
+				var facts SyntaxFactsOutput
+				if json.Unmarshal(stdout.Bytes(), &facts) == nil && len(facts.Documents) > 0 {
+					for _, arm := range facts.Documents[0].BranchArms {
+						hitsVal, exists := getArmHits(arm, executedArcs, missingArcs)
+						if !exists {
+							continue
+						}
+						
+						dst.BranchArms = append(dst.BranchArms, NativeBranchArm{
+							BranchID:     arm.BranchID,
+							ArmID:        arm.ArmID,
+							Kind:         arm.Kind,
+							Member:       arm.Member,
+							DecisionSpan: arm.DecisionSpan,
+							ArmSpan:      arm.ArmSpan,
+							Hits:         hitsVal,
+						})
+					}
+				}
+			}
+		}
+
+		files[absFile] = dst
+	}
+	return nil
+}
+
+func normalizeArcs(arcs [][]int) [][2]int {
+	var out [][2]int
+	for _, arc := range arcs {
+		if len(arc) == 2 && arc[0] > 0 && arc[1] > 0 {
+			out = append(out, [2]int{arc[0], arc[1]})
+		}
+	}
+	return out
+}
+
+func getArmHits(arm SyntaxFactsArm, executed, missing [][2]int) (int, bool) {
+	decisionLine := arm.DecisionLine
+	span := arm.ArmSpan
+	
+	for _, arc := range executed {
+		if arc[0] == decisionLine && lineInSpan(arc[1], span) {
+			return 1, true
+		}
+	}
+	for _, arc := range missing {
+		if arc[0] == decisionLine && lineInSpan(arc[1], span) {
+			return 0, true
+		}
+	}
+	return 0, false
+}
+
+func lineInSpan(line int, span []int) bool {
+	if len(span) != 4 {
+		return false
+	}
+	return line >= span[0] && line <= span[2]
 }
 

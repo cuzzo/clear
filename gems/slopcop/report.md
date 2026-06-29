@@ -3,84 +3,86 @@
 > Top true coverage gaps, ranked by fix-churn x structural
 > deviance. Every dark arm is categorized; only GENUINE
 > reachable ones are gaps. Apex = uncovered AND historically
-> churned (boobytrap) AND structurally deviant (decomplex).
+> churned (boobytrap), structurally deviant (decomplex),
+> and weakly verified when mutation facts are supplied.
 > Owns categorization; consumes boobytrap (churn) and
 > optional decomplex (spurious filter + deviance rank).
 
-## Top True Gaps (1195) — test these, ranked by fix-churn
+## Top True Gaps (55) — test these, ranked by fix-churn
 
 | # | gap | method | churn | decomplex deviance |
 |---|---|---|---|---|
-| 1 | [`src/mir/mir.rb:641`](../../src/mir/mir.rb#L641) | `(top-level)` | 0.9486 | **8** (False Simplicity) |
-| 2 | [`src/mir/mir.rb:717`](../../src/mir/mir.rb#L717) | `each_node_inner` | 0.9486 | **8** (False Simplicity) |
-| 3 | [`src/mir/mir.rb:735`](../../src/mir/mir.rb#L735) | `each_surface_node_inner` | 0.9486 | **8** (False Simplicity) |
-| 4 | [`src/mir/mir.rb:966`](../../src/mir/mir.rb#L966) | `(top-level)` | 0.9486 | **8** (False Simplicity) |
-| 5 | [`src/mir/mir.rb:2544`](../../src/mir/mir.rb#L2544) | `body_slots` | 0.9486 | **8** (False Simplicity) |
-| 6 | [`src/mir/mir.rb:3151`](../../src/mir/mir.rb#L3151) | `child_exprs` | 0.9486 | **8** (False Simplicity) |
-| 7 | [`src/mir/mir.rb:3185`](../../src/mir/mir.rb#L3185) | `child_exprs` | 0.9486 | **8** (False Simplicity) |
-| 8 | [`src/mir/mir.rb:3811`](../../src/mir/mir.rb#L3811) | `child_exprs` | 0.9486 | **8** (False Simplicity) |
-| 9 | [`src/mir/mir_lowering.rb:593`](../../src/mir/mir_lowering.rb#L593) | `destination_type` | 0.9103 | **8** (False Simplicity) |
-| 10 | [`src/mir/lowering/variables.rb:662`](../../src/mir/lowering/variables.rb#L662) | `field_access_moves_owner?` | 0.7062 | **10** † (Broken Protocols, Decision Pressure, False Simplicity, +1) |
-| 11 | [`src/mir/mir.rb:3554`](../../src/mir/mir.rb#L3554) | `ownership_effect` | 0.9486 | **6** (False Simplicity) |
-| 12 | [`src/mir/mir.rb:4645`](../../src/mir/mir.rb#L4645) | `ownership_effect` | 0.9486 | **6** (False Simplicity) |
-| 13 | [`src/mir/mir.rb:4655`](../../src/mir/mir.rb#L4655) | `ownership_effect` | 0.9486 | **6** (False Simplicity) |
-| 14 | [`src/mir/mir.rb:4754`](../../src/mir/mir.rb#L4754) | `ownership_effect` | 0.9486 | **6** (False Simplicity) |
-| 15 | [`src/mir/mir_lowering.rb:316`](../../src/mir/mir_lowering.rb#L316) | `ast_void_type?` | 0.9103 | **6** † (Decision Pressure, State-Based Branch Density) |
-| 16 | [`src/mir/lowering/functions.rb:1687`](../../src/mir/lowering/functions.rb#L1687) | `lower_intrinsic` | 0.4928 | **12** (Locality Drag, Weighted Inlined Cognitive Complexity) |
-| 17 | [`src/mir/lowering/variables.rb:574`](../../src/mir/lowering/variables.rb#L574) | `lower_var_decl_init` | 0.7062 | **8** (State-Based Branch Density, Weighted Inlined Cognitive Complexity) |
-| 18 | [`src/mir/lowering/variables.rb:581`](../../src/mir/lowering/variables.rb#L581) | `lower_var_decl_init` | 0.7062 | **8** (State-Based Branch Density, Weighted Inlined Cognitive Complexity) |
-| 19 | [`src/mir/lowering/variables.rb:587`](../../src/mir/lowering/variables.rb#L587) | `lower_var_decl_init` | 0.7062 | **8** (State-Based Branch Density, Weighted Inlined Cognitive Complexity) |
-| 20 | [`src/mir/lowering/variables.rb:597`](../../src/mir/lowering/variables.rb#L597) | `lower_var_decl_init` | 0.7062 | **8** (State-Based Branch Density, Weighted Inlined Cognitive Complexity) |
-| 21 | [`src/mir/lowering/variables.rb:602`](../../src/mir/lowering/variables.rb#L602) | `lower_var_decl_init` | 0.7062 | **8** (State-Based Branch Density, Weighted Inlined Cognitive Complexity) |
-| 22 | [`src/mir/lowering/variables.rb:625`](../../src/mir/lowering/variables.rb#L625) | `source_already_has_declared_capability?` | 0.7062 | **8** (State-Based Branch Density) |
-| 23 | [`src/mir/lowering/variables.rb:626`](../../src/mir/lowering/variables.rb#L626) | `source_already_has_declared_capability?` | 0.7062 | **8** (State-Based Branch Density) |
-| 24 | [`src/mir/lowering/variables.rb:627`](../../src/mir/lowering/variables.rb#L627) | `source_already_has_declared_capability?` | 0.7062 | **8** (State-Based Branch Density) |
-| 25 | [`src/mir/lowering/variables.rb:730`](../../src/mir/lowering/variables.rb#L730) | `lower_bind_expr` | 0.7062 | **8** (State-Based Branch Density, Weighted Inlined Cognitive Complexity) |
-| 26 | [`src/mir/lowering/variables.rb:750`](../../src/mir/lowering/variables.rb#L750) | `lower_bind_expr` | 0.7062 | **8** (False Simplicity, State-Based Branch Density, Weighted Inlined Cognitive Complexity) |
-| 27 | [`src/mir/lowering/variables.rb:1136`](../../src/mir/lowering/variables.rb#L1136) | `lower_template_indexed_assignment` | 0.7062 | **8** † (Decision Pressure, False Simplicity, State-Based Branch Density) |
-| 28 | [`src/mir/lowering/variables.rb:1150`](../../src/mir/lowering/variables.rb#L1150) | `lower_template_indexed_assignment` | 0.7062 | **8** (State-Based Branch Density) |
-| 29 | [`src/mir/lowering/variables.rb:1287`](../../src/mir/lowering/variables.rb#L1287) | `lower_auto_lock_assignment` | 0.7062 | **8** (State-Based Branch Density) |
-| 30 | [`src/mir/mir_checker.rb:418`](../../src/mir/mir_checker.rb#L418) | `check_fn!` | 0.7057 | **8** (Locality Drag, State-Based Branch Density, Temporal Ordering Pressure, +1) |
-| 31 | [`src/mir/mir_checker.rb:496`](../../src/mir/mir_checker.rb#L496) | `verify_structural_ownership_contracts!` | 0.7057 | **8** (Temporal Ordering Pressure) |
-| 32 | [`src/mir/mir_checker.rb:547`](../../src/mir/mir_checker.rb#L547) | `structural_consumed_names` | 0.7057 | **8** (Temporal Ordering Pressure) |
-| 33 | [`src/mir/mir_checker.rb:580`](../../src/mir/mir_checker.rb#L580) | `check_linear_stmt!` | 0.7057 | **8** (Temporal Ordering Pressure, Weighted Inlined Cognitive Complexity) |
-| 34 | [`src/mir/mir_checker.rb:1263`](../../src/mir/mir_checker.rb#L1263) | `ownership_registry_errors` | 0.7057 | **8** (State-Based Branch Density) |
-| 35 | [`src/mir/mir_checker.rb:1584`](../../src/mir/mir_checker.rb#L1584) | `check_fsm_structure!` | 0.7057 | **8** (Weighted Inlined Cognitive Complexity) |
-| 36 | [`src/mir/mir_checker.rb:1611`](../../src/mir/mir_checker.rb#L1611) | `check_fsm_structure!` | 0.7057 | **8** (State-Based Branch Density, Weighted Inlined Cognitive Complexity) |
-| 37 | [`src/mir/mir_checker.rb:2343`](../../src/mir/mir_checker.rb#L2343) | `verify_ownership_contract_operands!` | 0.7057 | **8** (State-Based Branch Density) |
-| 38 | [`src/mir/mir_checker.rb:2890`](../../src/mir/mir_checker.rb#L2890) | `check_expr_sources_for_unhoisted` | 0.7057 | **8** (Operational Discontinuity) |
-| 39 | [`src/mir/fiber_ctx_builder.rb:296`](../../src/mir/fiber_ctx_builder.rb#L296) | `build` | 0.5711 | **10** (Weighted Inlined Cognitive Complexity) |
-| 40 | [`src/mir/fiber_ctx_builder.rb:312`](../../src/mir/fiber_ctx_builder.rb#L312) | `build` | 0.5711 | **10** (Weighted Inlined Cognitive Complexity) |
-| 41 | [`src/semantic/escape_analysis.rb:917`](../../src/semantic/escape_analysis.rb#L917) | `function_facts` | 0.4336 | **12** (False Simplicity) |
-| 42 | [`src/semantic/escape_analysis.rb:1035`](../../src/semantic/escape_analysis.rb#L1035) | `owning_return_needs_heap_placement?` | 0.4336 | **12** † (Decision Pressure, Derived-State Staleness, False Simplicity, +1) |
-| 43 | [`src/semantic/escape_analysis.rb:1038`](../../src/semantic/escape_analysis.rb#L1038) | `owning_return_needs_heap_placement?` | 0.4336 | **12** † (Decision Pressure, Derived-State Staleness, False Simplicity, +1) |
-| 44 | [`src/semantic/escape_analysis.rb:1045`](../../src/semantic/escape_analysis.rb#L1045) | `owning_return_needs_heap_placement?` | 0.4336 | **12** (State-Based Branch Density) |
-| 45 | [`src/ast/ast.rb:385`](../../src/ast/ast.rb#L385) | `walk_body` | 0.6613 | **8** (False Simplicity) |
-| 46 | [`src/ast/ast.rb:826`](../../src/ast/ast.rb#L826) | `each_capture_analysis` | 0.6613 | **8** (False Simplicity, State-Based Branch Density, Weighted Inlined Cognitive Complexity) |
-| 47 | [`src/ast/ast.rb:831`](../../src/ast/ast.rb#L831) | `each_capture_analysis` | 0.6613 | **8** (False Simplicity, State-Based Branch Density, Weighted Inlined Cognitive Complexity) |
-| 48 | [`src/ast/ast.rb:2618`](../../src/ast/ast.rb#L2618) | `child_bodies` | 0.6613 | **8** (False Simplicity) |
-| 49 | [`src/ast/ast.rb:2624`](../../src/ast/ast.rb#L2624) | `child_bodies` | 0.6613 | **8** (False Simplicity, State-Based Branch Density) |
-| 50 | [`src/ast/ast.rb:2625`](../../src/ast/ast.rb#L2625) | `child_bodies` | 0.6613 | **8** (False Simplicity, State-Based Branch Density) |
+| 1 | [`src/mir/mir_lowering.rb:3506`](../../src/mir/mir_lowering.rb#L3506) | `emit_stmts_zig` | 0.0763 | - |
+| 2 | [`src/mir/mir.rb:1555`](../../src/mir/mir.rb#L1555) | `fetch` | 0.0615 | - |
+| 3 | [`src/mir/lowering/functions.rb:681`](../../src/mir/lowering/functions.rb#L681) | `reentrance_guard_prologue` | 0.049 | - |
+| 4 | [`src/mir/lowering/functions.rb:769`](../../src/mir/lowering/functions.rb#L769) | `takes_param_ownership_mir` | 0.049 | - |
+| 5 | [`src/mir/lowering/functions.rb:1085`](../../src/mir/lowering/functions.rb#L1085) | `ownership_consumed_arg_names` | 0.049 | - |
+| 6 | [`src/mir/lowering/functions.rb:1085`](../../src/mir/lowering/functions.rb#L1085) | `ownership_consumed_arg_names` | 0.049 | - |
+| 7 | [`src/mir/lowering/functions.rb:1085`](../../src/mir/lowering/functions.rb#L1085) | `ownership_consumed_arg_names` | 0.049 | - |
+| 8 | [`src/mir/lowering/functions.rb:1085`](../../src/mir/lowering/functions.rb#L1085) | `ownership_consumed_arg_names` | 0.049 | - |
+| 9 | [`src/mir/lowering/functions.rb:1085`](../../src/mir/lowering/functions.rb#L1085) | `ownership_consumed_arg_names` | 0.049 | - |
+| 10 | [`src/mir/lowering/control_flow.rb:470`](../../src/mir/lowering/control_flow.rb#L470) | `for_each_loop_stmt` | 0.038 | - |
+| 11 | [`src/mir/lowering/control_flow.rb:1186`](../../src/mir/lowering/control_flow.rb#L1186) | `collect_returned_binding_names` | 0.038 | - |
+| 12 | [`src/mir/lowering/control_flow.rb:1186`](../../src/mir/lowering/control_flow.rb#L1186) | `collect_returned_binding_names` | 0.038 | - |
+| 13 | [`src/mir/lowering/control_flow.rb:1186`](../../src/mir/lowering/control_flow.rb#L1186) | `collect_returned_binding_names` | 0.038 | - |
+| 14 | [`src/mir/lowering/control_flow.rb:1192`](../../src/mir/lowering/control_flow.rb#L1192) | `collect_returned_binding_names` | 0.038 | - |
+| 15 | [`src/mir/lowering/expressions.rb:119`](../../src/mir/lowering/expressions.rb#L119) | `field_root` | 0.023 | - |
+| 16 | [`src/mir/lowering/expressions.rb:207`](../../src/mir/lowering/expressions.rb#L207) | `lower_literal` | 0.023 | - |
+| 17 | [`src/mir/lowering/expressions.rb:1298`](../../src/mir/lowering/expressions.rb#L1298) | `index_access_value` | 0.023 | - |
+| 18 | [`src/mir/lowering/expressions.rb:1345`](../../src/mir/lowering/expressions.rb#L1345) | `index_collection_value` | 0.023 | - |
+| 19 | [`src/mir/lowering/expressions.rb:1814`](../../src/mir/lowering/expressions.rb#L1814) | `lower_slice` | 0.023 | - |
+| 20 | [`src/mir/lowering/variables.rb:1173`](../../src/mir/lowering/variables.rb#L1173) | `indexed_assignment_dispatch` | 0.0197 | - |
+| 21 | [`src/backends/mir_emitter.rb:588`](../../src/backends/mir_emitter.rb#L588) | `emit_extern_trampoline` | 0.0154 | - |
+| 22 | [`src/backends/mir_emitter.rb:1219`](../../src/backends/mir_emitter.rb#L1219) | `emit_with_match_prelude` | 0.0154 | - |
+| 23 | [`src/backends/mir_emitter.rb:1279`](../../src/backends/mir_emitter.rb#L1279) | `emit_failure_action` | 0.0154 | - |
+| 24 | [`src/backends/mir_emitter.rb:1328`](../../src/backends/mir_emitter.rb#L1328) | `emit_fallible_lock_acquire_expr` | 0.0154 | - |
+| 25 | [`src/backends/mir_emitter.rb:1818`](../../src/backends/mir_emitter.rb#L1818) | `emit_catch_default_body` | 0.0154 | - |
+| 26 | [`src/backends/mir_emitter.rb:2665`](../../src/backends/mir_emitter.rb#L2665) | `emit_cast` | 0.0154 | - |
+| 27 | [`src/backends/mir_emitter.rb:2671`](../../src/backends/mir_emitter.rb#L2671) | `emit_cast` | 0.0154 | - |
+| 28 | [`src/backends/mir_emitter.rb:2761`](../../src/backends/mir_emitter.rb#L2761) | `emit_type_sentinel` | 0.0154 | - |
+| 29 | [`src/mir/rewriters/pipeline_rewriter.rb:179`](../../src/mir/rewriters/pipeline_rewriter.rb#L179) | `rewrite_pipeline` | 0.0145 | - |
+| 30 | [`src/mir/rewriters/pipeline_rewriter.rb:317`](../../src/mir/rewriters/pipeline_rewriter.rb#L317) | `fuse_pipeline` | 0.0145 | - |
+| 31 | [`src/mir/rewriters/pipeline_rewriter.rb:319`](../../src/mir/rewriters/pipeline_rewriter.rb#L319) | `fuse_pipeline` | 0.0145 | - |
+| 32 | [`src/mir/rewriters/pipeline_rewriter.rb:321`](../../src/mir/rewriters/pipeline_rewriter.rb#L321) | `fuse_pipeline` | 0.0145 | - |
+| 33 | [`src/mir/lowering/capabilities.rb:404`](../../src/mir/lowering/capabilities.rb#L404) | `borrowed_capability_binding` | 0.0122 | - |
+| 34 | [`src/mir/lowering/capabilities.rb:434`](../../src/mir/lowering/capabilities.rb#L434) | `restrict_capability_binding` | 0.0122 | - |
+| 35 | [`src/mir/fsm_transform/emit.rb:1401`](../../src/mir/fsm_transform/emit.rb#L1401) | `self.compute_sp_indices` | 0.0081 | - |
+| 36 | [`src/mir/fsm_ops.rb:377`](../../src/mir/fsm_ops.rb#L377) | `lower_expr` | 0.0079 | - |
+| 37 | [`src/semantic/bg_capture_classifier.rb:137`](../../src/semantic/bg_capture_classifier.rb#L137) | `self.apply_capture_storage_provenance!` | 0.0079 | - |
+| 38 | [`src/mir/fsm_transform/recursive_splitter.rb:600`](../../src/mir/fsm_transform/recursive_splitter.rb#L600) | `self.remap_tail` | 0.0042 | - |
+| 39 | [`src/mir/fsm_transform/segments.rb:335`](../../src/mir/fsm_transform/segments.rb#L335) | `self.contains_suspend_anywhere?` | 0.0042 | - |
+| 40 | [`src/mir/fsm_transform/segments.rb:335`](../../src/mir/fsm_transform/segments.rb#L335) | `self.contains_suspend_anywhere?` | 0.0042 | - |
+| 41 | [`src/semantic/concurrency_checks.rb:67`](../../src/semantic/concurrency_checks.rb#L67) | `self.check_hold_across_yield!` | 0.0036 | - |
+| 42 | [`src/ast/parser.rb:1835`](../../src/ast/parser.rb#L1835) | `get_precedence` | 0.0005 | - |
+| 43 | [`src/ast/type.rb:2004`](../../src/ast/type.rb#L2004) | `fsm_foreach_descriptor` | 0.0003 | - |
+| 44 | [`src/ast/type.rb:3004`](../../src/ast/type.rb#L3004) | `needs_explicit_cleanup?` | 0.0003 | - |
+| 45 | [`src/ast/type.rb:3728`](../../src/ast/type.rb#L3728) | `integer_range_target_type` | 0.0003 | - |
+| 46 | [`src/annotator/helpers/fixable_helpers.rb:1357`](../../src/annotator/helpers/fixable_helpers.rb#L1357) | `emit_with_cap_mismatch!` | 0.0 | - |
+| 47 | [`src/annotator/helpers/fixable_helpers.rb:1375`](../../src/annotator/helpers/fixable_helpers.rb#L1375) | `emit_with_cap_mismatch!` | 0.0 | - |
+| 48 | [`src/annotator/helpers/fixable_helpers.rb:1375`](../../src/annotator/helpers/fixable_helpers.rb#L1375) | `emit_with_cap_mismatch!` | 0.0 | - |
+| 49 | [`src/lsp/diagnostics.rb:123`](../../src/lsp/diagnostics.rb#L123) | `self.fallback_token_length` | 0.0 | - |
+| 50 | [`src/lsp/diagnostics.rb:123`](../../src/lsp/diagnostics.rb#L123) | `self.fallback_token_length` | 0.0 | - |
 
-- ...(+1145 more genuine gaps)
-
-> decomplex attribution on listed gaps: **796 span-precise**, **311 method-coarse (†)**, **47 ⚠dup?** (possibly redundant, not localised -- verify before testing). Coarse rows are whole-method: treat as a hint, not an arm-level discriminator.
+- ...(+5 more genuine gaps)
 
 ## Category Summary
-_2622 dark arms; only 1195 are genuine gaps. The rest are not test targets:_
+_1185 dark arms; only 55 are genuine gaps. The rest are not test targets:_
 
 | category | arms | % | what it means |
 |---|---|---|---|
-| type_norm | 697 | 26.6% | type/nil guard -- likely dead if runtime contracts were stricter |
-| dead | 73 | 2.8% | decision never executes in coverage -- audit as missing test or statically-dead code |
-| defensive | 42 | 1.6% | inert / invariant-pinned -- accept, exclude from denominator |
-| spurious | 72 | 2.7% | span-precise redundant/cloned decision (decomplex) -- refactor or delete, NOT a test target (coarse duplication never excludes -- it stays a gap, flagged ⚠dup?) |
+| type_norm | 338 | 28.5% | type/null guard -- likely dead if runtime contracts were stricter |
+| dead | 726 | 61.3% | decision never executes in coverage -- audit as missing test or statically-dead code |
+| defensive | 15 | 1.3% | inert / invariant-pinned -- accept, exclude from denominator |
+| spurious | 0 | 0.0% | span-precise redundant/cloned decision (decomplex) -- refactor or delete, NOT a test target (coarse duplication never excludes -- it stays a gap, flagged ⚠dup?) |
 | ffi | 0 | 0.0% | external/boundary call -- needs an integration test |
-| diagnostic | 543 | 20.7% | error/raise/diagnostic path -- reachable only by invalid input (negative test) |
-| genuine | 1195 | 45.6% | real reachable gap -- test it; ranked by fix-churn x decomplex structural deviance |
+| diagnostic | 51 | 4.3% | language diagnostic/error path -- reachable only by invalid input (negative test) |
+| genuine | 55 | 4.6% | real reachable gap -- test it; ranked by fix-churn x decomplex structural deviance |
 
 ## Run Summary
 - Repo: `/home/yahn/cheat`
-- Files: 120; dark arms: 2622; genuine gaps: 1195
+- Files: 103; dark arms: 1185; genuine gaps: 55
+- Coverage input: SimpleCov
+- Mutation facts: not supplied
+- Branch source: coverage=1185
 - General engine: categorizes uncovered branches, ranks genuine gaps by consumed boobytrap churn x optional decomplex structural deviance. Project lexicons (external-boundary methods and domain diagnostic methods) are caller-supplied, not baked in (see docs/agents/design.md).
 - decomplex join is span-precise (the arm's line falls inside the flagged decision's source extent); `†` marks a (file, method) fallback when no flagged span contained the arm. A ranked candidate, not a verdict (Engler discipline).

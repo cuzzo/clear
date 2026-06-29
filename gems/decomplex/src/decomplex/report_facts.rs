@@ -138,6 +138,11 @@ pub fn facts_for_source_files(files: &[SourceFile], options: &Options) -> Result
         syntax::parse_file_for_report(file.path.clone(), file.language)
     })?;
     profile_phase(profile, "parse", parse_started.elapsed());
+
+    let projected_documents: Vec<Value> = documents.iter().map(|doc| {
+        crate::decomplex::syntax_oracle::project_document(doc)
+    }).collect();
+
     let shared_started = Instant::now();
     let shared = SharedFacts::new(&documents);
     profile_phase(profile, "shared_facts", shared_started.elapsed());
@@ -162,6 +167,7 @@ pub fn facts_for_source_files(files: &[SourceFile], options: &Options) -> Result
         "format": FORMAT,
         "files": reported_files,
         "detectors": detectors,
+        "documents": projected_documents,
     });
     profile_phase(profile, "assemble_json", assemble_started.elapsed());
     profile_phase(profile, "facts_total", total_started.elapsed());

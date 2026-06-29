@@ -78,7 +78,8 @@ module SlopCop
         arms = Classifier.classify_file(resultset, abs,
                                         root: repo,
                                         ffi_boundary: ffi_boundary,
-                                        diagnostic_mids: diagnostic_mids)
+                                        diagnostic_mids: diagnostic_mids,
+                                        decomplex_verdict: dv)
         next if arms.empty?
 
         cn = ((churn[rel] || 0.0) / mx).round(4)

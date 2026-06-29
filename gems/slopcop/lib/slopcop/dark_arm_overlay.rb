@@ -2,6 +2,7 @@
 
 require "json"
 require_relative "classifier"
+require_relative "decomplex_verdict"
 sibling_sarif = File.expand_path("../../../decomplex/lib/decomplex/sarif", __dir__)
 if File.file?("#{sibling_sarif}.rb")
   require sibling_sarif
@@ -17,6 +18,11 @@ module SlopCop
 
     def build(files:, repo:, resultset:, ffi_boundary: [], diagnostic_mids: [])
       repo = File.realpath(repo)
+      abs_files = Array(files).map do |file|
+        File.expand_path(repo_relative(file, repo), repo)
+      end.select { |f| File.file?(f) }
+      dv = DecomplexVerdict.index(abs_files)
+
       arms = Array(files).flat_map do |file|
         rel = repo_relative(file, repo)
         abs = File.expand_path(rel, repo)
@@ -27,7 +33,8 @@ module SlopCop
           abs,
           root: repo,
           ffi_boundary: ffi_boundary,
-          diagnostic_mids: diagnostic_mids
+          diagnostic_mids: diagnostic_mids,
+          decomplex_verdict: dv
         ).map { |arm| overlay_arm(arm, repo) }
       end.compact.sort_by do |arm|
         [arm["file"], arm["line"].to_i, arm["method"].to_s, arm["arm_category"].to_s]
