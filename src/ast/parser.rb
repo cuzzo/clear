@@ -1828,7 +1828,7 @@ class ClearParser
     end
 
     consume(:CHAR, '}')
-    AST::BlockExpr.new(block_token, body, T.must(result))
+    AST::BlockExpr.new(block_token, body, result)
   end
 
   VALUE_BLOCK_STATEMENT_KEYWORDS = T.let(Set[
