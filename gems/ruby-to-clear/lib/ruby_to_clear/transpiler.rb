@@ -30,18 +30,7 @@ module RubyToClear
       node_name = node.class.name.split("::").last
       method_name = "visit_#{node_name.gsub(/(?<!^)(?=[A-Z])/, '_').downcase}"
       if respond_to?(method_name, true)
-        res = send(method_name, node)
-        if res.is_a?(String) && res.include?("# [UNSUPPORTED:") &&
-           node_name != "StatementsNode" && node_name != "ProgramNode" &&
-           node_name != "ClassNode" && node_name != "DefNode"
-          if @raise_on_error
-            raise_unsupported("Unsupported construct #{node_name}", node)
-          else
-            comment_unsupported(node)
-          end
-        else
-          res
-        end
+        send(method_name, node)
       else
         raise_unsupported("Unsupported node #{node_name}", node)
       end
@@ -63,7 +52,7 @@ module RubyToClear
       if @raise_on_error
         raise TranspilationError, err_msg
       else
-        "# [UNSUPPORTED: #{node.class.name.split('::').last}]\n# #{loc.slice.gsub("\n", "\n# ")}"
+        unsupported_comment(node, message)
       end
     end
 
@@ -272,7 +261,7 @@ module RubyToClear
         @current_sig = nil
         next if code.empty?
 
-        unless code.end_with?(";") || code.end_with?("END") || code.start_with?("STRUCT ") || code.start_with?("#")
+        unless code.end_with?(";") || code.end_with?("END") || code.start_with?("STRUCT ") || code.lstrip.start_with?("#")
           code = "#{code};"
         end
 
@@ -832,10 +821,18 @@ module RubyToClear
     end
 
     def comment_unsupported(node)
+      unsupported_comment(node)
+    end
+
+    def unsupported_comment(node, message = nil)
       node_name = node.class.name.split("::").last
+      loc = node.location
+      source_loc = "#{@source[0...loc.start_offset].count("\n") + 1}:#{loc.start_column}"
       slice = node.location.slice
       lines = slice.split("\n")
-      commented_lines = ["# [UNSUPPORTED: #{node_name}]"]
+      header = "# [UNSUPPORTED: #{node_name} at #{source_loc}]"
+      header = "#{header} #{message}" if message
+      commented_lines = [header]
       lines.each do |line|
         commented_lines << "# #{line}"
       end

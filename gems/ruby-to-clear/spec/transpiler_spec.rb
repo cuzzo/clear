@@ -288,7 +288,48 @@ RSpec.describe RubyToClear::Transpiler do
 
     it "comments out class variable in lax mode" do
       res = RubyToClear.transpile("@@count = 0", raise_on_error: false)
-      expect(res.strip).to eq("# [UNSUPPORTED: ClassVariableWriteNode]\n# @@count = 0")
+      expect(res.strip).to eq("# [UNSUPPORTED: ClassVariableWriteNode at 1:0] Unsupported node ClassVariableWriteNode\n# @@count = 0")
+    end
+
+    it "keeps supported statements around unsupported inner statements in lax mode" do
+      ruby_code = <<~RUBY
+        if ok
+          before
+          @@count = 1
+          after
+        end
+      RUBY
+      expected_clear = <<~CLEAR
+        IF ok() THEN
+          before();
+          # [UNSUPPORTED: ClassVariableWriteNode at 3:2] Unsupported node ClassVariableWriteNode
+          # @@count = 1
+          after();
+        END
+      CLEAR
+
+      expect(RubyToClear.transpile(ruby_code, raise_on_error: false).strip).to eq(expected_clear.strip)
+    end
+
+    it "keeps supported method structure around unsupported body statements in lax mode" do
+      ruby_code = <<~RUBY
+        def build
+          value = 1
+          @@count = value
+          value
+        end
+      RUBY
+      expected_clear = <<~CLEAR
+        FN build() RETURNS !Auto ->
+          MUTABLE value = NIL;
+          value = 1;
+          # [UNSUPPORTED: ClassVariableWriteNode at 3:2] Unsupported node ClassVariableWriteNode
+          # @@count = value
+          value;
+        END
+      CLEAR
+
+      expect(RubyToClear.transpile(ruby_code, raise_on_error: false).strip).to eq(expected_clear.strip)
     end
   end
 
@@ -301,7 +342,7 @@ RSpec.describe RubyToClear::Transpiler do
 
     it "comments out regex literal in lax mode" do
       res = RubyToClear.transpile("/pattern/", raise_on_error: false)
-      expect(res.strip).to eq("# [UNSUPPORTED: RegularExpressionNode]\n# /pattern/")
+      expect(res.strip).to eq("# [UNSUPPORTED: RegularExpressionNode at 1:0] Regular expressions are not supported\n# /pattern/")
     end
 
     it "raises error on gsub with regex" do
