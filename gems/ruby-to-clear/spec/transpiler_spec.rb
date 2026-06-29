@@ -353,11 +353,12 @@ RSpec.describe RubyToClear::Transpiler do
     end
 
     it "transpiles common File and Dir stdlib calls to CLEAR primitives or thin adapters" do
-      expect_transpile('File.read("a.txt")', 'readFile("a.txt");')
-      expect_transpile('File.readlines("a.txt")', 'readFile("a.txt").split("\n");')
-      expect_transpile('File.foreach("a.txt")', 'readFile("a.txt").split("\n");')
-      expect_transpile('File.foreach("a.txt") { |line| puts line }', 'readFile("a.txt").split("\n") |> EACH { puts(_); };')
-      expect_transpile('File.write("a.txt", body)', 'writeFile("a.txt", body());')
+      expect_transpile('File.read("a.txt")', "REQUIRE \"pkg:fs\"\nread(\"a.txt\") OR RAISE;")
+      expect_transpile('File.readlines("a.txt")', "REQUIRE \"pkg:fs\"\nreadLines(\"a.txt\") OR RAISE;")
+      expect_transpile('File.foreach("a.txt")', "REQUIRE \"pkg:fs\"\nreadLines(\"a.txt\") OR RAISE;")
+      expect_transpile('File.foreach("a.txt") { |line| puts line }', "REQUIRE \"pkg:fs\"\n(readLines(\"a.txt\") OR RAISE) |> EACH { puts(_); };")
+      expect_transpile('File.write("a.txt", body)', "REQUIRE \"pkg:fs\"\nwrite(\"a.txt\", body()) OR RAISE;")
+      expect_transpile('File.size(path)', "REQUIRE \"pkg:fs\"\nsize(path()) OR RAISE;")
       expect_transpile('File.exist?(path)', 'fileExists?(path());')
       expect_transpile('File.join(root, "src", name)', 'joinPath(root(), "src", name());')
       expect_transpile('File.expand_path("../x", base)', 'expandPath("../x", base());')
@@ -367,6 +368,27 @@ RSpec.describe RubyToClear::Transpiler do
       expect_transpile('Dir.children(path)', 'listDir(path());')
       expect_transpile('Dir.entries(path)', 'listAll(path());')
       expect_transpile('Dir.pwd', 'currentDirectory();')
+    end
+
+    it "emits one pkg:fs require and marks methods fallible when fs calls can raise" do
+      ruby_code = <<~RUBY
+        sig { params(path: String, out: String).returns(String) }
+        def copy_text(path, out)
+          body = File.read(path)
+          File.write(out, body)
+          body
+        end
+      RUBY
+      expected_clear = <<~CLEAR
+        REQUIRE "pkg:fs"
+        FN copy_text(path: String, out: String) RETURNS !String ->
+          MUTABLE body = NIL;
+          body = read(path) OR RAISE;
+          write(out, body) OR RAISE;
+          body;
+        END
+      CLEAR
+      expect_transpile(ruby_code, expected_clear)
     end
 
     it "transpiles JSON, regexp escaping, scanner construction, and string aliases" do

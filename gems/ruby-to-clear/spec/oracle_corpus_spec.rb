@@ -18,8 +18,9 @@ RSpec.describe "Ruby-to-CLEAR oracle corpus" do
         end
       RUBY
       clear: <<~CLEAR,
-        FN read_names(path: String) RETURNS String[] ->
-          readFile(path).split("\\n") |> SELECT _.trim();
+        REQUIRE "pkg:fs"
+        FN read_names(path: String) RETURNS !String[] ->
+          (readLines(path) OR RAISE) |> SELECT _.trim();
         END
       CLEAR
     },

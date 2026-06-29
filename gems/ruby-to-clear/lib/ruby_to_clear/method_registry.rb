@@ -69,8 +69,25 @@ module RubyToClear
       "#{clear_name}(#{args.join(', ')})"
     end
 
+    def self.package_call(context, package, clear_name, min:, max: min, fallible: false)
+      args = arguments(context)
+      unless args.length >= min && args.length <= max
+        expected = min == max ? min.to_s : "#{min}..#{max}"
+        return context.transpiler.raise_unsupported("#{context.receiver_name}.#{context.ruby_name} expects #{expected} arguments", context.node)
+      end
+
+      context.transpiler.require_package(package)
+      context.transpiler.mark_current_function_fallible! if fallible
+      call = "#{clear_name}(#{args.join(', ')})"
+      fallible ? "#{call} OR RAISE" : call
+    end
+
     def self.unsupported_result?(value)
       value.is_a?(String) && value.include?("# [UNSUPPORTED:")
+    end
+
+    def self.pipeline_source(receiver)
+      receiver.include?(" OR ") ? "(#{receiver})" : receiver
     end
 
     def self.block_required_parameter_names(node, block_node, transpiler, method_label, min:, max:)
@@ -164,15 +181,11 @@ module RubyToClear
     # --- Registrations ---
 
     register("read", receiver: "File") do |context|
-      static_call(context, "readFile", min: 1)
+      package_call(context, "fs", "read", min: 1, max: 1, fallible: true)
     end
 
     register("readlines", receiver: "File") do |context|
-      args = arguments(context)
-      unless args.length == 1
-        next context.transpiler.raise_unsupported("File.readlines expects 1 argument", context.node)
-      end
-      "readFile(#{args.first}).split(\"\\n\")"
+      package_call(context, "fs", "readLines", min: 1, max: 1, fallible: true)
     end
 
     register("foreach", receiver: "File") do |context|
@@ -181,7 +194,9 @@ module RubyToClear
         next context.transpiler.raise_unsupported("File.foreach expects 1 argument", context.node)
       end
 
-      lines = "readFile(#{args.first}).split(\"\\n\")"
+      context.transpiler.require_package("fs")
+      context.transpiler.mark_current_function_fallible!
+      lines = "readLines(#{args.first}) OR RAISE"
       block_node = context.node.block
       next lines unless block_node
 
@@ -191,20 +206,20 @@ module RubyToClear
 
       param_name = block_node.parameters&.parameters&.requireds&.first&.name&.to_s
       context.transpiler.with_renames({ param_name => "_" }) do
-        "#{lines} |> EACH { #{context.transpiler.visit(block_node.body)} }"
+        "(#{lines}) |> EACH { #{context.transpiler.visit(block_node.body)} }"
       end
     end
 
     register("write", receiver: "File") do |context|
-      static_call(context, "writeFile", min: 2, max: 2)
+      package_call(context, "fs", "write", min: 2, max: 2, fallible: true)
     end
 
     register("binwrite", receiver: "File") do |context|
-      static_call(context, "writeFile", min: 2, max: 2)
+      package_call(context, "fs", "write", min: 2, max: 2, fallible: true)
     end
 
     register("size", receiver: "File") do |context|
-      static_call(context, "fileSize", min: 1, max: 1)
+      package_call(context, "fs", "size", min: 1, max: 1, fallible: true)
     end
 
     register("exist?", receiver: "File") do |context|
@@ -327,9 +342,9 @@ module RubyToClear
       source = args.first
       if context.node.block
         projection = block_expression(source, context.node, context.transpiler, "Set.new")
-        "#{source} |> SELECT #{projection} |> DISTINCT _"
+        "#{pipeline_source(source)} |> SELECT #{projection} |> DISTINCT _"
       else
-        "#{source} |> DISTINCT _"
+        "#{pipeline_source(source)} |> DISTINCT _"
       end
     end
 
@@ -373,7 +388,7 @@ module RubyToClear
       block_body = block_expression(receiver, node, transpiler, "map")
       next block_body if unsupported_result?(block_body)
 
-      "#{receiver} |> SELECT #{block_body}"
+      "#{pipeline_source(receiver)} |> SELECT #{block_body}"
     end
 
     register("collect") do |context|
@@ -391,7 +406,7 @@ module RubyToClear
       block_body = block_expression(receiver, node, transpiler, "select")
       next block_body if unsupported_result?(block_body)
 
-      "#{receiver} |> WHERE #{block_body}"
+      "#{pipeline_source(receiver)} |> WHERE #{block_body}"
     end
 
     register("filter") do |context|
@@ -409,28 +424,28 @@ module RubyToClear
       block_body = block_expression(receiver, node, transpiler, "reject")
       next block_body if unsupported_result?(block_body)
 
-      "#{receiver} |> WHERE !(#{block_body})"
+      "#{pipeline_source(receiver)} |> WHERE !(#{block_body})"
     end
 
     register("any?") do |receiver, node, transpiler|
       block_body = block_expression(receiver, node, transpiler, "any?")
       next block_body if unsupported_result?(block_body)
 
-      "#{receiver} |> ANY #{block_body}"
+      "#{pipeline_source(receiver)} |> ANY #{block_body}"
     end
 
     register("all?") do |receiver, node, transpiler|
       block_body = block_expression(receiver, node, transpiler, "all?")
       next block_body if unsupported_result?(block_body)
 
-      "#{receiver} |> ALL #{block_body}"
+      "#{pipeline_source(receiver)} |> ALL #{block_body}"
     end
 
     register("find") do |receiver, node, transpiler|
       block_body = block_expression(receiver, node, transpiler, "find")
       next block_body if unsupported_result?(block_body)
 
-      "#{receiver} |> FIND #{block_body}"
+      "#{pipeline_source(receiver)} |> FIND #{block_body}"
     end
 
     register("detect") do |context|
@@ -448,21 +463,21 @@ module RubyToClear
       block_body = block_expression(receiver, node, transpiler, "filter_map")
       next block_body if unsupported_result?(block_body)
 
-      "#{receiver} |> SELECT #{block_body} |> WHERE _ != NIL"
+      "#{pipeline_source(receiver)} |> SELECT #{block_body} |> WHERE _ != NIL"
     end
 
     register("flat_map") do |receiver, node, transpiler|
       block_body = block_expression(receiver, node, transpiler, "flat_map")
       next block_body if unsupported_result?(block_body)
 
-      "#{receiver} |> UNNEST #{block_body}"
+      "#{pipeline_source(receiver)} |> UNNEST #{block_body}"
     end
 
     register("sort_by") do |receiver, node, transpiler|
       block_body = block_expression(receiver, node, transpiler, "sort_by")
       next block_body if unsupported_result?(block_body)
 
-      "#{receiver} |> ORDER_BY #{block_body}"
+      "#{pipeline_source(receiver)} |> ORDER_BY #{block_body}"
     end
 
     register("reduce") do |receiver, node, transpiler|
@@ -482,7 +497,7 @@ module RubyToClear
         item_name = block_node.parameters&.parameters&.requireds&.last&.name&.to_s
         transpiler.with_renames({ acc_name => "acc", item_name => "_" }) do
           block_body = transpiler.visit(block_node.body.body.first)
-          "#{receiver} |> REDUCE(#{init_val}) #{block_body}"
+          "#{pipeline_source(receiver)} |> REDUCE(#{init_val}) #{block_body}"
         end
       else
         transpiler.raise_unsupported("Unsupported reduce block type: #{block_node.class.name}", node)
@@ -530,7 +545,7 @@ module RubyToClear
         param_name = block_node.parameters&.parameters&.requireds&.first&.name&.to_s
         transpiler.with_renames({ param_name => "_" }) do
           block_body = transpiler.visit(block_node.body)
-          "#{receiver} |> EACH { #{block_body} }"
+          "#{pipeline_source(receiver)} |> EACH { #{block_body} }"
         end
       else
         transpiler.raise_unsupported("Unsupported each block type: #{block_node.class.name}", node)

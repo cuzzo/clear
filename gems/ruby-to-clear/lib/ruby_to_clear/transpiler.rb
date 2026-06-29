@@ -35,10 +35,14 @@ module RubyToClear
       @renames = {}
       @mutable_params = nil
       @type_aliases = {}
+      @required_packages = Set.new
+      @current_function_can_fail = false
     end
 
     def transpile(program_node)
-      visit(program_node)
+      body = visit(program_node)
+      requires = @required_packages.sort.map { |package| "REQUIRE \"pkg:#{package}\"" }
+      (requires + [body]).reject(&:empty?).join("\n")
     end
 
     def visit(node)
@@ -59,6 +63,14 @@ module RubyToClear
       yield
     ensure
       @renames = old_renames
+    end
+
+    def require_package(package)
+      @required_packages << package.to_s
+    end
+
+    def mark_current_function_fallible!
+      @current_function_can_fail = true
     end
 
     def raise_unsupported(message, node)
@@ -984,7 +996,9 @@ module RubyToClear
       end
 
       old_declared = @declared_locals
+      old_function_can_fail = @current_function_can_fail
       @declared_locals = Set.new(param_names)
+      @current_function_can_fail = false
       
       local_vars_to_declare = (written_vars - param_names).to_a.sort
       local_vars_to_declare.each { |var| @declared_locals << var }
@@ -1003,7 +1017,9 @@ module RubyToClear
         "#{decls_code}\n#{body_code}"
       end
 
+      function_can_fail = @current_function_can_fail
       @declared_locals = old_declared
+      @current_function_can_fail = old_function_can_fail
       @mutable_params = nil
       @param_types = nil
 
@@ -1014,9 +1030,16 @@ module RubyToClear
       else
         "!Auto"
       end
+      ret_type = fallible_return_type(ret_type) if function_can_fail
       sig_name = name == "initialize" ? "initialize!" : name
 
       "FN #{sig_name}(#{params.join(', ')}) RETURNS #{ret_type} ->\n#{full_body}\nEND"
+    end
+
+    def fallible_return_type(ret_type)
+      return ret_type if ret_type.start_with?("!")
+
+      "!#{ret_type}"
     end
 
     def visit_block_argument_node(node)
