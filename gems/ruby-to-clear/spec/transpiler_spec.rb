@@ -199,6 +199,28 @@ RSpec.describe RubyToClear::Transpiler do
   end
 
   describe "classes and methods" do
+    it "preserves Ruby module bodies as comment-bounded flat output" do
+      ruby_code = <<~RUBY
+        module AST
+          def helper(value)
+            value
+          end
+        end
+      RUBY
+      expected_clear = <<~CLEAR
+        # Ruby module AST
+        FN helper(value: Auto) RETURNS !Auto ->
+          value;
+        END
+        # End Ruby module AST
+      CLEAR
+      expect_transpile(ruby_code, expected_clear)
+    end
+
+    it "preserves empty Ruby modules without inventing namespace syntax" do
+      expect_transpile("module Empty; end", "# Ruby module Empty")
+    end
+
     it "transpiles Struct.new definition and constructor call mapping" do
       ruby_code = <<~RUBY
         Token = Struct.new(:type, :value, :line, :column)
@@ -303,6 +325,8 @@ RSpec.describe RubyToClear::Transpiler do
     it "transpiles common File and Dir stdlib calls to CLEAR primitives or thin adapters" do
       expect_transpile('File.read("a.txt")', 'readFile("a.txt");')
       expect_transpile('File.readlines("a.txt")', 'readFile("a.txt").split("\n");')
+      expect_transpile('File.foreach("a.txt")', 'readFile("a.txt").split("\n");')
+      expect_transpile('File.foreach("a.txt") { |line| puts line }', 'readFile("a.txt").split("\n") |> EACH { puts(_); };')
       expect_transpile('File.write("a.txt", body)', 'writeFile("a.txt", body());')
       expect_transpile('File.exist?(path)', 'fileExists?(path());')
       expect_transpile('File.join(root, "src", name)', 'joinPath(root(), "src", name());')

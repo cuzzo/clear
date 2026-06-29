@@ -836,6 +836,17 @@ module RubyToClear
       end
     end
 
+    def visit_module_node(node)
+      name = node.constant_path.location.slice.strip
+      body_code = visit(node.body)
+
+      if body_code.empty?
+        "# Ruby module #{name}"
+      else
+        "# Ruby module #{name}\n#{body_code}\n# End Ruby module #{name}"
+      end
+    end
+
     def visit_class_node(node)
       old_class = @current_class
       @current_class = node.constant_path.location.slice.strip

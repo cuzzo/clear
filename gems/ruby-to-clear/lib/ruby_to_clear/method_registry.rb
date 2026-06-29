@@ -109,7 +109,7 @@ module RubyToClear
 
       lines = "readFile(#{args.first}).split(\"\\n\")"
       block_node = context.node.block
-      return lines unless block_node
+      next lines unless block_node
 
       unless block_node.is_a?(Prism::BlockNode)
         next context.transpiler.raise_unsupported("File.foreach block must be a literal block", context.node)
