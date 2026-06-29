@@ -18,6 +18,7 @@ module RubyToClear
       @current_class = nil
       @renames = {}
       @mutable_params = nil
+      @type_aliases = {}
     end
 
     def transpile(program_node)
@@ -122,20 +123,27 @@ module RubyToClear
       case node.class.name.split("::").last
       when "ConstantReadNode"
         name = node.name.to_s
+        return @type_aliases[name] if @type_aliases.key?(name)
+
         case name
         when "Integer" then "Int64"
         when "Float" then "Float64"
         when "String" then "String"
-        when "Symbol" then "Auto"
+        when "Symbol" then "String@symbol"
         when "NilClass" then "Void"
         when "Boolean" then "Bool"
         when "TrueClass", "FalseClass" then "Bool"
+        when "T" then "Auto"
         else name
         end
       when "ConstantPathNode"
         path = node.location.slice.strip
         case path
         when "T::Boolean" then "Bool"
+        when "T::Array" then "Auto[]"
+        when "T::Hash" then "HashMap<Auto, Auto>"
+        when "T::Set" then "Auto[]@set"
+        when "T.untyped" then "Auto"
         else path.gsub("::", ".")
         end
       when "CallNode"
@@ -153,12 +161,25 @@ module RubyToClear
             else
               return "Auto"
             end
+          when "untyped", "anything"
+            return "Auto"
           end
         end
         
         if node.name.to_s == "[]"
           receiver_name = node.receiver ? node.receiver.location.slice.strip : ""
           if receiver_name == "T::Array" || receiver_name == "Array"
+            inner = convert_sorbet_type(node.arguments&.arguments&.first)
+            return "#{inner}[]"
+          elsif receiver_name == "T::Hash" || receiver_name == "Hash"
+            args = node.arguments ? node.arguments.arguments : []
+            key = convert_sorbet_type(args[0])
+            value = convert_sorbet_type(args[1])
+            return "HashMap<#{key}, #{value}>"
+          elsif receiver_name == "T::Set" || receiver_name == "Set"
+            inner = convert_sorbet_type(node.arguments&.arguments&.first)
+            return "#{inner}[]@set"
+          elsif receiver_name == "T::Enumerable" || receiver_name == "Enumerable"
             inner = convert_sorbet_type(node.arguments&.arguments&.first)
             return "#{inner}[]"
           end
@@ -233,6 +254,58 @@ module RubyToClear
       names << params.block.name.to_s if params.block && params.block.respond_to?(:name)
       
       names
+    end
+
+    def sorbet_call?(node, name = nil)
+      return false unless node.is_a?(Prism::CallNode)
+      return false unless node.receiver&.location&.slice == "T"
+
+      name.nil? || node.name.to_s == name.to_s
+    end
+
+    def sorbet_unwrapped_value(node)
+      return nil unless sorbet_call?(node)
+
+      case node.name.to_s
+      when "let", "cast", "must", "unsafe"
+        node.arguments&.arguments&.first
+      end
+    end
+
+    def sorbet_typed_value(node)
+      return nil unless sorbet_call?(node)
+      return nil unless ["let", "cast"].include?(node.name.to_s)
+
+      args = node.arguments ? node.arguments.arguments : []
+      return nil unless args.length >= 2
+
+      [args.first, convert_sorbet_type(args[1])]
+    end
+
+    def sorbet_type_alias_value(node)
+      return nil unless sorbet_call?(node, "type_alias")
+      return nil unless node.block&.body.is_a?(Prism::StatementsNode)
+
+      body = node.block.body.body
+      return nil unless body.length == 1
+
+      convert_sorbet_type(body.first)
+    end
+
+    def t_struct_class?(node)
+      node.superclass&.location&.slice == "T::Struct"
+    end
+
+    def t_struct_field(node)
+      return nil unless node.is_a?(Prism::CallNode)
+      return nil unless node.receiver.nil?
+      return nil unless ["const", "prop"].include?(node.name.to_s)
+
+      args = node.arguments ? node.arguments.arguments : []
+      return nil unless args.length >= 2
+      return nil unless args.first.is_a?(Prism::SymbolNode)
+
+      [args.first.value.to_s, convert_sorbet_type(args[1])]
     end
 
     # --- Node Visitors ---
@@ -322,12 +395,19 @@ module RubyToClear
     def visit_local_variable_write_node(node)
       name = node.name.to_s
       name = @renames[name] || name
-      val = visit(node.value)
+      value_node = node.value
+      type_annotation = nil
+      if (typed_value = sorbet_typed_value(value_node))
+        value_node, type_annotation = typed_value
+      end
+
+      val = visit(value_node)
       if @declared_locals.include?(name)
         "#{name} = #{val}"
       else
         @declared_locals << name
-        "MUTABLE #{name} = #{val}"
+        typed = type_annotation && type_annotation != "Auto" ? ": #{type_annotation}" : ""
+        "MUTABLE #{name}#{typed} = #{val}"
       end
     end
 
@@ -383,6 +463,11 @@ module RubyToClear
 
     def visit_constant_write_node(node)
       name = node.name.to_s
+
+      if (type_alias = sorbet_type_alias_value(node.value))
+        @type_aliases[name] = type_alias
+        return ""
+      end
 
       if node.value.is_a?(Prism::CallNode) &&
          (node.value.receiver.nil? || (node.value.receiver.is_a?(Prism::ConstantReadNode) && node.value.receiver.name == :Struct)) &&
@@ -600,6 +685,14 @@ module RubyToClear
       chk = check_arguments!(node.arguments)
       return chk if chk.is_a?(String) && chk.include?("# [UNSUPPORTED:")
 
+      if sorbet_call?(node)
+        return "" if node.name.to_s == "bind"
+
+        if (unwrapped = sorbet_unwrapped_value(node))
+          return visit(unwrapped)
+        end
+      end
+
       if node.name.to_s == "gsub" || node.name.to_s == "sub"
         rec_code = node.receiver ? visit(node.receiver) : nil
         if rec_code
@@ -706,6 +799,17 @@ module RubyToClear
     def visit_class_node(node)
       old_class = @current_class
       @current_class = node.constant_path.location.slice.strip
+
+      if t_struct_class?(node)
+        body_nodes = node.body&.body || []
+        fields = body_nodes.filter_map { |stmt| t_struct_field(stmt) }
+        if fields.length == body_nodes.length
+          @struct_fields[@current_class] = fields.map(&:first)
+          field_decls = fields.map { |field, type| "  #{field}: #{type}" }.join(",\n")
+          @current_class = old_class
+          return "STRUCT #{node.constant_path.location.slice.strip} {\n#{field_decls}\n}"
+        end
+      end
 
       ivar_names = collect_instance_variables(node)
       struct_fields = ivar_names.map { |name| "  #{name}: Auto" }.join(",\n")

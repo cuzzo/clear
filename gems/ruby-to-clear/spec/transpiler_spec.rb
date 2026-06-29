@@ -568,5 +568,88 @@ RSpec.describe RubyToClear::Transpiler do
       CLEAR
       expect_transpile(ruby_code, expected_clear)
     end
+
+    it "compiles richer Sorbet collection and union types" do
+      ruby_code = <<~RUBY
+        sig { params(items: T::Array[String], table: T::Hash[String, Integer], seen: T::Set[Symbol], maybe: T.any(String, NilClass)).returns(T::Hash[String, T::Array[Integer]]) }
+        def typed(items, table, seen, maybe)
+          table
+        end
+      RUBY
+      expected_clear = <<~CLEAR
+        FN typed(items: String[], table: HashMap<String, Int64>, seen: String@symbol[]@set, maybe: ?String) RETURNS HashMap<String, Int64[]> ->
+          table;
+        END
+      CLEAR
+      expect_transpile(ruby_code, expected_clear)
+    end
+
+    it "uses T.let and T.cast as local type metadata without emitting Sorbet runtime calls" do
+      ruby_code = <<~RUBY
+        value = "x"
+        items = T.let([], T::Array[String])
+        table = T.let({}, T::Hash[String, Integer])
+        maybe = T.cast(value, T.nilable(String))
+        sure = T.must(maybe)
+        unsafe = T.unsafe(sure)
+      RUBY
+      expected_clear = <<~CLEAR
+        MUTABLE value = "x";
+        MUTABLE items: String[] = [];
+        MUTABLE table: HashMap<String, Int64> = {};
+        MUTABLE maybe: ?String = value;
+        MUTABLE sure = maybe;
+        MUTABLE unsafe = sure;
+      CLEAR
+      expect_transpile(ruby_code, expected_clear)
+    end
+
+    it "drops T.bind statements" do
+      ruby_code = <<~RUBY
+        def bound
+          T.bind(self, Thing)
+          x = 1
+        end
+      RUBY
+      expected_clear = <<~CLEAR
+        FN bound() RETURNS !Auto ->
+          MUTABLE x = NIL;
+          x = 1;
+        END
+      CLEAR
+      expect_transpile(ruby_code, expected_clear)
+    end
+
+    it "records simple T.type_alias constants for later signatures" do
+      ruby_code = <<~RUBY
+        Table = T.type_alias { T::Hash[String, Integer] }
+        sig { params(table: Table).returns(Table) }
+        def passthrough(table)
+          table
+        end
+      RUBY
+      expected_clear = <<~CLEAR
+        FN passthrough(table: HashMap<String, Int64>) RETURNS HashMap<String, Int64> ->
+          table;
+        END
+      CLEAR
+      expect_transpile(ruby_code, expected_clear)
+    end
+
+    it "transpiles field-only T::Struct classes to explicit CLEAR structs" do
+      ruby_code = <<~RUBY
+        class Config < T::Struct
+          const :path, String
+          prop :count, Integer
+        end
+      RUBY
+      expected_clear = <<~CLEAR
+        STRUCT Config {
+          path: String,
+          count: Int64
+        }
+      CLEAR
+      expect_transpile(ruby_code, expected_clear)
+    end
   end
 end
