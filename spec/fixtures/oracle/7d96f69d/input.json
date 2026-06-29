@@ -1,0 +1,1345 @@
+{
+  "methods": [
+    {
+      "key": [
+        "VoidChainExample",
+        "leaf_value",
+        "instance",
+        "/home/yahn/litedb/nil-kill-void-chain20260629-301490-zapd7p/void_chain_example.rb",
+        5
+      ],
+      "calls": 0,
+      "ok_calls": 0,
+      "raised_calls": 0,
+      "params_by_name": {
+      },
+      "params_ok": {
+      },
+      "params_raised": {
+      },
+      "param_elem": {
+      },
+      "param_kv": {
+      },
+      "param_elem_shapes": {
+      },
+      "param_kv_shapes": {
+      },
+      "param_sites": {
+      },
+      "param_sites_ok": {
+      },
+      "param_sites_raised": {
+      },
+      "param_traces": {
+      },
+      "param_traces_ok": {
+      },
+      "param_traces_raised": {
+      },
+      "returns": [
+
+      ],
+      "return_elem": [
+
+      ],
+      "return_kv": [
+        [
+
+        ],
+        [
+
+        ]
+      ],
+      "return_elem_shapes": [
+
+      ],
+      "return_kv_shapes": [
+        [
+
+        ],
+        [
+
+        ]
+      ],
+      "raised": [
+
+      ],
+      "source": {
+        "path": "/home/yahn/litedb/nil-kill-void-chain20260629-301490-zapd7p/void_chain_example.rb",
+        "line": 5,
+        "end_line": 7,
+        "class": "VoidChainExample",
+        "method": "leaf_value",
+        "kind": "instance",
+        "language": "ruby",
+        "has_sig": true,
+        "sig": "sig { returns(T.untyped) }",
+        "params": [
+
+        ],
+        "scope": [
+          "VoidChainExample"
+        ],
+        "non_nil_params": [
+
+        ],
+        "uses_yield": false,
+        "untraceable_params": [
+
+        ],
+        "protocols": {
+        },
+        "noreturn_candidate": false
+      },
+      "has_sig": true
+    },
+    {
+      "key": [
+        "VoidChainExample",
+        "middle_value",
+        "instance",
+        "/home/yahn/litedb/nil-kill-void-chain20260629-301490-zapd7p/void_chain_example.rb",
+        10
+      ],
+      "calls": 0,
+      "ok_calls": 0,
+      "raised_calls": 0,
+      "params_by_name": {
+      },
+      "params_ok": {
+      },
+      "params_raised": {
+      },
+      "param_elem": {
+      },
+      "param_kv": {
+      },
+      "param_elem_shapes": {
+      },
+      "param_kv_shapes": {
+      },
+      "param_sites": {
+      },
+      "param_sites_ok": {
+      },
+      "param_sites_raised": {
+      },
+      "param_traces": {
+      },
+      "param_traces_ok": {
+      },
+      "param_traces_raised": {
+      },
+      "returns": [
+
+      ],
+      "return_elem": [
+
+      ],
+      "return_kv": [
+        [
+
+        ],
+        [
+
+        ]
+      ],
+      "return_elem_shapes": [
+
+      ],
+      "return_kv_shapes": [
+        [
+
+        ],
+        [
+
+        ]
+      ],
+      "raised": [
+
+      ],
+      "source": {
+        "path": "/home/yahn/litedb/nil-kill-void-chain20260629-301490-zapd7p/void_chain_example.rb",
+        "line": 10,
+        "end_line": 12,
+        "class": "VoidChainExample",
+        "method": "middle_value",
+        "kind": "instance",
+        "language": "ruby",
+        "has_sig": true,
+        "sig": "sig { returns(T.untyped) }",
+        "params": [
+
+        ],
+        "scope": [
+          "VoidChainExample"
+        ],
+        "non_nil_params": [
+
+        ],
+        "uses_yield": false,
+        "untraceable_params": [
+
+        ],
+        "protocols": {
+        },
+        "noreturn_candidate": false
+      },
+      "has_sig": true
+    },
+    {
+      "key": [
+        "VoidChainExample",
+        "top_value",
+        "instance",
+        "/home/yahn/litedb/nil-kill-void-chain20260629-301490-zapd7p/void_chain_example.rb",
+        15
+      ],
+      "calls": 0,
+      "ok_calls": 0,
+      "raised_calls": 0,
+      "params_by_name": {
+      },
+      "params_ok": {
+      },
+      "params_raised": {
+      },
+      "param_elem": {
+      },
+      "param_kv": {
+      },
+      "param_elem_shapes": {
+      },
+      "param_kv_shapes": {
+      },
+      "param_sites": {
+      },
+      "param_sites_ok": {
+      },
+      "param_sites_raised": {
+      },
+      "param_traces": {
+      },
+      "param_traces_ok": {
+      },
+      "param_traces_raised": {
+      },
+      "returns": [
+
+      ],
+      "return_elem": [
+
+      ],
+      "return_kv": [
+        [
+
+        ],
+        [
+
+        ]
+      ],
+      "return_elem_shapes": [
+
+      ],
+      "return_kv_shapes": [
+        [
+
+        ],
+        [
+
+        ]
+      ],
+      "raised": [
+
+      ],
+      "source": {
+        "path": "/home/yahn/litedb/nil-kill-void-chain20260629-301490-zapd7p/void_chain_example.rb",
+        "line": 15,
+        "end_line": 17,
+        "class": "VoidChainExample",
+        "method": "top_value",
+        "kind": "instance",
+        "language": "ruby",
+        "has_sig": true,
+        "sig": "sig { returns(T.untyped) }",
+        "params": [
+
+        ],
+        "scope": [
+          "VoidChainExample"
+        ],
+        "non_nil_params": [
+
+        ],
+        "uses_yield": false,
+        "untraceable_params": [
+
+        ],
+        "protocols": {
+        },
+        "noreturn_candidate": false
+      },
+      "has_sig": true
+    },
+    {
+      "key": [
+        "VoidChainExample",
+        "run",
+        "instance",
+        "/home/yahn/litedb/nil-kill-void-chain20260629-301490-zapd7p/void_chain_example.rb",
+        20
+      ],
+      "calls": 0,
+      "ok_calls": 0,
+      "raised_calls": 0,
+      "params_by_name": {
+      },
+      "params_ok": {
+      },
+      "params_raised": {
+      },
+      "param_elem": {
+      },
+      "param_kv": {
+      },
+      "param_elem_shapes": {
+      },
+      "param_kv_shapes": {
+      },
+      "param_sites": {
+      },
+      "param_sites_ok": {
+      },
+      "param_sites_raised": {
+      },
+      "param_traces": {
+      },
+      "param_traces_ok": {
+      },
+      "param_traces_raised": {
+      },
+      "returns": [
+
+      ],
+      "return_elem": [
+
+      ],
+      "return_kv": [
+        [
+
+        ],
+        [
+
+        ]
+      ],
+      "return_elem_shapes": [
+
+      ],
+      "return_kv_shapes": [
+        [
+
+        ],
+        [
+
+        ]
+      ],
+      "raised": [
+
+      ],
+      "source": {
+        "path": "/home/yahn/litedb/nil-kill-void-chain20260629-301490-zapd7p/void_chain_example.rb",
+        "line": 20,
+        "end_line": 22,
+        "class": "VoidChainExample",
+        "method": "run",
+        "kind": "instance",
+        "language": "ruby",
+        "has_sig": true,
+        "sig": "sig { void }",
+        "params": [
+
+        ],
+        "scope": [
+          "VoidChainExample"
+        ],
+        "non_nil_params": [
+
+        ],
+        "uses_yield": false,
+        "untraceable_params": [
+
+        ],
+        "protocols": {
+        },
+        "noreturn_candidate": false
+      },
+      "has_sig": true
+    }
+  ],
+  "tlets": [
+
+  ],
+  "facts": {
+    "files": {
+      "nil-kill-void-chain20260629-301490-zapd7p/void_chain_example.rb": {
+        "language": "ruby",
+        "methods": 0,
+        "fields": 0,
+        "digest": "sha256:c6e791aabf0f476d0ac8f6513d640d1bf3959cb874433754c67a38179364e33b",
+        "parser": "tree_sitter"
+      }
+    },
+    "unsigned_methods": [
+
+    ],
+    "existing_sigs": [
+      {
+        "path": "/home/yahn/litedb/nil-kill-void-chain20260629-301490-zapd7p/void_chain_example.rb",
+        "line": 5,
+        "end_line": 7,
+        "class": "VoidChainExample",
+        "method": "leaf_value",
+        "kind": "instance",
+        "language": "ruby",
+        "has_sig": true,
+        "sig": "sig { returns(T.untyped) }",
+        "params": [
+
+        ],
+        "scope": [
+          "VoidChainExample"
+        ],
+        "non_nil_params": [
+
+        ],
+        "uses_yield": false,
+        "untraceable_params": [
+
+        ],
+        "protocols": {
+        },
+        "noreturn_candidate": false
+      },
+      {
+        "path": "/home/yahn/litedb/nil-kill-void-chain20260629-301490-zapd7p/void_chain_example.rb",
+        "line": 10,
+        "end_line": 12,
+        "class": "VoidChainExample",
+        "method": "middle_value",
+        "kind": "instance",
+        "language": "ruby",
+        "has_sig": true,
+        "sig": "sig { returns(T.untyped) }",
+        "params": [
+
+        ],
+        "scope": [
+          "VoidChainExample"
+        ],
+        "non_nil_params": [
+
+        ],
+        "uses_yield": false,
+        "untraceable_params": [
+
+        ],
+        "protocols": {
+        },
+        "noreturn_candidate": false
+      },
+      {
+        "path": "/home/yahn/litedb/nil-kill-void-chain20260629-301490-zapd7p/void_chain_example.rb",
+        "line": 15,
+        "end_line": 17,
+        "class": "VoidChainExample",
+        "method": "top_value",
+        "kind": "instance",
+        "language": "ruby",
+        "has_sig": true,
+        "sig": "sig { returns(T.untyped) }",
+        "params": [
+
+        ],
+        "scope": [
+          "VoidChainExample"
+        ],
+        "non_nil_params": [
+
+        ],
+        "uses_yield": false,
+        "untraceable_params": [
+
+        ],
+        "protocols": {
+        },
+        "noreturn_candidate": false
+      },
+      {
+        "path": "/home/yahn/litedb/nil-kill-void-chain20260629-301490-zapd7p/void_chain_example.rb",
+        "line": 20,
+        "end_line": 22,
+        "class": "VoidChainExample",
+        "method": "run",
+        "kind": "instance",
+        "language": "ruby",
+        "has_sig": true,
+        "sig": "sig { void }",
+        "params": [
+
+        ],
+        "scope": [
+          "VoidChainExample"
+        ],
+        "non_nil_params": [
+
+        ],
+        "uses_yield": false,
+        "untraceable_params": [
+
+        ],
+        "protocols": {
+        },
+        "noreturn_candidate": false
+      }
+    ],
+    "tlet_sites": [
+
+    ],
+    "dead_nil_checks": [
+
+    ],
+    "deterministic_guards": [
+
+    ],
+    "struct_declarations": [
+
+    ],
+    "struct_field_static": [
+
+    ],
+    "tuple_arrays": [
+
+    ],
+    "hash_shapes": [
+
+    ],
+    "collection_index_lookups": [
+
+    ],
+    "hash_record_blockers": [
+
+    ],
+    "hash_record_member_calls": [
+
+    ],
+    "collection_runtime": [
+
+    ],
+    "ivar_runtime": [
+
+    ],
+    "collect_coverage": {
+    },
+    "type_normalizers": [
+
+    ],
+    "dispatcher_inferences": [
+
+    ],
+    "return_origins": [
+      {
+        "array_element_shape": null,
+        "blockers": [
+
+        ],
+        "candidate_type": "String",
+        "class": "VoidChainExample",
+        "confidence": "strong",
+        "control_shape": "branchless",
+        "end_line": 7,
+        "hash_shape": null,
+        "implicit": true,
+        "kind": "instance",
+        "line": 5,
+        "method": "leaf_value",
+        "path": "/home/yahn/litedb/nil-kill-void-chain20260629-301490-zapd7p/void_chain_example.rb",
+        "return_syntax": "implicit",
+        "sources": [
+          {
+            "code": "\"event\"",
+            "kind": "static",
+            "line": 6,
+            "type": "String"
+          }
+        ]
+      },
+      {
+        "array_element_shape": null,
+        "blockers": [
+
+        ],
+        "candidate_type": "String",
+        "class": "VoidChainExample",
+        "confidence": "strong",
+        "control_shape": "branchless",
+        "end_line": 12,
+        "hash_shape": null,
+        "implicit": true,
+        "kind": "instance",
+        "line": 10,
+        "method": "middle_value",
+        "path": "/home/yahn/litedb/nil-kill-void-chain20260629-301490-zapd7p/void_chain_example.rb",
+        "return_syntax": "implicit",
+        "sources": [
+          {
+            "callee": "leaf_value",
+            "code": "leaf_value",
+            "kind": "typed_call_inferred",
+            "line": 11,
+            "type": "String"
+          }
+        ]
+      },
+      {
+        "array_element_shape": null,
+        "blockers": [
+
+        ],
+        "candidate_type": "String",
+        "class": "VoidChainExample",
+        "confidence": "strong",
+        "control_shape": "branchless",
+        "end_line": 17,
+        "hash_shape": null,
+        "implicit": true,
+        "kind": "instance",
+        "line": 15,
+        "method": "top_value",
+        "path": "/home/yahn/litedb/nil-kill-void-chain20260629-301490-zapd7p/void_chain_example.rb",
+        "return_syntax": "implicit",
+        "sources": [
+          {
+            "callee": "middle_value",
+            "code": "middle_value",
+            "kind": "typed_call_inferred",
+            "line": 16,
+            "type": "String"
+          }
+        ]
+      },
+      {
+        "array_element_shape": null,
+        "blockers": [
+
+        ],
+        "candidate_type": "String",
+        "class": "VoidChainExample",
+        "confidence": "strong",
+        "control_shape": "branchless",
+        "end_line": 22,
+        "hash_shape": null,
+        "implicit": true,
+        "kind": "instance",
+        "line": 20,
+        "method": "run",
+        "path": "/home/yahn/litedb/nil-kill-void-chain20260629-301490-zapd7p/void_chain_example.rb",
+        "return_syntax": "implicit",
+        "sources": [
+          {
+            "callee": "top_value",
+            "code": "top_value",
+            "kind": "typed_call_inferred",
+            "line": 21,
+            "type": "String"
+          }
+        ]
+      }
+    ],
+    "param_origins": [
+      {
+        "arg_kind": "positional",
+        "array_element_shape": null,
+        "callee": "extend",
+        "code": "T::Sig",
+        "enclosing_scope": "VoidChainExample",
+        "hash_shape": null,
+        "line": 2,
+        "origin_kind": "unknown",
+        "path": "/home/yahn/litedb/nil-kill-void-chain20260629-301490-zapd7p/void_chain_example.rb",
+        "receiver": null,
+        "slot": "0",
+        "source_method": null,
+        "type": null,
+        "unknown_reasons": [
+          "operation unresolved constant T::Sig"
+        ]
+      },
+      {
+        "arg_kind": "positional",
+        "array_element_shape": null,
+        "callee": "returns",
+        "code": "T.untyped",
+        "enclosing_scope": "VoidChainExample",
+        "hash_shape": null,
+        "line": 4,
+        "origin_kind": "untyped_return",
+        "path": "/home/yahn/litedb/nil-kill-void-chain20260629-301490-zapd7p/void_chain_example.rb",
+        "receiver": null,
+        "slot": "0",
+        "source_method": "untyped",
+        "type": null,
+        "unknown_reasons": [
+
+        ]
+      },
+      {
+        "arg_kind": "positional",
+        "array_element_shape": null,
+        "callee": "sig",
+        "code": "sig",
+        "enclosing_scope": "VoidChainExample",
+        "hash_shape": null,
+        "line": 4,
+        "origin_kind": "untyped_return",
+        "path": "/home/yahn/litedb/nil-kill-void-chain20260629-301490-zapd7p/void_chain_example.rb",
+        "receiver": null,
+        "slot": "0",
+        "source_method": "sig",
+        "type": null,
+        "unknown_reasons": [
+
+        ]
+      },
+      {
+        "arg_kind": "positional",
+        "array_element_shape": null,
+        "callee": "untyped",
+        "code": "",
+        "enclosing_scope": "VoidChainExample",
+        "hash_shape": null,
+        "line": 4,
+        "origin_kind": "static",
+        "path": "/home/yahn/litedb/nil-kill-void-chain20260629-301490-zapd7p/void_chain_example.rb",
+        "receiver": "T",
+        "slot": "0",
+        "source_method": null,
+        "type": "T::Array[T.untyped]",
+        "unknown_reasons": [
+
+        ]
+      },
+      {
+        "arg_kind": "positional",
+        "array_element_shape": null,
+        "callee": "returns",
+        "code": "T.untyped",
+        "enclosing_scope": "VoidChainExample",
+        "hash_shape": null,
+        "line": 9,
+        "origin_kind": "untyped_return",
+        "path": "/home/yahn/litedb/nil-kill-void-chain20260629-301490-zapd7p/void_chain_example.rb",
+        "receiver": null,
+        "slot": "0",
+        "source_method": "untyped",
+        "type": null,
+        "unknown_reasons": [
+
+        ]
+      },
+      {
+        "arg_kind": "positional",
+        "array_element_shape": null,
+        "callee": "sig",
+        "code": "sig",
+        "enclosing_scope": "VoidChainExample",
+        "hash_shape": null,
+        "line": 9,
+        "origin_kind": "untyped_return",
+        "path": "/home/yahn/litedb/nil-kill-void-chain20260629-301490-zapd7p/void_chain_example.rb",
+        "receiver": null,
+        "slot": "0",
+        "source_method": "sig",
+        "type": null,
+        "unknown_reasons": [
+
+        ]
+      },
+      {
+        "arg_kind": "positional",
+        "array_element_shape": null,
+        "callee": "untyped",
+        "code": "",
+        "enclosing_scope": "VoidChainExample",
+        "hash_shape": null,
+        "line": 9,
+        "origin_kind": "static",
+        "path": "/home/yahn/litedb/nil-kill-void-chain20260629-301490-zapd7p/void_chain_example.rb",
+        "receiver": "T",
+        "slot": "0",
+        "source_method": null,
+        "type": "T::Array[T.untyped]",
+        "unknown_reasons": [
+
+        ]
+      },
+      {
+        "arg_kind": "positional",
+        "array_element_shape": null,
+        "callee": "leaf_value",
+        "code": "leaf_value",
+        "enclosing_scope": "VoidChainExample",
+        "hash_shape": null,
+        "line": 11,
+        "origin_kind": "typed_return",
+        "path": "/home/yahn/litedb/nil-kill-void-chain20260629-301490-zapd7p/void_chain_example.rb",
+        "receiver": null,
+        "slot": "0",
+        "source_method": "leaf_value",
+        "type": "T.untyped",
+        "unknown_reasons": [
+
+        ]
+      },
+      {
+        "arg_kind": "positional",
+        "array_element_shape": null,
+        "callee": "returns",
+        "code": "T.untyped",
+        "enclosing_scope": "VoidChainExample",
+        "hash_shape": null,
+        "line": 14,
+        "origin_kind": "untyped_return",
+        "path": "/home/yahn/litedb/nil-kill-void-chain20260629-301490-zapd7p/void_chain_example.rb",
+        "receiver": null,
+        "slot": "0",
+        "source_method": "untyped",
+        "type": null,
+        "unknown_reasons": [
+
+        ]
+      },
+      {
+        "arg_kind": "positional",
+        "array_element_shape": null,
+        "callee": "sig",
+        "code": "sig",
+        "enclosing_scope": "VoidChainExample",
+        "hash_shape": null,
+        "line": 14,
+        "origin_kind": "untyped_return",
+        "path": "/home/yahn/litedb/nil-kill-void-chain20260629-301490-zapd7p/void_chain_example.rb",
+        "receiver": null,
+        "slot": "0",
+        "source_method": "sig",
+        "type": null,
+        "unknown_reasons": [
+
+        ]
+      },
+      {
+        "arg_kind": "positional",
+        "array_element_shape": null,
+        "callee": "untyped",
+        "code": "",
+        "enclosing_scope": "VoidChainExample",
+        "hash_shape": null,
+        "line": 14,
+        "origin_kind": "static",
+        "path": "/home/yahn/litedb/nil-kill-void-chain20260629-301490-zapd7p/void_chain_example.rb",
+        "receiver": "T",
+        "slot": "0",
+        "source_method": null,
+        "type": "T::Array[T.untyped]",
+        "unknown_reasons": [
+
+        ]
+      },
+      {
+        "arg_kind": "positional",
+        "array_element_shape": null,
+        "callee": "middle_value",
+        "code": "middle_value",
+        "enclosing_scope": "VoidChainExample",
+        "hash_shape": null,
+        "line": 16,
+        "origin_kind": "typed_return",
+        "path": "/home/yahn/litedb/nil-kill-void-chain20260629-301490-zapd7p/void_chain_example.rb",
+        "receiver": null,
+        "slot": "0",
+        "source_method": "middle_value",
+        "type": "T.untyped",
+        "unknown_reasons": [
+
+        ]
+      },
+      {
+        "arg_kind": "positional",
+        "array_element_shape": null,
+        "callee": "sig",
+        "code": "sig",
+        "enclosing_scope": "VoidChainExample",
+        "hash_shape": null,
+        "line": 19,
+        "origin_kind": "untyped_return",
+        "path": "/home/yahn/litedb/nil-kill-void-chain20260629-301490-zapd7p/void_chain_example.rb",
+        "receiver": null,
+        "slot": "0",
+        "source_method": "sig",
+        "type": null,
+        "unknown_reasons": [
+
+        ]
+      },
+      {
+        "arg_kind": "positional",
+        "array_element_shape": null,
+        "callee": "void",
+        "code": "void",
+        "enclosing_scope": "VoidChainExample",
+        "hash_shape": null,
+        "line": 19,
+        "origin_kind": "untyped_return",
+        "path": "/home/yahn/litedb/nil-kill-void-chain20260629-301490-zapd7p/void_chain_example.rb",
+        "receiver": null,
+        "slot": "0",
+        "source_method": "void",
+        "type": null,
+        "unknown_reasons": [
+
+        ]
+      },
+      {
+        "arg_kind": "positional",
+        "array_element_shape": null,
+        "callee": "top_value",
+        "code": "top_value",
+        "enclosing_scope": "VoidChainExample",
+        "hash_shape": null,
+        "line": 21,
+        "origin_kind": "typed_return",
+        "path": "/home/yahn/litedb/nil-kill-void-chain20260629-301490-zapd7p/void_chain_example.rb",
+        "receiver": null,
+        "slot": "0",
+        "source_method": "top_value",
+        "type": "T.untyped",
+        "unknown_reasons": [
+
+        ]
+      }
+    ],
+    "rbi_field_types": [
+
+    ],
+    "noreturn_methods": [
+
+    ],
+    "runtime_call_edges": [
+
+    ],
+    "fallibility_pressure": [
+
+    ],
+    "hidden_enum_pressure": [
+
+    ],
+    "flow_graph": null,
+    "static_evidence_summary": {
+      "files": 1,
+      "methods": 4,
+      "fields": 0,
+      "signatures": 3,
+      "state_types": 0,
+      "state_type_records": 0,
+      "state_protocols": 0,
+      "state_param_origins": 0,
+      "state_protocol_records": 0,
+      "state_param_origin_records": 0,
+      "type_definitions": 3,
+      "alias_recommendations": 0,
+      "struct_declarations": 0,
+      "hash_shapes": 0,
+      "array_shapes": 0,
+      "collection_index_lookups": 0,
+      "hash_record_blockers": 0,
+      "tlet_sites": 0,
+      "dead_nil_checks": 0,
+      "deterministic_guards": 0,
+      "return_origins": 4,
+      "noreturn_methods": 0,
+      "rbi_field_types": 0,
+      "ivar_protocols": 0,
+      "ivar_param_origins": 0
+    },
+    "rescue_handlers": [
+
+    ],
+    "return_usage_sites": [
+      {
+        "code": "extend T::Sig",
+        "context": "statement",
+        "current_method": null,
+        "handler_line": null,
+        "line": 2,
+        "name": "extend",
+        "path": "/home/yahn/litedb/nil-kill-void-chain20260629-301490-zapd7p/void_chain_example.rb"
+      },
+      {
+        "code": "sig",
+        "context": "statement",
+        "current_method": null,
+        "handler_line": null,
+        "line": 4,
+        "name": "sig",
+        "path": "/home/yahn/litedb/nil-kill-void-chain20260629-301490-zapd7p/void_chain_example.rb"
+      },
+      {
+        "code": "returns(T.untyped)",
+        "context": "statement",
+        "current_method": null,
+        "handler_line": null,
+        "line": 4,
+        "name": "returns",
+        "path": "/home/yahn/litedb/nil-kill-void-chain20260629-301490-zapd7p/void_chain_example.rb"
+      },
+      {
+        "code": "T.untyped",
+        "context": "value",
+        "current_method": null,
+        "handler_line": null,
+        "line": 4,
+        "name": "untyped",
+        "path": "/home/yahn/litedb/nil-kill-void-chain20260629-301490-zapd7p/void_chain_example.rb"
+      },
+      {
+        "code": "sig",
+        "context": "statement",
+        "current_method": null,
+        "handler_line": null,
+        "line": 9,
+        "name": "sig",
+        "path": "/home/yahn/litedb/nil-kill-void-chain20260629-301490-zapd7p/void_chain_example.rb"
+      },
+      {
+        "code": "returns(T.untyped)",
+        "context": "statement",
+        "current_method": null,
+        "handler_line": null,
+        "line": 9,
+        "name": "returns",
+        "path": "/home/yahn/litedb/nil-kill-void-chain20260629-301490-zapd7p/void_chain_example.rb"
+      },
+      {
+        "code": "T.untyped",
+        "context": "value",
+        "current_method": null,
+        "handler_line": null,
+        "line": 9,
+        "name": "untyped",
+        "path": "/home/yahn/litedb/nil-kill-void-chain20260629-301490-zapd7p/void_chain_example.rb"
+      },
+      {
+        "code": "leaf_value",
+        "context": "return",
+        "current_method": "middle_value",
+        "handler_line": null,
+        "line": 11,
+        "name": "leaf_value",
+        "path": "/home/yahn/litedb/nil-kill-void-chain20260629-301490-zapd7p/void_chain_example.rb"
+      },
+      {
+        "code": "sig",
+        "context": "statement",
+        "current_method": null,
+        "handler_line": null,
+        "line": 14,
+        "name": "sig",
+        "path": "/home/yahn/litedb/nil-kill-void-chain20260629-301490-zapd7p/void_chain_example.rb"
+      },
+      {
+        "code": "returns(T.untyped)",
+        "context": "statement",
+        "current_method": null,
+        "handler_line": null,
+        "line": 14,
+        "name": "returns",
+        "path": "/home/yahn/litedb/nil-kill-void-chain20260629-301490-zapd7p/void_chain_example.rb"
+      },
+      {
+        "code": "T.untyped",
+        "context": "value",
+        "current_method": null,
+        "handler_line": null,
+        "line": 14,
+        "name": "untyped",
+        "path": "/home/yahn/litedb/nil-kill-void-chain20260629-301490-zapd7p/void_chain_example.rb"
+      },
+      {
+        "code": "middle_value",
+        "context": "return",
+        "current_method": "top_value",
+        "handler_line": null,
+        "line": 16,
+        "name": "middle_value",
+        "path": "/home/yahn/litedb/nil-kill-void-chain20260629-301490-zapd7p/void_chain_example.rb"
+      },
+      {
+        "code": "sig",
+        "context": "statement",
+        "current_method": null,
+        "handler_line": null,
+        "line": 19,
+        "name": "sig",
+        "path": "/home/yahn/litedb/nil-kill-void-chain20260629-301490-zapd7p/void_chain_example.rb"
+      },
+      {
+        "code": "void",
+        "context": "statement",
+        "current_method": null,
+        "handler_line": null,
+        "line": 19,
+        "name": "void",
+        "path": "/home/yahn/litedb/nil-kill-void-chain20260629-301490-zapd7p/void_chain_example.rb"
+      },
+      {
+        "code": "top_value",
+        "context": "return",
+        "current_method": "run",
+        "handler_line": null,
+        "line": 21,
+        "name": "top_value",
+        "path": "/home/yahn/litedb/nil-kill-void-chain20260629-301490-zapd7p/void_chain_example.rb"
+      }
+    ],
+    "return_direct_usage_sites": [
+      {
+        "code": "extend T::Sig",
+        "context": "statement",
+        "current_method": null,
+        "handler_line": null,
+        "line": 2,
+        "name": "extend",
+        "path": "/home/yahn/litedb/nil-kill-void-chain20260629-301490-zapd7p/void_chain_example.rb"
+      },
+      {
+        "code": "sig",
+        "context": "statement",
+        "current_method": null,
+        "handler_line": null,
+        "line": 4,
+        "name": "sig",
+        "path": "/home/yahn/litedb/nil-kill-void-chain20260629-301490-zapd7p/void_chain_example.rb"
+      },
+      {
+        "code": "returns(T.untyped)",
+        "context": "statement",
+        "current_method": null,
+        "handler_line": null,
+        "line": 4,
+        "name": "returns",
+        "path": "/home/yahn/litedb/nil-kill-void-chain20260629-301490-zapd7p/void_chain_example.rb"
+      },
+      {
+        "code": "T.untyped",
+        "context": "value",
+        "current_method": null,
+        "handler_line": null,
+        "line": 4,
+        "name": "untyped",
+        "path": "/home/yahn/litedb/nil-kill-void-chain20260629-301490-zapd7p/void_chain_example.rb"
+      },
+      {
+        "code": "sig",
+        "context": "statement",
+        "current_method": null,
+        "handler_line": null,
+        "line": 9,
+        "name": "sig",
+        "path": "/home/yahn/litedb/nil-kill-void-chain20260629-301490-zapd7p/void_chain_example.rb"
+      },
+      {
+        "code": "returns(T.untyped)",
+        "context": "statement",
+        "current_method": null,
+        "handler_line": null,
+        "line": 9,
+        "name": "returns",
+        "path": "/home/yahn/litedb/nil-kill-void-chain20260629-301490-zapd7p/void_chain_example.rb"
+      },
+      {
+        "code": "T.untyped",
+        "context": "value",
+        "current_method": null,
+        "handler_line": null,
+        "line": 9,
+        "name": "untyped",
+        "path": "/home/yahn/litedb/nil-kill-void-chain20260629-301490-zapd7p/void_chain_example.rb"
+      },
+      {
+        "code": "leaf_value",
+        "context": "return",
+        "current_method": "middle_value",
+        "handler_line": null,
+        "line": 11,
+        "name": "leaf_value",
+        "path": "/home/yahn/litedb/nil-kill-void-chain20260629-301490-zapd7p/void_chain_example.rb"
+      },
+      {
+        "code": "sig",
+        "context": "statement",
+        "current_method": null,
+        "handler_line": null,
+        "line": 14,
+        "name": "sig",
+        "path": "/home/yahn/litedb/nil-kill-void-chain20260629-301490-zapd7p/void_chain_example.rb"
+      },
+      {
+        "code": "returns(T.untyped)",
+        "context": "statement",
+        "current_method": null,
+        "handler_line": null,
+        "line": 14,
+        "name": "returns",
+        "path": "/home/yahn/litedb/nil-kill-void-chain20260629-301490-zapd7p/void_chain_example.rb"
+      },
+      {
+        "code": "T.untyped",
+        "context": "value",
+        "current_method": null,
+        "handler_line": null,
+        "line": 14,
+        "name": "untyped",
+        "path": "/home/yahn/litedb/nil-kill-void-chain20260629-301490-zapd7p/void_chain_example.rb"
+      },
+      {
+        "code": "middle_value",
+        "context": "return",
+        "current_method": "top_value",
+        "handler_line": null,
+        "line": 16,
+        "name": "middle_value",
+        "path": "/home/yahn/litedb/nil-kill-void-chain20260629-301490-zapd7p/void_chain_example.rb"
+      },
+      {
+        "code": "sig",
+        "context": "statement",
+        "current_method": null,
+        "handler_line": null,
+        "line": 19,
+        "name": "sig",
+        "path": "/home/yahn/litedb/nil-kill-void-chain20260629-301490-zapd7p/void_chain_example.rb"
+      },
+      {
+        "code": "void",
+        "context": "statement",
+        "current_method": null,
+        "handler_line": null,
+        "line": 19,
+        "name": "void",
+        "path": "/home/yahn/litedb/nil-kill-void-chain20260629-301490-zapd7p/void_chain_example.rb"
+      },
+      {
+        "code": "top_value",
+        "context": "return",
+        "current_method": "run",
+        "handler_line": null,
+        "line": 21,
+        "name": "top_value",
+        "path": "/home/yahn/litedb/nil-kill-void-chain20260629-301490-zapd7p/void_chain_example.rb"
+      }
+    ],
+    "hash_record_escape_sites": [
+
+    ],
+    "hidden_enum_observations": [
+
+    ],
+    "ivar_protocols": {
+    },
+    "ivar_param_origins": {
+    }
+  },
+  "unused_return_methods_by_location": {
+    "[\"/home/yahn/litedb/nil-kill-void-chain20260629-301490-zapd7p/void_chain_example.rb\",5,\"VoidChainExample\",\"leaf_value\",\"instance\"]": {
+      "path": "/home/yahn/litedb/nil-kill-void-chain20260629-301490-zapd7p/void_chain_example.rb",
+      "line": 5,
+      "end_line": 7,
+      "class": "VoidChainExample",
+      "method": "leaf_value",
+      "kind": "instance",
+      "language": "ruby",
+      "has_sig": true,
+      "sig": "sig { returns(T.untyped) }",
+      "params": [
+
+      ],
+      "scope": [
+        "VoidChainExample"
+      ],
+      "non_nil_params": [
+
+      ],
+      "uses_yield": false,
+      "untraceable_params": [
+
+      ],
+      "protocols": {
+      },
+      "noreturn_candidate": false
+    },
+    "[\"/home/yahn/litedb/nil-kill-void-chain20260629-301490-zapd7p/void_chain_example.rb\",10,\"VoidChainExample\",\"middle_value\",\"instance\"]": {
+      "path": "/home/yahn/litedb/nil-kill-void-chain20260629-301490-zapd7p/void_chain_example.rb",
+      "line": 10,
+      "end_line": 12,
+      "class": "VoidChainExample",
+      "method": "middle_value",
+      "kind": "instance",
+      "language": "ruby",
+      "has_sig": true,
+      "sig": "sig { returns(T.untyped) }",
+      "params": [
+
+      ],
+      "scope": [
+        "VoidChainExample"
+      ],
+      "non_nil_params": [
+
+      ],
+      "uses_yield": false,
+      "untraceable_params": [
+
+      ],
+      "protocols": {
+      },
+      "noreturn_candidate": false
+    },
+    "[\"/home/yahn/litedb/nil-kill-void-chain20260629-301490-zapd7p/void_chain_example.rb\",15,\"VoidChainExample\",\"top_value\",\"instance\"]": {
+      "path": "/home/yahn/litedb/nil-kill-void-chain20260629-301490-zapd7p/void_chain_example.rb",
+      "line": 15,
+      "end_line": 17,
+      "class": "VoidChainExample",
+      "method": "top_value",
+      "kind": "instance",
+      "language": "ruby",
+      "has_sig": true,
+      "sig": "sig { returns(T.untyped) }",
+      "params": [
+
+      ],
+      "scope": [
+        "VoidChainExample"
+      ],
+      "non_nil_params": [
+
+      ],
+      "uses_yield": false,
+      "untraceable_params": [
+
+      ],
+      "protocols": {
+      },
+      "noreturn_candidate": false
+    }
+  }
+}

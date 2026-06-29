@@ -1,0 +1,41 @@
+{
+  "actions": [
+    {
+      "kind": "fix_sig_return",
+      "confidence": "high",
+      "path": "/home/yahn/litedb/nil-kill-stdlib-return20260629-301490-5bkkgb/stdlib_return_example.rb",
+      "line": 5,
+      "message": "existing sig return is T.untyped; return value is never used, prefer .void",
+      "data": {
+        "type": "void",
+        "source": "unused_return"
+      }
+    },
+    {
+      "kind": "fix_sig_return",
+      "confidence": "high",
+      "path": "/home/yahn/litedb/nil-kill-stdlib-return20260629-301490-5bkkgb/stdlib_return_example.rb",
+      "line": 5,
+      "message": "existing sig return is T.untyped; static return origins suggest T.nilable(String)",
+      "data": {
+        "type": "T.nilable(String)",
+        "source": "static_return_origin",
+        "origin_confidence": "strong",
+        "blockers": [
+
+        ]
+      }
+    }
+  ],
+  "diagnostics": {
+    "sorbet_errors": [
+
+    ],
+    "nil_origins": [
+
+    ],
+    "sorbet_feedback": [
+
+    ]
+  }
+}

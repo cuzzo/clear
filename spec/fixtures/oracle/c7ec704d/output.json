@@ -1,0 +1,26 @@
+{
+  "actions": [
+    {
+      "kind": "fix_sig_return",
+      "confidence": "high",
+      "path": "/home/yahn/litedb/nil-kill-global-recv20260629-301490-7rslh0/global_recv.rb",
+      "line": 5,
+      "message": "existing sig return is T.untyped; return value is never used, prefer .void",
+      "data": {
+        "type": "void",
+        "source": "unused_return"
+      }
+    }
+  ],
+  "diagnostics": {
+    "sorbet_errors": [
+
+    ],
+    "nil_origins": [
+
+    ],
+    "sorbet_feedback": [
+
+    ]
+  }
+}

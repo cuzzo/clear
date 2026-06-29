@@ -1,0 +1,843 @@
+{
+  "methods": [
+    {
+      "key": [
+        "PipelineExample",
+        "call",
+        "instance",
+        "/home/yahn/litedb/nil-kill-pipeline20260629-301490-z10d8r/sample.rb",
+        5
+      ],
+      "calls": 25,
+      "ok_calls": 25,
+      "raised_calls": 0,
+      "params_by_name": {
+        "items": [
+          "Array"
+        ],
+        "reason": [
+          "String"
+        ]
+      },
+      "params_ok": {
+        "items": [
+          "Array"
+        ],
+        "reason": [
+          "String"
+        ]
+      },
+      "params_raised": {
+      },
+      "param_elem": {
+        "items": [
+          "String"
+        ]
+      },
+      "param_kv": {
+      },
+      "param_elem_shapes": {
+      },
+      "param_kv_shapes": {
+      },
+      "param_sites": {
+      },
+      "param_sites_ok": {
+      },
+      "param_sites_raised": {
+      },
+      "param_traces": {
+      },
+      "param_traces_ok": {
+      },
+      "param_traces_raised": {
+      },
+      "returns": [
+        "Array"
+      ],
+      "return_elem": [
+        "String"
+      ],
+      "return_kv": [
+        [
+
+        ],
+        [
+
+        ]
+      ],
+      "return_elem_shapes": [
+
+      ],
+      "return_kv_shapes": [
+        [
+
+        ],
+        [
+
+        ]
+      ],
+      "raised": [
+
+      ],
+      "source": {
+        "path": "/home/yahn/litedb/nil-kill-pipeline20260629-301490-z10d8r/sample.rb",
+        "line": 5,
+        "end_line": 8,
+        "class": "PipelineExample",
+        "method": "call",
+        "kind": "instance",
+        "language": "ruby",
+        "has_sig": true,
+        "sig": "sig { params(items: T::Array[T.untyped], reason: String).returns(T.untyped) }",
+        "params": [
+          {
+            "name": "items",
+            "nil_default": false,
+            "type": "T::Array[T.untyped]"
+          },
+          {
+            "name": "reason",
+            "nil_default": false,
+            "type": "String"
+          }
+        ],
+        "scope": [
+          "PipelineExample"
+        ],
+        "non_nil_params": [
+          "items",
+          "reason"
+        ],
+        "uses_yield": false,
+        "untraceable_params": [
+
+        ],
+        "protocols": {
+        },
+        "noreturn_candidate": false
+      },
+      "has_sig": true
+    },
+    {
+      "key": [
+        "PipelineExample",
+        "unsigned",
+        "instance",
+        "/home/yahn/litedb/nil-kill-pipeline20260629-301490-z10d8r/sample.rb",
+        10
+      ],
+      "calls": 0,
+      "ok_calls": 0,
+      "raised_calls": 0,
+      "params_by_name": {
+      },
+      "params_ok": {
+      },
+      "params_raised": {
+      },
+      "param_elem": {
+      },
+      "param_kv": {
+      },
+      "param_elem_shapes": {
+      },
+      "param_kv_shapes": {
+      },
+      "param_sites": {
+      },
+      "param_sites_ok": {
+      },
+      "param_sites_raised": {
+      },
+      "param_traces": {
+      },
+      "param_traces_ok": {
+      },
+      "param_traces_raised": {
+      },
+      "returns": [
+
+      ],
+      "return_elem": [
+
+      ],
+      "return_kv": [
+        [
+
+        ],
+        [
+
+        ]
+      ],
+      "return_elem_shapes": [
+
+      ],
+      "return_kv_shapes": [
+        [
+
+        ],
+        [
+
+        ]
+      ],
+      "raised": [
+
+      ],
+      "source": {
+        "path": "/home/yahn/litedb/nil-kill-pipeline20260629-301490-z10d8r/sample.rb",
+        "line": 10,
+        "end_line": 12,
+        "class": "PipelineExample",
+        "method": "unsigned",
+        "kind": "instance",
+        "language": "ruby",
+        "has_sig": false,
+        "sig": "",
+        "params": [
+          {
+            "name": "value",
+            "nil_default": false,
+            "type": null
+          }
+        ],
+        "scope": [
+          "PipelineExample"
+        ],
+        "non_nil_params": [
+
+        ],
+        "uses_yield": false,
+        "untraceable_params": [
+
+        ],
+        "protocols": {
+        },
+        "noreturn_candidate": false
+      },
+      "has_sig": false
+    }
+  ],
+  "tlets": [
+
+  ],
+  "facts": {
+    "files": {
+      "nil-kill-pipeline20260629-301490-z10d8r/sample.rb": {
+        "language": "ruby",
+        "methods": 0,
+        "fields": 0,
+        "digest": "sha256:b325df63722516433001b3e637564cecccf2be75e7e03e3cfb3ac2d0f67c0075",
+        "parser": "tree_sitter"
+      }
+    },
+    "unsigned_methods": [
+      {
+        "path": "/home/yahn/litedb/nil-kill-pipeline20260629-301490-z10d8r/sample.rb",
+        "line": 10,
+        "end_line": 12,
+        "class": "PipelineExample",
+        "method": "unsigned",
+        "kind": "instance",
+        "language": "ruby",
+        "has_sig": false,
+        "sig": "",
+        "params": [
+          {
+            "name": "value",
+            "nil_default": false,
+            "type": null
+          }
+        ],
+        "scope": [
+          "PipelineExample"
+        ],
+        "non_nil_params": [
+
+        ],
+        "uses_yield": false,
+        "untraceable_params": [
+
+        ],
+        "protocols": {
+        },
+        "noreturn_candidate": false
+      }
+    ],
+    "existing_sigs": [
+      {
+        "path": "/home/yahn/litedb/nil-kill-pipeline20260629-301490-z10d8r/sample.rb",
+        "line": 5,
+        "end_line": 8,
+        "class": "PipelineExample",
+        "method": "call",
+        "kind": "instance",
+        "language": "ruby",
+        "has_sig": true,
+        "sig": "sig { params(items: T::Array[T.untyped], reason: String).returns(T.untyped) }",
+        "params": [
+          {
+            "name": "items",
+            "nil_default": false,
+            "type": "T::Array[T.untyped]"
+          },
+          {
+            "name": "reason",
+            "nil_default": false,
+            "type": "String"
+          }
+        ],
+        "scope": [
+          "PipelineExample"
+        ],
+        "non_nil_params": [
+          "items",
+          "reason"
+        ],
+        "uses_yield": false,
+        "untraceable_params": [
+
+        ],
+        "protocols": {
+        },
+        "noreturn_candidate": false
+      }
+    ],
+    "tlet_sites": [
+
+    ],
+    "dead_nil_checks": [
+      {
+        "code": "reason.nil?",
+        "kind": "nil_check",
+        "line": 6,
+        "path": "/home/yahn/litedb/nil-kill-pipeline20260629-301490-z10d8r/sample.rb",
+        "reason": "reason is provably non-nil; .nil? is always false"
+      }
+    ],
+    "deterministic_guards": [
+
+    ],
+    "struct_declarations": [
+
+    ],
+    "struct_field_static": [
+
+    ],
+    "tuple_arrays": [
+      {
+        "path": "/home/yahn/litedb/nil-kill-pipeline20260629-301490-z10d8r/sample.rb",
+        "line": 4,
+        "types": [
+          "T.untyped",
+          "T.untyped"
+        ],
+        "size": 0,
+        "code": "params(items: T::Array[T.untyped], reason: String)",
+        "source": "static_evidence"
+      }
+    ],
+    "hash_shapes": [
+
+    ],
+    "collection_index_lookups": [
+
+    ],
+    "hash_record_blockers": [
+
+    ],
+    "hash_record_member_calls": [
+
+    ],
+    "collection_runtime": [
+
+    ],
+    "ivar_runtime": [
+
+    ],
+    "collect_coverage": {
+    },
+    "type_normalizers": [
+
+    ],
+    "dispatcher_inferences": [
+
+    ],
+    "return_origins": [
+      {
+        "array_element_shape": null,
+        "blockers": [
+
+        ],
+        "candidate_type": "T::Array[T.untyped]",
+        "class": "PipelineExample",
+        "confidence": "weak",
+        "control_shape": "branchless",
+        "end_line": 8,
+        "hash_shape": null,
+        "implicit": true,
+        "kind": "instance",
+        "line": 5,
+        "method": "call",
+        "path": "/home/yahn/litedb/nil-kill-pipeline20260629-301490-z10d8r/sample.rb",
+        "return_syntax": "implicit",
+        "sources": [
+          {
+            "code": "items",
+            "kind": "static",
+            "line": 7,
+            "type": "T::Array[T.untyped]"
+          }
+        ]
+      },
+      {
+        "array_element_shape": null,
+        "blockers": [
+          "untyped local variable value (LocalVariableReadNode) at /home/yahn/litedb/nil-kill-pipeline20260629-301490-z10d8r/sample.rb:11"
+        ],
+        "candidate_type": "T.untyped",
+        "class": "PipelineExample",
+        "confidence": "blocked",
+        "control_shape": "branchless",
+        "end_line": 12,
+        "hash_shape": null,
+        "implicit": true,
+        "kind": "instance",
+        "line": 10,
+        "method": "unsigned",
+        "path": "/home/yahn/litedb/nil-kill-pipeline20260629-301490-z10d8r/sample.rb",
+        "return_syntax": "implicit",
+        "sources": [
+          {
+            "code": "value",
+            "kind": "unknown",
+            "line": 11,
+            "unknown_reasons": [
+
+            ]
+          }
+        ]
+      }
+    ],
+    "param_origins": [
+      {
+        "arg_kind": "positional",
+        "array_element_shape": null,
+        "callee": "extend",
+        "code": "T::Sig",
+        "enclosing_scope": "PipelineExample",
+        "hash_shape": null,
+        "line": 2,
+        "origin_kind": "unknown",
+        "path": "/home/yahn/litedb/nil-kill-pipeline20260629-301490-z10d8r/sample.rb",
+        "receiver": null,
+        "slot": "0",
+        "source_method": null,
+        "type": null,
+        "unknown_reasons": [
+          "operation unresolved constant T::Sig"
+        ]
+      },
+      {
+        "arg_kind": "positional",
+        "array_element_shape": null,
+        "callee": "[]",
+        "code": "T.untyped",
+        "enclosing_scope": "PipelineExample",
+        "hash_shape": null,
+        "line": 4,
+        "origin_kind": "untyped_return",
+        "path": "/home/yahn/litedb/nil-kill-pipeline20260629-301490-z10d8r/sample.rb",
+        "receiver": "T::Array",
+        "slot": "0",
+        "source_method": "untyped",
+        "type": null,
+        "unknown_reasons": [
+
+        ]
+      },
+      {
+        "arg_kind": "keyword",
+        "array_element_shape": null,
+        "callee": "params",
+        "code": "T::Array[T.untyped]",
+        "enclosing_scope": "PipelineExample",
+        "hash_shape": null,
+        "line": 4,
+        "origin_kind": "untyped_return",
+        "path": "/home/yahn/litedb/nil-kill-pipeline20260629-301490-z10d8r/sample.rb",
+        "receiver": null,
+        "slot": "items",
+        "source_method": "[]",
+        "type": null,
+        "unknown_reasons": [
+
+        ]
+      },
+      {
+        "arg_kind": "keyword",
+        "array_element_shape": null,
+        "callee": "params",
+        "code": "String",
+        "enclosing_scope": "PipelineExample",
+        "hash_shape": null,
+        "line": 4,
+        "origin_kind": "static",
+        "path": "/home/yahn/litedb/nil-kill-pipeline20260629-301490-z10d8r/sample.rb",
+        "receiver": null,
+        "slot": "reason",
+        "source_method": null,
+        "type": "T.class_of(String)",
+        "unknown_reasons": [
+
+        ]
+      },
+      {
+        "arg_kind": "positional",
+        "array_element_shape": null,
+        "callee": "returns",
+        "code": "T.untyped",
+        "enclosing_scope": "PipelineExample",
+        "hash_shape": null,
+        "line": 4,
+        "origin_kind": "untyped_return",
+        "path": "/home/yahn/litedb/nil-kill-pipeline20260629-301490-z10d8r/sample.rb",
+        "receiver": "params(items: T::Array[T.untyped], reason: String)",
+        "slot": "0",
+        "source_method": "untyped",
+        "type": null,
+        "unknown_reasons": [
+
+        ]
+      },
+      {
+        "arg_kind": "positional",
+        "array_element_shape": null,
+        "callee": "sig",
+        "code": "sig",
+        "enclosing_scope": "PipelineExample",
+        "hash_shape": null,
+        "line": 4,
+        "origin_kind": "untyped_return",
+        "path": "/home/yahn/litedb/nil-kill-pipeline20260629-301490-z10d8r/sample.rb",
+        "receiver": null,
+        "slot": "0",
+        "source_method": "sig",
+        "type": null,
+        "unknown_reasons": [
+
+        ]
+      },
+      {
+        "arg_kind": "positional",
+        "array_element_shape": null,
+        "callee": "untyped",
+        "code": "",
+        "enclosing_scope": "PipelineExample",
+        "hash_shape": null,
+        "line": 4,
+        "origin_kind": "static",
+        "path": "/home/yahn/litedb/nil-kill-pipeline20260629-301490-z10d8r/sample.rb",
+        "receiver": "T",
+        "slot": "0",
+        "source_method": null,
+        "type": "T::Array[T.untyped]",
+        "unknown_reasons": [
+
+        ]
+      },
+      {
+        "arg_kind": "positional",
+        "array_element_shape": null,
+        "callee": "untyped",
+        "code": "",
+        "enclosing_scope": "PipelineExample",
+        "hash_shape": null,
+        "line": 4,
+        "origin_kind": "static",
+        "path": "/home/yahn/litedb/nil-kill-pipeline20260629-301490-z10d8r/sample.rb",
+        "receiver": "T",
+        "slot": "0",
+        "source_method": null,
+        "type": "T::Array[T.untyped]",
+        "unknown_reasons": [
+
+        ]
+      },
+      {
+        "arg_kind": "positional",
+        "array_element_shape": null,
+        "callee": "nil?",
+        "code": "",
+        "enclosing_scope": "PipelineExample",
+        "hash_shape": null,
+        "line": 6,
+        "origin_kind": "static",
+        "path": "/home/yahn/litedb/nil-kill-pipeline20260629-301490-z10d8r/sample.rb",
+        "receiver": "reason",
+        "slot": "0",
+        "source_method": null,
+        "type": "T::Array[T.untyped]",
+        "unknown_reasons": [
+
+        ]
+      }
+    ],
+    "rbi_field_types": [
+
+    ],
+    "noreturn_methods": [
+
+    ],
+    "runtime_call_edges": [
+
+    ],
+    "fallibility_pressure": [
+
+    ],
+    "hidden_enum_pressure": [
+
+    ],
+    "flow_graph": null,
+    "static_evidence_summary": {
+      "files": 1,
+      "methods": 2,
+      "fields": 0,
+      "signatures": 1,
+      "state_types": 0,
+      "state_type_records": 0,
+      "state_protocols": 0,
+      "state_param_origins": 0,
+      "state_protocol_records": 0,
+      "state_param_origin_records": 0,
+      "type_definitions": 1,
+      "alias_recommendations": 0,
+      "struct_declarations": 0,
+      "hash_shapes": 0,
+      "array_shapes": 1,
+      "collection_index_lookups": 0,
+      "hash_record_blockers": 0,
+      "tlet_sites": 0,
+      "dead_nil_checks": 1,
+      "deterministic_guards": 0,
+      "return_origins": 2,
+      "noreturn_methods": 0,
+      "rbi_field_types": 0,
+      "ivar_protocols": 0,
+      "ivar_param_origins": 0
+    },
+    "rescue_handlers": [
+
+    ],
+    "return_usage_sites": [
+      {
+        "code": "extend T::Sig",
+        "context": "statement",
+        "current_method": null,
+        "handler_line": null,
+        "line": 2,
+        "name": "extend",
+        "path": "/home/yahn/litedb/nil-kill-pipeline20260629-301490-z10d8r/sample.rb"
+      },
+      {
+        "code": "sig",
+        "context": "statement",
+        "current_method": null,
+        "handler_line": null,
+        "line": 4,
+        "name": "sig",
+        "path": "/home/yahn/litedb/nil-kill-pipeline20260629-301490-z10d8r/sample.rb"
+      },
+      {
+        "code": "params(items: T::Array[T.untyped], reason: String).returns(T.untyped)",
+        "context": "statement",
+        "current_method": null,
+        "handler_line": null,
+        "line": 4,
+        "name": "returns",
+        "path": "/home/yahn/litedb/nil-kill-pipeline20260629-301490-z10d8r/sample.rb"
+      },
+      {
+        "code": "params(items: T::Array[T.untyped], reason: String)",
+        "context": "value",
+        "current_method": null,
+        "handler_line": null,
+        "line": 4,
+        "name": "params",
+        "path": "/home/yahn/litedb/nil-kill-pipeline20260629-301490-z10d8r/sample.rb"
+      },
+      {
+        "code": "T::Array[T.untyped]",
+        "context": "value",
+        "current_method": null,
+        "handler_line": null,
+        "line": 4,
+        "name": "[]",
+        "path": "/home/yahn/litedb/nil-kill-pipeline20260629-301490-z10d8r/sample.rb"
+      },
+      {
+        "code": "T.untyped",
+        "context": "value",
+        "current_method": null,
+        "handler_line": null,
+        "line": 4,
+        "name": "untyped",
+        "path": "/home/yahn/litedb/nil-kill-pipeline20260629-301490-z10d8r/sample.rb"
+      },
+      {
+        "code": "(T.untyped)",
+        "context": "value",
+        "current_method": null,
+        "handler_line": null,
+        "line": 4,
+        "name": "untyped",
+        "path": "/home/yahn/litedb/nil-kill-pipeline20260629-301490-z10d8r/sample.rb"
+      },
+      {
+        "code": "reason.nil?",
+        "context": "statement",
+        "current_method": "call",
+        "handler_line": null,
+        "line": 6,
+        "name": "nil?",
+        "path": "/home/yahn/litedb/nil-kill-pipeline20260629-301490-z10d8r/sample.rb"
+      }
+    ],
+    "return_direct_usage_sites": [
+      {
+        "code": "extend T::Sig",
+        "context": "statement",
+        "current_method": null,
+        "handler_line": null,
+        "line": 2,
+        "name": "extend",
+        "path": "/home/yahn/litedb/nil-kill-pipeline20260629-301490-z10d8r/sample.rb"
+      },
+      {
+        "code": "sig",
+        "context": "statement",
+        "current_method": null,
+        "handler_line": null,
+        "line": 4,
+        "name": "sig",
+        "path": "/home/yahn/litedb/nil-kill-pipeline20260629-301490-z10d8r/sample.rb"
+      },
+      {
+        "code": "params(items: T::Array[T.untyped], reason: String).returns(T.untyped)",
+        "context": "statement",
+        "current_method": null,
+        "handler_line": null,
+        "line": 4,
+        "name": "returns",
+        "path": "/home/yahn/litedb/nil-kill-pipeline20260629-301490-z10d8r/sample.rb"
+      },
+      {
+        "code": "params(items: T::Array[T.untyped], reason: String)",
+        "context": "value",
+        "current_method": null,
+        "handler_line": null,
+        "line": 4,
+        "name": "params",
+        "path": "/home/yahn/litedb/nil-kill-pipeline20260629-301490-z10d8r/sample.rb"
+      },
+      {
+        "code": "T::Array[T.untyped]",
+        "context": "value",
+        "current_method": null,
+        "handler_line": null,
+        "line": 4,
+        "name": "[]",
+        "path": "/home/yahn/litedb/nil-kill-pipeline20260629-301490-z10d8r/sample.rb"
+      },
+      {
+        "code": "T.untyped",
+        "context": "return",
+        "current_method": null,
+        "handler_line": null,
+        "line": 4,
+        "name": "untyped",
+        "path": "/home/yahn/litedb/nil-kill-pipeline20260629-301490-z10d8r/sample.rb"
+      },
+      {
+        "code": "(T.untyped)",
+        "context": "return",
+        "current_method": null,
+        "handler_line": null,
+        "line": 4,
+        "name": "untyped",
+        "path": "/home/yahn/litedb/nil-kill-pipeline20260629-301490-z10d8r/sample.rb"
+      },
+      {
+        "code": "reason.nil?",
+        "context": "statement",
+        "current_method": "call",
+        "handler_line": null,
+        "line": 6,
+        "name": "nil?",
+        "path": "/home/yahn/litedb/nil-kill-pipeline20260629-301490-z10d8r/sample.rb"
+      }
+    ],
+    "hash_record_escape_sites": [
+      {
+        "code": "items: T::Array[T.untyped]",
+        "escapes_collection": true,
+        "line": 4,
+        "path": "/home/yahn/litedb/nil-kill-pipeline20260629-301490-z10d8r/sample.rb",
+        "reason": "array_literal"
+      },
+      {
+        "code": "reason: String",
+        "escapes_collection": true,
+        "line": 4,
+        "path": "/home/yahn/litedb/nil-kill-pipeline20260629-301490-z10d8r/sample.rb",
+        "reason": "array_literal"
+      }
+    ],
+    "hidden_enum_observations": [
+
+    ],
+    "ivar_protocols": {
+    },
+    "ivar_param_origins": {
+    }
+  },
+  "unused_return_methods_by_location": {
+    "[\"/home/yahn/litedb/nil-kill-pipeline20260629-301490-z10d8r/sample.rb\",5,\"PipelineExample\",\"call\",\"instance\"]": {
+      "path": "/home/yahn/litedb/nil-kill-pipeline20260629-301490-z10d8r/sample.rb",
+      "line": 5,
+      "end_line": 8,
+      "class": "PipelineExample",
+      "method": "call",
+      "kind": "instance",
+      "language": "ruby",
+      "has_sig": true,
+      "sig": "sig { params(items: T::Array[T.untyped], reason: String).returns(T.untyped) }",
+      "params": [
+        {
+          "name": "items",
+          "nil_default": false,
+          "type": "T::Array[T.untyped]"
+        },
+        {
+          "name": "reason",
+          "nil_default": false,
+          "type": "String"
+        }
+      ],
+      "scope": [
+        "PipelineExample"
+      ],
+      "non_nil_params": [
+        "items",
+        "reason"
+      ],
+      "uses_yield": false,
+      "untraceable_params": [
+
+      ],
+      "protocols": {
+      },
+      "noreturn_candidate": false
+    }
+  }
+}

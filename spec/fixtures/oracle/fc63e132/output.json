@@ -1,0 +1,43 @@
+{
+  "actions": [
+    {
+      "kind": "add_sig",
+      "confidence": "review",
+      "path": "/home/yahn/litedb/nil-kill-pipeline-edges20260629-301490-e2zmmb/edges.rb",
+      "line": 2,
+      "message": "add missing sig",
+      "data": {
+        "sig": "sig { returns(T.untyped) }",
+        "scope": [
+          "RuntimeEdgePipeline"
+        ],
+        "method": "caller"
+      }
+    },
+    {
+      "kind": "add_sig",
+      "confidence": "review",
+      "path": "/home/yahn/litedb/nil-kill-pipeline-edges20260629-301490-e2zmmb/edges.rb",
+      "line": 6,
+      "message": "add missing sig",
+      "data": {
+        "sig": "sig { returns(T.untyped) }",
+        "scope": [
+          "RuntimeEdgePipeline"
+        ],
+        "method": "callee"
+      }
+    }
+  ],
+  "diagnostics": {
+    "sorbet_errors": [
+
+    ],
+    "nil_origins": [
+
+    ],
+    "sorbet_feedback": [
+
+    ]
+  }
+}

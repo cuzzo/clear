@@ -1,0 +1,56 @@
+{
+  "actions": [
+    {
+      "kind": "fix_sig_return",
+      "confidence": "high",
+      "path": "/home/yahn/litedb/nil-kill-void20260629-301490-tmugxh/void_example.rb",
+      "line": 5,
+      "message": "existing sig return is T.untyped; return value is never used, prefer .void",
+      "data": {
+        "type": "void",
+        "source": "unused_return"
+      }
+    },
+    {
+      "kind": "fix_sig_return",
+      "confidence": "review",
+      "path": "/home/yahn/litedb/nil-kill-void20260629-301490-tmugxh/void_example.rb",
+      "line": 5,
+      "message": "existing sig return is T.untyped; static return origins suggest NilClass",
+      "data": {
+        "type": "NilClass",
+        "source": "static_return_origin",
+        "origin_confidence": "strong",
+        "blockers": [
+
+        ]
+      }
+    },
+    {
+      "kind": "fix_sig_return",
+      "confidence": "review",
+      "path": "/home/yahn/litedb/nil-kill-void20260629-301490-tmugxh/void_example.rb",
+      "line": 5,
+      "message": "existing sig return is T.untyped; forwarded-return chain resolves to NilClass",
+      "data": {
+        "type": "NilClass",
+        "source": "forwarded_return_chain",
+        "chain": [
+          "/home/yahn/litedb/nil-kill-void20260629-301490-tmugxh/void_example.rb:5 VoidExample#emit",
+          "typed_call puts at line 6"
+        ]
+      }
+    }
+  ],
+  "diagnostics": {
+    "sorbet_errors": [
+
+    ],
+    "nil_origins": [
+
+    ],
+    "sorbet_feedback": [
+
+    ]
+  }
+}

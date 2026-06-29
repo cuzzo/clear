@@ -1,0 +1,45 @@
+{
+  "actions": [
+    {
+      "kind": "fix_sig_return",
+      "confidence": "high",
+      "path": "/home/yahn/litedb/nil-kill-void-used-chain20260629-301490-48liga/used_chain_example.rb",
+      "line": 5,
+      "message": "existing sig return is T.untyped; static return origins suggest String",
+      "data": {
+        "type": "String",
+        "source": "static_return_origin",
+        "origin_confidence": "strong",
+        "blockers": [
+
+        ]
+      }
+    },
+    {
+      "kind": "fix_sig_return",
+      "confidence": "high",
+      "path": "/home/yahn/litedb/nil-kill-void-used-chain20260629-301490-48liga/used_chain_example.rb",
+      "line": 10,
+      "message": "existing sig return is T.untyped; static return origins suggest String",
+      "data": {
+        "type": "String",
+        "source": "static_return_origin",
+        "origin_confidence": "strong",
+        "blockers": [
+
+        ]
+      }
+    }
+  ],
+  "diagnostics": {
+    "sorbet_errors": [
+
+    ],
+    "nil_origins": [
+
+    ],
+    "sorbet_feedback": [
+
+    ]
+  }
+}

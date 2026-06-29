@@ -1,0 +1,1574 @@
+{
+  "methods": [
+    {
+      "key": [
+        "HygieneReport",
+        "unused_leaf",
+        "instance",
+        "/home/yahn/litedb/nil-kill-return-hygiene-report20260629-301490-mxc1wt/hygiene_report.rb",
+        5
+      ],
+      "calls": 0,
+      "ok_calls": 0,
+      "raised_calls": 0,
+      "params_by_name": {
+      },
+      "params_ok": {
+      },
+      "params_raised": {
+      },
+      "param_elem": {
+      },
+      "param_kv": {
+      },
+      "param_elem_shapes": {
+      },
+      "param_kv_shapes": {
+      },
+      "param_sites": {
+      },
+      "param_sites_ok": {
+      },
+      "param_sites_raised": {
+      },
+      "param_traces": {
+      },
+      "param_traces_ok": {
+      },
+      "param_traces_raised": {
+      },
+      "returns": [
+
+      ],
+      "return_elem": [
+
+      ],
+      "return_kv": [
+        [
+
+        ],
+        [
+
+        ]
+      ],
+      "return_elem_shapes": [
+
+      ],
+      "return_kv_shapes": [
+        [
+
+        ],
+        [
+
+        ]
+      ],
+      "raised": [
+
+      ],
+      "source": {
+        "path": "/home/yahn/litedb/nil-kill-return-hygiene-report20260629-301490-mxc1wt/hygiene_report.rb",
+        "line": 5,
+        "end_line": 7,
+        "class": "HygieneReport",
+        "method": "unused_leaf",
+        "kind": "instance",
+        "language": "ruby",
+        "has_sig": true,
+        "sig": "sig { returns(T.untyped) }",
+        "params": [
+
+        ],
+        "scope": [
+          "HygieneReport"
+        ],
+        "non_nil_params": [
+
+        ],
+        "uses_yield": false,
+        "untraceable_params": [
+
+        ],
+        "protocols": {
+        },
+        "noreturn_candidate": false
+      },
+      "has_sig": true
+    },
+    {
+      "key": [
+        "HygieneReport",
+        "unused_wrapper",
+        "instance",
+        "/home/yahn/litedb/nil-kill-return-hygiene-report20260629-301490-mxc1wt/hygiene_report.rb",
+        10
+      ],
+      "calls": 0,
+      "ok_calls": 0,
+      "raised_calls": 0,
+      "params_by_name": {
+      },
+      "params_ok": {
+      },
+      "params_raised": {
+      },
+      "param_elem": {
+      },
+      "param_kv": {
+      },
+      "param_elem_shapes": {
+      },
+      "param_kv_shapes": {
+      },
+      "param_sites": {
+      },
+      "param_sites_ok": {
+      },
+      "param_sites_raised": {
+      },
+      "param_traces": {
+      },
+      "param_traces_ok": {
+      },
+      "param_traces_raised": {
+      },
+      "returns": [
+
+      ],
+      "return_elem": [
+
+      ],
+      "return_kv": [
+        [
+
+        ],
+        [
+
+        ]
+      ],
+      "return_elem_shapes": [
+
+      ],
+      "return_kv_shapes": [
+        [
+
+        ],
+        [
+
+        ]
+      ],
+      "raised": [
+
+      ],
+      "source": {
+        "path": "/home/yahn/litedb/nil-kill-return-hygiene-report20260629-301490-mxc1wt/hygiene_report.rb",
+        "line": 10,
+        "end_line": 12,
+        "class": "HygieneReport",
+        "method": "unused_wrapper",
+        "kind": "instance",
+        "language": "ruby",
+        "has_sig": true,
+        "sig": "sig { returns(T.untyped) }",
+        "params": [
+
+        ],
+        "scope": [
+          "HygieneReport"
+        ],
+        "non_nil_params": [
+
+        ],
+        "uses_yield": false,
+        "untraceable_params": [
+
+        ],
+        "protocols": {
+        },
+        "noreturn_candidate": false
+      },
+      "has_sig": true
+    },
+    {
+      "key": [
+        "HygieneReport",
+        "used_leaf",
+        "instance",
+        "/home/yahn/litedb/nil-kill-return-hygiene-report20260629-301490-mxc1wt/hygiene_report.rb",
+        15
+      ],
+      "calls": 0,
+      "ok_calls": 0,
+      "raised_calls": 0,
+      "params_by_name": {
+      },
+      "params_ok": {
+      },
+      "params_raised": {
+      },
+      "param_elem": {
+      },
+      "param_kv": {
+      },
+      "param_elem_shapes": {
+      },
+      "param_kv_shapes": {
+      },
+      "param_sites": {
+      },
+      "param_sites_ok": {
+      },
+      "param_sites_raised": {
+      },
+      "param_traces": {
+      },
+      "param_traces_ok": {
+      },
+      "param_traces_raised": {
+      },
+      "returns": [
+
+      ],
+      "return_elem": [
+
+      ],
+      "return_kv": [
+        [
+
+        ],
+        [
+
+        ]
+      ],
+      "return_elem_shapes": [
+
+      ],
+      "return_kv_shapes": [
+        [
+
+        ],
+        [
+
+        ]
+      ],
+      "raised": [
+
+      ],
+      "source": {
+        "path": "/home/yahn/litedb/nil-kill-return-hygiene-report20260629-301490-mxc1wt/hygiene_report.rb",
+        "line": 15,
+        "end_line": 17,
+        "class": "HygieneReport",
+        "method": "used_leaf",
+        "kind": "instance",
+        "language": "ruby",
+        "has_sig": true,
+        "sig": "sig { returns(T.untyped) }",
+        "params": [
+
+        ],
+        "scope": [
+          "HygieneReport"
+        ],
+        "non_nil_params": [
+
+        ],
+        "uses_yield": false,
+        "untraceable_params": [
+
+        ],
+        "protocols": {
+        },
+        "noreturn_candidate": false
+      },
+      "has_sig": true
+    },
+    {
+      "key": [
+        "HygieneReport",
+        "used_caller",
+        "instance",
+        "/home/yahn/litedb/nil-kill-return-hygiene-report20260629-301490-mxc1wt/hygiene_report.rb",
+        20
+      ],
+      "calls": 0,
+      "ok_calls": 0,
+      "raised_calls": 0,
+      "params_by_name": {
+      },
+      "params_ok": {
+      },
+      "params_raised": {
+      },
+      "param_elem": {
+      },
+      "param_kv": {
+      },
+      "param_elem_shapes": {
+      },
+      "param_kv_shapes": {
+      },
+      "param_sites": {
+      },
+      "param_sites_ok": {
+      },
+      "param_sites_raised": {
+      },
+      "param_traces": {
+      },
+      "param_traces_ok": {
+      },
+      "param_traces_raised": {
+      },
+      "returns": [
+
+      ],
+      "return_elem": [
+
+      ],
+      "return_kv": [
+        [
+
+        ],
+        [
+
+        ]
+      ],
+      "return_elem_shapes": [
+
+      ],
+      "return_kv_shapes": [
+        [
+
+        ],
+        [
+
+        ]
+      ],
+      "raised": [
+
+      ],
+      "source": {
+        "path": "/home/yahn/litedb/nil-kill-return-hygiene-report20260629-301490-mxc1wt/hygiene_report.rb",
+        "line": 20,
+        "end_line": 23,
+        "class": "HygieneReport",
+        "method": "used_caller",
+        "kind": "instance",
+        "language": "ruby",
+        "has_sig": true,
+        "sig": "sig { returns(String) }",
+        "params": [
+
+        ],
+        "scope": [
+          "HygieneReport"
+        ],
+        "non_nil_params": [
+
+        ],
+        "uses_yield": false,
+        "untraceable_params": [
+
+        ],
+        "protocols": {
+        },
+        "noreturn_candidate": false
+      },
+      "has_sig": true
+    },
+    {
+      "key": [
+        "HygieneReport",
+        "run",
+        "instance",
+        "/home/yahn/litedb/nil-kill-return-hygiene-report20260629-301490-mxc1wt/hygiene_report.rb",
+        26
+      ],
+      "calls": 0,
+      "ok_calls": 0,
+      "raised_calls": 0,
+      "params_by_name": {
+      },
+      "params_ok": {
+      },
+      "params_raised": {
+      },
+      "param_elem": {
+      },
+      "param_kv": {
+      },
+      "param_elem_shapes": {
+      },
+      "param_kv_shapes": {
+      },
+      "param_sites": {
+      },
+      "param_sites_ok": {
+      },
+      "param_sites_raised": {
+      },
+      "param_traces": {
+      },
+      "param_traces_ok": {
+      },
+      "param_traces_raised": {
+      },
+      "returns": [
+
+      ],
+      "return_elem": [
+
+      ],
+      "return_kv": [
+        [
+
+        ],
+        [
+
+        ]
+      ],
+      "return_elem_shapes": [
+
+      ],
+      "return_kv_shapes": [
+        [
+
+        ],
+        [
+
+        ]
+      ],
+      "raised": [
+
+      ],
+      "source": {
+        "path": "/home/yahn/litedb/nil-kill-return-hygiene-report20260629-301490-mxc1wt/hygiene_report.rb",
+        "line": 26,
+        "end_line": 28,
+        "class": "HygieneReport",
+        "method": "run",
+        "kind": "instance",
+        "language": "ruby",
+        "has_sig": true,
+        "sig": "sig { void }",
+        "params": [
+
+        ],
+        "scope": [
+          "HygieneReport"
+        ],
+        "non_nil_params": [
+
+        ],
+        "uses_yield": false,
+        "untraceable_params": [
+
+        ],
+        "protocols": {
+        },
+        "noreturn_candidate": false
+      },
+      "has_sig": true
+    }
+  ],
+  "tlets": [
+
+  ],
+  "facts": {
+    "files": {
+      "nil-kill-return-hygiene-report20260629-301490-mxc1wt/hygiene_report.rb": {
+        "language": "ruby",
+        "methods": 0,
+        "fields": 0,
+        "digest": "sha256:7a132ade2c4af3e68781d116b52a634e2092ea7124ee7c5b62c5e8a7da04a034",
+        "parser": "tree_sitter"
+      }
+    },
+    "unsigned_methods": [
+
+    ],
+    "existing_sigs": [
+      {
+        "path": "/home/yahn/litedb/nil-kill-return-hygiene-report20260629-301490-mxc1wt/hygiene_report.rb",
+        "line": 5,
+        "end_line": 7,
+        "class": "HygieneReport",
+        "method": "unused_leaf",
+        "kind": "instance",
+        "language": "ruby",
+        "has_sig": true,
+        "sig": "sig { returns(T.untyped) }",
+        "params": [
+
+        ],
+        "scope": [
+          "HygieneReport"
+        ],
+        "non_nil_params": [
+
+        ],
+        "uses_yield": false,
+        "untraceable_params": [
+
+        ],
+        "protocols": {
+        },
+        "noreturn_candidate": false
+      },
+      {
+        "path": "/home/yahn/litedb/nil-kill-return-hygiene-report20260629-301490-mxc1wt/hygiene_report.rb",
+        "line": 10,
+        "end_line": 12,
+        "class": "HygieneReport",
+        "method": "unused_wrapper",
+        "kind": "instance",
+        "language": "ruby",
+        "has_sig": true,
+        "sig": "sig { returns(T.untyped) }",
+        "params": [
+
+        ],
+        "scope": [
+          "HygieneReport"
+        ],
+        "non_nil_params": [
+
+        ],
+        "uses_yield": false,
+        "untraceable_params": [
+
+        ],
+        "protocols": {
+        },
+        "noreturn_candidate": false
+      },
+      {
+        "path": "/home/yahn/litedb/nil-kill-return-hygiene-report20260629-301490-mxc1wt/hygiene_report.rb",
+        "line": 15,
+        "end_line": 17,
+        "class": "HygieneReport",
+        "method": "used_leaf",
+        "kind": "instance",
+        "language": "ruby",
+        "has_sig": true,
+        "sig": "sig { returns(T.untyped) }",
+        "params": [
+
+        ],
+        "scope": [
+          "HygieneReport"
+        ],
+        "non_nil_params": [
+
+        ],
+        "uses_yield": false,
+        "untraceable_params": [
+
+        ],
+        "protocols": {
+        },
+        "noreturn_candidate": false
+      },
+      {
+        "path": "/home/yahn/litedb/nil-kill-return-hygiene-report20260629-301490-mxc1wt/hygiene_report.rb",
+        "line": 20,
+        "end_line": 23,
+        "class": "HygieneReport",
+        "method": "used_caller",
+        "kind": "instance",
+        "language": "ruby",
+        "has_sig": true,
+        "sig": "sig { returns(String) }",
+        "params": [
+
+        ],
+        "scope": [
+          "HygieneReport"
+        ],
+        "non_nil_params": [
+
+        ],
+        "uses_yield": false,
+        "untraceable_params": [
+
+        ],
+        "protocols": {
+        },
+        "noreturn_candidate": false
+      },
+      {
+        "path": "/home/yahn/litedb/nil-kill-return-hygiene-report20260629-301490-mxc1wt/hygiene_report.rb",
+        "line": 26,
+        "end_line": 28,
+        "class": "HygieneReport",
+        "method": "run",
+        "kind": "instance",
+        "language": "ruby",
+        "has_sig": true,
+        "sig": "sig { void }",
+        "params": [
+
+        ],
+        "scope": [
+          "HygieneReport"
+        ],
+        "non_nil_params": [
+
+        ],
+        "uses_yield": false,
+        "untraceable_params": [
+
+        ],
+        "protocols": {
+        },
+        "noreturn_candidate": false
+      }
+    ],
+    "tlet_sites": [
+
+    ],
+    "dead_nil_checks": [
+
+    ],
+    "deterministic_guards": [
+
+    ],
+    "struct_declarations": [
+
+    ],
+    "struct_field_static": [
+
+    ],
+    "tuple_arrays": [
+
+    ],
+    "hash_shapes": [
+
+    ],
+    "collection_index_lookups": [
+
+    ],
+    "hash_record_blockers": [
+
+    ],
+    "hash_record_member_calls": [
+
+    ],
+    "collection_runtime": [
+
+    ],
+    "ivar_runtime": [
+
+    ],
+    "collect_coverage": {
+    },
+    "type_normalizers": [
+
+    ],
+    "dispatcher_inferences": [
+
+    ],
+    "return_origins": [
+      {
+        "array_element_shape": null,
+        "blockers": [
+
+        ],
+        "candidate_type": "String",
+        "class": "HygieneReport",
+        "confidence": "strong",
+        "control_shape": "branchless",
+        "end_line": 7,
+        "hash_shape": null,
+        "implicit": true,
+        "kind": "instance",
+        "line": 5,
+        "method": "unused_leaf",
+        "path": "/home/yahn/litedb/nil-kill-return-hygiene-report20260629-301490-mxc1wt/hygiene_report.rb",
+        "return_syntax": "implicit",
+        "sources": [
+          {
+            "code": "\"event\"",
+            "kind": "static",
+            "line": 6,
+            "type": "String"
+          }
+        ]
+      },
+      {
+        "array_element_shape": null,
+        "blockers": [
+
+        ],
+        "candidate_type": "String",
+        "class": "HygieneReport",
+        "confidence": "strong",
+        "control_shape": "branchless",
+        "end_line": 12,
+        "hash_shape": null,
+        "implicit": true,
+        "kind": "instance",
+        "line": 10,
+        "method": "unused_wrapper",
+        "path": "/home/yahn/litedb/nil-kill-return-hygiene-report20260629-301490-mxc1wt/hygiene_report.rb",
+        "return_syntax": "implicit",
+        "sources": [
+          {
+            "callee": "unused_leaf",
+            "code": "unused_leaf",
+            "kind": "typed_call_inferred",
+            "line": 11,
+            "type": "String"
+          }
+        ]
+      },
+      {
+        "array_element_shape": null,
+        "blockers": [
+
+        ],
+        "candidate_type": "String",
+        "class": "HygieneReport",
+        "confidence": "strong",
+        "control_shape": "branchless",
+        "end_line": 17,
+        "hash_shape": null,
+        "implicit": true,
+        "kind": "instance",
+        "line": 15,
+        "method": "used_leaf",
+        "path": "/home/yahn/litedb/nil-kill-return-hygiene-report20260629-301490-mxc1wt/hygiene_report.rb",
+        "return_syntax": "implicit",
+        "sources": [
+          {
+            "code": "\"value\"",
+            "kind": "static",
+            "line": 16,
+            "type": "String"
+          }
+        ]
+      },
+      {
+        "array_element_shape": null,
+        "blockers": [
+
+        ],
+        "candidate_type": "String",
+        "class": "HygieneReport",
+        "confidence": "strong",
+        "control_shape": "branchless",
+        "end_line": 23,
+        "hash_shape": null,
+        "implicit": true,
+        "kind": "instance",
+        "line": 20,
+        "method": "used_caller",
+        "path": "/home/yahn/litedb/nil-kill-return-hygiene-report20260629-301490-mxc1wt/hygiene_report.rb",
+        "return_syntax": "implicit",
+        "sources": [
+          {
+            "callee": "to_s",
+            "code": "value.to_s",
+            "kind": "typed_call",
+            "line": 22,
+            "stdlib": null,
+            "type": "String"
+          }
+        ]
+      },
+      {
+        "array_element_shape": null,
+        "blockers": [
+
+        ],
+        "candidate_type": "String",
+        "class": "HygieneReport",
+        "confidence": "strong",
+        "control_shape": "branchless",
+        "end_line": 28,
+        "hash_shape": null,
+        "implicit": true,
+        "kind": "instance",
+        "line": 26,
+        "method": "run",
+        "path": "/home/yahn/litedb/nil-kill-return-hygiene-report20260629-301490-mxc1wt/hygiene_report.rb",
+        "return_syntax": "implicit",
+        "sources": [
+          {
+            "callee": "unused_wrapper",
+            "code": "unused_wrapper",
+            "kind": "typed_call_inferred",
+            "line": 27,
+            "type": "String"
+          }
+        ]
+      }
+    ],
+    "param_origins": [
+      {
+        "arg_kind": "positional",
+        "array_element_shape": null,
+        "callee": "extend",
+        "code": "T::Sig",
+        "enclosing_scope": "HygieneReport",
+        "hash_shape": null,
+        "line": 2,
+        "origin_kind": "unknown",
+        "path": "/home/yahn/litedb/nil-kill-return-hygiene-report20260629-301490-mxc1wt/hygiene_report.rb",
+        "receiver": null,
+        "slot": "0",
+        "source_method": null,
+        "type": null,
+        "unknown_reasons": [
+          "operation unresolved constant T::Sig"
+        ]
+      },
+      {
+        "arg_kind": "positional",
+        "array_element_shape": null,
+        "callee": "returns",
+        "code": "T.untyped",
+        "enclosing_scope": "HygieneReport",
+        "hash_shape": null,
+        "line": 4,
+        "origin_kind": "untyped_return",
+        "path": "/home/yahn/litedb/nil-kill-return-hygiene-report20260629-301490-mxc1wt/hygiene_report.rb",
+        "receiver": null,
+        "slot": "0",
+        "source_method": "untyped",
+        "type": null,
+        "unknown_reasons": [
+
+        ]
+      },
+      {
+        "arg_kind": "positional",
+        "array_element_shape": null,
+        "callee": "sig",
+        "code": "sig",
+        "enclosing_scope": "HygieneReport",
+        "hash_shape": null,
+        "line": 4,
+        "origin_kind": "untyped_return",
+        "path": "/home/yahn/litedb/nil-kill-return-hygiene-report20260629-301490-mxc1wt/hygiene_report.rb",
+        "receiver": null,
+        "slot": "0",
+        "source_method": "sig",
+        "type": null,
+        "unknown_reasons": [
+
+        ]
+      },
+      {
+        "arg_kind": "positional",
+        "array_element_shape": null,
+        "callee": "untyped",
+        "code": "",
+        "enclosing_scope": "HygieneReport",
+        "hash_shape": null,
+        "line": 4,
+        "origin_kind": "static",
+        "path": "/home/yahn/litedb/nil-kill-return-hygiene-report20260629-301490-mxc1wt/hygiene_report.rb",
+        "receiver": "T",
+        "slot": "0",
+        "source_method": null,
+        "type": "T::Array[T.untyped]",
+        "unknown_reasons": [
+
+        ]
+      },
+      {
+        "arg_kind": "positional",
+        "array_element_shape": null,
+        "callee": "returns",
+        "code": "T.untyped",
+        "enclosing_scope": "HygieneReport",
+        "hash_shape": null,
+        "line": 9,
+        "origin_kind": "untyped_return",
+        "path": "/home/yahn/litedb/nil-kill-return-hygiene-report20260629-301490-mxc1wt/hygiene_report.rb",
+        "receiver": null,
+        "slot": "0",
+        "source_method": "untyped",
+        "type": null,
+        "unknown_reasons": [
+
+        ]
+      },
+      {
+        "arg_kind": "positional",
+        "array_element_shape": null,
+        "callee": "sig",
+        "code": "sig",
+        "enclosing_scope": "HygieneReport",
+        "hash_shape": null,
+        "line": 9,
+        "origin_kind": "untyped_return",
+        "path": "/home/yahn/litedb/nil-kill-return-hygiene-report20260629-301490-mxc1wt/hygiene_report.rb",
+        "receiver": null,
+        "slot": "0",
+        "source_method": "sig",
+        "type": null,
+        "unknown_reasons": [
+
+        ]
+      },
+      {
+        "arg_kind": "positional",
+        "array_element_shape": null,
+        "callee": "untyped",
+        "code": "",
+        "enclosing_scope": "HygieneReport",
+        "hash_shape": null,
+        "line": 9,
+        "origin_kind": "static",
+        "path": "/home/yahn/litedb/nil-kill-return-hygiene-report20260629-301490-mxc1wt/hygiene_report.rb",
+        "receiver": "T",
+        "slot": "0",
+        "source_method": null,
+        "type": "T::Array[T.untyped]",
+        "unknown_reasons": [
+
+        ]
+      },
+      {
+        "arg_kind": "positional",
+        "array_element_shape": null,
+        "callee": "unused_leaf",
+        "code": "unused_leaf",
+        "enclosing_scope": "HygieneReport",
+        "hash_shape": null,
+        "line": 11,
+        "origin_kind": "typed_return",
+        "path": "/home/yahn/litedb/nil-kill-return-hygiene-report20260629-301490-mxc1wt/hygiene_report.rb",
+        "receiver": null,
+        "slot": "0",
+        "source_method": "unused_leaf",
+        "type": "T.untyped",
+        "unknown_reasons": [
+
+        ]
+      },
+      {
+        "arg_kind": "positional",
+        "array_element_shape": null,
+        "callee": "returns",
+        "code": "T.untyped",
+        "enclosing_scope": "HygieneReport",
+        "hash_shape": null,
+        "line": 14,
+        "origin_kind": "untyped_return",
+        "path": "/home/yahn/litedb/nil-kill-return-hygiene-report20260629-301490-mxc1wt/hygiene_report.rb",
+        "receiver": null,
+        "slot": "0",
+        "source_method": "untyped",
+        "type": null,
+        "unknown_reasons": [
+
+        ]
+      },
+      {
+        "arg_kind": "positional",
+        "array_element_shape": null,
+        "callee": "sig",
+        "code": "sig",
+        "enclosing_scope": "HygieneReport",
+        "hash_shape": null,
+        "line": 14,
+        "origin_kind": "untyped_return",
+        "path": "/home/yahn/litedb/nil-kill-return-hygiene-report20260629-301490-mxc1wt/hygiene_report.rb",
+        "receiver": null,
+        "slot": "0",
+        "source_method": "sig",
+        "type": null,
+        "unknown_reasons": [
+
+        ]
+      },
+      {
+        "arg_kind": "positional",
+        "array_element_shape": null,
+        "callee": "untyped",
+        "code": "",
+        "enclosing_scope": "HygieneReport",
+        "hash_shape": null,
+        "line": 14,
+        "origin_kind": "static",
+        "path": "/home/yahn/litedb/nil-kill-return-hygiene-report20260629-301490-mxc1wt/hygiene_report.rb",
+        "receiver": "T",
+        "slot": "0",
+        "source_method": null,
+        "type": "T::Array[T.untyped]",
+        "unknown_reasons": [
+
+        ]
+      },
+      {
+        "arg_kind": "positional",
+        "array_element_shape": null,
+        "callee": "returns",
+        "code": "String",
+        "enclosing_scope": "HygieneReport",
+        "hash_shape": null,
+        "line": 19,
+        "origin_kind": "static",
+        "path": "/home/yahn/litedb/nil-kill-return-hygiene-report20260629-301490-mxc1wt/hygiene_report.rb",
+        "receiver": null,
+        "slot": "0",
+        "source_method": null,
+        "type": "T.class_of(String)",
+        "unknown_reasons": [
+
+        ]
+      },
+      {
+        "arg_kind": "positional",
+        "array_element_shape": null,
+        "callee": "sig",
+        "code": "sig",
+        "enclosing_scope": "HygieneReport",
+        "hash_shape": null,
+        "line": 19,
+        "origin_kind": "untyped_return",
+        "path": "/home/yahn/litedb/nil-kill-return-hygiene-report20260629-301490-mxc1wt/hygiene_report.rb",
+        "receiver": null,
+        "slot": "0",
+        "source_method": "sig",
+        "type": null,
+        "unknown_reasons": [
+
+        ]
+      },
+      {
+        "arg_kind": "positional",
+        "array_element_shape": null,
+        "callee": "used_leaf",
+        "code": "used_leaf",
+        "enclosing_scope": "HygieneReport",
+        "hash_shape": null,
+        "line": 21,
+        "origin_kind": "typed_return",
+        "path": "/home/yahn/litedb/nil-kill-return-hygiene-report20260629-301490-mxc1wt/hygiene_report.rb",
+        "receiver": null,
+        "slot": "0",
+        "source_method": "used_leaf",
+        "type": "T.untyped",
+        "unknown_reasons": [
+
+        ]
+      },
+      {
+        "arg_kind": "positional",
+        "array_element_shape": null,
+        "callee": "to_s",
+        "code": "",
+        "enclosing_scope": "HygieneReport",
+        "hash_shape": null,
+        "line": 22,
+        "origin_kind": "static",
+        "path": "/home/yahn/litedb/nil-kill-return-hygiene-report20260629-301490-mxc1wt/hygiene_report.rb",
+        "receiver": "value",
+        "slot": "0",
+        "source_method": null,
+        "type": "T::Array[T.untyped]",
+        "unknown_reasons": [
+
+        ]
+      },
+      {
+        "arg_kind": "positional",
+        "array_element_shape": null,
+        "callee": "sig",
+        "code": "sig",
+        "enclosing_scope": "HygieneReport",
+        "hash_shape": null,
+        "line": 25,
+        "origin_kind": "untyped_return",
+        "path": "/home/yahn/litedb/nil-kill-return-hygiene-report20260629-301490-mxc1wt/hygiene_report.rb",
+        "receiver": null,
+        "slot": "0",
+        "source_method": "sig",
+        "type": null,
+        "unknown_reasons": [
+
+        ]
+      },
+      {
+        "arg_kind": "positional",
+        "array_element_shape": null,
+        "callee": "void",
+        "code": "void",
+        "enclosing_scope": "HygieneReport",
+        "hash_shape": null,
+        "line": 25,
+        "origin_kind": "untyped_return",
+        "path": "/home/yahn/litedb/nil-kill-return-hygiene-report20260629-301490-mxc1wt/hygiene_report.rb",
+        "receiver": null,
+        "slot": "0",
+        "source_method": "void",
+        "type": null,
+        "unknown_reasons": [
+
+        ]
+      },
+      {
+        "arg_kind": "positional",
+        "array_element_shape": null,
+        "callee": "unused_wrapper",
+        "code": "unused_wrapper",
+        "enclosing_scope": "HygieneReport",
+        "hash_shape": null,
+        "line": 27,
+        "origin_kind": "typed_return",
+        "path": "/home/yahn/litedb/nil-kill-return-hygiene-report20260629-301490-mxc1wt/hygiene_report.rb",
+        "receiver": null,
+        "slot": "0",
+        "source_method": "unused_wrapper",
+        "type": "T.untyped",
+        "unknown_reasons": [
+
+        ]
+      }
+    ],
+    "rbi_field_types": [
+
+    ],
+    "noreturn_methods": [
+
+    ],
+    "runtime_call_edges": [
+
+    ],
+    "fallibility_pressure": [
+
+    ],
+    "hidden_enum_pressure": [
+
+    ],
+    "flow_graph": null,
+    "static_evidence_summary": {
+      "files": 1,
+      "methods": 5,
+      "fields": 0,
+      "signatures": 4,
+      "state_types": 0,
+      "state_type_records": 0,
+      "state_protocols": 0,
+      "state_param_origins": 0,
+      "state_protocol_records": 0,
+      "state_param_origin_records": 0,
+      "type_definitions": 4,
+      "alias_recommendations": 0,
+      "struct_declarations": 0,
+      "hash_shapes": 0,
+      "array_shapes": 0,
+      "collection_index_lookups": 0,
+      "hash_record_blockers": 0,
+      "tlet_sites": 0,
+      "dead_nil_checks": 0,
+      "deterministic_guards": 0,
+      "return_origins": 5,
+      "noreturn_methods": 0,
+      "rbi_field_types": 0,
+      "ivar_protocols": 0,
+      "ivar_param_origins": 0
+    },
+    "rescue_handlers": [
+
+    ],
+    "return_usage_sites": [
+      {
+        "code": "extend T::Sig",
+        "context": "statement",
+        "current_method": null,
+        "handler_line": null,
+        "line": 2,
+        "name": "extend",
+        "path": "/home/yahn/litedb/nil-kill-return-hygiene-report20260629-301490-mxc1wt/hygiene_report.rb"
+      },
+      {
+        "code": "sig",
+        "context": "statement",
+        "current_method": null,
+        "handler_line": null,
+        "line": 4,
+        "name": "sig",
+        "path": "/home/yahn/litedb/nil-kill-return-hygiene-report20260629-301490-mxc1wt/hygiene_report.rb"
+      },
+      {
+        "code": "returns(T.untyped)",
+        "context": "statement",
+        "current_method": null,
+        "handler_line": null,
+        "line": 4,
+        "name": "returns",
+        "path": "/home/yahn/litedb/nil-kill-return-hygiene-report20260629-301490-mxc1wt/hygiene_report.rb"
+      },
+      {
+        "code": "T.untyped",
+        "context": "value",
+        "current_method": null,
+        "handler_line": null,
+        "line": 4,
+        "name": "untyped",
+        "path": "/home/yahn/litedb/nil-kill-return-hygiene-report20260629-301490-mxc1wt/hygiene_report.rb"
+      },
+      {
+        "code": "sig",
+        "context": "statement",
+        "current_method": null,
+        "handler_line": null,
+        "line": 9,
+        "name": "sig",
+        "path": "/home/yahn/litedb/nil-kill-return-hygiene-report20260629-301490-mxc1wt/hygiene_report.rb"
+      },
+      {
+        "code": "returns(T.untyped)",
+        "context": "statement",
+        "current_method": null,
+        "handler_line": null,
+        "line": 9,
+        "name": "returns",
+        "path": "/home/yahn/litedb/nil-kill-return-hygiene-report20260629-301490-mxc1wt/hygiene_report.rb"
+      },
+      {
+        "code": "T.untyped",
+        "context": "value",
+        "current_method": null,
+        "handler_line": null,
+        "line": 9,
+        "name": "untyped",
+        "path": "/home/yahn/litedb/nil-kill-return-hygiene-report20260629-301490-mxc1wt/hygiene_report.rb"
+      },
+      {
+        "code": "unused_leaf",
+        "context": "return",
+        "current_method": "unused_wrapper",
+        "handler_line": null,
+        "line": 11,
+        "name": "unused_leaf",
+        "path": "/home/yahn/litedb/nil-kill-return-hygiene-report20260629-301490-mxc1wt/hygiene_report.rb"
+      },
+      {
+        "code": "sig",
+        "context": "statement",
+        "current_method": null,
+        "handler_line": null,
+        "line": 14,
+        "name": "sig",
+        "path": "/home/yahn/litedb/nil-kill-return-hygiene-report20260629-301490-mxc1wt/hygiene_report.rb"
+      },
+      {
+        "code": "returns(T.untyped)",
+        "context": "statement",
+        "current_method": null,
+        "handler_line": null,
+        "line": 14,
+        "name": "returns",
+        "path": "/home/yahn/litedb/nil-kill-return-hygiene-report20260629-301490-mxc1wt/hygiene_report.rb"
+      },
+      {
+        "code": "T.untyped",
+        "context": "value",
+        "current_method": null,
+        "handler_line": null,
+        "line": 14,
+        "name": "untyped",
+        "path": "/home/yahn/litedb/nil-kill-return-hygiene-report20260629-301490-mxc1wt/hygiene_report.rb"
+      },
+      {
+        "code": "sig",
+        "context": "statement",
+        "current_method": null,
+        "handler_line": null,
+        "line": 19,
+        "name": "sig",
+        "path": "/home/yahn/litedb/nil-kill-return-hygiene-report20260629-301490-mxc1wt/hygiene_report.rb"
+      },
+      {
+        "code": "returns(String)",
+        "context": "statement",
+        "current_method": null,
+        "handler_line": null,
+        "line": 19,
+        "name": "returns",
+        "path": "/home/yahn/litedb/nil-kill-return-hygiene-report20260629-301490-mxc1wt/hygiene_report.rb"
+      },
+      {
+        "code": "used_leaf",
+        "context": "value",
+        "current_method": "used_caller",
+        "handler_line": null,
+        "line": 21,
+        "name": "used_leaf",
+        "path": "/home/yahn/litedb/nil-kill-return-hygiene-report20260629-301490-mxc1wt/hygiene_report.rb"
+      },
+      {
+        "code": "value.to_s",
+        "context": "return",
+        "current_method": "used_caller",
+        "handler_line": null,
+        "line": 22,
+        "name": "to_s",
+        "path": "/home/yahn/litedb/nil-kill-return-hygiene-report20260629-301490-mxc1wt/hygiene_report.rb"
+      },
+      {
+        "code": "sig",
+        "context": "statement",
+        "current_method": null,
+        "handler_line": null,
+        "line": 25,
+        "name": "sig",
+        "path": "/home/yahn/litedb/nil-kill-return-hygiene-report20260629-301490-mxc1wt/hygiene_report.rb"
+      },
+      {
+        "code": "void",
+        "context": "statement",
+        "current_method": null,
+        "handler_line": null,
+        "line": 25,
+        "name": "void",
+        "path": "/home/yahn/litedb/nil-kill-return-hygiene-report20260629-301490-mxc1wt/hygiene_report.rb"
+      },
+      {
+        "code": "unused_wrapper",
+        "context": "return",
+        "current_method": "run",
+        "handler_line": null,
+        "line": 27,
+        "name": "unused_wrapper",
+        "path": "/home/yahn/litedb/nil-kill-return-hygiene-report20260629-301490-mxc1wt/hygiene_report.rb"
+      }
+    ],
+    "return_direct_usage_sites": [
+      {
+        "code": "extend T::Sig",
+        "context": "statement",
+        "current_method": null,
+        "handler_line": null,
+        "line": 2,
+        "name": "extend",
+        "path": "/home/yahn/litedb/nil-kill-return-hygiene-report20260629-301490-mxc1wt/hygiene_report.rb"
+      },
+      {
+        "code": "sig",
+        "context": "statement",
+        "current_method": null,
+        "handler_line": null,
+        "line": 4,
+        "name": "sig",
+        "path": "/home/yahn/litedb/nil-kill-return-hygiene-report20260629-301490-mxc1wt/hygiene_report.rb"
+      },
+      {
+        "code": "returns(T.untyped)",
+        "context": "statement",
+        "current_method": null,
+        "handler_line": null,
+        "line": 4,
+        "name": "returns",
+        "path": "/home/yahn/litedb/nil-kill-return-hygiene-report20260629-301490-mxc1wt/hygiene_report.rb"
+      },
+      {
+        "code": "T.untyped",
+        "context": "value",
+        "current_method": null,
+        "handler_line": null,
+        "line": 4,
+        "name": "untyped",
+        "path": "/home/yahn/litedb/nil-kill-return-hygiene-report20260629-301490-mxc1wt/hygiene_report.rb"
+      },
+      {
+        "code": "sig",
+        "context": "statement",
+        "current_method": null,
+        "handler_line": null,
+        "line": 9,
+        "name": "sig",
+        "path": "/home/yahn/litedb/nil-kill-return-hygiene-report20260629-301490-mxc1wt/hygiene_report.rb"
+      },
+      {
+        "code": "returns(T.untyped)",
+        "context": "statement",
+        "current_method": null,
+        "handler_line": null,
+        "line": 9,
+        "name": "returns",
+        "path": "/home/yahn/litedb/nil-kill-return-hygiene-report20260629-301490-mxc1wt/hygiene_report.rb"
+      },
+      {
+        "code": "T.untyped",
+        "context": "value",
+        "current_method": null,
+        "handler_line": null,
+        "line": 9,
+        "name": "untyped",
+        "path": "/home/yahn/litedb/nil-kill-return-hygiene-report20260629-301490-mxc1wt/hygiene_report.rb"
+      },
+      {
+        "code": "unused_leaf",
+        "context": "return",
+        "current_method": "unused_wrapper",
+        "handler_line": null,
+        "line": 11,
+        "name": "unused_leaf",
+        "path": "/home/yahn/litedb/nil-kill-return-hygiene-report20260629-301490-mxc1wt/hygiene_report.rb"
+      },
+      {
+        "code": "sig",
+        "context": "statement",
+        "current_method": null,
+        "handler_line": null,
+        "line": 14,
+        "name": "sig",
+        "path": "/home/yahn/litedb/nil-kill-return-hygiene-report20260629-301490-mxc1wt/hygiene_report.rb"
+      },
+      {
+        "code": "returns(T.untyped)",
+        "context": "statement",
+        "current_method": null,
+        "handler_line": null,
+        "line": 14,
+        "name": "returns",
+        "path": "/home/yahn/litedb/nil-kill-return-hygiene-report20260629-301490-mxc1wt/hygiene_report.rb"
+      },
+      {
+        "code": "T.untyped",
+        "context": "value",
+        "current_method": null,
+        "handler_line": null,
+        "line": 14,
+        "name": "untyped",
+        "path": "/home/yahn/litedb/nil-kill-return-hygiene-report20260629-301490-mxc1wt/hygiene_report.rb"
+      },
+      {
+        "code": "sig",
+        "context": "statement",
+        "current_method": null,
+        "handler_line": null,
+        "line": 19,
+        "name": "sig",
+        "path": "/home/yahn/litedb/nil-kill-return-hygiene-report20260629-301490-mxc1wt/hygiene_report.rb"
+      },
+      {
+        "code": "returns(String)",
+        "context": "statement",
+        "current_method": null,
+        "handler_line": null,
+        "line": 19,
+        "name": "returns",
+        "path": "/home/yahn/litedb/nil-kill-return-hygiene-report20260629-301490-mxc1wt/hygiene_report.rb"
+      },
+      {
+        "code": "used_leaf",
+        "context": "value",
+        "current_method": "used_caller",
+        "handler_line": null,
+        "line": 21,
+        "name": "used_leaf",
+        "path": "/home/yahn/litedb/nil-kill-return-hygiene-report20260629-301490-mxc1wt/hygiene_report.rb"
+      },
+      {
+        "code": "value.to_s",
+        "context": "return",
+        "current_method": "used_caller",
+        "handler_line": null,
+        "line": 22,
+        "name": "to_s",
+        "path": "/home/yahn/litedb/nil-kill-return-hygiene-report20260629-301490-mxc1wt/hygiene_report.rb"
+      },
+      {
+        "code": "sig",
+        "context": "statement",
+        "current_method": null,
+        "handler_line": null,
+        "line": 25,
+        "name": "sig",
+        "path": "/home/yahn/litedb/nil-kill-return-hygiene-report20260629-301490-mxc1wt/hygiene_report.rb"
+      },
+      {
+        "code": "void",
+        "context": "statement",
+        "current_method": null,
+        "handler_line": null,
+        "line": 25,
+        "name": "void",
+        "path": "/home/yahn/litedb/nil-kill-return-hygiene-report20260629-301490-mxc1wt/hygiene_report.rb"
+      },
+      {
+        "code": "unused_wrapper",
+        "context": "return",
+        "current_method": "run",
+        "handler_line": null,
+        "line": 27,
+        "name": "unused_wrapper",
+        "path": "/home/yahn/litedb/nil-kill-return-hygiene-report20260629-301490-mxc1wt/hygiene_report.rb"
+      }
+    ],
+    "hash_record_escape_sites": [
+
+    ],
+    "hidden_enum_observations": [
+
+    ],
+    "ivar_protocols": {
+    },
+    "ivar_param_origins": {
+    }
+  },
+  "unused_return_methods_by_location": {
+    "[\"/home/yahn/litedb/nil-kill-return-hygiene-report20260629-301490-mxc1wt/hygiene_report.rb\",5,\"HygieneReport\",\"unused_leaf\",\"instance\"]": {
+      "path": "/home/yahn/litedb/nil-kill-return-hygiene-report20260629-301490-mxc1wt/hygiene_report.rb",
+      "line": 5,
+      "end_line": 7,
+      "class": "HygieneReport",
+      "method": "unused_leaf",
+      "kind": "instance",
+      "language": "ruby",
+      "has_sig": true,
+      "sig": "sig { returns(T.untyped) }",
+      "params": [
+
+      ],
+      "scope": [
+        "HygieneReport"
+      ],
+      "non_nil_params": [
+
+      ],
+      "uses_yield": false,
+      "untraceable_params": [
+
+      ],
+      "protocols": {
+      },
+      "noreturn_candidate": false
+    },
+    "[\"/home/yahn/litedb/nil-kill-return-hygiene-report20260629-301490-mxc1wt/hygiene_report.rb\",10,\"HygieneReport\",\"unused_wrapper\",\"instance\"]": {
+      "path": "/home/yahn/litedb/nil-kill-return-hygiene-report20260629-301490-mxc1wt/hygiene_report.rb",
+      "line": 10,
+      "end_line": 12,
+      "class": "HygieneReport",
+      "method": "unused_wrapper",
+      "kind": "instance",
+      "language": "ruby",
+      "has_sig": true,
+      "sig": "sig { returns(T.untyped) }",
+      "params": [
+
+      ],
+      "scope": [
+        "HygieneReport"
+      ],
+      "non_nil_params": [
+
+      ],
+      "uses_yield": false,
+      "untraceable_params": [
+
+      ],
+      "protocols": {
+      },
+      "noreturn_candidate": false
+    }
+  }
+}

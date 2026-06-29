@@ -1,0 +1,345 @@
+{
+  "actions": [
+    {
+      "kind": "fix_sig_param",
+      "confidence": "review",
+      "path": "/home/yahn/litedb/nk-zero-gap20260629-301490-3j9vna/plain_require_lib.rb",
+      "line": 11,
+      "message": "existing sig param x is T.untyped; observed Integer",
+      "data": {
+        "name": "x",
+        "type": "Integer"
+      }
+    },
+    {
+      "kind": "fix_sig_return",
+      "confidence": "review",
+      "path": "/home/yahn/litedb/nk-zero-gap20260629-301490-3j9vna/plain_require_lib.rb",
+      "line": 11,
+      "message": "existing sig return is T.untyped; observed Integer",
+      "data": {
+        "type": "Integer"
+      }
+    },
+    {
+      "kind": "fix_sig_param",
+      "confidence": "review",
+      "path": "/home/yahn/litedb/nk-zero-gap20260629-301490-3j9vna/require_relative_lib.rb",
+      "line": 14,
+      "message": "existing sig param v is T.untyped; observed Integer",
+      "data": {
+        "name": "v",
+        "type": "Integer"
+      }
+    },
+    {
+      "kind": "fix_sig_return",
+      "confidence": "review",
+      "path": "/home/yahn/litedb/nk-zero-gap20260629-301490-3j9vna/require_relative_lib.rb",
+      "line": 14,
+      "message": "existing sig return is T.untyped; observed String",
+      "data": {
+        "type": "String"
+      }
+    },
+    {
+      "kind": "fix_sig_return",
+      "confidence": "review",
+      "path": "/home/yahn/litedb/nk-zero-gap20260629-301490-3j9vna/require_relative_lib.rb",
+      "line": 14,
+      "message": "existing sig return is T.untyped; static return origins suggest String",
+      "data": {
+        "type": "String",
+        "source": "static_return_origin",
+        "origin_confidence": "strong",
+        "blockers": [
+
+        ]
+      }
+    },
+    {
+      "kind": "fix_sig_param",
+      "confidence": "review",
+      "path": "/home/yahn/litedb/nk-zero-gap20260629-301490-3j9vna/kernel_load_lib.rb",
+      "line": 14,
+      "message": "existing sig param opts is T.untyped; observed Hash",
+      "data": {
+        "name": "opts",
+        "type": "Hash"
+      }
+    },
+    {
+      "kind": "fix_sig_return",
+      "confidence": "review",
+      "path": "/home/yahn/litedb/nk-zero-gap20260629-301490-3j9vna/kernel_load_lib.rb",
+      "line": 14,
+      "message": "existing sig return is T.untyped; observed Integer",
+      "data": {
+        "type": "Integer"
+      }
+    },
+    {
+      "kind": "fix_sig_param",
+      "confidence": "review",
+      "path": "/home/yahn/litedb/nk-zero-gap20260629-301490-3j9vna/autoload_lib.rb",
+      "line": 13,
+      "message": "existing sig param v is T.untyped; observed String",
+      "data": {
+        "name": "v",
+        "type": "String"
+      }
+    },
+    {
+      "kind": "fix_sig_return",
+      "confidence": "review",
+      "path": "/home/yahn/litedb/nk-zero-gap20260629-301490-3j9vna/autoload_lib.rb",
+      "line": 13,
+      "message": "existing sig return is T.untyped; observed String",
+      "data": {
+        "type": "String"
+      }
+    },
+    {
+      "kind": "union_observed",
+      "confidence": "review",
+      "path": "/home/yahn/litedb/nk-zero-gap20260629-301490-3j9vna/abs_require_lib.rb",
+      "line": 15,
+      "message": "param node observed Array, Hash, Integer; leaving as T.untyped by default until more evidence or design intent is clear",
+      "data": {
+        "name": "node",
+        "classes": [
+          "Array",
+          "Hash",
+          "Integer"
+        ],
+        "callsites": {
+          "/home/yahn/litedb/nk-zero-gap20260629-301490-3j9vna/abs_require_lib.rb:15:Array": 3,
+          "/home/yahn/litedb/nk-zero-gap20260629-301490-3j9vna/abs_require_lib.rb:15:Hash": 3,
+          "/home/yahn/litedb/nk-zero-gap20260629-301490-3j9vna/abs_require_lib.rb:15:Integer": 3
+        }
+      }
+    },
+    {
+      "kind": "fix_sig_param",
+      "confidence": "review",
+      "path": "/home/yahn/litedb/nk-zero-gap20260629-301490-3j9vna/abs_require_lib.rb",
+      "line": 15,
+      "message": "existing sig param node is T.untyped; observed T.any(Array, Hash, Integer)",
+      "data": {
+        "name": "node",
+        "type": "T.any(Array, Hash, Integer)"
+      }
+    },
+    {
+      "kind": "fix_sig_param",
+      "confidence": "review",
+      "path": "/home/yahn/litedb/nk-zero-gap20260629-301490-3j9vna/abs_require_lib.rb",
+      "line": 15,
+      "message": "existing sig param acc is T.untyped; observed Array",
+      "data": {
+        "name": "acc",
+        "type": "Array"
+      }
+    },
+    {
+      "kind": "fix_sig_return",
+      "confidence": "review",
+      "path": "/home/yahn/litedb/nk-zero-gap20260629-301490-3j9vna/abs_require_lib.rb",
+      "line": 15,
+      "message": "existing sig return is T.untyped; observed T::Array[Integer]",
+      "data": {
+        "type": "T::Array[Integer]"
+      }
+    },
+    {
+      "kind": "fix_sig_param",
+      "confidence": "review",
+      "path": "/home/yahn/litedb/nk-zero-gap20260629-301490-3j9vna/ensure_punt_lib.rb",
+      "line": 12,
+      "message": "existing sig param v is T.untyped; observed Integer",
+      "data": {
+        "name": "v",
+        "type": "Integer"
+      }
+    },
+    {
+      "kind": "fix_sig_return",
+      "confidence": "review",
+      "path": "/home/yahn/litedb/nk-zero-gap20260629-301490-3j9vna/ensure_punt_lib.rb",
+      "line": 12,
+      "message": "existing sig return is T.untyped; observed Integer",
+      "data": {
+        "type": "Integer"
+      }
+    },
+    {
+      "kind": "fix_sig_return",
+      "confidence": "review",
+      "path": "/home/yahn/litedb/nk-zero-gap20260629-301490-3j9vna/struct_collection_lib.rb",
+      "line": 16,
+      "message": "existing sig return is T.untyped; observed T::Array[T::Array[Integer]]",
+      "data": {
+        "type": "T::Array[T::Array[Integer]]"
+      }
+    },
+    {
+      "kind": "narrow_generic_param",
+      "confidence": "review",
+      "path": "/home/yahn/litedb/nk-zero-gap20260629-301490-3j9vna/struct_collection_lib.rb",
+      "line": 16,
+      "message": "narrow generic param items from T::Array[T.untyped] to T::Array[Integer]",
+      "data": {
+        "name": "items",
+        "from": "T::Array[T.untyped]",
+        "type": "T::Array[Integer]",
+        "source": "collection_runtime"
+      }
+    },
+    {
+      "kind": "fix_sig_param",
+      "confidence": "review",
+      "path": "/home/yahn/litedb/nk-zero-gap20260629-301490-3j9vna/subprocess_lib.rb",
+      "line": 15,
+      "message": "existing sig param payload is T.untyped; observed String",
+      "data": {
+        "name": "payload",
+        "type": "String"
+      }
+    },
+    {
+      "kind": "fix_sig_return",
+      "confidence": "review",
+      "path": "/home/yahn/litedb/nk-zero-gap20260629-301490-3j9vna/subprocess_lib.rb",
+      "line": 15,
+      "message": "existing sig return is T.untyped; observed Integer",
+      "data": {
+        "type": "Integer"
+      }
+    },
+    {
+      "kind": "fix_sig_return",
+      "confidence": "high",
+      "path": "/home/yahn/litedb/nk-zero-gap20260629-301490-3j9vna/abs_require_lib.rb",
+      "line": 38,
+      "message": "existing sig return is T.untyped; return value is never used, prefer .void",
+      "data": {
+        "type": "void",
+        "source": "unused_return"
+      }
+    },
+    {
+      "kind": "fix_sig_param",
+      "confidence": "review",
+      "path": "/home/yahn/litedb/nk-zero-gap20260629-301490-3j9vna/abs_require_lib.rb",
+      "line": 38,
+      "message": "static callsites prove param tree is T::Array[T::Hash[Symbol, T::Hash[Symbol, T::Array[Integer]]]]; 1 static callsite(s) agree",
+      "data": {
+        "name": "tree",
+        "type": "T::Array[T::Hash[Symbol, T::Hash[Symbol, T::Array[Integer]]]]",
+        "source": "static_param_backflow",
+        "callsites": {
+          "/home/yahn/litedb/nk-zero-gap20260629-301490-3j9vna/driver.rb:49:[{ a: [1] }, 2, { b: { c: [3] } }]": 1
+        },
+        "callsite_count": 1
+      }
+    },
+    {
+      "kind": "fix_sig_param",
+      "confidence": "review",
+      "path": "/home/yahn/litedb/nk-zero-gap20260629-301490-3j9vna/kernel_load_lib.rb",
+      "line": 14,
+      "message": "static callsites prove param opts is T::Hash[Symbol, Integer]; 1 static callsite(s) agree",
+      "data": {
+        "name": "opts",
+        "type": "T::Hash[Symbol, Integer]",
+        "source": "static_param_backflow",
+        "callsites": {
+          "/home/yahn/litedb/nk-zero-gap20260629-301490-3j9vna/driver.rb:37:{ n: 1 }": 1
+        },
+        "callsite_count": 1
+      }
+    },
+    {
+      "kind": "fix_sig_param",
+      "confidence": "review",
+      "path": "/home/yahn/litedb/nk-zero-gap20260629-301490-3j9vna/kernel_load_lib.rb",
+      "line": 14,
+      "message": "static callsites prove param rest is Integer; 1 static callsite(s) agree",
+      "data": {
+        "name": "rest",
+        "type": "Integer",
+        "source": "static_param_backflow",
+        "callsites": {
+          "/home/yahn/litedb/nk-zero-gap20260629-301490-3j9vna/driver.rb:37:2": 1
+        },
+        "callsite_count": 1
+      }
+    },
+    {
+      "kind": "fix_sig_param",
+      "confidence": "review",
+      "path": "/home/yahn/litedb/nk-zero-gap20260629-301490-3j9vna/kernel_load_lib.rb",
+      "line": 14,
+      "message": "static callsites prove param kw is Integer; 1 static callsite(s) agree",
+      "data": {
+        "name": "kw",
+        "type": "Integer",
+        "source": "static_param_backflow",
+        "callsites": {
+          "/home/yahn/litedb/nk-zero-gap20260629-301490-3j9vna/driver.rb:37:3": 1
+        },
+        "callsite_count": 1
+      }
+    },
+    {
+      "kind": "fix_sig_return",
+      "confidence": "high",
+      "path": "/home/yahn/litedb/nk-zero-gap20260629-301490-3j9vna/require_relative_lib.rb",
+      "line": 14,
+      "message": "existing sig return is T.untyped; forwarded-return chain resolves to String",
+      "data": {
+        "type": "String",
+        "source": "forwarded_return_chain",
+        "chain": [
+          "/home/yahn/litedb/nk-zero-gap20260629-301490-3j9vna/require_relative_lib.rb:14 RelReq#calc",
+          "typed_call to_s at line 14"
+        ]
+      }
+    },
+    {
+      "kind": "add_struct_field_sig",
+      "confidence": "review",
+      "path": "sorbet/rbi/ast-struct-fields.rbi",
+      "line": 1,
+      "message": "type Pair#a as T.any(String, T.untyped) (struct field RBI)",
+      "data": {
+        "class": "Pair",
+        "field": "a",
+        "type": "T.any(String, T.untyped)"
+      }
+    },
+    {
+      "kind": "add_struct_field_sig",
+      "confidence": "review",
+      "path": "sorbet/rbi/ast-struct-fields.rbi",
+      "line": 1,
+      "message": "type Pair#b as Integer (struct field RBI)",
+      "data": {
+        "class": "Pair",
+        "field": "b",
+        "type": "Integer"
+      }
+    }
+  ],
+  "diagnostics": {
+    "sorbet_errors": [
+
+    ],
+    "nil_origins": [
+
+    ],
+    "sorbet_feedback": [
+
+    ]
+  }
+}

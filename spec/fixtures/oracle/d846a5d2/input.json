@@ -1,0 +1,494 @@
+{
+  "methods": [
+    {
+      "key": [
+        "NoReturnExample",
+        "fail_now",
+        "instance",
+        "/home/yahn/litedb/nil-kill-noreturn20260629-301490-rrobsl/noreturn_example.rb",
+        5
+      ],
+      "calls": 0,
+      "ok_calls": 0,
+      "raised_calls": 0,
+      "params_by_name": {
+      },
+      "params_ok": {
+      },
+      "params_raised": {
+      },
+      "param_elem": {
+      },
+      "param_kv": {
+      },
+      "param_elem_shapes": {
+      },
+      "param_kv_shapes": {
+      },
+      "param_sites": {
+      },
+      "param_sites_ok": {
+      },
+      "param_sites_raised": {
+      },
+      "param_traces": {
+      },
+      "param_traces_ok": {
+      },
+      "param_traces_raised": {
+      },
+      "returns": [
+
+      ],
+      "return_elem": [
+
+      ],
+      "return_kv": [
+        [
+
+        ],
+        [
+
+        ]
+      ],
+      "return_elem_shapes": [
+
+      ],
+      "return_kv_shapes": [
+        [
+
+        ],
+        [
+
+        ]
+      ],
+      "raised": [
+
+      ],
+      "source": {
+        "path": "/home/yahn/litedb/nil-kill-noreturn20260629-301490-rrobsl/noreturn_example.rb",
+        "line": 5,
+        "end_line": 7,
+        "class": "NoReturnExample",
+        "method": "fail_now",
+        "kind": "instance",
+        "language": "ruby",
+        "has_sig": true,
+        "sig": "sig { returns(T.untyped) }",
+        "params": [
+
+        ],
+        "scope": [
+          "NoReturnExample"
+        ],
+        "non_nil_params": [
+
+        ],
+        "uses_yield": false,
+        "untraceable_params": [
+
+        ],
+        "protocols": {
+        },
+        "noreturn_candidate": true
+      },
+      "has_sig": true
+    }
+  ],
+  "tlets": [
+
+  ],
+  "facts": {
+    "files": {
+      "nil-kill-noreturn20260629-301490-rrobsl/noreturn_example.rb": {
+        "language": "ruby",
+        "methods": 0,
+        "fields": 0,
+        "digest": "sha256:bf6bcff5443a9003ba6b8f0af0344c18e95b77a7b7a1da899ac3847d16ddbcde",
+        "parser": "tree_sitter"
+      }
+    },
+    "unsigned_methods": [
+
+    ],
+    "existing_sigs": [
+      {
+        "path": "/home/yahn/litedb/nil-kill-noreturn20260629-301490-rrobsl/noreturn_example.rb",
+        "line": 5,
+        "end_line": 7,
+        "class": "NoReturnExample",
+        "method": "fail_now",
+        "kind": "instance",
+        "language": "ruby",
+        "has_sig": true,
+        "sig": "sig { returns(T.untyped) }",
+        "params": [
+
+        ],
+        "scope": [
+          "NoReturnExample"
+        ],
+        "non_nil_params": [
+
+        ],
+        "uses_yield": false,
+        "untraceable_params": [
+
+        ],
+        "protocols": {
+        },
+        "noreturn_candidate": true
+      }
+    ],
+    "tlet_sites": [
+
+    ],
+    "dead_nil_checks": [
+
+    ],
+    "deterministic_guards": [
+
+    ],
+    "struct_declarations": [
+
+    ],
+    "struct_field_static": [
+
+    ],
+    "tuple_arrays": [
+
+    ],
+    "hash_shapes": [
+
+    ],
+    "collection_index_lookups": [
+
+    ],
+    "hash_record_blockers": [
+
+    ],
+    "hash_record_member_calls": [
+
+    ],
+    "collection_runtime": [
+
+    ],
+    "ivar_runtime": [
+
+    ],
+    "collect_coverage": {
+    },
+    "type_normalizers": [
+
+    ],
+    "dispatcher_inferences": [
+
+    ],
+    "return_origins": [
+      {
+        "array_element_shape": null,
+        "blockers": [
+          "untyped callee raise at /home/yahn/litedb/nil-kill-noreturn20260629-301490-rrobsl/noreturn_example.rb:6"
+        ],
+        "candidate_type": "T.untyped",
+        "class": "NoReturnExample",
+        "confidence": "blocked",
+        "control_shape": "branchless",
+        "end_line": 7,
+        "hash_shape": null,
+        "implicit": true,
+        "kind": "instance",
+        "line": 5,
+        "method": "fail_now",
+        "path": "/home/yahn/litedb/nil-kill-noreturn20260629-301490-rrobsl/noreturn_example.rb",
+        "return_syntax": "implicit",
+        "sources": [
+          {
+            "callee": "raise",
+            "code": "raise \"boom\"",
+            "kind": "call_untyped",
+            "line": 6,
+            "receiver_type": null
+          }
+        ]
+      }
+    ],
+    "param_origins": [
+      {
+        "arg_kind": "positional",
+        "array_element_shape": null,
+        "callee": "extend",
+        "code": "T::Sig",
+        "enclosing_scope": "NoReturnExample",
+        "hash_shape": null,
+        "line": 2,
+        "origin_kind": "unknown",
+        "path": "/home/yahn/litedb/nil-kill-noreturn20260629-301490-rrobsl/noreturn_example.rb",
+        "receiver": null,
+        "slot": "0",
+        "source_method": null,
+        "type": null,
+        "unknown_reasons": [
+          "operation unresolved constant T::Sig"
+        ]
+      },
+      {
+        "arg_kind": "positional",
+        "array_element_shape": null,
+        "callee": "returns",
+        "code": "T.untyped",
+        "enclosing_scope": "NoReturnExample",
+        "hash_shape": null,
+        "line": 4,
+        "origin_kind": "untyped_return",
+        "path": "/home/yahn/litedb/nil-kill-noreturn20260629-301490-rrobsl/noreturn_example.rb",
+        "receiver": null,
+        "slot": "0",
+        "source_method": "untyped",
+        "type": null,
+        "unknown_reasons": [
+
+        ]
+      },
+      {
+        "arg_kind": "positional",
+        "array_element_shape": null,
+        "callee": "sig",
+        "code": "sig",
+        "enclosing_scope": "NoReturnExample",
+        "hash_shape": null,
+        "line": 4,
+        "origin_kind": "untyped_return",
+        "path": "/home/yahn/litedb/nil-kill-noreturn20260629-301490-rrobsl/noreturn_example.rb",
+        "receiver": null,
+        "slot": "0",
+        "source_method": "sig",
+        "type": null,
+        "unknown_reasons": [
+
+        ]
+      },
+      {
+        "arg_kind": "positional",
+        "array_element_shape": null,
+        "callee": "untyped",
+        "code": "",
+        "enclosing_scope": "NoReturnExample",
+        "hash_shape": null,
+        "line": 4,
+        "origin_kind": "static",
+        "path": "/home/yahn/litedb/nil-kill-noreturn20260629-301490-rrobsl/noreturn_example.rb",
+        "receiver": "T",
+        "slot": "0",
+        "source_method": null,
+        "type": "T::Array[T.untyped]",
+        "unknown_reasons": [
+
+        ]
+      },
+      {
+        "arg_kind": "positional",
+        "array_element_shape": null,
+        "callee": "raise",
+        "code": "\"boom\"",
+        "enclosing_scope": "NoReturnExample",
+        "hash_shape": null,
+        "line": 6,
+        "origin_kind": "static",
+        "path": "/home/yahn/litedb/nil-kill-noreturn20260629-301490-rrobsl/noreturn_example.rb",
+        "receiver": null,
+        "slot": "0",
+        "source_method": null,
+        "type": "String",
+        "unknown_reasons": [
+
+        ]
+      }
+    ],
+    "rbi_field_types": [
+
+    ],
+    "noreturn_methods": [
+      {
+        "class": "NoReturnExample",
+        "kind": "instance",
+        "line": 5,
+        "name": "fail_now",
+        "path": "/home/yahn/litedb/nil-kill-noreturn20260629-301490-rrobsl/noreturn_example.rb"
+      }
+    ],
+    "runtime_call_edges": [
+
+    ],
+    "fallibility_pressure": [
+
+    ],
+    "hidden_enum_pressure": [
+
+    ],
+    "flow_graph": null,
+    "static_evidence_summary": {
+      "files": 1,
+      "methods": 1,
+      "fields": 0,
+      "signatures": 1,
+      "state_types": 0,
+      "state_type_records": 0,
+      "state_protocols": 0,
+      "state_param_origins": 0,
+      "state_protocol_records": 0,
+      "state_param_origin_records": 0,
+      "type_definitions": 1,
+      "alias_recommendations": 0,
+      "struct_declarations": 0,
+      "hash_shapes": 0,
+      "array_shapes": 0,
+      "collection_index_lookups": 0,
+      "hash_record_blockers": 0,
+      "tlet_sites": 0,
+      "dead_nil_checks": 0,
+      "deterministic_guards": 0,
+      "return_origins": 1,
+      "noreturn_methods": 1,
+      "rbi_field_types": 0,
+      "ivar_protocols": 0,
+      "ivar_param_origins": 0
+    },
+    "rescue_handlers": [
+
+    ],
+    "return_usage_sites": [
+      {
+        "code": "extend T::Sig",
+        "context": "statement",
+        "current_method": null,
+        "handler_line": null,
+        "line": 2,
+        "name": "extend",
+        "path": "/home/yahn/litedb/nil-kill-noreturn20260629-301490-rrobsl/noreturn_example.rb"
+      },
+      {
+        "code": "sig",
+        "context": "statement",
+        "current_method": null,
+        "handler_line": null,
+        "line": 4,
+        "name": "sig",
+        "path": "/home/yahn/litedb/nil-kill-noreturn20260629-301490-rrobsl/noreturn_example.rb"
+      },
+      {
+        "code": "returns(T.untyped)",
+        "context": "statement",
+        "current_method": null,
+        "handler_line": null,
+        "line": 4,
+        "name": "returns",
+        "path": "/home/yahn/litedb/nil-kill-noreturn20260629-301490-rrobsl/noreturn_example.rb"
+      },
+      {
+        "code": "T.untyped",
+        "context": "value",
+        "current_method": null,
+        "handler_line": null,
+        "line": 4,
+        "name": "untyped",
+        "path": "/home/yahn/litedb/nil-kill-noreturn20260629-301490-rrobsl/noreturn_example.rb"
+      },
+      {
+        "code": "raise \"boom\"",
+        "context": "return",
+        "current_method": "fail_now",
+        "handler_line": null,
+        "line": 6,
+        "name": "raise",
+        "path": "/home/yahn/litedb/nil-kill-noreturn20260629-301490-rrobsl/noreturn_example.rb"
+      }
+    ],
+    "return_direct_usage_sites": [
+      {
+        "code": "extend T::Sig",
+        "context": "statement",
+        "current_method": null,
+        "handler_line": null,
+        "line": 2,
+        "name": "extend",
+        "path": "/home/yahn/litedb/nil-kill-noreturn20260629-301490-rrobsl/noreturn_example.rb"
+      },
+      {
+        "code": "sig",
+        "context": "statement",
+        "current_method": null,
+        "handler_line": null,
+        "line": 4,
+        "name": "sig",
+        "path": "/home/yahn/litedb/nil-kill-noreturn20260629-301490-rrobsl/noreturn_example.rb"
+      },
+      {
+        "code": "returns(T.untyped)",
+        "context": "statement",
+        "current_method": null,
+        "handler_line": null,
+        "line": 4,
+        "name": "returns",
+        "path": "/home/yahn/litedb/nil-kill-noreturn20260629-301490-rrobsl/noreturn_example.rb"
+      },
+      {
+        "code": "T.untyped",
+        "context": "value",
+        "current_method": null,
+        "handler_line": null,
+        "line": 4,
+        "name": "untyped",
+        "path": "/home/yahn/litedb/nil-kill-noreturn20260629-301490-rrobsl/noreturn_example.rb"
+      },
+      {
+        "code": "raise \"boom\"",
+        "context": "return",
+        "current_method": "fail_now",
+        "handler_line": null,
+        "line": 6,
+        "name": "raise",
+        "path": "/home/yahn/litedb/nil-kill-noreturn20260629-301490-rrobsl/noreturn_example.rb"
+      }
+    ],
+    "hash_record_escape_sites": [
+
+    ],
+    "hidden_enum_observations": [
+
+    ],
+    "ivar_protocols": {
+    },
+    "ivar_param_origins": {
+    }
+  },
+  "unused_return_methods_by_location": {
+    "[\"/home/yahn/litedb/nil-kill-noreturn20260629-301490-rrobsl/noreturn_example.rb\",5,\"NoReturnExample\",\"fail_now\",\"instance\"]": {
+      "path": "/home/yahn/litedb/nil-kill-noreturn20260629-301490-rrobsl/noreturn_example.rb",
+      "line": 5,
+      "end_line": 7,
+      "class": "NoReturnExample",
+      "method": "fail_now",
+      "kind": "instance",
+      "language": "ruby",
+      "has_sig": true,
+      "sig": "sig { returns(T.untyped) }",
+      "params": [
+
+      ],
+      "scope": [
+        "NoReturnExample"
+      ],
+      "non_nil_params": [
+
+      ],
+      "uses_yield": false,
+      "untraceable_params": [
+
+      ],
+      "protocols": {
+      },
+      "noreturn_candidate": true
+    }
+  }
+}

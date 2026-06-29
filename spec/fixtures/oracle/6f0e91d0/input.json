@@ -1,0 +1,760 @@
+{
+  "methods": [
+    {
+      "key": [
+        "GuardSample",
+        "check",
+        "instance",
+        "/tmp/nil-kill-deterministic-infer20260629-301490-fwb8l3/guard_sample.rb",
+        5
+      ],
+      "calls": 0,
+      "ok_calls": 0,
+      "raised_calls": 0,
+      "params_by_name": {
+      },
+      "params_ok": {
+      },
+      "params_raised": {
+      },
+      "param_elem": {
+      },
+      "param_kv": {
+      },
+      "param_elem_shapes": {
+      },
+      "param_kv_shapes": {
+      },
+      "param_sites": {
+      },
+      "param_sites_ok": {
+      },
+      "param_sites_raised": {
+      },
+      "param_traces": {
+      },
+      "param_traces_ok": {
+      },
+      "param_traces_raised": {
+      },
+      "returns": [
+
+      ],
+      "return_elem": [
+
+      ],
+      "return_kv": [
+        [
+
+        ],
+        [
+
+        ]
+      ],
+      "return_elem_shapes": [
+
+      ],
+      "return_kv_shapes": [
+        [
+
+        ],
+        [
+
+        ]
+      ],
+      "raised": [
+
+      ],
+      "source": {
+        "path": "/tmp/nil-kill-deterministic-infer20260629-301490-fwb8l3/guard_sample.rb",
+        "line": 5,
+        "end_line": 17,
+        "class": "GuardSample",
+        "method": "check",
+        "kind": "instance",
+        "language": "ruby",
+        "has_sig": true,
+        "sig": "sig { params(name: String, count: Integer).void }",
+        "params": [
+          {
+            "name": "name",
+            "nil_default": false,
+            "type": "String"
+          },
+          {
+            "name": "count",
+            "nil_default": false,
+            "type": "Integer"
+          }
+        ],
+        "scope": [
+          "GuardSample"
+        ],
+        "non_nil_params": [
+          "name",
+          "count"
+        ],
+        "uses_yield": false,
+        "untraceable_params": [
+
+        ],
+        "protocols": {
+        },
+        "noreturn_candidate": false
+      },
+      "has_sig": true
+    }
+  ],
+  "tlets": [
+
+  ],
+  "facts": {
+    "files": {
+      "../../../tmp/nil-kill-deterministic-infer20260629-301490-fwb8l3/guard_sample.rb": {
+        "language": "ruby",
+        "methods": 0,
+        "fields": 0,
+        "digest": "sha256:612355c4be9ee4b7a0e60b42dc79cbbb09a23d36787a12f101e35c57f39ab383",
+        "parser": "tree_sitter"
+      }
+    },
+    "unsigned_methods": [
+
+    ],
+    "existing_sigs": [
+      {
+        "path": "/tmp/nil-kill-deterministic-infer20260629-301490-fwb8l3/guard_sample.rb",
+        "line": 5,
+        "end_line": 17,
+        "class": "GuardSample",
+        "method": "check",
+        "kind": "instance",
+        "language": "ruby",
+        "has_sig": true,
+        "sig": "sig { params(name: String, count: Integer).void }",
+        "params": [
+          {
+            "name": "name",
+            "nil_default": false,
+            "type": "String"
+          },
+          {
+            "name": "count",
+            "nil_default": false,
+            "type": "Integer"
+          }
+        ],
+        "scope": [
+          "GuardSample"
+        ],
+        "non_nil_params": [
+          "name",
+          "count"
+        ],
+        "uses_yield": false,
+        "untraceable_params": [
+
+        ],
+        "protocols": {
+        },
+        "noreturn_candidate": false
+      }
+    ],
+    "tlet_sites": [
+
+    ],
+    "dead_nil_checks": [
+
+    ],
+    "deterministic_guards": [
+      {
+        "branch_kind": "if",
+        "class": "GuardSample",
+        "code": "name.is_a?(String)",
+        "line": 6,
+        "method": "check",
+        "origin_kind": "param",
+        "origin_name": "name",
+        "path": "/tmp/nil-kill-deterministic-infer20260629-301490-fwb8l3/guard_sample.rb",
+        "predicate_kind": "class_guard",
+        "proof_tier": "static_proven",
+        "reason": "name has static type String; is_a?(String) is always true",
+        "taken_branch": "body",
+        "truth_value": true
+      },
+      {
+        "branch_kind": "if",
+        "class": "GuardSample",
+        "code": "name.is_a?(String)",
+        "line": 6,
+        "method": "check",
+        "origin_kind": "param",
+        "origin_name": "name",
+        "path": "/tmp/nil-kill-deterministic-infer20260629-301490-fwb8l3/guard_sample.rb",
+        "predicate_kind": "class_guard",
+        "proof_tier": "static_proven",
+        "reason": "name has static type String; is_a?(String) is always true",
+        "taken_branch": "body",
+        "truth_value": true
+      },
+      {
+        "branch_kind": "if",
+        "class": "GuardSample",
+        "code": "name.is_a?(String)",
+        "line": 6,
+        "method": "check",
+        "origin_kind": "param",
+        "origin_name": "name",
+        "path": "/tmp/nil-kill-deterministic-infer20260629-301490-fwb8l3/guard_sample.rb",
+        "predicate_kind": "class_guard",
+        "proof_tier": "static_proven",
+        "reason": "name has static type String; is_a?(String) is always true",
+        "taken_branch": "body",
+        "truth_value": true
+      },
+      {
+        "branch_kind": "if",
+        "class": "GuardSample",
+        "code": "name.is_a?(String)",
+        "line": 6,
+        "method": "check",
+        "origin_kind": "param",
+        "origin_name": "name",
+        "path": "/tmp/nil-kill-deterministic-infer20260629-301490-fwb8l3/guard_sample.rb",
+        "predicate_kind": "class_guard",
+        "proof_tier": "static_proven",
+        "reason": "name has static type String; is_a?(String) is always true",
+        "taken_branch": "body",
+        "truth_value": true
+      },
+      {
+        "branch_kind": "unless",
+        "class": "GuardSample",
+        "code": "count.is_a?(String)",
+        "line": 10,
+        "method": "check",
+        "origin_kind": "param",
+        "origin_name": "count",
+        "path": "/tmp/nil-kill-deterministic-infer20260629-301490-fwb8l3/guard_sample.rb",
+        "predicate_kind": "class_guard",
+        "proof_tier": "static_proven",
+        "reason": "count has static type Integer; is_a?(String) is always false",
+        "taken_branch": "body",
+        "truth_value": false
+      },
+      {
+        "branch_kind": "unless",
+        "class": "GuardSample",
+        "code": "count.is_a?(String)",
+        "line": 10,
+        "method": "check",
+        "origin_kind": "param",
+        "origin_name": "count",
+        "path": "/tmp/nil-kill-deterministic-infer20260629-301490-fwb8l3/guard_sample.rb",
+        "predicate_kind": "class_guard",
+        "proof_tier": "static_proven",
+        "reason": "count has static type Integer; is_a?(String) is always false",
+        "taken_branch": "body",
+        "truth_value": false
+      },
+      {
+        "branch_kind": "unless",
+        "class": "GuardSample",
+        "code": "count.is_a?(String)",
+        "line": 10,
+        "method": "check",
+        "origin_kind": "param",
+        "origin_name": "count",
+        "path": "/tmp/nil-kill-deterministic-infer20260629-301490-fwb8l3/guard_sample.rb",
+        "predicate_kind": "class_guard",
+        "proof_tier": "static_proven",
+        "reason": "count has static type Integer; is_a?(String) is always false",
+        "taken_branch": "body",
+        "truth_value": false
+      },
+      {
+        "branch_kind": "unless",
+        "class": "GuardSample",
+        "code": "count.is_a?(String)",
+        "line": 10,
+        "method": "check",
+        "origin_kind": "param",
+        "origin_name": "count",
+        "path": "/tmp/nil-kill-deterministic-infer20260629-301490-fwb8l3/guard_sample.rb",
+        "predicate_kind": "class_guard",
+        "proof_tier": "static_proven",
+        "reason": "count has static type Integer; is_a?(String) is always false",
+        "taken_branch": "body",
+        "truth_value": false
+      },
+      {
+        "branch_kind": "if",
+        "class": "GuardSample",
+        "code": "1 == 1",
+        "line": 14,
+        "method": "check",
+        "origin_kind": null,
+        "origin_name": null,
+        "path": "/tmp/nil-kill-deterministic-infer20260629-301490-fwb8l3/guard_sample.rb",
+        "predicate_kind": "literal_comparison",
+        "proof_tier": "static_proven",
+        "reason": "1 == 1 is always true",
+        "taken_branch": "body",
+        "truth_value": true
+      },
+      {
+        "branch_kind": "if",
+        "class": "GuardSample",
+        "code": "1 == 1",
+        "line": 14,
+        "method": "check",
+        "origin_kind": null,
+        "origin_name": null,
+        "path": "/tmp/nil-kill-deterministic-infer20260629-301490-fwb8l3/guard_sample.rb",
+        "predicate_kind": "literal_comparison",
+        "proof_tier": "static_proven",
+        "reason": "1 == 1 is always true",
+        "taken_branch": "body",
+        "truth_value": true
+      },
+      {
+        "branch_kind": "if",
+        "class": "GuardSample",
+        "code": "1 == 1",
+        "line": 14,
+        "method": "check",
+        "origin_kind": null,
+        "origin_name": null,
+        "path": "/tmp/nil-kill-deterministic-infer20260629-301490-fwb8l3/guard_sample.rb",
+        "predicate_kind": "literal_comparison",
+        "proof_tier": "static_proven",
+        "reason": "1 == 1 is always true",
+        "taken_branch": "body",
+        "truth_value": true
+      },
+      {
+        "branch_kind": "if",
+        "class": "GuardSample",
+        "code": "1 == 1",
+        "line": 14,
+        "method": "check",
+        "origin_kind": null,
+        "origin_name": null,
+        "path": "/tmp/nil-kill-deterministic-infer20260629-301490-fwb8l3/guard_sample.rb",
+        "predicate_kind": "literal_comparison",
+        "proof_tier": "static_proven",
+        "reason": "1 == 1 is always true",
+        "taken_branch": "body",
+        "truth_value": true
+      }
+    ],
+    "struct_declarations": [
+
+    ],
+    "struct_field_static": [
+
+    ],
+    "tuple_arrays": [
+      {
+        "path": "/tmp/nil-kill-deterministic-infer20260629-301490-fwb8l3/guard_sample.rb",
+        "line": 4,
+        "types": [
+          "T.untyped",
+          "T.untyped"
+        ],
+        "size": 0,
+        "code": "params(name: String, count: Integer)",
+        "source": "static_evidence"
+      }
+    ],
+    "hash_shapes": [
+
+    ],
+    "collection_index_lookups": [
+
+    ],
+    "hash_record_blockers": [
+
+    ],
+    "hash_record_member_calls": [
+
+    ],
+    "collection_runtime": [
+
+    ],
+    "ivar_runtime": [
+
+    ],
+    "collect_coverage": {
+    },
+    "type_normalizers": [
+
+    ],
+    "dispatcher_inferences": [
+
+    ],
+    "return_origins": [
+      {
+        "array_element_shape": null,
+        "blockers": [
+
+        ],
+        "candidate_type": "T.nilable(Integer)",
+        "class": "GuardSample",
+        "confidence": "strong",
+        "control_shape": "branching",
+        "end_line": 17,
+        "hash_shape": null,
+        "implicit": true,
+        "kind": "instance",
+        "line": 5,
+        "method": "check",
+        "path": "/tmp/nil-kill-deterministic-infer20260629-301490-fwb8l3/guard_sample.rb",
+        "return_syntax": "implicit",
+        "sources": [
+          {
+            "code": "count",
+            "kind": "static",
+            "line": 15,
+            "type": "Integer"
+          },
+          {
+            "code": "implicit else",
+            "kind": "nil",
+            "line": 14,
+            "type": "NilClass"
+          }
+        ]
+      }
+    ],
+    "param_origins": [
+      {
+        "arg_kind": "positional",
+        "array_element_shape": null,
+        "callee": "extend",
+        "code": "T::Sig",
+        "enclosing_scope": "GuardSample",
+        "hash_shape": null,
+        "line": 2,
+        "origin_kind": "unknown",
+        "path": "/tmp/nil-kill-deterministic-infer20260629-301490-fwb8l3/guard_sample.rb",
+        "receiver": null,
+        "slot": "0",
+        "source_method": null,
+        "type": null,
+        "unknown_reasons": [
+          "operation unresolved constant T::Sig"
+        ]
+      },
+      {
+        "arg_kind": "keyword",
+        "array_element_shape": null,
+        "callee": "params",
+        "code": "String",
+        "enclosing_scope": "GuardSample",
+        "hash_shape": null,
+        "line": 4,
+        "origin_kind": "static",
+        "path": "/tmp/nil-kill-deterministic-infer20260629-301490-fwb8l3/guard_sample.rb",
+        "receiver": null,
+        "slot": "name",
+        "source_method": null,
+        "type": "T.class_of(String)",
+        "unknown_reasons": [
+
+        ]
+      },
+      {
+        "arg_kind": "keyword",
+        "array_element_shape": null,
+        "callee": "params",
+        "code": "Integer",
+        "enclosing_scope": "GuardSample",
+        "hash_shape": null,
+        "line": 4,
+        "origin_kind": "static",
+        "path": "/tmp/nil-kill-deterministic-infer20260629-301490-fwb8l3/guard_sample.rb",
+        "receiver": null,
+        "slot": "count",
+        "source_method": null,
+        "type": "T.class_of(Integer)",
+        "unknown_reasons": [
+
+        ]
+      },
+      {
+        "arg_kind": "positional",
+        "array_element_shape": null,
+        "callee": "sig",
+        "code": "sig",
+        "enclosing_scope": "GuardSample",
+        "hash_shape": null,
+        "line": 4,
+        "origin_kind": "untyped_return",
+        "path": "/tmp/nil-kill-deterministic-infer20260629-301490-fwb8l3/guard_sample.rb",
+        "receiver": null,
+        "slot": "0",
+        "source_method": "sig",
+        "type": null,
+        "unknown_reasons": [
+
+        ]
+      },
+      {
+        "arg_kind": "positional",
+        "array_element_shape": null,
+        "callee": "void",
+        "code": "",
+        "enclosing_scope": "GuardSample",
+        "hash_shape": null,
+        "line": 4,
+        "origin_kind": "static",
+        "path": "/tmp/nil-kill-deterministic-infer20260629-301490-fwb8l3/guard_sample.rb",
+        "receiver": "params(name: String, count: Integer)",
+        "slot": "0",
+        "source_method": null,
+        "type": "T::Array[T.untyped]",
+        "unknown_reasons": [
+
+        ]
+      },
+      {
+        "arg_kind": "positional",
+        "array_element_shape": null,
+        "callee": "is_a?",
+        "code": "String",
+        "enclosing_scope": "GuardSample",
+        "hash_shape": null,
+        "line": 6,
+        "origin_kind": "static",
+        "path": "/tmp/nil-kill-deterministic-infer20260629-301490-fwb8l3/guard_sample.rb",
+        "receiver": "name",
+        "slot": "0",
+        "source_method": null,
+        "type": "T.class_of(String)",
+        "unknown_reasons": [
+
+        ]
+      },
+      {
+        "arg_kind": "positional",
+        "array_element_shape": null,
+        "callee": "is_a?",
+        "code": "String",
+        "enclosing_scope": "GuardSample",
+        "hash_shape": null,
+        "line": 10,
+        "origin_kind": "static",
+        "path": "/tmp/nil-kill-deterministic-infer20260629-301490-fwb8l3/guard_sample.rb",
+        "receiver": "count",
+        "slot": "0",
+        "source_method": null,
+        "type": "T.class_of(String)",
+        "unknown_reasons": [
+
+        ]
+      },
+      {
+        "arg_kind": "positional",
+        "array_element_shape": null,
+        "callee": "==",
+        "code": "1",
+        "enclosing_scope": "GuardSample",
+        "hash_shape": null,
+        "line": 14,
+        "origin_kind": "static",
+        "path": "/tmp/nil-kill-deterministic-infer20260629-301490-fwb8l3/guard_sample.rb",
+        "receiver": "1",
+        "slot": "0",
+        "source_method": null,
+        "type": "Integer",
+        "unknown_reasons": [
+
+        ]
+      }
+    ],
+    "rbi_field_types": [
+
+    ],
+    "noreturn_methods": [
+
+    ],
+    "runtime_call_edges": [
+
+    ],
+    "fallibility_pressure": [
+
+    ],
+    "hidden_enum_pressure": [
+
+    ],
+    "flow_graph": null,
+    "static_evidence_summary": {
+      "files": 1,
+      "methods": 1,
+      "fields": 0,
+      "signatures": 1,
+      "state_types": 0,
+      "state_type_records": 0,
+      "state_protocols": 0,
+      "state_param_origins": 0,
+      "state_protocol_records": 0,
+      "state_param_origin_records": 0,
+      "type_definitions": 1,
+      "alias_recommendations": 0,
+      "struct_declarations": 0,
+      "hash_shapes": 0,
+      "array_shapes": 1,
+      "collection_index_lookups": 0,
+      "hash_record_blockers": 0,
+      "tlet_sites": 0,
+      "dead_nil_checks": 0,
+      "deterministic_guards": 12,
+      "return_origins": 1,
+      "noreturn_methods": 0,
+      "rbi_field_types": 0,
+      "ivar_protocols": 0,
+      "ivar_param_origins": 0
+    },
+    "rescue_handlers": [
+
+    ],
+    "return_usage_sites": [
+      {
+        "code": "extend T::Sig",
+        "context": "statement",
+        "current_method": null,
+        "handler_line": null,
+        "line": 2,
+        "name": "extend",
+        "path": "/tmp/nil-kill-deterministic-infer20260629-301490-fwb8l3/guard_sample.rb"
+      },
+      {
+        "code": "sig",
+        "context": "statement",
+        "current_method": null,
+        "handler_line": null,
+        "line": 4,
+        "name": "sig",
+        "path": "/tmp/nil-kill-deterministic-infer20260629-301490-fwb8l3/guard_sample.rb"
+      },
+      {
+        "code": "params(name: String, count: Integer).void",
+        "context": "statement",
+        "current_method": null,
+        "handler_line": null,
+        "line": 4,
+        "name": "void",
+        "path": "/tmp/nil-kill-deterministic-infer20260629-301490-fwb8l3/guard_sample.rb"
+      },
+      {
+        "code": "params(name: String, count: Integer)",
+        "context": "value",
+        "current_method": null,
+        "handler_line": null,
+        "line": 4,
+        "name": "params",
+        "path": "/tmp/nil-kill-deterministic-infer20260629-301490-fwb8l3/guard_sample.rb"
+      },
+      {
+        "code": "name.is_a?(String)",
+        "context": "value",
+        "current_method": "check",
+        "handler_line": null,
+        "line": 6,
+        "name": "is_a?",
+        "path": "/tmp/nil-kill-deterministic-infer20260629-301490-fwb8l3/guard_sample.rb"
+      },
+      {
+        "code": "count.is_a?(String)",
+        "context": "value",
+        "current_method": "check",
+        "handler_line": null,
+        "line": 10,
+        "name": "is_a?",
+        "path": "/tmp/nil-kill-deterministic-infer20260629-301490-fwb8l3/guard_sample.rb"
+      }
+    ],
+    "return_direct_usage_sites": [
+      {
+        "code": "extend T::Sig",
+        "context": "statement",
+        "current_method": null,
+        "handler_line": null,
+        "line": 2,
+        "name": "extend",
+        "path": "/tmp/nil-kill-deterministic-infer20260629-301490-fwb8l3/guard_sample.rb"
+      },
+      {
+        "code": "sig",
+        "context": "statement",
+        "current_method": null,
+        "handler_line": null,
+        "line": 4,
+        "name": "sig",
+        "path": "/tmp/nil-kill-deterministic-infer20260629-301490-fwb8l3/guard_sample.rb"
+      },
+      {
+        "code": "params(name: String, count: Integer).void",
+        "context": "statement",
+        "current_method": null,
+        "handler_line": null,
+        "line": 4,
+        "name": "void",
+        "path": "/tmp/nil-kill-deterministic-infer20260629-301490-fwb8l3/guard_sample.rb"
+      },
+      {
+        "code": "params(name: String, count: Integer)",
+        "context": "value",
+        "current_method": null,
+        "handler_line": null,
+        "line": 4,
+        "name": "params",
+        "path": "/tmp/nil-kill-deterministic-infer20260629-301490-fwb8l3/guard_sample.rb"
+      },
+      {
+        "code": "name.is_a?(String)",
+        "context": "value",
+        "current_method": "check",
+        "handler_line": null,
+        "line": 6,
+        "name": "is_a?",
+        "path": "/tmp/nil-kill-deterministic-infer20260629-301490-fwb8l3/guard_sample.rb"
+      },
+      {
+        "code": "count.is_a?(String)",
+        "context": "value",
+        "current_method": "check",
+        "handler_line": null,
+        "line": 10,
+        "name": "is_a?",
+        "path": "/tmp/nil-kill-deterministic-infer20260629-301490-fwb8l3/guard_sample.rb"
+      }
+    ],
+    "hash_record_escape_sites": [
+      {
+        "code": "name: String",
+        "escapes_collection": true,
+        "line": 4,
+        "path": "/tmp/nil-kill-deterministic-infer20260629-301490-fwb8l3/guard_sample.rb",
+        "reason": "array_literal"
+      },
+      {
+        "code": "count: Integer",
+        "escapes_collection": true,
+        "line": 4,
+        "path": "/tmp/nil-kill-deterministic-infer20260629-301490-fwb8l3/guard_sample.rb",
+        "reason": "array_literal"
+      }
+    ],
+    "hidden_enum_observations": [
+
+    ],
+    "ivar_protocols": {
+    },
+    "ivar_param_origins": {
+    }
+  },
+  "unused_return_methods_by_location": {
+  }
+}

@@ -1,0 +1,43 @@
+{
+  "actions": [
+    {
+      "kind": "add_sig",
+      "confidence": "review",
+      "path": "/home/yahn/litedb/nil-kill-fallibility-infer20260629-301490-neu80x/pipeline.rb",
+      "line": 2,
+      "message": "add missing sig",
+      "data": {
+        "sig": "sig { returns(T.untyped) }",
+        "scope": [
+          "PipelineFallibility"
+        ],
+        "method": "root"
+      }
+    },
+    {
+      "kind": "add_sig",
+      "confidence": "review",
+      "path": "/home/yahn/litedb/nil-kill-fallibility-infer20260629-301490-neu80x/pipeline.rb",
+      "line": 6,
+      "message": "add missing sig",
+      "data": {
+        "sig": "sig { returns(T.untyped) }",
+        "scope": [
+          "PipelineFallibility"
+        ],
+        "method": "handled"
+      }
+    }
+  ],
+  "diagnostics": {
+    "sorbet_errors": [
+
+    ],
+    "nil_origins": [
+
+    ],
+    "sorbet_feedback": [
+
+    ]
+  }
+}
