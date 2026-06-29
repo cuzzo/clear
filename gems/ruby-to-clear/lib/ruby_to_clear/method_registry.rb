@@ -17,6 +17,28 @@ module RubyToClear
       keyword_init: true
     )
 
+    BlockLowering = Struct.new(
+      :parameter_names,
+      :value_lines,
+      :effect_lines,
+      :source_location,
+      keyword_init: true
+    ) do
+      def value_code
+        return value_lines.first if value_lines.length == 1
+
+        "{\n#{value_lines.join("\n")}\n}"
+      end
+
+      def effect_code
+        effect_lines.join("\n")
+      end
+
+      def multiline_effect?
+        effect_lines.length > 1 || effect_lines.any? { |line| line.include?("\n") }
+      end
+    end
+
     REGISTRY = {}
 
     def self.register(ruby_name, receiver: :any, &block)
@@ -130,28 +152,109 @@ module RubyToClear
       found
     end
 
-    def self.render_block_value(block_node, transpiler)
+    def self.statement_code?(code)
+      code.end_with?(";") || code.end_with?("END") || code.lstrip.start_with?("#")
+    end
+
+    def self.statement_line(code)
+      statement_code?(code) ? code : "#{code};"
+    end
+
+    def self.indent_block_line(code)
+      code.split("\n").map { |line| "  #{line}" }.join("\n")
+    end
+
+    def self.lower_literal_block(node, block_node, transpiler, method_label, min_params:, max_params:, rename:)
+      unless block_node.is_a?(Prism::BlockNode)
+        return transpiler.raise_unsupported("Unsupported #{method_label} block type: #{block_node.class.name}", node)
+      end
+
+      param_names = block_required_parameter_names(node, block_node, transpiler, method_label, min: min_params, max: max_params)
+      return param_names if unsupported_result?(param_names)
+
+      aliases = rename.call(param_names)
+      transpiler.with_renames(aliases) do
+        if (unsafe = unsafe_value_block_node(block_node))
+          next transpiler.raise_unsupported("#{method_label} block contains unsupported #{unsafe}", node)
+        end
+
+        lowering = lower_block_body(block_node, transpiler)
+        lowering.parameter_names = param_names if lowering.is_a?(BlockLowering)
+        lowering
+      end
+    end
+
+    def self.lower_block_body(block_node, transpiler)
       body = block_node.body
       unless body.is_a?(Prism::StatementsNode) && body.body.any?
         return transpiler.raise_unsupported("Pipeline block must contain at least one expression", block_node)
       end
 
       statements = body.body
-      return transpiler.visit(statements.first) if statements.length == 1
+      source_location = block_node.location
 
-      rendered = statements.map.with_index do |stmt, index|
-        code = transpiler.visit(stmt)
-        code = "#{code};" if index < statements.length - 1 &&
-                             !code.end_with?(";") &&
-                             !code.end_with?("END") &&
-                             !code.lstrip.start_with?("#")
-        code.split("\n").map { |line| "  #{line}" }.join("\n")
+      rendered = statements.map do |stmt|
+        transpiler.visit(stmt)
       end
 
-      "{\n#{rendered.join("\n")}\n}"
+      value_lines = rendered.map.with_index do |code, index|
+        line = index < rendered.length - 1 ? statement_line(code) : code
+        indent_block_line(line)
+      end
+
+      effect_lines = rendered.map do |code|
+        indent_block_line(statement_line(code))
+      end
+
+      if statements.length == 1
+        value_lines = [rendered.first]
+        effect_lines = [statement_line(rendered.first)]
+      end
+
+      BlockLowering.new(
+        parameter_names: [],
+        value_lines: value_lines,
+        effect_lines: effect_lines,
+        source_location: source_location
+      )
     end
 
-    def self.block_expression(receiver, node, transpiler, method_label)
+    def self.render_block_value(block_node, transpiler)
+      lowering = lower_block_body(block_node, transpiler)
+      return lowering if unsupported_result?(lowering)
+
+      lowering.value_code
+    end
+
+    def self.render_effect_block(lowering)
+      if lowering.multiline_effect?
+        "{\n#{lowering.effect_code}\n}"
+      else
+        "{ #{lowering.effect_code} }"
+      end
+    end
+
+    def self.block_value_lowering(node, transpiler, method_label, min_params: 0, max_params: 1)
+      block_node = node.block
+      unless block_node
+        return transpiler.raise_unsupported("#{method_label} without a block is not supported", node)
+      end
+
+      lower_literal_block(
+        node,
+        block_node,
+        transpiler,
+        method_label,
+        min_params: min_params,
+        max_params: max_params,
+        rename: lambda do |param_names|
+          param_name = param_names.first
+          param_name ? { param_name => "_" } : {}
+        end
+      )
+    end
+
+    def self.block_value_expression(receiver, node, transpiler, method_label)
       block_node = node.block
       unless block_node
         return transpiler.raise_unsupported("#{method_label} without a block is not supported", node)
@@ -160,22 +263,56 @@ module RubyToClear
       if block_node.is_a?(Prism::BlockArgumentNode)
         method_name = block_node.expression.value.to_s
         method_name = "toString" if method_name == "to_s"
-        "_.#{method_name}()"
-      elsif block_node.is_a?(Prism::BlockNode)
-        param_names = block_required_parameter_names(node, block_node, transpiler, method_label, min: 0, max: 1)
-        return param_names if unsupported_result?(param_names)
-
-        param_name = param_names.first
-        transpiler.with_renames({ param_name => "_" }) do
-          if (unsafe = unsafe_value_block_node(block_node))
-            next transpiler.raise_unsupported("#{method_label} block contains unsupported #{unsafe}", node)
-          end
-
-          render_block_value(block_node, transpiler)
-        end
-      else
-        transpiler.raise_unsupported("Unsupported #{method_label} block type: #{block_node.class.name}", node)
+        return "_.#{method_name}()"
       end
+
+      lowering = block_value_lowering(node, transpiler, method_label)
+      return lowering if unsupported_result?(lowering)
+
+      lowering.value_code
+    end
+
+    def self.block_effect_lowering(node, transpiler, method_label, min_params: 0, max_params: 1)
+      block_node = node.block
+      unless block_node
+        return transpiler.raise_unsupported("#{method_label} without a block is not supported", node)
+      end
+
+      lower_literal_block(
+        node,
+        block_node,
+        transpiler,
+        method_label,
+        min_params: min_params,
+        max_params: max_params,
+        rename: lambda do |param_names|
+          param_name = param_names.first
+          param_name ? { param_name => "_" } : {}
+        end
+      )
+    end
+
+    def self.reduce_block_lowering(node, transpiler)
+      block_node = node.block
+      unless block_node
+        return transpiler.raise_unsupported("reduce without a block is not supported", node)
+      end
+
+      lower_literal_block(
+        node,
+        block_node,
+        transpiler,
+        "reduce",
+        min_params: 2,
+        max_params: 2,
+        rename: lambda do |param_names|
+          { param_names[0] => "acc", param_names[1] => "_" }
+        end
+      )
+    end
+
+    def self.block_expression(receiver, node, transpiler, method_label)
+      block_value_expression(receiver, node, transpiler, method_label)
     end
 
     # --- Registrations ---
