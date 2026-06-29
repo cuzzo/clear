@@ -63,7 +63,7 @@ module RubyToClear
     def self.lookup(context)
       REGISTRY[[context.receiver_name, context.ruby_name]] ||
         REGISTRY[[context.receiver_kind, context.ruby_name]] ||
-        REGISTRY[["any", context.ruby_name]]
+        (context.receiver_code ? REGISTRY[["any", context.ruby_name]] : nil)
     end
 
     def self.call_handler(handler, context)
@@ -234,6 +234,24 @@ module RubyToClear
       end
     end
 
+    def self.pipeline_value_stage(receiver, stage_name, node, transpiler, method_label)
+      block_body = block_value_expression(receiver, node, transpiler, method_label)
+      return block_body if unsupported_result?(block_body)
+
+      "#{pipeline_source(receiver)} |> #{stage_name} #{block_body}"
+    end
+
+    def self.pipeline_effect_stage(receiver, source, node, transpiler, method_label)
+      lowering = block_effect_lowering(node, transpiler, method_label)
+      return lowering if unsupported_result?(lowering)
+
+      "#{pipeline_source(source)} |> EACH #{render_effect_block(lowering)}"
+    end
+
+    def self.mutable_receiver?(receiver)
+      receiver.match?(/\A[a-z_]\w*\z/)
+    end
+
     def self.block_value_lowering(node, transpiler, method_label, min_params: 0, max_params: 1)
       block_node = node.block
       unless block_node
@@ -341,10 +359,7 @@ module RubyToClear
         next context.transpiler.raise_unsupported("File.foreach block must be a literal block", context.node)
       end
 
-      param_name = block_node.parameters&.parameters&.requireds&.first&.name&.to_s
-      context.transpiler.with_renames({ param_name => "_" }) do
-        "(#{lines}) |> EACH { #{context.transpiler.visit(block_node.body)} }"
-      end
+      pipeline_effect_stage(lines, lines, context.node, context.transpiler, "File.foreach")
     end
 
     register("write", receiver: "File") do |context|
@@ -522,10 +537,18 @@ module RubyToClear
     end
 
     register("map") do |receiver, node, transpiler|
-      block_body = block_expression(receiver, node, transpiler, "map")
+      pipeline_value_stage(receiver, "SELECT", node, transpiler, "map")
+    end
+
+    register("map!") do |receiver, node, transpiler|
+      unless mutable_receiver?(receiver)
+        next transpiler.raise_unsupported("map! is only supported on a mutable local receiver", node)
+      end
+
+      block_body = block_expression(receiver, node, transpiler, "map!")
       next block_body if unsupported_result?(block_body)
 
-      "#{pipeline_source(receiver)} |> SELECT #{block_body}"
+      "#{receiver} = #{pipeline_source(receiver)} |> SELECT #{block_body}"
     end
 
     register("collect") do |context|
@@ -540,10 +563,7 @@ module RubyToClear
     end
 
     register("select") do |receiver, node, transpiler|
-      block_body = block_expression(receiver, node, transpiler, "select")
-      next block_body if unsupported_result?(block_body)
-
-      "#{pipeline_source(receiver)} |> WHERE #{block_body}"
+      pipeline_value_stage(receiver, "WHERE", node, transpiler, "select")
     end
 
     register("filter") do |context|
@@ -565,24 +585,23 @@ module RubyToClear
     end
 
     register("any?") do |receiver, node, transpiler|
-      block_body = block_expression(receiver, node, transpiler, "any?")
-      next block_body if unsupported_result?(block_body)
-
-      "#{pipeline_source(receiver)} |> ANY #{block_body}"
+      if node.block
+        pipeline_value_stage(receiver, "ANY", node, transpiler, "any?")
+      else
+        "#{pipeline_source(receiver)} |> ANY _"
+      end
     end
 
     register("all?") do |receiver, node, transpiler|
-      block_body = block_expression(receiver, node, transpiler, "all?")
-      next block_body if unsupported_result?(block_body)
-
-      "#{pipeline_source(receiver)} |> ALL #{block_body}"
+      if node.block
+        pipeline_value_stage(receiver, "ALL", node, transpiler, "all?")
+      else
+        "#{pipeline_source(receiver)} |> ALL _"
+      end
     end
 
     register("find") do |receiver, node, transpiler|
-      block_body = block_expression(receiver, node, transpiler, "find")
-      next block_body if unsupported_result?(block_body)
-
-      "#{pipeline_source(receiver)} |> FIND #{block_body}"
+      pipeline_value_stage(receiver, "FIND", node, transpiler, "find")
     end
 
     register("detect") do |context|
@@ -604,41 +623,28 @@ module RubyToClear
     end
 
     register("flat_map") do |receiver, node, transpiler|
-      block_body = block_expression(receiver, node, transpiler, "flat_map")
-      next block_body if unsupported_result?(block_body)
-
-      "#{pipeline_source(receiver)} |> UNNEST #{block_body}"
+      pipeline_value_stage(receiver, "UNNEST", node, transpiler, "flat_map")
     end
 
     register("sort_by") do |receiver, node, transpiler|
-      block_body = block_expression(receiver, node, transpiler, "sort_by")
-      next block_body if unsupported_result?(block_body)
+      pipeline_value_stage(receiver, "ORDER_BY", node, transpiler, "sort_by")
+    end
 
-      "#{pipeline_source(receiver)} |> ORDER_BY #{block_body}"
+    register("sum") do |receiver, node, transpiler|
+      if node.block
+        pipeline_value_stage(receiver, "SUM", node, transpiler, "sum")
+      else
+        "#{pipeline_source(receiver)} |> SUM _"
+      end
     end
 
     register("reduce") do |receiver, node, transpiler|
-      block_node = node.block
-      unless block_node
-        transpiler.raise_unsupported("reduce without a block is not supported", node)
-      end
-
       args = node.arguments ? node.arguments.arguments : []
       init_val = args.first ? transpiler.visit(args.first) : "0"
+      lowering = reduce_block_lowering(node, transpiler)
+      next lowering if unsupported_result?(lowering)
 
-      if block_node.is_a?(Prism::BlockNode)
-        unless transpiler.simple_block_expression?(block_node)
-          transpiler.raise_unsupported("reduce block must be a single expression", node)
-        end
-        acc_name = block_node.parameters&.parameters&.requireds&.first&.name&.to_s
-        item_name = block_node.parameters&.parameters&.requireds&.last&.name&.to_s
-        transpiler.with_renames({ acc_name => "acc", item_name => "_" }) do
-          block_body = transpiler.visit(block_node.body.body.first)
-          "#{pipeline_source(receiver)} |> REDUCE(#{init_val}) #{block_body}"
-        end
-      else
-        transpiler.raise_unsupported("Unsupported reduce block type: #{block_node.class.name}", node)
-      end
+      "#{pipeline_source(receiver)} |> REDUCE(#{init_val}) #{lowering.value_code}"
     end
 
     register("inject") do |context|
@@ -673,20 +679,31 @@ module RubyToClear
     end
 
     register("each") do |receiver, node, transpiler|
-      block_node = node.block
-      unless block_node
-        transpiler.raise_unsupported("each without a block is not supported", node)
-      end
+      pipeline_effect_stage(receiver, receiver, node, transpiler, "each")
+    end
 
-      if block_node.is_a?(Prism::BlockNode)
-        param_name = block_node.parameters&.parameters&.requireds&.first&.name&.to_s
-        transpiler.with_renames({ param_name => "_" }) do
-          block_body = transpiler.visit(block_node.body)
-          "#{pipeline_source(receiver)} |> EACH { #{block_body} }"
-        end
-      else
-        transpiler.raise_unsupported("Unsupported each block type: #{block_node.class.name}", node)
-      end
+    register("reverse_each") do |receiver, node, transpiler|
+      pipeline_effect_stage(receiver, "#{receiver}.reverse()", node, transpiler, "reverse_each")
+    end
+
+    register("each_key") do |receiver, node, transpiler|
+      pipeline_effect_stage(receiver, "#{receiver}.keys()", node, transpiler, "each_key")
+    end
+
+    register("each_value") do |receiver, node, transpiler|
+      pipeline_effect_stage(receiver, "#{receiver}.values()", node, transpiler, "each_value")
+    end
+
+    register("each_pair") do |_receiver, node, transpiler|
+      transpiler.raise_unsupported("each_pair requires pair/destructuring block support", node)
+    end
+
+    register("each_with_index") do |_receiver, node, transpiler|
+      transpiler.raise_unsupported("each_with_index requires indexed pipeline block support", node)
+    end
+
+    register("loop", receiver: "implicit") do |_receiver, node, transpiler|
+      transpiler.raise_unsupported("Ruby loop requires exact break/next semantics before lowering", node)
     end
   end
 end

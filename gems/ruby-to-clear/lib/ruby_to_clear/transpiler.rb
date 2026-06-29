@@ -920,6 +920,16 @@ module RubyToClear
             receiver_name: registry_receiver_name(node.receiver)
           )
           return translated if translated
+        else
+          translated = MethodRegistry.translate(
+            name_str,
+            nil,
+            node,
+            self,
+            receiver_kind: "implicit",
+            receiver_name: nil
+          )
+          return translated if translated
         end
 
         rec = rec_code ? "#{rec_code}." : ""

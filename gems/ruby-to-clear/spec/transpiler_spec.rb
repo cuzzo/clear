@@ -328,9 +328,34 @@ RSpec.describe RubyToClear::Transpiler do
       expect_transpile("items = []; items.sort_by { |item| item.name }", "MUTABLE items = [];\nitems |> ORDER_BY _.name();")
     end
 
+    it "transpiles mutating map and sum pipeline terminals" do
+      ruby_code = "nums = []; nums.map! { |x| y = x + 1; y }"
+      expected_clear = <<~CLEAR
+        MUTABLE nums = [];
+        nums = nums |> SELECT {
+          MUTABLE y = (_ + 1);
+          y
+        };
+      CLEAR
+      expect_transpile(ruby_code, expected_clear)
+
+      expect_transpile("nums = []; nums.sum", "MUTABLE nums = [];\nnums |> SUM _;")
+      expect_transpile("items = []; items.sum { |item| item.value }", "MUTABLE items = [];\nitems |> SUM _.value();")
+    end
+
     it "transpiles reduce and inject" do
       ruby_code = "nums = []; nums.reduce(0) { |acc, x| acc + x }"
       expected_clear = "MUTABLE nums = [];\nnums |> REDUCE(0) (acc + _);"
+      expect_transpile(ruby_code, expected_clear)
+
+      ruby_code = "nums = []; nums.reduce(0) { |acc, x| next_value = acc + x; next_value }"
+      expected_clear = <<~CLEAR
+        MUTABLE nums = [];
+        nums |> REDUCE(0) {
+          MUTABLE next_value = (acc + _);
+          next_value
+        };
+      CLEAR
       expect_transpile(ruby_code, expected_clear)
     end
 
@@ -350,6 +375,22 @@ RSpec.describe RubyToClear::Transpiler do
       ruby_code = "nums = []; nums.each { |x| puts x }"
       expected_clear = "MUTABLE nums = [];\nnums |> EACH { puts(_); };"
       expect_transpile(ruby_code, expected_clear)
+
+      ruby_code = "nums = []; nums.each { |x| puts x; audit x }"
+      expected_clear = <<~CLEAR
+        MUTABLE nums = [];
+        nums |> EACH {
+          puts(_);
+          audit(_);
+        };
+      CLEAR
+      expect_transpile(ruby_code, expected_clear)
+    end
+
+    it "transpiles receiver-transform iteration helpers" do
+      expect_transpile("nums = []; nums.reverse_each { |x| puts x }", "MUTABLE nums = [];\nnums.reverse() |> EACH { puts(_); };")
+      expect_transpile("map = {}; map.each_key { |key| puts key }", "MUTABLE map = {};\nmap.keys() |> EACH { puts(_); };")
+      expect_transpile("map = {}; map.each_value { |value| puts value }", "MUTABLE map = {};\nmap.values() |> EACH { puts(_); };")
     end
 
     it "transpiles common File and Dir stdlib calls to CLEAR primitives or thin adapters" do
@@ -527,6 +568,20 @@ RSpec.describe RubyToClear::Transpiler do
       expect {
         RubyToClear.transpile("list = []; list.each")
       }.to raise_error(RubyToClear::Transpiler::TranspilationError, /each without a block is not supported/)
+    end
+
+    it "raises error on enumerable helpers that need unavailable Ruby semantics" do
+      expect {
+        RubyToClear.transpile("pairs = []; pairs.each_pair { |key, value| puts key }")
+      }.to raise_error(RubyToClear::Transpiler::TranspilationError, /each_pair requires pair\/destructuring block support/)
+
+      expect {
+        RubyToClear.transpile("items = []; items.each_with_index { |item, index| puts item }")
+      }.to raise_error(RubyToClear::Transpiler::TranspilationError, /each_with_index requires indexed pipeline block support/)
+
+      expect {
+        RubyToClear.transpile("loop { tick }")
+      }.to raise_error(RubyToClear::Transpiler::TranspilationError, /Ruby loop requires exact break\/next semantics/)
     end
 
     it "translates multi-statement pipeline blocks with implicit final expression values" do
