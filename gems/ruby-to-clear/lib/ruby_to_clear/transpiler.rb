@@ -626,6 +626,18 @@ module RubyToClear
         rhs = visit(node.arguments.arguments.first)
         "#{lhs}.append(#{rhs})"
       when "[]"
+        if node.receiver
+          lhs = visit(node.receiver)
+          translated = MethodRegistry.translate(
+            node.name.to_s,
+            lhs,
+            node,
+            self,
+            receiver_kind: registry_receiver_kind(node.receiver),
+            receiver_name: registry_receiver_name(node.receiver)
+          )
+          return translated if translated
+        end
         lhs = visit(node.receiver)
         args = visit(node.arguments)
         "#{lhs}[#{args}]"
@@ -636,6 +648,17 @@ module RubyToClear
         "#{lhs}[#{index}] = #{value}"
       else
         if node.receiver.is_a?(Prism::ConstantReadNode) && node.name.to_s == "new"
+          rec_code = visit(node.receiver)
+          translated = MethodRegistry.translate(
+            node.name.to_s,
+            rec_code,
+            node,
+            self,
+            receiver_kind: registry_receiver_kind(node.receiver),
+            receiver_name: registry_receiver_name(node.receiver)
+          )
+          return translated if translated
+
           class_name = node.receiver.name.to_s
           if @struct_fields[class_name]
             fields = @struct_fields[class_name]

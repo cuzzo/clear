@@ -291,6 +291,48 @@ RSpec.describe RubyToClear::Transpiler do
       expected_clear = "MUTABLE nums = [];\nnums |> EACH { puts(_); };"
       expect_transpile(ruby_code, expected_clear)
     end
+
+    it "transpiles common File and Dir stdlib calls to CLEAR primitives or thin adapters" do
+      expect_transpile('File.read("a.txt")', 'readFile("a.txt");')
+      expect_transpile('File.readlines("a.txt")', 'readFile("a.txt").split("\n");')
+      expect_transpile('File.write("a.txt", body)', 'writeFile("a.txt", body());')
+      expect_transpile('File.exist?(path)', 'fileExists?(path());')
+      expect_transpile('File.join(root, "src", name)', 'joinPath(root(), "src", name());')
+      expect_transpile('File.expand_path("../x", base)', 'expandPath("../x", base());')
+      expect_transpile('File.basename(path)', 'baseName(path());')
+      expect_transpile('File.dirname(path)', 'dirName(path());')
+      expect_transpile('Dir.glob(File.join(root, "*.rb"))', 'globPaths(joinPath(root(), "*.rb"));')
+      expect_transpile('Dir.children(path)', 'listDir(path());')
+      expect_transpile('Dir.entries(path)', 'listAll(path());')
+      expect_transpile('Dir.pwd', 'currentDirectory();')
+    end
+
+    it "transpiles JSON, regexp escaping, scanner construction, and string aliases" do
+      expect_transpile('JSON.parse(raw)', 'parseJson(raw());')
+      expect_transpile('JSON.generate(doc)', 'generateJson(doc());')
+      expect_transpile('JSON.pretty_generate(doc)', 'prettyGenerateJson(doc());')
+      expect_transpile('Regexp.escape(name)', 'escapeRegex(name());')
+      expect_transpile('StringScanner.new(source)', 'Scanner{ source: source(), pos: 0 };')
+      expect_transpile('s = " x "; s.strip', "MUTABLE s = \" x \";\ns.trim();")
+      expect_transpile('s = "abc"; s.start_with?("a")', "MUTABLE s = \"abc\";\ns.startsWith?(\"a\");")
+      expect_transpile('s = "abc"; s.end_with?("c")', "MUTABLE s = \"abc\";\ns.endsWith?(\"c\");")
+      expect_transpile('s = "abc"; s.index("b")', "MUTABLE s = \"abc\";\ns.indexOf(\"b\");")
+      expect_transpile('s = "a"; s.lines', "MUTABLE s = \"a\";\ns.split(\"\\n\");")
+      expect_transpile('parts = []; parts.join', "MUTABLE parts = [];\nparts.join(\"\");")
+    end
+
+    it "transpiles Set constructors to CLEAR set-producing expressions" do
+      expect_transpile('Set.new', 'Set[];')
+      expect_transpile('Set.new([1, 2, 1])', '[1, 2, 1] |> DISTINCT _;')
+      expect_transpile('Set.new(items) { |item| item.name }', 'items() |> SELECT _.name() |> DISTINCT _;')
+      expect_transpile('Set[:a, :b]', '[.a, .b] |> DISTINCT _;')
+    end
+
+    it "rejects Ruby regexp global match state instead of hiding it behind an adapter" do
+      expect {
+        RubyToClear.transpile("Regexp.last_match(1)")
+      }.to raise_error(RubyToClear::Transpiler::TranspilationError, /implicit regexp match state/)
+    end
   end
 
   describe "unsupported/incorrect nodes in strict and lax mode" do
