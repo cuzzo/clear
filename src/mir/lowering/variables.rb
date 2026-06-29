@@ -728,7 +728,10 @@ module MIRLoweringVariables
       # producing `var x_L8 = ...; ... x.len` which is undeclared Zig.
       decl_name_map = function_state.decl_zig_names
       if decl_name_map.key?(proxy.object_id)
-        decl_name_map[node.object_id] = T.must(decl_name_map[proxy.object_id])
+        safe_name = T.must(decl_name_map[proxy.object_id])
+        decl_name_map[node.object_id] = safe_name
+        symbol_reg = node.symbol&.reg
+        decl_name_map[symbol_reg.object_id] = safe_name if symbol_reg
       end
       result
     else

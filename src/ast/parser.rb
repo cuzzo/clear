@@ -1801,6 +1801,115 @@ class ClearParser
     parse_statement_block(:CHAR, '{', '}')
   end
 
+  sig { returns(AST::BlockExpr) }
+  def parse_value_block_expr
+    block_token = consume(:CHAR, '{')
+    body = T.let([], AST::RawBody)
+    result = T.let(nil, T.nilable(AST::Node))
+
+    until match?(:CHAR, '}') || match?(:EOF)
+      if (stmt = try_parse_value_block_statement)
+        body << stmt
+        next
+      end
+
+      expr = parse_expression
+      if match!(:CHAR, ';')
+        body << expr
+        next
+      end
+
+      result = expr
+      break
+    end
+
+    unless result
+      error!(current, :UNEXPECTED_TOKEN_LINE, value: current.value, type: current.type, line: current.line)
+    end
+
+    consume(:CHAR, '}')
+    AST::BlockExpr.new(block_token, body, T.must(result))
+  end
+
+  VALUE_BLOCK_STATEMENT_KEYWORDS = T.let(Set[
+    'ASSERT', 'ASSERT_RAISES', 'BENCHMARK', 'BREAK', 'CONTINUE', 'DIE',
+    'DO', 'ENUM', 'EXIT', 'EXTERN', 'FN', 'FOR', 'METHOD', 'MUTABLE',
+    'PASS', 'PRIVATE', 'PROFILE', 'PUB', 'RAISE', 'RETURN', 'SMASH',
+    'STRUCT', 'STUB', 'SYNC', 'TEST', 'TIGHT', 'UNION', 'WHILE', 'WITH',
+    'YIELD'
+  ], T::Set[String])
+
+  sig { returns(T.nilable(AST::Node)) }
+  def try_parse_value_block_statement
+    if current.type == :VAR_ID
+      stmt = try_parse_bind_or_assign
+      return stmt if stmt
+    end
+
+    return nil unless current.type == :KEYWORD
+    return nil unless VALUE_BLOCK_STATEMENT_KEYWORDS.include?(current.value)
+
+    parse_statement
+  end
+
+  sig { returns(T::Boolean) }
+  def brace_literal_is_hash?
+    return false unless match?(:CHAR, '{')
+    return true if match_at?(1, :CHAR, '}')
+
+    depth = 0
+    offset = 0
+    loop do
+      token = peek_at(offset)
+      return false unless token
+
+      if token.type == :CHAR
+        case token.value
+        when '{', '(', '['
+          depth += 1
+        when '}', ')', ']'
+          depth -= 1
+          return false if depth <= 0
+        when ';'
+          return false if depth == 1
+        when ':'
+          return !top_level_assignment_before_brace_delimiter?(offset + 1) if depth == 1
+        end
+      end
+
+      offset += 1
+    end
+  end
+
+  sig { params(start_offset: Integer).returns(T::Boolean) }
+  def top_level_assignment_before_brace_delimiter?(start_offset)
+    depth = 1
+    offset = start_offset
+
+    loop do
+      token = peek_at(offset)
+      return false unless token
+
+      if token.type == :COMPOUND_ASSIGN && depth == 1
+        return true
+      elsif token.type == :CHAR
+        case token.value
+        when '{', '(', '['
+          depth += 1
+        when '}', ')', ']'
+          depth -= 1
+          return false if depth <= 0
+        when ',', ';'
+          return false if depth == 1
+        when '='
+          return true if depth == 1
+        end
+      end
+
+      offset += 1
+    end
+  end
+
   sig { params(precedence: Integer).returns(AST::Node) }
   def parse_expression(precedence = 0)
     lhs = parse_unary
@@ -2623,6 +2732,8 @@ class ClearParser
       bracket_token, items = parse_comma_seq(:CHAR, '[', ']') { parse_expression }
       return AST::ListLit.new(bracket_token, items, storage)
     elsif match?(:CHAR, '{')
+      return parse_value_block_expr unless brace_literal_is_hash?
+
       start_token, pairs = parse_comma_seq(:CHAR, '{', '}') do
         k = parse_expression; consume(:CHAR, ':'); v = parse_expression
         [k, v]
@@ -2647,7 +2758,7 @@ class ClearParser
         captures = parse_argument_list(as_param: false)
       end
       consume(:ARROW, '->')
-      body = parse_expression
+      body = match?(:CHAR, '{') ? parse_value_block_expr : parse_expression
       return AST::LambdaLit.new(percent_token, params, captures, body, :stack, nil)
     end
   end

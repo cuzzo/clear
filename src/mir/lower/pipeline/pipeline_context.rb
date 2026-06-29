@@ -147,6 +147,7 @@ class PipelinePlaceholderRewriter
     when AST::WithBlock then substitute_with_block(node)
     when AST::StructLit then substitute_struct_lit(node)
     when AST::HashLit then substitute_hash_lit(node)
+    when AST::BlockExpr then substitute_block_expr(node)
     when AST::Assert then substitute_assert(node)
     when AST::IfStatement then substitute_if_statement(node)
     else node
@@ -254,6 +255,10 @@ class PipelinePlaceholderRewriter
     new_bind = AST::BindExpr.new(node.token, new_name, node.type, new_value)
     new_bind.mode = node.mode
     new_bind.reassign_cleanup = node.reassign_cleanup
+    new_bind.symbol = node.symbol if new_bind.respond_to?(:symbol=) && node.respond_to?(:symbol)
+    new_bind.mir_binding_entry = node.mir_binding_entry if new_bind.respond_to?(:mir_binding_entry=) && node.respond_to?(:mir_binding_entry)
+    new_bind.compound_op = node.compound_op if new_bind.respond_to?(:compound_op=) && node.respond_to?(:compound_op)
+    new_bind.auto_atomic_op = node.auto_atomic_op if new_bind.respond_to?(:auto_atomic_op=) && node.respond_to?(:auto_atomic_op)
     copy_type_info(node, new_bind)
     new_bind
   end
@@ -322,6 +327,18 @@ class PipelinePlaceholderRewriter
     new_hl = AST::HashLit.new(node.token, new_pairs, node.storage)
     copy_type_info(node, new_hl)
     new_hl
+  end
+
+  sig { params(node: AST::BlockExpr).returns(AST::Node) }
+  def substitute_block_expr(node)
+    new_body = node.body.map { |stmt| substitute(stmt) }
+    result = T.let(node.result, T.nilable(AST::Node))
+    new_result = result ? substitute(result) : nil
+    return node if new_body == node.body && new_result == node.result
+
+    new_block = AST::BlockExpr.new(node.token, new_body, new_result)
+    copy_type_info(node, new_block)
+    new_block
   end
 
   sig { params(node: AST::Assert).returns(AST::Node) }

@@ -390,6 +390,11 @@ module FuzzSurfaceRegistry
       mir_ownership_contracts: [:cleanup_on_all_paths, :error_path_allocator_identity],
     },
 
+    pipeline_value_block_matrix: {
+      execution_boundaries: [:stream_pipeline],
+      mir_ownership_contracts: [:cleanup_on_all_paths],
+    },
+
     call_ownership_contract_matrix: {
       cleanup_value_shapes: [:string, :heap_list, :struct_owned_fields, :union_owned_payload, :nested_container],
       escape_sources: [:function_param, :bg_capture, :stream_next],

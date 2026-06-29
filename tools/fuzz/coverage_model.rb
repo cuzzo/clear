@@ -258,6 +258,9 @@ module FuzzCoverageModel
     pipeline_source_shape_matrix: profile(
       failure_proves: 'Pipeline source and terminal shapes preserve cleanup across stream and promise boundaries.'
     ),
+    pipeline_value_block_matrix: profile(
+      failure_proves: 'Source-level pipeline and lambda value blocks preserve final-expression lowering and reject unsafe block shapes.'
+    ),
     polymorphic_sync_admission: profile(
       failure_proves: 'Polymorphic sync admission accepts compatible caller/callee capability families only.'
     ),
