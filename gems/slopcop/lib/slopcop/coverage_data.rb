@@ -98,12 +98,12 @@ module SlopCop
     end
 
     def load_one(path, root:)
-      resolved, provider = CoverageProviders.resolve(path, root: root)
-      return empty_dataset(path) unless resolved && provider && ::File.file?(resolved)
-
       root = ::File.expand_path(root)
+      resolved = resolve_path(path)
+      return empty_dataset(path) unless resolved && ::File.file?(resolved)
+
       cache_key = [realish_path(resolved), root]
-      cache[cache_key] ||= provider.load(resolved, root: root)
+      cache[cache_key] ||= load_uncached(resolved, root: root)
     end
 
     def empty_dataset(path)
@@ -165,7 +165,7 @@ module SlopCop
     end
 
     def resolve(path)
-      CoverageProviders.resolve(path, root: Dir.pwd).first
+      resolve_path(path)
     end
 
     def relpath(abs, root)
@@ -419,201 +419,117 @@ module SlopCop
       end
     end
 
-    def load_uncached(path, root:)
-      case ::File.extname(path).downcase
-      when ".xml"
-        load_cobertura(path, root: root)
-      when ".json"
-        load_json(path, root: root)
-      else
-        Dataset.new(path: path, files: {})
-      end
-    rescue JSON::ParserError, REXML::ParseException, Errno::ENOENT
-      Dataset.new(path: path, files: {})
-    end
-
-    def load_json(path, root:)
-      data = JSON.parse(::File.read(path))
-      if simplecov_resultset?(data)
-        load_simplecov(path, data, root: root)
-      elsif nil_kill_branch_coverage?(data)
-        load_nil_kill_branch_coverage(path, data, root: root)
-      elsif kcov_codecov?(data)
-        load_kcov_codecov(path, data, root: root)
-      else
-        Dataset.new(path: path, files: {})
-      end
-    end
-
-    def simplecov_resultset?(data)
-      data.is_a?(Hash) &&
-        data.values.any? { |entry| entry.is_a?(Hash) && entry["coverage"].is_a?(Hash) }
-    end
-
-    def kcov_codecov?(data)
-      data.is_a?(Hash) &&
-        data["coverage"].is_a?(Hash) &&
-        data["coverage"].values.all? { |lines| lines.is_a?(Hash) }
-    end
-
-    def nil_kill_branch_coverage?(data)
-      data.is_a?(Hash) &&
-        data["format"].to_s == "nil-kill.branch-coverage" &&
-        data["files"].is_a?(Array)
-    end
-
-    def load_simplecov(path, data, root:)
-      files = {}
-      data.each_value do |entry|
-        (entry["coverage"] || {}).each do |file, cov|
-          next unless cov.is_a?(Hash)
-
-          abs = normalize_file(file, root: root, source_roots: [])
-          dst = (files[abs] ||= FileCoverage.new(
-            file: abs,
-            lines: [],
-            branches: {},
-            branch_arms: [],
-            source_path: CoverageData.relpath(abs, root),
-            language: language_for(abs),
-            format: :simplecov
-          ))
-          merge_lines!(dst.lines, cov["lines"] || [])
-          merge_branches!(dst.branches, cov["branches"] || {})
+    def load_uncached(resolved, root:)
+      begin
+        data = JSON.parse(::File.read(resolved))
+        if data.is_a?(Hash)
+          if data.key?("coverage") && data["coverage"].is_a?(Hash) && data["coverage"]["files"].is_a?(Hash)
+            return load_from_boobytrap_json(data["coverage"], path: resolved, root: root)
+          elsif data.key?("files") && data["files"].is_a?(Hash)
+            return load_from_boobytrap_json(data, path: resolved, root: root)
+          end
         end
+      rescue JSON::ParserError, Errno::ENOENT
       end
-      Dataset.new(path: path, files: files)
+
+      require "open3"
+      require "shellwords"
+      bin = ::File.expand_path("../../../boobytrap/exe/boobytrap", __FILE__)
+      bin = "boobytrap" unless ::File.exist?(bin)
+
+      cmd = [bin, "--repo", root, "--coverage", resolved, "--parse-coverage-only"]
+      stdout, stderr, status = Open3.capture3(*cmd)
+      unless status.success?
+        warn "boobytrap failed to parse coverage: #{stderr}"
+        return empty_dataset(resolved)
+      end
+
+      begin
+        cov_data = JSON.parse(stdout)
+        load_from_boobytrap_json(cov_data, path: resolved, root: root)
+      rescue JSON::ParserError
+        warn "failed to parse boobytrap output JSON"
+        empty_dataset(resolved)
+      end
     end
 
-    def load_cobertura(path, root:)
-      doc = REXML::Document.new(::File.read(path))
-      source_roots = REXML::XPath.match(doc, "//source").filter_map do |node|
-        text = node.text.to_s.strip
-        text.empty? ? nil : ::File.expand_path(text)
-      end
+    def load_from_boobytrap_json(data, path:, root:)
       files = {}
-      REXML::XPath.each(doc, "//class") do |klass|
-        filename = klass.attributes["filename"].to_s
-        next if filename.empty?
+      (data["files"] || {}).each do |abs, cov|
+        next unless cov.is_a?(Hash)
 
-        abs = normalize_file(filename, root: root, source_roots: source_roots)
-        lines = []
-        REXML::XPath.each(klass, "lines/line") do |line|
-          number = line.attributes["number"].to_i
-          next unless number.positive?
-
-          lines[number - 1] = line.attributes["hits"].to_i
+        branch_arms = Array(cov["branch_arms"]).map do |arm|
+          NativeBranchArm.new(
+            branch_id: arm["branch_id"].to_s,
+            arm_id: arm["arm_id"].to_s,
+            kind: (arm["kind"] || "branch").to_s,
+            member: (arm["member"] || arm["label"] || arm["arm"]).to_s,
+            decision_span: Array(arm["decision_span"]).map(&:to_i),
+            arm_span: Array(arm["arm_span"]).map(&:to_i),
+            hits: arm["hits"].to_i
+          )
         end
-        next unless lines.any? { |hit| !hit.nil? }
+
+        lines = Array(cov["lines"]).map { |h| h.nil? ? nil : h.to_i }
+
+        branches = {}
+        if cov["branches"].is_a?(Hash)
+          cov["branches"].each do |k, v|
+            if v.is_a?(Hash)
+              branches[k] = {}
+              v.each do |sub_k, sub_v|
+                branches[k][sub_k] = sub_v.to_i
+              end
+            end
+          end
+        end
 
         files[abs] = FileCoverage.new(
           file: abs,
           lines: lines,
-          branches: {},
-          branch_arms: [],
-          source_path: CoverageData.relpath(abs, root),
-          language: language_for(abs),
-          format: :kcov_cobertura
+          branches: branches,
+          branch_arms: branch_arms,
+          source_path: cov["source_path"].to_s,
+          language: cov["language"].to_s,
+          format: cov["format"].to_s.to_sym
         )
       end
       Dataset.new(path: path, files: files)
     end
 
-    def load_nil_kill_branch_coverage(path, data, root:)
-      coverage_root = data["root"].to_s.empty? ? root : ::File.expand_path(data["root"])
-      files = {}
-      Array(data["files"]).each do |entry|
-        rel = (entry["path"] || entry["file"] || entry["filename"]).to_s
-        next if rel.empty?
-
-        abs = normalize_file(rel, root: root, source_roots: [coverage_root])
-        native_arms = Array(entry["arms"] || entry["branch_arms"]).filter_map do |arm|
-          normalize_native_branch_arm(arm)
+    def resolve_path(path)
+      return nil if path.nil? || path.to_s.empty?
+      expanded = ::File.expand_path(path)
+      if ::File.directory?(expanded)
+        candidates = [
+          "coverage/.resultset.json",
+          "merged/kcov-merged/cobertura.xml",
+          "kcov-merged/cobertura.xml",
+          "cobertura.xml",
+          "cov.xml",
+          "merged/kcov-merged/codecov.json",
+          "kcov-merged/codecov.json",
+          "codecov.json",
+          "branch-coverage.json",
+          "nil-kill-branch-coverage.json"
+        ]
+        candidates.each do |rel|
+          cand = ::File.join(expanded, rel)
+          return cand if ::File.file?(cand)
         end
-        next if native_arms.empty?
-
-        files[abs] = FileCoverage.new(
-          file: abs,
-          lines: normalize_native_lines(entry["lines"]),
-          branches: {},
-          branch_arms: native_arms,
-          source_path: rel,
-          language: (entry["language"] || language_for(abs)).to_s,
-          format: :nil_kill_branch
-        )
-      end
-      Dataset.new(path: path, files: files)
-    end
-
-    def load_kcov_codecov(path, data, root:)
-      summary = summary_path_map(path, root: root)
-      files = {}
-      data.fetch("coverage", {}).each do |file, line_hits|
-        abs = normalize_file(file, root: root, source_roots: [], summary: summary)
-        lines = []
-        line_hits.each do |line, hits|
-          number = line.to_i
-          next unless number.positive?
-
-          lines[number - 1] = normalized_hit_count(hits)
+        glob_patterns = [
+          "**/kcov-merged/cobertura.xml",
+          "**/cobertura.xml",
+          "**/codecov.json"
+        ]
+        glob_patterns.each do |pat|
+          match = Dir[::File.join(expanded, pat)].sort.first
+          return match if match && ::File.file?(match)
         end
-        next unless lines.any? { |hit| !hit.nil? }
-
-        files[abs] = FileCoverage.new(
-          file: abs,
-          lines: lines,
-          branches: {},
-          branch_arms: [],
-          source_path: CoverageData.relpath(abs, root),
-          language: language_for(abs),
-          format: :kcov_codecov
-        )
+        return nil
       end
-      Dataset.new(path: path, files: files)
-    end
-
-    def summary_path_map(path, root:)
-      summary = ::File.join(::File.dirname(path), "coverage.json")
-      return {} unless ::File.file?(summary)
-
-      data = JSON.parse(::File.read(summary))
-      files = data.fetch("files", []).filter_map do |entry|
-        file = entry["file"].to_s
-        file.empty? ? nil : ::File.expand_path(file)
-      end
-      files.each_with_object({}) do |abs, out|
-        next unless ::File.file?(abs)
-
-        rel = relpath(abs, root)
-        parts = rel.split("/")
-        parts.each_index do |idx|
-          suffix = parts[idx..].join("/")
-          out[suffix] ||= abs
-        end
-      end
-    rescue JSON::ParserError, Errno::ENOENT
-      {}
-    end
-
-    def normalize_file(file, root:, source_roots:, summary: {})
-      return summary[file] if summary[file]
-
-      expanded = ::File.expand_path(file)
-      return expanded if file.start_with?("/") && ::File.file?(expanded)
-
-      candidates = []
-      source_roots.each { |source_root| candidates << ::File.expand_path(file, source_root) }
-      candidates << ::File.expand_path(file, root)
-      candidates.concat(CoverageProviders.path_candidates(
-                          file,
-                          root: root,
-                          source_roots: source_roots,
-                          summary: summary
-                        ))
-      found = candidates.find { |candidate| ::File.file?(candidate) }
-      return found if found
-
-      source_roots.empty? ? ::File.expand_path(file, root) : ::File.expand_path(file, source_roots.first)
+      return expanded if ::File.file?(expanded)
+      nil
     end
 
     def merge_lines!(dst, src)
@@ -630,58 +546,6 @@ module SlopCop
         target = (dst[parent] ||= Hash.new(0))
         arms.each { |arm, hits| target[arm] += hits.to_i }
       end
-    end
-
-    def normalized_hit_count(value)
-      if value.is_a?(Array)
-        value.first.to_i
-      else
-        value.to_i
-      end
-    end
-
-    def normalize_native_lines(value)
-      case value
-      when Array
-        value.map { |hit| hit.nil? ? nil : normalized_hit_count(hit) }
-      when Hash
-        lines = []
-        value.each do |line, hit|
-          number = line.to_i
-          next unless number.positive?
-
-          lines[number - 1] = normalized_hit_count(hit)
-        end
-        lines
-      else
-        []
-      end
-    end
-
-    def normalize_native_branch_arm(arm)
-      return nil unless arm.is_a?(Hash)
-
-      arm_span = normalize_span(arm["arm_span"] || arm["span"])
-      decision_span = normalize_span(arm["decision_span"])
-      return nil unless arm_span && decision_span
-
-      NativeBranchArm.new(
-        branch_id: arm["branch_id"].to_s,
-        arm_id: arm["arm_id"].to_s,
-        kind: (arm["kind"] || "branch").to_s,
-        member: (arm["member"] || arm["label"] || arm["arm"]).to_s,
-        decision_span: decision_span,
-        arm_span: arm_span,
-        hits: normalized_hit_count(arm["hits"] || arm["count"] || arm["sample_count"])
-      )
-    end
-
-    def normalize_span(value)
-      span = Array(value).map(&:to_i)
-      return nil unless span.size == 4
-      return nil unless span[0].positive? && span[2] >= span[0]
-
-      span
     end
 
     def native_arm_signature(arm)
@@ -750,4 +614,4 @@ module SlopCop
   end
 end
 
-require_relative "coverage_providers"
+
