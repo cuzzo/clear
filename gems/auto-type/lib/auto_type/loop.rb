@@ -115,9 +115,13 @@ module AutoType
           high_actions.concat(review_narrow_tlet)
         end
         if @z3_solver
-          before_count = high_actions.size
-          high_actions = @z3_solver.inferred_actions(high_actions)
-          puts "Z3 SMT global consistency filter: kept #{high_actions.size} of #{before_count} action(s)"
+          z3_eligible, z3_bypass = high_actions.partition do |action|
+            action["path"].to_s.end_with?(".rb") && %w[fix_sig_return fix_sig_param narrow_generic_param].include?(action["kind"])
+          end
+
+          z3_kept = @z3_solver.inferred_actions(z3_eligible)
+          high_actions = z3_kept + z3_bypass
+          puts "Z3 SMT global consistency filter: kept #{z3_kept.size} of #{z3_eligible.size} eligible action(s) (bypassed #{z3_bypass.size})"
         end
         high = high_actions.size
         puts "high-confidence actions: #{high}"

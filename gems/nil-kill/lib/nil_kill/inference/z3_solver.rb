@@ -1195,15 +1195,13 @@ module NilKill
         proposed = extract_return_type(action.dig("data", "sig").to_s) if action["kind"] == "add_sig"
         next unless proposed && proposed != "T.untyped"
 
-        rec = method_rec_by_location["#{action["path"]}:#{action["line"]}"]
-        next unless rec
-
-        class_name = rec["class"].to_s
-        method_name = rec["method"].to_s
-        kind = rec["kind"].to_s
-
         case action["kind"]
         when "fix_sig_return"
+          rec = method_rec_by_location["#{action["path"]}:#{action["line"]}"]
+          next unless rec
+          class_name = rec["class"].to_s
+          method_name = rec["method"].to_s
+          kind = rec["kind"].to_s
           ret_var = return_var(class_name, method_name, kind)
           if @declared_vars.include?(ret_var)
             expr = "(= #{ret_var} #{type_id(proposed)})"
@@ -1211,6 +1209,10 @@ module NilKill
             action_to_expr[action] = expr
           end
         when "fix_sig_param", "narrow_generic_param"
+          rec = method_rec_by_location["#{action["path"]}:#{action["line"]}"]
+          next unless rec
+          class_name = rec["class"].to_s
+          method_name = rec["method"].to_s
           p_name = action.dig("data", "name").to_s
           p_var = param_var(class_name, method_name, p_name)
           if @declared_vars.include?(p_var)
@@ -1230,6 +1232,12 @@ module NilKill
           i_var = ivar_var(klass, field)
           if @declared_vars.include?(i_var)
             expr = "(= #{i_var} #{type_id(proposed)})"
+            action_assertions << expr
+            action_to_expr[action] = expr
+          end
+          i_var_at = ivar_var(klass, "@" + field)
+          if @declared_vars.include?(i_var_at)
+            expr = "(= #{i_var_at} #{type_id(proposed)})"
             action_assertions << expr
             action_to_expr[action] = expr
           end
@@ -1414,18 +1422,20 @@ module NilKill
         proposed = extract_return_type(action.dig("data", "sig").to_s) if action["kind"] == "add_sig"
         next unless proposed && proposed != "T.untyped"
 
-        rec = method_rec_by_location["#{action["path"]}:#{action["line"]}"]
-        next unless rec
-
-        class_name = rec["class"].to_s
-        method_name = rec["method"].to_s
-        kind = rec["kind"].to_s
-
         var_name = nil
         case action["kind"]
         when "fix_sig_return"
+          rec = method_rec_by_location["#{action["path"]}:#{action["line"]}"]
+          next unless rec
+          class_name = rec["class"].to_s
+          method_name = rec["method"].to_s
+          kind = rec["kind"].to_s
           var_name = return_var(class_name, method_name, kind)
         when "fix_sig_param", "narrow_generic_param"
+          rec = method_rec_by_location["#{action["path"]}:#{action["line"]}"]
+          next unless rec
+          class_name = rec["class"].to_s
+          method_name = rec["method"].to_s
           p_name = action.dig("data", "name").to_s
           var_name = param_var(class_name, method_name, p_name)
         when "add_struct_field_sig"
@@ -1436,6 +1446,11 @@ module NilKill
           if @declared_vars.include?(i_var)
             solved[i_var] = merge_types.call(solved[i_var], proposed)
             queue << i_var
+          end
+          i_var_at = ivar_var(klass, "@" + field)
+          if @declared_vars.include?(i_var_at)
+            solved[i_var_at] = merge_types.call(solved[i_var_at], proposed)
+            queue << i_var_at
           end
         end
 
@@ -1480,28 +1495,33 @@ module NilKill
         proposed = extract_return_type(action.dig("data", "sig").to_s) if action["kind"] == "add_sig"
         next unless proposed && proposed != "T.untyped"
 
-        rec = method_rec_by_location["#{action["path"]}:#{action["line"]}"]
-        next unless rec
-
-        class_name = rec["class"].to_s
-        method_name = rec["method"].to_s
-        kind = rec["kind"].to_s
-
         consistent = false
         case action["kind"]
         when "fix_sig_return"
-          ret_var = return_var(class_name, method_name, kind)
-          consistent = (solved[ret_var] == proposed)
+          rec = method_rec_by_location["#{action["path"]}:#{action["line"]}"]
+          if rec
+            class_name = rec["class"].to_s
+            method_name = rec["method"].to_s
+            kind = rec["kind"].to_s
+            ret_var = return_var(class_name, method_name, kind)
+            consistent = (solved[ret_var] == proposed)
+          end
         when "fix_sig_param", "narrow_generic_param"
-          p_name = action.dig("data", "name").to_s
-          p_var = param_var(class_name, method_name, p_name)
-          consistent = (solved[p_var] == proposed)
+          rec = method_rec_by_location["#{action["path"]}:#{action["line"]}"]
+          if rec
+            class_name = rec["class"].to_s
+            method_name = rec["method"].to_s
+            p_name = action.dig("data", "name").to_s
+            p_var = param_var(class_name, method_name, p_name)
+            consistent = (solved[p_var] == proposed)
+          end
         when "add_struct_field_sig"
           klass = action.dig("data", "class").to_s
           field = action.dig("data", "field").to_s
           f_var = field_var(klass, field)
           i_var = ivar_var(klass, field)
-          consistent = (solved[f_var] == proposed || solved[i_var] == proposed)
+          i_var_at = ivar_var(klass, "@" + field)
+          consistent = (solved[f_var] == proposed || solved[i_var] == proposed || solved[i_var_at] == proposed)
         end
 
         if consistent
