@@ -9,6 +9,22 @@ module RubyToClear
   class Transpiler
     class TranspilationError < StandardError; end
 
+    DYNAMIC_RUBY_CALLS = {
+      "send" => "dynamic dispatch; replace with a closed case/table over known method names",
+      "__send__" => "dynamic dispatch; replace with a closed case/table over known method names",
+      "public_send" => "dynamic dispatch; replace with a closed case/table over known method names",
+      "const_get" => "dynamic constant lookup; replace with an explicit registry map",
+      "const_defined?" => "dynamic constant lookup; replace with an explicit registry map",
+      "instance_variable_get" => "dynamic instance state; replace with declared fields or a typed side table",
+      "instance_variable_set" => "dynamic instance state; replace with declared fields or a typed side table",
+      "define_method" => "dynamic method definition; generate explicit methods or a closed dispatcher",
+      "method_missing" => "dynamic method definition; replace with explicit protocol methods",
+      "eval" => "dynamic evaluation; refactor before translation",
+      "instance_eval" => "dynamic evaluation; refactor before translation",
+      "class_eval" => "dynamic evaluation; refactor before translation",
+      "module_eval" => "dynamic evaluation; refactor before translation",
+    }.freeze
+
     def initialize(source, raise_on_error: true)
       @source = source
       @raise_on_error = raise_on_error
@@ -306,6 +322,10 @@ module RubyToClear
       return nil unless args.first.is_a?(Prism::SymbolNode)
 
       [args.first.value.to_s, convert_sorbet_type(args[1])]
+    end
+
+    def dynamic_ruby_call_reason(name)
+      DYNAMIC_RUBY_CALLS[name.to_s]
     end
 
     # --- Node Visitors ---
@@ -684,6 +704,10 @@ module RubyToClear
     def visit_call_node(node)
       chk = check_arguments!(node.arguments)
       return chk if chk.is_a?(String) && chk.include?("# [UNSUPPORTED:")
+
+      if (reason = dynamic_ruby_call_reason(node.name.to_s))
+        return raise_unsupported("#{node.name} is a Ruby dynamic/reflection call: #{reason}", node)
+      end
 
       if sorbet_call?(node)
         return "" if node.name.to_s == "bind"

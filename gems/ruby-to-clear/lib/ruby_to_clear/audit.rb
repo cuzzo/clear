@@ -16,9 +16,26 @@ module RubyToClear
     ].freeze
 
     DYNAMIC_CALLS = %w[
-      send public_send const_get instance_variable_get define_method
-      method_missing eval instance_eval
+      send __send__ public_send const_get const_defined?
+      instance_variable_get instance_variable_set define_method
+      method_missing eval instance_eval class_eval module_eval
     ].freeze
+
+    DYNAMIC_CALL_GUIDANCE = {
+      "send" => ["dynamic dispatch", "replace with a closed case/table over known method names"],
+      "__send__" => ["dynamic dispatch", "replace with a closed case/table over known method names"],
+      "public_send" => ["dynamic dispatch", "replace with a closed case/table over known method names"],
+      "const_get" => ["dynamic constant lookup", "replace with an explicit registry map"],
+      "const_defined?" => ["dynamic constant lookup", "replace with an explicit registry map"],
+      "instance_variable_get" => ["dynamic instance state", "replace with declared fields or a typed side table"],
+      "instance_variable_set" => ["dynamic instance state", "replace with declared fields or a typed side table"],
+      "define_method" => ["dynamic definition", "generate explicit methods or a closed dispatcher"],
+      "method_missing" => ["dynamic definition", "replace with explicit protocol methods"],
+      "eval" => ["dynamic evaluation", "refactor before translation"],
+      "instance_eval" => ["dynamic evaluation", "refactor before translation"],
+      "class_eval" => ["dynamic evaluation", "refactor before translation"],
+      "module_eval" => ["dynamic evaluation", "refactor before translation"],
+    }.freeze
 
     STDLIB_RECEIVERS = %w[
       File Dir Pathname JSON YAML OptionParser Open3 Set StringScanner Regexp
@@ -52,6 +69,7 @@ module RubyToClear
       @call_with_block = Hash.new(0)
       @call_block_kinds = Hash.new(0)
       @dynamic_calls = Hash.new(0)
+      @dynamic_categories = Hash.new(0)
       @stdlib_calls = Hash.new(0)
       @sorbet_calls = Hash.new(0)
       @call_samples = Hash.new { |h, k| h[k] = [] }
@@ -197,6 +215,8 @@ module RubyToClear
 
     if DYNAMIC_CALLS.include?(name)
       @dynamic_calls[name] += 1
+      category, = DYNAMIC_CALL_GUIDANCE.fetch(name, ["dynamic/reflection", "refactor before translation"])
+      @dynamic_categories[category] += 1
       add_sample(@call_samples[name], path, node)
     end
 
@@ -405,6 +425,10 @@ module RubyToClear
     out << table("Stdlib Receiver Calls", ["count", "call"], top(@stdlib_calls))
     out << ""
     out << table("Dynamic/Reflection Calls", ["count", "method"], top(@dynamic_calls))
+    out << ""
+    out << table("Dynamic/Reflection Categories", ["count", "category"], top(@dynamic_categories))
+    out << ""
+    out << table("Dynamic Blocker Guidance", ["count", "method", "category", "recommended action"], dynamic_guidance_rows)
     render_samples(out, @dynamic_calls.keys.sort + @stdlib_calls.keys.sort)
   end
 
@@ -445,6 +469,13 @@ module RubyToClear
     out << table("Ranked Next Work", ["count", "recommendation"], rows)
   end
 
+  def dynamic_guidance_rows
+    top(@dynamic_calls).map do |count, call|
+      category, action = DYNAMIC_CALL_GUIDANCE.fetch(call, ["dynamic/reflection", "refactor before translation"])
+      [count, call, category, action]
+    end
+  end
+
   def render_samples(out, names)
     sample_rows = names.filter_map do |name|
       samples = @call_samples[name]
@@ -470,8 +501,9 @@ module RubyToClear
     lines << ""
     lines << "| #{headers.join(' | ')} |"
     lines << "| #{headers.map { '---' }.join(' | ')} |"
-    rows.each do |left, right|
-      lines << "| #{escape_md(left)} | #{escape_md(right)} |"
+    rows.each do |row|
+      cells = Array(row)
+      lines << "| #{cells.map { |cell| escape_md(cell) }.join(' | ')} |"
     end
     lines.join("\n")
   end

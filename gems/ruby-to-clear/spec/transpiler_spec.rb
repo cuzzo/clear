@@ -542,6 +542,32 @@ RSpec.describe RubyToClear::Transpiler do
     end
   end
 
+  describe "dynamic Ruby blocker validation" do
+    it "raises on dynamic and reflection calls instead of emitting Ruby-shaped CLEAR" do
+      {
+        "send(:foo)" => /dynamic dispatch/,
+        "public_send(:foo)" => /dynamic dispatch/,
+        "Object.const_get(:Name)" => /dynamic constant lookup/,
+        "instance_variable_get(:@value)" => /dynamic instance state/,
+        "define_method(:value) { 1 }" => /dynamic method definition/,
+        "eval('1 + 1')" => /dynamic evaluation/,
+        "instance_eval('1 + 1')" => /dynamic evaluation/,
+      }.each do |ruby_code, error|
+        expect {
+          RubyToClear.transpile(ruby_code)
+        }.to raise_error(RubyToClear::Transpiler::TranspilationError, error)
+      end
+    end
+
+    it "comments dynamic/reflection calls in lax mode with refactor guidance" do
+      result = RubyToClear.transpile("send(:foo)", raise_on_error: false)
+      expect(result.strip).to eq(<<~CLEAR.strip)
+        # [UNSUPPORTED: CallNode at 1:0] send is a Ruby dynamic/reflection call: dynamic dispatch; replace with a closed case/table over known method names
+        # send(:foo)
+      CLEAR
+    end
+  end
+
   describe "compound assignments and optional parameters" do
     it "translates local and instance variable operator writes (+=, ||=, etc.)" do
       expect_transpile("x = 10; x += 5", "MUTABLE x = 10;\nx = (x + 5);")
