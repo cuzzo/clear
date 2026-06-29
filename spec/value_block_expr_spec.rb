@@ -17,6 +17,10 @@ RSpec.describe "Clear value block expressions" do
     main.body.find { |stmt| stmt.respond_to?(:name) && stmt.name.to_s == name.to_s }
   end
 
+  def parser_for(source)
+    ClearParser.new(Lexer.new(source).tokenize, source)
+  end
+
   def compile_and_check_mir(source)
     result = compile_mir_frontend(source)
     importer = ModuleImporter.new(base_dir: Dir.pwd, use_mir: true)
@@ -58,12 +62,44 @@ RSpec.describe "Clear value block expressions" do
   it "keeps hash literals distinct from value blocks" do
     bind = first_main_bind(<<~CLEAR, "table")
       FN main() RETURNS Void ->
-        table = { "a": 1_i64 };
+        table = { "a": 1_i64, "b": 2_i64 };
         RETURN;
       END
     CLEAR
 
     expect(bind.value).to be_a(AST::HashLit)
+  end
+
+  it "parses single-expression value blocks without requiring prefix statements" do
+    bind = first_main_bind(<<~CLEAR, "picked")
+      FN main() RETURNS Void ->
+        nums = [1_i64, 2_i64];
+        picked = nums |> SELECT { _ * 2_i64 };
+        RETURN;
+      END
+    CLEAR
+
+    block = bind.value.right.expression
+
+    expect(block).to be_a(AST::BlockExpr)
+    expect(block.body).to be_empty
+    expect(block.result).to be_a(AST::BinaryOp)
+  end
+
+  it "parses expression and keyword statements before the final value" do
+    bind = first_main_bind(<<~CLEAR, "picked")
+      FN main() RETURNS Void ->
+        nums = [1_i64, 2_i64];
+        picked = nums |> SELECT { _ + 1_i64; ASSERT _ > 0_i64, "positive"; _ * 2_i64 };
+        RETURN;
+      END
+    CLEAR
+
+    block = bind.value.right.expression
+
+    expect(block).to be_a(AST::BlockExpr)
+    expect(block.body.map(&:class)).to eq([AST::BinaryOp, AST::Assert])
+    expect(block.result).to be_a(AST::BinaryOp)
   end
 
   it "parses typed locals inside value blocks as statements" do
@@ -119,5 +155,17 @@ RSpec.describe "Clear value block expressions" do
         END
       CLEAR
     }.to raise_error(CompilerError, /WHERE clause must evaluate to Bool/)
+  end
+
+  it "covers nested and compound brace disambiguation after a top-level colon" do
+    compound_parser = parser_for("{ x: T += y }")
+    compound_tokens = compound_parser.instance_variable_get(:@tokens)
+    compound_colon = compound_tokens.index { |token| token.type == :CHAR && token.value == ":" }
+    expect(compound_parser.send(:top_level_assignment_before_brace_delimiter?, compound_colon + 1)).to eq(true)
+
+    nested_parser = parser_for("{ x: (T = y), z: 1_i64 }")
+    nested_tokens = nested_parser.instance_variable_get(:@tokens)
+    nested_colon = nested_tokens.index { |token| token.type == :CHAR && token.value == ":" }
+    expect(nested_parser.send(:top_level_assignment_before_brace_delimiter?, nested_colon + 1)).to eq(false)
   end
 end
