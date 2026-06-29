@@ -8,7 +8,8 @@ options = {
   root: Dir.pwd,
   glob: "src/**/*.rb",
   top: 25,
-  markdown: true
+  markdown: true,
+  transpile: true
 }
 
 OptionParser.new do |opts|
@@ -17,12 +18,13 @@ OptionParser.new do |opts|
   opts.on("--glob GLOB", "Ruby file glob relative to root, default src/**/*.rb") { |v| options[:glob] = v }
   opts.on("--top N", Integer, "Rows per table, default 25") { |v| options[:top] = v }
   opts.on("--[no-]markdown", "Emit markdown, default true") { |v| options[:markdown] = v }
+  opts.on("--[no-]transpile", "Run transpiler coverage pass, default true") { |v| options[:transpile] = v }
 end.parse!
 
 files = RubyToClear::Audit.files_for(root: options[:root], glob: options[:glob])
 abort "no files matched #{options[:glob]} under #{File.expand_path(options[:root])}" if files.empty?
 
-audit = RubyToClear::Audit.new(files, top: options[:top], root: options[:root])
+audit = RubyToClear::Audit.new(files, top: options[:top], root: options[:root], transpile: options[:transpile])
 audit.run
 
 puts audit.render_markdown

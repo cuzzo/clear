@@ -1,6 +1,7 @@
 # frozen_string_literal: true
 
 require "prism"
+require_relative "../ruby_to_clear"
 
 module RubyToClear
   # Prism-based Ruby -> CLEAR migration audit.
@@ -23,20 +24,25 @@ module RubyToClear
       File Dir Pathname JSON YAML OptionParser Open3 Set StringScanner Regexp
     ].freeze
 
-    attr_reader :files, :node_counts, :parse_errors
+    attr_reader :files, :node_counts, :parse_errors, :transpile_results
 
     def self.files_for(root:, glob:)
       expanded_root = File.expand_path(root)
       Dir[File.join(expanded_root, glob)].sort
     end
 
-    def initialize(files, top:, root: Dir.pwd)
+    def initialize(files, top:, root: Dir.pwd, transpile: true)
       @root = File.expand_path(root)
       @files = files
       @top = top
+      @transpile = transpile
       @node_counts = Hash.new(0)
       @parse_errors = []
       @total_nodes = 0
+      @source_loc = 0
+      @unsupported_loc = 0
+      @unsupported_nodes = Hash.new(0)
+      @transpile_results = Hash.new(0)
 
       @call_names = Hash.new(0)
       @call_receiver_kinds = Hash.new(0)
@@ -75,6 +81,12 @@ module RubyToClear
     out << "## Node Coverage"
     out << ""
     render_coverage(out)
+    if @transpile
+      out << ""
+      out << "## Translation Coverage"
+      out << ""
+      render_translation_coverage(out)
+    end
     out << ""
     out << "## CallNode Breakdown"
     out << ""
@@ -83,6 +95,10 @@ module RubyToClear
     out << "## BlockNode Breakdown"
     out << ""
     render_block_breakdown(out)
+    out << ""
+    out << "## Roadmap Suggestions"
+    out << ""
+    render_roadmap(out)
     out.join("\n")
   end
 
@@ -99,6 +115,50 @@ module RubyToClear
       count_node(node)
       analyze_call(path, node) if node.is_a?(Prism::CallNode)
     end
+
+    analyze_transpile(path) if @transpile
+  end
+
+  def analyze_transpile(path)
+    source = File.read(path)
+    source_loc = source.lines.count { |line| !line.strip.empty? }
+    @source_loc += source_loc
+
+    output = RubyToClear.transpile(source, raise_on_error: false)
+    unsupported_loc = [count_unsupported_source_lines(output), source_loc].min
+    @unsupported_loc += unsupported_loc
+
+    if unsupported_loc.zero?
+      @transpile_results[:complete] += 1
+    else
+      @transpile_results[:partial] += 1
+    end
+  rescue StandardError => e
+    @transpile_results[:failed] += 1
+    @unsupported_loc += source_loc || 0
+    @unsupported_nodes[e.class.name] += 1
+  end
+
+  def count_unsupported_source_lines(output)
+    count = 0
+    in_unsupported = false
+
+    output.each_line do |line|
+      stripped = line.lstrip
+      if (node_name = stripped[/\A# \[UNSUPPORTED: ([^\] ]+)/, 1])
+        @unsupported_nodes[node_name] += 1
+        in_unsupported = true
+        next
+      end
+
+      if in_unsupported && stripped.start_with?("# ")
+        count += 1
+      else
+        in_unsupported = false
+      end
+    end
+
+    count
   end
 
   def walk(node, &block)
@@ -310,6 +370,18 @@ module RubyToClear
                  sorted.first(@top).map { |name, count| [count, name] })
   end
 
+  def render_translation_coverage(out)
+    translated_loc = [@source_loc - @unsupported_loc, 0].max
+    out << "- complete files: #{@transpile_results[:complete]}"
+    out << "- partial files: #{@transpile_results[:partial]}"
+    out << "- failed files: #{@transpile_results[:failed]}"
+    out << "- source LoC: #{@source_loc}"
+    out << "- unsupported/commented LoC: #{@unsupported_loc}"
+    out << format("- useful LoC coverage: %.2f%%", percent(translated_loc, @source_loc))
+    out << ""
+    out << table("Unsupported Nodes In Transpiler Output", ["count", "node"], top(@unsupported_nodes))
+  end
+
   def render_call_breakdown(out)
     total = @call_names.values.sum
     out << "- total CallNode: #{total}"
@@ -352,6 +424,25 @@ module RubyToClear
     out << table("Control Nodes Inside Blocks", ["count", "node"], top(@block_control_nodes))
     out << ""
     out << table("Top Block Shapes", ["count", "shape"], top(@block_shapes))
+  end
+
+  def render_roadmap(out)
+    rows = []
+    top(@unsupported_nodes).each do |count, node|
+      rows << [count, "#{node} | transpile or leave localized TODO | unsupported Prism node in current output"]
+    end
+    top(@stdlib_calls).each do |count, call|
+      rows << [count, "#{call} | add thin adapter | recurring Ruby stdlib surface"]
+    end
+    top(@block_callees).each do |count, callee|
+      rows << [count, "#{callee} block | transpile safe subset | recurring block form"]
+    end
+    top(@dynamic_calls).each do |count, call|
+      rows << [count, "#{call} | refactor Ruby source or closed dispatch | dynamic/reflection blocker"]
+    end
+
+    rows = rows.sort_by { |count, text| [-count.to_i, text] }.first(@top)
+    out << table("Ranked Next Work", ["count", "recommendation"], rows)
   end
 
   def render_samples(out, names)

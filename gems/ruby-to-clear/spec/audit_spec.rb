@@ -27,6 +27,10 @@ RSpec.describe RubyToClear::Audit do
 
       report = audit.render_markdown
       expect(report).to include("# Ruby to CLEAR Prism Audit")
+      expect(report).to include("## Translation Coverage")
+      expect(report).to include("useful LoC coverage")
+      expect(report).to include("## Roadmap Suggestions")
+      expect(report).to include("Ranked Next Work")
       expect(report).to include("CallNode")
       expect(report).to include("map")
       expect(report).to include("Set.new")
@@ -70,6 +74,8 @@ RSpec.describe RubyToClear::Audit do
       report = audit.render_markdown
       expect(audit.parse_errors.size).to eq(1)
       expect(report).to include("- parse errors: 1")
+      expect(report).to include("partial files:")
+      expect(report).to include("Unsupported Nodes In Transpiler Output")
       expect(report).to include("send")
       expect(report).to include("nilable")
       expect(report).to include("block_arg")
