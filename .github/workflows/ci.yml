@@ -150,8 +150,14 @@ jobs:
           node-version: 20
       - name: Install Tree-sitter grammars
         run: npm install --legacy-peer-deps
-      - run: bundle exec go test -v ./...
+      - run: bundle exec go test -v -coverprofile=coverage.txt -covermode=atomic ./...
         working-directory: gems/boobytrap
+      - uses: codecov/codecov-action@v5
+        with:
+          files: gems/boobytrap/coverage.txt
+          flags: go
+          fail_ci_if_error: false
+          token: ${{ secrets.CODECOV_TOKEN }}
 
   ruby-gems-coverage:
     name: Ruby gems coverage
