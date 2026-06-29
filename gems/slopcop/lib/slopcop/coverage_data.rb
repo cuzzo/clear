@@ -423,9 +423,11 @@ module SlopCop
       begin
         data = JSON.parse(::File.read(resolved))
         if data.is_a?(Hash)
-          if data.key?("coverage") && data["coverage"].is_a?(Hash) && data["coverage"]["files"].is_a?(Hash)
+          if data.key?("coverage") && data["coverage"].is_a?(Hash) && data["coverage"]["files"].is_a?(Hash) &&
+             (data["coverage"]["files"].empty? || data["coverage"]["files"].values.first.is_a?(Hash) && data["coverage"]["files"].values.first.key?("format"))
             return load_from_boobytrap_json(data["coverage"], path: resolved, root: root)
-          elsif data.key?("files") && data["files"].is_a?(Hash)
+          elsif data.key?("files") && data["files"].is_a?(Hash) &&
+                (data["files"].empty? || data["files"].values.first.is_a?(Hash) && data["files"].values.first.key?("format"))
             return load_from_boobytrap_json(data, path: resolved, root: root)
           end
         end
@@ -434,9 +436,11 @@ module SlopCop
 
       require "open3"
       require "shellwords"
-      bin = ::File.expand_path("../../../boobytrap/exe/boobytrap", __FILE__)
+      bin = ::File.expand_path("../../../../boobytrap/bin/boobytrap-helper", __FILE__)
+      unless ::File.exist?(bin)
+        bin = ::File.expand_path("../../../../boobytrap/exe/boobytrap", __FILE__)
+      end
       bin = "boobytrap" unless ::File.exist?(bin)
-
       cmd = [bin, "--repo", root, "--coverage", resolved, "--parse-coverage-only"]
       stdout, stderr, status = Open3.capture3(*cmd)
       unless status.success?

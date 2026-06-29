@@ -1269,6 +1269,10 @@ func processCoverage(covPath, repo string) (*CoverageDataset, map[string]FileGap
 					if err := parseNilKillBranchCoverage(data, repo, files); err != nil {
 						return nil, nil, err
 					}
+				} else if isPythonCoverageJson(raw) {
+					if err := parsePythonCoverageJson(data, repo, files); err != nil {
+						return nil, nil, err
+					}
 				} else {
 					isKcov := false
 					if _, ok := raw["coverage"]; ok {
@@ -2160,5 +2164,223 @@ func inScope(rel string, only []string, files []string) bool {
 		}
 	}
 	return false
+}
+
+type PythonCoverageJson struct {
+	Files map[string]PythonFileCoverage `json:"files"`
+}
+
+type PythonFileCoverage struct {
+	ExecutedLines    []int   `json:"executed_lines"`
+	MissingLines     []int   `json:"missing_lines"`
+	ExecutedBranches [][]int `json:"executed_branches"`
+	MissingBranches  [][]int `json:"missing_branches"`
+}
+
+type SyntaxFactsOutput struct {
+	Documents []SyntaxFactsDoc `json:"documents"`
+}
+
+type SyntaxFactsDoc struct {
+	BranchArms []SyntaxFactsArm `json:"branch_arms"`
+}
+
+type SyntaxFactsArm struct {
+	BranchID     string `json:"branch_id"`
+	ArmID        string `json:"arm_id"`
+	Kind         string `json:"kind"`
+	Member       string `json:"member"`
+	DecisionLine int    `json:"decision_line"`
+	DecisionSpan []int  `json:"decision_span"`
+	ArmLine      int    `json:"line"`
+	ArmSpan      []int  `json:"span"`
+}
+
+func findDecomplexBinary(repoRoot string) string {
+	if envBin := os.Getenv("DECOMPLEX_RUST_BINARY"); envBin != "" {
+		return envBin
+	}
+	sibling := filepath.Join(repoRoot, "gems/decomplex/target/release/decomplex-rust")
+	if _, err := os.Stat(sibling); err == nil {
+		return sibling
+	}
+	siblingDebug := filepath.Join(repoRoot, "gems/decomplex/target/debug/decomplex-rust")
+	if _, err := os.Stat(siblingDebug); err == nil {
+		return siblingDebug
+	}
+
+	if exePath, err := os.Executable(); err == nil {
+		exeDir := filepath.Dir(exePath)
+		gemsDir := filepath.Clean(filepath.Join(exeDir, "..", ".."))
+		siblingRel := filepath.Join(gemsDir, "decomplex/target/release/decomplex-rust")
+		if _, err := os.Stat(siblingRel); err == nil {
+			return siblingRel
+		}
+		siblingRelDebug := filepath.Join(gemsDir, "decomplex/target/debug/decomplex-rust")
+		if _, err := os.Stat(siblingRelDebug); err == nil {
+			return siblingRelDebug
+		}
+	}
+
+	return "decomplex-rust"
+}
+
+func isPythonCoverageJson(raw map[string]interface{}) bool {
+	filesVal, ok := raw["files"]
+	if !ok {
+		return false
+	}
+	filesMap, ok := filesVal.(map[string]interface{})
+	if !ok {
+		return false
+	}
+	for _, v := range filesMap {
+		entry, ok := v.(map[string]interface{})
+		if !ok {
+			continue
+		}
+		if _, ok := entry["executed_lines"]; ok {
+			return true
+		}
+		if _, ok := entry["missing_lines"]; ok {
+			return true
+		}
+		if _, ok := entry["executed_branches"]; ok {
+			return true
+		}
+		if _, ok := entry["missing_branches"]; ok {
+			return true
+		}
+	}
+	return false
+}
+
+func parsePythonCoverageJson(data []byte, repo string, files map[string]FileCoverage) error {
+	var pyCov PythonCoverageJson
+	if err := json.Unmarshal(data, &pyCov); err != nil {
+		return err
+	}
+
+	decomplexBin := findDecomplexBinary(repo)
+
+	for file, entry := range pyCov.Files {
+		absFile := file
+		if !filepath.IsAbs(file) {
+			absFile = filepath.Join(repo, file)
+		}
+		absFile = filepath.Clean(absFile)
+
+		if _, err := os.Stat(absFile); err != nil {
+			continue
+		}
+
+		dst, exists := files[absFile]
+		if !exists {
+			dst = FileCoverage{
+				Lines:      []*int{},
+				Branches:   make(map[string]map[string]int),
+				SourcePath: relpathNoEval(absFile, repo),
+				Format:     "coverage_py",
+				Language:   "python",
+			}
+		}
+
+		// Normalize lines
+		for _, line := range entry.ExecutedLines {
+			if line <= 0 {
+				continue
+			}
+			for len(dst.Lines) < line {
+				dst.Lines = append(dst.Lines, nil)
+			}
+			hits := 1
+			if dst.Lines[line-1] == nil {
+				dst.Lines[line-1] = &hits
+			} else {
+				*dst.Lines[line-1] += hits
+			}
+		}
+		for _, line := range entry.MissingLines {
+			if line <= 0 {
+				continue
+			}
+			for len(dst.Lines) < line {
+				dst.Lines = append(dst.Lines, nil)
+			}
+			if dst.Lines[line-1] == nil {
+				hits := 0
+				dst.Lines[line-1] = &hits
+			}
+		}
+
+		executedArcs := normalizeArcs(entry.ExecutedBranches)
+		missingArcs := normalizeArcs(entry.MissingBranches)
+
+		if len(executedArcs) > 0 || len(missingArcs) > 0 {
+			cmd := exec.Command(decomplexBin, "syntax-facts", "--language", "python", absFile)
+			var stdout bytes.Buffer
+			var stderr bytes.Buffer
+			cmd.Stdout = &stdout
+			cmd.Stderr = &stderr
+			if err := cmd.Run(); err == nil {
+				var facts SyntaxFactsOutput
+				if json.Unmarshal(stdout.Bytes(), &facts) == nil && len(facts.Documents) > 0 {
+					for _, arm := range facts.Documents[0].BranchArms {
+						hitsVal, exists := getArmHits(arm, executedArcs, missingArcs)
+						if !exists {
+							continue
+						}
+						
+						dst.BranchArms = append(dst.BranchArms, NativeBranchArm{
+							BranchID:     arm.BranchID,
+							ArmID:        arm.ArmID,
+							Kind:         arm.Kind,
+							Member:       arm.Member,
+							DecisionSpan: arm.DecisionSpan,
+							ArmSpan:      arm.ArmSpan,
+							Hits:         hitsVal,
+						})
+					}
+				}
+			}
+		}
+
+		files[absFile] = dst
+	}
+	return nil
+}
+
+func normalizeArcs(arcs [][]int) [][2]int {
+	var out [][2]int
+	for _, arc := range arcs {
+		if len(arc) == 2 && arc[0] > 0 && arc[1] > 0 {
+			out = append(out, [2]int{arc[0], arc[1]})
+		}
+	}
+	return out
+}
+
+func getArmHits(arm SyntaxFactsArm, executed, missing [][2]int) (int, bool) {
+	decisionLine := arm.DecisionLine
+	span := arm.ArmSpan
+	
+	for _, arc := range executed {
+		if arc[0] == decisionLine && lineInSpan(arc[1], span) {
+			return 1, true
+		}
+	}
+	for _, arc := range missing {
+		if arc[0] == decisionLine && lineInSpan(arc[1], span) {
+			return 0, true
+		}
+	}
+	return 0, false
+}
+
+func lineInSpan(line int, span []int) bool {
+	if len(span) != 4 {
+		return false
+	}
+	return line >= span[0] && line <= span[2]
 }
 
