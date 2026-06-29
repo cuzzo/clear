@@ -97,7 +97,15 @@ module SlopCop
 
       process_detectors(detectors, span_recs, m_all, m_spur, m_devw)
       
-      { spans: span_recs, m_all: m_all, m_spur: m_spur, m_devw: m_devw, status: :ok }
+      branch_arms_by_file = {}
+      Array(data[:documents]).each do |doc|
+        next unless doc.is_a?(Hash) && doc["file"]
+        abs = File.expand_path(doc["file"])
+        branch_arms_by_file[abs] = doc["branch_arms"]
+      end
+      
+      { spans: span_recs, m_all: m_all, m_spur: m_spur, m_devw: m_devw,
+        branch_arms: branch_arms_by_file, status: :ok }
     rescue StandardError => e
       warn "SlopCop::DecomplexVerdict error: #{e.message}"
       blank(:error)
@@ -105,7 +113,8 @@ module SlopCop
 
     def load_decomplex_facts(abs_files)
       if ENV["DECOMPLEX_FACTS_FILE"] && !ENV["DECOMPLEX_FACTS_FILE"].empty?
-        { detectors: JSON.parse(File.read(ENV["DECOMPLEX_FACTS_FILE"]))["detectors"], status: :ok }
+        parsed = JSON.parse(File.read(ENV["DECOMPLEX_FACTS_FILE"]))
+        { detectors: parsed["detectors"], documents: parsed["documents"], status: :ok }
       else
         begin
           require "tempfile"
@@ -120,7 +129,8 @@ module SlopCop
           ok = system(bin, "facts", "--output", tmp.path, *abs_files, err: File::NULL)
           return { status: :error } unless ok
           
-          { detectors: JSON.parse(File.read(tmp.path))["detectors"], status: :ok }
+          parsed = JSON.parse(File.read(tmp.path))
+          { detectors: parsed["detectors"], documents: parsed["documents"], status: :ok }
         ensure
           tmp&.unlink if tmp
         end

@@ -39,20 +39,22 @@ module SlopCop
     end
 
     # -> [Arm, ...] for every dark arm in abspath.
-    def classify_file(resultset, abspath, ffi_boundary: [], diagnostic_mids: [], root: nil)
+    def classify_file(resultset, abspath, ffi_boundary: [], diagnostic_mids: [], root: nil, decomplex_verdict: nil)
       file_coverage = coverage_for(resultset, abspath, root: root)
       if tree_sitter_coverage_file?(abspath, file_coverage)
         return classify_coverage_file(
           abspath,
           file_coverage,
           ffi_boundary: ffi_boundary,
-          diagnostic_mids: diagnostic_mids
+          diagnostic_mids: diagnostic_mids,
+          decomplex_verdict: decomplex_verdict
         )
       end
 
       return classify_static_file(abspath,
                                   ffi_boundary: ffi_boundary,
-                                  diagnostic_mids: diagnostic_mids) if tree_sitter_source?(abspath)
+                                  diagnostic_mids: diagnostic_mids,
+                                  decomplex_verdict: decomplex_verdict) if tree_sitter_source?(abspath)
 
       []
     end
@@ -72,10 +74,10 @@ module SlopCop
       @coverage_cache[key] ||= SlopCop::CoverageData.load(resultset, root: root)
     end
 
-    def classify_static_file(abspath, ffi_boundary: [], diagnostic_mids: [])
+    def classify_static_file(abspath, ffi_boundary: [], diagnostic_mids: [], decomplex_verdict: nil)
       return [] unless tree_sitter_source?(abspath)
 
-      arms = get_branch_arms(abspath)
+      arms = get_branch_arms(abspath, decomplex_verdict: decomplex_verdict)
       lexicon = SlopCop.language_lexicon(language_for(abspath))
       arms.filter_map do |arm|
         cat = categorize_text(
@@ -99,10 +101,10 @@ module SlopCop
       []
     end
 
-    def classify_coverage_file(abspath, file_coverage, ffi_boundary: [], diagnostic_mids: [])
+    def classify_coverage_file(abspath, file_coverage, ffi_boundary: [], diagnostic_mids: [], decomplex_verdict: nil)
       return [] unless tree_sitter_source?(abspath)
 
-      arms = get_branch_arms(abspath)
+      arms = get_branch_arms(abspath, decomplex_verdict: decomplex_verdict)
       lexicon = SlopCop.language_lexicon(language_for(abspath))
       
       doc_arms = arms.map do |arm|
@@ -153,7 +155,21 @@ module SlopCop
       []
     end
 
-    def get_branch_arms(abspath)
+    def get_branch_arms(abspath, decomplex_verdict: nil)
+      if decomplex_verdict && decomplex_verdict[:branch_arms] && decomplex_verdict[:branch_arms][abspath]
+        return decomplex_verdict[:branch_arms][abspath]
+      end
+
+      if ENV["DECOMPLEX_FACTS_FILE"] && !ENV["DECOMPLEX_FACTS_FILE"].empty?
+        begin
+          @facts_file_cache ||= JSON.parse(File.read(ENV["DECOMPLEX_FACTS_FILE"]))
+          doc = Array(@facts_file_cache["documents"]).find { |d| File.expand_path(d["file"]) == abspath }
+          return doc["branch_arms"] if doc && doc["branch_arms"]
+        rescue => e
+          warn "Failed to read documents from DECOMPLEX_FACTS_FILE: #{e.message}"
+        end
+      end
+
       bin = ENV.fetch("DECOMPLEX_RUST_BINARY", ::File.expand_path("../../../decomplex/target/release/decomplex-rust", __dir__))
       unless ::File.executable?(bin)
         warn "SlopCop::Classifier cannot find executable decomplex-rust at #{bin}"
