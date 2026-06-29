@@ -2,18 +2,48 @@
 
 module RubyToClear
   module MethodRegistry
+    CallContext = Struct.new(
+      :ruby_name,
+      :receiver_code,
+      :receiver_kind,
+      :receiver_name,
+      :node,
+      :transpiler,
+      keyword_init: true
+    )
+
     REGISTRY = {}
 
-    def self.register(ruby_name, &block)
-      REGISTRY[ruby_name.to_s] = block
+    def self.register(ruby_name, receiver: :any, &block)
+      REGISTRY[[receiver.to_s, ruby_name.to_s]] = block
     end
 
-    def self.translate(ruby_name, receiver, node, transpiler)
-      handler = REGISTRY[ruby_name.to_s]
-      if handler
-        handler.call(receiver, node, transpiler)
+    def self.translate(ruby_name, receiver, node, transpiler, receiver_kind: nil, receiver_name: nil)
+      context = CallContext.new(
+        ruby_name: ruby_name.to_s,
+        receiver_code: receiver,
+        receiver_kind: receiver_kind&.to_s,
+        receiver_name: receiver_name&.to_s,
+        node: node,
+        transpiler: transpiler
+      )
+      handler = lookup(context)
+      return nil unless handler
+
+      call_handler(handler, context)
+    end
+
+    def self.lookup(context)
+      REGISTRY[[context.receiver_name, context.ruby_name]] ||
+        REGISTRY[[context.receiver_kind, context.ruby_name]] ||
+        REGISTRY[["any", context.ruby_name]]
+    end
+
+    def self.call_handler(handler, context)
+      if handler.arity == 1
+        handler.call(context)
       else
-        nil
+        handler.call(context.receiver_code, context.node, context.transpiler)
       end
     end
 
@@ -43,8 +73,15 @@ module RubyToClear
       end
     end
 
-    register("collect") do |receiver, node, transpiler|
-      REGISTRY["map"].call(receiver, node, transpiler)
+    register("collect") do |context|
+      translate(
+        "map",
+        context.receiver_code,
+        context.node,
+        context.transpiler,
+        receiver_kind: context.receiver_kind,
+        receiver_name: context.receiver_name
+      )
     end
 
     register("select") do |receiver, node, transpiler|
@@ -70,8 +107,15 @@ module RubyToClear
       end
     end
 
-    register("filter") do |receiver, node, transpiler|
-      REGISTRY["select"].call(receiver, node, transpiler)
+    register("filter") do |context|
+      translate(
+        "select",
+        context.receiver_code,
+        context.node,
+        context.transpiler,
+        receiver_kind: context.receiver_kind,
+        receiver_name: context.receiver_name
+      )
     end
 
     register("reduce") do |receiver, node, transpiler|
@@ -98,8 +142,15 @@ module RubyToClear
       end
     end
 
-    register("inject") do |receiver, node, transpiler|
-      REGISTRY["reduce"].call(receiver, node, transpiler)
+    register("inject") do |context|
+      translate(
+        "reduce",
+        context.receiver_code,
+        context.node,
+        context.transpiler,
+        receiver_kind: context.receiver_kind,
+        receiver_name: context.receiver_name
+      )
     end
 
     register("gsub") do |receiver, node, transpiler|

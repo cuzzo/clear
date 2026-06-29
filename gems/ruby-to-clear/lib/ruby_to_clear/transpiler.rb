@@ -603,7 +603,14 @@ module RubyToClear
       if node.name.to_s == "gsub" || node.name.to_s == "sub"
         rec_code = node.receiver ? visit(node.receiver) : nil
         if rec_code
-          translated = MethodRegistry.translate(node.name.to_s, rec_code, node, self)
+          translated = MethodRegistry.translate(
+            node.name.to_s,
+            rec_code,
+            node,
+            self,
+            receiver_kind: registry_receiver_kind(node.receiver),
+            receiver_name: registry_receiver_name(node.receiver)
+          )
           return translated if translated
         end
         return raise_unsupported("gsub/sub with dynamic regex, block, or invalid arguments is not supported", node)
@@ -650,7 +657,14 @@ module RubyToClear
         args_list = node.arguments ? node.arguments.arguments.map { |arg| visit(arg) } : []
 
         if rec_code
-          translated = MethodRegistry.translate(name_str, rec_code, node, self)
+          translated = MethodRegistry.translate(
+            name_str,
+            rec_code,
+            node,
+            self,
+            receiver_kind: registry_receiver_kind(node.receiver),
+            receiver_name: registry_receiver_name(node.receiver)
+          )
           return translated if translated
         end
 
@@ -818,6 +832,41 @@ module RubyToClear
       end
       walk.call(node)
       ivars.to_a.sort
+    end
+
+    def registry_receiver_kind(receiver)
+      case receiver
+      when nil then "implicit"
+      when Prism::SelfNode then "self"
+      when Prism::LocalVariableReadNode then "local"
+      when Prism::InstanceVariableReadNode then "ivar"
+      when Prism::ClassVariableReadNode then "class_var"
+      when Prism::GlobalVariableReadNode then "global"
+      when Prism::ConstantReadNode then "constant"
+      when Prism::ConstantPathNode then "constant_path"
+      when Prism::CallNode then "call_result"
+      when Prism::ParenthesesNode then "parenthesized"
+      when Prism::StringNode, Prism::InterpolatedStringNode then "string_literal"
+      when Prism::SymbolNode, Prism::InterpolatedSymbolNode then "symbol_literal"
+      when Prism::IntegerNode, Prism::FloatNode then "numeric_literal"
+      when Prism::ArrayNode then "array_literal"
+      when Prism::HashNode then "hash_literal"
+      when Prism::NilNode then "nil_literal"
+      when Prism::TrueNode, Prism::FalseNode then "bool_literal"
+      else receiver.class.name.split("::").last
+      end
+    end
+
+    def registry_receiver_name(receiver)
+      return nil unless receiver
+
+      if receiver.respond_to?(:full_name)
+        receiver.full_name
+      elsif receiver.respond_to?(:name)
+        receiver.name.to_s
+      end
+    rescue StandardError
+      nil
     end
 
     def comment_unsupported(node)
