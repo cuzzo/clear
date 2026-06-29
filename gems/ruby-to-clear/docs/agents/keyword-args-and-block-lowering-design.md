@@ -98,6 +98,29 @@ implicit block return, block-local renaming, mutation, and safe rewrites such as
 - Do not let the transpiler decide new CLEAR semantics. If a lowering requires
   a compiler or language change, record that as an explicit prerequisite.
 
+## Stack-Ranked Non-Executive Implementation Queue
+
+This queue includes work the transpiler can do without deciding new CLEAR
+language, compiler, or stdlib semantics. Coverage impact is estimated from the
+current `src/**/*.rb` audit and should be re-measured after each commit.
+
+| rank | task | effort | expected coverage impact | why it is non-executive |
+| ---: | --- | --- | --- | --- |
+| 1 | Fix interpolated-string traversal crash | XS | Medium: removes 6 failed files from full-file unsupported accounting | Pure Prism visitor bug; no CLEAR semantics change |
+| 2 | Preserve Ruby `module` bodies as migration boundaries | S | Very high: many 0% files are hidden behind unsupported top-level modules | Emits comments/boundaries plus existing declarations; no namespace decision |
+| 3 | Support keyword parameters in function signatures | S-M | Medium: removes `ParametersNode` blockers in method definitions | Lowers static names to ordinary CLEAR params; rejects keyword rest/splat |
+| 4 | Support safe keyword call shapes only where the target is already known | M | High for constructors, diagnostics, Sorbet `const`/`prop`, and helper APIs | Handler/config opt-in; generic named-call syntax remains TODO |
+| 5 | Add multi-statement implicit-return pipeline blocks | M | High: expands existing `map`/`select`/`reject`/`flat_map`/`sort_by` support | Emits the already-planned pipeline block form; unsupported control flow stays TODO |
+| 6 | Add low-risk receiver-transform block handlers | M | Medium: `reverse_each`, `each_key`, `each_value`, `each_pair`, `each_with_index`, `loop` | Uses explicit rewrites such as `reverse |> EACH`; transforms are handler-local |
+| 7 | Add block control-flow detection before lowering | S-M | Medium: prevents wrong output and localizes TODOs | Analysis only; does not invent nonlocal flow semantics |
+| 8 | Add assignment/update/destructuring handlers | S-M | Low-medium now, higher after structural blockers fall | Mechanical lowering with temporaries; unsafe splats remain TODO |
+| 9 | Add regex/scanner safe subset after explicit stdlib shape exists | M | Low-medium | Deferred until stdlib shape is explicit; interpolation fix is rank 1 |
+
+The implementation should stop or downgrade to TODO output when a shape needs a
+new language feature, broad Ruby compatibility behavior, or unapproved stdlib
+surface. The target is rising useful LoC coverage, not silently accepting Ruby
+syntax.
+
 ## Keyword Args And Keyword Params
 
 ### Required Transpiler Work
