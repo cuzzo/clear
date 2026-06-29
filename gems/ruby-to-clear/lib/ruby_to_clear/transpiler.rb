@@ -328,6 +328,77 @@ module RubyToClear
       DYNAMIC_RUBY_CALLS[name.to_s]
     end
 
+    def keyword_hash_argument(arguments_node)
+      return nil unless arguments_node
+
+      arguments_node.arguments.find { |arg| arg.is_a?(Prism::KeywordHashNode) }
+    end
+
+    def constant_constructor_call?(node)
+      node.name.to_s == "new" &&
+        (node.receiver.is_a?(Prism::ConstantReadNode) || node.receiver.is_a?(Prism::ConstantPathNode))
+    end
+
+    def constructor_field_names(receiver)
+      names = []
+      names << receiver.location.slice.strip if receiver
+      names << receiver.location.slice.strip.split("::").last if receiver.is_a?(Prism::ConstantPathNode)
+      names << receiver.name.to_s if receiver.respond_to?(:name)
+
+      names.uniq.each do |name|
+        return @struct_fields[name] if @struct_fields[name]
+      end
+
+      nil
+    end
+
+    def constructor_output_name(receiver)
+      receiver.location.slice.strip.gsub("::", ".")
+    end
+
+    def keyword_constructor_pairs(keyword_hash)
+      keyword_hash.elements.map do |assoc|
+        unless assoc.is_a?(Prism::AssocNode)
+          return raise_unsupported("Constructor keyword splats are not supported", keyword_hash)
+        end
+
+        key = if assoc.key.is_a?(Prism::SymbolNode)
+          assoc.key.value.to_s
+        elsif assoc.key.is_a?(Prism::StringNode)
+          assoc.key.content
+        else
+          return raise_unsupported("Constructor keyword names must be static", assoc.key)
+        end
+
+        "#{key}: #{visit(assoc.value)}"
+      end
+    end
+
+    def constructor_from_arguments(receiver, arguments_node)
+      fields = constructor_field_names(receiver)
+      return nil unless fields
+
+      class_name = constructor_output_name(receiver)
+      args = arguments_node ? arguments_node.arguments : []
+      keyword_hash = args.last if args.last.is_a?(Prism::KeywordHashNode)
+      positional_args = keyword_hash ? args[0...-1] : args
+
+      assoc_pairs = []
+      positional_args.each_with_index do |arg, idx|
+        field_name = fields[idx] || "field_#{idx}"
+        assoc_pairs << "#{field_name}: #{visit(arg)}"
+      end
+
+      if keyword_hash
+        keyword_pairs = keyword_constructor_pairs(keyword_hash)
+        return keyword_pairs if keyword_pairs.is_a?(String) && keyword_pairs.include?("# [UNSUPPORTED:")
+
+        assoc_pairs.concat(keyword_pairs)
+      end
+
+      "#{class_name}{ #{assoc_pairs.join(', ')} }"
+    end
+
     # --- Node Visitors ---
 
     def visit_program_node(node)
@@ -732,8 +803,7 @@ module RubyToClear
     end
 
     def visit_call_node(node)
-      chk = check_arguments!(node.arguments)
-      return chk if chk.is_a?(String) && chk.include?("# [UNSUPPORTED:")
+      keyword_arg = keyword_hash_argument(node.arguments)
 
       if (reason = dynamic_ruby_call_reason(node.name.to_s))
         return raise_unsupported("#{node.name} is a Ruby dynamic/reflection call: #{reason}", node)
@@ -794,8 +864,15 @@ module RubyToClear
         value = visit(node.arguments.arguments.last)
         "#{lhs}[#{index}] = #{value}"
       else
-        if node.receiver.is_a?(Prism::ConstantReadNode) && node.name.to_s == "new"
+        if constant_constructor_call?(node)
           rec_code = visit(node.receiver)
+          if keyword_arg
+            constructor = constructor_from_arguments(node.receiver, node.arguments)
+            return constructor if constructor
+
+            return raise_unsupported("Keyword arguments are not supported for this constructor", keyword_arg)
+          end
+
           translated = MethodRegistry.translate(
             node.name.to_s,
             rec_code,
@@ -806,24 +883,19 @@ module RubyToClear
           )
           return translated if translated
 
-          class_name = node.receiver.name.to_s
-          if @struct_fields[class_name]
-            fields = @struct_fields[class_name]
-            args = node.arguments ? node.arguments.arguments : []
-            assoc_pairs = []
-            args.each_with_index do |arg, idx|
-              field_name = fields[idx] || "field_#{idx}"
-              assoc_pairs << "#{field_name}: #{visit(arg)}"
-            end
-            return "#{class_name}{ #{assoc_pairs.join(', ')} }"
-          else
-            args_list = node.arguments ? visit(node.arguments) : ""
-            return "#{class_name}{ #{args_list} }"
-          end
+          constructor = constructor_from_arguments(node.receiver, node.arguments)
+          return constructor if constructor
+
+          args_list = node.arguments ? visit(node.arguments) : ""
+          return "#{constructor_output_name(node.receiver)}{ #{args_list} }"
         end
 
         rec_code = node.receiver ? visit(node.receiver) : nil
         name_str = node.name.to_s
+        if keyword_arg
+          return raise_unsupported("Keyword arguments are not supported for this call shape", keyword_arg)
+        end
+
         args_list = node.arguments ? node.arguments.arguments.map { |arg| visit(arg) } : []
 
         if rec_code

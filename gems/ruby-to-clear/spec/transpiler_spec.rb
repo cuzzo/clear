@@ -238,6 +238,36 @@ RSpec.describe RubyToClear::Transpiler do
       expect_transpile(ruby_code, expected_clear)
     end
 
+    it "transpiles keyword constructors for statically known struct fields" do
+      ruby_code = <<~RUBY
+        Token = Struct.new(:type, :value, keyword_init: true)
+        t = Token.new(type: :IDENT, value: "name")
+      RUBY
+      expected_clear = <<~CLEAR
+        STRUCT Token {
+          type: Auto,
+          value: Auto
+        }
+        MUTABLE t = Token{ type: .IDENT, value: "name" };
+      CLEAR
+      expect_transpile(ruby_code, expected_clear)
+    end
+
+    it "transpiles keyword constructors through constant paths when fields are known" do
+      ruby_code = <<~RUBY
+        Token = Struct.new(:type, :value)
+        t = AST::Token.new(type: :IDENT, value: "name")
+      RUBY
+      expected_clear = <<~CLEAR
+        STRUCT Token {
+          type: Auto,
+          value: Auto
+        }
+        MUTABLE t = AST.Token{ type: .IDENT, value: "name" };
+      CLEAR
+      expect_transpile(ruby_code, expected_clear)
+    end
+
     it "transpiles classes, fields, and instance methods" do
       ruby_code = <<~RUBY
         class Calc
@@ -556,7 +586,7 @@ RSpec.describe RubyToClear::Transpiler do
     it "raises error on keyword arguments inside calls" do
       expect {
         RubyToClear.transpile("test_call(a: 1)")
-      }.to raise_error(RubyToClear::Transpiler::TranspilationError, /Keyword arguments are not supported/)
+      }.to raise_error(RubyToClear::Transpiler::TranspilationError, /Keyword arguments are not supported for this call shape/)
     end
 
     it "translates static keyword parameters as ordinary CLEAR parameters" do
