@@ -24,6 +24,13 @@ RSpec.describe RubyToClear::Transpiler do
       expect_transpile('{ "a" => 1 }', '{"a": 1};')
     end
 
+    it "transpiles ranges and boolean operators" do
+      expect_transpile("1..3", "1 ..= 3;")
+      expect_transpile("1...3", "1 ..< 3;")
+      expect_transpile("a && b", "(a() && b());")
+      expect_transpile("a || b", "(a() || b());")
+    end
+
     it "transpiles string interpolations" do
       expect_transpile('x = 10; "count: #{x}"', "MUTABLE x = 10;\n\"count: ${x}\";")
       expect_transpile('x = 10; "count: #{x + 1}"', "MUTABLE x = 10;\n\"count: ${(x + 1)}\";")
@@ -316,14 +323,18 @@ RSpec.describe RubyToClear::Transpiler do
 
     it "transpiles predicate collection blocks" do
       expect_transpile("nums = []; nums.reject { |x| x < 2 }", "MUTABLE nums = [];\nnums |> WHERE !((_ < 2));")
+      expect_transpile("nums = []; nums.any?", "MUTABLE nums = [];\nnums |> ANY _;")
       expect_transpile("nums = []; nums.any? { |x| x > 5 }", "MUTABLE nums = [];\nnums |> ANY (_ > 5);")
+      expect_transpile("nums = []; nums.all?", "MUTABLE nums = [];\nnums |> ALL _;")
       expect_transpile("nums = []; nums.all? { |x| x > 0 }", "MUTABLE nums = [];\nnums |> ALL (_ > 0);")
       expect_transpile("nums = []; nums.find { |x| x == 3 }", "MUTABLE nums = [];\nnums |> FIND (_ == 3);")
       expect_transpile("nums = []; nums.detect { |x| x == 3 }", "MUTABLE nums = [];\nnums |> FIND (_ == 3);")
     end
 
     it "transpiles projection collection blocks" do
+      expect_transpile("nums = []; nums.collect { |x| x * 2 }", "MUTABLE nums = [];\nnums |> SELECT (_ * 2);")
       expect_transpile("nums = []; nums.filter_map { |x| maybe(x) }", "MUTABLE nums = [];\nnums |> SELECT maybe(_) |> WHERE _ != NIL;")
+      expect_transpile("nums = []; nums.filter { |x| x > 2 }", "MUTABLE nums = [];\nnums |> WHERE (_ > 2);")
       expect_transpile("groups = []; groups.flat_map { |g| g.items }", "MUTABLE groups = [];\ngroups |> UNNEST _.items();")
       expect_transpile("items = []; items.sort_by { |item| item.name }", "MUTABLE items = [];\nitems |> ORDER_BY _.name();")
     end
@@ -347,6 +358,7 @@ RSpec.describe RubyToClear::Transpiler do
       ruby_code = "nums = []; nums.reduce(0) { |acc, x| acc + x }"
       expected_clear = "MUTABLE nums = [];\nnums |> REDUCE(0) (acc + _);"
       expect_transpile(ruby_code, expected_clear)
+      expect_transpile("nums = []; nums.inject(0) { |acc, x| acc + x }", "MUTABLE nums = [];\nnums |> REDUCE(0) (acc + _);")
 
       ruby_code = "nums = []; nums.reduce(0) { |acc, x| next_value = acc + x; next_value }"
       expected_clear = <<~CLEAR
@@ -399,8 +411,10 @@ RSpec.describe RubyToClear::Transpiler do
       expect_transpile('File.foreach("a.txt")', "REQUIRE \"pkg:fs\"\nreadLines(\"a.txt\") OR RAISE;")
       expect_transpile('File.foreach("a.txt") { |line| puts line }', "REQUIRE \"pkg:fs\"\n(readLines(\"a.txt\") OR RAISE) |> EACH { puts(_); };")
       expect_transpile('File.write("a.txt", body)', "REQUIRE \"pkg:fs\"\nwrite(\"a.txt\", body()) OR RAISE;")
+      expect_transpile('File.binwrite("a.txt", bytes)', "REQUIRE \"pkg:fs\"\nwrite(\"a.txt\", bytes()) OR RAISE;")
       expect_transpile('File.size(path)', "REQUIRE \"pkg:fs\"\nsize(path()) OR RAISE;")
       expect_transpile('File.exist?(path)', "REQUIRE \"pkg:fs\"\nexists?(path());")
+      expect_transpile('File.exists?(path)', "REQUIRE \"pkg:fs\"\nexists?(path());")
       expect_transpile('File.file?(path)', "REQUIRE \"pkg:fs\"\nfile?(path());")
       expect_transpile('File.directory?(path)', "REQUIRE \"pkg:fs\"\ndir?(path());")
       expect_transpile('File.mtime(path)', "REQUIRE \"pkg:fs\"\nmtime(path()) OR RAISE;")
@@ -414,6 +428,7 @@ RSpec.describe RubyToClear::Transpiler do
       expect_transpile('File.dirname(path)', "REQUIRE \"pkg:path\"\ndirname(path());")
       expect_transpile('Dir.glob(File.join(root, "*.rb"))', "REQUIRE \"pkg:fs\"\nREQUIRE \"pkg:path\"\nglob(join(root(), \"*.rb\")) OR RAISE;")
       expect_transpile('Dir.exist?(path)', "REQUIRE \"pkg:fs\"\ndir?(path());")
+      expect_transpile('Dir.exists?(path)', "REQUIRE \"pkg:fs\"\ndir?(path());")
       expect_transpile('Dir.children(path)', "REQUIRE \"pkg:fs\"\nlist(path()) OR RAISE;")
       expect_transpile('Dir.entries(path)', "REQUIRE \"pkg:fs\"\nlistAll(path()) OR RAISE;")
       expect_transpile('Dir.pwd', "REQUIRE \"pkg:fs\"\npwd() OR RAISE;")
@@ -455,19 +470,37 @@ RSpec.describe RubyToClear::Transpiler do
     end
 
     it "uses receiver-shape tracking for overloaded collection and string calls" do
+      expect_transpile('[1].size', "[1].length();")
       expect_transpile('items = []; items.empty?', "MUTABLE items = [];\n(items.length() == 0);")
       expect_transpile('items = []; items.size', "MUTABLE items = [];\nitems.length();")
+      expect_transpile('{ a: 1 }.length', "{a: 1}.count();")
       expect_transpile('table = {}; table.empty?', "MUTABLE table = {};\n(table.count() == 0);")
       expect_transpile('table = {}; table.size', "MUTABLE table = {};\ntable.count();")
+      expect_transpile('"abc".empty?', "(\"abc\".length() == 0);")
       expect_transpile('name = "abc"; name.empty?', "MUTABLE name = \"abc\";\n(name.length() == 0);")
       expect_transpile('name = "abc"; name.split("b")', "MUTABLE name = \"abc\";\nname.split(\"b\");")
       expect_transpile('name = "abc"; name.delete_prefix("a")', "MUTABLE name = \"abc\";\nname.deletePrefix(\"a\");")
     end
 
+    it "tracks receiver shapes through typed values and call results" do
+      expect_transpile('items = T.let([], T::Array[String]); items.size', "MUTABLE items: String[] = [];\nitems.length();")
+      expect_transpile('name = T.must("abc"); name.size', "MUTABLE name = \"abc\";\nname.length();")
+      expect_transpile('lines = File.readlines(path); lines.size', "REQUIRE \"pkg:fs\"\nMUTABLE lines = readLines(path()) OR RAISE;\nlines.length();")
+      expect_transpile('name = "a:b"; parts = name.split(":"); parts.size', "MUTABLE name = \"a:b\";\nMUTABLE parts = name.split(\":\");\nparts.length();")
+      expect_transpile('table = {}; keys = table.keys; keys.size', "MUTABLE table = {};\nMUTABLE keys = table.keys();\nkeys.length();")
+      expect_transpile('items = []; mapped = items.map { |item| item }; mapped.size', "MUTABLE items = [];\nMUTABLE mapped = items |> SELECT _;\nmapped.length();")
+    end
+
     it "statically lowers simple nil and type/reflection checks when receiver shape is known" do
       expect_transpile('items = []; items.nil?', "MUTABLE items = [];\n(items == NIL);")
+      expect_transpile('nil.is_a?(NilClass)', "TRUE;")
+      expect_transpile('true.is_a?(Boolean)', "TRUE;")
+      expect_transpile('1.is_a?(Numeric)', "TRUE;")
+      expect_transpile(':name.is_a?(Symbol)', "TRUE;")
+      expect_transpile('"abc".is_a?("String")', "TRUE;")
       expect_transpile('items = []; items.is_a?(Array)', "MUTABLE items = [];\nTRUE;")
       expect_transpile('items = []; items.is_a?(Hash)', "MUTABLE items = [];\nFALSE;")
+      expect_transpile('items = []; items.respond_to?("size")', "MUTABLE items = [];\nTRUE;")
       expect_transpile('table = {}; table.respond_to?(:keys)', "MUTABLE table = {};\nTRUE;")
       expect_transpile('table = {}; table.respond_to?(:strip)', "MUTABLE table = {};\nFALSE;")
     end
@@ -480,6 +513,34 @@ RSpec.describe RubyToClear::Transpiler do
       expect {
         RubyToClear.transpile('items = unknown; items.is_a?(klass)')
       }.to raise_error(RubyToClear::Transpiler::TranspilationError, /is_a\? requires a static type argument/)
+
+      expect {
+        RubyToClear.transpile('items = get_items; items.respond_to?(:size)')
+      }.to raise_error(RubyToClear::Transpiler::TranspilationError, /respond_to\? requires a static receiver shape/)
+
+      expect {
+        RubyToClear.transpile('items = get_items; items.is_a?(Array)')
+      }.to raise_error(RubyToClear::Transpiler::TranspilationError, /is_a\? requires a static receiver shape/)
+    end
+
+    it "rejects unsupported registry edge cases with precise TODOs" do
+      {
+        'JSON.parse' => /JSON.parse expects 1 arguments/,
+        'File.read' => /File.read expects 1 arguments/,
+        'File.foreach("a.txt", "b.txt")' => /File.foreach expects 1 argument/,
+        'StringScanner.new' => /StringScanner.new expects 1 argument/,
+        'Set.new { |item| item }' => /Set.new with a block requires a source enumerable/,
+        'Set.new(a, b)' => /Set.new expects 0 or 1 arguments/,
+        '"abc".delete_prefix' => /delete_prefix expects 1 argument/,
+        '[1].map! { |x| x }' => /map! is only supported on a mutable local receiver/,
+        'items = []; items.map { |x = 1| x }' => /map block parameter shape is not supported/,
+        'nums = []; nums.reduce(0) { |acc| acc }' => /reduce block expects 2 required parameters/,
+        'items = []; items.map { |item| }' => /Pipeline block must contain at least one expression/
+      }.each do |ruby_code, error|
+        expect {
+          RubyToClear.transpile(ruby_code)
+        }.to raise_error(RubyToClear::Transpiler::TranspilationError, error)
+      end
     end
 
     it "transpiles Set constructors to CLEAR set-producing expressions" do
@@ -788,7 +849,11 @@ RSpec.describe RubyToClear::Transpiler do
   describe "compound assignments and optional parameters" do
     it "translates local and instance variable operator writes (+=, ||=, etc.)" do
       expect_transpile("x = 10; x += 5", "MUTABLE x = 10;\nx = (x + 5);")
+      expect_transpile("x += 5", "MUTABLE x = 5;")
       expect_transpile("x = 10; x ||= 5", "MUTABLE x = 10;\nx = (x || 5);")
+      expect_transpile("x ||= 5", "MUTABLE x = 5;")
+      expect_transpile("x &&= 5", "MUTABLE x = 5;")
+      expect_transpile("x = true; x &&= false", "MUTABLE x = TRUE;\nx = (x && FALSE);")
       expect_transpile("@val = 10; @val += 5", "self.val = 10;\nself.val = (self.val + 5);")
     end
 
@@ -822,6 +887,20 @@ RSpec.describe RubyToClear::Transpiler do
       expected_clear = <<~CLEAR
         FN typed(items: String[], table: HashMap<String, Int64>, seen: String@symbol[]@set, maybe: ?String) RETURNS HashMap<String, Int64[]> ->
           table;
+        END
+      CLEAR
+      expect_transpile(ruby_code, expected_clear)
+    end
+
+    it "compiles broader Sorbet scalar and collection type forms" do
+      ruby_code = <<~RUBY
+        sig { params(f: Float, n: NilClass, b: Boolean, t: TrueClass, f2: FalseClass, any_t: T, arr: T::Array, hash: T::Hash, set: T::Set, raw: T.untyped, anything: T.anything, either: T.any(String, Integer, NilClass), enumerable: T::Enumerable[String]).void }
+        def edge_types(f, n, b, t, f2, any_t, arr, hash, set, raw, anything, either, enumerable)
+        end
+      RUBY
+      expected_clear = <<~CLEAR
+        FN edge_types(f: Float64, n: Void, b: Bool, t: Bool, f2: Bool, any_t: Auto, arr: Auto[], hash: HashMap<Auto, Auto>, set: Auto[]@set, raw: Auto, anything: Auto, either: Auto, enumerable: String[]) RETURNS Void ->
+
         END
       CLEAR
       expect_transpile(ruby_code, expected_clear)

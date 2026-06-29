@@ -66,6 +66,15 @@ module RubyToClear
       @renames = old_renames
     end
 
+    def with_block_local_scope
+      old_declared = @declared_locals.dup
+      old_shapes = @local_shapes.dup
+      yield
+    ensure
+      @declared_locals = old_declared
+      @local_shapes = old_shapes
+    end
+
     def require_package(package)
       @required_packages << package.to_s
     end
@@ -259,6 +268,8 @@ module RubyToClear
         if exclude_defs && n.is_a?(Prism::DefNode)
           return
         end
+        return if n.is_a?(Prism::BlockNode)
+
         if n.respond_to?(:name) && n.class.name.start_with?("Prism::LocalVariable") && 
            (n.class.name.end_with?("WriteNode") || n.class.name.end_with?("TargetNode"))
           written << n.name.to_s

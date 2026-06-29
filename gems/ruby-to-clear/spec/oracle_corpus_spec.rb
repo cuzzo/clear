@@ -25,6 +25,30 @@ RSpec.describe "Ruby-to-CLEAR oracle corpus" do
       CLEAR
     },
     {
+      name: "shape tracked file pipeline result",
+      ruby: <<~RUBY,
+        sig { params(path: String).returns(Integer) }
+        def count_names(path)
+          lines = File.readlines(path)
+          names = lines.map { |line| name = line.strip; name }
+          names.size
+        end
+      RUBY
+      clear: <<~CLEAR,
+        REQUIRE "pkg:fs"
+        FN count_names(path: String) RETURNS !Int64 ->
+          MUTABLE lines = NIL;
+          MUTABLE names = NIL;
+          lines = readLines(path) OR RAISE;
+          names = lines |> SELECT {
+          MUTABLE name = _.trim();
+          name
+          };
+          names.length();
+        END
+      CLEAR
+    },
+    {
       name: "typed set construction",
       ruby: <<~RUBY,
         values = T.let([:a, :b], T::Set[Symbol])

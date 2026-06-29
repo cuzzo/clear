@@ -196,14 +196,16 @@ module RubyToClear
       return param_names if unsupported_result?(param_names)
 
       aliases = rename.call(param_names)
-      transpiler.with_renames(aliases) do
-        if (unsafe = unsafe_value_block_node(block_node))
-          next transpiler.raise_unsupported("#{method_label} block contains unsupported #{unsafe}", node)
-        end
+      transpiler.with_block_local_scope do
+        transpiler.with_renames(aliases) do
+          if (unsafe = unsafe_value_block_node(block_node))
+            next transpiler.raise_unsupported("#{method_label} block contains unsupported #{unsafe}", node)
+          end
 
-        lowering = lower_block_body(block_node, transpiler)
-        lowering.parameter_names = param_names if lowering.is_a?(BlockLowering)
-        lowering
+          lowering = lower_block_body(block_node, transpiler)
+          lowering.parameter_names = param_names if lowering.is_a?(BlockLowering)
+          lowering
+        end
       end
     end
 
