@@ -476,3 +476,224 @@ fn simple_identifier(value: &str) -> bool {
     matches!(chars.next(), Some(first) if first == '_' || first.is_ascii_alphabetic())
         && chars.all(|ch| ch == '_' || ch.is_ascii_alphanumeric())
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn node(kind: &str, text: &str) -> Node {
+        Node {
+            r#type: kind.to_string(),
+            children: Vec::new(),
+            first_lineno: 10,
+            first_column: 2,
+            last_lineno: 10,
+            last_column: 20,
+            text: text.to_string(),
+        }
+    }
+
+    #[test]
+    fn test_lua_behavior_comprehensive() {
+        let b = LuaNormalizedBehavior;
+
+        // 1. self_member_receiver
+        assert_eq!(b.self_member_receiver("foo"), "self.foo");
+
+        // 2. project_call
+        let call_p = NormalizedCallProjection {
+            receiver: "self:method".to_string(),
+            message: "call".to_string(),
+            arguments: Vec::new(),
+            access_span: [1, 2, 3, 4],
+            span: [1, 2, 3, 4],
+        };
+        let res_p = b.project_call(&node("CALL", ""), call_p);
+        assert_eq!(res_p.receiver, "self");
+        assert_eq!(res_p.message, "method");
+
+        // 3. state_read_uses_access_span
+        assert!(b.state_read_uses_access_span(&NormalizedCallProjection {
+            receiver: "self".to_string(),
+            message: "foo".to_string(),
+            arguments: Vec::new(),
+            access_span: [1, 2, 3, 4],
+            span: [1, 2, 3, 4],
+        }));
+
+        // 4. node_call_projections & lua_expression_list_call
+        // Case 1: LVAR with ipairs
+        let mut lvar_node = node("LVAR", "ipairs");
+        lvar_node.children = vec![Child::Symbol("ipairs".to_string())];
+        let mut arg_node = node("ARGUMENTS", "(t)");
+        arg_node.children = vec![Child::Node(Box::new(node("LVAR", "t")))];
+        let mut exp_node = node("EXPRESSION_LIST", "ipairs(t)");
+        exp_node.children = vec![
+            Child::Node(Box::new(lvar_node)),
+            Child::Node(Box::new(arg_node)),
+        ];
+        let calls = b.node_call_projections(&exp_node);
+        assert_eq!(calls.len(), 1);
+        assert_eq!(calls[0].message, "ipairs");
+
+        // Case 2: CALL node (non LVAR) inside EXPRESSION_LIST
+        let mut call_node = node("CALL", "self:method");
+        call_node.children = vec![
+            Child::Node(Box::new(node("IDENT", "self"))),
+            Child::Symbol("method".to_string()),
+        ];
+        let mut exp_node_call = node("EXPRESSION_LIST", "self:method(1)");
+        let mut args_node_call = node("ARGUMENTS", "(1)");
+        let mut int_node = node("INT", "1");
+        int_node.children = vec![Child::Symbol("1".to_string())];
+        args_node_call.children = vec![Child::Node(Box::new(int_node))];
+        exp_node_call.children = vec![
+            Child::Node(Box::new(call_node)),
+            Child::Node(Box::new(args_node_call)),
+        ];
+        let calls_call = b.node_call_projections(&exp_node_call);
+        assert_eq!(calls_call.len(), 1);
+        assert_eq!(calls_call[0].message, "method");
+
+        // Cover fallback branches in lua_expression_list_call
+        let mut non_lvar_node = node("EXPRESSION_LIST", "1");
+        non_lvar_node.children = vec![Child::Node(Box::new(node("INT", "1")))];
+        assert!(b.node_call_projections(&non_lvar_node).is_empty());
+
+        let mut other_lvar_node = node("LVAR", "other");
+        other_lvar_node.children = vec![Child::Symbol("other".to_string())];
+        let mut exp_node_other = node("EXPRESSION_LIST", "other(t)");
+        exp_node_other.children = vec![
+            Child::Node(Box::new(other_lvar_node)),
+            Child::Node(Box::new(node("ARGUMENTS", ""))),
+        ];
+        assert!(b.node_call_projections(&exp_node_other).is_empty());
+
+        // 5. call_site_span
+        assert_eq!(
+            b.call_site_span(
+                &node("CALL", "self:escalate()"),
+                &NormalizedCallParts { receiver: "self".to_string(), message: "escalate".to_string(), arguments: Vec::new() },
+                [1, 2, 3, 4],
+                [5, 6, 7, 8],
+                "foo"
+            ),
+            [5, 6, 7, 8]
+        );
+        assert_eq!(
+            b.call_site_span(
+                &node("CALL", "other()"),
+                &NormalizedCallParts { receiver: "other".to_string(), message: "other".to_string(), arguments: Vec::new() },
+                [1, 2, 3, 4],
+                [5, 6, 7, 8],
+                "foo"
+            ),
+            [1, 2, 3, 4]
+        );
+
+        // 6. suppress_state_read_for_call
+        assert!(b.suppress_state_read_for_call(&NormalizedCallProjection {
+            receiver: "self".to_string(),
+            message: "callback".to_string(),
+            arguments: Vec::new(),
+            access_span: [1, 2, 3, 4],
+            span: [1, 2, 3, 4],
+        }, ""));
+
+        // 7. property_read_call
+        assert!(b.property_read_call(&node("CALL", "x.y"), &NormalizedCallParts {
+            receiver: "x".to_string(),
+            message: "y".to_string(),
+            arguments: Vec::new(),
+        }));
+
+        // 8. embedded_member_reads & node_state_reads
+        let reads = b.node_state_reads(&node("DOT_INDEX_EXPRESSION", "self.x"));
+        assert_eq!(reads.len(), 1);
+        assert_eq!(reads[0].field, "x");
+        assert!(b.node_state_reads(&node("other", "self.x")).is_empty());
+
+        // 9. function_visibility
+        assert_eq!(b.function_visibility("foo", &node("", ""), &[]), "public");
+
+        // 10. owner_for_function & lua_function_owner
+        assert_eq!(b.owner_for_function("foo", &node("FN", "function MyTable:foo()"), "current", "file"), "MyTable");
+        assert_eq!(b.owner_for_function("foo", &node("FN", "function foo()"), "current", "file"), "current");
+        assert_eq!(b.owner_for_function("foo", &node("FN", "function MyTable:foo"), "current", "file"), "MyTable");
+
+        // 11. owner_name_span
+        assert!(b.owner_name_span("MyClass", &node("CLASS", ""), [1, 2, 3, 4]).is_some());
+
+        // 12. suppress_branch_decision
+        assert!(b.suppress_branch_decision(&node("", "elseif x then")));
+
+        // 13. nil_guard_fact
+        assert!(b.nil_guard_fact("isNull", "x").is_some());
+
+        // 14. terminating_call_message
+        assert!(b.terminating_call_message("error"));
+
+        // 15. semantic_effect_for_call
+        assert!(b.semantic_effect_for_call(&CallSite {
+            receiver: "x".to_string(),
+            message: "isNull".to_string(),
+            file: "".to_string(),
+            function: "".to_string(),
+            owner: "".to_string(),
+            line: 1,
+            span: [1, 2, 3, 4],
+            conditional: false,
+            arguments: Vec::new(),
+            control: None,
+            safe_navigation: false,
+            block: false,
+        }).is_some());
+
+        // 16. local_assignment_writes
+        assert!(b.local_assignment_writes(None, &node("", ""), [1, 2, 3, 4]).is_empty());
+        let writes = b.local_assignment_writes(Some("self.field[1]"), &node("", ""), [1, 2, 3, 4]);
+        assert_eq!(writes.len(), 1);
+        assert_eq!(writes[0].receiver, "self");
+        assert_eq!(writes[0].field, "field");
+
+        assert!(b.local_assignment_writes(Some("invalid"), &node("", ""), [1, 2, 3, 4]).is_empty());
+
+        // 17. local_flow_declaration_keyword & local_flow_keyword
+        assert!(b.local_flow_declaration_keyword("local"));
+        for kw in &["and", "break", "do", "else", "elseif", "end", "false", "for", "function", "if", "in", "nil", "return", "then", "true", "while"] {
+            assert!(b.local_flow_keyword(kw));
+        }
+        assert!(!b.local_flow_keyword("not_a_keyword"));
+
+        // 18. suppress_predicate_body_text
+        assert!(b.suppress_predicate_body_text("nil"));
+
+        // 19. predicate_body_language_signal
+        assert!(b.predicate_body_language_signal("nil"));
+
+        // 20. state_declaration_from_node
+        assert!(b.state_declaration_from_node(&node("", ""), "", false).is_none());
+
+        // 21-25. formatting
+        assert_eq!(b.format_array_type("Int"), "Int[]");
+        assert_eq!(b.format_hash_type("String", "Int"), "table<String, Int>");
+        assert_eq!(b.format_set_type("Int"), "table<Int, boolean>");
+        assert_eq!(b.format_nilable_type(""), "");
+        assert_eq!(b.format_nilable_type("Int|nil"), "Int|nil");
+        assert_eq!(b.format_nilable_type("Int"), "Int|nil");
+        assert_eq!(b.untyped_type(), "any");
+        assert_eq!(b.untyped_array_type(), "any[]");
+        assert_eq!(b.untyped_hash_type(), "table");
+
+        // child_symbol None branch
+        let empty_node = node("", "");
+        assert_eq!(child_symbol(&empty_node, 0), None);
+        // first_string_or_symbol None branch
+        assert_eq!(first_string_or_symbol(&empty_node), None);
+        // child_symbol and first_string_or_symbol match fallback arms
+        let mut node_with_int = node("", "");
+        node_with_int.children = vec![Child::Integer(1)];
+        assert_eq!(child_symbol(&node_with_int, 0), None);
+        assert_eq!(first_string_or_symbol(&node_with_int), None);
+    }
+}
