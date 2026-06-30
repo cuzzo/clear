@@ -4,17 +4,18 @@
 require "yaml"
 require "set"
 
-$LOAD_PATH.unshift("/home/yahn/litedb/gems/espalier/lib")
-$LOAD_PATH.unshift("/home/yahn/litedb/gems/nil-kill/lib")
-$LOAD_PATH.unshift("/home/yahn/litedb/gems/fact-mine/lib")
+ROOT = File.expand_path("..", __dir__)
+$LOAD_PATH.unshift(File.join(ROOT, "gems/espalier/lib"))
+$LOAD_PATH.unshift(File.join(ROOT, "gems/nil-kill/lib"))
+$LOAD_PATH.unshift(File.join(ROOT, "gems/fact-mine/lib"))
 
 require "espalier/big_o_analyzer"
 require "espalier/nil_kill_evidence"
 require "espalier/static_evidence"
 require "espalier/aggregator"
 
-manifest_path = File.expand_path("../espalier_manifest.yml", __dir__)
-nil_kill_path = "/tmp/clear-nil-kill/evidence.json"
+manifest_path = File.join(ROOT, "espalier_manifest.yml")
+nil_kill_path = ENV.fetch("NIL_KILL_EVIDENCE", "/tmp/clear-nil-kill/evidence.json")
 
 explain_target = nil
 ARGV.each_with_index do |arg, idx|
@@ -78,7 +79,14 @@ if explain_target
   
   # Re-evaluate ast_nodes like Aggregator does
   next_meth = matched_mod[:functions][matched_mod[:functions].index(matched_fn) + 1]
-  end_line = next_meth ? (next_meth[:line] || Float::INFINITY) : Float::INFINITY
+  span = matched_fn[:span]
+  if span.is_a?(Array) && span[2]
+    end_line = span[2].to_i
+    end_inclusive = true
+  else
+    end_line = next_meth ? (next_meth[:line] || Float::INFINITY) : Float::INFINITY
+    end_inclusive = false
+  end
 
   ast_nodes = Array(matched_fn[:delegations] || []).map do |d|
     { type: :call, receiver: d[:receiver], method: d[:message], line: matched_fn[:line] || 0 }
@@ -86,7 +94,8 @@ if explain_target
 
   if file && nk.loop_counts && nk.loop_counts[file]
     nk.loop_counts[file].each do |line, calls|
-      if line >= meth_line && line < end_line && calls > 0
+      in_range = line >= meth_line && (end_inclusive ? line <= end_line : line < end_line)
+      if in_range && calls > 0
         ast_nodes << { type: :loop, line: line, calls: calls }
       end
     end
@@ -134,9 +143,9 @@ if explain_target
       end
     elsif node[:type] == :loop
       prev = current_complexity
-      current_complexity = analyzer.send(:multiply_complexity, current_complexity, "O(N)")
+      current_complexity = analyzer.send(:max_complexity, current_complexity, "O(N)")
       puts "  \e[35m[Step #{step_num}]\e[0m Loop: detected at line #{node[:line]} (iteration count: #{node[:calls]})"
-      puts "           -> Multiplied complexity by O(N)"
+      puts "           -> Flat loop evidence contributes a sequential O(N) lower bound"
       puts "           -> Complexity update: #{prev} -> #{current_complexity}"
     end
   end
@@ -148,9 +157,8 @@ if explain_target
     puts "\n\e[1;33mDiagnostic Insight:\e[0m"
     puts "This method has an unusually high complexity of #{current_complexity}."
     puts "This is typically caused by one of two factors:"
-    puts "1. \e[1mSequential loops treated as nested:\e[0m The Big-O analyzer currently multiplies all loop complexities"
-    puts "   found within the method's line span. If the loops are sequential rather than nested, this leads to an inflated"
-    puts "   exponent (e.g. 5 sequential loops evaluated as O(N^5) instead of O(N))."
+    puts "1. \e[1mNested loop proof missing:\e[0m The Big-O analyzer only has flat runtime loop evidence."
+    puts "   It should not produce high exponents unless static nesting evidence is added."
     puts "2. \e[1mMethod boundary detection issue:\e[0m If this is the last method in the file, it defaults its end line"
     puts "   to the end of the file. Any loops in subsequent lines/methods will be incorrectly counted towards this function."
   end

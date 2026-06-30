@@ -181,4 +181,40 @@ class AggregatorTest < Minitest::Test
     assert_includes fn[:DELEGATIONS][:always_calls], "@unknown_ivar.process"
   end
 
+  def test_big_o_loop_attribution_uses_last_method_span
+    modules = [
+      {
+        type: :class,
+        name: "Formatter",
+        file: "lib/formatter.rb",
+        states: Set.new,
+        methods: [
+          {
+            name: "last_method",
+            signature: "def last_method",
+            parameters: [],
+            visibility: :public,
+            line: 10,
+            span: [10, 2, 12, 5],
+            effects: { reads: Set.new, writes: Set.new },
+            delegations: []
+          }
+        ]
+      }
+    ]
+
+    aggregator = Espalier::Aggregator.new(
+      nil_kill_loops: {
+        "lib/formatter.rb" => {
+          30 => 10
+        }
+      }
+    )
+
+    manifest = aggregator.aggregate(modules)
+    fn = manifest.first[:functions].first
+
+    assert_equal "O(1)", fn[:quality_metrics][:big_o]
+  end
+
 end

@@ -53,8 +53,10 @@ module Espalier
             warnings << "Unknown receiver type for `#{node[:receiver]}` at line #{node[:line]}. Defaulting to O(1) for `.#{method_called}`, but this could be worse."
           end
         elsif node[:type] == :loop
-          # multiply inner complexity
-          complexity = multiply_complexity(complexity, "O(N)")
+          # Runtime loop evidence is currently flat by source line. Without a
+          # nesting tree, multiple observed loops in one method are a sequential
+          # lower bound, not proof of nested O(N^k) behavior.
+          complexity = max_complexity(complexity, "O(N)")
         elsif node[:type] == :callback || node[:type] == :yield
           warnings << "Function pointer / callback executed at line #{node[:line]}. This could execute arbitrary O(N^x) code, meaning our calculation is strictly a LOWER BOUND."
         end

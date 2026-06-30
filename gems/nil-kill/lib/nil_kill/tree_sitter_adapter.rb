@@ -235,7 +235,7 @@ module NilKill
       end
 
       def slice
-        @context.source[@raw.start_byte...@raw.end_byte]
+        @context.source.byteslice(@raw.start_byte...@raw.end_byte)
       end
 
       def child_nodes
@@ -332,7 +332,7 @@ module NilKill
     class DefNode < Node
       def name
         name_node = @raw.child_by_field_name("name") || @raw.named_children.find { |child| child.type == "identifier" }
-        name_node ? @context.source[name_node.start_byte...name_node.end_byte].to_sym : nil
+        name_node ? @context.source.byteslice(name_node.start_byte...name_node.end_byte).to_sym : nil
       end
 
       def receiver
@@ -422,7 +422,7 @@ module NilKill
         node = @raw.child_by_field_name("name") ||
                @raw.named_children.find { |child| child.type == "identifier" } ||
                (@raw.type == "identifier" ? @raw : nil)
-        node ? @context.source[node.start_byte...node.end_byte].to_sym : nil
+        node ? @context.source.byteslice(node.start_byte...node.end_byte).to_sym : nil
       end
 
       def value
@@ -451,7 +451,7 @@ module NilKill
     class VariableNode < Node
       def name
         name_node = @raw.child_by_field_name("name") || @raw.named_children.first || @raw
-        @context.source[name_node.start_byte...name_node.end_byte].to_sym
+        @context.source.byteslice(name_node.start_byte...name_node.end_byte).to_sym
       end
     end
 
@@ -490,13 +490,16 @@ module NilKill
           :[]
         when "binary"
           op = @raw.child_by_field_name("operator")
-          op ? @context.source[op.start_byte...op.end_byte].to_sym : nil
+          txt = op && @context.source ? @context.source.byteslice(op.start_byte...op.end_byte) : nil
+          txt ? txt.to_sym : nil
         when "unary"
           op = @raw.child_by_field_name("operator")
-          op ? @context.source[op.start_byte...op.end_byte].to_sym : nil
+          txt = op && @context.source ? @context.source.byteslice(op.start_byte...op.end_byte) : nil
+          txt ? txt.to_sym : nil
         else
           method_node = @raw.child_by_field_name("method") || @raw.named_children.find { |child| child.type == "identifier" }
-          method_node ? @context.source[method_node.start_byte...method_node.end_byte].to_sym : nil
+          txt = method_node && @context.source ? @context.source.byteslice(method_node.start_byte...method_node.end_byte) : nil
+          txt ? txt.to_sym : nil
         end
       end
 
@@ -574,7 +577,7 @@ module NilKill
 
     class LocalVariableReadNode < CallNode
       def name
-        @context.source[@raw.start_byte...@raw.end_byte].to_sym
+        @context.source.byteslice(@raw.start_byte...@raw.end_byte).to_sym
       end
     end
 

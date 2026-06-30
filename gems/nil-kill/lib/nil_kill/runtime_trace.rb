@@ -1393,6 +1393,11 @@ module NilKillRuntimeTrace
     install_set_hook
   end
 
+  def self.record_loop_iteration(path, line)
+    @loop_file ||= File.open(File.join(OUT_DIR, "loops-#{Process.pid}.jsonl"), "a")
+    @loop_file.puts %({"path":#{path.inspect},"line":#{line}})
+  end
+
   # NOTE: the parallel instrumented tree and its require/require_relative
   # redirect (instrumented_copy_for / resolve_required_source /
   # install_instrumented_require_hook) were DELETED. In-place

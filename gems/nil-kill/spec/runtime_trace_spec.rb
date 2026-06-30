@@ -761,4 +761,34 @@ RSpec.describe "nil-kill runtime trace" do
       end
     end
   end
+
+  it "records loop iterations against original source lines even when __LINE__ is present" do
+    Dir.mktmpdir("nil-kill-loop-line", NilKill::ROOT) do |dir|
+      src = File.join(dir, "loop_line.rb")
+      File.write(src, <<~RUBY)
+        class LoopLine
+          MARKER = __LINE__
+
+          def run
+            i = 0
+            while i < 1
+              i += 1
+            end
+          end
+        end
+      RUBY
+
+      source_lines = File.read(src).lines
+      marker_line = source_lines.index { |line| line.include?("MARKER") } + 1
+      while_line = source_lines.index { |line| line.include?("while i < 1") } + 1
+
+      instrumented = NilKill::SourceInstrumenter.new.instrument_file(src)
+
+      expect(instrumented).to include("MARKER = #{marker_line}")
+      expect(instrumented).to include(
+        "NilKillRuntimeTrace.record_loop_iteration(#{File.expand_path(src, NilKill::ROOT).inspect}, #{while_line})"
+      )
+      expect(instrumented).not_to include("MARKER = __LINE__")
+    end
+  end
 end

@@ -79,6 +79,7 @@ module NilKill
       return [source, nil] unless parsed.success?
       edits = []
       collect_ivar_assignment_edits(parsed.value, edits) if source.include?("@")
+      collect_loop_edits(parsed.value, File.expand_path(path, ROOT), edits) if source.include?("while") || source.include?("until")
       collect_method_edits(parsed.value, File.expand_path(path, ROOT), edits)
       collect_source_ref_edits(parsed.value, edits, File.expand_path(path, ROOT)) if source.include?("__LINE__")
       write_tracepoint_fallback_plan
@@ -118,6 +119,7 @@ module NilKill
       return source unless parsed.success?
       edits = []
       collect_ivar_assignment_edits(parsed.value, edits) if source.include?("@")
+      collect_loop_edits(parsed.value, File.expand_path(path, ROOT), edits) if source.include?("while") || source.include?("until")
       collect_method_edits(parsed.value, File.expand_path(path, ROOT), edits)
       collect_source_ref_edits(parsed.value, edits, File.expand_path(path, ROOT)) if source.include?("__LINE__")
       write_tracepoint_fallback_plan
@@ -147,7 +149,8 @@ module NilKill
       [low, 1].max
     end
 
-    def collect_method_edits(node, path, edits)
+    def collect_method_edits(node, path, edits, visited = Set.new)
+      return unless visited.add?(node)
       case node
       when Syntax::DefNode
         plan = @method_plans_by_file_line[path][node.location.start_line]
@@ -177,7 +180,7 @@ module NilKill
         collect_return_edits(node.body, plan, edits)
         return
       end
-      node.child_nodes.compact.each { |child| collect_method_edits(child, path, edits) } if node.respond_to?(:child_nodes)
+      node.child_nodes.compact.each { |child| collect_method_edits(child, path, edits, visited) } if node.respond_to?(:child_nodes)
     end
 
     def insert_method_wrapper(node, plan, edits)
@@ -205,11 +208,12 @@ module NilKill
     # rewrites -- are gone). Only __LINE__ still needs literalising:
     # the injected wrapper shifts every later line, so a raw __LINE__
     # would yield the instrumented line, not the src line.
-    def collect_source_ref_edits(node, edits, _real_file = nil)
+    def collect_source_ref_edits(node, edits, _real_file = nil, visited = Set.new)
+      return unless visited.add?(node)
       if node.is_a?(Syntax::SourceLineNode)
         edits << [node.location.start_offset, node.location.end_offset, node.location.start_line.to_s]
       end
-      node.child_nodes.compact.each { |child| collect_source_ref_edits(child, edits, _real_file) } if node.respond_to?(:child_nodes)
+      node.child_nodes.compact.each { |child| collect_source_ref_edits(child, edits, _real_file, visited) } if node.respond_to?(:child_nodes)
     end
 
     def method_header_end_offset(node)
@@ -217,8 +221,9 @@ module NilKill
       loc.start_offset + loc.length
     end
 
-    def collect_return_edits(node, plan, edits)
+    def collect_return_edits(node, plan, edits, visited = Set.new)
       return unless node
+      return unless visited.add?(node)
       case node
       when Syntax::DefNode, Syntax::ClassNode, Syntax::ModuleNode, Syntax::LambdaNode
         # New scope: a `return` here belongs to it, not this method.
@@ -247,7 +252,7 @@ module NilKill
       # returns. Skip the whole call subtree; the caller's recursion
       # still walks siblings.
       return if node.is_a?(Syntax::CallNode) && node.name == :lambda && node.block.is_a?(Syntax::BlockNode)
-      node.child_nodes.compact.each { |child| collect_return_edits(child, plan, edits) } if node.respond_to?(:child_nodes)
+      node.child_nodes.compact.each { |child| collect_return_edits(child, plan, edits, visited) } if node.respond_to?(:child_nodes)
     end
 
     def source_params_expr(plan)
@@ -265,7 +270,8 @@ module NilKill
       @line_offsets[line] ? @line_offsets[line] - 1 : @line_offsets.last.to_i
     end
 
-    def collect_ivar_assignment_edits(node, edits)
+    def collect_ivar_assignment_edits(node, edits, visited = Set.new)
+      return unless visited.add?(node)
       case node
       when Syntax::InstanceVariableWriteNode, Syntax::ClassVariableWriteNode, Syntax::GlobalVariableWriteNode
         value = node.value
@@ -276,7 +282,22 @@ module NilKill
           edits << [value.location.start_offset, value.location.end_offset, replacement]
         end
       end
-      node.child_nodes.compact.each { |child| collect_ivar_assignment_edits(child, edits) } if node.respond_to?(:child_nodes)
+      node.child_nodes.compact.each { |child| collect_ivar_assignment_edits(child, edits, visited) } if node.respond_to?(:child_nodes)
+    end
+
+    def collect_loop_edits(node, path, edits, visited = Set.new)
+      return unless visited.add?(node)
+      abs_path = File.expand_path(path, NilKill::ROOT)
+      case node
+      when Syntax::WhileNode, Syntax::UntilNode
+        if node.predicate&.location
+          pred = node.predicate
+          replacement_start = "(NilKillRuntimeTrace.record_loop_iteration(#{abs_path.inspect}, #{node.location.start_line}); "
+          edits << [pred.location.start_offset, pred.location.start_offset, replacement_start]
+          edits << [pred.location.end_offset, pred.location.end_offset, ")"]
+        end
+      end
+      node.child_nodes.compact.each { |child| collect_loop_edits(child, path, edits, visited) } if node.respond_to?(:child_nodes)
     end
 
     def apply_edits(source, edits)

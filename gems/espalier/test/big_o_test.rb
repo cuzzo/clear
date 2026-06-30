@@ -71,9 +71,21 @@ class BigOTest < Minitest::Test
     result = analyzer.analyze_method("process_items", ast_mock)
     
     assert_equal "process_items", result[:method]
-    assert_equal "O(N^2 log N)", result[:lower_bound_complexity] # O(N log N) * O(N) = O(N^2 log N)
+    assert_equal "O(N log N)", result[:lower_bound_complexity]
     assert_empty result[:unknown_operations]
     assert_equal 1, result[:warnings].size
     assert_match(/Function pointer \/ callback/, result[:warnings].first)
+  end
+
+  def test_flat_sequential_loop_evidence_does_not_imply_nested_exponent
+    analyzer = Espalier::BigOAnalyzer.new
+
+    result = analyzer.analyze_method("sequential_loops", [
+      { type: :loop, line: 10 },
+      { type: :loop, line: 20 },
+      { type: :loop, line: 30 }
+    ])
+
+    assert_equal "O(N)", result[:lower_bound_complexity]
   end
 end

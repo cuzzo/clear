@@ -98,10 +98,8 @@ module Espalier
           end
 
           # Run Big-O analysis
-          meth_line = m[:line] || 0
+          meth_line, end_line, end_inclusive = method_line_bounds(mod[:methods], m)
           file = mod[:file]
-          next_meth = mod[:methods][mod[:methods].index(m) + 1]
-          end_line = next_meth ? (next_meth[:line] || Float::INFINITY) : Float::INFINITY
 
           ast_nodes = Array(m[:delegations]).map do |d|
             { type: :call, receiver: d[:receiver], method: d[:message], line: m[:line] || 0 }
@@ -109,7 +107,7 @@ module Espalier
 
           if file && @nil_kill_loops && @nil_kill_loops[file]
             @nil_kill_loops[file].each do |line, calls|
-              if line >= meth_line && line < end_line && calls > 0
+              if line_in_method_bounds?(line, meth_line, end_line, end_inclusive) && calls > 0
                 ast_nodes << { type: :loop, line: line, calls: calls }
               end
             end
@@ -197,6 +195,22 @@ module Espalier
         props << "co-updates with #{co_updates[state_var]}"
       end
       props
+    end
+
+    def method_line_bounds(methods, method)
+      start_line = method[:line] || 0
+      span = method[:span]
+      if span.is_a?(Array) && span[2]
+        return [start_line, span[2].to_i, true]
+      end
+
+      next_method = methods[methods.index(method) + 1]
+      [start_line, next_method ? (next_method[:line] || Float::INFINITY) : Float::INFINITY, false]
+    end
+
+    def line_in_method_bounds?(line, start_line, end_line, end_inclusive)
+      return false unless line >= start_line
+      end_inclusive ? line <= end_line : line < end_line
     end
   end
 end
