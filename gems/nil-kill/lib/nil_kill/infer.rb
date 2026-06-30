@@ -32,8 +32,7 @@ module NilKill
       begin
         temp_in.write(JSON.generate(input_data))
         temp_in.flush
-        bin_path = File.expand_path("../../../target/debug/nil-kill-infer-rust", __FILE__)
-        bin_path = "nil-kill-infer-rust" unless File.exist?(bin_path)
+        bin_path = rust_binary_path
         out, err, status = Open3.capture3(bin_path, temp_in.path, temp_out.path)
         abort "Rust inference failed:\n#{err}" unless status.success?
         output_data = JSON.parse(File.read(temp_out.path))
@@ -48,6 +47,18 @@ module NilKill
         temp_out.unlink
       end
     end
+
+    def rust_binary_path
+      env_path = ENV["NIL_KILL_INFER_RUST_BINARY"]
+      return env_path unless env_path.nil? || env_path.empty?
+
+      [
+        File.join(ROOT, "gems/nil-kill/target/release/nil-kill-infer-rust"),
+        File.join(ROOT, "gems/nil-kill/target/debug/nil-kill-infer-rust"),
+        "nil-kill-infer-rust"
+      ].find { |path| path == "nil-kill-infer-rust" || File.exist?(path) }
+    end
+
     def load_runtime
       Runtime::Normalizer.new(root: ROOT).load_legacy_ruby!(@store, runtime_dir: RUNTIME_DIR)
     end
