@@ -147,6 +147,7 @@ class SemanticAnnotator
     prop :snapshot_txn_frames, T::Array[SnapshotTxnFrame], factory: -> { [] }
     prop :pipeline_accessed_fields, T.nilable(T::Set[String]), default: nil
     prop :auto_locked_assign_name, T.nilable(String), default: nil
+    prop :struct_literal_call_argument_depth, Integer, default: 0
     prop :effect_state, T.nilable(EffectTracker::EffectState), default: nil
     prop :lock_analysis, LockHelper::LockAnalysisState, factory: -> { LockHelper::LockAnalysisState.new }
     prop :ownership_graph, OwnershipGraph, factory: -> { OwnershipGraph.new }
@@ -551,6 +552,23 @@ class SemanticAnnotator
     @branch_terminated = T.let(false, T::Boolean)
     reset_compilation_state!
   end
+
+  sig { returns(T::Boolean) }
+  def struct_literal_call_argument_context?
+    @receiver_state.struct_literal_call_argument_depth > 0
+  end
+  private :struct_literal_call_argument_context?
+
+  sig { params(block: T.proc.void).void }
+  def with_struct_literal_call_argument(&block)
+    @receiver_state.struct_literal_call_argument_depth += 1
+    begin
+      block.call
+    ensure
+      @receiver_state.struct_literal_call_argument_depth -= 1
+    end
+  end
+  private :with_struct_literal_call_argument
 
   sig { params(node: AST::Program).returns(NilClass) }
   def annotate!(node)

@@ -686,7 +686,7 @@ module Annotator
 
         return unless expected.is_a?(Type)
         empty_list = rhs.is_a?(AST::ListLit) && rhs.items.empty? &&
-                     !rhs.instance_variable_get(:@constructor_collection)
+                     !rhs.collection_constructor?
         empty_hash = rhs.is_a?(AST::HashLit) && rhs.pairs.empty?
         return unless empty_list || empty_hash
         stamp_type!(rhs, expected)

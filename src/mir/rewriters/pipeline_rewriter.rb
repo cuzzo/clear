@@ -335,7 +335,7 @@ class PipelineRewriter
     is_each = terminal.is_a?(AST::EachOp)
     foreach = AST::ForEach.new(token, it_var, source.dup, loop_body, nil, is_each)
     AST.stamp_synthetic_type!(foreach, Type.new(:Void), context: "synthetic AST type")
-    foreach.instance_variable_set(:@var_used, true)
+    foreach.var_used = true
     body << foreach
 
     # 4. Post-loop guards
@@ -367,7 +367,7 @@ class PipelineRewriter
       AST.stamp_synthetic_type!(avg_decl, Type.new(:Float64), context: "synthetic AST type")
       avg_decl.storage   = :stack
       avg_decl.slot_size = 1
-      avg_decl.instance_variable_set(:@var_used, true)
+      avg_decl.var_used = true
       avg_decl.var_mutated = true
       body << avg_decl
 
@@ -408,7 +408,7 @@ class PipelineRewriter
       AST.stamp_synthetic_type!(decl, smooth_node.full_type!, context: "synthetic AST type")
       decl.storage   = :stack
       decl.slot_size = 1
-      decl.instance_variable_set(:@var_used, true)
+      decl.var_used = true
       decl.var_mutated = true
       [decl]
     when AST::AverageOp
@@ -417,14 +417,14 @@ class PipelineRewriter
       AST.stamp_synthetic_type!(sum_decl, Type.new(:Float64), context: "synthetic AST type")
       sum_decl.storage   = :stack
       sum_decl.slot_size = 1
-      sum_decl.instance_variable_set(:@var_used, true)
+      sum_decl.var_used = true
       sum_decl.var_mutated = true
 
       cnt_decl = AST::VarDecl.new(token, "#{res_var}_cnt", nil, AST::Literal.new(token, :NUMBER, 0.0), true)
       AST.stamp_synthetic_type!(cnt_decl, Type.new(:Float64), context: "synthetic AST type")
       cnt_decl.storage   = :stack
       cnt_decl.slot_size = 1
-      cnt_decl.instance_variable_set(:@var_used, true)
+      cnt_decl.var_used = true
       cnt_decl.var_mutated = true
 
       [sum_decl, cnt_decl]
@@ -436,7 +436,7 @@ class PipelineRewriter
       AST.stamp_synthetic_type!(decl, Type.new(:Bool), context: "synthetic AST type")
       decl.storage   = :stack
       decl.slot_size = 1
-      decl.instance_variable_set(:@var_used, true)
+      decl.var_used = true
       decl.var_mutated = true
       [decl]
     when AST::ReduceOp
@@ -444,7 +444,7 @@ class PipelineRewriter
       AST.stamp_synthetic_type!(decl, terminal.full_type!, context: "synthetic AST type")
       decl.storage   = :stack
       decl.slot_size = Type.new(decl.full_type!).slot_size(schema_lookup)
-      decl.instance_variable_set(:@var_used, true)
+      decl.var_used = true
       decl.var_mutated = true
       [decl]
     when AST::FindOp
@@ -454,7 +454,7 @@ class PipelineRewriter
       AST.stamp_synthetic_type!(decl, smooth_node.full_type!, context: "synthetic AST type")
       decl.storage   = :stack
       decl.slot_size = Type.new(decl.full_type!).slot_size(schema_lookup)
-      decl.instance_variable_set(:@var_used, true)
+      decl.var_used = true
       decl.var_mutated = true
       [decl]
     when AST::MinOp, AST::MaxOp
@@ -465,7 +465,7 @@ class PipelineRewriter
       AST.stamp_synthetic_type!(val_decl, Type.new(:Float64), context: "synthetic AST type")
       val_decl.storage   = :stack
       val_decl.slot_size = 1
-      val_decl.instance_variable_set(:@var_used, true)
+      val_decl.var_used = true
       val_decl.var_mutated = true
 
       found_init = AST::Literal.new(token, :BOOLEAN, false)
@@ -474,7 +474,7 @@ class PipelineRewriter
       AST.stamp_synthetic_type!(found_decl, Type.new(:Bool), context: "synthetic AST type")
       found_decl.storage   = :stack
       found_decl.slot_size = 1
-      found_decl.instance_variable_set(:@var_used, true)
+      found_decl.var_used = true
       found_decl.var_mutated = true
 
       [val_decl, found_decl]
@@ -486,7 +486,7 @@ class PipelineRewriter
       AST.stamp_synthetic_type!(decl, smooth_node.full_type!, context: "synthetic AST type")
       decl.storage   = smooth_node.storage
       decl.slot_size = Type.new(decl.full_type!).slot_size(schema_lookup)
-      decl.instance_variable_set(:@var_used, true)
+      decl.var_used = true
       [decl]
     else
       []
@@ -518,7 +518,7 @@ class PipelineRewriter
       AST.stamp_synthetic_type!(sel_decl, stage.expression.full_type!, context: "synthetic AST type")
       sel_decl.storage   = :stack
       sel_decl.slot_size = 0
-      sel_decl.instance_variable_set(:@var_used, true)
+      sel_decl.var_used = true
       sel_ident = AST::Identifier.new(stage.token, sel_var)
       AST.stamp_synthetic_type!(sel_ident, stage.expression.full_type!, context: "synthetic AST type")
       rest = build_recursive_body(T.must(remaining), terminal, sel_ident, res_var, token, stage_inits, res_type)
@@ -540,7 +540,7 @@ class PipelineRewriter
       AST.stamp_synthetic_type!(cnt_decl, Type.new(:Int64), context: "synthetic AST type")
       cnt_decl.storage = :stack
       cnt_decl.slot_size = 1
-      cnt_decl.instance_variable_set(:@var_used, true)
+      cnt_decl.var_used = true
       cnt_decl.var_mutated = true
       stage_inits << cnt_decl
 
@@ -567,7 +567,7 @@ class PipelineRewriter
       AST.stamp_synthetic_type!(cnt_decl, Type.new(:Int64), context: "synthetic AST type")
       cnt_decl.storage = :stack
       cnt_decl.slot_size = 1
-      cnt_decl.instance_variable_set(:@var_used, true)
+      cnt_decl.var_used = true
       cnt_decl.var_mutated = true
       stage_inits << cnt_decl
 
@@ -687,7 +687,7 @@ class PipelineRewriter
       # Mark collection as a slice so the transpiler uses &expr, not .items.
       inner_foreach = AST::ForEach.new(token, inner_it_var, inner_expr, [append], nil, false)
       AST.stamp_synthetic_type!(inner_foreach, Type.new(:Void), context: "synthetic AST type")
-      inner_foreach.instance_variable_set(:@var_used, true)
+      inner_foreach.var_used = true
 
       [inner_foreach]
     when AST::DistinctOp

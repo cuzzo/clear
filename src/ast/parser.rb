@@ -133,6 +133,9 @@ class ClearParser
     @@suffix_rules[[type, value]] = block
   end
 
+  sig { returns(String) }
+  attr_reader :source_code
+
   sig { params(tokens: T::Array[Lexer::Token], source_code: String, gradual: T.nilable(T::Boolean)).void }
   def initialize(tokens, source_code = "", gradual: nil)
     @tokens = tokens
@@ -149,6 +152,12 @@ class ClearParser
     # landed.
     @gradual = T.let(gradual.nil? ? self.class.gradual_mode : gradual, T::Boolean)
   end
+
+  sig { returns(T::Boolean) }
+  def suppress_struct_lit?
+    @suppress_struct_lit
+  end
+  private :suppress_struct_lit?
 
   class << self
     extend T::Sig
@@ -517,7 +526,7 @@ class ClearParser
   # like parse_with_capability that legitimately follow an expression with '{' are unaffected.
   suffix(:CHAR, '{') do |lhs|
     T.bind(self, ClearParser) rescue nil
-    if !T.unsafe(self).instance_variable_get(:@suppress_struct_lit) && AST.inline_union_constructor_target?(lhs)
+    if !suppress_struct_lit? && AST.inline_union_constructor_target?(lhs)
       tok = current
       _, field_pairs = parse_comma_seq(:CHAR, '{', '}') do
         k = (T.must(current.type == :TYPE_ID ? consume(:TYPE_ID) : consume(:VAR_ID))).value
@@ -2746,9 +2755,11 @@ class ClearParser
           is_soa = caps.is_soa
         end
         node = AST::ListLit.new(type_token, ctor_items, storage)
-        node.instance_variable_set(:@constructor_collection, collection)
-        node.instance_variable_set(:@constructor_soa, is_soa)
-        node.instance_variable_set(:@constructor_shard_count, shard_count)
+        node.constructor_options = AST::CollectionConstructorFact.new(
+          collection: collection,
+          soa: is_soa,
+          shard_count: shard_count
+        )
         return node
       elsif match?(:CHAR, '<') && peek_is_generic_struct_lit?
         # Generic struct literal: Pair<Number>{ first: 1.0, second: 2.0 }

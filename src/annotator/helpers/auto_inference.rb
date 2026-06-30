@@ -391,7 +391,7 @@ class AutoConstraintCollector
   sig { params(node: T.nilable(AST::Locatable)).returns(T::Boolean) }
   def empty_list_lit?(node)
     node.is_a?(AST::ListLit) && node.items.empty? &&
-      !node.instance_variable_get(:@constructor_collection)
+      !node.collection_constructor?
   end
 
   sig { params(node: T.nilable(AST::Locatable)).returns(T::Boolean) }

@@ -433,18 +433,9 @@ class Scope
 end
 
 # Helper module for scope stack management.
-# Include in classes that maintain @scope_stack.
+# Include in classes that provide a `scope_stack` method.
 module ScopeHelper
     extend T::Sig
-
-  # @scope_stack is initialized by the host class. Access it through this
-  # private helper so Sorbet strict mode can verify the element type without
-  # requiring a T.let declaration inside a module (which has no initialize).
-  sig { returns(T::Array[Scope]) }
-  def scope_stack
-    T.cast(T.unsafe(self).instance_variable_get(:@scope_stack), T::Array[Scope])
-  end
-  private :scope_stack
 
   sig { returns(Scope) }
   def current_scope

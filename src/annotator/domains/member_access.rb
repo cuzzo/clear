@@ -395,7 +395,7 @@ module Annotator
           # Skip CopyNode wrapping for rodata strings in call argument structs.
           # The struct is a temporary - rodata strings are valid for the call's
           # lifetime. The callee dupes strings it needs to escape.
-          is_call_arg = node.instance_variable_get(:@is_call_arg)
+          is_call_arg = struct_literal_call_argument_context?
           owned = T.let(unless field_is_borrowed || is_call_arg
             ensure_owned_value!(val_node, expected_type, "#{node.name}.#{field_name}")
           end, T.nilable(AST::CopyNode))
@@ -417,7 +417,6 @@ module Annotator
 
         # Non-escaping propagation: structs with BORROWED fields inherit non_escaping.
         node.borrowed_field_names = schema.borrowed_fields
-        node.instance_variable_set(:@has_borrowed_fields, true) if schema.borrowed_fields&.any?
 
         stamp_type!(node, literal_instance_type(node))
       end
@@ -446,12 +445,12 @@ module Annotator
         if node.items.empty?
           # Untyped constructor: List[] or Pool[] — deferred element type.
           # The collection type is set; element type resolves on first append/insert.
-          if (coll = node.instance_variable_get(:@constructor_collection))
+          if (coll = node.constructor_collection)
             t = Type.new(:"Any[]", collection: coll)
             t.apply_constructor_collection!(
               collection: nil,
-              soa: !!node.instance_variable_get(:@constructor_soa),
-              shard_count: node.instance_variable_get(:@constructor_shard_count)
+              soa: node.constructor_soa?,
+              shard_count: node.constructor_shard_count
             )
             t.mark_heap_allocated! if coll == :pool || coll == :set
             stamp_type!(node, t)

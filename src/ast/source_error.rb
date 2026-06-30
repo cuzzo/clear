@@ -56,11 +56,11 @@ module ErrorHelper
     err_class = self.class.name&.include?("Parser") ? ParserError : CompilerError
     source_token = source_error_token(token)
 
-    raise err_class.new(
-      source_token,
-      message,
-      T.cast(T.unsafe(self).instance_variable_get(:@source_code), T.nilable(String))
-    )
+      raise err_class.new(
+        source_token,
+        message,
+        diagnostic_source_code
+      )
   end
 
   # Try the hash form first when applicable; fall back to positional;
@@ -165,7 +165,7 @@ module ErrorHelper
       raise err_class.new(
         source_token,
         rendered_message,
-        T.cast(T.unsafe(self).instance_variable_get(:@source_code), T.nilable(String))
+        diagnostic_source_code
       )
     end
 
@@ -180,10 +180,18 @@ module ErrorHelper
       raise err_class.new(
         source_token,
         rendered_message,
-        T.cast(T.unsafe(self).instance_variable_get(:@source_code), T.nilable(String))
+        diagnostic_source_code
       )
     end
   end
+
+  sig { returns(T.nilable(String)) }
+  def diagnostic_source_code
+    return T.cast(T.unsafe(self).source_code, T.nilable(String)) if T.unsafe(self).respond_to?(:source_code)
+
+    nil
+  end
+
   sig { params(node_or_token: T.untyped).returns(DiagnosticToken) }
   def diagnostic_token(node_or_token)
     token = node_or_token.respond_to?(:token) ? node_or_token.token : node_or_token
@@ -198,7 +206,7 @@ module ErrorHelper
     Lexer::Token.new(:ANCHOR, nil, T.unsafe(token).line, T.unsafe(token).column)
   end
 
-  private :format_diagnostic_template, :diagnostic_token, :source_error_token
+  private :format_diagnostic_template, :diagnostic_source_code, :diagnostic_token, :source_error_token
 
 end
 
