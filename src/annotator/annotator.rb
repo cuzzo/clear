@@ -24,6 +24,7 @@ require_relative "phases/whole_program_semantics"
 require_relative "function_registry"
 require_relative "domains/control_flow"
 require_relative "domains/variables"
+require_relative "domains/destructuring"
 require_relative "domains/member_access"
 require_relative "domains/execution_boundaries"
 require_relative "domains/errors"
@@ -87,6 +88,7 @@ class SemanticAnnotator
   include Annotator::Phases::WholeProgramSemantics
   include Annotator::Domains::ControlFlow
   include Annotator::Domains::Variables
+  include Annotator::Domains::Destructuring
   include Annotator::Domains::MemberAccess
   include Annotator::Domains::ExecutionBoundaries
   include Annotator::Domains::Errors
