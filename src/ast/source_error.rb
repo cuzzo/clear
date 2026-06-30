@@ -187,9 +187,7 @@ module ErrorHelper
 
   sig { returns(T.nilable(String)) }
   def diagnostic_source_code
-    return T.cast(T.unsafe(self).source_code, T.nilable(String)) if T.unsafe(self).respond_to?(:source_code)
-
-    nil
+    T.cast(T.unsafe(self).source_code, T.nilable(String))
   end
 
   sig { params(node_or_token: T.untyped).returns(DiagnosticToken) }
