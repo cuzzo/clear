@@ -1,15 +1,15 @@
 diff --git a/src/semantic/escape_analysis.rb b/src/semantic/escape_analysis.rb
 --- a/src/semantic/escape_analysis.rb
 +++ b/src/semantic/escape_analysis.rb
-@@ -672,5 +672,6 @@ module EscapeAnalysis
+@@ -665,5 +665,6 @@ module EscapeAnalysis
    sig { params(receiver: AST::Node, args: T::Array[AST::Node], params: T::Array[AST::Param], fn_nodes: FnNodes, facts_by_name: T::Hash[String, FunctionFacts], schema_lookup: T.nilable(Proc)).void }
    private_class_method def self.mark_receiver_for_owned_sink!(receiver, args, params, fn_nodes, facts_by_name, schema_lookup)
 +    return # MUTANT: owned sink args no longer force the receiver heap-owned.
      receiver_root = AST.root_identifier(receiver)
      receiver_sym = receiver_root&.symbol
      return unless receiver_sym
-@@ -767,5 +768,6 @@ module EscapeAnalysis
-   sig { params(receiver: T.untyped, args: T::Array[T.untyped], params: T::Array[AST::Param]).void }
+@@ -762,5 +763,6 @@ module EscapeAnalysis
+   sig { params(receiver: AST::Node, args: T::Array[AST::Node], params: T::Array[AST::Param]).void }
    private_class_method def self.mark_receiver_scope_escapes!(receiver, args, params)
 +    return # MUTANT: deeper-scope values no longer force the outer receiver heap-owned.
      receiver_root = AST.root_identifier(receiver)
