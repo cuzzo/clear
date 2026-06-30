@@ -119,9 +119,9 @@ module Espalier
           analyzer.instance_variable_set(:@ivar_types, mod[:ivar_types] || {})
           
           big_o_result = analyzer.analyze_method(key, ast_nodes)
-          if big_o_result[:lower_bound_complexity] != "O(1)"
-            quality[:big_o] = big_o_result[:lower_bound_complexity]
-          end
+          quality[:big_o] = big_o_result[:lower_bound_complexity]
+          quality[:big_o_warnings] = big_o_result[:warnings] unless big_o_result[:warnings].empty?
+          quality[:big_o_unknowns] = big_o_result[:unknown_operations] unless big_o_result[:unknown_operations].empty?
 
           {
             name: m[:name],

@@ -44,6 +44,9 @@ module Espalier
             if known_complexity
               # If it's sequential, we just take the max of what we've seen so far.
               complexity = max_complexity(complexity, known_complexity)
+            else
+              unknown_operations << "#{receiver_type}##{method_called}"
+              warnings << "Missing method complexity for `#{receiver_type}##{method_called}` in stdlib_complexity_ruby.yml at line #{node[:line]}."
             end
           else
             unknown_operations << "#{node[:receiver]}.#{method_called}"
