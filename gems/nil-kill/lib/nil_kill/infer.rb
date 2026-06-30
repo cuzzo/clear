@@ -34,7 +34,7 @@ module NilKill
         temp_in.flush
         bin_path = File.expand_path("../../../target/debug/nil-kill-infer-rust", __FILE__)
         bin_path = "nil-kill-infer-rust" unless File.exist?(bin_path)
-        out, err, status = Open3.capture3(bin_path, "infer", temp_in.path, temp_out.path)
+        out, err, status = Open3.capture3(bin_path, temp_in.path, temp_out.path)
         abort "Rust inference failed:\n#{err}" unless status.success?
         output_data = JSON.parse(File.read(temp_out.path))
         @store.actions.concat(output_data["actions"] || [])
