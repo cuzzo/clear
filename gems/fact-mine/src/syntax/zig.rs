@@ -614,4 +614,66 @@ mod tests {
         assert_eq!(span_zig[0], 31);
         assert_eq!(span_zig[2], 30);
     }
+
+    #[test]
+    fn test_zig_behavior_uncovered_methods() {
+        let behavior = ZigNormalizedBehavior;
+        assert_eq!(behavior.format_array_type("i32"), "[]i32");
+        assert_eq!(behavior.format_hash_type("String", "i32"), "std.AutoHashMap(String, i32)");
+        assert_eq!(behavior.format_set_type("i32"), "std.AutoHashMap(i32, void)");
+        assert_eq!(behavior.format_nilable_type(""), "");
+        assert_eq!(behavior.format_nilable_type("?i32"), "?i32");
+        assert_eq!(behavior.format_nilable_type("i32"), "?i32");
+        assert_eq!(behavior.untyped_type(), "anytype");
+        assert_eq!(behavior.untyped_array_type(), "[]anytype");
+        assert_eq!(behavior.untyped_hash_type(), "std.AutoHashMap(anytype, anytype)");
+
+        // Test literal_state_writes with STRUCT_INITIALIZER
+        let init_list = Node {
+            r#type: "INITIALIZER_LIST".to_string(),
+            children: vec![
+                Child::Node(Box::new(Node {
+                    r#type: "FIELD_INITIALIZER".to_string(),
+                    children: Vec::new(),
+                    first_lineno: 10,
+                    first_column: 0,
+                    last_lineno: 10,
+                    last_column: 15,
+                    text: ".x = 42".to_string(),
+                })),
+                Child::Integer(123),
+            ],
+            first_lineno: 10,
+            first_column: 0,
+            last_lineno: 10,
+            last_column: 15,
+            text: "{ .x = 42 }".to_string(),
+        };
+        let type_id = Node {
+            r#type: "TYPE_IDENTIFIER".to_string(),
+            children: Vec::new(),
+            first_lineno: 10,
+            first_column: 0,
+            last_lineno: 10,
+            last_column: 5,
+            text: "Point".to_string(),
+        };
+        let struct_init = Node {
+            r#type: "STRUCT_INITIALIZER".to_string(),
+            children: vec![
+                Child::Node(Box::new(type_id)),
+                Child::Node(Box::new(init_list)),
+                Child::Integer(123),
+            ],
+            first_lineno: 10,
+            first_column: 0,
+            last_lineno: 10,
+            last_column: 15,
+            text: "Point{ .x = 42 }".to_string(),
+        };
+        let writes = behavior.initializer_writes(&struct_init, "dummy", [10, 0, 10, 15]);
+        assert_eq!(writes.len(), 1);
+        assert_eq!(writes[0].receiver, "Point");
+        assert_eq!(writes[0].field, "x");
+    }
 }

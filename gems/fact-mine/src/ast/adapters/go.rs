@@ -64,3 +64,44 @@ fn go_statement_without_inner_call(node: TreeSitterNode<'_>) -> bool {
             .into_iter()
             .any(|child| child.kind() == "call_expression")
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use tree_sitter::Parser;
+
+    #[test]
+    fn test_go_adapter_fallback_paths() {
+        let adapter = GoAstAdapter;
+        let mut parser = Parser::new();
+        parser
+            .set_language(&tree_sitter_go::LANGUAGE.into())
+            .unwrap();
+
+        // test case_arm_body_nodes fallback None path (line 51)
+        let tree = parser.parse("package main\nfunc main() { var x = 5 }", None).unwrap();
+        let var_node = tree.root_node().child(1).unwrap();
+        assert!(adapter.case_arm_body_nodes(var_node, "").is_none());
+
+        // test call_argument_nodes fallback None path
+        assert!(adapter.call_argument_nodes(var_node, None, "").is_none());
+
+        // go statement with parenthesized_expression argument
+        let tree_go = parser.parse("package main\nfunc main() { go (x) }", None).unwrap();
+        let mut go_node = None;
+        let mut queue = vec![tree_go.root_node()];
+        while let Some(n) = queue.pop() {
+            if n.kind() == "go_statement" {
+                go_node = Some(n);
+                break;
+            }
+            for i in 0..n.child_count() {
+                queue.push(n.child(i).unwrap());
+            }
+        }
+        let n = go_node.unwrap();
+        let args = adapter.call_argument_nodes(n, None, "go (x)").unwrap();
+        assert_eq!(args.len(), 1);
+        assert_eq!(args[0].kind(), "identifier");
+    }
+}

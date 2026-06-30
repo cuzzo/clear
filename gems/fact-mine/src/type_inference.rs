@@ -758,22 +758,7 @@ pub(crate) fn collect_prepass_facts(
     }
 }
 
-pub(crate) struct TypeInferenceVisitor<'a> {
-    pub(crate) behavior: &'static dyn crate::syntax::normalized_behavior::NormalizedLanguageBehavior,
-    pub(crate) document: &'a Document,
-    pub(crate) lines: &'a [String],
-    pub(crate) path: &'a str,
-    pub(crate) current_owners: Vec<String>,
-    pub(crate) current_method: Option<String>,
-    pub(crate) current_method_kind: String,
-    pub(crate) current_method_line: usize,
-    pub(crate) current_method_end_line: usize,
-    pub(crate) current_params: Vec<String>,
-    pub(crate) param_types: BTreeMap<String, TypeExpr>,
-    pub(crate) local_types: BTreeMap<String, TypeExpr>,
-    pub(crate) in_conditional: bool,
-    pub(crate) ivar_tlet_types: BTreeMap<(String, String), TypeExpr>,
-    pub(crate) signatures: BTreeMap<String, String>,
+pub(crate) struct FactStore<'a> {
     pub(crate) tlet_sites: &'a mut Vec<serde_json::Value>,
     pub(crate) dead_nil_checks: &'a mut Vec<serde_json::Value>,
     pub(crate) deterministic_guards: &'a mut Vec<serde_json::Value>,
@@ -794,6 +779,25 @@ pub(crate) struct TypeInferenceVisitor<'a> {
     pub(crate) state_type_records: &'a mut Vec<StateTypeRecord>,
     pub(crate) hash_shapes: &'a mut Vec<HashShape>,
     pub(crate) tuple_arrays: &'a mut Vec<serde_json::Value>,
+}
+
+pub(crate) struct TypeInferenceVisitor<'a> {
+    pub(crate) behavior: &'static dyn crate::syntax::normalized_behavior::NormalizedLanguageBehavior,
+    pub(crate) document: &'a Document,
+    pub(crate) lines: &'a [String],
+    pub(crate) path: &'a str,
+    pub(crate) current_owners: Vec<String>,
+    pub(crate) current_method: Option<String>,
+    pub(crate) current_method_kind: String,
+    pub(crate) current_method_line: usize,
+    pub(crate) current_method_end_line: usize,
+    pub(crate) current_params: Vec<String>,
+    pub(crate) param_types: BTreeMap<String, TypeExpr>,
+    pub(crate) local_types: BTreeMap<String, TypeExpr>,
+    pub(crate) in_conditional: bool,
+    pub(crate) ivar_tlet_types: BTreeMap<(String, String), TypeExpr>,
+    pub(crate) signatures: BTreeMap<String, String>,
+    pub(crate) facts: FactStore<'a>,
     pub(crate) local_hash_shapes: BTreeMap<String, serde_json::Value>,
     pub(crate) local_array_shapes: BTreeMap<String, serde_json::Value>,
     pub(crate) local_container_origins: BTreeMap<String, serde_json::Value>,
@@ -877,383 +881,13 @@ impl<'a> TypeInferenceVisitor<'a> {
     pub(crate) fn visit(&mut self, node: &crate::ast::Node) {
         match node.r#type.as_str() {
             "CLASS" | "MODULE" | "INTERFACE_DECLARATION" => {
-                let name = owner_name(node).unwrap_or_else(|| "(anonymous)".to_string());
-                let qualified = if self.current_owners.is_empty() {
-                    name
-                } else {
-                    format!("{}::{name}", self.current_owners.join("::"))
-                };
-                self.current_owners.push(qualified);
-                for child in child_nodes(node) {
-                    self.visit(child);
-                }
-                self.current_owners.pop();
+                self.visit_class_or_module(node);
             }
             "DEFN" | "DEFS" | "METHOD_SIGNATURE" => {
-                let name_symbol = if node.r#type == "DEFS" {
-                    child_symbol(node, 1)
-                } else {
-                    child_symbol(node, 0)
-                };
-                if let Some(func_name) = name_symbol {
-                    let owner = self.current_owners.last().cloned().unwrap_or_default();
-                    let kind = if node.r#type == "DEFS" {
-                        "class".to_string()
-                    } else if !owner.is_empty() {
-                        "instance".to_string()
-                    } else {
-                        "top".to_string()
-                    };
-
-                    if let Some(fn_def) = self.document.function_defs.iter().find(|fd| {
-                        (fd.name == func_name || (node.r#type == "DEFS" && fd.name == format!("self.{}", func_name)))
-                            && (fd.line == node.first_lineno || fd.owner == owner)
-                    }) {
-                        eprintln!(
-                            "TypeInferenceVisitor matched: name={}, owner={}, line={}",
-                            func_name, owner, node.first_lineno
-                        );
-                        let old_method = self.current_method.clone();
-                        let old_method_kind = self.current_method_kind.clone();
-                        let old_method_line = self.current_method_line;
-                        let old_method_end_line = self.current_method_end_line;
-                        let old_params = self.current_params.clone();
-                        let old_param_types = std::mem::take(&mut self.param_types);
-                        let old_local_types = std::mem::take(&mut self.local_types);
-                        let old_local_hash_shapes = std::mem::take(&mut self.local_hash_shapes);
-                        let old_local_array_shapes = std::mem::take(&mut self.local_array_shapes);
-                        let old_local_container_origins = std::mem::take(&mut self.local_container_origins);
-                        let old_unconditional_vars = std::mem::take(&mut self.unconditional_vars);
-                        let old_in_conditional = self.in_conditional;
- 
-                        self.current_method = Some(func_name.clone());
-                        self.in_conditional = false;
-                        self.current_method_kind = kind.clone();
-                        self.current_method_line = node.first_lineno;
-                        self.current_method_end_line = node.last_lineno;
-                        self.current_params = fn_def.params.clone();
-
-                        let fn_key_null = format!("{}\u{0}{}", owner, func_name);
-                        let fn_key_colon = if owner.is_empty() {
-                            func_name.clone()
-                        } else {
-                            format!("{}::{}", owner, func_name)
-                        };
-                        let types_opt = self
-                            .document
-                            .method_param_types
-                            .get(&fn_key_null)
-                            .or_else(|| self.document.method_param_types.get(&fn_key_colon))
-                            .or_else(|| self.document.method_param_types.get(&func_name));
-                        if let Some(types) = types_opt {
-                            for (pname, ptype) in types {
-                                let ty_expr = self.parse_type(ptype);
-                                if ty_expr.is_useful() {
-                                    self.param_types.insert(pname.clone(), ty_expr);
-                                }
-                            }
-                        }
-
-                        // Populate local_container_origins with method parameters and parameter shapes
-                        eprintln!("DEBUG: DEFN/DEFS matched method: {}, current_params: {:?}", func_name, self.current_params);
-                        for (idx, param_name) in self.current_params.iter().enumerate() {
-                            let origin = json!({
-                                "kind": "method parameter",
-                                "name": param_name,
-                                "path": self.path,
-                                "line": node.first_lineno
-                            });
-                            eprintln!("DEBUG: inserting method parameter origin for {}: {:?}", param_name, origin);
-                            self.local_container_origins.insert(param_name.clone(), origin);
-
-                            if let Some(shape) = self.get_method_param_hash_shape(&owner, &func_name, param_name)
-                                .or_else(|| self.get_method_param_hash_shape(&owner, &func_name, &idx.to_string()))
-                            {
-                                self.local_hash_shapes.insert(param_name.clone(), shape);
-                            }
-                            if let Some(shape) = self.get_method_param_array_shape(&owner, &func_name, param_name)
-                                .or_else(|| self.get_method_param_array_shape(&owner, &func_name, &idx.to_string()))
-                            {
-                                self.local_array_shapes.insert(param_name.clone(), shape);
-                            }
-                        }
-
-                        let body = child_node(node, if node.r#type == "DEFS" { 2 } else { 1 });
-                        if let Some(body_node) = body {
-                            self.visit(body_node);
-
-                            if !self.is_prepass {
-                                let params_list = self.current_params_json(node);
-                                let record = json!({
-                                    "path": self.path,
-                                    "line": node.first_lineno,
-                                    "class": owner,
-                                    "method": func_name,
-                                    "kind": kind,
-                                    "params": params_list,
-                                });
-                                self.collect_type_normalizers(body_node, &record);
-                                self.collect_hidden_enum_observations(body_node, &record);
-                                self.inspect_dispatcher(body_node, node.first_lineno);
-                            }
-                        }
-
-                        let explicit = body
-                            .map(|b| {
-                                let mut exp = Vec::new();
-                                collect_explicit_returns(b, &mut exp);
-                                exp
-                            })
-                            .unwrap_or_default();
-
-                        let implicit_expr = body.and_then(implicit_return_expression);
-                        let implicit_present = implicit_expr
-                            .map(|expr| expr.r#type != "RETURN")
-                            .unwrap_or(false);
-
-                        let mut expressions = explicit.clone();
-                        if implicit_present {
-                            if let Some(expr) = implicit_expr {
-                                expressions.push(expr);
-                            }
-                        }
-
-                        let mut sources = Vec::new();
-                        let mut blockers = BTreeSet::new();
-                        for expr in &expressions {
-                            sources.extend(self.return_sources_for(expr, body, &mut blockers));
-                        }
-                        if expressions.is_empty() || sources.is_empty() {
-                            blockers.insert("no return expression found".to_string());
-                        }
-
-                        let source_types = sources
-                            .iter()
-                            .filter_map(|s| {
-                                s.get("type")
-                                    .and_then(get_type_str)
-                            })
-                            .collect::<Vec<_>>();
-
-                        let mut candidate = static_sorbet_type(&source_types, self.document.language.as_str());
-                        if candidate == TypeExpr::NilClass
-                            && sources.iter().any(|s| {
-                                matches!(
-                                    s.get("kind").and_then(Value::as_str),
-                                    Some("call_untyped" | "unknown")
-                                )
-                            })
-                        {
-                            candidate = TypeExpr::Untyped;
-                        }
-                        let useful = useful_type(&candidate);
-                        let has_untyped_call = sources
-                            .iter()
-                            .any(|s| s.get("kind").and_then(Value::as_str) == Some("call_untyped"));
-                        let confidence = if useful
-                            && !weak_type(&candidate)
-                            && blockers.is_empty()
-                            && !has_untyped_call
-                        {
-                            "strong"
-                        } else if useful {
-                            "weak"
-                        } else {
-                            "blocked"
-                        };
-
-                        eprintln!("DEBUG: method={:?}, expressions={:?}", func_name, expressions.iter().map(|e| (&e.r#type, &e.text)).collect::<Vec<_>>());
-                        let mut ret_hash_shape = None;
-                        for expr in &expressions {
-                            if let Some(shape) = self.hash_shape_for_value(expr) {
-                                if let Some(existing) = ret_hash_shape {
-                                    ret_hash_shape = Some(merge_hash_record_shapes(existing, shape));
-                                } else {
-                                    ret_hash_shape = Some(shape);
-                                }
-                            }
-                        }
-                        if let Some(ref shape) = ret_hash_shape {
-                            let key = (owner.clone(), func_name.clone());
-                            self.method_return_hash_shapes.insert(key, shape.clone());
-                        }
-
-                        let mut ret_array_shape = None;
-                        for expr in &expressions {
-                            if let Some(shape) = self.array_element_shape_for_value(expr) {
-                                if let Some(existing) = ret_array_shape {
-                                    ret_array_shape = Some(merge_hash_record_shapes(existing, shape));
-                                } else {
-                                    ret_array_shape = Some(shape);
-                                }
-                            }
-                        }
-                        if let Some(ref shape) = ret_array_shape {
-                            let key = (owner.clone(), func_name.clone());
-                            self.method_return_array_shapes.insert(key, shape.clone());
-                        }
-
-                        if useful {
-                            let key = (owner.clone(), func_name.clone());
-                            self.inferred_return_types.insert(key, candidate.clone());
-                        }
-
-                        if !self.is_prepass {
-                            self.return_origins.push(json!({
-                                "path": self.path,
-                                "line": node.first_lineno,
-                                "end_line": node.last_lineno,
-                                "class": owner,
-                                "method": func_name,
-                                "kind": kind,
-                                "implicit": explicit.is_empty(),
-                                "return_syntax": return_syntax(explicit.is_empty(), implicit_present),
-                                "control_shape": return_control_shape(&explicit, implicit_expr, implicit_present),
-                                "candidate_type": if useful { &candidate } else { &TypeExpr::Untyped },
-                                "confidence": confidence,
-                                "sources": sources,
-                                "blockers": blockers.into_iter().collect::<Vec<_>>(),
-                                "hash_shape": ret_hash_shape.unwrap_or(Value::Null),
-                                "array_element_shape": ret_array_shape.unwrap_or(Value::Null),
-                            }));
-
-                            let is_noreturn = !self.has_explicit_return(body)
-                                && body.is_some_and(|b| self.noreturn_body(b));
-                            if is_noreturn {
-                                self.noreturn_methods.push(json!({
-                                    "name": func_name,
-                                    "path": self.path,
-                                    "line": node.first_lineno,
-                                    "class": owner,
-                                    "kind": kind,
-                                }));
-                            }
-                        }
-
-                        self.current_method = old_method;
-                        self.current_method_kind = old_method_kind;
-                        self.current_method_line = old_method_line;
-                        self.current_method_end_line = old_method_end_line;
-                        self.current_params = old_params;
-                        self.param_types = old_param_types;
-                        self.local_types = old_local_types;
-                        self.local_hash_shapes = old_local_hash_shapes;
-                        self.local_array_shapes = old_local_array_shapes;
-                        self.local_container_origins = old_local_container_origins;
-                        self.unconditional_vars = old_unconditional_vars;
-                        self.in_conditional = old_in_conditional;
-                    }
-                }
+                self.visit_method_definition(node);
             }
             "IF" | "UNLESS" => {
-                self.inspect_branch_guard(node, node.r#type == "UNLESS");
-                let children = child_nodes(node);
-                if !children.is_empty() {
-                    self.visit(children[0]);
-                    
-                    let mut then_vars = BTreeSet::new();
-                    if let Some(then_node) = children.get(1) {
-                        collect_assigned_vars(then_node, &mut then_vars);
-                    }
-                    let mut else_vars = BTreeSet::new();
-                    if let Some(else_node) = children.get(2) {
-                        collect_assigned_vars(else_node, &mut else_vars);
-                    }
-                    let common_vars: BTreeSet<String> = then_vars.intersection(&else_vars).cloned().collect();
-                    self.unconditional_vars.extend(common_vars);
-                    
-                    let before_local_types = self.local_types.clone();
-                    let before_hash_shapes = self.local_hash_shapes.clone();
-                    let before_array_shapes = self.local_array_shapes.clone();
-                    
-                    let mut then_local_types = before_local_types.clone();
-                    let mut then_hash_shapes = before_hash_shapes.clone();
-                    let mut then_array_shapes = before_array_shapes.clone();
-                    
-                    if let Some(then_node) = children.get(1) {
-                        self.local_types = before_local_types.clone();
-                        self.local_hash_shapes = before_hash_shapes.clone();
-                        self.local_array_shapes = before_array_shapes.clone();
-                        
-                        let old_cond = self.in_conditional;
-                        self.in_conditional = true;
-                        self.visit(then_node);
-                        self.in_conditional = old_cond;
-                        
-                        then_local_types = self.local_types.clone();
-                        then_hash_shapes = self.local_hash_shapes.clone();
-                        then_array_shapes = self.local_array_shapes.clone();
-                    }
-                    
-                    let mut else_local_types = before_local_types.clone();
-                    let mut else_hash_shapes = before_hash_shapes.clone();
-                    let mut else_array_shapes = before_array_shapes.clone();
-                    
-                    if let Some(else_node) = children.get(2) {
-                        self.local_types = before_local_types.clone();
-                        self.local_hash_shapes = before_hash_shapes.clone();
-                        self.local_array_shapes = before_array_shapes.clone();
-                        
-                        let old_cond = self.in_conditional;
-                        self.in_conditional = true;
-                        self.visit(else_node);
-                        self.in_conditional = old_cond;
-                        
-                        else_local_types = self.local_types.clone();
-                        else_hash_shapes = self.local_hash_shapes.clone();
-                        else_array_shapes = self.local_array_shapes.clone();
-                    }
-                    
-                    let all_keys: BTreeSet<String> = then_local_types.keys()
-                        .chain(else_local_types.keys())
-                        .cloned()
-                        .collect();
-                        
-                    let mut merged_local_types = BTreeMap::new();
-                    for key in &all_keys {
-                        let t_val = then_local_types.get(key);
-                        let e_val = else_local_types.get(key);
-                        let b_val = before_local_types.get(key);
-                        
-                        let merged = match (t_val, e_val) {
-                            (Some(t), Some(e)) => merge_types(t, e),
-                            (Some(t), None) => t.make_nilable(),
-                            (None, Some(e)) => e.make_nilable(),
-                            _ => unreachable!(),
-                        };
-                        merged_local_types.insert(key.clone(), merged);
-                    }
-                    
-                    let all_hash_keys: BTreeSet<String> = then_hash_shapes.keys()
-                        .chain(else_hash_shapes.keys())
-                        .cloned()
-                        .collect();
-                    let mut merged_hash_shapes = BTreeMap::new();
-                    for key in &all_hash_keys {
-                        let t_val = then_hash_shapes.get(key);
-                        let e_val = else_hash_shapes.get(key);
-                        if let (Some(t), Some(e)) = (t_val, e_val) {
-                            merged_hash_shapes.insert(key.clone(), merge_hash_record_shapes(t.clone(), e.clone()));
-                        }
-                    }
-                    
-                    let all_array_keys: BTreeSet<String> = then_array_shapes.keys()
-                        .chain(else_array_shapes.keys())
-                        .cloned()
-                        .collect();
-                    let mut merged_array_shapes = BTreeMap::new();
-                    for key in &all_array_keys {
-                        let t_val = then_array_shapes.get(key);
-                        let e_val = else_array_shapes.get(key);
-                        if let (Some(t), Some(e)) = (t_val, e_val) {
-                            merged_array_shapes.insert(key.clone(), merge_hash_record_shapes(t.clone(), e.clone()));
-                        }
-                    }
-                    
-                    self.local_types = merged_local_types;
-                    self.local_hash_shapes = merged_hash_shapes;
-                    self.local_array_shapes = merged_array_shapes;
-                }
+                self.visit_if_or_unless(node);
             }
             "AND" | "OR" | "WHILE" | "UNTIL" => {
                 let children = child_nodes(node);
@@ -1288,292 +922,13 @@ impl<'a> TypeInferenceVisitor<'a> {
                 self.in_conditional = old_cond;
             }
             "ITER" => {
-                let call_node = child_node(node, 0);
-                let block_node = child_node(node, 1);
-
-                let old_local_types = self.local_types.clone();
-                let old_local_hash_shapes = self.local_hash_shapes.clone();
-                let old_local_array_shapes = self.local_array_shapes.clone();
-                let old_local_container_origins = self.local_container_origins.clone();
-
-                let mut args_node = None;
-                if let Some(block) = block_node {
-                    for child in child_nodes(block) {
-                        if child.r#type == "ARGS" {
-                            args_node = Some(child);
-                            break;
-                        }
-                    }
-                }
-
-                let param_names = if let Some(args) = args_node {
-                    collect_block_param_names(args)
-                } else {
-                    Vec::new()
-                };
-
-                if let Some(call) = call_node {
-                    if let Some((rec, method, _)) = match_call(call) {
-                        if matches!(
-                            method.as_str(),
-                            "each"
-                                | "map"
-                                | "collect"
-                                | "filter_map"
-                                | "select"
-                                | "reject"
-                                | "find"
-                                | "detect"
-                                | "any?"
-                                | "all?"
-                                | "none?"
-                                | "one?"
-                        ) {
-                            if let Some(receiver_type) = self.expression_type(rec) {
-                                if let Some(info) = collection_type_info(&receiver_type) {
-                                    if info.kind == "hash" {
-                                        if let Some(p0) = param_names.get(0) {
-                                            if let Some(ref key_ty) = info.element {
-                                                if useful_type(key_ty) {
-                                                    self.local_types.insert(p0.clone(), key_ty.clone());
-                                                }
-                                            }
-                                        }
-                                        if let Some(p1) = param_names.get(1) {
-                                            if let Some(ref val_ty) = info.value {
-                                                if useful_type(val_ty) {
-                                                    self.local_types.insert(p1.clone(), val_ty.clone());
-                                                }
-                                            }
-                                        }
-                                    } else {
-                                        if let Some(p0) = param_names.get(0) {
-                                            if let Some(ref elem_ty) = info.element {
-                                                if useful_type(elem_ty) {
-                                                    self.local_types.insert(p0.clone(), elem_ty.clone());
-                                                }
-                                            }
-                                        }
-                                    }
-                                }
-                            }
-
-                            if let Some(p0) = param_names.get(0) {
-                                if let Some(shape) = self.array_element_shape_for_receiver(Some(rec)) {
-                                    self.local_hash_shapes.insert(p0.clone(), shape);
-                                }
-                                if let Some(origin) = self.container_origin_for_value(rec, p0) {
-                                    let kind = origin.get("kind").and_then(serde_json::Value::as_str).unwrap_or("");
-                                    if kind == "method parameter" || kind == "instance variable" {
-                                        self.local_container_origins.insert(p0.clone(), origin);
-                                    }
-                                }
-                            }
-                        }
-                    }
-                }
-
-                let old_cond = self.in_conditional;
-                self.in_conditional = true;
-                for child in child_nodes(node) {
-                    self.visit(child);
-                }
-                self.in_conditional = old_cond;
-
-                self.local_types = old_local_types;
-                for p in &param_names {
-                    if let Some(old_val) = old_local_hash_shapes.get(p) {
-                        self.local_hash_shapes.insert(p.clone(), old_val.clone());
-                    } else {
-                        self.local_hash_shapes.remove(p);
-                    }
-                    if let Some(old_val) = old_local_array_shapes.get(p) {
-                        self.local_array_shapes.insert(p.clone(), old_val.clone());
-                    } else {
-                        self.local_array_shapes.remove(p);
-                    }
-                    if let Some(old_val) = old_local_container_origins.get(p) {
-                        self.local_container_origins.insert(p.clone(), old_val.clone());
-                    } else {
-                        self.local_container_origins.remove(p);
-                    }
-                }
+                self.visit_iter(node);
             }
             "CALL" | "QCALL" | "FCALL" | "VCALL" | "OPCALL" | "ATTRASGN" => {
-                self.inspect_call_node(node);
-                self.inspect_index_lookup(node);
-                self.inspect_hash_record_blocker(node);
-                self.inspect_hash_record_member_call(node);
-                self.inspect_struct_constructor(node);
-                self.inspect_class_constructor_fields(node);
-                self.inspect_param_origins(node);
-                self.inspect_attribute_assignment(node);
-                self.check_local_escapes_and_mutations(node);
-
-                if let Some((rec, method, args_node)) = match_call(node) {
-                    if rec.r#type == "LVAR" || rec.r#type == "DVAR" {
-                        let name = node_symbol(rec).unwrap_or_else(|| rec.text.trim().to_string());
-                        let args = call_arguments(args_node);
-                        if collection_append_method(&method) {
-                            if let Some(arg) = args.first() {
-                                if let Some(shape) = self.hash_shape_for_value(arg) {
-                                    self.local_array_shapes.insert(name.clone(), shape);
-                                }
-                                let existing_type = self.local_types.get(&name)
-                                    .or_else(|| self.param_types.get(&name))
-                                    .cloned();
-                                if let Some(existing_type) = existing_type {
-                                    if let Some(info) = collection_type_info(&existing_type) {
-                                        if info.kind == "array" || info.kind == "set" {
-                                            let arg_type = self.expression_type(arg).unwrap_or(TypeExpr::Untyped);
-                                            let new_elem_type = if method == "concat" {
-                                                collection_type_info(&arg_type).and_then(|i| i.element).unwrap_or(TypeExpr::Untyped)
-                                            } else {
-                                                arg_type
-                                            };
-                                            let existing_elem = info.element.unwrap_or(TypeExpr::Untyped);
-                                            let merged_elem = merge_types(&existing_elem, &new_elem_type);
-                                            let updated_type = if matches!(existing_type, TypeExpr::Set(_)) || existing_type.to_sorbet_string().starts_with("T::Set") || existing_type.to_sorbet_string().starts_with("Set") {
-                                                TypeExpr::Set(Box::new(merged_elem))
-                                            } else {
-                                                TypeExpr::Array(Box::new(merged_elem))
-                                            };
-                                            if self.param_types.contains_key(&name) {
-                                                self.param_types.insert(name.clone(), updated_type);
-                                            } else {
-                                                self.local_types.insert(name.clone(), updated_type);
-                                            }
-                                        }
-                                    }
-                                }
-                            }
-                        } else if method == "[]=" {
-                            if args.len() >= 2 {
-                                let key_arg = args[0];
-                                let val_arg = args[1];
-                                let existing_type = self.local_types.get(&name)
-                                    .or_else(|| self.param_types.get(&name))
-                                    .cloned();
-                                if let Some(existing_type) = existing_type {
-                                    if let Some(info) = collection_type_info(&existing_type) {
-                                        if info.kind == "hash" {
-                                            let key_type = self.expression_type(key_arg).unwrap_or(TypeExpr::Untyped);
-                                            let val_type = self.expression_type(val_arg).unwrap_or(TypeExpr::Untyped);
-                                            let existing_key = info.element.unwrap_or(TypeExpr::Untyped);
-                                            let existing_val = info.value.unwrap_or(TypeExpr::Untyped);
-                                            let merged_key = merge_types(&existing_key, &key_type);
-                                            let merged_val = merge_types(&existing_val, &val_type);
-                                            let updated_type = TypeExpr::Hash {
-                                                key: Box::new(merged_key),
-                                                value: Box::new(merged_val),
-                                            };
-                                            if self.param_types.contains_key(&name) {
-                                                self.param_types.insert(name.clone(), updated_type);
-                                            } else {
-                                                self.local_types.insert(name.clone(), updated_type);
-                                            }
-                                        }
-                                    }
-                                }
-                            }
-                        } else if method == "merge!" || method == "update" {
-                            if let Some(arg) = args.first() {
-                                let arg_type = self.expression_type(arg).unwrap_or(TypeExpr::Untyped);
-                                if let Some(arg_info) = collection_type_info(&arg_type) {
-                                    if arg_info.kind == "hash" {
-                                        let arg_key = arg_info.element.unwrap_or(TypeExpr::Untyped);
-                                        let arg_val = arg_info.value.unwrap_or(TypeExpr::Untyped);
-                                        let existing_type = self.local_types.get(&name)
-                                            .or_else(|| self.param_types.get(&name))
-                                            .cloned();
-                                        if let Some(existing_type) = existing_type {
-                                            if let Some(info) = collection_type_info(&existing_type) {
-                                                if info.kind == "hash" {
-                                                    let existing_key = info.element.unwrap_or(TypeExpr::Untyped);
-                                                    let existing_val = info.value.unwrap_or(TypeExpr::Untyped);
-                                                    let merged_key = merge_types(&existing_key, &arg_key);
-                                                    let merged_val = merge_types(&existing_val, &arg_val);
-                                                    let updated_type = TypeExpr::Hash {
-                                                        key: Box::new(merged_key),
-                                                        value: Box::new(merged_val),
-                                                    };
-                                                    if self.param_types.contains_key(&name) {
-                                                        self.param_types.insert(name.clone(), updated_type);
-                                                    } else {
-                                                        self.local_types.insert(name.clone(), updated_type);
-                                                    }
-                                                }
-                                            }
-                                        }
-                                    }
-                                }
-                            }
-                        }
-                    }
-                }
-
-                for child in child_nodes(node) {
-                    self.visit(child);
-                }
+                self.visit_call_like(node);
             }
             "LASGN" | "DASGN" | "CASGN" => {
-                let mut pushed = false;
-                let current_owner = self.current_owners.last().cloned().unwrap_or_default();
-                if let Some(owner) = self.behavior.declarative_owner(node, &current_owner) {
-                    self.current_owners.push(owner.name);
-                    pushed = true;
-                }
-
-                if node.r#type == "LASGN" || node.r#type == "DASGN" {
-                    if let Some(var_name) = node_symbol(node) {
-                        if let Some(val_node) = child_node(node, 1) {
-                            let mut resolved_type = None;
-                            if let Some((receiver, method, args_node)) = match_call(val_node) {
-                                if method == "let" && receiver.text == "T" {
-                                    let arg_nodes = call_arguments(args_node);
-                                    if let Some(type_node) = arg_nodes.get(1) {
-                                        resolved_type = Some(TypeExpr::parse(&type_node.text.trim(), self.document.language.as_str()));
-                                    }
-                                }
-                            }
-                            if resolved_type.is_none() {
-                                resolved_type = self.expression_type(val_node);
-                            }
-                            if let Some(ty) = resolved_type {
-                                if useful_type(&ty) {
-                                    let is_conditional = self.in_conditional && !self.unconditional_vars.contains(&var_name);
-                                    let ty = if is_conditional {
-                                        ty.make_nilable()
-                                    } else {
-                                        ty
-                                    };
-                                    let merged = if let Some(existing) = self.local_types.get(&var_name) {
-                                        merge_types(existing, &ty)
-                                    } else {
-                                        ty
-                                    };
-                                    self.local_types.insert(var_name.clone(), merged);
-                                }
-                            }
-                        }
-                    }
-                    self.update_local_fact(node);
-                    self.inspect_local_container_origin(node);
-                    self.inspect_ivar_container_origin(node);
-                    self.inspect_struct_declaration(node);
-                } else {
-                    // CASGN
-                    self.inspect_ivar_container_origin(node);
-                    self.inspect_struct_declaration(node);
-                }
-
-                for child in child_nodes(node) {
-                    self.visit(child);
-                }
-
-                if pushed {
-                    self.current_owners.pop();
-                }
+                self.visit_assignment(node);
             }
             "IASGN" | "CVASGN" | "GVASGN" => {
                 self.inspect_ivar_container_origin(node);
@@ -1604,6 +959,678 @@ impl<'a> TypeInferenceVisitor<'a> {
         }
     }
 
+    fn visit_class_or_module(&mut self, node: &crate::ast::Node) {
+        let name = owner_name(node).unwrap_or_else(|| "(anonymous)".to_string());
+        let qualified = if self.current_owners.is_empty() {
+            name
+        } else {
+            format!("{}::{name}", self.current_owners.join("::"))
+        };
+        self.current_owners.push(qualified);
+        for child in child_nodes(node) {
+            self.visit(child);
+        }
+        self.current_owners.pop();
+    }
+
+    fn visit_method_definition(&mut self, node: &crate::ast::Node) {
+        let name_symbol = if node.r#type == "DEFS" {
+            child_symbol(node, 1)
+        } else {
+            child_symbol(node, 0)
+        };
+        if let Some(func_name) = name_symbol {
+            let owner = self.current_owners.last().cloned().unwrap_or_default();
+            let kind = if node.r#type == "DEFS" {
+                "class".to_string()
+            } else if !owner.is_empty() {
+                "instance".to_string()
+            } else {
+                "top".to_string()
+            };
+
+            if let Some(fn_def) = self.document.function_defs.iter().find(|fd| {
+                (fd.name == func_name || (node.r#type == "DEFS" && fd.name == format!("self.{}", func_name)))
+                    && (fd.line == node.first_lineno || fd.owner == owner)
+            }) {
+                eprintln!(
+                    "TypeInferenceVisitor matched: name={}, owner={}, line={}",
+                    func_name, owner, node.first_lineno
+                );
+                let old_method = self.current_method.clone();
+                let old_method_kind = self.current_method_kind.clone();
+                let old_method_line = self.current_method_line;
+                let old_method_end_line = self.current_method_end_line;
+                let old_params = self.current_params.clone();
+                let old_param_types = std::mem::take(&mut self.param_types);
+                let old_local_types = std::mem::take(&mut self.local_types);
+                let old_local_hash_shapes = std::mem::take(&mut self.local_hash_shapes);
+                let old_local_array_shapes = std::mem::take(&mut self.local_array_shapes);
+                let old_local_container_origins = std::mem::take(&mut self.local_container_origins);
+                let old_unconditional_vars = std::mem::take(&mut self.unconditional_vars);
+                let old_in_conditional = self.in_conditional;
+ 
+                self.current_method = Some(func_name.clone());
+                self.in_conditional = false;
+                self.current_method_kind = kind.clone();
+                self.current_method_line = node.first_lineno;
+                self.current_method_end_line = node.last_lineno;
+                self.current_params = fn_def.params.clone();
+
+                let fn_key_null = format!("{}\u{0}{}", owner, func_name);
+                let fn_key_colon = if owner.is_empty() {
+                    func_name.clone()
+                } else {
+                    format!("{}::{}", owner, func_name)
+                };
+                let types_opt = self
+                    .document
+                    .method_param_types
+                    .get(&fn_key_null)
+                    .or_else(|| self.document.method_param_types.get(&fn_key_colon))
+                    .or_else(|| self.document.method_param_types.get(&func_name));
+                if let Some(types) = types_opt {
+                    for (pname, ptype) in types {
+                        let ty_expr = self.parse_type(ptype);
+                        if ty_expr.is_useful() {
+                            self.param_types.insert(pname.clone(), ty_expr);
+                        }
+                    }
+                }
+
+                // Populate local_container_origins with method parameters and parameter shapes
+                eprintln!("DEBUG: DEFN/DEFS matched method: {}, current_params: {:?}", func_name, self.current_params);
+                for (idx, param_name) in self.current_params.iter().enumerate() {
+                    let origin = json!({
+                        "kind": "method parameter",
+                        "name": param_name,
+                        "path": self.path,
+                        "line": node.first_lineno
+                    });
+                    eprintln!("DEBUG: inserting method parameter origin for {}: {:?}", param_name, origin);
+                    self.local_container_origins.insert(param_name.clone(), origin);
+
+                    if let Some(shape) = self.get_method_param_hash_shape(&owner, &func_name, param_name)
+                        .or_else(|| self.get_method_param_hash_shape(&owner, &func_name, &idx.to_string()))
+                    {
+                        self.local_hash_shapes.insert(param_name.clone(), shape);
+                    }
+                    if let Some(shape) = self.get_method_param_array_shape(&owner, &func_name, param_name)
+                        .or_else(|| self.get_method_param_array_shape(&owner, &func_name, &idx.to_string()))
+                    {
+                        self.local_array_shapes.insert(param_name.clone(), shape);
+                    }
+                }
+
+                let body = child_node(node, if node.r#type == "DEFS" { 2 } else { 1 });
+                if let Some(body_node) = body {
+                    self.visit(body_node);
+
+                    if !self.is_prepass {
+                        let params_list = self.current_params_json(node);
+                        let record = json!({
+                            "path": self.path,
+                            "line": node.first_lineno,
+                            "class": owner,
+                            "method": func_name,
+                            "kind": kind,
+                            "params": params_list,
+                        });
+                        self.collect_type_normalizers(body_node, &record);
+                        self.collect_hidden_enum_observations(body_node, &record);
+                        self.inspect_dispatcher(body_node, node.first_lineno);
+                    }
+                }
+
+                let explicit = body
+                    .map(|b| {
+                        let mut exp = Vec::new();
+                        collect_explicit_returns(b, &mut exp);
+                        exp
+                    })
+                    .unwrap_or_default();
+
+                let implicit_expr = body.and_then(implicit_return_expression);
+                let implicit_present = implicit_expr
+                    .map(|expr| expr.r#type != "RETURN")
+                    .unwrap_or(false);
+
+                let mut expressions = explicit.clone();
+                if implicit_present {
+                    if let Some(expr) = implicit_expr {
+                        expressions.push(expr);
+                    }
+                }
+
+                let mut sources = Vec::new();
+                let mut blockers = BTreeSet::new();
+                for expr in &expressions {
+                    sources.extend(self.return_sources_for(expr, body, &mut blockers));
+                }
+                if expressions.is_empty() || sources.is_empty() {
+                    blockers.insert("no return expression found".to_string());
+                }
+
+                let source_types = sources
+                    .iter()
+                    .filter_map(|s| {
+                        s.get("type")
+                            .and_then(get_type_str)
+                    })
+                    .collect::<Vec<_>>();
+
+                let mut candidate = static_sorbet_type(&source_types, self.document.language.as_str());
+                if candidate == TypeExpr::NilClass
+                    && sources.iter().any(|s| {
+                        matches!(
+                            s.get("kind").and_then(Value::as_str),
+                            Some("call_untyped" | "unknown")
+                        )
+                    })
+                {
+                    candidate = TypeExpr::Untyped;
+                }
+                let useful = useful_type(&candidate);
+                let has_untyped_call = sources
+                    .iter()
+                    .any(|s| s.get("kind").and_then(Value::as_str) == Some("call_untyped"));
+                let confidence = if useful
+                    && !weak_type(&candidate)
+                    && blockers.is_empty()
+                    && !has_untyped_call
+                {
+                    "strong"
+                } else if useful {
+                    "weak"
+                } else {
+                    "blocked"
+                };
+
+                eprintln!("DEBUG: method={:?}, expressions={:?}", func_name, expressions.iter().map(|e| (&e.r#type, &e.text)).collect::<Vec<_>>());
+                let mut ret_hash_shape = None;
+                for expr in &expressions {
+                    if let Some(shape) = self.hash_shape_for_value(expr) {
+                        if let Some(existing) = ret_hash_shape {
+                            ret_hash_shape = Some(merge_hash_record_shapes(existing, shape));
+                        } else {
+                            ret_hash_shape = Some(shape);
+                        }
+                    }
+                }
+                if let Some(ref shape) = ret_hash_shape {
+                    let key = (owner.clone(), func_name.clone());
+                    self.method_return_hash_shapes.insert(key, shape.clone());
+                }
+
+                let mut ret_array_shape = None;
+                for expr in &expressions {
+                    if let Some(shape) = self.array_element_shape_for_value(expr) {
+                        if let Some(existing) = ret_array_shape {
+                            ret_array_shape = Some(merge_hash_record_shapes(existing, shape));
+                        } else {
+                            ret_array_shape = Some(shape);
+                        }
+                    }
+                }
+                if let Some(ref shape) = ret_array_shape {
+                    let key = (owner.clone(), func_name.clone());
+                    self.method_return_array_shapes.insert(key, shape.clone());
+                }
+
+                if useful {
+                    let key = (owner.clone(), func_name.clone());
+                    self.inferred_return_types.insert(key, candidate.clone());
+                }
+
+                if !self.is_prepass {
+                    self.facts.return_origins.push(json!({
+                        "path": self.path,
+                        "line": node.first_lineno,
+                        "end_line": node.last_lineno,
+                        "class": owner,
+                        "method": func_name,
+                        "kind": kind,
+                        "implicit": explicit.is_empty(),
+                        "return_syntax": return_syntax(explicit.is_empty(), implicit_present),
+                        "control_shape": return_control_shape(&explicit, implicit_expr, implicit_present),
+                        "candidate_type": if useful { &candidate } else { &TypeExpr::Untyped },
+                        "confidence": confidence,
+                        "sources": sources,
+                        "blockers": blockers.into_iter().collect::<Vec<_>>(),
+                        "hash_shape": ret_hash_shape.unwrap_or(Value::Null),
+                        "array_element_shape": ret_array_shape.unwrap_or(Value::Null),
+                    }));
+
+                    let is_noreturn = !self.has_explicit_return(body)
+                        && body.is_some_and(|b| self.noreturn_body(b));
+                    if is_noreturn {
+                        self.facts.noreturn_methods.push(json!({
+                            "name": func_name,
+                            "path": self.path,
+                            "line": node.first_lineno,
+                            "class": owner,
+                            "kind": kind,
+                        }));
+                    }
+                }
+
+                self.current_method = old_method;
+                self.current_method_kind = old_method_kind;
+                self.current_method_line = old_method_line;
+                self.current_method_end_line = old_method_end_line;
+                self.current_params = old_params;
+                self.param_types = old_param_types;
+                self.local_types = old_local_types;
+                self.local_hash_shapes = old_local_hash_shapes;
+                self.local_array_shapes = old_local_array_shapes;
+                self.local_container_origins = old_local_container_origins;
+                self.unconditional_vars = old_unconditional_vars;
+                self.in_conditional = old_in_conditional;
+            }
+        }
+    }
+
+    fn visit_if_or_unless(&mut self, node: &crate::ast::Node) {
+        self.inspect_branch_guard(node, node.r#type == "UNLESS");
+        let children = child_nodes(node);
+        if !children.is_empty() {
+            self.visit(children[0]);
+            
+            let mut then_vars = BTreeSet::new();
+            if let Some(then_node) = children.get(1) {
+                collect_assigned_vars(then_node, &mut then_vars);
+            }
+            let mut else_vars = BTreeSet::new();
+            if let Some(else_node) = children.get(2) {
+                collect_assigned_vars(else_node, &mut else_vars);
+            }
+            let common_vars: BTreeSet<String> = then_vars.intersection(&else_vars).cloned().collect();
+            self.unconditional_vars.extend(common_vars);
+            
+            let before_local_types = self.local_types.clone();
+            let before_hash_shapes = self.local_hash_shapes.clone();
+            let before_array_shapes = self.local_array_shapes.clone();
+            
+            let mut then_local_types = before_local_types.clone();
+            let mut then_hash_shapes = before_hash_shapes.clone();
+            let mut then_array_shapes = before_array_shapes.clone();
+            
+            if let Some(then_node) = children.get(1) {
+                self.local_types = before_local_types.clone();
+                self.local_hash_shapes = before_hash_shapes.clone();
+                self.local_array_shapes = before_array_shapes.clone();
+                
+                let old_cond = self.in_conditional;
+                self.in_conditional = true;
+                self.visit(then_node);
+                self.in_conditional = old_cond;
+                
+                then_local_types = self.local_types.clone();
+                then_hash_shapes = self.local_hash_shapes.clone();
+                then_array_shapes = self.local_array_shapes.clone();
+            }
+            
+            let mut else_local_types = before_local_types.clone();
+            let mut else_hash_shapes = before_hash_shapes.clone();
+            let mut else_array_shapes = before_array_shapes.clone();
+            
+            if let Some(else_node) = children.get(2) {
+                self.local_types = before_local_types.clone();
+                self.local_hash_shapes = before_hash_shapes.clone();
+                self.local_array_shapes = before_array_shapes.clone();
+                
+                let old_cond = self.in_conditional;
+                self.in_conditional = true;
+                self.visit(else_node);
+                self.in_conditional = old_cond;
+                
+                else_local_types = self.local_types.clone();
+                else_hash_shapes = self.local_hash_shapes.clone();
+                else_array_shapes = self.local_array_shapes.clone();
+            }
+            
+            let all_keys: BTreeSet<String> = then_local_types.keys()
+                .chain(else_local_types.keys())
+                .cloned()
+                .collect();
+                
+            let mut merged_local_types = BTreeMap::new();
+            for key in &all_keys {
+                let t_val = then_local_types.get(key);
+                let e_val = else_local_types.get(key);
+                
+                let merged = match (t_val, e_val) {
+                    (Some(t), Some(e)) => merge_types(t, e),
+                    (Some(t), None) => t.make_nilable(),
+                    (None, Some(e)) => e.make_nilable(),
+                    _ => unreachable!(),
+                };
+                merged_local_types.insert(key.clone(), merged);
+            }
+            
+            let all_hash_keys: BTreeSet<String> = then_hash_shapes.keys()
+                .chain(else_hash_shapes.keys())
+                .cloned()
+                .collect();
+            let mut merged_hash_shapes = BTreeMap::new();
+            for key in &all_hash_keys {
+                let t_val = then_hash_shapes.get(key);
+                let e_val = else_hash_shapes.get(key);
+                if let (Some(t), Some(e)) = (t_val, e_val) {
+                    merged_hash_shapes.insert(key.clone(), merge_hash_record_shapes(t.clone(), e.clone()));
+                }
+            }
+            
+            let all_array_keys: BTreeSet<String> = then_array_shapes.keys()
+                .chain(else_array_shapes.keys())
+                .cloned()
+                .collect();
+            let mut merged_array_shapes = BTreeMap::new();
+            for key in &all_array_keys {
+                let t_val = then_array_shapes.get(key);
+                let e_val = else_array_shapes.get(key);
+                if let (Some(t), Some(e)) = (t_val, e_val) {
+                    merged_array_shapes.insert(key.clone(), merge_hash_record_shapes(t.clone(), e.clone()));
+                }
+            }
+            
+            self.local_types = merged_local_types;
+            self.local_hash_shapes = merged_hash_shapes;
+            self.local_array_shapes = merged_array_shapes;
+        }
+    }
+
+    fn visit_iter(&mut self, node: &crate::ast::Node) {
+        let call_node = child_node(node, 0);
+        let block_node = child_node(node, 1);
+
+        let old_local_types = self.local_types.clone();
+        let old_local_hash_shapes = self.local_hash_shapes.clone();
+        let old_local_array_shapes = self.local_array_shapes.clone();
+        let old_local_container_origins = self.local_container_origins.clone();
+
+        let mut args_node = None;
+        if let Some(block) = block_node {
+            for child in child_nodes(block) {
+                if child.r#type == "ARGS" {
+                    args_node = Some(child);
+                    break;
+                }
+            }
+        }
+
+        let param_names = if let Some(args) = args_node {
+            collect_block_param_names(args)
+        } else {
+            Vec::new()
+        };
+
+        if let Some(call) = call_node {
+            if let Some((rec, method, _)) = match_call(call) {
+                if matches!(
+                    method.as_str(),
+                    "each"
+                        | "map"
+                        | "collect"
+                        | "filter_map"
+                        | "select"
+                        | "reject"
+                        | "find"
+                        | "detect"
+                        | "any?"
+                        | "all?"
+                        | "none?"
+                        | "one?"
+                ) {
+                    if let Some(receiver_type) = self.expression_type(rec) {
+                        if let Some(info) = collection_type_info(&receiver_type) {
+                            if info.kind == "hash" {
+                                if let Some(p0) = param_names.get(0) {
+                                    if let Some(ref key_ty) = info.element {
+                                        if useful_type(key_ty) {
+                                            self.local_types.insert(p0.clone(), key_ty.clone());
+                                        }
+                                    }
+                                }
+                                if let Some(p1) = param_names.get(1) {
+                                    if let Some(ref val_ty) = info.value {
+                                        if useful_type(val_ty) {
+                                            self.local_types.insert(p1.clone(), val_ty.clone());
+                                        }
+                                    }
+                                }
+                            } else {
+                                if let Some(p0) = param_names.get(0) {
+                                    if let Some(ref elem_ty) = info.element {
+                                        if useful_type(elem_ty) {
+                                            self.local_types.insert(p0.clone(), elem_ty.clone());
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+
+                    if let Some(p0) = param_names.get(0) {
+                        if let Some(shape) = self.array_element_shape_for_receiver(Some(rec)) {
+                            self.local_hash_shapes.insert(p0.clone(), shape);
+                        }
+                        if let Some(origin) = self.container_origin_for_value(rec, p0) {
+                            let kind = origin.get("kind").and_then(serde_json::Value::as_str).unwrap_or("");
+                            if kind == "method parameter" || kind == "instance variable" {
+                                self.local_container_origins.insert(p0.clone(), origin);
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
+        let old_cond = self.in_conditional;
+        self.in_conditional = true;
+        for child in child_nodes(node) {
+            self.visit(child);
+        }
+        self.in_conditional = old_cond;
+
+        self.local_types = old_local_types;
+        for p in &param_names {
+            if let Some(old_val) = old_local_hash_shapes.get(p) {
+                self.local_hash_shapes.insert(p.clone(), old_val.clone());
+            } else {
+                self.local_hash_shapes.remove(p);
+            }
+            if let Some(old_val) = old_local_array_shapes.get(p) {
+                self.local_array_shapes.insert(p.clone(), old_val.clone());
+            } else {
+                self.local_array_shapes.remove(p);
+            }
+            if let Some(old_val) = old_local_container_origins.get(p) {
+                self.local_container_origins.insert(p.clone(), old_val.clone());
+            } else {
+                self.local_container_origins.remove(p);
+            }
+        }
+    }
+
+    fn visit_call_like(&mut self, node: &crate::ast::Node) {
+        self.inspect_call_node(node);
+        self.inspect_index_lookup(node);
+        self.inspect_hash_record_blocker(node);
+        self.inspect_hash_record_member_call(node);
+        self.inspect_struct_constructor(node);
+        self.inspect_class_constructor_fields(node);
+        self.inspect_param_origins(node);
+        self.inspect_attribute_assignment(node);
+        self.check_local_escapes_and_mutations(node);
+
+        if let Some((rec, method, args_node)) = match_call(node) {
+            if rec.r#type == "LVAR" || rec.r#type == "DVAR" {
+                let name = node_symbol(rec).unwrap_or_else(|| rec.text.trim().to_string());
+                let args = call_arguments(args_node);
+                if collection_append_method(&method) {
+                    if let Some(arg) = args.first() {
+                        if let Some(shape) = self.hash_shape_for_value(arg) {
+                            self.local_array_shapes.insert(name.clone(), shape);
+                        }
+                        let existing_type = self.local_types.get(&name)
+                            .or_else(|| self.param_types.get(&name))
+                            .cloned();
+                        if let Some(existing_type) = existing_type {
+                            if let Some(info) = collection_type_info(&existing_type) {
+                                if info.kind == "array" || info.kind == "set" {
+                                    let arg_type = self.expression_type(arg).unwrap_or(TypeExpr::Untyped);
+                                    let new_elem_type = if method == "concat" {
+                                        collection_type_info(&arg_type).and_then(|i| i.element).unwrap_or(TypeExpr::Untyped)
+                                    } else {
+                                        arg_type
+                                    };
+                                    let existing_elem = info.element.unwrap_or(TypeExpr::Untyped);
+                                    let merged_elem = merge_types(&existing_elem, &new_elem_type);
+                                    let updated_type = if matches!(existing_type, TypeExpr::Set(_)) || existing_type.to_sorbet_string().starts_with("T::Set") || existing_type.to_sorbet_string().starts_with("Set") {
+                                        TypeExpr::Set(Box::new(merged_elem))
+                                    } else {
+                                        TypeExpr::Array(Box::new(merged_elem))
+                                    };
+                                    if self.param_types.contains_key(&name) {
+                                        self.param_types.insert(name.clone(), updated_type);
+                                    } else {
+                                        self.local_types.insert(name.clone(), updated_type);
+                                    }
+                                }
+                            }
+                        }
+                    }
+                } else if method == "[]=" {
+                    if args.len() >= 2 {
+                        let key_arg = args[0];
+                        let val_arg = args[1];
+                        let existing_type = self.local_types.get(&name)
+                            .or_else(|| self.param_types.get(&name))
+                            .cloned();
+                        if let Some(existing_type) = existing_type {
+                            if let Some(info) = collection_type_info(&existing_type) {
+                                if info.kind == "hash" {
+                                    let key_type = self.expression_type(key_arg).unwrap_or(TypeExpr::Untyped);
+                                    let val_type = self.expression_type(val_arg).unwrap_or(TypeExpr::Untyped);
+                                    let existing_key = info.element.unwrap_or(TypeExpr::Untyped);
+                                    let existing_val = info.value.unwrap_or(TypeExpr::Untyped);
+                                    let merged_key = merge_types(&existing_key, &key_type);
+                                    let merged_val = merge_types(&existing_val, &val_type);
+                                    let updated_type = TypeExpr::Hash {
+                                        key: Box::new(merged_key),
+                                        value: Box::new(merged_val),
+                                    };
+                                    if self.param_types.contains_key(&name) {
+                                        self.param_types.insert(name.clone(), updated_type);
+                                    } else {
+                                        self.local_types.insert(name.clone(), updated_type);
+                                    }
+                                }
+                            }
+                        }
+                    }
+                } else if method == "merge!" || method == "update" {
+                    if let Some(arg) = args.first() {
+                        let arg_type = self.expression_type(arg).unwrap_or(TypeExpr::Untyped);
+                        if let Some(arg_info) = collection_type_info(&arg_type) {
+                            if arg_info.kind == "hash" {
+                                let arg_key = arg_info.element.unwrap_or(TypeExpr::Untyped);
+                                let arg_val = arg_info.value.unwrap_or(TypeExpr::Untyped);
+                                let existing_type = self.local_types.get(&name)
+                                    .or_else(|| self.param_types.get(&name))
+                                    .cloned();
+                                if let Some(existing_type) = existing_type {
+                                    if let Some(info) = collection_type_info(&existing_type) {
+                                        if info.kind == "hash" {
+                                            let existing_key = info.element.unwrap_or(TypeExpr::Untyped);
+                                            let existing_val = info.value.unwrap_or(TypeExpr::Untyped);
+                                            let merged_key = merge_types(&existing_key, &arg_key);
+                                            let merged_val = merge_types(&existing_val, &arg_val);
+                                            let updated_type = TypeExpr::Hash {
+                                                key: Box::new(merged_key),
+                                                value: Box::new(merged_val),
+                                            };
+                                            if self.param_types.contains_key(&name) {
+                                                self.param_types.insert(name.clone(), updated_type);
+                                            } else {
+                                                self.local_types.insert(name.clone(), updated_type);
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
+        for child in child_nodes(node) {
+            self.visit(child);
+        }
+    }
+
+    fn visit_assignment(&mut self, node: &crate::ast::Node) {
+        let mut pushed = false;
+        let current_owner = self.current_owners.last().cloned().unwrap_or_default();
+        if let Some(owner) = self.behavior.declarative_owner(node, &current_owner) {
+            self.current_owners.push(owner.name);
+            pushed = true;
+        }
+
+        if node.r#type == "LASGN" || node.r#type == "DASGN" {
+            if let Some(var_name) = node_symbol(node) {
+                if let Some(val_node) = child_node(node, 1) {
+                    let mut resolved_type = None;
+                    if let Some((receiver, method, args_node)) = match_call(val_node) {
+                        if method == "let" && receiver.text == "T" {
+                            let arg_nodes = call_arguments(args_node);
+                            if let Some(type_node) = arg_nodes.get(1) {
+                                resolved_type = Some(TypeExpr::parse(&type_node.text.trim(), self.document.language.as_str()));
+                            }
+                        }
+                    }
+                    if resolved_type.is_none() {
+                        resolved_type = self.expression_type(val_node);
+                    }
+                    if let Some(ty) = resolved_type {
+                        if useful_type(&ty) {
+                            let is_conditional = self.in_conditional && !self.unconditional_vars.contains(&var_name);
+                            let ty = if is_conditional {
+                                ty.make_nilable()
+                            } else {
+                                ty
+                            };
+                            let merged = if let Some(existing) = self.local_types.get(&var_name) {
+                                merge_types(existing, &ty)
+                            } else {
+                                ty
+                            };
+                            self.local_types.insert(var_name.clone(), merged);
+                        }
+                    }
+                }
+            }
+            self.update_local_fact(node);
+            self.inspect_local_container_origin(node);
+            self.inspect_ivar_container_origin(node);
+            self.inspect_struct_declaration(node);
+        } else {
+            // CASGN
+            self.inspect_ivar_container_origin(node);
+            self.inspect_struct_declaration(node);
+        }
+
+        for child in child_nodes(node) {
+            self.visit(child);
+        }
+
+        if pushed {
+            self.current_owners.pop();
+        }
+    }
+
     fn has_explicit_return(&self, body: Option<&crate::ast::Node>) -> bool {
         let Some(b) = body else { return false };
         let mut exp = Vec::new();
@@ -1619,7 +1646,7 @@ impl<'a> TypeInferenceVisitor<'a> {
             if let Some((receiver, method, args_node)) = match_call(node) {
                 if method == "let" && receiver.text == "T" {
                     let arg_nodes = call_arguments(args_node);
-                    self.tlet_sites.push(json!({
+                    self.facts.tlet_sites.push(json!({
                         "path": self.path,
                         "line": node.first_lineno,
                         "tlet": true,
@@ -1627,7 +1654,7 @@ impl<'a> TypeInferenceVisitor<'a> {
                     }));
                 } else if node.r#type == "QCALL" {
                     if self.provably_non_nil(receiver) {
-                        self.dead_nil_checks.push(json!({
+                        self.facts.dead_nil_checks.push(json!({
                             "path": self.path,
                             "line": node.first_lineno,
                             "kind": "safe_nav",
@@ -1637,7 +1664,7 @@ impl<'a> TypeInferenceVisitor<'a> {
                     }
                 } else if self.behavior.is_nil_check(&method) {
                     if self.provably_non_nil(receiver) {
-                        self.dead_nil_checks.push(json!({
+                        self.facts.dead_nil_checks.push(json!({
                             "path": self.path,
                             "line": node.first_lineno,
                             "kind": "nil_check",
@@ -1693,7 +1720,7 @@ impl<'a> TypeInferenceVisitor<'a> {
         let current_class = self.current_owners.last().cloned().unwrap_or_default();
         let current_method = self.current_method.clone().unwrap_or_default();
 
-        self.deterministic_guards.push(json!({
+        self.facts.deterministic_guards.push(json!({
             "path": self.path,
             "line": predicate.first_lineno,
             "class": current_class,
@@ -3178,7 +3205,7 @@ impl<'a> TypeInferenceVisitor<'a> {
                 if arg_nodes.len() == 1 && arg_nodes[0].text == "Type" {
                     let (origin_kind, origin_name) =
                         self.classify_origin(receiver, param_names, assigns, 0);
-                    self.type_normalizers.push(json!({
+                    self.facts.type_normalizers.push(json!({
                         "path": self.path,
                         "line": node.first_lineno,
                         "class": record["class"],
@@ -3413,7 +3440,7 @@ impl<'a> TypeInferenceVisitor<'a> {
                 "code": first_line,
             }),
         );
-        self.hidden_enum_observations.push(obs);
+        self.facts.hidden_enum_observations.push(obs);
     }
 
     pub(crate) fn collect_return_usage_site_context(
@@ -3497,7 +3524,7 @@ impl<'a> TypeInferenceVisitor<'a> {
                     .find(|child| child.r#type == "rescue" || child.r#type == "RESCUE")
                     .map(|child| child.first_lineno);
                 if let Some(hl) = handler_line {
-                    self.rescue_handlers.push(json!({
+                    self.facts.rescue_handlers.push(json!({
                         "path": self.path,
                         "line": hl,
                         "kind": "rescue",
@@ -3610,9 +3637,9 @@ impl<'a> TypeInferenceVisitor<'a> {
                                 "code": node.text.lines().next().unwrap_or("").trim().to_string(),
                             });
                             if direct_usage {
-                                self.return_direct_usage_sites.push(site_record);
+                                self.facts.return_direct_usage_sites.push(site_record);
                             } else {
-                                self.return_usage_sites.push(site_record);
+                                self.facts.return_usage_sites.push(site_record);
                             }
                         }
                         if let Some(receiver) =
@@ -3681,9 +3708,9 @@ impl<'a> TypeInferenceVisitor<'a> {
                         "code": node.text.lines().next().unwrap_or("").trim().to_string(),
                     });
                     if direct_usage {
-                        self.return_direct_usage_sites.push(site_record);
+                        self.facts.return_direct_usage_sites.push(site_record);
                     } else {
-                        self.return_usage_sites.push(site_record);
+                        self.facts.return_usage_sites.push(site_record);
                     }
                 }
                 if let Some((receiver, _, args_node)) = match_call(node) {
@@ -3742,7 +3769,7 @@ impl<'a> TypeInferenceVisitor<'a> {
     ) {
         if node.r#type == "HASH" {
             if let Some(reason) = self.hash_record_escape_reason(root, node) {
-                self.hash_record_escape_sites.push(json!({
+                self.facts.hash_record_escape_sites.push(json!({
                     "path": self.path,
                     "line": node.first_lineno,
                     "code": node.text.trim().to_string(),
@@ -4134,7 +4161,7 @@ impl<'a> TypeInferenceVisitor<'a> {
                             let record =
                                 self.param_origin_record(node, value, &callee, "keyword", &key);
                             if !self.is_prepass {
-                                self.param_origins.push(record);
+                                self.facts.param_origins.push(record);
                             }
                             self.record_callsite_hash_shape(&class_name, &callee, "keyword", &key, value);
                             self.record_callsite_array_element_shape(
@@ -4156,7 +4183,7 @@ impl<'a> TypeInferenceVisitor<'a> {
                     &positional_idx.to_string(),
                 );
                 if !self.is_prepass {
-                    self.param_origins.push(record);
+                    self.facts.param_origins.push(record);
                 }
                 self.record_callsite_hash_shape(
                     &class_name,
@@ -4359,7 +4386,7 @@ impl<'a> TypeInferenceVisitor<'a> {
 
         let code = node.text.clone();
 
-        self.collection_index_lookups.push(json!({
+        self.facts.collection_index_lookups.push(json!({
             "path": self.path,
             "line": node.first_lineno,
             "enclosing_scope": self.current_owners.join("::"),
@@ -4701,7 +4728,7 @@ impl<'a> TypeInferenceVisitor<'a> {
                 return;
             }
             let code = node.text.clone();
-            self.hash_record_blockers.push(json!({
+            self.facts.hash_record_blockers.push(json!({
                 "path": self.path,
                 "line": node.first_lineno,
                 "enclosing_scope": self.current_owners.join("::"),
@@ -4720,7 +4747,7 @@ impl<'a> TypeInferenceVisitor<'a> {
             if !hash_record_blocker_origin(&origin) {
                 return;
             }
-            self.hash_record_blockers.push(json!({
+            self.facts.hash_record_blockers.push(json!({
                 "path": self.path,
                 "line": node.first_lineno,
                 "enclosing_scope": self.current_owners.join("::"),
@@ -4775,7 +4802,7 @@ impl<'a> TypeInferenceVisitor<'a> {
         {
             return;
         }
-        self.hash_record_member_calls.push(json!({
+        self.facts.hash_record_member_calls.push(json!({
             "path": self.path,
             "line": node.first_lineno,
             "enclosing_scope": self.current_owners.join("::"),
@@ -4812,7 +4839,7 @@ impl<'a> TypeInferenceVisitor<'a> {
             } else {
                 format!("T.any({})", classes_vec.join(", "))
             };
-            self.dispatcher_inferences.push(json!({
+            self.facts.dispatcher_inferences.push(json!({
                 "path": self.path,
                 "line": line,
                 "class": owner,
@@ -4847,7 +4874,7 @@ impl<'a> TypeInferenceVisitor<'a> {
                         .unwrap_or(TypeExpr::Untyped);
                     let key = state_key(&full_class, &fields[idx]);
                     if !self.is_prepass {
-                        self.state_type_records.push(StateTypeRecord {
+                        self.facts.state_type_records.push(StateTypeRecord {
                             language: self.document.language.as_str().to_string(),
                             path: self.path.to_string(),
                             owner: full_class.clone(),
@@ -4895,7 +4922,7 @@ impl<'a> TypeInferenceVisitor<'a> {
                                     .unwrap_or(TypeExpr::Untyped);
                                 let key = state_key(&klass, &field);
                                 if !self.is_prepass {
-                                    self.state_type_records.push(StateTypeRecord {
+                                    self.facts.state_type_records.push(StateTypeRecord {
                                         language: self.document.language.as_str().to_string(),
                                         path: self.path.to_string(),
                                         owner: klass.clone(),
@@ -4978,7 +5005,7 @@ impl<'a> TypeInferenceVisitor<'a> {
         if unique.len() < 2 {
             return;
         }
-        self.tuple_arrays.push(json!({
+        self.facts.tuple_arrays.push(json!({
             "path": self.path,
             "line": node.first_lineno,
             "size": values.len(),
@@ -5030,7 +5057,7 @@ impl<'a> TypeInferenceVisitor<'a> {
         if keys.len() < 2 || keys.len() != pairs.len() {
             return;
         }
-        self.hash_shapes.push(HashShape {
+        self.facts.hash_shapes.push(HashShape {
             path: self.path.to_string(),
             line: node.first_lineno,
             keys: keys.clone(),
@@ -5052,6 +5079,7 @@ impl<'a> TypeInferenceVisitor<'a> {
     fn find_struct_declaration(&self, class_name: &str) -> Option<StructDeclaration> {
         let clean_name = class_name.trim_start_matches("::");
         if let Some(decl) = self
+            .facts
             .struct_declarations
             .iter()
             .find(|d| d.class.trim_start_matches("::") == clean_name)
@@ -5059,7 +5087,7 @@ impl<'a> TypeInferenceVisitor<'a> {
             return Some(decl.clone());
         }
         let short_name = clean_name.rsplit("::").next().unwrap_or(clean_name);
-        if let Some(decl) = self.struct_declarations.iter().find(|d| {
+        if let Some(decl) = self.facts.struct_declarations.iter().find(|d| {
             let decl_clean = d.class.trim_start_matches("::");
             decl_clean == short_name || decl_clean.ends_with(&format!("::{short_name}"))
         }) {

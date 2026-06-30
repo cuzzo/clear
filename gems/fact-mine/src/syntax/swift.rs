@@ -352,3 +352,162 @@ fn is_keyword(name: &str) -> bool {
             | "void"
     )
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn node(kind: &str, text: &str) -> Node {
+        Node {
+            r#type: kind.to_string(),
+            children: Vec::new(),
+            first_lineno: 10,
+            first_column: 2,
+            last_lineno: 10,
+            last_column: 20,
+            text: text.to_string(),
+        }
+    }
+
+    #[test]
+    fn test_swift_behavior_comprehensive() {
+        let b = SwiftNormalizedBehavior;
+
+        // 1. owner_name_span
+        assert!(b.owner_name_span("MyClass", &node("CLASS", ""), [1, 2, 3, 4]).is_some());
+
+        // 2. function_visibility
+        assert_eq!(b.function_visibility("foo", &node("FUNC", "private func foo()"), &[]), "private");
+        assert_eq!(b.function_visibility("foo", &node("FUNC", "func foo()"), &[]), "public");
+
+        // 3. parameter_name_from_signature
+        assert_eq!(b.parameter_name_from_signature("_ name: String"), Some("name".to_string()));
+        assert_eq!(b.parameter_name_from_signature("name: String"), Some("name".to_string()));
+        assert_eq!(b.parameter_name_from_signature("invalid signature"), None);
+
+        // 4. local_assignment_writes
+        assert!(b.local_assignment_writes(None, &node("ASGN", ""), [1, 2, 3, 4]).is_empty());
+        assert!(b.local_assignment_writes(Some("invalid"), &node("ASGN", ""), [1, 2, 3, 4]).is_empty());
+        // Cover dotted_assignment_target returning None
+        assert!(b.local_assignment_writes(Some("self..myField"), &node("ASGN", ""), [1, 2, 3, 4]).is_empty());
+        let writes = b.local_assignment_writes(Some("self.myField"), &node("ASGN", ""), [1, 2, 3, 4]);
+        assert_eq!(writes.len(), 1);
+        assert_eq!(writes[0].receiver, "self");
+        assert_eq!(writes[0].field, "myField");
+
+        // 5. property_read_call
+        assert!(b.property_read_call(&node("CALL", "x.y"), &NormalizedCallParts {
+            receiver: "x".to_string(),
+            message: "y".to_string(),
+            arguments: Vec::new(),
+        }));
+
+        // 6. state_read_uses_access_span
+        assert!(b.state_read_uses_access_span(&NormalizedCallProjection {
+            receiver: "self".to_string(),
+            message: "foo".to_string(),
+            arguments: Vec::new(),
+            access_span: [1, 2, 3, 4],
+            span: [1, 2, 3, 4],
+        }));
+
+        // 7. suppress_state_read_for_call
+        assert!(b.suppress_state_read_for_call(&NormalizedCallProjection {
+            receiver: "self".to_string(),
+            message: "callback".to_string(),
+            arguments: Vec::new(),
+            access_span: [1, 2, 3, 4],
+            span: [1, 2, 3, 4],
+        }, ""));
+
+        // 8. call_site_span
+        assert_eq!(
+            b.call_site_span(
+                &node("CALL", ""),
+                &NormalizedCallParts { receiver: "self".to_string(), message: "fallback".to_string(), arguments: Vec::new() },
+                [1, 2, 3, 4],
+                [5, 6, 7, 8],
+                "foo"
+            ),
+            [5, 6, 7, 8]
+        );
+        assert_eq!(
+            b.call_site_span(
+                &node("CALL", ""),
+                &NormalizedCallParts { receiver: "self".to_string(), message: "other".to_string(), arguments: Vec::new() },
+                [1, 2, 3, 4],
+                [5, 6, 7, 8],
+                "foo"
+            ),
+            [1, 2, 3, 4]
+        );
+
+        // 9. boolean_decision_members
+        let members = vec!["self.status == active".to_string(), "other".to_string()];
+        let resolved = b.boolean_decision_members(members, &node("DECISION", ""));
+        assert_eq!(resolved[0], "active");
+        assert_eq!(resolved[1], "other");
+
+        // 10. nil_guard_fact
+        assert!(b.nil_guard_fact("isNull", "x").is_some());
+
+        // 11. terminating_call_message
+        assert!(b.terminating_call_message("fatalError"));
+
+        // 12. semantic_effect_for_call
+        assert!(b.semantic_effect_for_call(&CallSite {
+            receiver: "x".to_string(),
+            message: "isNull".to_string(),
+            file: "".to_string(),
+            function: "".to_string(),
+            owner: "".to_string(),
+            line: 1,
+            span: [1, 2, 3, 4],
+            conditional: false,
+            arguments: Vec::new(),
+            control: None,
+            safe_navigation: false,
+            block: false,
+        }).is_some());
+
+        // 13. local_flow_declaration_keyword
+        assert!(b.local_flow_declaration_keyword("let"));
+
+        // 14. local_flow_keyword
+        assert!(b.local_flow_keyword("let"));
+        for kw in &["as", "break", "case", "class", "continue", "default", "else", "false", "for", "func", "if", "in", "nil", "private", "public", "return", "self", "static", "true", "while"] {
+            assert!(b.local_flow_keyword(kw));
+        }
+        assert!(!b.local_flow_keyword("not_a_keyword"));
+
+        // 15. suppress_predicate_body_text
+        assert!(b.suppress_predicate_body_text("nil"));
+        assert!(!b.suppress_predicate_body_text("foo"));
+
+        // 16. predicate_body_language_signal
+        assert!(b.predicate_body_language_signal("nil"));
+
+        // 17. state_declaration_from_node
+        let prop_node = node("PROPERTY", "var myProperty: String = \"hello\"");
+        let decl = b.state_declaration_from_node(&prop_node, "MyClass", false);
+        assert!(decl.is_some());
+        assert_eq!(decl.as_ref().unwrap().field, "myProperty");
+        assert_eq!(decl.as_ref().unwrap().r#type, Some("String".to_string()));
+        assert!(b.state_declaration_from_node(&prop_node, "MyClass", true).is_none());
+
+        // 18-24. formatting
+        assert_eq!(b.format_array_type("Int"), "[Int]");
+        assert_eq!(b.format_hash_type("String", "Int"), "[String: Int]");
+        assert_eq!(b.format_set_type("Int"), "Set<Int>");
+        assert_eq!(b.format_nilable_type(""), "");
+        assert_eq!(b.format_nilable_type("Int?"), "Int?");
+        assert_eq!(b.format_nilable_type("Int"), "Int?");
+        assert_eq!(b.untyped_type(), "Any");
+        assert_eq!(b.untyped_array_type(), "[Any]");
+        assert_eq!(b.untyped_hash_type(), "[AnyHashable: Any]");
+
+        // Cover helper functions
+        assert!(simple_identifier("foo"));
+        assert!(!simple_identifier(""));
+    }
+}

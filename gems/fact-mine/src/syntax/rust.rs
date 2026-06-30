@@ -449,6 +449,21 @@ mod tests {
             .unwrap();
         assert_eq!(span2, [30, 5, 31, 17]);
     }
+
+    #[test]
+    fn test_rust_behavior_uncovered_methods() {
+        let behavior = RustNormalizedBehavior;
+        assert_eq!(behavior.format_array_type("i32"), "Vec<i32>");
+        assert_eq!(behavior.format_hash_type("String", "i32"), "HashMap<String, i32>");
+        assert_eq!(behavior.format_set_type("i32"), "HashSet<i32>");
+        assert_eq!(behavior.untyped_array_type(), "Vec<Value>");
+        assert_eq!(behavior.untyped_hash_type(), "HashMap<String, Value>");
+        assert_eq!(behavior.format_nilable_type(""), "");
+        assert_eq!(behavior.format_nilable_type("Option<i32>"), "Option<i32>");
+        assert_eq!(behavior.format_nilable_type("i32"), "Option<i32>");
+        assert_eq!(behavior.parameter_name_from_signature("invalid_sig"), None);
+        assert_eq!(behavior.untyped_type(), "Value");
+    }
 }
 
 fn is_simple_name(name: &str) -> bool {

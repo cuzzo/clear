@@ -463,8 +463,9 @@ impl<'a> Extractor<'a> {
 
     fn scan_operator_call(&mut self, node: &Node) {
         if let Some(operator) = child_symbol(node, 1) {
+            let op = operator.as_str();
             if matches!(
-                operator.as_str(),
+                op,
                 "==" | "!=" | "===" | "!==" | "<" | "<=" | ">" | ">="
             ) {
                 let raw = normalized_text(node);
@@ -477,6 +478,10 @@ impl<'a> Extractor<'a> {
                     span: span(node),
                     enclosing_span: self.decision_spans.last().copied().unwrap_or(span(node)),
                 });
+
+                if matches!(op, "==" | "!=" | "===" | "!==") {
+                    self.record_nil_comparison_guard(node);
+                }
             }
         }
         if child_symbol(node, 1).as_deref() == Some("<<")
@@ -485,6 +490,58 @@ impl<'a> Extractor<'a> {
             self.record_semantic_effect(node, "hidden_mutation", "<<");
         }
         self.scan_children(node);
+    }
+
+    fn record_nil_comparison_guard(&mut self, node: &Node) {
+        let left = node.children.first().and_then(crate::ast::node);
+        let right_list = node.children.get(2).and_then(crate::ast::node);
+
+        if let (Some(left), Some(right_list)) = (left, right_list) {
+            let is_nil_node = |n: &Node| n.r#type == "NIL";
+            let is_nil_list = |n: &Node| {
+                n.r#type == "LIST"
+                    && n.children.iter().any(|child| match child {
+                        Child::Node(cn) => cn.r#type == "NIL",
+                        Child::Nil => true,
+                        _ => false,
+                    })
+            };
+
+            let mut subject_node = None;
+            if is_nil_list(right_list) {
+                subject_node = Some(left);
+            } else if is_nil_node(left) {
+                subject_node = right_list.children.first().and_then(crate::ast::node);
+            }
+
+            if let Some(s_node) = subject_node {
+                if let Some(subject) = self.subject_key_for_guard(s_node) {
+                    self.record_semantic_effect(node, "eliminable_guard", &subject);
+                }
+            }
+        }
+    }
+
+    fn subject_key_for_guard(&self, node: &Node) -> Option<String> {
+        match node.r#type.as_str() {
+            "LVAR" | "DVAR" | "VCALL" => match node.children.first()? {
+                Child::String(s) | Child::Symbol(s) => Some(s.clone()),
+                _ => None,
+            },
+            "CALL" | "QCALL" => {
+                let call = self.call_parts(node)?;
+                if !call.arguments.is_empty() {
+                    return None;
+                }
+                let recv = call.receiver_node?;
+                if recv.r#type == "SELF" {
+                    return Some(format!("self.{}", call.message));
+                }
+                let recv_key = self.subject_key_for_guard(recv)?;
+                Some(format!("{}.{}", recv_key, call.message))
+            }
+            _ => None,
+        }
     }
 
     fn scan_operator_assignment(&mut self, node: &Node) {

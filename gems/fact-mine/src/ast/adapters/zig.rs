@@ -80,5 +80,8 @@ mod tests {
         assert!(adapter
             .case_arm_pattern_nodes(var_node, "const x = 5;")
             .is_none());
+        assert!(adapter
+            .hash_literal_target(var_node, "const x = 5;")
+            .is_none());
     }
 }

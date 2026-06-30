@@ -412,3 +412,172 @@ fn simple_identifier(name: &str) -> bool {
     matches!(chars.next(), Some(first) if first == '_' || first.is_ascii_alphabetic())
         && chars.all(|ch| ch == '_' || ch == '?' || ch == '!' || ch.is_ascii_alphanumeric())
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn node(kind: &str, text: &str) -> Node {
+        Node {
+            r#type: kind.to_string(),
+            children: Vec::new(),
+            first_lineno: 10,
+            first_column: 2,
+            last_lineno: 10,
+            last_column: 20,
+            text: text.to_string(),
+        }
+    }
+
+    #[test]
+    fn test_python_behavior_comprehensive() {
+        let b = PythonNormalizedBehavior;
+
+        // 1. self_member_receiver
+        assert_eq!(b.self_member_receiver("foo"), "self.foo");
+
+        // 2. clean_identifier & clean_receiver
+        assert_eq!(b.clean_identifier("self.foo"), "foo");
+        assert_eq!(b.clean_identifier("foo"), "foo");
+        assert_eq!(b.clean_receiver("self.foo"), "foo");
+        assert_eq!(b.clean_receiver("foo"), "foo");
+
+        // 3. yield_semantic_effect
+        assert!(!b.yield_semantic_effect(&node("", "")));
+
+        // 4. boolean_decision_members
+        let members = vec!["b".to_string(), "a".to_string()];
+        let sorted = b.boolean_decision_members(members, &node("", ""));
+        assert_eq!(sorted, vec!["a".to_string(), "b".to_string()]);
+
+        // 5. function_visibility
+        assert_eq!(b.function_visibility("_foo", &node("", ""), &[]), "private");
+        assert_eq!(b.function_visibility("__foo__", &node("", ""), &[]), "public");
+        assert_eq!(b.function_visibility("foo", &node("", ""), &[]), "public");
+
+        // 6. parameter_name_from_signature
+        assert_eq!(b.parameter_name_from_signature("*args"), Some("args".to_string()));
+        assert_eq!(b.parameter_name_from_signature("x: int = 1"), Some("x".to_string()));
+
+        // 7. state_read_uses_access_span
+        assert!(b.state_read_uses_access_span(&NormalizedCallProjection {
+            receiver: "self".to_string(),
+            message: "foo".to_string(),
+            arguments: Vec::new(),
+            access_span: [1, 2, 3, 4],
+            span: [1, 2, 3, 4],
+        }));
+
+        // 8. suppress_state_read_for_call
+        assert!(b.suppress_state_read_for_call(&NormalizedCallProjection {
+            receiver: "self".to_string(),
+            message: "callback".to_string(),
+            arguments: Vec::new(),
+            access_span: [1, 2, 3, 4],
+            span: [1, 2, 3, 4],
+        }, ""));
+
+        // 9. property_read_call
+        assert!(b.property_read_call(&node("CALL", "(x.y)"), &NormalizedCallParts {
+            receiver: "x".to_string(),
+            message: "y".to_string(),
+            arguments: Vec::new(),
+        }));
+
+        // 10. embedded_member_reads
+        let reads = b.embedded_member_reads(&node("", "self.field_lock"));
+        assert!(reads.is_empty());
+        let reads_eq = b.embedded_member_reads(&node("", "x = y"));
+        assert!(reads_eq.is_empty());
+
+        // 11. node_state_reads
+        let reads_node = b.node_state_reads(&node("EXPRESSION_STATEMENT", "self.x = self.y"));
+        assert_eq!(reads_node.len(), 1);
+        assert_eq!(reads_node[0].field, "y");
+        assert!(b.node_state_reads(&node("EXPRESSION_STATEMENT", "self.x = y")).is_empty());
+        // Cover line 339 (contains = but not .)
+        let reads_no_dots = b.node_state_reads(&node("EXPRESSION_STATEMENT", "x = y"));
+        assert!(reads_no_dots.is_empty());
+
+        // 12. ternary_children_conditional & ternary_if_node
+        assert!(!b.ternary_children_conditional(&node("", "")));
+        assert!(b.ternary_if_node(&node("IF", "x if cond else y")));
+        assert!(!b.ternary_if_node(&node("IF", "if cond:\n  pass")));
+
+        // 13. wrap_branch_predicate
+        assert!(!b.wrap_branch_predicate(&node("", "")));
+
+        // 14. owner_name_span
+        assert!(b.owner_name_span("MyClass", &node("CLASS", ""), [1, 2, 3, 4]).is_some());
+
+        // 15. nil_guard_fact
+        assert!(b.nil_guard_fact("is_none", "x").is_some());
+
+        // 16. semantic_effect_for_call
+        assert!(b.semantic_effect_for_call(&CallSite {
+            receiver: "x".to_string(),
+            message: "is_none".to_string(),
+            file: "".to_string(),
+            function: "".to_string(),
+            owner: "".to_string(),
+            line: 1,
+            span: [1, 2, 3, 4],
+            conditional: false,
+            arguments: Vec::new(),
+            control: None,
+            safe_navigation: false,
+            block: false,
+        }).is_some());
+
+        // 17. local_flow_declaration_keyword
+        assert!(!b.local_flow_declaration_keyword("int"));
+
+        // 18. local_flow_keyword
+        for kw in &["as", "break", "class", "continue", "else", "False", "false", "for", "if", "in", "None", "return", "self", "True", "true", "while"] {
+            assert!(b.local_flow_keyword(kw));
+        }
+        assert!(!b.local_flow_keyword("not_a_keyword"));
+
+        // 19. state_declaration_from_node
+        // Structured children branch
+        let child1 = node("identifier", "self.myField");
+        let child2 = node("type", "int");
+        let mut decl_node = node("annotated_assignment", "self.myField: int");
+        decl_node.children = vec![
+            Child::Node(Box::new(child1)),
+            Child::Node(Box::new(child2)),
+        ];
+        let decl = b.state_declaration_from_node(&decl_node, "MyClass", false).unwrap();
+        assert_eq!(decl.field, "myField");
+        assert_eq!(decl.r#type, Some("int".to_string()));
+
+        // Text-based fallback branch
+        let field_node = node("annotated_assignment", "self.myField: int = 123");
+        let decl_fallback = b.state_declaration_from_node(&field_node, "MyClass", false).unwrap();
+        assert_eq!(decl_fallback.field, "myField");
+        assert_eq!(decl_fallback.r#type, Some("int".to_string()));
+
+        // None branches
+        assert!(b.state_declaration_from_node(&node("annotated_assignment", "no_colon"), "MyClass", false).is_none());
+        assert!(b.state_declaration_from_node(&node("other", "self.x: int"), "MyClass", false).is_none());
+        let field_node_no_self = node("annotated_assignment", "myField: int = 123");
+        assert!(b.state_declaration_from_node(&field_node_no_self, "MyClass", true).is_none());
+        // Cover line 283 (empty type_text after colon)
+        assert!(b.state_declaration_from_node(&node("annotated_assignment", "self.myField:"), "MyClass", false).is_none());
+
+        // 20-26. formatting
+        assert_eq!(b.format_array_type("Int"), "List[Int]");
+        assert_eq!(b.format_hash_type("String", "Int"), "Dict[String, Int]");
+        assert_eq!(b.format_set_type("Int"), "Set[Int]");
+        assert_eq!(b.format_nilable_type(""), "");
+        assert_eq!(b.format_nilable_type("Optional[Int]"), "Optional[Int]");
+        assert_eq!(b.format_nilable_type("Int"), "Optional[Int]");
+        assert_eq!(b.untyped_type(), "Any");
+        assert_eq!(b.untyped_array_type(), "List[Any]");
+        assert_eq!(b.untyped_hash_type(), "Dict[Any, Any]");
+
+        // Helper functions
+        assert!(is_simple_name("var_name"));
+        assert!(!is_simple_name(""));
+    }
+}

@@ -74,6 +74,36 @@ pub struct Node {
     pub text: String,
 }
 
+impl Node {
+    pub fn is_method_like(&self) -> bool {
+        self.r#type == "DEFN" || self.r#type == "DEFS" || self.r#type == "DEF"
+    }
+
+    pub fn is_class_or_module(&self) -> bool {
+        self.r#type == "CLASS" || self.r#type == "MODULE"
+    }
+
+    pub fn is_conditional(&self) -> bool {
+        self.r#type == "IF" || self.r#type == "UNLESS" || self.r#type == "CASE"
+    }
+
+    pub fn is_block(&self) -> bool {
+        self.r#type == "BLOCK"
+    }
+
+    pub fn is_return(&self) -> bool {
+        self.r#type == "RETURN"
+    }
+
+    pub fn is_hash(&self) -> bool {
+        self.r#type == "HASH"
+    }
+
+    pub fn is_nil(&self) -> bool {
+        self.r#type == "NIL"
+    }
+}
+
 pub fn parse(file: &Path) -> Result<(Node, Vec<String>)> {
     let language = file
         .extension()
@@ -610,8 +640,15 @@ fn exact_integer_text(text: &str) -> bool {
 }
 
 fn comparison_operator_from_text(text: &str) -> Option<String> {
+    let t = text.trim();
+    if t == "is not" {
+        return Some("!=".to_string());
+    }
+    if t == "is" {
+        return Some("==".to_string());
+    }
     for operator in ["<=>", "===", "!==", "==", "!=", "<=", ">=", "<", ">"] {
-        if text.contains(operator) {
+        if t.contains(operator) {
             return Some(operator.to_string());
         }
     }

@@ -315,3 +315,151 @@ fn is_keyword(name: &str) -> bool {
             | "void"
     )
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn node(kind: &str, text: &str) -> Node {
+        Node {
+            r#type: kind.to_string(),
+            children: Vec::new(),
+            first_lineno: 10,
+            first_column: 2,
+            last_lineno: 10,
+            last_column: 20,
+            text: text.to_string(),
+        }
+    }
+
+    #[test]
+    fn test_kotlin_behavior_comprehensive() {
+        let b = KotlinNormalizedBehavior;
+
+        // 1. owner_name_span
+        assert!(b.owner_name_span("MyClass", &node("CLASS", ""), [1, 2, 3, 4]).is_some());
+
+        // 2. function_visibility
+        assert_eq!(b.function_visibility("foo", &node("FUN", "private fun foo()"), &[]), "private");
+        assert_eq!(b.function_visibility("foo", &node("FUN", "fun foo()"), &[]), "public");
+
+        // 3. parameter_name_from_signature
+        assert_eq!(b.parameter_name_from_signature("vararg items: String"), Some("items".to_string()));
+        assert_eq!(b.parameter_name_from_signature("items: String"), Some("items".to_string()));
+        assert_eq!(b.parameter_name_from_signature("invalid signature"), None);
+
+        // 4. property_read_call
+        assert!(b.property_read_call(&node("CALL", "x.y"), &NormalizedCallParts {
+            receiver: "x".to_string(),
+            message: "y".to_string(),
+            arguments: Vec::new(),
+        }));
+
+        // 5. state_read_uses_access_span
+        assert!(b.state_read_uses_access_span(&NormalizedCallProjection {
+            receiver: "self".to_string(),
+            message: "foo".to_string(),
+            arguments: Vec::new(),
+            access_span: [1, 2, 3, 4],
+            span: [1, 2, 3, 4],
+        }));
+
+        // 6. suppress_state_read_for_call
+        assert!(b.suppress_state_read_for_call(&NormalizedCallProjection {
+            receiver: "self".to_string(),
+            message: "callback".to_string(),
+            arguments: Vec::new(),
+            access_span: [1, 2, 3, 4],
+            span: [1, 2, 3, 4],
+        }, ""));
+
+        // 7. call_site_span
+        assert_eq!(
+            b.call_site_span(
+                &node("CALL", ""),
+                &NormalizedCallParts { receiver: "self".to_string(), message: "defaultCase".to_string(), arguments: Vec::new() },
+                [1, 2, 3, 4],
+                [5, 6, 7, 8],
+                "process"
+            ),
+            [5, 6, 7, 8]
+        );
+        assert_eq!(
+            b.call_site_span(
+                &node("CALL", ""),
+                &NormalizedCallParts { receiver: "item".to_string(), message: "children".to_string(), arguments: Vec::new() },
+                [1, 2, 3, 4],
+                [5, 6, 7, 8],
+                "foo"
+            ),
+            [5, 6, 7, 8]
+        );
+        assert_eq!(
+            b.call_site_span(
+                &node("CALL", ""),
+                &NormalizedCallParts { receiver: "other".to_string(), message: "foo".to_string(), arguments: Vec::new() },
+                [1, 2, 3, 4],
+                [5, 6, 7, 8],
+                "foo"
+            ),
+            [1, 2, 3, 4]
+        );
+
+        // 8. case_predicate_text
+        assert_eq!(b.case_predicate_text("(a == b)"), "a == b");
+
+        // 9. nil_guard_fact
+        assert!(b.nil_guard_fact("isNull", "x").is_some());
+
+        // 10. terminating_call_message
+        assert!(b.terminating_call_message("TODO"));
+
+        // 11. semantic_effect_for_call
+        assert!(b.semantic_effect_for_call(&CallSite {
+            receiver: "x".to_string(),
+            message: "isNull".to_string(),
+            file: "".to_string(),
+            function: "".to_string(),
+            owner: "".to_string(),
+            line: 1,
+            span: [1, 2, 3, 4],
+            conditional: false,
+            arguments: Vec::new(),
+            control: None,
+            safe_navigation: false,
+            block: false,
+        }).is_some());
+
+        // 12. local_flow_declaration_keyword
+        assert!(b.local_flow_declaration_keyword("val"));
+
+        // 13. local_flow_keyword
+        assert!(b.local_flow_keyword("val"));
+        for kw in &["as", "break", "class", "continue", "else", "false", "for", "fun", "if", "in", "null", "private", "protected", "public", "return", "this", "true", "while"] {
+            assert!(b.local_flow_keyword(kw));
+        }
+        assert!(!b.local_flow_keyword("not_a_keyword"));
+
+        // 14. predicate_body_language_signal
+        assert!(b.predicate_body_language_signal("null"));
+
+        // 15. state_declaration_from_node
+        let prop_node = node("PROPERTY", "val myProperty: String = \"hello\"");
+        let decl = b.state_declaration_from_node(&prop_node, "MyClass", false);
+        assert!(decl.is_some());
+        assert_eq!(decl.as_ref().unwrap().field, "myProperty");
+        assert_eq!(decl.as_ref().unwrap().r#type, Some("String".to_string()));
+        assert!(b.state_declaration_from_node(&prop_node, "MyClass", true).is_none());
+
+        // 16-20. formatting
+        assert_eq!(b.format_array_type("Int"), "List<Int>");
+        assert_eq!(b.format_hash_type("String", "Int"), "Map<String, Int>");
+        assert_eq!(b.format_set_type("Int"), "Set<Int>");
+        assert_eq!(b.untyped_array_type(), "List<Object>");
+        assert_eq!(b.untyped_hash_type(), "Map<String, Object>");
+
+        // Cover helper functions
+        assert!(simple_identifier("foo"));
+        assert!(!simple_identifier(""));
+    }
+}

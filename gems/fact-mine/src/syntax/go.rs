@@ -538,3 +538,121 @@ fn simple_identifier(name: &str) -> bool {
     matches!(chars.next(), Some(first) if first == '_' || first.is_ascii_alphabetic())
         && chars.all(|ch| ch == '_' || ch.is_ascii_alphanumeric())
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::syntax::Child;
+
+    fn node(kind: &str, text: &str) -> Node {
+        Node {
+            r#type: kind.to_string(),
+            children: Vec::new(),
+            first_lineno: 10,
+            first_column: 2,
+            last_lineno: 10 + text.lines().count().saturating_sub(1),
+            last_column: text.lines().last().map(str::len).unwrap_or_default(),
+            text: text.to_string(),
+        }
+    }
+
+    #[test]
+    fn test_go_behavior_uncovered_methods() {
+        let behavior = GoNormalizedBehavior;
+
+        // format_array_type etc
+        assert_eq!(behavior.format_array_type("int"), "[]int");
+        assert_eq!(behavior.format_hash_type("string", "int"), "map[string]value_type");
+        assert_eq!(behavior.format_set_type("string"), "map[string]struct{}");
+        assert_eq!(behavior.untyped_array_type(), "[]any");
+        assert_eq!(behavior.untyped_hash_type(), "map[string]any");
+        assert_eq!(behavior.untyped_type(), "any");
+        assert_eq!(behavior.format_nilable_type(""), "");
+        assert_eq!(behavior.format_nilable_type("nil"), "nil");
+        assert_eq!(behavior.format_nilable_type("*int"), "*int");
+        assert_eq!(behavior.format_nilable_type("int"), "*int");
+
+        // state_declaration_from_node
+        let field_decl = node("FIELD_DECLARATION", "Value int");
+        assert!(behavior.state_declaration_from_node(&field_decl, "Widget", true).is_none());
+        assert!(behavior.state_declaration_from_node(&node("OTHER", "Value int"), "Widget", false).is_none());
+
+        // embedded_member_reads
+        let multiline_node = Node {
+            r#type: "READ".to_string(),
+            children: Vec::new(),
+            first_lineno: 10,
+            first_column: 0,
+            last_lineno: 12,
+            last_column: 5,
+            text: "first\nsecond".to_string(),
+        };
+        assert!(behavior.embedded_member_reads(&multiline_node).is_empty());
+
+        // owner_for_function
+        let fn_node = node("FUNCTION", "func (r *Receiver) MyMethod() {}");
+        assert_eq!(behavior.owner_for_function("MyMethod", &fn_node, "Receiver", "File"), "Receiver");
+        assert_eq!(behavior.owner_for_function("MyMethod", &fn_node, "File", "File"), "Receiver");
+
+        // function_name_from_text
+        assert_eq!(behavior.function_name_from_text("func (r *Receiver) MyMethod()"), Some("MyMethod".to_string()));
+        assert_eq!(behavior.function_name_from_text("func MyFunction()"), Some("MyFunction".to_string()));
+        assert_eq!(behavior.function_name_from_text("invalid"), None);
+
+        // parameter_list_source
+        assert_eq!(behavior.parameter_list_source("func (r *Receiver) MyMethod(a int, b string)"), "a int, b string");
+        assert_eq!(behavior.parameter_list_source("func MyMethod(a int)"), "a int");
+        assert_eq!(behavior.parameter_list_source("func (r *Receiver) MyMethod("), "");
+        assert_eq!(behavior.parameter_list_source("func MyMethod("), "");
+        assert_eq!(behavior.parameter_list_source("func MyMethod"), "");
+        assert_eq!(behavior.parameter_list_source("func (r *Receiver MyMethod()"), "");
+        assert_eq!(behavior.parameter_list_source("func (r *Receiver) MyMethod"), "");
+
+        // keywords
+        assert!(behavior.local_flow_declaration_keyword("int"));
+        assert!(!behavior.local_flow_declaration_keyword("invalid"));
+        assert!(behavior.local_flow_keyword("break"));
+        assert!(!behavior.local_flow_keyword("invalid"));
+
+        // receiver_aliases_for_function
+        let aliases = behavior.receiver_aliases_for_function(&fn_node);
+        assert_eq!(aliases.get("r"), Some(&"self".to_string()));
+
+        // initializer_writes
+        let mut key_node = node("IDENTIFIER", "x");
+        key_node.children = vec![Child::Integer(123)];
+        
+        let mut keyed_node = node("KEYED_ELEMENT", "x: 1");
+        keyed_node.children = vec![Child::Integer(123), Child::Node(Box::new(key_node))];
+
+        let keyed_node_no_key = node("KEYED_ELEMENT", "y: 2");
+        let not_keyed_node = node("IDENTIFIER", "z");
+
+        let mut lit_val_node = node("LITERAL_VALUE", "{x: 1}");
+        lit_val_node.children = vec![
+            Child::Integer(123),
+            Child::Node(Box::new(not_keyed_node)),
+            Child::Node(Box::new(keyed_node_no_key)),
+            Child::Node(Box::new(keyed_node)),
+        ];
+
+        let mut comp_lit_node = node("COMPOSITE_LITERAL", "Point{x: 1}");
+        comp_lit_node.children = vec![
+            Child::Integer(123),
+            Child::Node(Box::new(node("TYPE_IDENTIFIER", "Point"))),
+            Child::Node(Box::new(lit_val_node)),
+        ];
+
+        let writes = behavior.initializer_writes(&comp_lit_node, "dummy", [10, 0, 10, 15]);
+        assert_eq!(writes.len(), 1);
+        assert_eq!(writes[0].receiver, "Point");
+        assert_eq!(writes[0].field, "x");
+
+        // state_declaration_from_node error paths
+        let mut invalid_lvar = node("LVAR", "x");
+        invalid_lvar.children = vec![Child::Integer(123)];
+        let mut invalid_field_decl = node("FIELD_DECLARATION", "Value int");
+        invalid_field_decl.children = vec![Child::Node(Box::new(invalid_lvar)), Child::Integer(123)];
+        assert!(behavior.state_declaration_from_node(&invalid_field_decl, "Widget", false).is_none());
+    }
+}
