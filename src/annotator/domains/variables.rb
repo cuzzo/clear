@@ -26,6 +26,12 @@ module Annotator
       # accumulator path instead of an inline fold.
 
       DeclarationNode = T.type_alias { T.any(AST::VarDecl, AST::BindExpr) }
+
+      class DestructureRhsFacts < T::Struct
+        const :value_type, Type
+        const :element_type, Type
+      end
+
       sig { params(node: DeclarationNode).returns(T.nilable(Type)) }
       def promote_pipe_to_observable_dest!(node)
         T.bind(self, SemanticAnnotator)
@@ -284,18 +290,17 @@ module Annotator
         T.bind(self, SemanticAnnotator)
 
         visit(node.value)
-        validate_destructure_shape!(node)
-        validate_destructure_copyable!(node)
+        rhs = destructure_rhs_facts(node)
+        validate_destructure_shape!(node, rhs)
+        validate_destructure_copyable!(node, rhs)
 
-        value_type = node.value.full_type!(context: "destructuring assignment value").success_type
-        element_type = T.must(value_type.element_type)
         node.targets.each_with_index do |target, index|
           if destructure_discard?(target)
-            stamp_type!(target, element_type)
+            stamp_type!(target, rhs.element_type)
             next
           end
 
-          target_value_type = destructure_value_type_at(node, index, element_type)
+          target_value_type = destructure_value_type_at(node, index, rhs.element_type)
           if current_scope.entry?(target.name)
             finalize_destructure_assignment_target!(node, target, target_value_type)
           else
@@ -601,11 +606,18 @@ module Annotator
         target.name == "_"
       end
 
-      sig { params(node: AST::DestructuringAssignment).void }
-      def validate_destructure_shape!(node)
+      sig { params(node: AST::DestructuringAssignment).returns(DestructureRhsFacts) }
+      def destructure_rhs_facts(node)
         T.bind(self, SemanticAnnotator)
 
         value_type = node.value.full_type!(context: "destructuring assignment value").success_type
+        element_type = value_type.element_type || Type.new(:Any)
+        DestructureRhsFacts.new(value_type: value_type, element_type: element_type)
+      end
+
+      sig { params(node: AST::DestructuringAssignment, rhs: DestructureRhsFacts).void }
+      def validate_destructure_shape!(node, rhs)
+        value_type = rhs.value_type
         unless value_type.fixed? && value_type.array?
           error!(node, :DESTRUCTURE_REQUIRES_FIXED_SHAPE, got: value_type.to_s)
         end
@@ -614,16 +626,14 @@ module Annotator
         end
       end
 
-      sig { params(node: AST::DestructuringAssignment).void }
-      def validate_destructure_copyable!(node)
+      sig { params(node: AST::DestructuringAssignment, rhs: DestructureRhsFacts).void }
+      def validate_destructure_copyable!(node, rhs)
         T.bind(self, SemanticAnnotator)
 
-        value_type = node.value.full_type!(context: "destructuring assignment value").success_type
-        element_type = T.must(value_type.element_type)
-        copyable = element_type.implicitly_copyable? { |t| lookup_type_schema(t) }
+        copyable = rhs.element_type.implicitly_copyable? { |t| lookup_type_schema(t) }
         return if copyable
 
-        error!(node, :DESTRUCTURE_REQUIRES_COPYABLE_RHS, got: value_type.to_s)
+        error!(node, :DESTRUCTURE_REQUIRES_COPYABLE_RHS, got: rhs.value_type.to_s)
       end
 
       sig { params(node: AST::DestructuringAssignment, index: Integer, fallback: Type).returns(Type) }
@@ -916,6 +926,7 @@ module Annotator
       private :finalize_destructure_declaration_target!
       private :finalize_var_declaration!
       private :destructure_discard?
+      private :destructure_rhs_facts
       private :destructure_value_type_at
       private :mark_borrowed_field_bind_alias!
       private :mark_var_mutated

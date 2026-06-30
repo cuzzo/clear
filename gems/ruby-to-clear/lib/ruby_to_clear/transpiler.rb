@@ -1135,36 +1135,59 @@ module RubyToClear
     end
 
     def visit_multi_write_node(node)
+      target_names = validated_multi_write_target_names(node)
+      return target_names if target_names.is_a?(String)
+
+      first_new_target = multi_write_first_new_target?(target_names)
+      target_code = multi_write_target_codes(target_names, first_new_target)
+      prefix = first_new_target ? "MUTABLE " : ""
+      "#{prefix}#{target_code.join(', ')} = #{visit(node.value)}"
+    end
+
+    def validated_multi_write_target_names(node)
       unless fixed_shape_multi_write?(node)
         return raise_unsupported("Destructuring requires a statically fixed literal array RHS", node)
       end
 
-      lefts = node.lefts
-      rights = node.value.elements
-
-      if lefts.length != rights.length
+      if node.lefts.length != node.value.elements.length
         return raise_unsupported("Multi-write left and right side lengths must match", node)
       end
 
-      target_names = lefts.map { |target| multi_write_target_name(target) }
-      if target_names.any?(&:nil?)
+      target_names = multi_write_target_names(node)
+      unless target_names
         return raise_unsupported("Destructuring targets must be local variables or _", node)
       end
 
-      first_new_target = target_names.first != "_" && !@declared_locals.include?(target_names.first)
-      target_code = target_names.each_with_index.map do |name, index|
-        next "_" if name == "_"
-        if @declared_locals.include?(name)
-          name
-        else
-          @declared_locals << name
-          @local_shapes[name] = nil
-          index.zero? || first_new_target ? name : "MUTABLE #{name}"
-        end
-      end
+      target_names
+    end
 
-      prefix = first_new_target ? "MUTABLE " : ""
-      "#{prefix}#{target_code.join(', ')} = #{visit(node.value)}"
+    def multi_write_target_codes(target_names, first_new_target)
+      target_names.each_with_index.map do |name, index|
+        multi_write_target_code(name, index, first_new_target)
+      end
+    end
+
+    def multi_write_target_code(name, index, first_new_target)
+      return "_" if name == "_"
+
+      if @declared_locals.include?(name)
+        name
+      else
+        @declared_locals << name
+        @local_shapes[name] = nil
+        index.zero? || first_new_target ? name : "MUTABLE #{name}"
+      end
+    end
+
+    def multi_write_first_new_target?(target_names)
+      target_names.first != "_" && !@declared_locals.include?(target_names.first)
+    end
+
+    def multi_write_target_names(node)
+      target_names = node.lefts.map { |target| multi_write_target_name(target) }
+      return nil if target_names.any?(&:nil?)
+
+      target_names
     end
 
     def fixed_shape_multi_write?(node)

@@ -33,11 +33,6 @@ module MIRLoweringVariables
     const :cleanup_field, T.nilable(AST::GetField)
   end
 
-  class DestructureTargetPlan < T::Struct
-    const :target, MIR::DestructureTarget
-    const :declared, T::Boolean
-  end
-
   class VarDeclFacts < T::Struct
     const :ft, Type
     const :binding_entry, CleanupEntry
@@ -783,17 +778,14 @@ module MIRLoweringVariables
   def lower_destructuring_assignment(node)
     T.bind(self, MIRLowering) rescue nil
     value = T.cast(lower(node.value), MIR::Emittable)
-    plans = node.targets.map { |target| destructure_target_plan(target) }
-    MIR::DestructureSet.new(plans.map(&:target), value)
+    targets = node.targets.map { |target| lower_destructure_target(target) }
+    MIR::DestructureSet.new(targets, value)
   end
 
-  sig { params(target: AST::DestructureTarget).returns(DestructureTargetPlan) }
-  def destructure_target_plan(target)
+  sig { params(target: AST::DestructureTarget).returns(MIR::DestructureTarget) }
+  def lower_destructure_target(target)
     if target.name.to_s == "_"
-      return DestructureTargetPlan.new(
-        target: MIR::DestructureTarget.new("_", nil, nil),
-        declared: false,
-      )
+      return MIR::DestructureTarget.new("_", nil, nil)
     end
 
     symbol = target.symbol
@@ -806,10 +798,7 @@ module MIRLoweringVariables
 
     declaration_kind = declared ? destructure_declaration_kind(target) : nil
     annotation = declared && target.type ? Type.new(transpile_type(target.full_type!)) : nil
-    DestructureTargetPlan.new(
-      target: MIR::DestructureTarget.new(safe_name, declaration_kind, annotation),
-      declared: declared == true,
-    )
+    MIR::DestructureTarget.new(safe_name, declaration_kind, annotation)
   end
 
   sig { params(target: AST::DestructureTarget).returns(Symbol) }
@@ -1428,7 +1417,7 @@ module MIRLoweringVariables
   private :lower_var_decl
   private :lower_var_decl_init
   private :destructure_declaration_kind
-  private :destructure_target_plan
+  private :lower_destructure_target
   private :mark_field_assignment_cleanup!
   private :mark_guarded_cleanup_name!
   private :moved_guard_cleanup_entry
