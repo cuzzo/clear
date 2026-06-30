@@ -151,21 +151,19 @@ impl Report {
         Self { writes, by_unit }
     }
 
-    fn pair_owners(&self) -> BTreeMap<Vec<String>, BTreeSet<String>> {
-        let mut pair_owners: BTreeMap<Vec<String>, BTreeSet<String>> = BTreeMap::new();
+    fn pair_owners(&self) -> BTreeMap<(&str, &str), BTreeSet<&str>> {
+        let mut pair_owners: BTreeMap<(&str, &str), BTreeSet<&str>> = BTreeMap::new();
         for (_unit, ws) in &self.by_unit {
             for i in 0..ws.len() {
                 for j in i + 1..ws.len() {
                     let w1 = &ws[i];
                     let w2 = &ws[j];
                     if w1.attr != w2.attr && can_pair(w1, w2) {
-                        let mut pair = vec![w1.attr.clone(), w2.attr.clone()];
-                        pair.sort();
-
+                        let pair = if w1.attr < w2.attr { (w1.attr.as_str(), w2.attr.as_str()) } else { (w2.attr.as_str(), w1.attr.as_str()) };
                         let owner_ctx = if is_unknown(w1) || is_unknown(w2) {
-                            "".to_string()
+                            ""
                         } else {
-                            w1.owner.clone()
+                            w1.owner.as_str()
                         };
                         pair_owners.entry(pair).or_default().insert(owner_ctx);
                     }
@@ -175,22 +173,21 @@ impl Report {
         pair_owners
     }
 
-    fn pair_recvs(&self) -> BTreeMap<Vec<String>, BTreeSet<String>> {
-        let mut pair_recvs: BTreeMap<Vec<String>, BTreeSet<String>> = BTreeMap::new();
+    fn pair_recvs(&self) -> BTreeMap<(&str, &str), BTreeSet<&str>> {
+        let mut pair_recvs: BTreeMap<(&str, &str), BTreeSet<&str>> = BTreeMap::new();
         for (_unit, ws) in &self.by_unit {
             for i in 0..ws.len() {
                 for j in i + 1..ws.len() {
                     let w1 = &ws[i];
                     let w2 = &ws[j];
                     if w1.attr != w2.attr && can_pair(w1, w2) {
-                        let mut pair = vec![w1.attr.clone(), w2.attr.clone()];
-                        pair.sort();
+                        let pair = if w1.attr < w2.attr { (w1.attr.as_str(), w2.attr.as_str()) } else { (w2.attr.as_str(), w1.attr.as_str()) };
                         let entry = pair_recvs.entry(pair).or_default();
                         if !w1.recv.is_empty() {
-                            entry.insert(w1.recv.clone());
+                            entry.insert(w1.recv.as_str());
                         }
                         if !w2.recv.is_empty() {
-                            entry.insert(w2.recv.clone());
+                            entry.insert(w2.recv.as_str());
                         }
                     }
                 }
@@ -200,33 +197,27 @@ impl Report {
     }
 
     fn co_written_pairs(&self, min_support: usize) -> Vec<CoWrittenPair> {
-        let mut keys = Vec::new();
-        let mut counts: BTreeMap<Vec<String>, BTreeSet<(String, String)>> = BTreeMap::new();
+        let mut counts: BTreeMap<(&str, &str), BTreeSet<(&str, &str)>> = BTreeMap::new();
         for (unit, ws) in &self.by_unit {
             for i in 0..ws.len() {
                 for j in i + 1..ws.len() {
                     let w1 = &ws[i];
                     let w2 = &ws[j];
                     if w1.attr != w2.attr && can_pair(w1, w2) {
-                        let mut pair = vec![w1.attr.clone(), w2.attr.clone()];
-                        pair.sort();
-                        if !counts.contains_key(&pair) {
-                            keys.push(pair.clone());
-                        }
-                        counts.entry(pair).or_default().insert(unit.clone());
+                        let pair = if w1.attr < w2.attr { (w1.attr.as_str(), w2.attr.as_str()) } else { (w2.attr.as_str(), w1.attr.as_str()) };
+                        counts.entry(pair).or_default().insert((unit.0.as_str(), unit.1.as_str()));
                     }
                 }
             }
         }
 
         let mut out = Vec::new();
-        for pair in keys {
-            let units = counts.remove(&pair).unwrap();
+        for (pair, units) in counts {
             if units.len() < min_support {
                 continue;
             }
             out.push(CoWrittenPair {
-                pair,
+                pair: vec![pair.0.to_string(), pair.1.to_string()],
                 support: units.len(),
                 sites: units
                     .into_iter()
@@ -260,18 +251,19 @@ impl Report {
 
                 if let (Some(has), Some(miss)) = (has, miss) {
                     if let Some(w) = ws.iter().find(|x| &x.attr == has) {
+                        let pair_tuple = if a < b { (a.as_str(), b.as_str()) } else { (b.as_str(), a.as_str()) };
                         let matches_owner = if is_unknown(w) {
                             true
-                        } else if let Some(owners) = pair_owners.get(&p.pair) {
-                            owners.contains("") || owners.contains(&w.owner)
+                        } else if let Some(owners) = pair_owners.get(&pair_tuple) {
+                            owners.contains("") || owners.contains(&w.owner.as_str())
                         } else {
                             false
                         };
 
                         let matches_recv = if is_dynamic_language(file) {
                             true
-                        } else if let Some(recvs) = pair_recvs.get(&p.pair) {
-                            if recvs.contains(&w.recv) {
+                        } else if let Some(recvs) = pair_recvs.get(&pair_tuple) {
+                            if recvs.contains(&w.recv.as_str()) {
                                 true
                             } else {
                                 w.recv.is_empty() || w.recv == "self" || w.recv == "this" || recvs.contains("self") || recvs.contains("this")

@@ -222,21 +222,15 @@ impl Report {
             *ess.entry(&h.contract).or_insert(0) += 1;
         }
 
-        let mut rows_map: Vec<(String, Vec<&Hit>)> = Vec::new();
+        let mut rows_map: BTreeMap<&str, Vec<&Hit>> = BTreeMap::new();
         for h in &self.guard {
-            if let Some((_, hits)) = rows_map
-                .iter_mut()
-                .find(|(contract, _)| contract == &h.contract)
-            {
-                hits.push(h);
-            } else {
-                rows_map.push((h.contract.clone(), vec![h]));
-            }
+            rows_map.entry(h.contract.as_str()).or_default().push(h);
         }
 
         let rows: Vec<_> = rows_map
             .into_iter()
             .map(|(contract, mut hs)| {
+                let contract = contract.to_string();
                 hs.sort_by(|a, b| {
                     a.file
                         .cmp(&b.file)
