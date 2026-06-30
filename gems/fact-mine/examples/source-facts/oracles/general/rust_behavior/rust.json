@@ -3,11 +3,6 @@
     {
       "boundaries": [
         {
-          "after_index": 2,
-          "before_index": 1,
-          "kind": "blank"
-        },
-        {
           "after_index": 3,
           "before_index": 2,
           "kind": "blank"
@@ -15,6 +10,11 @@
         {
           "after_index": 4,
           "before_index": 3,
+          "kind": "blank"
+        },
+        {
+          "after_index": 5,
+          "before_index": 4,
           "kind": "blank"
         }
       ],
@@ -26,6 +26,16 @@
           "reads": [],
           "writes": [
             "result"
+          ]
+        },
+        {
+          "co_uses": [],
+          "dependencies": [],
+          "reads": [
+            "methods"
+          ],
+          "writes": [
+            "methods"
           ]
         },
         {
@@ -119,19 +129,19 @@
     "branch_arms": [
       {
         "body": "panic!(\"missing input\")",
-        "decision_line": 11,
+        "decision_line": 12,
         "function": "update",
         "kind": "if",
-        "line": 12,
+        "line": 13,
         "member": "then",
         "predicate": "local.is_none()"
       },
       {
         "body": "{ self.value = local; self.callback(); std::fs::read_to_string(\"config\").ok(); println!(\"{}\", result); }",
-        "decision_line": 15,
+        "decision_line": 16,
         "function": "update",
         "kind": "if",
-        "line": 15,
+        "line": 16,
         "member": "then",
         "predicate": "local.is_some() && enabled"
       }
@@ -139,7 +149,7 @@
     "branch_decisions": [
       {
         "function": "update",
-        "line": 11,
+        "line": 12,
         "predicate": "local.is_none()",
         "state_refs": [
           "local.is_none"
@@ -147,7 +157,7 @@
       },
       {
         "function": "update",
-        "line": 15,
+        "line": 16,
         "predicate": "local.is_some() && enabled",
         "state_refs": [
           "local.is_some"
@@ -163,7 +173,7 @@
         "conditional": true,
         "control": "conditional",
         "function": "update",
-        "line": 18,
+        "line": 19,
         "message": "read_to_string",
         "receiver": "std::fs",
         "safe_navigation": false
@@ -176,7 +186,7 @@
         "conditional": false,
         "control": "always",
         "function": "update",
-        "line": 22,
+        "line": 23,
         "message": "push_str",
         "receiver": "result",
         "safe_navigation": false
@@ -189,7 +199,7 @@
         "conditional": false,
         "control": "always",
         "function": "update",
-        "line": 23,
+        "line": 24,
         "message": "Some",
         "receiver": "self",
         "safe_navigation": false
@@ -200,7 +210,7 @@
         "conditional": false,
         "control": "always",
         "function": "none_ready",
-        "line": 27,
+        "line": 28,
         "message": "is_none",
         "receiver": "self.value",
         "safe_navigation": false
@@ -211,7 +221,7 @@
         "conditional": true,
         "control": "conditional",
         "function": "update",
-        "line": 11,
+        "line": 12,
         "message": "is_none",
         "receiver": "local",
         "safe_navigation": false
@@ -222,7 +232,7 @@
         "conditional": true,
         "control": "conditional",
         "function": "update",
-        "line": 15,
+        "line": 16,
         "message": "is_some",
         "receiver": "local",
         "safe_navigation": false
@@ -233,7 +243,7 @@
         "conditional": true,
         "control": "conditional",
         "function": "update",
-        "line": 17,
+        "line": 18,
         "message": "callback",
         "receiver": "self",
         "safe_navigation": false
@@ -244,7 +254,7 @@
         "conditional": true,
         "control": "conditional",
         "function": "update",
-        "line": 18,
+        "line": 19,
         "message": "ok",
         "receiver": "std::fs::read_to_string.call(\"config\")",
         "safe_navigation": false
@@ -259,7 +269,7 @@
           2
         ],
         "fingerprint": "call<Some>(id argument_list(id))",
-        "line": 23,
+        "line": 24,
         "mass": 3,
         "method_name": "update",
         "node_name": "call"
@@ -278,7 +288,7 @@
           5
         ],
         "fingerprint": "body_statement(assignment<value=>(id id argument_list(id)) call(id id) call(id call<call>(id scoped_identifier(scoped_identifier(id id) id) argument_list(lit))) macro_invocation(id token_tree(lit id)))",
-        "line": 15,
+        "line": 16,
         "mass": 21,
         "method_name": "update",
         "node_name": "body_statement"
@@ -297,7 +307,7 @@
           5
         ],
         "fingerprint": "if(and(call(id id) id) body_statement(assignment<value=>(id id argument_list(id)) call(id id) call(id call<call>(id scoped_identifier(scoped_identifier(id id) id) argument_list(lit))) macro_invocation(id token_tree(lit id))))",
-        "line": 15,
+        "line": 16,
         "mass": 26,
         "method_name": "update",
         "node_name": "if"
@@ -312,7 +322,7 @@
           1
         ],
         "fingerprint": "and(call(id id) id)",
-        "line": 15,
+        "line": 16,
         "mass": 4,
         "method_name": "update",
         "node_name": "and"
@@ -327,7 +337,7 @@
           4
         ],
         "fingerprint": "if(call(id id) macro_invocation(id token_tree(lit)))",
-        "line": 11,
+        "line": 12,
         "mass": 7,
         "method_name": "update",
         "node_name": "if"
@@ -340,7 +350,7 @@
           2
         ],
         "fingerprint": "call(id call(id id))",
-        "line": 27,
+        "line": 28,
         "mass": 3,
         "method_name": "none_ready",
         "node_name": "call"
@@ -353,7 +363,7 @@
           8
         ],
         "fingerprint": "call(id call<call>(id scoped_identifier(scoped_identifier(id id) id) argument_list(lit)))",
-        "line": 18,
+        "line": 19,
         "mass": 9,
         "method_name": "update",
         "node_name": "call"
@@ -368,7 +378,7 @@
           2
         ],
         "fingerprint": "assignment<value=>(id id argument_list(id))",
-        "line": 16,
+        "line": 17,
         "mass": 4,
         "method_name": "update",
         "node_name": "assignment"
@@ -383,7 +393,7 @@
           2
         ],
         "fingerprint": "call<push_str>(id id argument_list(lit))",
-        "line": 22,
+        "line": 23,
         "mass": 4,
         "method_name": "update",
         "node_name": "call"
@@ -396,7 +406,7 @@
           1
         ],
         "fingerprint": "argument_list(id)",
-        "line": 16,
+        "line": 17,
         "mass": 2,
         "method_name": "update",
         "node_name": "argument_list"
@@ -409,7 +419,7 @@
           1
         ],
         "fingerprint": "argument_list(id)",
-        "line": 23,
+        "line": 24,
         "mass": 2,
         "method_name": "update",
         "node_name": "argument_list"
@@ -422,7 +432,7 @@
           1
         ],
         "fingerprint": "call(id id)",
-        "line": 11,
+        "line": 12,
         "mass": 2,
         "method_name": "update",
         "node_name": "call"
@@ -435,7 +445,7 @@
           1
         ],
         "fingerprint": "call(id id)",
-        "line": 15,
+        "line": 16,
         "mass": 2,
         "method_name": "update",
         "node_name": "call"
@@ -448,7 +458,7 @@
           1
         ],
         "fingerprint": "call(id id)",
-        "line": 17,
+        "line": 18,
         "mass": 2,
         "method_name": "update",
         "node_name": "call"
@@ -461,7 +471,7 @@
           1
         ],
         "fingerprint": "call(id id)",
-        "line": 27,
+        "line": 28,
         "mass": 2,
         "method_name": "none_ready",
         "node_name": "call"
@@ -469,6 +479,7 @@
       {
         "child_fingerprints": [
           "let_declaration(assignment(id call(id scoped_identifier(id id))))",
+          "let_declaration(id generic_type(id type_arguments(id)))",
           "let_declaration(assignment(id id))",
           "if(call(id id) macro_invocation(id token_tree(lit)))",
           "if(and(call(id id) id) body_statement(assignment<value=>(id id argument_list(id)) call(id id) call(id call<call>(id scoped_identifier(scoped_identifier(id id) id) argument_list(lit))) macro_invocation(id token_tree(lit id))))",
@@ -477,15 +488,16 @@
         ],
         "child_masses": [
           6,
+          6,
           3,
           7,
           26,
           4,
           3
         ],
-        "fingerprint": "body_statement(let_declaration(assignment(id call(id scoped_identifier(id id)))) let_declaration(assignment(id id)) if(call(id id) macro_invocation(id token_tree(lit))) if(and(call(id id) id) body_statement(assignment<value=>(id id argument_list(id)) call(id id) call(id call<call>(id scoped_identifier(scoped_identifier(id id) id) argument_list(lit))) macro_invocation(id token_tree(lit id)))) call<push_str>(id id argument_list(lit)) call<Some>(id argument_list(id)))",
+        "fingerprint": "body_statement(let_declaration(assignment(id call(id scoped_identifier(id id)))) let_declaration(id generic_type(id type_arguments(id))) let_declaration(assignment(id id)) if(call(id id) macro_invocation(id token_tree(lit))) if(and(call(id id) id) body_statement(assignment<value=>(id id argument_list(id)) call(id id) call(id call<call>(id scoped_identifier(scoped_identifier(id id) id) argument_list(lit))) macro_invocation(id token_tree(lit id)))) call<push_str>(id id argument_list(lit)) call<Some>(id argument_list(id)))",
         "line": 7,
-        "mass": 50,
+        "mass": 56,
         "method_name": "update",
         "node_name": "body_statement"
       },
@@ -497,7 +509,7 @@
           1
         ],
         "fingerprint": "argument_list(lit)",
-        "line": 18,
+        "line": 19,
         "mass": 2,
         "method_name": "update",
         "node_name": "argument_list"
@@ -510,23 +522,23 @@
           1
         ],
         "fingerprint": "argument_list(lit)",
-        "line": 22,
+        "line": 23,
         "mass": 2,
         "method_name": "update",
         "node_name": "argument_list"
       },
       {
         "child_fingerprints": [
-          "method(id body(body_statement(let_declaration(assignment(id call(id scoped_identifier(id id)))) let_declaration(assignment(id id)) if(call(id id) macro_invocation(id token_tree(lit))) if(and(call(id id) id) body_statement(assignment<value=>(id id argument_list(id)) call(id id) call(id call<call>(id scoped_identifier(scoped_identifier(id id) id) argument_list(lit))) macro_invocation(id token_tree(lit id)))) call<push_str>(id id argument_list(lit)) call<Some>(id argument_list(id)))))",
+          "method(id body(body_statement(let_declaration(assignment(id call(id scoped_identifier(id id)))) let_declaration(id generic_type(id type_arguments(id))) let_declaration(assignment(id id)) if(call(id id) macro_invocation(id token_tree(lit))) if(and(call(id id) id) body_statement(assignment<value=>(id id argument_list(id)) call(id id) call(id call<call>(id scoped_identifier(scoped_identifier(id id) id) argument_list(lit))) macro_invocation(id token_tree(lit id)))) call<push_str>(id id argument_list(lit)) call<Some>(id argument_list(id)))))",
           "method(id body(call(id call(id id))))"
         ],
         "child_masses": [
-          52,
+          58,
           5
         ],
-        "fingerprint": "body_statement(method(id body(body_statement(let_declaration(assignment(id call(id scoped_identifier(id id)))) let_declaration(assignment(id id)) if(call(id id) macro_invocation(id token_tree(lit))) if(and(call(id id) id) body_statement(assignment<value=>(id id argument_list(id)) call(id id) call(id call<call>(id scoped_identifier(scoped_identifier(id id) id) argument_list(lit))) macro_invocation(id token_tree(lit id)))) call<push_str>(id id argument_list(lit)) call<Some>(id argument_list(id))))) method(id body(call(id call(id id)))))",
+        "fingerprint": "body_statement(method(id body(body_statement(let_declaration(assignment(id call(id scoped_identifier(id id)))) let_declaration(id generic_type(id type_arguments(id))) let_declaration(assignment(id id)) if(call(id id) macro_invocation(id token_tree(lit))) if(and(call(id id) id) body_statement(assignment<value=>(id id argument_list(id)) call(id id) call(id call<call>(id scoped_identifier(scoped_identifier(id id) id) argument_list(lit))) macro_invocation(id token_tree(lit id)))) call<push_str>(id id argument_list(lit)) call<Some>(id argument_list(id))))) method(id body(call(id call(id id)))))",
         "line": 6,
-        "mass": 58,
+        "mass": 64,
         "method_name": "(top-level)",
         "node_name": "body_statement"
       },
@@ -553,7 +565,7 @@
           2
         ],
         "fingerprint": "call<call>(id scoped_identifier(scoped_identifier(id id) id) argument_list(lit))",
-        "line": 18,
+        "line": 19,
         "mass": 8,
         "method_name": "update",
         "node_name": "call"
@@ -561,9 +573,9 @@
       {
         "child_fingerprints": [],
         "child_masses": [],
-        "fingerprint": "method(id body(body_statement(let_declaration(assignment(id call(id scoped_identifier(id id)))) let_declaration(assignment(id id)) if(call(id id) macro_invocation(id token_tree(lit))) if(and(call(id id) id) body_statement(assignment<value=>(id id argument_list(id)) call(id id) call(id call<call>(id scoped_identifier(scoped_identifier(id id) id) argument_list(lit))) macro_invocation(id token_tree(lit id)))) call<push_str>(id id argument_list(lit)) call<Some>(id argument_list(id)))))",
+        "fingerprint": "method(id body(body_statement(let_declaration(assignment(id call(id scoped_identifier(id id)))) let_declaration(id generic_type(id type_arguments(id))) let_declaration(assignment(id id)) if(call(id id) macro_invocation(id token_tree(lit))) if(and(call(id id) id) body_statement(assignment<value=>(id id argument_list(id)) call(id id) call(id call<call>(id scoped_identifier(scoped_identifier(id id) id) argument_list(lit))) macro_invocation(id token_tree(lit id)))) call<push_str>(id id argument_list(lit)) call<Some>(id argument_list(id)))))",
         "line": 7,
-        "mass": 52,
+        "mass": 58,
         "method_name": "update",
         "node_name": "defn"
       },
@@ -571,7 +583,7 @@
         "child_fingerprints": [],
         "child_masses": [],
         "fingerprint": "method(id body(call(id call(id id))))",
-        "line": 26,
+        "line": 27,
         "mass": 5,
         "method_name": "none_ready",
         "node_name": "defn"
@@ -581,14 +593,14 @@
     "decisions": [
       {
         "enclosing_span": [
-          15,
+          16,
           8,
-          20,
+          21,
           9
         ],
         "function": "update",
         "kind": "conjunction",
-        "line": 15,
+        "line": 16,
         "members": [
           "local.is_some()",
           "enabled"
@@ -599,7 +611,7 @@
     "dispatch_sites": [],
     "functions": [
       {
-        "line": 26,
+        "line": 27,
         "name": "none_ready",
         "owner": "RustSourceFactBehavior",
         "params": [
@@ -638,7 +650,7 @@
       {
         "boundaries": [],
         "id": "RustSourceFactBehavior#none_ready",
-        "line": 26,
+        "line": 27,
         "local_contract_assignments": {},
         "name": "none_ready",
         "owner": "RustSourceFactBehavior",
@@ -646,15 +658,15 @@
           {
             "co_uses": [],
             "dependencies": [],
-            "end_line": 27,
+            "end_line": 28,
             "index": 0,
-            "line": 27,
+            "line": 28,
             "reads": [],
             "source": "self.value.is_none()",
             "span": [
-              27,
+              28,
               8,
-              27,
+              28,
               28
             ],
             "writes": []
@@ -664,24 +676,24 @@
       {
         "boundaries": [
           {
-            "after_index": 2,
-            "before_index": 1,
-            "kind": "blank",
-            "line": 10,
-            "text": ""
-          },
-          {
             "after_index": 3,
             "before_index": 2,
             "kind": "blank",
-            "line": 14,
+            "line": 11,
             "text": ""
           },
           {
             "after_index": 4,
             "before_index": 3,
             "kind": "blank",
-            "line": 21,
+            "line": 15,
+            "text": ""
+          },
+          {
+            "after_index": 5,
+            "before_index": 4,
+            "kind": "blank",
+            "line": 22,
             "text": ""
           }
         ],
@@ -713,23 +725,43 @@
           },
           {
             "co_uses": [],
+            "dependencies": [],
+            "end_line": 9,
+            "index": 1,
+            "line": 9,
+            "reads": [
+              "methods"
+            ],
+            "source": "let mut methods: Vec<String> = Vec::new();",
+            "span": [
+              9,
+              8,
+              9,
+              50
+            ],
+            "writes": [
+              "methods"
+            ]
+          },
+          {
+            "co_uses": [],
             "dependencies": [
               [
                 "local",
                 "input"
               ]
             ],
-            "end_line": 9,
-            "index": 1,
-            "line": 9,
+            "end_line": 10,
+            "index": 2,
+            "line": 10,
             "reads": [
               "input"
             ],
             "source": "let mut local = input;",
             "span": [
-              9,
+              10,
               8,
-              9,
+              10,
               30
             ],
             "writes": [
@@ -744,18 +776,18 @@
               ]
             ],
             "dependencies": [],
-            "end_line": 13,
-            "index": 2,
-            "line": 11,
+            "end_line": 14,
+            "index": 3,
+            "line": 12,
             "reads": [
               "input",
               "local"
             ],
             "source": "if local.is_none() { panic!(\"missing input\"); }",
             "span": [
-              11,
+              12,
               8,
-              13,
+              14,
               9
             ],
             "writes": []
@@ -776,9 +808,9 @@
               ]
             ],
             "dependencies": [],
-            "end_line": 20,
-            "index": 3,
-            "line": 15,
+            "end_line": 21,
+            "index": 4,
+            "line": 16,
             "reads": [
               "enabled",
               "local",
@@ -786,28 +818,10 @@
             ],
             "source": "if local.is_some() && enabled { self.value = local; self.callback(); std::fs::read_to_string(\"config\").ok(); println!(\"{}\", result); }",
             "span": [
-              15,
+              16,
               8,
-              20,
+              21,
               9
-            ],
-            "writes": []
-          },
-          {
-            "co_uses": [],
-            "dependencies": [],
-            "end_line": 22,
-            "index": 4,
-            "line": 22,
-            "reads": [
-              "result"
-            ],
-            "source": "result.push_str(\"done\")",
-            "span": [
-              22,
-              8,
-              22,
-              31
             ],
             "writes": []
           },
@@ -820,11 +834,29 @@
             "reads": [
               "result"
             ],
-            "source": "Some(result)",
+            "source": "result.push_str(\"done\")",
             "span": [
               23,
               8,
               23,
+              31
+            ],
+            "writes": []
+          },
+          {
+            "co_uses": [],
+            "dependencies": [],
+            "end_line": 24,
+            "index": 6,
+            "line": 24,
+            "reads": [
+              "result"
+            ],
+            "source": "Some(result)",
+            "span": [
+              24,
+              8,
+              24,
               20
             ],
             "writes": []
@@ -852,7 +884,7 @@
           "enabled",
           "local.is_some()"
         ],
-        "line": 17
+        "line": 18
       },
       {
         "action": "self.value = local",
@@ -861,7 +893,7 @@
           "enabled",
           "local.is_some()"
         ],
-        "line": 16
+        "line": 17
       },
       {
         "action": "std::fs::read_to_string(\"config\")",
@@ -870,7 +902,7 @@
           "enabled",
           "local.is_some()"
         ],
-        "line": 18
+        "line": 19
       },
       {
         "action": "std::fs::read_to_string(\"config\").ok()",
@@ -879,13 +911,13 @@
           "enabled",
           "local.is_some()"
         ],
-        "line": 18
+        "line": 19
       }
     ],
     "predicate_bodies": [
       {
         "body": "self.value.is_none()",
-        "line": 26,
+        "line": 27,
         "name": "none_ready",
         "owner": "RustSourceFactBehavior"
       }
@@ -893,29 +925,29 @@
     "protocol_call_paths": [
       {
         "calls": [],
-        "line": 26,
+        "line": 27,
         "name": "none_ready",
         "owner": "RustSourceFactBehavior"
       },
       {
         "calls": [
           {
-            "line": 17,
+            "line": 18,
             "mid": "callback",
             "span": [
-              17,
+              18,
               12,
-              17,
+              18,
               27
             ]
           },
           {
-            "line": 23,
+            "line": 24,
             "mid": "Some",
             "span": [
-              23,
+              24,
               8,
-              23,
+              24,
               20
             ]
           }
@@ -927,12 +959,12 @@
       {
         "calls": [
           {
-            "line": 23,
+            "line": 24,
             "mid": "Some",
             "span": [
-              23,
+              24,
               8,
-              23,
+              24,
               20
             ]
           }
@@ -944,7 +976,7 @@
     ],
     "protocol_method_effects": [
       {
-        "line": 26,
+        "line": 27,
         "name": "none_ready",
         "owner": "RustSourceFactBehavior",
         "reads": [
@@ -977,31 +1009,31 @@
         "detail": "local",
         "function": "update",
         "kind": "eliminable_guard",
-        "line": 11
+        "line": 12
       },
       {
         "detail": "local",
         "function": "update",
         "kind": "eliminable_guard",
-        "line": 15
+        "line": 16
       },
       {
         "detail": "self.value",
         "function": "none_ready",
         "kind": "eliminable_guard",
-        "line": 27
+        "line": 28
       },
       {
         "detail": "std::fs.read_to_string",
         "function": "update",
         "kind": "hidden_io",
-        "line": 18
+        "line": 19
       },
       {
         "detail": "std::fs::read_to_string.call(\"config\").ok",
         "function": "update",
         "kind": "hidden_io",
-        "line": 18
+        "line": 19
       }
     ],
     "state_declarations": [
@@ -1023,43 +1055,43 @@
       {
         "field": "is_none",
         "function": "none_ready",
-        "line": 27,
+        "line": 28,
         "receiver": "self.value"
       },
       {
         "field": "is_none",
         "function": "update",
-        "line": 11,
+        "line": 12,
         "receiver": "local"
       },
       {
         "field": "is_some",
         "function": "update",
-        "line": 15,
+        "line": 16,
         "receiver": "local"
       },
       {
         "field": "ok",
         "function": "update",
-        "line": 18,
+        "line": 19,
         "receiver": "std::fs::read_to_string.call(\"config\")"
       },
       {
         "field": "push_str",
         "function": "update",
-        "line": 22,
+        "line": 23,
         "receiver": "result"
       },
       {
         "field": "read_to_string",
         "function": "update",
-        "line": 18,
+        "line": 19,
         "receiver": "std::fs"
       },
       {
         "field": "value",
         "function": "none_ready",
-        "line": 27,
+        "line": 28,
         "receiver": "self"
       }
     ],
@@ -1067,7 +1099,7 @@
       {
         "field": "value",
         "function": "update",
-        "line": 16,
+        "line": 17,
         "receiver": "self"
       }
     ]

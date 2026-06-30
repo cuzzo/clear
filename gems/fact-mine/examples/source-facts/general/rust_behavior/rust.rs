@@ -6,6 +6,7 @@ pub struct RustSourceFactBehavior {
 impl RustSourceFactBehavior {
     pub fn update(&mut self, input: Option<String>, enabled: bool) -> Option<String> {
         let mut result = String::new();
+        let mut methods: Vec<String> = Vec::new();
         let mut local = input;
 
         if local.is_none() {
