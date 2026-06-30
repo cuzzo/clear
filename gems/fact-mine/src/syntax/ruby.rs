@@ -1653,6 +1653,118 @@ mod tests {
         assert!(!is_valid_type("lowercase"));
         assert!(is_valid_type("T.foo"));
 
+        // parameter_list_source success path
+        assert_eq!(behavior.parameter_list_source("def foo(a, b)"), "a, b");
+
+        // declarative_owner with non-empty current_owner
+        let struct_with_owner = Node {
+            r#type: "LASGN".to_string(),
+            children: vec![
+                Child::Symbol("MyStruct".to_string()),
+                Child::Node(Box::new(Node {
+                    r#type: "CALL".to_string(),
+                    children: vec![
+                        Child::Node(Box::new(node("IDENT", "Struct"))),
+                        Child::Symbol("new".to_string()),
+                    ],
+                    first_lineno: 10,
+                    first_column: 0,
+                    last_lineno: 10,
+                    last_column: 4,
+                    text: "Struct.new".to_string(),
+                })),
+            ],
+            first_lineno: 10,
+            first_column: 0,
+            last_lineno: 10,
+            last_column: 4,
+            text: "MyStruct = Struct.new".to_string(),
+        };
+        assert_eq!(
+            behavior.declarative_owner(&struct_with_owner, "MyModule").unwrap().name,
+            "MyModule::MyStruct"
+        );
+
+        // struct_declaration_fields with ITER
+        let call_in_iter = Node {
+            r#type: "CALL".to_string(),
+            children: vec![
+                Child::Node(Box::new(node("IDENT", "Struct"))),
+                Child::Symbol("new".to_string()),
+                Child::Node(Box::new(Node {
+                    r#type: "ARGS".to_string(),
+                    children: vec![Child::Node(Box::new(node("SYM", ":x")))],
+                    first_lineno: 10,
+                    first_column: 0,
+                    last_lineno: 10,
+                    last_column: 4,
+                    text: "(:x)".to_string(),
+                })),
+            ],
+            first_lineno: 10,
+            first_column: 0,
+            last_lineno: 10,
+            last_column: 4,
+            text: "Struct.new(:x)".to_string(),
+        };
+        let iter_with_call = Node {
+            r#type: "ITER".to_string(),
+            children: vec![Child::Node(Box::new(call_in_iter))],
+            first_lineno: 10,
+            first_column: 0,
+            last_lineno: 10,
+            last_column: 4,
+            text: "Struct.new(:x) { }".to_string(),
+        };
+        let struct_decl_with_iter = Node {
+            r#type: "LASGN".to_string(),
+            children: vec![
+                Child::Symbol("MyStruct".to_string()),
+                Child::Node(Box::new(iter_with_call)),
+            ],
+            first_lineno: 10,
+            first_column: 0,
+            last_lineno: 10,
+            last_column: 4,
+            text: "MyStruct = Struct.new(:x) { }".to_string(),
+        };
+        assert_eq!(behavior.struct_declaration_fields(&struct_decl_with_iter), Some(vec!["x".to_string()]));
+
+        // struct_declaration_fields empty ITER
+        let empty_iter = Node {
+            r#type: "ITER".to_string(),
+            children: Vec::new(),
+            first_lineno: 10,
+            first_column: 0,
+            last_lineno: 10,
+            last_column: 4,
+            text: " { }".to_string(),
+        };
+        let struct_decl_empty_iter = Node {
+            r#type: "LASGN".to_string(),
+            children: vec![
+                Child::Symbol("MyStruct".to_string()),
+                Child::Node(Box::new(empty_iter)),
+            ],
+            first_lineno: 10,
+            first_column: 0,
+            last_lineno: 10,
+            last_column: 4,
+            text: "MyStruct = { }".to_string(),
+        };
+        assert!(behavior.struct_declaration_fields(&struct_decl_empty_iter).is_none());
+
+        // static_return_type nilable receiver and comparison / conversion operators
+        assert_eq!(behavior.static_return_type("==", Some("T.nilable(String)")), Some("T::Boolean".to_string()));
+        assert_eq!(behavior.static_return_type("to_i", None), Some("Integer".to_string()));
+        assert_eq!(behavior.static_return_type("class", None), Some("Class".to_string()));
+        assert_eq!(behavior.static_return_type("upcase", Some("String")), Some("String".to_string()));
+
+        // propagated_collection_return_type first and join
+        assert_eq!(behavior.propagated_collection_return_type("first", Some("T::Array[String]")), Some("T.nilable(String)".to_string()));
+        assert_eq!(behavior.propagated_collection_return_type("join", Some("T::Array[String]")), Some("String".to_string()));
+        assert_eq!(behavior.propagated_collection_return_type("join", Some("Array")), Some("String".to_string()));
+
         // type alias blank target / invalid type / blank type declaration
         let mock_fn_for_sig = FunctionDef {
             file: "foo.rb".to_string(),
@@ -1673,7 +1785,7 @@ mod tests {
             class Parent < T::Struct
               const :x
               const :y, lowercase
-              sig { params(x, y: String) }
+              sig { params(x: T.any(Integer, String), y: T::Hash[Symbol, String]) }
               def bar
               end
             end
