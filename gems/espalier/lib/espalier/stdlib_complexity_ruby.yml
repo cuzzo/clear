@@ -1,0 +1,23 @@
+Array:
+  each: "O(N)"
+  map: "O(N)"
+  select: "O(N)"
+  reject: "O(N)"
+  flatten: "O(N)"
+  sort: "O(N log N)"
+  sort_by: "O(N log N)"
+  "-": "O(N * M)"
+  "&": "O(N * M)"
+  "|": "O(N * M)"
+
+String:
+  scan: "O(N)"
+  gsub: "O(N)"
+  split: "O(N)"
+  "+": "O(N)"
+
+Hash:
+  merge: "O(N)"
+  keys: "O(N)"
+  values: "O(N)"
+  transform_values: "O(N)"
