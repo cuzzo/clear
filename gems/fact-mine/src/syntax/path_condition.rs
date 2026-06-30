@@ -348,6 +348,11 @@ impl Report {
                     let at = format!("{}:{}:{}", s.file, s.defn, s.line);
                     let missing = diff_gs_s.into_iter().next().unwrap();
 
+                    // Do not flag structural pattern match bindings (e.g. `let Some(x) = ...`) as optional neglected checks.
+                    if missing.starts_with("let ") || missing.starts_with("!let ") || missing.starts_with("let(") || missing.starts_with("!let(") {
+                        continue;
+                    }
+
                     // dedupe manually
                     let key = (gs.clone(), sup.clone(), missing.clone(), at.clone());
                     if seen.insert(key) {
