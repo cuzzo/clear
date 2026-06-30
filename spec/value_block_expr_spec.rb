@@ -3,6 +3,7 @@ require_relative "../src/ast/lexer" unless defined?(Lexer)
 require_relative "../src/ast/parser" unless defined?(ClearParser)
 require_relative "../src/mir/mir_lowering" unless defined?(MIRLowering)
 require_relative "../src/mir/mir_checker" unless defined?(MIRChecker)
+require_relative "../src/backends/mir_emitter" unless defined?(MIREmitter)
 
 RSpec.describe "Clear value block expressions" do
   def parse_source(source)
@@ -131,6 +132,20 @@ RSpec.describe "Clear value block expressions" do
         RETURN;
       END
     CLEAR
+  end
+
+  it "discards expression prefix statements in emitted value blocks" do
+    program = compile_and_check_mir(<<~CLEAR)
+      FN main() RETURNS Void ->
+        nums = [1_i64, 2_i64, 3_i64];
+        prefixed = nums |> SELECT { _ + 0_i64; _ * 2_i64 };
+        ASSERT prefixed[1] == 4_i64, "expression prefix statement in value block";
+        RETURN;
+      END
+    CLEAR
+
+    zig = MIREmitter.new.emit(program)
+    expect(zig).to match(/_ = CheatLib\.intAdd\(__it\d+, 0\);/)
   end
 
   it "rejects value blocks that have no final expression" do

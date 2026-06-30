@@ -924,7 +924,7 @@ module MIRLoweringConcurrency
     T.bind(self, MIRLowering) rescue nil
     finalized, hoisted_discard = materialize_statement_discard(expr, mir)
     finalized = T.cast(finalized, MIR::NodeRoot)
-    return finalized unless discard_expr_stmt?(expr) && !hoisted_discard
+    return finalized unless discard_expr_stmt?(expr, finalized) && !hoisted_discard
 
     MIR::ExprStmt.new(T.cast(finalized, MIR::Node), true)
   end
