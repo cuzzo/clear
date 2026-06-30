@@ -5350,6 +5350,7 @@ if pre_init.is_empty() {
         } else {
             node.next_named_sibling()
         };
+        let right_node = right_node.filter(|r| !self.same_ts_node(*r, node));
         let right = right_node.and_then(|sibling| self.normalize_node(sibling));
         let source = node.parent().unwrap_or(node);
         self.assignment_target(node, right.clone(), source)
