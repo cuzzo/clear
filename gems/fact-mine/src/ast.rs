@@ -640,8 +640,15 @@ fn exact_integer_text(text: &str) -> bool {
 }
 
 fn comparison_operator_from_text(text: &str) -> Option<String> {
+    let t = text.trim();
+    if t == "is not" {
+        return Some("!=".to_string());
+    }
+    if t == "is" {
+        return Some("==".to_string());
+    }
     for operator in ["<=>", "===", "!==", "==", "!=", "<=", ">=", "<", ">"] {
-        if text.contains(operator) {
+        if t.contains(operator) {
             return Some(operator.to_string());
         }
     }

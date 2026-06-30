@@ -2486,6 +2486,18 @@
       },
       {
         "detail": "value",
+        "function": "guard_eq_nil",
+        "kind": "eliminable_guard",
+        "line": 24
+      },
+      {
+        "detail": "value",
+        "function": "guard_ne_nil",
+        "kind": "eliminable_guard",
+        "line": 31
+      },
+      {
+        "detail": "value",
         "function": "guard_safe_nav_cond",
         "kind": "eliminable_guard",
         "line": 60
