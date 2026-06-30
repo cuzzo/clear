@@ -198,3 +198,95 @@ pub(crate) fn property_read_call(node: &Node, parts: &NormalizedCallParts) -> bo
     let text = node.text.as_str();
     !text.contains('(') || (text.starts_with('(') && text.ends_with(')'))
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn node(kind: &str, text: &str) -> Node {
+        Node {
+            r#type: kind.to_string(),
+            children: Vec::new(),
+            first_lineno: 10,
+            first_column: 2,
+            last_lineno: 10,
+            last_column: 20,
+            text: text.to_string(),
+        }
+    }
+
+    #[test]
+    fn test_javascript_behavior_comprehensive() {
+        let b = JavaScriptNormalizedBehavior;
+        assert_eq!(b.self_member_receiver("Foo"), "this.Foo");
+        assert_eq!(b.function_visibility("#foo", &node("DEFN", ""), &[]), "private");
+        assert_eq!(b.function_visibility("foo", &node("DEFN", ""), &[]), "public");
+        assert!(b.wrap_branch_predicate(&node("IF", "")));
+        assert_eq!(b.explicit_self_state_ref(&node("LVAR", ""), "Foo"), "this.Foo");
+
+        assert!(b.state_read_uses_access_span(&NormalizedCallProjection {
+            receiver: "console".to_string(),
+            message: "log".to_string(),
+            arguments: Vec::new(),
+            access_span: [1, 2, 3, 4],
+            span: [1, 2, 3, 4],
+        }));
+
+        assert!(b.suppress_state_read_for_call(&NormalizedCallProjection {
+            receiver: "self".to_string(),
+            message: "callback".to_string(),
+            arguments: Vec::new(),
+            access_span: [1, 2, 3, 4],
+            span: [1, 2, 3, 4],
+        }, ""));
+
+        assert!(b.property_read_call(&node("CALL", "x.y"), &NormalizedCallParts {
+            receiver: "x".to_string(),
+            message: "y".to_string(),
+            arguments: Vec::new(),
+        }));
+
+        assert!(b.owner_name_span("A", &node("CLASS", "class A {}"), [1, 2, 3, 4]).is_some());
+
+        assert!(b.nil_guard_fact("isNull", "x").is_some());
+
+        assert!(b.semantic_effect_for_call(&CallSite {
+            receiver: "x".to_string(),
+            message: "isNull".to_string(),
+            file: "".to_string(),
+            function: "".to_string(),
+            owner: "".to_string(),
+            line: 1,
+            span: [1, 2, 3, 4],
+            conditional: false,
+            arguments: Vec::new(),
+            control: None,
+            safe_navigation: false,
+            block: false,
+        }).is_some());
+
+        assert!(b.local_flow_declaration_keyword("let"));
+        assert!(b.local_flow_keyword("let"));
+        assert!(b.local_flow_keyword("if"));
+        assert!(!b.local_flow_keyword("foo"));
+
+        assert!(b.suppress_predicate_body_text("undefined"));
+        assert!(!b.suppress_predicate_body_text("foo"));
+
+        assert!(b.predicate_body_language_signal("null"));
+        assert!(!b.predicate_body_language_signal("foo"));
+
+        assert_eq!(b.format_array_type("number"), "number[]");
+        assert_eq!(b.format_hash_type("string", "number"), "Record<string, number>");
+        assert_eq!(b.format_set_type("number"), "Set<number>");
+
+        assert_eq!(b.format_nilable_type(""), "");
+        assert_eq!(b.format_nilable_type("nil"), "nil");
+        assert_eq!(b.format_nilable_type("number | null"), "number | null");
+        assert_eq!(b.format_nilable_type("number"), "number | null");
+
+        assert_eq!(b.untyped_type(), "any");
+        assert_eq!(b.untyped_array_type(), "any[]");
+        assert_eq!(b.untyped_hash_type(), "Record<any, any>");
+    }
+}

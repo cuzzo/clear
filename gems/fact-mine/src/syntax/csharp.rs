@@ -269,3 +269,164 @@ static BEHAVIOR: CSharpNormalizedBehavior = CSharpNormalizedBehavior;
 pub(crate) fn behavior() -> &'static dyn NormalizedLanguageBehavior {
     &BEHAVIOR
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn node(kind: &str, text: &str) -> Node {
+        Node {
+            r#type: kind.to_string(),
+            children: Vec::new(),
+            first_lineno: 10,
+            first_column: 2,
+            last_lineno: 10,
+            last_column: 20,
+            text: text.to_string(),
+        }
+    }
+
+    #[test]
+    fn test_csharp_behavior_comprehensive() {
+        let b = CSharpNormalizedBehavior;
+        assert_eq!(b.self_member_receiver("Foo"), "Foo");
+        assert_eq!(b.explicit_self_state_ref(&node("LVAR", "x"), "Foo"), "this.Foo");
+        assert!(b.initializer_writes(&node("LVAR", "x"), "", [1, 2, 3, 4]).is_empty());
+
+        // Test initializer_writes with nested children representing OBJECT_CREATION_EXPRESSION
+        let mut child1 = node("IDENTIFIER", "MyClass");
+        child1.text = "MyClass".to_string();
+        let mut key_node = node("IDENTIFIER", "MyField");
+        key_node.text = "MyField".to_string();
+        let grand_child1 = Node {
+            r#type: "ASSIGNMENT".to_string(),
+            children: vec![crate::ast::Child::String("MyStringField".to_string())],
+            first_lineno: 10,
+            first_column: 2,
+            last_lineno: 10,
+            last_column: 20,
+            text: "MyStringField = 1".to_string(),
+        };
+        let grand_child2 = Node {
+            r#type: "ASSIGNMENT".to_string(),
+            children: vec![crate::ast::Child::Node(Box::new(key_node))],
+            first_lineno: 10,
+            first_column: 2,
+            last_lineno: 10,
+            last_column: 20,
+            text: "MyField = 1".to_string(),
+        };
+        let init_expr = Node {
+            r#type: "INITIALIZER_EXPRESSION".to_string(),
+            children: vec![
+                crate::ast::Child::Node(Box::new(grand_child1)),
+                crate::ast::Child::Node(Box::new(grand_child2)),
+            ],
+            first_lineno: 10,
+            first_column: 2,
+            last_lineno: 10,
+            last_column: 20,
+            text: "{ MyStringField = 1, MyField = 1 }".to_string(),
+        };
+        let new_expr = Node {
+            r#type: "OBJECT_CREATION_EXPRESSION".to_string(),
+            children: vec![
+                crate::ast::Child::Node(Box::new(child1)),
+                crate::ast::Child::Node(Box::new(init_expr)),
+            ],
+            first_lineno: 10,
+            first_column: 2,
+            last_lineno: 10,
+            last_column: 20,
+            text: "new MyClass { MyField = 1 }".to_string(),
+        };
+        let writes = b.initializer_writes(&new_expr, "", [10, 2, 10, 20]);
+        assert_eq!(writes.len(), 2);
+        assert_eq!(writes[0].receiver, "MyClass");
+        assert_eq!(writes[0].field, "MyStringField");
+        assert_eq!(writes[1].receiver, "MyClass");
+        assert_eq!(writes[1].field, "MyField");
+
+        assert_eq!(b.function_visibility("Foo", &node("DEFN", "public void Foo()"), &[]), "public");
+        assert_eq!(b.function_visibility("Foo", &node("DEFN", "protected void Foo()"), &[]), "protected");
+        assert_eq!(b.function_visibility("Foo", &node("DEFN", "void Foo()"), &[]), "private");
+
+        assert!(b.property_read_call(&node("CALL", "x.Foo"), &NormalizedCallParts {
+            receiver: "x".to_string(),
+            message: "Foo".to_string(),
+            arguments: Vec::new(),
+        }));
+        assert!(!b.property_read_call(&node("VCALL", "Foo"), &NormalizedCallParts {
+            receiver: "".to_string(),
+            message: "Foo".to_string(),
+            arguments: Vec::new(),
+        }));
+
+        assert!(b.state_read_uses_access_span(&NormalizedCallProjection {
+            receiver: "x".to_string(),
+            message: "Foo".to_string(),
+            arguments: Vec::new(),
+            access_span: [1, 2, 3, 4],
+            span: [1, 2, 3, 4],
+        }));
+
+        assert!(b.suppress_state_read_for_call(&NormalizedCallProjection {
+            receiver: "self".to_string(),
+            message: "Foo".to_string(),
+            arguments: vec!["a".to_string()],
+            access_span: [1, 2, 3, 4],
+            span: [1, 2, 3, 4],
+        }, ""));
+
+        assert!(b.implicit_owner_fields());
+
+        let field_node = node("FIELD_DECLARATION", "private int _myField;");
+        assert_eq!(b.field_name_from_declaration(&field_node), Some("_myField".to_string()));
+        assert_eq!(b.field_name_from_declaration(&node("LVAR", "x")), None);
+
+        assert!(!b.wrap_branch_predicate(&node("IF", "if (a)")));
+        assert!(b.owner_name_span("A", &node("CLASS", "class A"), [1, 2, 3, 4]).is_some());
+
+        assert!(b.nil_guard_fact("isNull", "x").is_some());
+
+        assert!(b.terminating_call_message("throw"));
+        assert!(b.terminating_call_message("Exit"));
+        assert!(!b.terminating_call_message("Foo"));
+
+        assert!(b.semantic_effect_for_call(&CallSite {
+            receiver: "x".to_string(),
+            message: "isNull".to_string(),
+            file: "".to_string(),
+            function: "".to_string(),
+            owner: "".to_string(),
+            line: 1,
+            span: [1, 2, 3, 4],
+            conditional: false,
+            arguments: Vec::new(),
+            control: None,
+            safe_navigation: false,
+            block: false,
+        }).is_some());
+
+        assert!(b.local_flow_declaration_keyword("int"));
+        assert!(b.local_flow_keyword("int"));
+        assert!(b.local_flow_keyword("if"));
+        assert!(!b.local_flow_keyword("foo"));
+
+        assert!(b.predicate_body_language_signal("null"));
+        assert!(!b.predicate_body_language_signal("foo"));
+
+        assert_eq!(b.format_array_type("int"), "List<int>");
+        assert_eq!(b.format_hash_type("string", "int"), "Dictionary<string, int>");
+        assert_eq!(b.format_set_type("int"), "HashSet<int>");
+
+        assert_eq!(b.format_nilable_type(""), "");
+        assert_eq!(b.format_nilable_type("null"), "null");
+        assert_eq!(b.format_nilable_type("int?"), "int?");
+        assert_eq!(b.format_nilable_type("int"), "int?");
+
+        assert_eq!(b.untyped_type(), "object");
+        assert_eq!(b.untyped_array_type(), "List<object>");
+        assert_eq!(b.untyped_hash_type(), "Dictionary<string, object>");
+    }
+}

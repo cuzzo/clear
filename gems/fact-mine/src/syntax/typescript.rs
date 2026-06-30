@@ -338,3 +338,144 @@ fn is_simple_name(name: &str) -> bool {
             .chars()
             .all(|ch| ch == '_' || ch == '?' || ch == '!' || ch.is_ascii_alphanumeric())
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn node(kind: &str, text: &str) -> Node {
+        Node {
+            r#type: kind.to_string(),
+            children: Vec::new(),
+            first_lineno: 10,
+            first_column: 2,
+            last_lineno: 10,
+            last_column: 20,
+            text: text.to_string(),
+        }
+    }
+
+    #[test]
+    fn test_typescript_behavior_comprehensive() {
+        let b = TypeScriptNormalizedBehavior;
+        assert_eq!(b.self_member_receiver("Foo"), "this.Foo");
+        assert_eq!(b.function_visibility("Foo", &node("DEFN", "private void Foo()"), &[]), "private");
+        assert_eq!(b.function_visibility("Foo", &node("DEFN", "protected void Foo()"), &[]), "private");
+        assert_eq!(b.function_visibility("Foo", &node("DEFN", "public void Foo()"), &[]), "public");
+
+        assert_eq!(b.parameter_name_from_signature("public x: number"), Some("x".to_string()));
+        assert_eq!(b.parameter_name_from_signature("readonly value: number = 1"), Some("value".to_string()));
+        assert_eq!(b.parameter_name_from_signature("invalid name"), None);
+
+        assert!(b.wrap_branch_predicate(&node("IF", "")));
+        assert_eq!(b.explicit_self_state_ref(&node("LVAR", ""), "Foo"), "this.Foo");
+        assert!(b.property_read_call(&node("CALL", "x.y"), &NormalizedCallParts {
+            receiver: "x".to_string(),
+            message: "y".to_string(),
+            arguments: Vec::new(),
+        }));
+
+        assert!(b.state_read_uses_access_span(&NormalizedCallProjection {
+            receiver: "console".to_string(),
+            message: "log".to_string(),
+            arguments: Vec::new(),
+            access_span: [1, 2, 3, 4],
+            span: [1, 2, 3, 4],
+        }));
+
+        assert!(b.suppress_state_read_for_call(&NormalizedCallProjection {
+            receiver: "self".to_string(),
+            message: "callback".to_string(),
+            arguments: Vec::new(),
+            access_span: [1, 2, 3, 4],
+            span: [1, 2, 3, 4],
+        }, ""));
+
+        assert!(b.owner_name_span("A", &node("CLASS", "class A {}"), [1, 2, 3, 4]).is_some());
+        assert!(b.owner_name_span("A", &node("INTERFACE_DECLARATION", ""), [1, 2, 3, 4]).is_some());
+
+        assert!(b.nil_guard_fact("isNull", "x").is_some());
+
+        assert!(b.semantic_effect_for_call(&CallSite {
+            receiver: "x".to_string(),
+            message: "isNull".to_string(),
+            file: "".to_string(),
+            function: "".to_string(),
+            owner: "".to_string(),
+            line: 1,
+            span: [1, 2, 3, 4],
+            conditional: false,
+            arguments: Vec::new(),
+            control: None,
+            safe_navigation: false,
+            block: false,
+        }).is_some());
+
+        assert!(b.local_flow_declaration_keyword("let"));
+        assert!(b.local_flow_keyword("let"));
+        assert!(b.local_flow_keyword("if"));
+        assert!(!b.local_flow_keyword("foo"));
+
+        assert!(b.suppress_predicate_body_text("undefined"));
+        assert!(!b.suppress_predicate_body_text("foo"));
+
+        assert!(b.predicate_body_language_signal("null"));
+        assert!(!b.predicate_body_language_signal("foo"));
+
+        assert_eq!(b.format_array_type("number"), "number[]");
+        assert_eq!(b.format_hash_type("string", "number"), "Record<string, number>");
+        assert_eq!(b.format_set_type("number"), "Set<number>");
+
+        assert_eq!(b.format_nilable_type(""), "");
+        assert_eq!(b.format_nilable_type("nil"), "nil");
+        assert_eq!(b.format_nilable_type("number | null"), "number | null");
+        assert_eq!(b.format_nilable_type("number"), "number | null");
+
+        assert_eq!(b.untyped_type(), "any");
+        assert_eq!(b.untyped_array_type(), "any[]");
+        assert_eq!(b.untyped_hash_type(), "Record<any, any>");
+
+        // Test state_declaration_from_node
+        let mut field_decl = node("PUBLIC_FIELD_DEFINITION", "public readonly x: number = 1");
+        field_decl.children = vec![
+            Child::String("not_a_node".to_string()), // Cover Child::String filter branch in state_declaration_from_node
+            Child::Node(Box::new(node("MODIFIER", "public"))),
+            Child::Node(Box::new(node("MODIFIER", "readonly"))),
+            Child::Node(Box::new(node("IDENTIFIER", "x"))),
+            Child::Node(Box::new(node("TYPE", ": number"))),
+        ];
+        let decl = b.state_declaration_from_node(&field_decl, "MyClass", false);
+        assert!(decl.is_some());
+        assert_eq!(decl.as_ref().unwrap().field, "x");
+        assert_eq!(decl.as_ref().unwrap().r#type, Some("number".to_string()));
+
+        // Test fallback split text branch in state_declaration_from_node with modifier stripping
+        let mut fallback_decl = node("PUBLIC_FIELD_DEFINITION", "public readonly myField: string = 'hello';");
+        let fallback_res = b.state_declaration_from_node(&fallback_decl, "MyClass", false);
+        assert!(fallback_res.is_some());
+        assert_eq!(fallback_res.as_ref().unwrap().field, "myField");
+        assert_eq!(fallback_res.as_ref().unwrap().r#type, Some("string".to_string()));
+
+        // Test fallback split text branch with 'this.' prefix stripping
+        let mut fallback_this_decl = node("PUBLIC_FIELD_DEFINITION", "this.myField: string = 'hello';");
+        let fallback_this_res = b.state_declaration_from_node(&fallback_this_decl, "MyClass", false);
+        assert!(fallback_this_res.is_some());
+        assert_eq!(fallback_this_res.as_ref().unwrap().field, "myField");
+        assert_eq!(fallback_this_res.as_ref().unwrap().r#type, Some("string".to_string()));
+
+        // Test in_method = true with ATTRASGN
+        let mut in_method_decl = node("ATTRASGN", "this.field: number = 2");
+        let mut lhs_node = node("IDENTIFIER", "this.field");
+        lhs_node.text = "this.field".to_string();
+        in_method_decl.children = vec![Child::Node(Box::new(lhs_node))];
+        let in_method_res = b.state_declaration_from_node(&in_method_decl, "MyClass", true);
+        assert!(in_method_res.is_some());
+        assert_eq!(in_method_res.as_ref().unwrap().field, "field");
+        assert_eq!(in_method_res.as_ref().unwrap().r#type, Some("number".to_string()));
+
+        // Test in_method = true none branch (first child not a Node)
+        let mut in_method_decl_none = node("ATTRASGN", "field = 2");
+        in_method_decl_none.children = vec![Child::String("not_a_node".to_string())];
+        assert!(b.state_declaration_from_node(&in_method_decl_none, "MyClass", true).is_none());
+    }
+}
