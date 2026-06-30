@@ -48,10 +48,10 @@ module NilKill
         down = name.to_s.downcase
         return "null" if NULL_NAMES.any? { |n| down == n.downcase }
         return "array" if ARRAY_NAMES.any? { |n| down == n.downcase }
+        return "record" if language.to_s == "lua" && down == "table"
         return "map" if MAP_NAMES.any? { |n| down == n.downcase }
         return "union" if name.to_s.include?("|")
         return "primitive" if PRIMITIVE_NAMES.any? { |n| down == n.downcase }
-        return "record" if language.to_s == "lua" && down == "table"
 
         "class"
       end

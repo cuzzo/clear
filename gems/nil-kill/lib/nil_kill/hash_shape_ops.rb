@@ -17,12 +17,21 @@ module NilKill
 
     def merge_shapes(left, right, stringify_keys: false)
       return poisoned_shape if left["poisoned"] || right["poisoned"]
-      keys = Hash(left["keys"]).keys | Hash(right["keys"]).keys
+      merged_keys = {}
+      Hash(left["keys"]).each do |key, types|
+        out_key = shape_key(key, stringify_keys)
+        merged_keys[out_key] ||= []
+        merged_keys[out_key].concat(Array(types))
+      end
+      Hash(right["keys"]).each do |key, types|
+        out_key = shape_key(key, stringify_keys)
+        merged_keys[out_key] ||= []
+        merged_keys[out_key].concat(Array(types))
+      end
+      merged_keys.each { |_, v| v.uniq! }
+
       {
-        "keys" => keys.each_with_object({}) do |key, merged|
-          out_key = shape_key(key, stringify_keys)
-          merged[out_key] = (Array(left.dig("keys", key)) + Array(right.dig("keys", key))).uniq
-        end,
+        "keys" => merged_keys,
         "value_hash_shapes" => merge_nested_shape_maps(left["value_hash_shapes"], right["value_hash_shapes"], stringify_keys: stringify_keys),
         "value_array_element_shapes" => merge_nested_shape_maps(left["value_array_element_shapes"], right["value_array_element_shapes"], stringify_keys: stringify_keys),
         "poisoned" => false,
@@ -30,13 +39,20 @@ module NilKill
     end
 
     def merge_nested_shape_maps(left, right, stringify_keys: false)
-      keys = Hash(left).keys | Hash(right).keys
-      keys.each_with_object({}) do |key, merged|
-        l = Hash(left)[key]
-        r = Hash(right)[key]
+      merged = {}
+      Hash(left).each do |key, shape|
         out_key = shape_key(key, stringify_keys)
-        merged[out_key] = l && r ? merge_shapes(l, r, stringify_keys: stringify_keys) : dup_shape(l || r, stringify_keys: stringify_keys)
+        merged[out_key] = dup_shape(shape, stringify_keys: stringify_keys)
       end
+      Hash(right).each do |key, shape|
+        out_key = shape_key(key, stringify_keys)
+        if merged.key?(out_key)
+          merged[out_key] = merge_shapes(merged[out_key], shape, stringify_keys: stringify_keys)
+        else
+          merged[out_key] = dup_shape(shape, stringify_keys: stringify_keys)
+        end
+      end
+      merged
     end
 
     def poisoned_shape

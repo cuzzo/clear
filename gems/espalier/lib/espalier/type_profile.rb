@@ -159,13 +159,13 @@ module FactMine
             langs = []
             langs << val["language"] if val["language"]
             if val["methods"].is_a?(Array)
-              langs.concat(val["methods"].map { |m| m["language"] })
+              langs.concat(val["methods"].map { |m| m.is_a?(Hash) ? m["language"] : nil })
             end
             if val["fields"].is_a?(Array)
-              langs.concat(val["fields"].map { |f| f["language"] })
+              langs.concat(val["fields"].map { |f| f.is_a?(Hash) ? f["language"] : nil })
             end
             if val["type_definitions"].is_a?(Array)
-              langs.concat(val["type_definitions"].map { |d| d["language"] })
+              langs.concat(val["type_definitions"].map { |d| d.is_a?(Hash) ? d["language"] : nil })
             end
             current_lang = langs.compact.map(&:to_s).reject(&:empty?).first&.downcase
           end

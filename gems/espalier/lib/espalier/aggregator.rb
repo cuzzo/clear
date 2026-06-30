@@ -1,6 +1,7 @@
 # frozen_string_literal: true
 
 require "yaml"
+require_relative "big_o_analyzer"
 
 module Espalier
   # Coalescing agent that imports the static skeleton maps and merges secondary
@@ -9,15 +10,24 @@ module Espalier
     def initialize(
       decomplex_data: {},
       nil_kill_data: {},
-      risk_data: {}
+      risk_data: {},
+      nil_kill_loops: {},
+      nil_kill_evidence: nil
     )
       @decomplex_data = decomplex_data
       @nil_kill_data = nil_kill_data
       @risk_data = risk_data
+      @nil_kill_loops = nil_kill_loops
+      @nil_kill_evidence = nil_kill_evidence
     end
 
     # Aggregate extracted AST structure with auxiliary indicators
     def aggregate(modules)
+      analyzer = Espalier::BigOAnalyzer.new(
+        language: :ruby,
+        nil_kill: @nil_kill_evidence
+      )
+
       manifest = modules.map do |mod|
         internal_edges = internal_edges_for(mod)
         callers_by_method = internal_edges.each_with_object(Hash.new { |h, k| h[k] = [] }) do |edge, index|
@@ -85,6 +95,32 @@ module Espalier
           if file_risk
             quality[:churn_risk] = file_risk[:churn]
             quality[:coverage_gap] = file_risk[:coverage_gap] if file_risk[:coverage_gap]
+          end
+
+          # Run Big-O analysis
+          meth_line = m[:line] || 0
+          file = mod[:file]
+          next_meth = mod[:methods][mod[:methods].index(m) + 1]
+          end_line = next_meth ? (next_meth[:line] || Float::INFINITY) : Float::INFINITY
+
+          ast_nodes = Array(m[:delegations]).map do |d|
+            { type: :call, receiver: d[:receiver], method: d[:message], line: m[:line] || 0 }
+          end
+
+          if file && @nil_kill_loops && @nil_kill_loops[file]
+            @nil_kill_loops[file].each do |line, calls|
+              if line >= meth_line && line < end_line && calls > 0
+                ast_nodes << { type: :loop, line: line, calls: calls }
+              end
+            end
+          end
+
+          analyzer.instance_variable_set(:@class_name, mod[:name])
+          analyzer.instance_variable_set(:@ivar_types, mod[:ivar_types] || {})
+          
+          big_o_result = analyzer.analyze_method(key, ast_nodes)
+          if big_o_result[:lower_bound_complexity] != "O(1)"
+            quality[:big_o] = big_o_result[:lower_bound_complexity]
           end
 
           {
