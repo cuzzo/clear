@@ -55,7 +55,6 @@ pub fn scan_documents(documents: &[Document], min_support: usize) -> BrokenProto
 struct PairSupport {
     pair: Vec<String>,
     support: usize,
-    sites: Vec<(String, String)>,
 }
 
 struct Report {
@@ -79,7 +78,7 @@ impl Report {
         let mut support = BTreeMap::new();
         for (_, calls) in &by_unit {
             for mid in unique_mids(calls) {
-                *support.entry(mid).or_insert(0) += 1;
+                *support.entry(mid.to_string()).or_insert(0) += 1;
             }
         }
 
@@ -99,9 +98,9 @@ impl Report {
             let mids = unique_mids(calls);
             for pair in &pairs {
                 let (has, missing) =
-                    if mids.contains(&pair.pair[0]) && !mids.contains(&pair.pair[1]) {
+                    if mids.contains(&pair.pair[0].as_str()) && !mids.contains(&pair.pair[1].as_str()) {
                         (pair.pair[0].clone(), pair.pair[1].clone())
-                    } else if mids.contains(&pair.pair[1]) && !mids.contains(&pair.pair[0]) {
+                    } else if mids.contains(&pair.pair[1].as_str()) && !mids.contains(&pair.pair[0].as_str()) {
                         (pair.pair[1].clone(), pair.pair[0].clone())
                     } else {
                         continue;
@@ -146,36 +145,30 @@ impl Report {
     }
 
     fn co_called_pairs(&self, min_support: usize) -> Vec<PairSupport> {
-        let mut counts: Vec<PairSupport> = Vec::new();
-        for (unit, calls) in &self.by_unit {
+        let mut counts: BTreeMap<(&str, &str), usize> = BTreeMap::new();
+        for (_, calls) in &self.by_unit {
             let mids = unique_mids(calls);
             for i in 0..mids.len() {
                 for j in i + 1..mids.len() {
-                    let pair = vec![mids[i].clone(), mids[j].clone()];
-                    if let Some(existing) = counts.iter_mut().find(|row| row.pair == pair) {
-                        existing.support += 1;
-                        existing.sites.push(unit.clone());
-                    } else {
-                        counts.push(PairSupport {
-                            pair,
-                            support: 1,
-                            sites: vec![unit.clone()],
-                        });
-                    }
+                    *counts.entry((mids[i], mids[j])).or_insert(0) += 1;
                 }
             }
         }
         let mut out: Vec<_> = counts
             .into_iter()
-            .filter(|row| row.support >= min_support)
+            .filter(|(_, support)| *support >= min_support)
+            .map(|((m1, m2), support)| PairSupport {
+                pair: vec![m1.to_string(), m2.to_string()],
+                support,
+            })
             .collect();
         out.sort_by(|a, b| b.support.cmp(&a.support));
         out
     }
 }
 
-fn unique_mids(calls: &[Call]) -> Vec<String> {
-    let set: BTreeSet<_> = calls.iter().map(|call| call.mid.clone()).collect();
+fn unique_mids(calls: &[Call]) -> Vec<&str> {
+    let set: BTreeSet<_> = calls.iter().map(|call| call.mid.as_str()).collect();
     set.into_iter().collect()
 }
 

@@ -256,7 +256,7 @@ fn run_with_args(args: Vec<String>) -> Result<()> {
             output,
             ..
         } => {
-            let facts = report_facts::collect(&targets, &options)
+            let facts = report_facts::collect(&targets, &options, true)
                 .with_context(|| "failed to collect report facts")?;
             write_json(&facts, output.as_ref())?;
         }
@@ -267,7 +267,7 @@ fn run_with_args(args: Vec<String>) -> Result<()> {
             output,
             ..
         } => {
-            let facts = report_facts::collect(&targets, &options)
+            let facts = report_facts::collect(&targets, &options, false)
                 .with_context(|| "failed to collect report facts")?;
             render_report(&facts, &format, output.as_ref())?;
         }

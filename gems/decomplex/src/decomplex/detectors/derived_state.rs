@@ -90,36 +90,39 @@ fn write_position(source: &str, name: &str) -> usize {
         .unwrap_or(usize::MAX)
 }
 
-fn identifier_positions(source: &str) -> Vec<(String, usize)> {
+fn identifier_positions(source: &str) -> Vec<(&str, usize)> {
     let mut out = Vec::new();
-    let mut current = String::new();
     let mut start = 0usize;
+    let mut in_ident = false;
     for (index, ch) in source.char_indices() {
         if ch == '_' || ch.is_ascii_alphanumeric() {
-            if current.is_empty() {
+            if !in_ident {
                 start = index;
+                in_ident = true;
             }
-            current.push(ch);
-        } else if !current.is_empty() {
+        } else if in_ident {
+            let current = &source[start..index];
             if current
                 .chars()
                 .next()
                 .map(|first| first == '_' || first.is_ascii_alphabetic())
                 .unwrap_or(false)
             {
-                out.push((current.clone(), start));
+                out.push((current, start));
             }
-            current.clear();
+            in_ident = false;
         }
     }
-    if !current.is_empty()
-        && current
+    if in_ident {
+        let current = &source[start..];
+        if current
             .chars()
             .next()
             .map(|first| first == '_' || first.is_ascii_alphabetic())
             .unwrap_or(false)
-    {
-        out.push((current, start));
+        {
+            out.push((current, start));
+        }
     }
     out
 }
