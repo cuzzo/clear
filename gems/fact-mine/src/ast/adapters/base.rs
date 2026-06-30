@@ -28,7 +28,25 @@ pub(crate) struct ConditionalBranchParts<'tree> {
     pub(crate) negative: Option<TreeSitterNode<'tree>>,
 }
 
+use super::super::TreeSitterNormalizer;
 pub(crate) trait AstNormalizationAdapter: Sync {
+    fn scope_locals(
+        &self,
+        _node: TreeSitterNode<'_>,
+        _normalizer: &TreeSitterNormalizer<'_>,
+    ) -> std::collections::BTreeSet<String> {
+        std::collections::BTreeSet::new()
+    }
+
+    fn vcall_identifier(
+        &self,
+        _node: TreeSitterNode<'_>,
+        _name: &str,
+        _normalizer: &TreeSitterNormalizer<'_>,
+    ) -> bool {
+        false
+    }
+
     fn check_node_role(&self, node: TreeSitterNode<'_>, role: &str) -> bool {
         let kind = node.kind();
         match role {

@@ -6028,4 +6028,46 @@ if pre_init.is_empty() {
 }
 
 
+impl<'source> TreeSitterNormalizer<'source> {
+    pub(in crate::ast) fn with_dynamic_scope<T>(
+        &mut self,
+        node: TreeSitterNode<'_>,
+        reset: bool,
+        f: impl FnOnce(&mut Self) -> T,
+    ) -> T {
+        if !self.normalization_adapter.tracks_dynamic_local_scope() {
+            return f(self);
+        }
+        let previous = self.local_stack.clone();
+        if reset {
+            self.local_stack.clear();
+        }
+        let locals = self.normalization_adapter.scope_locals(node, self);
+        self.local_stack.push(locals);
+        let result = f(self);
+        self.local_stack = previous;
+        result
+    }
+
+    pub(in crate::ast) fn dynamic_vcall_identifier(
+        &self,
+        node: TreeSitterNode<'_>,
+        name: &str,
+    ) -> bool {
+        self.normalization_adapter.vcall_identifier(node, name, self)
+    }
+
+    pub(in crate::ast) fn dynamic_local_name(&self, name: &str) -> bool {
+        self.local_stack
+            .iter()
+            .rev()
+            .any(|scope| scope.contains(name))
+    }
+
+    pub(in crate::ast) fn dynamic_syntax_enabled(&self) -> bool {
+        self.normalization_adapter.tracks_dynamic_local_scope()
+    }
+
+}
+
 include!("normalizer-test.rs");

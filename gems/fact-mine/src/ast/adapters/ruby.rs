@@ -19,6 +19,23 @@ impl AstNormalizationAdapter for RubyAstAdapter {
         true
     }
 
+    fn scope_locals(
+        &self,
+        node: TreeSitterNode<'_>,
+        normalizer: &TreeSitterNormalizer<'_>,
+    ) -> BTreeSet<String> {
+        ruby_scope_locals(normalizer, node)
+    }
+
+    fn vcall_identifier(
+        &self,
+        node: TreeSitterNode<'_>,
+        name: &str,
+        normalizer: &TreeSitterNormalizer<'_>,
+    ) -> bool {
+        ruby_vcall_identifier(normalizer, node, name)
+    }
+
     fn yield_statement(&self, node: TreeSitterNode<'_>, source: &str) -> bool {
         if !matches!(
             node.kind(),
@@ -633,8 +650,7 @@ fn ruby_variable_name_text(text: &str) -> bool {
     }
     true
 }
-
-fn ruby_inline_def_receiver_text(text: &str) -> bool {
+pub(crate) fn ruby_inline_def_receiver_text(text: &str) -> bool {
     let mut tokens = text.split_whitespace();
     while let Some(token) = tokens.next() {
         if token != "def" {
@@ -651,7 +667,7 @@ fn ruby_inline_def_receiver_text(text: &str) -> bool {
     false
 }
 
-fn heredoc_marker_text(text: &str) -> bool {
+pub(crate) fn heredoc_marker_text(text: &str) -> bool {
     text.split(|ch: char| ch.is_whitespace() || matches!(ch, '(' | ','))
         .any(|token| {
             let Some(marker) = token.strip_prefix("<<") else {
@@ -669,230 +685,187 @@ fn heredoc_marker_text(text: &str) -> bool {
         })
 }
 
-impl<'source> TreeSitterNormalizer<'source> {
-    pub(in crate::ast) fn with_dynamic_scope<T>(
-        &mut self,
-        node: TreeSitterNode<'_>,
-        reset: bool,
-        f: impl FnOnce(&mut Self) -> T,
-    ) -> T {
-        self.with_ruby_scope(node, reset, f)
-    }
+pub(crate) fn ruby_vcall_identifier(
+    normalizer: &TreeSitterNormalizer<'_>,
+    node: TreeSitterNode<'_>,
+    name: &str,
+) -> bool {
+    normalizer.normalization_adapter.tracks_dynamic_local_scope()
+        && normalizer.identifier_kind(node.kind())
+        && !normalizer.assignment_lhs(node)
+        && !ruby_definition_identifier(normalizer, node)
+        && !ruby_local_name(normalizer, name)
+}
 
-    pub(in crate::ast) fn dynamic_vcall_identifier(
-        &self,
-        node: TreeSitterNode<'_>,
-        name: &str,
-    ) -> bool {
-        self.ruby_vcall_identifier(node, name)
-    }
+pub(crate) fn ruby_local_name(normalizer: &TreeSitterNormalizer<'_>, name: &str) -> bool {
+    normalizer.local_stack
+        .iter()
+        .rev()
+        .any(|scope| scope.contains(name))
+}
 
-    pub(in crate::ast) fn dynamic_local_name(&self, name: &str) -> bool {
-        self.ruby_local_name(name)
-    }
+pub(crate) fn ruby_scope_locals(
+    normalizer: &TreeSitterNormalizer<'_>,
+    node: TreeSitterNode<'_>,
+) -> BTreeSet<String> {
+    let mut locals = BTreeSet::new();
+    collect_ruby_scope_locals(normalizer, node, &mut locals, true);
+    locals
+}
 
-    pub(in crate::ast) fn dynamic_syntax_enabled(&self) -> bool {
-        self.ruby()
+pub(crate) fn collect_ruby_scope_locals(
+    normalizer: &TreeSitterNormalizer<'_>,
+    node: TreeSitterNode<'_>,
+    locals: &mut BTreeSet<String>,
+    root: bool,
+) {
+    if !root && ruby_scope_boundary(normalizer, node) {
+        return;
     }
-
-    pub(crate) fn with_ruby_scope<T>(
-        &mut self,
-        node: TreeSitterNode<'_>,
-        reset: bool,
-        f: impl FnOnce(&mut Self) -> T,
-    ) -> T {
-        if !self.ruby() {
-            return f(self);
+    collect_ruby_parameter_locals(normalizer, node, locals);
+    collect_ruby_assignment_locals(normalizer, node, locals);
+    for child in normalizer.named_children(node) {
+        if !ruby_scope_child_boundary(normalizer, child) {
+            collect_ruby_scope_locals(normalizer, child, locals, false);
         }
-        let previous = self.local_stack.clone();
-        if reset {
-            self.local_stack.clear();
-        }
-        self.local_stack.push(self.ruby_scope_locals(node));
-        let result = f(self);
-        self.local_stack = previous;
-        result
     }
+}
 
-    pub(crate) fn ruby_vcall_identifier(&self, node: TreeSitterNode<'_>, name: &str) -> bool {
-        self.ruby()
-            && self.identifier_kind(node.kind())
-            && !self.assignment_lhs(node)
-            && !self.ruby_definition_identifier(node)
-            && !self.ruby_local_name(name)
-    }
-
-    pub(crate) fn ruby_local_name(&self, name: &str) -> bool {
-        self.local_stack
-            .iter()
-            .rev()
-            .any(|scope| scope.contains(name))
-    }
-
-    pub(crate) fn ruby(&self) -> bool {
-        self.normalization_adapter.tracks_dynamic_local_scope()
-    }
-
-    pub(crate) fn ruby_scope_locals(&self, node: TreeSitterNode<'_>) -> BTreeSet<String> {
-        let mut locals = BTreeSet::new();
-        self.collect_ruby_scope_locals(node, &mut locals, true);
-        locals
-    }
-
-    pub(crate) fn collect_ruby_scope_locals(
-        &self,
-        node: TreeSitterNode<'_>,
-        locals: &mut BTreeSet<String>,
-        root: bool,
+pub(crate) fn collect_ruby_parameter_locals(
+    normalizer: &TreeSitterNormalizer<'_>,
+    node: TreeSitterNode<'_>,
+    locals: &mut BTreeSet<String>,
+) {
+    if !matches!(
+        node.kind(),
+        "method_parameters" | "block_parameters" | "lambda_parameters"
     ) {
-        if !root && self.ruby_scope_boundary(node) {
-            return;
-        }
-        self.collect_ruby_parameter_locals(node, locals);
-        self.collect_ruby_assignment_locals(node, locals);
-        for child in self.named_children(node) {
-            if !self.ruby_scope_child_boundary(child) {
-                self.collect_ruby_scope_locals(child, locals, false);
-            }
-        }
+        return;
     }
 
-    pub(crate) fn collect_ruby_parameter_locals(
-        &self,
-        node: TreeSitterNode<'_>,
-        locals: &mut BTreeSet<String>,
+    for child in normalizer.named_children(node) {
+        collect_identifier_names(normalizer, child, locals);
+    }
+}
+
+pub(crate) fn collect_ruby_assignment_locals(
+    normalizer: &TreeSitterNormalizer<'_>,
+    node: TreeSitterNode<'_>,
+    locals: &mut BTreeSet<String>,
+) {
+    if node.kind() == "exception_variable" {
+        collect_identifier_names(normalizer, node, locals);
+        return;
+    }
+
+    if !ruby_assignment_node(normalizer, node) {
+        return;
+    }
+
+    if let Some(left) = normalizer.assignment_left(node) {
+        collect_assignment_target_names(normalizer, left, locals);
+    }
+}
+
+pub(crate) fn collect_assignment_target_names(
+    normalizer: &TreeSitterNormalizer<'_>,
+    node: TreeSitterNode<'_>,
+    locals: &mut BTreeSet<String>,
+) {
+    if let Some(name) = normalizer.identifier_text(node) {
+        locals.insert(name);
+        return;
+    }
+    if matches!(
+        node.kind(),
+        "left_assignment_list"
+            | "expression_list"
+            | "splat"
+            | "splat_parameter"
+            | "rest_assignment"
     ) {
-        if !matches!(
-            node.kind(),
-            "method_parameters" | "block_parameters" | "lambda_parameters"
-        ) {
-            return;
-        }
-
-        for child in self.named_children(node) {
-            self.collect_identifier_names(child, locals);
+        for child in normalizer.named_children(node) {
+            collect_assignment_target_names(normalizer, child, locals);
         }
     }
+}
 
-    pub(crate) fn collect_ruby_assignment_locals(
-        &self,
-        node: TreeSitterNode<'_>,
-        locals: &mut BTreeSet<String>,
-    ) {
-        if node.kind() == "exception_variable" {
-            self.collect_identifier_names(node, locals);
-            return;
-        }
+pub(crate) fn collect_identifier_names(
+    normalizer: &TreeSitterNormalizer<'_>,
+    node: TreeSitterNode<'_>,
+    locals: &mut BTreeSet<String>,
+) {
+    if let Some(name) = normalizer.identifier_text(node) {
+        locals.insert(name);
+    }
+    for child in normalizer.raw_named_children(node) {
+        collect_identifier_names(normalizer, child, locals);
+    }
+}
 
-        if !self.ruby_assignment_node(node) {
-            return;
-        }
+pub(crate) fn ruby_scope_boundary(normalizer: &TreeSitterNormalizer<'_>, node: TreeSitterNode<'_>) -> bool {
+    if matches!(node.kind(), "block" | "do_block")
+        && node
+            .parent()
+            .map(|parent| parent.kind() == "lambda")
+            .unwrap_or(false)
+    {
+        return false;
+    }
+    matches!(
+        node.kind(),
+        "singleton_class" | "lambda" | "block" | "do_block"
+    ) || normalizer.function_kind(node.kind())
+        || normalizer.class_node(node)
+        || normalizer.module_node(node)
+}
 
-        if let Some(left) = self.assignment_left(node) {
-            self.collect_assignment_target_names(left, locals);
-        }
+pub(crate) fn ruby_scope_child_boundary(normalizer: &TreeSitterNormalizer<'_>, node: TreeSitterNode<'_>) -> bool {
+    ruby_scope_boundary(normalizer, node)
+}
+
+pub(crate) fn ruby_definition_identifier(normalizer: &TreeSitterNormalizer<'_>, node: TreeSitterNode<'_>) -> bool {
+    let Some(parent) = normalizer.parent_node(node) else {
+        return false;
+    };
+    if matches!(parent.kind(), "method" | "singleton_method") {
+        let name = normalizer.named_field(parent, "name");
+        return name
+            .map(|name| normalizer.same_ts_node(name, node))
+            .unwrap_or(false);
+    }
+    matches!(
+        parent.kind(),
+        "method_parameters"
+            | "block_parameters"
+            | "lambda_parameters"
+            | "optional_parameter"
+            | "keyword_parameter"
+            | "block_parameter"
+    )
+}
+
+pub(crate) fn ruby_assignment_node(normalizer: &TreeSitterNormalizer<'_>, node: TreeSitterNode<'_>) -> bool {
+    if matches!(node.kind(), "assignment" | "operator_assignment") {
+        return true;
+    }
+    if node.kind() == "pattern"
+        && node
+            .children(&mut node.walk())
+            .any(|child| !child.is_named() && node_text(child, normalizer.source) == "=")
+    {
+        return true;
+    }
+    let raw_named = normalizer.raw_named_children(node);
+    if node.kind() == "block_body"
+        && raw_named.len() == 1
+        && raw_named[0].kind() == "assignment"
+    {
+        return true;
     }
 
-    pub(crate) fn collect_assignment_target_names(
-        &self,
-        node: TreeSitterNode<'_>,
-        locals: &mut BTreeSet<String>,
-    ) {
-        if let Some(name) = self.identifier_text(node) {
-            locals.insert(name);
-            return;
-        }
-        if matches!(
-            node.kind(),
-            "left_assignment_list"
-                | "expression_list"
-                | "splat"
-                | "splat_parameter"
-                | "rest_assignment"
-        ) {
-            for child in self.named_children(node) {
-                self.collect_assignment_target_names(child, locals);
-            }
-        }
-    }
-
-    pub(crate) fn collect_identifier_names(
-        &self,
-        node: TreeSitterNode<'_>,
-        locals: &mut BTreeSet<String>,
-    ) {
-        if let Some(name) = self.identifier_text(node) {
-            locals.insert(name);
-        }
-        for child in self.raw_named_children(node) {
-            self.collect_identifier_names(child, locals);
-        }
-    }
-
-    pub(crate) fn ruby_scope_boundary(&self, node: TreeSitterNode<'_>) -> bool {
-        if matches!(node.kind(), "block" | "do_block")
-            && node
-                .parent()
-                .map(|parent| parent.kind() == "lambda")
-                .unwrap_or(false)
-        {
-            return false;
-        }
-        matches!(
-            node.kind(),
-            "singleton_class" | "lambda" | "block" | "do_block"
-        ) || self.function_kind(node.kind())
-            || self.class_node(node)
-            || self.module_node(node)
-    }
-
-    pub(crate) fn ruby_scope_child_boundary(&self, node: TreeSitterNode<'_>) -> bool {
-        self.ruby_scope_boundary(node)
-    }
-
-    pub(crate) fn ruby_definition_identifier(&self, node: TreeSitterNode<'_>) -> bool {
-        let Some(parent) = self.parent_node(node) else {
-            return false;
-        };
-        if matches!(parent.kind(), "method" | "singleton_method") {
-            let name = self.named_field(parent, "name");
-            return name
-                .map(|name| self.same_ts_node(name, node))
-                .unwrap_or(false);
-        }
-        matches!(
-            parent.kind(),
-            "method_parameters"
-                | "block_parameters"
-                | "lambda_parameters"
-                | "optional_parameter"
-                | "keyword_parameter"
-                | "block_parameter"
-        )
-    }
-
-    pub(crate) fn ruby_assignment_node(&self, node: TreeSitterNode<'_>) -> bool {
-        if matches!(node.kind(), "assignment" | "operator_assignment") {
-            return true;
-        }
-        if node.kind() == "pattern"
-            && node
-                .children(&mut node.walk())
-                .any(|child| !child.is_named() && node_text(child, self.source) == "=")
-        {
-            return true;
-        }
-        let raw_named = self.raw_named_children(node);
-        if node.kind() == "block_body"
-            && raw_named.len() == 1
-            && raw_named[0].kind() == "assignment"
-        {
-            return true;
-        }
-
-        matches!(node.kind(), "body_statement" | "block_body" | "statement")
-            && self.has_assignment_operator_child(node)
-    }
+    matches!(node.kind(), "body_statement" | "block_body" | "statement")
+        && normalizer.has_assignment_operator_child(node)
 }
 
 #[cfg(test)]
@@ -1079,12 +1052,12 @@ mod tests {
         let method_node = nodes_var.iter().find(|n| n.kind() == "method").unwrap();
         
         let mut locals_set = BTreeSet::new();
-        normalizer.collect_ruby_scope_locals(*method_node, &mut locals_set, false);
+        collect_ruby_scope_locals(&normalizer, *method_node, &mut locals_set, false);
         assert!(locals_set.is_empty());
 
-        assert!(!normalizer.ruby_definition_identifier(*method_node));
+        assert!(!ruby_definition_identifier(&normalizer, *method_node));
         // cover parent None
-        assert!(!normalizer.ruby_definition_identifier(tree_var.root_node()));
+        assert!(!ruby_definition_identifier(&normalizer, tree_var.root_node()));
 
         // cover ruby_definition_identifier method name child fallback
 
@@ -1094,7 +1067,7 @@ mod tests {
         collect_all_nodes(tree_pat.root_node(), &mut nodes_pat);
         for n in &nodes_pat {
             if n.kind() == "pattern" {
-                let _ = normalizer.ruby_assignment_node(*n);
+                let _ = ruby_assignment_node(&normalizer, *n);
             }
         }
 
