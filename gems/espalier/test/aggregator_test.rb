@@ -217,4 +217,35 @@ class AggregatorTest < Minitest::Test
     assert_equal "O(1)", fn[:quality_metrics][:big_o]
   end
 
+  def test_big_o_uses_signature_param_types
+    modules = [
+      {
+        type: :class,
+        name: "SegmentRenumber",
+        file: "lib/segment_renumber.rb",
+        states: Set.new,
+        methods: [
+          {
+            name: "self.renumber_with_entry",
+            signature: "sig { params(segments: T::Array[Segment], entry: Integer).returns(Result) }",
+            parameters: ["segments", "entry"],
+            visibility: :public,
+            line: 20,
+            span: [20, 2, 25, 5],
+            effects: { reads: Set.new, writes: Set.new },
+            delegations: [
+              { receiver: "segments", message: "sort_by", line: 24, type: :always }
+            ]
+          }
+        ]
+      }
+    ]
+
+    manifest = Espalier::Aggregator.new.aggregate(modules)
+    fn = manifest.first[:functions].first
+
+    assert_equal "O(N log N)", fn[:quality_metrics][:big_o]
+    refute fn[:quality_metrics].key?(:big_o_unknowns)
+  end
+
 end

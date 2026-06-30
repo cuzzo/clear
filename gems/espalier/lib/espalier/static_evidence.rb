@@ -88,6 +88,7 @@ module Espalier
           meth[:delegations] << {
             receiver: field,
             message: proto,
+            line: record["line"]&.to_i,
             type: :always
           }
         end

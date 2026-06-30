@@ -5,13 +5,42 @@ require "set"
 
 module Espalier
   class BigOAnalyzer
+    STDLIB_RETURN_TYPES = {
+      "Array" => {
+        "compact" => "Array",
+        "filter_map" => "Array",
+        "flatten" => "Array",
+        "map" => "Array",
+        "reject" => "Array",
+        "select" => "Array",
+        "sort" => "Array",
+        "sort_by" => "Array",
+        "to_a" => "Array"
+      },
+      "Hash" => {
+        "keys" => "Array",
+        "map" => "Array",
+        "sort" => "Array",
+        "sort_by" => "Array",
+        "to_a" => "Array",
+        "values" => "Array"
+      },
+      "Set" => {
+        "map" => "Array",
+        "sort" => "Array",
+        "sort_by" => "Array",
+        "to_a" => "Array"
+      }
+    }.freeze
+
     attr_reader :registry, :nil_kill_evidence
 
-    def initialize(language: :ruby, nil_kill_evidence: {}, class_name: nil, ivar_types: {}, nil_kill: nil)
+    def initialize(language: :ruby, nil_kill_evidence: {}, class_name: nil, ivar_types: {}, nil_kill: nil, local_types: {})
       @language = language
       @nil_kill_evidence = nil_kill_evidence
       @class_name = class_name
       @ivar_types = ivar_types || {}
+      @local_types = local_types || {}
       @nil_kill = nil_kill
       @registry = load_registry(language)
     end
@@ -25,7 +54,9 @@ module Espalier
     # Prototypical analyzer for a method.
     # We pass in `ast_nodes` which represents the parsed AST 
     # (mocked for this prototype as an array of operation hashes).
-    def analyze_method(method_name, ast_nodes)
+    def analyze_method(method_name, ast_nodes, local_types: nil)
+      previous_local_types = @local_types
+      @local_types = local_types if local_types
       complexity = "O(1)"
       unknown_operations = []
       warnings = []
@@ -44,6 +75,10 @@ module Espalier
             if known_complexity
               # If it's sequential, we just take the max of what we've seen so far.
               complexity = max_complexity(complexity, known_complexity)
+            elsif (chained_complexity = flattened_chain_complexity(node, ast_nodes))
+              complexity = max_complexity(complexity, chained_complexity)
+            elsif state_accessor_return_type(receiver_type, method_called)
+              complexity = max_complexity(complexity, "O(1)")
             else
               unknown_operations << "#{receiver_type}##{method_called}"
               warnings << "Missing method complexity for `#{receiver_type}##{method_called}` in stdlib_complexity_ruby.yml at line #{node[:line]}."
@@ -68,6 +103,8 @@ module Espalier
         unknown_operations: unknown_operations.uniq,
         warnings: warnings.uniq
       }
+    ensure
+      @local_types = previous_local_types if local_types
     end
 
     private
@@ -119,6 +156,10 @@ module Espalier
         return clean_type_name(@class_name)
       end
 
+      if (type = @local_types[receiver_name])
+        return clean_type_name(type)
+      end
+
       if receiver_name.start_with?("@")
         type = @ivar_types[receiver_name] || @ivar_types[receiver_name[1..]]
         return clean_type_name(type) if type
@@ -145,12 +186,48 @@ module Espalier
     end
 
     def resolve_method_return_type(class_name, method_name)
-      return nil unless @nil_kill && class_name
-      sig = @nil_kill.method_signatures["#{class_name}##{method_name}"]
-      if sig
-        ret = extract_return_type(sig)
-        return clean_type_name(ret)
+      return nil unless class_name
+
+      if @nil_kill
+        sig = @nil_kill.method_signatures["#{class_name}##{method_name}"]
+        if sig
+          ret = extract_return_type(sig)
+          return clean_type_name(ret)
+        end
+
+        state_type = state_accessor_return_type(class_name, method_name)
+        return state_type if state_type
       end
+
+      stdlib_type = STDLIB_RETURN_TYPES.dig(class_name, method_name)
+      return clean_type_name(stdlib_type) if stdlib_type
+
+      nil
+    end
+
+    def state_accessor_return_type(class_name, method_name)
+      return nil unless @nil_kill&.respond_to?(:state_types)
+
+      clean_type_name(@nil_kill.state_types.dig(class_name, "@#{method_name}"))
+    end
+
+    def flattened_chain_complexity(node, ast_nodes)
+      receiver = node[:receiver].to_s
+      method_called = node[:method].to_s
+      line = node[:line]
+
+      Array(ast_nodes).each do |candidate|
+        next unless candidate[:type] == :call
+        next unless candidate[:receiver].to_s == receiver
+        next unless candidate[:line] == line
+        accessor = candidate[:method].to_s
+        next if accessor == method_called
+
+        chained_type = resolve_type("#{receiver}.#{accessor}", line)
+        known_complexity = @registry.dig(chained_type, method_called)
+        return known_complexity if known_complexity
+      end
+
       nil
     end
 

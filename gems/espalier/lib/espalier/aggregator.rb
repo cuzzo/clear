@@ -102,7 +102,7 @@ module Espalier
           file = mod[:file]
 
           ast_nodes = Array(m[:delegations]).map do |d|
-            { type: :call, receiver: d[:receiver], method: d[:message], line: m[:line] || 0 }
+            { type: :call, receiver: d[:receiver], method: d[:message], line: d[:line] || m[:line] || 0 }
           end
 
           if file && @nil_kill_loops && @nil_kill_loops[file]
@@ -116,7 +116,7 @@ module Espalier
           analyzer.instance_variable_set(:@class_name, mod[:name])
           analyzer.instance_variable_set(:@ivar_types, mod[:ivar_types] || {})
           
-          big_o_result = analyzer.analyze_method(key, ast_nodes)
+          big_o_result = analyzer.analyze_method(key, ast_nodes, local_types: local_types_for_signature(sig))
           quality[:big_o] = big_o_result[:lower_bound_complexity]
           quality[:big_o_warnings] = big_o_result[:warnings] unless big_o_result[:warnings].empty?
           quality[:big_o_unknowns] = big_o_result[:unknown_operations] unless big_o_result[:unknown_operations].empty?
@@ -211,6 +211,59 @@ module Espalier
     def line_in_method_bounds?(line, start_line, end_line, end_inclusive)
       return false unless line >= start_line
       end_inclusive ? line <= end_line : line < end_line
+    end
+
+    def local_types_for_signature(signature)
+      params_source = signature_params_source(signature.to_s)
+      return {} unless params_source
+
+      split_signature_args(params_source).each_with_object({}) do |entry, types|
+        name, type = entry.split(":", 2)
+        next unless name && type
+
+        types[name.strip] = type.strip
+      end
+    end
+
+    def signature_params_source(signature)
+      start_idx = signature.index("params(")
+      return nil unless start_idx
+
+      idx = start_idx + "params(".length
+      depth = 1
+      while idx < signature.length
+        case signature[idx]
+        when "(", "[", "{"
+          depth += 1
+        when ")", "]", "}"
+          depth -= 1
+          return signature[(start_idx + "params(".length)...idx] if depth.zero?
+        end
+        idx += 1
+      end
+
+      nil
+    end
+
+    def split_signature_args(source)
+      parts = []
+      start_idx = 0
+      depth = 0
+      source.each_char.with_index do |char, idx|
+        case char
+        when "(", "[", "{"
+          depth += 1
+        when ")", "]", "}"
+          depth -= 1
+        when ","
+          next unless depth.zero?
+
+          parts << source[start_idx...idx].strip
+          start_idx = idx + 1
+        end
+      end
+      parts << source[start_idx..].to_s.strip
+      parts.reject(&:empty?)
     end
   end
 end

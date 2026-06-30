@@ -77,6 +77,89 @@ class BigOTest < Minitest::Test
     assert_match(/Function pointer \/ callback/, result[:warnings].first)
   end
 
+  def test_param_type_drives_sort_by_complexity
+    analyzer = Espalier::BigOAnalyzer.new
+
+    result = analyzer.analyze_method(
+      "renumber",
+      [{ type: :call, receiver: "segments", method: "sort_by", line: 10 }],
+      local_types: { "segments" => "T::Array[Segment]" }
+    )
+
+    assert_equal "O(N log N)", result[:lower_bound_complexity]
+    assert_empty result[:unknown_operations]
+  end
+
+  def test_hash_sort_is_n_log_n
+    analyzer = Espalier::BigOAnalyzer.new(
+      class_name: "Snapshot",
+      ivar_types: { "@alloc_kinds" => "Hash" }
+    )
+
+    assert_equal "Array", analyzer.send(:resolve_type, "alloc_kinds.map", 10)
+
+    result = analyzer.analyze_method(
+      "summary",
+      [{ type: :call, receiver: "alloc_kinds", method: "sort", line: 10 }]
+    )
+
+    assert_equal "O(N log N)", result[:lower_bound_complexity]
+    assert_empty result[:unknown_operations]
+  end
+
+  def test_flattened_chain_uses_stdlib_return_type
+    analyzer = Espalier::BigOAnalyzer.new(
+      class_name: "Snapshot",
+      ivar_types: { "@alloc_kinds" => "Hash" }
+    )
+
+    result = analyzer.analyze_method(
+      "summary",
+      [
+        { type: :call, receiver: "alloc_kinds", method: "map", line: 10 },
+        { type: :call, receiver: "alloc_kinds", method: "join", line: 10 }
+      ]
+    )
+
+    assert_equal "O(N)", result[:lower_bound_complexity]
+    refute_includes result[:unknown_operations], "Hash#join"
+  end
+
+  def test_flattened_same_line_chain_uses_accessor_return_type
+    nil_kill = Object.new
+    def nil_kill.method_signatures
+      {}
+    end
+    def nil_kill.state_types
+      { "FunctionCFG" => { "@blocks" => "Array" } }
+    end
+
+    analyzer = Espalier::BigOAnalyzer.new(
+      class_name: "OwnershipDataflow",
+      ivar_types: { "@cfg" => "FunctionCFG" },
+      nil_kill: nil_kill
+    )
+
+    result = analyzer.analyze_method(
+      "analyze!",
+      [
+        { type: :call, receiver: "cfg", method: "blocks", line: 20 },
+        { type: :call, receiver: "cfg", method: "sort_by", line: 20 }
+      ]
+    )
+
+    assert_equal "O(N log N)", result[:lower_bound_complexity]
+    refute_includes result[:unknown_operations], "FunctionCFG#sort_by"
+
+    accessor_result = analyzer.analyze_method(
+      "blocks_only",
+      [{ type: :call, receiver: "cfg", method: "blocks", line: 20 }]
+    )
+
+    assert_equal "O(1)", accessor_result[:lower_bound_complexity]
+    refute_includes accessor_result[:unknown_operations], "FunctionCFG#blocks"
+  end
+
   def test_flat_sequential_loop_evidence_does_not_imply_nested_exponent
     analyzer = Espalier::BigOAnalyzer.new
 
