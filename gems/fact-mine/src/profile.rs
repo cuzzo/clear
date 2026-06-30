@@ -2132,7 +2132,7 @@ fn collect_struct_declarations<'a>(
         namespace.pop();
     } else {
         let mut pushed = false;
-        if node.r#type == "CLASS" || node.r#type == "MODULE" {
+        if node.is_class_or_module() {
             let name = owner_name(node).unwrap_or_else(|| "(anonymous)".to_string());
             namespace.push(name);
             pushed = true;

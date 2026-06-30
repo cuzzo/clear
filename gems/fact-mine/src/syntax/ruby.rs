@@ -747,7 +747,7 @@ impl NormalizedLanguageBehavior for RubyNormalizedBehavior {
     }
 
     fn owner_name_span(&self, _name: &str, node: &Node, default_span: Span) -> Option<Span> {
-        matches!(node.r#type.as_str(), "CLASS" | "MODULE").then_some(default_span)
+        node.is_class_or_module().then_some(default_span)
     }
 
     fn boolean_enclosing_span(
