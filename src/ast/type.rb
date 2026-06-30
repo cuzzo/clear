@@ -2678,7 +2678,7 @@ class Type
   end
 
   # The capacity N in ~T[N] / ~?T[N].
-  sig { returns(T.untyped) }
+  sig { returns(T.nilable(ArrayCapacity)) }
   def stream_capacity
     return nil unless bounded_stream?
     optional_stream_shape_type&.capacity || tense_type.capacity

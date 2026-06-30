@@ -1,6 +1,7 @@
 # typed: strict
 require "sorbet-runtime"
 require_relative "../../ast/ast"
+require_relative "../../ast/scope"
 
 AutoInferenceWalkNode = T.type_alias do
   T.nilable(T.any(
@@ -9,6 +10,7 @@ AutoInferenceWalkNode = T.type_alias do
     T::Hash[BasicObject, BasicObject],
     Struct,
     T::Struct,
+    Scope,
     SymbolEntry,
     Symbol,
     String,
@@ -234,7 +236,7 @@ class AutoConstraintCollector
   def walk(node, current_fn:)
     return if node.nil?
     case node
-    when Symbol, String, Numeric, TrueClass, FalseClass, Lexer::Token, Type, SymbolEntry
+    when Symbol, String, Numeric, TrueClass, FalseClass, Lexer::Token, Type, SymbolEntry, Scope
       # leaf
     when Array
       node.each { |c| walk(c, current_fn: current_fn) }

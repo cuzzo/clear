@@ -784,6 +784,8 @@ module MIRLoweringVariables
 
   sig { params(target: AST::DestructureTarget).returns(MIR::DestructureTarget) }
   def lower_destructure_target(target)
+    T.bind(self, MIRLowering)
+
     if target.name.to_s == "_"
       return MIR::DestructureTarget.new("_", nil, nil)
     end

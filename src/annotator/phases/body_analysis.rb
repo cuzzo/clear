@@ -392,10 +392,10 @@ module Annotator
             summary.binding_nodes << node
             frame.next_local_ordinal += 1
             frame.next_place_ordinal += 1
-            body_id_base = summary.body_id.value * Semantic::BODY_ID_STRIDE
+            var_body_id_base = summary.body_id.value * Semantic::BODY_ID_STRIDE
             summary.local_facts << Semantic::LocalFact.new(
-              id: Semantic::LocalId.new(value: body_id_base + frame.next_local_ordinal),
-              place_id: Semantic::PlaceId.new(value: body_id_base + frame.next_place_ordinal),
+              id: Semantic::LocalId.new(value: var_body_id_base + frame.next_local_ordinal),
+              place_id: Semantic::PlaceId.new(value: var_body_id_base + frame.next_place_ordinal),
               name: node.name.to_s
             )
           when AST::BindExpr
@@ -405,10 +405,10 @@ module Annotator
               summary.binding_nodes << node
               frame.next_local_ordinal += 1
               frame.next_place_ordinal += 1
-              body_id_base = summary.body_id.value * Semantic::BODY_ID_STRIDE
+              bind_body_id_base = summary.body_id.value * Semantic::BODY_ID_STRIDE
               summary.local_facts << Semantic::LocalFact.new(
-                id: Semantic::LocalId.new(value: body_id_base + frame.next_local_ordinal),
-                place_id: Semantic::PlaceId.new(value: body_id_base + frame.next_place_ordinal),
+                id: Semantic::LocalId.new(value: bind_body_id_base + frame.next_local_ordinal),
+                place_id: Semantic::PlaceId.new(value: bind_body_id_base + frame.next_place_ordinal),
                 name: node.name.to_s
               )
             end
@@ -421,10 +421,10 @@ module Annotator
               summary.binding_nodes << target
               frame.next_local_ordinal += 1
               frame.next_place_ordinal += 1
-              body_id_base = summary.body_id.value * Semantic::BODY_ID_STRIDE
+              destructure_body_id_base = summary.body_id.value * Semantic::BODY_ID_STRIDE
               summary.local_facts << Semantic::LocalFact.new(
-                id: Semantic::LocalId.new(value: body_id_base + frame.next_local_ordinal),
-                place_id: Semantic::PlaceId.new(value: body_id_base + frame.next_place_ordinal),
+                id: Semantic::LocalId.new(value: destructure_body_id_base + frame.next_local_ordinal),
+                place_id: Semantic::PlaceId.new(value: destructure_body_id_base + frame.next_place_ordinal),
                 name: target.name.to_s
               )
             end

@@ -241,7 +241,8 @@ module FsmTransform
       candidates << stmt.full_type!(context: "FSM liveness declaration")
       candidates << T.cast(T.unsafe(stmt).type, DeclTypeCandidate) if stmt.respond_to?(:type)
       candidates << T.cast(T.unsafe(stmt).declared_type, DeclTypeCandidate) if stmt.respond_to?(:declared_type)
-      value = stmt.respond_to?(:value) ? stmt.value : nil
+      value = T.let(nil, T.nilable(AST::Node))
+      value = stmt.value if stmt.is_a?(AST::VarDecl) || stmt.is_a?(AST::BindExpr)
       candidates << value.full_type!(context: "FSM liveness declaration value") if value
       normalize_decl_type(candidates.compact.first)
     end

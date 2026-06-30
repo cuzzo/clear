@@ -33,7 +33,7 @@ class MIREmitter
 
   # Public boundary accepts Object so the explicit unknown-node diagnostic below
   # runs instead of Sorbet's runtime signature error.
-  EmitInput = T.type_alias { T.nilable(Object) }
+  EmitInput = T.type_alias { T.nilable(T.any(Object, MIR::Emittable)) }
   ShardedMapNode = T.type_alias { T.any(MIR::ShardedMapPut, MIR::ShardedMapGet) }
 
   sig { returns(String) }

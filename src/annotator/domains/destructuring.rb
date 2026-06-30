@@ -53,6 +53,8 @@ module Annotator
 
       sig { params(node: AST::DestructuringAssignment, rhs: DestructureRhsFacts).void }
       def validate_destructure_shape!(node, rhs)
+        T.bind(self, SemanticAnnotator)
+
         value_type = rhs.value_type
         unless value_type.fixed? && value_type.array?
           error!(node, :DESTRUCTURE_REQUIRES_FIXED_SHAPE, got: value_type.to_s)
@@ -130,6 +132,8 @@ module Annotator
 
       sig { params(node: AST::DestructuringAssignment, target_type: Type::TypeInput, value_type: Type).void }
       def validate_destructure_target_type!(node, target_type, value_type)
+        T.bind(self, SemanticAnnotator)
+
         return if target_type.nil? || target_type == :Any || value_type.resolved == :Any
         return if target_type == :NIL
         return if Type.new(target_type).accepts?(value_type)

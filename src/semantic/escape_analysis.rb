@@ -991,7 +991,8 @@ module EscapeAnalysis
   sig { params(node: BindingNode, symbols: T::Hash[String, SymbolEntry], binding_values: T::Hash[String, T::Array[AST::Locatable]]).void }
   private_class_method def self.record_binding_fact!(node, symbols, binding_values)
     record_symbol_fact!(node, symbols)
-    value = node.respond_to?(:value) ? node.value : nil
+    value = T.let(nil, T.nilable(AST::Node))
+    value = node.value if node.is_a?(AST::VarDecl) || node.is_a?(AST::BindExpr)
     return unless value.is_a?(AST::Locatable)
 
     (binding_values[node.name.to_s] ||= []) << value

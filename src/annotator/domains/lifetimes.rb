@@ -919,6 +919,7 @@ module Annotator
           T::Array[BasicObject],
           T::Hash[BasicObject, BasicObject],
           Struct,
+          T::Struct,
           NilClass,
           String,
           Symbol,
