@@ -124,6 +124,12 @@ module FuzzSurfaceRegistry
       mir_ownership_contracts: [:promotion_on_escape],
     },
 
+    destructuring_assignment_matrix: {
+      cleanup_value_shapes: [],
+      collection_shapes: [:dynamic_array],
+      mir_ownership_contracts: [:collection_mutation_visible_to_mir],
+    },
+
     escape_mechanism_matrix: {
       cleanup_value_shapes: [:string, :heap_list, :struct_owned_fields],
       collection_shapes: [:list, :pool, :set, :hash_map],

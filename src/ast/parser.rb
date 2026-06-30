@@ -767,8 +767,13 @@ class ClearParser
 
   sig { returns(AST::Node) }
   def parse_statement
-    # Keywordless bind/assign: x = ..., x: Type = ..., x.field = ..., x[0] = ...
+    # Destructuring bind/assign must win before scalar bind parsing:
+    # a, b = ...
+    # a: Int32, b: Float64 = ...
     if current.type == :VAR_ID
+      result = try_parse_destructuring_assign
+      return result if result
+
       result = try_parse_bind_or_assign
       return result if result
     end
@@ -778,6 +783,48 @@ class ClearParser
     expr = parse_expression
     consume(:CHAR, ';')
     expr
+  end
+
+  # Speculatively parse identifier-only destructuring:
+  #   a, b = expr;
+  #   a: Int32, b: Float64 = expr;
+  # Existing names are reassigned by the annotator; new names are declared.
+  sig { params(default_mutable: T::Boolean).returns(T.nilable(AST::DestructuringAssignment)) }
+  def try_parse_destructuring_assign(default_mutable: false)
+    saved_pos = @pos
+    start_token = current
+    targets = [parse_destructure_target(default_mutable: default_mutable)]
+
+    unless match?(:CHAR, ',')
+      @pos = saved_pos
+      return nil
+    end
+
+    while match!(:CHAR, ',')
+      targets << parse_destructure_target(default_mutable: default_mutable)
+    end
+
+    unless match?(:CHAR, '=')
+      @pos = saved_pos
+      return nil
+    end
+
+    consume(:CHAR, '=')
+    value = parse_expression
+    consume(:CHAR, ';')
+    AST::DestructuringAssignment.new(start_token, targets, value)
+  end
+
+  sig { params(default_mutable: T::Boolean).returns(AST::DestructureTarget) }
+  def parse_destructure_target(default_mutable: false)
+    mutable = default_mutable
+    mutable = true if match!(:KEYWORD, 'MUTABLE')
+    name_tok = consume(:VAR_ID)
+    type_annotation = nil
+    if match!(:CHAR, ':')
+      type_annotation = parse_type_annotation
+    end
+    AST::DestructureTarget.new(T.must(name_tok), T.must(name_tok).value, type_annotation, mutable)
   end
 
   # Speculatively parse `target [: Type] = expression ;` as a BindExpr or Assignment.
@@ -978,9 +1025,13 @@ class ClearParser
   # type has a known zero literal (Int64/Float64/String/Bool family). It keeps
   # the default as one compact node; materializing N literal children here makes
   # large fixed arrays explode before annotation or MIR lowering can optimize it.
-  sig { returns(AST::VarDecl) }
+  sig { returns(T.any(AST::VarDecl, AST::DestructuringAssignment)) }
   def parse_mutable_var_decl
     start_token = consume(:KEYWORD, 'MUTABLE')
+    if (destructure = try_parse_destructuring_assign(default_mutable: true))
+      return destructure
+    end
+
     name = T.must(consume(:VAR_ID)).value
     type_annotation = nil
     if match!(:CHAR, ':')
@@ -1842,6 +1893,9 @@ class ClearParser
   sig { returns(T.nilable(AST::Node)) }
   def try_parse_value_block_statement
     if current.type == :VAR_ID
+      stmt = try_parse_destructuring_assign
+      return stmt if stmt
+
       stmt = try_parse_bind_or_assign
       return stmt if stmt
     end

@@ -146,6 +146,9 @@ module FuzzCoverageModel
     diagnostic_policy_matrix: profile(
       failure_proves: 'Policy diagnostics for reentrancy, lock ordering, handlers, and ownership reject unsafe code.'
     ),
+    destructuring_assignment_matrix: profile(
+      failure_proves: 'Fixed-shape destructuring declarations, assignments, mutable targets, and discards lower directly.'
+    ),
     error_cleanup: profile(
       failure_proves: 'Error paths clean or transfer owned values under OR PASS, RAISE, and DEFAULT.',
       high_risk: true

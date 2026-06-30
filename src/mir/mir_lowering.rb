@@ -962,6 +962,7 @@ class MIRLowering
     when AST::VarDecl           then lower_var_decl(node)
     when AST::BindExpr          then lower_bind_expr(node)
     when AST::Assignment        then lower_assignment(node)
+    when AST::DestructuringAssignment then lower_destructuring_assignment(node)
 
     # --- Control flow ---
     when AST::IfStatement       then lower_if(node)

@@ -44,7 +44,7 @@ module FsmTransform
     extend T::Sig
 
     AstIdentWalkRoot = T.type_alias { T.nilable(T.any(AST::Node, AST::RawBody)) }
-    BindingStmt = T.type_alias { T.any(AST::VarDecl, AST::BindExpr) }
+    BindingStmt = T.type_alias { T.any(AST::VarDecl, AST::BindExpr, AST::DestructureTarget) }
     DeclTypeCandidate = T.type_alias { T.nilable(Type::TypeInput) }
 
     # Returns a Result. ctx provides captured-name set + any
@@ -227,6 +227,11 @@ module FsmTransform
         if stmt.name.is_a?(String)
           into[stmt.name] ||= nil
         end
+      when AST::DestructuringAssignment
+        stmt.targets.each do |target|
+          next if target.name == "_"
+          into[target.name] ||= stmt_decl_type(target)
+        end
       end
     end
 
@@ -236,7 +241,7 @@ module FsmTransform
       candidates << stmt.full_type!(context: "FSM liveness declaration")
       candidates << T.cast(T.unsafe(stmt).type, DeclTypeCandidate) if stmt.respond_to?(:type)
       candidates << T.cast(T.unsafe(stmt).declared_type, DeclTypeCandidate) if stmt.respond_to?(:declared_type)
-      value = stmt.value
+      value = stmt.respond_to?(:value) ? stmt.value : nil
       candidates << value.full_type!(context: "FSM liveness declaration value") if value
       normalize_decl_type(candidates.compact.first)
     end

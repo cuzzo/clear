@@ -59,7 +59,7 @@ class PipelineRewriter
       node.statements.map! { |s| rewrite!(s) }
     when AST::FunctionDef
       node.body.map! { |s| rewrite!(s) }
-    when AST::VarDecl, AST::BindExpr, AST::Assignment, AST::ReturnNode
+    when AST::VarDecl, AST::BindExpr, AST::Assignment, AST::DestructuringAssignment, AST::ReturnNode
       node.value = rewrite!(node.value) if node.value
     when AST::IfStatement
       node.condition = rewrite!(node.condition)

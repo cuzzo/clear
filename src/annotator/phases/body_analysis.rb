@@ -8,8 +8,8 @@ require_relative "declaration_index"
 
 module Annotator
   module Phases
-    BindingNode = T.type_alias { T.any(AST::VarDecl, AST::BindExpr) }
-    AssignmentNode = T.type_alias { T.any(AST::Assignment, AST::BindExpr) }
+    BindingNode = T.type_alias { T.any(AST::VarDecl, AST::BindExpr, AST::DestructureTarget) }
+    AssignmentNode = T.type_alias { T.any(AST::Assignment, AST::BindExpr, AST::DestructuringAssignment) }
     AsyncBodyNode = T.type_alias { T.any(AST::BgBlock, AST::BgStreamBlock, AST::DoBranch) }
     AsyncValidationNode = T.type_alias { T.any(AST::BgBlock, AST::BgStreamBlock, AST::DoBlock) }
     WithScopeNodes = T.type_alias { T::Hash[Integer, T::Array[AST::Locatable]] }
@@ -414,6 +414,20 @@ module Annotator
             end
           when AST::Assignment
             summary.assignment_nodes << node
+          when AST::DestructuringAssignment
+            summary.assignment_nodes << node
+            node.targets.each do |target|
+              next if target.name == "_"
+              summary.binding_nodes << target
+              frame.next_local_ordinal += 1
+              frame.next_place_ordinal += 1
+              body_id_base = summary.body_id.value * Semantic::BODY_ID_STRIDE
+              summary.local_facts << Semantic::LocalFact.new(
+                id: Semantic::LocalId.new(value: body_id_base + frame.next_local_ordinal),
+                place_id: Semantic::PlaceId.new(value: body_id_base + frame.next_place_ordinal),
+                name: target.name.to_s
+              )
+            end
           when AST::Identifier
             summary.references_snapshot = true if node.name == "snapshot"
           when AST::Raise, AST::OrRaise, AST::BgBlock, AST::BgStreamBlock

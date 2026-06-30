@@ -1073,6 +1073,25 @@ module MIR
     def child_exprs = compact_child_exprs([target, value])
   end
 
+  # One target inside a destructuring assignment/declaration.
+  # declaration_kind nil means assignment to an existing lvalue.
+  # :const/:var mean declaration in the destructuring target list.
+  DestructureTarget = Struct.new(:name, :declaration_kind, :annotation) do
+    extend T::Sig
+    include Expr
+  end
+
+  # Destructuring assignment/declaration.
+  # Zig:
+  #   a, b = value;
+  #   const a: i64, var b: i64 = value;
+  DestructureSet = Struct.new(:targets, :value) do
+    extend T::Sig
+    include Stmt
+    sig { returns(T::Array[Emittable]) }
+    def child_exprs = compact_child_exprs([value])
+  end
+
   # Reassignment with old-value cleanup.
   # Zig: { const __new = value; CheatLib.cleanup(T, alloc, &old); old = __new; }
   # alloc: symbol (:heap, :frame, :cleanup) -- resolved to Zig by emitter.

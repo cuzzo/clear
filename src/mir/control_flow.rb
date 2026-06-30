@@ -967,7 +967,7 @@ class OwnershipDataflow
       collect_binding_move_places(stmt.value, state).each { |place| mark_moved!(state, place) }
       update_declared_owner!(state, stmt.name.to_s, stmt) if stmt.mode == :decl
 
-    when AST::Assignment, AST::ReturnNode
+    when AST::Assignment, AST::DestructuringAssignment, AST::ReturnNode
       collect_binding_move_places(stmt.value, state).each { |place| mark_moved!(state, place) }
 
     when AST::MoveNode
@@ -1336,7 +1336,7 @@ class UseAfterMoveChecker
   sig { params(stmt: AST::Node, state: OwnershipDataflow::OwnershipState).void }
   def check_stmt_reads(stmt, state)
     case stmt
-    when AST::VarDecl, AST::BindExpr, AST::ReturnNode
+    when AST::VarDecl, AST::BindExpr, AST::DestructuringAssignment, AST::ReturnNode
       # RHS is read. LHS: if :assign mode, the name is NOT being read (it's
       # being assigned to). If :decl mode or VarDecl, the name is new.
       check_reads_in_expr(stmt.value, state)
@@ -1773,9 +1773,10 @@ module LoopFrameAnalysis
 
   sig { params(node: AST::Locatable).returns(T::Boolean) }
   def self.statement_like_expression_container?(node)
-    node.is_a?(AST::VarDecl) ||
+      node.is_a?(AST::VarDecl) ||
       node.is_a?(AST::BindExpr) ||
       node.is_a?(AST::Assignment) ||
+      node.is_a?(AST::DestructuringAssignment) ||
       node.is_a?(AST::IfStatement) ||
       node.is_a?(AST::IfBind) ||
       node.is_a?(AST::MatchStatement) ||
@@ -1899,7 +1900,7 @@ class BorrowChecker
     when AST::WithBlock
       handle_with_block(stmt, state)
 
-    when AST::VarDecl, AST::BindExpr, AST::Assignment, AST::ReturnNode
+    when AST::VarDecl, AST::BindExpr, AST::Assignment, AST::DestructuringAssignment, AST::ReturnNode
       return if state.empty?
       check_binding_moves(stmt.value, stmt.token, state)
 

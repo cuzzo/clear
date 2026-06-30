@@ -175,6 +175,8 @@ module Hoist
           stmt.value = hoist_escape_value!(stmt.value, hoists, counter, schema_lookup)
         end
       end
+    when AST::DestructuringAssignment
+      stmt.value = hoist_escape_value!(stmt.value, hoists, counter, schema_lookup) if stmt.value
     end
     nil
   end

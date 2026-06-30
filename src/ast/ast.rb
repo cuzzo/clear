@@ -15,6 +15,7 @@ module AST
   RawBody = T.type_alias { T::Array[AST::Node] }
   HashLitPairs = T.type_alias { T::Hash[AST::Node, AST::Node] }
   BgNode = T.type_alias { T.any(AST::BgBlock, AST::BgStreamBlock) }
+  BindingNode = T.type_alias { T.any(AST::VarDecl, AST::BindExpr, AST::DestructureTarget) }
   ScalarLiteralCandidate = T.type_alias do
     T.nilable(T.any(AST::Node, RawBody, Struct, Type, String, Symbol, Numeric, TrueClass, FalseClass))
   end
@@ -549,6 +550,7 @@ module AST
   def self.statement_result_void?(node)
     node.is_a?(AST::ReturnNode) || node.is_a?(AST::VarDecl) ||
       node.is_a?(AST::BindExpr) || node.is_a?(AST::Assignment) ||
+      node.is_a?(AST::DestructuringAssignment) ||
       node.is_a?(AST::WhileLoop) || node.is_a?(AST::ForRange) ||
       node.is_a?(AST::ForEach) || node.is_a?(AST::MatchStatement) ||
       node.is_a?(AST::Assert) || node.is_a?(AST::Raise) ||
@@ -696,7 +698,8 @@ module AST
     case node
     when CopyNode, CloneNode, FreezeNode
       skip_copy ? [] : [node.value].compact
-    when MoveNode, ShareNode, CapabilityWrap, Cast, ReturnNode, Assignment, VarDecl, BindExpr
+    when MoveNode, ShareNode, CapabilityWrap, Cast, ReturnNode, Assignment, VarDecl, BindExpr,
+         DestructuringAssignment
       [node.value].compact
     when BinaryOp
       [node.left, node.right].compact
@@ -754,7 +757,7 @@ module AST
     case node
     when HasBodies
       node.child_bodies.each { |b| each_bg_block(b, &block) }
-    when VarDecl, BindExpr, Assignment, ReturnNode
+    when VarDecl, BindExpr, Assignment, DestructuringAssignment, ReturnNode
       _expr_each_bg_block_recursive(node.value, &block)
     when FuncCall
       node.args.each { |a| _expr_each_bg_block_recursive(a, &block) }
@@ -801,7 +804,7 @@ module AST
     case stmt
     when BgBlock, BgStreamBlock
       yield stmt
-    when VarDecl, BindExpr, Assignment, ReturnNode
+    when VarDecl, BindExpr, Assignment, DestructuringAssignment, ReturnNode
       _expr_each_bg_block_shallow(stmt.value, &block) if stmt.respond_to?(:value)
     when FuncCall
       stmt.args.each { |a| _expr_each_bg_block_shallow(a, &block) }
@@ -869,7 +872,7 @@ module AST
       # contain ConcurrentOps in either side via nested expressions.)
       _expr_each_concurrent_capture(node.left, &block) if node.respond_to?(:left)
       _expr_each_concurrent_capture(node.right, &block) if node.respond_to?(:right)
-    when VarDecl, BindExpr, Assignment, ReturnNode
+    when VarDecl, BindExpr, Assignment, DestructuringAssignment, ReturnNode
       _expr_each_concurrent_capture(node.value, &block) if node.respond_to?(:value)
     when FuncCall
       node.args.each { |a| _expr_each_concurrent_capture(a, &block) }
@@ -1688,6 +1691,40 @@ module AST
     # Stamped by the annotator for @shared:atomic targets so MIR lowering emits
     # MethodCall(cell, op, args) instead of plain Set.
     attr_accessor :auto_atomic_op
+  end
+  DestructureTarget = Struct.new(:token, :name, :type, :mutable) do
+    extend T::Sig
+    include Locatable
+    attr_accessor :mir_binding_entry
+
+    sig { params(args: InitArgs).void }
+    def initialize(*args)
+      super
+      t = self[:type]
+      self[:type] = Type.new(t) unless t.nil?
+      self[:mutable] = false if self[:mutable].nil?
+    end
+
+    sig { params(val: T.nilable(T.any(Type, Symbol, String))).void }
+    def type=(val)
+      self[:type] = val.nil? ? nil : Type.new(val)
+    end
+  end
+  DestructuringAssignment = Struct.new(:token, :targets, :value) do
+    extend T::Sig
+    include Locatable
+    include StatementVoidType
+
+    sig { params(args: InitArgs).void }
+    def initialize(*args)
+      super
+      self[:targets] ||= []
+    end
+
+    sig { returns(T::Array[AST::DestructureTarget]) }
+    def targets
+      self[:targets]
+    end
   end
   # Keywordless bind: `x = val` or `x: Type = val`. Annotator sets mode to :decl or :assign.
   BindExpr     = Struct.new(:token, :name, :type, :value) do

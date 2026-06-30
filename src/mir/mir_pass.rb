@@ -496,7 +496,7 @@ class MIRPass
     # recurse into call arguments. Only BgBlock (outer consumer fiber) -- not
     # BgStreamBlock (generator fiber has special YIELD handling).
     case stmt
-    when AST::VarDecl, AST::BindExpr, AST::Assignment
+    when AST::VarDecl, AST::BindExpr, AST::Assignment, AST::DestructuringAssignment
       val = stmt.value
       if val.is_a?(AST::BgBlock) && val.body
         val.body = transform_body(val.body, ctx.with(cleanup_facts: bg_inner_facts(val, ctx.cleanup_facts)))
@@ -546,7 +546,7 @@ class MIRPass
 
     # 1. Direct RHS consumption
     rhs = case stmt
-          when AST::VarDecl, AST::BindExpr, AST::Assignment then stmt.value
+          when AST::VarDecl, AST::BindExpr, AST::Assignment, AST::DestructuringAssignment then stmt.value
           else nil
           end
 
@@ -564,7 +564,7 @@ class MIRPass
 
     # 2. Nested consumption (StructLit fields, FuncCall/MethodCall TAKES args)
     value_expr = case stmt
-                 when AST::VarDecl, AST::BindExpr, AST::Assignment then stmt.value
+                 when AST::VarDecl, AST::BindExpr, AST::Assignment, AST::DestructuringAssignment then stmt.value
                  else stmt
                  end
     value_expr = value_expr.value if value_expr.is_a?(AST::MoveNode)

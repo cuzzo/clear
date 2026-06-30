@@ -135,6 +135,7 @@ expected hard error is absent.
 | `capability_wrap_matrix`   | 21           | Capability wrapper construction/admission cells. |
 | `catch_allocator_matrix`   | 20           | Error/catch paths that preserve allocator identity. |
 | `catch_reassign_matrix`    | 16           | Catch/fallback reassignment ownership cells. |
+| `destructuring_assignment_matrix` | 6      | Fixed-shape destructuring declaration, typed/mutable targets, reassignment, mixed declaration, and discard. |
 | `indexed_assignment_matrix`| 20           | Indexed assignment into lists/maps across value shapes. |
 | `indirect_recursive_union` | 12           | Recursive union payloads through indirect storage. |
 | `match_matrix`             | 18           | MATCH lowering over union/scalar shapes plus AS payload bindings. |
@@ -180,7 +181,7 @@ expected hard error is absent.
 | `lowering_boundary_matrix`   | 28           | MIR lowering boundary coverage for call contracts, WITH variants, BG/DO/NEXT, and pipeline terminals. |
 | `test_framework_matrix`      | 6            | TEST/WHEN/TEST THAT grammar through hooks, LET bindings, stubs, pending tests, benchmark, smash, and profile forms. |
 | `extern_boundary_matrix`     | 6            | Negative extern declaration/call boundaries for free functions, trampolines, extern methods/resources, generic comptime calls, and tight-loop rejection. |
-| `curated_gap_corpus`         | 465          | Self-contained `transpile-tests/*.cht` corpus reused as broad compile-mode fuzz coverage for parser, annotator, MIR lowering, and emission. |
+| `curated_gap_corpus`         | 466          | Self-contained `transpile-tests/*.cht` corpus reused as broad compile-mode fuzz coverage for parser, annotator, MIR lowering, and emission. |
 
 ### `stream_into_boundary` matrix
 

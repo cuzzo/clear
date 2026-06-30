@@ -99,6 +99,20 @@ RSpec.describe FsmTransform::Liveness do
       expect(result.cross_segment_vars).not_to have_key("x")
     end
 
+    it "collects destructuring targets as definitions and skips discards" do
+      target = AST::DestructureTarget.new(Lexer::Token.new(:VAR_ID, "a", 1, 1), "a", Type.new(:Int64), false)
+      target.full_type = Type.new(:Int64)
+      discard = AST::DestructureTarget.new(Lexer::Token.new(:VAR_ID, "_", 1, 4), "_", Type.new(:Int64), false)
+      discard.full_type = Type.new(:Int64)
+      stmt = AST::DestructuringAssignment.new(nil, [target, discard], AST::Literal.new(1, :Int64))
+      defs = {}
+
+      described_class.send(:collect_defs, stmt, defs)
+
+      expect(defs.keys).to contain_exactly("a")
+      expect(defs.fetch("a")).to eq(Type.new(:Int64))
+    end
+
     it "flags decls inside a cyclic segment as cross-iteration" do
       # Build a 5-seg LOOP graph manually:
       #   0 pre              -> Goto(1)
