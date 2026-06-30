@@ -32,14 +32,14 @@ impl ReportSection {
 }
 
 #[derive(Clone, Debug)]
-pub struct Report {
-    files: Vec<String>,
-    sections: Vec<ReportSection>,
-    convergence: Vec<Unit>,
-    root: Vec<Cluster>,
+pub struct FindingsRollup {
+    pub files: Vec<String>,
+    pub sections: Vec<ReportSection>,
+    pub convergence: Vec<Unit>,
+    pub root: Vec<Cluster>,
 }
 
-impl Report {
+impl FindingsRollup {
     pub fn from_facts(facts: &Value) -> Result<Self> {
         let files = rv::field_array_strings(facts, "files");
         let Some(detectors) = rv::get(facts, "detectors") else {
@@ -62,7 +62,19 @@ impl Report {
         })
     }
 
-    pub fn to_markdown(&self) -> String {
+    pub fn convergence_value(&self) -> Value {
+        json!(self.convergence)
+    }
+
+    pub fn root_clusters_value(&self) -> Value {
+        json!(self.root)
+    }
+}
+
+pub struct MarkdownEmitter;
+
+impl MarkdownEmitter {
+    pub fn render(rollup: &FindingsRollup) -> String {
         let mut out = String::from("# Decomplex Report\n\n");
         out.push_str("> Decision-level duplication and neglected-condition analysis.\n");
         out.push_str("> Every entry is a ranked **candidate** (Engler's discipline),\n");
@@ -75,15 +87,15 @@ impl Report {
         out.push_str("- [Project Prioritization](#project-prioritization)\n");
         out.push_str(&format!(
             "- [Cross-Detector Convergence ({})](#cross-detector-convergence-{})\n",
-            self.convergence.len(),
-            self.convergence.len()
+            rollup.convergence.len(),
+            rollup.convergence.len()
         ));
         out.push_str(&format!(
             "- [Root-Cause Clusters ({})](#root-cause-clusters-{})\n",
-            self.root.len(),
-            self.root.len()
+            rollup.root.len(),
+            rollup.root.len()
         ));
-        for section in &self.sections {
+        for section in &rollup.sections {
             out.push_str(&format!(
                 "- [{} ({})](#{}-{})\n",
                 section.title,
@@ -94,11 +106,11 @@ impl Report {
         }
         out.push_str("- [Run Summary](#run-summary)\n\n");
 
-        self.render_project_prioritization(&mut out);
-        self.render_convergence(&mut out);
-        self.render_root_cause(&mut out);
+        Self::render_project_prioritization(rollup, &mut out);
+        Self::render_convergence(rollup, &mut out);
+        Self::render_root_cause(rollup, &mut out);
 
-        for section in &self.sections {
+        for section in &rollup.sections {
             out.push_str(&format!(
                 "## {} ({})\n",
                 section.title,
@@ -109,25 +121,25 @@ impl Report {
                 out.push_str("None.\n\n");
                 continue;
             }
-            self.render_section(&mut out, section);
+            Self::render_section(rollup, &mut out, section);
             out.push('\n');
         }
 
         out.push_str("## Run Summary\n");
-        out.push_str(&format!("- Files analyzed: {}\n", self.files.len()));
+        out.push_str(&format!("- Files analyzed: {}\n", rollup.files.len()));
         out.push_str(&format!(
             "- Detectors: {} (all shipped, self-tested)\n",
-            self.sections.len()
+            rollup.sections.len()
         ));
         out.push_str(&format!(
             "- Convergence: {} unit(s) flagged by >=2 independent detectors\n",
-            self.convergence.len()
+            rollup.convergence.len()
         ));
         out.push_str(&format!(
             "- Root-cause clusters: {} (one fix collapses each)\n",
-            self.root.len()
+            rollup.root.len()
         ));
-        let total: usize = self
+        let total: usize = rollup
             .sections
             .iter()
             .map(|section| section.findings.len())
@@ -137,56 +149,12 @@ impl Report {
         out
     }
 
-    pub fn to_sarif(&self) -> String {
-        serde_json::to_string_pretty(&self.to_sarif_value(false, false, None)).unwrap()
-    }
-
-    pub fn convergence_value(&self) -> Value {
-        json!(self.convergence)
-    }
-
-    pub fn root_clusters_value(&self) -> Value {
-        json!(self.root)
-    }
-
-    pub fn to_sarif_value(
-        &self,
-        include_snapshot: bool,
-        include_finding_payload: bool,
-        max_results: Option<usize>,
-    ) -> Value {
-        let snapshot = delta::snapshot(&self.sections, &self.root);
-        let mut results = self.sarif_results(include_finding_payload);
-        if let Some(max_results) = max_results {
-            results = ranked_sarif_results(results)
-                .into_iter()
-                .take(max_results)
-                .collect();
-        }
-        let mut properties = json!({
-            "format": "decomplex.report.sarif.v1",
-            "files": self.files,
-        });
-        if include_snapshot {
-            if let Some(object) = properties.as_object_mut() {
-                object.insert("decomplex.snapshot".to_string(), snapshot);
-            }
-        }
-        sarif::document(
-            "Decomplex",
-            self.sarif_rules(),
-            results,
-            Some("https://github.com/cuzzo/clear"),
-            properties,
-        )
-    }
-
-    fn render_project_prioritization(&self, out: &mut String) {
+    fn render_project_prioritization(rollup: &FindingsRollup, out: &mut String) {
         out.push_str("## Project Prioritization\n");
         out.push_str(
             "_Ordered by signal tier (1 = highest signal / lowest FP), then by volume._\n\n",
         );
-        let mut ranked = self
+        let mut ranked = rollup
             .sections
             .iter()
             .enumerate()
@@ -209,7 +177,7 @@ impl Report {
                 section.desc
             ));
         }
-        if self
+        if rollup
             .sections
             .iter()
             .all(|section| section.findings.is_empty())
@@ -219,17 +187,17 @@ impl Report {
         out.push('\n');
     }
 
-    fn render_convergence(&self, out: &mut String) {
+    fn render_convergence(rollup: &FindingsRollup, out: &mut String) {
         out.push_str(&format!(
             "## Cross-Detector Convergence ({})\n",
-            self.convergence.len()
+            rollup.convergence.len()
         ));
         out.push_str("_(file, method) units flagged by >=2 INDEPENDENT detectors -- the strongest triage signal: agreement outranks any single detector's volume. Tier-weighted (1=3, 2=2, 3=1). **Start here.**_\n\n");
-        if self.convergence.is_empty() {
+        if rollup.convergence.is_empty() {
             out.push_str("None (no unit flagged by >=2 detectors).\n\n");
             return;
         }
-        for hit in self.convergence.iter().take(25) {
+        for hit in rollup.convergence.iter().take(25) {
             out.push_str(&format!(
                 "- {} -- **{} detectors** [score {}, {} findings]: {}\n",
                 nav(&hit.at),
@@ -239,10 +207,10 @@ impl Report {
                 hit.detectors.join(", ")
             ));
         }
-        if self.convergence.len() > 25 {
-            out.push_str(&format!("- ...(+{} more)\n", self.convergence.len() - 25));
+        if rollup.convergence.len() > 25 {
+            out.push_str(&format!("- ...(+{} more)\n", rollup.convergence.len() - 25));
         }
-        let by_file = convergence::by_file(&self.convergence);
+        let by_file = convergence::by_file(&rollup.convergence);
         if !by_file.is_empty() {
             out.push_str("\n### By file\n");
             for hit in by_file.iter().take(15) {
@@ -258,14 +226,14 @@ impl Report {
         out.push('\n');
     }
 
-    fn render_root_cause(&self, out: &mut String) {
-        out.push_str(&format!("## Root-Cause Clusters ({})\n", self.root.len()));
+    fn render_root_cause(rollup: &FindingsRollup, out: &mut String) {
+        out.push_str(&format!("## Root-Cause Clusters ({})\n", rollup.root.len()));
         out.push_str("_Findings across >=2 INDEPENDENT detectors that name the SAME entity -- 'N findings are really one invariant'. Convergence says where to look; this says **what one fix collapses the cluster**. Ranked candidate, not a verdict._\n\n");
-        if self.root.is_empty() {
+        if rollup.root.is_empty() {
             out.push_str("None (no entity named by >=2 detectors).\n\n");
             return;
         }
-        for hit in self.root.iter().take(20) {
+        for hit in rollup.root.iter().take(20) {
             let tag = if hit.fat_union {
                 format!("[{} | FAT-UNION]", hit.kind)
             } else {
@@ -284,13 +252,13 @@ impl Report {
                 hit.sites.iter().take(4).map(|site| nav(site)).collect::<Vec<_>>().join(" ; ")
             ));
         }
-        if self.root.len() > 20 {
-            out.push_str(&format!("- ...(+{} more)\n", self.root.len() - 20));
+        if rollup.root.len() > 20 {
+            out.push_str(&format!("- ...(+{} more)\n", rollup.root.len() - 20));
         }
         out.push('\n');
     }
 
-    fn render_section(&self, out: &mut String, section: &ReportSection) {
+    fn render_section(_rollup: &FindingsRollup, out: &mut String, section: &ReportSection) {
         for finding in section.findings.iter().take(25) {
             out.push_str(&render_finding(&section.title, finding));
         }
@@ -298,9 +266,49 @@ impl Report {
             out.push_str(&format!("- ...(+{} more)\n", section.findings.len() - 25));
         }
     }
+}
 
-    fn sarif_rules(&self) -> Vec<Value> {
-        self.sections
+pub struct SarifEmitter;
+
+impl SarifEmitter {
+    pub fn render(rollup: &FindingsRollup) -> String {
+        serde_json::to_string_pretty(&Self::to_value(rollup, false, false, None)).unwrap()
+    }
+
+    pub fn to_value(
+        rollup: &FindingsRollup,
+        include_snapshot: bool,
+        include_finding_payload: bool,
+        max_results: Option<usize>,
+    ) -> Value {
+        let snapshot = delta::snapshot(&rollup.sections, &rollup.root);
+        let mut results = Self::sarif_results(rollup, include_finding_payload);
+        if let Some(max_results) = max_results {
+            results = ranked_sarif_results(results)
+                .into_iter()
+                .take(max_results)
+                .collect();
+        }
+        let mut properties = json!({
+            "format": "decomplex.report.sarif.v1",
+            "files": rollup.files,
+        });
+        if include_snapshot {
+            if let Some(object) = properties.as_object_mut() {
+                object.insert("decomplex.snapshot".to_string(), snapshot);
+            }
+        }
+        sarif::document(
+            "Decomplex",
+            Self::sarif_rules(rollup),
+            results,
+            Some("https://github.com/cuzzo/clear"),
+            properties,
+        )
+    }
+
+    fn sarif_rules(rollup: &FindingsRollup) -> Vec<Value> {
+        rollup.sections
             .iter()
             .map(|section| {
                 sarif::rule(
@@ -316,9 +324,9 @@ impl Report {
             .collect()
     }
 
-    fn sarif_results(&self, include_finding_payload: bool) -> Vec<Value> {
+    fn sarif_results(rollup: &FindingsRollup, include_finding_payload: bool) -> Vec<Value> {
         let mut out = Vec::new();
-        for section in &self.sections {
+        for section in &rollup.sections {
             for finding in &section.findings {
                 for location in sarif_locations_for_finding(finding) {
                     let mut properties = json!({
@@ -350,6 +358,43 @@ impl Report {
             }
         }
         out
+    }
+}
+
+#[derive(Clone, Debug)]
+pub struct Report {
+    pub rollup: FindingsRollup,
+}
+
+impl Report {
+    pub fn from_facts(facts: &Value) -> Result<Self> {
+        let rollup = FindingsRollup::from_facts(facts)?;
+        Ok(Self { rollup })
+    }
+
+    pub fn to_markdown(&self) -> String {
+        MarkdownEmitter::render(&self.rollup)
+    }
+
+    pub fn to_sarif(&self) -> String {
+        SarifEmitter::render(&self.rollup)
+    }
+
+    pub fn to_sarif_value(
+        &self,
+        include_snapshot: bool,
+        include_finding_payload: bool,
+        max_results: Option<usize>,
+    ) -> Value {
+        SarifEmitter::to_value(&self.rollup, include_snapshot, include_finding_payload, max_results)
+    }
+
+    pub fn convergence_value(&self) -> Value {
+        self.rollup.convergence_value()
+    }
+
+    pub fn root_clusters_value(&self) -> Value {
+        self.rollup.root_clusters_value()
     }
 }
 
@@ -1860,7 +1905,7 @@ mod tests {
         });
 
         let mut rep = Report::from_facts(&comprehensive_facts).unwrap();
-        rep.sections.push(ReportSection::new("Unknown Section Title", 3, "desc", vec![
+        rep.rollup.sections.push(ReportSection::new("Unknown Section Title", 3, "desc", vec![
             json!({"at": "file.rb:m:10"}),
             json!({"at": "file.rb:10", "name": "foo"}),
             json!({"at": "file.rb:10"}),
