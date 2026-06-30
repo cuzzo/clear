@@ -758,22 +758,7 @@ pub(crate) fn collect_prepass_facts(
     }
 }
 
-pub(crate) struct TypeInferenceVisitor<'a> {
-    pub(crate) behavior: &'static dyn crate::syntax::normalized_behavior::NormalizedLanguageBehavior,
-    pub(crate) document: &'a Document,
-    pub(crate) lines: &'a [String],
-    pub(crate) path: &'a str,
-    pub(crate) current_owners: Vec<String>,
-    pub(crate) current_method: Option<String>,
-    pub(crate) current_method_kind: String,
-    pub(crate) current_method_line: usize,
-    pub(crate) current_method_end_line: usize,
-    pub(crate) current_params: Vec<String>,
-    pub(crate) param_types: BTreeMap<String, TypeExpr>,
-    pub(crate) local_types: BTreeMap<String, TypeExpr>,
-    pub(crate) in_conditional: bool,
-    pub(crate) ivar_tlet_types: BTreeMap<(String, String), TypeExpr>,
-    pub(crate) signatures: BTreeMap<String, String>,
+pub(crate) struct FactStore<'a> {
     pub(crate) tlet_sites: &'a mut Vec<serde_json::Value>,
     pub(crate) dead_nil_checks: &'a mut Vec<serde_json::Value>,
     pub(crate) deterministic_guards: &'a mut Vec<serde_json::Value>,
@@ -794,6 +779,25 @@ pub(crate) struct TypeInferenceVisitor<'a> {
     pub(crate) state_type_records: &'a mut Vec<StateTypeRecord>,
     pub(crate) hash_shapes: &'a mut Vec<HashShape>,
     pub(crate) tuple_arrays: &'a mut Vec<serde_json::Value>,
+}
+
+pub(crate) struct TypeInferenceVisitor<'a> {
+    pub(crate) behavior: &'static dyn crate::syntax::normalized_behavior::NormalizedLanguageBehavior,
+    pub(crate) document: &'a Document,
+    pub(crate) lines: &'a [String],
+    pub(crate) path: &'a str,
+    pub(crate) current_owners: Vec<String>,
+    pub(crate) current_method: Option<String>,
+    pub(crate) current_method_kind: String,
+    pub(crate) current_method_line: usize,
+    pub(crate) current_method_end_line: usize,
+    pub(crate) current_params: Vec<String>,
+    pub(crate) param_types: BTreeMap<String, TypeExpr>,
+    pub(crate) local_types: BTreeMap<String, TypeExpr>,
+    pub(crate) in_conditional: bool,
+    pub(crate) ivar_tlet_types: BTreeMap<(String, String), TypeExpr>,
+    pub(crate) signatures: BTreeMap<String, String>,
+    pub(crate) facts: FactStore<'a>,
     pub(crate) local_hash_shapes: BTreeMap<String, serde_json::Value>,
     pub(crate) local_array_shapes: BTreeMap<String, serde_json::Value>,
     pub(crate) local_container_origins: BTreeMap<String, serde_json::Value>,
@@ -1179,7 +1183,7 @@ impl<'a> TypeInferenceVisitor<'a> {
                 }
 
                 if !self.is_prepass {
-                    self.return_origins.push(json!({
+                    self.facts.return_origins.push(json!({
                         "path": self.path,
                         "line": node.first_lineno,
                         "end_line": node.last_lineno,
@@ -1200,7 +1204,7 @@ impl<'a> TypeInferenceVisitor<'a> {
                     let is_noreturn = !self.has_explicit_return(body)
                         && body.is_some_and(|b| self.noreturn_body(b));
                     if is_noreturn {
-                        self.noreturn_methods.push(json!({
+                        self.facts.noreturn_methods.push(json!({
                             "name": func_name,
                             "path": self.path,
                             "line": node.first_lineno,
@@ -1642,7 +1646,7 @@ impl<'a> TypeInferenceVisitor<'a> {
             if let Some((receiver, method, args_node)) = match_call(node) {
                 if method == "let" && receiver.text == "T" {
                     let arg_nodes = call_arguments(args_node);
-                    self.tlet_sites.push(json!({
+                    self.facts.tlet_sites.push(json!({
                         "path": self.path,
                         "line": node.first_lineno,
                         "tlet": true,
@@ -1650,7 +1654,7 @@ impl<'a> TypeInferenceVisitor<'a> {
                     }));
                 } else if node.r#type == "QCALL" {
                     if self.provably_non_nil(receiver) {
-                        self.dead_nil_checks.push(json!({
+                        self.facts.dead_nil_checks.push(json!({
                             "path": self.path,
                             "line": node.first_lineno,
                             "kind": "safe_nav",
@@ -1660,7 +1664,7 @@ impl<'a> TypeInferenceVisitor<'a> {
                     }
                 } else if self.behavior.is_nil_check(&method) {
                     if self.provably_non_nil(receiver) {
-                        self.dead_nil_checks.push(json!({
+                        self.facts.dead_nil_checks.push(json!({
                             "path": self.path,
                             "line": node.first_lineno,
                             "kind": "nil_check",
@@ -1716,7 +1720,7 @@ impl<'a> TypeInferenceVisitor<'a> {
         let current_class = self.current_owners.last().cloned().unwrap_or_default();
         let current_method = self.current_method.clone().unwrap_or_default();
 
-        self.deterministic_guards.push(json!({
+        self.facts.deterministic_guards.push(json!({
             "path": self.path,
             "line": predicate.first_lineno,
             "class": current_class,
@@ -3201,7 +3205,7 @@ impl<'a> TypeInferenceVisitor<'a> {
                 if arg_nodes.len() == 1 && arg_nodes[0].text == "Type" {
                     let (origin_kind, origin_name) =
                         self.classify_origin(receiver, param_names, assigns, 0);
-                    self.type_normalizers.push(json!({
+                    self.facts.type_normalizers.push(json!({
                         "path": self.path,
                         "line": node.first_lineno,
                         "class": record["class"],
@@ -3436,7 +3440,7 @@ impl<'a> TypeInferenceVisitor<'a> {
                 "code": first_line,
             }),
         );
-        self.hidden_enum_observations.push(obs);
+        self.facts.hidden_enum_observations.push(obs);
     }
 
     pub(crate) fn collect_return_usage_site_context(
@@ -3520,7 +3524,7 @@ impl<'a> TypeInferenceVisitor<'a> {
                     .find(|child| child.r#type == "rescue" || child.r#type == "RESCUE")
                     .map(|child| child.first_lineno);
                 if let Some(hl) = handler_line {
-                    self.rescue_handlers.push(json!({
+                    self.facts.rescue_handlers.push(json!({
                         "path": self.path,
                         "line": hl,
                         "kind": "rescue",
@@ -3633,9 +3637,9 @@ impl<'a> TypeInferenceVisitor<'a> {
                                 "code": node.text.lines().next().unwrap_or("").trim().to_string(),
                             });
                             if direct_usage {
-                                self.return_direct_usage_sites.push(site_record);
+                                self.facts.return_direct_usage_sites.push(site_record);
                             } else {
-                                self.return_usage_sites.push(site_record);
+                                self.facts.return_usage_sites.push(site_record);
                             }
                         }
                         if let Some(receiver) =
@@ -3704,9 +3708,9 @@ impl<'a> TypeInferenceVisitor<'a> {
                         "code": node.text.lines().next().unwrap_or("").trim().to_string(),
                     });
                     if direct_usage {
-                        self.return_direct_usage_sites.push(site_record);
+                        self.facts.return_direct_usage_sites.push(site_record);
                     } else {
-                        self.return_usage_sites.push(site_record);
+                        self.facts.return_usage_sites.push(site_record);
                     }
                 }
                 if let Some((receiver, _, args_node)) = match_call(node) {
@@ -3765,7 +3769,7 @@ impl<'a> TypeInferenceVisitor<'a> {
     ) {
         if node.r#type == "HASH" {
             if let Some(reason) = self.hash_record_escape_reason(root, node) {
-                self.hash_record_escape_sites.push(json!({
+                self.facts.hash_record_escape_sites.push(json!({
                     "path": self.path,
                     "line": node.first_lineno,
                     "code": node.text.trim().to_string(),
@@ -4157,7 +4161,7 @@ impl<'a> TypeInferenceVisitor<'a> {
                             let record =
                                 self.param_origin_record(node, value, &callee, "keyword", &key);
                             if !self.is_prepass {
-                                self.param_origins.push(record);
+                                self.facts.param_origins.push(record);
                             }
                             self.record_callsite_hash_shape(&class_name, &callee, "keyword", &key, value);
                             self.record_callsite_array_element_shape(
@@ -4179,7 +4183,7 @@ impl<'a> TypeInferenceVisitor<'a> {
                     &positional_idx.to_string(),
                 );
                 if !self.is_prepass {
-                    self.param_origins.push(record);
+                    self.facts.param_origins.push(record);
                 }
                 self.record_callsite_hash_shape(
                     &class_name,
@@ -4382,7 +4386,7 @@ impl<'a> TypeInferenceVisitor<'a> {
 
         let code = node.text.clone();
 
-        self.collection_index_lookups.push(json!({
+        self.facts.collection_index_lookups.push(json!({
             "path": self.path,
             "line": node.first_lineno,
             "enclosing_scope": self.current_owners.join("::"),
@@ -4724,7 +4728,7 @@ impl<'a> TypeInferenceVisitor<'a> {
                 return;
             }
             let code = node.text.clone();
-            self.hash_record_blockers.push(json!({
+            self.facts.hash_record_blockers.push(json!({
                 "path": self.path,
                 "line": node.first_lineno,
                 "enclosing_scope": self.current_owners.join("::"),
@@ -4743,7 +4747,7 @@ impl<'a> TypeInferenceVisitor<'a> {
             if !hash_record_blocker_origin(&origin) {
                 return;
             }
-            self.hash_record_blockers.push(json!({
+            self.facts.hash_record_blockers.push(json!({
                 "path": self.path,
                 "line": node.first_lineno,
                 "enclosing_scope": self.current_owners.join("::"),
@@ -4798,7 +4802,7 @@ impl<'a> TypeInferenceVisitor<'a> {
         {
             return;
         }
-        self.hash_record_member_calls.push(json!({
+        self.facts.hash_record_member_calls.push(json!({
             "path": self.path,
             "line": node.first_lineno,
             "enclosing_scope": self.current_owners.join("::"),
@@ -4835,7 +4839,7 @@ impl<'a> TypeInferenceVisitor<'a> {
             } else {
                 format!("T.any({})", classes_vec.join(", "))
             };
-            self.dispatcher_inferences.push(json!({
+            self.facts.dispatcher_inferences.push(json!({
                 "path": self.path,
                 "line": line,
                 "class": owner,
@@ -4870,7 +4874,7 @@ impl<'a> TypeInferenceVisitor<'a> {
                         .unwrap_or(TypeExpr::Untyped);
                     let key = state_key(&full_class, &fields[idx]);
                     if !self.is_prepass {
-                        self.state_type_records.push(StateTypeRecord {
+                        self.facts.state_type_records.push(StateTypeRecord {
                             language: self.document.language.as_str().to_string(),
                             path: self.path.to_string(),
                             owner: full_class.clone(),
@@ -4918,7 +4922,7 @@ impl<'a> TypeInferenceVisitor<'a> {
                                     .unwrap_or(TypeExpr::Untyped);
                                 let key = state_key(&klass, &field);
                                 if !self.is_prepass {
-                                    self.state_type_records.push(StateTypeRecord {
+                                    self.facts.state_type_records.push(StateTypeRecord {
                                         language: self.document.language.as_str().to_string(),
                                         path: self.path.to_string(),
                                         owner: klass.clone(),
@@ -5001,7 +5005,7 @@ impl<'a> TypeInferenceVisitor<'a> {
         if unique.len() < 2 {
             return;
         }
-        self.tuple_arrays.push(json!({
+        self.facts.tuple_arrays.push(json!({
             "path": self.path,
             "line": node.first_lineno,
             "size": values.len(),
@@ -5053,7 +5057,7 @@ impl<'a> TypeInferenceVisitor<'a> {
         if keys.len() < 2 || keys.len() != pairs.len() {
             return;
         }
-        self.hash_shapes.push(HashShape {
+        self.facts.hash_shapes.push(HashShape {
             path: self.path.to_string(),
             line: node.first_lineno,
             keys: keys.clone(),
@@ -5075,6 +5079,7 @@ impl<'a> TypeInferenceVisitor<'a> {
     fn find_struct_declaration(&self, class_name: &str) -> Option<StructDeclaration> {
         let clean_name = class_name.trim_start_matches("::");
         if let Some(decl) = self
+            .facts
             .struct_declarations
             .iter()
             .find(|d| d.class.trim_start_matches("::") == clean_name)
@@ -5082,7 +5087,7 @@ impl<'a> TypeInferenceVisitor<'a> {
             return Some(decl.clone());
         }
         let short_name = clean_name.rsplit("::").next().unwrap_or(clean_name);
-        if let Some(decl) = self.struct_declarations.iter().find(|d| {
+        if let Some(decl) = self.facts.struct_declarations.iter().find(|d| {
             let decl_clean = d.class.trim_start_matches("::");
             decl_clean == short_name || decl_clean.ends_with(&format!("::{short_name}"))
         }) {
