@@ -301,3 +301,144 @@ fn last_visibility_marker(source: &str) -> Option<&'static str> {
         None => None,
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn node(kind: &str, text: &str) -> Node {
+        Node {
+            r#type: kind.to_string(),
+            children: Vec::new(),
+            first_lineno: 10,
+            first_column: 2,
+            last_lineno: 10,
+            last_column: 20,
+            text: text.to_string(),
+        }
+    }
+
+    #[test]
+    fn test_cpp_behavior_comprehensive() {
+        let b = CppNormalizedBehavior;
+
+        // 1. source_message_text
+        assert_eq!(b.source_message_text("foo", Some(&node("CALL", "foo()"))), "foo()");
+        assert_eq!(b.source_message_text("foo", Some(&node("CALL", "foo"))), "foo");
+        assert_eq!(b.source_message_text("foo", None), "foo");
+
+        // 2. owner_name_span
+        assert!(b.owner_name_span("MyClass", &node("CLASS", ""), [1, 2, 3, 4]).is_some());
+
+        // 3. function_visibility
+        let lines = vec![
+            "class MyClass {".to_string(),
+            "public:".to_string(),
+            "  void foo();".to_string(),
+            "private:".to_string(),
+            "  void bar();".to_string(),
+        ];
+        let mut fn_foo = node("FUNCTION", "void foo();");
+        fn_foo.first_lineno = 3;
+        let mut fn_bar = node("FUNCTION", "void bar();");
+        fn_bar.first_lineno = 5;
+        assert_eq!(b.function_visibility("foo", &fn_foo, &lines), "public");
+        assert_eq!(b.function_visibility("bar", &fn_bar, &lines), "private");
+        
+        // test last_visibility_marker same line visibility fallback
+        let lines_inline = vec![
+            "public: void foo();".to_string(),
+        ];
+        let mut fn_inline = node("FUNCTION", "void foo();");
+        fn_inline.first_lineno = 1;
+        fn_inline.first_column = 8;
+        assert_eq!(b.function_visibility("foo", &fn_inline, &lines_inline), "public");
+
+        // 4. implicit_owner_fields
+        assert!(b.implicit_owner_fields());
+
+        // 5. field_name_from_declaration
+        assert_eq!(b.field_name_from_declaration(&node("FIELD_DECLARATION", "int count;")), Some("count".to_string()));
+        assert_eq!(b.field_name_from_declaration(&node("LVAR", "")), None);
+
+        // 6. initializer_field_reads
+        let init_node = node("CONSTRUCTOR", "MyClass() : count(0) {}");
+        let reads = b.initializer_field_reads(&init_node, "MyClass", &["count".to_string()], "MyClass");
+        assert_eq!(reads.len(), 1);
+        assert_eq!(reads[0].field, "count");
+        assert!(b.initializer_field_reads(&init_node, "MyClass", &["count".to_string()], "not_owner").is_empty());
+        // Cover target_span_from_text returning None (line 128)
+        let init_node_no_text = node("CONSTRUCTOR", "MyClass() : field(0) {}");
+        assert!(b.initializer_field_reads(&init_node_no_text, "MyClass", &["count".to_string()], "MyClass").is_empty());
+
+        // 7. state_read_uses_access_span
+        assert!(b.state_read_uses_access_span(&NormalizedCallProjection {
+            receiver: "self".to_string(),
+            message: "foo".to_string(),
+            arguments: Vec::new(),
+            access_span: [1, 2, 3, 4],
+            span: [1, 2, 3, 4],
+        }));
+
+        // 8. suppress_state_read_for_call
+        assert!(b.suppress_state_read_for_call(&NormalizedCallProjection {
+            receiver: "self".to_string(),
+            message: "callback".to_string(),
+            arguments: Vec::new(),
+            access_span: [1, 2, 3, 4],
+            span: [1, 2, 3, 4],
+        }, ""));
+
+        // 9. case_predicate_text
+        assert_eq!(b.case_predicate_text("(a == b)"), "a == b");
+
+        // 10. stream_insertion_operator
+        assert!(b.stream_insertion_operator(&node("OP", "")));
+
+        // 11. nil_guard_fact
+        assert!(b.nil_guard_fact("isNull", "x").is_some());
+
+        // 12. terminating_call_message
+        assert!(b.terminating_call_message("throw"));
+
+        // 13. semantic_effect_for_call
+        assert!(b.semantic_effect_for_call(&CallSite {
+            receiver: "x".to_string(),
+            message: "isNull".to_string(),
+            file: "".to_string(),
+            function: "".to_string(),
+            owner: "".to_string(),
+            line: 1,
+            span: [1, 2, 3, 4],
+            conditional: false,
+            arguments: Vec::new(),
+            control: None,
+            safe_navigation: false,
+            block: false,
+        }).is_some());
+
+        // 14. local_flow_declaration_keyword
+        assert!(b.local_flow_declaration_keyword("int"));
+
+        // 15. local_flow_keyword
+        assert!(b.local_flow_keyword("int"));
+        for kw in &["break", "case", "class", "const", "continue", "default", "else", "false", "for", "if", "private", "protected", "public", "return", "static", "struct", "this", "true", "while"] {
+            assert!(b.local_flow_keyword(kw));
+        }
+        assert!(!b.local_flow_keyword("not_a_keyword"));
+
+        // 16. predicate_body_language_signal
+        assert!(b.predicate_body_language_signal("null"));
+
+        // 17-21. formatting
+        assert_eq!(b.format_array_type("int"), "std::vector<int>");
+        assert_eq!(b.format_hash_type("int", "int"), "std::unordered_map<int, int>");
+        assert_eq!(b.format_set_type("int"), "std::unordered_set<int>");
+        assert_eq!(b.format_nilable_type(""), "");
+        assert_eq!(b.format_nilable_type("std::optional<int>"), "std::optional<int>");
+        assert_eq!(b.format_nilable_type("int"), "std::optional<int>");
+        assert_eq!(b.untyped_type(), "std::any");
+        assert_eq!(b.untyped_array_type(), "std::vector<std::any>");
+        assert_eq!(b.untyped_hash_type(), "std::unordered_map<std::string, std::any>");
+    }
+}
