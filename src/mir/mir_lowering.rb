@@ -1388,6 +1388,9 @@ class MIRLowering
     return false unless stmt.is_a?(AST::Locatable)
     return false unless mir.is_a?(MIR::Emittable) && mir.expr?
 
+    ast_stmt = stmt
+    return false unless AST.call?(ast_stmt) || ast_stmt.is_a?(AST::BinaryOp)
+
     resolved = stmt.resolved_type
     !!(resolved && resolved != :Void)
   end
