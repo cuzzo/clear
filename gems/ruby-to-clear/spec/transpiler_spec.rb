@@ -726,19 +726,24 @@ RSpec.describe RubyToClear::Transpiler do
       RUBY
       expected_clear = <<~CLEAR
         FN swap_vars(MUTABLE a: Auto, MUTABLE b: Auto) RETURNS !Auto ->
-          MUTABLE __tmp_multi_0 = b;
-          MUTABLE __tmp_multi_1 = a;
-          a = __tmp_multi_0;
-          b = __tmp_multi_1;
+          a, b = [b, a];
         END
       CLEAR
       expect_transpile(ruby_code, expected_clear)
+      expect_transpile("a, b = [1, 2]", "MUTABLE a, b = [1, 2];")
     end
 
     it "raises error on non-array value destructuring" do
       expect {
         RubyToClear.transpile("a, b = get_val")
-      }.to raise_error(RubyToClear::Transpiler::TranspilationError, /Destructuring is only supported for literal array values/)
+      }.to raise_error(RubyToClear::Transpiler::TranspilationError, /Destructuring requires a statically fixed literal array RHS/)
+
+      expect(RubyToClear.transpile("a, b = get_val", raise_on_error: false))
+        .to include("# [UNSUPPORTED: MultiWriteNode")
+
+      expect {
+        RubyToClear.transpile("@a, b = [1, 2]")
+      }.to raise_error(RubyToClear::Transpiler::TranspilationError, /Destructuring targets must be local variables or _/)
     end
   end
 

@@ -1135,36 +1135,50 @@ module RubyToClear
     end
 
     def visit_multi_write_node(node)
-      unless node.value.is_a?(Prism::ArrayNode)
-        return raise_unsupported("Destructuring is only supported for literal array values", node)
+      unless fixed_shape_multi_write?(node)
+        return raise_unsupported("Destructuring requires a statically fixed literal array RHS", node)
       end
-      
+
       lefts = node.lefts
       rights = node.value.elements
-      
+
       if lefts.length != rights.length
         return raise_unsupported("Multi-write left and right side lengths must match", node)
       end
-      
-      temp_names = lefts.map.with_index { |_, idx| "__tmp_multi_#{idx}" }
-      
-      decls = []
-      assigns = []
-      
-      rights.each_with_index do |r, idx|
-        val = visit(r)
-        temp_name = temp_names[idx]
-        @declared_locals << temp_name
-        decls << "MUTABLE #{temp_name} = #{val}"
+
+      target_names = lefts.map { |target| multi_write_target_name(target) }
+      if target_names.any?(&:nil?)
+        return raise_unsupported("Destructuring targets must be local variables or _", node)
       end
-      
-      lefts.each_with_index do |l, idx|
-        target_name = visit(l)
-        temp_name = temp_names[idx]
-        assigns << "#{target_name} = #{temp_name}"
+
+      first_new_target = target_names.first != "_" && !@declared_locals.include?(target_names.first)
+      target_code = target_names.each_with_index.map do |name, index|
+        next "_" if name == "_"
+        if @declared_locals.include?(name)
+          name
+        else
+          @declared_locals << name
+          @local_shapes[name] = nil
+          index.zero? || first_new_target ? name : "MUTABLE #{name}"
+        end
       end
-      
-      (decls + assigns).join(";\n")
+
+      prefix = first_new_target ? "MUTABLE " : ""
+      "#{prefix}#{target_code.join(', ')} = #{visit(node.value)}"
+    end
+
+    def fixed_shape_multi_write?(node)
+      return false unless node.value.is_a?(Prism::ArrayNode)
+      return false if node.respond_to?(:rest) && node.rest
+      return false if node.respond_to?(:rights) && node.rights.any?
+
+      node.value.elements.none? { |element| element.is_a?(Prism::SplatNode) }
+    end
+
+    def multi_write_target_name(target)
+      return target.name.to_s if target.is_a?(Prism::LocalVariableTargetNode)
+
+      nil
     end
 
     def visit_rescue_node(node)
