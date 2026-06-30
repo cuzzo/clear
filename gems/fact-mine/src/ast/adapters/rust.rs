@@ -29,13 +29,7 @@ impl AstNormalizationAdapter for RustAstAdapter {
         node: TreeSitterNode<'tree>,
         _source: &str,
     ) -> Option<TreeSitterNode<'tree>> {
-        node.child_by_field_name("body")
-            .or_else(|| {
-                named_children(node)
-                    .into_iter()
-                    .find(|child| child.kind() == "declaration_list")
-            })
-            .or(Some(node))
+        node.child_by_field_name("body").or(Some(node))
     }
 
     fn loop_node_type(&self, kind: &str) -> Option<&'static str> {
@@ -79,29 +73,5 @@ mod tests {
             .class_like_owner_body(impl_node, "impl Widget { }")
             .unwrap();
         assert_eq!(body_node.kind(), "declaration_list");
-
-        let tree3 = parser.parse("extern \"C\" { }", None).unwrap();
-        let mut found = None;
-        let mut queue = vec![tree3.root_node()];
-        while let Some(n) = queue.pop() {
-            if n.child_by_field_name("body").is_none() {
-                let has_decl_list = (0..n.child_count())
-                    .map(|i| n.child(i).unwrap())
-                    .any(|child| child.kind() == "declaration_list");
-                if has_decl_list {
-                    found = Some(n);
-                    break;
-                }
-            }
-            for i in 0..n.child_count() {
-                queue.push(n.child(i).unwrap());
-            }
-        }
-        if let Some(target_node) = found {
-            let body_node2 = adapter
-                .class_like_owner_body(target_node, "extern \"C\" { }")
-                .unwrap();
-            assert_eq!(body_node2.kind(), "declaration_list");
-        }
     }
 }

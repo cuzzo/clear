@@ -858,12 +858,13 @@ fn immutable_struct_reader_sets(
     let mut class_stack = Vec::new();
     let method_ranges: Vec<(usize, usize)> =
         functions.iter().map(|f| (f.span[0], f.span[2])).collect();
+    let debug_funcs: Vec<_> = functions
+        .iter()
+        .map(|f| (&f.name, &f.span))
+        .collect();
     eprintln!(
         "IMMUTABLE_STRUCT_READER_SETS: functions={:?}, method_ranges={:?}",
-        functions
-            .iter()
-            .map(|f| (&f.name, &f.span))
-            .collect::<Vec<_>>(),
+        debug_funcs,
         method_ranges
     );
     for (idx, line) in source.lines().enumerate() {
@@ -1094,6 +1095,7 @@ fn type_aliases(source: &str) -> BTreeMap<String, String> {
                     }
 
                     if target.is_empty() {
+                        i += 1;
                         continue;
                     }
                     let qualified_name = if let Some(parent) = owner_stack.last() {
@@ -1308,5 +1310,376 @@ mod tests {
         assert!(aliases.contains_key("Nested::Child::MyAlias5"));
         assert!(aliases.contains_key("Parent::MyAlias6"));
         assert!(!aliases.contains_key("Nested::Child::MyAliasEmpty"));
+    }
+    #[test]
+    fn test_ruby_behavior_uncovered_methods() {
+        use crate::syntax::Child;
+        let behavior = RubyNormalizedBehavior;
+
+        // format_array_type etc
+        assert_eq!(behavior.format_array_type("String"), "T::Array[String]");
+        assert_eq!(behavior.format_hash_type("Symbol", "Integer"), "T::Hash[Symbol, Integer]");
+        assert_eq!(behavior.format_set_type("String"), "T::Set[String]");
+        assert_eq!(behavior.untyped_type(), "T.untyped");
+        assert_eq!(behavior.untyped_array_type(), "T::Array[T.untyped]");
+        assert_eq!(behavior.untyped_hash_type(), "T::Hash[T.untyped, T.untyped]");
+
+        // format_nilable_type
+        assert_eq!(behavior.format_nilable_type(""), "");
+        assert_eq!(behavior.format_nilable_type("nil"), "nil");
+        assert_eq!(behavior.format_nilable_type("T.nilable(String)"), "T.nilable(String)");
+        assert_eq!(behavior.format_nilable_type("String"), "T.nilable(String)");
+
+        // clean_identifier / clean_receiver
+        assert_eq!(behavior.clean_identifier("self.foo"), "foo");
+        assert_eq!(behavior.clean_receiver("@foo"), "foo");
+
+        // known_return_type
+        assert_eq!(behavior.known_return_type("puts"), Some("NilClass".to_string()));
+        assert_eq!(behavior.known_return_type("to_s"), Some("String".to_string()));
+        assert_eq!(behavior.known_return_type("size"), Some("Integer".to_string()));
+        assert_eq!(behavior.known_return_type("to_f"), Some("Float".to_string()));
+        assert_eq!(behavior.known_return_type("nil?"), Some("T::Boolean".to_string()));
+        assert_eq!(behavior.known_return_type("invalid"), None);
+
+        // static_return_type
+        assert_eq!(behavior.static_return_type("<=>", None), Some("T.nilable(Integer)".to_string()));
+        assert_eq!(behavior.static_return_type("hash", None), Some("Integer".to_string()));
+        assert_eq!(behavior.static_return_type("inspect", None), Some("String".to_string()));
+        assert_eq!(behavior.static_return_type("to_sym", None), Some("Symbol".to_string()));
+        assert_eq!(behavior.static_return_type("to_f", None), Some("Float".to_string()));
+        assert_eq!(behavior.static_return_type("to_a", None), Some("T::Array[T.untyped]".to_string()));
+        assert_eq!(behavior.static_return_type("to_h", None), Some("T::Hash[T.untyped, T.untyped]".to_string()));
+        assert_eq!(behavior.propagated_collection_return_type("compact", Some("T::Array[T.nilable(String)]")), Some("T::Array[String]".to_string()));
+        assert_eq!(behavior.propagated_collection_return_type("flatten", Some("T::Array[T::Array[String]]")), Some("T::Array[String]".to_string()));
+        assert_eq!(behavior.propagated_collection_return_type("keys", Some("T::Hash[Symbol, Integer]")), Some("T::Array[Symbol]".to_string()));
+        assert_eq!(behavior.propagated_collection_return_type("values", Some("T::Hash[Symbol, Integer]")), Some("T::Array[Integer]".to_string()));
+        assert_eq!(behavior.propagated_collection_return_type("to_a", Some("T::Array[String]")), Some("T::Array[String]".to_string()));
+        assert_eq!(behavior.propagated_collection_return_type("to_h", Some("T::Hash[Symbol, Integer]")), Some("T::Hash[Symbol, Integer]".to_string()));
+
+        // is_noreturn_method
+        assert!(behavior.is_noreturn_method("raise"));
+        assert!(!behavior.is_noreturn_method("other"));
+
+        // struct_declaration_fields
+        let symbol_node = Node {
+            r#type: "SYM".to_string(),
+            children: Vec::new(),
+            first_lineno: 10,
+            first_column: 0,
+            last_lineno: 10,
+            last_column: 4,
+            text: ":x".to_string(),
+        };
+        let args_node = Node {
+            r#type: "ARGS".to_string(),
+            children: vec![Child::Node(Box::new(symbol_node))],
+            first_lineno: 10,
+            first_column: 0,
+            last_lineno: 10,
+            last_column: 4,
+            text: "(:x)".to_string(),
+        };
+        let call_node = Node {
+            r#type: "CALL".to_string(),
+            children: vec![
+                Child::Node(Box::new(Node {
+                    r#type: "IDENT".to_string(),
+                    children: Vec::new(),
+                    first_lineno: 10,
+                    first_column: 0,
+                    last_lineno: 10,
+                    last_column: 4,
+                    text: "new".to_string(),
+                })),
+                Child::Node(Box::new(Node {
+                    r#type: "IDENT".to_string(),
+                    children: Vec::new(),
+                    first_lineno: 10,
+                    first_column: 0,
+                    last_lineno: 10,
+                    last_column: 4,
+                    text: "new".to_string(),
+                })),
+                Child::Node(Box::new(args_node)),
+            ],
+            first_lineno: 10,
+            first_column: 0,
+            last_lineno: 10,
+            last_column: 4,
+            text: "new(:x)".to_string(),
+        };
+        let struct_node = Node {
+            r#type: "LASGN".to_string(),
+            children: vec![
+                Child::Node(Box::new(Node {
+                    r#type: "IDENT".to_string(),
+                    children: Vec::new(),
+                    first_lineno: 10,
+                    first_column: 0,
+                    last_lineno: 10,
+                    last_column: 4,
+                    text: "Struct".to_string(),
+                })),
+                Child::Node(Box::new(call_node)),
+            ],
+            first_lineno: 10,
+            first_column: 0,
+            last_lineno: 10,
+            last_column: 4,
+            text: "Struct = Struct.new(:x)".to_string(),
+        };
+        let fields = behavior.struct_declaration_fields(&struct_node).unwrap();
+        assert_eq!(fields, vec!["x".to_string()]);
+
+        // immutable_struct_reader_sets
+        let mock_body = crate::ast::RawNode {
+            kind: String::new(),
+            text: String::new(),
+            span: [0, 0, 0, 0],
+            named: false,
+            field_name: None,
+            children: Vec::new(),
+        };
+        let mock_fn = FunctionDef {
+            file: "foo.rb".to_string(),
+            name: "bar".to_string(),
+            owner: "Parent".to_string(),
+            line: 5,
+            span: [5, 0, 7, 0],
+            body: mock_body.clone(),
+            visibility: None,
+            params: Vec::new(),
+            signature: String::new(),
+        };
+        let reader_sets = immutable_struct_reader_sets("class Parent; end", &[mock_fn]);
+        assert!(reader_sets.is_empty());
+
+        fn node(kind: &str, text: &str) -> Node {
+            Node {
+                r#type: kind.to_string(),
+                children: Vec::new(),
+                first_lineno: 10,
+                first_column: 0,
+                last_lineno: 10,
+                last_column: text.len(),
+                text: text.to_string(),
+            }
+        }
+
+        // static_return_type string chars and lines
+        assert_eq!(behavior.static_return_type("chars", Some("String")), Some("T::Array[String]".to_string()));
+        assert_eq!(behavior.static_return_type("lines", Some("String")), Some("T::Array[String]".to_string()));
+
+        // propagated_collection_return_type skipped blocks
+        assert_eq!(behavior.propagated_collection_return_type("compact", Some("Integer")), None);
+        assert_eq!(behavior.propagated_collection_return_type("flatten", Some("Integer")), None);
+        assert_eq!(behavior.propagated_collection_return_type("keys", Some("Integer")), None);
+        assert_eq!(behavior.propagated_collection_return_type("values", Some("Integer")), None);
+        assert_eq!(behavior.propagated_collection_return_type("to_a", Some("Integer")), None);
+        assert_eq!(behavior.propagated_collection_return_type("to_h", Some("Integer")), None);
+
+        // static_call_return_type for Arrays, Hashes, and Iters
+        let mut index_arg = Node {
+            r#type: "RANGE".to_string(),
+            children: Vec::new(),
+            first_lineno: 10,
+            first_column: 0,
+            last_lineno: 10,
+            last_column: 4,
+            text: "1..3".to_string(),
+        };
+        let mut args_node_array = Node {
+            r#type: "ARGS".to_string(),
+            children: vec![Child::Node(Box::new(index_arg))],
+            first_lineno: 10,
+            first_column: 0,
+            last_lineno: 10,
+            last_column: 4,
+            text: "(1..3)".to_string(),
+        };
+        let mut lookup_node = Node {
+            r#type: "CALL".to_string(),
+            children: vec![
+                Child::Node(Box::new(node("IDENT", "arr"))),
+                Child::Node(Box::new(node("IDENT", "[]"))),
+                Child::Node(Box::new(args_node_array)),
+            ],
+            first_lineno: 10,
+            first_column: 0,
+            last_lineno: 10,
+            last_column: 4,
+            text: "arr[1..3]".to_string(),
+        };
+        assert_eq!(behavior.static_call_return_type(&lookup_node, "[]", Some("T::Array[String]")), Some("T::Array[String]".to_string()));
+
+        // Iter / block lookup
+        let iter_node = Node {
+            r#type: "ITER".to_string(),
+            children: vec![Child::Node(Box::new(lookup_node))],
+            first_lineno: 10,
+            first_column: 0,
+            last_lineno: 10,
+            last_column: 4,
+            text: "arr[1..3] { }".to_string(),
+        };
+        assert_eq!(behavior.static_call_return_type(&iter_node, "[]", Some("T::Array[String]")), Some("T::Array[String]".to_string()));
+
+        // Hash split_once None path
+        let simple_lookup = Node {
+            r#type: "CALL".to_string(),
+            children: Vec::new(),
+            first_lineno: 10,
+            first_column: 0,
+            last_lineno: 10,
+            last_column: 4,
+            text: "hash[x]".to_string(),
+        };
+        assert_eq!(behavior.static_call_return_type(&simple_lookup, "[]", Some("T::Hash[Invalid]")), None);
+        assert_eq!(behavior.static_call_return_type(&simple_lookup, "[]", Some("T::Array[String]")), Some("T.nilable(String)".to_string()));
+
+        // parameter_list_source no closing parenthesis
+        assert_eq!(behavior.parameter_list_source("def foo(a"), "");
+
+        // declarative_owner fallback paths
+        let mut invalid_lasgn = Node {
+            r#type: "LASGN".to_string(),
+            children: vec![Child::Integer(123)],
+            first_lineno: 10,
+            first_column: 0,
+            last_lineno: 10,
+            last_column: 4,
+            text: "x = 1".to_string(),
+        };
+        assert!(behavior.declarative_owner(&invalid_lasgn, "").is_none());
+
+        let mut invalid_call = Node {
+            r#type: "CALL".to_string(),
+            children: vec![
+                Child::Node(Box::new(node("IDENT", "Struct"))),
+                Child::Integer(123),
+            ],
+            first_lineno: 10,
+            first_column: 0,
+            last_lineno: 10,
+            last_column: 4,
+            text: "Struct.new".to_string(),
+        };
+        let mut lasgn_with_invalid_call = Node {
+            r#type: "LASGN".to_string(),
+            children: vec![
+                Child::Symbol("MyAlias".to_string()),
+                Child::Node(Box::new(invalid_call)),
+            ],
+            first_lineno: 10,
+            first_column: 0,
+            last_lineno: 10,
+            last_column: 4,
+            text: "MyAlias = Struct.new".to_string(),
+        };
+        assert!(behavior.declarative_owner(&lasgn_with_invalid_call, "").is_none());
+
+        // struct_declaration_fields non-node children
+        let mut invalid_args = Node {
+            r#type: "ARGS".to_string(),
+            children: vec![
+                Child::Integer(123),
+                Child::Node(Box::new(node("IDENT", "not_a_symbol"))),
+            ],
+            first_lineno: 10,
+            first_column: 0,
+            last_lineno: 10,
+            last_column: 4,
+            text: "(123)".to_string(),
+        };
+        let mut invalid_call_for_struct = Node {
+            r#type: "CALL".to_string(),
+            children: vec![
+                Child::Node(Box::new(node("IDENT", "new"))),
+                Child::Node(Box::new(node("IDENT", "new"))),
+                Child::Node(Box::new(invalid_args)),
+            ],
+            first_lineno: 10,
+            first_column: 0,
+            last_lineno: 10,
+            last_column: 4,
+            text: "new(123)".to_string(),
+        };
+        let mut invalid_struct_node = Node {
+            r#type: "LASGN".to_string(),
+            children: vec![
+                Child::Node(Box::new(node("IDENT", "Struct"))),
+                Child::Node(Box::new(invalid_call_for_struct)),
+            ],
+            first_lineno: 10,
+            first_column: 0,
+            last_lineno: 10,
+            last_column: 4,
+            text: "Struct = Struct.new(123)".to_string(),
+        };
+        assert!(behavior.struct_declaration_fields(&invalid_struct_node).unwrap().is_empty());
+
+        // keys and values fallback coverage
+        assert_eq!(behavior.propagated_collection_return_type("keys", Some("T::Hash[Invalid]")), None);
+        assert_eq!(behavior.propagated_collection_return_type("values", Some("T::Hash[Invalid]")), None);
+
+        // index lookup empty args
+        let mut empty_args_node = Node {
+            r#type: "ARGS".to_string(),
+            children: Vec::new(),
+            first_lineno: 10,
+            first_column: 0,
+            last_lineno: 10,
+            last_column: 4,
+            text: "()".to_string(),
+        };
+        let mut lookup_empty_args = Node {
+            r#type: "CALL".to_string(),
+            children: vec![
+                Child::Node(Box::new(node("IDENT", "arr"))),
+                Child::Node(Box::new(node("IDENT", "[]"))),
+                Child::Node(Box::new(empty_args_node)),
+            ],
+            first_lineno: 10,
+            first_column: 0,
+            last_lineno: 10,
+            last_column: 4,
+            text: "arr[]".to_string(),
+        };
+        assert_eq!(behavior.static_call_return_type(&lookup_empty_args, "[]", Some("T::Array[String]")), Some("T.nilable(String)".to_string()));
+
+        // is_valid_type
+        assert!(!is_valid_type(""));
+        assert!(!is_valid_type("lowercase"));
+        assert!(is_valid_type("T.foo"));
+
+        // type alias blank target / invalid type / blank type declaration
+        let mock_fn_for_sig = FunctionDef {
+            file: "foo.rb".to_string(),
+            name: "bar".to_string(),
+            owner: "Parent".to_string(),
+            line: 8,
+            span: [8, 0, 10, 0],
+            body: mock_body.clone(),
+            visibility: None,
+            params: Vec::new(),
+            signature: String::new(),
+        };
+
+        let metadata = ruby_metadata(
+            "
+            MyAliasEmpty = T.type_alias
+            MyAlias = T.type_alias { String }
+            class Parent < T::Struct
+              const :x
+              const :y, lowercase
+              sig { params(x, y: String) }
+              def bar
+              end
+            end
+            ",
+            &[mock_fn_for_sig]
+        );
+        assert!(metadata.type_aliases.contains_key("MyAlias"));
     }
 }
