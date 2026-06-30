@@ -13,6 +13,7 @@ module NilKill
                  "struct_declarations" => [], "struct_field_static" => [], "tuple_arrays" => [], "hash_shapes" => [],
                  "collection_index_lookups" => [], "hash_record_blockers" => [],
                  "hash_record_member_calls" => [],
+                 "type_definitions" => [],
                  "collection_runtime" => [], "ivar_runtime" => [], "collect_coverage" => {},
                  "type_normalizers" => [], "dispatcher_inferences" => [], "return_origins" => [], "param_origins" => [],
                  "rbi_field_types" => [], "noreturn_methods" => [],

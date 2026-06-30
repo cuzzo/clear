@@ -106,7 +106,3 @@ pub struct Action {
     pub message: String,
     pub data: HashMap<String, Value>,
 }
-
-pub const REVIEW: &str = "review";
-pub const HIGH: &str = "high";
-pub const GAP: &str = "gap";

@@ -6,7 +6,7 @@ module NilKill
     FACT_LISTS = %w[
       tlet_sites dead_nil_checks deterministic_guards struct_declarations struct_field_static
       tuple_arrays hash_shapes collection_index_lookups hash_record_blockers hash_record_member_calls
-      type_normalizers dispatcher_inferences return_origins param_origins rbi_field_types noreturn_methods
+      type_definitions type_normalizers dispatcher_inferences return_origins param_origins rbi_field_types noreturn_methods
     ].freeze
 
     attr_reader :store, :evidence

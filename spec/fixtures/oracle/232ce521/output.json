@@ -49,12 +49,10 @@
       "line": 14,
       "message": "existing sig return is T.untyped; static return origins suggest String",
       "data": {
+        "origin_confidence": "strong",
         "type": "String",
         "source": "static_return_origin",
-        "origin_confidence": "strong",
-        "blockers": [
-
-        ]
+        "blockers": []
       }
     },
     {
@@ -85,8 +83,8 @@
       "line": 13,
       "message": "existing sig param v is T.untyped; observed String",
       "data": {
-        "name": "v",
-        "type": "String"
+        "type": "String",
+        "name": "v"
       }
     },
     {
@@ -124,10 +122,10 @@
       "confidence": "review",
       "path": "/home/yahn/litedb/nk-inv20260629-301490-lo3zfq/abs_require_lib.rb",
       "line": 15,
-      "message": "existing sig param node is T.untyped; observed T.any(Array, Hash, Integer)",
+      "message": "existing sig param acc is T.untyped; observed Array",
       "data": {
-        "name": "node",
-        "type": "T.any(Array, Hash, Integer)"
+        "type": "Array",
+        "name": "acc"
       }
     },
     {
@@ -135,10 +133,10 @@
       "confidence": "review",
       "path": "/home/yahn/litedb/nk-inv20260629-301490-lo3zfq/abs_require_lib.rb",
       "line": 15,
-      "message": "existing sig param acc is T.untyped; observed Array",
+      "message": "existing sig param node is T.untyped; observed T.any(Array, Hash, Integer)",
       "data": {
-        "name": "acc",
-        "type": "Array"
+        "type": "T.any(Array, Hash, Integer)",
+        "name": "node"
       }
     },
     {
@@ -173,6 +171,19 @@
       }
     },
     {
+      "kind": "narrow_generic_param",
+      "confidence": "review",
+      "path": "/home/yahn/litedb/nk-inv20260629-301490-lo3zfq/struct_collection_lib.rb",
+      "line": 16,
+      "message": "narrow generic param items from T::Array[T.untyped] to T::Array[Integer]",
+      "data": {
+        "type": "T::Array[Integer]",
+        "name": "items",
+        "source": "collection_runtime",
+        "from": "T::Array[T.untyped]"
+      }
+    },
+    {
       "kind": "fix_sig_return",
       "confidence": "review",
       "path": "/home/yahn/litedb/nk-inv20260629-301490-lo3zfq/struct_collection_lib.rb",
@@ -180,19 +191,6 @@
       "message": "existing sig return is T.untyped; observed T::Array[T::Array[Integer]]",
       "data": {
         "type": "T::Array[T::Array[Integer]]"
-      }
-    },
-    {
-      "kind": "narrow_generic_param",
-      "confidence": "review",
-      "path": "/home/yahn/litedb/nk-inv20260629-301490-lo3zfq/struct_collection_lib.rb",
-      "line": 16,
-      "message": "narrow generic param items from T::Array[T.untyped] to T::Array[Integer]",
-      "data": {
-        "name": "items",
-        "from": "T::Array[T.untyped]",
-        "type": "T::Array[Integer]",
-        "source": "collection_runtime"
       }
     },
     {
@@ -234,13 +232,13 @@
       "line": 38,
       "message": "static callsites prove param tree is T::Array[T::Hash[Symbol, T::Hash[Symbol, T::Array[Integer]]]]; 1 static callsite(s) agree",
       "data": {
-        "name": "tree",
-        "type": "T::Array[T::Hash[Symbol, T::Hash[Symbol, T::Array[Integer]]]]",
-        "source": "static_param_backflow",
+        "callsite_count": 1,
         "callsites": {
           "/home/yahn/litedb/nk-inv20260629-301490-lo3zfq/driver.rb:49:[{ a: [1] }, 2, { b: { c: [3] } }]": 1
         },
-        "callsite_count": 1
+        "name": "tree",
+        "source": "static_param_backflow",
+        "type": "T::Array[T::Hash[Symbol, T::Hash[Symbol, T::Array[Integer]]]]"
       }
     },
     {
@@ -250,13 +248,13 @@
       "line": 14,
       "message": "static callsites prove param opts is T::Hash[Symbol, Integer]; 1 static callsite(s) agree",
       "data": {
-        "name": "opts",
+        "callsite_count": 1,
         "type": "T::Hash[Symbol, Integer]",
         "source": "static_param_backflow",
         "callsites": {
           "/home/yahn/litedb/nk-inv20260629-301490-lo3zfq/driver.rb:37:{ n: 1 }": 1
         },
-        "callsite_count": 1
+        "name": "opts"
       }
     },
     {
@@ -266,12 +264,12 @@
       "line": 14,
       "message": "static callsites prove param rest is Integer; 1 static callsite(s) agree",
       "data": {
-        "name": "rest",
         "type": "Integer",
-        "source": "static_param_backflow",
         "callsites": {
           "/home/yahn/litedb/nk-inv20260629-301490-lo3zfq/driver.rb:37:2": 1
         },
+        "name": "rest",
+        "source": "static_param_backflow",
         "callsite_count": 1
       }
     },
@@ -284,11 +282,11 @@
       "data": {
         "name": "kw",
         "type": "Integer",
+        "callsite_count": 1,
         "source": "static_param_backflow",
         "callsites": {
           "/home/yahn/litedb/nk-inv20260629-301490-lo3zfq/driver.rb:37:3": 1
-        },
-        "callsite_count": 1
+        }
       }
     },
     {
@@ -311,11 +309,13 @@
       "confidence": "review",
       "path": "sorbet/rbi/ast-struct-fields.rbi",
       "line": 1,
-      "message": "type Pair#a as T.any(String, T.untyped) (struct field RBI)",
+      "message": "type Pair#a as String (struct field RBI)",
       "data": {
         "class": "Pair",
+        "runtime_calls": 3,
+        "target": "rbi",
         "field": "a",
-        "type": "T.any(String, T.untyped)"
+        "type": "String"
       }
     },
     {
@@ -327,19 +327,11 @@
       "data": {
         "class": "Pair",
         "field": "b",
-        "type": "Integer"
+        "type": "Integer",
+        "target": "rbi",
+        "runtime_calls": 3
       }
     }
   ],
-  "diagnostics": {
-    "sorbet_errors": [
-
-    ],
-    "nil_origins": [
-
-    ],
-    "sorbet_feedback": [
-
-    ]
-  }
+  "diagnostics": {}
 }

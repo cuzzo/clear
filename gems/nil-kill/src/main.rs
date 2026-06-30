@@ -19,7 +19,7 @@ fn main() -> Result<()> {
 
     let input_data = fs::read_to_string(input_path)
         .with_context(|| format!("Failed to read input file: {}", input_path))?;
-    
+
     let input_state: InputState = serde_json::from_str(&input_data)
         .with_context(|| "Failed to parse input JSON")?;
 

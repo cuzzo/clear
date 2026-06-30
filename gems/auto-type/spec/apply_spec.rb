@@ -233,6 +233,49 @@ RSpec.describe AutoType::Apply do
     expect(output).to include("class AST::Bar\n  sig { returns(Integer) }\n  def id; end\nend")
   end
 
+  it "rewrites source T::Struct const and prop field types" do
+    _path, rel = repo_tmp_file("apply_source_struct_fields.rb", <<~RUBY)
+      class Example < T::Struct
+        const :name, T.untyped
+        prop :items, T::Array[T.untyped]
+      end
+    RUBY
+
+    applier.apply_actions([
+      { "kind" => "add_struct_field_sig", "confidence" => "review", "path" => rel, "line" => 2,
+        "data" => { "target" => "source_field", "class" => "Example", "field" => "name",
+                    "raw_field" => "name", "current_type" => "T.untyped", "type" => "String" } },
+      { "kind" => "add_struct_field_sig", "confidence" => "review", "path" => rel, "line" => 3,
+        "data" => { "target" => "source_field", "class" => "Example", "field" => "items",
+                    "raw_field" => "items", "current_type" => "T::Array[T.untyped]", "type" => "T::Array[String]" } },
+    ])
+
+    source = File.read(File.join(NilKill::ROOT, rel))
+    expect(source).to include("const :name, String")
+    expect(source).to include("prop :items, T::Array[String]")
+    expect(source).not_to include("T.untyped")
+  end
+
+  it "rewrites source ivar T.let field types" do
+    _path, rel = repo_tmp_file("apply_source_ivar_field.rb", <<~RUBY)
+      class Example
+        def initialize
+          @shape = T.let(shape, T.untyped)
+        end
+      end
+    RUBY
+
+    applier.apply_actions([
+      { "kind" => "add_struct_field_sig", "confidence" => "review", "path" => rel, "line" => 3,
+        "data" => { "target" => "source_field", "class" => "Example", "field" => "shape",
+                    "raw_field" => "@shape", "current_type" => "T.untyped", "type" => "TypeShape" } },
+    ])
+
+    source = File.read(File.join(NilKill::ROOT, rel))
+    expect(source).to include("@shape = T.let(shape, TypeShape)")
+    expect(source).not_to include("T.untyped")
+  end
+
   it "inserts promoted hash-record structs after same-file constant forward references" do
     _path, rel = repo_tmp_file("apply_hash_record_forward_ref.rb", <<~RUBY)
       module MIR
