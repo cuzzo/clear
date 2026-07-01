@@ -387,7 +387,7 @@ RSpec.describe MIRLowering do
     end
 
     it "heap-boxes indirect fallible return payloads at the return site" do
-      program = lower_fixture_program("transpile-tests/06_heap_return.cht")
+      program = lower_fixture_program("transpile-tests/06_heap_return.clear")
 
       expect(program).to include("fn makeUser(rt: *Runtime) !*User")
       expect(program).to include("try rt.heapAlloc().create(User)")
@@ -3710,7 +3710,7 @@ RSpec.describe MIRLowering do
     end
 
     it "raises on local require when no importer available" do
-      node = AST::RequireNode.new(tok, "utils.cht", nil, :local)
+      node = AST::RequireNode.new(tok, "utils.clear", nil, :local)
       node.full_type = :Void
 
       expect { lowering.lower(node) }.to raise_error(/no importer available/)
@@ -3743,7 +3743,7 @@ RSpec.describe MIRLowering do
       )
       importer = ModuleImporter.new(base_dir: Dir.pwd)
       importer.define_singleton_method(:compile_file) { |_path, caller_dir:| imported_mod }
-      node = AST::RequireNode.new(tok, "helper.cht", "helper", :local)
+      node = AST::RequireNode.new(tok, "helper.clear", "helper", :local)
 
       low = lowering(importer: importer, source_dir: Dir.pwd)
       result = low.lower(node)
@@ -3783,8 +3783,8 @@ RSpec.describe MIRLowering do
       importer.define_singleton_method(:compile_file) { |_path, caller_dir:| imported_mod }
       low = lowering(importer: importer, source_dir: Dir.pwd)
 
-      first = low.lower(AST::RequireNode.new(tok, "grid.cht", "grid", :local))
-      second = low.lower(AST::RequireNode.new(tok, "grid.cht", "grid", :local))
+      first = low.lower(AST::RequireNode.new(tok, "grid.clear", "grid", :local))
+      second = low.lower(AST::RequireNode.new(tok, "grid.clear", "grid", :local))
 
       expect(first).to include(an_instance_of(MIR::ModuleNamespace))
       expect(second).to eq([])
@@ -3807,7 +3807,7 @@ RSpec.describe MIRLowering do
       importer.define_singleton_method(:compile_file) { |_path, caller_dir:| imported_mod }
 
       result = lowering(importer: importer, source_dir: Dir.pwd, target: :bc)
-        .lower(AST::RequireNode.new(tok, "empty.cht", "empty", :local))
+        .lower(AST::RequireNode.new(tok, "empty.clear", "empty", :local))
 
       expect(result).to contain_exactly(an_instance_of(MIR::ModuleNamespace))
     end
@@ -4000,37 +4000,37 @@ RSpec.describe MIRLowering do
 
   describe "source fixture MIR lowering corpus" do
     fixture_expectations = {
-      "transpile-tests/253_while_bind.cht" => {
+      "transpile-tests/253_while_bind.clear" => {
         description: "WHILE bind and RESOLVE traversal",
         required_patterns: [/while \(items\.pop\(\)\) \|v\|/, /CheatLib\.weakRcUpgrade/, /CheatLib\.cleanup\([^,]+,\s*rt\.heapAlloc\(\),\s*&__tmp_/]
       },
-      "transpile-tests/305_observable_collect.cht" => {
+      "transpile-tests/305_observable_collect.clear" => {
         description: "observable COLLECT wait/destroy cleanup",
         # wait+destroy lives in CheatLib.cleanup's observable arm now; the
         # codegen contract is "binding cleanup routes through CheatLib.cleanup
         # with heapAlloc, calling running.next() in the body."
         required_patterns: [/CheatLib\.cleanup\([^,]+,\s*rt\.heapAlloc\(\),\s*&running\)/, /try running\.next\(\)/]
       },
-      "transpile-tests/306_observable_default.cht" => {
+      "transpile-tests/306_observable_default.clear" => {
         description: "inline observable aggregate COLLECT accumulator ownership",
         required_patterns: [
           /const __collect_acc_\d+/,
           /CheatLib\.cleanup\(@TypeOf\(__collect_acc_\d+\), rt\.heapAlloc\(\), &__collect_acc_\d+\)/
         ]
       },
-      "transpile-tests/329_versioned_snapshot_mutable.cht" => {
+      "transpile-tests/329_versioned_snapshot_mutable.clear" => {
         description: "versioned mutable snapshot update conflict handling",
         required_patterns: [/\.update\(rt, rt\.heapAlloc\(\)/, /MvccConflict/]
       },
-      "transpile-tests/337_atomic_basic_ops.cht" => {
+      "transpile-tests/337_atomic_basic_ops.clear" => {
         description: "primitive atomic load/store/fetch operations",
         required_patterns: [/\.load\(\)/, /\.store\(/, /\.fetchAdd\(/, /\.fetchSub\(/]
       },
-      "transpile-tests/342_atomic_ptr_read.cht" => {
+      "transpile-tests/342_atomic_ptr_read.clear" => {
         description: "atomic pointer snapshot read guards",
         required_patterns: [/\.read\(rt\)/, /\.release\(\)/]
       },
-      "transpile-tests/349_polymorphic_transaction_acceptance.cht" => {
+      "transpile-tests/349_polymorphic_transaction_acceptance.clear" => {
         description: "polymorphic lock and snapshot dispatch",
         required_patterns: [/acquire\(\)/, /\.update\(rt, rt\.heapAlloc\(\)/, /@hasField/]
       }
@@ -4049,7 +4049,7 @@ RSpec.describe MIRLowering do
     end
 
     it "keeps nested concurrent pipeline sources checker-clean" do
-      mir = lower_fixture_mir("examples/parallel_du/du.cht")
+      mir = lower_fixture_mir("examples/parallel_du/du.clear")
       expect_checker_clean(mir)
 
       zig = emit(mir)
@@ -4116,7 +4116,7 @@ RSpec.describe MIRLowering do
     end
 
     it "lowers BatchWindowOp through structural MIR instead of the legacy pipeline host" do
-      mir = lower_fixture_mir("transpile-tests/243_batch_window.cht")
+      mir = lower_fixture_mir("transpile-tests/243_batch_window.clear")
 
       expect(collect_mir_nodes(mir, MIR::BatchWindowPush)).not_to be_empty
       expect(collect_mir_nodes(mir, MIR::BatchWindowFlush)).not_to be_empty
@@ -4128,7 +4128,7 @@ RSpec.describe MIRLowering do
     end
 
     it "lowers non-mutual THUNK recursion through structural MIR instead of opaque Zig" do
-      mir = lower_fixture_mir("transpile-tests/526_non_mutual_thunk_trampoline.cht")
+      mir = lower_fixture_mir("transpile-tests/526_non_mutual_thunk_trampoline.clear")
 
       thunk_nodes = collect_mir_nodes(mir, MIR::ThunkTrampoline)
       expect(thunk_nodes.length).to eq(1)
@@ -4147,7 +4147,7 @@ RSpec.describe MIRLowering do
     end
 
     it "lowers mutual THUNK recursion through structural MIR instead of opaque Zig" do
-      mir = lower_fixture_mir("transpile-tests/525_mutual_thunk_trampoline.cht")
+      mir = lower_fixture_mir("transpile-tests/525_mutual_thunk_trampoline.clear")
 
       thunk_nodes = collect_mir_nodes(mir, MIR::MutualThunkTrampoline)
       expect(thunk_nodes.map(&:fn_name)).to contain_exactly("is_even", "is_odd")

@@ -1,7 +1,7 @@
 name: Transpile Pure
 
 # Verifies that this branch produces byte-identical .zig output for every
-# .cht file in `transpile-tests/` compared to the merge base. Triggered
+# .clear file in `transpile-tests/` compared to the merge base. Triggered
 # by including `#TRANSPILE_PURE` in the PR description.
 #
 # Use this when you've made a refactor that should NOT change the
@@ -9,7 +9,7 @@ name: Transpile Pure
 # the FnSig/PipelineSite extractions in #4/#3. Editing the PR body to
 # add or remove the marker re-triggers the check.
 #
-# Scope: `transpile-tests/` only. The 408 standalone .cht files there
+# Scope: `transpile-tests/` only. The 408 standalone .clear files there
 # are designed to round-trip through the transpiler without external
 # package paths or runtime args. `examples/` is intentionally excluded
 # — many examples in that tree are driven by bc_emitter or need

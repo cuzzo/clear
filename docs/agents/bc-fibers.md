@@ -6,7 +6,7 @@ real fiber, no concurrency, no lock contention. This works for tests
 that assert order-invariant aggregate results but cannot reproduce
 behaviors that depend on real parallel execution.
 
-The bc_runner (`_bc_runner.cht`) is itself a CLEAR program running on
+The bc_runner (`_bc_runner.clear`) is itself a CLEAR program running on
 the Zig runtime, which DOES have real fibers, real `Locked<T>`, and
 real `sleep()`. So the gap is not runtime capability — it's that the
 BC implementation chose synchronous BG_SPAWN as a deliberate simplification.
@@ -29,7 +29,7 @@ shape of cooperative scheduling (lazy stream generators, cursors).
 the body runs, the caller continues. NEXT blocks until the body
 completes.
 
-**Site:** `_bc_runner.cht`, opcode `82` BG_SPAWN dispatch (~line 3254).
+**Site:** `_bc_runner.clear`, opcode `82` BG_SPAWN dispatch (~line 3254).
 
 **Current shape:**
 ```clear
@@ -68,7 +68,7 @@ completes.
 **Required changes:**
 
 1. **Add `Value.Future { inner: ~Value }` variant** to the Value union
-   in `_bc_runner.cht`. Carries a `Promise(Value)` or equivalent
+   in `_bc_runner.clear`. Carries a `Promise(Value)` or equivalent
    handle. Affects MATCH-on-Value sites: there are many (~30+ sites
    for various ops); each needs an explicit DEFAULT branch (or a
    pass-through). Inventory required.
@@ -113,7 +113,7 @@ completes.
 - Per-fiber `slots`/`stack`/`istack`/etc. are local to each `exec!`
   call (already independent). Good.
 
-**Estimated effort:** 1-2 days, ~50 LOC change in _bc_runner.cht
+**Estimated effort:** 1-2 days, ~50 LOC change in _bc_runner.clear
 plus full BG-test audit (~50 tests).
 
 ## Phase B — Real per-resource locks
@@ -178,7 +178,7 @@ limit (could grow but capped).
    path: if LOCK_ACQUIRE returns error.LockTimeout, jump to the ON
    handler.
 
-**Estimated effort:** 3-5 days. Touches bc_emitter.rb, _bc_runner.cht,
+**Estimated effort:** 3-5 days. Touches bc_emitter.rb, _bc_runner.clear,
 and the WITH lowering path. Many tests use WITH EXCLUSIVE (test 170,
 228, 240, 263, 264, 265, 266, 267, 268, 270) — full audit required.
 

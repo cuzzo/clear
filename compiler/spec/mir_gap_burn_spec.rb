@@ -2043,7 +2043,7 @@ RSpec.describe "MIR gap-burn characterization" do
     importer = ModuleImporter.new(base_dir: "/tmp")
     importer.define_singleton_method(:compile_file) { |_path, caller_dir:| imported_mod }
     bc_require_low = MIRLowering.new(input: MIRLoweringInput.new(importer: importer, source_dir: "/tmp", target: :bc))
-    required = bc_require_low.lower(AST::RequireNode.new(tok, "helper.cht", "helper", :local))
+    required = bc_require_low.lower(AST::RequireNode.new(tok, "helper.clear", "helper", :local))
     expect(required).to include(an_instance_of(MIR::FnDef))
     expect(required).not_to include(an_instance_of(MIR::ModuleNamespace))
 

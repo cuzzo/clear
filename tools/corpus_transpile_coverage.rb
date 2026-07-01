@@ -3,7 +3,7 @@
 #
 # We do NOT run these programs (running exercises the emitted Zig binary,
 # not the Ruby compiler). We transpile each one in a single process so
-# every .cht drives the real pass pipeline — CompilerFrontend.compile →
+# every .clear drives the real pass pipeline — CompilerFrontend.compile →
 # MIRLowering → MIRChecker → MIREmitter — and SimpleCov records the
 # branch arms each shape takes in compiler/ruby. One process, no Zig, no 100x
 # Ruby startup. Per-file errors are swallowed: many examples are module
@@ -33,7 +33,7 @@ OptionParser.new do |o|
   end
 end.parse!
 
-files = Dir.glob(File.join(ROOT, '{examples,benchmarks}', '**', '*.cht'))
+files = Dir.glob(File.join(ROOT, '{examples,benchmarks}', '**', '*.clear'))
               .reject { |f| File.basename(f).start_with?('._') }
               .reject { |f| f.split(File::SEPARATOR).include?('bench.profile') }
               .sort

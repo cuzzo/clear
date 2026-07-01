@@ -142,12 +142,12 @@ RSpec.describe Scope do
     expect(types.keys).to eq([:Thing])
 
     root = Scope.new
-    root.dependencies["main.cht"] = "lib.cht"
+    root.dependencies["main.clear"] = "lib.clear"
     copied = root.dup
-    copied.dependencies["other.cht"] = "dep.cht"
-    expect(root.dependencies["main.cht"]).to eq("lib.cht")
-    expect(root.dependencies["other.cht"]).to be_nil
-    expect(copied.dependencies["other.cht"]).to eq("dep.cht")
+    copied.dependencies["other.clear"] = "dep.clear"
+    expect(root.dependencies["main.clear"]).to eq("lib.clear")
+    expect(root.dependencies["other.clear"]).to be_nil
+    expect(copied.dependencies["other.clear"]).to eq("dep.clear")
   end
 
   it "normalizes legacy hash struct fields into typed StructField values" do

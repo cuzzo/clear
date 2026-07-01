@@ -43,7 +43,7 @@ OptionParser.new do |opts|
     abort "--shard total must be > 0" unless total_shards.positive?
     abort "--shard index must be less than total" unless shard < total_shards
   end
-  opts.on('--include-large', 'Include application-scale .cht files') do
+  opts.on('--include-large', 'Include application-scale .clear files') do
     max_lines = nil
   end
 end.parse!
@@ -147,9 +147,9 @@ def balanced_shard(files, shard, total_shards)
 end
 
 all_files = (
-  Dir.glob(File.join(ROOT, 'transpile-tests', '**', '*.cht')) +
-  Dir.glob(File.join(ROOT, '{examples,benchmarks}', '**', '*.cht')) +
-  Dir.glob(File.join(ROOT, 'transpile-tests', 'fuzz', '*.cht'))
+  Dir.glob(File.join(ROOT, 'transpile-tests', '**', '*.clear')) +
+  Dir.glob(File.join(ROOT, '{examples,benchmarks}', '**', '*.clear')) +
+  Dir.glob(File.join(ROOT, 'transpile-tests', 'fuzz', '*.clear'))
 ).reject { |f| File.basename(f).start_with?('._') }
   .reject { |f| f.split(File::SEPARATOR).include?('bench.profile') }
   .uniq.sort

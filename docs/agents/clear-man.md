@@ -3,16 +3,16 @@
 ## SYNOPSIS
 
 ```
-clear build <file.cht> [-o output] [--release|--safe]
-clear run <file.cht> [-- args...]
-clear test <file.cht>
+clear build <file.clear> [-o output] [--release|--safe]
+clear run <file.clear> [-- args...]
+clear test <file.clear>
 clear help
 ```
 
 ## DESCRIPTION
 
 `clear` is the command-line interface for the CLEAR programming language.
-It transpiles CLEAR source (`.cht` files) to Zig, compiles to a native
+It transpiles CLEAR source (`.clear` files) to Zig, compiles to a native
 binary, and optionally executes or tests the result.
 
 ## COMMANDS
@@ -22,9 +22,9 @@ binary, and optionally executes or tests the result.
 Transpile and compile a CLEAR program to a native binary.
 
 ```
-clear build server.cht              # produces ./server
-clear build server.cht -o bin/srv   # custom output path
-clear build server.cht --safe       # with bounds/overflow checks
+clear build server.clear              # produces ./server
+clear build server.clear -o bin/srv   # custom output path
+clear build server.clear --safe       # with bounds/overflow checks
 ```
 
 The binary is placed in the same directory as the source file by default.
@@ -32,7 +32,7 @@ Use `-o` to specify a different path.
 
 **FFI auto-detection**: Any `.zig` files in the same directory as the
 source are automatically linked as FFI modules. For example, if
-`native_math.zig` exists alongside `main.cht`, it becomes available via
+`native_math.zig` exists alongside `main.clear`, it becomes available via
 `EXTERN FN ... FROM "native_math"`.
 
 ### run
@@ -41,8 +41,8 @@ Build and execute a CLEAR program in one step. The binary is kept after
 execution.
 
 ```
-clear run hello.cht
-clear run server.cht -- --port 8080
+clear run hello.clear
+clear run server.clear -- --port 8080
 ```
 
 Arguments after `--` are passed to the program.
@@ -57,7 +57,7 @@ Build and run a CLEAR file as a test. Uses the module test harness which
 wraps `main()` in a Zig test block with leak detection (GPA allocator).
 
 ```
-clear test my_module.cht
+clear test my_module.clear
 ```
 
 ASSERT statements in the code become test assertions. Memory leaks are
@@ -82,19 +82,19 @@ detected and reported.
 
 ```bash
 # Build and run a simple program
-clear run examples/hello.cht
+clear run examples/hello.clear
 
 # Build an optimized server binary
-clear build benchmarks/server/02_json_api/server.cht -o server
+clear build benchmarks/server/02_json_api/server.clear -o server
 
 # Run with multi-threaded scheduler and jemalloc
 CLEAR_THREADS=0 LD_PRELOAD=/lib/x86_64-linux-gnu/libjemalloc.so.2 ./server
 
 # Test a module with leak detection
-clear test transpile-tests/58_bg.cht
+clear test transpile-tests/58_bg.clear
 
 # Build with safety checks for debugging
-clear build my_app.cht --safe
+clear build my_app.clear --safe
 ```
 
 ## FILES

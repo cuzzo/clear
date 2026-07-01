@@ -6,7 +6,7 @@ require 'open3'
 #
 # Strategy: synthesize a minimal profile dir with a hand-written
 # `locks.txt` in v2 format, run `clear doctor`, assert the diagnosis.
-# Avoids the cost (and flakiness) of building a real CHT program and
+# Avoids the cost (and flakiness) of building a real CLEAR program and
 # running it under perf to produce real telemetry.
 
 RSpec.describe 'clear doctor — MVCC heuristic' do

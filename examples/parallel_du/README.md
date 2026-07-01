@@ -2,19 +2,19 @@
 
 Parallel recursive directory size calculator in CLEAR.
 
-`du.cht` scans the current directory, maps entries through a concurrent
+`du.clear` scans the current directory, maps entries through a concurrent
 pipeline, and sums apparent file sizes for files and directories. It is
 intended as a direct, filesystem-heavy comparison point for Rust's `diskus`.
 
 `bench.rb` is only a harness: it builds the CLEAR binary and times external
-commands. The directory traversal being measured is `du.cht` versus `diskus`,
+commands. The directory traversal being measured is `du.clear` versus `diskus`,
 not Ruby. The harness runs both tools with the same thread count, verifies that
 the reported byte totals match, and reports wall-clock time plus max RSS.
 
 ## Build
 
 ```bash
-BUNDLE_WITHOUT=development ./clear build --optimized examples/parallel_du/du.cht -o examples/parallel_du/pdu
+BUNDLE_WITHOUT=development ./clear build --optimized examples/parallel_du/du.clear -o examples/parallel_du/pdu
 ```
 
 ## Run

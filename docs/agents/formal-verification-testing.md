@@ -36,7 +36,7 @@ renames the two combinatoric sets per the language they belong in:
 | 3 | MIR pass specs | `spec/mir_*_spec.rb`, `spec/affine_ownership_spec.rb`, etc. (~60 files) | MIR node shape, dataflow results | RSpec asserts on MIR node trees |
 | 4 | MIR static checker | `src/mir/mir_checker.rb` (9 invariants) | every `./clear build` | raises on violation pre-codegen |
 | 5 | Transpiler emit specs | `spec/*_emitter_spec.rb`, `spec/test_framework_spec.rb`, `spec/polymorphic_transaction_acceptance_spec.rb` | string-grep emitted Zig | RSpec `expect(zig).to include(...)` |
-| 6 | transpile-tests | `transpile-tests/*.cht` (~447 files) | end-to-end per source | `zig test` + `std.testing.allocator` |
+| 6 | transpile-tests | `transpile-tests/*.clear` (~447 files) | end-to-end per source | `zig test` + `std.testing.allocator` |
 | 7 | Module integration | `transpile-tests/module-integration/` | cross-module compile + run | `zig build test` |
 | 8 | FFI integration | `transpile-tests/ffi-integration/` | extern fn boundary | `zig build test` |
 | 9 | Combinatoric fuzz | `tools/fuzz/` (5 templates, ~48 active cells) | end-to-end per cell | compile + run + leak |
@@ -46,7 +46,7 @@ renames the two combinatoric sets per the language they belong in:
 
 Effective coverage flow:
 
-    .cht source
+    .clear source
         │
         ├─ Parser ───── unit specs (1)
         ├─ Annotator ── unit specs (2) + borrow/move/non-escaping checker
@@ -332,7 +332,7 @@ because they stop at Zig string-grep.
    in the working tree, re-run, expect failures matching the bug
    shape, then `git checkout` to restore. (This was done for commit
    `9fa21926` and the `nested_loop_escape` template.)
-6. If a real bug surfaces, the failing `.cht` is reproducible by
+6. If a real bug surfaces, the failing `.clear` is reproducible by
    filename. Move it to `transpile-tests/` with a descriptive name —
    it becomes a permanent regression test — and fix the bug.
 

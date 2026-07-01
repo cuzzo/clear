@@ -1091,9 +1091,9 @@ class ClearParser
       namespace = pkg_name.gsub(/[^a-zA-Z0-9_]/, '_').sub(/\A(\d)/, '_\1')
       kind      = :package
     else
-      # Local file import: REQUIRE "file.cht"
+      # Local file import: REQUIRE "file.clear"
       path      = raw
-      namespace = File.basename(path, '.cht')
+      namespace = File.basename(path, '.clear')
                       .gsub(/[^a-zA-Z0-9_]/, '_')
                       .sub(/\A(\d)/, '_\1')
       kind      = :local

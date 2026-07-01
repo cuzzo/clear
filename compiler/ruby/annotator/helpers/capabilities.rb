@@ -1232,7 +1232,7 @@ module CapabilityHelper
     end
   end
 
-  sig { params(blk: T.untyped).returns(T.nilable(T.any(SymbolEntry, Type))) }
+  sig { params(blk: T.untyped).returns(T.untyped) }
   def without_capture_moves(&blk)
     T.bind(self, SemanticAnnotator)
     phase_receiver_state.capture_move_suppression_depth += 1

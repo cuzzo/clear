@@ -10,7 +10,7 @@ require_relative "../ruby/semantic/escape_analysis" unless defined?(EscapeAnalys
 # and the surrounding plumbing (param[:symbol] stash, FunctionSignature
 # :sync field). They do NOT route through annotator-time WITH validation,
 # which P1.7 will defer; the annotator-integrated version is pinned by
-# transpile-tests/201_capability_passthrough.cht.disabled (enabled when
+# transpile-tests/201_capability_passthrough.clear.disabled (enabled when
 # P1.7 lands).
 
 RSpec.describe EscapeAnalysis do

@@ -58,12 +58,12 @@ def bench_threads(dir)
 end
 
 def leak_sources(dir)
-  if File.exist?("#{dir}/bench.cht")
-    ["#{dir}/bench.cht"]
-  elsif File.exist?("#{dir}/server.cht")
-    ["#{dir}/server.cht"]
+  if File.exist?("#{dir}/bench.clear")
+    ["#{dir}/bench.clear"]
+  elsif File.exist?("#{dir}/server.clear")
+    ["#{dir}/server.clear"]
   else
-    Dir.glob("#{dir}/bench*.cht").sort
+    Dir.glob("#{dir}/bench*.clear").sort
   end
 end
 
@@ -174,16 +174,16 @@ def measure_min(command, runs = 5, timeout: RUN_TIMEOUT)
 end
 
 def server_benchmark?(dir)
-  File.exist?("#{dir}/client.go") && File.exist?("#{dir}/server.cht")
+  File.exist?("#{dir}/client.go") && File.exist?("#{dir}/server.clear")
 end
 
 def coverage_sources(dir)
-  if File.exist?("#{dir}/bench.cht")
-    ["#{dir}/bench.cht"]
-  elsif File.exist?("#{dir}/server.cht")
-    ["#{dir}/server.cht"]
+  if File.exist?("#{dir}/bench.clear")
+    ["#{dir}/bench.clear"]
+  elsif File.exist?("#{dir}/server.clear")
+    ["#{dir}/server.clear"]
   else
-    Dir.glob("#{dir}/bench*.cht").sort
+    Dir.glob("#{dir}/bench*.clear").sort
   end
 end
 
@@ -198,7 +198,7 @@ def run_coverage_bench(dir)
   passed = 0
   failed = 0
   sources.each do |source|
-    label = File.basename(source, ".cht")
+    label = File.basename(source, ".clear")
     puts "  #{label}:"
     output, status = Open3.capture2e(
       {
@@ -277,7 +277,7 @@ def run_bench(dir)
 
   bto = bench_timeout(dir)
 
-  # Detect server benchmarks (have client.go + server.cht)
+  # Detect server benchmarks (have client.go + server.clear)
   if server_benchmark?(dir)
     # Server benchmarks: only apply timeout if TIMEOUT file exists.
     return run_server_bench(dir, timeout: bto) unless leak_mode
@@ -288,7 +288,7 @@ def run_bench(dir)
   has_c    = !leak_mode && File.exist?("#{dir}/bench.c")
   has_rust = !leak_mode && File.exist?("#{dir}/bench.rs") && system("command -v rustc > /dev/null 2>&1")
   has_go   = !leak_mode && File.exist?("#{dir}/bench.go") && system("command -v go > /dev/null 2>&1")
-  variant_sources = !leak_mode && !File.exist?("#{dir}/bench.cht") ? Dir.glob("#{dir}/bench*.cht").sort : []
+  variant_sources = !leak_mode && !File.exist?("#{dir}/bench.clear") ? Dir.glob("#{dir}/bench*.clear").sort : []
 
   # Clean stale binaries before recompiling
   %w[bench_c bench_rust bench_go bench_clear].each { |b| FileUtils.rm_f("#{dir}/#{b}") }
@@ -343,7 +343,7 @@ def run_bench(dir)
     bench_info = []
 
     variant_sources.each do |source_path|
-      label = File.basename(source_path, ".cht")
+      label = File.basename(source_path, ".clear")
       bin = "#{dir}/bench_clear_#{label}"
       puts "Compiling CLEAR variant #{label}..."
       output = `./clear build --optimized #{source_path} -o #{bin} 2>&1`
@@ -374,14 +374,14 @@ def run_bench(dir)
 
   # 4. Compile CLEAR
   # bench.zt: pure Zig benchmark (runtime-level, no CLEAR transpilation needed).
-  # bench.cht with "@use_zig": scheduler-dependent Zig (e.g. socket I/O, fiber benchmarks).
+  # bench.clear with "@use_zig": scheduler-dependent Zig (e.g. socket I/O, fiber benchmarks).
   has_clear = false
   if leak_mode
     # Leak mode: build with ./clear build (debug, GPA leak detection enabled)
     sources = leak_sources(dir)
     if sources.any?
       sources.each do |source_path|
-        label = File.basename(source_path, ".cht")
+        label = File.basename(source_path, ".clear")
         puts "  #{label}:"
         src = File.read(source_path)
 
@@ -398,7 +398,7 @@ def run_bench(dir)
           # producer/consumer loops often share the same bound, and changing
           # only one side indexes past the reduced producer output.
           patched = apply_leak_substitutions(src, source_path: source_path)
-          build_src = "/tmp/bench_leak_#{File.basename(dir)}_#{label}.cht"
+          build_src = "/tmp/bench_leak_#{File.basename(dir)}_#{label}.clear"
           File.write(build_src, patched)
         end
 
@@ -436,8 +436,8 @@ def run_bench(dir)
     use_zt  = File.exist?("#{dir}/bench.zt")
     use_zig = !use_zt &&
               File.exist?("#{dir}/bench.zig") &&
-              File.exist?("#{dir}/bench.cht") &&
-              File.read("#{dir}/bench.cht").include?("@use_zig")
+              File.exist?("#{dir}/bench.clear") &&
+              File.read("#{dir}/bench.clear").include?("@use_zig")
 
     if use_zt
       puts "Compiling CLEAR (runtime Zig, .zt)..."
@@ -465,9 +465,9 @@ def run_bench(dir)
         puts "WARNING: bench_clear was not generated."
       end
       FileUtils.rm("zig/bench.zig") if File.exist?("zig/bench.zig")
-    elsif File.exist?("#{dir}/bench.cht")
+    elsif File.exist?("#{dir}/bench.clear")
       puts "Compiling CLEAR..."
-      output = `./clear build --optimized #{dir}/bench.cht -o #{dir}/bench_clear 2>&1`
+      output = `./clear build --optimized #{dir}/bench.clear -o #{dir}/bench_clear 2>&1`
       if File.exist?("#{dir}/bench_clear")
         has_clear = true
       else
@@ -656,9 +656,9 @@ def run_server_bench(dir, timeout: RUN_TIMEOUT)
 
   # CLEAR server
   has_clear = false
-  if File.exist?("#{dir}/server.cht")
+  if File.exist?("#{dir}/server.clear")
     puts "Compiling CLEAR server..."
-    output = `./clear build --optimized #{dir}/server.cht -o #{dir}/server_clear 2>&1`
+    output = `./clear build --optimized #{dir}/server.clear -o #{dir}/server_clear 2>&1`
     if File.exist?("#{dir}/server_clear")
       has_clear = true
     else

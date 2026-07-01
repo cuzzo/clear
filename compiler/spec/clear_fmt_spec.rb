@@ -90,14 +90,14 @@ RSpec.describe Formatter do
   end
 
   it "parses and prints a well-formed file to stdout" do
-    path = write("a.cht", "FN main() RETURNS Void ->\n  RETURN;\nEND\n")
+    path = write("a.clear", "FN main() RETURNS Void ->\n  RETURN;\nEND\n")
     out, _, status = run_fmt("--stdout", path)
     expect(status).to eq(0)
     expect(out).to eq("FN main() RETURNS Void ->\n  RETURN;\nEND\n")
   end
 
   it "exits non-zero on a parse error and refuses to write" do
-    path = write("bad.cht", "FN main( RETURNS Void ->\n")
+    path = write("bad.clear", "FN main( RETURNS Void ->\n")
     before = File.read(path)
     _, stderr, status = run_fmt(path)
     expect(status).not_to eq(0)
@@ -106,7 +106,7 @@ RSpec.describe Formatter do
   end
 
   it "normalizes 4-space indent to 2-space and prints the path on change" do
-    path = write("i.cht", "FN main() RETURNS Void ->\n    RETURN;\nEND\n")
+    path = write("i.clear", "FN main() RETURNS Void ->\n    RETURN;\nEND\n")
     out, _, status = run_fmt(path)
     expect(status).to eq(0)
     expect(out.strip).to eq(path)
@@ -114,8 +114,8 @@ RSpec.describe Formatter do
   end
 
   it "--check exits 1 when file is not formatted, 0 when formatted" do
-    bad  = write("b.cht", "FN main() RETURNS Void ->\n    RETURN;\nEND\n")
-    good = write("g.cht", "FN main() RETURNS Void ->\n  RETURN;\nEND\n")
+    bad  = write("b.clear", "FN main() RETURNS Void ->\n    RETURN;\nEND\n")
+    good = write("g.clear", "FN main() RETURNS Void ->\n  RETURN;\nEND\n")
 
     _, _, sb = run_fmt("--check", bad)
     expect(sb).to eq(1)
@@ -125,7 +125,7 @@ RSpec.describe Formatter do
   end
 
   it "expands FN one-liners into multi-line form" do
-    path = write("o.cht", "FN f() RETURNS Int64 -> RETURN 0; END\n")
+    path = write("o.clear", "FN f() RETURNS Int64 -> RETURN 0; END\n")
     out, _, _ = run_fmt("--stdout", path)
     expect(out).to eq("FN f() RETURNS Int64 ->\n  RETURN 0;\nEND\n")
   end
@@ -143,14 +143,14 @@ RSpec.describe Formatter do
         RETURN;
       END
     CLEAR
-    path = write("bang_mutable.cht", src)
+    path = write("bang_mutable.clear", src)
     out, _, _ = run_fmt("--stdout", path)
     expect(out).to include("MUTABLE xs: Int64[]@list = []")
   end
 
   it "wraps FN signature when it exceeds 120 chars" do
     long = (1..6).map { |i| "p#{i}: SomeReallyLongTypeName" }.join(", ")
-    path = write("l.cht", "FN withLotsOfParams(#{long}) RETURNS Int64 ->\n  RETURN 0;\nEND\n")
+    path = write("l.clear", "FN withLotsOfParams(#{long}) RETURNS Int64 ->\n  RETURN 0;\nEND\n")
     out, _, _ = run_fmt("--stdout", path)
     expect(out).to include("FN withLotsOfParams(\n")
     expect(out).to include("\n)\nRETURNS Int64 ->\n")
@@ -168,7 +168,7 @@ RSpec.describe Formatter do
         RETURN;
       END
     CLEAR
-    path = write("w.cht", src)
+    path = write("w.clear", src)
     out, _, _ = run_fmt("--stdout", path)
     expect(out).to include("WITH\n    EXCLUSIVE a AS x,\n    EXCLUSIVE b AS y {")
   end
@@ -180,7 +180,7 @@ RSpec.describe Formatter do
         RETURN v;
       END
     CLEAR
-    path = write("p.cht", src)
+    path = write("p.clear", src)
     out, _, _ = run_fmt("--stdout", path)
     expect(out).to include("\n    |> SELECT _ * 2\n    |> SUM _")
   end
@@ -205,7 +205,7 @@ RSpec.describe Formatter do
         RETURN;
       END
     CLEAR
-    path = write("elseif_fn.cht", src)
+    path = write("elseif_fn.clear", src)
     out, _, _ = run_fmt("--stdout", path)
     expect(out).to include("ELSE_IF entry == \"d:\" THEN\n    RETURN 2;\n  END\n\n  RETURN 0;\nEND\n\nFN scanDir")
     expect(out).to include("\nFN main() RETURNS Void ->\n")
@@ -231,7 +231,7 @@ RSpec.describe Formatter do
         RETURN;
       END
     CLEAR
-    path = write("elseif_balance.cht", src)
+    path = write("elseif_balance.clear", src)
     out, _, _ = run_fmt("--stdout", path)
     expect(out).to include("  ELSE_IF x == 1 THEN\n    RETURN 1;\n  ELSE_IF x == 2 THEN\n")
     expect(out).to include("  ELSE\n    RETURN 3;\n  END\n\n  RETURN 4;\nEND\n\nFN after")
@@ -248,7 +248,7 @@ RSpec.describe Formatter do
           |> REDUCE(0_i64) acc + _;
       END
     CLEAR
-    path = write("pipeline_cont.cht", src)
+    path = write("pipeline_cont.clear", src)
     out, _, _ = run_fmt("--stdout", path)
     # `listAll` is METHOD-flagged in stdlib; fmt rewrites the prefix
     # call to UFCS, then preserves the pipeline continuation indent.
@@ -263,7 +263,7 @@ RSpec.describe Formatter do
         RETURN v;
       END
     CLEAR
-    path = write("r.cht", src)
+    path = write("r.clear", src)
     out, _, _ = run_fmt("--stdout", path)
     # a and b at +1 (4 spaces inside main); RECOVER at +2 (6 spaces).
     expect(out).to match(/^    |> a$/)
@@ -274,7 +274,7 @@ RSpec.describe Formatter do
   it "wraps long call args onto own lines with closing paren at call column" do
     long = (1..8).map { |i| "arg_#{i}_with_long_name" }.join(", ")
     src = "FN main() RETURNS Int64 ->\n  v = callWithLongName(#{long});\n  RETURN v;\nEND\n"
-    path = write("c.cht", src)
+    path = write("c.clear", src)
     out, _, _ = run_fmt("--stdout", path)
     expect(out).to include("v = callWithLongName(\n")
     expect(out).to match(/\n  \);\n/)
@@ -288,7 +288,7 @@ RSpec.describe Formatter do
         RETURN x;
       END
     CLEAR
-    path = write("cap.cht", src)
+    path = write("cap.clear", src)
     out, _, _ = run_fmt("--stdout", path)
     expect(out).to include("value: Int64@locked")
     expect(out).to include("x = 42 @locked")
@@ -296,15 +296,15 @@ RSpec.describe Formatter do
 
   it "emits a width warning for lines exceeding 120 chars" do
     long_str = '"' + ("x" * 140) + '"'
-    path = write("width.cht", "FN main() RETURNS Void ->\n  s = #{long_str};\n  RETURN;\nEND\n")
+    path = write("width.clear", "FN main() RETURNS Void ->\n  s = #{long_str};\n  RETURN;\nEND\n")
     _, stderr, status = run_fmt("--check", path)
     expect(status).to eq(0).or eq(1)
-    expect(stderr).to match(/width\.cht:\d+: warning: line length \d+ exceeds 120/)
+    expect(stderr).to match(/width\.clear:\d+: warning: line length \d+ exceeds 120/)
   end
 
   it "suppresses width warnings with --no-warn" do
     long_str = '"' + ("x" * 140) + '"'
-    path = write("nw.cht", "FN main() RETURNS Void ->\n  s = #{long_str};\n  RETURN;\nEND\n")
+    path = write("nw.clear", "FN main() RETURNS Void ->\n  s = #{long_str};\n  RETURN;\nEND\n")
     _, stderr, _ = run_fmt("--no-warn", "--check", path)
     expect(stderr).not_to include("warning: line length")
   end
@@ -321,7 +321,7 @@ RSpec.describe Formatter do
         RETURN a;
       END
     CLEAR
-    path = write("n_int.cht", src)
+    path = write("n_int.clear", src)
     out, _, _ = run_fmt("--no-warn", "--stdout", path)
     expect(out).to include("a = 1_000_000;")
     expect(out).to include("b = 12_345;")
@@ -338,7 +338,7 @@ RSpec.describe Formatter do
         RETURN;
       END
     CLEAR
-    path = write("n_float.cht", src)
+    path = write("n_float.clear", src)
     out, _, _ = run_fmt("--no-warn", "--stdout", path)
     expect(out).to include("a = 3.141_592_653_589_793;")
     expect(out).to include("b = 1_000_000.5;")
@@ -347,7 +347,7 @@ RSpec.describe Formatter do
 
   it "preserves type suffixes through separator rewriting" do
     src = "FN main() RETURNS Int32 ->\n  a: Int32 = 1000000_i32;\n  RETURN a;\nEND\n"
-    path = write("n_suffix.cht", src)
+    path = write("n_suffix.clear", src)
     out, _, _ = run_fmt("--no-warn", "--stdout", path)
     expect(out).to include("1_000_000_i32")
   end
@@ -356,7 +356,7 @@ RSpec.describe Formatter do
     # `: Int64` annotations stripped by LintFixRewriter (redundant
     # with the literal RHS). Numeric separator rules still apply.
     src = "FN main() RETURNS Int64 ->\n  a: Int64 = 1_0_0_0;\n  b: Int64 = 1000000;\n  RETURN a;\nEND\n"
-    path = write("n_canon.cht", src)
+    path = write("n_canon.clear", src)
     out, _, _ = run_fmt("--no-warn", "--stdout", path)
     expect(out).to include("a = 1000;")
     expect(out).to include("b = 1_000_000;")
@@ -364,7 +364,7 @@ RSpec.describe Formatter do
 
   it "leaves hex / oct / bin literals untouched" do
     src = "FN main() RETURNS Int64 ->\n  a = 0xDEAD_BEEF;\n  b = 0b1010_0101;\n  RETURN 0;\nEND\n"
-    path = write("n_hex.cht", src)
+    path = write("n_hex.clear", src)
     out, _, _ = run_fmt("--no-warn", "--stdout", path)
     expect(out).to include("0xDEAD_BEEF")
     expect(out).to include("0b1010_0101")
@@ -377,7 +377,7 @@ RSpec.describe Formatter do
         RETURN 0;
       END
     CLEAR
-    path = write("drop_pipe.cht", src)
+    path = write("drop_pipe.clear", src)
     out, _, _ = run_fmt("--no-warn", "--stdout", path)
     expect(out).to match(/some_really_really_long_variable_name =\n/)
     expect(out).to match(/^    some_really_really_long_receiver_expression_thing$/)
@@ -387,7 +387,7 @@ RSpec.describe Formatter do
 
   it "keeps receiver inline when first line fits within 80 chars" do
     src = "FN main() RETURNS Int64 ->\n  x = items |> filter |> reduce;\n  RETURN 0;\nEND\n"
-    path = write("nodrop.cht", src)
+    path = write("nodrop.clear", src)
     out, _, _ = run_fmt("--no-warn", "--stdout", path)
     expect(out).to match(/^  x = items$/)
     expect(out).to match(/^    |> filter$/)
@@ -400,7 +400,7 @@ RSpec.describe Formatter do
         RETURN;
       END
     CLEAR
-    path = write("conc.cht", src)
+    path = write("conc.clear", src)
     out, _, _ = run_fmt("--no-warn", "--stdout", path)
     expect(out).to match(/CONCURRENT\(workers: 4, capacity: 8\)\n/)
     expect(out).to match(/^    EACH \{/)
@@ -413,7 +413,7 @@ RSpec.describe Formatter do
         RETURN;
       END
     CLEAR
-    path = write("conc1.cht", src)
+    path = write("conc1.clear", src)
     out, _, _ = run_fmt("--no-warn", "--stdout", path)
     expect(out).to include("CONCURRENT(workers: 4) EACH")
   end
@@ -434,7 +434,7 @@ RSpec.describe Formatter do
         FN main() RETURNS Void ->
         END
       CLEAR
-      path = write("metawrap.cht", src)
+      path = write("metawrap.clear", src)
       out, _, _ = run_fmt("--no-warn", "--stdout", path)
       expect(out).to include("FN bumpIt(c: Counter)\n RETURNS Void\n REQUIRES c: LOCKED\n->\n")
       expect(out).to include("FN main() RETURNS Void ->")
@@ -450,7 +450,7 @@ RSpec.describe Formatter do
           RETURN TRUE;
         END
       CLEAR
-      path = write("metawrap_params.cht", src)
+      path = write("metawrap_params.clear", src)
       out, _, _ = run_fmt("--no-warn", "--stdout", path)
       expect(out).to include("FN transact(x: Account, y: Account, amount: Int64, audit: Bool)\n RETURNS Bool\n REQUIRES x, y: LOCKED\n->\n")
     end
@@ -465,9 +465,9 @@ RSpec.describe Formatter do
             WITH EXCLUSIVE c AS inner { inner.value = inner.value + 1; }
         END
       CLEAR
-      path = write("metawrap_idem.cht", src)
+      path = write("metawrap_idem.clear", src)
       first, _, _ = run_fmt("--no-warn", "--stdout", path)
-      again_path = write("metawrap_idem_2.cht", first)
+      again_path = write("metawrap_idem_2.clear", first)
       second, _, _ = run_fmt("--no-warn", "--stdout", again_path)
       expect(second).to eq(first)
     end
@@ -478,7 +478,7 @@ RSpec.describe Formatter do
           RETURN a + b;
         END
       CLEAR
-      path = write("nometa.cht", src)
+      path = write("nometa.clear", src)
       out, _, _ = run_fmt("--no-warn", "--stdout", path)
       expect(out).to include("FN add(a: Int64, b: Int64) RETURNS Int64 ->")
       expect(out).not_to match(/^ RETURNS/)
@@ -495,7 +495,7 @@ RSpec.describe Formatter do
   describe "tokenizer edge cases" do
     it "preserves triple-quoted strings as a single STRING token" do
       src = "FN main() RETURNS Void ->\n  s = \"\"\"line1\nline2\"\"\";\n  RETURN;\nEND\n"
-      out, _, status = run_fmt("--no-warn", "--stdout", src.then { |s| write("triple.cht", s) })
+      out, _, status = run_fmt("--no-warn", "--stdout", src.then { |s| write("triple.clear", s) })
       expect(status).to eq(0)
       expect(out).to include("\"\"\"line1\nline2\"\"\"")
     end
@@ -504,7 +504,7 @@ RSpec.describe Formatter do
       # `: Float64` annotation also dropped by LintFixRewriter when
       # the literal RHS already determines the type.
       src = "FN main() RETURNS Void ->\n  a: Float64 = 3.14_f64;\n  RETURN;\nEND\n"
-      path = write("f64suffix.cht", src)
+      path = write("f64suffix.clear", src)
       out, _, _ = run_fmt("--no-warn", "--stdout", path)
       expect(out).to include("a = 3.14;")
       expect(out).not_to include("_f64")
@@ -514,7 +514,7 @@ RSpec.describe Formatter do
       # 1_f64 is an integer literal with explicit f64 type -- dropping
       # the suffix would silently change the type to i64.
       src = "FN main() RETURNS Void ->\n  a: Float64 = 1_f64;\n  RETURN;\nEND\n"
-      path = write("f64keep.cht", src)
+      path = write("f64keep.clear", src)
       out, _, _ = run_fmt("--no-warn", "--stdout", path)
       expect(out).to include("1_f64")
     end
@@ -531,7 +531,7 @@ RSpec.describe Formatter do
           RETURN;
         END
       CLEAR
-      path = write("nested_interp.cht", src)
+      path = write("nested_interp.clear", src)
       out, _, status = run_fmt("--no-warn", "--stdout", path)
       expect(status).to eq(0)
       expect(out).to include("\"shape=${ Pair { a: 1, b: 2 } }\"")
@@ -550,7 +550,7 @@ RSpec.describe Formatter do
           RETURN;
         END
       CLEAR
-      path = write("fn_params_meta.cht", src)
+      path = write("fn_params_meta.clear", src)
       out, _, _ = run_fmt("--no-warn", "--stdout", path)
       # Param-list wrap fired (open paren on its own line):
       expect(out).to include("FN bumpItLots(\n")
@@ -569,7 +569,7 @@ RSpec.describe Formatter do
           RETURN r;
         END
       CLEAR
-      path = write("chain4.cht", src)
+      path = write("chain4.clear", src)
       out, _, _ = run_fmt("--no-warn", "--stdout", path)
       expect(out).to match(/^    \.first\(\)$/)
       expect(out).to match(/^    \.filter\(\)$/)
@@ -582,7 +582,7 @@ RSpec.describe Formatter do
       # current line >80 chars at the moment the chain decides to wrap, so
       # the receiver drops to its own line at +1 from the assignment.
       src = "FN main() RETURNS Int64 ->\n  some_really_long_var_name = some_really_really_really_really_long_receiver_expression_name_here.first().second().third().fourth();\n  RETURN 0;\nEND\n"
-      path = write("chain_drop.cht", src)
+      path = write("chain_drop.clear", src)
       out, _, _ = run_fmt("--no-warn", "--stdout", path)
       # receiver dropped to its own line:
       expect(out).to match(/some_really_long_var_name =\n/)
@@ -603,7 +603,7 @@ RSpec.describe Formatter do
           RETURN;
         END
       CLEAR
-      path = write("with_nested.cht", src)
+      path = write("with_nested.clear", src)
       out, _, _ = run_fmt("--no-warn", "--stdout", path)
       # Multi-cap wrap fired despite the parens:
       expect(out).to include("EXCLUSIVE make() AS x,\n")
@@ -620,7 +620,7 @@ RSpec.describe Formatter do
           RETURN v;
         END
       CLEAR
-      path = write("pipe_unary.cht", src)
+      path = write("pipe_unary.clear", src)
       out, _, _ = run_fmt("--no-warn", "--stdout", path)
       expect(out).to include("-1")
     end
@@ -635,7 +635,7 @@ RSpec.describe Formatter do
           RETURN;
         END
       CLEAR
-      path = write("pipe_arrow_unary.cht", src)
+      path = write("pipe_arrow_unary.clear", src)
       out, _, _ = run_fmt("--no-warn", "--stdout", path)
       expect(out).to include("RETURN -x;")
     end
@@ -651,7 +651,7 @@ RSpec.describe Formatter do
           RETURN v;
         END
       CLEAR
-      path = write("concurrent_then_pipe.cht", src)
+      path = write("concurrent_then_pipe.clear", src)
       out, _, status = run_fmt("--no-warn", "--stdout", path)
       expect(status).to eq(0)
       expect(out).to include("CONCURRENT(workers: 4, capacity: 8)")
@@ -669,7 +669,7 @@ RSpec.describe Formatter do
           RETURN n;
         END
       CLEAR
-      path = write("pipe_in_call.cht", src)
+      path = write("pipe_in_call.clear", src)
       out, _, status = run_fmt("--no-warn", "--stdout", path)
       expect(status).to eq(0)
       expect(out).to include("consume(xs |> SELECT _)")
@@ -696,7 +696,7 @@ RSpec.describe Formatter do
           RETURN;
         END
       CLEAR
-      path = write("multiline_fn.cht", src)
+      path = write("multiline_fn.clear", src)
       out, _, status = run_fmt("--no-warn", "--stdout", path)
       expect(status).to eq(0)
       # Each param on its own line.
@@ -717,7 +717,7 @@ RSpec.describe Formatter do
           RETURN;
         END
       CLEAR
-      path = write("multiline_fn_meta.cht", src)
+      path = write("multiline_fn_meta.clear", src)
       out, _, status = run_fmt("--no-warn", "--stdout", path)
       expect(status).to eq(0)
       expect(out).to include("FN bumpItLots(\n")
@@ -741,7 +741,7 @@ RSpec.describe Formatter do
           RETURN;
         END
       CLEAR
-      path = write("multiline_with.cht", src)
+      path = write("multiline_with.clear", src)
       out, _, status = run_fmt("--no-warn", "--stdout", path)
       expect(status).to eq(0)
       # Idempotent re-wrap.
@@ -1406,7 +1406,7 @@ RSpec.describe Formatter do
       expect(out).to include(expected)
     end
 
-    # Repro from examples/minivm/vm.cht: a MATCH arm whose body starts
+    # Repro from examples/minivm/vm.clear: a MATCH arm whose body starts
     # with a line comment (`# tag`) above a single statement was
     # collapsed onto one line as `Pat ->  # tag stmt;,`. Because `#`
     # extends to end-of-line, the comment then ate the statement and
@@ -1458,7 +1458,7 @@ RSpec.describe Formatter do
   end
 
   describe "IF/ELSE_IF chain symmetric expansion" do
-    # Repro from examples/minivm/vm.cht: an `IF cond THEN body END /
+    # Repro from examples/minivm/vm.clear: an `IF cond THEN body END /
     # ELSE_IF cond THEN body END / ... END` chain where each branch
     # body is a one-line MATCH was getting expanded ASYMMETRICALLY --
     # the first IF's body broke across lines properly, but every
@@ -1501,7 +1501,7 @@ RSpec.describe Formatter do
       end
     end
 
-    # Companion case discovered while stress-testing on vm.cht: nested
+    # Companion case discovered while stress-testing on vm.clear: nested
     # IF chains inside MATCH arm bodies must get the same recursive
     # one-line MATCH expansion as top-level IF bodies.
     it "expands IF chains nested inside a MATCH arm body" do
@@ -1759,14 +1759,14 @@ RSpec.describe Formatter do
 
   it "is idempotent on the whole transpile-tests corpus" do
     root = File.expand_path("../../transpile-tests", __dir__)
-    files = Dir.glob(File.join(root, "**", "*.cht"))
+    files = Dir.glob(File.join(root, "**", "*.clear"))
     expect(files).not_to be_empty
 
     drifts = []
     files.each do |f|
       first, _, s1 = run_fmt("--no-warn", "--stdout", f)
       next unless s1 == 0
-      second_in = File.join(@tmp, "tmp_idem.cht")
+      second_in = File.join(@tmp, "tmp_idem.clear")
       File.write(second_in, first)
       second, _, _ = run_fmt("--no-warn", "--stdout", second_in)
       drifts << f if second != first

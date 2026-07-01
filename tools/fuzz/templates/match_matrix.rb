@@ -5,7 +5,7 @@
 # variant, union unit variant, enum, with and without DEFAULT. The
 # corpus exercised only a couple of these shapes.
 #
-# Confirmed syntax (transpile-tests/52_union.cht): UNION with payload
+# Confirmed syntax (transpile-tests/52_union.clear): UNION with payload
 # and unit variants, `Type{ Variant: v }` construction, `PARTIAL MATCH
 # subj START Type.Variant -> ...; DEFAULT -> ...; END`.
 #

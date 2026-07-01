@@ -1486,7 +1486,7 @@ module AST
     attr_accessor :sync_policy
     attr_accessor :mir_pass_state
   end
-  # kind: :local (REQUIRE "file.cht") or :package (REQUIRE "pkg:name")
+  # kind: :local (REQUIRE "file.clear") or :package (REQUIRE "pkg:name")
   RequireNode  = Struct.new(:token, :path, :namespace, :kind) { include Locatable }
   FunctionDef  = Struct.new(:token, :name, :params, :captures, :return_type, :return_lifetime, :body, :catch_clauses, :default_catch, :visibility, :deferred_drops, :uses_frame) do
     extend T::Sig

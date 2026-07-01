@@ -7,10 +7,10 @@
 # in MethodRewriter and PredicateRewriter). The tests under spec/ exercise
 # specific formatter rules but can't catch every pathological interaction.
 # This tool gives us a much wider net: every benchmark / example / test
-# .cht file becomes a "did fmt change emitted Zig?" sanity check.
+# .clear file becomes a "did fmt change emitted Zig?" sanity check.
 #
 # Usage:
-#   FmtVerifier.verify("benchmarks/sequential/01_call_overhead/bench.cht")
+#   FmtVerifier.verify("benchmarks/sequential/01_call_overhead/bench.clear")
 #   # => Result(ok: true, ...)
 #
 #   FmtVerifier.verify_dir("benchmarks/sequential")
@@ -39,7 +39,7 @@ module FmtVerifier
   end
 
 
-  # Verify a single .cht file. Returns a Result struct.
+  # Verify a single .clear file. Returns a Result struct.
   #
   # source_dir: directory used by the importer to resolve REQUIRE paths.
   # Defaults to the file's containing directory, which is what `clear`
@@ -90,12 +90,12 @@ module FmtVerifier
       .gsub(/__([A-Za-z]\w*?)_(\d+)(_\d+)?\b/) { "__#{$1}_N#{$3}" }
   end
 
-  # Verify every .cht file under `dir` (recursive). Useful for sweeping
+  # Verify every .clear file under `dir` (recursive). Useful for sweeping
   # large corpora like benchmarks/ or examples/. Returns an Array of
   # Results in path order.
   sig { params(dir: String).returns(Array) }
   def self.verify_dir(dir)
-    paths = Dir.glob(File.join(dir, '**', '*.cht')).sort
+    paths = Dir.glob(File.join(dir, '**', '*.clear')).sort
     paths.map { |p| verify(p) }
   end
 

@@ -2860,7 +2860,7 @@ RSpec.describe SemanticAnnotator do
       let(:helper) { "PUB FN add(a: Float64, b: Float64) RETURNS Float64 -> RETURN a + b; END" }
       let(:main) {
         <<~FLUX
-          REQUIRE "helper.cht";
+          REQUIRE "helper.clear";
           FN caller() RETURNS !Float64 ->
             RETURN add(1, 2);
           END
@@ -2868,18 +2868,18 @@ RSpec.describe SemanticAnnotator do
       }
 
       it "annotates without error" do
-        expect { annotate_with_require(main, helpers: { "helper.cht" => helper }) }.not_to raise_error
+        expect { annotate_with_require(main, helpers: { "helper.clear" => helper }) }.not_to raise_error
       end
 
       it "resolves the call return type from the imported signature" do
-        ast = annotate_with_require(main, helpers: { "helper.cht" => helper })
+        ast = annotate_with_require(main, helpers: { "helper.clear" => helper })
         fn_node = ast.statements.last
         return_node = fn_node.body.last
         expect(return_node.value.full_type).to eq(:Float64)
       end
 
       it "tags the FuncCall node with the module namespace alias" do
-        ast = annotate_with_require(main, helpers: { "helper.cht" => helper })
+        ast = annotate_with_require(main, helpers: { "helper.clear" => helper })
         fn_node   = ast.statements.last
         call_node = fn_node.body.last.value
         expect(call_node.module_alias).to eq("helper")
@@ -2890,7 +2890,7 @@ RSpec.describe SemanticAnnotator do
       let(:helper) { "FN multiply(x: Float64, y: Float64) RETURNS Float64 -> RETURN x * y; END" }
       let(:main) {
         <<~FLUX
-          REQUIRE "helper.cht";
+          REQUIRE "helper.clear";
           FN caller() RETURNS !Float64 ->
             RETURN multiply(3, 4);
           END
@@ -2898,7 +2898,7 @@ RSpec.describe SemanticAnnotator do
       }
 
       it "annotates without error (same-dir package access is allowed)" do
-        expect { annotate_with_require(main, helpers: { "helper.cht" => helper }) }.not_to raise_error
+        expect { annotate_with_require(main, helpers: { "helper.clear" => helper }) }.not_to raise_error
       end
     end
 
@@ -2906,7 +2906,7 @@ RSpec.describe SemanticAnnotator do
       let(:helper) { "PRIVATE FN secret(x: Float64) RETURNS Float64 -> RETURN x; END" }
       let(:main) {
         <<~FLUX
-          REQUIRE "helper.cht";
+          REQUIRE "helper.clear";
           FN caller() RETURNS !Float64 ->
             RETURN secret(1);
           END
@@ -2915,7 +2915,7 @@ RSpec.describe SemanticAnnotator do
 
       it "raises an Undefined function error" do
         expect {
-          annotate_with_require(main, helpers: { "helper.cht" => helper })
+          annotate_with_require(main, helpers: { "helper.clear" => helper })
         }.to raise_error(/Undefined function 'secret'/)
       end
     end
@@ -2924,7 +2924,7 @@ RSpec.describe SemanticAnnotator do
       let(:helper) { "PUB FN greet() RETURNS Float64 -> RETURN 42; END" }
       let(:main) {
         <<~FLUX
-          REQUIRE "helper.cht" AS myLib;
+          REQUIRE "helper.clear" AS myLib;
           FN caller() RETURNS !Float64 ->
             RETURN greet();
           END
@@ -2932,13 +2932,13 @@ RSpec.describe SemanticAnnotator do
       }
 
       it "uses the alias as the namespace on the parsed RequireNode" do
-        ast = annotate_with_require(main, helpers: { "helper.cht" => helper })
+        ast = annotate_with_require(main, helpers: { "helper.clear" => helper })
         require_node = ast.statements.first
         expect(require_node.namespace).to eq("myLib")
       end
 
       it "tags the FuncCall with the alias" do
-        ast = annotate_with_require(main, helpers: { "helper.cht" => helper })
+        ast = annotate_with_require(main, helpers: { "helper.clear" => helper })
         fn_node   = ast.statements.last
         call_node = fn_node.body.last.value
         expect(call_node.module_alias).to eq("myLib")
@@ -2948,12 +2948,12 @@ RSpec.describe SemanticAnnotator do
     context "circular dependency detection" do
       it "raises a circular dependency error" do
         dir = Dir.mktmpdir
-        # a.cht REQUIREs b.cht, b.cht REQUIREs a.cht
-        File.write(File.join(dir, "a.cht"), 'REQUIRE "b.cht";')
-        File.write(File.join(dir, "b.cht"), 'REQUIRE "a.cht";')
+        # a.clear REQUIREs b.clear, b.clear REQUIREs a.clear
+        File.write(File.join(dir, "a.clear"), 'REQUIRE "b.clear";')
+        File.write(File.join(dir, "b.clear"), 'REQUIRE "a.clear";')
 
         compiler  = ModuleImporter.new(base_dir: dir)
-        main_code = 'REQUIRE "a.cht";'
+        main_code = 'REQUIRE "a.clear";'
         tokens    = Lexer.new(main_code).tokenize
         ast       = ClearParser.new(tokens, main_code).parse
         annotator = SemanticAnnotator.new(importer: compiler, source_dir: dir)
@@ -2967,7 +2967,7 @@ RSpec.describe SemanticAnnotator do
     context "missing required file" do
       it "raises a file-not-found error" do
         expect {
-          annotate_with_require('REQUIRE "nonexistent.cht";', helpers: {})
+          annotate_with_require('REQUIRE "nonexistent.clear";', helpers: {})
         }.to raise_error(/file not found/)
       end
     end
@@ -2983,7 +2983,7 @@ RSpec.describe SemanticAnnotator do
       }
       let(:main) {
         <<~FLUX
-          REQUIRE "helper.cht";
+          REQUIRE "helper.clear";
           FN caller() RETURNS !Float64 ->
             p = makePoint(1, 2);
             RETURN p.x;
@@ -2992,7 +2992,7 @@ RSpec.describe SemanticAnnotator do
       }
 
       it "makes the imported struct type available" do
-        expect { annotate_with_require(main, helpers: { "helper.cht" => helper }) }.not_to raise_error
+        expect { annotate_with_require(main, helpers: { "helper.clear" => helper }) }.not_to raise_error
       end
     end
 
@@ -3004,7 +3004,7 @@ RSpec.describe SemanticAnnotator do
       }
       let(:main) {
         <<~FLUX
-          REQUIRE "helper.cht";
+          REQUIRE "helper.clear";
           FN caller() RETURNS !Float64 ->
             r = Result{ Ok: 42.0 };
             PARTIAL MATCH r START
@@ -3016,7 +3016,7 @@ RSpec.describe SemanticAnnotator do
       }
 
       it "makes the imported union type available" do
-        expect { annotate_with_require(main, helpers: { "helper.cht" => helper }) }.not_to raise_error
+        expect { annotate_with_require(main, helpers: { "helper.clear" => helper }) }.not_to raise_error
       end
     end
 
@@ -3028,7 +3028,7 @@ RSpec.describe SemanticAnnotator do
       }
       let(:main) {
         <<~FLUX
-          REQUIRE "helper.cht";
+          REQUIRE "helper.clear";
           FN caller() RETURNS !Bool ->
             c = Color.Red;
             RETURN c == Color.Red;
@@ -3037,7 +3037,7 @@ RSpec.describe SemanticAnnotator do
       }
 
       it "makes the imported enum type available" do
-        expect { annotate_with_require(main, helpers: { "helper.cht" => helper }) }.not_to raise_error
+        expect { annotate_with_require(main, helpers: { "helper.clear" => helper }) }.not_to raise_error
       end
     end
 
@@ -3050,7 +3050,7 @@ RSpec.describe SemanticAnnotator do
       }
       let(:main) {
         <<~FLUX
-          REQUIRE "helper.cht";
+          REQUIRE "helper.clear";
           FN caller() RETURNS !Float64 ->
             s = Secret{ code: 42.0 };
             RETURN s.code;
@@ -3060,7 +3060,7 @@ RSpec.describe SemanticAnnotator do
 
       it "rejects usage of a private struct from the required file" do
         expect {
-          annotate_with_require(main, helpers: { "helper.cht" => helper })
+          annotate_with_require(main, helpers: { "helper.clear" => helper })
         }.to raise_error(/Secret/)
       end
     end

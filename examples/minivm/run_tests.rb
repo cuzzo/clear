@@ -1,12 +1,12 @@
 #!/usr/bin/env ruby
 # MiniVM runner policy:
-# - The primary correctness target is interpreter_test.cht.
+# - The primary correctness target is interpreter_test.clear.
 # - The broader transpile-tests runner is historical/aspirational coverage.
 
 MINIVM_CLEAR = File.join(__dir__, "clear")
 TRANSPILER = File.join(__dir__, "bc_run.rb")
 TEST_DIR = File.expand_path("../../transpile-tests", __dir__)
-INTERPRETER_TEST = File.join(__dir__, "interpreter_test.cht")
+INTERPRETER_TEST = File.join(__dir__, "interpreter_test.clear")
 REGISTER_TRANSPILE_ALLOWLIST = File.join(__dir__, "register-transpile-allowlist.txt")
 
 require_relative "vm_golden_harness"
@@ -206,7 +206,7 @@ REGISTER_ROADMAP = [
 ].freeze
 
 def print_register_roadmap
-  total = Dir.glob(File.join(TEST_DIR, "*.cht")).length
+  total = Dir.glob(File.join(TEST_DIR, "*.clear")).length
   passing = read_allowlist(REGISTER_TRANSPILE_ALLOWLIST).length
   pct = total.positive? ? (passing.to_f / total * 100) : 0.0
   puts
@@ -248,7 +248,7 @@ def run_primary_test
   $?.exitstatus || 1
 end
 
-# Compile a .cht file with the bc emitter and print the recorded
+# Compile a .clear file with the bc emitter and print the recorded
 # shared-memory event stream + BG dispatch points. This is the
 # observation surface a future deterministic-replay scheduler will
 # enumerate over; today it lets developers see which operations the
@@ -395,7 +395,7 @@ end
 def resolve_transpile_test(name)
   return name if File.exist?(name)
 
-  candidate = File.join(TEST_DIR, "#{name}.cht")
+  candidate = File.join(TEST_DIR, "#{name}.clear")
   return candidate if File.exist?(candidate)
 
   candidate = File.join(TEST_DIR, name)
@@ -474,7 +474,7 @@ def run_historical_suite(tests, label)
   error = 0
 
   tests.each do |name|
-    path = name.include?("/") ? name : File.join(TEST_DIR, "#{name}.cht")
+    path = name.include?("/") ? name : File.join(TEST_DIR, "#{name}.clear")
     unless File.exist?(path)
       puts "  SKIP  #{name} (file not found)"
       next
@@ -503,18 +503,18 @@ def run_historical_suite(tests, label)
 end
 
 def run_vm_coverage
-  # Walk every .cht file in TEST_DIR (except ffi/module integration dirs and
+  # Walk every .clear file in TEST_DIR (except ffi/module integration dirs and
   # helpers). Skip VM_UNSUPPORTED outright. Bucket everything else by outcome
   # category so we can see at a glance what stands between us and 100%.
   exclude = %w[require_helper require_types_helper]
-  all = Dir.glob(File.join(TEST_DIR, "*.cht")).sort.reject do |p|
-    name = File.basename(p, ".cht")
+  all = Dir.glob(File.join(TEST_DIR, "*.clear")).sort.reject do |p|
+    name = File.basename(p, ".clear")
     exclude.include?(name)
   end
 
   buckets = Hash.new { |h, k| h[k] = [] }
   all.each do |path|
-    name = File.basename(path, ".cht")
+    name = File.basename(path, ".clear")
     if VM_UNSUPPORTED.key?(name)
       buckets[:unsupported] << [name, VM_UNSUPPORTED[name]]
       next
@@ -552,7 +552,7 @@ end
 def usage
   puts "Usage:"
   puts "  ruby examples/minivm/run_tests.rb"
-  puts "    Runs the primary MiniVM regression target: interpreter_test.cht"
+  puts "    Runs the primary MiniVM regression target: interpreter_test.clear"
   puts
   puts "  ruby examples/minivm/run_tests.rb --historical"
   puts "    Runs the broader historical transpile-tests coverage"
@@ -574,14 +574,14 @@ def usage
   puts "    Runs transpile tests through the selected MiniVM target. Register"
   puts "    defaults to register-transpile-allowlist.txt."
   puts
-  puts "  ruby examples/minivm/run_tests.rb path/to/test.cht"
+  puts "  ruby examples/minivm/run_tests.rb path/to/test.clear"
   puts "    Runs a single transpile test through bc_run"
   puts
   puts "  ruby examples/minivm/run_tests.rb --roadmap [--detail]"
   puts "    Prints the register VM language-coverage roadmap, ranked"
   puts "    P0/P1/P2 with expected test count and effort estimate."
   puts
-  puts "  ruby examples/minivm/run_tests.rb --concurrency-report file.cht ..."
+  puts "  ruby examples/minivm/run_tests.rb --concurrency-report file.clear ..."
   puts "    Compiles each file with the bc emitter and prints its"
   puts "    shared-memory event stream + BG dispatch points -- the"
   puts "    observation surface a future deterministic-replay"
@@ -626,7 +626,7 @@ elsif ARGV[0] == "--roadmap"
 elsif ARGV[0] == "--concurrency-report"
   paths = ARGV[1..]
   if paths.nil? || paths.empty?
-    $stderr.puts "Usage: ruby examples/minivm/run_tests.rb --concurrency-report <file.cht> [file.cht ...]"
+    $stderr.puts "Usage: ruby examples/minivm/run_tests.rb --concurrency-report <file.clear> [file.clear ...]"
     exit 1
   end
   ok = print_concurrency_report(paths)
@@ -649,8 +649,8 @@ elsif ARGV[0] == "--golden"
   ok = system("bundle", "exec", "rspec", spec_path)
   exit(ok ? 0 : 1)
 elsif ARGV[0] == "--discover"
-  all = Dir.glob(File.join(TEST_DIR, "*.cht"))
-    .map { |f| File.basename(f, ".cht") }
+  all = Dir.glob(File.join(TEST_DIR, "*.clear"))
+    .map { |f| File.basename(f, ".clear") }
     .select { |f| f.match?(/^\d+_/) && f.split("_").first.to_i <= 60 }
     .sort_by { |f| f.split("_").first.to_i }
   ok = run_historical_suite(all, "Historical Discovery: all tests <= 60")

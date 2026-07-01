@@ -1,7 +1,7 @@
 " Vim syntax file
 " Language: CLEAR
 " Filetype: clear
-" File extension: .cht
+" File extension: .clear
 "
 " Install for Neovim:
 "   ln -s /path/to/cheat/syntaxes/cheat.vim ~/.config/nvim/syntax/clear.vim
@@ -9,7 +9,7 @@
 "   ln -s /path/to/cheat/syntaxes/cheat.vim ~/.vim/syntax/clear.vim
 "
 " The buffer must have `set filetype=clear` (the LSP autocmd in
-" `src/lsp/README.md` handles this for `.cht` files).
+" `src/lsp/README.md` handles this for `.clear` files).
 
 if exists("b:current_syntax")
   finish

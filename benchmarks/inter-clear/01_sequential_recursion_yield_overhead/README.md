@@ -33,7 +33,7 @@ DELTA reflects the actual yield-check cost.
 ## Run
 
 ```bash
-./clear build benchmarks/inter-clear/01_sequential_recursion_yield_overhead/bench.cht --optimized -o /tmp/bench_yield
+./clear build benchmarks/inter-clear/01_sequential_recursion_yield_overhead/bench.clear --optimized -o /tmp/bench_yield
 for i in 1 2 3 4 5; do /tmp/bench_yield; done
 ```
 

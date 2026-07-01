@@ -63,7 +63,7 @@ run unit-specs bundle exec prspec compiler/spec/
 # Source tracing slows MiniVM subprocesses enough that the normal 10s
 # golden timeout can trip even when the VM is healthy. Keep the override
 # scoped to nil-kill collection so ordinary integration specs stay strict.
-# Native MiniVM register binaries build vm.cht through a traced compiler and
+# Native MiniVM register binaries build vm.clear through a traced compiler and
 # contribute little field/ivar type evidence relative to the compiler pipeline
 # stages below, so reuse the existing CI skip path for that native rebuild.
 run integration-specs env CI=1 MINIVM_GOLDEN_TIMEOUT_SECONDS="${NIL_KILL_MINIVM_GOLDEN_TIMEOUT_SECONDS:-120}" bundle exec prspec compiler/spec/ --tag integration
@@ -77,7 +77,7 @@ run nil-kill-specs bash -c 'export NIL_KILL_TMP_DIR="tmp/nil-kill-spec-$$"; bund
 #    parallel. We skip `zig test all-tests.zig` (pure Zig, zero Ruby
 #    value). Was one serial process over ~468 files -- the biggest
 #    single-core bottleneck.
-par_ruby transpile-corpus transpile-tests -maxdepth 1 -name '*.cht' -- transpile-tests/gen.rb --single
+par_ruby transpile-corpus transpile-tests -maxdepth 1 -name '*.clear' -- transpile-tests/gen.rb --single
 
 # 5. Fuzz matrix -- randomized inputs hammer lexer/parser/annotator/MIR.
 run fuzz-matrix ruby tools/fuzz/run.rb --matrix \
@@ -126,7 +126,7 @@ export -f build_one
 {
   local_t0=$SECONDS
   echo "=== nil-kill workload [examples-build] start (jobs=$JOBS) ==="
-  if ! find examples benchmarks -path '*/bench.profile/*' -prune -o -type f -name '*.cht' -print0 \
+  if ! find examples benchmarks -path '*/bench.profile/*' -prune -o -type f -name '*.clear' -print0 \
     | xargs -0 -P "$JOBS" -I{} bash -c 'build_one "$@"' _ {}; then
     record_stage_failure "examples-build"
   fi
@@ -138,7 +138,7 @@ run module-integration bash -c 'cd transpile-tests/module-integration && zig bui
 run ffi-integration    bash -c 'cd transpile-tests/ffi-integration && zig build test'
 
 # 9. Example test files -- gen.rb --single is the Ruby half (skip Zig).
-par_ruby example-tests examples/testing -maxdepth 1 -name '*.cht' -- transpile-tests/gen.rb --single
+par_ruby example-tests examples/testing -maxdepth 1 -name '*.clear' -- transpile-tests/gen.rb --single
 
 echo "=== nil-kill workload complete in $((SECONDS - TOTAL_START))s (jobs=$JOBS) ==="
 if ((${#FAILED_STAGES[@]} > 0)); then

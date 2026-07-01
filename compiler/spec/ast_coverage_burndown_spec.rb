@@ -89,10 +89,10 @@ RSpec.describe "AST coverage burndown" do
 
   describe "fixable diagnostics primitives" do
     it "serializes spans and validates fix confidence" do
-      span = Span.new(file: "main.cht", line: 2, col: 4, length: 3)
+      span = Span.new(file: "main.clear", line: 2, col: 4, length: 3)
 
       expect(span.to_h).to eq(
-        file: "main.cht", line: 2, col: 4, length: 3,
+        file: "main.clear", line: 2, col: 4, length: 3,
         end_line: 2, end_col: 7
       )
       expect {
@@ -170,7 +170,7 @@ RSpec.describe "AST coverage burndown" do
       expect(AST.type_declaration?(extern_struct)).to be(true)
       expect(AST.type_declaration?(enum_def)).to be(true)
       expect(AST.type_declaration?(union_def)).to be(true)
-      expect(AST.top_level_declaration?(AST::RequireNode.new(tok, "file.cht", "file", :local))).to be(true)
+      expect(AST.top_level_declaration?(AST::RequireNode.new(tok, "file.clear", "file", :local))).to be(true)
       expect(AST.top_level_declaration?(AST::ExternFnDecl.new(tok, "native", [], nil, "mod", {}))).to be(true)
       expect(Class.new { include AST::HasBodies }.new.child_bodies).to eq([])
     end

@@ -1,4 +1,4 @@
-(* Small fib benchmark for vm.cht testing - fib(20) keeps the recursion
+(* Small fib benchmark for vm.clear testing - fib(20) keeps the recursion
    depth inside CLEAR's default 64KB fiber stack. *)
 
 MODULE FibIntSmall;

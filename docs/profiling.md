@@ -3,7 +3,7 @@
 ## Quick Start
 
 ```bash
-./clear profile myapp.cht
+./clear profile myapp.clear
 ./clear doctor myapp.profile/
 ```
 
@@ -20,7 +20,7 @@
 ### Step 1: Profile
 
 ```bash
-./clear profile benchmarks/concurrent/09_kvstore/bench.cht
+./clear profile benchmarks/concurrent/09_kvstore/bench.clear
 ./clear doctor benchmarks/concurrent/09_kvstore/bench.profile/
 ```
 

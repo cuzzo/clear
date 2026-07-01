@@ -56,7 +56,7 @@ class ZigTranspiler
   end
 
   # Single-file entry point (used by the CLI and simple callers).
-  # pkg_paths: { "name" => "/abs/path/to/lib.cht" } for REQUIRE "pkg:name" resolution.
+  # pkg_paths: { "name" => "/abs/path/to/lib.clear" } for REQUIRE "pkg:name" resolution.
   sig { params(cheat_code: String, source_dir: String, pkg_paths: T::Hash[String, String], use_c_allocator: T::Boolean, use_debug_allocator: T::Boolean, test_mode: T::Boolean, strict_test: T::Boolean, exact_tiers: T::Hash[Integer, Symbol], main_tier: T.nilable(Symbol), default_stack: T.nilable(String)).returns(T.nilable(String)) }
   def transpile(cheat_code, source_dir: @source_dir, pkg_paths: {}, use_c_allocator: false, use_debug_allocator: false, test_mode: false, strict_test: false, exact_tiers: {}, main_tier: nil, default_stack: nil)
     transpile_mir(cheat_code, source_dir: source_dir, pkg_paths: pkg_paths,
@@ -291,7 +291,7 @@ if __FILE__ == $0
     opts.on('--module', 'Emit as a Zig module (uses @import("cheat_runtime"), no runtime footer)') do
       options[:mode] = :module
     end
-    opts.on('--pkg SPEC', 'Register a package path as "name=/abs/path/to/lib.cht"') do |spec|
+    opts.on('--pkg SPEC', 'Register a package path as "name=/abs/path/to/lib.clear"') do |spec|
       name, path = spec.split('=', 2)
       options[:pkg_paths][name] = File.expand_path(path)
     end
@@ -345,6 +345,6 @@ if __FILE__ == $0
                                 default_stack: options[:default_stack])
     end
   else
-    $stderr.puts "Usage: ruby transpiler.rb [--module] [--pkg name=/path/to/lib.cht] <script.cht>"
+    $stderr.puts "Usage: ruby transpiler.rb [--module] [--pkg name=/path/to/lib.clear] <script.clear>"
   end
 end

@@ -13,7 +13,7 @@ the others, not against gem status.
 ## Generality / no baked-in lexicon
 
 The earlier objection was correct: the first cut baked CLEAR jargon
-(`.cht`, `fuzz`, `nil-kill`) and CLEAR's FFI method names into the
+(`.clear`, `fuzz`, `nil-kill`) and CLEAR's FFI method names into the
 gem. Fixed:
 
 - **Vocabulary is generic.** Category actions are

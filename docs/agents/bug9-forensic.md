@@ -1,6 +1,6 @@
 # Bug #9 Forensic — 1.2 and 1.3
 
-Bug under investigation: [`transpile-tests/known-failing/bug9_list_in_struct_in_list.cht`](../../transpile-tests/known-failing/bug9_list_in_struct_in_list.cht).
+Bug under investigation: [`transpile-tests/known-failing/bug9_list_in_struct_in_list.clear`](../../transpile-tests/known-failing/bug9_list_in_struct_in_list.clear).
 Symptom: `items[i].data[0]` returns the wrong value (or the 0xAAAA debug-fill
 pattern) because the inner `@list`'s backing storage is freed by the loop's
 `restoreLoopMark` while still referenced by the outer `items` list.
@@ -152,7 +152,7 @@ Three dimensions: `inner_kind ∈ {list, array}`, `loop_kind ∈ {while, for}`,
 
 The body of every cell looks like:
 
-```cht
+```clear
 MUTABLE inner: Int64[]@list = [];
 inner.append(i);
 inner.append(i + 1_i64);
@@ -162,7 +162,7 @@ outer.append(inner);          # ← direct identifier escape
 **The escapee is always a bare Identifier passed directly to
 `outer.append(...)`**. The matrix never produces:
 
-```cht
+```clear
 outer.append(Item{ data: inner });    # struct-wrapped
 outer.append(Wrapper.Some(inner));    # union-variant-wrapped
 outer.append([inner, inner2]);        # list-literal-wrapped
@@ -188,7 +188,7 @@ analysis.
 
 A natural fifth axis is **transitivity depth** — does the wrapping struct
 itself live inside another struct, which is the actual append target? Bug
-#9's reproducer goes one level deep; real codebases (the vm.cht loader
+#9's reproducer goes one level deep; real codebases (the vm.clear loader
 that triggered the discovery) go two or three.
 
 ### Why the existing cells didn't accidentally cover it

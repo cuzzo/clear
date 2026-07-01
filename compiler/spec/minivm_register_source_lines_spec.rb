@@ -4,7 +4,7 @@
 # register bc emitter, through the optimizer/allocator pipeline, and
 # arrives at the runner as a parallel `Int64[]` (4-byte LE-encoded by
 # bc_run.rb). The runner's `formatVmError` consults it to produce
-# `vm.cht:<line>` style crash messages instead of bare `ip=<N>`.
+# `vm.clear:<line>` style crash messages instead of bare `ip=<N>`.
 #
 # These tests exercise the Ruby-side plumbing only -- the runner
 # integration is covered by the broader VM smoke + bench corpus.
@@ -130,7 +130,7 @@ require_relative "../../examples/minivm/register_bc_emitter"
 
 RSpec.describe "Per-statement source-line attribution" do
   it "stamps each register opcode with the source line of its originating CLEAR statement" do
-    fixture = File.expand_path("../../examples/minivm/fib21.cht", __dir__)
+    fixture = File.expand_path("../../examples/minivm/fib21.clear", __dir__)
     src = File.read(fixture)
     src_dir = File.dirname(fixture)
 
@@ -158,7 +158,7 @@ RSpec.describe "Per-statement source-line attribution" do
       .group_by { |insn| insn.source_line }
       .transform_values { |insns| insns.map { |i| spec::BY_CODE[i.opcode].name } }
 
-    # fib21.cht:
+    # fib21.clear:
     #   line 2:  IF n <= 1_i64 THEN
     #   line 3:  RETURN n;
     #   line 5:  RETURN fib(n - 1_i64) + fib(n - 2_i64);
@@ -171,7 +171,7 @@ RSpec.describe "Per-statement source-line attribution" do
   end
 
   it "emits a register-to-variable-name table joining emitter virtuals with allocator physicals" do
-    fixture = File.expand_path("../../examples/minivm/fib21.cht", __dir__)
+    fixture = File.expand_path("../../examples/minivm/fib21.clear", __dir__)
     src = File.read(fixture)
     src_dir = File.dirname(fixture)
 
@@ -215,7 +215,7 @@ RSpec.describe "Per-statement source-line attribution" do
     CHT
 
     Dir.mktmpdir do |dir|
-      File.write(File.join(dir, "main.cht"), src)
+      File.write(File.join(dir, "main.clear"), src)
       imp = ModuleImporter.new(base_dir: dir)
       fe = CompilerFrontend.compile(src, importer: imp, source_dir: dir)
       lo = MIRLowering.new(input: MIRLoweringInput.new(

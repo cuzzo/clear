@@ -25,7 +25,7 @@ WITH(InvalidJson), DEFAULT).
 
 ## Runtime-faithful (no shadow error model)
 
-The VM runner (`vm.cht`) holds a real `rt: *Runtime`. It uses the
+The VM runner (`vm.clear`) holds a real `rt: *Runtime`. It uses the
 REAL error context, not a reimplementation:
 
 - `Runtime.__error: ErrorContext { kind: ErrorKind(u8 enum), error_name: u32, message: []u8, clear_line: u32 }`
@@ -295,7 +295,7 @@ Still PENDING (orthogonal):
 
 - No Zig parsing; only `clause_meta`/`clause_bodies`/`error_reassigns`.
 - Real `rt.__error` + real `rt.setError`/`matches*`; no shadow model.
-- New `vm.cht` runtime control flow -> exercise via the register
+- New `vm.clear` runtime control flow -> exercise via the register
   debugger integration spec (CLAUDE.md runtime-change rule); the VM
   is single-threaded so no Loom/Hammer needed for `errored` (no
   atomics/threads added).

@@ -6,7 +6,7 @@ require "set"
 class CircularDependencyError < StandardError; end
 
 # Orchestrates multi-file compilation with a shared module cache.
-# Prevents circular dependencies and compiles each .cht file exactly once.
+# Prevents circular dependencies and compiles each .clear file exactly once.
 class ModuleImporter
     extend T::Sig
 
@@ -23,7 +23,7 @@ class ModuleImporter
     :type_items       # structural MIR type items for REQUIRE inlining
   )
 
-  # First-party stdlib packages live under <repo>/stdlib/<name>/src/lib.cht
+  # First-party stdlib packages live under <repo>/stdlib/<name>/src/lib.clear
   # and are auto-resolvable as `REQUIRE "pkg:<name>"` without an explicit
   # --pkg flag. Computed from this file's location:
   # compiler/ruby/compiler/module_importer.rb -> ../../../stdlib.
@@ -37,15 +37,15 @@ class ModuleImporter
     @base_dir     = T.let(File.expand_path(base_dir), String)
     @module_cache = T.let({}, T::Hash[T.untyped, T.untyped])  # abs_path => CompiledModule
     @compiling    = T.let(Set.new, T::Set[T.untyped])  # abs_paths currently being compiled (cycle detection)
-    # pkg_paths: { "name" => "/abs/path/to/lib.cht" } -- registered package sources.
+    # pkg_paths: { "name" => "/abs/path/to/lib.clear" } -- registered package sources.
     @pkg_paths    = T.let(pkg_paths.transform_keys(&:to_s), T::Hash[T.untyped, T.untyped])
     @stdlib_root  = T.let(stdlib_root, String)
   end
 
-  # Compile a .cht package by name and return a CompiledModule.
+  # Compile a .clear package by name and return a CompiledModule.
   # Resolution order:
   #   1. Explicitly registered packages (via --pkg flag)
-  #   2. First-party stdlib at <stdlib_root>/<name>/src/lib.cht
+  #   2. First-party stdlib at <stdlib_root>/<name>/src/lib.clear
   #
   # @param pkg_name [String] Package name (e.g. "math", "testing")
   sig { params(pkg_name: String, caller_dir: String).returns(T.nilable(ModuleImporter::CompiledModule)) }
@@ -53,8 +53,8 @@ class ModuleImporter
     path = @pkg_paths[pkg_name.to_s] || resolve_stdlib_package(pkg_name)
     unless path
       raise "REQUIRE error: unknown package '#{pkg_name}'. " \
-            "Register it with --pkg #{pkg_name}=/path/to/lib.cht " \
-            "or place it under #{@stdlib_root}/#{pkg_name}/src/lib.cht"
+            "Register it with --pkg #{pkg_name}=/path/to/lib.clear " \
+            "or place it under #{@stdlib_root}/#{pkg_name}/src/lib.clear"
     end
     compile_file(path, caller_dir: File.dirname(File.expand_path(path)))
   end
@@ -62,12 +62,12 @@ class ModuleImporter
   sig { params(pkg_name: String).returns(T.nilable(String)) }
   def resolve_stdlib_package(pkg_name)
     return nil unless @stdlib_root
-    candidate = File.join(@stdlib_root, pkg_name.to_s, 'src', 'lib.cht')
+    candidate = File.join(@stdlib_root, pkg_name.to_s, 'src', 'lib.clear')
     File.exist?(candidate) ? candidate : nil
   end
 
   # True if `pkg_name` resolves to a first-party stdlib package
-  # (lives under `<stdlib_root>/<name>/src/lib.cht`) rather than a
+  # (lives under `<stdlib_root>/<name>/src/lib.clear`) rather than a
   # user-registered package. The distinction matters at lowering
   # time: stdlib packages must be inlined into single-binary builds
   # (no separate .zig file is produced for them), whereas
@@ -78,9 +78,9 @@ class ModuleImporter
     !@pkg_paths.key?(pkg_name.to_s) && !resolve_stdlib_package(pkg_name).nil?
   end
 
-  # Compile a .cht file and return a CompiledModule (cached after first call).
+  # Compile a .clear file and return a CompiledModule (cached after first call).
   #
-  # @param path [String] Relative or absolute path to the .cht file
+  # @param path [String] Relative or absolute path to the .clear file
   # @param caller_dir [String] Directory of the file issuing the REQUIRE
   sig { params(path: String, caller_dir: String).returns(T.nilable(ModuleImporter::CompiledModule)) }
   def compile_file(path, caller_dir: @base_dir)

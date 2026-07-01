@@ -256,7 +256,7 @@ END
 
 CLI:
 ```
-clear test --focus auth_test.cht        # only FOCUS-marked specs
+clear test --focus auth_test.clear        # only FOCUS-marked specs
 clear test --tag slow                   # only specs tagged slow
 clear test --tag slow --tag integration # union of tags
 clear test --skip-tag slow              # exclude tagged slow
@@ -320,7 +320,7 @@ TEST Counter / increments on bump (failed)
   expected counter == Counter{ value: 1, generation: 0 }
   actual                  Counter{ value: 2, generation: 0 }
                                  ^---^
-  at counter_test.cht:14
+  at counter_test.clear:14
 ```
 
 **Implementation:** `ASSERT a == b` lowers to emit a CLEAR-side
@@ -412,15 +412,15 @@ is the predicate vocabulary and the diff-on-failure printer.
 stdlib/
   test/
     src/
-      lib.cht              # public re-exports
-      predicates.cht       # .nil? .present? .empty? .between? ...
-      diff.cht             # equality-failure rendering
-      cli.cht              # --tag / --focus translation to Zig --test-filter
+      lib.clear              # public re-exports
+      predicates.clear       # .nil? .present? .empty? .between? ...
+      diff.clear             # equality-failure rendering
+      cli.clear              # --tag / --focus translation to Zig --test-filter
     spec/
-      predicates_spec.cht  # the test framework, tested in itself
-      hooks_spec.cht
-      let_spec.cht
-      diff_spec.cht
+      predicates_spec.clear  # the test framework, tested in itself
+      hooks_spec.clear
+      let_spec.clear
+      diff_spec.clear
 ```
 
 The `spec/` directory inside the package is the **dogfood test
@@ -438,11 +438,11 @@ API or the language has a hole.
    helpers rather than each carrying their own. Worth a small
    refactor of `STUB` lowering when `LET` lands.
 
-2. **Test discovery.** `clear test path/` already walks `*.cht`.
-   Do we want a `_spec.cht` suffix convention so framework-style
+2. **Test discovery.** `clear test path/` already walks `*.clear`.
+   Do we want a `_spec.clear` suffix convention so framework-style
    spec files vs application-level test files are visually
    distinguishable? Lean yes for stdlib's own tests
-   (`predicates_spec.cht`); leave `_test.cht` available as the
+   (`predicates_spec.clear`); leave `_test.clear` available as the
    convention for application tests. Both runnable.
 
 3. **Diff color.** Terminal color codes in failure output, with a
@@ -466,7 +466,7 @@ API or the language has a hole.
 Each step lands as its own commit; review stays manageable, and at
 every step the framework is incrementally more useful.
 
-1. **`stdlib/test/` skeleton** — empty `lib.cht`, package resolver
+1. **`stdlib/test/` skeleton** — empty `lib.clear`, package resolver
    registration, smoke spec proving `REQUIRE "pkg:test"` works.
 2. **Predicate library** — `.nil?`, `.present?`, `.empty?`, `.zero?`,
    `.positive?`, `.between?`, `.close_to?`, `.starts_with?`,

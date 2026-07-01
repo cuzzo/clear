@@ -3121,7 +3121,7 @@ class MIRLowering
 
   sig { params(node: AST::RequireNode).returns(LoweredMir) }
   def lower_require(node)
-    # Stdlib packages auto-resolve to <repo>/stdlib/<name>/src/lib.cht
+    # Stdlib packages auto-resolve to <repo>/stdlib/<name>/src/lib.clear
     # and are inlined into single-binary builds (no separate .zig is
     # produced for them). User-registered packages (--pkg name=...)
     # keep the @import emission so an outer build.zig can orchestrate
@@ -3592,7 +3592,7 @@ class MIRLowering
   # c (received via REQUIRES LOCKED) emits the polymorphic `c.*` deref
   # path instead of the direct `c.ctrl.data.*` Arc-unwrap, and the Zig
   # compile fails with "cannot dereference non-pointer type Arc(...)".
-  # See transpile-tests/257_concurrent_capture_locked_param.cht.
+  # See transpile-tests/257_concurrent_capture_locked_param.clear.
   sig do
     type_parameters(:U)
       .params(

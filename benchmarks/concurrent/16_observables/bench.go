@@ -1,5 +1,5 @@
 // Concurrent observable stream-sum benchmark — Go.
-// Mirrors bench.cht: producer stream -> consumer sum -> join.
+// Mirrors bench.clear: producer stream -> consumer sum -> join.
 package main
 
 import (

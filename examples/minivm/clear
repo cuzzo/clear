@@ -2,12 +2,12 @@
 # CLEAR Scheme VM - run CLEAR programs on the Scheme interpreter
 #
 # Usage:
-#   ./clear run foo.cht          # transpile + run on Scheme VM
+#   ./clear run foo.clear          # transpile + run on Scheme VM
 #   ./clear repl                 # interactive REPL
-#   ./clear repl foo.cht         # REPL with file's definitions loaded
-#   ./clear transpile foo.cht    # emit S-expressions to stdout
+#   ./clear repl foo.clear         # REPL with file's definitions loaded
+#   ./clear transpile foo.clear    # emit S-expressions to stdout
 #   ./clear test                 # run compliance test suite
-#   ./clear test foo.cht         # run single test
+#   ./clear test foo.clear         # run single test
 
 require "readline"
 require "tempfile"
@@ -35,7 +35,7 @@ load File.join(DIR, "scheme_transpiler.rb")
 
 class InterpreterBridge
   def initialize
-    @interp_path = File.join(DIR, "interpreter.cht")
+    @interp_path = File.join(DIR, "interpreter.clear")
     @interp_src = File.read(@interp_path)
     # Strip from main() onward
     main_idx = @interp_src.index(/^FN main\(\)/)
@@ -73,7 +73,7 @@ class InterpreterBridge
 
   # Run a CLEAR source file (the full interpreter + custom main)
   def run_clear(source, silent: false)
-    tmp = File.join(DIR, "_vm_run.cht")
+    tmp = File.join(DIR, "_vm_run.clear")
     File.write(tmp, source)
     output = `#{PROJECT_ROOT}/clear run --use-c-allocator #{tmp} 2>&1`
     File.delete(tmp) if File.exist?(tmp)
@@ -161,7 +161,7 @@ class InterpreterBridge
         next
       when ":reload"
         if @file_defs.empty?
-          puts "No files loaded. Use :load <file.cht>"
+          puts "No files loaded. Use :load <file.clear>"
         else
           @file_defs.keys.each { |path| load_file(path) }
         end
@@ -175,7 +175,7 @@ class InterpreterBridge
         next
       when ":watch"
         if @file_defs.empty?
-          puts "No files loaded. Use :load <file.cht> first."
+          puts "No files loaded. Use :load <file.clear> first."
         else
           @watching = !@watching
           if @watching
@@ -246,7 +246,7 @@ class InterpreterBridge
         next
       when ":help", ":h"
         puts <<~HELP
-          :load <file.cht>     Load/reload a CLEAR source file
+          :load <file.clear>     Load/reload a CLEAR source file
           :watch               Toggle auto-reload on file changes
           :reload              Reload all loaded files (hot reload)
           :files               List loaded files
@@ -519,7 +519,7 @@ class InterpreterBridge
       File.write("/tmp/#{f}", "")
     end
 
-    tmp = File.join(DIR, "_vm_run.cht")
+    tmp = File.join(DIR, "_vm_run.clear")
     File.write(tmp, source)
 
     # Compile first
@@ -666,7 +666,7 @@ class InterpreterBridge
   end
 
   def run_clear(source, silent: false)
-    tmp = File.join(DIR, "_vm_run.cht")
+    tmp = File.join(DIR, "_vm_run.clear")
     File.write(tmp, source)
     output = `#{PROJECT_ROOT}/clear run #{tmp} 2>&1`
     File.delete(tmp) if File.exist?(tmp)
@@ -695,12 +695,12 @@ def usage
     CLEAR Scheme VM
 
     Usage:
-      ./clear run <file.cht>       Transpile + run on Scheme VM
+      ./clear run <file.clear>       Transpile + run on Scheme VM
       ./clear repl                 Interactive REPL
-      ./clear repl <file.cht>      REPL with file's definitions loaded
-      ./clear transpile <file.cht> Emit S-expressions to stdout
+      ./clear repl <file.clear>      REPL with file's definitions loaded
+      ./clear transpile <file.clear> Emit S-expressions to stdout
       ./clear test                 Run compliance test suite (31 tests)
-      ./clear test <file.cht>      Run single file as test
+      ./clear test <file.clear>      Run single file as test
   USAGE
   exit 1
 end

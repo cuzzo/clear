@@ -127,8 +127,8 @@ RSpec.describe Pprof::Profile do
 
   it 'deduplicates strings, functions, and string columns' do
     pb = described_class.new
-    pb.add_function(name: 'foo', filename: 'a.cht')
-    second_id = pb.add_function(name: 'foo', filename: 'a.cht')
+    pb.add_function(name: 'foo', filename: 'a.clear')
+    second_id = pb.add_function(name: 'foo', filename: 'a.clear')
     expect(second_id).to eq(1)
     decoded = ProtoTestDecoder.parse(pb.send(:encode))
     expect(decoded[5].length).to eq(1) # one Function entry only
@@ -136,9 +136,9 @@ RSpec.describe Pprof::Profile do
 
   it 'keeps functions distinct by system name and filename' do
     pb = described_class.new
-    first_id = pb.add_function(name: 'foo', filename: 'a.cht', system_name: 'foo.impl')
-    second_id = pb.add_function(name: 'foo', filename: 'b.cht', system_name: 'foo.impl')
-    third_id = pb.add_function(name: 'foo', filename: 'a.cht', system_name: 'foo.other')
+    first_id = pb.add_function(name: 'foo', filename: 'a.clear', system_name: 'foo.impl')
+    second_id = pb.add_function(name: 'foo', filename: 'b.clear', system_name: 'foo.impl')
+    third_id = pb.add_function(name: 'foo', filename: 'a.clear', system_name: 'foo.other')
 
     expect([first_id, second_id, third_id]).to eq([1, 2, 3])
     decoded = ProtoTestDecoder.parse(pb.send(:encode))
@@ -147,8 +147,8 @@ RSpec.describe Pprof::Profile do
 
   it 'keeps functions distinct by source name even when system name and filename match' do
     pb = described_class.new
-    first_id = pb.add_function(name: 'foo', filename: 'a.cht', system_name: 'same.impl')
-    second_id = pb.add_function(name: 'bar', filename: 'a.cht', system_name: 'same.impl')
+    first_id = pb.add_function(name: 'foo', filename: 'a.clear', system_name: 'same.impl')
+    second_id = pb.add_function(name: 'bar', filename: 'a.clear', system_name: 'same.impl')
 
     expect([first_id, second_id]).to eq([1, 2])
     decoded = ProtoTestDecoder.parse(pb.send(:encode))
@@ -186,7 +186,7 @@ RSpec.describe Pprof::Profile do
     pb.set_period_type('space', 'bytes', 99)
     pb.default_sample_type = 'alloc_space'
     mapping_id = pb.add_mapping(binary: 'bin', build_id: 'build')
-    fid = pb.add_function(name: 'foo', filename: 'a.cht', system_name: 'Foo.sys', start_line: 7)
+    fid = pb.add_function(name: 'foo', filename: 'a.clear', system_name: 'Foo.sys', start_line: 7)
     lid = pb.add_location(function_id: fid, line: 42, address: 0x1234)
     pb.add_sample([lid], [10], label: 'hot', count: 3)
 
@@ -200,8 +200,8 @@ RSpec.describe Pprof::Profile do
       8, 40, 7, 50, 0, 50, 11, 97, 108, 108, 111, 99, 95, 115, 112, 97,
       99, 101, 50, 5, 98, 121, 116, 101, 115, 50, 5, 115, 112, 97, 99, 101,
       50, 3, 98, 105, 110, 50, 5, 98, 117, 105, 108, 100, 50, 3, 102, 111,
-      111, 50, 7, 70, 111, 111, 46, 115, 121, 115, 50, 5, 97, 46, 99, 104,
-      116, 50, 5, 108, 97, 98, 101, 108, 50, 3, 104, 111, 116, 50, 5, 99,
+      111, 50, 7, 70, 111, 111, 46, 115, 121, 115, 50, 7, 97, 46, 99, 108,
+      101, 97, 114, 50, 5, 108, 97, 98, 101, 108, 50, 3, 104, 111, 116, 50, 5, 99,
       111, 117, 110, 116, 72, 123, 80, 200, 3, 90, 4, 8, 3, 16, 2, 96,
       99, 112, 1,
     ])
@@ -217,7 +217,7 @@ RSpec.describe Pprof::Profile do
       'build',
       'foo',
       'Foo.sys',
-      'a.cht',
+      'a.clear',
       'label',
       'hot',
       'count',
@@ -276,7 +276,7 @@ RSpec.describe Pprof::Profile do
     pb.add_sample_type('alloc_objects', 'count')
     pb.add_sample_type('alloc_space',   'bytes')
     pb.set_period_type('space', 'bytes', 1)
-    fid = pb.add_function(name: 'allocBlob', filename: 'foo.cht')
+    fid = pb.add_function(name: 'allocBlob', filename: 'foo.clear')
     lid = pb.add_location(function_id: fid, line: 42, address: 0x1234)
     pb.add_sample([lid], [10, 1024], addr: '0x1234')
 
@@ -337,7 +337,7 @@ RSpec.describe Pprof::Profile do
     pb = described_class.new
     pb.add_mapping(binary: '/path/to/litedb', build_id: 'abc123')
     pb.add_sample_type('alloc_space', 'bytes')
-    fid = pb.add_function(name: 'foo', filename: 'foo.cht')
+    fid = pb.add_function(name: 'foo', filename: 'foo.clear')
     lid = pb.add_location(function_id: fid, line: 1, address: 0x100)
     pb.add_sample([lid], [10])
 
@@ -878,7 +878,7 @@ RSpec.describe PprofConverter do
 
   describe '.build_location_index' do
     it 'uses resolved function names, filenames, line numbers, and fallback addresses' do
-      source = File.join(@profile_dir, 'source.cht')
+      source = File.join(@profile_dir, 'source.clear')
       File.write(source, 'FN main() RETURNS Void -> RETURN; END')
       pb = Pprof::Profile.new
       resolved = {
@@ -898,19 +898,19 @@ RSpec.describe PprofConverter do
   end
 
   describe '.clear_source_path' do
-    it 'uses source.cht in legacy auto-detect mode when present' do
-      source = File.join(@profile_dir, 'source.cht')
+    it 'uses source.clear in legacy auto-detect mode when present' do
+      source = File.join(@profile_dir, 'source.clear')
       File.write(source, 'FN main() RETURNS Void -> RETURN; END')
 
       expect(described_class.send(:clear_source_path, @profile_dir, '/build/file.zig:3')).to eq(source)
     end
 
-    it 'falls back to addr2line path in legacy auto-detect mode without source.cht' do
+    it 'falls back to addr2line path in legacy auto-detect mode without source.clear' do
       expect(described_class.send(:clear_source_path, @profile_dir, '/build/file.zig:3')).to eq('/build/file.zig')
     end
 
-    it 'returns source.cht for user Zig frames when present' do
-      source = File.join(@profile_dir, 'source.cht')
+    it 'returns source.clear for user Zig frames when present' do
+      source = File.join(@profile_dir, 'source.clear')
       File.write(source, 'FN main() RETURNS Void -> RETURN; END')
 
       expect(described_class.send(:clear_source_path, @profile_dir, '/build/._clear_tmp_foo.zig:3', is_user_zig: true)).to eq(source)

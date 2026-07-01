@@ -6,20 +6,20 @@
 
 ## MiniVM Rules
 
-Active MiniVM: `examples/minivm/bc_emitter.rb` + `examples/minivm/_bc_runner.cht`.
+Active MiniVM: `examples/minivm/bc_emitter.rb` + `examples/minivm/_bc_runner.clear`.
 
 **NEVER parse Zig code strings in the MiniVM.** `MIR::InlineZig` and `MIR::RawZig` are Zig backend artifacts. The bc_emitter must use the AST fallback (`compile_ast_stmt` / `compile_ast_expr`); never inspect `.code`. If no AST is available, raise `Unimplemented`.
 
 ## Build & Test
 
 ```bash
-./clear build foo.cht                # Default Zig backend (~2s, safety on, 64KB stacks)
-./clear build foo.cht --optimized    # LLVM, ReleaseFast (~22s, 16KB stacks)
-./clear build foo.cht --safe         # LLVM, ReleaseSafe (~28s)
-./clear build foo.cht --stack-check  # Verify per-fn stack usage via objdump
-./clear run foo.cht [-- args]
+./clear build foo.clear                # Default Zig backend (~2s, safety on, 64KB stacks)
+./clear build foo.clear --optimized    # LLVM, ReleaseFast (~22s, 16KB stacks)
+./clear build foo.clear --safe         # LLVM, ReleaseSafe (~28s)
+./clear build foo.clear --stack-check  # Verify per-fn stack usage via objdump
+./clear run foo.clear [-- args]
 ./clear test <file|dir>              # Test with leak detection
-./clear profile foo.cht              # Heap/CPU/syscall profiling
+./clear profile foo.clear              # Heap/CPU/syscall profiling
 ./clear doctor foo.profile/          # Analyze profile, print advice
 ```
 
@@ -27,7 +27,7 @@ Default build has Zig safety checks (bounds/overflow/null) but no `__morestack` 
 
 **Test suites (run after compiler changes):**
 - `bundle exec prspec spec/` — Ruby specs, parallel, ~1s
-- `./clear test transpile-tests/` — all .cht transpile tests
+- `./clear test transpile-tests/` — all .clear transpile tests
 - `cd transpile-tests/module-integration && zig build test` — package integration
 - `cd transpile-tests/ffi-integration && zig build test` — FFI integration
 - `ruby tools/fuzz/run.rb --matrix --skip-quarantined --out /tmp/clear-fuzz-ci --clean` — full fuzz matrix minus quarantine (run last). Quarantined templates (tools/fuzz/quarantine.txt) have a known bug; `--only-quarantined` runs just those.

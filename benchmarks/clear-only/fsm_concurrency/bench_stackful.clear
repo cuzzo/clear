@@ -1,0 +1,30 @@
+# Stackful baseline. Same body as bench_fsm.clear, @xl forces full
+# per-fiber stack allocation via spawnBest (instead of the FSM
+# ctx-struct path).
+#
+# The body wraps sleep in `napFor` because the stackful path's
+# transpiler currently mis-rewrites bare `sleep(...)` inside a BG
+# (emits `rt.sleep(...)` instead of `__rt_bg0.sleep(...)`).
+# Routing through a user fn dodges that pre-existing bug.
+# Functionally identical to bench_fsm.clear: each fiber suspends
+# once for ~50ms.
+
+FN napFor(ms: Int64) RETURNS !Void ->
+  sleep(ms);
+  RETURN;
+END
+
+FN main() RETURNS Void ->
+  count: Int64 = 20000_i64;
+
+  MUTABLE futures: ~Void[]@list = [];
+  FOR i IN (0 ..< count) DO
+    futures.append(BG { @standard -> napFor(50); });
+  END
+
+  FOR j IN (0 ..< count) DO
+    NEXT futures[j];
+  END
+
+  RETURN;
+END

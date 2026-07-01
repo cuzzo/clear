@@ -1971,7 +1971,7 @@ RSpec.describe SemanticAnnotator do
     end
 
     it "does not emit verifier-only cleanup mirrors for moved locked BG captures" do
-      out = transpile_fn(File.read(File.expand_path("../../transpile-tests/263_with_lock_contention.cht", __dir__)))
+      out = transpile_fn(File.read(File.expand_path("../../transpile-tests/263_with_lock_contention.clear", __dir__)))
 
       expect(out).not_to include("var __ctx_0.c_moved")
       expect(out).not_to include("CheatLib.cleanup(@TypeOf(__ctx_0.c)")

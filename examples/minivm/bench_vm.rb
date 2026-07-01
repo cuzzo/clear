@@ -46,7 +46,7 @@ parser = OptionParser.new do |opts|
     options[:all_vm_bench] = true
     options[:compare_languages] = true
   end
-  opts.on("--all-benchmarks", "Survey every benchmark .cht under benchmarks/ with the VM targets") do
+  opts.on("--all-benchmarks", "Survey every benchmark .clear under benchmarks/ with the VM targets") do
     options[:suite] = :all_benchmarks
     options[:all_benchmarks] = true
     options[:allowlist] = nil
@@ -114,13 +114,13 @@ end
 def resolve_transpile_test(name)
   return name if File.exist?(name)
 
-  root_cht = File.expand_path(File.join(MiniVM::Golden::ROOT, "#{name}.cht"))
+  root_cht = File.expand_path(File.join(MiniVM::Golden::ROOT, "#{name}.clear"))
   return root_cht if File.exist?(root_cht)
 
   root_relative = File.expand_path(File.join(MiniVM::Golden::ROOT, name))
   return root_relative if File.exist?(root_relative)
 
-  candidate = File.join(TEST_DIR, "#{name}.cht")
+  candidate = File.join(TEST_DIR, "#{name}.clear")
   return candidate if File.exist?(candidate)
 
   candidate = File.join(TEST_DIR, name)
@@ -158,12 +158,12 @@ def bench_ms(raw)
 end
 
 def sibling_benchmark(path, ext)
-  sibling = path.sub(/\.cht\z/, ext)
+  sibling = path.sub(/\.clear\z/, ext)
   File.exist?(sibling) ? sibling : nil
 end
 
 def benchmark_sources(root = File.join(MiniVM::Golden::ROOT, "benchmarks"))
-  Dir.glob(File.join(root, "**", "*.cht")).sort.reject do |path|
+  Dir.glob(File.join(root, "**", "*.clear")).sort.reject do |path|
     parts = path.split(File::SEPARATOR)
     File.basename(path).start_with?("minivm-golden-") ||
       parts.any? { |part| part.start_with?(".") } ||
@@ -211,7 +211,7 @@ def profile_register_bytecode!(stats, bytecode)
 end
 
 def warm_optimized_register_runner!
-  warm_source = File.join(MiniVM::Golden::ROOT, "examples", "minivm", "vm-tests", "basics", "return_i64.cht")
+  warm_source = File.join(MiniVM::Golden::ROOT, "examples", "minivm", "vm-tests", "basics", "return_i64.clear")
   return unless File.exist?(warm_source)
 
   env = { "BC_OPT" => "1" }
@@ -283,7 +283,7 @@ paths = if options[:golden]
         elsif options[:suite] == :all_benchmarks && ARGV.empty?
           benchmark_sources
         elsif options[:suite] == :vm_bench && options[:all_vm_bench] && ARGV.empty?
-          Dir.glob(File.join(MiniVM::Golden::ROOT, "benchmarks", "vm", "*.cht")).sort
+          Dir.glob(File.join(MiniVM::Golden::ROOT, "benchmarks", "vm", "*.clear")).sort
         elsif options[:suite] == :vm_bench && ARGV.empty?
           read_allowlist(options[:allowlist]).map { |name| resolve_transpile_test(name) }
         elsif ARGV.empty?

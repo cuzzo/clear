@@ -78,7 +78,7 @@ Pass 4: serialize (emit Int64[] ops + Value[] consts)
 exec!() register dispatch loop
 ```
 
-All passes are Ruby. The VM (interpreter.cht) only sees physical register opcodes.
+All passes are Ruby. The VM (interpreter.clear) only sees physical register opcodes.
 
 ### Current Pipeline Hook
 

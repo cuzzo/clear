@@ -129,37 +129,37 @@ RSpec.describe "register-VM @shared:locked scalar store cell" do
   # If it regressed to inline, 263's `ASSERT timed_out == 1` would
   # pass for the wrong reason; this catches it at emit time.
   it "compiles 263_with_lock_contention to >= 2 real fibers" do
-    src = File.read(File.expand_path("../../transpile-tests/263_with_lock_contention.cht", __dir__))
+    src = File.read(File.expand_path("../../transpile-tests/263_with_lock_contention.clear", __dir__))
     ops = emit(src)
     expect(ops.count { |o| o == code(:BGSPAWN) }).to be >= 2
     expect(ops).to include(code(:LOCKACQ))
   end
 
   it "compiles typed versioned snapshot read and transaction MIR in the register backend" do
-    expect { emit_fixture("328_versioned_snapshot_read.cht") }.not_to raise_error
-    expect { emit_fixture("329_versioned_snapshot_mutable.cht") }.not_to raise_error
+    expect { emit_fixture("328_versioned_snapshot_read.clear") }.not_to raise_error
+    expect { emit_fixture("329_versioned_snapshot_mutable.clear") }.not_to raise_error
   end
 
   it "compiles typed multi-cell snapshot transaction MIR in the register backend" do
-    expect { emit_fixture("330_versioned_multi_cell.cht") }.not_to raise_error
+    expect { emit_fixture("330_versioned_multi_cell.clear") }.not_to raise_error
   end
 
   it "compiles typed WITH MATCH arm MIR in the register backend" do
-    expect { emit_fixture("333_with_match_per_arm_dispatch.cht") }.not_to raise_error
+    expect { emit_fixture("333_with_match_per_arm_dispatch.clear") }.not_to raise_error
   end
 
   it "compiles typed IfChain branch MIR in the register backend" do
-    expect { emit_fixture("46_match_when.cht") }.not_to raise_error
+    expect { emit_fixture("46_match_when.clear") }.not_to raise_error
   end
 
   it "compiles typed union MATCH MIR in the register backend" do
-    expect { emit_fixture("52_union.cht") }.not_to raise_error
-    expect { emit_fixture("57_match_union_capture.cht") }.not_to raise_error
+    expect { emit_fixture("52_union.clear") }.not_to raise_error
+    expect { emit_fixture("57_match_union_capture.clear") }.not_to raise_error
   end
 
   it "compiles typed union MATCH struct payload MIR in the register backend" do
-    expect { emit_fixture("69_inline_union_variants.cht") }.not_to raise_error
-    expect { emit_fixture("107_match_destructure_bind.cht") }.not_to raise_error
+    expect { emit_fixture("69_inline_union_variants.clear") }.not_to raise_error
+    expect { emit_fixture("107_match_destructure_bind.clear") }.not_to raise_error
   end
 
   it "compiles typed union variant construction in the register backend" do

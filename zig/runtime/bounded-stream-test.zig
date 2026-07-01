@@ -3,7 +3,7 @@
 //
 // These tests exercise the Zig runtime struct directly, independent of the
 // CLEAR compiler.  Full behavioral tests (concurrent BG fibers, NEXT in order)
-// require a live scheduler and are covered by transpile-tests/70_bounded_stream.cht.
+// require a live scheduler and are covered by transpile-tests/70_bounded_stream.clear.
 //
 // Run with:
 //   zig test zig/bounded-stream-test.zig -lc zig/switch.S zig/onRoot.S
@@ -90,7 +90,7 @@ test "BoundedStream exhaustion condition is head >= N" {
 // ---------------------------------------------------------------------------
 // nextOrNull() returns null immediately when head >= N without touching items.
 // The scheduler-dependent path (consuming actual Promise values) is covered by
-// transpile-tests/233_bounded_stream_sequential_pipelines.cht.
+// transpile-tests/233_bounded_stream_sequential_pipelines.clear.
 
 test "nextOrNull returns null for exhausted stream (head == N)" {
     // Stream of 3 with head already at 3 — nextOrNull must return null without
@@ -115,7 +115,7 @@ test "nextOrNull returns null for zero-capacity stream" {
 // ---------------------------------------------------------------------------
 // deinit() must be a no-op when head == N — it must not touch items[].
 // The early-exit drain path (calling next() on unconsumed promises) is covered
-// by transpile-tests/233_bounded_stream_sequential_pipelines.cht.
+// by transpile-tests/233_bounded_stream_sequential_pipelines.clear.
 
 test "deinit is a no-op when stream is already exhausted" {
     // head == N means all promises were consumed; deinit's while condition

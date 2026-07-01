@@ -6,13 +6,13 @@
 TRANSPILE_TEST_ROOT = File.expand_path("../../../transpile-tests", __dir__)
 
 CURATED_GAP_CORPUS_SKIP = %w[
-  50_require.cht
-  51_require_types.cht
-  224_extern_std_ffi.cht
-  382_returned_list_import_cleanup_leak.cht
-  382_returned_list_lib.cht
-  require_helper.cht
-  require_types_helper.cht
+  50_require.clear
+  51_require_types.clear
+  224_extern_std_ffi.clear
+  382_returned_list_import_cleanup_leak.clear
+  382_returned_list_lib.clear
+  require_helper.clear
+  require_types_helper.clear
 ].freeze
 
 CURATED_GAP_CORPUS_SKIP_PREFIXES = %w[
@@ -20,7 +20,7 @@ CURATED_GAP_CORPUS_SKIP_PREFIXES = %w[
 ].freeze
 
 CURATED_GAP_CORPUS_CELLS =
-  Dir[File.join(TRANSPILE_TEST_ROOT, "*.cht")]
+  Dir[File.join(TRANSPILE_TEST_ROOT, "*.clear")]
     .map { |path| { file: File.basename(path) } }
     .reject { |cell| CURATED_GAP_CORPUS_SKIP.include?(cell[:file]) }
     .reject { |cell| CURATED_GAP_CORPUS_SKIP_PREFIXES.any? { |prefix| cell[:file].start_with?(prefix) } }

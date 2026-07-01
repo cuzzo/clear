@@ -32,7 +32,7 @@ This design didn't emerge from theory. It emerged from a real, concrete failure 
 
 ### The shape of the problem
 
-The bytecode VM (`examples/minivm/_bc_runner.cht`) stores environments in a pool, shared across the interpreter and any fibers it spawns:
+The bytecode VM (`examples/minivm/_bc_runner.clear`) stores environments in a pool, shared across the interpreter and any fibers it spawns:
 
 ```clear
 FN exec!(ops: Int64[], consts: Value[], envId: Id<Env>,
@@ -910,7 +910,7 @@ $ clear fix --migrate pool:@locked-to-@sharded:locked(8)
 
 Found 1 binding to migrate:
   pool: Env[50000]@pool  →  Env[50000]@pool @sharded:locked(8)
-  declared at examples/minivm/_bc_runner.cht:2988
+  declared at examples/minivm/_bc_runner.clear:2988
 
 Analyzing impact...
   ✓ 15 functions take pool as a parameter — all sync-agnostic, no changes
@@ -927,7 +927,7 @@ Per-site interaction:
 
 ```
 [1/3] Compound op needs WITH wrapping:
-  examples/minivm/_bc_runner.cht:1657
+  examples/minivm/_bc_runner.clear:1657
     IF pool[envId] AS env THEN env.vars[defName] = COPY val; END
                   ↑ compound: read-then-modify on a sharded binding
 
@@ -1602,7 +1602,7 @@ Phase 7 (stdlib polymorphism) has the longest tail (audit unknowns) — start it
 | ID | Task | Files | Effort |
 |---|---|---|---|
 | 8.1 | Update `CLAUDE.md`: replace "Functions take Types, not Capabilities" with the binding-metadata rule. Update authority boundaries section (Type / Annotator / EscapeAnalysis / CleanupClassifier / mir_lowering). | `CLAUDE.md` | 0.5d |
-| 8.2 | VM migration: change `pool` declaration in `main()` of `_bc_runner.cht` to `@shared:locked`; wrap recursive `exec!` in `BG { ... }`; verify Phase 2 of the bytecode VM works. | `examples/minivm/_bc_runner.cht` | 1-2d |
+| 8.2 | VM migration: change `pool` declaration in `main()` of `_bc_runner.clear` to `@shared:locked`; wrap recursive `exec!` in `BG { ... }`; verify Phase 2 of the bytecode VM works. | `examples/minivm/_bc_runner.clear` | 1-2d |
 | 8.3 | Verify full test suite: 2549+ specs, 340+ transpile-tests. Investigate any regressions. | All test files | 1d |
 | 8.4 | Run benchmark suite. Compare against pre-migration baseline; verify no regression > 5% on any benchmark. Investigate outliers. | `benchmarks/` | 0.5-1d |
 | 8.5 | VM historical suite improvement check. Goal: ≥ 32/58 passing (current: 28/58). | `examples/minivm/run_tests.rb --historical` | 0.5d |

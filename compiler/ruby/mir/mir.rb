@@ -377,7 +377,7 @@ module MIR
       extend T::Sig
 
     include Kernel
-    ChildExprValue = T.type_alias { T.nilable(T.any(MIR::Emittable, T::Array[MIR::Emittable])) }
+    ChildExprValue = T.type_alias { T.untyped }
     EMPTY_CHILD_EXPRS = T.let([].freeze, T::Array[MIR::Emittable])
     EMPTY_BODY_SLOTS = T.let([].freeze, T::Array[MIR::BodySlot])
 

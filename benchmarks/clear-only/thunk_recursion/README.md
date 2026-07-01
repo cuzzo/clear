@@ -6,8 +6,8 @@ sum_n(n - 1);` (simple-recurrence shape; splitter accepts).
 
 | File | Lowering | Stack | Heap |
 |---|---|---|---|
-| `bench_thunk.cht` | `EFFECTS REENTRANT:THUNK` | regular fiber, depth = 1 | one Frame per recursion level |
-| `bench_reentrant.cht` | plain `EFFECTS REENTRANT`, BG `@service` | OS thread, 2 MB pre-allocated | none |
+| `bench_thunk.clear` | `EFFECTS REENTRANT:THUNK` | regular fiber, depth = 1 | one Frame per recursion level |
+| `bench_reentrant.clear` | plain `EFFECTS REENTRANT`, BG `@service` | OS thread, 2 MB pre-allocated | none |
 
 `N` is sampled from `timestampMs() MOD 1000` so LLVM can't fold
 the recursion to a closed form.

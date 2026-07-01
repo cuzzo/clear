@@ -652,7 +652,7 @@ RSpec.describe SemanticAnnotator do
       end
 
       it "iterate-and-append over .keys() result still works" do
-        # The stack machine pattern (_bc_runner.cht:3120). ArrayList
+        # The stack machine pattern (_bc_runner.clear:3120). ArrayList
         # supports `xs[i]` and `.length()`, so the same code that
         # used to consume a slice continues to work unchanged.
         iterate_src = <<~CLEAR

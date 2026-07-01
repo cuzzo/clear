@@ -169,7 +169,7 @@ module PprofConverter
       r = resolved[addr] || {}
       func = r[:func] || addr
       file = r[:file] || ''
-      # User-zig frames get clear_line into source.cht; runtime/stdlib
+      # User-zig frames get clear_line into source.clear; runtime/stdlib
       # frames get the Zig line itself, with their own filename so
       # pprof -list resolves to the right file.
       line = r[:is_user_zig] ? (r[:clear_line] || 0) : extract_zig_line(file)
@@ -359,7 +359,7 @@ module PprofConverter
   # transpiled.zig — otherwise the address was in runtime/stdlib Zig
   # code where CLR markers don't exist, and we'd misattribute by
   # walking back through transpiled.zig anyway. (Repro: `pprof -list
-  # entryWrapper` showed it pointing at random source.cht lines.)
+  # entryWrapper` showed it pointing at random source.clear lines.)
   sig { params(addrs: Array, binary: T.nilable(String), profile_dir: String).returns(Hash) }
   def self.resolve_addrs(addrs, binary, profile_dir)
     return {} if addrs.empty? || binary.nil?
@@ -412,20 +412,20 @@ module PprofConverter
 
   # Pick the source file pprof's `list` view should show for this
   # function. User-code (transpiled.zig with CLR markers) -> the
-  # original .cht source. Runtime/stdlib code -> the addr2line file
+  # original .clear source. Runtime/stdlib code -> the addr2line file
   # path (which is a real .zig file pprof can read). Without this
   # split, runtime functions like `entryWrapper` rendered against
-  # arbitrary .cht line numbers, badly misleading the user.
+  # arbitrary .clear line numbers, badly misleading the user.
   sig { params(profile_dir: String, addr2line_file: String, is_user_zig: T.nilable(T::Boolean)).returns(String) }
   def self.clear_source_path(profile_dir, addr2line_file, is_user_zig: nil)
     if is_user_zig.nil?
-      cht = File.join(profile_dir, 'source.cht')
-      return cht if File.exist?(cht)
+      source = File.join(profile_dir, 'source.clear')
+      return source if File.exist?(source)
       return addr2line_file.to_s.sub(/:\d+\z/, '')
     end
     if is_user_zig
-      cht = File.join(profile_dir, 'source.cht')
-      return cht if File.exist?(cht)
+      source = File.join(profile_dir, 'source.clear')
+      return source if File.exist?(source)
     end
     addr2line_file.to_s.sub(/:\d+\z/, '')
   end

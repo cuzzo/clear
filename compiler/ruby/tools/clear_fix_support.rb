@@ -90,7 +90,7 @@ module ClearFixSupport
       end
     end
 
-    raise UsageError, "Usage: clear fix [--dry-run|--yes|--loop[=N]|--only=cat1,cat2] <file.cht|file.rb>..." if paths.empty?
+    raise UsageError, "Usage: clear fix [--dry-run|--yes|--loop[=N]|--only=cat1,cat2] <file.clear|file.rb>..." if paths.empty?
     raise UsageError, "--loop and --dry-run are mutually exclusive" if loop_until_clean && dry_run
 
     Options.new(

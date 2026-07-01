@@ -235,7 +235,7 @@ class RegisterBcEmitter
       referenced = collect_qualified_calls(program.items)
       @importer.module_cache.each do |abs_path, mod|
         next unless mod.respond_to?(:mir_items) && mod.mir_items
-        alias_name = File.basename(abs_path, ".cht")
+        alias_name = File.basename(abs_path, ".clear")
         mod.mir_items.each do |item|
           next unless item.is_a?(MIR::FnDef)
           qualified = "#{alias_name}.#{item.name}"
@@ -456,7 +456,7 @@ class RegisterBcEmitter
   # Walks the AST::Program for top-level `AST::FunctionDef` nodes and
   # builds `name -> token.line`. Used by `compile_function` to stamp each
   # emitted opcode with the function's start line so VM crash messages
-  # can say "vm.cht:142 in fn fib" instead of just "ip=387". Per-statement
+  # can say "vm.clear:142 in fn fib" instead of just "ip=387". Per-statement
   # granularity would require threading source-line through MIR; for now
   # function-level is the cheapest meaningful upgrade.
   def collect_function_source_lines(ast)

@@ -28,7 +28,7 @@
 - [ ] Conduct a final parity run: Tree-sitter-Ruby vs. Prism-Ruby facts.
 
 ### 5. Launch Artifacts
-- [ ] Finalize the "Language Tour" featuring the MiniVM (`_bc_runner.cht`) as proof of logic.
+- [ ] Finalize the "Language Tour" featuring the MiniVM (`_bc_runner.clear`) as proof of logic.
 - [ ] Release the 3-week "Decomplex Expansion" narrative (Ruby -> Python -> Universal).
 
 ## Phase 3: CLEAR v0.2 Self-Hosted Release (Weeks 9-10+)

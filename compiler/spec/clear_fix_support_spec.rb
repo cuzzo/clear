@@ -26,17 +26,17 @@ RSpec.describe ClearFixSupport do
   end
 
   it "parses CLI options and rejects invalid combinations" do
-    options = described_class.parse_args(["--yes", "--loop=3", "--only=lint,ownership", "a.cht", "b.rb"])
+    options = described_class.parse_args(["--yes", "--loop=3", "--only=lint,ownership", "a.clear", "b.rb"])
     expect(options.take_first).to be(true)
     expect(options.loop_until_clean).to be(true)
     expect(options.loop_max).to eq(3)
     expect(options.only_set).to eq(Set[:lint, :ownership])
-    expect(options.paths).to eq(["a.cht", "b.rb"])
+    expect(options.paths).to eq(["a.clear", "b.rb"])
 
-    expect(described_class.parse_args(["--loop", "a.cht"]).loop_max).to eq(20)
+    expect(described_class.parse_args(["--loop", "a.clear"]).loop_max).to eq(20)
     expect { described_class.parse_args([]) }.to raise_error(described_class::UsageError, /Usage: clear fix/)
-    expect { described_class.parse_args(["--unknown", "a.cht"]) }.to raise_error(described_class::UsageError, /Unknown flag/)
-    expect { described_class.parse_args(["--loop", "--dry-run", "a.cht"]) }.to raise_error(
+    expect { described_class.parse_args(["--unknown", "a.clear"]) }.to raise_error(described_class::UsageError, /Unknown flag/)
+    expect { described_class.parse_args(["--loop", "--dry-run", "a.clear"]) }.to raise_error(
       described_class::UsageError,
       /mutually exclusive/
     )
@@ -308,7 +308,7 @@ RSpec.describe ClearFixSupport do
     expect(described_class.prompt_choice(manual, err: StringIO.new, input: StringIO.new("\n"))).to be_nil
 
     Dir.mktmpdir do |dir|
-      path = File.join(dir, "loop.cht")
+      path = File.join(dir, "loop.clear")
       File.write(path, source)
       loop_out = StringIO.new
       result = described_class.run_args(["--loop=3", path], out: loop_out, err: StringIO.new, input: StringIO.new)
@@ -317,21 +317,21 @@ RSpec.describe ClearFixSupport do
       expect(loop_out.string).to include("[fix --loop] converged after 2 pass(es)")
       expect(File.read(path)).to include("  x = 1;")
 
-      dry_path = File.join(dir, "dry.cht")
+      dry_path = File.join(dir, "dry.clear")
       File.write(dry_path, source)
       dry_out = StringIO.new
       described_class.run_args(["--dry-run", dry_path], out: dry_out, err: StringIO.new, input: StringIO.new)
       expect(dry_out.string).to include("Remove MUTABLE keyword")
       expect(File.read(dry_path)).to include("MUTABLE x = 1")
 
-      max_path = File.join(dir, "max.cht")
+      max_path = File.join(dir, "max.clear")
       File.write(max_path, source)
       max_out = StringIO.new
       max_result = described_class.run_args(["--loop=1", max_path], out: max_out, err: StringIO.new, input: StringIO.new)
       expect(max_result.passes).to eq(1)
       expect(max_out.string).to include("[fix --loop] hit loop_max=1")
 
-      moved_path = File.join(dir, "moved.cht")
+      moved_path = File.join(dir, "moved.clear")
       File.write(moved_path, <<~CLEAR)
         STRUCT Config {id: Float64, data: HashMap<Float64>}
 
@@ -351,7 +351,7 @@ RSpec.describe ClearFixSupport do
 
   it "surfaces missing files through the shared runner" do
     expect {
-      described_class.run_args(["missing.cht"], out: StringIO.new, err: StringIO.new, input: StringIO.new)
+      described_class.run_args(["missing.clear"], out: StringIO.new, err: StringIO.new, input: StringIO.new)
     }.to raise_error(described_class::FileMissingError, /No such file/)
   end
 end

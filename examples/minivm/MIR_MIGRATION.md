@@ -267,7 +267,7 @@ Each phase is 1 commit. Each commit has the three-suite check:
 
 - VM performance work (timeouts on loop-heavy tests).
 - Narrow integer types (Int8..UInt64, Float32) — gated as VM_UNSUPPORTED.
-- Adding new Value variants to `_bc_runner.cht` — separate runtime work.
+- Adding new Value variants to `_bc_runner.clear` — separate runtime work.
 - Fiber scheduling / BG blocks / concurrent streams — architecturally
   out of scope for the VM (gated as VM_UNSUPPORTED).
 

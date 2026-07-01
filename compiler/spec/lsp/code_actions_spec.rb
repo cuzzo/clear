@@ -13,8 +13,8 @@ RSpec.describe LSP::CodeActions do
 
   def make_doc(text = "FN main() RETURNS Void -> END\n", findings: [])
     store = LSP::DocumentStore.new
-    store.open("file:///t.cht", text, 1)
-    doc = store.get("file:///t.cht")
+    store.open("file:///t.clear", text, 1)
+    doc = store.get("file:///t.clear")
     doc.cached_findings = LSP::AnalysisResult.new(findings: findings, fatal_error: nil)
     doc
   end
@@ -60,8 +60,8 @@ RSpec.describe LSP::CodeActions do
     end
 
     it "returns an empty array when there are no cached findings" do
-      doc = LSP::DocumentStore.new.open("file:///t.cht", "x", 1)
-      doc = LSP::DocumentStore.new.tap { |s| s.open("file:///t.cht", "x", 1) }.get("file:///t.cht")
+      doc = LSP::DocumentStore.new.open("file:///t.clear", "x", 1)
+      doc = LSP::DocumentStore.new.tap { |s| s.open("file:///t.clear", "x", 1) }.get("file:///t.clear")
       doc.cached_findings = nil
       expect(LSP::CodeActions.for_range(doc, request_range)).to eq([])
     end
@@ -170,7 +170,7 @@ RSpec.describe LSP::CodeActions do
       changes = action[:edit][:documentChanges]
       expect(changes.size).to eq(1)
       td_edit = changes.first
-      expect(td_edit[:textDocument][:uri]).to eq("file:///t.cht")
+      expect(td_edit[:textDocument][:uri]).to eq("file:///t.clear")
       expect(td_edit[:textDocument][:version]).to eq(1)
       edit = td_edit[:edits].first
       expect(edit[:newText]).to eq("MUTABLE ")

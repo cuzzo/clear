@@ -637,7 +637,7 @@ module MIRLoweringExpressions
           "(e.g. `s == #{type_name}.Variant`) -- which lowers to " \
           "std.meta.activeTag(s) == .Variant -- or use a MATCH expression " \
           "to discriminate the active variant.\n" \
-          "(See transpile-tests/255_union_equality.cht.)"
+          "(See transpile-tests/255_union_equality.clear.)"
   end
 
   sig { params(node: AST::BinaryOp).returns(MIR::BinOp) }

@@ -5,7 +5,7 @@ require 'open3'
 
 ROOT = File.expand_path('../..', __dir__)
 EXAMPLE_DIR = File.expand_path(__dir__)
-SOURCE = File.join(EXAMPLE_DIR, 'du.cht')
+SOURCE = File.join(EXAMPLE_DIR, 'du.clear')
 BINARY = File.join(EXAMPLE_DIR, 'pdu')
 DISKUS = ENV['DISKUS'] || File.join(Dir.home, '.cargo', 'bin', 'diskus')
 

@@ -90,7 +90,7 @@ fn promiseConsumerAfterDone(rt: *Runtime, raw_args: ?*anyopaque) anyerror!void {
 // makes Promise idempotent (e.g. by folding it into SharedPromise's
 // retain/refcount), the BC's `futureResolved` cache becomes
 // optimization-only and this test should be revisited alongside
-// `_bc_runner.cht`'s AWAIT branch.
+// `_bc_runner.clear`'s AWAIT branch.
 test "Promise(f64).next() consumes the handle: documented contract" {
     // Assert the type-level shape: Inner has a wg + result; alloc is the
     // GPA used to destroy() Inner on next(). Calling next() twice on

@@ -13,7 +13,7 @@ options = {
 }
 
 OptionParser.new do |opts|
-  opts.banner = "Usage: ruby tools/stackprof_compile.rb [options] path/to/file.cht"
+  opts.banner = "Usage: ruby tools/stackprof_compile.rb [options] path/to/file.clear"
   opts.on("--phase NAME", "full, frontend, lower, checker, emit") { |v| options[:phase] = v }
   opts.on("-o", "--out PATH", "StackProf dump path") { |v| options[:out] = v }
   opts.on("--mode MODE", "wall, cpu, object") { |v| options[:mode] = v.to_sym }

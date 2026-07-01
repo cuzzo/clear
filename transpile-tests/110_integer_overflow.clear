@@ -1,0 +1,63 @@
+# Test: integer arithmetic uses wrapping-safe helpers (intAdd/intSub/intMul).
+# Debug builds: panics on overflow. Release builds (--optimized): wraps.
+# This test validates non-overflowing arithmetic compiles and runs correctly
+# through the wrapping helpers. Overflow wrapping is verified separately
+# via: ./clear build transpile-tests/110_integer_overflow.clear --optimized
+
+FN main() RETURNS Void ->
+    # Basic variable-variable arithmetic (uses intAdd/intSub/intMul)
+    a: Int64 = 100;
+    b: Int64 = 200;
+    ASSERT a + b == 300, "add";
+    ASSERT b - a == 100, "sub";
+    ASSERT a * b == 20000, "mul";
+
+    # Negative results
+    c: Int64 = 50;
+    ASSERT c - a == -50, "sub negative";
+
+    # Multiplication with negatives
+    d: Int64 = -10;
+    ASSERT d * a == -1000, "mul negative";
+
+    # Chained arithmetic
+    ASSERT a + b + c == 350, "chained add";
+    ASSERT a * b + c == 20050, "mul then add";
+
+    # Typed _i64 literals (fixed-width, not comptime_int - safe for wrapping ops)
+    e = 1000000_i64;
+    f = 1000000_i64;
+    ASSERT e * f == 1000000000000_i64, "1M * 1M = 1T";
+
+    # Mixed literal + variable (literal side stays as Zig native op)
+    ASSERT a + 1 == 101, "var + lit";
+    ASSERT a * 2 == 200, "var * lit";
+    ASSERT 3 * a == 300, "lit * var";
+    ASSERT a - 1 == 99, "var - lit";
+
+    # Division and modulo (unchanged, use @divTrunc/@mod)
+    ASSERT b / a == 2, "div";
+    ASSERT b MOD 150 == 50, "mod";
+
+    # Large values near max (no overflow)
+    big: Int64 = 4611686018427387903_i64;
+    ASSERT big + 1_i64 == 4611686018427387904_i64, "near max add";
+    ASSERT big - big == 0, "self sub";
+
+    # LCG pattern (the pattern that motivated this change).
+    # Single step with small seed doesn't overflow.
+    MUTABLE state: Int64 = 1;
+    state = state + 42_i64;
+    ASSERT state == 43, "lcg seed";
+
+    # Compound expressions
+    x: Int64 = 7;
+    y: Int64 = 3;
+    ASSERT (x + y) * (x - y) == 40, "compound (7+3)*(7-3)=40";
+
+    # Negation (0 - x pattern, uses intSub with comptime_int 0)
+    z: Int64 = 42;
+    ASSERT 0 - z == -42, "negation";
+
+    RETURN;
+END

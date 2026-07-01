@@ -498,7 +498,7 @@
 
 # Runtime additions: indexOf native + RangeLit-as-value + IfBindStmt
 #
-# - vm.cht gets a new native (id 20) for `indexOf(haystack, needle)`,
+# - vm.clear gets a new native (id 20) for `indexOf(haystack, needle)`,
 #   returning -1 when not found (CLEAR's `?Int64` collapsed to a
 #   sentinel). compile_i64_inline_bc emits N_STRING_INDEX_OF for
 #   `:indexOf`.

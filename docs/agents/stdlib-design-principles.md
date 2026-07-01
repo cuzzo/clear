@@ -136,7 +136,7 @@ The exact names are not settled. The principle is settled:
 Ordering is explicit:
 
 ```ruby clear illustrative
-files = fs.glob("src/**/*.cht") OR RAISE;
+files = fs.glob("src/**/*.clear") OR RAISE;
 sorted = files |> ORDER_BY _;
 ```
 

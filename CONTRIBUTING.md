@@ -101,7 +101,7 @@ The primary focus of the v0.2 release is to demonstrate the power of the languag
 
 CLEAR should be able to have unmatched Profile-Guided Optimization to allow anyone (especially LLMs) to write nearly perfect, concurrent code easily.
 
-The key focus will revolve around `clear profile <myApp.cht>`, which will identify common bottlenecks regarding concurrency and scheduling, and suggest options to fix them.
+The key focus will revolve around `clear profile <myApp.clear>`, which will identify common bottlenecks regarding concurrency and scheduling, and suggest options to fix them.
 
  * LLMs should be able to automate this in a virtuous feedback cycle.
 

@@ -1,6 +1,6 @@
 // Benchmark 24: TCP JSON File Server — Rust / Tokio
 //
-// Same protocol as server.cht / server.go:
+// Same protocol as server.clear / server.go:
 //   SET:N  → generate JSON file data/N.json, respond +OK\r\n
 //   GET:N  → read + parse JSON, respond :SUM\r\n
 //   QUIT   → close connection

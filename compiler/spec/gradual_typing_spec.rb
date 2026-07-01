@@ -856,7 +856,7 @@ end
 RSpec.describe "Gradual typing — STRICT-imports boundary (M1.5)" do
   def import(main_code, helpers)
     Dir.mktmpdir do |dir|
-      File.write(File.join(dir, "main.cht"), main_code)
+      File.write(File.join(dir, "main.clear"), main_code)
       helpers.each { |filename, code| File.write(File.join(dir, filename), code) }
       compiler = ModuleImporter.new(base_dir: dir)
       yield compiler, dir
@@ -864,8 +864,8 @@ RSpec.describe "Gradual typing — STRICT-imports boundary (M1.5)" do
   end
 
   it "rejects an imported PUB function with Auto in its param" do
-    import(<<~MAIN, "helper.cht" => <<~HELPER) do |c, dir|
-      REQUIRE "helper.cht";
+    import(<<~MAIN, "helper.clear" => <<~HELPER) do |c, dir|
+      REQUIRE "helper.clear";
       FN main() RETURNS !Void ->
         RETURN;
       END
@@ -875,14 +875,14 @@ RSpec.describe "Gradual typing — STRICT-imports boundary (M1.5)" do
       END
     HELPER
       expect {
-        c.compile_file("helper.cht", caller_dir: dir)
-      }.to raise_error(CompilerError, /'broken' from module 'helper.cht' has `Auto`.*public signature.*param 'x'/m)
+        c.compile_file("helper.clear", caller_dir: dir)
+      }.to raise_error(CompilerError, /'broken' from module 'helper.clear' has `Auto`.*public signature.*param 'x'/m)
     end
   end
 
   it "rejects an imported PUB function with Auto in its return type" do
-    import(<<~MAIN, "helper.cht" => <<~HELPER) do |c, dir|
-      REQUIRE "helper.cht";
+    import(<<~MAIN, "helper.clear" => <<~HELPER) do |c, dir|
+      REQUIRE "helper.clear";
       FN main() RETURNS !Void ->
         RETURN;
       END
@@ -892,16 +892,16 @@ RSpec.describe "Gradual typing — STRICT-imports boundary (M1.5)" do
       END
     HELPER
       expect {
-        c.compile_file("helper.cht", caller_dir: dir)
-      }.to raise_error(CompilerError, /'identity' from module 'helper.cht' has `Auto`.*return type/m)
+        c.compile_file("helper.clear", caller_dir: dir)
+      }.to raise_error(CompilerError, /'identity' from module 'helper.clear' has `Auto`.*return type/m)
     end
   end
 
   it "rejects an imported package-visible function (default visibility)" do
     # Default visibility is `:package`, which is importable from
     # same-directory modules. Auto must be rejected for these too.
-    import(<<~MAIN, "helper.cht" => <<~HELPER) do |c, dir|
-      REQUIRE "helper.cht";
+    import(<<~MAIN, "helper.clear" => <<~HELPER) do |c, dir|
+      REQUIRE "helper.clear";
       FN main() RETURNS !Void ->
         RETURN;
       END
@@ -911,14 +911,14 @@ RSpec.describe "Gradual typing — STRICT-imports boundary (M1.5)" do
       END
     HELPER
       expect {
-        c.compile_file("helper.cht", caller_dir: dir)
+        c.compile_file("helper.clear", caller_dir: dir)
       }.to raise_error(CompilerError, /'packageVisible'.*public signature/m)
     end
   end
 
   it "ALLOWS Auto in a PRIVATE function (not part of the public surface)" do
-    import(<<~MAIN, "helper.cht" => <<~HELPER) do |c, dir|
-      REQUIRE "helper.cht";
+    import(<<~MAIN, "helper.clear" => <<~HELPER) do |c, dir|
+      REQUIRE "helper.clear";
       FN main() RETURNS !Void ->
         RETURN;
       END
@@ -936,8 +936,8 @@ RSpec.describe "Gradual typing — STRICT-imports boundary (M1.5)" do
       # is silent on PRIVATE.
       expect {
         c.send(:reject_auto_in_public_signatures!,
-               ClearParser.new(Lexer.new(File.read(File.join(dir, "helper.cht"))).tokenize, "").parse,
-               File.join(dir, "helper.cht"))
+               ClearParser.new(Lexer.new(File.read(File.join(dir, "helper.clear"))).tokenize, "").parse,
+               File.join(dir, "helper.clear"))
       }.not_to raise_error
     end
   end
@@ -950,8 +950,8 @@ RSpec.describe "Gradual typing — STRICT-imports boundary (M1.5)" do
     saved = ClearParser.gradual_mode
     ClearParser.gradual_mode = true
     begin
-      import(<<~MAIN, "helper.cht" => <<~HELPER) do |c, dir|
-        REQUIRE "helper.cht";
+      import(<<~MAIN, "helper.clear" => <<~HELPER) do |c, dir|
+        REQUIRE "helper.clear";
         FN main() RETURNS !Void ->
           RETURN;
         END
@@ -961,7 +961,7 @@ RSpec.describe "Gradual typing — STRICT-imports boundary (M1.5)" do
         END
       HELPER
         expect(ClearParser.gradual_mode).to be true
-        c.compile_file("helper.cht", caller_dir: dir)
+        c.compile_file("helper.clear", caller_dir: dir)
         expect(ClearParser.gradual_mode).to be true
       end
     ensure
@@ -970,8 +970,8 @@ RSpec.describe "Gradual typing — STRICT-imports boundary (M1.5)" do
   end
 
   it "passes through cleanly when no Auto is present" do
-    import(<<~MAIN, "helper.cht" => <<~HELPER) do |c, dir|
-      REQUIRE "helper.cht";
+    import(<<~MAIN, "helper.clear" => <<~HELPER) do |c, dir|
+      REQUIRE "helper.clear";
       FN main() RETURNS !Void ->
         RETURN;
       END
@@ -980,9 +980,9 @@ RSpec.describe "Gradual typing — STRICT-imports boundary (M1.5)" do
         RETURN x + y;
       END
     HELPER
-      ast = ClearParser.new(Lexer.new(File.read(File.join(dir, "helper.cht"))).tokenize, "").parse
+      ast = ClearParser.new(Lexer.new(File.read(File.join(dir, "helper.clear"))).tokenize, "").parse
       expect {
-        c.send(:reject_auto_in_public_signatures!, ast, File.join(dir, "helper.cht"))
+        c.send(:reject_auto_in_public_signatures!, ast, File.join(dir, "helper.clear"))
       }.not_to raise_error
     end
   end

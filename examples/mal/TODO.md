@@ -14,7 +14,7 @@ original TODO are resolved - the compiler supports string escapes, charAt,
 substr, toNumber, MATCH AS, @indirect, @shared, and RAISE in WHILE.
 
 ```bash
-./clear test examples/mal/interpreter.cht
+./clear test examples/mal/interpreter.clear
 ```
 
 Implemented:

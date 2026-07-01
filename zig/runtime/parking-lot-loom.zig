@@ -3820,8 +3820,8 @@ pub fn testConcurrentListReduceAtomicCoverage() !void {
 // branch cannot be deterministically scheduled here. The success-path
 // sequencing (which is the common case in practice) is what this
 // test exercises. Real timeout behaviour is covered by
-// transpile-tests/365_multi_lock_with_on_hammer.cht (TSan) and
-// transpile-tests/366_multi_lock_retry_recovers.cht (deterministic
+// transpile-tests/365_multi_lock_with_on_hammer.clear (TSan) and
+// transpile-tests/366_multi_lock_retry_recovers.clear (deterministic
 // retry recovery).
 // ─────────────────────────────────────────────────────────────────────────────
 

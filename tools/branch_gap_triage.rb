@@ -15,8 +15,8 @@
 #                    One deterministic negative unit spec per cluster.
 #   ffi-integration  the arm is in the extern/require/module boundary
 #                    -> needs a real external artifact a fuzzer cannot
-#                    synthesize. A handful of targeted .cht. (Whole-
-#                    program .cht is otherwise the WRONG lever: 92 real
+#                    synthesize. A handful of targeted .clear. (Whole-
+#                    program .clear is otherwise the WRONG lever: 92 real
 #                    programs moved this set 50/1005 arms.)
 #   accept-defensive an effect-free else / impossible guard -> annotate
 #                    and remove from the denominator. No test. (Human
@@ -198,7 +198,7 @@ end
 ACTION = {
   fuzz_axis: 'fuzz template axis (+ mutant)',
   negative_spec: 'negative unit spec (fuzz cannot reach)',
-  ffi_integration: 'targeted FFI/package .cht',
+  ffi_integration: 'targeted FFI/package .clear',
   accept_defensive: 'annotate + accept (human-confirm)'
 }.freeze
 

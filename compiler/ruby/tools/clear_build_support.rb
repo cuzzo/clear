@@ -127,7 +127,7 @@ module ClearBuildSupport
   def self.find_package_source(pkg_name, start_dir:)
     dir = File.expand_path(start_dir)
     loop do
-      candidate = File.join(dir, "packages", pkg_name, "src", "lib.cht")
+      candidate = File.join(dir, "packages", pkg_name, "src", "lib.clear")
       return candidate if File.exist?(candidate)
 
       parent = File.dirname(dir)

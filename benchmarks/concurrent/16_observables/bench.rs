@@ -1,5 +1,5 @@
 //! Concurrent observable stream-sum benchmark — Rust.
-//! Mirrors bench.cht: producer stream -> consumer sum -> join.
+//! Mirrors bench.clear: producer stream -> consumer sum -> join.
 
 use std::sync::mpsc;
 use std::thread;

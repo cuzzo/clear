@@ -23,7 +23,7 @@ correctness bug — the violations counter is the trip-wire.
 
 ```
 # CLEAR (compares all three CLEAR variants in one binary)
-./clear build benchmarks/concurrent/19_atomic_ptr/bench.cht --optimized
+./clear build benchmarks/concurrent/19_atomic_ptr/bench.clear --optimized
 ./benchmarks/concurrent/19_atomic_ptr/bench
 CLEAR_THREADS=8 ./benchmarks/concurrent/19_atomic_ptr/bench
 

@@ -7,8 +7,8 @@ form has no closed form so LLVM has to actually run the loop.
 
 | File | Form | Expected lowering |
 |---|---|---|
-| `bench_tail_call.cht` | self-recursive with `EFFECTS REENTRANT:TIGHT:TAIL_CALL` | `@call(.always_tail, ...)` -> LLVM `musttail` -> self-`jmp` (TCO), no recursion yield probe |
-| `bench_loop.cht` | hand-written `WHILE` | direct loop |
+| `bench_tail_call.clear` | self-recursive with `EFFECTS REENTRANT:TIGHT:TAIL_CALL` | `@call(.always_tail, ...)` -> LLVM `musttail` -> self-`jmp` (TCO), no recursion yield probe |
+| `bench_loop.clear` | hand-written `WHILE` | direct loop |
 
 `N` is sampled from `timestampMs() MOD 1000 + 999_999_000` so
 LLVM can't constant-fold the result.

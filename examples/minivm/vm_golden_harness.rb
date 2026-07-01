@@ -36,7 +36,7 @@ module MiniVM
 
     Case = Struct.new(:path, keyword_init: true) do
       def self.all(root = File.join(Golden::ROOT, "examples", "minivm", "vm-tests"))
-        Dir.glob(File.join(root, "**", "*.cht")).sort.reject do |path|
+        Dir.glob(File.join(root, "**", "*.clear")).sort.reject do |path|
           File.basename(path).start_with?("minivm-golden-")
         end.map { |path| new(path: path) }
       end
@@ -58,11 +58,11 @@ module MiniVM
       end
 
       def output_path
-        path.sub(/\.cht\z/, ".out")
+        path.sub(/\.clear\z/, ".out")
       end
 
       def bytecode_snapshot_path(target)
-        path.sub(/\.cht\z/, ".#{target}.bc")
+        path.sub(/\.clear\z/, ".#{target}.bc")
       end
     end
 
@@ -552,7 +552,7 @@ module MiniVM
       private
 
       def with_source_file(source, source_dir)
-        Tempfile.create(["minivm-golden-", ".cht"], source_dir) do |file|
+        Tempfile.create(["minivm-golden-", ".clear"], source_dir) do |file|
           file.write(source)
           file.flush
           yield file.path
@@ -626,7 +626,7 @@ module MiniVM
       private
 
       def with_source_file(source, source_dir)
-        Tempfile.create(["minivm-golden-register-", ".cht"], source_dir) do |file|
+        Tempfile.create(["minivm-golden-register-", ".clear"], source_dir) do |file|
           file.write(source)
           file.flush
           yield file.path

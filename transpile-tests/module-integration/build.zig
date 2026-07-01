@@ -9,9 +9,9 @@ pub fn build(b: *std.Build) void {
     // -----------------------------------------------------------------------
     const build_root  = b.build_root.path orelse ".";
     const transpiler  = b.fmt("{s}/../../compiler/ruby/backends/transpiler.rb", .{build_root});
-    const math_src    = b.fmt("{s}/packages/math/src/lib.cht", .{build_root});
-    const geom_src    = b.fmt("{s}/packages/geometry/src/lib.cht", .{build_root});
-    const main_src    = b.fmt("{s}/src/main.cht", .{build_root});
+    const math_src    = b.fmt("{s}/packages/math/src/lib.clear", .{build_root});
+    const geom_src    = b.fmt("{s}/packages/geometry/src/lib.clear", .{build_root});
+    const main_src    = b.fmt("{s}/src/main.clear", .{build_root});
 
     // --pkg flags passed to the Ruby transpiler so it can type-check imports
     const math_pkg_arg = b.fmt("math={s}", .{math_src});
@@ -35,7 +35,7 @@ pub fn build(b: *std.Build) void {
     cheat_runtime_mod.addImport("ownership", ownership_mod);
 
     // -----------------------------------------------------------------------
-    // math package: transpile lib.cht → Zig module
+    // math package: transpile lib.clear → Zig module
     // -----------------------------------------------------------------------
     const transpile_math = b.addSystemCommand(&.{ "ruby", transpiler, "--module", math_src });
     const math_zig = transpile_math.captureStdOut(.{});
@@ -44,7 +44,7 @@ pub fn build(b: *std.Build) void {
     math_mod.addImport("cheat_runtime", cheat_runtime_mod);
 
     // -----------------------------------------------------------------------
-    // geometry package: transpile lib.cht → Zig module (depends on math)
+    // geometry package: transpile lib.clear → Zig module (depends on math)
     // -----------------------------------------------------------------------
     const transpile_geom = b.addSystemCommand(&.{
         "ruby", transpiler, "--module", geom_src,
@@ -57,7 +57,7 @@ pub fn build(b: *std.Build) void {
     geom_mod.addImport("math", math_mod);
 
     // -----------------------------------------------------------------------
-    // main: transpile src/main.cht → Zig module (with embedded test block)
+    // main: transpile src/main.clear → Zig module (with embedded test block)
     //
     // The transpiler emits a `test "cheat main" { ... }` block when it detects
     // FN main() in the source. This lets main_mod be used directly as

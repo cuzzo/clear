@@ -1,5 +1,5 @@
 #!/usr/bin/env ruby
-# Equivalent of vm_bench.cht: 100 outer * 10000 inner filter+sum.
+# Equivalent of vm_bench.clear: 100 outer * 10000 inner filter+sum.
 
 sum = 0
 100.times do

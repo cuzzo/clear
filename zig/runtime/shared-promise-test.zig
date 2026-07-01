@@ -2,7 +2,7 @@
 // Unit tests for CheatLib.SharedPromise(T) — Phase 2 shared/memoized promises.
 //
 // Full behavioral tests (concurrent BG fibers, multi-holder NEXT) require a
-// live scheduler and are covered by transpile-tests/74_shared_promise.cht.
+// live scheduler and are covered by transpile-tests/74_shared_promise.clear.
 //
 // Run with:
 //   zig test zig/shared-promise-test.zig -lc zig/switch.S zig/onRoot.S

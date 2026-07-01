@@ -421,7 +421,7 @@ ASSERT NEXT b == 20, "order is preserved for all subscribers";
 
 `CLONE` is mandatory for `@split` streams. Plain assignment moves the handle.
 
-This is the model CLEAR intends for pub/sub style workloads. For a concrete benchmark in this area, see [08_pubsub/bench.cht](../benchmarks/concurrent/08_pubsub/bench.cht).
+This is the model CLEAR intends for pub/sub style workloads. For a concrete benchmark in this area, see [08_pubsub/bench.clear](../benchmarks/concurrent/08_pubsub/bench.clear).
 
 ## 11. Collections: Array, List, and Pool
 
@@ -592,7 +592,7 @@ results = items |> CONCURRENT(workers: 8) SELECT transform(_);
 CLEAR uses a simple namespace-based module system via `REQUIRE`.
 
 ```ruby clear illustrative
-REQUIRE "math_utils.cht" AS m;                      # Local file alias
+REQUIRE "math_utils.clear" AS m;                      # Local file alias
 REQUIRE "pkg:geometry";                             # Package import
 
 FN main() RETURNS Void ->
@@ -658,7 +658,7 @@ buf = createBuffer("hello");
 # defer buf.deinit() emitted automatically
 ```
 
- * See [json_api](benchmarks/24_json_api/server.cht) for an example.
+ * See [json_api](benchmarks/24_json_api/server.clear) for an example.
  * See [docs/agents/ffi.md](docs/agents/ffi.md) for the complete FFI guide.
 
 ## 17. Memory Model

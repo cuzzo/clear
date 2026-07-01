@@ -1,0 +1,66 @@
+# 89_frame_alloc.clear — near-perfect allocation: frame arena & SROA
+#
+# Goals verified at runtime:
+#  1. Large structs (> 128 slots) are allocated in the frame arena (*T pointer).
+#     Fields must be accessible via Zig's auto-deref after the allocation.
+#  2. Small fixed-array literals with T[N] annotation emit [N]T{...} raw arrays
+#     (enabling LLVM SROA).  Array indexing must produce the right values.
+
+# Chunk5 = 5 Float64 fields = 5 slots
+STRUCT Chunk5 { a: Float64, b: Float64, c: Float64, d: Float64, e: Float64 }
+
+# BigS = 26 × Chunk5 = 130 slots → exceeds the 128-slot threshold → :frame allocation
+STRUCT BigS {
+  c1:  Chunk5, c2:  Chunk5, c3:  Chunk5, c4:  Chunk5, c5:  Chunk5,
+  c6:  Chunk5, c7:  Chunk5, c8:  Chunk5, c9:  Chunk5, c10: Chunk5,
+  c11: Chunk5, c12: Chunk5, c13: Chunk5, c14: Chunk5, c15: Chunk5,
+  c16: Chunk5, c17: Chunk5, c18: Chunk5, c19: Chunk5, c20: Chunk5,
+  c21: Chunk5, c22: Chunk5, c23: Chunk5, c24: Chunk5, c25: Chunk5,
+  c26: Chunk5
+}
+
+# Return a field from a frame-allocated struct (tests RETURN s.field path).
+FN first_a(s: BigS) RETURNS Float64 ->
+  RETURN s.c1.a;
+END
+
+FN test_frame_struct() RETURNS !Void ->
+  zero:  Chunk5 = Chunk5{ a: 0.0, b: 0.0, c: 0.0, d: 0.0, e: 0.0 };
+  first: Chunk5 = Chunk5{ a: 7.0, b: 2.0, c: 3.0, d: 4.0, e: 5.0 };
+
+  # BigS is 130 slots → allocated in frame arena
+  big: BigS = BigS{
+    c1:  first, c2:  zero, c3:  zero, c4:  zero, c5:  zero,
+    c6:  zero,  c7:  zero, c8:  zero, c9:  zero, c10: zero,
+    c11: zero,  c12: zero, c13: zero, c14: zero, c15: zero,
+    c16: zero,  c17: zero, c18: zero, c19: zero, c20: zero,
+    c21: zero,  c22: zero, c23: zero, c24: zero, c25: zero,
+    c26: zero
+  };
+
+  # Field access on frame-allocated struct (Zig auto-deref through the pointer)
+  ASSERT big.c1.a == 7.0, "frame struct: c1.a is 7";
+  ASSERT big.c1.b == 2.0, "frame struct: c1.b is 2";
+  ASSERT big.c26.a == 0.0, "frame struct: last chunk is zero";
+
+  # Pass frame variable to a function (transpiler emits big.* at call site)
+  result: Float64 = first_a(big);
+  ASSERT result == 7.0, "frame struct passed to function returns correct field";
+END
+
+FN test_stack_arrays() RETURNS Void ->
+  # Explicit T[N] annotation → annotator pre-sets :stack → transpiler emits [N]T{...}
+  # (Using Float64/f64 literals to avoid integer-coercion edge cases in the lexer.)
+  nums: Float64[4] = [10.0, 20.0, 30.0, 40.0];
+  ASSERT nums[0] == 10.0, "stack array Float64[4]: element 0 is 10";
+  ASSERT nums[3] == 40.0, "stack array Float64[4]: element 3 is 40";
+
+  small: Float64[3] = [1.5, 2.5, 3.5];
+  ASSERT small[0] == 1.5, "stack array Float64[3]: element 0 is 1.5";
+  ASSERT small[2] == 3.5, "stack array Float64[3]: element 2 is 3.5";
+END
+
+FN main() RETURNS Void ->
+  test_frame_struct();
+  test_stack_arrays();
+END

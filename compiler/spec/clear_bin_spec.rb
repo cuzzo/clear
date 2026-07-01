@@ -4,7 +4,7 @@ require "fileutils"
 require "digest"
 
 # Tests for the ./clear CLI binary.
-# Each test creates a temp directory with .cht files and runs ./clear build.
+# Each test creates a temp directory with .clear files and runs ./clear build.
 
 CLEAR_BIN = File.expand_path("../../clear", __dir__)
 
@@ -37,13 +37,13 @@ RSpec.describe "./clear build", :integration do
   context "single file" do
     it "builds and runs a simple program" do
       dir = Dir.mktmpdir
-      File.write(File.join(dir, "main.cht"), <<~CLEAR)
+      File.write(File.join(dir, "main.clear"), <<~CLEAR)
         FN main() RETURNS Void ->
           print("hello");
           RETURN;
         END
       CLEAR
-      output, ok = clear_run(File.join(dir, "main.cht"))
+      output, ok = clear_run(File.join(dir, "main.clear"))
       expect(ok).to be true
       expect(output).to include("hello")
     ensure
@@ -55,17 +55,17 @@ RSpec.describe "./clear build", :integration do
     it "builds a program that REQUIRE pkg:math with packages/ convention" do
       dir = Dir.mktmpdir
 
-      # Create package: packages/math/src/lib.cht
+      # Create package: packages/math/src/lib.clear
       math_dir = File.join(dir, "packages", "math", "src")
       FileUtils.mkdir_p(math_dir)
-      File.write(File.join(math_dir, "lib.cht"), <<~CLEAR)
+      File.write(File.join(math_dir, "lib.clear"), <<~CLEAR)
         PUB FN add(a: Int64, b: Int64) RETURNS Int64 ->
           RETURN a + b;
         END
       CLEAR
 
       # Create main
-      File.write(File.join(dir, "main.cht"), <<~CLEAR)
+      File.write(File.join(dir, "main.clear"), <<~CLEAR)
         REQUIRE "pkg:math";
         FN main() RETURNS Void ->
           result = add(3, 4);
@@ -75,7 +75,7 @@ RSpec.describe "./clear build", :integration do
         END
       CLEAR
 
-      output, ok = clear_run(File.join(dir, "main.cht"))
+      output, ok = clear_run(File.join(dir, "main.clear"))
       expect(ok).to eq(true), "Expected build+run to succeed, got: #{output}"
       expect(output).to include("PASS")
     ensure
@@ -87,7 +87,7 @@ RSpec.describe "./clear build", :integration do
   context "incremental builds" do
     it "skips rebuilding unchanged single-file programs and preserves cached Zig output mtimes" do
       dir = Dir.mktmpdir
-      main_path = File.join(dir, "main.cht")
+      main_path = File.join(dir, "main.clear")
       File.write(main_path, <<~CLEAR)
         FN main() RETURNS Void ->
           print("cache");

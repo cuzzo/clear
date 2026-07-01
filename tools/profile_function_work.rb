@@ -20,7 +20,7 @@ require "compiler/module_importer"
 require "mir_lowering"
 require "mir_checker"
 
-source_path = File.expand_path(ARGV.fetch(0) { "examples/minivm/vm.cht" })
+source_path = File.expand_path(ARGV.fetch(0) { "examples/minivm/vm.clear" })
 source = File.read(source_path)
 source_dir = File.dirname(source_path)
 

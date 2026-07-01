@@ -19,7 +19,7 @@
  *     larger than the entire L2 cache — it cannot prefetch that far ahead.
  *
  * MEASURED: ~0.37 s wall time (runner.rb baseline, full process).
- * CLEAR comparison (bench.cht):
+ * CLEAR comparison (bench.clear):
  *   - Uses @pool (CheatLib.Pool) + Id<Node> (u64) handles.
  *   - pool.get(id) adds: optional unwrap, alive check, generation check,
  *     and address arithmetic — ~4–6 extra ops vs C's 1 pointer load.

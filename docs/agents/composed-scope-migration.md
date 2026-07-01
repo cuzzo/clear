@@ -13,7 +13,7 @@ creates two bad properties:
 - Correctness depends on stale copied `SymbolEntry` objects. Post-annotation
   mutations on canonical function-level entries can drift from nested copies.
 
-The `examples/minivm/vm.cht` profile exposed the performance side clearly:
+The `examples/minivm/vm.clear` profile exposed the performance side clearly:
 `runRegisterBytecode!` is a huge dispatch loop with hundreds of branches. The
 structural profile measured `1,839` branch scopes and `106,233` copied locals.
 
@@ -165,7 +165,7 @@ After migration, run the same command to
 Run the structural profiler before and after:
 
 ```sh
-bundle exec ruby tools/profile_structural_multipliers.rb examples/minivm/vm.cht
+bundle exec ruby tools/profile_structural_multipliers.rb examples/minivm/vm.clear
 ```
 
 The migration should reduce the branch-scope copied-local work. If wall time

@@ -91,7 +91,7 @@ RSpec.describe ClearBuildSupport do
 
   it "round-trips build signatures and tolerates absent or corrupt metadata" do
     support_tree do |dir, config|
-      source = write(File.join(dir, "main.cht"), "FN main() RETURNS Void -> RETURN; END\n")
+      source = write(File.join(dir, "main.clear"), "FN main() RETURNS Void -> RETURN; END\n")
       output = File.join(dir, "main")
       signature = simple_signature(config, source, output)
 
@@ -130,9 +130,9 @@ RSpec.describe ClearBuildSupport do
   it "resolves local and package dependencies from nested source layouts" do
     support_tree do |dir, _config|
       src_dir = File.join(dir, "app", "src")
-      helper = write(File.join(src_dir, "helper.cht"), "PUB FN value() RETURNS Int64 -> RETURN 1; END\n")
+      helper = write(File.join(src_dir, "helper.clear"), "PUB FN value() RETURNS Int64 -> RETURN 1; END\n")
       package = write(
-        File.join(dir, "app", "packages", "math", "src", "lib.cht"),
+        File.join(dir, "app", "packages", "math", "src", "lib.clear"),
         "PUB FN add(a: Int64, b: Int64) RETURNS Int64 -> RETURN a + b; END\n"
       )
       zig_package = write(
@@ -140,15 +140,15 @@ RSpec.describe ClearBuildSupport do
         "pub fn ok() bool { return true; }\n"
       )
       main = write(
-        File.join(src_dir, "main.cht"),
-        "REQUIRE \"helper.cht\";\nREQUIRE \"pkg:math\";\nFN main() RETURNS Int64 -> RETURN value(); END\n"
+        File.join(src_dir, "main.clear"),
+        "REQUIRE \"helper.clear\";\nREQUIRE \"pkg:math\";\nFN main() RETURNS Int64 -> RETURN value(); END\n"
       )
 
       expect(described_class.find_package_source("math", start_dir: src_dir)).to eq(package)
       expect(described_class.find_package_source("missing", start_dir: src_dir)).to be_nil
       expect(described_class.find_zig_package_source("http", start_dir: src_dir)).to eq(zig_package)
       expect(described_class.find_zig_package_source("missing", start_dir: src_dir)).to be_nil
-      expect(described_class.resolve_clear_require("helper.cht", caller_dir: src_dir)).to eq(helper)
+      expect(described_class.resolve_clear_require("helper.clear", caller_dir: src_dir)).to eq(helper)
       expect(described_class.resolve_clear_require("pkg:math", caller_dir: src_dir)).to eq(package)
       expect {
         described_class.resolve_clear_require("pkg:missing", caller_dir: src_dir)
@@ -157,15 +157,15 @@ RSpec.describe ClearBuildSupport do
       deps = described_class.collect_clear_dependencies(main)
       expect(deps).to include(File.expand_path(main), File.expand_path(helper), File.expand_path(package))
       expect {
-        described_class.collect_clear_dependencies(File.join(src_dir, "missing.cht"))
+        described_class.collect_clear_dependencies(File.join(src_dir, "missing.clear"))
       }.to raise_error(described_class::FileMissingError, /File not found/)
     end
   end
 
   it "handles dependency cycles without revisiting already seen files" do
     support_tree do |dir, _config|
-      a = write(File.join(dir, "a.cht"), "REQUIRE \"b.cht\";\n")
-      b = write(File.join(dir, "b.cht"), "REQUIRE \"a.cht\";\n")
+      a = write(File.join(dir, "a.clear"), "REQUIRE \"b.clear\";\n")
+      b = write(File.join(dir, "b.clear"), "REQUIRE \"a.clear\";\n")
 
       expect(described_class.collect_clear_dependencies(a)).to eq(Set[File.expand_path(a), File.expand_path(b)])
     end
@@ -174,14 +174,14 @@ RSpec.describe ClearBuildSupport do
   it "decides rebuilds from output metadata, build flags, and transitive mtimes" do
     support_tree do |dir, config|
       app_dir = File.join(dir, "app")
-      helper = write(File.join(app_dir, "helper.cht"), "PUB FN value() RETURNS Int64 -> RETURN 1; END\n")
+      helper = write(File.join(app_dir, "helper.clear"), "PUB FN value() RETURNS Int64 -> RETURN 1; END\n")
       package = write(
-        File.join(app_dir, "packages", "math", "src", "lib.cht"),
+        File.join(app_dir, "packages", "math", "src", "lib.clear"),
         "PUB FN add(a: Int64, b: Int64) RETURNS Int64 -> RETURN a + b; END\n"
       )
       source = write(
-        File.join(app_dir, "main.cht"),
-        "REQUIRE \"helper.cht\";\nREQUIRE \"pkg:math\";\nFN main() RETURNS Int64 -> RETURN value(); END\n"
+        File.join(app_dir, "main.clear"),
+        "REQUIRE \"helper.clear\";\nREQUIRE \"pkg:math\";\nFN main() RETURNS Int64 -> RETURN value(); END\n"
       )
       output = write(File.join(app_dir, "main"), "binary")
       signature = simple_signature(config, source, output)
@@ -277,8 +277,8 @@ RSpec.describe ClearBuildSupport do
 
   it "keys transpile cache entries by compiler signature and dependency content" do
     support_tree do |dir, config|
-      helper = write(File.join(dir, "helper.cht"), "PUB FN value() RETURNS Int64 -> RETURN 1; END\n")
-      source = write(File.join(dir, "main.cht"), "REQUIRE \"helper.cht\";\nFN main() RETURNS Int64 -> RETURN value(); END\n")
+      helper = write(File.join(dir, "helper.clear"), "PUB FN value() RETURNS Int64 -> RETURN 1; END\n")
+      source = write(File.join(dir, "main.clear"), "REQUIRE \"helper.clear\";\nFN main() RETURNS Int64 -> RETURN value(); END\n")
       source_text = File.read(source)
 
       first_compiler_signature = described_class.compiler_signature(config)
@@ -306,7 +306,7 @@ RSpec.describe ClearBuildSupport do
 
   it "fetches, bypasses, and records transpilation cache entries with debug output" do
     support_tree do |dir, config|
-      source = write(File.join(dir, "main.cht"), "FN main() RETURNS Void -> RETURN; END\n")
+      source = write(File.join(dir, "main.clear"), "FN main() RETURNS Void -> RETURN; END\n")
       calls = 0
       runner = lambda do |_config, _flag, _path|
         calls += 1
@@ -326,7 +326,7 @@ RSpec.describe ClearBuildSupport do
       )
       expect(zig_code).to eq("zig-1")
       expect(File.read(cache_file)).to eq("zig-1")
-      expect(debug.string).to include("[transpile-cache] miss build_root main.cht")
+      expect(debug.string).to include("[transpile-cache] miss build_root main.clear")
 
       hit_code, hit_file = described_class.transpile_cached(
         config: config,
@@ -339,7 +339,7 @@ RSpec.describe ClearBuildSupport do
         runner: ->(_config, _flag, _path) { raise "should not run on cache hit" }
       )
       expect([hit_code, hit_file, calls]).to eq(["zig-1", cache_file, 1])
-      expect(debug.string).to include("[transpile-cache] hit build_root main.cht")
+      expect(debug.string).to include("[transpile-cache] hit build_root main.clear")
 
       bypass_code, bypass_file = described_class.transpile_cached(
         config: config,
@@ -354,7 +354,7 @@ RSpec.describe ClearBuildSupport do
       )
       expect([bypass_code, bypass_file, calls]).to eq(["zig-2", cache_file, 2])
       expect(File.read(cache_file)).to eq("zig-2")
-      expect(debug.string).to include("[transpile-cache] bypass build_root main.cht")
+      expect(debug.string).to include("[transpile-cache] bypass build_root main.clear")
 
       expect {
         described_class.transpile_cached(
@@ -375,7 +375,7 @@ RSpec.describe ClearBuildSupport do
 
   it "runs the configured transpiler command and returns nil on failure" do
     support_tree do |dir, config|
-      source = write(File.join(dir, "main.cht"), "FN main() RETURNS Void -> RETURN; END\n")
+      source = write(File.join(dir, "main.clear"), "FN main() RETURNS Void -> RETURN; END\n")
       ok_transpiler = write(File.join(dir, "ok_transpile.rb"), "puts ARGV.join('|')\n")
       ok_config = described_class::Config.new(
         src_dir: config.src_dir,

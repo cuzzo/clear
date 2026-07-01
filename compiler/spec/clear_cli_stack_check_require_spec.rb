@@ -4,7 +4,7 @@ require "fileutils"
 require "open3"
 
 # Regression: `clear build --stack-check` on a file that uses
-# file-style REQUIRE (e.g. `REQUIRE "other.cht"`) must run the
+# file-style REQUIRE (e.g. `REQUIRE "other.clear"`) must run the
 # tier-sizing analysis end-to-end. Previously the analysis
 # constructed `SemanticAnnotator.new` without an importer, so the
 # annotator's REQUIRE handler raised and the rescue silently logged
@@ -19,15 +19,15 @@ RSpec.describe "clear build --stack-check with file-style REQUIRE", :integration
 
   it "succeeds without [stack-check] Analysis failed and emits a tier line" do
     Dir.mktmpdir do |dir|
-      File.write(File.join(dir, "helper.cht"), <<~CLEAR)
+      File.write(File.join(dir, "helper.clear"), <<~CLEAR)
         FN helper(n: Int64) RETURNS Int64 ->
           RETURN n + 1;
         END
       CLEAR
 
-      main_src = File.join(dir, "main.cht")
+      main_src = File.join(dir, "main.clear")
       File.write(main_src, <<~CLEAR)
-        REQUIRE "helper.cht"
+        REQUIRE "helper.clear"
 
         FN main() RETURNS Void ->
           x = helper(41);

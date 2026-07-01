@@ -104,7 +104,7 @@ Ordering is explicit. Directory scans and globbing should be unsorted
 streams unless the user asks otherwise:
 
 ```ruby clear illustrative
-files = fs.glob("src/**/*.cht") OR RAISE;
+files = fs.glob("src/**/*.clear") OR RAISE;
 sorted = files |> ORDER_BY _;
 ```
 

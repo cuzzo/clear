@@ -68,7 +68,7 @@ memory is technically reusable but is not returned to the OS.
 ### Verified
 
 Frame arena correctness was independently verified via transpile-test 200
-(`200_frame_peak_large_alloc_loop.cht`): 500 iterations each allocating ~6KB on the frame
+(`200_frame_peak_large_alloc_loop.clear`): 500 iterations each allocating ~6KB on the frame
 showed a peak of 3493 bytes. The arena rewinds correctly on every iteration. The RSS
 growth is entirely a glibc retention artifact, not a CLEAR memory bug.
 

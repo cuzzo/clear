@@ -79,7 +79,7 @@ RSpec.describe "clear-lsp end-to-end (binary)", :integration do
       { jsonrpc: "2.0", id: 1, method: "initialize", params: {} },
       { jsonrpc: "2.0", method: "initialized", params: {} },
       { jsonrpc: "2.0", method: "textDocument/didOpen", params: {
-        textDocument: { uri: "file:///t.cht", languageId: "clear", version: 1, text: src },
+        textDocument: { uri: "file:///t.clear", languageId: "clear", version: 1, text: src },
       } },
       { jsonrpc: "2.0", id: 2, method: "shutdown", params: nil },
       { jsonrpc: "2.0", method: "exit", params: nil },
@@ -110,10 +110,10 @@ RSpec.describe "clear-lsp end-to-end (binary)", :integration do
       { jsonrpc: "2.0", id: 1, method: "initialize", params: {} },
       { jsonrpc: "2.0", method: "initialized", params: {} },
       { jsonrpc: "2.0", method: "textDocument/didOpen", params: {
-        textDocument: { uri: "file:///t.cht", languageId: "clear", version: 1, text: src },
+        textDocument: { uri: "file:///t.clear", languageId: "clear", version: 1, text: src },
       } },
       { jsonrpc: "2.0", id: 2, method: "textDocument/codeAction", params: {
-        textDocument: { uri: "file:///t.cht" },
+        textDocument: { uri: "file:///t.clear" },
         range: { start: { line: 2, character: 0 }, end: { line: 2, character: 100 } },
         context: { diagnostics: [] },
       } },
@@ -137,10 +137,10 @@ RSpec.describe "clear-lsp end-to-end (binary)", :integration do
       { jsonrpc: "2.0", id: 1, method: "initialize", params: {} },
       { jsonrpc: "2.0", method: "initialized", params: {} },
       { jsonrpc: "2.0", method: "textDocument/didOpen", params: {
-        textDocument: { uri: "file:///t.cht", languageId: "clear", version: 1, text: src },
+        textDocument: { uri: "file:///t.clear", languageId: "clear", version: 1, text: src },
       } },
       { jsonrpc: "2.0", id: 2, method: "textDocument/hover", params: {
-        textDocument: { uri: "file:///t.cht" },
+        textDocument: { uri: "file:///t.clear" },
         position:     { line: 1, character: 8 },
       } },
       { jsonrpc: "2.0", id: 3, method: "shutdown", params: nil },

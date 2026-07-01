@@ -13,7 +13,7 @@ require 'set'
 #
 # The strict-test mode IO-coverage check (`validate_strict_io!`)
 # lives here too because it's only invoked from `visit_WhenBlock`.
-# See examples/testing/*.cht for grammar examples.
+# See examples/testing/*.clear for grammar examples.
 
 module TestAnnotation
     extend T::Sig

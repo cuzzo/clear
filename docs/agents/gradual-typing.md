@@ -445,13 +445,13 @@ shows the ambiguity surface.
 - **Local re-binding ambiguity**: `MUTABLE x: Auto = 0_i64; x = "hi"`
   produces the ranked diagnostic.
 
-`transpile-tests/3XX_gradual_basic.cht`:
+`transpile-tests/3XX_gradual_basic.clear`:
 
 - End-to-end `--gradual` build of a small program with empty
   containers, omitted param/return types, and a single resolved-by-use
   binding. Compiles and runs.
 
-`transpile-tests/3XX_gradual_ambiguity.cht`:
+`transpile-tests/3XX_gradual_ambiguity.clear`:
 
 - A program that produces an ambiguity. Expects the build to fail
   with the ranked diagnostic.

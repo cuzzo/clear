@@ -1144,7 +1144,7 @@ RSpec.describe CleanupClassifier do
   # =========================================================================
   # Resource test skipped: File.open requires a real filesystem path and
   # the test harness doesn't mock it. Resource cleanup is covered by the
-  # transpile-tests (60_file_resource.cht, 63_resource_return.cht).
+  # transpile-tests (60_file_resource.clear, 63_resource_return.clear).
 
   # =========================================================================
   # Negative tests: no cleanup needed

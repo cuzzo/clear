@@ -292,7 +292,7 @@ RSpec.describe "Polymorphic transaction function — acceptance" do
     # field access. When this passes (no `pending`), the milestone
     # is complete.
     it "compiles a single tick! body that is called from 6+ sync strategies " \
-       "(real end-to-end verification in transpile-tests/350_polymorphic_unified_tick.cht)" do
+       "(real end-to-end verification in transpile-tests/350_polymorphic_unified_tick.clear)" do
       # This spec verifies the codegen path -- the generated Zig contains the
       # comptime-dispatch helper call. The behavioral verification (build +
       # run + ASSERT each family yields the right cumulative value) lives in

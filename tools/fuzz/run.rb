@@ -71,7 +71,7 @@ opts[:jobs] = 1 if opts[:jobs] < 1
 opts[:seed] ||= Random.new_seed
 
 if opts[:clean] && Dir.exist?(opts[:out])
-  Dir.glob(File.join(opts[:out], 'fuzz_*.cht')).each { |f| File.delete(f) }
+  Dir.glob(File.join(opts[:out], 'fuzz_*.clear')).each { |f| File.delete(f) }
   Dir.glob(File.join(opts[:out], 'fuzz_*.rb')).each { |f| File.delete(f) }
 end
 
@@ -116,14 +116,14 @@ tuples.each do |tuple|
     next
   end
   hash = Digest::SHA1.hexdigest(result[:source])[0, 10]
-  ext = result[:kind] == :mir_checker ? "rb" : "cht"
+  ext = result[:kind] == :mir_checker ? "rb" : "clear"
   name = "fuzz_#{tuple[:template]}_#{hash}.#{ext}"
   path = File.join(opts[:out], name)
   File.write(path, result[:source])
   emitted << {
     path: path,
     expected: result[:expected],
-    kind: result[:kind] || :cht,
+    kind: result[:kind] || :clear,
     error_code: result[:error_code],
   }
 end

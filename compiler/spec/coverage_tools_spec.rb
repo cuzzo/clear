@@ -1016,7 +1016,7 @@ RSpec.describe "coverage gap tools" do
       ZigDwarfLineAudit::Symbol.new(
         addr: 0x100,
         size: 0x20,
-        name: "all-fuzz.test.generated_case.cht.S.clearMain.__SgCtx0.run",
+        name: "all-fuzz.test.generated_case.clear.S.clearMain.__SgCtx0.run",
       ),
     ]
     rows = [ZigDwarfLineAudit::LineRow.new(file: "zig/runtime/runtime-header.zig", line: hit_line, pc: 0x110, flags: "x")]

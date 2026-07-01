@@ -1,6 +1,6 @@
 // Benchmark 24: TCP JSON File Server — Go
 //
-// Same protocol as server.cht. Uses encoding/json for parsing.
+// Same protocol as server.clear. Uses encoding/json for parsing.
 
 package main
 

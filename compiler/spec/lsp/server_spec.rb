@@ -145,7 +145,7 @@ RSpec.describe LSP::Server do
   end
 
   describe "textDocument lifecycle" do
-    let(:uri) { "file:///tmp/test.cht" }
+    let(:uri) { "file:///tmp/test.clear" }
 
     def open_doc(text, version: 1)
       write(stdin, jsonrpc: "2.0", method: "textDocument/didOpen", params: {
@@ -228,7 +228,7 @@ RSpec.describe LSP::Server do
 
     it "ignores didChange for an unopened document" do
       write(stdin, jsonrpc: "2.0", method: "textDocument/didChange", params: {
-        textDocument: { uri: "file:///nope.cht", version: 1 },
+        textDocument: { uri: "file:///nope.clear", version: 1 },
         contentChanges: [{ text: "x" }],
       })
       stdin.rewind
@@ -364,7 +364,7 @@ RSpec.describe LSP::Server do
   end
 
   describe "textDocument/hover" do
-    let(:uri) { "file:///tmp/test.cht" }
+    let(:uri) { "file:///tmp/test.clear" }
 
     it "renders hover content for a position with an overlapping diagnostic" do
       write(stdin, jsonrpc: "2.0", method: "textDocument/didOpen", params: {
@@ -405,7 +405,7 @@ RSpec.describe LSP::Server do
   end
 
   describe "textDocument/codeAction" do
-    let(:uri) { "file:///tmp/test.cht" }
+    let(:uri) { "file:///tmp/test.clear" }
 
     # Source that has a Tier 1 :auto fix (WITH_RESTRICT_NEEDS_MUTABLE).
     let(:src_with_fix) {

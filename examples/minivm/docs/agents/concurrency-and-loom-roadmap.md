@@ -22,9 +22,9 @@ This is a NEW doc tree (`examples/minivm/docs/agents/`). Cross-refs:
   synchronously; FSM transform skipped for `:bc`); `NEXT` is a
   pass-through; `@bg_dispatch_points` is recorded but **no scheduler
   consumes it**. Faithful only for order-independent pure compute.
-- `vm.cht`: time-travel trace infra exists — `recordingActive`,
+- `vm.clear`: time-travel trace infra exists — `recordingActive`,
   `TraceEvent[]` with kind 1=ireg / 2=freg / 3=sreg / 4=container
-  alloc, consumed by `register_debugger.cht`'s `registerDebugPause!`
+  alloc, consumed by `register_debugger.clear`'s `registerDebugPause!`
   (step/reverse). It records ONE linear single-fiber stream.
 - Benchmarks: `benchmarks/vm/*` (20 sequential micro-benchmarks,
   `register-benchmark-allowlist.txt`, `./clear bench --vm=register`
@@ -32,7 +32,7 @@ This is a NEW doc tree (`examples/minivm/docs/agents/`). Cross-refs:
   (socket_throughput, concurrent_search, atomic_contention,
   fanout_fanin, backpressure, dynamic_spawn, stream_merge, pubsub,
   kvstore, shard_vs_locked) — **not runnable** on the register VM.
-- The runner (`vm.cht`) itself runs on real Zig fibers / `Locked<T>`
+- The runner (`vm.clear`) itself runs on real Zig fibers / `Locked<T>`
   / `sleep`, so the gap is the BC's deliberate synchronous-BG choice,
   not runtime capability (per `bc-fibers.md`).
 
@@ -72,7 +72,7 @@ Foundation for BOTH goals.
 
 1. **Multi-fiber trace model.** Extend `TraceEvent` with `fiber_id`
    and a global monotonic `seq` (keep per-fiber `step`). Update the
-   recording arms and `register_debugger.cht` to key on `(fiber_id,
+   recording arms and `register_debugger.clear` to key on `(fiber_id,
    step)`. Pure data-model change; single-fiber behavior unchanged
    (fiber_id=0). Unblocks every later item.
 
@@ -94,7 +94,7 @@ Foundation for BOTH goals.
    yield to the scheduler meanwhile. Faithful FIFO spawn-order
    semantics (matches compiled CLEAR).
 
-5. **Cooperative scheduler loop in `vm.cht`.** Ready-queue of fiber
+5. **Cooperative scheduler loop in `vm.clear`.** Ready-queue of fiber
    states (ip, iBase/fBase, frame stacks, regs view); run-to-next-
    suspend; resume. Suspend points: spawn, join, lock acquire/
    release, yield, sleep. Default policy = deterministic FIFO so
@@ -160,7 +160,7 @@ programs by exploring schedules.
 14. **Deterministic interleaving replay + DPOR enumeration.** Given
     a schedule (seed or explicit), replay exactly one interleaving
     deterministically (reuse the time-travel infra in
-    `register_debugger.cht`). DPOR enumerates distinct interleavings
+    `register_debugger.clear`). DPOR enumerates distinct interleavings
     while pruning equivalent ones; depth/iteration budget caps the
     explosion.
 

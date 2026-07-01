@@ -1,12 +1,12 @@
 # Replicating the Stack VM's Real Fibers in the Register VM
 
-The user's insight is correct: the **stack VM (`_bc_runner.cht` +
+The user's insight is correct: the **stack VM (`_bc_runner.clear` +
 `bc_emitter.rb`) already implements real BG fibers, futures, joins,
 sleep-yield, and stream channels.** The register VM
-(`vm.cht` + `register_bc_emitter.rb`) inlines BG synchronously. This
+(`vm.clear` + `register_bc_emitter.rb`) inlines BG synchronously. This
 doc is the exact, verified mapping — the "easy path to replicate."
 
-Source of truth read 2026-05-17: `_bc_runner.cht` lines 2516-2590
+Source of truth read 2026-05-17: `_bc_runner.clear` lines 2516-2590
 (exec! signature + futureTable), 3311-3410 (BG_SPAWN op 82 / AWAIT
 op 83), 3294-3309 (FIBER_RET op 81), 3802-3970 (SLEEP_MS op 118 /
 STREAM_SPAWN op 119 / STREAM_NEXT op 121); `bc_emitter.rb` 2763-2800
@@ -76,7 +76,7 @@ instead of a uniform `slots[]`, and `RegisterValue` instead of
 
 Add `entryIp: Int64` and `initCaps: RegisterValue[]` params. Set the
 dispatch `ip = entryIp`. Top-level call (bc_run.rb generated main,
-and vm.cht template) passes `entryIp = 0` (main is compiled first so
+and vm.clear template) passes `entryIp = 0` (main is compiled first so
 its entry is ip 0) and `initCaps = List[]`. Capture loading is a
 no-op when `initCaps` is empty -> identical behavior. Mirrors
 exec!'s signature growth. Verify allowlist 245/245.
@@ -99,7 +99,7 @@ Renumber: R3->R2 (BGSPAWN), R4->R3 (FNEXT), R5->R4 (emitter), etc.
 
 ### R3. `BGSPAWN entry_ip argc` opcode (= stack op 82)
 
-vm.cht dispatch (mirror verbatim):
+vm.clear dispatch (mirror verbatim):
 ```clear
 MUTABLE futureTable: ~RegisterValue[]@list = List[];
 MUTABLE futureResolved: HashMap<RegisterValue> = {};
@@ -259,7 +259,7 @@ what that doc was opened to track — *plus* P0 (guest frame-arena +
 giant-function FSM/heap-resident conversion). These are
 shared-compiler correctness fixes that must land, architecturally,
 **before** stack-VM fiber replication is viable. Do NOT band-aid
-around them in `vm.cht`. R1 + the compiler-bug fix remain; the
+around them in `vm.clear`. R1 + the compiler-bug fix remain; the
 probe was reverted (tree green, register allowlist 245/245).
 
 ### CORRECTION (2026-05-18): retracting the "flatten" workaround
@@ -285,11 +285,11 @@ Empirically established instead:
   and is explicitly NOT the path.
 
 - **The `INLINE_ALLOC_MISMATCH` was real** (it occurred in the
-  actual `vm.cht` R2 build) but its precise trigger is **not yet
+  actual `vm.clear` R2 build) but its precise trigger is **not yet
   minimally reproduced** — every minimal repro that should exercise
   the hypothesised path passes. So the "Condition 7 only promotes
   string-concats" root-cause is **unproven** and must not be acted
-  on. The true trigger is more specific to the full `vm.cht`
+  on. The true trigger is more specific to the full `vm.clear`
   shape (likely the heavy param-capture set of
   `BG { runRegisterBytecode!(COPY ops, COPY opcodes, ...) }`
   combined with the giant function's other escaping locals).
@@ -299,7 +299,7 @@ Empirically established instead:
 Per CLAUDE.md bug methodology, the escape mismatch must be
 **faithfully reproduced before any fix**:
 
-1. Re-apply the R2 vm.cht changes (the configuration that
+1. Re-apply the R2 vm.clear changes (the configuration that
    definitively produced `INLINE_ALLOC_MISMATCH`).
 2. Bisect within it: is the trigger `EFFECTS REENTRANT` alone? +
    non-TIGHT? + the `BG { runRegisterBytecode!(COPY ops, ...) }`
@@ -364,7 +364,7 @@ frame/escape failure. The giant `runRegisterBytecode!` made
 
 The previously-feared P0(b) `INLINE_ALLOC_MISMATCH` **did not
 reproduce** under the faithful minimal probe -- consistent with
-the earlier note that it was "real in the full R2 vm.cht but never
+the earlier note that it was "real in the full R2 vm.clear but never
 minimally reproduced; root-cause unproven." The two real,
 minimally-reproduced, now-fixed blockers were ordinary
 shared-compiler bugs (BG-capture param typing; discard-`_`
@@ -392,9 +392,9 @@ While measuring the perf cost of de-`TIGHT`ing the dispatch loop
 (R3 prerequisite), the P0 `INLINE_ALLOC_MISMATCH` reproduced from a
 **single-token change** and nothing else:
 
-`examples/minivm/vm.cht:950` `TIGHT WHILE ip < ops.length()` ->
+`examples/minivm/vm.clear:950` `TIGHT WHILE ip < ops.length()` ->
 `WHILE ip < ops.length()` (drop `TIGHT`). NO `EFFECTS REENTRANT`,
-NO BG/probe, NO `COPY`-capture set. `./clear build vm.cht`:
+NO BG/probe, NO `COPY`-capture set. `./clear build vm.clear`:
 
 ```
 MIR ownership verification failed (post-lowering):
@@ -509,13 +509,13 @@ allocations so `mark_per_iter` is false -> de-TIGHT then costs only
 `checkYield` (the stack VM's accepted cost), not arena rewind. This
 is a dispatch-body restructuring task (hoist per-instruction temp
 collections/strings to reused buffers or heap-resident ctx fields;
-note the existing bc_run.rb comment that vm.cht is the tree's one
+note the existing bc_run.rb comment that vm.clear is the tree's one
 stackful task pending an FSM-style heap-resident conversion). Only
 once `mark_per_iter` is false should de-TIGHT land + R3's real
 BGSPAWN/FNEXT opcodes proceed. Do NOT ship a +43% hot-path
 regression to unblock R3.
 
-Tree state: vm.cht reverted to clean TIGHT baseline; all probes
+Tree state: vm.clear reverted to clean TIGHT baseline; all probes
 reverted; suite green.
 
 ## R3 UNBLOCKED at ZERO perf cost (2026-05-18) -- supersedes the de-TIGHT plan

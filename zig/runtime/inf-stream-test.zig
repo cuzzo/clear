@@ -2,7 +2,7 @@
 // Unit tests for CheatLib.InfStream(T) — Phase 4 infinite rendezvous streams.
 //
 // Full behavioral tests (concurrent push/next rendezvous) require a live scheduler
-// and are covered by transpile-tests/76_inf_stream.cht.
+// and are covered by transpile-tests/76_inf_stream.clear.
 //
 // Run with:
 //   zig test zig/inf-stream-test.zig -lc zig/switch.S zig/onRoot.S

@@ -144,26 +144,26 @@ If you want to contribute, see [CONTRIBUTING.md](CONTRIBUTING.md).
 ```bash
 bundle install                       # Install Ruby dependencies (one time)
 
-./clear build hello.cht              # Compile a CLEAR program
-./clear run hello.cht                # Build + execute
-./clear test hello.cht               # Test with leak detection
+./clear build hello.clear              # Compile a CLEAR program
+./clear run hello.clear                # Build + execute
+./clear test hello.clear               # Test with leak detection
 ```
 
 ### The `clear` CLI
 
 ```bash
 # Build
-./clear build foo.cht                # Produces ./foo binary
-./clear build foo.cht -o bin/app     # Custom output path
-./clear build foo.cht --safe         # With bounds/overflow checks (-O ReleaseSafe)
+./clear build foo.clear                # Produces ./foo binary
+./clear build foo.clear -o bin/app     # Custom output path
+./clear build foo.clear --safe         # With bounds/overflow checks (-O ReleaseSafe)
 
 # Run
-./clear run foo.cht                  # Build + execute
-./clear run foo.cht -- --port 8080   # Pass arguments to the program
-CLEAR_THREADS=0 ./clear run app.cht  # Multi-threaded fiber runtime
+./clear run foo.clear                  # Build + execute
+./clear run foo.clear -- --port 8080   # Pass arguments to the program
+CLEAR_THREADS=0 ./clear run app.clear  # Multi-threaded fiber runtime
 
 # Test
-./clear test foo.cht                 # Test with GPA leak detection + scheduler
+./clear test foo.clear                 # Test with GPA leak detection + scheduler
 ```
 
 FFI modules (`.zig` files referenced via `EXTERN ... FROM`) are auto-detected and linked.
@@ -176,7 +176,7 @@ bundle exec prspec spec/
 
 # Transpile integration tests - two ways:
 ./clear test transpile-tests/                    # Run all at once (139 tests)
-./clear test transpile-tests/58_bg.cht           # One at a time
+./clear test transpile-tests/58_bg.clear           # One at a time
 
 # Package integration
 cd transpile-tests/module-integration && zig build test

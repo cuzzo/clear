@@ -357,7 +357,7 @@ The current implementation is covered by:
 * Multi-object specs that reject any multi-cell transaction admitting
   `ATOMIC`.
 * End-to-end transpile tests, especially
-  `transpile-tests/350_polymorphic_unified_tick.cht`, which verifies one
+  `transpile-tests/350_polymorphic_unified_tick.clear`, which verifies one
   polymorphic mutation body across local, shared, locked, write-locked,
   versioned, and atomic-pointer storage.
 

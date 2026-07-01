@@ -1,0 +1,82 @@
+# freeze_candidate.clear
+#
+# Before/after comparison for FREEZE.
+#
+# BEFORE: 10 000 Doc @multiowned objects, each with three heap-allocated strings.
+# Each access chases ctrl → data → string bytes across scattered allocations.
+# Doctor reports: high LLC miss rate + FREEZE Opportunity.
+#
+# AFTER: FREEZE a single Doc into one contiguous buffer. All struct fields and
+# string bytes become adjacent, cutting pointer chasing from 3 hops to 1.
+#
+# Run with:
+#   ./clear profile examples/testing/freeze_candidate.clear
+#   ./clear doctor  examples/testing/freeze_candidate.profile/
+
+STRUCT Doc {
+  title: String,
+  body: String,
+  tag: String
+}
+
+FN buildDoc(seed: Int64) RETURNS !Doc@multiowned ->
+  RETURN Doc{
+    title: "doc_title_" + seed.toString(),
+    body: "body_content_" + (seed * 13).toString() + "_suffix",
+    tag: "tag_" + (seed MOD 50).toString()
+  } @multiowned;
+END
+
+FN main() RETURNS Void ->
+  n_docs = 10_000;
+
+  # ── RC version: n_docs scattered Doc allocations ─────────────────────────
+  # 5 heap allocs per Doc (ctrl, data, title, body, tag) → 50 000 allocs total.
+  # Working set ≈ n_docs × 80 B ≈ 800 KB, exceeds L1/L2 → LLC misses.
+  docs: Doc@multiowned[]@list = List[];
+  MUTABLE k = 0;
+  WHILE k < n_docs DO
+    docs.append(buildDoc(k));
+    k += 1;
+  END
+
+  t0 = timestampMs();
+  MUTABLE s_rc = 0;
+  iters = 200;
+  MUTABLE it = 0;
+  WHILE it < iters DO
+    MUTABLE idx = 0;
+    WHILE idx < n_docs DO
+      s_rc += docs[idx].title.length() + docs[idx].body.length() + docs[idx].tag.length();
+      idx += 1;
+    END
+    it += 1;
+  END
+  rc_ms = timestampMs() - t0;
+
+  # ── FREEZE version: one Doc, all fields in one contiguous buffer ──────────
+  # After FREEZE the frozen buffer holds the Doc struct + all 3 string bodies
+  # at adjacent offsets. Access is one pointer hop into the buffer.
+  # Working set ≈ 80 B → always in L1.
+  doc_fr = buildDoc(42);
+  frozen = FREEZE doc_fr;
+
+  t1 = timestampMs();
+  MUTABLE s_fr = 0;
+  frozen_iters = n_docs * iters;
+  MUTABLE fi = 0;
+  WHILE fi < frozen_iters DO
+    s_fr += frozen.title.length() + frozen.body.length() + frozen.tag.length();
+    fi += 1;
+  END
+  fr_ms = timestampMs() - t1;
+
+  print(
+    "RC     (" + n_docs.toString() + " docs x " + iters.toString() + " passes): " +
+    rc_ms.toString() + "ms  sum=" + s_rc.toString()
+  );
+  print(
+    "Frozen (1 doc  x " + frozen_iters.toString() + " reads):  " +
+    fr_ms.toString() + "ms  sum=" + s_fr.toString()
+  );
+END

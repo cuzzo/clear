@@ -123,7 +123,7 @@ END
 ```
 
 `@locked` (short form) doesn't auto-coerce to `@shared:locked` at call
-sites with a SHARED-typed param. `transpile-tests/349_polymorphic_transaction_acceptance.cht`
+sites with a SHARED-typed param. `transpile-tests/349_polymorphic_transaction_acceptance.clear`
 uses the explicit `@shared:locked` form throughout to avoid this.
 
 ### 6. `WITH MATCH` syntax not parsed

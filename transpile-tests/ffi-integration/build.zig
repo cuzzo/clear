@@ -9,7 +9,7 @@ pub fn build(b: *std.Build) void {
     // -----------------------------------------------------------------------
     const build_root = b.build_root.path orelse ".";
     const transpiler = b.fmt("{s}/../../compiler/ruby/backends/transpiler.rb", .{build_root});
-    const main_src   = b.fmt("{s}/src/main.cht", .{build_root});
+    const main_src   = b.fmt("{s}/src/main.clear", .{build_root});
 
     // -----------------------------------------------------------------------
     // cheat_runtime module
@@ -36,8 +36,8 @@ pub fn build(b: *std.Build) void {
     });
 
     // -----------------------------------------------------------------------
-    // Transpile main.cht → Zig module
-    // EXTERN FN declarations in main.cht emit @import("native_math").
+    // Transpile main.clear → Zig module
+    // EXTERN FN declarations in main.clear emit @import("native_math").
     // The build system wires the actual module via addImport below.
     // -----------------------------------------------------------------------
     const transpile_main = b.addSystemCommand(&.{ "ruby", transpiler, "--module", main_src });

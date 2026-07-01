@@ -9,15 +9,15 @@ require "open3"
 # workers race over the cached binary.
 RSpec.describe "MiniVM register debugger REPL", :integration do
   # Every example here runs bc_run.rb --vm=register, which builds
-  # vm.cht to a native binary -- that compile times out on GitHub
+  # vm.clear to a native binary -- that compile times out on GitHub
   # runners (same reason the Register-VM allowlist CI job is disabled).
-  before { skip "vm.cht native-binary execution times out on GitHub runners; run locally" if ENV["CI"] }
+  before { skip "vm.clear native-binary execution times out on GitHub runners; run locally" if ENV["CI"] }
 
   PROJECT_ROOT = File.expand_path("../..", __dir__)
   BC_RUN_RB    = File.expand_path("examples/minivm/bc_run.rb", PROJECT_ROOT)
 
   def write_fixture(dir, source)
-    path = File.join(dir, "prog.cht")
+    path = File.join(dir, "prog.clear")
     File.write(path, source)
     path
   end

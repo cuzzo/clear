@@ -139,7 +139,7 @@ RSpec.describe Doctor do
         // CLR:2
         user_pipeline();
       ZIG
-      File.write(File.join(dir, "source.cht"), <<~CLEAR)
+      File.write(File.join(dir, "source.clear"), <<~CLEAR)
         FN main() RETURNS Void ->
           xs |> map(fn);
         END
@@ -176,7 +176,7 @@ RSpec.describe Doctor do
 
   it "prints exact @parallel recommendations for imbalanced local BG sites" do
     Dir.mktmpdir do |dir|
-      File.write(File.join(dir, "source.cht"), "FN main() ->\n  x = BG { 1 };\nEND\n")
+      File.write(File.join(dir, "source.clear"), "FN main() ->\n  x = BG { 1 };\nEND\n")
       File.write(File.join(dir, "transpiled.zig"), <<~ZIG)
         // CLEAR_PROFILE_TASK_SITE id=7 kind=BG line=2 column=7 dispatch=local form=fsm
       ZIG
@@ -201,7 +201,7 @@ RSpec.describe Doctor do
 
   it "falls back to source scanning when profile metadata has local dispatches" do
     Dir.mktmpdir do |dir|
-      File.write(File.join(dir, "source.cht"), <<~CLEAR)
+      File.write(File.join(dir, "source.clear"), <<~CLEAR)
         FN main() ->
           a = BG { 1 };
           b = BG { @parallel -> 2 };
@@ -263,7 +263,7 @@ RSpec.describe Doctor do
 
   it "diagnoses short fibers, scheduler imbalance, and exact local BG sites" do
     Dir.mktmpdir do |dir|
-      File.write(File.join(dir, "source.cht"), <<~CLEAR)
+      File.write(File.join(dir, "source.clear"), <<~CLEAR)
         FN main() RETURNS Void ->
           work = BG { 1 };
           other = BG { @parallel -> 2 };
@@ -319,7 +319,7 @@ RSpec.describe Doctor do
 
   it "cross-checks lock contention against atomic, atomic-ptr, and MVCC static advice" do
     Dir.mktmpdir do |dir|
-      File.write(File.join(dir, "source.cht"), <<~CLEAR)
+      File.write(File.join(dir, "source.clear"), <<~CLEAR)
         STRUCT Counter { value: Int64 }
         STRUCT Cfg { host: String, port: Int64 }
 
@@ -351,7 +351,7 @@ RSpec.describe Doctor do
 
   it "renders atomic-ptr migration advice for whole-struct publish candidates" do
     Dir.mktmpdir do |dir|
-      File.write(File.join(dir, "source.cht"), <<~CLEAR)
+      File.write(File.join(dir, "source.clear"), <<~CLEAR)
         STRUCT Cfg { host: String, port: Int64 }
         FN main!() RETURNS !Void ->
           MUTABLE cfg = Cfg{ host: "a", port: 1 } @shared:writeLocked;
@@ -370,7 +370,7 @@ RSpec.describe Doctor do
 
   it "renders atomic-ptr migration advice for @shared:locked candidates" do
     Dir.mktmpdir do |dir|
-      File.write(File.join(dir, "source.cht"), <<~CLEAR)
+      File.write(File.join(dir, "source.clear"), <<~CLEAR)
         STRUCT Cfg { host: String, port: Int64 }
         FN main!() RETURNS !Void ->
           cfg = Cfg{ host: "a", port: 1 } @shared:locked;
@@ -387,7 +387,7 @@ RSpec.describe Doctor do
 
   it "diagnoses MVCC COW thrash, misuse, retry pressure, and atomic-ptr upgrade candidates" do
     Dir.mktmpdir do |dir|
-      File.write(File.join(dir, "source.cht"), <<~CLEAR)
+      File.write(File.join(dir, "source.clear"), <<~CLEAR)
         STRUCT Cfg { host: String, port: Int64 }
         FN main!() RETURNS !Void ->
           MUTABLE cfg = Cfg{ host: "a", port: 1 } @shared:versioned;
@@ -422,7 +422,7 @@ RSpec.describe Doctor do
 
   it "renders atomic escape findings surfaced by the doctor" do
     Dir.mktmpdir do |dir|
-      File.write(File.join(dir, "source.cht"), "FN main() RETURNS Void -> RETURN; END\n")
+      File.write(File.join(dir, "source.clear"), "FN main() RETURNS Void -> RETURN; END\n")
       require_relative "../ruby/tools/atomic_escape_suggester" unless defined?(AtomicEscapeSuggester)
       allow(AtomicEscapeSuggester).to receive(:analyze).and_return([
         { line: nil, kind: :return },

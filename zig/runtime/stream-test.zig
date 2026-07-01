@@ -2,7 +2,7 @@
 // Unit tests for CheatLib.Stream(T) — Phase 3 open/closeable streams.
 //
 // Full behavioral tests (concurrent generator fiber, multi-YIELD) require a
-// live scheduler and are covered by transpile-tests/75_open_stream.cht.
+// live scheduler and are covered by transpile-tests/75_open_stream.clear.
 //
 // Run with:
 //   zig test zig/stream-test.zig -lc zig/switch.S zig/onRoot.S

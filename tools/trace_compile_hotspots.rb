@@ -21,7 +21,7 @@ require "backends/mir_emitter"
 
 options = { phase: "annotate", limit: 50 }
 OptionParser.new do |opts|
-  opts.banner = "Usage: ruby tools/trace_compile_hotspots.rb [options] path/to/file.cht"
+  opts.banner = "Usage: ruby tools/trace_compile_hotspots.rb [options] path/to/file.clear"
   opts.on("--phase NAME", "annotate, mir_pass, lower, checker") { |v| options[:phase] = v }
   opts.on("--limit N", Integer) { |v| options[:limit] = v }
 end.parse!

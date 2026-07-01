@@ -159,7 +159,7 @@ multi-resource acquire path, or the multi-resource lowering isn't
 pinning the inner-acquire order. Triage in `zig/lib/parking-lot.zig`
 (detectCycle) and the multi-resource WITH lowering.
 
-#### `examples/testing/stub_ufcs.cht` -- unused local constant on stub helper
+#### `examples/testing/stub_ufcs.clear` -- unused local constant on stub helper
 
 ```
 ._clear_tmp_stub_ufcs.zig:62:7: error: unused local constant
@@ -172,7 +172,7 @@ generated helper doesn't reference it. Likely a stub-generation bug in
 
 ### Example regressions
 
-#### `examples/graphdb/graph.cht` — concurrent assertion fires
+#### `examples/graphdb/graph.clear` — concurrent assertion fires
 
 ```
 graphdb: sequential tests PASSED

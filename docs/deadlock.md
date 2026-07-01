@@ -159,7 +159,7 @@ FN main() RETURNS Void ->
 END
 ```
 
-The tradeoff: releasing between the two operations creates a TOCTOU window (see [examples/footguns/05_toctou](https://github.com/cuzzo/clear/blob/master/examples/footguns/05_toctou/main.cht)).
+The tradeoff: releasing between the two operations creates a TOCTOU window (see [examples/footguns/05_toctou](https://github.com/cuzzo/clear/blob/master/examples/footguns/05_toctou/main.clear)).
 
 ---
 

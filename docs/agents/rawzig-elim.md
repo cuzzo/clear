@@ -30,7 +30,7 @@ Three follow-ups got the count to a clean 100%:
    mark/restore on the Zig backend's stack arena -- doesn't apply to
    the BC (which uses a heap-backed pool, not a frame arena). They
    pass on Zig; on BC they legitimately exceed the 10s interpretive
-   deadline. (An in-place `list-push` optimization in `_bc_runner.cht`
+   deadline. (An in-place `list-push` optimization in `_bc_runner.clear`
    sped these up ~5-10x but they still don't fit in 10s; the runtime
    overhead is fundamental to the interpretive dispatch model.)
 

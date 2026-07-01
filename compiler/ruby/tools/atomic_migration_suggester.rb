@@ -48,7 +48,7 @@ module AtomicMigrationSuggester
   ATOMIC_ELIGIBLE_FIELD_TYPES = %i[Int64 Float64 Bool].to_set.freeze
 
   # Public entry point. `source` is the CLEAR source string (typically
-  # read from `<binary>.profile/source.cht`). Returns
+  # read from `<binary>.profile/source.clear`). Returns
   # `[{ name:, line:, struct_name:, field_name:, field_type:, shared:,
   #     n_uses: }, ...]` for every eligible binding, sorted by line.
   # Returns [] on parse / annotate errors (the doctor falls back to its

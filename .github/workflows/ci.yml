@@ -595,7 +595,7 @@ jobs:
           token: ${{ secrets.CODECOV_TOKEN }}
 
   transpile-tests:
-    name: transpile-tests/ coverage (.cht via gen.rb)
+    name: transpile-tests/ coverage (.clear via gen.rb)
     needs: changes
     if: ${{ needs.changes.outputs.run_src == 'true' }}
     runs-on: ubuntu-22.04
@@ -686,7 +686,7 @@ jobs:
       - run: NIL_KILL_JOBS="$(nproc)" tools/clear-nil-kill-transpile-corpus.sh
         env:
           NO_COLOR: "1"
-          NIL_KILL_REQUIRE_CHT_ONLY: "1"
+          NIL_KILL_REQUIRE_CLEAR_ONLY: "1"
 
   examples-benchmarks-coverage-shard:
     name: examples/benchmarks coverage shard ${{ matrix.shard }}/5
@@ -735,7 +735,7 @@ jobs:
           path: |
             zig/.clear-cache
             zig/.clear-transpile-cache
-          key: clear-examples-coverage-${{ runner.os }}-zig${{ env.ZIG_VERSION }}-${{ hashFiles('compiler/ruby/**', 'zig/runtime/**', 'zig/lib/**', 'examples/**/*.cht', 'benchmarks/**/*.cht', 'Gemfile.lock') }}
+          key: clear-examples-coverage-${{ runner.os }}-zig${{ env.ZIG_VERSION }}-${{ hashFiles('compiler/ruby/**', 'zig/runtime/**', 'zig/lib/**', 'examples/**/*.clear', 'benchmarks/**/*.clear', 'Gemfile.lock') }}
           restore-keys: |
             clear-examples-coverage-${{ runner.os }}-zig${{ env.ZIG_VERSION }}-
       - run: bundle exec ruby tools/corpus_transpile_coverage.rb --shard ${{ matrix.shard }}/5
@@ -919,7 +919,7 @@ jobs:
         with:
           ruby-version: ${{ env.RUBY_VERSION }}
           bundler-cache: true
-      # Pure Ruby: re-lowers the existing .cht corpus with target: :bc
+      # Pure Ruby: re-lowers the existing .clear corpus with target: :bc
       # to cover the @target==:bc lowering arms. No Zig / no clear build
       # (lowering runs before the bytecode VM; the incomplete _bc_runner
       # is never executed).
@@ -957,7 +957,7 @@ jobs:
 
   register-vm-allowlist:
     name: Register-VM allowlist (transpile-tests via --vm=register)
-    # DISABLED: the register VM compiles vm.cht to a native binary per
+    # DISABLED: the register VM compiles vm.clear to a native binary per
     # run; on GitHub-hosted runners this consistently times out. Run
     # locally instead:
     #   bundle exec ruby examples/minivm/run_tests.rb --vm=register
@@ -972,7 +972,7 @@ jobs:
       - uses: mlugg/setup-zig@v2
         with:
           version: ${{ env.ZIG_VERSION }}
-      # The register VM compiles the runner template (vm.cht) once and
+      # The register VM compiles the runner template (vm.clear) once and
       # caches it across tests, so warming clear-cache speeds it up
       # significantly (5-10x). Share the cache key with transpile-tests
       # since both run the same compile pipeline.
@@ -1025,7 +1025,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       # build.zig invokes `ruby compiler/ruby/backends/transpiler.rb` to lower
-      # .cht to Zig; transpiler.rb does `require 'bundler/setup'` so
+      # .clear to Zig; transpiler.rb does `require 'bundler/setup'` so
       # we need both Ruby and bundle install before zig build runs.
       - uses: ruby/setup-ruby@v1
         with:
@@ -1045,7 +1045,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       # build.zig invokes `ruby compiler/ruby/backends/transpiler.rb` to lower
-      # .cht to Zig; transpiler.rb does `require 'bundler/setup'` so
+      # .clear to Zig; transpiler.rb does `require 'bundler/setup'` so
       # we need both Ruby and bundle install before zig build runs.
       - uses: ruby/setup-ruby@v1
         with:
@@ -1093,7 +1093,7 @@ jobs:
           path: |
             zig/.clear-cache
             zig/.clear-transpile-cache
-          key: clear-bench-leak-${{ runner.os }}-zig${{ env.ZIG_VERSION }}-${{ hashFiles('compiler/ruby/**', 'zig/runtime/**', 'zig/lib/**', 'benchmarks/**/*.cht', 'Gemfile.lock') }}
+          key: clear-bench-leak-${{ runner.os }}-zig${{ env.ZIG_VERSION }}-${{ hashFiles('compiler/ruby/**', 'zig/runtime/**', 'zig/lib/**', 'benchmarks/**/*.clear', 'Gemfile.lock') }}
           restore-keys: |
             clear-bench-leak-${{ runner.os }}-zig${{ env.ZIG_VERSION }}-
       - run: ruby benchmarks/runner.rb --leak --all --shard=${{ matrix.shard }}/5 --cores=2 --bencher-json tmp/benchmark-leak-${{ matrix.shard }}.json

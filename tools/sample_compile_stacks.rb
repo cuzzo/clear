@@ -22,7 +22,7 @@ options = {
 }
 
 OptionParser.new do |opts|
-  opts.banner = "Usage: ruby tools/sample_compile_stacks.rb [options] path/to/file.cht"
+  opts.banner = "Usage: ruby tools/sample_compile_stacks.rb [options] path/to/file.clear"
   opts.on("--interval SECONDS", Float, "Sampling interval, default 0.001") { |v| options[:interval] = v }
   opts.on("-o", "--output PATH", "Write JSON report") { |v| options[:output] = v }
   opts.on("--checked", "Enable Sorbet runtime call validation before loading compiler") { options[:checked] = true }

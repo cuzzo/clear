@@ -30,9 +30,9 @@ END
 ```
 
 ```bash
-clear test myfile.cht               # run TEST THAT blocks (correctness)
-clear benchmark myfile.cht          # run BENCHMARK + SMASH blocks (performance)
-clear test myfile.cht --profile     # run tests with allocation profiling
+clear test myfile.clear               # run TEST THAT blocks (correctness)
+clear benchmark myfile.clear          # run BENCHMARK + SMASH blocks (performance)
+clear test myfile.clear --profile     # run tests with allocation profiling
 ```
 
 ## Why CLEAR can do this
@@ -206,12 +206,12 @@ CLEAR has three visibility levels: `PUB`, `PRIVATE`, and package (default).
 In test mode, ALL functions are accessible:
 
 ```
--- In src/user.cht:
+-- In src/user.clear:
 PRIVATE FN validateEmail(email: String) RETURNS Bool ->
     RETURN email.contains?("@");
 END
 
--- In test/user_test.cht:
+-- In test/user_test.clear:
 TEST validateEmail DO
   TEST THAT "rejects invalid email" DO
     ASSERT validateEmail("not-an-email") == FALSE;

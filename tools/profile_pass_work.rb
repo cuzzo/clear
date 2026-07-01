@@ -17,7 +17,7 @@ Options = T.type_alias { T::Hash[Symbol, T.untyped] }
 
 options = T.let({ format: "table", unchecked: true, details: false }, Options)
 parser = OptionParser.new do |opts|
-  opts.banner = "Usage: bundle exec ruby tools/profile_pass_work.rb [--csv] [--checked] examples/minivm/vm.cht"
+  opts.banner = "Usage: bundle exec ruby tools/profile_pass_work.rb [--csv] [--checked] examples/minivm/vm.clear"
   opts.on("--csv", "Emit machine-readable CSV instead of the aligned table") { options[:format] = "csv" }
   opts.on("--details", "Append per-event work counters and exclusive timings") { options[:details] = true }
   opts.on("--checked", "Enable sorbet-runtime checks while profiling") { options[:unchecked] = false }
@@ -771,7 +771,7 @@ module PassWorkProfilerTool
   end
 end
 
-source_path = File.expand_path(ARGV.fetch(0) { "examples/minivm/vm.cht" }, ROOT)
+source_path = File.expand_path(ARGV.fetch(0) { "examples/minivm/vm.clear" }, ROOT)
 PassWorkProfilerTool.install!
 runner = PassWorkProfilerTool::Runner.new(source_path)
 scale = runner.run

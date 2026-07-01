@@ -9,7 +9,7 @@ require_relative '../tools/zig_coverage_support'
 
 require_relative '../compiler/ruby/backends/transpiler'
 
-# Generates Zig test blocks from .cht files using MIRLowering + MIREmitter.
+# Generates Zig test blocks from .clear files using MIRLowering + MIREmitter.
 class TestGenerator
   def generate_test_block(filename, cheat_code, source_dir: Dir.pwd)
     source_dir = File.expand_path(source_dir)
@@ -214,12 +214,12 @@ if __FILE__ == $0
 # Accept --mir for backward compatibility (ignored, MIR is always used)
 ARGV.delete('--mir')
 
-# Single-file mode: ruby gen.rb --single foo.cht
+# Single-file mode: ruby gen.rb --single foo.clear
 # Outputs a complete zig test file to stdout.
 if ARGV.delete('--single')
   test_file = ARGV.first
   unless test_file && File.exist?(test_file)
-    $stderr.puts "Usage: ruby gen.rb --single <file.cht>"
+    $stderr.puts "Usage: ruby gen.rb --single <file.clear>"
     exit 1
   end
   code = File.read(test_file)
@@ -316,11 +316,11 @@ end
 
 puts "Generating #{OUTPUT_FILE}..."
 
-# Iterate through all .cht files before opening the output file. Worker
+# Iterate through all .clear files before opening the output file. Worker
 # processes inherit open file descriptors; keeping OUTPUT_FILE closed during
 # fork prevents each child from flushing a copy of the parent's header buffer.
 test_source_dir = File.expand_path(TEST_DIR)
-test_files = Dir.glob("#{TEST_DIR}/*.cht").sort
+test_files = Dir.glob("#{TEST_DIR}/*.clear").sort
 
 puts "  - Processing #{test_files.length} files with #{[GEN_JOBS, test_files.length].min} worker(s)"
 generated_blocks = generate_blocks_parallel(test_files, test_source_dir, GEN_JOBS)

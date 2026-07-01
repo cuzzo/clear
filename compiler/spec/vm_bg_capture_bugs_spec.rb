@@ -12,18 +12,18 @@ PROJECT_ROOT = File.expand_path("../..", __dir__)
 CLEAR_BIN = File.join(PROJECT_ROOT, "clear")
 
 def compile(src_text)
-  Tempfile.open(["vmbug", ".cht"]) do |src|
+  Tempfile.open(["vmbug", ".clear"]) do |src|
     src.write(src_text); src.close
-    out_path = src.path.sub(/\.cht\z/, "")
+    out_path = src.path.sub(/\.clear\z/, "")
     stdout, status = Open3.capture2e(CLEAR_BIN, "build", "--no-cache", src.path, "-o", out_path)
     { ok: status.success?, output: stdout, out_path: out_path }
   end
 end
 
 def compile_and_run(src_text)
-  Tempfile.open(["vmbug", ".cht"]) do |src|
+  Tempfile.open(["vmbug", ".clear"]) do |src|
     src.write(src_text); src.close
-    out_path = src.path.sub(/\.cht\z/, "")
+    out_path = src.path.sub(/\.clear\z/, "")
     build_output, bstatus = Open3.capture2e(CLEAR_BIN, "build", "--no-cache", src.path, "-o", out_path)
     return { ok: false, phase: :compile, output: build_output } unless bstatus.success?
     stdout, rstatus = Open3.capture2e(out_path)

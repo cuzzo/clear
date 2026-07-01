@@ -3,7 +3,7 @@
 A Language Server Protocol (LSP) implementation for the CLEAR
 programming language. Drop the snippet below into your Neovim config
 and you get diagnostics, hover docs, and quick-fix actions on
-`.cht` files. Drives the same `Lexer → Parser → SemanticAnnotator`
+`.clear` files. Drives the same `Lexer → Parser → SemanticAnnotator`
 pipeline the `clear` CLI uses, so behaviour matches `clear build`
 exactly.
 
@@ -95,11 +95,11 @@ with your actual repo path** (run `pwd` in the repo to get it):
 
 ```lua
 ---------------------------------------------------------------------
--- CLEAR (.cht) language support
+-- CLEAR (.clear) language support
 ---------------------------------------------------------------------
 
--- 1. Tell Neovim what filetype `.cht` files are.
-vim.filetype.add({ extension = { cht = "clear" } })
+-- 1. Tell Neovim what filetype `.clear` files are.
+vim.filetype.add({ extension = { clear = "clear" } })
 
 -- 2. Auto-start the LSP whenever a CLEAR buffer opens.
 local clear_lsp_root = "/absolute/path/to/cheat"  -- ← edit this
@@ -162,7 +162,7 @@ return {
     config = function()
       local clear_lsp_root = "/absolute/path/to/cheat"  -- ← edit
 
-      vim.filetype.add({ extension = { cht = "clear" } })
+      vim.filetype.add({ extension = { clear = "clear" } })
 
       vim.api.nvim_create_autocmd("FileType", {
         pattern = "clear",
@@ -209,11 +209,11 @@ return {
 Open a CLEAR file with a deliberate error. From the repo root:
 
 ```sh
-nvim transpile-tests/01_smoke.cht
+nvim transpile-tests/01_smoke.clear
 ```
 
 You should see no diagnostics (it's valid CLEAR). Now try a broken
-file. Save this somewhere as `/tmp/broken.cht`:
+file. Save this somewhere as `/tmp/broken.clear`:
 
 ```clear
 FN main() RETURNS Void ->
@@ -223,7 +223,7 @@ FN main() RETURNS Void ->
 END
 ```
 
-Open it: `nvim /tmp/broken.cht`. Within ~1 second:
+Open it: `nvim /tmp/broken.clear`. Within ~1 second:
 
 1. **Diagnostic squiggle** under `doesNotExist` and on the `WITH
    RESTRICT x` line.
@@ -239,12 +239,12 @@ If all three work, you're done.
 
 ## Step 6 — Troubleshooting
 
-### "Nothing happens when I open a .cht file"
+### "Nothing happens when I open a .clear file"
 
 Run `:LspInfo` inside Neovim. If `clear-lsp` isn't listed, the
 autocmd didn't fire. Check:
 
-- `:set filetype?` — should say `clear`. If it says `cht` or empty,
+- `:set filetype?` — should say `clear`. If it says empty,
   the `vim.filetype.add` call didn't run; verify the snippet
   actually loaded (try `:lua print("clear-lsp config loaded")` at
   the top to confirm).
@@ -359,7 +359,7 @@ npm install
 npm run compile
 ```
 
-Reload your VS Code window once. Open a `.cht` file → squiggles,
+Reload your VS Code window once. Open a `.clear` file → squiggles,
 hover, and Ctrl+. quick-fix all light up. Full instructions and
 settings reference are in that extension's own README.
 

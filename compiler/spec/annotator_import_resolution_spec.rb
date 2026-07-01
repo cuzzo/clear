@@ -43,7 +43,7 @@ RSpec.describe "annotator import resolution boundaries" do
     importer.define_singleton_method(:compile_package) { |_path, caller_dir:| mod }
 
     annotator = SemanticAnnotator.new(importer: importer, source_dir: source_dir)
-    annotator.send(:visit_RequireNode, AST::RequireNode.new(tok, "helper.cht", "helper", kind))
+    annotator.send(:visit_RequireNode, AST::RequireNode.new(tok, "helper.clear", "helper", kind))
     annotator.send(:current_scope)
   end
 
@@ -274,7 +274,7 @@ RSpec.describe "annotator import resolution boundaries" do
     annotator = SemanticAnnotator.new
 
     expect {
-      annotator.send(:visit_RequireNode, AST::RequireNode.new(tok, "helper.cht", "helper", :local))
+      annotator.send(:visit_RequireNode, AST::RequireNode.new(tok, "helper.clear", "helper", :local))
     }.to raise_error(CompilerError, /REQUIRE/)
   end
 end

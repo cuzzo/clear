@@ -202,7 +202,7 @@ concurrently, results are awaited and folded in order.
 
 ### Phase 5: Rewrite this benchmark
 
-Once Phases 1-4 are complete, rewrite `bench.cht` to use the idiomatic pattern
+Once Phases 1-4 are complete, rewrite `bench.clear` to use the idiomatic pattern
 above. Expected outcome: memory drops from ~420 MB to ~32 KB, latency improves
 due to reduced allocation pressure, and the benchmark actually tests pub/sub
 semantics rather than parallel fan-out.

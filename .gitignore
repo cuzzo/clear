@@ -47,7 +47,7 @@ benchmarks/**
 !benchmarks/**/
 !benchmarks/.gitignore
 !benchmarks/runner.rb
-!benchmarks/**/*.cht
+!benchmarks/**/*.clear
 !benchmarks/**/*.c
 !benchmarks/**/*.h
 !benchmarks/**/*.cpp
@@ -81,7 +81,7 @@ examples/**
 !examples/**/
 !examples/.gitignore
 # General source files
-!examples/**/*.cht
+!examples/**/*.clear
 !examples/**/*.md
 !examples/**/*.puck
 !examples/**/*.toml
@@ -108,8 +108,8 @@ examples/**
 !examples/puck/v11/*.c
 !examples/puck/v11/*.h
 !examples/puck/v11/Makefile
-# minivm has its own *.cht test fixtures + the bc_runner alias
-!examples/minivm/_bc_runner.cht
+# minivm has its own *.clear test fixtures + the bc_runner alias
+!examples/minivm/_bc_runner.clear
 # web_crawler has a build.zig
 !examples/web_crawler/**/build.zig*
 # Sub-package directories that benchmarks may need
@@ -142,17 +142,17 @@ zig/data
 transpile-tests/ffi-integration/.zig-cache
 transpile-tests/module-integration/.zig-cache
 # Compiled transpile-test binaries (numeric prefix, no extension).
-# Source files have .cht / .zig / .disabled.
+# Source files have .clear / .zig / .disabled.
 transpile-tests/[0-9]*
-!transpile-tests/[0-9]*.cht
+!transpile-tests/[0-9]*.clear
 !transpile-tests/[0-9]*.zig
 !transpile-tests/[0-9]*.disabled
-!transpile-tests/[0-9]*.cht.disabled
+!transpile-tests/[0-9]*.clear.disabled
 !transpile-tests/[0-9]*/
 
 # Generated fuzz programs (see tools/fuzz/). Promoted regressions move into
 # transpile-tests/ proper; the fuzz/ dir holds only ephemeral output.
-transpile-tests/fuzz/*.cht
+transpile-tests/fuzz/*.clear
 
 # Catch-all
 **/*.profile/

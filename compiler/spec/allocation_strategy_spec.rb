@@ -503,7 +503,7 @@ RSpec.describe "Allocation Strategy Invariants" do
 
     it ":transitive_imported_callee — imported heap-returning call → cleanup :heap" do
       Dir.mktmpdir("clear-import-owned-return") do |dir|
-        File.write(File.join(dir, "lib.cht"), <<~CLEAR)
+        File.write(File.join(dir, "lib.clear"), <<~CLEAR)
           FN build!() RETURNS !Float64[]@list ->
             MUTABLE v: Float64[]@list = [];
             v.append(1.0);
@@ -512,7 +512,7 @@ RSpec.describe "Allocation Strategy Invariants" do
         CLEAR
 
         src = <<~CLEAR
-          REQUIRE "lib.cht";
+          REQUIRE "lib.clear";
           FN caller!() RETURNS !Void ->
             x = build!();
             RETURN;

@@ -1,0 +1,45 @@
+# VM pool benchmark: measures cost of pool.insert + pool[id].vars[key] access
+# under @shared:locked. Simulates the inner loop of envSet!/envGet!.
+
+REQUIRE "types.clear";
+
+FN run!(MUTABLE pool: Env[200000]@pool) RETURNS Int64
+  REQUIRES pool: LOCKED
+->
+    MUTABLE total: Int64 = 0;
+    MUTABLE iter: Int64 = 0;
+    WHILE iter < 100000 DO
+        MUTABLE eid: ?Id<Env> = NIL;
+        WITH POLYMORPHIC EXCLUSIVE pool AS p {
+            id: Id<Env> = p.insert(Env{ vars: {} });
+            IF p[id] AS env THEN
+                env.vars["k1"] = Value{ Int64Val: iter };
+                env.vars["k2"] = Value{ Int64Val: iter * 2 };
+                env.vars["k3"] = Value{ Int64Val: iter * 3 };
+            END
+            eid = id;
+        }
+        IF eid AS id THEN
+            WITH POLYMORPHIC EXCLUSIVE pool AS p {
+                IF p[id] AS env THEN
+                    PARTIAL MATCH env.vars["k2"] OR Value.Nil START
+                        Value.Int64Val AS v -> total = total + v;,
+                        DEFAULT -> PASS;
+                    END
+                END
+            }
+        END
+        iter = iter + 1;
+    END
+    RETURN total;
+END
+
+FN main() RETURNS Void ->
+    MUTABLE pool: Env[200000]@pool:shared:locked = [];
+    startMs = timestampMs();
+    total = run!(pool);
+    endMs = timestampMs();
+    elapsed = endMs - startMs;
+    print("VM pool ops total=" + total.toString() + " in " + elapsed.toString() + "ms");
+    RETURN;
+END

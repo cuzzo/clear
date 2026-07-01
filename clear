@@ -2,9 +2,9 @@
 # clear - CLEAR language compiler CLI
 #
 # Usage:
-#   clear build foo.cht [-o output] [--release|--safe]
-#   clear run foo.cht [-- args...]
-#   clear test foo.cht
+#   clear build foo.clear [-o output] [--release|--safe]
+#   clear run foo.clear [-- args...]
+#   clear test foo.clear
 #
 # See docs/clear-man.md for full documentation.
 
@@ -152,7 +152,7 @@ def do_build(source, output: nil, opt_level: 'Debug', extra_flags: [], module_mo
   error "File not found: #{source}" unless File.exist?(source)
   source = File.expand_path(source)
   source_dir = File.dirname(source)
-  base_name = File.basename(source, '.cht')
+  base_name = File.basename(source, '.clear')
 
   # Output binary path
   output ||= File.join(source_dir, base_name)
@@ -204,7 +204,7 @@ def do_build(source, output: nil, opt_level: 'Debug', extra_flags: [], module_mo
   end
   transpile_flag += " --main-tier #{main_tier}" if main_tier
 
-  # Auto-detect package requires: REQUIRE "pkg:name" → look for packages/name/src/lib.cht
+  # Auto-detect package requires: REQUIRE "pkg:name" → look for packages/name/src/lib.clear
   source_text = File.read(source)
   pkg_requires = source_text.scan(/REQUIRE\s+"pkg:([^"]+)"/).flatten.uniq
   pkg_flags = pkg_requires.map do |pkg_name|
@@ -434,7 +434,7 @@ when 'build'
   if fix_mode
     sub_args = args - %w[--fix --fix=auto --fix=yes]
     source   = first_positional_arg(sub_args)
-    error "Usage: clear build --fix <file.cht>" unless source
+    error "Usage: clear build --fix <file.clear>" unless source
     run_with_fix_retry(__FILE__, 'build', sub_args, source, fix_mode)
     exit 0
   end
@@ -527,14 +527,14 @@ when 'build'
   end
 
   source = remaining.first
-  error "Usage: clear build <file.cht> [-o output] [--release|--safe] [--stack-check] [--force]" unless source
+  error "Usage: clear build <file.clear> [-o output] [--release|--safe] [--stack-check] [--force]" unless source
 
   # Auto-detect stack check: off for debug (20MB binaries make objdump slow), on for release/safe.
   stack_check = (opt_level != 'Debug') if stack_check.nil?
 
   default_stack = (opt_level == 'Debug') ? 'Large' : nil
   result = do_build(source, output: output, opt_level: opt_level, extra_flags: extra_flags, default_stack: default_stack, force: !!@force_build, use_c_allocator: use_c_allocator, use_debug_allocator: use_debug_allocator, bypass_transpile_cache: bypass_transpile_cache)
-  output_path = output || File.join(File.dirname(File.expand_path(source)), File.basename(source, '.cht'))
+  output_path = output || File.join(File.dirname(File.expand_path(source)), File.basename(source, '.clear'))
   exit 0 if result == :up_to_date
   puts "Built: #{output_path}"
 
@@ -553,7 +553,7 @@ when 'build'
       # raises "REQUIRE is only supported when using the Importer" --
       # the rescue below silently logs `[stack-check] Analysis failed`
       # and the build proceeds without exact-tier sizing. For files with
-      # large frames (e.g. examples/minivm/vm.cht's runRegisterBytecode!
+      # large frames (e.g. examples/minivm/vm.clear's runRegisterBytecode!
       # at ~478 KB), the missing tier upgrade leaves them on the default
       # 16 KB Standard stack, overflowing into adjacent slab memory
       # and corrupting fiber slab headers at scheduler shutdown.
@@ -564,7 +564,7 @@ when 'build'
       annotator.annotate!(ast)
       fn_nodes = annotator.semantic_function_nodes
 
-      base_name = File.basename(source, '.cht')
+      base_name = File.basename(source, '.clear')
       prefix = "._clear_tmp_#{base_name}"
       verifier = StackVerifier.new(output_path, prefix)
 
@@ -675,7 +675,7 @@ when 'run'
   if fix_mode
     sub_args = clear_args - %w[--fix --fix=auto --fix=yes]
     source   = first_positional_arg(sub_args)
-    error "Usage: clear run --fix <file.cht>" unless source
+    error "Usage: clear run --fix <file.clear>" unless source
     full_args = sub_args.dup
     full_args += ['--'] + run_args unless run_args.empty?
     run_with_fix_retry(__FILE__, 'run', full_args, source, fix_mode)
@@ -711,10 +711,10 @@ when 'run'
   end
 
   source = run_remaining.first
-  error "Usage: clear run <file.cht> [--optimized|--safe] [-- args...]" unless source
+  error "Usage: clear run <file.clear> [--optimized|--safe] [-- args...]" unless source
 
   source = File.expand_path(source)
-  output = File.join(File.dirname(source), File.basename(source, '.cht'))
+  output = File.join(File.dirname(source), File.basename(source, '.clear'))
   default_stack = (opt_level == 'Debug') ? 'Large' : nil
   do_build(source, output: output, opt_level: opt_level, extra_flags: extra_flags, default_stack: default_stack, use_c_allocator: use_c_allocator, force: no_cache, bypass_transpile_cache: no_cache)
 
@@ -755,7 +755,7 @@ when 'test'
   end
 
   source = test_args.first
-  error "Usage: clear test <file.cht|directory> [--profile] [--strict] [--debug-frame] [--coverage] [--tag <name>]" unless source
+  error "Usage: clear test <file.clear|directory> [--profile] [--strict] [--debug-frame] [--coverage] [--tag <name>]" unless source
   frame_env = frame_debug ? "CLEAR_FRAME_DEBUG=1 " : ""
 
   if File.directory?(source)
@@ -887,7 +887,7 @@ when 'test'
     # Transpiled tests import runtime/runtime-header.zig and lib/* via
     # directory-relative paths; top-level zig/*.zig symlinks are no longer
     # sufficient after the Zig 0.16 runtime/layout changes.
-    base_name = File.basename(source, '.cht')
+    base_name = File.basename(source, '.clear')
     build_dir = coverage_mode ? ZIG_DIR : File.join(ZIG_DIR, ".build-#{$$}")
     cleanup_paths = []
     FileUtils.mkdir_p(build_dir)
@@ -974,7 +974,7 @@ when 'benchmark'
   coverage_mode = bench_args.delete('--coverage')
   ENV['ZIG_COVERAGE'] ||= '1' if coverage_mode
   source = bench_args.first
-  error "Usage: clear benchmark <file.cht> [--coverage]" unless source
+  error "Usage: clear benchmark <file.clear> [--coverage]" unless source
   # Benchmark mode: same as test but also runs BENCHMARK/SMASH blocks
   do_build(
     source,
@@ -1045,10 +1045,10 @@ when 'profile'
   sample_n = 100 if sync_callstacks && sample_n.nil?
 
   source = clear_args.first
-  error "Usage: clear profile <file.cht> [--profile-max=N] [--sample=N] [--sync-callstacks] [-- args...]" unless source
+  error "Usage: clear profile <file.clear> [--profile-max=N] [--sample=N] [--sync-callstacks] [-- args...]" unless source
 
   source = File.expand_path(source)
-  base_name = File.basename(source, '.cht')
+  base_name = File.basename(source, '.clear')
   output = File.join(File.dirname(source), base_name)
   profile_dir = File.join(File.dirname(source), "#{base_name}.profile")
   FileUtils.mkdir_p(profile_dir)
@@ -1065,7 +1065,7 @@ when 'profile'
 
   # Copy the CLEAR source alongside the transpiled.zig so `clear doctor`
   # can show source snippets next to hot-line attributions.
-  FileUtils.cp(source, File.join(profile_dir, 'source.cht')) rescue nil
+  FileUtils.cp(source, File.join(profile_dir, 'source.clear')) rescue nil
 
   # CPU profiling via perf
   has_perf = system('which perf > /dev/null 2>&1') &&
@@ -1198,7 +1198,7 @@ when 'fmt', 'format'
     end
   end
 
-  error "Usage: clear fmt [--check|--stdout|--verify] <file.cht|dir>..." if paths.empty?
+  error "Usage: clear fmt [--check|--stdout|--verify] <file.clear|dir>..." if paths.empty?
 
   # --verify: confirm fmt is semantics-preserving by transpiling the
   # original AND the formatted source to Zig and comparing byte-for-byte.
@@ -1210,14 +1210,14 @@ when 'fmt', 'format'
     files = []
     paths.each do |p|
       if File.directory?(p)
-        files.concat(Dir.glob(File.join(p, '**', '*.cht')).sort)
+        files.concat(Dir.glob(File.join(p, '**', '*.clear')).sort)
       elsif File.file?(p)
         files << p
       else
         error "No such file or directory: #{p}"
       end
     end
-    error "No .cht files found" if files.empty?
+    error "No .clear files found" if files.empty?
     results = files.map { |f| FmtVerifier.verify(f) }
     fail_count = FmtVerifier.report(results)
     exit(fail_count.zero? ? 0 : 3)
@@ -1226,14 +1226,14 @@ when 'fmt', 'format'
   files = []
   paths.each do |p|
     if File.directory?(p)
-      files.concat(Dir.glob(File.join(p, '**', '*.cht')).sort)
+      files.concat(Dir.glob(File.join(p, '**', '*.clear')).sort)
     elsif File.file?(p)
       files << p
     else
       error "No such file or directory: #{p}"
     end
   end
-  error "No .cht files found" if files.empty?
+  error "No .clear files found" if files.empty?
 
   changed = 0
   failed  = 0
@@ -1403,16 +1403,16 @@ when 'help', '--help', '-h', nil
     CLEAR Language Compiler
 
     Usage:
-      clear build <file.cht> [-o output] [--optimized|--safe|--debug]
-      clear run <file.cht> [-- args...]
-      clear test <file.cht>          Test a single file
-      clear test <directory>         Test all .cht files in directory
+      clear build <file.clear> [-o output] [--optimized|--safe|--debug]
+      clear run <file.clear> [-- args...]
+      clear test <file.clear>          Test a single file
+      clear test <directory>         Test all .clear files in directory
       clear test ... --debug-frame   Enable debug frame arena (slow, detects use-after-rewind)
-      clear profile <file.cht>      Build + run with profiling (heap + CPU)
+      clear profile <file.clear>      Build + run with profiling (heap + CPU)
       clear doctor <profile-dir>    Analyze profile data
       clear build --fix <file>      On compile error, run `clear fix` then retry once
       clear run --fix <file>        Same, for `clear run`
-      clear fix <file.cht>          Apply auto-fixable findings; prompt for others
+      clear fix <file.clear>          Apply auto-fixable findings; prompt for others
       clear fix --dry-run <file>    Show findings and chosen fixes, do not write
       clear fix --yes <file>        Take the first fix for every finding
       clear fix --only=lint,... <f> Restrict to categories (lint, ownership, ...)

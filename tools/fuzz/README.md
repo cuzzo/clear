@@ -1,7 +1,7 @@
 # tools/fuzz — Combinatorial Fuzz Harness
 
 Template-based program generator that stresses MIR ownership invariants and
-escape-analysis cross-products. Runs `.cht` programs through the existing
+escape-analysis cross-products. Runs `.clear` programs through the existing
 `./clear test` pipeline, which catches MIR violations (statically) and leaks /
 UAF / double-free (at runtime via `std.testing.allocator`).
 
@@ -103,11 +103,11 @@ Active mutants:
       mutants/          # manual targeted safety mutants
       templates/*.rb    # one file per template
     transpile-tests/fuzz/
-      fuzz_<name>_<hash>.cht   # generated programs (gitignored)
+      fuzz_<name>_<hash>.clear   # generated programs (gitignored)
 
 Each template registers itself with `FuzzGenerator.register(name, cells:) { |params| ... }`,
 declaring its parameter cells (the matrix it owns) and a renderer that turns a
-cell into a complete `.cht` source string with embedded `ASSERT` oracles. A
+cell into a complete `.clear` source string with embedded `ASSERT` oracles. A
 template may also return `{ kind: :mir_checker, source:, error_code: }` for
 malformed-MIR negative cells; those run the checker directly and fail if the
 expected hard error is absent.
@@ -181,7 +181,7 @@ expected hard error is absent.
 | `lowering_boundary_matrix`   | 28           | MIR lowering boundary coverage for call contracts, WITH variants, BG/DO/NEXT, and pipeline terminals. |
 | `test_framework_matrix`      | 6            | TEST/WHEN/TEST THAT grammar through hooks, LET bindings, stubs, pending tests, benchmark, smash, and profile forms. |
 | `extern_boundary_matrix`     | 6            | Negative extern declaration/call boundaries for free functions, trampolines, extern methods/resources, generic comptime calls, and tight-loop rejection. |
-| `curated_gap_corpus`         | 466          | Self-contained `transpile-tests/*.cht` corpus reused as broad compile-mode fuzz coverage for parser, annotator, MIR lowering, and emission. |
+| `curated_gap_corpus`         | 466          | Self-contained `transpile-tests/*.clear` corpus reused as broad compile-mode fuzz coverage for parser, annotator, MIR lowering, and emission. |
 
 ### `stream_into_boundary` matrix
 
@@ -439,10 +439,10 @@ auto-loads everything in that directory at startup.
 
 ## When a fuzz run finds a bug
 
-1. The failing `.cht` is named by content hash, so it's reproducible across
+1. The failing `.clear` is named by content hash, so it's reproducible across
    runs given the same seed and template.
 2. Move the failing file from `transpile-tests/fuzz/` into `transpile-tests/`
-   with a descriptive name (e.g. `382_loop_local_map_escape.cht`). It becomes
+   with a descriptive name (e.g. `382_loop_local_map_escape.clear`). It becomes
    a permanent regression test caught by `./clear test transpile-tests/`.
 3. Fix the underlying bug in `src/`.
 4. Re-run the fuzz suite. The newly added permanent test runs as part of the
@@ -460,7 +460,7 @@ place, the full matrix passes 36/36.
 - **Template-based, not grammar-based.** Random AST generation produces 90%
   trivial syntax that doesn't reach MIR. Templates target the bug shapes that
   actually slip through hand-written tests.
-- **Per-file `clear test` invocation.** Each generated `.cht` is run through
+- **Per-file `clear test` invocation.** Each generated `.clear` is run through
   `./clear test <file>` which uses `gen.rb --single`. Slower than batching but
   trivial to integrate; switch to a bundled runner if matrix size grows past
   ~200 programs.

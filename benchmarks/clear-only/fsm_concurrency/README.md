@@ -11,8 +11,8 @@ per-fiber stack.
 
 | File | BG body | Lowering | Per-fiber stack |
 |---|---|---|---|
-| `bench_fsm.cht` | `BG { sleep(50); }` | FSM (`FsmTask` + `runStep0/runStep1`) | none -- ctx struct on heap |
-| `bench_stackful.cht` | `BG { @standard -> napFor(50); }` | stackful (`spawnBest`) | 16 KB tier (4 KB body + 12 KB safety+arena) |
+| `bench_fsm.clear` | `BG { sleep(50); }` | FSM (`FsmTask` + `runStep0/runStep1`) | none -- ctx struct on heap |
+| `bench_stackful.clear` | `BG { @standard -> napFor(50); }` | stackful (`spawnBest`) | 16 KB tier (4 KB body + 12 KB safety+arena) |
 
 `@standard` is the smallest tier the stack-safety analyzer accepts
 for code that calls `sleep`. `@micro` (4 KB) is rejected by
@@ -90,9 +90,9 @@ chunked allocations).
 ## Running
 
 ```bash
-./clear build benchmarks/clear-only/fsm_concurrency/bench_fsm.cht --optimized \
+./clear build benchmarks/clear-only/fsm_concurrency/bench_fsm.clear --optimized \
     -o benchmarks/clear-only/fsm_concurrency/bench_fsm
-./clear build benchmarks/clear-only/fsm_concurrency/bench_stackful.cht --optimized \
+./clear build benchmarks/clear-only/fsm_concurrency/bench_stackful.clear --optimized \
     -o benchmarks/clear-only/fsm_concurrency/bench_stackful
 
 /usr/bin/time -f "elapsed=%e rss_kb=%M" \

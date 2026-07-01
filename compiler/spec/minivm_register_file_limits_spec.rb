@@ -23,7 +23,7 @@ RSpec.describe MiniVM::Register::RegisterFileLimits do
   describe ".validate_vm_cht!" do
     it "passes when every register file is declared at the cap" do
       Dir.mktmpdir do |dir|
-        path = File.join(dir, "vm.cht")
+        path = File.join(dir, "vm.clear")
         File.write(path, <<~CLR)
           MUTABLE iregs: Int64[#{described_class::I}];
           MUTABLE fregs: Float64[#{described_class::F}];
@@ -35,7 +35,7 @@ RSpec.describe MiniVM::Register::RegisterFileLimits do
 
     it "raises when a register file is declared at a different size than its cap" do
       Dir.mktmpdir do |dir|
-        path = File.join(dir, "vm.cht")
+        path = File.join(dir, "vm.clear")
         File.write(path, <<~CLR)
           MUTABLE iregs: Int64[#{described_class::I + 1}];
           MUTABLE fregs: Float64[#{described_class::F}];
@@ -48,7 +48,7 @@ RSpec.describe MiniVM::Register::RegisterFileLimits do
 
     it "raises when a register file declaration is missing entirely" do
       Dir.mktmpdir do |dir|
-        path = File.join(dir, "vm.cht")
+        path = File.join(dir, "vm.clear")
         File.write(path, <<~CLR)
           MUTABLE iregs: Int64[#{described_class::I}];
           MUTABLE sregs: String[#{described_class::S}];
@@ -58,8 +58,8 @@ RSpec.describe MiniVM::Register::RegisterFileLimits do
       end
     end
 
-    it "validates the actual checked-in vm.cht in the repository" do
-      vm_path = File.expand_path("../../examples/minivm/vm.cht", __dir__)
+    it "validates the actual checked-in vm.clear in the repository" do
+      vm_path = File.expand_path("../../examples/minivm/vm.clear", __dir__)
       expect(described_class.validate_vm_cht!(vm_path)).to eq(true)
     end
   end

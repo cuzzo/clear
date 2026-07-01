@@ -29,7 +29,7 @@ RSpec.describe "OOM fault injection (alloc-as-FAULT model)", :integration do
 
   def build(src)
     dir = Dir.mktmpdir("oom")
-    cht = File.join(dir, "p.cht")
+    cht = File.join(dir, "p.clear")
     bin = File.join(dir, "p")
     File.write(cht, src)
     out = `#{CLEAR_BIN} build #{cht} -o #{bin} 2>&1`

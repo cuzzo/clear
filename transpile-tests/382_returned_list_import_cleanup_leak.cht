@@ -1,8 +1,0 @@
-REQUIRE "382_returned_list_lib.cht";
-
-FN main() RETURNS Void ->
-  nums = makeNumbersFromLib();
-  ASSERT nums.length() == 1, "imported returned list length";
-  ASSERT nums[0] == 2, "imported returned list contents";
-  RETURN;
-END

@@ -3,13 +3,13 @@
 ## Pipeline
 
 ```
-clear profile foo.cht [-- args]
+clear profile foo.clear [-- args]
     └─ do_build(profile: true)       # ReleaseFast + CLEAR_PROFILE comptime flag + -fno-strip
     └─ perf record -g -o .profile/perf.data
     └─ CLEAR_ALLOC_PROFILE=.profile/alloc.txt ./foo
     └─ strace -c -o .profile/syscalls.txt ./foo
     └─ perf stat -o .profile/perf-stat.txt ./foo
-    └─ cp source.cht .profile/                # for doctor source snippets
+    └─ cp source.clear .profile/                # for doctor source snippets
     └─ cp transpiled.zig .profile/            # Zig source for addr2line + CLR:N mapping
 
 clear doctor .profile/

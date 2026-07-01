@@ -1,0 +1,34 @@
+# Same benchmark, but without @shared:locked. Measures lock overhead.
+
+REQUIRE "types.clear";
+
+FN run!(MUTABLE pool: Env[200000]@pool) RETURNS Int64 ->
+    MUTABLE total: Int64 = 0;
+    MUTABLE iter: Int64 = 0;
+    WHILE iter < 100000 DO
+        id: Id<Env> = pool.insert(Env{ vars: {} });
+        IF pool[id] AS env THEN
+            env.vars["k1"] = Value{ Int64Val: iter };
+            env.vars["k2"] = Value{ Int64Val: iter * 2 };
+            env.vars["k3"] = Value{ Int64Val: iter * 3 };
+        END
+        IF pool[id] AS env THEN
+            PARTIAL MATCH env.vars["k2"] OR Value.Nil START
+                Value.Int64Val AS v -> total = total + v;,
+                DEFAULT -> PASS;
+            END
+        END
+        iter = iter + 1;
+    END
+    RETURN total;
+END
+
+FN main() RETURNS Void ->
+    MUTABLE pool: Env[200000]@pool = [];
+    startMs = timestampMs();
+    total = run!(pool);
+    endMs = timestampMs();
+    elapsed = endMs - startMs;
+    print("VM pool ops (nosync) total=" + total.toString() + " in " + elapsed.toString() + "ms");
+    RETURN;
+END

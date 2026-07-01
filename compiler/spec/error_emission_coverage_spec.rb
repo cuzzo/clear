@@ -1927,7 +1927,7 @@ RSpec.describe "error emission coverage" do
 
   # @example_for: MISSING_FUNCTION
   # @fix: Check the spelling. If the function lives in another
-  # @fix: module, add `REQUIRE "pkg:..."` or `REQUIRE "file.cht"`.
+  # @fix: module, add `REQUIRE "pkg:..."` or `REQUIRE "file.clear"`.
   # @fix: The typo-suggestion auto-fix offers the closest declared
   # @fix: name when one is within Levenshtein threshold.
   describe ":MISSING_FUNCTION — calling a name that isn't a declared function" do

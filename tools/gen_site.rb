@@ -86,7 +86,7 @@ def strip_empty_links(body) = body.gsub(EMPTY_LINK_RE, '\1')
 # Ruby-ish) so they highlight like Ruby on the site. Source docs are
 # untouched and still render on GitHub.
 FENCE_RE  = /\A(\s*)(`{3,}|~{3,})(.*)\z/
-CODE_LANG = { "clear" => "ruby", "CLEAR" => "ruby", "cht" => "ruby" }.freeze
+CODE_LANG = { "clear" => "ruby", "CLEAR" => "ruby" }.freeze
 
 def normalize_code_fences(body)
   in_fence = false

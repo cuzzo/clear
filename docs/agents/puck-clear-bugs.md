@@ -1,15 +1,15 @@
 # Puck-on-CLEAR — Compiler Bugs and Friction
 
-Bugs and rough edges discovered while building `examples/puck/vm.cht`
+Bugs and rough edges discovered while building `examples/puck/vm.clear`
 (a CLEAR-language port of `v10/vm.c`). Every entry below was reproduced
 from a small piece of the VM during the same session, and every one is
-worked around in `vm.cht` so the file compiles today.
+worked around in `vm.clear` so the file compiles today.
 
 Minimal reproducers live in
 [`transpile-tests/known-failing/`](../../transpile-tests/known-failing/).
 They are deliberately kept out of `transpile-tests/gen.rb`'s glob so the
 standard CI run isn't blocked; when a bug is fixed, move its reproducer
-up into `transpile-tests/<NNN>_<name>.cht` to make the fix gate.
+up into `transpile-tests/<NNN>_<name>.clear` to make the fix gate.
 
 See also [`puck-clear-retrospective.md`](puck-clear-retrospective.md) for
 the post-mortem on how these slipped through to this stage.
@@ -67,7 +67,7 @@ gate. None are regressions; each is a distinct root cause.
 
 Affects `cht` source of the shape:
 
-```cht
+```clear
 IF (someFallible(args) OR fallback) != "literal" THEN
   RAISE "...";
 END
@@ -92,7 +92,7 @@ Zig rejects this:
 
 **Workaround**: bind the lifted expression to a named local first.
 
-```cht
+```clear
 strHeader = firstToken(lines[1]) OR "";
 IF strHeader != "STRINGS" THEN RAISE "vm: missing STRINGS header"; END
 ```
@@ -118,7 +118,7 @@ MIR ownership verification failed (post-lowering):
 
 The MIR rule (CLAUDE.md, invariant #6) is documented and correct in
 spirit, but the per-iteration `restoreLoopMark` defer is not auto-inserted
-for the common loop-with-temps shape. `examples/minivm/_bc_runner.cht`
+for the common loop-with-temps shape. `examples/minivm/_bc_runner.clear`
 sidesteps this by allocating every transient into a long-lived
 `Env[N]@pool` rather than the frame; ordinary user code without that
 infrastructure is stuck.
@@ -127,7 +127,7 @@ infrastructure is stuck.
 `MUTABLE` declared above the loop, so the loop body only ever
 **re-assigns**, never **allocates**:
 
-```cht
+```clear
 MUTABLE head: String = "";
 MUTABLE tail: String = "";
 WHILE i < codesLen DO
@@ -158,7 +158,7 @@ to add `OR <action>` or change its return type to `!T`.
 
 Concrete reproducer (this should compile with `RETURNS Int64`):
 
-```cht
+```clear
 FN codepointOf(c: String) RETURNS Int64 ->
   ascii = " ABC";
   MUTABLE i = 0;
@@ -201,7 +201,7 @@ spawnNew`), and `compute_can_fail!` gained an explicit
 declared-`RETURNS !T` axis (the most authoritative failure signal,
 previously masked by the alloc proxy). Regression-gated by
 `tools/fuzz/templates/infallible_signature.rb` and promoted to
-`transpile-tests/or_fallback_doesnt_propagate_fallibility.cht`.
+`transpile-tests/or_fallback_doesnt_propagate_fallibility.clear`.
 
 The exhaustive gate surfaced three residual latent defects the
 over-rejection had been masking — see #11, #12, #13. The canonical
@@ -228,7 +228,7 @@ A pure function that does `parts = line.split(" "); parts[1]` is
 inferred as `can_fail`, requiring `!T` and `OR <action>` at every
 call site:
 
-```cht
+```clear
 FN splitOnce(line: String) RETURNS String[] ->     # rejected
   parts = line.split(" ");
   ...
@@ -252,7 +252,7 @@ gets clobbered across outer-loop iterations
 
 Reproducer — the canonical "load a Program out of a binary file" loop:
 
-```cht
+```clear
 STRUCT Procedure { params: Int64, codes: ByteCode[]@list }
 STRUCT Program   { procs: Procedure[]@list }
 
@@ -283,7 +283,7 @@ in a `@list`. Replace the per-proc `codes` field with
 `ByteCode[]@list`. Then the only `@list` in the picture is the flat
 one, owned by `Program`, and no nested-list aliasing can happen.
 
-```cht
+```clear
 STRUCT Procedure { params: Int64, opStart: Int64, opCount: Int64 }
 STRUCT Program   {
   procs:  Procedure[]@list,
@@ -291,7 +291,7 @@ STRUCT Program   {
 }
 ```
 
-This is what `vm.cht` does today. The C/Go/Rust ports won't have to.
+This is what `vm.clear` does today. The C/Go/Rust ports won't have to.
 
 ---
 
@@ -300,7 +300,7 @@ This is what `vm.cht` does today. The C/Go/Rust ports won't have to.
 A function that *correctly* declares an error union over a list return
 type fails Zig codegen:
 
-```cht
+```clear
 FN build(a: String) RETURNS !Int64[]@list ->
   RETURN [1_i64];
 END
@@ -344,7 +344,7 @@ The residual half of #3. With the alloc-conflation fixed, a function
 whose ONLY fallibility is a user callee absorbed by `OR <value>` is
 still forced to `!T`:
 
-```cht
+```clear
 FN flaky(s: String) RETURNS !String -> ... END
 FN sub(a: String) RETURNS String ->
   h = flaky(a) OR "fallback";   # error consumed -> sub is infallible
@@ -385,7 +385,7 @@ the orthogonal arena-op `try`).
 Exposed by #3's de-conflation (was masked because #3 rejected these at
 the annotator before codegen):
 
-```cht
+```clear
 FN f(a: String) RETURNS Int64 ->
   parts = a.split(" ");   # -> `const __tmp = try CheatLib.split(...)`
   RETURN 7_i64;
@@ -462,7 +462,7 @@ values) is several times the LOC of the C original, with the extra
 weight coming entirely from CLEAR-imposed workarounds rather than from
 the language's normal cost.
 
-The pragmatic choice for `vm.cht` today is:
+The pragmatic choice for `vm.clear` today is:
 
 - Restrict the value type to bare `Int64` (sidesteps the now-removed
   by-design friction around unions/heap entirely).

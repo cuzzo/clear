@@ -23,7 +23,7 @@ options = {
 }
 
 OptionParser.new do |opts|
-  opts.banner = "Usage: ruby tools/trace_method_times.rb [options] path/to/file.cht"
+  opts.banner = "Usage: ruby tools/trace_method_times.rb [options] path/to/file.clear"
   opts.on("--phase NAME", "full, frontend, lower, checker, emit") { |v| options[:phase] = v }
   opts.on("-o", "--output PATH", "CSV output path") { |v| options[:output] = v }
   opts.on("--limit N", Integer, "Rows printed per sort") { |v| options[:limit] = v }

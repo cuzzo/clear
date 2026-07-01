@@ -33,11 +33,11 @@ work.
 | `fs.glob(pattern)` | `planned`, `self-host required` | Unsorted stream of matching paths. |
 
 ```ruby clear illustrative
-source = fs.read("src/ast/parser.cht") OR RAISE;
-lines = fs.readLines("src/ast/lexer.cht") OR RAISE;
+source = fs.read("src/ast/parser.clear") OR RAISE;
+lines = fs.readLines("src/ast/lexer.clear") OR RAISE;
 fs.write("build/report.txt", report) OR RAISE;
 
-ordered_files = (fs.glob("src/**/*.cht") OR RAISE)
+ordered_files = (fs.glob("src/**/*.clear") OR RAISE)
     |> ORDER_BY _;
 ```
 

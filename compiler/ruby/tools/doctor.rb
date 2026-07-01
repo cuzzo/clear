@@ -177,7 +177,7 @@ module Doctor
         # actually came from the user's transpiled CLEAR file. Runtime
         # and stdlib zig files have no CLR markers; treating them as
         # user code led to runtime functions appearing at random
-        # source.cht lines. addr2line emits the build-time filename
+        # source.clear lines. addr2line emits the build-time filename
         # `._clear_tmp_<name>.zig` (the compile target), which is a
         # content copy of profile_dir/transpiled.zig.
         is_user_zig = File.exist?(zig_source_path) &&
@@ -324,7 +324,7 @@ module Doctor
     # containing `|>`) are called out explicitly — they're the most
     # common perf "why is this slow" question.
     zig_source = File.join(profile_dir, 'transpiled.zig')
-    clear_source = File.join(profile_dir, 'source.cht')
+    clear_source = File.join(profile_dir, 'source.clear')
     return unless File.exist?(zig_source)
 
     zig_to_clear = {}
@@ -542,7 +542,7 @@ module Doctor
     dispatch_counts = task_dispatch_counts(profile_dir)
     return unless local_dispatch_warning?(dispatch_counts)
 
-    emit_generic_local_bg_hint!(local_bg_source_lines(File.join(profile_dir, 'source.cht')))
+    emit_generic_local_bg_hint!(local_bg_source_lines(File.join(profile_dir, 'source.clear')))
   end
 
   sig { params(profile_dir: String, local_sites: Array, metadata: Hash).void }
@@ -636,7 +636,7 @@ module Doctor
   sig { params(profile_dir: String, line: T.any(Integer, String)).returns(String) }
   def self.source_line(profile_dir, line)
     return '' unless line && line != '?'
-    clear_source = File.join(profile_dir, 'source.cht')
+    clear_source = File.join(profile_dir, 'source.clear')
     return '' unless File.exist?(clear_source)
     File.readlines(clear_source)[line.to_i - 1]&.strip.to_s[0, 90]
   end
@@ -835,7 +835,7 @@ module Doctor
   # flagged write-heavy contention.
   sig { params(profile_dir: String).returns(Array) }
   def self.emit_atomic_migration!(profile_dir)
-    src_path = File.join(profile_dir, 'source.cht')
+    src_path = File.join(profile_dir, 'source.clear')
     return unless File.exist?(src_path)
 
     require_relative "atomic_migration_suggester"
@@ -868,7 +868,7 @@ module Doctor
   # runtime contention both agree.
   sig { params(profile_dir: String).returns(T.nilable(Array)) }
   def self.emit_atomic_ptr_migration!(profile_dir)
-    src_path = File.join(profile_dir, 'source.cht')
+    src_path = File.join(profile_dir, 'source.clear')
     return unless File.exist?(src_path)
 
     require_relative "atomic_ptr_migration_suggester"
@@ -1068,7 +1068,7 @@ module Doctor
   # replacement eligibility before suggesting @indirect:atomic.
   sig { params(profile_dir: String).returns(T.nilable(Array)) }
   def self.emit_atomic_ptr_upgrade_from_mvcc!(profile_dir)
-    src_path = File.join(profile_dir, 'source.cht')
+    src_path = File.join(profile_dir, 'source.clear')
     return unless File.exist?(src_path)
 
     require_relative "atomic_ptr_migration_suggester"
@@ -1101,17 +1101,17 @@ module Doctor
   end
 
   # ── Atomic Escape ──
-  # Static analysis on `<profile-dir>/source.cht`. The compiler
+  # Static analysis on `<profile-dir>/source.clear`. The compiler
   # rejects `@shared:atomic` bindings that escape their declaring
   # scope; this section translates the
   # "Lifetime Error: cannot store/RETURN ..." messages into a
   # plain-language explanation alongside the migration paths
   # (`@shared:locked` today, atomic struct fields in v0.3).
-  # Skipped silently when source.cht is missing or no atomic-
+  # Skipped silently when source.clear is missing or no atomic-
   # escape sites are detected.
   sig { params(profile_dir: String).returns(NilClass) }
   def self.section_atomic_escape(profile_dir)
-    src_path = File.join(profile_dir, 'source.cht')
+    src_path = File.join(profile_dir, 'source.clear')
     return unless File.exist?(src_path)
 
     require_relative "atomic_escape_suggester"

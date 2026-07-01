@@ -2,7 +2,7 @@ require "rspec"
 require "tmpdir"
 require_relative "../ruby/tools/fmt_verifier" unless defined?(FmtVerifier)
 
-# FmtVerifier compares the Zig emitted from a .cht file before and
+# FmtVerifier compares the Zig emitted from a .clear file before and
 # after fmt to confirm fmt is semantics-preserving. Heavy parts
 # (full transpile pipeline, real Formatter) are stubbed here so the
 # tests focus on the equivalence-check logic itself: a normalized
@@ -25,7 +25,7 @@ RSpec.describe FmtVerifier do
 
   describe ".verify — equivalence logic" do
     it "returns ok=true when both transpilations produce the same Zig" do
-      path = write_cht("a.cht", "original source")
+      path = write_cht("a.clear", "original source")
       calls = []
       allow(FmtVerifier).to receive(:transpile) do |source, source_dir|
         calls << [source, source_dir]
@@ -46,7 +46,7 @@ RSpec.describe FmtVerifier do
     end
 
     it "uses an explicit source_dir for both transpilation passes" do
-      path = write_cht("a.cht", "source")
+      path = write_cht("a.clear", "source")
       source_dir = File.join(@tmp, "imports")
       FileUtils.mkdir_p(source_dir)
       calls = []
@@ -66,7 +66,7 @@ RSpec.describe FmtVerifier do
     end
 
     it "derives the default source_dir from the expanded file path" do
-      write_cht("a.cht", "source")
+      write_cht("a.clear", "source")
       calls = []
       allow(FmtVerifier).to receive(:transpile) do |source, dir|
         calls << [source, dir]
@@ -75,8 +75,8 @@ RSpec.describe FmtVerifier do
       allow(Formatter).to receive(:format).with("source").and_return("formatted")
 
       Dir.chdir(@tmp) do
-        result = FmtVerifier.verify("a.cht")
-        expect(result.path).to eq("a.cht")
+        result = FmtVerifier.verify("a.clear")
+        expect(result.path).to eq("a.clear")
       end
 
       expect(calls).to eq([
@@ -86,7 +86,7 @@ RSpec.describe FmtVerifier do
     end
 
     it "returns ok=false with a diff excerpt when Zig outputs differ" do
-      path = write_cht("a.cht")
+      path = write_cht("a.clear")
       call_count = 0
       allow(FmtVerifier).to receive(:transpile) do
         call_count += 1
@@ -104,7 +104,7 @@ RSpec.describe FmtVerifier do
     end
 
     it "ignores `// CLR:N` line markers when comparing" do
-      path = write_cht("a.cht")
+      path = write_cht("a.clear")
       before_zig = <<~ZIG
         // CLR:5
         const x = 1;
@@ -130,7 +130,7 @@ RSpec.describe FmtVerifier do
     end
 
     it "still flags genuine code-line differences even alongside CLR markers" do
-      path = write_cht("a.cht")
+      path = write_cht("a.clear")
       before_zig = <<~ZIG
         // CLR:5
         const x = 1;
@@ -154,7 +154,7 @@ RSpec.describe FmtVerifier do
     end
 
     it "captures errors with class+message when transpile raises" do
-      path = write_cht("a.cht")
+      path = write_cht("a.clear")
       allow(FmtVerifier).to receive(:transpile)
         .and_raise(ArgumentError, "missing source dir")
 
@@ -166,7 +166,7 @@ RSpec.describe FmtVerifier do
     end
 
     it "captures errors when Formatter.format raises" do
-      path = write_cht("a.cht")
+      path = write_cht("a.clear")
       allow(FmtVerifier).to receive(:transpile).and_return("zig output")
       allow(Formatter).to receive(:format).and_raise(Formatter::Error, "parse error")
 
@@ -188,7 +188,7 @@ RSpec.describe FmtVerifier do
         end
       end
       stub_const("FmtVerifierSpecError", error_class)
-      path = write_cht("a.cht")
+      path = write_cht("a.clear")
       allow(FmtVerifier).to receive(:transpile).and_raise(FmtVerifierSpecError.new)
 
       result = FmtVerifier.verify(path)
@@ -244,12 +244,12 @@ RSpec.describe FmtVerifier do
   end
 
   describe ".verify_dir" do
-    it "returns one Result per .cht file under the directory in path order" do
+    it "returns one Result per .clear file under the directory in path order" do
       sub = File.join(@tmp, "nested")
       FileUtils.mkdir_p(sub)
-      z = File.join(@tmp, "z.cht")
-      b = File.join(sub, "b.cht")
-      a = File.join(@tmp, "a.cht")
+      z = File.join(@tmp, "z.clear")
+      b = File.join(sub, "b.clear")
+      a = File.join(@tmp, "a.clear")
       File.write(z, "FN main() RETURNS Void -> RETURN; END\n")
       File.write(b, "FN main() RETURNS Void -> RETURN; END\n")
       File.write(a, "FN main() RETURNS Void -> RETURN; END\n")
@@ -263,11 +263,11 @@ RSpec.describe FmtVerifier do
     end
 
     it "sorts the globbed paths before verification" do
-      a = File.join(@tmp, "a.cht")
-      b = File.join(@tmp, "b.cht")
-      z = File.join(@tmp, "z.cht")
+      a = File.join(@tmp, "a.clear")
+      b = File.join(@tmp, "b.clear")
+      z = File.join(@tmp, "z.clear")
       allow(Dir).to receive(:glob)
-        .with(File.join(@tmp, "**", "*.cht"))
+        .with(File.join(@tmp, "**", "*.clear"))
         .and_return([z, a, b])
       allow(FmtVerifier).to receive(:verify) do |path|
         FmtVerifier::Result.new(path, true, nil, nil)
@@ -334,10 +334,10 @@ RSpec.describe FmtVerifier do
 
   describe ".report" do
     it "writes to stdout by default" do
-      results = [FmtVerifier::Result.new("a.cht", true, nil, nil)]
+      results = [FmtVerifier::Result.new("a.clear", true, nil, nil)]
 
       expect { expect(FmtVerifier.report(results)).to eq(0) }.to output(
-        "  \e[32mOK\e[0m  a.cht\n" \
+        "  \e[32mOK\e[0m  a.clear\n" \
         "\n" \
         "  \e[32m1 passed, 0 failed.\e[0m\n"
       ).to_stdout
@@ -345,26 +345,26 @@ RSpec.describe FmtVerifier do
 
     it "returns 0 fail count when all results are OK" do
       results = [
-        FmtVerifier::Result.new("a.cht", true, nil, nil),
-        FmtVerifier::Result.new("b.cht", true, nil, nil),
+        FmtVerifier::Result.new("a.clear", true, nil, nil),
+        FmtVerifier::Result.new("b.clear", true, nil, nil),
       ]
       io = StringIO.new
       expect(FmtVerifier.report(results, io: io)).to eq(0)
       expect(io.string).to eq(
-        "  \e[32mOK\e[0m  a.cht\n" \
-        "  \e[32mOK\e[0m  b.cht\n" \
+        "  \e[32mOK\e[0m  a.clear\n" \
+        "  \e[32mOK\e[0m  b.clear\n" \
         "\n" \
         "  \e[32m2 passed, 0 failed.\e[0m\n"
       )
     end
 
     it "allows a failure row with no error or diff details" do
-      results = [FmtVerifier::Result.new("unknown.cht", false, nil, nil)]
+      results = [FmtVerifier::Result.new("unknown.clear", false, nil, nil)]
       io = StringIO.new
 
       expect(FmtVerifier.report(results, io: io)).to eq(1)
       expect(io.string).to eq(
-        "  \e[31mDIFFERS\e[0m  unknown.cht\n" \
+        "  \e[31mDIFFERS\e[0m  unknown.clear\n" \
         "\n" \
         "  \e[31m0 passed, 1 failed.\e[0m\n"
       )
@@ -372,19 +372,19 @@ RSpec.describe FmtVerifier do
 
     it "returns the count of failures and prints details" do
       results = [
-        FmtVerifier::Result.new("ok.cht", true, nil, nil),
-        FmtVerifier::Result.new("bad.cht", false, nil, "--- a\n+++ b\n@@ ...\n"),
-        FmtVerifier::Result.new("err.cht", false, "RuntimeError: boom", nil),
+        FmtVerifier::Result.new("ok.clear", true, nil, nil),
+        FmtVerifier::Result.new("bad.clear", false, nil, "--- a\n+++ b\n@@ ...\n"),
+        FmtVerifier::Result.new("err.clear", false, "RuntimeError: boom", nil),
       ]
       io = StringIO.new
       expect(FmtVerifier.report(results, io: io)).to eq(2)
       expect(io.string).to eq(
-        "  \e[32mOK\e[0m  ok.cht\n" \
-        "  \e[31mDIFFERS\e[0m  bad.cht\n" \
+        "  \e[32mOK\e[0m  ok.clear\n" \
+        "  \e[31mDIFFERS\e[0m  bad.clear\n" \
         "        --- a\n" \
         "        +++ b\n" \
         "        @@ ...\n" \
-        "  \e[31mERROR\e[0m  err.cht\n" \
+        "  \e[31mERROR\e[0m  err.clear\n" \
         "        \e[33mRuntimeError: boom\e[0m\n" \
         "\n" \
         "  \e[31m1 passed, 2 failed.\e[0m\n"

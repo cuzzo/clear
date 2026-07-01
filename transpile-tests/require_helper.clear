@@ -1,0 +1,14 @@
+# require_helper.clear — used by 50_require.clear
+# Tests that visibility is respected at import boundaries.
+
+PUB FN addPub(a: Float64, b: Float64) RETURNS Float64 ->
+  RETURN a + b;
+END
+
+FN multiplyPackage(x: Float64, y: Float64) RETURNS Float64 ->
+  RETURN x * y;
+END
+
+PRIVATE FN secretPrivate(x: Float64) RETURNS Float64 ->
+  RETURN x + 999;
+END

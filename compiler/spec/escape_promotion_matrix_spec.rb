@@ -4,7 +4,7 @@ require_relative "../ruby/backends/transpiler" unless defined?(ZigTranspiler)
 # Escape promotion matrix — combinatoric coverage for Phase 1a of the
 # unified-classification refactor (silly-churning-simon.md plan).
 #
-# Each cell builds a `.cht` source where a value of type T is built in
+# Each cell builds a `.clear` source where a value of type T is built in
 # function-local scope and RETURNed. The cell asserts the
 # return-binding's post-MIR storage and cleanup-allocator. If escape
 # promotion is correctly applied, every escaping non-Copy type ends up
@@ -50,7 +50,7 @@ RSpec.describe "Escape promotion matrix (Phase 1a)" do
     fn.cleanup_bindings&.[](name.to_s)
   end
 
-  # Each fixture: (cht source, name of the binding under test, expected
+  # Each fixture: (CLEAR source, name of the binding under test, expected
   # storage, expected cleanup_allocator | nil for "no cleanup").
   # Each cell asserts:
   #   storage         — declaration's `decl.storage` after MIR.

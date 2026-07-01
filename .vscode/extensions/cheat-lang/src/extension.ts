@@ -1,6 +1,6 @@
 // CLEAR Language Server VS Code client.
 //
-// Activates on `.cht` files (registered language id: "clear"), spawns
+// Activates on `.clear` files (registered language id: "clear"), spawns
 // `bundle exec bin/clear-lsp`, and wires the standard LSP client so
 // VS Code surfaces:
 //
@@ -71,7 +71,7 @@ export function activate(context: ExtensionContext) {
   const clientOptions: LanguageClientOptions = {
     documentSelector: [{ scheme: "file", language: "clear" }],
     synchronize: {
-      fileEvents: workspace.createFileSystemWatcher("**/*.cht"),
+      fileEvents: workspace.createFileSystemWatcher("**/*.clear"),
     },
     outputChannelName: "CLEAR Language Server",
   };

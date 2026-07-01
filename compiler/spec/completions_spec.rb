@@ -17,7 +17,7 @@ RSpec.describe Completions do
     it 'returns the zsh script for "zsh"' do
       out = described_class.script_for('zsh')
       expect(out).to start_with('#compdef clear')
-      expect(out).to include('_files -g \'*.cht\'')
+      expect(out).to include('_files -g \'*.clear\'')
     end
 
     it 'returns the fish script for "fish"' do
@@ -37,8 +37,8 @@ RSpec.describe Completions do
       end
     end
 
-    it 'filters file completion to *.cht for build-like subcommands' do
-      expect(script).to include("compgen -f -X '!*.cht'")
+    it 'filters file completion to *.clear for build-like subcommands' do
+      expect(script).to include("compgen -f -X '!*.clear'")
     end
 
     it 'completes only directories for `doctor`' do

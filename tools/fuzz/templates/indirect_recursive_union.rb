@@ -6,8 +6,8 @@
 #
 # Cross-references:
 #   - CLAUDE.md "Group 2 (data shape)" / @indirect heap-pinned cell
-#   - transpile-tests/174_union_match_struct_fields.cht (inline-struct field)
-#   - transpile-tests/520_mal_indirect_lambda_body_cleanup.cht (recursive)
+#   - transpile-tests/174_union_match_struct_fields.clear (inline-struct field)
+#   - transpile-tests/520_mal_indirect_lambda_body_cleanup.clear (recursive)
 #   - INV-INDIRECT-SINGLE-BOX (mir_checker): no double box.
 #
 # Cell schema: { payload:, op: }

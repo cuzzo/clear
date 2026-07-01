@@ -49,7 +49,7 @@ module BgCaptureClassifier
       # against the live entries before we read sync/storage closes
       # the dual-SymbolEntry divergence flagged in
       # docs/agents/sync-boundary-unification.md (Gap C) and fixes
-      # transpile-tests/257_concurrent_capture_locked_param.cht.
+      # transpile-tests/257_concurrent_capture_locked_param.clear.
       live_param_syms = Scope.live_param_syms(fn)
       AST.each_capture_analysis(fn.body) do |a|
         a = T.cast(a, CapabilityHelper::CaptureAnalysis)

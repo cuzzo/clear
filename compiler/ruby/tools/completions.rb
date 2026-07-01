@@ -6,8 +6,8 @@
 #   clear completions fish > ~/.config/fish/completions/clear.fish
 #
 # Per-subcommand completion semantics:
-#   build / run / fmt / fix / profile / explain  -> *.cht files (+ dirs)
-#   test                                          -> *.cht files OR directories
+#   build / run / fmt / fix / profile / explain  -> *.clear files (+ dirs)
+#   test                                          -> *.clear files OR directories
 #   doctor                                        -> *.profile/ directories
 #   completions                                   -> bash | zsh | fish
 require "sorbet-runtime"
@@ -16,14 +16,14 @@ module Completions
   extend T::Sig
 
   SUBCOMMANDS = {
-    'build'       => 'Build a .cht file to a native binary',
-    'run'         => 'Build and run a .cht file',
-    'test'        => 'Run tests in a .cht file or directory',
+    'build'       => 'Build a .clear file to a native binary',
+    'run'         => 'Build and run a .clear file',
+    'test'        => 'Run tests in a .clear file or directory',
     'benchmark'   => 'Run a CLEAR benchmark',
     'profile'     => 'Build with profiling and run',
     'doctor'      => 'Analyze a .profile/ directory',
-    'fix'         => 'Apply lint fixes to .cht files',
-    'fmt'         => 'Format .cht files',
+    'fix'         => 'Apply lint fixes to .clear files',
+    'fmt'         => 'Format .clear files',
     'format'      => 'Alias for fmt',
     'explain'     => 'Explain a language feature',
     'completions' => 'Print shell completions',
@@ -43,7 +43,7 @@ module Completions
   end
 
   # Bash uses `complete -F` with a function. We hand-roll the
-  # subcommand dispatch so file completion is filtered to `.cht`
+  # subcommand dispatch so file completion is filtered to `.clear`
   # for build-like commands and to `.profile/` for `doctor`.
   sig { returns(String) }
   def self.bash
@@ -64,11 +64,11 @@ module Completions
 
         case "$cmd" in
           build|run|fmt|format|fix|profile|explain)
-            COMPREPLY=( $(compgen -f -X '!*.cht' -- "$cur") $(compgen -d -- "$cur") )
+            COMPREPLY=( $(compgen -f -X '!*.clear' -- "$cur") $(compgen -d -- "$cur") )
             compopt -o filenames 2>/dev/null
             ;;
           test|benchmark)
-            COMPREPLY=( $(compgen -f -X '!*.cht' -- "$cur") $(compgen -d -- "$cur") )
+            COMPREPLY=( $(compgen -f -X '!*.clear' -- "$cur") $(compgen -d -- "$cur") )
             compopt -o filenames 2>/dev/null
             ;;
           doctor)
@@ -115,7 +115,7 @@ module Completions
 
         case "${words[2]}" in
           build|run|fmt|format|fix|profile|explain|test|benchmark)
-            _files -g '*.cht'
+            _files -g '*.clear'
             ;;
           doctor)
             _files -/ -g '*.profile'
@@ -146,7 +146,7 @@ module Completions
 
       # File arguments per subcommand
       complete -c clear -n '__fish_seen_subcommand_from build run fmt format fix profile explain test benchmark' \\
-        -F -k -a "(__fish_complete_path '*.cht')"
+        -F -k -a "(__fish_complete_path '*.clear')"
 
       # `doctor` wants *.profile/ directories
       complete -c clear -n '__fish_seen_subcommand_from doctor' \\

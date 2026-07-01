@@ -30,7 +30,7 @@ RSpec.describe 'clear doctor — @parallel BG hint' do
       # site\tspawns\truns\texits\ttotal_lifetime_ns\tmax_lifetime_ns\tdispatch\tform\tschedulers
       1\t4\t4\t4\t4000000\t1000000\t#{site_dispatch}\tfsm\t3:4
     FIBERS
-    File.write(File.join(dir, 'source.cht'), source)
+    File.write(File.join(dir, 'source.clear'), source)
     File.write(File.join(dir, 'transpiled.zig'), zig)
   end
 

@@ -5,7 +5,7 @@ module MiniVM
     # Capacity caps for the register VM register files.
     #
     # Tune by editing the constants below. `validate_vm_cht!` checks that
-    # vm.cht's pre-fill loops match (so the runtime has slots for every
+    # vm.clear's pre-fill loops match (so the runtime has slots for every
     # register the allocator may emit). The allocator rewriter enforces
     # the caps statically at compile time and raises OverRegisterCap if a
     # program needs more registers than the cap allows.
@@ -18,10 +18,10 @@ module MiniVM
 
       ALL = { i: I, f: F, s: S }.freeze
 
-      # Verifies vm.cht declares each register file as a raw fixed-size
+      # Verifies vm.clear declares each register file as a raw fixed-size
       # array sized at exactly the corresponding cap. Mismatches raise --
-      # tuning a cap means editing both this file and the vm.cht decl.
-      def self.validate_vm_cht!(vm_path = File.join(__dir__, "vm.cht"))
+      # tuning a cap means editing both this file and the vm.clear decl.
+      def self.validate_vm_cht!(vm_path = File.join(__dir__, "vm.clear"))
         source = File.read(vm_path)
         observed = {
           i: scan_decl_size(source, "iregs", "Int64"),
@@ -31,10 +31,10 @@ module MiniVM
         ALL.each do |kind, cap|
           actual = observed.fetch(kind)
           if actual.nil?
-            raise "RegisterFileLimits drift: vm.cht has no `MUTABLE #{kind}regs: ...[N]` declaration"
+            raise "RegisterFileLimits drift: vm.clear has no `MUTABLE #{kind}regs: ...[N]` declaration"
           end
           if actual != cap
-            raise "RegisterFileLimits drift: vm.cht declares #{kind}regs as size #{actual}, " \
+            raise "RegisterFileLimits drift: vm.clear declares #{kind}regs as size #{actual}, " \
                   "but RegisterFileLimits::#{kind.upcase} = #{cap}. " \
                   "Update both to match."
           end
@@ -137,7 +137,7 @@ module MiniVM
         Opcode.new(name: :SPRINT, code: 79, arity: 1, vm_name: "SPrint"),
         # String list opcodes — mirror LNEW/LAPPENDI/LGETI/LLEN for
         # `String[]@list` programs. Slot indexes 0..3 (slist0..slist3
-        # in vm.cht) and the v register file is shared with the other
+        # in vm.clear) and the v register file is shared with the other
         # list/map kinds (existing Int64/Float64 list and map slots).
         Opcode.new(name: :LSNEW, code: 80, arity: 1, vm_name: "LSNew"),
         Opcode.new(name: :LSAPPEND, code: 81, arity: 2, vm_name: "LSAppend"),
@@ -210,7 +210,7 @@ module MiniVM
         # `map.values()` return owned ArrayLists, so each runtime
         # arm is a direct assignment to the slist / ilist slot
         # (rather than the iterate-and-append workaround the stack
-        # machine uses at _bc_runner.cht:3120).
+        # machine uses at _bc_runner.clear:3120).
         Opcode.new(name: :MKEYS,    code: 116, arity: 2, vm_name: "MKeys"),
         Opcode.new(name: :MVALUES,  code: 117, arity: 2, vm_name: "MValues"),
         Opcode.new(name: :NMKEYS,   code: 118, arity: 2, vm_name: "NMKeys"),
@@ -825,7 +825,7 @@ module MiniVM
       end
       private_class_method :rewrite_typed_args!
 
-      def self.validate_vm_enum!(vm_path = File.join(__dir__, "vm.cht"))
+      def self.validate_vm_enum!(vm_path = File.join(__dir__, "vm.clear"))
         source = File.read(vm_path)
         match = source.match(/ENUM\s+RegisterOp\s*\{(?<body>.*?)\}/m)
         raise "RegisterOp enum not found in #{vm_path}" unless match

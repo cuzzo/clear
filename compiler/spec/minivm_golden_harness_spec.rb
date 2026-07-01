@@ -12,7 +12,7 @@ require_relative "../../examples/minivm/vm_golden_harness"
 RSpec.describe "MiniVM golden harness", :integration do
   let(:vm_tests_dir) { File.expand_path("../../examples/minivm/vm-tests", __dir__) }
   let(:case_dir) { File.join(vm_tests_dir, "basics") }
-  let(:source_path) { File.join(case_dir, "return_i64.cht") }
+  let(:source_path) { File.join(case_dir, "return_i64.clear") }
   let(:source) { File.read(source_path) }
   let(:cases) { MiniVM::Golden::Case.all(vm_tests_dir) }
 
@@ -22,12 +22,12 @@ RSpec.describe "MiniVM golden harness", :integration do
     skip e.message
   end
 
-  # MiniVM::Golden.*.run builds vm.cht to a native binary and executes
+  # MiniVM::Golden.*.run builds vm.clear to a native binary and executes
   # it. That compile times out on GitHub-hosted runners (same reason
   # the Register-VM allowlist CI job is disabled). The compile/snapshot
   # tests above use the in-process Ruby emitter and are unaffected.
   def skip_vm_binary_on_ci!
-    skip "vm.cht native-binary execution times out on GitHub runners; run locally" if ENV["CI"]
+    skip "vm.clear native-binary execution times out on GitHub runners; run locally" if ENV["CI"]
   end
 
   def run_or_skip(target, test_case)
@@ -37,20 +37,20 @@ RSpec.describe "MiniVM golden harness", :integration do
   end
 
   # Fixtures the register emitter doesn't yet handle. These keep their
-  # `.cht` source committed so the gap is visible, but we skip generating
+  # `.clear` source committed so the gap is visible, but we skip generating
   # the per-fixture register-snapshot test for them (would produce a
   # pending). When the register emitter gains support for the underlying
   # feature, drop the fixture from this set and run
   # `examples/minivm/update_vm_golden.rb --target register` to record
   # the freshly-supported snapshot.
   REGISTER_PENDING_FIXTURES = %w[
-    types/union_helper_arg_i64.cht
-    types/union_payload_i64.cht
-    types/union_tag_i64.cht
-    values/map_contains_i64.cht
-    values/map_delete_i64.cht
-    values/string_length.cht
-    values/union_helper_multi_return_i64.cht
+    types/union_helper_arg_i64.clear
+    types/union_payload_i64.clear
+    types/union_tag_i64.clear
+    values/map_contains_i64.clear
+    values/map_delete_i64.clear
+    values/string_length.clear
+    values/union_helper_multi_return_i64.clear
   ].to_set.freeze
 
   MiniVM::Golden::Case.all(File.expand_path("../../examples/minivm/vm-tests", __dir__)).each do |test_case|
@@ -115,7 +115,7 @@ RSpec.describe "MiniVM golden harness", :integration do
     expect(MiniVM::Golden.register).to respond_to(:run)
   end
 
-  it "runs register bytecode through vm.cht for an Int64 return" do
+  it "runs register bytecode through vm.clear for an Int64 return" do
     skip_vm_binary_on_ci!
     source = <<~CHT
       FN main() RETURNS Int64 ->
@@ -212,34 +212,34 @@ RSpec.describe "MiniVM golden harness", :integration do
 
   it "discovers fixture cases through the harness" do
     expect(cases.map { |c| c.relative_path(vm_tests_dir) }).to include(
-      "basics/return_i64.cht",
-      "calls/early_return_i64.cht",
-      "calls/helper_call_f64.cht",
-      "calls/nested_helper_calls_i64.cht",
-      "control/f64_compare_branch.cht",
-      "control/nested_loop_branch_i64.cht",
-      "errors/or_fallible_success_i64.cht",
-      "errors/or_map_fallback_i64.cht",
-      "errors/or_map_success_i64.cht",
-      "errors/or_raise_fallback_i64.cht",
-      "functions/fn_ref_i64.cht",
-      "functions/higher_order_fn_ref_i64.cht",
-      "functions/higher_order_lambda_i64.cht",
-      "functions/lambda_capture_i64.cht",
-      "functions/lambda_default_i64.cht",
-      "functions/lambda_direct_i64.cht",
-      "numerics/div_i64.cht",
-      "numerics/f64_arithmetic.cht",
-      "numerics/locals_reassign_f64.cht",
-      "types/enum_match_i64.cht",
-      "types/enum_multi_branch_i64.cht",
-      "types/union_payload_i64.cht",
-      "types/union_tag_i64.cht",
-      "values/list_append_count.cht",
-      "values/list_index_i64.cht",
-      "values/map_get_i64.cht",
-      "values/string_concat.cht",
-      "values/struct_field_i64.cht"
+      "basics/return_i64.clear",
+      "calls/early_return_i64.clear",
+      "calls/helper_call_f64.clear",
+      "calls/nested_helper_calls_i64.clear",
+      "control/f64_compare_branch.clear",
+      "control/nested_loop_branch_i64.clear",
+      "errors/or_fallible_success_i64.clear",
+      "errors/or_map_fallback_i64.clear",
+      "errors/or_map_success_i64.clear",
+      "errors/or_raise_fallback_i64.clear",
+      "functions/fn_ref_i64.clear",
+      "functions/higher_order_fn_ref_i64.clear",
+      "functions/higher_order_lambda_i64.clear",
+      "functions/lambda_capture_i64.clear",
+      "functions/lambda_default_i64.clear",
+      "functions/lambda_direct_i64.clear",
+      "numerics/div_i64.clear",
+      "numerics/f64_arithmetic.clear",
+      "numerics/locals_reassign_f64.clear",
+      "types/enum_match_i64.clear",
+      "types/enum_multi_branch_i64.clear",
+      "types/union_payload_i64.clear",
+      "types/union_tag_i64.clear",
+      "values/list_append_count.clear",
+      "values/list_index_i64.clear",
+      "values/map_get_i64.clear",
+      "values/string_concat.clear",
+      "values/struct_field_i64.clear"
     )
   end
 
@@ -247,7 +247,7 @@ RSpec.describe "MiniVM golden harness", :integration do
     Dir.mktmpdir("minivm-golden-") do |dir|
       fixture_dir = File.join(dir, "basics")
       FileUtils.mkdir_p(fixture_dir)
-      FileUtils.cp(source_path, File.join(fixture_dir, "return_i64.cht"))
+      FileUtils.cp(source_path, File.join(fixture_dir, "return_i64.clear"))
 
       results = MiniVM::Golden.update_snapshots(root: dir, targets: [:stack])
       snapshot_path = File.join(fixture_dir, "return_i64.stack.bc")
@@ -261,7 +261,7 @@ RSpec.describe "MiniVM golden harness", :integration do
     Dir.mktmpdir("minivm-golden-") do |dir|
       fixture_dir = File.join(dir, "basics")
       FileUtils.mkdir_p(fixture_dir)
-      FileUtils.cp(source_path, File.join(fixture_dir, "return_i64.cht"))
+      FileUtils.cp(source_path, File.join(fixture_dir, "return_i64.clear"))
       snapshot_path = File.join(fixture_dir, "return_i64.stack.bc")
       File.write(snapshot_path, "stale\n")
 
@@ -278,7 +278,7 @@ RSpec.describe "MiniVM golden harness", :integration do
       FileUtils.mkdir_p(fixture_dir)
       # A register-unsupported fixture (non-scalar struct return); see
       # REGISTER_UNSUPPORTED_SRC above.
-      File.write(File.join(fixture_dir, "struct_return.cht"), REGISTER_UNSUPPORTED_SRC)
+      File.write(File.join(fixture_dir, "struct_return.clear"), REGISTER_UNSUPPORTED_SRC)
 
       results = MiniVM::Golden.update_snapshots(root: dir, targets: [:register])
 

@@ -1,0 +1,94 @@
+# Debugger support for the Mal interpreter.
+# File-based debug pause (tree-walker) and helpers.
+# Returns action codes: 0=continue, 1=step-into, 2=step-over, 3=step-out, 4=inspect-pending
+
+REQUIRE "types.clear";
+REQUIRE "parser.clear";
+
+FN readFileOr!(path: String, fallback: String, MUTABLE pool: Env[50000]@pool) RETURNS !String ->
+    content = readFile(path) OR RAISE;
+    RETURN content;
+END
+
+FN readFileSafe!(path: String, MUTABLE pool: Env[50000]@pool) RETURNS !String ->
+    content = readFileOr!(path, "", pool) OR "";
+    RETURN content;
+END
+
+# Debug pause: writes break info, polls for commands, resumes on :c/:s/:n/:f.
+# When inspectResult is non-empty, writes it as response from a prior :i command.
+# Returns: 0=continue, 1=step-into, 2=step-over, 3=step-out, 4=inspect-pending
+# When returning 4, the parsed inspect AST is stored in env at "__dbg_inspect".
+# The caller should eval it, format with prStr, and re-call with the result string.
+
+FN debugPause!(reason: String, envId: Id<Env>, inspectResult: String, MUTABLE pool: Env[50000]@pool) RETURNS !Int64
+  REQUIRES pool: LOCKED
+  EFFECTS REENTRANT
+->
+    # If we have an inspect result from the caller, write it before resuming polling
+    IF inspectResult.length() > 0 THEN
+        writeFile("/tmp/_debug_resp.txt", inspectResult);
+    ELSE
+        # Build call stack string
+        stackStr = envGet!(envId, "__dbg_stack", pool);
+        stackDisplay = getStr(stackStr);
+
+        # Write break info
+        MUTABLE breakInfo = COPY reason;
+        IF stackDisplay.length() > 0 THEN
+            breakInfo = breakInfo + "\n  stack: " + stackDisplay;
+        END
+        writeFile("/tmp/_debug_break.txt", breakInfo);
+    END
+
+    stackStr2 = envGet!(envId, "__dbg_stack", pool);
+    stackDisplay2 = getStr(stackStr2);
+
+    MUTABLE debugAction: Int64 = 0;
+    MUTABLE debugActive = TRUE;
+    WHILE debugActive DO
+        MUTABLE cmdRaw = readFileSafe!("/tmp/_debug_cmd.txt", pool) OR RAISE;
+        IF cmdRaw.length() > 0 THEN
+            writeFile("/tmp/_debug_cmd.txt", "");
+            IF cmdRaw == ":c" || cmdRaw == ":continue" THEN
+                debugAction = 0; debugActive = FALSE;
+            ELSE_IF cmdRaw == ":s" || cmdRaw == ":step" THEN
+                debugAction = 1; debugActive = FALSE;
+            ELSE_IF cmdRaw == ":n" || cmdRaw == ":next" THEN
+                debugAction = 2; debugActive = FALSE;
+            ELSE_IF cmdRaw == ":f" || cmdRaw == ":finish" THEN
+                debugAction = 3; debugActive = FALSE;
+            ELSE_IF startsWith?(cmdRaw, ":i ") THEN
+                # Parse the inspect expression, store AST in env, return 4
+                inspectExpr = substr(cmdRaw, 3, cmdRaw.length() - 3);
+                MUTABLE inspPenv: HashMap<Value> = {};
+                tokenizeToEnv!(inspPenv, inspectExpr) OR RAISE;
+                inspPenv["__rp"] = Value{ Number: 0.0 };
+                inspAst = readFormEnv!(inspPenv) OR RAISE;
+                WITH POLYMORPHIC EXCLUSIVE pool AS p {
+                    IF p[envId] AS dbgInspEnv THEN dbgInspEnv.vars["__dbg_inspect"] = COPY inspAst; END
+                }
+                debugAction = 4; debugActive = FALSE;
+            ELSE_IF cmdRaw == ":l" || cmdRaw == ":locals" THEN
+                localsStr = envGet!(envId, "__dbg_locals", pool);
+                MUTABLE localDump = "";
+                IF getStr(localsStr).length() > 0 THEN
+                    localDump = getStr(localsStr);
+                ELSE
+                    localDump = "(no tracked locals)";
+                END
+                writeFile("/tmp/_debug_resp.txt", localDump);
+            ELSE_IF cmdRaw == ":w" || cmdRaw == ":where" || cmdRaw == ":bt" THEN
+                IF stackDisplay2.length() > 0 THEN
+                    writeFile("/tmp/_debug_resp.txt", stackDisplay2);
+                ELSE
+                    writeFile("/tmp/_debug_resp.txt", "(top level)");
+                END
+            ELSE
+                writeFile("/tmp/_debug_resp.txt", "commands: :c :s :n :f :i <expr> :l :w");
+            END
+        END
+    END
+    writeFile("/tmp/_debug_break.txt", "");
+    RETURN debugAction;
+END

@@ -25,7 +25,7 @@ options = {
 }
 
 OptionParser.new do |opts|
-  opts.banner = "Usage: ruby tools/profile_compile_hotspots.rb [options] path/to/file.cht"
+  opts.banner = "Usage: ruby tools/profile_compile_hotspots.rb [options] path/to/file.clear"
   opts.on("--phase NAME", "frontend, annotate, mir_pass, lower, checker, all") { |v| options[:phase] = v }
   opts.on("--limit N", Integer, "Rows to print") { |v| options[:limit] = v }
 end.parse!

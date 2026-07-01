@@ -3,7 +3,7 @@ require_relative "../../ruby/lsp/document_store" unless defined?(LSP::DocumentSt
 
 RSpec.describe LSP::DocumentStore do
   let(:store) { described_class.new }
-  let(:uri)   { "file:///tmp/foo.cht" }
+  let(:uri)   { "file:///tmp/foo.clear" }
 
   describe "#open" do
     it "stores text + version" do
@@ -25,7 +25,7 @@ RSpec.describe LSP::DocumentStore do
     end
 
     it "returns nil when the uri isn't open" do
-      expect(store.update("file:///nope.cht", "x", 1)).to be_nil
+      expect(store.update("file:///nope.clear", "x", 1)).to be_nil
     end
 
     it "invalidates cached findings on update" do
@@ -48,7 +48,7 @@ RSpec.describe LSP::DocumentStore do
     end
 
     it "is a no-op for an unknown uri" do
-      expect { store.close("file:///nope.cht") }.not_to raise_error
+      expect { store.close("file:///nope.clear") }.not_to raise_error
     end
   end
 
@@ -57,8 +57,8 @@ RSpec.describe LSP::DocumentStore do
       store.open(uri, "known text", 7)
       expect(store.text(uri)).to eq("known text")
       expect(store.version(uri)).to eq(7)
-      expect(store.text("file:///missing.cht")).to be_nil
-      expect(store.version("file:///missing.cht")).to be_nil
+      expect(store.text("file:///missing.clear")).to be_nil
+      expect(store.version("file:///missing.clear")).to be_nil
     end
   end
 
@@ -75,8 +75,8 @@ RSpec.describe LSP::DocumentStore do
 
   describe "#each" do
     it "iterates every open document" do
-      store.open("file:///a.cht", "a", 1)
-      store.open("file:///b.cht", "b", 1)
+      store.open("file:///a.clear", "a", 1)
+      store.open("file:///b.clear", "b", 1)
       texts = []
       store.each { |d| texts << d.text }
       expect(texts.sort).to eq(["a", "b"])

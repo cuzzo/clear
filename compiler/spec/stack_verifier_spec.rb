@@ -201,7 +201,7 @@ RSpec.describe StackVerifier do
     # loop -- because the single-immediate `sub $IMM,%rsp` can't be
     # combined with the per-page probe LLVM needs to touch the guard
     # page. The original regex matched only the immediate form, so
-    # any function with a huge frame (e.g. examples/minivm/vm.cht's
+    # any function with a huge frame (e.g. examples/minivm/vm.clear's
     # runRegisterBytecode! at ~544 KB) was INVISIBLE to the
     # verifier. Its cost never entered the deepest-path computation,
     # the main fiber was tier-sized as if the function didn't exist,
@@ -325,9 +325,9 @@ RSpec.describe StackVerifier do
         "main"  => FnDouble.new(stack_tier: :standard, stack_vars_bytes: 0, line: 1),
         "heavy" => FnDouble.new(stack_tier: :standard, stack_vars_bytes: 0, line: 42),
       }
-      report = v.analyze(fn_nodes: fn_nodes, source_file: "/some/path/test.cht")
+      report = v.analyze(fn_nodes: fn_nodes, source_file: "/some/path/test.clear")
       err = report[:warnings].find { |w| w[:level] == :error }
-      expect(err[:message]).to include("(test.cht:42)")
+      expect(err[:message]).to include("(test.clear:42)")
     end
 
     it "treats omitted fn_nodes as empty" do
@@ -700,11 +700,11 @@ RSpec.describe StackVerifier do
     end
 
     it "renders '(basename:line)' when both file and line are present" do
-      expect(v.send(:format_location, "/path/to/foo.cht", 42)).to eq("(foo.cht:42) ")
+      expect(v.send(:format_location, "/path/to/foo.clear", 42)).to eq("(foo.clear:42) ")
     end
 
     it "renders '(basename)' when line is nil" do
-      expect(v.send(:format_location, "/path/to/foo.cht", nil)).to eq("(foo.cht) ")
+      expect(v.send(:format_location, "/path/to/foo.clear", nil)).to eq("(foo.clear) ")
     end
   end
 
@@ -757,7 +757,7 @@ RSpec.describe StackVerifier do
           RETURN;
         END
       CLEAR
-      src_path = File.join(@real_dir, "test.cht")
+      src_path = File.join(@real_dir, "test.clear")
       bin_path = File.join(@real_dir, "test_bin")
       File.write(src_path, src)
       `#{CLEAR_BIN} build #{src_path} -o #{bin_path} 2>&1`

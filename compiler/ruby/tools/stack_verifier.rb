@@ -7,7 +7,7 @@
 #
 # Usage:
 #   verifier = StackVerifier.new(binary_path, module_prefix)
-#   report = verifier.analyze(fn_nodes: fn_nodes, source_file: "foo.cht")
+#   report = verifier.analyze(fn_nodes: fn_nodes, source_file: "foo.clear")
 #   verifier.print_report(report)
 
 require "sorbet-runtime"

@@ -10,10 +10,10 @@ BENCH_DIR=benchmarks/clear-only/fsm_concurrency
 RUNS=${RUNS:-5}
 
 echo "Building bench_fsm (optimized)..."
-$CLEAR build $BENCH_DIR/bench_fsm.cht --optimized -o $BENCH_DIR/bench_fsm > /dev/null
+$CLEAR build $BENCH_DIR/bench_fsm.clear --optimized -o $BENCH_DIR/bench_fsm > /dev/null
 
 echo "Building bench_stackful (optimized)..."
-$CLEAR build $BENCH_DIR/bench_stackful.cht --optimized -o $BENCH_DIR/bench_stackful > /dev/null
+$CLEAR build $BENCH_DIR/bench_stackful.clear --optimized -o $BENCH_DIR/bench_stackful > /dev/null
 
 run_n() {
   local label="$1" bin="$2" rss_total=0 elapsed_total=0

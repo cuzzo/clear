@@ -10,8 +10,8 @@ RSpec.describe LSP::Hover do
 
   def make_doc(text = "  x = 5;\n", findings: [], fatal: nil)
     store = LSP::DocumentStore.new
-    store.open("file:///t.cht", text, 1)
-    doc = store.get("file:///t.cht")
+    store.open("file:///t.clear", text, 1)
+    doc = store.get("file:///t.clear")
     doc.cached_findings = LSP::AnalysisResult.new(findings: findings, fatal_error: fatal)
     doc
   end
@@ -23,8 +23,8 @@ RSpec.describe LSP::Hover do
 
     it "returns nil when cached_findings is nil" do
       store = LSP::DocumentStore.new
-      store.open("file:///t.cht", "x = 5", 1)
-      doc = store.get("file:///t.cht")
+      store.open("file:///t.clear", "x = 5", 1)
+      doc = store.get("file:///t.clear")
       expect(LSP::Hover.render(doc, { "line" => 0, "character" => 0 })).to be_nil
     end
 

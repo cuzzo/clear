@@ -273,7 +273,7 @@ RSpec.describe OwnershipDataflow do
 
   describe "zero under-guarding across test suite" do
     it "never under-guards vs CleanupClassifier" do
-      test_files = Dir.glob("transpile-tests/*.cht").sort
+      test_files = Dir.glob("transpile-tests/*.clear").sort
       under_guarded = []
 
       test_files.each do |f|

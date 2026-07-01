@@ -6,7 +6,7 @@ pub fn build(b: *std.Build) void {
 
     const build_root = b.build_root.path orelse ".";
     const transpiler = b.fmt("{s}/../../../../compiler/ruby/backends/transpiler.rb", .{build_root});
-    const math_src   = b.fmt("{s}/src/lib.cht", .{build_root});
+    const math_src   = b.fmt("{s}/src/lib.clear", .{build_root});
 
     // cheat_runtime: path relative from packages/math/ to the zig/ directory
     const cheat_runtime_mod = b.createModule(.{
@@ -15,7 +15,7 @@ pub fn build(b: *std.Build) void {
         .optimize = optimize,
     });
 
-    // Transpile lib.cht → Zig source and expose as the "math" module
+    // Transpile lib.clear → Zig source and expose as the "math" module
     const transpile = b.addSystemCommand(&.{ "ruby", transpiler, "--module", math_src });
     const lib_zig   = transpile.captureStdOut();
 
