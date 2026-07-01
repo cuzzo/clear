@@ -466,7 +466,7 @@ jobs:
           version: ${{ env.ZIG_VERSION }}
       - name: Generate lint SARIF
         run: |
-          git fetch origin "${{ github.event.pull_request.base.ref }}:refs/remotes/origin/${{ github.event.pull_request.base.ref }}" --depth=1
+          git fetch origin "+${{ github.event.pull_request.base.ref }}:refs/remotes/origin/${{ github.event.pull_request.base.ref }}" --depth=1
           bundle exec ruby tools/generate_lint_sarif.rb \
             --repo=. \
             --base="origin/${{ github.event.pull_request.base.ref }}" \
@@ -1400,7 +1400,7 @@ jobs:
           path: tmp/zig-special-coverage-artifacts
       - name: Generate SlopCop constraint SARIF
         run: |
-          git fetch origin "${{ github.event.pull_request.base.ref }}:refs/remotes/origin/${{ github.event.pull_request.base.ref }}" --depth=1
+          git fetch origin "+${{ github.event.pull_request.base.ref }}:refs/remotes/origin/${{ github.event.pull_request.base.ref }}" --depth=1
           mkdir -p tmp
           args=()
           while IFS= read -r path; do
@@ -1496,7 +1496,7 @@ jobs:
         env:
           FACT_MINE_RUST_BINARY: ./gems/fact-mine/target/release/fact-mine-rust
         run: |
-          git fetch origin "${{ github.event.pull_request.base.ref }}:refs/remotes/origin/${{ github.event.pull_request.base.ref }}" --depth=1
+          git fetch origin "+${{ github.event.pull_request.base.ref }}:refs/remotes/origin/${{ github.event.pull_request.base.ref }}" --depth=1
           mkdir -p tmp/generalized-gems-coverage tmp/generalized-gems-sarif
           coverage_args=()
           while IFS= read -r path; do
@@ -1606,7 +1606,7 @@ jobs:
           path: tmp/zig-coverage-artifacts
       - name: Generate diff coverage bucket markdown
         run: |
-          git fetch origin "${{ github.event.pull_request.base.ref }}:refs/remotes/origin/${{ github.event.pull_request.base.ref }}" --depth=1
+          git fetch origin "+${{ github.event.pull_request.base.ref }}:refs/remotes/origin/${{ github.event.pull_request.base.ref }}" --depth=1
           mkdir -p tmp
           ruby_paths="$(find tmp/ruby-coverage-artifacts -name .resultset.json -type f | sort | paste -sd: -)"
           zig_paths="$(find tmp/zig-coverage-artifacts -name cobertura.xml -type f | sort | paste -sd: -)"
