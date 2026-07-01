@@ -1,0 +1,247 @@
+{
+  "scenario": "noreturn-guard",
+  "methods": [
+    {
+      "calls": 0,
+      "return_kv": [
+        [
+
+        ],
+        [
+
+        ]
+      ],
+      "return_kv_shapes": [
+        [
+
+        ],
+        [
+
+        ]
+      ],
+      "source": {
+        "path": "gems/nil-kill/spec/fixtures/noreturn-guard/noreturn_guard_example.rb",
+        "line": 5,
+        "class": "NoReturnGuardExample",
+        "method": "assert_prefix!",
+        "kind": "instance",
+        "sig": "sig { params(value: String).returns(T.untyped) }",
+        "params": [
+          {
+            "name": "value",
+            "nil_default": false,
+            "type": "String"
+          }
+        ],
+        "scope": [
+          "NoReturnGuardExample"
+        ],
+        "uses_yield": false,
+        "noreturn_candidate": false
+      },
+      "has_sig": true
+    }
+  ],
+  "facts": {
+    "existing_sigs": [
+      {
+        "path": "gems/nil-kill/spec/fixtures/noreturn-guard/noreturn_guard_example.rb",
+        "line": 5,
+        "end_line": 8,
+        "class": "NoReturnGuardExample",
+        "method": "assert_prefix!",
+        "kind": "instance",
+        "language": "ruby",
+        "has_sig": true,
+        "sig": "sig { params(value: String).returns(T.untyped) }",
+        "params": [
+          {
+            "name": "value",
+            "nil_default": false,
+            "type": "String"
+          }
+        ],
+        "scope": [
+          "NoReturnGuardExample"
+        ],
+        "non_nil_params": [
+          "value"
+        ],
+        "uses_yield": false,
+        "noreturn_candidate": false
+      }
+    ],
+    "return_origins": [
+      {
+        "array_element_shape": null,
+        "blockers": [
+          "untyped callee raise at gems/nil-kill/spec/fixtures/noreturn-guard/noreturn_guard_example.rb:7"
+        ],
+        "candidate_type": "T.untyped",
+        "class": "NoReturnGuardExample",
+        "confidence": "blocked",
+        "control_shape": "branching",
+        "end_line": 8,
+        "hash_shape": null,
+        "implicit": false,
+        "kind": "instance",
+        "line": 5,
+        "method": "assert_prefix!",
+        "path": "gems/nil-kill/spec/fixtures/noreturn-guard/noreturn_guard_example.rb",
+        "return_syntax": "mixed",
+        "sources": [
+          {
+            "code": "return",
+            "kind": "nil",
+            "line": null,
+            "type": "NilClass"
+          },
+          {
+            "callee": "raise",
+            "code": "raise \"bad\"",
+            "kind": "call_untyped",
+            "line": 7,
+            "receiver_type": null
+          }
+        ]
+      }
+    ],
+    "param_origins": [
+      {
+        "arg_kind": "positional",
+        "array_element_shape": null,
+        "callee": "extend",
+        "code": "T::Sig",
+        "enclosing_scope": "NoReturnGuardExample",
+        "hash_shape": null,
+        "line": 2,
+        "origin_kind": "unknown",
+        "path": "gems/nil-kill/spec/fixtures/noreturn-guard/noreturn_guard_example.rb",
+        "receiver": null,
+        "slot": "0",
+        "source_method": null,
+        "type": null,
+        "unknown_reasons": [
+          "operation unresolved constant T::Sig"
+        ]
+      },
+      {
+        "arg_kind": "keyword",
+        "array_element_shape": null,
+        "callee": "params",
+        "code": "String",
+        "enclosing_scope": "NoReturnGuardExample",
+        "hash_shape": null,
+        "line": 4,
+        "origin_kind": "static",
+        "path": "gems/nil-kill/spec/fixtures/noreturn-guard/noreturn_guard_example.rb",
+        "receiver": null,
+        "slot": "value",
+        "source_method": null,
+        "type": "T.class_of(String)"
+      },
+      {
+        "arg_kind": "positional",
+        "array_element_shape": null,
+        "callee": "returns",
+        "code": "T.untyped",
+        "enclosing_scope": "NoReturnGuardExample",
+        "hash_shape": null,
+        "line": 4,
+        "origin_kind": "untyped_return",
+        "path": "gems/nil-kill/spec/fixtures/noreturn-guard/noreturn_guard_example.rb",
+        "receiver": "params(value: String)",
+        "slot": "0",
+        "source_method": "untyped",
+        "type": null
+      },
+      {
+        "arg_kind": "positional",
+        "array_element_shape": null,
+        "callee": "sig",
+        "code": "sig",
+        "enclosing_scope": "NoReturnGuardExample",
+        "hash_shape": null,
+        "line": 4,
+        "origin_kind": "untyped_return",
+        "path": "gems/nil-kill/spec/fixtures/noreturn-guard/noreturn_guard_example.rb",
+        "receiver": null,
+        "slot": "0",
+        "source_method": "sig",
+        "type": null
+      },
+      {
+        "arg_kind": "positional",
+        "array_element_shape": null,
+        "callee": "untyped",
+        "enclosing_scope": "NoReturnGuardExample",
+        "hash_shape": null,
+        "line": 4,
+        "origin_kind": "static",
+        "path": "gems/nil-kill/spec/fixtures/noreturn-guard/noreturn_guard_example.rb",
+        "receiver": "T",
+        "slot": "0",
+        "source_method": null,
+        "type": "T::Array[T.untyped]"
+      },
+      {
+        "arg_kind": "positional",
+        "array_element_shape": null,
+        "callee": "start_with?",
+        "code": "\"!\"",
+        "enclosing_scope": "NoReturnGuardExample",
+        "hash_shape": null,
+        "line": 6,
+        "origin_kind": "static",
+        "path": "gems/nil-kill/spec/fixtures/noreturn-guard/noreturn_guard_example.rb",
+        "receiver": "value",
+        "slot": "0",
+        "source_method": null,
+        "type": "String"
+      },
+      {
+        "arg_kind": "positional",
+        "array_element_shape": null,
+        "callee": "raise",
+        "code": "\"bad\"",
+        "enclosing_scope": "NoReturnGuardExample",
+        "hash_shape": null,
+        "line": 7,
+        "origin_kind": "static",
+        "path": "gems/nil-kill/spec/fixtures/noreturn-guard/noreturn_guard_example.rb",
+        "receiver": null,
+        "slot": "0",
+        "source_method": null,
+        "type": "String"
+      }
+    ]
+  },
+  "unused_return_methods_by_location": {
+    "[\"gems/nil-kill/spec/fixtures/noreturn-guard/noreturn_guard_example.rb\",5,\"NoReturnGuardExample\",\"assert_prefix!\",\"instance\"]": {
+      "path": "gems/nil-kill/spec/fixtures/noreturn-guard/noreturn_guard_example.rb",
+      "line": 5,
+      "end_line": 8,
+      "class": "NoReturnGuardExample",
+      "method": "assert_prefix!",
+      "kind": "instance",
+      "language": "ruby",
+      "has_sig": true,
+      "sig": "sig { params(value: String).returns(T.untyped) }",
+      "params": [
+        {
+          "name": "value",
+          "nil_default": false,
+          "type": "String"
+        }
+      ],
+      "scope": [
+        "NoReturnGuardExample"
+      ],
+      "non_nil_params": [
+        "value"
+      ],
+      "uses_yield": false,
+      "noreturn_candidate": false
+    }
+  }
+}

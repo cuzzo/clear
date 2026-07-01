@@ -1,0 +1,15 @@
+{
+  "actions": [
+    {
+      "kind": "fix_sig_return",
+      "confidence": "high",
+      "path": "gems/nil-kill/spec/fixtures/noreturn-method/noreturn_example.rb",
+      "line": 5,
+      "message": "existing sig return is T.untyped; method body cannot return normally",
+      "data": {
+        "type": "T.noreturn",
+        "source": "noreturn_body"
+      }
+    }
+  ]
+}

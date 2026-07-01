@@ -1,0 +1,32 @@
+{
+  "actions": [
+    {
+      "kind": "add_sig",
+      "confidence": "review",
+      "path": "gems/nil-kill/spec/fixtures/runtime-edge-pipeline/edges.rb",
+      "line": 2,
+      "message": "add missing sig",
+      "data": {
+        "sig": "sig { returns(T.untyped) }",
+        "scope": [
+          "RuntimeEdgePipeline"
+        ],
+        "method": "caller"
+      }
+    },
+    {
+      "kind": "add_sig",
+      "confidence": "review",
+      "path": "gems/nil-kill/spec/fixtures/runtime-edge-pipeline/edges.rb",
+      "line": 6,
+      "message": "add missing sig",
+      "data": {
+        "scope": [
+          "RuntimeEdgePipeline"
+        ],
+        "method": "callee",
+        "sig": "sig { returns(T.untyped) }"
+      }
+    }
+  ]
+}

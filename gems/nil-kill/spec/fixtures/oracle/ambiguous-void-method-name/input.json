@@ -1,0 +1,59 @@
+{
+  "scenario": "ambiguous-void-method-name",
+  "methods": [
+    {
+      "source": {
+        "path": "gems/nil-kill/spec/fixtures/ambiguous-void-method-name/ambiguous_void_example.rb",
+        "line": 5,
+        "class": "FirstAmbiguousVoid",
+        "method": "duplicate_name",
+        "kind": "instance",
+        "sig": "sig { returns(T.untyped) }"
+      },
+      "has_sig": true
+    },
+    {
+      "source": {
+        "path": "gems/nil-kill/spec/fixtures/ambiguous-void-method-name/ambiguous_void_example.rb",
+        "line": 14,
+        "class": "SecondAmbiguousVoid",
+        "method": "duplicate_name",
+        "kind": "instance",
+        "sig": "sig { returns(T.untyped) }"
+      },
+      "has_sig": true
+    }
+  ],
+  "facts": {
+    "return_origins": [
+      {
+        "candidate_type": "String",
+        "class": "FirstAmbiguousVoid",
+        "confidence": "strong",
+        "kind": "instance",
+        "line": 5,
+        "method": "duplicate_name",
+        "sources": [
+          {
+            "code": "\"first\"",
+            "kind": "static"
+          }
+        ]
+      },
+      {
+        "candidate_type": "String",
+        "class": "SecondAmbiguousVoid",
+        "confidence": "strong",
+        "kind": "instance",
+        "line": 14,
+        "method": "duplicate_name",
+        "sources": [
+          {
+            "code": "\"second\"",
+            "kind": "static"
+          }
+        ]
+      }
+    ]
+  }
+}

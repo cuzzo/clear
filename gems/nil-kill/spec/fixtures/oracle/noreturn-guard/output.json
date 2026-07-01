@@ -1,0 +1,15 @@
+{
+  "actions": [
+    {
+      "kind": "fix_sig_return",
+      "confidence": "high",
+      "path": "gems/nil-kill/spec/fixtures/noreturn-guard/noreturn_guard_example.rb",
+      "line": 5,
+      "message": "existing sig return is T.untyped; return value is never used, prefer .void",
+      "data": {
+        "type": "void",
+        "source": "unused_return"
+      }
+    }
+  ]
+}

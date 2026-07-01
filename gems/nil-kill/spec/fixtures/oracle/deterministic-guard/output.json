@@ -1,0 +1,268 @@
+{
+  "actions": [
+    {
+      "kind": "replace_deterministic_guard",
+      "confidence": "review",
+      "path": "gems/nil-kill/spec/fixtures/deterministic-guard/guard_sample.rb",
+      "line": 6,
+      "message": "name.is_a?(String) is always true: name has static type String; is_a?(String) is always true",
+      "data": {
+        "code": "name.is_a?(String)",
+        "path": "gems/nil-kill/spec/fixtures/deterministic-guard/guard_sample.rb",
+        "predicate_kind": "class_guard",
+        "class": "GuardSample",
+        "taken_branch": "body",
+        "truth_value": true,
+        "origin_kind": "param",
+        "method": "check",
+        "origin_name": "name",
+        "reason": "name has static type String; is_a?(String) is always true",
+        "proof_tier": "static_proven",
+        "branch_kind": "if",
+        "line": 6
+      }
+    },
+    {
+      "kind": "replace_deterministic_guard",
+      "confidence": "review",
+      "path": "gems/nil-kill/spec/fixtures/deterministic-guard/guard_sample.rb",
+      "line": 6,
+      "message": "name.is_a?(String) is always true: name has static type String; is_a?(String) is always true",
+      "data": {
+        "class": "GuardSample",
+        "predicate_kind": "class_guard",
+        "taken_branch": "body",
+        "truth_value": true,
+        "method": "check",
+        "branch_kind": "if",
+        "code": "name.is_a?(String)",
+        "line": 6,
+        "origin_kind": "param",
+        "origin_name": "name",
+        "path": "gems/nil-kill/spec/fixtures/deterministic-guard/guard_sample.rb",
+        "proof_tier": "static_proven",
+        "reason": "name has static type String; is_a?(String) is always true"
+      }
+    },
+    {
+      "kind": "replace_deterministic_guard",
+      "confidence": "review",
+      "path": "gems/nil-kill/spec/fixtures/deterministic-guard/guard_sample.rb",
+      "line": 6,
+      "message": "name.is_a?(String) is always true: name has static type String; is_a?(String) is always true",
+      "data": {
+        "branch_kind": "if",
+        "code": "name.is_a?(String)",
+        "origin_kind": "param",
+        "taken_branch": "body",
+        "line": 6,
+        "origin_name": "name",
+        "proof_tier": "static_proven",
+        "class": "GuardSample",
+        "path": "gems/nil-kill/spec/fixtures/deterministic-guard/guard_sample.rb",
+        "predicate_kind": "class_guard",
+        "reason": "name has static type String; is_a?(String) is always true",
+        "method": "check",
+        "truth_value": true
+      }
+    },
+    {
+      "kind": "replace_deterministic_guard",
+      "confidence": "review",
+      "path": "gems/nil-kill/spec/fixtures/deterministic-guard/guard_sample.rb",
+      "line": 6,
+      "message": "name.is_a?(String) is always true: name has static type String; is_a?(String) is always true",
+      "data": {
+        "proof_tier": "static_proven",
+        "path": "gems/nil-kill/spec/fixtures/deterministic-guard/guard_sample.rb",
+        "code": "name.is_a?(String)",
+        "method": "check",
+        "line": 6,
+        "predicate_kind": "class_guard",
+        "origin_name": "name",
+        "class": "GuardSample",
+        "reason": "name has static type String; is_a?(String) is always true",
+        "taken_branch": "body",
+        "truth_value": true,
+        "branch_kind": "if",
+        "origin_kind": "param"
+      }
+    },
+    {
+      "kind": "replace_deterministic_guard",
+      "confidence": "review",
+      "path": "gems/nil-kill/spec/fixtures/deterministic-guard/guard_sample.rb",
+      "line": 10,
+      "message": "count.is_a?(String) is always false: count has static type Integer; is_a?(String) is always false",
+      "data": {
+        "predicate_kind": "class_guard",
+        "path": "gems/nil-kill/spec/fixtures/deterministic-guard/guard_sample.rb",
+        "code": "count.is_a?(String)",
+        "line": 10,
+        "origin_name": "count",
+        "proof_tier": "static_proven",
+        "branch_kind": "unless",
+        "class": "GuardSample",
+        "method": "check",
+        "origin_kind": "param",
+        "reason": "count has static type Integer; is_a?(String) is always false",
+        "taken_branch": "body",
+        "truth_value": false
+      }
+    },
+    {
+      "kind": "replace_deterministic_guard",
+      "confidence": "review",
+      "path": "gems/nil-kill/spec/fixtures/deterministic-guard/guard_sample.rb",
+      "line": 10,
+      "message": "count.is_a?(String) is always false: count has static type Integer; is_a?(String) is always false",
+      "data": {
+        "path": "gems/nil-kill/spec/fixtures/deterministic-guard/guard_sample.rb",
+        "predicate_kind": "class_guard",
+        "proof_tier": "static_proven",
+        "reason": "count has static type Integer; is_a?(String) is always false",
+        "taken_branch": "body",
+        "truth_value": false,
+        "branch_kind": "unless",
+        "method": "check",
+        "origin_name": "count",
+        "code": "count.is_a?(String)",
+        "class": "GuardSample",
+        "line": 10,
+        "origin_kind": "param"
+      }
+    },
+    {
+      "kind": "replace_deterministic_guard",
+      "confidence": "review",
+      "path": "gems/nil-kill/spec/fixtures/deterministic-guard/guard_sample.rb",
+      "line": 10,
+      "message": "count.is_a?(String) is always false: count has static type Integer; is_a?(String) is always false",
+      "data": {
+        "code": "count.is_a?(String)",
+        "line": 10,
+        "path": "gems/nil-kill/spec/fixtures/deterministic-guard/guard_sample.rb",
+        "reason": "count has static type Integer; is_a?(String) is always false",
+        "predicate_kind": "class_guard",
+        "taken_branch": "body",
+        "truth_value": false,
+        "class": "GuardSample",
+        "method": "check",
+        "origin_name": "count",
+        "branch_kind": "unless",
+        "origin_kind": "param",
+        "proof_tier": "static_proven"
+      }
+    },
+    {
+      "kind": "replace_deterministic_guard",
+      "confidence": "review",
+      "path": "gems/nil-kill/spec/fixtures/deterministic-guard/guard_sample.rb",
+      "line": 10,
+      "message": "count.is_a?(String) is always false: count has static type Integer; is_a?(String) is always false",
+      "data": {
+        "path": "gems/nil-kill/spec/fixtures/deterministic-guard/guard_sample.rb",
+        "predicate_kind": "class_guard",
+        "proof_tier": "static_proven",
+        "taken_branch": "body",
+        "code": "count.is_a?(String)",
+        "reason": "count has static type Integer; is_a?(String) is always false",
+        "line": 10,
+        "truth_value": false,
+        "origin_kind": "param",
+        "branch_kind": "unless",
+        "origin_name": "count",
+        "class": "GuardSample",
+        "method": "check"
+      }
+    },
+    {
+      "kind": "replace_deterministic_guard",
+      "confidence": "review",
+      "path": "gems/nil-kill/spec/fixtures/deterministic-guard/guard_sample.rb",
+      "line": 14,
+      "message": "1 == 1 is always true: 1 == 1 is always true",
+      "data": {
+        "class": "GuardSample",
+        "line": 14,
+        "origin_kind": null,
+        "code": "1 == 1",
+        "reason": "1 == 1 is always true",
+        "method": "check",
+        "truth_value": true,
+        "path": "gems/nil-kill/spec/fixtures/deterministic-guard/guard_sample.rb",
+        "proof_tier": "static_proven",
+        "predicate_kind": "literal_comparison",
+        "branch_kind": "if",
+        "taken_branch": "body",
+        "origin_name": null
+      }
+    },
+    {
+      "kind": "replace_deterministic_guard",
+      "confidence": "review",
+      "path": "gems/nil-kill/spec/fixtures/deterministic-guard/guard_sample.rb",
+      "line": 14,
+      "message": "1 == 1 is always true: 1 == 1 is always true",
+      "data": {
+        "branch_kind": "if",
+        "predicate_kind": "literal_comparison",
+        "proof_tier": "static_proven",
+        "reason": "1 == 1 is always true",
+        "truth_value": true,
+        "path": "gems/nil-kill/spec/fixtures/deterministic-guard/guard_sample.rb",
+        "taken_branch": "body",
+        "class": "GuardSample",
+        "origin_kind": null,
+        "line": 14,
+        "method": "check",
+        "code": "1 == 1",
+        "origin_name": null
+      }
+    },
+    {
+      "kind": "replace_deterministic_guard",
+      "confidence": "review",
+      "path": "gems/nil-kill/spec/fixtures/deterministic-guard/guard_sample.rb",
+      "line": 14,
+      "message": "1 == 1 is always true: 1 == 1 is always true",
+      "data": {
+        "origin_kind": null,
+        "proof_tier": "static_proven",
+        "branch_kind": "if",
+        "path": "gems/nil-kill/spec/fixtures/deterministic-guard/guard_sample.rb",
+        "reason": "1 == 1 is always true",
+        "taken_branch": "body",
+        "code": "1 == 1",
+        "origin_name": null,
+        "line": 14,
+        "class": "GuardSample",
+        "method": "check",
+        "predicate_kind": "literal_comparison",
+        "truth_value": true
+      }
+    },
+    {
+      "kind": "replace_deterministic_guard",
+      "confidence": "review",
+      "path": "gems/nil-kill/spec/fixtures/deterministic-guard/guard_sample.rb",
+      "line": 14,
+      "message": "1 == 1 is always true: 1 == 1 is always true",
+      "data": {
+        "path": "gems/nil-kill/spec/fixtures/deterministic-guard/guard_sample.rb",
+        "proof_tier": "static_proven",
+        "branch_kind": "if",
+        "code": "1 == 1",
+        "line": 14,
+        "truth_value": true,
+        "origin_name": null,
+        "class": "GuardSample",
+        "method": "check",
+        "predicate_kind": "literal_comparison",
+        "taken_branch": "body",
+        "origin_kind": null,
+        "reason": "1 == 1 is always true"
+      }
+    }
+  ]
+}

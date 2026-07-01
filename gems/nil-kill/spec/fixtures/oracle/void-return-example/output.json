@@ -1,0 +1,45 @@
+{
+  "actions": [
+    {
+      "kind": "fix_sig_return",
+      "confidence": "high",
+      "path": "gems/nil-kill/spec/fixtures/void-return-example/void_example.rb",
+      "line": 5,
+      "message": "existing sig return is T.untyped; return value is never used, prefer .void",
+      "data": {
+        "source": "unused_return",
+        "type": "void"
+      }
+    },
+    {
+      "kind": "fix_sig_return",
+      "confidence": "review",
+      "path": "gems/nil-kill/spec/fixtures/void-return-example/void_example.rb",
+      "line": 5,
+      "message": "existing sig return is T.untyped; static return origins suggest NilClass",
+      "data": {
+        "source": "static_return_origin",
+        "blockers": [
+
+        ],
+        "origin_confidence": "strong",
+        "type": "NilClass"
+      }
+    },
+    {
+      "kind": "fix_sig_return",
+      "confidence": "review",
+      "path": "gems/nil-kill/spec/fixtures/void-return-example/void_example.rb",
+      "line": 5,
+      "message": "existing sig return is T.untyped; forwarded-return chain resolves to NilClass",
+      "data": {
+        "chain": [
+          "gems/nil-kill/spec/fixtures/void-return-example/void_example.rb:5 VoidExample#emit",
+          "typed_call puts at line 6"
+        ],
+        "type": "NilClass",
+        "source": "forwarded_return_chain"
+      }
+    }
+  ]
+}

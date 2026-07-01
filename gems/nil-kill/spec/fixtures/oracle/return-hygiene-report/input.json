@@ -1,0 +1,89 @@
+{
+  "scenario": "return-hygiene-report",
+  "methods": [
+    {
+      "source": {
+        "path": "gems/nil-kill/spec/fixtures/return-hygiene-report/hygiene_report.rb",
+        "line": 5,
+        "class": "HygieneReport",
+        "method": "unused_leaf",
+        "kind": "instance",
+        "sig": "sig { returns(T.untyped) }"
+      },
+      "has_sig": true
+    },
+    {
+      "source": {
+        "path": "gems/nil-kill/spec/fixtures/return-hygiene-report/hygiene_report.rb",
+        "line": 10,
+        "class": "HygieneReport",
+        "method": "unused_wrapper",
+        "kind": "instance",
+        "sig": "sig { returns(T.untyped) }"
+      },
+      "has_sig": true
+    },
+    {
+      "source": {
+        "path": "gems/nil-kill/spec/fixtures/return-hygiene-report/hygiene_report.rb",
+        "line": 15,
+        "class": "HygieneReport",
+        "method": "used_leaf",
+        "kind": "instance",
+        "sig": "sig { returns(T.untyped) }"
+      },
+      "has_sig": true
+    }
+  ],
+  "facts": {
+    "return_origins": [
+      {
+        "candidate_type": "String",
+        "class": "HygieneReport",
+        "confidence": "strong",
+        "kind": "instance",
+        "line": 5,
+        "method": "unused_leaf",
+        "sources": [
+          {
+            "code": "\"event\"",
+            "kind": "static"
+          }
+        ]
+      },
+      {
+        "candidate_type": "String",
+        "class": "HygieneReport",
+        "confidence": "strong",
+        "kind": "instance",
+        "line": 10,
+        "method": "unused_wrapper",
+        "sources": [
+          {
+            "kind": "typed_call_inferred"
+          }
+        ]
+      },
+      {
+        "candidate_type": "String",
+        "class": "HygieneReport",
+        "confidence": "strong",
+        "kind": "instance",
+        "line": 15,
+        "method": "used_leaf",
+        "sources": [
+          {
+            "code": "\"value\"",
+            "kind": "static"
+          }
+        ]
+      }
+    ]
+  },
+  "unused_return_methods_by_location": {
+    "[\"gems/nil-kill/spec/fixtures/return-hygiene-report/hygiene_report.rb\",5,\"HygieneReport\",\"unused_leaf\",\"instance\"]": {
+    },
+    "[\"gems/nil-kill/spec/fixtures/return-hygiene-report/hygiene_report.rb\",10,\"HygieneReport\",\"unused_wrapper\",\"instance\"]": {
+    }
+  }
+}

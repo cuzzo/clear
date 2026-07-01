@@ -17,7 +17,8 @@ where
     Ok(values.into_iter().map(|value| value.unwrap_or_default()).collect())
 }
 
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Debug, Default, Serialize, Deserialize)]
+#[serde(default)]
 pub struct InputState {
     pub methods: Vec<MethodRecord>,
     pub tlets: Vec<Value>,
@@ -25,13 +26,15 @@ pub struct InputState {
     pub unused_return_methods_by_location: HashMap<String, Value>,
 }
 
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Debug, Default, Serialize, Deserialize)]
+#[serde(default)]
 pub struct OutputState {
     pub actions: Vec<Action>,
     pub diagnostics: HashMap<String, Vec<Value>>,
 }
 
-#[derive(Debug, Serialize, Deserialize, Clone)]
+#[derive(Debug, Default, Serialize, Deserialize, Clone)]
+#[serde(default)]
 pub struct MethodRecord {
     pub key: Vec<Value>,
     pub calls: i64,
@@ -62,7 +65,8 @@ pub struct MethodRecord {
     pub has_sig: bool,
 }
 
-#[derive(Debug, Serialize, Deserialize, Clone)]
+#[derive(Debug, Default, Serialize, Deserialize, Clone)]
+#[serde(default)]
 pub struct SourceRecord {
     #[serde(deserialize_with = "string_or_default")]
     pub path: String,
@@ -88,7 +92,8 @@ pub struct SourceRecord {
     pub noreturn_candidate: bool,
 }
 
-#[derive(Debug, Serialize, Deserialize, Clone)]
+#[derive(Debug, Default, Serialize, Deserialize, Clone)]
+#[serde(default)]
 pub struct ParamRecord {
     #[serde(deserialize_with = "string_or_default")]
     pub name: String,

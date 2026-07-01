@@ -1,0 +1,30 @@
+{
+  "actions": [
+    {
+      "kind": "fix_sig_return",
+      "confidence": "high",
+      "path": "gems/nil-kill/spec/fixtures/stdlib-return-candidate/stdlib_return_example.rb",
+      "line": 5,
+      "message": "existing sig return is T.untyped; return value is never used, prefer .void",
+      "data": {
+        "source": "unused_return",
+        "type": "void"
+      }
+    },
+    {
+      "kind": "fix_sig_return",
+      "confidence": "high",
+      "path": "gems/nil-kill/spec/fixtures/stdlib-return-candidate/stdlib_return_example.rb",
+      "line": 5,
+      "message": "existing sig return is T.untyped; static return origins suggest T.nilable(String)",
+      "data": {
+        "origin_confidence": "strong",
+        "source": "static_return_origin",
+        "type": "T.nilable(String)",
+        "blockers": [
+
+        ]
+      }
+    }
+  ]
+}

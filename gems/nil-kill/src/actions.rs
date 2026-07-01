@@ -2010,7 +2010,7 @@ mod tests {
     #[test]
     fn test_actions_oracle_fixtures() {
         let mut d = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
-        d.push("../../spec/fixtures/oracle");
+        d.push("spec/fixtures/oracle");
 
         let mut tested = 0;
         for entry in fs::read_dir(d).unwrap() {

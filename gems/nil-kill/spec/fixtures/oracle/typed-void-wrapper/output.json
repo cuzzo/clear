@@ -1,0 +1,30 @@
+{
+  "actions": [
+    {
+      "kind": "fix_sig_return",
+      "confidence": "high",
+      "path": "gems/nil-kill/spec/fixtures/typed-void-wrapper/typed_void_wrapper_example.rb",
+      "line": 5,
+      "message": "existing sig return is T.untyped; return value is never used, prefer .void",
+      "data": {
+        "type": "void",
+        "source": "unused_return"
+      }
+    },
+    {
+      "kind": "fix_sig_return",
+      "confidence": "high",
+      "path": "gems/nil-kill/spec/fixtures/typed-void-wrapper/typed_void_wrapper_example.rb",
+      "line": 5,
+      "message": "existing sig return is T.untyped; static return origins suggest String",
+      "data": {
+        "type": "String",
+        "blockers": [
+
+        ],
+        "source": "static_return_origin",
+        "origin_confidence": "strong"
+      }
+    }
+  ]
+}

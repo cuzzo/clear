@@ -1,0 +1,37 @@
+{
+  "scenario": "stdlib-return-candidate",
+  "methods": [
+    {
+      "source": {
+        "path": "gems/nil-kill/spec/fixtures/stdlib-return-candidate/stdlib_return_example.rb",
+        "line": 5,
+        "class": "StdlibReturnExample",
+        "method": "maybe_join",
+        "kind": "instance",
+        "sig": "sig { params(lines: T::Array[String], ok: T::Boolean).returns(T.untyped) }"
+      },
+      "has_sig": true
+    }
+  ],
+  "facts": {
+    "return_origins": [
+      {
+        "candidate_type": "T.nilable(String)",
+        "class": "StdlibReturnExample",
+        "confidence": "strong",
+        "kind": "instance",
+        "line": 5,
+        "method": "maybe_join",
+        "sources": [
+          {
+            "kind": "typed_call_inferred"
+          }
+        ]
+      }
+    ]
+  },
+  "unused_return_methods_by_location": {
+    "[\"gems/nil-kill/spec/fixtures/stdlib-return-candidate/stdlib_return_example.rb\",5,\"StdlibReturnExample\",\"maybe_join\",\"instance\"]": {
+    }
+  }
+}

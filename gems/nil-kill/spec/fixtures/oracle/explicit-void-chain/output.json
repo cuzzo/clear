@@ -1,0 +1,56 @@
+{
+  "actions": [
+    {
+      "kind": "fix_sig_return",
+      "confidence": "high",
+      "path": "gems/nil-kill/spec/fixtures/explicit-void-chain/explicit_void_chain_example.rb",
+      "line": 5,
+      "message": "existing sig return is T.untyped; return value is never used, prefer .void",
+      "data": {
+        "type": "void",
+        "source": "unused_return"
+      }
+    },
+    {
+      "kind": "fix_sig_return",
+      "confidence": "high",
+      "path": "gems/nil-kill/spec/fixtures/explicit-void-chain/explicit_void_chain_example.rb",
+      "line": 5,
+      "message": "existing sig return is T.untyped; static return origins suggest String",
+      "data": {
+        "blockers": [
+
+        ],
+        "origin_confidence": "strong",
+        "type": "String",
+        "source": "static_return_origin"
+      }
+    },
+    {
+      "kind": "fix_sig_return",
+      "confidence": "high",
+      "path": "gems/nil-kill/spec/fixtures/explicit-void-chain/explicit_void_chain_example.rb",
+      "line": 10,
+      "message": "existing sig return is T.untyped; return value is never used, prefer .void",
+      "data": {
+        "source": "unused_return",
+        "type": "void"
+      }
+    },
+    {
+      "kind": "fix_sig_return",
+      "confidence": "high",
+      "path": "gems/nil-kill/spec/fixtures/explicit-void-chain/explicit_void_chain_example.rb",
+      "line": 10,
+      "message": "existing sig return is T.untyped; static return origins suggest String",
+      "data": {
+        "source": "static_return_origin",
+        "blockers": [
+
+        ],
+        "origin_confidence": "strong",
+        "type": "String"
+      }
+    }
+  ]
+}

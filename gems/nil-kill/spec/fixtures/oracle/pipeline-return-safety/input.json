@@ -1,0 +1,70 @@
+{
+  "scenario": "pipeline-return-safety",
+  "methods": [
+    {
+      "calls": 25,
+      "param_elem": {
+        "items": [
+          "String"
+        ]
+      },
+      "returns": [
+        "Array"
+      ],
+      "return_elem": [
+        "String"
+      ],
+      "source": {
+        "path": "gems/nil-kill/spec/fixtures/pipeline-return-safety/sample.rb",
+        "line": 5,
+        "class": "PipelineExample",
+        "method": "call",
+        "kind": "instance",
+        "sig": "sig { params(items: T::Array[T.untyped], reason: String).returns(T.untyped) }",
+        "params": [
+          {
+            "name": "items",
+            "type": "T::Array[T.untyped]"
+          }
+        ]
+      },
+      "has_sig": true
+    },
+    {
+      "source": {
+        "path": "gems/nil-kill/spec/fixtures/pipeline-return-safety/sample.rb",
+        "line": 10,
+        "method": "unsigned",
+        "params": [
+          {
+            "name": "value"
+          }
+        ],
+        "scope": [
+          "PipelineExample"
+        ]
+      }
+    }
+  ],
+  "facts": {
+    "dead_nil_checks": [
+      {
+        "code": "reason.nil?",
+        "kind": "nil_check",
+        "line": 6,
+        "path": "gems/nil-kill/spec/fixtures/pipeline-return-safety/sample.rb",
+        "reason": "reason is provably non-nil; .nil? is always false"
+      }
+    ],
+    "return_origins": [
+      {
+        "candidate_type": "T::Array[T.untyped]",
+        "class": "PipelineExample",
+        "confidence": "weak",
+        "kind": "instance",
+        "line": 5,
+        "method": "call"
+      }
+    ]
+  }
+}

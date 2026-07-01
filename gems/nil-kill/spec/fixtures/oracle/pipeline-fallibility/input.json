@@ -1,0 +1,25 @@
+{
+  "scenario": "pipeline-fallibility",
+  "methods": [
+    {
+      "source": {
+        "path": "gems/nil-kill/spec/fixtures/pipeline-fallibility/pipeline.rb",
+        "line": 2,
+        "method": "root",
+        "scope": [
+          "PipelineFallibility"
+        ]
+      }
+    },
+    {
+      "source": {
+        "path": "gems/nil-kill/spec/fixtures/pipeline-fallibility/pipeline.rb",
+        "line": 6,
+        "method": "handled",
+        "scope": [
+          "PipelineFallibility"
+        ]
+      }
+    }
+  ]
+}

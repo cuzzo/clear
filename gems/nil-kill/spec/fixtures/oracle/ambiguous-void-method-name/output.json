@@ -1,0 +1,34 @@
+{
+  "actions": [
+    {
+      "kind": "fix_sig_return",
+      "confidence": "high",
+      "path": "gems/nil-kill/spec/fixtures/ambiguous-void-method-name/ambiguous_void_example.rb",
+      "line": 5,
+      "message": "existing sig return is T.untyped; static return origins suggest String",
+      "data": {
+        "blockers": [
+
+        ],
+        "origin_confidence": "strong",
+        "type": "String",
+        "source": "static_return_origin"
+      }
+    },
+    {
+      "kind": "fix_sig_return",
+      "confidence": "high",
+      "path": "gems/nil-kill/spec/fixtures/ambiguous-void-method-name/ambiguous_void_example.rb",
+      "line": 14,
+      "message": "existing sig return is T.untyped; static return origins suggest String",
+      "data": {
+        "blockers": [
+
+        ],
+        "type": "String",
+        "source": "static_return_origin",
+        "origin_confidence": "strong"
+      }
+    }
+  ]
+}
