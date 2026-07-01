@@ -488,7 +488,11 @@ module Espalier
     end
 
     def quality_hash(row)
-      (row[:quality] || {}).merge(external_overlap_for(row))
+      h = (row[:quality] || {}).dup
+      h.delete(:big_o) if h[:big_o] == "O(1)"
+      h.delete(:big_o_warnings)
+      h.delete(:big_o_unknowns)
+      h.merge(external_overlap_for(row))
     end
 
     def external_overlap_for(row)

@@ -120,7 +120,15 @@ class StaticEvidenceTest < Minitest::Test
       ],
       "facts" => {
         "call_graph_edges" => [],
-        "state_protocol_records" => [],
+        "state_protocol_records" => [
+          {
+            "owner" => "ConnectionManager",
+            "function" => "connect",
+            "field" => "@active_connections",
+            "protocol" => "sort_by",
+            "line" => 23
+          }
+        ],
         "state_param_origin_records" => []
       }
     }
@@ -133,6 +141,12 @@ class StaticEvidenceTest < Minitest::Test
     assert_includes mod[:states], "@active_connections"
     assert_equal 1, mod[:methods].size
     assert_equal "connect", mod[:methods].first[:name]
+    assert_includes mod[:methods].first[:delegations], {
+      receiver: "@active_connections",
+      message: "sort_by",
+      line: 23,
+      type: :always
+    }
   end
 
   def test_builds_using_fact_mine_facts_file

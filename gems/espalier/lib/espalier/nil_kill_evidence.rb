@@ -7,12 +7,12 @@ module Espalier
   # Normalizes Nil-Kill Espalier evidence across legacy Ruby ivar facts and the
   # Tree-sitter static schema v2.
   class NilKillEvidence
-    attr_reader :method_signatures, :state_types, :state_param_origins, :state_protocols
+    attr_reader :method_signatures, :state_types, :state_param_origins, :state_protocols, :loop_counts
 
     def self.load(path)
       return empty unless path && File.exist?(path)
 
-      new(FactMine::Syntax::TypeExpr.wrap_types!(JSON.parse(File.read(path))))
+      new(FactMine::Syntax::TypeExpr.wrap_types!(JSON.parse(File.read(path))), path)
     rescue StandardError
       empty
     end
@@ -21,14 +21,16 @@ module Espalier
       new({})
     end
 
-    def initialize(data)
+    def initialize(data, path = nil)
       @data = data || {}
       @method_signatures = {}
       @state_types = nested_state_map(facts["state_types"] || {})
       @state_param_origins = nested_state_map(facts["state_param_origins"] || facts["ivar_param_origins"] || {})
       @state_protocols = nested_state_map(facts["state_protocols"] || facts["ivar_protocols"] || {})
+      @loop_counts = Hash.new { |h, k| h[k] = Hash.new(0) }
       load_methods!
       load_legacy_runtime_types!
+      load_loops_if_present!(path) if path
     end
 
     def apply!(modules)
@@ -115,6 +117,23 @@ module Espalier
         non_nil.size == 1 ? "T.nilable(#{non_nil.first})" : "T.nilable(T.any(#{non_nil.join(', ')}))"
       else
         "T.any(#{classes.join(', ')})"
+      end
+    end
+
+    def load_loops_if_present!(evidence_path)
+      dir = File.dirname(evidence_path)
+      runtime_dir = File.join(dir, "runtime")
+      return unless File.directory?(runtime_dir)
+
+      Dir.glob(File.join(runtime_dir, "loops-*.jsonl")).each do |loop_file|
+        File.readlines(loop_file).each do |line|
+          data = JSON.parse(line) rescue next
+          path = data["path"]
+          line_num = data["line"]&.to_i
+          if path && line_num
+            @loop_counts[path][line_num] += 1
+          end
+        end
       end
     end
   end

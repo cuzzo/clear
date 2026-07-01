@@ -145,7 +145,9 @@ modules = Espalier::StaticEvidence.project_modules(evidence)
 aggregator = Espalier::Aggregator.new(
   decomplex_data: decomplex_data,
   nil_kill_data: nil_kill_data,
-  risk_data: risk_data
+  risk_data: risk_data,
+  nil_kill_loops: nil_kill_evidence.loop_counts,
+  nil_kill_evidence: nil_kill_evidence
 )
 
 nil_kill_evidence.apply!(modules)
