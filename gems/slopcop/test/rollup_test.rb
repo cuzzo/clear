@@ -3,11 +3,13 @@
 require "minitest/autorun"
 require "tmpdir"
 require "json"
-require "coverage"
 require "fileutils"
 require_relative "../lib/slopcop"
+require_relative "support/branch_resultset_helper"
 
 class RollupTest < Minitest::Test
+  include BranchResultsetHelper
+
   def test_rollup_categorizes_and_surfaces_genuine_with_churn_overlay
     Dir.mktmpdir do |dir|
       FileUtils.mkdir_p("#{dir}/src")
@@ -33,12 +35,8 @@ class RollupTest < Minitest::Test
       system("git", "-C", dir, "add", "-A", out: File::NULL, err: File::NULL)
       system("git", "-C", dir, "commit", "-qm", "add", out: File::NULL, err: File::NULL)
 
-      Coverage.start(branches: true)
-      load path
-      res = Coverage.result
-      rs = { "T" => { "coverage" => { path => { "branches" => res.dig(path, :branches) } } } }
       rsf = "#{dir}/.resultset.json"
-      File.write(rsf, JSON.dump(rs))
+      write_branch_resultset(path, rsf)
 
       out = SlopCop::Rollup.run(files: ["src/m.rb"], repo: dir, resultset: rsf)
       assert out[:per_file].key?("src/m.rb")

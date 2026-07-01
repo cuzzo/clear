@@ -3,12 +3,14 @@
 require "minitest/autorun"
 require "tempfile"
 require "json"
-require "coverage"
 require "tmpdir"
 require "fileutils"
 require_relative "../lib/slopcop"
+require_relative "support/branch_resultset_helper"
 
 class ClassifierTest < Minitest::Test
+  include BranchResultsetHelper
+
   C = SlopCop::Classifier
 
   def with_env(key, value)
@@ -108,13 +110,8 @@ class ClassifierTest < Minitest::Test
     f = Tempfile.new(["cov", ".rb"])
     f.write(src)
     f.close
-    Coverage.start(branches: true)
-    load f.path
-    res = Coverage.result
-    rs = { "T" => { "coverage" => { f.path => { "branches" => res.dig(f.path, :branches) } } } }
     rsf = Tempfile.new(["rs", ".json"])
-    rsf.write(JSON.dump(rs))
-    rsf.close
+    write_branch_resultset(f.path, rsf.path)
 
     arms = C.classify_file(rsf.path, f.path)
     cats = arms.map(&:category)
@@ -144,13 +141,8 @@ class ClassifierTest < Minitest::Test
     f = Tempfile.new(["cov", ".rb"])
     f.write(src)
     f.close
-    Coverage.start(branches: true)
-    load f.path
-    res = Coverage.result
-    rs = { "T" => { "coverage" => { f.path => { "branches" => res.dig(f.path, :branches) } } } }
     rsf = Tempfile.new(["rs", ".json"])
-    rsf.write(JSON.dump(rs))
-    rsf.close
+    write_branch_resultset(f.path, rsf.path)
 
     default_cats = C.classify_file(rsf.path, f.path).map(&:category)
     custom_cats = C.classify_file(rsf.path, f.path,

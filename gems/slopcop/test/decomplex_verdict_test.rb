@@ -4,9 +4,9 @@ require "minitest/autorun"
 require "tmpdir"
 require "tempfile"
 require "json"
-require "coverage"
 require "fileutils"
 require_relative "../lib/slopcop"
+require_relative "support/branch_resultset_helper"
 
 # SlopCop's OPTIONAL decomplex consumer: the negative `spurious`
 # filter (redundant decision -> refactor, not test) and the positive
@@ -14,6 +14,8 @@ require_relative "../lib/slopcop"
 # consumer discipline: read decomplex's verdict, re-derive nothing,
 # degrade cleanly if absent.
 class DecomplexVerdictTest < Minitest::Test
+  include BranchResultsetHelper
+
   # ---- adapter unit -------------------------------------------------
 
   def write(src)
@@ -175,13 +177,8 @@ class DecomplexVerdictTest < Minitest::Test
       system("git", "-C", dir, "config", "user.name", "t")
       system("git", "-C", dir, "add", "-A", out: File::NULL, err: File::NULL)
       system("git", "-C", dir, "commit", "-qm", "x", out: File::NULL, err: File::NULL)
-      Coverage.start(branches: true)
-      load path
-      res = Coverage.result
       rsf = "#{dir}/rs.json"
-      File.write(rsf, JSON.dump(
-        "T" => { "coverage" => { path => { "branches" => res.dig(path, :branches) } } }
-      ))
+      write_branch_resultset(path, rsf)
       yield dir, rsf
     end
   end
