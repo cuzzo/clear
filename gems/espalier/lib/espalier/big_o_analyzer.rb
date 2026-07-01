@@ -92,6 +92,10 @@ module Espalier
           # nesting tree, multiple observed loops in one method are a sequential
           # lower bound, not proof of nested O(N^k) behavior.
           complexity = max_complexity(complexity, "O(N)")
+        elsif node[:type] == :structural
+          structural_complexity = node[:complexity].to_s
+          complexity = max_complexity(complexity, structural_complexity)
+          warnings << structural_warning(node) if structural_complexity != "O(1)"
         elsif node[:type] == :callback || node[:type] == :yield
           warnings << "Function pointer / callback executed at line #{node[:line]}. This could execute arbitrary O(N^x) code, meaning our calculation is strictly a LOWER BOUND."
         end
@@ -232,23 +236,42 @@ module Espalier
     end
 
     def max_complexity(current, added)
-      rank = {
-        "O(1)" => 1,
-        "O(log N)" => 2,
-        "O(N)" => 3,
-        "O(N log N)" => 4,
-        "O(N * M)" => 5,
-        "O(N^2)" => 6
-      }
-      
-      r1 = rank[current] || 1
-      r2 = rank[added] || 1
+      r1 = complexity_rank(current)
+      r2 = complexity_rank(added)
       r1 > r2 ? current : added
+    end
+
+    def structural_warning(node)
+      parts = ["Structural Big-O hint at line #{node[:line]}"]
+      parts << node[:reason].to_s unless node[:reason].to_s.empty?
+      parts << "`#{node[:operation]}`" unless node[:operation].to_s.empty?
+      parts << "=> #{node[:complexity]}"
+      parts.join(": ")
+    end
+
+    def complexity_rank(complexity)
+      return 1 if complexity.nil?
+
+      case complexity.to_s
+      when "O(1)" then 1
+      when "O(log N)" then 2
+      when "O(N)" then 10
+      when "O(N log N)" then 11
+      when "O(N * M)" then 14
+      when /\AO\(N\^(\d+)( log N)?\)\z/
+        10 + ($1.to_i * 2) + ($2 ? 1 : 0)
+      when "O(2^N)" then 100
+      when "O(N!)" then 200
+      else
+        1
+      end
     end
 
     def multiply_complexity(current, multiplier)
       return multiplier if current == "O(1)"
       return current if multiplier == "O(1)"
+      return "O(N!)" if current == "O(N!)" || multiplier == "O(N!)"
+      return "O(2^N)" if current == "O(2^N)" || multiplier == "O(2^N)"
       
       c_pow = 0
       c_log = false

@@ -2,6 +2,7 @@
 
 require "yaml"
 require_relative "big_o_analyzer"
+require_relative "structural_big_o"
 
 module Espalier
   # Coalescing agent that imports the static skeleton maps and merges secondary
@@ -26,6 +27,10 @@ module Espalier
       analyzer = Espalier::BigOAnalyzer.new(
         language: :ruby,
         nil_kill: @nil_kill_evidence
+      )
+      method_complexities = structural_method_complexities(modules)
+      structural_big_o = Espalier::StructuralBigO.new(
+        method_complexities: method_complexities
       )
 
       manifest = modules.map do |mod|
@@ -97,21 +102,9 @@ module Espalier
             quality[:coverage_gap] = file_risk[:coverage_gap] if file_risk[:coverage_gap]
           end
 
-          # Run Big-O analysis
-          meth_line, end_line, end_inclusive = method_line_bounds(mod[:methods], m)
           file = mod[:file]
-
-          ast_nodes = Array(m[:delegations]).map do |d|
-            { type: :call, receiver: d[:receiver], method: d[:message], line: d[:line] || m[:line] || 0 }
-          end
-
-          if file && @nil_kill_loops && @nil_kill_loops[file]
-            @nil_kill_loops[file].each do |line, calls|
-              if line_in_method_bounds?(line, meth_line, end_line, end_inclusive) && calls > 0
-                ast_nodes << { type: :loop, line: line, calls: calls }
-              end
-            end
-          end
+          ast_nodes = big_o_nodes_for(mod, m)
+          ast_nodes.concat(structural_big_o.hints_for(file, m, mod[:name]))
 
           analyzer.instance_variable_set(:@class_name, mod[:name])
           analyzer.instance_variable_set(:@ivar_types, mod[:ivar_types] || {})
@@ -211,6 +204,98 @@ module Espalier
     def line_in_method_bounds?(line, start_line, end_line, end_inclusive)
       return false unless line >= start_line
       end_inclusive ? line <= end_line : line < end_line
+    end
+
+    def preliminary_method_complexities(modules)
+      analyzer = Espalier::BigOAnalyzer.new(
+        language: :ruby,
+        nil_kill: @nil_kill_evidence
+      )
+      modules.each_with_object(Hash.new { |h, k| h[k] = {} }) do |mod, complexities|
+        Array(mod[:methods]).each do |method|
+          analyzer.instance_variable_set(:@class_name, mod[:name])
+          analyzer.instance_variable_set(:@ivar_types, mod[:ivar_types] || {})
+          key = "#{mod[:name]}##{method[:name]}"
+          sig = @nil_kill_data[key] || method[:signature]
+          result = analyzer.analyze_method(
+            key,
+            big_o_nodes_for(mod, method),
+            local_types: local_types_for_signature(sig)
+          )
+          complexities[mod[:name]][method[:name].to_s] = result[:lower_bound_complexity]
+        end
+      end
+    end
+
+    def structural_method_complexities(modules)
+      complexities = preliminary_method_complexities(modules)
+      analyzer = Espalier::BigOAnalyzer.new(
+        language: :ruby,
+        nil_kill: @nil_kill_evidence
+      )
+
+      8.times do
+        changed = false
+        structural_big_o = Espalier::StructuralBigO.new(method_complexities: complexities)
+        modules.each do |mod|
+          Array(mod[:methods]).each do |method|
+            analyzer.instance_variable_set(:@class_name, mod[:name])
+            analyzer.instance_variable_set(:@ivar_types, mod[:ivar_types] || {})
+            key = "#{mod[:name]}##{method[:name]}"
+            sig = @nil_kill_data[key] || method[:signature]
+            nodes = big_o_nodes_for(mod, method)
+            nodes.concat(structural_big_o.hints_for(mod[:file], method, mod[:name]))
+            result = analyzer.analyze_method(key, nodes, local_types: local_types_for_signature(sig))
+            current = complexities[mod[:name]][method[:name].to_s] || "O(1)"
+            next unless complexity_rank(result[:lower_bound_complexity]) > complexity_rank(current)
+
+            complexities[mod[:name]][method[:name].to_s] = result[:lower_bound_complexity]
+            changed = true
+          end
+        end
+        break unless changed
+      end
+
+      complexities
+    end
+
+    def complexity_rank(complexity)
+      case complexity.to_s
+      when "O(1)" then 1
+      when "O(log N)" then 2
+      when "O(N)" then 10
+      when "O(N log N)" then 11
+      when "O(N * M)" then 14
+      when /\AO\(N\^(\d+)( log N)?\)\z/
+        10 + ($1.to_i * 2) + ($2 ? 1 : 0)
+      when "O(2^N)" then 100
+      when "O(N!)" then 200
+      else
+        1
+      end
+    end
+
+    def big_o_nodes_for(mod, method)
+      nodes = Array(method[:delegations]).map do |delegation|
+        {
+          type: :call,
+          receiver: delegation[:receiver],
+          method: delegation[:message],
+          line: delegation[:line] || method[:line] || 0
+        }
+      end
+
+      meth_line, end_line, end_inclusive = method_line_bounds(mod[:methods], method)
+      file = mod[:file]
+      if file && @nil_kill_loops && @nil_kill_loops[file]
+        @nil_kill_loops[file].each do |line, calls|
+          if line_in_method_bounds?(line, meth_line, end_line, end_inclusive) && calls > 0
+            nodes << { type: :loop, line: line, calls: calls }
+          end
+        end
+      end
+
+      nodes
     end
 
     def local_types_for_signature(signature)

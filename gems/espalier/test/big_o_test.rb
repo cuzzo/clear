@@ -13,9 +13,12 @@ class BigOTest < Minitest::Test
     assert_equal "O(N)", analyzer.send(:multiply_complexity, "O(N)", "O(1)")
     assert_equal "O(N^2)", analyzer.send(:multiply_complexity, "O(N)", "O(N)")
     assert_equal "O(N^3)", analyzer.send(:multiply_complexity, "O(N^2)", "O(N)")
+    assert_equal "O(N^5)", analyzer.send(:multiply_complexity, "O(N^2)", "O(N^3)")
     assert_equal "O(N^2 log N)", analyzer.send(:multiply_complexity, "O(N log N)", "O(N)")
     assert_equal "O(N^3 log N)", analyzer.send(:multiply_complexity, "O(N^2 log N)", "O(N)")
     assert_equal "O(log N)", analyzer.send(:multiply_complexity, "O(log N)", "O(1)")
+    assert_equal "O(2^N)", analyzer.send(:multiply_complexity, "O(2^N)", "O(N)")
+    assert_equal "O(N!)", analyzer.send(:multiply_complexity, "O(N!)", "O(N^3)")
   end
 
   def test_resolve_type_with_nil_kill_evidence
@@ -170,5 +173,36 @@ class BigOTest < Minitest::Test
     ])
 
     assert_equal "O(N)", result[:lower_bound_complexity]
+  end
+
+  def test_structural_hint_promotes_loop_contained_linear_work
+    analyzer = Espalier::BigOAnalyzer.new
+
+    result = analyzer.analyze_method("fixpoint", [
+      { type: :loop, line: 10 },
+      {
+        type: :structural,
+        line: 12,
+        complexity: "O(N^2)",
+        operation: "items.each",
+        reason: "linear stdlib call inside loop"
+      }
+    ])
+
+    assert_equal "O(N^2)", result[:lower_bound_complexity]
+    assert_match(/Structural Big-O hint/, result[:warnings].first)
+  end
+
+  def test_structural_hint_ranks_super_polynomial_work
+    analyzer = Espalier::BigOAnalyzer.new
+
+    result = analyzer.analyze_method("search", [
+      { type: :structural, line: 10, complexity: "O(N^4)", operation: "nested", reason: "nested loop containment depth 4" },
+      { type: :structural, line: 20, complexity: "O(2^N)", operation: "fib", reason: "multiple recursive branches" },
+      { type: :structural, line: 30, complexity: "O(N!)", operation: "permute", reason: "recursive branching over shrinking collection" }
+    ])
+
+    assert_equal "O(N!)", result[:lower_bound_complexity]
+    assert_equal 3, result[:warnings].size
   end
 end
