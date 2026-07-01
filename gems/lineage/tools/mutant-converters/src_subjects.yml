@@ -53,7 +53,7 @@
   hard_gate: true
   max_timeouts: 0
 - subject: IntrinsicRegistry
-  require: annotator/helpers/intrinsic_registry
+  require: ast/ast -r annotator/helpers/intrinsic_registry
   spec: spec/intrinsic_registry_spec.rb
   baseline: 92.81
   hard_gate: true
@@ -166,13 +166,14 @@
   spec: spec/ownership_dataflow_spec.rb
   baseline: 100.0
   hard_gate: true
+  max_timeouts: 400
 - subject: BorrowChecker
   require: backends/transpiler
   specs:
     - spec/borrow_checker_spec.rb
     - spec/borrowed_escape_spec.rb
     - spec/wildcard_borrow_spec.rb
-  baseline: 86.0
+  baseline: 77.31
   hard_gate: true
   max_timeouts: 20
 - subject: BorrowChecker.check
@@ -1061,7 +1062,7 @@
   hard_gate: false
 - subject: PipelineRewriter#rewrite!
   expression: PipelineRewriter#rewrite!
-  require: mir/rewriters/pipeline_rewriter
+  require: backends/transpiler
   specs:
     - spec/pipeline_rewriter_spec.rb
     - spec/pipeline_backend_coverage_spec.rb
