@@ -55,9 +55,19 @@ flags:
       - gems/lineage/
     carryforward: false
     joined: false
+  go:
+    paths:
+      - gems/boobytrap/
+    carryforward: false
+    joined: false
   gems:
     paths:
       - gems/
+    carryforward: false
+    joined: false
+  nil-kill-rust:
+    paths:
+      - gems/nil-kill/
     carryforward: false
     joined: false
   zig-mutants:

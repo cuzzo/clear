@@ -2007,6 +2007,10 @@ mod tests {
     use std::fs;
     use std::path::PathBuf;
 
+    fn input_from_json(value: serde_json::Value) -> crate::schemas::InputState {
+        serde_json::from_value(value).unwrap()
+    }
+
     #[test]
     fn test_actions_oracle_fixtures() {
         let mut d = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
@@ -2536,5 +2540,500 @@ mod tests {
         ]);
         let res2 = super::shape_union_type(&arr_shapes.as_array().unwrap());
         assert_eq!(res2, Some("T::Array[Float]".to_string()));
+    }
+
+    #[test]
+    fn test_type_helper_conservative_edges() {
+        use serde_json::json;
+
+        assert_eq!(
+            super::sorbet_type(&["TrueClass".to_string(), "FalseClass".to_string()], true),
+            "T::Boolean"
+        );
+        assert_eq!(
+            super::conservative_element_type(&["NilClass".to_string(), "String".to_string()]),
+            Some("T.nilable(String)".to_string())
+        );
+        assert_eq!(
+            super::conservative_element_type(&["TrueClass".to_string(), "FalseClass".to_string()]),
+            Some("T::Boolean".to_string())
+        );
+        assert_eq!(
+            super::conservative_element_type(&["AST::Send".to_string()]),
+            None
+        );
+        assert_eq!(
+            super::conservative_element_type(&["String".to_string(), "Integer".to_string()]),
+            None
+        );
+
+        let mixed_hash = json!([
+            {
+                "kind": "hash",
+                "keys": [{ "kind": "class", "name": "String" }],
+                "values": [
+                    { "kind": "class", "name": "String" },
+                    { "kind": "class", "name": "Integer" }
+                ]
+            }
+        ]);
+        assert_eq!(
+            super::shape_union_type(mixed_hash.as_array().unwrap()),
+            None
+        );
+        assert_eq!(
+            super::shape_union_type(&[json!({ "kind": "unknown" })]),
+            None
+        );
+        assert_eq!(super::shape_union_type(&[json!({})]), None);
+
+        let array_classes = json!(["Symbol"]);
+        assert_eq!(
+            super::generic_candidate_type("Array", Some(&array_classes), None, None, None),
+            Some("T::Array[Symbol]".to_string())
+        );
+        let set_classes = json!(["String"]);
+        assert_eq!(
+            super::generic_candidate_type("Set", Some(&set_classes), None, None, None),
+            Some("T::Set[String]".to_string())
+        );
+        let hash_classes = json!([["Symbol"], ["Float"]]);
+        assert_eq!(
+            super::generic_candidate_type("Hash", None, Some(&hash_classes), None, None),
+            Some("T::Hash[Symbol, Float]".to_string())
+        );
+        assert_eq!(
+            super::preserve_nilable_wrapper("T.nilable(T.untyped)", "String"),
+            "T.nilable(String)"
+        );
+        assert_eq!(
+            super::extract_return_type("sig { returns(T.nilable(String)) }"),
+            Some("T.nilable(String)".to_string())
+        );
+        assert_eq!(
+            super::collection_narrowing_confidence(1, "T::Array[User]"),
+            "review"
+        );
+    }
+
+    #[test]
+    fn test_dead_checks_deterministic_guards_and_missing_sig_confidence() {
+        use serde_json::json;
+
+        let input = input_from_json(json!({
+            "methods": [
+                { "has_sig": false, "source": null },
+                {
+                    "has_sig": false,
+                    "calls": 25,
+                    "params_by_name": { "name": ["String"] },
+                    "returns": ["Integer"],
+                    "source": {
+                        "path": "src/signup.rb",
+                        "line": 10,
+                        "class": "Signup",
+                        "method": "create",
+                        "kind": "instance",
+                        "params": [{ "name": "name", "nil_default": true, "type": null }],
+                        "uses_yield": false
+                    }
+                },
+                {
+                    "has_sig": false,
+                    "calls": 25,
+                    "params_by_name": { "block_arg": ["String"] },
+                    "returns": ["String"],
+                    "source": {
+                        "path": "src/signup.rb",
+                        "line": 20,
+                        "class": "Signup",
+                        "method": "around",
+                        "kind": "instance",
+                        "params": [{ "name": "block_arg", "nil_default": false, "type": null }],
+                        "uses_yield": true
+                    }
+                },
+                {
+                    "has_sig": true,
+                    "source": {
+                        "path": "src/signup.rb",
+                        "line": 30,
+                        "class": "Signup",
+                        "method": "already_typed",
+                        "kind": "instance",
+                        "sig": "sig { void }"
+                    }
+                }
+            ],
+            "facts": {
+                "dead_nil_checks": [
+                    { "kind": "nil_check", "path": "src/signup.rb", "line": 3, "code": "user.nil?", "reason": "user is non-nil" },
+                    { "kind": "safe_nav", "path": "src/signup.rb", "line": 4, "code": "user&.name", "reason": "receiver is non-nil" }
+                ],
+                "deterministic_guards": [
+                    { "proof_tier": "runtime_observed", "predicate_kind": "type_check", "path": "src/signup.rb", "line": 5, "code": "name.is_a?(String)", "truth_value": true, "reason": "runtime only" },
+                    { "proof_tier": "static_proven", "predicate_kind": "nil_check", "path": "src/signup.rb", "line": 6, "code": "name.nil?", "truth_value": false, "reason": "handled elsewhere" },
+                    { "proof_tier": "static_proven", "predicate_kind": "type_check", "path": "src/signup.rb", "line": 7, "code": "name.is_a?(String)", "truth_value": true, "reason": "signature proves String" }
+                ]
+            }
+        }));
+
+        let actions = super::build_actions(&input);
+        assert!(actions.iter().any(|a| a.kind == "replace_dead_nil_check"));
+        assert!(actions.iter().any(|a| a.kind == "remove_dead_safe_nav"));
+        let guard = actions
+            .iter()
+            .find(|a| a.kind == "replace_deterministic_guard")
+            .unwrap();
+        assert_eq!(guard.line, 7);
+        assert!(guard.message.contains("always true"));
+
+        let create_sig = actions
+            .iter()
+            .find(|a| a.kind == "add_sig" && a.line == 10)
+            .unwrap();
+        assert_eq!(create_sig.confidence, "high");
+        assert_eq!(
+            create_sig.data["sig"],
+            "sig { params(name: T.nilable(String)).returns(Integer) }"
+        );
+
+        let around_sig = actions
+            .iter()
+            .find(|a| a.kind == "add_sig" && a.line == 20)
+            .unwrap();
+        assert_eq!(around_sig.confidence, "review");
+        assert!(around_sig.message.contains("block typing needs review"));
+    }
+
+    #[test]
+    fn test_signature_validation_handles_collections_voids_and_static_return_origins() {
+        use serde_json::json;
+
+        let unused_key =
+            serde_json::json!(["src/service.rb", 40, "Service", "unused", "instance"]).to_string();
+        let contradicted_key = serde_json::json!([
+            "src/service.rb",
+            50,
+            "Service",
+            "contradicted_unused",
+            "instance"
+        ])
+        .to_string();
+
+        let input = input_from_json(json!({
+            "methods": [
+                {
+                    "has_sig": true,
+                    "calls": 25,
+                    "params_ok": { "value": ["String"], "items": ["Array"] },
+                    "param_elem": { "items": ["Integer"] },
+                    "returns": ["Hash"],
+                    "return_kv": [["String"], ["Integer"]],
+                    "source": {
+                        "path": "src/service.rb",
+                        "line": 10,
+                        "class": "Service",
+                        "method": "process",
+                        "kind": "instance",
+                        "sig": "sig { params(value:T.untyped, items: T::Array[T.untyped]).returns(T.untyped) }",
+                        "params": [
+                            { "name": "value", "type": "T.untyped" },
+                            { "name": "items", "type": "T::Array[T.untyped]" }
+                        ]
+                    }
+                },
+                {
+                    "has_sig": true,
+                    "calls": 1,
+                    "returns": [],
+                    "source": {
+                        "path": "src/service.rb",
+                        "line": 30,
+                        "class": "Service",
+                        "method": "always_raises",
+                        "kind": "instance",
+                        "sig": "sig { returns(T.untyped) }",
+                        "params": [],
+                        "noreturn_candidate": true
+                    }
+                },
+                {
+                    "has_sig": true,
+                    "calls": 5,
+                    "returns": [],
+                    "source": {
+                        "path": "src/service.rb",
+                        "line": 40,
+                        "class": "Service",
+                        "method": "unused",
+                        "kind": "instance",
+                        "sig": "sig { returns(T.untyped) }",
+                        "params": []
+                    }
+                },
+                {
+                    "has_sig": true,
+                    "calls": 5,
+                    "returns": ["String"],
+                    "source": {
+                        "path": "src/service.rb",
+                        "line": 50,
+                        "class": "Service",
+                        "method": "contradicted_unused",
+                        "kind": "instance",
+                        "sig": "sig { returns(T.untyped) }",
+                        "params": []
+                    }
+                },
+                {
+                    "has_sig": true,
+                    "calls": 5,
+                    "returns": [],
+                    "source": {
+                        "path": "src/service.rb",
+                        "line": 60,
+                        "class": "Service",
+                        "method": "literal_return",
+                        "kind": "instance",
+                        "sig": "sig { returns(T.untyped) }",
+                        "params": []
+                    }
+                },
+                {
+                    "has_sig": true,
+                    "calls": 5,
+                    "returns": [],
+                    "source": {
+                        "path": "src/service.rb",
+                        "line": 70,
+                        "class": "Service",
+                        "method": "bare_static_return",
+                        "kind": "instance",
+                        "sig": "sig { returns(T.untyped) }",
+                        "params": []
+                    }
+                },
+                {
+                    "has_sig": true,
+                    "calls": 5,
+                    "returns": ["String"],
+                    "source": {
+                        "path": "src/service.rb",
+                        "line": 80,
+                        "class": "Service",
+                        "method": "void_contradiction",
+                        "kind": "instance",
+                        "sig": "sig { returns(T.untyped) }",
+                        "params": []
+                    }
+                }
+            ],
+            "unused_return_methods_by_location": {
+                (unused_key): true,
+                (contradicted_key): true
+            },
+            "facts": {
+                "return_origins": [
+                    {
+                        "path": "src/service.rb",
+                        "line": 60,
+                        "class": "Service",
+                        "method": "literal_return",
+                        "kind": "instance",
+                        "confidence": "strong",
+                        "candidate_type": "String",
+                        "sources": [{ "kind": "static", "type": "String", "code": "\"ok\"" }],
+                        "blockers": []
+                    },
+                    {
+                        "path": "src/service.rb",
+                        "line": 70,
+                        "class": "Service",
+                        "method": "bare_static_return",
+                        "kind": "instance",
+                        "confidence": "strong",
+                        "candidate_type": "String",
+                        "sources": [{ "kind": "static", "type": "String", "code": "value" }],
+                        "blockers": []
+                    },
+                    {
+                        "path": "src/service.rb",
+                        "line": 80,
+                        "class": "Service",
+                        "method": "void_contradiction",
+                        "kind": "instance",
+                        "confidence": "strong",
+                        "candidate_type": "void",
+                        "sources": [{ "kind": "static", "type": "void", "code": "nil" }],
+                        "blockers": []
+                    }
+                ]
+            }
+        }));
+
+        let actions = super::build_actions(&input);
+        assert!(actions.iter().any(|a| {
+            a.kind == "narrow_generic_param"
+                && a.line == 10
+                && a.data["type"] == "T::Array[Integer]"
+                && a.confidence == "high"
+        }));
+        assert!(actions
+            .iter()
+            .any(|a| { a.kind == "fix_sig_param" && a.line == 10 && a.data["name"] == "value" }));
+        assert!(actions.iter().any(|a| {
+            a.kind == "fix_sig_return"
+                && a.line == 10
+                && a.data["type"] == "T::Hash[String, Integer]"
+        }));
+        assert!(actions.iter().any(|a| {
+            a.kind == "fix_sig_return" && a.line == 30 && a.data["type"] == "T.noreturn"
+        }));
+        assert!(actions
+            .iter()
+            .any(|a| { a.kind == "fix_sig_return" && a.line == 40 && a.data["type"] == "void" }));
+        assert!(actions
+            .iter()
+            .any(|a| { a.kind == "fix_sig_return" && a.line == 50 && a.data["type"] == "String" }));
+        assert!(!actions.iter().any(|a| {
+            a.kind == "fix_sig_return"
+                && a.line == 50
+                && a.data.get("source").and_then(|v| v.as_str()) == Some("unused_return")
+        }));
+
+        let literal = actions
+            .iter()
+            .find(|a| a.kind == "fix_sig_return" && a.line == 60)
+            .unwrap();
+        assert_eq!(literal.confidence, "high");
+
+        let bare = actions
+            .iter()
+            .find(|a| a.kind == "fix_sig_return" && a.line == 70)
+            .unwrap();
+        assert_eq!(bare.confidence, "review");
+        assert!(actions
+            .iter()
+            .any(|a| { a.kind == "fix_sig_return" && a.line == 80 && a.data["type"] == "String" }));
+        assert!(!actions.iter().any(|a| {
+            a.kind == "fix_sig_return"
+                && a.line == 80
+                && a.data.get("source").and_then(|v| v.as_str()) == Some("static_return_origin")
+                && a.data.get("type").and_then(|v| v.as_str()) == Some("void")
+        }));
+    }
+
+    #[test]
+    fn test_static_backflow_forwarded_returns_and_struct_field_rbi_paths() {
+        use serde_json::json;
+
+        let input = input_from_json(json!({
+            "methods": [],
+            "facts": {
+                "existing_sigs": [
+                    {
+                        "path": "src/service.rb",
+                        "line": 10,
+                        "class": "Service",
+                        "method": "accept",
+                        "kind": "instance",
+                        "sig": "sig { params(user: T.untyped, ignored: T.untyped).void }"
+                    },
+                    {
+                        "path": "src/service.rb",
+                        "line": 20,
+                        "class": "Service",
+                        "method": "forwarded",
+                        "kind": "instance",
+                        "sig": "sig { returns(T.untyped) }"
+                    },
+                    {
+                        "path": "src/service.rb",
+                        "line": 30,
+                        "class": "Service",
+                        "method": "not_forwarded",
+                        "kind": "instance",
+                        "sig": "sig { returns(T.untyped) }",
+                        "return_origin": { "sources": [{ "kind": "static", "type": "String", "code": "\"ok\"" }] }
+                    },
+                    {
+                        "path": "src/service.rb",
+                        "line": 40,
+                        "class": "Service",
+                        "method": "bad_forward",
+                        "kind": "instance",
+                        "sig": "sig { returns(T.untyped) }",
+                        "return_origin": { "sources": [{ "kind": "typed_call", "type": "Object", "callee": "load_any", "line": 41 }] }
+                    }
+                ],
+                "param_origins": [
+                    { "callee": "accept", "slot": "user", "origin_kind": "static", "type": "User", "path": "src/caller.rb", "line": 3, "code": "accept(user)" },
+                    { "callee": "accept", "slot": "user", "origin_kind": "static", "type": "User", "path": "src/caller.rb", "line": 3, "code": "accept(user)" },
+                    { "callee": "accept", "slot": "ignored", "origin_kind": "unknown", "path": "src/caller.rb", "line": 4, "code": "accept(dynamic)" }
+                ],
+                "return_origins": [
+                    {
+                        "path": "src/service.rb",
+                        "line": 20,
+                        "class": "Service",
+                        "method": "forwarded",
+                        "kind": "instance",
+                        "sources": [
+                            { "kind": "typed_call", "type": "String", "callee": "load_name", "line": 21 },
+                            { "kind": "nil" }
+                        ]
+                    }
+                ],
+                "struct_field_runtime": [
+                    { "class": "User", "field": "name", "classes": ["String"], "elem_classes": [], "calls": 5 },
+                    { "class": "User", "field": "empty", "classes": [], "elem_classes": [], "calls": 5 }
+                ],
+                "struct_field_static": [
+                    { "class": "User", "field": "missing_runtime", "type": "" }
+                ]
+            }
+        }));
+
+        let actions = super::build_actions(&input);
+        let backflow = actions
+            .iter()
+            .find(|a| a.kind == "fix_sig_param" && a.line == 10)
+            .unwrap();
+        assert_eq!(backflow.data["name"], "user");
+        assert_eq!(backflow.data["type"], "User");
+        assert_eq!(backflow.data["callsite_count"], 2);
+        assert_eq!(
+            backflow
+                .data
+                .get("callsites")
+                .and_then(|v| v.as_object())
+                .and_then(|m| m.get("src/caller.rb:3:accept(user)"))
+                .and_then(|v| v.as_i64()),
+            Some(2)
+        );
+
+        let forwarded = actions
+            .iter()
+            .find(|a| a.kind == "fix_sig_return" && a.line == 20)
+            .unwrap();
+        assert_eq!(forwarded.confidence, "review");
+        assert_eq!(forwarded.data["type"], "T.any(NilClass, String)");
+        assert!(!actions
+            .iter()
+            .any(|a| a.kind == "fix_sig_return" && a.line == 30));
+        assert!(!actions
+            .iter()
+            .any(|a| a.kind == "fix_sig_return" && a.line == 40));
+
+        let rbi = actions
+            .iter()
+            .find(|a| a.kind == "add_struct_field_sig" && a.data["target"] == "rbi")
+            .unwrap();
+        assert_eq!(rbi.path, "sorbet/rbi/ast-struct-fields.rbi");
+        assert_eq!(rbi.data["field"], "name");
+        assert!(!actions
+            .iter()
+            .any(|a| a.kind == "add_struct_field_sig" && a.data["field"] == "empty"));
     }
 }

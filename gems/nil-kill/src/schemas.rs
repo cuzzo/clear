@@ -14,7 +14,10 @@ where
     D: serde::Deserializer<'de>,
 {
     let values = Vec::<Option<String>>::deserialize(deserializer)?;
-    Ok(values.into_iter().map(|value| value.unwrap_or_default()).collect())
+    Ok(values
+        .into_iter()
+        .map(|value| value.unwrap_or_default())
+        .collect())
 }
 
 #[derive(Debug, Default, Serialize, Deserialize)]

@@ -154,8 +154,12 @@ jobs:
           node-version: 20
       - name: Install Tree-sitter grammars
         run: npm install --legacy-peer-deps
-      - run: bundle exec go test -v -coverprofile=coverage.txt -covermode=atomic ./...
+      - run: bundle exec go test -v -coverprofile=coverage.raw.txt -covermode=atomic ./...
         working-directory: gems/boobytrap
+      - name: Normalize Boobytrap Go coverage paths
+        run: |
+          ruby -e 'ARGV.each { |path| text = File.read(path); File.write(path.sub(".raw.", "."), text.gsub(/^boobytrap-helper\//, "gems/boobytrap/")) }' \
+            gems/boobytrap/coverage.raw.txt
       - uses: codecov/codecov-action@v5
         with:
           files: gems/boobytrap/coverage.txt
@@ -370,6 +374,40 @@ jobs:
           files: ./tmp/fact-mine-rust-coverage/cobertura.xml
           disable_search: true
           flags: fact-mine-rust
+          fail_ci_if_error: false
+          token: ${{ secrets.CODECOV_TOKEN }}
+
+  nil-kill-rust-coverage:
+    name: Nil-Kill Rust coverage
+    needs: changes
+    if: ${{ needs.changes.outputs.run_gems == 'true' }}
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install Z3
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y z3
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: taiki-e/install-action@cargo-llvm-cov
+      - name: Run cargo llvm-cov for Nil-Kill
+        run: |
+          mkdir -p tmp/nil-kill-rust-coverage
+          cargo llvm-cov \
+            --manifest-path gems/nil-kill/Cargo.toml \
+            --all-features \
+            --cobertura \
+            --output-path ${{ github.workspace }}/tmp/nil-kill-rust-coverage/cobertura.xml
+      - uses: actions/upload-artifact@v4
+        with:
+          name: nil-kill-rust-coverage
+          path: tmp/nil-kill-rust-coverage/cobertura.xml
+          retention-days: 7
+      - uses: codecov/codecov-action@v5
+        with:
+          files: ./tmp/nil-kill-rust-coverage/cobertura.xml
+          disable_search: true
+          flags: nil-kill-rust
           fail_ci_if_error: false
           token: ${{ secrets.CODECOV_TOKEN }}
 

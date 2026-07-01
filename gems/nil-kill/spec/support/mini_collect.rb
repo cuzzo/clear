@@ -14,6 +14,7 @@ require "tmpdir"
 
 module MiniCollect
   TRACER = File.join(NilKill::ROOT, "gems", "nil-kill", "lib", "nil_kill", "runtime_trace.rb")
+  SUBPROCESS_COVERAGE = File.join(__dir__, "subprocess_coverage.rb")
 
   def in_tmp(&blk)
     Dir.mktmpdir("nk-cap", NilKill::ROOT, &blk)
@@ -54,7 +55,9 @@ module MiniCollect
       "NIL_KILL_TRACE_METHODS" => "0",
       "NIL_KILL_TMP_DIR" => NilKill::TMP_DIR,
       "NIL_KILL_TARGETS" => dir,
-      "RUBYOPT" => "-r#{TRACER}",
+      "RUBYOPT" => ENV["NIL_KILL_SUBPROCESS_COVERAGE"] == "1" ? "-r#{SUBPROCESS_COVERAGE} -r#{TRACER}" : "-r#{TRACER}",
+      "NIL_KILL_SUBPROCESS_COVERAGE_CHILD" => ENV["NIL_KILL_SUBPROCESS_COVERAGE"] == "1" ? "1" : nil,
+      "NIL_KILL_SHARED_COVERAGE" => ENV["NIL_KILL_SUBPROCESS_COVERAGE"] == "1" ? "1" : nil,
     }
     out, err, status = Open3.capture3(env, "bundle", "exec", "ruby", driver, chdir: NilKill::ROOT)
     rd = NilKill::RUNTIME_DIR
