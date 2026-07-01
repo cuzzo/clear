@@ -429,7 +429,7 @@ class SymbolEntry
   def initialize_copy(original)
     super
     @lifecycle = original.lifecycle
-    @flow = original.instance_variable_get(:@flow).dup
+    @flow = original.flow_snapshot
     @lifetime = original.lifetime.dup
   end
 

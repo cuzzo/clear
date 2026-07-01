@@ -253,6 +253,8 @@ RSpec.describe Scope do
         @scope_stack = scopes
       end
 
+      attr_reader :scope_stack
+
       def expose_current_scope = current_scope
       def expose_lookup_scope_for(name) = lookup_scope_for(name)
       def expose_resolve_variable_scope(name) = resolve_variable_scope(name)

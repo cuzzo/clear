@@ -124,11 +124,14 @@ jobs:
       - name: Install Tree-sitter grammars
         run: npm install --legacy-peer-deps
       - uses: dtolnay/rust-toolchain@stable
-      - name: Build fact-mine-rust binary
-        run: cargo build --release --manifest-path gems/fact-mine/Cargo.toml
+      - name: Build Rust binaries
+        run: |
+          cargo build --release --manifest-path gems/fact-mine/Cargo.toml
+          cargo build --release --manifest-path gems/nil-kill/Cargo.toml
       - run: bundle exec rspec gems/nil-kill/spec
         env:
           FACT_MINE_RUST_BINARY: ./gems/fact-mine/target/release/fact-mine-rust
+          NIL_KILL_INFER_RUST_BINARY: ./gems/nil-kill/target/release/nil-kill-infer-rust
 
   boobytrap-go-unit:
     name: boobytrap Go tests
@@ -185,11 +188,13 @@ jobs:
       - name: Build Rust binaries
         run: |
           cargo build --release --manifest-path gems/fact-mine/Cargo.toml
+          cargo build --release --manifest-path gems/nil-kill/Cargo.toml
           cargo build --release --manifest-path gems/decomplex/Cargo.toml
       - name: Run Ruby gem tests with SimpleCov
         run: bundle exec ruby tools/run_ruby_gem_coverage.rb
         env:
           FACT_MINE_RUST_BINARY: ./gems/fact-mine/target/release/fact-mine-rust
+          NIL_KILL_INFER_RUST_BINARY: ./gems/nil-kill/target/release/nil-kill-infer-rust
       - uses: actions/upload-artifact@v4
         with:
           name: ruby-coverage-gems

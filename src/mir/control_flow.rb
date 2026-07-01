@@ -84,13 +84,19 @@ class FunctionCFG
 
   attr_reader :blocks, :entry, :exit_block, :fn_name
 
-  sig { params(fn_name: String).void }
-  def initialize(fn_name)
+  sig { params(fn_name: String, can_fail_fns: T.nilable(T::Set[String])).void }
+  def initialize(fn_name, can_fail_fns: nil)
     @fn_name = T.let(fn_name, String)
+    @can_fail_fns = T.let(can_fail_fns, T.nilable(T::Set[String]))
     @blocks = T.let([], T::Array[BasicBlock])
     @block_counter = T.let(0, Integer)
     @entry = T.let(new_block, BasicBlock)
     @exit_block = T.let(new_block, BasicBlock)  # virtual exit - all returns target this
+  end
+
+  sig { returns(T.nilable(T::Set[String])) }
+  def can_fail_fns
+    @can_fail_fns
   end
 
   sig { returns(BasicBlock) }
@@ -111,8 +117,7 @@ class FunctionCFG
   #   error edge to the exit block (models Zig try/error-unwind semantics).
   sig { params(fn_node: AST::FunctionDef, can_fail_fns: T.nilable(T::Set[String])).returns(FunctionCFG) }
   def self.build(fn_node, can_fail_fns: nil)
-    cfg = new(fn_node.name)
-    cfg.instance_variable_set(:@can_fail_fns, can_fail_fns)
+    cfg = new(fn_node.name, can_fail_fns: can_fail_fns)
     last_block = build_body(fn_node.body || [], cfg.entry, cfg.exit_block, cfg)
     # Connect fall-through to exit (implicit return at end of function).
     last_block.add_successor(cfg.exit_block) if last_block
@@ -256,8 +261,7 @@ class FunctionCFG
         # Place the error edge BEFORE the statement so the dataflow state
         # on the error path does not include effects of this statement
         # (e.g., a VarDecl's variable is not yet bound on try-unwind).
-        if cfg.instance_variable_get(:@can_fail_fns) &&
-           stmt_can_fail?(stmt, cfg.instance_variable_get(:@can_fail_fns))
+        if cfg.can_fail_fns && stmt_can_fail?(stmt, T.must(cfg.can_fail_fns))
           current_block.add_successor(cfg.exit_block)
           next_block = cfg.new_block
           current_block.add_successor(next_block)
@@ -452,6 +456,11 @@ class OwnershipDataflow
     @schema_lookup = schema_lookup
     @block_in  = T.let({}, T::Hash[Integer, OwnershipState]) # block.id => typed ownership state
     @block_out = T.let({}, T::Hash[Integer, T.nilable(OwnershipState)]) # block.id => typed ownership state
+  end
+
+  sig { returns(FunctionCFG) }
+  def cfg
+    @cfg
   end
 
   # Run the forward dataflow to fixpoint. Returns self for chaining.
@@ -967,7 +976,7 @@ class OwnershipDataflow
       collect_binding_move_places(stmt.value, state).each { |place| mark_moved!(state, place) }
       update_declared_owner!(state, stmt.name.to_s, stmt) if stmt.mode == :decl
 
-    when AST::Assignment, AST::ReturnNode
+    when AST::Assignment, AST::DestructuringAssignment, AST::ReturnNode
       collect_binding_move_places(stmt.value, state).each { |place| mark_moved!(state, place) }
 
     when AST::MoveNode
@@ -1311,7 +1320,7 @@ class UseAfterMoveChecker
   def check!
     # Walk the CFG blocks, replaying transfer from each block's input state.
     # This avoids materializing a full state snapshot after every statement.
-    @dataflow.instance_variable_get(:@cfg).blocks.each do |block|
+    @dataflow.cfg.blocks.each do |block|
       state = @dataflow.replay_state_for_block(block)
       block.stmts.each do |stmt|
         check_stmt_reads(stmt, state)
@@ -1336,7 +1345,7 @@ class UseAfterMoveChecker
   sig { params(stmt: AST::Node, state: OwnershipDataflow::OwnershipState).void }
   def check_stmt_reads(stmt, state)
     case stmt
-    when AST::VarDecl, AST::BindExpr, AST::ReturnNode
+    when AST::VarDecl, AST::BindExpr, AST::DestructuringAssignment, AST::ReturnNode
       # RHS is read. LHS: if :assign mode, the name is NOT being read (it's
       # being assigned to). If :decl mode or VarDecl, the name is new.
       check_reads_in_expr(stmt.value, state)
@@ -1773,9 +1782,10 @@ module LoopFrameAnalysis
 
   sig { params(node: AST::Locatable).returns(T::Boolean) }
   def self.statement_like_expression_container?(node)
-    node.is_a?(AST::VarDecl) ||
+      node.is_a?(AST::VarDecl) ||
       node.is_a?(AST::BindExpr) ||
       node.is_a?(AST::Assignment) ||
+      node.is_a?(AST::DestructuringAssignment) ||
       node.is_a?(AST::IfStatement) ||
       node.is_a?(AST::IfBind) ||
       node.is_a?(AST::MatchStatement) ||
@@ -1899,7 +1909,7 @@ class BorrowChecker
     when AST::WithBlock
       handle_with_block(stmt, state)
 
-    when AST::VarDecl, AST::BindExpr, AST::Assignment, AST::ReturnNode
+    when AST::VarDecl, AST::BindExpr, AST::Assignment, AST::DestructuringAssignment, AST::ReturnNode
       return if state.empty?
       check_binding_moves(stmt.value, stmt.token, state)
 

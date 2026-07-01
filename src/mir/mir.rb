@@ -1073,6 +1073,25 @@ module MIR
     def child_exprs = compact_child_exprs([target, value])
   end
 
+  # One target inside a destructuring assignment/declaration.
+  # declaration_kind nil means assignment to an existing lvalue.
+  # :const/:var mean declaration in the destructuring target list.
+  DestructureTarget = Struct.new(:name, :declaration_kind, :annotation) do
+    extend T::Sig
+    include Expr
+  end
+
+  # Destructuring assignment/declaration.
+  # Zig:
+  #   a, b = value;
+  #   const a: i64, var b: i64 = value;
+  DestructureSet = Struct.new(:targets, :value) do
+    extend T::Sig
+    include Stmt
+    sig { returns(T::Array[Emittable]) }
+    def child_exprs = compact_child_exprs([value])
+  end
+
   # Reassignment with old-value cleanup.
   # Zig: { const __new = value; CheatLib.cleanup(T, alloc, &old); old = __new; }
   # alloc: symbol (:heap, :frame, :cleanup) -- resolved to Zig by emitter.
@@ -1879,6 +1898,13 @@ module MIR
 
   FsmDestroyAction = T.type_alias { T.any(FsmDestroyCleanup, FsmDestroyStmt, FsmDestroyLockRelease) }
 
+  class FsmStructureFacts < T::Struct
+    prop :required_move_guards, T::Array[String], factory: -> { [] }
+    prop :move_guard_writes, T::Array[String], factory: -> { [] }
+    prop :ownership_facts, T::Array[FsmOwnershipFact], factory: -> { [] }
+    prop :destroy_actions, T::Array[FsmDestroyAction], factory: -> { [] }
+  end
+
   FsmStructure = Struct.new(
     :captures, :state_fields, :steps, :finalize_cleanups, :ctx_id,
     :result_aliases_finalized
@@ -1886,49 +1912,40 @@ module MIR
     extend T::Sig
     include Emittable
 
+    sig { params(args: T.untyped).void }
+    def initialize(*args)
+      super
+      @facts = T.let(FsmStructureFacts.new, FsmStructureFacts)
+    end
+
     sig { returns(T::Array[String]) }
     def required_move_guards
-      raw = instance_variable_get(:@required_move_guards)
-      unless raw.is_a?(Array)
-        raw = T.let([], T::Array[String])
-        instance_variable_set(:@required_move_guards, raw)
-      end
-      raw
+      @facts.required_move_guards
     end
 
     sig { params(value: T::Array[String]).returns(T::Array[String]) }
     def required_move_guards=(value)
-      instance_variable_set(:@required_move_guards, value)
+      @facts.required_move_guards = value
     end
 
     sig { returns(T::Array[String]) }
     def move_guard_writes
-      raw = instance_variable_get(:@move_guard_writes)
-      unless raw.is_a?(Array)
-        raw = T.let([], T::Array[String])
-        instance_variable_set(:@move_guard_writes, raw)
-      end
-      raw
+      @facts.move_guard_writes
     end
 
     sig { params(value: T::Array[String]).returns(T::Array[String]) }
     def move_guard_writes=(value)
-      instance_variable_set(:@move_guard_writes, value)
+      @facts.move_guard_writes = value
     end
 
     sig { returns(T::Array[FsmOwnershipFact]) }
     def ownership_facts
-      raw = instance_variable_get(:@ownership_facts)
-      unless raw.is_a?(Array)
-        raw = T.let([], T::Array[FsmOwnershipFact])
-        instance_variable_set(:@ownership_facts, raw)
-      end
-      raw
+      @facts.ownership_facts
     end
 
     sig { params(value: T::Array[FsmOwnershipFact]).returns(T::Array[FsmOwnershipFact]) }
     def ownership_facts=(value)
-      instance_variable_set(:@ownership_facts, value)
+      @facts.ownership_facts = value
     end
 
     sig { returns(T::Boolean) }
@@ -1944,17 +1961,12 @@ module MIR
 
     sig { returns(T::Array[FsmDestroyAction]) }
     def destroy_actions
-      raw = instance_variable_get(:@destroy_actions)
-      unless raw.is_a?(Array)
-        raw = T.let([], T::Array[FsmDestroyAction])
-        instance_variable_set(:@destroy_actions, raw)
-      end
-      raw
+      @facts.destroy_actions
     end
 
     sig { params(value: T::Array[FsmDestroyAction]).returns(T::Array[FsmDestroyAction]) }
     def destroy_actions=(value)
-      instance_variable_set(:@destroy_actions, value)
+      @facts.destroy_actions = value
     end
   end
 
@@ -2708,19 +2720,17 @@ module MIR
     sig { params(code: DoBlockPlan, branch_bodies: T::Array[T::Array[Emittable]]).void }
     def initialize(code, branch_bodies)
       super(code, branch_bodies)
+      @boundary_facts = T.let([], T::Array[MIR::ExecutionBoundaryFact])
     end
 
     sig { returns(T::Array[MIR::ExecutionBoundaryFact]) }
     def boundary_facts
-      raw = instance_variable_get(:@boundary_facts)
-      unless raw.is_a?(Array)
-        raw = T.let([], T::Array[MIR::ExecutionBoundaryFact])
-        instance_variable_set(:@boundary_facts, raw)
-      end
-      raw
+      @boundary_facts
     end
     sig { params(value: T::Array[MIR::ExecutionBoundaryFact]).returns(T::Array[MIR::ExecutionBoundaryFact]) }
-    def boundary_facts=(value); instance_variable_set(:@boundary_facts, value); end
+    def boundary_facts=(value)
+      @boundary_facts = value
+    end
     sig { returns(T::Array[BodySlot]) }
     def body_slots
       slots = T.let([], T::Array[BodySlot])

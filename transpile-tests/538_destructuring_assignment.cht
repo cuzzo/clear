@@ -1,0 +1,17 @@
+FN main() RETURNS Void ->
+  MUTABLE a: Int64, b: Int64 = [1_i64, 2_i64];
+  ASSERT a == 1_i64, "destructure declaration first";
+  ASSERT b == 2_i64, "destructure declaration second";
+
+  a, b = [3_i64, 4_i64];
+  ASSERT a == 3_i64, "destructure assignment first";
+  ASSERT b == 4_i64, "destructure assignment second";
+
+  c: Int64, _ = [5_i64, 6_i64];
+  ASSERT c == 5_i64, "destructure discard";
+
+  a, MUTABLE d: Int64 = [7_i64, 8_i64];
+  d = d + 1_i64;
+  ASSERT a == 7_i64, "mixed destructure assignment first";
+  ASSERT d == 9_i64, "mixed destructure declaration second";
+END

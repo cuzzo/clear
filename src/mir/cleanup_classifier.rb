@@ -306,6 +306,8 @@ module CleanupClassifier
         target = AST.root_identifier(node.name)
         next if target&.name && local_names.include?(target.name.to_s)
         mark_iteration_values_function!(node.value, local_entries) if node.value.is_a?(AST::Locatable)
+      when AST::DestructuringAssignment
+        mark_iteration_values_function!(node.value, local_entries) if node.value.is_a?(AST::Locatable)
       when AST::FuncCall
         mark_call_lifetime_extensions!(node.args, params_for_call(node), local_entries, nil)
       when AST::MethodCall

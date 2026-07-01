@@ -1,5 +1,7 @@
+mod actions;
 mod schemas;
 
+use actions::build_actions;
 use anyhow::{Context, Result};
 use schemas::{InputState, OutputState};
 use std::env;
@@ -17,13 +19,12 @@ fn main() -> Result<()> {
 
     let input_data = fs::read_to_string(input_path)
         .with_context(|| format!("Failed to read input file: {}", input_path))?;
-    
+
     let input_state: InputState = serde_json::from_str(&input_data)
         .with_context(|| "Failed to parse input JSON")?;
 
-    // For Epic 2, we just successfully parse the input and write an empty output.
     let output_state = OutputState {
-        actions: vec![],
+        actions: build_actions(&input_state),
         diagnostics: std::collections::HashMap::new(),
     };
 

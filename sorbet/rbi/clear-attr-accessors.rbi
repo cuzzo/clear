@@ -174,6 +174,13 @@ class AST::CopyNode
   def deep_copy=(value); end
 end
 
+class AST::DestructureTarget
+  sig { returns(T.untyped) }
+  def mir_binding_entry; end
+  sig { params(value: T.untyped).returns(T.untyped) }
+  def mir_binding_entry=(value); end
+end
+
 class AST::ExternFnDecl
   sig { returns(T.untyped) }
   def owner_type; end
@@ -856,6 +863,11 @@ class ClearFixSupport::LocationToken
   def line; end
 end
 
+class ClearParser
+  sig { returns(T.untyped) }
+  def source_code; end
+end
+
 class ConcurrentOp
   sig { returns(T.untyped) }
   def capture_analysis; end
@@ -872,6 +884,13 @@ class CopyNode
   def deep_copy; end
   sig { params(value: T.untyped).returns(T.untyped) }
   def deep_copy=(value); end
+end
+
+class DestructureTarget
+  sig { returns(T.untyped) }
+  def mir_binding_entry; end
+  sig { params(value: T.untyped).returns(T.untyped) }
+  def mir_binding_entry=(value); end
 end
 
 class Drop

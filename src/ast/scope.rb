@@ -433,28 +433,24 @@ class Scope
 end
 
 # Helper module for scope stack management.
-# Include in classes that maintain @scope_stack.
+# Include in classes that provide a `scope_stack` method.
 module ScopeHelper
     extend T::Sig
 
-  # @scope_stack is initialized by the host class. Access it through this
-  # private helper so Sorbet strict mode can verify the element type without
-  # requiring a T.let declaration inside a module (which has no initialize).
   sig { returns(T::Array[Scope]) }
-  def scope_stack
-    T.cast(T.unsafe(self).instance_variable_get(:@scope_stack), T::Array[Scope])
+  def scope_stack_for_helper
+    T.cast(T.unsafe(self).scope_stack, T::Array[Scope])
   end
-  private :scope_stack
 
   sig { returns(Scope) }
   def current_scope
-    T.must(scope_stack.last)
+    T.must(scope_stack_for_helper.last)
   end
 
   sig { params(name: String).returns(T.nilable(Scope)) }
   def lookup_scope_for(name)
     # Search from Top (last) to Bottom (first)
-    scope_stack.reverse_each do |scope|
+    scope_stack_for_helper.reverse_each do |scope|
       return scope if scope.entry?(name)
     end
     nil
@@ -480,7 +476,7 @@ module ScopeHelper
     # For generic instances like :"Pair<Number>", look up the base type ":Pair"
     base_name = name.to_s.sub(/<.*>$/, '').to_sym
     # Search from Top (newest) to Bottom (global)
-    scope_stack.reverse_each do |scope|
+    scope_stack_for_helper.reverse_each do |scope|
       schema = scope.resolve_type_definition(base_name)
       return schema if schema
     end
@@ -492,7 +488,7 @@ module ScopeHelper
   sig { returns(T::Array[String]) }
   def all_known_type_names
     names = []
-    scope_stack.each do |scope|
+    scope_stack_for_helper.each do |scope|
       names.concat(scope.types.keys.map(&:to_s))
     end
     names.uniq
@@ -503,14 +499,16 @@ module ScopeHelper
     new_scope = scope.nil? ? Scope.new : scope.dup
     # Root scope keeps depth 0; each `with_new_scope` nest increases depth by
     # one so declarations can record their lifetime boundary.
-    new_scope.depth = scope_stack.size
-    scope_stack.push(new_scope)
+    stack = scope_stack_for_helper
+    new_scope.depth = stack.size
+    stack.push(new_scope)
     blk.call
   ensure
-    scope_stack.pop
+    scope_stack_for_helper.pop
   end
 
   private :current_scope
   private :lookup_scope_for
+  private :scope_stack_for_helper
 
 end

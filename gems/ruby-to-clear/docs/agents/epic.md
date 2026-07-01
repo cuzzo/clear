@@ -6,7 +6,7 @@ This document outlines the design and implementation roadmap for `rb-to-clear`, 
 
 ## 1. AST Node Analysis & Target Selection
 
-An audit of [lexer.rb](file:///home/yahn/litedb/src/ast/lexer.rb) using [ruby-to-clear.rb](file:///home/yahn/litedb/tools/ruby-to-clear.rb) reveals **43 unique Prism node types** across **1,786 total nodes**. Targeting the top 20 node types achieves **95.80% automatic coverage** of the entire tokenizer source.
+An audit of [lexer.rb](file:///home/yahn/litedb/src/ast/lexer.rb) using `ruby-to-clear-audit` reveals **43 unique Prism node types** across **1,786 total nodes**. Targeting the top 20 node types achieves **95.80% automatic coverage** of the entire tokenizer source.
 
 ### Top 20 Targeted Prism Nodes
 

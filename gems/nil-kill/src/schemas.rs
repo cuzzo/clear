@@ -2,6 +2,21 @@ use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use std::collections::HashMap;
 
+fn string_or_default<'de, D>(deserializer: D) -> Result<String, D::Error>
+where
+    D: serde::Deserializer<'de>,
+{
+    Ok(Option::<String>::deserialize(deserializer)?.unwrap_or_default())
+}
+
+fn string_vec_or_default<'de, D>(deserializer: D) -> Result<Vec<String>, D::Error>
+where
+    D: serde::Deserializer<'de>,
+{
+    let values = Vec::<Option<String>>::deserialize(deserializer)?;
+    Ok(values.into_iter().map(|value| value.unwrap_or_default()).collect())
+}
+
 #[derive(Debug, Serialize, Deserialize)]
 pub struct InputState {
     pub methods: Vec<MethodRecord>,
@@ -35,11 +50,13 @@ pub struct MethodRecord {
     pub param_traces: HashMap<String, Value>,
     pub param_traces_ok: HashMap<String, Value>,
     pub param_traces_raised: HashMap<String, Value>,
+    #[serde(deserialize_with = "string_vec_or_default")]
     pub returns: Vec<String>,
     pub return_elem: Vec<Value>,
     pub return_kv: Vec<Value>,
     pub return_elem_shapes: Vec<Value>,
     pub return_kv_shapes: Vec<Value>,
+    #[serde(deserialize_with = "string_vec_or_default")]
     pub raised: Vec<String>,
     pub source: Option<SourceRecord>,
     pub has_sig: bool,
@@ -47,14 +64,20 @@ pub struct MethodRecord {
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
 pub struct SourceRecord {
+    #[serde(deserialize_with = "string_or_default")]
     pub path: String,
     pub line: i64,
     pub end_line: Option<i64>,
+    #[serde(deserialize_with = "string_or_default")]
     pub class: String,
+    #[serde(deserialize_with = "string_or_default")]
     pub method: String,
+    #[serde(deserialize_with = "string_or_default")]
     pub kind: String,
+    #[serde(deserialize_with = "string_or_default")]
     pub language: String,
     pub has_sig: bool,
+    #[serde(deserialize_with = "string_or_default")]
     pub sig: String,
     pub params: Vec<ParamRecord>,
     pub scope: Vec<String>,
@@ -67,9 +90,11 @@ pub struct SourceRecord {
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
 pub struct ParamRecord {
+    #[serde(deserialize_with = "string_or_default")]
     pub name: String,
     pub nil_default: bool,
-    pub r#type: String, // 'type' is a reserved keyword in Rust
+    #[serde(default)]
+    pub r#type: Option<String>, // 'type' is a reserved keyword in Rust
 }
 
 #[derive(Debug, Serialize, Deserialize, Clone, PartialEq, Eq)]
@@ -81,7 +106,3 @@ pub struct Action {
     pub message: String,
     pub data: HashMap<String, Value>,
 }
-
-pub const REVIEW: &str = "review";
-pub const HIGH: &str = "high";
-pub const GAP: &str = "gap";

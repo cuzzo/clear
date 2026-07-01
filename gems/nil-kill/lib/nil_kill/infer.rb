@@ -32,9 +32,8 @@ module NilKill
       begin
         temp_in.write(JSON.generate(input_data))
         temp_in.flush
-        bin_path = File.expand_path("../../../target/debug/nil-kill-infer-rust", __FILE__)
-        bin_path = "nil-kill-infer-rust" unless File.exist?(bin_path)
-        out, err, status = Open3.capture3(bin_path, "infer", temp_in.path, temp_out.path)
+        bin_path = rust_binary_path
+        out, err, status = Open3.capture3(bin_path, temp_in.path, temp_out.path)
         abort "Rust inference failed:\n#{err}" unless status.success?
         output_data = JSON.parse(File.read(temp_out.path))
         @store.actions.concat(output_data["actions"] || [])
@@ -48,6 +47,18 @@ module NilKill
         temp_out.unlink
       end
     end
+
+    def rust_binary_path
+      env_path = ENV["NIL_KILL_INFER_RUST_BINARY"]
+      return env_path unless env_path.nil? || env_path.empty?
+
+      [
+        File.join(ROOT, "gems/nil-kill/target/release/nil-kill-infer-rust"),
+        File.join(ROOT, "gems/nil-kill/target/debug/nil-kill-infer-rust"),
+        "nil-kill-infer-rust"
+      ].find { |path| path == "nil-kill-infer-rust" || File.exist?(path) }
+    end
+
     def load_runtime
       Runtime::Normalizer.new(root: ROOT).load_legacy_ruby!(@store, runtime_dir: RUNTIME_DIR)
     end
@@ -135,6 +146,125 @@ module NilKill
     rescue Errno::ENOENT
       @store.diagnostics["sorbet_errors"] = []
       @store.diagnostics["sorbet_feedback"] = []
+    end
+
+    def parse_sorbet_errors(output)
+      strip_ansi(output).lines.filter_map do |line|
+        match = line.match(/\A([^:\n]+):(\d+):\s*(.*?)\s*(?:https:\/\/srb\.help\/(\d+))?\s*\z/)
+        next unless match
+
+        {
+          "path" => match[1],
+          "line" => match[2].to_i,
+          "message" => match[3].strip,
+          "code" => match[4].to_s,
+        }
+      end
+    end
+
+    def parse_nil_origins(output)
+      counts = Hash.new(0)
+      lines = strip_ansi(output).lines
+      lines.each_with_index do |line, idx|
+        next unless line.include?("NilClass")
+
+        origin = lines[(idx + 1)..]&.find { |candidate| candidate.match?(/\A\s+[^:\s][^:]*:\d+:/) }
+        next unless origin
+
+        location = origin.strip.sub(/:\s*\z/, "")
+        counts[location] += 1 unless location.empty?
+      end
+      counts.map { |origin, count| { "origin" => origin, "count" => count } }
+    end
+
+    def parse_sorbet_feedback(output)
+      lines = strip_ansi(output).lines
+      feedback = []
+      lines.each_with_index do |line, idx|
+        match = line.match(/\A([^:\n]+):(\d+):\s*(.*?)\s*https:\/\/srb\.help\/(\d+)\s*\z/)
+        next unless match
+
+        case match[4]
+        when "7002"
+          item = parse_argument_widening_feedback(lines, idx, match)
+          feedback << item if item
+        when "7005"
+          item = parse_return_widening_feedback(lines, idx, match)
+          feedback << item if item
+        when "7034"
+          item = parse_safe_navigation_feedback(lines, idx, match)
+          feedback << item if item
+        end
+      end
+      feedback
+    end
+
+    def parse_argument_widening_feedback(lines, idx, match)
+      message = match[3].strip
+      type_match = message.match(/Expected `(.+?)` but found `(.+?)` for argument `(.+?)`/)
+      return nil unless type_match
+
+      loc = following_sorbet_location(lines, idx)
+      return nil unless loc
+
+      {
+        "code" => "7002",
+        "path" => loc["path"],
+        "line" => loc["line"],
+        "site_path" => match[1],
+        "site_line" => match[2].to_i,
+        "arg" => type_match[3],
+        "expected" => type_match[1],
+        "found" => type_match[2],
+        "message" => "widening argument #{type_match[3]} from #{type_match[1]} to #{type_match[2]}",
+      }
+    end
+
+    def parse_return_widening_feedback(lines, idx, match)
+      message = match[3].strip
+      type_match = message.match(/Expected `(.+?)` but found `(.+?)` for method result type/)
+      return nil unless type_match
+
+      loc = following_sorbet_location(lines, idx)
+      return nil unless loc
+
+      {
+        "code" => "7005",
+        "path" => loc["path"],
+        "line" => loc["line"],
+        "site_path" => match[1],
+        "site_line" => match[2].to_i,
+        "expected" => type_match[1],
+        "found" => type_match[2],
+        "message" => "widening return from #{type_match[1]} to #{type_match[2]}",
+      }
+    end
+
+    def parse_safe_navigation_feedback(lines, idx, match)
+      loc = following_sorbet_location(lines, idx)
+      return nil unless loc
+
+      {
+        "code" => "7034",
+        "path" => loc["path"],
+        "line" => loc["line"],
+        "site_path" => match[1],
+        "site_line" => match[2].to_i,
+        "message" => "safe navigation receiver is non-nil",
+      }
+    end
+
+    def following_sorbet_location(lines, idx)
+      lines[(idx + 1)..]&.each do |line|
+        next unless (match = line.match(/\A\s+([^:\s][^:]*\.rb):(\d+):\s*\z/))
+
+        return { "path" => match[1], "line" => match[2].to_i }
+      end
+      nil
+    end
+
+    def strip_ansi(output)
+      output.to_s.gsub(/\e\[[0-9;]*m/, "")
     end
 
     def method_location_key(method)

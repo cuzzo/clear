@@ -159,6 +159,7 @@ transpile-tests/fuzz/*.cht
 **/.zig-cache/
 **/zig-out/
 **/*.clear-build.json
+**/__pycache__/
 
 # Generated architecture reports
 gems/espalier/architecture.yml
@@ -166,3 +167,4 @@ gems/espalier/architecture.yml
 # Decomplex native Rust build artifacts
 gems/decomplex/target/
 gems/fact-mine/target/
+gems/nil-kill/target/

@@ -109,7 +109,7 @@ RSpec.describe UseAfterMoveChecker do
 
     it "forwards fallibility and schema lookup context into ownership analysis" do
       fn_node = empty_function_node
-      can_fail_fns = { "helper" => true }
+      can_fail_fns = Set["helper"]
       schema_lookup = ->(_name) { nil }
 
       expect(OwnershipDataflow).to receive(:analyze)

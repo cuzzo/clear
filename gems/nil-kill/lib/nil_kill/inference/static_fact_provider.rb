@@ -60,6 +60,7 @@ module NilKill
         concat_fact("hash_shapes", facts["hash_shapes"])
         concat_fact("tuple_arrays", tuple_array_records(facts["array_shapes"]))
         concat_fact("struct_field_static", struct_field_static_records(facts["state_type_records"]))
+        concat_fact("type_definitions", facts["type_definitions"])
         concat_fact("return_origins", facts["return_origins"])
         concat_fact("param_origins", facts["param_origins"])
         concat_fact("rbi_field_types", facts["rbi_field_types"])

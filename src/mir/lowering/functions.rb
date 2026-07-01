@@ -2020,11 +2020,14 @@ module MIRLoweringFunctions
     return_type_zig = sig.return_type.zig_type
     ret_str = ZigType.new(return_type_zig).anyerror_return_type
 
-    # Build body: suppressions + return expr
+    # Build body: suppressions + body prefix + implicit final expression return.
     body_mir = []
     body_mir << MIR::Suppress.new("_rt")
     params_list.each { |p| body_mir << MIR::Suppress.new(p.name) }
-    return_expr = T.must(AST.lambda_body_nodes(node.body).last)
+    body_nodes = AST.lambda_body_nodes(node.body)
+    prefix_nodes = body_nodes[0...-1] || []
+    body_mir.concat(lower_body(prefix_nodes))
+    return_expr = T.must(body_nodes.last)
     body_mir << MIR::ReturnStmt.new(lower(return_expr))
 
     fn_def = MIR::FnDef.new(fn_name, params_mir, ret_str, body_mir, nil, false, nil)

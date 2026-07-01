@@ -1,9 +1,9 @@
 diff --git a/src/mir/mir_lowering.rb b/src/mir/mir_lowering.rb
 --- a/src/mir/mir_lowering.rb
 +++ b/src/mir/mir_lowering.rb
-@@ -778,6 +778,7 @@ class MIRLowering
+@@ -798,6 +798,7 @@
  
-   sig { params(mir: T.untyped, dst_ti: Type, dest_alloc: Symbol).returns(T.untyped) }
+   sig { params(mir: MIR::Node, dst_ti: Type, dest_alloc: Symbol).returns(MIR::Node) }
    def place_owned_branch_value_for_destination(mir, dst_ti, dest_alloc)
 +    return mir # MUTANT: OR/branch owned values are no longer placed into the destination allocator.
      owned_alloc = mir_owned_alloc(mir)

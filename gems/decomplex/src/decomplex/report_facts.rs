@@ -1075,7 +1075,7 @@ mod tests {
         fs::write(&rb_file, "def hello\n  puts \"hello\"\nend\n").unwrap();
 
         let options = Options::default();
-        let result = collect(&[rb_file], &options).expect("collect");
+        let result = collect(&[rb_file], &options, false).expect("collect");
         assert!(result.is_object());
 
         // Reset
@@ -1093,7 +1093,7 @@ mod tests {
         fs::write(&rs_file, "fn main() {\n  println!(\"hello\");\n}\n").unwrap();
 
         let options = Options::default();
-        let result = collect(&[rb_file.clone(), rs_file.clone()], &options).expect("collect");
+        let result = collect(&[rb_file.clone(), rs_file.clone()], &options, false).expect("collect");
         assert!(result.is_object());
         let obj = result.as_object().unwrap();
         assert_eq!(obj.get("format").unwrap(), FORMAT);
@@ -1105,12 +1105,12 @@ mod tests {
             language: Some(Language::Ruby),
             ..Options::default()
         };
-        let result_lang = collect(&[dir.path().to_path_buf()], &options_lang).expect("collect with lang filter");
+        let result_lang = collect(&[dir.path().to_path_buf()], &options_lang, false).expect("collect with lang filter");
         let obj_lang = result_lang.as_object().unwrap();
         let files_lang = obj_lang.get("files").unwrap().as_array().unwrap();
         assert_eq!(files_lang.len(), 1);
 
-        let empty_res = facts_for_source_files(&[], &options);
+        let empty_res = facts_for_source_files(&[], &options, false);
         assert!(empty_res.is_err());
     }
 

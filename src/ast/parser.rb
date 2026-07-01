@@ -133,6 +133,9 @@ class ClearParser
     @@suffix_rules[[type, value]] = block
   end
 
+  sig { returns(String) }
+  attr_reader :source_code
+
   sig { params(tokens: T::Array[Lexer::Token], source_code: String, gradual: T.nilable(T::Boolean)).void }
   def initialize(tokens, source_code = "", gradual: nil)
     @tokens = tokens
@@ -149,6 +152,12 @@ class ClearParser
     # landed.
     @gradual = T.let(gradual.nil? ? self.class.gradual_mode : gradual, T::Boolean)
   end
+
+  sig { returns(T::Boolean) }
+  def suppress_struct_lit?
+    @suppress_struct_lit
+  end
+  private :suppress_struct_lit?
 
   class << self
     extend T::Sig
@@ -517,7 +526,7 @@ class ClearParser
   # like parse_with_capability that legitimately follow an expression with '{' are unaffected.
   suffix(:CHAR, '{') do |lhs|
     T.bind(self, ClearParser) rescue nil
-    if !T.unsafe(self).instance_variable_get(:@suppress_struct_lit) && AST.inline_union_constructor_target?(lhs)
+    if !suppress_struct_lit? && AST.inline_union_constructor_target?(lhs)
       tok = current
       _, field_pairs = parse_comma_seq(:CHAR, '{', '}') do
         k = (T.must(current.type == :TYPE_ID ? consume(:TYPE_ID) : consume(:VAR_ID))).value
@@ -767,8 +776,13 @@ class ClearParser
 
   sig { returns(AST::Node) }
   def parse_statement
-    # Keywordless bind/assign: x = ..., x: Type = ..., x.field = ..., x[0] = ...
+    # Destructuring bind/assign must win before scalar bind parsing:
+    # a, b = ...
+    # a: Int32, b: Float64 = ...
     if current.type == :VAR_ID
+      result = try_parse_destructuring_assign
+      return result if result
+
       result = try_parse_bind_or_assign
       return result if result
     end
@@ -778,6 +792,48 @@ class ClearParser
     expr = parse_expression
     consume(:CHAR, ';')
     expr
+  end
+
+  # Speculatively parse identifier-only destructuring:
+  #   a, b = expr;
+  #   a: Int32, b: Float64 = expr;
+  # Existing names are reassigned by the annotator; new names are declared.
+  sig { params(default_mutable: T::Boolean).returns(T.nilable(AST::DestructuringAssignment)) }
+  def try_parse_destructuring_assign(default_mutable: false)
+    saved_pos = @pos
+    start_token = current
+    targets = [parse_destructure_target(default_mutable: default_mutable)]
+
+    unless match?(:CHAR, ',')
+      @pos = saved_pos
+      return nil
+    end
+
+    while match!(:CHAR, ',')
+      targets << parse_destructure_target(default_mutable: default_mutable)
+    end
+
+    unless match?(:CHAR, '=')
+      @pos = saved_pos
+      return nil
+    end
+
+    consume(:CHAR, '=')
+    value = parse_expression
+    consume(:CHAR, ';')
+    AST::DestructuringAssignment.new(start_token, targets, value)
+  end
+
+  sig { params(default_mutable: T::Boolean).returns(AST::DestructureTarget) }
+  def parse_destructure_target(default_mutable: false)
+    mutable = default_mutable
+    mutable = true if match!(:KEYWORD, 'MUTABLE')
+    name_tok = consume(:VAR_ID)
+    type_annotation = nil
+    if match!(:CHAR, ':')
+      type_annotation = parse_type_annotation
+    end
+    AST::DestructureTarget.new(T.must(name_tok), T.must(name_tok).value, type_annotation, mutable)
   end
 
   # Speculatively parse `target [: Type] = expression ;` as a BindExpr or Assignment.
@@ -978,9 +1034,13 @@ class ClearParser
   # type has a known zero literal (Int64/Float64/String/Bool family). It keeps
   # the default as one compact node; materializing N literal children here makes
   # large fixed arrays explode before annotation or MIR lowering can optimize it.
-  sig { returns(AST::VarDecl) }
+  sig { returns(T.any(AST::VarDecl, AST::DestructuringAssignment)) }
   def parse_mutable_var_decl
     start_token = consume(:KEYWORD, 'MUTABLE')
+    if (destructure = try_parse_destructuring_assign(default_mutable: true))
+      return destructure
+    end
+
     name = T.must(consume(:VAR_ID)).value
     type_annotation = nil
     if match!(:CHAR, ':')
@@ -1801,6 +1861,118 @@ class ClearParser
     parse_statement_block(:CHAR, '{', '}')
   end
 
+  sig { returns(AST::BlockExpr) }
+  def parse_value_block_expr
+    block_token = consume(:CHAR, '{')
+    body = T.let([], AST::RawBody)
+    result = T.let(nil, T.nilable(AST::Node))
+
+    until match?(:CHAR, '}') || match?(:EOF)
+      if (stmt = try_parse_value_block_statement)
+        body << stmt
+        next
+      end
+
+      expr = parse_expression
+      if match!(:CHAR, ';')
+        body << expr
+        next
+      end
+
+      result = expr
+      break
+    end
+
+    unless result
+      error!(current, :UNEXPECTED_TOKEN_LINE, value: current.value, type: current.type, line: current.line)
+    end
+
+    consume(:CHAR, '}')
+    AST::BlockExpr.new(block_token, body, result)
+  end
+
+  VALUE_BLOCK_STATEMENT_KEYWORDS = T.let(Set[
+    'ASSERT', 'ASSERT_RAISES', 'BENCHMARK', 'BREAK', 'CONTINUE', 'DIE',
+    'DO', 'ENUM', 'EXIT', 'EXTERN', 'FN', 'FOR', 'METHOD', 'MUTABLE',
+    'PASS', 'PRIVATE', 'PROFILE', 'PUB', 'RAISE', 'RETURN', 'SMASH',
+    'STRUCT', 'STUB', 'SYNC', 'TEST', 'TIGHT', 'UNION', 'WHILE', 'WITH',
+    'YIELD'
+  ], T::Set[String])
+
+  sig { returns(T.nilable(AST::Node)) }
+  def try_parse_value_block_statement
+    if current.type == :VAR_ID
+      stmt = try_parse_destructuring_assign
+      return stmt if stmt
+
+      stmt = try_parse_bind_or_assign
+      return stmt if stmt
+    end
+
+    return nil unless current.type == :KEYWORD
+    return nil unless VALUE_BLOCK_STATEMENT_KEYWORDS.include?(current.value)
+
+    parse_statement
+  end
+
+  sig { returns(T::Boolean) }
+  def brace_literal_is_hash?
+    return false unless match?(:CHAR, '{')
+    return true if match_at?(1, :CHAR, '}')
+
+    depth = 0
+    offset = 0
+    loop do
+      token = peek_at(offset)
+      return false unless token
+
+      if token.type == :CHAR
+        case token.value
+        when '{', '(', '['
+          depth += 1
+        when '}', ')', ']'
+          depth -= 1
+          return false if depth <= 0
+        when ';'
+          return false if depth == 1
+        when ':'
+          return !top_level_assignment_before_brace_delimiter?(offset + 1) if depth == 1
+        end
+      end
+
+      offset += 1
+    end
+  end
+
+  sig { params(start_offset: Integer).returns(T::Boolean) }
+  def top_level_assignment_before_brace_delimiter?(start_offset)
+    depth = 1
+    offset = start_offset
+
+    loop do
+      token = peek_at(offset)
+      return false unless token
+
+      if token.type == :COMPOUND_ASSIGN && depth == 1
+        return true
+      elsif token.type == :CHAR
+        case token.value
+        when '{', '(', '['
+          depth += 1
+        when '}', ')', ']'
+          depth -= 1
+          return false if depth <= 0
+        when ',', ';'
+          return false if depth == 1
+        when '='
+          return true if depth == 1
+        end
+      end
+
+      offset += 1
+    end
+  end
+
   sig { params(precedence: Integer).returns(AST::Node) }
   def parse_expression(precedence = 0)
     lhs = parse_unary
@@ -2583,9 +2755,11 @@ class ClearParser
           is_soa = caps.is_soa
         end
         node = AST::ListLit.new(type_token, ctor_items, storage)
-        node.instance_variable_set(:@constructor_collection, collection)
-        node.instance_variable_set(:@constructor_soa, is_soa)
-        node.instance_variable_set(:@constructor_shard_count, shard_count)
+        node.constructor_options = AST::CollectionConstructorFact.new(
+          collection: collection,
+          soa: is_soa,
+          shard_count: shard_count
+        )
         return node
       elsif match?(:CHAR, '<') && peek_is_generic_struct_lit?
         # Generic struct literal: Pair<Number>{ first: 1.0, second: 2.0 }
@@ -2623,6 +2797,8 @@ class ClearParser
       bracket_token, items = parse_comma_seq(:CHAR, '[', ']') { parse_expression }
       return AST::ListLit.new(bracket_token, items, storage)
     elsif match?(:CHAR, '{')
+      return parse_value_block_expr unless brace_literal_is_hash?
+
       start_token, pairs = parse_comma_seq(:CHAR, '{', '}') do
         k = parse_expression; consume(:CHAR, ':'); v = parse_expression
         [k, v]
@@ -2647,7 +2823,7 @@ class ClearParser
         captures = parse_argument_list(as_param: false)
       end
       consume(:ARROW, '->')
-      body = parse_expression
+      body = match?(:CHAR, '{') ? parse_value_block_expr : parse_expression
       return AST::LambdaLit.new(percent_token, params, captures, body, :stack, nil)
     end
   end

@@ -1,7 +1,7 @@
 diff --git a/src/mir/hoist.rb b/src/mir/hoist.rb
 --- a/src/mir/hoist.rb
 +++ b/src/mir/hoist.rb
-@@ -510,12 +510,8 @@ module Hoist
+@@ -499,12 +499,8 @@ module Hoist
    sig { params(blk: T.proc.returns(T.untyped)).returns([T.untyped, T::Array[T.untyped]]) }
    def lower_head(&blk)
      T.bind(self, MIRLowering) rescue nil
@@ -15,4 +15,4 @@ diff --git a/src/mir/hoist.rb b/src/mir/hoist.rb
 +    [result, []]
    end
  
-   sig { params(pending: T::Array[T.untyped], node: T.untyped).returns(T.untyped) }
+   sig { params(pending: T::Array[MIR::Node], node: MIR::Node).returns(MIR::Node) }

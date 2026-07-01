@@ -962,6 +962,7 @@ class MIRLowering
     when AST::VarDecl           then lower_var_decl(node)
     when AST::BindExpr          then lower_bind_expr(node)
     when AST::Assignment        then lower_assignment(node)
+    when AST::DestructuringAssignment then lower_destructuring_assignment(node)
 
     # --- Control flow ---
     when AST::IfStatement       then lower_if(node)
@@ -1319,7 +1320,7 @@ class MIRLowering
 
     mir, hoisted_discard = materialize_statement_discard(stmt, mir)
     pending = flush_pending
-    mir = MIR::ExprStmt.new(mir, true) if discard_expr_stmt?(stmt) && !hoisted_discard
+    mir = MIR::ExprStmt.new(mir, true) if discard_expr_stmt?(stmt, mir) && !hoisted_discard
     token = stmt.is_a?(AST::Locatable) ? stmt.token : nil
     transfer_only = stmt.is_a?(AST::MoveNode)
     stmt_transfer_marks =
@@ -1339,7 +1340,7 @@ class MIRLowering
 
   sig { params(stmt: T.untyped, mir: T.untyped).returns([T.untyped, T::Boolean]) }
   def materialize_statement_discard(stmt, mir)
-    return [mir, false] unless discard_expr_stmt?(stmt)
+    return [mir, false] unless discard_expr_stmt?(stmt, mir)
 
     discard_type = Type.from_node!(stmt, context: "discard allocation mark")
     mir = place_discarded_owned_branch_value(mir, discard_type)
@@ -1382,14 +1383,16 @@ class MIRLowering
     end
   end
 
-  sig { params(stmt: LowerableStmt).returns(T::Boolean) }
-  def discard_expr_stmt?(stmt)
+  sig { params(stmt: LowerableStmt, mir: T.untyped).returns(T::Boolean) }
+  def discard_expr_stmt?(stmt, mir)
     return false unless stmt.is_a?(AST::Locatable)
+    return false unless mir.is_a?(MIR::Emittable) && mir.expr?
 
     ast_stmt = stmt
-    return false unless AST.call?(ast_stmt) ||
-                        (ast_stmt.is_a?(AST::BinaryOp) && (ast_stmt.op == :OR_RESCUE || ast_stmt.op == :PIPE_ERR))
-    !!(ast_stmt.resolved_type && ast_stmt.resolved_type != :Void)
+    return false unless AST.call?(ast_stmt) || ast_stmt.is_a?(AST::BinaryOp)
+
+    resolved = stmt.resolved_type
+    !!(resolved && resolved != :Void)
   end
 
   sig { params(state: OwnershipFinalizationContext, root: MIR::NodeRoot).void }

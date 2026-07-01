@@ -7,14 +7,14 @@
 class AST::AllOp
   sig { returns(Lexer::Token) }
   def token; end
-  sig { returns(T.any(AST::BinaryOp, AST::Identifier)) }
+  sig { returns(AST::Node) }
   def expression; end
 end
 
 class AST::AnyOp
   sig { returns(Lexer::Token) }
   def token; end
-  sig { returns(T.any(AST::BinaryOp, AST::Identifier)) }
+  sig { returns(AST::Node) }
   def expression; end
 end
 
@@ -23,7 +23,7 @@ class AST::Assert
   def token; end
   sig { returns(AST::Node) }
   def condition; end
-  sig { returns(T.untyped) }
+  sig { returns(T.any(String, Symbol)) }
   def message; end
 end
 
@@ -32,14 +32,14 @@ class AST::AssertRaises
   def token; end
   sig { returns(T.any(String, Symbol)) }
   def kind; end
-  sig { returns(T.untyped) }
+  sig { returns(T.any(String, Symbol)) }
   def error_name; end
-  sig { returns(T.any(AST::FuncCall, AST::Literal)) }
+  sig { returns(AST::Node) }
   def expression; end
 end
 
 class AST::Assignment
-  sig { returns(Token) }
+  sig { returns(Lexer::Token) }
   def token; end
   sig { returns(T.untyped) }
   def name; end
@@ -66,44 +66,44 @@ end
 class AST::BenchmarkStmt
   sig { returns(Lexer::Token) }
   def token; end
-  sig { returns(T.any(AST::FuncCall, AST::Literal)) }
+  sig { returns(AST::Node) }
   def expression; end
   sig { returns(Integer) }
   def iterations; end
 end
 
 class AST::BgBlock
-  sig { returns(Token) }
+  sig { returns(Lexer::Token) }
   def token; end
-  sig { returns(T::Array[T.untyped]) }
+  sig { returns(T::Array[AST::Node]) }
   def body; end
   sig { returns(T.untyped) }
   def deferred_drops; end
-  sig { returns(T.untyped) }
+  sig { returns(Symbol) }
   def stack_size; end
-  sig { returns(T.untyped) }
+  sig { returns(T.any(FalseClass, Symbol, TrueClass)) }
   def pinned; end
-  sig { returns(T.untyped) }
+  sig { returns(T::Boolean) }
   def parallel; end
-  sig { returns(T.untyped) }
+  sig { returns(T::Boolean) }
   def arena_mode; end
-  sig { returns(T.untyped) }
+  sig { returns(T::Boolean) }
   def can_smash; end
 end
 
 class AST::BgStreamBlock
   sig { returns(Lexer::Token) }
   def token; end
-  sig { returns(T::Array[T.untyped]) }
+  sig { returns(T::Array[AST::Node]) }
   def body; end
   sig { returns(T.untyped) }
   def deferred_drops; end
-  sig { returns(T.untyped) }
+  sig { returns(Symbol) }
   def stack_size; end
 end
 
 class AST::BinaryOp
-  sig { returns(Token) }
+  sig { returns(Lexer::Token) }
   def token; end
   sig { returns(T.untyped) }
   def left; end
@@ -114,35 +114,35 @@ class AST::BinaryOp
 end
 
 class AST::BindExpr
-  sig { returns(Token) }
+  sig { returns(Lexer::Token) }
   def token; end
   sig { returns(T.untyped) }
   def name; end
-  sig { returns(T.untyped) }
+  sig { returns(Type) }
   def type; end
   sig { returns(T.untyped) }
   def value; end
 end
 
 class AST::Binding
-  sig { returns(T.any(AST::Node, T.untyped)) }
+  sig { returns(AST::Node) }
   def expr; end
-  sig { returns(T.any(String, T.untyped)) }
+  sig { returns(String) }
   def name; end
-  sig { returns(T.untyped) }
+  sig { returns(Lexer::Token) }
   def name_token; end
   sig { returns(Type) }
   def unwrapped_type; end
-  sig { returns(T.untyped) }
+  sig { returns(SymbolEntry) }
   def symbol; end
-  sig { returns(T.untyped) }
+  sig { returns(String) }
   def capture; end
 end
 
 class AST::BlockExpr
-  sig { returns(Token) }
+  sig { returns(Lexer::Token) }
   def token; end
-  sig { returns(T::Array[T.untyped]) }
+  sig { returns(T::Array[AST::Node]) }
   def body; end
   sig { returns(T.untyped) }
   def result; end
@@ -160,28 +160,28 @@ class AST::CallSiteOverride
   def kind; end
   sig { returns(Integer) }
   def n; end
-  sig { returns(AST::FuncCall) }
+  sig { returns(AST::Node) }
   def inner; end
 end
 
 class AST::Capability
-  sig { returns(T.any(Symbol, T.untyped)) }
+  sig { returns(Symbol) }
   def capability; end
-  sig { returns(T.untyped) }
+  sig { returns(AST::Node) }
   def var_node; end
-  sig { returns(T.untyped) }
+  sig { returns(String) }
   def alias; end
-  sig { returns(T.untyped) }
+  sig { returns(T::Boolean) }
   def alias_mutable; end
-  sig { returns(T.untyped) }
+  sig { returns(AST::Node) }
   def guard_expr; end
-  sig { returns(T.untyped) }
+  sig { returns(Lexer::Token) }
   def snapshot_token; end
-  sig { returns(T.untyped) }
+  sig { returns(Lexer::Token) }
   def view_token; end
-  sig { returns(T.untyped) }
+  sig { returns(Type) }
   def resolved_type; end
-  sig { returns(T.untyped) }
+  sig { returns(Scope) }
   def old_scope; end
 end
 
@@ -190,28 +190,28 @@ class AST::CapabilityWrap
   def token; end
   sig { returns(AST::Node) }
   def value; end
-  sig { returns(T.untyped) }
+  sig { returns(Symbol) }
   def ownership; end
-  sig { returns(T.untyped) }
+  sig { returns(Symbol) }
   def sync; end
-  sig { returns(T.untyped) }
+  sig { returns(Symbol) }
   def layout; end
 end
 
 class AST::Capture
-  sig { returns(T.untyped) }
+  sig { returns(String) }
   def name; end
-  sig { returns(T.untyped) }
+  sig { returns(T.any(Symbol, Type)) }
   def type; end
-  sig { returns(T.untyped) }
+  sig { returns(AST::Node) }
   def default; end
-  sig { returns(T.untyped) }
+  sig { returns(T.any(FalseClass, Lexer::Token, TrueClass)) }
   def mutable; end
-  sig { returns(T.untyped) }
+  sig { returns(T::Boolean) }
   def takes; end
-  sig { returns(T.untyped) }
+  sig { returns(T::Boolean) }
   def comptime; end
-  sig { returns(T.any(Lexer::Token, T.untyped)) }
+  sig { returns(Lexer::Token) }
   def name_token; end
   sig { returns(Symbol) }
   def storage; end
@@ -220,27 +220,27 @@ end
 class AST::Cast
   sig { returns(Lexer::Token) }
   def token; end
-  sig { returns(T.any(AST::Identifier, AST::Literal)) }
+  sig { returns(AST::Node) }
   def value; end
   sig { returns(T.any(Symbol, Type)) }
   def target; end
 end
 
 class AST::CatchBlock
-  sig { returns(Token) }
+  sig { returns(Lexer::Token) }
   def token; end
-  sig { returns(T::Array[AST::CatchClause]) }
+  sig { returns(T::Array[AST::Node]) }
   def catch_clauses; end
   sig { returns(T.untyped) }
   def default_body; end
 end
 
 class AST::CatchClause
-  sig { returns(T.any(Array, T::Array[AST::CatchItem])) }
+  sig { returns(T::Array[AST::Node]) }
   def items; end
-  sig { returns(T.any(Array, T.untyped)) }
+  sig { returns(T::Array[AST::Node]) }
   def filters; end
-  sig { returns(T.untyped) }
+  sig { returns(T::Array[AST::Node]) }
   def body; end
   sig { returns(T::Array[Symbol]) }
   def kinds; end
@@ -248,32 +248,32 @@ class AST::CatchClause
   def types; end
   sig { returns(T::Array[String]) }
   def filter_types; end
-  sig { returns(T::Array[AST::Literal]) }
+  sig { returns(T::Array[AST::Node]) }
   def filter_messages; end
 end
 
 class AST::CatchFilter
   sig { returns(Symbol) }
   def form; end
-  sig { returns(T.any(AST::Literal, String, T.untyped)) }
+  sig { returns(T.any(AST::Node, String)) }
   def value; end
-  sig { returns(T.any(Lexer::Token, T.untyped)) }
+  sig { returns(Lexer::Token) }
   def token; end
 end
 
 class AST::CatchItem
-  sig { returns(T.any(Symbol, T.untyped)) }
+  sig { returns(Symbol) }
   def form; end
-  sig { returns(T.any(String, T.untyped)) }
+  sig { returns(String) }
   def name; end
-  sig { returns(T.any(Lexer::Token, T.untyped)) }
+  sig { returns(Lexer::Token) }
   def token; end
 end
 
 class AST::CloneNode
   sig { returns(Lexer::Token) }
   def token; end
-  sig { returns(AST::Identifier) }
+  sig { returns(AST::Node) }
   def value; end
 end
 
@@ -299,7 +299,7 @@ end
 class AST::Copy
   sig { returns(Lexer::Token) }
   def token; end
-  sig { returns(T.any(AST::Identifier, AST::Literal)) }
+  sig { returns(AST::Node) }
   def value; end
 end
 
@@ -313,12 +313,12 @@ end
 class AST::CountOp
   sig { returns(Lexer::Token) }
   def token; end
-  sig { returns(T.any(AST::BinaryOp, AST::Identifier, AST::Literal)) }
+  sig { returns(AST::Node) }
   def expression; end
 end
 
 class AST::DefaultArrayLit
-  sig { returns(T.untyped) }
+  sig { returns(Lexer::Token) }
   def token; end
   sig { returns(Type) }
   def type_info; end
@@ -341,7 +341,7 @@ end
 class AST::DistinctOp
   sig { returns(Lexer::Token) }
   def token; end
-  sig { returns(T.any(AST::GetField, AST::Identifier, AST::Literal)) }
+  sig { returns(AST::Node) }
   def expression; end
 end
 
@@ -355,7 +355,7 @@ end
 class AST::EachOp
   sig { returns(Lexer::Token) }
   def token; end
-  sig { returns(T::Array[T.untyped]) }
+  sig { returns(T::Array[AST::Node]) }
   def body; end
 end
 
@@ -377,7 +377,7 @@ class AST::ExternFnDecl
   def name; end
   sig { returns(T::Array[T.untyped]) }
   def params; end
-  sig { returns(T.untyped) }
+  sig { returns(T.any(String, Type)) }
   def return_type; end
   sig { returns(T.untyped) }
   def from_module; end
@@ -399,18 +399,18 @@ end
 class AST::FindOp
   sig { returns(Lexer::Token) }
   def token; end
-  sig { returns(T.any(AST::BinaryOp, AST::Identifier, AST::MethodCall)) }
+  sig { returns(AST::Node) }
   def expression; end
 end
 
 class AST::ForEach
-  sig { returns(Token) }
+  sig { returns(Lexer::Token) }
   def token; end
   sig { returns(String) }
   def var_name; end
   sig { returns(T.untyped) }
   def collection; end
-  sig { returns(T::Array[T.untyped]) }
+  sig { returns(T::Array[AST::Node]) }
   def body; end
   sig { returns(T.untyped) }
   def deferred_drops; end
@@ -419,11 +419,11 @@ class AST::ForEach
 end
 
 class AST::ForRange
-  sig { returns(Token) }
+  sig { returns(Lexer::Token) }
   def token; end
   sig { returns(String) }
   def var_name; end
-  sig { returns(T.any(AST::BinaryOp, AST::Identifier, AST::Literal)) }
+  sig { returns(AST::Node) }
   def start_expr; end
   sig { returns(AST::Node) }
   def end_expr; end
@@ -433,21 +433,21 @@ class AST::ForRange
   def body; end
   sig { returns(T.untyped) }
   def deferred_drops; end
-  sig { returns(T.untyped) }
+  sig { returns(T::Boolean) }
   def mark_per_iter; end
 end
 
 class AST::FreezeNode
   sig { returns(Lexer::Token) }
   def token; end
-  sig { returns(T.any(AST::FuncCall, AST::Identifier)) }
+  sig { returns(AST::Node) }
   def value; end
 end
 
 class AST::FuncCall
-  sig { returns(Token) }
+  sig { returns(Lexer::Token) }
   def token; end
-  sig { returns(T.any(AST::Identifier, String)) }
+  sig { returns(T.any(AST::Node, String)) }
   def name; end
   sig { returns(T.untyped) }
   def args; end
@@ -476,12 +476,12 @@ class AST::FunctionDef
   def visibility; end
   sig { returns(T.untyped) }
   def deferred_drops; end
-  sig { returns(T.untyped) }
+  sig { returns(T::Boolean) }
   def uses_frame; end
 end
 
 class AST::GetField
-  sig { returns(Token) }
+  sig { returns(Lexer::Token) }
   def token; end
   sig { returns(T.untyped) }
   def target; end
@@ -508,7 +508,7 @@ class AST::HashLit
 end
 
 class AST::Identifier
-  sig { returns(Token) }
+  sig { returns(Lexer::Token) }
   def token; end
   sig { returns(String) }
   def name; end
@@ -526,7 +526,7 @@ class AST::IfBind
 end
 
 class AST::IfStatement
-  sig { returns(Token) }
+  sig { returns(Lexer::Token) }
   def token; end
   sig { returns(AST::Node) }
   def condition; end
@@ -576,7 +576,7 @@ class AST::LetBinding
   def token; end
   sig { returns(String) }
   def name; end
-  sig { returns(T.any(AST::BinaryOp, AST::Literal)) }
+  sig { returns(AST::Node) }
   def expr; end
 end
 
@@ -590,7 +590,7 @@ end
 class AST::LinkNode
   sig { returns(Lexer::Token) }
   def token; end
-  sig { returns(T.any(AST::GetIndex, AST::Identifier)) }
+  sig { returns(AST::Node) }
   def value; end
 end
 
@@ -601,6 +601,8 @@ class AST::ListLit
   def items; end
   sig { returns(Symbol) }
   def storage; end
+  sig { returns(AST::Node) }
+  def constructor_options; end
 end
 
 class AST::Literal
@@ -617,24 +619,24 @@ end
 class AST::MatchCase
   sig { returns(Symbol) }
   def kind; end
-  sig { returns(T.untyped) }
+  sig { returns(AST::Node) }
   def value; end
-  sig { returns(T.any(AST::RawBody, Array, T::Array[T.untyped])) }
+  sig { returns(T::Array[T.any(AST::Node, MIR::Node)]) }
   def body; end
-  sig { returns(T.untyped) }
+  sig { returns(String) }
   def binding; end
-  sig { returns(T.untyped) }
+  sig { returns(AST::Node) }
   def destructure; end
-  sig { returns(T.any(Array, T::Array[T.untyped])) }
+  sig { returns(T::Array[AST::Node]) }
   def extra_values; end
   sig { returns(T::Boolean) }
   def indirect_payload_as; end
 end
 
 class AST::MatchStatement
-  sig { returns(Token) }
+  sig { returns(Lexer::Token) }
   def token; end
-  sig { returns(T.untyped) }
+  sig { returns(AST::Node) }
   def expr; end
   sig { returns(T::Array[T.untyped]) }
   def cases; end
@@ -646,7 +648,7 @@ class AST::MatchStatement
   def default_drops; end
   sig { returns(T::Boolean) }
   def exhaustive; end
-  sig { returns(T.untyped) }
+  sig { returns(T::Boolean) }
   def takes; end
 end
 
@@ -683,7 +685,7 @@ class AST::MoveNode
 end
 
 class AST::NextExpr
-  sig { returns(Token) }
+  sig { returns(Lexer::Token) }
   def token; end
   sig { returns(AST::Node) }
   def expr; end
@@ -708,7 +710,7 @@ class AST::OrExit
   def kind; end
   sig { returns(T.untyped) }
   def error_name; end
-  sig { returns(T.untyped) }
+  sig { returns(AST::Node) }
   def message; end
 end
 
@@ -730,44 +732,44 @@ end
 class AST::OrderByOp
   sig { returns(Lexer::Token) }
   def token; end
-  sig { returns(T.any(AST::GetField, AST::Identifier)) }
+  sig { returns(AST::Node) }
   def expression; end
 end
 
 class AST::Param
-  sig { returns(T.untyped) }
+  sig { returns(String) }
   def name; end
-  sig { returns(T.untyped) }
+  sig { returns(T.any(String, Symbol, Type)) }
   def type; end
   sig { returns(T.untyped) }
   def default; end
   sig { returns(T.untyped) }
   def mutable; end
-  sig { returns(T.untyped) }
+  sig { returns(T.any(FalseClass, Lexer::Token, TrueClass)) }
   def takes; end
-  sig { returns(T.untyped) }
+  sig { returns(T::Boolean) }
   def comptime; end
-  sig { returns(T.untyped) }
+  sig { returns(Lexer::Token) }
   def name_token; end
-  sig { returns(T.any(T.untyped, T::Boolean)) }
+  sig { returns(T::Boolean) }
   def required; end
-  sig { returns(T.untyped) }
+  sig { returns(Symbol) }
   def sync; end
-  sig { returns(T.untyped) }
+  sig { returns(SymbolEntry) }
   def symbol; end
 end
 
 class AST::PassStmt
-  sig { returns(Token) }
+  sig { returns(Lexer::Token) }
   def token; end
 end
 
 class AST::PatternField
-  sig { returns(T.any(String, T.untyped)) }
+  sig { returns(String) }
   def name; end
-  sig { returns(T.any(AST::Literal, Symbol, T.untyped)) }
+  sig { returns(T.any(AST::Node, Symbol)) }
   def value; end
-  sig { returns(T.untyped) }
+  sig { returns(Lexer::Token) }
   def name_token; end
 end
 
@@ -779,7 +781,7 @@ end
 class AST::ProfileStmt
   sig { returns(Lexer::Token) }
   def token; end
-  sig { returns(T.any(AST::FuncCall, AST::Literal)) }
+  sig { returns(AST::Node) }
   def expression; end
 end
 
@@ -793,11 +795,11 @@ end
 class AST::Raise
   sig { returns(Lexer::Token) }
   def token; end
-  sig { returns(T.untyped) }
+  sig { returns(Symbol) }
   def kind; end
   sig { returns(T.untyped) }
   def error_name; end
-  sig { returns(T.untyped) }
+  sig { returns(AST::Node) }
   def message_expr; end
 end
 
@@ -815,7 +817,7 @@ end
 class AST::RecoverOp
   sig { returns(Lexer::Token) }
   def token; end
-  sig { returns(T.any(AST::DefaultLit, AST::Literal)) }
+  sig { returns(AST::Node) }
   def default_expr; end
 end
 
@@ -824,7 +826,7 @@ class AST::ReduceOp
   def token; end
   sig { returns(T.untyped) }
   def initial_value; end
-  sig { returns(T.any(AST::BinaryOp, AST::Identifier)) }
+  sig { returns(AST::Node) }
   def expression; end
 end
 
@@ -840,7 +842,7 @@ class AST::RequireNode
   def token; end
   sig { returns(String) }
   def path; end
-  sig { returns(T.untyped) }
+  sig { returns(String) }
   def namespace; end
   sig { returns(Symbol) }
   def kind; end
@@ -849,12 +851,12 @@ end
 class AST::ResolveNode
   sig { returns(Lexer::Token) }
   def token; end
-  sig { returns(T.any(AST::GetField, AST::GetIndex, AST::Identifier)) }
+  sig { returns(AST::Node) }
   def value; end
 end
 
 class AST::ReturnNode
-  sig { returns(Token) }
+  sig { returns(Lexer::Token) }
   def token; end
   sig { returns(T.untyped) }
   def value; end
@@ -872,7 +874,7 @@ class AST::ShardOp
   def token; end
   sig { returns(AST::Node) }
   def key_expr; end
-  sig { returns(T.any(AST::Identifier, AST::Literal)) }
+  sig { returns(AST::Node) }
   def target_map; end
 end
 
@@ -895,9 +897,9 @@ class AST::Slice
   def token; end
   sig { returns(T.untyped) }
   def target; end
-  sig { returns(T.untyped) }
+  sig { returns(AST::Node) }
   def start; end
-  sig { returns(T.untyped) }
+  sig { returns(AST::Node) }
   def end; end
   sig { returns(T::Boolean) }
   def exclusive; end
@@ -906,7 +908,7 @@ end
 class AST::SmashStmt
   sig { returns(Lexer::Token) }
   def token; end
-  sig { returns(T.any(AST::FuncCall, AST::Literal)) }
+  sig { returns(AST::Node) }
   def expression; end
 end
 
@@ -917,7 +919,7 @@ class AST::StaticCall
   def type_name; end
   sig { returns(String) }
   def method_name; end
-  sig { returns(T::Array[T.any(AST::Identifier, AST::Literal)]) }
+  sig { returns(T::Array[AST::Node]) }
   def args; end
 end
 
@@ -942,22 +944,22 @@ class AST::StructDef
 end
 
 class AST::StructField
-  sig { returns(T.untyped) }
+  sig { returns(T.any(Symbol, Type)) }
   def type; end
-  sig { returns(T.untyped) }
+  sig { returns(AST::Node) }
   def default; end
-  sig { returns(T.any(FalseClass, T.untyped, TrueClass)) }
+  sig { returns(T::Boolean) }
   def borrowed; end
 end
 
 class AST::StructLit
-  sig { returns(Token) }
+  sig { returns(Lexer::Token) }
   def token; end
   sig { returns(T.untyped) }
   def name; end
   sig { returns(T.untyped) }
   def fields; end
-  sig { returns(T.untyped) }
+  sig { returns(Symbol) }
   def storage; end
   sig { returns(T.untyped) }
   def type_args; end
@@ -1000,14 +1002,14 @@ end
 class AST::TakeWhileOp
   sig { returns(Lexer::Token) }
   def token; end
-  sig { returns(T.any(AST::BinaryOp, AST::Identifier)) }
+  sig { returns(AST::Node) }
   def expression; end
 end
 
 class AST::TapOp
   sig { returns(Lexer::Token) }
   def token; end
-  sig { returns(T::Array[T.any(AST::Assert, AST::BinaryOp, AST::FuncCall)]) }
+  sig { returns(T::Array[AST::Node]) }
   def body; end
 end
 
@@ -1016,7 +1018,7 @@ class AST::TestBlock
   def token; end
   sig { returns(String) }
   def name; end
-  sig { returns(T::Array[T.any(AST::BindExpr, AST::Literal, AST::PassStmt)]) }
+  sig { returns(T::Array[AST::Node]) }
   def setup; end
   sig { returns(T::Array[AST::WhenBlock]) }
   def whens; end
@@ -1027,7 +1029,7 @@ class AST::TestThat
   def token; end
   sig { returns(String) }
   def description; end
-  sig { returns(T::Array[T.untyped]) }
+  sig { returns(T::Array[AST::Node]) }
   def body; end
 end
 
@@ -1041,7 +1043,7 @@ end
 class AST::ThrowNode
   sig { returns(Lexer::Token) }
   def token; end
-  sig { returns(T.untyped) }
+  sig { returns(AST::Node) }
   def value; end
 end
 
@@ -1081,12 +1083,12 @@ end
 class AST::UnnestOp
   sig { returns(Lexer::Token) }
   def token; end
-  sig { returns(T.any(AST::BinaryOp, AST::GetField, AST::Identifier)) }
+  sig { returns(AST::Node) }
   def expression; end
 end
 
 class AST::VarDecl
-  sig { returns(Token) }
+  sig { returns(Lexer::Token) }
   def token; end
   sig { returns(String) }
   def name; end
@@ -1107,7 +1109,7 @@ class AST::WhenBlock
   def setup; end
   sig { returns(T::Array[AST::TestThat]) }
   def tests; end
-  sig { returns(T::Array[T.any(AST::BenchmarkStmt, AST::ProfileStmt, AST::SmashStmt)]) }
+  sig { returns(T::Array[AST::Node]) }
   def benchmarks; end
 end
 
@@ -1134,7 +1136,7 @@ class AST::WhileBindLoop
 end
 
 class AST::WhileLoop
-  sig { returns(Token) }
+  sig { returns(Lexer::Token) }
   def token; end
   sig { returns(T.untyped) }
   def condition; end
@@ -1149,12 +1151,12 @@ class AST::WindowOp
   def token; end
   sig { returns(T.untyped) }
   def size; end
-  sig { returns(T.any(AST::GetIndex, AST::Identifier, AST::MethodCall)) }
+  sig { returns(AST::Node) }
   def expression; end
 end
 
 class AST::WithBlock
-  sig { returns(Token) }
+  sig { returns(Lexer::Token) }
   def token; end
   sig { returns(T::Array[T.untyped]) }
   def capabilities; end
@@ -1162,7 +1164,7 @@ class AST::WithBlock
   def body; end
   sig { returns(T.untyped) }
   def deferred_drops; end
-  sig { returns(T.untyped) }
+  sig { returns(CapabilityPlan::WithCapabilityPlan) }
   def capability_plan; end
 end
 
@@ -1222,7 +1224,7 @@ class Annotator::Domains::ControlFlow::MatchSubjectPlan
   def enum_subject; end
   sig { returns(Type) }
   def expr_type; end
-  sig { returns(T.untyped) }
+  sig { returns(T.any(Schemas::EnumSchema, Schemas::StructSchema, Schemas::UnionSchema)) }
   def schema; end
   sig { returns(Symbol) }
   def type_name; end
@@ -1251,16 +1253,16 @@ class Annotator::Phases::AnnotationBoundary::BoundaryTypeViolation
 end
 
 class Annotator::Phases::AsyncBodyFact
-  sig { returns(T.any(AST::BgBlock, AST::BgStreamBlock, AST::DoBranch)) }
+  sig { returns(AST::Node) }
   def node; end
   sig { returns(Annotator::Phases::BodyScanSummary) }
   def summary; end
-  sig { returns(T.any(AST::BgBlock, AST::BgStreamBlock, AST::DoBlock)) }
+  sig { returns(AST::Node) }
   def validation_node; end
 end
 
 class Annotator::Phases::BgSpawnDecision
-  sig { returns(T.untyped) }
+  sig { returns(Symbol) }
   def reason; end
   sig { returns(Symbol) }
   def spawn_form; end
@@ -1275,7 +1277,7 @@ class Annotator::Phases::BodyFactContext
   def record_call_sites; end
   sig { returns(T::Boolean) }
   def track_with_scope_stack; end
-  sig { returns(T::Array[AST::WithBlock]) }
+  sig { returns(T::Array[AST::Node]) }
   def with_scope_stack; end
 end
 
@@ -1320,42 +1322,42 @@ end
 class Annotator::Phases::DeferredWithValidation
   sig { returns(CapabilityPlan::CapabilityTransition) }
   def fact; end
-  sig { returns(AST::WithBlock) }
+  sig { returns(AST::Node) }
   def node; end
 end
 
 class Annotator::Phases::FunctionBodySummary
-  sig { returns(T.any(Array, T.untyped)) }
+  sig { returns(T::Array[AST::Node]) }
   def assignment_nodes; end
-  sig { returns(T.any(Array, T.untyped)) }
+  sig { returns(T::Array[AST::Node]) }
   def binding_nodes; end
-  sig { returns(T.any(Semantic::BodyId, T.untyped)) }
+  sig { returns(Semantic::BodyId) }
   def body_id; end
-  sig { returns(T.any(Array, T.untyped)) }
+  sig { returns(T::Array[Semantic::CallSiteFact]) }
   def call_site_facts; end
   sig { returns(T.any(Set, T.untyped)) }
   def callees; end
-  sig { returns(T.any(Semantic::DefId, T.untyped)) }
+  sig { returns(Semantic::DefId) }
   def definition_id; end
-  sig { returns(T.any(Array, T.untyped)) }
+  sig { returns(T::Array[AST::Node]) }
   def escape_nodes; end
-  sig { returns(T.any(FalseClass, T.untyped, TrueClass)) }
+  sig { returns(T::Boolean) }
   def has_fnptr_call; end
   sig { returns(T.any(Hash, T.untyped)) }
   def lambda_body_identifier_refs; end
-  sig { returns(T.any(Array, T.untyped)) }
+  sig { returns(T::Array[Semantic::LocalFact]) }
   def local_facts; end
   sig { returns(String) }
   def name; end
   sig { returns(T.any(Set, T.untyped)) }
   def propagating_callees; end
-  sig { returns(T.any(FalseClass, T.untyped, TrueClass)) }
+  sig { returns(T::Boolean) }
   def raises_directly; end
-  sig { returns(T.any(Array, T.untyped)) }
+  sig { returns(T::Array[AST::Node]) }
   def return_nodes; end
-  sig { returns(T.any(Array, T.untyped)) }
+  sig { returns(T::Array[Semantic::SuspendPointFact]) }
   def suspend_points; end
-  sig { returns(T.any(Array, T.untyped)) }
+  sig { returns(T::Array[AST::Node]) }
   def with_blocks; end
   sig { returns(T.any(Hash, T.untyped)) }
   def with_scope_nodes; end
@@ -1369,19 +1371,19 @@ class AsyncResultShape
 end
 
 class AutoConstraintCollector::Slot
-  sig { returns(T.untyped) }
+  sig { returns(Lexer::Token) }
   def auto_token; end
-  sig { returns(T.any(AST::BindExpr, AST::FunctionDef, AST::VarDecl)) }
+  sig { returns(AST::Node) }
   def decl_node; end
-  sig { returns(T.untyped) }
+  sig { returns(String) }
   def fn_name; end
-  sig { returns(T.untyped) }
+  sig { returns(Integer) }
   def index; end
   sig { returns(Symbol) }
   def kind; end
-  sig { returns(T.untyped) }
+  sig { returns(Symbol) }
   def shape; end
-  sig { returns(T::Array[AST::Identifier]) }
+  sig { returns(T::Array[AST::Node]) }
   def sources; end
 end
 
@@ -1397,14 +1399,14 @@ class AutoUnifier::Ambiguity
   def observed_types; end
   sig { returns(AutoConstraintCollector::Slot) }
   def slot; end
-  sig { returns(T::Array[T.any(AST::Identifier, AST::Literal)]) }
+  sig { returns(T::Array[AST::Node]) }
   def sources; end
 end
 
 class AutoUnifier::Resolution
   sig { returns(AutoConstraintCollector::Slot) }
   def slot; end
-  sig { returns(T::Array[T.any(AST::Identifier, AST::Literal)]) }
+  sig { returns(T::Array[AST::Node]) }
   def sources; end
   sig { returns(T.any(Symbol, Type)) }
   def type; end
@@ -1606,11 +1608,11 @@ class BinaryMirOperands
 end
 
 class BinaryOpResult
-  sig { returns(T.untyped) }
+  sig { returns(Type) }
   def type; end
-  sig { returns(T.untyped) }
+  sig { returns(Symbol) }
   def left_coercion; end
-  sig { returns(T.untyped) }
+  sig { returns(Symbol) }
   def right_coercion; end
   sig { returns(Symbol) }
   def storage; end
@@ -1736,9 +1738,9 @@ class BufferSetup
 end
 
 class Capabilities::Conflict
-  sig { returns(T.any(Array, T::Array[Symbol])) }
+  sig { returns(T::Array[Symbol]) }
   def set_a; end
-  sig { returns(T.any(Array, T::Array[Symbol])) }
+  sig { returns(T::Array[Symbol]) }
   def set_b; end
   sig { returns(String) }
   def message; end
@@ -1751,13 +1753,13 @@ class CapabilityAudit::BindingAuditRecord
   def fn; end
   sig { returns(Integer) }
   def line; end
-  sig { returns(T.untyped) }
+  sig { returns(Symbol) }
   def ownership; end
   sig { returns(T::Boolean) }
   def sharded; end
   sig { returns(Symbol) }
   def storage; end
-  sig { returns(T.untyped) }
+  sig { returns(Symbol) }
   def sync; end
   sig { returns(String) }
   def var; end
@@ -1781,24 +1783,24 @@ class CapabilityHelper::PredicateCallSite
   def call; end
   sig { returns(String) }
   def callee; end
-  sig { returns(T.untyped) }
+  sig { returns(AST::Node) }
   def fn_node; end
   sig { returns(Symbol) }
   def kind; end
-  sig { returns(T.any(AST::BinaryOp, AST::FuncCall, AST::Literal)) }
+  sig { returns(AST::Node) }
   def pred_expr; end
-  sig { returns(T.untyped) }
+  sig { returns(AST::Node) }
   def with_node; end
 end
 
 class CapabilityHelper::PredicateContext
   sig { returns(T::Array[String]) }
   def allowed_names; end
-  sig { returns(T.untyped) }
+  sig { returns(String) }
   def fn_name; end
-  sig { returns(T.untyped) }
+  sig { returns(AST::Node) }
   def fn_node; end
-  sig { returns(T.untyped) }
+  sig { returns(String) }
   def guard_alias; end
   sig { returns(Symbol) }
   def kind; end
@@ -1810,7 +1812,7 @@ class CapabilityHelper::PredicateContext
   def rejected_param_names; end
   sig { returns(T::Array[String]) }
   def sibling_aliases; end
-  sig { returns(T.untyped) }
+  sig { returns(AST::Node) }
   def with_node; end
 end
 
@@ -1819,44 +1821,44 @@ class CapabilityPlan::CapabilityRequest
   def alias_explicit; end
   sig { returns(T::Boolean) }
   def alias_mutable; end
-  sig { returns(T.untyped) }
+  sig { returns(String) }
   def alias_name; end
   sig { returns(Symbol) }
   def capability; end
-  sig { returns(T.untyped) }
+  sig { returns(AST::Node) }
   def guard_expr; end
-  sig { returns(AST::Capability) }
+  sig { returns(AST::Node) }
   def source; end
-  sig { returns(AST::Identifier) }
+  sig { returns(AST::Node) }
   def var_node; end
 end
 
 class CapabilityPlan::CapabilityTargetFact
-  sig { returns(T.any(FalseClass, T::Boolean, TrueClass)) }
+  sig { returns(T::Boolean) }
   def field_target; end
-  sig { returns(T.any(FalseClass, T::Boolean)) }
+  sig { returns(T::Boolean) }
   def index_target; end
-  sig { returns(T.untyped) }
+  sig { returns(Symbol) }
   def layout; end
-  sig { returns(T.any(FalseClass, T::Boolean, TrueClass)) }
+  sig { returns(T::Boolean) }
   def live_symbol_refreshed; end
-  sig { returns(T.untyped) }
+  sig { returns(Scope) }
   def old_scope; end
   sig { returns(Type) }
   def resolved_type; end
-  sig { returns(T.untyped) }
+  sig { returns(SymbolEntry) }
   def source_entry; end
-  sig { returns(T.any(T.untyped, Type)) }
+  sig { returns(Type) }
   def source_type; end
-  sig { returns(T.untyped) }
+  sig { returns(Symbol) }
   def storage; end
-  sig { returns(T.untyped) }
+  sig { returns(Symbol) }
   def sync; end
   sig { returns(String) }
   def target_label; end
-  sig { returns(T.any(String, T.untyped)) }
+  sig { returns(String) }
   def var_name; end
-  sig { returns(T.any(AST::Node, T.untyped)) }
+  sig { returns(AST::Node) }
   def var_node; end
 end
 
@@ -1867,33 +1869,33 @@ class CapabilityPlan::CapabilityTransition
   def alias_mutable; end
   sig { returns(String) }
   def alias_name; end
-  sig { returns(T.untyped) }
+  sig { returns(String) }
   def borrowed_qualifier; end
   sig { returns(Symbol) }
   def capability; end
   sig { returns(T::Boolean) }
   def field_target; end
-  sig { returns(T.untyped) }
+  sig { returns(AST::Node) }
   def guard_expr; end
-  sig { returns(T.untyped) }
+  sig { returns(Symbol) }
   def layout; end
   sig { returns(Symbol) }
   def lock_identity_value; end
-  sig { returns(T.untyped) }
+  sig { returns(Scope) }
   def old_scope; end
   sig { returns(CapabilityPlan::CapabilityRequest) }
   def request; end
   sig { returns(Type) }
   def resolved_type; end
-  sig { returns(AST::Capability) }
+  sig { returns(AST::Node) }
   def source; end
-  sig { returns(T.untyped) }
+  sig { returns(SymbolEntry) }
   def source_entry; end
   sig { returns(Type) }
   def source_type; end
-  sig { returns(T.untyped) }
+  sig { returns(Symbol) }
   def storage; end
-  sig { returns(T.untyped) }
+  sig { returns(Symbol) }
   def sync; end
   sig { returns(CapabilityPlan::CapabilityTargetFact) }
   def target; end
@@ -2086,15 +2088,15 @@ class ClearParser::BgPrefix
   def arena; end
   sig { returns(T::Boolean) }
   def can_smash; end
-  sig { returns(T.untyped) }
+  sig { returns(Lexer::Token) }
   def can_smash_token; end
   sig { returns(T::Boolean) }
   def parallel; end
   sig { returns(T::Boolean) }
   def pinned; end
-  sig { returns(T.untyped) }
+  sig { returns(Symbol) }
   def stack_size; end
-  sig { returns(T.untyped) }
+  sig { returns(Lexer::Token) }
   def stack_size_token; end
 end
 
@@ -2105,7 +2107,7 @@ class ClearParser::DoBranchPrefix
   def parallel; end
   sig { returns(T::Boolean) }
   def pinned; end
-  sig { returns(T.untyped) }
+  sig { returns(Symbol) }
   def stack_size; end
 end
 
@@ -2330,11 +2332,11 @@ class EscapeAnalysis::EscapeContext
   def facts; end
   sig { returns(Hash) }
   def facts_by_name; end
-  sig { returns(AST::FunctionDef) }
+  sig { returns(AST::Node) }
   def fn; end
   sig { returns(Hash) }
   def fn_nodes; end
-  sig { returns(T.untyped) }
+  sig { returns(Proc) }
   def schema_lookup; end
 end
 
@@ -2357,13 +2359,13 @@ class EscapeAnalysis::EscapeSink
 end
 
 class EscapeAnalysis::FunctionFacts
-  sig { returns(T::Array[T.any(AST::Assignment, AST::BindExpr)]) }
+  sig { returns(T::Array[AST::Node]) }
   def assignment_nodes; end
   sig { returns(Hash) }
   def binding_values; end
   sig { returns(T::Array[AST::Node]) }
   def escape_nodes; end
-  sig { returns(AST::FunctionDef) }
+  sig { returns(AST::Node) }
   def fn; end
   sig { returns(Hash) }
   def lambda_body_identifier_refs; end
@@ -2519,13 +2521,13 @@ class FixableHelper::CapabilityFixCandidate
 end
 
 class FmtVerifier::Result
-  sig { returns(T.any(String, T.untyped)) }
+  sig { returns(String) }
   def path; end
-  sig { returns(T.any(FalseClass, T::Boolean, TrueClass)) }
+  sig { returns(T::Boolean) }
   def ok; end
-  sig { returns(T.untyped) }
+  sig { returns(String) }
   def error; end
-  sig { returns(T.untyped) }
+  sig { returns(String) }
   def diff_excerpt; end
 end
 
@@ -2534,9 +2536,9 @@ class Formatter::FormatLexer::Token
   def type; end
   sig { returns(String) }
   def raw; end
-  sig { returns(T.any(Integer, T.untyped)) }
+  sig { returns(Integer) }
   def line; end
-  sig { returns(T.any(Integer, T.untyped)) }
+  sig { returns(Integer) }
   def col; end
 end
 
@@ -2597,7 +2599,7 @@ class FsmDestroyStmt
 end
 
 class FsmLowering::FsmLockErrorArmSplit
-  sig { returns(T::Array[T.any(MIR::ExprStmt, MIR::Set)]) }
+  sig { returns(T::Array[MIR::Node]) }
   def body_stmts; end
   sig { returns(Symbol) }
   def exit_kind; end
@@ -2611,61 +2613,61 @@ class FsmLoweringResult
 end
 
 class FsmOps::AddrOf
-  sig { returns(T.any(FsmOps::StateField, FsmOps::SubField, T.untyped)) }
+  sig { returns(T.any(FsmOps::StateField, FsmOps::SubField)) }
   def expr; end
 end
 
 class FsmOps::AllocExpr
-  sig { returns(T.any(String, T.untyped)) }
+  sig { returns(String) }
   def elem_type; end
-  sig { returns(T.any(FsmOps::LocalRef, T.untyped)) }
+  sig { returns(FsmOps::LocalRef) }
   def count; end
 end
 
 class FsmOps::ArgRef
-  sig { returns(T.any(Integer, T.untyped)) }
+  sig { returns(Integer) }
   def idx; end
 end
 
 class FsmOps::AssignField
-  sig { returns(T.any(String, T.untyped)) }
+  sig { returns(String) }
   def field; end
   sig { returns(T.untyped) }
   def value; end
 end
 
 class FsmOps::BinOp
-  sig { returns(T.any(String, T.untyped)) }
+  sig { returns(String) }
   def op; end
-  sig { returns(T.untyped) }
+  sig { returns(FsmOps::CallExpr) }
   def left; end
-  sig { returns(T.untyped) }
+  sig { returns(FsmOps::IntCast) }
   def right; end
 end
 
 class FsmOps::CallExpr
   sig { returns(T.any(FsmOps::FunctionPath, T.untyped)) }
   def fn; end
-  sig { returns(T.any(Array, T.untyped)) }
+  sig { returns(T::Array[T.any(FsmOps::AddrOf, FsmOps::ArgRef, FsmOps::StateField)]) }
   def args; end
-  sig { returns(T.any(FalseClass, T::Boolean, TrueClass)) }
+  sig { returns(T::Boolean) }
   def is_try; end
 end
 
 class FsmOps::DeferFreeField
-  sig { returns(T.any(String, T.untyped)) }
+  sig { returns(String) }
   def field; end
 end
 
 class FsmOps::ErrDeferCall
   sig { returns(T.any(FsmOps::FunctionPath, T.untyped)) }
   def fn; end
-  sig { returns(T.any(Array, T.untyped)) }
+  sig { returns(T::Array[FsmOps::StateField]) }
   def args; end
 end
 
 class FsmOps::ErrDeferFreeField
-  sig { returns(T.any(String, T.untyped)) }
+  sig { returns(String) }
   def field; end
 end
 
@@ -2677,55 +2679,55 @@ class FsmOps::FunctionPath
 end
 
 class FsmOps::IfFieldSubLtZeroReturnCall
-  sig { returns(T.any(String, T.untyped)) }
+  sig { returns(String) }
   def field; end
-  sig { returns(T.any(String, T.untyped)) }
+  sig { returns(String) }
   def sub; end
   sig { returns(T.any(FsmOps::FunctionPath, T.untyped)) }
   def return_fn; end
-  sig { returns(T.any(Array, T.untyped)) }
+  sig { returns(T::Array[FsmOps::SubField]) }
   def return_args; end
 end
 
 class FsmOps::IntCast
-  sig { returns(T.any(String, T.untyped)) }
+  sig { returns(String) }
   def zig_type; end
-  sig { returns(T.untyped) }
+  sig { returns(T.any(FsmOps::ArgRef, FsmOps::CallExpr, FsmOps::SubField)) }
   def expr; end
 end
 
 class FsmOps::IoSubmit
-  sig { returns(T.any(Symbol, T.untyped)) }
+  sig { returns(Symbol) }
   def verb; end
-  sig { returns(T.any(FsmOps::StateField, T.untyped)) }
+  sig { returns(FsmOps::StateField) }
   def waiter; end
-  sig { returns(T.any(Array, T.untyped)) }
+  sig { returns(T::Array[T.any(FsmOps::ArgRef, FsmOps::StateField)]) }
   def extra_args; end
 end
 
 class FsmOps::LetConst
-  sig { returns(T.any(String, T.untyped)) }
+  sig { returns(String) }
   def name; end
-  sig { returns(T.any(String, T.untyped)) }
+  sig { returns(String) }
   def zig_type; end
-  sig { returns(T.any(FsmOps::IntCast, T.untyped)) }
+  sig { returns(FsmOps::IntCast) }
   def value; end
 end
 
 class FsmOps::LocalRef
-  sig { returns(T.any(String, T.untyped)) }
+  sig { returns(String) }
   def name; end
 end
 
 class FsmOps::SliceUntilIntCast
-  sig { returns(T.any(FsmOps::StateField, T.untyped)) }
+  sig { returns(FsmOps::StateField) }
   def base; end
-  sig { returns(T.any(FsmOps::SubField, T.untyped)) }
+  sig { returns(FsmOps::SubField) }
   def end_expr; end
 end
 
 class FsmOps::StateField
-  sig { returns(T.any(String, T.untyped)) }
+  sig { returns(String) }
   def name; end
 end
 
@@ -2734,14 +2736,14 @@ class FsmOps::StmtCall
   def fn; end
   sig { returns(T.any(Array, T.untyped)) }
   def args; end
-  sig { returns(T.any(FalseClass, T::Boolean, TrueClass)) }
+  sig { returns(T::Boolean) }
   def is_try; end
 end
 
 class FsmOps::SubField
-  sig { returns(T.any(FsmOps::StateField, T.untyped)) }
+  sig { returns(FsmOps::StateField) }
   def base; end
-  sig { returns(T.any(String, T.untyped)) }
+  sig { returns(String) }
   def name; end
 end
 
@@ -2848,7 +2850,7 @@ class FsmTransform::Liveness::CrossSegmentVarFact
   def first_def_seg; end
   sig { returns(Integer) }
   def last_use_seg; end
-  sig { returns(T.untyped) }
+  sig { returns(Type) }
   def type_info; end
 end
 
@@ -2876,7 +2878,7 @@ class FsmTransform::SegmentList
 end
 
 class FsmTransform::Segments::CondBranch
-  sig { returns(T.untyped) }
+  sig { returns(T.any(AST::Node, MIR::Node)) }
   def cond_ast; end
   sig { returns(Integer) }
   def then_index; end
@@ -2899,9 +2901,9 @@ class FsmTransform::Segments::IoSuspend
   def call_node; end
   sig { returns(T.untyped) }
   def stdlib_def; end
-  sig { returns(T.untyped) }
+  sig { returns(String) }
   def result_var; end
-  sig { returns(T.untyped) }
+  sig { returns(Integer) }
   def next_index; end
 end
 
@@ -2928,18 +2930,18 @@ class FsmTransform::Segments::LoopBack
 end
 
 class FsmTransform::Segments::NextSuspend
-  sig { returns(T.untyped) }
+  sig { returns(AST::Node) }
   def promise_ast; end
-  sig { returns(T.untyped) }
+  sig { returns(String) }
   def result_var; end
-  sig { returns(T.untyped) }
+  sig { returns(Integer) }
   def next_index; end
 end
 
 class FsmTransform::Segments::Segment
   sig { returns(Integer) }
   def index; end
-  sig { returns(T.any(AST::RawBody, T.untyped, T::Array[T.untyped])) }
+  sig { returns(T::Array[T.any(AST::Node, MIR::Node)]) }
   def stmts; end
   sig { returns(T.untyped) }
   def tail; end
@@ -2986,7 +2988,7 @@ end
 class FunctionAnalysis::CallSignatureSite
   sig { returns(String) }
   def name; end
-  sig { returns(T.any(AST::FuncCall, AST::MethodCall)) }
+  sig { returns(AST::Node) }
   def node; end
 end
 
@@ -3015,7 +3017,7 @@ class GenericAnalysis::TypeAnnotationFacts
   def inner_array; end
   sig { returns(T::Boolean) }
   def is_param; end
-  sig { returns(T.any(AST::Node, T.untyped)) }
+  sig { returns(AST::Node) }
   def node; end
   sig { returns(Type) }
   def type_obj; end
@@ -3089,30 +3091,30 @@ class InlineStructDeinitEntry
 end
 
 class IntrinsicAllocationContract
-  sig { returns(T.any(T.untyped, T::Array[T.untyped])) }
+  sig { returns(Symbol) }
   def alloc; end
-  sig { returns(T.any(FalseClass, T.untyped, TrueClass)) }
+  sig { returns(T::Boolean) }
   def allocates; end
-  sig { returns(T.untyped) }
+  sig { returns(Symbol) }
   def key_alloc; end
-  sig { returns(T.untyped) }
+  sig { returns(Symbol) }
   def return_alloc; end
-  sig { returns(T.untyped) }
+  sig { returns(Symbol) }
   def shard_alloc; end
-  sig { returns(T.untyped) }
+  sig { returns(Symbol) }
   def sharded_alloc; end
-  sig { returns(T.untyped) }
+  sig { returns(Symbol) }
   def val_alloc; end
 end
 
 class IntrinsicArgSpec
   sig { returns(T::Boolean) }
   def mutable; end
-  sig { returns(T.untyped) }
+  sig { returns(String) }
   def name; end
-  sig { returns(T.untyped) }
+  sig { returns(Symbol) }
   def ownership; end
-  sig { returns(T.untyped) }
+  sig { returns(Symbol) }
   def sync; end
   sig { returns(T::Boolean) }
   def takes; end
@@ -3121,25 +3123,25 @@ class IntrinsicArgSpec
 end
 
 class IntrinsicBehaviorContract
-  sig { returns(T.any(T.untyped, T::Array[T.untyped])) }
+  sig { returns(Symbol) }
   def error_kind; end
-  sig { returns(T.untyped) }
+  sig { returns(Symbol) }
   def error_type; end
-  sig { returns(T.any(FalseClass, T.untyped, TrueClass)) }
+  sig { returns(T::Boolean) }
   def fsm_setup_present; end
-  sig { returns(T.any(FalseClass, T.untyped, TrueClass)) }
+  sig { returns(T::Boolean) }
   def is_method; end
-  sig { returns(T.any(Array, T.untyped)) }
+  sig { returns(T::Array[String]) }
   def lifetime; end
-  sig { returns(T.any(FalseClass, T.untyped, TrueClass)) }
+  sig { returns(T::Boolean) }
   def narrows_collection; end
-  sig { returns(T.any(FalseClass, T.untyped, TrueClass)) }
+  sig { returns(T::Boolean) }
   def narrows_receiver_collection; end
-  sig { returns(T.untyped) }
+  sig { returns(String) }
   def reject_error; end
-  sig { returns(T.untyped) }
+  sig { returns(Symbol) }
   def reject_when; end
-  sig { returns(T.any(FalseClass, T.untyped, TrueClass)) }
+  sig { returns(T::Boolean) }
   def suspends; end
 end
 
@@ -3157,28 +3159,28 @@ end
 class IntrinsicOwnershipContract
   sig { returns(T.any(Set, T::Array[T.untyped], T::Set[Integer])) }
   def argument_takes_indices; end
-  sig { returns(T.any(FalseClass, T.untyped, TrueClass)) }
+  sig { returns(T::Boolean) }
   def container_borrow; end
-  sig { returns(T.any(FalseClass, T.untyped, TrueClass)) }
+  sig { returns(T::Boolean) }
   def mutates_receiver; end
   sig { returns(T.any(Set, T::Set[Integer])) }
   def takes_indices; end
-  sig { returns(T.any(FalseClass, T.untyped, TrueClass)) }
+  sig { returns(T::Boolean) }
   def takes_value; end
 end
 
 class IntrinsicTemplateContract
-  sig { returns(T.any(T.untyped, T::Array[T.untyped])) }
+  sig { returns(T::Boolean) }
   def bc; end
-  sig { returns(T.untyped) }
+  sig { returns(Symbol) }
   def bc_op; end
-  sig { returns(T.untyped) }
+  sig { returns(String) }
   def numeric_zig; end
-  sig { returns(T.untyped) }
+  sig { returns(String) }
   def shard_direct_zig; end
-  sig { returns(T.untyped) }
+  sig { returns(String) }
   def sharded_zig; end
-  sig { returns(T.untyped) }
+  sig { returns(T.any(String, Symbol)) }
   def zig; end
 end
 
@@ -3230,7 +3232,7 @@ end
 class Lexer::Token
   sig { returns(Symbol) }
   def type; end
-  sig { returns(T.untyped) }
+  sig { returns(T.any(Float, Integer, String)) }
   def value; end
   sig { returns(Integer) }
   def line; end
@@ -3258,7 +3260,7 @@ end
 class LockHelper::LockClauseSite
   sig { returns(T::Array[Symbol]) }
   def cap_types; end
-  sig { returns(AST::WithBlock) }
+  sig { returns(AST::Node) }
   def node; end
 end
 
@@ -3358,14 +3360,14 @@ class MIR::AllocMark
   def alloc; end
   sig { returns(Type) }
   def type_info; end
-  sig { returns(T.untyped) }
+  sig { returns(Symbol) }
   def scope; end
 end
 
 class MIR::AllocSlice
   sig { returns(String) }
   def elem_type; end
-  sig { returns(MIR::Lit) }
+  sig { returns(MIR::Node) }
   def len; end
   sig { returns(Symbol) }
   def alloc; end
@@ -3381,7 +3383,7 @@ class MIR::ArrayDefaultInit
   def elem_type; end
   sig { returns(String) }
   def count; end
-  sig { returns(MIR::Lit) }
+  sig { returns(MIR::Node) }
   def default_value; end
   sig { returns(Symbol) }
   def alloc; end
@@ -3390,20 +3392,20 @@ end
 class MIR::ArrayInit
   sig { returns(String) }
   def elem_type; end
-  sig { returns(String) }
+  sig { returns(T.any(Integer, String)) }
   def count; end
   sig { returns(T.untyped) }
   def items; end
 end
 
 class MIR::AssertRaisesCheck
-  sig { returns(T.any(MIR::Call, MIR::Lit)) }
+  sig { returns(MIR::Node) }
   def expr; end
   sig { returns(String) }
   def rt_name; end
   sig { returns(Symbol) }
   def kind; end
-  sig { returns(T.untyped) }
+  sig { returns(T.any(String, Symbol)) }
   def error_name; end
 end
 
@@ -3423,7 +3425,7 @@ class MIR::BatchWindowFlush
   def elem_zig; end
   sig { returns(String) }
   def result_var; end
-  sig { returns(T.any(MIR::Call, MIR::Ident, MIR::RegistryCall)) }
+  sig { returns(MIR::Node) }
   def value_expr; end
   sig { returns(Symbol) }
   def alloc; end
@@ -3432,7 +3434,7 @@ end
 class MIR::BatchWindowPush
   sig { returns(String) }
   def window; end
-  sig { returns(MIR::Ident) }
+  sig { returns(MIR::Node) }
   def item_expr; end
   sig { returns(String) }
   def batch_var; end
@@ -3440,14 +3442,14 @@ class MIR::BatchWindowPush
   def elem_zig; end
   sig { returns(String) }
   def result_var; end
-  sig { returns(T.any(MIR::Call, MIR::Ident, MIR::RegistryCall)) }
+  sig { returns(MIR::Node) }
   def value_expr; end
   sig { returns(Symbol) }
   def alloc; end
 end
 
 class MIR::BgBlock
-  sig { returns(String) }
+  sig { returns(MIR::Node) }
   def code; end
   sig { returns(Hash) }
   def captures; end
@@ -3467,34 +3469,34 @@ class MIR::BinOp
 end
 
 class MIR::BlockExpr
-  sig { returns(T.untyped) }
+  sig { returns(String) }
   def label; end
   sig { returns(T::Array[MIR::Node]) }
   def body; end
 end
 
 class MIR::BreakExpr
-  sig { returns(T.untyped) }
+  sig { returns(String) }
   def label; end
-  sig { returns(T.untyped) }
+  sig { returns(MIR::Node) }
   def value; end
 end
 
 class MIR::BreakStmt
-  sig { returns(T.untyped) }
+  sig { returns(String) }
   def label; end
   sig { returns(T.untyped) }
   def value; end
 end
 
 class MIR::Call
-  sig { returns(T.any(String, T.untyped)) }
+  sig { returns(String) }
   def callee; end
   sig { returns(T.untyped) }
   def args; end
-  sig { returns(T.any(T.untyped, T::Boolean)) }
+  sig { returns(T::Boolean) }
   def try_wrap; end
-  sig { returns(T.any(FalseClass, T.untyped, TrueClass)) }
+  sig { returns(T::Boolean) }
   def owned_return; end
   sig { returns(T.untyped) }
   def callable_contract; end
@@ -3507,25 +3509,25 @@ class MIR::CapWrap
   def zig_base; end
   sig { returns(Symbol) }
   def strategy; end
-  sig { returns(T.untyped) }
+  sig { returns(String) }
   def sync_fn; end
-  sig { returns(T.untyped) }
+  sig { returns(String) }
   def sync_type; end
-  sig { returns(T.untyped) }
+  sig { returns(String) }
   def own_fn; end
   sig { returns(Symbol) }
   def alloc; end
 end
 
 class MIR::CapabilityLockAddress
-  sig { returns(MIR::Ident) }
+  sig { returns(MIR::Node) }
   def source; end
   sig { returns(T::Boolean) }
   def arc_wrapped; end
 end
 
 class MIR::CapabilityLockTarget
-  sig { returns(MIR::Ident) }
+  sig { returns(MIR::Node) }
   def source; end
   sig { returns(T::Boolean) }
   def arc_wrapped; end
@@ -3534,21 +3536,21 @@ class MIR::CapabilityLockTarget
 end
 
 class MIR::CapabilityUnwrap
-  sig { returns(MIR::Ident) }
+  sig { returns(MIR::Node) }
   def source; end
 end
 
 class MIR::Cast
   sig { returns(MIR::Node) }
   def expr; end
-  sig { returns(T.untyped) }
+  sig { returns(String) }
   def target_type; end
   sig { returns(Symbol) }
   def method; end
 end
 
 class MIR::CatchWrapper
-  sig { returns(MIR::Call) }
+  sig { returns(MIR::Node) }
   def inner_call; end
   sig { returns(Array) }
   def error_reassigns; end
@@ -3556,9 +3558,9 @@ class MIR::CatchWrapper
   def clauses; end
   sig { returns(T::Array[MIR::Node]) }
   def default_body; end
-  sig { returns(T.untyped) }
+  sig { returns(MIR::Node) }
   def default_action; end
-  sig { returns(T.untyped) }
+  sig { returns(Type) }
   def snapshot_type; end
   sig { returns(String) }
   def rt_name; end
@@ -3577,7 +3579,7 @@ class MIR::Comment
 end
 
 class MIR::Comptime
-  sig { returns(T.any(MIR::Ident, MIR::RegistryCall)) }
+  sig { returns(MIR::Node) }
   def expr; end
 end
 
@@ -3586,21 +3588,21 @@ class MIR::ConcatStr
   def parts; end
   sig { returns(Symbol) }
   def alloc; end
-  sig { returns(T.untyped) }
+  sig { returns(String) }
   def rt_expr; end
 end
 
 class MIR::Conditional
-  sig { returns(T.any(MIR::BinOp, MIR::Ident)) }
+  sig { returns(MIR::Node) }
   def cond; end
-  sig { returns(T.any(MIR::BinOp, MIR::Cast, MIR::Ident)) }
+  sig { returns(MIR::Node) }
   def then_val; end
-  sig { returns(T.any(MIR::BinOp, MIR::Ident, MIR::Lit)) }
+  sig { returns(MIR::Node) }
   def else_val; end
 end
 
 class MIR::ConstCast
-  sig { returns(MIR::Ident) }
+  sig { returns(MIR::Node) }
   def expr; end
 end
 
@@ -3609,7 +3611,7 @@ class MIR::ContainerInit
   def zig_type; end
   sig { returns(Symbol) }
   def strategy; end
-  sig { returns(T.untyped) }
+  sig { returns(Symbol) }
   def alloc; end
   sig { returns(T.untyped) }
   def capacity; end
@@ -3621,27 +3623,27 @@ class MIR::ContinueStmt
 end
 
 class MIR::DebugOnly
-  sig { returns(T::Array[T.any(MIR::ExprStmt, MIR::IfStmt)]) }
+  sig { returns(T::Array[MIR::Node]) }
   def body; end
 end
 
 class MIR::DeepCopy
   sig { returns(MIR::Node) }
   def source; end
-  sig { returns(T.untyped) }
+  sig { returns(String) }
   def zig_type; end
-  sig { returns(T.untyped) }
+  sig { returns(String) }
   def elem_type; end
   sig { returns(Symbol) }
   def strategy; end
-  sig { returns(T.untyped) }
+  sig { returns(Symbol) }
   def alloc; end
   sig { returns(T.untyped) }
   def copy_shape; end
 end
 
 class MIR::DefaultStreamCapacity
-  sig { returns(T.any(MIR::Ident, MIR::Lit, MIR::RuntimeCall)) }
+  sig { returns(MIR::Node) }
   def worker_count; end
 end
 
@@ -3651,14 +3653,14 @@ class MIR::DeferStmt
 end
 
 class MIR::Deref
-  sig { returns(T.any(MIR::FieldGet, MIR::Ident)) }
+  sig { returns(MIR::Node) }
   def expr; end
 end
 
 class MIR::DestroyPtr
-  sig { returns(T.any(MIR::FieldGet, MIR::Ident)) }
+  sig { returns(MIR::Node) }
   def ptr; end
-  sig { returns(T.any(MIR::Ident, Symbol)) }
+  sig { returns(T.any(MIR::Node, Symbol)) }
   def alloc; end
 end
 
@@ -3672,7 +3674,7 @@ class MIR::DiscardOwned
 end
 
 class MIR::DoBlock
-  sig { returns(MIR::DoBlockPlan) }
+  sig { returns(MIR::Node) }
   def code; end
   sig { returns(T::Array[Array]) }
   def branch_bodies; end
@@ -3697,12 +3699,12 @@ class MIR::EnumDef
   def name; end
   sig { returns(T::Array[String]) }
   def variants; end
-  sig { returns(T.untyped) }
+  sig { returns(Symbol) }
   def visibility; end
 end
 
 class MIR::EnumOrdinal
-  sig { returns(MIR::FieldGet) }
+  sig { returns(MIR::Node) }
   def value; end
 end
 
@@ -3721,7 +3723,7 @@ end
 class MIR::ExprStmt
   sig { returns(MIR::Node) }
   def expr; end
-  sig { returns(T.untyped) }
+  sig { returns(T::Boolean) }
   def discard; end
 end
 
@@ -3730,11 +3732,11 @@ class MIR::FallibleLockBinding
   def guard_var; end
   sig { returns(String) }
   def alias_name; end
-  sig { returns(MIR::LockAcquire) }
+  sig { returns(MIR::Node) }
   def acquire_call; end
   sig { returns(MIR::FailureAction) }
   def action; end
-  sig { returns(T.nilable(Integer)) }
+  sig { returns(Integer) }
   def retries; end
   sig { returns(T::Array[Symbol]) }
   def matched_types; end
@@ -3773,7 +3775,7 @@ class MIR::FieldDef
   def name; end
   sig { returns(String) }
   def zig_type; end
-  sig { returns(T.untyped) }
+  sig { returns(MIR::Node) }
   def default; end
 end
 
@@ -3787,13 +3789,13 @@ end
 class MIR::FnDef
   sig { returns(String) }
   def name; end
-  sig { returns(T::Array[MIR::Param]) }
+  sig { returns(T::Array[MIR::Node]) }
   def params; end
   sig { returns(String) }
   def ret_type; end
   sig { returns(T::Array[MIR::Node]) }
   def body; end
-  sig { returns(T.untyped) }
+  sig { returns(Symbol) }
   def visibility; end
   sig { returns(T::Boolean) }
   def can_fail; end
@@ -3813,11 +3815,11 @@ class MIR::ForStmt
   def capture; end
   sig { returns(T::Array[MIR::Node]) }
   def body; end
-  sig { returns(T.untyped) }
+  sig { returns(String) }
   def index_capture; end
-  sig { returns(T.untyped) }
+  sig { returns(T::Boolean) }
   def mark_per_iter; end
-  sig { returns(T.untyped) }
+  sig { returns(T::Boolean) }
   def tight; end
 end
 
@@ -3832,14 +3834,14 @@ class MIR::FrameSave
 end
 
 class MIR::FreeSlice
-  sig { returns(T.any(MIR::FieldGet, MIR::Ident)) }
+  sig { returns(MIR::Node) }
   def slice; end
-  sig { returns(T.any(MIR::Ident, Symbol)) }
+  sig { returns(T.any(MIR::Node, Symbol)) }
   def alloc; end
 end
 
 class MIR::FreezeExpr
-  sig { returns(T.any(MIR::FieldGet, MIR::Ident)) }
+  sig { returns(MIR::Node) }
   def inner; end
   sig { returns(String) }
   def zig_base; end
@@ -3852,7 +3854,7 @@ class MIR::FsmB1Body
   def blk_label; end
   sig { returns(T.untyped) }
   def ctx_struct; end
-  sig { returns(T.untyped) }
+  sig { returns(MIR::Node) }
   def spawn_setup; end
 end
 
@@ -3861,7 +3863,7 @@ class MIR::FsmB1CtxStruct
   def type_name; end
   sig { returns(String) }
   def promise_zig; end
-  sig { returns(T::Array[MIR::ContextFieldDecl]) }
+  sig { returns(T::Array[MIR::Node]) }
   def capture_fields; end
   sig { returns(MIR::FsmStep) }
   def run_body; end
@@ -3872,15 +3874,15 @@ class MIR::FsmCtxStruct
   def type_name; end
   sig { returns(String) }
   def promise_zig; end
-  sig { returns(T::Array[MIR::ContextFieldDecl]) }
+  sig { returns(T::Array[MIR::Node]) }
   def capture_fields; end
   sig { returns(T::Array[FsmOps::StateFieldDecl]) }
   def state_decls; end
   sig { returns(Array) }
   def promoted_field_decls; end
-  sig { returns(MIR::FsmStep) }
+  sig { returns(MIR::Node) }
   def step0; end
-  sig { returns(MIR::FsmStep) }
+  sig { returns(MIR::Node) }
   def step1; end
   sig { returns(MIR::FsmDispatch) }
   def resume_fn; end
@@ -3889,7 +3891,7 @@ end
 class MIR::FsmDispatch
   sig { returns(Integer) }
   def ctx_id; end
-  sig { returns(T::Array[MIR::FsmStateArm]) }
+  sig { returns(T::Array[MIR::Node]) }
   def arms; end
   sig { returns(T::Boolean) }
   def uses_loop_label; end
@@ -3900,7 +3902,7 @@ class MIR::FsmGenericBody
   def blk_label; end
   sig { returns(MIR::FsmGenericCtxStruct) }
   def ctx_struct; end
-  sig { returns(MIR::FsmSpawnSetup) }
+  sig { returns(MIR::Node) }
   def spawn_setup; end
 end
 
@@ -3909,13 +3911,13 @@ class MIR::FsmGenericCtxStruct
   def type_name; end
   sig { returns(String) }
   def promise_zig; end
-  sig { returns(T::Array[MIR::ContextFieldDecl]) }
+  sig { returns(T::Array[MIR::Node]) }
   def capture_fields; end
-  sig { returns(T::Array[MIR::ContextFieldDecl]) }
+  sig { returns(T::Array[MIR::Node]) }
   def extra_field_decls; end
-  sig { returns(T::Array[MIR::ContextFieldDecl]) }
+  sig { returns(T::Array[MIR::Node]) }
   def promoted_field_decls; end
-  sig { returns(T::Array[MIR::FsmMemberFn]) }
+  sig { returns(T::Array[MIR::Node]) }
   def member_fns; end
   sig { returns(T.untyped) }
   def dispatch; end
@@ -3928,7 +3930,7 @@ class MIR::FsmIoBody
   def blk_label; end
   sig { returns(MIR::FsmCtxStruct) }
   def ctx_struct; end
-  sig { returns(MIR::FsmSpawnSetup) }
+  sig { returns(MIR::Node) }
   def spawn_setup; end
 end
 
@@ -3943,32 +3945,32 @@ class MIR::FsmMemberFn
   def suppress_runtime_ref; end
   sig { returns(T::Array[MIR::Node]) }
   def body_stmts; end
-  sig { returns(T::Array[MIR::Comment]) }
+  sig { returns(T::Array[MIR::Node]) }
   def extra_prologue_stmts; end
 end
 
 class MIR::FsmSpawnSetup
   sig { returns(String) }
   def alloc_var; end
-  sig { returns(T.any(MIR::FieldGet, MIR::MethodCall)) }
+  sig { returns(MIR::Node) }
   def alloc_expr; end
   sig { returns(String) }
   def promise_var; end
   sig { returns(String) }
   def promise_zig; end
-  sig { returns(T::Array[T.any(MIR::ErrDeferStmt, MIR::Let)]) }
+  sig { returns(T::Array[MIR::Node]) }
   def promoted_decls; end
   sig { returns(String) }
   def ctx_var; end
   sig { returns(String) }
   def ctx_type; end
-  sig { returns(T::Array[MIR::StructInitField]) }
+  sig { returns(T::Array[MIR::Node]) }
   def ctx_init_fields; end
-  sig { returns(MIR::FsmSpawnCall) }
+  sig { returns(MIR::Node) }
   def spawn_call; end
   sig { returns(String) }
   def rt_name; end
-  sig { returns(T.untyped) }
+  sig { returns(Integer) }
   def profile_site_id; end
   sig { returns(Integer) }
   def profile_dispatch_id; end
@@ -3983,7 +3985,7 @@ class MIR::FsmStateArm
   def pre_body_skip; end
   sig { returns(T.untyped) }
   def pre_body_stmts; end
-  sig { returns(T.untyped) }
+  sig { returns(String) }
   def body_fn_name; end
   sig { returns(T.untyped) }
   def err_cleanups; end
@@ -4005,22 +4007,22 @@ class MIR::FsmStep
 end
 
 class MIR::FsmStructure
-  sig { returns(T.untyped) }
+  sig { returns(T::Array[MIR::Node]) }
   def captures; end
-  sig { returns(T::Array[MIR::FsmStateFieldFact]) }
+  sig { returns(T::Array[MIR::Node]) }
   def state_fields; end
-  sig { returns(T.untyped) }
+  sig { returns(T::Array[MIR::Node]) }
   def steps; end
   sig { returns(T::Array[String]) }
   def finalize_cleanups; end
-  sig { returns(T.untyped) }
+  sig { returns(Integer) }
   def ctx_id; end
-  sig { returns(T.untyped) }
+  sig { returns(String) }
   def result_aliases_finalized; end
 end
 
 class MIR::FsmTailCondJump
-  sig { returns(MIR::Ident) }
+  sig { returns(MIR::Node) }
   def condition; end
   sig { returns(Integer) }
   def then_step; end
@@ -4029,7 +4031,7 @@ class MIR::FsmTailCondJump
 end
 
 class MIR::FsmTailCondSkip
-  sig { returns(T.any(MIR::FieldGet, MIR::Ident)) }
+  sig { returns(MIR::Node) }
   def condition; end
   sig { returns(Integer) }
   def skip_step; end
@@ -4059,9 +4061,9 @@ class MIR::FsmTailLockTry
 end
 
 class MIR::FsmTailRegisterYield
-  sig { returns(T.untyped) }
+  sig { returns(Integer) }
   def next_step; end
-  sig { returns(T.any(MIR::Call, MIR::Ident, MIR::MethodCall)) }
+  sig { returns(MIR::Node) }
   def register_expr; end
   sig { returns(String) }
   def yield_reason; end
@@ -4084,14 +4086,14 @@ class MIR::FsmTailWokenCheck
 end
 
 class MIR::FsmTailYield
-  sig { returns(T.untyped) }
+  sig { returns(Integer) }
   def next_step; end
   sig { returns(String) }
   def yield_reason; end
 end
 
 class MIR::HasField
-  sig { returns(MIR::Ident) }
+  sig { returns(MIR::Node) }
   def expr; end
   sig { returns(String) }
   def field; end
@@ -4100,7 +4102,7 @@ end
 class MIR::HeapCreate
   sig { returns(String) }
   def zig_type; end
-  sig { returns(T.any(MIR::DeepCopy, MIR::ItemsAccess, MIR::StructInit)) }
+  sig { returns(MIR::Node) }
   def init; end
   sig { returns(Symbol) }
   def alloc; end
@@ -4116,7 +4118,7 @@ end
 class MIR::IfBindStmt
   sig { returns(T.untyped) }
   def bindings; end
-  sig { returns(T::Array[T.any(T.untyped, T.untyped)]) }
+  sig { returns(T::Array[MIR::Node]) }
   def then_body; end
   sig { returns(T.untyped) }
   def else_body; end
@@ -4136,7 +4138,7 @@ class MIR::IfOptional
   def capture; end
   sig { returns(MIR::Node) }
   def then_expr; end
-  sig { returns(MIR::Lit) }
+  sig { returns(MIR::Node) }
   def else_expr; end
 end
 
@@ -4154,23 +4156,23 @@ class MIR::Import
   def alias_name; end
   sig { returns(String) }
   def module_path; end
-  sig { returns(T.untyped) }
+  sig { returns(String) }
   def member; end
 end
 
 class MIR::IndexGet
-  sig { returns(T.any(MIR::FieldGet, MIR::Ident, MIR::ListItems)) }
+  sig { returns(MIR::Node) }
   def object; end
   sig { returns(MIR::Node) }
   def index; end
 end
 
 class MIR::IndexInsert
-  sig { returns(MIR::Ident) }
+  sig { returns(MIR::Node) }
   def map; end
-  sig { returns(T.any(MIR::Ident, MIR::Lit)) }
+  sig { returns(MIR::Node) }
   def key_expr; end
-  sig { returns(MIR::Ident) }
+  sig { returns(MIR::Node) }
   def value_expr; end
   sig { returns(String) }
   def key_zig_type; end
@@ -4190,18 +4192,18 @@ class MIR::InlineBc
 end
 
 class MIR::ItemsAccess
-  sig { returns(T.any(MIR::FieldGet, MIR::Ident)) }
+  sig { returns(MIR::Node) }
   def expr; end
   sig { returns(T::Boolean) }
   def safe; end
 end
 
 class MIR::IterRange
-  sig { returns(MIR::Lit) }
+  sig { returns(MIR::Node) }
   def start; end
   sig { returns(MIR::Node) }
   def end_val; end
-  sig { returns(T.untyped) }
+  sig { returns(Symbol) }
   def capture_type; end
 end
 
@@ -4219,16 +4221,16 @@ class MIR::Let
   def init; end
   sig { returns(T::Boolean) }
   def mutable; end
-  sig { returns(T.untyped) }
+  sig { returns(Type) }
   def annotation; end
-  sig { returns(T.untyped) }
+  sig { returns(String) }
   def suppression; end
   sig { returns(T.untyped) }
   def alias_safe; end
 end
 
 class MIR::ListItems
-  sig { returns(T.any(MIR::Ident, MIR::TryExpr)) }
+  sig { returns(MIR::Node) }
   def list; end
 end
 
@@ -4245,18 +4247,18 @@ end
 class MIR::LocalBindingFacts
   sig { returns(Hash) }
   def entries; end
-  sig { returns(T::Array[T.any(AST::BindExpr, AST::VarDecl)]) }
+  sig { returns(T::Array[AST::Node]) }
   def frame_decls; end
-  sig { returns(T::Array[T.any(AST::BindExpr, AST::VarDecl)]) }
+  sig { returns(T::Array[AST::Node]) }
   def iteration_frame_decls; end
   sig { returns(Set) }
   def names; end
 end
 
 class MIR::LockAcquire
-  sig { returns(T.any(MIR::CapabilityLockTarget, MIR::Ident)) }
+  sig { returns(MIR::Node) }
   def lock_expr; end
-  sig { returns(T.untyped) }
+  sig { returns(Symbol) }
   def lock_sync; end
   sig { returns(T::Boolean) }
   def fallible; end
@@ -4272,26 +4274,26 @@ class MIR::MakeList
 end
 
 class MIR::MaterializationPacket
-  sig { returns(T.untyped) }
+  sig { returns(MIR::Node) }
   def alloc_mark; end
-  sig { returns(T.untyped) }
+  sig { returns(MIR::Node) }
   def cleanup_stmt; end
-  sig { returns(T.untyped) }
+  sig { returns(MIR::Node) }
   def value_stmt; end
 end
 
 class MIR::MethodCall
-  sig { returns(T.any(MIR::Node, T.untyped)) }
+  sig { returns(MIR::Node) }
   def receiver; end
-  sig { returns(T.any(String, T.untyped)) }
+  sig { returns(String) }
   def method; end
-  sig { returns(T.any(Array, T.untyped)) }
+  sig { returns(T::Array[MIR::Node]) }
   def args; end
-  sig { returns(T.any(FalseClass, T::Boolean, TrueClass)) }
+  sig { returns(T::Boolean) }
   def try_wrap; end
   sig { returns(T.any(MIR::CallableContract, T.untyped)) }
   def callable_contract; end
-  sig { returns(T.untyped) }
+  sig { returns(Symbol) }
   def owned_result_alloc; end
 end
 
@@ -4308,7 +4310,7 @@ class MIR::MoveMark
 end
 
 class MIR::NextPromiseList
-  sig { returns(MIR::Ident) }
+  sig { returns(MIR::Node) }
   def list_expr; end
   sig { returns(String) }
   def elem_zig; end
@@ -4326,14 +4328,14 @@ class MIR::Noop
 end
 
 class MIR::OptionalUnwrap
-  sig { returns(T.any(MIR::FieldGet, MIR::Ident)) }
+  sig { returns(MIR::Node) }
   def expr; end
 end
 
 class MIR::OrExitBcRewrite
   sig { returns(String) }
   def kind; end
-  sig { returns(T.untyped) }
+  sig { returns(Integer) }
   def name_id; end
   sig { returns(T::Boolean) }
   def clear_type; end
@@ -4341,7 +4343,7 @@ class MIR::OrExitBcRewrite
   def has_message; end
   sig { returns(Integer) }
   def line; end
-  sig { returns(MIR::Lit) }
+  sig { returns(MIR::Node) }
   def message; end
 end
 
@@ -4387,7 +4389,7 @@ class MIR::OwnedReturn
 end
 
 class MIR::OwnedSlice
-  sig { returns(MIR::Ident) }
+  sig { returns(MIR::Node) }
   def expr; end
   sig { returns(Symbol) }
   def alloc; end
@@ -4418,11 +4420,11 @@ class MIR::OwnershipOperandFact
   def borrowed; end
   sig { returns(Symbol) }
   def kind; end
-  sig { returns(T.untyped) }
+  sig { returns(String) }
   def name; end
   sig { returns(String) }
   def source; end
-  sig { returns(T.untyped) }
+  sig { returns(Symbol) }
   def target_alloc; end
   sig { returns(Type) }
   def type_info; end
@@ -4443,39 +4445,39 @@ class MIR::Param
 end
 
 class MIR::Pipeline
-  sig { returns(AST::BinaryOp) }
+  sig { returns(AST::Node) }
   def ast_node; end
-  sig { returns(T.untyped) }
+  sig { returns(MIR::Node) }
   def inner; end
-  sig { returns(T.untyped) }
+  sig { returns(Symbol) }
   def source_type; end
   sig { returns(T.untyped) }
   def stages; end
   sig { returns(T.untyped) }
   def sink; end
-  sig { returns(T.untyped) }
+  sig { returns(Symbol) }
   def sink_alloc; end
 end
 
 class MIR::Placement::BindingFact
-  sig { returns(T.any(Symbol, T.untyped)) }
+  sig { returns(Symbol) }
   def alloc; end
-  sig { returns(T.untyped) }
+  sig { returns(Symbol) }
   def escape_reason; end
-  sig { returns(T.any(FalseClass, T::Boolean, TrueClass)) }
+  sig { returns(T::Boolean) }
   def heap_return; end
   sig { returns(String) }
   def name; end
-  sig { returns(T.any(Symbol, T.untyped)) }
+  sig { returns(Symbol) }
   def scope; end
-  sig { returns(T.any(Symbol, T.untyped)) }
+  sig { returns(Symbol) }
   def storage; end
   sig { returns(Type) }
   def type_info; end
 end
 
 class MIR::PointerCast
-  sig { returns(MIR::OptionalUnwrap) }
+  sig { returns(MIR::Node) }
   def expr; end
   sig { returns(String) }
   def target_type; end
@@ -4484,12 +4486,12 @@ end
 class MIR::PolymorphicFlowSignal
   sig { returns(Symbol) }
   def kind; end
-  sig { returns(T.untyped) }
+  sig { returns(MIR::Node) }
   def ret; end
 end
 
 class MIR::PolymorphicMutate
-  sig { returns(T.any(MIR::AddressOf, MIR::Ident)) }
+  sig { returns(MIR::Node) }
   def cell; end
   sig { returns(String) }
   def rt; end
@@ -4497,12 +4499,12 @@ class MIR::PolymorphicMutate
   def alias_name; end
   sig { returns(Type) }
   def bare_type; end
-  sig { returns(T::Array[T.any(MIR::Comment, MIR::ExprStmt, MIR::Set)]) }
+  sig { returns(T::Array[MIR::Node]) }
   def body; end
 end
 
 class MIR::PolymorphicMutateFlow
-  sig { returns(T.any(MIR::AddressOf, MIR::Ident)) }
+  sig { returns(MIR::Node) }
   def cell; end
   sig { returns(String) }
   def rt; end
@@ -4514,7 +4516,7 @@ class MIR::PolymorphicMutateFlow
   def return_type; end
   sig { returns(T::Array[MIR::Node]) }
   def body; end
-  sig { returns(T.untyped) }
+  sig { returns(MIR::Node) }
   def guard_cond; end
   sig { returns(T::Array[MIR::Node]) }
   def guard_fail_body; end
@@ -4528,7 +4530,7 @@ class MIR::PubConst
 end
 
 class MIR::RangeLit
-  sig { returns(T.any(MIR::Cast, MIR::Lit)) }
+  sig { returns(MIR::Node) }
   def start; end
   sig { returns(MIR::Node) }
   def end_val; end
@@ -4537,7 +4539,7 @@ class MIR::RangeLit
 end
 
 class MIR::RcDowngrade
-  sig { returns(T.any(MIR::Ident, MIR::RegistryCall)) }
+  sig { returns(MIR::Node) }
   def source; end
   sig { returns(String) }
   def zig_base; end
@@ -4546,18 +4548,18 @@ class MIR::RcDowngrade
 end
 
 class MIR::RcRelease
-  sig { returns(T.any(MIR::FieldGet, MIR::Ident)) }
+  sig { returns(MIR::Node) }
   def source; end
   sig { returns(String) }
   def zig_base; end
   sig { returns(String) }
   def func; end
-  sig { returns(T.any(MIR::FieldGet, MIR::Ident)) }
+  sig { returns(MIR::Node) }
   def alloc; end
 end
 
 class MIR::RcRetain
-  sig { returns(T.any(MIR::Ident, MIR::RegistryCall)) }
+  sig { returns(MIR::Node) }
   def source; end
   sig { returns(String) }
   def zig_base; end
@@ -4633,26 +4635,26 @@ class MIR::Set
   def target; end
   sig { returns(T.untyped) }
   def value; end
-  sig { returns(T.untyped) }
+  sig { returns(T::Boolean) }
   def needs_field_cleanup; end
 end
 
 class MIR::ShardedMapGet
-  sig { returns(T.any(MIR::Deref, MIR::FieldGet, MIR::Ident)) }
+  sig { returns(MIR::Node) }
   def target; end
   sig { returns(MIR::Node) }
   def key; end
-  sig { returns(T.untyped) }
+  sig { returns(MIR::Node) }
   def shard_idx; end
-  sig { returns(T.untyped) }
+  sig { returns(MIR::Node) }
   def shard_key; end
   sig { returns(Symbol) }
   def map_kind; end
   sig { returns(FunctionSignature) }
   def stdlib_def; end
-  sig { returns(T.untyped) }
+  sig { returns(Type) }
   def key_type; end
-  sig { returns(T.untyped) }
+  sig { returns(Type) }
   def value_type; end
   sig { returns(MIR::InlineAllocMetadata) }
   def resolved_allocs; end
@@ -4661,23 +4663,23 @@ class MIR::ShardedMapGet
 end
 
 class MIR::ShardedMapPut
-  sig { returns(T.any(MIR::Deref, MIR::FieldGet, MIR::Ident)) }
+  sig { returns(MIR::Node) }
   def target; end
   sig { returns(MIR::Node) }
   def key; end
   sig { returns(MIR::Node) }
   def value; end
-  sig { returns(T.untyped) }
+  sig { returns(MIR::Node) }
   def shard_idx; end
-  sig { returns(T.untyped) }
+  sig { returns(MIR::Node) }
   def shard_key; end
   sig { returns(Symbol) }
   def map_kind; end
   sig { returns(FunctionSignature) }
   def stdlib_def; end
-  sig { returns(T.untyped) }
+  sig { returns(Type) }
   def key_type; end
-  sig { returns(T.untyped) }
+  sig { returns(Type) }
   def value_type; end
   sig { returns(MIR::InlineAllocMetadata) }
   def resolved_allocs; end
@@ -4688,7 +4690,7 @@ class MIR::ShardedMapPut
 end
 
 class MIR::SharePromote
-  sig { returns(MIR::Ident) }
+  sig { returns(MIR::Node) }
   def source; end
   sig { returns(String) }
   def zig_base; end
@@ -4697,18 +4699,18 @@ class MIR::SharePromote
 end
 
 class MIR::SliceExpr
-  sig { returns(T.any(MIR::FieldGet, MIR::Ident, MIR::ItemsAccess)) }
+  sig { returns(MIR::Node) }
   def target; end
-  sig { returns(T.any(MIR::Cast, MIR::Ident, MIR::Lit)) }
+  sig { returns(MIR::Node) }
   def start; end
-  sig { returns(T.untyped) }
+  sig { returns(MIR::Node) }
   def end_expr; end
-  sig { returns(T.untyped) }
+  sig { returns(String) }
   def elem_type; end
 end
 
 class MIR::SnapshotMultiTxn
-  sig { returns(T::Array[MIR::Ident]) }
+  sig { returns(T::Array[MIR::Node]) }
   def cells; end
   sig { returns(String) }
   def rt; end
@@ -4716,7 +4718,7 @@ class MIR::SnapshotMultiTxn
   def alloc; end
   sig { returns(T::Array[String]) }
   def aliases; end
-  sig { returns(T::Array[T.any(MIR::Comment, MIR::ExprStmt, MIR::Set)]) }
+  sig { returns(T::Array[MIR::Node]) }
   def body; end
   sig { returns(T.nilable(MIR::FailureAction)) }
   def conflict_action; end
@@ -4727,7 +4729,7 @@ class MIR::SnapshotMultiTxn
 end
 
 class MIR::SnapshotRead
-  sig { returns(MIR::CapabilityUnwrap) }
+  sig { returns(MIR::Node) }
   def cell_unwrap; end
   sig { returns(String) }
   def rt; end
@@ -4735,12 +4737,12 @@ class MIR::SnapshotRead
   def alias_name; end
   sig { returns(String) }
   def guard_var; end
-  sig { returns(T::Array[T.any(MIR::ExprStmt, MIR::Suppress)]) }
+  sig { returns(T::Array[MIR::Node]) }
   def body; end
 end
 
 class MIR::SnapshotTransaction
-  sig { returns(MIR::CapabilityUnwrap) }
+  sig { returns(MIR::Node) }
   def cell_unwrap; end
   sig { returns(String) }
   def rt; end
@@ -4750,20 +4752,20 @@ class MIR::SnapshotTransaction
   def alias_name; end
   sig { returns(Type) }
   def bare_type; end
-  sig { returns(T::Array[T.any(MIR::Comment, MIR::ExprStmt, MIR::Set)]) }
+  sig { returns(T::Array[MIR::Node]) }
   def body; end
   sig { returns(T.nilable(MIR::FailureAction)) }
   def conflict_action; end
   sig { returns(T.untyped) }
   def retries; end
-  sig { returns(T.untyped) }
+  sig { returns(String) }
   def with_label; end
   sig { returns(T::Boolean) }
   def is_atomic_ptr; end
 end
 
 class MIR::SoaFieldAccess
-  sig { returns(MIR::Ident) }
+  sig { returns(MIR::Node) }
   def soa_expr; end
   sig { returns(String) }
   def field_name; end
@@ -4772,11 +4774,11 @@ end
 class MIR::Sort
   sig { returns(String) }
   def elem_type; end
-  sig { returns(T.any(MIR::FieldGet, MIR::Ident)) }
+  sig { returns(MIR::Node) }
   def items_expr; end
-  sig { returns(T.any(MIR::FieldGet, MIR::Ident)) }
+  sig { returns(MIR::Node) }
   def key_a; end
-  sig { returns(T.any(MIR::FieldGet, MIR::Ident)) }
+  sig { returns(MIR::Node) }
   def key_b; end
 end
 
@@ -4789,7 +4791,7 @@ class MIR::SortedLockAcquire
   def matched_types; end
   sig { returns(T::Array[Symbol]) }
   def bubble_types; end
-  sig { returns(T.nilable(Integer)) }
+  sig { returns(Integer) }
   def retries; end
   sig { returns(String) }
   def source_line; end
@@ -4804,28 +4806,28 @@ end
 class MIR::StreamSpawn
   sig { returns(Hash) }
   def captures; end
-  sig { returns(T::Array[T.any(MIR::ExprStmt, MIR::StreamYield)]) }
+  sig { returns(T::Array[MIR::Node]) }
   def body; end
 end
 
 class MIR::StreamYield
-  sig { returns(MIR::Lit) }
+  sig { returns(MIR::Node) }
   def value; end
 end
 
 class MIR::StructDef
-  sig { returns(T.untyped) }
+  sig { returns(String) }
   def name; end
   sig { returns(T::Array[MIR::FieldDef]) }
   def fields; end
   sig { returns(T.untyped) }
   def methods; end
-  sig { returns(T.untyped) }
+  sig { returns(Symbol) }
   def visibility; end
 end
 
 class MIR::StructInit
-  sig { returns(T.untyped) }
+  sig { returns(String) }
   def zig_type; end
   sig { returns(T.any(Array, Hash)) }
   def fields; end
@@ -4848,13 +4850,13 @@ class MIR::SuspendDescriptor
   def setup_stmts; end
   sig { returns(T::Array[MIR::Node]) }
   def bind_stmts; end
-  sig { returns(T.any(MIR::FsmTailDone, MIR::FsmTailRegisterYield, MIR::FsmTailYield)) }
+  sig { returns(MIR::Node) }
   def tail; end
-  sig { returns(T::Array[MIR::ContextFieldDecl]) }
+  sig { returns(T::Array[MIR::Node]) }
   def ctx_field_decls; end
   sig { returns(String) }
   def result_var; end
-  sig { returns(T.untyped) }
+  sig { returns(String) }
   def result_zig_type; end
   sig { returns(T::Boolean) }
   def result_needs_cleanup; end
@@ -4893,9 +4895,9 @@ end
 class MIR::TransferMark
   sig { returns(String) }
   def name; end
-  sig { returns(T.any(Symbol, T.untyped)) }
+  sig { returns(Symbol) }
   def target; end
-  sig { returns(T.untyped) }
+  sig { returns(Symbol) }
   def target_alloc; end
 end
 
@@ -4904,17 +4906,17 @@ class MIR::TryCatch
   def expr; end
   sig { returns(T.untyped) }
   def catch_body; end
-  sig { returns(T.untyped) }
+  sig { returns(String) }
   def capture; end
 end
 
 class MIR::TryExpr
-  sig { returns(T.any(MIR::Call, MIR::Ident, MIR::RegistryCall)) }
+  sig { returns(MIR::Node) }
   def expr; end
 end
 
 class MIR::TryOrPanic
-  sig { returns(MIR::Call) }
+  sig { returns(MIR::Node) }
   def expr; end
   sig { returns(String) }
   def panic_msg; end
@@ -4933,7 +4935,7 @@ class MIR::TypeAlias
 end
 
 class MIR::TypeOf
-  sig { returns(T.any(MIR::FieldGet, MIR::Ident)) }
+  sig { returns(MIR::Node) }
   def expr; end
 end
 
@@ -4952,7 +4954,7 @@ class MIR::UnaryOp
 end
 
 class MIR::Undef
-  sig { returns(T.untyped) }
+  sig { returns(String) }
   def zig_type; end
 end
 
@@ -4966,23 +4968,23 @@ class MIR::UnionMatchStmt
 end
 
 class MIR::UnionPayloadGet
-  sig { returns(MIR::Ident) }
+  sig { returns(MIR::Node) }
   def subject; end
   sig { returns(T.any(String, Symbol)) }
   def variant; end
 end
 
 class MIR::UnionTypeDef
-  sig { returns(T.untyped) }
+  sig { returns(String) }
   def name; end
   sig { returns(T::Array[T.any(Hash, MIR::UnionTypeVariant)]) }
   def variants; end
-  sig { returns(T.untyped) }
+  sig { returns(Symbol) }
   def visibility; end
 end
 
 class MIR::UnionVariantGet
-  sig { returns(T.any(MIR::Ident, MIR::TryExpr)) }
+  sig { returns(MIR::Node) }
   def object; end
   sig { returns(T.any(String, Symbol)) }
   def variant; end
@@ -4991,7 +4993,7 @@ class MIR::UnionVariantGet
 end
 
 class MIR::WeakUpgrade
-  sig { returns(T.any(MIR::FieldGet, MIR::Ident, MIR::RegistryCall)) }
+  sig { returns(MIR::Node) }
   def source; end
   sig { returns(String) }
   def zig_base; end
@@ -5004,18 +5006,18 @@ class MIR::WhileStmt
   def cond; end
   sig { returns(T::Array[MIR::Node]) }
   def body; end
-  sig { returns(T.untyped) }
+  sig { returns(String) }
   def capture; end
-  sig { returns(T.untyped) }
+  sig { returns(MIR::Node) }
   def update; end
-  sig { returns(T.untyped) }
+  sig { returns(T::Boolean) }
   def mark_per_iter; end
-  sig { returns(T.untyped) }
+  sig { returns(T::Boolean) }
   def tight; end
 end
 
 class MIR::WithMatchDispatch
-  sig { returns(MIR::Ident) }
+  sig { returns(MIR::Node) }
   def cell; end
   sig { returns(String) }
   def alias_name; end
@@ -5030,17 +5032,17 @@ end
 class MIRLoweringControlFlow::ForEachPlan
   sig { returns(T::Array[MIR::Node]) }
   def body; end
-  sig { returns(T.any(MIR::FieldGet, MIR::Ident)) }
+  sig { returns(MIR::Node) }
   def collection; end
-  sig { returns(T::Array[T.any(MIR::AllocMark, MIR::Cleanup, MIR::Let)]) }
+  sig { returns(T::Array[MIR::Node]) }
   def collection_setup; end
   sig { returns(Type) }
   def collection_type; end
-  sig { returns(T.untyped) }
+  sig { returns(TrueClass) }
   def mark_per_iter; end
   sig { returns(T::Boolean) }
   def mutable; end
-  sig { returns(MIR::Ident) }
+  sig { returns(MIR::Node) }
   def rt; end
   sig { returns(T::Boolean) }
   def tight; end
@@ -5057,11 +5059,11 @@ class MIRLoweringControlFlow::ForRangePlan
   def end_value; end
   sig { returns(String) }
   def iter_var; end
-  sig { returns(T.untyped) }
+  sig { returns(TrueClass) }
   def mark_per_iter; end
-  sig { returns(MIR::Ident) }
+  sig { returns(MIR::Node) }
   def rt; end
-  sig { returns(T.any(MIR::Ident, MIR::Lit, MIR::RegistryCall)) }
+  sig { returns(MIR::Node) }
   def start_value; end
   sig { returns(T::Boolean) }
   def tight; end
@@ -5070,7 +5072,7 @@ class MIRLoweringControlFlow::ForRangePlan
 end
 
 class MIRLoweringControlFlow::MatchLoweringFacts
-  sig { returns(T.untyped) }
+  sig { returns(String) }
   def expr_label; end
   sig { returns(Symbol) }
   def expr_type_sym; end
@@ -5104,7 +5106,7 @@ end
 class MIRLoweringControlFlow::UnionMatchArmPlan
   sig { returns(T::Array[MIR::Node]) }
   def body; end
-  sig { returns(T.untyped) }
+  sig { returns(String) }
   def payload_name; end
   sig { returns(String) }
   def variant; end
@@ -5115,13 +5117,13 @@ class MIRLoweringFunctions::CallArgFacts
   def arg_alloc; end
   sig { returns(AST::Node) }
   def ast_arg; end
-  sig { returns(T.untyped) }
+  sig { returns(AST::Param) }
   def callee_param; end
   sig { returns(Type) }
   def callee_param_type; end
-  sig { returns(T.untyped) }
+  sig { returns(FunctionSignature) }
   def callee_sig; end
-  sig { returns(T.untyped) }
+  sig { returns(AST::Node) }
   def copy_source; end
   sig { returns(T::Boolean) }
   def copy_to_owning; end
@@ -5136,27 +5138,27 @@ end
 class MIRLoweringFunctions::CallOwnershipFacts
   sig { returns(T::Array[String]) }
   def consumed_names; end
-  sig { returns(T::Array[MIR::OwnershipOperandFact]) }
+  sig { returns(T::Array[MIR::Node]) }
   def consumed_operands; end
   sig { returns(Set) }
   def takes_indices; end
 end
 
 class MIRLoweringFunctions::CatchLoweringPlan
-  sig { returns(T::Array[MIR::CatchClause]) }
+  sig { returns(T::Array[MIR::Node]) }
   def clauses; end
-  sig { returns(MIR::CatchDefaultAction) }
+  sig { returns(MIR::Node) }
   def default_action; end
   sig { returns(T::Array[MIR::Node]) }
   def default_body; end
-  sig { returns(T.untyped) }
+  sig { returns(Type) }
   def snapshot_type; end
 end
 
 class MIRLoweringFunctions::FunctionEntryPlan
   sig { returns(T::Array[MIR::Node]) }
   def prologue; end
-  sig { returns(T::Array[T.any(MIR::AllocMark, MIR::Cleanup)]) }
+  sig { returns(T::Array[MIR::Node]) }
   def takes_mir; end
 end
 
@@ -5227,11 +5229,11 @@ end
 class MIRLoweringFunctions::StdlibArgumentMaterialization
   sig { returns(T::Array[String]) }
   def consumed_names; end
-  sig { returns(T::Array[MIR::OwnershipOperandFact]) }
+  sig { returns(T::Array[MIR::Node]) }
   def consumed_operands; end
   sig { returns(T::Array[MIR::Node]) }
   def mir_args; end
-  sig { returns(T.untyped) }
+  sig { returns(Symbol) }
   def val_alloc_placeholder; end
 end
 
@@ -5242,7 +5244,7 @@ class MIRLoweringFunctions::StdlibCallArgFact
   def coerce_type; end
   sig { returns(Integer) }
   def index; end
-  sig { returns(T.untyped) }
+  sig { returns(Type) }
   def sink_type; end
   sig { returns(T::Boolean) }
   def takes; end
@@ -5258,18 +5260,18 @@ end
 class MIRLoweringGeneratedId
   sig { returns(MIRLoweringCounterKind) }
   def kind; end
-  sig { returns(T.any(Integer, T.untyped)) }
+  sig { returns(Integer) }
   def value; end
 end
 
 class MIRLoweringInput
-  sig { returns(T.any(FalseClass, T::Boolean, TrueClass)) }
+  sig { returns(T::Boolean) }
   def debug_mode; end
   sig { returns(T.any(Hash, T.untyped, T::Hash[T.untyped, T.untyped])) }
   def enum_schemas; end
   sig { returns(T.any(Hash, T.untyped, T::Hash[T.untyped, T.untyped])) }
   def fn_sigs; end
-  sig { returns(T.untyped) }
+  sig { returns(ModuleImporter) }
   def importer; end
   sig { returns(T.any(Hash, T.untyped, T::Hash[T.untyped, T.untyped])) }
   def moved_guard_info; end
@@ -5284,13 +5286,13 @@ class MIRLoweringInput
 end
 
 class MIRLoweringLiterals::HashLiteralCapabilityPlan
-  sig { returns(MIR::CapWrap) }
+  sig { returns(MIR::Node) }
   def empty_result; end
-  sig { returns(MIR::StructInit) }
+  sig { returns(MIR::Node) }
   def init_value; end
   sig { returns(Symbol) }
   def result_wrap; end
-  sig { returns(T.untyped) }
+  sig { returns(String) }
   def result_wrap_fn; end
   sig { returns(String) }
   def zig_type; end
@@ -5314,7 +5316,7 @@ class MIRLoweringLiterals::ListLiteralPlan
   def alloc; end
   sig { returns(T::Boolean) }
   def element_needs_owned_storage; end
-  sig { returns(T.untyped) }
+  sig { returns(Type) }
   def element_type; end
   sig { returns(String) }
   def element_zig; end
@@ -5329,9 +5331,9 @@ class MIRLoweringOwnershipScanner
   def capture_map; end
   sig { returns(T.any(Hash, T.untyped)) }
   def rename_map; end
-  sig { returns(T.any(Proc, T.untyped)) }
+  sig { returns(Proc) }
   def safe_name; end
-  sig { returns(T.any(Proc, T.untyped)) }
+  sig { returns(Proc) }
   def schema_lookup; end
 end
 
@@ -5359,9 +5361,9 @@ class MIRLoweringState
 end
 
 class MIRLoweringVariables::AssignmentTargetPlan
-  sig { returns(T.untyped) }
+  sig { returns(AST::Node) }
   def cleanup_field; end
-  sig { returns(T.any(MIR::FieldGet, MIR::Ident)) }
+  sig { returns(MIR::Node) }
   def target; end
 end
 
@@ -5370,7 +5372,7 @@ class MIRLoweringVariables::AutoLockAssignmentFacts
   def alias_var; end
   sig { returns(Symbol) }
   def alloc_sym; end
-  sig { returns(T.untyped) }
+  sig { returns(Symbol) }
   def cleanup_alloc; end
   sig { returns(String) }
   def field; end
@@ -5385,26 +5387,26 @@ class MIRLoweringVariables::AutoLockAssignmentFacts
 end
 
 class MIRLoweringVariables::IndexedAssignmentDispatch
-  sig { returns(T.untyped) }
+  sig { returns(Type) }
   def key_type; end
-  sig { returns(MIR::InlineAllocMetadata) }
+  sig { returns(MIR::Node) }
   def resolved_allocs; end
   sig { returns(T::Boolean) }
   def shard_direct; end
   sig { returns(Symbol) }
   def sink_alloc; end
-  sig { returns(T.untyped) }
+  sig { returns(String) }
   def target_var; end
   sig { returns(IntrinsicTemplateKind) }
   def template_kind; end
-  sig { returns(T.untyped) }
+  sig { returns(Type) }
   def value_type; end
 end
 
 class MIRLoweringVariables::VarDeclFacts
   sig { returns(T::Boolean) }
   def actually_mutated; end
-  sig { returns(T.untyped) }
+  sig { returns(Type) }
   def annotation; end
   sig { returns(String) }
   def bare_zig; end
@@ -5424,7 +5426,7 @@ class MIRLoweringVariables::VarDeclFacts
   def has_mir_drop; end
   sig { returns(T::Boolean) }
   def heap_return_var; end
-  sig { returns(MIR::OwnershipEffect) }
+  sig { returns(MIR::Node) }
   def init_ownership_effect; end
   sig { returns(T::Boolean) }
   def keyword_mutable; end
@@ -5437,7 +5439,7 @@ class MIRPass::OwnershipPreparationPlan
   def can_fail_fns; end
   sig { returns(CleanupClassifier::FrozenCleanupFacts) }
   def cleanup_facts; end
-  sig { returns(AST::FunctionDef) }
+  sig { returns(AST::Node) }
   def function; end
 end
 
@@ -5458,9 +5460,9 @@ end
 class ModuleImporter::CompiledModule
   sig { returns(AST::Program) }
   def ast; end
-  sig { returns(T.untyped) }
+  sig { returns(Scope) }
   def global_scope; end
-  sig { returns(T.untyped) }
+  sig { returns(String) }
   def transpiled_body; end
   sig { returns(String) }
   def source_dir; end
@@ -5470,7 +5472,7 @@ class ModuleImporter::CompiledModule
   def union_schemas; end
   sig { returns(T.untyped) }
   def enum_schemas; end
-  sig { returns(T.untyped) }
+  sig { returns(String) }
   def type_defs; end
   sig { returns(T.untyped) }
   def mir_items; end
@@ -5676,11 +5678,11 @@ class OwnershipDataflow::CleanupEntryPair
 end
 
 class OwnershipDataflow::ControlHeaderTransfer
-  sig { returns(T.untyped) }
+  sig { returns(AST::Node) }
   def condition; end
-  sig { returns(T.untyped) }
+  sig { returns(AST::Node) }
   def loop_binding; end
-  sig { returns(T.untyped) }
+  sig { returns(String) }
   def loop_name; end
 end
 
@@ -5694,9 +5696,9 @@ end
 class OwnershipDataflow::OwnerEntry
   sig { returns(Symbol) }
   def allocator; end
-  sig { returns(T.any(FalseClass, T::Boolean, TrueClass)) }
+  sig { returns(T::Boolean) }
   def needs_cleanup; end
-  sig { returns(T.any(Symbol, T.untyped)) }
+  sig { returns(Symbol) }
   def state; end
 end
 
@@ -5750,7 +5752,7 @@ class OwnershipFinalizationContext
 end
 
 class OwnershipGraph::Edge
-  sig { returns(T.any(String, T.untyped)) }
+  sig { returns(String) }
   def from; end
   sig { returns(Symbol) }
   def kind; end
@@ -5842,80 +5844,80 @@ class PipelineAllocMarkFact
 end
 
 class PipelineBatchWindowLowerer
-  sig { returns(T.any(Proc, T.untyped)) }
+  sig { returns(Proc) }
   def bc_target; end
-  sig { returns(T.any(Proc, T.untyped)) }
+  sig { returns(Proc) }
   def next_label; end
-  sig { returns(T.any(Proc, T.untyped)) }
+  sig { returns(Proc) }
   def pipeline_alloc; end
-  sig { returns(T.any(Proc, T.untyped)) }
+  sig { returns(Proc) }
   def pipeline_block; end
-  sig { returns(T.any(Proc, T.untyped)) }
+  sig { returns(Proc) }
   def set_current_label; end
-  sig { returns(T.any(Proc, T.untyped)) }
+  sig { returns(Proc) }
   def transpile_type; end
-  sig { returns(T.any(Proc, T.untyped)) }
+  sig { returns(Proc) }
   def visit_mir; end
-  sig { returns(T.any(Proc, T.untyped)) }
+  sig { returns(Proc) }
   def visit_mir_with_placeholder; end
 end
 
 class PipelineBatchWindowPlan
-  sig { returns(T.any(Symbol, T.untyped)) }
+  sig { returns(Symbol) }
   def alloc; end
-  sig { returns(T.any(String, T.untyped)) }
+  sig { returns(String) }
   def element_zig; end
-  sig { returns(T.any(MIR::Node, T.untyped)) }
+  sig { returns(MIR::Node) }
   def expr_mir; end
-  sig { returns(T.any(AST::Identifier, AST::Node)) }
+  sig { returns(AST::Node) }
   def list_node; end
   sig { returns(String) }
   def placeholder_var; end
-  sig { returns(T.any(String, T.untyped)) }
+  sig { returns(String) }
   def result_zig; end
-  sig { returns(MIR::Lit) }
+  sig { returns(MIR::Node) }
   def size_mir; end
-  sig { returns(AST::BinaryOp) }
+  sig { returns(AST::Node) }
   def smooth_node; end
-  sig { returns(T.any(PipelineBatchWindowSourceKind, T.untyped)) }
+  sig { returns(PipelineBatchWindowSourceKind) }
   def source_kind; end
-  sig { returns(T.untyped) }
+  sig { returns(String) }
   def stream_pop_method; end
   sig { returns(String) }
   def timeout_ns; end
 end
 
 class PipelineBindingChainLowerer
-  sig { returns(T.any(Proc, T.untyped)) }
+  sig { returns(Proc) }
   def ast_uses_placeholder; end
-  sig { returns(T.any(Proc, T.untyped)) }
+  sig { returns(Proc) }
   def bc_target; end
-  sig { returns(T.any(Proc, T.untyped)) }
+  sig { returns(Proc) }
   def next_label; end
-  sig { returns(T.any(Proc, T.untyped)) }
+  sig { returns(Proc) }
   def pipe_binding_zig_name; end
-  sig { returns(T.any(Proc, T.untyped)) }
+  sig { returns(Proc) }
   def set_current_label; end
-  sig { returns(T.any(Proc, T.untyped)) }
+  sig { returns(Proc) }
   def transpile_type; end
-  sig { returns(T.any(Proc, T.untyped)) }
+  sig { returns(Proc) }
   def visit_mir; end
-  sig { returns(T.any(Proc, T.untyped)) }
+  sig { returns(Proc) }
   def visit_mir_with_placeholder; end
-  sig { returns(T.any(Proc, T.untyped)) }
+  sig { returns(Proc) }
   def visit_mir_with_reduce_placeholders; end
-  sig { returns(T.any(Proc, T.untyped)) }
+  sig { returns(Proc) }
   def with_named_bindings; end
 end
 
 class PipelineBindingFoldPlan
-  sig { returns(T.any(Array, T::Array[MIR::Emittable])) }
+  sig { returns(T::Array[MIR::Node]) }
   def init_stmts; end
-  sig { returns(T.any(Array, T::Array[MIR::Emittable])) }
+  sig { returns(T::Array[MIR::Node]) }
   def loop_body_stmts; end
-  sig { returns(T.any(Array, T::Array[MIR::Emittable])) }
+  sig { returns(T::Array[MIR::Node]) }
   def post_inner_stmts; end
-  sig { returns(T.any(MIR::Conditional, MIR::Ident, MIR::Node)) }
+  sig { returns(MIR::Node) }
   def result_expr; end
 end
 
@@ -5939,55 +5941,55 @@ class PipelineBindingNames
 end
 
 class PipelineBindingUnnestChain
-  sig { returns(T.any(AST::Node, T.untyped)) }
+  sig { returns(AST::Node) }
   def fold; end
-  sig { returns(T.untyped) }
+  sig { returns(String) }
   def inner_binding; end
   sig { returns(String) }
   def outer_binding; end
-  sig { returns(T.any(AST::Identifier, T.untyped)) }
+  sig { returns(AST::Node) }
   def source; end
-  sig { returns(T.any(Array, T::Array[AST::Node])) }
+  sig { returns(T::Array[AST::Node]) }
   def stages; end
-  sig { returns(T.any(AST::GetField, AST::Identifier, AST::Node)) }
+  sig { returns(AST::Node) }
   def unnest_expr; end
 end
 
 class PipelineBridgeAllocationFact
-  sig { returns(T.any(Symbol, T.untyped)) }
+  sig { returns(Symbol) }
   def alloc; end
-  sig { returns(T.untyped) }
+  sig { returns(CleanupEntry) }
   def cleanup_entry; end
-  sig { returns(T.any(MIR::AllocMark, T.untyped)) }
+  sig { returns(MIR::Node) }
   def mark; end
 end
 
 class PipelineConcurrentAllocationFact
-  sig { returns(T.any(Symbol, T.untyped)) }
+  sig { returns(Symbol) }
   def alloc; end
-  sig { returns(T.any(CleanupEntry, T.untyped)) }
+  sig { returns(CleanupEntry) }
   def cleanup_entry; end
-  sig { returns(T.any(MIR::AllocMark, T.untyped)) }
+  sig { returns(MIR::Node) }
   def mark; end
 end
 
 class PipelineConcurrentBcExpression
-  sig { returns(T.any(AST::Node, T.untyped)) }
+  sig { returns(AST::Node) }
   def expr; end
-  sig { returns(T.any(Symbol, T.untyped)) }
+  sig { returns(Symbol) }
   def policy; end
 end
 
 class PipelineConcurrentCallback
-  sig { returns(MIR::FieldGet) }
+  sig { returns(MIR::Node) }
   def apply_ident; end
-  sig { returns(MIR::AddressOf) }
+  sig { returns(MIR::Node) }
   def context_arg; end
-  sig { returns(T.any(Array, T::Array[T.untyped])) }
+  sig { returns(T::Array[MIR::Node]) }
   def context_stmts; end
-  sig { returns(MIR::StructDef) }
+  sig { returns(MIR::Node) }
   def ctx_def; end
-  sig { returns(MIR::Let) }
+  sig { returns(MIR::Node) }
   def ctx_let; end
   sig { returns(String) }
   def ctx_name; end
@@ -5995,279 +5997,279 @@ class PipelineConcurrentCallback
   def ctx_var; end
   sig { returns(Integer) }
   def id; end
-  sig { returns(T.any(Array, T.untyped)) }
+  sig { returns(T::Array[MIR::Node]) }
   def post_ctx_stmts; end
-  sig { returns(T.any(Array, T.untyped)) }
+  sig { returns(T::Array[MIR::Node]) }
   def pre_ctx_stmts; end
 end
 
 class PipelineConcurrentHeadResult
-  sig { returns(T.any(Array, T.untyped)) }
+  sig { returns(T::Array[MIR::Node]) }
   def pending; end
-  sig { returns(T.any(MIR::Node, T.untyped)) }
+  sig { returns(MIR::Node) }
   def value; end
 end
 
 class PipelineConcurrentInvocation
-  sig { returns(T.any(MIR::FieldGet, T.untyped)) }
+  sig { returns(MIR::Node) }
   def apply_ident; end
-  sig { returns(T.any(MIR::Cast, MIR::Lit, T.untyped)) }
+  sig { returns(MIR::Node) }
   def batch_size; end
-  sig { returns(T.any(Array, T::Array[MIR::StructInit])) }
+  sig { returns(T::Array[MIR::Node]) }
   def bounded_runtime_args; end
-  sig { returns(T.any(MIR::AddressOf, T.untyped)) }
+  sig { returns(MIR::Node) }
   def context_arg; end
-  sig { returns(T.any(Array, T.untyped)) }
+  sig { returns(T::Array[MIR::Node]) }
   def context_stmts; end
-  sig { returns(T.any(Integer, T.untyped)) }
+  sig { returns(Integer) }
   def id; end
-  sig { returns(MIR::Lit) }
+  sig { returns(MIR::Node) }
   def parallel; end
-  sig { returns(MIR::StructInit) }
+  sig { returns(MIR::Node) }
   def task_config; end
-  sig { returns(MIR::Cast) }
+  sig { returns(MIR::Node) }
   def worker_count; end
 end
 
 class PipelineConcurrentLowerer
-  sig { returns(T.any(Proc, T.untyped)) }
+  sig { returns(Proc) }
   def agg_max_sentinel_mir; end
-  sig { returns(T.any(Proc, T.untyped)) }
+  sig { returns(Proc) }
   def agg_min_sentinel_mir; end
-  sig { returns(T.any(Proc, T.untyped)) }
+  sig { returns(Proc) }
   def append_ownership_transfers; end
-  sig { returns(T.any(Proc, T.untyped)) }
+  sig { returns(Proc) }
   def bc_target; end
-  sig { returns(T.any(Proc, T.untyped)) }
+  sig { returns(Proc) }
   def callback_body_mir; end
-  sig { returns(T.any(Proc, T.untyped)) }
+  sig { returns(Proc) }
   def callback_body_mir_with_shard; end
-  sig { returns(T.any(Proc, T.untyped)) }
+  sig { returns(Proc) }
   def callback_expr_mir; end
-  sig { returns(T.any(Proc, T.untyped)) }
+  sig { returns(Proc) }
   def do_rt_name; end
-  sig { returns(T.any(Proc, T.untyped)) }
+  sig { returns(Proc) }
   def emit_builtin; end
-  sig { returns(T.any(Proc, T.untyped)) }
+  sig { returns(Proc) }
   def guarded_cleanup_name; end
-  sig { returns(T.any(Proc, T.untyped)) }
+  sig { returns(Proc) }
   def lower_average; end
-  sig { returns(T.any(Proc, T.untyped)) }
+  sig { returns(Proc) }
   def lower_count; end
-  sig { returns(T.any(Proc, T.untyped)) }
+  sig { returns(Proc) }
   def lower_each; end
-  sig { returns(T.any(Proc, T.untyped)) }
+  sig { returns(Proc) }
   def lower_head_with_placeholder; end
-  sig { returns(T.any(Proc, T.untyped)) }
+  sig { returns(Proc) }
   def lower_max; end
-  sig { returns(T.any(Proc, T.untyped)) }
+  sig { returns(Proc) }
   def lower_min; end
-  sig { returns(T.any(Proc, T.untyped)) }
+  sig { returns(Proc) }
   def lower_mir; end
-  sig { returns(T.any(Proc, T.untyped)) }
+  sig { returns(Proc) }
   def lower_select; end
-  sig { returns(T.any(Proc, T.untyped)) }
+  sig { returns(Proc) }
   def lower_sum; end
-  sig { returns(T.any(Proc, T.untyped)) }
+  sig { returns(Proc) }
   def lower_where; end
-  sig { returns(T.any(Proc, T.untyped)) }
+  sig { returns(Proc) }
   def next_label; end
-  sig { returns(T.any(Proc, T.untyped)) }
+  sig { returns(Proc) }
   def pipeline_alloc; end
-  sig { returns(T.any(Proc, T.untyped)) }
+  sig { returns(Proc) }
   def pipeline_alloc_mark_fact; end
-  sig { returns(T.any(Proc, T.untyped)) }
+  sig { returns(Proc) }
   def pipeline_block; end
-  sig { returns(T.any(Proc, T.untyped)) }
+  sig { returns(Proc) }
   def pipeline_result_alloc; end
-  sig { returns(T.any(Proc, T.untyped)) }
+  sig { returns(Proc) }
   def source_setup; end
-  sig { returns(T.any(Proc, T.untyped)) }
+  sig { returns(Proc) }
   def task_config_variant; end
-  sig { returns(T.any(Proc, T.untyped)) }
+  sig { returns(Proc) }
   def transpile_type; end
-  sig { returns(T.any(Proc, T.untyped)) }
+  sig { returns(Proc) }
   def typed_block_expr; end
-  sig { returns(T.any(Proc, T.untyped)) }
+  sig { returns(Proc) }
   def visit_body_with_placeholder; end
-  sig { returns(T.any(Proc, T.untyped)) }
+  sig { returns(Proc) }
   def visit_mir; end
-  sig { returns(T.any(Proc, T.untyped)) }
+  sig { returns(Proc) }
   def visit_mir_with_placeholder; end
-  sig { returns(T.any(Proc, T.untyped)) }
+  sig { returns(Proc) }
   def with_optional_named_binding; end
 end
 
 class PipelineConcurrentPlan
-  sig { returns(T.untyped) }
+  sig { returns(PipelineConcurrentBcExpression) }
   def bc_expression; end
-  sig { returns(T.untyped) }
+  sig { returns(String) }
   def binding_name; end
-  sig { returns(AST::ConcurrentOp) }
+  sig { returns(AST::Node) }
   def conc_op; end
-  sig { returns(T.any(AST::Node, T.untyped)) }
+  sig { returns(AST::Node) }
   def inner; end
-  sig { returns(T.any(AST::Node, T.untyped)) }
+  sig { returns(AST::Node) }
   def lhs; end
-  sig { returns(T.any(FalseClass, T::Boolean, TrueClass)) }
+  sig { returns(T::Boolean) }
   def list_each_mutates_placeholder; end
-  sig { returns(T.any(AST::Node, T.untyped)) }
+  sig { returns(AST::Node) }
   def real_lhs; end
-  sig { returns(T.untyped) }
+  sig { returns(AST::Node) }
   def shard_context; end
-  sig { returns(AST::BinaryOp) }
+  sig { returns(AST::Node) }
   def smooth_node; end
-  sig { returns(T.any(PipelineConcurrentSourceKind, T.untyped)) }
+  sig { returns(PipelineConcurrentSourceKind) }
   def source_kind; end
-  sig { returns(T.any(AST::Node, PipelineConcurrentTerminalKind)) }
+  sig { returns(PipelineConcurrentTerminalKind) }
   def terminal_kind; end
 end
 
 class PipelineConcurrentSourcePointer
-  sig { returns(MIR::AddressOf) }
+  sig { returns(MIR::Node) }
   def pointer; end
   sig { returns(T.any(Array, T::Array[T.untyped])) }
   def setup; end
 end
 
 class PipelineContextState
-  sig { returns(T.untyped) }
+  sig { returns(String) }
   def acc_placeholder; end
   sig { returns(T.untyped) }
   def join_param_map; end
   sig { returns(T.any(Hash, T.untyped)) }
   def named_bindings; end
-  sig { returns(T.untyped) }
+  sig { returns(String) }
   def placeholder_name; end
-  sig { returns(T.any(T.untyped, T::Boolean)) }
+  sig { returns(T::Boolean) }
   def soa_each_mode; end
   sig { returns(T.any(PipelineSoaFieldSet, Set, T.untyped)) }
   def soa_needed_fields; end
-  sig { returns(T.any(T.untyped, T::Boolean)) }
+  sig { returns(T::Boolean) }
   def soa_rewrite_active; end
 end
 
 class PipelineEachLowerer
-  sig { returns(T.any(Proc, T.untyped)) }
+  sig { returns(Proc) }
   def ast_stmts_use_placeholder; end
-  sig { returns(T.any(Proc, T.untyped)) }
+  sig { returns(Proc) }
   def bc_target; end
-  sig { returns(T.any(Proc, T.untyped)) }
+  sig { returns(Proc) }
   def lower_each_range; end
-  sig { returns(T.any(Proc, T.untyped)) }
+  sig { returns(Proc) }
   def lower_sharded_each; end
-  sig { returns(T.any(Proc, T.untyped)) }
+  sig { returns(Proc) }
   def next_index_name; end
-  sig { returns(T.any(Proc, T.untyped)) }
+  sig { returns(Proc) }
   def range_chain; end
-  sig { returns(T.any(Proc, T.untyped)) }
+  sig { returns(Proc) }
   def soa_body; end
-  sig { returns(T.any(Proc, T.untyped)) }
+  sig { returns(Proc) }
   def visit_body_with_placeholder; end
-  sig { returns(T.any(Proc, T.untyped)) }
+  sig { returns(Proc) }
   def visit_mir; end
 end
 
 class PipelineEachPlan
-  sig { returns(T.any(FalseClass, T.untyped, TrueClass)) }
+  sig { returns(T::Boolean) }
   def bc_target; end
-  sig { returns(AST::EachOp) }
+  sig { returns(AST::Node) }
   def each_op; end
-  sig { returns(T.any(T.untyped, Type)) }
+  sig { returns(Type) }
   def lhs_type; end
   sig { returns(AST::Node) }
   def list_node; end
-  sig { returns(T.untyped) }
+  sig { returns(PipelineRangeChain) }
   def range_chain; end
-  sig { returns(T.any(PipelineEachSourceKind, T.untyped)) }
+  sig { returns(PipelineEachSourceKind) }
   def source_kind; end
 end
 
 class PipelineEachSoaBody
-  sig { returns(T.any(Array, T::Array[MIR::Emittable])) }
+  sig { returns(T::Array[MIR::Node]) }
   def body; end
-  sig { returns(T.any(Array, T::Array[String])) }
+  sig { returns(T::Array[String]) }
   def fields; end
 end
 
 class PipelineIndexAllocationFact
-  sig { returns(T.any(Symbol, T.untyped)) }
+  sig { returns(Symbol) }
   def alloc; end
-  sig { returns(T.any(CleanupEntry, T.untyped)) }
+  sig { returns(CleanupEntry) }
   def cleanup_entry; end
-  sig { returns(T.any(MIR::AllocMark, T.untyped)) }
+  sig { returns(MIR::Node) }
   def mark; end
 end
 
 class PipelineIndexPreparedValue
-  sig { returns(T.any(T.untyped, T::Boolean)) }
+  sig { returns(T::Boolean) }
   def owns_heap; end
-  sig { returns(T.any(T.untyped, T::Array[MIR::AllocMark], T::Array[T.untyped])) }
+  sig { returns(T::Array[MIR::Node]) }
   def setup_stmts; end
-  sig { returns(T.any(MIR::Ident, MIR::Node, T.untyped)) }
+  sig { returns(MIR::Node) }
   def value; end
 end
 
 class PipelineLazyRangePrefix
-  sig { returns(T.any(String, T.untyped)) }
+  sig { returns(String) }
   def elem_zig; end
   sig { returns(String) }
   def initial_capture; end
-  sig { returns(T.any(FalseClass, T::Boolean, TrueClass)) }
+  sig { returns(T::Boolean) }
   def item_used; end
   sig { returns(String) }
   def item_var; end
-  sig { returns(T.any(String, T.untyped)) }
+  sig { returns(String) }
   def next_method; end
-  sig { returns(T.any(Array, T::Array[MIR::Emittable])) }
+  sig { returns(T::Array[MIR::Node]) }
   def outer_stmts; end
-  sig { returns(T.untyped) }
+  sig { returns(MIR::Node) }
   def range_let; end
-  sig { returns(T.any(String, T.untyped)) }
+  sig { returns(String) }
   def source_name; end
-  sig { returns(T.any(Array, T::Array[MIR::Emittable])) }
+  sig { returns(T::Array[MIR::Node]) }
   def stage_stmts; end
 end
 
 class PipelineListLowerer
-  sig { returns(T.any(Proc, T.untyped)) }
+  sig { returns(Proc) }
   def append_owned_value_stmt; end
-  sig { returns(T.any(Proc, T.untyped)) }
+  sig { returns(Proc) }
   def borrowed_pipeline_value; end
-  sig { returns(T.any(Proc, T.untyped)) }
+  sig { returns(Proc) }
   def cleanup_bearing_type; end
-  sig { returns(T.any(Proc, T.untyped)) }
+  sig { returns(Proc) }
   def next_label; end
-  sig { returns(T.any(Proc, T.untyped)) }
+  sig { returns(Proc) }
   def owning_pipeline_temp_stmts; end
-  sig { returns(T.any(Proc, T.untyped)) }
+  sig { returns(Proc) }
   def pipeline_alloc; end
-  sig { returns(T.any(Proc, T.untyped)) }
+  sig { returns(Proc) }
   def pipeline_block; end
-  sig { returns(T.any(Proc, T.untyped)) }
+  sig { returns(Proc) }
   def pipeline_result_alloc; end
-  sig { returns(T.any(Proc, T.untyped)) }
+  sig { returns(Proc) }
   def set_current_label; end
-  sig { returns(T.any(Proc, T.untyped)) }
+  sig { returns(Proc) }
   def source_shape; end
-  sig { returns(T.any(Proc, T.untyped)) }
+  sig { returns(Proc) }
   def transpile_type; end
-  sig { returns(T.any(Proc, T.untyped)) }
+  sig { returns(Proc) }
   def visit_body; end
-  sig { returns(T.any(Proc, T.untyped)) }
+  sig { returns(Proc) }
   def visit_expr; end
-  sig { returns(T.any(Proc, T.untyped)) }
+  sig { returns(Proc) }
   def visit_join_lambda; end
-  sig { returns(T.any(Proc, T.untyped)) }
+  sig { returns(Proc) }
   def visit_mir; end
-  sig { returns(T.any(Proc, T.untyped)) }
+  sig { returns(Proc) }
   def visit_reduce_expr; end
 end
 
 class PipelineLowerHeadResult
-  sig { returns(T.any(Array, T::Array[MIR::Emittable])) }
+  sig { returns(T::Array[MIR::Node]) }
   def pending; end
-  sig { returns(T.any(MIR::Node, T.untyped)) }
+  sig { returns(MIR::Node) }
   def value; end
 end
 
@@ -6294,29 +6296,29 @@ class PipelineOperationPlan
 end
 
 class PipelinePlanBuilder
-  sig { returns(T.any(Proc, T.untyped)) }
+  sig { returns(Proc) }
   def binding_chain; end
-  sig { returns(T.any(Proc, T.untyped)) }
+  sig { returns(Proc) }
   def lowering_target; end
-  sig { returns(T.any(Proc, T.untyped)) }
+  sig { returns(Proc) }
   def range_chain; end
 end
 
 class PipelinePublishSpec
-  sig { returns(T.any(Symbol, T.untyped)) }
+  sig { returns(Symbol) }
   def expr; end
-  sig { returns(T.any(Symbol, T.untyped)) }
+  sig { returns(Symbol) }
   def gate; end
-  sig { returns(T.any(String, T.untyped)) }
+  sig { returns(String) }
   def publish_method; end
-  sig { returns(T.any(FalseClass, T::Boolean, TrueClass)) }
+  sig { returns(T::Boolean) }
   def transfers_item_on_success; end
 end
 
 class PipelineRangeChain
-  sig { returns(T.any(AST::Identifier, AST::Node, AST::RangeLit)) }
+  sig { returns(AST::Node) }
   def source; end
-  sig { returns(T.any(Array, T::Array[AST::Node], T::Array[T.untyped])) }
+  sig { returns(T::Array[AST::Node]) }
   def stages; end
 end
 
@@ -6336,20 +6338,20 @@ class PipelineRangeFoldNames
 end
 
 class PipelineRangeFoldPlan
-  sig { returns(T.any(Array, T::Array[MIR::Let])) }
+  sig { returns(T::Array[MIR::Node]) }
   def acc_init_stmts; end
-  sig { returns(T.any(T::Array[MIR::IfStmt], T::Array[MIR::Set], T::Array[T.untyped])) }
+  sig { returns(T::Array[MIR::Node]) }
   def loop_acc_stmts; end
-  sig { returns(T.any(Array, T::Array[MIR::IfStmt], T::Array[T.untyped])) }
+  sig { returns(T::Array[MIR::Node]) }
   def post_loop_stmts; end
-  sig { returns(T.any(MIR::Conditional, MIR::Ident)) }
+  sig { returns(MIR::Node) }
   def result_expr; end
 end
 
 class PipelineRangeLoopIter
-  sig { returns(T.untyped) }
+  sig { returns(String) }
   def capture_name; end
-  sig { returns(T.any(MIR::Ident, MIR::IterRange, T.untyped)) }
+  sig { returns(MIR::Node) }
   def iter; end
 end
 
@@ -6358,21 +6360,21 @@ class PipelineRewriter::PipelineChain
   def source; end
   sig { returns(T::Array[AST::Node]) }
   def stages; end
-  sig { returns(T.untyped) }
+  sig { returns(AST::Node) }
   def terminal; end
 end
 
 class PipelineScalarLowerer
-  sig { returns(T.any(Proc, T.untyped)) }
+  sig { returns(Proc) }
   def pipeline_block; end
-  sig { returns(T.any(Proc, T.untyped)) }
+  sig { returns(Proc) }
   def transpile_type; end
-  sig { returns(T.any(Proc, T.untyped)) }
+  sig { returns(Proc) }
   def visit_expr; end
 end
 
 class PipelineSemanticFacts
-  sig { returns(T.any(FalseClass, T::Boolean, TrueClass)) }
+  sig { returns(T::Boolean) }
   def bc_target; end
   sig { returns(PipelineSourceKind) }
   def source_kind; end
@@ -6381,37 +6383,37 @@ class PipelineSemanticFacts
 end
 
 class PipelineSetIndexLowerer
-  sig { returns(T.any(Proc, T.untyped)) }
+  sig { returns(Proc) }
   def bc_target; end
-  sig { returns(T.any(Proc, T.untyped)) }
+  sig { returns(Proc) }
   def cleanup_bearing_type; end
-  sig { returns(T.any(Proc, T.untyped)) }
+  sig { returns(Proc) }
   def index_temp_name; end
-  sig { returns(T.any(Proc, T.untyped)) }
+  sig { returns(Proc) }
   def lazy_range_prefix; end
-  sig { returns(T.any(Proc, T.untyped)) }
+  sig { returns(Proc) }
   def next_label; end
-  sig { returns(T.any(Proc, T.untyped)) }
+  sig { returns(Proc) }
   def pipeline_alloc; end
-  sig { returns(T.any(Proc, T.untyped)) }
+  sig { returns(Proc) }
   def pipeline_alloc_mark_fact; end
-  sig { returns(T.any(Proc, T.untyped)) }
+  sig { returns(Proc) }
   def pipeline_block; end
-  sig { returns(T.any(Proc, T.untyped)) }
+  sig { returns(Proc) }
   def pipeline_index_insert_with_ownership; end
-  sig { returns(T.any(Proc, T.untyped)) }
+  sig { returns(Proc) }
   def pipeline_owned_cleanup_entry; end
-  sig { returns(T.any(Proc, T.untyped)) }
+  sig { returns(Proc) }
   def range_chain; end
-  sig { returns(T.any(Proc, T.untyped)) }
+  sig { returns(Proc) }
   def range_fold_observable_distinct; end
-  sig { returns(T.any(Proc, T.untyped)) }
+  sig { returns(Proc) }
   def transpile_type; end
-  sig { returns(T.any(Proc, T.untyped)) }
+  sig { returns(Proc) }
   def typed_block_expr; end
-  sig { returns(T.any(Proc, T.untyped)) }
+  sig { returns(Proc) }
   def visit_mir; end
-  sig { returns(T.any(Proc, T.untyped)) }
+  sig { returns(Proc) }
   def visit_mir_with_placeholder; end
 end
 
@@ -6440,29 +6442,29 @@ class PipelineShardedAccess
 end
 
 class PipelineSite
-  sig { returns(T.any(AST::Node, T.untyped)) }
+  sig { returns(AST::Node) }
   def list; end
-  sig { returns(T.any(AST::BinaryOp, T.untyped)) }
+  sig { returns(AST::Node) }
   def options; end
 end
 
 class PipelineSourcePlan
-  sig { returns(T.untyped) }
+  sig { returns(PipelineBindingUnnestChain) }
   def binding_chain; end
   sig { returns(PipelineSourceKind) }
   def kind; end
-  sig { returns(T.any(AST::Node, T.untyped)) }
+  sig { returns(AST::Node) }
   def node; end
-  sig { returns(T.untyped) }
+  sig { returns(PipelineRangeChain) }
   def range_chain; end
 end
 
 class PipelineSourceShape
-  sig { returns(T.any(FalseClass, T::Boolean, TrueClass)) }
+  sig { returns(T::Boolean) }
   def bc_target; end
-  sig { returns(T.any(T::Boolean, TrueClass)) }
+  sig { returns(T::Boolean) }
   def named_source; end
-  sig { returns(T.any(T.untyped, Type)) }
+  sig { returns(Type) }
   def type; end
 end
 
@@ -6612,22 +6614,22 @@ class Semantic::BodyIdentity
 end
 
 class Semantic::CallSiteFact
-  sig { returns(T.any(Array, T.untyped)) }
+  sig { returns(T::Array[AST::Node]) }
   def args; end
   sig { returns(String) }
   def callee_name; end
-  sig { returns(T.any(FalseClass, T::Boolean, TrueClass)) }
+  sig { returns(T::Boolean) }
   def fn_var_call; end
   sig { returns(Semantic::CallSiteId) }
   def id; end
-  sig { returns(T.any(AST::FuncCall, T.untyped)) }
+  sig { returns(AST::Node) }
   def node; end
-  sig { returns(T.any(FalseClass, T.untyped, TrueClass)) }
+  sig { returns(T::Boolean) }
   def propagates_failure; end
 end
 
 class Semantic::CallSiteId
-  sig { returns(T.any(Integer, T.untyped)) }
+  sig { returns(Integer) }
   def value; end
 end
 
@@ -6651,12 +6653,12 @@ class Semantic::LocalFact
 end
 
 class Semantic::LocalId
-  sig { returns(T.any(Integer, T.untyped)) }
+  sig { returns(Integer) }
   def value; end
 end
 
 class Semantic::PlaceId
-  sig { returns(T.any(Integer, T.untyped)) }
+  sig { returns(Integer) }
   def value; end
 end
 
@@ -6680,9 +6682,9 @@ end
 class Semantic::SuspendPointFact
   sig { returns(Semantic::SuspendPointId) }
   def id; end
-  sig { returns(T.untyped) }
+  sig { returns(Symbol) }
   def kind; end
-  sig { returns(T.any(AST::Node, T.untyped)) }
+  sig { returns(AST::Node) }
   def node; end
 end
 
@@ -6721,7 +6723,7 @@ class SemanticAnnotator::SnapshotTxnViolation
 end
 
 class SemanticAnnotator::StreamYieldFrame
-  sig { returns(AST::BgStreamBlock) }
+  sig { returns(AST::Node) }
   def node; end
   sig { returns(Array) }
   def yield_types; end
@@ -6732,9 +6734,9 @@ class SemanticIndex
   def function_registry; end
   sig { returns(Semantic::SemanticIdIndex) }
   def id_index; end
-  sig { returns(AST::Program) }
+  sig { returns(AST::Node) }
   def program; end
-  sig { returns(T.any(Scope, T.untyped)) }
+  sig { returns(Scope) }
   def root_scope; end
 end
 
@@ -6816,14 +6818,14 @@ class StdLibGlobalBinding
   def name; end
   sig { returns(Symbol) }
   def storage; end
-  sig { returns(T.any(Symbol, T.untyped)) }
+  sig { returns(Symbol) }
   def type; end
 end
 
 class StdLibTypeBinding
   sig { returns(Symbol) }
   def name; end
-  sig { returns(T.any(Proc, T.untyped)) }
+  sig { returns(Proc) }
   def schema_factory; end
 end
 
@@ -6859,9 +6861,9 @@ class TestLowering::TestThatEnv
   def when_desc; end
   sig { returns(String) }
   def tag_suffix; end
-  sig { returns(T::Array[MIR::Let]) }
+  sig { returns(T::Array[MIR::Node]) }
   def stub_mir; end
-  sig { returns(T::Array[T.any(MIR::Comment, MIR::Let)]) }
+  sig { returns(T::Array[MIR::Node]) }
   def when_setup_mir; end
   sig { returns(T::Array[Array]) }
   def when_before_each_mir; end
@@ -6933,7 +6935,7 @@ class ThunkTransform::Emit::ThunkParamFact
 end
 
 class ThunkTransform::RecursiveSplitter::BaseCase
-  sig { returns(T.any(AST::BinaryOp, AST::Identifier, AST::MethodCall)) }
+  sig { returns(AST::Node) }
   def cond_ast; end
   sig { returns(AST::Node) }
   def value_ast; end
@@ -6942,45 +6944,45 @@ end
 class ThunkTransform::RecursiveSplitter::MutualPlan
   sig { returns(T::Array[ThunkTransform::RecursiveSplitter::BaseCase]) }
   def base_cases; end
-  sig { returns(AST::ReturnNode) }
+  sig { returns(AST::Node) }
   def final_return; end
-  sig { returns(T::Array[AST::BinaryOp]) }
+  sig { returns(T::Array[AST::Node]) }
   def target_args; end
   sig { returns(String) }
   def target_fn; end
 end
 
 class ThunkTransform::RecursiveSplitter::MutualTailCall
-  sig { returns(T::Array[AST::BinaryOp]) }
+  sig { returns(T::Array[AST::Node]) }
   def args; end
   sig { returns(String) }
   def name; end
 end
 
 class ThunkTransform::RecursiveSplitter::MutualThunkPlan
-  sig { returns(T.any(Array, T::Array[AST::FunctionDef])) }
+  sig { returns(T::Array[AST::Node]) }
   def cycle_fns; end
-  sig { returns(T.any(T.untyped, ThunkTransform::RecursiveSplitter::MutualPlan)) }
+  sig { returns(ThunkTransform::RecursiveSplitter::MutualPlan) }
   def own_plan; end
 end
 
 class ThunkTransform::RecursiveSplitter::Plan
   sig { returns(T::Array[ThunkTransform::RecursiveSplitter::BaseCase]) }
   def base_cases; end
-  sig { returns(T.any(AST::GetField, AST::Identifier, AST::Literal)) }
+  sig { returns(AST::Node) }
   def combine_lhs; end
   sig { returns(Symbol) }
   def combine_op; end
-  sig { returns(AST::ReturnNode) }
+  sig { returns(AST::Node) }
   def final_return; end
-  sig { returns(T::Array[T.any(AST::BinaryOp, AST::Identifier)]) }
+  sig { returns(T::Array[AST::Node]) }
   def recurse_args; end
 end
 
 class ThunkTransform::RecursiveSplitter::RecursiveCombine
-  sig { returns(T::Array[T.any(AST::BinaryOp, AST::Identifier)]) }
+  sig { returns(T::Array[AST::Node]) }
   def args; end
-  sig { returns(T.any(AST::GetField, AST::Identifier, AST::Literal)) }
+  sig { returns(AST::Node) }
   def lhs; end
   sig { returns(Symbol) }
   def op; end
@@ -7003,58 +7005,58 @@ class Type::ObservablePublishSpec
 end
 
 class Type::ObservableTerminalSpec
-  sig { returns(T.untyped) }
+  sig { returns(Class) }
   def ast_class; end
-  sig { returns(T.untyped) }
+  sig { returns(Type::ObservablePublishSpec) }
   def publish; end
   sig { returns(Proc) }
   def wrapper; end
 end
 
 class TypeCapabilities
-  sig { returns(T.untyped) }
+  sig { returns(Symbol) }
   def collection; end
-  sig { returns(T.untyped) }
+  sig { returns(Symbol) }
   def elem_ownership; end
-  sig { returns(T.untyped) }
+  sig { returns(Symbol) }
   def elem_sync; end
-  sig { returns(T.untyped) }
+  sig { returns(Symbol) }
   def layout; end
-  sig { returns(T.untyped) }
+  sig { returns(Symbol) }
   def link_source; end
-  sig { returns(T.untyped) }
+  sig { returns(Integer) }
   def lock_rank; end
-  sig { returns(T.any(FalseClass, T::Boolean, TrueClass)) }
+  sig { returns(T::Boolean) }
   def observable; end
-  sig { returns(T.untyped) }
+  sig { returns(Symbol) }
   def observable_terminal; end
-  sig { returns(T.untyped) }
+  sig { returns(Lexer::Token) }
   def observable_token; end
-  sig { returns(T.untyped) }
+  sig { returns(Symbol) }
   def ownership; end
-  sig { returns(T.any(FalseClass, T::Boolean, TrueClass)) }
+  sig { returns(T::Boolean) }
   def polymorphic_shared; end
-  sig { returns(T.untyped) }
+  sig { returns(Integer) }
   def shard_count; end
-  sig { returns(T.any(FalseClass, T::Boolean, TrueClass)) }
+  sig { returns(T::Boolean) }
   def soa; end
-  sig { returns(T.untyped) }
+  sig { returns(Symbol) }
   def sync; end
 end
 
 class TypeCapabilitySuffix
-  sig { returns(T.any(String, T.untyped)) }
+  sig { returns(String) }
   def base; end
-  sig { returns(T.untyped) }
+  sig { returns(Symbol) }
   def ownership; end
-  sig { returns(T.untyped) }
+  sig { returns(Symbol) }
   def sync; end
 end
 
 class TypeFsmForEachDescriptor
   sig { returns(String) }
   def advance_method; end
-  sig { returns(T.any(FalseClass, T::Boolean, TrueClass)) }
+  sig { returns(T::Boolean) }
   def deref; end
   sig { returns(String) }
   def init_method; end
@@ -7072,71 +7074,71 @@ class TypeId
 end
 
 class TypePlacement
-  sig { returns(T.untyped) }
+  sig { returns(Symbol) }
   def provenance; end
 end
 
 class TypeShape
-  sig { returns(T.any(FalseClass, T.untyped, TrueClass)) }
+  sig { returns(T::Boolean) }
   def array; end
-  sig { returns(T.any(FalseClass, T::Boolean, TrueClass)) }
+  sig { returns(T::Boolean) }
   def auto; end
-  sig { returns(T.untyped) }
+  sig { returns(T.any(Integer, Symbol)) }
   def capacity; end
-  sig { returns(T.untyped) }
+  sig { returns(Symbol) }
   def element_type_raw; end
-  sig { returns(T.any(FalseClass, T.untyped, TrueClass)) }
+  sig { returns(T::Boolean) }
   def error_union; end
-  sig { returns(T.any(Array, T.untyped)) }
+  sig { returns(T::Array[Symbol]) }
   def generic_args_raw; end
-  sig { returns(T.untyped) }
+  sig { returns(Symbol) }
   def generic_base_raw; end
-  sig { returns(T.any(FalseClass, T.untyped, TrueClass)) }
+  sig { returns(T::Boolean) }
   def generic_instance; end
-  sig { returns(T.untyped) }
+  sig { returns(Symbol) }
   def key_type_raw; end
-  sig { returns(T.any(FalseClass, T::Array[T.untyped], TrueClass)) }
+  sig { returns(T::Boolean) }
   def map; end
-  sig { returns(T.any(FalseClass, T.untyped, TrueClass)) }
+  sig { returns(T::Boolean) }
   def optional; end
-  sig { returns(T.untyped) }
+  sig { returns(Symbol) }
   def payload_type_raw; end
   sig { returns(T.any(Symbol, T.untyped)) }
   def raw; end
-  sig { returns(T.any(FalseClass, T::Boolean, TrueClass)) }
+  sig { returns(T::Boolean) }
   def tense; end
-  sig { returns(T.untyped) }
+  sig { returns(Symbol) }
   def tense_type_raw; end
-  sig { returns(T.untyped) }
+  sig { returns(Symbol) }
   def value_type_raw; end
-  sig { returns(T.untyped) }
+  sig { returns(Symbol) }
   def wrapped_type_raw; end
 end
 
 class TypeShape::ArrayParts
   sig { returns(T::Boolean) }
   def array; end
-  sig { returns(T.untyped) }
+  sig { returns(T.any(Integer, Symbol)) }
   def capacity; end
-  sig { returns(T.untyped) }
+  sig { returns(Symbol) }
   def element_type_raw; end
 end
 
 class TypeShape::GenericParts
   sig { returns(T::Array[Symbol]) }
   def generic_args_raw; end
-  sig { returns(T.untyped) }
+  sig { returns(Symbol) }
   def generic_base_raw; end
   sig { returns(T::Boolean) }
   def generic_instance; end
 end
 
 class TypeShape::MapParts
-  sig { returns(T.untyped) }
+  sig { returns(Symbol) }
   def key_type_raw; end
   sig { returns(T::Boolean) }
   def map; end
-  sig { returns(T.untyped) }
+  sig { returns(Symbol) }
   def value_type_raw; end
 end
 
@@ -7267,10 +7269,16 @@ class MIR::OwnershipEffect
   def produces_owned; end
   sig { returns(T::Boolean) }
   def requires_hoist; end
+  sig { returns(Symbol) }
+  def alloc; end
+  sig { returns(Symbol) }
+  def cleanup_kind; end
+  sig { returns(String) }
+  def target_var; end
 end
 
 class MIR::LoweredNodeId
-  sig { returns(T.any(Integer, T.untyped)) }
+  sig { returns(Integer) }
   def value; end
 end
 
@@ -7282,33 +7290,37 @@ class MIRLowering::OwnershipSurfaceScan
 end
 
 class MIR::LoweredBodyId
-  sig { returns(T.any(Array, T::Array[MIR::LoweredNodeId])) }
+  sig { returns(T::Array[MIR::Node]) }
   def node_ids; end
 end
 
 class Schemas::ResourceClosePlan
-  sig { returns(T.any(Array, T::Array[Schemas::ResourceCloseAction])) }
+  sig { returns(T::Array[Schemas::ResourceCloseAction]) }
   def actions; end
 end
 
 class Schemas::ResourceCloseAction
-  sig { returns(T.any(Schemas::ResourceCloseCallKind, T.untyped)) }
+  sig { returns(Schemas::ResourceCloseCallKind) }
   def call_kind; end
-  sig { returns(T.any(Array, T.untyped)) }
+  sig { returns(T::Array[String]) }
   def field_path; end
   sig { returns(String) }
   def name; end
-  sig { returns(T.any(Integer, T.untyped)) }
+  sig { returns(Integer) }
   def runtime_heap_alloc_args; end
 end
 
 class MIRLowering::LoweredStmtPacket
-  sig { returns(T::Array[T.any(MIR::MoveMark, MIR::TransferMark)]) }
+  sig { returns(T::Array[MIR::Node]) }
   def stmt_transfer_marks; end
   sig { returns(T.any(Array, MIR::Node)) }
   def mir; end
   sig { returns(T::Array[MIR::Node]) }
   def pending; end
+  sig { returns(Integer) }
+  def source_column; end
+  sig { returns(Integer) }
+  def source_line; end
 end
 
 class MIRLowering::OwnershipFinalizationContext
@@ -7326,10 +7338,12 @@ class MIRLowering::OwnershipFinalizationContext
   def inherited_alloc_names; end
   sig { returns(Set) }
   def move_mark_names; end
-  sig { returns(T::Array[MIR::MoveMark]) }
+  sig { returns(T::Array[MIR::Node]) }
   def out; end
   sig { returns(Set) }
   def transfer_mark_names; end
+  sig { returns(MIRLowering::OwnershipFinalizationContext) }
+  def parent; end
 end
 
 class MIRLowering::OwnershipFactTarget
@@ -7339,27 +7353,45 @@ class MIRLowering::OwnershipFactTarget
   def include_transfer_contract; end
   sig { returns(String) }
   def name; end
+  sig { returns(Type) }
+  def type_info; end
 end
 
 class MIRLowering::DestinationPlacementPlan
   sig { returns(Symbol) }
   def action; end
+  sig { returns(Symbol) }
+  def dest_alloc; end
+  sig { returns(Symbol) }
+  def source_alloc; end
+  sig { returns(Type) }
+  def type_info; end
 end
 
 class AST::ErrorSelector
-  sig { returns(T.any(Symbol, T.untyped)) }
+  sig { returns(Symbol) }
   def form; end
   sig { returns(Symbol) }
   def name; end
+  sig { returns(Lexer::Token) }
+  def token; end
 end
 
 class AST::ErrorClause
-  sig { returns(T.any(AST::ErrorActionKind, T.untyped)) }
+  sig { returns(AST::Node) }
   def action; end
-  sig { returns(T.any(Array, T::Array[AST::ErrorSelector])) }
+  sig { returns(T::Array[AST::Node]) }
   def selectors; end
   sig { returns(T::Array[AST::Node]) }
   def body; end
+  sig { returns(Integer) }
+  def retries; end
+  sig { returns(Lexer::Token) }
+  def token; end
+  sig { returns(AST::Node) }
+  def message; end
+  sig { returns(AST::Node) }
+  def value; end
 end
 
 class MIRLowering::DestinationSourceFact
@@ -7376,19 +7408,31 @@ class MIRPassState::StageSpec
   def name; end
   sig { returns(String) }
   def producer; end
+  sig { returns(Symbol) }
+  def requires; end
 end
 
 class MIR::RegistryCall
-  sig { returns(T.any(Array, T::Array[MIR::RegistryCallArg])) }
+  sig { returns(T::Array[MIR::Node]) }
   def args; end
-  sig { returns(T.any(FunctionSignature, T.untyped)) }
+  sig { returns(FunctionSignature) }
   def entry; end
-  sig { returns(T.any(String, T.untyped)) }
+  sig { returns(String) }
   def reason; end
-  sig { returns(T.any(MIR::OwnershipContract, T.untyped)) }
+  sig { returns(MIR::Node) }
   def ownership_contract; end
-  sig { returns(T.any(FalseClass, T.untyped, TrueClass)) }
+  sig { returns(T::Boolean) }
   def suppress_try; end
+  sig { returns(Type) }
+  def key_type; end
+  sig { returns(T::Boolean) }
+  def result_ownership_bearing; end
+  sig { returns(Type) }
+  def result_type; end
+  sig { returns(Type) }
+  def value_type; end
+  sig { returns(Symbol) }
+  def owned_result_alloc; end
 end
 
 class MIRLowering::LoweredBodyConstruction
@@ -7411,6 +7455,10 @@ class CleanupClassifier::BindingCleanupFacts
   def mutable_binding_mutated; end
   sig { returns(T::Boolean) }
   def rodata_provenance; end
+  sig { returns(Schemas::ResourceClosePlan) }
+  def resource_close_plan; end
+  sig { returns(Symbol) }
+  def sync; end
 end
 
 class MIRLoweringExpressions::BinaryOperandFacts
@@ -7418,7 +7466,7 @@ class MIRLoweringExpressions::BinaryOperandFacts
   def int_arithmetic; end
   sig { returns(Type) }
   def left_type; end
-  sig { returns(AST::BinaryOp) }
+  sig { returns(AST::Node) }
   def node; end
   sig { returns(Symbol) }
   def op; end
@@ -7428,6 +7476,10 @@ class MIRLoweringExpressions::BinaryOperandFacts
   def left; end
   sig { returns(MIR::Node) }
   def right; end
+  sig { returns(MIRLoweringExpressions::UnitVariantAccess) }
+  def left_unit_variant; end
+  sig { returns(MIRLoweringExpressions::UnitVariantAccess) }
+  def right_unit_variant; end
 end
 
 class MIRLoweringExpressions::BinaryOperationPlan
@@ -7435,6 +7487,22 @@ class MIRLoweringExpressions::BinaryOperationPlan
   def facts; end
   sig { returns(Symbol) }
   def kind; end
+  sig { returns(Symbol) }
+  def builtin; end
+  sig { returns(String) }
+  def op_str; end
+  sig { returns(String) }
+  def optional_capture; end
+  sig { returns(MIRLoweringExpressions::OptionalOperandSide) }
+  def optional_side; end
+  sig { returns(Symbol) }
+  def tag_source; end
+  sig { returns(String) }
+  def type_arg; end
+  sig { returns(Symbol) }
+  def union_error_type; end
+  sig { returns(MIRLoweringExpressions::UnitVariantAccess) }
+  def variant; end
 end
 
 class MIRLoweringExpressions::BinaryIntArithmeticFacts
@@ -7453,6 +7521,12 @@ class MIRLowering::OwnedSinkPlan
   def source_slice_view; end
   sig { returns(Symbol) }
   def target_alloc; end
+  sig { returns(Symbol) }
+  def copy_mode; end
+  sig { returns(String) }
+  def rc_func; end
+  sig { returns(String) }
+  def zig_type; end
 end
 
 class MIRLowering::OwnedSinkSourceFact
@@ -7474,23 +7548,31 @@ class MIRLowering::OwnedSinkSourceFact
   def same_alloc_verifiable; end
   sig { returns(T::Boolean) }
   def transfer_without_local_cleanup; end
+  sig { returns(Symbol) }
+  def source_alloc; end
 end
 
 class MIR::OwnershipTransferPlan
-  sig { returns(T.any(Symbol, T.untyped)) }
+  sig { returns(Symbol) }
   def target; end
+  sig { returns(T::Boolean) }
+  def move_guarded; end
+  sig { returns(String) }
+  def name; end
+  sig { returns(Symbol) }
+  def target_alloc; end
 end
 
 class Annotator::Phases::DeclarationIndex
   sig { returns(T::Array[Annotator::Phases::ErrorTypeRegistration]) }
   def error_type_registrations; end
-  sig { returns(T::Array[AST::ExternFnDecl]) }
+  sig { returns(T::Array[AST::Node]) }
   def extern_function_declarations; end
-  sig { returns(T::Array[AST::FunctionDef]) }
+  sig { returns(T::Array[AST::Node]) }
   def function_declarations; end
-  sig { returns(T::Array[AST::RequireNode]) }
+  sig { returns(T::Array[AST::Node]) }
   def imports; end
-  sig { returns(T::Array[AST::UnionDef]) }
+  sig { returns(T::Array[AST::Node]) }
   def union_method_declarations; end
   sig { returns(T::Array[AST::Node]) }
   def body_statements; end
@@ -7499,7 +7581,7 @@ class Annotator::Phases::DeclarationIndex
 end
 
 class FsmOps::StateFieldDecl
-  sig { returns(T.any(MIR::AddressOf, MIR::Lit, MIR::Undef)) }
+  sig { returns(MIR::Node) }
   def default_value; end
   sig { returns(String) }
   def name; end
@@ -7517,26 +7599,34 @@ class MIRLowering::OwnershipTransferTarget
 end
 
 class MIR::StructInitField
-  sig { returns(T.any(String, Symbol, T.any(String, Symbol))) }
+  sig { returns(T.any(String, Symbol)) }
   def name; end
-  sig { returns(T.any(MIR::Node, T.untyped)) }
+  sig { returns(MIR::Node) }
   def value; end
+  sig { returns(Symbol) }
+  def alloc; end
 end
 
 class MIR::OwnershipConsumptionFact
-  sig { returns(T.any(T.untyped, T::Boolean, TrueClass)) }
+  sig { returns(T::Boolean) }
   def covers_consuming_params; end
-  sig { returns(T.any(String, T.untyped)) }
+  sig { returns(String) }
   def source; end
-  sig { returns(T.any(Symbol, T.untyped)) }
+  sig { returns(Symbol) }
   def target; end
+  sig { returns(T::Array[MIR::Node]) }
+  def operands; end
+  sig { returns(Symbol) }
+  def target_alloc; end
 end
 
 class AST::ReturnFact
-  sig { returns(T.any(Symbol, T.untyped)) }
+  sig { returns(Symbol) }
   def metatype; end
-  sig { returns(T.any(Symbol, T.untyped)) }
+  sig { returns(Symbol) }
   def type; end
+  sig { returns(Symbol) }
+  def storage; end
 end
 
 class CleanupClassifier::FrozenCleanupFacts
@@ -7552,49 +7642,71 @@ class CleanupClassifier::CleanupClassificationPlan
 end
 
 class MIR::BindingMaterialization
-  sig { returns(T.any(FalseClass, T::Boolean, TrueClass)) }
+  sig { returns(T::Boolean) }
   def mutable; end
-  sig { returns(T.any(T.untyped, Type)) }
+  sig { returns(Type) }
   def type_info; end
-  sig { returns(T.any(Symbol, T.untyped)) }
+  sig { returns(Symbol) }
   def cleanup_mode; end
+  sig { returns(Symbol) }
+  def alloc; end
+  sig { returns(MIR::Node) }
+  def expr; end
+  sig { returns(String) }
+  def name; end
+  sig { returns(CleanupEntry) }
+  def cleanup_entry; end
+  sig { returns(Symbol) }
+  def scope; end
+  sig { returns(String) }
+  def suppression; end
+  sig { returns(Type) }
+  def annotation; end
 end
 
 class FsmTransform::Emit::FsmSegmentSpec
   sig { returns(T::Array[FsmTransform::Emit::FsmBodyItem]) }
   def body_stmts; end
-  sig { returns(T::Array[MIR::ExprStmt]) }
+  sig { returns(T::Array[MIR::Node]) }
   def err_cleanups; end
-  sig { returns(T::Array[MIR::Comment]) }
+  sig { returns(T::Array[MIR::Node]) }
   def extra_prologue_stmts; end
   sig { returns(FsmTransform::Emit::FsmSegmentFacts) }
   def facts; end
-  sig { returns(T::Array[MIR::FsmResultTransferFact]) }
+  sig { returns(T::Array[MIR::Node]) }
   def fsm_result_transfer_facts; end
   sig { returns(Integer) }
   def index; end
-  sig { returns(T::Array[T.any(MIR::ExprStmt, MIR::Set)]) }
+  sig { returns(T::Array[MIR::Node]) }
   def pre_body_stmts; end
   sig { returns(T::Array[FsmTransform::Emit::FsmBodyItem]) }
   def prologue_stmts; end
-  sig { returns(T::Array[T.any(MIR::MoveMark, MIR::Set, MIR::TransferMark)]) }
+  sig { returns(T::Array[MIR::Node]) }
   def structure_stmts; end
   sig { returns(T::Boolean) }
   def suppress_runtime_ref; end
+  sig { returns(MIR::Node) }
+  def descriptor; end
+  sig { returns(String) }
+  def fn_name; end
+  sig { returns(MIR::Node) }
+  def pre_body_skip; end
 end
 
 class AST::DeferredDrop
-  sig { returns(T.any(String, T.untyped)) }
+  sig { returns(String) }
   def name; end
-  sig { returns(T.any(FalseClass, T::Boolean, TrueClass)) }
+  sig { returns(T::Boolean) }
   def resource; end
-  sig { returns(T.any(T.untyped, Type)) }
+  sig { returns(Type) }
   def type; end
 end
 
 class MIRChecker::InlineStoredAllocCheck
   sig { returns(Symbol) }
   def label; end
+  sig { returns(Symbol) }
+  def alloc; end
 end
 
 class MIRLoweringExpressions::FieldAccessPlan
@@ -7608,6 +7720,8 @@ class MIRLoweringExpressions::FieldAccessPlan
   def union_payload; end
   sig { returns(MIR::Node) }
   def target; end
+  sig { returns(String) }
+  def union_payload_zig; end
 end
 
 class FsmTransform::Emit::FsmSegmentFacts
@@ -7615,7 +7729,7 @@ class FsmTransform::Emit::FsmSegmentFacts
   def ctx_reads; end
   sig { returns(T::Array[String]) }
   def move_guard_writes; end
-  sig { returns(T::Array[MIR::FsmOwnershipFact]) }
+  sig { returns(T::Array[MIR::Node]) }
   def ownership_facts; end
   sig { returns(T::Array[String]) }
   def required_move_guards; end
@@ -7624,7 +7738,7 @@ class FsmTransform::Emit::FsmSegmentFacts
 end
 
 class MIR::RuntimeCallSpec
-  sig { returns(MIR::CallableContract) }
+  sig { returns(MIR::Node) }
   def callable_contract; end
   sig { returns(String) }
   def callee; end
@@ -7635,10 +7749,12 @@ class MIR::RuntimeCallSpec
 end
 
 class MIR::ContextFieldDecl
-  sig { returns(T.any(String, T.untyped)) }
+  sig { returns(String) }
   def name; end
-  sig { returns(T.any(String, T.untyped)) }
+  sig { returns(String) }
   def type_zig; end
+  sig { returns(MIR::Node) }
+  def default_value; end
 end
 
 class MIRLoweringExpressions::IndexAccessPlan
@@ -7646,28 +7762,34 @@ class MIRLoweringExpressions::IndexAccessPlan
   def needs_mut_ref; end
   sig { returns(T::Boolean) }
   def optional; end
-  sig { returns(T.any(MIR::FieldGet, MIR::Ident, MIR::RegistryCall)) }
+  sig { returns(MIR::Node) }
   def target; end
-  sig { returns(T.any(AST::GetField, AST::GetIndex, AST::Identifier)) }
+  sig { returns(AST::Node) }
   def target_ast; end
   sig { returns(Type) }
   def type_info; end
   sig { returns(MIR::Node) }
   def index; end
+  sig { returns(String) }
+  def target_name; end
 end
 
 class MIR::FsmStepFact
-  sig { returns(T.any(Array, T::Array[T.untyped])) }
+  sig { returns(T::Array[String]) }
   def cleanups; end
-  sig { returns(T.any(Integer, T.untyped)) }
+  sig { returns(Integer) }
   def index; end
-  sig { returns(T.any(Array, T.untyped)) }
+  sig { returns(T::Array[String]) }
   def reads; end
 end
 
 class MIR::TaskConfigPlan
-  sig { returns(T.any(String, T.untyped)) }
+  sig { returns(String) }
   def stack_variant; end
+  sig { returns(Integer) }
+  def profile_dispatch_id; end
+  sig { returns(Integer) }
+  def profile_site_id; end
 end
 
 class MIRLoweringExpressions::OrRescueFacts
@@ -7682,18 +7804,18 @@ end
 class MIR::ProfileTaskSite
   sig { returns(Integer) }
   def column; end
-  sig { returns(T.any(Symbol, T.untyped)) }
+  sig { returns(Symbol) }
   def dispatch; end
   sig { returns(Symbol) }
   def form; end
   sig { returns(Integer) }
   def line; end
-  sig { returns(T.any(Integer, T.untyped)) }
+  sig { returns(Integer) }
   def site_id; end
 end
 
 class MIRLoweringExpressions::BinaryMirOperands
-  sig { returns(T.any(MIR::Ident, MIR::Lit)) }
+  sig { returns(MIR::Node) }
   def right; end
   sig { returns(MIR::Node) }
   def left; end
@@ -7719,11 +7841,11 @@ class FsmTransform::Emit::FsmEmitContext
   def blk_label; end
   sig { returns(Hash) }
   def capture_close_plans; end
-  sig { returns(T::Array[MIR::ContextFieldDecl]) }
+  sig { returns(T::Array[MIR::Node]) }
   def capture_fields; end
-  sig { returns(T::Array[MIR::RcRelease]) }
+  sig { returns(T::Array[MIR::Node]) }
   def capture_finalizers; end
-  sig { returns(T::Array[MIR::StructInitField]) }
+  sig { returns(T::Array[MIR::Node]) }
   def capture_inits; end
   sig { returns(Hash) }
   def captured; end
@@ -7731,7 +7853,7 @@ class FsmTransform::Emit::FsmEmitContext
   def ctx_type; end
   sig { returns(String) }
   def ctx_var; end
-  sig { returns(T::Array[MIR::ContextFieldDecl]) }
+  sig { returns(T::Array[MIR::Node]) }
   def extra_ctx_fields; end
   sig { returns(T::Array[String]) }
   def fresh_heap_cleanup_names; end
@@ -7749,12 +7871,18 @@ class FsmTransform::Emit::FsmEmitContext
   def promise_var; end
   sig { returns(String) }
   def promise_zig; end
-  sig { returns(T::Array[T.any(MIR::ErrDeferStmt, MIR::Let)]) }
+  sig { returns(T::Array[MIR::Node]) }
   def promoted_decls; end
   sig { returns(T::Array[String]) }
   def recursive_promoted_names; end
   sig { returns(String) }
   def rt_name; end
+  sig { returns(Integer) }
+  def profile_column; end
+  sig { returns(Integer) }
+  def profile_line; end
+  sig { returns(Integer) }
+  def profile_site_id; end
 end
 
 class MIR::FiberSpawnCall
@@ -7762,16 +7890,20 @@ class MIR::FiberSpawnCall
   def ctx_type; end
   sig { returns(String) }
   def ctx_var; end
-  sig { returns(T.any(Symbol, T.untyped)) }
+  sig { returns(Symbol) }
   def target; end
-  sig { returns(MIR::TaskConfigPlan) }
+  sig { returns(MIR::Node) }
   def task_config; end
-  sig { returns(T.any(FalseClass, T::Boolean, TrueClass)) }
+  sig { returns(T::Boolean) }
   def pass_ctx_by_address; end
+  sig { returns(String) }
+  def runtime_name; end
+  sig { returns(String) }
+  def wait_group_name; end
 end
 
 class MIR::ExecutionBoundaryFact
-  sig { returns(T.any(Array, T::Array[MIR::BoundaryCaptureFact])) }
+  sig { returns(T::Array[MIR::Node]) }
   def captures; end
   sig { returns(Symbol) }
   def dispatch; end
@@ -7782,6 +7914,12 @@ end
 class FiberCtxBuilder::CaptureCleanupPlan
   sig { returns(FiberCtxBuilder::CaptureCleanupKind) }
   def kind; end
+  sig { returns(Type) }
+  def mirror_type; end
+  sig { returns(FiberCtxBuilder::CaptureRcKind) }
+  def rc_kind; end
+  sig { returns(String) }
+  def rc_payload_type_zig; end
 end
 
 class FiberCtxBuilder::CaptureSpec
@@ -7789,27 +7927,35 @@ class FiberCtxBuilder::CaptureSpec
   def cleanup_plan; end
   sig { returns(String) }
   def field_type_zig; end
-  sig { returns(T.any(MIR::AddressOf, MIR::Ident)) }
+  sig { returns(MIR::Node) }
   def init_value_mir; end
   sig { returns(String) }
   def name; end
-  sig { returns(T::Array[T.any(MIR::ErrDeferStmt, MIR::Let)]) }
+  sig { returns(T::Array[MIR::Node]) }
   def setup_mir; end
 end
 
 class MIR::BoundaryCaptureFact
   sig { returns(String) }
   def name; end
-  sig { returns(T.any(FalseClass, T::Boolean, TrueClass)) }
+  sig { returns(T::Boolean) }
   def parallel_safe; end
-  sig { returns(T.any(FalseClass, T::Boolean, TrueClass)) }
+  sig { returns(T::Boolean) }
   def requires_pinned; end
-  sig { returns(T.any(FalseClass, T::Boolean, TrueClass)) }
+  sig { returns(T::Boolean) }
   def scheduler_affine; end
+  sig { returns(Symbol) }
+  def forbidden_reason; end
+  sig { returns(Symbol) }
+  def ownership; end
+  sig { returns(Symbol) }
+  def storage; end
+  sig { returns(Symbol) }
+  def sync; end
 end
 
 class MIRLoweringConcurrency::NextExprPlan
-  sig { returns(T.any(MIR::Ident, MIR::RegistryCall)) }
+  sig { returns(MIR::Node) }
   def inner; end
   sig { returns(Type) }
   def promise_type; end
@@ -7817,22 +7963,26 @@ class MIRLoweringConcurrency::NextExprPlan
   def result_type; end
   sig { returns(Symbol) }
   def source_kind; end
+  sig { returns(AsyncResultShape) }
+  def async_result_shape; end
+  sig { returns(Symbol) }
+  def result_alloc; end
 end
 
 class MIRLoweringConcurrency::BgCaptureMaterialization
   sig { returns(FiberCtxBuilder::Result) }
   def caps; end
-  sig { returns(T::Array[MIR::ContextFieldDecl]) }
+  sig { returns(T::Array[MIR::Node]) }
   def capture_fields; end
-  sig { returns(T::Array[MIR::RcRelease]) }
+  sig { returns(T::Array[MIR::Node]) }
   def capture_finalizers; end
-  sig { returns(T::Array[MIR::CaptureCleanupAction]) }
+  sig { returns(T::Array[MIR::Node]) }
   def capture_frees; end
-  sig { returns(T::Array[MIR::StructInitField]) }
+  sig { returns(T::Array[MIR::Node]) }
   def capture_inits; end
   sig { returns(T::Array[String]) }
   def fresh_heap_cleanup_names; end
-  sig { returns(T::Array[T.any(MIR::ErrDeferStmt, MIR::Let)]) }
+  sig { returns(T::Array[MIR::Node]) }
   def promoted_decls; end
 end
 
@@ -7856,9 +8006,9 @@ end
 class MIRLoweringConcurrency::BgSchedulerPlan
   sig { returns(T.any(Symbol, TrueClass)) }
   def dispatch; end
-  sig { returns(MIR::ProfileTaskSite) }
+  sig { returns(MIR::Node) }
   def profile_site; end
-  sig { returns(MIR::TaskConfigPlan) }
+  sig { returns(MIR::Node) }
   def profiled_task_cfg; end
   sig { returns(Integer) }
   def site_col; end
@@ -7866,8 +8016,12 @@ class MIRLoweringConcurrency::BgSchedulerPlan
   def site_id; end
   sig { returns(Integer) }
   def site_line; end
-  sig { returns(MIR::FiberSpawnCall) }
+  sig { returns(MIR::Node) }
   def spawn_call; end
+  sig { returns(MIR::Node) }
+  def arena_init; end
+  sig { returns(T.any(FalseClass, Symbol, TrueClass)) }
+  def pin_mode; end
 end
 
 class MIRLoweringConcurrency::BgTypePlan
@@ -7884,8 +8038,10 @@ class MIRLoweringConcurrency::BgTypePlan
 end
 
 class MIR::UnionMatchArm
-  sig { returns(T.any(String, T.untyped)) }
+  sig { returns(String) }
   def variant; end
+  sig { returns(String) }
+  def payload; end
 end
 
 class MIRLoweringCapabilities::WithCapabilityBindingContext
@@ -7895,7 +8051,7 @@ class MIRLoweringCapabilities::WithCapabilityBindingContext
   def cap; end
   sig { returns(T::Boolean) }
   def needs_sort; end
-  sig { returns(AST::WithBlock) }
+  sig { returns(AST::Node) }
   def node; end
   sig { returns(Type) }
   def resolved_type; end
@@ -7903,10 +8059,18 @@ class MIRLoweringCapabilities::WithCapabilityBindingContext
   def rt_name; end
   sig { returns(String) }
   def var_name; end
-  sig { returns(AST::Identifier) }
+  sig { returns(AST::Node) }
   def var_node; end
   sig { returns(String) }
   def zig_var; end
+  sig { returns(AST::Node) }
+  def clause; end
+  sig { returns(Symbol) }
+  def var_storage; end
+  sig { returns(Symbol) }
+  def var_sync; end
+  sig { returns(String) }
+  def with_label; end
 end
 
 class MIRLoweringCapabilities::WithBindingMaterialization
@@ -7927,7 +8091,7 @@ class MIRLoweringConcurrency::BgFsmTransformContext
   def captured; end
   sig { returns(MIRLoweringConcurrency::BgLoweringNames) }
   def names; end
-  sig { returns(AST::BgBlock) }
+  sig { returns(AST::Node) }
   def node; end
   sig { returns(Set) }
   def pointer_captures; end
@@ -7940,10 +8104,12 @@ class MIRLoweringConcurrency::BgFsmTransformContext
 end
 
 class MIR::FsmSpawnCall
-  sig { returns(T.any(String, T.untyped)) }
+  sig { returns(String) }
   def ctx_var; end
-  sig { returns(T.any(Symbol, T.untyped)) }
+  sig { returns(Symbol) }
   def target; end
+  sig { returns(String) }
+  def runtime_name; end
 end
 
 class FsmTransform::RecursiveSplitter::SegmentList
@@ -7951,14 +8117,14 @@ class FsmTransform::RecursiveSplitter::SegmentList
   def alias_overrides_by_index; end
   sig { returns(T::Array[FsmTransform::Segments::Segment]) }
   def segments; end
-  sig { returns(T::Array[MIR::ContextFieldDecl]) }
+  sig { returns(T::Array[MIR::Node]) }
   def synthetic_fields; end
 end
 
 class MIR::FsmLoweringResult
-  sig { returns(T.any(MIR::FsmB1Body, MIR::FsmGenericBody)) }
+  sig { returns(MIR::Node) }
   def body; end
-  sig { returns(MIR::FsmStructure) }
+  sig { returns(MIR::Node) }
   def structure; end
 end
 
@@ -7970,16 +8136,22 @@ class FsmTransform::RecursiveSplitter::Builder::Finalized
 end
 
 class AST::ErrorAction
-  sig { returns(T.any(AST::ErrorActionKind, T.untyped)) }
+  sig { returns(AST::Node) }
   def action; end
-  sig { returns(T.any(Lexer::Token, T.noreturn, T.untyped)) }
+  sig { returns(Lexer::Token) }
   def token; end
+  sig { returns(T::Array[AST::Node]) }
+  def body; end
+  sig { returns(AST::Node) }
+  def message; end
+  sig { returns(AST::Node) }
+  def value; end
 end
 
 class MIR::UnionTypeVariant
   sig { returns(String) }
   def name; end
-  sig { returns(T.any(String, T.untyped)) }
+  sig { returns(String) }
   def zig_type; end
 end
 
@@ -7992,10 +8164,12 @@ class MIRLowering::UnionVariantLoweringFact
   def owner_name; end
   sig { returns(String) }
   def zig_type; end
+  sig { returns(T.any(Schemas::InlineStructVariant, Symbol, Type)) }
+  def data; end
 end
 
 class MIR::EnumTag
-  sig { returns(T.any(String, T.untyped)) }
+  sig { returns(String) }
   def variant; end
 end
 
@@ -8004,10 +8178,16 @@ class MIRLoweringCapabilities::LockBindingPlan
   def alias_name; end
   sig { returns(String) }
   def guard_var; end
-  sig { returns(MIR::CapabilityLockTarget) }
+  sig { returns(MIR::Node) }
   def lock_expr; end
-  sig { returns(AST::WithBlock) }
+  sig { returns(AST::Node) }
   def with_node; end
+  sig { returns(AST::Node) }
+  def clause; end
+  sig { returns(Symbol) }
+  def lock_sync; end
+  sig { returns(String) }
+  def with_label; end
 end
 
 class ClearBuildSupport::Config
@@ -8028,7 +8208,7 @@ end
 class MIRLowering::AllocatingResultFact
   sig { returns(String) }
   def name; end
-  sig { returns(MIR::OwnershipEffect) }
+  sig { returns(MIR::Node) }
   def ownership_effect; end
   sig { returns(Symbol) }
   def scope; end
@@ -8037,10 +8217,12 @@ class MIRLowering::AllocatingResultFact
 end
 
 class AST::DoBranch
-  sig { returns(T.any(FalseClass, T.untyped, TrueClass)) }
+  sig { returns(T::Boolean) }
   def can_smash; end
-  sig { returns(T.any(FalseClass, T.untyped, TrueClass)) }
+  sig { returns(T::Boolean) }
   def parallel; end
+  sig { returns(Symbol) }
+  def stack_size; end
 end
 
 class PipelineMaterializer::ItemSetup
@@ -8055,31 +8237,31 @@ class MIR::BgStreamPlan
   def alloc_var; end
   sig { returns(String) }
   def blk_label; end
-  sig { returns(T.any(Array, T::Array[MIR::Node])) }
+  sig { returns(T::Array[MIR::Node]) }
   def body; end
-  sig { returns(T.any(Array, T.untyped)) }
+  sig { returns(T::Array[MIR::Node]) }
   def capture_cleanups; end
-  sig { returns(T.any(Array, T::Array[MIR::ContextFieldDecl])) }
+  sig { returns(T::Array[MIR::Node]) }
   def capture_fields; end
-  sig { returns(T.any(Array, T::Array[MIR::StructInitField])) }
+  sig { returns(T::Array[MIR::Node]) }
   def capture_inits; end
   sig { returns(String) }
   def ctx_type; end
   sig { returns(String) }
   def ctx_var; end
-  sig { returns(T.any(Integer, T.untyped)) }
+  sig { returns(Integer) }
   def id; end
   sig { returns(String) }
   def local_stream; end
-  sig { returns(T.any(Array, T.untyped)) }
+  sig { returns(T::Array[MIR::Node]) }
   def promoted_decls; end
-  sig { returns(T.any(String, T.untyped)) }
+  sig { returns(String) }
   def rt_name; end
-  sig { returns(MIR::FiberSpawnCall) }
+  sig { returns(MIR::Node) }
   def spawn_call; end
   sig { returns(String) }
   def stream_var; end
-  sig { returns(T.any(String, T.untyped)) }
+  sig { returns(String) }
   def stream_zig; end
 end
 
@@ -8088,79 +8270,91 @@ class Schemas::InlineStructDeinitEntry
   def field; end
   sig { returns(Symbol) }
   def kind; end
+  sig { returns(String) }
+  def elem_zig_type; end
+  sig { returns(String) }
+  def zig_type; end
 end
 
 class MIR::FsmCaptureFact
   sig { returns(T.any(Integer, Symbol)) }
   def cleanup_at; end
-  sig { returns(T.any(String, T.untyped)) }
+  sig { returns(String) }
   def name; end
 end
 
 class MIR::BgStackfulPlan
-  sig { returns(T.any(String, T.untyped)) }
+  sig { returns(String) }
   def alloc_var; end
-  sig { returns(T.any(String, T.untyped)) }
+  sig { returns(String) }
   def bg_rt; end
-  sig { returns(T.any(String, T.untyped)) }
+  sig { returns(String) }
   def blk_label; end
-  sig { returns(T.any(Array, T.untyped)) }
+  sig { returns(T::Array[MIR::Node]) }
   def capture_fields; end
-  sig { returns(T.any(Array, T.untyped)) }
+  sig { returns(T::Array[MIR::Node]) }
   def capture_frees; end
-  sig { returns(T.any(Array, T.untyped)) }
+  sig { returns(T::Array[MIR::Node]) }
   def capture_inits; end
-  sig { returns(T.any(String, T.untyped)) }
+  sig { returns(String) }
   def ctx_type; end
-  sig { returns(T.any(String, T.untyped)) }
+  sig { returns(String) }
   def ctx_var; end
-  sig { returns(T.any(Integer, T.untyped)) }
+  sig { returns(Integer) }
   def id; end
-  sig { returns(T.any(FalseClass, T.untyped, TrueClass)) }
+  sig { returns(T::Boolean) }
   def is_void; end
-  sig { returns(T.any(MIR::ProfileTaskSite, T.untyped)) }
+  sig { returns(MIR::Node) }
   def profile_site; end
-  sig { returns(T.any(String, T.untyped)) }
+  sig { returns(String) }
   def promise_var; end
-  sig { returns(T.any(String, T.untyped)) }
+  sig { returns(String) }
   def promise_zig; end
-  sig { returns(T.any(Array, T.untyped)) }
+  sig { returns(T::Array[MIR::Node]) }
   def promoted_decls; end
-  sig { returns(T.any(String, T.untyped)) }
+  sig { returns(String) }
   def rt_name; end
-  sig { returns(T.any(Array, T.untyped)) }
+  sig { returns(T::Array[MIR::Node]) }
   def run_body; end
-  sig { returns(T.any(MIR::FiberSpawnCall, T.untyped)) }
+  sig { returns(MIR::Node) }
   def spawn_call; end
-  sig { returns(T.any(MIR::Node, T.untyped)) }
+  sig { returns(MIR::Node) }
   def alloc_expr; end
+  sig { returns(MIR::Node) }
+  def arena_init; end
 end
 
 class MIR::IndexedStore
-  sig { returns(T.any(MIR::InlineAllocMetadata, T.untyped)) }
+  sig { returns(MIR::Node) }
   def allocs; end
   sig { returns(FunctionSignature) }
   def entry; end
   sig { returns(Symbol) }
   def map_kind; end
-  sig { returns(T.any(MIR::OwnershipContract, T.untyped)) }
+  sig { returns(MIR::Node) }
   def ownership_contract; end
-  sig { returns(T.any(MIR::Ident, MIR::IndexGet, MIR::Node)) }
+  sig { returns(MIR::Node) }
   def target; end
-  sig { returns(T.any(IntrinsicTemplateKind, T.untyped)) }
+  sig { returns(IntrinsicTemplateKind) }
   def template_kind; end
   sig { returns(MIR::Node) }
   def index; end
-  sig { returns(T.any(MIR::Node, T.untyped)) }
+  sig { returns(MIR::Node) }
   def value; end
+  sig { returns(Type) }
+  def key_type; end
+  sig { returns(String) }
+  def target_var; end
+  sig { returns(Type) }
+  def value_type; end
 end
 
 class MIR::FsmDestroyLockRelease
-  sig { returns(T.any(Integer, T.untyped)) }
+  sig { returns(Integer) }
   def ctx_id; end
-  sig { returns(T.any(Integer, T.untyped)) }
+  sig { returns(Integer) }
   def guard_index; end
-  sig { returns(T.any(MIR::FieldGet, MIR::Ident)) }
+  sig { returns(MIR::Node) }
   def lock_ref; end
   sig { returns(String) }
   def name; end
@@ -8169,29 +8363,31 @@ class MIR::FsmDestroyLockRelease
 end
 
 class PipelineMaterializer::BufferSetup
-  sig { returns(MIR::DeferStmt) }
+  sig { returns(MIR::Node) }
   def defer_stmt; end
-  sig { returns(MIR::Let) }
+  sig { returns(MIR::Node) }
   def var_decl; end
 end
 
 class AST::PipelineShardContext
-  sig { returns(T.any(AST::Identifier, T.untyped)) }
+  sig { returns(AST::Node) }
   def map_var; end
-  sig { returns(T.any(FalseClass, T::Boolean, TrueClass)) }
+  sig { returns(T::Boolean) }
   def auto_detected; end
-  sig { returns(T.any(FalseClass, T::Boolean)) }
+  sig { returns(T::Boolean) }
   def body_allocates_frame; end
-  sig { returns(T.any(FalseClass, T::Boolean, TrueClass)) }
+  sig { returns(T::Boolean) }
   def key_allocates_frame; end
-  sig { returns(T.any(AST::Node, T.untyped)) }
+  sig { returns(AST::Node) }
   def key_expr; end
+  sig { returns(Integer) }
+  def shard_count; end
 end
 
 class FsmTransform::Emit::ExpandedLockSegment
   sig { returns(T::Array[FsmTransform::Emit::FsmSegmentSpec]) }
   def appended_specs; end
-  sig { returns(T::Array[MIR::ContextFieldDecl]) }
+  sig { returns(T::Array[MIR::Node]) }
   def extra_fields; end
   sig { returns(FsmTransform::Emit::FsmSegmentSpec) }
   def lock_try_spec; end
@@ -8200,8 +8396,10 @@ end
 class MIR::FsmDestroyStmt
   sig { returns(Symbol) }
   def source_kind; end
-  sig { returns(T.any(MIR::Node, T.untyped)) }
+  sig { returns(MIR::Node) }
   def stmt; end
+  sig { returns(String) }
+  def name; end
 end
 
 class Annotator::Phases::ErrorTypeRegistration
@@ -8214,9 +8412,9 @@ class Annotator::Phases::ErrorTypeRegistration
 end
 
 class MIR::DoBranchPlan
-  sig { returns(T.any(Array, T::Array[T.untyped])) }
+  sig { returns(T::Array[MIR::Node]) }
   def body; end
-  sig { returns(T.any(Array, T.untyped)) }
+  sig { returns(T::Array[MIR::Node]) }
   def capture_pre_decls; end
   sig { returns(String) }
   def raw_args_name; end
@@ -8224,21 +8422,39 @@ class MIR::DoBranchPlan
   def raw_rt_name; end
   sig { returns(String) }
   def wg_var; end
+  sig { returns(T::Array[MIR::Node]) }
+  def capture_fields; end
+  sig { returns(T::Array[MIR::Node]) }
+  def capture_inits; end
+  sig { returns(String) }
+  def ctx_type; end
+  sig { returns(String) }
+  def ctx_var; end
+  sig { returns(MIR::Node) }
+  def spawn_call; end
 end
 
 class AST::UnionMethodRequirement
-  sig { returns(T.any(String, T.untyped)) }
+  sig { returns(String) }
   def name; end
-  sig { returns(T.any(Array, T.untyped)) }
+  sig { returns(T::Array[AST::Node]) }
   def params; end
-  sig { returns(T.any(Lexer::Token, T.untyped)) }
+  sig { returns(Lexer::Token) }
   def token; end
+  sig { returns(T::Array[AST::Node]) }
+  def body; end
+  sig { returns(T::Boolean) }
+  def has_default_body; end
+  sig { returns(Type) }
+  def return_type; end
+  sig { returns(Symbol) }
+  def visibility; end
 end
 
 class AST::UnionMethodParamRequirement
-  sig { returns(T.any(String, T.untyped)) }
+  sig { returns(String) }
   def name; end
-  sig { returns(T.any(T.untyped, Type)) }
+  sig { returns(Type) }
   def type; end
 end
 
@@ -8254,48 +8470,60 @@ class MIR::FailureAction
   def error_kind; end
   sig { returns(Symbol) }
   def error_type; end
-  sig { returns(T.any(AST::ErrorActionKind, MIR::FailureActionKind, T.untyped)) }
+  sig { returns(MIR::Node) }
   def kind; end
   sig { returns(String) }
   def line; end
-  sig { returns(T.any(String, T.untyped)) }
+  sig { returns(String) }
   def rt_name; end
   sig { returns(T::Array[MIR::Emittable]) }
   def body; end
+  sig { returns(String) }
+  def with_label; end
+  sig { returns(MIR::Node) }
+  def message; end
+  sig { returns(MIR::Node) }
+  def return_value; end
 end
 
 class MIR::ObservableConsumerSpawn
   sig { returns(String) }
   def acc_name; end
-  sig { returns(T.any(T.untyped, Type)) }
+  sig { returns(Type) }
   def acc_type; end
   sig { returns(Integer) }
   def id; end
-  sig { returns(T.any(MIR::OwnershipContract, T.untyped)) }
+  sig { returns(MIR::Node) }
   def ownership_contract; end
-  sig { returns(T.any(String, T.untyped)) }
+  sig { returns(String) }
   def runtime_name; end
-  sig { returns(T.any(String, T.untyped)) }
+  sig { returns(String) }
   def source_name; end
-  sig { returns(T.any(FunctionSignature, T.untyped)) }
+  sig { returns(FunctionSignature) }
   def stdlib_def; end
-  sig { returns(T.any(String, T.untyped)) }
+  sig { returns(String) }
   def task_config_variant; end
 end
 
 class MIR::FsmDestroyCleanup
-  sig { returns(T.any(CleanupEntry, T.untyped)) }
+  sig { returns(CleanupEntry) }
   def cleanup_entry; end
   sig { returns(Symbol) }
   def source_kind; end
-  sig { returns(MIR::FieldGet) }
+  sig { returns(MIR::Node) }
   def target; end
+  sig { returns(String) }
+  def name; end
+  sig { returns(MIR::Node) }
+  def allocator; end
+  sig { returns(MIR::Node) }
+  def guard; end
 end
 
 class MIR::ThunkFrameInit
-  sig { returns(T.any(String, T.untyped)) }
+  sig { returns(String) }
   def field_name; end
-  sig { returns(T.any(MIR::Node, T.untyped)) }
+  sig { returns(MIR::Node) }
   def value; end
 end
 
@@ -8306,10 +8534,16 @@ class MIRLoweringExpressions::OrExitFacts
   def has_message; end
   sig { returns(Integer) }
   def line; end
+  sig { returns(String) }
+  def error_name; end
+  sig { returns(String) }
+  def kind; end
+  sig { returns(Integer) }
+  def name_id; end
 end
 
 class MIR::DoBlockPlan
-  sig { returns(T.any(Array, T::Array[MIR::DoBranchPlan])) }
+  sig { returns(T::Array[MIR::Node]) }
   def branches; end
   sig { returns(String) }
   def wg_var; end
@@ -8322,36 +8556,40 @@ class MIRLoweringCapabilities::MutableSnapshotCap
   def bare_type; end
   sig { returns(Symbol) }
   def conflict_error; end
-  sig { returns(MIR::Ident) }
+  sig { returns(MIR::Node) }
   def source; end
-  sig { returns(AST::Identifier) }
+  sig { returns(AST::Node) }
   def var_node; end
 end
 
 class MIRLoweringCapabilities::MutableSnapshotPlan
   sig { returns(Symbol) }
   def alloc; end
-  sig { returns(T::Array[T.any(MIR::Comment, MIR::Set)]) }
+  sig { returns(T::Array[MIR::Node]) }
   def body_mir; end
   sig { returns(T::Array[MIRLoweringCapabilities::MutableSnapshotCap]) }
   def capabilities; end
-  sig { returns(AST::WithBlock) }
+  sig { returns(AST::Node) }
   def node; end
   sig { returns(String) }
   def rt_name; end
+  sig { returns(String) }
+  def with_label; end
 end
 
 class MIRLowering::PipelineAllocMarkFact
   sig { returns(Symbol) }
   def alloc; end
-  sig { returns(MIR::AllocMark) }
+  sig { returns(MIR::Node) }
   def mark; end
+  sig { returns(CleanupEntry) }
+  def cleanup_entry; end
 end
 
 class MIRLoweringCapabilities::FallibleClauseFact
-  sig { returns(AST::ErrorActionKind) }
+  sig { returns(AST::Node) }
   def action_kind; end
-  sig { returns(T::Array[T.any(MIR::Comment, MIR::ScopeBlock, MIR::Set)]) }
+  sig { returns(T::Array[MIR::Node]) }
   def action_mir; end
   sig { returns(String) }
   def alias_name; end
@@ -8361,13 +8599,21 @@ class MIRLoweringCapabilities::FallibleClauseFact
   def matched_types; end
   sig { returns(String) }
   def var_name; end
+  sig { returns(MIR::Node) }
+  def exit_msg_mir; end
+  sig { returns(Integer) }
+  def retries; end
 end
 
 class MIR::FsmOwnershipFact
   sig { returns(Symbol) }
   def target; end
-  sig { returns(T.any(Symbol, T.untyped)) }
+  sig { returns(Symbol) }
   def target_alloc; end
+  sig { returns(T::Boolean) }
+  def move_guarded; end
+  sig { returns(String) }
+  def name; end
 end
 
 class MIR::SortedLockAcquireEntry
@@ -8377,79 +8623,85 @@ class MIR::SortedLockAcquireEntry
   def guard_var; end
   sig { returns(String) }
   def held_var; end
-  sig { returns(T.any(Integer, T.untyped)) }
+  sig { returns(Integer) }
   def index; end
   sig { returns(String) }
   def method_name; end
+  sig { returns(MIR::Node) }
+  def address_expr; end
+  sig { returns(MIR::Node) }
+  def lock_expr; end
 end
 
 class AST::AutoLockPlan
-  sig { returns(T.any(Symbol, T.untyped)) }
+  sig { returns(Symbol) }
   def sync; end
+  sig { returns(String) }
+  def var; end
 end
 
 class MIR::ThunkFrameField
-  sig { returns(T.any(String, T.untyped)) }
+  sig { returns(String) }
   def name; end
-  sig { returns(T.any(T.untyped, Type)) }
+  sig { returns(Type) }
   def type_info; end
 end
 
 class MIR::ThunkBaseCase
-  sig { returns(T.any(MIR::BinOp, MIR::Ident, MIR::Node)) }
+  sig { returns(MIR::Node) }
   def cond; end
-  sig { returns(T.any(MIR::FieldGet, MIR::Lit, MIR::Node)) }
+  sig { returns(MIR::Node) }
   def value; end
 end
 
 class MIR::ShardConcurrentEach
-  sig { returns(T.any(MIR::Cast, MIR::Lit, T.untyped)) }
+  sig { returns(MIR::Node) }
   def batch_size_expr; end
-  sig { returns(T.any(FalseClass, T.untyped, TrueClass)) }
+  sig { returns(T::Boolean) }
   def body_allocates_frame; end
   sig { returns(T.any(Array, T.untyped)) }
   def capture_fields; end
   sig { returns(T.any(Array, T::Array[MIR::StructInitField])) }
   def capture_inits; end
-  sig { returns(T.any(Integer, T.untyped)) }
+  sig { returns(Integer) }
   def id; end
-  sig { returns(T.any(FalseClass, T.untyped)) }
+  sig { returns(T::Boolean) }
   def inclusive; end
-  sig { returns(T.any(FalseClass, T.untyped, TrueClass)) }
+  sig { returns(T::Boolean) }
   def key_allocates_frame; end
   sig { returns(Type) }
   def key_type; end
-  sig { returns(T.any(MIR::Ident, T.untyped)) }
+  sig { returns(MIR::Node) }
   def map_expr; end
-  sig { returns(T.any(T.untyped, Type)) }
+  sig { returns(Type) }
   def map_type; end
   sig { returns(String) }
   def map_var_name; end
-  sig { returns(T.any(Integer, T.untyped)) }
+  sig { returns(Integer) }
   def shard_count; end
-  sig { returns(T.any(MIR::Lit, T.untyped)) }
+  sig { returns(MIR::Node) }
   def start_expr; end
-  sig { returns(T.any(String, T.untyped)) }
+  sig { returns(String) }
   def task_config_variant; end
-  sig { returns(T.any(MIR::Node, T.untyped)) }
+  sig { returns(MIR::Node) }
   def capacity_expr; end
-  sig { returns(T.any(MIR::Node, T.untyped)) }
+  sig { returns(MIR::Node) }
   def finish_expr; end
 end
 
 class MIR::CatchClause
-  sig { returns(MIR::CatchClauseMeta) }
+  sig { returns(MIR::Node) }
   def meta; end
 end
 
 class MIR::CatchClauseMeta
-  sig { returns(T.any(Array, T::Array[T.untyped])) }
+  sig { returns(T::Array[MIR::Node]) }
   def filter_messages; end
-  sig { returns(T.any(Array, T::Array[T.untyped])) }
+  sig { returns(T::Array[String]) }
   def filter_types; end
-  sig { returns(T.any(Array, T::Array[T.untyped])) }
+  sig { returns(T::Array[String]) }
   def kinds; end
-  sig { returns(T.any(Array, T::Array[T.untyped])) }
+  sig { returns(T::Array[String]) }
   def types; end
 end
 
@@ -8465,34 +8717,48 @@ end
 class MIR::ExternTrampoline
   sig { returns(String) }
   def callee_name; end
-  sig { returns(T.any(Integer, T.untyped)) }
+  sig { returns(Integer) }
   def id; end
-  sig { returns(T.any(T.untyped, Type)) }
+  sig { returns(Type) }
   def return_type; end
-  sig { returns(T.any(Array, T::Array[MIR::ExternTrampolineArg])) }
+  sig { returns(T::Array[MIR::Node]) }
   def runtime_args; end
-  sig { returns(T.any(FunctionSignature, T.untyped)) }
+  sig { returns(FunctionSignature) }
   def stdlib_def; end
-  sig { returns(T.any(Array, T::Array[T.untyped])) }
+  sig { returns(T::Array[MIR::Node]) }
   def comptime_args; end
+  sig { returns(Symbol) }
+  def alloc_kind; end
+  sig { returns(String) }
+  def method_name; end
+  sig { returns(String) }
+  def module_alias; end
+  sig { returns(MIR::Node) }
+  def receiver; end
 end
 
 class MIR::DefaultValue
   sig { returns(Symbol) }
   def kind; end
+  sig { returns(String) }
+  def zig_type; end
 end
 
 class MIR::FsmResultTransferFact
-  sig { returns(T.any(Symbol, T.untyped)) }
+  sig { returns(Symbol) }
   def target_alloc; end
+  sig { returns(T::Boolean) }
+  def move_guarded; end
+  sig { returns(String) }
+  def name; end
 end
 
 class MIR::MutualThunkArm
-  sig { returns(T.any(Array, T::Array[MIR::ThunkBaseCase])) }
+  sig { returns(T::Array[MIR::Node]) }
   def base_cases; end
-  sig { returns(T.any(Array, T::Array[MIR::ThunkFrameInit])) }
+  sig { returns(T::Array[MIR::Node]) }
   def target_arg_inits; end
-  sig { returns(T.any(String, T.untyped)) }
+  sig { returns(String) }
   def target_variant; end
   sig { returns(String) }
   def variant_name; end
@@ -8501,47 +8767,47 @@ end
 class MIR::ThunkVariant
   sig { returns(String) }
   def name; end
-  sig { returns(T.any(Array, T::Array[MIR::ThunkFrameField])) }
+  sig { returns(T::Array[MIR::Node]) }
   def param_fields; end
 end
 
 class MIR::WithMatchArm
-  sig { returns(T.any(Symbol, T.untyped)) }
+  sig { returns(Symbol) }
   def family; end
   sig { returns(String) }
   def guard_var; end
 end
 
 class MIR::CaptureCleanupAction
-  sig { returns(T.any(CleanupEntry, T.untyped)) }
+  sig { returns(CleanupEntry) }
   def cleanup_entry; end
-  sig { returns(T.any(MIR::FieldGet, MIR::Ident)) }
+  sig { returns(MIR::Node) }
   def target; end
 end
 
 class PipelineMaterializer::AllocationFact
-  sig { returns(T.any(Symbol, T.untyped)) }
+  sig { returns(Symbol) }
   def alloc; end
-  sig { returns(T.any(MIR::AllocMark, T.untyped)) }
+  sig { returns(MIR::Node) }
   def mark; end
 end
 
 class MIR::ThunkTrampoline
-  sig { returns(T.any(Array, T::Array[MIR::ThunkBaseCase])) }
+  sig { returns(T::Array[MIR::Node]) }
   def base_cases; end
-  sig { returns(T.any(Symbol, T.untyped)) }
+  sig { returns(Symbol) }
   def combine_op; end
   sig { returns(String) }
   def fn_name; end
-  sig { returns(T.any(Array, T::Array[MIR::ThunkFrameField])) }
+  sig { returns(T::Array[MIR::Node]) }
   def param_fields; end
-  sig { returns(T.any(Array, T::Array[MIR::ThunkFrameInit])) }
+  sig { returns(T::Array[MIR::Node]) }
   def param_init_fields; end
-  sig { returns(T.any(Array, T::Array[MIR::ThunkFrameInit])) }
+  sig { returns(T::Array[MIR::Node]) }
   def recurse_arg_inits; end
   sig { returns(Type) }
   def return_type; end
-  sig { returns(T.any(Symbol, T.untyped)) }
+  sig { returns(Symbol) }
   def yield_policy; end
   sig { returns(MIR::Node) }
   def combine_lhs; end
@@ -8565,22 +8831,24 @@ class MIR::FsmStateFieldFact
   def error_handled_in_setup; end
   sig { returns(String) }
   def name; end
+  sig { returns(Symbol) }
+  def finalize_at; end
 end
 
 class MIR::MutualThunkTrampoline
-  sig { returns(T.any(Array, T::Array[MIR::MutualThunkArm])) }
+  sig { returns(T::Array[MIR::Node]) }
   def arms; end
   sig { returns(String) }
   def fn_name; end
-  sig { returns(T.any(Array, T::Array[MIR::ThunkFrameInit])) }
+  sig { returns(T::Array[MIR::Node]) }
   def initial_fields; end
   sig { returns(String) }
   def initial_variant; end
   sig { returns(Type) }
   def return_type; end
-  sig { returns(T.any(Array, T::Array[MIR::ThunkVariant])) }
+  sig { returns(T::Array[MIR::Node]) }
   def variants; end
-  sig { returns(T.any(Symbol, T.untyped)) }
+  sig { returns(Symbol) }
   def yield_policy; end
 end
 
@@ -8594,9 +8862,9 @@ end
 class AST::PipelineShardedAccess
   sig { returns(String) }
   def map_name; end
-  sig { returns(T.any(Lexer::Token, T.untyped)) }
+  sig { returns(Lexer::Token) }
   def map_token; end
-  sig { returns(T.any(AST::Node, T.untyped)) }
+  sig { returns(AST::Node) }
   def key_expr; end
 end
 
@@ -8615,10 +8883,12 @@ class MIRLoweringExpressions::UnitVariantAccess
 end
 
 class MIR::CatchReassign
-  sig { returns(T.any(Integer, T.untyped)) }
+  sig { returns(Integer) }
   def line; end
   sig { returns(String) }
   def name; end
+  sig { returns(Symbol) }
+  def alloc; end
 end
 
 class ClearFixSupport::Heredoc
@@ -8764,6 +9034,8 @@ end
 class AST::ThenStep
   sig { returns(T.any(AST::Node, T.untyped)) }
   def expr; end
+  sig { returns(String) }
+  def binding; end
 end
 
 class FixableFinding
@@ -9646,13 +9918,17 @@ class ZigTranspiler
 end
 
 class MIR::RegistryCallArg
-  sig { returns(T.any(MIR::Node, T.untyped)) }
+  sig { returns(MIR::Node) }
   def expr; end
+  sig { returns(Symbol) }
+  def coerce_type; end
 end
 
 class MIRLowering::LoweredItemTarget
   sig { returns(T::Array[MIR::Node]) }
   def items; end
+  sig { returns(Integer) }
+  def line; end
 end
 
 class FsmTransform::Emit::FsmBodyItem
@@ -9672,6 +9948,8 @@ end
 class MIRLoweringConcurrency::BgBodyStep
   sig { returns(AST::Node) }
   def expr; end
+  sig { returns(String) }
+  def binding; end
 end
 
 class MIRLowering::LoweredModuleItems
@@ -9682,7 +9960,66 @@ class MIRLowering::LoweredModuleItems
 end
 
 class MIR::ExternTrampolineArg
-  sig { returns(T.any(MIR::Node, T.untyped)) }
+  sig { returns(MIR::Node) }
   def expr; end
+  sig { returns(Type) }
+  def field_type; end
+end
+
+class AST::DestructureTarget
+  sig { returns(Type) }
+  def type; end
+  sig { returns(T::Boolean) }
+  def mutable; end
+  sig { returns(String) }
+  def name; end
+  sig { returns(Lexer::Token) }
+  def token; end
+end
+
+class AST::CollectionConstructorFact
+  sig { returns(Symbol) }
+  def collection; end
+  sig { returns(Integer) }
+  def shard_count; end
+  sig { returns(T::Boolean) }
+  def soa; end
+end
+
+class MIR::SwitchArm
+  sig { returns(T::Array[MIR::Node]) }
+  def patterns; end
+end
+
+class AST::DestructuringAssignment
+  sig { returns(AST::Node) }
+  def value; end
+  sig { returns(T::Array[AST::Node]) }
+  def targets; end
+  sig { returns(Lexer::Token) }
+  def token; end
+end
+
+class MIR::DestructureTarget
+  sig { returns(Type) }
+  def annotation; end
+  sig { returns(Symbol) }
+  def declaration_kind; end
+  sig { returns(String) }
+  def name; end
+end
+
+class Annotator::Domains::Destructuring::DestructureRhsFacts
+  sig { returns(Type) }
+  def element_type; end
+  sig { returns(Type) }
+  def value_type; end
+end
+
+class MIR::DestructureSet
+  sig { returns(T::Array[MIR::Node]) }
+  def targets; end
+  sig { returns(MIR::Node) }
+  def value; end
 end
 

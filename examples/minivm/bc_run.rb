@@ -37,6 +37,15 @@ def jemalloc_env
 end
 
 def run_clear_build(project_root, build_args)
+  clean_env = clear_build_env
+  if defined?(Bundler)
+    Bundler.with_unbundled_env { system(clean_env, "#{project_root}/clear", *build_args, out: File::NULL) }
+  else
+    system(clean_env, "#{project_root}/clear", *build_args, out: File::NULL)
+  end
+end
+
+def clear_build_env
   clean_env = {
     "BUNDLE_BIN_PATH" => nil,
     "BUNDLE_GEMFILE" => nil,
@@ -52,11 +61,8 @@ def run_clear_build(project_root, build_args)
     "RUBYLIB" => nil,
     "RUBYOPT" => nil,
   }
-  if defined?(Bundler)
-    Bundler.with_unbundled_env { system(clean_env, "#{project_root}/clear", *build_args, out: File::NULL) }
-  else
-    system(clean_env, "#{project_root}/clear", *build_args, out: File::NULL)
-  end
+  clean_env["RUBYOPT"] = ENV["RUBYOPT"] if ENV["NIL_KILL_TRACE"] == "1" && ENV["RUBYOPT"] && !ENV["RUBYOPT"].empty?
+  clean_env
 end
 
 if $PROGRAM_NAME == __FILE__ && ARGV.empty?

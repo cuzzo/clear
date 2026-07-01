@@ -11,7 +11,20 @@ RSpec.describe "nil-kill Sorbet feedback parsing" do
     File.read(File.join(__dir__, "fixtures", "sorbet", name))
   end
 
-  xit "parses 7002 argument widening feedback at the signature location" do
+  it "parses basic Sorbet errors and nil origins without requiring full feedback support" do
+    output = "\e[31mlib/example.rb:25: Method `name` does not exist on `NilClass` https://srb.help/7003\e[0m\n" \
+      "  lib/origin.rb:4:\n"
+
+    expect(infer.send(:parse_sorbet_errors, output)).to include(a_hash_including(
+      "path" => "lib/example.rb",
+      "line" => 25,
+      "code" => "7003",
+      "message" => include("NilClass")
+    ))
+    expect(infer.send(:parse_nil_origins, output)).to eq([{ "origin" => "lib/origin.rb:4", "count" => 1 }])
+  end
+
+  it "parses 7002 argument widening feedback at the signature location" do
     feedback = infer.send(:parse_sorbet_feedback, fixture("7002.txt"))
 
     expect(feedback).to include(a_hash_including(
@@ -24,7 +37,7 @@ RSpec.describe "nil-kill Sorbet feedback parsing" do
     ))
   end
 
-  xit "parses 7005 result widening feedback at the signature location" do
+  it "parses 7005 result widening feedback at the signature location" do
     feedback = infer.send(:parse_sorbet_feedback, fixture("7005.txt"))
 
     expect(feedback).to include(a_hash_including(
@@ -35,7 +48,7 @@ RSpec.describe "nil-kill Sorbet feedback parsing" do
     ))
   end
 
-  xit "parses 7034 safe-navigation feedback at the origin location" do
+  it "parses 7034 safe-navigation feedback at the origin location" do
     feedback = infer.send(:parse_sorbet_feedback, fixture("7034.txt"))
 
     expect(feedback).to include(a_hash_including(
@@ -46,7 +59,7 @@ RSpec.describe "nil-kill Sorbet feedback parsing" do
     ))
   end
 
-  xit "strips ANSI color while parsing nil origins" do
+  it "strips ANSI color while parsing nil origins" do
     output = "\e[31mlib/example.rb:25: Method `name` does not exist on `NilClass` https://srb.help/7003\e[0m\n" \
       "  lib/origin.rb:4:\n"
 

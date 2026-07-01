@@ -9,6 +9,22 @@ module RubyToClear
   class Transpiler
     class TranspilationError < StandardError; end
 
+    DYNAMIC_RUBY_CALLS = {
+      "send" => "dynamic dispatch; replace with a closed case/table over known method names",
+      "__send__" => "dynamic dispatch; replace with a closed case/table over known method names",
+      "public_send" => "dynamic dispatch; replace with a closed case/table over known method names",
+      "const_get" => "dynamic constant lookup; replace with an explicit registry map",
+      "const_defined?" => "dynamic constant lookup; replace with an explicit registry map",
+      "instance_variable_get" => "dynamic instance state; replace with declared fields or a typed side table",
+      "instance_variable_set" => "dynamic instance state; replace with declared fields or a typed side table",
+      "define_method" => "dynamic method definition; generate explicit methods or a closed dispatcher",
+      "method_missing" => "dynamic method definition; replace with explicit protocol methods",
+      "eval" => "dynamic evaluation; refactor before translation",
+      "instance_eval" => "dynamic evaluation; refactor before translation",
+      "class_eval" => "dynamic evaluation; refactor before translation",
+      "module_eval" => "dynamic evaluation; refactor before translation",
+    }.freeze
+
     def initialize(source, raise_on_error: true)
       @source = source
       @raise_on_error = raise_on_error
@@ -18,10 +34,16 @@ module RubyToClear
       @current_class = nil
       @renames = {}
       @mutable_params = nil
+      @type_aliases = {}
+      @required_packages = Set.new
+      @current_function_can_fail = false
+      @local_shapes = {}
     end
 
     def transpile(program_node)
-      visit(program_node)
+      body = visit(program_node)
+      requires = @required_packages.sort.map { |package| "REQUIRE \"pkg:#{package}\"" }
+      (requires + [body]).reject(&:empty?).join("\n")
     end
 
     def visit(node)
@@ -30,18 +52,7 @@ module RubyToClear
       node_name = node.class.name.split("::").last
       method_name = "visit_#{node_name.gsub(/(?<!^)(?=[A-Z])/, '_').downcase}"
       if respond_to?(method_name, true)
-        res = send(method_name, node)
-        if res.is_a?(String) && res.include?("# [UNSUPPORTED:") &&
-           node_name != "StatementsNode" && node_name != "ProgramNode" &&
-           node_name != "ClassNode" && node_name != "DefNode"
-          if @raise_on_error
-            raise_unsupported("Unsupported construct #{node_name}", node)
-          else
-            comment_unsupported(node)
-          end
-        else
-          res
-        end
+        send(method_name, node)
       else
         raise_unsupported("Unsupported node #{node_name}", node)
       end
@@ -55,6 +66,23 @@ module RubyToClear
       @renames = old_renames
     end
 
+    def with_block_local_scope
+      old_declared = @declared_locals.dup
+      old_shapes = @local_shapes.dup
+      yield
+    ensure
+      @declared_locals = old_declared
+      @local_shapes = old_shapes
+    end
+
+    def require_package(package)
+      @required_packages << package.to_s
+    end
+
+    def mark_current_function_fallible!
+      @current_function_can_fail = true
+    end
+
     def raise_unsupported(message, node)
       loc = node.location
       source_loc = "#{@source[0...loc.start_offset].count("\n") + 1}:#{loc.start_column}"
@@ -63,7 +91,7 @@ module RubyToClear
       if @raise_on_error
         raise TranspilationError, err_msg
       else
-        "# [UNSUPPORTED: #{node.class.name.split('::').last}]\n# #{loc.slice.gsub("\n", "\n# ")}"
+        unsupported_comment(node, message)
       end
     end
 
@@ -133,20 +161,27 @@ module RubyToClear
       case node.class.name.split("::").last
       when "ConstantReadNode"
         name = node.name.to_s
+        return @type_aliases[name] if @type_aliases.key?(name)
+
         case name
         when "Integer" then "Int64"
         when "Float" then "Float64"
         when "String" then "String"
-        when "Symbol" then "Auto"
+        when "Symbol" then "String@symbol"
         when "NilClass" then "Void"
         when "Boolean" then "Bool"
         when "TrueClass", "FalseClass" then "Bool"
+        when "T" then "Auto"
         else name
         end
       when "ConstantPathNode"
         path = node.location.slice.strip
         case path
         when "T::Boolean" then "Bool"
+        when "T::Array" then "Auto[]"
+        when "T::Hash" then "HashMap<Auto, Auto>"
+        when "T::Set" then "Auto[]@set"
+        when "T.untyped" then "Auto"
         else path.gsub("::", ".")
         end
       when "CallNode"
@@ -164,12 +199,25 @@ module RubyToClear
             else
               return "Auto"
             end
+          when "untyped", "anything"
+            return "Auto"
           end
         end
         
         if node.name.to_s == "[]"
           receiver_name = node.receiver ? node.receiver.location.slice.strip : ""
           if receiver_name == "T::Array" || receiver_name == "Array"
+            inner = convert_sorbet_type(node.arguments&.arguments&.first)
+            return "#{inner}[]"
+          elsif receiver_name == "T::Hash" || receiver_name == "Hash"
+            args = node.arguments ? node.arguments.arguments : []
+            key = convert_sorbet_type(args[0])
+            value = convert_sorbet_type(args[1])
+            return "HashMap<#{key}, #{value}>"
+          elsif receiver_name == "T::Set" || receiver_name == "Set"
+            inner = convert_sorbet_type(node.arguments&.arguments&.first)
+            return "#{inner}[]@set"
+          elsif receiver_name == "T::Enumerable" || receiver_name == "Enumerable"
             inner = convert_sorbet_type(node.arguments&.arguments&.first)
             return "#{inner}[]"
           end
@@ -207,8 +255,8 @@ module RubyToClear
 
     def check_parameters!(parameters_node)
       return unless parameters_node
-      if !parameters_node.keywords.empty? || parameters_node.keyword_rest
-        return raise_unsupported("Keyword parameters are not supported", parameters_node)
+      if parameters_node.keyword_rest
+        return raise_unsupported("Keyword rest parameters are not supported", parameters_node.keyword_rest)
       end
       nil
     end
@@ -220,6 +268,8 @@ module RubyToClear
         if exclude_defs && n.is_a?(Prism::DefNode)
           return
         end
+        return if n.is_a?(Prism::BlockNode)
+
         if n.respond_to?(:name) && n.class.name.start_with?("Prism::LocalVariable") && 
            (n.class.name.end_with?("WriteNode") || n.class.name.end_with?("TargetNode"))
           written << n.name.to_s
@@ -244,6 +294,184 @@ module RubyToClear
       names << params.block.name.to_s if params.block && params.block.respond_to?(:name)
       
       names
+    end
+
+    def sorbet_call?(node, name = nil)
+      return false unless node.is_a?(Prism::CallNode)
+      return false unless node.receiver&.location&.slice == "T"
+
+      name.nil? || node.name.to_s == name.to_s
+    end
+
+    def sorbet_unwrapped_value(node)
+      return nil unless sorbet_call?(node)
+
+      case node.name.to_s
+      when "let", "cast", "must", "unsafe"
+        node.arguments&.arguments&.first
+      end
+    end
+
+    def sorbet_typed_value(node)
+      return nil unless sorbet_call?(node)
+      return nil unless ["let", "cast"].include?(node.name.to_s)
+
+      args = node.arguments ? node.arguments.arguments : []
+      return nil unless args.length >= 2
+
+      [args.first, convert_sorbet_type(args[1])]
+    end
+
+    def inferred_shape(node)
+      return nil unless node
+
+      if (typed_value = sorbet_typed_value(node))
+        return inferred_shape(typed_value.first)
+      end
+
+      if (unwrapped = sorbet_unwrapped_value(node))
+        return inferred_shape(unwrapped)
+      end
+
+      case node
+      when Prism::ArrayNode
+        "array"
+      when Prism::HashNode, Prism::KeywordHashNode
+        "hash"
+      when Prism::StringNode, Prism::InterpolatedStringNode
+        "string"
+      when Prism::SymbolNode
+        "symbol"
+      when Prism::IntegerNode, Prism::FloatNode
+        "numeric"
+      when Prism::NilNode
+        "nil"
+      when Prism::TrueNode, Prism::FalseNode
+        "bool"
+      when Prism::LocalVariableReadNode
+        @local_shapes[node.name.to_s]
+      when Prism::CallNode
+        inferred_call_shape(node)
+      end
+    end
+
+    def inferred_call_shape(node)
+      receiver_name = registry_receiver_name(node.receiver)
+      receiver_shape = node.receiver ? registry_receiver_shape(node.receiver) : nil
+
+      case node.name.to_s
+      when "readlines"
+        return "array" if receiver_name == "File"
+      when "split", "lines"
+        return "array" if receiver_shape == "string"
+      when "keys", "values"
+        return "array" if receiver_shape == "hash"
+      when "map", "collect", "select", "filter", "reject", "filter_map", "flat_map", "sort_by"
+        return "array" if receiver_shape == "array"
+      end
+
+      nil
+    end
+
+    def sorbet_type_alias_value(node)
+      return nil unless sorbet_call?(node, "type_alias")
+      return nil unless node.block&.body.is_a?(Prism::StatementsNode)
+
+      body = node.block.body.body
+      return nil unless body.length == 1
+
+      convert_sorbet_type(body.first)
+    end
+
+    def t_struct_class?(node)
+      node.superclass&.location&.slice == "T::Struct"
+    end
+
+    def t_struct_field(node)
+      return nil unless node.is_a?(Prism::CallNode)
+      return nil unless node.receiver.nil?
+      return nil unless ["const", "prop"].include?(node.name.to_s)
+
+      args = node.arguments ? node.arguments.arguments : []
+      return nil unless args.length >= 2
+      return nil unless args.first.is_a?(Prism::SymbolNode)
+
+      [args.first.value.to_s, convert_sorbet_type(args[1])]
+    end
+
+    def dynamic_ruby_call_reason(name)
+      DYNAMIC_RUBY_CALLS[name.to_s]
+    end
+
+    def keyword_hash_argument(arguments_node)
+      return nil unless arguments_node
+
+      arguments_node.arguments.find { |arg| arg.is_a?(Prism::KeywordHashNode) }
+    end
+
+    def constant_constructor_call?(node)
+      node.name.to_s == "new" &&
+        (node.receiver.is_a?(Prism::ConstantReadNode) || node.receiver.is_a?(Prism::ConstantPathNode))
+    end
+
+    def constructor_field_names(receiver)
+      names = []
+      names << receiver.location.slice.strip if receiver
+      names << receiver.location.slice.strip.split("::").last if receiver.is_a?(Prism::ConstantPathNode)
+      names << receiver.name.to_s if receiver.respond_to?(:name)
+
+      names.uniq.each do |name|
+        return @struct_fields[name] if @struct_fields[name]
+      end
+
+      nil
+    end
+
+    def constructor_output_name(receiver)
+      receiver.location.slice.strip.gsub("::", ".")
+    end
+
+    def keyword_constructor_pairs(keyword_hash)
+      keyword_hash.elements.map do |assoc|
+        unless assoc.is_a?(Prism::AssocNode)
+          return raise_unsupported("Constructor keyword splats are not supported", keyword_hash)
+        end
+
+        key = if assoc.key.is_a?(Prism::SymbolNode)
+          assoc.key.value.to_s
+        elsif assoc.key.is_a?(Prism::StringNode)
+          assoc.key.content
+        else
+          return raise_unsupported("Constructor keyword names must be static", assoc.key)
+        end
+
+        "#{key}: #{visit(assoc.value)}"
+      end
+    end
+
+    def constructor_from_arguments(receiver, arguments_node)
+      fields = constructor_field_names(receiver)
+      return nil unless fields
+
+      class_name = constructor_output_name(receiver)
+      args = arguments_node ? arguments_node.arguments : []
+      keyword_hash = args.last if args.last.is_a?(Prism::KeywordHashNode)
+      positional_args = keyword_hash ? args[0...-1] : args
+
+      assoc_pairs = []
+      positional_args.each_with_index do |arg, idx|
+        field_name = fields[idx] || "field_#{idx}"
+        assoc_pairs << "#{field_name}: #{visit(arg)}"
+      end
+
+      if keyword_hash
+        keyword_pairs = keyword_constructor_pairs(keyword_hash)
+        return keyword_pairs if keyword_pairs.is_a?(String) && keyword_pairs.include?("# [UNSUPPORTED:")
+
+        assoc_pairs.concat(keyword_pairs)
+      end
+
+      "#{class_name}{ #{assoc_pairs.join(', ')} }"
     end
 
     # --- Node Visitors ---
@@ -272,7 +500,7 @@ module RubyToClear
         @current_sig = nil
         next if code.empty?
 
-        unless code.end_with?(";") || code.end_with?("END") || code.start_with?("STRUCT ") || code.start_with?("#")
+        unless code.end_with?(";") || code.end_with?("END") || code.start_with?("STRUCT ") || code.lstrip.start_with?("#")
           code = "#{code};"
         end
 
@@ -285,6 +513,10 @@ module RubyToClear
     end
 
     def visit_integer_node(node)
+      node.value.to_s
+    end
+
+    def visit_float_node(node)
       node.value.to_s
     end
 
@@ -333,12 +565,22 @@ module RubyToClear
     def visit_local_variable_write_node(node)
       name = node.name.to_s
       name = @renames[name] || name
-      val = visit(node.value)
+      value_node = node.value
+      type_annotation = nil
+      if (typed_value = sorbet_typed_value(value_node))
+        value_node, type_annotation = typed_value
+      end
+
+      val = visit(value_node)
+      shape = inferred_shape(value_node)
       if @declared_locals.include?(name)
+        @local_shapes[name] = shape
         "#{name} = #{val}"
       else
         @declared_locals << name
-        "MUTABLE #{name} = #{val}"
+        @local_shapes[name] = shape
+        typed = type_annotation && type_annotation != "Auto" ? ": #{type_annotation}" : ""
+        "MUTABLE #{name}#{typed} = #{val}"
       end
     end
 
@@ -395,6 +637,11 @@ module RubyToClear
     def visit_constant_write_node(node)
       name = node.name.to_s
 
+      if (type_alias = sorbet_type_alias_value(node.value))
+        @type_aliases[name] = type_alias
+        return ""
+      end
+
       if node.value.is_a?(Prism::CallNode) &&
          (node.value.receiver.nil? || (node.value.receiver.is_a?(Prism::ConstantReadNode) && node.value.receiver.name == :Struct)) &&
          node.value.name == :new
@@ -431,10 +678,24 @@ module RubyToClear
     def visit_parameters_node(node)
       requireds = node.requireds.map { |param| visit(param) }
       optionals = node.optionals.map { |param| visit(param) }
-      (requireds + optionals).join(", ")
+      keywords = node.keywords.map { |param| visit(param) }
+      (requireds + optionals + keywords).join(", ")
     end
 
     def visit_optional_parameter_node(node)
+      prefix = (@mutable_params && @mutable_params.include?(node.name.to_s)) ? "MUTABLE " : ""
+      type = (@param_types && @param_types[node.name.to_s]) || "Auto"
+      default_val = visit(node.value)
+      "#{prefix}#{node.name} = #{default_val}: #{type}"
+    end
+
+    def visit_required_keyword_parameter_node(node)
+      prefix = (@mutable_params && @mutable_params.include?(node.name.to_s)) ? "MUTABLE " : ""
+      type = (@param_types && @param_types[node.name.to_s]) || "Auto"
+      "#{prefix}#{node.name}: #{type}"
+    end
+
+    def visit_optional_keyword_parameter_node(node)
       prefix = (@mutable_params && @mutable_params.include?(node.name.to_s)) ? "MUTABLE " : ""
       type = (@param_types && @param_types[node.name.to_s]) || "Auto"
       default_val = visit(node.value)
@@ -591,30 +852,65 @@ module RubyToClear
     end
 
     def visit_interpolated_string_node(node)
-      parts = node.parts.map do |part|
-        if part.is_a?(Prism::StringNode)
-          part.content
-        else
-          stmt_code = visit(part.statements)
-          "${#{stmt_code.delete_suffix(';')}}"
-        end
-      end.join
+      parts = node.parts.map { |part| interpolated_string_part(part) }.join
       "\"#{parts}\""
     end
 
     def visit_embedded_statements_node(node)
-      stmt_code = visit(node.statements)
-      "${#{stmt_code.delete_suffix(';')}}"
+      "${#{embedded_statement_expression(node)}}"
+    end
+
+    def interpolated_string_part(part)
+      case part
+      when Prism::StringNode
+        part.content
+      when Prism::EmbeddedStatementsNode
+        "${#{embedded_statement_expression(part)}}"
+      when Prism::InterpolatedStringNode
+        part.parts.map { |nested_part| interpolated_string_part(nested_part) }.join
+      else
+        visit(part).delete_suffix(";")
+      end
+    end
+
+    def embedded_statement_expression(node)
+      statements = node.statements
+      return "" unless statements
+
+      unless statements.body.length == 1
+        return raise_unsupported("String interpolation must contain a single expression", node)
+      end
+
+      visit(statements.body.first).delete_suffix(";")
     end
 
     def visit_call_node(node)
-      chk = check_arguments!(node.arguments)
-      return chk if chk.is_a?(String) && chk.include?("# [UNSUPPORTED:")
+      keyword_arg = keyword_hash_argument(node.arguments)
+
+      if (reason = dynamic_ruby_call_reason(node.name.to_s))
+        return raise_unsupported("#{node.name} is a Ruby dynamic/reflection call: #{reason}", node)
+      end
+
+      if sorbet_call?(node)
+        return "" if node.name.to_s == "bind"
+
+        if (unwrapped = sorbet_unwrapped_value(node))
+          return visit(unwrapped)
+        end
+      end
 
       if node.name.to_s == "gsub" || node.name.to_s == "sub"
         rec_code = node.receiver ? visit(node.receiver) : nil
         if rec_code
-          translated = MethodRegistry.translate(node.name.to_s, rec_code, node, self)
+          translated = MethodRegistry.translate(
+            node.name.to_s,
+            rec_code,
+            node,
+            self,
+            receiver_kind: registry_receiver_kind(node.receiver),
+            receiver_name: registry_receiver_name(node.receiver),
+            receiver_shape: registry_receiver_shape(node.receiver)
+          )
           return translated if translated
         end
         return raise_unsupported("gsub/sub with dynamic regex, block, or invalid arguments is not supported", node)
@@ -630,6 +926,19 @@ module RubyToClear
         rhs = visit(node.arguments.arguments.first)
         "#{lhs}.append(#{rhs})"
       when "[]"
+        if node.receiver
+          lhs = visit(node.receiver)
+          translated = MethodRegistry.translate(
+            node.name.to_s,
+            lhs,
+            node,
+            self,
+            receiver_kind: registry_receiver_kind(node.receiver),
+            receiver_name: registry_receiver_name(node.receiver),
+            receiver_shape: registry_receiver_shape(node.receiver)
+          )
+          return translated if translated
+        end
         lhs = visit(node.receiver)
         args = visit(node.arguments)
         "#{lhs}[#{args}]"
@@ -639,29 +948,62 @@ module RubyToClear
         value = visit(node.arguments.arguments.last)
         "#{lhs}[#{index}] = #{value}"
       else
-        if node.receiver.is_a?(Prism::ConstantReadNode) && node.name.to_s == "new"
-          class_name = node.receiver.name.to_s
-          if @struct_fields[class_name]
-            fields = @struct_fields[class_name]
-            args = node.arguments ? node.arguments.arguments : []
-            assoc_pairs = []
-            args.each_with_index do |arg, idx|
-              field_name = fields[idx] || "field_#{idx}"
-              assoc_pairs << "#{field_name}: #{visit(arg)}"
-            end
-            return "#{class_name}{ #{assoc_pairs.join(', ')} }"
-          else
-            args_list = node.arguments ? visit(node.arguments) : ""
-            return "#{class_name}{ #{args_list} }"
+        if constant_constructor_call?(node)
+          rec_code = visit(node.receiver)
+          if keyword_arg
+            constructor = constructor_from_arguments(node.receiver, node.arguments)
+            return constructor if constructor
+
+            return raise_unsupported("Keyword arguments are not supported for this constructor", keyword_arg)
           end
+
+          translated = MethodRegistry.translate(
+            node.name.to_s,
+            rec_code,
+            node,
+            self,
+            receiver_kind: registry_receiver_kind(node.receiver),
+            receiver_name: registry_receiver_name(node.receiver),
+            receiver_shape: registry_receiver_shape(node.receiver)
+          )
+          return translated if translated
+
+          constructor = constructor_from_arguments(node.receiver, node.arguments)
+          return constructor if constructor
+
+          args_list = node.arguments ? visit(node.arguments) : ""
+          return "#{constructor_output_name(node.receiver)}{ #{args_list} }"
         end
 
         rec_code = node.receiver ? visit(node.receiver) : nil
         name_str = node.name.to_s
+        if keyword_arg
+          return raise_unsupported("Keyword arguments are not supported for this call shape", keyword_arg)
+        end
+
         args_list = node.arguments ? node.arguments.arguments.map { |arg| visit(arg) } : []
 
         if rec_code
-          translated = MethodRegistry.translate(name_str, rec_code, node, self)
+          translated = MethodRegistry.translate(
+            name_str,
+            rec_code,
+            node,
+            self,
+            receiver_kind: registry_receiver_kind(node.receiver),
+            receiver_name: registry_receiver_name(node.receiver),
+            receiver_shape: registry_receiver_shape(node.receiver)
+          )
+          return translated if translated
+        else
+          translated = MethodRegistry.translate(
+            name_str,
+            nil,
+            node,
+            self,
+            receiver_kind: "implicit",
+            receiver_name: nil,
+            receiver_shape: nil
+          )
           return translated if translated
         end
 
@@ -677,9 +1019,31 @@ module RubyToClear
       end
     end
 
+    def visit_module_node(node)
+      name = node.constant_path.location.slice.strip
+      body_code = visit(node.body)
+
+      if body_code.empty?
+        "# Ruby module #{name}"
+      else
+        "# Ruby module #{name}\n#{body_code}\n# End Ruby module #{name}"
+      end
+    end
+
     def visit_class_node(node)
       old_class = @current_class
       @current_class = node.constant_path.location.slice.strip
+
+      if t_struct_class?(node)
+        body_nodes = node.body&.body || []
+        fields = body_nodes.filter_map { |stmt| t_struct_field(stmt) }
+        if fields.length == body_nodes.length
+          @struct_fields[@current_class] = fields.map(&:first)
+          field_decls = fields.map { |field, type| "  #{field}: #{type}" }.join(",\n")
+          @current_class = old_class
+          return "STRUCT #{node.constant_path.location.slice.strip} {\n#{field_decls}\n}"
+        end
+      end
 
       ivar_names = collect_instance_variables(node)
       struct_fields = ivar_names.map { |name| "  #{name}: Auto" }.join(",\n")
@@ -717,7 +1081,11 @@ module RubyToClear
       end
 
       old_declared = @declared_locals
+      old_function_can_fail = @current_function_can_fail
+      old_local_shapes = @local_shapes
       @declared_locals = Set.new(param_names)
+      @current_function_can_fail = false
+      @local_shapes = {}
       
       local_vars_to_declare = (written_vars - param_names).to_a.sort
       local_vars_to_declare.each { |var| @declared_locals << var }
@@ -736,7 +1104,10 @@ module RubyToClear
         "#{decls_code}\n#{body_code}"
       end
 
+      function_can_fail = @current_function_can_fail
       @declared_locals = old_declared
+      @current_function_can_fail = old_function_can_fail
+      @local_shapes = old_local_shapes
       @mutable_params = nil
       @param_types = nil
 
@@ -747,9 +1118,16 @@ module RubyToClear
       else
         "!Auto"
       end
+      ret_type = fallible_return_type(ret_type) if function_can_fail
       sig_name = name == "initialize" ? "initialize!" : name
 
       "FN #{sig_name}(#{params.join(', ')}) RETURNS #{ret_type} ->\n#{full_body}\nEND"
+    end
+
+    def fallible_return_type(ret_type)
+      return ret_type if ret_type.start_with?("!")
+
+      "!#{ret_type}"
     end
 
     def visit_block_argument_node(node)
@@ -757,36 +1135,73 @@ module RubyToClear
     end
 
     def visit_multi_write_node(node)
-      unless node.value.is_a?(Prism::ArrayNode)
-        return raise_unsupported("Destructuring is only supported for literal array values", node)
+      target_names = validated_multi_write_target_names(node)
+      return target_names if target_names.is_a?(String)
+
+      first_new_target = multi_write_first_new_target?(target_names)
+      target_code = multi_write_target_codes(target_names, first_new_target)
+      prefix = first_new_target ? "MUTABLE " : ""
+      "#{prefix}#{target_code.join(', ')} = #{visit(node.value)}"
+    end
+
+    def validated_multi_write_target_names(node)
+      unless fixed_shape_multi_write?(node)
+        return raise_unsupported("Destructuring requires a statically fixed literal array RHS", node)
       end
-      
-      lefts = node.lefts
-      rights = node.value.elements
-      
-      if lefts.length != rights.length
+
+      if node.lefts.length != node.value.elements.length
         return raise_unsupported("Multi-write left and right side lengths must match", node)
       end
-      
-      temp_names = lefts.map.with_index { |_, idx| "__tmp_multi_#{idx}" }
-      
-      decls = []
-      assigns = []
-      
-      rights.each_with_index do |r, idx|
-        val = visit(r)
-        temp_name = temp_names[idx]
-        @declared_locals << temp_name
-        decls << "MUTABLE #{temp_name} = #{val}"
+
+      target_names = multi_write_target_names(node)
+      unless target_names
+        return raise_unsupported("Destructuring targets must be local variables or _", node)
       end
-      
-      lefts.each_with_index do |l, idx|
-        target_name = visit(l)
-        temp_name = temp_names[idx]
-        assigns << "#{target_name} = #{temp_name}"
+
+      target_names
+    end
+
+    def multi_write_target_codes(target_names, first_new_target)
+      target_names.each_with_index.map do |name, index|
+        multi_write_target_code(name, index, first_new_target)
       end
-      
-      (decls + assigns).join(";\n")
+    end
+
+    def multi_write_target_code(name, index, first_new_target)
+      return "_" if name == "_"
+
+      if @declared_locals.include?(name)
+        name
+      else
+        @declared_locals << name
+        @local_shapes[name] = nil
+        index.zero? || first_new_target ? name : "MUTABLE #{name}"
+      end
+    end
+
+    def multi_write_first_new_target?(target_names)
+      target_names.first != "_" && !@declared_locals.include?(target_names.first)
+    end
+
+    def multi_write_target_names(node)
+      target_names = node.lefts.map { |target| multi_write_target_name(target) }
+      return nil if target_names.any?(&:nil?)
+
+      target_names
+    end
+
+    def fixed_shape_multi_write?(node)
+      return false unless node.value.is_a?(Prism::ArrayNode)
+      return false if node.respond_to?(:rest) && node.rest
+      return false if node.respond_to?(:rights) && node.rights.any?
+
+      node.value.elements.none? { |element| element.is_a?(Prism::SplatNode) }
+    end
+
+    def multi_write_target_name(target)
+      return target.name.to_s if target.is_a?(Prism::LocalVariableTargetNode)
+
+      nil
     end
 
     def visit_rescue_node(node)
@@ -794,6 +1209,10 @@ module RubyToClear
     end
 
     def visit_rescue_modifier_node(node)
+      if node.rescue_expression.is_a?(Prism::NilNode) && sorbet_call?(node.expression, "bind")
+        return ""
+      end
+
       return raise_unsupported("Exception handling (rescue) is not supported", node)
     end
 
@@ -831,11 +1250,79 @@ module RubyToClear
       ivars.to_a.sort
     end
 
+    def registry_receiver_kind(receiver)
+      case receiver
+      when nil then "implicit"
+      when Prism::SelfNode then "self"
+      when Prism::LocalVariableReadNode then "local"
+      when Prism::InstanceVariableReadNode then "ivar"
+      when Prism::ClassVariableReadNode then "class_var"
+      when Prism::GlobalVariableReadNode then "global"
+      when Prism::ConstantReadNode then "constant"
+      when Prism::ConstantPathNode then "constant_path"
+      when Prism::CallNode then "call_result"
+      when Prism::ParenthesesNode then "parenthesized"
+      when Prism::StringNode, Prism::InterpolatedStringNode then "string_literal"
+      when Prism::SymbolNode, Prism::InterpolatedSymbolNode then "symbol_literal"
+      when Prism::IntegerNode, Prism::FloatNode then "numeric_literal"
+      when Prism::ArrayNode then "array_literal"
+      when Prism::HashNode then "hash_literal"
+      when Prism::NilNode then "nil_literal"
+      when Prism::TrueNode, Prism::FalseNode then "bool_literal"
+      else receiver.class.name.split("::").last
+      end
+    end
+
+    def registry_receiver_name(receiver)
+      return nil unless receiver
+
+      if receiver.respond_to?(:full_name)
+        receiver.full_name
+      elsif receiver.respond_to?(:name)
+        receiver.name.to_s
+      end
+    rescue StandardError
+      nil
+    end
+
+    def registry_receiver_shape(receiver)
+      return nil unless receiver
+
+      case receiver
+      when Prism::ArrayNode
+        "array"
+      when Prism::HashNode, Prism::KeywordHashNode
+        "hash"
+      when Prism::StringNode, Prism::InterpolatedStringNode
+        "string"
+      when Prism::SymbolNode
+        "symbol"
+      when Prism::IntegerNode, Prism::FloatNode
+        "numeric"
+      when Prism::NilNode
+        "nil"
+      when Prism::TrueNode, Prism::FalseNode
+        "bool"
+      when Prism::LocalVariableReadNode
+        @local_shapes[receiver.name.to_s]
+      else
+        inferred_shape(receiver)
+      end
+    end
+
     def comment_unsupported(node)
+      unsupported_comment(node)
+    end
+
+    def unsupported_comment(node, message = nil)
       node_name = node.class.name.split("::").last
+      loc = node.location
+      source_loc = "#{@source[0...loc.start_offset].count("\n") + 1}:#{loc.start_column}"
       slice = node.location.slice
       lines = slice.split("\n")
-      commented_lines = ["# [UNSUPPORTED: #{node_name}]"]
+      header = "# [UNSUPPORTED: #{node_name} at #{source_loc}]"
+      header = "#{header} #{message}" if message
+      commented_lines = [header]
       lines.each do |line|
         commented_lines << "# #{line}"
       end

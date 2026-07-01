@@ -16,17 +16,17 @@ RSpec.describe "ClearParser collection capability chains" do
     pool = parse_expr("Pool[]:soa")
     set = parse_expr("Set[]")
 
-    expect(list.instance_variable_get(:@constructor_collection)).to eq(:list)
-    expect(list.instance_variable_get(:@constructor_shard_count)).to eq(3)
-    expect(list.instance_variable_get(:@constructor_soa)).to be false
+    expect(list.constructor_collection).to eq(:list)
+    expect(list.constructor_shard_count).to eq(3)
+    expect(list.constructor_soa?).to be false
 
-    expect(pool.instance_variable_get(:@constructor_collection)).to eq(:pool)
-    expect(pool.instance_variable_get(:@constructor_shard_count)).to be_nil
-    expect(pool.instance_variable_get(:@constructor_soa)).to be true
+    expect(pool.constructor_collection).to eq(:pool)
+    expect(pool.constructor_shard_count).to be_nil
+    expect(pool.constructor_soa?).to be true
 
-    expect(set.instance_variable_get(:@constructor_collection)).to eq(:set)
-    expect(set.instance_variable_get(:@constructor_shard_count)).to be_nil
-    expect(set.instance_variable_get(:@constructor_soa)).to be false
+    expect(set.constructor_collection).to eq(:set)
+    expect(set.constructor_shard_count).to be_nil
+    expect(set.constructor_soa?).to be false
   end
 
   it "validates constructor shard counts while type annotations defer to semantic validation" do
@@ -38,10 +38,10 @@ RSpec.describe "ClearParser collection capability chains" do
     list = parse_expr("List[] @sharded(3)")
     pool = parse_expr("Pool[] @soa")
 
-    expect(list.instance_variable_get(:@constructor_shard_count)).to eq(3)
-    expect(list.instance_variable_get(:@constructor_soa)).to be false
-    expect(pool.instance_variable_get(:@constructor_shard_count)).to be_nil
-    expect(pool.instance_variable_get(:@constructor_soa)).to be true
+    expect(list.constructor_shard_count).to eq(3)
+    expect(list.constructor_soa?).to be false
+    expect(pool.constructor_shard_count).to be_nil
+    expect(pool.constructor_soa?).to be true
   end
 
   it "rejects duplicate local sync capability in type chains" do
