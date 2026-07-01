@@ -2713,8 +2713,19 @@ class Formatter::Emitter
     j = idx - 1
     while j >= 0
       t = line[j]
-      return t unless [:COMMENT, :INDENT_OPEN, :INDENT_CLOSE].include?(t.type)
+      return t unless [:WS, :COMMENT, :INDENT_OPEN, :INDENT_CLOSE].include?(t.type)
       j -= 1
+    end
+    nil
+  end
+
+  sig { params(line: Array, idx: Integer).returns(T.nilable(Formatter::FormatLexer::Token)) }
+  def following_code_token(line, idx)
+    j = idx + 1
+    while j < line.length
+      t = line[j]
+      return t unless [:WS, :COMMENT, :INDENT_OPEN, :INDENT_CLOSE].include?(t.type)
+      j += 1
     end
     nil
   end
@@ -2881,7 +2892,15 @@ class Formatter::Emitter
       return false
     end
 
-    # Type annotation `:` — no space before, space after (default).
+    # Symbol literal `:name` / `:TYPE`: attach the colon to the symbol
+    # name, but keep a leading space when the literal follows another
+    # expression token (`x = :ok`, `field: :EOF`).
+    if b.type == :SYM && b.raw == ':' && symbol_literal_colon?(line, b_idx)
+      return false if a.type == :SYM && ['(', '[', '{'].include?(a.raw)
+      return true
+    end
+
+    # Type annotation / field `:` — no space before, space after (default).
     if b.type == :SYM && b.raw == ':'
       return false
     end
@@ -2892,6 +2911,10 @@ class Formatter::Emitter
     # identifiers; if the leftmost identifier starts with `@`, suppress
     # the space between this `:` and the next ident.
     if a.type == :SYM && a.raw == ':' && capability_chain_colon?(line, b_idx - 1)
+      return false
+    end
+
+    if a.type == :SYM && a.raw == ':' && symbol_literal_colon?(line, b_idx - 1)
       return false
     end
 
@@ -2956,6 +2979,21 @@ class Formatter::Emitter
       end
     end
     false
+  end
+
+  sig { params(line: Array, colon_idx: Integer).returns(T::Boolean) }
+  def symbol_literal_colon?(line, colon_idx)
+    colon = line[colon_idx]
+    return false unless colon && colon.type == :SYM && colon.raw == ':'
+
+    nxt = following_code_token(line, colon_idx)
+    return false unless nxt && [:VAR_ID, :TYPE_ID].include?(nxt.type)
+
+    prev = preceding_code_token(line, colon_idx)
+    return true unless prev
+    return false if [:VAR_ID, :TYPE_ID].include?(prev.type)
+    return false if prev.type == :SYM && [')', ']', '}'].include?(prev.raw)
+    true
   end
 
   # Walk back from a `)` at `idx` to the matching `(`. Returns the index

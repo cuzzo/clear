@@ -13,7 +13,7 @@ RSpec.describe RubyToClear::Transpiler do
       expect_transpile("123", "123;")
       expect_transpile("0.5", "0.5;")
       expect_transpile('"hello"', '"hello";')
-      expect_transpile(":my_sym", ".my_sym;")
+      expect_transpile(":my_sym", ":my_sym;")
       expect_transpile("nil", "NIL;")
       expect_transpile("false", "FALSE;")
       expect_transpile("true", "TRUE;")
@@ -30,6 +30,13 @@ RSpec.describe RubyToClear::Transpiler do
       expect_transpile("1...3", "1 ..< 3;")
       expect_transpile("a && b", "(a() && b());")
       expect_transpile("a || b", "(a() || b());")
+    end
+
+    it "keeps parenthesized single expressions expression-safe" do
+      expect_transpile(
+        "x = (str.length - T.must(last_newline_index))",
+        "MUTABLE x = ((str().length() - last_newline_index()));"
+      )
     end
 
     it "transpiles string interpolations" do
@@ -83,6 +90,16 @@ RSpec.describe RubyToClear::Transpiler do
       expect_transpile("a = 1; b = 2; a == b", "MUTABLE a = 1;\nMUTABLE b = 2;\n(a == b);")
       expect_transpile("a = 1; b = 2; a != b", "MUTABLE a = 1;\nMUTABLE b = 2;\n(a != b);")
       expect_transpile("a = 1; b = 2; a << b", "MUTABLE a = 1;\nMUTABLE b = 2;\na.append(b);")
+      expect_transpile("nums = []; x = 1; !nums.include?(x)", "MUTABLE nums = [];\nMUTABLE x = 1;\n!(nums.contains?(x));")
+    end
+
+    it "lowers Ruby regex match operators to syntax-valid CLEAR calls in lax mode" do
+      expect(RubyToClear.transpile("word =~ /^[A-Z]/", raise_on_error: false).strip).to eq(
+        'regexMatch?(word(), unsupportedRuby("RegularExpressionNode at 1:8: Regular expressions are not supported"));'
+      )
+      expect(RubyToClear.transpile("word !~ /^[A-Z]/", raise_on_error: false).strip).to eq(
+        '!(regexMatch?(word(), unsupportedRuby("RegularExpressionNode at 1:8: Regular expressions are not supported")));'
+      )
     end
 
     it "transpiles index access and assignments" do
@@ -167,10 +184,10 @@ RSpec.describe RubyToClear::Transpiler do
         end
       RUBY
       expected_clear = <<~CLEAR
-        MUTABLE val = .a;
+        MUTABLE val = :a;
         PARTIAL MATCH val START
-          .a -> 1;,
-          .b -> 2;,
+          :a -> 1;,
+          :b -> 2;,
           DEFAULT -> 99;
         END
       CLEAR
@@ -236,12 +253,12 @@ RSpec.describe RubyToClear::Transpiler do
       RUBY
       expected_clear = <<~CLEAR
         STRUCT Token {
-          type: Auto,
-          value: Auto,
-          line: Auto,
-          column: Auto
+          type: Any,
+          value: Any,
+          line: Any,
+          column: Any
         }
-        MUTABLE t = Token{ type: .ELLIPSIS, value: "...", line: 1, column: 1 };
+        MUTABLE t = Token{ type: :ELLIPSIS, value: "...", line: 1, column: 1 };
       CLEAR
       expect_transpile(ruby_code, expected_clear)
     end
@@ -253,10 +270,10 @@ RSpec.describe RubyToClear::Transpiler do
       RUBY
       expected_clear = <<~CLEAR
         STRUCT Token {
-          type: Auto,
-          value: Auto
+          type: Any,
+          value: Any
         }
-        MUTABLE t = Token{ type: .IDENT, value: "name" };
+        MUTABLE t = Token{ type: :IDENT, value: "name" };
       CLEAR
       expect_transpile(ruby_code, expected_clear)
     end
@@ -268,10 +285,10 @@ RSpec.describe RubyToClear::Transpiler do
       RUBY
       expected_clear = <<~CLEAR
         STRUCT Token {
-          type: Auto,
-          value: Auto
+          type: Any,
+          value: Any
         }
-        MUTABLE t = AST.Token{ type: .IDENT, value: "name" };
+        MUTABLE t = AST.Token{ type: :IDENT, value: "name" };
       CLEAR
       expect_transpile(ruby_code, expected_clear)
     end
@@ -290,7 +307,7 @@ RSpec.describe RubyToClear::Transpiler do
       RUBY
       expected_clear = <<~CLEAR
         STRUCT Calc {
-          val: Auto
+          val: Any
         }
 
         FN initialize!(MUTABLE self: Calc, start: Auto) RETURNS Void ->
@@ -298,6 +315,32 @@ RSpec.describe RubyToClear::Transpiler do
         END
         FN add(MUTABLE self: Calc, n: Auto) RETURNS !Auto ->
           self.val = (self.val + n);
+        END
+      CLEAR
+      expect_transpile(ruby_code, expected_clear)
+    end
+
+    it "uses T.let metadata for generated instance field types" do
+      ruby_code = <<~RUBY
+        class Lexer
+          def initialize(source)
+            @s = T.let(StringScanner.new(source), StringScanner)
+            @line = T.let(1, Integer)
+            @tokens = T.let([], T::Array[Token])
+          end
+        end
+      RUBY
+      expected_clear = <<~CLEAR
+        STRUCT Lexer {
+          line: Int64,
+          s: Scanner,
+          tokens: Token[]
+        }
+
+        FN initialize!(MUTABLE self: Lexer, source: Auto) RETURNS Void ->
+          self.s = Scanner{ source: source, pos: 0 };
+          self.line = 1;
+          self.tokens = [];
         END
       CLEAR
       expect_transpile(ruby_code, expected_clear)
@@ -548,7 +591,7 @@ RSpec.describe RubyToClear::Transpiler do
       expect_transpile('Set.new', 'Set[];')
       expect_transpile('Set.new([1, 2, 1])', '[1, 2, 1] |> DISTINCT _;')
       expect_transpile('Set.new(items) { |item| item.name }', 'items() |> SELECT _.name() |> DISTINCT _;')
-      expect_transpile('Set[:a, :b]', '[.a, .b] |> DISTINCT _;')
+      expect_transpile('Set[:a, :b]', '[:a, :b] |> DISTINCT _;')
     end
 
     it "rejects Ruby regexp global match state instead of hiding it behind an adapter" do
@@ -621,7 +664,55 @@ RSpec.describe RubyToClear::Transpiler do
 
     it "comments out regex literal in lax mode" do
       res = RubyToClear.transpile("/pattern/", raise_on_error: false)
-      expect(res.strip).to eq("# [UNSUPPORTED: RegularExpressionNode at 1:0] Regular expressions are not supported\n# /pattern/")
+      expect(res.strip).to eq('unsupportedRuby("RegularExpressionNode at 1:0: Regular expressions are not supported");')
+    end
+
+    it "uses a syntax-valid placeholder for regex literals in expression position in lax mode" do
+      res = RubyToClear.transpile("scanner.scan(/pattern/)", raise_on_error: false)
+      expect(res.strip).to eq(
+        'scanner().scan(unsupportedRuby("RegularExpressionNode at 1:13: Regular expressions are not supported"));'
+      )
+    end
+
+    it "uses a syntax-valid placeholder for defined? in expression position in lax mode" do
+      res = RubyToClear.transpile("unless defined?(Lexer)\nend", raise_on_error: false)
+      expect(res.strip).to eq(<<~CLEAR.strip)
+        IF !(unsupportedRuby("DefinedNode at 1:7: defined? is not supported")) THEN
+
+        END
+      CLEAR
+    end
+
+    it "uses a syntax-valid placeholder for unsupported sub expressions in lax mode" do
+      res = RubyToClear.transpile("body = matched.sub(/_x\\z/, '')", raise_on_error: false)
+      expect(res.strip).to eq(
+        'MUTABLE body = unsupportedRuby("CallNode at 1:7: gsub/sub with dynamic regex, block, or invalid arguments is not supported");'
+      )
+    end
+
+    it "comments unsupported top-level constant writes in lax mode" do
+      res = RubyToClear.transpile("KEYWORDS = T.let(%w[A], T::Set[String])", raise_on_error: false)
+      expect(res).to include("# [UNSUPPORTED: ConstantWriteNode at 1:0] Top-level Ruby constant assignments are not supported")
+      expect(res).to include("# KEYWORDS = T.let(%w[A], T::Set[String])")
+    end
+
+    it "raises on unsupported top-level constant writes in strict mode" do
+      expect {
+        RubyToClear.transpile("KEYWORDS = T.let(%w[A], T::Set[String])")
+      }.to raise_error(RubyToClear::Transpiler::TranspilationError, /Top-level Ruby constant assignments are not supported/)
+    end
+
+    it "comments unknown Ruby block DSL calls in lax mode" do
+      ruby_code = <<~RUBY
+        RSpec.describe(Lexer) do
+          it("works") { expect(true).to eq(true) }
+        end
+      RUBY
+      res = RubyToClear.transpile(ruby_code, raise_on_error: false)
+
+      expect(res).to include("# [UNSUPPORTED: CallNode at 1:0] Blocks are not supported for this call shape")
+      expect(res).to include("# RSpec.describe(Lexer) do")
+      expect(res).not_to include("RSpec.describe(Lexer) # [UNSUPPORTED")
     end
 
     it "raises error on gsub with regex" do
@@ -959,6 +1050,29 @@ RSpec.describe RubyToClear::Transpiler do
         FN bound() RETURNS !Auto ->
           MUTABLE x = NIL;
           x = 1;
+        END
+      CLEAR
+      expect_transpile(ruby_code, expected_clear)
+    end
+
+    it "drops Ruby require, visibility, and Sorbet extend scaffolding" do
+      ruby_code = <<~RUBY
+        require "sorbet-runtime"
+        class Thing
+          extend T::Sig
+          private
+          def run
+            1
+          end
+        end
+      RUBY
+      expected_clear = <<~CLEAR
+        STRUCT Thing {
+
+        }
+
+        FN run(MUTABLE self: Thing) RETURNS !Auto ->
+          1;
         END
       CLEAR
       expect_transpile(ruby_code, expected_clear)

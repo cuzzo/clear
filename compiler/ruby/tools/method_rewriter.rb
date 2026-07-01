@@ -141,7 +141,7 @@ module MethodRewriter
   # right-to-left on the source so positions don't shift.
   sig { params(node: T.untyped, methods: Set, source: String, edits: Array).returns(T.nilable(Array)) }
   def self.walk_collect_edits(node, methods, source, edits)
-    return if node.nil? || AST.scalar_literal_value?(node)
+    return if node.nil?
 
     if node.is_a?(Array)
       node.each { |n| walk_collect_edits(n, methods, source, edits) }
@@ -150,7 +150,10 @@ module MethodRewriter
 
     if node.respond_to?(:each_pair)
       node.each_pair { |_, v| walk_collect_edits(v, methods, source, edits) }
+      return unless node.is_a?(AST::FuncCall)
     end
+
+    return if scalar_literal?(node)
 
     if node.is_a?(AST::FuncCall) && methods.include?(node.name) &&
        node.args.is_a?(Array) && !node.args.empty? &&
@@ -226,6 +229,12 @@ module MethodRewriter
     end
 
     { start: start_off, len: close_off - start_off + 1, replacement: rewritten }
+  end
+
+  sig { params(node: T.untyped).returns(T::Boolean) }
+  def self.scalar_literal?(node)
+    node.is_a?(String) || node.is_a?(Symbol) || node.is_a?(Numeric) ||
+      node.is_a?(TrueClass) || node.is_a?(FalseClass)
   end
 
   # True when the source text for `node` would mis-parse if placed
@@ -446,6 +455,7 @@ module MethodRewriter
   private_class_method :next_non_ws
   private_class_method :offset_for
   private_class_method :resolve_nested_edits
+  private_class_method :scalar_literal?
   private_class_method :split_args_by_comma
   private_class_method :walk_collect_edits
   private_class_method :walk_collect_user_decls

@@ -1,0 +1,15 @@
+# Ruby-to-CLEAR Migration Feature Gaps
+
+## Lexer Migration
+
+- `String@symbol` is expected to work as a first-class token/tag representation. CLEAR should accept symbol literal expressions like `.NAME`/`:NAME` as string values typed `String@symbol`; this is not intended to be an unsupported expression form. The migration exposed bugs rather than a missing language feature: ruby-to-clear initially emitted `.NAME` in places the compiler could not parse, the parser originally rejected uppercase symbol literals such as `:ELLIPSIS`, and symbol equality is currently pointer-based enough that equivalent literals from imported modules can compare unequal. Lexer tests compare tag text as a workaround, and the lexer avoids `token.type == :EOF` for the same reason.
+- Regex and scanner support remain the largest migration gap. The Ruby lexer is built around `StringScanner#scan`, regex captures, interpolated regexes, and Ruby match operators. ruby-to-clear currently has to emit `unsupportedRuby(...)` placeholders for most of that surface.
+- String interpolation has no obvious literal escape for the two-character sequence `"${"`. The migrated lexer source had to avoid writing that string directly and instead compare `"$"` and `"{"` separately.
+- The lexer migration exposed missing byte/codepoint conversion helpers. Ruby can do `hex.to_i(16).chr(Encoding::UTF_8)`; CLEAR currently needs hand-written ASCII-only conversion for `\xHH`/`\u{...}` escapes.
+- Raw string single-byte access is awkward. The migrated lexer uses one-character `substr` slices plus `"" +` coercions because raw string byte access returns `String@raw`, while most helper predicates need ordinary `String`.
+- Function calls over mutable scanner state in `WHILE` conditions can be hoisted incorrectly. `WHILE self.pos < len && is_identifier_body?(current_char(self))` generated Zig that reused the first `current_char` result for the whole loop. The lexer now computes those predicates inside loop bodies.
+- Checked numeric casts are missing or poorly lowered. After an explicit `UInt64` range check, `CAST(value AS Int64)` still lowered to an invalid Zig `@as(i64, value)`. The lexer currently converts through `value.toString().toInt()` as a safe but inefficient workaround.
+- `ASSERT_RAISES` lowering failed for fallible expressions returning list and scalar payloads during the lexer tests. The migrated tests use explicit `CATCH` helpers for overflow rejection instead.
+- Local build/test caching did not reliably invalidate when only a required CLEAR file changed. During migration, generated test binaries had to be removed manually after edits to `compiler/src/ast/lexer.clear`.
+- Top-level immutable lookup tables would help migrations. The lexer keyword set and numeric suffix ranges became long predicates because ruby-to-clear cannot preserve Ruby constants such as `KEYWORDS = ...to_set` in a useful CLEAR shape yet.
+- RSpec specs do not translate meaningfully yet. ruby-to-clear can now keep unsupported RSpec block DSL output syntax-valid in lax mode, but the real tests had to be rewritten manually into CLEAR `TEST` blocks.

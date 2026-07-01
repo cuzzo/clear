@@ -263,8 +263,8 @@ class ClearParser
   primary(:CHAR, ':') do
     T.bind(self, ClearParser) rescue nil
     colon_tok = consume(:CHAR, ':')
-    error!(colon_tok, :EXPECTED_SYMBOL_AFTER_COLON) unless match?(:VAR_ID)
-    ident_tok = consume(:VAR_ID)
+    error!(colon_tok, :EXPECTED_SYMBOL_AFTER_COLON) unless match?(:VAR_ID) || match?(:TYPE_ID)
+    ident_tok = current.type == :TYPE_ID ? consume(:TYPE_ID) : consume(:VAR_ID)
     AST::Literal.new(colon_tok, :SYMBOL, T.must(ident_tok).value, :stack)
   end
   primary(:BYTE) { T.bind(self, ClearParser); parse_literal(:BYTE, :stack) }

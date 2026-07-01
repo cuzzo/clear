@@ -167,6 +167,7 @@ module RubyToClear
         when "Integer" then "Int64"
         when "Float" then "Float64"
         when "String" then "String"
+        when "StringScanner" then "Scanner"
         when "Symbol" then "String@symbol"
         when "NilClass" then "Void"
         when "Boolean" then "Bool"
@@ -399,6 +400,42 @@ module RubyToClear
       [args.first.value.to_s, convert_sorbet_type(args[1])]
     end
 
+    def concrete_struct_type(type)
+      type.to_s.gsub(/\bAuto\b/, "Any")
+    end
+
+    def inferred_field_type_from_value(node)
+      if (typed_value = sorbet_typed_value(node))
+        return concrete_struct_type(typed_value[1])
+      end
+
+      if (unwrapped = sorbet_unwrapped_value(node))
+        return inferred_field_type_from_value(unwrapped)
+      end
+
+      case node
+      when Prism::StringNode, Prism::InterpolatedStringNode
+        "String"
+      when Prism::IntegerNode
+        "Int64"
+      when Prism::FloatNode
+        "Float64"
+      when Prism::TrueNode, Prism::FalseNode
+        "Bool"
+      when Prism::ArrayNode
+        "Any[]"
+      when Prism::HashNode, Prism::KeywordHashNode
+        "HashMap<Any, Any>"
+      when Prism::CallNode
+        if constant_constructor_call?(node)
+          name = constructor_output_name(node.receiver)
+          return name if name && !name.empty?
+        end
+      end
+
+      "Any"
+    end
+
     def dynamic_ruby_call_reason(name)
       DYNAMIC_RUBY_CALLS[name.to_s]
     end
@@ -525,7 +562,7 @@ module RubyToClear
     end
 
     def visit_symbol_node(node)
-      ".#{node.value}"
+      ":#{node.value}"
     end
 
     def visit_local_variable_read_node(node)
@@ -654,12 +691,11 @@ module RubyToClear
         end
         @struct_fields[name] = fields
 
-        field_decls = fields.map { |f| "  #{f}: Auto" }.join(",\n")
+        field_decls = fields.map { |f| "  #{f}: Any" }.join(",\n")
         return "STRUCT #{name} {\n#{field_decls}\n}"
       end
 
-      val = visit(node.value)
-      "#{name} = #{val}"
+      raise_unsupported("Top-level Ruby constant assignments are not supported", node)
     end
 
     def visit_range_node(node)
@@ -750,7 +786,11 @@ module RubyToClear
 
     def visit_parentheses_node(node)
       if node.body
-        "(#{visit(node.body)})"
+        if node.body.is_a?(Prism::StatementsNode) && node.body.body.length == 1
+          "(#{visit(node.body.body.first).delete_suffix(";")})"
+        else
+          "(#{visit(node.body).delete_suffix(";")})"
+        end
       else
         "()"
       end
@@ -844,11 +884,15 @@ module RubyToClear
     end
 
     def visit_regular_expression_node(node)
-      return raise_unsupported("Regular expressions are not supported", node)
+      return unsupported_expression(node, "Regular expressions are not supported")
     end
 
     def visit_interpolated_regular_expression_node(node)
-      return raise_unsupported("Regular expressions are not supported", node)
+      return unsupported_expression(node, "Regular expressions are not supported")
+    end
+
+    def visit_defined_node(node)
+      return unsupported_expression(node, "defined? is not supported")
     end
 
     def visit_interpolated_string_node(node)
@@ -887,6 +931,10 @@ module RubyToClear
     def visit_call_node(node)
       keyword_arg = keyword_hash_argument(node.arguments)
 
+      if ruby_scaffolding_call?(node)
+        return ""
+      end
+
       if (reason = dynamic_ruby_call_reason(node.name.to_s))
         return raise_unsupported("#{node.name} is a Ruby dynamic/reflection call: #{reason}", node)
       end
@@ -911,16 +959,26 @@ module RubyToClear
             receiver_name: registry_receiver_name(node.receiver),
             receiver_shape: registry_receiver_shape(node.receiver)
           )
-          return translated if translated
+          return translated if translated && !translated.include?("# [UNSUPPORTED:")
         end
-        return raise_unsupported("gsub/sub with dynamic regex, block, or invalid arguments is not supported", node)
+        return unsupported_expression(node, "gsub/sub with dynamic regex, block, or invalid arguments is not supported")
       end
 
       case node.name.to_s
+      when "!"
+        "!(#{visit(node.receiver)})"
       when "==", "!=", "<", "<=", ">", ">=", "+", "-", "*", "/", "%", "&&", "||", "&", "|"
         lhs = visit(node.receiver)
         rhs = visit(node.arguments.arguments.first)
         "(#{lhs} #{node.name} #{rhs})"
+      when "=~"
+        lhs = visit(node.receiver)
+        rhs = visit(node.arguments.arguments.first)
+        "regexMatch?(#{lhs}, #{rhs})"
+      when "!~"
+        lhs = visit(node.receiver)
+        rhs = visit(node.arguments.arguments.first)
+        "!(regexMatch?(#{lhs}, #{rhs}))"
       when "<<"
         lhs = visit(node.receiver)
         rhs = visit(node.arguments.arguments.first)
@@ -1007,15 +1065,14 @@ module RubyToClear
           return translated if translated
         end
 
+        if node.block
+          return raise_unsupported("Blocks are not supported for this call shape", node)
+        end
+
         rec = rec_code ? "#{rec_code}." : ""
         args_str = args_list.join(", ")
 
-        if node.block
-          block_code = visit(node.block)
-          "#{rec}#{name_str}(#{args_str}) #{block_code}"
-        else
-          "#{rec}#{name_str}(#{args_str})"
-        end
+        "#{rec}#{name_str}(#{args_str})"
       end
     end
 
@@ -1039,14 +1096,14 @@ module RubyToClear
         fields = body_nodes.filter_map { |stmt| t_struct_field(stmt) }
         if fields.length == body_nodes.length
           @struct_fields[@current_class] = fields.map(&:first)
-          field_decls = fields.map { |field, type| "  #{field}: #{type}" }.join(",\n")
+          field_decls = fields.map { |field, type| "  #{field}: #{concrete_struct_type(type)}" }.join(",\n")
           @current_class = old_class
           return "STRUCT #{node.constant_path.location.slice.strip} {\n#{field_decls}\n}"
         end
       end
 
-      ivar_names = collect_instance_variables(node)
-      struct_fields = ivar_names.map { |name| "  #{name}: Auto" }.join(",\n")
+      instance_fields = collect_instance_fields(node)
+      struct_fields = instance_fields.map { |name, type| "  #{name}: #{type}" }.join(",\n")
       struct_code = "STRUCT #{@current_class} {\n#{struct_fields}\n}"
 
       body_code = visit(node.body)
@@ -1236,18 +1293,22 @@ module RubyToClear
       end
     end
 
-    def collect_instance_variables(node)
-      ivars = Set.new
+    def collect_instance_fields(node)
+      fields = {}
       walk = ->(n) do
         next unless n
 
-        if n.is_a?(Prism::InstanceVariableReadNode) || n.is_a?(Prism::InstanceVariableWriteNode)
-          ivars << n.name.to_s.delete_prefix("@")
+        if n.is_a?(Prism::InstanceVariableReadNode)
+          fields[n.name.to_s.delete_prefix("@")] ||= "Any"
+        elsif n.is_a?(Prism::InstanceVariableWriteNode)
+          name = n.name.to_s.delete_prefix("@")
+          inferred_type = inferred_field_type_from_value(n.value)
+          fields[name] = inferred_type == "Any" ? fields.fetch(name, "Any") : inferred_type
         end
         n.child_nodes.each { |child| walk.call(child) if child }
       end
       walk.call(node)
-      ivars.to_a.sort
+      fields.sort.to_h
     end
 
     def registry_receiver_kind(receiver)
@@ -1327,6 +1388,30 @@ module RubyToClear
         commented_lines << "# #{line}"
       end
       commented_lines.map { |l| "#{indent}#{l}" }.join("\n")
+    end
+
+    def unsupported_expression(node, message)
+      return raise_unsupported(message, node) if @raise_on_error
+
+      node_name = node.class.name.split("::").last
+      loc = node.location
+      source_loc = "#{@source[0...loc.start_offset].count("\n") + 1}:#{loc.start_column}"
+      encoded = "#{node_name} at #{source_loc}: #{message}".dump
+      "unsupportedRuby(#{encoded})"
+    end
+
+    def ruby_scaffolding_call?(node)
+      return false unless node.is_a?(Prism::CallNode)
+
+      name = node.name.to_s
+      return true if node.receiver.nil? && ["require", "require_relative", "private", "public", "protected"].include?(name)
+
+      if name == "extend" && node.receiver.nil?
+        args = node.arguments ? node.arguments.arguments : []
+        return true if args.length == 1 && args.first.location.slice.strip == "T::Sig"
+      end
+
+      false
     end
   end
 end

@@ -46,6 +46,16 @@ RSpec.describe "./clear fix", :integration do
     expect(File.read(path)).to eq("FN main() RETURNS Int64 ->\n  x = 42;\n  RETURN x;\nEND\n")
   end
 
+  it "`autofix` is an alias for `fix`" do
+    path = write("autofix.clear", "FN main() RETURNS Int64 ->\n  MUTABLE x = 42;\n  RETURN x;\nEND\n")
+
+    out, _err, status = run_clear("autofix", path)
+
+    expect(status).to eq(0)
+    expect(out).to match(/applied 1 edit/)
+    expect(File.read(path)).to eq("FN main() RETURNS Int64 ->\n  x = 42;\n  RETURN x;\nEND\n")
+  end
+
   it "`build --fix` applies a representative parser fix and retries the build" do
     path = write("build_fix.clear", "FN main() RETURNS Int64 ->\n  x = 42\n  RETURN x;\nEND\n")
 

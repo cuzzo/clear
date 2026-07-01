@@ -2570,7 +2570,6 @@ class MIRLowering
         next if stmt.visibility == :private
         append_lowered_items!(LoweredItemTarget.new(items: fn_items, line: stmt.token.line), lower(stmt))
       when AST::StructDef, AST::EnumDef, AST::UnionDef
-        next if stmt.visibility == :private
         append_lowered_items!(LoweredItemTarget.new(items: type_items, line: stmt.token.line), lower(stmt))
       when AST::RequireNode
         append_lowered_items!(LoweredItemTarget.new(items: fn_items, line: nil), lower(stmt))
@@ -3252,20 +3251,39 @@ class MIRLowering
   sig { params(mod: ModuleImporter::CompiledModule).returns(T::Array[MIR::Emittable]) }
   def imported_module_items(mod)
     if mod.ast
-      return mod.ast.statements.filter_map do |stmt|
-        next nil if stmt.is_a?(AST::FunctionDef) && stmt.visibility == :private
+      hidden_type_items = mod.ast.statements.filter_map do |stmt|
+        next nil unless hidden_imported_type_statement?(stmt, mod)
+        lower(stmt)
+      end
+
+      fn_items = mod.ast.statements.filter_map do |stmt|
         next nil if stmt.is_a?(AST::FunctionDef) && stmt.name == Compiler::Entrypoint::NAME
         next lower_function_def(stmt) if stmt.is_a?(AST::FunctionDef)
         next lower(stmt) if stmt.is_a?(AST::ExternFnDecl) || stmt.is_a?(AST::ExternStructDecl)
 
         nil
       end.flatten.select { |item| item.is_a?(MIR::Emittable) }
+
+      return [hidden_type_items, fn_items].flatten.select { |item| item.is_a?(MIR::Emittable) }
     end
 
     items = mod.mir_items
     return items.select { |item| importable_module_item?(item) } if items.is_a?(Array)
     []
   end
+
+  sig { params(stmt: AST::Node, mod: ModuleImporter::CompiledModule).returns(T::Boolean) }
+  def hidden_imported_type_statement?(stmt, mod)
+    return false unless stmt.is_a?(AST::StructDef) || stmt.is_a?(AST::EnumDef) || stmt.is_a?(AST::UnionDef)
+
+    same_dir = mod.source_dir == program_state.source_dir
+    vis = stmt.visibility || :package
+    return false if vis == :pub
+    return false if vis == :package && same_dir
+
+    true
+  end
+  private :hidden_imported_type_statement?
 
   sig { params(item: MIR::Node).returns(T::Boolean) }
   def importable_module_item?(item)

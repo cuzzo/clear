@@ -97,6 +97,20 @@ RSpec.describe "String@symbol" do
       expect(ast).not_to be_nil
     end
 
+    it "parses uppercase symbol literals for enum-like tags" do
+      ast = parse(<<~CLEAR)
+        FN main() RETURNS Void ->
+          tok = :ELLIPSIS;
+          RETURN;
+        END
+      CLEAR
+      body = ast.statements.first.body
+      decl = body.find { |s| s.respond_to?(:name) && s.name == "tok" }
+      expect(decl.value).to be_a(AST::Literal)
+      expect(decl.value.type).to eq(:SYMBOL)
+      expect(decl.value.value).to eq("ELLIPSIS")
+    end
+
     it "parses @symbol as a type capability annotation on a parameter" do
       ast = parse(<<~CLEAR)
         FN label(tag: String@symbol) RETURNS String ->

@@ -3,11 +3,14 @@
 
 require_relative "../lib/ruby_to_clear"
 
-if ARGV.empty?
-  puts "Usage: ruby-to-clear <file.rb>"
+usage = "Usage: ruby-to-clear [--strict] <file.rb>"
+
+if ARGV.empty? || ARGV.include?("--help") || ARGV.include?("-h")
+  puts usage
   exit 1
 end
 
+strict = ARGV.delete("--strict")
 path = ARGV[0]
 unless File.exist?(path)
   puts "File not found: #{path}"
@@ -15,7 +18,7 @@ unless File.exist?(path)
 end
 
 begin
-  puts RubyToClear.transpile_file(path)
+  puts RubyToClear.transpile_file(path, raise_on_error: strict)
 rescue StandardError => e
   warn "Error: #{e.message}"
   exit 1

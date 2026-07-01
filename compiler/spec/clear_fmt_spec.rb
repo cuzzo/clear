@@ -130,6 +130,21 @@ RSpec.describe Formatter do
     expect(out).to eq("FN f() RETURNS Int64 ->\n  RETURN 0;\nEND\n")
   end
 
+  it "keeps symbol literal colons attached in expressions and arguments" do
+    path = write("symbol.clear", <<~CLEAR)
+      FN main() RETURNS Void ->
+        tag=:ok;
+        add(:ELLIPSIS,:ok);
+        RETURN;
+      END
+    CLEAR
+
+    out, _, status = run_fmt("--stdout", path)
+    expect(status).to eq(0)
+    expect(out).to include("tag = :ok;")
+    expect(out).to include("add(:ELLIPSIS, :ok);")
+  end
+
   it "keeps MUTABLE on bindings passed to bang helpers" do
     src = <<~CLEAR
       FN appendOne!(MUTABLE xs: Int64[]@list) RETURNS Void ->

@@ -3759,6 +3759,48 @@ RSpec.describe MIRLowering do
       expect(emit(namespace)).not_to include("clearMain")
     end
 
+    it "keeps hidden implementation declarations inside imported module namespaces" do
+      public_fn_ast = AST::FunctionDef.new(tok, "public_value", [], nil, :Void, nil, [], nil, nil, :pub, nil, false)
+      public_fn_ast.needs_rt = false
+      public_fn_ast.can_fail = false
+      private_fn_ast = AST::FunctionDef.new(tok, "private_helper", [], nil, :Void, nil, [], nil, nil, :private, nil, false)
+      private_fn_ast.needs_rt = false
+      private_fn_ast.can_fail = false
+      imported_ast = AST::Program.new(tok, [
+        AST::StructDef.new(tok, "PublicType", {}, :pub, nil),
+        AST::StructDef.new(tok, "HiddenState", {}, :private, nil),
+        public_fn_ast,
+        private_fn_ast,
+      ])
+      public_type = MIR::StructDef.new("PublicType", [], nil, :pub)
+      hidden_type = MIR::StructDef.new("HiddenState", [], nil, nil)
+      imported_mod = ModuleImporter::CompiledModule.new(
+        imported_ast,
+        nil,
+        nil,
+        File.join(Dir.pwd, "dep"),
+        {},
+        {},
+        {},
+        nil,
+        nil,
+        [public_type, hidden_type],
+      )
+      importer = ModuleImporter.new(base_dir: Dir.pwd)
+      importer.define_singleton_method(:compile_file) { |_path, caller_dir:| imported_mod }
+      node = AST::RequireNode.new(tok, "dep/helper.clear", "helper", :local)
+
+      low = lowering(importer: importer, source_dir: Dir.pwd)
+      result = low.lower(node)
+
+      expect(result).to include(public_type)
+      expect(result).not_to include(hidden_type)
+      namespace = result.find { |item| item.is_a?(MIR::ModuleNamespace) }
+      expect(namespace.items).to include(an_object_having_attributes(name: "HiddenState"))
+      expect(namespace.items).to include(an_object_having_attributes(name: "private_helper"))
+      expect(namespace.items).to include(an_object_having_attributes(name: "public_value"))
+    end
+
     it "emits a repeated local require module only once" do
       imported_fn = MIR::FnDef.new(
         "helper_value",
@@ -3814,6 +3856,8 @@ RSpec.describe MIRLowering do
 
     it "reconstructs imported module items from AST without nesting requires" do
       private_fn = AST::FunctionDef.new(tok, "private_helper", [], nil, :Void, nil, [], nil, nil, :private, nil, false)
+      private_fn.needs_rt = false
+      private_fn.can_fail = false
       imported_ast = AST::Program.new(tok, [
         private_fn,
         AST::RequireNode.new(tok, "math", "math", :package),
@@ -3837,6 +3881,7 @@ RSpec.describe MIRLowering do
 
       expect(items).not_to include(an_object_having_attributes(alias_name: "math", module_path: "math.zig"))
       expect(items).to include(an_object_having_attributes(alias_name: "c", module_path: "c.zig"))
+      expect(items).to include(an_object_having_attributes(name: "private_helper"))
     end
 
     it "hoists imported module requires as dependency items" do

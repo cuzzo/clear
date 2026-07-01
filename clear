@@ -1168,7 +1168,7 @@ when 'doctor'
   end
   Doctor.run(positional.first, **doctor_opts)
 
-when 'fix'
+when 'fix', 'autofix'
   require_relative 'compiler/ruby/tools/clear_fix_support'
 
   begin

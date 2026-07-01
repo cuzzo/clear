@@ -55,7 +55,7 @@ RSpec.describe "Ruby-to-CLEAR oracle corpus" do
         Set.new(values)
       RUBY
       clear: <<~CLEAR,
-        MUTABLE values: String@symbol[]@set = [.a, .b];
+        MUTABLE values: String@symbol[]@set = [:a, :b];
         values |> DISTINCT _;
       CLEAR
     },
