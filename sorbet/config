@@ -5,6 +5,7 @@
 --ignore=zig-old/
 --ignore=zig-out/
 --ignore=spec/
+--ignore=compiler/spec/
 --ignore=transpile-tests/
 --ignore=examples/
 --ignore=benchmarks/

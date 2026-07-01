@@ -8,7 +8,7 @@ pub fn build(b: *std.Build) void {
     // Absolute paths (needed for addSystemCommand args and --pkg flags)
     // -----------------------------------------------------------------------
     const build_root  = b.build_root.path orelse ".";
-    const transpiler  = b.fmt("{s}/../../src/backends/transpiler.rb", .{build_root});
+    const transpiler  = b.fmt("{s}/../../compiler/ruby/backends/transpiler.rb", .{build_root});
     const math_src    = b.fmt("{s}/packages/math/src/lib.cht", .{build_root});
     const geom_src    = b.fmt("{s}/packages/geometry/src/lib.cht", .{build_root});
     const main_src    = b.fmt("{s}/src/main.cht", .{build_root});

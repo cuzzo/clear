@@ -31,7 +31,7 @@ require "stackprof"
 require "benchmark"
 
 root = File.expand_path("..", __dir__)
-src_root = File.join(root, "src")
+src_root = File.join(root, "compiler", "ruby")
 $LOAD_PATH.unshift(src_root)
 $LOAD_PATH.unshift(File.join(src_root, "ast"))
 $LOAD_PATH.unshift(File.join(src_root, "mir"))

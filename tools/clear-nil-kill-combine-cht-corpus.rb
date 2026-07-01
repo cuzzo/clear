@@ -2,7 +2,7 @@
 # frozen_string_literal: true
 
 require "fileutils"
-require_relative "../src/ast/type"
+require_relative "../compiler/ruby/ast/type"
 
 ROOT = File.expand_path("..", __dir__)
 OUT = File.expand_path(File.join(ROOT, "tmp", "nil-kill", "combined-corpus.cht"))

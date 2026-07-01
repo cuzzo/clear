@@ -82,12 +82,12 @@ jobs:
         with:
           ruby-version: ${{ env.RUBY_VERSION }}
           bundler-cache: true
-      - run: bundle exec prspec spec/
+      - run: bundle exec prspec compiler/spec/
       # Collate parallel_rspec workers' resultsets into a single Cobertura
       # XML before upload (each worker writes its own `RSpec-w<id>-<pid>`
       # entry into coverage/.resultset.json; collate_coverage merges them
       # back into one entry that the Cobertura formatter understands).
-      - run: bundle exec ruby spec/collate_coverage.rb
+      - run: bundle exec ruby compiler/spec/collate_coverage.rb
       - uses: actions/upload-artifact@v4
         with:
           name: ruby-coverage-unit
@@ -261,7 +261,7 @@ jobs:
               filename = klass.attributes["filename"].to_s.tr("\\\\", "/")
               rel = if filename.start_with?(repo.tr("\\\\", "/") + "/")
                       filename[(repo.length + 1)..]
-                    elsif filename.start_with?("src/")
+                    elsif filename.start_with?("compiler/ruby/")
                       "gems/zig-mutants/#{filename}"
                     else
                       filename
@@ -487,7 +487,7 @@ jobs:
         with:
           ruby-version: ${{ env.RUBY_VERSION }}
           bundler-cache: true
-      - run: bundle exec rubocop --only Sorbet/EnforceSignatures src/
+      - run: bundle exec rubocop --only Sorbet/EnforceSignatures compiler/ruby/
 
   lint-sarif:
     name: Advisory lint SARIF
@@ -571,15 +571,15 @@ jobs:
           path: |
             zig/.clear-cache
             zig/.clear-transpile-cache
-          key: clear-build-${{ runner.os }}-zig${{ env.ZIG_VERSION }}-${{ hashFiles('src/**', 'zig/runtime/**', 'zig/lib/**', 'Gemfile.lock') }}
+          key: clear-build-${{ runner.os }}-zig${{ env.ZIG_VERSION }}-${{ hashFiles('compiler/ruby/**', 'zig/runtime/**', 'zig/lib/**', 'Gemfile.lock') }}
           restore-keys: |
             clear-build-${{ runner.os }}-zig${{ env.ZIG_VERSION }}-
-      - run: bundle exec prspec spec/ --tag integration
+      - run: bundle exec prspec compiler/spec/ --tag integration
       # Collate workers + clear-CLI subprocess resultsets into a single
       # Cobertura XML, same as the unit job. Both unit and integration
       # uploads use `flags: ruby` so Codecov merges them server-side
       # into one Ruby coverage view.
-      - run: bundle exec ruby spec/collate_coverage.rb
+      - run: bundle exec ruby compiler/spec/collate_coverage.rb
       - uses: actions/upload-artifact@v4
         with:
           name: ruby-coverage-integration
@@ -639,11 +639,11 @@ jobs:
           path: |
             zig/.clear-cache
             zig/.clear-transpile-cache
-          key: clear-build-${{ runner.os }}-zig${{ env.ZIG_VERSION }}-${{ hashFiles('src/**', 'zig/runtime/**', 'zig/lib/**', 'Gemfile.lock') }}
+          key: clear-build-${{ runner.os }}-zig${{ env.ZIG_VERSION }}-${{ hashFiles('compiler/ruby/**', 'zig/runtime/**', 'zig/lib/**', 'Gemfile.lock') }}
           restore-keys: |
             clear-build-${{ runner.os }}-zig${{ env.ZIG_VERSION }}-
       - run: TRANSPILE_GEN_JOBS="$(nproc)" bundle exec ruby transpile-tests/gen.rb
-      - run: bundle exec ruby spec/collate_coverage.rb
+      - run: bundle exec ruby compiler/spec/collate_coverage.rb
       - uses: actions/upload-artifact@v4
         with:
           name: ruby-coverage-transpile-tests
@@ -735,12 +735,12 @@ jobs:
           path: |
             zig/.clear-cache
             zig/.clear-transpile-cache
-          key: clear-examples-coverage-${{ runner.os }}-zig${{ env.ZIG_VERSION }}-${{ hashFiles('src/**', 'zig/runtime/**', 'zig/lib/**', 'examples/**/*.cht', 'benchmarks/**/*.cht', 'Gemfile.lock') }}
+          key: clear-examples-coverage-${{ runner.os }}-zig${{ env.ZIG_VERSION }}-${{ hashFiles('compiler/ruby/**', 'zig/runtime/**', 'zig/lib/**', 'examples/**/*.cht', 'benchmarks/**/*.cht', 'Gemfile.lock') }}
           restore-keys: |
             clear-examples-coverage-${{ runner.os }}-zig${{ env.ZIG_VERSION }}-
       - run: bundle exec ruby tools/corpus_transpile_coverage.rb --shard ${{ matrix.shard }}/5
       - run: bundle exec ruby tools/corpus_runtime_coverage.rb --shard ${{ matrix.shard }}/5
-      - run: bundle exec ruby spec/collate_coverage.rb
+      - run: bundle exec ruby compiler/spec/collate_coverage.rb
       - uses: actions/upload-artifact@v4
         with:
           name: ruby-coverage-examples-benchmarks-${{ matrix.shard }}
@@ -815,7 +815,7 @@ jobs:
           path: |
             zig/.clear-cache
             zig/.clear-transpile-cache
-          key: clear-fuzz-${{ runner.os }}-zig${{ env.ZIG_VERSION }}-${{ hashFiles('src/**', 'zig/runtime/**', 'zig/lib/**', 'tools/fuzz/**', 'Gemfile.lock') }}
+          key: clear-fuzz-${{ runner.os }}-zig${{ env.ZIG_VERSION }}-${{ hashFiles('compiler/ruby/**', 'zig/runtime/**', 'zig/lib/**', 'tools/fuzz/**', 'Gemfile.lock') }}
           restore-keys: |
             clear-fuzz-${{ runner.os }}-zig${{ env.ZIG_VERSION }}-
       # Ruby coverage records compile/lower/emit. ZIG_COVERAGE=1 also bundles
@@ -823,7 +823,7 @@ jobs:
       # cells stay compile-only so SimpleCov does not fan out through every
       # child `clear test` / `clear build` process.
       - run: bundle exec ruby tools/fuzz/run.rb --matrix --skip-quarantined --shard ${{ matrix.shard }}/5 --out /tmp/clear-fuzz-ci-${{ matrix.shard }} --clean --jobs "$(nproc)"
-      - run: bundle exec ruby spec/collate_coverage.rb
+      - run: bundle exec ruby compiler/spec/collate_coverage.rb
       - uses: actions/upload-artifact@v4
         with:
           name: ruby-coverage-fuzz-${{ matrix.shard }}
@@ -896,7 +896,7 @@ jobs:
           path: |
             zig/.clear-cache
             zig/.clear-transpile-cache
-          key: clear-fuzz-${{ runner.os }}-zig${{ env.ZIG_VERSION }}-${{ hashFiles('src/**', 'zig/runtime/**', 'zig/lib/**', 'tools/fuzz/**', 'Gemfile.lock') }}
+          key: clear-fuzz-${{ runner.os }}-zig${{ env.ZIG_VERSION }}-${{ hashFiles('compiler/ruby/**', 'zig/runtime/**', 'zig/lib/**', 'tools/fuzz/**', 'Gemfile.lock') }}
           restore-keys: |
             clear-fuzz-${{ runner.os }}-zig${{ env.ZIG_VERSION }}-
       - run: bundle exec ruby tools/fuzz/run.rb --matrix --only-quarantined --shard ${{ matrix.shard }}/5 --out /tmp/clear-fuzz-quar-${{ matrix.shard }} --clean
@@ -924,7 +924,7 @@ jobs:
       # (lowering runs before the bytecode VM; the incomplete _bc_runner
       # is never executed).
       - run: bundle exec ruby tools/bc_lower_coverage.rb --shard ${{ matrix.shard }}/5
-      - run: bundle exec ruby spec/collate_coverage.rb
+      - run: bundle exec ruby compiler/spec/collate_coverage.rb
       - uses: actions/upload-artifact@v4
         with:
           name: ruby-coverage-bc-lower-${{ matrix.shard }}
@@ -981,7 +981,7 @@ jobs:
           path: |
             zig/.clear-cache
             zig/.clear-transpile-cache
-          key: clear-build-${{ runner.os }}-zig${{ env.ZIG_VERSION }}-${{ hashFiles('src/**', 'zig/runtime/**', 'zig/lib/**', 'Gemfile.lock') }}
+          key: clear-build-${{ runner.os }}-zig${{ env.ZIG_VERSION }}-${{ hashFiles('compiler/ruby/**', 'zig/runtime/**', 'zig/lib/**', 'Gemfile.lock') }}
           restore-keys: |
             clear-build-${{ runner.os }}-zig${{ env.ZIG_VERSION }}-
       # Baseline ratchet: the register VM is the primary stress-tester
@@ -1024,7 +1024,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      # build.zig invokes `ruby src/backends/transpiler.rb` to lower
+      # build.zig invokes `ruby compiler/ruby/backends/transpiler.rb` to lower
       # .cht to Zig; transpiler.rb does `require 'bundler/setup'` so
       # we need both Ruby and bundle install before zig build runs.
       - uses: ruby/setup-ruby@v1
@@ -1044,7 +1044,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      # build.zig invokes `ruby src/backends/transpiler.rb` to lower
+      # build.zig invokes `ruby compiler/ruby/backends/transpiler.rb` to lower
       # .cht to Zig; transpiler.rb does `require 'bundler/setup'` so
       # we need both Ruby and bundle install before zig build runs.
       - uses: ruby/setup-ruby@v1
@@ -1093,7 +1093,7 @@ jobs:
           path: |
             zig/.clear-cache
             zig/.clear-transpile-cache
-          key: clear-bench-leak-${{ runner.os }}-zig${{ env.ZIG_VERSION }}-${{ hashFiles('src/**', 'zig/runtime/**', 'zig/lib/**', 'benchmarks/**/*.cht', 'Gemfile.lock') }}
+          key: clear-bench-leak-${{ runner.os }}-zig${{ env.ZIG_VERSION }}-${{ hashFiles('compiler/ruby/**', 'zig/runtime/**', 'zig/lib/**', 'benchmarks/**/*.cht', 'Gemfile.lock') }}
           restore-keys: |
             clear-bench-leak-${{ runner.os }}-zig${{ env.ZIG_VERSION }}-
       - run: ruby benchmarks/runner.rb --leak --all --shard=${{ matrix.shard }}/5 --cores=2 --bencher-json tmp/benchmark-leak-${{ matrix.shard }}.json

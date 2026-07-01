@@ -1,5 +1,5 @@
 #! /usr/bin/env ruby
-# Drive src/ branch coverage of the `@target == :bc` lowering arms by
+# Drive compiler/ruby branch coverage of the `@target == :bc` lowering arms by
 # re-lowering the EXISTING corpus with target: :bc. Zero new programs.
 #
 # Feasibility: the `@target == :bc` branches in mir_lowering fire during
@@ -13,7 +13,7 @@
 # Usage:
 #   COVERAGE=1 ruby tools/bc_lower_coverage.rb
 #   COVERAGE=1 ruby tools/bc_lower_coverage.rb --jobs 32
-#   bundle exec ruby spec/collate_coverage.rb
+#   bundle exec ruby compiler/spec/collate_coverage.rb
 #   ruby tools/branch_gap_triage.rb
 
 require 'bundler/setup'
@@ -120,10 +120,10 @@ if jobs
   exit 0
 end
 
-require_relative '../spec/coverage_bootstrap'
+require_relative '../compiler/spec/coverage_bootstrap'
 CoverageBootstrap.start('bc-lower')
 
-require_relative '../src/backends/transpiler'
+require_relative '../compiler/ruby/backends/transpiler'
 
 def line_count(path)
   count = 0

@@ -1,8 +1,8 @@
 # frozen_string_literal: true
 
 require "set"
-require_relative "../../src/mir/mir"
-require_relative "../../src/ast/error_registry"
+require_relative "../../compiler/ruby/mir/mir"
+require_relative "../../compiler/ruby/ast/error_registry"
 require_relative "register_opcode_layout"
 require_relative "register_pipeline"
 

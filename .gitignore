@@ -25,14 +25,14 @@
 !/clear
 !/bin/
 !/benchmarks/
+!/compiler/
+!/compiler/**
 !/docs/
 !/examples/
 !/gems/
 !/manifesto/
 !/site/
 !/sorbet/
-!/spec/
-!/src/
 !/stdlib/
 !/syntaxes/
 !/testdata/

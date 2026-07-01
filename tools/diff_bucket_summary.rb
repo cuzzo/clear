@@ -28,24 +28,24 @@ def parse_options(argv)
     format: "text",
     src_visibility: false,
     src_visibility_only: false,
-    src_visibility_path: "src",
+    src_visibility_path: "compiler/ruby",
     type_guardrails_sarif: nil,
   }
   OptionParser.new do |parser|
     parser.banner = "Usage: ruby tools/diff_bucket_summary.rb [BASE] [--format text|markdown] [--src-visibility] [--type-guardrails-sarif PATH]"
     parser.on("--format FORMAT", %w[text markdown], "Output format") { |value| options[:format] = value }
-    parser.on("--src-visibility", "Append src/**/*.rb public/private/OTHER code-line breakdown") do
+    parser.on("--src-visibility", "Append compiler/ruby/**/*.rb public/private/OTHER code-line breakdown") do
       options[:src_visibility] = true
     end
-    parser.on("--src-visibility-only", "Print only the src/**/*.rb public/private/OTHER code-line breakdown") do
+    parser.on("--src-visibility-only", "Print only the compiler/ruby/**/*.rb public/private/OTHER code-line breakdown") do
       options[:src_visibility] = true
       options[:src_visibility_only] = true
     end
-    parser.on("--src-visibility-path PATH", "Directory to scan for --src-visibility (default: src)") do |value|
+    parser.on("--src-visibility-path PATH", "Directory to scan for --src-visibility (default: compiler/ruby)") do |value|
       options[:src_visibility] = true
       options[:src_visibility_path] = value
     end
-    parser.on("--type-guardrails-sarif PATH", "Write src type guardrail findings as SARIF") do |value|
+    parser.on("--type-guardrails-sarif PATH", "Write compiler/ruby type guardrail findings as SARIF") do |value|
       options[:type_guardrails_sarif] = value
     end
   end.parse!(argv)
@@ -85,10 +85,10 @@ def zig_test_or_harness_file?(path)
 end
 
 def bucket_for(path)
-  return :src_rb if path.start_with?("src/") && path.end_with?(".rb")
+  return :src_rb if path.start_with?("compiler/ruby/") && path.end_with?(".rb")
   return :zig_tests if zig_test_or_harness_file?(path)
   return :zig_src if path.start_with?("zig/") && path.end_with?(".zig")
-  return :spec if path.start_with?("spec/")
+  return :spec if path.start_with?("compiler/spec/")
   return :transpile_tests if path.start_with?("transpile-tests/")
   return :tools if path.start_with?("tools/")
   return :gems if path.start_with?("gems/")
@@ -158,9 +158,9 @@ end
 SrcRubyMethodSpan = Struct.new(:name, :visibility, :start_line, :end_line, :singleton, keyword_init: true)
 
 SRC_RUBY_CHANGE_BUCKETS = {
-  src_public_fn: "src/**/*.rb public functions",
-  src_private_fn: "src/**/*.rb private functions",
-  src_other: "src/**/*.rb OTHER",
+  src_public_fn: "compiler/ruby/**/*.rb public functions",
+  src_private_fn: "compiler/ruby/**/*.rb private functions",
+  src_other: "compiler/ruby/**/*.rb OTHER",
 }.freeze
 
 SRC_RUBY_VISIBILITY_BUCKET_LABELS = {
@@ -945,12 +945,12 @@ RUBOCOP_GUARDRAIL_KIND = {
 
 def src_ruby_added_paths(adds_by_path, root: ROOT)
   adds_by_path.keys.select do |path|
-    path.start_with?("src/") && path.end_with?(".rb") && File.file?(File.join(root, path))
+    path.start_with?("compiler/ruby/") && path.end_with?(".rb") && File.file?(File.join(root, path))
   end.sort
 end
 
 def src_ruby_context_paths(root: ROOT)
-  Dir.glob(File.join(root, "src/**/*.rb")).filter_map do |path|
+  Dir.glob(File.join(root, "compiler/ruby/**/*.rb")).filter_map do |path|
     next unless File.file?(path)
 
     path.delete_prefix("#{root}/")
@@ -981,7 +981,7 @@ def rubocop_guardrail_findings_from_json(adds_by_path, output, root: ROOT)
   payload.fetch("files", []).flat_map do |file|
     path = normalize_rubocop_path(file.fetch("path", ""), root)
     added = adds_by_path.fetch(path, Set.new)
-    next [] if added.empty? || !path.start_with?("src/") || !path.end_with?(".rb")
+    next [] if added.empty? || !path.start_with?("compiler/ruby/") || !path.end_with?(".rb")
 
     file.fetch("offenses", []).filter_map do |offense|
       cop = offense.fetch("cop_name", "")
@@ -997,7 +997,7 @@ def rubocop_guardrail_findings_from_json(adds_by_path, output, root: ROOT)
         kind: RUBOCOP_GUARDRAIL_KIND.fetch(cop),
         path: path,
         line: line,
-        message: "added src line trips #{cop}",
+        message: "added compiler/ruby line trips #{cop}",
         detail: [message, column.positive? ? "column #{column}" : nil].compact.join("; "),
         code: code,
       )
@@ -1071,7 +1071,7 @@ def print_type_guardrails_markdown(findings)
   puts "## Src Type Guardrails"
   puts
   if findings.empty?
-    puts "No added `src/**/*.rb` type guardrail findings."
+    puts "No added `compiler/ruby/**/*.rb` type guardrail findings."
     return
   end
 
@@ -1093,7 +1093,7 @@ def type_guardrails_sarif_hash(findings)
       id: kind,
       name: kind.tr("_", " "),
       short_description: "Src type guardrail",
-      full_description: "A changed src/**/*.rb line tripped a type-system guardrail.",
+      full_description: "A changed compiler/ruby/**/*.rb line tripped a type-system guardrail.",
       default_level: "warning",
       properties: { "category" => "src-type-guardrails" }
     )
@@ -1196,7 +1196,7 @@ if $PROGRAM_NAME == __FILE__
     [:total, "total"],
     *SRC_RUBY_CHANGE_BUCKETS.to_a,
     [:zig_src, "zig/**/*.zig prod"],
-    [:spec, "spec/"],
+    [:spec, "compiler/spec/"],
     [:transpile_tests, "transpile-tests/"],
     [:tools, "tools/"],
     [:gems, "gems/"],

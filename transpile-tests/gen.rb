@@ -1,13 +1,13 @@
 #! /usr/bin/env ruby
 require 'bundler/setup'
 
-# Coverage bootstrap MUST run before src/ requires. No-op unless
-# COVERAGE=1. See spec/coverage_bootstrap.rb.
-require_relative '../spec/coverage_bootstrap'
+# Coverage bootstrap MUST run before compiler/ruby requires. No-op unless
+# COVERAGE=1. See compiler/spec/coverage_bootstrap.rb.
+require_relative '../compiler/spec/coverage_bootstrap'
 CoverageBootstrap.start(ENV.fetch('COVERAGE_BOOTSTRAP_NAME', 'transpile-tests'))
 require_relative '../tools/zig_coverage_support'
 
-require_relative '../src/backends/transpiler'
+require_relative '../compiler/ruby/backends/transpiler'
 
 # Generates Zig test blocks from .cht files using MIRLowering + MIREmitter.
 class TestGenerator

@@ -5,21 +5,21 @@
 # not the Ruby compiler). We transpile each one in a single process so
 # every .cht drives the real pass pipeline — CompilerFrontend.compile →
 # MIRLowering → MIRChecker → MIREmitter — and SimpleCov records the
-# branch arms each shape takes in src/. One process, no Zig, no 100x
+# branch arms each shape takes in compiler/ruby. One process, no Zig, no 100x
 # Ruby startup. Per-file errors are swallowed: many examples are module
 # or package fragments that don't transpile standalone, and even a
 # failed compile exercises parser/annotator/escape paths we want counted.
 #
 # Usage: COVERAGE=1 ruby tools/corpus_transpile_coverage.rb
-#        bundle exec ruby spec/collate_coverage.rb
+#        bundle exec ruby compiler/spec/collate_coverage.rb
 #        ruby tools/branch_gap_report.rb
 
 require 'bundler/setup'
 require 'optparse'
-require_relative '../spec/coverage_bootstrap'
+require_relative '../compiler/spec/coverage_bootstrap'
 CoverageBootstrap.start('corpus-transpile')
 
-require_relative '../src/backends/transpiler'
+require_relative '../compiler/ruby/backends/transpiler'
 
 ROOT = File.expand_path('..', __dir__)
 opts = { shard: nil }

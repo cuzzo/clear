@@ -8,7 +8,7 @@
 #
 # See docs/clear-man.md for full documentation.
 
-# Set up Bundler so src/ files can `require "sorbet-runtime"` etc.
+# Set up Bundler so compiler/ruby files can `require "sorbet-runtime"` etc.
 # without relying on system gems. Soft-fails when Bundler isn't
 # available so end users running a vendored binary aren't blocked.
 begin
@@ -19,7 +19,7 @@ rescue LoadError
 end
 
 # Compiler runtime type wrappers are useful while debugging compiler internals,
-# but they dominate normal build time if enabled before src/ is loaded.
+# but they dominate normal build time if enabled before compiler/ruby is loaded.
 begin
   require "sorbet-runtime"
   T::Configuration.default_checked_level = :never unless ENV["CLEAR_SORBET_RUNTIME"] == "1"
@@ -31,19 +31,19 @@ require 'optparse'
 require 'digest'
 require 'set'
 require 'json'
-require_relative 'src/tools/clear_build_support'
+require_relative 'compiler/ruby/tools/clear_build_support'
 require_relative 'tools/zig_coverage_support'
 
-# Coverage bootstrap MUST run before any src/ require so SimpleCov can
+# Coverage bootstrap MUST run before any compiler/ruby require so SimpleCov can
 # instrument every file the subcommand loads. No-op unless COVERAGE=1.
-# See spec/coverage_bootstrap.rb.
-require_relative 'spec/coverage_bootstrap'
+# See compiler/spec/coverage_bootstrap.rb.
+require_relative 'compiler/spec/coverage_bootstrap'
 CoverageBootstrap.start('clear-cli')
 
 # Resolve paths relative to this script (works from any directory)
 CLEAR_ROOT = File.expand_path('..', __FILE__)
 ZIG_DIR    = File.join(CLEAR_ROOT, 'zig')
-SRC_DIR    = File.join(CLEAR_ROOT, 'src')
+SRC_DIR    = File.join(CLEAR_ROOT, 'compiler', 'ruby')
 TRANSPILER = File.join(SRC_DIR, 'backends', 'transpiler.rb')
 TRANSPILER_CACHE_DIR = File.join(ZIG_DIR, '.clear-transpile-cache')
 
@@ -517,7 +517,7 @@ when 'build'
       # observed uses. `clear fix` rewrites resolved Autos to their
       # concrete types. Imports are still required to be fully typed
       # (STRICT-imports boundary, §7).
-      require_relative 'src/ast/parser'
+      require_relative 'compiler/ruby/ast/parser'
       ClearParser.gradual_mode = true
       i += 1
     else
@@ -540,8 +540,8 @@ when 'build'
 
   # Post-build stack verification and exact sizing
   if stack_check && File.exist?(output_path) && File.read(source).scan(/REQUIRE\s+"pkg:([^"]+)"/).empty?
-    require_relative 'src/tools/stack_verifier'
-    require_relative 'src/backends/transpiler'
+    require_relative 'compiler/ruby/tools/stack_verifier'
+    require_relative 'compiler/ruby/backends/transpiler'
 
     begin
       src_text = File.read(source)
@@ -557,7 +557,7 @@ when 'build'
       # at ~478 KB), the missing tier upgrade leaves them on the default
       # 16 KB Standard stack, overflowing into adjacent slab memory
       # and corrupting fiber slab headers at scheduler shutdown.
-      require_relative 'src/compiler/module_importer'
+      require_relative 'compiler/ruby/compiler/module_importer'
       source_dir = File.dirname(File.expand_path(source))
       importer = ModuleImporter.new(base_dir: source_dir, use_mir: true)
       annotator = SemanticAnnotator.new(importer: importer, source_dir: source_dir)
@@ -1113,7 +1113,7 @@ when 'profile'
   # `pprof` tool can render flamegraphs / call graphs / source views
   # directly. Heap / lock / mvcc are encoded in pure Ruby; CPU defers
   # to the standard `perf_to_profile` Go binary if it's on PATH.
-  require_relative 'src/tools/pprof_converter'
+  require_relative 'compiler/ruby/tools/pprof_converter'
   pprof_files = PprofConverter.convert_all(profile_dir)
   if File.exist?(perf_data) && !pprof_files[:cpu]
     hint "perf_to_profile not on PATH — skipping CPU pprof. Install: " \
@@ -1136,7 +1136,7 @@ when 'profile'
   end
 
 when 'doctor'
-  require_relative 'src/tools/doctor'
+  require_relative 'compiler/ruby/tools/doctor'
   # Parse flags: --cumulative shows cum bytes/count alongside flat;
   # --focus=REGEX filters samples whose trace touches a function
   # matching the pattern; --diff <before-dir> compares two profile
@@ -1169,7 +1169,7 @@ when 'doctor'
   Doctor.run(positional.first, **doctor_opts)
 
 when 'fix'
-  require_relative 'src/tools/clear_fix_support'
+  require_relative 'compiler/ruby/tools/clear_fix_support'
 
   begin
     ClearFixSupport.run_args(ARGV[1..] || [])
@@ -1178,7 +1178,7 @@ when 'fix'
   end
 
 when 'fmt', 'format'
-  require_relative 'src/tools/formatter'
+  require_relative 'compiler/ruby/tools/formatter'
 
   args = ARGV[1..] || []
   check_only = false
@@ -1206,7 +1206,7 @@ when 'fmt', 'format'
   # Returns exit status = number of files where output differed (or
   # transpilation raised). Does not write files.
   if verify_mode
-    require_relative 'src/tools/fmt_verifier'
+    require_relative 'compiler/ruby/tools/fmt_verifier'
     files = []
     paths.each do |p|
       if File.directory?(p)
@@ -1287,8 +1287,8 @@ when 'explain'
   # the registered diagnostic's category, severity, message template,
   # summary, and (when set) cause / fix-hint / worked examples. With
   # no argument, lists every registered code.
-  require_relative 'src/ast/diagnostic_registry'
-  require_relative 'src/ast/diagnostic_examples'
+  require_relative 'compiler/ruby/ast/diagnostic_registry'
+  require_relative 'compiler/ruby/ast/diagnostic_examples'
   arg = ARGV[1]
   if arg.nil? || arg.empty?
     puts "Usage: clear explain <CODE>"
@@ -1394,7 +1394,7 @@ when 'completions'
     $stderr.puts "  clear completions fish > ~/.config/fish/completions/clear.fish"
     exit 1
   end
-  require_relative 'src/tools/completions'
+  require_relative 'compiler/ruby/tools/completions'
   print Completions.script_for(shell)
   exit 0
 

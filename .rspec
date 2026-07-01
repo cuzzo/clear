@@ -1,2 +1,2 @@
 --tag ~integration
---require spec_helper
+--require ./compiler/spec/spec_helper

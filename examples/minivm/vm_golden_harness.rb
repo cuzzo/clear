@@ -11,7 +11,7 @@ require "tempfile"
 require "timeout"
 require "fileutils"
 
-src_root = File.expand_path("../../src", __dir__)
+src_root = File.expand_path("../../compiler/ruby", __dir__)
 $LOAD_PATH.unshift(src_root)
 $LOAD_PATH.unshift(File.join(src_root, "ast"))
 $LOAD_PATH.unshift(File.join(src_root, "mir"))

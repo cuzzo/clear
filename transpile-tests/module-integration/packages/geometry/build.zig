@@ -5,7 +5,7 @@ pub fn build(b: *std.Build) void {
     const optimize = b.standardOptimizeOption(.{});
 
     const build_root = b.build_root.path orelse ".";
-    const transpiler = b.fmt("{s}/../../../../src/transpiler.rb", .{build_root});
+    const transpiler = b.fmt("{s}/../../../../compiler/ruby/backends/transpiler.rb", .{build_root});
     const geom_src   = b.fmt("{s}/src/lib.cht", .{build_root});
     const math_src   = b.fmt("{s}/../math/src/lib.cht", .{build_root});
     const math_pkg_arg = b.fmt("math={s}", .{math_src});

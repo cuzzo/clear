@@ -6,7 +6,7 @@ require "sorbet-runtime"
 T::Configuration.default_checked_level = :never
 
 ROOT = File.expand_path("..", __dir__)
-SRC_ROOT = File.join(ROOT, "src")
+SRC_ROOT = File.join(ROOT, "compiler", "ruby")
 $LOAD_PATH.unshift(SRC_ROOT)
 $LOAD_PATH.unshift(File.join(SRC_ROOT, "ast"))
 $LOAD_PATH.unshift(File.join(SRC_ROOT, "mir"))
@@ -29,7 +29,7 @@ COUNTS = Hash.new { |h, k| h[k] = { calls: 0, yields: 0, seconds: 0.0 } }
 def caller_key
   loc = caller_locations(2, 12).find do |frame|
     path = frame.absolute_path || frame.path
-    path.start_with?(SRC_ROOT) && !path.end_with?("src/ast/ast.rb") && !path.end_with?("src/mir/mir.rb")
+    path.start_with?(SRC_ROOT) && !path.end_with?("compiler/ruby/ast/ast.rb") && !path.end_with?("compiler/ruby/mir/mir.rb")
   end
   return "unknown" unless loc
 

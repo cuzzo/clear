@@ -25,24 +25,24 @@ module SrcAstWalkGuardrail
   )
 
   ALLOWED_PREFIXES = T.let([
-    "src/ast/",
-    "src/parser/",
+    "compiler/ruby/ast/",
+    "compiler/ruby/parser/",
   ].freeze, T::Array[String])
 
   ALLOWED_FILES = T.let([
-    "src/annotator/annotator.rb",
-    "src/annotator/domains/errors.rb",
+    "compiler/ruby/annotator/annotator.rb",
+    "compiler/ruby/annotator/domains/errors.rb",
   ].freeze, T::Array[String])
 
   ALLOWED_ANNOTATOR_PREFIXES = T.let([
-    "src/annotator/domains/",
-    "src/annotator/helpers/",
-    "src/annotator/phases/",
+    "compiler/ruby/annotator/domains/",
+    "compiler/ruby/annotator/helpers/",
+    "compiler/ruby/annotator/phases/",
   ].freeze, T::Array[String])
 
   ALLOWED_HOIST_PREFIXES = T.let([
-    "src/mir/hoist.rb",
-    "src/mir/lowering/",
+    "compiler/ruby/mir/hoist.rb",
+    "compiler/ruby/mir/lowering/",
   ].freeze, T::Array[String])
 
   sig { params(root: String, paths: T::Array[String]).returns(T::Array[Finding]) }
@@ -53,7 +53,7 @@ module SrcAstWalkGuardrail
   sig { params(root: String, path: String).returns(T::Array[Finding]) }
   def self.scan_file(root:, path:)
     rel = relative_path(root: root, path: path)
-    return [] unless rel.start_with?("src/") && rel.end_with?(".rb")
+    return [] unless rel.start_with?("compiler/ruby/") && rel.end_with?(".rb")
 
     File.readlines(path).filter_map.with_index do |line, idx|
       next if line.strip.start_with?("#")
@@ -88,8 +88,8 @@ module SrcAstWalkGuardrail
     return :body_typing_or_diagnostic if ALLOWED_FILES.include?(path)
     return :body_typing_or_diagnostic if ALLOWED_ANNOTATOR_PREFIXES.any? { |prefix| path.start_with?(prefix) }
     return :hoist_or_lowering if ALLOWED_HOIST_PREFIXES.any? { |prefix| path.start_with?(prefix) }
-    return :forbidden_semantic_rediscovery if path.start_with?("src/semantic/")
-    return :forbidden_post_hoist_rediscovery if path.start_with?("src/mir/")
+    return :forbidden_semantic_rediscovery if path.start_with?("compiler/ruby/semantic/")
+    return :forbidden_post_hoist_rediscovery if path.start_with?("compiler/ruby/mir/")
 
     :unknown
   end

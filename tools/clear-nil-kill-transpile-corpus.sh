@@ -37,7 +37,7 @@ should_skip_live_data_file() {
 run_transpiler() {
   NIL_KILL_NOOP_SORBET="${NIL_KILL_NOOP_SORBET:-1}" \
     RUBYOPT="${RUBYOPT:+$RUBYOPT }-rbundler/setup -r./${tracer}" \
-    ruby src/backends/transpiler.rb "$1"
+    ruby compiler/ruby/backends/transpiler.rb "$1"
 }
 
 run_transpiler_with_timeout() {
@@ -47,7 +47,7 @@ run_transpiler_with_timeout() {
   local timeout_seconds="${NIL_KILL_REQUIRE_CHT_TIMEOUT:-300}"
 
   if command -v timeout >/dev/null 2>&1; then
-    timeout "${timeout_seconds}s" bash -c 'NIL_KILL_NOOP_SORBET="${NIL_KILL_NOOP_SORBET:-1}" RUBYOPT="${RUBYOPT:+$RUBYOPT }-rbundler/setup -r./gems/nil-kill/lib/nil_kill/runtime_trace.rb" ruby src/backends/transpiler.rb "$1"' _ "$file"
+    timeout "${timeout_seconds}s" bash -c 'NIL_KILL_NOOP_SORBET="${NIL_KILL_NOOP_SORBET:-1}" RUBYOPT="${RUBYOPT:+$RUBYOPT }-rbundler/setup -r./gems/nil-kill/lib/nil_kill/runtime_trace.rb" ruby compiler/ruby/backends/transpiler.rb "$1"' _ "$file"
   else
     run_transpiler "$file"
   fi

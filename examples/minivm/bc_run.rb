@@ -6,7 +6,7 @@
 # writes ops/consts to temp files, then executes the compiled _bc_runner binary.
 # The _bc_runner binary is built once from _bc_runner.cht and cached.
 
-src_root = File.expand_path("../../src", __dir__)
+src_root = File.expand_path("../../compiler/ruby", __dir__)
 $LOAD_PATH.unshift(src_root)
 $LOAD_PATH.unshift(File.join(src_root, "ast"))
 $LOAD_PATH.unshift(File.join(src_root, "mir"))

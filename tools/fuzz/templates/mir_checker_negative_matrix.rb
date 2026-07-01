@@ -409,11 +409,11 @@ def mir_checker_negative_source(case_name, error_code)
   body_src = mir_checker_negative_case(case_name)
   <<~RUBY
     require 'bundler/setup'
-    require File.expand_path('spec/coverage_bootstrap', Dir.pwd) if ENV['COVERAGE'] == '1'
-    require File.expand_path('src/ast/ast', Dir.pwd)
-    require File.expand_path('src/mir/mir', Dir.pwd)
-    require File.expand_path('src/mir/cleanup_entry', Dir.pwd)
-    require File.expand_path('src/mir/mir_checker', Dir.pwd)
+    require File.expand_path('compiler/spec/coverage_bootstrap', Dir.pwd) if ENV['COVERAGE'] == '1'
+    require File.expand_path('compiler/ruby/ast/ast', Dir.pwd)
+    require File.expand_path('compiler/ruby/mir/mir', Dir.pwd)
+    require File.expand_path('compiler/ruby/mir/cleanup_entry', Dir.pwd)
+    require File.expand_path('compiler/ruby/mir/mir_checker', Dir.pwd)
 
     def fn_def(name, body)
       MIR::FnDef.new(name, [], "void", body, :pub, false, nil)

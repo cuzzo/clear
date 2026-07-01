@@ -7,7 +7,7 @@ require 'prism'
 # We extract source text for the receiver and guard, compare strings.
 
 findings = []
-Dir.glob("src/**/*.rb").each do |path|
+Dir.glob("compiler/ruby/**/*.rb").each do |path|
   src = File.read(path)
   parsed = Prism.parse(src)
   next if parsed.failure?

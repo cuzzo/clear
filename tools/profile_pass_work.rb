@@ -7,7 +7,7 @@ require "optparse"
 require "sorbet-runtime"
 
 ROOT = File.expand_path("..", __dir__)
-SRC_ROOT = File.join(ROOT, "src")
+SRC_ROOT = File.join(ROOT, "compiler", "ruby")
 $LOAD_PATH.unshift(SRC_ROOT)
 $LOAD_PATH.unshift(File.join(SRC_ROOT, "ast"))
 $LOAD_PATH.unshift(File.join(SRC_ROOT, "mir"))

@@ -258,10 +258,11 @@ end
 # The report is purely structural -- it consumes the value-kinds
 # the bc emitter already tracks and adds nothing to the runtime.
 def print_concurrency_report(paths)
-  $LOAD_PATH.unshift(File.expand_path("../../src", __dir__))
-  $LOAD_PATH.unshift(File.expand_path("../../src/backends", __dir__))
-  $LOAD_PATH.unshift(File.expand_path("../../src/mir", __dir__))
-  $LOAD_PATH.unshift(File.expand_path("../../src/ast", __dir__))
+  compiler_ruby_root = File.expand_path("../../compiler/ruby", __dir__)
+  $LOAD_PATH.unshift(compiler_ruby_root)
+  $LOAD_PATH.unshift(File.join(compiler_ruby_root, "backends"))
+  $LOAD_PATH.unshift(File.join(compiler_ruby_root, "mir"))
+  $LOAD_PATH.unshift(File.join(compiler_ruby_root, "ast"))
   require_relative "register_bc_emitter"
   require "compiler/compiler_frontend"
   require "mir_lowering"

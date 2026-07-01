@@ -22,7 +22,7 @@ options = {
   source_root: ROOT,
   top: 40,
   format: "md",
-  only: %w[src/],
+  only: %w[compiler/ruby/],
   call_edges: false
 }
 
@@ -33,7 +33,7 @@ OptionParser.new do |o|
   o.on("--create-db", "Create the Ruby CodeQL database before querying") { options[:create_db] = true }
   o.on("--overwrite-db", "Pass --overwrite to database create") { options[:overwrite_db] = true }
   o.on("--source-root PATH", "Source root for database create") { |v| options[:source_root] = File.expand_path(v, ROOT) }
-  o.on("--only CSV", "Repo-relative path prefixes to include in the report (default: src/)") { |v| options[:only] = v.split(",").map(&:strip).reject(&:empty?) }
+  o.on("--only CSV", "Repo-relative path prefixes to include in the report (default: compiler/ruby/)") { |v| options[:only] = v.split(",").map(&:strip).reject(&:empty?) }
   o.on("--call-edges", "Also run the slower resolved-call-edge query") { options[:call_edges] = true }
   o.on("--top N", Integer, "Rows per ranking table") { |v| options[:top] = v }
   o.on("--format NAME", "md or json") { |v| options[:format] = v }
