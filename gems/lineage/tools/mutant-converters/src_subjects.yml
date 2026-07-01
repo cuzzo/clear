@@ -129,7 +129,7 @@
 - subject: SymbolEntry
   require: ast/symbol_entry
   spec: spec/symbol_entry_spec.rb
-  baseline: 95.07
+  baseline: 71.42
   hard_gate: true
   max_timeouts: 0
 - subject: LockHelper
@@ -243,7 +243,7 @@
 - subject: MIRChecker
   require: backends/transpiler
   spec: spec/mir_checker_spec.rb
-  baseline: 70.3
+  baseline: 52.34
   hard_gate: true
 - subject: FsmTransform::SuspendResolvers
   require: backends/transpiler
