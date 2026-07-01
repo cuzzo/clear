@@ -2,10 +2,26 @@
 # frozen_string_literal: true
 
 require "fileutils"
+require "json"
 require "rbconfig"
 
 root = File.expand_path("..", __dir__)
 Dir.chdir(root)
+FileUtils.rm_rf(File.join(root, "coverage", "ruby-gems"))
+FileUtils.rm_rf(File.join(root, "coverage", "ruby-gems-subprocess"))
+
+def merge_nil_kill_subprocess_coverage(root)
+  child_resultset = File.join(root, "coverage", "ruby-gems-subprocess", ".resultset.json")
+  return unless File.file?(child_resultset)
+
+  parent_resultset = File.join(root, "coverage", "ruby-gems", ".resultset.json")
+  parent = File.file?(parent_resultset) ? JSON.parse(File.read(parent_resultset)) : {}
+  child = JSON.parse(File.read(child_resultset))
+  FileUtils.mkdir_p(File.dirname(parent_resultset))
+  File.write(parent_resultset, JSON.pretty_generate(parent.merge(child)))
+rescue JSON::ParserError
+  warn "failed to merge nil-kill subprocess coverage"
+end
 
 require "simplecov"
 begin
@@ -46,6 +62,8 @@ end
 # because this harness owns the all-gems SimpleCov session.
 ENV.delete("NIL_KILL_COVERAGE")
 ENV["NIL_KILL_TMP_DIR"] ||= File.join(root, "tmp", "ruby-gem-coverage", Process.pid.to_s)
+ENV["NIL_KILL_SUBPROCESS_COVERAGE"] = "1"
+ENV["NIL_KILL_SUBPROCESS_COVERAGE_DIR"] = File.join(root, "coverage", "ruby-gems-subprocess")
 
 require "rspec/core"
 
@@ -77,6 +95,10 @@ end
 at_exit do
   exit rspec_status if rspec_status != 0 && $!.nil?
   exit external_status if external_status != 0 && $!.nil?
+end
+
+at_exit do
+  merge_nil_kill_subprocess_coverage(root)
 end
 
 simplecov_minitest_files.each { |file| require File.expand_path(file, root) }

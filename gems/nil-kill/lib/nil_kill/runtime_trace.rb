@@ -130,6 +130,7 @@ module NilKillRuntimeTrace
       current_targets = TARGETS.map { |path| File.expand_path(path, ROOT) }.sort
       @trace_plan = nil unless plan_targets == current_targets
     end
+    @trace_plan
   rescue JSON::ParserError
     @trace_plan = nil
   end
@@ -1490,10 +1491,14 @@ module NilKillRuntimeTrace
         result
       end
 
-      define_method(:concat) do |other|
-        result = super(other)
+      define_method(:concat) do |*others|
+        result = super(*others)
         if @__nil_kill_traced
-          NilKillRuntimeTrace.with_collection_hook_guard { Array(other).first(NilKillRuntimeTrace::ELEMENT_SAMPLE).each { |value| NilKillRuntimeTrace.record_collection_mutation(self, elem: value) } }
+          NilKillRuntimeTrace.with_collection_hook_guard do
+            others.each do |other|
+              Array(other).first(NilKillRuntimeTrace::ELEMENT_SAMPLE).each { |value| NilKillRuntimeTrace.record_collection_mutation(self, elem: value) }
+            end
+          end
         end
         result
       end
@@ -1857,7 +1862,10 @@ module NilKillRuntimeTrace
   # instead of comparing against a stale aggregate SimpleCov.
   def self.start_coverage!
     require "coverage"
-    return if Coverage.respond_to?(:running?) && Coverage.running?
+    if Coverage.respond_to?(:running?) && Coverage.running?
+      @coverage_owned = ENV["NIL_KILL_SHARED_COVERAGE"] == "1"
+      return
+    end
     Coverage.start(lines: true)
     @coverage_owned = true
   rescue StandardError, LoadError
@@ -1889,7 +1897,7 @@ module NilKillRuntimeTrace
   def self.src_line(path, lineno)
     rel = Pathname.new(abs_path(path)).relative_path_from(Pathname.new(ROOT)).to_s rescue nil
     per_file = rel && coverage_line_map[rel]
-    (per_file && per_file[lineno]) || lineno
+    (per_file && (per_file[lineno] || per_file[lineno.to_s])) || lineno
   end
 
   def self.dump_coverage(pid)
@@ -1911,7 +1919,7 @@ module NilKillRuntimeTrace
         Array(lines).each_with_index do |hits, i|
           next unless hits && hits.to_i.positive?
           instr_line = i + 1
-          src_line = per_file ? per_file[instr_line] : instr_line
+          src_line = per_file ? (per_file[instr_line] || per_file[instr_line.to_s]) : instr_line
           covered << src_line if src_line
         end
         covered = covered.uniq.sort

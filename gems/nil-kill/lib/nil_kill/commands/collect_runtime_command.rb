@@ -14,7 +14,7 @@ module NilKill
         output = File.expand_path(option("--output") || RUNTIME_DIR, ROOT)
         targets = options("--target")
         targets = ["src"] if targets.empty?
-        append = @argv.delete("--append-runtime")
+        append = !!@argv.delete("--append-runtime")
         provider = Languages.provider_for(language)
 
         provider.collect_runtime(argv: @argv, root: root, output: output, targets: targets, append: append)

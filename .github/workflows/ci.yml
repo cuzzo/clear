@@ -97,6 +97,7 @@ jobs:
       - uses: codecov/codecov-action@v5
         with:
           files: ./coverage/coverage.xml
+          disable_search: true
           flags: ruby
           fail_ci_if_error: false
           token: ${{ secrets.CODECOV_TOKEN }}
@@ -153,11 +154,16 @@ jobs:
           node-version: 20
       - name: Install Tree-sitter grammars
         run: npm install --legacy-peer-deps
-      - run: bundle exec go test -v -coverprofile=coverage.txt -covermode=atomic ./...
+      - run: bundle exec go test -v -coverprofile=coverage.raw.txt -covermode=atomic ./...
         working-directory: gems/boobytrap
+      - name: Normalize Boobytrap Go coverage paths
+        run: |
+          ruby -e 'ARGV.each { |path| text = File.read(path); File.write(path.sub(".raw.", "."), text.gsub(/^boobytrap-helper\//, "gems/boobytrap/")) }' \
+            gems/boobytrap/coverage.raw.txt
       - uses: codecov/codecov-action@v5
         with:
           files: gems/boobytrap/coverage.txt
+          disable_search: true
           flags: go
           fail_ci_if_error: false
           token: ${{ secrets.CODECOV_TOKEN }}
@@ -206,6 +212,7 @@ jobs:
       - uses: codecov/codecov-action@v5
         with:
           files: ./coverage/ruby-gems/coverage.xml
+          disable_search: true
           flags: gems
           fail_ci_if_error: false
           token: ${{ secrets.CODECOV_TOKEN }}
@@ -273,6 +280,7 @@ jobs:
       - uses: codecov/codecov-action@v5
         with:
           files: ./tmp/zig-mutants-coverage/cobertura.xml
+          disable_search: true
           flags: zig-mutants
           fail_ci_if_error: false
           token: ${{ secrets.CODECOV_TOKEN }}
@@ -302,6 +310,7 @@ jobs:
       - uses: codecov/codecov-action@v5
         with:
           files: ./tmp/lineage-rust-coverage/cobertura.xml
+          disable_search: true
           flags: lineage-rust
           fail_ci_if_error: false
           token: ${{ secrets.CODECOV_TOKEN }}
@@ -346,9 +355,11 @@ jobs:
           mkdir -p tmp/fact-mine-rust-coverage
           cargo llvm-cov clean --manifest-path gems/fact-mine/Cargo.toml
           cargo llvm-cov --no-report --manifest-path gems/fact-mine/Cargo.toml --all-features
-          cargo build --manifest-path gems/decomplex/Cargo.toml
+          cargo build --release --manifest-path gems/nil-kill/Cargo.toml
+          cargo build --release --manifest-path gems/decomplex/Cargo.toml
           FACT_MINE_RUST_BINARY=${{ github.workspace }}/gems/fact-mine/target/llvm-cov-target/debug/fact-mine-rust \
-          DECOMPLEX_RUST_BINARY=${{ github.workspace }}/gems/decomplex/target/debug/decomplex-rust \
+          NIL_KILL_INFER_RUST_BINARY=${{ github.workspace }}/gems/nil-kill/target/release/nil-kill-infer-rust \
+          DECOMPLEX_RUST_BINARY=${{ github.workspace }}/gems/decomplex/target/release/decomplex-rust \
           LLVM_PROFILE_FILE='${{ github.workspace }}/gems/fact-mine/target/llvm-cov-target/fact-mine-%p-%32m.profraw' \
           bundle exec ruby tools/run_ruby_gem_coverage.rb
           cargo llvm-cov report \
@@ -363,7 +374,42 @@ jobs:
       - uses: codecov/codecov-action@v5
         with:
           files: ./tmp/fact-mine-rust-coverage/cobertura.xml
+          disable_search: true
           flags: fact-mine-rust
+          fail_ci_if_error: false
+          token: ${{ secrets.CODECOV_TOKEN }}
+
+  nil-kill-rust-coverage:
+    name: Nil-Kill Rust coverage
+    needs: changes
+    if: ${{ needs.changes.outputs.run_gems == 'true' }}
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install Z3
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y z3
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: taiki-e/install-action@cargo-llvm-cov
+      - name: Run cargo llvm-cov for Nil-Kill
+        run: |
+          mkdir -p tmp/nil-kill-rust-coverage
+          cargo llvm-cov \
+            --manifest-path gems/nil-kill/Cargo.toml \
+            --all-features \
+            --cobertura \
+            --output-path ${{ github.workspace }}/tmp/nil-kill-rust-coverage/cobertura.xml
+      - uses: actions/upload-artifact@v4
+        with:
+          name: nil-kill-rust-coverage
+          path: tmp/nil-kill-rust-coverage/cobertura.xml
+          retention-days: 7
+      - uses: codecov/codecov-action@v5
+        with:
+          files: ./tmp/nil-kill-rust-coverage/cobertura.xml
+          disable_search: true
+          flags: nil-kill-rust
           fail_ci_if_error: false
           token: ${{ secrets.CODECOV_TOKEN }}
 
@@ -404,6 +450,7 @@ jobs:
       - uses: codecov/codecov-action@v5
         with:
           files: ./tmp/decomplex-rust-coverage/cobertura.xml
+          disable_search: true
           flags: decomplex-rust
           fail_ci_if_error: false
           token: ${{ secrets.CODECOV_TOKEN }}
@@ -542,6 +589,7 @@ jobs:
       - uses: codecov/codecov-action@v5
         with:
           files: ./coverage/coverage.xml
+          disable_search: true
           flags: ruby
           fail_ci_if_error: false
           token: ${{ secrets.CODECOV_TOKEN }}
@@ -605,6 +653,7 @@ jobs:
       - uses: codecov/codecov-action@v5
         with:
           files: ./coverage/coverage.xml
+          disable_search: true
           flags: ruby,transpile-tests
           fail_ci_if_error: false
           token: ${{ secrets.CODECOV_TOKEN }}
@@ -617,6 +666,7 @@ jobs:
       - uses: codecov/codecov-action@v5
         with:
           files: ./zig/zig-out/coverage-transpile-tests/merged/kcov-merged/cobertura.xml
+          disable_search: true
           flags: zig,transpile-tests
           fail_ci_if_error: false
           token: ${{ secrets.CODECOV_TOKEN }}
@@ -700,6 +750,7 @@ jobs:
       - uses: codecov/codecov-action@v5
         with:
           files: ./coverage/coverage.xml
+          disable_search: true
           flags: ruby,examples-benchmarks,examples-benchmarks-shard-${{ matrix.shard }}
           fail_ci_if_error: false
           token: ${{ secrets.CODECOV_TOKEN }}
@@ -712,6 +763,7 @@ jobs:
       - uses: codecov/codecov-action@v5
         with:
           files: ./zig/zig-out/coverage-examples-benchmarks/merged/kcov-merged/cobertura.xml
+          disable_search: true
           flags: zig,examples-benchmarks,examples-benchmarks-shard-${{ matrix.shard }}
           fail_ci_if_error: false
           token: ${{ secrets.CODECOV_TOKEN }}
@@ -781,6 +833,7 @@ jobs:
       - uses: codecov/codecov-action@v5
         with:
           files: ./coverage/coverage.xml
+          disable_search: true
           flags: ruby,fuzz,fuzz-shard-${{ matrix.shard }}
           fail_ci_if_error: false
           token: ${{ secrets.CODECOV_TOKEN }}
@@ -793,6 +846,7 @@ jobs:
       - uses: codecov/codecov-action@v5
         with:
           files: ./zig/zig-out/coverage-fuzz/merged/kcov-merged/cobertura.xml
+          disable_search: true
           flags: zig,fuzz,fuzz-shard-${{ matrix.shard }}
           fail_ci_if_error: false
           token: ${{ secrets.CODECOV_TOKEN }}
@@ -880,6 +934,7 @@ jobs:
       - uses: codecov/codecov-action@v5
         with:
           files: ./coverage/coverage.xml
+          disable_search: true
           flags: ruby,bc-lower,bc-lower-shard-${{ matrix.shard }}
           fail_ci_if_error: false
           token: ${{ secrets.CODECOV_TOKEN }}
@@ -1271,6 +1326,7 @@ jobs:
       - uses: codecov/codecov-action@v5
         with:
           files: ./zig/zig-out/coverage/merged/kcov-merged/cobertura.xml
+          disable_search: true
           flags: zig
           fail_ci_if_error: false
           token: ${{ secrets.CODECOV_TOKEN }}

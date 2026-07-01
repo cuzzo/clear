@@ -143,6 +143,126 @@ RSpec.describe NilKill::HiddenEnumPressure do
     end
   end
 
+  it "loads persisted hidden enum observations without rescanning source" do
+    observations = [
+      {
+        "key" => "slot-1",
+        "kind" => "param",
+        "path" => "src/workflow.rb",
+        "line" => "12",
+        "owner" => "Workflow",
+        "method" => "transition",
+        "method_kind" => "instance",
+        "slot" => "state",
+        "type" => "T.untyped",
+        "event" => "decision",
+        "values" => [{ "kind" => "Symbol", "value" => ":draft" }, { "kind" => "Symbol", "value" => ":sent" }],
+        "site" => { "path" => "src/workflow.rb", "line" => 13, "kind" => "case" },
+      },
+      {
+        "key" => "slot-1",
+        "kind" => "param",
+        "path" => "src/workflow.rb",
+        "line" => "12",
+        "owner" => "Workflow",
+        "method" => "transition",
+        "method_kind" => "instance",
+        "slot" => "state",
+        "type" => "T.untyped",
+        "event" => "producer",
+        "values" => [{ "kind" => "Symbol", "value" => ":archived" }],
+        "site" => { "path" => "src/workflow.rb", "line" => 10, "kind" => "producer" },
+      },
+      {
+        "key" => "slot-1",
+        "kind" => "param",
+        "path" => "src/workflow.rb",
+        "line" => "12",
+        "owner" => "Workflow",
+        "method" => "transition",
+        "method_kind" => "instance",
+        "slot" => "state",
+        "type" => "T.untyped",
+        "event" => "blocker",
+        "site" => { "path" => "src/workflow.rb", "line" => 9, "kind" => "open-world producer" },
+      },
+    ]
+    evidence = {
+      "facts" => { "hidden_enum_observations" => observations },
+      "methods" => [{
+        "calls" => 5,
+        "params_by_name" => { "state" => ["Symbol"] },
+        "source" => {
+          "path" => "src/workflow.rb",
+          "line" => 12,
+          "class" => "Workflow",
+          "method" => "transition",
+          "kind" => "instance",
+        },
+      }],
+    }
+
+    row = described_class.scan(["/definitely/missing.rb"], evidence: evidence).fetch(0)
+
+    expect(row).to include(
+      "values" => %w[:archived :draft :sent],
+      "primitive_kinds" => ["Symbol"],
+      "confidence" => "review",
+      "decision_pressure" => 2
+    )
+    expect(row.fetch("runtime")).to include("calls" => 5, "classes" => ["Symbol"])
+    expect(row.fetch("blockers")).to include(a_hash_including("kind" => "open-world producer"))
+  end
+
+  it "tracks aliases, defaults, class variables, literal-left comparisons, and dynamic blockers" do
+    Dir.mktmpdir("nil-kill-hidden-enum-advanced", NilKill::ROOT) do |dir|
+      path = write_sample(dir, "advanced.rb", <<~RUBY)
+        class Advanced
+          extend T::Sig
+
+          sig do
+            params(mode: T.any(String, Symbol), state: T.untyped, source: String).void
+          end
+          def call(mode = :draft, state:, source: "manual")
+            alias_mode = T.must(mode)
+            return if "manual" == alias_mode
+
+            [:draft, :queued].member?(alias_mode)
+            @state = "\#{source}-suffix"
+            @@global_state = File.read("state.txt")
+
+            case @state
+            when "ready"
+              true
+            when "done"
+              false
+            end
+
+            case @@global_state
+            when :open
+              true
+            when :closed
+              false
+            end
+          end
+        end
+      RUBY
+
+      rows = described_class.scan([path])
+      mode = rows.find { |row| row["slot"] == "mode" }
+      state = rows.find { |row| row["slot"] == "@state" }
+      global = rows.find { |row| row["slot"] == "@@global_state" }
+
+      expect(mode).to include(
+        "values" => ['"manual"', ":draft", ":queued"],
+        "primitive_kinds" => %w[String Symbol],
+        "confidence" => "high"
+      )
+      expect(state.fetch("blockers")).to include(a_hash_including("kind" => "dynamic primitive producer"))
+      expect(global.fetch("blockers")).to include(a_hash_including("kind" => "open-world producer"))
+    end
+  end
+
   it "does not report a single literal check as an enum candidate" do
     Dir.mktmpdir("nil-kill-hidden-enum", NilKill::ROOT) do |dir|
       path = write_sample(dir, "single.rb", <<~RUBY)
