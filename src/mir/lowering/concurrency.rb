@@ -924,7 +924,7 @@ module MIRLoweringConcurrency
     T.bind(self, MIRLowering) rescue nil
     finalized, hoisted_discard = materialize_statement_discard(expr, mir)
     finalized = T.cast(finalized, MIR::NodeRoot)
-    return finalized unless discard_expr_stmt?(expr) && !hoisted_discard
+    return finalized unless discard_expr_stmt?(expr, finalized) && !hoisted_discard
 
     MIR::ExprStmt.new(T.cast(finalized, MIR::Node), true)
   end
@@ -1236,7 +1236,7 @@ module MIRLoweringConcurrency
     type_info.inf_stream? || type_info.open_stream? || type_info.bounded_stream?
   end
 
-  sig { params(node: AST::NextExpr, alloc_sym: Symbol).returns(T.untyped) }
+  sig { params(node: AST::NextExpr, alloc_sym: Symbol).returns(MIR::Node) }
   def lower_next_expr(node, alloc_sym = :frame)
     T.bind(self, MIRLowering) rescue nil
     plan = next_expr_plan(node, alloc_sym)

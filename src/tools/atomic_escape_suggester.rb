@@ -1,4 +1,6 @@
 # typed: strict
+require "sorbet-runtime"
+
 require_relative "../ast/lexer"
 require_relative "../ast/parser"
 require_relative "../annotator"
@@ -20,7 +22,10 @@ require_relative "../ast/fixable_error"
 # Empty on parse error too -- the caller falls back to its existing
 # diagnosis stream.
 module AtomicEscapeSuggester
+  extend T::Sig
 
+
+  sig { params(source: String).returns(Array) }
   def self.analyze(source)
     tokens = Lexer.new(source).tokenize
     ast    = ClearParser.new(tokens, source).parse
@@ -49,6 +54,7 @@ module AtomicEscapeSuggester
     []
   end
 
+  sig { params(finding: T.any(FixableFinding, T.untyped)).returns(Hash) }
   def self.to_hash(finding)
     msg = finding.message.to_s
     kind =

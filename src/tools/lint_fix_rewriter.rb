@@ -64,6 +64,7 @@ module LintFixRewriter
     set
   end
 
+  sig { params(node: T.untyped, in_bg: T::Boolean, set: Set).void }
   def self.walk_for_bg_names(node, in_bg, set)
     return if terminal?(node)
     if node.is_a?(Array)
@@ -85,6 +86,7 @@ module LintFixRewriter
     set
   end
 
+  sig { params(node: T.untyped, set: Set).void }
   def self.walk_for_mutation_sensitive_names(node, set)
     return if terminal?(node)
     if node.is_a?(Array)
@@ -102,6 +104,7 @@ module LintFixRewriter
     node.each_pair { |_, v| walk_for_mutation_sensitive_names(v, set) }
   end
 
+  sig { params(node: T.untyped, set: Set).returns(T.untyped) }
   def self.collect_identifier_names(node, set)
     return if terminal?(node)
     if node.is_a?(Array)
@@ -195,6 +198,7 @@ module LintFixRewriter
     edits
   end
 
+  sig { params(node: T.untyped, source: String, edits: Array).void }
   def self.walk_for_redundant_type(node, source, edits)
     return if node.nil? || terminal?(node)
     if node.is_a?(Array)
@@ -209,11 +213,13 @@ module LintFixRewriter
     node.each_pair { |_, v| walk_for_redundant_type(v, source, edits) }
   end
 
+  sig { params(n: T.untyped).returns(T::Boolean) }
   def self.terminal?(n)
     n.nil? || n.is_a?(Symbol) || n.is_a?(String) || n.is_a?(Integer) ||
       n.is_a?(Float) || n.is_a?(TrueClass) || n.is_a?(FalseClass)
   end
 
+  sig { params(node: T.untyped).returns(T::Boolean) }
   def self.decl_mode_bind_expr?(node)
     node.is_a?(AST::BindExpr) && node.respond_to?(:mode) && node.mode == :decl
   end
@@ -250,7 +256,7 @@ module LintFixRewriter
     decl_t.resolved == inf_t.resolved
   end
 
-  sig { params(t: T.untyped).returns(T.nilable(Type)) }
+  sig { params(t: T.nilable(T.any(String, Symbol, Type))).returns(T.nilable(Type)) }
   def self.to_type(t)
     return nil if t.nil?
     return t if t.respond_to?(:resolved) && t.respond_to?(:any_sync?)

@@ -1,0 +1,25 @@
+{
+  "scenario": "runtime-edge-pipeline",
+  "methods": [
+    {
+      "source": {
+        "path": "gems/nil-kill/spec/fixtures/runtime-edge-pipeline/edges.rb",
+        "line": 2,
+        "method": "caller",
+        "scope": [
+          "RuntimeEdgePipeline"
+        ]
+      }
+    },
+    {
+      "source": {
+        "path": "gems/nil-kill/spec/fixtures/runtime-edge-pipeline/edges.rb",
+        "line": 6,
+        "method": "callee",
+        "scope": [
+          "RuntimeEdgePipeline"
+        ]
+      }
+    }
+  ]
+}

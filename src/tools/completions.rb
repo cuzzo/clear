@@ -10,7 +10,11 @@
 #   test                                          -> *.cht files OR directories
 #   doctor                                        -> *.profile/ directories
 #   completions                                   -> bash | zsh | fish
+require "sorbet-runtime"
+
 module Completions
+  extend T::Sig
+
   SUBCOMMANDS = {
     'build'       => 'Build a .cht file to a native binary',
     'run'         => 'Build and run a .cht file',
@@ -27,6 +31,7 @@ module Completions
   }.freeze
 
 
+  sig { params(shell: String).returns(String) }
   def self.script_for(shell)
     case shell
     when 'bash' then bash
@@ -40,6 +45,7 @@ module Completions
   # Bash uses `complete -F` with a function. We hand-roll the
   # subcommand dispatch so file completion is filtered to `.cht`
   # for build-like commands and to `.profile/` for `doctor`.
+  sig { returns(String) }
   def self.bash
     <<~BASH
       # bash completion for `clear`
@@ -88,6 +94,7 @@ module Completions
 
   # Zsh's completion system is richer: `_describe` shows subcommand
   # descriptions inline, `_files -g GLOB` filters by glob.
+  sig { returns(String) }
   def self.zsh
     desc_lines = SUBCOMMANDS.map { |k, v| "    '#{k}:#{v}'" }.join("\n")
     <<~ZSH
@@ -123,6 +130,7 @@ module Completions
   end
 
   # Fish completions are declarative: one `complete` call per arm.
+  sig { returns(String) }
   def self.fish
     sub_complete = SUBCOMMANDS.map do |k, v|
       desc = v.gsub("'", "\\\\'")

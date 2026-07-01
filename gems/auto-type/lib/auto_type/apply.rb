@@ -138,6 +138,7 @@ module AutoType
       when "promote_hash_record_cluster_to_struct"
         return apply_hash_record_cluster_promotion(lines, action)
       when "add_struct_field_sig"
+        return apply_source_field_type(lines, action) if action.dig("data", "target").to_s == "source_field"
         return apply_add_struct_field_sig(lines, action)
       else
         return false
@@ -179,6 +180,23 @@ module AutoType
         lines << "\n" unless lines.empty? || lines[-1].end_with?("\n")
         lines.concat(["class #{klass}\n", sig_line, def_line, "end\n", "\n"])
       end
+      true
+    end
+
+    def apply_source_field_type(lines, action)
+      type = action.dig("data", "type").to_s
+      current_type = action.dig("data", "current_type").to_s
+      return false if type.empty? || current_type.empty?
+
+      source = lines.join
+      parsed = NilKill::Syntax.parse(source)
+      return false unless parsed.success?
+
+      edit = sorbet_struct_field_type_edit(parsed.value, action, current_type, type) ||
+        ivar_tlet_type_edit(parsed.value, action, current_type, type)
+      return false unless edit
+
+      lines.replace(apply_source_edits(source, [edit]).lines)
       true
     end
 
@@ -269,6 +287,46 @@ module AutoType
       key = consumer["key"].to_s
       return nil if receiver.empty? || key.empty? || !key.match?(/\A[a-z_]\w*\z/)
       "#{receiver}.#{key}"
+    end
+
+    def sorbet_struct_field_type_edit(root, action, current_type, type)
+      field = action.dig("data", "field").to_s
+      return nil if field.empty?
+
+      nodes_matching(root) do |node|
+        node.is_a?(NilKill::Syntax::CallNode) &&
+          node.location.start_line == action["line"].to_i &&
+          %i[const prop].include?(node.name) &&
+          node.receiver.nil?
+      end.filter_map do |node|
+        args = node.arguments&.arguments || []
+        field_node = args[0]
+        type_node = args[1]
+        next unless type_node&.slice == current_type
+        next unless signature_keyword_name(field_node) == field || field_node&.slice.to_s.delete_prefix(":") == field
+
+        [type_node.location.start_offset, type_node.location.end_offset, type]
+      end.first
+    end
+
+    def ivar_tlet_type_edit(root, action, current_type, type)
+      raw_field = action.dig("data", "raw_field").to_s
+      raw_field = "@#{action.dig("data", "field")}" if raw_field.empty?
+
+      nodes_matching(root) do |node|
+        node.is_a?(NilKill::Syntax::InstanceVariableWriteNode) &&
+          node.location.start_line == action["line"].to_i &&
+          node.name.to_s == raw_field
+      end.filter_map do |node|
+        value = node.value
+        next unless value.is_a?(NilKill::Syntax::CallNode)
+        next unless value.name == :let && value.receiver&.slice == "T"
+
+        type_node = value.arguments&.arguments&.[](1)
+        next unless type_node&.slice == current_type
+
+        [type_node.location.start_offset, type_node.location.end_offset, type]
+      end.first
     end
 
     def apply_signature_cst_rewrite(lines, action, kind, name, from, to)
@@ -752,7 +810,11 @@ module AutoType
     end
 
     def find_sig_idx(lines, def_idx)
-      (def_idx - 1).downto([def_idx - 5, 0].max) { |i| return i if lines[i]&.match?(/\bsig\s*\{/) }
+      (def_idx - 1).downto([def_idx - 5, 0].max) do |i|
+        line = lines[i]
+        return nil if line&.match?(DEF_HEADER)
+        return i if line&.match?(/\bsig\s*\{/)
+      end
       nil
     end
 

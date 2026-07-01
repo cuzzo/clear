@@ -183,7 +183,7 @@ module FsmLowering
     allocs.length == 1 ? allocs.first : nil
   end
 
-  sig { params(value: T.untyped, result_type: Type).returns(T.untyped) }
+  sig { params(value: MIR::Node, result_type: Type).returns(MIR::Node) }
   def coerce_fsm_result_value(value, result_type)
     return value unless result_type.integer?
     return value if value.is_a?(MIR::Cast)

@@ -1492,6 +1492,25 @@ module DiagnosticRegistry
       cause: "The value being assigned to an existing binding doesn't match the binding's declared type. Coercion was tried and failed.",
       fix_hint: "Either change the value, change the declared type at the binding's declaration site, or use CAST for an explicit conversion.",
     },
+    DESTRUCTURE_REQUIRES_FIXED_SHAPE: {
+      severity: :error, category: :type,
+      template: "Destructuring assignment requires a fixed-size RHS, got %{got}",
+      summary:  "Destructuring only accepts values whose element count is statically known.",
+      cause: "`a, b = value` must know exactly how many slots `value` contains at compile time. Dynamic arrays, streams, and unknown call results cannot be destructured safely.",
+      fix_hint: "Use a fixed-size array or tuple-like value, or assign through explicit indexing after checking the shape.",
+    },
+    DESTRUCTURE_ARITY_MISMATCH: {
+      severity: :error, category: :type,
+      template: "Destructuring target count %{targets} does not match RHS size %{values}",
+      summary:  "The number of destructuring targets must match the RHS fixed size.",
+    },
+    DESTRUCTURE_REQUIRES_COPYABLE_RHS: {
+      severity: :error, category: :type,
+      template: "Destructuring assignment currently requires a copyable RHS, got %{got}",
+      summary:  "Only fixed-size values with copyable elements can be destructured today.",
+      cause: "Owned element destructuring needs explicit per-slot ownership transfer and cleanup metadata. Lowering it as a plain fixed array would obscure ownership.",
+      fix_hint: "Use copyable fixed-size values, or assign owned elements explicitly until owned destructuring is implemented.",
+    },
 
     # Indexing / hashmap / strings
     NUMERIC_MAP_KEY_BAD: {

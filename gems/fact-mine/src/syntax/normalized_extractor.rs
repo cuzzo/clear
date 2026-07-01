@@ -1763,7 +1763,7 @@ fn function_params(node: &Node, behavior: &dyn NormalizedLanguageBehavior) -> Ve
                 .collect()
         })
         .unwrap_or_default();
-    if params.is_empty() {
+    if params.is_empty() && !behavior.supports_parameter_normalization() {
         function_params_from_signature(&node.text, behavior)
     } else {
         params

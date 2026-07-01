@@ -70,7 +70,7 @@ module OwnershipIdentity
       PlaceId.from_path(path.rpartition(".").first)
     end
 
-    sig { params(other: T.untyped).returns(T::Boolean) }
+    sig { params(other: T.any(Object, OwnershipIdentity::PlaceId)).returns(T::Boolean) }
     def eql?(other)
       !!(other.is_a?(PlaceId) &&
         path == other.path &&

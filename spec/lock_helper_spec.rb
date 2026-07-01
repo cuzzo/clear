@@ -10,7 +10,8 @@ require_relative "../src/annotator" unless defined?(SemanticAnnotator)
 # synthetic graphs without going through the annotator pipeline so
 # algorithm-level regressions show up as algorithm-level failures.
 RSpec.describe LockHelper do
-  TARJAN_SANITY_TIMEOUT_SECONDS = 5.0
+  TARJAN_SANITY_TIMEOUT_SECONDS = ENV["NIL_KILL_TRACE"] == "1" ? 60.0 : 5.0
+  TARJAN_SANITY_CHAIN_LENGTH = ENV["NIL_KILL_TRACE"] == "1" ? 2_500 : 10_000
 
   class LockHelperSpecError < StandardError
     attr_reader :node, :code, :payload
@@ -256,8 +257,11 @@ RSpec.describe LockHelper do
 
     it "does not blow the stack on a long chain (iterative Tarjan sanity)" do
       # Guard against naive recursive Tarjan: a 10k-node chain DAG should
-      # complete fine with the iterative work-list implementation.
-      n = 10_000
+      # complete fine with the iterative work-list implementation. nil-kill
+      # tracing hooks the hot T.let path, so keep the traced collect variant
+      # large enough to exercise iteration without turning collection into a
+      # timeout test.
+      n = TARJAN_SANITY_CHAIN_LENGTH
       chain_nodes = (0...n).map { |i| :"N#{i}" }
       edges = (0...n - 1).map { |i| [chain_nodes.fetch(i), chain_nodes.fetch(i + 1)] }
       nodes, adj = adj_from(edges)

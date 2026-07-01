@@ -155,7 +155,7 @@ class ZigTranspiler
     service: "Huge", unbounded: "Huge"
   }.freeze, T::Hash[Symbol, String])
 
-  sig { params(main_fn: T.nilable(AST::FunctionDef), override: T.untyped).returns(String) }
+  sig { params(main_fn: T.nilable(AST::FunctionDef), override: T.nilable(Symbol)).returns(String) }
   def main_stack_variant(main_fn, override: nil)
     tier = override&.to_sym || main_fn&.stack_tier || :standard
     MAIN_STACK_VARIANTS.fetch(tier, "Standard")
@@ -163,7 +163,7 @@ class ZigTranspiler
 
   # Module entry point: transpile code as a Zig module (--module flag).
   # Emits @import("cheat_runtime") instead of runtime-header.zig, no runtime footer.
-  sig { params(cheat_code: String, source_dir: String, pkg_paths: T::Hash[T.untyped, T.untyped]).returns(T.nilable(String)) }
+  sig { params(cheat_code: String, source_dir: String, pkg_paths: T::Hash[String, String]).returns(T.nilable(String)) }
   def transpile_as_module(cheat_code, source_dir: @source_dir, pkg_paths: {})
     @source_dir = File.expand_path(source_dir)
     @importer ||= ModuleImporter.new(base_dir: @source_dir, pkg_paths: pkg_paths, use_mir: true)

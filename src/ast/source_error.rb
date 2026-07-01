@@ -32,7 +32,7 @@ module ErrorHelper
   # `%{name}` interpolation against the hash. Legacy positional args
   # against `%s`/`%d` still work for the (shrinking) set of templates
   # that haven't been migrated to named form yet.
-  sig { params(node_or_token: T.untyped, code_or_message: T.untyped, args: String, kwargs: T.untyped).returns(T.untyped) }
+  sig { params(node_or_token: T.untyped, code_or_message: T.any(String, Symbol), args: String, kwargs: T.untyped).returns(T.noreturn) }
   def error!(node_or_token, code_or_message, *args, **kwargs)
     T.bind(self, T.untyped) rescue nil
     token = diagnostic_token(node_or_token)
@@ -56,16 +56,16 @@ module ErrorHelper
     err_class = self.class.name&.include?("Parser") ? ParserError : CompilerError
     source_token = source_error_token(token)
 
-    raise err_class.new(
-      source_token,
-      message,
-      T.cast(T.unsafe(self).instance_variable_get(:@source_code), T.nilable(String))
-    )
+      raise err_class.new(
+        source_token,
+        message,
+        diagnostic_source_code
+      )
   end
 
   # Try the hash form first when applicable; fall back to positional;
   # surface any internal mismatch as an "Internal Args Error" suffix.
-  sig { params(template: String, args: T::Array[String], kwargs: T::Hash[Symbol, T.untyped]).returns(String) }
+  sig { params(template: String, args: T::Array[String], kwargs: T::Hash[Symbol, T::Array[Symbol]]).returns(String) }
   def format_diagnostic_template(template, args, kwargs)
     T.bind(self, T.untyped) rescue nil
     if !kwargs.empty? || template.include?("%{")
@@ -101,7 +101,7 @@ module ErrorHelper
   end
 
   # Non-fatal compiler note (printed to stderr, does not halt compilation).
-  sig { params(node_or_token: T.untyped, message: String).void }
+  sig { params(node_or_token: AST::Node, message: String).void }
   def note!(node_or_token, message)
     T.bind(self, T.untyped) rescue nil
     token = diagnostic_token(node_or_token)
@@ -109,7 +109,7 @@ module ErrorHelper
     $stderr.puts "\e[36m[Note]\e[0m #{message}#{loc}"
   end
 
-  sig { params(node_or_token: T.untyped, message: String).returns(NilClass) }
+  sig { params(node_or_token: AST::Node, message: String).returns(NilClass) }
   def warning!(node_or_token, message)
     T.bind(self, T.untyped) rescue nil
     token = diagnostic_token(node_or_token)
@@ -144,7 +144,7 @@ module ErrorHelper
       message: T.nilable(String),
       code: T.nilable(Symbol),
       level: Symbol,
-      raise_in_collector: T.untyped,
+      raise_in_collector: T::Boolean,
       kwargs: T.untyped
     ).returns(T.untyped)
   end
@@ -165,7 +165,7 @@ module ErrorHelper
       raise err_class.new(
         source_token,
         rendered_message,
-        T.cast(T.unsafe(self).instance_variable_get(:@source_code), T.nilable(String))
+        diagnostic_source_code
       )
     end
 
@@ -180,10 +180,16 @@ module ErrorHelper
       raise err_class.new(
         source_token,
         rendered_message,
-        T.cast(T.unsafe(self).instance_variable_get(:@source_code), T.nilable(String))
+        diagnostic_source_code
       )
     end
   end
+
+  sig { returns(T.nilable(String)) }
+  def diagnostic_source_code
+    T.cast(T.unsafe(self).source_code, T.nilable(String))
+  end
+
   sig { params(node_or_token: T.untyped).returns(DiagnosticToken) }
   def diagnostic_token(node_or_token)
     token = node_or_token.respond_to?(:token) ? node_or_token.token : node_or_token
@@ -198,7 +204,7 @@ module ErrorHelper
     Lexer::Token.new(:ANCHOR, nil, T.unsafe(token).line, T.unsafe(token).column)
   end
 
-  private :format_diagnostic_template, :diagnostic_token, :source_error_token
+  private :format_diagnostic_template, :diagnostic_source_code, :diagnostic_token, :source_error_token
 
 end
 

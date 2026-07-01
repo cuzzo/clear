@@ -44,7 +44,7 @@ module FsmTransform
     extend T::Sig
 
     AstIdentWalkRoot = T.type_alias { T.nilable(T.any(AST::Node, AST::RawBody)) }
-    BindingStmt = T.type_alias { T.any(AST::VarDecl, AST::BindExpr) }
+    BindingStmt = T.type_alias { T.any(AST::VarDecl, AST::BindExpr, AST::DestructureTarget) }
     DeclTypeCandidate = T.type_alias { T.nilable(Type::TypeInput) }
 
     # Returns a Result. ctx provides captured-name set + any
@@ -158,7 +158,7 @@ module FsmTransform
     # Targets a segment's tail can transition to (for cycle
     # detection). Linear suspends implicitly fall through to
     # seg.index + 1.
-    sig { params(seg: T.untyped).returns(T::Array[Integer]) }
+    sig { params(seg: FsmTransform::Segments::Segment).returns(T::Array[Integer]) }
     def self.tail_targets(seg)
       case seg.tail
       when Segments::Done                          then []
@@ -188,7 +188,7 @@ module FsmTransform
     # inside the body and stash into ctx.sp; subsequent steps
     # reference ctx.sp, not the original identifiers, so no extra
     # tail reads are recorded here.
-    sig { params(seg: T.untyped, uses_by_seg: T.untyped).void }
+    sig { params(seg: FsmTransform::Segments::Segment, uses_by_seg: T::Hash[Integer, T::Set[String]]).void }
     def self.collect_tail_uses(seg, uses_by_seg)
       tail = seg.tail
       case tail
@@ -209,7 +209,7 @@ module FsmTransform
     # Type resolution mirrors the legacy collect_fsm_promoted_locals
     # fallback chain so consumers (FSM ctx-field decl emission)
     # always have a usable type.
-    sig { params(stmt: T.untyped, into: T.untyped).void }
+    sig { params(stmt: T.any(AST::Node, MIR::Node), into: T.untyped).void }
     def self.collect_defs(stmt, into)
       case stmt
       when AST::VarDecl, AST::BindExpr
@@ -227,6 +227,11 @@ module FsmTransform
         if stmt.name.is_a?(String)
           into[stmt.name] ||= nil
         end
+      when AST::DestructuringAssignment
+        stmt.targets.each do |target|
+          next if target.name == "_"
+          into[target.name] ||= stmt_decl_type(target)
+        end
       end
     end
 
@@ -236,7 +241,8 @@ module FsmTransform
       candidates << stmt.full_type!(context: "FSM liveness declaration")
       candidates << T.cast(T.unsafe(stmt).type, DeclTypeCandidate) if stmt.respond_to?(:type)
       candidates << T.cast(T.unsafe(stmt).declared_type, DeclTypeCandidate) if stmt.respond_to?(:declared_type)
-      value = stmt.value
+      value = T.let(nil, T.nilable(AST::Node))
+      value = stmt.value if stmt.is_a?(AST::VarDecl) || stmt.is_a?(AST::BindExpr)
       candidates << value.full_type!(context: "FSM liveness declaration value") if value
       normalize_decl_type(candidates.compact.first)
     end
@@ -249,8 +255,9 @@ module FsmTransform
     end
 
     # Collect identifier reads anywhere in stmt's expressions.
-    sig { params(stmt: T.untyped, into: T.untyped).returns(T.untyped) }
+    sig { params(stmt: T.untyped, into: T.nilable(T::Set[String])).void }
     def self.collect_uses(stmt, into)
+      return unless into
       walk_idents(stmt) { |name| into << name }
     end
 

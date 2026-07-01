@@ -55,7 +55,7 @@ class IntrinsicArgSpec < T::Struct
     type.to_s
   end
 
-  sig { params(value: T.untyped).returns(T.nilable(String)) }
+  sig { params(value: T.nilable(T.any(String, Symbol))).returns(T.nilable(String)) }
   def self.normalize_name(value)
     return nil if value.nil?
 
@@ -63,7 +63,7 @@ class IntrinsicArgSpec < T::Struct
   end
   private_class_method :normalize_name
 
-  sig { params(value: T.untyped).returns(T.nilable(Symbol)) }
+  sig { params(value: T.nilable(T.any(String, Symbol))).returns(T.nilable(Symbol)) }
   def self.normalize_symbol(value)
     return nil if value.nil?
 

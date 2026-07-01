@@ -1,0 +1,51 @@
+{
+  "scenario": "void-return-example",
+  "methods": [
+    {
+      "source": {
+        "path": "gems/nil-kill/spec/fixtures/void-return-example/void_example.rb",
+        "line": 5,
+        "class": "VoidExample",
+        "method": "emit",
+        "kind": "instance",
+        "sig": "sig { returns(T.untyped) }"
+      },
+      "has_sig": true
+    }
+  ],
+  "facts": {
+    "existing_sigs": [
+      {
+        "path": "gems/nil-kill/spec/fixtures/void-return-example/void_example.rb",
+        "line": 5,
+        "class": "VoidExample",
+        "method": "emit",
+        "kind": "instance",
+        "sig": "sig { returns(T.untyped) }"
+      }
+    ],
+    "return_origins": [
+      {
+        "candidate_type": "NilClass",
+        "class": "VoidExample",
+        "confidence": "strong",
+        "kind": "instance",
+        "line": 5,
+        "method": "emit",
+        "path": "gems/nil-kill/spec/fixtures/void-return-example/void_example.rb",
+        "sources": [
+          {
+            "callee": "puts",
+            "kind": "typed_call",
+            "line": 6,
+            "type": "NilClass"
+          }
+        ]
+      }
+    ]
+  },
+  "unused_return_methods_by_location": {
+    "[\"gems/nil-kill/spec/fixtures/void-return-example/void_example.rb\",5,\"VoidExample\",\"emit\",\"instance\"]": {
+    }
+  }
+}

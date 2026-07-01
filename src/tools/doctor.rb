@@ -69,6 +69,7 @@ module Doctor
   # passes the focus/ignore filters. focus keeps only matches; ignore
   # drops matches; both can compose. With no filters set, every
   # sample passes.
+  sig { params(funcs: Array).returns(T::Boolean) }
   def self.focus_match?(funcs)
     return false if @opts && @opts[:ignore] && funcs.any? { |f| f =~ @opts[:ignore] }
     return true unless @opts && @opts[:focus]
@@ -95,6 +96,7 @@ module Doctor
   end
 
   # Human-readable label for the sort axis (used in section headers).
+  sig { returns(String) }
   def self.sort_label
     case sort_key
     when :allocs        then "allocations"
@@ -106,6 +108,7 @@ module Doctor
 
   # Format the sort metric as a string for the per-row display.
   # Bytes get KB/MB pretty-printing; counts get thousand-separators.
+  sig { params(s: Hash).returns(String) }
   def self.fmt_sort_value(s)
     v = s[sort_key]
     case sort_key
@@ -522,6 +525,7 @@ module Doctor
     end
   end
 
+  sig { params(profile_dir: String, site_rows: Array).void }
   def self.emit_parallel_bg_hint!(profile_dir, site_rows = [])
     metadata = task_site_metadata(profile_dir)
     imbalanced_sites = site_rows.select do |site|
@@ -541,6 +545,7 @@ module Doctor
     emit_generic_local_bg_hint!(local_bg_source_lines(File.join(profile_dir, 'source.cht')))
   end
 
+  sig { params(profile_dir: String, local_sites: Array, metadata: Hash).void }
   def self.emit_exact_local_bg_sites!(profile_dir, local_sites, metadata)
     puts ""
     puts "      Exact imbalanced local BG task sites:"
@@ -559,6 +564,7 @@ module Doctor
     emit_parallel_bg_advice!
   end
 
+  sig { params(local_bg_lines: Array).void }
   def self.emit_generic_local_bg_hint!(local_bg_lines)
     puts ""
     puts "      Profile contains local BG dispatches (`BG {}` defaults to the"
@@ -572,17 +578,20 @@ module Doctor
     emit_parallel_bg_advice!
   end
 
+  sig { void }
   def self.emit_parallel_bg_advice!
     puts "      Use `BG { @parallel -> ... }` for CPU-parallel worker fanout."
     puts "      Keep plain `BG {}` for scheduler-affine, IO-affine, or"
     puts "      locality-sensitive work."
   end
 
+  sig { params(site: Hash).returns(Float) }
   def self.site_scheduler_skew(site)
     max_runs = site[:scheds].values.max || 0
     max_runs.to_f / site[:runs]
   end
 
+  sig { params(profile_dir: String).returns(Hash) }
   def self.task_dispatch_counts(profile_dir)
     zig_source = File.join(profile_dir, 'transpiled.zig')
     return { local: 0, parallel: 0 } unless File.exist?(zig_source)
@@ -594,12 +603,14 @@ module Doctor
     }
   end
 
+  sig { params(counts: Hash).returns(T::Boolean) }
   def self.local_dispatch_warning?(counts)
     local = counts[:local]
     parallel = counts[:parallel]
     local > 0 && (parallel == 0 || local > parallel)
   end
 
+  sig { params(profile_dir: String).returns(Hash) }
   def self.task_site_metadata(profile_dir)
     zig_source = File.join(profile_dir, 'transpiled.zig')
     return {} unless File.exist?(zig_source)
@@ -622,6 +633,7 @@ module Doctor
     sites
   end
 
+  sig { params(profile_dir: String, line: T.any(Integer, String)).returns(String) }
   def self.source_line(profile_dir, line)
     return '' unless line && line != '?'
     clear_source = File.join(profile_dir, 'source.cht')
@@ -629,6 +641,7 @@ module Doctor
     File.readlines(clear_source)[line.to_i - 1]&.strip.to_s[0, 90]
   end
 
+  sig { params(clear_source: String).returns(Array) }
   def self.local_bg_source_lines(clear_source)
     return [] unless File.exist?(clear_source)
 
@@ -820,6 +833,7 @@ module Doctor
 
   # Surface eligible locked-counter migrations only when the profile already
   # flagged write-heavy contention.
+  sig { params(profile_dir: String).returns(Array) }
   def self.emit_atomic_migration!(profile_dir)
     src_path = File.join(profile_dir, 'source.cht')
     return unless File.exist?(src_path)
@@ -852,6 +866,7 @@ module Doctor
 
   # Surface whole-struct-publish migrations only when static eligibility and
   # runtime contention both agree.
+  sig { params(profile_dir: String).returns(T.nilable(Array)) }
   def self.emit_atomic_ptr_migration!(profile_dir)
     src_path = File.join(profile_dir, 'source.cht')
     return unless File.exist?(src_path)
@@ -1051,6 +1066,7 @@ module Doctor
 
   # Cross-reference runtime single-cell MVCC traffic with static whole-struct
   # replacement eligibility before suggesting @indirect:atomic.
+  sig { params(profile_dir: String).returns(T.nilable(Array)) }
   def self.emit_atomic_ptr_upgrade_from_mvcc!(profile_dir)
     src_path = File.join(profile_dir, 'source.cht')
     return unless File.exist?(src_path)
@@ -1293,6 +1309,7 @@ module Doctor
   # per caller. For samples where `regex` matches a non-leaf frame,
   # also lists what's directly below — the callees this function
   # was on the path to. Mirrors `pprof -peek`'s shape.
+  sig { params(profile_dir: String, regex: Regexp).returns(NilClass) }
   def self.run_peek(profile_dir, regex)
     unless profile_dir && Dir.exist?(profile_dir)
       $stderr.puts "\e[31merror:\e[0m --peek requires a profile directory"
@@ -1363,6 +1380,7 @@ module Doctor
 
   # Same parsing as section_heap but without the printout — used by
   # run_peek so we can build caller/callee tables from the parsed sites.
+  sig { params(profile_dir: String, binary: T.nilable(NilClass)).returns(Array) }
   def self.section_heap_silent(profile_dir, binary)
     out = StringIO.new
     real, $stdout = $stdout, out
@@ -1379,6 +1397,7 @@ module Doctor
   # newly trips "MVCC fit" gets called out, etc. Computes deltas
   # ourselves rather than shelling to `pprof -base` so doctor stays
   # self-contained and can attach commentary.
+  sig { params(before_dir: String, after_dir: String, focus: T.nilable(Regexp)).returns(NilClass) }
   def self.run_diff(before_dir, after_dir, focus: nil)
     before_dir = before_dir.to_s.chomp('/')
     after_dir  = after_dir.to_s.chomp('/')
@@ -1452,6 +1471,7 @@ module Doctor
     by_func
   end
 
+  sig { params(before_dir: String, after_dir: String, focus: T.nilable(Regexp)).void }
   def self.diff_heap(before_dir, after_dir, focus)
     # Use the after-dir's binary for both lookups — that's the user's
     # current build. Falls back to the before-dir's binary if the
@@ -1532,6 +1552,7 @@ module Doctor
     by_addr
   end
 
+  sig { params(before_dir: String, after_dir: String, _focus: T.nilable(Regexp)).void }
   def self.diff_locks(before_dir, after_dir, _focus)
     before = parse_locks_for_diff(before_dir)
     after  = parse_locks_for_diff(after_dir)
@@ -1599,6 +1620,7 @@ module Doctor
     by_addr
   end
 
+  sig { params(before_dir: String, after_dir: String, _focus: T.nilable(Regexp)).returns(NilClass) }
   def self.diff_mvcc(before_dir, after_dir, _focus)
     before = parse_mvcc_for_diff(before_dir)
     after  = parse_mvcc_for_diff(after_dir)
@@ -1648,6 +1670,7 @@ module Doctor
   # Prefers the after-dir's binary (the user's current build); falls
   # back to the before-dir's binary if the after-dir is missing one
   # (e.g. binary was deleted after profiling).
+  sig { params(after_dir: String, before_dir: String).returns(T.nilable(String)) }
   def self.locate_diff_binary(after_dir, before_dir)
     [after_dir, before_dir].each do |dir|
       bin = dir.to_s.chomp('/').sub(/\.profile$/, '')

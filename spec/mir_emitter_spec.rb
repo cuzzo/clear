@@ -123,6 +123,19 @@ RSpec.describe MIREmitter do
     expect(e.emit(node)).to eq("x = 5;")
   end
 
+  it "emits destructuring assignment and declaration targets" do
+    node = MIR::DestructureSet.new(
+      [
+        MIR::DestructureTarget.new("a", :const, Type.new("i64")),
+        MIR::DestructureTarget.new("b", nil, nil),
+        MIR::DestructureTarget.new("_", nil, nil),
+      ],
+      MIR::Ident.new("pair"),
+    )
+
+    expect(e.emit(node)).to eq("const a: i64, b, _ = pair;")
+  end
+
   it "emits field assignment" do
     target = MIR::FieldGet.new(MIR::Ident.new("user"), "name")
     node = MIR::Set.new(target, MIR::Lit.new("\"alice\""))

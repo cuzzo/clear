@@ -1,0 +1,58 @@
+{
+  "scenario": "used-return-chain",
+  "methods": [
+    {
+      "source": {
+        "path": "gems/nil-kill/spec/fixtures/used-return-chain/used_chain_example.rb",
+        "line": 5,
+        "class": "UsedChainExample",
+        "method": "used_leaf",
+        "kind": "instance",
+        "sig": "sig { returns(T.untyped) }"
+      },
+      "has_sig": true
+    },
+    {
+      "source": {
+        "path": "gems/nil-kill/spec/fixtures/used-return-chain/used_chain_example.rb",
+        "line": 10,
+        "class": "UsedChainExample",
+        "method": "used_middle",
+        "kind": "instance",
+        "sig": "sig { returns(T.untyped) }"
+      },
+      "has_sig": true
+    }
+  ],
+  "facts": {
+    "return_origins": [
+      {
+        "candidate_type": "String",
+        "class": "UsedChainExample",
+        "confidence": "strong",
+        "kind": "instance",
+        "line": 5,
+        "method": "used_leaf",
+        "sources": [
+          {
+            "code": "\"event\"",
+            "kind": "static"
+          }
+        ]
+      },
+      {
+        "candidate_type": "String",
+        "class": "UsedChainExample",
+        "confidence": "strong",
+        "kind": "instance",
+        "line": 10,
+        "method": "used_middle",
+        "sources": [
+          {
+            "kind": "typed_call_inferred"
+          }
+        ]
+      }
+    ]
+  }
+}

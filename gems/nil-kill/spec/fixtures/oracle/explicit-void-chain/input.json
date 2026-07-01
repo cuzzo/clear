@@ -1,0 +1,64 @@
+{
+  "scenario": "explicit-void-chain",
+  "methods": [
+    {
+      "source": {
+        "path": "gems/nil-kill/spec/fixtures/explicit-void-chain/explicit_void_chain_example.rb",
+        "line": 5,
+        "class": "ExplicitVoidChainExample",
+        "method": "explicit_leaf",
+        "kind": "instance",
+        "sig": "sig { returns(T.untyped) }"
+      },
+      "has_sig": true
+    },
+    {
+      "source": {
+        "path": "gems/nil-kill/spec/fixtures/explicit-void-chain/explicit_void_chain_example.rb",
+        "line": 10,
+        "class": "ExplicitVoidChainExample",
+        "method": "explicit_wrapper",
+        "kind": "instance",
+        "sig": "sig { returns(T.untyped) }"
+      },
+      "has_sig": true
+    }
+  ],
+  "facts": {
+    "return_origins": [
+      {
+        "candidate_type": "String",
+        "class": "ExplicitVoidChainExample",
+        "confidence": "strong",
+        "kind": "instance",
+        "line": 5,
+        "method": "explicit_leaf",
+        "sources": [
+          {
+            "code": "\"event\"",
+            "kind": "static"
+          }
+        ]
+      },
+      {
+        "candidate_type": "String",
+        "class": "ExplicitVoidChainExample",
+        "confidence": "strong",
+        "kind": "instance",
+        "line": 10,
+        "method": "explicit_wrapper",
+        "sources": [
+          {
+            "kind": "typed_call_inferred"
+          }
+        ]
+      }
+    ]
+  },
+  "unused_return_methods_by_location": {
+    "[\"gems/nil-kill/spec/fixtures/explicit-void-chain/explicit_void_chain_example.rb\",5,\"ExplicitVoidChainExample\",\"explicit_leaf\",\"instance\"]": {
+    },
+    "[\"gems/nil-kill/spec/fixtures/explicit-void-chain/explicit_void_chain_example.rb\",10,\"ExplicitVoidChainExample\",\"explicit_wrapper\",\"instance\"]": {
+    }
+  }
+}

@@ -1,0 +1,90 @@
+{
+  "scenario": "void-return-chain",
+  "methods": [
+    {
+      "source": {
+        "path": "gems/nil-kill/spec/fixtures/void-return-chain/void_chain_example.rb",
+        "line": 5,
+        "class": "VoidChainExample",
+        "method": "leaf_value",
+        "kind": "instance",
+        "sig": "sig { returns(T.untyped) }"
+      },
+      "has_sig": true
+    },
+    {
+      "source": {
+        "path": "gems/nil-kill/spec/fixtures/void-return-chain/void_chain_example.rb",
+        "line": 10,
+        "class": "VoidChainExample",
+        "method": "middle_value",
+        "kind": "instance",
+        "sig": "sig { returns(T.untyped) }"
+      },
+      "has_sig": true
+    },
+    {
+      "source": {
+        "path": "gems/nil-kill/spec/fixtures/void-return-chain/void_chain_example.rb",
+        "line": 15,
+        "class": "VoidChainExample",
+        "method": "top_value",
+        "kind": "instance",
+        "sig": "sig { returns(T.untyped) }"
+      },
+      "has_sig": true
+    }
+  ],
+  "facts": {
+    "return_origins": [
+      {
+        "candidate_type": "String",
+        "class": "VoidChainExample",
+        "confidence": "strong",
+        "kind": "instance",
+        "line": 5,
+        "method": "leaf_value",
+        "sources": [
+          {
+            "code": "\"event\"",
+            "kind": "static"
+          }
+        ]
+      },
+      {
+        "candidate_type": "String",
+        "class": "VoidChainExample",
+        "confidence": "strong",
+        "kind": "instance",
+        "line": 10,
+        "method": "middle_value",
+        "sources": [
+          {
+            "kind": "typed_call_inferred"
+          }
+        ]
+      },
+      {
+        "candidate_type": "String",
+        "class": "VoidChainExample",
+        "confidence": "strong",
+        "kind": "instance",
+        "line": 15,
+        "method": "top_value",
+        "sources": [
+          {
+            "kind": "typed_call_inferred"
+          }
+        ]
+      }
+    ]
+  },
+  "unused_return_methods_by_location": {
+    "[\"gems/nil-kill/spec/fixtures/void-return-chain/void_chain_example.rb\",5,\"VoidChainExample\",\"leaf_value\",\"instance\"]": {
+    },
+    "[\"gems/nil-kill/spec/fixtures/void-return-chain/void_chain_example.rb\",10,\"VoidChainExample\",\"middle_value\",\"instance\"]": {
+    },
+    "[\"gems/nil-kill/spec/fixtures/void-return-chain/void_chain_example.rb\",15,\"VoidChainExample\",\"top_value\",\"instance\"]": {
+    }
+  }
+}

@@ -77,7 +77,7 @@ module MIRLoweringLiterals
     end
   end
 
-  sig { params(node: AST::ListLit).returns(T.untyped) }
+  sig { params(node: AST::ListLit).returns(MIR::Node) }
   def lower_list_lit(node)
     T.bind(self, MIRLowering) rescue nil
     function_state.current_expected_type = T.let(function_state.current_expected_type, T.nilable(Type))

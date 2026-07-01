@@ -1,0 +1,14 @@
+{
+  "scenario": "noreturn-method",
+  "methods": [
+    {
+      "source": {
+        "path": "gems/nil-kill/spec/fixtures/noreturn-method/noreturn_example.rb",
+        "line": 5,
+        "sig": "sig { returns(T.untyped) }",
+        "noreturn_candidate": true
+      },
+      "has_sig": true
+    }
+  ]
+}

@@ -1,4 +1,6 @@
 # typed: strict
+require "sorbet-runtime"
+
 require_relative "diagnostic_registry"
 require_relative "../semantic/ownership_graph"
 
@@ -61,18 +63,18 @@ module DiagnosticExamples
 
   # Public entry point. Parses each spec file once, memoises results.
   # Returns a hash { CODE_SYM => { bad:, fix:, good:, file:, line: } }.
-  sig { returns(T.untyped) }
+  sig { returns(T::Hash[Symbol, T::Hash[Symbol, T.untyped]]) }
   def self.all
     @all = T.let(@all, T.untyped)
     @all ||= load!
   end
 
-  sig { params(code: T.untyped).returns(T.nilable(Example)) }
+  sig { params(code: Symbol).returns(T.nilable(Example)) }
   def self.lookup(code)
     all[code.to_sym]
   end
 
-  sig { params(spec_files: T.untyped).returns(T::Hash[T.untyped, T.untyped]) }
+  sig { params(spec_files: T.untyped).returns(T::Hash[Symbol, T::Hash[Symbol, T.untyped]]) }
   def self.load!(spec_files = DEFAULT_SPEC_FILES)
     out = {}
     spec_files.each do |path|
@@ -84,7 +86,7 @@ module DiagnosticExamples
 
   # ---- internals ----
 
-  sig { params(path: T.untyped, out: T.untyped).returns(NilClass) }
+  sig { params(path: String, out: T.untyped).returns(NilClass) }
   def self.scan_file(path, out)
     lines = File.readlines(path)
     i = T.let(0, Integer)
@@ -139,7 +141,7 @@ module DiagnosticExamples
   # Walk forward from `start_idx` (line of `describe ... do`) and find
   # the `end` line at the same indentation level. Returns the index or
   # nil if the file is malformed.
-  sig { params(lines: T.untyped, start_idx: T.untyped, indent: T.untyped).returns(T.untyped) }
+  sig { params(lines: T.untyped, start_idx: Integer, indent: T.nilable(Integer)).returns(T.untyped) }
   def self.find_block_end(lines, start_idx, indent)
     depth = 1
     k = start_idx + 1
@@ -163,7 +165,7 @@ module DiagnosticExamples
   # body satisfies `expecting_raise` (true == contains `raise_error`,
   # false == does not). Extract the first `<<~CLEAR ... CLEAR` heredoc
   # body within that `it`.
-  sig { params(block_lines: T.untyped, expecting_raise: T.untyped).returns(T.nilable(String)) }
+  sig { params(block_lines: T.untyped, expecting_raise: T::Boolean).returns(T.nilable(String)) }
   def self.extract_first_heredoc_in_it(block_lines, expecting_raise:)
     block_lines.each_with_index do |line, i|
       next unless line =~ /^(\s*)it\b/

@@ -107,9 +107,9 @@ impl SharedFacts {
     }
 }
 
-pub fn collect(targets: &[PathBuf], options: &Options) -> Result<Value> {
+pub fn collect(targets: &[PathBuf], options: &Options, include_documents: bool) -> Result<Value> {
     let files = collect_source_files(targets, options)?;
-    facts_for_source_files(&files, options)
+    facts_for_source_files(&files, options, include_documents)
 }
 
 pub fn collect_source_files(targets: &[PathBuf], options: &Options) -> Result<Vec<SourceFile>> {
@@ -126,7 +126,7 @@ pub fn collect_source_files(targets: &[PathBuf], options: &Options) -> Result<Ve
     Ok(files)
 }
 
-pub fn facts_for_source_files(files: &[SourceFile], options: &Options) -> Result<Value> {
+pub fn facts_for_source_files(files: &[SourceFile], options: &Options, include_documents: bool) -> Result<Value> {
     if files.is_empty() {
         bail!("facts requires at least one supported source file");
     }
@@ -139,9 +139,13 @@ pub fn facts_for_source_files(files: &[SourceFile], options: &Options) -> Result
     })?;
     profile_phase(profile, "parse", parse_started.elapsed());
 
-    let projected_documents: Vec<Value> = documents.iter().map(|doc| {
-        crate::decomplex::syntax_oracle::project_document(doc)
-    }).collect();
+    let projected_documents: Vec<Value> = if include_documents {
+        documents.iter().map(|doc| {
+            crate::decomplex::syntax_oracle::project_document(doc)
+        }).collect()
+    } else {
+        Vec::new()
+    };
 
     let shared_started = Instant::now();
     let shared = SharedFacts::new(&documents);
@@ -1071,7 +1075,7 @@ mod tests {
         fs::write(&rb_file, "def hello\n  puts \"hello\"\nend\n").unwrap();
 
         let options = Options::default();
-        let result = collect(&[rb_file], &options).expect("collect");
+        let result = collect(&[rb_file], &options, false).expect("collect");
         assert!(result.is_object());
 
         // Reset
@@ -1089,7 +1093,7 @@ mod tests {
         fs::write(&rs_file, "fn main() {\n  println!(\"hello\");\n}\n").unwrap();
 
         let options = Options::default();
-        let result = collect(&[rb_file.clone(), rs_file.clone()], &options).expect("collect");
+        let result = collect(&[rb_file.clone(), rs_file.clone()], &options, false).expect("collect");
         assert!(result.is_object());
         let obj = result.as_object().unwrap();
         assert_eq!(obj.get("format").unwrap(), FORMAT);
@@ -1101,12 +1105,12 @@ mod tests {
             language: Some(Language::Ruby),
             ..Options::default()
         };
-        let result_lang = collect(&[dir.path().to_path_buf()], &options_lang).expect("collect with lang filter");
+        let result_lang = collect(&[dir.path().to_path_buf()], &options_lang, false).expect("collect with lang filter");
         let obj_lang = result_lang.as_object().unwrap();
         let files_lang = obj_lang.get("files").unwrap().as_array().unwrap();
         assert_eq!(files_lang.len(), 1);
 
-        let empty_res = facts_for_source_files(&[], &options);
+        let empty_res = facts_for_source_files(&[], &options, false);
         assert!(empty_res.is_err());
     }
 

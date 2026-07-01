@@ -26,8 +26,8 @@ module EscapeAnalysis
   HeapResult = T.type_alias { [T::Set[String], T::Set[String]] }
   LambdaIdentifierRefs = T.type_alias { Annotator::Phases::LambdaIdentifierRefs }
   EscapeHandlerRegistry = T.type_alias { T::Hash[Symbol, T::Array[Symbol]] }
-  BindingNode = T.type_alias { T.any(AST::VarDecl, AST::BindExpr) }
-  AssignmentNode = T.type_alias { T.any(AST::Assignment, AST::BindExpr) }
+  BindingNode = T.type_alias { T.any(AST::VarDecl, AST::BindExpr, AST::DestructureTarget) }
+  AssignmentNode = T.type_alias { T.any(AST::Assignment, AST::BindExpr, AST::DestructuringAssignment) }
   AssignmentTarget = T.type_alias { T.any(String, Symbol, AST::Node) }
   NodeClass = T.type_alias { T::Module[T.anything] }
   NodeValue = T.type_alias { T.nilable(AST::Node) }
@@ -475,7 +475,8 @@ module EscapeAnalysis
       reg = sym.reg
       next unless reg.is_a?(AST::Locatable)
       node = reg
-      next unless node.is_a?(AST::VarDecl) || (node.is_a?(AST::BindExpr) && node.mode == :decl)
+      next unless node.is_a?(AST::VarDecl) || node.is_a?(AST::DestructureTarget) ||
+                  (node.is_a?(AST::BindExpr) && node.mode == :decl)
       ti = node.full_type!(context: "recursive aggregate owner")
       next unless aggregate_owner_requires_heap?(ti, schema_lookup)
       mark_symbol_heap!(sym)
@@ -823,6 +824,7 @@ module EscapeAnalysis
     if node.is_a?(AST::BindExpr) && node.mode == :assign
       return node.name.to_s
     end
+    return nil if node.is_a?(AST::DestructuringAssignment)
     return nil unless node.is_a?(AST::Assignment)
     target = unwrap_value(node.name)
     return target.to_s if target.is_a?(String) || target.is_a?(Symbol)
@@ -952,7 +954,7 @@ module EscapeAnalysis
     walk_body(fn.body) do |node|
       escape_nodes << node if node.is_a?(AST::Locatable)
       return_values << node.value if node.is_a?(AST::ReturnNode) && node.value
-      assignment_nodes << node if node.is_a?(AST::Assignment)
+      assignment_nodes << node if node.is_a?(AST::Assignment) || node.is_a?(AST::DestructuringAssignment)
       case node
       when AST::VarDecl
         record_binding_fact!(node, symbols, binding_values)
@@ -961,6 +963,11 @@ module EscapeAnalysis
           assignment_nodes << node
         else
           record_binding_fact!(node, symbols, binding_values)
+        end
+      when AST::DestructuringAssignment
+        node.targets.each do |target|
+          next if target.name == "_"
+          record_binding_fact!(target, symbols, binding_values) if target.symbol&.reg.equal?(target)
         end
       end
     end
@@ -984,7 +991,8 @@ module EscapeAnalysis
   sig { params(node: BindingNode, symbols: T::Hash[String, SymbolEntry], binding_values: T::Hash[String, T::Array[AST::Locatable]]).void }
   private_class_method def self.record_binding_fact!(node, symbols, binding_values)
     record_symbol_fact!(node, symbols)
-    value = node.value
+    value = T.let(nil, T.nilable(AST::Node))
+    value = node.value if node.is_a?(AST::VarDecl) || node.is_a?(AST::BindExpr)
     return unless value.is_a?(AST::Locatable)
 
     (binding_values[node.name.to_s] ||= []) << value

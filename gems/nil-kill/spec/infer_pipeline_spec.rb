@@ -10,6 +10,8 @@ RSpec.describe "nil-kill infer pipeline" do
         class StaticProviderExample
           extend T::Sig
 
+          const :name, T.untyped
+
           sig { params(reason: String).returns(String) }
           def call(reason)
             reason.nil?
@@ -28,6 +30,12 @@ RSpec.describe "nil-kill infer pipeline" do
           "class" => "StaticProviderExample",
           "method" => "call",
           "non_nil_params" => include("reason")
+        ))
+        expect(store.facts["type_definitions"]).to include(a_hash_including(
+          "kind" => "state_field",
+          "owner" => "StaticProviderExample",
+          "name" => "name",
+          "declared_type" => "T.untyped"
         ))
         # expect(store.facts["dead_nil_checks"]).to include(a_hash_including(
         #   "path" => source,

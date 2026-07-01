@@ -1,0 +1,71 @@
+{
+  "actions": [
+    {
+      "kind": "fix_sig_return",
+      "confidence": "high",
+      "path": "gems/nil-kill/spec/fixtures/return-hygiene-report/hygiene_report.rb",
+      "line": 5,
+      "message": "existing sig return is T.untyped; return value is never used, prefer .void",
+      "data": {
+        "type": "void",
+        "source": "unused_return"
+      }
+    },
+    {
+      "kind": "fix_sig_return",
+      "confidence": "high",
+      "path": "gems/nil-kill/spec/fixtures/return-hygiene-report/hygiene_report.rb",
+      "line": 5,
+      "message": "existing sig return is T.untyped; static return origins suggest String",
+      "data": {
+        "type": "String",
+        "source": "static_return_origin",
+        "blockers": [
+
+        ],
+        "origin_confidence": "strong"
+      }
+    },
+    {
+      "kind": "fix_sig_return",
+      "confidence": "high",
+      "path": "gems/nil-kill/spec/fixtures/return-hygiene-report/hygiene_report.rb",
+      "line": 10,
+      "message": "existing sig return is T.untyped; return value is never used, prefer .void",
+      "data": {
+        "type": "void",
+        "source": "unused_return"
+      }
+    },
+    {
+      "kind": "fix_sig_return",
+      "confidence": "high",
+      "path": "gems/nil-kill/spec/fixtures/return-hygiene-report/hygiene_report.rb",
+      "line": 10,
+      "message": "existing sig return is T.untyped; static return origins suggest String",
+      "data": {
+        "origin_confidence": "strong",
+        "source": "static_return_origin",
+        "type": "String",
+        "blockers": [
+
+        ]
+      }
+    },
+    {
+      "kind": "fix_sig_return",
+      "confidence": "high",
+      "path": "gems/nil-kill/spec/fixtures/return-hygiene-report/hygiene_report.rb",
+      "line": 15,
+      "message": "existing sig return is T.untyped; static return origins suggest String",
+      "data": {
+        "type": "String",
+        "origin_confidence": "strong",
+        "source": "static_return_origin",
+        "blockers": [
+
+        ]
+      }
+    }
+  ]
+}

@@ -506,7 +506,7 @@ module Espalier
     def profile_for_rbi_file(file)
       tmp = Tempfile.new(["espalier-rbi-facts", ".json"])
       tmp.close
-      ok = system(FACT_MINE_RUST_BINARY, "profile", "nil-kill", "--output", tmp.path, file)
+      ok = system(FACT_MINE_RUST_BINARY, "profile", "nil-kill", "--language", "ruby", "--output", tmp.path, file)
       return [] unless ok
 
       FactMine::Syntax::TypeExpr.wrap_types!(JSON.parse(File.read(tmp.path))).fetch("type_definitions", [])

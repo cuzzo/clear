@@ -71,6 +71,10 @@ pub(crate) struct NormalizedNilGuardFact {
 }
 
 pub(crate) trait NormalizedLanguageBehavior: Sync {
+    fn supports_parameter_normalization(&self) -> bool {
+        false
+    }
+
     fn yield_semantic_effect(&self, _node: &Node) -> bool {
         true
     }

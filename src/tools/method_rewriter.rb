@@ -62,6 +62,7 @@ module MethodRewriter
     set
   end
 
+  sig { params(node: T.untyped, methods: Set, fns: Set).returns(T.untyped) }
   def self.walk_collect_user_decls(node, methods, fns)
     case node
     when AST::FunctionDef
@@ -138,6 +139,7 @@ module MethodRewriter
   # Post-order walk: collect edits for inner calls first so outer
   # rewrites see the (logically) rewritten inner. Edits are applied
   # right-to-left on the source so positions don't shift.
+  sig { params(node: T.untyped, methods: Set, source: String, edits: Array).returns(T.nilable(Array)) }
   def self.walk_collect_edits(node, methods, source, edits)
     return if node.nil? || AST.scalar_literal_value?(node)
 
@@ -241,6 +243,7 @@ module MethodRewriter
     :GetIndex, :StructLit, :ListLit, :HashLit, :StringLit
   ].freeze
 
+  sig { params(node: AST::Node, text: String).returns(T::Boolean) }
   def self.needs_parens?(node, text)
     stripped = text.strip
     return false if stripped.start_with?('(') && stripped.end_with?(')')

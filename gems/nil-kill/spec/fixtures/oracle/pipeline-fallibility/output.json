@@ -1,0 +1,32 @@
+{
+  "actions": [
+    {
+      "kind": "add_sig",
+      "confidence": "review",
+      "path": "gems/nil-kill/spec/fixtures/pipeline-fallibility/pipeline.rb",
+      "line": 2,
+      "message": "add missing sig",
+      "data": {
+        "scope": [
+          "PipelineFallibility"
+        ],
+        "method": "root",
+        "sig": "sig { returns(T.untyped) }"
+      }
+    },
+    {
+      "kind": "add_sig",
+      "confidence": "review",
+      "path": "gems/nil-kill/spec/fixtures/pipeline-fallibility/pipeline.rb",
+      "line": 6,
+      "message": "add missing sig",
+      "data": {
+        "scope": [
+          "PipelineFallibility"
+        ],
+        "method": "handled",
+        "sig": "sig { returns(T.untyped) }"
+      }
+    }
+  ]
+}

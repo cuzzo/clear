@@ -62,7 +62,7 @@ module FsmTransform
   #   :promoted_decls, :capture_inits, :rt_name, :pin_mode,
   #   :inner_zig, :is_void, :arena_init_flag, :id, :bg_rt,
   #   :ctx_type, :promise_zig, :blk_label, :capture_fields
-  sig { params(bg_block: T.untyped, ctx: T.untyped, lowering: T.untyped).returns(T.nilable(MIR::FsmLoweringResult)) }
+  sig { params(bg_block: T.any(AST::Node, T.untyped), ctx: T.untyped, lowering: T.any(MIRLowering, T.untyped)).returns(T.nilable(MIR::FsmLoweringResult)) }
   def self.transform(bg_block, ctx, lowering)
     T.bind(self, T.untyped) rescue nil
     suspend_points = bg_block.fsm_suspend_points || []
@@ -320,7 +320,7 @@ module FsmTransform
   # already added to the ctx by the suspend descriptor's
   # ctx_field_decls. Used by collect_body_locals to avoid
   # double-declaring the result var.
-  sig { params(value: T.untyped).returns(T::Boolean) }
+  sig { params(value: AST::Node).returns(T::Boolean) }
   def self.suspend_value?(value)
     T.bind(self, T.untyped) rescue nil
     return true if value.is_a?(AST::NextExpr)
@@ -329,7 +329,7 @@ module FsmTransform
     !!(md&.intrinsic_suspends? && md.intrinsic_contract.behavior.fsm_setup_present)
   end
 
-  sig { params(name: T.untyped, type_obj: T.untyped, is_suspend_result: T::Boolean).returns(T.nilable(PromotedLocalFact)) }
+  sig { params(name: String, type_obj: Type, is_suspend_result: T::Boolean).returns(T.nilable(PromotedLocalFact)) }
   def self.local_entry(name, type_obj, is_suspend_result: false)
     T.bind(self, T.untyped) rescue nil
     return nil if name.nil?

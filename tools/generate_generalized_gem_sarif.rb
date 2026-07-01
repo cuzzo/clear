@@ -80,6 +80,24 @@ def write(path, body)
   warn "wrote #{path}"
 end
 
+def cap_sarif_results(path, max_results)
+  return unless max_results&.positive?
+
+  sarif = JSON.parse(File.read(path))
+  run = sarif.fetch("runs").first
+  results = run["results"]
+  return unless results.is_a?(Array) && results.size > max_results
+
+  original_count = results.size
+  run["results"] = results.take(max_results)
+  properties = run["properties"] ||= {}
+  properties["decomplex.sarif_results_original_count"] = original_count
+  properties["decomplex.sarif_results_limit"] = max_results
+  properties["decomplex.sarif_results_truncated_count"] = original_count - max_results
+  File.write(path, JSON.pretty_generate(sarif))
+  warn "truncated #{path} results from #{original_count} to #{max_results}"
+end
+
 def empty_sarif(tool_name, format)
   JSON.pretty_generate(
     NilKill::Sarif.document(
@@ -107,6 +125,7 @@ def run_decomplex_rust(binary, files, out_dir, repo)
 
   ok = system(binary, "report", "--format", "sarif", "--output", sarif_out, *abs_files)
   abort "decomplex-rust report --format sarif failed" unless ok
+  cap_sarif_results(sarif_out, DECOMPLEX_SARIF_MAX_RESULTS)
 
   ok = system(binary, "report", "--format", "markdown", "--output", md_out, *abs_files)
   abort "decomplex-rust report --format markdown failed" unless ok

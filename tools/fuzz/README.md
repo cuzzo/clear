@@ -135,6 +135,7 @@ expected hard error is absent.
 | `capability_wrap_matrix`   | 21           | Capability wrapper construction/admission cells. |
 | `catch_allocator_matrix`   | 20           | Error/catch paths that preserve allocator identity. |
 | `catch_reassign_matrix`    | 16           | Catch/fallback reassignment ownership cells. |
+| `destructuring_assignment_matrix` | 6      | Fixed-shape destructuring declaration, typed/mutable targets, reassignment, mixed declaration, and discard. |
 | `indexed_assignment_matrix`| 20           | Indexed assignment into lists/maps across value shapes. |
 | `indirect_recursive_union` | 12           | Recursive union payloads through indirect storage. |
 | `match_matrix`             | 18           | MATCH lowering over union/scalar shapes plus AS payload bindings. |
@@ -163,6 +164,7 @@ expected hard error is absent.
 | `diagnostic_policy_matrix`  | 16              | Policy-heavy front-end diagnostics for reentrancy, hold-lock-across-yield, lock ordering, handlers, and ownership/fixable rejection paths. |
 | `pipeline_source_shape_matrix` | 44           | Pipeline source/terminal shapes across range, BG STREAM, bounded promises, strings, and observable terminals. |
 | `pipeline_gap_matrix`        | 8            | Focused pipeline operator gaps: TAKE_WHILE, SKIP, WINDOW(time), UNNEST bindings, and CONCURRENT terminals. |
+| `pipeline_value_block_matrix` | 7            | Source-level value blocks in SELECT, WHERE, ORDER_BY, and lambda positions, including missing-result and bad-predicate rejection cells. |
 | `call_ownership_contract_matrix` | 73         | Normal calls, TAKES bare/COPY/GIVE, owned/fallible returns, receiver mutation, BG calls, and pipeline call contracts across string/list/struct/union/nested owned shapes. |
 | `collection_iteration_storage_matrix` | 43    | Collection iteration/storage across arrays, lists, sets, maps, pools, nested and SOA containers. |
 | `mir_checker_negative_matrix` | 45            | Generated malformed-MIR cells for fail-closed ownership verification: double release/finalizer, implicit move, UAF after transfer, unverifiable joins, aggregate allocator mismatch, return allocator invariants, MIR call contracts, InlineZig/RawZig allocator contracts, invalid allocator facts, missing cleanup finalizers, borrow cleanup, unhoisted allocs, COPY_CLEANUP, and INDIRECT_DOUBLE_BOX. |
@@ -179,7 +181,7 @@ expected hard error is absent.
 | `lowering_boundary_matrix`   | 28           | MIR lowering boundary coverage for call contracts, WITH variants, BG/DO/NEXT, and pipeline terminals. |
 | `test_framework_matrix`      | 6            | TEST/WHEN/TEST THAT grammar through hooks, LET bindings, stubs, pending tests, benchmark, smash, and profile forms. |
 | `extern_boundary_matrix`     | 6            | Negative extern declaration/call boundaries for free functions, trampolines, extern methods/resources, generic comptime calls, and tight-loop rejection. |
-| `curated_gap_corpus`         | 463          | Self-contained `transpile-tests/*.cht` corpus reused as broad compile-mode fuzz coverage for parser, annotator, MIR lowering, and emission. |
+| `curated_gap_corpus`         | 466          | Self-contained `transpile-tests/*.cht` corpus reused as broad compile-mode fuzz coverage for parser, annotator, MIR lowering, and emission. |
 
 ### `stream_into_boundary` matrix
 

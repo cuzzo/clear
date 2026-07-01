@@ -183,6 +183,10 @@ const RUBY_EFFECT_LEXICON: EffectLexicon = EffectLexicon {
 pub(crate) struct RubyNormalizedBehavior;
 
 impl NormalizedLanguageBehavior for RubyNormalizedBehavior {
+    fn supports_parameter_normalization(&self) -> bool {
+        true
+    }
+
     fn static_call_return_type(
         &self,
         node: &Node,

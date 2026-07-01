@@ -1,0 +1,38 @@
+{
+  "scenario": "typed-void-wrapper",
+  "methods": [
+    {
+      "source": {
+        "path": "gems/nil-kill/spec/fixtures/typed-void-wrapper/typed_void_wrapper_example.rb",
+        "line": 5,
+        "class": "TypedVoidWrapperExample",
+        "method": "leaf_event",
+        "kind": "instance",
+        "sig": "sig { returns(T.untyped) }"
+      },
+      "has_sig": true
+    }
+  ],
+  "facts": {
+    "return_origins": [
+      {
+        "candidate_type": "String",
+        "class": "TypedVoidWrapperExample",
+        "confidence": "strong",
+        "kind": "instance",
+        "line": 5,
+        "method": "leaf_event",
+        "sources": [
+          {
+            "code": "\"event\"",
+            "kind": "static"
+          }
+        ]
+      }
+    ]
+  },
+  "unused_return_methods_by_location": {
+    "[\"gems/nil-kill/spec/fixtures/typed-void-wrapper/typed_void_wrapper_example.rb\",5,\"TypedVoidWrapperExample\",\"leaf_event\",\"instance\"]": {
+    }
+  }
+}

@@ -122,7 +122,7 @@ module AST
   # Returns [existed?, conflict?]. conflict is a Hash
   #   { existing_kind:, given_kind:, first_site:, is_stdlib: }
   # or nil when registration succeeded (or was a no-op re-use).
-  sig { params(type_sym: Symbol, kind_sym: Symbol, site_token: T.untyped).returns(T::Array[T.untyped]) }
+  sig { params(type_sym: Symbol, kind_sym: Symbol, site_token: T.nilable(T.any(Lexer::Token, Object))).returns([T::Boolean, T.nilable(T::Hash[Symbol, T.untyped])]) }
   def self.register_type!(type_sym, kind_sym, site_token: nil)
     entry = ERROR_TYPES[type_sym]
     if entry.nil?
@@ -160,7 +160,7 @@ module AST
   # the `pub const ErrorName = enum(u32) { ... };` header at the top
   # of the generated Zig program. Sorted by id so the emitted enum is
   # deterministic across runs.
-  sig { returns(T::Array[T.untyped]) }
+  sig { returns(T::Array[T::Array[T.any(Integer, Symbol)]]) }
   def self.enum_entries
     [[:None, ERROR_NAME_NONE]] + ERROR_TYPES.map { |sym, meta| [sym, meta[:id]] }.sort_by(&:last)
   end

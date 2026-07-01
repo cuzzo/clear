@@ -1,0 +1,278 @@
+{
+  "scenario": "zero-evidence-gap-corpus",
+  "methods": [
+    {
+      "params_by_name": {
+        "x": [
+          "Integer"
+        ]
+      },
+      "returns": [
+        "Integer"
+      ],
+      "source": {
+        "path": "gems/nil-kill/spec/fixtures/zero-evidence-gap-corpus/plain_require_lib.rb",
+        "line": 11,
+        "sig": "sig { params(x: T.untyped).returns(T.untyped) }"
+      },
+      "has_sig": true
+    },
+    {
+      "params_ok": {
+        "v": [
+          "Integer"
+        ]
+      },
+      "returns": [
+        "String"
+      ],
+      "source": {
+        "path": "gems/nil-kill/spec/fixtures/zero-evidence-gap-corpus/require_relative_lib.rb",
+        "line": 14,
+        "class": "RelReq",
+        "method": "calc",
+        "kind": "instance",
+        "sig": "sig { params(v: T.untyped).returns(T.untyped) }"
+      },
+      "has_sig": true
+    },
+    {
+      "params_by_name": {
+        "opts": [
+          "Hash"
+        ]
+      },
+      "returns": [
+        "Integer"
+      ],
+      "source": {
+        "path": "gems/nil-kill/spec/fixtures/zero-evidence-gap-corpus/kernel_load_lib.rb",
+        "line": 14,
+        "sig": "sig { params(opts: T.untyped, rest: T.untyped, kw: T.untyped, blk: T.untyped).returns(T.untyped) }"
+      },
+      "has_sig": true
+    },
+    {
+      "params_by_name": {
+        "v": [
+          "String"
+        ]
+      },
+      "returns": [
+        "String"
+      ],
+      "source": {
+        "path": "gems/nil-kill/spec/fixtures/zero-evidence-gap-corpus/autoload_lib.rb",
+        "line": 13,
+        "sig": "sig { params(v: T.untyped).returns(T.untyped) }"
+      },
+      "has_sig": true
+    },
+    {
+      "params_by_name": {
+        "node": [
+          "Array",
+          "Hash",
+          "Integer"
+        ],
+        "acc": [
+          "Array"
+        ]
+      },
+      "param_sites": {
+        "node": {
+          "gems/nil-kill/spec/fixtures/zero-evidence-gap-corpus/abs_require_lib.rb:15:Array": 3,
+          "gems/nil-kill/spec/fixtures/zero-evidence-gap-corpus/abs_require_lib.rb:15:Hash": 3,
+          "gems/nil-kill/spec/fixtures/zero-evidence-gap-corpus/abs_require_lib.rb:15:Integer": 3
+        }
+      },
+      "returns": [
+        "Array"
+      ],
+      "return_elem": [
+        "Integer"
+      ],
+      "source": {
+        "path": "gems/nil-kill/spec/fixtures/zero-evidence-gap-corpus/abs_require_lib.rb",
+        "line": 15,
+        "sig": "sig { params(node: T.untyped, acc: T.untyped).returns(T.untyped) }"
+      },
+      "has_sig": true
+    },
+    {
+      "params_by_name": {
+        "v": [
+          "Integer"
+        ]
+      },
+      "returns": [
+        "Integer"
+      ],
+      "source": {
+        "path": "gems/nil-kill/spec/fixtures/zero-evidence-gap-corpus/ensure_punt_lib.rb",
+        "line": 12,
+        "sig": "sig { params(v: T.untyped).returns(T.untyped) }"
+      },
+      "has_sig": true
+    },
+    {
+      "param_elem": {
+        "items": [
+          "Integer"
+        ]
+      },
+      "returns": [
+        "Array"
+      ],
+      "return_elem_shapes": [
+        {
+          "kind": "array",
+          "elements": [
+            {
+              "kind": "class",
+              "name": "Integer"
+            }
+          ]
+        }
+      ],
+      "source": {
+        "path": "gems/nil-kill/spec/fixtures/zero-evidence-gap-corpus/struct_collection_lib.rb",
+        "line": 16,
+        "sig": "sig { params(items: T::Array[T.untyped]).returns(T.untyped) }",
+        "params": [
+          {
+            "name": "items",
+            "type": "T::Array[T.untyped]"
+          }
+        ]
+      },
+      "has_sig": true
+    },
+    {
+      "params_by_name": {
+        "payload": [
+          "String"
+        ]
+      },
+      "returns": [
+        "Integer"
+      ],
+      "source": {
+        "path": "gems/nil-kill/spec/fixtures/zero-evidence-gap-corpus/subprocess_lib.rb",
+        "line": 15,
+        "sig": "sig { params(payload: T.untyped).returns(T.untyped) }"
+      },
+      "has_sig": true
+    },
+    {
+      "source": {
+        "path": "gems/nil-kill/spec/fixtures/zero-evidence-gap-corpus/abs_require_lib.rb",
+        "line": 38,
+        "class": "AbsReq",
+        "method": "run",
+        "kind": "instance",
+        "sig": "sig { params(tree: T.untyped).returns(T.untyped) }"
+      },
+      "has_sig": true
+    }
+  ],
+  "facts": {
+    "existing_sigs": [
+      {
+        "path": "gems/nil-kill/spec/fixtures/zero-evidence-gap-corpus/abs_require_lib.rb",
+        "line": 38,
+        "method": "run",
+        "sig": "sig { params(tree: T.untyped).returns(T.untyped) }"
+      },
+      {
+        "path": "gems/nil-kill/spec/fixtures/zero-evidence-gap-corpus/kernel_load_lib.rb",
+        "line": 14,
+        "method": "handle",
+        "sig": "sig { params(opts: T.untyped, rest: T.untyped, kw: T.untyped, blk: T.untyped).returns(T.untyped) }"
+      },
+      {
+        "path": "gems/nil-kill/spec/fixtures/zero-evidence-gap-corpus/require_relative_lib.rb",
+        "line": 14,
+        "class": "RelReq",
+        "method": "calc",
+        "kind": "instance",
+        "sig": "sig { params(v: T.untyped).returns(T.untyped) }"
+      }
+    ],
+    "return_origins": [
+      {
+        "candidate_type": "String",
+        "class": "RelReq",
+        "confidence": "strong",
+        "kind": "instance",
+        "line": 14,
+        "method": "calc",
+        "path": "gems/nil-kill/spec/fixtures/zero-evidence-gap-corpus/require_relative_lib.rb",
+        "sources": [
+          {
+            "callee": "to_s",
+            "kind": "typed_call",
+            "line": 14,
+            "type": "String"
+          }
+        ]
+      }
+    ],
+    "param_origins": [
+      {
+        "callee": "handle",
+        "code": "{ n: 1 }",
+        "line": 37,
+        "path": "gems/nil-kill/spec/fixtures/zero-evidence-gap-corpus/driver.rb",
+        "slot": "0",
+        "type": "T::Hash[Symbol, Integer]"
+      },
+      {
+        "callee": "handle",
+        "code": "2",
+        "line": 37,
+        "path": "gems/nil-kill/spec/fixtures/zero-evidence-gap-corpus/driver.rb",
+        "slot": "1",
+        "type": "Integer"
+      },
+      {
+        "callee": "handle",
+        "code": "3",
+        "line": 37,
+        "path": "gems/nil-kill/spec/fixtures/zero-evidence-gap-corpus/driver.rb",
+        "slot": "2",
+        "type": "Integer"
+      },
+      {
+        "callee": "run",
+        "code": "[{ a: [1] }, 2, { b: { c: [3] } }]",
+        "line": 49,
+        "path": "gems/nil-kill/spec/fixtures/zero-evidence-gap-corpus/driver.rb",
+        "slot": "0",
+        "type": "T::Array[T::Hash[Symbol, T::Hash[Symbol, T::Array[Integer]]]]"
+      }
+    ],
+    "struct_field_runtime": [
+      {
+        "class": "Pair",
+        "field": "a",
+        "calls": 3,
+        "classes": [
+          "String"
+        ]
+      },
+      {
+        "class": "Pair",
+        "field": "b",
+        "calls": 3,
+        "classes": [
+          "Integer"
+        ]
+      }
+    ]
+  },
+  "unused_return_methods_by_location": {
+    "[\"gems/nil-kill/spec/fixtures/zero-evidence-gap-corpus/abs_require_lib.rb\",38,\"AbsReq\",\"run\",\"instance\"]": {
+    }
+  }
+}

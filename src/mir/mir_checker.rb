@@ -107,7 +107,7 @@ class MIRChecker
   LINEAR_STATEMENT_NODE_TYPES = T.let([
     MIR::AllocMark, MIR::AssertRaisesCheck, MIR::AssertStmt, MIR::BatchWindowFlush, MIR::BatchWindowPush,
     MIR::BgBlock, MIR::BreakStmt, MIR::CatchWrapper, MIR::Cleanup,
-    MIR::Comment, MIR::ContinueStmt, MIR::DeferStmt, MIR::DiscardOwned,
+    MIR::Comment, MIR::ContinueStmt, MIR::DeferStmt, MIR::DestructureSet, MIR::DiscardOwned,
     MIR::DebugOnly, MIR::DoBlock, MIR::EnumDef, MIR::ErrCleanup, MIR::ErrDeferStmt,
     MIR::ExprStmt, MIR::FallibleLockBinding, MIR::FieldCleanupMark, MIR::FnDef, MIR::ForStmt,
     MIR::FrameRestore, MIR::FrameSave, MIR::FsmB1Body, MIR::FsmGenericBody,
@@ -1132,7 +1132,7 @@ class MIRChecker
       case stmt
       when MIR::Let
         check_aggregate_expr!(stmt.init, alloc_by_name[stmt.name], alloc_by_name)
-      when MIR::Set, MIR::ReturnStmt, MIR::BreakStmt
+      when MIR::Set, MIR::DestructureSet, MIR::ReturnStmt, MIR::BreakStmt
         check_aggregate_expr!(stmt.value, nil, alloc_by_name)
       when MIR::ReassignWithCleanup
         check_reassign_cleanup_alloc!(stmt, alloc_by_name)

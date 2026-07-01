@@ -612,7 +612,17 @@ fn textual_local_writes(source: &str, behavior: &dyn NormalizedLanguageBehavior)
         return Vec::new();
     }
 
-    let identifiers = identifiers_with_positions(lhs)
+    let clean_lhs = if declaration_like_lhs(lhs, behavior) {
+        if let Some((before_colon, _)) = lhs.split_once(':') {
+            before_colon
+        } else {
+            lhs
+        }
+    } else {
+        lhs
+    };
+
+    let identifiers = identifiers_with_positions(clean_lhs)
         .into_iter()
         .map(|identifier| identifier.name)
         .filter(|name| !behavior.local_flow_keyword(name))

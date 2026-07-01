@@ -225,9 +225,14 @@ module NilKillRuntimeTrace
   def self.sample_struct_field?(klass_name, field)
     plan = trace_plan
     return true unless plan
-    short = klass_name.to_s.split("::").last
-    plan.dig("struct_fields", [klass_name.to_s, field.to_s].join("\0")) == true ||
-      plan.dig("struct_fields", [short, field.to_s].join("\0")) == true
+    
+    parts = klass_name.to_s.split("::")
+    (1..parts.length).each do |i|
+      suffix = parts[-i..-1].join("::")
+      return true if plan.dig("struct_fields", [suffix, field.to_s].join("\0")) == true
+    end
+    
+    false
   end
 
   # In-place instrumentation: the wrapped file IS at its real src
@@ -1387,6 +1392,41 @@ module NilKillRuntimeTrace
     nil
   end
 
+  def self.install_tstruct_hook
+    return unless defined?(T::Struct)
+    return if T::Struct.instance_variable_get(:@__nil_kill_attached)
+    T::Struct.instance_variable_set(:@__nil_kill_attached, true)
+
+    T::Struct.singleton_class.prepend(Module.new do
+      def inherited(child)
+        super
+        loc = caller_locations(1, 1)&.first
+        path = loc && File.expand_path(loc.absolute_path || loc.path, NilKillRuntimeTrace::ROOT)
+        if path && NilKillRuntimeTrace.target_path?(path)
+          child.instance_variable_set(:@__nil_kill_struct_path, path)
+          child.instance_variable_set(:@__nil_kill_struct_line, loc.lineno)
+        end
+      end
+    end)
+
+    T::Struct.prepend(Module.new do
+      def initialize(*args, **kw, &blk)
+        super(*args, **kw, &blk)
+        class_name = NilKillRuntimeTrace.safe_module_name(self.class) || "AnonymousTStruct"
+        if self.class.respond_to?(:props)
+          self.class.props.keys.each do |field|
+            value = self.send(field) rescue nil
+            NilKillRuntimeTrace.record_struct_field(self.class, class_name, field, value)
+          end
+        else
+          kw.each do |field, value|
+            NilKillRuntimeTrace.record_struct_field(self.class, class_name, field, value)
+          end
+        end
+      end
+    end)
+  end
+
   def self.install_collection_hook
     install_array_hook
     install_hash_hook
@@ -1563,7 +1603,27 @@ module NilKillRuntimeTrace
         kw.each { |field, value| NilKillRuntimeTrace.record_struct_field(self.class, class_name, field, value) }
         super(*args, **kw, &blk)
       end
+
+      define_method(:[]=) do |field, value|
+        class_name = NilKillRuntimeTrace.safe_module_name(self.class) || "AnonymousStruct"
+        field_sym = field.to_sym rescue nil
+        if field_sym && fields.include?(field_sym)
+          NilKillRuntimeTrace.record_struct_field(self.class, class_name, field_sym, value)
+        end
+        super(field, value)
+      end
     end)
+
+    fields.each do |field|
+      setter = "#{field}="
+      if !klass.method_defined?(setter) || klass.instance_method(setter).source_location.nil?
+        klass.define_method(setter) do |value|
+          class_name = NilKillRuntimeTrace.safe_module_name(self.class) || "AnonymousStruct"
+          NilKillRuntimeTrace.record_struct_field(self.class, class_name, field, value)
+          self[field] = value
+        end
+      end
+    end
   end
 
   def self.attach_data(klass)
@@ -1883,6 +1943,7 @@ if ENV["NIL_KILL_TRACE"] == "1"
   NilKillRuntimeTrace.install_struct_hook
   NilKillRuntimeTrace.install_data_hook
   NilKillRuntimeTrace.install_open_struct_hook
+  NilKillRuntimeTrace.install_tstruct_hook
   NilKillRuntimeTrace.install_collection_hook unless ENV["NIL_KILL_TRACE_COLLECTIONS"] == "0"
   TracePoint.new(:end) { NilKillRuntimeTrace.install_tlet_hook }.enable
   TracePoint.new(:end) do

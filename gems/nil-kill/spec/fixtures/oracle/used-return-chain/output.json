@@ -1,0 +1,34 @@
+{
+  "actions": [
+    {
+      "kind": "fix_sig_return",
+      "confidence": "high",
+      "path": "gems/nil-kill/spec/fixtures/used-return-chain/used_chain_example.rb",
+      "line": 5,
+      "message": "existing sig return is T.untyped; static return origins suggest String",
+      "data": {
+        "type": "String",
+        "origin_confidence": "strong",
+        "source": "static_return_origin",
+        "blockers": [
+
+        ]
+      }
+    },
+    {
+      "kind": "fix_sig_return",
+      "confidence": "high",
+      "path": "gems/nil-kill/spec/fixtures/used-return-chain/used_chain_example.rb",
+      "line": 10,
+      "message": "existing sig return is T.untyped; static return origins suggest String",
+      "data": {
+        "source": "static_return_origin",
+        "origin_confidence": "strong",
+        "type": "String",
+        "blockers": [
+
+        ]
+      }
+    }
+  ]
+}

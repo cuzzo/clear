@@ -1492,7 +1492,7 @@ module FsmTransform
       MIR::ContextFieldDecl.new(name: name, type_zig: type_zig, default_value: default_value)
     end
 
-    sig { params(dispatch: T.untyped).returns(Integer) }
+    sig { params(dispatch: Symbol).returns(Integer) }
     def self.profile_dispatch_id(dispatch)
       T.bind(self, T.untyped) rescue nil
       case dispatch

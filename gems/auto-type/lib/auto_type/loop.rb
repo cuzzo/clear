@@ -65,7 +65,7 @@ module AutoType
         @z3_solver = init_z3_solver(evidence)
         emit_z3_inferred_actions(@z3_solver, evidence) if @z3_solver
         high_actions = evidence["actions"].select do |action|
-          next false unless action["confidence"] == NilKill::HIGH
+          next false unless action["confidence"] == NilKill::HIGH || (action["confidence"] == NilKill::REVIEW && action["kind"] == "add_sig")
           next false if @skipped.include?(fingerprint(action))
           next false if permanently_skipped?(action)
           next false if z3_preflight_skip?(action)
@@ -113,6 +113,15 @@ module AutoType
           review_narrow_tlet = narrow_tlet_review_actions(evidence, high_actions)
           puts "narrow-tlet review actions: #{review_narrow_tlet.size}"
           high_actions.concat(review_narrow_tlet)
+        end
+        if @z3_solver
+          z3_eligible, z3_bypass = high_actions.partition do |action|
+            action["path"].to_s.end_with?(".rb") && %w[fix_sig_return fix_sig_param narrow_generic_param].include?(action["kind"])
+          end
+
+          z3_kept = @z3_solver.inferred_actions(z3_eligible)
+          high_actions = z3_kept + z3_bypass
+          puts "Z3 SMT global consistency filter: kept #{z3_kept.size} of #{z3_eligible.size} eligible action(s) (bypassed #{z3_bypass.size})"
         end
         high = high_actions.size
         puts "high-confidence actions: #{high}"
@@ -583,7 +592,7 @@ module AutoType
 
     def snapshot_files(actions)
       actions.flat_map { |action| snapshot_paths_for_action(action) }.uniq.each_with_object({}) do |rel_path, snapshot|
-        path = File.join(NilKill::ROOT, rel_path)
+        path = File.expand_path(rel_path, NilKill::ROOT)
         snapshot[path] = File.read(path) if File.file?(path)
       end
     end

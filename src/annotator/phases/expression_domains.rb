@@ -15,9 +15,6 @@ module Annotator
       def visit_FuncCall(node)
         T.bind(self, SemanticAnnotator)
 
-        # Struct literal args are temporary call arguments; rodata strings are
-        # valid for the call lifetime and are copied by the callee if needed.
-        node.args.each { |arg| arg.instance_variable_set(:@is_call_arg, true) if arg.is_a?(AST::StructLit) }
         node.args.each { |arg| annotate_call_argument!(node, arg) }
 
         if node.name == "native_call"
@@ -183,7 +180,7 @@ module Annotator
       def annotate_call_argument!(parent, arg)
         T.bind(self, SemanticAnnotator)
 
-        visit(arg)
+        arg.is_a?(AST::StructLit) ? with_struct_literal_call_argument { visit(arg) } : visit(arg)
         promote_to_expr_if!(parent, arg) if arg.is_a?(AST::IfStatement)
         promote_to_expr_match!(parent, arg) if arg.is_a?(AST::MatchStatement)
       end

@@ -329,7 +329,7 @@ module Annotator
 
       sig { params(node: AST::BindExpr).void }
       def mark_borrowed_field_bind_alias!(node)
-        return unless node.value.instance_variable_get(:@has_borrowed_fields)
+        return unless node.value.is_a?(AST::StructLit) && node.value.borrowed_fields?
 
         sym = T.must(node.symbol)
         sym.mark_non_escaping!

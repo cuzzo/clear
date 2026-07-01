@@ -102,7 +102,7 @@ module MigrationSuggesterHelpers
   #   - ReturnNode value (binding escapes via RETURN)
   # Per-suggester WITH handling is dispatched to the suggester's
   # `classify_with_block!`.
-  sig { params(node: T.untyped, candidates: T::Hash[String, Hash]).void }
+  sig { params(node: AST::Node, candidates: T::Hash[String, Hash]).void }
   def classify_uses!(node, candidates)
     case node
     when AST::WithBlock
@@ -126,7 +126,7 @@ module MigrationSuggesterHelpers
   # Class-name-based control-flow detection. Used by the body-stmt
   # eligibility check to disqualify nested control-flow inside a WITH
   # body (the body shape we can't 1:1 rewrite into atomic ops).
-  sig { params(stmt: T.untyped).returns(T::Boolean) }
+  sig { params(stmt: AST::Node).returns(T::Boolean) }
   def control_flow_stmt?(stmt)
     return false unless stmt.respond_to?(:class)
     name = stmt.class.name.to_s
@@ -166,7 +166,7 @@ module MigrationSuggesterHelpers
   # (atomic-ptr semantics: read any field of the snapshot); when set,
   # only the matching field is eligible (atomic-primitive semantics:
   # the single primitive field is the cell).
-  sig { params(expr: T.untyped, alias_name: String, field_name: T.untyped).returns(T::Boolean) }
+  sig { params(expr: T.untyped, alias_name: String, field_name: T.nilable(String)).returns(T::Boolean) }
   def rhs_uses_alias_only_for_field_get?(expr, alias_name, field_name = nil)
     eligible = true
     walk = lambda do |n|

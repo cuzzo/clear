@@ -456,7 +456,7 @@ class Type
   OBSERVABLE_TERMINALS_CACHE = T.let({}, ObservableTerminalRegistry)
   OBSERVABLE_WRAPPERS_CACHE = T.let({}, ObservableWrapperRegistry)
 
-  sig { params(value: T.untyped).returns(T::Boolean) }
+  sig { params(value: Type).returns(T::Boolean) }
   def self.indirect_type?(value)
     return false unless value.is_a?(Type)
 
@@ -1438,7 +1438,7 @@ class Type
     resolved == other.to_sym || raw == other
   end
 
-  sig { returns(T.untyped) }
+  sig { returns(T.any(FunctionSignature, Symbol)) }
   def raw
     shape.raw
   end
@@ -2678,7 +2678,7 @@ class Type
   end
 
   # The capacity N in ~T[N] / ~?T[N].
-  sig { returns(T.untyped) }
+  sig { returns(T.nilable(ArrayCapacity)) }
   def stream_capacity
     return nil unless bounded_stream?
     optional_stream_shape_type&.capacity || tense_type.capacity
@@ -3092,7 +3092,7 @@ class Type
   # Replaces the repeated inline pattern:
   #   ti = node.full_type rescue nil
   #   ti = Type.new(ti) if ti && !ti.is_a?(Type)
-  sig { params(node: TypeNodeInput).returns(T.nilable(Type)) }
+  sig { params(node: T.untyped).returns(T.nilable(Type)) }
   def self.from_node(node)
     return nil unless node
     t = node.respond_to?(:full_type) ? T.unsafe(node).full_type : node
@@ -3105,7 +3105,7 @@ class Type
     end
   end
 
-  sig { params(node: TypeNodeInput, context: String).returns(Type) }
+  sig { params(node: T.untyped, context: String).returns(Type) }
   def self.from_node!(node, context: "post-annotation MIR")
     t = from_node(node)
     raise "#{context}: missing type info for #{node.class}" unless t
@@ -3170,7 +3170,7 @@ class Type
 
   private
 
-  sig { params(field_type: Type, schema: T.untyped).returns(Type) }
+  sig { params(field_type: Type, schema: Schemas::StructSchema).returns(Type) }
   def substitute_generic_schema_field_type(field_type, schema)
     return field_type unless generic_instance?
     params = schema.respond_to?(:type_params) ? schema.type_params : []
@@ -3661,12 +3661,12 @@ module TypeHelper
     extend T::Sig
 
   # Coerce input to Type object if needed
-  sig { params(input: T.untyped).returns(Type) }
+  sig { params(input: T.nilable(T.any(Symbol, Type))).returns(Type) }
   def to_type(input)
     input.is_a?(Type) ? input : Type.new(input)
   end
 
-  sig { params(source_type: T.untyped, target_type: T.untyped).returns(T::Boolean) }
+  sig { params(source_type: T.nilable(T.any(Symbol, Type)), target_type: T.untyped).returns(T::Boolean) }
   def is_safe_autocast?(source_type, target_type)
     to_type(target_type).accepts?(to_type(source_type))
   end

@@ -31,7 +31,9 @@ require_relative "zig_type"
 class MIREmitter
     extend T::Sig
 
-  EmitInput = T.type_alias { T.nilable(T.any(String, MIR::Node)) }
+  # Public boundary accepts Object so the explicit unknown-node diagnostic below
+  # runs instead of Sorbet's runtime signature error.
+  EmitInput = T.type_alias { T.nilable(T.any(Object, MIR::Emittable)) }
   ShardedMapNode = T.type_alias { T.any(MIR::ShardedMapPut, MIR::ShardedMapGet) }
 
   sig { returns(String) }
@@ -53,7 +55,7 @@ class MIREmitter
     @discard_counter = T.let(0, Integer)
   end
 
-  # Emit Zig code from a typed MIR node. Returns a String.
+  # Emit Zig code from a structural MIR node. Returns a String.
   sig { params(node: EmitInput).returns(T.nilable(String)) }
   def emit(node)
     case node
@@ -75,6 +77,7 @@ class MIREmitter
     # --- Statements ---
     when MIR::Let              then emit_let(node)
     when MIR::Set              then emit_set(node)
+    when MIR::DestructureSet   then emit_destructure_set(node)
     when MIR::ReassignWithCleanup then emit_reassign_cleanup(node)
     when MIR::IfStmt           then emit_if_stmt(node)
     when MIR::IfBindStmt       then emit_if_bind_stmt(node)
@@ -164,6 +167,7 @@ class MIREmitter
     when MIR::EnumTag          then ".#{node.variant}"
     when MIR::EnumOrdinal      then "@intFromEnum(#{emit(node.value)})"
     when MIR::Ident            then node.name
+    when MIR::DestructureTarget then emit_destructure_target(node)
     when MIR::TupleLiteral     then emit_tuple_literal(node)
     when MIR::CapabilityUnwrap then emit_capability_unwrap(node)
     when MIR::CapabilityLockTarget then emit_capability_lock_target(node)
@@ -1067,7 +1071,7 @@ class MIREmitter
     stmts.filter_map { |s| emit_flow_stmt(s, return_kind) }.join("\n")
   end
 
-  sig { params(stmt: T.untyped, return_kind: Symbol).returns(T.nilable(String)) }
+  sig { params(stmt: MIR::Node, return_kind: Symbol).returns(T.nilable(String)) }
   def emit_flow_stmt(stmt, return_kind)
     case stmt
     when MIR::ReturnStmt
@@ -1640,6 +1644,25 @@ class MIREmitter
   sig { params(node: MIR::Set).returns(String) }
   def emit_set(node)
     "#{emit(node.target)} = #{emit(node.value)};"
+  end
+
+  sig { params(node: MIR::DestructureSet).returns(String) }
+  def emit_destructure_set(node)
+    targets = node.targets.map { |target| T.must(emit(target)) }.join(", ")
+    "#{targets} = #{emit(node.value)};"
+  end
+
+  sig { params(node: MIR::DestructureTarget).returns(String) }
+  def emit_destructure_target(node)
+    return "_" if node.name.to_s == "_"
+
+    annotation = node.annotation ? ": #{node.annotation.zig_type}" : ""
+    case node.declaration_kind
+    when :const, :var
+      "#{node.declaration_kind} #{node.name}#{annotation}"
+    else
+      node.name.to_s
+    end
   end
 
   sig { params(node: MIR::ReassignWithCleanup).returns(String) }

@@ -211,7 +211,7 @@ module PipeAnalysis
     fn ? function_has_catch_clauses?(fn) : false
   end
 
-  sig { params(node: AST::BinaryOp).returns(T.untyped) }
+  sig { params(node: AST::BinaryOp).returns(Type) }
   def analyze_higher_order_op(node)
     T.bind(self, SemanticAnnotator) rescue nil
     case node.right
@@ -460,7 +460,7 @@ module PipeAnalysis
       end
       ns = parse_batch_window_time_ns(opts["time"].value)
       error!(opts["time"], :WINDOW_TIME_BAD_FORMAT, got: opts["time"].value) unless ns
-      error!(opts["time"], :WINDOW_TIME_NEEDS_POSITIVE) if T.must(ns) <= 0
+      error!(opts["time"], :WINDOW_TIME_NEEDS_POSITIVE) if ns <= 0
     end
 
     # Determine input element type (works for arrays and all stream types)
@@ -1153,7 +1153,7 @@ module PipeAnalysis
   # Pre-scan: check if the EACH body references any @sharded map variable
   # by scanning for identifiers that are in scope as @sharded (without :locked).
   # This runs BEFORE visiting the body, so we only check unvisited AST.
-  sig { params(conc: T.untyped, sharded_names: T.untyped).void }
+  sig { params(conc: AST::ConcurrentOp, sharded_names: T.untyped).void }
   def emit_multi_map_warning(conc, sharded_names)
     T.bind(self, SemanticAnnotator) rescue nil
     shard_counts = sharded_names.map do |name|
@@ -1295,7 +1295,7 @@ module PipeAnalysis
     end
   end
 
-  sig { params(entry: T.untyped).returns(T::Boolean) }
+  sig { params(entry: T.nilable(SymbolEntry)).returns(T::Boolean) }
   def sharded_unsynced_entry?(entry)
     return false unless entry
     type = entry.type
@@ -1415,7 +1415,7 @@ module PipeAnalysis
       lhs_type&.open_stream? || lhs.is_a?(AST::RangeLit)
   end
 
-  sig { params(lhs: T.untyped).returns(T::Boolean) }
+  sig { params(lhs: AST::Node).returns(T::Boolean) }
   def shard_concurrent_source?(lhs)
     T.bind(self, SemanticAnnotator) rescue nil
     lhs.is_a?(AST::BinaryOp) && lhs.smooth? && lhs.right.is_a?(AST::ShardOp)
@@ -1821,7 +1821,7 @@ module PipeAnalysis
   SOA_MIN_FIELDS = 4
   SOA_THRESHOLD  = 0.5  # warn when < 50% of fields accessed
 
-  sig { params(node: AST::BinaryOp, item_type: T.untyped).void }
+  sig { params(node: AST::BinaryOp, item_type: Symbol).void }
   def check_soa_opportunity!(node, item_type)
     T.bind(self, SemanticAnnotator) rescue nil
     accessed = phase_receiver_state.pipeline_accessed_fields
@@ -1843,7 +1843,7 @@ module PipeAnalysis
   end
 
   # Wraps a pipeline body visit with SOA field tracking.
-  sig { params(node: AST::BinaryOp, item_type: T.untyped, blk: T.untyped).void }
+  sig { params(node: AST::BinaryOp, item_type: Symbol, blk: T.untyped).void }
   def with_soa_tracking(node, item_type, &blk)
     T.bind(self, SemanticAnnotator) rescue nil
     receiver_state = phase_receiver_state

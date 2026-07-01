@@ -728,7 +728,10 @@ module MIRLoweringVariables
       # producing `var x_L8 = ...; ... x.len` which is undeclared Zig.
       decl_name_map = function_state.decl_zig_names
       if decl_name_map.key?(proxy.object_id)
-        decl_name_map[node.object_id] = T.must(decl_name_map[proxy.object_id])
+        safe_name = T.must(decl_name_map[proxy.object_id])
+        decl_name_map[node.object_id] = safe_name
+        symbol_reg = node.symbol&.reg
+        decl_name_map[symbol_reg.object_id] = safe_name if symbol_reg
       end
       result
     else
@@ -769,6 +772,46 @@ module MIRLoweringVariables
         target_alloc: result.is_a?(MIR::ReassignWithCleanup) ? result.alloc : assign_alloc)
       result
     end
+  end
+
+  sig { params(node: AST::DestructuringAssignment).returns(MIR::DestructureSet) }
+  def lower_destructuring_assignment(node)
+    T.bind(self, MIRLowering) rescue nil
+    value = T.cast(lower(node.value), MIR::Emittable)
+    targets = node.targets.map { |target| lower_destructure_target(target) }
+    MIR::DestructureSet.new(targets, value)
+  end
+
+  sig { params(target: AST::DestructureTarget).returns(MIR::DestructureTarget) }
+  def lower_destructure_target(target)
+    T.bind(self, MIRLowering)
+
+    if target.name.to_s == "_"
+      return MIR::DestructureTarget.new("_", nil, nil)
+    end
+
+    symbol = target.symbol
+    declared = symbol&.reg.equal?(target)
+    safe_name = zig_safe_name(target.name)
+    if declared
+      function_state.decl_zig_names[target.object_id] = safe_name
+      function_state.decl_zig_names[symbol.reg.object_id] = safe_name if symbol&.reg
+    end
+
+    declaration_kind = declared ? destructure_declaration_kind(target) : nil
+    annotation = declared && target.type ? Type.new(transpile_type(target.full_type!)) : nil
+    MIR::DestructureTarget.new(safe_name, declaration_kind, annotation)
+  end
+
+  sig { params(target: AST::DestructureTarget).returns(Symbol) }
+  def destructure_declaration_kind(target)
+    return :const unless target.mutable
+
+    ft = Type.from_node!(target, context: "destructure target declaration")
+    forced_var = ft.collection? || ft.dynamic_stream? || ft.bounded_stream? ||
+                 ft.shared_promise? || ft.open_stream? || ft.inf_stream? ||
+                 (ft.array? && ft.dynamic?) || ft.any_sync? || ft.resource?
+    target.var_mutated == true || forced_var ? :var : :const
   end
 
   sig { params(name: String, renamed: T::Boolean).returns(String) }
@@ -1375,6 +1418,8 @@ module MIRLoweringVariables
   private :lower_template_indexed_assignment
   private :lower_var_decl
   private :lower_var_decl_init
+  private :destructure_declaration_kind
+  private :lower_destructure_target
   private :mark_field_assignment_cleanup!
   private :mark_guarded_cleanup_name!
   private :moved_guard_cleanup_entry

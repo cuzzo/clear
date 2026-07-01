@@ -1,6 +1,7 @@
 # typed: strict
 require "sorbet-runtime"
 require_relative "../../ast/ast"
+require_relative "../../ast/scope"
 
 AutoInferenceWalkNode = T.type_alias do
   T.nilable(T.any(
@@ -9,6 +10,7 @@ AutoInferenceWalkNode = T.type_alias do
     T::Hash[BasicObject, BasicObject],
     Struct,
     T::Struct,
+    Scope,
     SymbolEntry,
     Symbol,
     String,
@@ -83,7 +85,7 @@ class AutoSlotId
     [@kind, @fn_name, @index, @decl_id].hash
   end
 
-  sig { params(other: T.untyped).returns(T::Boolean) }
+  sig { params(other: AutoSlotId).returns(T::Boolean) }
   def eql?(other)
     return false unless other.is_a?(AutoSlotId)
     @kind == other.kind &&
@@ -234,7 +236,7 @@ class AutoConstraintCollector
   def walk(node, current_fn:)
     return if node.nil?
     case node
-    when Symbol, String, Numeric, TrueClass, FalseClass, Lexer::Token, Type, SymbolEntry
+    when Symbol, String, Numeric, TrueClass, FalseClass, Lexer::Token, Type, SymbolEntry, Scope
       # leaf
     when Array
       node.each { |c| walk(c, current_fn: current_fn) }
@@ -391,7 +393,7 @@ class AutoConstraintCollector
   sig { params(node: T.nilable(AST::Locatable)).returns(T::Boolean) }
   def empty_list_lit?(node)
     node.is_a?(AST::ListLit) && node.items.empty? &&
-      !node.instance_variable_get(:@constructor_collection)
+      !node.collection_constructor?
   end
 
   sig { params(node: T.nilable(AST::Locatable)).returns(T::Boolean) }

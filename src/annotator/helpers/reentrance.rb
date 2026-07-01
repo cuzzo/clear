@@ -525,7 +525,7 @@ module ReentranceBridge
   # cycle member AND prepend `!` to each return type. Asserts at
   # runtime that the cycle is logically impossible; raises System
   # UnexpectedRecursion if violated.
-  sig { params(fn_node: AST::FunctionDef).returns(T.untyped) }
+  sig { params(fn_node: AST::FunctionDef).void }
   def emit_mutual_thunk_unsupported!(fn_node)
     T.bind(self, SemanticAnnotator) rescue nil
     fn_nodes = function_node_map
@@ -663,7 +663,7 @@ module ReentranceBridge
     scc.to_a
   end
 
-  sig { params(graph: T::Hash[String, T::Set[T.untyped]], start: String).returns(T::Set[String]) }
+  sig { params(graph: T::Hash[String, T::Set[String]], start: String).returns(T::Set[String]) }
   def compute_reachable(graph, start)
     T.bind(self, SemanticAnnotator) rescue nil
     seen = Set.new

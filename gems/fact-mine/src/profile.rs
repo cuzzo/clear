@@ -291,6 +291,19 @@ pub fn extract(document: &Document, profile: Profile) -> ProfileOutput {
     }
 
     let mut struct_declarations = extract_struct_declarations(document, &language, &path);
+    let behavior = crate::syntax::normalized_behavior::behavior(
+        crate::syntax::Language::parse(&document.language.as_str())
+            .unwrap_or(crate::syntax::Language::Ruby),
+    );
+    if let Some(ref root) = root_node {
+        collect_struct_declarations(
+            root,
+            &path,
+            &mut Vec::new(),
+            &mut struct_declarations,
+            &*behavior,
+        );
+    }
     let state_type_edges = extract_state_type_edges(document, &language, &path);
     let call_graph_edges = extract_call_graph_edges(document);
 
@@ -337,17 +350,6 @@ pub fn extract(document: &Document, profile: Profile) -> ProfileOutput {
                 &mut ivar_tlet_types,
             );
             let signatures_map = extract_signatures(&lines, document);
-            let behavior = crate::syntax::normalized_behavior::behavior(
-                crate::syntax::Language::parse(&document.language.as_str())
-                    .unwrap_or(crate::syntax::Language::Ruby),
-            );
-            collect_struct_declarations(
-                root,
-                &path,
-                &mut Vec::new(),
-                &mut struct_declarations,
-                &*behavior,
-            );
             let mut method_param_hash_shapes = BTreeMap::new();
             let mut method_param_array_shapes = BTreeMap::new();
             let mut method_return_hash_shapes = BTreeMap::new();

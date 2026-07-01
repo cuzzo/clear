@@ -53,6 +53,7 @@ module AtomicMigrationSuggester
   #     n_uses: }, ...]` for every eligible binding, sorted by line.
   # Returns [] on parse / annotate errors (the doctor falls back to its
   # existing lock-only diagnosis).
+  sig { params(source: String).returns(Array) }
   def self.analyze(source)
     run_analyze(source)
   end
@@ -60,6 +61,7 @@ module AtomicMigrationSuggester
   # Eligibility: STRUCT with exactly one Int64/Float64/Bool field
   # under :locked sync (NOT :write_locked -- RWLocks don't map cleanly
   # to a single Atomic primitive).
+  sig { params(node: AST::Node, annotator: SemanticAnnotator).returns(T.nilable(Hash)) }
   def self.candidate_decl_info(node, annotator)
     return nil unless node.is_a?(AST::VarDecl) || node.is_a?(AST::BindExpr)
     return nil unless node.name.is_a?(String)
@@ -103,6 +105,7 @@ module AtomicMigrationSuggester
   # WITH-block dispatch: only WITH EXCLUSIVE captures are valid for
   # the atomic-primitive migration; other capabilities (RESTRICT,
   # SNAPSHOT, etc.) DISQUALIFY.
+  sig { params(with_node: AST::WithBlock, candidates: Hash).returns(Array) }
   def self.classify_with_block!(with_node, candidates)
     (with_node.capabilities || []).each do |cap|
       vn = cap[:var_node]
@@ -122,12 +125,14 @@ module AtomicMigrationSuggester
     end
   end
 
+  sig { params(with_node: AST::WithBlock, alias_name: String, field_name: String).returns(T::Boolean) }
   def self.with_body_eligible?(with_node, alias_name, field_name)
     body = with_node.body
     return false unless body.is_a?(Array) && !body.empty?
     body.all? { |stmt| stmt_eligible?(stmt, alias_name, field_name) }
   end
 
+  sig { params(stmt: AST::Node, alias_name: String, field_name: String).returns(T::Boolean) }
   def self.stmt_eligible?(stmt, alias_name, field_name)
     case stmt
     when AST::Assignment
@@ -176,6 +181,7 @@ module AtomicMigrationSuggester
   # `+= N` / `-= N` desugars to `alias.field = alias.field + N`. To
   # be atomic-rewriteable as fetchAdd/fetchSub: exactly one side is
   # the field read, the other side doesn't reference the alias.
+  sig { params(expr: AST::BinaryOp, alias_name: String, field_name: String).returns(T::Boolean) }
   def self.eligible_compound_rhs?(expr, alias_name, field_name)
     return false unless expr.is_a?(AST::BinaryOp)
     op = expr.respond_to?(:op) ? expr.op : nil

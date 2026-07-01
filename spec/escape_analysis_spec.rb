@@ -86,6 +86,23 @@ RSpec.describe EscapeAnalysis do
     expect(facts.heap_symbol_ids).to eq(Set[heap_param.symbol.binding_id, local_entry.binding_id])
   end
 
+  it "records binding facts for destructuring declaration targets" do
+    target = AST::DestructureTarget.new(tok, "a", Type.new(:Int64), false)
+    target.full_type = Type.new(:Int64)
+    target.symbol = SymbolEntry.new(reg: target, type: Type.new(:Int64), mutable: false, storage: :frame)
+    discard = AST::DestructureTarget.new(tok, "_", Type.new(:Int64), false)
+    discard.full_type = Type.new(:Int64)
+    value = AST::Literal.new(tok, :INT64, 1, nil)
+    value.full_type = Type.new(:Int64)
+    stmt = AST::DestructuringAssignment.new(tok, [target, discard], value)
+
+    facts = described_class.send(:function_facts, fn([stmt]))
+
+    expect(facts.symbols).to have_key("a")
+    expect(facts.assignment_nodes).to include(stmt)
+    expect(facts.symbols).not_to have_key("_")
+  end
+
   it "records placement facts for symbols newly promoted to heap" do
     entry = SymbolEntry.new(reg: "owned", type: Type.new(:String), mutable: false, storage: :frame)
     facts = EscapeAnalysis::FunctionFacts.new(

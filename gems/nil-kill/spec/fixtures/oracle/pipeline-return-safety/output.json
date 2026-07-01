@@ -1,0 +1,66 @@
+{
+  "actions": [
+    {
+      "kind": "replace_dead_nil_check",
+      "confidence": "review",
+      "path": "gems/nil-kill/spec/fixtures/pipeline-return-safety/sample.rb",
+      "line": 6,
+      "message": "reason is provably non-nil; .nil? is always false",
+      "data": {
+        "code": "reason.nil?"
+      }
+    },
+    {
+      "kind": "add_sig",
+      "confidence": "review",
+      "path": "gems/nil-kill/spec/fixtures/pipeline-return-safety/sample.rb",
+      "line": 10,
+      "message": "add missing sig",
+      "data": {
+        "method": "unsigned",
+        "sig": "sig { params(value: T.untyped).returns(T.untyped) }",
+        "scope": [
+          "PipelineExample"
+        ]
+      }
+    },
+    {
+      "kind": "narrow_generic_param",
+      "confidence": "high",
+      "path": "gems/nil-kill/spec/fixtures/pipeline-return-safety/sample.rb",
+      "line": 5,
+      "message": "narrow generic param items from T::Array[T.untyped] to T::Array[String]",
+      "data": {
+        "name": "items",
+        "from": "T::Array[T.untyped]",
+        "type": "T::Array[String]",
+        "source": "collection_runtime"
+      }
+    },
+    {
+      "kind": "fix_sig_return",
+      "confidence": "review",
+      "path": "gems/nil-kill/spec/fixtures/pipeline-return-safety/sample.rb",
+      "line": 5,
+      "message": "existing sig return is T.untyped; observed T::Array[String]",
+      "data": {
+        "type": "T::Array[String]"
+      }
+    },
+    {
+      "kind": "fix_sig_return",
+      "confidence": "review",
+      "path": "gems/nil-kill/spec/fixtures/pipeline-return-safety/sample.rb",
+      "line": 5,
+      "message": "existing sig return is T.untyped; static return origins suggest T::Array[T.untyped]",
+      "data": {
+        "origin_confidence": "weak",
+        "source": "static_return_origin",
+        "blockers": [
+
+        ],
+        "type": "T::Array[T.untyped]"
+      }
+    }
+  ]
+}

@@ -41,12 +41,14 @@ module AtomicPtrMigrationSuggester
 
   extend MigrationSuggesterHelpers
 
+  sig { params(source: String).returns(Array) }
   def self.analyze(source)
     run_analyze(source)
   end
 
   # Eligibility: STRUCT under :locked / :write_locked / :versioned sync. The
   # doctor gates :versioned candidates further with mvcc-profile signals.
+  sig { params(node: AST::Node, _annotator: SemanticAnnotator).returns(T.nilable(Hash)) }
   def self.candidate_decl_info(node, _annotator)
     return nil unless node.is_a?(AST::VarDecl) || node.is_a?(AST::BindExpr)
     return nil unless node.name.is_a?(String)
@@ -82,6 +84,7 @@ module AtomicPtrMigrationSuggester
   # @locked accept EXCLUSIVE (write); @writeLocked also accepts an
   # inferred read-only WITH; @versioned accepts SNAPSHOT (read +
   # MUTABLE). Other capabilities DISQUALIFY.
+  sig { params(with_node: AST::WithBlock, candidates: Hash).returns(Array) }
   def self.classify_with_block!(with_node, candidates)
     (with_node.capabilities || []).each do |cap|
       vn = cap[:var_node]
@@ -113,6 +116,7 @@ module AtomicPtrMigrationSuggester
   # Each statement in the WITH body must be:
   #   - Read-only (alias appears only as target.field), OR
   #   - Whole-struct replace: `alias = StructName{...}`
+  sig { params(with_node: AST::WithBlock, alias_name: String, struct_name: Symbol).returns(T::Boolean) }
   def self.with_body_eligible?(with_node, alias_name, struct_name)
     body = with_node.body
     return false unless body.is_a?(Array) && !body.empty?

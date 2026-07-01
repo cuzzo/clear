@@ -1,0 +1,21 @@
+FN main() RETURNS Void ->
+    nums = [1_i64, 2_i64, 3_i64, 4_i64];
+
+    selected = nums |> SELECT { doubled = _ * 2_i64; doubled + 1_i64 };
+    ASSERT selected.length() == 4_i64, "value block SELECT length";
+    ASSERT selected[0] == 3_i64, "value block SELECT first";
+    ASSERT selected[3] == 9_i64, "value block SELECT last";
+
+    filtered = nums |> WHERE { candidate = _ + 1_i64; candidate > 3_i64 };
+    ASSERT filtered.length() == 2_i64, "value block WHERE length";
+    ASSERT filtered[0] == 3_i64, "value block WHERE first";
+
+    sorted = nums |> ORDER_BY { key = 0_i64 - _; key };
+    ASSERT sorted[0] == 4_i64, "value block ORDER_BY descending first";
+    ASSERT sorted[3] == 1_i64, "value block ORDER_BY descending last";
+
+    transform = %(n: Int64) -> { inc = n + 1_i64; inc * 2_i64 };
+    ASSERT transform(4_i64) == 10_i64, "value block lambda";
+
+    RETURN;
+END

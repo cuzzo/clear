@@ -2,18 +2,21 @@
 
 Published at **https://cuzzo.github.io/clear**.
 
-Content is **not** authored here. The single source of truth is
-[`docs/`](../docs). `tools/gen_site.rb` maps source markdown into Zola
+Content is **not** authored here. Most public docs are authored under
+[`docs/`](../docs). The stdlib reference is generated from code-owned
+heredocs in [`tools/stdlib_docs.rb`](../tools/stdlib_docs.rb) before
+site generation. `tools/gen_site.rb` maps source markdown into Zola
 sections with injected TOML front matter (title from the first `# `
-heading; `date`/`updated` from git history; markdown links between
-any two generated files — including cross-section — rewritten to Zola
-internal links). Generated files are git-ignored; only the section
-`_index.md` files are authored here.
+heading; `date`/`updated` from git history; markdown links between any
+two generated files, including cross-section, rewritten to Zola internal
+links). Generated files are git-ignored; only the section `_index.md`
+files are authored here.
 
 | Section | Source | URL |
 |---|---|---|
 | `blog` | `docs/retrospective/*.md` | `/blog/` |
 | `docs` | `docs/**/*.md` except `docs/agents` and the retrospective blog | `/docs/` |
+| stdlib docs | `tools/stdlib_docs.rb` -> `docs/stdlib*.md` -> `/docs/` | `/docs/stdlib/`-style slugs |
 
 ## Local preview
 
@@ -33,4 +36,5 @@ deploys `site/public/` as a GitHub Pages artifact on every push to
 
 To add a blog post, drop a file in `docs/retrospective/`. To add a
 doc page, drop a file anywhere in `docs/` (outside `docs/agents`).
-Nothing here changes.
+To change the stdlib reference, edit `tools/stdlib_docs.rb` and run
+`ruby tools/gen_site.rb`. Nothing here changes.

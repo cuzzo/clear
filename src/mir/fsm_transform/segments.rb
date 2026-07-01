@@ -357,6 +357,8 @@ module FsmTransform
         suspend_for(stmt.value, stmt.name)
       when AST::Assignment
         suspend_for(stmt.value, stmt.name.is_a?(String) ? stmt.name : nil)
+      when AST::DestructuringAssignment
+        suspend_for(stmt.value, nil)
       end
     end
 

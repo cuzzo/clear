@@ -186,7 +186,8 @@ module DiagnosticBuckets
         FOR_IN_NEEDS_COLLECTION CONDITION_NEEDS_BOOL
         ASSERT_NEEDS_BOOL
         BREAK_OUTSIDE_LOOP CONTINUE_OUTSIDE_LOOP
-        INVALID_ASSIGNMENT_TARGET
+        INVALID_ASSIGNMENT_TARGET DESTRUCTURE_REQUIRES_FIXED_SHAPE
+        DESTRUCTURE_ARITY_MISMATCH DESTRUCTURE_REQUIRES_COPYABLE_RHS
       ],
     },
 
@@ -533,7 +534,7 @@ module DiagnosticBuckets
   #
   # `examples` should be the `DiagnosticExamples.all` hash; passed in
   # so callers can reuse it across many lookups.
-  sig { params(code: Symbol, examples: T::Hash[Symbol, T.untyped]).returns(Symbol) }
+  sig { params(code: Symbol, examples: T::Hash[Symbol, T::Hash[Symbol, T.nilable(String)]]).returns(Symbol) }
   def self.status_of(code, examples)
     return :pending if DiagnosticRegistry.pending?(code)
     e = examples[code]

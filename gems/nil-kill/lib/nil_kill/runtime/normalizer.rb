@@ -283,16 +283,24 @@ module NilKill
       end
 
       def load_legacy_methods!(store, runtime_dir)
-        Dir.glob(File.join(runtime_dir, "methods-*.jsonl")).each do |file|
+        files = Dir.glob(File.join(runtime_dir, "methods-*.jsonl"))
+        files.each do |file|
           File.foreach(file) do |line|
-            obs = JSON.parse(line)
+            obs = JSON.parse(line) rescue next
             next unless NilKill.target_path?(obs["path"])
-            key = [obs["class"], obs["method"], obs["kind"], obs["path"], obs["line"]]
-            rec = store.method_record(key)
+            key_str = "#{obs["class"]}\0#{obs["method"]}\0#{obs["kind"]}\0#{obs["path"]}\0#{obs["line"]}"
+            rec = store.method_record_by_key_str(key_str) do
+              [obs["class"].to_s, obs["method"].to_s, obs["kind"].to_s, obs["path"].to_s, obs["line"].to_i]
+            end
             rec["calls"] += obs["calls"].to_i
             rec["ok_calls"] += obs["ok_calls"].to_i
             rec["raised_calls"] += obs["raised_calls"].to_i
-            %w[returns return_elem raised].each { |k| rec[k] = (rec[k] + Array(obs[k])).uniq.sort }
+
+            %w[returns return_elem raised].each do |k|
+              rec[k] = Set.new(rec[k]) unless rec[k].is_a?(Set)
+              rec[k].merge(Array(obs[k]))
+            end
+
             merge_hash_sets(rec["params_by_name"], obs["params_by_name"])
             merge_hash_sets(rec["params_ok"], obs["params_ok"])
             merge_hash_sets(rec["params_raised"], obs["params_raised"])
@@ -302,35 +310,87 @@ module NilKill
             merge_hash_counts(rec["param_traces"], obs["param_traces"])
             merge_hash_counts(rec["param_traces_ok"], obs["param_traces_ok"])
             merge_hash_counts(rec["param_traces_raised"], obs["param_traces_raised"])
-            merge_hash_sets(rec["param_elem"], obs["param_elem"])
+
+            rec["param_elem"] ||= {}
+            (obs["param_elem"] || {}).each do |name, vals|
+              rec["param_elem"][name] = Set.new(rec["param_elem"][name]) unless rec["param_elem"][name].is_a?(Set)
+              rec["param_elem"][name].merge(Array(vals))
+            end
+
             merge_hash_kv(rec["param_kv"], obs["param_kv"])
             merge_hash_shapes(rec["param_elem_shapes"], obs["param_elem_shapes"])
             merge_hash_kv_shapes(rec["param_kv_shapes"], obs["param_kv_shapes"])
             merge_kv(rec["return_kv"], obs["return_kv"])
-            merge_shapes(rec["return_elem_shapes"], obs["return_elem_shapes"])
+            merge_shapes_in_wrapper(rec, "return_elem_shapes", obs["return_elem_shapes"])
             merge_kv_shapes(rec["return_kv_shapes"], obs["return_kv_shapes"])
           end
         end
+
+        # Post-process: convert all Sets/Hashes back to sorted arrays
+        store.methods.each_value do |rec|
+          %w[returns return_elem raised].each do |k|
+            rec[k] = rec[k].to_a.sort if rec[k].is_a?(Set)
+          end
+          %w[params_by_name params_ok params_raised param_elem].each do |k|
+            rec[k].each do |name, val|
+              rec[k][name] = val.to_a.sort if val.is_a?(Set)
+            end
+          end
+          rec["param_kv"].each do |name, kv|
+            kv[0] = kv[0].to_a.sort if kv[0].is_a?(Set)
+            kv[1] = kv[1].to_a.sort if kv[1].is_a?(Set)
+          end
+          if rec["return_kv"]
+            rec["return_kv"][0] = rec["return_kv"][0].to_a.sort if rec["return_kv"][0].is_a?(Set)
+            rec["return_kv"][1] = rec["return_kv"][1].to_a.sort if rec["return_kv"][1].is_a?(Set)
+          end
+          if rec["param_elem_shapes"]
+            rec["param_elem_shapes"].each do |name, list|
+              rec["param_elem_shapes"][name] = list.values.sort_by { |s| JSON.generate(s) } if list.is_a?(Hash)
+            end
+          end
+          if rec["param_kv_shapes"]
+            rec["param_kv_shapes"].each do |name, kv|
+              kv[0] = kv[0].values.sort_by { |s| JSON.generate(s) } if kv[0].is_a?(Hash)
+              kv[1] = kv[1].values.sort_by { |s| JSON.generate(s) } if kv[1].is_a?(Hash)
+            end
+          end
+          if rec["return_elem_shapes"].is_a?(Hash)
+            rec["return_elem_shapes"] = rec["return_elem_shapes"].values.sort_by { |s| JSON.generate(s) }
+          end
+          if rec["return_kv_shapes"]
+            rec["return_kv_shapes"][0] = rec["return_kv_shapes"][0].values.sort_by { |s| JSON.generate(s) } if rec["return_kv_shapes"][0].is_a?(Hash)
+            rec["return_kv_shapes"][1] = rec["return_kv_shapes"][1].values.sort_by { |s| JSON.generate(s) } if rec["return_kv_shapes"][1].is_a?(Hash)
+          end
+        end
+
+        GC.start
       end
 
       def load_legacy_edges!(store, runtime_dir)
         runtime_edges = {}
         Dir.glob(File.join(runtime_dir, "method-edges-*.jsonl")).each do |file|
           File.foreach(file) do |line|
-            obs = JSON.parse(line)
-            caller = legacy_runtime_edge_endpoint(obs["caller"])
-            callee = legacy_runtime_edge_endpoint(obs["callee"])
-            next unless caller && callee
-            next unless NilKill.target_path?(caller["path"]) && NilKill.target_path?(callee["path"])
+            obs = JSON.parse(line) rescue next
+            c_info = obs["caller"]
+            e_info = obs["callee"]
+            next unless c_info && e_info
+            next unless NilKill.target_path?(c_info["path"]) && NilKill.target_path?(e_info["path"])
 
-            key = [caller, callee]
-            rec = (runtime_edges[key] ||= {
-              "caller" => caller,
-              "callee" => callee,
-              "calls" => 0,
-              "ok_calls" => 0,
-              "raised_calls" => 0,
-            })
+            key_str = "#{c_info["path"]}\0#{c_info["line"]}\0#{c_info["class"]}\0#{c_info["method"]}\0#{c_info["kind"]}\0#{e_info["path"]}\0#{e_info["line"]}\0#{e_info["class"]}\0#{e_info["method"]}\0#{e_info["kind"]}"
+            rec = runtime_edges[key_str]
+            if rec.nil?
+              caller = legacy_runtime_edge_endpoint(c_info)
+              callee = legacy_runtime_edge_endpoint(e_info)
+              next unless caller && callee
+              rec = runtime_edges[key_str] = {
+                "caller" => caller,
+                "callee" => callee,
+                "calls" => 0,
+                "ok_calls" => 0,
+                "raised_calls" => 0,
+              }
+            end
             rec["calls"] += obs["calls"].to_i
             rec["ok_calls"] += obs["ok_calls"].to_i
             rec["raised_calls"] += obs["raised_calls"].to_i
@@ -347,7 +407,7 @@ module NilKill
       def load_legacy_tlets!(store, runtime_dir)
         Dir.glob(File.join(runtime_dir, "tlets-*.jsonl")).each do |file|
           File.foreach(file) do |line|
-            obs = JSON.parse(line)
+            obs = JSON.parse(line) rescue next
             next unless NilKill.target_path?(obs["path"])
             key = "#{obs["path"]}:#{obs["line"]}"
             rec = (store.tlets[key] ||= { "path" => obs["path"], "line" => obs["line"], "calls" => 0, "classes" => [] })
@@ -360,7 +420,7 @@ module NilKill
       def load_legacy_fact_file!(store, runtime_dir, pattern, fact_key, target_filter: true)
         Dir.glob(File.join(runtime_dir, pattern)).each do |file|
           File.foreach(file) do |line|
-            obs = JSON.parse(line)
+            obs = JSON.parse(line) rescue next
             next if target_filter && !NilKill.target_path?(obs["path"])
             store.facts[fact_key] ||= []
             store.facts[fact_key] << obs
@@ -372,7 +432,7 @@ module NilKill
         cov = Hash.new { |h, k| h[k] = [] }
         Dir.glob(File.join(runtime_dir, "coverage-*.jsonl")).each do |file|
           File.foreach(file) do |line|
-            obs = JSON.parse(line)
+            obs = JSON.parse(line) rescue next
             next unless NilKill.target_path?(obs["path"])
             cov[NilKill.rel(obs["path"])].concat(Array(obs["lines"]))
           end
@@ -395,7 +455,10 @@ module NilKill
       end
 
       def merge_hash_sets(target, source)
-        (source || {}).each { |name, vals| target[name] = (Array(target[name]) + Array(vals)).uniq.sort }
+        (source || {}).each do |name, vals|
+          target[name] = Set.new(target[name]) unless target[name].is_a?(Set)
+          target[name].merge(Array(vals))
+        end
       end
 
       def merge_hash_kv(target, source)
@@ -403,11 +466,28 @@ module NilKill
       end
 
       def merge_hash_shapes(target, source)
-        (source || {}).each { |name, shapes| merge_shapes((target[name] ||= []), shapes) }
+        (source || {}).each do |name, shapes|
+          target[name] ||= {}
+          if target[name].is_a?(Array)
+            hash = {}
+            target[name].each do |s|
+              parsed = NilKill.parse_shape(s)
+              hash[JSON.generate(parsed)] = parsed
+            end
+            target[name] = hash
+          end
+          Array(shapes).each do |s|
+            parsed = NilKill.parse_shape(s)
+            target[name][JSON.generate(parsed)] = parsed
+          end
+        end
       end
 
       def merge_hash_kv_shapes(target, source)
-        (source || {}).each { |name, kv| merge_kv_shapes((target[name] ||= [[], []]), kv) }
+        (source || {}).each do |name, kv|
+          target[name] ||= [{}, {}]
+          merge_kv_shapes(target[name], kv)
+        end
       end
 
       def merge_hash_counts(target, source)
@@ -419,26 +499,47 @@ module NilKill
 
       def merge_kv(target, source)
         return unless source
-        target[0] = (Array(target[0]) + Array(source[0])).uniq.sort
-        target[1] = (Array(target[1]) + Array(source[1])).uniq.sort
+        target[0] = Set.new(target[0]) unless target[0].is_a?(Set)
+        target[1] = Set.new(target[1]) unless target[1].is_a?(Set)
+        target[0].merge(Array(source[0]))
+        target[1].merge(Array(source[1]))
       end
 
-      def merge_shapes(target, source)
-        seen = target.map { |shape| JSON.generate(shape) }.to_set
-        Array(source).each do |shape|
-          parsed = NilKill.parse_shape(shape)
-          key = JSON.generate(parsed)
-          next if seen.include?(key)
-          target << parsed
-          seen << key
+      def merge_shapes_in_wrapper(target_wrapper, key, source)
+        return unless source
+        list = target_wrapper[key]
+        if list.is_a?(Array)
+          hash = {}
+          list.each { |s| p = NilKill.parse_shape(s); hash[JSON.generate(p)] = p }
+          list = target_wrapper[key] = hash
         end
-        target.sort_by! { |shape| JSON.generate(shape) }
+        Array(source).each do |s|
+          parsed = NilKill.parse_shape(s)
+          list[JSON.generate(parsed)] = parsed
+        end
       end
 
       def merge_kv_shapes(target, source)
         return unless source
-        merge_shapes(target[0], Array(source)[0])
-        merge_shapes(target[1], Array(source)[1])
+        if target[0].is_a?(Array)
+          h0 = {}
+          target[0].each { |s| p = NilKill.parse_shape(s); h0[JSON.generate(p)] = p }
+          target[0] = h0
+        end
+        if target[1].is_a?(Array)
+          h1 = {}
+          target[1].each { |s| p = NilKill.parse_shape(s); h1[JSON.generate(p)] = p }
+          target[1] = h1
+        end
+
+        Array(source[0]).each do |s|
+          parsed = NilKill.parse_shape(s)
+          target[0][JSON.generate(parsed)] = parsed
+        end
+        Array(source[1]).each do |s|
+          parsed = NilKill.parse_shape(s)
+          target[1][JSON.generate(parsed)] = parsed
+        end
       end
 
       def rel(path)

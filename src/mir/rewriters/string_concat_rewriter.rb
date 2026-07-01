@@ -16,7 +16,7 @@ require_relative "../../ast/type"
 class StringConcatRewriter
     extend T::Sig
 
-  sig { params(ast: AST::Program).returns(T::Array[T.untyped]) }
+  sig { params(ast: AST::Program).returns(T::Array[AST::Node]) }
   def rewrite!(ast)
     ast.statements.each { |stmt| rewrite_in_node!(stmt) }
   end
@@ -44,7 +44,7 @@ class StringConcatRewriter
     case node
     when AST::FunctionDef
       node.body.map! { |s| rewrite_in_node!(s) }
-    when AST::VarDecl, AST::BindExpr, AST::Assignment, AST::ReturnNode
+    when AST::VarDecl, AST::BindExpr, AST::Assignment, AST::DestructuringAssignment, AST::ReturnNode
       node.value = rewrite_in_node!(node.value)
     when AST::IfStatement
       node.then_branch&.map! { |s| rewrite_in_node!(s) }

@@ -1,0 +1,2540 @@
+pub fn replace_dead_nil_check(input: &InputState) -> Vec<Action> {
+    let mut actions = Vec::new();
+    if let Some(checks) = input
+        .facts
+        .get("dead_nil_checks")
+        .and_then(|v| v.as_array())
+    {
+        for check in checks {
+            if let Some(check_obj) = check.as_object() {
+                let code = check_obj.get("code").and_then(|v| v.as_str()).unwrap_or("");
+                let reason = check_obj
+                    .get("reason")
+                    .and_then(|v| v.as_str())
+                    .unwrap_or("");
+                let kind = check_obj.get("kind").and_then(|v| v.as_str()).unwrap_or("");
+
+                let mut data = HashMap::new();
+                data.insert(
+                    "code".to_string(),
+                    serde_json::Value::String(code.to_string()),
+                );
+
+                let action_kind = if kind == "nil_check" {
+                    "replace_dead_nil_check"
+                } else {
+                    "remove_dead_safe_nav"
+                };
+
+                actions.push(Action {
+                    kind: action_kind.to_string(),
+                    confidence: "review".to_string(),
+                    path: check_obj
+                        .get("path")
+                        .and_then(|v| v.as_str())
+                        .unwrap_or("")
+                        .to_string(),
+                    line: check_obj.get("line").and_then(|v| v.as_i64()).unwrap_or(0),
+                    message: reason.to_string(),
+                    data,
+                });
+            }
+        }
+    }
+    actions
+}
+
+pub fn replace_deterministic_guard(input: &InputState) -> Vec<Action> {
+    let mut actions = Vec::new();
+    if let Some(guards) = input
+        .facts
+        .get("deterministic_guards")
+        .and_then(|v| v.as_array())
+    {
+        for guard in guards {
+            if let Some(guard_obj) = guard.as_object() {
+                let proof_tier = guard_obj
+                    .get("proof_tier")
+                    .and_then(|v| v.as_str())
+                    .unwrap_or("");
+                if proof_tier != "static_proven" {
+                    continue;
+                }
+
+                let predicate_kind = guard_obj
+                    .get("predicate_kind")
+                    .and_then(|v| v.as_str())
+                    .unwrap_or("");
+                if predicate_kind == "nil_check" {
+                    continue;
+                }
+
+                let mut data = HashMap::new();
+                for (k, v) in guard_obj {
+                    data.insert(k.clone(), v.clone());
+                }
+
+                let code = guard_obj.get("code").and_then(|v| v.as_str()).unwrap_or("");
+                let truth = guard_obj
+                    .get("truth_value")
+                    .and_then(|v| v.as_bool())
+                    .unwrap_or(false);
+                let reason = guard_obj
+                    .get("reason")
+                    .and_then(|v| v.as_str())
+                    .unwrap_or("");
+                let message = format!("{} is always {}: {}", code, truth, reason);
+
+                actions.push(Action {
+                    kind: "replace_deterministic_guard".to_string(),
+                    confidence: "review".to_string(),
+                    path: guard_obj
+                        .get("path")
+                        .and_then(|v| v.as_str())
+                        .unwrap_or("")
+                        .to_string(),
+                    line: guard_obj.get("line").and_then(|v| v.as_i64()).unwrap_or(0),
+                    message,
+                    data,
+                });
+            }
+        }
+    }
+    actions
+}
+use crate::schemas::{Action, InputState, MethodRecord, SourceRecord};
+use std::collections::HashMap;
+
+pub fn propose_sig(input: &InputState) -> Vec<Action> {
+    let mut actions = Vec::new();
+    for m in &input.methods {
+        let src = match &m.source {
+            Some(s) => s,
+            None => continue,
+        };
+
+        if m.has_sig {
+            continue;
+        }
+
+        let mut params_str = Vec::new();
+        for param in &src.params {
+            let name = &param.name;
+            let nil_default = param.nil_default;
+            let mut typ = "T.untyped".to_string();
+
+            if let Some(classes) = m.params_by_name.get(name) {
+                for c_str in classes {
+                    if !c_str.is_empty() && c_str != "T.untyped" {
+                        typ = c_str.to_string();
+                        break;
+                    }
+                }
+            }
+            if nil_default && !typ.starts_with("T.nilable(") && typ != "T.untyped" {
+                typ = format!("T.nilable({})", typ);
+            }
+            params_str.push(format!("{}: {}", name, typ));
+        }
+
+        let mut ret = "T.untyped".to_string();
+        for r_str in &m.returns {
+            if !r_str.is_empty() && r_str != "T.untyped" {
+                ret = r_str.to_string();
+                break;
+            }
+        }
+
+        let clause = format!("returns({})", ret);
+        let sig = if params_str.is_empty() {
+            format!("sig {{ {} }}", clause)
+        } else {
+            format!("sig {{ params({}).{} }}", params_str.join(", "), clause)
+        };
+
+        let calls = m.calls;
+        let mut conf = if sig.contains("T.untyped") || calls == 0 {
+            "review"
+        } else {
+            if calls >= 20 {
+                "high"
+            } else {
+                "review"
+            }
+        };
+
+        let uses_yield = src.uses_yield;
+        if uses_yield && conf == "high" {
+            conf = "review";
+        }
+
+        let message = if uses_yield {
+            "add missing sig; method uses implicit yield, block typing needs review"
+        } else {
+            "add missing sig"
+        };
+
+        let mut data = HashMap::new();
+        data.insert("sig".to_string(), serde_json::Value::String(sig.clone()));
+        data.insert(
+            "scope".to_string(),
+            serde_json::to_value(&src.scope).unwrap(),
+        );
+        data.insert(
+            "method".to_string(),
+            serde_json::Value::String(src.method.clone()),
+        );
+
+        actions.push(Action {
+            kind: "add_sig".to_string(),
+            confidence: conf.to_string(),
+            path: src.path.clone(),
+            line: src.line,
+            message: message.to_string(),
+            data,
+        });
+    }
+    actions
+}
+
+fn sorbet_type(classes: &[String], allow_nilable: bool) -> String {
+    let mut others = Vec::new();
+    let mut has_nil = false;
+    for c in classes {
+        if c == "NilClass" {
+            has_nil = true;
+        } else if !c.is_empty() && !c.contains('#') && !c.starts_with("Sorbet::Private::") {
+            others.push(c.clone());
+        }
+    }
+
+    if others.is_empty() && !has_nil {
+        return "T.untyped".to_string();
+    }
+
+    let has_ast = others.iter().any(|c| {
+        c.starts_with("AST::")
+            && c != "AST::Type"
+            && c != "AST::Scope"
+            && c != "AST::SymbolEntry"
+            && c != "AST::Param"
+            && c != "AST::Diagnostic"
+            && c != "AST::SourceError"
+            && c != "AST::DiagnosticBucket"
+    });
+    let has_mir = others.iter().any(|c| c.starts_with("MIR::"));
+
+    if has_ast || has_mir {
+        let mut new_others = Vec::new();
+        for c in &others {
+            if c.starts_with("AST::")
+                && c != "AST::Type"
+                && c != "AST::Scope"
+                && c != "AST::SymbolEntry"
+                && c != "AST::Param"
+                && c != "AST::Diagnostic"
+                && c != "AST::SourceError"
+                && c != "AST::DiagnosticBucket"
+            {
+                if !new_others.contains(&"AST::Node".to_string()) {
+                    new_others.push("AST::Node".to_string());
+                }
+            } else if c.starts_with("MIR::") {
+                if !new_others.contains(&"MIR::Node".to_string()) {
+                    new_others.push("MIR::Node".to_string());
+                }
+            } else {
+                if !new_others.contains(c) {
+                    new_others.push(c.clone());
+                }
+            }
+        }
+        others = new_others;
+    }
+
+    others.sort();
+    others.dedup();
+
+    let base = if others.len() == 2
+        && others.contains(&"TrueClass".to_string())
+        && others.contains(&"FalseClass".to_string())
+    {
+        "T::Boolean".to_string()
+    } else if others.len() == 1 {
+        others[0].clone()
+    } else if others.len() > 1 && others.len() <= 3 {
+        format!("T.any({})", others.join(", "))
+    } else {
+        "T.untyped".to_string()
+    };
+
+    if base == "T.untyped" {
+        return base;
+    }
+
+    if has_nil && allow_nilable {
+        format!("T.nilable({})", base)
+    } else {
+        base
+    }
+}
+
+fn conservative_element_type(classes: &[String]) -> Option<String> {
+    let mut others = Vec::new();
+    let mut has_nil = false;
+    for c in classes {
+        if c == "NilClass" {
+            has_nil = true;
+        } else if !c.is_empty() && !c.contains('#') && !c.starts_with("Sorbet::Private::") {
+            others.push(c.clone());
+        }
+    }
+    others.sort();
+    others.dedup();
+    if others.is_empty() {
+        return None;
+    }
+    if others.len() == 2
+        && others.contains(&"TrueClass".to_string())
+        && others.contains(&"FalseClass".to_string())
+    {
+        return Some("T::Boolean".to_string());
+    }
+    let klass = if others.len() > 1 && others.iter().all(|c| c.starts_with("AST::")) {
+        "AST::Node".to_string()
+    } else if others.len() > 1 && others.iter().all(|c| c.starts_with("MIR::")) {
+        "MIR::Node".to_string()
+    } else if others.len() == 1 {
+        let k = others[0].clone();
+        if k.starts_with("AST::") || k.starts_with("MIR::") {
+            return None;
+        }
+        k
+    } else {
+        return None;
+    };
+    if has_nil {
+        Some(format!("T.nilable({})", klass))
+    } else {
+        Some(klass)
+    }
+}
+
+fn conservative_element_type_json(classes: &Vec<serde_json::Value>) -> Option<String> {
+    let mut str_classes = Vec::new();
+    for c in classes {
+        if let Some(s) = c.as_str() {
+            str_classes.push(s.to_string());
+        }
+    }
+    conservative_element_type(&str_classes)
+}
+
+fn shape_union_type(shapes: &[serde_json::Value]) -> Option<String> {
+    if shapes.is_empty() {
+        return None;
+    }
+
+    let mut kinds = Vec::new();
+    for shape in shapes {
+        if let Some(obj) = shape.as_object() {
+            if let Some(kind) = obj.get("kind").and_then(|k| k.as_str()) {
+                if !kinds.contains(&kind) {
+                    kinds.push(kind);
+                }
+            }
+        }
+    }
+
+    if kinds.len() == 1 {
+        match kinds[0] {
+            "array" => {
+                let mut all_elems = Vec::new();
+                for shape in shapes {
+                    if let Some(elems) = shape.get("elements").and_then(|e| e.as_array()) {
+                        all_elems.extend(elems.clone());
+                    }
+                }
+                if let Some(elem) = shape_union_type(&all_elems) {
+                    return Some(format!("T::Array[{}]", elem));
+                }
+            }
+            "set" => {
+                let mut all_elems = Vec::new();
+                for shape in shapes {
+                    if let Some(elems) = shape.get("elements").and_then(|e| e.as_array()) {
+                        all_elems.extend(elems.clone());
+                    }
+                }
+                if let Some(elem) = shape_union_type(&all_elems) {
+                    return Some(format!("T::Set[{}]", elem));
+                }
+            }
+            "hash" => {
+                let mut all_keys = Vec::new();
+                let mut all_values = Vec::new();
+                for shape in shapes {
+                    if let Some(keys) = shape.get("keys").and_then(|e| e.as_array()) {
+                        all_keys.extend(keys.clone());
+                    }
+                    if let Some(values) = shape.get("values").and_then(|e| e.as_array()) {
+                        all_values.extend(values.clone());
+                    }
+                }
+                let key = shape_union_type(&all_keys);
+                let mut value = shape_union_type(&all_values);
+                if let Some(ref v) = value {
+                    if v.contains("T.any(") {
+                        value = Some("T.untyped".to_string());
+                    }
+                }
+                if let (Some(k), Some(v)) = (key, value) {
+                    return Some(format!("T::Hash[{}, {}]", k, v));
+                }
+            }
+            "class" => {
+                let mut names = Vec::new();
+                for shape in shapes {
+                    if let Some(name) = shape.get("name").and_then(|n| n.as_str()) {
+                        if !names.contains(&name.to_string()) {
+                            names.push(name.to_string());
+                        }
+                    }
+                }
+                if names.len() == 1 {
+                    return Some(names[0].clone());
+                }
+            }
+            _ => {}
+        }
+    }
+
+    None
+}
+
+fn runtime_return_type_candidate(m: &MethodRecord) -> String {
+    let observed = sorbet_type(&m.returns, true);
+    if observed == "Array" {
+        if let Some(elem) = shape_union_type(&m.return_elem_shapes)
+            .or_else(|| conservative_element_type_json(&m.return_elem))
+        {
+            return format!("T::Array[{}]", elem);
+        }
+    } else if observed == "Hash" {
+        let keys = m
+            .return_kv
+            .get(0)
+            .and_then(|v| v.as_array())
+            .cloned()
+            .unwrap_or_default();
+        let values = m
+            .return_kv
+            .get(1)
+            .and_then(|v| v.as_array())
+            .cloned()
+            .unwrap_or_default();
+
+        let mut key_shapes = Vec::new();
+        let mut val_shapes = Vec::new();
+        if let Some(kv_shapes_arr) = m.return_kv_shapes.get(0).and_then(|v| v.as_array()) {
+            key_shapes = kv_shapes_arr.clone();
+        }
+        if let Some(kv_shapes_arr) = m.return_kv_shapes.get(1).and_then(|v| v.as_array()) {
+            val_shapes = kv_shapes_arr.clone();
+        }
+
+        let key = shape_union_type(&key_shapes).or_else(|| conservative_element_type_json(&keys));
+        let val = shape_union_type(&val_shapes).or_else(|| conservative_element_type_json(&values));
+
+        if let (Some(k), Some(v)) = (key, val) {
+            return format!("T::Hash[{}, {}]", k, v);
+        }
+    } else if observed == "Set" {
+        if let Some(elem) = shape_union_type(&m.return_elem_shapes)
+            .or_else(|| conservative_element_type_json(&m.return_elem))
+        {
+            return format!("T::Set[{}]", elem);
+        }
+    }
+    observed
+}
+
+fn report_union_candidates(m: &MethodRecord, src: &SourceRecord, actions: &mut Vec<Action>) {
+    let params_to_check = if m.params_ok.is_empty() {
+        &m.params_by_name
+    } else {
+        &m.params_ok
+    };
+    for (name, classes) in params_to_check {
+        let mut others: Vec<String> = classes
+            .iter()
+            .filter(|c| *c != "NilClass")
+            .cloned()
+            .collect();
+        others.sort();
+        others.dedup();
+        if others.len() > 1 {
+            let mut callsites = serde_json::Map::new();
+            let sites = if m.param_sites_ok.is_empty() {
+                &m.param_sites
+            } else {
+                &m.param_sites_ok
+            };
+            if let Some(sites_for_param) = sites.get(name) {
+                for (site, count) in sites_for_param {
+                    let class_name = site.split(':').last().unwrap_or("");
+                    if others.iter().any(|c| c == class_name) {
+                        callsites.insert(site.clone(), serde_json::Value::Number((*count).into()));
+                    }
+                }
+            }
+
+            let mut data = HashMap::new();
+            data.insert("name".to_string(), serde_json::Value::String(name.clone()));
+            data.insert(
+                "classes".to_string(),
+                serde_json::Value::Array(
+                    others
+                        .iter()
+                        .map(|s| serde_json::Value::String(s.clone()))
+                        .collect(),
+                ),
+            );
+            data.insert(
+                "callsites".to_string(),
+                serde_json::Value::Object(callsites),
+            );
+
+            actions.push(Action {
+                kind: "union_observed".to_string(),
+                confidence: "review".to_string(),
+                path: src.path.clone(),
+                line: src.line,
+                message: format!("param {} observed {}; leaving as T.untyped by default until more evidence or design intent is clear", name, others.join(", ")),
+                data,
+            });
+        }
+    }
+}
+
+fn generic_type(t: &str) -> bool {
+    let raw = strip_nilable_type(t);
+    (raw.starts_with("Array[")
+        || raw.starts_with("Hash[")
+        || raw.starts_with("Set[")
+        || raw.starts_with("T::Array[")
+        || raw.starts_with("T::Hash[")
+        || raw.starts_with("T::Set["))
+        && raw.contains("T.untyped")
+}
+
+fn strip_nilable_type(t: &str) -> &str {
+    if t.starts_with("T.nilable(") && t.ends_with(")") {
+        &t[10..t.len() - 1]
+    } else {
+        t
+    }
+}
+
+fn preserve_nilable_wrapper(current_type: &str, candidate: &str) -> String {
+    if current_type.starts_with("T.nilable(") {
+        format!("T.nilable({})", candidate)
+    } else {
+        candidate.to_string()
+    }
+}
+
+fn extract_return_type(sig: &str) -> Option<String> {
+    if let Some(idx) = sig.find("returns(") {
+        let rest = &sig[idx + 8..];
+        let mut depth = 1;
+        for (i, c) in rest.char_indices() {
+            if c == '(' {
+                depth += 1;
+            } else if c == ')' {
+                depth -= 1;
+                if depth == 0 {
+                    return Some(rest[..i].to_string());
+                }
+            }
+        }
+    }
+    None
+}
+
+fn generic_candidate_type(
+    current_type: &str,
+    elem_classes: Option<&serde_json::Value>,
+    kv_classes: Option<&serde_json::Value>,
+    elem_shapes: Option<&serde_json::Value>,
+    kv_shapes: Option<&serde_json::Value>,
+) -> Option<String> {
+    if current_type.starts_with("Array") || current_type.starts_with("T::Array") {
+        let mut elem = None;
+        if let Some(shapes) = elem_shapes.and_then(|v| v.as_array()) {
+            elem = shape_union_type(shapes);
+        }
+        if elem.is_none() {
+            if let Some(classes) = elem_classes.and_then(|v| v.as_array()) {
+                elem = conservative_element_type_json(classes);
+            }
+        }
+        if let Some(e) = elem {
+            return Some(format!("T::Array[{}]", e));
+        }
+    } else if current_type.starts_with("Set") || current_type.starts_with("T::Set") {
+        let mut elem = None;
+        if let Some(shapes) = elem_shapes.and_then(|v| v.as_array()) {
+            elem = shape_union_type(shapes);
+        }
+        if elem.is_none() {
+            if let Some(classes) = elem_classes.and_then(|v| v.as_array()) {
+                elem = conservative_element_type_json(classes);
+            }
+        }
+        if let Some(e) = elem {
+            return Some(format!("T::Set[{}]", e));
+        }
+    } else if current_type.starts_with("Hash") || current_type.starts_with("T::Hash") {
+        let mut key = None;
+        let mut val = None;
+        if let Some(shapes_arr) = kv_shapes.and_then(|v| v.as_array()) {
+            if let Some(k_shapes) = shapes_arr.get(0).and_then(|v| v.as_array()) {
+                key = shape_union_type(k_shapes);
+            }
+            if let Some(v_shapes) = shapes_arr.get(1).and_then(|v| v.as_array()) {
+                val = shape_union_type(v_shapes);
+            }
+        }
+        if key.is_none() {
+            if let Some(classes_arr) = kv_classes.and_then(|v| v.as_array()) {
+                if let Some(k_classes) = classes_arr.get(0).and_then(|v| v.as_array()) {
+                    key = conservative_element_type_json(k_classes);
+                }
+            }
+        }
+        if val.is_none() {
+            if let Some(classes_arr) = kv_classes.and_then(|v| v.as_array()) {
+                if let Some(v_classes) = classes_arr.get(1).and_then(|v| v.as_array()) {
+                    val = conservative_element_type_json(v_classes);
+                }
+            }
+        }
+        if let (Some(k), Some(v)) = (key, val) {
+            return Some(format!("T::Hash[{}, {}]", k, v));
+        }
+    }
+    None
+}
+
+pub fn validate_sig(
+    input: &InputState,
+    m: &MethodRecord,
+    src: &SourceRecord,
+    unused_returns: &HashMap<String, serde_json::Value>,
+) -> Vec<Action> {
+    let mut actions = Vec::new();
+    let sig = &src.sig;
+
+    for param in &src.params {
+        let name = &param.name;
+        let current_type = match &param.r#type {
+            Some(t) => t,
+            None => continue,
+        };
+
+        if generic_type(current_type) {
+            let inner_type = strip_nilable_type(current_type);
+            let param_elem = m.param_elem.get(name);
+            let param_kv = m.param_kv.get(name);
+            let param_elem_shapes = m.param_elem_shapes.get(name);
+            let param_kv_shapes = m.param_kv_shapes.get(name);
+
+            let candidate = generic_candidate_type(
+                inner_type,
+                param_elem,
+                param_kv,
+                param_elem_shapes,
+                param_kv_shapes,
+            );
+
+            if let Some(cand) = candidate {
+                let final_cand = preserve_nilable_wrapper(current_type, &cand);
+                if final_cand != *current_type {
+                    let mut data = HashMap::new();
+                    data.insert(
+                        "name".to_string(),
+                        serde_json::Value::String(name.to_string()),
+                    );
+                    data.insert(
+                        "from".to_string(),
+                        serde_json::Value::String(current_type.to_string()),
+                    );
+                    data.insert(
+                        "type".to_string(),
+                        serde_json::Value::String(final_cand.clone()),
+                    );
+                    data.insert(
+                        "source".to_string(),
+                        serde_json::Value::String("collection_runtime".to_string()),
+                    );
+
+                    let action_conf = collection_narrowing_confidence(m.calls, &final_cand);
+
+                    actions.push(Action {
+                        kind: "narrow_generic_param".to_string(),
+                        confidence: action_conf.to_string(),
+                        path: src.path.clone(),
+                        line: src.line,
+                        message: format!(
+                            "narrow generic param {} from {} to {}",
+                            name, current_type, final_cand
+                        ),
+                        data,
+                    });
+                }
+            }
+        }
+    }
+
+    if let Some(current_return) = extract_return_type(sig) {
+        if generic_type(&current_return) {
+            let inner_return = strip_nilable_type(&current_return);
+            let candidate = generic_candidate_type(
+                inner_return,
+                Some(&serde_json::Value::Array(m.return_elem.clone())),
+                Some(&serde_json::Value::Array(m.return_kv.clone())),
+                Some(&serde_json::Value::Array(m.return_elem_shapes.clone())),
+                Some(&serde_json::Value::Array(m.return_kv_shapes.clone())),
+            );
+            if let Some(cand) = candidate {
+                let final_cand = preserve_nilable_wrapper(&current_return, &cand);
+                if final_cand != current_return {
+                    let mut data = HashMap::new();
+                    data.insert(
+                        "from".to_string(),
+                        serde_json::Value::String(current_return.clone()),
+                    );
+                    data.insert(
+                        "type".to_string(),
+                        serde_json::Value::String(final_cand.clone()),
+                    );
+                    data.insert(
+                        "source".to_string(),
+                        serde_json::Value::String("collection_runtime".to_string()),
+                    );
+
+                    let action_conf = collection_narrowing_confidence(m.calls, &final_cand);
+
+                    actions.push(Action {
+                        kind: "narrow_generic_return".to_string(),
+                        confidence: action_conf.to_string(),
+                        path: src.path.clone(),
+                        line: src.line,
+                        message: format!(
+                            "narrow generic return from {} to {}",
+                            current_return, final_cand
+                        ),
+                        data,
+                    });
+                }
+            }
+        }
+    }
+
+    let params_to_check = if m.params_ok.is_empty() {
+        &m.params_by_name
+    } else {
+        &m.params_ok
+    };
+    for (name, classes) in params_to_check {
+        let observed = sorbet_type(classes, true);
+        if observed != "T.untyped" && !observed.is_empty() {
+            let pattern = format!("{}: T.untyped", name);
+            if sig.contains(&pattern)
+                || sig.contains(&format!("{}:T.untyped", name))
+                || sig.contains(&format!("{}:  T.untyped", name))
+            {
+                let mut data = HashMap::new();
+                data.insert("name".to_string(), serde_json::Value::String(name.clone()));
+                data.insert(
+                    "type".to_string(),
+                    serde_json::Value::String(observed.clone()),
+                );
+
+                actions.push(Action {
+                    kind: "fix_sig_param".to_string(),
+                    confidence: "review".to_string(),
+                    path: src.path.clone(),
+                    line: src.line,
+                    message: format!(
+                        "existing sig param {} is T.untyped; observed {}",
+                        name, observed
+                    ),
+                    data,
+                });
+            }
+        }
+    }
+
+    if sig.contains("returns(T.untyped)") {
+        let observed_return = runtime_return_type_candidate(m);
+        if observed_return != "T.untyped" && !observed_return.is_empty() {
+            let mut data = HashMap::new();
+            data.insert(
+                "type".to_string(),
+                serde_json::Value::String(observed_return.clone()),
+            );
+
+            actions.push(Action {
+                kind: "fix_sig_return".to_string(),
+                confidence: "review".to_string(),
+                path: src.path.clone(),
+                line: src.line,
+                message: format!(
+                    "existing sig return is T.untyped; observed {}",
+                    observed_return
+                ),
+                data,
+            });
+        }
+    }
+
+    if sig.contains("returns(T.untyped)") && !src.noreturn_candidate {
+        let key =
+            serde_json::json!([src.path, src.line, src.class, src.method, src.kind]).to_string();
+
+        if unused_returns.contains_key(&key) {
+            let mut contradicts_void = false;
+            for c in &m.returns {
+                if !c.is_empty()
+                    && c != "NilClass"
+                    && !c.contains("#")
+                    && !c.starts_with("Sorbet::Private::")
+                {
+                    contradicts_void = true;
+                    break;
+                }
+            }
+            if !contradicts_void {
+                let mut data = HashMap::new();
+                data.insert(
+                    "type".to_string(),
+                    serde_json::Value::String("void".to_string()),
+                );
+                data.insert(
+                    "source".to_string(),
+                    serde_json::Value::String("unused_return".to_string()),
+                );
+
+                actions.push(Action {
+                    kind: "fix_sig_return".to_string(),
+                    confidence: "high".to_string(),
+                    path: src.path.clone(),
+                    line: src.line,
+                    message:
+                        "existing sig return is T.untyped; return value is never used, prefer .void"
+                            .to_string(),
+                    data,
+                });
+            }
+        }
+    }
+
+    if sig.contains("returns(T.untyped)") && src.noreturn_candidate {
+        let mut data = HashMap::new();
+        data.insert(
+            "type".to_string(),
+            serde_json::Value::String("T.noreturn".to_string()),
+        );
+        data.insert(
+            "source".to_string(),
+            serde_json::Value::String("noreturn_body".to_string()),
+        );
+
+        actions.push(Action {
+            kind: "fix_sig_return".to_string(),
+            confidence: "high".to_string(),
+            path: src.path.clone(),
+            line: src.line,
+            message: "existing sig return is T.untyped; method body cannot return normally"
+                .to_string(),
+            data,
+        });
+    }
+
+    if sig.contains("returns(T.untyped)") {
+        if let Some(origins) = input.facts.get("return_origins").and_then(|v| v.as_array()) {
+            let method_name = &src.method;
+            let class_name = &src.class;
+            let kind_name = &src.kind;
+            let line_num = src.line;
+            for origin in origins {
+                let orig_obj = origin.as_object().unwrap();
+                if orig_obj.get("method").and_then(|v| v.as_str()) == Some(method_name)
+                    && orig_obj.get("class").and_then(|v| v.as_str()) == Some(class_name)
+                    && orig_obj.get("kind").and_then(|v| v.as_str()) == Some(kind_name)
+                    && orig_obj.get("line").and_then(|v| v.as_i64()) == Some(line_num)
+                {
+                    let conf = orig_obj
+                        .get("confidence")
+                        .and_then(|v| v.as_str())
+                        .unwrap_or("");
+                    let cand = orig_obj
+                        .get("candidate_type")
+                        .and_then(|v| v.as_str())
+                        .unwrap_or("");
+
+                    if cand != "T.untyped" && !cand.is_empty() {
+                        let blockers = orig_obj
+                            .get("blockers")
+                            .cloned()
+                            .unwrap_or(serde_json::Value::Array(Vec::new()));
+
+                        let has_blockers = blockers.as_array().map_or(false, |b| !b.is_empty());
+
+                        let mut is_high = conf == "strong" && !has_blockers;
+                        if is_high {
+                            if let Some(sources) =
+                                orig_obj.get("sources").and_then(|v| v.as_array())
+                            {
+                                let mut useful = Vec::new();
+                                for source in sources {
+                                    if let Some(s_obj) = source.as_object() {
+                                        if s_obj.get("kind").and_then(|v| v.as_str()) != Some("nil")
+                                        {
+                                            useful.push(s_obj);
+                                        }
+                                    }
+                                }
+                                if useful.is_empty() {
+                                    is_high = false;
+                                } else {
+                                    for s_obj in &useful {
+                                        let kind = s_obj
+                                            .get("kind")
+                                            .and_then(|v| v.as_str())
+                                            .unwrap_or("");
+                                        if kind == "static" || kind == "typed_call_inferred" {
+                                            continue;
+                                        }
+                                        if kind != "typed_call" && kind != "safe_call" {
+                                            is_high = false;
+                                            break;
+                                        }
+                                        if s_obj.get("stdlib").map_or(false, |v| {
+                                            !v.is_null() && v.as_bool() != Some(false)
+                                        }) {
+                                            continue;
+                                        }
+                                        is_high = false;
+                                        break;
+                                    }
+
+                                    if is_high {
+                                        let mut has_bare = false;
+                                        for s_obj in &useful {
+                                            let kind = s_obj
+                                                .get("kind")
+                                                .and_then(|v| v.as_str())
+                                                .unwrap_or("");
+                                            if kind == "static" {
+                                                let is_stdlib =
+                                                    s_obj.get("stdlib").map_or(false, |v| {
+                                                        !v.is_null() && v.as_bool() != Some(false)
+                                                    });
+                                                if !is_stdlib {
+                                                    let code = s_obj
+                                                        .get("code")
+                                                        .and_then(|v| v.as_str())
+                                                        .unwrap_or("");
+                                                    let is_self_evident = code.starts_with('"')
+                                                        || code.starts_with('[')
+                                                        || code.starts_with('{')
+                                                        || code.starts_with(':')
+                                                        || code.starts_with('/')
+                                                        || code == "true"
+                                                        || code == "false"
+                                                        || code == "nil"
+                                                        || code.contains(".new(");
+                                                    let starts_with_digit =
+                                                        code.chars().next().map_or(false, |c| {
+                                                            c.is_ascii_digit() || c == '-'
+                                                        });
+                                                    if !is_self_evident && !starts_with_digit {
+                                                        has_bare = true;
+                                                        break;
+                                                    }
+                                                }
+                                            }
+                                        }
+                                        if has_bare && m.returns.is_empty() {
+                                            is_high = false;
+                                        }
+                                    }
+                                }
+                            } else {
+                                is_high = false;
+                            }
+                        }
+
+                        let action_conf = if is_high { "high" } else { "review" };
+
+                        let mut data = HashMap::new();
+                        data.insert(
+                            "type".to_string(),
+                            serde_json::Value::String(cand.to_string()),
+                        );
+                        data.insert(
+                            "source".to_string(),
+                            serde_json::Value::String("static_return_origin".to_string()),
+                        );
+                        data.insert(
+                            "origin_confidence".to_string(),
+                            serde_json::Value::String(conf.to_string()),
+                        );
+
+                        let mut final_blockers = blockers
+                            .as_array()
+                            .map(|v| v.clone())
+                            .unwrap_or_else(Vec::new);
+                        final_blockers.truncate(8);
+                        data.insert(
+                            "blockers".to_string(),
+                            serde_json::Value::Array(final_blockers),
+                        );
+
+                        // Check for contradicts_void
+                        let mut contradicts_void = false;
+                        for c in &m.returns {
+                            if !c.is_empty()
+                                && c != "NilClass"
+                                && !c.contains("#")
+                                && !c.starts_with("Sorbet::Private::")
+                            {
+                                if cand == "void" {
+                                    contradicts_void = true;
+                                    break;
+                                }
+                            }
+                        }
+
+                        if !contradicts_void {
+                            actions.push(Action {
+                                kind: "fix_sig_return".to_string(),
+                                confidence: action_conf.to_string(),
+                                path: src.path.clone(),
+                                line: src.line,
+                                message: format!("existing sig return is T.untyped; static return origins suggest {}", cand),
+                                data,
+                            });
+                        }
+                    }
+                    break;
+                }
+            }
+        }
+    }
+
+    actions
+}
+
+fn extract_param_entries(sig: &str) -> Vec<(String, String)> {
+    let mut params = Vec::new();
+    if let Some(start) = sig.find("params(") {
+        let rest = &sig[start + 7..];
+        let mut end = 0;
+        let mut depth = 1;
+        for (i, c) in rest.char_indices() {
+            if c == '(' {
+                depth += 1;
+            } else if c == ')' {
+                depth -= 1;
+                if depth == 0 {
+                    end = i;
+                    break;
+                }
+            }
+        }
+        let params_str = &rest[..end];
+        let mut current_name = String::new();
+        let mut parsing_type = false;
+        let mut nest = 0;
+        let mut token = String::new();
+
+        for c in params_str.chars() {
+            if c == '(' || c == '[' || c == '{' {
+                nest += 1;
+                token.push(c);
+            } else if c == ')' || c == ']' || c == '}' {
+                nest -= 1;
+                token.push(c);
+            } else if c == ':' && nest == 0 && !parsing_type {
+                current_name = token.trim().to_string();
+                token.clear();
+                parsing_type = true;
+            } else if c == ',' && nest == 0 {
+                if !current_name.is_empty() {
+                    params.push((current_name.clone(), token.trim().to_string()));
+                }
+                token.clear();
+                current_name.clear();
+                parsing_type = false;
+            } else {
+                token.push(c);
+            }
+        }
+        if parsing_type {
+            if !current_name.is_empty() {
+                params.push((current_name, token.trim().to_string()));
+            }
+        }
+    }
+    params
+}
+
+fn propose_static_param_backflow_actions(
+    input: &InputState,
+    existing_actions: &[Action],
+) -> Vec<Action> {
+    let mut actions = Vec::new();
+
+    let param_origins = match input.facts.get("param_origins").and_then(|v| v.as_array()) {
+        Some(arr) => arr,
+        None => return actions,
+    };
+
+    let existing_sigs = match input.facts.get("existing_sigs").and_then(|v| v.as_array()) {
+        Some(arr) => arr,
+        None => return actions,
+    };
+
+    let mut origins_by_callee = std::collections::HashMap::new();
+    for origin in param_origins {
+        if let Some(callee) = origin.get("callee").and_then(|v| v.as_str()) {
+            origins_by_callee
+                .entry(callee)
+                .or_insert_with(Vec::new)
+                .push(origin.clone());
+        }
+    }
+
+    for method in existing_sigs {
+        let name = match method.get("method").and_then(|v| v.as_str()) {
+            Some(n) => n,
+            None => continue,
+        };
+        let path = match method.get("path").and_then(|v| v.as_str()) {
+            Some(p) => p,
+            None => continue,
+        };
+        let line = match method.get("line").and_then(|v| v.as_i64()) {
+            Some(l) => l,
+            None => continue,
+        };
+        let sig = match method.get("sig").and_then(|v| v.as_str()) {
+            Some(s) => s,
+            None => continue,
+        };
+
+        let m_params = extract_param_entries(sig);
+
+        for (idx, (param_name, current_type)) in m_params.iter().enumerate() {
+            if current_type != "T.untyped" {
+                continue;
+            }
+
+            let mut origins = Vec::new();
+            if let Some(callee_origins) = origins_by_callee.get(name) {
+                for origin in callee_origins {
+                    if let Some(slot) = origin.get("slot") {
+                        let matches = if let Some(s) = slot.as_str() {
+                            s == idx.to_string() || s == param_name
+                        } else if let Some(i) = slot.as_i64() {
+                            i == idx as i64
+                        } else {
+                            false
+                        };
+                        if matches {
+                            origins.push(origin.clone());
+                        }
+                    }
+                }
+            }
+
+            if origins.is_empty() {
+                continue;
+            }
+
+            let mut has_unknown = false;
+            let mut types = Vec::new();
+            for origin in &origins {
+                let kind = origin
+                    .get("origin_kind")
+                    .and_then(|v| v.as_str())
+                    .unwrap_or("");
+                let t = origin.get("type").and_then(|v| v.as_str()).unwrap_or("");
+                if kind == "unknown" || t.is_empty() {
+                    has_unknown = true;
+                    break;
+                }
+                if kind == "local" && !useful_type(t) {
+                    has_unknown = true;
+                    break;
+                }
+                if !t.is_empty() {
+                    types.push(t.to_string());
+                }
+            }
+
+            if has_unknown {
+                continue;
+            }
+
+            if let Some(candidate) = static_sorbet_type(&types) {
+                if !useful_type(&candidate)
+                    || weak_type(&candidate)
+                    || strip_nilable_type(&candidate) == "Object"
+                {
+                    continue;
+                }
+
+                // Skip if an existing action already covers this param with the same candidate
+                let mut exists = false;
+                for act in existing_actions {
+                    if act.kind == "fix_sig_param" && act.path == path && act.line == line {
+                        if let Some(n) = act.data.get("name").and_then(|v| v.as_str()) {
+                            if n == param_name {
+                                if let Some(t) = act.data.get("type").and_then(|v| v.as_str()) {
+                                    if t == candidate {
+                                        exists = true;
+                                        break;
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+                if exists {
+                    continue;
+                }
+
+                let mut data = std::collections::HashMap::new();
+                data.insert(
+                    "name".to_string(),
+                    serde_json::Value::String(param_name.clone()),
+                );
+                data.insert(
+                    "type".to_string(),
+                    serde_json::Value::String(candidate.clone()),
+                );
+                data.insert(
+                    "source".to_string(),
+                    serde_json::Value::String("static_param_backflow".to_string()),
+                );
+
+                let mut callsites_map = serde_json::Map::new();
+                for origin in &origins {
+                    let p = origin.get("path").and_then(|v| v.as_str()).unwrap_or("");
+                    let l = origin.get("line").and_then(|v| v.as_i64()).unwrap_or(0);
+                    let c = origin.get("code").and_then(|v| v.as_str()).unwrap_or("");
+                    let key = format!("{}:{}:{}", p, l, c);
+                    if let Some(val) = callsites_map.get_mut(&key) {
+                        *val = serde_json::Value::Number(serde_json::Number::from(
+                            val.as_i64().unwrap_or(0) + 1,
+                        ));
+                    } else {
+                        callsites_map
+                            .insert(key, serde_json::Value::Number(serde_json::Number::from(1)));
+                    }
+                }
+                data.insert(
+                    "callsites".to_string(),
+                    serde_json::Value::Object(callsites_map),
+                );
+                data.insert(
+                    "callsite_count".to_string(),
+                    serde_json::Value::Number(serde_json::Number::from(origins.len())),
+                );
+
+                actions.push(Action {
+                    kind: "fix_sig_param".to_string(),
+                    confidence: "review".to_string(),
+                    path: path.to_string(),
+                    line: line,
+                    message: format!(
+                        "static callsites prove param {} is {}; {} static callsite(s) agree",
+                        param_name,
+                        candidate,
+                        origins.len()
+                    ),
+                    data,
+                });
+            }
+        }
+    }
+
+    actions
+}
+
+fn useful_type(t: &str) -> bool {
+    !t.is_empty()
+        && t != "T.untyped"
+        && t != "Object"
+        && t != "BasicObject"
+        && t != "T.anything"
+        && !t.starts_with("T.class_of(")
+}
+
+fn weak_type(t: &str) -> bool {
+    t.starts_with("T.any(")
+        && (t.contains("T.untyped") || t.contains("Object") || t.contains("BasicObject"))
+}
+
+fn static_sorbet_type(types: &[String]) -> Option<String> {
+    if types.is_empty() {
+        return None;
+    }
+    let mut uniq = Vec::new();
+    for t in types {
+        if !uniq.contains(t) {
+            uniq.push(t.clone());
+        }
+    }
+    if uniq.len() == 1 {
+        return Some(uniq[0].to_string());
+    }
+    uniq.sort();
+    Some(format!("T.any({})", uniq.join(", ")))
+}
+
+fn weak_collection_type(t: &str) -> bool {
+    t == "Array"
+        || t == "Hash"
+        || t == "Set"
+        || t == "T::Array[T.untyped]"
+        || t == "T::Set[T.untyped]"
+        || t == "T::Hash[T.untyped, T.untyped]"
+}
+
+fn runtime_field_candidate(classes: &[String], elem_classes: &[String]) -> Option<String> {
+    let concrete: Vec<String> = classes.iter().filter(|c| useful_type(c)).cloned().collect();
+    if concrete.is_empty() {
+        return None;
+    }
+
+    if concrete.len() == 1 && concrete[0] == "Array" && !elem_classes.is_empty() {
+        if let Some(elem) = runtime_field_candidate(elem_classes, &[]) {
+            return Some(format!("T::Array[{}]", elem));
+        }
+    }
+
+    let bool_classes = concrete
+        .iter()
+        .all(|c| c == "TrueClass" || c == "FalseClass" || c == "T::Boolean");
+    if bool_classes {
+        return Some("T::Boolean".to_string());
+    }
+
+    let observed = sorbet_type(&concrete, false);
+    if useful_type(&observed) && !weak_type(&observed) && !observed.contains("T.nilable") {
+        Some(observed)
+    } else {
+        None
+    }
+}
+
+fn static_field_candidate(types: &[String]) -> Option<String> {
+    let concrete: Vec<String> = types.iter().filter(|t| useful_type(t)).cloned().collect();
+    if concrete.is_empty() {
+        return None;
+    }
+    if concrete
+        .iter()
+        .all(|t| t == "TrueClass" || t == "FalseClass" || t == "T::Boolean")
+    {
+        return Some("T::Boolean".to_string());
+    }
+    static_sorbet_type(&concrete).and_then(|candidate| {
+        if useful_type(&candidate) && !weak_type(&candidate) && !candidate.contains("T.nilable") {
+            Some(candidate)
+        } else {
+            None
+        }
+    })
+}
+
+fn collapsible_node_union(current_type: &str, candidate: &str) -> bool {
+    if !current_type.starts_with("T.any(") {
+        return false;
+    }
+    if candidate == "AST::Node" {
+        return current_type.contains("AST::");
+    }
+    if candidate == "MIR::Node" {
+        return current_type.contains("MIR::");
+    }
+    false
+}
+
+fn collapsible_boolean_union(current_type: &str, candidate: &str) -> bool {
+    candidate == "T::Boolean"
+        && current_type.starts_with("T.any(")
+        && current_type.contains("TrueClass")
+        && current_type.contains("FalseClass")
+}
+
+fn rewriteable_field_type(current_type: &str, candidate: &str) -> bool {
+    let current = current_type.trim();
+    if current.is_empty() {
+        return false;
+    }
+    if current == candidate {
+        return false;
+    }
+    current == "T.untyped"
+        || weak_collection_type(current)
+        || weak_type(current)
+        || collapsible_node_union(current, candidate)
+        || collapsible_boolean_union(current, candidate)
+}
+
+fn propose_forwarded_return_chain_actions(input: &InputState) -> Vec<Action> {
+    let mut actions = Vec::new();
+
+    let existing_sigs = match input.facts.get("existing_sigs").and_then(|v| v.as_array()) {
+        Some(arr) => arr,
+        None => return actions,
+    };
+
+    let return_origins = match input.facts.get("return_origins").and_then(|v| v.as_array()) {
+        Some(arr) => arr,
+        None => return actions,
+    };
+
+    let mut untyped_methods = Vec::new();
+    for method in existing_sigs {
+        if let Some(sig) = method.get("sig").and_then(|v| v.as_str()) {
+            if extract_return_type(sig).as_deref() == Some("T.untyped") {
+                untyped_methods.push(method);
+            }
+        }
+    }
+
+    if untyped_methods.is_empty() {
+        return actions;
+    }
+
+    let mut origin_by_location = std::collections::HashMap::new();
+    for origin in return_origins {
+        let path = origin.get("path").and_then(|v| v.as_str()).unwrap_or("");
+        let line = origin.get("line").and_then(|v| v.as_i64()).unwrap_or(0);
+        let class = origin.get("class").and_then(|v| v.as_str()).unwrap_or("");
+        let method = origin.get("method").and_then(|v| v.as_str()).unwrap_or("");
+        let kind = origin.get("kind").and_then(|v| v.as_str()).unwrap_or("");
+        origin_by_location.insert(
+            format!("{}:{}:{}:{}:{}", path, line, class, method, kind),
+            origin.clone(),
+        );
+    }
+
+    for method in untyped_methods {
+        let path = method.get("path").and_then(|v| v.as_str()).unwrap_or("");
+        let line = method.get("line").and_then(|v| v.as_i64()).unwrap_or(0);
+        let class = method.get("class").and_then(|v| v.as_str()).unwrap_or("");
+        let m_name = method.get("method").and_then(|v| v.as_str()).unwrap_or("");
+        let kind = method.get("kind").and_then(|v| v.as_str()).unwrap_or("");
+
+        let mut origin = None;
+        if let Some(ro) = method.get("return_origin") {
+            origin = Some(ro.clone());
+        } else if let Some(ro) =
+            origin_by_location.get(&format!("{}:{}:{}:{}:{}", path, line, class, m_name, kind))
+        {
+            origin = Some(ro.clone());
+        }
+
+        if let Some(o) = origin {
+            let sources = match o.get("sources").and_then(|v| v.as_array()) {
+                Some(arr) => arr,
+                None => continue,
+            };
+
+            if sources.is_empty() {
+                continue;
+            }
+
+            let mut types = Vec::new();
+            let mut chain = vec![format!("{}:{} {}#{}", path, line, class, m_name)];
+            let mut forwarded = false;
+            let mut failed = false;
+
+            for source in sources {
+                let skind = source.get("kind").and_then(|v| v.as_str()).unwrap_or("");
+                match skind {
+                    "static" | "assignment" | "typed_call" | "safe_call" => {
+                        let t = source.get("type").and_then(|v| v.as_str()).unwrap_or("");
+                        if !useful_type(t) {
+                            failed = true;
+                            break;
+                        }
+                        types.push(t.to_string());
+                        if skind == "typed_call" || skind == "safe_call" {
+                            forwarded = true;
+                        }
+
+                        let sl = source.get("line").and_then(|v| v.as_i64()).unwrap_or(0);
+                        chain.push(format!(
+                            "{} {} at line {}",
+                            skind,
+                            source.get("callee").and_then(|v| v.as_str()).unwrap_or(""),
+                            sl
+                        ));
+                    }
+                    "nil" => {
+                        types.push("NilClass".to_string());
+                    }
+                    _ => {
+                        failed = true;
+                        break;
+                    }
+                }
+            }
+
+            if failed || !forwarded {
+                continue;
+            }
+
+            if let Some(candidate) = static_sorbet_type(&types) {
+                if !useful_type(&candidate) || weak_type(&candidate) {
+                    continue;
+                }
+
+                let confidence = if ["String", "Integer", "Float", "Symbol", "T::Boolean"]
+                    .contains(&candidate.as_str())
+                {
+                    "high"
+                } else {
+                    "review"
+                };
+
+                let mut data = std::collections::HashMap::new();
+                data.insert(
+                    "type".to_string(),
+                    serde_json::Value::String(candidate.clone()),
+                );
+                data.insert(
+                    "source".to_string(),
+                    serde_json::Value::String("forwarded_return_chain".to_string()),
+                );
+                let chain_vals: Vec<serde_json::Value> =
+                    chain.into_iter().map(serde_json::Value::String).collect();
+                data.insert("chain".to_string(), serde_json::Value::Array(chain_vals));
+
+                actions.push(Action {
+                    kind: "fix_sig_return".to_string(),
+                    confidence: confidence.to_string(),
+                    path: path.to_string(),
+                    line: line,
+                    message: format!(
+                        "existing sig return is T.untyped; forwarded-return chain resolves to {}",
+                        candidate
+                    ),
+                    data,
+                });
+            }
+        }
+    }
+
+    actions
+}
+
+fn propose_struct_field_sig_actions(input: &InputState) -> Vec<Action> {
+    let mut actions = Vec::new();
+
+    let struct_runtime = input
+        .facts
+        .get("struct_field_runtime")
+        .and_then(|v| v.as_array())
+        .cloned()
+        .unwrap_or_default();
+    let ivar_runtime = input
+        .facts
+        .get("ivar_runtime")
+        .and_then(|v| v.as_array())
+        .cloned()
+        .unwrap_or_default();
+    let static_fields = input
+        .facts
+        .get("struct_field_static")
+        .and_then(|v| v.as_array())
+        .cloned()
+        .unwrap_or_default();
+    let type_definitions = input
+        .facts
+        .get("type_definitions")
+        .and_then(|v| v.as_array())
+        .cloned()
+        .unwrap_or_default();
+
+    if struct_runtime.is_empty()
+        && ivar_runtime.is_empty()
+        && static_fields.is_empty()
+        && type_definitions.is_empty()
+    {
+        return actions;
+    }
+
+    #[derive(Clone)]
+    struct Declaration {
+        path: String,
+        line: i64,
+        raw_field: String,
+        current_type: String,
+        type_system: String,
+    }
+
+    struct Slot {
+        class: String,
+        field: String,
+        runtime_classes: Vec<String>,
+        elem_classes: Vec<String>,
+        static_types: Vec<String>,
+        declarations: Vec<Declaration>,
+        runtime_calls: i64,
+        static_count: i64,
+        has_unknown_static: bool,
+        has_struct_runtime: bool,
+        has_ivar_runtime: bool,
+    }
+
+    let mut by_slot: std::collections::HashMap<(String, String), Slot> =
+        std::collections::HashMap::new();
+
+    for rec in struct_runtime {
+        let class = rec
+            .get("class")
+            .and_then(|v| v.as_str())
+            .unwrap_or("")
+            .to_string();
+        let field = rec
+            .get("field")
+            .and_then(|v| v.as_str())
+            .unwrap_or("")
+            .to_string();
+        if class.is_empty() || field.is_empty() {
+            continue;
+        }
+        let key = (class.clone(), field.clone());
+
+        let slot = by_slot.entry(key).or_insert(Slot {
+            class,
+            field,
+            runtime_classes: Vec::new(),
+            elem_classes: Vec::new(),
+            static_types: Vec::new(),
+            declarations: Vec::new(),
+            runtime_calls: 0,
+            static_count: 0,
+            has_unknown_static: false,
+            has_struct_runtime: false,
+            has_ivar_runtime: false,
+        });
+
+        if let Some(arr) = rec.get("classes").and_then(|v| v.as_array()) {
+            for c in arr {
+                if let Some(c_str) = c.as_str() {
+                    if !slot.runtime_classes.contains(&c_str.to_string()) {
+                        slot.runtime_classes.push(c_str.to_string());
+                    }
+                }
+            }
+        }
+
+        if let Some(arr) = rec.get("elem_classes").and_then(|v| v.as_array()) {
+            for c in arr {
+                if let Some(c_str) = c.as_str() {
+                    if !slot.elem_classes.contains(&c_str.to_string()) {
+                        slot.elem_classes.push(c_str.to_string());
+                    }
+                }
+            }
+        }
+
+        slot.runtime_calls += rec.get("calls").and_then(|v| v.as_i64()).unwrap_or(0);
+        slot.has_struct_runtime = true;
+    }
+
+    for rec in ivar_runtime {
+        let class = rec
+            .get("class")
+            .and_then(|v| v.as_str())
+            .unwrap_or("")
+            .to_string();
+        let raw_name = rec.get("name").and_then(|v| v.as_str()).unwrap_or("");
+        let field = raw_name
+            .trim_start_matches('@')
+            .trim_start_matches('@')
+            .to_string();
+        if class.is_empty() || field.is_empty() {
+            continue;
+        }
+        let key = (class.clone(), field.clone());
+
+        let slot = by_slot.entry(key).or_insert(Slot {
+            class,
+            field,
+            runtime_classes: Vec::new(),
+            elem_classes: Vec::new(),
+            static_types: Vec::new(),
+            declarations: Vec::new(),
+            runtime_calls: 0,
+            static_count: 0,
+            has_unknown_static: false,
+            has_struct_runtime: false,
+            has_ivar_runtime: false,
+        });
+
+        if let Some(arr) = rec.get("classes").and_then(|v| v.as_array()) {
+            for c in arr {
+                if let Some(c_str) = c.as_str() {
+                    if !slot.runtime_classes.contains(&c_str.to_string()) {
+                        slot.runtime_classes.push(c_str.to_string());
+                    }
+                }
+            }
+        }
+
+        slot.runtime_calls += rec.get("calls").and_then(|v| v.as_i64()).unwrap_or(0);
+        slot.has_ivar_runtime = true;
+    }
+
+    for rec in static_fields {
+        let class = rec
+            .get("class")
+            .and_then(|v| v.as_str())
+            .unwrap_or("")
+            .to_string();
+        let field = rec
+            .get("field")
+            .and_then(|v| v.as_str())
+            .unwrap_or("")
+            .to_string();
+        if class.is_empty() || field.is_empty() {
+            continue;
+        }
+        let key = (class.clone(), field.clone());
+
+        let slot = by_slot.entry(key).or_insert(Slot {
+            class,
+            field,
+            runtime_classes: Vec::new(),
+            elem_classes: Vec::new(),
+            static_types: Vec::new(),
+            declarations: Vec::new(),
+            runtime_calls: 0,
+            static_count: 0,
+            has_unknown_static: false,
+            has_struct_runtime: false,
+            has_ivar_runtime: false,
+        });
+
+        let type_str = rec.get("type").and_then(|v| v.as_str()).unwrap_or("");
+        if type_str.is_empty() {
+            slot.has_unknown_static = true;
+        } else {
+            if !slot.static_types.contains(&type_str.to_string()) {
+                slot.static_types.push(type_str.to_string());
+            }
+        }
+        slot.static_count += 1;
+    }
+
+    for rec in type_definitions {
+        if rec.get("kind").and_then(|v| v.as_str()) != Some("state_field") {
+            continue;
+        }
+        let class = rec
+            .get("owner")
+            .and_then(|v| v.as_str())
+            .unwrap_or("")
+            .to_string();
+        let raw_field = rec
+            .get("name")
+            .and_then(|v| v.as_str())
+            .unwrap_or("")
+            .to_string();
+        let field = raw_field
+            .trim_start_matches('@')
+            .trim_start_matches('@')
+            .to_string();
+        if class.is_empty() || field.is_empty() {
+            continue;
+        }
+        let key = (class.clone(), field.clone());
+        let slot = by_slot.entry(key).or_insert(Slot {
+            class,
+            field,
+            runtime_classes: Vec::new(),
+            elem_classes: Vec::new(),
+            static_types: Vec::new(),
+            declarations: Vec::new(),
+            runtime_calls: 0,
+            static_count: 0,
+            has_unknown_static: false,
+            has_struct_runtime: false,
+            has_ivar_runtime: false,
+        });
+        slot.declarations.push(Declaration {
+            path: rec
+                .get("path")
+                .and_then(|v| v.as_str())
+                .unwrap_or("")
+                .to_string(),
+            line: rec.get("line").and_then(|v| v.as_i64()).unwrap_or(0),
+            raw_field,
+            current_type: rec
+                .get("declared_type")
+                .and_then(|v| v.as_str())
+                .unwrap_or("")
+                .to_string(),
+            type_system: rec
+                .get("type_system")
+                .and_then(|v| v.as_str())
+                .unwrap_or("")
+                .to_string(),
+        });
+    }
+
+    let mut slots: Vec<Slot> = by_slot.into_values().collect();
+    // Sort by: -runtime_calls, -static_count, class, field
+    slots.sort_by(|a, b| {
+        b.runtime_calls
+            .cmp(&a.runtime_calls)
+            .then_with(|| b.static_count.cmp(&a.static_count))
+            .then_with(|| a.class.cmp(&b.class))
+            .then_with(|| a.field.cmp(&b.field))
+    });
+
+    for slot in slots {
+        if slot.has_unknown_static && slot.runtime_calls == 0 {
+            continue;
+        }
+
+        let type_opt = if slot.runtime_calls > 0 {
+            runtime_field_candidate(&slot.runtime_classes, &slot.elem_classes)
+        } else {
+            static_field_candidate(&slot.static_types)
+        };
+
+        let type_str = match type_opt {
+            Some(t) => t,
+            None => continue,
+        };
+
+        if !useful_type(&type_str)
+            || weak_type(&type_str)
+            || weak_collection_type(&type_str)
+            || type_str.contains("T.nilable")
+        {
+            continue;
+        }
+
+        let source_decl = slot.declarations.iter().find(|decl| {
+            !decl.path.is_empty()
+                && decl.line > 0
+                && rewriteable_field_type(&decl.current_type, &type_str)
+        });
+
+        if let Some(decl) = source_decl {
+            let mut data = std::collections::HashMap::new();
+            data.insert(
+                "class".to_string(),
+                serde_json::Value::String(slot.class.clone()),
+            );
+            data.insert(
+                "field".to_string(),
+                serde_json::Value::String(slot.field.clone()),
+            );
+            data.insert(
+                "raw_field".to_string(),
+                serde_json::Value::String(decl.raw_field.clone()),
+            );
+            data.insert(
+                "type".to_string(),
+                serde_json::Value::String(type_str.clone()),
+            );
+            data.insert(
+                "current_type".to_string(),
+                serde_json::Value::String(decl.current_type.clone()),
+            );
+            data.insert(
+                "target".to_string(),
+                serde_json::Value::String("source_field".to_string()),
+            );
+            data.insert(
+                "type_system".to_string(),
+                serde_json::Value::String(decl.type_system.clone()),
+            );
+            data.insert(
+                "runtime_calls".to_string(),
+                serde_json::Value::Number(serde_json::Number::from(slot.runtime_calls)),
+            );
+
+            actions.push(Action {
+                kind: "add_struct_field_sig".to_string(),
+                confidence: "review".to_string(),
+                path: decl.path.clone(),
+                line: decl.line,
+                message: format!(
+                    "type {}#{} as {} in source",
+                    slot.class, slot.field, type_str
+                ),
+                data,
+            });
+        } else if slot.has_struct_runtime {
+            let mut data = std::collections::HashMap::new();
+            data.insert(
+                "class".to_string(),
+                serde_json::Value::String(slot.class.clone()),
+            );
+            data.insert(
+                "field".to_string(),
+                serde_json::Value::String(slot.field.clone()),
+            );
+            data.insert(
+                "type".to_string(),
+                serde_json::Value::String(type_str.clone()),
+            );
+            data.insert(
+                "target".to_string(),
+                serde_json::Value::String("rbi".to_string()),
+            );
+            data.insert(
+                "runtime_calls".to_string(),
+                serde_json::Value::Number(serde_json::Number::from(slot.runtime_calls)),
+            );
+
+            actions.push(Action {
+                kind: "add_struct_field_sig".to_string(),
+                confidence: "review".to_string(),
+                path: "sorbet/rbi/ast-struct-fields.rbi".to_string(),
+                line: 1,
+                message: format!(
+                    "type {}#{} as {} (struct field RBI)",
+                    slot.class, slot.field, type_str
+                ),
+                data,
+            });
+        }
+    }
+    actions
+}
+
+pub fn build_actions(input: &InputState) -> Vec<Action> {
+    let mut actions = Vec::new();
+    actions.extend(replace_dead_nil_check(input));
+    actions.extend(replace_deterministic_guard(input));
+    actions.extend(propose_sig(input));
+
+    for m in &input.methods {
+        if m.has_sig {
+            if let Some(src) = &m.source {
+                report_union_candidates(m, src, &mut actions);
+                actions.extend(validate_sig(
+                    input,
+                    m,
+                    src,
+                    &input.unused_return_methods_by_location,
+                ));
+            }
+        }
+    }
+
+    let existing = actions.clone();
+    actions.extend(propose_static_param_backflow_actions(input, &existing));
+    actions.extend(propose_forwarded_return_chain_actions(input));
+    actions.extend(propose_struct_field_sig_actions(input));
+
+    actions
+}
+
+fn simple_high_confidence_collection_candidate(candidate: &str) -> bool {
+    let raw = strip_nilable_type(candidate);
+    let scalar_pattern = |s: &str| -> bool {
+        s == "String" || s == "Symbol" || s == "Integer" || s == "Float" || s == "T::Boolean"
+    };
+
+    if let Some(inner) = raw
+        .strip_prefix("T::Array[")
+        .and_then(|s| s.strip_suffix("]"))
+    {
+        return scalar_pattern(inner);
+    }
+    if let Some(inner) = raw
+        .strip_prefix("T::Set[")
+        .and_then(|s| s.strip_suffix("]"))
+    {
+        return scalar_pattern(inner);
+    }
+    if let Some(inner) = raw
+        .strip_prefix("T::Hash[")
+        .and_then(|s| s.strip_suffix("]"))
+    {
+        if let Some((k, v)) = inner.split_once(", ") {
+            if (k == "String" || k == "Symbol" || k == "Integer") && scalar_pattern(v) {
+                return true;
+            }
+        }
+    }
+    false
+}
+
+fn collection_narrowing_confidence(calls: i64, candidate: &str) -> &'static str {
+    if !simple_high_confidence_collection_candidate(candidate) {
+        return "review";
+    }
+    if calls >= 20 {
+        "high"
+    } else {
+        "review"
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::fs;
+    use std::path::PathBuf;
+
+    #[test]
+    fn test_actions_oracle_fixtures() {
+        let mut d = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
+        d.push("spec/fixtures/oracle");
+
+        let mut tested = 0;
+        for entry in fs::read_dir(d).unwrap() {
+            let entry = entry.unwrap();
+            let path = entry.path();
+            if path.is_dir() {
+                let input_path = path.join("input.json");
+                let output_path = path.join("output.json");
+
+                if input_path.exists() && output_path.exists() {
+                    let input_data = fs::read_to_string(&input_path).unwrap();
+                    let expected_data = fs::read_to_string(&output_path).unwrap();
+                    eprintln!("Testing {:?}", path);
+
+                    let input_state: crate::schemas::InputState = serde_json::from_str(&input_data)
+                        .unwrap_or_else(|e| {
+                            panic!("Failed to parse input JSON for {:?}: {}", path, e)
+                        });
+                    let expected_actions: crate::schemas::OutputState =
+                        serde_json::from_str(&expected_data).unwrap_or_else(|e| {
+                            panic!("Failed to parse expected JSON for {:?}: {}", path, e)
+                        });
+
+                    let actual_actions = crate::schemas::OutputState {
+                        actions: build_actions(&input_state),
+                        diagnostics: std::collections::HashMap::new(),
+                    };
+
+                    let mut actual_val = serde_json::to_value(&actual_actions.actions).unwrap();
+                    let mut expected_val = serde_json::to_value(&expected_actions.actions).unwrap();
+
+                    if let (Some(actual_arr), Some(expected_arr)) =
+                        (actual_val.as_array_mut(), expected_val.as_array_mut())
+                    {
+                        actual_arr.sort_by_key(|v| serde_json::to_string(v).unwrap());
+                        expected_arr.sort_by_key(|v| serde_json::to_string(v).unwrap());
+                    }
+
+                    assert_eq!(
+                        actual_val,
+                        expected_val,
+                        "Failed oracle test for fixture {:?}",
+                        path.file_name().unwrap()
+                    );
+                    tested += 1;
+                }
+            }
+        }
+        assert!(tested > 0, "No oracle fixtures found!");
+    }
+
+    #[test]
+    fn test_generic_candidate_type() {
+        use serde_json::json;
+        // Test Set
+        let set_class = json!(["Integer"]);
+        let res = super::generic_candidate_type("Set", Some(&set_class), None, None, None);
+        assert_eq!(res, Some("T::Set[Integer]".to_string()));
+
+        let set_class2 = json!(["String"]);
+        let res2 =
+            super::generic_candidate_type("T::Set[T.untyped]", Some(&set_class2), None, None, None);
+        assert_eq!(res2, Some("T::Set[String]".to_string()));
+
+        // Test Hash
+        let hash_class = json!([["String"], ["Integer"]]);
+        let res3 = super::generic_candidate_type("Hash", None, Some(&hash_class), None, None);
+        assert_eq!(res3, Some("T::Hash[String, Integer]".to_string()));
+
+        let hash_class2 = json!([["Symbol"], ["Float"]]);
+        let res4 = super::generic_candidate_type(
+            "T::Hash[T.untyped, T.untyped]",
+            None,
+            Some(&hash_class2),
+            None,
+            None,
+        );
+        assert_eq!(res4, Some("T::Hash[Symbol, Float]".to_string()));
+    }
+
+    #[test]
+    fn test_runtime_field_candidate_ignores_static_untyped_and_normalizes_boolean() {
+        assert_eq!(
+            super::runtime_field_candidate(&vec!["String".to_string()], &[]),
+            Some("String".to_string())
+        );
+        assert_eq!(
+            super::runtime_field_candidate(&vec!["FalseClass".to_string()], &[]),
+            Some("T::Boolean".to_string())
+        );
+        assert_eq!(
+            super::runtime_field_candidate(
+                &vec!["AST::Identifier".to_string(), "AST::Literal".to_string()],
+                &[]
+            ),
+            Some("AST::Node".to_string())
+        );
+    }
+
+    #[test]
+    fn test_field_candidate_helper_edges() {
+        assert_eq!(super::runtime_field_candidate(&[], &[]), None);
+        assert_eq!(
+            super::runtime_field_candidate(&vec!["Array".to_string()], &vec!["String".to_string()]),
+            Some("T::Array[String]".to_string())
+        );
+        assert_eq!(
+            super::runtime_field_candidate(
+                &vec![
+                    "String".to_string(),
+                    "Integer".to_string(),
+                    "Symbol".to_string(),
+                    "Float".to_string(),
+                ],
+                &[]
+            ),
+            None
+        );
+
+        assert_eq!(super::static_field_candidate(&[]), None);
+        assert_eq!(
+            super::static_field_candidate(&vec!["FalseClass".to_string(), "TrueClass".to_string()]),
+            Some("T::Boolean".to_string())
+        );
+        assert_eq!(
+            super::static_field_candidate(&vec!["String".to_string()]),
+            Some("String".to_string())
+        );
+        assert_eq!(
+            super::static_field_candidate(&vec!["T.untyped".to_string()]),
+            None
+        );
+
+        assert!(!super::collapsible_node_union("String", "AST::Node"));
+        assert!(super::collapsible_node_union(
+            "T.any(AST::FuncCall, AST::MethodCall)",
+            "AST::Node"
+        ));
+        assert!(super::collapsible_node_union(
+            "T.any(MIR::Literal, MIR::FuncCall)",
+            "MIR::Node"
+        ));
+        assert!(!super::collapsible_node_union(
+            "T.any(String, Symbol)",
+            "TypeShape"
+        ));
+        assert!(super::collapsible_boolean_union(
+            "T.any(FalseClass, TrueClass)",
+            "T::Boolean"
+        ));
+
+        assert!(!super::rewriteable_field_type("", "String"));
+        assert!(!super::rewriteable_field_type("String", "String"));
+        assert!(super::rewriteable_field_type(
+            "T::Array[T.untyped]",
+            "T::Array[String]"
+        ));
+        assert!(super::rewriteable_field_type(
+            "T.any(AST::FuncCall, AST::MethodCall)",
+            "AST::Node"
+        ));
+    }
+
+    #[test]
+    fn test_build_actions_emits_source_field_action_for_weak_declaration() {
+        use serde_json::json;
+
+        let input: crate::schemas::InputState = serde_json::from_value(json!({
+            "methods": [],
+            "tlets": [],
+            "unused_return_methods_by_location": {},
+            "facts": {
+                "struct_field_runtime": [
+                    {
+                        "class": "Example",
+                        "field": "name",
+                        "classes": ["String"],
+                        "elem_classes": [],
+                        "calls": 25
+                    }
+                ],
+                "ivar_runtime": [
+                    {
+                        "class": "Example",
+                        "name": "@shape",
+                        "classes": ["TypeShape"],
+                        "calls": 10
+                    }
+                ],
+                "struct_field_static": [
+                    {
+                        "class": "Example",
+                        "field": "name",
+                        "type": "T.untyped",
+                        "path": "src/example.rb",
+                        "line": 3
+                    }
+                ],
+                "type_definitions": [
+                    {
+                        "kind": "state_field",
+                        "owner": "Example",
+                        "name": "name",
+                        "declared_type": "T.untyped",
+                        "path": "src/example.rb",
+                        "line": 3,
+                        "type_system": "sorbet"
+                    },
+                    {
+                        "kind": "state_field",
+                        "owner": "Example",
+                        "name": "@shape",
+                        "declared_type": "T.untyped",
+                        "path": "src/example.rb",
+                        "line": 8,
+                        "type_system": "sorbet"
+                    }
+                ]
+            }
+        }))
+        .unwrap();
+
+        let actions = super::build_actions(&input);
+        assert!(actions.iter().any(|action| {
+            action.kind == "add_struct_field_sig"
+                && action.path == "src/example.rb"
+                && action.line == 3
+                && action.data.get("target").and_then(|v| v.as_str()) == Some("source_field")
+                && action.data.get("field").and_then(|v| v.as_str()) == Some("name")
+                && action.data.get("type").and_then(|v| v.as_str()) == Some("String")
+        }));
+        assert!(actions.iter().any(|action| {
+            action.kind == "add_struct_field_sig"
+                && action.path == "src/example.rb"
+                && action.line == 8
+                && action.data.get("target").and_then(|v| v.as_str()) == Some("source_field")
+                && action.data.get("raw_field").and_then(|v| v.as_str()) == Some("@shape")
+                && action.data.get("type").and_then(|v| v.as_str()) == Some("TypeShape")
+        }));
+    }
+
+    #[test]
+    fn test_struct_field_actions_skip_malformed_or_static_only_rows() {
+        use serde_json::json;
+
+        let input: crate::schemas::InputState = serde_json::from_value(json!({
+            "methods": [],
+            "tlets": [],
+            "unused_return_methods_by_location": {},
+            "facts": {
+                "struct_field_runtime": [
+                    { "class": "", "field": "name", "classes": ["String"], "calls": 1 }
+                ],
+                "ivar_runtime": [
+                    { "class": "Example", "name": "", "classes": ["String"], "calls": 1 }
+                ],
+                "struct_field_static": [
+                    { "class": "Example", "field": "", "type": "String" },
+                    { "class": "Example", "field": "static_only", "type": "String" }
+                ],
+                "type_definitions": [
+                    { "kind": "method_signature", "owner": "Example", "name": "call" },
+                    { "kind": "state_field", "owner": "Example", "name": "", "declared_type": "T.untyped" }
+                ]
+            }
+        }))
+        .unwrap();
+
+        let actions = super::build_actions(&input);
+        assert!(actions
+            .iter()
+            .all(|action| action.kind != "add_struct_field_sig"));
+    }
+
+    #[test]
+    fn test_build_actions_missing_sig() {
+        let input_json = r#"{
+            "methods": [
+                {
+                    "has_sig": false,
+                    "key": [],
+                    "calls": 1,
+                    "ok_calls": 1,
+                    "raised_calls": 0,
+                    "params_by_name": {
+                        "x": ["Integer"]
+                    },
+                    "params_ok": {},
+                    "params_raised": {},
+                    "param_elem": {},
+                    "param_kv": {},
+                    "param_elem_shapes": {},
+                    "param_kv_shapes": {},
+                    "param_sites": {},
+                    "param_sites_ok": {},
+                    "param_sites_raised": {},
+                    "param_traces": {},
+                    "param_traces_ok": {},
+                    "param_traces_raised": {},
+                    "returns": ["String"],
+                    "return_elem": [],
+                    "return_elem_shapes": [],
+                    "return_kv": [],
+                    "return_kv_shapes": [],
+                    "raised": [],
+                    "source": {
+                        "path": "/foo.rb",
+                        "line": 1,
+                        "end_line": null,
+                        "class": "SomeClass",
+                        "method": "foo",
+                        "kind": "def",
+                        "language": "ruby",
+                        "has_sig": false,
+                        "sig": "",
+                        "params": [
+                            { "name": "x", "nil_default": false, "type": null }
+                        ],
+                        "scope": [],
+                        "non_nil_params": [],
+                        "uses_yield": false,
+                        "untraceable_params": [],
+                        "protocols": {},
+                        "noreturn_candidate": false
+                    }
+                }
+            ],
+            "tlets": [],
+            "facts": {},
+            "unused_return_methods_by_location": {}
+        }"#;
+        let input: crate::schemas::InputState = serde_json::from_str(input_json).unwrap();
+        let actions = super::build_actions(&input);
+        assert_eq!(actions.len(), 1);
+        assert_eq!(actions[0].kind, "add_sig");
+        assert_eq!(
+            actions[0].data["sig"],
+            "sig { params(x: Integer).returns(String) }"
+        );
+    }
+
+    #[test]
+    fn test_inferred_return_type_hash_and_set() {
+        use serde_json::json;
+        // Test Hash
+        let json_hash = json!({
+            "returns": ["Hash"],
+            "return_elem": [],
+            "return_elem_shapes": [],
+            "return_kv": [["String"], ["Integer"]],
+            "return_kv_shapes": [
+                [ { "kind": "class", "name": "String" } ],
+                [ { "kind": "class", "name": "Integer" } ]
+            ],
+            "key": ["x"],
+            "calls": 1,
+            "ok_calls": 1,
+            "raised_calls": 0,
+            "params_by_name": {},
+            "params_ok": {},
+            "params_raised": {},
+            "param_elem": {},
+            "param_kv": {},
+            "param_elem_shapes": {},
+            "param_kv_shapes": {},
+            "param_sites": {},
+            "param_sites_ok": {},
+            "param_sites_raised": {},
+            "param_traces": {},
+            "param_traces_ok": {},
+            "param_traces_raised": {},
+            "raised": [],
+            "source": null,
+            "has_sig": false
+        });
+        let mut m: crate::schemas::MethodRecord = serde_json::from_value(json_hash).unwrap();
+        assert_eq!(
+            super::runtime_return_type_candidate(&m),
+            "T::Hash[String, Integer]"
+        );
+
+        // Test Set
+        m.returns = vec!["Set".to_string()];
+        m.return_elem_shapes = vec![json!({ "kind": "class", "name": "Float" })];
+        assert_eq!(super::runtime_return_type_candidate(&m), "T::Set[Float]");
+    }
+
+    #[test]
+    fn test_simple_high_confidence_collection_candidate() {
+        assert!(super::simple_high_confidence_collection_candidate(
+            "T::Set[Integer]"
+        ));
+        assert!(!super::simple_high_confidence_collection_candidate(
+            "T::Set[Object]"
+        ));
+        assert!(super::simple_high_confidence_collection_candidate(
+            "T::Hash[String, Float]"
+        ));
+        assert!(!super::simple_high_confidence_collection_candidate(
+            "T::Hash[Object, Float]"
+        ));
+    }
+    #[test]
+    fn test_narrow_generic_return() {
+        use crate::schemas::*;
+        let input_json = r#"{
+            "methods": [{
+                "key": [],
+                "calls": 2,
+                "ok_calls": 2,
+                "raised_calls": 0,
+                "params_by_name": {},
+                "params_ok": {},
+                "params_raised": {},
+                "param_elem": {},
+                "param_kv": {},
+                "param_elem_shapes": {},
+                "param_kv_shapes": {},
+                "param_sites": {},
+                "param_sites_ok": {},
+                "param_sites_raised": {},
+                "param_traces": {},
+                "param_traces_ok": {},
+                "param_traces_raised": {},
+                "returns": [],
+                "return_elem": ["Integer"],
+                "return_kv": [],
+                "return_elem_shapes": [],
+                "return_kv_shapes": [],
+                "raised": [],
+                "source": {
+                    "path": "test.rb",
+                    "line": 1,
+                    "end_line": null,
+                    "class": "Test",
+                    "method": "test",
+                    "kind": "def",
+                    "language": "ruby",
+                    "has_sig": true,
+                    "sig": "sig { returns(T::Array[T.untyped]) }",
+                    "params": [],
+                    "scope": [],
+                    "non_nil_params": [],
+                    "uses_yield": false,
+                    "untraceable_params": [],
+                    "protocols": {},
+                    "noreturn_candidate": false,
+                    "static_return_types": ["T::Array[T.untyped]"]
+                },
+                "has_sig": true
+            }],
+            "tlets": [],
+            "facts": {},
+            "unused_return_methods_by_location": {}
+        }"#;
+        let input: InputState = serde_json::from_str(input_json).unwrap();
+        let actions = super::build_actions(&input);
+        assert!(actions
+            .iter()
+            .any(|a| a.kind == "narrow_generic_return" && a.data["type"] == "T::Array[Integer]"));
+    }
+    #[test]
+    fn test_shape_union_type_hash() {
+        use serde_json::json;
+        // Test shape_union_type with hash
+        let hash_shapes = json!([
+            {
+                "kind": "hash",
+                "keys": [
+                    { "kind": "class", "name": "String" }
+                ],
+                "values": [
+                    { "kind": "class", "name": "Integer" }
+                ]
+            }
+        ]);
+        let shapes = hash_shapes.as_array().unwrap();
+        let res = super::shape_union_type(&shapes);
+        assert_eq!(res, Some("T::Hash[String, Integer]".to_string()));
+
+        let kv_shapes = json!([
+            [ { "kind": "class", "name": "String" } ],
+            [ { "kind": "class", "name": "Integer" } ]
+        ]);
+        let res2 = super::generic_candidate_type("Hash", None, None, None, Some(&kv_shapes));
+        assert_eq!(res2, Some("T::Hash[String, Integer]".to_string()));
+    }
+
+    #[test]
+    fn test_sorbet_type_ast() {
+        let classes = vec![
+            "AST::Node".to_string(),
+            "AST::SomethingElse".to_string(),
+            "MIR::Node".to_string(),
+            "String".to_string(),
+            "NilClass".to_string(),
+        ];
+        let res = super::sorbet_type(&classes, true);
+        assert_eq!(res, "T.nilable(T.any(AST::Node, MIR::Node, String))");
+    }
+    #[test]
+    fn test_shape_union_type_set_array() {
+        use serde_json::json;
+        // Test shape_union_type with set and array
+        let set_shapes = json!([
+            {
+                "kind": "set",
+                "elements": [
+                    { "kind": "class", "name": "Float" }
+                ]
+            }
+        ]);
+        let res = super::shape_union_type(&set_shapes.as_array().unwrap());
+        assert_eq!(res, Some("T::Set[Float]".to_string()));
+
+        let arr_shapes = json!([
+            {
+                "kind": "array",
+                "elements": [
+                    { "kind": "class", "name": "Float" }
+                ]
+            }
+        ]);
+        let res2 = super::shape_union_type(&arr_shapes.as_array().unwrap());
+        assert_eq!(res2, Some("T::Array[Float]".to_string()));
+    }
+}
