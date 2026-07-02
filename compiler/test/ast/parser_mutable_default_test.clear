@@ -1,0 +1,59 @@
+TEST ClearParserMutableFixedArrayDefaults DO
+  FN parse_main_body(source: Auto) RETURNS Auto ->
+    MUTABLE ast = NIL;
+    ast = ClearParser.new(Lexer.new(source).tokenize(), source).parse();
+    ast.statements() |> FIND (isA?(_, "AST::FunctionDef") && (_.name() == "main")).body();
+  END
+  WHEN "examples" DO
+    TEST THAT "keeps bare mutable fixed primitive array defaults compact" DO
+      MUTABLE body = parse_main_body(
+        """      FN main() RETURNS Void ->
+            MUTABLE ints: Int64[2];
+            MUTABLE floats: Float64[2];
+            MUTABLE strings: String[2];
+            MUTABLE bools: Bool[2];
+            RETURN;
+          END
+      """
+      );
+      MUTABLE defaults = body
+        |> WHERE isA?(_, "AST::VarDecl")
+        |> SELECT [_.name(), [_.value().class(), _.value().full_type().resolved(), _.value().full_type().capacity(), _.value().storage(
+
+        )]].to_h();
+      ASSERT defaults.fetch("ints") == [AST.DefaultArrayLit, symbol("Int64[2]"), 2, :stack], "expected defaults.fetch(\"ints\") to eq([AST::DefaultArrayLit, :\"Int64[2]\", 2, :stack])";
+      ASSERT defaults.fetch("floats") == [AST.DefaultArrayLit, symbol("Float64[2]"), 2, :stack], "expected defaults.fetch(\"floats\") to eq([AST::DefaultArrayLit, :\"Float64[2]\", 2, :stack])";
+      ASSERT defaults.fetch("strings") == [AST.DefaultArrayLit, symbol("String[2]"), 2, :stack], "expected defaults.fetch(\"strings\") to eq([AST::DefaultArrayLit, :\"String[2]\", 2, :stack])";
+      ASSERT defaults.fetch("bools") == [AST.DefaultArrayLit, symbol("Bool[2]"), 2, :stack], "expected defaults.fetch(\"bools\") to eq([AST::DefaultArrayLit, :\"Bool[2]\", 2, :stack])";
+    END
+    TEST THAT "reports return values as expression children" DO
+      MUTABLE value = Literal{ token: NIL, type: :INT64, value: 1, storage: NIL };
+      MUTABLE ret = ReturnNode{ token: NIL, value: value };
+      ASSERT AST.expression_children(ret) == [value], "expected AST.expression_children(ret) to eq([value])";
+    END
+    TEST THAT "coerces fixed-array defaults through their target type" DO
+      MUTABLE lit = DefaultArrayLit{ token: NIL, type_info: Type.array_of(:Int64, 2), storage: :stack };
+      ASSERT lit.coerce!(Type.array_of(:Int64, 2)) == [symbol("Int64[2]"), NIL], "expected lit.coerce!(Type.array_of(:Int64, 2)) to eq([:\"Int64[2]\", nil])";
+      MUTABLE coerced, error = lit.coerce!(Type.array_of(:String, 2));
+      ASSERT coerced.nil?(), "expected coerced to be_nil";
+      ASSERT error.contains?("Cannot initialize array of size 2 with 2 elements"), "expected error to include(\"Cannot initialize array of size 2 with 2 elements\")";
+    END
+    TEST THAT "rejects bare mutable declarations without a fixed primitive array type" DO
+      ASSERT_RAISES Input, parse_main_body(
+        """        STRUCT Box { value: Int64 }
+            FN main() RETURNS Void ->
+              MUTABLE boxes: Box[2];
+              RETURN;
+            END
+      """
+      );
+      ASSERT_RAISES Input, parse_main_body(
+        """        FN main() RETURNS Void ->
+              MUTABLE values: Int64[];
+              RETURN;
+            END
+      """
+      );
+    END
+  END
+END

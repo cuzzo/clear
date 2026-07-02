@@ -17,6 +17,6 @@ module RubyToClear
     result = Prism.parse_file(path)
     raise Error, "Failed to parse Ruby file #{path}: #{result.errors.map(&:message).join(', ')}" if result.failure?
 
-    Transpiler.new(File.read(path), raise_on_error: raise_on_error).transpile(result.value)
+    Transpiler.new(File.read(path), raise_on_error: raise_on_error, source_path: path).transpile(result.value)
   end
 end

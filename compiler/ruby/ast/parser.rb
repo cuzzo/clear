@@ -53,6 +53,7 @@ class ClearParser
   PatternItem = T.type_alias { T.any(String, Symbol, T::Hash[T.any(String, Symbol), Symbol]) }
   Pattern = T.type_alias { T::Array[PatternItem] }
   PatternCapture = T.type_alias { T.nilable(T.any(AST::Node, Type, String, Symbol, Integer, Float, T::Boolean)) }
+  PatternRule = T.type_alias { T.proc.params(start_token: Lexer::Token, args: T::Array[PatternCapture]).returns(T.nilable(AST::Node)) }
   EffectMetadataValue = T.type_alias { T.nilable(T.any(Lexer::Token, Integer, T::Boolean)) }
   EffectMetadata = T.type_alias { T::Hash[Symbol, EffectMetadataValue] }
   EffectsDecl = T.type_alias { [T.nilable(Symbol), T.nilable(EffectMetadata)] }
@@ -97,8 +98,13 @@ class ClearParser
     attrs
   end
 
-  sig { params(type: Symbol, value: String, node_class: T.nilable(T::Class[T.anything]), pattern: Pattern, inject: T::Array[TrueClass], block: T.nilable(StmtRule)).returns(StmtRule) }
-  def self.stmt(type, value, node_class = nil, pattern = [], inject: [], &block)
+  sig { params(type: Symbol, value: String, block: T.nilable(StmtRule)).returns(StmtRule) }
+  def self.stmt(type, value, &block)
+    @@stmt_rules[[type, value]] = T.must(block)
+  end
+
+  sig { params(type: Symbol, value: String, pattern: Pattern, inject: T::Array[TrueClass], block: T.nilable(PatternRule)).returns(StmtRule) }
+  def self.stmt_pattern(type, value, pattern, inject: [], &block)
     unless pattern.empty?
       # If pattern provided, create a block that runs the engine
       @@stmt_rules[[type, value]] = lambda do
@@ -106,25 +112,36 @@ class ClearParser
         start_token = current
         args = process_pattern(pattern)
         args.concat(inject)
-        T.unsafe(node_class).new(start_token, *args)
+        T.must(block).call(start_token, args)
       end
     else
-      @@stmt_rules[[type, value]] = T.must(block)
+      @@stmt_rules[[type, value]] = lambda do
+        T.bind(self, ClearParser) rescue nil
+        T.must(block).call(current, [])
+      end
     end
   end
 
-  sig { params(type: Symbol, value: T.nilable(String), node_class: T.nilable(T::Class[T.anything]), pattern: Pattern, block: T.nilable(PrimaryRule)).returns(PrimaryRule) }
-  def self.primary(type, value=nil, node_class = nil, pattern = [],  &block)
+  sig { params(type: Symbol, value: T.nilable(String), block: T.nilable(PrimaryRule)).returns(PrimaryRule) }
+  def self.primary(type, value=nil, &block)
+    @@primary_rules[[type, value]] = T.must(block)
+  end
+
+  sig { params(type: Symbol, value: T.nilable(String), pattern: Pattern, block: T.nilable(PatternRule)).returns(PrimaryRule) }
+  def self.primary_pattern(type, value, pattern, &block)
     unless pattern.empty?
       # If pattern provided, create a block that runs the engine
       @@primary_rules[[type, value]] = lambda do
         T.bind(self, ClearParser) rescue nil
         start_token = current
         args = process_pattern(pattern)
-        T.unsafe(node_class).new(start_token, *args)
+        T.must(block).call(start_token, args)
       end
     else
-      @@primary_rules[[type, value]] = T.must(block)
+      @@primary_rules[[type, value]] = lambda do
+        T.bind(self, ClearParser) rescue nil
+        T.must(block).call(current, [])
+      end
     end
   end
 
@@ -207,6 +224,7 @@ class ClearParser
   stmt(:KEYWORD, 'PUB')     { T.bind(self, ClearParser); parse_visibility_decl(:pub) }
   stmt(:KEYWORD, 'PRIVATE') { T.bind(self, ClearParser); parse_visibility_decl(:private) }
   stmt(:KEYWORD, 'IF') { T.bind(self, ClearParser); parse_if_statement }
+  stmt(:KEYWORD, 'COMPTIME') { T.bind(self, ClearParser); parse_comptime_statement }
   stmt(:KEYWORD, 'STRUCT') { T.bind(self, ClearParser); parse_struct_def }
   stmt(:KEYWORD, 'ENUM')   { T.bind(self, ClearParser); parse_enum_def }
   stmt(:KEYWORD, 'UNION')  { T.bind(self, ClearParser); parse_union_def }
@@ -214,7 +232,7 @@ class ClearParser
   stmt(:KEYWORD, 'FOR') { T.bind(self, ClearParser); parse_for_range }
   stmt(:KEYWORD, 'TIGHT') { T.bind(self, ClearParser); parse_tight_stmt }
   stmt(:KEYWORD, 'RETURN') { T.bind(self, ClearParser); parse_return }
-  stmt(:KEYWORD, 'ASSERT', AST::Assert, ['ASSERT', :expression, {',' => :STRING}, ';'])
+  stmt_pattern(:KEYWORD, 'ASSERT', ['ASSERT', :expression, {',' => :STRING}, ';']) { |tok, args| AST::Assert.new(tok, args[0], args[1]) }
   stmt(:KEYWORD, 'ASSERT_RAISES') { T.bind(self, ClearParser); parse_assert_raises }
   stmt(:KEYWORD, 'TEST') { T.bind(self, ClearParser); parse_test_block }
   stmt(:KEYWORD, 'STUB') { T.bind(self, ClearParser); parse_stub }
@@ -224,8 +242,8 @@ class ClearParser
   stmt(:KEYWORD, 'RAISE') { T.bind(self, ClearParser); parse_raise_stmt }
   stmt(:KEYWORD, 'EXIT') { T.bind(self, ClearParser); parse_exit }
   stmt(:KEYWORD, 'DIE') { T.bind(self, ClearParser); parse_die }
-  stmt(:KEYWORD, 'BREAK', AST::BreakNode, ['BREAK', ';'])
-  stmt(:KEYWORD, 'CONTINUE', AST::ContinueNode, ['CONTINUE', ';'])
+  stmt_pattern(:KEYWORD, 'BREAK', ['BREAK', ';']) { |tok, _args| AST::BreakNode.new(tok) }
+  stmt_pattern(:KEYWORD, 'CONTINUE', ['CONTINUE', ';']) { |tok, _args| AST::ContinueNode.new(tok) }
   stmt(:KEYWORD, 'WITH') { T.bind(self, ClearParser); parse_with_capability }
   stmt(:KEYWORD, 'SYNC') { T.bind(self, ClearParser); parse_sync_policy_block }
   stmt(:KEYWORD, 'DO')   { T.bind(self, ClearParser); parse_do_block }
@@ -282,48 +300,48 @@ class ClearParser
   primary(:KEYWORD, 'FALSE') { T.bind(self, ClearParser); t = consume(:KEYWORD); AST::Literal.new(t, :BOOLEAN, false) }
   primary(:KEYWORD, 'NIL') { T.bind(self, ClearParser); t = consume(:KEYWORD); AST::Literal.new(t, :NIL, nil) }
   primary(:KEYWORD, 'DEFAULT') { T.bind(self, ClearParser); t = consume(:KEYWORD, 'DEFAULT'); AST::DefaultLit.new(t) }
-  primary(:KEYWORD, 'CAST', AST::Cast, ['CAST', '(', :expression, 'AS', :type_annotation, ')'])
-  primary(:KEYWORD, 'COPY', AST::Copy, ['COPY', :expression])
-  primary(:KEYWORD, 'MOVE', AST::MoveNode, ['MOVE', :expression])
-  primary(:KEYWORD, 'GIVE', AST::MoveNode, ['GIVE', :expression])
-  primary(:KEYWORD, 'COPY', AST::CopyNode, ['COPY', :expression])
-  primary(:KEYWORD, 'CLONE', AST::CloneNode, ['CLONE', :expression])
-  primary(:KEYWORD, 'SHARE', AST::ShareNode, ['SHARE', :expression])
-  primary(:KEYWORD, 'LINK', AST::LinkNode, ['LINK', :expression])
-  primary(:KEYWORD, 'RESOLVE', AST::ResolveNode, ['RESOLVE', :expression])
-  primary(:KEYWORD, 'FREEZE', AST::FreezeNode, ['FREEZE', :expression])
+  primary_pattern(:KEYWORD, 'CAST', ['CAST', '(', :expression, 'AS', :type_annotation, ')']) { |tok, args| AST::Cast.new(tok, args[0], args[1]) }
+  primary_pattern(:KEYWORD, 'COPY', ['COPY', :expression]) { |tok, args| AST::Copy.new(tok, args[0]) }
+  primary_pattern(:KEYWORD, 'MOVE', ['MOVE', :expression]) { |tok, args| AST::MoveNode.new(tok, args[0]) }
+  primary_pattern(:KEYWORD, 'GIVE', ['GIVE', :expression]) { |tok, args| AST::MoveNode.new(tok, args[0]) }
+  primary_pattern(:KEYWORD, 'COPY', ['COPY', :expression]) { |tok, args| AST::CopyNode.new(tok, args[0]) }
+  primary_pattern(:KEYWORD, 'CLONE', ['CLONE', :expression]) { |tok, args| AST::CloneNode.new(tok, args[0]) }
+  primary_pattern(:KEYWORD, 'SHARE', ['SHARE', :expression]) { |tok, args| AST::ShareNode.new(tok, args[0]) }
+  primary_pattern(:KEYWORD, 'LINK', ['LINK', :expression]) { |tok, args| AST::LinkNode.new(tok, args[0]) }
+  primary_pattern(:KEYWORD, 'RESOLVE', ['RESOLVE', :expression]) { |tok, args| AST::ResolveNode.new(tok, args[0]) }
+  primary_pattern(:KEYWORD, 'FREEZE', ['FREEZE', :expression]) { |tok, args| AST::FreezeNode.new(tok, args[0]) }
   primary(:KEYWORD, 'BG')   { T.bind(self, ClearParser); parse_bg_block }
   primary(:KEYWORD, 'NEXT') { T.bind(self, ClearParser); parse_next_expr }
   primary(:PERCENT, '%') { T.bind(self, ClearParser); parse_sigil_construct }
-  primary(:KEYWORD, 'REQUIRE', AST::Require, ['REQUIRE', :STRING])
+  primary_pattern(:KEYWORD, 'REQUIRE', ['REQUIRE', :STRING]) { |tok, args| AST::Require.new(tok, args[0]) }
 
   # Pipeline operators use :pipe_expression (min precedence 2) so their
   # body expression stops before `|>` (precedence 1), enabling chaining:
   #   list |> SELECT _ * 2.0 |> WHERE _ > 5.0
-  primary(:KEYWORD, 'SELECT', AST::SelectOp, ['SELECT', :pipe_expression])
-  primary(:KEYWORD, 'WHERE', AST::WhereOp, ['WHERE', :pipe_expression])
-  primary(:KEYWORD, 'INDEX', AST::IndexOp, ['INDEX', :pipe_expression])
+  primary_pattern(:KEYWORD, 'SELECT', ['SELECT', :pipe_expression]) { |tok, args| AST::SelectOp.new(tok, args[0]) }
+  primary_pattern(:KEYWORD, 'WHERE', ['WHERE', :pipe_expression]) { |tok, args| AST::WhereOp.new(tok, args[0]) }
+  primary_pattern(:KEYWORD, 'INDEX', ['INDEX', :pipe_expression]) { |tok, args| AST::IndexOp.new(tok, args[0]) }
   primary(:KEYWORD, 'REDUCE') { T.bind(self, ClearParser); parse_reduce_op }
-  primary(:KEYWORD, 'ORDER_BY', AST::OrderByOp, ['ORDER_BY', :pipe_expression])
-  primary(:KEYWORD, 'LIMIT', AST::LimitOp, ['LIMIT', :pipe_expression])
-  primary(:KEYWORD, 'SKIP', AST::SkipOp, ['SKIP', :pipe_expression])
-  primary(:KEYWORD, 'UNNEST', AST::UnnestOp, ['UNNEST', :pipe_expression])
-  primary(:KEYWORD, 'DISTINCT', AST::DistinctOp, ['DISTINCT', :pipe_expression])
+  primary_pattern(:KEYWORD, 'ORDER_BY', ['ORDER_BY', :pipe_expression]) { |tok, args| AST::OrderByOp.new(tok, args[0]) }
+  primary_pattern(:KEYWORD, 'LIMIT', ['LIMIT', :pipe_expression]) { |tok, args| AST::LimitOp.new(tok, args[0]) }
+  primary_pattern(:KEYWORD, 'SKIP', ['SKIP', :pipe_expression]) { |tok, args| AST::SkipOp.new(tok, args[0]) }
+  primary_pattern(:KEYWORD, 'UNNEST', ['UNNEST', :pipe_expression]) { |tok, args| AST::UnnestOp.new(tok, args[0]) }
+  primary_pattern(:KEYWORD, 'DISTINCT', ['DISTINCT', :pipe_expression]) { |tok, args| AST::DistinctOp.new(tok, args[0]) }
   primary(:KEYWORD, 'EACH')  { T.bind(self, ClearParser); parse_each_op }
   primary(:KEYWORD, 'TAP')   { T.bind(self, ClearParser); parse_tap_op }
-  primary(:KEYWORD, 'FIND',    AST::FindOp,    ['FIND',    :pipe_expression])
-  primary(:KEYWORD, 'ANY',     AST::AnyOp,     ['ANY',     :pipe_expression])
-  primary(:KEYWORD, 'ALL',     AST::AllOp,     ['ALL',     :pipe_expression])
-  primary(:KEYWORD, 'COUNT',   AST::CountOp,   ['COUNT',   :pipe_expression])
-  primary(:KEYWORD, 'SUM',     AST::SumOp,     ['SUM',     :pipe_expression])
-  primary(:KEYWORD, 'AVERAGE', AST::AverageOp, ['AVERAGE', :pipe_expression])
-  primary(:KEYWORD, 'MIN',     AST::MinOp,     ['MIN',     :pipe_expression])
-  primary(:KEYWORD, 'MAX',     AST::MaxOp,     ['MAX',     :pipe_expression])
-  primary(:KEYWORD, 'TAKE_WHILE', AST::TakeWhileOp, ['TAKE_WHILE', :pipe_expression])
+  primary_pattern(:KEYWORD, 'FIND', ['FIND', :pipe_expression]) { |tok, args| AST::FindOp.new(tok, args[0]) }
+  primary_pattern(:KEYWORD, 'ANY', ['ANY', :pipe_expression]) { |tok, args| AST::AnyOp.new(tok, args[0]) }
+  primary_pattern(:KEYWORD, 'ALL', ['ALL', :pipe_expression]) { |tok, args| AST::AllOp.new(tok, args[0]) }
+  primary_pattern(:KEYWORD, 'COUNT', ['COUNT', :pipe_expression]) { |tok, args| AST::CountOp.new(tok, args[0]) }
+  primary_pattern(:KEYWORD, 'SUM', ['SUM', :pipe_expression]) { |tok, args| AST::SumOp.new(tok, args[0]) }
+  primary_pattern(:KEYWORD, 'AVERAGE', ['AVERAGE', :pipe_expression]) { |tok, args| AST::AverageOp.new(tok, args[0]) }
+  primary_pattern(:KEYWORD, 'MIN', ['MIN', :pipe_expression]) { |tok, args| AST::MinOp.new(tok, args[0]) }
+  primary_pattern(:KEYWORD, 'MAX', ['MAX', :pipe_expression]) { |tok, args| AST::MaxOp.new(tok, args[0]) }
+  primary_pattern(:KEYWORD, 'TAKE_WHILE', ['TAKE_WHILE', :pipe_expression]) { |tok, args| AST::TakeWhileOp.new(tok, args[0]) }
   primary(:KEYWORD, 'RECOVER') { T.bind(self, ClearParser); parse_recover_op }
   # COLLECT: pipe-terminal that joins a `~T@observable` (blocking)
   # and returns the underlying T. Takes no expression argument.
-  primary(:KEYWORD, 'COLLECT', AST::CollectOp, ['COLLECT'])
+  primary_pattern(:KEYWORD, 'COLLECT', ['COLLECT']) { |tok, _args| AST::CollectOp.new(tok) }
   primary(:KEYWORD, 'WINDOW') { T.bind(self, ClearParser); parse_window_op }
   primary(:KEYWORD, 'JOIN') { T.bind(self, ClearParser); parse_join_op }
   primary(:KEYWORD, 'SHARD') { T.bind(self, ClearParser); parse_shard_op }
@@ -581,11 +599,12 @@ class ClearParser
   def run_action(item)
     # Convention: :UPPER_CASE is a Token Type to eat
     return T.must(consume(item)).value if item == item.upcase
+    return parse_expression if item == :expression
     # :pipe_expression → parse_expression with min precedence = |> (1)
     # Excludes |> (prec 1, since 1 > 1 is false) but includes OR (prec 2).
     return parse_expression(1) if item == :pipe_expression
-    # :down_case => parse function to run
-    return send("parse_#{item}")
+    return parse_type_annotation if item == :type_annotation
+    error!(current, :PARSER_EXPECTED, expected: "known pattern action", got: item.to_s, type: current.type, line: current.line)
   end
 
   # Helpers for the literals (Keywords or Chars)
@@ -1894,7 +1913,7 @@ class ClearParser
   VALUE_BLOCK_STATEMENT_KEYWORDS = T.let(Set[
     'ASSERT', 'ASSERT_RAISES', 'BENCHMARK', 'BREAK', 'CONTINUE', 'DIE',
     'DO', 'ENUM', 'EXIT', 'EXTERN', 'FN', 'FOR', 'METHOD', 'MUTABLE',
-    'PASS', 'PRIVATE', 'PROFILE', 'PUB', 'RAISE', 'RETURN', 'SMASH',
+    'IF', 'MATCH', 'PARTIAL', 'PASS', 'PRIVATE', 'PROFILE', 'PUB', 'RAISE', 'RETURN', 'SMASH',
     'STRUCT', 'STUB', 'SYNC', 'TEST', 'TIGHT', 'UNION', 'WHILE', 'WITH',
     'YIELD'
   ], T::Set[String])
@@ -2001,7 +2020,7 @@ class ClearParser
     when '..<', '..<=', '..=' then 3
     when '||'             then 4
     when '&&'             then 5
-    when '==', '!=', '<', '>', '<=', '>=' then 6
+    when 'IS_A', '==', '!=', '<', '>', '<=', '>=' then 6
     when '+', '-', '%+', '%-', '!+', '!-' then 7
     when '*', '/', 'MOD', '%*', '!*'     then 8
     when '**'             then 9
@@ -2026,6 +2045,15 @@ class ClearParser
     when 'OR'
       rhs = parse_or_rescue
       return AST::BinaryOp.new(op_token, lhs, :OR_RESCUE, rhs)
+
+    when 'IS_A'
+      rhs = parse_unary
+      binding = nil
+      if match?(:KEYWORD, 'AS')
+        consume(:KEYWORD, 'AS')
+        binding = T.must(consume(:VAR_ID)).value
+      end
+      return AST::IsA.new(op_token, lhs, rhs, binding)
 
     when '|>'
       # SMOOTH binds Level 1, but its RHS allows chained pipe operators
@@ -2197,20 +2225,31 @@ class ClearParser
   end
 
   sig { returns(T.any(AST::IfStatement, AST::IfBind)) }
-  def parse_if_statement
-    if_token = consume(:KEYWORD, 'IF')
-    parse_if_chain(T.must(if_token))
+  def parse_comptime_statement
+    consume(:KEYWORD, 'COMPTIME')
+    unless match?(:KEYWORD, 'IF')
+      error!(current, :PARSER_EXPECTED, expected: "IF", got: current.value, type: current.type, line: current.line)
+    end
+    parse_if_statement(comptime: true)
   end
 
-  sig { params(if_token: Lexer::Token).returns(T.any(AST::IfStatement, AST::IfBind)) }
-  def parse_if_chain(if_token)
+  sig { params(comptime: T::Boolean).returns(T.any(AST::IfStatement, AST::IfBind)) }
+  def parse_if_statement(comptime: false)
+    if_token = consume(:KEYWORD, 'IF')
+    parse_if_chain(T.must(if_token), comptime: comptime)
+  end
+
+  sig { params(if_token: Lexer::Token, comptime: T::Boolean).returns(T.any(AST::IfStatement, AST::IfBind)) }
+  def parse_if_chain(if_token, comptime: false)
     condition = parse_expression
 
     # Shorthand: IF condition -> single_statement;
     if match?(:ARROW, '->')
       consume(:ARROW, '->')
       stmt = parse_statement
-      return AST::IfStatement.new(if_token, condition, [stmt].compact, [])
+      node = AST::IfStatement.new(if_token, condition, [stmt].compact, [])
+      node.comptime = comptime
+      return node
     end
 
     # Single bare bind: IF expr AS name [THEN ...]
@@ -2243,7 +2282,7 @@ class ClearParser
       # We recurse! We treat the ELSIF as the start of a new IF node.
       # This new node becomes the single statement inside our 'else_branch'.
       # Note: We do NOT consume 'END' here, the recursion handles it.
-      nested_if = parse_if_chain(previous)
+      nested_if = parse_if_chain(previous, comptime: comptime)
       else_branch << nested_if
 
     # Parse Optional 'ELSE'
@@ -2254,7 +2293,9 @@ class ClearParser
       consume(:KEYWORD, 'END')
     end
 
-    AST::IfStatement.new(if_token, condition, then_branch, else_branch)
+    node = AST::IfStatement.new(if_token, condition, then_branch, else_branch)
+    node.comptime = comptime
+    node
   end
 
   sig { params(if_token: Lexer::Token, bindings: T::Array[AST::Binding]).returns(AST::IfBind) }

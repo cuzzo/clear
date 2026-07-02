@@ -966,6 +966,7 @@ class MIRLowering
 
     # --- Control flow ---
     when AST::IfStatement       then lower_if(node)
+    when AST::IsA               then lower_is_a(node)
     when AST::IfBind            then lower_if_bind(node)
     when AST::WhileLoop         then lower_while(node)
     when AST::WhileBindLoop     then lower_while_bind(node)

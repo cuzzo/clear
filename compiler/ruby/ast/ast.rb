@@ -1887,6 +1887,16 @@ module AST
     # pipeline lowering switches to fiber-spawn-with-accumulator codegen.
     attr_accessor :observable_dest
   end
+  IsA          = Struct.new(:token, :left, :right, :binding) do
+    extend T::Sig
+    include Locatable
+    attr_accessor :runtime_variant_name
+    attr_accessor :runtime_payload_type
+    attr_accessor :runtime_indirect_payload_as
+
+    sig { returns(Type) }
+    def full_type; Type.new(:Bool); end
+  end
   UnaryOp      = Struct.new(:token, :op, :right) do
     extend T::Sig
     include Locatable
@@ -2042,6 +2052,7 @@ module AST
     sig { returns(T::Array[RawBody]) }
     def child_bodies = [then_branch, else_branch].compact
     attr_accessor :expr_mode           # true when used as an expression (x = IF ...)
+    attr_accessor :comptime            # true when parsed from COMPTIME IF
     attr_accessor :then_result_type    # Type of last value expression in then_branch
     attr_accessor :else_result_type    # Type of last value expression in else_branch
   end

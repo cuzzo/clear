@@ -1,0 +1,188 @@
+TEST TrueSyncPolymorphismParserStep1 DO
+  FN parse(src: Auto) RETURNS Auto ->
+    MUTABLE tokens = NIL;
+    tokens = Lexer.new(src).tokenize();
+    ClearParser.new(tokens, src).parse();
+  END
+  FN parse_first_stmt(src: Auto) RETURNS Auto ->
+    parse(src).statements().first();
+  END
+  WHEN "SYNC POLICY START ... END" DO
+    TEST THAT "parses a full policy with three handlers into AST::SyncPolicyDecl" DO
+      MUTABLE node = parse_first_stmt(
+        """        SYNC POLICY START
+                ON LockTimeout RETRY(3) THEN RAISE
+                ON MvccConflict RAISE
+                ON AtomicConflict RAISE
+            END
+      """
+      );
+      ASSERT isA?(node, "AST::SyncPolicyDecl"), "expected node to be_a(AST::SyncPolicyDecl)";
+      ASSERT node.handlers().size() == 3, "expected node.handlers().size() to eq(3)";
+    END
+    TEST THAT "carries each handler's selectors, retries, and action through" DO
+      node = parse_first_stmt(
+        """        SYNC POLICY START
+                ON LockTimeout RETRY(3) THEN RAISE
+                ON MvccConflict RAISE
+                ON AtomicConflict RAISE
+            END
+      """
+      );
+      MUTABLE first = node.handlers()[0];
+      MUTABLE second = node.handlers()[1];
+      MUTABLE third = node.handlers()[2];
+      ASSERT first.selectors().first().name() == :LockTimeout, "expected first.selectors().first().name() to eq(:LockTimeout)";
+      ASSERT first.retries() == 3, "expected first.retries() to eq(3)";
+      ASSERT first.action() == AST.ErrorActionKind.Raise, "expected first.action() to eq(AST::ErrorActionKind::Raise)";
+      ASSERT second.selectors().first().name() == :MvccConflict, "expected second.selectors().first().name() to eq(:MvccConflict)";
+      ASSERT second.retries().nil?(), "expected second.retries() to be_nil";
+      ASSERT second.action() == AST.ErrorActionKind.Raise, "expected second.action() to eq(AST::ErrorActionKind::Raise)";
+      ASSERT third.selectors().first().name() == :AtomicConflict, "expected third.selectors().first().name() to eq(:AtomicConflict)";
+      ASSERT third.action() == AST.ErrorActionKind.Raise, "expected third.action() to eq(AST::ErrorActionKind::Raise)";
+    END
+    TEST THAT "accepts a single handler" DO
+      node = parse_first_stmt("""        SYNC POLICY START
+                ON LockTimeout RAISE
+            END
+      """);
+      ASSERT isA?(node, "AST::SyncPolicyDecl"), "expected node to be_a(AST::SyncPolicyDecl)";
+      ASSERT node.handlers().size() == 1, "expected node.handlers().size() to eq(1)";
+    END
+    TEST THAT "errors when the body is empty" DO
+      ASSERT_RAISES Input, parse("""          SYNC POLICY START
+              END
+      """);
+    END
+    TEST THAT "errors when END is missing" DO
+      ASSERT_RAISES Input, parse("""          SYNC POLICY START
+                  ON LockTimeout RAISE
+      """);
+    END
+    TEST THAT "errors when POLICY keyword is missing" DO
+      ASSERT_RAISES Input, parse("""          SYNC START
+                  ON LockTimeout RAISE
+              END
+      """);
+    END
+    TEST THAT "is locatable (carries the SYNC token's line)" DO
+      MUTABLE src = "SYNC POLICY START\\n    ON LockTimeout RAISE\\nEND\\n";
+      node = parse_first_stmt(src);
+      ASSERT node.token().value() == "SYNC", "expected node.token().value() to eq(\"SYNC\")";
+      ASSERT node.token().line() == 1, "expected node.token().line() to eq(1)";
+    END
+    TEST THAT "two SYNC POLICY blocks parse fine; annotator (#325) rejects" DO
+      MUTABLE stmts = parse(
+        """        SYNC POLICY START
+                ON LockTimeout RAISE
+            END
+      
+            SYNC POLICY START
+                ON MvccConflict RAISE
+            END
+      """
+      ).statements();
+      ASSERT stmts.size() == 2, "expected stmts.size() to eq(2)";
+      ASSERT stmts |> ALL isA?(_, "AST::SyncPolicyDecl"), "expected stmts to all(be_a(AST::SyncPolicyDecl))";
+    END
+  END
+  WHEN "WITH POLYMORPHIC inside a function body" DO
+    TEST THAT "sets WithBlock#polymorphic = true on the brace form" DO
+      MUTABLE prog = parse(
+        """        FN run(c: Counter) ->
+                WITH POLYMORPHIC c AS x { x.value = x.value + 1; }
+                RETURN;
+            END
+      """
+      );
+      MUTABLE fn = prog.statements().first();
+      MUTABLE with_block = fn.body().first();
+      ASSERT isA?(with_block, "AST::WithBlock"), "expected with_block to be_a(AST::WithBlock)";
+      ASSERT with_block.polymorphic() == TRUE, "expected with_block.polymorphic() to be true";
+    END
+    TEST THAT "plain WITH leaves polymorphic falsy" DO
+      prog = parse(
+        """        FN run(c: Counter) ->
+                WITH c AS x { x.value = x.value + 1; }
+                RETURN;
+            END
+      """
+      );
+      with_block = prog
+        .statements()
+        .first()
+        .body()
+        .first();
+      ASSERT !(with_block.polymorphic()), "expected with_block.polymorphic() to be_falsey";
+    END
+    TEST THAT "WITH POLYMORPHIC POSSIBLE_DEADLOCK preserves both flags" DO
+      prog = parse(
+        """        FN run(a: Counter, b: Counter) ->
+                WITH POLYMORPHIC POSSIBLE_DEADLOCK a AS x, b AS y {
+                    x.value = y.value;
+                } ON Deadlock RAISE
+                RETURN;
+            END
+      """
+      );
+      with_block = prog
+        .statements()
+        .first()
+        .body()
+        .first();
+      ASSERT with_block.polymorphic() == TRUE, "expected with_block.polymorphic() to be true";
+      ASSERT isA?(with_block.deadlock_escape(), "Hash"), "expected with_block.deadlock_escape() to be_a(Hash)";
+      ASSERT with_block.deadlock_escape()[:kind] == :deadlock, "expected with_block.deadlock_escape()[:kind] to eq(:deadlock)";
+    END
+    TEST THAT "WITH POLYMORPHIC POSSIBLE_LOCK_CYCLE preserves both flags" DO
+      prog = parse(
+        """        FN run(a: Counter, b: Counter) ->
+                WITH POLYMORPHIC POSSIBLE_LOCK_CYCLE a AS x, b AS y {
+                    x.value = y.value;
+                } ON LockCycle RAISE
+                RETURN;
+            END
+      """
+      );
+      with_block = prog
+        .statements()
+        .first()
+        .body()
+        .first();
+      ASSERT with_block.polymorphic() == TRUE, "expected with_block.polymorphic() to be true";
+      ASSERT with_block.deadlock_escape()[:kind] == :lock_cycle, "expected with_block.deadlock_escape()[:kind] to eq(:lock_cycle)";
+    END
+    TEST THAT "POLYMORPHIC must come BEFORE POSSIBLE_DEADLOCK (left-to-right grammar)" DO
+      ASSERT_RAISES Input, parse(
+        """          FN run(c: Counter) ->
+                  WITH POSSIBLE_DEADLOCK POLYMORPHIC c AS x { x.value = 0; }
+                  RETURN;
+              END
+      """
+      );
+    END
+    TEST THAT "WITH POLYMORPHIC carries a per-WITH ON handler through" DO
+      prog = parse(
+        """        FN run(c: Counter) ->
+                WITH POLYMORPHIC c AS x { x.value = x.value + 1; }
+                ON MvccConflict RETRY(2) THEN RAISE
+                RETURN;
+            END
+      """
+      );
+      with_block = prog
+        .statements()
+        .first()
+        .body()
+        .first();
+      ASSERT with_block.polymorphic() == TRUE, "expected with_block.polymorphic() to be true";
+      ASSERT !(with_block.lock_error_clause().nil?()), "expected with_block.lock_error_clause() not_to be_nil";
+      ASSERT with_block
+        .lock_error_clause()
+        .selectors()
+        .first()
+        .name() == :MvccConflict, "expected with_block.lock_error_clause().selectors().first().name() to eq(:MvccConflict)";
+      ASSERT with_block.lock_error_clause().retries() == 2, "expected with_block.lock_error_clause().retries() to eq(2)";
+    END
+  END
+END

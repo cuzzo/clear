@@ -125,18 +125,59 @@ module MIRLoweringControlFlow
   sig { params(node: AST::IfStatement).returns(MIR::Node) }
   def lower_if(node)
     T.bind(self, MIRLowering) rescue nil
+    if node.condition.is_a?(AST::IsA) && node.condition.runtime_variant_name
+      return lower_runtime_is_a_if(node, node.condition)
+    end
+
     cond, cond_pending = lower_head { lower_control_condition(node.condition) }
     if node.expr_mode
       label = "__if_#{lowering_counters.next_block_expr_id}"
       then_body = lower_body_with_break(node.then_branch, label)
       else_body = lower_body_with_break(node.else_branch || [], label)
-      block = MIR::BlockExpr.new(label, [MIR::IfStmt.new(cond, then_body, else_body)])
+      if_stmt = MIR::IfStmt.new(cond, then_body, else_body)
+      if_stmt.comptime = !!node.comptime
+      block = MIR::BlockExpr.new(label, [if_stmt])
       return with_pending(cond_pending, block)
     end
 
     then_body = lower_body(node.then_branch)
     else_body = (node.else_branch && !node.else_branch.empty?) ? lower_body(node.else_branch) : nil
-    with_pending(cond_pending, MIR::IfStmt.new(cond, then_body, else_body))
+    if_stmt = MIR::IfStmt.new(cond, then_body, else_body)
+    if_stmt.comptime = !!node.comptime
+    with_pending(cond_pending, if_stmt)
+  end
+
+  sig { params(node: AST::IfStatement, condition: AST::IsA).returns(MIR::Node) }
+  def lower_runtime_is_a_if(node, condition)
+    T.bind(self, MIRLowering) rescue nil
+
+    subject, subject_pending = lower_head { lower_control_condition(condition.left) }
+    variant = T.must(condition.runtime_variant_name)
+    cond = union_tag_condition(T.cast(subject, MIR::Emittable), variant)
+    payload_bindings = runtime_is_a_payload_bindings(condition, T.cast(subject, MIR::Emittable), variant)
+
+    if node.expr_mode
+      label = "__if_#{lowering_counters.next_block_expr_id}"
+      then_body = payload_bindings + lower_body_with_break(node.then_branch, label)
+      else_body = lower_body_with_break(node.else_branch || [], label)
+      block = MIR::BlockExpr.new(label, [MIR::IfStmt.new(cond, then_body, else_body)])
+      return with_pending(subject_pending, block)
+    end
+
+    then_body = payload_bindings + lower_body(node.then_branch)
+    else_body = (node.else_branch && !node.else_branch.empty?) ? lower_body(node.else_branch) : nil
+    with_pending(subject_pending, MIR::IfStmt.new(cond, then_body, else_body))
+  end
+
+  sig { params(condition: AST::IsA, subject: MIR::Emittable, variant: String).returns(MatchBody) }
+  def runtime_is_a_payload_bindings(condition, subject, variant)
+    binding = condition.binding
+    return [] unless binding
+
+    payload = T.let(MIR::UnionPayloadGet.new(subject, variant), MIR::Emittable)
+    payload = MIR::Deref.new(payload) if condition.runtime_indirect_payload_as
+    is_mutable = condition.left.is_a?(AST::Identifier) && condition.left.was_moved == true
+    [MIR::Let.new(binding, payload, is_mutable, nil, "_ = &#{binding};")]
   end
 
   sig { params(node: AST::IfBind).returns(MIR::IfBindStmt) }

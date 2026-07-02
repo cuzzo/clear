@@ -77,6 +77,10 @@ module RubyToClear
       end
     end
 
+    def self.unsupported(transpiler, node, message)
+      transpiler.unsupported_expression(node, message)
+    end
+
     def self.argument_nodes(context)
       context.node.arguments ? context.node.arguments.arguments : []
     end
@@ -90,6 +94,8 @@ module RubyToClear
       case arg
       when Prism::ConstantReadNode
         arg.name.to_s
+      when Prism::ConstantPathNode
+        arg.location.slice.strip
       when Prism::SymbolNode
         arg.value.to_s
       when Prism::StringNode
@@ -97,11 +103,16 @@ module RubyToClear
       end
     end
 
+    def self.regex_node?(node)
+      node.is_a?(Prism::RegularExpressionNode) ||
+        node.is_a?(Prism::InterpolatedRegularExpressionNode)
+    end
+
     def self.static_call(context, clear_name, min:, max: min)
       args = arguments(context)
       unless args.length >= min && args.length <= max
         expected = min == max ? min.to_s : "#{min}..#{max}"
-        return context.transpiler.raise_unsupported("#{context.receiver_name}.#{context.ruby_name} expects #{expected} arguments", context.node)
+        return unsupported(context.transpiler, context.node, "#{context.receiver_name}.#{context.ruby_name} expects #{expected} arguments")
       end
       "#{clear_name}(#{args.join(', ')})"
     end
@@ -110,7 +121,7 @@ module RubyToClear
       args = arguments(context)
       unless args.length >= min && args.length <= max
         expected = min == max ? min.to_s : "#{min}..#{max}"
-        return context.transpiler.raise_unsupported("#{context.receiver_name}.#{context.ruby_name} expects #{expected} arguments", context.node)
+        return unsupported(context.transpiler, context.node, "#{context.receiver_name}.#{context.ruby_name} expects #{expected} arguments")
       end
 
       context.transpiler.require_package(package)
@@ -128,7 +139,7 @@ module RubyToClear
     end
 
     def self.unsupported_result?(value)
-      value.is_a?(String) && value.include?("# [UNSUPPORTED:")
+      value.is_a?(String) && (value.include?("# [UNSUPPORTED:") || value.include?("unsupportedRuby("))
     end
 
     def self.pipeline_source(receiver)
@@ -141,19 +152,32 @@ module RubyToClear
 
       if params && (params.optionals.any? || params.rest || params.posts.any? ||
                     params.keywords.any? || params.keyword_rest || params.block)
-        return transpiler.raise_unsupported("#{method_label} block parameter shape is not supported", node)
+        return unsupported(transpiler, node, "#{method_label} block parameter shape is not supported")
       end
 
       unless requireds.length >= min && requireds.length <= max
         expected = min == max ? min.to_s : "#{min}..#{max}"
-        return transpiler.raise_unsupported("#{method_label} block expects #{expected} required parameters", node)
+        return unsupported(transpiler, node, "#{method_label} block expects #{expected} required parameters")
       end
 
       unless requireds.all? { |param| param.respond_to?(:name) }
-        return transpiler.raise_unsupported("#{method_label} block parameter destructuring is not supported", node)
+        return unsupported(transpiler, node, "#{method_label} block parameter destructuring is not supported")
       end
 
       requireds.map { |param| param.name.to_s }
+    end
+
+    def self.pipeline_block_aliases(param_names)
+      case param_names.length
+      when 0
+        {}
+      when 1
+        { param_names[0] => "_" }
+      when 2
+        { param_names[0] => "_[0]", param_names[1] => "_[1]" }
+      else
+        {}
+      end
     end
 
     def self.unsafe_value_block_node(block_node)
@@ -189,7 +213,7 @@ module RubyToClear
 
     def self.lower_literal_block(node, block_node, transpiler, method_label, min_params:, max_params:, rename:)
       unless block_node.is_a?(Prism::BlockNode)
-        return transpiler.raise_unsupported("Unsupported #{method_label} block type: #{block_node.class.name}", node)
+        return unsupported(transpiler, node, "Unsupported #{method_label} block type: #{block_node.class.name}")
       end
 
       param_names = block_required_parameter_names(node, block_node, transpiler, method_label, min: min_params, max: max_params)
@@ -199,7 +223,7 @@ module RubyToClear
       transpiler.with_block_local_scope do
         transpiler.with_renames(aliases) do
           if (unsafe = unsafe_value_block_node(block_node))
-            next transpiler.raise_unsupported("#{method_label} block contains unsupported #{unsafe}", node)
+            next unsupported(transpiler, node, "#{method_label} block contains unsupported #{unsafe}")
           end
 
           lowering = lower_block_body(block_node, transpiler)
@@ -212,7 +236,7 @@ module RubyToClear
     def self.lower_block_body(block_node, transpiler)
       body = block_node.body
       unless body.is_a?(Prism::StatementsNode) && body.body.any?
-        return transpiler.raise_unsupported("Pipeline block must contain at least one expression", block_node)
+        return unsupported(transpiler, block_node, "Pipeline block must contain at least one expression")
       end
 
       statements = body.body
@@ -295,10 +319,10 @@ module RubyToClear
       "string" => %w[delete_prefix empty? end_with? include? index length lines size split start_with? strip]
     }.freeze
 
-    def self.block_value_lowering(node, transpiler, method_label, min_params: 0, max_params: 1)
+    def self.block_value_lowering(node, transpiler, method_label, min_params: 0, max_params: 2)
       block_node = node.block
       unless block_node
-        return transpiler.raise_unsupported("#{method_label} without a block is not supported", node)
+        return unsupported(transpiler, node, "#{method_label} without a block is not supported")
       end
 
       lower_literal_block(
@@ -309,8 +333,7 @@ module RubyToClear
         min_params: min_params,
         max_params: max_params,
         rename: lambda do |param_names|
-          param_name = param_names.first
-          param_name ? { param_name => "_" } : {}
+          pipeline_block_aliases(param_names)
         end
       )
     end
@@ -318,7 +341,7 @@ module RubyToClear
     def self.block_value_expression(receiver, node, transpiler, method_label)
       block_node = node.block
       unless block_node
-        return transpiler.raise_unsupported("#{method_label} without a block is not supported", node)
+        return unsupported(transpiler, node, "#{method_label} without a block is not supported")
       end
 
       if block_node.is_a?(Prism::BlockArgumentNode)
@@ -333,10 +356,10 @@ module RubyToClear
       lowering.value_code
     end
 
-    def self.block_effect_lowering(node, transpiler, method_label, min_params: 0, max_params: 1)
+    def self.block_effect_lowering(node, transpiler, method_label, min_params: 0, max_params: 2)
       block_node = node.block
       unless block_node
-        return transpiler.raise_unsupported("#{method_label} without a block is not supported", node)
+        return unsupported(transpiler, node, "#{method_label} without a block is not supported")
       end
 
       lower_literal_block(
@@ -347,8 +370,7 @@ module RubyToClear
         min_params: min_params,
         max_params: max_params,
         rename: lambda do |param_names|
-          param_name = param_names.first
-          param_name ? { param_name => "_" } : {}
+          pipeline_block_aliases(param_names)
         end
       )
     end
@@ -356,7 +378,7 @@ module RubyToClear
     def self.reduce_block_lowering(node, transpiler)
       block_node = node.block
       unless block_node
-        return transpiler.raise_unsupported("reduce without a block is not supported", node)
+        return unsupported(transpiler, node, "reduce without a block is not supported")
       end
 
       lower_literal_block(
@@ -389,7 +411,7 @@ module RubyToClear
     register("foreach", receiver: "File") do |context|
       args = arguments(context)
       unless args.length == 1
-        next context.transpiler.raise_unsupported("File.foreach expects 1 argument", context.node)
+        next unsupported(context.transpiler, context.node, "File.foreach expects 1 argument")
       end
 
       context.transpiler.require_package("fs")
@@ -399,7 +421,7 @@ module RubyToClear
       next lines unless block_node
 
       unless block_node.is_a?(Prism::BlockNode)
-        next context.transpiler.raise_unsupported("File.foreach block must be a literal block", context.node)
+        next unsupported(context.transpiler, context.node, "File.foreach block must be a literal block")
       end
 
       pipeline_effect_stage(lines, lines, context.node, context.transpiler, "File.foreach")
@@ -510,17 +532,17 @@ module RubyToClear
     end
 
     register("last_match", receiver: "Regexp") do |context|
-      context.transpiler.raise_unsupported("Regexp.last_match depends on Ruby's implicit regexp match state; use an explicit match result", context.node)
+      unsupported(context.transpiler, context.node, "Regexp.last_match depends on Ruby's implicit regexp match state; use an explicit match result")
     end
 
     register("new", receiver: "Regexp") do |context|
-      context.transpiler.raise_unsupported("Regexp.new is not supported; use explicit scanner or parser logic", context.node)
+      unsupported(context.transpiler, context.node, "Regexp.new is not supported; use explicit scanner or parser logic")
     end
 
     register("new", receiver: "StringScanner") do |context|
       args = arguments(context)
       unless args.length == 1
-        next context.transpiler.raise_unsupported("StringScanner.new expects 1 argument", context.node)
+        next unsupported(context.transpiler, context.node, "StringScanner.new expects 1 argument")
       end
       "Scanner{ source: #{args.first}, pos: 0 }"
     end
@@ -529,13 +551,13 @@ module RubyToClear
       args = arguments(context)
       if args.empty?
         if context.node.block
-          next context.transpiler.raise_unsupported("Set.new with a block requires a source enumerable", context.node)
+          next unsupported(context.transpiler, context.node, "Set.new with a block requires a source enumerable")
         end
         next "Set[]"
       end
 
       unless args.length == 1
-        next context.transpiler.raise_unsupported("Set.new expects 0 or 1 arguments", context.node)
+        next unsupported(context.transpiler, context.node, "Set.new expects 0 or 1 arguments")
       end
 
       source = args.first
@@ -587,7 +609,7 @@ module RubyToClear
     register("delete_prefix", receiver: "string") do |context|
       args = arguments(context)
       unless args.length == 1
-        next context.transpiler.raise_unsupported("delete_prefix expects 1 argument", context.node)
+        next unsupported(context.transpiler, context.node, "delete_prefix expects 1 argument")
       end
 
       "#{context.receiver_code}.deletePrefix(#{args.first})"
@@ -600,13 +622,22 @@ module RubyToClear
     register("is_a?") do |context|
       expected = static_first_argument_name(context)
       unless expected
-        next context.transpiler.raise_unsupported("is_a? requires a static type argument", context.node)
+        next context.transpiler.unsupported_expression(context.node, "is_a? requires a static type argument")
       end
 
+      receiver = context.receiver_code
       actual = static_ruby_type_for_shape(context.receiver_shape)
-      unless actual
-        next context.transpiler.raise_unsupported("is_a? requires a static receiver shape", context.node)
+      type_param = context.transpiler.current_type_param_for_receiver(context.receiver_name)
+      next "#{type_param} IS_A #{context.transpiler.clear_type_expr(expected)}" if type_param
+
+      expected_clear = context.transpiler.clear_type_expr(expected)
+      receiver_type = context.transpiler.static_clear_type_for_receiver(context.receiver_name)
+      next "TRUE" if receiver_type && receiver_type != "Auto" && receiver_type.to_s == expected_clear
+      if receiver_type && context.transpiler.runtime_union_narrowing_candidate?(receiver_type, expected_clear)
+        next "#{receiver} IS_A #{expected_clear}"
       end
+
+      next "isA?(#{receiver}, #{expected.inspect})" unless actual
 
       actual == expected ? "TRUE" : "FALSE"
     end
@@ -614,19 +645,41 @@ module RubyToClear
     register("respond_to?") do |context|
       method_name = static_first_argument_name(context)
       unless method_name
-        next context.transpiler.raise_unsupported("respond_to? requires a static method name", context.node)
+        next context.transpiler.unsupported_expression(context.node, "respond_to? requires a static method name")
       end
 
+      receiver = context.receiver_code
       methods = SHAPE_METHODS[context.receiver_shape.to_s]
-      unless methods
-        next context.transpiler.raise_unsupported("respond_to? requires a static receiver shape", context.node)
-      end
+      next "respondsTo?(#{receiver}, #{method_name.inspect})" unless methods
 
       methods.include?(method_name) ? "TRUE" : "FALSE"
     end
 
     register("strip") do |receiver, _node, _transpiler|
       "#{receiver}.trim()"
+    end
+
+    register("to_i") do |receiver, node, transpiler|
+      args = node.arguments ? node.arguments.arguments : []
+      unless args.empty?
+        next unsupported(transpiler, node, "to_i expects 0 arguments")
+      end
+
+      "(#{receiver}.toInt() OR 0)"
+    end
+
+    register("match?") do |receiver, node, transpiler|
+      args = node.arguments ? node.arguments.arguments : []
+      unless args.length == 1
+        next unsupported(transpiler, node, "match? expects 1 argument")
+      end
+
+      pattern = transpiler.visit(args.first)
+      if regex_node?(args.first)
+        "regexMatch?(#{receiver}, #{pattern})"
+      else
+        "#{receiver}.match?(#{pattern})"
+      end
     end
 
     register("start_with?") do |receiver, node, transpiler|
@@ -662,7 +715,7 @@ module RubyToClear
 
     register("map!") do |receiver, node, transpiler|
       unless mutable_receiver?(receiver)
-        next transpiler.raise_unsupported("map! is only supported on a mutable local receiver", node)
+        next unsupported(transpiler, node, "map! is only supported on a mutable local receiver")
       end
 
       block_body = block_expression(receiver, node, transpiler, "map!")
@@ -784,12 +837,32 @@ module RubyToClear
 
     register("gsub") do |receiver, node, transpiler|
       args = node.arguments ? node.arguments.arguments : []
-      if node.block || args.length != 2 || 
-         args[0].is_a?(Prism::RegularExpressionNode) || 
-         args[0].is_a?(Prism::InterpolatedRegularExpressionNode)
-        transpiler.raise_unsupported("gsub with regex or block is not supported", node)
+      if node.block || args.length != 2
+        next unsupported(transpiler, node, "gsub with regex or block is not supported")
       end
-      "#{receiver}.replace(#{transpiler.visit(args[0])}, #{transpiler.visit(args[1])})"
+
+      pattern = transpiler.visit(args[0])
+      replacement = transpiler.visit(args[1])
+      if regex_node?(args[0])
+        "regexReplaceAll(#{receiver}, #{pattern}, #{replacement})"
+      else
+        "#{receiver}.replace(#{pattern}, #{replacement})"
+      end
+    end
+
+    register("sub") do |receiver, node, transpiler|
+      args = node.arguments ? node.arguments.arguments : []
+      if node.block || args.length != 2
+        next unsupported(transpiler, node, "sub with block or invalid arguments is not supported")
+      end
+
+      pattern = transpiler.visit(args[0])
+      replacement = transpiler.visit(args[1])
+      if regex_node?(args[0])
+        "regexReplaceFirst(#{receiver}, #{pattern}, #{replacement})"
+      else
+        "replaceFirst(#{receiver}, #{pattern}, #{replacement})"
+      end
     end
 
     register("include?") do |receiver, node, transpiler|
@@ -819,15 +892,19 @@ module RubyToClear
     end
 
     register("each_pair") do |_receiver, node, transpiler|
-      transpiler.raise_unsupported("each_pair requires pair/destructuring block support", node)
+      unsupported(transpiler, node, "each_pair requires pair/destructuring block support")
     end
 
-    register("each_with_index") do |_receiver, node, transpiler|
-      transpiler.raise_unsupported("each_with_index requires indexed pipeline block support", node)
+    register("each_with_index") do |receiver, node, transpiler|
+      if node.block
+        pipeline_effect_stage(receiver, "#{receiver}.eachWithIndex()", node, transpiler, "each_with_index")
+      else
+        "#{receiver}.eachWithIndex()"
+      end
     end
 
     register("loop", receiver: "implicit") do |_receiver, node, transpiler|
-      transpiler.raise_unsupported("Ruby loop requires exact break/next semantics before lowering", node)
+      unsupported(transpiler, node, "Ruby loop requires exact break/next semantics before lowering")
     end
   end
 end

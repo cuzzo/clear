@@ -55,7 +55,7 @@ RSpec.describe "Ruby-to-CLEAR oracle corpus" do
         Set.new(values)
       RUBY
       clear: <<~CLEAR,
-        MUTABLE values: String@symbol[]@set = [:a, :b];
+        MUTABLE values: String[]@set = [:a, :b];
         values |> DISTINCT _;
       CLEAR
     },
@@ -88,13 +88,14 @@ RSpec.describe "Ruby-to-CLEAR oracle corpus" do
   it "keeps dynamic Ruby blockers localized in repair mode" do
     ruby_code = <<~RUBY
       ok = 1
-      send(:dynamic)
+      method_name = :dynamic
+      send(method_name)
       ok
     RUBY
     expected_clear = <<~CLEAR
       MUTABLE ok = 1;
-      # [UNSUPPORTED: CallNode at 2:0] send is a Ruby dynamic/reflection call: dynamic dispatch; replace with a closed case/table over known method names
-      # send(:dynamic)
+      MUTABLE method_name = :dynamic;
+      unsupportedRuby("CallNode at 3:0: send requires a static symbol or string method name");
       ok;
     CLEAR
     expect_transpile(ruby_code, expected_clear, raise_on_error: false)

@@ -125,11 +125,21 @@ module Annotator
       def visit_IfStatement(node)
         T.bind(self, SemanticAnnotator)
 
-        visit(node.condition)
+        if node.condition.is_a?(AST::IsA) && node.comptime
+          annotate_comptime_is_a!(node.condition)
+        else
+          if node.condition.is_a?(AST::IsA) && static_type_expr?(node.condition.left)
+            emit_is_a_needs_comptime_fix!(node)
+          end
+          with_if_is_a_condition(node.condition) { visit(node.condition) }
+        end
 
         branch_logic = [
           proc {
-            with_conditional_context { visit_stmts(node.then_branch) }
+            with_conditional_context do
+              declare_is_a_binding!(node.condition)
+              visit_stmts(node.then_branch)
+            end
             finalize_scope(node, branch: :then)
             node.then_drops
           },
@@ -147,6 +157,269 @@ module Annotator
         node.else_result_type = expr_result_type(node.else_branch)
 
         stamp_type!(node, :Void)
+      end
+
+      sig { params(node: AST::IsA).returns(T.nilable(Symbol)) }
+      def visit_IsA(node)
+        T.bind(self, SemanticAnnotator)
+
+        unless static_type_expr?(node.left)
+          annotate_runtime_is_a!(node)
+          stamp_type!(node, :Bool)
+          return nil
+        end
+
+        annotate_comptime_is_a!(node)
+        nil
+      end
+
+      sig { params(node: AST::IsA).void }
+      def annotate_comptime_is_a!(node)
+        T.bind(self, SemanticAnnotator)
+
+        annotate_is_a_operand!(node.left, side: "Left")
+        annotate_is_a_operand!(node.right, side: "Right")
+        stamp_type!(node, :Bool)
+      end
+
+      sig { params(condition: AST::Node, blk: T.proc.void).void }
+      def with_if_is_a_condition(condition, &blk)
+        T.bind(self, SemanticAnnotator)
+
+        previous = @current_if_is_a_condition
+        @current_if_is_a_condition = condition
+        blk.call
+      ensure
+        @current_if_is_a_condition = previous
+      end
+
+      sig { params(node: AST::IsA).void }
+      def annotate_runtime_is_a!(node)
+        T.bind(self, SemanticAnnotator)
+
+        visit(node.left)
+        subject_type = node.left.full_type!(context: "runtime IS_A subject")
+        type_name = T.cast(subject_type.generic_instance? ? subject_type.generic_base : subject_type.resolved, Symbol)
+        schema = T.cast(lookup_type_schema(type_name), T.nilable(MatchSchema))
+        unless Schemas.union?(schema)
+          error!(node.left, :IS_A_RUNTIME_NEEDS_UNION, got: subject_type.to_s)
+        end
+
+        union_schema = T.cast(schema, Schemas::UnionSchema)
+        subst = match_union_substitution(subject_type, union_schema, true)
+        variant_name = resolve_runtime_is_a_variant!(node, union_schema, type_name, subst)
+        node.runtime_variant_name = variant_name
+        stamp_runtime_is_a_target!(node.right, type_name)
+
+        binding = node.binding
+        return unless binding
+
+        raw_payload = runtime_union_payload(union_schema, variant_name)
+        if raw_payload.nil?
+          error!(node, :MATCH_UNIT_CAPTURE, binding: binding, variant: variant_name)
+          return
+        end
+
+        match_case = AST::MatchCase.new(kind: :eq, value: node.right, binding: binding, body: [])
+        node.runtime_payload_type = match_payload_binding_type(
+          MatchSubjectPlan.new(
+            expr_type: subject_type,
+            type_name: type_name,
+            schema: union_schema,
+            enum_subject: false,
+            union_subject: true,
+            union_subst: subst,
+          ),
+          variant_name,
+          raw_payload,
+          match_case,
+        )
+        node.runtime_indirect_payload_as = match_case.indirect_payload_as
+      end
+
+      sig do
+        params(
+          node: AST::IsA,
+          schema: Schemas::UnionSchema,
+          union_type: Symbol,
+          union_subst: T::Hash[Symbol, Symbol]
+        ).returns(String)
+      end
+      def resolve_runtime_is_a_variant!(node, schema, union_type, union_subst)
+        T.bind(self, SemanticAnnotator)
+
+        target_names = runtime_is_a_target_names(node.right)
+        variant_key = target_names.filter_map { |name| runtime_union_variant_key(schema, name) }.first
+        return T.must(variant_key).to_s if variant_key
+
+        payload_matches = schema.variants.keys.select do |variant|
+          payload = normalized_match_payload(schema.variants[variant], union_subst)
+          runtime_is_a_payload_matches?(payload, target_names, union_type, variant.to_s)
+        end
+
+        if payload_matches.length == 1
+          return payload_matches.first.to_s
+        elsif payload_matches.length > 1
+          error!(node, :IS_A_RUNTIME_AMBIGUOUS_PAYLOAD,
+            target: runtime_is_a_target_label(node.right),
+            union: union_type,
+            variants: payload_matches.map(&:to_s).sort.join(', '))
+        end
+
+        error!(node, :IS_A_RUNTIME_UNKNOWN_VARIANT,
+          target: runtime_is_a_target_label(node.right),
+          union: union_type)
+      end
+
+      sig { params(node: AST::Node).returns(T::Array[String]) }
+      def runtime_is_a_target_names(node)
+        segments = runtime_is_a_target_segments(node)
+        full = segments.join(".")
+        [full, segments.last].compact.uniq
+      end
+
+      sig { params(node: AST::Node).returns(T::Array[String]) }
+      def runtime_is_a_target_segments(node)
+        case node
+        when AST::Identifier
+          [node.name]
+        when AST::GetField
+          runtime_is_a_target_segments(T.cast(node.target, AST::Node)) + [node.field.to_s]
+        else
+          [node.token_value.to_s]
+        end
+      end
+
+      sig { params(node: AST::Node).returns(String) }
+      def runtime_is_a_target_label(node)
+        runtime_is_a_target_segments(node).join(".")
+      end
+
+      sig { params(schema: Schemas::UnionSchema, name: String).returns(T.nilable(T.any(String, Symbol))) }
+      def runtime_union_variant_key(schema, name)
+        schema.variants.keys.find { |key| key.to_s == name.to_s }
+      end
+
+      sig { params(schema: Schemas::UnionSchema, variant_name: String).returns(MatchPayload) }
+      def runtime_union_payload(schema, variant_name)
+        key = runtime_union_variant_key(schema, variant_name)
+        key ? schema.variants[key] : nil
+      end
+
+      sig { params(payload: MatchPayload, target_names: T::Array[String], union_type: Symbol, variant_name: String).returns(T::Boolean) }
+      def runtime_is_a_payload_matches?(payload, target_names, union_type, variant_name)
+        case payload
+        when Type
+          payload_name = payload.resolved.to_s
+          payload_names = [payload_name, payload_name.split(".").last].uniq
+          (payload_names & target_names).any?
+        when Schemas::InlineStructVariant
+          synthetic_name = "#{union_type}_#{variant_name}"
+          ([synthetic_name, variant_name] & target_names).any?
+        when Symbol
+          payload_name = payload.to_s
+          ([payload_name, payload_name.split(".").last] & target_names).any?
+        else
+          false
+        end
+      end
+
+      sig { params(node: AST::Node, type_name: Symbol).void }
+      def stamp_runtime_is_a_target!(node, type_name)
+        T.bind(self, SemanticAnnotator)
+
+        case node
+        when AST::GetField
+          stamp_runtime_is_a_target!(T.cast(node.target, AST::Node), type_name)
+          stamp_type!(node, type_name)
+        when AST::Identifier
+          stamp_type!(node, :Type)
+        else
+          visit(node)
+        end
+      end
+
+      sig { params(node: AST::Node, side: String).void }
+      def annotate_is_a_operand!(node, side:)
+        T.bind(self, SemanticAnnotator)
+
+        if static_type_expr?(node)
+          stamp_type!(node, :Type)
+        else
+          visit(node)
+        end
+
+        type_info = node.full_type!(context: "IS_A #{side.downcase} operand")
+        return if type_info.resolved == :Type
+
+        error!(node, :IS_A_OPERAND_NEEDS_TYPE, side: side, got: type_info.to_s)
+      end
+
+      sig { params(node: AST::Node).returns(T::Boolean) }
+      def static_type_expr?(node)
+        T.bind(self, SemanticAnnotator)
+
+        case node
+        when AST::Identifier
+          name = node.name.to_sym
+          current_function_type_param?(name) ||
+            Type::ZIG_TYPE_MAP.key?(name) ||
+            !!lookup_type_schema(name)
+        when AST::GetField
+          static_dotted_type_expr?(node)
+        else
+          false
+        end
+      end
+
+      sig { params(node: AST::GetField).returns(T::Boolean) }
+      def static_dotted_type_expr?(node)
+        return false unless node.target.is_a?(AST::Identifier)
+
+        namespace = T.cast(node.target, AST::Identifier).name
+        namespace == "AST"
+      end
+
+      sig { params(node: AST::IfStatement).void }
+      def emit_is_a_needs_comptime_fix!(node)
+        fix = Fix.new(
+          description: "Insert COMPTIME before IF",
+          confidence: :auto,
+          edits: [
+            Edit.new(
+              span: Span.new(file: nil, line: node.token.line, col: node.token.column, length: 0),
+              replacement: "COMPTIME ",
+            )
+          ],
+        )
+        fixable!(
+          node,
+          category: :type,
+          level: :error,
+          message: "`IS_A` type predicates must be written as `COMPTIME IF`.",
+          fixes: [fix],
+          raise_in_collector: true,
+        )
+      end
+
+      sig { params(condition: AST::Node).void }
+      def declare_is_a_binding!(condition)
+        return unless condition.is_a?(AST::IsA)
+        binding = condition.binding
+        return unless binding
+
+        if condition.runtime_variant_name
+          payload_type = condition.runtime_payload_type
+          return unless payload_type
+
+          current_scope.declare(binding, nil, payload_type, false, false, nil, :stack)
+          og_declare(binding, nil, payload_type)
+          classify_ownership!(current_scope.local_entry!(binding))
+          borrow_match_payload_binding!(binding)
+          return
+        end
+
+        current_scope.declare(binding, nil, Type.new(:Type), false, false, nil, :stack)
       end
 
       sig { params(node: AST::IfBind).returns(Symbol) }

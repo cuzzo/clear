@@ -175,6 +175,7 @@ class MIREmitter
     when MIR::FnRef            then "&#{node.name}"
     when MIR::LockAcquire      then emit_lock_acquire(node)
     when MIR::TypeOf           then "@TypeOf(#{emit(node.expr)})"
+    when MIR::TypeEq           then "(#{emit(node.left)} == #{emit(node.right)})"
     when MIR::StructInit       then emit_struct_init(node)
     when MIR::ArrayInit        then emit_array_init(node)
     when MIR::ArrayDefaultInit then emit_array_default_init(node)
@@ -1702,6 +1703,7 @@ class MIREmitter
   sig { params(node: MIR::IfStmt).returns(String) }
   def emit_if_stmt(node)
     cond = emit(node.cond)
+    cond = "comptime #{cond}" if node.comptime
     then_body = emit_body(node.then_body)
     result = "if (#{cond}) {\n#{then_body}\n}"
     if node.else_body && !node.else_body.empty?

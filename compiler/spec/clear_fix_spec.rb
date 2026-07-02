@@ -56,6 +56,22 @@ RSpec.describe "./clear fix", :integration do
     expect(File.read(path)).to eq("FN main() RETURNS Int64 ->\n  x = 42;\n  RETURN x;\nEND\n")
   end
 
+  it "does not rewrite uppercase constructor names to in-scope variables" do
+    path = write("constructor_name.clear", <<~CLEAR)
+      FN main(src: String) RETURNS Void ->
+        exp = 1;
+        tokens = Lexer.new(src);
+        RETURN;
+      END
+    CLEAR
+
+    out, _err, status = run_clear("autofix", path)
+
+    expect(status).to eq(0)
+    expect(out).to include("no fixable findings")
+    expect(File.read(path)).to include("Lexer.new(src)")
+  end
+
   it "`build --fix` applies a representative parser fix and retries the build" do
     path = write("build_fix.clear", "FN main() RETURNS Int64 ->\n  x = 42\n  RETURN x;\nEND\n")
 

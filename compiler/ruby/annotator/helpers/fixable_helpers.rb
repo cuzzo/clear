@@ -126,7 +126,11 @@ module FixableHelper
   sig { params(token: Lexer::Token, name: NameCandidate, candidates: T::Array[NameCandidate], message: String, fix_label: String).returns(NilClass) }
   def emit_registry_mismatch!(token, name, candidates, message, fix_label)
     T.bind(self, SemanticAnnotator) rescue nil
-    best = closest_name(name, candidates)
+    best = if fix_label == "closest in-scope variable" && name.to_s.match?(/\A[A-Z]/)
+      nil
+    else
+      closest_name(name, candidates)
+    end
     fixes = []
     if best
       fixes << Fix.new(
@@ -168,7 +172,11 @@ module FixableHelper
     T.bind(self, SemanticAnnotator) rescue nil
     token_line = T.cast(T.unsafe(token).line, Integer)
     token_column = T.cast(T.unsafe(token).column, Integer)
-    best = closest_name(name, candidates)
+    best = if fix_label == "closest in-scope variable" && name.to_s.match?(/\A[A-Z]/)
+      nil
+    else
+      closest_name(name, candidates)
+    end
     fixes = []
     if best
       fixes << Fix.new(

@@ -355,6 +355,49 @@ module MIRLoweringExpressions
     emit_binary_operation_plan(binary_operation_plan(node))
   end
 
+  sig { params(node: AST::IsA).returns(MIR::Node) }
+  def lower_is_a(node)
+    T.bind(self, MIRLowering) rescue nil
+
+    if node.runtime_variant_name
+      subject = T.cast(lower(node.left), MIR::Emittable)
+      return MIR::BinOp.new("==", active_tag_call(subject), MIR::EnumTag.new(variant: T.must(node.runtime_variant_name)))
+    end
+
+    MIR::TypeEq.new(lower_type_value_expr(node.left), lower_type_value_expr(node.right))
+  end
+
+  sig { params(node: AST::Node).returns(MIR::Node) }
+  def lower_type_value_expr(node)
+    T.bind(self, MIRLowering) rescue nil
+
+    case node
+    when AST::Identifier
+      MIR::Ident.new(type_value_zig_name(node.name))
+    when AST::GetField
+      MIR::Ident.new(dotted_type_value_zig_name(node))
+    else
+      lower(node)
+    end
+  end
+
+  sig { params(name: String).returns(String) }
+  def type_value_zig_name(name)
+    Type.new(name.to_sym).zig_type
+  end
+
+  sig { params(node: AST::GetField).returns(String) }
+  def dotted_type_value_zig_name(node)
+    if node.target.is_a?(AST::Identifier)
+      namespace = T.cast(node.target, AST::Identifier).name
+      return type_value_zig_name(node.field.to_s) if namespace == "AST"
+
+      return "#{namespace}.#{node.field}"
+    end
+
+    raise "MIRLowering: unsupported dotted type expression #{node.inspect}"
+  end
+
   sig { params(node: AST::BinaryOp).returns(BinaryOperationPlan) }
   def binary_operation_plan(node)
     T.bind(self, MIRLowering) rescue nil

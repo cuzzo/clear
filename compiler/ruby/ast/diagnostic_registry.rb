@@ -383,6 +383,34 @@ module DiagnosticRegistry
       template: "Type Error: Conflicting inference for '%{param}' in '%{fn}': got '%{first}' and '%{second}'.",
       summary:  "Generic function call: the same type parameter inferred to two different types.",
     },
+    IS_A_OPERAND_NEEDS_TYPE: {
+      severity: :error, category: :type,
+      template: "Type Error: %{side} side of IS_A must be a type, got %{got}.",
+      summary:  "`IS_A` compares compile-time type values; both operands must be types.",
+      cause: "`IS_A` is a compile-time type predicate. A normal value such as an Int64, Bool, struct instance, or local variable cannot appear on either side.",
+      fix_hint: "Use a type parameter or type name on both sides, and place the predicate under COMPTIME IF.",
+    },
+    IS_A_RUNTIME_NEEDS_UNION: {
+      severity: :error, category: :type,
+      template: "Runtime IS_A requires a union-typed value on the left, got %{got}.",
+      summary:  "`value IS_A Variant` only works for closed union values.",
+      cause: "The runtime form of `IS_A` is sugar for checking a union value's active tag. Non-union values do not carry a variant tag.",
+      fix_hint: "Use `COMPTIME IF T IS_A SomeType THEN ... END` for static type-parameter checks, or change the value's type to a UNION and test one of that union's variants.",
+    },
+    IS_A_RUNTIME_UNKNOWN_VARIANT: {
+      severity: :error, category: :type,
+      template: "Runtime IS_A target %{target} is not a variant of union %{union}.",
+      summary:  "`value IS_A Target` must name a variant of the value's union type.",
+      cause: "The compiler lowers runtime `IS_A` to an active-tag comparison. That requires resolving the target to exactly one variant in the subject union.",
+      fix_hint: "Use the explicit variant path, for example `%{union}.SomeVariant`, or choose a payload type that appears in exactly one variant of the union.",
+    },
+    IS_A_RUNTIME_AMBIGUOUS_PAYLOAD: {
+      severity: :error, category: :type,
+      template: "Runtime IS_A target %{target} matches multiple variants of union %{union}: %{variants}.",
+      summary:  "Payload-type shorthand for runtime `IS_A` must resolve to one variant.",
+      cause: "More than one variant in the union carries the requested payload type, so the shorthand would not say which active tag to test.",
+      fix_hint: "Use the explicit variant path, for example `%{union}.SomeVariant`, to remove the ambiguity.",
+    },
 
     # ===================================================================
     # FUNCTION CALLS

@@ -44,6 +44,16 @@ RSpec.describe "destructuring assignment" do
     expect(parser.send(:try_parse_value_block_statement)).to be_a(AST::DestructuringAssignment)
   end
 
+  it "parses control-flow statements inside lambda value blocks before the result" do
+    source = "cb: FN() -> Int64 = %() -> { IF TRUE THEN PASS END 1_i64 };"
+    ast = ClearParser.new(Lexer.new(source).tokenize, source).parse
+
+    lambda_body = ast.statements.first.value.body
+    expect(lambda_body).to be_a(AST::BlockExpr)
+    expect(lambda_body.body.first).to be_a(AST::IfStatement)
+    expect(lambda_body.result).to be_a(AST::Literal)
+  end
+
   it "coerces target type setters through Type" do
     target = AST::DestructureTarget.new(Lexer::Token.new(:VAR_ID, "a", 1, 1), "a", nil, false)
 

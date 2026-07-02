@@ -406,6 +406,10 @@ module Annotator
         # which restricts to local scope + function-as-value references.
         scope = smooth_depth > 0 ? lookup_scope_for(node.name) : resolve_variable_scope(node.name)
         unless scope
+          if current_function_type_param?(node.name.to_sym)
+            stamp_type!(node, :Type)
+            return
+          end
           # Check if it's a type name used as a comptime argument (e.g., parseFromSlice(MyDoc, ...))
           type_schema = lookup_type_schema(node.name.to_sym)
           if type_schema

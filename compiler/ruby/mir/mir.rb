@@ -1107,6 +1107,7 @@ module MIR
   IfStmt = Struct.new(:cond, :then_body, :else_body) do
     extend T::Sig
     include Stmt
+    attr_accessor :comptime
     sig { returns(T::Array[Emittable]) }
     def child_exprs = compact_child_exprs([cond])
     sig { returns(T::Array[BodySlot]) }
@@ -3912,6 +3913,15 @@ module MIR
     def expr
       self[:expr]
     end
+  end
+
+  # Comptime type equality predicate.
+  # Zig: LeftType == RightType
+  TypeEq = Struct.new(:left, :right) do
+    extend T::Sig
+    include Expr
+    sig { returns(T::Array[Emittable]) }
+    def child_exprs = compact_child_exprs([left, right])
   end
 
   # Struct initialization.

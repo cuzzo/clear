@@ -1,0 +1,180 @@
+TEST ClearParserEFFECTSREENTRANTClause DO
+  FN parse(source: Auto) RETURNS Auto ->
+    MUTABLE tokens = NIL;
+    tokens = Lexer.new(source).tokenize();
+    ClearParser.new(tokens, source).parse();
+  END
+  FN fn(ast: Auto, name = "main": Auto) RETURNS Auto ->
+    ast.statements() |> FIND (isA?(_, "AST::FunctionDef") && (_.name() == name));
+  END
+  WHEN "examples" DO
+    TEST THAT "leaves effects_decl nil when no clause is present" DO
+      MUTABLE ast = parse("""      FN main() RETURNS Void ->
+            RETURN;
+          END
+      """);
+      ASSERT(fn(ast).effects_decl()).nil?(), "expected fn(ast).effects_decl() to be_nil";
+    END
+    TEST THAT "parses `EFFECTS REENTRANT` as :reentrant" DO
+      ast = parse(
+        """      FN walk(n: Int64) RETURNS Void
+            EFFECTS REENTRANT ->
+            RETURN;
+          END
+      """
+      );
+      ASSERT fn(ast, "walk").effects_decl() == :reentrant, "expected fn(ast, \"walk\").effects_decl() to eq(:reentrant)";
+    END
+    TEST THAT "parses `EFFECTS REENTRANT:THUNK` as :reentrant_thunk" DO
+      ast = parse(
+        """      FN factorial(n: Int64) RETURNS Int64
+            EFFECTS REENTRANT:THUNK ->
+            RETURN n;
+          END
+      """
+      );
+      ASSERT fn(ast, "factorial").effects_decl() == :reentrant_thunk, "expected fn(ast, \"factorial\").effects_decl() to eq(:reentrant_thunk)";
+    END
+    TEST THAT "parses `EFFECTS REENTRANT:TAIL_CALL` as :reentrant_tail_call" DO
+      ast = parse(
+        """      FN sum(n: Int64, acc: Int64) RETURNS Int64
+            EFFECTS REENTRANT:TAIL_CALL ->
+            RETURN acc;
+          END
+      """
+      );
+      ASSERT fn(ast, "sum").effects_decl() == :reentrant_tail_call, "expected fn(ast, \"sum\").effects_decl() to eq(:reentrant_tail_call)";
+    END
+    TEST THAT "rejects an unknown REENTRANT variant" DO
+      ASSERT_RAISES Input, parse(
+        """        FN x() RETURNS Void
+              EFFECTS REENTRANT:WAFFLES ->
+              RETURN;
+            END
+      """
+      );
+    END
+    TEST THAT "rejects a non-REENTRANT effect at function level" DO
+      ASSERT_RAISES Input, parse(
+        """        FN x() RETURNS Void
+              EFFECTS HEAP ->
+              RETURN;
+            END
+      """
+      );
+    END
+    TEST THAT "rejects legacy @reentrant before an EFFECTS REENTRANT clause" DO
+      ASSERT_RAISES Input, parse(
+        """        FN x() RETURNS Void @reentrant
+              EFFECTS REENTRANT ->
+              RETURN;
+            END
+      """
+      );
+    END
+    TEST THAT "sets tail_call false when only plain EFFECTS REENTRANT is used" DO
+      ast = parse(
+        """      FN walk() RETURNS Void
+            EFFECTS REENTRANT ->
+            RETURN;
+          END
+      """
+      );
+      ASSERT !(fn(ast, "walk").tail_call()), "expected fn(ast, \"walk\").tail_call() to be_falsey";
+    END
+    TEST THAT "rejects legacy @reentrant on its own" DO
+      ASSERT_RAISES Input, parse(
+        """        FN walk() RETURNS Void @reentrant ->
+              RETURN;
+            END
+      """
+      );
+    END
+    TEST THAT "sets tail_call for EFFECTS REENTRANT:TAIL_CALL" DO
+      ast = parse(
+        """      FN sum(n: Int64) RETURNS Int64 EFFECTS REENTRANT:TAIL_CALL ->
+            RETURN n;
+          END
+      """
+      );
+      MUTABLE f = fn(ast, "sum");
+      ASSERT f.tail_call() == TRUE, "expected f.tail_call() to be(true)";
+      ASSERT f.effects_decl() == :reentrant_tail_call, "expected f.effects_decl() to eq(:reentrant_tail_call)";
+    END
+  END
+END
+TEST ClearParserREQUIRESNONREENTRANTClause DO
+  FN parse(source: Auto) RETURNS Auto ->
+    MUTABLE tokens = NIL;
+    tokens = Lexer.new(source).tokenize();
+    ClearParser.new(tokens, source).parse();
+  END
+  FN fn(ast: Auto, name = "main": Auto) RETURNS Auto ->
+    ast.statements() |> FIND (isA?(_, "AST::FunctionDef") && (_.name() == name));
+  END
+  WHEN "examples" DO
+    TEST THAT "leaves requires_clauses nil when none are declared" DO
+      ast = parse("""      FN main() RETURNS Void ->
+            RETURN;
+          END
+      """);
+      ASSERT(fn(ast).requires_clauses()).nil?(), "expected fn(ast).requires_clauses() to be_nil";
+    END
+    TEST THAT "parses a single `REQUIRES f: NON_REENTRANT` clause" DO
+      ast = parse(
+        """      FN map(items: Int64[], f: FN(Int64) -> Int64) RETURNS !Int64[]
+            REQUIRES f: NON_REENTRANT ->
+            RETURN items;
+          END
+      """
+      );
+      ASSERT fn(ast, "map").requires_clauses() == {"f": :non_reentrant}, "expected fn(ast, \"map\").requires_clauses() to eq(\"f\" => :non_reentrant)";
+    END
+    TEST THAT "parses multiple REQUIRES clauses on independent parameters" DO
+      ast = parse(
+        """      FN apply2(f: FN(Int64) -> Int64, g: FN(Int64) -> Int64, x: Int64) RETURNS Int64
+            REQUIRES f: NON_REENTRANT
+            REQUIRES g: NON_REENTRANT ->
+            RETURN x;
+          END
+      """
+      );
+      ASSERT fn(ast, "apply2").requires_clauses() == {"f": :non_reentrant, "g": :non_reentrant}, """expected fn(ast, "apply2").requires_clauses() to eq(
+          "f" => :non_reentrant,
+          "g" => :non_reentrant,
+        )""";
+    END
+    TEST THAT "stacks REQUIRES with EFFECTS REENTRANT" DO
+      ast = parse(
+        """      FN reduce(items: Int64[], step: FN(Int64, Int64) -> Int64) RETURNS Int64
+            EFFECTS REENTRANT
+            REQUIRES step: NON_REENTRANT ->
+            RETURN 0;
+          END
+      """
+      );
+      f = fn(ast, "reduce");
+      ASSERT f.effects_decl() == :reentrant, "expected f.effects_decl() to eq(:reentrant)";
+      ASSERT f.requires_clauses() == {"step": :non_reentrant}, "expected f.requires_clauses() to eq(\"step\" => :non_reentrant)";
+    END
+    TEST THAT "rejects an unknown REQUIRES kind" DO
+      ASSERT_RAISES Input, parse(
+        """        FN x(f: FN() -> Void) RETURNS Void
+              REQUIRES f: WAFFLES ->
+              RETURN;
+            END
+      """
+      );
+    END
+    TEST THAT "rejects duplicate REQUIRES clauses for the same name" DO
+      ASSERT_RAISES Input, parse(
+        """        FN x(f: FN() -> Void) RETURNS Void
+              REQUIRES f: NON_REENTRANT
+              REQUIRES f: NON_REENTRANT ->
+              RETURN;
+            END
+      """
+      );
+    END
+  END
+END
