@@ -74,17 +74,22 @@ module RubyToClear
       @type_aliases = {}
       @union_types = {}
       @generated_union_defs = {}
+      @method_return_types = {}
       @required_packages = Set.new
       @current_function_can_fail = false
       @inside_function = false
       @current_function_returns_value = false
       @local_shapes = {}
+      @local_types = {}
       @singleton_class_depth = 0
       @current_function_type_bindings = {}
     end
 
     def transpile(program_node)
       preload_required_metadata(program_node)
+      collect_type_aliases_from_node(program_node)
+      collect_ast_node_variants_from_node(program_node)
+      collect_method_signature_metadata_from_node(program_node)
       collect_method_params_from_node(program_node)
       body = visit(program_node)
       requires = @required_packages.sort.map { |package| "REQUIRE \"pkg:#{package}\"" }
@@ -115,10 +120,12 @@ module RubyToClear
     def with_block_local_scope
       old_declared = @declared_locals.dup
       old_shapes = @local_shapes.dup
+      old_types = @local_types.dup
       yield
     ensure
       @declared_locals = old_declared
       @local_shapes = old_shapes
+      @local_types = old_types
     end
 
     def require_package(package)
@@ -223,6 +230,11 @@ module RubyToClear
         end
       when "ConstantPathNode"
         path = node.location.slice.strip
+        if path == "AST::Node"
+          ensure_ast_node_union!(emit: emit_union)
+          return "Node"
+        end
+
         case path
         when "T::Boolean" then "Bool"
         when "T::Array" then "Any"
@@ -288,6 +300,14 @@ module RubyToClear
       end
     end
 
+    def ensure_ast_node_union!(emit:)
+      members = @union_types["Node"]
+      return nil unless members && members.any?
+
+      @generated_union_defs["Node"] = union_definition("Node", members) if emit
+      "Node"
+    end
+
     def sorbet_union_from_any_args(args, union_name:, emit_union:)
       return nil unless union_name
 
@@ -311,6 +331,7 @@ module RubyToClear
       normalized_members = members.map { |member| clear_type_expr(member) }.uniq
       return "Auto" if normalized_members.empty?
 
+      normalized_members = ((@union_types[clear_name] || []) + normalized_members).uniq
       @union_types[clear_name] = normalized_members
       @generated_union_defs[clear_name] = union_definition(clear_name, normalized_members) if emit
       clear_name
@@ -707,11 +728,13 @@ module RubyToClear
     def with_lambda_scope(parameter_names)
       old_declared = @declared_locals.dup
       old_shapes = @local_shapes.dup
+      old_types = @local_types.dup
       parameter_names.each { |name| @declared_locals << name }
       yield
     ensure
       @declared_locals = old_declared
       @local_shapes = old_shapes
+      @local_types = old_types
     end
 
     def unsupported_output?(value)
@@ -1006,7 +1029,8 @@ module RubyToClear
     def static_clear_type_for_receiver(receiver_name)
       return nil unless receiver_name
 
-      @param_types && @param_types[receiver_name.to_s]
+      name = receiver_name.to_s
+      (@local_types && @local_types[name]) || (@param_types && @param_types[name])
     end
 
     public :current_type_param_for_receiver, :runtime_union_narrowing_candidate?, :static_clear_type_for_receiver
@@ -1094,8 +1118,56 @@ module RubyToClear
 
       body = node.block.body.body
       return nil unless body.length == 1
+      if alias_name.to_s == "Node" && body.first.is_a?(Prism::ConstantReadNode) && body.first.name.to_s == "Locatable"
+        return ensure_ast_node_union!(emit: false) || "Node"
+      end
 
       convert_sorbet_type(body.first, union_name: alias_name, emit_union: false)
+    end
+
+    def inferred_clear_type(node)
+      return nil unless node
+
+      if (typed_value = sorbet_typed_value(node))
+        return typed_value[1] unless typed_value[1] == "Auto"
+
+        return inferred_clear_type(typed_value.first)
+      end
+
+      if (unwrapped = sorbet_unwrapped_value(node))
+        return inferred_clear_type(unwrapped)
+      end
+
+      case node
+      when Prism::LocalVariableReadNode
+        static_clear_type_for_receiver(node.name.to_s)
+      when Prism::CallNode
+        if constant_constructor_call?(node)
+          name = constructor_output_name(node.receiver)
+          return name if name && !name.empty?
+        end
+
+        receiver = node.receiver
+        if receiver.nil? || receiver.is_a?(Prism::SelfNode)
+          @method_return_types[node.name.to_s]
+        end
+      when Prism::ArrayNode
+        "Any[]"
+      when Prism::HashNode, Prism::KeywordHashNode
+        "HashMap<Any, Any>"
+      when Prism::StringNode, Prism::InterpolatedStringNode
+        "String"
+      when Prism::SymbolNode
+        "String@symbol"
+      when Prism::IntegerNode
+        "Int64"
+      when Prism::FloatNode
+        "Float64"
+      when Prism::TrueNode, Prism::FalseNode
+        "Bool"
+      when Prism::NilNode
+        "Void"
+      end
     end
 
     def t_struct_class?(node)
@@ -1219,9 +1291,112 @@ module RubyToClear
         collect_metadata_from_file(nested)
       end
       collect_struct_fields_from_node(result.value)
+      collect_type_aliases_from_node(result.value)
+      collect_ast_node_variants_from_node(result.value)
+      collect_method_signature_metadata_from_node(result.value)
       collect_method_params_from_node(result.value)
     rescue StandardError
       nil
+    end
+
+    def collect_type_aliases_from_node(node)
+      return unless node
+
+      if node.is_a?(Prism::ConstantWriteNode)
+        if (type_alias = sorbet_type_alias_value(node.value, alias_name: node.name.to_s))
+          @type_aliases[node.name.to_s] ||= type_alias
+        end
+      end
+
+      node.child_nodes.each { |child| collect_type_aliases_from_node(child) if child }
+    end
+
+    def collect_ast_node_variants_from_node(node, namespace = [])
+      return unless node
+
+      case node
+      when Prism::ModuleNode
+        name = node.constant_path.location.slice.strip.split("::").last
+        collect_ast_node_variants_from_node(node.body, namespace + [name])
+        return
+      when Prism::ClassNode
+        name = node.constant_path.location.slice.strip.split("::").last
+        register_ast_node_variant(name) if namespace.last == "AST" && class_includes_locatable?(node)
+      when Prism::ConstantWriteNode
+        register_ast_node_variant(node.name.to_s) if namespace.last == "AST" && struct_value_includes_locatable?(node.value)
+      end
+
+      node.child_nodes.each { |child| collect_ast_node_variants_from_node(child, namespace) if child }
+    end
+
+    def register_ast_node_variant(name)
+      return if name.to_s.empty? || name.to_s == "Node"
+
+      members = (@union_types["Node"] ||= [])
+      members << name.to_s unless members.include?(name.to_s)
+    end
+
+    def class_includes_locatable?(node)
+      body = node.body
+      return false unless body.respond_to?(:body)
+
+      body.body.any? { |stmt| include_locatable_call?(stmt) }
+    end
+
+    def struct_value_includes_locatable?(node)
+      return false unless node.is_a?(Prism::CallNode)
+      return false unless struct_new_field_names(node)
+
+      body = node.block&.body
+      return false unless body.respond_to?(:body)
+
+      body.body.any? { |stmt| include_locatable_call?(stmt) }
+    end
+
+    def include_locatable_call?(node)
+      return false unless node.is_a?(Prism::CallNode)
+      return false unless node.receiver.nil? && node.name.to_s == "include"
+
+      arg = node.arguments&.arguments&.first
+      case arg
+      when Prism::ConstantReadNode
+        arg.name.to_s == "Locatable"
+      when Prism::ConstantPathNode
+        arg.location.slice.strip == "AST::Locatable"
+      else
+        false
+      end
+    end
+
+    def collect_method_signature_metadata_from_node(node, current_class = nil)
+      return unless node
+
+      if node.is_a?(Prism::ClassNode)
+        class_name = node.constant_path.location.slice.strip.split("::").last
+        collect_method_signature_metadata_from_node(node.body, class_name)
+        return
+      end
+
+      if node.is_a?(Prism::StatementsNode)
+        last_sig = nil
+        node.body.each do |stmt|
+          if stmt.is_a?(Prism::CallNode) && stmt.name.to_s == "sig"
+            last_sig = stmt
+            next
+          end
+
+          if stmt.is_a?(Prism::DefNode) && last_sig
+            _params, return_type = parse_sig(last_sig)
+            @method_return_types[stmt.name.to_s] ||= return_type unless return_type == "Auto"
+          end
+          last_sig = nil unless stmt.is_a?(Prism::CallNode) && stmt.name.to_s == "sig"
+
+          collect_method_signature_metadata_from_node(stmt, current_class)
+        end
+        return
+      end
+
+      node.child_nodes.each { |child| collect_method_signature_metadata_from_node(child, current_class) if child }
     end
 
     def collect_method_params_from_node(node, current_class = nil)
@@ -1434,12 +1609,19 @@ module RubyToClear
 
 
     def visit_statements_node(node)
+      visit_statement_list(node.body)
+    end
+
+    def visit_statement_list(statements)
       last_sig = nil
-      statements = node.body
-      statements.map.with_index do |stmt, index|
+      rendered = []
+      index = 0
+      while index < statements.length
+        stmt = statements[index]
         if stmt.is_a?(Prism::CallNode) && stmt.name.to_s == "sig"
           last_sig = stmt
-          next nil
+          index += 1
+          next
         end
 
         if stmt.is_a?(Prism::DefNode)
@@ -1449,15 +1631,61 @@ module RubyToClear
           last_sig = nil
         end
 
+        if (guard = runtime_is_a_exit_guard(stmt)) && index < statements.length - 1
+          code = render_runtime_is_a_guard(guard, statements[(index + 1)..])
+          @current_sig = nil
+          rendered << format_statement_code(code) unless code.empty?
+          break
+        end
+
         code = visit(stmt)
         if @inside_function && @current_function_returns_value && index == statements.length - 1 && ternary_if_node?(stmt)
           code = "RETURN #{code}"
         end
         @current_sig = nil
-        next if code.empty?
+        rendered << format_statement_code(code) unless code.empty?
 
-        format_statement_code(code)
-      end.compact.join("\n")
+        index += 1
+      end
+      rendered.join("\n")
+    end
+
+    def runtime_is_a_exit_guard(stmt)
+      return nil unless stmt.is_a?(Prism::UnlessNode)
+      return nil if stmt.consequent
+
+      runtime_is_a = runtime_is_a_predicate(stmt.predicate)
+      return nil unless runtime_is_a
+
+      body = stmt.statements&.body || []
+      return nil unless body.length == 1
+      return nil unless guard_exit_statement?(body.first)
+
+      runtime_is_a.merge(exit_statement: body.first)
+    end
+
+    def guard_exit_statement?(stmt)
+      stmt.is_a?(Prism::ReturnNode) || stmt.is_a?(Prism::BreakNode) || stmt.is_a?(Prism::NextNode)
+    end
+
+    def render_runtime_is_a_guard(guard, rest_statements)
+      pred = "#{guard[:receiver_code]} IS_A #{guard[:expected_type]} AS #{guard[:binding_name]}"
+      then_body = with_indent do
+        with_narrowing_context(guard) do
+          visit_statement_list(rest_statements)
+        end
+      end
+      else_body = with_indent { format_statement_code(visit(guard[:exit_statement])) }
+      "IF #{pred} THEN\n#{then_body}\nELSE\n#{else_body}\nEND"
+    end
+
+    def with_narrowing_context(runtime_is_a)
+      binding_name = runtime_is_a[:binding_name]
+      old_types = @local_types.dup
+      @local_types[binding_name] = runtime_is_a[:expected_type]
+      with_renames(runtime_is_a[:renames]) { yield }
+    ensure
+      @local_types = old_types
     end
 
     def visit_else_node(node)
@@ -1573,12 +1801,15 @@ module RubyToClear
         visit(value_node)
       end
       shape = inferred_shape(value_node)
+      inferred_type = type_annotation || inferred_clear_type(value_node)
       if @declared_locals.include?(name)
         @local_shapes[name] = shape
+        @local_types[name] = inferred_type if inferred_type && inferred_type != "Auto"
         "#{name} = #{val}"
       else
         @declared_locals << name
         @local_shapes[name] = shape
+        @local_types[name] = inferred_type if inferred_type && inferred_type != "Auto"
         typed = type_annotation && type_annotation != "Auto" ? ": #{type_annotation}" : ""
         "MUTABLE #{name}#{typed} = #{val}"
       end
@@ -1590,11 +1821,13 @@ module RubyToClear
       unless @declared_locals.include?(name)
         @declared_locals << name
         @local_shapes[name] = shape
+        @local_types[name] = type_annotation if type_annotation && type_annotation != "Auto"
         typed = type_annotation && type_annotation != "Auto" ? ": #{type_annotation}" : ""
         prefix = "MUTABLE #{name}#{typed} = NIL;\n"
       end
 
       @local_shapes[name] = shape
+      @local_types[name] = type_annotation if type_annotation && type_annotation != "Auto"
       "#{prefix}#{if_assignment_code(name, if_node)}"
     end
 
@@ -1898,7 +2131,7 @@ module RubyToClear
       keyword = comptime_predicate?(pred) ? "COMPTIME IF" : "IF"
       body = with_indent do
         if runtime_is_a
-          with_renames(runtime_is_a[:renames]) { visit(node.statements) }
+          with_narrowing_context(runtime_is_a) { visit(node.statements) }
         else
           visit(node.statements)
         end
@@ -2366,12 +2599,14 @@ module RubyToClear
       old_declared = @declared_locals
       old_function_can_fail = @current_function_can_fail
       old_local_shapes = @local_shapes
+      old_local_types = @local_types
       old_inside_function = @inside_function
       old_function_returns_value = @current_function_returns_value
       old_function_type_bindings = @current_function_type_bindings
       @declared_locals = Set.new(param_names)
       @current_function_can_fail = false
       @local_shapes = {}
+      @local_types = param_types.reject { |_param, type| type == "Auto" || type == "Any" }
       @inside_function = true
       @current_function_returns_value = name != "initialize" && sig_return_type != "Void"
       @current_function_type_bindings = type_bindings
@@ -2397,6 +2632,7 @@ module RubyToClear
       @declared_locals = old_declared
       @current_function_can_fail = old_function_can_fail
       @local_shapes = old_local_shapes
+      @local_types = old_local_types
       @inside_function = old_inside_function
       @current_function_returns_value = old_function_returns_value
       @current_function_type_bindings = old_function_type_bindings

@@ -1578,6 +1578,61 @@ RSpec.describe RubyToClear::Transpiler do
       expect_transpile(ruby_code, expected_clear)
     end
 
+    it "loads AST::Node as a dependency-derived union and narrows locals assigned from typed calls" do
+      Dir.mktmpdir do |dir|
+        File.write(File.join(dir, "ast.rb"), <<~RUBY)
+          module AST
+            module Locatable; end
+            BinaryOp = Struct.new(:token, :op) { include Locatable }
+            Identifier = Struct.new(:token, :name) { include Locatable }
+            Node = T.type_alias { Locatable }
+          end
+        RUBY
+        source_path = File.join(dir, "parser.rb")
+        File.write(source_path, <<~RUBY)
+          require_relative "./ast"
+          sig { returns(AST::Node) }
+          def parse_node
+            AST::Identifier.new(nil, "x")
+          end
+
+          def handle
+            node = parse_node
+            if node.is_a?(AST::BinaryOp)
+              node.op
+            end
+          end
+        RUBY
+
+        clear = RubyToClear.transpile_file(source_path)
+        expect(clear).to include("UNION Node { BinaryOp: BinaryOp, Identifier: Identifier }")
+        expect(clear).to include("IF node IS_A AST.BinaryOp AS binary_op THEN")
+        expect(clear).to include("binary_op.op();")
+      end
+    end
+
+    it "rewrites is_a? guard returns into narrowed branches for the remaining statements" do
+      ruby_code = <<~RUBY
+        Node = T.type_alias { T.any(AST::BinaryOp, AST::Identifier) }
+        sig { params(node: Node).void }
+        def validate(node)
+          return unless node.is_a?(AST::BinaryOp)
+          node.op
+        end
+      RUBY
+      expected_clear = <<~CLEAR
+        UNION Node { BinaryOp: BinaryOp, Identifier: Identifier }
+        FN validate(node: Node) RETURNS Void ->
+          IF node IS_A AST.BinaryOp AS binary_op THEN
+            binary_op.op();
+          ELSE
+            RETURN;
+          END
+        END
+      CLEAR
+      expect_transpile(ruby_code, expected_clear)
+    end
+
     it "does not add generic params for exact known type predicates" do
       ruby_code = <<~RUBY
         sig { params(type: Type).returns(Bool) }
