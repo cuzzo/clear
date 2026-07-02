@@ -814,13 +814,17 @@ module RubyToClear
       end
     end
 
-    register("reduce") do |receiver, node, transpiler|
-      args = node.arguments ? node.arguments.arguments : []
-      init_val = args.first ? transpiler.visit(args.first) : "0"
-      lowering = reduce_block_lowering(node, transpiler)
+    register("reduce") do |context|
+      args = argument_nodes(context)
+      if args.empty? && !context.node.block && context.receiver_shape.nil?
+        next nil
+      end
+
+      init_val = args.first ? context.transpiler.visit(args.first) : "0"
+      lowering = reduce_block_lowering(context.node, context.transpiler)
       next lowering if unsupported_result?(lowering)
 
-      "#{pipeline_source(receiver)} |> REDUCE(#{init_val}) #{lowering.value_code}"
+      "#{pipeline_source(context.receiver_code)} |> REDUCE(#{init_val}) #{lowering.value_code}"
     end
 
     register("inject") do |context|

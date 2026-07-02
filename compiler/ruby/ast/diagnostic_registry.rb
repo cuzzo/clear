@@ -383,6 +383,13 @@ module DiagnosticRegistry
       template: "Type Error: Conflicting inference for '%{param}' in '%{fn}': got '%{first}' and '%{second}'.",
       summary:  "Generic function call: the same type parameter inferred to two different types.",
     },
+    IS_A_NEEDS_COMPTIME: {
+      severity: :error, category: :type,
+      template: "`IS_A` type predicates must be written as `COMPTIME IF`.",
+      summary:  "`IS_A` with a type operand is a compile-time predicate.",
+      cause: "A type predicate branches while the compiler is specializing code, not while the program is running.",
+      fix_hint: "Insert `COMPTIME` before `IF`.",
+    },
     IS_A_OPERAND_NEEDS_TYPE: {
       severity: :error, category: :type,
       template: "Type Error: %{side} side of IS_A must be a type, got %{got}.",
@@ -2991,6 +2998,7 @@ module DiagnosticRegistry
     DROP_WITH_GUARD_MUTABLE: "Drop `MUTABLE` from %{target} so the GUARD predicate stays valid (the body only reads through the alias).",
     INSERT_EXPECTED_AT_END_OF_LINE: "Insert `%{expected}` at end of line %{line}.",
     INSERT_EXPECTED_BEFORE_TOKEN: "Insert `%{expected}` before '%{got}' at line %{line}.",
+    INSERT_COMPTIME_BEFORE_IF: "Insert COMPTIME before IF.",
     INSERT_RETURNS_ANY: "Insert `RETURNS :Any` so the function accepts the polymorphic return.",
     INSERT_RETURNS_FALLIBLE_VOID: "Insert `RETURNS !Void` so PRE-failure errors can propagate.",
     INSERT_SERVICE_AFTER_OPEN_BRACE: "Insert `@service ->` after `{` (this fiber transitively calls a plain :reentrant fn).",

@@ -209,6 +209,20 @@ module DiagnosticBuckets
     },
 
     {
+      id: :type_type_predicates,
+      title: "Type predicates (`IS_A`)",
+      category: :type,
+      frequency: 2,
+      alien_factor: :high,
+      summary: "Compile-time type predicates and runtime union-variant tests. Familiar to Rust/Zig users; unusual for Ruby/Python users.",
+      codes: %i[
+        IS_A_NEEDS_COMPTIME IS_A_OPERAND_NEEDS_TYPE
+        IS_A_RUNTIME_NEEDS_UNION IS_A_RUNTIME_UNKNOWN_VARIANT
+        IS_A_RUNTIME_AMBIGUOUS_PAYLOAD
+      ],
+    },
+
+    {
       id: :type_static_methods,
       title: "Static methods & resources (`File::open`)",
       category: :type,

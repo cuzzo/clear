@@ -870,6 +870,11 @@ RSpec.describe RubyToClear::Transpiler do
       expect_transpile(ruby_code, expected_clear)
     end
 
+    it "leaves bare reduce/inject attr readers as ordinary calls" do
+      expect_transpile("rule = get_rule; rule.inject", "MUTABLE rule = get_rule();\nrule.inject();")
+      expect_transpile("rule = get_rule; rule.reduce", "MUTABLE rule = get_rule();\nrule.reduce();")
+    end
+
     it "transpiles gsub" do
       ruby_code = "str = ''; str.gsub('a', 'b')"
       expected_clear = "MUTABLE str = \"\";\nstr.replace(\"a\", \"b\");"

@@ -2571,6 +2571,7 @@ class MIRLowering
         next if stmt.visibility == :private
         append_lowered_items!(LoweredItemTarget.new(items: fn_items, line: stmt.token.line), lower(stmt))
       when AST::StructDef, AST::EnumDef, AST::UnionDef
+        next if stmt.visibility == :private
         append_lowered_items!(LoweredItemTarget.new(items: type_items, line: stmt.token.line), lower(stmt))
       when AST::RequireNode
         append_lowered_items!(LoweredItemTarget.new(items: fn_items, line: nil), lower(stmt))

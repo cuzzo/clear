@@ -383,7 +383,7 @@ module Annotator
       sig { params(node: AST::IfStatement).void }
       def emit_is_a_needs_comptime_fix!(node)
         fix = Fix.new(
-          description: "Insert COMPTIME before IF",
+          description: DiagnosticRegistry.fix_description(:INSERT_COMPTIME_BEFORE_IF),
           confidence: :auto,
           edits: [
             Edit.new(
@@ -396,7 +396,7 @@ module Annotator
           node,
           category: :type,
           level: :error,
-          message: "`IS_A` type predicates must be written as `COMPTIME IF`.",
+          code: :IS_A_NEEDS_COMPTIME,
           fixes: [fix],
           raise_in_collector: true,
         )
