@@ -295,6 +295,11 @@ module RubyToClear
         end
         
         "Auto"
+      when "ArrayNode"
+        members = node.elements.map { |element| convert_sorbet_type(element) }
+        return "Auto" if members.empty? || members.any? { |member| member == "Auto" }
+
+        "Tuple<#{members.join(', ')}>"
       else
         "Auto"
       end

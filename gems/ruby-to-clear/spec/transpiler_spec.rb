@@ -1796,6 +1796,22 @@ RSpec.describe RubyToClear::Transpiler do
       expect_transpile(ruby_code, expected_clear)
     end
 
+    it "lowers Sorbet tuple type aliases to generic Tuple types" do
+      ruby_code = <<~RUBY
+        RuleKey = T.type_alias { [Symbol, T.nilable(String)] }
+        sig { params(key: RuleKey).returns(RuleKey) }
+        def key_for(key)
+          key
+        end
+      RUBY
+      expected_clear = <<~CLEAR
+        FN key_for(key: Tuple<String@symbol, ?String>) RETURNS Tuple<String@symbol, ?String> ->
+          key;
+        END
+      CLEAR
+      expect_transpile(ruby_code, expected_clear)
+    end
+
     it "transpiles field-only T::Struct classes to explicit CLEAR structs" do
       ruby_code = <<~RUBY
         class Config < T::Struct
