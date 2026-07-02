@@ -75,6 +75,14 @@ RSpec.describe SemanticAnnotator do
           expect { run(code) }.not_to raise_error
         end
       end
+
+      context "?FN() -> Bool in an optional type annotation position" do
+        let(:code) { "cb: ?FN() -> Bool = NIL;" }
+
+        it "parses without error" do
+          expect { run(code) }.not_to raise_error
+        end
+      end
     end
 
     # -------------------------------------------------------------------------
@@ -91,6 +99,16 @@ RSpec.describe SemanticAnnotator do
       it "returns false for plain symbol types" do
         expect(Type.new(:Bool).fn_type?).to be false
         expect(Type.new(:Int64).fn_type?).to be false
+      end
+
+      it "preserves an optional parsed FN type as an optional wrapping a fn_type" do
+        tokens = Lexer.new("cb: ?FN(Int64) -> Bool = NIL;").tokenize
+        ast    = ClearParser.new(tokens, "").parse
+        bind   = ast.statements.first
+
+        expect(bind.type.optional?).to be true
+        expect(bind.type.wrapped_type.fn_type?).to be true
+        expect(Type.surface_name(bind.type)).to eq("?FN(Int64) -> Bool")
       end
     end
 
@@ -120,6 +138,14 @@ RSpec.describe SemanticAnnotator do
         # Parse just the type annotation directly via the parser
         t = Type.new(FunctionSignature.new(params: [], return_type: Type.new(:Void)))
         expect(t.zig_type).to eq("*const fn(*Runtime) anyerror!void")
+      end
+
+      it "emits ?*const fn(*Runtime) anyerror!bool for ?FN() -> Bool" do
+        tokens = Lexer.new("cb: ?FN() -> Bool = NIL;").tokenize
+        ast = ClearParser.new(tokens, "").parse
+        t = ast.statements.first.type
+
+        expect(t.zig_type).to eq("?*const fn(*Runtime) anyerror!bool")
       end
     end
 

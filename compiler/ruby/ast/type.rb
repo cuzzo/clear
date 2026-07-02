@@ -206,6 +206,7 @@ class TypeShape < T::Struct
   const :capacity, ArrayCapacity, default: nil
   const :payload_type_raw, T.nilable(Symbol), default: nil
   const :wrapped_type_raw, T.nilable(Symbol), default: nil
+  const :wrapped_type_obj, T.untyped, default: nil
   const :element_type_raw, T.nilable(Symbol), default: nil
   const :key_type_raw, T.nilable(Symbol), default: nil
   const :value_type_raw, T.nilable(Symbol), default: nil
@@ -471,6 +472,7 @@ class Type
     return "!#{surface_name(T.must(t.payload_type))}" if t.error_union?
     return "?#{surface_name(T.must(t.wrapped_type))}" if t.optional?
     return "#{surface_name(T.must(t.element_type))}#{array_capacity_suffix(t.capacity)}" if t.array?
+    return function_type_surface_name(t) if t.fn_type?
 
     if t.generic_instance?
       args = t.generic_args.map { |arg| surface_name(arg) }
@@ -492,7 +494,19 @@ class Type
 
   sig { params(wrapped_type: TypeInput).returns(Type) }
   def self.optional_of(wrapped_type)
-    Type.new("?#{surface_name(wrapped_type)}")
+    wrapped = wrapped_type.is_a?(Type) ? Type.new(wrapped_type) : Type.new(wrapped_type)
+    return Type.new("?#{surface_name(wrapped)}") unless wrapped.fn_type?
+
+    t = Type.new(:"?#{surface_name(wrapped)}")
+    t.instance_variable_set(
+      :@shape,
+      TypeShape.new(
+        raw: t.raw,
+        optional: true,
+        wrapped_type_obj: wrapped
+      )
+    )
+    t
   end
 
   sig { params(value_type: TypeInput).returns(Type) }
@@ -517,6 +531,14 @@ class Type
     else
       "[#{capacity}]"
     end
+  end
+
+  sig { params(type: Type).returns(String) }
+  def self.function_type_surface_name(type)
+    fn_raw = T.cast(type.raw, FunctionSignature)
+    params = fn_raw.params.map { |param| surface_name(param.type) }
+
+    "FN(#{params.join(', ')}) -> #{surface_name(fn_raw.return_type)}"
   end
 
   # Operator categories
@@ -2315,6 +2337,9 @@ class Type
   sig { returns(T.nilable(Type)) }
   def wrapped_type
     return nil unless optional?
+    wrapped = shape.wrapped_type_obj
+    return Type.new(wrapped) if wrapped.is_a?(Type)
+
     Type.new(shape.wrapped_type_raw || :Any)
   end
 

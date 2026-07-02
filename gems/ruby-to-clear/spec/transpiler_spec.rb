@@ -1812,6 +1812,24 @@ RSpec.describe RubyToClear::Transpiler do
       expect_transpile(ruby_code, expected_clear)
     end
 
+    it "lowers Sorbet proc aliases to CLEAR function types" do
+      ruby_code = <<~RUBY
+        NodeRule = T.type_alias { T.proc.returns(T.nilable(AST::Node)) }
+        Expr = T.type_alias { T.any(AST::BinaryOp, AST::Identifier) }
+        SuffixRule = T.type_alias { T.proc.params(lhs: AST::Node).returns(Expr) }
+        sig { params(rule: NodeRule, suffix: SuffixRule).void }
+        def register(rule, suffix)
+        end
+      RUBY
+      expected_clear = <<~CLEAR
+        UNION Expr { BinaryOp: BinaryOp, Identifier: Identifier }
+        FN register(rule: FN() -> ?Node, suffix: FN(Node) -> Expr) RETURNS Void ->
+
+        END
+      CLEAR
+      expect_transpile(ruby_code, expected_clear)
+    end
+
     it "transpiles field-only T::Struct classes to explicit CLEAR structs" do
       ruby_code = <<~RUBY
         class Config < T::Struct

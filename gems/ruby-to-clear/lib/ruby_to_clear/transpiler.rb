@@ -244,6 +244,10 @@ module RubyToClear
         else path.split("::").last
         end
       when "CallNode"
+        if (proc_type = sorbet_proc_type(node, union_name: union_name, emit_union: emit_union))
+          return proc_type
+        end
+
         if node.receiver && node.receiver.location.slice.strip == "T"
           case node.name.to_s
           when "nilable"
@@ -302,6 +306,48 @@ module RubyToClear
         "Tuple<#{members.join(', ')}>"
       else
         "Auto"
+      end
+    end
+
+    def sorbet_proc_type(node, union_name:, emit_union:)
+      return nil unless node.is_a?(Prism::CallNode)
+
+      params = []
+      return_type = "Auto"
+      found_proc = false
+      current = node
+
+      while current.is_a?(Prism::CallNode)
+        case current.name.to_s
+        when "proc"
+          found_proc = current.receiver&.location&.slice == "T"
+        when "params"
+          params = sorbet_proc_param_types(current, union_name: union_name, emit_union: emit_union)
+        when "returns"
+          arg = current.arguments&.arguments&.first
+          return_type = convert_sorbet_type(arg, union_name: union_name ? "#{union_name}Return" : nil, emit_union: emit_union)
+        when "void"
+          return_type = "Void"
+        end
+        current = current.receiver
+      end
+
+      return nil unless found_proc
+
+      "FN(#{params.join(', ')}) -> #{return_type}"
+    end
+
+    def sorbet_proc_param_types(node, union_name:, emit_union:)
+      args = node.arguments ? node.arguments.arguments : []
+      keyword_hash = args.find { |arg| arg.is_a?(Prism::KeywordHashNode) }
+      values = if keyword_hash
+        keyword_hash.elements.filter_map { |assoc| assoc.value if assoc.is_a?(Prism::AssocNode) }
+      else
+        args
+      end
+
+      values.each_with_index.map do |value, index|
+        convert_sorbet_type(value, union_name: union_name ? "#{union_name}Param#{index + 1}" : nil, emit_union: emit_union)
       end
     end
 

@@ -3035,6 +3035,15 @@ class ClearParser
       error!(current, :AUTO_PREFIX_NOT_SUPPORTED, prefix: prefix_chars, prefix2: prefix_chars, prefix3: prefix_chars, prefix4: prefix_chars)
     end
 
+    if match?(:KEYWORD, 'FN')
+      fn_type = parse_fn_type_annotation
+      if tense_prefix != "" || error_prefix != ""
+        error!(current, :PARSER_EXPECTED, expected: "plain or optional function type annotation", got: "#{tense_prefix}#{error_prefix}FN", type: current.type, line: current.line)
+      end
+
+      return optional_prefix == "?" ? Type.optional_of(fn_type) : fn_type
+    end
+
     base = T.must(consume(:TYPE_ID)).value
     inner = ""
 
