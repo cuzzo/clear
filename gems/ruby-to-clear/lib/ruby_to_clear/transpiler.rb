@@ -197,11 +197,12 @@ module RubyToClear
     def parse_sig(sig_call_node)
       param_types = {}
       return_type = "Auto"
+      type_params = []
       
-      return [param_types, return_type] unless sig_call_node&.block
+      return [param_types, return_type, type_params] unless sig_call_node&.block
       
       body_node = sig_call_node.block.body
-      return [param_types, return_type] unless body_node.is_a?(Prism::StatementsNode)
+      return [param_types, return_type, type_params] unless body_node.is_a?(Prism::StatementsNode)
       
       body_node.body.each do |stmt|
         walk_sig_chain = ->(call_node) do
@@ -224,6 +225,8 @@ module RubyToClear
                 end
               end
             end
+          when "type_parameters"
+            type_params = sorbet_type_parameter_names(call_node)
           end
           
           walk_sig_chain.call(call_node.receiver) if call_node.receiver
@@ -232,7 +235,7 @@ module RubyToClear
         walk_sig_chain.call(stmt)
       end
       
-      [param_types, return_type]
+      [param_types, return_type, type_params]
     end
 
     def convert_sorbet_type(node, union_name: nil, emit_union: false)
@@ -296,6 +299,9 @@ module RubyToClear
             end
           when "untyped", "anything"
             return "Auto"
+          when "type_parameter"
+            arg = node.arguments&.arguments&.first
+            return camel_type_name(arg.value.to_s) if arg.is_a?(Prism::SymbolNode)
           end
         end
         
@@ -376,6 +382,14 @@ module RubyToClear
 
       values.each_with_index.map do |value, index|
         convert_sorbet_type(value, union_name: union_name ? "#{union_name}Param#{index + 1}" : nil, emit_union: emit_union)
+      end
+    end
+
+    def sorbet_type_parameter_names(node)
+      args = node.arguments ? node.arguments.arguments : []
+      args.filter_map do |arg|
+        next camel_type_name(arg.value.to_s) if arg.is_a?(Prism::SymbolNode)
+        next camel_type_name(arg.content) if arg.is_a?(Prism::StringNode)
       end
     end
 
@@ -2734,7 +2748,7 @@ module RubyToClear
       return chk if chk.is_a?(String) && chk.include?("# [UNSUPPORTED:")
       
       name = node.name.to_s
-      param_types, sig_return_type = parse_sig(@current_sig)
+      param_types, sig_return_type, sig_type_params = parse_sig(@current_sig)
       param_names = extract_parameter_names(node)
       type_bindings = infer_function_type_bindings(node.body, param_names, param_types)
       param_types = param_types.merge(type_bindings)
@@ -2806,7 +2820,7 @@ module RubyToClear
       end
       ret_type = fallible_return_type(ret_type) if function_can_fail
       sig_name = clear_function_name(name)
-      type_params = type_bindings.values
+      type_params = (sig_type_params + type_bindings.values).uniq
       type_param_suffix = type_params.empty? ? "" : "<#{type_params.join(', ')}>"
 
       "FN #{sig_name}#{type_param_suffix}(#{params.join(', ')}) RETURNS #{ret_type} ->\n#{full_body}\nEND"

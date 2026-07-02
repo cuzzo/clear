@@ -1854,6 +1854,24 @@ RSpec.describe RubyToClear::Transpiler do
       expect_transpile(ruby_code, expected_clear)
     end
 
+    it "lowers Sorbet type parameters to CLEAR generic function signatures" do
+      ruby_code = <<~RUBY
+        sig do
+          type_parameters(:Elem)
+            .params(type: Symbol, blk: T.proc.returns(T.type_parameter(:Elem)))
+            .returns([Lexer::Token, T::Array[T.type_parameter(:Elem)]])
+        end
+        def parse_generic(type, &blk)
+        end
+      RUBY
+      expected_clear = <<~CLEAR
+        FN parse_generic<Elem>(type: String@symbol, blk = NIL: FN() -> Elem) RETURNS Tuple<Token, Elem[]> ->
+
+        END
+      CLEAR
+      expect_transpile(ruby_code, expected_clear)
+    end
+
     it "transpiles field-only T::Struct classes to explicit CLEAR structs" do
       ruby_code = <<~RUBY
         class Config < T::Struct
