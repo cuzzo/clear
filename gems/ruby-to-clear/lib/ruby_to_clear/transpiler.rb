@@ -74,6 +74,9 @@ module RubyToClear
       @type_aliases = {}
       @union_types = {}
       @generated_union_defs = {}
+      @body_union_defs = Set.new
+      @type_alias_union_deps = Hash.new { |hash, key| hash[key] = Set.new }
+      @type_alias_context = []
       @method_return_types = {}
       @required_packages = Set.new
       @current_function_can_fail = false
@@ -93,8 +96,32 @@ module RubyToClear
       collect_method_params_from_node(program_node)
       body = visit(program_node)
       requires = @required_packages.sort.map { |package| "REQUIRE \"pkg:#{package}\"" }
-      generated_unions = @generated_union_defs.keys.sort.map { |name| @generated_union_defs[name] }
+      generated_unions = generated_union_definitions_for_body(body)
       (requires + generated_unions + [body]).reject(&:empty?).join("\n")
+    end
+
+    def generated_union_definitions_for_body(body)
+      selected = {}
+
+      loop do
+        changed = false
+        @generated_union_defs.keys.sort.each do |name|
+          next if @body_union_defs.include?(name) || selected.key?(name)
+
+          haystacks = [body] + selected.values
+          next unless haystacks.any? { |text| type_name_referenced?(text, name) }
+
+          selected[name] = @generated_union_defs[name]
+          changed = true
+        end
+        break unless changed
+      end
+
+      selected.keys.sort.map { |name| selected[name] }
+    end
+
+    def type_name_referenced?(text, name)
+      !!text.match?(/\b#{Regexp.escape(name)}\b/)
     end
 
     def visit(node)
@@ -251,18 +278,19 @@ module RubyToClear
         if node.receiver && node.receiver.location.slice.strip == "T"
           case node.name.to_s
           when "nilable"
-            inner = convert_sorbet_type(node.arguments&.arguments&.first)
+            inner = convert_sorbet_type(node.arguments&.arguments&.first, union_name: union_name, emit_union: emit_union)
             return "Auto" if inner == "Auto"
 
-            return "?#{inner}"
+            return optional_clear_type(inner)
           when "any"
             args = node.arguments ? node.arguments.arguments : []
             non_nil_args = args.reject { |a| a.location.slice.strip == "NilClass" }
+            has_nil = non_nil_args.length != args.length
             if non_nil_args.length == 1
-              inner = convert_sorbet_type(non_nil_args.first)
-              return "?#{inner}"
+              inner = convert_sorbet_type(non_nil_args.first, union_name: union_name, emit_union: emit_union)
+              return has_nil ? optional_clear_type(inner) : inner
             elsif (union = sorbet_union_from_any_args(non_nil_args, union_name: union_name, emit_union: emit_union))
-              return union
+              return has_nil ? optional_clear_type(union) : union
             else
               return "Auto"
             end
@@ -274,24 +302,24 @@ module RubyToClear
         if node.name.to_s == "[]"
           receiver_name = node.receiver ? node.receiver.location.slice.strip : ""
           if receiver_name == "T::Array" || receiver_name == "Array"
-            inner = convert_sorbet_type(node.arguments&.arguments&.first)
+            inner = convert_sorbet_type(node.arguments&.arguments&.first, union_name: union_name ? "#{union_name}Item" : nil, emit_union: emit_union)
             return "Any" if inner == "Auto"
 
             return "#{collection_element_type(inner)}[]"
           elsif receiver_name == "T::Hash" || receiver_name == "Hash"
             args = node.arguments ? node.arguments.arguments : []
-            key = convert_sorbet_type(args[0])
-            value = convert_sorbet_type(args[1])
+            key = convert_sorbet_type(args[0], union_name: union_name ? "#{union_name}Key" : nil, emit_union: emit_union)
+            value = convert_sorbet_type(args[1], union_name: union_name ? "#{union_name}Value" : nil, emit_union: emit_union)
             return "Any" if key == "Auto" || value == "Auto"
 
             return "HashMap<#{collection_element_type(key)}, #{collection_element_type(value)}>"
           elsif receiver_name == "T::Set" || receiver_name == "Set"
-            inner = convert_sorbet_type(node.arguments&.arguments&.first)
+            inner = convert_sorbet_type(node.arguments&.arguments&.first, union_name: union_name ? "#{union_name}Item" : nil, emit_union: emit_union)
             return "Any" if inner == "Auto"
 
             return "#{collection_element_type(inner)}[]@set"
           elsif receiver_name == "T::Enumerable" || receiver_name == "Enumerable"
-            inner = convert_sorbet_type(node.arguments&.arguments&.first)
+            inner = convert_sorbet_type(node.arguments&.arguments&.first, union_name: union_name ? "#{union_name}Item" : nil, emit_union: emit_union)
             return "Any" if inner == "Auto"
 
             return "#{collection_element_type(inner)}[]"
@@ -362,19 +390,21 @@ module RubyToClear
     def sorbet_union_from_any_args(args, union_name:, emit_union:)
       return nil unless union_name
 
-      members = args.map { |arg| convert_sorbet_type(arg) }
+      members = args.each_with_index.map do |arg, index|
+        convert_sorbet_type(arg, union_name: sorbet_union_member_context_name(union_name, arg, index), emit_union: emit_union)
+      end
       return nil if members.length < 2
-      return nil unless members.all? { |type| union_member_type?(type) }
+      return nil unless members.all? { |type| union_member_payload_type?(type) }
 
       register_union_type(union_name, members, emit: emit_union)
     end
 
-    def union_member_type?(type)
+    def union_member_payload_type?(type)
       text = type.to_s
       return false if text.empty? || text == "Auto" || text == "Any"
-      return false if text.start_with?("?") || text.include?("[]") || text.start_with?("HashMap<")
+      return false if text == "Void"
 
-      !%w[Int64 Float64 String Bool Void String@symbol].include?(text)
+      true
     end
 
     def register_union_type(name, members, emit:)
@@ -385,16 +415,90 @@ module RubyToClear
       normalized_members = ((@union_types[clear_name] || []) + normalized_members).uniq
       @union_types[clear_name] = normalized_members
       @generated_union_defs[clear_name] = union_definition(clear_name, normalized_members) if emit
+      @type_alias_union_deps[@type_alias_context.last] << clear_name if @type_alias_context.any?
       clear_name
     end
 
     def union_definition(name, members)
-      variants = members.map { |member| "#{union_variant_name(member)}: #{member}" }.join(", ")
+      seen = Hash.new(0)
+      variants = members.map do |member|
+        base_name = union_variant_name(member)
+        seen[base_name] += 1
+        variant_name = seen[base_name] == 1 ? base_name : "#{base_name}#{seen[base_name]}"
+
+        "#{variant_name}: #{member}"
+      end.join(", ")
       "UNION #{name} { #{variants} }"
     end
 
     def union_variant_name(type)
-      type.to_s.split(".").last
+      text = type.to_s
+      return "StringValue" if text == "String"
+      return "SymbolValue" if text == "String@symbol"
+      return "Int64Value" if text == "Int64"
+      return "Float64Value" if text == "Float64"
+      return "BoolValue" if text == "Bool"
+      return "ArrayValue" if text.include?("[]")
+      return "HashMapValue" if text.start_with?("HashMap<")
+      return "OptionalValue" if text.start_with?("?")
+
+      text.split(".").last
+    end
+
+    def optional_clear_type(type)
+      text = type.to_s
+      return text if text.start_with?("?")
+      return "Auto" if text == "Auto"
+
+      "?#{text}"
+    end
+
+    def sorbet_union_member_context_name(parent_name, arg, index)
+      suffix = case arg
+      when Prism::ConstantReadNode
+        camel_type_name(arg.name.to_s)
+      when Prism::ConstantPathNode
+        camel_type_name(arg.location.slice.strip.split("::").last)
+      when Prism::CallNode
+        receiver_name = arg.receiver ? arg.receiver.location.slice.strip : ""
+        if arg.name.to_s == "[]"
+          case receiver_name
+          when "T::Array", "Array" then "Array"
+          when "T::Hash", "Hash" then "Hash"
+          when "T::Set", "Set" then "Set"
+          when "T::Enumerable", "Enumerable" then "Enumerable"
+          else "Member#{index + 1}"
+          end
+        elsif arg.receiver&.location&.slice == "T" && arg.name.to_s == "any"
+          "Union"
+        else
+          "Member#{index + 1}"
+        end
+      else
+        "Member#{index + 1}"
+      end
+
+      "#{parent_name}#{suffix}"
+    end
+
+    def union_definitions_for_alias(alias_name, type_alias)
+      names = @type_alias_union_deps[alias_name].to_a
+      names << type_alias if @union_types.key?(type_alias)
+      names.sort_by { |name| [name == type_alias ? 1 : 0, name] }.filter_map do |name|
+        next if @body_union_defs.include?(name)
+
+        @body_union_defs << name
+        union_definition(name, @union_types[name])
+      end
+    end
+
+    def with_type_alias_context(alias_name)
+      if alias_name
+        @type_alias_context << alias_name
+      end
+      yield
+    ensure
+      @type_alias_context.pop if alias_name
     end
 
     def camel_type_name(name)
@@ -1173,7 +1277,9 @@ module RubyToClear
         return ensure_ast_node_union!(emit: false) || "Node"
       end
 
-      convert_sorbet_type(body.first, union_name: alias_name, emit_union: false)
+      with_type_alias_context(alias_name) do
+        convert_sorbet_type(body.first, union_name: alias_name, emit_union: false)
+      end
     end
 
     def inferred_clear_type(node)
@@ -1948,7 +2054,8 @@ module RubyToClear
 
       if (type_alias = sorbet_type_alias_value(node.value, alias_name: name))
         @type_aliases[name] = type_alias
-        return union_definition(type_alias, @union_types[type_alias]) if @union_types.key?(type_alias)
+        union_defs = union_definitions_for_alias(name, type_alias)
+        return union_defs.join("\n") unless union_defs.empty?
 
         return ""
       end

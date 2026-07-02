@@ -1714,8 +1714,32 @@ RSpec.describe RubyToClear::Transpiler do
         end
       RUBY
       expected_clear = <<~CLEAR
-        FN edge_types(f: Float64, n: Void, b: Bool, t: Bool, f2: Bool, any_t: Auto, arr: Any, hash: Any, set: Any, raw: Auto, anything: Auto, either: Auto, unknown_maybe: Auto, enumerable: String[]) RETURNS Void ->
+        UNION Either { StringValue: String, Int64Value: Int64 }
+        FN edge_types(f: Float64, n: Void, b: Bool, t: Bool, f2: Bool, any_t: Auto, arr: Any, hash: Any, set: Any, raw: Auto, anything: Auto, either: ?Either, unknown_maybe: Auto, enumerable: String[]) RETURNS Void ->
 
+        END
+      CLEAR
+      expect_transpile(ruby_code, expected_clear)
+    end
+
+    it "emits nested Sorbet union aliases inside collections" do
+      ruby_code = <<~RUBY
+        PatternItem = T.type_alias { T.any(String, Symbol, T::Hash[T.any(String, Symbol), Symbol]) }
+        Pattern = T.type_alias { T::Array[PatternItem] }
+        PatternCapture = T.type_alias { T.nilable(T.any(AST::Node, Type, String, Symbol, Integer, Float, T::Boolean)) }
+        SigilAttrs = T.type_alias { T::Hash[Symbol, T.any(Symbol, T::Boolean)] }
+        sig { params(item: PatternItem, pattern: Pattern, capture: PatternCapture, attrs: SigilAttrs).returns(PatternCapture) }
+        def typed_aliases(item, pattern, capture, attrs)
+          capture
+        end
+      RUBY
+      expected_clear = <<~CLEAR
+        UNION PatternItemHashKey { StringValue: String, SymbolValue: String@symbol }
+        UNION PatternItem { StringValue: String, SymbolValue: String@symbol, HashMapValue: HashMap<PatternItemHashKey, String> }
+        UNION PatternCapture { Node: Node, Type: Type, StringValue: String, SymbolValue: String@symbol, Int64Value: Int64, Float64Value: Float64, BoolValue: Bool }
+        UNION SigilAttrsValue { SymbolValue: String@symbol, BoolValue: Bool }
+        FN typed_aliases(item: PatternItem, pattern: PatternItem[], capture: ?PatternCapture, attrs: HashMap<String, SigilAttrsValue>) RETURNS ?PatternCapture ->
+          capture;
         END
       CLEAR
       expect_transpile(ruby_code, expected_clear)
