@@ -3841,6 +3841,12 @@ module MIR
     include Expr
   end
 
+  # Canonical static symbol literal. The emitter lowers each distinct value to
+  # one top-level []const u8 binding and all uses reference that binding.
+  SymbolLit = Struct.new(:value) do
+    include Expr
+  end
+
   # Void value.
   # Zig: {}
   VoidLiteral = Struct.new(nil) do

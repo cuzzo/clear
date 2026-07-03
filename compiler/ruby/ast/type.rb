@@ -424,6 +424,8 @@ class Type
     atomic: "@atomic",
     always_mutable: "@alwaysMutable",
     local: "@local",
+    raw: "@raw",
+    symbol: "@symbol",
   }.freeze, T::Hash[Symbol, String])
 
   SYNC_FAMILY_NAMES = T.let({
@@ -480,6 +482,12 @@ class Type
     end
 
     t.resolved.to_s
+  end
+
+  sig { params(type: TypeInput).returns(String) }
+  def self.coercion_surface_name(type)
+    t = type.is_a?(Type) ? type : Type.new(type)
+    "#{surface_name(t)}#{t.sync_surface_name}"
   end
 
   sig { params(element_type: TypeInput, capacity: ArrayCapacity).returns(Type) }
@@ -620,7 +628,7 @@ class Type
     if target.array_overflow?(source)
       "Cannot initialize array of size #{target.capacity} with #{source.capacity} elements"
     else
-      "Type Mismatch: Cannot assign #{source.resolved} to #{target.resolved}"
+      "Type Mismatch: Cannot assign #{coercion_surface_name(source)} to #{coercion_surface_name(target)}"
     end
   end
 
@@ -1533,33 +1541,37 @@ class Type
     # 0. Function type: must precede == shortcut (resolved strips fn signature to return type)
     return accepts_fn_type?(other_type) if fn_type?
 
-    # 1. Exact match / Any
+    # 1. String@symbol is a canonicalized string capability. A plain String
+    # cannot satisfy it without a future runtime intern(rt, s) operation.
+    return other_type.string? && other_type.symbol? if string? && symbol?
+
+    # 2. Exact match / Any
     return true if self == other_type || any? || other_type.any?
 
-    # 2. Primitive widening
+    # 3. Primitive widening
     return true if numeric? && other_type.numeric?
     return true if string? && (other_type.byte? || other_type.string?)
 
-    # 3. Optional coercion: ?T accepts T, NIL, or ?T
+    # 4. Optional coercion: ?T accepts T, NIL, or ?T
     if optional?
       return true if other_type.resolved == :NIL
       inner = other_type.optional? ? T.must(other_type.wrapped_type) : other_type
       return T.must(wrapped_type).accepts?(inner)
     end
 
-    # 4. Error union coercion: !T accepts T or !T
+    # 5. Error union coercion: !T accepts T or !T
     if error_union?
       inner = other_type.error_union? ? T.must(other_type.payload_type) : other_type
       return T.must(payload_type).accepts?(inner)
     end
 
-    # 5. Tense (Promise/Stream) coercion
+    # 6. Tense (Promise/Stream) coercion
     return accepts_future?(other_type) if future?
 
-    # 6. Array coercion
+    # 7. Array coercion
     return accepts_array?(other_type) if array?
 
-    # 7. HashMap coercion: HashMap<Any> (empty literal) accepts any HashMap<T>
+    # 8. HashMap coercion: HashMap<Any> (empty literal) accepts any HashMap<T>
     if map? && other_type.map?
       return true if other_type.value_type.any?
       return value_type.accepts?(other_type.value_type)

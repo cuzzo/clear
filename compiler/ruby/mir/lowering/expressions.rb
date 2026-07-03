@@ -195,7 +195,9 @@ module MIRLoweringExpressions
   def lower_literal(node)
     T.bind(self, MIRLowering) rescue nil
     case node.type
-    when :STRING, :SYMBOL
+    when :SYMBOL
+      MIR::SymbolLit.new(node.value.to_s)
+    when :STRING
       escaped = node.value.bytes.map { |b|
         case b
         when 0x5C then '\\\\'

@@ -1687,6 +1687,14 @@ pub const CheatLib = struct {
         return str[u_start .. u_start + u_len];
     }
 
+    // TODO(symbols): add intern(rt, s) for dynamic String@symbol values.
+    // Static symbol literals are canonicalized by compiler-emitted top-level
+    // constants. Dynamic interning should use Runtime.globalAlloc() and a
+    // StringHashMapUnmanaged-backed pool. StringHashMapUnmanaged is not
+    // thread-safe for concurrent access, so wrap the pool in synchronization
+    // (Mutex/RwLock or a sharded locked map) before sharing it across
+    // schedulers/threads.
+
     // String Equality (Content check)
     pub fn strEql(s1: []const u8, s2: []const u8) bool {
         return std.mem.eql(u8, s1, s2);

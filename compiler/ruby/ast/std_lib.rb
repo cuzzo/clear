@@ -1518,8 +1518,8 @@ BUILTIN_OPS = T.let({
   eql:       { zig: "CheatLib.eql({0}, {1})", bc: true, borrows: :all },
   strcmp:    { zig: "CheatLib.strcmp({0}, {1})", bc: true, borrows: :all },
   strEql:    { zig: "CheatLib.strEql({0}, {1})", bc: true, borrows: :all },
-  # O(1) pointer+length comparison for String@symbol. Valid because the compiler
-  # deduplicates identical string literals within a single compilation unit.
+  # O(1) pointer+length comparison for String@symbol. Valid for compiler-pooled
+  # static symbol literals; dynamic String@symbol values must be interned first.
   symbolEql: { zig: "({0}.ptr == {1}.ptr and {0}.len == {1}.len)", bc: true, borrows: :all },
 
   # --- String indexing ---

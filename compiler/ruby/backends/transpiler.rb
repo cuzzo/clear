@@ -206,8 +206,9 @@ class ZigTranspiler
     emitter = MIREmitter.new
     items_zig = mod_result[:items].flatten.filter_map { |item| emitter.emit(item) }.join("\n\n")
     type_defs_zig = mod_result[:type_items].flatten.filter_map { |item| emitter.emit(item) }.join("\n\n")
+    symbol_pool_zig = emitter.symbol_pool_declarations
 
-    body = [type_defs_zig, items_zig].reject(&:empty?).join("\n\n")
+    body = [symbol_pool_zig, type_defs_zig, items_zig].reject(&:empty?).join("\n\n")
     safety_line = body.include?("safety.") ? "const safety = @import(\"safety\");\n" : ""
 
     # If the module defines main, emit a Zig test block so the module

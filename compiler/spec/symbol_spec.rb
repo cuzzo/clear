@@ -179,6 +179,11 @@ RSpec.describe "String@symbol" do
       expect(t.provenance).to eq(:rodata)
       expect(t.any_sync?).to be false
     end
+
+    it "does not accept a plain String where String@symbol is required" do
+      expect(Type.new(:String, sync: :symbol).accepts?(Type.new(:String))).to be false
+      expect(Type.new(:String, sync: :symbol).accepts?(Type.new(:String, sync: :symbol))).to be true
+    end
   end
 
   # =========================================================================
@@ -243,20 +248,71 @@ RSpec.describe "String@symbol" do
         CLEAR
       }.not_to raise_error
     end
+
+    it "rejects a plain string literal passed to String@symbol parameter" do
+      expect {
+        run(<<~CLEAR)
+          FN check(tag: String@symbol) RETURNS Bool ->
+            RETURN tag == :ok;
+          END
+          FN main() RETURNS Void ->
+            check("ok");
+            RETURN;
+          END
+        CLEAR
+      }.to raise_error(/String@symbol/)
+    end
+
+    it "rejects assigning a plain string literal to String@symbol" do
+      expect {
+        run(<<~CLEAR)
+          FN main() RETURNS Void ->
+            tag: String@symbol = "ok";
+            RETURN;
+          END
+        CLEAR
+      }.to raise_error(/String@symbol/)
+    end
   end
 
   # =========================================================================
   # MIR lowering / Zig emission
   # =========================================================================
   describe "Zig code generation" do
-    it "emits a symbol literal as a Zig string literal" do
+    it "emits a symbol literal through the static symbol pool" do
       zig = compile_symbol_src(<<~CLEAR)
         FN main() RETURNS Void ->
           x = :ok;
           RETURN;
         END
       CLEAR
-      expect(zig).to include('"ok"')
+      expect(zig).to include('const __clear_symbol_0: []const u8 = "ok";')
+      expect(zig).to include("const x: []const u8 = __clear_symbol_0;")
+    end
+
+    it "deduplicates repeated static symbol literals" do
+      zig = compile_symbol_src(<<~CLEAR)
+        FN main() RETURNS Void ->
+          a = :foo;
+          b = :foo;
+          c = :bar;
+          _ = a == b;
+          _ = c == :bar;
+          RETURN;
+        END
+      CLEAR
+      expect(zig.scan(/const __clear_symbol_\d+: \[\]const u8 = "foo";/).size).to eq(1)
+      expect(zig.scan(/const __clear_symbol_\d+: \[\]const u8 = "bar";/).size).to eq(1)
+    end
+
+    it "emits the static symbol pool for modules before exported items" do
+      zig = ZigTranspiler.new.transpile_as_module(<<~CLEAR)
+        PUB FN label() RETURNS String@symbol ->
+          RETURN :ok;
+        END
+      CLEAR
+      expect(zig).to include('const __clear_symbol_0: []const u8 = "ok";')
+      expect(zig.index("const __clear_symbol_0")).to be < zig.index("pub fn label")
     end
 
     it "emits symbol == symbol comparison as pointer+length check" do
@@ -271,6 +327,8 @@ RSpec.describe "String@symbol" do
       # symbolEql expands to pointer+length comparison, not CheatLib.eql
       expect(zig).to include(".ptr ==")
       expect(zig).to include(".len ==")
+      expect(zig).to include("const a: []const u8 = __clear_symbol_0;")
+      expect(zig).to include("const b: []const u8 = __clear_symbol_0;")
       expect(zig).not_to include("CheatLib.eql")
     end
 
@@ -307,7 +365,8 @@ RSpec.describe "String@symbol" do
           RETURN;
         END
       CLEAR
-      expect(zig).to include('"debug"')
+      expect(zig).to include('const __clear_symbol_0: []const u8 = "debug";')
+      expect(zig).to include("tag_label(__clear_symbol_0)")
     end
 
     it "function returning String@symbol emits correct return type" do
@@ -319,7 +378,7 @@ RSpec.describe "String@symbol" do
           RETURN;
         END
       CLEAR
-      expect(zig).to include('"release"')
+      expect(zig).to include('const __clear_symbol_0: []const u8 = "release";')
       # Return type is []const u8 (same wire type)
       expect(zig).to include("[]const u8")
     end

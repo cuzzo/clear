@@ -697,7 +697,9 @@ module FunctionAnalysis
 
     error!(facts.arg_node, :ARGUMENT_TYPE_ERROR,
       fn: argument_name(facts.arg_node, fallback: "Expression"),
-      index: facts.index + 1, expected: facts.expected_type, got: facts.actual)
+      index: facts.index + 1,
+      expected: Type.coercion_surface_name(facts.expected_type),
+      got: Type.coercion_surface_name(facts.actual_type))
   end
 
   sig { params(facts: CallArgumentFacts).returns(T::Boolean) }
@@ -780,7 +782,8 @@ module FunctionAnalysis
   sig { params(facts: CallArgumentFacts).returns(T::Boolean) }
   def basic_argument_match?(facts)
     T.bind(self, SemanticAnnotator)
-    return true if facts.expected_type.any? || facts.actual == :Any || facts.expected_type == facts.actual
+    return true if facts.expected_type.any? || facts.actual == :Any ||
+      facts.expected_type.semantic_type_key == facts.actual_type.semantic_type_key
     return true if any_element_collection_param?(facts.expected_type, facts.actual_type)
     return true if facts.expected_type.auto?
     return false unless is_safe_autocast?(facts.actual, facts.expected_type)

@@ -1174,11 +1174,16 @@ module AST
       # No explicit type or :Any -> use inferred, no coercion needed
       return [inferred, nil] if declared_type.nil? || declared_type == :Any
 
+      declared_type_info = declared_type.is_a?(FunctionSignature) ? Type.new(declared_type) : Type.new(declared_type)
+      if declared_type_info.symbol? && @type_object && !T.must(@type_object).symbol?
+        return [nil, Type.coerce_error(T.must(@type_object), declared_type_info)]
+      end
+
       # Explicit type matches inferred -> no coercion needed
       return [declared_type, nil] if declared_type == inferred
 
       # Check if coercion is valid
-      coerce_target = T.let(declared_type.is_a?(FunctionSignature) ? Type.new(declared_type) : declared_type, Type::TypeInput)
+      coerce_target = T.let(declared_type.is_a?(FunctionSignature) ? declared_type_info : declared_type, Type::TypeInput)
       error = Type.coerce_error(T.must(@type_object), coerce_target)
       return [nil, error] if error
 

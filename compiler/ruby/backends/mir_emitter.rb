@@ -53,6 +53,7 @@ class MIREmitter
     @flow_alias_name = T.let(nil, T.nilable(String))
     @if_bind_counter = T.let(nil, T.nilable(Integer))
     @discard_counter = T.let(0, Integer)
+    @symbol_literals = T.let({}, T::Hash[String, String])
   end
 
   # Emit Zig code from a structural MIR node. Returns a String.
@@ -162,6 +163,7 @@ class MIREmitter
     when MIR::BinOp            then emit_bin_op(node)
     when MIR::UnaryOp          then emit_unary_op(node)
     when MIR::Lit              then node.value
+    when MIR::SymbolLit        then symbol_literal_name(node.value.to_s)
     when MIR::VoidLiteral      then "{}"
     when MIR::DefaultValue     then emit_default_value(node)
     when MIR::EnumTag          then ".#{node.variant}"
@@ -1308,6 +1310,33 @@ class MIREmitter
     text.dump
   end
 
+  sig { params(value: String).returns(String) }
+  def symbol_literal_name(value)
+    existing = @symbol_literals[value]
+    return existing if existing
+
+    name = "__clear_symbol_#{@symbol_literals.length}"
+    @symbol_literals[value] = name
+    name
+  end
+
+  sig { params(text: String).returns(String) }
+  def zig_byte_string_literal(text)
+    escaped = text.bytes.map do |b|
+      case b
+      when 0x5C then '\\\\'
+      when 0x22 then '\\"'
+      when 0x0A then '\\n'
+      when 0x0D then '\\r'
+      when 0x09 then '\\t'
+      when 0x00 then '\\x00'
+      when 0x80..0xFF then "\\x#{'%02x' % b}"
+      else b.chr
+      end
+    end.join
+    "\"#{escaped}\""
+  end
+
   sig { params(node: MIR::FallibleLockBinding).returns(String) }
   def emit_fallible_lock_binding(node)
     [
@@ -1537,6 +1566,8 @@ class MIREmitter
   sig { params(node: MIR::Program).returns(String) }
   def emit_program(node)
     parts = node.items.filter_map { |item| emit(item) }
+    symbol_pool = symbol_pool_declarations
+    parts.unshift(symbol_pool) unless symbol_pool.empty?
     out = []
     parts.each_with_index do |part, i|
       if i == 0
@@ -1549,6 +1580,20 @@ class MIREmitter
     end
     out.join
   end
+
+  sig { returns(String) }
+  def symbol_pool_declarations
+    return "" if @symbol_literals.empty?
+
+    lines = [
+      "// Static String@symbol literal pool.",
+    ]
+    @symbol_literals.each do |value, name|
+      lines << "const #{name}: []const u8 = #{zig_byte_string_literal(value)};"
+    end
+    lines.join("\n")
+  end
+  public :symbol_pool_declarations
 
   sig { params(node: MIR::FnDef).returns(String) }
   def emit_fn_def(node)
