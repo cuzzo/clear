@@ -212,6 +212,17 @@ def coverage_format(path)
   nil
 end
 
+def analyzer_coverage_compatible?(path, format)
+  return true if %w[simplecov cobertura codecov].include?(format)
+
+  base = File.basename(path)
+  return true if base == "coverage.json"
+  return true if base == "branch-coverage.json" || base == "nil-kill-branch-coverage.json"
+  return true if base.end_with?(".jsonl")
+
+  false
+end
+
 def tracked_suffix_index(repo)
   files = git_tracked_files(repo)
   index = Hash.new { |hash, key| hash[key] = [] }
@@ -363,7 +374,7 @@ build_cmd = [lineage_bin, "build", "--repo", repo, "--db", db]
 build_cmd += ["--max-commits", options[:max_commits].to_s] if options[:max_commits]
 run_command("lineage-build", build_cmd, chdir: repo, log_dir: log_dir)
 
-coverage_paths = []
+analyzer_coverage_paths = []
 if options[:coverage]
   suffix_index = tracked_suffix_index(repo)
   discovered = discover_coverage(repo, options[:coverage_inputs])
@@ -387,7 +398,7 @@ if options[:coverage]
     ]
     cmd << "--replace" if options[:replace]
     run_command("coverage-#{rel}", cmd, chdir: repo, log_dir: log_dir, optional: true)
-    coverage_paths << path
+    analyzer_coverage_paths << path if analyzer_coverage_compatible?(path, format)
   end
 end
 
@@ -418,7 +429,7 @@ if options[:analyzers]
     "--top", options[:top].to_s,
     "--decomplex-binary", decomplex_bin,
   ]
-  cmd += ["--coverage", coverage_paths.join(File::PATH_SEPARATOR)] unless coverage_paths.empty?
+  cmd += ["--coverage", analyzer_coverage_paths.join(File::PATH_SEPARATOR)] unless analyzer_coverage_paths.empty?
   ENV["FACT_MINE_RUST_BINARY"] = fact_mine_bin
   run_command("first-party-sarif", cmd, chdir: TOOL_ROOT, log_dir: log_dir, optional: true)
   ingest = [lineage_bin, "ingest-sarif", "--db", db, "--repo", repo, "--input", first_party_dir, "--source", "first-party", "--commit", commit]

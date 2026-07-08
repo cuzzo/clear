@@ -197,66 +197,72 @@ end
 def rubocop_results(repo, ruby_files)
   return [] if ruby_files.empty?
 
-  command = if File.file?(File.join(repo, "Gemfile")) && command_available?(repo, "bundle")
-              ["bundle", "exec", "rubocop"]
-            elsif command_available?(repo, "rubocop")
-              ["rubocop"]
-            else
-              warn "rubocop not found; writing empty Ruby lint SARIF"
-              return []
-            end
+  commands = []
+  commands << ["bundle", "exec", "rubocop"] if File.file?(File.join(repo, "Gemfile")) && command_available?(repo, "bundle")
+  commands << ["rubocop"] if command_available?(repo, "rubocop")
+  commands.uniq!
+  if commands.empty?
+    warn "rubocop not found; writing empty Ruby lint SARIF"
+    return []
+  end
+
   config = if File.file?(File.join(repo, "tools/lint/rubocop_lineage.yml"))
              File.join(repo, "tools/lint/rubocop_lineage.yml")
            elsif File.file?(File.join(ROOT, "tools/lint/rubocop_lineage.yml"))
              File.join(ROOT, "tools/lint/rubocop_lineage.yml")
            end
-  args = [
-    *command,
-    "--format", "json",
-    "--force-exclusion"
-  ]
-  args += ["--config", config] if config
-  args += ruby_files
-  stdout, stderr, status = run_capture(
-    repo,
-    *args
-  )
-  warn stderr unless stderr.empty?
-  warn "rubocop exited #{status&.exitstatus}" if status && !status.success? && stdout.strip.empty?
-  data = JSON.parse(stdout)
 
-  data.fetch("files", []).flat_map do |file|
-    path = repo_relative(file.fetch("path"), repo)
-    file.fetch("offenses", []).map do |offense|
-      location = offense.fetch("location", {})
-      rule_id = offense.fetch("cop_name", "rubocop")
-      line = Integer(location.fetch("line", 1))
-      column = location["column"] ? Integer(location["column"]) : nil
-      last_line = location["last_line"] ? Integer(location["last_line"]) : nil
-      end_column = if location["last_column"]
-                     Integer(location["last_column"])
-                   elsif column && location["length"]
-                     column + Integer(location["length"])
-                   end
-      lint_result(
-        rule_id: rule_id,
-        message: offense.fetch("message", rule_id),
-        path: path,
-        line: line,
-        start_column: column,
-        end_line: last_line,
-        end_column: end_column,
-        level: sarif_level_from_rubocop(offense["severity"]),
-        tool: "rubocop",
-        extra: {
-          "severity" => offense["severity"],
-          "correctable" => offense["correctable"]
-        }
-      )
+  commands.each do |command|
+    args = [
+      *command,
+      "--format", "json",
+      "--force-exclusion"
+    ]
+    args += ["--config", config] if config
+    args += ruby_files
+    stdout, stderr, status = run_capture(repo, *args)
+    warn stderr unless stderr.empty?
+    if stdout.strip.empty?
+      warn "rubocop #{command.join(' ')} exited #{status&.exitstatus}" if status && !status.success?
+      next
     end
+
+    data = JSON.parse(stdout)
+    return data.fetch("files", []).flat_map do |file|
+      path = repo_relative(file.fetch("path"), repo)
+      file.fetch("offenses", []).map do |offense|
+        location = offense.fetch("location", {})
+        rule_id = offense.fetch("cop_name", "rubocop")
+        line = Integer(location.fetch("line", 1))
+        column = location["column"] ? Integer(location["column"]) : nil
+        last_line = location["last_line"] ? Integer(location["last_line"]) : nil
+        end_column = if location["last_column"]
+                       Integer(location["last_column"])
+                     elsif column && location["length"]
+                       column + Integer(location["length"])
+                     end
+        lint_result(
+          rule_id: rule_id,
+          message: offense.fetch("message", rule_id),
+          path: path,
+          line: line,
+          start_column: column,
+          end_line: last_line,
+          end_column: end_column,
+          level: sarif_level_from_rubocop(offense["severity"]),
+          tool: "rubocop",
+          extra: {
+            "severity" => offense["severity"],
+            "correctable" => offense["correctable"]
+          }
+        )
+      end
+    end
+  rescue JSON::ParserError => e
+    warn "could not parse RuboCop JSON from #{command.join(' ')}: #{e.message}"
   end
-rescue JSON::ParserError => e
-  warn "could not parse RuboCop JSON: #{e.message}"
+
+  warn "rubocop produced no parseable JSON; writing empty Ruby lint SARIF"
   []
 end
 
