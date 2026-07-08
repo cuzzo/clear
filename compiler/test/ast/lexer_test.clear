@@ -209,9 +209,9 @@ TEST Lexer DO
       octal = tokenizeSource!("0o12_34") OR RAISE;
       suffixed = tokenizeSource!("0xFF_FF_u32") OR RAISE;
 
-      assertTokenInt!(hex[0], "INT64", 255, 1, 1) OR RAISE;
-      assertTokenInt!(binary[0], "INT64", 165, 1, 1) OR RAISE;
-      assertTokenInt!(octal[0], "INT64", 668, 1, 1) OR RAISE;
+      assertTokenInt!(hex[0], "PREFIXED_INT", 255, 1, 1) OR RAISE;
+      assertTokenInt!(binary[0], "PREFIXED_INT", 165, 1, 1) OR RAISE;
+      assertTokenInt!(octal[0], "PREFIXED_INT", 668, 1, 1) OR RAISE;
       assertTokenInt!(suffixed[0], "UINT32", 65_535, 1, 1) OR RAISE;
     END
 

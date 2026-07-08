@@ -52,6 +52,7 @@ class TestGenerator
     body_items = program.items.reject { |item| preamble_items.include?(item) || item.is_a?(MIR::Import) || item.is_a?(MIR::TypeAlias) }
     preamble = preamble_items.filter_map { |item| emitter.emit(item) }.join("\n\n")
     transpiled_body = body_items.filter_map { |item| emitter.emit(item) }.join("\n\n")
+    symbol_pool = emitter.symbol_pool_declarations
 
     # Detect if test uses DO/BG blocks, TCP resources, sharded EACH,
     # or any of the CONCURRENT runtime helpers. The structural list
@@ -126,6 +127,8 @@ class TestGenerator
           #{preamble}
           #{error_name_enum}
           const S = struct {
+              #{symbol_pool}
+
               #{transpiled_body}
           };
 

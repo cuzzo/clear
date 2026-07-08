@@ -31,6 +31,7 @@ require 'optparse'
 require 'digest'
 require 'set'
 require 'json'
+require 'rbconfig'
 require_relative 'compiler/ruby/tools/clear_build_support'
 require_relative 'tools/zig_coverage_support'
 
@@ -734,6 +735,41 @@ when 'run'
 
 when 'test'
   test_args = ARGV[1..] || []
+  compat_stage = nil
+  compat_out = nil
+  i = 0
+  while i < test_args.length
+    case test_args[i]
+    when '--compat-stage', '--compat'
+      compat_stage = test_args[i + 1]
+      error "#{test_args[i]} requires a value (currently: lexer)" unless compat_stage
+      test_args.slice!(i, 2)
+      next
+    when /\A--compat-stage=(.+)\z/, /\A--compat=(.+)\z/
+      compat_stage = Regexp.last_match(1)
+      test_args.delete_at(i)
+      next
+    when '--compat-out'
+      compat_out = test_args[i + 1]
+      error "--compat-out requires a path" unless compat_out
+      test_args.slice!(i, 2)
+      next
+    when /\A--compat-out=(.+)\z/
+      compat_out = Regexp.last_match(1)
+      test_args.delete_at(i)
+      next
+    end
+    i += 1
+  end
+
+  if compat_stage
+    error "Unknown compatibility stage: #{compat_stage} (currently supported: lexer)" unless compat_stage == 'lexer'
+    compat_script = File.join(CLEAR_ROOT, 'tools', 'lexer_compat.rb')
+    compat_args = []
+    compat_args += ['--out', compat_out] if compat_out
+    exec(RbConfig.ruby, compat_script, *compat_args)
+  end
+
   profile_mode = test_args.delete('--profile')
   strict_mode = test_args.delete('--strict')
   frame_debug = test_args.delete('--debug-frame') || test_args.delete('--no-frame')
@@ -971,6 +1007,11 @@ when 'test'
 
 when 'benchmark'
   bench_args = ARGV[1..] || []
+  if bench_args.delete('--lexer')
+    benchmark_script = File.join(CLEAR_ROOT, 'tools', 'lexer_benchmark.rb')
+    exec(RbConfig.ruby, benchmark_script, *bench_args)
+  end
+
   coverage_mode = bench_args.delete('--coverage')
   ENV['ZIG_COVERAGE'] ||= '1' if coverage_mode
   source = bench_args.first
@@ -1407,7 +1448,9 @@ when 'help', '--help', '-h', nil
       clear run <file.clear> [-- args...]
       clear test <file.clear>          Test a single file
       clear test <directory>         Test all .clear files in directory
+      clear test --compat-stage lexer Compare Ruby and CLEAR lexer output; writes MessagePack artifacts
       clear test ... --debug-frame   Enable debug frame arena (slow, detects use-after-rewind)
+      clear benchmark --lexer        Benchmark the Ruby lexer against the CLEAR lexer
       clear profile <file.clear>      Build + run with profiling (heap + CPU)
       clear doctor <profile-dir>    Analyze profile data
       clear build --fix <file>      On compile error, run `clear fix` then retry once
