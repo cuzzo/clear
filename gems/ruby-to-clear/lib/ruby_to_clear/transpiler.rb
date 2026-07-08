@@ -86,16 +86,20 @@ module RubyToClear
       @local_types = {}
       @singleton_class_depth = 0
       @current_function_type_bindings = {}
+      @required_files = Set.new
     end
 
     def transpile(program_node)
       preload_required_metadata(program_node)
+      collect_local_requires_from_node(program_node)
+      collect_struct_fields_from_node(program_node)
       collect_type_aliases_from_node(program_node)
       collect_ast_node_variants_from_node(program_node)
       collect_method_signature_metadata_from_node(program_node)
       collect_method_params_from_node(program_node)
       body = visit(program_node)
       requires = @required_packages.sort.map { |package| "REQUIRE \"pkg:#{package}\"" }
+      requires += @required_files.sort.map { |path| "REQUIRE \"#{path}\"" }
       generated_unions = generated_union_definitions_for_body(body)
       (requires + generated_unions + [body]).reject(&:empty?).join("\n")
     end
@@ -1064,9 +1068,6 @@ module RubyToClear
 
     def check_parameters!(parameters_node)
       return unless parameters_node
-      if parameters_node.keyword_rest
-        return raise_unsupported("Keyword rest parameters are not supported", parameters_node.keyword_rest)
-      end
       nil
     end
 
@@ -1449,6 +1450,32 @@ module RubyToClear
       paths
     end
 
+    def collect_local_requires_from_node(program_node)
+      return unless program_node.respond_to?(:statements)
+
+      top_level_require_relative_paths(program_node.statements).each do |relative|
+        @required_files << clear_require_path(relative)
+      end
+    end
+
+    def top_level_require_relative_paths(statements_node)
+      return [] unless statements_node
+
+      statements_node.body.filter_map do |node|
+        next unless node.is_a?(Prism::CallNode)
+        next unless node.receiver.nil? && node.name.to_s == "require_relative"
+
+        arg = node.arguments&.arguments&.first
+        arg.content if arg.is_a?(Prism::StringNode)
+      end
+    end
+
+    def clear_require_path(relative)
+      normalized = relative.sub(%r{\A\./}, "")
+      normalized = normalized.sub(/\.rb\z/, "")
+      "#{normalized}.clear"
+    end
+
     def collect_metadata_from_file(path)
       return if @loaded_metadata_files.include?(path)
       return unless File.file?(path)
@@ -1596,13 +1623,19 @@ module RubyToClear
 
       infos = []
       parameters_node.requireds.each do |param|
-        infos << { name: param.name.to_s, default: nil } if param.respond_to?(:name)
+        infos << { name: param.name.to_s, default: nil, kind: :positional } if param.respond_to?(:name)
       end
       parameters_node.optionals.each do |param|
-        infos << { name: param.name.to_s, default: param.value } if param.respond_to?(:name)
+        infos << { name: param.name.to_s, default: param.value, kind: :positional } if param.respond_to?(:name)
+      end
+      if parameters_node.rest&.respond_to?(:name)
+        infos << { name: parameters_node.rest.name.to_s, default: nil, kind: :rest }
       end
       parameters_node.keywords.each do |param|
-        infos << { name: param.name.to_s, default: param.respond_to?(:value) ? param.value : nil } if param.respond_to?(:name)
+        infos << { name: param.name.to_s, default: param.respond_to?(:value) ? param.value : nil, kind: :keyword } if param.respond_to?(:name)
+      end
+      if parameters_node.keyword_rest&.respond_to?(:name)
+        infos << { name: parameters_node.keyword_rest.name.to_s, default: nil, kind: :keyword_rest }
       end
       infos
     end
@@ -1619,7 +1652,9 @@ module RubyToClear
         if t_struct_class?(node)
           body_nodes = node.body&.body || []
           fields = body_nodes.filter_map { |stmt| t_struct_field(stmt)&.first }
-          register_constructor_fields(namespace, name, fields) if fields.any?
+          register_constructor_fields(namespace, name, fields)
+        elsif (fields = struct_new_field_names(node.superclass))
+          register_constructor_fields(namespace, name, fields)
         end
       when Prism::ConstantWriteNode
         if (fields = struct_new_field_names(node.value))
@@ -1644,6 +1679,10 @@ module RubyToClear
       args = node.arguments ? node.arguments.arguments : []
       fields = args.take_while { |arg| arg.is_a?(Prism::SymbolNode) }.map { |arg| arg.value.to_s }
       fields.empty? ? nil : fields
+    end
+
+    def struct_new_superclass?(node)
+      !!struct_new_field_names(node)
     end
 
     def constructor_output_name(receiver)
@@ -1690,12 +1729,11 @@ module RubyToClear
         assoc_pairs.concat(keyword_pairs)
       end
 
-      "#{class_name}{ #{assoc_pairs.join(', ')} }"
+      assoc_pairs.empty? ? "#{class_name}{}" : "#{class_name}{ #{assoc_pairs.join(', ')} }"
     end
 
     def constructor_call_from_keywords(receiver, arguments_node)
-      class_name = constructor_output_name(receiver)
-      param_infos = @constructor_params[class_name]
+      param_infos = constructor_parameter_info(receiver)
       return nil unless param_infos
 
       args = arguments_from_keywords(param_infos, arguments_node)
@@ -1705,11 +1743,23 @@ module RubyToClear
     end
 
     def constructor_call_from_positional(receiver, arguments_node)
-      class_name = constructor_output_name(receiver)
-      return nil unless @constructor_params[class_name]
+      return nil unless constructor_parameter_info(receiver)
 
       args = arguments_node ? arguments_node.arguments.map { |arg| visit(arg) } : []
       "#{visit(receiver)}.new(#{args.join(', ')})"
+    end
+
+    def constructor_parameter_info(receiver)
+      names = []
+      names << receiver.location.slice.strip if receiver
+      names << receiver.location.slice.strip.split("::").last if receiver.is_a?(Prism::ConstantPathNode)
+      names << receiver.name.to_s if receiver.respond_to?(:name)
+
+      names.uniq.each do |name|
+        return @constructor_params[name] if @constructor_params[name]
+      end
+
+      nil
     end
 
     def call_arguments_from_keywords(method_name, arguments_node)
@@ -1725,26 +1775,71 @@ module RubyToClear
       return args.map { |arg| visit(arg) } unless keyword_hash
 
       positional = args.reject { |arg| arg.equal?(keyword_hash) }
-      rendered = positional.map { |arg| visit(arg) }
+      rendered = []
+      rest_index = param_infos.index { |info| info[:kind] == :rest }
+      keyword_rest_index = param_infos.index { |info| info[:kind] == :keyword_rest }
+
+      positional.each_with_index do |arg, arg_index|
+        if arg.is_a?(Prism::SplatNode)
+          return nil unless rest_index
+
+          rendered[rest_index] = visit(arg.expression)
+        elsif rest_index && arg_index >= rest_index
+          return nil
+        else
+          rendered[arg_index] = visit(arg)
+        end
+      end
       max_index = rendered.length - 1
+      keyword_pairs = []
+      keyword_splats = []
 
       keyword_hash.elements.each do |assoc|
+        if assoc.is_a?(Prism::AssocSplatNode)
+          return nil unless keyword_rest_index
+
+          keyword_splats << visit(assoc.value)
+          max_index = [max_index, keyword_rest_index].max
+          next
+        end
         return nil unless assoc.is_a?(Prism::AssocNode)
 
         key = keyword_call_key(assoc.key)
         return nil unless key
 
         index = param_infos.index { |info| info[:name] == key }
-        return nil unless index
-        return nil if index < positional.length
+        if index
+          return nil if index < positional.length
 
-        max_index = [max_index, index].max
-        rendered[index] = visit(assoc.value)
+          max_index = [max_index, index].max
+          rendered[index] = visit(assoc.value)
+        elsif keyword_rest_index
+          keyword_pairs << "#{key}: #{visit(assoc.value)}"
+          max_index = [max_index, keyword_rest_index].max
+        else
+          return nil
+        end
+      end
+
+      if keyword_rest_index
+        rendered[keyword_rest_index] = keyword_rest_argument(keyword_pairs, keyword_splats)
       end
 
       (0..max_index).map do |idx|
         rendered[idx] || default_argument_for(param_infos[idx])
       end
+    end
+
+    def keyword_rest_argument(keyword_pairs, keyword_splats)
+      return "{#{keyword_pairs.join(', ')}}" if keyword_splats.empty?
+
+      base = keyword_splats.first
+      return base if keyword_pairs.empty? && keyword_splats.length == 1
+
+      args = []
+      args << "{#{keyword_pairs.join(', ')}}" unless keyword_pairs.empty?
+      args.concat(keyword_splats)
+      "mergeKwargs(#{args.join(', ')})"
     end
 
     def arguments_with_keyword_hash(arguments_node)
@@ -1767,6 +1862,8 @@ module RubyToClear
 
     def default_argument_for(param_info)
       return nil unless param_info
+      return "[]" if param_info[:kind] == :rest
+      return "{}" if param_info[:kind] == :keyword_rest
       return visit(param_info[:default]) if param_info[:default]
 
       nil
@@ -1882,6 +1979,11 @@ module RubyToClear
       end
 
       "symbol(#{value.inspect})"
+    end
+
+    def visit_interpolated_symbol_node(node)
+      parts = node.parts.map { |part| interpolated_string_part_for_literal(part) }.join
+      "symbol(\"#{parts}\")"
     end
 
     def static_send_method_name(node)
@@ -2022,6 +2124,18 @@ module RubyToClear
       "self.#{name} = (self.#{name} #{op} #{val})"
     end
 
+    def visit_instance_variable_or_write_node(node)
+      name = node.name.to_s.delete_prefix("@")
+      val = visit(node.value)
+      "self.#{name} = (self.#{name} || #{val})"
+    end
+
+    def visit_instance_variable_and_write_node(node)
+      name = node.name.to_s.delete_prefix("@")
+      val = visit(node.value)
+      "self.#{name} = (self.#{name} && #{val})"
+    end
+
     def visit_local_variable_or_write_node(node)
       name = node.name.to_s
       name = @renames[name] || name
@@ -2111,9 +2225,11 @@ module RubyToClear
     def visit_parameters_node(node)
       requireds = node.requireds.map { |param| visit(param) }
       optionals = node.optionals.map { |param| visit(param) }
+      rest = node.rest ? [visit(node.rest)] : []
       keywords = node.keywords.map { |param| visit(param) }
+      keyword_rest = node.keyword_rest ? [visit(node.keyword_rest)] : []
       block = node.block ? [visit(node.block)] : []
-      (requireds + optionals + keywords + block).join(", ")
+      (requireds + optionals + rest + keywords + keyword_rest + block).join(", ")
     end
 
     def visit_optional_parameter_node(node)
@@ -2145,6 +2261,34 @@ module RubyToClear
       "#{node.name} = NIL: #{type}"
     end
 
+    def visit_rest_parameter_node(node)
+      name = node.name ? node.name.to_s : "args"
+      type = rest_parameter_type(name)
+      "#{name} = []: #{type}"
+    end
+
+    def visit_keyword_rest_parameter_node(node)
+      name = node.name ? node.name.to_s : "kwargs"
+      type = keyword_rest_parameter_type(name)
+      "#{name} = {}: #{type}"
+    end
+
+    def rest_parameter_type(name)
+      type = @param_types && @param_types[name]
+      return "Auto[]" if type.nil? || type == "Auto" || type == "Any"
+      return type if type.end_with?("[]")
+
+      "#{type}[]"
+    end
+
+    def keyword_rest_parameter_type(name)
+      type = @param_types && @param_types[name]
+      return "HashMap<String@symbol, Auto>" if type.nil? || type == "Auto" || type == "Any"
+      return type if type.start_with?("HashMap<")
+
+      "HashMap<String@symbol, #{type}>"
+    end
+
     def visit_array_node(node)
       elements = node.elements.map { |el| visit(el) }.join(", ")
       "[#{elements}]"
@@ -2152,6 +2296,10 @@ module RubyToClear
 
     def visit_splat_node(node)
       unsupported_expression(node, "Splat arguments require an explicit call shape or generated overload")
+    end
+
+    def visit_assoc_splat_node(node)
+      visit(node.value)
     end
 
     def visit_hash_node(node)
@@ -2277,6 +2425,20 @@ module RubyToClear
       end
     end
 
+    def visit_super_node(node)
+      args = node.arguments ? visit(node.arguments) : ""
+      "super(#{args})"
+    end
+
+    def visit_forwarding_super_node(_node)
+      "super()"
+    end
+
+    def visit_yield_node(node)
+      args = node.arguments ? visit(node.arguments) : ""
+      "yield(#{args})"
+    end
+
     def visit_break_node(node)
       "BREAK"
     end
@@ -2384,6 +2546,10 @@ module RubyToClear
         "IF #{pred} THEN\n#{body}#{consequent_code}\nEND"
       else
         target = visit(node.predicate)
+        if node.conditions.any? { |w| w.conditions.any? { |cond| cond.is_a?(Prism::SplatNode) } }
+          return render_case_as_condition_chain(node, target)
+        end
+
         arms = []
         node.conditions.each do |w|
           w.conditions.each do |cond|
@@ -2404,6 +2570,31 @@ module RubyToClear
 
         "PARTIAL MATCH #{target} START\n#{arms_body}\nEND"
       end
+    end
+
+    def render_case_as_condition_chain(node, target)
+      chunks = []
+      node.conditions.each_with_index do |when_node, index|
+        keyword = index.zero? ? "IF" : "ELSE_IF"
+        pred = when_node.conditions.map { |cond| case_condition_predicate(target, cond) }.join(" || ")
+        body = with_indent { visit(when_node.statements) }
+        chunks << "#{keyword} #{pred} THEN\n#{body}"
+      end
+
+      if node.consequent
+        else_body = with_indent { visit(node.consequent) }
+        chunks << "ELSE\n#{else_body}"
+      end
+
+      "#{chunks.join("\n")}#{chunks.empty? ? "" : "\n"}END"
+    end
+
+    def case_condition_predicate(target, cond)
+      if cond.is_a?(Prism::SplatNode)
+        return "#{visit(cond.expression)}.contains?(#{target})"
+      end
+
+      "(#{target} == #{visit(cond)})"
     end
 
     def visit_regular_expression_node(node)
@@ -2719,28 +2910,59 @@ module RubyToClear
 
     def visit_class_node(node)
       old_class = @current_class
-      @current_class = node.constant_path.location.slice.strip
+      class_name = node.constant_path.location.slice.strip
+      @current_class = class_name
 
       if t_struct_class?(node)
         body_nodes = node.body&.body || []
         fields = body_nodes.filter_map { |stmt| t_struct_field(stmt) }
-        if fields.length == body_nodes.length
-          @struct_fields[@current_class] = fields.map(&:first)
-          field_decls = fields.map { |field, type| "  #{field}: #{concrete_struct_type(type)}" }.join(",\n")
-          @current_class = old_class
-          return "STRUCT #{node.constant_path.location.slice.strip} {\n#{field_decls}\n}"
-        end
+        register_constructor_fields([], @current_class, fields.map(&:first))
+        field_decls = fields.map { |field, type| "  #{field}: #{concrete_struct_type(type)}" }.join(",\n")
+        body_without_fields = body_nodes.reject { |stmt| t_struct_field(stmt) }
+        body_code = visit_statement_list(body_without_fields)
+        @current_class = old_class
+        struct_code = "STRUCT #{node.constant_path.location.slice.strip} {\n#{field_decls}\n}"
+        return body_code.empty? ? struct_code : "#{struct_code}\n\n#{body_code}"
+      end
+
+      if struct_new_superclass?(node.superclass)
+        fields = struct_new_field_names(node.superclass)
+        register_constructor_fields([], @current_class, fields)
+        body_code = visit(node.body)
+        @current_class = old_class
+        field_decls = fields.map { |field| "  #{field}: Any" }.join(",\n")
+        struct_code = "STRUCT #{class_name} {\n#{field_decls}\n}"
+        return body_code.empty? ? struct_code : "#{struct_code}\n\n#{body_code}"
       end
 
       instance_fields = collect_instance_fields(node)
-      struct_fields = instance_fields.map { |name, type| "  #{name}: #{type}" }.join(",\n")
-      struct_code = "STRUCT #{@current_class} {\n#{struct_fields}\n}"
-
       body_code = visit(node.body)
 
       @current_class = old_class
 
+      return body_code if namespace_only_class?(node, instance_fields)
+
+      struct_fields = instance_fields.map { |name, type| "  #{name}: #{type}" }.join(",\n")
+      struct_code = "STRUCT #{class_name} {\n#{struct_fields}\n}"
       "#{struct_code}\n\n#{body_code}"
+    end
+
+    def namespace_only_class?(node, instance_fields)
+      return false unless instance_fields.empty?
+
+      body_nodes = node.body&.body || []
+      body_nodes.none? { |stmt| class_body_instance_member?(stmt) }
+    end
+
+    def class_body_instance_member?(stmt)
+      case stmt
+      when Prism::DefNode
+        stmt.receiver.nil?
+      when Prism::CallNode
+        stmt.receiver.nil? && %w[attr_reader attr_accessor attr_writer].include?(stmt.name.to_s)
+      else
+        false
+      end
     end
 
     def visit_def_node(node)

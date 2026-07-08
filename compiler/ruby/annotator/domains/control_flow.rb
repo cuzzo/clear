@@ -271,16 +271,18 @@ module Annotator
           union: union_type)
       end
 
-      sig { params(node: AST::Node).returns(T::Array[String]) }
+      sig { params(node: T.any(AST::Node, Type)).returns(T::Array[String]) }
       def runtime_is_a_target_names(node)
         segments = runtime_is_a_target_segments(node)
         full = segments.join(".")
         [full, segments.last].compact.uniq
       end
 
-      sig { params(node: AST::Node).returns(T::Array[String]) }
+      sig { params(node: T.any(AST::Node, Type)).returns(T::Array[String]) }
       def runtime_is_a_target_segments(node)
         case node
+        when Type
+          [node.resolved.to_s]
         when AST::Identifier
           [node.name]
         when AST::GetField
@@ -290,7 +292,7 @@ module Annotator
         end
       end
 
-      sig { params(node: AST::Node).returns(String) }
+      sig { params(node: T.any(AST::Node, Type)).returns(String) }
       def runtime_is_a_target_label(node)
         runtime_is_a_target_segments(node).join(".")
       end
@@ -324,11 +326,13 @@ module Annotator
         end
       end
 
-      sig { params(node: AST::Node, type_name: Symbol).void }
+      sig { params(node: T.any(AST::Node, Type), type_name: Symbol).void }
       def stamp_runtime_is_a_target!(node, type_name)
         T.bind(self, SemanticAnnotator)
 
         case node
+        when Type
+          return
         when AST::GetField
           stamp_runtime_is_a_target!(T.cast(node.target, AST::Node), type_name)
           stamp_type!(node, type_name)
@@ -339,9 +343,11 @@ module Annotator
         end
       end
 
-      sig { params(node: AST::Node, side: String).void }
+      sig { params(node: T.any(AST::Node, Type), side: String).void }
       def annotate_is_a_operand!(node, side:)
         T.bind(self, SemanticAnnotator)
+
+        return if node.is_a?(Type)
 
         if static_type_expr?(node)
           stamp_type!(node, :Type)
@@ -355,11 +361,13 @@ module Annotator
         error!(node, :IS_A_OPERAND_NEEDS_TYPE, side: side, got: type_info.to_s)
       end
 
-      sig { params(node: AST::Node).returns(T::Boolean) }
+      sig { params(node: T.any(AST::Node, Type)).returns(T::Boolean) }
       def static_type_expr?(node)
         T.bind(self, SemanticAnnotator)
 
         case node
+        when Type
+          true
         when AST::Identifier
           name = node.name.to_sym
           current_function_type_param?(name) ||

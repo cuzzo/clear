@@ -180,7 +180,7 @@ module RubyToClear
       end
     end
 
-    def self.unsafe_value_block_node(block_node)
+    def self.unsafe_value_block_node(block_node, allow_next: false, allow_yield: false)
       found = nil
       walk = lambda do |node|
         return unless node.is_a?(Prism::Node)
@@ -188,6 +188,14 @@ module RubyToClear
         return if node != block_node && node.is_a?(Prism::BlockNode)
 
         node_name = node.class.name.split("::").last
+        if allow_next && node_name == "NextNode"
+          node.child_nodes.each { |child| walk.call(child) if child }
+          return
+        end
+        if allow_yield && node_name == "YieldNode"
+          node.child_nodes.each { |child| walk.call(child) if child }
+          return
+        end
         if UNSAFE_VALUE_BLOCK_NODES.include?(node_name)
           found = node_name
           return
@@ -211,7 +219,7 @@ module RubyToClear
       code.split("\n").map { |line| "  #{line}" }.join("\n")
     end
 
-    def self.lower_literal_block(node, block_node, transpiler, method_label, min_params:, max_params:, rename:)
+    def self.lower_literal_block(node, block_node, transpiler, method_label, min_params:, max_params:, rename:, allow_next: false, allow_yield: false)
       unless block_node.is_a?(Prism::BlockNode)
         return unsupported(transpiler, node, "Unsupported #{method_label} block type: #{block_node.class.name}")
       end
@@ -222,7 +230,7 @@ module RubyToClear
       aliases = rename.call(param_names)
       transpiler.with_block_local_scope do
         transpiler.with_renames(aliases) do
-          if (unsafe = unsafe_value_block_node(block_node))
+          if (unsafe = unsafe_value_block_node(block_node, allow_next: allow_next, allow_yield: allow_yield))
             next unsupported(transpiler, node, "#{method_label} block contains unsupported #{unsafe}")
           end
 
@@ -371,7 +379,9 @@ module RubyToClear
         max_params: max_params,
         rename: lambda do |param_names|
           pipeline_block_aliases(param_names)
-        end
+        end,
+        allow_next: true,
+        allow_yield: true
       )
     end
 
@@ -709,8 +719,10 @@ module RubyToClear
       "#{receiver}.join(#{separator})"
     end
 
-    register("map") do |receiver, node, transpiler|
-      pipeline_value_stage(receiver, "SELECT", node, transpiler, "map")
+    register("map") do |context|
+      next nil unless context.node.block || context.receiver_shape == "array"
+
+      pipeline_value_stage(context.receiver_code, "SELECT", context.node, context.transpiler, "map")
     end
 
     register("map!") do |receiver, node, transpiler|

@@ -3,6 +3,7 @@ require "sorbet-runtime"
 
 require_relative "./ast"
 require_relative "./lexer"
+require_relative "./parser_rules"
 require_relative "./error_registry"
 require_relative "./source_error"
 require_relative "./fixable_error"
@@ -63,55 +64,7 @@ class ClearParser
           AST::MinOp, AST::MaxOp, AST::AverageOp)
   end
 
-  class PatternStep < T::Struct
-    const :kind, Symbol
-    const :value, T.untyped, default: nil
-    const :action, T.nilable(Symbol), default: nil
-  end
-
-  class ParserRule < T::Struct
-    const :type, Symbol
-    const :value, T.nilable(String), default: nil
-    const :action, Symbol
-    const :pattern, T::Array[PatternStep], default: []
-    const :inject, T::Array[T.untyped], default: []
-  end
-
-  Pattern = T.type_alias { T::Array[PatternStep] }
-
   @gradual_mode = T.let(false, T.nilable(T::Boolean))
-
-  sig { params(type: Symbol, value: T.nilable(String), action: Symbol, pattern: T::Array[PatternStep], inject: T::Array[T.untyped]).returns(ParserRule) }
-  def self.rule(type, value = nil, action:, pattern: [], inject: [])
-    ParserRule.new(type: type, value: value, action: action, pattern: pattern, inject: inject)
-  end
-
-  sig { params(value: String).returns(PatternStep) }
-  def self.lit(value)
-    PatternStep.new(kind: :literal, value: value)
-  end
-
-  sig { params(action: Symbol).returns(PatternStep) }
-  def self.capture(action)
-    PatternStep.new(kind: :capture, action: action)
-  end
-
-  sig { params(trigger: String, action: Symbol).returns(PatternStep) }
-  def self.optional_capture(trigger, action)
-    PatternStep.new(kind: :optional_capture, value: trigger, action: action)
-  end
-
-  sig { params(rules: T::Array[ParserRule]).returns(T::Hash[T.untyped, ParserRule]) }
-  def self.index_rules(rules)
-    index = T.let({}, T::Hash[T.untyped, ParserRule])
-    rules.each do |rule|
-      key = [rule.type, rule.value]
-      raise "Duplicate parser rule for #{key.inspect}" if index.key?(key)
-
-      index[key] = rule
-    end
-    index.freeze
-  end
 
   sig do
     params(
@@ -2148,7 +2101,7 @@ class ClearParser
       return AST::BinaryOp.new(op_token, lhs, :OR_RESCUE, rhs)
 
     when 'IS_A'
-      rhs = parse_unary
+      rhs = parse_is_a_rhs
       binding = nil
       if match?(:KEYWORD, 'AS')
         consume(:KEYWORD, 'AS')
@@ -2177,8 +2130,29 @@ class ClearParser
 
     rhs = parse_expression(next_prec)
     op_sym = AST::OP_TO_OP_CODE[op_val] || op_val.to_sym
-    
+
     AST::BinaryOp.new(op_token, lhs, op_sym, rhs)
+  end
+
+  sig { returns(T.any(AST::Node, Type)) }
+  def parse_is_a_rhs
+    return T.must(parse_type_annotation) if is_a_rhs_type_annotation?
+
+    parse_unary
+  end
+
+  sig { returns(T::Boolean) }
+  def is_a_rhs_type_annotation?
+    return true if match?(:KEYWORD, 'FN')
+    return true if match?(:KEYWORD, 'SHARED')
+    return true if match?(:KEYWORD, 'Auto')
+    return true if match?(:CHAR, '~') || match?(:CHAR, '!') || match?(:CHAR, '?')
+    return false unless match?(:TYPE_ID)
+
+    nxt = peek_at(1)
+    return false unless nxt
+    return true if nxt.type == :VAR_ID && CAPABILITY_TOKENS.include?(nxt.value)
+    nxt.type == :CHAR && ["<", "["].include?(nxt.value)
   end
 
   sig { returns(AST::Node) }

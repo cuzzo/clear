@@ -36,6 +36,36 @@ RSpec.describe "COMPTIME IF type predicates" do
     expect(zig).to include("if (comptime (T == Box))")
   end
 
+  it "parses capability-qualified type annotations on the right side" do
+    ast = parse(<<~CLEAR)
+      FN handle<T>(x: T) RETURNS Void ->
+        COMPTIME IF T IS_A String@symbol THEN
+          PASS
+        END
+      END
+    CLEAR
+
+    fn = ast.statements.first
+    condition = fn.body.first.condition
+    expect(condition.right).to be_a(Type)
+    expect(condition.right.symbol?).to be true
+  end
+
+  it "lowers capability-qualified IS_A type predicates" do
+    zig = transpile(<<~CLEAR)
+      FN handle<T>(x: T) RETURNS Void ->
+        COMPTIME IF T IS_A String@symbol THEN
+          PASS
+        END
+      END
+
+      FN main() RETURNS Void -> PASS END
+    CLEAR
+
+    expect(zig).to include("fn handle(comptime T: type, x: T)")
+    expect(zig).to include("if (comptime (T == []const u8))")
+  end
+
   it "allows a then-branch type binding" do
     expect {
       annotate(<<~CLEAR)

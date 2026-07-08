@@ -369,11 +369,13 @@ module MIRLoweringExpressions
     MIR::TypeEq.new(lower_type_value_expr(node.left), lower_type_value_expr(node.right))
   end
 
-  sig { params(node: AST::Node).returns(MIR::Node) }
+  sig { params(node: T.any(AST::Node, Type)).returns(MIR::Node) }
   def lower_type_value_expr(node)
     T.bind(self, MIRLowering) rescue nil
 
     case node
+    when Type
+      MIR::Ident.new(node.zig_type)
     when AST::Identifier
       MIR::Ident.new(type_value_zig_name(node.name))
     when AST::GetField

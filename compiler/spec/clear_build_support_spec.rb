@@ -135,6 +135,10 @@ RSpec.describe ClearBuildSupport do
         File.join(dir, "app", "packages", "math", "src", "lib.clear"),
         "PUB FN add(a: Int64, b: Int64) RETURNS Int64 -> RETURN a + b; END\n"
       )
+      stdlib_package = write(
+        File.join(dir, "app", "stdlib", "path", "src", "lib.clear"),
+        "PUB FN basename(path: String) RETURNS String -> RETURN path; END\n"
+      )
       zig_package = write(
         File.join(dir, "app", "packages", "http", "src", "lib.zig"),
         "pub fn ok() bool { return true; }\n"
@@ -145,11 +149,13 @@ RSpec.describe ClearBuildSupport do
       )
 
       expect(described_class.find_package_source("math", start_dir: src_dir)).to eq(package)
+      expect(described_class.find_package_source("path", start_dir: src_dir)).to eq(stdlib_package)
       expect(described_class.find_package_source("missing", start_dir: src_dir)).to be_nil
       expect(described_class.find_zig_package_source("http", start_dir: src_dir)).to eq(zig_package)
       expect(described_class.find_zig_package_source("missing", start_dir: src_dir)).to be_nil
       expect(described_class.resolve_clear_require("helper.clear", caller_dir: src_dir)).to eq(helper)
       expect(described_class.resolve_clear_require("pkg:math", caller_dir: src_dir)).to eq(package)
+      expect(described_class.resolve_clear_require("pkg:path", caller_dir: src_dir)).to eq(stdlib_package)
       expect {
         described_class.resolve_clear_require("pkg:missing", caller_dir: src_dir)
       }.to raise_error(described_class::PackageMissingError, /Package 'missing'/)

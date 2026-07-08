@@ -130,6 +130,9 @@ module ClearBuildSupport
       candidate = File.join(dir, "packages", pkg_name, "src", "lib.clear")
       return candidate if File.exist?(candidate)
 
+      candidate = File.join(dir, "stdlib", pkg_name, "src", "lib.clear")
+      return candidate if File.exist?(candidate)
+
       parent = File.dirname(dir)
       break if parent == dir
 

@@ -373,6 +373,25 @@ RSpec.describe RubyToClear::Transpiler do
       expect_transpile(ruby_code, expected_clear)
     end
 
+    it "transpiles splatted case arms as membership checks" do
+      ruby_code = <<~RUBY
+        case key
+        when *EMIT_BOOL
+          truthy
+        when :other
+          other
+        end
+      RUBY
+      expected_clear = <<~CLEAR
+        IF EMIT_BOOL.contains?(key()) THEN
+          truthy();
+        ELSE_IF (key() == :other) THEN
+          other();
+        END
+      CLEAR
+      expect_transpile(ruby_code, expected_clear)
+    end
+
     it "transpiles case expression assignments with a target" do
       ruby_code = <<~RUBY
         result = case val
@@ -441,6 +460,20 @@ RSpec.describe RubyToClear::Transpiler do
       expected_clear = <<~CLEAR
         WHILE running() DO
           CONTINUE;
+        END
+      CLEAR
+      expect_transpile(ruby_code, expected_clear)
+    end
+
+    it "transpiles Ruby yield as an explicit yield call" do
+      ruby_code = <<~RUBY
+        def walk(node)
+          yield node
+        end
+      RUBY
+      expected_clear = <<~CLEAR
+        FN walk(node: Auto) RETURNS Auto ->
+          yield(node);
         END
       CLEAR
       expect_transpile(ruby_code, expected_clear)
@@ -533,6 +566,68 @@ RSpec.describe RubyToClear::Transpiler do
           value: Any
         }
         MUTABLE t = Token{ type: :IDENT, value: "name" };
+      CLEAR
+      expect_transpile(ruby_code, expected_clear)
+    end
+
+    it "transpiles classes inheriting from Struct.new as structs" do
+      ruby_code = <<~RUBY
+        class Param < Struct.new(:name, :type, keyword_init: true)
+          def type
+            self[:type]
+          end
+        end
+
+        p = AST::Param.new(name: "value", type: :String)
+      RUBY
+      expected_clear = <<~CLEAR
+        STRUCT Param {
+          name: Any,
+          type: Any
+        }
+
+        FN type(MUTABLE self: Param) RETURNS Auto ->
+          self[:type];
+        END
+        MUTABLE p = Param{ name: "value", type: :String };
+      CLEAR
+      expect_transpile(ruby_code, expected_clear)
+    end
+
+    it "uses same-file T::Struct metadata even when the struct has methods" do
+      ruby_code = <<~RUBY
+        class Action < T::Struct
+          const :name, String
+
+          def copy
+            Action.new(name: name)
+          end
+        end
+      RUBY
+      expected_clear = <<~CLEAR
+        STRUCT Action {
+          name: String
+        }
+
+        FN copy(MUTABLE self: Action) RETURNS Auto ->
+          Action{ name: name() };
+        END
+      CLEAR
+      expect_transpile(ruby_code, expected_clear)
+    end
+
+    it "transpiles zero-field T::Struct classes and constructors" do
+      ruby_code = <<~RUBY
+        class Marker < T::Struct
+        end
+
+        Marker.new
+      RUBY
+      expected_clear = <<~CLEAR
+        STRUCT Marker {
+
+        }
+        Marker{};
       CLEAR
       expect_transpile(ruby_code, expected_clear)
     end
@@ -721,13 +816,64 @@ RSpec.describe RubyToClear::Transpiler do
       expect_transpile(ruby_code, expected_clear)
     end
 
+    it "does not emit empty structs for namespace-only classes" do
+      ruby_code = <<~RUBY
+        class Parser
+          class Rule < T::Struct
+            const :name, Symbol
+          end
+
+          def self.rule(name)
+            Rule.new(name: name)
+          end
+        end
+      RUBY
+      expected_clear = <<~CLEAR
+        STRUCT Rule {
+          name: String@symbol
+        }
+        FN rule(name: Auto) RETURNS Auto ->
+          Rule{ name: name };
+        END
+      CLEAR
+      expect_transpile(ruby_code, expected_clear)
+    end
+
     it "uses require_relative struct metadata for positional constructors when transpiling files" do
       Dir.mktmpdir do |dir|
         File.write(File.join(dir, "ast.rb"), "module AST\n  Pair = Struct.new(:left, :right)\nend\n")
         source_path = File.join(dir, "parser.rb")
         File.write(source_path, "require_relative './ast'\nAST::Pair.new(1, 2)\n")
 
-        expect(RubyToClear.transpile_file(source_path).strip).to eq("Pair{ left: 1, right: 2 };")
+        expect(RubyToClear.transpile_file(source_path).strip).to eq(<<~CLEAR.strip)
+          REQUIRE "ast.clear"
+          Pair{ left: 1, right: 2 };
+        CLEAR
+      end
+    end
+
+    it "uses require_relative struct metadata for keyword constructors when transpiling files" do
+      Dir.mktmpdir do |dir|
+        File.write(File.join(dir, "ast.rb"), "module AST\n  Pair = Struct.new(:left, :right, keyword_init: true)\nend\n")
+        source_path = File.join(dir, "parser.rb")
+        File.write(source_path, "require_relative './ast'\nAST::Pair.new(left: 1, right: 2)\n")
+
+        expect(RubyToClear.transpile_file(source_path).strip).to eq(<<~CLEAR.strip)
+          REQUIRE "ast.clear"
+          Pair{ left: 1, right: 2 };
+        CLEAR
+      end
+    end
+
+    it "emits unguarded local require_relative calls as CLEAR requires" do
+      Dir.mktmpdir do |dir|
+        File.write(File.join(dir, "parser_rules.rb"), "class Rule < T::Struct\n  const :name, Symbol\nend\n")
+        source_path = File.join(dir, "parser.rb")
+        File.write(source_path, "require_relative './parser_rules'\nclass Parser\nend\n")
+
+        expect(RubyToClear.transpile_file(source_path).strip).to eq(<<~CLEAR.strip)
+          REQUIRE "parser_rules.clear"
+        CLEAR
       end
     end
 
@@ -738,6 +884,16 @@ RSpec.describe RubyToClear::Transpiler do
         File.write(source_path, "require_relative './lexer' unless defined?(Lexer)\nLexer.new(src)\n")
 
         expect(RubyToClear.transpile_file(source_path).strip).to eq("Lexer.new(src());")
+      end
+    end
+
+    it "uses imported initialize keyword metadata from require_relative calls" do
+      Dir.mktmpdir do |dir|
+        File.write(File.join(dir, "type.rb"), "class Type\n  def initialize(raw_input, ownership: nil, sync: nil)\n  end\nend\n")
+        source_path = File.join(dir, "schema.rb")
+        File.write(source_path, "require_relative './type' unless defined?(Type)\nType.new(:Int64, sync: :atomic)\n")
+
+        expect(RubyToClear.transpile_file(source_path).strip).to eq("Type.new(:Int64, NIL, :atomic);")
       end
     end
 
@@ -836,6 +992,26 @@ RSpec.describe RubyToClear::Transpiler do
       expect_transpile("nums = []; nums.filter { |x| x > 2 }", "MUTABLE nums = [];\nnums |> WHERE (_ > 2);")
       expect_transpile("groups = []; groups.flat_map { |g| g.items }", "MUTABLE groups = [];\ngroups |> UNNEST _.items();")
       expect_transpile("items = []; items.sort_by { |item| item.name }", "MUTABLE items = [];\nitems |> ORDER_BY _.name();")
+    end
+
+    it "allows next inside effect-only each blocks" do
+      ruby_code = <<~RUBY
+        items = []
+        items.each do |item|
+          next if item.nil?
+          puts item
+        end
+      RUBY
+      expected_clear = <<~CLEAR
+        MUTABLE items = [];
+        items |> EACH {
+          IF (_ == NIL) THEN
+            CONTINUE;
+          END
+          puts(_);
+        };
+      CLEAR
+      expect_transpile(ruby_code, expected_clear)
     end
 
     it "transpiles mutating map and sum pipeline terminals" do
@@ -1011,6 +1187,7 @@ RSpec.describe RubyToClear::Transpiler do
       expect_transpile('items = []; mapped = items.map { |item| item }; mapped.size', "MUTABLE items = [];\nMUTABLE mapped = items |> SELECT _;\nmapped.length();")
       expect_transpile('pairs = []; pairs.any? { |w, t| match?(t, w) }', "MUTABLE pairs = [];\npairs |> ANY match?(_[1], _[0]);")
       expect_transpile('table = {}; pairs = []; pairs.each { |k, v| table[k] = v }', "MUTABLE table = {};\nMUTABLE pairs = [];\npairs |> EACH { table[_[0]] = _[1]; };")
+      expect_transpile("shape = get_shape; shape.map", "MUTABLE shape = get_shape();\nshape.map();")
     end
 
     it "statically lowers simple nil and type/reflection checks when receiver shape is known" do
@@ -1181,6 +1358,7 @@ RSpec.describe RubyToClear::Transpiler do
 
     it "treats Ruby freeze calls as immutability scaffolding" do
       expect_transpile("values = %w[A].freeze", "MUTABLE values = [\"A\"];")
+      expect_transpile(':"?#{name}"', 'symbol("?${name()}");')
     end
 
     it "translates RSpec block DSL calls to CLEAR test syntax" do
@@ -1425,10 +1603,35 @@ RSpec.describe RubyToClear::Transpiler do
       expect_transpile(ruby_code, expected_clear)
     end
 
-    it "raises error on keyword rest parameters inside method signatures" do
-      expect {
-        RubyToClear.transpile("def my_func(**kwargs); end")
-      }.to raise_error(RubyToClear::Transpiler::TranspilationError, /Keyword rest parameters are not supported/)
+    it "translates rest and keyword-rest parameters as explicit collection parameters" do
+      ruby_code = <<~RUBY
+        def emit(code, *args, **kwargs)
+          format(code, args, kwargs)
+        end
+      RUBY
+      expected_clear = <<~CLEAR
+        FN emit(code: Auto, args = []: Auto[], kwargs = {}: HashMap<String@symbol, Auto>) RETURNS Auto ->
+          format(code, args, kwargs);
+        END
+      CLEAR
+      expect_transpile(ruby_code, expected_clear)
+    end
+
+    it "maps keyword splats into explicit keyword-rest arguments when parameters are known" do
+      ruby_code = <<~RUBY
+        def emit(code, *args, **kwargs)
+          format(code, args, kwargs)
+        end
+
+        emit(:BAD, value: name, **kwargs)
+      RUBY
+      expected_clear = <<~CLEAR
+        FN emit(code: Auto, args = []: Auto[], kwargs = {}: HashMap<String@symbol, Auto>) RETURNS Auto ->
+          format(code, args, kwargs);
+        END
+        emit(:BAD, [], mergeKwargs({value: name()}, kwargs()));
+      CLEAR
+      expect_transpile(ruby_code, expected_clear)
     end
   end
 
@@ -1499,6 +1702,8 @@ RSpec.describe RubyToClear::Transpiler do
       expect_transpile("x &&= 5", "MUTABLE x = 5;")
       expect_transpile("x = true; x &&= false", "MUTABLE x = TRUE;\nx = (x && FALSE);")
       expect_transpile("@val = 10; @val += 5", "self.val = 10;\nself.val = (self.val + 5);")
+      expect_transpile("@type_object ||= fallback", "self.type_object = (self.type_object || fallback());")
+      expect_transpile("@enabled &&= flag", "self.enabled = (self.enabled && flag());")
     end
 
     it "translates optional parameters in def signatures" do
