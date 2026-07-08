@@ -548,7 +548,7 @@ module SlopCop
     def merge_branches!(dst, src)
       src.each do |parent, arms|
         target = (dst[parent] ||= Hash.new(0))
-        arms.each { |arm, hits| target[arm] += hits.to_i }
+        arms.each { |arm, hits| target[arm] = target.fetch(arm, 0).to_i + hits.to_i }
       end
     end
 
@@ -617,5 +617,4 @@ module SlopCop
     end
   end
 end
-
 

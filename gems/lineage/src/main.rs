@@ -312,6 +312,19 @@ fn main() -> Result<()> {
                     mutation_status.as_deref(),
                     mutation_kind.as_deref(),
                 );
+                let exposure_record_count = serde_json::from_str::<serde_json::Value>(
+                    &exposure_payload,
+                )?
+                .get("hits")
+                .and_then(serde_json::Value::as_array)
+                .map_or(0, Vec::len);
+                if exposure_record_count == 0 {
+                    println!(
+                        "skipped coverage exposure: test_id={} test_type={} records=0",
+                        test_id, test_type
+                    );
+                    return Ok(());
+                }
                 let git = GitProvider::open(&repo)?;
                 let extractor = HeuristicExtractor::default();
                 let normalizer = RepoPathNormalizer::new(&repo);

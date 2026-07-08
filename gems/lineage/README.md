@@ -22,7 +22,34 @@ If you want to contribute, see [CONTRIBUTING.md](CONTRIBUTING.md).
 
 - Rust and Cargo
 - A git repository
-- Optional coverage, mutation, hazard, or stack-trace artifacts
+- Optional coverage, mutation, hazard, lint, SARIF, or stack-trace artifacts
+
+For a fully populated local database from a repo checkout, use the import
+wrapper. It builds the required Lineage/analyzer binaries, builds the
+Lineage database, discovers supported coverage artifacts, runs bundled
+hazard providers, generates first-party SARIF, runs available Go/Rust/Ruby/Zig
+lints, ingests extra SARIF inputs, refreshes UI summaries, and can start the
+UI server:
+
+```bash
+gems/lineage/bin/lineage-import \
+  --repo . \
+  --db lineage.db \
+  --out-dir tmp/lineage-import \
+  --fresh \
+  --serve \
+  --daemon \
+  --host 0.0.0.0 \
+  --port 8080
+```
+
+Useful iteration flags:
+
+```bash
+gems/lineage/bin/lineage-import --repo . --db tmp/lineage.db --fresh --max-commits 100
+gems/lineage/bin/lineage-import --repo . --db tmp/lineage.db --fresh --no-coverage --no-lints
+gems/lineage/bin/lineage-import --repo . --db tmp/lineage.db --sarif-input tmp/vendor-sarif
+```
 
 Build a Lineage database for this repository:
 
@@ -123,6 +150,7 @@ from the same source and commit.
 | Systems hazards | `ingest-hazards` | Zig, Go, Rust, C, C++, C# hazard providers |
 | Stack traces | `ingest` | Sentry-style event JSON |
 | Static analysis and risk findings | `ingest-sarif` | SARIF 2.1.0 files from Decomplex, SlopCop, Boobytrap, Nil-Kill, Espalier, and third-party tools |
+| One-line repository import | `gems/lineage/bin/lineage-import` | Git history, coverage discovery, hazards, bundled first-party SARIF, Go/Rust/Ruby/Zig lint SARIF, extra SARIF |
 
 ### SARIF Findings
 
@@ -133,52 +161,10 @@ upload a mixed artifact directory. Rows are keyed by
 same findings is idempotent. `--replace` deletes prior SARIF rows for
 the same `source` and `commit` before loading the new artifact set.
 
-```sh
-mkdir -p tmp/lineage-sarif
-
-bundle exec ruby gems/decomplex/exe/decomplex report \
-  --emit-json=tmp/lineage-sarif/decomplex.sarif \
-  --output=tmp/lineage-sarif/decomplex.md \
-  src
-
-bundle exec ruby gems/slopcop/exe/slopcop report \
-  --repo=. \
-  --coverage=coverage/.resultset.json \
-  --json=tmp/lineage-sarif/slopcop.sarif \
-  --output=tmp/lineage-sarif/slopcop.md
-
-bundle exec ruby tools/nil-kill static \
-  --root . \
-  --output tmp/lineage-sarif/nil-kill-static.json \
-  src
-
-mkdir -p tmp/lineage-sarif/no-runtime
-bundle exec ruby tools/nil-kill normalize \
-  --root . \
-  --static tmp/lineage-sarif/nil-kill-static.json \
-  --traces tmp/lineage-sarif/no-runtime \
-  --output tmp/lineage-sarif/nil-kill-static-evidence.json \
-  --no-analyze
-
-bundle exec ruby tools/nil-kill report \
-  --evidence tmp/lineage-sarif/nil-kill-static-evidence.json \
-  --format sarif \
-  --sarif tmp/lineage-sarif/nil-kill-static.sarif
-
-bundle exec ruby gems/espalier/exe/espalier \
-  --format sarif \
-  --output tmp/lineage-sarif/espalier.sarif \
-  --nil-kill tmp/lineage-sarif/nil-kill-static.json \
-  src
-
-cargo run --manifest-path gems/lineage/Cargo.toml -- ingest-sarif \
-  --db lineage.db \
-  --repo . \
-  --input tmp/lineage-sarif \
-  --source first-party \
-  --commit "$(git rev-parse HEAD)" \
-  --replace
-```
+`gems/lineage/bin/lineage-import` generates and ingests the bundled
+first-party SARIF set automatically: Decomplex, SlopCop, Boobytrap,
+Nil-Kill, and Espalier. To generate that bundle without a full import,
+run `tools/generate_generalized_gem_sarif.rb --repo . --out-dir tmp/lineage-sarif`.
 
 For third-party lint, smell, or security tools, upload their SARIF into
 a directory and use a source name that identifies the provider or CI
@@ -413,7 +399,9 @@ experimental languages.
 
 ## Boundaries
 
-Lineage does not:
+The `lineage` binary stores, joins, and renders evidence. The
+`lineage-import` wrapper can orchestrate bundled producers and import
+artifacts for a repository checkout. The core binary does not:
 
 - run tests;
 - collect coverage;
@@ -426,9 +414,6 @@ Lineage does not:
 It stores, joins, and renders evidence. A good Lineage view should make a
 human say: "this line is risky, and here is the history and verification
 evidence explaining why."
-
-Support to ingest lint data and code smell data into Lineage is not yet
-available. Though, it is planned for the first release.
 
 ## Links
 

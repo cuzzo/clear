@@ -8,6 +8,30 @@ This document tracks the first practical validation pass for building Lineage da
 
 Create one `lineage.db` per target repository, ingest the best available evidence, start a Lineage UI server for each on `0.0.0.0`, and spot check that the UI can review the project with cross-language data.
 
+## Standard Import Command
+
+Use the same import wrapper for every checkout. The wrapper builds Lineage and
+bundled analyzers, indexes the whole repository, discovers supported coverage
+artifacts, ingests hazards, generates and ingests first-party SARIF
+(Decomplex, SlopCop, Boobytrap, Nil-Kill, Espalier), generates Go/Rust/Ruby/Zig
+lint SARIF where the repository has relevant code, ingests extra SARIF inputs,
+refreshes summaries, and can start the UI:
+
+```bash
+/home/yahn/litedb/gems/lineage/bin/lineage-import \
+  --repo /path/to/repo \
+  --db /path/to/repo/lineage.db \
+  --out-dir /path/to/repo/tmp/lineage-import \
+  --fresh \
+  --serve \
+  --daemon \
+  --host 0.0.0.0 \
+  --port 8081
+```
+
+For faster adapter smoke checks, add `--max-commits 100`. For imported CI
+artifacts, repeat `--coverage path/to/artifact` or `--sarif-input path/to/dir`.
+
 ## Validation Matrix
 
 | Language | Repository | Local Clone | Database | UI Port | Status |

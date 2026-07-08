@@ -1699,7 +1699,7 @@ impl Storage {
               GROUP BY current_path
             ),
             latest_source_lines AS (
-              SELECT path, line, hits
+              SELECT path, line, source, hits
               FROM (
                 SELECT path, line, source, hits,
                        ROW_NUMBER() OVER (
@@ -1836,16 +1836,35 @@ impl Storage {
             hazard_rows AS (
               SELECT h.id,
                      h.path,
-                     MAX(CASE
-                       WHEN e.test_type = lower(h.required_evidence) AND e.has_evidence = 1
-                       THEN 1 ELSE 0
-                     END) AS evidence_present,
                      CASE
                        WHEN MAX(CASE
-                              WHEN e.test_type = lower(h.required_evidence) AND e.has_evidence = 1
+                              WHEN (e.test_type = lower(h.required_evidence)
+                                 OR e.test_type LIKE '%' || lower(h.required_evidence) || '%')
+                               AND e.has_evidence = 1
                               THEN 1 ELSE 0
                             END) = 1
-                        AND MAX(COALESCE(e.has_invariant_mutation, 0)) = 1
+                         OR MAX(CASE
+                              WHEN ls.hits > 0
+                               AND (lower(ls.source) = lower(h.required_evidence)
+                                 OR lower(ls.source) LIKE '%' || lower(h.required_evidence) || '%')
+                              THEN 1 ELSE 0
+                            END) = 1
+                       THEN 1 ELSE 0
+                     END AS evidence_present,
+                     CASE
+                       WHEN MAX(CASE WHEN l.hits > 0 THEN 1 ELSE 0 END) = 1
+                         OR MAX(CASE
+                              WHEN (e.test_type = lower(h.required_evidence)
+                                 OR e.test_type LIKE '%' || lower(h.required_evidence) || '%')
+                               AND e.has_evidence = 1
+                              THEN 1 ELSE 0
+                            END) = 1
+                         OR MAX(CASE
+                              WHEN ls.hits > 0
+                               AND (lower(ls.source) = lower(h.required_evidence)
+                                 OR lower(ls.source) LIKE '%' || lower(h.required_evidence) || '%')
+                              THEN 1 ELSE 0
+                            END) = 1
                        THEN 1 ELSE 0
                      END AS verified
               FROM active_hazards h
@@ -1853,6 +1872,12 @@ impl Storage {
                 ON e.unit_id = h.unit_id
                AND e.path = h.path
                AND e.line = h.line
+              LEFT JOIN latest_lines l
+                ON l.path = h.path
+               AND l.line = h.line
+              LEFT JOIN latest_source_lines ls
+                ON ls.path = h.path
+               AND ls.line = h.line
               GROUP BY h.id, h.path
             ),
             hazard_file AS (

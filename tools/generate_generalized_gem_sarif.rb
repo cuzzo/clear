@@ -8,10 +8,16 @@ require "optparse"
 
 ROOT = File.expand_path("..", __dir__)
 DECOMPLEX_SARIF_MAX_RESULTS = Integer(ENV.fetch("DECOMPLEX_CI_SARIF_MAX_RESULTS", "1000"))
-$LOAD_PATH.unshift(File.join(ROOT, "gems/boobytrap/lib"))
-$LOAD_PATH.unshift(File.join(ROOT, "gems/slopcop/lib"))
-$LOAD_PATH.unshift(File.join(ROOT, "gems/espalier/lib"))
-$LOAD_PATH.unshift(File.join(ROOT, "gems/nil-kill/lib"))
+LOCAL_RUBY_LOAD_PATHS = %w[
+  gems/boobytrap/lib
+  gems/slopcop/lib
+  gems/espalier/lib
+  gems/nil-kill/lib
+].map { |path| File.join(ROOT, path) }.freeze
+
+LOCAL_RUBY_LOAD_PATHS.reverse_each { |path| $LOAD_PATH.unshift(path) }
+existing_rubylib = ENV.fetch("RUBYLIB", "").split(File::PATH_SEPARATOR).reject(&:empty?)
+ENV["RUBYLIB"] = (LOCAL_RUBY_LOAD_PATHS + existing_rubylib).uniq.join(File::PATH_SEPARATOR)
 
 require "slopcop"
 require "espalier"
@@ -29,7 +35,7 @@ options = {
 }
 
 OptionParser.new do |parser|
-  parser.banner = "Usage: generate_generalized_gem_sarif.rb --base=REF [options]"
+  parser.banner = "Usage: generate_generalized_gem_sarif.rb [--base=REF] [options]"
   parser.on("--repo=PATH") { |value| options[:repo] = value }
   parser.on("--base=REF") { |value| options[:base] = value }
   parser.on("--head=REF") { |value| options[:head] = value }
@@ -40,11 +46,24 @@ OptionParser.new do |parser|
   parser.on("--decomplex-binary=PATH") { |value| options[:decomplex_binary] = value }
 end.parse!
 
-abort "--base is required" unless options[:base]
-
 repo = File.realpath(options[:repo])
 out_dir = File.expand_path(options[:out_dir])
 FileUtils.mkdir_p(out_dir)
+
+SUPPORTED_SOURCE_EXTENSIONS = %w[
+  c cc cpp cs cxx go h hh hpp java js jsx kt kts lua m py rb rs swift ts tsx zig
+].freeze
+
+IGNORED_COMPONENTS = %w[
+  .git
+  .zig-cache
+  coverage
+  node_modules
+  target
+  tmp
+  vendor
+  zig-out
+].freeze
 
 def repo_relative(path, repo)
   expanded = File.expand_path(path.to_s.start_with?("/") ? path : File.join(repo, path)).tr("\\", "/")
@@ -53,6 +72,8 @@ def repo_relative(path, repo)
 end
 
 def changed_files(repo, base, head)
+  return nil if base.nil? || base.empty?
+
   out, status = Open3.capture2e(
     "git", "-C", repo, "diff", "--name-only", "--diff-filter=ACMRT",
     "#{base}...#{head}"
@@ -62,16 +83,40 @@ def changed_files(repo, base, head)
   out.lines.map(&:strip).reject(&:empty?)
 end
 
+def git_tracked_files(repo)
+  out, status = Open3.capture2e("git", "-C", repo, "ls-files", "-z")
+  abort out unless status.success?
+
+  out.split("\0").reject(&:empty?)
+end
+
+def ignored_path?(path, exclude)
+  normalized = path.to_s.tr("\\", "/").sub(%r{\A\./}, "")
+  components = normalized.split("/")
+  return true if components.any? { |component| IGNORED_COMPONENTS.include?(component) }
+
+  exclude.any? do |pattern|
+    pattern = pattern.tr("\\", "/")
+    if pattern.end_with?("/**")
+      prefix = pattern.delete_suffix("/**").delete_prefix("**/")
+      normalized == prefix || normalized.start_with?("#{prefix}/") || normalized.include?("/#{prefix}/")
+    else
+      normalized == pattern || normalized.start_with?("#{pattern}/") || normalized.include?(pattern)
+    end
+  end
+end
+
 def source_files(repo, files, exclude)
-  Decomplex::SourceFilter.collect(
-    files,
-    parser: "tree_sitter",
-    root: repo,
-    exclude: exclude
-  ).map { |path| repo_relative(path, repo) }
-   .select { |path| File.file?(File.join(repo, path)) }
-   .uniq
-   .sort
+  candidates = files || git_tracked_files(repo)
+  candidates.map { |path| repo_relative(path, repo) }
+            .select do |path|
+              ext = File.extname(path).delete_prefix(".").downcase
+              SUPPORTED_SOURCE_EXTENSIONS.include?(ext) &&
+                !ignored_path?(path, exclude) &&
+                File.file?(File.join(repo, path))
+            end
+            .uniq
+            .sort
 end
 
 def write(path, body)
@@ -118,24 +163,22 @@ def empty_markdown(tool_name)
 end
 
 def run_decomplex_rust(binary, files, out_dir, repo)
-  abs_files = files.map { |f| File.join(repo, f) }
-
   sarif_out = File.join(out_dir, "decomplex.sarif")
   md_out = File.join(out_dir, "decomplex.md")
 
-  ok = system(binary, "report", "--format", "sarif", "--output", sarif_out, *abs_files)
+  ok = system(binary, "report", "--format", "sarif", "--output", sarif_out, "--vcs=git", *files, chdir: repo)
   abort "decomplex-rust report --format sarif failed" unless ok
   cap_sarif_results(sarif_out, DECOMPLEX_SARIF_MAX_RESULTS)
 
-  ok = system(binary, "report", "--format", "markdown", "--output", md_out, *abs_files)
+  ok = system(binary, "report", "--format", "markdown", "--output", md_out, "--vcs=git", *files, chdir: repo)
   abort "decomplex-rust report --format markdown failed" unless ok
 
   warn "wrote #{sarif_out}"
   warn "wrote #{md_out}"
 end
 
-def build_espalier_manifest(files)
-  evidence = Espalier::StaticEvidence.build(files, root: ROOT)
+def build_espalier_manifest(files, repo)
+  evidence = Espalier::StaticEvidence.build(files, root: repo)
   modules = Espalier::StaticEvidence.project_modules(evidence)
   Espalier::Aggregator.new.aggregate(modules)
 end
@@ -165,8 +208,13 @@ coverage = coverage_paths.empty? ? nil : coverage_paths.join(File::PATH_SEPARATO
 changed = changed_files(repo, options[:base], options[:head])
 rel_files = source_files(repo, changed, options[:exclude])
 
-warn "changed supported source files: #{rel_files.size}"
-rel_files.each { |path| warn "  #{path}" }
+scope_label = changed ? "changed" : "tracked"
+warn "#{scope_label} supported source files: #{rel_files.size}"
+if ENV["LINEAGE_VERBOSE_FILES"] == "1"
+  rel_files.each { |path| warn "  #{path}" }
+elsif changed
+  warn "set LINEAGE_VERBOSE_FILES=1 to print scoped source file paths"
+end
 
 if rel_files.empty?
   write(File.join(out_dir, "decomplex.sarif"), empty_sarif("Decomplex", "decomplex.report.sarif.v1"))
@@ -196,7 +244,7 @@ begin
       fact_mine_temp = Tempfile.new(["fact-mine-facts", ".json"])
       fact_mine_temp.close
       warn "Pre-computing fact-mine static facts..."
-      ok = system(fact_mine_bin, "profile", "nil-kill", "--output", fact_mine_temp.path, *rel_files)
+      ok = system(fact_mine_bin, "profile", "nil-kill", "--output", fact_mine_temp.path, *rel_files, chdir: repo)
       if ok
         ENV["FACT_MINE_FACTS_FILE"] = fact_mine_temp.path
       else
@@ -207,7 +255,7 @@ begin
 
   decomplex_bin = options[:decomplex_binary] || File.join(ROOT, "gems/decomplex/target/release/decomplex-rust")
   if File.executable?(decomplex_bin)
-    run_decomplex_rust(decomplex_bin, rel_files, out_dir, repo)
+    run_decomplex_rust(decomplex_bin, changed ? rel_files : ["."], out_dir, repo)
   else
     abort "decomplex-rust binary not found at #{decomplex_bin}. Please build it or pass --decomplex-binary"
   end
@@ -247,7 +295,7 @@ begin
   write(File.join(out_dir, "slopcop.md"), slopcop.to_markdown)
 
   Dir.chdir(repo) do
-    manifest = build_espalier_manifest(rel_files)
+    manifest = build_espalier_manifest(rel_files, repo)
     write(File.join(out_dir, "espalier.sarif"), Espalier::Formatter.to_sarif(manifest))
     write(
       File.join(out_dir, "espalier.md"),
