@@ -1,0 +1,60 @@
+# pkg:path - prototype path helpers for compiler self-hosting.
+#
+# These are intentionally lexical path operations. They do not touch the
+# filesystem and do not canonicalize symlinks.
+
+PUB FN basename(path: String, suffix = "" :String) RETURNS String ->
+  MUTABLE start = 0;
+  MUTABLE i = 0;
+  WHILE i < path.length() DO
+    IF path.substr(i, 1) == "/" THEN
+      start = i + 1;
+    END
+    i += 1;
+  END
+
+  name = path.substr(start, path.length() - start);
+  IF suffix.any?() && name.ends_with?(suffix) THEN
+    RETURN name.substr(0, name.length() - suffix.length());
+  END
+  RETURN name;
+END
+
+PUB FN dirname(path: String) RETURNS String ->
+  MUTABLE last = -1;
+  MUTABLE i = 0;
+  WHILE i < path.length() DO
+    IF path.substr(i, 1) == "/" THEN
+      last = i;
+    END
+    i += 1;
+  END
+
+  IF last < 0 THEN
+    RETURN ".";
+  END
+  IF last == 0 THEN
+    RETURN "/";
+  END
+  RETURN path.substr(0, last);
+END
+
+PUB FN join(left: String, right = "" :String) RETURNS String ->
+  IF right.empty?() THEN
+    RETURN left;
+  END
+  IF left.empty?() || right.starts_with?("/") THEN
+    RETURN right;
+  END
+  IF left.ends_with?("/") THEN
+    RETURN left + right;
+  END
+  RETURN left + "/" + right;
+END
+
+PUB FN expand(path: String, base = "" :String) RETURNS String ->
+  IF path.starts_with?("/") || base.empty?() THEN
+    RETURN path;
+  END
+  RETURN join(base, path);
+END

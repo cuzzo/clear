@@ -17,8 +17,8 @@
 #   KeyList            -> key_type[]@list
 #   Infer              -> a host inference method (bounded Symbol set:
 #                         infer_element_type / infer_optional_element_type
-#                         / infer_map_return_type) -- a typed variant,
-#                         not a Proc; resolve dispatches via the host.
+#                         / infer_to_list) -- a typed variant, not a Proc;
+#                         resolve dispatches via the host.
 require "sorbet-runtime"
 require_relative "../../ast/type"
 
@@ -70,7 +70,31 @@ class FunctionReturn
   # constant name. No payload -- the Type is computed from the
   # receiver at resolve time.
   sig { params(kind_name: Symbol).returns(FunctionReturn) }
-  def self.variant(kind_name) = new(kind: Kind.const_get(kind_name))
+  def self.variant(kind_name) = new(kind: variant_kind(kind_name))
+
+  sig { params(kind_name: Symbol).returns(Kind) }
+  def self.variant_kind(kind_name)
+    case kind_name
+    when :Fixed
+      Kind::Fixed
+    when :ElementOf
+      Kind::ElementOf
+    when :OptionalOfElement
+      Kind::OptionalOfElement
+    when :IdOfElement
+      Kind::IdOfElement
+    when :OptionalOfValue
+      Kind::OptionalOfValue
+    when :ValueList
+      Kind::ValueList
+    when :KeyList
+      Kind::KeyList
+    when :Infer
+      Kind::Infer
+    else
+      raise "unknown FunctionReturn variant: #{kind_name.inspect}"
+    end
+  end
 
   sig { returns(FunctionReturn) }
   def copy
@@ -109,10 +133,27 @@ class FunctionReturn
     when Kind::KeyList
       Type.new(:"#{T.must(receiver).key_type.resolved}[]@list")
     when Kind::Infer
-      r = host.send(T.must(infer), args, nil)
-      r.is_a?(Type) ? r : Type.new(r || :Any)
+      resolve_infer(args, host)
     else
       raise "unknown FunctionReturn kind: #{kind.inspect}"
     end
+  end
+
+  sig { params(args: T::Array[T.untyped], host: T.nilable(SemanticAnnotator)).returns(Type) }
+  def resolve_infer(args, host)
+    raise "FunctionReturn infer requires a SemanticAnnotator host" unless host
+
+    r = case T.must(infer)
+    when :infer_element_type
+      T.unsafe(host).infer_element_type(args, nil)
+    when :infer_optional_element_type
+      T.unsafe(host).infer_optional_element_type(args, nil)
+    when :infer_to_list
+      T.unsafe(host).infer_to_list(args, nil)
+    else
+      raise "unknown FunctionReturn infer method: #{T.must(infer).inspect}"
+    end
+
+    r.is_a?(Type) ? r : Type.new(r || :Any)
   end
 end
