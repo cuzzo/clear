@@ -23,6 +23,7 @@ RSpec.describe RubyToClear::Transpiler do
     it "transpiles arrays and hashes" do
       expect_transpile("[1, 2, 3]", "[1, 2, 3];")
       expect_transpile("{ a: 1, b: 2 }", "{a: 1, b: 2};")
+      expect_transpile("{ MOD: 1 }", "{symbol(\"MOD\"): 1};")
       expect_transpile('{ "a" => 1 }', '{"a": 1};')
     end
 

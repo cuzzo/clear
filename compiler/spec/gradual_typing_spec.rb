@@ -1266,38 +1266,38 @@ RSpec.describe "Gradual typing — operator-aware suggestions (M2.1)" do
 
     it "ranks `+` as Int64 default with Float64 and String alternatives" do
       ranked = host.send(:auto_rank_candidates, Set[:ADD])
-      types = ranked.map(&:first)
+      types = ranked.map(&:type_sym)
       expect(types).to eq([:Int64, :Float64, :String])
     end
 
     it "ranks `*` as Int64 default with Float64 (no String — can't multiply strings)" do
       ranked = host.send(:auto_rank_candidates, Set[:MUL])
-      types = ranked.map(&:first)
+      types = ranked.map(&:type_sym)
       expect(types).to eq([:Int64, :Float64])
     end
 
     it "ranks `/` as Float64 default with Int64 alternative + truncation note" do
       ranked = host.send(:auto_rank_candidates, Set[:DIV])
-      expect(ranked[0][0]).to eq(:Float64)
-      expect(ranked[1][0]).to eq(:Int64)
+      expect(ranked[0].type_sym).to eq(:Float64)
+      expect(ranked[1].type_sym).to eq(:Int64)
       # Note specifically warns about integer-division truncation
-      expect(ranked[1][1]).to include("integer division")
-      expect(ranked[1][1]).to include("TRUNCATES")
+      expect(ranked[1].note).to include("integer division")
+      expect(ranked[1].note).to include("TRUNCATES")
     end
 
     it "ranks `%` as Int64 only (modulo is integer-only)" do
       ranked = host.send(:auto_rank_candidates, Set[:MOD])
-      expect(ranked.map(&:first)).to eq([:Int64])
+      expect(ranked.map(&:type_sym)).to eq([:Int64])
     end
 
     it "ranks `&&` and `||` as Bool only" do
-      expect(host.send(:auto_rank_candidates, Set[:AND]).map(&:first)).to eq([:Bool])
-      expect(host.send(:auto_rank_candidates, Set[:OR]).map(&:first)).to eq([:Bool])
+      expect(host.send(:auto_rank_candidates, Set[:AND]).map(&:type_sym)).to eq([:Bool])
+      expect(host.send(:auto_rank_candidates, Set[:OR]).map(&:type_sym)).to eq([:Bool])
     end
 
     it "intersects candidates across multiple ops (+ and * → Int64, Float64)" do
       ranked = host.send(:auto_rank_candidates, Set[:ADD, :MUL])
-      types = ranked.map(&:first)
+      types = ranked.map(&:type_sym)
       # `+` allows {Int64, Float64, String}; `*` allows {Int64, Float64}.
       # Intersection: {Int64, Float64}; Int64 ranks first (default for both).
       expect(types).to eq([:Int64, :Float64])

@@ -17,12 +17,15 @@ require "sorbet-runtime"
 # Helpers live here so `annotator.rb` stays focused on AST walking and
 # ownership analysis. Mixed into SemanticAnnotator via `include`.
 
+require_relative "../../ast/ast"
+require_relative "../../ast/fixable_error"
+require_relative "../../ast/type"
+
 module FixableHelper
     extend T::Sig
 
   DiagnosticKwValue = T.type_alias { DiagnosticRegistry::DiagnosticKwValue }
   NameCandidate = T.type_alias { T.any(String, Symbol) }
-  AutoCandidate = T.type_alias { [Symbol, T.nilable(String)] }
   AutoOperatorCandidateConfig = T.type_alias {
     T::Hash[Symbol, BasicObject]
   }
@@ -31,6 +34,11 @@ module FixableHelper
     const :sigil, String
     const :description_code, Symbol
     const :description_params, T::Hash[Symbol, DiagnosticKwValue], default: {}
+  end
+
+  class AutoCandidate < T::Struct
+    const :type_sym, Symbol
+    const :note, T.nilable(String), default: nil
   end
 
   # Synthetic token used for fixable spans whose AST node carries a
@@ -62,12 +70,6 @@ module FixableHelper
           replacement: ''
         )]
       )
-    end
-
-    if fixes.empty?
-      loc = " (line #{reg.line})"
-      $stderr.puts "\e[33m[Warning]\e[0m MUTABLE '#{name}' is never reassigned#{loc} — consider removing MUTABLE"
-      return
     end
 
     fixable!(reg,
@@ -346,9 +348,10 @@ module FixableHelper
       if semi_idx
         insert_col = semi_idx + 1  # 1-based column at the `;`
         candidate_caps.each do |cap|
-          reason = cap == '@multiowned' ?
-            'single-scheduler Rc; automatic clone on move' :
-            'atomic Arc; safe across fibers'
+          reason = 'atomic Arc; safe across fibers'
+          if cap == '@multiowned'
+            reason = 'single-scheduler Rc; automatic clone on move'
+          end
           fixes << Fix.new(
             description: fix_description(:CHANGE_BINDING_CAPABILITY_FOR_MOVE, name: name, cap: cap, reason: reason),
             confidence: :interactive,
@@ -486,13 +489,58 @@ module FixableHelper
   def smallest_fitting_int_type(val)
     T.bind(self, SemanticAnnotator) rescue nil
     order = val >= 0 ? UNSIGNED_ORDER : SIGNED_ORDER
-    order.find do |t|
+    selected = T.let(nil, T.nilable(Symbol))
+    order.each do |t|
+      next if selected
+
       max = Type::INT_TYPE_MAX[t]
-      next false if max.nil?
+      next if max.nil?
 
       min = Type::INT_TYPE_MIN[t] || 0
-      val >= min && val <= max
+      selected = t if val >= min && val <= max
     end
+    selected
+  end
+
+  sig { params(prefix: String, target_name: String).returns(T.nilable(Integer)) }
+  def annotation_type_column(prefix, target_name)
+    T.bind(self, SemanticAnnotator) rescue nil
+    idx = 0
+    found = T.let(nil, T.nilable(Integer))
+    while idx < prefix.length
+      colon = prefix.index(':', idx)
+      if colon
+        type_start = colon + 1
+        while type_start < prefix.length && whitespace_char?(prefix[type_start])
+          type_start += 1
+        end
+        type_end = type_start + target_name.length
+        if prefix[type_start, target_name.length] == target_name && !identifier_char_at?(prefix, type_end)
+          found = type_start + 1
+        end
+        idx = colon + 1
+      else
+        idx = prefix.length
+      end
+    end
+    found
+  end
+
+  sig { params(ch: T.nilable(String)).returns(T::Boolean) }
+  def whitespace_char?(ch)
+    ch == ' ' || ch == "\t"
+  end
+
+  sig { params(text: String, idx: Integer).returns(T::Boolean) }
+  def identifier_char_at?(text, idx)
+    return false if idx >= text.length
+    ch = text[idx]
+    return false unless ch
+
+    (ch >= 'A' && ch <= 'Z') ||
+      (ch >= 'a' && ch <= 'z') ||
+      (ch >= '0' && ch <= '9') ||
+      ch == '_'
   end
 
   sig { params(node: AST::Literal, val: Integer, target_type: Symbol, min: Integer, max: Integer).returns(NilClass) }
@@ -525,11 +573,8 @@ module FixableHelper
     # same line doesn't capture the fix.
     target_name = target_type.to_s
     prefix = line_text[0...(tok.column - 1)] || ''
-    last_match_start = T.let(nil, T.nilable(Integer))
-    prefix.scan(/:\s*(#{Regexp.escape(target_name)})\b/) { last_match_start = T.must(Regexp.last_match).begin(0) }
-    ann_match = last_match_start ? prefix.match(/:\s*(#{Regexp.escape(target_name)})\b/, last_match_start) : nil
-    if ann_match
-      ann_col = ann_match.begin(1) + 1  # 1-based column of the type name
+    ann_col = annotation_type_column(prefix, target_name)
+    if ann_col
       new_type = best.to_s
       if new_type != target_name
         fix = Fix.new(
@@ -612,13 +657,7 @@ module FixableHelper
       end
     end
 
-    if fixes.empty?
-      loc = line ? " (line #{line})" : ""
-      $stderr.puts "\e[36m[Note]\e[0m #{diagnostic_message(:LOCAL_NEVER_SHARED, name: name)}#{loc}"
-      return
-    end
-
-    anchor = anchor_at(T.must(line), info.column || 1)
+    anchor = line ? anchor_at(T.must(line), info.column || 1) : nil
     fixable!(anchor,
       code: :LOCAL_NEVER_SHARED,
       name: name,
@@ -956,18 +995,23 @@ module FixableHelper
       window_lines = src.lines[(with_line - 1)..(with_line + 8)] || []
       names.each do |alias_name|
         pat = /\bMUTABLE\s+#{Regexp.escape(alias_name)}\b/
-        window_lines.each_with_index do |line, off|
+        off = 0
+        found = false
+        while off < window_lines.length && !found
+          line = T.must(window_lines[off])
           idx = line =~ pat
-          next unless idx
-          line_no = with_line + off
-          # 1-based column of the `MUTABLE` token.
-          mut_col = idx + 1
-          # The keyword is `MUTABLE` (7 chars) plus one trailing space.
-          edits << Edit.new(
-            span: Span.new(file: nil, line: line_no, col: mut_col, length: 'MUTABLE '.length),
-            replacement: ''
-          )
-          break  # only the first occurrence per name
+          if idx
+            line_no = with_line + off
+            # 1-based column of the `MUTABLE` token.
+            mut_col = idx + 1
+            # The keyword is `MUTABLE` (7 chars) plus one trailing space.
+            edits << Edit.new(
+              span: Span.new(file: nil, line: line_no, col: mut_col, length: 'MUTABLE '.length),
+              replacement: ''
+            )
+            found = true
+          end
+          off += 1
         end
       end
     end
@@ -1506,11 +1550,15 @@ module FixableHelper
       notes = T.cast(entry[:notes] || {}, T::Hash[Symbol, String])
       ranked = [default] + alts
       ranked.each_with_index do |type_sym, idx|
-        agg[type_sym] ||= { count: 0, rank_sum: 0, notes: [] }
-        agg[type_sym][:count]    += 1
-        agg[type_sym][:rank_sum] += idx
+        stat = agg[type_sym]
+        unless stat
+          stat = { count: 0, rank_sum: 0, notes: [] }
+          agg[type_sym] = stat
+        end
+        stat[:count] = T.cast(stat[:count], Integer) + 1
+        stat[:rank_sum] = T.cast(stat[:rank_sum], Integer) + idx
         if notes[type_sym]
-          agg[type_sym][:notes] << T.must(notes[type_sym])
+          T.cast(stat[:notes], T::Array[String]) << T.must(notes[type_sym])
         end
       end
     end
@@ -1522,7 +1570,12 @@ module FixableHelper
     intersection = agg.select { |_, v| v[:count] == n_ops }
     intersection
       .sort_by { |_, v| v[:rank_sum] }
-      .map { |type_sym, v| [type_sym, v[:notes].uniq.first] }
+      .map do |type_sym, v|
+        AutoCandidate.new(
+          type_sym: T.cast(type_sym, Symbol),
+          note: T.cast(v[:notes], T::Array[String]).uniq.first
+        )
+      end
   end
 
   # Build an :interactive Fix for a single operator-derived candidate.
@@ -1531,7 +1584,7 @@ module FixableHelper
   # candidates as text but no auto-applicable fix).
   sig { params(slot: AutoConstraintCollector::Slot, type_sym: Symbol, note: T.nilable(String), position: Integer).returns(T.nilable(Fix)) }
   def build_auto_candidate_fix(slot, type_sym, note, position)
-    T.bind(self, SemanticAnnotator) rescue ""
+    T.bind(self, SemanticAnnotator) rescue nil
     auto_tok = auto_token_for(slot)
     return nil unless auto_tok
     type_str = type_sym.to_s
@@ -1557,13 +1610,21 @@ module FixableHelper
     T.bind(self, SemanticAnnotator) rescue nil
     return "" if candidates.empty?
     op_list = ops.to_a.sort.join(", ")
-    msg = +"\n  In the body, the binding is used in operator(s): #{op_list}.\n"
+    msg = "\n  In the body, the binding is used in operator(s): #{op_list}.\n"
     msg << "  Suggested fixes:\n"
-    candidates.each_with_index do |(type_sym, note), idx|
-      label = idx == 0 ? "(recommended)" : ""
+    idx = 0
+    while idx < candidates.length
+      candidate = candidates[idx]
+      type_sym = candidate.type_sym
+      note = candidate.note
+      label = ""
+      if idx == 0
+        label = "(recommended)"
+      end
       line = "    #{idx + 1}. #{label.ljust(15)} #{type_sym}"
       line << "  -- #{note}" if note
       msg << line << "\n"
+      idx += 1
     end
     msg
   end
@@ -1669,10 +1730,11 @@ module FixableHelper
     candidates = auto_rank_candidates(ops)
     message += build_auto_op_evidence_block(ops, candidates) unless candidates.empty?
 
-    fixes = candidates.each_with_index
-                      .filter_map { |(type_sym, note), i|
-                        build_auto_candidate_fix(slot, type_sym, note, i + 1)
-                      }
+    fixes = []
+    candidates.each_with_index do |candidate, i|
+      fix = build_auto_candidate_fix(slot, candidate.type_sym, candidate.note, i + 1)
+      fixes << fix if fix
+    end
 
     auto_tok = auto_token_for(slot)
     fixable!(
@@ -1704,10 +1766,11 @@ module FixableHelper
       message << build_auto_op_evidence_block(ops, candidates)
     end
 
-    fixes = candidates.each_with_index
-                      .filter_map { |(type_sym, note), i|
-                        build_auto_candidate_fix(slot, type_sym, note, i + 1)
-                      }
+    fixes = []
+    candidates.each_with_index do |candidate, i|
+      fix = build_auto_candidate_fix(slot, candidate.type_sym, candidate.note, i + 1)
+      fixes << fix if fix
+    end
 
     auto_tok = auto_token_for(slot)
     fixable!(
@@ -1803,7 +1866,7 @@ module FixableHelper
   def build_auto_ambiguity_message(label, observed_strs, slot)
     T.bind(self, SemanticAnnotator) rescue nil
     types_list = observed_strs.join(', ')
-    msg = +"Ambiguous Auto for #{label}: observed as #{types_list}.\n"
+    msg = "Ambiguous Auto for #{label}: observed as #{types_list}.\n"
 
     # Option 1: pin one type; convert at divergent callsites.
     msg << "  Option 1 (recommended): pin one concrete type at the\n"

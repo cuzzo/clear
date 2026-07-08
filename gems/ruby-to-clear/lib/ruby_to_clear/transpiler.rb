@@ -2314,7 +2314,14 @@ module RubyToClear
 
     def visit_assoc_node(node)
       key = visit(node.key)
-      key = node.key.value.to_s if node.key.is_a?(Prism::SymbolNode)
+      if node.key.is_a?(Prism::SymbolNode)
+        raw_key = node.key.value.to_s
+        key = if raw_key.match?(/\A[A-Za-z]\w*[!?]?\z/) && !CLEAR_KEYWORDS.include?(raw_key)
+          raw_key
+        else
+          visit(node.key)
+        end
+      end
       val = visit(node.value)
       "#{key}: #{val}"
     end
