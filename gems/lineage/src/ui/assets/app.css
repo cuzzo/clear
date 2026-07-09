@@ -803,8 +803,8 @@
     white-space: nowrap;
     overflow: visible;
   }
-  #layer-gutter-highlights:checked ~ #mode-coverage:checked ~ .viewer .gutter { background: var(--gutter-coverage-bg, transparent); }
-  #layer-gutter-highlights:checked ~ #mode-churn:checked ~ .viewer .gutter { background: var(--gutter-churn-bg, transparent); }
+  #layer-gutter-highlights:checked ~ #mode-coverage:checked ~ .viewer .gutter { background: var(--gutter-churn-bg, transparent); }
+  #layer-gutter-highlights:checked ~ #mode-churn:checked ~ .viewer .gutter { background: var(--gutter-coverage-bg, transparent); }
   #layer-gutter-icons:not(:checked) ~ .viewer .bomb,
   #layer-gutter-icons:not(:checked) ~ .viewer .line-icon { display: none; }
   .bomb {

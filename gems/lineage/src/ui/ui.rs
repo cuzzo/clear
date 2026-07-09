@@ -6985,8 +6985,10 @@ fn coverage_background(annotation: &UiLineAnnotation, gutter: bool) -> String {
     if annotation_has_dark_arms(annotation) {
         if gutter {
             "rgba(31, 41, 55, 0.32)".to_string()
+        } else if annotation.covered {
+            "rgba(34, 197, 94, 0.08)".to_string()
         } else {
-            "rgba(31, 41, 55, 0.22)".to_string()
+            "transparent".to_string()
         }
     } else if annotation.mutant_tested || annotation.mutant_killed_tests > 0 {
         if gutter {
@@ -9800,7 +9802,7 @@ flags:
         annotation.dark_arms = vec!["dark arm: else".to_string()];
 
         let bg = coverage_background(&annotation, false);
-        assert_eq!(bg, "rgba(31, 41, 55, 0.22)");
+        assert_eq!(bg, "rgba(34, 197, 94, 0.08)");
 
         let gutter_bg = coverage_background(&annotation, true);
         assert_eq!(gutter_bg, "rgba(31, 41, 55, 0.32)");

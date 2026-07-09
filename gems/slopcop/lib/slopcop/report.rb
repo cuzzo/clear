@@ -249,12 +249,16 @@ module SlopCop
     def dark_arm_results
       @r[:dark_arms].map do |arm|
         category = arm[:category].to_s
+        span = arm[:span]
         SlopCop::Sarif.result(
           rule_id: "slopcop.dark-arm.#{category}",
           level: category == "genuine" ? "warning" : "note",
           message: arm[:message] || "dark arm: #{category}",
           path: arm[:file],
           line: arm[:line],
+          start_column: zero_based_column_to_sarif(span&.[](1)),
+          end_line: span&.[](2),
+          end_column: zero_based_column_to_sarif(span&.[](3)),
           properties: stringify_keys(arm).merge(
             "dark_arm" => true,
             "category" => "dark arm: #{category}",
@@ -262,6 +266,10 @@ module SlopCop
           )
         )
       end
+    end
+
+    def zero_based_column_to_sarif(value)
+      value.nil? ? nil : value.to_i + 1
     end
 
     def stringify_counts(counts)
