@@ -42,7 +42,7 @@ comment:
 flags:
   ruby:
     paths:
-      - src/
+      - compiler/
     carryforward: false
     joined: false
   zig:

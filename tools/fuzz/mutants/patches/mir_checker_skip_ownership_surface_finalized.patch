@@ -1,6 +1,6 @@
-diff --git a/src/mir/mir_checker.rb b/src/mir/mir_checker.rb
---- a/src/mir/mir_checker.rb
-+++ b/src/mir/mir_checker.rb
+diff --git a/compiler/ruby/mir/mir_checker.rb b/compiler/ruby/mir/mir_checker.rb
+--- a/compiler/ruby/mir/mir_checker.rb
++++ b/compiler/ruby/mir/mir_checker.rb
 @@ -2410,6 +2410,7 @@
    # unrelated protocols and memory bugs can slip through opaque code.
    sig { params(nodes: T::Array[MIR::Node], facts: T::Array[MIR::Node]).void }

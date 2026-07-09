@@ -1,6 +1,6 @@
-diff --git a/src/annotator/domains/errors.rb b/src/annotator/domains/errors.rb
---- a/src/annotator/domains/errors.rb
-+++ b/src/annotator/domains/errors.rb
+diff --git a/compiler/ruby/annotator/domains/errors.rb b/compiler/ruby/annotator/domains/errors.rb
+--- a/compiler/ruby/annotator/domains/errors.rb
++++ b/compiler/ruby/annotator/domains/errors.rb
 @@ -411,7 +411,7 @@
          # SymbolEntry#non_escaping flag is set on every WITH alias by
          # declare_capability_scope!; it's the same flag ensure_owned_value!

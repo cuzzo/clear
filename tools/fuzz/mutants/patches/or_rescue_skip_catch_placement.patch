@@ -1,6 +1,6 @@
-diff --git a/src/mir/mir_lowering.rb b/src/mir/mir_lowering.rb
---- a/src/mir/mir_lowering.rb
-+++ b/src/mir/mir_lowering.rb
+diff --git a/compiler/ruby/mir/mir_lowering.rb b/compiler/ruby/mir/mir_lowering.rb
+--- a/compiler/ruby/mir/mir_lowering.rb
++++ b/compiler/ruby/mir/mir_lowering.rb
 @@ -676,7 +676,7 @@
    end
  

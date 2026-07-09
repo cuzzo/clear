@@ -1,6 +1,6 @@
-diff --git a/src/mir/lowering/functions.rb b/src/mir/lowering/functions.rb
---- a/src/mir/lowering/functions.rb
-+++ b/src/mir/lowering/functions.rb
+diff --git a/compiler/ruby/mir/lowering/functions.rb b/compiler/ruby/mir/lowering/functions.rb
+--- a/compiler/ruby/mir/lowering/functions.rb
++++ b/compiler/ruby/mir/lowering/functions.rb
 @@ -1018,7 +1018,7 @@ module MIRLoweringFunctions
        return MIR::ItemsAccess.new(arg, true)
      end

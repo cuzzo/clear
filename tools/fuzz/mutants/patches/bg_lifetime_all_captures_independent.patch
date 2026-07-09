@@ -1,7 +1,7 @@
-diff --git a/src/annotator/domains/lifetimes.rb b/src/annotator/domains/lifetimes.rb
+diff --git a/compiler/ruby/annotator/domains/lifetimes.rb b/compiler/ruby/annotator/domains/lifetimes.rb
 index 000000000..000000000 100644
---- a/src/annotator/domains/lifetimes.rb
-+++ b/src/annotator/domains/lifetimes.rb
+--- a/compiler/ruby/annotator/domains/lifetimes.rb
++++ b/compiler/ruby/annotator/domains/lifetimes.rb
 @@ -982,9 +982,7 @@ class SemanticAnnotator
        def bg_lifetime_sources(analysis)
          T.bind(self, SemanticAnnotator)

@@ -1,7 +1,7 @@
-diff --git a/src/semantic/capture_strategy.rb b/src/semantic/capture_strategy.rb
+diff --git a/compiler/ruby/semantic/capture_strategy.rb b/compiler/ruby/semantic/capture_strategy.rb
 index 000000000..000000000 100644
---- a/src/semantic/capture_strategy.rb
-+++ b/src/semantic/capture_strategy.rb
+--- a/compiler/ruby/semantic/capture_strategy.rb
++++ b/compiler/ruby/semantic/capture_strategy.rb
 @@ -211,7 +211,7 @@ module CaptureStrategy
      # 3. A plain promise handle (~T) is an owned affine capability. Capturing
      #    it into a fiber transfers the one right to NEXT it. Shared promises

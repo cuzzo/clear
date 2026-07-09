@@ -1,6 +1,6 @@
-diff --git a/src/mir/lowering/control_flow.rb b/src/mir/lowering/control_flow.rb
---- a/src/mir/lowering/control_flow.rb
-+++ b/src/mir/lowering/control_flow.rb
+diff --git a/compiler/ruby/mir/lowering/control_flow.rb b/compiler/ruby/mir/lowering/control_flow.rb
+--- a/compiler/ruby/mir/lowering/control_flow.rb
++++ b/compiler/ruby/mir/lowering/control_flow.rb
 @@ -246,5 +246,5 @@ module MIRLoweringControlFlow
  
    sig { params(stmts: T::Array[MIR::Node], mark_per_iter: T.nilable(T::Boolean)).void }

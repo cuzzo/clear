@@ -1,7 +1,7 @@
-diff --git a/src/mir/mir_checker.rb b/src/mir/mir_checker.rb
+diff --git a/compiler/ruby/mir/mir_checker.rb b/compiler/ruby/mir/mir_checker.rb
 index 000000000..000000000 100644
---- a/src/mir/mir_checker.rb
-+++ b/src/mir/mir_checker.rb
+--- a/compiler/ruby/mir/mir_checker.rb
++++ b/compiler/ruby/mir/mir_checker.rb
 @@ -1197,7 +1197,7 @@ class MIRChecker
      when MIR::Ident
        child_alloc = alloc_by_name[expr.name]

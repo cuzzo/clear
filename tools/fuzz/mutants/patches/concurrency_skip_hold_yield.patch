@@ -1,6 +1,6 @@
-diff --git a/src/semantic/concurrency_checks.rb b/src/semantic/concurrency_checks.rb
---- a/src/semantic/concurrency_checks.rb
-+++ b/src/semantic/concurrency_checks.rb
+diff --git a/compiler/ruby/semantic/concurrency_checks.rb b/compiler/ruby/semantic/concurrency_checks.rb
+--- a/compiler/ruby/semantic/concurrency_checks.rb
++++ b/compiler/ruby/semantic/concurrency_checks.rb
 @@ -48,7 +48,7 @@ module ConcurrencyChecks
        summary = body_summaries.fetch(fn.name)
        with_blocks = summary.with_blocks

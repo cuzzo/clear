@@ -177,10 +177,23 @@ def run_decomplex_rust(binary, files, out_dir, repo)
   warn "wrote #{md_out}"
 end
 
-def build_espalier_manifest(files, repo)
+def build_espalier_manifest(files, repo, nil_kill_evidence = nil)
   evidence = Espalier::StaticEvidence.build(files, root: repo)
   modules = Espalier::StaticEvidence.project_modules(evidence)
-  Espalier::Aggregator.new.aggregate(modules)
+  if nil_kill_evidence
+    static_data = nil_kill_evidence["static"] || {}
+    wrapped_data = FactMine::Syntax::TypeExpr.wrap_types!(static_data)
+    espalier_nk = Espalier::NilKillEvidence.new(wrapped_data)
+    espalier_nk.apply!(modules)
+    aggregator = Espalier::Aggregator.new(
+      nil_kill_data: espalier_nk.method_signatures,
+      nil_kill_loops: espalier_nk.loop_counts,
+      nil_kill_evidence: espalier_nk
+    )
+    aggregator.aggregate(modules)
+  else
+    Espalier::Aggregator.new.aggregate(modules)
+  end
 end
 
 
@@ -295,14 +308,14 @@ begin
   write(File.join(out_dir, "slopcop.md"), slopcop.to_markdown)
 
   Dir.chdir(repo) do
-    manifest = build_espalier_manifest(rel_files, repo)
+    nil_kill_evidence = build_nil_kill_evidence(rel_files, repo)
+    manifest = build_espalier_manifest(rel_files, repo, nil_kill_evidence)
     write(File.join(out_dir, "espalier.sarif"), Espalier::Formatter.to_sarif(manifest))
     write(
       File.join(out_dir, "espalier.md"),
       Espalier::Reporter.new(manifest, root: repo, link_base: out_dir).to_markdown
     )
 
-    nil_kill_evidence = build_nil_kill_evidence(rel_files, repo)
     nil_kill_report = NilKill::Report.new(["--format", "sarif"], evidence: nil_kill_evidence)
     write(File.join(out_dir, "nil-kill.sarif"), nil_kill_report.to_sarif(nil_kill_evidence))
     write(
