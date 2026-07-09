@@ -84,7 +84,7 @@ impl LanguageNormalizer for RepoPathNormalizer {
         }
         if path.starts_with('/') {
             let mut best_match: Option<(usize, &str)> = None;
-            for marker in ["/src/", "/gems/", "/zig/"] {
+            for marker in ["/compiler/", "/src/", "/gems/", "/zig/"] {
                 if let Some(index) = path.find(marker) {
                     let actual_idx = index + 1;
                     if best_match.map_or(true, |(best_idx, _)| actual_idx < best_idx) {

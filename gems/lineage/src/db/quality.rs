@@ -5,6 +5,7 @@ use serde_json::{json, Value};
 
 const DEFAULT_COVERAGE_SOURCE: &str = "coverage";
 const RELATIVE_ROOTS: &[&str] = &[
+    "compiler/",
     "src/",
     "gems/",
     "tools/",

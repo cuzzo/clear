@@ -6982,7 +6982,13 @@ fn row_style(annotation: &UiLineAnnotation) -> String {
 }
 
 fn coverage_background(annotation: &UiLineAnnotation, gutter: bool) -> String {
-    if annotation.mutant_tested || annotation.mutant_killed_tests > 0 {
+    if annotation_has_dark_arms(annotation) {
+        if gutter {
+            "rgba(31, 41, 55, 0.32)".to_string()
+        } else {
+            "rgba(31, 41, 55, 0.22)".to_string()
+        }
+    } else if annotation.mutant_tested || annotation.mutant_killed_tests > 0 {
         if gutter {
             "rgba(22, 101, 52, 0.34)".to_string()
         } else {
@@ -9785,6 +9791,19 @@ flags:
         assert!(html.contains("<span class=\"tok-type\">Scheduler</span>"));
         assert!(html.contains("<span class=\"tok-function\">run</span>"));
         assert!(html.contains("<span class=\"tok-constant\">MAX_SIZE</span>"));
+    }
+
+    #[test]
+    fn coverage_background_paints_partial_coverage_when_dark_arms_exist() {
+        let mut annotation = empty_annotation(1);
+        annotation.covered = true;
+        annotation.dark_arms = vec!["dark arm: else".to_string()];
+
+        let bg = coverage_background(&annotation, false);
+        assert_eq!(bg, "rgba(31, 41, 55, 0.22)");
+
+        let gutter_bg = coverage_background(&annotation, true);
+        assert_eq!(gutter_bg, "rgba(31, 41, 55, 0.32)");
     }
 
     fn ui_file_for_sort(path: &str, tracked_lines: i64, covered_lines: i64, partial: i64) -> UiFile {

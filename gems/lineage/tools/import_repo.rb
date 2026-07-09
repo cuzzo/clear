@@ -429,6 +429,7 @@ if options[:analyzers]
     "--top", options[:top].to_s,
     "--decomplex-binary", decomplex_bin,
   ]
+  cmd += ["--exclude", "transpile-tests/**", "--exclude", "stdlib/**", "--exclude", "benchmarks/**"]
   cmd += ["--coverage", analyzer_coverage_paths.join(File::PATH_SEPARATOR)] unless analyzer_coverage_paths.empty?
   ENV["FACT_MINE_RUST_BINARY"] = fact_mine_bin
   run_command("first-party-sarif", cmd, chdir: TOOL_ROOT, log_dir: log_dir, optional: true)
