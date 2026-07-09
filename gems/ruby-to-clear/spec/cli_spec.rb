@@ -11,7 +11,7 @@ RSpec.describe "ruby-to-clear CLI" do
     stdout, stderr, status = Open3.capture3(RbConfig.ruby, exe, "--help")
 
     expect(status.exitstatus).to eq(1)
-    expect(stdout).to include("Usage: ruby-to-clear [--strict] <file.rb>")
+    expect(stdout).to include("Usage: ruby-to-clear [--strict] [--helper-config path.json] <file.rb>")
     expect(stderr).to eq("")
   end
 

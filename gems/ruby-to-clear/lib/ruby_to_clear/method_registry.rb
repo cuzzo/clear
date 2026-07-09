@@ -219,7 +219,7 @@ module RubyToClear
       code.split("\n").map { |line| "  #{line}" }.join("\n")
     end
 
-    def self.lower_literal_block(node, block_node, transpiler, method_label, min_params:, max_params:, rename:, allow_next: false, allow_yield: false)
+    def self.lower_literal_block(node, block_node, transpiler, method_label, min_params:, max_params:, rename:, allow_next: false, allow_yield: false, local_types: nil)
       unless block_node.is_a?(Prism::BlockNode)
         return unsupported(transpiler, node, "Unsupported #{method_label} block type: #{block_node.class.name}")
       end
@@ -229,14 +229,16 @@ module RubyToClear
 
       aliases = rename.call(param_names)
       transpiler.with_block_local_scope do
-        transpiler.with_renames(aliases) do
-          if (unsafe = unsafe_value_block_node(block_node, allow_next: allow_next, allow_yield: allow_yield))
-            next unsupported(transpiler, node, "#{method_label} block contains unsupported #{unsafe}")
-          end
+        transpiler.with_local_types(local_types ? local_types.call(param_names) : {}) do
+          transpiler.with_renames(aliases) do
+            if (unsafe = unsafe_value_block_node(block_node, allow_next: allow_next, allow_yield: allow_yield))
+              next unsupported(transpiler, node, "#{method_label} block contains unsupported #{unsafe}")
+            end
 
-          lowering = lower_block_body(block_node, transpiler)
-          lowering.parameter_names = param_names if lowering.is_a?(BlockLowering)
-          lowering
+            lowering = lower_block_body(block_node, transpiler)
+            lowering.parameter_names = param_names if lowering.is_a?(BlockLowering)
+            lowering
+          end
         end
       end
     end
@@ -305,6 +307,46 @@ module RubyToClear
       "#{pipeline_source(source)} |> EACH #{render_effect_block(lowering)}"
     end
 
+    def self.each_with_index_effect_loop(receiver, node, transpiler)
+      block_node = node.block
+      unless block_node
+        return unsupported(transpiler, node, "each_with_index without a block is not supported")
+      end
+
+      index_name = "rtoc_idx"
+      receiver_type = transpiler.clear_type_for_receiver_node(node.receiver)
+      element_type = receiver_type.to_s.delete_prefix("?").end_with?("[]") ?
+        receiver_type.to_s.delete_prefix("?").delete_suffix("[]") : nil
+      lowering = lower_literal_block(
+        node,
+        block_node,
+        transpiler,
+        "each_with_index",
+        min_params: 1,
+        max_params: 2,
+        rename: lambda do |param_names|
+          aliases = { param_names[0] => "#{receiver}[#{index_name}]" }
+          aliases[param_names[1]] = index_name if param_names.length > 1
+          aliases
+        end,
+        allow_next: true,
+        allow_yield: true,
+        local_types: lambda do |param_names|
+          element_type && param_names.first ? { param_names.first => element_type } : {}
+        end
+      )
+      return lowering if unsupported_result?(lowering)
+
+      body = indent_block_line(lowering.effect_code)
+      [
+        "MUTABLE #{index_name} = 0;",
+        "WHILE #{index_name} < #{receiver}.length() DO",
+        body,
+        "  #{index_name} = #{index_name} + 1;",
+        "END"
+      ].join("\n")
+    end
+
     def self.mutable_receiver?(receiver)
       receiver.match?(/\A[a-z_]\w*\z/)
     end
@@ -327,12 +369,21 @@ module RubyToClear
       "string" => %w[delete_prefix empty? end_with? include? index length lines size split start_with? strip]
     }.freeze
 
+    def self.array_element_type_for_receiver(node, transpiler)
+      return nil unless node.receiver
+
+      receiver_type = transpiler.clear_type_for_receiver_node(node.receiver)
+      text = receiver_type.to_s.delete_prefix("?")
+      text.end_with?("[]") ? text.delete_suffix("[]") : nil
+    end
+
     def self.block_value_lowering(node, transpiler, method_label, min_params: 0, max_params: 2)
       block_node = node.block
       unless block_node
         return unsupported(transpiler, node, "#{method_label} without a block is not supported")
       end
 
+      element_type = array_element_type_for_receiver(node, transpiler)
       lower_literal_block(
         node,
         block_node,
@@ -342,6 +393,9 @@ module RubyToClear
         max_params: max_params,
         rename: lambda do |param_names|
           pipeline_block_aliases(param_names)
+        end,
+        local_types: lambda do |param_names|
+          element_type && param_names.first ? { param_names.first => element_type } : {}
         end
       )
     end
@@ -354,7 +408,10 @@ module RubyToClear
 
       if block_node.is_a?(Prism::BlockArgumentNode)
         method_name = block_node.expression.value.to_s
-        method_name = "toString" if method_name == "to_s"
+        return "_.toString()" if method_name == "to_s"
+        return "_.trim()" if method_name == "strip"
+        return "symbol(_)" if method_name == "to_sym"
+
         return "_.#{method_name}()"
       end
 
@@ -538,7 +595,11 @@ module RubyToClear
     end
 
     register("escape", receiver: "Regexp") do |context|
-      static_call(context, "escapeRegex", min: 1, max: 1)
+      args = arguments(context)
+      unless args.length == 1
+        next unsupported(context.transpiler, context.node, "Regexp.escape expects 1 argument")
+      end
+      context.transpiler.regex_escape_code(args.first)
     end
 
     register("last_match", receiver: "Regexp") do |context|
@@ -554,7 +615,7 @@ module RubyToClear
       unless args.length == 1
         next unsupported(context.transpiler, context.node, "StringScanner.new expects 1 argument")
       end
-      "Scanner{ source: #{args.first}, pos: 0 }"
+      context.transpiler.helper_config.call(:scanner_new, args) || "Scanner{ source: #{args.first}, pos: 0 }"
     end
 
     register("new", receiver: "Set") do |context|
@@ -642,12 +703,13 @@ module RubyToClear
 
       expected_clear = context.transpiler.clear_type_expr(expected)
       receiver_type = context.transpiler.static_clear_type_for_receiver(context.receiver_name)
+      expected_clear = context.transpiler.runtime_is_a_expected_type(receiver_type, expected_clear) if receiver_type
       next "TRUE" if receiver_type && receiver_type != "Auto" && receiver_type.to_s == expected_clear
       if receiver_type && context.transpiler.runtime_union_narrowing_candidate?(receiver_type, expected_clear)
         next "#{receiver} IS_A #{expected_clear}"
       end
 
-      next "isA?(#{receiver}, #{expected.inspect})" unless actual
+      next "#{receiver} IS_A #{expected_clear}" unless actual
 
       actual == expected ? "TRUE" : "FALSE"
     end
@@ -669,13 +731,74 @@ module RubyToClear
       "#{receiver}.trim()"
     end
 
-    register("to_i") do |receiver, node, transpiler|
+    register("dup") do |receiver, node, transpiler|
       args = node.arguments ? node.arguments.arguments : []
       unless args.empty?
-        next unsupported(transpiler, node, "to_i expects 0 arguments")
+        next unsupported(transpiler, node, "dup expects no arguments")
       end
 
-      "(#{receiver}.toInt() OR 0)"
+      "COPY #{receiver}"
+    end
+
+    register("to_i") do |receiver, node, transpiler|
+      args = node.arguments ? node.arguments.arguments : []
+      unless args.length <= 1
+        next unsupported(transpiler, node, "to_i expects 0 or 1 arguments")
+      end
+
+      if args.empty?
+        "(#{receiver}.toInt() OR 0)"
+      else
+        base = transpiler.visit(args.first)
+        transpiler.helper_config.call(:string_to_int_base, [receiver, base]) || "(toIntBase(#{receiver}, #{base}) OR 0)"
+      end
+    end
+
+    register("to_s") do |context|
+      args = argument_nodes(context)
+      unless args.empty?
+        next unsupported(context.transpiler, context.node, "to_s expects no arguments")
+      end
+
+      receiver_type = context.transpiler.static_clear_type_for_receiver(context.receiver_name) ||
+                      context.transpiler.clear_type_for_receiver_node(context.node.receiver)
+      receiver_type = receiver_type.to_s.delete_prefix("?") if receiver_type
+      next "CAST(#{context.receiver_code} AS String)" if receiver_type == "String@symbol"
+      next context.receiver_code if receiver_type&.start_with?("String")
+      next "#{context.receiver_code}.toString()" if %w[Int64 Float64].include?(receiver_type)
+      next "CAST(#{context.receiver_code} AS String)" if context.receiver_shape.to_s == "symbol"
+      next context.receiver_code if context.receiver_shape.to_s == "string"
+      next "CAST(#{context.receiver_code} AS String)" if context.receiver_kind.to_s == "symbol_literal"
+      next context.receiver_code if %w[string_literal symbol_literal].include?(context.receiver_kind.to_s)
+      next "CAST(#{context.receiver_code} AS String)"
+
+      nil
+    end
+
+    register("to_sym") do |context|
+      args = argument_nodes(context)
+      unless args.empty?
+        next unsupported(context.transpiler, context.node, "to_sym expects no arguments")
+      end
+
+      receiver_type = context.transpiler.static_clear_type_for_receiver(context.receiver_name) ||
+                      context.transpiler.clear_type_for_receiver_node(context.node.receiver)
+      receiver_type = receiver_type.to_s.delete_prefix("?") if receiver_type
+      next "symbol(#{context.receiver_code})" if receiver_type&.start_with?("String")
+      next "symbol(#{context.receiver_code})" if %w[string symbol].include?(context.receiver_shape.to_s)
+      next "symbol(#{context.receiver_code})" if %w[string_literal symbol_literal].include?(context.receiver_kind.to_s)
+      next "symbol(#{context.receiver_code})" if context.node.receiver.is_a?(Prism::CallNode) && context.node.receiver.name.to_s == "to_s"
+
+      nil
+    end
+
+    register("chr") do |receiver, node, transpiler|
+      args = node.arguments ? node.arguments.arguments.map { |arg| transpiler.visit(arg) } : []
+      unless args.length <= 1
+        next unsupported(transpiler, node, "chr expects 0 or 1 arguments")
+      end
+
+      transpiler.helper_config.call(:codepoint_to_string, [receiver]) || "codepointToString(#{receiver})"
     end
 
     register("match?") do |receiver, node, transpiler|
@@ -686,10 +809,74 @@ module RubyToClear
 
       pattern = transpiler.visit(args.first)
       if regex_node?(args.first)
-        "regexMatch?(#{receiver}, #{pattern})"
+        transpiler.regex_match_code(receiver, pattern)
       else
         "#{receiver}.match?(#{pattern})"
       end
+    end
+
+    register("match") do |receiver, node, transpiler|
+      args = node.arguments ? node.arguments.arguments : []
+      unless args.length == 1
+        next unsupported(transpiler, node, "match expects 1 argument")
+      end
+      next nil unless regex_node?(args.first)
+      next nil unless transpiler.helper_config.helper?(:regex_match_data)
+
+      pattern = transpiler.visit(args.first)
+      transpiler.regex_match_data_code(receiver, pattern)
+    end
+
+    register("scan") do |receiver, node, transpiler|
+      args = node.arguments ? node.arguments.arguments : []
+      next nil unless args.length == 1 && regex_node?(args.first)
+      next nil unless transpiler.helper_config.helper?(:scanner_scan)
+
+      pattern = transpiler.visit(args.first)
+      transpiler.helper_config.call(:scanner_scan, [receiver, pattern])
+    end
+
+    register("matched") do |receiver, node, transpiler|
+      args = node.arguments ? node.arguments.arguments : []
+      next nil unless args.empty?
+
+      transpiler.helper_config.call(:scanner_matched, [receiver])
+    end
+
+    register("peek") do |receiver, node, transpiler|
+      args = node.arguments ? node.arguments.arguments.map { |arg| transpiler.visit(arg) } : []
+      next nil unless transpiler.helper_config.helper?(:scanner_peek)
+
+      transpiler.helper_config.call(:scanner_peek, [receiver, *args])
+    end
+
+    register("getch") do |receiver, node, transpiler|
+      args = node.arguments ? node.arguments.arguments.map { |arg| transpiler.visit(arg) } : []
+      next nil unless args.empty? && transpiler.helper_config.helper?(:scanner_getch)
+
+      transpiler.helper_config.call(:scanner_getch, [receiver])
+    end
+
+    register("eos?") do |receiver, node, transpiler|
+      args = node.arguments ? node.arguments.arguments : []
+      next nil unless args.empty? && transpiler.helper_config.helper?(:scanner_eos)
+
+      transpiler.helper_config.call(:scanner_eos, [receiver])
+    end
+
+    register("[]") do |context|
+      next nil unless context.transpiler.helper_config.helper?(:scanner_capture)
+      scanner_receiver = context.transpiler.helper_config.scanner_receiver?(context.receiver_code) ||
+                         context.receiver_shape == "scanner"
+      next nil unless scanner_receiver
+
+      args = arguments(context)
+      next nil unless args.length == 1
+
+      receiver_code = context.receiver_code
+      receiver_type = context.receiver_name && context.transpiler.static_clear_type_for_receiver(context.receiver_name)
+      receiver_code = "#{receiver_code}?" if receiver_type.to_s.start_with?("?") && !receiver_code.to_s.end_with?("?")
+      context.transpiler.helper_config.call(:scanner_capture, [receiver_code, args.first])
     end
 
     register("start_with?") do |receiver, node, transpiler|
@@ -771,19 +958,23 @@ module RubyToClear
       "#{pipeline_source(receiver)} |> WHERE !(#{block_body})"
     end
 
-    register("any?") do |receiver, node, transpiler|
-      if node.block
-        pipeline_value_stage(receiver, "ANY", node, transpiler, "any?")
+    register("any?") do |context|
+      next nil unless context.receiver_shape == "array"
+
+      if context.node.block
+        pipeline_value_stage(context.receiver_code, "ANY", context.node, context.transpiler, "any?")
       else
-        "#{pipeline_source(receiver)} |> ANY _"
+        "#{pipeline_source(context.receiver_code)} |> ANY _"
       end
     end
 
-    register("all?") do |receiver, node, transpiler|
-      if node.block
-        pipeline_value_stage(receiver, "ALL", node, transpiler, "all?")
+    register("all?") do |context|
+      next nil unless context.receiver_shape == "array"
+
+      if context.node.block
+        pipeline_value_stage(context.receiver_code, "ALL", context.node, context.transpiler, "all?")
       else
-        "#{pipeline_source(receiver)} |> ALL _"
+        "#{pipeline_source(context.receiver_code)} |> ALL _"
       end
     end
 
@@ -860,7 +1051,7 @@ module RubyToClear
       pattern = transpiler.visit(args[0])
       replacement = transpiler.visit(args[1])
       if regex_node?(args[0])
-        "regexReplaceAll(#{receiver}, #{pattern}, #{replacement})"
+        transpiler.regex_replace_all_code(receiver, pattern, replacement)
       else
         "#{receiver}.replace(#{pattern}, #{replacement})"
       end
@@ -875,7 +1066,7 @@ module RubyToClear
       pattern = transpiler.visit(args[0])
       replacement = transpiler.visit(args[1])
       if regex_node?(args[0])
-        "regexReplaceFirst(#{receiver}, #{pattern}, #{replacement})"
+        transpiler.regex_replace_first_code(receiver, pattern, replacement)
       else
         "replaceFirst(#{receiver}, #{pattern}, #{replacement})"
       end
@@ -912,11 +1103,7 @@ module RubyToClear
     end
 
     register("each_with_index") do |receiver, node, transpiler|
-      if node.block
-        pipeline_effect_stage(receiver, "#{receiver}.eachWithIndex()", node, transpiler, "each_with_index")
-      else
-        "#{receiver}.eachWithIndex()"
-      end
+      each_with_index_effect_loop(receiver, node, transpiler)
     end
 
     register("loop", receiver: "implicit") do |_receiver, node, transpiler|

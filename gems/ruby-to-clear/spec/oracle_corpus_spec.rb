@@ -37,10 +37,8 @@ RSpec.describe "Ruby-to-CLEAR oracle corpus" do
       clear: <<~CLEAR,
         REQUIRE "pkg:fs"
         FN count_names(path: String) RETURNS !Int64 ->
-          MUTABLE lines = NIL;
-          MUTABLE names = NIL;
-          lines = readLines(path) OR RAISE;
-          names = lines |> SELECT {
+          MUTABLE lines = readLines(path) OR RAISE;
+          MUTABLE names = lines |> SELECT {
           MUTABLE name = _.trim();
           name
           };

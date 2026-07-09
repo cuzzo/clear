@@ -1,0 +1,51 @@
+{
+  "prelude": [
+    "EXTERN STRUCT CompilerRegex {} FROM \"compiler_regex\";",
+    "EXTERN STRUCT CompilerRegexScanner {} FROM \"compiler_regex\";",
+    "EXTERN FN compilerRegexCompile(pattern: String) RETURNS CompilerRegex EFFECTS :safe FROM \"compiler_regex\";",
+    "EXTERN FN compilerRegexPattern(regex: CompilerRegex) RETURNS String EFFECTS :safe FROM \"compiler_regex\";",
+    "EXTERN FN compilerRegexMatch(subject: String, regex: CompilerRegex) RETURNS Bool EFFECTS :safe FROM \"compiler_regex\";",
+    "EXTERN FN compilerRegexMatchData(subject: String, regex: CompilerRegex) RETURNS ?CompilerRegexScanner EFFECTS :safe FROM \"compiler_regex\";",
+    "EXTERN FN compilerRegexReplaceAll(subject: String, regex: CompilerRegex, replacement: String) RETURNS String EFFECTS :safe FROM \"compiler_regex\";",
+    "EXTERN FN compilerRegexReplaceFirst(subject: String, regex: CompilerRegex, replacement: String) RETURNS String EFFECTS :safe FROM \"compiler_regex\";",
+    "EXTERN FN compilerRegexEscape(value: String) RETURNS String EFFECTS :safe FROM \"compiler_regex\";",
+    "EXTERN FN compilerRegexScanner(source: String) RETURNS CompilerRegexScanner EFFECTS :safe FROM \"compiler_regex\";",
+    "EXTERN FN compilerRegexScan(scanner: CompilerRegexScanner, regex: CompilerRegex) RETURNS Bool EFFECTS :safe FROM \"compiler_regex\";",
+    "EXTERN FN compilerRegexMatched(scanner: CompilerRegexScanner) RETURNS String EFFECTS :safe FROM \"compiler_regex\";",
+    "EXTERN FN compilerRegexCapture(scanner: CompilerRegexScanner, index: Int64) RETURNS String EFFECTS :safe FROM \"compiler_regex\";",
+    "EXTERN FN compilerRegexPeek(scanner: CompilerRegexScanner, count: Int64) RETURNS String EFFECTS :safe FROM \"compiler_regex\";",
+    "EXTERN FN compilerRegexGetch(scanner: CompilerRegexScanner) RETURNS ?String EFFECTS :safe FROM \"compiler_regex\";",
+    "EXTERN FN compilerRegexEos(scanner: CompilerRegexScanner) RETURNS Bool EFFECTS :safe FROM \"compiler_regex\";",
+    "EXTERN FN compilerParseIntBase(text: String, base: Int64) RETURNS Int64 EFFECTS :safe FROM \"compiler_regex\";",
+    "EXTERN FN compilerCodepointToString(codepoint: Int64) RETURNS String EFFECTS :safe FROM \"compiler_regex\";"
+  ],
+  "types": {
+    "Regexp": "CompilerRegex",
+    "StringScanner": "CompilerRegexScanner"
+  },
+  "helpers": {
+    "regex_literal": "compilerRegexCompile",
+    "regex_interpolated_literal": "compilerRegexCompile",
+    "regex_pattern": "compilerRegexPattern",
+    "regex_match": "compilerRegexMatch",
+    "regex_match_data": "compilerRegexMatchData",
+    "regex_replace_all": "compilerRegexReplaceAll",
+    "regex_replace_first": "compilerRegexReplaceFirst",
+    "regex_escape": "compilerRegexEscape",
+    "regex_capture": "compilerRegexCapture",
+    "scanner_new": "compilerRegexScanner",
+    "scanner_scan": "compilerRegexScan",
+    "scanner_matched": "compilerRegexMatched",
+    "scanner_capture": "compilerRegexCapture",
+    "scanner_peek": "compilerRegexPeek",
+    "scanner_getch": "compilerRegexGetch",
+    "scanner_eos": "compilerRegexEos",
+    "string_to_int_base": "compilerParseIntBase",
+    "codepoint_to_string": "compilerCodepointToString"
+  },
+  "scanner_receivers": [
+    "self.s",
+    "scanner()",
+    "scanner"
+  ]
+}
