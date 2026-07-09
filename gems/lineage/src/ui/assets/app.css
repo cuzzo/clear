@@ -794,7 +794,7 @@
     background: transparent;
   }
   .row.hazard-open .hazard-rail { background: #7f1d1d; }
-  .row.hazard-verified .hazard-rail { background: #cbd5e1; }
+  .row.hazard-verified .hazard-rail { background: #166534; }
   .gutter {
     min-width: 100px;
     text-align: right;
