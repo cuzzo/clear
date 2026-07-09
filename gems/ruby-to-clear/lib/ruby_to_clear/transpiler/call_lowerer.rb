@@ -239,6 +239,14 @@ module RubyToClear
             value_code = visit(value_node)
             value_type = inferred_clear_type(value_node)
             return "#{value_code}?" if value_type.to_s.start_with?("?")
+            if value_node.is_a?(Prism::LocalVariableReadNode)
+              name = value_node.name.to_s
+              if value_code == optional_unwrap_code(name) &&
+                 !@current_param_names.include?(name) &&
+                 @narrowed_optional_storage_locals.include?(name)
+                return name
+              end
+            end
 
             return value_code
           end

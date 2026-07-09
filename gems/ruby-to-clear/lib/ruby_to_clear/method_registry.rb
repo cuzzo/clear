@@ -906,6 +906,15 @@ module RubyToClear
       "#{receiver}.join(#{separator})"
     end
 
+    register("drop") do |receiver, node, transpiler|
+      args = node.arguments ? node.arguments.arguments : []
+      unless args.length == 1
+        next unsupported(transpiler, node, "drop expects 1 argument")
+      end
+
+      "#{pipeline_source(receiver)} |> SKIP #{transpiler.visit(args.first)}"
+    end
+
     register("map") do |context|
       next nil unless context.node.block || context.receiver_shape == "array"
 

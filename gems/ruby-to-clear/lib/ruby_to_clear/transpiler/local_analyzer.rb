@@ -26,22 +26,12 @@ module RubyToClear
 
     def collect_predeclared_local_variables(node, parameter_names = Set.new)
       names = Set.new
-      walk = lambda do |n, nested|
-        return unless n
-        return if n.is_a?(Prism::DefNode) || n.is_a?(Prism::BlockNode)
-
-        if nested &&
-           n.respond_to?(:name) &&
-           n.class.name.start_with?("Prism::LocalVariable") &&
-           (n.class.name.end_with?("WriteNode") || n.class.name.end_with?("TargetNode"))
-          name = n.name.to_s
-          names << name unless parameter_names.include?(name)
-        end
-
-        child_nested = nested || predeclare_child_scope?(n)
-        n.child_nodes.each { |child| walk.call(child, child_nested) if child }
-      end
-      walk.call(node, false)
+      collect_predeclared_from_statement_list(
+        statement_list_body(node),
+        parameter_names.to_set,
+        names,
+        parameter_names.to_set
+      )
       names
     end
 
@@ -51,6 +41,89 @@ module RubyToClear
         node.is_a?(Prism::WhileNode) ||
         node.is_a?(Prism::UntilNode) ||
         node.is_a?(Prism::BeginNode)
+    end
+
+    def collect_predeclared_from_statement_list(statements, parameter_names, names, declared_so_far)
+      statements.each_with_index do |stmt, index|
+        if predeclare_child_scope?(stmt)
+          needed = control_flow_locals_read_after(stmt, statements[(index + 1)..] || [], parameter_names, declared_so_far)
+          names.merge(needed)
+          declared_so_far.merge(needed)
+          collect_predeclared_from_child_statement_lists(stmt, parameter_names, names, declared_so_far.dup)
+        else
+          collect_predeclared_from_child_statement_lists(stmt, parameter_names, names, declared_so_far.dup)
+        end
+
+        declared_so_far.merge(current_scope_local_declarations(stmt) - parameter_names)
+      end
+    end
+
+    def control_flow_locals_read_after(stmt, later_statements, parameter_names, declared_so_far)
+      written = collect_written_variables(stmt, parameter_names, exclude_defs: true) - parameter_names
+      return Set.new if written.empty?
+
+      reads_after = collect_read_variables_from_nodes(later_statements)
+      (written & reads_after) - declared_so_far
+    end
+
+    def collect_predeclared_from_child_statement_lists(node, parameter_names, names, declared_so_far)
+      case node
+      when Prism::IfNode, Prism::UnlessNode
+        collect_predeclared_from_statement_list(statement_list_body(node.statements), parameter_names, names, declared_so_far.dup)
+        consequent = node.consequent
+        if consequent.is_a?(Prism::IfNode)
+          collect_predeclared_from_statement_list([consequent], parameter_names, names, declared_so_far.dup)
+        elsif consequent
+          collect_predeclared_from_statement_list(statement_list_body(consequent.statements), parameter_names, names, declared_so_far.dup)
+        end
+      when Prism::CaseNode
+        node.conditions.each do |condition|
+          collect_predeclared_from_statement_list(statement_list_body(condition.statements), parameter_names, names, declared_so_far.dup)
+        end
+        collect_predeclared_from_statement_list(statement_list_body(node.consequent&.statements), parameter_names, names, declared_so_far.dup)
+      when Prism::WhileNode, Prism::UntilNode, Prism::BeginNode
+        collect_predeclared_from_statement_list(statement_list_body(node.statements), parameter_names, names, declared_so_far.dup)
+      end
+    end
+
+    def statement_list_body(node)
+      return [] unless node
+      return node.body if node.respond_to?(:body) && node.body
+
+      []
+    end
+
+    def collect_read_variables_from_nodes(nodes)
+      reads = Set.new
+      walk = lambda do |n|
+        return unless n
+        return if n.is_a?(Prism::DefNode) || n.is_a?(Prism::BlockNode)
+
+        if n.is_a?(Prism::LocalVariableReadNode)
+          reads << n.name.to_s
+          return
+        end
+
+        n.child_nodes.each { |child| walk.call(child) if child }
+      end
+      nodes.each { |node| walk.call(node) }
+      reads
+    end
+
+    def current_scope_local_declarations(stmt)
+      case stmt
+      when Prism::LocalVariableWriteNode,
+           Prism::LocalVariableOperatorWriteNode,
+           Prism::LocalVariableOrWriteNode,
+           Prism::LocalVariableAndWriteNode
+        Set[stmt.name.to_s]
+      when Prism::MultiWriteNode
+        stmt.lefts.filter_map do |target|
+          target.name.to_s if target.is_a?(Prism::LocalVariableTargetNode)
+        end.to_set
+      else
+        Set.new
+      end
     end
 
     def collect_local_variable_type_annotations(node)
@@ -667,6 +740,11 @@ module RubyToClear
         if node.receiver && node.name.to_s == "values"
           value_type = map_value_clear_type(clear_type_for_receiver_node(node.receiver))
           return "#{value_type}[]" if value_type
+        end
+
+        if constant_constructor_call?(node)
+          name = constructor_output_name(node.receiver)
+          return name if name && !name.empty?
         end
 
         return nil unless node.arguments.nil? || node.arguments.arguments.empty?

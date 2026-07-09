@@ -306,6 +306,7 @@ RSpec.describe RubyToClear::Transpiler do
       expect_transpile("line = 'abc'; line[1, 2]", "MUTABLE line = \"abc\";\nline.substr(1, 2);")
       expect_transpile("line = 'abc'; line[1..2]", "MUTABLE line = \"abc\";\nline.substr(1, ((2 - 1) + 1));")
       expect_transpile("line = 'abc'; line[1..]", "MUTABLE line = \"abc\";\nline.substr(1, (line.length() - 1));")
+      expect_transpile("parts = split_name; parts.drop(1)", "MUTABLE parts = split_name();\nparts |> SKIP 1;")
     end
 
     it "transpiles standard method calls" do
@@ -633,6 +634,68 @@ RSpec.describe RubyToClear::Transpiler do
       expect_transpile(ruby_code, expected_clear)
     end
 
+    it "does not auto-return nested case statements from value-returning methods" do
+      ruby_code = <<~RUBY
+        sig { returns(T::Boolean) }
+        def done
+          while active?
+            case
+            when ready? then step
+            else stop
+            end
+          end
+          return true
+        end
+      RUBY
+      expected_clear = <<~CLEAR
+        FN done() RETURNS Bool ->
+          WHILE active?() DO
+            IF ready?() THEN
+              step();
+            ELSE
+              stop();
+            END
+          END
+          RETURN TRUE;
+        END
+      CLEAR
+      expect_transpile(ruby_code, expected_clear)
+    end
+
+    it "transpiles target case statements with multi-statement arms as condition chains" do
+      ruby_code = <<~RUBY
+        sig { params(token: Symbol).returns(T::Boolean) }
+        def check(token)
+          depth = T.let(1, Integer)
+          case token
+          when :close
+            depth -= 1
+            return false if depth <= 0
+          when :semi
+            return false if depth == 1
+          end
+          return true
+        end
+      RUBY
+      expected_clear = <<~CLEAR
+        FN check(token: String@symbol) RETURNS Bool ->
+          MUTABLE depth: Int64 = 1;
+          IF (token == :close) THEN
+            depth = (depth - 1);
+            IF (depth <= 0) THEN
+              RETURN FALSE;
+            END
+          ELSE_IF (token == :semi) THEN
+            IF (depth == 1) THEN
+              RETURN FALSE;
+            END
+          END
+          RETURN TRUE;
+        END
+      CLEAR
+      expect_transpile(ruby_code, expected_clear)
+    end
+
     it "transpiles return case expressions with expression match arms" do
       ruby_code = <<~RUBY
         def pick(value)
@@ -672,6 +735,32 @@ RSpec.describe RubyToClear::Transpiler do
             :b -> 2,
             DEFAULT -> 99
           END;
+        END
+      CLEAR
+      expect_transpile(ruby_code, expected_clear)
+    end
+
+    it "returns final case statements with multi-statement arms using branch returns" do
+      ruby_code = <<~RUBY
+        sig { params(kind: Symbol).returns(Integer) }
+        def resolve(kind)
+          case kind
+          when :a
+            value = 1
+            value
+          else
+            2
+          end
+        end
+      RUBY
+      expected_clear = <<~CLEAR
+        FN resolve(kind: String@symbol) RETURNS Int64 ->
+          IF (kind == :a) THEN
+            MUTABLE value = 1;
+            RETURN value;
+          ELSE
+            RETURN 2;
+          END
         END
       CLEAR
       expect_transpile(ruby_code, expected_clear)
@@ -2695,10 +2784,11 @@ RSpec.describe RubyToClear::Transpiler do
       expect(result.strip).to eq(<<~CLEAR.strip)
         FN capture(word: String) RETURNS ?String@symbol ->
           MUTABLE match = compilerRegexMatchData(word, compilerRegexCompile("^([A-Z]+)(\\\\d+)$"));
-          IF !(match) THEN
+          IF match THEN
+            symbol(compilerRegexCapture(match?, 1));
+          ELSE
             RETURN NIL;
           END
-          symbol(compilerRegexCapture(match?, 1));
         END
       CLEAR
     end
@@ -2951,7 +3041,7 @@ RSpec.describe RubyToClear::Transpiler do
       expect_transpile(ruby_code, expected_clear)
     end
 
-    it "uses inferred RHS types on branch-predeclared locals" do
+    it "keeps branch-only locals inside the branch scope" do
       ruby_code = <<~RUBY
         sig { params(s: String).returns(Void) }
         def test_fn(s)
@@ -2963,9 +3053,8 @@ RSpec.describe RubyToClear::Transpiler do
       RUBY
       expected_clear = <<~CLEAR
         FN test_fn(s: String) RETURNS Void ->
-          MUTABLE x: String = "";
           IF s.startsWith?("~") THEN
-            x = s.substr(1, (s.length() - 1));
+            MUTABLE x = s.substr(1, (s.length() - 1));
             x.startsWith?("~");
           END
         END
@@ -2973,7 +3062,7 @@ RSpec.describe RubyToClear::Transpiler do
       expect_transpile(ruby_code, expected_clear)
     end
 
-    it "uses narrowed hash value types on branch-predeclared locals" do
+    it "uses narrowed hash value types on branch-local locals" do
       ruby_code = <<~RUBY
         class StructSchema
           sig { params(fields: T::Hash[String, Integer]).void }
@@ -3001,9 +3090,103 @@ RSpec.describe RubyToClear::Transpiler do
       RUBY
 
       clear = RubyToClear.transpile(ruby_code)
-      expect(clear).to include("MUTABLE fields: Int64[] = [];")
-      expect(clear).to include("fields = struct_schema.fields.values();")
+      expect(clear).to include("MUTABLE fields = struct_schema.fields.values();")
       expect(clear).to include("WHILE (i < fields.length()) DO")
+    end
+
+    it "narrows optional locals after nil guard exits" do
+      ruby_code = <<~RUBY
+        Value = T.type_alias { T.any(String, Integer) }
+
+        sig { params(values: T::Array[T.nilable(Value)]).returns(Void) }
+        def walk(values)
+          i = T.let(0, Integer)
+          while i < values.length
+            vt = values.fetch(i)
+            unless vt
+              i += 1
+              next
+            end
+            if vt.is_a?(String)
+              vt.to_sym
+            end
+            i += 1
+          end
+        end
+      RUBY
+
+      clear = RubyToClear.transpile(ruby_code)
+      expect(clear).to include("IF vt THEN")
+      expect(clear).to include("IF vt IS_A String AS string THEN")
+      expect(clear).not_to include("vt??")
+    end
+
+    it "does not unwrap optional-guard locals in runtime type-test else branches" do
+      ruby_code = <<~RUBY
+        Value = T.type_alias { T.any(String, Integer) }
+
+        sig { params(value: Value).returns(Void) }
+        def keep(value)
+        end
+
+        sig { params(values: T::Array[T.nilable(Value)]).returns(Void) }
+        def walk(values)
+          vt = values.fetch(0)
+          return unless vt
+
+          if vt.is_a?(String)
+            vt.to_sym
+          else
+            keep(T.must(vt))
+          end
+        end
+      RUBY
+
+      clear = RubyToClear.transpile(ruby_code)
+      expect(clear).to match(/IF vt\?? IS_A String AS string THEN/)
+      expect(clear).to include("keep(vt);")
+      expect(clear).not_to include("keep(vt?);")
+    end
+
+    it "unwraps non-union optional locals after nil guard exits" do
+      ruby_code = <<~RUBY
+        sig { params(value: String).returns(String) }
+        def keep(value)
+          value
+        end
+
+        sig { params(value: T.nilable(String)).returns(String) }
+        def keep_optional(value)
+          return "" unless value
+
+          return keep(value)
+        end
+      RUBY
+
+      clear = RubyToClear.transpile(ruby_code)
+      expect(clear).to include("IF value THEN")
+      expect(clear).to include("RETURN keep(value?);")
+    end
+
+    it "keeps T.must unwraps on non-union optional locals after nil guard exits" do
+      ruby_code = <<~RUBY
+        sig { params(value: String).returns(String) }
+        def keep(value)
+          value
+        end
+
+        sig { params(values: T::Array[T.nilable(String)]).returns(String) }
+        def keep_first(values)
+          value = values.fetch(0)
+          return "" unless value
+
+          return keep(T.must(value))
+        end
+      RUBY
+
+      clear = RubyToClear.transpile(ruby_code)
+      expect(clear).to include("RETURN keep(value?);")
+      expect(clear).not_to include("RETURN keep(value);")
     end
 
     it "predeclares optional element arrays with an empty array default" do
@@ -3655,8 +3838,8 @@ RSpec.describe RubyToClear::Transpiler do
           end
         end
       RUBY
-      expect(clear).to include("MUTABLE item: ?String = NIL;")
-      expect(clear).to include("item = items[0];")
+      expect(clear).to include("IF flag THEN")
+      expect(clear).to include("MUTABLE item = items[0];")
     end
 
     it "uses T.let and T.cast as local type metadata without emitting Sorbet runtime calls" do

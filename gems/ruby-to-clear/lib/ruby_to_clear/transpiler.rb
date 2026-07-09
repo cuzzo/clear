@@ -121,8 +121,10 @@ module RubyToClear
       @current_function_can_fail = false
       @inside_function = false
       @current_function_returns_value = false
+      @function_statement_list_depth = 0
       @local_shapes = {}
       @local_types = {}
+      @narrowed_optional_storage_locals = Set.new
       @singleton_class_depth = 0
       @current_function_type_bindings = {}
       @required_files = Set.new
@@ -825,9 +827,13 @@ module RubyToClear
     end
 
     def render_returning_statement(stmt)
+      return visit(stmt) if guard_exit_statement?(stmt)
+
       case stmt
       when Prism::IfNode
         render_returning_if_node(stmt)
+      when Prism::CaseNode
+        render_returning_case_node(stmt)
       else
         "RETURN #{visit(stmt).delete_suffix(';')};"
       end
@@ -1071,6 +1077,9 @@ module RubyToClear
       private_names = statements.flat_map { |stmt| private_class_method_names(stmt) }
       old_private_method_names = @private_method_names
       old_private_section = @private_section
+      old_function_statement_list_depth = @function_statement_list_depth
+      top_level_function_body = @inside_function && old_function_statement_list_depth.zero?
+      @function_statement_list_depth = old_function_statement_list_depth + 1
       @private_method_names = @private_method_names | private_names.to_set
       while index < statements.length
         stmt = statements[index]
@@ -1100,6 +1109,13 @@ module RubyToClear
           last_sig = nil
         end
 
+        if (guard = optional_nil_exit_guard(stmt)) && index < statements.length - 1
+          code = render_optional_nil_guard(guard, statements[(index + 1)..])
+          @current_sig = nil
+          rendered << format_statement_code(code) unless code.empty?
+          break
+        end
+
         if (guard = runtime_is_a_exit_guard(stmt)) && index < statements.length - 1
           code = render_runtime_is_a_guard(guard, statements[(index + 1)..])
           @current_sig = nil
@@ -1107,11 +1123,12 @@ module RubyToClear
           break
         end
 
-        code = visit(stmt)
-        if @inside_function && @current_function_returns_value && index == statements.length - 1 && ternary_if_node?(stmt)
-          code = render_returning_if_node(stmt)
-        elsif @inside_function && @current_function_returns_value && index == statements.length - 1 && stmt.is_a?(Prism::CaseNode)
-          code = "RETURN #{visit_case_expression_or_placeholder(stmt)}"
+        code = if top_level_function_body && @current_function_returns_value && index == statements.length - 1 && ternary_if_node?(stmt)
+          render_returning_if_node(stmt)
+        elsif top_level_function_body && @current_function_returns_value && index == statements.length - 1 && stmt.is_a?(Prism::CaseNode)
+          render_returning_case_node(stmt)
+        else
+          visit(stmt)
         end
         @current_sig = nil
         rendered << format_statement_code(code) unless code.empty?
@@ -1120,6 +1137,7 @@ module RubyToClear
       end
       @private_method_names = old_private_method_names
       @private_section = old_private_section
+      @function_statement_list_depth = old_function_statement_list_depth
       rendered.join("\n")
     end
 
@@ -1141,6 +1159,39 @@ module RubyToClear
       stmt.is_a?(Prism::ReturnNode) || stmt.is_a?(Prism::BreakNode) || stmt.is_a?(Prism::NextNode)
     end
 
+    def optional_nil_exit_guard(stmt)
+      return nil unless stmt.is_a?(Prism::UnlessNode)
+      return nil if stmt.consequent
+      return nil unless stmt.predicate.is_a?(Prism::LocalVariableReadNode)
+
+      receiver_name = stmt.predicate.name.to_s
+      receiver_type = static_clear_type_for_receiver(receiver_name)
+      return nil unless receiver_type.to_s.start_with?("?")
+
+      body = stmt.statements&.body || []
+      return nil unless body.any?
+      return nil unless guard_exit_statement?(body.last)
+
+      {
+        receiver_name: receiver_name,
+        receiver_code: visit(stmt.predicate),
+        payload_type: receiver_type.to_s.delete_prefix("?"),
+        exit_statements: body,
+      }
+    end
+
+    def render_optional_nil_guard(guard, rest_statements)
+      then_body = with_indent do
+        with_optional_unwrap_context(guard) do
+          visit_statement_list(rest_statements)
+        end
+      end
+      else_body = with_indent do
+        guard[:exit_statements].map { |stmt| format_statement_code(visit(stmt)) }.join("\n")
+      end
+      "IF #{guard[:receiver_code]} THEN\n#{then_body}\nELSE\n#{else_body}\nEND"
+    end
+
     def render_runtime_is_a_guard(guard, rest_statements)
       pred = "#{guard[:receiver_code]} IS_A #{guard[:expected_type]} AS #{guard[:binding_name]}"
       then_body = with_indent do
@@ -1150,6 +1201,23 @@ module RubyToClear
       end
       else_body = with_indent { format_statement_code(visit(guard[:exit_statement])) }
       "IF #{pred} THEN\n#{then_body}\nELSE\n#{else_body}\nEND"
+    end
+
+    def with_optional_unwrap_context(guard)
+      receiver_name = guard[:receiver_name]
+      payload_type = guard[:payload_type]
+      old_types = @local_types.dup
+      old_shapes = @local_shapes.dup
+      old_narrowed_optional_storage_locals = @narrowed_optional_storage_locals.dup
+      @local_types[receiver_name] = payload_type
+      @local_shapes[receiver_name] = clear_type_shape(payload_type)
+      @narrowed_optional_storage_locals << receiver_name if union_like_type?(payload_type)
+      renames = { receiver_name => optional_unwrap_code(receiver_name) }
+      with_renames(renames) { yield }
+    ensure
+      @local_types = old_types
+      @local_shapes = old_shapes
+      @narrowed_optional_storage_locals = old_narrowed_optional_storage_locals
     end
 
     def with_narrowing_context(runtime_is_a)
@@ -1162,6 +1230,61 @@ module RubyToClear
     ensure
       @local_types = old_types
       @local_shapes = old_shapes
+    end
+
+    def with_runtime_is_a_else_context(runtime_is_a)
+      return yield unless runtime_is_a
+
+      receiver_name = runtime_is_a[:receiver_name]
+      receiver_type = static_clear_type_for_receiver(receiver_name)
+      unwrap_code = optional_unwrap_code(receiver_name)
+      unless @renames[receiver_name] == unwrap_code && receiver_type && !receiver_type.to_s.start_with?("?")
+        return yield
+      end
+
+      old_renames = @renames.dup
+      @renames.delete(receiver_name)
+      yield
+    ensure
+      @renames = old_renames if old_renames
+    end
+
+    def optional_union_truthy_if_guard(predicate)
+      return nil unless predicate.is_a?(Prism::LocalVariableReadNode)
+
+      receiver_name = predicate.name.to_s
+      return nil if @current_param_names.include?(receiver_name)
+
+      receiver_type = static_clear_type_for_receiver(receiver_name)
+      return nil unless receiver_type.to_s.start_with?("?")
+
+      payload_type = receiver_type.to_s.delete_prefix("?")
+      return nil unless union_like_type?(payload_type)
+
+      {
+        receiver_name: receiver_name,
+        payload_type: payload_type,
+      }
+    end
+
+    def with_optional_truthy_context(guard)
+      receiver_name = guard[:receiver_name]
+      payload_type = guard[:payload_type]
+      old_types = @local_types.dup
+      old_shapes = @local_shapes.dup
+      old_narrowed_optional_storage_locals = @narrowed_optional_storage_locals.dup
+      @local_types[receiver_name] = payload_type
+      @local_shapes[receiver_name] = clear_type_shape(payload_type)
+      @narrowed_optional_storage_locals << receiver_name
+      yield
+    ensure
+      @local_types = old_types
+      @local_shapes = old_shapes
+      @narrowed_optional_storage_locals = old_narrowed_optional_storage_locals
+    end
+
+    def union_like_type?(type)
+      @union_types[type] || @generated_union_defs[type] || @type_aliases[type]
     end
 
     def visit_else_node(node)
@@ -1310,7 +1433,7 @@ module RubyToClear
       elsif value_node.is_a?(Prism::CaseNode)
         visit_case_expression_or_placeholder(value_node)
       else
-        cast_value || visit(value_node)
+        cast_value || sorbet_must_assignment_unwrap_code(value_node) || visit(value_node)
       end
       val = "COPY #{val}" if copyable_local_read_source?(value_node)
       shape = inferred_shape(value_node)
@@ -1328,19 +1451,59 @@ module RubyToClear
       end
     end
 
+    def sorbet_must_assignment_unwrap_code(node)
+      return nil unless sorbet_call?(node, "must")
+
+      args = node.arguments ? node.arguments.arguments : []
+      return nil unless args.length == 1
+      return nil unless args.first.is_a?(Prism::LocalVariableReadNode)
+
+      source_name = args.first.name.to_s
+      return nil unless @narrowed_optional_storage_locals.include?(source_name)
+
+      optional_unwrap_code(source_name)
+    end
+
     def visit_local_variable_if_assignment(name, if_node, type_annotation)
       shape = inferred_shape(if_node)
+      assignment_type = type_annotation || inferred_if_assignment_type(if_node)
       prefix = ""
       unless @declared_locals.include?(name)
         @declared_locals << name
         @local_shapes[name] = shape
-        @local_types[name] = type_annotation if type_annotation && type_annotation != "Auto"
-        prefix = "#{predeclared_local_declaration(name, type_annotation)}\n"
+        @local_types[name] = assignment_type if assignment_type && assignment_type != "Auto"
+        prefix = "#{predeclared_local_declaration(name, assignment_type)}\n"
       end
 
       @local_shapes[name] = shape
-      @local_types[name] = type_annotation if type_annotation && type_annotation != "Auto"
-      "#{prefix}#{if_assignment_code(name, if_node)}"
+      @local_types[name] = assignment_type if assignment_type && assignment_type != "Auto"
+      "#{prefix}#{if_assignment_code(name, if_node, assignment_type)}"
+    end
+
+    def inferred_if_assignment_type(if_node)
+      types = []
+      current = if_node
+
+      loop do
+        types << inferred_branch_statement_type(current.statements)
+        consequent = current.consequent
+        if consequent.is_a?(Prism::IfNode)
+          current = consequent
+          next
+        elsif consequent
+          types << inferred_branch_statement_type(consequent.statements)
+        end
+        break
+      end
+
+      compact_types = types.compact
+      compact_types.uniq.one? ? compact_types.first : nil
+    end
+
+    def inferred_branch_statement_type(statements)
+      return nil unless statements.is_a?(Prism::StatementsNode) && statements.body.any?
+
+      inferred_clear_type(statements.body.last)
     end
 
     def visit_local_variable_operator_write_node(node)
@@ -1754,7 +1917,7 @@ module RubyToClear
         end
 
         if args.length == 1 && args.first.is_a?(Prism::CaseNode)
-          return "RETURN #{visit_case_expression_or_placeholder(args.first)}"
+          return render_returning_case_node(args.first)
         end
 
         if args.length == 1
@@ -1798,6 +1961,7 @@ module RubyToClear
       predicate_prefix = ""
       pred_assignment = predicate_assignment_node(node.predicate)
       runtime_is_a = runtime_is_a_predicate(node.predicate)
+      optional_truthy = runtime_is_a || pred_assignment ? nil : optional_union_truthy_if_guard(node.predicate)
       pred = if runtime_is_a
         "#{runtime_is_a[:receiver_code]} IS_A #{runtime_is_a[:expected_type]} AS #{runtime_is_a[:binding_name]}"
       elsif pred_assignment
@@ -1810,11 +1974,13 @@ module RubyToClear
       body = with_indent do
         if runtime_is_a
           with_narrowing_context(runtime_is_a) { visit(node.statements) }
+        elsif optional_truthy
+          with_optional_truthy_context(optional_truthy) { visit(node.statements) }
         else
           visit(node.statements)
         end
       end
-      consequent_code = node.consequent ? format_consequent(node.consequent) : ""
+      consequent_code = node.consequent ? format_consequent(node.consequent, runtime_is_a) : ""
       "#{predicate_prefix}#{keyword} #{pred} THEN\n#{body}#{consequent_code}\nEND"
     end
 
@@ -1843,7 +2009,11 @@ module RubyToClear
         return nil unless receiver_type && runtime_union_narrowing_candidate?(receiver_type, expected_type)
 
         binding_name = runtime_is_a_binding_name(expected_type, receiver_name)
-        receiver_code = helper_predicate[:receiver_code]
+        receiver_code = runtime_is_a_receiver_code(
+          receiver_name,
+          helper_predicate[:receiver_code],
+          receiver_type,
+        )
         receiver_code = optional_unwrap_code(receiver_code) if receiver_type.to_s.start_with?("?")
         return {
           receiver_name: receiver_name,
@@ -1866,7 +2036,7 @@ module RubyToClear
       return nil unless receiver_type && runtime_union_narrowing_candidate?(receiver_type, expected_type)
 
       binding_name = runtime_is_a_binding_name(expected_type, receiver_name)
-      receiver_code = visit(receiver)
+      receiver_code = runtime_is_a_receiver_code(receiver_name, visit(receiver), receiver_type)
       receiver_code = optional_unwrap_code(receiver_code) if receiver_type.to_s.start_with?("?")
       {
         receiver_name: receiver_name,
@@ -1875,6 +2045,16 @@ module RubyToClear
         binding_name: binding_name,
         renames: { receiver_name => binding_name },
       }
+    end
+
+    def runtime_is_a_receiver_code(receiver_name, receiver_code, receiver_type)
+      unwrap_code = optional_unwrap_code(receiver_name)
+      local_receiver = !@current_param_names.include?(receiver_name)
+      if local_receiver && receiver_code == unwrap_code && !receiver_type.to_s.start_with?("?")
+        return receiver_name
+      end
+
+      receiver_code
     end
 
     def runtime_is_a_binding_name(expected_type, receiver_name)
@@ -1897,28 +2077,10 @@ module RubyToClear
 
     def visit_case_node(node)
       if node.predicate.nil?
-        first_when = node.conditions.first
-        other_whens = node.conditions[1..-1] || []
-
-        pred = visit(first_when.conditions.first)
-        body = with_indent { visit(first_when.statements) }
-
-        consequent_code = ""
-        other_whens.each do |w|
-          w_pred = visit(w.conditions.first)
-          w_body = with_indent { visit(w.statements) }
-          consequent_code += "\nELSE_IF #{w_pred} THEN\n#{w_body}"
-        end
-
-        if node.consequent
-          else_body = with_indent { visit(node.consequent) }
-          consequent_code += "\nELSE\n#{else_body}"
-        end
-
-        "IF #{pred} THEN\n#{body}#{consequent_code}\nEND"
+        return render_case_as_condition_chain(node, nil)
       else
         target = visit(node.predicate)
-        if node.conditions.any? { |w| w.conditions.any? { |cond| cond.is_a?(Prism::SplatNode) } }
+        if statement_case_condition_chain?(node)
           return render_case_as_condition_chain(node, target)
         end
 
@@ -1944,24 +2106,43 @@ module RubyToClear
       end
     end
 
-    def render_case_as_condition_chain(node, target)
+    def statement_case_condition_chain?(node)
+      return true if node.conditions.any? { |w| w.conditions.any? { |cond| cond.is_a?(Prism::SplatNode) } }
+
+      node.conditions.any? { |w| !case_expression_statements?(w.statements) } ||
+        (node.consequent && !case_expression_statements?(node.consequent.statements))
+    end
+
+    def render_case_as_condition_chain(node, target, returning: false)
       chunks = []
       node.conditions.each_with_index do |when_node, index|
         keyword = index.zero? ? "IF" : "ELSE_IF"
-        pred = when_node.conditions.map { |cond| case_condition_predicate(target, cond) }.join(" || ")
-        body = with_indent { visit(when_node.statements) }
+        pred = case_when_predicate(target, when_node)
+        body = with_indent do
+          returning ? returning_branch_statements(when_node.statements) : visit(when_node.statements)
+        end
         chunks << "#{keyword} #{pred} THEN\n#{body}"
       end
 
       if node.consequent
-        else_body = with_indent { visit(node.consequent) }
+        else_body = with_indent do
+          returning ? returning_branch_statements(node.consequent.statements) : visit(node.consequent)
+        end
         chunks << "ELSE\n#{else_body}"
+      elsif returning
+        chunks << "ELSE\n#{indent}  RETURN NIL;"
       end
 
       "#{chunks.join("\n")}#{chunks.empty? ? "" : "\n"}END"
     end
 
+    def case_when_predicate(target, when_node)
+      when_node.conditions.map { |cond| case_condition_predicate(target, cond) }.join(" || ")
+    end
+
     def case_condition_predicate(target, cond)
+      return visit(cond) unless target
+
       if cond.is_a?(Prism::SplatNode)
         return "#{visit(cond.expression)}.contains?(#{target})"
       end
@@ -2438,6 +2619,7 @@ module RubyToClear
       old_inside_instance_method = @inside_instance_method
       old_inside_class_method = @inside_class_method
       old_function_returns_value = @current_function_returns_value
+      old_function_statement_list_depth = @function_statement_list_depth
       old_function_type_bindings = @current_function_type_bindings
       old_current_param_names = @current_param_names
       old_current_function_return_type = @current_function_return_type
@@ -2449,6 +2631,7 @@ module RubyToClear
       @inside_instance_method = !!(@current_class && !node.receiver)
       @inside_class_method = !!(@current_class && node.receiver.is_a?(Prism::SelfNode))
       @current_function_returns_value = name != "initialize" && sig_return_type != "Void"
+      @function_statement_list_depth = 0
       @current_function_type_bindings = type_bindings
       @current_param_names = param_names.to_set
       @current_function_return_type = sig_return_type
@@ -2482,6 +2665,7 @@ module RubyToClear
       @inside_instance_method = old_inside_instance_method
       @inside_class_method = old_inside_class_method
       @current_function_returns_value = old_function_returns_value
+      @function_statement_list_depth = old_function_statement_list_depth
       @current_function_type_bindings = old_function_type_bindings
       @current_param_names = old_current_param_names
       @current_function_return_type = old_current_function_return_type
@@ -2621,7 +2805,13 @@ module RubyToClear
       end
     end
 
-    def format_consequent(consequent_node)
+    def format_consequent(consequent_node, else_context = nil)
+      if else_context
+        return with_runtime_is_a_else_context(else_context) do
+          format_consequent(consequent_node)
+        end
+      end
+
       if consequent_node.is_a?(Prism::IfNode)
         runtime_is_a = runtime_is_a_predicate(consequent_node.predicate)
         pred = if runtime_is_a
@@ -2636,7 +2826,7 @@ module RubyToClear
             visit(consequent_node.statements)
           end
         end
-        nested = consequent_node.consequent ? format_consequent(consequent_node.consequent) : ""
+        nested = consequent_node.consequent ? format_consequent(consequent_node.consequent, runtime_is_a) : ""
         "\nELSE_IF #{pred} THEN\n#{body}#{nested}"
       else
         body = with_indent { visit(consequent_node) }
@@ -3041,7 +3231,22 @@ module RubyToClear
     end
 
     def visit_case_expression_or_placeholder(node)
+      code = case_expression_code(node)
+      return code if code
+
       return unsupported_expression(node, "Case expressions without a target are not supported") if node.predicate.nil?
+
+      unsupported_expression(unsupported_case_expression_node(node), "Case expression arms must contain one expression")
+    end
+
+    def unsupported_case_expression_node(node)
+      node.conditions.find { |when_node| !case_expression_statements?(when_node.statements) } ||
+        (node.consequent if node.consequent && !case_expression_statements?(node.consequent.statements)) ||
+        node
+    end
+
+    def case_expression_code(node)
+      return nil if node.predicate.nil?
 
       target = visit(node.predicate)
       arms = []
@@ -3049,7 +3254,7 @@ module RubyToClear
         w.conditions.each do |cond|
           cond_val = visit(cond)
           stmt_val = single_expression_from_statements(w.statements)
-          return unsupported_expression(w, "Case expression arms must contain one expression") unless stmt_val
+          return nil unless stmt_val
 
           stmt_val = match_arm_expression(stmt_val)
           arms << "#{cond_val} -> #{stmt_val},"
@@ -3058,7 +3263,7 @@ module RubyToClear
 
       if node.consequent
         else_val = single_expression_from_statements(node.consequent.statements)
-        return unsupported_expression(node.consequent, "Case expression default must contain one expression") unless else_val
+        return nil unless else_val
 
         else_val = match_arm_expression(else_val)
         arms << "DEFAULT -> #{else_val}"
@@ -3073,6 +3278,19 @@ module RubyToClear
       "PARTIAL MATCH #{target} START\n#{arms_body}\n#{indent}END"
     end
 
+    def case_expression_statements?(statements)
+      statements.is_a?(Prism::StatementsNode) && statements.body.length == 1
+    end
+
+    def render_returning_case_node(node)
+      if (code = case_expression_code(node))
+        return "RETURN #{code}"
+      end
+
+      target = node.predicate ? visit(node.predicate) : nil
+      render_case_as_condition_chain(node, target, returning: true)
+    end
+
     def if_expression_code(node)
       body = if_expression_branch_code(node, "IF")
       return nil unless body
@@ -3080,24 +3298,24 @@ module RubyToClear
       "#{body}\n#{indent}END"
     end
 
-    def if_assignment_code(name, node)
-      body = if_assignment_branch_code(name, node, "IF")
+    def if_assignment_code(name, node, type = nil)
+      body = if_assignment_branch_code(name, node, "IF", type)
       "#{body}\n#{indent}END"
     end
 
-    def if_assignment_branch_code(name, node, keyword)
+    def if_assignment_branch_code(name, node, keyword, type = nil)
       pred = visit(node.predicate)
       code = "#{indent}#{keyword} #{pred} THEN\n"
       code += with_indent { assignment_branch_statements(name, node.statements) }
       consequent = node.consequent
 
       if consequent.is_a?(Prism::IfNode)
-        code += "\n#{if_assignment_branch_code(name, consequent, 'ELSE_IF')}"
+        code += "\n#{if_assignment_branch_code(name, consequent, 'ELSE_IF', type)}"
       elsif consequent
         code += "\n#{indent}ELSE\n"
         code += with_indent { assignment_branch_statements(name, consequent.statements) }
       else
-        code += "\n#{indent}ELSE\n#{indent}  #{name} = NIL;"
+        code += "\n#{indent}ELSE\n#{indent}  #{name} = #{default_value_for_type(type)};"
       end
 
       code
@@ -3110,6 +3328,10 @@ module RubyToClear
       rendered = body[0...-1].map { |stmt| format_statement_code(visit(stmt)) }
       rendered << format_statement_code("#{name} = #{visit(body.last).delete_suffix(';')}")
       rendered.join("\n")
+    end
+
+    def returning_branch_statements(statements)
+      render_returning_statements(statements)
     end
 
     def if_expression_branch_code(node, keyword)
