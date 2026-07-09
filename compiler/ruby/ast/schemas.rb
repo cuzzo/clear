@@ -8,6 +8,7 @@
 # representation.
 require "sorbet-runtime"
 require "set"
+require_relative "struct_field"
 
 module Schemas
     extend T::Sig
@@ -20,7 +21,7 @@ module Schemas
   class EnumSchema
       extend T::Sig
 
-    VariantInput = T.type_alias { T.any(T::Array[T.any(String, Symbol)], T::Set[T.any(String, Symbol)]) }
+    VariantInput = T.type_alias { T::Enumerable[T.any(String, Symbol)] }
 
     sig { returns(T::Set[String]) }
     attr_reader :variants
@@ -35,9 +36,11 @@ module Schemas
 
     sig { params(variants: VariantInput).returns(T::Set[String]) }
     def normalize_variants(variants)
-      variants.each_with_object(T.let(Set.new, T::Set[String])) do |variant, normalized|
+      normalized = T.let(Set.new, T::Set[String])
+      variants.each do |variant|
         normalized << variant.to_s
       end
+      normalized
     end
     private :normalize_variants
 
@@ -113,7 +116,8 @@ module Schemas
 
     sig { params(field: String).returns(ResourceClosePlan) }
     def for_field(field)
-      ResourceClosePlan.new(actions: actions.map { |action| action.for_field(field) })
+      mapped_actions = actions.map { |action| action.for_field(field) }
+      ResourceClosePlan.new(actions: mapped_actions)
     end
 
     sig { returns(T::Boolean) }
@@ -130,7 +134,7 @@ module Schemas
   class ResourceSchema
     extend T::Sig
 
-    FieldMetadataValue = T.type_alias { T.nilable(T.any(Type::TypeInput, AST::Locatable, T::Boolean)) }
+    FieldMetadataValue = T.type_alias { T.any(Type::TypeInput, AST::Locatable, T::Boolean) }
     FieldMetadata = T.type_alias { T::Hash[T.any(Symbol, String), FieldMetadataValue] }
     FieldInput = T.type_alias { T.any(Type::TypeInput, AST::StructField, FieldMetadata) }
     FieldInputMap = T.type_alias { T::Hash[T.any(Symbol, String), FieldInput] }
@@ -142,7 +146,7 @@ module Schemas
     attr_reader :close_plan, :static_methods, :fields, :type_params, :extern_module, :as_type, :visibility, :methods
     sig { params(close_plan: Schemas::ResourceClosePlan, static_methods: Schemas::ResourceSchema::StaticMethodsMap, fields: FieldInputMap, type_params: T::Array[Symbol], extern_module: T.nilable(String), as_type: T.nilable(String), visibility: Symbol, methods: Schemas::ResourceSchema::MethodsMap).void }
     def initialize(close_plan:, static_methods: {}, fields: {}, type_params: [], extern_module: nil, as_type: nil, visibility: :package, methods: {})
-      @close_plan      = T.let(close_plan, Schemas::ResourceClosePlan)
+      @close_plan      = T.let(close_plan.dup, Schemas::ResourceClosePlan)
       @static_methods  = T.let(static_methods, Schemas::ResourceSchema::StaticMethodsMap)
       @fields          = T.let(normalize_fields(fields), T::Hash[String, AST::StructField])
       @type_params     = T.let(type_params.dup, T::Array[Symbol])
@@ -168,9 +172,14 @@ module Schemas
 
     sig { params(fields: FieldInputMap).returns(T::Hash[String, AST::StructField]) }
     def normalize_fields(fields)
-      fields.each_with_object({}) do |(name, field), out|
-        out[name.to_s] = normalize_field(field)
+      out = T.let({}, T::Hash[String, AST::StructField])
+      keys = fields.keys
+      i = T.let(0, Integer)
+      while i < keys.length
+        out[keys[i].to_s] = normalize_field(T.must(fields[keys[i]]))
+        i += 1
       end
+      out
     end
     private :normalize_fields
 
@@ -178,14 +187,21 @@ module Schemas
     def normalize_field(field)
       return field if field.is_a?(AST::StructField)
       if field.is_a?(Hash)
+        type_value = T.let(field[:type], T.nilable(FieldMetadataValue))
+        type_value = field["type"] if type_value.nil?
+        type_value = :Any if type_value.nil?
+        default_value = T.let(field[:default], T.nilable(FieldMetadataValue))
+        default_value = field["default"] if default_value.nil?
+        borrowed_value = T.let(field[:borrowed], T.nilable(FieldMetadataValue))
+        borrowed_value = field["borrowed"] if borrowed_value.nil?
         return AST::StructField.new(
-          type: field[:type] || field["type"],
-          default: field[:default] || field["default"],
-          borrowed: field[:borrowed] || field["borrowed"]
+          type: T.must(type_value).dup,
+          default: default_value,
+          borrowed: !borrowed_value.nil?
         )
       end
 
-      AST::StructField.new(type: field)
+      AST::StructField.new(type: field.dup)
     end
     private :normalize_field
   end
@@ -229,9 +245,7 @@ module Schemas
     attr_reader :fields
     sig { params(fields: FieldInputMap, deinit_entries: T::Array[Schemas::InlineStructDeinitEntry]).void }
     def initialize(fields:, deinit_entries: [])
-      @fields = T.let(fields.transform_values { |field_type|
-        Type.new(field_type)
-      }, Schemas::InlineStructVariant::FieldMap)
+      @fields = T.let(normalize_fields(fields), Schemas::InlineStructVariant::FieldMap)
       @deinit_entries = T.let(deinit_entries, T::Array[Schemas::InlineStructDeinitEntry])
     end
 
@@ -247,19 +261,45 @@ module Schemas
 
     sig { returns(T::Hash[String, Type]) }
     def typed_fields
-      @fields.transform_keys(&:to_s)
+      out = T.let({}, T::Hash[String, Type])
+      keys = @fields.keys
+      i = T.let(0, Integer)
+      while i < keys.length
+        out[keys[i].to_s] = T.must(@fields[keys[i]])
+        i += 1
+      end
+      out
     end
 
     # Value equality on the field shape (not deinit_entries, which is
     # derived). The multi-arm shared-destructure check compares two
     # variants' payloads structurally — this used to be Hash `==`.
-    sig { params(other: T.untyped).returns(T::Boolean) }
+    sig { params(other: InlineStructVariant).returns(T::Boolean) }
     def ==(other)
-      !!(other.is_a?(Schemas::InlineStructVariant) && other.fields == @fields)
+      other.fields == @fields
     end
-    alias eql? ==
+
+    sig { params(other: InlineStructVariant).returns(T::Boolean) }
+    def eql?(other)
+      self == other
+    end
+    # ruby-to-clear: skip
     sig { returns(Integer) }
     def hash = @fields.hash
+
+    sig { params(fields: FieldInputMap).returns(FieldMap) }
+    def normalize_fields(fields)
+      out = T.let({}, Schemas::InlineStructVariant::FieldMap)
+      keys = fields.keys
+      i = T.let(0, Integer)
+      while i < keys.length
+        key = keys.fetch(i)
+        out[key] = Type.new(T.must(fields[key]))
+        i += 1
+      end
+      out
+    end
+    private :normalize_fields
   end
 
   # Union (sum-type) schema. `variants` is a Hash[Symbol => value] where
@@ -276,20 +316,35 @@ module Schemas
     attr_reader :variants, :type_params, :visibility
     sig { params(variants: VariantInputMap, type_params: T::Array[Symbol], visibility: Symbol).void }
     def initialize(variants:, type_params: [], visibility: :package)
-      @variants = T.let(
-        variants.transform_values do |variant|
-          if variant.nil? || variant.is_a?(Schemas::InlineStructVariant)
-            variant
-          else
-            Type.new(variant)
-          end
-        end,
-        Schemas::UnionSchema::VariantMap
-      )
+      @variants = T.let(normalize_variants(variants), Schemas::UnionSchema::VariantMap)
       @type_params = T.let(type_params.dup, T::Array[Symbol])
       @visibility = T.let(visibility, Symbol)
       freeze
     end
+
+    sig { params(variants: VariantInputMap).returns(VariantMap) }
+    def normalize_variants(variants)
+      out = T.let({}, Schemas::UnionSchema::VariantMap)
+      keys = variants.keys
+      i = T.let(0, Integer)
+      while i < keys.length
+        key = keys.fetch(i)
+        out[key] = normalize_variant(variants[key])
+        i += 1
+      end
+      out
+    end
+    private :normalize_variants
+
+    sig { params(variant: VariantInput).returns(VariantValue) }
+    def normalize_variant(variant)
+      return nil if variant.nil?
+      return variant if variant.is_a?(Type)
+      return variant if variant.is_a?(Schemas::InlineStructVariant)
+
+      Type.new(variant)
+    end
+    private :normalize_variant
 
     sig { returns(T.nilable(Symbol)) }
     def kind = :union
@@ -317,7 +372,7 @@ module Schemas
     # `fields` is ALWAYS Hash[String => AST::StructField]. Per-field
     # default value and borrowed-ness live on the StructField, so
     # `field_defaults` / `borrowed_fields` are derived, not stored.
-    FieldMetadataValue = T.type_alias { T.nilable(T.any(Type::TypeInput, AST::Locatable, T::Boolean)) }
+    FieldMetadataValue = T.type_alias { T.any(Type::TypeInput, AST::Locatable, T::Boolean) }
     FieldMetadata = T.type_alias { T::Hash[T.any(Symbol, String), FieldMetadataValue] }
     FieldInput = T.type_alias { T.any(Type::TypeInput, AST::StructField, FieldMetadata) }
     FieldInputMap = T.type_alias { T::Hash[T.any(Symbol, String), FieldInput] }
@@ -338,14 +393,29 @@ module Schemas
     sig { returns(T::Array[Symbol]) }
     def type_params = @type_params
 
-    sig { returns(T::Hash[String, AST::Node]) }
+    sig { returns(T::Hash[String, AST::Locatable]) }
     def field_defaults
-      @fields.each_with_object({}) { |(k, f), h| h[k] = f.default if f.default }
+      out = T.let({}, T::Hash[String, AST::Locatable])
+      keys = @fields.keys
+      i = T.let(0, Integer)
+      while i < keys.length
+        default = T.must(@fields[keys[i]]).default
+        out[keys[i]] = T.must(default) unless default.nil?
+        i += 1
+      end
+      out
     end
 
     sig { returns(T::Set[String]) }
     def borrowed_fields
-      @fields.each_with_object(Set.new) { |(k, f), s| s << k if f.borrowed }
+      out = T.let(Set.new, T::Set[String])
+      keys = @fields.keys
+      i = T.let(0, Integer)
+      while i < keys.length
+        out << keys[i] if T.must(@fields[keys[i]]).borrowed
+        i += 1
+      end
+      out
     end
 
     sig { returns(T.nilable(Symbol)) }
@@ -361,9 +431,14 @@ module Schemas
 
     sig { params(fields: FieldInputMap).returns(T::Hash[String, AST::StructField]) }
     def normalize_fields(fields)
-      fields.each_with_object({}) do |(name, field), out|
-        out[name.to_s] = normalize_field(field)
+      out = T.let({}, T::Hash[String, AST::StructField])
+      keys = fields.keys
+      i = T.let(0, Integer)
+      while i < keys.length
+        out[keys[i].to_s] = normalize_field(T.must(fields[keys[i]]))
+        i += 1
       end
+      out
     end
     private :normalize_fields
 
@@ -371,14 +446,21 @@ module Schemas
     def normalize_field(field)
       return field if field.is_a?(AST::StructField)
       if field.is_a?(Hash)
+        type_value = T.let(field[:type], T.nilable(FieldMetadataValue))
+        type_value = field["type"] if type_value.nil?
+        type_value = :Any if type_value.nil?
+        default_value = T.let(field[:default], T.nilable(FieldMetadataValue))
+        default_value = field["default"] if default_value.nil?
+        borrowed_value = T.let(field[:borrowed], T.nilable(FieldMetadataValue))
+        borrowed_value = field["borrowed"] if borrowed_value.nil?
         return AST::StructField.new(
-          type: field[:type] || field["type"],
-          default: field[:default] || field["default"],
-          borrowed: field[:borrowed] || field["borrowed"]
+          type: T.must(type_value).dup,
+          default: default_value,
+          borrowed: !borrowed_value.nil?
         )
       end
 
-      AST::StructField.new(type: field)
+      AST::StructField.new(type: field.dup)
     end
     private :normalize_field
   end

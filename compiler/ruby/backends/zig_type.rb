@@ -18,31 +18,32 @@ class ZigType
   sig { params(name: String).returns(T::Boolean) }
   def self.primitive_numeric_identifier?(name)
     return false if name.length < 2
-    head = name[0]
-    return false unless head == "u" || head == "i" || head == "f"
+    return false unless name.start_with?("u") || name.start_with?("i") || name.start_with?("f")
 
-    digits = name[1..]
-    !digits.nil? && !digits.empty? && digits.each_char.all? { |char| char >= "0" && char <= "9" }
+    digits_only?(T.must(name[1..]))
   end
 
   sig { params(name: String).returns(T::Boolean) }
   def self.float_identifier?(name)
     return false if name.length < 2
-    return false unless name[0] == "f"
+    return false unless name.start_with?("f")
 
-    digits = name[1..]
-    !digits.nil? && !digits.empty? && digits.each_char.all? { |char| char >= "0" && char <= "9" }
+    digits_only?(T.must(name[1..]))
   end
 
   sig { params(name: String).returns(T::Boolean) }
   def self.integer_identifier?(name)
     return false if name.length < 2
-    head = name[0]
-    return false unless head == "u" || head == "i"
+    return false unless name.start_with?("u") || name.start_with?("i")
 
-    digits = name[1..]
-    !digits.nil? && !digits.empty? && digits.each_char.all? { |char| char >= "0" && char <= "9" }
+    digits_only?(T.must(name[1..]))
   end
+
+  sig { params(value: String).returns(T::Boolean) }
+  def self.digits_only?(value)
+    value.match?(/\A[0-9]+\z/)
+  end
+  private_class_method :digits_only?
 
   sig { returns(T::Boolean) }
   def error_union?

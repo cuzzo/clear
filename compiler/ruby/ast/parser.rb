@@ -3054,12 +3054,7 @@ class ClearParser
     if match?(:VAR_ID) && %w[@reentrant @nonReentrant].include?(current.value)
       error!(current, :PARSER_EXPECTED, expected: "supported function type annotation", got: current.value, type: current.type, line: current.line)
     end
-    Type.new(FunctionSignature.new(
-      params: param_types.each_with_index.map { |t, i|
-        AST::Param.new(name: "arg#{i}", type: t, required: true, mutable: false, takes: false)
-      },
-      return_type: return_type
-    ))
+    Type.function_type_from_parts(param_types, return_type, false, nil)
   end
 
   sig { returns(T.nilable(Type)) }

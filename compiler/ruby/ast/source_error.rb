@@ -8,6 +8,8 @@ require_relative 'lexer'
 # objects from fix/lint tooling that expose line/column.
 DiagnosticToken = T.type_alias { T.nilable(T.any(Lexer::Token, Struct, Object)) }
 
+require_relative 'fixable_error'
+
 module ErrorDefinitions
   # Backward-compat view: the legacy `MESSAGES` hash now derives from
   # the unified `DiagnosticRegistry`. Existing call sites that pass a
@@ -68,18 +70,7 @@ module ErrorHelper
   sig { params(template: String, args: T::Array[String], kwargs: T::Hash[Symbol, T::Array[Symbol]]).returns(String) }
   def format_diagnostic_template(template, args, kwargs)
     T.bind(self, T.untyped) rescue nil
-    if !kwargs.empty? || template.include?("%{")
-      begin
-        return template % kwargs
-      rescue KeyError, ArgumentError => e
-        return template + " [Internal Args Error: #{e.message} kwargs=#{kwargs.inspect}]"
-      end
-    end
-    begin
-      template % args
-    rescue ArgumentError
-      template + " [Internal Args Error: #{args.inspect}]"
-    end
+    DiagnosticRegistry.format_template(template, args, kwargs)
   end
 
   sig { params(code: Symbol, args: String, kwargs: T.untyped).returns(String) }
@@ -101,12 +92,13 @@ module ErrorHelper
   end
 
   # Non-fatal compiler note (printed to stderr, does not halt compilation).
-  sig { params(node_or_token: AST::Node, message: String).void }
+  sig { params(node_or_token: AST::Node, message: String).returns(NilClass) }
   def note!(node_or_token, message)
     T.bind(self, T.untyped) rescue nil
     token = diagnostic_token(node_or_token)
     loc = token ? " (line #{token.line})" : ""
-    $stderr.puts "\e[36m[Note]\e[0m #{message}#{loc}"
+    diagnostic_output("\e[36m[Note]\e[0m #{message}#{loc}")
+    nil
   end
 
   sig { params(node_or_token: AST::Node, message: String).returns(NilClass) }
@@ -114,7 +106,7 @@ module ErrorHelper
     T.bind(self, T.untyped) rescue nil
     token = diagnostic_token(node_or_token)
     loc = token ? " (line #{token.line})" : ""
-    $stderr.puts "\e[33m[Warning]\e[0m #{message}#{loc}"
+    diagnostic_output("\e[33m[Warning]\e[0m #{message}#{loc}")
     nil
   end
 
@@ -173,7 +165,7 @@ module ErrorHelper
     when :hint, :info, :warning
       loc = token ? " (line #{token.line})" : ""
       tag = level == :warning ? "\e[33m[Warning]\e[0m" : "\e[36m[#{level.to_s.capitalize}]\e[0m"
-      $stderr.puts "#{tag} #{rendered_message}#{loc}"
+      diagnostic_output("#{tag} #{rendered_message}#{loc}")
     when :error
       err_class = self.class.name&.include?("Parser") ? ParserError : CompilerError
       source_token = source_error_token(token)
@@ -204,7 +196,13 @@ module ErrorHelper
     Lexer::Token.new(:ANCHOR, nil, T.unsafe(token).line, T.unsafe(token).column)
   end
 
-  private :format_diagnostic_template, :diagnostic_source_code, :diagnostic_token, :source_error_token
+  sig { params(message: String).returns(NilClass) }
+  def diagnostic_output(message)
+    Kernel.warn(message)
+    nil
+  end
+
+  private :format_diagnostic_template, :diagnostic_source_code, :diagnostic_token, :source_error_token, :diagnostic_output
 
 end
 

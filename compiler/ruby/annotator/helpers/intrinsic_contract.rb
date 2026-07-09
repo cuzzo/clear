@@ -1,5 +1,6 @@
 # typed: strict
 require "sorbet-runtime"
+require_relative "../../ast/param"
 require_relative "intrinsic_emit"
 
 class IntrinsicTemplateKind < T::Enum
@@ -25,24 +26,33 @@ end
 class IntrinsicTemplateContract < T::Struct
   extend T::Sig
 
-  TemplateValue = T.type_alias { T.any(String, Symbol) }
-
-  const :zig, T.nilable(TemplateValue), default: nil
-  const :numeric_zig, T.nilable(TemplateValue), default: nil
-  const :sharded_zig, T.nilable(TemplateValue), default: nil
-  const :shard_direct_zig, T.nilable(TemplateValue), default: nil
+  const :zig, T.nilable(IntrinsicEmit::StrOrSym), default: nil
+  const :numeric_zig, T.nilable(IntrinsicEmit::StrOrSym), default: nil
+  const :sharded_zig, T.nilable(IntrinsicEmit::StrOrSym), default: nil
+  const :shard_direct_zig, T.nilable(IntrinsicEmit::StrOrSym), default: nil
   const :bc, T::Boolean, default: false
   const :bc_op, T.nilable(Symbol), default: nil
 
-  sig { params(kind: IntrinsicTemplateKind).returns(T.nilable(TemplateValue)) }
+  sig { params(kind: IntrinsicTemplateKind).returns(T.nilable(IntrinsicEmit::StrOrSym)) }
   def pattern_for(kind)
-    case kind
-    when IntrinsicTemplateKind::Zig then zig
-    when IntrinsicTemplateKind::NumericZig then numeric_zig
-    when IntrinsicTemplateKind::ShardedZig then sharded_zig
-    when IntrinsicTemplateKind::ShardDirectZig then shard_direct_zig
-    end
+    return copy_template_value(zig) if kind == IntrinsicTemplateKind::Zig
+    return copy_template_value(numeric_zig) if kind == IntrinsicTemplateKind::NumericZig
+    return copy_template_value(sharded_zig) if kind == IntrinsicTemplateKind::ShardedZig
+    return copy_template_value(shard_direct_zig) if kind == IntrinsicTemplateKind::ShardDirectZig
+
+    nil
   end
+
+  sig { params(value: T.nilable(IntrinsicEmit::StrOrSym)).returns(T.nilable(IntrinsicEmit::StrOrSym)) }
+  def copy_template_value(value)
+    return nil if value.nil?
+
+    concrete = T.must(value)
+    return concrete if concrete.is_a?(Symbol)
+
+    concrete.dup
+  end
+  private :copy_template_value
 
   sig { params(default_name: Symbol).returns(Symbol) }
   def bc_op_or(default_name)
@@ -63,14 +73,14 @@ class IntrinsicAllocationContract < T::Struct
 
   sig { params(kind: IntrinsicAllocationKind).returns(T.nilable(Symbol)) }
   def placeholder(kind)
-    case kind
-    when IntrinsicAllocationKind::Alloc then alloc
-    when IntrinsicAllocationKind::ReturnAlloc then return_alloc
-    when IntrinsicAllocationKind::ValAlloc then val_alloc
-    when IntrinsicAllocationKind::KeyAlloc then key_alloc
-    when IntrinsicAllocationKind::ShardAlloc then shard_alloc
-    when IntrinsicAllocationKind::ShardedAlloc then sharded_alloc
-    end
+    return alloc if kind == IntrinsicAllocationKind::Alloc
+    return return_alloc if kind == IntrinsicAllocationKind::ReturnAlloc
+    return val_alloc if kind == IntrinsicAllocationKind::ValAlloc
+    return key_alloc if kind == IntrinsicAllocationKind::KeyAlloc
+    return shard_alloc if kind == IntrinsicAllocationKind::ShardAlloc
+    return sharded_alloc if kind == IntrinsicAllocationKind::ShardedAlloc
+
+    nil
   end
 end
 

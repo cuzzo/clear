@@ -1,6 +1,8 @@
 # typed: strict
 require "sorbet-runtime"
 
+require_relative "param"
+require_relative "struct_field"
 require_relative "type"
 require_relative "schemas"
 require_relative "lexer"
@@ -19,7 +21,6 @@ module AST
   ScalarLiteralCandidate = T.type_alias do
     T.nilable(T.any(AST::Node, RawBody, Struct, Type, String, Symbol, Numeric, TrueClass, FalseClass))
   end
-  StructKwargs = T.type_alias { BasicObject }
 
   class BodySlot
     extend T::Sig
@@ -36,7 +37,8 @@ module AST
     sig { params(body: AST::RawBody).void }
     def replace(body)
       @body = body
-      @writer.call(body)
+      writer = @writer
+      writer.call(body)
     end
   end
 
@@ -108,7 +110,7 @@ module AST
   # code. An annotator-set value always wins (`||=`).
   LITERAL_VALUE_TYPE = T.let({
     STRING: :String, NUMBER: :Number, FLOAT64: :Float64,
-    INT64: :Int64, BOOLEAN: :Bool, SYMBOL: :Symbol, NIL: :Void
+    INT64: :Int64, BOOLEAN: :Bool, SYMBOL: :Symbol, NIL: :NIL
   }.freeze, T::Hash[Symbol, Symbol])
   BOOL_BINOPS = %i[LT GT LTE GTE EQ NEQ AND OR].freeze
   # Statements / control-flow evaluate to Void unless the annotator
@@ -123,9 +125,7 @@ module AST
     end
   end
 
-  Param = Struct.new(:name, :type, :default, :mutable, :takes,
-                     :comptime, :name_token, :required, :sync, :symbol,
-                     keyword_init: true) do
+  class Param
     extend T::Sig
 
     sig { params(kw: StructKwargs).void }
@@ -709,7 +709,9 @@ module AST
     when FuncCall, StaticCall
       node.args.compact
     when MethodCall
-      [node.object, *node.args].compact
+      children = T.let([node.object], T::Array[T.nilable(AST::Node)])
+      children.concat(node.args)
+      children.compact
     when GetField
       [node.target].compact
     when GetIndex
@@ -747,11 +749,11 @@ module AST
   def self.each_bg_block(body, &block)
     return unless body
     nodes = body.is_a?(Array) ? body : [body]
-    nodes.each { |n| _bg_visit_recursive(n, &block) }
+    nodes.each { |n| bg_visit_recursive(n, &block) }
   end
 
   sig { params(node: T.nilable(AST::Node), block: T.proc.params(node: BgNode).void).void }
-  def self._bg_visit_recursive(node, &block)
+  def self.bg_visit_recursive(node, &block)
     if node.is_a?(BgBlock) || node.is_a?(BgStreamBlock)
       yield node
     end
@@ -759,36 +761,36 @@ module AST
     when HasBodies
       node.child_bodies.each { |b| each_bg_block(b, &block) }
     when VarDecl, BindExpr, Assignment, DestructuringAssignment, ReturnNode
-      _expr_each_bg_block_recursive(node.value, &block)
+      expr_each_bg_block_recursive(node.value, &block)
     when FuncCall
-      node.args.each { |a| _expr_each_bg_block_recursive(a, &block) }
+      node.args.each { |a| expr_each_bg_block_recursive(a, &block) }
     when MethodCall
-      _expr_each_bg_block_recursive(node.object, &block)
-      node.args.each { |a| _expr_each_bg_block_recursive(a, &block) }
+      expr_each_bg_block_recursive(node.object, &block)
+      node.args.each { |a| expr_each_bg_block_recursive(a, &block) }
     end
   end
 
   sig { params(expr: T.nilable(AST::Node), block: T.proc.params(node: BgNode).void).void }
-  def self._expr_each_bg_block_recursive(expr, &block)
+  def self.expr_each_bg_block_recursive(expr, &block)
     return unless expr
     case expr
     when BgBlock, BgStreamBlock
       yield expr
       each_bg_block(expr.body, &block)
     when FuncCall
-      expr.args.each { |a| _expr_each_bg_block_recursive(a, &block) }
+      expr.args.each { |a| expr_each_bg_block_recursive(a, &block) }
     when MethodCall
-      _expr_each_bg_block_recursive(expr.object, &block)
-      expr.args.each { |a| _expr_each_bg_block_recursive(a, &block) }
+      expr_each_bg_block_recursive(expr.object, &block)
+      expr.args.each { |a| expr_each_bg_block_recursive(a, &block) }
     when StructLit, UnionVariantLit
-      expr.fields.each_value { |v| _expr_each_bg_block_recursive(v, &block) }
+      expr.fields.each_value { |v| expr_each_bg_block_recursive(v, &block) }
     when ListLit
-      expr.items.each { |v| _expr_each_bg_block_recursive(v, &block) }
+      expr.items.each { |v| expr_each_bg_block_recursive(v, &block) }
     when HashLit
-      hash_lit_pair_nodes(expr.pairs).each { |node| _expr_each_bg_block_recursive(node, &block) }
+      hash_lit_pair_nodes(expr.pairs).each { |node| expr_each_bg_block_recursive(node, &block) }
     when BinaryOp
-      _expr_each_bg_block_recursive(expr.left, &block)
-      _expr_each_bg_block_recursive(expr.right, &block)
+      expr_each_bg_block_recursive(expr.left, &block)
+      expr_each_bg_block_recursive(expr.right, &block)
     end
     nil
   end
@@ -806,36 +808,36 @@ module AST
     when BgBlock, BgStreamBlock
       yield stmt
     when VarDecl, BindExpr, Assignment, DestructuringAssignment, ReturnNode
-      _expr_each_bg_block_shallow(stmt.value, &block) if stmt.respond_to?(:value)
+      expr_each_bg_block_shallow(stmt.value, &block) if stmt.respond_to?(:value)
     when FuncCall
-      stmt.args.each { |a| _expr_each_bg_block_shallow(a, &block) }
+      stmt.args.each { |a| expr_each_bg_block_shallow(a, &block) }
     when MethodCall
-      _expr_each_bg_block_shallow(stmt.object, &block)
-      stmt.args.each { |a| _expr_each_bg_block_shallow(a, &block) }
+      expr_each_bg_block_shallow(stmt.object, &block)
+      stmt.args.each { |a| expr_each_bg_block_shallow(a, &block) }
     end
   end
 
   sig { params(expr: T.nilable(AST::Node), block: T.proc.params(node: BgNode).void).void }
-  def self._expr_each_bg_block_shallow(expr, &block)
+  def self.expr_each_bg_block_shallow(expr, &block)
     return unless expr
     case expr
     when BgBlock, BgStreamBlock
       yield expr
       # Stop here -- do not descend into BG body.
     when FuncCall
-      expr.args.each { |a| _expr_each_bg_block_shallow(a, &block) }
+      expr.args.each { |a| expr_each_bg_block_shallow(a, &block) }
     when MethodCall
-      _expr_each_bg_block_shallow(expr.object, &block)
-      expr.args.each { |a| _expr_each_bg_block_shallow(a, &block) }
+      expr_each_bg_block_shallow(expr.object, &block)
+      expr.args.each { |a| expr_each_bg_block_shallow(a, &block) }
     when StructLit, UnionVariantLit
-      expr.fields.each_value { |v| _expr_each_bg_block_shallow(v, &block) }
+      expr.fields.each_value { |v| expr_each_bg_block_shallow(v, &block) }
     when ListLit
-      expr.items.each { |v| _expr_each_bg_block_shallow(v, &block) }
+      expr.items.each { |v| expr_each_bg_block_shallow(v, &block) }
     when HashLit
-      hash_lit_pair_nodes(expr.pairs).each { |node| _expr_each_bg_block_shallow(node, &block) }
+      hash_lit_pair_nodes(expr.pairs).each { |node| expr_each_bg_block_shallow(node, &block) }
     when BinaryOp
-      _expr_each_bg_block_shallow(expr.left, &block)
-      _expr_each_bg_block_shallow(expr.right, &block)
+      expr_each_bg_block_shallow(expr.left, &block)
+      expr_each_bg_block_shallow(expr.right, &block)
     end
     nil
   end
@@ -858,12 +860,12 @@ module AST
           yield b.capture_analysis if b.capture_analysis
         end
       end
-      _expr_each_concurrent_capture(node, &block)
+      expr_each_concurrent_capture(node, &block)
     end
   end
 
   sig { params(node: T.nilable(AST::Node), block: T.proc.params(analysis: T.untyped).void).void }
-  def self._expr_each_concurrent_capture(node, &block)
+  def self.expr_each_concurrent_capture(node, &block)
     case node
     when ConcurrentOp
       yield node.capture_analysis if node.capture_analysis
@@ -871,15 +873,15 @@ module AST
       # `x |> CONCURRENT EACH { ... }` parses as BinaryOp(op=:SMOOTH);
       # the ConcurrentOp lives on .right. (Other binary ops can also
       # contain ConcurrentOps in either side via nested expressions.)
-      _expr_each_concurrent_capture(node.left, &block) if node.respond_to?(:left)
-      _expr_each_concurrent_capture(node.right, &block) if node.respond_to?(:right)
+      expr_each_concurrent_capture(node.left, &block) if node.respond_to?(:left)
+      expr_each_concurrent_capture(node.right, &block) if node.respond_to?(:right)
     when VarDecl, BindExpr, Assignment, DestructuringAssignment, ReturnNode
-      _expr_each_concurrent_capture(node.value, &block) if node.respond_to?(:value)
+      expr_each_concurrent_capture(node.value, &block) if node.respond_to?(:value)
     when FuncCall
-      node.args.each { |a| _expr_each_concurrent_capture(a, &block) }
+      node.args.each { |a| expr_each_concurrent_capture(a, &block) }
     when MethodCall
-      _expr_each_concurrent_capture(node.object, &block)
-      node.args.each { |a| _expr_each_concurrent_capture(a, &block) }
+      expr_each_concurrent_capture(node.object, &block)
+      node.args.each { |a| expr_each_concurrent_capture(a, &block) }
     end
   end
 
@@ -1115,7 +1117,16 @@ module AST
     # some tests and analysis hooks attach singleton behavior to the instance.
     sig { params(val: SyntheticTypeInput).returns(Type) }
     def full_type=(val)
-      @type_object = T.let(val.is_a?(Type) ? val : Type.new(val), T.nilable(Type))
+      @type_object = T.let(
+        if val.is_a?(Type)
+          val
+        elsif val.is_a?(FunctionSignature)
+          Type.from_function_signature(val)
+        else
+          Type.new(val)
+        end,
+        T.nilable(Type)
+      )
       T.must(@type_object)
     end
 
@@ -1141,7 +1152,10 @@ module AST
 
     sig { params(val: CoerceTypeInput).returns(T.nilable(Type)) }
     def coerced_type=(val)
-      return @coerced_type_object = T.let(nil, T.nilable(Type)) if val.nil?
+      if val.nil?
+        @coerced_type_object = T.let(nil, T.nilable(Type))
+        return @coerced_type_object
+      end
 
       # Same logic: Wrap raw values, accept Type objects
       @coerced_type_object = T.let(val.is_a?(Type) ? val : Type.new(val), T.nilable(Type))
@@ -1166,17 +1180,24 @@ module AST
     #
     sig { params(declared_type: CoerceTypeInput).returns(CoerceResult) }
     def coerce!(declared_type)
-      # fn_type must not be flattened to its return type — preserve the full Type object.
-      return [@type_object, nil] if @type_object&.fn_type? && (declared_type.nil? || declared_type == :Any)
+      # fn_type metadata must not be flattened to a surface symbol: function
+      # params/returns are stored in the Type object, including for ?FN.
+      if @type_object && (declared_type.nil? || declared_type == :Any)
+        inferred_type = T.must(@type_object)
+        if inferred_type.fn_type? || (inferred_type.optional? && inferred_type.wrapped_type&.fn_type?)
+          return [inferred_type, nil]
+        end
+      end
 
       inferred = @type_object&.resolved
 
       # No explicit type or :Any -> use inferred, no coercion needed
       return [inferred, nil] if declared_type.nil? || declared_type == :Any
 
-      declared_type_info = declared_type.is_a?(FunctionSignature) ? Type.new(declared_type) : Type.new(declared_type)
+      declared_type_info = declared_type.is_a?(FunctionSignature) ? Type.from_function_signature(declared_type) : Type.new(declared_type)
       if declared_type_info.symbol? && @type_object && !T.must(@type_object).symbol?
-        return [nil, Type.coerce_error(T.must(@type_object), declared_type_info)]
+        error = Type.coerce_error(T.must(@type_object), declared_type_info)
+        return [nil, error] if error
       end
 
       # Explicit type matches inferred -> no coercion needed
@@ -1232,12 +1253,15 @@ module AST
         value_sync = vt.sync
       end
 
-      # Build a Type that carries the resolved base type plus storage-derived capabilities.
+      # Build a Type that carries the full declared/inferred shape plus
+      # storage-derived capabilities. Preserve optional/error-union/generic
+      # wrappers and data capabilities such as String@symbol; rebuilding from
+      # only resolved would collapse `?String@symbol` to bare `String`.
       # For fn_type, preserve the full type object — do not reduce to the return-type symbol.
       t = if final_type.fn_type?
         final_type
       else
-        new_t = Type.new(final_type.resolved)
+        new_t = Type.new(final_type)
         val_ti = respond_to?(:value) && value.respond_to?(:full_type) ? value.full_type : nil
         new_t.apply_finalized_value_shape!(final_type: final_type, value_type: val_ti)
         new_t
@@ -1454,7 +1478,11 @@ module AST
 
     sig { returns(T::Array[AST::DeferredDrop]) }
     def deferred_drops
-      T.unsafe(self)[:deferred_drops] ||= []
+      drops = T.unsafe(self)[:deferred_drops]
+      return drops if drops
+
+      self.deferred_drops = []
+      T.must(T.unsafe(self)[:deferred_drops])
     end
 
     sig { params(val: T.nilable(T::Array[AST::DeferredDrop])).void }
@@ -1704,7 +1732,7 @@ module AST
     # call resolution, same UFCS at call sites at the language level.
     attr_accessor :is_method
   end
-  StructField = Struct.new(:type, :default, :borrowed, keyword_init: true) do
+  class StructField
     extend T::Sig
 
     sig { params(kw: StructKwargs).void }
@@ -1780,7 +1808,11 @@ module AST
     def ==(other)
       !!(other && other.var == var && other.sync == sync)
     end
-    alias eql? ==
+
+    sig { params(other: T.nilable(AutoLockPlan)).returns(T::Boolean) }
+    def eql?(other)
+      self == other
+    end
 
     sig { returns(Integer) }
     def hash = [var, sync].hash
@@ -1998,7 +2030,7 @@ module AST
 
     sig { params(declared_type: CoerceTypeInput).returns(CoerceResult) }
     def coerce!(declared_type)
-      target = Type.new(declared_type)
+      target = declared_type.is_a?(FunctionSignature) ? Type.from_function_signature(declared_type) : Type.new(declared_type)
       return [nil, "Cannot initialize array of size #{target.capacity} with #{type_info.capacity} elements"] unless target.accepts?(type_info)
 
       [target.resolved, nil]

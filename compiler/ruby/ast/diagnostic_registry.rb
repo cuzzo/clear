@@ -3066,14 +3066,74 @@ module DiagnosticRegistry
   def self.format(code, args = [], **kwargs)
     entry = DIAGNOSTICS[code]
     return nil unless entry
-    template = entry[:template]
-    use_kwargs = !kwargs.empty? || template.include?("%{")
-    begin
-      use_kwargs ? template % kwargs : template % args
-    rescue KeyError, ArgumentError
-      payload = use_kwargs ? kwargs.inspect : args.inspect
-      "#{template} [Internal Args Error: #{payload}]"
+
+    format_template(entry[:template], args, kwargs)
+  end
+
+  sig { params(template: String, args: T::Array[T.untyped], kwargs: T.untyped).returns(String) }
+  def self.format_template(template, args = [], kwargs = {})
+    if !kwargs.empty? || template.include?("%{")
+      return template % kwargs if !template.include?("%{") || named_template_args_complete?(template, kwargs)
+
+      return "#{template} [Internal Args Error: #{kwargs.inspect}]"
     end
+
+    return template % args if positional_template_args_complete?(template, args)
+
+    "#{template} [Internal Args Error: #{args.inspect}]"
+  end
+
+  sig { params(template: String, kwargs: T.untyped).returns(T::Boolean) }
+  def self.named_template_args_complete?(template, kwargs)
+    keys = named_template_keys(template)
+    i = T.let(0, Integer)
+    while i < keys.length
+      return false unless kwargs.key?(keys.fetch(i))
+
+      i += 1
+    end
+    true
+  end
+
+  sig { params(template: String).returns(T::Array[Symbol]) }
+  def self.named_template_keys(template)
+    keys = T.let([], T::Array[Symbol])
+    offset = T.let(0, Integer)
+    loop do
+      start_index = template.index("%{", offset)
+      break unless start_index
+
+      end_index = template.index("}", start_index + 2)
+      break unless end_index
+
+      keys << template[(start_index + 2)...end_index].to_sym
+      offset = end_index + 1
+    end
+    keys
+  end
+
+  sig { params(template: String, args: T::Array[T.untyped]).returns(T::Boolean) }
+  def self.positional_template_args_complete?(template, args)
+    positional_placeholder_count(template) <= args.length
+  end
+
+  sig { params(template: String).returns(Integer) }
+  def self.positional_placeholder_count(template)
+    count = T.let(0, Integer)
+    i = T.let(0, Integer)
+    while i < template.length - 1
+      if template[i] == "%"
+        spec = template[i + 1]
+        if spec == "s" || spec == "d"
+          count += 1
+          i += 1
+        elsif spec == "%"
+          i += 1
+        end
+      end
+      i += 1
+    end
+    count
   end
 
   sig { params(code: Symbol, kwargs: T::Hash[Symbol, DiagnosticKwValue]).returns(String) }
@@ -3081,11 +3141,24 @@ module DiagnosticRegistry
     template = FIX_DESCRIPTIONS[code]
     Kernel.raise "Internal Compiler Error: Unknown fix description code :#{code}" unless template
 
-    begin
-      template % kwargs
-    rescue KeyError, ArgumentError => e
-      "#{template} [Internal Args Error: #{e.message} kwargs=#{kwargs.inspect}]"
+    return template % kwargs if named_template_args_complete?(template, kwargs)
+
+    missing = missing_named_template_key(template, kwargs)
+    detail = missing ? "key{#{missing}} not found kwargs=#{kwargs.inspect}" : "kwargs=#{kwargs.inspect}"
+    "#{template} [Internal Args Error: #{detail}]"
+  end
+
+  sig { params(template: String, kwargs: T.untyped).returns(T.nilable(Symbol)) }
+  def self.missing_named_template_key(template, kwargs)
+    keys = named_template_keys(template)
+    i = T.let(0, Integer)
+    while i < keys.length
+      key = keys.fetch(i)
+      return key unless kwargs.key?(key)
+
+      i += 1
     end
+    nil
   end
 
   sig { params(code: Symbol, kwargs: DiagnosticKwValue).returns(String) }

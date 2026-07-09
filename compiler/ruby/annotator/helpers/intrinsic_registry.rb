@@ -3,7 +3,7 @@
 # (+ typed IntrinsicEmit). The Hash literals stay the authoring DSL;
 # this builds the typed objects consumers will read. Inert until
 # consumers are migrated (EPIC #65, per-registry slices).
-require_relative "function_signature"
+require_relative "function_signature_returns"
 require_relative "intrinsic_arg_spec"
 require_relative "intrinsic_emit"
 
@@ -31,6 +31,8 @@ module IntrinsicRegistry
     %i[STD_LIB POOL_METHODS SET_METHODS MAP_METHODS INDEX_OPS BUILTIN_OPS].freeze,
     T::Array[Symbol]
   )
+  REGISTRY_VALUES = T.let({}, RegistryMap)
+  MAP_METHOD_ALIASES_VALUE = T.let({}, T::Hash[String, String])
 
   # Keys consumed at the FunctionSignature level (not IntrinsicEmit).
   FS_KEYS = %i[args arity validate return return_type can_fail needs_rt].freeze
@@ -62,21 +64,148 @@ module IntrinsicRegistry
       next if FS_KEYS.include?(k)
       next if v.nil?
       case k
-      when *EMIT_BOOL   then e.public_send("#{k}=", !!v)
+      when *EMIT_BOOL
+        assign_emit_bool(e, k, !!v)
       when *EMIT_STRSYM, *EMIT_PASS
-        e.public_send("#{k}=", v)
-        e.public_send("#{k}_present=", true) if %i[fsm_setup fsm_state_decls fsm_finish_block fsm_state_finalize].include?(k)
-      when *EMIT_STR    then e.public_send("#{k}=", v.to_s)
-      when :lifetime    then e.lifetime = normalize_lifetime(v).map(&:to_s)
-      when *EMIT_SYM    then e.public_send("#{k}=", v.to_sym)
-      when *EMIT_INTARR then e.public_send("#{k}=", Kernel.Array(v).map(&:to_i))
+        assign_emit_value(e, k, v)
+      when *EMIT_STR
+        assign_emit_string(e, k, v.to_s)
+      when :lifetime
+        e.lifetime = normalize_lifetime(v).map(&:to_s)
+      when *EMIT_SYM
+        assign_emit_symbol(e, k, v.to_sym)
+      when *EMIT_INTARR
+        assign_emit_int_array(e, k, coerce_int_array(v))
       when *EMIT_NESTED
-        e.public_send("#{k}=", nested_emit(v, registries))
+        assign_emit_nested(e, k, nested_emit(v, registries))
       else
         Kernel.raise "IntrinsicRegistry: unmapped registry key #{k.inspect}"
       end
     end
     e
+  end
+
+  sig { params(e: IntrinsicEmit, key: Symbol, value: T::Boolean).void }
+  def self.assign_emit_bool(e, key, value)
+    case key
+    when :bc then e.bc = value
+    when :is_method then e.is_method = value
+    when :suspends then e.suspends = value
+    when :narrows_collection then e.narrows_collection = value
+    when :narrows_receiver_collection then e.narrows_receiver_collection = value
+    when :mutates_receiver then e.mutates_receiver = value
+    when :allocates then e.allocates = value
+    when :takes_value then e.takes_value = value
+    when :container_borrow then e.container_borrow = value
+    else
+      unknown_emit_key!(key)
+    end
+  end
+
+  sig { params(e: IntrinsicEmit, key: Symbol, value: T.untyped).void }
+  def self.assign_emit_value(e, key, value)
+    case key
+    when :zig then e.zig = value
+    when :numeric_zig then e.numeric_zig = value
+    when :sharded_zig then e.sharded_zig = value
+    when :shard_direct_zig then e.shard_direct_zig = value
+    when :borrows then e.borrows = value
+    when :fallible_clauses then e.fallible_clauses = value
+    when :fsm_setup
+      e.fsm_setup = value
+      e.fsm_setup_present = true
+    when :fsm_state_decls
+      e.fsm_state_decls = value
+      e.fsm_state_decls_present = true
+    when :fsm_finish_block
+      e.fsm_finish_block = value
+      e.fsm_finish_block_present = true
+    when :fsm_state_finalize
+      e.fsm_state_finalize = value
+      e.fsm_state_finalize_present = true
+    when :fsm_finish_value then e.fsm_finish_value = value
+    when :label then e.label = value
+    else
+      unknown_emit_key!(key)
+    end
+  end
+
+  sig { params(e: IntrinsicEmit, key: Symbol, value: String).void }
+  def self.assign_emit_string(e, key, value)
+    case key
+    when :reject_error then e.reject_error = value
+    when :elem then e.elem = value
+    else
+      unknown_emit_key!(key)
+    end
+  end
+
+  sig { params(e: IntrinsicEmit, key: Symbol, value: Symbol).void }
+  def self.assign_emit_symbol(e, key, value)
+    case key
+    when :tag then e.tag = value
+    when :builtin then e.builtin = value
+    when :alloc then e.alloc = value
+    when :return_alloc then e.return_alloc = value
+    when :val_alloc then e.val_alloc = value
+    when :key_alloc then e.key_alloc = value
+    when :shard_alloc then e.shard_alloc = value
+    when :sharded_alloc then e.sharded_alloc = value
+    when :reject_when then e.reject_when = value
+    when :bc_op then e.bc_op = value
+    when :error_kind then e.error_kind = value
+    when :error_type then e.error_type = value
+    else
+      unknown_emit_key!(key)
+    end
+  end
+
+  sig { params(e: IntrinsicEmit, key: Symbol, value: T::Array[Integer]).void }
+  def self.assign_emit_int_array(e, key, value)
+    case key
+    when :takes_args then e.takes_args = value
+    else
+      unknown_emit_key!(key)
+    end
+  end
+
+  sig { params(e: IntrinsicEmit, key: Symbol, value: T.nilable(IntrinsicEmit)).void }
+  def self.assign_emit_nested(e, key, value)
+    case key
+    when :eql then e.eql = value
+    when :strcmp then e.strcmp = value
+    when :cleanup then e.cleanup = value
+    when :assert then e.assert = value
+    when :array then e.array = value
+    when :list then e.list = value
+    when :pool then e.pool = value
+    when :set then e.set = value
+    when :get then e.get = value
+    when :string_raw then e.string_raw = value
+    when :string_symbol then e.string_symbol = value
+    when :string_map then e.string_map = value
+    when :numeric_map then e.numeric_map = value
+    when :set_collection then e.set_collection = value
+    else
+      unknown_emit_key!(key)
+    end
+  end
+
+  sig { params(value: T.untyped).returns(T::Array[Integer]) }
+  def self.coerce_int_array(value)
+    raw_values = value.is_a?(Array) ? value : [value]
+    out = T.let([], T::Array[Integer])
+    i = T.let(0, Integer)
+    while i < raw_values.length
+      out << raw_values.fetch(i).to_i
+      i += 1
+    end
+    out
+  end
+
+  sig { params(key: Symbol).returns(T.noreturn) }
+  def self.unknown_emit_key!(key)
+    Kernel.raise "IntrinsicRegistry: unmapped registry key #{key.inspect}"
   end
 
   # A nested sub-descriptor is either another emit Hash or a
@@ -140,7 +269,8 @@ module IntrinsicRegistry
       Kernel.raise "IntrinsicRegistry: Proc return descriptor is not allowed; " \
                    "use a declarative directive (r_* variant or infer_* host method)"
     end
-    if v.is_a?(Symbol) && (kind = RETURN_VARIANTS[v])
+    kind = v.is_a?(Symbol) ? RETURN_VARIANTS[v] : nil
+    if kind
       return FunctionReturn.variant(kind)
     end
 
@@ -188,17 +318,22 @@ module IntrinsicRegistry
 
     takes_args = Kernel.Array(h[:takes_args])
     mutates_receiver = h[:mutates_receiver] == true
-    arg_specs.each_with_index.map do |arg_def, i|
+    params = T.let([], T::Array[AST::Param])
+    i = T.let(0, Integer)
+    while i < arg_specs.length
+      arg_def = arg_specs.fetch(i)
       takes_index = (h[:is_method] || mutates_receiver) ? i - 1 : i
       takes_by_index = takes_index >= 0 && takes_args.include?(takes_index)
-      AST::Param.new(
+      params << AST::Param.new(
         name: arg_def.name || "arg#{i}",
         type: arg_def.type,
         required: true,
         mutable: arg_def.mutable || (i == 0 && mutates_receiver),
         takes: arg_def.takes || takes_by_index
       )
+      i += 1
     end
+    params
   end
 
   # Startup conversion (memoized, built once per registry on first
@@ -208,34 +343,62 @@ module IntrinsicRegistry
   # STD_LIB["charAt"]). Consumers read THIS, never the raw Hash.
   sig { params(reg: RawRegistry).returns(SigsTable) }
   def self.sigs(reg)
-    SIGS_CACHE[reg.object_id] ||=
-      reg.each_with_object({}) do |(name, entry), out|
-        out[name] =
-          if entry.is_a?(Array)
-            entry.map { |e| convert_entry(name, e, registries) }
-          elsif entry.is_a?(Hash)
-            convert_entry(name, entry, registries)
-          end
-      end
+    cache_key = reg.object_id
+    cached = SIGS_CACHE[cache_key]
+    return cached if cached
+
+    registry_map = registries
+    out = T.let({}, SigsTable)
+    reg.each do |name, entry|
+      out[name] =
+        if entry.is_a?(Array)
+          entry.map { |e| convert_entry(name, e, registry_map) }
+        elsif entry.is_a?(Hash)
+          convert_entry(name, entry, registry_map)
+        end
+    end
+    SIGS_CACHE[cache_key] = out
+    out
   end
 
   # Registry map built from loaded std_lib constants so there is no
   # load-order coupling. Used by `fs` so call sites need not thread the map.
   sig { returns(RegistryMap) }
   def self.registries
-    REGISTRY_CONSTANTS.each_with_object({}) do |constant_name, out|
-      registry =
-        case constant_name
-        when :STD_LIB then defined?(STD_LIB) ? STD_LIB : nil
-        when :POOL_METHODS then defined?(POOL_METHODS) ? POOL_METHODS : nil
-        when :SET_METHODS then defined?(SET_METHODS) ? SET_METHODS : nil
-        when :MAP_METHODS then defined?(MAP_METHODS) ? MAP_METHODS : nil
-        when :INDEX_OPS then defined?(INDEX_OPS) ? INDEX_OPS : nil
-        when :BUILTIN_OPS then defined?(BUILTIN_OPS) ? BUILTIN_OPS : nil
-        end
+    out = T.let({}, RegistryMap)
+    values = registry_values
+    i = T.let(0, Integer)
+    while i < REGISTRY_CONSTANTS.length
+      constant_name = REGISTRY_CONSTANTS.fetch(i)
+      registry = values[constant_name]
       out[constant_name] = registry if registry
+      i += 1
     end
+    out
   end
+
+  sig { returns(RegistryMap) }
+  def self.registry_values
+    populate_registry_values if REGISTRY_VALUES.empty?
+
+    REGISTRY_VALUES
+  end
+  private_class_method :registry_values
+
+  sig { returns(NilClass) }
+  def self.populate_registry_values
+    REGISTRY_VALUES[:STD_LIB] = STD_LIB
+    REGISTRY_VALUES[:POOL_METHODS] = POOL_METHODS
+    REGISTRY_VALUES[:SET_METHODS] = SET_METHODS
+    REGISTRY_VALUES[:MAP_METHODS] = MAP_METHODS
+    REGISTRY_VALUES[:INDEX_OPS] = INDEX_OPS
+    REGISTRY_VALUES[:BUILTIN_OPS] = BUILTIN_OPS
+    MAP_METHOD_ALIASES.each do |key, value|
+      MAP_METHOD_ALIASES_VALUE[key] = value
+    end
+    nil
+  end
+  private_class_method :populate_registry_values
 
   # Idempotent normalizer for the flag-day migration: returns a
   # FunctionSignature for a registry/ad-hoc entry Hash, passes a
@@ -255,12 +418,20 @@ module IntrinsicRegistry
     return false unless arity == 1
 
     method_name = name.to_s
-    [STD_LIB, POOL_METHODS, SET_METHODS].any? do |registry|
+    registries = [STD_LIB, POOL_METHODS, SET_METHODS]
+    i = T.let(0, Integer)
+    while i < registries.length
+      registry = registries.fetch(i)
       fs = FunctionSignature.unwrap(IntrinsicRegistry.lookup(registry, method_name))
-      next false unless fs&.intrinsic_contract&.behavior&.is_method
+      unless fs&.intrinsic_contract&.behavior&.is_method
+        i += 1
+        next
+      end
 
-      T.must(fs).intrinsic_collection_narrowing?
+      return true if T.must(fs).intrinsic_collection_narrowing?
+      i += 1
     end
+    false
   end
 
   sig { params(name: T.any(String, Symbol), arity: Integer).returns(T::Boolean) }
@@ -276,13 +447,21 @@ module IntrinsicRegistry
   sig { params(name: T.any(String, Symbol), arity: Integer).returns(T::Boolean) }
   def self.collection_value_store_method?(name, arity)
     method_name = name.to_s
-    [STD_LIB, POOL_METHODS, SET_METHODS, MAP_METHODS].any? do |registry|
+    registries = [STD_LIB, POOL_METHODS, SET_METHODS, MAP_METHODS]
+    i = T.let(0, Integer)
+    while i < registries.length
+      registry = registries.fetch(i)
       fs = FunctionSignature.unwrap(IntrinsicRegistry.lookup(registry, method_name))
-      next false unless fs
+      unless fs
+        i += 1
+        next
+      end
       method_arity = fs.arity || [fs.params.length - 1, 0].max
-      !!(method_arity == arity && fs.intrinsic_contract.behavior.is_method &&
-        fs.mutates_receiver? && fs.takes_ownership?)
+      return true if method_arity == arity && fs.intrinsic_contract.behavior.is_method &&
+        fs.mutates_receiver? && fs.takes_ownership?
+      i += 1
     end
+    false
   end
 
   sig { params(reg: RawRegistry, name: RegistryKey).returns(T::Array[FunctionSignature]) }
@@ -303,14 +482,22 @@ module IntrinsicRegistry
     result = sigs(reg)[name]
     return result if result
 
-    if defined?(MAP_METHODS) && defined?(MAP_METHOD_ALIASES) &&
-        reg.equal?(MAP_METHODS)
-      alias_name = MAP_METHOD_ALIASES[name.to_s]
+    if map_methods_registry?(reg)
+      alias_name = MAP_METHOD_ALIASES_VALUE[name.to_s]
       return sigs(reg)[alias_name] if alias_name
     end
 
     nil
   end
+  sig { params(reg: RawRegistry).returns(T::Boolean) }
+  def self.map_methods_registry?(reg)
+    map_methods = registry_values[:MAP_METHODS]
+    return false unless map_methods
+
+    reg.equal?(map_methods)
+  end
+  private_class_method :map_methods_registry?
+
   private_class_method :build_emit
   private_class_method :convert_entry
   private_class_method :nested_emit

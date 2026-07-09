@@ -6,10 +6,11 @@
 # declared/imported contract fields separately from mutable analysis/codegen
 # facts.
 require "sorbet-runtime"
+require_relative "../../ast/param"
+require_relative "../../ast/ast" # ruby-to-clear: no-require
 require_relative "intrinsic_arg_spec"
 require_relative "intrinsic_emit"
 require_relative "intrinsic_contract"
-require_relative "function_return"
 
 class FunctionSignature
   extend T::Sig
@@ -103,7 +104,7 @@ class FunctionSignature
     prop :intrinsic_varargs, T::Boolean, default: false
     prop :arity, T.nilable(Integer), default: nil
     prop :emit, T.nilable(IntrinsicEmit), default: nil
-    prop :return_def, FunctionReturn, factory: -> { FunctionReturn.fixed(Type.new(:Void)) }
+    prop :return_def, T.nilable(BasicObject), default: nil
 
     sig { returns(AnalysisFacts) }
     def copy
@@ -216,25 +217,6 @@ class FunctionSignature
     "(#{intrinsic_arg_specs.map(&:display_type).join(', ')})"
   end
 
-  sig { returns(FunctionSignature) }
-  def intrinsic_call_validation_signature
-    validation_params = intrinsic_arg_specs.each_with_index.map do |arg_spec, index|
-      AST::Param.new(
-        name: arg_spec.name || "arg#{index}",
-        type: arg_spec.type,
-        required: true,
-        mutable: arg_spec.mutable,
-        takes: arg_spec.takes
-      )
-    end
-    FunctionSignature.new(
-      params: validation_params,
-      return_type: return_type,
-      intrinsic: true,
-      return_def: return_def,
-    )
-  end
-
   sig { returns(T.nilable(Integer)) }
   def arity = @facts.arity
 
@@ -246,9 +228,6 @@ class FunctionSignature
     emit = @facts.emit
     emit ? IntrinsicContract.from_emit(emit, @contract.params) : IntrinsicContract.empty
   end
-  sig { returns(FunctionReturn) }
-  def return_def = @facts.return_def
-
   sig { returns(RequiresMap) }
   def requires = @facts.requires
 
@@ -262,10 +241,10 @@ class FunctionSignature
   # for ordinary user functions). `arg_validator` the custom arg
   # type-checker; `intrinsic_arg_specs` the typed args shape; `emit` the
   # typed codegen/dispatch metadata (IntrinsicEmit).
-  # Strongly-typed return (FunctionReturn). Non-nil; defaults to
-  # Fixed(Void). The single return facility -- resolve(receiver,
-  # args, host) always yields a concrete Type. Replaced the former
-  # untyped return_spec (Symbol|Hash|Proc|nil) / return_resolver Proc.
+  # Strongly-typed return (FunctionReturn) lives in
+  # function_signature_returns.rb. Core FunctionSignature intentionally keeps
+  # the slot raw so Type can import callable signatures without pulling
+  # FunctionReturn back through the type/signature cycle.
 
   # P2: REQUIRES clause as { param_name_string => Set[Symbol] } or nil.
   # Mirrors FunctionDef#requires; needed at signature level so call-site
@@ -300,7 +279,7 @@ class FunctionSignature
       )
     end
 
-    sync_from_function_def!(sig, fn)
+    sync_signature_from_function_def!(sig, fn)
   end
 
   sig do
@@ -312,7 +291,7 @@ class FunctionSignature
       return_alloc: T.nilable(Symbol),
     ).returns(FunctionSignature)
   end
-  def self.intrinsic_contract(return_type: Type.new(:Void), allocates: false, borrows: nil,
+  def self.intrinsic_signature(return_type: Type.new(:Void), allocates: false, borrows: nil,
                               can_fail: nil, return_alloc: nil)
     FunctionSignature.new(
       params: [],
@@ -329,16 +308,16 @@ class FunctionSignature
 
   sig { returns(FunctionSignature) }
   def self.allocating_intrinsic
-    intrinsic_contract(allocates: true)
+    intrinsic_signature(allocates: true)
   end
 
   sig { returns(FunctionSignature) }
   def self.borrowing_intrinsic
-    intrinsic_contract(borrows: :all)
+    intrinsic_signature(borrows: :all)
   end
 
   sig { params(sig: FunctionSignature, fn: T.any(AST::Node, Object, T.untyped)).returns(FunctionSignature) }
-  def self.sync_from_function_def!(sig, fn)
+  def self.sync_signature_from_function_def!(sig, fn)
     T.cast(sig.send(:sync_from_function_def!, fn), FunctionSignature)
   end
 
@@ -371,7 +350,7 @@ class FunctionSignature
       arg_spec: T.untyped,
       arity: T.nilable(Integer),
       emit: T.nilable(IntrinsicEmit),
-      return_def: T.nilable(FunctionReturn)
+      return_def: T.nilable(BasicObject)
     ).void
   end
   def initialize(params:, return_type: nil, return_lifetime: nil, visibility: nil,
@@ -418,7 +397,7 @@ class FunctionSignature
         intrinsic_varargs: arg_spec == :Varargs,
         arity: arity,
         emit: emit,
-        return_def: return_def || FunctionReturn.fixed(Type.new(:Void))
+        return_def: return_def
       ),
       AnalysisFacts
     )
@@ -456,12 +435,6 @@ class FunctionSignature
     @facts.alloc_fault = true
     self
   end
-
-  # True iff the return is a static Fixed Type (not receiver-parametric
-  # or host-inferred). Callers that only honor a statically-declared
-  # owned return (e.g. the MIR HPT_LEAK check) gate on this.
-  sig { returns(T::Boolean) }
-  def fixed_return? = @facts.return_def.fixed?
 
   sig { returns(T::Boolean) }
   def emits_allocating?
@@ -612,28 +585,6 @@ class FunctionSignature
     end
   end
 
-  sig { params(module_alias: T.nilable(String)).returns(FunctionSignature) }
-  def import_copy(module_alias:)
-    copy = dup
-    copy.replace_import_mutable_state!(module_alias: module_alias)
-  end
-
-  sig { params(module_alias: T.nilable(String)).returns(FunctionSignature) }
-  def replace_import_mutable_state!(module_alias:)
-    @contract.params = self.class.copy_params_for_import(@contract.params)
-    @contract.type_params = @contract.type_params.dup
-    @contract.module_alias = module_alias
-    @contract.extern_effects = @contract.extern_effects.dup
-    @contract.fn_type_params = @contract.fn_type_params.dup
-    @contract.owner_type_params = @contract.owner_type_params.dup
-    @facts.effects = @facts.effects&.dup
-    @facts.requires = self.class.copy_requires_for_import(@facts.requires)
-    @facts.heap_carry_return_vars = @facts.heap_carry_return_vars&.dup
-    @facts.return_def = @facts.return_def.copy
-    self
-  end
-  protected :replace_import_mutable_state!
-
   sig { params(params: T::Array[AST::Param]).returns(T::Array[AST::Param]) }
   def self.copy_params_for_import(params)
     params.map do |param|
@@ -702,12 +653,21 @@ class FunctionSignature
   def normalize_lifetime(val)
     return [] if val.nil?
     raw = val.is_a?(Array) ? val : [val]
-    raw.map do |item|
+    out = T.let([], T::Array[LifetimeSource])
+    i = T.let(0, Integer)
+    while i < raw.length
+      item = raw.fetch(i)
       if item.respond_to?(:name)
-        item.public_send(:name).to_s
+        out << item.public_send(:name).to_s
+      elsif item.is_a?(Symbol)
+        out << item
       else
-        item.is_a?(Symbol) ? item : item.to_s
+        out << item.to_s
       end
+      i += 1
     end
+    out
   end
 end
+
+require_relative "function_signature_returns" # ruby-to-clear: no-require

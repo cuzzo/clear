@@ -481,14 +481,16 @@ RSpec.describe IntrinsicRegistry do
     expect(registries[:BUILTIN_OPS]).to equal(BUILTIN_OPS)
   end
 
-  it "tolerates optional registry constants being unloaded" do
+  it "uses closed registry snapshots instead of runtime constant reflection" do
+    snapshot = IntrinsicRegistry.send(:registries)
     map_methods = MAP_METHODS
 
     hide_const("BUILTIN_OPS")
-    expect(IntrinsicRegistry.send(:registries)).not_to have_key(:BUILTIN_OPS)
+    expect(snapshot).to have_key(:BUILTIN_OPS)
+    expect(IntrinsicRegistry.send(:registries)).to have_key(:BUILTIN_OPS)
 
     hide_const("MAP_METHOD_ALIASES")
-    expect(IntrinsicRegistry.lookup(map_methods, "insert")).to be_nil
+    expect(IntrinsicRegistry.lookup(map_methods, "insert")).not_to be_nil
 
     hide_const("MAP_METHODS")
     expect(IntrinsicRegistry.lookup({}, "insert")).to be_nil

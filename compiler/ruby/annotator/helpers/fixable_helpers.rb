@@ -1122,9 +1122,10 @@ module FixableHelper
         line_text = src.lines[dline - 1] || ''
         # Search from the decl-name column so a prior decl's `: TypeName`
         # on the same line is skipped.
-        ann_match = line_text.match(/:\s*([A-Za-z_][\w]*)/, token.column - 1)
+        search_offset = token.column - 1
+        ann_match = line_text[search_offset..]&.match(/:\s*([A-Za-z_][\w]*)/)
         if ann_match && !line_text.include?('~')
-          type_col = ann_match.begin(1) + 1  # 1-based
+          type_col = search_offset + ann_match.begin(1) + 1  # 1-based
           fix = Fix.new(
             description: fix_description(:PREFIX_TENSE_TYPE, name: name),
             confidence: :interactive,
@@ -1487,9 +1488,10 @@ module FixableHelper
     # `@atomic:shared` parse to the same Type. Match either form.
     # Search from the decl-name column so a prior decl's @shared:atomic
     # sigil on the same line is skipped.
-    match = src_line.match(/@(?:shared:atomic|atomic:shared)/, reg.token.column - 1)
+    search_offset = reg.token.column - 1
+    match = src_line[search_offset..]&.match(/@(?:shared:atomic|atomic:shared)/)
     return nil unless match
-    start_col = match.begin(0) + 1   # 1-based column
+    start_col = search_offset + match.begin(0) + 1   # 1-based column
 
     Fix.new(
       description: fix_description(:MIGRATE_ATOMIC_ESCAPE, name: source_name),
@@ -1785,13 +1787,13 @@ module FixableHelper
   sig { params(slot: AutoConstraintCollector::Slot).returns(T.nilable(AutoSlotId)) }
   def slot_id_for(slot)
     T.bind(self, SemanticAnnotator) rescue nil
-    case slot.kind
-    when :param
-      return nil unless slot.fn_name && slot.index
-      AutoSlotId.param(T.must(slot.fn_name), T.must(slot.index))
-    when :return
-      return nil unless slot.fn_name
-      AutoSlotId.return(T.must(slot.fn_name))
+    kind = slot.kind
+    return nil if kind == :param && !(slot.fn_name && slot.index)
+    return nil if kind == :return && !slot.fn_name
+
+    case kind
+    when :param  then AutoSlotId.param(T.must(slot.fn_name), T.must(slot.index))
+    when :return then AutoSlotId.return(T.must(slot.fn_name))
     when :local
       AutoSlotId.local(T.cast(slot.decl_node, AutoConstraintCollector::DeclarationNode))
     end
@@ -1820,24 +1822,16 @@ module FixableHelper
     # Shape-tagged slots get a more specific label so the diagnostic tells the
     # user which sub-type is being inferred.
     if slot.respond_to?(:shape) && slot.shape
-      name = T.cast(slot.decl_node, AutoConstraintCollector::DeclarationNode).name
-      case slot.shape
-      when :list_element then return "element type of list `#{name}`"
-      when :map_key      then return "key type of map `#{name}`"
-      when :map_value    then return "value type of map `#{name}`"
-      end
+      return auto_shape_slot_label(slot)
     end
 
     case slot.kind
     when :param
-      fn = T.cast(slot.decl_node, AST::FunctionDef)
-      param = fn.params[T.must(slot.index)]
-      "parameter '#{param.name}' of `#{slot.fn_name}`"
+      auto_param_slot_label(slot)
     when :return
       "return type of `#{slot.fn_name}`"
     when :local
-      name = T.cast(slot.decl_node, AutoConstraintCollector::DeclarationNode).name
-      "local '#{name}'"
+      auto_local_slot_label(slot)
     else
       # AutoConstraintCollector only creates :param / :return /
       # :local slots. A different kind reaching this path means a
@@ -1846,6 +1840,32 @@ module FixableHelper
       # appearing in user-facing diagnostics.
       raise ArgumentError, "auto_slot_label: unrecognized slot kind #{slot.kind.inspect}"
     end
+  end
+
+  sig { params(slot: AutoConstraintCollector::Slot).returns(T.nilable(String)) }
+  def auto_shape_slot_label(slot)
+    T.bind(self, SemanticAnnotator) rescue nil
+    name = T.cast(slot.decl_node, AutoConstraintCollector::DeclarationNode).name
+    case slot.shape
+    when :list_element then "element type of list `#{name}`"
+    when :map_key      then "key type of map `#{name}`"
+    when :map_value    then "value type of map `#{name}`"
+    end
+  end
+
+  sig { params(slot: AutoConstraintCollector::Slot).returns(String) }
+  def auto_param_slot_label(slot)
+    T.bind(self, SemanticAnnotator) rescue nil
+    fn = T.cast(slot.decl_node, AST::FunctionDef)
+    param = fn.params[T.must(slot.index)]
+    "parameter '#{param.name}' of `#{slot.fn_name}`"
+  end
+
+  sig { params(slot: AutoConstraintCollector::Slot).returns(String) }
+  def auto_local_slot_label(slot)
+    T.bind(self, SemanticAnnotator) rescue nil
+    name = T.cast(slot.decl_node, AutoConstraintCollector::DeclarationNode).name
+    "local '#{name}'"
   end
 
   sig { params(slot: AutoConstraintCollector::Slot).returns(T.nilable(Lexer::Token)) }
@@ -1889,7 +1909,13 @@ module FixableHelper
       else
         "Result"
       end
-      variants = observed_strs.map.with_index { |t, i| "Variant#{i}: #{t}" }.join(', ')
+      variant_parts = T.let([], T::Array[String])
+      i = T.let(0, Integer)
+      while i < observed_strs.length
+        variant_parts << "Variant#{i}: #{observed_strs.fetch(i)}"
+        i += 1
+      end
+      variants = variant_parts.join(', ')
       msg << "  Option 3 (last resort): if you genuinely need to accept\n"
       msg << "    multiple types, define a union explicitly:\n"
       msg << "      UNION #{union_name} { #{variants} }\n"
