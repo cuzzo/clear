@@ -78,6 +78,7 @@ pub struct UiDirectory {
     pub tracked_lines: i64,
     pub covered_lines: i64,
     pub mutant_killed_covered_lines: i64,
+    pub multi_type_covered_lines: i64,
     pub line_coverage: f64,
     pub mutant_coverage: f64,
 }
@@ -2319,6 +2320,7 @@ pub fn directory_index(files: &[UiFile], directory: &str) -> Vec<UiDirectory> {
         entry.tracked_lines += file.tracked_lines;
         entry.covered_lines += file.covered_lines;
         entry.mutant_killed_covered_lines += file.mutant_killed_covered_lines;
+        entry.multi_type_covered_lines += file.multi_type_covered_lines;
         entry.line_coverage_sum += file.line_coverage;
         entry.mutant_coverage_sum += file.mutant_coverage;
         if file.tracked_lines == 0 {
@@ -2345,6 +2347,7 @@ pub fn directory_index(files: &[UiFile], directory: &str) -> Vec<UiDirectory> {
                 tracked_lines: builder.tracked_lines,
                 covered_lines: builder.covered_lines,
                 mutant_killed_covered_lines: builder.mutant_killed_covered_lines,
+                multi_type_covered_lines: builder.multi_type_covered_lines,
                 line_coverage,
                 mutant_coverage: builder.mutant_coverage_sum / files,
             }
@@ -2364,6 +2367,7 @@ struct DirectoryBuilder {
     tracked_lines: i64,
     covered_lines: i64,
     mutant_killed_covered_lines: i64,
+    multi_type_covered_lines: i64,
     fallback_files: i64,
     line_coverage_sum: f64,
     mutant_coverage_sum: f64,
@@ -5830,8 +5834,8 @@ fn render_directory_coverage_row(directory: &UiDirectory, parent: &str, filter: 
         directory.tracked_lines,
         directory.covered_lines,
         directory.dark_arm_findings,
-        0,
-        0,
+        directory.multi_type_covered_lines,
+        directory.mutant_killed_covered_lines,
         directory.line_coverage,
     )
 }
@@ -6170,7 +6174,7 @@ fn render_code_line(
     if annotation.map(|a| a.mutant_tested).unwrap_or(false) {
         classes.push("mutant");
     }
-    if annotation.map(annotation_has_dark_arms).unwrap_or(false) {
+    if annotation.map(|a| a.covered && annotation_has_dark_arms(a)).unwrap_or(false) {
         classes.push("dark-arm");
     }
     if annotation.map(|a| a.semantic_churn > 0.0).unwrap_or(false) {
@@ -6988,7 +6992,7 @@ fn coverage_background(annotation: &UiLineAnnotation, gutter: bool) -> String {
         } else {
             "rgba(34, 197, 94, 0.08)".to_string()
         }
-    } else if annotation.mutant_tested || annotation.mutant_killed_tests > 0 {
+    } else if annotation.covered && (annotation.mutant_tested || annotation.mutant_killed_tests > 0) {
         if gutter {
             "rgba(22, 101, 52, 0.34)".to_string()
         } else {
@@ -7160,19 +7164,23 @@ fn inline_overlay_ranges(
     source: &str,
     annotation: &UiLineAnnotation,
 ) -> Vec<InlineOverlayRange> {
-    let mut ranges = annotation
-        .dark_arm_spans
-        .iter()
-        .filter_map(|arm| {
-            let span = arm.span?;
-            dark_arm_line_range(line_no, source, span).map(|(start, end)| InlineOverlayRange {
-                start,
-                end,
-                classes: BTreeSet::from(["dark-arm-span".to_string()]),
-                labels: vec![arm.label.clone()],
+    let mut ranges = if annotation.covered {
+        annotation
+            .dark_arm_spans
+            .iter()
+            .filter_map(|arm| {
+                let span = arm.span?;
+                dark_arm_line_range(line_no, source, span).map(|(start, end)| InlineOverlayRange {
+                    start,
+                    end,
+                    classes: BTreeSet::from(["dark-arm-span".to_string()]),
+                    labels: vec![arm.label.clone()],
+                })
             })
-        })
-        .collect::<Vec<_>>();
+            .collect::<Vec<_>>()
+    } else {
+        Vec::new()
+    };
     ranges.extend(annotation.effect_spans.iter().filter_map(|span| {
         let start = clamp_to_char_boundary(source, span.start.min(source.len()));
         let end = clamp_to_char_boundary(source, span.end.min(source.len()));
@@ -9817,6 +9825,32 @@ flags:
 
         let gutter_bg = coverage_background(&annotation, true);
         assert_eq!(gutter_bg, "transparent");
+    }
+
+    #[test]
+    fn coverage_background_unpainted_when_uncovered_even_with_mutant_tested() {
+        let mut annotation = empty_annotation(1);
+        annotation.covered = false;
+        annotation.mutant_tested = true;
+
+        let bg = coverage_background(&annotation, false);
+        assert_eq!(bg, "transparent");
+
+        let gutter_bg = coverage_background(&annotation, true);
+        assert_eq!(gutter_bg, "transparent");
+    }
+
+    #[test]
+    fn highlight_source_line_with_dark_arms_skips_uncovered_lines() {
+        let mut annotation = empty_annotation(1);
+        annotation.covered = false;
+        annotation.dark_arm_spans = vec![UiDarkArm {
+            label: "dark arm: else".to_string(),
+            span: Some([0, 0, 0, 5]),
+        }];
+
+        let html = highlight_source_line_with_dark_arms("src/demo.rb", 1, "return x;", Some(&annotation));
+        assert!(!html.contains("dark-arm-span"));
     }
 
     fn ui_file_for_sort(path: &str, tracked_lines: i64, covered_lines: i64, partial: i64) -> UiFile {
