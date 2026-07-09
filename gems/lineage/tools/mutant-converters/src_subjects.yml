@@ -26,6 +26,11 @@
   spec: spec/lexer_spec.rb
   baseline: 76.22
   hard_gate: true
+- subject: ClearParser
+  require: ast/lexer -r ast/parser
+  spec: spec/ast_coverage_burndown_spec.rb
+  baseline: 50.0
+  hard_gate: false
 - subject: LSP::Diagnostics
   require: lsp/analyzer -r lsp/document_store -r lsp/diagnostics
   spec: spec/lsp/diagnostics_spec.rb

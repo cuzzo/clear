@@ -6982,13 +6982,11 @@ fn row_style(annotation: &UiLineAnnotation) -> String {
 }
 
 fn coverage_background(annotation: &UiLineAnnotation, gutter: bool) -> String {
-    if annotation_has_dark_arms(annotation) {
+    if annotation.covered && annotation_has_dark_arms(annotation) {
         if gutter {
             "rgba(31, 41, 55, 0.32)".to_string()
-        } else if annotation.covered {
-            "rgba(34, 197, 94, 0.08)".to_string()
         } else {
-            "transparent".to_string()
+            "rgba(34, 197, 94, 0.08)".to_string()
         }
     } else if annotation.mutant_tested || annotation.mutant_killed_tests > 0 {
         if gutter {
@@ -9806,6 +9804,19 @@ flags:
 
         let gutter_bg = coverage_background(&annotation, true);
         assert_eq!(gutter_bg, "rgba(31, 41, 55, 0.32)");
+    }
+
+    #[test]
+    fn coverage_background_unpainted_when_uncovered_even_with_dark_arms() {
+        let mut annotation = empty_annotation(1);
+        annotation.covered = false;
+        annotation.dark_arms = vec!["dark arm: else".to_string()];
+
+        let bg = coverage_background(&annotation, false);
+        assert_eq!(bg, "transparent");
+
+        let gutter_bg = coverage_background(&annotation, true);
+        assert_eq!(gutter_bg, "transparent");
     }
 
     fn ui_file_for_sort(path: &str, tracked_lines: i64, covered_lines: i64, partial: i64) -> UiFile {
