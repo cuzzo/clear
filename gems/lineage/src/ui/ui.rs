@@ -75,6 +75,7 @@ pub struct UiDirectory {
     pub covered_hazards: i64,
     pub sarif_findings: i64,
     pub dark_arm_findings: i64,
+    pub partial_lines: i64,
     pub distinct_tests: i64,
     pub mutant_killed_tests: i64,
     pub tracked_lines: i64,
@@ -2340,6 +2341,7 @@ pub fn directory_index(files: &[UiFile], directory: &str) -> Vec<UiDirectory> {
         entry.covered_hazards += file.covered_hazards;
         entry.sarif_findings += file.sarif_findings;
         entry.dark_arm_findings += file.dark_arm_findings;
+        entry.partial_lines += partial_line_count(file.covered_lines, file.dark_arm_findings);
         entry.distinct_tests += file.distinct_tests;
         entry.mutant_killed_tests += file.mutant_killed_tests;
         entry.tracked_lines += file.tracked_lines;
@@ -2369,6 +2371,7 @@ pub fn directory_index(files: &[UiFile], directory: &str) -> Vec<UiDirectory> {
                 covered_hazards: builder.covered_hazards,
                 sarif_findings: builder.sarif_findings,
                 dark_arm_findings: builder.dark_arm_findings,
+                partial_lines: builder.partial_lines,
                 distinct_tests: builder.distinct_tests,
                 mutant_killed_tests: builder.mutant_killed_tests,
                 tracked_lines: builder.tracked_lines,
@@ -2391,6 +2394,7 @@ struct DirectoryBuilder {
     covered_hazards: i64,
     sarif_findings: i64,
     dark_arm_findings: i64,
+    partial_lines: i64,
     distinct_tests: i64,
     mutant_killed_tests: i64,
     tracked_lines: i64,
@@ -5924,7 +5928,7 @@ fn render_directory_coverage_row(directory: &UiDirectory, parent: &str, filter: 
         &detail,
         directory.tracked_lines,
         directory.covered_lines,
-        directory.dark_arm_findings,
+        directory.partial_lines,
         directory.multi_type_covered_lines,
         directory.mutant_killed_covered_lines,
         directory.line_coverage,

@@ -439,7 +439,9 @@ fn parse_cobertura_records(input: &str) -> Result<Vec<CoverageRecord>> {
         let path = if !sources.is_empty() {
             let mut resolved = String::new();
             for source in &sources {
-                let combined = if source.ends_with('/') || raw_filename.starts_with('/') {
+                let combined = if raw_filename.starts_with('/') {
+                    raw_filename.to_string()
+                } else if source.ends_with('/') {
                     format!("{}{}", source, raw_filename)
                 } else {
                     format!("{}/{}", source, raw_filename)

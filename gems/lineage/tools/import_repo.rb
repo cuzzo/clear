@@ -249,7 +249,25 @@ def resolve_coverage_path(raw_path, repo, suffix_index)
   return candidates.min_by(&:length) if candidates.any?
 
   basename_candidates = suffix_index[File.basename(normalized)]
-  basename_candidates.min_by(&:length) || normalized
+  if basename_candidates.any?
+    raw_parts = normalized.split("/")
+    best_cand = basename_candidates.max_by do |cand|
+      cand_parts = cand.split("/")
+      common_len = 0
+      min_len = [raw_parts.length, cand_parts.length].min
+      (1..min_len).each do |i|
+        if raw_parts[-i] == cand_parts[-i]
+          common_len += 1
+        else
+          break
+        end
+      end
+      [common_len, -cand.length]
+    end
+    return best_cand
+  end
+
+  normalized
 end
 
 def write_generic_coverage(path, out_dir, repo, suffix_index)
