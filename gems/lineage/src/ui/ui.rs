@@ -416,6 +416,7 @@ struct FunctionFold {
     start_line: u32,
     end_line: u32,
     is_private: bool,
+    closing_token: String,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -425,6 +426,7 @@ struct FunctionFoldLine {
     end_line: u32,
     is_start: bool,
     is_private: bool,
+    closing_token: String,
 }
 
 #[derive(Debug, Clone, Serialize, PartialEq)]
@@ -6168,11 +6170,28 @@ fn render_source_view(
                     symbol.name.starts_with('_')
                 }
             };
+            let closing_token = {
+                if symbol.end_line as usize <= payload.lines.len() {
+                    let last_line = payload.lines.get(symbol.end_line as usize - 1).map(|s| s.trim()).unwrap_or("");
+                    if last_line == "}" || last_line == "end" {
+                        last_line.to_string()
+                    } else if last_line.ends_with('}') {
+                        "}".to_string()
+                    } else if last_line.ends_with("end") {
+                        "end".to_string()
+                    } else {
+                        String::new()
+                    }
+                } else {
+                    String::new()
+                }
+            };
             FunctionFold {
                 id: idx + 1,
                 start_line: symbol.start_line,
                 end_line: symbol.end_line,
                 is_private,
+                closing_token,
             }
         })
         .collect::<Vec<_>>();
@@ -6188,6 +6207,7 @@ fn render_source_view(
                         end_line: fold.end_line,
                         is_start: line == fold.start_line,
                         is_private: fold.is_private,
+                        closing_token: fold.closing_token.clone(),
                     },
                 );
             }
@@ -6516,7 +6536,7 @@ fn render_code_line(
             out.push_str(&highlight_source_line_with_dark_arms(
                 path,
                 line_no,
-                &collapsed_function_source(source),
+                &collapsed_function_source(source, &fold.closing_token),
                 annotation,
             ));
             out.push_str("</span>");
@@ -6714,8 +6734,13 @@ fn collapsed_comment_source(source: &str) -> String {
     format!("{} ...", source.trim_end())
 }
 
-fn collapsed_function_source(source: &str) -> String {
-    format!("{} ...", source.trim_end())
+fn collapsed_function_source(source: &str, closing_token: &str) -> String {
+    let trimmed = source.trim_end();
+    if closing_token.is_empty() {
+        format!("{} ...", trimmed)
+    } else {
+        format!("{} ... {}", trimmed, closing_token)
+    }
 }
 
 fn render_line_details_control(meta_id: &str) -> String {
