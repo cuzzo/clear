@@ -7,6 +7,7 @@ const fsm = @import("fsm.zig");
 const ebr = @import("../lib/ebr.zig");
 const header = @import("runtime-header.zig");
 const compat = @import("../lib/compat.zig");
+const alloc_profile = @import("alloc-profile.zig");
 
 // Import the C library
 const c = @cImport({
@@ -21,6 +22,38 @@ const alloc = std.heap.c_allocator;
 var global_ebr_ctx: ebr.EbrContext = .{};
 var global_stack_pool: fm.StackPool = undefined;
 var global_shutdown = std.atomic.Value(bool).init(false);
+
+test "Rc and WeakRc share one allocation while preserving the ctrl.data ABI" {
+    const allocator = std.testing.allocator;
+    const profile_allocs_before = alloc_profile.totalAllocs();
+    const rc = try CheatLib.rcCreate(u64, allocator, 42);
+    const weak = CheatLib.rcDowngrade(u64, rc);
+
+    try std.testing.expectEqual(3 * @sizeOf(usize), @sizeOf(CheatLib.RcControlBlock(u64)));
+    try std.testing.expectEqual(@as(u64, 42), rc.ctrl.data.*);
+    const ctrl_addr = @intFromPtr(rc.ctrl);
+    const data_addr = @intFromPtr(rc.ctrl.data);
+    try std.testing.expect(data_addr > ctrl_addr);
+    try std.testing.expect(data_addr - ctrl_addr <= @sizeOf(CheatLib.RcControlBlock(u64)) + @alignOf(u64));
+
+    CheatLib.rcRelease(u64, allocator, rc);
+    try std.testing.expect(CheatLib.weakRcUpgrade(u64, weak) == null);
+    CheatLib.weakRcRelease(u64, allocator, weak);
+    try std.testing.expectEqual(profile_allocs_before, alloc_profile.totalAllocs());
+}
+
+test "last Rc strong release keeps the control block alive through self-WeakRc cleanup" {
+    const SelfLinked = struct {
+        self: CheatLib.WeakRc(@This()),
+    };
+    const allocator = std.testing.allocator;
+    const rc = try CheatLib.rcCreate(SelfLinked, allocator, undefined);
+    rc.ctrl.data.self = CheatLib.rcDowngrade(SelfLinked, rc);
+
+    // The payload's WeakRc release runs inside this last-strong release. The
+    // implicit weak must prevent an inner free followed by an outer double-free.
+    CheatLib.rcRelease(SelfLinked, allocator, rc);
+}
 
 test "CheatLib.read returns immediately when fd already has bytes" {
     var fds: [2]i32 = undefined;

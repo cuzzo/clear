@@ -2470,8 +2470,23 @@ pub const CheatLib = struct {
             strong: usize,
             weak: usize,
             data: *T,
-            alloc: std.mem.Allocator,
         };
+    }
+
+    /// One allocation backs both the stable weak-reference control block and
+    /// its payload. `ctrl.data` remains a pointer so generated CLEAR code keeps
+    /// the existing ABI (`rc.ctrl.data.*`), while rcCreate avoids a second
+    /// allocator call and allocator header per object.
+    fn RcAllocation(comptime T: type) type {
+        return struct {
+            ctrl: RcControlBlock(T),
+            data: T,
+        };
+    }
+
+    fn destroyRcAllocation(comptime T: type, alloc: std.mem.Allocator, ctrl: *RcControlBlock(T)) void {
+        const allocation: *RcAllocation(T) = @fieldParentPtr("ctrl", ctrl);
+        alloc.destroy(allocation);
     }
 
     /// Rc(T): a reference-counted wrapper around a heap-allocated T.
@@ -2487,12 +2502,16 @@ pub const CheatLib = struct {
 
     pub fn rcCreate(comptime T: type, alloc: std.mem.Allocator, data: T) !Rc(T) {
         const alloc_profile = @import("alloc-profile.zig");
-        const ctrl = try alloc.create(RcControlBlock(T));
-        const data_ptr = try alloc.create(T);
-        data_ptr.* = data;
-        ctrl.* = .{ .strong = 1, .weak = 0, .data = data_ptr, .alloc = alloc };
-        alloc_profile.recordAlloc(@returnAddress(), @sizeOf(RcControlBlock(T)) + @sizeOf(T));
-        return Rc(T){ .ctrl = ctrl };
+        const allocation = try alloc.create(RcAllocation(T));
+        allocation.data = data;
+        // `weak` includes one implicit weak reference while strong > 0.
+        // It keeps the control block alive while last-strong cleanup releases
+        // payload-owned WeakRc fields (including self-links).
+        allocation.ctrl = .{ .strong = 1, .weak = 1, .data = &allocation.data };
+        if (comptime CLEAR_PROFILE) {
+            alloc_profile.recordAlloc(@returnAddress(), @sizeOf(RcAllocation(T)));
+        }
+        return Rc(T){ .ctrl = &allocation.ctrl };
     }
 
     pub fn Frozen(comptime T: type) type {
@@ -2503,7 +2522,7 @@ pub const CheatLib = struct {
         return freeze_mod.freeze(T, alloc, val);
     }
 
-    pub fn rcRetain(comptime T: type, rc: Rc(T)) Rc(T) {
+    pub inline fn rcRetain(comptime T: type, rc: Rc(T)) Rc(T) {
         rc.ctrl.strong += 1;
         return rc;
     }
@@ -2512,18 +2531,21 @@ pub const CheatLib = struct {
         return stream.retain();
     }
 
-    pub fn rcRelease(comptime T: type, alloc: std.mem.Allocator, rc: Rc(T)) void {
-        _ = alloc; // alloc stored in control block
+    pub inline fn rcRelease(comptime T: type, alloc: std.mem.Allocator, rc: Rc(T)) void {
+        // `alloc` must match rcCreate's allocator. MIR cleanup already carries
+        // that provenance; keeping it at the call site avoids storing a
+        // 16-byte Allocator value in every non-atomic control block.
         rc.ctrl.strong -= 1;
         if (rc.ctrl.strong == 0) {
             if (comptime isLocked(T) or isRwLocked(T)) {
-                arcDeinitInner(T, rc.ctrl.alloc, rc.ctrl.data);
+                arcDeinitInner(T, alloc, rc.ctrl.data);
             } else if (comptime needsCleanup(T)) {
-                cleanup(T, rc.ctrl.alloc, rc.ctrl.data);
+                cleanup(T, alloc, rc.ctrl.data);
             }
-            rc.ctrl.alloc.destroy(rc.ctrl.data);
+            // Payload destruction is complete; release the implicit weak.
+            rc.ctrl.weak -= 1;
             if (rc.ctrl.weak == 0) {
-                rc.ctrl.alloc.destroy(rc.ctrl);
+                destroyRcAllocation(T, alloc, rc.ctrl);
             }
         }
     }
@@ -2663,21 +2685,24 @@ pub const CheatLib = struct {
         };
     }
 
-    pub fn rcDowngrade(comptime T: type, rc: Rc(T)) WeakRc(T) {
+    pub inline fn rcDowngrade(comptime T: type, rc: Rc(T)) WeakRc(T) {
         rc.ctrl.weak += 1;
         return WeakRc(T){ .ctrl = rc.ctrl };
     }
 
-    pub fn weakRcUpgrade(comptime T: type, weak: WeakRc(T)) ?Rc(T) {
+    pub inline fn weakRcUpgrade(comptime T: type, weak: WeakRc(T)) ?Rc(T) {
         if (weak.ctrl.strong == 0) return null;
         weak.ctrl.strong += 1;
         return Rc(T){ .ctrl = weak.ctrl };
     }
 
-    pub fn weakRcRelease(comptime T: type, weak: WeakRc(T)) void {
+    pub inline fn weakRcRelease(comptime T: type, alloc: std.mem.Allocator, weak: WeakRc(T)) void {
+        // Same allocator-provenance contract as rcRelease. Weak cleanup is
+        // always reached through cleanup/releaseOne, which already has alloc.
         weak.ctrl.weak -= 1;
-        if (weak.ctrl.weak == 0 and weak.ctrl.strong == 0) {
-            weak.ctrl.alloc.destroy(weak.ctrl);
+        if (weak.ctrl.weak == 0) {
+            std.debug.assert(weak.ctrl.strong == 0);
+            destroyRcAllocation(T, alloc, weak.ctrl);
         }
     }
 
@@ -2777,7 +2802,7 @@ pub const CheatLib = struct {
             if (is_atomic) {
                 weakArcRelease(T, .{ .ctrl = @ptrCast(value.ctrl) });
             } else {
-                weakRcRelease(T, .{ .ctrl = @ptrCast(value.ctrl) });
+                weakRcRelease(T, alloc, .{ .ctrl = @ptrCast(value.ctrl) });
             }
         } else {
             if (is_atomic) {
