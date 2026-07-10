@@ -30,6 +30,65 @@
     height: 100vh;
     min-height: 0;
     overflow: hidden;
+    position: relative;
+  }
+  .app:has(.sidebar-toggle:not(:checked)) {
+    grid-template-columns: 0px 1fr;
+  }
+  .sidebar-toggle {
+    display: none;
+  }
+  .sidebar-collapse-container {
+    display: flex;
+    justify-content: flex-end;
+    align-items: center;
+    padding: 8px 12px;
+    border-bottom: 1px solid var(--line);
+    background: var(--panel);
+  }
+  .sidebar-collapse-btn {
+    font-size: 11px;
+    color: var(--muted);
+    cursor: pointer;
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    user-select: none;
+  }
+  .sidebar-collapse-btn:hover {
+    color: var(--text);
+  }
+  .sidebar-expand-btn {
+    display: none;
+    position: absolute;
+    left: 8px;
+    top: 8px;
+    z-index: 1000;
+    width: 28px;
+    height: 28px;
+    background: var(--panel);
+    border: 1px solid var(--line);
+    border-radius: 6px;
+    align-items: center;
+    justify-content: center;
+    cursor: pointer;
+    box-shadow: 0 1px 4px rgba(0,0,0,0.1);
+    color: var(--muted);
+  }
+  .sidebar-expand-btn:hover {
+    color: var(--text);
+    background: var(--hover);
+  }
+  .sidebar-toggle:not(:checked) ~ aside {
+    display: none !important;
+  }
+  .sidebar-toggle:not(:checked) ~ main {
+    grid-column: 1 / span 2;
+    padding-left: 44px;
+    position: relative;
+  }
+  .sidebar-toggle:not(:checked) ~ main .sidebar-expand-btn {
+    display: flex;
   }
   aside {
     border-right: 1px solid var(--line);
@@ -869,6 +928,59 @@
   #layer-comment-folding:checked ~ .viewer .row.comment-fold-hidden {
     display: none;
   }
+  .fn-fold-toggle { display: none; }
+  .fn-fold-control {
+    border-radius: 3px;
+    color: #475569;
+    cursor: pointer;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    font-weight: 700;
+    inline-size: 18px;
+    min-height: 18px;
+  }
+  .fn-fold-control *,
+  .fn-fold-arrow,
+  .fn-fold-arrow::before,
+  .fn-fold-control::before,
+  .fn-fold-control::after {
+    cursor: pointer;
+  }
+  .fn-fold-control:hover,
+  .fn-fold-control:focus-visible {
+    background: rgba(71, 85, 105, 0.14);
+    color: #0f172a;
+    outline: 1px solid rgba(71, 85, 105, 0.28);
+  }
+  .fn-fold-arrow::before {
+    content: ">";
+    display: inline-block;
+    inline-size: 12px;
+    text-align: center;
+    transform: rotate(0deg);
+    transition: transform 120ms ease;
+  }
+  .fn-fold-toggle:checked ~ .ln .fn-fold-arrow::before { transform: rotate(0deg); }
+  .fn-fold-toggle:not(:checked) ~ .ln .fn-fold-arrow::before { transform: rotate(90deg); }
+  .fn-fold-toggle:checked ~ .ln,
+  .fn-fold-toggle:checked ~ .gutter,
+  .fn-fold-toggle:checked ~ .source-text,
+  .fn-fold-toggle:checked ~ .blame-cell { border-bottom: 1px dashed rgba(100, 116, 139, 0.28); }
+  .row.fn-fold-hidden {
+    display: none !important;
+  }
+  #layer-comment-folding:checked ~ .viewer .row.comment-fold-hidden.fn-fold-child {
+    display: none;
+  }
+  .outline a.private-symbol .outline-name {
+    color: var(--muted);
+  }
+  #layer-private-folding:checked ~ .topbar .private-fold-layer .switch-on { display: inline-block; }
+  #layer-private-folding:checked ~ .topbar .private-fold-layer .switch-off { display: none; }
+  #layer-private-folding:not(:checked) ~ .topbar .private-fold-layer .switch-on { display: none; }
+  #layer-private-folding:not(:checked) ~ .topbar .private-fold-layer .switch-off { display: inline-block; }
+
   .row.dark-arm .line-meta {
     color: var(--dark-arm);
     font-weight: 700;

@@ -110,6 +110,40 @@
     input.addEventListener("change", () => setFoldRows(input));
   };
 
+  const setFnFoldRows = (input) => {
+    const foldId = input.dataset.foldId;
+    const sourceView = input.closest(".source-view");
+    const row = input.closest(".row");
+    if (row) {
+      row.classList.toggle("fn-fold-collapsed", input.checked);
+      row.classList.toggle("fn-fold-expanded", !input.checked);
+    }
+    if (!foldId || !sourceView) return;
+    sourceView
+      .querySelectorAll(`[data-fn-fold-child="${foldId}"]`)
+      .forEach((row) => row.classList.toggle("fn-fold-hidden", input.checked));
+  };
+
+  const restoreFnFold = (input) => {
+    const key = input.dataset.persistKey;
+    const stored = key ? read(key) : null;
+    if (stored === null) {
+      if (input.classList.contains("private-fn-fold")) {
+        const privateFoldingLayer = document.getElementById("layer-private-folding");
+        input.checked = privateFoldingLayer ? privateFoldingLayer.checked : true;
+      } else {
+        input.checked = false;
+      }
+    } else {
+      input.checked = (stored === "true");
+    }
+    input.addEventListener("change", () => {
+      if (key) write(key, String(input.checked));
+      setFnFoldRows(input);
+    });
+    setFnFoldRows(input);
+  };
+
   const restoreWarningDismissal = (control) => {
     const key = control.dataset.dismissKey;
     const warning = control.closest(".warning");
@@ -187,9 +221,25 @@
 
   document.addEventListener("DOMContentLoaded", () => {
     document
-      .querySelectorAll("input[data-persist-key]:not(.comment-fold-toggle)")
+      .querySelectorAll("input[data-persist-key]:not(.comment-fold-toggle):not(.fn-fold-toggle)")
       .forEach(restoreInput);
     document.querySelectorAll(".comment-fold-toggle[data-persist-key]").forEach(restoreCommentFold);
+    document.querySelectorAll(".fn-fold-toggle[data-persist-key]").forEach(restoreFnFold);
+    
+    const privateFoldingLayer = document.getElementById("layer-private-folding");
+    if (privateFoldingLayer) {
+      privateFoldingLayer.addEventListener("change", () => {
+        document.querySelectorAll(".private-fn-fold").forEach(input => {
+          const key = input.dataset.persistKey;
+          const stored = key ? read(key) : null;
+          if (stored === null) {
+            input.checked = privateFoldingLayer.checked;
+            input.dispatchEvent(new Event("change", { bubbles: true }));
+          }
+        });
+      });
+    }
+
     document.querySelectorAll(".warning-dismiss[data-dismiss-key]").forEach(restoreWarningDismissal);
     document.querySelectorAll(".layers-panel label[for]").forEach(bindLayerLabel);
     document.querySelectorAll(".line-toggle").forEach(bindLineToggle);

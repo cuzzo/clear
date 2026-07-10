@@ -410,6 +410,23 @@ struct CommentFoldLine {
     is_start: bool,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct FunctionFold {
+    id: usize,
+    start_line: u32,
+    end_line: u32,
+    is_private: bool,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct FunctionFoldLine {
+    id: usize,
+    start_line: u32,
+    end_line: u32,
+    is_start: bool,
+    is_private: bool,
+}
+
 #[derive(Debug, Clone, Serialize, PartialEq)]
 pub struct UiSourcePayload {
     pub path: String,
@@ -508,8 +525,8 @@ struct AppTemplate<'a> {
 #[derive(Template)]
 #[template(path = "dashboard_sidebar.html")]
 struct DashboardSidebarTemplate<'a> {
-    summary: &'a str,
-    nav: &'a str,
+    _summary: &'a str,
+    _nav: &'a str,
     current_directory: &'a str,
     show_directory_input: bool,
     filter: &'a str,
@@ -520,8 +537,8 @@ struct DashboardSidebarTemplate<'a> {
 #[derive(Template)]
 #[template(path = "source_sidebar.html")]
 struct SourceSidebarTemplate<'a> {
-    path: &'a str,
-    nav: &'a str,
+    _path: &'a str,
+    _nav: &'a str,
     outline: &'a str,
     show_empty_outline: bool,
 }
@@ -4611,8 +4628,8 @@ fn render_dashboard_sidebar(args: DashboardSidebarArgs<'_>) -> String {
     let file_links = render_sidebar_file_links(&args);
     render_template_string(
         DashboardSidebarTemplate {
-            summary: &summary,
-            nav: &nav,
+            _summary: &summary,
+            _nav: &nav,
             current_directory: args.current_directory,
             show_directory_input: !args.current_directory.is_empty(),
             filter: args.filter,
@@ -4659,8 +4676,8 @@ fn render_source_sidebar(payload: &UiSourcePayload, current_directory: &str, fil
     let outline = render_source_outline(payload);
     render_template_string(
         SourceSidebarTemplate {
-            path: &payload.path,
-            nav: &nav,
+            _path: &payload.path,
+            _nav: &nav,
             outline: &outline,
             show_empty_outline: outline.is_empty(),
         },
@@ -4805,7 +4822,7 @@ fn render_source_outline(payload: &UiSourcePayload) -> String {
     let mut out = String::new();
     out.push_str("<nav class=\"outline\" aria-label=\"source outline\"><div class=\"outline-title\">Outline</div>");
     for entry in root_outline_entries(&containers, &functions) {
-        render_outline_entry(&mut out, entry, &containers, &functions);
+        render_outline_entry(&mut out, entry, &containers, &functions, payload);
     }
     out.push_str("</nav>");
     out
@@ -5012,12 +5029,13 @@ fn render_outline_entry(
     entry: OutlineEntry<'_>,
     containers: &[OutlineContainer<'_>],
     functions: &[OutlineFunction<'_>],
+    payload: &UiSourcePayload,
 ) {
     match entry {
         OutlineEntry::Container(container) => {
-            render_outline_symbol_link(out, container.symbol, &container.display_name, container.depth);
+            render_outline_symbol_link(out, container.symbol, &container.display_name, container.depth, payload);
             for child in child_outline_entries(&container.full_name, containers, functions) {
-                render_outline_entry(out, child, containers, functions);
+                render_outline_entry(out, child, containers, functions, payload);
             }
         }
         OutlineEntry::Function(function) => {
@@ -5026,6 +5044,7 @@ fn render_outline_entry(
                 function.symbol,
                 &function.display_name,
                 function.depth,
+                payload,
             );
         }
     }
@@ -5036,7 +5055,50 @@ fn render_outline_symbol_link(
     symbol: &UiSourceSymbol,
     display_name: &str,
     depth: usize,
+    payload: &UiSourcePayload,
 ) {
+    let is_fn = symbol.kind == "function" || symbol.kind == "method";
+    let is_reentrant = is_fn && (symbol.start_line as usize..=symbol.end_line as usize)
+        .take(4)
+        .any(|l| {
+            payload.lines.get(l - 1)
+                .map(|line| line.to_uppercase().contains("REENTRANT"))
+                .unwrap_or(false)
+        });
+    let is_private = is_fn && {
+        let path = &payload.path;
+        if path.ends_with(".zig") {
+            let def_line = payload.lines.get(symbol.start_line as usize - 1).map(|s| s.trim()).unwrap_or("");
+            def_line.contains("fn ") && !def_line.contains("pub fn")
+        } else if path.ends_with(".clear") {
+            let def_line = payload.lines.get(symbol.start_line as usize - 1).map(|s| s.trim()).unwrap_or("");
+            let upper = def_line.to_uppercase();
+            upper.contains("FN ") && !upper.contains("PUB FN")
+        } else if path.ends_with(".rb") {
+            if symbol.name.starts_with('_') {
+                true
+            } else {
+                let mut found_private = false;
+                let start_idx = symbol.start_line as usize - 1;
+                for idx in (0..start_idx).rev() {
+                    if let Some(line) = payload.lines.get(idx) {
+                        let trimmed = line.trim();
+                        if trimmed == "private" {
+                            found_private = true;
+                            break;
+                        }
+                        if trimmed.starts_with("class ") || trimmed.starts_with("module ") || trimmed.starts_with("def ") {
+                            break;
+                        }
+                    }
+                }
+                found_private
+            }
+        } else {
+            symbol.name.starts_with('_')
+        }
+    };
+
     out.push_str("<a href=\"#L");
     out.push_str(&symbol.start_line.to_string());
     out.push_str("\"");
@@ -5054,6 +5116,9 @@ fn render_outline_symbol_link(
     } else {
         out.push_str("unknown-symbol");
     }
+    if is_private {
+        out.push_str(" private-symbol");
+    }
     out.push_str(" hotspot-");
     out.push_str(&html_escape(&symbol.hotspot_level));
     out.push_str(" outline-depth-");
@@ -5070,6 +5135,9 @@ fn render_outline_symbol_link(
     out.push_str(&html_escape(&outline_kind_label(symbol)));
     out.push_str("</span><span class=\"outline-name\">");
     out.push_str(&html_escape(display_name));
+    if is_reentrant {
+        out.push_str(" <i class=\"fa-solid fa-recycle reentrant-icon\" title=\"Re-entrant\"></i>");
+    }
     out.push_str("</span></a>");
 }
 
@@ -6060,6 +6128,72 @@ fn render_source_view(
         .collect::<BTreeMap<_, _>>();
     let comment_folds = detect_comment_folds(&payload.path, &payload.lines);
     let comment_fold_lines = comment_fold_lines(&comment_folds);
+    let fn_folds = payload.symbols.iter()
+        .filter(|symbol| {
+            (symbol.kind == "function" || symbol.kind == "method")
+                && symbol.start_line < symbol.end_line
+        })
+        .enumerate()
+        .map(|(idx, symbol)| {
+            let is_private = {
+                let path = &payload.path;
+                if path.ends_with(".zig") {
+                    let def_line = payload.lines.get(symbol.start_line as usize - 1).map(|s| s.trim()).unwrap_or("");
+                    def_line.contains("fn ") && !def_line.contains("pub fn")
+                } else if path.ends_with(".clear") {
+                    let def_line = payload.lines.get(symbol.start_line as usize - 1).map(|s| s.trim()).unwrap_or("");
+                    let upper = def_line.to_uppercase();
+                    upper.contains("FN ") && !upper.contains("PUB FN")
+                } else if path.ends_with(".rb") {
+                    if symbol.name.starts_with('_') {
+                        true
+                    } else {
+                        let mut found_private = false;
+                        let start_idx = symbol.start_line as usize - 1;
+                        for idx in (0..start_idx).rev() {
+                            if let Some(line) = payload.lines.get(idx) {
+                                let trimmed = line.trim();
+                                if trimmed == "private" {
+                                    found_private = true;
+                                    break;
+                               }
+                               if trimmed.starts_with("class ") || trimmed.starts_with("module ") || trimmed.starts_with("def ") {
+                                   break;
+                               }
+                            }
+                        }
+                        found_private
+                    }
+                } else {
+                    symbol.name.starts_with('_')
+                }
+            };
+            FunctionFold {
+                id: idx + 1,
+                start_line: symbol.start_line,
+                end_line: symbol.end_line,
+                is_private,
+            }
+        })
+        .collect::<Vec<_>>();
+    let fn_fold_lines = {
+        let mut by_line = BTreeMap::new();
+        for fold in &fn_folds {
+            for line in fold.start_line..=fold.end_line {
+                by_line.insert(
+                    line,
+                    FunctionFoldLine {
+                        id: fold.id,
+                        start_line: fold.start_line,
+                        end_line: fold.end_line,
+                        is_start: line == fold.start_line,
+                        is_private: fold.is_private,
+                    },
+                );
+            }
+        }
+        by_line
+    };
     let covered = payload
         .annotations
         .iter()
@@ -6107,6 +6241,7 @@ fn render_source_view(
             annotations.get(&line_no).copied(),
             blame.get(&line_no).copied(),
             comment_fold_lines.get(&line_no),
+            fn_fold_lines.get(&line_no),
         ));
     }
     let history = render_history(payload, filter);
@@ -6173,6 +6308,7 @@ fn render_code_line(
     annotation: Option<&UiLineAnnotation>,
     blame: Option<&UiLineBlame>,
     comment_fold: Option<&CommentFoldLine>,
+    fn_fold: Option<&FunctionFoldLine>,
 ) -> String {
     let mut classes = vec!["row"];
     if annotation.map(|a| a.covered).unwrap_or(false) {
@@ -6192,6 +6328,9 @@ fn render_code_line(
     }
     if comment_fold.map(|fold| !fold.is_start).unwrap_or(false) {
         classes.push("comment-fold-child");
+    }
+    if fn_fold.map(|fold| !fold.is_start).unwrap_or(false) {
+        classes.push("fn-fold-child");
     }
     if let Some(annotation) = annotation {
         if !annotation.hazards.is_empty() {
@@ -6231,16 +6370,24 @@ fn render_code_line(
     let fold_input_id = comment_fold
         .filter(|fold| fold.is_start)
         .map(|fold| format!("comment-fold-{}", fold.id));
+    let fn_fold_input_id = fn_fold
+        .filter(|fold| fold.is_start)
+        .map(|fold| format!("fn-fold-{}", fold.id));
 
     let fold_child_attr = comment_fold
         .filter(|fold| !fold.is_start)
         .map(|fold| format!(" data-comment-fold-child=\"{}\"", fold.id))
         .unwrap_or_default();
+    let fn_fold_child_attr = fn_fold
+        .filter(|fold| !fold.is_start)
+        .map(|fold| format!(" data-fn-fold-child=\"{}\"", fold.id))
+        .unwrap_or_default();
     let mut out = format!(
-        "<div id=\"L{}\" class=\"{}\"{}{}>",
+        "<div id=\"L{}\" class=\"{}\"{}{}{}>",
         line_no,
         classes.join(" "),
         fold_child_attr,
+        fn_fold_child_attr,
         style,
     );
     if let Some(input_id) = &fold_input_id {
@@ -6252,6 +6399,26 @@ fn render_code_line(
         out.push_str(&line_no.to_string());
         out.push_str("\" data-fold-id=\"");
         out.push_str(&comment_fold.map(|fold| fold.id).unwrap_or_default().to_string());
+        out.push_str("\">");
+    }
+    if let Some(input_id) = &fn_fold_input_id {
+        out.push_str("<input class=\"fn-fold-toggle");
+        if fn_fold.map(|f| f.is_private).unwrap_or(false) {
+            out.push_str(" private-fn-fold");
+        }
+        out.push_str("\" type=\"checkbox\" id=\"");
+        out.push_str(&html_escape(input_id));
+        if fn_fold.map(|f| f.is_private).unwrap_or(false) {
+            out.push_str("\" checked");
+        } else {
+            out.push_str("\"");
+        }
+        out.push_str(" data-persist-key=\"lineage.fn-fold.");
+        out.push_str(&html_escape(path));
+        out.push('.');
+        out.push_str(&line_no.to_string());
+        out.push_str("\" data-fold-id=\"");
+        out.push_str(&fn_fold.map(|fold| fold.id).unwrap_or_default().to_string());
         out.push_str("\">");
     }
     if has_bug_history {
@@ -6309,6 +6476,10 @@ fn render_code_line(
             fold.end_line.saturating_sub(fold.start_line) + 1
         ));
         out.push_str("\"><span class=\"comment-fold-arrow\"></span></label>");
+    } else if let (Some(input_id), Some(_fold)) = (&fn_fold_input_id, fn_fold) {
+        out.push_str("<label class=\"fn-fold-control\" for=\"");
+        out.push_str(&html_escape(input_id));
+        out.push_str("\" title=\"expand/collapse function\"><span class=\"fn-fold-arrow\"></span></label>");
     } else {
         out.push_str("<span class=\"comment-fold-slot\"></span>");
     }
