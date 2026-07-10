@@ -341,6 +341,7 @@ pub struct UiEffectSpan {
 pub struct UiLineAnnotation {
     pub line: u32,
     pub covered: bool,
+    pub is_partial: bool,
     pub mutant_tested: bool,
     pub test_types: Vec<String>,
     pub distinct_tests: i64,
@@ -688,6 +689,7 @@ struct SourceQuery {
 #[derive(Default)]
 struct AnnotationBuilder {
     covered: bool,
+    is_partial: bool,
     mutant_tested: bool,
     test_types: BTreeSet<String>,
     distinct_tests: i64,
@@ -3238,6 +3240,7 @@ pub fn line_annotations(
         .map(|(line, builder)| UiLineAnnotation {
             line,
             covered: builder.covered,
+            is_partial: builder.is_partial,
             mutant_tested: builder.mutant_tested,
             test_types: builder.test_types.into_iter().collect(),
             distinct_tests: builder.distinct_tests,
@@ -3324,6 +3327,7 @@ fn empty_annotation(line: u32) -> UiLineAnnotation {
     UiLineAnnotation {
         line,
         covered: false,
+        is_partial: false,
         mutant_tested: false,
         test_types: Vec::new(),
         distinct_tests: 0,
@@ -3476,7 +3480,7 @@ fn apply_line_coverage(
     let mut stmt = storage.connection().prepare(
         r#"
         WITH latest_source AS (
-          SELECT line, source, hits,
+          SELECT line, source, hits, is_partial,
                  ROW_NUMBER() OVER (
                    PARTITION BY line, source
                    ORDER BY timestamp DESC, id DESC
@@ -3485,28 +3489,31 @@ fn apply_line_coverage(
           WHERE path = ?1
         ),
         latest AS (
-          SELECT line, MAX(hits) AS hits
+          SELECT line, MAX(hits) AS hits, MAX(is_partial) AS is_partial
           FROM latest_source
           WHERE rank = 1
           GROUP BY line
         )
-        SELECT line, hits
+        SELECT line, hits, COALESCE(is_partial, 0)
         FROM latest
         ORDER BY line
         "#,
     )?;
     let rows = stmt.query_map(params![path], |row| {
-        Ok((row.get::<_, u32>(0)?, row.get::<_, u32>(1)?))
+        Ok((row.get::<_, u32>(0)?, row.get::<_, u32>(1)?, row.get::<_, i64>(2)?))
     })?;
 
     let mut has_exact_line_coverage = false;
     for row in rows {
-        let (line, hits) = row?;
+        let (line, hits, is_partial) = row?;
         has_exact_line_coverage = true;
         let entry = lines.entry(line).or_default();
         entry.line_hits = Some(hits);
         if hits > 0 {
             entry.covered = true;
+        }
+        if is_partial != 0 {
+            entry.is_partial = true;
         }
     }
     Ok(has_exact_line_coverage)
@@ -5464,7 +5471,7 @@ fn source_coverage_context(payload: &UiSourcePayload) -> UiCoverageContext {
         .iter()
         .filter(|annotation| {
             (!has_exact_line_hits || annotation.line_hits.is_some())
-                && annotation_has_dark_arms(annotation)
+                && annotation.is_partial
         })
         .count() as i64;
     let partial_lines = partial_lines.clamp(0, covered_lines);
@@ -6174,7 +6181,7 @@ fn render_code_line(
     if annotation.map(|a| a.mutant_tested).unwrap_or(false) {
         classes.push("mutant");
     }
-    if annotation.map(|a| a.covered && annotation_has_dark_arms(a)).unwrap_or(false) {
+    if annotation.map(|a| a.covered && a.is_partial).unwrap_or(false) {
         classes.push("dark-arm");
     }
     if annotation.map(|a| a.semantic_churn > 0.0).unwrap_or(false) {
@@ -6986,7 +6993,7 @@ fn row_style(annotation: &UiLineAnnotation) -> String {
 }
 
 fn coverage_background(annotation: &UiLineAnnotation, gutter: bool) -> String {
-    if annotation.covered && annotation_has_dark_arms(annotation) {
+    if annotation.covered && annotation.is_partial {
         if gutter {
             "rgba(31, 41, 55, 0.32)".to_string()
         } else {
@@ -7071,10 +7078,6 @@ fn line_has_details(annotation: &UiLineAnnotation) -> bool {
         || annotation.mutant_coverage.is_some()
         || annotation.semantic_churn_events > 0
         || !annotation.bug_events.is_empty()
-}
-
-fn annotation_has_dark_arms(annotation: &UiLineAnnotation) -> bool {
-    !annotation.dark_arms.is_empty() || !annotation.dark_arm_spans.is_empty()
 }
 
 fn dark_arm_labels(annotation: &UiLineAnnotation) -> Vec<String> {
@@ -8612,6 +8615,7 @@ mod tests {
             annotations: vec![UiLineAnnotation {
                 line: 2,
                 covered: true,
+                is_partial: false,
                 mutant_tested: false,
                 test_types: vec!["fuzz".to_string(), "integration".to_string(), "unit".to_string()],
                 distinct_tests: 9,
@@ -9655,6 +9659,7 @@ flags:
         let mut annotations = vec![UiLineAnnotation {
             line: 1,
             covered: true,
+            is_partial: false,
             mutant_tested: false,
             test_types: Vec::new(),
             distinct_tests: 0,
@@ -9723,6 +9728,7 @@ flags:
         let annotation = UiLineAnnotation {
             line: 1,
             covered: true,
+            is_partial: true,
             mutant_tested: false,
             test_types: Vec::new(),
             distinct_tests: 0,
@@ -9805,6 +9811,7 @@ flags:
     fn coverage_background_paints_partial_coverage_when_dark_arms_exist() {
         let mut annotation = empty_annotation(1);
         annotation.covered = true;
+        annotation.is_partial = true;
         annotation.dark_arms = vec!["dark arm: else".to_string()];
 
         let bg = coverage_background(&annotation, false);

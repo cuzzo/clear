@@ -21,6 +21,7 @@ DEFAULT_EXCLUDES = %w[
   node_modules
   target
   vendor
+  bc-lower-shards
 ].freeze
 
 SOURCE_EXTS = {

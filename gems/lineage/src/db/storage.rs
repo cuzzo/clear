@@ -188,6 +188,7 @@ impl Storage {
               path TEXT NOT NULL,
               line INTEGER NOT NULL,
               hits INTEGER NOT NULL,
+              is_partial INTEGER NOT NULL DEFAULT 0,
               source TEXT NOT NULL DEFAULT 'coverage',
               UNIQUE(commit_hash, path, line, source)
             );
@@ -1365,7 +1366,7 @@ impl Storage {
         line: u32,
         hits: u32,
     ) -> Result<bool> {
-        self.record_coverage_line_with_source(commit_hash, timestamp, path, line, hits, "coverage")
+        self.record_coverage_line_with_source(commit_hash, timestamp, path, line, hits, false, "coverage")
     }
 
     pub fn record_coverage_line_with_source(
@@ -1375,20 +1376,30 @@ impl Storage {
         path: &str,
         line: u32,
         hits: u32,
+        is_partial: bool,
         source: &str,
     ) -> Result<bool> {
         let changed = self.conn.execute(
             r#"
             INSERT INTO coverage_line_events
-              (commit_hash, timestamp, path, line, hits, source)
-            VALUES (?1, ?2, ?3, ?4, ?5, ?6)
+              (commit_hash, timestamp, path, line, hits, is_partial, source)
+            VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)
             ON CONFLICT(commit_hash, path, line, source) DO UPDATE SET
               timestamp = MAX(coverage_line_events.timestamp, excluded.timestamp),
-              hits = MAX(coverage_line_events.hits, excluded.hits)
+              hits = MAX(coverage_line_events.hits, excluded.hits),
+              is_partial = MAX(coverage_line_events.is_partial, excluded.is_partial)
             WHERE excluded.timestamp > coverage_line_events.timestamp
                OR excluded.hits > coverage_line_events.hits
             "#,
-            params![commit_hash, timestamp, path, line, hits, source],
+            params![
+                commit_hash,
+                timestamp,
+                path,
+                line,
+                hits,
+                if is_partial { 1 } else { 0 },
+                source
+            ],
         )?;
         Ok(changed > 0)
     }

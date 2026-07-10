@@ -30,6 +30,7 @@ pub struct CoverageRecord {
 pub struct CoverageLineHit {
     pub line: u32,
     pub hits: u32,
+    pub is_partial: bool,
 }
 
 #[derive(Debug, Default, Clone, Copy, PartialEq, Eq)]
@@ -176,6 +177,7 @@ fn ingest_records(
                 &path,
                 hit.line,
                 hit.hits,
+                hit.is_partial,
                 &options.line_source,
             )?);
         }
@@ -300,6 +302,7 @@ fn parse_simplecov_records(value: &Value) -> Vec<CoverageRecord> {
                     hits.map(|hits| CoverageLineHit {
                         line: (index + 1) as u32,
                         hits,
+                        is_partial: false,
                     })
                 })
                 .collect::<Vec<_>>();
@@ -384,7 +387,7 @@ fn line_hits_from_generic_node(node: &Value) -> Vec<CoverageLineHit> {
             if let Some(number) = line.as_u64() {
                 return u32::try_from(number)
                     .ok()
-                    .map(|line| CoverageLineHit { line, hits: 1 });
+                    .map(|line| CoverageLineHit { line, hits: 1, is_partial: false });
             }
 
             let line_no = line
@@ -402,6 +405,7 @@ fn line_hits_from_generic_node(node: &Value) -> Vec<CoverageLineHit> {
             Some(CoverageLineHit {
                 line: line_no,
                 hits,
+                is_partial: false,
             })
         })
         .collect()
@@ -457,9 +461,19 @@ fn parse_cobertura_records(input: &str) -> Result<Vec<CoverageRecord>> {
             .filter_map(|line| {
                 let line_no = line.attribute("number")?.parse::<u32>().ok()?;
                 let hits = line.attribute("hits").unwrap_or("0").parse::<u32>().ok()?;
+                let is_partial = if line.attribute("branch").unwrap_or("false") == "true" {
+                    if let Some(cc) = line.attribute("condition-coverage") {
+                        !cc.starts_with("100%")
+                    } else {
+                        false
+                    }
+                } else {
+                    false
+                };
                 Some(CoverageLineHit {
                     line: line_no,
                     hits,
+                    is_partial,
                 })
             })
             .collect::<Vec<_>>();
@@ -660,8 +674,8 @@ mod tests {
         let records = parse_coverage_records(&value, "generic").unwrap();
 
         assert_eq!(records.len(), 1);
-        assert_eq!(records[0].line_hits[0], CoverageLineHit { line: 1, hits: 2 });
-        assert_eq!(records[0].line_hits[1], CoverageLineHit { line: 2, hits: 0 });
+        assert_eq!(records[0].line_hits[0], CoverageLineHit { line: 1, hits: 2, is_partial: false });
+        assert_eq!(records[0].line_hits[1], CoverageLineHit { line: 2, hits: 0, is_partial: false });
     }
 
     #[test]
@@ -685,8 +699,8 @@ mod tests {
         assert_eq!(records.len(), 1);
         assert_eq!(records[0].path, "src/demo.rb");
         assert_eq!(records[0].line_coverage, Some(50.0));
-        assert_eq!(records[0].line_hits[0], CoverageLineHit { line: 1, hits: 3 });
-        assert_eq!(records[0].line_hits[1], CoverageLineHit { line: 2, hits: 0 });
+        assert_eq!(records[0].line_hits[0], CoverageLineHit { line: 1, hits: 3, is_partial: false });
+        assert_eq!(records[0].line_hits[1], CoverageLineHit { line: 2, hits: 0, is_partial: false });
     }
 
     #[test]
@@ -740,9 +754,9 @@ mod tests {
         assert_eq!(
             records[0].line_hits,
             vec![
-                CoverageLineHit { line: 2, hits: 2 },
-                CoverageLineHit { line: 3, hits: 3 },
-                CoverageLineHit { line: 5, hits: 1 },
+                CoverageLineHit { line: 2, hits: 2, is_partial: false },
+                CoverageLineHit { line: 3, hits: 3, is_partial: false },
+                CoverageLineHit { line: 5, hits: 1, is_partial: false },
             ]
         );
         assert_eq!(records[0].line_coverage, Some(100.0));
@@ -757,8 +771,8 @@ mod tests {
             mutant_coverage: None,
             hard_gated: None,
             line_hits: vec![
-                CoverageLineHit { line: 1, hits: 2 },
-                CoverageLineHit { line: 2, hits: 0 },
+                CoverageLineHit { line: 1, hits: 2, is_partial: false },
+                CoverageLineHit { line: 2, hits: 0, is_partial: false },
             ],
         }];
 

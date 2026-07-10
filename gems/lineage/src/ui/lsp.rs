@@ -550,6 +550,7 @@ mod tests {
         UiLineAnnotation {
             line: 7,
             covered: true,
+            is_partial: false,
             mutant_tested: true,
             test_types: vec!["unit".to_string()],
             distinct_tests: 2,
