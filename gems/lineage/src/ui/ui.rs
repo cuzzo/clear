@@ -6506,6 +6506,25 @@ fn render_code_line(
                 path, line_no, source, annotation,
             ));
         }
+    } else if let Some(fold) = fn_fold {
+        if fold.is_start {
+            out.push_str("<span class=\"fold-full-source\">");
+            out.push_str(&highlight_source_line_with_dark_arms(
+                path, line_no, source, annotation,
+            ));
+            out.push_str("</span><span class=\"fold-collapsed-source\">");
+            out.push_str(&highlight_source_line_with_dark_arms(
+                path,
+                line_no,
+                &collapsed_function_source(source),
+                annotation,
+            ));
+            out.push_str("</span>");
+        } else {
+            out.push_str(&highlight_source_line_with_dark_arms(
+                path, line_no, source, annotation,
+            ));
+        }
     } else {
         out.push_str(&highlight_source_line_with_dark_arms(
             path, line_no, source, annotation,
@@ -6692,6 +6711,10 @@ fn comment_fold_lines(folds: &[CommentFold]) -> BTreeMap<u32, CommentFoldLine> {
 }
 
 fn collapsed_comment_source(source: &str) -> String {
+    format!("{} ...", source.trim_end())
+}
+
+fn collapsed_function_source(source: &str) -> String {
     format!("{} ...", source.trim_end())
 }
 

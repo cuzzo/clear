@@ -973,6 +973,8 @@
   #layer-comment-folding:checked ~ .viewer .row.comment-fold-hidden.fn-fold-child {
     display: none;
   }
+  .viewer .fn-fold-toggle:checked ~ .source-text .fold-full-source { display: none; }
+  .viewer .fn-fold-toggle:checked ~ .source-text .fold-collapsed-source { display: inline; }
   .outline a.private-symbol .outline-name {
     color: var(--muted);
   }
