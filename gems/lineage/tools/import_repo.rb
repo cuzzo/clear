@@ -48,6 +48,7 @@ COVERAGE_NAMES = %w[
   coverage.lcov
   coverage.out
   coverage.coverprofile
+  coverage.txt
 ].freeze
 
 options = {
