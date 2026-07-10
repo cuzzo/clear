@@ -11,8 +11,8 @@ FN main() RETURNS Void ->
   grouped = items |> INDEX _.category;
 
   # Verify grouping
-  fruits = grouped["fruit"];
-  veggies = grouped["veggie"];
+  fruits = grouped["fruit"] OR [];
+  veggies = grouped["veggie"] OR [];
 
   ASSERT fruits.length() == 2, "Should have 2 fruits";
   ASSERT veggies.length() == 1, "Should have 1 veggie";

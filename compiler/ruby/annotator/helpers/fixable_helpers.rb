@@ -37,6 +37,35 @@ module FixableHelper
     DiagnosticRegistry.fix_description_from_hash(code, kwargs)
   end
 
+  # `value.field` where value is ?T is always safely repairable as
+  # `value?.field`. GetField's token anchors the field name, so the dot is the
+  # immediately preceding source column and inserting `?` there produces `?.`.
+  sig { params(node: AST::GetField, target_type: Type).void }
+  def emit_optional_field_safe_nav_finding!(node, target_type)
+    T.bind(self, SemanticAnnotator) rescue nil
+    token = node.token
+    return error!(node, :OPTIONAL_FIELD_REQUIRES_SAFE_NAV,
+                  field: node.field, type: Type.surface_name(target_type),
+                  target: node.target.name) unless token
+
+    fix = Fix.new(
+      description: fix_description(:INSERT_SAFE_NAVIGATION),
+      confidence: :auto,
+      edits: [Edit.new(
+        span: Span.new(file: nil, line: token.line, col: token.column - 1, length: 0),
+        replacement: "?"
+      )]
+    )
+    fixable!(node,
+      code: :OPTIONAL_FIELD_REQUIRES_SAFE_NAV,
+      field: node.field,
+      type: Type.surface_name(target_type),
+      target: node.target.name,
+      category: :type,
+      level: :error,
+      fixes: [fix])
+  end
+
   class CapabilityFixCandidate < T::Struct
     const :sigil, String
     const :description_code, Symbol

@@ -120,6 +120,47 @@ pub fn PagedSlotMap(
             return makeHandle(slot, generation);
         }
 
+        /// Grow logical capacity without invalidating any live handle.
+        /// Payload addresses may move; callers must not retain pointers across
+        /// this operation (the same mutation rule used by insert/remove).
+        pub fn growCapacity(self: *Self, new_capacity: u32) !void {
+            const old_capacity: u32 = @intCast(self.nodes.len);
+            if (new_capacity <= old_capacity) return;
+            if (new_capacity > max_capacity) return error.CapacityTooLarge;
+
+            const page_alignment = comptime std.mem.Alignment.fromByteUnits(@max(std.heap.page_size_min, @alignOf(T)));
+            const new_nodes = try self.dense_allocator.alignedAlloc(T, page_alignment, new_capacity);
+            errdefer self.dense_allocator.free(new_nodes);
+            const new_dense_to_slot = try self.dense_allocator.alignedAlloc(u32, .fromByteUnits(std.heap.page_size_min), new_capacity);
+            errdefer self.dense_allocator.free(new_dense_to_slot);
+            const new_slot_meta = try self.metadata_allocator.alloc(u32, new_capacity);
+            errdefer self.metadata_allocator.free(new_slot_meta);
+            const new_free_slots = try self.metadata_allocator.alloc(u32, new_capacity);
+            errdefer self.metadata_allocator.free(new_free_slots);
+
+            @memcpy(new_nodes[0..self.live_count], self.nodes[0..self.live_count]);
+            @memcpy(new_dense_to_slot[0..self.live_count], self.dense_to_slot[0..self.live_count]);
+            @memcpy(new_slot_meta[0..old_capacity], self.slot_meta);
+            @memcpy(new_free_slots[0..self.free_count], self.free_slots[0..self.free_count]);
+
+            var raw_slot: u32 = old_capacity;
+            while (raw_slot < new_capacity) : (raw_slot += 1) {
+                new_slot_meta[raw_slot] = dead_dense;
+                const offset = raw_slot - old_capacity;
+                new_free_slots[self.free_count + offset] = new_capacity - 1 - offset;
+            }
+
+            self.dense_allocator.free(self.nodes);
+            self.dense_allocator.free(self.dense_to_slot);
+            self.metadata_allocator.free(self.slot_meta);
+            self.metadata_allocator.free(self.free_slots);
+            self.nodes = new_nodes;
+            self.dense_to_slot = new_dense_to_slot;
+            self.slot_meta = new_slot_meta;
+            self.free_slots = new_free_slots;
+            self.free_count += new_capacity - old_capacity;
+        }
+
         pub inline fn get(self: *Self, handle: Handle) ?*T {
             const dense_index = self.resolve(handle) orelse return null;
             return &self.nodes[dense_index];

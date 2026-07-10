@@ -200,6 +200,11 @@ module Hoist
     return false unless node
     return false if node.is_a?(AST::Identifier) || node.is_a?(AST::Literal)
     return false if ast_access_path?(node)
+    # A value coerced to T@node is consumed immediately by NodeStore.create;
+    # the resulting expression is a four-byte handle, not an owning anonymous
+    # composite that needs a separate lexical cleanup binding.
+    coerced = node.respond_to?(:coerced_type_info) ? node.coerced_type_info : nil
+    return false if coerced&.node_reference?
     return true if concat?(node) || node.is_a?(AST::ListLit) || node.is_a?(AST::HashLit)
 
     return false unless node.is_a?(AST::Locatable)

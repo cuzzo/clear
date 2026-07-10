@@ -11,11 +11,11 @@ FN main() RETURNS Void ->
         entries.append(Entry{ id: i, name: "item-" + i.toString() });
     END
     ASSERT entries.length() == 4;
-    ASSERT entries[0].name == "item-1";
-    ASSERT entries[1].name == "item-2";
-    ASSERT entries[3].name == "item-4";
-    ASSERT entries[0].id == 1;
-    ASSERT entries[3].id == 4;
+    ASSERT entries[0]?.name == "item-1";
+    ASSERT entries[1]?.name == "item-2";
+    ASSERT entries[3]?.name == "item-4";
+    ASSERT entries[0]?.id == 1;
+    ASSERT entries[3]?.id == 4;
     print("PASS");
     RETURN;
 END

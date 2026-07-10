@@ -83,6 +83,7 @@ class SymbolEntry
                 :size, :capabilities,
                 :scope,          # Back-reference to owning Scope (set by Scope#declare)
                 :scope_depth,    # declaring scope depth (0 = root)
+                :reassigned,     # direct binding assignment (not field/index mutation)
                 :param_decl_token, # for is_param entries: the VAR_ID token at the
                                    # param's position in the function signature.
                                    # Used by build_declare_mutable_fix to point an

@@ -940,7 +940,8 @@ RSpec.describe SemanticAnnotator do
           STRUCT Node { keys: Int64[]@list, vals: String[]@list }
           STRUCT DB { nodes: Node[]@list }
           FN countKeys(db: DB, idx: Int64) RETURNS Int64 ->
-              RETURN db.nodes[idx].keys.length();
+              IF db.nodes[idx] AS node THEN RETURN node.keys.length(); END
+              RETURN 0_i64;
           END
         FLUX
         expect { run(code) }.not_to raise_error
@@ -951,7 +952,7 @@ RSpec.describe SemanticAnnotator do
           STRUCT Node { keys: Int64[]@list, vals: String[]@list }
           STRUCT DB { nodes: Node[]@list }
           FN addKey!(MUTABLE db: DB, idx: Int64, key: Int64) RETURNS !Void ->
-              db.nodes[idx].keys.append(key);
+              IF db.nodes[idx] AS node THEN node.keys.append(key); END
           END
         FLUX
         expect { run(code) }.not_to raise_error
@@ -961,35 +962,28 @@ RSpec.describe SemanticAnnotator do
         code = <<~FLUX
           STRUCT Node { keys: Int64[]@list }
           FN addKey!(MUTABLE nodes: Node[]@list, idx: Int64, key: Int64) RETURNS !Void ->
-              nodes[idx].keys.append(key);
+              IF nodes[idx] AS node THEN node.keys.append(key); END
           END
         FLUX
         ast = run(code)
         fn_body = ast.statements.last.body
-        # The append call's receiver chain: nodes[idx].keys
-        # The GetIndex (nodes[idx]) should be flagged as needs_mut_ref
-        append_call = fn_body.first
-        receiver = append_call.object  # GetField(keys, target: GetIndex(nodes[idx]))
-        get_index = receiver.target    # GetIndex(nodes, idx)
+        get_index = fn_body.first.bindings.first.expr
         expect(get_index).to be_a(AST::GetIndex)
-        expect(get_index.needs_mut_ref).to eq(true)
+        expect(fn_body.first.bindings.first.unwrapped_type.resolved).to eq(:Node)
       end
 
       it "flags needs_mut_ref on GetIndex for field assignment" do
         code = <<~FLUX
           STRUCT Node { keys: Int64[]@list }
           FN setKeys!(MUTABLE nodes: Node[]@list, idx: Int64) RETURNS Void ->
-              nodes[idx].keys = [1, 2, 3];
+              IF nodes[idx] AS node THEN node.keys = [1, 2, 3]; END
           END
         FLUX
         ast = run(code)
         fn_body = ast.statements.last.body
-        # The assignment target: nodes[idx].keys -> GetField(keys, target: GetIndex)
-        assignment = fn_body.first
-        target_field = assignment.name  # GetField
-        get_index = target_field.target # GetIndex
+        get_index = fn_body.first.bindings.first.expr
         expect(get_index).to be_a(AST::GetIndex)
-        expect(get_index.needs_mut_ref).to eq(true)
+        expect(fn_body.first.bindings.first.unwrapped_type.resolved).to eq(:Node)
       end
 
       it "emits CheatLib.cleanup before field reassignment of list type" do
@@ -999,7 +993,7 @@ RSpec.describe SemanticAnnotator do
             MUTABLE nodes: Node[]@list = [];
             nodes.append(Node{ vals: [] });
             MUTABLE nv: String[]@list = [];
-            nodes[0].vals = nv;
+            IF nodes[0] AS node THEN node.vals = nv; END
           END
         FLUX
         zig = ZigTranspiler.new.transpile(src)

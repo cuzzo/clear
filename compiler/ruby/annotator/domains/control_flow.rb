@@ -497,7 +497,10 @@ module Annotator
             node.bindings.each do |b|
               unwrapped = b.unwrapped_type  # always a Type (never nil)
               sym = unwrapped.resolved
-              current_scope.declare(b.name, nil, unwrapped, false, false, nil, :stack)
+              root = AST.root_identifier(b.expr)
+              mutable_list_alias = b.expr.is_a?(AST::GetIndex) && root &&
+                !current_scope.is_immutable?(root.name) && unwrapped.struct?
+              current_scope.declare(b.name, nil, unwrapped, mutable_list_alias, false, nil, :stack)
               entry = current_scope.local_entry!(b.name)
               b.symbol = entry
               # Propagate non_escaping when the source is borrow-derived from a
@@ -505,12 +508,17 @@ module Annotator
               # of one). IF-AS on `p[i]` / `p.field` where `p` is the alias
               # makes the new binding a borrow into locked data; it must not
               # escape the enclosing WITH scope either.
+              container_source = find_container_source(b.expr)
               if (src_sym = AST.root_identifier(b.expr)&.symbol)
                 entry.mark_non_escaping! if src_sym.non_escaping
-                entry.lifetime = SymbolEntry.tied_lifetime([src_sym]) if find_container_source(b.expr)
+                if container_source
+                  entry.lifetime = SymbolEntry.tied_lifetime([src_sym])
+                  entry.mark_borrowed_alias!
+                end
               end
               classify_ownership!(entry)
               og_declare(b.name.to_s, nil, unwrapped)
+              ownership_graph[b.name.to_s]&.kind = :borrowed if container_source
             end
             visit_stmts(node.then_branch)
             nil

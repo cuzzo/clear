@@ -738,6 +738,30 @@ pub const CheatLib = struct {
         }
     }
 
+    // Bounds-safe indexing for @node lists. NodeRef already reserves zero as
+    // NIL, so returning a Zig optional would add a second nullable encoding
+    // and break its compact four-byte representation. An out-of-bounds read
+    // therefore becomes the element type's zero/default NodeRef sentinel.
+    pub fn getNodeAt(container: anytype, index: anytype) ElementType(@TypeOf(container)) {
+        return getAtOpt(container, index) orelse .{};
+    }
+
+    // Mutable counterpart used by `IF list[i] AS item`: the optional pointer
+    // keeps the bounds check explicit while making the captured struct an
+    // alias of the real list slot rather than a detached value copy.
+    pub fn getAtPtrOpt(container: anytype, index: anytype) ?*ElementType(@TypeOf(container)) {
+        const i: usize = @intCast(index);
+        const c0 = if (@typeInfo(@TypeOf(container)) == .optional) container.? else container;
+        const c = if (@typeInfo(@TypeOf(c0)) == .pointer and @typeInfo(@TypeOf(c0)).pointer.size == .one) c0 else &c0;
+        if (@hasField(@TypeOf(c.*), "items")) {
+            if (i >= c.items.len) return null;
+            return &c.items[i];
+        } else {
+            if (i >= c.len) return null;
+            return &c[i];
+        }
+    }
+
     // First element, or null if empty. Backs CLEAR's `.first()` predicate.
     pub fn firstOpt(container: anytype) ?ElementType(@TypeOf(container)) {
         const c0 = if (@typeInfo(@TypeOf(container)) == .optional) container.? else container;
@@ -1031,6 +1055,177 @@ pub const CheatLib = struct {
     pub const Pool = DataStructures.Pool;
     pub const PagedSlotMap = DataStructures.PagedSlotMap;
     pub const PagedSlotMapWithDrop = DataStructures.PagedSlotMapWithDrop;
+
+    /// A nullable, typed, generational graph reference. Zero is NIL; live
+    /// PagedSlotMap handles are stored plus one, so both `T@node` and
+    /// `?T@node` occupy exactly four bytes.
+    pub fn NodeRef(comptime T: type) type {
+        _ = T;
+        return packed struct(u32) {
+            const Self = @This();
+            encoded: u32 = 0,
+
+            pub inline fn fromHandle(raw_handle: u32) Self {
+                return .{ .encoded = raw_handle +% 1 };
+            }
+
+            pub inline fn handle(self: Self) ?u32 {
+                if (self.encoded == 0) return null;
+                return self.encoded -% 1;
+            }
+
+            pub inline fn isNil(self: Self) bool {
+                return self.encoded == 0;
+            }
+        };
+    }
+
+    /// Per-(Runtime,T) storage synthesized for `T@node`. Source programs see
+    /// ordinary object references; the compiler inserts these calls at node
+    /// construction and dereference sites.
+    pub fn NodeStore(comptime T: type) type {
+        return struct {
+            const Self = @This();
+            const Ref = NodeRef(T);
+            const Map = PagedSlotMapWithDrop(T, dropValue);
+            const initial_capacity: u32 = Map.region_capacity;
+
+            const State = struct {
+                owner: *Runtime,
+                owner_id: u64,
+                map: Map,
+                next: ?*State = null,
+            };
+
+            const Cache = struct {
+                owner_id: u64 = 0,
+                state: ?*State = null,
+            };
+
+            var states: ?*State = null;
+            var states_lock: compat.Mutex = .{};
+            threadlocal var cache: Cache = .{};
+
+            fn dropValue(alloc: std.mem.Allocator, value: *T) void {
+                CheatLib.cleanup(T, alloc, value);
+            }
+
+            fn destroy(raw: *anyopaque) void {
+                const current: *State = @ptrCast(@alignCast(raw));
+                states_lock.lock();
+                var link = &states;
+                while (link.*) |candidate| {
+                    if (candidate == current) {
+                        link.* = candidate.next;
+                        break;
+                    }
+                    link = &candidate.next;
+                }
+                states_lock.unlock();
+                current.map.deinit();
+                current.owner.heap_allocator.destroy(current);
+                if (cache.state == current) cache = .{};
+            }
+
+            fn ensure(rt: *Runtime) !*State {
+                if (cache.owner_id == rt.instance_id) {
+                    if (cache.state) |current| return current;
+                }
+
+                states_lock.lock();
+                defer states_lock.unlock();
+                var cursor = states;
+                while (cursor) |current| : (cursor = current.next) {
+                    if (current.owner_id == rt.instance_id) {
+                        cache = .{ .owner_id = rt.instance_id, .state = current };
+                        return current;
+                    }
+                }
+
+                const current = try rt.heap_allocator.create(State);
+                errdefer rt.heap_allocator.destroy(current);
+                current.* = .{
+                    .owner = rt,
+                    .owner_id = rt.instance_id,
+                    .map = try Map.initCapacity(rt.heap_allocator, initial_capacity),
+                    .next = states,
+                };
+                errdefer current.map.deinit();
+                try rt.registerFinalizer(.{ .context = current, .run = destroy });
+                states = current;
+                cache = .{ .owner_id = rt.instance_id, .state = current };
+                return current;
+            }
+
+            inline fn lookup(rt: *Runtime) ?*State {
+                if (cache.owner_id == rt.instance_id) return cache.state;
+
+                states_lock.lock();
+                defer states_lock.unlock();
+                var cursor = states;
+                while (cursor) |current| : (cursor = current.next) {
+                    if (current.owner_id == rt.instance_id) {
+                        cache = .{ .owner_id = rt.instance_id, .state = current };
+                        return current;
+                    }
+                }
+                return null;
+            }
+
+            pub fn create(rt: *Runtime, value: T) !Ref {
+                const current = try ensure(rt);
+                return insertGrowing(&current.map, value);
+            }
+
+            pub fn bind(rt: *Runtime) !*Map {
+                return &(try ensure(rt)).map;
+            }
+
+            pub fn createBound(map: *Map, value: T) !Ref {
+                return insertGrowing(map, value);
+            }
+
+            fn insertGrowing(map: *Map, value: T) !Ref {
+                const handle = map.insert(value) catch |err| switch (err) {
+                    error.Full => blk: {
+                        const current_capacity: u32 = @intCast(map.nodes.len);
+                        if (current_capacity == Map.max_capacity) return error.Full;
+                        const next_capacity = @min(Map.max_capacity, current_capacity * 2);
+                        try map.growCapacity(next_capacity);
+                        break :blk try map.insert(value);
+                    },
+                };
+                return Ref.fromHandle(handle);
+            }
+
+            pub inline fn getBound(map: *Map, ref: Ref) ?*T {
+                const handle = ref.handle() orelse return null;
+                return map.get(handle);
+            }
+
+            pub inline fn removeBound(map: *Map, ref: Ref) bool {
+                const handle = ref.handle() orelse return false;
+                return map.remove(handle);
+            }
+
+            pub inline fn get(rt: *Runtime, ref: Ref) ?*T {
+                const handle = ref.handle() orelse return null;
+                const current = lookup(rt) orelse return null;
+                return current.map.get(handle);
+            }
+
+            pub inline fn remove(rt: *Runtime, ref: Ref) bool {
+                const handle = ref.handle() orelse return false;
+                const current = lookup(rt) orelse return false;
+                return current.map.remove(handle);
+            }
+
+            pub inline fn count(rt: *Runtime) usize {
+                const current = lookup(rt) orelse return 0;
+                return current.map.length();
+            }
+        };
+    }
     pub const SoaList = DataStructures.SoaList;
     pub const SoaPool = DataStructures.SoaPool;
     pub const ShardedPool = DataStructures.ShardedPool;

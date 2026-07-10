@@ -17,10 +17,22 @@ module MethodAnalysis
   def resolve_collection_method(node)
     T.bind(self, SemanticAnnotator) rescue nil
     obj_type = node.object.full_type!(context: "collection method receiver")
+    implicit_safe_nav = obj_type.optional? && node.object.respond_to?(:safe_nav_chain) &&
+      node.object.safe_nav_chain == true
+    obj_type = T.must(obj_type.wrapped_type) if implicit_safe_nav
     config = COLLECTION_METHOD_CONFIGS[obj_type.dispatch_key]
     return false unless config
-    resolve_typed_method(node, obj_type, config[:registry], config[:tag],
-                         config[:label].call(obj_type))
+    handled = resolve_typed_method(node, obj_type, config[:registry], config[:tag],
+                                   config[:label].call(obj_type))
+    navigation = node.object.is_a?(AST::OptionalUnwrap) || implicit_safe_nav
+    if handled && navigation
+      result = node.full_type!(context: "safe-navigation method result")
+      unless result.optional?
+        stamp_type!(node, Type.optional_of(result))
+        node.safe_nav_chain = true
+      end
+    end
+    handled
   end
 
   # Narrow a collection's element type after an intrinsic call with
@@ -88,6 +100,16 @@ module MethodAnalysis
       arg_validator.call(node, node.args, obj_type, method(:error!))
     end
 
+    # Collection element capability is concrete even though the intrinsic
+    # registry intentionally uses Any. Preserve expected-type @node coercion
+    # for object-style `node.children.append(Node{...})`.
+    element_type = obj_type.element_type
+    if element_type&.node_reference? && ["append", "push", "insert"].include?(node.name) && node.args.any?
+      value_arg = T.must(node.args.last)
+      actual_type = value_arg.full_type!(context: "@node collection insertion")
+      value_arg.coerced_type = element_type if !actual_type.node_reference? && element_type.accepts?(actual_type)
+    end
+
     # Set tag and return type
     node.send(:"#{tag_field}=", node.name.to_sym)
     stamp_type!(node, defn.return_def.resolve(obj_type, [], self))
@@ -140,6 +162,14 @@ module MethodAnalysis
     node.can_fail = node.can_fail || defn.can_fail || defn_allocates
     node.error_kind = defn.intrinsic_error_kind
     node.error_type = defn.intrinsic_error_type
+
+    # move_if_takes_ownership! may restamp the value node; apply the expected
+    # element representation last so lowering observes the @node coercion.
+    if element_type&.node_reference? && ["append", "push", "insert"].include?(node.name) && node.args.any?
+      value_arg = T.must(node.args.last)
+      actual_type = value_arg.full_type!(context: "@node collection insertion")
+      value_arg.coerced_type = element_type if !actual_type.node_reference? && element_type.accepts?(actual_type)
+    end
 
     true
   end

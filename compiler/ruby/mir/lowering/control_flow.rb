@@ -185,19 +185,40 @@ module MIRLoweringControlFlow
     T.bind(self, MIRLowering) rescue nil
     capture_markers = T.let([], T::Array[MIR::Stmt])
     mir_bindings = node.bindings.map do |b|
-      expr, pending = lower_head { lower_control_condition(b.expr, transfers_to_capture: true) }
+      expr, pending = lower_head do
+        if mutable_struct_list_bind?(b.expr)
+          index = T.cast(b.expr, AST::GetIndex)
+          emit_builtin(:getAtPtrOpt, [MIR::AddressOf.new(lower(index.target)), lower(index.index)])
+        else
+          lower_control_condition(b.expr, transfers_to_capture: true)
+        end
+      end
       if (capture_cleanup = bind_capture_cleanup(b.expr))
         capture_name = b.name.to_s
         capture_type = Type.from_node!(b.expr)
         capture_markers << MIR::AllocMark.new(capture_name, :heap, capture_type, :function)
         capture_markers << MIR::Cleanup.new(capture_name, capture_cleanup)
       end
-      { expr: loop_condition_expr(expr, pending), capture: b.name }
+      {
+        expr: loop_condition_expr(expr, pending),
+        capture: b.name,
+        node_ref: Type.from_node!(b.expr).node_reference?,
+      }
     end
     then_body = capture_markers + with_if_bind_alias_maps(node) { lower_body(node.then_branch) }
 
     else_body = (node.else_branch && !node.else_branch.empty?) ? lower_body(node.else_branch) : nil
     MIR::IfBindStmt.new(mir_bindings, then_body, else_body)
+  end
+
+  sig { params(expr: AST::Node).returns(T::Boolean) }
+  def mutable_struct_list_bind?(expr)
+    return false unless expr.is_a?(AST::GetIndex)
+
+    receiver = expr.target.full_type!(context: "IF list binding receiver")
+    result = expr.full_type!(context: "IF list binding result")
+    inner = result.optional? ? T.must(result.wrapped_type) : result
+    receiver.list_collection? && inner.struct? && !inner.node_reference?
   end
 
   sig do

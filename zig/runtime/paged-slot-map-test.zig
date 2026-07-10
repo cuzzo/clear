@@ -69,6 +69,33 @@ test "PagedSlotMap inserts resolves mutates and fills" {
     try std.testing.expectEqual(Map.handleGeneration(a), 0);
 }
 
+test "PagedSlotMap grows without invalidating handles or dropping moved payloads" {
+    var probe = DiscardProbe{};
+    var drops: usize = 0;
+    var map = try OwnedMap.initWithAllocators(
+        std.testing.allocator,
+        std.heap.page_allocator,
+        2,
+        &probe,
+        DiscardProbe.discard,
+    );
+    defer map.deinit();
+
+    const first = try map.insert(.{ .value = 10, .drops = &drops });
+    const second = try map.insert(.{ .value = 20, .drops = &drops });
+    try map.growCapacity(5);
+    try std.testing.expectEqual(@as(usize, 5), map.nodes.len);
+    try std.testing.expectEqual(@as(usize, 0), drops);
+    try std.testing.expectEqual(@as(u64, 10), map.get(first).?.value);
+    try std.testing.expectEqual(@as(u64, 20), map.get(second).?.value);
+
+    const third = try map.insert(.{ .value = 30, .drops = &drops });
+    try std.testing.expectEqual(@as(u64, 30), map.get(third).?.value);
+    try std.testing.expect(map.debugValidate());
+    try map.growCapacity(5); // same capacity is a no-op
+    try std.testing.expectError(error.CapacityTooLarge, map.growCapacity(Map.max_capacity + 1));
+}
+
 test "PagedSlotMap swap remove keeps dense storage and moved handle valid" {
     var probe = DiscardProbe{};
     var map = try testMap(8, &probe);

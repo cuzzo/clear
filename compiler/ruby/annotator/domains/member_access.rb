@@ -14,6 +14,9 @@ module Annotator
         visit(node.index)
 
         target_type_info = node.target.full_type!(context: "index target")
+        implicit_safe_nav = target_type_info.optional? && node.target.respond_to?(:safe_nav_chain) &&
+          node.target.safe_nav_chain == true
+        target_type_info = T.must(target_type_info.wrapped_type) if implicit_safe_nav
 
         if target_type_info.tuple?
           unless node.index.is_a?(AST::Literal) && node.index.value.is_a?(Integer)
@@ -36,8 +39,10 @@ module Annotator
           # Registry-driven: type and ownership from INDEX_OPS
           result_type = IntrinsicRegistry.to_return_def(op[:return_type])
                                         .resolve(target_type_info, [], self)
-          if node.target.is_a?(AST::OptionalUnwrap) && !result_type.optional?
-            result_type = Type.new(:"?#{result_type.resolved}")
+          navigation = node.target.is_a?(AST::OptionalUnwrap) || implicit_safe_nav
+          if navigation && !result_type.optional?
+            result_type = Type.optional_of(result_type)
+            node.safe_nav_chain = true
           end
           stamp_type!(node, result_type)
           node.container_borrow = true if op[:container_borrow]
@@ -83,7 +88,17 @@ module Annotator
 
         emit_moved_field_path_error_if_needed!(node)
 
-        type = node.target.resolved_type
+        target_type = node.target.full_type!(context: "field receiver")
+        implicit_safe_nav = target_type.optional? && node.target.respond_to?(:safe_nav_chain) &&
+          node.target.safe_nav_chain == true
+        if target_type.optional? && !node.target.is_a?(AST::OptionalUnwrap) && !implicit_safe_nav
+          emit_optional_field_safe_nav_finding!(node, target_type)
+          # FixCollector mode records the finding without raising. Continue
+          # against the wrapped schema so IDE diagnostics do not cascade.
+          target_type = T.must(target_type.wrapped_type)
+        end
+        target_type = T.must(target_type.wrapped_type) if implicit_safe_nav
+        type = target_type.resolved
 
         # Struct Field Lookup
         if node.wildcard?
@@ -165,8 +180,10 @@ module Annotator
             field_type.strip_layout!
           end
         end
-        if node.target.is_a?(AST::OptionalUnwrap) && !field_type.optional?
-          field_type = Type.new(:"?#{field_type.resolved}")
+        navigation = node.target.is_a?(AST::OptionalUnwrap) || implicit_safe_nav
+        if navigation && !field_type.optional?
+          field_type = Type.optional_of(field_type)
+          node.safe_nav_chain = true
         end
         stamp_type!(node, field_type)
       end
@@ -456,8 +473,10 @@ module Annotator
 
           # Simple Type Check
           actual_type = val_node.full_type!(context: "struct field value")
-          if actual_type != expected_type
-            unless is_safe_autocast?(actual_type, expected_type)
+          node_coercion = expected_type.node_reference? && !actual_type.node_reference? && expected_type.accepts?(actual_type)
+          if actual_type != expected_type || node_coercion
+            unless is_safe_autocast?(actual_type, expected_type) ||
+                   (expected_type.node_reference? && expected_type.accepts?(actual_type))
               error!(node, :FIELD_TYPE_MISMATCH, field: field_name, expected: expected_type, got: actual_type)
             end
             val_node.coerced_type = expected_type

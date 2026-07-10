@@ -568,6 +568,34 @@ class MIRLowering
     plan.place(self, mir, ast_node)
   end
 
+  sig { params(value: MIR::Node, destination: Type).returns(MIR::MethodCall) }
+  def node_create_mir(value, destination)
+    payload = T.must(destination.node_payload_type)
+    zig_type = transpile_type(payload.resolved.to_s)
+    function_state.node_store_types << zig_type
+    store = MIR::Ident.new("CheatLib.NodeStore(#{zig_type})")
+    call = MIR::MethodCall.new(
+      store,
+      "createBound",
+      [MIR::Ident.new(node_store_binding_name(zig_type)), value],
+      true,
+      MIR::CallableContract.no_ownership(2),
+    )
+    call.result_type = Type.new(destination)
+    call
+  end
+
+  # Optional @node values use NodeRef's zero handle as NIL so they remain a
+  # compact four-byte value. Every other optional uses Zig's native null.
+  sig { params(type: Type).returns(MIR::Node) }
+  def optional_nil_mir(type)
+    if type.node_reference?
+      MIR::StructInit.new(type.zig_type, [])
+    else
+      MIR::Lit.new("null")
+    end
+  end
+
   sig { params(mir: MIR::Node, ast_node: AST::Node, dest_alloc: T.nilable(Symbol), dest_type: T.nilable(Type::TypeInput)).returns(DestinationPlacementPlan) }
   def destination_placement_plan(mir, ast_node, dest_alloc, dest_type)
     return destination_keep_plan(dest_alloc) unless dest_alloc
@@ -1054,15 +1082,28 @@ class MIRLowering
   sig { params(mir: T.nilable(LoweredMir), node: AST::Locatable).returns(T.nilable(LoweredMir)) }
   def apply_lowered_coercion(mir, node)
     return mir unless mir && node.respond_to?(:coerced_type) && node.coerced_type
-    coerced_type = Type.new(node.coerced_type)
-    return mir unless node.typed? && coerced_type != node.full_type!
+    coerced_type = Type.new(node.coerced_type_info || node.coerced_type)
+    return mir unless node.typed?
+    actual_type = node.full_type!
+    return mir if coerced_type.semantic_type_key == actual_type.semantic_type_key
     return mir if stack_fixed_array_coercion?(node)
     return mir unless mir.is_a?(MIR::Emittable)
 
-    union_wrapped = lower_union_payload_coercion(mir, node, node.full_type!, coerced_type)
+    # Optionality is encoded inside NodeRef's zero sentinel; T@node and
+    # ?T@node therefore have the same Zig representation and need no cast.
+    return mir if coerced_type.node_reference? && actual_type.node_reference?
+
+    if coerced_type.node_reference? && !actual_type.node_reference?
+      if actual_type.resolved == :NIL
+        return MIR::StructInit.new(coerced_type.zig_type, [])
+      end
+      return node_create_mir(T.cast(mir, MIR::Node), coerced_type)
+    end
+
+    union_wrapped = lower_union_payload_coercion(mir, node, actual_type, coerced_type)
     return union_wrapped if union_wrapped
 
-    mir_cast(mir, node.full_type!, coerced_type) || mir
+    mir_cast(mir, actual_type, coerced_type) || mir
   end
 
   sig { params(mir: MIR::Emittable, node: AST::Locatable, actual_type: Type, coerced_type: Type).returns(T.nilable(MIR::Emittable)) }
@@ -2305,13 +2346,14 @@ class MIRLowering
 
 	  sig { params(value_mir: MIR::Node, ast_value: AST::Node, source: String, target_alloc: T.nilable(Symbol)).returns(T::Array[MIR::OwnershipOperandFact]) }
 	  def ownership_operands_for_lowered_takes_arg(value_mir, ast_value, source, target_alloc)
-	    ti = Type.from_node!(ast_value, context: "ownership sink argument")
+	    ti = ownership_operand_type(ast_value, "ownership sink argument")
 	    ownership_operands_for_sink_value(value_mir, ast_value, ti, source, target_alloc, require_visible_owned: true)
 	  end
 
 	  sig { params(ast_value: AST::Node, context: String).returns(Type) }
 	  def ownership_operand_type(ast_value, context)
-    Type.new(ast_value.full_type!(context: context))
+    coerced = ast_value.respond_to?(:coerced_type_info) ? ast_value.coerced_type_info : nil
+    Type.new(coerced || ast_value.full_type!(context: context))
   end
 
 	  sig do
@@ -2667,6 +2709,19 @@ class MIRLowering
     ZigType.primitive_numeric_identifier?(cleaned) ? "@\"#{cleaned}\"" : cleaned
   end
 
+  # Stable Zig identifier for a hidden per-type @node store. Avoid text/regex
+  # rewriting in MIR: this is a character-wise identifier encoding, not a
+  # rewrite of generated Zig expressions.
+  sig { params(zig_type: String).returns(String) }
+  def node_store_binding_name(zig_type)
+    encoded = zig_type.each_char.map do |char|
+      alpha = (char >= "A" && char <= "Z") || (char >= "a" && char <= "z")
+      digit = char >= "0" && char <= "9"
+      alpha || digit || char == "_" ? char : "_"
+    end.join
+    "__node_store_#{encoded}"
+  end
+
   sig { params(node: AST::Node).returns(Symbol) }
   def alloc_for_node(node)
     placement_for_node(node)
@@ -2777,7 +2832,11 @@ class MIRLowering
       receiver ||= node.object if node.is_a?(AST::MethodCall)
       receiver ||= node.args.first if node.is_a?(AST::FuncCall) && node.mutates_receiver
       root = root_receiver_node(receiver)
-      placement_for_node(T.cast(root || receiver || node, AST::Node))
+      selected = T.cast(root || receiver || node, AST::Node)
+      selected_type = Type.from_node!(selected, context: "allocator receiver")
+      return :heap if selected_type.node_reference?
+
+      placement_for_node(selected)
     when :node_storage
       function_state.current_decl_alloc || placement_for_node(T.cast(target_node || node, AST::Node))
     else :heap
@@ -2916,6 +2975,25 @@ class MIRLowering
     end
   end
 
+  sig { params(field: AST::StructField).returns(T.nilable(MIR::Emittable)) }
+  def lower_struct_field_default(field)
+    if field.type.optional? && field.type.node_reference? &&
+       field.default.is_a?(AST::Literal) && field.default.value.nil?
+      return MIR::StructInit.new(field.type.zig_type(is_field: true), [])
+    end
+    return lower_field_default(T.must(field.default)) if field.default
+
+    type = field.type
+    if type.optional? && type.node_reference?
+      return MIR::StructInit.new(type.zig_type(is_field: true), [])
+    end
+    if type.list_collection?
+      return MIR::ContainerInit.new(type.zig_type(is_field: true), :array_list_empty, nil, nil)
+    end
+
+    nil
+  end
+
   sig { params(node: AST::StructDef).returns(MIR::Node) }
   def lower_struct_def(node)
     lowering_schemas.register_struct(node.name, Schemas::StructSchema.new(fields: node.field_decls))
@@ -2925,7 +3003,7 @@ class MIRLowering
       comptime_params = node.type_params.map { |p| "comptime #{p}: type" }
       fields_mir = node.field_decls.map { |name, fd|
         zig_t = transpile_type(fd.type, is_field: true)
-        default_mir = fd.default ? lower_field_default(T.must(fd.default)) : nil
+        default_mir = lower_struct_field_default(fd)
         MIR::FieldDef.new(name.to_s, zig_t, default_mir)
       }
       inner_struct = MIR::StructDef.new(nil, fields_mir, nil, nil)
@@ -2934,7 +3012,7 @@ class MIRLowering
     else
       fields = node.field_decls.map { |name, fd|
         zig_t = transpile_type(fd.type, is_field: true)
-        default_mir = fd.default ? lower_field_default(T.must(fd.default)) : nil
+        default_mir = lower_struct_field_default(fd)
         MIR::FieldDef.new(name.to_s, zig_t, default_mir)
       }
       MIR::StructDef.new(node.name, fields, nil, nil)
@@ -3506,7 +3584,7 @@ class MIRLowering
     entry = FunctionSignature.unwrap(IntrinsicRegistry.lookup(BUILTIN_OPS, name))
     raise "emit_builtin: unknown builtin :#{name}" unless entry
     if bc_target? && entry.intrinsic_bc?
-      return MIR::InlineBc.new(name, args, entry)
+      return MIR::InlineBc.new(entry.intrinsic_bc_op_or(name), args, entry)
     end
     MIR::RegistryCall.new(
       entry: entry,
@@ -3525,8 +3603,9 @@ class MIRLowering
   sig { params(target: MIR::Node, index: MIR::Node, ast_node: AST::Node, type_info: Type).returns(T.nilable(MIR::IndexGet)) }
   def direct_index_get(target, index, ast_node, type_info)
     ti = Type.new(type_info)
-    # @list types defer to CheatLib.getAt (the registry fallback). The runtime
-    # helper dispatches ArrayList vs slice via comptime @hasField, so we don't
+    # @list types defer to their registry accessor (bounds-safe getAtOpt for
+    # reads). The runtime helper dispatches ArrayList vs slice via comptime
+    # @hasField, so we don't
     # re-derive container shape from "is this a param?" here. Keep direct
     # IndexGet only for true slice-backed exprs (string@raw, fixed slices).
     return nil if ti.list_collection?

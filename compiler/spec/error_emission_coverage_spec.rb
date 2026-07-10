@@ -1593,10 +1593,10 @@ RSpec.describe "error emission coverage" do
           FN main() RETURNS Void ->
               MUTABLE list: Value[]@list = [];
               list.append(Value.Nil);
-              consume(list[0_i64]);
+            IF list[0_i64] AS value THEN consume(value); END
           END
         CLEAR
-      }.to raise_error(CompilerError, /Cannot pass container index access to TAKES parameter/)
+      }.to raise_error(CompilerError, /Cannot pass borrowed access to TAKES parameter/)
     end
 
     it "compiles when the element is passed to a borrow parameter (no TAKES)" do
@@ -1606,7 +1606,7 @@ RSpec.describe "error emission coverage" do
         FN main() RETURNS Void ->
             MUTABLE list: Value[]@list = [];
             list.append(Value.Nil);
-            inspect(list[0_i64]);
+            IF list[0_i64] AS value THEN inspect(value); END
         END
       CLEAR
     end

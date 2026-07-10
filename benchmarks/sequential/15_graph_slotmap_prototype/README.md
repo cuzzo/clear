@@ -1,6 +1,7 @@
 # Graph slot-map prototype
 
-This is a runtime-design benchmark, not yet a CLEAR surface benchmark. It compares:
+This directory contains both the runtime-design matrix and the end-to-end
+CLEAR `@node` acceptance benchmark. It compares:
 
 - `bench.zig`: the proposed safe core — dense payload storage, a logical-slot to dense-index table, compact bounded-generation handles, checked lookup, and O(1) swap-remove;
 - `bench_clear_runtime.zig`: CLEAR's actual `CheatLib.Pool(T)` and the actual `Rc`/`WeakRc` primitives used by `@multiowned`, `LINK`, and `RESOLVE`;
@@ -10,6 +11,11 @@ This is a runtime-design benchmark, not yet a CLEAR surface benchmark. It compar
   raw pointers, and the same dense slotmap without generations. Only the last
   preserves its logical handle mapping; none provides equivalent stale-ID
   safety.
+- `bench_node.clear`: idiomatic object-style CLEAR using `@node`; this goes
+  through the real parser, annotator, MIR verifier, and Zig backend;
+- `bench_node_manual.zig`: the equivalent safe workload written directly
+  against `PagedSlotMap`, including nullable-edge checks and checked checksum
+  arithmetic.
 
 The workload initializes four edges on every node, performs normalized local
 and random traversal, rewrites edges, churns the unreferenced quarter, collapses
@@ -22,7 +28,31 @@ Run it with:
 benchmarks/sequential/15_graph_slotmap_prototype/run.sh
 BENCH_SCALE=0.25 RUNS=3 benchmarks/sequential/15_graph_slotmap_prototype/run.sh
 RUNS=5 benchmarks/sequential/15_graph_slotmap_prototype/run_matrix.sh
+RUNS=7 benchmarks/sequential/15_graph_slotmap_prototype/run_node.sh
 ```
+
+## End-to-end `@node` result
+
+On the pinned one-million-node acceptance workload (five interleaved
+ReleaseFast runs), medians were:
+
+| implementation | build | reads | rewrites | timed reads+writes |
+|---|---:|---:|---:|---:|
+| idiomatic CLEAR `@node` | 33 ms | 137 ms | 17 ms | 154 ms |
+| manual safe Zig `PagedSlotMap` | 16 ms | 118 ms | 14 ms | 132 ms |
+
+Both produced checksum `4000084000000`. With bounds-safe `@list` reads enabled,
+idiomatic CLEAR is 1.17x the manual Zig time in the steady-state phases and
+1.26x when construction is included (187 ms versus 148 ms). Peak RSS in a
+separate run was 34,376 KiB for CLEAR and 33,024 KiB for manual Zig (+4.1%,
+primarily fixed Runtime overhead). The comparison now charges CLEAR for the
+language-level optional checks at every `@list` index; the manual version uses
+its known-in-range sidecar array directly before each slot-map lookup.
+
+The CLEAR build cost is higher because the implicit store begins at 4,096
+slots and grows to the compact-handle maximum while preserving handles; the
+manual benchmark reserves maximum capacity immediately. This avoids charging
+small graphs roughly 8 MiB of metadata just for using `@node`.
 
 Every program prints internal phase times, capacity/virtual-memory estimates,
 and checksums. The Zig prototype reserves contiguous dense arrays, swap-removes

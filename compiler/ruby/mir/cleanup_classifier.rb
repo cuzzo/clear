@@ -799,6 +799,9 @@ module CleanupClassifier
   # array_struct_strings) stay as separate methods due to their size.
   sig { params(ti: Type, node: AST::Node, schema_lookup: Proc).returns(T.nilable(CleanupEntry)) }
   private_class_method def self.classify_binding(ti, node, schema_lookup)
+    # @node bindings are Copy handles. Their payload cleanup belongs to the
+    # Runtime-registered NodeStore, never to the lexical handle binding.
+    return nil if ti.node_reference?
     facts = binding_cleanup_facts(node)
     return nil if facts.container_borrow
     return nil if ti.optional? && facts.empty_initializer && !facts.mutable_binding_mutated

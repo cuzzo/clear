@@ -65,10 +65,10 @@ FN main!() RETURNS !Void ->
     record!(items, 3_i64);
 
     ASSERT items.length() == 3_i64, "len";
-    ASSERT items[0_i64].step == 1_i64, "first.step (UAF site)";
-    ASSERT items[0_i64].kind == 1_i64, "first.kind";
-    ASSERT items[0_i64].iAfter == 1_i64, "first.iAfter";
-    ASSERT items[1_i64].step == 2_i64, "second.step";
-    ASSERT items[2_i64].step == 3_i64, "third.step";
+    ASSERT items[0_i64]?.step == 1_i64, "first.step (UAF site)";
+    ASSERT items[0_i64]?.kind == 1_i64, "first.kind";
+    ASSERT items[0_i64]?.iAfter == 1_i64, "first.iAfter";
+    ASSERT items[1_i64]?.step == 2_i64, "second.step";
+    ASSERT items[2_i64]?.step == 3_i64, "third.step";
     RETURN;
 END

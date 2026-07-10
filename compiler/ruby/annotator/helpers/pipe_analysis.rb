@@ -771,8 +771,8 @@ module PipeAnalysis
 
     visit(node.right) # Resolves 'f' to its Signature/Type
 
-    sig = node.right.full_type!(context: "pipeline callable")
-    sig = sig.raw if sig.is_a?(Type) && sig.raw.is_a?(FunctionSignature)
+    callable_type = node.right.full_type!(context: "pipeline callable")
+    sig = callable_type.fn_type? ? callable_type.function_signature : callable_type.resolved
     func_name = node.right.name
 
     if sig.is_a?(FunctionSignature)

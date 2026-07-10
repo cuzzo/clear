@@ -727,6 +727,7 @@ class Type
   def self.ownership_surface_name_for(value)
     return "@multiowned" if value == :multiowned
     return "@shared" if value == :shared
+    return "@node" if value == :node
     return "@split" if value == :split
     return "@link" if value == :link
     return "@frozen" if value == :frozen
@@ -2057,6 +2058,15 @@ class Type
     # 1. Any
     return true if any? || other_type.any?
 
+    # Once a destination declares T@node, assigning a plain T value inserts
+    # it into the compiler-inferred NodeStore. Existing handles pass through.
+    if node_reference?
+      payload = node_payload_type
+      other_payload = other_type.node_payload_type
+      return true if payload && other_payload && payload.resolved == other_payload.resolved
+      return true if payload && payload.resolved == other_type.resolved
+    end
+
     # 2. String@symbol is a canonicalized string capability. A plain String
     # cannot satisfy it without a future runtime intern(rt, s) operation.
     return other_type.string? && other_type.symbol? if string? && symbol?
@@ -2349,6 +2359,25 @@ class Type
   sig { returns(T::Boolean) }
   def shared?
     ownership == :shared
+  end
+
+  sig { returns(T::Boolean) }
+  def node?
+    ownership == :node
+  end
+
+  sig { returns(T::Boolean) }
+  def node_reference?
+    return true if node?
+    optional? && !!wrapped_type&.node?
+  end
+
+  sig { returns(T.nilable(Type)) }
+  def node_payload_type
+    return T.must(wrapped_type).node_payload_type if optional? && wrapped_type&.node?
+    return self if node?
+
+    nil
   end
 
   sig { returns(T::Boolean) }
@@ -3553,6 +3582,9 @@ class Type
   # Primitives, strings, slices, enums, and unions are implicitly copyable.
   sig { params(lookup_arg: T.nilable(SchemaResolver), lookup_block: T.nilable(SchemaLookup)).returns(T::Boolean) }
   def implicitly_copyable?(lookup_arg = nil, &lookup_block)
+    # @node values are compact generational handles. The NodeStore owns the
+    # payload; copying a handle never copies or transfers the payload.
+    return true if node?
     return true if primitive?
     if optional?
       return lookup_block ? T.must(wrapped_type).implicitly_copyable?(&lookup_block) : T.must(wrapped_type).implicitly_copyable?(lookup_arg)
@@ -3604,6 +3636,7 @@ class Type
 
   sig { params(schema_lookup: T.nilable(SchemaLookup), seen: T.nilable(T::Set[String])).returns(T::Boolean) }
   def recursive_cleanup_shape?(schema_lookup = nil, seen = nil)
+    return false if node_reference?
     seen_set = T.let(seen || Set.new, T::Set[String])
     key = type_id.key
     return false if seen_set.include?(key)
@@ -3699,6 +3732,7 @@ class Type
   sig { params(schema_lookup: T.nilable(SchemaLookup), seen: T.nilable(T::Set[String])).returns(T::Boolean) }
   # ruby-to-clear: effects reentrant
   def needs_promotion?(schema_lookup = nil, seen = nil)
+    return false if node_reference?
     return true if string? || list_collection? || (map? && !numeric_map?)
     seen_set = T.let(seen || Set.new, T::Set[String])
     key = "promotion:#{type_id.key}"
@@ -3728,6 +3762,9 @@ class Type
   sig { params(schema_lookup: T.nilable(SchemaLookup), seen: T.nilable(T::Set[String])).returns(T::Boolean) }
   # ruby-to-clear: effects reentrant
   def needs_cleanup?(schema_lookup = nil, seen = nil)
+    # NodeStore is registered with Runtime and releases every live payload at
+    # Runtime.deinit. Individual handles are non-owning Copy values.
+    return false if node?
     return false if borrowed_reference?
     if optional?
       inner = wrapped_type
@@ -4395,6 +4432,7 @@ class Type
     caps.flat_map { |cap| cap.split(":") }.each do |cap|
       case cap
       when "shared" then ownership = :shared
+      when "node" then ownership = :node
       when "multiOwned", "multiowned" then ownership = :multiowned
       when "link" then ownership = :link
       when "split" then ownership = :split
@@ -4579,6 +4617,9 @@ class Type
       return tense_zig_type(is_param: is_param, is_field: is_field)
     end
 
+    # A node reference is always a four-byte nullable generational handle.
+    # Optionality is encoded by NodeRef's zero sentinel instead of Zig's
+    # optional tag, keeping ?T@node fields compact too.
     # 1. Handle Error Union: !T -> !zig_type
     if error_union?
       inner_zig = error_union_payload_with_outer_capabilities.zig_type(is_param: is_param, is_field: is_field)
@@ -4587,8 +4628,15 @@ class Type
 
     # 2. Handle Optional: ?T -> ?zig_type
     if optional?
+      inner = T.must(wrapped_type)
+      return inner.zig_type(is_param: is_param, is_field: is_field) if inner.node?
       inner_zig = T.must(wrapped_type).zig_type(is_param: is_param, is_field: is_field)
       return "?#{inner_zig}"
+    end
+
+
+    if node?
+      return "CheatLib.NodeRef(#{Type.zig_type_name_for(resolved)})"
     end
 
     # @indirect is a heap-pinned cell boxed by a single HeapCreate, so its

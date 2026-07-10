@@ -188,6 +188,18 @@ module MIRLoweringVariables
       let_node
     ).statements
 
+    # A node handle is non-owning, but mutations of collection fields inside
+    # its NodeStore payload still need allocator provenance. The store is
+    # always heap-backed, so expose that fact to MIR's inline-allocation
+    # verifier without attaching lexical cleanup to the handle.
+    if facts.ft.node_reference? && !nodes.any? { |item| item.is_a?(MIR::AllocMark) }
+      nodes.unshift(MIR::AllocMark.new(safe_name, :heap, facts.ft, :heap))
+      nodes << MIR::Cleanup.new(
+        safe_name,
+        CleanupEntry.build(:uniform, alloc: :heap, has_moved_guard: false),
+      )
+    end
+
     owner_marks = field_owner_move_marks(node)
     nodes.concat(owner_marks)
 
@@ -235,6 +247,9 @@ module MIRLoweringVariables
     placement = binding_placement_fact(node, ft, binding_entry, heap_return_var, heap_return_binding_allocates)
 
     actually_mutated = is_mutable && node.respond_to?(:var_mutated) && node.var_mutated == true
+    # Mutating a node payload does not mutate its compact handle. Only a
+    # direct reassignment of the binding requires Zig `var` storage.
+    actually_mutated = node.symbol&.reassigned == true if ft.node_reference?
     actually_mutated = actually_mutated == true
     is_heap = placement.heap?
     has_mutable_cleanup = has_mir_drop || ft.collection? || ft.dynamic_stream? || ft.bounded_stream? || ft.shared_promise? ||
@@ -897,7 +912,10 @@ module MIRLoweringVariables
     plan = assignment_target_plan(node)
     value = assignment_value(node)
     result = MIR::Set.new(plan.target, value)
-    with_ownership_consumption_for_value(result, value, node.value, "MIR::Set")
+    target_alloc = if plan.cleanup_field
+      placement_for_node(root_receiver_node(T.must(plan.cleanup_field)) || T.must(plan.cleanup_field))
+    end
+    with_ownership_consumption_for_value(result, value, node.value, "MIR::Set", target_alloc: target_alloc)
     mark_field_assignment_cleanup!(result, plan)
 
     result

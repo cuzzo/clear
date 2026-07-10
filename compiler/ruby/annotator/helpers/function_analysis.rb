@@ -815,7 +815,12 @@ module FunctionAnalysis
     return true if facts.expected_type.any? || facts.actual == :Any ||
       facts.expected_type.semantic_type_key == facts.actual_type.semantic_type_key
     return true if any_element_collection_param?(facts.expected_type, facts.actual_type)
-    return true if facts.expected_type.accepts?(facts.actual_type)
+    if facts.expected_type.accepts?(facts.actual_type)
+      if facts.expected_type.node_reference? && !facts.actual_type.node_reference?
+        facts.arg_node.coerced_type = facts.expected_type
+      end
+      return true
+    end
     return true if facts.expected_type.auto?
     return false unless is_safe_autocast?(facts.actual, facts.expected_type)
 

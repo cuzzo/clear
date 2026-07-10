@@ -24,11 +24,11 @@ FN main() RETURNS !Void ->
   END
 
   ASSERT items.length() == 3,        "items length";
-  ASSERT items[0].data.length() == 1, "items[0].data length";
-  ASSERT items[1].data.length() == 1, "items[1].data length";
-  ASSERT items[2].data.length() == 1, "items[2].data length";
-  ASSERT items[0].data[0] == 0,       "items[0].data[0]";
-  ASSERT items[1].data[0] == 10,      "items[1].data[0]";
-  ASSERT items[2].data[0] == 20,      "items[2].data[0]";
+  ASSERT items[0]?.data.length() == 1, "items[0].data length";
+  ASSERT items[1]?.data.length() == 1, "items[1].data length";
+  ASSERT items[2]?.data.length() == 1, "items[2].data length";
+  ASSERT items[0]?.data[0] == 0,       "items[0].data[0]";
+  ASSERT items[1]?.data[0] == 10,      "items[1].data[0]";
+  ASSERT items[2]?.data[0] == 20,      "items[2].data[0]";
   RETURN;
 END

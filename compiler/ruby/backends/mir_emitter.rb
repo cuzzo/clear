@@ -1767,8 +1767,15 @@ class MIREmitter
       b = node.bindings[0]
       expr = emit(b[:expr])
       suppress = b[:capture].to_s == "_" ? "" : "_ = &#{b[:capture]};\n"
-      result = "if (#{expr}) |#{b[:capture]}| {\n#{suppress}#{then_body}\n}"
-      result += " else {\n#{else_body}\n}" if else_body
+      if b[:node_ref]
+        result = "{\nconst #{b[:capture]} = #{expr};\n"
+        result += "if (!#{b[:capture]}.isNil()) {\n#{suppress}#{then_body}\n}"
+        result += " else {\n#{else_body}\n}" if else_body
+        result += "\n}"
+      else
+        result = "if (#{expr}) |#{b[:capture]}| {\n#{suppress}#{then_body}\n}"
+        result += " else {\n#{else_body}\n}" if else_body
+      end
       result
     else
       # Multi-binding: labeled break block
@@ -1776,7 +1783,11 @@ class MIREmitter
       label = "__ib_#{@if_bind_counter}"
       ok_var = "__ib_ok_#{@if_bind_counter}"
       inner = node.bindings.map { |b|
-        "const #{b[:capture]} = #{emit(b[:expr])} orelse break :#{label};"
+        if b[:node_ref]
+          "const #{b[:capture]} = #{emit(b[:expr])}; if (#{b[:capture]}.isNil()) break :#{label};"
+        else
+          "const #{b[:capture]} = #{emit(b[:expr])} orelse break :#{label};"
+        end
       }.join("\n")
       result = "var #{ok_var}: bool = false;\n"
       result += "#{label}: {\n#{inner}\n#{then_body}\n#{ok_var} = true;\n}"

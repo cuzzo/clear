@@ -628,7 +628,7 @@ RSpec.describe SemanticAnnotator do
           UNION Value { Nil, Num: Float64, Lambda { body: Value @indirect, id: Int64 } }
           FN test!(MUTABLE list: Value[]@list, MUTABLE map: HashMap<Value>) RETURNS Void ->
               list.append(Value.Nil);
-              map["key"] = list[0];
+              IF list[0] AS value THEN map["key"] = value; END
               RETURN;
           END
         CLEAR
@@ -648,7 +648,7 @@ RSpec.describe SemanticAnnotator do
           END
           FN test!(MUTABLE list: Value[]@list) RETURNS Void ->
               list.append(Value.Nil);
-              consume!(list[0]);
+              IF list[0] AS value THEN consume!(value); END
               RETURN;
           END
         CLEAR
@@ -668,7 +668,7 @@ RSpec.describe SemanticAnnotator do
           FN test!() RETURNS !Void ->
               MUTABLE list: Int64[]@list = List[];
               list.append(1_i64);
-              consume!(list[0]);
+              consume!(list[0] OR 0_i64);
               RETURN;
           END
         CLEAR

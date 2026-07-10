@@ -190,6 +190,13 @@ module DiagnosticRegistry
       template: "Type Error: Cannot determine struct type for field access '%{field}'. Receiver is '%{type}'.",
       summary: "Field access on a non-struct (or unresolved-type) target.",
     ),
+    OPTIONAL_FIELD_REQUIRES_SAFE_NAV: {
+      severity: :error, category: :type,
+      template: "Type Error: Cannot access field '%{field}' on optional '%{type}' without safe navigation.",
+      summary:  "Field access on an optional value requires `?.` so NIL propagates safely.",
+      cause: "An indexed @list read and every other optional expression may be NIL. Plain `.` would silently assume a value exists and could turn an out-of-bounds read into a runtime trap.",
+      fix_hint: "Use `%{target}?.%{field}`. The compiler then returns an optional field value and propagates NIL without dereferencing it.",
+    },
     STRUCT_FIELD_UNRESOLVABLE: {
       severity: :error, category: :type,
       template: "Type Error: Struct '%{struct}' has no field '%{field}'",
@@ -3006,6 +3013,7 @@ module DiagnosticRegistry
     INSERT_COMPTIME_BEFORE_IF: "Insert COMPTIME before IF.",
     INSERT_RETURNS_ANY: "Insert `RETURNS :Any` so the function accepts the polymorphic return.",
     INSERT_RETURNS_FALLIBLE_VOID: "Insert `RETURNS !Void` so PRE-failure errors can propagate.",
+    INSERT_SAFE_NAVIGATION: "Insert `?` before field access so NIL propagates safely.",
     INSERT_SERVICE_AFTER_OPEN_BRACE: "Insert `@service ->` after `{` (this fiber transitively calls a plain :reentrant fn).",
     MIGRATE_ATOMIC_ESCAPE: "Migrate '%{name}' from `@shared:atomic` to `@shared:locked` so its lifetime can outlive the declaring scope. NOTE: `@shared:locked` typically needs a STRUCT wrap around the primitive (e.g. `STRUCT Counter { v: Int64 }; c = Counter{v: 0} @shared:locked`); read/write sites become `WITH EXCLUSIVE c AS a { ... }`. Alternatively, wait for v0.3 atomic struct fields, which lift this escape restriction without the Arc cost.",
     PIN_AUTO_SLOT: "(%{position}) Pin %{label} to `%{type}`.%{note}",

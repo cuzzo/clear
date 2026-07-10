@@ -689,6 +689,7 @@ module Annotator
 
         validate_assignment_type(node, scope.resolve_type(var_name), node.value.resolved_type)
         stamp_type!(node, scope.resolve_type(var_name))
+        scope.resolve_entry(var_name)&.reassigned = true
         mark_var_mutated(var_name)
         true
       end
@@ -781,7 +782,11 @@ module Annotator
         end
 
         # 4. Type Check
-        validate_assignment_type(assignment_node, field_node.resolved_type, assignment_node.value.resolved_type)
+        validate_assignment_type(
+          assignment_node,
+          field_node.full_type!(context: "assignment field"),
+          assignment_node.value.full_type!(context: "assignment value")
+        )
 
         # Assignments are statements (void), not expressions that produce a value.
         stamp_type!(assignment_node, :Void)
@@ -802,7 +807,8 @@ module Annotator
           return
         end
         if target.accepts?(value)
-          node.value.coerced_type = target unless target == value
+          node.value.coerced_type = target if target != value ||
+            (target.node_reference? && !value.node_reference?)
           return
         end
 
@@ -812,7 +818,7 @@ module Annotator
       sig { params(node: T.any(AST::Assignment, AST::BindExpr), fallback: T.nilable(Type::TypeInput)).returns(Type) }
       def assignment_value_type(node, fallback)
         value = node.value
-        return value.full_type if value.respond_to?(:typed?) && value.typed?
+        return value.full_type!(context: "assignment value") if value.respond_to?(:typed?) && value.typed?
         return Type.new(fallback) if fallback
 
         Type.new(:Untyped)

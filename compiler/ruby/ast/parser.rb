@@ -274,6 +274,7 @@ class ClearParser
     rule(:CHAR, '?', action: :parse_optional_unwrap_suffix),
     rule(:VAR_ID, '@multiowned', action: :parse_capability_wrap_suffix),
     rule(:VAR_ID, '@shared', action: :parse_capability_wrap_suffix),
+    rule(:VAR_ID, '@node', action: :parse_capability_wrap_suffix),
     rule(:VAR_ID, '@locked', action: :parse_capability_wrap_suffix),
     rule(:VAR_ID, '@writeLocked', action: :parse_capability_wrap_suffix),
     rule(:VAR_ID, '@local', action: :parse_capability_wrap_suffix),
@@ -305,6 +306,7 @@ class ClearParser
   CAP_SIGIL_ATTRS = T.let({
     '@multiowned'     => sigil_attrs(dim: :ownership, val: :multiowned),
     '@shared'         => sigil_attrs(dim: :ownership, val: :shared),
+    '@node'           => sigil_attrs(dim: :ownership, val: :node),
     '@locked'         => sigil_attrs(dim: :sync, val: :locked),
     '@writeLocked'    => sigil_attrs(dim: :sync, val: :write_locked),
     '@local'          => sigil_attrs(dim: :sync, val: :local),
@@ -3383,12 +3385,13 @@ class ClearParser
   end
 
   # All recognized capability tokens.
-  ELEMENT_CAPABILITY_TOKENS = %w[@shared @multiowned @locked @writeLocked @link].freeze
+  ELEMENT_CAPABILITY_TOKENS = %w[@shared @multiowned @node @locked @writeLocked @link].freeze
   ELEMENT_SYNC_TOKENS = %w[@locked @writeLocked locked writeLocked].freeze
-  CAPABILITY_TOKENS = %w[@multiowned @shared @split @locked @writeLocked @local @versioned @atomic @indirect @link @raw @symbol @list @pool @set @soa @sharded @observable].freeze
+  CAPABILITY_TOKENS = %w[@multiowned @shared @node @split @locked @writeLocked @local @versioned @atomic @indirect @link @raw @symbol @list @pool @set @soa @sharded @observable].freeze
   CAPABILITY_OWNERSHIP_VALUES = T.let({
     "@multiowned" => :multiowned,
     "@shared" => :shared,
+    "@node" => :node,
     "@split" => :split,
     "@link" => :link,
   }.freeze, T::Hash[String, Symbol])
@@ -3499,6 +3502,8 @@ class ClearParser
       result[:ownership] = :shared
     when "@multiowned"
       result[:ownership] = :multiowned
+    when "@node"
+      result[:ownership] = :node
     when "@locked", "locked"
       result[:sync] = :locked
     when "@writeLocked", "writeLocked"

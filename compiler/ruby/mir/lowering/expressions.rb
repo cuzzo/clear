@@ -1089,17 +1089,48 @@ module MIRLoweringExpressions
     target_node = node.target
     # Safe field access on any ?T: expr?.field
     # Always generate safe navigation so nil propagates instead of panicking.
-    if target_node.is_a?(AST::OptionalUnwrap)
-      inner_mir = T.cast(lower(target_node.target), MIR::Node)
+    implicit_safe_nav = target_node.respond_to?(:safe_nav_chain) && target_node.safe_nav_chain == true
+    if target_node.is_a?(AST::OptionalUnwrap) || implicit_safe_nav
+      inner_ast = target_node.is_a?(AST::OptionalUnwrap) ? target_node.target : target_node
+      inner_mir = T.cast(lower(inner_ast), MIR::Node)
+      inner_type = Type.from_node!(inner_ast, context: "optional @node field target")
+      if inner_type.node_reference?
+        payload = T.must(inner_type.node_payload_type)
+        zig_type = transpile_type(payload.resolved.to_s)
+        function_state.node_store_types << zig_type
+        store = MIR::Ident.new("CheatLib.NodeStore(#{zig_type})")
+        inner_mir = MIR::MethodCall.new(
+          store,
+          "getBound",
+          [MIR::Ident.new(node_store_binding_name(zig_type)), inner_mir],
+          false,
+          MIR::CallableContract.no_ownership(1),
+        )
+      end
       plan = field_access_plan(node, MIR::Ident.new("_r"))
       return MIR::IfOptional.new(
         inner_mir, "_r",
         plan.value,
-        MIR::Lit.new("null")
+        optional_nil_mir(node.full_type!(context: "safe-navigation field result"))
       )
     end
 
     target = lower(node.target)
+    target_type = Type.from_node!(node.target, context: "@node field target")
+    if target_type.node_reference?
+      payload = T.must(target_type.node_payload_type)
+      zig_type = transpile_type(payload.resolved.to_s)
+      function_state.node_store_types << zig_type
+      store = MIR::Ident.new("CheatLib.NodeStore(#{zig_type})")
+      resolved = MIR::MethodCall.new(
+        store,
+        "getBound",
+        [MIR::Ident.new(node_store_binding_name(zig_type)), T.cast(target, MIR::Node)],
+        false,
+        MIR::CallableContract.no_ownership(1),
+      )
+      target = MIR::OptionalUnwrap.new(resolved)
+    end
     field_access_plan(node, T.cast(target, MIR::Node)).value
   end
 
@@ -1280,7 +1311,12 @@ module MIRLoweringExpressions
     T.bind(self, MIRLowering) rescue nil
     plan = index_access_plan(node)
     value = index_access_value(plan)
-    return MIR::IfOptional.new(T.must(plan.optional_source), "_r", value, MIR::Lit.new("null")) if plan.optional?
+    if plan.optional?
+      return MIR::IfOptional.new(
+        T.must(plan.optional_source), "_r", value,
+        optional_nil_mir(node.full_type!(context: "safe-navigation index result")),
+      )
+    end
 
     value
   end
@@ -1290,9 +1326,13 @@ module MIRLoweringExpressions
     T.bind(self, MIRLowering) rescue nil
     target_node = node.target
     target_ast = T.cast(target_node, AST::Node)
-    optional = target_node.is_a?(AST::OptionalUnwrap)
-    optional_source = optional ? T.cast(lower(target_node.target), MIR::Node) : nil
+    implicit_safe_nav = target_node.respond_to?(:safe_nav_chain) && target_node.safe_nav_chain == true
+    optional = target_node.is_a?(AST::OptionalUnwrap) || implicit_safe_nav
+    source_ast = target_node.is_a?(AST::OptionalUnwrap) ? target_node.target : target_node
+    optional_source = optional ? T.cast(lower(source_ast), MIR::Node) : nil
     target = optional ? MIR::Ident.new("_r") : T.cast(lower(target_node), MIR::Node)
+    target_type = Type.from_node!(target_node, context: "index target")
+    target_type = T.must(target_type.wrapped_type) if implicit_safe_nav
 
     IndexAccessPlan.new(
       target: target,
@@ -1300,7 +1340,7 @@ module MIRLoweringExpressions
       optional: optional,
       optional_source: optional_source,
       target_ast: target_ast,
-      type_info: Type.from_node!(target_node, context: "index target"),
+      type_info: target_type,
       target_name: target_node.is_a?(AST::Identifier) ? target_node.name : nil,
       needs_mut_ref: node.needs_mut_ref == true,
     )
@@ -1402,7 +1442,12 @@ module MIRLoweringExpressions
   sig { params(target: MIR::Node, index: MIR::Node, ti: Type).returns(T.any(MIR::InlineBc, MIR::RegistryCall)) }
   def lower_builtin_index_get(target, index, ti)
     T.bind(self, MIRLowering) rescue nil
-    builtin = INDEX_OPS.dig(ti.dispatch_key, :get, :builtin) || :getAt
+    element_type = ti.element_type
+    builtin = if ti.list_collection? && element_type&.node?
+      :getNodeAt
+    else
+      INDEX_OPS.dig(ti.dispatch_key, :get, :builtin) || :getAt
+    end
     emit_builtin(builtin, [target, index])
   end
 
@@ -2188,9 +2233,13 @@ module MIRLoweringExpressions
     ), MIR::CapWrap)
   end
 
-  sig { params(node: AST::CapabilityWrap).returns(MIR::CapWrap) }
+  sig { params(node: AST::CapabilityWrap).returns(MIR::Node) }
   def lower_cap_wrap(node)
     T.bind(self, MIRLowering) rescue nil
+    if node.ownership == :node
+      value = lower(node.value)
+      return node_create_mir(T.cast(value, MIR::Node), node.full_type!)
+    end
     inner = with_decl_alloc(:heap) do
       value = lower(node.value)
       place_value_for_destination(value, node.value, :heap, node.value.full_type!)

@@ -123,7 +123,7 @@ class FunctionReturn
       el = T.must(receiver).element_type
       el || Type.new(:Any)
     when Kind::OptionalOfElement
-      Type.new(:"?#{T.must(T.must(receiver).element_type).resolved}")
+      Type.optional_of(T.must(T.must(receiver).element_type))
     when Kind::IdOfElement
       Type.new(:"Id<#{T.must(T.must(receiver).element_type).resolved}>")
     when Kind::OptionalOfValue

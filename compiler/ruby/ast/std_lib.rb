@@ -1467,8 +1467,9 @@ INDEX_OPS = T.let({
   },
   list: {
     get: {
-      zig: "CheatLib.getAt({target}, {index})",
-      return_type: :r_element_of,
+      zig: "CheatLib.getAtOpt({target}, {index})",
+      builtin: :getAtOpt,
+      return_type: :r_optional_element,
       container_borrow: true,
     },
     set: {
@@ -1564,6 +1565,9 @@ BUILTIN_OPS = T.let({
 
   # --- Collection indexing (fallback for non-registry paths) ---
   getAt: { zig: "CheatLib.getAt({0}, {1})", bc: true, borrows: :all },
+  getAtOpt: { zig: "CheatLib.getAtOpt({0}, {1})", bc: true, bc_op: :getAt, borrows: :all },
+  getAtPtrOpt: { zig: "CheatLib.getAtPtrOpt({0}, {1})", bc: true, bc_op: :getAt, borrows: :all },
+  getNodeAt: { zig: "CheatLib.getNodeAt({0}, {1})", bc: true, bc_op: :getAt, borrows: :all },
   setAt: { zig: "CheatLib.setAt({0}, {1}, {2})", bc: true, borrows: :all },
   numericMapGet: { zig: "CheatLib.numericMapGet({0}, {1}, {2}, {3})", bc: true, borrows: :all },
 

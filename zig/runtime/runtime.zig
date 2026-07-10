@@ -206,9 +206,15 @@ pub fn zigErrorToName(err: anyerror) u32 {
 // Zero overhead when unset (one getenv at Runtime init). Global is
 // fine: a CLEAR program has one root Runtime; the hook is test-only.
 var __oom_failing: ?std.testing.FailingAllocator = null;
+var __next_runtime_id = std.atomic.Value(u64).init(1);
 
 pub const Runtime = struct {
+    pub const Finalizer = struct {
+        context: *anyopaque,
+        run: *const fn (*anyopaque) void,
+    };
     // Control
+    instance_id: u64,
     // Pointer (not by-value) so the same memory can be registered with
     // EbrContext from a deeper or shallower call site than where rt was
     // constructed. By-value rt.ebr would force registration to happen on
@@ -235,6 +241,11 @@ pub const Runtime = struct {
     // equality remains pointer-based after conversion from a runtime String.
     symbol_pool: std.StringHashMapUnmanaged(void) = .empty,
     symbol_pool_lock: compat.Mutex = .{},
+
+    // Type-erased owners used by compiler-synthesized facilities such as
+    // @node stores. They are registered lazily and destroyed before the
+    // runtime allocators disappear, in reverse construction order.
+    finalizers: std.ArrayListUnmanaged(Finalizer) = .empty,
 
     // OVERFLOW (The Safety Valve)
     // We use an Arena so we can track all the overflow allocations
@@ -294,6 +305,7 @@ pub const Runtime = struct {
         }
 
         return Runtime{
+            .instance_id = __next_runtime_id.fetchAdd(1, .monotonic),
             .ebr = ebr,
             .owns_ebr = false,
             .owns_frame_memory = false, // DO NOT FREE THIS in deinit.
@@ -305,6 +317,13 @@ pub const Runtime = struct {
     }
 
     pub fn deinit(self: *Runtime) void {
+        var i = self.finalizers.items.len;
+        while (i > 0) {
+            i -= 1;
+            const finalizer = self.finalizers.items[i];
+            finalizer.run(finalizer.context);
+        }
+        self.finalizers.deinit(self.heap_allocator);
         self.deinitSymbolPool();
         self.overflow_arena.deinit();
         if (self.owns_ebr) {
@@ -316,6 +335,10 @@ pub const Runtime = struct {
         if (self.owns_frame_memory) {
             self.heap_allocator.free(self.overflow_arena.static_block);
         }
+    }
+
+    pub fn registerFinalizer(self: *Runtime, finalizer: Finalizer) !void {
+        try self.finalizers.append(self.heap_allocator, finalizer);
     }
 
     fn deinitSymbolPool(self: *Runtime) void {

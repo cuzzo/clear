@@ -186,6 +186,7 @@ module MIRLoweringFunctions
     prop :decl_zig_name_map, DeclNameMap, factory: -> { {} }
     prop :guarded_cleanup_names, BoolNameMap, factory: -> { {} }
     prop :fn_name_rename_map, T::Hash[String, String], factory: -> { {} }
+    prop :node_store_types, T::Set[String], factory: -> { Set.new }
 
     sig { params(context: FunctionLoweringContext).void }
     def activate!(context)
@@ -198,6 +199,7 @@ module MIRLoweringFunctions
       self.lowered_guarded_cleanup_names = context.lowered_guarded_cleanup_names
       self.fn_name_rename_map = context.fn_name_rename_map
       self.guarded_cleanup_names = context.guarded_cleanup_names
+      self.node_store_types = Set.new
     end
 
     private
@@ -297,7 +299,8 @@ module MIRLoweringFunctions
     end
     final_type = transpile_type(ret_type)
 
-    fn_needs_rt = finalized_needs_rt!(node) || function_return_retains_shared_handle?(node)
+    fn_needs_rt = finalized_needs_rt!(node) || function_return_retains_shared_handle?(node) ||
+      function_uses_node_store?(node)
     if fn_needs_rt
       sig = fn_sigs[node.name.to_s] || fn_sigs[node.name.to_sym]
       sig.mark_runtime_required! if sig
@@ -368,7 +371,18 @@ module MIRLoweringFunctions
       body_mir = takes_mir + pointer_param_mir + [ThunkTransform::Emit.build_mutual_trampoline(node, self)]
     else
       pre_checks = lower_pre_clauses(node)
-      body_mir = takes_mir + pointer_param_mir + pre_checks + lower_body(node.body)
+      lowered_body = lower_body(node.body)
+      node_stores = function_state.node_store_types.to_a.sort.map do |zig_type|
+        bind_call = MIR::MethodCall.new(
+          MIR::Ident.new("CheatLib.NodeStore(#{zig_type})"),
+          "bind",
+          [MIR::Ident.new(runtime_binding_name)],
+          true,
+          MIR::CallableContract.no_ownership(1),
+        )
+        MIR::Let.new(node_store_binding_name(zig_type), bind_call, false, nil, nil)
+      end
+      body_mir = takes_mir + pointer_param_mir + pre_checks + node_stores + lowered_body
     end
     body_mir = append_ownership_transfers_for_mir_body(body_mir)
     if !fn_can_fail && body_has_faulting_alloc?(body_mir)
@@ -441,6 +455,24 @@ module MIRLoweringFunctions
                       append_ownership_transfers_for_mir_body(prologue + body_mir),
                       vis, false, comptime_params)
     end
+  end
+
+  sig { params(node: AST::FunctionDef).returns(T::Boolean) }
+  def function_uses_node_store?(node)
+    return true if node.params.any? { |param| Type.new(param.type).node_reference? }
+    return_type = node.return_type
+    return true if return_type&.node_reference?
+
+    found = T.let(false, T::Boolean)
+    AST.each_locatable(node.body) do |candidate|
+      type = candidate.full_type!(context: "@node function scan")
+      coerced = candidate.respond_to?(:coerced_type_info) ? candidate.coerced_type_info : nil
+      if type.node_reference? || coerced&.node_reference?
+        found = true
+        break
+      end
+    end
+    found
   end
 
   sig {
@@ -580,7 +612,8 @@ module MIRLoweringFunctions
     MIR.each_node(body) do |mir|
       next if found
       next unless mir.respond_to?(:expr?) && mir.expr?
-      found = true if T.unsafe(self).mir_allocates?(mir)
+      found = true if T.unsafe(self).mir_allocates?(mir) ||
+        (mir.is_a?(MIR::MethodCall) && mir.method == "bind" && mir.try_wrap)
     end
     found
   end
@@ -1056,8 +1089,9 @@ module MIRLoweringFunctions
     ast_args.each_with_index do |arg, idx|
       param = sig.params[idx]
       next unless call_arg_consumes_ownership?(arg, param)
+      arg_type = Type.new(arg.respond_to?(:coerced_type_info) && arg.coerced_type_info ? arg.coerced_type_info :
+        Type.from_node!(arg, context: "lowered call ownership argument"))
       takes_indices << idx
-      arg_type = Type.from_node!(arg, context: "lowered call ownership argument")
       unless ownership_tracked_transfer_type?(arg_type)
         operands << MIR::OwnershipOperandFact.non_owning(arg_type, "call argument #{idx}")
         next
@@ -1123,8 +1157,9 @@ module MIRLoweringFunctions
     ast_args.each_with_index do |arg, idx|
       callee_param = sig.params[idx]
       next unless call_arg_consumes_ownership?(arg, callee_param)
+      arg_type = Type.new(arg.respond_to?(:coerced_type_info) && arg.coerced_type_info ? arg.coerced_type_info :
+        Type.from_node!(arg, context: "call ownership argument"))
       takes_indices << idx
-      arg_type = Type.from_node!(arg, context: "call ownership argument")
       unless ownership_tracked_transfer_type?(arg_type)
         operands << MIR::OwnershipOperandFact.non_owning(arg_type, "call argument #{idx}")
         next
@@ -1358,7 +1393,7 @@ module MIRLoweringFunctions
       all_args = [MIR::Ident.new(runtime_binding_name)] + args_mir
       contract = callable_contract_for_lowered_args(FunctionSignature.unwrap(node.matched_signature), node.args, args_mir)
       sig = FunctionSignature.unwrap(node.matched_signature)
-      return_type = sig&.return_type || (node.full_type if node.respond_to?(:full_type))
+      return_type = sig&.return_type || node.full_type!(context: "function pointer call")
       fn_ptr_can_fail = return_type.is_a?(Type) && return_type.error_union?
       callee = fn_ptr_can_fail ? "try #{node.name}" : node.name
       return MIR::Call.new(callee, all_args, false, call_owned_return?(node), contract)
@@ -1400,7 +1435,8 @@ module MIRLoweringFunctions
 
     # Intrinsic pattern: already resolved by annotator
     if node.zig_pattern
-      return lower_safe_nav_method_call(node) if node.object.is_a?(AST::OptionalUnwrap)
+      return lower_safe_nav_method_call(node) if node.object.is_a?(AST::OptionalUnwrap) ||
+        (node.object.respond_to?(:safe_nav_chain) && node.object.safe_nav_chain == true)
       return lower_intrinsic(node)
     end
 
@@ -1589,17 +1625,24 @@ module MIRLoweringFunctions
     T.bind(self, MIRLowering) rescue nil
     snav_var = "_snav_#{lowering_counters.next_safe_nav_id}"
 
-    inner_mir = lower(node.object.target)
+    explicit = node.object.is_a?(AST::OptionalUnwrap)
+    inner_ast = explicit ? node.object.target : node.object
+    inner_mir = lower(inner_ast)
 
     snav_ident = AST::Identifier.new(node.object.token, snav_var)
-    AST.stamp_synthetic_type!(snav_ident, node.object.full_type!(context: "safe-nav receiver"), context: "synthetic AST type")  # T (unwrapped)
+    receiver_type = node.object.full_type!(context: "safe-nav receiver")
+    receiver_type = T.must(receiver_type.wrapped_type) unless explicit
+    AST.stamp_synthetic_type!(snav_ident, receiver_type, context: "synthetic AST type")
 
     synthetic = node.dup
     synthetic.object = snav_ident
 
     call_mir  = lower_intrinsic(synthetic)
 
-    MIR::IfOptional.new(inner_mir, snav_var, call_mir, MIR::Lit.new("null"))
+    MIR::IfOptional.new(
+      inner_mir, snav_var, call_mir,
+      optional_nil_mir(node.full_type!(context: "safe-navigation method result")),
+    )
   end
 
   sig { params(node: T.any(AST::FuncCall, AST::MethodCall)).returns(MIR::Node) }

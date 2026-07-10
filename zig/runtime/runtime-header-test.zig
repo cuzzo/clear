@@ -22,6 +22,74 @@ const alloc = std.heap.c_allocator;
 var global_ebr_ctx: ebr.EbrContext = .{};
 var global_stack_pool: fm.StackPool = undefined;
 var global_shutdown = std.atomic.Value(bool).init(false);
+var node_store_drop_count: usize = 0;
+
+const NodeStorePayload = struct {
+    value: u64,
+
+    pub fn deinit(_: *@This(), _: std.mem.Allocator) void {
+        node_store_drop_count += 1;
+    }
+};
+
+test "NodeStore uses compact nullable handles, rejects stale handles, and finalizes payloads" {
+    const allocator = std.testing.allocator;
+    var context = ebr.EbrContext{};
+    defer context.deinit(allocator);
+
+    var rt = try Runtime.init(allocator, 64 * 1024, &context);
+    node_store_drop_count = 0;
+
+    const Ref = CheatLib.NodeRef(NodeStorePayload);
+    const Store = CheatLib.NodeStore(NodeStorePayload);
+    try std.testing.expectEqual(@as(usize, 4), @sizeOf(Ref));
+    try std.testing.expect((Ref{}).isNil());
+
+    const first = try Store.create(&rt, .{ .value = 11 });
+    const second = try Store.create(&rt, .{ .value = 22 });
+    try std.testing.expectEqual(@as(u64, 11), Store.get(&rt, first).?.value);
+    try std.testing.expectEqual(@as(usize, 2), Store.count(&rt));
+
+    try std.testing.expect(Store.remove(&rt, first));
+    try std.testing.expect(Store.get(&rt, first) == null);
+    try std.testing.expectEqual(@as(usize, 1), node_store_drop_count);
+    try std.testing.expectEqual(@as(u64, 22), Store.get(&rt, second).?.value);
+
+    // Cross the 4,096-slot initial capacity. Growth must preserve all compact
+    // handles and must not drop bitwise-moved payloads.
+    var i: usize = 0;
+    while (i < 4096) : (i += 1) {
+        _ = try Store.create(&rt, .{ .value = @intCast(100 + i) });
+    }
+    try std.testing.expectEqual(@as(usize, 4097), Store.count(&rt));
+    try std.testing.expectEqual(@as(u64, 22), Store.get(&rt, second).?.value);
+    try std.testing.expectEqual(@as(usize, 1), node_store_drop_count);
+
+    rt.deinit();
+    try std.testing.expectEqual(@as(usize, 4098), node_store_drop_count);
+    try std.testing.expect(Store.get(&rt, second) == null);
+}
+
+test "bounds-safe list access returns optionals, mutable aliases, and compact node NIL" {
+    const allocator = std.testing.allocator;
+    var values: std.ArrayListUnmanaged(u64) = .empty;
+    defer values.deinit(allocator);
+    try values.append(allocator, 10);
+
+    try std.testing.expectEqual(@as(?u64, 10), CheatLib.getAtOpt(values, 0));
+    try std.testing.expectEqual(@as(?u64, null), CheatLib.getAtOpt(values, 1));
+    const ptr = CheatLib.getAtPtrOpt(&values, 0).?;
+    ptr.* = 25;
+    try std.testing.expectEqual(@as(u64, 25), values.items[0]);
+    try std.testing.expect(CheatLib.getAtPtrOpt(&values, 1) == null);
+
+    const Ref = CheatLib.NodeRef(NodeStorePayload);
+    var refs: std.ArrayListUnmanaged(Ref) = .empty;
+    defer refs.deinit(allocator);
+    try refs.append(allocator, Ref.fromHandle(7));
+    try std.testing.expectEqual(@as(u32, 8), CheatLib.getNodeAt(refs, 0).encoded);
+    try std.testing.expect(CheatLib.getNodeAt(refs, 1).isNil());
+}
 
 test "Rc and WeakRc share one allocation while preserving the ctrl.data ABI" {
     const allocator = std.testing.allocator;

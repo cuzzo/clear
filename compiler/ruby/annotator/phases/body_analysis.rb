@@ -475,8 +475,7 @@ module Annotator
         sig = FunctionSignature.unwrap(node.matched_signature) if node.respond_to?(:matched_signature)
         return true if sig&.return_type&.error_union?
 
-        call_type = node.full_type if node.respond_to?(:full_type)
-        call_type.is_a?(Type) && call_type.error_union?
+        node.full_type!(context: "function pointer call").error_union?
       rescue StandardError
         false
       end

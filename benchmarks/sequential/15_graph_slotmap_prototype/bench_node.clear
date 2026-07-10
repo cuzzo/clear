@@ -1,0 +1,49 @@
+# End-to-end @node acceptance benchmark. Unlike bench.zig, this source goes
+# through CLEAR's parser, annotator, MIR lowering, and Zig backend.
+STRUCT BenchNode {
+  next: ?BenchNode@node,
+  id: Int64
+}
+
+FN main() RETURNS Void ->
+  n = 1_000_000_i64;
+  readRounds = 8_i64;
+  writeRounds = 4_i64;
+  MUTABLE nodes: BenchNode@node[1_000_000]@list = [];
+
+  buildStart = timestampMs();
+  TIGHT FOR i IN (0_i64 ..< n) DO
+    nodes.append(BenchNode{ id: i });
+  END
+  TIGHT FOR i IN (0_i64 ..< n) DO
+    target = (i * 1_664_525_i64 + 1_013_904_223_i64) MOD n;
+    IF nodes[i] AS node THEN
+      node.next = nodes[target];
+    END
+  END
+  buildMs = timestampMs() - buildStart;
+
+  MUTABLE checksum = 0_i64;
+  readStart = timestampMs();
+  TIGHT FOR round IN (0_i64 ..< readRounds) DO
+    TIGHT FOR i IN (0_i64 ..< n) DO
+      checksum += nodes[i]?.next?.id OR 0_i64;
+    END
+  END
+  readMs = timestampMs() - readStart;
+
+  writeStart = timestampMs();
+  TIGHT FOR round IN (0_i64 ..< writeRounds) DO
+    TIGHT FOR i IN (0_i64 ..< n) DO
+      target = (i * 22_695_477_i64 + round * 1_103_515_245_i64 + 12_345_i64) MOD n;
+      IF nodes[i] AS node THEN
+        node.next = nodes[target];
+      END
+    END
+  END
+  writeMs = timestampMs() - writeStart;
+
+  ASSERT checksum > 0_i64, "benchmark work must remain observable";
+  totalMs = readMs + writeMs;
+  print("NODE_BENCH: impl=clear-node nodes=${n.toString()} build_ms=${buildMs.toString()} read_ms=${readMs.toString()} write_ms=${writeMs.toString()} total_ms=${totalMs.toString()} checksum=${checksum.toString()}");
+END

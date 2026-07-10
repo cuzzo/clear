@@ -37,6 +37,13 @@ module Annotator
         node.args.each { |arg| visit(arg) }
 
         if resolve_collection_method(node)
+          receiver_type = node.object.full_type!(context: "@node collection receiver")
+          element_type = receiver_type.element_type
+          if element_type&.node_reference? && ["append", "push", "insert"].include?(node.name) && node.args.any?
+            value_arg = T.must(node.args.last)
+            actual_type = value_arg.full_type!(context: "@node collection insertion")
+            value_arg.coerced_type = element_type if !actual_type.node_reference? && element_type.accepts?(actual_type)
+          end
           record_predicate_call_site!(node)
           return
         end
@@ -272,6 +279,13 @@ module Annotator
         return false unless matched_def
 
         visit_IntrinsicFunc(node, ufcs_args, matched_def: matched_def)
+        receiver_type = node.object.full_type!(context: "@node intrinsic collection receiver")
+        element_type = receiver_type.element_type
+        if element_type&.node_reference? && ["append", "push", "insert"].include?(node.name) && node.args.any?
+          value_arg = T.must(node.args.last)
+          actual_type = value_arg.full_type!(context: "@node collection insertion")
+          value_arg.coerced_type = element_type if !actual_type.node_reference? && element_type.accepts?(actual_type)
+        end
         record_predicate_call_site!(node)
         true
       end

@@ -479,6 +479,7 @@ module AST
   def self.borrowed_ownership_view?(node)
     return false unless node
     return false if node.is_a?(AST::CopyNode) || node.is_a?(AST::CloneNode)
+    return true if node.is_a?(AST::Identifier) && node.symbol&.borrowed_alias
     return true if container_borrow?(node)
     return true if node.is_a?(AST::GetIndex)
     return false unless node.is_a?(AST::GetField)
@@ -2192,6 +2193,7 @@ module AST
     attr_accessor :extern_effects    # Hash of effect symbols from EXTERN FN EFFECTS declaration
     attr_accessor :generic_type_args # Array of inferred type symbols for generic methods
     attr_accessor :heap_dupe_result  # true when result must be heap-duped (frame string escaping to outer container)
+    attr_accessor :safe_nav_chain    # implicit continuation of an earlier ?. over non-optional members
     sig { returns(FalseClass) }
     def wildcard?; false end
     sig { returns(String) }
@@ -2209,6 +2211,7 @@ module AST
     # Set by visit_GetField when this reads an @indirect (heap-boxed) field:
     # the value is a one-level pointer that lower_get_field must deref.
     attr_accessor :indirect_field
+    attr_accessor :safe_nav_chain
     sig { returns(T::Boolean) }
     def wildcard?; field == '*' end
     sig { returns(String) }
@@ -2217,6 +2220,7 @@ module AST
   GetIndex     = Struct.new(:token, :target, :index) do
     extend T::Sig
     include Locatable
+    attr_accessor :safe_nav_chain
     sig { returns(String) }
     def name; target.name end
   end

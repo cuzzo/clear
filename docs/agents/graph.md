@@ -1,600 +1,241 @@
-# `@graph`: dense, handle-addressed cyclic storage
+# `@node`: object-style cyclic topology on compact slot-map storage
 
-Status: **Draft / benchmark-gated**
-Target: post-self-host baseline
-Author: Language Architecture Team
+Status: **Implemented v1 surface; explicit deletion remains follow-up**
 
-## Executive decision
+## Decision
 
-`@graph` should be a collection shape, not a new ownership mode on each node.
-The viable surface is:
+CLEAR models a graph edge as a capability on the referenced value:
 
 ```clear
-STRUCT WebNode {
-    url: String,
-    links: GraphId<WebNode>[]@list
+STRUCT Node {
+  left: ?Node@node,
+  right: ?Node@node,
+  children: Node@node[]@list,
+  id: Int64
 }
 
 FN main() RETURNS Void ->
-    MUTABLE web: WebNode[100_000]@graph = [];
+  MUTABLE root: Node@node = Node{ id: 1 };
+  root.left = Node{ id: 2 };
+  root.children.append(Node{ id: 3 });
 
-    home = web.insert(WebNode{ url: "https://clear.dev", links: [] });
-    docs = web.insert(WebNode{ url: "https://clear.dev/docs", links: [] });
-
-    IF web[home] AS node THEN
-        node.links.append(docs);
-    END
-    IF web[docs] AS node THEN
-        node.links.append(home); # a cycle is just two non-owning handles
-    END
-
-    web.remove(docs);             # destroys docs now
-    ASSERT web[docs] == NIL, "stale handles resolve to NIL";
-    RETURN;                       # destroys every remaining node, then the graph
+  ASSERT root.left?.id == 2;
+  ASSERT root.children[0]?.id == 3;
 END
 ```
 
-This is intentionally close to the existing, working `@pool` surface. The
-compiler already parses fixed-capacity collections, has generic handle types, annotates pool
-methods through a registry, treats `get` as a container borrow, and lowers
-collection initialization through structural MIR. `@graph` should extend those
-paths rather than introduce pointer syntax or a second ownership system.
+The public model is an object reference, not a pool and not `GraphId<T>`.
+Once a destination is declared `T@node`, assigning a plain `T` constructs a
+vertex in the compiler-inferred store. Assigning an existing `T@node` copies
+its compact handle. Field access and list indexing resolve handles
+automatically.
 
-The feature does require a new Zig runtime container. The current
-`CheatLib.Pool(T)` is not sufficient:
+This fits CLEAR's “decision at declaration time” rule: the field, parameter,
+list element, or binding chooses the representation once; every assignment
+inherits that choice.
 
-- it preallocates every payload slot;
-- live payloads remain sparse after deletion;
-- its `remove` does not destroy the removed payload;
-- its handles directly encode the physical slot, so moving payloads would
-  invalidate handles;
-- it cannot return payload pages until the entire pool is destroyed.
-
-The proposed runtime is a dense slot map: handles name stable logical slots;
-logical slots map to movable dense payload positions. Removal destroys one
-payload, swap-moves the last payload into the hole, updates one mapping entry,
-and can decommit an empty tail region. There is no tracing and no graph walk.
-
-This document does **not** accept the original performance table. Exact claims
-such as “1.15x C,” “flat-line jitter,” or “lowest memory” are benchmark results,
-not language semantics. The feature remains benchmark-gated by the matrix in
-this document.
+`NODE STRUCT` is unnecessary. A struct may mix ordinary value fields,
+`@node` edges, `@link`, or other capabilities. Plain `Node{...}` remains a
+normal value until expected-type coercion places it at an `@node` destination.
 
 ## Goals
 
-1. Express cyclic topology without `@multiowned`, `@link`, `LINK`, or `RESOLVE`
-   at every edge.
-2. Make one affine graph container the lifetime owner of all vertices.
-3. Destroy a removed vertex's owned payload exactly once, synchronously.
-4. Destroy all remaining payloads deterministically when the graph leaves
-   scope.
-5. Keep insertion, checked lookup, edge assignment, and removal O(1).
-6. Keep live payloads dense and decommit empty payload regions without an O(N)
-   compaction pause.
-7. Preserve CLEAR's existing allocator, ownership, borrow, MIR-checking, and
-   backend invariants.
-8. Approach an unsafe C slot map closely enough to beat `LINK`/`RESOLVE` by a
-   meaningful margin on real graph workloads.
+1. Ruby/Go-style construction and traversal for cyclic data.
+2. Four-byte typed edges, including nullable edges.
+3. Stable, stale-detecting handles while payloads move during swap-remove.
+4. Dense payload iteration and tail-page reclamation.
+5. No reference counts, weak upgrades, tracing, or write barriers on traversal.
+6. Deterministic payload cleanup through the existing CLEAR cleanup authority.
+7. Runtime and compiler overhead close to direct safe Zig PagedSlotMap use.
 
-## Non-goals
+## Non-goals and v1 limits
 
-- Reachability-based collection. A node remains alive until `graph.remove(id)`
-  or destruction of the graph, even if no edge points to it.
-- Owning edges. Adding or removing an edge never creates or destroys a vertex.
-- Stable payload addresses. Handles are stable; pointers and borrowed aliases
-  are not stable across graph mutation.
-- Automatic maintenance of incoming edges. Removing a vertex may leave stale
-  handles in other vertices; checked access returns `NIL`.
-- Ordered iteration. Swap-remove changes dense iteration order.
-- Lock-free parallel mutation in v1.
-- Unbounded reuse from a compact 32-bit handle. Exhausted generations retire
-  slots instead of wrapping.
+- An edge does not own a vertex independently. The inferred store owns every
+  payload.
+- Replacing an edge does not delete the old target; other edges may still name
+  it.
+- Reachability collection is not performed.
+- Payload addresses are unstable across insertion, growth, and removal.
+- Handles are limited to 20 slot bits and 12 generation bits: at most
+  1,048,575 slots and 4,095 reuse generations per slot. Exhausted slots retire
+  instead of wrapping.
+- The language surface for explicit early vertex deletion is not part of this
+  patch. The runtime already supports exact-once `remove`; a later surface
+  decision should add `DROP node` or an equivalent operation without exposing
+  the store.
 
-## Why the outline's original surface does not fit CLEAR
+## Type and coercion rules
 
-This form is rejected:
+`T@node` is a copyable, non-owning reference to a `T` payload in the inferred
+`(Runtime, T)` store. It is not layout-compatible with `T`.
 
-```clear
-links: WebNode@graph[]@list
-```
+Expected-type coercion applies at:
 
-Capabilities before `[]` describe each element's ownership/synchronization
-wrapper. `@graph` instead describes the container that owns storage and the
-namespace in which handles resolve. Edges therefore store `GraphId<WebNode>`, while
-the root is `WebNode[N]@graph`.
+- typed declarations;
+- field assignment;
+- struct literal fields;
+- function arguments;
+- `@list` append/push/insert when its element type is `T@node`.
 
-This separation also prevents an accidental recursive representation. A
-`WebNode` value is an ordinary payload; a graph edge is a small non-owning
-handle, not another embedded or reference-counted `WebNode`.
+Given a destination `T@node` or `?T@node`:
 
-## Semantics
+- plain `T` becomes `NodeStore(T).create(payload)`;
+- existing `T@node` copies directly;
+- `NIL` becomes the zero handle for `?T@node`;
+- any other payload type is a compile-time mismatch.
 
-### Ownership
+Optional node fields default to NIL. `@list` fields default to an empty list,
+which permits the ergonomic `Node{ id: 2 }` form shown above. A non-optional
+node reference still requires an explicit value.
 
-An affine `T[N]@graph` owns:
+## Physical representation
 
-- every live `T` payload;
-- logical-slot metadata and generations;
-- the logical free-slot stack;
-- dense-to-logical reverse mappings;
-- the committed dense payload prefix.
-
-`GraphId<T>` does not own a node. It is freely copyable and may participate in
-cycles. The graph container remains subject to CLEAR's ordinary move rules.
-
-Initially, only affine `@graph` is required. A later
-`T[N]@graph:shared:locked` composes with the existing ownership and
-synchronization axes; operations occur under `WITH EXCLUSIVE`. It must not
-invent graph-specific locking rules.
-
-### Lookup and borrows
-
-`graph.get(id)` and `graph[id]` return `?T`, matching `@pool`. A lookup checks:
-
-1. the logical slot is in range;
-2. the slot is live;
-3. the handle generation equals the slot generation.
-
-On success, lowering exposes a borrowed alias into dense storage. The existing
-container-borrow rule must reject `insert`, `remove`, or any operation that can
-move payloads while that alias is live. The alias cannot escape its binding
-scope. No raw payload pointer is stored in user code.
-
-`GraphId<T>` does not encode the identity of a particular graph. V1 may
-retain that compatibility, but then passing an ID from graph A to graph B of
-the same `T` is a logical misuse that is not detected. A container nonce or
-compiler-tracked origin is a separate design decision and must be benchmarked:
-adding an owner token makes a fully identified handle at least 64 bits and may
-make it 16 bytes, materially changing graph memory and cache behavior. The
-compact prototype must not claim cross-container identity safety.
-
-### Removal and deterministic cleanup
-
-Only `graph.remove(id)` removes a vertex. Rewriting an edge merely replaces an
-integer handle.
-
-For a valid handle, removal performs this sequence:
-
-1. run the compiler-selected cleanup plan on the victim payload;
-2. if the victim is not last, bitwise-move the last live payload into the
-   victim's dense position;
-3. update the moved payload's logical-slot metadata and reverse mapping;
-4. decrement the live count;
-5. mark the removed logical slot dead and increment its generation;
-6. return the logical slot to the free stack;
-7. decommit the now-empty tail payload region if a boundary was crossed.
-
-The old tail position is left undefined and is **not** cleaned. Ownership was
-moved, not copied. This is the critical exactly-once invariant.
-
-Generation increment must not wrap. When a slot reaches the maximum generation,
-the implementation retires that logical slot instead of making an ancient
-handle valid again. This is stricter than the current pool's wrapping `u32` and
-is required for an unqualified stale-handle safety claim.
-
-Graph destruction walks the dense live payload sequence once, runs the same
-cleanup plan on every payload, and then releases virtual segments and metadata. Scope exit
-is therefore O(live nodes), not O(1). The destructors fire deterministically,
-but claiming constant-time destruction of a non-empty owning container would be
-false.
-
-### Cleanup authority
-
-The runtime's generic `cleanup(T, allocator, ptr)` handles many structural
-types, but it is not sufficient authority for every compiler-known `CLOSE`
-plan. `@graph` must not create a parallel cleanup classifier.
-
-The annotator/cleanup classifier derives the element cleanup plan once from the
-existing schema and ownership facts. MIR graph removal and graph destruction
-carry that typed plan. Emission passes compiler-generated drop glue to the Zig
-container, conceptually:
+Both `T@node` and `?T@node` lower to:
 
 ```zig
-fn __clear_drop_WebNode(rt: *Runtime, alloc: Allocator, value: *WebNode) void {
-    // Mechanical emission of the existing CleanupEntry/resource close plan.
+packed struct(u32) {
+    encoded: u32, // zero = NIL, otherwise PagedSlotMap handle + 1
 }
-
-graph.removeWith(rt, alloc, id, __clear_drop_WebNode);
-graph.deinitWith(rt, alloc, __clear_drop_WebNode);
 ```
 
-This keeps resource `CLOSE`, nested collection cleanup, RC release, and moved
-guards under the same compiler authority used for locals and other containers.
-The callback is compile-time-known and should inline for ordinary payloads.
+Using an in-band NIL sentinel avoids Zig's optional tag, so nullable graph
+edges remain four bytes. The maximum PagedSlotMap handle cannot be
+`0xffffffff`, making wrapping addition safe for the sentinel encoding.
 
-## Runtime layout
+Payload storage is the existing `PagedSlotMap(T)`:
 
-Conceptually:
+```text
+handle(slot, generation)
+        |
+        v
+slot_meta[slot] = (generation, dense_index)
+        |
+        v
+dense_payload[dense_index]
+```
+
+The map also stores `dense_to_slot` and a logical free-slot stack. Removal
+cleans one payload, swap-moves the dense tail into the hole, fixes one reverse
+mapping, advances the removed slot generation, and decommits newly empty tail
+regions. No topology walk or compaction sweep occurs.
+
+The inferred store starts at 4,096 slots and doubles while preserving every
+handle. This avoids an approximately 8 MiB metadata floor for tiny graphs.
+Growth moves payload storage and is O(live nodes); callers may avoid growth in
+a future capacity-hint surface. Steady-state insert, lookup, rewrite, and
+remove remain O(1).
+
+## Store ownership and Runtime isolation
+
+There is one hidden store for each `(Runtime instance, payload type)`. A
+process-global type registry finds it, keyed by a monotonic Runtime identity;
+the registry is locked only on a cache miss or store creation. This avoids the
+incorrect alternatives of:
+
+- one process-global unsynchronized map for all programs/fibers; or
+- one thread-local map, which breaks when a fiber migrates between workers.
+
+Every store registers a type-erased finalizer with its owning Runtime. Runtime
+deinitialization runs finalizers in reverse registration order before its
+allocators disappear. Store destruction cleans every live payload exactly
+once through `CheatLib.cleanup(T, allocator, value)` and then releases slot-map
+storage.
+
+Generated functions bind each used node type once:
 
 ```zig
-const GraphId = packed struct(u32) {
-    slot: u20,
-    generation: u12,
-};
-
-const Graph = struct {
-    slot_meta: []u32,           // packed generation:12 + dense_index:20
-    free_slots: []u32,
-    dense_to_slot: []u32,
-    dense_payload: []T,         // one contiguous reserved virtual range
-    committed_dense_capacity: u32,
-    live_count: u32,
-    capacity: u32,
-};
+const __node_store_Node = try CheatLib.NodeStore(Node).bind(rt);
 ```
 
-V1 reserves the all-ones dense index as the dead sentinel, so compact
-`GraphId<T>` supports at most 2^20 - 1 logical slots and 2^12 - 1 reuse cycles
-per slot. A slot is permanently retired at generation exhaustion; it never
-wraps. Larger-capacity or effectively unbounded-churn graphs require a 64-bit
-graph ID and must be benchmarked as a distinct representation.
-
-Lookup is two dependent reads before the payload read: handle -> slot metadata
--> dense payload. The current pool performs handle -> physical slot. The new
-indirection is the price of moving payloads without invalidating handles.
-
-The runtime reserves one contiguous virtual range for payloads and one for the
-reverse map. Insertion faults/commits pages as the dense tail enters them.
-Removal swap-fills the dense prefix; whenever a 4,096-node tail region becomes
-empty, the runtime decommits its payload and reverse-map pages without changing
-their virtual addresses. The prototype uses Linux `madvise(DONTNEED)`;
-production requires a platform abstraction with Windows decommit and the
-appropriate macOS primitive. A fixed capacity remains part of v1
-(`T[N]@graph`) because the parser and pool diagnostics already support it.
-
-### Why there is no compaction sweep
-
-The proposed dense representation is compact after every removal. Swap-remove
-moves at most one payload and updates one mapping, so adversarial sparse
-survivors cannot pin sparse payload pages. An O(N) threshold sweep would:
-
-- add the exact latency spike the feature is meant to avoid;
-- require an O(N) remap pass;
-- duplicate a property maintained more cheaply by the dense invariant.
-
-The trade-off is unstable iteration order. Applications requiring stable order
-must maintain a separate order list or use another collection.
-
-## Realistic performance and memory expectations
-
-### Speed
-
-There is no single graph slowdown factor.
-
-- Dense linear iteration can approach a list and can beat a tombstoned pool.
-- Handle traversal is expected to be slower than `@pool` lookup because of the
-  additional logical-to-dense load.
-- It should be substantially faster than `LINK`/`RESOLVE` when traversals would
-  otherwise perform weak upgrades and strong releases at each edge.
-- Random traversal at large sizes is dominated by cache misses. Wider handles
-  and metadata can produce a sharp last-level-cache crossover.
-- Mutation avoids RC balancing and is O(1), but cleanup-bearing payloads still
-  pay their real destructor cost.
-
-The corrected phase-separated 1M-capacity prototype, retaining 1% after
-collapse, measured median-of-five combined times:
-
-| Implementation | Combined time | Peak bytes/capacity |
-|---|---:|---:|
-| Ideal unchecked C `u32` indices | 299.5 ms | 24 |
-| Proposed paged compact slot map | 362.8 ms | 36 |
-| Unsafe C slot map | 366.2 ms | 36 |
-| CLEAR manual pool | 373.9 ms | 48 |
-| Ideal C raw pointers | 378.6 ms | 40 |
-| Go pointers + forced GC | 977.0 ms | allocator-reported separately |
-| CLEAR LINK/RESOLVE | 1,008.5 ms | 80 |
-| Rust `Rc<RefCell>` / `Weak` | 1,023.4 ms | 72 estimated |
-
-The CLEAR baselines call the real `Pool`, `Rc`, `WeakRc`, downgrade, upgrade,
-and release runtime functions. Rust uses `Rc<RefCell<Node>>` and `Weak`. Go uses
-ordinary strong pointers and includes a forced post-collapse `runtime.GC()` in
-the timed region.
-
-The original LINK result was invalid because `rcCreate` unconditionally ran
-the allocation profiler in non-profile builds. That captured a stack trace and
-took a global profiling lock for every node. Rc now uses one combined
-allocation and an implicit weak reference during last-strong cleanup. A second
-layout fix removed the redundant 16-byte allocator stored in every non-atomic
-control block; cleanup already carries allocator provenance. In matched
-median-of-five runs, CLEAR now tracks Rust phase by phase and is about 1% faster
-overall. CLEAR uses 80 requested bytes per capacity versus Rust's estimated 72;
-the remaining difference is primarily Zig's 16-byte `?Rc` wrapper versus
-Rust's 8-byte niche-optimized `Option<Rc>`.
-
-Against ideal unchecked direct-index C, the paged slot map is 1.21x overall at
-1M. Random traversal is 1.18x ideal C and 2% faster than corrected Pool. While
-compact C remains cache-resident, random traversal is still 1.51x–2.24x ideal
-C; no universal 1.15x claim is supported.
-
-Before deletion, random handle traversal is slower than pool because
-`GraphId -> dense index -> payload` is a dependent two-load chain while pool
-directly names its slot. Compact IDs reduce bandwidth but cannot remove that
-latency. After 99% deletion, the normalized sparse scan takes 0.315 ms in the
-slotmap versus 45.5 ms in corrected Pool: dense survivor iteration is about
-147x faster.
-It is still 4.04x ideal C's vectorized dense scan in absolute terms. The feature
-is therefore compelling for sparse/churned graphs, not as a universal
-replacement for a dense pool.
-
-After 99% deletion at 1M capacity, `mincore` measured resident payload pages
-falling from 26.71 MiB to 0.33 MiB: 98.8% returned. Fixed logical metadata keeps
-the retained committed estimate at 7.96 MiB, and 34.33 MiB of virtual address
-space remains reserved. Real reclamation increases collapse from 3.98 ms in
-C's non-reclaiming slot map to 9.84 ms in the proposed implementation.
-
-### Memory
-
-A deleting graph cannot safely use a plain 32-bit offset: it needs generation
-state to prevent slot-reuse ABA. V1 packs a bounded generation and slot into 32
-bits, then retires exhausted slots. This preserves the compact four-byte edge
-at the cost of a 1,048,575-node ceiling and 4,095 reuse cycles per slot. A
-64-bit variant removes those practical bounds but materially enlarges the
-working set and must be measured separately.
-
-At peak, `@graph` is not guaranteed to use less memory than `@pool`. It adds a
-reverse map; its advantage is dense payload iteration and the ability to
-decommit empty dense-tail pages after deletions. Fixed-capacity logical
-metadata remains allocated, so “free almost all memory” means most **payload**
-memory, not literally every byte of the graph container.
-
-Compared with `LINK`/`RESOLVE`, the graph should avoid per-node control blocks,
-strong/weak counters, allocator headers, and individual allocations. That is a
-plausible substantial memory win, but it must be measured with the real CLEAR
-runtime allocator.
-
-### Latency
-
-No tracing or O(N) compaction occurs during mutation. Individual remove cost is
-bounded by payload cleanup, one optional swap, and tail-page decommit syscalls.
-Allocator decommit/free latency and arbitrary user resource destructors are not
-constant-time. “Zero pause” and “perfect flat line” are therefore prohibited
-claims. Benchmarks must report p50, p99, maximum operation/batch time, and page
-faults rather than only total throughput.
-
-## Benchmark acceptance gate
-
-The feature is accepted only after one harness compares the same topology and
-operation stream across:
-
-1. current CLEAR `T[N]@pool` with explicit `Id<T>` edges;
-2. current CLEAR `@multiowned` + `@link`, exercising real `LINK` and `RESOLVE`;
-3. the proposed paged/decommitting dense graph runtime;
-4. an unsafe C implementation with the minimum representation required by the
-   same stable-ID operations;
-5. idiomatic Go pointer topology under the tracing GC, reporting both natural
-   collections and an explicit post-collapse `runtime.GC()` run.
-
-Do not compare a deleting stable-ID graph to a C representation that silently
-changes node identity after compaction. If C omits generation checks, label it
-as an unsafe lower bound and report its smaller handle width.
-
-### Sizes
-
-Test at payload working sets bracketing cache levels, not only node counts:
-
-- approximately 32 KiB;
-- 256 KiB;
-- 1 MiB;
-- detected/shared LLC fractions (25%, 50%, 100%, 200%);
-- at least one DRAM-scale case.
-
-The checked-in default may use 4K, 16K, 64K, 256K, and 1M nodes, but the report
-must also translate them into actual bytes for each representation.
-
-### Workloads
-
-1. **Local read-heavy:** fixed out-degree, neighboring targets, repeated edge
-   traversal. Exposes best-case cache behavior.
-2. **Random read-heavy:** fixed out-degree, deterministic random targets.
-   Exposes lookup indirection and LLC/DRAM crossover.
-3. **Edge write-heavy:** repeatedly replace edges. `LINK`/`RESOLVE` must perform
-   real weak release/downgrade; integer-handle variants perform assignment.
-4. **Vertex churn:** remove and reinsert an unreferenced subset. Exercises
-   generation checks, free lists, payload moves, allocation, and RC teardown.
-5. **Burst collapse:** grow to peak, then remove 99% and 99.9%. Record peak and
-   retained requested bytes, RSS, and allocator/syscall behavior.
-6. **Adversarial sparse survivors:** retain nodes selected uniformly across
-   original allocation order. Verifies that payload pages still decommit
-   under swap-remove and that no sparse page pinning remains.
-7. **Cleanup-bearing nodes:** nested lists/strings plus a counted resource drop.
-   Verify immediate exactly-once destruction separately from raw speed.
-8. **Mixed service trace:** 90/9/1 read/edge-write/vertex-churn and a bursty
-   phase. Report p99/max batch latency, not just mean throughput.
-
-### Metrics and provisional thresholds
-
-Report operations/second, ns/edge, build time, teardown time, p50/p99/max batch
-latency, peak/current requested bytes, peak/current RSS, allocations, frees,
-minor faults, LLC misses, and branch misses.
-
-The initial go/no-go thresholds are deliberately explicit and revisable:
-
-- `@graph` is at least 1.5x faster than real `LINK`/`RESOLVE` on random reads,
-  edge writes, and the mixed trace once the working set reaches LLC;
-- peak requested bytes are no more than 1.25x manual pool and materially below
-  `LINK`/`RESOLVE` for the same topology;
-- after 99% collapse, retained payload bytes are proportional to live payloads
-  plus fixed logical metadata, with no sparse payload-page retention;
-- local reads remain within 20% of manual pool unless the memory-reclamation
-  win is large enough to justify a documented trade-off;
-- no mutation contains an O(N) compaction path.
-
-If those gates fail, `@graph` should remain library/runtime experimentation.
-Ergonomics alone does not justify a second collection primitive.
-
-The prototype lives in
-`benchmarks/sequential/15_graph_slotmap_prototype/`. Its current Zig-vs-C
-comparison validates the basic generational slot-map cost. The next benchmark
-revision must implement this full matrix before the feature is approved.
-
-## Ergonomics and fit with CLEAR
-
-The proposal aligns well with CLEAR when the graph has one architectural owner:
-
-- one capability at the storage boundary instead of ownership syntax on every
-  edge;
-- ordinary `GraphId<T>` values express topology and cycles;
-- checked optional access makes deletion visible;
-- deterministic cleanup follows lexical container ownership;
-- changing storage from `@pool` to `@graph` is conceptually small;
-- costs remain visible: `@graph` says handle lookup and movable dense storage,
-  while `@shared:locked` still says synchronization.
-
-It does not replace `@link`. `@link` remains appropriate when independently
-owned objects have unrelated lifetimes, can escape the graph domain, or must
-remain alive without one root container. `@graph` is appropriate for ECS-like
-worlds, syntax/IR graphs, routing topologies, UI trees with back-pointers, and
-request-scoped object networks whose vertices share a lifecycle domain.
-
-The optional lookup is necessary and consistent with `@pool`; hiding it would
-make deletion races and stale edges implicit. Ergonomics improve by removing
-per-edge RC ceremony, not by pretending stale handles cannot exist.
-
-### Representation choices and recommended default
-
-No one representation wins every graph workload. CLEAR should expose one
-topology abstraction while keeping its important lifecycle choice explicit:
-
-| Representation | Wins when | Pays for |
-|---|---|---|
-| Dense slot map (this proposal) | deletion, churn, sparse survivors, full-node iteration | an extra dependent metadata load on handle traversal |
-| Existing generational pool | graphs stay dense and traversal follows random handles | tombstone scans and retained sparse payload storage |
-| Non-moving chunked slab | stable addresses and read-heavy random traversal dominate | fragmentation and poor sparse iteration/reclamation |
-| Arena/bump graph | topology is built once and discarded as a unit | no individual deletion or stale-handle reuse |
-| `LINK`/`RESOLVE` | nodes escape the container or have independent lifetimes | allocation, counters, upgrades, and larger working sets |
-
-The dense slot map is the best **general default for a closed, mutable graph**
-only if the paged prototype passes the acceptance gate. It is not a universal
-replacement for `@pool`, `@arena`, or `@link`. In particular, a dense graph
-whose dominant operation is random edge traversal should continue to be able
-to use `@pool`. Corrected Pool wins the combined trace by 27% at 4K, 27% at
-16K, 29% at 65K, and 12% at 262K. SlotMap crosses over at 1M, where it is 3%
-faster overall and 2% faster on random traversal because its compact edges and
-payload reduce DRAM traffic.
-
-The direct-pool alternative is not an implementation of this `@graph`
-contract. A physical-slot handle cannot survive arbitrary payload movement
-unless the runtime rewrites all incoming edges or introduces a forwarding
-mapping. The former creates an O(E) compaction pause and the latter recreates
-the slot-map lookup. `@pool` may continue to expose that explicit fragmentation
-trade-off, but `@graph` requires movable payloads and logical-to-physical
-indirection.
-
-V1 should not switch layouts automatically at runtime. Migrating between a
-pool and dense slot map would invalidate performance assumptions, complicate
-latency guarantees, and either rewrite every edge or preserve the same
-indirection. Instead:
-
-1. keep `@pool` available as the explicit dense/direct-lookup choice;
-2. make `@graph` the dense-survivor/churn-optimized closed-topology choice;
-3. keep `@link` for open lifetime domains;
-4. use the existing arena model when whole-graph reset is sufficient.
-
-After the full matrix, a later release may add an explicit `@graph` layout
-modifier for a non-moving slab or arena-backed graph. It should be justified by
-a common workload that cannot already be expressed cleanly with `@pool` or
-`@arena`; adding policy syntax merely to hide a benchmark trade-off would work
-against CLEAR's goal of visible, predictable costs.
-
-## Compiler implementation plan
-
-### G1: Characterize and fix pool cleanup first — complete
-
-Pool removal now destroys cleanup-bearing elements immediately and exactly
-once. Its payload and packed liveness/generation metadata are separate arrays,
-initialization is failure-safe, sparse high-index survivors are cleaned at
-teardown, and generation exhaustion retires a slot instead of wrapping.
-
-### G2: Parse and type the collection shape
-
-- Add `@graph` to `CAPABILITY_TOKENS` and
-  `CAPABILITY_COLLECTION_VALUES` in `compiler/ruby/ast/parser.rb`.
-- Store it as `TypeCapabilities.collection == :graph`.
-- Add `Type#graph?` and include it in the centralized collection predicates,
-  heap backing, pointer passing, dispatch key, and capability conflict table.
-- Require a fixed positive capacity and reject `@graph:soa` initially.
-- Lower bare Zig type to `CheatLib.Graph(T)`; do not model graph as ownership or
-  layout.
-
-### G3: Registry and semantic facts
-
-- Add `GRAPH_METHODS` or generalize the pool registry into an explicitly named
-  handle-collection registry. Do not hard-code graph method names in lowering.
-- `insert` consumes `T` on success and returns `GraphId<T>`.
-- `get`/index return a borrowed `?T` and stamp `container_borrow`.
-- `remove` mutates the receiver and carries the compiler-derived element
-  cleanup fact.
-- Reuse current borrow diagnostics so graph mutation is rejected while a
-  payload alias is live.
-
-### G4: Structural MIR
-
-- Add a `:graph` `ContainerInit` strategy or a dedicated structural graph init
-  node with explicit allocator and capacity.
-- Represent remove/destruction with typed cleanup operands. Do not emit an
-  opaque `InlineZig` call that hides ownership effects.
-- MIR lowering remains the only allocator/cleanup decision owner.
-- MIRChecker verifies allocation/cleanup pairing and the element cleanup fact;
-  it does not infer graph policy from names or Zig types.
-- MIREmitter mechanically renders the already-decided runtime calls.
-
-### G5: Zig runtime
-
-- Implement the paged dense slot map in `zig/lib/data-structures.zig`.
-- Re-export through `CheatLib` in `zig/runtime/runtime-header.zig`.
-- Implement non-wrapping generations, checked get, insert, callback-driven
-  remove, callback-driven deinit, dense iteration, and tail-page decommit.
-- Add reserve/commit/decommit failure tests and platform-specific VM tests.
-- Add stale-handle, repeated-remove, moved-payload cleanup, page-boundary,
-  generation-retirement, and adversarial-survivor tests.
-
-### G6: Pipelines, FSMs, and MiniVM
-
-- Add `:graph_indexed` to the centralized `Type#fsm_foreach_descriptor`; do not
-  teach the FSM splitter graph-specific semantics.
-- Pipelines iterate the dense payload prefix and make no ordering guarantee.
-- Add structural MiniVM graph operations. The MiniVM must never parse rendered
-  Zig or `InlineZig` to recover graph behavior.
-- If MiniVM support is staged, reject `@graph` with an explicit backend
-  diagnostic rather than silently modeling it as a list.
-
-### G7: Tests and documentation
-
-- Parser/type/capability conflict specs.
-- Annotator borrow and cross-container misuse characterization.
-- MIR ownership/allocator/cleanup invariant specs.
-- Runtime unit and fault-injection tests.
-- End-to-end transpile tests with cycles, stale edges, nested owned fields,
-  explicit resources, early return, error paths, and graph moves.
-- The complete benchmark gate above, including `perf` counters and memory
-  collapse.
-- Update `docs/collections.md`, `docs/WALKTHROUGH.md`, formatter syntax, editor
-  grammars, and the fuzz ownership-surface registry only after behavior lands.
-
-## Open decisions
-
-1. Is cross-container `GraphId<T>` misuse accepted for v1, rejected by
-   compiler origin tracking, or prevented with a wider runtime owner token?
-2. What decommit-region size wins across small and large `T`? This must be
-   chosen by the benchmark matrix, not fixed at the prototype's 4,096 nodes.
-3. Should metadata be decommittable after peak-collapse measurements, or is fixed
-   logical metadata an acceptable bounded cost?
-4. Does dense iteration expose a mutable alias, an immutable value, or both?
-5. Is `@graph:shared:locked` part of v1 or a follow-up after affine semantics
-   stabilize?
-6. Should generation exhaustion retire a slot permanently or promote that
-   graph instance to a wider handle representation?
-
-## Final recommendation
-
-Advance the paged segment into a tested Zig runtime component, but do not yet
-commit to the language surface.
-
-Architecturally, the dense slot-map design fits CLEAR better than pervasive
-`LINK`/`RESOLVE` for closed-lifecycle graphs. It provides deterministic RAII and
-excellent ergonomics without tracing or reference counts. The prototype now
-demonstrates competitive DRAM-scale traversal and actual payload-page return.
-Cache-resident checked traversal, cleanup-bearing payloads, decommit latency,
-and non-Linux platform behavior remain acceptance risks. The feature is the
-right choice only if the production runtime clears the remaining published
-gates.
+All hot operations use that local `*PagedSlotMap(Node)` through inline
+`createBound`/`getBound` helpers. The registry/TLS lookup is therefore outside
+loops and function-local performance approaches hand-written Zig.
+
+Functions that accept or return node handles receive CLEAR's normal hidden
+`rt` parameter. Calling code threads it automatically; users never pass a
+store or Runtime.
+
+## Cleanup and RAII
+
+The handle is Copy and has no lexical payload cleanup. The store is the owner.
+
+- Runtime teardown deterministically destroys all remaining live vertices.
+- Runtime `remove` destroys the selected payload synchronously and exactly
+  once.
+- Swap-moved payloads are not cleaned at the old dense tail position.
+- Nested strings, lists, maps, resources, RC values, and compiler-known
+  recursive cleanup use the existing cleanup machinery rather than a
+  graph-specific destructor system.
+
+The emitted lexical cleanup on a root handle is a no-op representation marker
+used by MIR's allocator-provenance verifier for mutations of nested collection
+fields. Payload lifetime remains exclusively store-owned.
+
+## Safety
+
+Lookup rejects:
+
+1. NIL;
+2. out-of-range slots;
+3. dead slots;
+4. generation mismatches;
+5. dense indices outside the live prefix.
+
+Safe navigation (`node.left?.id`) resolves the node and propagates NIL. One
+guard covers a continuous chain of non-optional members; another `?.` is only
+needed when a later member or an indexed `@list` read introduces a new
+optional boundary.
+Non-optional access unwraps the checked lookup; a stale handle on that path is
+a failed program invariant, not memory corruption.
+
+`@node` remains affine/local in v1. Sharing the same store concurrently would
+need an explicit synchronization capability and benchmarked locking or shard
+policy; the compiler must not silently treat node payload mutation as shared.
+
+## End-to-end performance result
+
+The acceptance benchmark lives in
+`benchmarks/sequential/15_graph_slotmap_prototype/` and runs real idiomatic
+CLEAR against equivalent safe hand-written Zig. It builds one million nodes,
+forms a randomized edge topology, performs eight full read passes, and four
+full edge-rewrite passes. Both variants use nullable-edge validation, checked
+slot-map lookup, and checked checksum arithmetic.
+
+Seven interleaved pinned ReleaseFast runs produced these medians:
+
+| implementation | build | reads | rewrites | reads + rewrites |
+|---|---:|---:|---:|---:|
+| idiomatic CLEAR `@node` | 34 ms | 108 ms | 16 ms | 124 ms |
+| manual safe Zig PagedSlotMap | 16 ms | 119 ms | 15 ms | 134 ms |
+
+Checksums matched at `4000084000000`. The CLEAR steady-state trace was 7.5%
+faster in this run; construction was slower because the automatic store grows
+from 4,096 slots while manual Zig reserves maximum capacity immediately.
+Including build, CLEAR was 158 ms versus 150 ms, or 1.05x manual Zig.
+
+Peak RSS was 34,388 KiB for CLEAR and 33,024 KiB for manual Zig (+4.1%), which
+is roughly similar memory at this scale and includes CLEAR's fixed Runtime.
+
+These results supersede the speculative “1.15x C” table for the language
+surface. The broader runtime matrix still compares PagedSlotMap, Pool,
+LINK/RESOLVE, Rust Weak, Go GC, and unsafe C across cache sizes, churn,
+collapse, and sparse-survivor workloads. The current language acceptance
+benchmark covers construction, traversal, and rewrite; it must gain the same
+churn/collapse phases when explicit node deletion is exposed.
+
+## Why this is preferable to exposing Pool or SlotMap
+
+PagedSlotMap is a better backend for movable graph payloads than the old Pool,
+but it is not a better user model. Exposing `insert`, IDs, and `get` merely asks
+users to write allocator plumbing in another form.
+
+`@node` keeps the valuable representation and removes the incidental API:
+
+- users create objects, not slots;
+- fields state topology directly;
+- cycles are ordinary assignments;
+- the compiler owns store selection, coercion, resolution, and cleanup;
+- the generated hot path is still the same dense generational slot map.
+
+That combination—high-level graph syntax with a measured low-level
+representation—is the part aligned with CLEAR's design goals.
