@@ -194,6 +194,9 @@ module AST
                          :indirect_payload_as,
                          keyword_init: true) do
     extend T::Sig
+    # ruby-to-clear: field-type value=Node
+    # ruby-to-clear: field-type body=Node[]
+    # ruby-to-clear: field-type extra_values=Node[]
 
     sig { params(kw: StructKwargs).void }
     def initialize(**kw)
@@ -253,6 +256,7 @@ module AST
   Binding = Struct.new(:expr, :name, :name_token, :unwrapped_type, :symbol, :capture,
                        keyword_init: true) do
     extend T::Sig
+    # ruby-to-clear: field-type expr=Node
 
     sig { params(kw: StructKwargs).void }
     def initialize(**kw)
@@ -330,7 +334,7 @@ module AST
   # nested pattern AST node (`b: x`). A real 3-way typed sum -- NOT
   # T.untyped. Named once here and reused on every slot/param that
   # carries it.
-  PatternFieldValue = T.type_alias { T.any(Symbol, AST::Locatable) }
+  PatternFieldValue = T.type_alias { T.any(Symbol, AST::Node) }
 
   # One field of a struct-destructuring pattern (StructPattern#fields
   # element), e.g. `a` / `b: x` / `c: _` inside `MATCH v { a, b: x }`.
@@ -2087,7 +2091,7 @@ module AST
       self[:body] = val
     end
   end
-  IfStatement  = Struct.new(:token, :condition, :then_branch, :else_branch, :then_drops, :else_drops) do
+  IfStatement  = Struct.new(:token, :condition, :then_branch, :else_branch, :then_drops, :else_drops, :comptime) do
     extend T::Sig
     include Locatable
     include StatementVoidType
@@ -2095,7 +2099,6 @@ module AST
     sig { returns(T::Array[RawBody]) }
     def child_bodies = [then_branch, else_branch].compact
     attr_accessor :expr_mode           # true when used as an expression (x = IF ...)
-    attr_accessor :comptime            # true when parsed from COMPTIME IF
     attr_accessor :then_result_type    # Type of last value expression in then_branch
     attr_accessor :else_result_type    # Type of last value expression in else_branch
   end
@@ -2395,7 +2398,7 @@ module AST
     extend T::Sig
     sig { returns(Symbol) }
     def form; self[:form]; end
-    sig { returns(T.any(String, AST::Locatable)) }
+    sig { returns(T.any(String, AST::Node)) }
     def value; self[:value]; end
     sig { returns(Lexer::Token) }
     def token; self[:token]; end

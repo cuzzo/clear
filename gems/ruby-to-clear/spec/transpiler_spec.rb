@@ -821,6 +821,20 @@ RSpec.describe RubyToClear::Transpiler do
       expect_transpile(ruby_code, expected_clear)
     end
 
+    it "wraps scalar sentinels before lowering union identity checks" do
+      ruby_code = <<~RUBY
+        Result = T.type_alias { T.any(Integer, Symbol) }
+        STOP = T.let(:stop, Symbol)
+        sig { params(result: Result).returns(T::Boolean) }
+        def stopped?(result)
+          result.equal?(STOP)
+        end
+      RUBY
+
+      result = RubyToClear.transpile(ruby_code, raise_on_error: true)
+      expect(result).to include("(result == Result{ SymbolValue: COPY stop })")
+    end
+
     it "guards sentinel identity checks on optional union aliases" do
       ruby_code = <<~RUBY
         class TypeCapabilityUnset < T::Struct
@@ -1120,6 +1134,19 @@ RSpec.describe RubyToClear::Transpiler do
         END
       CLEAR
       expect_transpile(ruby_code, expected_clear)
+    end
+
+    it "narrows optional assignment predicates" do
+      ruby_code = <<~RUBY
+        sig { returns(T.nilable(String)) }
+        def next_item; nil; end
+        if (item = next_item)
+          item.strip
+        end
+      RUBY
+      clear = RubyToClear.transpile(ruby_code, raise_on_error: true)
+      expect(clear).to include("IF item AS item_value THEN")
+      expect(clear).to include("item_value.trim();")
     end
 
     it "keeps returns when optional guard rewrites wrap the final function body" do
@@ -2842,6 +2869,101 @@ RSpec.describe RubyToClear::Transpiler do
       expect(clear).not_to include("FN choose!")
     end
 
+    it "detects captured parameter reassignment inside blocks" do
+      ruby_code = <<~RUBY
+        sig { params(value: String).returns(String) }
+        def consume(value)
+          loop do
+            value = value.strip
+            break
+          end
+          value
+        end
+      RUBY
+
+      clear = RubyToClear.transpile(ruby_code, raise_on_error: true)
+      expect(clear).to include("FN consume(value_input: String) RETURNS String ->")
+      expect(clear).to include("MUTABLE value = COPY value_input;")
+      expect(clear).not_to include("FN consume!")
+    end
+
+    it "uses optional fallback for ||= on nilable non-booleans" do
+      ruby_code = <<~RUBY
+        sig { params(fallback: String).returns(String) }
+        def choose(fallback)
+          value = T.let(nil, T.nilable(String))
+          value ||= fallback
+          T.must(value)
+        end
+      RUBY
+
+      clear = RubyToClear.transpile(ruby_code, raise_on_error: true)
+      expect(clear).to include("value = (value OR fallback)")
+      expect(clear).not_to include("value = (value || fallback)")
+    end
+
+    it "does not leak branch-local declarations into the outer CLEAR scope" do
+      ruby_code = <<~RUBY
+        class Left < T::Struct
+        end
+        class Right < T::Struct
+        end
+        Value = T.type_alias { T.any(Left, Right) }
+        sig { params(flag: T::Boolean).returns(Value) }
+        def choose(flag)
+          if flag
+            value = T.let(Left.new, Value)
+            return value
+          end
+          value = T.let(Right.new, Value)
+          value
+        end
+      RUBY
+
+      clear = RubyToClear.transpile(ruby_code, raise_on_error: true)
+      expect(clear.scan("MUTABLE value: Value =").length).to eq(2)
+      expect(clear).not_to include("\n  value = Value{ Right:")
+    end
+
+    it "narrows union payloads in Ruby case arms" do
+      ruby_code = <<~RUBY
+        Left = Struct.new(:name)
+        Right = Struct.new(:name)
+        Value = T.type_alias { T.any(Left, Right) }
+        sig { params(value: Value).returns(String) }
+        def name_of(value)
+          case value
+          when Left
+            value.name
+          when Right
+            value.name
+          end
+          "done"
+        end
+      RUBY
+
+      clear = RubyToClear.transpile(ruby_code, raise_on_error: true)
+      expect(clear).to include("Value.Left AS left -> left.name")
+      expect(clear).to include("Value.Right AS right -> right.name")
+    end
+
+    it "emits module type aliases with their flattened reference names" do
+      ruby_code = <<~RUBY
+        module AST
+          Value = T.type_alias { T.any(String, Symbol) }
+          Entry = Struct.new(:value) do
+            sig { returns(Value) }
+            def value = self[:value]
+          end
+        end
+      RUBY
+
+      clear = RubyToClear.transpile(ruby_code, raise_on_error: true)
+      expect(clear).to include("UNION Value { StringValue: String, SymbolValue: String@symbol }")
+      expect(clear).to include("value: Value")
+      expect(clear).not_to include("UNION ASTValue")
+    end
+
     it "maps keyword calls to constant-receiver class methods" do
       ruby_code = <<~RUBY
         class TypeShape
@@ -4492,6 +4614,49 @@ RSpec.describe RubyToClear::Transpiler do
       expect_transpile(ruby_code, expected_clear)
     end
 
+    it "wraps first assignments to explicitly typed union locals" do
+      ruby_code = <<~RUBY
+        class Left < T::Struct
+        end
+        class Right < T::Struct
+        end
+        Value = T.type_alias { T.any(Left, Right) }
+        value = T.let(Left.new, Value)
+      RUBY
+
+      result = RubyToClear.transpile(ruby_code, raise_on_error: true)
+      expect(result).to include("MUTABLE value: Value = Value{ Left: COPY Left{} }")
+    end
+
+    it "preserves Struct initializer defaults for omitted fields" do
+      ruby_code = <<~RUBY
+        Entry = Struct.new(:items, :enabled, keyword_init: true) do
+          def initialize(**kw)
+            super
+            self[:items] = [] if self[:items].nil?
+            self[:enabled] = false if self[:enabled].nil?
+          end
+        end
+        entry = Entry.new
+      RUBY
+
+      result = RubyToClear.transpile(ruby_code, raise_on_error: true)
+      expect(result).to include("MUTABLE entry = Entry{ items: [], enabled: FALSE }")
+    end
+
+    it "copies indexed values stored by constructors" do
+      ruby_code = <<~RUBY
+        Box = Struct.new(:value)
+        sig { params(items: T::Hash[String, Symbol], key: String).returns(Box) }
+        def build(items, key)
+          Box.new(items[key])
+        end
+      RUBY
+
+      result = RubyToClear.transpile(ruby_code, raise_on_error: true)
+      expect(result).to include("Box{ value: COPY items[key] }")
+    end
+
     it "routes Ruby string percent formatting through the compiler helper" do
       config = {
         "prelude" => ["EXTERN FN compilerFormatTemplate(template: String) RETURNS String FROM \"compiler_regex\";"],
@@ -4938,6 +5103,24 @@ RSpec.describe RubyToClear::Transpiler do
       expect_transpile("shape = get_shape; shape.map", "MUTABLE shape = get_shape();\nshape.map();")
     end
 
+    it "extracts integer payloads before applying Ruby to_i to unions" do
+      config = {
+        "struct_fields" => { "Token" => { "value" => "TokenValue" } },
+        "unions" => { "TokenValue" => ["String", "Int64", "Float64"] },
+        "union_variants" => { "TokenValue" => { "String" => "Str", "Int64" => "Int", "Float64" => "Float" } }
+      }
+      ruby_code = <<~RUBY
+        sig { params(token: Token).returns(Integer) }
+        def numeric_value(token)
+          token.value.to_i
+        end
+      RUBY
+
+      result = RubyToClear.transpile(ruby_code, helper_config: config, raise_on_error: true)
+      expect(result).to include("castTokenValueToInt64(token.value)")
+      expect(result).to include("FN castTokenValueToInt64(value: TokenValue) RETURNS Int64")
+    end
+
     it "statically lowers simple nil and type/reflection checks when receiver shape is known" do
       expect_transpile('items = []; items.nil?', "MUTABLE items = [];\n(items == NIL);")
       expect_transpile('nil.is_a?(NilClass)', "TRUE;")
@@ -5368,6 +5551,27 @@ RSpec.describe RubyToClear::Transpiler do
         "str = ''; str.sub('a', 'b')",
         "MUTABLE str = \"\";\nreplaceFirst(str, \"a\", \"b\");"
       )
+    end
+
+    it "extracts string union payloads for sub and configured replacement helpers" do
+      config = {
+        "struct_fields" => { "Token" => { "value" => "TokenValue" } },
+        "unions" => { "TokenValue" => ["String", "Int64"] },
+        "union_variants" => { "TokenValue" => { "String" => "Str", "Int64" => "Int" } },
+        "helpers" => {
+          "regex_literal" => "compileRegex",
+          "regex_replace_first" => "replaceRegexFirst"
+        }
+      }
+      ruby_code = <<~RUBY
+        sig { params(token: Token).returns(Symbol) }
+        def sigil_name(token)
+          token.value.sub('@', '').to_sym
+        end
+      RUBY
+
+      result = RubyToClear.transpile(ruby_code, helper_config: config, raise_on_error: true)
+      expect(result).to include('symbol(replaceRegexFirst(castTokenValueToString(token.value), compileRegex("@"), ""))')
     end
   end
 
@@ -6795,6 +6999,14 @@ RSpec.describe RubyToClear::Transpiler do
       expect_transpile(
         'table = T.let({}, T::Hash[String, Integer]); value = table.fetch("missing", 0)',
         "MUTABLE table: HashMap<String, Int64> = {};\nMUTABLE value = (table[\"missing\"] OR 0);"
+      )
+      expect_transpile(
+        'table = T.let({}, T::Hash[String, Integer]); value = table.fetch("present")',
+        "MUTABLE table: HashMap<String, Int64> = {};\nMUTABLE value = table[\"present\"]?;"
+      )
+      expect_transpile(
+        'value = {"present" => 1}.fetch("present")',
+        "MUTABLE value = {\"present\": 1}[\"present\"]?;"
       )
 
       clear = RubyToClear.transpile(<<~RUBY)

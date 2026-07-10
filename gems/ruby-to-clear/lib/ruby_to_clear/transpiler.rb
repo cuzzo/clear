@@ -98,6 +98,7 @@ module RubyToClear
       @class_class_method_names = Hash.new { |hash, key| hash[key] = Set.new }
       @class_mutating_instance_method_names = Hash.new { |hash, key| hash[key] = Set.new }
       @module_function_names = Hash.new { |hash, key| hash[key] = Set.new }
+      @module_namespace_names = Set.new
       @imported_class_names = Set.new
       @imported_prefixed_instance_methods = Set.new
       @imported_instance_method_names = Hash.new { |hash, key| hash[key] = Set.new }
@@ -400,8 +401,19 @@ module RubyToClear
       @helper_config.call(:regex_pattern, [value_code]) || value_code
     end
 
+    def integer_conversion_code(receiver_node, receiver_code)
+      receiver_type = inferred_clear_type_for_node(receiver_node)
+      union_payload_cast_code(receiver_code, receiver_type, "Int64") ||
+        "(#{method_receiver_code(receiver_code)}.toInt() OR 0)"
+    end
+
+    def string_conversion_code(receiver_node, receiver_code)
+      receiver_type = inferred_clear_type_for_node(receiver_node)
+      union_payload_cast_code(receiver_code, receiver_type, "String") || receiver_code
+    end
+
     public :helper_config, :untyped_type, :function_signature_type_code, :current_class_name, :regex_literal_code, :regex_match_code, :regex_match_data_code, :regex_replace_all_code,
-           :regex_replace_first_code, :regex_escape_code, :regex_capture_code, :regex_pattern_code
+           :regex_replace_first_code, :regex_escape_code, :regex_capture_code, :regex_pattern_code, :integer_conversion_code, :string_conversion_code
 
     def raise_unsupported(message, node)
       loc = node.location
@@ -1953,6 +1965,10 @@ module RubyToClear
       else
         @declared_locals << name
         @local_shapes[name] = shape
+        if type_annotation && type_annotation != "Auto"
+          argument_node = cast_value ? original_value_node : value_node
+          val = wrap_argument_for_parameter_type(val, argument_node, type_annotation)
+        end
         if forced_untyped
           @forced_untyped_locals << name
           @local_types.delete(name)
@@ -2156,7 +2172,9 @@ module RubyToClear
       name = @renames[name] || name
       val = expression_argument_code(node.value)
       if @declared_locals.include?(name)
-        "#{name} = (#{name} || #{val})"
+        local_type = @local_types[name].to_s
+        operator = local_type.start_with?("?") && local_type != "?Bool" ? "OR" : "||"
+        "#{name} = (#{name} #{operator} #{val})"
       else
         @declared_locals << name
         "MUTABLE #{name} = #{val}"
@@ -2225,6 +2243,10 @@ module RubyToClear
       return true if copyable_local_read_source?(node)
 
       value_node = sorbet_unwrapped_value(node) || node
+      if value_node.is_a?(Prism::CallNode) && value_node.name.to_s == "[]" && value_node.receiver
+        return true
+      end
+
       value_node.is_a?(Prism::LocalVariableReadNode) && @current_param_names.include?(value_node.name.to_s)
     end
 
@@ -2307,8 +2329,9 @@ module RubyToClear
         return ""
       end
 
-      alias_key = type_alias_key(name)
-      alias_name = type_alias_clear_name(name)
+      alias_context = @module_namespace_names.include?(@current_class) ? nil : @current_class
+      alias_key = type_alias_key(name, alias_context)
+      alias_name = type_alias_clear_name(name, alias_context)
       if (type_alias = sorbet_type_alias_value(node.value, alias_name: alias_name))
         @type_aliases[alias_key] = type_alias
         union_defs = union_definitions_for_alias(alias_name, type_alias, visibility: declaration_visibility_prefix(node))
@@ -2845,7 +2868,22 @@ module RubyToClear
         "#{runtime_is_a[:receiver_code]} IS_A #{runtime_is_a[:expected_type]} AS #{runtime_is_a[:binding_name]}"
       elsif pred_assignment
         predicate_prefix = "#{visit(pred_assignment)};\n"
-        @renames[pred_assignment.name.to_s] || pred_assignment.name.to_s
+        receiver_name = pred_assignment.name.to_s
+        receiver_code = @renames[receiver_name] || receiver_name
+        receiver_type = @local_types[receiver_code].to_s
+        if receiver_type.start_with?("?")
+          payload_type = receiver_type.delete_prefix("?")
+          optional_truthy = {
+            receiver_name: receiver_name,
+            receiver_code: receiver_code,
+            binding_name: optional_guard_binding_name(receiver_name),
+            payload_type: payload_type,
+            union_like: union_like_type?(payload_type),
+          }
+          "#{receiver_code} AS #{optional_truthy[:binding_name]}"
+        else
+          receiver_code
+        end
       elsif optional_truthy
         "#{optional_truthy[:receiver_code]} AS #{optional_truthy[:binding_name]}"
       else
@@ -2858,17 +2896,23 @@ module RubyToClear
         return ""
       end
       keyword = comptime_predicate?(pred) ? "COMPTIME IF" : "IF"
-      body = with_indent do
-        if runtime_is_a
-          with_narrowing_context(runtime_is_a) { visit(node.statements) }
-        elsif optional_truthy || compound_optional_truthies.any?
-          guards = optional_truthy ? [optional_truthy] : compound_optional_truthies
-          with_optional_truthy_contexts(guards) { visit(node.statements) }
-        else
-          visit(node.statements)
+      body = with_block_local_scope do
+        with_indent do
+          if runtime_is_a
+            with_narrowing_context(runtime_is_a) { visit(node.statements) }
+          elsif optional_truthy || compound_optional_truthies.any?
+            guards = optional_truthy ? [optional_truthy] : compound_optional_truthies
+            with_optional_truthy_contexts(guards) { visit(node.statements) }
+          else
+            visit(node.statements)
+          end
         end
       end
-      consequent_code = node.consequent ? format_consequent(node.consequent, runtime_is_a) : ""
+      consequent_code = if node.consequent
+        with_block_local_scope { format_consequent(node.consequent, runtime_is_a) }
+      else
+        ""
+      end
       "#{predicate_prefix}#{keyword} #{pred} THEN\n#{body}#{consequent_code}\nEND"
     end
 
@@ -2985,8 +3029,15 @@ module RubyToClear
         arms = []
         node.conditions.each do |w|
           w.conditions.each do |cond|
-            cond_val = visit(cond)
-            stmt_val = match_statement_arm_body(visit(w.statements))
+            narrowing = union_case_narrowing(node.predicate, cond)
+            if narrowing
+              cond_val = narrowing[:pattern]
+              stmt_code = with_narrowing_context(narrowing[:context]) { visit(w.statements) }
+            else
+              cond_val = visit(cond)
+              stmt_code = visit(w.statements)
+            end
+            stmt_val = match_statement_arm_body(stmt_code)
             arms << "#{cond_val} -> #{stmt_val},"
           end
         end
@@ -3002,6 +3053,35 @@ module RubyToClear
 
         "PARTIAL MATCH #{target} START\n#{arms_body}\nEND"
       end
+    end
+
+    def union_case_narrowing(predicate, condition)
+      return nil unless predicate.is_a?(Prism::LocalVariableReadNode)
+      return nil unless condition.is_a?(Prism::ConstantReadNode) || condition.is_a?(Prism::ConstantPathNode)
+
+      receiver_name = predicate.name.to_s
+      union_type = inferred_clear_type(predicate).to_s.delete_prefix("?")
+      members = @union_types[union_type]
+      return nil unless members
+
+      condition_type = condition.location.slice.strip.split("::").last
+      member = members.find do |candidate|
+        expanded = expand_non_emitted_type_alias(candidate).to_s.delete_prefix("?")
+        candidate.to_s.delete_prefix("?") == condition_type || expanded == condition_type
+      end
+      return nil unless member
+
+      expected_type = expand_non_emitted_type_alias(member).to_s.delete_prefix("?")
+      binding_name = runtime_is_a_binding_name(expected_type, receiver_name)
+      {
+        pattern: "#{union_type}.#{union_variant_name(member, union_type)} AS #{binding_name}",
+        context: {
+          receiver_name: receiver_name,
+          expected_type: expected_type,
+          binding_name: binding_name,
+          renames: { receiver_name => binding_name }
+        }
+      }
     end
 
     def statement_case_condition_chain?(node)
@@ -3193,6 +3273,7 @@ module RubyToClear
 
     def visit_module_node(node)
       name = node.constant_path.location.slice.strip
+      @module_namespace_names << name
       @module_function_names[name].merge(collect_class_method_names(node))
       body_nodes = node.body&.body || []
       old_class = @current_class

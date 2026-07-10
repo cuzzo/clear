@@ -46,15 +46,22 @@ module RubyToClear
 
     def collect_reassigned_variables(node)
       names = Set.new
-      walk = lambda do |current|
+      walk = lambda do |current, shadowed = Set.new|
         return unless current
-        return if current.is_a?(Prism::DefNode) || current.is_a?(Prism::BlockNode)
+        return if current.is_a?(Prism::DefNode)
+
+        if current.is_a?(Prism::BlockNode)
+          block_params = parameter_names_from_parameters(current.parameters)
+          walk.call(current.body, shadowed | block_params)
+          return
+        end
 
         if current.respond_to?(:name) && current.class.name.start_with?("Prism::LocalVariable") &&
-           (current.class.name.end_with?("WriteNode") || current.class.name.end_with?("TargetNode"))
+           (current.class.name.end_with?("WriteNode") || current.class.name.end_with?("TargetNode")) &&
+           !shadowed.include?(current.name.to_s)
           names << current.name.to_s
         end
-        current.child_nodes.each { |child| walk.call(child) if child }
+        current.child_nodes.each { |child| walk.call(child, shadowed) if child }
       end
       walk.call(node)
       names
@@ -478,10 +485,15 @@ module RubyToClear
     end
 
     def extract_parameter_names(def_node)
-      names = Set.new
-      return names unless def_node.parameters
+      parameter_names_from_parameters(def_node.parameters)
+    end
 
-      params = def_node.parameters
+    def parameter_names_from_parameters(parameters)
+      names = Set.new
+      return names unless parameters
+
+      params = parameters.is_a?(Prism::BlockParametersNode) ? parameters.parameters : parameters
+      return names unless params
       params.requireds.each { |p| names << p.name.to_s if p.respond_to?(:name) }
       params.optionals.each { |p| names << p.name.to_s if p.respond_to?(:name) }
       names << params.rest.name.to_s if params.rest && params.rest.respond_to?(:name)
@@ -645,6 +657,14 @@ module RubyToClear
     def string_receiver?(receiver)
       return false unless receiver
       return true if inferred_shape(receiver) == "string"
+
+      receiver_type = clear_type_for_receiver_node(receiver).to_s.delete_prefix("?")
+      union_members = @union_types[receiver_type]
+      if union_members
+        return true if union_members.any? do |member|
+          string_like_clear_type?(expand_non_emitted_type_alias(member))
+        end
+      end
 
       if receiver.is_a?(Prism::LocalVariableReadNode)
         return string_like_clear_type?(static_clear_type_for_receiver(receiver.name.to_s))

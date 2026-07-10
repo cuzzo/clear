@@ -259,6 +259,14 @@ module RubyToClear
       false
     end
 
+    def scalar_identity_type?(type)
+      text = type.to_s.delete_prefix("?")
+      return true if %w[Bool String@symbol Nil].include?(text)
+      return true if text.match?(/\A(?:U?Int|Byte)\d*\z/)
+
+      %w[Float32 Float64].include?(text)
+    end
+
     def union_member_payload_type_match?(candidate, arg_type, arg_type_names = type_lookup_names(arg_type))
       candidate_text = candidate.to_s
       arg_text = arg_type.to_s
@@ -443,6 +451,18 @@ module RubyToClear
         return "#{receiver_code} IS_A #{sentinel_type}"
       end
 
+      if node.name.to_s == "equal?" && node.receiver && node.arguments&.arguments&.length == 1
+        argument_node = node.arguments.arguments.first
+        argument_type = inferred_clear_type(argument_node).to_s.delete_prefix("?")
+        if scalar_identity_type?(argument_type)
+          receiver_code = visit(node.receiver)
+          argument_code = visit(argument_node)
+          receiver_type = inferred_clear_type(node.receiver)
+          argument_code = wrap_argument_for_parameter_type(argument_code, argument_node, receiver_type)
+          return "(#{receiver_code} == #{argument_code})"
+        end
+      end
+
       if node.receiver.nil? && node.name.to_s == "loop" && node.block
         return render_ruby_loop(node)
       end
@@ -528,7 +548,8 @@ module RubyToClear
 
         key = visit(arg_nodes.first)
         if arg_nodes.length == 1
-          "#{lhs}[#{key}]"
+          receiver_type = (clear_type_for_receiver_node(node.receiver) || inferred_clear_type(node.receiver)).to_s.delete_prefix("?")
+          receiver_type.start_with?("HashMap<") ? "#{lhs}[#{key}]?" : "#{lhs}[#{key}]"
         elsif arg_nodes.length == 2
           "(#{lhs}[#{key}] OR #{visit(arg_nodes[1])})"
         else

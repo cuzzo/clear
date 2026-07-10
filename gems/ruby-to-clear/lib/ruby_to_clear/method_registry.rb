@@ -944,17 +944,17 @@ module RubyToClear
       "COPY #{receiver}"
     end
 
-    register("to_i") do |receiver, node, transpiler|
-      args = node.arguments ? node.arguments.arguments : []
+    register("to_i") do |context|
+      args = argument_nodes(context)
       unless args.length <= 1
-        next unsupported(transpiler, node, "to_i expects 0 or 1 arguments")
+        next unsupported(context.transpiler, context.node, "to_i expects 0 or 1 arguments")
       end
 
       if args.empty?
-        "(#{method_receiver(transpiler, receiver)}.toInt() OR 0)"
+        context.transpiler.integer_conversion_code(context.node.receiver, context.receiver_code)
       else
-        base = transpiler.visit(args.first)
-        transpiler.helper_config.call(:string_to_int_base, [receiver, base]) || "(toIntBase(#{receiver}, #{base}) OR 0)"
+        base = context.transpiler.visit(args.first)
+        context.transpiler.helper_config.call(:string_to_int_base, [context.receiver_code, base]) || "(toIntBase(#{context.receiver_code}, #{base}) OR 0)"
       end
     end
 
@@ -1291,16 +1291,20 @@ module RubyToClear
       end
     end
 
-    register("sub") do |receiver, node, transpiler|
-      args = node.arguments ? node.arguments.arguments : []
-      if node.block || args.length != 2
-        next unsupported(transpiler, node, "sub with block or invalid arguments is not supported")
+    register("sub") do |context|
+      args = argument_nodes(context)
+      if context.node.block || args.length != 2
+        next unsupported(context.transpiler, context.node, "sub with block or invalid arguments is not supported")
       end
 
-      pattern = transpiler.visit(args[0])
-      replacement = transpiler.visit(args[1])
+      receiver = context.transpiler.string_conversion_code(context.node.receiver, context.receiver_code)
+      pattern = context.transpiler.visit(args[0])
+      replacement = context.transpiler.visit(args[1])
       if regex_node?(args[0])
-        transpiler.regex_replace_first_code(receiver, pattern, replacement)
+        context.transpiler.regex_replace_first_code(receiver, pattern, replacement)
+      elsif args[0].is_a?(Prism::StringNode) && context.transpiler.helper_config.helper?(:regex_replace_first)
+        escaped_pattern = context.transpiler.regex_literal_code(Regexp.escape(args[0].content).inspect)
+        context.transpiler.regex_replace_first_code(receiver, escaped_pattern, replacement)
       else
         "replaceFirst(#{receiver}, #{pattern}, #{replacement})"
       end

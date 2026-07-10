@@ -433,6 +433,7 @@ module RubyToClear
           field_types["token"] = "Token" if fields.include?("token") && include_names.include?("Locatable")
           field_types.merge!(struct_new_block_field_types(node.value.block, fields, node.name.to_s))
           defaults = fields.to_h { |field| [field, "NIL"] }
+          defaults.merge!(struct_new_block_initializer_defaults(node.value.block, fields, node.name.to_s))
           register_constructor_fields(namespace, node.name.to_s, all_fields, defaults, field_types)
           register_struct_new_block_methods(namespace, node.name.to_s, node.value.block)
         end
@@ -509,6 +510,46 @@ module RubyToClear
         last_sig = nil unless stmt.is_a?(Prism::CallNode) && stmt.name.to_s == "sig"
       end
       types.merge(field_type_overrides)
+    end
+
+    def struct_new_block_initializer_defaults(block_node, fields, class_name)
+      body_nodes = block_node&.body&.body || []
+      initialize_def = body_nodes.find do |stmt|
+        stmt.is_a?(Prism::DefNode) && stmt.receiver.nil? && stmt.name.to_s == "initialize"
+      end
+      return {} unless initialize_def
+
+      field_set = fields.to_set
+      (initialize_def.body&.body || []).each_with_object({}) do |stmt, defaults|
+        next unless stmt.is_a?(Prism::IfNode) && stmt.consequent.nil?
+
+        predicate_field = nil_guarded_self_index_field(stmt.predicate)
+        next unless predicate_field && field_set.include?(predicate_field)
+
+        assignment = stmt.statements&.body&.first
+        next unless stmt.statements&.body&.length == 1
+        next unless assignment.is_a?(Prism::CallNode) && assignment.name.to_s == "[]="
+        next unless assignment.receiver.is_a?(Prism::SelfNode)
+
+        args = assignment.arguments ? assignment.arguments.arguments : []
+        next unless args.length == 2 && args.first.is_a?(Prism::SymbolNode)
+        next unless args.first.value.to_s == predicate_field
+
+        defaults[predicate_field] = with_current_class(class_name) { visit(args.last) }
+      end
+    end
+
+    def nil_guarded_self_index_field(predicate)
+      return nil unless predicate.is_a?(Prism::CallNode) && predicate.name.to_s == "nil?"
+
+      index_call = predicate.receiver
+      return nil unless index_call.is_a?(Prism::CallNode) && index_call.name.to_s == "[]"
+      return nil unless index_call.receiver.is_a?(Prism::SelfNode)
+
+      args = index_call.arguments ? index_call.arguments.arguments : []
+      return nil unless args.length == 1 && args.first.is_a?(Prism::SymbolNode)
+
+      args.first.value.to_s
     end
 
     def struct_new_field_type_overrides(block_node, field_set)

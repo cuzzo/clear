@@ -2320,8 +2320,8 @@ class ClearParser
   sig { returns(AST::Node) }
   def parse_var_id
     var_token = consume(:VAR_ID)
-    name = T.must(var_token).value
-    node = AST::Identifier.new(var_token, name)
+    name = T.cast(T.must(var_token).value, String)
+    node = T.let(AST::Identifier.new(var_token, name), AST::Node)
 
     # Predicate suffix: name? followed by ( → function call with ? suffix
     if match?(:CHAR, '?') && peek_at(1)&.value == '('
@@ -2433,7 +2433,8 @@ class ClearParser
     case node
     when AST::BinaryOp
       if node.op == :BIND_VAR
-        return node.paren_bind ? [AST::Binding.new(expr: node.left, name: node.right.name, name_token: node.right.token)] : []
+        right = T.cast(node.right, AST::Identifier)
+        return node.paren_bind ? [AST::Binding.new(expr: node.left, name: right.name, name_token: right.token)] : []
       elsif node.op == :AND  # && maps to :AND in OP_TO_OP_CODE
         left_binds  = extract_paren_bindings(node.left, if_token)
         right_binds = extract_paren_bindings(node.right, if_token)
@@ -2560,16 +2561,17 @@ class ClearParser
   sig { returns(T.any(AST::ForRange, AST::ForEach)) }
   def parse_for_range
     tok = consume(:KEYWORD, 'FOR')
-    var_name = T.must(consume(:VAR_ID)).value
+    var_name = T.cast(T.must(consume(:VAR_ID)).value, String)
     consume(:KEYWORD, 'IN')
 
     # Ranges need parens for precedence; collections don't.
-    if match?(:CHAR, '(')
+    expr = if match?(:CHAR, '(')
       consume(:CHAR, '(')
-      expr = parse_expression
+      parsed = parse_expression
       consume(:CHAR, ')')
+      parsed
     else
-      expr = parse_expression
+      parse_expression
     end
 
     # Shorthand: FOR var IN range -> single_statement;
@@ -2814,7 +2816,7 @@ class ClearParser
   def parse_struct_body
     _, pairs = parse_comma_seq(:CHAR, '{', '}') do
       name_tok = consume(:VAR_ID)
-      name = T.must(name_tok).value
+      name = T.cast(T.must(name_tok).value, String)
 
       # Syntax: name=default: Type  (default before type annotation)
       default_val = nil
@@ -2833,6 +2835,7 @@ class ClearParser
 
       [name, AST::StructField.new(type: type, default: default_val, borrowed: borrowed)]
     end
+    pairs = T.let(pairs, T::Array[[String, AST::StructField]])
     pairs.to_h
   end
 
@@ -2895,7 +2898,7 @@ class ClearParser
   def parse_lit(storage)
     if match?(:TYPE_ID)
       type_token = consume(:TYPE_ID)
-      name = T.must(type_token).value
+      name = T.cast(T.must(type_token).value, String)
       # Collection constructor: List[] / Pool[] (with optional capabilities)
       # Element type is inferred from first append/insert.
       if %w[List Pool Set].include?(name) && match?(:CHAR, '[')
