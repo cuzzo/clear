@@ -71,6 +71,8 @@ pub struct UiDirectory {
     pub files: i64,
     pub units: i64,
     pub hazards: i64,
+    pub evidence_covered_hazards: i64,
+    pub covered_hazards: i64,
     pub sarif_findings: i64,
     pub dark_arm_findings: i64,
     pub distinct_tests: i64,
@@ -2334,6 +2336,8 @@ pub fn directory_index(files: &[UiFile], directory: &str) -> Vec<UiDirectory> {
         entry.files += 1;
         entry.units += file.units;
         entry.hazards += file.hazards;
+        entry.evidence_covered_hazards += file.evidence_covered_hazards;
+        entry.covered_hazards += file.covered_hazards;
         entry.sarif_findings += file.sarif_findings;
         entry.dark_arm_findings += file.dark_arm_findings;
         entry.distinct_tests += file.distinct_tests;
@@ -2361,6 +2365,8 @@ pub fn directory_index(files: &[UiFile], directory: &str) -> Vec<UiDirectory> {
                 files: builder.files,
                 units: builder.units,
                 hazards: builder.hazards,
+                evidence_covered_hazards: builder.evidence_covered_hazards,
+                covered_hazards: builder.covered_hazards,
                 sarif_findings: builder.sarif_findings,
                 dark_arm_findings: builder.dark_arm_findings,
                 distinct_tests: builder.distinct_tests,
@@ -2381,6 +2387,8 @@ struct DirectoryBuilder {
     files: i64,
     units: i64,
     hazards: i64,
+    evidence_covered_hazards: i64,
+    covered_hazards: i64,
     sarif_findings: i64,
     dark_arm_findings: i64,
     distinct_tests: i64,
@@ -5714,6 +5722,9 @@ fn render_code_tree_table(
         dashboard.multi_type_covered_lines,
         dashboard.mutant_verified_covered_lines,
         dashboard.coverage_percent,
+        dashboard.active_hazards,
+        dashboard.evidence_covered_hazards,
+        dashboard.covered_hazards,
     );
     render_template_string(
         CoverageTableTemplate {
@@ -5886,6 +5897,9 @@ fn render_file_coverage_row(file: &UiFile, directory: &str, filter: &str) -> Str
         file.multi_type_covered_lines,
         file.mutant_verified_covered_lines,
         file.line_coverage,
+        file.hazards,
+        file.evidence_covered_hazards,
+        file.covered_hazards,
     )
 }
 
@@ -5914,6 +5928,9 @@ fn render_directory_coverage_row(directory: &UiDirectory, parent: &str, filter: 
         directory.multi_type_covered_lines,
         directory.mutant_killed_covered_lines,
         directory.line_coverage,
+        directory.hazards,
+        directory.evidence_covered_hazards,
+        directory.covered_hazards,
     )
 }
 
@@ -5986,6 +6003,57 @@ fn unit_kind_label(kind: &str, name: &str) -> String {
     }
 }
 
+fn percent_color_class(pct: f64) -> &'static str {
+    if pct < 60.0 {
+        "pct-dark-red"
+    } else if pct < 70.0 {
+        "pct-light-red"
+    } else if pct < 80.0 {
+        "pct-orange"
+    } else if pct < 90.0 {
+        "pct-yellow"
+    } else {
+        "pct-green"
+    }
+}
+
+fn render_hazard_quality_bar(hazards: i64, evidence_covered: i64, covered_hazards: i64) -> String {
+    let mutant_killed_percent = if hazards > 0 {
+        percent(covered_hazards, hazards)
+    } else {
+        0.0
+    };
+    let covered_percent = if hazards > 0 {
+        percent(evidence_covered, hazards)
+    } else {
+        0.0
+    };
+    let covered_only_percent = (covered_percent - mutant_killed_percent).max(0.0);
+    let missed_percent = (100.0 - covered_percent).max(0.0);
+
+    let title = format!(
+        "{:.1}% hazard coverage; {} total, {} covered, {} mutant killed",
+        if hazards > 0 { covered_percent } else { 100.0 },
+        hazards,
+        evidence_covered,
+        covered_hazards
+    );
+
+    format!(
+        concat!(
+            "<span class=\"hazard-bar\" title=\"{}\">",
+            "<span class=\"hazard-mutant-killed\" style=\"width:{:.3}%\"></span>",
+            "<span class=\"hazard-covered-only\" style=\"width:{:.3}%\"></span>",
+            "<span class=\"hazard-missed\" style=\"width:{:.3}%\"></span>",
+            "</span>"
+        ),
+        html_escape(&title),
+        mutant_killed_percent,
+        covered_only_percent,
+        missed_percent
+    )
+}
+
 fn render_coverage_table_row(
     href: Option<&str>,
     icon_class: &str,
@@ -5997,6 +6065,9 @@ fn render_coverage_table_row(
     multi_type_lines: i64,
     mutant_backed_lines: i64,
     line_coverage: f64,
+    hazards: i64,
+    evidence_covered_hazards: i64,
+    covered_hazards: i64,
 ) -> String {
     let partial = partial_line_count(covered_lines, partial_findings);
     let covered = covered_lines.saturating_sub(partial);
@@ -6005,6 +6076,11 @@ fn render_coverage_table_row(
         percent(covered_lines, tracked_lines)
     } else {
         line_coverage
+    };
+    let hazard_percent_value = if hazards > 0 {
+        percent(evidence_covered_hazards, hazards)
+    } else {
+        100.0
     };
     let mut out = String::new();
     out.push_str("<tr>");
@@ -6027,15 +6103,25 @@ fn render_coverage_table_row(
         out.push_str(&html_escape(detail));
         out.push_str("</small>");
     }
-    out.push_str("</th><td>");
+    // Coverage mode columns
+    out.push_str("</th><td class=\"cov-col\">");
     out.push_str(&tracked_lines.to_string());
-    out.push_str("</td><td>");
+    out.push_str("</td><td class=\"cov-col\">");
     out.push_str(&covered.to_string());
-    out.push_str("</td><td>");
+    out.push_str("</td><td class=\"cov-col\">");
     out.push_str(&partial.to_string());
-    out.push_str("</td><td>");
+    out.push_str("</td><td class=\"cov-col\">");
     out.push_str(&missed.to_string());
+    // Hazards mode columns
+    out.push_str("</td><td class=\"haz-col\">");
+    out.push_str(&hazards.to_string());
+    out.push_str("</td><td class=\"haz-col\">");
+    out.push_str(&evidence_covered_hazards.to_string());
+    out.push_str("</td><td class=\"haz-col\">");
+    out.push_str(&covered_hazards.to_string());
+    // Coverage bar td
     out.push_str("</td><td class=\"coverage-cell\">");
+    out.push_str("<div class=\"cov-bar-wrapper\">");
     out.push_str(&render_line_quality_bar(LineQualityBar {
         tracked_lines,
         covered_lines,
@@ -6044,8 +6130,25 @@ fn render_coverage_table_row(
         mutant_backed_lines,
         coverage_percent: percent_value,
     }));
-    out.push_str("</td><td class=\"coverage-percent\">");
+    out.push_str("</div>");
+    out.push_str("<div class=\"haz-bar-wrapper\">");
+    out.push_str(&render_hazard_quality_bar(
+        hazards,
+        evidence_covered_hazards,
+        covered_hazards,
+    ));
+    out.push_str("</div>");
+    // Percentage tds (cov-col and haz-col)
+    let cov_color = percent_color_class(percent_value);
+    let haz_color = percent_color_class(hazard_percent_value);
+    out.push_str("</td><td class=\"coverage-percent cov-col ");
+    out.push_str(cov_color);
+    out.push_str("\">");
     out.push_str(&format!("{percent_value:.2}%"));
+    out.push_str("</td><td class=\"coverage-percent haz-col ");
+    out.push_str(haz_color);
+    out.push_str("\">");
+    out.push_str(&format!("{hazard_percent_value:.2}%"));
     out.push_str("</td></tr>");
     out
 }

@@ -983,6 +983,59 @@
   #layer-private-folding:not(:checked) ~ .topbar .private-fold-layer .switch-on { display: none; }
   #layer-private-folding:not(:checked) ~ .topbar .private-fold-layer .switch-off { display: inline-block; }
 
+  /* Directory views hazards / coverage toggle */
+  .dashboard-section-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    margin-bottom: 12px;
+  }
+  .dashboard-section-header h2 {
+    margin: 0;
+  }
+  #dir-mode-coverage:checked ~ .dashboard .view-toggle label[for="dir-mode-coverage"],
+  #dir-mode-hazards:checked ~ .dashboard .view-toggle label[for="dir-mode-hazards"] {
+    background: #eef2f7;
+    color: var(--text);
+    font-weight: 600;
+  }
+  .coverage-table .haz-col { display: none !important; }
+  .coverage-table .haz-bar-wrapper { display: none !important; }
+  #dir-mode-hazards:checked ~ .dashboard .coverage-table .cov-col { display: none !important; }
+  #dir-mode-hazards:checked ~ .dashboard .coverage-table .cov-bar-wrapper { display: none !important; }
+  #dir-mode-hazards:checked ~ .dashboard .coverage-table .haz-col { display: table-cell !important; }
+  #dir-mode-hazards:checked ~ .dashboard .coverage-table .haz-bar-wrapper { display: block !important; }
+
+  /* Hazard quality bar styling */
+  .hazard-bar {
+    display: flex;
+    height: 8px;
+    min-width: 130px;
+    border: 1px solid rgba(100, 116, 139, 0.22);
+    background: #e2e8f0;
+    border-radius: 4px;
+    overflow: hidden;
+  }
+  .hazard-bar span {
+    height: 100%;
+  }
+  .hazard-mutant-killed {
+    background: #166534;
+  }
+  .hazard-covered-only {
+    background: #86efac;
+  }
+  .hazard-missed {
+    background: transparent;
+  }
+
+  /* Percentage color coding */
+  .coverage-percent.pct-green { color: #166534 !important; }
+  .coverage-percent.pct-yellow { color: #d97706 !important; }
+  .coverage-percent.pct-orange { color: #ea580c !important; }
+  .coverage-percent.pct-light-red { color: #ef4444 !important; }
+  .coverage-percent.pct-dark-red { color: #b91c1c !important; }
+
   .row.dark-arm .line-meta {
     color: var(--dark-arm);
     font-weight: 700;

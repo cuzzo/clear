@@ -1,4 +1,6 @@
 <div class="viewer">
+  <input class="mode-radio" type="radio" name="lineage-dir-mode" id="dir-mode-coverage" checked data-persist-key="lineage.dir.mode">
+  <input class="mode-radio" type="radio" name="lineage-dir-mode" id="dir-mode-hazards" data-persist-key="lineage.dir.mode">
   <section class="dashboard">
     {{ branch_context|safe }}
     {{ warnings|safe }}
@@ -7,7 +9,13 @@
     {{ highest_risk_units|safe }}
     {{ highest_architecture_risks|safe }}
     <section class="dashboard-section">
-      <h2>{{ code_tree_heading }}</h2>
+      <div class="dashboard-section-header">
+        <h2>{{ code_tree_heading }}</h2>
+        <div class="view-toggle" aria-label="directory view mode">
+          <label for="dir-mode-coverage">Coverage</label>
+          <label for="dir-mode-hazards">Hazards</label>
+        </div>
+      </div>
       {{ code_tree|safe }}
     </section>
   </section>
