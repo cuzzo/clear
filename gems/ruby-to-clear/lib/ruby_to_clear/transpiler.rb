@@ -203,7 +203,8 @@ module RubyToClear
       generated_unions = generated_union_definitions_for_body(body)
       generated_cast_helpers = @generated_cast_helper_defs.keys.sort.map { |name| @generated_cast_helper_defs.fetch(name) }
       generated_support_helpers = @generated_support_helper_defs.keys.sort.map { |name| @generated_support_helper_defs.fetch(name) }
-      (requires.uniq + @helper_config.prelude_lines + generated_unions + [body] + generated_cast_helpers + generated_support_helpers).reject(&:empty?).join("\n")
+      helper_prelude = @helper_config.prelude_lines_for(body)
+      (requires.uniq + helper_prelude + generated_unions + [body] + generated_cast_helpers + generated_support_helpers).reject(&:empty?).join("\n")
     end
 
     def normalize_imported_union_alias_members!
@@ -497,7 +498,8 @@ module RubyToClear
     end
 
     def clear_string_escape(content)
-      content.each_codepoint.map do |codepoint|
+      codepoints = content.codepoints
+      codepoints.each_with_index.map do |codepoint, index|
         case codepoint
         when 0x08 then "\\b"
         when 0x09 then "\\t"
@@ -505,6 +507,10 @@ module RubyToClear
         when 0x0D then "\\r"
         when 0x22 then "\\\""
         when 0x5C then "\\\\"
+        when 0x24
+          # CLEAR reserves `${...}` for interpolation. A literal Ruby
+          # string containing that sequence must escape only the dollar.
+          index + 1 < codepoints.length && codepoints[index + 1] == 0x7B ? "\\$" : "$"
         else
           if codepoint < 0x20 || codepoint == 0x7F
             "\\x#{codepoint.to_s(16).upcase.rjust(2, '0')}"
@@ -2136,6 +2142,27 @@ module RubyToClear
       val = expression_argument_code(node.value)
       receiver = class_storage_instance_variable?(name) ? name : "self.#{name}"
       "#{receiver} = (#{receiver} #{op} #{val})"
+    end
+
+    def visit_call_operator_write_node(node)
+      op = node.operator.to_s
+      receiver = visit(node.receiver)
+      name = node.read_name.to_s
+      lhs = "#{receiver}.#{name}()"
+      val = expression_argument_code(node.value)
+      "#{receiver}.#{node.write_name}((#{lhs} #{op} #{val}))"
+    end
+
+    def visit_index_operator_write_node(node)
+      args = node.arguments ? node.arguments.arguments : []
+      return unsupported_expression(node, "Indexed compound write requires one index") unless args.length == 1
+
+      receiver = visit(node.receiver)
+      index = visit(args.first)
+      lhs = "#{receiver}[#{index}]"
+      op = node.operator.to_s
+      val = expression_argument_code(node.value)
+      "#{lhs} = (#{lhs} #{op} #{val})"
     end
 
     def visit_instance_variable_or_write_node(node)
@@ -3859,7 +3886,12 @@ module RubyToClear
         return ""
       end
 
-      return raise_unsupported("Exception handling (rescue) is not supported", node)
+      # Ruby's modifier form (`value rescue fallback`) is the common
+      # expression-level recovery idiom. CLEAR's OR operator has the same
+      # value semantics and preserves the error for the surrounding function.
+      expression = visit(node.expression)
+      fallback = visit(node.rescue_expression)
+      "(#{expression} OR #{fallback})"
     end
 
     def visit_begin_node(node)

@@ -499,7 +499,7 @@ module RubyToClear
         "(-#{visit(node.receiver)})"
       when "+@"
         "(+#{visit(node.receiver)})"
-      when "==", "!=", "<", "<=", ">", ">=", "+", "-", "*", "/", "%", "&&", "||", "&", "|"
+      when "==", "!=", "<", "<=", ">", ">=", "+", "-", "*", "/", "%", "**", "&&", "||", "&", "|"
         rhs_node = node.arguments.arguments.first
         if ["==", "!="].include?(node.name.to_s) &&
            (safe_comparison = safe_navigation_equality_code(node, rhs_node))
@@ -721,13 +721,12 @@ module RubyToClear
         end
 
         if rec_code && name_str == "call" && function_like_clear_type?(receiver_type_for_call)
-          unless rec_code.match?(/\A[A-Za-z_]\w*\z/)
-            return unsupported_expression(node, "Proc#call on expression receivers is not supported; assign the function to a local first")
-          end
           if receiver_type_for_call.to_s.start_with?("?")
             return unsupported_expression(node, "Proc#call on optional function receivers is not supported; assign T.must(receiver) to a local first")
           end
 
+          # CLEAR accepts calls on parenthesized function expressions, so
+          # `factory().call(x)` can remain expression-shaped.
           return "#{rec_code}(#{args_list.join(', ')})"
         end
 

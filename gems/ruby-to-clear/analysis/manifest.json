@@ -1,0 +1,22 @@
+{
+  "schema_version": 1,
+  "name": "compiler-ruby-self-host",
+  "description": "Every Ruby implementation file in the CLEAR compiler, evaluated as a complete source unit.",
+  "corpus": {
+    "source_root": "compiler/ruby",
+    "glob": "**/*.rb",
+    "generated_root": "compiler/src"
+  },
+  "helper_config": "gems/ruby-to-clear/config/compiler_regex_helpers.json",
+  "packages": {
+    "path": "stdlib/path/src/lib.clear"
+  },
+  "native_modules": {
+    "compiler_regex": "compiler/src/compiler_regex.zig"
+  },
+  "forbidden_output_patterns": [
+    "# [UNSUPPORTED:",
+    "unsupportedRuby("
+  ],
+  "timeout_seconds": 240
+}

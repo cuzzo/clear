@@ -50,6 +50,38 @@ module RubyToClear
       @prelude.map(&:to_s)
     end
 
+    # Emit only native declarations referenced by the generated body. Keeping
+    # the entire helper prelude in every file makes `clear test` fail on
+    # unused Zig aliases, and also hides which native surface a unit needs.
+    def prelude_lines_for(body)
+      lines = @prelude.map(&:to_s)
+      declarations = lines.filter_map do |line|
+        match = line.match(/\AEXTERN\s+(?:STRUCT|FN)\s+([A-Za-z_]\w*)/)
+        [match[1], line] if match
+      end
+      needed = declarations.each_with_object({}) do |(name, _line), out|
+        out[name] = true if body.match?(Regexp.new("\\b#{Regexp.escape(name)}\\b"))
+      end
+
+      loop do
+        added = false
+        declarations.each do |name, line|
+          next unless needed[name]
+
+          line.scan(/\b[A-Z][A-Za-z0-9_]*\b/).each do |type_name|
+            next unless declarations.any? { |candidate, _| candidate == type_name }
+            next if needed[type_name]
+
+            needed[type_name] = true
+            added = true
+          end
+        end
+        break unless added
+      end
+
+      declarations.filter_map { |name, line| line if needed[name] }
+    end
+
     def helper?(name)
       helper_entry(name) != nil
     end

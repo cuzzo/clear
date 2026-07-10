@@ -184,7 +184,7 @@ module RubyToClear
       end
     end
 
-    def self.unsafe_value_block_node(block_node, allow_next: false, allow_yield: false)
+    def self.unsafe_value_block_node(block_node, allow_next: false, allow_yield: false, allow_break: false)
       found = nil
       walk = lambda do |node|
         return unless node.is_a?(Prism::Node)
@@ -197,6 +197,10 @@ module RubyToClear
           return
         end
         if allow_yield && node_name == "YieldNode"
+          node.child_nodes.each { |child| walk.call(child) if child }
+          return
+        end
+        if allow_break && node_name == "BreakNode"
           node.child_nodes.each { |child| walk.call(child) if child }
           return
         end
@@ -229,7 +233,7 @@ module RubyToClear
       code.split("\n").map { |line| "  #{line}" }.join("\n")
     end
 
-    def self.lower_literal_block(node, block_node, transpiler, method_label, min_params:, max_params:, rename:, allow_next: false, allow_yield: false, local_types: nil)
+    def self.lower_literal_block(node, block_node, transpiler, method_label, min_params:, max_params:, rename:, allow_next: false, allow_yield: false, allow_break: false, local_types: nil)
       unless block_node.is_a?(Prism::BlockNode)
         return unsupported(transpiler, node, "Unsupported #{method_label} block type: #{block_node.class.name}")
       end
@@ -241,7 +245,7 @@ module RubyToClear
       transpiler.with_block_local_scope do
         transpiler.with_local_types(local_types ? local_types.call(param_names) : {}) do
           transpiler.with_renames(aliases) do
-            if (unsafe = unsafe_value_block_node(block_node, allow_next: allow_next, allow_yield: allow_yield))
+            if (unsafe = unsafe_value_block_node(block_node, allow_next: allow_next, allow_yield: allow_yield, allow_break: allow_break))
               next unsupported(transpiler, node, "#{method_label} block contains unsupported #{unsafe}")
             end
 
@@ -339,6 +343,7 @@ module RubyToClear
         end,
         allow_next: true,
         allow_yield: true,
+        allow_break: true,
         local_types: lambda do |param_names|
           { param_names[0] => key_type, param_names[1] => value_type }
         end
