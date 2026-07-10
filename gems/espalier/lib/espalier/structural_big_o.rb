@@ -196,6 +196,7 @@ module Espalier
           structural_hint(
             line: recursive_calls.first,
             complexity: "O(N!)",
+            space: "O(N)",
             operation: method_name,
             reason: "recursive branching over shrinking collection",
             detail: lines[recursive_calls.first - 1].to_s.strip
@@ -203,17 +204,50 @@ module Espalier
         ]
       end
 
-      return [] unless exponential_recursion?(lines, recursive_calls)
+      if exponential_recursion?(lines, recursive_calls)
+        return [
+          structural_hint(
+            line: recursive_calls.first,
+            complexity: "O(2^N)",
+            space: "O(N)",
+            operation: method_name,
+            reason: "multiple recursive branches",
+            detail: lines[recursive_calls.first - 1].to_s.strip
+          )
+        ]
+      end
 
+      if divide_and_conquer_recursion?(lines, recursive_calls)
+        return [
+          structural_hint(
+            line: recursive_calls.first,
+            complexity: "O(log N)",
+            space: "O(log N)",
+            operation: method_name,
+            reason: "recursive call with division / halving",
+            detail: lines[recursive_calls.first - 1].to_s.strip
+          )
+        ]
+      end
+
+      # Linear recursion fallback
       [
         structural_hint(
           line: recursive_calls.first,
-          complexity: "O(2^N)",
+          complexity: "O(N)",
+          space: "O(N)",
           operation: method_name,
-          reason: "multiple recursive branches",
+          reason: "recursive self call",
           detail: lines[recursive_calls.first - 1].to_s.strip
         )
       ]
+    end
+
+    def divide_and_conquer_recursion?(lines, recursive_calls)
+      recursive_calls.any? do |line_no|
+        line = lines[line_no - 1].to_s
+        line.match?(%r{/\s*2\b|>>\s*1\b|\bsplit\b|\bslice\b|mid\b})
+      end
     end
 
     def recursive_call_lines(lines, method_name, start_line, end_line)
@@ -421,11 +455,12 @@ module Espalier
       line[/\A\s*/].to_s.length
     end
 
-    def structural_hint(line:, operation:, reason:, detail:, complexity: "O(N^2)")
+    def structural_hint(line:, operation:, reason:, detail:, complexity: "O(N^2)", space: nil)
       {
         type: :structural,
         line: line,
         complexity: complexity,
+        space: space,
         operation: operation,
         reason: reason,
         detail: detail

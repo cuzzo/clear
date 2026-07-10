@@ -58,6 +58,7 @@ module Espalier
       previous_local_types = @local_types
       @local_types = local_types if local_types
       complexity = "O(1)"
+      space_complexity = "O(1)"
       unknown_operations = []
       warnings = []
 
@@ -95,6 +96,9 @@ module Espalier
         elsif node[:type] == :structural
           structural_complexity = node[:complexity].to_s
           complexity = max_complexity(complexity, structural_complexity)
+          if node[:space]
+            space_complexity = max_space_complexity(space_complexity, node[:space].to_s)
+          end
           warnings << structural_warning(node) if structural_complexity != "O(1)"
         elsif node[:type] == :callback || node[:type] == :yield
           warnings << "Function pointer / callback executed at line #{node[:line]}. This could execute arbitrary O(N^x) code, meaning our calculation is strictly a LOWER BOUND."
@@ -104,6 +108,7 @@ module Espalier
       {
         method: method_name,
         lower_bound_complexity: complexity,
+        space_complexity: space_complexity,
         unknown_operations: unknown_operations.uniq,
         warnings: warnings.uniq
       }
@@ -314,6 +319,21 @@ module Espalier
         new_log ? "O(N log N)" : "O(N)"
       else
         new_log ? "O(N^#{new_pow} log N)" : "O(N^#{new_pow})"
+      end
+    end
+
+    def max_space_complexity(current, added)
+      r1 = space_complexity_rank(current)
+      r2 = space_complexity_rank(added)
+      r1 > r2 ? current : added
+    end
+
+    def space_complexity_rank(space)
+      case space.to_s
+      when "O(N)" then 10
+      when "O(log N)" then 5
+      when "O(1)" then 1
+      else 1
       end
     end
   end

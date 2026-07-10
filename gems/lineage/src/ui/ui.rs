@@ -398,6 +398,16 @@ pub struct UiArchitectureRisk {
     pub privacy_candidates: i64,
 }
 
+#[derive(Debug, Clone, Serialize, PartialEq)]
+pub struct UiComplexityFunction {
+    pub name: String,
+    pub path: String,
+    pub start_line: u32,
+    pub runtime_complexity: String,
+    pub space_complexity: String,
+    pub detail: String,
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 struct CommentFold {
     id: usize,
@@ -474,6 +484,7 @@ pub struct UiDashboard {
     pub top_hazard_files: Vec<UiFile>,
     pub top_units: Vec<UiUnitHotspot>,
     pub top_architecture_risks: Vec<UiArchitectureRisk>,
+    pub top_complexity_functions: Vec<UiComplexityFunction>,
     pub warnings: Vec<UiWarning>,
 }
 
@@ -563,6 +574,7 @@ struct DashboardTemplate<'a> {
     highest_hazard_files: &'a str,
     highest_risk_units: &'a str,
     highest_architecture_risks: &'a str,
+    highest_complexity_functions: &'a str,
     code_tree_heading: &'a str,
     code_tree: &'a str,
 }
@@ -1316,6 +1328,10 @@ fn dashboard_summary_for_directory_with_scope_and_repo(
         .map(|file| file.sarif_findings)
         .sum();
 
+    let complexity_start = Instant::now();
+    let top_complexity_functions = top_complexity_functions(storage, &directory, scope)?;
+    profile_log("dashboard.top_complexity_functions", complexity_start);
+
     let dashboard = UiDashboard {
         files: files_count,
         tracked_lines: line_counts.tracked,
@@ -1357,6 +1373,7 @@ fn dashboard_summary_for_directory_with_scope_and_repo(
         top_hazard_files,
         top_units,
         top_architecture_risks,
+        top_complexity_functions,
         warnings,
     };
     profile_log("dashboard.total", total_start);
@@ -1826,6 +1843,109 @@ fn top_architecture_risks(
     out.truncate(12);
     Ok(out)
 }
+
+fn top_complexity_functions(
+    storage: &Storage,
+    directory: &str,
+    scope: &CoverageScope,
+) -> Result<Vec<UiComplexityFunction>> {
+    let mut stmt = storage.connection().prepare(
+        r#"
+        SELECT path, start_line, properties_json, message
+        FROM sarif_findings
+        WHERE rule_id = 'espalier.function'
+           OR (tool_name = 'espalier' AND rule_id LIKE '%.function')
+        "#,
+    )?;
+    let rows = stmt.query_map([], |row| {
+        Ok((
+            row.get::<_, String>(0)?,
+            row.get::<_, u32>(1)?,
+            row.get::<_, String>(2)?,
+            row.get::<_, String>(3)?,
+        ))
+    })?;
+
+    let mut functions = Vec::new();
+    let mut seen = std::collections::HashSet::new();
+
+    for row in rows {
+        let (path, start_line, properties_json, message) = row?;
+        if !scope.allows(&path)
+            || !is_production_source_path(&path)
+            || !path_in_directory(&path, directory)
+        {
+            continue;
+        }
+
+        let properties = serde_json::from_str::<Value>(&properties_json).unwrap_or(Value::Null);
+        let func_val = match properties.get("function") {
+            Some(v) => v,
+            None => continue,
+        };
+
+        let name = string_field(func_val, &["name"])
+            .or_else(|| string_field(&properties, &["function"]))
+            .or_else(|| message.rsplit('#').next())
+            .map(|s| s.trim())
+            .filter(|s| !s.is_empty())
+            .unwrap_or("*")
+            .to_string();
+
+        let key = (path.clone(), name.clone(), start_line);
+        if seen.contains(&key) {
+            continue;
+        }
+
+        let metrics = match func_val.get("quality_metrics") {
+            Some(m) => m,
+            None => continue,
+        };
+
+        let big_o = metrics
+            .get("big_o")
+            .and_then(|v| v.as_str())
+            .unwrap_or("O(1)")
+            .to_string();
+
+        let rank = match big_o.as_str() {
+            s if s.contains("N^3") => 3,
+            s if s.contains("N^2") => 2,
+            s if s.contains("N log N") => 1,
+            _ => 0,
+        };
+
+        if rank >= 1 {
+            seen.insert(key);
+            functions.push((path, start_line, name, big_o, rank));
+        }
+    }
+
+    functions.sort_by(|left, right| {
+        right.4.cmp(&left.4)
+            .then_with(|| left.0.cmp(&right.0))
+            .then_with(|| left.2.cmp(&right.2))
+    });
+
+    let result = functions
+        .into_iter()
+        .map(|(path, start_line, name, big_o, _)| {
+            let space_complexity = "O(1)".to_string();
+            let detail = format!("Runtime: {} | Space: {}", big_o, space_complexity);
+            UiComplexityFunction {
+                name,
+                path,
+                start_line,
+                runtime_complexity: big_o,
+                space_complexity,
+                detail,
+            }
+        })
+        .collect();
+
+    Ok(result)
+}
+
 
 fn espalier_owner_name(properties: &Value, message: &str) -> Option<String> {
     string_field(properties, &["module"])
@@ -5373,6 +5493,7 @@ fn render_dashboard(
         false,
         &render_architecture_risks(&dashboard.top_architecture_risks, filter),
     );
+    let highest_complexity_functions = render_complexity_functions_section(dashboard, filter);
     let code_tree_heading = format!(
         "Directory entries ({} dirs - {} files - {} SARIF findings)",
         directories.len(),
@@ -5395,6 +5516,7 @@ fn render_dashboard(
             highest_hazard_files: &highest_hazard_files,
             highest_risk_units: &highest_risk_units,
             highest_architecture_risks: &highest_architecture_risks,
+            highest_complexity_functions: &highest_complexity_functions,
             code_tree_heading: &code_tree_heading,
             code_tree: &code_tree,
         },
@@ -5994,6 +6116,36 @@ fn render_architecture_risks(risks: &[UiArchitectureRisk], filter: &str) -> Stri
             items: &items,
         },
         "architecture hotspot template",
+    )
+}
+
+fn render_complexity_functions_section(dashboard: &UiDashboard, filter: &str) -> String {
+    let items = dashboard
+        .top_complexity_functions
+        .iter()
+        .map(|func| HotspotItem {
+            href: format!("{}#L{}", page_href(&func.path, None, filter), func.start_line),
+            kind: unit_kind_label("function", &func.name),
+            name: func.name.clone(),
+            path: func.path.clone(),
+            detail: func.detail.clone(),
+            score: func.runtime_complexity.clone(),
+        })
+        .collect::<Vec<_>>();
+
+    let body = render_template_string(
+        HotspotListTemplate {
+            wrapper_class: "unit-hotspots complexity-hotspots",
+            empty_message: "No high complexity functions to show.",
+            items: &items,
+        },
+        "complexity functions template",
+    );
+
+    render_dashboard_disclosure(
+        "High Complexity Functions",
+        !dashboard.top_complexity_functions.is_empty(),
+        &body,
     )
 }
 
@@ -9396,6 +9548,7 @@ mod tests {
             }],
             top_units: Vec::new(),
             top_architecture_risks: Vec::new(),
+            top_complexity_functions: Vec::new(),
             warnings: Vec::new(),
         };
         let files = dashboard.top_hazard_files.iter().collect::<Vec<_>>();
@@ -9417,6 +9570,7 @@ mod tests {
         assert!(html.contains("<h2>Active Hazards</h2>"));
         assert!(html.contains("<h2>Highest Risk Units</h2>"));
         assert!(html.contains("<h2>Highest Architectural Risks</h2>"));
+        assert!(html.contains("<h2>High Complexity Functions</h2>"));
         assert!(html.contains("class=\"coverage-bar line-quality-bar\""));
         assert!(html.contains("8 of 10 lines covered; 1 partial, 2 missed"));
         assert!(!html.contains(">8 covered lines</span>"));

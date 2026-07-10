@@ -205,4 +205,86 @@ class BigOTest < Minitest::Test
     assert_equal "O(N!)", result[:lower_bound_complexity]
     assert_equal 3, result[:warnings].size
   end
+
+  def test_space_complexity_calculation
+    analyzer = Espalier::BigOAnalyzer.new
+
+    # 1. Default/pure iterative space
+    result_default = analyzer.analyze_method("iterative", [
+      { type: :loop, line: 10 }
+    ])
+    assert_equal "O(1)", result_default[:space_complexity]
+
+    # 2. Divide and conquer space
+    result_dc = analyzer.analyze_method("binary_search", [
+      { type: :structural, line: 10, complexity: "O(log N)", space: "O(log N)", operation: "search" }
+    ])
+    assert_equal "O(log N)", result_dc[:space_complexity]
+
+    # 3. Linear recursion space
+    result_linear = analyzer.analyze_method("factorial", [
+      { type: :structural, line: 10, complexity: "O(N)", space: "O(N)", operation: "factorial" }
+    ])
+    assert_equal "O(N)", result_linear[:space_complexity]
+  end
+
+  def test_recursion_detection_types
+    require_relative "../lib/espalier/structural_big_o"
+    
+    # Mock source cache
+    source_cache = {
+      "fact.rb" => [
+        "def factorial(n)\n",
+        "  return 1 if n <= 1\n",
+        "  n * factorial(n - 1)\n",
+        "end\n"
+      ],
+      "fib.rb" => [
+        "def fib(n)\n",
+        "  return n if n <= 1\n",
+        "  fib(n - 1) + fib(n - 2)\n",
+        "end\n"
+      ],
+      "dc.rb" => [
+        "def bsearch(n)\n",
+        "  return if n <= 1\n",
+        "  bsearch(n / 2)\n",
+        "end\n"
+      ],
+      "perm.rb" => [
+        "def permute(arr)\n",
+        "  arr.each do |x|\n",
+        "    permute(arr - [x])\n",
+        "  end\n",
+        "end\n"
+      ]
+    }
+
+    s = Espalier::StructuralBigO.new(source_cache: source_cache)
+
+    # 1. Linear recursion: factorial(n - 1)
+    hints = s.hints_for("fact.rb", { name: "factorial", line: 1, span: [1, 0, 4, 3] }, "Math")
+    assert_equal 1, hints.size
+    assert_equal "O(N)", hints[0][:complexity]
+    assert_equal "O(N)", hints[0][:space]
+
+    # 2. Exponential recursion: fib(n - 1) + fib(n - 2)
+    hints = s.hints_for("fib.rb", { name: "fib", line: 1, span: [1, 0, 4, 3] }, "Math")
+    assert_equal 1, hints.size
+    assert_equal "O(2^N)", hints[0][:complexity]
+    assert_equal "O(N)", hints[0][:space]
+
+    # 3. Divide and conquer: bsearch(n / 2)
+    hints = s.hints_for("dc.rb", { name: "bsearch", line: 1, span: [1, 0, 4, 3] }, "Math")
+    assert_equal 1, hints.size
+    assert_equal "O(log N)", hints[0][:complexity]
+    assert_equal "O(log N)", hints[0][:space]
+
+    # 4. Factorial recursion: permute(arr - [x]) in loop
+    hints = s.hints_for("perm.rb", { name: "permute", line: 1, span: [1, 0, 5, 3] }, "Math")
+    # Might include both permute (O(N!)) and collection scan / expensive call hints.
+    factorial_hint = hints.find { |h| h[:complexity] == "O(N!)" }
+    refute_nil factorial_hint
+    assert_equal "O(N)", factorial_hint[:space]
+  end
 end

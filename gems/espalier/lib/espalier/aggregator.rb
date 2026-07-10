@@ -111,6 +111,7 @@ module Espalier
           
           big_o_result = analyzer.analyze_method(key, ast_nodes, local_types: local_types_for_signature(sig))
           quality[:big_o] = big_o_result[:lower_bound_complexity]
+          quality[:big_o_space] = big_o_result[:space_complexity] if big_o_result[:space_complexity]
           quality[:big_o_warnings] = big_o_result[:warnings] unless big_o_result[:warnings].empty?
           quality[:big_o_unknowns] = big_o_result[:unknown_operations] unless big_o_result[:unknown_operations].empty?
 
