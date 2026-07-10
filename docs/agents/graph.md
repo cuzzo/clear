@@ -135,19 +135,20 @@ incorrect alternatives of:
 - one process-global unsynchronized map for all programs/fibers; or
 - one thread-local map, which breaks when a fiber migrates between workers.
 
-Every store registers a type-erased finalizer with its owning Runtime. Runtime
-deinitialization runs finalizers in reverse registration order before its
-allocators disappear. Store destruction cleans every live payload exactly
-once through `CheatLib.cleanup(T, allocator, value)` and then releases slot-map
-storage.
+Every store registers a type-erased finalizer with its owning Runtime as a
+shutdown safety net. Runtime deinitialization runs finalizers in reverse
+registration order before its allocators disappear.
 
 Generated functions bind each used node type once:
 
 ```zig
 const __node_store_Node = try CheatLib.NodeStore(Node).bind(rt);
+defer CheatLib.NodeStore(Node).releaseBound(__node_store_Node);
 ```
 
-All hot operations use that local `*PagedSlotMap(Node)` through inline
+`bind` acquires a lexical lease and the generated `defer` releases it. The
+outermost release clears the store synchronously. All hot operations use the
+local `*PagedSlotMap(Node)` through inline
 `createBound`/`getBound` helpers. The registry/TLS lookup is therefore outside
 loops and function-local performance approaches hand-written Zig.
 
@@ -157,9 +158,13 @@ store or Runtime.
 
 ## Cleanup and RAII
 
-The handle is Copy and has no lexical payload cleanup. The store is the owner.
+The handle is Copy and the store is the payload owner.
 
-- Runtime teardown deterministically destroys all remaining live vertices.
+- Each node-using function holds a store lease. Releasing the outermost lease
+  deterministically destroys all remaining live vertices before returning to
+  its caller, including cycles.
+- Runtime teardown remains a safety net for direct runtime users that create
+  nodes without compiler-generated lexical bindings.
 - Runtime `remove` destroys the selected payload synchronously and exactly
   once.
 - Swap-moved payloads are not cleaned at the old dense tail position.
@@ -167,9 +172,9 @@ The handle is Copy and has no lexical payload cleanup. The store is the owner.
   recursive cleanup use the existing cleanup machinery rather than a
   graph-specific destructor system.
 
-The emitted lexical cleanup on a root handle is a no-op representation marker
-used by MIR's allocator-provenance verifier for mutations of nested collection
-fields. Payload lifetime remains exclusively store-owned.
+Individual root handles do not own vertices and therefore do not run payload
+cleanup. The graph is reclaimed as one store at the outermost lexical lifetime
+boundary; this avoids both reference counting on edges and topology tracing.
 
 ## Safety
 

@@ -1094,6 +1094,7 @@ pub const CheatLib = struct {
                 owner: *Runtime,
                 owner_id: u64,
                 map: Map,
+                active_bindings: usize = 0,
                 next: ?*State = null,
             };
 
@@ -1178,7 +1179,23 @@ pub const CheatLib = struct {
             }
 
             pub fn bind(rt: *Runtime) !*Map {
-                return &(try ensure(rt)).map;
+                const current = try ensure(rt);
+                states_lock.lock();
+                defer states_lock.unlock();
+                current.active_bindings += 1;
+                return &current.map;
+            }
+
+            /// Release one compiler-synthesized lexical binding. The final
+            /// binding owns the implicit graph lifetime, so clearing it runs
+            /// payload cleanup synchronously even when the topology is cyclic.
+            pub fn releaseBound(map: *Map) void {
+                const current: *State = @fieldParentPtr("map", map);
+                states_lock.lock();
+                defer states_lock.unlock();
+                std.debug.assert(current.active_bindings > 0);
+                current.active_bindings -= 1;
+                if (current.active_bindings == 0) current.map.clear();
             }
 
             pub fn createBound(map: *Map, value: T) !Ref {

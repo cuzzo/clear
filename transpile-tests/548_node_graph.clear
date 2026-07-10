@@ -21,7 +21,7 @@ FN main() RETURNS Void ->
   ASSERT nodeId(root) == 1, "node store is implicitly threaded through calls";
 
   # Replacing an edge changes only the compact handle. Both payloads remain
-  # owned by the inferred type store until Runtime.deinit.
+  # owned by the inferred type store until the outermost @node scope exits.
   IF root.children[0] AS child THEN
     root.left = child;
   END

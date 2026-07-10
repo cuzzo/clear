@@ -70,6 +70,31 @@ test "NodeStore uses compact nullable handles, rejects stale handles, and finali
     try std.testing.expect(Store.get(&rt, second) == null);
 }
 
+test "NodeStore releases every payload at the outermost lexical binding" {
+    const allocator = std.testing.allocator;
+    var context = ebr.EbrContext{};
+    defer context.deinit(allocator);
+
+    var rt = try Runtime.init(allocator, 64 * 1024, &context);
+    defer rt.deinit();
+    node_store_drop_count = 0;
+
+    const Store = CheatLib.NodeStore(NodeStorePayload);
+    const outer = try Store.bind(&rt);
+    const inner = try Store.bind(&rt);
+    try std.testing.expectEqual(outer, inner);
+
+    const first = try Store.createBound(outer, .{ .value = 1 });
+    _ = try Store.createBound(inner, .{ .value = 2 });
+    Store.releaseBound(inner);
+    try std.testing.expectEqual(@as(usize, 0), node_store_drop_count);
+    try std.testing.expectEqual(@as(u64, 1), Store.getBound(outer, first).?.value);
+
+    Store.releaseBound(outer);
+    try std.testing.expectEqual(@as(usize, 2), node_store_drop_count);
+    try std.testing.expect(Store.getBound(outer, first) == null);
+}
+
 test "bounds-safe list access returns optionals, mutable aliases, and compact node NIL" {
     const allocator = std.testing.allocator;
     var values: std.ArrayListUnmanaged(u64) = .empty;

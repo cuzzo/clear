@@ -492,60 +492,107 @@ Like arrays, Strings have capabilities:
 - `String@symbol` - compile-time interned identifier. Literals use Ruby-style `:ok` syntax. The compiler embeds the string in read-only static memory and deduplicates identical literals, so equality is O(1) pointer comparison and the value needs no cleanup (program-lifetime). Use for status tags, option names, event names, and map keys where the set of values is known at compile time. Note: interned HashMaps carry their own per-map symbol table for runtime string keys - this avoids a globally locked intern table, which would create a contention hotspot incompatible with CLEAR's scalability goals.
 - `String@ring` (v0.2) - circular buffer for streaming.
 
-## 13. Graphs, Cycles, and @indirect
+## 13. Graphs, Cycles, and `@node`
 
-For recursive or cyclic data structures, use `@indirect` (heap-allocated pointer, like Rust's `Box<T>`). Combine it with `EFFECTS REENTRANT` for recursive traversal:
+Use `@node` for a closed graph: a group of vertices that naturally shares one
+lifetime, such as an AST, scene graph, dependency graph, or UI tree with
+back-pointers. Declare the capability on references inside the node type and
+then construct and assign ordinary structs:
 
 ```ruby clear illustrative
-# Recursive tree node using @indirect for child pointers
 STRUCT Node {
-    value: Int64,
-    left: ?Node@indirect,     # Optional heap-allocated child
-    right: ?Node@indirect
+    id: Int64,
+    left: ?Node@node,
+    right: ?Node@node,
+    children: Node@node[]@list
 }
 
-# Recursive traversal must declare EFFECTS REENTRANT
-FN sumTree(n: Node) RETURNS Int64 EFFECTS REENTRANT ->
-    MUTABLE total = n.value;
-    IF n.left -> total += sumTree(n?.left OR 0);
-    IF n.right -> total += sumTree(n?.right OR 0);
-    RETURN total;
+FN buildGraph() RETURNS Void ->
+    MUTABLE root: Node@node = Node{ id: 1 };
+
+    # The destination is already Node@node, so CLEAR inserts each new value
+    # into the implicit graph store. No GraphId or pool API is exposed.
+    root.left = Node{ id: 2 };
+    root.right = root.left;                 # sharing is ordinary assignment
+    root.children.append(Node{ id: 3 });
+
+    # Cycles are legal. IF binds the optional node for mutation.
+    IF root.left AS left THEN
+        left.right = root;
+    END
+    ASSERT root.left?.right?.id == 1;
 END
 ```
 
-`@indirect` gives the node a stable heap address, enabling graph structures. `@multiowned` (Rc) enables shared ownership for DAGs. For cyclic graphs, use `@link` -- CLEAR's weak reference.
+The compiler represents each reference as a compact generational handle and
+stores payloads densely in a hidden paged slot map. Stale handles resolve to
+NIL, and users still program against objects and fields rather than pool
+indices.
+
+> [!INFO]
+> `@node` cleanup is automatic RAII. Each function using a node type acquires
+> an implicit graph-scope lease and the compiler emits its release as a
+> `defer`. When the outermost lease ends, CLEAR synchronously destroys every
+> live payload in that type's implicit store—even if the nodes form cycles.
+> Nested Strings, Lists, and `EXTERN STRUCT ... CLOSE` resources are cleaned
+> exactly once before control returns to the caller. A graph is reclaimed as
+> a unit; no tracing garbage collector or manual walk is involved.
+
+`@node` is deliberately graph-lifetime ownership, not per-edge ownership.
+Losing one handle does not prove that its vertex is unreachable; the complete
+implicit store is reclaimed when its outermost graph scope ends. This is what
+makes cycles inexpensive and cleanup deterministic.
+
+For a uniquely owned recursive tree that does not need sharing or cycles,
+`@indirect` remains the simpler pointer-like representation:
+
+```ruby clear illustrative
+STRUCT TreeNode {
+    value: Int64,
+    left: ?TreeNode@indirect,
+    right: ?TreeNode@indirect
+}
+```
 
 `?.` is the safe navigate operator to peek into optional types. It combines with `OR` to handle missing data like an error. One `?.` guards a continuous chain of non-optional members, so `user?.profile.name` is sufficient when only `user` is optional. A member that is itself optional introduces a new boundary (`user?.optionalProfile?.name`). Bounds-safe `@list` indexing also introduces a boundary: `users[i]?.profile.name`.
 
 An `@list` indexed read has type `?T` and returns NIL when the index is out of bounds. Use `IF users[i] AS user THEN ... END` when mutating a struct element; the binding aliases the actual list slot rather than a temporary copy.
 
-### Weak References with @link
+### Independent Lifetimes with `LINK` / `RESOLVE`
 
-`@link` creates a weak reference that does not keep the target alive. It works with both `@multiowned` (WeakRc) and `@shared` (WeakArc).
+Use `LINK` / `RESOLVE` instead of `@node` when the objects do **not** share a
+closed graph lifetime—for example, a request temporarily observing a global
+registry, a cache entry watched by unrelated components, or an object that
+must remain alive after the function that created its neighbors returns.
+
+`@multiowned` and `@shared` give each object an independent reference-counted
+lifetime. `@link` creates a weak reference that observes the object without
+keeping it alive. It works with both `@multiowned` (WeakRc) and `@shared`
+(WeakArc).
 
 - `LINK expr` -- downgrade a strong reference to a weak reference
 - `RESOLVE expr` -- upgrade a weak reference back to an optional strong reference (`?T`)
 
 ```ruby clear illustrative
-# Parent-child with back-pointer cycle
+# The parent has an independent Rc lifetime. Its child only observes it.
 STRUCT Parent {
     name: String,
-    child: ?Child@multiowned@indirect
 }
 
 STRUCT Child {
     name: String,
-    parent: ?Parent@link          # weak back-pointer, breaks the cycle
+    parent: ?Parent@link
 }
 
 FN main() RETURNS Void ->
-    p = Parent{ name: "Alice", child: NIL } @multiowned;
+    p = Parent{ name: "Alice" } @multiowned;
 
-    # LINK downgrades the strong Rc to a WeakRc
+    # LINK downgrades the strong Rc to a WeakRc without extending its life.
     weak_p = LINK p;
+    child = Child{ name: "Bob", parent: weak_p };
 
-    # RESOLVE returns ?Parent@multiowned; bind first, then use ?. to safely access fields
-    resolved = RESOLVE weak_p;
+    # RESOLVE checks whether the independently-owned parent is still alive.
+    resolved = RESOLVE child.parent;
     name = resolved?.name OR "dropped";
     ASSERT name == "Alice", "resolved";
 
@@ -558,7 +605,12 @@ Key rules:
 - `RESOLVE` only works on `@link` values (compile-time error otherwise)
 - `RESOLVE` returns `?T` -- bind the result first, then use `resolved?.field OR fallback` to handle the dropped case
 - Cleanup is automatic: weak references are released when they go out of scope
-- No runtime cost when the strong reference is still alive; RESOLVE is a simple count check
+- Unlike `@node`, every strong object is reference-counted independently and every `RESOLVE` performs an upgrade check
+
+In short: choose `@node` for a high-performance closed topology with one RAII
+lifetime. Choose `LINK` / `RESOLVE` when lifetime boundaries are open and
+independent, and a weak observer must safely discover whether another object
+still exists.
 
 ## 14. Concurrency: BG & DO
 

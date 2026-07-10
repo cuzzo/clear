@@ -372,7 +372,7 @@ module MIRLoweringFunctions
     else
       pre_checks = lower_pre_clauses(node)
       lowered_body = lower_body(node.body)
-      node_stores = function_state.node_store_types.to_a.sort.map do |zig_type|
+      node_stores = function_state.node_store_types.to_a.sort.flat_map do |zig_type|
         bind_call = MIR::MethodCall.new(
           MIR::Ident.new("CheatLib.NodeStore(#{zig_type})"),
           "bind",
@@ -380,7 +380,18 @@ module MIRLoweringFunctions
           true,
           MIR::CallableContract.no_ownership(1),
         )
-        MIR::Let.new(node_store_binding_name(zig_type), bind_call, false, nil, nil)
+        binding = MIR::Ident.new(node_store_binding_name(zig_type))
+        release_call = MIR::MethodCall.new(
+          MIR::Ident.new("CheatLib.NodeStore(#{zig_type})"),
+          "releaseBound",
+          [binding],
+          false,
+          MIR::CallableContract.no_ownership(1),
+        )
+        [
+          MIR::Let.new(node_store_binding_name(zig_type), bind_call, false, nil, nil),
+          MIR::DeferStmt.new(release_call),
+        ]
       end
       body_mir = takes_mir + pointer_param_mir + pre_checks + node_stores + lowered_body
     end

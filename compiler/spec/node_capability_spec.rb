@@ -51,6 +51,7 @@ RSpec.describe "@node capability" do
 
     expect(zig).to include("left: CheatLib.NodeRef(Node)")
     expect(zig).to include("const __node_store_Node = try CheatLib.NodeStore(Node).bind(rt)")
+    expect(zig).to include("defer CheatLib.NodeStore(Node).releaseBound(__node_store_Node)")
     expect(zig).to include("CheatLib.NodeStore(Node).createBound(__node_store_Node, Node{")
     expect(zig).to include("CheatLib.NodeStore(Node).getBound(__node_store_Node, root).?.left")
     expect(zig).to include("children.append(rt.heapAlloc(), try CheatLib.NodeStore(Node).createBound")
