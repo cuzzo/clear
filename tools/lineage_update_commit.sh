@@ -1,13 +1,14 @@
 #!/bin/bash
 set -e
 
-# tools/lineage_build_db.sh
-# Rebuilds the Lineage database from scratch by running tests, generating coverage/mutants, and ingesting the results.
+# tools/lineage_update_commit.sh
+# Updates the Lineage database for a new commit by running tests, generating coverage/SARIF,
+# and ingesting the results, reusing pre-existing mutant facts.
 
 DB_PATH=${1:-/tmp/lineage.db}
 COMMIT_HASH=$(git rev-parse HEAD)
 
-echo "=== [1/5] Running Tests & Generating Coverage ==="
+echo "=== [1/4] Running Tests & Generating Coverage ==="
 # Ruby spec coverage
 echo "Running Ruby specs under coverage..."
 COVERAGE=1 bundle exec prspec compiler/spec/
@@ -19,19 +20,7 @@ cd zig
 zig build test -Dcoverage
 cd ..
 
-echo "=== [2/5] Running Mutant & SARIF Generators ==="
-# Go mutants
-echo "Running Go mutants..."
-ruby tools/mutants/go_mutants.rb
-
-# Fuzz mutants
-echo "Running fuzz mutants..."
-bundle exec ruby tools/fuzz/mutants/run.rb --all --allow-dirty --exposure /tmp/clear-fuzz-mutants-new.json --out /tmp/clear-fuzz-mutants-out-new
-
-# Transpile mutants
-echo "Running transpile mutants..."
-bundle exec ruby tools/mutants/transpile_tests.rb --all --allow-dirty --exposure /tmp/clear-transpile-mutants-new.json --out /tmp/clear-transpile-mutants-out-new
-
+echo "=== [2/4] Generating SARIF Findings ==="
 # SARIF findings for SlopCop, Espalier, NilKill, Decomplex
 echo "Building decomplex-rust release binary..."
 cargo build --release --manifest-path gems/decomplex/Cargo.toml
@@ -48,7 +37,7 @@ ruby tools/generate_generalized_gem_sarif.rb \
   --coverage /tmp/cov-artifacts/decomplex/cobertura.xml \
   --coverage /tmp/cov-artifacts/lineage/cobertura.xml
 
-echo "=== [3/5] Importing Codebase & Coverage into Lineage ==="
+echo "=== [3/4] Importing Codebase & Coverage into Lineage ==="
 gems/lineage/bin/lineage-import \
   --repo . \
   --db "$DB_PATH" \
@@ -64,15 +53,27 @@ gems/lineage/bin/lineage-import \
   --coverage /tmp/cov-artifacts/lineage/cobertura.xml \
   --sarif-input tmp/generalized-gems-sarif
 
-echo "=== [4/5] Ingesting Mutant & Test Exposure Facts ==="
-cargo run --release --manifest-path gems/lineage/Cargo.toml -- ingest-test-exposure --db "$DB_PATH" --repo . --commit "$COMMIT_HASH" --input /tmp/clear-fuzz-mutants-new.json
-cargo run --release --manifest-path gems/lineage/Cargo.toml -- ingest-test-exposure --db "$DB_PATH" --repo . --commit "$COMMIT_HASH" --input /tmp/clear-transpile-mutants-new.json
-cargo run --release --manifest-path gems/lineage/Cargo.toml -- ingest-test-exposure --db "$DB_PATH" --repo . --commit "$COMMIT_HASH" --input /tmp/zig-system-exposure.json
+echo "=== [4/4] Ingesting Mutant & Test Exposure Facts ==="
+if [ -f /tmp/clear-fuzz-mutants-new.json ]; then
+  cargo run --release --manifest-path gems/lineage/Cargo.toml -- ingest-test-exposure --db "$DB_PATH" --repo . --commit "$COMMIT_HASH" --input /tmp/clear-fuzz-mutants-new.json
+fi
+if [ -f /tmp/clear-transpile-mutants-new.json ]; then
+  cargo run --release --manifest-path gems/lineage/Cargo.toml -- ingest-test-exposure --db "$DB_PATH" --repo . --commit "$COMMIT_HASH" --input /tmp/clear-transpile-mutants-new.json
+fi
+if [ -f /tmp/zig-system-exposure.json ]; then
+  cargo run --release --manifest-path gems/lineage/Cargo.toml -- ingest-test-exposure --db "$DB_PATH" --repo . --commit "$COMMIT_HASH" --input /tmp/zig-system-exposure.json
+fi
 
 # Stochastic/Unit mutant facts
-cargo run --release --manifest-path gems/lineage/Cargo.toml -- ingest-mutants --db "$DB_PATH" --repo . --input /tmp/rust-mutants-lineage-100/mutant-facts.json --commit "$COMMIT_HASH" --test-type unit
-cargo run --release --manifest-path gems/lineage/Cargo.toml -- ingest-mutants --db "$DB_PATH" --repo . --input /tmp/boobytrap-go-mutants.json --commit "$COMMIT_HASH" --test-type unit
-cargo run --release --manifest-path gems/lineage/Cargo.toml -- ingest-mutants --db "$DB_PATH" --repo . --input /tmp/litedb-mutant-facts-normalized.json --commit "$COMMIT_HASH" --test-type unit
+if [ -f /tmp/rust-mutants-lineage-100/mutant-facts.json ]; then
+  cargo run --release --manifest-path gems/lineage/Cargo.toml -- ingest-mutants --db "$DB_PATH" --repo . --input /tmp/rust-mutants-lineage-100/mutant-facts.json --commit "$COMMIT_HASH" --test-type unit
+fi
+if [ -f /tmp/boobytrap-go-mutants.json ]; then
+  cargo run --release --manifest-path gems/lineage/Cargo.toml -- ingest-mutants --db "$DB_PATH" --repo . --input /tmp/boobytrap-go-mutants.json --commit "$COMMIT_HASH" --test-type unit
+fi
+if [ -f /tmp/litedb-mutant-facts-normalized.json ]; then
+  cargo run --release --manifest-path gems/lineage/Cargo.toml -- ingest-mutants --db "$DB_PATH" --repo . --input /tmp/litedb-mutant-facts-normalized.json --commit "$COMMIT_HASH" --test-type unit
+fi
 
 # PR 141 shards (if present)
 for file in /tmp/pr141-*/mutant-facts.json; do
@@ -98,7 +99,7 @@ if [ -f /tmp/scheduler-mutants.json ]; then
   cargo run --release --manifest-path gems/lineage/Cargo.toml -- ingest-mutants --db "$DB_PATH" --repo . --input /tmp/scheduler-mutants.json --commit "$COMMIT_HASH" --test-type unit
 fi
 
-echo "=== [5/5] Refreshing UI Summaries ==="
+echo "=== Refreshing UI Summaries ==="
 cargo run --release --manifest-path gems/lineage/Cargo.toml -- refresh-ui --db "$DB_PATH"
 
-echo "=== Lineage Database Rebuild Complete! ==="
+echo "=== Lineage Database Update Complete! ==="
