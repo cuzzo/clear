@@ -3,6 +3,8 @@ require_relative "../ruby/ast/lexer" unless defined?(Lexer)
 require_relative "../ruby/ast/parser" unless defined?(ClearParser)
 require_relative "../ruby/ast/type" unless defined?(Type)
 require_relative "../ruby/backends/transpiler" unless defined?(ZigTranspiler)
+require_relative "../ruby/compiler/compiler_frontend" unless defined?(CompilerFrontend)
+require_relative "../ruby/compiler/module_importer" unless defined?(ModuleImporter)
 
 # Full pipeline helper: source -> Zig string
 def compile_symbol_src(src)
@@ -135,6 +137,13 @@ RSpec.describe "String@symbol" do
       expect(t.symbol?).to be true
     end
 
+    it "parses String@symbol through the Type constructor" do
+      t = Type.new("String@symbol")
+      expect(t.resolved).to eq(:String)
+      expect(t.symbol?).to be true
+      expect(t.provenance).to eq(:rodata)
+    end
+
     it "symbol? is false for plain String" do
       expect(Type.new(:String).symbol?).to be false
     end
@@ -168,6 +177,11 @@ RSpec.describe "String@symbol" do
       expect(t.implicitly_copyable?).to be true
     end
 
+    it "symbol type is not caller-owned cleanup-bearing data" do
+      t = Type.new(:String, sync: :symbol)
+      expect(t.ownership_bearing?).to be false
+    end
+
     it "zig_type is []const u8 (same wire type as String)" do
       t = Type.new(:String, sync: :symbol)
       expect(t.zig_type).to eq("[]const u8")
@@ -178,6 +192,14 @@ RSpec.describe "String@symbol" do
       expect(t.symbol?).to be true
       expect(t.provenance).to eq(:rodata)
       expect(t.any_sync?).to be false
+    end
+
+    it "preserves symbol capability on optional wrappers" do
+      t = Type.optional_of(Type.new(:String, sync: :symbol))
+      expect(t.optional?).to be true
+      expect(t.symbol?).to be true
+      expect(t.wrapped_type.symbol?).to be true
+      expect(Type.coercion_surface_name(t)).to eq("?String@symbol")
     end
 
     it "does not accept a plain String where String@symbol is required" do
@@ -247,6 +269,112 @@ RSpec.describe "String@symbol" do
           END
         CLEAR
       }.not_to raise_error
+    end
+
+    it "accepts symbol literal passed to optional String@symbol parameter" do
+      expect {
+        run(<<~CLEAR)
+          FN check(tag: ?String@symbol) RETURNS Bool ->
+            RETURN tag != NIL;
+          END
+          FN main() RETURNS Void ->
+            check(:ok);
+            RETURN;
+          END
+        CLEAR
+      }.not_to raise_error
+    end
+
+    it "accepts symbol literal defaults for String@symbol parameters" do
+      expect {
+        run(<<~CLEAR)
+          FN check(tag = :ok: String@symbol) RETURNS Bool ->
+            RETURN tag == :ok;
+          END
+          FN main() RETURNS Void ->
+            check();
+            RETURN;
+          END
+        CLEAR
+      }.not_to raise_error
+    end
+
+    it "preserves symbol capability on cast targets" do
+      ast = run(<<~CLEAR)
+        FN coerce(tag: String) RETURNS String@symbol ->
+          RETURN CAST(tag AS String@symbol);
+        END
+      CLEAR
+
+      ret = ast.statements.first.body.first
+      expect(ret.value.full_type.symbol?).to be true
+    end
+
+    it "accepts runtime symbol interning through the symbol intrinsic" do
+      expect {
+        run(<<~CLEAR)
+          FN coerce(tag: String) RETURNS String@symbol ->
+            RETURN symbol(tag);
+          END
+        CLEAR
+      }.not_to raise_error
+    end
+
+    it "does not classify runtime symbol hoists as cleanup-bearing" do
+      importer = ModuleImporter.new(base_dir: Dir.pwd, use_mir: true)
+      ast = CompilerFrontend.compile(<<~CLEAR, importer: importer, source_dir: Dir.pwd).ast
+        FN coerce(tag: String) RETURNS String@symbol ->
+          RETURN symbol(tag);
+        END
+      CLEAR
+
+      decl = ast.statements.first.body.find { |node| node.is_a?(AST::VarDecl) && node.name.to_s.start_with?("__hoist_") }
+      expect(decl).not_to be_nil
+      expect(decl.full_type.symbol?).to be true
+      expect(decl.mir_binding_entry.needs_cleanup?).to be false
+    end
+
+    it "accepts symbol literals in String@symbol union payloads" do
+      expect {
+        run(<<~CLEAR)
+          UNION MaybeSymbol { SymbolValue: String@symbol }
+          FN main() RETURNS Void ->
+            value: MaybeSymbol = MaybeSymbol{ SymbolValue: :ok };
+            RETURN;
+          END
+        CLEAR
+      }.not_to raise_error
+    end
+
+    it "distinguishes String and String@symbol runtime union payload checks" do
+      expect {
+        run(<<~CLEAR)
+          UNION TemplateValue { StringValue: String, SymbolValue: String@symbol }
+          FN is_plain(value: TemplateValue) RETURNS Bool ->
+            RETURN value IS_A String;
+          END
+          FN is_symbol(value: TemplateValue) RETURNS Bool ->
+            RETURN value IS_A String@symbol;
+          END
+        CLEAR
+      }.not_to raise_error
+    end
+
+    it "coerces a unique union payload return into an optional union" do
+      ast = run(<<~CLEAR)
+        UNION TemplateValue { StringValue: String, SymbolValue: String@symbol }
+        FN copy_symbol(value: TemplateValue) RETURNS ?TemplateValue ->
+          IF value IS_A String@symbol AS symbol_value THEN
+            RETURN symbol_value;
+          END
+          RETURN NIL;
+        END
+      CLEAR
+
+      branch_return = ast.statements[1].body.first.then_branch.first
+      coerced_type = Type.new(branch_return.value.coerced_type)
+      expect(coerced_type.optional?).to be true
+      expect(coerced_type.value_payload_type.resolved).to eq(:TemplateValue)
     end
 
     it "rejects a plain string literal passed to String@symbol parameter" do
@@ -381,6 +509,44 @@ RSpec.describe "String@symbol" do
       expect(zig).to include('const __clear_symbol_0: []const u8 = "release";')
       # Return type is []const u8 (same wire type)
       expect(zig).to include("[]const u8")
+    end
+
+    it "lowers symbol intrinsic to runtime interning" do
+      zig = compile_symbol_src(<<~CLEAR)
+        FN mode(name: String) RETURNS String@symbol ->
+          RETURN symbol(name);
+        END
+        FN main() RETURNS Void ->
+          RETURN;
+        END
+      CLEAR
+
+      expect(zig).to include("try rt.internSymbol(name)")
+    end
+
+    it "wraps a returned symbol payload in the unique union variant" do
+      zig = compile_symbol_src(<<~CLEAR)
+        UNION TemplateValue { StringValue: String, SymbolValue: String@symbol }
+        FN copy_symbol(value: TemplateValue) RETURNS ?TemplateValue ->
+          IF value IS_A String@symbol AS symbol_value THEN
+            RETURN symbol_value;
+          END
+          RETURN NIL;
+        END
+      CLEAR
+
+      expect(zig).to include("return TemplateValue{ .SymbolValue = symbol_value };")
+    end
+
+    it "wraps a symbol payload assigned into an optional union map value" do
+      zig = compile_symbol_src(<<~CLEAR)
+        UNION TemplateValue { StringValue: String, SymbolValue: String@symbol }
+        FN put_symbol!(MUTABLE out: HashMap<String, ?TemplateValue>, value: String@symbol) RETURNS Void ->
+          out[:value] = value;
+        END
+      CLEAR
+
+      expect(zig).to include("TemplateValue{ .SymbolValue = value }")
     end
   end
 

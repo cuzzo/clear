@@ -100,15 +100,15 @@ module Annotator
         signature = FunctionSignature.new(
           params: fn.params,
           return_type: fn.return_type,
-          return_lifetime: fn.return_lifetime,
+          return_lifetime: get_lifetime_paths(fn),
           visibility: fn.visibility,
           type_params: fn.type_params.map(&:to_sym),
           reentrant: fn.declared_plain_reentrant?
         )
-        FunctionSignature.sync_from_function_def!(signature, fn)
+        FunctionSignature.sync_signature_from_function_def!(signature, fn)
         stamp_type!(fn, signature)
         entry = semantic_root_scope.local_entry(fn.name)
-        entry.type = Type.new(signature) if entry
+        entry.type = Type.from_function_signature(signature) if entry
       end
       private :restamp_auto_function_signature!
 

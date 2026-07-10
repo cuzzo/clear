@@ -18,9 +18,11 @@ require "sorbet-runtime"
 # ownership analysis. Mixed into SemanticAnnotator via `include`.
 
 require_relative "../../ast/ast"
+require_relative "../../ast/diagnostic_registry"
 require_relative "../../ast/fixable_error"
 require_relative "../../ast/type"
 
+# ruby-to-clear: emit-module-methods
 module FixableHelper
     extend T::Sig
 
@@ -29,6 +31,11 @@ module FixableHelper
   AutoOperatorCandidateConfig = T.type_alias {
     T::Hash[Symbol, BasicObject]
   }
+
+  sig { params(code: Symbol, kwargs: DiagnosticRegistry::DiagnosticKwValue).returns(String) }
+  def fix_description(code, **kwargs)
+    DiagnosticRegistry.fix_description_from_hash(code, kwargs)
+  end
 
   class CapabilityFixCandidate < T::Struct
     const :sigil, String
@@ -41,25 +48,17 @@ module FixableHelper
     const :note, T.nilable(String), default: nil
   end
 
-  # Synthetic token used for fixable spans whose AST node carries a
-  # line/column but not a lexer token for the exact identifier.
-  AnchorToken = Struct.new(:line, :column) do
-    extend T::Sig
-    sig { returns(Symbol) }
-    def type; :ANCHOR; end
-    sig { returns(NilClass) }
-    def value; nil; end
-  end
-
-  TypoToken = T.type_alias { T.any(Lexer::Token, AnchorToken) }
-
   # Lint: `MUTABLE 'x' is never reassigned`. :auto fix removes the
   # `MUTABLE ` prefix (8 chars) at the VarDecl's column.
   sig { params(reg: T.nilable(T.any(AST::VarDecl, AST::DestructureTarget)), name: String).void }
   def emit_mutable_unused_finding!(reg, name)
     T.bind(self, SemanticAnnotator) rescue nil
-    return unless reg && reg.token
-    tok = reg.token
+    return unless reg
+    tok = if reg.is_a?(AST::VarDecl)
+      T.cast(reg, AST::VarDecl).token
+    else
+      T.cast(reg, AST::DestructureTarget).token
+    end
     fixes = []
     if tok.value == 'MUTABLE'
       fixes << Fix.new(
@@ -199,7 +198,7 @@ module FixableHelper
   end
 
   # Synthesize a token-like anchor at an explicit (line, col). Used by
-  sig { params(line: Integer, col: Integer).returns(FixableHelper::AnchorToken) }
+  sig { params(line: Integer, col: Integer).returns(AnchorToken) }
   def anchor_at(line, col)
     T.bind(self, SemanticAnnotator) rescue nil
     AnchorToken.new(line, col)
@@ -207,7 +206,7 @@ module FixableHelper
 
   # Given a Type.Variant style GetField, compute the token line/col of
   # the variant name (right after `target.` — length of target + 1).
-  sig { params(getfield_node: AST::GetField).returns(T.nilable(FixableHelper::AnchorToken)) }
+  sig { params(getfield_node: AST::GetField).returns(T.nilable(AnchorToken)) }
   def variant_anchor_from_getfield(getfield_node)
     T.bind(self, SemanticAnnotator) rescue nil
     tgt = getfield_node.target
@@ -218,7 +217,7 @@ module FixableHelper
   # For a UnionVariantLit `Union.Variant{...}`, the node's token is the
   # opening `{` — the variant name ends right before it, so the name's
   # start column is `token.column - variant_name.length`.
-  sig { params(node: T.any(AST::StructLit, AST::UnionVariantLit), variant_name: String).returns(T.nilable(FixableHelper::AnchorToken)) }
+  sig { params(node: T.any(AST::StructLit, AST::UnionVariantLit), variant_name: String).returns(T.nilable(AnchorToken)) }
   def variant_anchor_from_unionlit(node, variant_name)
     T.bind(self, SemanticAnnotator) rescue nil
     return nil unless node.token
@@ -228,7 +227,7 @@ module FixableHelper
   # Typo-suggestion wrapper that takes an (line, col, name, length)
   # instead of a Token. Used by migrations whose error token comes
   # from a synthesized anchor.
-  sig { params(anchor: FixableHelper::AnchorToken, name: String, candidates: T::Enumerable[NameCandidate], message: String, fix_label: String, cascade: T::Boolean).returns(NilClass) }
+  sig { params(anchor: AnchorToken, name: String, candidates: T::Enumerable[NameCandidate], message: String, fix_label: String, cascade: T::Boolean).returns(NilClass) }
   def emit_variant_typo!(anchor, name, candidates, message, fix_label,
                          cascade: false)
     T.bind(self, SemanticAnnotator) rescue nil

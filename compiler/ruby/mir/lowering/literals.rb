@@ -83,6 +83,15 @@ module MIRLoweringLiterals
     function_state.current_expected_type = T.let(function_state.current_expected_type, T.nilable(Type))
     function_state.current_decl_alloc = T.let(function_state.current_decl_alloc, T.nilable(Symbol))
 
+    tuple_type = Type.new(node.coerced_type_info || node.full_type!)
+    if tuple_type.tuple?
+      tuple_items = node.items.each_with_index.map do |item, index|
+        expected_item = T.must(tuple_type.generic_args[index])
+        with_expected_type(expected_item) { lower(item) }
+      end
+      return MIR::TupleLiteral.new(tuple_items)
+    end
+
     plan = list_literal_plan(node)
     ti = plan.type_info
 

@@ -4,7 +4,7 @@ require "json"
 
 module RubyToClear
   class HelperConfig
-    attr_reader :requires
+    attr_reader :requires, :struct_fields, :union_variants, :unions, :untyped_type
 
     def self.load(value)
       case value
@@ -27,6 +27,10 @@ module RubyToClear
       @prelude = Array(data["prelude"] || data[:prelude])
       @helpers = data["helpers"] || data[:helpers] || {}
       @types = data["types"] || data[:types] || {}
+      @struct_fields = data["struct_fields"] || data[:struct_fields] || {}
+      @unions = data["unions"] || data[:unions] || {}
+      @union_variants = data["union_variants"] || data[:union_variants] || {}
+      @untyped_type = (data["untyped_type"] || data[:untyped_type] || "Auto").to_s
       @scanner_receivers = Array(
         data["scanner_receivers"] ||
         data[:scanner_receivers] ||

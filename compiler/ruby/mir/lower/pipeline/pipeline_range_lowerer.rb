@@ -432,11 +432,25 @@ class PipelineRangeLowerer
   end
 
   PIPELINE_ALLOC_REF_DEF = T.let(FunctionSignature.borrowing_intrinsic, FunctionSignature)
+  OBSERVABLE_FOLD_OP_CLASSES = T.let({
+    sum: AST::SumOp,
+    count: AST::CountOp,
+    avg: AST::AverageOp,
+    max: AST::MaxOp,
+    min: AST::MinOp,
+    any: AST::AnyOp,
+    all: AST::AllOp,
+    find: AST::FindOp,
+  }.freeze, T::Hash[Symbol, T::Class[T.anything]])
   PUBLISH_SPEC = T.let(Type.observable_terminals.each_with_object({}) { |(sym, entry), h|
     h[sym] = PipelinePublishSpec.from(T.must(entry.publish)) if entry.publish
   }.freeze, T::Hash[Symbol, PipelinePublishSpec])
   FOLD_OP_OBSERVABLE_TERMINAL = T.let(Type.observable_terminals.each_with_object({}) { |(sym, entry), h|
-    h[T.must(entry.ast_class)] = sym if entry.ast_class
+    tag = entry.ast_class
+    unless tag.nil?
+      klass = OBSERVABLE_FOLD_OP_CLASSES[T.must(tag)]
+      h[T.must(klass)] = sym unless klass.nil?
+    end
   }.freeze, T::Hash[T::Class[T.anything], Symbol])
 
   sig { params(expr_ast: AST::Node, item_var: String, acc_zig: String).returns(MIR::Node) }

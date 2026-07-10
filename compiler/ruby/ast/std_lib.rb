@@ -17,6 +17,24 @@ FO = FsmOps::DSL
 STD_LIB = T.let({
   # Method Name => { args: [Type...], return: Type, zig: Pattern }
 
+  "symbol" => {
+    args: [STRING_TYPE],
+    return: {type: STRING_TYPE, sync: :symbol},
+    zig: "try {rt}.internSymbol({0})",
+    bc: false,
+    can_fail: true,
+    needs_rt: true,
+    borrows: :all,
+  },
+
+  "panic" => {
+    args: [STRING_TYPE],
+    return: :NoReturn,
+    zig: "@panic({0})",
+    bc: false,
+    borrows: :all,
+  },
+
   # NOT SUPPORTED YET IN TRANSPILATION
   "map" => {
     args: :Varargs,
@@ -75,6 +93,16 @@ STD_LIB = T.let({
     allocates: true,
     alloc: :receiver_storage,
     mutates_receiver: true,
+    is_method: true,
+  },
+
+  "clear" => {
+    args: [:"Any[]"],
+    return: :Void,
+    zig: "{0}.clearRetainingCapacity()",
+    bc: true,
+    mutates_receiver: true,
+    borrows: :all,
     is_method: true,
   },
 
@@ -471,14 +499,23 @@ STD_LIB = T.let({
   },
 
   # indexOf("hello world", "world") -> 6  (or nil if not found)
-  "indexOf" => {
-    args: [STRING_TYPE, STRING_TYPE],
-    return: :"?Int64",
-    zig: "CheatLib.indexOf({0}, {1})",
-    bc: true,
-    borrows: :all,
-    is_method: true,
-  },
+  "indexOf" => [
+    {
+      args: [STRING_TYPE, STRING_TYPE],
+      return: :"?Int64",
+      zig: "CheatLib.indexOf({0}, {1})",
+      bc: true,
+      borrows: :all,
+      is_method: true,
+    },
+    {
+      args: [STRING_TYPE, STRING_TYPE, :Int64],
+      return: :"?Int64",
+      zig: "CheatLib.indexOfFrom({0}, {1}, {2})",
+      borrows: :all,
+      is_method: true,
+    },
+  ],
 
   # replace("hello world", "world", "CLEAR") -> "hello CLEAR"
   "replace" => {

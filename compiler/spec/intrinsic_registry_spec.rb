@@ -365,7 +365,6 @@ RSpec.describe IntrinsicRegistry do
     expect(IntrinsicRegistry.send(:nested_emit, nil, registries)).to be_nil
     expect(IntrinsicRegistry.send(:nested_emit, { registry: registry }, registries).registry).to eq(:KNOWN)
     expect(IntrinsicRegistry.send(:nested_emit, { registry: {} }, registries).registry).to eq(:unknown)
-    expect(IntrinsicRegistry.send(:nested_emit, registry, registries).registry).to eq(:KNOWN)
     expect(IntrinsicRegistry.send(:nested_emit, { zig: "nested({0})" }, registries).zig).to eq("nested({0})")
   end
 
@@ -403,6 +402,14 @@ RSpec.describe IntrinsicRegistry do
     expect(IntrinsicRegistry.send(:normalize_lifetime, nil)).to eq([])
     expect(IntrinsicRegistry.send(:normalize_lifetime, [:a, :b])).to eq([:a, :b])
     expect(IntrinsicRegistry.send(:normalize_lifetime, :a)).to eq([:a])
+    expect(IntrinsicRegistry.send(:lifetime_source_string, "value")).to eq("value")
+    expect(IntrinsicRegistry.send(:lifetime_source_string, :value)).to eq("value")
+    expect(IntrinsicRegistry.send(:coerce_symbol, "value")).to eq(:value)
+    expect(IntrinsicRegistry.send(:coerce_symbol, :value)).to eq(:value)
+    expect { IntrinsicRegistry.send(:coerce_symbol, 1) }.to raise_error(TypeError)
+    expect(IntrinsicRegistry.send(:coerce_integer, "2")).to eq(2)
+    expect(IntrinsicRegistry.send(:coerce_integer, 2)).to eq(2)
+    expect { IntrinsicRegistry.send(:coerce_integer, :two) }.to raise_error(TypeError)
 
     method_sig = IntrinsicRegistry.send(:convert_entry, "method", {
       args: [{ name: "receiver", type: :List }, { name: "value", type: :Int64 }],

@@ -468,6 +468,24 @@ RSpec.describe "MIR gap-burn characterization" do
       cleanup_kind: :heap_string,
       target_var: "tmp",
     )
+
+    side_effect_transfer = MIR::OwnershipEffect.from_block_body([
+      MIR::TransferMark.new("arg", :owned_sink, :heap),
+      MIR::BreakStmt.new("__blk", MIR::Lit.new("0")),
+    ], result_type: nil)
+    expect(side_effect_transfer.produces_owned).to eq(false)
+
+    unrelated_transfer = MIR::OwnershipEffect.from_block_body([
+      MIR::TransferMark.new("tmp", :block_result, :heap),
+      MIR::BreakStmt.new("__blk", MIR::Ident.new("other")),
+    ], result_type: nil)
+    expect(unrelated_transfer.produces_owned).to eq(false)
+
+    composite_transfer = MIR::OwnershipEffect.from_block_body([
+      MIR::TransferMark.new("tmp", :block_result, :heap),
+      MIR::BreakStmt.new("__blk", MIR::StructInit.new("Box", [{ name: :value, value: MIR::Ident.new("tmp") }])),
+    ], result_type: nil)
+    expect(composite_transfer).to have_attributes(produces_owned: true, alloc: :heap)
   end
 
   it "treats sharded map allocator metadata as store consumption, not an owned result" do
@@ -851,7 +869,7 @@ RSpec.describe "MIR gap-burn characterization" do
     expect(MIR::TryCatch.new(owned_left, owned_right, "err").ownership_effect.alloc).to eq(:heap)
     expect(MIR::Orelse.new(owned_left, owned_right).ownership_effect.alloc).to eq(:heap)
 
-    heap_return_sig = FunctionSignature.intrinsic_contract(
+    heap_return_sig = FunctionSignature.intrinsic_signature(
       return_type: Type.new(:"!?String"),
       return_alloc: :heap,
     )
@@ -860,7 +878,7 @@ RSpec.describe "MIR gap-burn characterization" do
     expect(inline_effect.produces_owned).to be(true)
     expect(inline_effect.alloc).to eq(:heap)
 
-    receiver_return_sig = FunctionSignature.intrinsic_contract(
+    receiver_return_sig = FunctionSignature.intrinsic_signature(
       return_type: Type.new(:String),
       return_alloc: :receiver_storage,
     )
@@ -1012,7 +1030,7 @@ RSpec.describe "MIR gap-burn characterization" do
   it "covers missing runtime metadata paths for MIR pass and InlineBc emission" do
     pass = MIRPass.new(fn_nodes: {}, schema_lookup: ->(_name) { nil })
     plain_call = AST::FuncCall.new(tok, "plain", [])
-    plain_sig = FunctionSignature.intrinsic_contract
+    plain_sig = FunctionSignature.intrinsic_signature
     plain_call.matched_signature = plain_sig
     runtime_call = AST::FuncCall.new(tok, "runtime", [])
     runtime_sig = FunctionSignature.new(params: [], return_type: Type.new(:Void), intrinsic: true, needs_rt: true)
@@ -1946,6 +1964,16 @@ RSpec.describe "MIR gap-burn characterization" do
     expect(discarded).to be_a(MIR::ScopeBlock)
     expect(discarded.body).to include(an_instance_of(MIR::AllocMark), an_instance_of(MIR::Let), an_instance_of(MIR::Cleanup))
 
+    low.function_state.pending_stmts = []
+    discarded_bin = AST::BinaryOp.new(tok, lit("left", type: :String), :EQ, lit("right", type: :String))
+    discarded_bin.full_type = Type.new(:Bool)
+    bin_mir = MIR::BinOp.new("==", MIR::DupeSlice.new(MIR::Ident.new("s"), :heap), MIR::Lit.new("\"x\""))
+    final_bin, hoisted_bin = low.send(:materialize_statement_discard, discarded_bin, bin_mir)
+    expect(hoisted_bin).to eq(false)
+    expect(final_bin).to be(bin_mir)
+    expect(bin_mir.left).to be_a(MIR::Ident)
+    expect(low.send(:flush_pending)).to include(an_instance_of(MIR::AllocMark), an_instance_of(MIR::Let), an_instance_of(MIR::Cleanup))
+
     discarded_or = AST::BinaryOp.new(tok, id("fallible", type: Type.new(:"!String")), :OR_RESCUE, AST::OrPass.new(tok))
     discarded_or.full_type = Type.new(:String)
     try_call = MIR::Call.new("run", [], false, true, nil)
@@ -2186,6 +2214,13 @@ RSpec.describe "MIR gap-burn characterization" do
     expect(low.send(:cleanup_entry_for_ownership_effect, call, alloc: :heap).kind).to eq(:uniform)
     untyped_call = MIR::Call.new("make", [], false, true)
     expect { low.send(:cleanup_entry_for_ownership_effect, untyped_call, alloc: :heap) }.to raise_error(/no typed cleanup result/)
+
+    pipeline_ast = AST::Identifier.new(tok, "filtered")
+    pipeline_ast.full_type = Type.new(:"String[]")
+    owned_pipeline = MIR::Pipeline.new(pipeline_ast, MIR::Ident.new("items"), nil, [], nil, :heap)
+    pipeline_cleanup = low.send(:cleanup_entry_for_ownership_effect, owned_pipeline, alloc: :heap)
+    expect(pipeline_cleanup.kind).to eq(:uniform)
+    expect(pipeline_cleanup[:zig_type]).to eq("std.ArrayListUnmanaged([]const u8)")
 
     expect(low.send(:mir_ident_names, nil)).to eq([])
     expect(low.send(:mir_ident_names, MIR::ArrayInit.new("i64", nil, [MIR::Ident.new("a"), MIR::Ident.new("b")]))).to eq(["a", "b"])
@@ -3663,7 +3698,7 @@ RSpec.describe "MIR gap-burn characterization" do
       runtime_args: [],
       alloc_kind: :heap,
       return_type: Type.new(:Void),
-      stdlib_def: FunctionSignature.intrinsic_contract(return_type: Type.new(:Void)),
+      stdlib_def: FunctionSignature.intrinsic_signature(return_type: Type.new(:Void)),
     )
     frame_trampoline = MIR::ExternTrampoline.new(
       id: 92,
@@ -3673,7 +3708,7 @@ RSpec.describe "MIR gap-burn characterization" do
       runtime_args: [],
       alloc_kind: :frame,
       return_type: Type.new(:Void),
-      stdlib_def: FunctionSignature.intrinsic_contract(return_type: Type.new(:Void)),
+      stdlib_def: FunctionSignature.intrinsic_signature(return_type: Type.new(:Void)),
     )
     emitter = MIREmitter.new
     expect(emitter.emit(heap_trampoline)).to include(".alloc = rt.heapAlloc()")
@@ -3790,7 +3825,7 @@ RSpec.describe "MIR gap-burn characterization" do
     intrinsic = AST::FuncCall.new(tok, "consume", [id("taken", type: :String, storage: :heap)])
     intrinsic.zig_pattern = "consume({0})"
     intrinsic.full_type = Type.new(:Void)
-    intrinsic.matched_stdlib_def = FunctionSignature.intrinsic_contract(return_type: Type.new(:Void))
+    intrinsic.matched_stdlib_def = FunctionSignature.intrinsic_signature(return_type: Type.new(:Void))
     intrinsic_out = intrinsic_low.send(:lower_intrinsic, intrinsic)
     expect(intrinsic_out.ownership_contract.operands.first.name).to eq("taken")
 

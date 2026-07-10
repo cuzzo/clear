@@ -49,16 +49,23 @@ module Annotator
       # Safety: CLEAR uses value semantics for structs (pass/return by copy).  A large
       # struct on the stack cannot have its address escape the loop body through normal
       # CLEAR operations, so :stack is always safe here.
-      sig { params(node: AST::Cast).returns(Symbol) }
+      sig { params(node: AST::Cast).returns(Type) }
       def visit_Cast(node)
         T.bind(self, SemanticAnnotator)
 
+        target_type = Type.new(node.target)
+        if node.value.is_a?(AST::ListLit) && target_type.tuple?
+          node.value.coerced_type = target_type
+        elsif node.value.is_a?(AST::HashLit) && target_type.map?
+          node.value.coerced_type = target_type
+        end
         visit(node.value) # Resolve 'json' -> :HashMap
 
-        # node.target is "Config".
+        # node.target is "Config" or a full Type such as String@symbol.
         # In a strict language, we'd check if :HashMap can cast to Config.
-        # For now, just trust the user and carry the type forward.
-        stamp_type!(node, node.target.to_sym)
+        # For now, just trust the user and carry the full type forward so
+        # data capabilities are not collapsed to the bare resolved symbol.
+        stamp_type!(node, target_type)
       end
 
       sig { params(node: AST::CallSiteOverride).void }
@@ -149,6 +156,10 @@ module Annotator
         # Standard binary operations - visit children first
         visit(node.left)
         visit(node.right)
+        promote_to_expr_if!(node, node.left) if node.left.is_a?(AST::IfStatement)
+        promote_to_expr_match!(node, node.left) if node.left.is_a?(AST::MatchStatement)
+        promote_to_expr_if!(node, node.right) if node.right.is_a?(AST::IfStatement)
+        promote_to_expr_match!(node, node.right) if node.right.is_a?(AST::MatchStatement)
         validate_predicate_purity! if current_predicate_context
 
         # Delegate type resolution to Type class
@@ -328,7 +339,7 @@ module Annotator
         # The result type is the wrapped type (without the ?)
         # Preserve ownership/sync so Rc/Arc auto-deref works on the unwrapped value.
         unwrapped = type.wrapped_type
-        result = Type.new(unwrapped.resolved)
+        result = Type.new(T.must(unwrapped))
         result.merge_capabilities_from!(type, include_affine_ownership: true)
         stamp_type!(node, result)
       end
@@ -348,7 +359,8 @@ module Annotator
         end
         return nil unless last.is_a?(AST::Locatable)
         ti = last.full_type!(context: "branch result")
-        return nil if ti.void? || ti.resolved == :NoReturn
+        return ti if ti.resolved == :NoReturn
+        return nil if ti.void?
         # These are statement-level constructs, not value-producing expressions
         return nil if AST.statement_result_void?(last)
         ti
@@ -388,13 +400,15 @@ module Annotator
           return fallback
         end
 
-        t1 = then_result.string? ? :String : then_result.resolved
-        t2 = else_result.string? ? :String : else_result.resolved
-        unless t1 == t2 || t1 == :Any || t2 == :Any
-          error!(if_node, :IF_EXPR_BRANCHES_INCOMPATIBLE, then_type: t1, else_type: t2)
+        branch_types = [then_result, else_result]
+        value_types = branch_types.reject { |type| type.resolved == :NoReturn }
+        result_type = merged_expression_branch_type(branch_types)
+        compare_types = value_types.map { |type| expression_branch_compare_type(type) }
+        unless result_type || compare_types.length <= 1 || compare_types[0] == compare_types[1] || compare_types.include?(:Any)
+          error!(if_node, :IF_EXPR_BRANCHES_INCOMPATIBLE, then_type: compare_types[0], else_type: compare_types[1])
         end
 
-        result_type = (t1 == :Any) ? else_result : then_result
+        result_type ||= value_types.find { |type| !type.any? } || value_types.first || then_result
         unless result_type.implicitly_copyable? { |t| lookup_type_schema(t) }
           error!(if_node, :IF_EXPR_RESULT_NOT_COPYABLE, type: result_type.resolved)
         end
@@ -438,12 +452,14 @@ module Annotator
           return fallback
         end
 
-        resolved_types = all_types.map { |t| t.string? ? :String : t.resolved }.uniq.reject { |t| t == :Any }
-        if resolved_types.size > 1
+        result_type = merged_expression_branch_type(all_types)
+        value_types = all_types.reject { |t| t.resolved == :NoReturn }
+        resolved_types = value_types.map { |t| expression_branch_compare_type(t) }.uniq.reject { |t| t == :Any }
+        if !result_type && resolved_types.size > 1
           error!(match_node, :MATCH_EXPR_BRANCHES_INCOMPATIBLE, types: resolved_types.join(', '))
         end
 
-        result_type = all_types.first
+        result_type ||= value_types.first || all_types.first
         unless result_type.implicitly_copyable? { |t| lookup_type_schema(t) }
           error!(match_node, :MATCH_EXPR_RESULT_NOT_COPYABLE, type: result_type.resolved)
         end
@@ -452,6 +468,26 @@ module Annotator
         stamp_type!(match_node, (result_type.string? && !result_type.symbol?) ? Type.new(:String, location: :rodata) : result_type)
       end
       private :collect_implicit_type_params
+
+      sig { params(type: Type).returns(Symbol) }
+      def expression_branch_compare_type(type)
+        type.string? ? :String : type.resolved
+      end
+
+      sig { params(types: T::Array[Type]).returns(T.nilable(Type)) }
+      def merged_expression_branch_type(types)
+        value_types = types.reject { |type| type.resolved == :NoReturn }
+        return Type.new(:NoReturn) if value_types.empty?
+
+        concrete = value_types.reject { |type| type.resolved == :NIL || type.any? }
+        nil_seen = concrete.length != value_types.reject(&:any?).length
+        return nil unless nil_seen && concrete.any?
+        compare_types = concrete.map { |type| expression_branch_compare_type(type) }.uniq
+        return nil unless compare_types.length == 1
+
+        Type.optional_of(concrete.first)
+      end
+      private :expression_branch_compare_type, :merged_expression_branch_type
 
 end
   end

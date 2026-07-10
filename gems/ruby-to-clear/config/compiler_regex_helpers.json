@@ -1,4 +1,5 @@
 {
+  "untyped_type": "Any",
   "prelude": [
     "EXTERN STRUCT CompilerRegex {} FROM \"compiler_regex\";",
     "EXTERN STRUCT CompilerRegexScanner {} FROM \"compiler_regex\";",
@@ -17,11 +18,33 @@
     "EXTERN FN compilerRegexGetch(scanner: CompilerRegexScanner) RETURNS ?String EFFECTS :safe FROM \"compiler_regex\";",
     "EXTERN FN compilerRegexEos(scanner: CompilerRegexScanner) RETURNS Bool EFFECTS :safe FROM \"compiler_regex\";",
     "EXTERN FN compilerParseIntBase(text: String, base: Int64) RETURNS Int64 EFFECTS :safe FROM \"compiler_regex\";",
-    "EXTERN FN compilerCodepointToString(codepoint: Int64) RETURNS String EFFECTS :safe FROM \"compiler_regex\";"
+    "EXTERN FN compilerCodepointToString(codepoint: Int64) RETURNS String EFFECTS :safe FROM \"compiler_regex\";",
+    "EXTERN FN compilerFormatTemplate(template: String) RETURNS String EFFECTS :safe FROM \"compiler_regex\";",
+    "EXTERN FN compilerInspectValue() RETURNS String EFFECTS :safe FROM \"compiler_regex\";",
+    "EXTERN FN compilerRepeatString(value: String, count: Int64) RETURNS String EFFECTS :safe FROM \"compiler_regex\";"
   ],
   "types": {
     "Regexp": "CompilerRegex",
     "StringScanner": "CompilerRegexScanner"
+  },
+  "struct_fields": {
+    "Token": {
+      "type": "String@symbol",
+      "value": "TokenValue",
+      "line": "Int64",
+      "column": "Int64"
+    }
+  },
+  "unions": {
+    "TokenValue": ["String", "Int64", "UInt64", "Float64"]
+  },
+  "union_variants": {
+    "TokenValue": {
+      "String": "Str",
+      "Int64": "Int",
+      "UInt64": "UInt",
+      "Float64": "Float"
+    }
   },
   "helpers": {
     "regex_literal": "compilerRegexCompile",
@@ -41,7 +64,10 @@
     "scanner_getch": "compilerRegexGetch",
     "scanner_eos": "compilerRegexEos",
     "string_to_int_base": "compilerParseIntBase",
-    "codepoint_to_string": "compilerCodepointToString"
+    "codepoint_to_string": "compilerCodepointToString",
+    "string_format": "compilerFormatTemplate",
+    "inspect_value": "compilerInspectValue",
+    "string_repeat": "compilerRepeatString"
   },
   "scanner_receivers": [
     "self.s",

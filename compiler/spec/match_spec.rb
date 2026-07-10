@@ -57,6 +57,24 @@ RSpec.describe SemanticAnnotator do
       end
     end
 
+    context "optional symbol-string value match" do
+      let(:code) {
+        <<~FLUX
+          FN pick(v: ?String@symbol) RETURNS ?String@symbol ->
+            RETURN PARTIAL MATCH v START
+              :heap -> :heap,
+              :frame -> :frame,
+              DEFAULT -> NIL
+            END;
+          END
+        FLUX
+      }
+
+      it "matches non-nil symbol cases against the wrapped type" do
+        expect { ast }.not_to raise_error
+      end
+    end
+
     context "case type mismatch" do
       let(:code) {
         <<~FLUX

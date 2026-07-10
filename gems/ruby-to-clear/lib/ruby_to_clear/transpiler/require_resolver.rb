@@ -153,12 +153,19 @@ module RubyToClear
       return unless File.file?(path)
 
       @loaded_metadata_files << path
+      File.read(path).scan(/#\s*ruby-to-clear:\s*data-api\s*\n\s*([A-Z][A-Z0-9_]*)\s*=/) do |match|
+        @imported_data_constant_names << match.first
+      end
       result = Prism.parse_file(path)
       return if result.failure?
 
+      record_imported_prefixed_instance_methods(result.value)
+
       old_collecting_imported_metadata = @collecting_imported_metadata
+      union_names_before = @union_types.keys.to_set
       @collecting_imported_metadata = true
       begin
+        collect_type_aliases_from_node(result.value)
         require_relative_paths(result.value.statements).each do |relative|
           nested = File.expand_path(relative.end_with?(".rb") ? relative : "#{relative}.rb", File.dirname(path))
           collect_metadata_from_file(nested)
@@ -169,14 +176,44 @@ module RubyToClear
         collect_struct_fields_from_node(result.value)
         collect_type_aliases_from_node(result.value)
         collect_ast_node_variants_from_node(result.value)
+        collect_mixin_metadata(result.value)
+        record_imported_prefixed_instance_methods(result.value)
         collect_method_signature_metadata_from_node(result.value)
         collect_method_params_from_node(result.value)
+        collect_constant_storage_names_from_node(result.value)
+        collect_imported_data_constant_names_from_node(result.value)
         preload_class_instance_metadata(result.value)
       ensure
+        @imported_union_names.merge(@union_types.keys.to_set - union_names_before)
         @collecting_imported_metadata = old_collecting_imported_metadata
       end
     rescue StandardError
       nil
+    end
+
+    def record_imported_prefixed_instance_methods(program_node)
+      duplicates = duplicate_instance_method_names(program_node)
+      @mixin_methods.each_value do |methods|
+        methods.each { |_sig, fn| duplicates << clear_function_name(fn.name.to_s) }
+      end
+      walk = lambda do |node|
+        return unless node.is_a?(Prism::Node)
+
+        if node.is_a?(Prism::ClassNode)
+          class_name = node.constant_path.location.slice.strip.split("::").last
+          collect_instance_method_names(node).each do |method_name|
+            @imported_prefixed_instance_methods << [class_name, method_name] if duplicates.include?(method_name)
+          end
+        elsif node.is_a?(Prism::ConstantWriteNode) && struct_new_field_names(node.value)
+          class_name = node.name.to_s
+          body_nodes = node.value.block&.body&.body || []
+          collect_instance_method_names_from_body_nodes(body_nodes).each do |method_name|
+            @imported_prefixed_instance_methods << [class_name, method_name] if duplicates.include?(method_name)
+          end
+        end
+        node.child_nodes.each { |child| walk.call(child) if child }
+      end
+      walk.call(program_node)
     end
 
     def constant_namespace_metadata_paths(statements_node, source_path: @source_path)

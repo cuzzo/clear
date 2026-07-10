@@ -1357,7 +1357,11 @@ module MIRLoweringFunctions
       # fn-type variable call
       all_args = [MIR::Ident.new(runtime_binding_name)] + args_mir
       contract = callable_contract_for_lowered_args(FunctionSignature.unwrap(node.matched_signature), node.args, args_mir)
-      return MIR::Call.new("try #{node.name}", all_args, false, call_owned_return?(node), contract)
+      sig = FunctionSignature.unwrap(node.matched_signature)
+      return_type = sig&.return_type || (node.full_type if node.respond_to?(:full_type))
+      fn_ptr_can_fail = return_type.is_a?(Type) && return_type.error_union?
+      callee = fn_ptr_can_fail ? "try #{node.name}" : node.name
+      return MIR::Call.new(callee, all_args, false, call_owned_return?(node), contract)
     end
 
     # Resolve rt/fail from fn_sigs

@@ -187,15 +187,21 @@ module Schemas
     def normalize_field(field)
       return field if field.is_a?(AST::StructField)
       if field.is_a?(Hash)
-        type_value = T.let(field[:type], T.nilable(FieldMetadataValue))
-        type_value = field["type"] if type_value.nil?
-        type_value = :Any if type_value.nil?
-        default_value = T.let(field[:default], T.nilable(FieldMetadataValue))
+        raw_type_value = T.let(field[:type], T.nilable(FieldMetadataValue))
+        raw_type_value = field["type"] if raw_type_value.nil?
+        default_value = T.let(field[:default], T.untyped)
         default_value = field["default"] if default_value.nil?
-        borrowed_value = T.let(field[:borrowed], T.nilable(FieldMetadataValue))
+        borrowed_value = T.let(field[:borrowed], T.untyped)
         borrowed_value = field["borrowed"] if borrowed_value.nil?
+        if raw_type_value.nil?
+          return AST::StructField.new(
+            type: :Any,
+            default: default_value,
+            borrowed: !borrowed_value.nil?
+          )
+        end
         return AST::StructField.new(
-          type: T.must(type_value).dup,
+          type: T.must(raw_type_value),
           default: default_value,
           borrowed: !borrowed_value.nil?
         )
@@ -232,14 +238,15 @@ module Schemas
 
   # One union variant whose payload is an anonymous inline struct
   # (`UNION Shape { Circle { radius: Float64 } }`). `fields` maps field
-  # name (String) to its declared Type. `deinit_entries` is filled in by
+  # name (String) to its declared type input. `deinit_entries` is filled in by
   # the annotator after parse (which fields need @indirect / array
   # cleanup) and is intentionally mutable in place, like
   # StructSchema#methods.
+  # ruby-to-clear: pub
   class InlineStructVariant
       extend T::Sig
 
-    FieldMap = T.type_alias { T::Hash[T.any(String, Symbol), Type] }
+    FieldMap = T.type_alias { T::Hash[T.any(String, Symbol), Type::TypeInput] }
     FieldInputMap = T.type_alias { T::Hash[T.any(String, Symbol), Type::TypeInput] }
 
     attr_reader :fields
@@ -259,13 +266,14 @@ module Schemas
       @deinit_entries = entries
     end
 
+    # ruby-to-clear: skip
     sig { returns(T::Hash[String, Type]) }
     def typed_fields
       out = T.let({}, T::Hash[String, Type])
       keys = @fields.keys
       i = T.let(0, Integer)
       while i < keys.length
-        out[keys[i].to_s] = T.must(@fields[keys[i]])
+        out[keys[i].to_s] = Type.new(T.must(@fields[keys[i]]))
         i += 1
       end
       out
@@ -294,7 +302,7 @@ module Schemas
       i = T.let(0, Integer)
       while i < keys.length
         key = keys.fetch(i)
-        out[key] = Type.new(T.must(fields[key]))
+        out[key] = T.must(fields[key])
         i += 1
       end
       out
@@ -303,12 +311,12 @@ module Schemas
   end
 
   # Union (sum-type) schema. `variants` is a Hash[Symbol => value] where
-  # the value is `nil` for payload-less variants, a Type for single-type
+  # the value is `nil` for payload-less variants, a type input for single-type
   # payloads, or an InlineStructVariant for inline struct variants.
   class UnionSchema
       extend T::Sig
 
-    VariantValue = T.type_alias { T.nilable(T.any(Type, Schemas::InlineStructVariant)) }
+    VariantValue = T.type_alias { T.nilable(T.any(Type::TypeInput, Schemas::InlineStructVariant)) }
     VariantMap = T.type_alias { T::Hash[T.any(String, Symbol), VariantValue] }
     VariantInput = T.type_alias { T.nilable(T.any(Type::TypeInput, Schemas::InlineStructVariant)) }
     VariantInputMap = T.type_alias { T::Hash[T.any(String, Symbol), VariantInput] }
@@ -339,10 +347,9 @@ module Schemas
     sig { params(variant: VariantInput).returns(VariantValue) }
     def normalize_variant(variant)
       return nil if variant.nil?
-      return variant if variant.is_a?(Type)
       return variant if variant.is_a?(Schemas::InlineStructVariant)
 
-      Type.new(variant)
+      variant
     end
     private :normalize_variant
 
@@ -446,15 +453,21 @@ module Schemas
     def normalize_field(field)
       return field if field.is_a?(AST::StructField)
       if field.is_a?(Hash)
-        type_value = T.let(field[:type], T.nilable(FieldMetadataValue))
-        type_value = field["type"] if type_value.nil?
-        type_value = :Any if type_value.nil?
-        default_value = T.let(field[:default], T.nilable(FieldMetadataValue))
+        raw_type_value = T.let(field[:type], T.nilable(FieldMetadataValue))
+        raw_type_value = field["type"] if raw_type_value.nil?
+        default_value = T.let(field[:default], T.untyped)
         default_value = field["default"] if default_value.nil?
-        borrowed_value = T.let(field[:borrowed], T.nilable(FieldMetadataValue))
+        borrowed_value = T.let(field[:borrowed], T.untyped)
         borrowed_value = field["borrowed"] if borrowed_value.nil?
+        if raw_type_value.nil?
+          return AST::StructField.new(
+            type: :Any,
+            default: default_value,
+            borrowed: !borrowed_value.nil?
+          )
+        end
         return AST::StructField.new(
-          type: T.must(type_value).dup,
+          type: T.must(raw_type_value),
           default: default_value,
           borrowed: !borrowed_value.nil?
         )
@@ -465,25 +478,28 @@ module Schemas
     private :normalize_field
   end
 
+  SchemaValue = T.type_alias { T.nilable(T.any(EnumSchema, StructSchema, UnionSchema, ResourceSchema)) }
+  FieldBearingSchema = T.type_alias { T.nilable(T.any(StructSchema, ResourceSchema)) }
+
   # Nil-safe kind predicates. Single representation: a schema is always
   # one of the typed classes above (or nil for an unknown type name).
-  sig { params(s: T.untyped).returns(T::Boolean) }
+  sig { params(s: SchemaValue).returns(T::Boolean) }
   def self.struct?(s) = s.is_a?(StructSchema)
 
-  sig { params(s: T.untyped).returns(T::Boolean) }
+  sig { params(s: SchemaValue).returns(T::Boolean) }
   def self.union?(s) = s.is_a?(UnionSchema)
 
-  sig { params(s: T.untyped).returns(T::Boolean) }
+  sig { params(s: SchemaValue).returns(T::Boolean) }
   def self.enum?(s) = s.is_a?(EnumSchema)
 
-  sig { params(s: T.untyped).returns(T::Boolean) }
+  sig { params(s: SchemaValue).returns(T::Boolean) }
   def self.resource?(s) = s.is_a?(ResourceSchema)
 
-  sig { params(v: T.untyped).returns(T::Boolean) }
+  sig { params(v: UnionSchema::VariantValue).returns(T::Boolean) }
   def self.inline_struct?(v) = v.is_a?(InlineStructVariant)
 
   # Field-bearing schema: StructSchema or ResourceSchema (EXTERN STRUCT
   # ... CLOSE carries fields too), so `.fields` is safe to read.
-  sig { params(s: T.untyped).returns(T::Boolean) }
+  sig { params(s: FieldBearingSchema).returns(T::Boolean) }
   def self.field_bearing?(s) = s.is_a?(StructSchema) || s.is_a?(ResourceSchema)
 end

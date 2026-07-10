@@ -13,6 +13,7 @@ require_relative "../ruby/ast/std_lib" unless defined?(StdLibTypeBinding)
 require_relative "../ruby/ast/symbol_entry" unless defined?(SymbolEntry::BindingLifecycleFacts)
 require_relative "../ruby/ast/type" unless defined?(Type)
 require_relative "../ruby/annotator/helpers/function_signature" unless defined?(FunctionSignature::AnalysisFacts)
+require_relative "../ruby/annotator/helpers/prefixed_int_range" unless defined?(PrefixedIntRange)
 
 RSpec.describe "AST coverage burndown" do
   def token(type = :VAR_ID, value = "x", line: 1, column: 1)
@@ -672,10 +673,14 @@ RSpec.describe "AST coverage burndown" do
 
       host = Class.new do
         include TypeHelper
+        include PrefixedIntRange
         attr_reader :error
         def error!(*args, **kwargs)
           @error = [args, kwargs]
           nil
+        end
+        def handle_prefixed_int_overflow!(_node, _val, target_type, min, max)
+          error!(:INT_LITERAL_OVERFLOW, type: target_type, min: min, max: max)
         end
       end.new
       host.check_prefixed_int_range!(AST::Literal.new(token, :PREFIXED_INT, 300, nil), Type.new(:"!Int8"))

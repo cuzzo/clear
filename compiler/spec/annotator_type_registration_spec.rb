@@ -72,6 +72,40 @@ RSpec.describe Annotator::Phases::TypeRegistration do
     }.to raise_error(CompilerError, /Duplicate type declaration 'Box'/)
   end
 
+  it "allows identical imported extern struct declarations to be re-declared locally" do
+    annotator = SemanticAnnotator.new
+    annotator.send(:current_scope).declare_type(
+      :CompilerRegex,
+      Schemas::StructSchema.new(fields: {}, extern_module: "compiler_regex")
+    )
+    native = AST::ExternStructDecl.new(tok("CompilerRegex"), "CompilerRegex", {}, "compiler_regex")
+    index = Annotator::Phases::DeclarationIndexer.index(AST::Program.new(tok("program"), [native]))
+
+    expect {
+      annotator.register_type_declarations(index)
+    }.not_to raise_error
+    expect(native.full_type!.resolved).to eq(:Void)
+  end
+
+  it "rejects imported extern struct declarations with incompatible shapes" do
+    annotator = SemanticAnnotator.new
+    annotator.send(:current_scope).declare_type(
+      :CompilerRegex,
+      Schemas::StructSchema.new(fields: {}, extern_module: "compiler_regex")
+    )
+    native = AST::ExternStructDecl.new(
+      tok("CompilerRegex"),
+      "CompilerRegex",
+      { "id" => AST::StructField.new(type: Type.new(:Int64)) },
+      "compiler_regex"
+    )
+    index = Annotator::Phases::DeclarationIndexer.index(AST::Program.new(tok("program"), [native]))
+
+    expect {
+      annotator.register_type_declarations(index)
+    }.to raise_error(CompilerError, /Duplicate type declaration 'CompilerRegex'/)
+  end
+
   it "rejects inline union helper struct name collisions" do
     helper = AST::StructDef.new(tok("Value_Data"), "Value_Data", {}, :pub, [])
     inline = Schemas::InlineStructVariant.new(fields: { "owned" => Type.new(:String) })

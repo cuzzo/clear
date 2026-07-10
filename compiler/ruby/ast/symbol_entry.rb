@@ -473,7 +473,13 @@ class SymbolEntry
                  valid: true, invalid_reason: nil, resource: nil, close_plan: nil)
     @binding_id = T.let(self.class.next_binding_id, Integer)
     @reg = reg
-    normalized_type = type.nil? ? Type.new(:Untyped) : Type.new(type)
+    normalized_type = if type.nil?
+      Type.new(:Untyped)
+    elsif type.is_a?(FunctionSignature)
+      Type.from_function_signature(type)
+    else
+      Type.new(type)
+    end
     @lifecycle = T.let(
       BindingLifecycleFacts.new(
         type: normalized_type,
@@ -504,7 +510,13 @@ class SymbolEntry
   # anything outside it is a compiler bug, surfaced here.
   sig { params(val: TypeInput).void }
   def type=(val)
-    @lifecycle.type = val.nil? ? Type.new(:Untyped) : Type.new(val)
+    @lifecycle.type = if val.nil?
+      Type.new(:Untyped)
+    elsif val.is_a?(FunctionSignature)
+      Type.from_function_signature(val)
+    else
+      Type.new(val)
+    end
   end
 
   private

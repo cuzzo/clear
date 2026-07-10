@@ -123,10 +123,10 @@ module Annotator
         # annotator must not pre-fold a type's heap-capable provenance onto
         # the symbol -- that over-promotes (e.g. a union typed heap-capable
         # but never actually escaping).
-        is_resource, resource_close = resolve_resource_close(node)
-        node.resource_close_plan = resource_close
+        resource_result = resolve_resource_close(node)
+        node.resource_close_plan = resource_result.close_plan
         node_type = node.full_type!(context: "var declaration")
-        node_type.is_resource = true if is_resource && node_type.respond_to?(:is_resource=)
+        node_type.is_resource = true if resource_result.is_resource && node_type.respond_to?(:is_resource=)
 
         Capabilities.validate!(node, node_type) { |n, msg| error!(n, :CAPABILITY_INVALID, detail: msg) }
 
@@ -149,8 +149,8 @@ module Annotator
           Set.new, [],
           sync: node_sync,
           layout: node_layout,
-          resource: is_resource,
-          close_plan: resource_close
+          resource: resource_result.is_resource,
+          close_plan: resource_result.close_plan
         )
         record_capture_local!(node.name.to_s)
         node.symbol = current_scope.local_entry!(node.name)
@@ -289,6 +289,12 @@ module Annotator
         if node.value.is_a?(AST::ListLit) && node.type&.fixed?
           node.value.storage = :stack
         end
+        if node.value.is_a?(AST::ListLit) && node.type&.tuple?
+          node.value.coerced_type = node.type
+        end
+        if node.value.is_a?(AST::HashLit) && node.type&.map?
+          node.value.coerced_type = node.type
+        end
         visit(node.value)
       end
 
@@ -351,6 +357,7 @@ module Annotator
 
         node.mode = :assign
         verify_unrestricted!(node)
+        promote_declaration_value!(node)
         node.symbol = scope.entry_for_write(node.name)
         target_type = scope.resolve_type(node.name)
         validate_assignment_type(node, target_type, node.value.resolved_type)
@@ -429,10 +436,12 @@ module Annotator
 
         # 2. Resolve Type
         raw_type = scope.resolve_full_type(node.name)
-        if raw_type.raw.is_a?(FunctionSignature)
-          # Named function used as a value — re-wrap the signature in a Type
-          # tagged as a fn_ref so the transpiler emits `&fn_name`.
-          stamp_type!(node, Type.new(raw_type.raw))
+        raw_type = refined_comptime_type_param_type(raw_type)
+        entry = scope.resolve_entry(node.name)
+        if raw_type.fn_type? && entry&.storage == :static
+          # Named function used as a value — preserve its function type and tag
+          # it so MIR lowering emits a function reference.
+          stamp_type!(node, raw_type)
           node.fn_ref = true
         elsif raw_type.is_a?(Type) && raw_type.atomic? && raw_type.layout != :indirect
           # Atomic reads type as the inner value; the symbol keeps :atomic so
@@ -625,6 +634,8 @@ module Annotator
         ensure
           phase_receiver_state.auto_locked_assign_name = previous_auto_lock
         end
+        promote_to_expr_if!(node, node.value) if node.value.is_a?(AST::IfStatement)
+        promote_to_expr_match!(node, node.value) if node.value.is_a?(AST::MatchStatement)
 
         verify_unrestricted!(node)
         # Tied-lifetime values cannot be stored into destinations that outlive
@@ -705,19 +716,25 @@ module Annotator
           mark_var_mutated(root) if root
         end
 
-        # Map reads return ?V, but map writes store V.
-        assign_type = index_node.full_type!(context: "index assignment target")
-        if assign_type&.optional?
-          assign_type_resolved = T.must(assign_type.wrapped_type).resolved
+        target_type = index_node.target.full_type!(context: "index assignment collection")
+        assign_type = if target_type&.map?
+          # Map reads return ?V because the key may be absent, but map writes
+          # store the declared value type V. If V itself is optional, preserve it.
+          target_type.value_type
         else
-          assign_type_resolved = index_node.resolved_type
+          index_type = index_node.full_type!(context: "index assignment target")
+          if index_type&.optional?
+            T.must(index_type.wrapped_type)
+          else
+            index_type
+          end
         end
-        validate_assignment_type(assignment_node, assign_type_resolved, assignment_node.value.resolved_type)
 
-        stamp_type!(assignment_node, T.must(assign_type_resolved))
+        validate_assignment_type(assignment_node, assign_type, assignment_node.value.resolved_type)
+
+        stamp_type!(assignment_node, T.must(assign_type))
 
         # HashMap put may allocate, so needs_rt must propagate.
-        target_type = index_node.target.full_type!(context: "index assignment collection")
         if target_type&.map?
           current_fn_ctx&.record_heap_use!
           record_effect(EffectTracker::HEAP)
@@ -770,24 +787,41 @@ module Annotator
         stamp_type!(assignment_node, :Void)
       end
 
-      sig { params(node: T.any(AST::Assignment, AST::BindExpr), target_type: T.nilable(Type::TypeInput), value_type: Symbol).void }
+      sig { params(node: T.any(AST::Assignment, AST::BindExpr), target_type: T.nilable(Type::TypeInput), value_type: T.nilable(Type::TypeInput)).void }
       def validate_assignment_type(node, target_type, value_type)
         T.bind(self, SemanticAnnotator)
 
-        return if target_type.nil? || target_type == :Any || value_type == :Any
-        return if target_type == :NIL # Allow narrowing from initial NIL
-        return if target_type == value_type
+        return if target_type.nil?
 
-        if !is_safe_autocast?(value_type, target_type)
-          emit_type_mismatch_assign_error!(node, target_type, value_type)
-        else
-          node.value.coerced_type = target_type
+        target = Type.new(target_type)
+        value = assignment_value_type(node, value_type)
+        return if target.any? || value.any? || value.untyped?
+        return if target.resolved == :NIL # Allow narrowing from initial NIL
+        if unique_union_payload_variant(target, value)
+          node.value.coerced_type = target
+          return
         end
+        if target.accepts?(value)
+          node.value.coerced_type = target unless target == value
+          return
+        end
+
+        emit_type_mismatch_assign_error!(node, target, value.resolved)
+      end
+
+      sig { params(node: T.any(AST::Assignment, AST::BindExpr), fallback: T.nilable(Type::TypeInput)).returns(Type) }
+      def assignment_value_type(node, fallback)
+        value = node.value
+        return value.full_type if value.respond_to?(:typed?) && value.typed?
+        return Type.new(fallback) if fallback
+
+        Type.new(:Untyped)
       end
 
       # ==========================================
       # INVALIDATION LOGIC (The "Dependencies" feature)
       # ==========================================
+      private :assignment_value_type
       private :finalize_decl_node!
       private :accumulate_stack_bytes
       private :atomic_bind_operation

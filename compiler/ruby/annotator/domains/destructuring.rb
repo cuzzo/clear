@@ -47,7 +47,7 @@ module Annotator
         T.bind(self, SemanticAnnotator)
 
         value_type = node.value.full_type!(context: "destructuring assignment value").success_type
-        element_type = value_type.element_type || Type.new(:Any)
+        element_type = value_type.tuple? ? Type.new(:Any) : (value_type.element_type || Type.new(:Any))
         DestructureRhsFacts.new(value_type: value_type, element_type: element_type)
       end
 
@@ -56,17 +56,22 @@ module Annotator
         T.bind(self, SemanticAnnotator)
 
         value_type = rhs.value_type
-        unless value_type.fixed? && value_type.array?
+        unless value_type.tuple? || (value_type.fixed? && value_type.array?)
           error!(node, :DESTRUCTURE_REQUIRES_FIXED_SHAPE, got: value_type.to_s)
         end
-        if value_type.capacity != node.targets.length
-          error!(node, :DESTRUCTURE_ARITY_MISMATCH, targets: node.targets.length, values: value_type.capacity)
+        value_count = value_type.tuple? ? value_type.generic_args.length : value_type.capacity
+        if value_count != node.targets.length
+          error!(node, :DESTRUCTURE_ARITY_MISMATCH, targets: node.targets.length, values: value_count)
         end
       end
 
       sig { params(node: AST::DestructuringAssignment, rhs: DestructureRhsFacts).void }
       def validate_destructure_copyable!(node, rhs)
         T.bind(self, SemanticAnnotator)
+
+        # Tuple is the compiler's typed multi-return value. Destructuring consumes
+        # its slots, so individual affine values do not need to be copyable.
+        return if rhs.value_type.tuple?
 
         copyable = rhs.element_type.implicitly_copyable? { |t| lookup_type_schema(t) }
         return if copyable
@@ -79,6 +84,10 @@ module Annotator
         value = node.value
         if value.is_a?(AST::ListLit) && value.items[index]
           return value.items[index].full_type!(context: "destructuring literal element")
+        end
+
+        if node.value.full_type!(context: "destructuring tuple value").tuple?
+          return T.must(node.value.full_type!.generic_args[index])
         end
 
         fallback

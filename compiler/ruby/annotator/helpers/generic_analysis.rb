@@ -208,6 +208,10 @@ module GenericAnalysis
     inner = facts.inner
     base_name = inner.generic_base
     return if base_name == :Id
+    if base_name == :Tuple
+      inner.generic_args.each { |arg| validate_generic_type_arg!(facts, arg) }
+      return
+    end
 
     schema = annotation_schema_for!(facts.node, base_name)
     type_params = schema_type_params(schema)
@@ -222,6 +226,18 @@ module GenericAnalysis
   sig { params(facts: TypeAnnotationFacts, arg: Type).void }
   def validate_generic_type_arg!(facts, arg)
     T.bind(self, SemanticAnnotator) rescue nil
+    if arg.optional? || arg.error_union? || arg.tense?
+      wrapped = arg.wrapped_type || arg.payload_type || arg.tense_type
+      validate_generic_type_arg!(facts, T.must(wrapped))
+      return
+    end
+    if arg.array?
+      validate_generic_type_arg!(facts, T.must(arg.element_type))
+      return
+    end
+    # HashMap is a built-in composite type rather than a registered generic
+    # schema. Its own annotation validation checks the key/value shape.
+    return if arg.map?
     return if BUILTIN_TYPES.include?(arg.resolved)
     return if facts.fn_type_params.include?(arg.resolved)
 
@@ -366,6 +382,16 @@ module GenericAnalysis
         next unless p_arg && a_arg
         extract_type_bindings!(node, p_arg, a_arg, type_params, subst)
       end
+    elsif param_type.fn_type? && actual_type.fn_type?
+      param_fn = param_type.function_type
+      actual_fn = actual_type.function_type
+      return unless param_fn && actual_fn
+
+      param_fn.params.zip(actual_fn.params).each do |p_param, a_param|
+        next unless p_param && a_param
+        extract_type_bindings!(node, p_param.type, a_param.type, type_params, subst)
+      end
+      extract_type_bindings!(node, param_fn.return_type, actual_fn.return_type, type_params, subst)
     end
   end
 
@@ -390,6 +416,19 @@ module GenericAnalysis
       else
         substituted
       end
+    elsif t.fn_type?
+      fn_type = t.function_type
+      return t unless fn_type
+
+      params = fn_type.params.map do |param|
+        Type::FunctionTypeParam.new(type: apply_type_subst(param.type, subst))
+      end
+      Type.new(Type::FunctionType.new(
+        params: params,
+        return_type: apply_type_subst(fn_type.return_type, subst),
+        reentrant: fn_type.reentrant,
+        source_signature: fn_type.source_signature
+      ))
     elsif t.generic_instance?
       new_args = t.generic_args.map { |arg| generic_binding_source(apply_type_subst(arg, subst)) }
       Type.new(:"#{t.generic_base}<#{new_args.join(',')}>")

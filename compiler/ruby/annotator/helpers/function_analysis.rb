@@ -191,13 +191,42 @@ module FunctionAnalysis
     FunctionSignature.new(params: normalized_params, return_type: Type.new(return_type))
   end
 
+  sig { params(fn_type: Type::FunctionType).returns(FunctionSignature) }
+  def signature_from_function_type(fn_type)
+    params = T.let([], T::Array[AST::Param])
+    i = T.let(0, Integer)
+    while i < fn_type.params.length
+      param = fn_type.params.fetch(i)
+      params << AST::Param.new(
+        name: "arg#{i}",
+        type: param.type,
+        required: true,
+        mutable: false,
+        takes: false
+      )
+      i += 1
+    end
+
+    FunctionSignature.new(
+      params: params,
+      return_type: fn_type.return_type,
+      reentrant: fn_type.reentrant
+    )
+  end
+
   sig { params(node: AST::LambdaLit).returns(T.nilable(FunctionSignature)) }
   def visit_LambdaLit(node)
     T.bind(self, SemanticAnnotator) rescue nil
-    return_type = with_body_fact_nested_body do
-      with_body_fact_lambda_body(node) do
-        analyze_routine(node, node.body, :Any, true)
+    lambda_ctx = FunctionContext.new(name: "<lambda>", return_type: :Any)
+    push_function_context!(lambda_ctx)
+    begin
+      return_type = with_body_fact_nested_body do
+        with_body_fact_lambda_body(node) do
+          analyze_routine(node, node.body, :Any, true)
+        end
       end
+    ensure
+      pop_function_context!
     end
 
     stamp_type!(node, build_lambda_signature(node.params, T.cast(return_type, Symbol)))
@@ -300,7 +329,6 @@ module FunctionAnalysis
       node.uses_rt    = ctx.uses_rt
       node.stack_vars_bytes = ctx.stack_vars_bytes
       raises_directly =
-        has_fnptr ||
         node.reentrance_guard_required? ||
         function_has_pre_clauses?(node) ||
         raises_in_body == true
@@ -373,6 +401,7 @@ module FunctionAnalysis
     func_type = scope.resolve_type(func_name)
     entry = scope.resolve_entry(func_name)
     fsig = FunctionSignature.unwrap(func_type)
+    fn_type = func_type.is_a?(Type) ? func_type.function_type : nil
     if func_type == :Intrinsic
       visit_IntrinsicFunc(node, args)
 
@@ -463,13 +492,14 @@ module FunctionAnalysis
       end
 
 
-    elsif fsig
+    elsif fsig || fn_type
       T.unsafe(node).fn_var_call = true if node.respond_to?(:fn_var_call=)
       lookup_scope_for(func_name)&.mark_read(func_name)
-      sig = fsig
+      sig = fsig || signature_from_function_type(T.must(fn_type))
       synthetic_sig = FunctionSignature.new(
         params: sig.params,
-        return_type: sig.return_type
+        return_type: sig.return_type,
+        reentrant: sig.reentrant
       )
       verify_function_signature!(node, synthetic_sig, args)
       T.unsafe(node).matched_signature = synthetic_sig if node.respond_to?(:matched_signature=)
@@ -785,6 +815,7 @@ module FunctionAnalysis
     return true if facts.expected_type.any? || facts.actual == :Any ||
       facts.expected_type.semantic_type_key == facts.actual_type.semantic_type_key
     return true if any_element_collection_param?(facts.expected_type, facts.actual_type)
+    return true if facts.expected_type.accepts?(facts.actual_type)
     return true if facts.expected_type.auto?
     return false unless is_safe_autocast?(facts.actual, facts.expected_type)
 
@@ -818,7 +849,14 @@ module FunctionAnalysis
 
   sig { params(node: AST::Locatable, fallback: String).returns(String) }
   def argument_name(node, fallback:)
-    node.respond_to?(:name) ? T.unsafe(node).name.to_s : fallback
+    case node
+    when AST::Identifier, AST::FuncCall, AST::MethodCall, AST::VarDecl, AST::BindExpr
+      T.unsafe(node).name.to_s
+    when AST::GetField, AST::GetIndex
+      argument_name(node.target, fallback: fallback)
+    else
+      fallback
+    end
   end
 
   sig { params(param: AST::Param).returns(T::Boolean) }
@@ -1045,7 +1083,7 @@ module FunctionAnalysis
           stamp_type!(param.default, param.type)
         else
           visit(param.default)
-          def_type = param.default.resolved_type
+          def_type = param.default.full_type!(context: "parameter default")
           param_type = param.type
           unless is_safe_autocast?(def_type, param_type)
             error!(node, :DEFAULT_VALUE_TYPE_MISMATCH, name: param.name, expected: param_type, got: def_type)

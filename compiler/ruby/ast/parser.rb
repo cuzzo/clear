@@ -2,12 +2,14 @@
 require "sorbet-runtime"
 
 require_relative "./ast"
+require_relative "./schemas"
+require_relative "./type"
 require_relative "./lexer"
 require_relative "./parser_rules"
 require_relative "./error_registry"
 require_relative "./source_error"
 require_relative "./fixable_error"
-require_relative "../annotator/helpers/fixable_helpers"
+require_relative "../annotator/helpers/fixable_helpers" # ruby-to-clear: no-require
 
 # ==========================================
 # PARSER
@@ -48,6 +50,8 @@ class ClearParser
 
   SuffixResult = T.type_alias { T.any(AST::Node, Symbol) }
   PatternCapture = T.type_alias { T.nilable(T.any(AST::Node, Type, String, Symbol, Integer, Float, T::Boolean)) }
+  ArgumentType = T.type_alias { T.any(Symbol, Type) }
+  ReturnLifetime = T.type_alias { T.nilable(T.any(Symbol, T::Array[AST::Node])) }
   EffectMetadataValue = T.type_alias { T.nilable(T.any(Lexer::Token, Integer, T::Boolean)) }
   EffectMetadata = T.type_alias { T::Hash[Symbol, EffectMetadataValue] }
   EffectsDecl = T.type_alias { [T.nilable(Symbol), T.nilable(EffectMetadata)] }
@@ -194,7 +198,7 @@ class ClearParser
     rule(:KEYWORD, 'PASS', action: :parse_pass_statement),
   ].freeze, T::Array[ParserRule])
 
-  STMT_RULE_INDEX = T.let(index_rules(STMT_RULES), T::Hash[T.untyped, ParserRule])
+  STMT_RULE_INDEX = T.let(index_rules(STMT_RULES), T::Hash[String, ParserRule])
 
   PRIMARY_RULES = T.let([
     rule(:KEYWORD, 'IF', action: :parse_if_expr),
@@ -260,7 +264,7 @@ class ClearParser
     rule(:CHAR, '(', action: :parse_group_expression),
   ].freeze, T::Array[ParserRule])
 
-  PRIMARY_RULE_INDEX = T.let(index_rules(PRIMARY_RULES), T::Hash[T.untyped, ParserRule])
+  PRIMARY_RULE_INDEX = T.let(index_rules(PRIMARY_RULES), T::Hash[String, ParserRule])
 
   SUFFIX_RULES = T.let([
     rule(:CHAR, '[', action: :parse_index_suffix),
@@ -280,7 +284,10 @@ class ClearParser
     rule(:CHAR, '{', action: :parse_inline_union_variant_suffix),
   ].freeze, T::Array[ParserRule])
 
-  SUFFIX_RULE_INDEX = T.let(index_rules(SUFFIX_RULES), T::Hash[T.untyped, ParserRule])
+  SUFFIX_RULE_INDEX = T.let(index_rules(SUFFIX_RULES), T::Hash[String, ParserRule])
+
+  # Sentinel returned by a suffix rule to stop without consuming a token.
+  SUFFIX_DECLINE = T.let(:__clear_parser_suffix_decline__, Symbol)
 
   # Capability Wraps: expr @multiowned -> Rc(T), expr @shared -> Arc(T), expr @locked -> *Locked(T)
   # Supports `:` join: expr @shared:locked, expr @locked:multiowned (order-independent).
@@ -604,13 +611,16 @@ class ClearParser
     if !suppress_struct_lit? && AST.inline_union_constructor_target?(lhs)
       tok = current
       _, field_pairs = parse_comma_seq(:CHAR, '{', '}') do
-        k = (T.must(current.type == :TYPE_ID ? consume(:TYPE_ID) : consume(:VAR_ID))).value
+        key_token = current.type == :TYPE_ID ? consume(:TYPE_ID) : consume(:VAR_ID)
+        k = T.cast(T.must(key_token).value, String)
         consume(:CHAR, ':')
         v = parse_expression
         [k, v]
       end
+      field_pairs = T.let(field_pairs, T::Array[[String, AST::Node]])
       target = T.cast(lhs, AST::GetField)
-      AST::UnionVariantLit.new(tok, target.target.name, target.field, field_pairs.to_h, :stack)
+      target_ident = T.cast(target.target, AST::Identifier)
+      AST::UnionVariantLit.new(tok, target_ident.name, T.cast(target.field, String), field_pairs.to_h, :stack)
     else
       SUFFIX_DECLINE
     end
@@ -860,7 +870,7 @@ class ClearParser
       return result if result
     end
 
-    rule = STMT_RULE_INDEX[[current.type, current.value]]
+    rule = STMT_RULE_INDEX[ClearParser.token_rule_key(current)]
     return dispatch_stmt_rule(rule) if rule
     expr = parse_expression
     consume(:CHAR, ';')
@@ -933,7 +943,7 @@ class ClearParser
       end
 
       op_token = consume(:COMPOUND_ASSIGN)
-      op_char = T.must(op_token).value[0]  # '+=' → '+', '-=' → '-', etc.
+      op_char = T.cast(T.must(op_token).value, String)[0]  # '+=' → '+', '-=' → '-', etc.
       op_sym = AST::OP_TO_OP_CODE[op_char] || op_char.to_sym
       rhs = parse_expression
       consume(:CHAR, ';')
@@ -980,9 +990,9 @@ class ClearParser
   def parse_tight_stmt
     tight_token = consume(:KEYWORD, 'TIGHT')
     if match?(:KEYWORD, 'FOR')
-      node = parse_for_range
-      node.tight = true
-      return node
+      for_node = T.cast(parse_for_range, AST::ForRange)
+      for_node.tight = true
+      return for_node
     end
     unless match?(:KEYWORD, 'WHILE')
       raise "Expected WHILE or FOR after TIGHT (got #{current.value.inspect})"
@@ -999,9 +1009,9 @@ class ClearParser
       body = parse_keyword_block('DO')
     end
 
-    node = AST::WhileLoop.new(tight_token, cond, body, nil)
-    node.tight = true
-    node
+    while_node = AST::WhileLoop.new(tight_token, cond, body, nil)
+    while_node.tight = true
+    while_node
   end
 
   sig { returns(AST::ReturnNode) }
@@ -1045,8 +1055,8 @@ class ClearParser
     AST::DieNode.new(die_token, status)
   end
 
-  sig { params(as_param: T::Boolean).returns(T::Array[T.any(AST::Param, AST::Capture)]) }
-  def parse_argument_list(as_param: true)
+  sig { returns(T::Array[AST::Capture]) }
+  def parse_argument_specs
     parse_comma_seq(:CHAR, '(', ')') do
       takes = match!(:KEYWORD, 'TAKES')
       is_mutable = match!(:KEYWORD, 'MUTABLE')
@@ -1062,21 +1072,24 @@ class ClearParser
       end
 
       name_tok = is_comptime ? nil : consume(:VAR_ID)
-      p_name = name_tok&.value
-      p_type = :Any
+      p_name = T.let(nil, T.nilable(String))
+      p_name = T.cast(name_tok.value, String) if name_tok
+      p_type = T.let(nil, T.nilable(ArgumentType))
       default_val = nil
 
       if is_comptime
         consume(:CHAR, ':')
-        p_type = T.must(consume(:TYPE_ID)).value.to_sym  # The type param name (T)
+        p_type = T.cast(T.must(consume(:TYPE_ID)).value, String).to_sym  # The type param name (T)
         p_name = "comptime"
       else
-        # Syntax: name=default: Type  (default before type annotation)
-        if match!(:CHAR, '=')
-          default_val = parse_expression()
-        end
         if match!(:CHAR, ':')
           p_type = parse_type_annotation
+          default_val = parse_expression if match!(:CHAR, '=')
+        elsif match!(:CHAR, '=')
+          # Compatibility with the original spelling, `name=default: Type`.
+          # New code should use `name: Type = default`.
+          default_val = parse_expression
+          p_type = parse_type_annotation if match!(:CHAR, ':')
         elsif @gradual
           # Gradual mode: omitted annotation becomes implicit Auto.
           # The inference pass resolves these from call-site arg types.
@@ -1084,20 +1097,25 @@ class ClearParser
         end
       end
 
-      # Shared by FN-param and USE-capture parsing. Params build an
-      # AST::Param directly (single representation, no Hash seam);
-      # USE-captures stay Hashes (distinct downstream shape).
-      if as_param
-        AST::Param.new(name: p_name, type: p_type, default: default_val,
+      AST::Capture.new(name: p_name, type: p_type, default: default_val,
                        mutable: is_mutable, takes: takes,
                        comptime: is_comptime, name_token: name_tok)
-      else
-        AST::Capture.new(name: p_name, type: p_type, default: default_val,
-                         mutable: is_mutable, takes: takes,
-                         comptime: is_comptime, name_token: name_tok)
-      end
     end
      .last # always ignore the first token
+  end
+
+  sig { returns(T::Array[AST::Param]) }
+  def parse_argument_list
+    parse_argument_specs.map do |spec|
+      AST::Param.new(name: spec.name, type: spec.type, default: spec.default,
+                     mutable: spec.mutable, takes: spec.takes,
+                     comptime: spec.comptime, name_token: spec.name_token)
+    end
+  end
+
+  sig { returns(T::Array[AST::Capture]) }
+  def parse_capture_list
+    parse_argument_specs
   end
 
   # `MUTABLE name: T = expr;` (with initializer)
@@ -1115,7 +1133,7 @@ class ClearParser
     end
 
     name = T.must(consume(:VAR_ID)).value
-    type_annotation = nil
+    type_annotation = T.let(nil, T.nilable(Type))
     if match!(:CHAR, ':')
       type_annotation = parse_type_annotation
     end
@@ -1127,11 +1145,11 @@ class ClearParser
     end
 
     consume(:CHAR, ';')
-    unless type_annotation
-      error!(start_token, :MUTABLE_BARE_NEEDS_TYPE)
+    if type_annotation
+      value = synthesize_default_for_type(T.must(start_token), type_annotation)
+      return AST::VarDecl.new(start_token, name, type_annotation, value, true)
     end
-    value = synthesize_default_for_type(T.must(start_token), type_annotation)
-    AST::VarDecl.new(start_token, name, type_annotation, value, true)
+    error!(start_token, :MUTABLE_BARE_NEEDS_TYPE)
   end
 
   # Build a compact default-initialized AST value for a `T[N]` annotation.
@@ -1155,7 +1173,9 @@ class ClearParser
   sig { returns(AST::RequireNode) }
   def parse_require
     tok = consume(:KEYWORD, 'REQUIRE')
-    raw = T.must(consume(:STRING)).value
+    raw = T.cast(T.must(consume(:STRING)).value, String)
+    namespace = T.let("", String)
+    kind = T.let(:local, Symbol)
 
     if raw.start_with?("pkg:")
       # Package import: REQUIRE "pkg:math"  →  kind=:package, path="math"
@@ -1216,18 +1236,19 @@ class ClearParser
     consume(:KEYWORD, 'FN')
 
     # Parse name: either "fnName", "fnName<T>", or "TypeName<T>.methodName"
-    owner_type = nil
+    owner_type = T.let(nil, T.nilable(String))
     owner_type_params = T.let([], T::Array[Symbol])
     fn_type_params = T.let([], T::Array[Symbol])
+    name = T.let("", String)
 
     if match?(:TYPE_ID)
       # Could be TypeName<T>.method or just a TYPE_ID-named function
-      type_name = T.must(consume(:TYPE_ID)).value
+      type_name = T.cast(T.must(consume(:TYPE_ID)).value, String)
       owner_type_params = parse_generic_type_param_symbols
       if match!(:CHAR, '.')
         # It's a method: TypeName<T>.methodName
         owner_type = type_name
-        name = T.must(consume(:VAR_ID)).value
+        name = T.cast(T.must(consume(:VAR_ID)).value, String)
       else
         # TYPE_ID without dot — treat as function name (unusual but valid)
         name = type_name
@@ -1235,7 +1256,7 @@ class ClearParser
         owner_type_params = []
       end
     else
-      name = T.must(consume(:VAR_ID)).value
+      name = T.cast(T.must(consume(:VAR_ID)).value, String)
       # Optional generic type params on the function: fnName<T>
       fn_type_params = parse_generic_type_param_symbols
     end
@@ -1256,7 +1277,7 @@ class ClearParser
       loop do
         consume(:CHAR, ':')
         eff_tok = consume(:VAR_ID)
-        eff_name = T.must(eff_tok).value.to_sym
+        eff_name = T.cast(T.must(eff_tok).value, String).to_sym
         unless [:alloc, :safe].include?(eff_name)
           emit_typo_suggestion!(
             eff_tok, T.must(eff_tok).value, %w[alloc safe],
@@ -1270,7 +1291,7 @@ class ClearParser
         elsif eff_name == :alloc && match?(:CHAR, ':')
           consume(:CHAR, ':')
           qual_tok = consume(:VAR_ID)
-          qualifier = T.must(qual_tok).value.to_sym
+          qualifier = T.cast(T.must(qual_tok).value, String).to_sym
           unless [:frame, :heap].include?(qualifier)
             emit_typo_suggestion!(
               qual_tok, T.must(qual_tok).value, %w[frame heap],
@@ -1288,19 +1309,16 @@ class ClearParser
     end
 
     consume(:KEYWORD, 'FROM')
-    from_module = T.must(consume(:STRING)).value
+    from_module = T.cast(T.must(consume(:STRING)).value, String)
     match!(:CHAR, ';')
-    node = AST::ExternFnDecl.new(extern_tok, name, params, return_type, from_module, effects)
-    node.owner_type = owner_type if owner_type
-    node.owner_type_params = owner_type_params
-    node.fn_type_params = fn_type_params
-    node
+    AST::ExternFnDecl.new(extern_tok, name, params, return_type, from_module, effects,
+                          owner_type, owner_type_params, fn_type_params)
   end
 
   sig { params(extern_tok: Lexer::Token).returns(T.nilable(AST::ExternStructDecl)) }
   def parse_extern_struct(extern_tok)
     consume(:KEYWORD, 'STRUCT')
-    name = T.must(consume(:TYPE_ID)).value
+    name = T.cast(T.must(consume(:TYPE_ID)).value, String)
 
     # Optional generic type params: EXTERN STRUCT Parsed<T> { ... }
     type_params = parse_generic_type_param_symbols
@@ -1309,27 +1327,24 @@ class ClearParser
     fields = parse_struct_body
 
     # Optional: CLOSE "method" — register cleanup method for RAII
-    close_method = nil
+    close_method = T.let(nil, T.nilable(String))
     if match!(:KEYWORD, 'CLOSE')
-      close_method = T.must(consume(:STRING)).value
+      close_method = T.cast(T.must(consume(:STRING)).value, String)
     end
 
     # Optional: AS "ZigTypeExpr" — alias to parameterized Zig type (e.g. Parsed(JsonRecord))
-    as_type = nil
+    as_type = T.let(nil, T.nilable(String))
     if match!(:KEYWORD, 'AS')
-      as_type = T.must(consume(:STRING)).value
+      as_type = T.cast(T.must(consume(:STRING)).value, String)
     end
 
-    from_module = nil
+    from_module = T.let(nil, T.nilable(String))
     if match!(:KEYWORD, 'FROM')
-      from_module = T.must(consume(:STRING)).value
+      from_module = T.cast(T.must(consume(:STRING)).value, String)
     end
     match!(:CHAR, ';')
-    node = AST::ExternStructDecl.new(extern_tok, name, fields, from_module)
-    node.type_params = type_params
-    node.close_method = close_method
-    node.as_type = as_type
-    node
+    AST::ExternStructDecl.new(extern_tok, name, fields, from_module,
+                              type_params, close_method, as_type)
   end
 
   sig { params(visibility: Symbol).returns(T.nilable(AST::StructDef)) }
@@ -1378,9 +1393,9 @@ class ClearParser
           stub_vis = :private
         end
         fn_tok = consume(:KEYWORD, 'FN')
-        fn_name = T.must(consume(:VAR_ID)).value
+        fn_name = T.cast(T.must(consume(:VAR_ID)).value, String)
         _, raw_params = parse_comma_seq(:CHAR, '(', ')') do
-          p_name = T.must(consume(:VAR_ID)).value
+          p_name = T.cast(T.must(consume(:VAR_ID)).value, String)
           consume(:CHAR, ':')
           p_type = parse_type_annotation
           AST::UnionMethodParamRequirement.new(name: p_name, type: T.must(p_type))
@@ -1408,17 +1423,18 @@ class ClearParser
           visibility: stub_vis,
         )
       else
-        var_name = T.must(consume(:TYPE_ID)).value
+        var_name = T.cast(T.must(consume(:TYPE_ID)).value, String)
         if match?(:CHAR, '{')
           # Inline struct variant: Circle { radius: Number, color: String }
           _, field_pairs = parse_comma_seq(:CHAR, '{', '}') do
             fname_tok = current.type == :TYPE_ID ? consume(:TYPE_ID) : consume(:VAR_ID)
-            fname = T.must(fname_tok).value
+            fname = T.cast(T.must(fname_tok).value, String)
             consume(:CHAR, ':')
             ftype = parse_type_annotation
             reject_auto_in_aggregate_field!(T.must(ftype), fname, fname_tok, "UNION inline-variant")
-            [fname, T.must(ftype)]
+            [fname, T.cast(T.must(ftype), Type::TypeInput)]
           end
+          field_pairs = T.let(field_pairs, T::Array[[String, Type::TypeInput]])
           variants[var_name] = Schemas::InlineStructVariant.new(fields: field_pairs.to_h)
         elsif match!(:CHAR, ':')
           # Single-type payload: Data: Number  (or Data: Number @indirect)
@@ -1433,10 +1449,9 @@ class ClearParser
       match!(:CHAR, ',')
     end
     consume(:CHAR, '}')
-    node = AST::UnionDef.new(tok, name, variants, visibility)
-    node.type_params = type_params
-    node.methods = method_reqs unless method_reqs.empty?
-    node
+    methods = T.let(nil, T.nilable(T::Array[AST::UnionMethodRequirement]))
+    methods = method_reqs unless method_reqs.empty?
+    AST::UnionDef.new(tok, name, variants, visibility, type_params, methods)
   end
 
   # Slice the source text spanning [start_tok, end_tok). Used to capture
@@ -1485,7 +1500,7 @@ class ClearParser
 
     captures = []
     if match!(:KEYWORD, 'USE')
-      captures = parse_argument_list(as_param: false)
+      captures = parse_capture_list
     end
 
     # Return lifetime syntax:
@@ -1503,9 +1518,10 @@ class ClearParser
     #                              the source set. Stored as the symbol
     #                              `:wildcard`; the annotator can replace it
     #                              with an explicit list.
-    return_type = nil
-    return_type_token = nil
-    return_lifetime_token = nil
+    return_type = T.let(nil, T.nilable(Type))
+    return_type_token = T.let(nil, T.nilable(Lexer::Token))
+    return_lifetime_token = T.let(nil, T.nilable(Lexer::Token))
+    return_lifetime = T.let(nil, ReturnLifetime)
     explicit_return = match?(:KEYWORD, 'RETURNS')  # peek for the post-#335 stamp
     # Gradual mode: when RETURNS is omitted, treat as implicit Auto so
     # the inference pass picks the return type up from RETURN exprs.
@@ -1525,7 +1541,7 @@ class ClearParser
         # whitespace until ')'. The lexer skips whitespace, so a
         # space-separated list parses as a sequence of bare VAR_IDs.
         return_lifetime_token = consume(:CHAR, '(')
-        names = []
+        names = T.let([], T::Array[AST::Node])
         while !match?(:CHAR, ')')
           names << parse_var_id
           # Allow optional commas between names; they're sugar.
@@ -1542,7 +1558,8 @@ class ClearParser
         # Backward-compat single-binding form. Wrap in a one-element
         # Array so downstream code uniformly iterates a list.
         return_lifetime_token = current
-        return_lifetime = [parse_var_id]
+        names = T.let([parse_var_id], T::Array[AST::Node])
+        return_lifetime = names
         consume(:CHAR, ':')
       end
 
@@ -1553,8 +1570,8 @@ class ClearParser
 
     # Gates which sync families this function accepts on its parameters.
     # Mandatory whenever the body uses WITH on a parameter.
-    requires_clause = nil
-    early_requires_clauses = nil
+    requires_clause = T.let(nil, T.nilable(T::Hash[String, T::Set[Symbol]]))
+    early_requires_clauses = T.let(nil, T.nilable(T::Hash[String, Symbol]))
     if match!(:KEYWORD, 'REQUIRES')
       requires_clause = parse_requires_clause
       # If this REQUIRES contained reentrance kinds (e.g. NON_REENTRANT),
@@ -1615,7 +1632,6 @@ class ClearParser
     consume(:ARROW, '->')
     body = parse_block_body(['END', 'CATCH'])
 
-    catch_block = nil
     # Parse CATCH clauses (unified error-system grammar):
     #
     #   CATCH <item> (',' <item>)* [ WITH(<filter> (',' <filter>)*) ]
@@ -1642,10 +1658,9 @@ class ClearParser
     #     body:         [...] }
     # Annotator fills in clause[:kinds] / [:types] / [:filter_types] /
     # [:filter_messages] for lowering.
-    catch_block = nil
+    catch_clauses = T.let([], T::Array[AST::CatchClause])
+    default_body = T.let(nil, T.nilable(T::Array[AST::Node]))
     if match?(:KEYWORD, 'CATCH')
-      catch_clauses = []
-      default_body = nil
       while match?(:KEYWORD, 'CATCH')
         consume(:KEYWORD, 'CATCH')
 
@@ -1670,34 +1685,31 @@ class ClearParser
           items: items,
           filters: filters,
           body: clause_body,
+          kinds: [],
+          types: [],
+          filter_types: [],
+          filter_messages: [],
         )
       end
       if match?(:KEYWORD, 'DEFAULT')
         consume(:KEYWORD, 'DEFAULT')
         default_body = parse_block_body(['END'])
       end
-      catch_block = AST::CatchBlock.new(fn_token, catch_clauses, default_body)
     end
 
     consume(:KEYWORD, 'END')
-    node = AST::FunctionDef.new(fn_token, name, params, captures, return_type, return_lifetime, body,
-      catch_block ? catch_block.catch_clauses : [], catch_block ? catch_block.default_body : nil, visibility)
-    node.explicit_return_type = explicit_return  # post-#335: enforce-fallible-returns gate
-    node.type_params = type_params
-    node.tail_call = effects_decl == :reentrant_tail_call
-    node.requires = requires_clause
-    node.arrow_token = arrow_token
-    node.name_token = name_tok
-    node.effects_decl = effects_decl
-    node.effects_span = effects_span if effects_span
-    node.max_depth_n = effects_span[:max_depth] if effects_span && effects_span[:max_depth]
-    node.tight_reentrance = effects_span[:tight] if effects_span
-    node.requires_clauses = requires_clauses unless requires_clauses.empty?
-    node.return_type_token = return_type_token
-    node.pre_clauses = pre_clauses unless pre_clauses.empty?
-    node.post_clauses = post_clauses unless post_clauses.empty?
-    node.is_method = is_method
-    node
+    max_depth_n = effects_span ? effects_span[:max_depth] : nil
+    tight_reentrance = effects_span ? effects_span[:tight] : nil
+    stored_requires_clauses = requires_clauses.empty? ? nil : requires_clauses
+    stored_pre_clauses = pre_clauses.empty? ? nil : pre_clauses
+    stored_post_clauses = post_clauses.empty? ? nil : post_clauses
+    AST::FunctionDef.new(
+      fn_token, name, params, captures, return_type, return_lifetime, body,
+      catch_clauses, default_body, visibility, nil, nil, explicit_return, type_params,
+      effects_decl == :reentrant_tail_call, requires_clause, arrow_token, name_tok,
+      effects_decl, effects_span, max_depth_n, tight_reentrance, stored_requires_clauses,
+      return_type_token, stored_pre_clauses, stored_post_clauses, is_method
+    )
   end
 
   # Parse the REQUIRES clause body (the keyword has already been consumed):
@@ -1725,27 +1737,39 @@ class ClearParser
 
   sig { returns(T::Hash[String, T::Set[Symbol]]) }
   def parse_requires_clause
-    requires_hash = {}
+    requires_hash = T.let({}, T::Hash[String, T::Set[Symbol]])
     @last_requires_clauses = {}
 
     loop do
-      names = [T.must(consume(:VAR_ID)).value]
+      names = T.let([T.cast(T.must(consume(:VAR_ID)).value, String)], T::Array[String])
       while match!(:CHAR, ',')
-        names << T.must(consume(:VAR_ID)).value
+        names << T.cast(T.must(consume(:VAR_ID)).value, String)
       end
       consume(:CHAR, ':')
 
-      families = Set.new
-      reentrance_kinds = []
+      families = T.let(Set.new, T::Set[Symbol])
+      reentrance_kinds = T.let([], T::Array[Symbol])
       first = parse_requires_family_or_reentrance
       first_family = first[:family]
       first_reentrance = first[:reentrance]
-      first_family ? (families << first_family) : reentrance_kinds << first_reentrance if first_family || first_reentrance
+      if first_family
+        families << first_family
+      else
+        if first_reentrance
+          reentrance_kinds << T.must(first_reentrance)
+        end
+      end
       while match!(:CHAR, '|')
         nxt = parse_requires_family_or_reentrance
         next_family = nxt[:family]
         next_reentrance = nxt[:reentrance]
-        next_family ? (families << next_family) : reentrance_kinds << next_reentrance if next_family || next_reentrance
+        if next_family
+          families << next_family
+        else
+          if next_reentrance
+            reentrance_kinds << T.must(next_reentrance)
+          end
+        end
       end
 
       names.each do |n|
@@ -1765,18 +1789,19 @@ class ClearParser
   sig { returns(T::Hash[Symbol, T.nilable(Symbol)]) }
   def parse_requires_family_or_reentrance
     tok = consume(:TYPE_ID)
-    if REQUIRES_VALID_FAMILIES.include?(T.must(tok).value)
-      { family: T.must(tok).value.to_sym }
-    elsif REQUIRES_REENTRANCE_KINDS.include?(T.must(tok).value)
-      kind = case T.must(tok).value
+    token_value = T.cast(T.must(tok).value, String)
+    if REQUIRES_VALID_FAMILIES.include?(token_value)
+      { family: token_value.to_sym }
+    elsif REQUIRES_REENTRANCE_KINDS.include?(token_value)
+      kind = case token_value
              when 'NON_REENTRANT' then :non_reentrant
              end
       { reentrance: kind }
     else
       candidates = REQUIRES_VALID_FAMILIES.to_a + REQUIRES_REENTRANCE_KINDS.to_a
       emit_typo_suggestion!(
-        tok, T.must(tok).value, candidates,
-        "Unknown REQUIRES family '#{T.must(tok).value}' (valid: #{REQUIRES_VALID_FAMILIES.to_a.join(', ')}; kinds: #{REQUIRES_REENTRANCE_KINDS.to_a.join(', ')})",
+        tok, token_value, candidates,
+        "Unknown REQUIRES family '#{token_value}' (valid: #{REQUIRES_VALID_FAMILIES.to_a.join(', ')}; kinds: #{REQUIRES_REENTRANCE_KINDS.to_a.join(', ')})",
         "closest REQUIRES family/kind",
         category: :type, cascade: true
       )
@@ -1800,27 +1825,27 @@ class ClearParser
   #   REQUIRES f: NON_REENTRANT REQUIRES g: NON_REENTRANT ->
   sig { params(fn_name: String).returns(T::Hash[String, Symbol]) }
   def parse_requires_clauses(fn_name)
-    out = {}
+    out = T.let({}, T::Hash[String, Symbol])
     while match?(:KEYWORD, 'REQUIRES')
       consume(:KEYWORD, 'REQUIRES')
       name_tok = consume(:VAR_ID)
+      name = T.cast(T.must(name_tok).value, String)
       consume(:CHAR, ':')
       kind_tok = consume(:TYPE_ID)
-      kind =
-        case T.must(kind_tok).value
-        when 'NON_REENTRANT' then :non_reentrant
-        else
-          emit_typo_suggestion!(
-            kind_tok, T.must(kind_tok).value, %w[NON_REENTRANT],
-            "Unknown REQUIRES kind '#{T.must(kind_tok).value}'",
-            "closest REQUIRES kind",
-            category: :type, cascade: true
-          )
-        end
-      if out.key?(T.must(name_tok).value)
-        error!(name_tok, :DUPLICATE_REQUIRES_CLAUSE, fn: fn_name, name: T.must(name_tok).value)
+      kind_value = T.cast(T.must(kind_tok).value, String)
+      unless kind_value == 'NON_REENTRANT'
+        emit_typo_suggestion!(
+          kind_tok, kind_value, %w[NON_REENTRANT],
+          "Unknown REQUIRES kind '#{kind_value}'",
+          "closest REQUIRES kind",
+          category: :type, cascade: true
+        )
       end
-      out[T.must(name_tok).value] = kind
+      kind = :non_reentrant
+      if out.key?(name)
+        error!(name_tok, :DUPLICATE_REQUIRES_CLAUSE, fn: fn_name, name: name)
+      end
+      out[name] = kind
     end
     out
   end
@@ -1832,10 +1857,11 @@ class ClearParser
     return [nil, nil] unless match?(:KEYWORD, 'EFFECTS')
     eff_kw = consume(:KEYWORD, 'EFFECTS')
     eff_tok = consume(:TYPE_ID)
-    unless T.must(eff_tok).value == 'REENTRANT'
+    effect_value = T.cast(T.must(eff_tok).value, String)
+    unless effect_value == 'REENTRANT'
       emit_typo_suggestion!(
-        eff_tok, T.must(eff_tok).value, %w[REENTRANT],
-        "Unknown function effect '#{T.must(eff_tok).value}'",
+        eff_tok, effect_value, %w[REENTRANT],
+        "Unknown function effect '#{effect_value}'",
         "closest function effect",
         category: :type, cascade: true
       )
@@ -1843,7 +1869,8 @@ class ClearParser
     span_start = eff_kw
     span_end_tok = eff_tok # tail of `EFFECTS REENTRANT` so far
     unless match!(:CHAR, ':')
-      return [:reentrant, { start_tok: span_start, end_tok: span_end_tok, tight: false }]
+      metadata = T.let({ start_tok: span_start, end_tok: span_end_tok, tight: false }, EffectMetadata)
+      return [:reentrant, metadata]
     end
 
     # Optional `:TIGHT` modifier (mirrors `TIGHT WHILE`). Order:
@@ -1862,24 +1889,30 @@ class ClearParser
       if match!(:CHAR, ':')
         # fall through to variant parsing below
       else
-        return [:reentrant, { start_tok: span_start, end_tok: span_end_tok, tight: true }]
+        metadata = T.let({ start_tok: span_start, end_tok: span_end_tok, tight: true }, EffectMetadata)
+        return [:reentrant, metadata]
       end
     end
 
     variant_tok = consume(:TYPE_ID)
-    kind = case T.must(variant_tok).value
-           when 'THUNK'       then :reentrant_thunk
-           when 'TAIL_CALL'   then :reentrant_tail_call
-           when 'NOT_LOGICAL' then :reentrant_not_logical
-           when 'MAX_DEPTH'   then :reentrant_max_depth
-           else
-             emit_typo_suggestion!(
-               variant_tok, T.must(variant_tok).value, %w[THUNK TAIL_CALL NOT_LOGICAL MAX_DEPTH],
-               "Unknown REENTRANT variant '#{T.must(variant_tok).value}'",
-               "closest REENTRANT variant",
-               category: :type, cascade: true
-             )
-           end
+    variant_value = T.cast(T.must(variant_tok).value, String)
+    kind = T.let(:reentrant, Symbol)
+    if variant_value == 'THUNK'
+      kind = :reentrant_thunk
+    elsif variant_value == 'TAIL_CALL'
+      kind = :reentrant_tail_call
+    elsif variant_value == 'NOT_LOGICAL'
+      kind = :reentrant_not_logical
+    elsif variant_value == 'MAX_DEPTH'
+      kind = :reentrant_max_depth
+    else
+      emit_typo_suggestion!(
+        variant_tok, variant_value, %w[THUNK TAIL_CALL NOT_LOGICAL MAX_DEPTH],
+        "Unknown REENTRANT variant '#{variant_value}'",
+        "closest REENTRANT variant",
+        category: :type, cascade: true
+      )
+    end
     if tight && (kind == :reentrant_not_logical || kind == :reentrant_max_depth)
       label = kind == :reentrant_not_logical ? "NOT_LOGICAL" : "MAX_DEPTH"
       explanation = label == 'MAX_DEPTH' ?
@@ -1888,28 +1921,30 @@ class ClearParser
       error!(variant_tok, :INVALID_TIGHT_VARIANT, label: label, explanation: explanation)
     end
     span_end_tok = variant_tok
-    max_depth_n = nil
+    max_depth_n = T.let(nil, T.nilable(Integer))
     if kind == :reentrant_max_depth
       consume(:CHAR, '(')
       n_tok = current
       n_lit = consume_number
-      max_depth_n = n_lit.value.to_i
+      max_depth_n = T.cast(n_lit.value, Integer)
       if max_depth_n <= 0
         error!(n_tok, :MAX_DEPTH_NONPOSITIVE, got: max_depth_n)
       end
       close_tok = consume(:CHAR, ')')
       span_end_tok = close_tok
     end
-    [kind, { start_tok: span_start, end_tok: span_end_tok, max_depth: max_depth_n, tight: tight }]
+    metadata = T.let(
+      { start_tok: span_start, end_tok: span_end_tok, max_depth: max_depth_n, tight: tight },
+      EffectMetadata
+    )
+    [kind, metadata]
   end
 
   sig { params(stop_words: T::Array[String]).returns(AST::RawBody) }
   def parse_block_body(stop_words = ['END'])
     stmts = T.let([], AST::RawBody)
-    types = stop_words.map { |w| Lexer::KEYWORDS.include?(w) ? :KEYWORD : :CHAR }
-    stop_words = stop_words.zip(types)
     # Keep going until we hit a stop word (END, ELSE, CATCH, }, etc)
-    until stop_words.any? { |w, t| match?(T.must(t), w) } || match?(:EOF)
+    until stop_words.any? { |word| match?(literal_token_type(word), word) } || match?(:EOF)
       stmt = parse_statement()
       stmts << stmt if stmt
     end
@@ -1950,10 +1985,10 @@ class ClearParser
       if match!(:CHAR, ';')
         body << expr
         next
+      else
+        result = expr
+        break
       end
-
-      result = expr
-      break
     end
 
     unless result
@@ -2000,7 +2035,8 @@ class ClearParser
       return false unless token
 
       if token.type == :CHAR
-        case token.value
+        token_value = T.cast(token.value, String)
+        case token_value
         when '{', '(', '['
           depth += 1
         when '}', ')', ']'
@@ -2029,7 +2065,8 @@ class ClearParser
       if token.type == :COMPOUND_ASSIGN && depth == 1
         return true
       elsif token.type == :CHAR
-        case token.value
+        token_value = T.cast(token.value, String)
+        case token_value
         when '{', '(', '['
           depth += 1
         when '}', ')', ']'
@@ -2052,7 +2089,7 @@ class ClearParser
 
     while (op_token = current) && (op_prec = get_precedence(op_token)) && op_prec > precedence
       # GUARD CLAUSE: AS is used as a keyword in CAST, and only binds if followed by an alias ($...)
-      if op_token.value == 'AS' && (peek.type == :TYPE_ID || peek.value[0] != '$')
+      if op_token.value == 'AS' && (peek.type == :TYPE_ID || T.cast(peek.value, String)[0] != '$')
         break
       end
 
@@ -2068,7 +2105,7 @@ class ClearParser
     return nil unless token.type == :CHAR || token.type == :KEYWORD || token.type == :SMOOTH || token.type == :OR_RESCUE || token.type == :RANGE_EXCL || token.type == :RANGE_INCL
 
     # Precedence levels (higher = tighter binding)
-    case token.value
+    case T.cast(token.value, String)
     when '|>'             then 1
     when 'OR', 'AS'       then 2
     when '..<', '..<=', '..=' then 3
@@ -2084,48 +2121,53 @@ class ClearParser
 
   sig { params(lhs: AST::Node, op_token: Lexer::Token, op_prec: Integer).returns(AST::Node) }
   def parse_binary_op(lhs, op_token, op_prec)
-    op_val = op_token.value
+    op_val = T.cast(op_token.value, String)
     
     next_prec = (op_val == '**') ? op_prec - 1 : op_prec
 
     case op_val
     when 'AS'
-      rhs = parse_var_id
-      unless rhs.is_a?(AST::Identifier)
-        error!(rhs, :EXPECTED_IDENT_AFTER_AS, got: rhs.class)
+      as_rhs = parse_var_id
+      unless as_rhs.is_a?(AST::Identifier)
+        error!(as_rhs, :EXPECTED_IDENT_AFTER_AS, got: "expression")
       end
-      return AST::BinaryOp.new(op_token, lhs, :BIND_VAR, rhs)
+      return AST::BinaryOp.new(op_token, lhs, :BIND_VAR, as_rhs)
 
     when 'OR'
-      rhs = parse_or_rescue
-      return AST::BinaryOp.new(op_token, lhs, :OR_RESCUE, rhs)
+      or_rhs = parse_or_rescue
+      return AST::BinaryOp.new(op_token, lhs, :OR_RESCUE, or_rhs)
 
     when 'IS_A'
-      rhs = parse_is_a_rhs
+      is_a_rhs = parse_is_a_rhs
       binding = nil
       if match?(:KEYWORD, 'AS')
         consume(:KEYWORD, 'AS')
-        binding = T.must(consume(:VAR_ID)).value
+        binding = T.cast(T.must(consume(:VAR_ID)).value, String)
       end
-      return AST::IsA.new(op_token, lhs, rhs, binding)
+      return AST::IsA.new(op_token, lhs, is_a_rhs, binding)
 
     when '|>'
       # SMOOTH binds Level 1, but its RHS allows chained pipe operators
-      rhs = parse_expression(next_prec)
+      pipe_rhs = parse_expression(next_prec)
+      normalized_pipe_rhs = T.let(pipe_rhs, AST::Node)
       # Predicate suffix: x |> isPositive? parses as OptionalUnwrap(Identifier).
       # Unwrap and restore the ? suffix as part of the function name.
-      if rhs.is_a?(AST::OptionalUnwrap) && rhs.target.is_a?(AST::Identifier)
-        rhs = AST::Identifier.new(rhs.token, "#{rhs.target.name}?")
+      if pipe_rhs.is_a?(AST::OptionalUnwrap)
+        unwrap_rhs = T.cast(pipe_rhs, AST::OptionalUnwrap)
+        if unwrap_rhs.target.is_a?(AST::Identifier)
+          target_ident = T.cast(unwrap_rhs.target, AST::Identifier)
+          normalized_pipe_rhs = AST::Identifier.new(unwrap_rhs.token, "#{target_ident.name}?")
+        end
       end
-      return AST::BinaryOp.new(op_token, lhs, :SMOOTH, rhs)
+      return AST::BinaryOp.new(op_token, lhs, :SMOOTH, normalized_pipe_rhs)
 
     when '..<'
-      rhs = parse_expression(next_prec)
-      return AST::RangeLit.new(op_token, lhs, rhs, false)
+      range_rhs = parse_expression(next_prec)
+      return AST::RangeLit.new(op_token, lhs, range_rhs, false)
 
     when '..<=', '..='
-      rhs = parse_expression(next_prec)
-      return AST::RangeLit.new(op_token, lhs, rhs, true)
+      range_rhs = parse_expression(next_prec)
+      return AST::RangeLit.new(op_token, lhs, range_rhs, true)
     end
 
     rhs = parse_expression(next_prec)
@@ -2189,7 +2231,7 @@ class ClearParser
         first_tok = consume(:TYPE_ID)
         first_is_kind = ERROR_KINDS.include?(T.must(first_tok).value)
         if first_is_kind
-          kind = T.must(first_tok).value.to_sym
+          kind = T.cast(T.must(first_tok).value, String).to_sym
         else
           error_name = T.must(first_tok).value
         end
@@ -2260,14 +2302,10 @@ class ClearParser
     parse_primary
   end
 
-  # Sentinel returned by a suffix rule to signal "this suffix does not apply
-  # to the current lhs — stop processing without consuming any tokens."
-  SUFFIX_DECLINE = T.let(:__clear_parser_suffix_decline__, Symbol)
-
   sig { params(lhs: AST::Node).returns(AST::Node) }
   def parse_suffixes(lhs)
     loop do
-      rule = SUFFIX_RULE_INDEX[[current.type, current.value]]
+      rule = SUFFIX_RULE_INDEX[ClearParser.token_rule_key(current)]
       break unless rule
       # Run the rule, passing the current 'lhs' into it.
       # If the rule returns SUFFIX_DECLINE, it did not consume anything and
@@ -2305,17 +2343,17 @@ class ClearParser
     unless match?(:KEYWORD, 'IF')
       error!(current, :PARSER_EXPECTED, expected: "IF", got: current.value, type: current.type, line: current.line)
     end
-    parse_if_statement(comptime: true)
+    parse_if_statement(is_comptime: true)
   end
 
-  sig { params(comptime: T::Boolean).returns(T.any(AST::IfStatement, AST::IfBind)) }
-  def parse_if_statement(comptime: false)
+  sig { params(is_comptime: T::Boolean).returns(T.any(AST::IfStatement, AST::IfBind)) }
+  def parse_if_statement(is_comptime: false)
     if_token = consume(:KEYWORD, 'IF')
-    parse_if_chain(T.must(if_token), comptime: comptime)
+    parse_if_chain(T.must(if_token), is_comptime: is_comptime)
   end
 
-  sig { params(if_token: Lexer::Token, comptime: T::Boolean).returns(T.any(AST::IfStatement, AST::IfBind)) }
-  def parse_if_chain(if_token, comptime: false)
+  sig { params(if_token: Lexer::Token, is_comptime: T::Boolean).returns(T.any(AST::IfStatement, AST::IfBind)) }
+  def parse_if_chain(if_token, is_comptime: false)
     condition = parse_expression
 
     # Shorthand: IF condition -> single_statement;
@@ -2323,7 +2361,7 @@ class ClearParser
       consume(:ARROW, '->')
       stmt = parse_statement
       node = AST::IfStatement.new(if_token, condition, [stmt].compact, [])
-      node.comptime = comptime
+      node.comptime = is_comptime
       return node
     end
 
@@ -2357,7 +2395,7 @@ class ClearParser
       # We recurse! We treat the ELSIF as the start of a new IF node.
       # This new node becomes the single statement inside our 'else_branch'.
       # Note: We do NOT consume 'END' here, the recursion handles it.
-      nested_if = parse_if_chain(previous, comptime: comptime)
+      nested_if = parse_if_chain(previous, is_comptime: is_comptime)
       else_branch << nested_if
 
     # Parse Optional 'ELSE'
@@ -2369,7 +2407,7 @@ class ClearParser
     end
 
     node = AST::IfStatement.new(if_token, condition, then_branch, else_branch)
-    node.comptime = comptime
+    node.comptime = is_comptime
     node
   end
 
@@ -2720,7 +2758,7 @@ class ClearParser
     first_tok = consume(:TYPE_ID)
     first_is_kind = ERROR_KINDS.include?(T.must(first_tok).value)
 
-    kind = first_is_kind ? T.must(first_tok).value.to_sym : nil
+    kind = first_is_kind ? T.cast(T.must(first_tok).value, String).to_sym : nil
     error_name = first_is_kind ? nil : T.must(first_tok).value
     message = nil
 
@@ -2810,8 +2848,8 @@ class ClearParser
 
   sig { returns(AST::Node) }
   def parse_primary
-    rule = PRIMARY_RULE_INDEX[[current.type, current.value]]
-    rule ||= PRIMARY_RULE_INDEX[[current.type, nil]]
+    rule = PRIMARY_RULE_INDEX[ClearParser.token_rule_key(current)]
+    rule ||= PRIMARY_RULE_INDEX[ClearParser.rule_key(current.type, nil)]
     return dispatch_primary_rule(rule) if rule
     return parse_unary() if current.type == :CHAR && AST::UNARY_OPS.include?(current.value)
     lit = parse_lit(:stack)
@@ -2936,7 +2974,7 @@ class ClearParser
       params = parse_argument_list()
       captures = []
       if match!(:KEYWORD, 'USE')
-        captures = parse_argument_list(as_param: false)
+        captures = parse_capture_list
       end
       consume(:ARROW, '->')
       body = match?(:CHAR, '{') ? parse_value_block_expr : parse_expression
@@ -3069,19 +3107,6 @@ class ClearParser
       return mark_polymorphic_shared_type(T.must(parse_type_annotation))
     end
 
-    # Auto — gradual-typing placeholder. Resolved to a concrete type
-    # by the inference pass (see docs/agents/gradual-typing.md). At
-    # parse time it's just a sentinel Type whose `auto?` flag is set;
-    # downstream code treats it as "unresolved, fill me in". Stash
-    # the keyword token so the fix emitter can replace this exact
-    # span with the resolved type's source form.
-    if match?(:KEYWORD, 'Auto')
-      auto_tok = consume(:KEYWORD, 'Auto')
-      t = Type.new(:Auto, auto: true)
-      t.auto_token = auto_tok
-      return t
-    end
-
     # Check for tense (Promise) prefix: ~Type
     tense_prefix = ""
     if match!(:CHAR, '~')
@@ -3100,7 +3125,7 @@ class ClearParser
       optional_prefix = "?"
     end
 
-    if match?(:KEYWORD, 'Auto')
+    if match?(:KEYWORD, 'Auto') && "#{tense_prefix}#{error_prefix}#{optional_prefix}" != ""
       prefix_chars = "#{tense_prefix}#{error_prefix}#{optional_prefix}"
       error!(current, :AUTO_PREFIX_NOT_SUPPORTED, prefix: prefix_chars, prefix2: prefix_chars, prefix3: prefix_chars, prefix4: prefix_chars)
     end
@@ -3114,7 +3139,22 @@ class ClearParser
       return optional_prefix == "?" ? Type.optional_of(fn_type) : fn_type
     end
 
-    base = T.must(consume(:TYPE_ID)).value
+    auto_tok = T.let(nil, T.nilable(Lexer::Token))
+    auto_type = false
+    base = T.let("", String)
+    if match?(:KEYWORD, 'Auto')
+      # Auto — gradual-typing placeholder. Resolved to a concrete type
+      # by the inference pass (see docs/agents/gradual-typing.md). At
+      # parse time it's just a sentinel Type whose `auto?` flag is set;
+      # downstream code treats it as "unresolved, fill me in". Stash
+      # the keyword token so the fix emitter can replace this exact
+      # span with the resolved type's source form.
+      auto_tok = consume(:KEYWORD, 'Auto')
+      auto_type = true
+      base = "Auto"
+    else
+      base = T.must(consume(:TYPE_ID)).value
+    end
     inner = ""
 
     # Generic type arguments: Pair<Number> or Map<String, Number>.
@@ -3209,7 +3249,8 @@ class ClearParser
     if sync == :atomic && layout == :indirect && ownership.nil?
       ownership = :shared
     end
-    t = Type.new(base_sym, ownership: ownership, sync: sync, layout: layout, location: loc, collection: collection, shard_count: shard_count, observable: observable)
+    t = Type.new(base_sym, ownership: ownership, sync: sync, layout: layout, location: loc, collection: collection, shard_count: shard_count, observable: observable, auto: auto_type)
+    t.auto_token = auto_tok if auto_tok
     t.apply_type_annotation_extras!(soa: is_soa, elem_ownership: elem_ownership, elem_sync: elem_sync, observable_token: observable_token)
     t
   end
@@ -3590,7 +3631,7 @@ class ClearParser
     while match?(:KEYWORD) || match?(:VAR_ID) do
       capability = if match?(:KEYWORD) && current.value != 'AS'
         cap_tok = consume(:KEYWORD)
-        cap = T.must(cap_tok).value.to_sym
+        cap = T.cast(T.must(cap_tok).value, String).to_sym
         unless AST::CAPABILITIES.include?(cap)
           emit_typo_suggestion!(
             cap_tok, T.must(cap_tok).value, AST::CAPABILITIES.map(&:to_s),
@@ -3897,7 +3938,7 @@ class ClearParser
     end
     tok = consume(:TYPE_ID)
     form = ERROR_KINDS.include?(T.must(tok).value) ? :kind : :type
-    AST::ErrorSelector.new(form: form, name: T.must(tok).value.to_sym, token: tok)
+    AST::ErrorSelector.new(form: form, name: T.cast(T.must(tok).value, String).to_sym, token: tok)
   end
 
   # Parse a single error-handler action: RAISE | PASS | RETURN expr | EXIT "msg" | -> { stmts }.
@@ -4229,7 +4270,7 @@ class ClearParser
     end
 
     # Keyword statements (IF, WHILE, RETURN, etc.) — cannot start THEN chains
-    rule = STMT_RULE_INDEX[[current.type, current.value]]
+    rule = STMT_RULE_INDEX[ClearParser.token_rule_key(current)]
     return dispatch_stmt_rule(rule) if rule
 
     expr = parse_expression
@@ -4328,7 +4369,7 @@ class ClearParser
   def parse_generic_type_param_symbols
     return [] unless match?(:CHAR, '<')
 
-    _, names = parse_comma_seq(:CHAR, '<', '>') { T.must(consume(:TYPE_ID)).value.to_sym }
+    _, names = parse_comma_seq(:CHAR, '<', '>') { T.cast(T.must(consume(:TYPE_ID)).value, String).to_sym }
     names
   end
 

@@ -1059,7 +1059,75 @@ class MIRLowering
     return mir if stack_fixed_array_coercion?(node)
     return mir unless mir.is_a?(MIR::Emittable)
 
+    union_wrapped = lower_union_payload_coercion(mir, node, node.full_type!, coerced_type)
+    return union_wrapped if union_wrapped
+
     mir_cast(mir, node.full_type!, coerced_type) || mir
+  end
+
+  sig { params(mir: MIR::Emittable, node: AST::Locatable, actual_type: Type, coerced_type: Type).returns(T.nilable(MIR::Emittable)) }
+  def lower_union_payload_coercion(mir, node, actual_type, coerced_type)
+    target_type = coerced_type.value_payload_type
+    schema = union_schemas[target_type.resolved]
+    schema ||= begin
+      looked_up = mir_schema_lookup.call(target_type.resolved)
+      looked_up.is_a?(Schemas::UnionSchema) ? looked_up : nil
+    end
+    return nil unless schema
+
+    compared_actual = actual_type.optional? ? T.must(actual_type.wrapped_type) : actual_type
+    variant_name, payload_type = unique_mir_union_payload_variant(schema, compared_actual)
+    return nil unless variant_name && payload_type
+
+    if actual_type.optional? && coerced_type.optional?
+      capture = "_union_payload_#{lowering_counters.next_tmp_id}"
+      wrapped = MIR::StructInit.new(transpile_type(target_type), [
+        { name: variant_name, value: MIR::Ident.new(capture) }
+      ])
+      result = MIR::IfOptional.new(mir, capture, wrapped, MIR::Lit.new("null"))
+      result.result_type = coerced_type
+      return result
+    end
+
+    union_payload_coercion_value(mir, node, target_type, variant_name, payload_type)
+  end
+
+  sig { params(schema: Schemas::UnionSchema, actual_type: Type).returns([T.nilable(String), T.nilable(Type)]) }
+  def unique_mir_union_payload_variant(schema, actual_type)
+    matches = schema.variants.filter_map do |variant_name, payload|
+      next unless payload.is_a?(Type)
+      next unless mir_union_payload_matches?(payload, actual_type)
+
+      [variant_name.to_s, payload]
+    end
+    matches.one? ? matches.first : [nil, nil]
+  end
+
+  sig { params(payload_type: Type, actual_type: Type).returns(T::Boolean) }
+  def mir_union_payload_matches?(payload_type, actual_type)
+    payload_surface = Type.coercion_surface_name(payload_type)
+    actual_surface = Type.coercion_surface_name(actual_type)
+    return true if payload_surface == actual_surface
+    return false if payload_type.string? || actual_type.string?
+
+    payload_type.accepts?(actual_type)
+  end
+
+  sig { params(mir: MIR::Emittable, node: AST::Locatable, union_type: Type, variant_name: String, payload_type: Type).returns(MIR::Emittable) }
+  def union_payload_coercion_value(mir, node, union_type, variant_name, payload_type)
+    ast_node = T.cast(node, AST::Node)
+    target_alloc = function_state.current_decl_alloc || alloc_for_node(ast_node)
+    payload = materialize_owned_sink_value(mir, ast_node, target_alloc, payload_type)
+    payload = hoist_alloc(payload, ast_node, err_cleanup: true) if mir_allocates?(payload)
+
+    T.cast(with_ownership_consumption(
+      MIR::StructInit.new(transpile_type(union_type), [
+        { name: variant_name, value: payload }
+      ]),
+      mir_ident_names(payload),
+      "MIR::StructInit",
+      target_alloc: target_alloc,
+    ), MIR::StructInit)
   end
 
   sig { params(node: T.any(AST::Locatable, T.untyped)).returns(T::Boolean) }
@@ -1345,6 +1413,8 @@ class MIRLowering
 
     discard_type = Type.from_node!(stmt, context: "discard allocation mark")
     mir = place_discarded_owned_branch_value(mir, discard_type)
+    normalized_prefix = normalize_allocating_result_expr!(mir)
+    function_state.pending_stmts.concat(normalized_prefix) unless normalized_prefix.empty?
     return [mir, false] unless mir_allocates?(mir) && !mutating_receiver_allocator_op?(mir)
 
     entry = hoist_cleanup_entry(mir, stmt)
@@ -3685,6 +3755,7 @@ class MIRLowering
     source = owned_sink_source_fact(value, ast_node, sink_alloc, ti)
 
     if ti.string?
+      return keep if ti.symbol?
       return keep if source.satisfies_sink?(sink_alloc, ti)
       return OwnedSinkPlan.new(action: :dupe_slice, target_alloc: sink_alloc, zig_type: nil, copy_mode: nil)
     end

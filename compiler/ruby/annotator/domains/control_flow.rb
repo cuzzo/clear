@@ -138,7 +138,9 @@ module Annotator
           proc {
             with_conditional_context do
               declare_is_a_binding!(node.condition)
-              visit_stmts(node.then_branch)
+              with_comptime_is_a_then_refinement(node.condition) do
+                visit_stmts(node.then_branch)
+              end
             end
             finalize_scope(node, branch: :then)
             node.then_drops
@@ -253,7 +255,7 @@ module Annotator
         return T.must(variant_key).to_s if variant_key
 
         payload_matches = schema.variants.keys.select do |variant|
-          payload = normalized_match_payload(schema.variants[variant], union_subst)
+          payload = normalized_runtime_match_payload(schema.variants[variant], union_subst)
           runtime_is_a_payload_matches?(payload, target_names, union_type, variant.to_s)
         end
 
@@ -282,7 +284,7 @@ module Annotator
       def runtime_is_a_target_segments(node)
         case node
         when Type
-          [node.resolved.to_s]
+          [Type.coercion_surface_name(node)]
         when AST::Identifier
           [node.name]
         when AST::GetField
@@ -312,7 +314,7 @@ module Annotator
       def runtime_is_a_payload_matches?(payload, target_names, union_type, variant_name)
         case payload
         when Type
-          payload_name = payload.resolved.to_s
+          payload_name = Type.coercion_surface_name(payload)
           payload_names = [payload_name, payload_name.split(".").last].uniq
           (payload_names & target_names).any?
         when Schemas::InlineStructVariant
@@ -386,6 +388,43 @@ module Annotator
 
         namespace = T.cast(node.target, AST::Identifier).name
         namespace == "AST"
+      end
+
+      sig { params(condition: AST::Node, blk: T.proc.returns(T.untyped)).returns(T.untyped) }
+      def with_comptime_is_a_then_refinement(condition, &blk)
+        refinement = comptime_is_a_type_param_refinement(condition)
+        return blk.call unless refinement
+
+        type_param = T.cast(refinement[0], Symbol)
+        narrowed_type = T.cast(refinement[1], Type)
+        with_comptime_type_param_refinement(type_param, narrowed_type) { blk.call }
+      end
+
+      sig { params(condition: AST::Node).returns(T.nilable(T::Array[T.untyped])) }
+      def comptime_is_a_type_param_refinement(condition)
+        return nil unless condition.is_a?(AST::IsA)
+        left = condition.left
+        return nil unless left.is_a?(AST::Identifier)
+
+        type_param = left.name.to_sym
+        return nil unless current_function_type_param?(type_param)
+
+        narrowed_type = static_is_a_target_type(condition.right)
+        narrowed_type ? [type_param, narrowed_type] : nil
+      end
+
+      sig { params(node: T.any(AST::Node, Type)).returns(T.nilable(Type)) }
+      def static_is_a_target_type(node)
+        case node
+        when Type
+          Type.new(node)
+        when AST::Identifier
+          Type.new(node.name.to_sym)
+        when AST::GetField
+          Type.new(runtime_is_a_target_label(node).to_sym)
+        else
+          nil
+        end
       end
 
       sig { params(node: AST::IfStatement).void }
@@ -579,6 +618,16 @@ module Annotator
         payload
       end
 
+      sig { params(payload: MatchPayload, union_subst: T::Hash[Symbol, Symbol]).returns(MatchPayload) }
+      def normalized_runtime_match_payload(payload, union_subst)
+        T.bind(self, SemanticAnnotator)
+
+        return apply_type_subst(payload, union_subst) if payload.is_a?(Type)
+        return union_subst.fetch(payload, payload) if payload.is_a?(Symbol)
+
+        payload
+      end
+
       sig do
         params(
           node: AST::MatchStatement,
@@ -641,7 +690,7 @@ module Annotator
       def match_subject_plan(node)
         T.bind(self, SemanticAnnotator)
 
-        expr_t = Type.new(node.expr.resolved_type || :Any)
+        expr_t = Type.new(node.expr.full_type!(context: "MATCH subject"))
         node.string_match = true if expr_t.string?
         type_name = T.cast(expr_t.generic_instance? ? expr_t.generic_base : expr_t.resolved, Symbol)
         schema = T.cast(lookup_type_schema(type_name), T.nilable(MatchSchema))
@@ -779,10 +828,11 @@ module Annotator
 
       sig { params(pattern: AST::Node, node: AST::MatchStatement, plan: MatchSubjectPlan).returns(T::Boolean) }
       def match_pattern_type_matches_subject?(pattern, node, plan)
-        case_type = Type.new(pattern.resolved_type || :Any)
+        case_type = Type.new(pattern.full_type!(context: "MATCH pattern"))
         return true if pattern.resolved_type == node.expr.resolved_type
         return true if node.expr.resolved_type == :Any || pattern.resolved_type == :Any
         return true if plan.expr_type.generic_instance? && plan.expr_type.generic_base == pattern.resolved_type
+        return true if plan.expr_type.optional? && T.must(plan.expr_type.wrapped_type).accepts?(case_type)
         return true if plan.expr_type.string? && case_type.string?
 
         false

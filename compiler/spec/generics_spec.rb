@@ -421,6 +421,26 @@ RSpec.describe SemanticAnnotator do
         expect { run(src) }.not_to raise_error
       end
 
+      it "infers T from a function parameter return type" do
+        src = call_src(
+          "FN invoke<T>(blk: FN() -> T) RETURNS T -> RETURN blk(); END",
+          "n = invoke(%() -> 42);"
+        )
+        expect { run(src) }.not_to raise_error
+      end
+
+      it "infers a callback return type through a forward generic signature" do
+        src = <<~CLEAR
+          FN main() RETURNS Void ->
+            n = invoke(%() -> 42);
+          END
+          FN invoke<T>(blk: FN() -> T) RETURNS T ->
+            RETURN blk();
+          END
+        CLEAR
+        expect { run(src) }.not_to raise_error
+      end
+
       it "sets generic_type_args to [:Float64] on the FuncCall node for identity(42.0)" do
         src = call_src(
           "FN identity<T>(x: T) RETURNS T -> RETURN x; END",

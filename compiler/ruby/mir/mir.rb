@@ -563,7 +563,7 @@ module MIR
       first_active_effect([
         [true, transferred_break_ident_effect(stmts, value)],
         [true, of(value)],
-        [true, block_result_transfer_effect(stmts)],
+        [true, block_result_transfer_effect(stmts, value)],
         [cleanup_result_type?(result_type), owned(alloc: nil, cleanup_kind: :uniform)],
       ])
     end
@@ -620,13 +620,28 @@ module MIR
         owned(alloc: mark&.alloc, cleanup_kind: cleanup_kind, target_var: name))
     end
 
-    sig { params(stmts: T::Array[Emittable]).returns(OwnershipEffect) }
-    private_class_method def self.block_result_transfer_effect(stmts)
+    sig { params(stmts: T::Array[Emittable], value: OwnershipEffectInput).returns(OwnershipEffect) }
+    private_class_method def self.block_result_transfer_effect(stmts, value)
+      result_names = ident_names_in_expr(value)
+      return none if result_names.empty?
+
       transferred_allocs = stmts.grep(MIR::TransferMark)
-        .select { |stmt| [:owned_sink, :block_result].include?(stmt.target) }
+        .select { |stmt| stmt.target == :block_result && result_names.include?(stmt.name.to_s) }
         .filter_map(&:target_alloc)
       effect_when(!transferred_allocs.empty?,
         owned(alloc: unique_symbol_or_nil(transferred_allocs), cleanup_kind: :uniform))
+    end
+
+    sig { params(value: OwnershipEffectInput).returns(T::Array[String]) }
+    private_class_method def self.ident_names_in_expr(value)
+      case value
+      when MIR::Ident
+        [value.name.to_s]
+      when MIR::Emittable
+        value.child_exprs.flat_map { |child| ident_names_in_expr(child) }.uniq
+      else
+        []
+      end
     end
   end
 

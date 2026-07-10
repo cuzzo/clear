@@ -13,6 +13,27 @@ RSpec.describe ZigTranspiler do
     zig[/fn #{Regexp.escape(name)}\b.*?\n(.*?)^}/m, 1] || ""
   end
 
+  describe "panic intrinsic" do
+    it "allows NoReturn panic branches in match expressions without fallible returns" do
+      zig = transpile(<<~CLEAR)
+        FN choose(x: Int64) RETURNS Int64 ->
+          RETURN PARTIAL MATCH x START
+            1 -> 1,
+            DEFAULT -> panic("bad")
+          END;
+        END
+
+        FN main() RETURNS Void ->
+          _ = choose(1);
+          RETURN;
+        END
+      CLEAR
+
+      expect(zig).to include('@panic(@as([]const u8, "bad"))')
+      expect(zig).to include("fn choose(x: i64) i64")
+    end
+  end
+
   describe "collection ownership regressions" do
     it "cleans popped frame-list string captures with the receiver allocator" do
       zig = transpile(<<~CLEAR)

@@ -7,15 +7,17 @@
 # facts.
 require "sorbet-runtime"
 require_relative "../../ast/param"
+require_relative "../../ast/type"
 require_relative "../../ast/ast" # ruby-to-clear: no-require
 require_relative "intrinsic_arg_spec"
 require_relative "intrinsic_emit"
 require_relative "intrinsic_contract"
 
+# ruby-to-clear: pub
 class FunctionSignature
   extend T::Sig
   LifetimeSource = T.type_alias { T.any(String, Symbol) }
-  LifetimeInput = T.type_alias { T.nilable(T.any(LifetimeSource, AST::Node, T::Array[T.any(LifetimeSource, AST::Node)])) }
+  LifetimeInput = T.type_alias { T.nilable(T.any(LifetimeSource, T::Array[LifetimeSource])) }
   RequiresMap = T.type_alias { T::Hash[String, T::Set[Symbol]] }
   ExternEffects = T.type_alias { T::Hash[Symbol, Symbol] }
   EffectSet = T.type_alias { T::Set[Symbol] }
@@ -214,7 +216,8 @@ class FunctionSignature
   def intrinsic_args_label
     return "(varargs)" if intrinsic_varargs?
 
-    "(#{intrinsic_arg_specs.map(&:display_type).join(', ')})"
+    display_types = intrinsic_arg_specs.map(&:display_type)
+    "(#{display_types.join(', ')})"
   end
 
   sig { returns(T.nilable(Integer)) }
@@ -226,7 +229,7 @@ class FunctionSignature
   sig { returns(IntrinsicContract) }
   def intrinsic_contract
     emit = @facts.emit
-    emit ? IntrinsicContract.from_emit(emit, @contract.params) : IntrinsicContract.empty
+    emit ? IntrinsicContract.from_emit(T.must(emit), @contract.params) : IntrinsicContract.empty
   end
   sig { returns(RequiresMap) }
   def requires = @facts.requires
@@ -255,14 +258,28 @@ class FunctionSignature
   # seam). Some producers still hand back a bare FunctionSignature.
   # Every reader that needs the signature goes through here so no site
   # re-derives the Type/FunctionSignature/nil split.
-  sig { params(x: T.untyped).returns(T.nilable(FunctionSignature)) }
+  sig do
+    type_parameters(:T)
+      .params(x: T.type_parameter(:T))
+      .returns(T.nilable(FunctionSignature))
+  end
   def self.unwrap(x)
     return x if x.is_a?(FunctionSignature)
-    return x.function_signature if x.is_a?(Type)
+    if x.is_a?(Type)
+      type = T.cast(x, Type)
+      function_type = type.function_type
+      return nil unless function_type
+
+      source_signature = T.cast(function_type.source_signature, T.nilable(FunctionSignature))
+      return source_signature if source_signature
+    end
+
     nil
   end
 
+  # ruby-to-clear: skip
   sig { params(fn: AST::FunctionDef).returns(FunctionSignature) }
+  # ruby-to-clear: skip
   def self.from_function_def(fn)
     raw_sig = unwrap(fn.full_type) || fn.full_type
 
@@ -272,7 +289,7 @@ class FunctionSignature
       FunctionSignature.new(
         params: fn.params,
         return_type: fn.annotation_return_type,
-        return_lifetime: fn.return_lifetime,
+        return_lifetime: function_def_lifetime_paths(fn),
         visibility: fn.visibility,
         type_params: fn.type_params.map(&:to_sym),
         reentrant: fn.declared_plain_reentrant?
@@ -280,6 +297,46 @@ class FunctionSignature
     end
 
     sync_signature_from_function_def!(sig, fn)
+  end
+
+  # ruby-to-clear: skip
+  sig { params(fn: AST::FunctionDef).returns(T::Array[LifetimeSource]) }
+  # ruby-to-clear: skip
+  def self.function_def_lifetime_paths(fn)
+    rl = fn.return_lifetime
+    return [] if rl.nil?
+    return [:wildcard] if rl == :wildcard
+
+    sources = rl.is_a?(Array) ? rl : [rl]
+    sources.filter_map do |source|
+      if source.respond_to?(:name)
+        T.unsafe(source).name.to_s
+      elsif source.respond_to?(:field) && source.respond_to?(:target)
+        lifetime_source_path(source).join(".")
+      elsif source.is_a?(String) || source.is_a?(Symbol)
+        source
+      end
+    end
+  end
+
+  # ruby-to-clear: skip
+  sig { params(source: BasicObject).returns(T::Array[String]) }
+  # ruby-to-clear: skip
+  def self.lifetime_source_path(source)
+    parts = T.let([], T::Array[String])
+    current = T.let(source, T.nilable(BasicObject))
+    while current
+      if current.respond_to?(:field) && current.respond_to?(:target)
+        parts.unshift(T.unsafe(current).field.to_s)
+        current = T.unsafe(current).target
+      elsif current.respond_to?(:name)
+        parts.unshift(T.unsafe(current).name.to_s)
+        break
+      else
+        break
+      end
+    end
+    parts
   end
 
   sig do
@@ -316,7 +373,9 @@ class FunctionSignature
     intrinsic_signature(borrows: :all)
   end
 
+  # ruby-to-clear: skip
   sig { params(sig: FunctionSignature, fn: T.any(AST::Node, Object, T.untyped)).returns(FunctionSignature) }
+  # ruby-to-clear: skip
   def self.sync_signature_from_function_def!(sig, fn)
     T.cast(sig.send(:sync_from_function_def!, fn), FunctionSignature)
   end
@@ -347,7 +406,7 @@ class FunctionSignature
       heap_carry_return: T.nilable(T::Boolean),
       heap_carry_return_vars: T.nilable(T::Set[String]),
       arg_validator: T.nilable(Proc),
-      arg_spec: T.untyped,
+      arg_spec: IntrinsicArgSpec::RawArgSpec,
       arity: T.nilable(Integer),
       emit: T.nilable(IntrinsicEmit),
       return_def: T.nilable(BasicObject)
@@ -388,13 +447,13 @@ class FunctionSignature
         effects: effects,
         return_strategy: return_strategy,
         stack_tier: stack_tier,
-        requires: self.class.copy_requires_for_import(requires || {}),
+        requires: FunctionSignature.copy_requires_for_import(requires || {}),
         heap_carry_return: heap_carry_return,
         heap_carry_return_vars: heap_carry_return_vars,
         arg_validator: arg_validator,
         intrinsic_arg_specs: IntrinsicArgSpec.list_from_registry(arg_spec),
-        intrinsic_fixed_arg_list: arg_spec.is_a?(Array),
-        intrinsic_varargs: arg_spec == :Varargs,
+        intrinsic_fixed_arg_list: IntrinsicArgSpec.fixed_list_from_registry?(arg_spec),
+        intrinsic_varargs: IntrinsicArgSpec.varargs_from_registry?(arg_spec),
         arity: arity,
         emit: emit,
         return_def: return_def
@@ -419,7 +478,11 @@ class FunctionSignature
 
   sig { params(emit: T.nilable(IntrinsicEmit)).returns(FunctionSignature) }
   def replace_intrinsic_emit!(emit)
-    @facts.emit = emit
+    if emit
+      @facts.emit = T.must(emit).dup
+    else
+      @facts.emit = nil
+    end
     self
   end
 
@@ -479,9 +542,19 @@ class FunctionSignature
   sig { params(kind: IntrinsicTemplateKind).returns(String) }
   def required_intrinsic_template(kind)
     pattern = intrinsic_template(kind)
-    raise "registry template missing :#{kind.serialize} for #{inspect}" unless pattern
+    raise "registry template missing :#{FunctionSignature.template_kind_label(kind)}" unless pattern
 
     pattern.to_s.dup
+  end
+
+  sig { params(kind: IntrinsicTemplateKind).returns(String) }
+  def self.template_kind_label(kind)
+    return "zig" if kind == IntrinsicTemplateKind::Zig
+    return "numeric_zig" if kind == IntrinsicTemplateKind::NumericZig
+    return "sharded_zig" if kind == IntrinsicTemplateKind::ShardedZig
+    return "shard_direct_zig" if kind == IntrinsicTemplateKind::ShardDirectZig
+
+    "unknown"
   end
 
   sig { params(default_name: Symbol).returns(Symbol) }
@@ -544,11 +617,18 @@ class FunctionSignature
     intrinsic_contract.behavior.lifetime
   end
 
-  sig { params(pattern: T.any(String, Symbol), alloc: T.nilable(Symbol)).returns(FunctionSignature) }
+  sig { params(pattern: IntrinsicEmit::StrOrSym, alloc: T.nilable(Symbol)).returns(FunctionSignature) }
   def with_intrinsic_override(pattern:, alloc: nil)
     copy = dup
-    emit_copy = copy.emit ? T.must(copy.emit).dup : IntrinsicEmit.new
-    emit_copy.zig = pattern
+    emit_copy = T.let(IntrinsicEmit.new, IntrinsicEmit)
+    if copy.emit
+      emit_copy = T.must(copy.emit).dup
+    end
+    if pattern.is_a?(Symbol)
+      emit_copy.zig = pattern
+    elsif pattern.is_a?(String)
+      emit_copy.zig = pattern
+    end
     emit_copy.alloc = alloc if alloc
     copy.replace_intrinsic_emit!(emit_copy)
     copy
@@ -566,7 +646,7 @@ class FunctionSignature
 
   sig { returns(FunctionSignature) }
   def dup
-    FunctionSignature.new(
+    copy = FunctionSignature.new(
       params: @contract.params,
       return_type: @contract.return_type,
       return_lifetime: @contract.return_lifetime,
@@ -580,9 +660,9 @@ class FunctionSignature
       owner_type: @contract.owner_type,
       owner_type_params: @contract.owner_type_params,
       intrinsic: @contract.intrinsic
-    ).tap do |s|
-      s.replace_analysis_storage!(@facts.copy)
-    end
+    )
+    copy.replace_analysis_storage!(@facts.copy)
+    copy
   end
 
   sig { params(params: T::Array[AST::Param]).returns(T::Array[AST::Param]) }
@@ -590,7 +670,7 @@ class FunctionSignature
     params.map do |param|
       AST::Param.new(
         name: param.name,
-        type: Type.new(param.type),
+        type: Type.copy_type(param.type),
         default: param.default,
         mutable: param.mutable,
         takes: param.takes,
@@ -616,10 +696,14 @@ class FunctionSignature
 
   sig { params(val: T.nilable(Type::TypeInput)).returns(Type) }
   def coerce_return_type(val)
-    val.nil? ? Type.new(:Void) : Type.new(val)
+    return Type.new(:Void) if val.nil?
+
+    Type.new(T.must(val))
   end
 
+  # ruby-to-clear: skip
   sig { params(fn: T.any(AST::Node, Object, T.untyped)).returns(FunctionSignature) }
+  # ruby-to-clear: skip
   def sync_from_function_def!(fn)
     @facts.needs_rt = fn.needs_rt if fn.respond_to?(:needs_rt)
     @facts.can_fail = fn.can_fail if fn.respond_to?(:can_fail)
@@ -638,9 +722,8 @@ class FunctionSignature
 
   sig { params(requires: T.nilable(RequiresMap)).void }
   def replace_requires_storage!(requires)
-    copied_requires = self.class.copy_requires_for_import(requires || {})
-    @facts.requires.clear
-    @facts.requires.merge!(copied_requires)
+    copied_requires = FunctionSignature.copy_requires_for_import(requires || {})
+    @facts.requires = copied_requires
   end
 
   sig { params(facts: AnalysisFacts).void }
@@ -652,17 +735,20 @@ class FunctionSignature
   sig { params(val: LifetimeInput).returns(T::Array[LifetimeSource]) }
   def normalize_lifetime(val)
     return [] if val.nil?
-    raw = val.is_a?(Array) ? val : [val]
+    raw = T.let([], T::Array[LifetimeSource])
+    if val.is_a?(Array)
+      raw = val
+    else
+      raw = [T.cast(T.must(val), LifetimeSource)]
+    end
     out = T.let([], T::Array[LifetimeSource])
     i = T.let(0, Integer)
     while i < raw.length
       item = raw.fetch(i)
-      if item.respond_to?(:name)
-        out << item.public_send(:name).to_s
-      elsif item.is_a?(Symbol)
-        out << item
-      else
+      if item.is_a?(Symbol)
         out << item.to_s
+      else
+        out << item
       end
       i += 1
     end

@@ -19,9 +19,22 @@
 
 require "sorbet-runtime"
 
-require_relative "source_error"
 require_relative "diagnostic_registry"
+require_relative "lexer"
 
+# Synthetic token used for fixable spans whose AST node carries a
+# line/column but not a lexer token for the exact identifier.
+AnchorToken = Struct.new(:line, :column) do
+  extend T::Sig
+  sig { returns(Symbol) }
+  def type; :ANCHOR; end
+  sig { returns(NilClass) }
+  def value; nil; end
+end
+
+TypoToken = T.type_alias { T.any(Lexer::Token, AnchorToken) }
+
+# ruby-to-clear: pub
 class Span
     extend T::Sig
 
@@ -51,6 +64,7 @@ class Span
   end
 end
 
+# ruby-to-clear: pub
 class Edit
     extend T::Sig
 
@@ -63,6 +77,7 @@ class Edit
   end
 end
 
+# ruby-to-clear: pub
 class Fix
   extend T::Sig
 
@@ -82,6 +97,7 @@ class Fix
   end
 end
 
+# ruby-to-clear: pub
 class FixableFinding
     extend T::Sig
 
@@ -89,16 +105,12 @@ class FixableFinding
   # values (Hint, Information, Warning, Error). :error is the only
   # blocking level; everything else is advisory.
   LEVELS = [:hint, :info, :warning, :error].freeze
-  # Delegated to the unified DiagnosticRegistry so a `category:` value
-  # accepted by `error!(:CODE, ...)` is also accepted by `fixable!`.
-  CATEGORIES = DiagnosticRegistry::CATEGORIES
-
   attr_reader :level, :message, :token, :category, :fixes
 
   sig { params(level: Symbol, message: String, token: DiagnosticToken, category: Symbol, fixes: T::Array[Fix]).void }
   def initialize(level:, message:, token:, category:, fixes:)
     raise ArgumentError, "bad level #{level.inspect}" unless LEVELS.include?(level)
-    raise ArgumentError, "bad category #{category.inspect}" unless CATEGORIES.include?(category)
+    raise ArgumentError, "bad category #{category.inspect}" unless DiagnosticRegistry.categories.include?(category)
     @level = T.let(level, Symbol)
     @message = T.let(message, String)
     @token = T.let(token, DiagnosticToken)

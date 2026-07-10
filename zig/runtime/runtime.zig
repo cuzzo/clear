@@ -50,7 +50,7 @@ comptime {
 // if another fiber is ready. Reset to 0 after each yield, giving each fiber a
 // fresh 4096-iteration slice on resume.
 const YIELD_BUDGET: u32 = 4096;
-const YIELD_MASK:   u32 = YIELD_BUDGET - 1;
+const YIELD_MASK: u32 = YIELD_BUDGET - 1;
 
 // ── Error Context ──────────────────────────────────────────────────
 // Fiber-local error context for CLEAR's intent-based error handling.
@@ -101,8 +101,8 @@ pub const ErrorContext = struct {
     kind: ErrorKind = .Unknown,
     error_name: u32 = 0,
     message: []const u8 = "",
-    snapshot_ptr: usize = 0,       // @intFromPtr of heap-copied element, 0 = no snapshot
-    snapshot_size: usize = 0,      // byte size of snapshot allocation (for generic free)
+    snapshot_ptr: usize = 0, // @intFromPtr of heap-copied element, 0 = no snapshot
+    snapshot_size: usize = 0, // byte size of snapshot allocation (for generic free)
     clear_line: u32 = 0,
 
     pub fn reset(self: *ErrorContext) void {
@@ -183,17 +183,17 @@ pub fn zigErrorToKind(err: anyerror) ErrorKind {
 /// stdlib ids and the per-program generated ErrorName enum.
 pub fn zigErrorToName(err: anyerror) u32 {
     const name = @errorName(err);
-    if (std.mem.eql(u8, name, "LockTimeout"))         return ErrorName_LockTimeout;
-    if (std.mem.eql(u8, name, "LockCycle"))           return ErrorName_LockCycle;
-    if (std.mem.eql(u8, name, "Deadlock"))            return ErrorName_Deadlock;
+    if (std.mem.eql(u8, name, "LockTimeout")) return ErrorName_LockTimeout;
+    if (std.mem.eql(u8, name, "LockCycle")) return ErrorName_LockCycle;
+    if (std.mem.eql(u8, name, "Deadlock")) return ErrorName_Deadlock;
     if (std.mem.eql(u8, name, "UnexpectedRecursion")) return ErrorName_UnexpectedRecursion;
-    if (std.mem.eql(u8, name, "MaxDepthExceeded"))    return ErrorName_MaxDepthExceeded;
-    if (std.mem.eql(u8, name, "OutOfMemory"))         return ErrorName_OutOfMemory;
+    if (std.mem.eql(u8, name, "MaxDepthExceeded")) return ErrorName_MaxDepthExceeded;
+    if (std.mem.eql(u8, name, "OutOfMemory")) return ErrorName_OutOfMemory;
     // Versioned commit-retry exhaustion maps to MvccConflict; atomic CAS
     // retry exhaustion raises AtomicConflict directly.
     if (std.mem.eql(u8, name, "UpdateRetriesExhausted")) return ErrorName_MvccConflict;
-    if (std.mem.eql(u8, name, "MvccConflict"))           return ErrorName_MvccConflict;
-    if (std.mem.eql(u8, name, "AtomicConflict"))         return ErrorName_AtomicConflict;
+    if (std.mem.eql(u8, name, "MvccConflict")) return ErrorName_MvccConflict;
+    if (std.mem.eql(u8, name, "AtomicConflict")) return ErrorName_AtomicConflict;
     return ErrorName_None;
 }
 
@@ -230,14 +230,20 @@ pub const Runtime = struct {
     // Error context: set on RAISE/EXIT, read in CATCH blocks.
     __error: ErrorContext = .{},
 
+    // Dynamic String@symbol intern pool. Static symbol literals are emitted as
+    // top-level constants; Ruby-style String#to_sym uses this pool so symbol
+    // equality remains pointer-based after conversion from a runtime String.
+    symbol_pool: std.StringHashMapUnmanaged(void) = .empty,
+    symbol_pool_lock: compat.Mutex = .{},
+
     // OVERFLOW (The Safety Valve)
     // We use an Arena so we can track all the overflow allocations
     // and free them in one go when the task resets.
     overflow_arena: OverflowArena,
 
     // THREE ALLOCATORS
-    heap_allocator: std.mem.Allocator,    // GPA or tcmalloc/jemalloc/mimalloc/malloc
-    frame_allocator: std.mem.Allocator,   // The VTable interface / FRAME
+    heap_allocator: std.mem.Allocator, // GPA or tcmalloc/jemalloc/mimalloc/malloc
+    frame_allocator: std.mem.Allocator, // The VTable interface / FRAME
 
     // @arena mode: when true, restoreFrameMark is a no-op.
     // The entire arena is freed when the fiber finishes, not per-function.
@@ -258,12 +264,7 @@ pub const Runtime = struct {
         return rt;
     }
 
-    pub fn initFromSlice(
-        slice: []u8,
-        global_ctx: *EbrContext,
-        heap_allocator_in: std.mem.Allocator,
-        timeout_ms: u64
-    ) !Runtime {
+    pub fn initFromSlice(slice: []u8, global_ctx: *EbrContext, heap_allocator_in: std.mem.Allocator, timeout_ms: u64) !Runtime {
         // Deterministic OOM injection hook (test-only; see __oom_failing).
         var heap_allocator = heap_allocator_in;
         if (std.c.getenv("CLEAR_OOM_AFTER")) |env_ptr| {
@@ -286,12 +287,7 @@ pub const Runtime = struct {
     /// the OS thread stack (deep allocator path), then hand the same
     /// stable pointer to the fiber via entryWrapper. rt.deinit will NOT
     /// destroy the ebr — caller is responsible for its lifecycle.
-    pub fn initFromSliceWithEbr(
-        slice: []u8,
-        ebr: *ThreadLocalEbr,
-        heap_allocator: std.mem.Allocator,
-        timeout_ms: u64
-    ) !Runtime {
+    pub fn initFromSliceWithEbr(slice: []u8, ebr: *ThreadLocalEbr, heap_allocator: std.mem.Allocator, timeout_ms: u64) !Runtime {
         var deadline: i64 = 0;
         if (timeout_ms > 0) {
             deadline = milliTimestamp() + @as(i64, @intCast(timeout_ms));
@@ -309,6 +305,7 @@ pub const Runtime = struct {
     }
 
     pub fn deinit(self: *Runtime) void {
+        self.deinitSymbolPool();
         self.overflow_arena.deinit();
         if (self.owns_ebr) {
             self.ebr.deinit(self.heap_allocator);
@@ -319,6 +316,28 @@ pub const Runtime = struct {
         if (self.owns_frame_memory) {
             self.heap_allocator.free(self.overflow_arena.static_block);
         }
+    }
+
+    fn deinitSymbolPool(self: *Runtime) void {
+        var it = self.symbol_pool.iterator();
+        while (it.next()) |entry| {
+            self.heap_allocator.free(entry.key_ptr.*);
+        }
+        self.symbol_pool.deinit(self.heap_allocator);
+    }
+
+    pub fn internSymbol(self: *Runtime, value: []const u8) ![]const u8 {
+        self.symbol_pool_lock.lock();
+        defer self.symbol_pool_lock.unlock();
+
+        if (self.symbol_pool.getKey(value)) |canonical| {
+            return canonical;
+        }
+
+        const canonical = try self.heap_allocator.dupe(u8, value);
+        errdefer self.heap_allocator.free(canonical);
+        try self.symbol_pool.put(self.heap_allocator, canonical, {});
+        return canonical;
     }
 
     // Allocators:
@@ -363,7 +382,11 @@ pub const Runtime = struct {
     }
 
     fn smartResize(ctx: *anyopaque, buf: []u8, buf_align: std.mem.Alignment, new_len: usize, ret_addr: usize) bool {
-        _ = ctx; _ = buf; _ = buf_align; _ = ret_addr; _ = new_len;
+        _ = ctx;
+        _ = buf;
+        _ = buf_align;
+        _ = ret_addr;
+        _ = new_len;
         return false;
     }
 
@@ -371,11 +394,18 @@ pub const Runtime = struct {
         // We don't actually free individual items in a Frame/Arena model.
         // We just let them accumulate and wipe the slate clean at the end.
         // But for correctness, we can forward the call if needed.
-        _ = ctx; _ = buf; _ = buf_align; _ = ret_addr;
+        _ = ctx;
+        _ = buf;
+        _ = buf_align;
+        _ = ret_addr;
     }
 
     fn smartRemap(ctx: *anyopaque, memory: []u8, alignment: std.mem.Alignment, new_len: usize, ret_addr: usize) ?[*]u8 {
-        _ = ctx; _ = memory; _ = alignment; _ = new_len; _ = ret_addr;
+        _ = ctx;
+        _ = memory;
+        _ = alignment;
+        _ = new_len;
+        _ = ret_addr;
         return null;
     }
 
@@ -533,12 +563,8 @@ pub const Runtime = struct {
 
     // Helper to spawn tasks easily from the Runtime.
     pub fn spawn(_: *Runtime, user_fn: *const fn (*Runtime, ?*anyopaque) anyerror!void, args_ptr: ?*anyopaque) !void {
-        try fp.active_scheduler.submitSpawn(
-            @intFromPtr(&entryWrapper), // trampoline
-            @as(qs.TaskFn, @ptrCast(user_fn)),
-            args_ptr,
-            .{}
-        );
+        try fp.active_scheduler.submitSpawn(@intFromPtr(&entryWrapper), // trampoline
+            @as(qs.TaskFn, @ptrCast(user_fn)), args_ptr, .{});
     }
 
     // SPAWN ON (Specific Thread)
@@ -547,11 +573,7 @@ pub const Runtime = struct {
 
         // We must allocate the Task struct on the GLOBAL heap because
         // we are creating it here but it lives over there.
-        try target.submitSpawn(
-            @intFromPtr(&entryWrapper),
-            @as(qs.TaskFn, @ptrCast(user_fn)),
-            args_ptr,
-            .{} // Default Config (timeout_ms = 0)
+        try target.submitSpawn(@intFromPtr(&entryWrapper), @as(qs.TaskFn, @ptrCast(user_fn)), args_ptr, .{} // Default Config (timeout_ms = 0)
         );
     }
 
@@ -560,23 +582,13 @@ pub const Runtime = struct {
         const pair = fp.global_registry.pickTwo();
         const a = pair.a orelse return error.NoThreads;
         const b = pair.b orelse {
-            try a.submitSpawn(
-                @intFromPtr(&entryWrapper),
-                @as(qs.TaskFn, @ptrCast(user_fn)),
-                args_ptr,
-                .{}
-            );
+            try a.submitSpawn(@intFromPtr(&entryWrapper), @as(qs.TaskFn, @ptrCast(user_fn)), args_ptr, .{});
             return;
         };
         const la = a.active_tasks.load(.monotonic);
         const lb = b.active_tasks.load(.monotonic);
         const target = if (la <= lb) a else b;
-        try target.submitSpawn(
-            @intFromPtr(&entryWrapper),
-            @as(qs.TaskFn, @ptrCast(user_fn)),
-            args_ptr,
-            .{}
-        );
+        try target.submitSpawn(@intFromPtr(&entryWrapper), @as(qs.TaskFn, @ptrCast(user_fn)), args_ptr, .{});
     }
 
     // For green fibers
@@ -613,12 +625,7 @@ pub const Runtime = struct {
         // MVCC/AtomicPtr access uses Runtime.currentEbr(), which resolves to
         // the active scheduler's per-thread EBR slot. The runtime's fallback
         // ebr pointer is only used outside scheduler execution.
-        var rt = Runtime.initFromSliceWithEbr(
-            frame_slice,
-            sched.thread_ebr,
-            sched.allocator,
-            task.config.timeout_ms
-        ) catch unreachable;
+        var rt = Runtime.initFromSliceWithEbr(frame_slice, sched.thread_ebr, sched.allocator, task.config.timeout_ms) catch unreachable;
 
         rt.wireAllocator();
 
@@ -633,31 +640,30 @@ pub const Runtime = struct {
             // Later, we'll store this error in the Task so the parent can see it.
             // For now, we just print and die safely.
             if (err == error.Timeout) {
-                 std.debug.print("\n[Scheduler] Task Timed Out! Killing it.\n", .{});
+                std.debug.print("\n[Scheduler] Task Timed Out! Killing it.\n", .{});
             } else if (err == error.StreamClosed) {
-                 // InfStream generator received a close signal — clean exit, not a crash.
+                // InfStream generator received a close signal — clean exit, not a crash.
             } else if (err == error.OutOfMemory) {
-                 // Allocation FAULT (kind :System / ErrorName.OutOfMemory)
-                 // that no OR/CATCH intercepted. CLEAR's model: OOM
-                 // panics by DEFAULT. Reaching this terminal means the
-                 // fault propagated unhandled to the task boundary, so
-                 // it must abort hard (not the print-and-continue path)
-                 // — otherwise a crashed fiber would exit "normally".
-                 // Intercept with `OR PASS` / `CATCH` to recover.
-                 // (puck-clear-bugs.md #3/#12)
-                 std.debug.panic("CLEAR fault: out of memory [System/OutOfMemory] — unhandled allocation fault. Recover with `expr OR PASS` / `CATCH` at any call stage.", .{});
+                // Allocation FAULT (kind :System / ErrorName.OutOfMemory)
+                // that no OR/CATCH intercepted. CLEAR's model: OOM
+                // panics by DEFAULT. Reaching this terminal means the
+                // fault propagated unhandled to the task boundary, so
+                // it must abort hard (not the print-and-continue path)
+                // — otherwise a crashed fiber would exit "normally".
+                // Intercept with `OR PASS` / `CATCH` to recover.
+                // (puck-clear-bugs.md #3/#12)
+                std.debug.panic("CLEAR fault: out of memory [System/OutOfMemory] — unhandled allocation fault. Recover with `expr OR PASS` / `CATCH` at any call stage.", .{});
             } else {
-                 if (!@import("builtin").is_test) {
-                     std.debug.print("\n[Scheduler] Task Crashed: {}\n", .{err});
-                 }
+                if (!@import("builtin").is_test) {
+                    std.debug.print("\n[Scheduler] Task Crashed: {}\n", .{err});
+                }
             }
         }
-
 
         // 5. Cleanup & Yield
         // ebr unregister + destroy happens in scheduler's .Finished handler.
         // When we yield here, we go back to Scheduler.run loop.
-        rt.deinit();  // must manually de-init
+        rt.deinit(); // must manually de-init
         task.status.store(.Finished, .release);
         task.base.yield();
     }

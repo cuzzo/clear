@@ -268,16 +268,18 @@ RSpec.describe Scope do
     root.declare_type(:Pair, schema)
     fn_sig = FunctionSignature.new(params: [], return_type: Type.new(:Void))
     root.declare("callable", nil, fn_sig, false)
-    child = root.dup
+    root.declare("global_value", nil, Type.new(:String), false)
+    child = Scope.new
     child.declare("value", nil, Type.new(:Int64), true)
     helper = host.new([root, child])
 
     expect(helper.expose_current_scope).to equal(child)
     expect(helper.expose_lookup_scope_for("value")).to equal(child)
-    expect(helper.expose_lookup_scope_for("callable")).to equal(child)
+    expect(helper.expose_lookup_scope_for("callable")).to equal(root)
     expect(helper.expose_lookup_scope_for("missing")).to be_nil
     expect(helper.expose_resolve_variable_scope("value")).to equal(child)
-    expect(helper.expose_resolve_variable_scope("callable")).to equal(child)
+    expect(helper.expose_resolve_variable_scope("callable")).to equal(root)
+    expect(helper.expose_resolve_variable_scope("global_value")).to equal(root)
     expect(helper.expose_resolve_variable_scope("missing")).to be_nil
     expect(helper.expose_lookup_type_schema(:"Pair<Int64>")).to equal(schema)
     expect(helper.expose_lookup_type_schema(:Missing)).to be_nil

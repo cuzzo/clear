@@ -3,9 +3,44 @@ require_relative "../ruby/ast/lexer" unless defined?(Lexer)
 require_relative "../ruby/ast/parser" unless defined?(ClearParser)
 
 RSpec.describe "ClearParser mutable fixed-array defaults" do
+  def parse_program(source)
+    ClearParser.new(Lexer.new(source).tokenize, source).parse
+  end
+
   def parse_main_body(source)
-    ast = ClearParser.new(Lexer.new(source).tokenize, source).parse
+    ast = parse_program(source)
     ast.statements.find { |node| node.is_a?(AST::FunctionDef) && node.name == "main" }.body
+  end
+
+  it "parses typed function parameter defaults after the type annotation" do
+    ast = parse_program(<<~CLEAR)
+      FN increment(n: Int64 = 1) RETURNS Int64 ->
+        RETURN n;
+      END
+    CLEAR
+
+    fn = ast.statements.find { |node| node.is_a?(AST::FunctionDef) && node.name == "increment" }
+    param = fn.params.first
+
+    expect(param.name).to eq("n")
+    expect(param.type.resolved).to eq(:Int64)
+    expect(param.default.value).to eq(1)
+  end
+
+  it "parses typed lambda parameter defaults after the type annotation" do
+    body = parse_main_body(<<~CLEAR)
+      FN main() RETURNS Void ->
+        double = %(n: Int64 = 5) -> n * 2;
+        RETURN;
+      END
+    CLEAR
+
+    lambda = body.first.value
+    param = lambda.params.first
+
+    expect(param.name).to eq("n")
+    expect(param.type.resolved).to eq(:Int64)
+    expect(param.default.value).to eq(5)
   end
 
   it "keeps bare mutable fixed primitive array defaults compact" do

@@ -2,6 +2,7 @@ require "rspec"
 require_relative "../ruby/backends/transpiler" unless defined?(ZigTranspiler)
 require_relative "../ruby/ast/ast" unless defined?(MIR::ReassignPlan)
 require_relative "../ruby/ast/diagnostic_registry" unless defined?(DiagnosticRegistry)
+require_relative "../ruby/annotator/helpers/prefixed_int_range" unless defined?(PrefixedIntRange)
 
 # Coverage spec for error sites added/touched by the error-audit branch.
 #
@@ -77,6 +78,7 @@ RSpec.describe "error emission coverage" do
     stub_const("FallbackHost", Class.new do
       include ErrorHelper
       include TypeHelper
+      include PrefixedIntRange
       attr_reader :source_code
       def initialize; @source_code = ""; end
     end)
@@ -2603,6 +2605,15 @@ RSpec.describe "error emission coverage" do
         FN main() RETURNS Void ->
             m: HashMap<Int64> = {"a": 1_i64, "b": 2_i64};
             print(m.count().toString());
+        END
+      CLEAR
+    end
+
+    it "allows mixed values in symbol-key kwargs maps" do
+      run(<<~CLEAR)
+        FN main() RETURNS Void ->
+            m = {:val: 1_i64, :type: :Int8};
+            _ = m;
         END
       CLEAR
     end

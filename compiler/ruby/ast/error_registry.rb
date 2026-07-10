@@ -22,6 +22,7 @@ module AST
   # runtime.zig stores ErrorContext.error_name as plain u32; dispatch in
   # generated user code compares to @intFromEnum(ErrorName.<Sym>).
 
+  # ruby-to-clear: data-api
   ERROR_KINDS = T.let(%i[Transient Input System NotFound Permission Canceled].freeze, T::Array[Symbol])
 
   # Stable stdlib-type IDs. runtime.zig's zigErrorToName hardcodes these
@@ -100,17 +101,17 @@ module AST
 
   sig { params(sym: Symbol).returns(T.nilable(Symbol)) }
   def self.kind_of_type(sym)
-    ERROR_TYPES.dig(sym, :kind)
+    T.cast(ERROR_TYPES.dig(sym, :kind), T.nilable(Symbol))
   end
 
   sig { params(sym: Symbol).returns(T.nilable(String)) }
   def self.zig_name_of_type(sym)
-    ERROR_TYPES.dig(sym, :zig_name)
+    T.cast(ERROR_TYPES.dig(sym, :zig_name), T.nilable(String))
   end
 
   sig { params(sym: Symbol).returns(T.nilable(Integer)) }
   def self.id_of_type(sym)
-    ERROR_TYPES.dig(sym, :id)
+    T.cast(ERROR_TYPES.dig(sym, :id), T.nilable(Integer))
   end
 
   # Register a user-defined type with its kind. First call for a given
@@ -160,9 +161,10 @@ module AST
   # the `pub const ErrorName = enum(u32) { ... };` header at the top
   # of the generated Zig program. Sorted by id so the emitted enum is
   # deterministic across runs.
-  sig { returns(T::Array[T::Array[T.any(Integer, Symbol)]]) }
+  sig { returns(T::Array[[Symbol, Integer]]) }
   def self.enum_entries
-    [[:None, ERROR_NAME_NONE]] + ERROR_TYPES.map { |sym, meta| [sym, meta[:id]] }.sort_by(&:last)
+    [[T.cast(:None, Symbol), T.cast(ERROR_NAME_NONE, Integer)]] +
+      ERROR_TYPES.map { |sym, meta| [T.cast(sym, Symbol), T.cast(meta[:id], Integer)] }.sort_by(&:last)
   end
 
   # Returns the Array of error-type Symbols whose :kind == kind. Used by

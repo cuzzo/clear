@@ -133,6 +133,55 @@ def error(msg)
   exit 1
 end
 
+def find_project_build_zig(source)
+  return nil if ENV['CLEAR_DISABLE_BUILD_ZIG'] == '1'
+
+  dir = File.dirname(File.expand_path(source))
+  loop do
+    path = File.join(dir, 'build.zig')
+    if File.file?(path)
+      begin
+        return [dir, path] if File.read(path, 4096).include?('CLEAR_BUILD_ENTRY')
+      rescue SystemCallError
+      end
+    end
+
+    parent = File.dirname(dir)
+    break if parent == dir
+
+    dir = parent
+  end
+
+  nil
+end
+
+def run_project_build_zig!(source, output:, opt_level:, mode:, run_args: [], use_c_allocator: false, use_debug_allocator: false)
+  project = find_project_build_zig(source)
+  return false unless project
+
+  build_root, build_file = project
+  step = mode == :run ? 'clear-run' : 'clear-build'
+  cmd = [
+    ZIG,
+    'build',
+    step,
+    "-Dclear-source=#{File.expand_path(source)}",
+    "-Dclear-output=#{File.expand_path(output)}",
+    "-Doptimize=#{opt_level}"
+  ]
+  cmd << '-Dclear-use-c-allocator=true' if use_c_allocator
+  cmd << '-Dclear-use-debug-allocator=true' if use_debug_allocator
+  if mode == :run && run_args.any?
+    cmd << '--'
+    cmd.concat(run_args)
+  end
+
+  $stderr.puts "\e[90musing project build: #{build_file}\e[0m"
+  ok = Dir.chdir(build_root) { system(*cmd) }
+  exit($?.exitstatus || 1) unless ok
+  true
+end
+
 # Walk AST to collect BG block nodes in order (matching transpiler's @bg_block_counter).
 def find_bg_blocks(node, result)
   case node
@@ -275,14 +324,23 @@ def do_build(source, output: nil, opt_level: 'Debug', extra_flags: [], module_mo
   ClearBuildSupport.write_if_changed(tmp_zig, zig_code)
   cleanup_paths << tmp_zig if coverage_module_mode
 
-  # Auto-detect FFI modules: scan source for EXTERN ... FROM "module" declarations
-  # and check for either a sibling module.zig or packages/module/src/lib.zig.
-  extern_modules = source_text.scan(/FROM\s+"([^"]+)"/).flatten.uniq
+  # Auto-detect FFI modules: scan the entry and local REQUIRE graph for
+  # EXTERN ... FROM "module" declarations. Required helper files can own native
+  # declarations even when the entry file only has REQUIRE lines.
+  begin
+    ffi_dependency_paths = ClearBuildSupport.collect_clear_dependencies(source).to_a
+  rescue ClearBuildSupport::BuildError
+    ffi_dependency_paths = [source]
+  end
+  ffi_scan_text = ffi_dependency_paths.map { |path| File.exist?(path) ? File.read(path) : "" }.join("\n")
+  extra_native_dirs = ENV.fetch('CLEAR_EXTRA_NATIVE_DIRS', '').split(File::PATH_SEPARATOR).reject(&:empty?)
+  ffi_search_dirs = ([source_dir] + ffi_dependency_paths.map { |path| File.dirname(path) } + extra_native_dirs).map { |dir| File.expand_path(dir) }.uniq
+  extern_modules = ffi_scan_text.scan(/FROM\s+"([^"]+)"/).flatten.uniq
   ffi_modules = extern_modules.filter_map do |m|
     next if m.start_with?('std.')
 
-    sibling = File.join(source_dir, "#{m}.zig")
-    src_mod = if File.exist?(sibling)
+    sibling = ffi_search_dirs.map { |dir| File.join(dir, "#{m}.zig") }.find { |path| File.exist?(path) }
+    src_mod = if sibling
                 sibling
               else
                 ClearBuildSupport.find_zig_package_source(m, start_dir: source_dir)
@@ -358,6 +416,11 @@ def do_build(source, output: nil, opt_level: 'Debug', extra_flags: [], module_mo
 
   cmd_parts += [tmp_name, *RUNTIME_FILES]
   cmd_parts += ['-lc']
+  extra_link_libs = ENV.fetch('CLEAR_EXTRA_LINK_LIBS', '').split(/[,\s]+/).reject(&:empty?)
+  extra_link_libs.each do |lib|
+    error "Invalid CLEAR_EXTRA_LINK_LIBS entry: #{lib}" unless lib.match?(/\A[A-Za-z0-9_.+\-]+\z/)
+    cmd_parts << "-l#{lib}"
+  end
 
   unless module_mode
     bin_name = "#{File.basename(output)}-#{$$}"
@@ -534,8 +597,20 @@ when 'build'
   stack_check = (opt_level != 'Debug') if stack_check.nil?
 
   default_stack = (opt_level == 'Debug') ? 'Large' : nil
-  result = do_build(source, output: output, opt_level: opt_level, extra_flags: extra_flags, default_stack: default_stack, force: !!@force_build, use_c_allocator: use_c_allocator, use_debug_allocator: use_debug_allocator, bypass_transpile_cache: bypass_transpile_cache)
   output_path = output || File.join(File.dirname(File.expand_path(source)), File.basename(source, '.clear'))
+  if find_project_build_zig(source)
+    run_project_build_zig!(
+      source,
+      output: output_path,
+      opt_level: opt_level,
+      mode: :build,
+      use_c_allocator: use_c_allocator,
+      use_debug_allocator: use_debug_allocator
+    )
+    exit 0
+  end
+
+  result = do_build(source, output: output, opt_level: opt_level, extra_flags: extra_flags, default_stack: default_stack, force: !!@force_build, use_c_allocator: use_c_allocator, use_debug_allocator: use_debug_allocator, bypass_transpile_cache: bypass_transpile_cache)
   exit 0 if result == :up_to_date
   puts "Built: #{output_path}"
 
@@ -717,6 +792,18 @@ when 'run'
   source = File.expand_path(source)
   output = File.join(File.dirname(source), File.basename(source, '.clear'))
   default_stack = (opt_level == 'Debug') ? 'Large' : nil
+  if find_project_build_zig(source)
+    run_project_build_zig!(
+      source,
+      output: output,
+      opt_level: opt_level,
+      mode: :run,
+      run_args: run_args,
+      use_c_allocator: use_c_allocator
+    )
+    exit 0
+  end
+
   do_build(source, output: output, opt_level: opt_level, extra_flags: extra_flags, default_stack: default_stack, use_c_allocator: use_c_allocator, force: no_cache, bypass_transpile_cache: no_cache)
 
   # Hints
@@ -742,7 +829,7 @@ when 'test'
     case test_args[i]
     when '--compat-stage', '--compat'
       compat_stage = test_args[i + 1]
-      error "#{test_args[i]} requires a value (currently: lexer)" unless compat_stage
+      error "#{test_args[i]} requires a value (currently: lexer, parser)" unless compat_stage
       test_args.slice!(i, 2)
       next
     when /\A--compat-stage=(.+)\z/, /\A--compat=(.+)\z/
@@ -763,8 +850,12 @@ when 'test'
   end
 
   if compat_stage
-    error "Unknown compatibility stage: #{compat_stage} (currently supported: lexer)" unless compat_stage == 'lexer'
-    compat_script = File.join(CLEAR_ROOT, 'tools', 'lexer_compat.rb')
+    compat_scripts = {
+      'lexer' => 'lexer_compat.rb',
+      'parser' => 'parser_compat.rb'
+    }
+    error "Unknown compatibility stage: #{compat_stage} (currently supported: lexer, parser)" unless compat_scripts.key?(compat_stage)
+    compat_script = File.join(CLEAR_ROOT, 'tools', compat_scripts.fetch(compat_stage))
     compat_args = []
     compat_args += ['--out', compat_out] if compat_out
     exec(RbConfig.ruby, compat_script, *compat_args)
@@ -933,12 +1024,20 @@ when 'test'
       ClearBuildSupport.ensure_symlink(File.join(build_dir, 'experimental'), File.join(ZIG_DIR, 'experimental'))
     end
     source_dir = File.dirname(File.expand_path(source))
-    extern_modules = File.read(source).scan(/FROM\s+"([^"]+)"/).flatten.uniq
+    begin
+      ffi_dependency_paths = ClearBuildSupport.collect_clear_dependencies(source).to_a
+    rescue ClearBuildSupport::BuildError
+      ffi_dependency_paths = [source]
+    end
+    ffi_scan_text = ffi_dependency_paths.map { |path| File.exist?(path) ? File.read(path) : "" }.join("\n")
+    extra_native_dirs = ENV.fetch('CLEAR_EXTRA_NATIVE_DIRS', '').split(File::PATH_SEPARATOR).reject(&:empty?)
+    ffi_search_dirs = ([source_dir] + ffi_dependency_paths.map { |path| File.dirname(path) } + extra_native_dirs).map { |dir| File.expand_path(dir) }.uniq
+    extern_modules = ffi_scan_text.scan(/FROM\s+"([^"]+)"/).flatten.uniq
     ffi_modules = extern_modules.filter_map do |m|
       next if m.start_with?('std.')
 
-      sibling = File.join(source_dir, "#{m}.zig")
-      src_mod = if File.exist?(sibling)
+      sibling = ffi_search_dirs.map { |dir| File.join(dir, "#{m}.zig") }.find { |path| File.exist?(path) }
+      src_mod = if sibling
                   sibling
                 else
                   ClearBuildSupport.find_zig_package_source(m, start_dir: source_dir)
@@ -1448,7 +1547,7 @@ when 'help', '--help', '-h', nil
       clear run <file.clear> [-- args...]
       clear test <file.clear>          Test a single file
       clear test <directory>         Test all .clear files in directory
-      clear test --compat-stage lexer Compare Ruby and CLEAR lexer output; writes MessagePack artifacts
+      clear test --compat-stage lexer|parser Compare Ruby and CLEAR stage output; writes MessagePack artifacts
       clear test ... --debug-frame   Enable debug frame arena (slow, detects use-after-rewind)
       clear benchmark --lexer        Benchmark the Ruby lexer against the CLEAR lexer
       clear profile <file.clear>      Build + run with profiling (heap + CPU)

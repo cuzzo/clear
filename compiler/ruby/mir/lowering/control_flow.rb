@@ -1178,7 +1178,10 @@ module MIRLoweringControlFlow
   def returned_takes_param?(name)
     T.bind(self, MIRLowering) rescue nil
     entry = function_state.bindings[name]
-    !!(entry && entry[:source_kind] == :takes_param)
+    return false unless entry && entry[:source_kind] == :takes_param
+
+    ti = function_state.binding_types[name]
+    !ti || ownership_tracked_transfer_type?(ti)
   end
 
   sig { params(name: String).returns(T::Boolean) }
@@ -1186,15 +1189,20 @@ module MIRLoweringControlFlow
     T.bind(self, MIRLowering) rescue nil
     return false unless name.start_with?("__hoist_")
     entry = function_state.bindings[name]
-    !!(entry&.present?)
+    !!(entry&.needs_cleanup?)
   end
 
   sig { params(name: String).returns(T::Boolean) }
   def returned_owned_binding?(name)
     T.bind(self, MIRLowering) rescue nil
+    entry = function_state.bindings[name]
+    return false if entry && !entry.needs_cleanup?
+
+    ti = function_state.binding_types[name]
+    return false if ti && !ownership_tracked_transfer_type?(ti)
+
     return true if T.unsafe(self).owned_binding_visible?(name)
 
-    entry = function_state.bindings[name]
     !!(entry&.needs_cleanup?)
   end
 

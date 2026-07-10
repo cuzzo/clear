@@ -99,7 +99,9 @@ module RubyToClear
     def constructor_field_value(receiver, field_name, value_node)
       code = visit(value_node)
       field_type = constructor_field_type(receiver, field_name)
-      if copyable_storage_type?(field_type) && !immediate_copy_safe_node?(value_node) && !code.start_with?("COPY ")
+      needs_copy = stored_borrowed_value?(value_node) ||
+        (copyable_storage_type?(field_type) && !immediate_copy_safe_node?(value_node))
+      if needs_copy && !code.start_with?("COPY ")
         code = "COPY #{code}"
       end
       wrap_argument_for_parameter_type(code, value_node, field_type)

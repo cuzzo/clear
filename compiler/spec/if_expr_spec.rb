@@ -113,6 +113,21 @@ RSpec.describe "IF/MATCH as expressions" do
       expect(if_node.resolved_type).to eq(:Int64)
     end
 
+    it "promotes IF expressions used in struct field assignments" do
+      ast = annotate_if_expr_src(<<~CLEAR)
+        STRUCT Settings { enabled: Bool }
+        FN configure!(MUTABLE settings: Settings, override: ?Bool) RETURNS Void ->
+          settings.enabled = IF override == NIL THEN FALSE ELSE override? END;
+          RETURN;
+        END
+      CLEAR
+      fn = ast.statements.find { |stmt| stmt.is_a?(AST::FunctionDef) }
+      assignment = fn.body.find { |stmt| stmt.is_a?(AST::Assignment) }
+      expect(assignment.value).to be_a(AST::IfStatement)
+      expect(assignment.value.expr_mode).to be true
+      expect(assignment.value.resolved_type).to eq(:Bool)
+    end
+
     it "promotes MATCH expression to expr_mode with correct type" do
       ast = annotate_if_expr_src(<<~CLEAR)
         FN main() RETURNS Void ->
@@ -156,6 +171,40 @@ RSpec.describe "IF/MATCH as expressions" do
       bind = body.find { |s| s.respond_to?(:name) && s.name == "status" }
       expect(bind.value.expr_mode).to be true
       expect(bind.full_type.symbol?).to be true
+    end
+
+    it "promotes IF expressions used as struct literal field values" do
+      ast = annotate_if_expr_src(<<~CLEAR)
+        STRUCT Shape {
+          payload: ?String@symbol
+        }
+
+        FN main(flag: Bool) RETURNS Void ->
+          s = Shape{ payload: IF flag THEN :ok ELSE NIL END };
+          RETURN;
+        END
+      CLEAR
+      fn = ast.statements.find { |s| s.is_a?(AST::FunctionDef) && s.name == "main" }
+      bind = fn.body.find { |s| s.respond_to?(:name) && s.name == "s" }
+      if_node = bind.value.fields.fetch("payload")
+      expect(if_node.expr_mode).to be true
+      expect(if_node.full_type.optional?).to be true
+      expect(T.must(if_node.full_type.wrapped_type).symbol?).to be true
+    end
+
+    it "promotes IF expressions used as binary operands" do
+      ast = annotate_if_expr_src(<<~CLEAR)
+        FN matches(value: ?Int64) RETURNS Bool ->
+          RETURN (IF value != NIL THEN value? ELSE NIL END) == 42;
+        END
+      CLEAR
+      fn = ast.statements.find { |s| s.is_a?(AST::FunctionDef) && s.name == "matches" }
+      ret = fn.body.find { |s| s.is_a?(AST::ReturnNode) }
+      if_node = ret.value.left
+      expect(if_node).to be_a(AST::IfStatement)
+      expect(if_node.expr_mode).to be true
+      expect(if_node.full_type.optional?).to be true
+      expect(T.must(if_node.full_type.wrapped_type).resolved).to eq(:Int64)
     end
 
     it "promotes Bool IF expression" do

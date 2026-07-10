@@ -10,19 +10,8 @@ DiagnosticToken = T.type_alias { T.nilable(T.any(Lexer::Token, Struct, Object)) 
 
 require_relative 'fixable_error'
 
-module ErrorDefinitions
-  # Backward-compat view: the legacy `MESSAGES` hash now derives from
-  # the unified `DiagnosticRegistry`. Existing call sites that pass a
-  # Symbol code to `error!` continue to look up the same templates.
-  # Layer 3 will refactor the ~470 ad-hoc string sites to use registry
-  # codes too; until then both paths work.
-  MESSAGES = T.let(DiagnosticRegistry::DIAGNOSTICS.transform_values { |e| e[:template] }.freeze, T::Hash[Symbol, String])
-end
-
 module ErrorHelper
     extend T::Sig
-
-  include ErrorDefinitions
 
   # usage:
   #   error!(node, :CODE)                              # no args
@@ -41,14 +30,8 @@ module ErrorHelper
 
     # 2. Determine Message
     if code_or_message.is_a?(Symbol)
-      # A. Look up the template
-      template = MESSAGES[code_or_message]
-      raise "Internal Compiler Error: Unknown error code :#{code_or_message}" unless template
-
-      # B. Format the string. Named-hash form takes priority — if any
-      # kwargs were passed OR the template uses `%{name}` placeholders,
-      # interpolate via the hash. Positional form is the fallback.
-      message = format_diagnostic_template(template, args, kwargs)
+      message = DiagnosticRegistry.format_from_hash(code_or_message, args, kwargs)
+      raise "Internal Compiler Error: Unknown error code :#{code_or_message}" unless message
     else
       # C. Legacy Support (Raw String)
       message = code_or_message
@@ -75,17 +58,19 @@ module ErrorHelper
 
   sig { params(code: Symbol, args: String, kwargs: T.untyped).returns(String) }
   def diagnostic_message(code, *args, **kwargs)
-    template = MESSAGES[code]
-    Kernel.raise "Internal Compiler Error: Unknown error code :#{code}" unless template
+    message = DiagnosticRegistry.format_from_hash(code, args, kwargs)
+    Kernel.raise "Internal Compiler Error: Unknown error code :#{code}" unless message
 
-    format_diagnostic_template(template, args, kwargs)
+    message
   end
 
+  # ruby-to-clear: skip
   sig { params(code: Symbol, kwargs: DiagnosticRegistry::DiagnosticKwValue).returns(String) }
   def fix_description(code, **kwargs)
     DiagnosticRegistry.fix_description_from_hash(code, kwargs)
   end
 
+  # ruby-to-clear: skip
   sig { params(code: Symbol, kwargs: T::Hash[Symbol, DiagnosticRegistry::DiagnosticKwValue]).returns(String) }
   def fix_description_from_hash(code, kwargs)
     DiagnosticRegistry.fix_description_from_hash(code, kwargs)

@@ -52,6 +52,11 @@ module DiagnosticRegistry
   CATEGORIES = T.let(%i[type ownership capability concurrency lifetime escape registry reentrance lint syntax mir test].freeze, T::Array[Symbol])
   SEVERITIES = T.let(%i[error warning hint info].freeze, T::Array[Symbol])
 
+  sig { returns(T::Array[Symbol]) }
+  def self.categories
+    CATEGORIES
+  end
+
   sig do
     params(
       severity: Symbol,
@@ -3064,10 +3069,15 @@ module DiagnosticRegistry
   # nil — the legacy helper raises an internal-compiler-error there.
   sig { params(code: Symbol, args: T::Array[T.untyped], kwargs: T.untyped).returns(T.nilable(String)) }
   def self.format(code, args = [], **kwargs)
+    format_from_hash(code, args, kwargs)
+  end
+
+  sig { params(code: Symbol, args: T::Array[T.untyped], kwargs: T.untyped).returns(T.nilable(String)) }
+  def self.format_from_hash(code, args, kwargs)
     entry = DIAGNOSTICS[code]
     return nil unless entry
 
-    format_template(entry[:template], args, kwargs)
+    format_template(T.cast(entry[:template], String), args, kwargs)
   end
 
   sig { params(template: String, args: T::Array[T.untyped], kwargs: T.untyped).returns(String) }
@@ -3136,6 +3146,7 @@ module DiagnosticRegistry
     count
   end
 
+  # ruby-to-clear: pub
   sig { params(code: Symbol, kwargs: T::Hash[Symbol, DiagnosticKwValue]).returns(String) }
   def self.fix_description_from_hash(code, kwargs)
     template = FIX_DESCRIPTIONS[code]
@@ -3154,7 +3165,7 @@ module DiagnosticRegistry
     i = T.let(0, Integer)
     while i < keys.length
       key = keys.fetch(i)
-      return key unless kwargs.key?(key)
+      return T.cast(key, Symbol) unless kwargs.key?(key)
 
       i += 1
     end
@@ -3169,6 +3180,7 @@ module DiagnosticRegistry
   # Self-check: every entry is well-formed. Returns an array of
   # error strings; empty == registry is consistent. Run by the
   # spec to make sure new entries don't drift.
+  # ruby-to-clear: skip
   sig { returns(T::Array[String]) }
   def self.validate
     issues = T.let([], T::Array[String])

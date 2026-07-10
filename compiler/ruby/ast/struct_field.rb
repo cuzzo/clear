@@ -5,5 +5,22 @@ require "sorbet-runtime"
 
 module AST
   # ruby-to-clear: pub
-  StructField = Struct.new(:type, :default, :borrowed, keyword_init: true)
+  StructField = Struct.new(:type, :default, :borrowed, keyword_init: true) do
+    extend T::Sig
+
+    sig { returns(T.untyped) }
+    def type
+      self[:type]
+    end
+
+    sig { returns(T.untyped) }
+    def default
+      self[:default]
+    end
+
+    sig { returns(T::Boolean) }
+    def borrowed
+      !!self[:borrowed]
+    end
+  end
 end

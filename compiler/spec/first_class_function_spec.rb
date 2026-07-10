@@ -110,6 +110,63 @@ RSpec.describe SemanticAnnotator do
         expect(bind.type.wrapped_type.fn_type?).to be true
         expect(Type.surface_name(bind.type)).to eq("?FN(Int64) -> Bool")
       end
+
+      it "checks function parameters contravariantly" do
+        expected = Type.function_type_from_parts(
+          [Type.new("String@symbol")],
+          Type.new("?String"),
+          false,
+          nil
+        )
+        actual = Type.function_type_from_parts(
+          [Type.new(:String)],
+          Type.new("?String"),
+          false,
+          nil
+        )
+
+        expect(expected.accepts?(actual)).to be true
+        expect(actual.accepts?(expected)).to be false
+      end
+
+      it "preserves function metadata when unwrapping optional function types" do
+        fn_type = Type.function_type_from_parts(
+          [Type.new("String@symbol")],
+          Type.new("?String"),
+          false,
+          nil
+        )
+        optional_fn = Type.optional_of(fn_type)
+
+        expect(optional_fn.wrapped_type&.fn_type?).to be true
+        expect(fn_type.accepts?(T.must(optional_fn.wrapped_type))).to be true
+      end
+
+      it "annotates optional unwrap of function values as function values" do
+        code = <<~CLEAR
+          UNION TypeSchemaLookupResult { A: String }
+          FN main(optional_resolver: ?FN(String@symbol) -> ?TypeSchemaLookupResult) RETURNS Void ->
+            resolver: FN(String@symbol) -> ?TypeSchemaLookupResult = optional_resolver?;
+          END
+        CLEAR
+
+        expect { run(code) }.not_to raise_error
+      end
+
+      it "preserves optional function metadata through inferred locals" do
+        code = <<~CLEAR
+          UNION TypeSchemaLookupResult { A: String }
+          FN identity(optional_resolver: ?FN(String@symbol) -> ?TypeSchemaLookupResult) RETURNS ?FN(String@symbol) -> ?TypeSchemaLookupResult ->
+            RETURN optional_resolver;
+          END
+          FN main(optional_resolver: ?FN(String@symbol) -> ?TypeSchemaLookupResult) RETURNS Void ->
+            maybe_resolver = identity(optional_resolver);
+            resolver: FN(String@symbol) -> ?TypeSchemaLookupResult = maybe_resolver?;
+          END
+        CLEAR
+
+        expect { run(code) }.not_to raise_error
+      end
     end
 
     # -------------------------------------------------------------------------
@@ -136,7 +193,7 @@ RSpec.describe SemanticAnnotator do
         # Parse only — don't run the annotator (Void lambdas need separate handling)
         tokens = Lexer.new("FN() -> Void").tokenize
         # Parse just the type annotation directly via the parser
-        t = Type.new(FunctionSignature.new(params: [], return_type: Type.new(:Void)))
+        t = Type.from_function_signature(FunctionSignature.new(params: [], return_type: Type.new(:Void)))
         expect(t.zig_type).to eq("*const fn(*Runtime) anyerror!void")
       end
 
@@ -193,7 +250,7 @@ RSpec.describe SemanticAnnotator do
     # -------------------------------------------------------------------------
     describe "Type#accepts? full signature matching (Phase 2)" do
       def fn_type(params, ret)
-        Type.new(FunctionSignature.new(
+        Type.from_function_signature(FunctionSignature.new(
           params: params.map.with_index { |t, i| AST::Param.new(name: "arg#{i}", type: Type.new(t), required: true, mutable: false, takes: false) },
           return_type: Type.new(ret)
         ))

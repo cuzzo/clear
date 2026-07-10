@@ -8,6 +8,10 @@ require "sorbet-runtime"
 # into this closed shape before annotator consumers inspect it.
 class IntrinsicArgSpec < T::Struct
   extend T::Sig
+  RegistryValue = T.type_alias { T.untyped }
+  RawEntry = T.type_alias { T::Hash[Symbol, RegistryValue] }
+  RawArgSpecEntry = T.type_alias { T.any(Symbol, String, RawEntry) }
+  RawArgSpec = T.type_alias { T.nilable(T.any(Symbol, String, RawEntry, T::Array[RawArgSpecEntry])) }
 
   const :name, T.nilable(String), default: nil
   const :type, Symbol
@@ -16,7 +20,7 @@ class IntrinsicArgSpec < T::Struct
   const :mutable, T::Boolean, default: false
   const :takes, T::Boolean, default: false
 
-  sig { params(raw: T.untyped).returns(IntrinsicArgSpec) }
+  sig { params(raw: RawArgSpecEntry).returns(IntrinsicArgSpec) }
   def self.from_registry(raw)
     if raw.is_a?(Hash)
       return IntrinsicArgSpec.new(
@@ -34,13 +38,30 @@ class IntrinsicArgSpec < T::Struct
     IntrinsicArgSpec.new(type: :Any)
   end
 
-  sig { params(raw: T.untyped).returns(T::Array[IntrinsicArgSpec]) }
+  sig { params(raw: RawArgSpec).returns(T::Array[IntrinsicArgSpec]) }
   def self.list_from_registry(raw)
     if raw.is_a?(Array)
       return raw.map { |entry| from_registry(entry) }
     end
 
     []
+  end
+
+  sig { params(raw: RawArgSpec).returns(T::Boolean) }
+  def self.fixed_list_from_registry?(raw)
+    return false if raw.nil?
+
+    raw.is_a?(Array)
+  end
+
+  sig { params(raw: RawArgSpec).returns(T::Boolean) }
+  def self.varargs_from_registry?(raw)
+    return false if raw.nil?
+    if raw.is_a?(Symbol)
+      return raw == :Varargs
+    end
+
+    false
   end
 
   sig { returns(T::Boolean) }
@@ -71,8 +92,9 @@ class IntrinsicArgSpec < T::Struct
   def self.normalize_type(value)
     return :Any if value.nil?
     return value if value.is_a?(Symbol)
+    return value.to_sym if value.is_a?(String)
 
-    value.to_sym
+    :Any
   end
   private_class_method :normalize_type
 
@@ -80,8 +102,9 @@ class IntrinsicArgSpec < T::Struct
   def self.normalize_symbol(value)
     return nil if value.nil?
     return value if value.is_a?(Symbol)
+    return value.to_sym if value.is_a?(String)
 
-    value.to_sym
+    nil
   end
   private_class_method :normalize_symbol
 end

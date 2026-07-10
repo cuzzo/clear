@@ -293,7 +293,7 @@ RSpec.describe MIRChecker do
     end
 
     it "detects discarded registry stdlib call with allocates:true" do
-      iz = registry_call("clone", FunctionSignature.intrinsic_contract(return_type: Type.new(:String), allocates: true, return_alloc: :heap))
+      iz = registry_call("clone", FunctionSignature.intrinsic_signature(return_type: Type.new(:String), allocates: true, return_alloc: :heap))
       body = [
         MIR::ExprStmt.new(iz, false),
       ]
@@ -302,7 +302,7 @@ RSpec.describe MIRChecker do
     end
 
     it "detects fixed-return registry leaks even when ownership effect metadata is suppressed" do
-      sig = FunctionSignature.intrinsic_contract(return_type: Type.new(:String), allocates: true, return_alloc: :heap)
+      sig = FunctionSignature.intrinsic_signature(return_type: Type.new(:String), allocates: true, return_alloc: :heap)
       iz = registry_call("clone_fixed", sig, allocs: MIR::InlineAllocMetadata.new(alloc: :heap))
 
       errors = checker.check_fn!(fn_def("stdlib_fixed_leak", [MIR::ExprStmt.new(iz, false)]))
@@ -311,7 +311,7 @@ RSpec.describe MIRChecker do
     end
 
     it "rejects registry stdlib call with allocates:true returning Void without explicit ownership facts" do
-      iz = registry_call("sort", FunctionSignature.intrinsic_contract(return_type: Type.new(:Void), allocates: true))
+      iz = registry_call("sort", FunctionSignature.intrinsic_signature(return_type: Type.new(:Void), allocates: true))
       body = [
         MIR::ExprStmt.new(iz, false),
       ]
@@ -320,7 +320,7 @@ RSpec.describe MIRChecker do
     end
 
     it "does not require ownership facts for pure receiver-growth allocator metadata" do
-      sig = FunctionSignature.intrinsic_contract(return_type: Type.new(:Void), allocates: true)
+      sig = FunctionSignature.intrinsic_signature(return_type: Type.new(:Void), allocates: true)
       T.must(sig.emit).mutates_receiver = true
       iz = registry_call("append", sig, allocs: MIR::InlineAllocMetadata.new(alloc: :heap), target_var: "parts")
       body = [
@@ -388,7 +388,7 @@ RSpec.describe MIRChecker do
     end
 
     it "rejects invalid allocator metadata" do
-      iz = registry_call("alloc", FunctionSignature.intrinsic_contract(return_type: Type.new(:Void)), allocs: MIR::InlineAllocMetadata.new(alloc: :arena))
+      iz = registry_call("alloc", FunctionSignature.intrinsic_signature(return_type: Type.new(:Void)), allocs: MIR::InlineAllocMetadata.new(alloc: :arena))
       body = [
         MIR::AllocMark.new("x", :arena, Type.new(:String), :heap),
         MIR::AllocMark.new("y", :heap, Type.new(:String), :nowhere),
@@ -1644,7 +1644,7 @@ RSpec.describe MIRChecker do
     end
 
     it "covers owned return, FSM guard, and boundary-fact branches" do
-      sig = FunctionSignature.intrinsic_contract(return_type: Type.new(:String), allocates: true, return_alloc: :heap)
+      sig = FunctionSignature.intrinsic_signature(return_type: Type.new(:String), allocates: true, return_alloc: :heap)
       inline = registry_call("owned", sig, allocs: MIR::InlineAllocMetadata.new(alloc: :heap))
       expect(checker.send(:owned_return_init?, inline)).to be true
 

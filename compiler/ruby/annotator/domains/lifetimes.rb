@@ -69,15 +69,18 @@ module Annotator
         vti = Type.new(vti) if vti && !vti.is_a?(Type)
         return nil unless vti
 
+        expected_t = expected_type.is_a?(Type) ? expected_type : (expected_type ? Type.new(expected_type) : nil)
+        return nil if expected_t&.symbol? && vti.symbol?
+
         if vti.list_collection?
           # When the target field is also @list (ArrayList), skip CopyNode wrapping.
           # The move mechanism will transfer the ArrayList struct directly.
           # CopyNode produces a slice which is the wrong type for ArrayList fields.
-          et = expected_type.is_a?(Type) ? expected_type : nil
+          et = expected_t
           return nil if et&.list_collection?
 
           copy = AST::CopyNode.new(val_node.token, val_node)
-          stamp_type!(copy, expected_type.is_a?(Type) ? expected_type : Type.new(expected_type || :Any))
+          stamp_type!(copy, expected_t || Type.new(:Any))
           copy.storage = container_alloc
           copy.alloc = container_alloc
           elem = vti.element_type
@@ -418,7 +421,8 @@ module Annotator
         # binding's move semantics are type-intrinsic, not value-location.
         # Exclude string? from the Copy gate at this ownership-decision site;
         # genuinely-Copy aggregates keep their exemption.
-        is_copy = type_obj.implicitly_copyable? { |t| lookup_type_schema(t) } && !type_obj.string?
+        is_copy = type_obj.implicitly_copyable? { |t| lookup_type_schema(t) } &&
+                  (!type_obj.string? || type_obj.symbol?)
         if !is_copy && (type_obj.requires_move? || rhs_info&.resource)
           # Cannot move a borrowed value (non-TAKES parameter).
           if ownership_graph[rhs_name]&.kind == :borrowed

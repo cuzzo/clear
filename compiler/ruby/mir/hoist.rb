@@ -724,6 +724,8 @@ module MIRHoistLowering
       T.unsafe(mir).callable_contract&.signature&.return_type
     elsif mir.is_a?(MIR::RegistryCall) || mir.is_a?(MIR::InlineBc)
       FunctionSignature.unwrap(mir.stdlib_def)&.return_type
+    elsif mir.is_a?(MIR::Pipeline) && mir.ast_node
+      Type.from_node!(mir.ast_node, context: "pipeline cleanup result")
     end
     raw_type ? Type.new(raw_type) : nil
   end
@@ -1226,6 +1228,7 @@ module MIRHoistLowering
     when MIR::Cast, MIR::TryExpr
       hoist_cleanup_entry(mir.expr, ast_node)
     when MIR::Call, MIR::MethodCall, MIR::TryCatch, MIR::Orelse, MIR::IfOptional, MIR::BlockExpr,
+         MIR::Pipeline,
          MIR::InlineBc, MIR::RegistryCall, MIR::IndexedStore, MIR::ExternTrampoline, MIR::BgBlock
       cleanup_entry_for_owned_result(ast_node, alloc: alloc) ||
         typed_cleanup_entry_for_mir_result(mir, alloc: alloc) ||
@@ -1251,6 +1254,7 @@ module MIRHoistLowering
     return nil unless ast_node
     ti = Type.from_node!(ast_node, context: "owned result cleanup entry")
     ti = ti.success_type || ti
+    return nil if ti.symbol? || ti.raw?
     return heap_string_entry(alloc: alloc) if ti.string?
     return uniform_cleanup_entry(ti.zig_type, alloc: alloc) if ti.collection?
     return nil unless ti.needs_explicit_cleanup?(alloc, mir_schema_lookup) ||
@@ -1272,6 +1276,7 @@ module MIRHoistLowering
     if typed_result
       ti = typed_result
       ti = ti.success_type || ti
+      return nil if ti.symbol? || ti.raw?
       return heap_string_entry(alloc: alloc) if ti.string?
       return uniform_cleanup_entry(ti.zig_type, alloc: alloc) if ti.collection? ||
         ti.recursive_cleanup_shape?(mir_schema_lookup) || ti.needs_cleanup?(mir_schema_lookup)

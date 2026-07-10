@@ -15,7 +15,7 @@ RSpec.describe Type, "zig_type gap coverage" do
   it "keeps fallible function return types fallible" do
     sig = FunctionSignature.new(params: [], return_type: Type.new("!Int64"))
 
-    expect(Type.new(sig).zig_type).to eq("*const fn(*Runtime) !i64")
+    expect(Type.from_function_signature(sig).zig_type).to eq("*const fn(*Runtime) !i64")
   end
 
   it "wraps shared fixed SOA arrays around the SoaList shape" do
@@ -145,7 +145,7 @@ RSpec.describe Type, "zig_type gap coverage" do
 
   it "keeps function-signature type wrappers affine" do
     sig = FunctionSignature.new(params: [], return_type: Type.new(:Int64))
-    type = Type.new(sig)
+    type = Type.from_function_signature(sig)
 
     expect(type.fn_type?).to be true
     expect(type.ownership).to eq(:affine)
@@ -203,6 +203,14 @@ RSpec.describe Type, "zig_type gap coverage" do
     elem = T.must(type.element_type)
     expect(elem.ownership).to eq(:shared)
     expect(elem.sync).to eq(:locked)
+  end
+
+  it "preserves optional element types for ?T[] arrays" do
+    type = Type.new(:"?Counter[]")
+
+    elem = T.must(type.element_type)
+    expect(elem.to_s).to eq("?Counter")
+    expect(elem.optional?).to be true
   end
 
   it "answers raw sync and link wrapper helpers through capabilities" do

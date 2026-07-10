@@ -159,7 +159,7 @@ class MIRPass
     # as the FunctionDef.
     @fn_nodes.each_value do |fn|
       sig = FunctionSignature.from_function_def(fn)
-      FunctionSignature.sync_from_function_def!(sig, fn) if sig.is_a?(FunctionSignature)
+      FunctionSignature.sync_signature_from_function_def!(sig, fn) if sig.is_a?(FunctionSignature)
     end
     pass_state.mark!(:mir_pass_complete)
     nil

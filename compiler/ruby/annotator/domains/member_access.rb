@@ -15,6 +15,20 @@ module Annotator
 
         target_type_info = node.target.full_type!(context: "index target")
 
+        if target_type_info.tuple?
+          unless node.index.is_a?(AST::Literal) && node.index.value.is_a?(Integer)
+            error!(node, :UNSUPPORTED_INDEX)
+          end
+          tuple_index = T.cast(node.index.value, Integer)
+          tuple_types = target_type_info.generic_args
+          unless tuple_index >= 0 && tuple_index < tuple_types.length
+            error!(node, :UNSUPPORTED_INDEX)
+          end
+          stamp_type!(node, T.must(tuple_types[tuple_index]))
+          node.container_borrow = true
+          return
+        end
+
         # Look up index operation from the registry
         op = resolve_index_op(target_type_info, :get)
 
@@ -234,6 +248,30 @@ module Annotator
       def visit_HashLit(node)
         T.bind(self, SemanticAnnotator)
 
+        expected_map = node.coerced_type_info
+        if expected_map&.map?
+          expected_key = expected_map.key_type
+          expected_value = expected_map.value_type
+          node.pairs.each do |key, value|
+            key.coerced_type = expected_key
+            value.coerced_type = expected_value
+            visit(key)
+            visit(value)
+
+            actual_key = key.full_type!(context: "hash literal key")
+            actual_value = value.full_type!(context: "hash literal value")
+            unless expected_key.any? || expected_key.accepts?(actual_key) || is_safe_autocast?(actual_key, expected_key)
+              error!(key, :TYPE_MISMATCH_ASSIGN, got: actual_key.resolved, expected: expected_key)
+            end
+            unless expected_value.any? || expected_value.accepts?(actual_value) || is_safe_autocast?(actual_value, expected_value)
+              error!(value, :TYPE_MISMATCH_ASSIGN, got: actual_value.resolved, expected: expected_value)
+            end
+          end
+          stamp_type!(node, expected_map)
+          node.storage = :stack
+          return
+        end
+
         # 1. Analyze values to find the Value Type (V)
         #    Assumption: Maps are homogeneous for now (e.g. all Int64)
         if node.pairs.empty?
@@ -246,17 +284,27 @@ module Annotator
         # key shape slots.
         node.pairs.each { |k, v| visit(k); visit(v) }
 
-        # Infer Type from first value
-        first_val_type = node.pairs.values.first.resolved_type
+        values = node.pairs.values
+        if values.all? { |value| Type.new(value.resolved_type).string? }
+          value_type = :String
+        else
+          value_type = values.first.resolved_type
+          symbol_key_map = node.pairs.keys.all? { |key| key.is_a?(AST::Literal) && key.type == :SYMBOL }
 
-        # Simple check: Ensure all values match
-        node.pairs.each do |k, v|
-          if v.resolved_type != first_val_type
-            error!(node, :HASHMAP_MIXED_VALUES)
+          # Simple check: Ensure all values match
+          values.each do |value|
+            if value.resolved_type != value_type
+              if symbol_key_map
+                stamp_type!(node, Type.new(:"HashMap<String@symbol, Auto>"))
+                node.storage = :stack
+                return
+              end
+              error!(node, :HASHMAP_MIXED_VALUES)
+            end
           end
         end
 
-        stamp_type!(node, Type.new(:"HashMap<#{first_val_type}>"))
+        stamp_type!(node, Type.new(:"HashMap<#{value_type}>"))
         node.storage = :stack
       end
 
@@ -363,6 +411,8 @@ module Annotator
         # Iterate Fields (Validation)
         node.fields.each do |field_name, val_node|
           visit(val_node) # Resolve value type
+          promote_to_expr_if!(node, val_node) if val_node.is_a?(AST::IfStatement)
+          promote_to_expr_match!(node, val_node) if val_node.is_a?(AST::MatchStatement)
 
           raw_expected = T.let(schema.fields[field_name]&.type, T.nilable(T.any(Type, Symbol)))
           if raw_expected.nil?
@@ -405,9 +455,10 @@ module Annotator
           end
 
           # Simple Type Check
-          if val_node.full_type!(context: "struct field value") != expected_type
-            unless is_safe_autocast?(val_node.resolved_type, expected_type)
-              error!(node, :FIELD_TYPE_MISMATCH, field: field_name, expected: expected_type, got: val_node.resolved_type)
+          actual_type = val_node.full_type!(context: "struct field value")
+          if actual_type != expected_type
+            unless is_safe_autocast?(actual_type, expected_type)
+              error!(node, :FIELD_TYPE_MISMATCH, field: field_name, expected: expected_type, got: actual_type)
             end
             val_node.coerced_type = expected_type
           end
@@ -427,6 +478,32 @@ module Annotator
 
         # 1. Analyze all items
         node.items.each { |item| visit(item) }
+
+        expected_tuple = node.coerced_type_info
+        if expected_tuple&.tuple?
+          tuple_types = expected_tuple.generic_args
+          if tuple_types.length != node.items.length
+            error!(node, :GENERIC_WRONG_ARG_COUNT, type: :Tuple,
+              expected: tuple_types.length, got: node.items.length)
+          end
+          node.items.each_with_index do |item, index|
+            expected_item = T.must(tuple_types[index])
+            actual_item = item.full_type!(context: "tuple literal element")
+            next if expected_item.accepts?(actual_item)
+            if unique_union_payload_variant(expected_item, actual_item)
+              item.coerced_type = expected_item
+              next
+            end
+            unless is_safe_autocast?(actual_item, expected_item)
+              error!(node, :TYPE_MISMATCH_ASSIGN,
+                got: actual_item.resolved, expected: expected_item)
+            end
+            item.coerced_type = expected_item
+          end
+          stamp_type!(node, expected_tuple)
+          node.storage = :stack
+          return
+        end
 
         # Bounded stream literal: [BG{...}, BG{...}] where all items are promises.
         # Produces ~T[N] type — a fixed-size stream of N concurrent BG fibers.

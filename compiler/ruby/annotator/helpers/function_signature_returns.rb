@@ -1,5 +1,6 @@
 # typed: strict
 require "sorbet-runtime"
+require_relative "../../ast/type"
 require_relative "function_signature"
 require_relative "function_return"
 
@@ -11,10 +12,8 @@ class FunctionSignature
   # pulling FunctionReturn back through the Type -> FunctionSignature cycle.
   sig { returns(FunctionReturn) }
   def return_def
-    raw = @facts.return_def
-    return raw if raw.is_a?(FunctionReturn)
-
-    FunctionReturn.fixed(Type.new(:Void))
+    T.cast(@facts.return_def, T.nilable(FunctionReturn)) ||
+      FunctionReturn.fixed(Type.new(:Void))
   end
 
   # True iff the return is a static Fixed Type (not receiver-parametric or

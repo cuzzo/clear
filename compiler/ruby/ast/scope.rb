@@ -458,16 +458,21 @@ module ScopeHelper
 
   # Resolve a name as either a local variable or a function-as-value reference.
   # Returns the scope where the name is found, or nil if undefined.
-  # Checks current scope locals first, then falls back to lookup_scope_for
-  # to find named functions used as values (fn-type references).
+  # Checks current scope locals first, then falls back to named functions and
+  # top-level bindings. Other enclosing locals remain unavailable outside
+  # explicit closure contexts.
   sig { params(name: String).returns(T.nilable(Scope)) }
   def resolve_variable_scope(name)
     scope = current_scope
     if scope.entry?(name)
       scope
     else
-      fn_scope = lookup_scope_for(name)
-      fn_scope && FunctionSignature.unwrap(fn_scope.resolve_type(name)) ? fn_scope : nil
+      outer_scope = lookup_scope_for(name)
+      return nil unless outer_scope
+      return outer_scope if FunctionSignature.unwrap(outer_scope.resolve_type(name))
+      return outer_scope if outer_scope.equal?(scope_stack_for_helper.first)
+
+      nil
     end
   end
 

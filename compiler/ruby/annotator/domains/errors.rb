@@ -391,6 +391,7 @@ module Annotator
         end
 
         value = T.must(raw_value)
+        value.coerced_type = expected if value.is_a?(AST::ListLit) && expected.tuple?
         visit(value)
 
         # Inline BG return: `RETURN BG { ... }`, plus composite returns such
@@ -492,10 +493,11 @@ module Annotator
         end
 
         stamp_type!(node, actual)
+        return_fact_type = T.let(value.coerced_type_info || actual_full, Type)
 
         fn_ctx.returns << AST::ReturnFact.new(
           storage: T.cast(value.storage, T.nilable(Symbol)),
-          type: T.cast(actual, Symbol),
+          type: Type.coercion_surface_name(return_fact_type).to_sym,
           metatype: T.cast(value.metatype, T.nilable(Symbol)),
         )
 
@@ -514,12 +516,48 @@ module Annotator
         T.bind(self, SemanticAnnotator)
 
         return true if expected_type.any? || actual_type.any?
+        return true if actual_type.resolved == :NoReturn
         return expected_type.accepts?(actual_type) if expected_type.fn_type?
+        return true if expected_type.optional? && actual_type.resolved == :NIL
+        return true if unique_union_payload_variant(expected_type, actual_type)
         return false unless same_return_capabilities?(expected_type, actual_type)
 
         is_safe_autocast?(actual_type, expected_type)
       end
       private :return_type_compatible?
+
+      sig { params(expected_type: Type, actual_type: Type).returns(T.nilable(T.any(String, Symbol))) }
+      def unique_union_payload_variant(expected_type, actual_type)
+        T.bind(self, SemanticAnnotator)
+
+        target_type = expected_type.value_payload_type
+        schema = lookup_type_schema(target_type.resolved)
+        return nil unless schema.is_a?(Schemas::UnionSchema)
+
+        compared_actual = if expected_type.optional? && actual_type.optional?
+          T.must(actual_type.wrapped_type)
+        else
+          actual_type
+        end
+
+        matches = schema.variants.filter_map do |variant_name, payload|
+          next unless payload.is_a?(Type)
+          union_payload_matches_return_type?(payload, compared_actual) ? variant_name : nil
+        end
+        matches.one? ? matches.first : nil
+      end
+      private :unique_union_payload_variant
+
+      sig { params(payload_type: Type, actual_type: Type).returns(T::Boolean) }
+      def union_payload_matches_return_type?(payload_type, actual_type)
+        payload_surface = Type.coercion_surface_name(payload_type)
+        actual_surface = Type.coercion_surface_name(actual_type)
+        return true if payload_surface == actual_surface
+        return false if payload_type.string? || actual_type.string?
+
+        payload_type.accepts?(actual_type)
+      end
+      private :union_payload_matches_return_type?
 
       sig { params(expected_t: Type, actual_t: Type).returns(T::Boolean) }
       def same_return_capabilities?(expected_t, actual_t)
@@ -591,9 +629,9 @@ module Annotator
         # Handle OR EXIT "msg": set error context + propagate (same as OR RAISE for types)
         if node.right.is_a?(AST::OrExit)
           if t_left_type.error_union?
-            stamp_type!(node, t_left_type.payload_type.resolved)
+            stamp_type!(node, t_left_type.payload_type)
           else
-            stamp_type!(node, t_left_type.resolved)
+            stamp_type!(node, t_left_type)
           end
           return
         end
@@ -602,10 +640,10 @@ module Annotator
         if node.right.is_a?(AST::OrRaise)
           if t_left_type.error_union?
             # Unwrap to payload type - error will be propagated
-            stamp_type!(node, t_left_type.payload_type.resolved)
+            stamp_type!(node, t_left_type.payload_type)
           else
             # OR RAISE on non-error type just passes through
-            stamp_type!(node, t_left_type.resolved)
+            stamp_type!(node, t_left_type)
           end
           return
         end
@@ -614,9 +652,9 @@ module Annotator
         if node.right.is_a?(AST::OrPass)
           if t_left_type.error_union?
             # Unwrap to payload type - error will be ignored
-            stamp_type!(node, t_left_type.payload_type.resolved)
+            stamp_type!(node, t_left_type.payload_type)
           else
-            stamp_type!(node, t_left_type.resolved)
+            stamp_type!(node, t_left_type)
           end
           return
         end
@@ -627,9 +665,9 @@ module Annotator
             error!(node, :OR_BREAK_OUTSIDE_WHILE)
           end
           if t_left_type.error_union?
-            stamp_type!(node, t_left_type.payload_type.resolved)
+            stamp_type!(node, t_left_type.payload_type)
           else
-            stamp_type!(node, t_left_type.resolved)
+            stamp_type!(node, t_left_type)
           end
           return
         end
@@ -638,9 +676,9 @@ module Annotator
         if node.right.is_a?(AST::OrPrune)
           if t_left_type.error_union?
             # Unwrap to payload type - error causes item to be skipped
-            stamp_type!(node, t_left_type.payload_type.resolved)
+            stamp_type!(node, t_left_type.payload_type)
           else
-            stamp_type!(node, t_left_type.resolved)
+            stamp_type!(node, t_left_type)
           end
           return
         end
@@ -656,7 +694,7 @@ module Annotator
 
           coerce_empty_collection_fallback!(node.right, payload_type)
           # Result is the payload type (error is handled)
-          stamp_type!(node, payload_type.resolved)
+          stamp_type!(node, payload_type)
           return
         end
 
@@ -667,12 +705,13 @@ module Annotator
             error!(node, :TYPE_MISMATCH_IN_OR, expected: wrapped.resolved, got: t_right_type.resolved)
           end
           coerce_empty_collection_fallback!(node.right, wrapped)
-          stamp_type!(node, wrapped.resolved)
+          stamp_type!(node, wrapped)
           return
         end
 
         # Standard OR behavior.
-        stamp_type!(node, t_left_type.resolved)
+        stamp_type!(node, t_left_type)
+        nil
       end
 
       # An empty collection fallback (`expr OR []` / `OR {}`) is visited

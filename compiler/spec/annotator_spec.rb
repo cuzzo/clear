@@ -23,6 +23,21 @@ RSpec.describe SemanticAnnotator do
   let(:ast) { run(code) }
   let(:result) { ast.statements.last.resolved_type }
 
+  describe "optional symbol fields" do
+    it "preserves String@symbol capabilities when checking optional struct fields" do
+      source = <<~CLEAR
+        STRUCT S { x: ?String@symbol }
+
+        FN main() RETURNS Void ->
+          _ = S{ x: :a };
+          RETURN;
+        END
+      CLEAR
+
+      expect { run(source) }.not_to raise_error
+    end
+  end
+
   describe "Smooth Operator (|>)" do
     context "when piping to a Function Call: x |> f()" do
       let(:code) {
@@ -1624,6 +1639,45 @@ RSpec.describe SemanticAnnotator do
           expect { ast }.not_to raise_error
           # Assuming logic maps [] to Any[]
           expect(result).to eq(:"Any[]")
+        end
+      end
+
+      context "Typed Tuple" do
+        let(:code) {
+          <<~FLUX
+            key: Tuple<String@symbol, ?String> = [:kind, NIL];
+          FLUX
+        }
+        it "uses the declared positional types for a heterogeneous list literal" do
+          expect { ast }.not_to raise_error
+          tuple_type = ast.statements.last.full_type
+          expect(tuple_type).to be_tuple
+          expect(tuple_type.generic_args.map(&:resolved)).to eq([:String, :"?String"])
+          expect(tuple_type.generic_args.last).to be_optional
+        end
+
+
+        it "resolves literal tuple indices positionally" do
+          tuple_ast = run(<<~FLUX)
+            key: Tuple<String@symbol, Int64> = [:kind, 1];
+            value = key[1];
+          FLUX
+          expect(tuple_ast.statements.last.resolved_type).to eq(:Int64)
+        end
+      end
+
+
+      context "Typed Nested Hash" do
+        let(:code) {
+          <<~FLUX
+            registry: HashMap<String@symbol, HashMap<String@symbol, Any>> = {
+              :entry: { :kind: :Input, :id: 1 }
+            };
+          FLUX
+        }
+        it "uses declared key and value types recursively" do
+          expect { ast }.not_to raise_error
+          expect(ast.statements.last.full_type).to be_map
         end
       end
     end
@@ -3819,6 +3873,21 @@ RSpec.describe SemanticAnnotator do
       ZigTranspiler.new.transpile(clear_src)
     end
 
+    describe "HashMap index assignment" do
+      it "preserves optional value types on writes" do
+        expect {
+          run(<<~CLEAR)
+            FN f() RETURNS !Void ->
+              MUTABLE m: HashMap<?Int64> = {};
+              m["missing"] = NIL;
+              m["present"] = 1_i64;
+              RETURN;
+            END
+          CLEAR
+        }.not_to raise_error
+      end
+    end
+
     describe "HashMap#count" do
       it "resolves count() return type as Int64" do
         tree = run(<<~CLEAR)
@@ -4667,6 +4736,28 @@ RSpec.describe SemanticAnnotator do
   end
 
   describe "WHILE bind footgun: stateless condition on immutable receiver" do
+    it "supports clearing a mutable list" do
+      src = <<~CLEAR
+        FN clear_items!(MUTABLE items: Int64[]@list) RETURNS Void ->
+          items.clear();
+        END
+      CLEAR
+
+      zig = ZigTranspiler.new.transpile(src)
+      expect(zig).to include("items.clearRetainingCapacity()")
+    end
+
+    it "supports String.indexOf with a starting offset" do
+      src = <<~CLEAR
+        FN find_from(text: String, needle: String, offset: Int64) RETURNS ?Int64 ->
+          text.indexOf(needle, offset);
+        END
+      CLEAR
+
+      zig = ZigTranspiler.new.transpile(src)
+      expect(zig).to include("CheatLib.indexOfFrom(text, needle, @as(i64, offset))")
+    end
+
     it "rejects WHILE AS when the method receiver is immutable" do
       src = <<~CHT
         FN test() RETURNS Void ->

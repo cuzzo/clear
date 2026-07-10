@@ -101,7 +101,7 @@ RSpec.describe "predicate-impurity rejection" do
     it "rejects allocating and suspending stdlib calls through matched metadata" do
       annotator = SemanticAnnotator.new
       alloc_call = AST::FuncCall.new(Lexer::Token.new(:VAR_ID, "make", 1, 1), "make", [])
-      alloc_call.matched_stdlib_def = FunctionSignature.intrinsic_contract(allocates: true)
+      alloc_call.matched_stdlib_def = FunctionSignature.intrinsic_signature(allocates: true)
 
       suspend_call = AST::FuncCall.new(Lexer::Token.new(:VAR_ID, "wait", 1, 1), "wait", [])
       suspend_sig = FunctionSignature.new(params: [], return_type: Type.new(:Void), intrinsic: true, emit: IntrinsicEmit.new(suspends: true))

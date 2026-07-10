@@ -1,4 +1,5 @@
 # typed: strict
+# ruby-to-clear: data-only
 require "sorbet-runtime"
 
 require_relative "param"
@@ -6,7 +7,7 @@ require_relative "struct_field"
 require_relative "type"
 require_relative "schemas"
 require_relative "lexer"
-require_relative "../annotator/helpers/intrinsic_registry"
+require_relative "../annotator/helpers/function_signature"
 
 # ==========================================
 # AST
@@ -125,31 +126,6 @@ module AST
     end
   end
 
-  class Param
-    extend T::Sig
-
-    sig { params(kw: StructKwargs).void }
-    def initialize(**kw)
-      super
-      t = self[:type]
-      self[:type] = Type.new(t || :Any)
-    end
-
-    # Mirror of Type#atomic? (Param has :sync but no :layout, so no
-    # indirect?/atomic_ptr?). `param.sync == :atomic` was reinvented
-    # inline (decomplex Reification-Miss).
-    sig { returns(T::Boolean) }
-    def atomic? = sync == :atomic
-
-    sig { returns(Type) }
-    def type; self[:type]; end
-
-    sig { params(val: T.nilable(T.any(Type, Symbol, String))).void }
-    def type=(val)
-      self[:type] = Type.new(val || :Any)
-    end
-  end
-
   Capture = Struct.new(:name, :type, :default, :mutable, :takes,
                        :comptime, :name_token, :storage,
                        keyword_init: true) do
@@ -168,9 +144,13 @@ module AST
     end
 
     sig { returns(String) }
+    # ruby-to-clear: data-api
+    # ruby-to-clear: pub
     def name; self[:name]; end
 
     sig { returns(Type) }
+    # ruby-to-clear: data-api
+    # ruby-to-clear: pub
     def type; self[:type]; end
 
     sig { params(val: T.nilable(T.any(Type, Symbol, String))).void }
@@ -179,18 +159,28 @@ module AST
     end
 
     sig { returns(T.nilable(AST::Locatable)) }
+    # ruby-to-clear: data-api
+    # ruby-to-clear: pub
     def default; self[:default]; end
 
     sig { returns(T::Boolean) }
+    # ruby-to-clear: data-api
+    # ruby-to-clear: pub
     def mutable; self[:mutable]; end
 
     sig { returns(T::Boolean) }
+    # ruby-to-clear: data-api
+    # ruby-to-clear: pub
     def takes; self[:takes]; end
 
     sig { returns(T::Boolean) }
+    # ruby-to-clear: data-api
+    # ruby-to-clear: pub
     def comptime; self[:comptime]; end
 
     sig { returns(T.nilable(Lexer::Token)) }
+    # ruby-to-clear: data-api
+    # ruby-to-clear: pub
     def name_token; self[:name_token]; end
 
     sig { returns(T.nilable(Symbol)) }
@@ -452,6 +442,7 @@ module AST
     end
   end
 
+  # ruby-to-clear: skip
   sig { params(symbol: T.nilable(SymbolEntry)).returns(T.nilable(SymbolEntry)) }
   def self.declaration_symbol(symbol)
     return nil unless symbol
@@ -588,11 +579,14 @@ module AST
       node.is_a?(AST::WithBlock) || node.is_a?(AST::DoBlock)
   end
 
+  # ruby-to-clear: data-api
   sig { params(node: T.nilable(AST::Node)).returns(T::Boolean) }
   def self.inline_union_constructor_target?(node)
     return false unless node.is_a?(AST::GetField)
-    target = node.target
-    !!(target.is_a?(AST::Identifier) && (target.name[0] =~ /[A-Z]/))
+    target = T.cast(node.target, AST::Node)
+    return false unless target.is_a?(AST::Identifier)
+
+    !!(target.name[0] =~ /[A-Z]/)
   end
 
   sig { params(node: T.nilable(AST::Node)).returns(T::Boolean) }
@@ -910,6 +904,8 @@ module AST
     end
   end
 
+  # ruby-to-clear: skip
+  # ruby-to-clear: no-expand
   module Locatable
       extend T::Sig
 
@@ -947,9 +943,8 @@ module AST
 
     sig { params(val: T.nilable(FunctionSignature)).returns(T.nilable(FunctionSignature)) }
     def matched_stdlib_def=(val)
-      fs = IntrinsicRegistry.fs(val)
-      @matched_stdlib_def = T.let(fs, T.nilable(FunctionSignature))
-      self.matched_signature = fs
+      @matched_stdlib_def = T.let(val, T.nilable(FunctionSignature))
+      self.matched_signature = val
     end
 
     sig { returns(T.nilable(FunctionSignature)) }
@@ -1200,9 +1195,6 @@ module AST
         return [nil, error] if error
       end
 
-      # Explicit type matches inferred -> no coercion needed
-      return [declared_type, nil] if declared_type == inferred
-
       # Check if coercion is valid
       coerce_target = T.let(declared_type.is_a?(FunctionSignature) ? declared_type_info : declared_type, Type::TypeInput)
       error = Type.coerce_error(T.must(@type_object), coerce_target)
@@ -1221,6 +1213,7 @@ module AST
     # @yield [name] Block to look up struct schema by name
     # @return [Symbol] The storage location
     #
+    # ruby-to-clear: skip
     sig { params(final_type: T.any(Symbol, Type), schema_lookup: T.nilable(SchemaLookup)).returns(Symbol) }
     def finalize_storage!(final_type, &schema_lookup)
       T.bind(self, T.untyped) rescue nil
@@ -1228,28 +1221,32 @@ module AST
       # the body never re-derives via final_type.is_a?(Type). A Symbol
       # tag yields a bare Type (no shard/sync/soa/observable) -- exactly
       # what the old `is_a?(Type) && ...` false-branch produced.
-      final_type = Type.new(final_type) unless final_type.is_a?(Type)
+      type_obj = T.let(final_type.is_a?(Type) ? final_type : Type.new(final_type), Type)
       # Calculate slot size
-      type_obj = Type.new(final_type)
       @slot_size = T.let(type_obj.slot_size(&schema_lookup), T.nilable(Integer))
 
       # Determine storage from value's type if this node has a value
-      if respond_to?(:value) && value.type_object
-        value_type = value.type_object
-        storage = value_type.finalize_storage(@slot_size, value.storage)
+      node_value = T.let(nil, T.untyped)
+      if T.unsafe(self).respond_to?(:value)
+        node_value = T.unsafe(self).value
+      end
+
+      if node_value && node_value.type_object
+        value_type = node_value.type_object
+        storage = value_type.finalize_storage(@slot_size, node_value.storage)
         # Declared type overrides: pointer types (%Type annotation) or sync types
         storage = :heap if type_obj.heap? || type_obj.any_sync?
         # Declared @list annotation requires frame (unless already upgraded to heap)
         storage = :frame if type_obj.list_collection? && storage != :heap
-        value.storage = storage if value.respond_to?(:storage=)
+        node_value.storage = storage if node_value.respond_to?(:storage=)
       else
         storage = type_obj.finalize_storage(T.must(@slot_size), nil)
       end
 
       # Determine if value has a sync capability
       value_sync = nil
-      if respond_to?(:value) && value.type_object
-        vt = value.type_object
+      if node_value && node_value.type_object
+        vt = node_value.type_object
         value_sync = vt.sync
       end
 
@@ -1258,16 +1255,16 @@ module AST
       # wrappers and data capabilities such as String@symbol; rebuilding from
       # only resolved would collapse `?String@symbol` to bare `String`.
       # For fn_type, preserve the full type object — do not reduce to the return-type symbol.
-      t = if final_type.fn_type?
-        final_type
+      t = if type_obj.fn_type?
+        type_obj
       else
-        new_t = Type.new(final_type)
-        val_ti = respond_to?(:value) && value.respond_to?(:full_type) ? value.full_type : nil
-        new_t.apply_finalized_value_shape!(final_type: final_type, value_type: val_ti)
+        new_t = Type.new(type_obj)
+        val_ti = node_value && node_value.respond_to?(:full_type) ? node_value.full_type : nil
+        new_t.apply_finalized_value_shape!(final_type: type_obj, value_type: val_ti)
         new_t
       end
       # Propagate @link ownership from the value's LinkNode
-      val_ti = respond_to?(:value) && value.respond_to?(:full_type) ? value.full_type : nil
+      val_ti = node_value && node_value.respond_to?(:full_type) ? node_value.full_type : nil
       if val_ti&.link?
         storage = :link
       end
@@ -1275,8 +1272,8 @@ module AST
       t.apply_storage_capability!(storage, value_sync: value_sync)
 
       # Propagate additional capability fields from the value's type_object
-      if respond_to?(:value) && value.type_object
-        vt = value.type_object
+      if node_value && node_value.type_object
+        vt = node_value.type_object
         t.merge_capabilities_from!(vt)
       end
 
@@ -1521,7 +1518,17 @@ module AST
   end
   # kind: :local (REQUIRE "file.clear") or :package (REQUIRE "pkg:name")
   RequireNode  = Struct.new(:token, :path, :namespace, :kind) { include Locatable }
-  FunctionDef  = Struct.new(:token, :name, :params, :captures, :return_type, :return_lifetime, :body, :catch_clauses, :default_catch, :visibility, :deferred_drops, :uses_frame) do
+  FunctionDef  = Struct.new(:token, :name, :params, :captures, :return_type, :return_lifetime,
+                            :body, :catch_clauses, :default_catch, :visibility, :deferred_drops,
+                            :uses_frame, :explicit_return_type, :type_params, :tail_call, :requires,
+                            :arrow_token, :name_token, :effects_decl, :effects_span, :max_depth_n,
+                            :tight_reentrance, :requires_clauses, :return_type_token, :pre_clauses,
+                            :post_clauses, :is_method) do
+    # ruby-to-clear: field-type return_type=?Type
+    # ruby-to-clear: field-type type_params=String[]
+    # ruby-to-clear: field-type arrow_token=Token
+    # ruby-to-clear: field-type name_token=?Token
+    # ruby-to-clear: field-type return_type_token=?Token
     extend T::Sig
     include Locatable
     include HasBodies
@@ -1541,7 +1548,7 @@ module AST
       rt = self[:return_type]
       self[:return_type] = Type.new(rt) unless rt.nil?
       self[:params] = self[:params] || []
-      @type_params = T.let([], T::Array[String])
+      self[:type_params] = (self[:type_params] || []).dup
       @semantic_with_blocks = T.let([], T::Array[AST::WithBlock])
     end
 
@@ -1577,12 +1584,12 @@ module AST
 
     sig { returns(T::Array[String]) }
     def type_params
-      @type_params
+      self[:type_params]
     end
 
     sig { params(value: T::Array[String]).void }
     def type_params=(value)
-      @type_params = value.dup
+      self[:type_params] = value.dup
     end
 
     sig { returns(T::Boolean) }
@@ -1592,35 +1599,28 @@ module AST
 
     # True when the user wrote RETURNS explicitly; fallible-signature checks
     # only enforce on user-authored return types.
-    attr_accessor :explicit_return_type
-    attr_accessor :requires      # REQUIRES clause — { param_name => Set[Family] } or nil
+    # REQUIRES clause — { param_name => Set[Family] } or nil
                                  #     Family symbols: :LOCKED, :VERSIONED, :ACTOR, :LOCK_FREE
     attr_accessor :effect_set    # projected EffectSet (yield/alloc_heap/io/fail)
                                  #     view over fn.effects + fn.can_fail
     attr_accessor :inferred_effects  # alias of effect_set; used by formatter
-    attr_accessor :tail_call     # true for EFFECTS REENTRANT:TAIL_CALL or routed THUNK tail recursion
-    attr_accessor :arrow_token       # Token for the `->` after the function header (drives REQUIRES insertion span)
-    attr_accessor :name_token        # Token for the function name itself (drives the `!`-suffix fix for STYLE_MUTABLE_PARAM_NEEDS_BANG)
+    # tail_call is true for EFFECTS REENTRANT:TAIL_CALL or routed THUNK tail recursion.
     # Phase 4f.2: { start_tok:, end_tok: } pair covering the full
     # `EFFECTS REENTRANT[:VARIANT]` clause text. Used by `clear fix`
     # to swap variants (e.g., `:THUNK` -> plain or `:NOT_LOGICAL`).
-    attr_accessor :effects_span
     # Phase 4f.3: positive Int from `EFFECTS REENTRANT:MAX_DEPTH(N)`.
     # Set on parse; the bridge validates `!T` return and the prologue
     # codegen path emits `safety.enterDepth(@src(), N)` /
     # `defer safety.exitDepth(@src())`.
-    attr_accessor :max_depth_n
     # When true, the function declared `:TIGHT` (or `:TIGHT:VARIANT`)
     # — skip the entry `rt.checkYield()` co-op-yield injection.
     # Mirrors `TIGHT WHILE`; same opt-out, same risks (long
     # workloads stall the scheduler). For `:MAX_DEPTH(N)` TIGHT is
     # IMPLIED and not user-settable; the bridge force-flips it on
     # iff `N <= YIELD_BUDGET`.
-    attr_accessor :tight_reentrance
     # Token at the start of the return type annotation (after RETURNS,
     # past any lifetime-prefix). Used for fixable spans that prepend
     # `!` to the declared return type.
-    attr_accessor :return_type_token
     # Thunk Phase 1: declared via `EFFECTS REENTRANT[:VARIANT]` after RETURNS.
     # Values:
     #   nil                       no declaration
@@ -1632,7 +1632,6 @@ module AST
     #   :reentrant_max_depth      EFFECTS REENTRANT:MAX_DEPTH(N) (runtime depth counter;
     #                                                             requires `!T` return type;
     #                                                             max_depth_n stamped on FunctionDef)
-    attr_accessor :effects_decl
     # Thunk Phase 1.3: canonical, post-bridge reentrance kind. Read THIS, not
     # `effects_decl` directly. Same value space as effects_decl.
     attr_accessor :reentrance_kind
@@ -1650,7 +1649,6 @@ module AST
     attr_accessor :mutual_thunk_plan
     # Thunk Phase 1.2: `REQUIRES <name>: NON_REENTRANT` clauses constrain function-typed
     # parameters. Hash mapping param name (String) to constraint symbol (e.g. :non_reentrant).
-    attr_accessor :requires_clauses
     attr_accessor :needs_rt      # computed by compute_needs_rt! post-pass; nil = not yet computed
     attr_accessor :fn_value_ref  # true when referenced as a function value; MIRPass finalizes needs_rt from it
     attr_accessor :can_fail      # computed by compute_can_fail! post-pass; nil = not yet computed
@@ -1720,17 +1718,14 @@ module AST
     # `PRE: <expr>` between RETURNS and `->`. Each predicate is checked
     # at function entry, fail-fast, raising PreconditionFail.
     # See docs / spec/with_pre_spec.rb for semantics.
-    attr_accessor :pre_clauses
     # DEBUG_POST clauses: same shape as pre_clauses (Array of
     # {expr:, source:}). Checked in a debug-only wrapper after the
     # function body returns; panics on violation. See spec/with_post_spec.rb.
-    attr_accessor :post_clauses
     # True when declared via `METHOD name(...)` instead of `FN name(...)`.
     # Purely a fmt directive: METHOD-flagged FNs have their prefix call
     # sites (`foo(v, ...)`) rewritten to UFCS form (`v.foo(...)`) by
     # `clear fmt`. Semantically identical to FN — same lookup, same
     # call resolution, same UFCS at call sites at the language level.
-    attr_accessor :is_method
   end
   class StructField
     extend T::Sig
@@ -1782,6 +1777,12 @@ module AST
     end
   end
 	  VarDecl      = Struct.new(:token, :name, :type, :value, :mutable) do
+	    # ruby-to-clear: field-type type=?Type
+	    extend T::Sig
+	    # ruby-to-clear: data-api
+	    # ruby-to-clear: pub
+	    sig { returns(Lexer::Token) }
+	    def token = self[:token]
     extend T::Sig
     include Locatable
     attr_accessor :mir_binding_entry  # stamped by CleanupClassifier: per-node cleanup entry (avoids same-name collision)
@@ -1817,20 +1818,24 @@ module AST
     sig { returns(Integer) }
     def hash = [var, sync].hash
   end
-	  Assignment   = Struct.new(:token, :name, :value) do
+	  Assignment   = Struct.new(:token, :name, :value, :compound_op) do
 	    include Locatable
 	    include StatementVoidType
 	    attr_accessor :auto_lock  # AutoLockPlan set by annotator for inline @locked/@writeLocked guards.
     attr_accessor :field_pre_cleanup  # stamped by MIRPass: Symbol (:heap or :frame) -- the allocator to free the OLD value with before the field overwrite. nil = no pre-cleanup needed.
     # Preserves the source compound operator so atomic targets can lower to
     # fetch_<op> instead of load/modify/store.
-    attr_accessor :compound_op
     # Stamped by the annotator for @shared:atomic targets so MIR lowering emits
     # MethodCall(cell, op, args) instead of plain Set.
     attr_accessor :auto_atomic_op
   end
   DestructureTarget = Struct.new(:token, :name, :type, :mutable) do
+    # ruby-to-clear: field-type type=?Type
     extend T::Sig
+    # ruby-to-clear: data-api
+    # ruby-to-clear: pub
+    sig { returns(Lexer::Token) }
+    def token = self[:token]
     include Locatable
     attr_accessor :mir_binding_entry
 
@@ -1864,13 +1869,13 @@ module AST
     end
   end
   # Keywordless bind: `x = val` or `x: Type = val`. Annotator sets mode to :decl or :assign.
-  BindExpr     = Struct.new(:token, :name, :type, :value) do
+  BindExpr     = Struct.new(:token, :name, :type, :value, :compound_op) do
+    # ruby-to-clear: field-type type=?Type
     extend T::Sig
     include Locatable
     attr_accessor :mode
     attr_accessor :reassign_cleanup  # MIR::ReassignPlan(alloc:, zig_type:) when the OLD value of this :assign target needs cleanup before overwrite. nil = no pre-cleanup.
     attr_accessor :mir_binding_entry  # stamped by CleanupClassifier: per-node cleanup entry (avoids same-name collision)
-    attr_accessor :compound_op
     attr_accessor :auto_atomic_op
 
     # Seam: same contract as VarDecl#type — annotated/inferred type is
@@ -1889,9 +1894,10 @@ module AST
       self[:type] = val.nil? ? nil : Type.new(val)
     end
   end
-  BinaryOp     = Struct.new(:token, :left, :op, :right) do
+  BinaryOp     = Struct.new(:token, :left, :op, :right, :paren_bind) do
     extend T::Sig
     include Locatable
+    # ruby-to-clear: field-type op=String@symbol
     # Derived: comparison/logical -> Bool; otherwise an operand's type.
     sig { returns(Type) }
     def full_type
@@ -1904,7 +1910,6 @@ module AST
     end
     attr_accessor :string_concat  # true when this is string + (stamped by annotator)
     attr_accessor :or_fallback_dupe  # true when OR_RESCUE fallback struct needs string-field heap dupe
-    attr_accessor :paren_bind     # true when this :BIND_VAR was wrapped in parens: (expr AS name)
     # Lazy positions: fields whose lowering must NOT leak @pending_stmts to
     # outer scope. The lowering's `descend` helper consults this and wraps
     # the field's emission in MIR::BlockExpr when the field actually emitted
@@ -1954,6 +1959,7 @@ module AST
     attr_accessor :atomic_borrow    # true when sync=:atomic ident is in fn-arg position (skip load wrap)
     sig { returns(FalseClass) }
     def wildcard?; false end
+    # ruby-to-clear: data-api
     sig { returns(String) }
     def name; self[:name].to_s end
   end
@@ -2112,7 +2118,7 @@ module AST
       self[:bindings] = val
     end
   end
-  WhileLoop    = Struct.new(:token, :condition, :do_branch, :deferred_drops) do
+  WhileLoop    = Struct.new(:token, :condition, :do_branch, :deferred_drops, :tight) do
     extend T::Sig
     include Locatable
     include StatementVoidType
@@ -2121,7 +2127,6 @@ module AST
     sig { returns(T::Array[RawBody]) }
     def child_bodies = [do_branch].compact
     attr_accessor :mark_per_iter
-    attr_accessor :tight        # true when declared with TIGHT WHILE — no yield injection, no loop marks
   end
   WhileBindLoop = Struct.new(:token, :condition, :binding_name, :binding_token, :do_branch, :deferred_drops) do
     extend T::Sig
@@ -2145,6 +2150,7 @@ module AST
   FuncCall     = Struct.new(:token, :name, :args) do
     extend T::Sig
     include Locatable
+    # ruby-to-clear: field-type name=Any
     attr_accessor :module_alias
     attr_accessor :extern_call       # true when calling a native EXTERN FN (no rt, no try)
     attr_accessor :extern_effects    # Set of effect symbols (:Alloc, etc.) from EXTERN FN EFFECTS declaration
@@ -2354,8 +2360,10 @@ module AST
   Placeholder  = Struct.new(:token) { include Locatable }
   Copy         = Struct.new(:token, :value) { include Locatable }
   OptionalUnwrap = Struct.new(:token, :target) do
+    # ruby-to-clear: field-type target=Node
     extend T::Sig
     include Locatable
+    # ruby-to-clear: skip
     sig { returns(T.nilable(String)) }
     def name; target.respond_to?(:name) ? target.name : nil end
   end
@@ -2414,9 +2422,9 @@ module AST
     def items; self[:items]; end
     sig { returns(T::Array[CatchFilter]) }
     def filters; self[:filters]; end
-    sig { returns(T::Array[AST::Locatable]) }
+    sig { returns(T::Array[AST::Node]) }
     def body; self[:body]; end
-    sig { params(val: T::Array[AST::Locatable]).void }
+    sig { params(val: T::Array[AST::Node]).void }
     def body=(val); self[:body] = val; end
 
     sig { returns(T::Array[Symbol]) }
@@ -2442,7 +2450,11 @@ module AST
 
   # CATCH block: error handler at function bottom. Multiple CATCH clauses + optional DEFAULT.
   # catch_clauses: [AST::CatchClause]; default_body: [ASTNode] or nil
-  CatchBlock     = Struct.new(:token, :catch_clauses, :default_body) { include Locatable }
+  CatchBlock     = Struct.new(:token, :catch_clauses, :default_body) do
+    # ruby-to-clear: field-type catch_clauses=CatchClause[]
+    # ruby-to-clear: field-type default_body=?Node[]
+    include Locatable
+  end
   # RECOVER(default): pipeline operator that replaces errors with a default value.
   RecoverOp      = Struct.new(:token, :default_expr) { include Locatable }
 
@@ -2528,7 +2540,7 @@ module AST
   # ownership: nil | :multiowned | :shared
   # sync:      nil | :locked | :write_locked | :local
   # layout:    nil | :indirect
-  CapabilityWrap    = Struct.new(:token, :value, :ownership, :sync, :layout) do
+  CapabilityWrap    = Struct.new(:token, :value, :ownership, :sync, :layout, :lock_rank) do
     include Locatable
     extend T::Sig
     # Optional integer rank on @locked(rank: N) / @writeLocked(rank: N).
@@ -2536,8 +2548,6 @@ module AST
     # locks are ranked, acquiring any lock requires the new rank to be
     # strictly greater than every held rank, which makes cycles
     # structurally unrepresentable.
-    attr_accessor :lock_rank
-
     # Mirror of Type#atomic? / indirect? / atomic_ptr?. The
     # `node.sync == :atomic [&& node.layout == :indirect]` checks were
     # reinvented inline across visit_CapabilityWrap / lower_cap_wrap
@@ -2613,20 +2623,24 @@ module AST
   # ExternFnDecl: EXTERN FN name<T>(params) RETURNS type [EFFECTS :alloc] FROM "module"
   # Or method:    EXTERN FN TypeName<T>.method(params) RETURNS type FROM "module"
   # Declares a native Zig/C function importable via @import("module").
-  ExternFnDecl     = Struct.new(:token, :name, :params, :return_type, :from_module, :effects) do
+  ExternFnDecl     = Struct.new(:token, :name, :params, :return_type, :from_module, :effects,
+                                :owner_type, :owner_type_params, :fn_type_params) do
+    # ruby-to-clear: field-type return_type=?Type
+    # ruby-to-clear: field-type owner_type=?String
+    # ruby-to-clear: field-type owner_type_params=String[]@symbol
+    # ruby-to-clear: field-type fn_type_params=String[]@symbol
     extend T::Sig
     include Locatable
-    attr_accessor :owner_type        # "TypeName" for method declarations (nil for free functions)
     # [:T, :U] for TypeName<T, U>.method
     sig { returns(T::Array[Symbol]) }
     def owner_type_params
-      @owner_type_params
+      self[:owner_type_params]
     end
 
     # [:T] for fnName<T>(...)
     sig { returns(T::Array[Symbol]) }
     def fn_type_params
-      @fn_type_params
+      self[:fn_type_params]
     end
 
     sig { params(args: InitArgs).void }
@@ -2635,18 +2649,18 @@ module AST
       self[:params] = self[:params] || []
       rt = self[:return_type]
       self[:return_type] = Type.new(rt) unless rt.nil?
-      @owner_type_params = T.let([], T::Array[Symbol])
-      @fn_type_params = T.let([], T::Array[Symbol])
+      self[:owner_type_params] = (self[:owner_type_params] || []).dup
+      self[:fn_type_params] = (self[:fn_type_params] || []).dup
     end
 
     sig { params(value: T::Array[Symbol]).void }
     def owner_type_params=(value)
-      @owner_type_params = value.dup
+      self[:owner_type_params] = value.dup
     end
 
     sig { params(value: T::Array[Symbol]).void }
     def fn_type_params=(value)
-      @fn_type_params = value.dup
+      self[:fn_type_params] = value.dup
     end
 
     sig { params(val: T.nilable(T::Array[AST::Param])).returns(T::Array[AST::Param]) }
@@ -2667,26 +2681,29 @@ module AST
   # ExternStructDecl: EXTERN STRUCT Name { fields } [CLOSE "method"] FROM "module"
   # Declares a native Zig/C struct type for CLEAR type-checking purposes.
   # CLOSE registers the type as a resource with auto-defer cleanup (RAII).
-  ExternStructDecl = Struct.new(:token, :name, :field_decls, :from_module) do
+  ExternStructDecl = Struct.new(:token, :name, :field_decls, :from_module,
+                                :type_params, :close_method, :as_type) do
+    # ruby-to-clear: field-type from_module=?String
+    # ruby-to-clear: field-type type_params=String[]@symbol
+    # ruby-to-clear: field-type close_method=?String
+    # ruby-to-clear: field-type as_type=?String
     extend T::Sig
     include Locatable
     # [:T, :U] for EXTERN STRUCT Name<T, U>
     sig { returns(T::Array[Symbol]) }
     def type_params
-      @type_params
+      self[:type_params]
     end
-    attr_accessor :close_method  # "deinit" for CLOSE "deinit" — auto-defer on scope exit
-    attr_accessor :as_type       # "Parsed(JsonRecord)" for AS "ZigTypeExpr" — parameterized alias
 
     sig { params(args: InitArgs).void }
     def initialize(*args)
       super
-      @type_params = T.let([], T::Array[Symbol])
+      self[:type_params] = (self[:type_params] || []).dup
     end
 
     sig { params(value: T::Array[Symbol]).void }
     def type_params=(value)
-      @type_params = value.dup
+      self[:type_params] = value.dup
     end
 
     sig { returns(T::Hash[String, AST::StructField]) }
@@ -2725,25 +2742,26 @@ module AST
   #   Schemas::InlineStructVariant                 — inline struct payload
   # methods (optional): Array of UnionMethodRequirement records.
   #   — compile-time constraints verified after function registration.
-  UnionDef         = Struct.new(:token, :name, :variants, :visibility) do
+  UnionDef         = Struct.new(:token, :name, :variants, :visibility, :type_params, :methods) do
+    # ruby-to-clear: field-type type_params=String[]
+    # ruby-to-clear: field-type methods=?UnionMethodRequirement[]
     extend T::Sig
     include Locatable
     # Array of type param name strings, e.g. ["T"]
     sig { returns(T::Array[String]) }
     def type_params
-      @type_params
+      self[:type_params]
     end
-    attr_accessor :methods       # Array of UnionMethodRequirement records, or nil
 
     sig { params(args: InitArgs).void }
     def initialize(*args)
       super
-      @type_params = T.let([], T::Array[String])
+      self[:type_params] = (self[:type_params] || []).dup
     end
 
     sig { params(value: T::Array[String]).void }
     def type_params=(value)
-      @type_params = value.dup
+      self[:type_params] = value.dup
     end
   end
 
@@ -2903,7 +2921,7 @@ module AST
 
   # ForRange: FOR var IN (start ..= end) DO body END
   # inclusive: true = ..= (start to end), false = ..< (start to end-1)
-  ForRange          = Struct.new(:token, :var_name, :start_expr, :end_expr, :inclusive, :body, :deferred_drops, :mark_per_iter) do
+  ForRange          = Struct.new(:token, :var_name, :start_expr, :end_expr, :inclusive, :body, :deferred_drops, :mark_per_iter, :tight) do
     extend T::Sig
     include Locatable
     include StatementVoidType
@@ -2911,7 +2929,6 @@ module AST
     include DeferredDropsField
     sig { returns(T::Array[RawBody]) }
     def child_bodies = [body].compact
-    attr_accessor :tight
   end
 
   # ForEach: FOR var IN collection DO body END
@@ -3135,6 +3152,7 @@ module AST
   StubDecl = Struct.new(:token, :function_name, :kind, :value) { include Locatable }
   # kind: :returns, :captures, :sequence, :with
 
+  # ruby-to-clear: data-api
   UNARY_OPS = ['-', '!', '~']
 
   PRIMITIVE_TYPES = [:Number, :Bool, :Byte, :Int64, :Float64,
@@ -3142,6 +3160,7 @@ module AST
                      :UInt8, :UInt16, :UInt32, :UInt64,
                      :Float32]
 
+  # ruby-to-clear: data-api
   sig { params(ops: T::Array[String], assoc: Symbol).returns(PrecedenceInfo) }
   def self.precedence_info(ops:, assoc:)
     info = T.let({}, PrecedenceInfo)
@@ -3182,6 +3201,7 @@ module AST
   NUMBER_RESULT_OPS = Type::NUMBER_RESULT_OPS
   BOOL_RESULT_OPS = Type::BOOL_RESULT_OPS
 
+  # ruby-to-clear: data-api
   OP_TO_OP_CODE = T.let({
     '+' => :ADD,
     '-' => :SUB,
@@ -3209,6 +3229,7 @@ module AST
     '!*' => :CHECK_MUL,
   }, T::Hash[String, Symbol])
 
+  # ruby-to-clear: data-api
   CAPABILITIES = [:RESTRICT, :EXCLUSIVE, :BORROWED, :VIEW, :MATERIALIZED_VIEW, :SNAPSHOT]
 end
 

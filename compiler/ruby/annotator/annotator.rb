@@ -33,6 +33,7 @@ require_relative "domains/lifetimes"
 require_relative "helpers/function_context"
 require_relative "helpers/function_signature"
 require_relative "helpers/function_analysis"
+require_relative "helpers/prefixed_int_range"
 require_relative "helpers/pipe_analysis"
 require_relative "../semantic/escape_analysis"
 require_relative "../semantic/semantic_index"
@@ -65,6 +66,7 @@ class SemanticAnnotator
   include PipeAnalysis
   include ScopeHelper
   include TypeHelper
+  include PrefixedIntRange
   include GenericAnalysis
   include EffectTracker
   include ReentranceBridge
@@ -252,6 +254,25 @@ class SemanticAnnotator
     current_function_type_params.include?(type_name)
   end
   private :current_function_type_param?
+
+  sig { params(type: Type).returns(Type) }
+  def refined_comptime_type_param_type(type)
+    type_name = type.resolved
+    return type unless current_function_type_param?(type_name)
+
+    @comptime_type_param_refinements[type_name] || type
+  end
+  private :refined_comptime_type_param_type
+
+  sig { params(type_param: Symbol, narrowed_type: Type, blk: T.proc.returns(T.untyped)).returns(T.untyped) }
+  def with_comptime_type_param_refinement(type_param, narrowed_type, &blk)
+    previous = @comptime_type_param_refinements
+    @comptime_type_param_refinements = previous.merge(type_param => Type.new(narrowed_type))
+    blk.call
+  ensure
+    @comptime_type_param_refinements = previous
+  end
+  private :with_comptime_type_param_refinement
 
   sig { params(ctx: FunctionContext).returns(FunctionContext) }
   def push_function_context!(ctx)
@@ -535,6 +556,11 @@ class SemanticAnnotator
   # locate source-level spans (e.g., the `;` at the end of a
   # declaration line so `@multiowned` can be inserted before it).
   # When nil, affected helpers fall back to the plain `error!` path.
+  sig { params(node: AST::Literal, val: Integer, target_type: Symbol, min: Integer, max: Integer).returns(NilClass) }
+  def handle_prefixed_int_overflow!(node, val, target_type, min, max)
+    emit_int_overflow_error!(node, val, target_type, min, max)
+  end
+
   sig { returns(T.nilable(String)) }
   attr_accessor :source_code
 
@@ -601,6 +627,7 @@ private
     @semantic_index = nil
     @program = nil
     @branch_terminated = false
+    @comptime_type_param_refinements = T.let({}, T::Hash[Symbol, Type])
     effects_init!
     capability_audit_init!
     initialize_builtin_environment!

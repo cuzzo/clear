@@ -378,6 +378,8 @@ module MIRLoweringVariables
   sig { params(safe_name: String, node: AST::VarDecl, facts: VarDeclFacts, init: MIR::Node).returns(T.nilable(String)) }
   def var_decl_suppression(safe_name, node, facts, init)
     lowering = T.unsafe(self)
+    return nil unless current_function_context
+
     owned_cleanup_value = (facts.has_mir_drop ||
                            (lowering.mir_allocates?(init) && lowering.ownership_bearing_type?(facts.ft))) == true
     if facts.keyword_mutable

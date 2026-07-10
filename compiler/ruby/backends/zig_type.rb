@@ -1,6 +1,7 @@
 # typed: strict
 require "sorbet-runtime"
 
+# ruby-to-clear: pub
 class ZigType
   extend T::Sig
 

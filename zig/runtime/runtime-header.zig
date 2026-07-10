@@ -1739,6 +1739,14 @@ pub const CheatLib = struct {
         }
         return null;
     }
+
+    pub fn indexOfFrom(haystack: []const u8, needle: []const u8, start: i64) ?i64 {
+        if (start < 0) return null;
+        const offset: usize = @intCast(start);
+        if (offset > haystack.len) return null;
+        const relative = indexOf(haystack[offset..], needle) orelse return null;
+        return start + relative;
+    }
     // toString: Int64 -> String (heap-allocated decimal representation)
     /// Parse a string to i64. Returns error on invalid input.
     pub fn toInt(s: []const u8) !i64 {

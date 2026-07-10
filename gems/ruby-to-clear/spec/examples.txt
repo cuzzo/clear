@@ -1,149 +1,421 @@
-example_id                          | status | run_time        |
------------------------------------ | ------ | --------------- |
-./spec/audit_spec.rb[1:1]           | passed | 0.00368 seconds |
-./spec/audit_spec.rb[1:2]           | passed | 0.00237 seconds |
-./spec/cli_spec.rb[1:1]             | passed | 0.2013 seconds  |
-./spec/cli_spec.rb[1:2]             | passed | 0.20776 seconds |
-./spec/cli_spec.rb[1:3]             | passed | 0.21196 seconds |
-./spec/method_registry_spec.rb[1:1] | passed | 0.00105 seconds |
-./spec/method_registry_spec.rb[1:2] | passed | 0.0008 seconds  |
-./spec/oracle_corpus_spec.rb[1:1]   | passed | 0.00151 seconds |
-./spec/oracle_corpus_spec.rb[1:2]   | passed | 0.0027 seconds  |
-./spec/oracle_corpus_spec.rb[1:3]   | passed | 0.00091 seconds |
-./spec/oracle_corpus_spec.rb[1:4]   | passed | 0.00025 seconds |
-./spec/oracle_corpus_spec.rb[1:5]   | passed | 0.0002 seconds  |
-./spec/transpiler_spec.rb[1:1:1]    | passed | 0.00031 seconds |
-./spec/transpiler_spec.rb[1:1:2]    | passed | 0.00018 seconds |
-./spec/transpiler_spec.rb[1:1:3]    | passed | 0.00029 seconds |
-./spec/transpiler_spec.rb[1:1:4]    | passed | 0.00018 seconds |
-./spec/transpiler_spec.rb[1:1:5]    | passed | 0.00042 seconds |
-./spec/transpiler_spec.rb[1:1:6]    | passed | 0.0001 seconds  |
-./spec/transpiler_spec.rb[1:1:7]    | passed | 0.00018 seconds |
-./spec/transpiler_spec.rb[1:1:8]    | passed | 0.00008 seconds |
-./spec/transpiler_spec.rb[1:2:1]    | passed | 0.00043 seconds |
-./spec/transpiler_spec.rb[1:2:2]    | passed | 0.00014 seconds |
-./spec/transpiler_spec.rb[1:3:1]    | passed | 0.00048 seconds |
-./spec/transpiler_spec.rb[1:3:2]    | passed | 0.00017 seconds |
-./spec/transpiler_spec.rb[1:3:3]    | passed | 0.00027 seconds |
-./spec/transpiler_spec.rb[1:3:4]    | passed | 0.00062 seconds |
-./spec/transpiler_spec.rb[1:3:5]    | passed | 0.00019 seconds |
-./spec/transpiler_spec.rb[1:3:6]    | passed | 0.00015 seconds |
-./spec/transpiler_spec.rb[1:3:7]    | passed | 0.00021 seconds |
-./spec/transpiler_spec.rb[1:4:1]    | passed | 0.00028 seconds |
-./spec/transpiler_spec.rb[1:4:2]    | passed | 0.00013 seconds |
-./spec/transpiler_spec.rb[1:4:3]    | passed | 0.0002 seconds  |
-./spec/transpiler_spec.rb[1:4:4]    | passed | 0.00077 seconds |
-./spec/transpiler_spec.rb[1:4:5]    | passed | 0.0002 seconds  |
-./spec/transpiler_spec.rb[1:4:6]    | passed | 0.00015 seconds |
-./spec/transpiler_spec.rb[1:4:7]    | passed | 0.00022 seconds |
-./spec/transpiler_spec.rb[1:4:8]    | passed | 0.00029 seconds |
-./spec/transpiler_spec.rb[1:4:9]    | passed | 0.00024 seconds |
-./spec/transpiler_spec.rb[1:4:10]   | passed | 0.00019 seconds |
-./spec/transpiler_spec.rb[1:4:11]   | passed | 0.00022 seconds |
-./spec/transpiler_spec.rb[1:4:12]   | passed | 0.00023 seconds |
-./spec/transpiler_spec.rb[1:4:13]   | passed | 0.00018 seconds |
-./spec/transpiler_spec.rb[1:4:14]   | passed | 0.00013 seconds |
-./spec/transpiler_spec.rb[1:4:15]   | passed | 0.00029 seconds |
-./spec/transpiler_spec.rb[1:4:16]   | passed | 0.00012 seconds |
-./spec/transpiler_spec.rb[1:4:17]   | passed | 0.00273 seconds |
-./spec/transpiler_spec.rb[1:5:1]    | passed | 0.00016 seconds |
-./spec/transpiler_spec.rb[1:5:2]    | passed | 0.00008 seconds |
-./spec/transpiler_spec.rb[1:5:3]    | passed | 0.00023 seconds |
-./spec/transpiler_spec.rb[1:5:4]    | passed | 0.00018 seconds |
-./spec/transpiler_spec.rb[1:5:5]    | passed | 0.00018 seconds |
-./spec/transpiler_spec.rb[1:5:6]    | passed | 0.00022 seconds |
-./spec/transpiler_spec.rb[1:5:7]    | passed | 0.00024 seconds |
-./spec/transpiler_spec.rb[1:5:8]    | passed | 0.00011 seconds |
-./spec/transpiler_spec.rb[1:5:9]    | passed | 0.00022 seconds |
-./spec/transpiler_spec.rb[1:5:10]   | passed | 0.00023 seconds |
-./spec/transpiler_spec.rb[1:5:11]   | passed | 0.00022 seconds |
-./spec/transpiler_spec.rb[1:5:12]   | passed | 0.00035 seconds |
-./spec/transpiler_spec.rb[1:5:13]   | passed | 0.00019 seconds |
-./spec/transpiler_spec.rb[1:5:14]   | passed | 0.00028 seconds |
-./spec/transpiler_spec.rb[1:5:15]   | passed | 0.00026 seconds |
-./spec/transpiler_spec.rb[1:5:16]   | passed | 0.00044 seconds |
-./spec/transpiler_spec.rb[1:5:17]   | passed | 0.00078 seconds |
-./spec/transpiler_spec.rb[1:5:18]   | passed | 0.00102 seconds |
-./spec/transpiler_spec.rb[1:5:19]   | passed | 0.00016 seconds |
-./spec/transpiler_spec.rb[1:5:20]   | passed | 0.00033 seconds |
-./spec/transpiler_spec.rb[1:5:21]   | passed | 0.00041 seconds |
-./spec/transpiler_spec.rb[1:6:1]    | passed | 0.00019 seconds |
-./spec/transpiler_spec.rb[1:6:2]    | passed | 0.00019 seconds |
-./spec/transpiler_spec.rb[1:6:3]    | passed | 0.00021 seconds |
-./spec/transpiler_spec.rb[1:6:4]    | passed | 0.00069 seconds |
-./spec/transpiler_spec.rb[1:6:5]    | passed | 0.00068 seconds |
-./spec/transpiler_spec.rb[1:6:6]    | passed | 0.00041 seconds |
-./spec/transpiler_spec.rb[1:6:7]    | passed | 0.00081 seconds |
-./spec/transpiler_spec.rb[1:6:8]    | passed | 0.00013 seconds |
-./spec/transpiler_spec.rb[1:6:9]    | passed | 0.00014 seconds |
-./spec/transpiler_spec.rb[1:6:10]   | passed | 0.00036 seconds |
-./spec/transpiler_spec.rb[1:6:11]   | passed | 0.00045 seconds |
-./spec/transpiler_spec.rb[1:6:12]   | passed | 0.00234 seconds |
-./spec/transpiler_spec.rb[1:6:13]   | passed | 0.00032 seconds |
-./spec/transpiler_spec.rb[1:6:14]   | passed | 0.00018 seconds |
-./spec/transpiler_spec.rb[1:6:15]   | passed | 0.00168 seconds |
-./spec/transpiler_spec.rb[1:6:16]   | passed | 0.00074 seconds |
-./spec/transpiler_spec.rb[1:6:17]   | passed | 0.00126 seconds |
-./spec/transpiler_spec.rb[1:6:18]   | passed | 0.00082 seconds |
-./spec/transpiler_spec.rb[1:6:19]   | passed | 0.00043 seconds |
-./spec/transpiler_spec.rb[1:6:20]   | passed | 0.00025 seconds |
-./spec/transpiler_spec.rb[1:6:21]   | passed | 0.00101 seconds |
-./spec/transpiler_spec.rb[1:6:22]   | passed | 0.00032 seconds |
-./spec/transpiler_spec.rb[1:6:23]   | passed | 0.00021 seconds |
-./spec/transpiler_spec.rb[1:7:1]    | passed | 0.00007 seconds |
-./spec/transpiler_spec.rb[1:7:2]    | passed | 0.00009 seconds |
-./spec/transpiler_spec.rb[1:7:3]    | passed | 0.00038 seconds |
-./spec/transpiler_spec.rb[1:7:4]    | passed | 0.00017 seconds |
-./spec/transpiler_spec.rb[1:7:5]    | passed | 0.00016 seconds |
-./spec/transpiler_spec.rb[1:8:1]    | passed | 0.00012 seconds |
-./spec/transpiler_spec.rb[1:8:2]    | passed | 0.00012 seconds |
-./spec/transpiler_spec.rb[1:8:3]    | passed | 0.00016 seconds |
-./spec/transpiler_spec.rb[1:8:4]    | passed | 0.00015 seconds |
-./spec/transpiler_spec.rb[1:8:5]    | passed | 0.00017 seconds |
-./spec/transpiler_spec.rb[1:8:6]    | passed | 0.00011 seconds |
-./spec/transpiler_spec.rb[1:8:7]    | passed | 0.00021 seconds |
-./spec/transpiler_spec.rb[1:8:8]    | passed | 0.00027 seconds |
-./spec/transpiler_spec.rb[1:8:9]    | passed | 0.00013 seconds |
-./spec/transpiler_spec.rb[1:8:10]   | passed | 0.00014 seconds |
-./spec/transpiler_spec.rb[1:8:11]   | passed | 0.00022 seconds |
-./spec/transpiler_spec.rb[1:8:12]   | passed | 0.00013 seconds |
-./spec/transpiler_spec.rb[1:9:1]    | passed | 0.00013 seconds |
-./spec/transpiler_spec.rb[1:9:2]    | passed | 0.00013 seconds |
-./spec/transpiler_spec.rb[1:9:3]    | passed | 0.00019 seconds |
-./spec/transpiler_spec.rb[1:9:4]    | passed | 0.00017 seconds |
-./spec/transpiler_spec.rb[1:9:5]    | passed | 0.00056 seconds |
-./spec/transpiler_spec.rb[1:9:6]    | passed | 0.00043 seconds |
-./spec/transpiler_spec.rb[1:9:7]    | passed | 0.00016 seconds |
-./spec/transpiler_spec.rb[1:9:8]    | passed | 0.00015 seconds |
-./spec/transpiler_spec.rb[1:10:1]   | passed | 0.00026 seconds |
-./spec/transpiler_spec.rb[1:10:2]   | passed | 0.00013 seconds |
-./spec/transpiler_spec.rb[1:10:3]   | passed | 0.00025 seconds |
-./spec/transpiler_spec.rb[1:11:1]   | passed | 0.00021 seconds |
-./spec/transpiler_spec.rb[1:11:2]   | passed | 0.00016 seconds |
-./spec/transpiler_spec.rb[1:12:1]   | passed | 0.00015 seconds |
-./spec/transpiler_spec.rb[1:12:2]   | passed | 0.00022 seconds |
-./spec/transpiler_spec.rb[1:12:3]   | passed | 0.00019 seconds |
-./spec/transpiler_spec.rb[1:12:4]   | passed | 0.00011 seconds |
-./spec/transpiler_spec.rb[1:13:1]   | passed | 0.00016 seconds |
-./spec/transpiler_spec.rb[1:13:2]   | passed | 0.00032 seconds |
-./spec/transpiler_spec.rb[1:13:3]   | passed | 0.00113 seconds |
-./spec/transpiler_spec.rb[1:14:1]   | passed | 0.00026 seconds |
-./spec/transpiler_spec.rb[1:14:2]   | passed | 0.0002 seconds  |
-./spec/transpiler_spec.rb[1:14:3]   | passed | 0.00017 seconds |
-./spec/transpiler_spec.rb[1:15:1]   | passed | 0.00046 seconds |
-./spec/transpiler_spec.rb[1:15:2]   | passed | 0.00014 seconds |
-./spec/transpiler_spec.rb[1:15:3]   | passed | 0.0004 seconds  |
-./spec/transpiler_spec.rb[1:15:4]   | passed | 0.00031 seconds |
-./spec/transpiler_spec.rb[1:15:5]   | passed | 0.00029 seconds |
-./spec/transpiler_spec.rb[1:15:6]   | passed | 0.00031 seconds |
-./spec/transpiler_spec.rb[1:15:7]   | passed | 0.00023 seconds |
-./spec/transpiler_spec.rb[1:15:8]   | passed | 0.00033 seconds |
-./spec/transpiler_spec.rb[1:16:1]   | passed | 0.00075 seconds |
-./spec/transpiler_spec.rb[1:16:2]   | passed | 0.00016 seconds |
-./spec/transpiler_spec.rb[1:16:3]   | passed | 0.00026 seconds |
-./spec/transpiler_spec.rb[1:16:4]   | passed | 0.00228 seconds |
-./spec/transpiler_spec.rb[1:16:5]   | passed | 0.00103 seconds |
-./spec/transpiler_spec.rb[1:16:6]   | passed | 0.00018 seconds |
-./spec/transpiler_spec.rb[1:16:7]   | passed | 0.00023 seconds |
-./spec/transpiler_spec.rb[1:16:8]   | passed | 0.00022 seconds |
-./spec/transpiler_spec.rb[1:16:9]   | passed | 0.00014 seconds |
+example_id                          | status  | run_time        |
+----------------------------------- | ------- | --------------- |
+./spec/audit_spec.rb[1:1]           | passed  | 0.00211 seconds |
+./spec/audit_spec.rb[1:2]           | passed  | 0.00336 seconds |
+./spec/cli_spec.rb[1:1]             | passed  | 0.21866 seconds |
+./spec/cli_spec.rb[1:2]             | passed  | 0.22618 seconds |
+./spec/cli_spec.rb[1:3]             | passed  | 0.23489 seconds |
+./spec/method_registry_spec.rb[1:1] | passed  | 0.00034 seconds |
+./spec/method_registry_spec.rb[1:2] | passed  | 0.00029 seconds |
+./spec/oracle_corpus_spec.rb[1:1]   | passed  | 0.0011 seconds  |
+./spec/oracle_corpus_spec.rb[1:2]   | passed  | 0.0008 seconds  |
+./spec/oracle_corpus_spec.rb[1:3]   | passed  | 0.00032 seconds |
+./spec/oracle_corpus_spec.rb[1:4]   | passed  | 0.00064 seconds |
+./spec/oracle_corpus_spec.rb[1:5]   | passed  | 0.0011 seconds  |
+./spec/transpiler_spec.rb[1:1]      | passed  | 0.00055 seconds |
+./spec/transpiler_spec.rb[1:2]      | passed  | 0.0056 seconds  |
+./spec/transpiler_spec.rb[1:3]      | passed  | 0.00347 seconds |
+./spec/transpiler_spec.rb[1:4]      | passed  | 0.00606 seconds |
+./spec/transpiler_spec.rb[1:5]      | passed  | 0.00374 seconds |
+./spec/transpiler_spec.rb[1:6]      | passed  | 0.00248 seconds |
+./spec/transpiler_spec.rb[1:7]      | unknown |                 |
+./spec/transpiler_spec.rb[1:8]      | passed  | 0.00243 seconds |
+./spec/transpiler_spec.rb[1:9]      | unknown |                 |
+./spec/transpiler_spec.rb[1:10]     | unknown |                 |
+./spec/transpiler_spec.rb[1:11]     | unknown |                 |
+./spec/transpiler_spec.rb[1:12:1]   | passed  | 0.00021 seconds |
+./spec/transpiler_spec.rb[1:12:2]   | passed  | 0.00078 seconds |
+./spec/transpiler_spec.rb[1:12:3]   | unknown |                 |
+./spec/transpiler_spec.rb[1:12:4]   | unknown |                 |
+./spec/transpiler_spec.rb[1:12:5]   | unknown |                 |
+./spec/transpiler_spec.rb[1:12:6]   | unknown |                 |
+./spec/transpiler_spec.rb[1:12:7]   | unknown |                 |
+./spec/transpiler_spec.rb[1:12:8]   | unknown |                 |
+./spec/transpiler_spec.rb[1:12:9]   | unknown |                 |
+./spec/transpiler_spec.rb[1:12:10]  | unknown |                 |
+./spec/transpiler_spec.rb[1:12:11]  | unknown |                 |
+./spec/transpiler_spec.rb[1:12:12]  | unknown |                 |
+./spec/transpiler_spec.rb[1:12:13]  | unknown |                 |
+./spec/transpiler_spec.rb[1:12:14]  | unknown |                 |
+./spec/transpiler_spec.rb[1:12:15]  | unknown |                 |
+./spec/transpiler_spec.rb[1:12:16]  | unknown |                 |
+./spec/transpiler_spec.rb[1:12:17]  | unknown |                 |
+./spec/transpiler_spec.rb[1:12:18]  | unknown |                 |
+./spec/transpiler_spec.rb[1:12:19]  | unknown |                 |
+./spec/transpiler_spec.rb[1:12:20]  | unknown |                 |
+./spec/transpiler_spec.rb[1:12:21]  | unknown |                 |
+./spec/transpiler_spec.rb[1:12:22]  | unknown |                 |
+./spec/transpiler_spec.rb[1:12:23]  | unknown |                 |
+./spec/transpiler_spec.rb[1:12:24]  | unknown |                 |
+./spec/transpiler_spec.rb[1:12:25]  | unknown |                 |
+./spec/transpiler_spec.rb[1:13:1]   | passed  | 0.00022 seconds |
+./spec/transpiler_spec.rb[1:13:2]   | passed  | 0.00037 seconds |
+./spec/transpiler_spec.rb[1:14:1]   | passed  | 0.00051 seconds |
+./spec/transpiler_spec.rb[1:14:2]   | passed  | 0.00073 seconds |
+./spec/transpiler_spec.rb[1:14:3]   | passed  | 0.00026 seconds |
+./spec/transpiler_spec.rb[1:14:4]   | unknown |                 |
+./spec/transpiler_spec.rb[1:14:5]   | unknown |                 |
+./spec/transpiler_spec.rb[1:14:6]   | unknown |                 |
+./spec/transpiler_spec.rb[1:14:7]   | unknown |                 |
+./spec/transpiler_spec.rb[1:14:8]   | unknown |                 |
+./spec/transpiler_spec.rb[1:14:9]   | unknown |                 |
+./spec/transpiler_spec.rb[1:14:10]  | unknown |                 |
+./spec/transpiler_spec.rb[1:14:11]  | unknown |                 |
+./spec/transpiler_spec.rb[1:14:12]  | unknown |                 |
+./spec/transpiler_spec.rb[1:14:13]  | unknown |                 |
+./spec/transpiler_spec.rb[1:14:14]  | unknown |                 |
+./spec/transpiler_spec.rb[1:14:15]  | unknown |                 |
+./spec/transpiler_spec.rb[1:14:16]  | unknown |                 |
+./spec/transpiler_spec.rb[1:14:17]  | unknown |                 |
+./spec/transpiler_spec.rb[1:14:18]  | unknown |                 |
+./spec/transpiler_spec.rb[1:14:19]  | unknown |                 |
+./spec/transpiler_spec.rb[1:14:20]  | unknown |                 |
+./spec/transpiler_spec.rb[1:14:21]  | unknown |                 |
+./spec/transpiler_spec.rb[1:14:22]  | unknown |                 |
+./spec/transpiler_spec.rb[1:14:23]  | unknown |                 |
+./spec/transpiler_spec.rb[1:15:1]   | passed  | 0.0013 seconds  |
+./spec/transpiler_spec.rb[1:15:2]   | failed  | 0.00067 seconds |
+./spec/transpiler_spec.rb[1:15:3]   | passed  | 0.0009 seconds  |
+./spec/transpiler_spec.rb[1:15:4]   | unknown |                 |
+./spec/transpiler_spec.rb[1:15:5]   | unknown |                 |
+./spec/transpiler_spec.rb[1:15:6]   | unknown |                 |
+./spec/transpiler_spec.rb[1:15:7]   | unknown |                 |
+./spec/transpiler_spec.rb[1:15:8]   | unknown |                 |
+./spec/transpiler_spec.rb[1:15:9]   | unknown |                 |
+./spec/transpiler_spec.rb[1:15:10]  | unknown |                 |
+./spec/transpiler_spec.rb[1:15:11]  | unknown |                 |
+./spec/transpiler_spec.rb[1:15:12]  | unknown |                 |
+./spec/transpiler_spec.rb[1:15:13]  | unknown |                 |
+./spec/transpiler_spec.rb[1:15:14]  | unknown |                 |
+./spec/transpiler_spec.rb[1:15:15]  | unknown |                 |
+./spec/transpiler_spec.rb[1:15:16]  | unknown |                 |
+./spec/transpiler_spec.rb[1:15:17]  | unknown |                 |
+./spec/transpiler_spec.rb[1:15:18]  | unknown |                 |
+./spec/transpiler_spec.rb[1:15:19]  | unknown |                 |
+./spec/transpiler_spec.rb[1:15:20]  | unknown |                 |
+./spec/transpiler_spec.rb[1:15:21]  | unknown |                 |
+./spec/transpiler_spec.rb[1:15:22]  | unknown |                 |
+./spec/transpiler_spec.rb[1:15:23]  | unknown |                 |
+./spec/transpiler_spec.rb[1:15:24]  | unknown |                 |
+./spec/transpiler_spec.rb[1:15:25]  | unknown |                 |
+./spec/transpiler_spec.rb[1:15:26]  | unknown |                 |
+./spec/transpiler_spec.rb[1:15:27]  | unknown |                 |
+./spec/transpiler_spec.rb[1:15:28]  | unknown |                 |
+./spec/transpiler_spec.rb[1:15:29]  | unknown |                 |
+./spec/transpiler_spec.rb[1:15:30]  | unknown |                 |
+./spec/transpiler_spec.rb[1:15:31]  | unknown |                 |
+./spec/transpiler_spec.rb[1:15:32]  | unknown |                 |
+./spec/transpiler_spec.rb[1:15:33]  | unknown |                 |
+./spec/transpiler_spec.rb[1:15:34]  | unknown |                 |
+./spec/transpiler_spec.rb[1:15:35]  | unknown |                 |
+./spec/transpiler_spec.rb[1:15:36]  | unknown |                 |
+./spec/transpiler_spec.rb[1:15:37]  | unknown |                 |
+./spec/transpiler_spec.rb[1:15:38]  | unknown |                 |
+./spec/transpiler_spec.rb[1:16:1]   | passed  | 0.00047 seconds |
+./spec/transpiler_spec.rb[1:16:2]   | passed  | 0.00054 seconds |
+./spec/transpiler_spec.rb[1:16:3]   | passed  | 0.00068 seconds |
+./spec/transpiler_spec.rb[1:16:4]   | unknown |                 |
+./spec/transpiler_spec.rb[1:16:5]   | unknown |                 |
+./spec/transpiler_spec.rb[1:16:6]   | unknown |                 |
+./spec/transpiler_spec.rb[1:16:7]   | unknown |                 |
+./spec/transpiler_spec.rb[1:16:8]   | unknown |                 |
+./spec/transpiler_spec.rb[1:16:9]   | unknown |                 |
+./spec/transpiler_spec.rb[1:16:10]  | unknown |                 |
+./spec/transpiler_spec.rb[1:16:11]  | unknown |                 |
+./spec/transpiler_spec.rb[1:16:12]  | unknown |                 |
+./spec/transpiler_spec.rb[1:16:13]  | unknown |                 |
+./spec/transpiler_spec.rb[1:16:14]  | unknown |                 |
+./spec/transpiler_spec.rb[1:16:15]  | unknown |                 |
+./spec/transpiler_spec.rb[1:16:16]  | unknown |                 |
+./spec/transpiler_spec.rb[1:16:17]  | unknown |                 |
+./spec/transpiler_spec.rb[1:16:18]  | unknown |                 |
+./spec/transpiler_spec.rb[1:16:19]  | unknown |                 |
+./spec/transpiler_spec.rb[1:16:20]  | unknown |                 |
+./spec/transpiler_spec.rb[1:16:21]  | unknown |                 |
+./spec/transpiler_spec.rb[1:16:22]  | unknown |                 |
+./spec/transpiler_spec.rb[1:16:23]  | unknown |                 |
+./spec/transpiler_spec.rb[1:16:24]  | unknown |                 |
+./spec/transpiler_spec.rb[1:16:25]  | unknown |                 |
+./spec/transpiler_spec.rb[1:16:26]  | unknown |                 |
+./spec/transpiler_spec.rb[1:16:27]  | unknown |                 |
+./spec/transpiler_spec.rb[1:16:28]  | unknown |                 |
+./spec/transpiler_spec.rb[1:16:29]  | unknown |                 |
+./spec/transpiler_spec.rb[1:16:30]  | unknown |                 |
+./spec/transpiler_spec.rb[1:16:31]  | unknown |                 |
+./spec/transpiler_spec.rb[1:16:32]  | unknown |                 |
+./spec/transpiler_spec.rb[1:16:33]  | unknown |                 |
+./spec/transpiler_spec.rb[1:16:34]  | unknown |                 |
+./spec/transpiler_spec.rb[1:16:35]  | unknown |                 |
+./spec/transpiler_spec.rb[1:16:36]  | unknown |                 |
+./spec/transpiler_spec.rb[1:16:37]  | unknown |                 |
+./spec/transpiler_spec.rb[1:16:38]  | unknown |                 |
+./spec/transpiler_spec.rb[1:16:39]  | unknown |                 |
+./spec/transpiler_spec.rb[1:16:40]  | unknown |                 |
+./spec/transpiler_spec.rb[1:16:41]  | unknown |                 |
+./spec/transpiler_spec.rb[1:16:42]  | unknown |                 |
+./spec/transpiler_spec.rb[1:16:43]  | unknown |                 |
+./spec/transpiler_spec.rb[1:16:44]  | unknown |                 |
+./spec/transpiler_spec.rb[1:16:45]  | unknown |                 |
+./spec/transpiler_spec.rb[1:16:46]  | unknown |                 |
+./spec/transpiler_spec.rb[1:16:47]  | unknown |                 |
+./spec/transpiler_spec.rb[1:16:48]  | unknown |                 |
+./spec/transpiler_spec.rb[1:16:49]  | unknown |                 |
+./spec/transpiler_spec.rb[1:16:50]  | unknown |                 |
+./spec/transpiler_spec.rb[1:16:51]  | unknown |                 |
+./spec/transpiler_spec.rb[1:16:52]  | unknown |                 |
+./spec/transpiler_spec.rb[1:16:53]  | unknown |                 |
+./spec/transpiler_spec.rb[1:16:54]  | unknown |                 |
+./spec/transpiler_spec.rb[1:16:55]  | unknown |                 |
+./spec/transpiler_spec.rb[1:16:56]  | unknown |                 |
+./spec/transpiler_spec.rb[1:16:57]  | unknown |                 |
+./spec/transpiler_spec.rb[1:16:58]  | unknown |                 |
+./spec/transpiler_spec.rb[1:16:59]  | unknown |                 |
+./spec/transpiler_spec.rb[1:16:60]  | unknown |                 |
+./spec/transpiler_spec.rb[1:16:61]  | unknown |                 |
+./spec/transpiler_spec.rb[1:16:62]  | unknown |                 |
+./spec/transpiler_spec.rb[1:16:63]  | unknown |                 |
+./spec/transpiler_spec.rb[1:16:64]  | unknown |                 |
+./spec/transpiler_spec.rb[1:16:65]  | unknown |                 |
+./spec/transpiler_spec.rb[1:16:66]  | unknown |                 |
+./spec/transpiler_spec.rb[1:16:67]  | unknown |                 |
+./spec/transpiler_spec.rb[1:16:68]  | unknown |                 |
+./spec/transpiler_spec.rb[1:16:69]  | unknown |                 |
+./spec/transpiler_spec.rb[1:16:70]  | unknown |                 |
+./spec/transpiler_spec.rb[1:16:71]  | unknown |                 |
+./spec/transpiler_spec.rb[1:16:72]  | unknown |                 |
+./spec/transpiler_spec.rb[1:16:73]  | unknown |                 |
+./spec/transpiler_spec.rb[1:16:74]  | unknown |                 |
+./spec/transpiler_spec.rb[1:16:75]  | unknown |                 |
+./spec/transpiler_spec.rb[1:16:76]  | unknown |                 |
+./spec/transpiler_spec.rb[1:16:77]  | unknown |                 |
+./spec/transpiler_spec.rb[1:16:78]  | unknown |                 |
+./spec/transpiler_spec.rb[1:16:79]  | unknown |                 |
+./spec/transpiler_spec.rb[1:16:80]  | unknown |                 |
+./spec/transpiler_spec.rb[1:16:81]  | unknown |                 |
+./spec/transpiler_spec.rb[1:16:82]  | unknown |                 |
+./spec/transpiler_spec.rb[1:16:83]  | unknown |                 |
+./spec/transpiler_spec.rb[1:16:84]  | unknown |                 |
+./spec/transpiler_spec.rb[1:16:85]  | unknown |                 |
+./spec/transpiler_spec.rb[1:16:86]  | unknown |                 |
+./spec/transpiler_spec.rb[1:16:87]  | unknown |                 |
+./spec/transpiler_spec.rb[1:16:88]  | unknown |                 |
+./spec/transpiler_spec.rb[1:16:89]  | unknown |                 |
+./spec/transpiler_spec.rb[1:16:90]  | unknown |                 |
+./spec/transpiler_spec.rb[1:16:91]  | unknown |                 |
+./spec/transpiler_spec.rb[1:16:92]  | unknown |                 |
+./spec/transpiler_spec.rb[1:16:93]  | unknown |                 |
+./spec/transpiler_spec.rb[1:16:94]  | unknown |                 |
+./spec/transpiler_spec.rb[1:16:95]  | unknown |                 |
+./spec/transpiler_spec.rb[1:16:96]  | unknown |                 |
+./spec/transpiler_spec.rb[1:16:97]  | unknown |                 |
+./spec/transpiler_spec.rb[1:16:98]  | unknown |                 |
+./spec/transpiler_spec.rb[1:16:99]  | unknown |                 |
+./spec/transpiler_spec.rb[1:16:100] | unknown |                 |
+./spec/transpiler_spec.rb[1:16:101] | unknown |                 |
+./spec/transpiler_spec.rb[1:16:102] | unknown |                 |
+./spec/transpiler_spec.rb[1:16:103] | unknown |                 |
+./spec/transpiler_spec.rb[1:16:104] | unknown |                 |
+./spec/transpiler_spec.rb[1:16:105] | unknown |                 |
+./spec/transpiler_spec.rb[1:16:106] | unknown |                 |
+./spec/transpiler_spec.rb[1:16:107] | unknown |                 |
+./spec/transpiler_spec.rb[1:16:108] | unknown |                 |
+./spec/transpiler_spec.rb[1:16:109] | unknown |                 |
+./spec/transpiler_spec.rb[1:16:110] | unknown |                 |
+./spec/transpiler_spec.rb[1:16:111] | unknown |                 |
+./spec/transpiler_spec.rb[1:16:112] | unknown |                 |
+./spec/transpiler_spec.rb[1:16:113] | unknown |                 |
+./spec/transpiler_spec.rb[1:16:114] | unknown |                 |
+./spec/transpiler_spec.rb[1:16:115] | unknown |                 |
+./spec/transpiler_spec.rb[1:17:1]   | unknown |                 |
+./spec/transpiler_spec.rb[1:17:2]   | unknown |                 |
+./spec/transpiler_spec.rb[1:17:3]   | unknown |                 |
+./spec/transpiler_spec.rb[1:17:4]   | unknown |                 |
+./spec/transpiler_spec.rb[1:17:5]   | unknown |                 |
+./spec/transpiler_spec.rb[1:17:6]   | unknown |                 |
+./spec/transpiler_spec.rb[1:17:7]   | unknown |                 |
+./spec/transpiler_spec.rb[1:17:8]   | unknown |                 |
+./spec/transpiler_spec.rb[1:17:9]   | unknown |                 |
+./spec/transpiler_spec.rb[1:17:10]  | unknown |                 |
+./spec/transpiler_spec.rb[1:17:11]  | unknown |                 |
+./spec/transpiler_spec.rb[1:17:12]  | unknown |                 |
+./spec/transpiler_spec.rb[1:17:13]  | unknown |                 |
+./spec/transpiler_spec.rb[1:17:14]  | unknown |                 |
+./spec/transpiler_spec.rb[1:17:15]  | unknown |                 |
+./spec/transpiler_spec.rb[1:17:16]  | unknown |                 |
+./spec/transpiler_spec.rb[1:17:17]  | unknown |                 |
+./spec/transpiler_spec.rb[1:17:18]  | unknown |                 |
+./spec/transpiler_spec.rb[1:17:19]  | unknown |                 |
+./spec/transpiler_spec.rb[1:17:20]  | unknown |                 |
+./spec/transpiler_spec.rb[1:17:21]  | unknown |                 |
+./spec/transpiler_spec.rb[1:17:22]  | unknown |                 |
+./spec/transpiler_spec.rb[1:17:23]  | unknown |                 |
+./spec/transpiler_spec.rb[1:17:24]  | unknown |                 |
+./spec/transpiler_spec.rb[1:17:25]  | unknown |                 |
+./spec/transpiler_spec.rb[1:17:26]  | unknown |                 |
+./spec/transpiler_spec.rb[1:17:27]  | unknown |                 |
+./spec/transpiler_spec.rb[1:17:28]  | unknown |                 |
+./spec/transpiler_spec.rb[1:17:29]  | unknown |                 |
+./spec/transpiler_spec.rb[1:17:30]  | unknown |                 |
+./spec/transpiler_spec.rb[1:17:31]  | unknown |                 |
+./spec/transpiler_spec.rb[1:17:32]  | unknown |                 |
+./spec/transpiler_spec.rb[1:17:33]  | unknown |                 |
+./spec/transpiler_spec.rb[1:17:34]  | unknown |                 |
+./spec/transpiler_spec.rb[1:17:35]  | unknown |                 |
+./spec/transpiler_spec.rb[1:17:36]  | unknown |                 |
+./spec/transpiler_spec.rb[1:17:37]  | unknown |                 |
+./spec/transpiler_spec.rb[1:17:38]  | unknown |                 |
+./spec/transpiler_spec.rb[1:17:39]  | unknown |                 |
+./spec/transpiler_spec.rb[1:17:40]  | unknown |                 |
+./spec/transpiler_spec.rb[1:17:41]  | unknown |                 |
+./spec/transpiler_spec.rb[1:17:42]  | unknown |                 |
+./spec/transpiler_spec.rb[1:17:43]  | unknown |                 |
+./spec/transpiler_spec.rb[1:17:44]  | unknown |                 |
+./spec/transpiler_spec.rb[1:17:45]  | unknown |                 |
+./spec/transpiler_spec.rb[1:17:46]  | unknown |                 |
+./spec/transpiler_spec.rb[1:17:47]  | unknown |                 |
+./spec/transpiler_spec.rb[1:17:48]  | unknown |                 |
+./spec/transpiler_spec.rb[1:17:49]  | unknown |                 |
+./spec/transpiler_spec.rb[1:17:50]  | unknown |                 |
+./spec/transpiler_spec.rb[1:17:51]  | unknown |                 |
+./spec/transpiler_spec.rb[1:17:52]  | unknown |                 |
+./spec/transpiler_spec.rb[1:18:1]   | unknown |                 |
+./spec/transpiler_spec.rb[1:18:2]   | unknown |                 |
+./spec/transpiler_spec.rb[1:18:3]   | unknown |                 |
+./spec/transpiler_spec.rb[1:18:4]   | passed  | 0.0015 seconds  |
+./spec/transpiler_spec.rb[1:18:5]   | passed  | 0.00438 seconds |
+./spec/transpiler_spec.rb[1:19:1]   | unknown |                 |
+./spec/transpiler_spec.rb[1:19:2]   | unknown |                 |
+./spec/transpiler_spec.rb[1:19:3]   | unknown |                 |
+./spec/transpiler_spec.rb[1:19:4]   | unknown |                 |
+./spec/transpiler_spec.rb[1:19:5]   | unknown |                 |
+./spec/transpiler_spec.rb[1:19:6]   | passed  | 0.00227 seconds |
+./spec/transpiler_spec.rb[1:19:7]   | passed  | 0.00242 seconds |
+./spec/transpiler_spec.rb[1:19:8]   | unknown |                 |
+./spec/transpiler_spec.rb[1:19:9]   | unknown |                 |
+./spec/transpiler_spec.rb[1:19:10]  | passed  | 0.00195 seconds |
+./spec/transpiler_spec.rb[1:19:11]  | unknown |                 |
+./spec/transpiler_spec.rb[1:19:12]  | unknown |                 |
+./spec/transpiler_spec.rb[1:19:13]  | unknown |                 |
+./spec/transpiler_spec.rb[1:19:14]  | unknown |                 |
+./spec/transpiler_spec.rb[1:19:15]  | unknown |                 |
+./spec/transpiler_spec.rb[1:19:16]  | unknown |                 |
+./spec/transpiler_spec.rb[1:19:17]  | unknown |                 |
+./spec/transpiler_spec.rb[1:20:1]   | unknown |                 |
+./spec/transpiler_spec.rb[1:20:2]   | unknown |                 |
+./spec/transpiler_spec.rb[1:20:3]   | unknown |                 |
+./spec/transpiler_spec.rb[1:20:4]   | unknown |                 |
+./spec/transpiler_spec.rb[1:20:5]   | unknown |                 |
+./spec/transpiler_spec.rb[1:20:6]   | unknown |                 |
+./spec/transpiler_spec.rb[1:20:7]   | unknown |                 |
+./spec/transpiler_spec.rb[1:20:8]   | unknown |                 |
+./spec/transpiler_spec.rb[1:20:9]   | unknown |                 |
+./spec/transpiler_spec.rb[1:20:10]  | unknown |                 |
+./spec/transpiler_spec.rb[1:21:1]   | unknown |                 |
+./spec/transpiler_spec.rb[1:21:2]   | passed  | 0.00592 seconds |
+./spec/transpiler_spec.rb[1:21:3]   | passed  | 0.0056 seconds  |
+./spec/transpiler_spec.rb[1:22:1]   | unknown |                 |
+./spec/transpiler_spec.rb[1:22:2]   | unknown |                 |
+./spec/transpiler_spec.rb[1:22:3]   | unknown |                 |
+./spec/transpiler_spec.rb[1:22:4]   | unknown |                 |
+./spec/transpiler_spec.rb[1:22:5]   | unknown |                 |
+./spec/transpiler_spec.rb[1:22:6]   | unknown |                 |
+./spec/transpiler_spec.rb[1:22:7]   | unknown |                 |
+./spec/transpiler_spec.rb[1:22:8]   | unknown |                 |
+./spec/transpiler_spec.rb[1:22:9]   | unknown |                 |
+./spec/transpiler_spec.rb[1:22:10]  | unknown |                 |
+./spec/transpiler_spec.rb[1:22:11]  | unknown |                 |
+./spec/transpiler_spec.rb[1:22:12]  | unknown |                 |
+./spec/transpiler_spec.rb[1:22:13]  | unknown |                 |
+./spec/transpiler_spec.rb[1:22:14]  | unknown |                 |
+./spec/transpiler_spec.rb[1:22:15]  | unknown |                 |
+./spec/transpiler_spec.rb[1:22:16]  | unknown |                 |
+./spec/transpiler_spec.rb[1:22:17]  | unknown |                 |
+./spec/transpiler_spec.rb[1:22:18]  | unknown |                 |
+./spec/transpiler_spec.rb[1:22:19]  | unknown |                 |
+./spec/transpiler_spec.rb[1:22:20]  | unknown |                 |
+./spec/transpiler_spec.rb[1:22:21]  | unknown |                 |
+./spec/transpiler_spec.rb[1:23:1]   | unknown |                 |
+./spec/transpiler_spec.rb[1:23:2]   | unknown |                 |
+./spec/transpiler_spec.rb[1:23:3]   | unknown |                 |
+./spec/transpiler_spec.rb[1:23:4]   | unknown |                 |
+./spec/transpiler_spec.rb[1:23:5]   | unknown |                 |
+./spec/transpiler_spec.rb[1:23:6]   | unknown |                 |
+./spec/transpiler_spec.rb[1:24:1]   | unknown |                 |
+./spec/transpiler_spec.rb[1:24:2]   | unknown |                 |
+./spec/transpiler_spec.rb[1:24:3]   | unknown |                 |
+./spec/transpiler_spec.rb[1:25:1]   | unknown |                 |
+./spec/transpiler_spec.rb[1:25:2]   | unknown |                 |
+./spec/transpiler_spec.rb[1:25:3]   | unknown |                 |
+./spec/transpiler_spec.rb[1:26:1]   | unknown |                 |
+./spec/transpiler_spec.rb[1:26:2]   | unknown |                 |
+./spec/transpiler_spec.rb[1:26:3]   | unknown |                 |
+./spec/transpiler_spec.rb[1:26:4]   | unknown |                 |
+./spec/transpiler_spec.rb[1:26:5]   | unknown |                 |
+./spec/transpiler_spec.rb[1:26:6]   | unknown |                 |
+./spec/transpiler_spec.rb[1:26:7]   | unknown |                 |
+./spec/transpiler_spec.rb[1:26:8]   | unknown |                 |
+./spec/transpiler_spec.rb[1:26:9]   | unknown |                 |
+./spec/transpiler_spec.rb[1:26:10]  | unknown |                 |
+./spec/transpiler_spec.rb[1:26:11]  | unknown |                 |
+./spec/transpiler_spec.rb[1:26:12]  | unknown |                 |
+./spec/transpiler_spec.rb[1:26:13]  | unknown |                 |
+./spec/transpiler_spec.rb[1:26:14]  | unknown |                 |
+./spec/transpiler_spec.rb[1:26:15]  | unknown |                 |
+./spec/transpiler_spec.rb[1:26:16]  | unknown |                 |
+./spec/transpiler_spec.rb[1:26:17]  | unknown |                 |
+./spec/transpiler_spec.rb[1:26:18]  | unknown |                 |
+./spec/transpiler_spec.rb[1:26:19]  | unknown |                 |
+./spec/transpiler_spec.rb[1:26:20]  | unknown |                 |
+./spec/transpiler_spec.rb[1:26:21]  | unknown |                 |
+./spec/transpiler_spec.rb[1:26:22]  | unknown |                 |
+./spec/transpiler_spec.rb[1:26:23]  | unknown |                 |
+./spec/transpiler_spec.rb[1:26:24]  | unknown |                 |
+./spec/transpiler_spec.rb[1:26:25]  | unknown |                 |
+./spec/transpiler_spec.rb[1:26:26]  | unknown |                 |
+./spec/transpiler_spec.rb[1:26:27]  | unknown |                 |
+./spec/transpiler_spec.rb[1:26:28]  | unknown |                 |
+./spec/transpiler_spec.rb[1:26:29]  | unknown |                 |
+./spec/transpiler_spec.rb[1:27:1]   | unknown |                 |
+./spec/transpiler_spec.rb[1:27:2]   | unknown |                 |
+./spec/transpiler_spec.rb[1:27:3]   | unknown |                 |
+./spec/transpiler_spec.rb[1:27:4]   | unknown |                 |
+./spec/transpiler_spec.rb[1:27:5]   | unknown |                 |
+./spec/transpiler_spec.rb[1:27:6]   | unknown |                 |
+./spec/transpiler_spec.rb[1:27:7]   | unknown |                 |
+./spec/transpiler_spec.rb[1:27:8]   | unknown |                 |
+./spec/transpiler_spec.rb[1:27:9]   | unknown |                 |
+./spec/transpiler_spec.rb[1:27:10]  | unknown |                 |
+./spec/transpiler_spec.rb[1:27:11]  | unknown |                 |
+./spec/transpiler_spec.rb[1:27:12]  | unknown |                 |
+./spec/transpiler_spec.rb[1:27:13]  | unknown |                 |
+./spec/transpiler_spec.rb[1:27:14]  | unknown |                 |
+./spec/transpiler_spec.rb[1:27:15]  | unknown |                 |
+./spec/transpiler_spec.rb[1:27:16]  | unknown |                 |
+./spec/transpiler_spec.rb[1:27:17]  | unknown |                 |
+./spec/transpiler_spec.rb[1:27:18]  | unknown |                 |
+./spec/transpiler_spec.rb[1:27:19]  | unknown |                 |
+./spec/transpiler_spec.rb[1:27:20]  | unknown |                 |
+./spec/transpiler_spec.rb[1:27:21]  | unknown |                 |
+./spec/transpiler_spec.rb[1:27:22]  | unknown |                 |
+./spec/transpiler_spec.rb[1:27:23]  | unknown |                 |
+./spec/transpiler_spec.rb[1:27:24]  | unknown |                 |
+./spec/transpiler_spec.rb[1:27:25]  | unknown |                 |
+./spec/transpiler_spec.rb[1:27:26]  | unknown |                 |
+./spec/transpiler_spec.rb[1:27:27]  | unknown |                 |
+./spec/transpiler_spec.rb[1:27:28]  | unknown |                 |
+./spec/transpiler_spec.rb[1:27:29]  | unknown |                 |
+./spec/transpiler_spec.rb[1:27:30]  | unknown |                 |
+./spec/transpiler_spec.rb[1:27:31]  | unknown |                 |
+./spec/transpiler_spec.rb[1:27:32]  | unknown |                 |
+./spec/transpiler_spec.rb[1:27:33]  | unknown |                 |
+./spec/transpiler_spec.rb[1:27:34]  | unknown |                 |
+./spec/transpiler_spec.rb[1:27:35]  | unknown |                 |
+./spec/transpiler_spec.rb[1:27:36]  | unknown |                 |
+./spec/transpiler_spec.rb[1:27:37]  | unknown |                 |
+./spec/transpiler_spec.rb[1:27:38]  | unknown |                 |
+./spec/transpiler_spec.rb[1:27:39]  | unknown |                 |
+./spec/transpiler_spec.rb[1:27:40]  | unknown |                 |
+./spec/transpiler_spec.rb[1:27:41]  | unknown |                 |
+./spec/transpiler_spec.rb[1:27:42]  | unknown |                 |
+./spec/transpiler_spec.rb[1:27:43]  | unknown |                 |
+./spec/transpiler_spec.rb[1:27:44]  | unknown |                 |

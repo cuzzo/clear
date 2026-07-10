@@ -1,6 +1,7 @@
 # typed: strict
 require "sorbet-runtime"
 require_relative "lexer"
+require_relative "struct_field"
 require_relative "../backends/zig_type"
 
 # Result struct for binary operation type resolution
@@ -178,10 +179,12 @@ class TypePlacement < T::Struct
 end
 
 class Type
+  # ruby-to-clear: pub
   class FunctionTypeParam < T::Struct
     const :type, Type
   end
 
+  # ruby-to-clear: pub
   class FunctionType < T::Struct
     const :params, T::Array[FunctionTypeParam]
     const :return_type, Type
@@ -194,7 +197,7 @@ class TypeShape < T::Struct
   extend T::Sig
 
   ArrayCapacity = T.type_alias { T.nilable(T.any(Integer, Symbol)) }
-  Raw = T.type_alias { T.untyped }
+  Raw = T.type_alias { T.any(Type::FunctionType, Symbol, String) }
 
   class ArrayParts < T::Struct
     const :array, T::Boolean, default: false
@@ -259,7 +262,7 @@ class TypeShape < T::Struct
     shape_str = after_error_str
     if after_error_str.start_with?("?")
       shape_str = T.must(after_error_str[1..])
-      raise "Invalid type '#{after_error_str}': double optional (??) is not allowed" if shape_str.start_with?("?")
+      shape_str = T.must(shape_str[1..]) while shape_str.start_with?("?")
       raise "Invalid type '#{after_error_str}': ?~T (optional of tense) is not allowed — use ~?T instead" if shape_str.start_with?("~")
     end
 
@@ -346,11 +349,34 @@ class TypeShape < T::Struct
     GenericParts.new(
       generic_instance: true,
       generic_base_raw: T.must(generic_match[1]).to_sym,
-      generic_args_raw: T.must(generic_match[2]).split(",").map { |part| part.strip.to_sym }
+      generic_args_raw: split_generic_type_args(T.must(generic_match[2])).map(&:to_sym)
     )
   end
 
-  private_class_method :parse_array_shape, :parse_array_capacity, :parse_map_shape, :parse_generic_shape
+  sig { params(source: String).returns(T::Array[String]) }
+  def self.split_generic_type_args(source)
+    parts = T.let([], T::Array[String])
+    start = T.let(0, Integer)
+    depth = T.let(0, Integer)
+    source.each_char.with_index do |char, index|
+      case char
+      when "<", "(", "[", "{"
+        depth += 1
+      when ">", ")", "]", "}"
+        depth -= 1
+      when ","
+        next unless depth.zero?
+
+        parts << source[start...index].to_s.strip
+        start = index + 1
+      end
+    end
+    parts << source[start..].to_s.strip
+    parts
+  end
+
+  private_class_method :parse_array_shape, :parse_array_capacity, :parse_map_shape, :parse_generic_shape,
+    :split_generic_type_args
 
   sig { returns(TypeShape) }
   def copy
@@ -383,7 +409,7 @@ class TypeShape < T::Struct
 
   sig { returns(T::Boolean) }
   def fn_type?
-    TypeShape.function_signature_like?(raw)
+    TypeShape.raw_function_signature_like?(raw)
   end
 
   sig { returns(Symbol) }
@@ -393,17 +419,6 @@ class TypeShape < T::Struct
       current_raw
     elsif current_raw.is_a?(String)
       current_raw.to_sym
-    elsif current_raw.is_a?(Array)
-      tuple_value = current_raw[2]
-      if tuple_value.is_a?(Type)
-        tuple_value.resolved
-      elsif tuple_value.is_a?(Symbol)
-        tuple_value
-      elsif tuple_value.is_a?(String)
-        tuple_value.to_sym
-      else
-        :Any
-      end
     else
       :Any
     end
@@ -411,7 +426,7 @@ class TypeShape < T::Struct
 
   # ruby-to-clear: private
   sig { params(value: Raw).returns(T::Boolean) }
-  def self.function_signature_like?(value)
+  def self.raw_function_signature_like?(value)
     value.is_a?(Type::FunctionType)
   end
 
@@ -441,9 +456,11 @@ class TypeId < T::Struct
   end
 end
 
+# ruby-to-clear: pub
 class Type
   extend T::Sig
 
+  # ruby-to-clear: pub
   TypeInput = T.type_alias { T.any(FunctionType, Type, Symbol, String) }
   RawParseInput = T.type_alias { T.any(FunctionType, Symbol, String) }
   TypeNodeInput = T.type_alias { T.untyped }
@@ -524,12 +541,19 @@ class Type
   def self.from_input(type)
     if type.is_a?(Type)
       return copy_type(type)
+    elsif type.is_a?(FunctionType)
+      return Type.new(type)
+    elsif type.is_a?(Symbol)
+      return Type.new(type)
+    elsif type.is_a?(String)
+      return Type.new(type)
     end
 
-    Type.new(type)
+    Type.new(:Any)
   end
 
-  sig { params(value: T.untyped).returns(T::Boolean) }
+  # ruby-to-clear: skip
+  sig { params(value: BasicObject).returns(T::Boolean) }
   def self.function_signature_like?(value)
     value.respond_to?(:params) && value.respond_to?(:return_type) && value.respond_to?(:reentrant)
   end
@@ -537,7 +561,6 @@ class Type
   sig { params(vt: Schemas::UnionSchema::VariantValue).returns(Type) }
   def self.from_variant_input(vt)
     return Type.new(:Any) unless vt
-    return vt if vt.is_a?(Type)
     return Type.new(:Any) if vt.is_a?(Schemas::InlineStructVariant)
 
     Type.from_input(T.cast(T.must(vt), Type::TypeInput))
@@ -606,6 +629,7 @@ class Type
   end
 
   sig { params(fn: FunctionType).returns(Symbol) }
+  # ruby-to-clear: effects reentrant
   def self.function_return_symbol(fn)
     fn.return_type.to_sym
   end
@@ -782,6 +806,7 @@ class Type
     copy
   end
 
+  # ruby-to-clear: effects reentrant
   sig { params(type: TypeInput).returns(String) }
   def self.surface_name(type)
     surface_name_type(from_input(type))
@@ -826,6 +851,7 @@ class Type
   end
 
   sig { params(wrapped_type: TypeInput).returns(Type) }
+  # ruby-to-clear: effects reentrant
   def self.optional_of(wrapped_type)
     wrapped = Type.new(wrapped_type)
     return wrapped if wrapped.optional?
@@ -914,6 +940,7 @@ class Type
   end
 
   sig { params(type: Type).returns(String) }
+  # ruby-to-clear: effects reentrant
   def self.function_type_surface_name(type)
     fn_raw = T.must(type.function_type)
     params = fn_raw.params.map { |param| surface_name_type(param.type) }
@@ -1213,7 +1240,7 @@ class Type
 
   sig do
     params(
-      raw_input: T.untyped,
+      raw_input: TypeInput,
       ownership: T.nilable(Symbol),
       sync: T.nilable(Symbol),
       layout: T.nilable(Symbol),
@@ -1242,11 +1269,6 @@ class Type
       @generic_payload_type_arg = raw_input.generic_payload_type_arg?
     elsif raw_input.is_a?(FunctionType)
       parse_function_type_input!(raw_input, auto: auto)
-    elsif Type.function_signature_like?(raw_input)
-      signature_type = Type.from_function_signature(raw_input)
-      @shape = auto ? signature_type.shape.copy_with_auto(true) : signature_type.shape.copy
-      @capabilities = signature_type.capabilities.copy
-      @placement = signature_type.placement.copy
     elsif raw_input.is_a?(Symbol)
       parse_raw_string!(raw_input.to_s, auto: auto)
     elsif raw_input.is_a?(String)
@@ -1934,10 +1956,10 @@ class Type
     if fn_type?
       return false unless other.is_a?(Type)
       return false unless other.fn_type?
-      return raw == other.raw
+      return semantic_type_key == other.semantic_type_key
     end
     other_type = Type.from_input(other)
-    resolved == other_type.to_sym || raw == other_type.raw
+    resolved == other_type.to_sym || semantic_type_key == other_type.semantic_type_key
   end
 
   sig { returns(TypeShape::Raw) }
@@ -1957,11 +1979,16 @@ class Type
 
   sig { returns(String) }
   def to_s; resolved.to_s; end
+
   sig { returns(Symbol) }
-  def to_sym; resolved; end
+  # ruby-to-clear: effects reentrant
+  def to_sym
+    resolved
+  end
 
   # Backward API: Deprecate
   sig { returns(Symbol) }
+  # ruby-to-clear: effects reentrant
   def resolved
     fn = function_type
     return Type.function_return_symbol(T.must(fn)) unless fn.nil?
@@ -1979,6 +2006,7 @@ class Type
   public
 
   sig { returns(String) }
+  # ruby-to-clear: effects reentrant
   def semantic_type_key
     ownership_key = ownership.nil? ? "affine" : T.must(ownership).to_s
     sync_key = sync.nil? ? "none" : T.must(sync).to_s
@@ -2107,6 +2135,44 @@ class Type
     Byte: 0, UInt8: 0, UInt16: 0, UInt32: 0, UInt64: 0,
     Int8: -128, Int16: -32_768, Int32: -2_147_483_648, Int64: -9_223_372_036_854_775_808,
   }.freeze, T::Hash[Symbol, Integer])
+
+  sig { params(type_sym: Symbol).returns(T.nilable(Integer)) }
+  def self.integer_type_max(type_sym)
+    case type_sym
+    when :Byte, :UInt8
+      255
+    when :UInt16
+      65_535
+    when :UInt32
+      4_294_967_295
+    when :UInt64
+      9_223_372_036_854_775_807
+    when :Int8
+      127
+    when :Int16
+      32_767
+    when :Int32
+      2_147_483_647
+    when :Int64
+      9_223_372_036_854_775_807
+    end
+  end
+
+  sig { params(type_sym: Symbol).returns(T.nilable(Integer)) }
+  def self.integer_type_min(type_sym)
+    case type_sym
+    when :Byte, :UInt8, :UInt16, :UInt32, :UInt64
+      0
+    when :Int8
+      -128
+    when :Int16
+      -32_768
+    when :Int32
+      -2_147_483_648
+    when :Int64
+      -9_223_372_036_854_775_808
+    end
+  end
 
   sig { returns(T::Boolean) }
   def numeric?
@@ -2857,6 +2923,11 @@ class Type
   end
 
   sig { returns(T::Boolean) }
+  def tuple?
+    generic_instance? && generic_base == :Tuple
+  end
+
+  sig { returns(T::Boolean) }
   def id_handle?
     generic_instance? && shape.generic_base_raw == :Id
   end
@@ -2900,7 +2971,7 @@ class Type
 
   sig { returns(T::Boolean) }
   def struct?
-    !primitive? && !any? && !void? && !string? && !array? && !map? && !optional? && !error_union? && !tense? && !fn_type?
+    !primitive? && !any? && !void? && !string? && !array? && !map? && !tuple? && !optional? && !error_union? && !tense? && !fn_type?
   end
 
   sig { returns(T::Boolean) }
@@ -3071,6 +3142,7 @@ class Type
   end
 
   sig { params(terminal: Symbol, type_info: Type).returns(T.nilable(String)) }
+  # ruby-to-clear: effects reentrant
   def self.observable_wrapper_for_terminal(terminal, type_info)
     return "ObservableSum(#{type_info.zig_type})" if terminal == :sum
     return "ObservableCount()" if terminal == :count
@@ -3105,6 +3177,7 @@ class Type
   private
 
   sig { params(tense_type: Type).returns(String) }
+  # ruby-to-clear: effects reentrant
   def observable_wrapper_zig(tense_type)
     # A2: a missing terminal stamp here means an upstream pass produced
     # an `~T@observable` Type without going through pipe_analysis's
@@ -3309,10 +3382,13 @@ class Type
   end
 
   sig { returns(T.nilable(Type)) }
+  # ruby-to-clear: effects reentrant
   def element_type
     return nil unless array?
     # Uses the capture from parse_raw_input, ensuring "Number[3]" becomes "Float64"
-    t = Type.new(Type.type_input_symbol_or_any(shape.element_type_raw))
+    raw = Type.type_input_symbol_or_any(shape.element_type_raw)
+    t = Type.new(raw)
+    t = Type.new("?#{Type.surface_name(raw)}") if optional? && !t.optional?
     t.apply_capabilities!(
       ownership: Type.capability_symbol_or_unset(elem_ownership),
       sync: Type.capability_symbol_or_unset(elem_sync)
@@ -3327,32 +3403,31 @@ class Type
     # Generic instances (e.g. Id<T>) are intrinsic scalar types — always 1 slot.
     return 1 if scalar_slot?
 
-    if optional_resolver.nil?
-      raise "Need lookup context for struct size"
-      return 1
-    end
+    return 1 unless optional_resolver
     resolver = T.let(T.must(optional_resolver), SchemaResolver)
 
     fixed_slots = fixed_array_slot_size(resolver)
-    return T.must(fixed_slots) unless fixed_slots.nil?
+    if fixed_slots
+      return T.must(fixed_slots)
+    end
 
     return 1 unless struct?
 
     schema = resolver.call(resolved)
-    return 1 unless schema # Treat unknown/nil schemas as 1 slot (default for pointers/unknown structs)
+    if schema
+      if schema.is_a?(Schemas::StructSchema)
+        return 1 unless schema.type_params.empty?
 
-    schema_value = T.must(schema)
-    if schema_value.is_a?(Schemas::StructSchema)
-      return 1 unless schema_value.type_params.empty?
-
-      total = T.let(0, Integer)
-      fields = schema_value.fields.values
-      i = T.let(0, Integer)
-      while i < fields.length
-        total += fields[i].type.slot_size(resolver)
-        i += 1
+        total = T.let(0, Integer)
+        fields = schema.fields.values
+        i = T.let(0, Integer)
+        while i < fields.length
+          field = T.must(fields[i])
+          total += T.cast(field.type, Type).slot_size(resolver)
+          i += 1
+        end
+        return total
       end
-      return total
     end
 
     1 # Default
@@ -3366,7 +3441,10 @@ class Type
     fixed_capacity = capacity
     return nil unless Type.integer_array_capacity?(fixed_capacity)
 
-    Type.array_capacity_integer(fixed_capacity) * T.must(element_type).slot_size(resolver)
+    elem = element_type
+    return nil unless elem
+
+    Type.array_capacity_integer(fixed_capacity) * T.must(elem).slot_size(resolver)
   end
 
   sig { returns(T::Boolean) }
@@ -3402,6 +3480,12 @@ class Type
     return false if heap?                   # Heap-allocated types are not copyable
     return false if frame? && struct?       # Frame-allocated struct pointers are not copyable
     return false if map?                    # Maps are not copyable
+    if tuple?
+      if lookup_block
+        return generic_args.all? { |arg| arg.copyable?(&lookup_block) }
+      end
+      return generic_args.all? { |arg| arg.copyable?(lookup_arg) }
+    end
 
     # Structs: copyable if all fields are copyable (for explicit COPY keyword)
     return false unless struct?
@@ -3412,8 +3496,18 @@ class Type
     schema = resolver_fn.call(resolved)
     return false unless schema
     schema_value = T.must(schema)
-    return false unless schema_value.is_a?(Schemas::StructSchema)
-    schema_value.fields.values.all? { |f| f.type.copyable?(resolver_fn) }
+    if schema_value.is_a?(Schemas::StructSchema)
+      fields = schema_value.fields.values
+      i = T.let(0, Integer)
+      while i < fields.length
+        return false unless fields[i].type.copyable?(resolver_fn)
+        i += 1
+      end
+
+      return true
+    end
+
+    false
   end
 
   # BG/DO/CONCURRENT capture by-value: capturing a value of this type
@@ -3465,6 +3559,12 @@ class Type
     end
     # Pool Id<T> handles are u64 indices — always Copy.
     return true if id_handle?
+    if tuple?
+      if lookup_block
+        return generic_args.all? { |arg| arg.implicitly_copyable?(&lookup_block) }
+      end
+      return generic_args.all? { |arg| arg.implicitly_copyable?(lookup_arg) }
+    end
     # String literals (rodata) are Copy - static data, never freed.
     return true if string? && rodata?
     # Non-literal strings are NOT Copy - they reference frame/heap data.
@@ -3516,6 +3616,10 @@ class Type
       return T.must(optional_inner).recursive_cleanup_shape?(schema_lookup, seen_set)
     end
     return true if string? || any_rc? || link? || collection? || indirect? || future?
+
+    if tuple?
+      return generic_args.any? { |arg| arg.recursive_cleanup_shape?(schema_lookup, seen_set) }
+    end
 
     if array?
       return true unless fixed?
@@ -3592,18 +3696,24 @@ class Type
   # Mirror of Zig's needsPromotion comptime predicate.
   # Returns true if this type contains frame-arena data that must be
   # duped to heap before returning from a function.
-  sig { params(schema_lookup: T.nilable(SchemaLookup)).returns(T::Boolean) }
-  def needs_promotion?(schema_lookup = nil)
+  sig { params(schema_lookup: T.nilable(SchemaLookup), seen: T.nilable(T::Set[String])).returns(T::Boolean) }
+  # ruby-to-clear: effects reentrant
+  def needs_promotion?(schema_lookup = nil, seen = nil)
     return true if string? || list_collection? || (map? && !numeric_map?)
+    seen_set = T.let(seen || Set.new, T::Set[String])
+    key = "promotion:#{type_id.key}"
+    return false if seen_set.include?(key)
+    seen_set << key
+
     if schema_lookup
       lookup = T.must(schema_lookup)
       schema = lookup.call(resolved)
       if schema
         schema_value = T.must(schema)
         if schema_value.is_a?(Schemas::UnionSchema)
-          return schema_union_needs_promotion?(schema_value, lookup)
+          return schema_union_needs_promotion?(schema_value, lookup, seen_set)
         elsif schema_value.is_a?(Schemas::StructSchema)
-          return schema_struct_needs_promotion?(schema_value, lookup)
+          return schema_struct_needs_promotion?(schema_value, lookup, seen_set)
         end
       end
     end
@@ -3615,48 +3725,56 @@ class Type
   # Same as needs_promotion? but excludes bare strings (freed by
   # StringMap.freeUnionPayload inside collections, not at top level).
   # Plus: RC, NumericMap, Pool, Set.
-  sig { params(schema_lookup: T.nilable(SchemaLookup)).returns(T::Boolean) }
-  def needs_cleanup?(schema_lookup = nil)
+  sig { params(schema_lookup: T.nilable(SchemaLookup), seen: T.nilable(T::Set[String])).returns(T::Boolean) }
+  # ruby-to-clear: effects reentrant
+  def needs_cleanup?(schema_lookup = nil, seen = nil)
     return false if borrowed_reference?
     if optional?
       inner = wrapped_type
       return false unless inner
 
       inner_type = T.must(inner)
-      return inner_type.needs_cleanup?(schema_lookup) || inner_type.string?
+      return inner_type.needs_cleanup?(schema_lookup, seen) || inner_type.string?
     end
-    return non_string_array_needs_cleanup?(schema_lookup) if non_string_array?
+    return non_string_array_needs_cleanup?(schema_lookup, seen) if non_string_array?
 
     return true if any_rc? || link? || resource? || collection? || future? || (string? && heap?) ||
                    any_sync? ||
                    indirect?
+    seen_set = T.let(seen || Set.new, T::Set[String])
+    key = "cleanup:#{type_id.key}"
+    return false if seen_set.include?(key)
+    seen_set << key
+
     if schema_lookup
       lookup = T.must(schema_lookup)
       schema = lookup.call(resolved)
       if schema
         schema_value = T.must(schema)
         if schema_value.is_a?(Schemas::UnionSchema)
-          return schema_union_needs_cleanup?(schema_value, lookup)
+          return schema_union_needs_cleanup?(schema_value, lookup, seen_set)
         elsif schema_value.is_a?(Schemas::StructSchema)
-          return schema_struct_needs_cleanup?(schema_value, lookup)
+          return schema_struct_needs_cleanup?(schema_value, lookup, seen_set)
         end
       end
     end
     false
   end
 
-  sig { params(schema_lookup: T.nilable(SchemaLookup)).returns(T::Boolean) }
-  def non_string_array_needs_cleanup?(schema_lookup)
+  sig { params(schema_lookup: T.nilable(SchemaLookup), seen: T.nilable(T::Set[String])).returns(T::Boolean) }
+  # ruby-to-clear: effects reentrant
+  def non_string_array_needs_cleanup?(schema_lookup, seen = nil)
     return true unless fixed?
 
     et = element_type
     return false unless et
 
     elem_t = T.must(et)
-    elem_t.needs_cleanup?(schema_lookup)
+    elem_t.needs_cleanup?(schema_lookup, seen)
   end
 
   sig { params(schema_lookup: T.nilable(SchemaLookup)).returns(T::Boolean) }
+  # ruby-to-clear: effects reentrant
   def ownership_bearing?(schema_lookup = nil)
     maybe_success_type = success_type
     return T.must(maybe_success_type).ownership_bearing_type?(schema_lookup) if maybe_success_type
@@ -3665,6 +3783,7 @@ class Type
   end
 
   sig { params(schema_lookup: T.nilable(SchemaLookup)).returns(T::Boolean) }
+  # ruby-to-clear: effects reentrant
   def ownership_bearing_type?(schema_lookup = nil)
     return false if primitive? || void? || any?
     return false if symbol? || raw?
@@ -3685,6 +3804,7 @@ class Type
   # This is the ownership-aware version of needs_cleanup?. It answers:
   # "if this variable is :live at scope exit, must we emit a defer?"
   sig { params(allocator: Symbol, schema_lookup: T.nilable(SchemaLookup)).returns(T::Boolean) }
+  # ruby-to-clear: effects reentrant
   def needs_explicit_cleanup?(allocator, schema_lookup = nil)
     return false if primitive? || void? || any?
     return false if implicitly_copyable?(schema_lookup)
@@ -3724,6 +3844,7 @@ class Type
 
   # Check if collection elements have heap internals (RC, resource, etc.)
   sig { params(schema_lookup: T.nilable(SchemaLookup)).returns(T::Boolean) }
+  # ruby-to-clear: effects reentrant
   def elem_has_heap_internals?(schema_lookup = nil)
     et = element_type
     return false unless et
@@ -3759,6 +3880,7 @@ class Type
   # self-consistent and the needs_heap_backing? guard becomes a defense-
   # in-depth backstop rather than the load-bearing path.
   sig { params(schema_lookup: T.nilable(SchemaLookup)).returns(Symbol) }
+  # ruby-to-clear: effects reentrant
   def cleanup_allocator(schema_lookup = nil)
     return :heap if heap_cleanup_allocator?
     if schema_lookup
@@ -3792,6 +3914,7 @@ class Type
   # Check if a union variant type contains heap-allocated data (collections, maps, dynamic arrays).
   # Used to determine if a union needs cleanup.
   sig { params(vt: Schemas::UnionSchema::VariantValue).returns(T::Boolean) }
+  # ruby-to-clear: effects reentrant
   def self.variant_has_heap?(vt)
     return false unless vt
     if Schemas.inline_struct?(vt)
@@ -3812,6 +3935,7 @@ class Type
   # Replaces the repeated inline pattern:
   #   ti = node.full_type rescue nil
   #   ti = Type.new(ti) if ti && !ti.is_a?(Type)
+  # ruby-to-clear: skip
   # ruby-to-clear: skip
   sig { params(node: TypeNodeInput).returns(T.nilable(Type)) }
   def self.from_node(node)
@@ -3835,6 +3959,7 @@ class Type
 
   # Returns the Zig type string representation of this type.
   sig { params(is_param: T::Boolean, is_field: T::Boolean).returns(String) }
+  # ruby-to-clear: effects reentrant
   def zig_type(is_param: false, is_field: false)
     compute_zig_type(is_param: is_param, is_field: is_field)
   end
@@ -3889,6 +4014,7 @@ class Type
   private
 
   sig { params(field_type: Type, schema: T.any(Schemas::StructSchema, Schemas::ResourceSchema)).returns(Type) }
+  # ruby-to-clear: effects reentrant
   def substitute_generic_schema_field_type(field_type, schema)
     return field_type unless generic_instance?
     params = T.let([], T::Array[Symbol])
@@ -3912,8 +4038,9 @@ class Type
     subst[field_type.resolved] || field_type
   end
 
-  sig { params(schema: Schemas::UnionSchema, schema_lookup: SchemaLookup).returns(T::Boolean) }
-  def schema_union_needs_promotion?(schema, schema_lookup)
+  sig { params(schema: Schemas::UnionSchema, schema_lookup: SchemaLookup, seen: T::Set[String]).returns(T::Boolean) }
+  # ruby-to-clear: effects reentrant
+  def schema_union_needs_promotion?(schema, schema_lookup, seen)
     values = schema.variants.values
     i = T.let(0, Integer)
     while i < values.length
@@ -3923,29 +4050,32 @@ class Type
         next
       end
       if vt.is_a?(Schemas::InlineStructVariant)
-        return true if inline_variant_needs_promotion?(vt, schema_lookup)
+        return true if inline_variant_needs_promotion?(vt, schema_lookup, seen)
       else
-        return true if Type.from_variant_input(T.must(vt)).needs_promotion?(schema_lookup)
+        return true if Type.from_variant_input(T.must(vt)).needs_promotion?(schema_lookup, seen)
       end
       i += 1
     end
     false
   end
 
-  sig { params(variant: Schemas::InlineStructVariant, schema_lookup: SchemaLookup).returns(T::Boolean) }
-  def inline_variant_needs_promotion?(variant, schema_lookup)
+  sig { params(variant: Schemas::InlineStructVariant, schema_lookup: SchemaLookup, seen: T::Set[String]).returns(T::Boolean) }
+  # ruby-to-clear: effects reentrant
+  def inline_variant_needs_promotion?(variant, schema_lookup, seen)
     values = variant.fields.values
     i = T.let(0, Integer)
     while i < values.length
-      return true if values.fetch(i).needs_promotion?(schema_lookup)
+      field_type = Type.from_input(values.fetch(i))
+      return true if field_type.needs_promotion?(schema_lookup, seen)
 
       i += 1
     end
     false
   end
 
-  sig { params(schema: Schemas::StructSchema, schema_lookup: SchemaLookup).returns(T::Boolean) }
-  def schema_struct_needs_promotion?(schema, schema_lookup)
+  sig { params(schema: Schemas::StructSchema, schema_lookup: SchemaLookup, seen: T::Set[String]).returns(T::Boolean) }
+  # ruby-to-clear: effects reentrant
+  def schema_struct_needs_promotion?(schema, schema_lookup, seen)
     values = schema.fields.values
     i = T.let(0, Integer)
     while i < values.length
@@ -3955,14 +4085,15 @@ class Type
         t = Type.new(t)
         t.mark_borrowed_reference!
       end
-      return true if t.needs_promotion?(schema_lookup)
+      return true if substitute_generic_schema_field_type(t, schema).needs_promotion?(schema_lookup, seen)
       i += 1
     end
     false
   end
 
-  sig { params(schema: Schemas::UnionSchema, schema_lookup: SchemaLookup).returns(T::Boolean) }
-  def schema_union_needs_cleanup?(schema, schema_lookup)
+  sig { params(schema: Schemas::UnionSchema, schema_lookup: SchemaLookup, seen: T::Set[String]).returns(T::Boolean) }
+  # ruby-to-clear: effects reentrant
+  def schema_union_needs_cleanup?(schema, schema_lookup, seen)
     values = schema.variants.values
     i = T.let(0, Integer)
     while i < values.length
@@ -3972,29 +4103,32 @@ class Type
         next
       end
       if vt.is_a?(Schemas::InlineStructVariant)
-        return true if inline_variant_needs_cleanup?(vt, schema_lookup)
+        return true if inline_variant_needs_cleanup?(vt, schema_lookup, seen)
       else
-        return true if Type.from_variant_input(T.must(vt)).needs_cleanup?(schema_lookup)
+        return true if Type.from_variant_input(T.must(vt)).needs_cleanup?(schema_lookup, seen)
       end
       i += 1
     end
     false
   end
 
-  sig { params(variant: Schemas::InlineStructVariant, schema_lookup: SchemaLookup).returns(T::Boolean) }
-  def inline_variant_needs_cleanup?(variant, schema_lookup)
+  sig { params(variant: Schemas::InlineStructVariant, schema_lookup: SchemaLookup, seen: T::Set[String]).returns(T::Boolean) }
+  # ruby-to-clear: effects reentrant
+  def inline_variant_needs_cleanup?(variant, schema_lookup, seen)
     values = variant.fields.values
     i = T.let(0, Integer)
     while i < values.length
-      return true if values.fetch(i).needs_cleanup?(schema_lookup)
+      field_type = Type.from_input(values.fetch(i))
+      return true if field_type.needs_cleanup?(schema_lookup, seen)
 
       i += 1
     end
     false
   end
 
-  sig { params(schema: Schemas::StructSchema, schema_lookup: SchemaLookup).returns(T::Boolean) }
-  def schema_struct_needs_cleanup?(schema, schema_lookup)
+  sig { params(schema: Schemas::StructSchema, schema_lookup: SchemaLookup, seen: T::Set[String]).returns(T::Boolean) }
+  # ruby-to-clear: effects reentrant
+  def schema_struct_needs_cleanup?(schema, schema_lookup, seen)
     fields = schema.fields
     values = fields.values
     i = T.let(0, Integer)
@@ -4005,13 +4139,14 @@ class Type
         t = Type.new(t)
         t.mark_borrowed_reference!
       end
-      return true if substitute_generic_schema_field_type(t, schema).needs_cleanup?(schema_lookup)
+      return true if substitute_generic_schema_field_type(t, schema).needs_cleanup?(schema_lookup, seen)
       i += 1
     end
     false
   end
 
   sig { params(schema: Schemas::StructSchema).returns(T::Boolean) }
+  # ruby-to-clear: effects reentrant
   def schema_struct_has_heap_internals?(schema)
     fields = schema.fields
     values = fields.values
@@ -4033,6 +4168,7 @@ class Type
   # True if any struct field in schema satisfies the block (block receives Type).
   # Skips metadata (Symbol) keys; unwraps {:type => T} field hashes.
   sig { params(schema: Schemas::StructSchema, blk: T.proc.params(t: Type).returns(T::Boolean)).returns(T::Boolean) }
+  # ruby-to-clear: effects reentrant
   def schema_struct_any?(schema, &blk)
     values = schema.fields.values
     i = T.let(0, Integer)
@@ -4053,15 +4189,22 @@ class Type
   # Skips nil and Hash variants (inline_struct/indirect); caller handles those via
   # Type.variant_has_heap? when needed.
   sig { params(schema: Schemas::UnionSchema, blk: T.proc.params(t: Type).returns(T::Boolean)).returns(T::Boolean) }
+  # ruby-to-clear: effects reentrant
   def schema_union_any?(schema, &blk)
     values = schema.variants.values
     i = T.let(0, Integer)
     while i < values.length
       vt = values.fetch(i)
-      if vt
-        unless vt.is_a?(Schemas::InlineStructVariant)
-          return true if blk.call(Type.from_variant_input(T.must(vt)))
-        end
+      unless vt
+        i += 1
+        next
+      end
+
+      if vt.is_a?(Schemas::InlineStructVariant)
+        i += 1
+        next
+      else
+        return true if blk.call(Type.from_variant_input(T.must(vt)))
       end
       i += 1
     end
@@ -4070,6 +4213,7 @@ class Type
 
   # Structural match for function/lambda types. Called by accepts? when self.fn_type?.
   sig { params(other_type: Type).returns(T::Boolean) }
+  # ruby-to-clear: effects reentrant
   def accepts_fn_type?(other_type)
     return true if other_type.any?
     return false unless other_type.fn_type?
@@ -4102,6 +4246,7 @@ class Type
 
   # Promise/Stream coercion. Called by accepts? when self.future?.
   sig { params(other_type: Type).returns(T::Boolean) }
+  # ruby-to-clear: effects reentrant
   def accepts_future?(other_type)
     # ~T[]@list accepts [] or another ~T[]
     return true if promise_list? && (other_type.empty_list? || (other_type.future? && other_type.tense_type.dynamic?))
@@ -4150,6 +4295,7 @@ class Type
 
   # Array coercion. Called by accepts? when self.array?.
   sig { params(other_type: Type).returns(T::Boolean) }
+  # ruby-to-clear: effects reentrant
   def accepts_array?(other_type)
     # Any[] accepts stream types for append/list intrinsic matching
     if T.must(element_type).any? && other_type.future?
@@ -4218,6 +4364,7 @@ class Type
   end
 
   sig { returns(String) }
+  # ruby-to-clear: effects reentrant
   def semantic_shape_key
     return function_type_key if fn_type?
 
@@ -4225,6 +4372,7 @@ class Type
   end
 
   sig { returns(String) }
+  # ruby-to-clear: effects reentrant
   def function_type_key
     sig = T.must(function_type)
     param_keys = sig.params.map { |param| param.type.semantic_type_key }
@@ -4271,6 +4419,7 @@ class Type
   end
 
   sig { params(is_param: T::Boolean, is_field: T::Boolean).returns(String) }
+  # ruby-to-clear: effects reentrant
   def tense_zig_type(is_param:, is_field:)
     if tense_observable? && !promise_list?
       return "*CheatLib.obs.#{observable_wrapper_zig(tense_type)}"
@@ -4312,6 +4461,7 @@ class Type
   end
 
   sig { params(is_param: T::Boolean, is_field: T::Boolean).returns(T.nilable(String)) }
+  # ruby-to-clear: effects reentrant
   def capability_wrapped_zig_type(is_param:, is_field:)
     return nil unless (ownership != :affine || any_sync?) && !(map? && striped? && ownership == :affine)
 
@@ -4329,11 +4479,13 @@ class Type
   end
 
   sig { params(inner_zig: String).returns(String) }
+  # ruby-to-clear: effects reentrant
   def link_zig_type(inner_zig)
     link_source == :shared ? "CheatLib.WeakArc(#{inner_zig})" : "CheatLib.WeakRc(#{inner_zig})"
   end
 
   sig { params(inner_zig: String).returns(T.nilable(String)) }
+  # ruby-to-clear: effects reentrant
   def default_capability_zig_type(inner_zig)
     return nil if map? && striped?
 
@@ -4341,6 +4493,7 @@ class Type
   end
 
   sig { params(is_param: T::Boolean, is_field: T::Boolean).returns(String) }
+  # ruby-to-clear: effects reentrant
   def capability_inner_zig_type(is_param:, is_field:)
     if map? && striped?
       bare = Type.new(resolved)
@@ -4373,6 +4526,7 @@ class Type
   end
 
   sig { returns(String) }
+  # ruby-to-clear: effects reentrant
   def map_zig_type
     val_zig = value_type.zig_type
     if striped?
@@ -4404,6 +4558,7 @@ class Type
   # Computes the Zig type string for this CHEAT type.
   # Handles: error unions, optionals, multiowned (Rc), pointers, arrays, hashmaps, primitives, structs.
   sig { params(is_param: T::Boolean, is_field: T::Boolean).returns(String) }
+  # ruby-to-clear: effects reentrant
   def compute_zig_type(is_param: false, is_field: false)
     # 0. Handle Tense types:
     #    ~T[N]              -> CheatLib.BoundedStream(T, N)
@@ -4526,14 +4681,16 @@ class Type
     #    Struct fields and function parameters use slices.
     if array?
       base_zig = T.must(element_type).zig_type(is_param: is_param, is_field: is_field)
+      array_capacity_value = capacity
       if dynamic? && !is_param && !is_field
         # Dynamic arrays (ArrayListUnmanaged) are always value-typed locals.
         # The list header is a struct value; the backing store lives on the heap internally.
         # heap? provenance means the backing store is heap-managed, NOT that the header
         # itself is a pointer. Never apply *-prefix here.
         return "std.ArrayListUnmanaged(#{base_zig})"
-      elsif fixed?
-        zig = "[#{capacity}]#{base_zig}"
+      elsif Type.integer_array_capacity?(array_capacity_value)
+        current_capacity = Type.array_capacity_integer(array_capacity_value)
+        zig = "[#{Type.integer_string(current_capacity)}]#{base_zig}"
       else
         zig = "[]#{base_zig}"
       end
@@ -4561,6 +4718,7 @@ class Type
   end
 
   sig { returns(T.nilable(String)) }
+  # ruby-to-clear: effects reentrant
   def generic_instance_zig_type
     return nil unless generic_instance?
     return "u64" if id_handle?
@@ -4574,7 +4732,10 @@ class Type
       i += 1
     end
     args_zig = args_zig_parts.join(", ")
-    "#{shape.generic_base_raw}(#{args_zig})"
+    return "struct { #{args_zig} }" if tuple?
+
+    base_name = Type.symbol_or_default(shape.generic_base_raw, resolved)
+    "#{base_name}(#{args_zig})"
   end
 
   private :apply_placement!,
@@ -4598,80 +4759,25 @@ module TypeHelper
   # Coerce input to Type object if needed
   sig { params(input: T.nilable(T.any(Symbol, Type))).returns(Type) }
   def to_type(input)
-    input.is_a?(Type) ? input : Type.new(input)
+    return Type.new(:Any) if input.nil?
+    value = T.must(input)
+
+    return Type.copy_type(value) if value.is_a?(Type)
+    return Type.new(value) if value.is_a?(Symbol)
+
+    Type.new(:Any)
   end
 
   sig { params(source_type: T.nilable(T.any(Symbol, Type)), target_type: Type::TypeInput).returns(T::Boolean) }
   def is_safe_autocast?(source_type, target_type)
-    to_type(target_type).accepts?(to_type(source_type))
+    target = Type.from_input(target_type)
+    return target.accepts?(Type.new(:Any)) if source_type.nil?
+    return target.accepts?(Type.copy_type(source_type)) if source_type.is_a?(Type)
+    return target.accepts?(Type.new(source_type)) if source_type.is_a?(Symbol)
+
+    target.accepts?(Type.new(:Any))
   end
 
-  # Called after coercion context is known for integer literals and constant-foldable
-  # unary negations (e.g. -200). Errors if the value does not fit in the effective
-  # target type. No-op for non-integer or non-literal nodes.
-  sig { params(node: AST::Node, effective_type: T.nilable(Type::TypeInput)).returns(NilClass) }
-  def check_prefixed_int_range!(node, effective_type)
-    return if effective_type.nil?
-
-    val = integer_literal_range_value(node)
-    return if val.nil?
-
-    t = integer_range_target_type(effective_type)
-    return if t.nil?
-
-    max = Type::INT_TYPE_MAX[t]
-    return if max.nil?  # Not a known integer type; let type checker handle the mismatch
-    min = Type::INT_TYPE_MIN[t] || 0
-
-    if val < min || val > max
-      if node.is_a?(AST::Literal) && respond_to?(:emit_int_overflow_error!)
-        emit_int_overflow_error!(node, val, t, min, max)
-      else
-        error!(node, :INT_LITERAL_OVERFLOW, val: val, type: t, min: min, max: max)
-      end
-    end
-  end
-
-  sig { params(node: AST::Node).returns(T.nilable(Integer)) }
-  def integer_literal_range_value(node)
-    if node.is_a?(AST::Literal) && (node.type == :PREFIXED_INT || node.type == :INT64)
-      node.value
-    else
-      negative_integer_literal_range_value(node)
-    end
-  end
-
-  sig { params(node: AST::Node).returns(T.nilable(Integer)) }
-  def negative_integer_literal_range_value(node)
-    return nil unless node.is_a?(AST::UnaryOp) && node.op == :SUB
-
-    lit = node.right
-    return nil unless lit.is_a?(AST::Literal) && (lit.type == :INT64 || lit.type == :PREFIXED_INT)
-
-    -lit.value
-  end
-
-  sig { params(effective_type: Type::TypeInput).returns(T.nilable(Symbol)) }
-  def integer_range_target_type(effective_type)
-    # Unwrap error unions so fallible integer returns range-check against the
-    # underlying payload type.
-    if effective_type.is_a?(Type) && effective_type.error_union?
-      payload_type = effective_type.payload_type
-      return nil unless payload_type
-      effective_type = payload_type
-    end
-
-    case effective_type
-    when Type
-      effective_type.resolved
-    when Symbol
-      effective_type
-    when String
-      effective_type.to_sym
-    end
-  end
-
-  private :integer_literal_range_value, :integer_range_target_type
 end
 
 # Loaded after `class Type` is fully defined so the
@@ -4684,8 +4790,12 @@ require_relative "../annotator/helpers/function_signature" # ruby-to-clear: no-r
 
 class Type
   sig { returns(T.nilable(BasicObject)) }
+  # ruby-to-clear: skip
   def function_signature
-    function_type&.source_signature
+    ft = function_type
+    return nil unless ft
+
+    ft.source_signature
   end
 
   # ruby-to-clear: skip

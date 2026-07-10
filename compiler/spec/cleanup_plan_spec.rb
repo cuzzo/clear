@@ -750,15 +750,15 @@ RSpec.describe CleanupClassifier do
       expect(resource_schema.static_methods.fetch("open").fetch(:can_fail)).to eq(true)
 
       direct = Type.new(:Handle).resolve_resource_close(schema_lookup_for(Handle: resource_schema))
-      expect(direct.first).to eq(true)
-      expect(direct.last&.actions&.first&.name).to eq("closeHandle")
+      expect(direct.is_resource).to eq(true)
+      expect(direct.close_plan&.actions&.first&.name).to eq("closeHandle")
 
       box_schema = Schemas::StructSchema.new(fields: {
         "handle" => AST::StructField.new(type: Type.new(:Handle)),
       })
       composed = Type.new(:Box).resolve_resource_close(schema_lookup_for(Box: box_schema, Handle: resource_schema))
-      expect(composed.first).to eq(true)
-      action = composed.last&.actions&.first
+      expect(composed.is_resource).to eq(true)
+      action = composed.close_plan&.actions&.first
       expect(action&.name).to eq("closeHandle")
       expect(action&.field_path).to eq(["handle"])
 

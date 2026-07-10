@@ -68,6 +68,11 @@ module RubyToClear
         rendered[keyword_rest_index] = keyword_rest_argument(keyword_pairs, keyword_splats)
       end
 
+      clear_required_tail = param_infos.rindex do |info|
+        info[:default] && !parameter_default_supported?(info[:default])
+      end
+      max_index = [max_index, clear_required_tail].compact.max
+
       (0..max_index).map do |idx|
         rendered[idx] || default_argument_for_parameter(param_infos[idx])
       end
@@ -78,40 +83,168 @@ module RubyToClear
       wrap_argument_for_parameter_type(code, arg_node, param_info && param_info[:type])
     end
 
+    def sorbet_must_unwrap_code(value_code, value_type)
+      target_type = value_type.to_s.delete_prefix("?")
+      if function_clear_type?(target_type)
+        return "CAST(#{value_code} AS #{target_type})"
+      end
+
+      if target_type.end_with?("@symbol")
+        value_type = target_type.delete_suffix("@symbol")
+        fallback = value_type.empty? ? 'panic("T.must failed")' : "CAST(panic(\"T.must failed\") AS #{value_type})"
+        return "symbol(#{value_code} OR #{fallback})"
+      end
+
+      fallback = if target_type.empty?
+        'panic("T.must failed")'
+      else
+        "CAST(panic(\"T.must failed\") AS #{target_type})"
+      end
+      "(#{value_code} OR #{fallback})"
+    end
+
     def default_argument_for_parameter(param_info)
       code = default_argument_for(param_info)
       wrap_argument_for_parameter_type(code, param_info && param_info[:default], param_info && param_info[:type])
     end
 
-    def wrap_argument_for_parameter_type(code, arg_node, param_type)
+    def wrap_argument_for_parameter_type(code, arg_node, param_type, seen_union_types = [])
       return code unless param_type
 
       expected = param_type.to_s
       optional_expected = expected.start_with?("?")
       union_type = expected.delete_prefix("?")
+      return code if seen_union_types.include?(union_type)
+
+      arg_type = sentinel_type_for_node(arg_node) || inferred_clear_type(arg_node)
+      if !optional_expected && arg_type.to_s.start_with?("?") && arg_type.to_s.delete_prefix("?") == expected
+        return sorbet_must_unwrap_code(code, arg_type)
+      end
+      if !@union_types.key?(union_type) &&
+         (payload_cast = union_payload_cast_code(code, arg_type, expected))
+        return payload_cast
+      end
+
       members = @union_types[union_type]
       return code unless members
       return code if optional_expected && code == "NIL"
       return code if code.start_with?("#{union_type}{")
 
-      arg_type = sentinel_type_for_node(arg_node) || inferred_clear_type(arg_node)
       return code if arg_type == union_type || arg_type == expected
+      if (subset_cast = union_subset_cast_code(code, arg_type, expected))
+        return subset_cast
+      end
+
+      if optional_expected && arg_type.to_s.start_with?("?")
+        inner_type = arg_type.to_s.delete_prefix("?")
+        inner_names = type_lookup_names(inner_type)
+        optional_member = members.find do |candidate|
+          union_member_payload_type_match?(candidate, inner_type, inner_names)
+        end
+        if optional_member
+          variant = union_variant_name(optional_member, union_type)
+          helper_suffix = [inner_type, union_type].join("_").gsub(/[^A-Za-z0-9]+/, "_").sub(/\A_+/, "").sub(/_+\z/, "")
+          helper = "ruby_wrap_optional_#{helper_suffix}"
+          @generated_support_helper_defs[helper] ||= <<~CLEAR.chomp
+            FN #{helper}(value: ?#{inner_type}) RETURNS ?#{union_type} ->
+              IF value AS optional_payload THEN
+                RETURN #{union_type}{ #{variant}: COPY optional_payload };
+              END
+              NIL;
+            END
+          CLEAR
+          return "#{helper}(#{code})"
+        end
+      end
 
       arg_type_names = type_lookup_names(arg_type)
+      nested_payload = nil
       member = members.find do |candidate|
-        union_member_payload_type_match?(candidate, arg_type, arg_type_names)
+        if (array_payload = union_array_payload_code(code, arg_node, candidate, arg_type, seen_union_types + [union_type]))
+          nested_payload = array_payload
+          true
+        elsif union_member_payload_type_match?(candidate, arg_type, arg_type_names)
+          true
+        elsif @union_types[candidate.to_s.delete_prefix("?")]
+          wrapped = wrap_argument_for_parameter_type(code, arg_node, candidate, seen_union_types + [union_type])
+          if wrapped != code
+            nested_payload = wrapped
+            true
+          else
+            false
+          end
+        else
+          false
+        end
       end
       return code unless member
 
-      variant = union_variant_name(member)
-      payload = union_payload_code(code, arg_node, member, variant)
+      variant = union_variant_name(member, union_type)
+      payload = nested_payload || union_payload_code(code, arg_node, member, variant)
+      "#{union_type}{ #{variant}: #{payload} }"
+    end
+
+    def union_array_payload_code(code, arg_node, candidate, arg_type, seen_union_types)
+      candidate_element_type = array_element_clear_type(candidate)
+      arg_element_type = array_element_clear_type(arg_type)
+      return nil unless candidate_element_type && arg_element_type
+
+      if union_member_payload_type_match?(candidate_element_type, arg_element_type)
+        return union_payload_code(code, arg_node, candidate, "ArrayValue")
+      end
+
+      wrapped_element = wrap_known_type_code("_", arg_element_type, candidate_element_type, seen_union_types)
+      return nil unless wrapped_element && wrapped_element != "_"
+
+      source = code.start_with?("COPY ") ? code.delete_prefix("COPY ") : code
+      "#{source} |> SELECT #{wrapped_element}"
+    end
+
+    def wrap_known_type_code(code, arg_type, param_type, seen_union_types = [])
+      expected = param_type.to_s
+      optional_expected = expected.start_with?("?")
+      union_type = expected.delete_prefix("?")
+      return code if seen_union_types.include?(union_type)
+
+      members = @union_types[union_type]
+      return code unless members
+      return code if optional_expected && code == "NIL"
+      return code if code.start_with?("#{union_type}{")
+      return code if arg_type == union_type || arg_type == expected
+
+      arg_type_names = type_lookup_names(arg_type)
+      nested_payload = nil
+      member = members.find do |candidate|
+        if union_member_payload_type_match?(candidate, arg_type, arg_type_names)
+          true
+        elsif @union_types[candidate.to_s.delete_prefix("?")]
+          wrapped = wrap_known_type_code(code, arg_type, candidate, seen_union_types + [union_type])
+          if wrapped != code
+            nested_payload = wrapped
+            true
+          else
+            false
+          end
+        else
+          false
+        end
+      end
+      return code unless member
+
+      variant = union_variant_name(member, union_type)
+      payload = nested_payload || union_payload_code(code, nil, member, variant)
       "#{union_type}{ #{variant}: #{payload} }"
     end
 
     def union_payload_code(code, arg_node, member, variant)
+      arg_type = inferred_clear_type(arg_node).to_s if arg_node
+      if arg_type&.start_with?("?") && !member.to_s.start_with?("?")
+        code = sorbet_must_unwrap_code(code, arg_type)
+      end
       return code if code.start_with?("COPY ")
-      return "COPY #{code}" if variant == "StringValue"
+      return "COPY #{code}" if member.to_s == "String"
       return code if immediate_copy_safe_node?(arg_node)
+      return "COPY #{code}" if member.to_s == "String@symbol"
       return code if primitive_union_payload_type?(member)
 
       "COPY #{code}"
@@ -130,6 +263,7 @@ module RubyToClear
       candidate_text = candidate.to_s
       arg_text = arg_type.to_s
       return true if candidate_text == arg_text
+      return false if candidate_text.end_with?("[]") != arg_text.end_with?("[]")
       return false if candidate_text.include?("@") || arg_text.include?("@")
 
       !(type_lookup_names(candidate) & arg_type_names).empty?
@@ -177,6 +311,24 @@ module RubyToClear
     # --- Node Visitors ---
 
     def visit_call_node(node)
+      if node.receiver.nil? && node.name.to_s == "Array"
+        args = node.arguments ? node.arguments.arguments : []
+        return visit(args.first) if args.length == 1
+      end
+
+      if node.safe_navigation? && !@lowering_safe_navigation.include?(node.object_id)
+        unless pure_expression?(node.receiver)
+          return unsupported_expression(node, "Safe navigation requires an expression-safe receiver")
+        end
+
+        receiver = visit(node.receiver)
+        unwrapped = optional_unwrap_code(receiver)
+        @lowering_safe_navigation << node.object_id
+        inner = with_node_code_override(node.receiver, unwrapped) { visit_call_node(node) }
+        @lowering_safe_navigation.delete(node.object_id)
+        return "(IF #{receiver} != NIL THEN\n#{indent}  #{inner}\n#{indent}ELSE\n#{indent}  NIL\n#{indent}END)"
+      end
+
       keyword_arg = keyword_hash_argument(node.arguments)
 
       if ruby_raise_call?(node)
@@ -194,6 +346,10 @@ module RubyToClear
 
       if ruby_scaffolding_call?(node)
         return ""
+      end
+
+      if array_concat_call?(node)
+        return array_concat_expression_code(node)
       end
 
       if same_class_constructor_call?(node)
@@ -217,7 +373,7 @@ module RubyToClear
           return unsupported_expression(node, "#{node.name} requires a static symbol or string method name")
         end
 
-        extra_args = args.drop(1).map { |arg| visit(arg) }
+        extra_args = args.drop(1).map { |arg| expression_argument_code(arg) }
         return "#{receiver}.#{method_name}(#{extra_args.join(', ')})"
       end
 
@@ -238,27 +394,41 @@ module RubyToClear
             value_node = args.first
             value_code = visit(value_node)
             value_type = inferred_clear_type(value_node)
-            return "#{value_code}?" if value_type.to_s.start_with?("?")
             if value_node.is_a?(Prism::LocalVariableReadNode)
               name = value_node.name.to_s
-              if value_code == optional_unwrap_code(name) &&
-                 !@current_param_names.include?(name) &&
+              if value_code == optional_unwrap_code(name)
+                return value_code
+              end
+
+              if value_type.to_s.start_with?("?") &&
+                 !union_like_type?(value_type.to_s.delete_prefix("?"))
+                return optional_unwrap_code(name)
+              end
+
+              return sorbet_must_unwrap_code(value_code, value_type) if value_type.to_s.start_with?("?")
+
+              if value_type.to_s.start_with?("?") &&
                  @narrowed_optional_storage_locals.include?(name)
-                return name
+                return optional_unwrap_code(name)
               end
             end
+            return sorbet_must_unwrap_code(value_code, value_type) if value_type.to_s.start_with?("?")
 
             return value_code
           end
         end
 
         if (unwrapped = sorbet_unwrapped_value(node))
-          return visit(unwrapped)
+          return expression_argument_code(unwrapped)
         end
       end
 
       if node.name.to_s == "freeze" && (!node.arguments || node.arguments.arguments.empty?)
         return node.receiver ? visit(node.receiver) : ""
+      end
+
+      if (pairs_to_hash = array_pairs_to_hash_code(node))
+        return pairs_to_hash
       end
 
       if node.name.to_s == "equal?" &&
@@ -286,7 +456,7 @@ module RubyToClear
           return unsupported_expression(node, unsupported_reason)
         end
 
-        rec_code = node.receiver ? visit(node.receiver) : nil
+        rec_code = node.receiver ? method_call_receiver_expression(node.receiver) : nil
         if rec_code
           translated = MethodRegistry.translate(
             node.name.to_s,
@@ -310,8 +480,30 @@ module RubyToClear
       when "+@"
         "(+#{visit(node.receiver)})"
       when "==", "!=", "<", "<=", ">", ">=", "+", "-", "*", "/", "%", "&&", "||", "&", "|"
+        rhs_node = node.arguments.arguments.first
+        if ["==", "!="].include?(node.name.to_s) &&
+           (safe_comparison = safe_navigation_equality_code(node, rhs_node))
+          return safe_comparison
+        end
         lhs = visit(node.receiver)
-        rhs = visit(node.arguments.arguments.first)
+        rhs = visit(rhs_node)
+        if node.name.to_s == "%" && inferred_clear_type(node.receiver).to_s.delete_prefix("?") == "String"
+          return helper_config.call_or(:string_format, "compilerFormatTemplate", [lhs])
+        end
+        if node.name.to_s == "*" && inferred_clear_type(node.receiver).to_s.delete_prefix("?") == "String"
+          return helper_config.call_or(:string_repeat, "compilerRepeatString", [lhs, rhs])
+        end
+        lhs = "(#{lhs})" if lhs.include?("|>")
+        rhs = "(#{rhs})" if rhs.include?("|>")
+        if ["==", "!="].include?(node.name.to_s)
+          lhs_type = inferred_clear_type(node.receiver).to_s.delete_prefix("?")
+          rhs_type = inferred_clear_type(rhs_node).to_s.delete_prefix("?")
+          if @union_types.key?(lhs_type) && !@union_types.key?(rhs_type)
+            rhs = wrap_argument_for_parameter_type(rhs, rhs_node, lhs_type)
+          elsif @union_types.key?(rhs_type) && !@union_types.key?(lhs_type)
+            lhs = wrap_argument_for_parameter_type(lhs, node.receiver, rhs_type)
+          end
+        end
         "(#{lhs} #{node.name} #{rhs})"
       when "=~"
         lhs = visit(node.receiver)
@@ -323,9 +515,11 @@ module RubyToClear
         "!(#{regex_match_code(lhs, rhs)})"
       when "<<"
         lhs = visit(node.receiver)
-        rhs = visit(node.arguments.arguments.first)
+        rhs_node = node.arguments.arguments.first
+        rhs = visit(rhs_node)
+        rhs = "COPY #{rhs}" if container_index_access_node?(rhs_node)
         method = set_receiver?(node.receiver) ? "insert" : "append"
-        "#{lhs}.#{method}(#{rhs})"
+        "#{method_receiver_code(lhs)}.#{method}(#{rhs})"
       when "fetch"
         lhs = visit(node.receiver)
         arg_nodes = node.arguments ? node.arguments.arguments : []
@@ -356,7 +550,9 @@ module RubyToClear
         end
         lhs = visit(node.receiver)
         arg_nodes = node.arguments ? node.arguments.arguments : []
-        if arg_nodes.length == 1 && arg_nodes.first.is_a?(Prism::RangeNode)
+        if (field_access = self_struct_field_index_access(node.receiver, arg_nodes))
+          field_access
+        elsif arg_nodes.length == 1 && arg_nodes.first.is_a?(Prism::RangeNode)
           range = arg_nodes.first
           start = range.left ? visit(range.left) : "0"
           if range.right
@@ -373,13 +569,32 @@ module RubyToClear
           length = visit(arg_nodes[1])
           "#{lhs}.substr(#{start}, #{length})"
         else
-          args = visit(node.arguments)
+          args = if arg_nodes.length == 1 && (key_type = map_key_clear_type(clear_type_for_receiver_node(node.receiver)))
+            key_node = arg_nodes.first
+            wrap_argument_for_parameter_type(visit(key_node), key_node, key_type)
+          else
+            visit(node.arguments)
+          end
           "#{lhs}[#{args}]"
         end
       when "[]="
         lhs = visit(node.receiver)
-        index = visit(node.arguments.arguments.first)
-        value = visit(node.arguments.arguments.last)
+        args = node.arguments.arguments
+        if (field_name = self_struct_field_index_name(node.receiver, args.first))
+          value = expression_argument_code(args.last)
+          value = "COPY #{value}" if stored_borrowed_value?(args.last)
+          if @current_class
+            field_type = @class_instance_field_types[@current_class][field_name]
+            value = wrap_argument_for_parameter_type(value, args.last, field_type)
+          end
+          return "self.#{field_name} = #{value}"
+        end
+        index = visit(args.first)
+        value = expression_argument_code(args.last)
+        value = "COPY #{value}" if stored_borrowed_value?(args.last)
+        if (value_type = map_value_clear_type(clear_type_for_receiver_node(node.receiver)))
+          value = wrap_argument_for_parameter_type(value, args.last, value_type)
+        end
         "#{lhs}[#{index}] = #{value}"
       else
         if constant_constructor_call?(node)
@@ -414,22 +629,33 @@ module RubyToClear
           return unsupported_expression(node, "Constructor call needs known field names")
         end
 
-        rec_code = node.receiver ? visit(node.receiver) : nil
+        rec_code = node.receiver ? method_call_receiver_expression(node.receiver) : nil
         name_str = node.name.to_s
         receiver_type_for_call = if node.receiver
           clear_type_for_receiver_node(node.receiver) || constant_receiver_name(node.receiver)
         elsif @inside_instance_method || @inside_class_method
+          @current_class
+        elsif @current_class && !@inside_function
           @current_class
         end
         if (struct_with = struct_with_call(node, receiver_type_for_call))
           return struct_with
         end
 
-        if rec_code && name_str.end_with?("=")
+        setter_owner = if receiver_type_for_call && name_str.end_with?("=")
+          instance_method_owner_type(receiver_type_for_call, clear_function_name(name_str))
+        end
+        if rec_code && name_str.end_with?("=") && setter_owner.nil?
           args = node.arguments ? node.arguments.arguments : []
           return unsupported_expression(node, "Attribute writer calls must have exactly one argument") unless args.length == 1
 
-          return "#{rec_code}.#{name_str.delete_suffix('=')} = #{visit(args.first)}"
+          field_name = name_str.delete_suffix("=")
+          value = expression_argument_code(args.first)
+          value = "COPY #{value}" if stored_borrowed_value?(args.first)
+          if receiver_type_for_call
+            value = wrap_argument_for_parameter_type(value, args.first, class_instance_field_type(receiver_type_for_call, field_name))
+          end
+          return "#{method_receiver_code(rec_code)}.#{field_name} = #{value}"
         end
 
         args_list = if keyword_arg
@@ -442,7 +668,7 @@ module RubyToClear
         elsif (param_infos = method_params_for(name_str, receiver_type_for_call))
           node.arguments ? node.arguments.arguments.each_with_index.map { |arg, idx| argument_for_parameter(arg, param_infos[idx]) } : []
         else
-          node.arguments ? node.arguments.arguments.map { |arg| visit(arg) } : []
+          node.arguments ? node.arguments.arguments.map { |arg| expression_argument_code(arg) } : []
         end
 
         if rec_code
@@ -486,17 +712,24 @@ module RubyToClear
 
         clear_name = clear_function_name(name_str)
         if rec_code
+          if (self_class = self_class_receiver_name(node.receiver)) &&
+             @class_class_method_names[self_class].include?(clear_name)
+            return "#{clear_name}(#{args_list.join(', ')})"
+          end
           receiver_type = receiver_type_for_call
           if (receiver_class = constant_receiver_name(node.receiver)) &&
              @class_class_method_names[receiver_class].include?(clear_name)
             return "#{clear_name}(#{args_list.join(', ')})"
           end
           if receiver_type
-            if args_list.empty? && struct_field_reader?(receiver_type, name_str)
-              return "#{rec_code}.#{name_str}"
+            if (owner_type = instance_method_owner_type(receiver_type, clear_name))
+              return "#{instance_function_name(owner_type, name_str)}(#{[rec_code, *args_list].join(', ')})"
             end
-            if @class_instance_method_names[receiver_type].include?(clear_name)
-              return "#{instance_function_name(receiver_type, name_str)}(#{[rec_code, *args_list].join(', ')})"
+            if args_list.empty? && shared_union_field_type(receiver_type, name_str)
+              return shared_union_field_access(rec_code, receiver_type, name_str)
+            end
+            if args_list.empty? && struct_field_reader?(receiver_type, name_str)
+              return "#{method_receiver_code(rec_code)}.#{name_str}"
             end
           end
           if (receiver_module = module_function_receiver_name(node.receiver)) &&
@@ -512,17 +745,187 @@ module RubyToClear
           end
         end
 
-        rec = rec_code ? "#{rec_code}." : ""
+        rec = rec_code ? "#{method_receiver_code(rec_code)}." : ""
         args_str = args_list.join(", ")
 
-        "#{rec}#{name_str}(#{args_str})"
+        call_name = mutable_parameter_function_name?(name_str) ? clear_name : name_str
+        "#{rec}#{call_name}(#{args_str})"
       end
+    end
+
+    def safe_navigation_equality_code(node, rhs_node)
+      safe_node = node.receiver
+      return nil unless safe_node.is_a?(Prism::CallNode) && safe_node.safe_navigation?
+      return nil unless safe_navigation_static_rhs?(rhs_node)
+
+      rhs_type = inferred_clear_type(rhs_node).to_s
+      return nil if rhs_type.empty? || rhs_type == "Any" || rhs_type == "Auto" || rhs_type.start_with?("?")
+
+      receiver = visit(safe_node.receiver)
+      unwrapped = optional_unwrap_code(receiver)
+      @lowering_safe_navigation << safe_node.object_id
+      lhs = with_node_code_override(safe_node.receiver, unwrapped) { visit_call_node(safe_node) }
+      @lowering_safe_navigation.delete(safe_node.object_id)
+      rhs = visit(rhs_node)
+
+      lhs_type = inferred_clear_type(safe_node).to_s.delete_prefix("?")
+      if @union_types.key?(lhs_type) && !@union_types.key?(rhs_type.delete_prefix("?"))
+        rhs = wrap_argument_for_parameter_type(rhs, rhs_node, lhs_type)
+      end
+
+      if node.name.to_s == "=="
+        "((#{receiver} != NIL) && (#{lhs} == #{rhs}))"
+      else
+        "((#{receiver} == NIL) || (#{lhs} != #{rhs}))"
+      end
+    ensure
+      @lowering_safe_navigation&.delete(safe_node.object_id) if safe_node
+    end
+
+    def container_index_access_node?(node)
+      node.is_a?(Prism::CallNode) && node.receiver && node.name.to_s == "[]"
+    end
+
+    def safe_navigation_static_rhs?(node)
+      node.is_a?(Prism::IntegerNode) ||
+        node.is_a?(Prism::FloatNode) ||
+        node.is_a?(Prism::StringNode) ||
+        node.is_a?(Prism::SymbolNode) ||
+        node.is_a?(Prism::FalseNode) ||
+        node.is_a?(Prism::TrueNode) ||
+        node.is_a?(Prism::ConstantReadNode) ||
+        node.is_a?(Prism::ConstantPathNode)
+    end
+
+    def array_concat_call?(node)
+      return false unless node.is_a?(Prism::CallNode)
+      return false unless node.receiver && node.name.to_s == "concat" && !node.block
+
+      args = node.arguments ? node.arguments.arguments : []
+      return false unless args.length == 1
+
+      !!array_element_clear_type(clear_type_for_receiver_node(node.receiver))
+    end
+
+    def array_pairs_to_hash_code(node)
+      return nil unless node.receiver && node.name.to_s == "to_h" && !node.block
+      return nil unless !node.arguments || node.arguments.arguments.empty?
+
+      receiver_type = clear_type_for_receiver_node(node.receiver).to_s
+      return nil unless receiver_type.start_with?("Tuple<") && receiver_type.end_with?(">[]")
+
+      member_types = split_top_level_clear_list(receiver_type.delete_prefix("Tuple<").delete_suffix(">[]"))
+      return nil unless member_types.length == 2
+
+      key_type, value_type = member_types.map(&:strip)
+      return nil unless ["String", "String@symbol"].include?(key_type)
+
+      result_type = "HashMap<#{key_type}, #{value_type}>"
+      helper_suffix = [key_type, value_type].join("_").gsub(/[^A-Za-z0-9]+/, "_").sub(/\A_+/, "").sub(/_+\z/, "")
+      helper_name = "ruby_pairs_to_hash_#{helper_suffix}"
+      @generated_support_helper_defs[helper_name] ||= <<~CLEAR.chomp
+        FN #{helper_name}(pairs: #{receiver_type}) RETURNS #{result_type} ->
+          MUTABLE result: #{result_type} = {};
+          pairs |> EACH { result[COPY _[0]] = COPY _[1]; };
+          result;
+        END
+      CLEAR
+      "#{helper_name}(#{method_receiver_code(visit(node.receiver))})"
+    end
+
+    def array_concat_expression_code(node)
+      receiver_type = clear_type_for_receiver_node(node.receiver).to_s
+      helper_suffix = receiver_type.gsub(/[^A-Za-z0-9]+/, "_").sub(/\A_+/, "").sub(/_+\z/, "")
+      helper_name = "ruby_array_concat_#{helper_suffix}"
+      @generated_support_helper_defs[helper_name] ||= <<~CLEAR.chomp
+        FN #{helper_name}(left: #{receiver_type}, right: #{receiver_type}) RETURNS #{receiver_type} ->
+          MUTABLE result: #{receiver_type} = [];
+          left |> EACH { result.append(COPY _); };
+          right |> EACH { result.append(COPY _); };
+          result;
+        END
+      CLEAR
+
+      arg = node.arguments.arguments.first
+      arg_code = expression_argument_code(arg)
+      arg_type = inferred_clear_type(arg).to_s
+      arg_code = "CAST(#{arg_code} AS #{receiver_type})" unless arg_type == receiver_type
+      "#{helper_name}(#{method_receiver_code(visit(node.receiver))}, #{arg_code})"
+    end
+
+    def array_concat_statement_code(node)
+      receiver = method_receiver_code(visit(node.receiver))
+      "#{receiver} = #{array_concat_expression_code(node)}"
+    end
+
+    def method_receiver_code(code)
+      text = code.to_s
+      return text if text.empty?
+      return text if text.start_with?("(") && text.end_with?(")")
+      return "(#{text})" if text.end_with?("?")
+      return text if simple_method_receiver_code?(text)
+
+      "(#{text})"
+    end
+    public :method_receiver_code
+
+    def method_call_receiver_expression(receiver)
+      if sorbet_call?(receiver, "must")
+        args = receiver.arguments ? receiver.arguments.arguments : []
+        if args.length == 1
+          value_node = args.first
+          value_type = inferred_clear_type(value_node)
+          if value_type.to_s.start_with?("?")
+            return sorbet_must_unwrap_code(visit(value_node), value_type)
+          end
+        end
+      end
+
+      visit(receiver)
+    end
+
+    def shared_union_field_access(receiver_code, receiver_type, field_name)
+      union_name = expand_non_emitted_type_alias(receiver_type).to_s.delete_prefix("?")
+      arms = @union_types.fetch(union_name).map do |member|
+        variant = union_variant_name(member, union_name)
+        "#{union_name}.#{variant} AS item -> item.#{field_name}"
+      end
+      "(MATCH #{receiver_code} START #{arms.join(', ')} END)"
+    end
+
+    def self_struct_field_index_access(receiver, arg_nodes)
+      return nil unless arg_nodes.length == 1
+
+      field_name = self_struct_field_index_name(receiver, arg_nodes.first)
+      field_name ? "self.#{field_name}" : nil
+    end
+
+    def self_struct_field_index_name(receiver, key_node)
+      return nil unless receiver.is_a?(Prism::SelfNode)
+
+      field_name = keyword_call_key(key_node)
+      return nil unless field_name
+      return nil unless @current_instance_field_names.include?(field_name)
+
+      field_name
+    end
+
+    def simple_method_receiver_code?(code)
+      code.match?(
+        /\A[A-Za-z_]\w*[!?]?(?:\[[^\n\]]+\]|\.[A-Za-z_]\w*[!?]?(?:\([^()\n]*\))?)*\z/
+      )
     end
 
     def struct_field_reader?(receiver_type, field_name)
       type_lookup_names(receiver_type).any? do |type_name|
         @class_instance_field_names[type_name].include?(field_name) ||
           Array(@struct_fields[type_name]).include?(field_name)
+      end
+    end
+
+    def instance_method_owner_type(receiver_type, clear_name)
+      type_lookup_names(receiver_type).find do |type_name|
+        @class_instance_method_names[type_name].include?(clear_name)
       end
     end
 
@@ -554,6 +957,16 @@ module RubyToClear
       candidates = [name]
       candidates << name.split("::").last if name.include?("::")
       candidates.find { |candidate| @class_class_method_names.key?(candidate) }
+    end
+
+    def self_class_receiver_name(node)
+      return nil unless @current_class
+      return nil unless node.is_a?(Prism::CallNode)
+      return nil unless node.name.to_s == "class"
+      return nil unless node.receiver.is_a?(Prism::SelfNode)
+      return nil unless node.arguments.nil? || node.arguments.arguments.empty?
+
+      @current_class
     end
 
     def module_function_receiver_name(node)

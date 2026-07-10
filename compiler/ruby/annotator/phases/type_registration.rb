@@ -51,6 +51,12 @@ module Annotator
           )
         end
 
+        existing = current_scope.resolve_type_entry(node.name.to_sym)
+        if existing && equivalent_extern_type_schema?(existing.schema, schema)
+          stamp_type!(node, :Void)
+          return
+        end
+
         declare_type_schema!(node, node.name.to_sym, schema)
         stamp_type!(node, :Void)
       end
@@ -134,6 +140,44 @@ module Annotator
         current_scope.declare_type(name, schema)
       end
       private :declare_type_schema!
+
+      sig { params(existing: Scope::ScopeTypeSchema, incoming: Scope::ScopeTypeSchema).returns(T::Boolean) }
+      def equivalent_extern_type_schema?(existing, incoming)
+        return false unless existing.class == incoming.class
+        return false unless extern_type_schema?(existing) && extern_type_schema?(incoming)
+        return false unless T.unsafe(existing).extern_module == T.unsafe(incoming).extern_module
+        return false unless T.unsafe(existing).as_type == T.unsafe(incoming).as_type
+        return false unless T.unsafe(existing).type_params == T.unsafe(incoming).type_params
+        return false unless equivalent_struct_fields?(T.unsafe(existing).fields, T.unsafe(incoming).fields)
+
+        if existing.is_a?(Schemas::ResourceSchema) && incoming.is_a?(Schemas::ResourceSchema)
+          return existing.close_plan == incoming.close_plan
+        end
+
+        true
+      end
+      private :equivalent_extern_type_schema?
+
+      sig { params(schema: Scope::ScopeTypeSchema).returns(T::Boolean) }
+      def extern_type_schema?(schema)
+        (schema.is_a?(Schemas::StructSchema) || schema.is_a?(Schemas::ResourceSchema)) &&
+          !T.unsafe(schema).extern_module.nil?
+      end
+      private :extern_type_schema?
+
+      sig { params(left: T::Hash[String, AST::StructField], right: T::Hash[String, AST::StructField]).returns(T::Boolean) }
+      def equivalent_struct_fields?(left, right)
+        return false unless left.keys.sort == right.keys.sort
+
+        left.all? do |name, left_field|
+          right_field = right[name]
+          right_field &&
+            left_field.type.to_s == right_field.type.to_s &&
+            left_field.borrowed == right_field.borrowed &&
+            left_field.default.nil? == right_field.default.nil?
+        end
+      end
+      private :equivalent_struct_fields?
 
       sig { params(variant_data: Schemas::InlineStructVariant).returns(T::Array[Schemas::InlineStructDeinitEntry]) }
       def inline_struct_deinit_entries(variant_data)

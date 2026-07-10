@@ -64,6 +64,19 @@ RSpec.describe "Gradual typing — Auto placeholder (parser)" do
       expect(decl.type.auto?).to be true
     end
 
+    it "accepts Auto with an array suffix in function parameters" do
+      ast = parse(<<~CLEAR)
+        FN collect(items: Auto[] = []) RETURNS Int64 ->
+          RETURN 0;
+        END
+      CLEAR
+      param_type = ast.statements.first.params.first[:type]
+
+      expect(param_type.auto?).to be true
+      expect(param_type.array?).to be true
+      expect(param_type.resolved).to eq(:"Auto[]")
+    end
+
     it "accepts MUTABLE x: Auto = ..." do
       ast = parse(<<~CLEAR)
         FN main() RETURNS Void ->

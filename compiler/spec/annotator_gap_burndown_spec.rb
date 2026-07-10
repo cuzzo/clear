@@ -647,6 +647,17 @@ RSpec.describe "annotator branch gap burndown" do
 
     expect(optional_expr.full_type!.resolved).to eq(:Int64)
     expect(direct_errors(ann).map { |err| err[1] }).to include(:TYPE_MISMATCH_IN_OR)
+
+    map_type = Type.new(:"HashMap<String, Any>")
+    optional_map = AST::Identifier.new(token, "maybe_map")
+    optional_map.full_type = Type.optional_of(map_type)
+    map_fallback = AST::Identifier.new(token, "map_fallback")
+    map_fallback.full_type = map_type
+    map_expr = AST::BinaryOp.new(token(:OR, "OR"), optional_map, :OR_RESCUE, map_fallback)
+    ann.send(:visit_OrRescue, map_expr)
+
+    expect(map_expr.full_type!).to be_map
+    expect(map_expr.full_type!.value_type.resolved).to eq(:Any)
   end
 
   it "covers expression visitor fallback and scalar binding branches" do
@@ -921,7 +932,9 @@ RSpec.describe "annotator branch gap burndown" do
     ann.define_singleton_method(:propagate_collection_metadata!) { |_node, _type| nil }
     ann.define_singleton_method(:propagate_call_flags!) { |_node| nil }
     ann.define_singleton_method(:set_cleanup_alloc!) { |_node| nil }
-    ann.define_singleton_method(:resolve_resource_close) { |_node| [false, nil] }
+    ann.define_singleton_method(:resolve_resource_close) do |_node|
+      Type::ResourceCloseResult.new(is_resource: false, close_plan: nil)
+    end
     ann.define_singleton_method(:record_capture_local!) { |_name| nil }
     ann.define_singleton_method(:classify_ownership!) { |_sym| nil }
     ann.define_singleton_method(:og_declare) { |_name, _node, _type| nil }
@@ -1855,7 +1868,7 @@ RSpec.describe "annotator branch gap burndown" do
     expect(sig.intrinsic_pattern).to eq(:call_box)
 
     expect(FunctionSignature.allocating_intrinsic.emit&.allocates).to eq(true)
-    expect(FunctionSignature.intrinsic_contract(borrows: []).emit&.borrows).to eq([])
+    expect(FunctionSignature.intrinsic_signature(borrows: []).emit&.borrows).to eq([])
 
     fn = Struct.new(
       :needs_rt,
@@ -1885,7 +1898,7 @@ RSpec.describe "annotator branch gap burndown" do
     )
 
     source_fn_requires = T.must(fn.requires)
-    FunctionSignature.sync_from_function_def!(sig, fn)
+    FunctionSignature.sync_signature_from_function_def!(sig, fn)
     expect(source_fn_requires).to eq("lock" => Set[:LOCKED])
     expect(sig.needs_rt).to eq(true)
     expect(sig.can_fail).to eq(true)
@@ -1900,7 +1913,7 @@ RSpec.describe "annotator branch gap burndown" do
     expect(sig.heap_carry_return_vars).to eq(Set["tmp"])
 
     unchanged = FunctionSignature.new(params: [], return_type: Type.new(:Int64))
-    FunctionSignature.sync_from_function_def!(unchanged, Object.new)
+    FunctionSignature.sync_signature_from_function_def!(unchanged, Object.new)
     expect(unchanged.return_type.raw).to eq(:Int64)
     expect(unchanged.needs_rt).to be_nil
   end

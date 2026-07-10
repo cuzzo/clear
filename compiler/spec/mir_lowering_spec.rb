@@ -2569,12 +2569,30 @@ RSpec.describe MIRLowering do
       expect(emit(result)).to eq("sum3(point)")
     end
 
-    it "passes runtime to function variable calls" do
+    it "passes runtime to non-fallible function variable calls without try" do
       arg = make_lit(:NUMBER, 5, full_type: :Int64)
       arg.coerced_type = :Int64
       node = AST::FuncCall.new(tok, "callback", [arg])
       node.full_type = :Int64
       node.fn_var_call = true
+
+      result = lowering.lower(node)
+
+      expect(result).to be_a(MIR::Call)
+      expect(result.callee).to eq("callback")
+      expect(result.args.map { |a| emit(a) }).to eq(["rt", "5"])
+    end
+
+    it "uses try for fallible function variable calls" do
+      arg = make_lit(:NUMBER, 5, full_type: :Int64)
+      arg.coerced_type = :Int64
+      node = AST::FuncCall.new(tok, "callback", [arg])
+      node.full_type = Type.new(:"!Int64")
+      node.fn_var_call = true
+      node.matched_signature = FunctionSignature.new(
+        params: [AST::Param.new(name: "value", type: :Int64)],
+        return_type: Type.new(:"!Int64")
+      )
 
       result = lowering.lower(node)
 
@@ -4458,6 +4476,16 @@ RSpec.describe "MIRLowering allocation cleanup classification" do
     expect(l.send(:hoist_cleanup_entry, MIR::MakeList.new("i64", [MIR::Lit.new("1")], :heap), nil)).to include(kind: :uniform, zig_type: "std.ArrayListUnmanaged(i64)")
     expect(l.send(:hoist_cleanup_entry, MIR::HeapCreate.new("Node", MIR::StructInit.new("Node", []), :heap, nil), nil)).to include(kind: :uniform, zig_type: "Node")
     expect(l.send(:hoist_cleanup_entry, MIR::ContainerInit.new("std.ArrayListUnmanaged(i64)", :array_list_empty, :heap, nil), nil)).to include(kind: :uniform)
+  end
+
+  it "classifies pipeline cleanup entries through their owned result" do
+    l = lowering
+    ast_node = typed_node(Type.new(:String))
+    inner = MIR::DupeSlice.new(MIR::Ident.new("s"), :heap)
+    pipeline = MIR::Pipeline.new(ast_node, inner, nil, nil, nil, nil)
+
+    expect(l.send(:mir_allocates?, pipeline)).to be(true)
+    expect(l.send(:hoist_cleanup_entry, pipeline, ast_node)).to include(kind: :heap_string)
   end
 
   it "classifies DeepCopy cleanup entries uniformly via :full_value (slice and value)" do

@@ -16,6 +16,8 @@ module Annotator
           return_type: node.annotation_return_type,
           return_lifetime: return_lifetime,
           visibility: node.visibility,
+          fn_type_params: node.type_params.map(&:to_sym),
+          type_params: node.type_params.map(&:to_sym),
           reentrant: node.declared_plain_reentrant?,
           requires: node.requires
         )

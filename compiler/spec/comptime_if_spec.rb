@@ -80,6 +80,18 @@ RSpec.describe "COMPTIME IF type predicates" do
     }.not_to raise_error
   end
 
+  it "narrows generic parameters in then-branch type predicates" do
+    expect {
+      annotate(<<~CLEAR)
+        FN handle<T>(raw: T) RETURNS Void ->
+          COMPTIME IF T IS_A HashMap<Any> THEN
+            value = raw[:type];
+          END
+        END
+      CLEAR
+    }.not_to raise_error
+  end
+
   it "rejects a non-type left operand" do
     expect {
       annotate(<<~CLEAR)

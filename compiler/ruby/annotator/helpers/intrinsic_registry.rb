@@ -4,8 +4,11 @@
 # this builds the typed objects consumers will read. Inert until
 # consumers are migrated (EPIC #65, per-registry slices).
 require_relative "function_signature_returns"
+require_relative "function_signature"
+require_relative "function_return"
 require_relative "intrinsic_arg_spec"
 require_relative "intrinsic_emit"
+require_relative "../../ast/type"
 
 module IntrinsicRegistry
   extend T::Sig
@@ -20,10 +23,13 @@ module IntrinsicRegistry
   RawRegistryEntry = T.type_alias { T.any(RawEntry, T::Array[RawEntry]) }
   RawRegistry = T.type_alias { T::Hash[RegistryKey, RawRegistryEntry] }
   RegistryMap = T.type_alias { T::Hash[Symbol, RawRegistry] }
-  SigsTable = T.type_alias { T::Hash[RegistryKey, LookupResult] }
-  SigsCache = T.type_alias { T::Hash[Integer, SigsTable] }
+  SigsTable = T.type_alias { T::Hash[String, LookupResult] }
+  SigsCache = T.type_alias { T::Hash[Symbol, SigsTable] }
   RawEmitInput = T.type_alias { T.nilable(T.any(RawRegistryEntry, Symbol, String, Numeric, T::Boolean)) }
-  ReturnDescriptor = T.type_alias { T.nilable(T.any(Type, Symbol, String, RawEntry)) }
+  ReturnDescriptor = T.type_alias { T.nilable(T.any(Type, Symbol, String, RawEntry, Proc)) }
+  IntegerValue = T.type_alias { T.any(Integer, String) }
+  IntegerInput = T.type_alias { T.any(IntegerValue, T::Array[IntegerValue]) }
+  SymbolInput = T.type_alias { T.any(String, Symbol) }
   LifetimeInput = T.type_alias { FunctionSignature::LifetimeInput }
 
   SIGS_CACHE = T.let({}, SigsCache)
@@ -61,25 +67,26 @@ module IntrinsicRegistry
 
     e = IntrinsicEmit.new
     h.each do |k, v|
-      next if FS_KEYS.include?(k)
-      next if v.nil?
-      case k
-      when *EMIT_BOOL
-        assign_emit_bool(e, k, !!v)
-      when *EMIT_STRSYM, *EMIT_PASS
-        assign_emit_value(e, k, v)
-      when *EMIT_STR
-        assign_emit_string(e, k, v.to_s)
-      when :lifetime
-        e.lifetime = normalize_lifetime(v).map(&:to_s)
-      when *EMIT_SYM
-        assign_emit_symbol(e, k, v.to_sym)
-      when *EMIT_INTARR
-        assign_emit_int_array(e, k, coerce_int_array(v))
-      when *EMIT_NESTED
-        assign_emit_nested(e, k, nested_emit(v, registries))
-      else
-        Kernel.raise "IntrinsicRegistry: unmapped registry key #{k.inspect}"
+      key = T.cast(k, Symbol)
+      unless FS_KEYS.include?(key) || v.nil?
+        case key
+        when *EMIT_BOOL
+          assign_emit_bool(e, key, !!v)
+        when *EMIT_STRSYM, *EMIT_PASS
+          assign_emit_value(e, key, v)
+        when *EMIT_STR
+          assign_emit_string(e, key, v.to_s)
+        when :lifetime
+          e.lifetime = normalize_lifetime(v).map { |source| lifetime_source_string(source) }
+        when *EMIT_SYM
+          assign_emit_symbol(e, key, coerce_symbol(T.cast(v, SymbolInput)))
+        when *EMIT_INTARR
+          assign_emit_int_array(e, key, coerce_int_array(T.cast(v, IntegerInput)))
+        when *EMIT_NESTED
+          assign_emit_nested(e, key, nested_emit(v, registries))
+        else
+          Kernel.raise "IntrinsicRegistry: unmapped registry key #{key}"
+        end
       end
     end
     e
@@ -191,21 +198,41 @@ module IntrinsicRegistry
     end
   end
 
-  sig { params(value: T.untyped).returns(T::Array[Integer]) }
+  sig { params(value: IntegerInput).returns(T::Array[Integer]) }
   def self.coerce_int_array(value)
-    raw_values = value.is_a?(Array) ? value : [value]
-    out = T.let([], T::Array[Integer])
-    i = T.let(0, Integer)
-    while i < raw_values.length
-      out << raw_values.fetch(i).to_i
-      i += 1
-    end
-    out
+    return value.map { |item| coerce_integer(item) } if value.is_a?(Array)
+    return [value] if value.is_a?(Integer)
+    return [T.cast(value, String).to_i] if value.is_a?(String)
+
+    Kernel.raise "IntrinsicRegistry: expected integer-compatible value"
+  end
+
+  sig { params(value: T.nilable(IntegerInput)).returns(T::Array[Integer]) }
+  def self.normalize_integer_array(value)
+    return [] if value.nil?
+
+    coerce_int_array(T.must(value))
+  end
+
+  sig { params(value: IntegerValue).returns(Integer) }
+  def self.coerce_integer(value)
+    return value if value.is_a?(Integer)
+    return T.cast(value, String).to_i if value.is_a?(String)
+
+    Kernel.raise "IntrinsicRegistry: expected integer-compatible value"
   end
 
   sig { params(key: Symbol).returns(T.noreturn) }
   def self.unknown_emit_key!(key)
-    Kernel.raise "IntrinsicRegistry: unmapped registry key #{key.inspect}"
+    Kernel.raise "IntrinsicRegistry: unmapped registry key #{key}"
+  end
+
+  sig { params(value: SymbolInput).returns(Symbol) }
+  def self.coerce_symbol(value)
+    return value if value.is_a?(Symbol)
+    return T.cast(value, String).to_sym if value.is_a?(String)
+
+    Kernel.raise "IntrinsicRegistry: expected symbol-compatible value"
   end
 
   # A nested sub-descriptor is either another emit Hash or a
@@ -214,13 +241,54 @@ module IntrinsicRegistry
   def self.nested_emit(v, registries)
     return nil unless v.is_a?(Hash)
     if (ptr = v[:registry])
-      name = registries.find { |_, r| r.equal?(ptr) }&.first
-      return IntrinsicEmit.new(registry: name || :unknown)
+      name = registry_name_for(registries, T.cast(ptr, RawRegistry))
+      return IntrinsicEmit.new(registry: T.must(name)) if name
+      return IntrinsicEmit.new(registry: :unknown)
     end
-    name = registries.find { |_, r| r.equal?(v) }&.first
-    return IntrinsicEmit.new(registry: name) if name
-
     build_emit(v, registries)
+  end
+
+  sig { params(registries: RegistryMap, target: RawRegistry).returns(T.nilable(Symbol)) }
+  def self.registry_name_for(registries, target)
+    names = registries.keys
+    i = T.let(0, Integer)
+    while i < names.length
+      name = T.cast(names.fetch(i), Symbol)
+      return name if registry_matches?(T.must(registries[name]), target)
+      i += 1
+    end
+    nil
+  end
+
+  sig { params(left: RawRegistry, right: RawRegistry).returns(T::Boolean) }
+  def self.registry_matches?(left, right)
+    return false unless left.length == right.length
+
+    left_keys = left.keys
+    right_keys = right.keys
+    i = T.let(0, Integer)
+    while i < left_keys.length
+      wanted = registry_key_string(left_keys.fetch(i))
+      found = T.let(false, T::Boolean)
+      j = T.let(0, Integer)
+      while j < right_keys.length
+        if registry_key_string(right_keys.fetch(j)) == wanted
+          found = true
+          break
+        end
+        j += 1
+      end
+      return false unless found
+      i += 1
+    end
+    true
+  end
+
+  sig { params(key: RegistryKey).returns(String) }
+  def self.registry_key_string(key)
+    return T.cast(key, String) if key.is_a?(String)
+
+    T.cast(key, Symbol).to_s
   end
 
   # Best-effort STATIC view of the return, derived from the typed
@@ -232,9 +300,9 @@ module IntrinsicRegistry
   def self.to_return_type(rdef)
     if rdef.fixed?
       fixed = rdef.fixed
-      Kernel.raise "IntrinsicRegistry: fixed return descriptor missing Type" unless fixed.is_a?(Type)
+      Kernel.raise "IntrinsicRegistry: fixed return descriptor missing Type" if fixed.nil?
 
-      fixed
+      T.must(fixed)
     else
       Type.new(:Any)
     end
@@ -255,35 +323,42 @@ module IntrinsicRegistry
   # Registry return descriptor -> FunctionReturn (strongly typed,
   # non-nil). No Proc, no Hash, no bare nil escape: every form maps to
   # Fixed(Type) | a receiver-parametric variant | Infer(host method).
-  sig { params(v: T.untyped).returns(FunctionReturn) }
+  sig { params(v: ReturnDescriptor).returns(FunctionReturn) }
   def self.to_return_def(v)
     return FunctionReturn.fixed(Type.new(:Void)) if v.nil?
     return FunctionReturn.fixed(v) if v.is_a?(Type)
     if v.is_a?(Hash)
-      return FunctionReturn.fixed(
-        v[:type] ? Type.new(v[:type], sync: v[:sync], ownership: v[:ownership])
-                 : Type.new(:Any)
-      )
+      raw_type = v[:type]
+      if raw_type
+        return FunctionReturn.fixed(Type.new(
+          T.cast(raw_type, Type::TypeInput),
+          sync: T.cast(v[:sync], T.nilable(Symbol)),
+          ownership: T.cast(v[:ownership], T.nilable(Symbol))
+        ))
+      end
+
+      return FunctionReturn.fixed(Type.new(:Any))
     end
     if v.is_a?(Proc)
       Kernel.raise "IntrinsicRegistry: Proc return descriptor is not allowed; " \
                    "use a declarative directive (r_* variant or infer_* host method)"
     end
-    kind = v.is_a?(Symbol) ? RETURN_VARIANTS[v] : nil
-    if kind
-      return FunctionReturn.variant(kind)
+    if v.is_a?(Symbol)
+      kind = RETURN_VARIANTS[v]
+      return FunctionReturn.variant(T.cast(T.must(kind), Symbol)) if kind
     end
 
     s = v.to_s
-    return FunctionReturn.infer(v.to_sym) if s.start_with?("infer_", "macro_")
+    return FunctionReturn.infer(coerce_symbol(T.cast(v, SymbolInput))) if s.start_with?("infer_", "macro_")
 
-    FunctionReturn.fixed(Type.new(v))
+    FunctionReturn.fixed(Type.new(T.cast(v, Type::TypeInput)))
   end
 
   sig { params(_name: RegistryKey, h: RawEntry, registries: RegistryMap).returns(FunctionSignature) }
   def self.convert_entry(_name, h, registries)
-    ret  = h.key?(:return_type) ? h[:return_type] : h[:return]
-    rdef = to_return_def(ret)
+    ret = h[:return]
+    ret = h[:return_type] if h.key?(:return_type)
+    rdef = to_return_def(T.cast(ret, ReturnDescriptor))
     params = params_from_arg_spec(h[:args], h)
     fs = FunctionSignature.new(
       params: params,
@@ -291,11 +366,11 @@ module IntrinsicRegistry
       return_lifetime: normalize_lifetime(h[:lifetime]),
       intrinsic: true,
       return_def: rdef,
-      arg_validator: h[:validate].is_a?(Proc) ? h[:validate] : nil,
-      arg_spec: h[:args],
-      arity: h[:arity],
-      can_fail: h[:can_fail],
-      needs_rt: h[:needs_rt],
+      arg_validator: T.cast(h[:validate], T.nilable(Proc)),
+      arg_spec: T.cast(h[:args], IntrinsicArgSpec::RawArgSpec),
+      arity: T.cast(h[:arity], T.nilable(Integer)),
+      can_fail: T.cast(h[:can_fail], T.nilable(T::Boolean)),
+      needs_rt: T.cast(h[:needs_rt], T.nilable(T::Boolean)),
       emit: build_emit(h, registries)
     )
     fs
@@ -305,24 +380,29 @@ module IntrinsicRegistry
   def self.normalize_lifetime(value)
     return [] if value.nil?
     if value.is_a?(Array)
-      return value.filter_map { |item| item.is_a?(String) || item.is_a?(Symbol) ? item : nil }
+      return value
     end
-    return [] unless value.is_a?(String) || value.is_a?(Symbol)
+    [T.cast(value, FunctionSignature::LifetimeSource)]
+  end
 
-    [value]
+  sig { params(value: FunctionSignature::LifetimeSource).returns(String) }
+  def self.lifetime_source_string(value)
+    return T.cast(value, String) if value.is_a?(String)
+
+    T.cast(value, Symbol).to_s
   end
 
   sig { params(spec: RawArgSpec, h: RawEntry).returns(T::Array[AST::Param]) }
   def self.params_from_arg_spec(spec, h)
-    arg_specs = IntrinsicArgSpec.list_from_registry(spec)
+    arg_specs = IntrinsicArgSpec.list_from_registry(T.cast(spec, IntrinsicArgSpec::RawArgSpec))
 
-    takes_args = Kernel.Array(h[:takes_args])
+    takes_args = normalize_integer_array(T.cast(h[:takes_args], T.nilable(IntegerInput)))
     mutates_receiver = h[:mutates_receiver] == true
     params = T.let([], T::Array[AST::Param])
     i = T.let(0, Integer)
     while i < arg_specs.length
       arg_def = arg_specs.fetch(i)
-      takes_index = (h[:is_method] || mutates_receiver) ? i - 1 : i
+      takes_index = (h[:is_method] == true || mutates_receiver) ? i - 1 : i
       takes_by_index = takes_index >= 0 && takes_args.include?(takes_index)
       params << AST::Param.new(
         name: arg_def.name || "arg#{i}",
@@ -343,21 +423,35 @@ module IntrinsicRegistry
   # STD_LIB["charAt"]). Consumers read THIS, never the raw Hash.
   sig { params(reg: RawRegistry).returns(SigsTable) }
   def self.sigs(reg)
-    cache_key = reg.object_id
-    cached = SIGS_CACHE[cache_key]
-    return cached if cached
-
     registry_map = registries
-    out = T.let({}, SigsTable)
-    reg.each do |name, entry|
-      out[name] =
-        if entry.is_a?(Array)
-          entry.map { |e| convert_entry(name, e, registry_map) }
-        elsif entry.is_a?(Hash)
-          convert_entry(name, entry, registry_map)
-        end
+    cache_key = registry_name_for(registry_map, reg)
+    if cache_key
+      cached = T.let(SIGS_CACHE[T.must(cache_key)], T.nilable(SigsTable))
+      return cached if cached
     end
-    SIGS_CACHE[cache_key] = out
+
+    out = T.let({}, SigsTable)
+    names = reg.keys
+    entries = reg.values
+    i = T.let(0, Integer)
+    while i < names.length
+      name = names.fetch(i)
+      entry = entries.fetch(i)
+      key = registry_key_string(name)
+      if entry.is_a?(Array)
+        overloads = T.let([], T::Array[FunctionSignature])
+        j = T.let(0, Integer)
+        while j < entry.length
+          overloads << convert_entry(name, entry.fetch(j), registry_map)
+          j += 1
+        end
+        out[key] = overloads
+      elsif entry.is_a?(Hash)
+        out[key] = convert_entry(name, entry, registry_map)
+      end
+      i += 1
+    end
+    SIGS_CACHE[T.must(cache_key)] = out if cache_key
     out
   end
 
@@ -479,7 +573,7 @@ module IntrinsicRegistry
   # not shadow Sorbet's signature DSL.
   sig { params(reg: RawRegistry, name: RegistryKey).returns(LookupResult) }
   def self.lookup(reg, name)
-    result = sigs(reg)[name]
+    result = sigs(reg)[registry_key_string(name)]
     return result if result
 
     if map_methods_registry?(reg)
@@ -494,7 +588,7 @@ module IntrinsicRegistry
     map_methods = registry_values[:MAP_METHODS]
     return false unless map_methods
 
-    reg.equal?(map_methods)
+    registry_matches?(reg, map_methods)
   end
   private_class_method :map_methods_registry?
 

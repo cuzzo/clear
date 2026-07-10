@@ -92,35 +92,35 @@ class FunctionReturn
     when :Infer
       Kind::Infer
     else
-      raise "unknown FunctionReturn variant: #{kind_name.inspect}"
+      raise "unknown FunctionReturn variant: #{kind_name.to_s}"
     end
   end
 
   sig { returns(FunctionReturn) }
   def copy
-    case kind
-    when Kind::Fixed
-      FunctionReturn.fixed(Type.new(T.must(fixed)))
-    when Kind::Infer
-      FunctionReturn.infer(T.must(infer))
-    else
-      FunctionReturn.new(kind: kind)
-    end
+    return FunctionReturn.fixed(Type.new(T.must(fixed))) if kind == Kind::Fixed
+    return FunctionReturn.infer(T.must(infer)) if kind == Kind::Infer
+
+    FunctionReturn.new(kind: kind)
   end
 
   # Resolve to a concrete Type. receiver is the call's receiver type
   # (for parametric shapes); args/host support the Infer variant's
   # host-method dispatch. Always returns a Type, never nil.
+  # ruby-to-clear: skip
   sig do
     params(receiver: T.nilable(Type), args: T::Array[T.untyped],
            host: T.nilable(SemanticAnnotator)).returns(Type)
   end
+  # ruby-to-clear: skip
   def resolve(receiver, args = [], host = nil)
     case kind
     when Kind::Fixed
       T.must(fixed)
     when Kind::ElementOf
-      el = receiver&.element_type
+      return Type.new(:Any) unless receiver
+
+      el = T.must(receiver).element_type
       el || Type.new(:Any)
     when Kind::OptionalOfElement
       Type.new(:"?#{T.must(T.must(receiver).element_type).resolved}")
@@ -135,10 +135,11 @@ class FunctionReturn
     when Kind::Infer
       resolve_infer(args, host)
     else
-      raise "unknown FunctionReturn kind: #{kind.inspect}"
+      raise "unknown FunctionReturn kind: #{kind.to_s}"
     end
   end
 
+  # ruby-to-clear: skip
   sig { params(args: T::Array[T.untyped], host: T.nilable(SemanticAnnotator)).returns(Type) }
   def resolve_infer(args, host)
     raise "FunctionReturn infer requires a SemanticAnnotator host" unless host
@@ -151,7 +152,7 @@ class FunctionReturn
     when :infer_to_list
       T.unsafe(host).infer_to_list(args, nil)
     else
-      raise "unknown FunctionReturn infer method: #{T.must(infer).inspect}"
+      raise "unknown FunctionReturn infer method: #{T.must(infer).to_s}"
     end
 
     r.is_a?(Type) ? r : Type.new(r || :Any)

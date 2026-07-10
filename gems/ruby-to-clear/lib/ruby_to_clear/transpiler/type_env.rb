@@ -30,7 +30,7 @@ module RubyToClear
     private
 
     def parse_sig(sig_call_node)
-      metadata = SigMetadata.new(param_types: {}, return_type: "Auto", type_params: [])
+      metadata = SigMetadata.new(param_types: {}, return_type: untyped_type, type_params: [])
 
       sig_call_chain(sig_call_node).each do |call_node|
         apply_sig_metadata(metadata, call_node)
@@ -71,9 +71,14 @@ module RubyToClear
 
     def sig_return_type(call_node)
       type_node = call_node.arguments&.arguments&.first
-      return "Auto" unless type_node
+      return untyped_type unless type_node
 
-      convert_sorbet_type(type_node, union_name: "ReturnValue", emit_union: true)
+      union_name = if @imported_union_names.include?("ReturnValue")
+        "#{camel_type_name((@current_class || 'Local').split('::').last)}ReturnValue"
+      else
+        "ReturnValue"
+      end
+      convert_sorbet_type(type_node, union_name: union_name, emit_union: true)
     end
 
     def sig_param_types(call_node)
@@ -93,7 +98,7 @@ module RubyToClear
     end
 
     def convert_sorbet_type(node, union_name: nil, emit_union: false, map_key: false)
-      return "Auto" unless node
+      return untyped_type unless node
 
       case node
       when Prism::ConstantReadNode
@@ -104,11 +109,11 @@ module RubyToClear
         convert_sorbet_call_type(node, union_name: union_name, emit_union: emit_union, map_key: map_key)
       when Prism::ArrayNode
         members = node.elements.map { |element| convert_sorbet_type(element) }
-        return "Auto" if members.empty? || members.any? { |member| member == "Auto" }
+        return untyped_type if members.empty? || members.any? { |member| member == untyped_type }
 
         "Tuple<#{members.join(', ')}>"
       else
-        "Auto"
+        untyped_type
       end
     end
 
@@ -123,14 +128,15 @@ module RubyToClear
 
     def convert_sorbet_constant_path_type(node, emit_union:)
       path = node.location.slice.strip
-      if (type_alias = type_alias_for_path(path))
-        return expand_non_emitted_type_alias(type_alias)
-      end
-
       if path == "AST::Node"
         ensure_ast_node_union!(emit: emit_union)
         return "Node"
       end
+      if (type_alias = type_alias_for_path(path))
+        return expand_non_emitted_type_alias(type_alias)
+      end
+
+      return untyped_type if path == "T.untyped"
 
       SORBET_PATH_TYPES.fetch(path) { path.split("::").last }
     end
@@ -145,7 +151,7 @@ module RubyToClear
       collection_type = convert_collection_type_call(node, union_name: union_name, emit_union: emit_union)
       return collection_type if collection_type
 
-      "Auto"
+      untyped_type
     end
 
     def convert_t_type_call(node, union_name:, emit_union:, map_key:)
@@ -157,7 +163,7 @@ module RubyToClear
       when "any"
         convert_any_type_call(node, union_name: union_name, emit_union: emit_union, map_key: map_key)
       when "untyped", "anything"
-        "Auto"
+        untyped_type
       when "type_parameter"
         convert_type_parameter_call(node)
       end
@@ -170,7 +176,7 @@ module RubyToClear
         emit_union: emit_union,
         map_key: map_key
       )
-      return "Auto" if inner == "Auto"
+      return untyped_type if inner == untyped_type
 
       optional_clear_type(inner)
     end
@@ -187,10 +193,10 @@ module RubyToClear
       elsif non_nil_args.length == 1
         convert_sorbet_type(non_nil_args.first, union_name: union_name, emit_union: emit_union, map_key: map_key)
       else
-        sorbet_union_from_any_args(non_nil_args, union_name: union_name, emit_union: emit_union) || "Auto"
+        sorbet_union_from_any_args(non_nil_args, union_name: union_name, emit_union: emit_union) || untyped_type
       end
 
-      has_nil && type != "Auto" ? optional_clear_type(type) : type
+      has_nil && type != untyped_type ? optional_clear_type(type) : type
     end
 
     def convert_type_parameter_call(node)
@@ -228,7 +234,7 @@ module RubyToClear
       value = convert_sorbet_type(args[1], union_name: union_name ? "#{union_name}Value" : nil, emit_union: emit_union)
       return "Any" if key == "Auto" || value == "Auto"
 
-      "HashMap<#{collection_element_type(key)}, #{collection_element_type(value)}>"
+      "HashMap<#{map_element_type(key)}, #{map_element_type(value)}>"
     end
 
     def convert_set_type_call(node, union_name:, emit_union:)
@@ -278,7 +284,7 @@ module RubyToClear
       return nil unless node.is_a?(Prism::CallNode)
 
       params = []
-      return_type = "Auto"
+      return_type = untyped_type
       found_proc = false
       current = node
 
@@ -328,7 +334,7 @@ module RubyToClear
       members = @union_types["Node"]
       return nil unless members && members.any?
 
-      @generated_union_defs["Node"] = union_definition("Node", members) if emit
+      @generated_union_defs["Node"] = union_definition("Node", members) if emit && !@imported_union_names.include?("Node")
       "Node"
     end
 
@@ -340,11 +346,23 @@ module RubyToClear
 
     def type_alias_for_name(name)
       if @current_class
-        scoped_key = "#{@current_class}::#{name}"
-        return @type_aliases[scoped_key] if @type_aliases.key?(scoped_key)
+        namespace = @current_class.split("::")
+        while namespace.any?
+          scoped_key = "#{namespace.join('::')}::#{name}"
+          return @type_aliases[scoped_key] if @type_aliases.key?(scoped_key)
+
+          namespace.pop
+        end
       end
 
-      @type_aliases[name.to_s]
+      direct = @type_aliases[name.to_s]
+      return direct if direct
+
+      suffix = "::#{name}"
+      suffix_matches = @type_aliases.keys.select { |key| key.end_with?(suffix) }
+      return @type_aliases[suffix_matches.first] if suffix_matches.length == 1
+
+      nil
     end
 
     def type_alias_for_path(path)
@@ -416,13 +434,22 @@ module RubyToClear
     def sorbet_union_from_any_args(args, union_name:, emit_union:)
       return nil unless union_name
 
-      members = args.each_with_index.map do |arg, index|
-        convert_sorbet_type(arg, union_name: sorbet_union_member_context_name(union_name, arg, index), emit_union: emit_union)
+      members = args.each_with_index.flat_map do |arg, index|
+        type = convert_sorbet_type(arg, union_name: sorbet_union_member_context_name(union_name, arg, index), emit_union: emit_union)
+        flattened_union_member_types(type)
       end
       return nil if members.length < 2
       return nil unless members.all? { |type| union_member_payload_type?(type) }
 
       register_union_type(union_name, members, emit: emit_union)
+    end
+
+    def flattened_union_member_types(type)
+      text = type.to_s
+      return [text] if text.start_with?("?")
+
+      expanded = expand_non_emitted_type_alias(text).to_s
+      @union_types[expanded] || [expanded]
     end
 
     def union_member_payload_type?(type)
@@ -436,7 +463,7 @@ module RubyToClear
     def register_union_type(name, members, emit:)
       clear_name = camel_type_name(name)
       normalized_members = members.map { |member| clear_type_expr(member) }.uniq
-      return "Auto" if normalized_members.empty?
+      return untyped_type if normalized_members.empty?
 
       normalized_members = ((@union_types[clear_name] || []) + normalized_members).uniq
       @union_types[clear_name] = normalized_members
@@ -445,20 +472,23 @@ module RubyToClear
       clear_name
     end
 
-    def union_definition(name, members)
+    def union_definition(name, members, visibility: "")
       seen = Hash.new(0)
       variants = members.map do |member|
-        base_name = union_variant_name(member)
+        base_name = union_variant_name(member, name)
         seen[base_name] += 1
         variant_name = seen[base_name] == 1 ? base_name : "#{base_name}#{seen[base_name]}"
 
         "#{variant_name}: #{member}"
       end.join(", ")
-      "UNION #{name} { #{variants} }"
+      "#{visibility}UNION #{name} { #{variants} }"
     end
 
-    def union_variant_name(type)
+    def union_variant_name(type, union_name = nil)
       text = type.to_s
+      configured = @configured_union_variants.dig(union_name.to_s, text) if union_name
+      return configured if configured
+
       return "StringValue" if text == "String"
       return "SymbolValue" if text == "String@symbol"
       return "Int64Value" if text == "Int64"
@@ -478,7 +508,7 @@ module RubyToClear
     def optional_clear_type(type)
       text = type.to_s
       return text if text.start_with?("?")
-      return "Auto" if text == "Auto"
+      return untyped_type if text == untyped_type
 
       "?#{text}"
     end
@@ -511,14 +541,14 @@ module RubyToClear
       "#{parent_name}#{suffix}"
     end
 
-    def union_definitions_for_alias(alias_name, type_alias)
+    def union_definitions_for_alias(alias_name, type_alias, visibility: "")
       names = @type_alias_union_deps[alias_name].to_a
       names << type_alias if @union_types.key?(type_alias)
       names.sort_by { |name| [name == type_alias ? 1 : 0, name] }.filter_map do |name|
         next if @body_union_defs.include?(name)
 
         @body_union_defs << name
-        union_definition(name, @union_types[name])
+        union_definition(name, @union_types[name], visibility: visibility)
       end
     end
 

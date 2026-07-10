@@ -163,6 +163,7 @@ RSpec.describe Type, "ownership and cleanup contracts" do
     it "unwraps success and payload types without losing ownership shape" do
       expect(Type.error_union_of(:String).success_type).to eq(Type.new(:String))
       expect(Type.optional_of(:String).value_payload_type).to eq(Type.new(:String))
+      expect(Type.optional_of(Type.optional_of(:String))).to eq(Type.optional_of(:String))
       expect(Type.error_union_of(:String).value_payload_type).to eq(Type.new(:String))
       expect(Type.error_union_of(Type.optional_of(:String)).value_payload_type).to eq(Type.new(:String))
       expect(Type.new(:Int64).value_payload_type).to eq(Type.new(:Int64))
@@ -171,6 +172,8 @@ RSpec.describe Type, "ownership and cleanup contracts" do
     it "accepts only compatible optional, error-union, array, and map values" do
       expect(Type.optional_of(:String).accepts?(Type.new(:String))).to eq(true)
       expect(Type.optional_of(:String).accepts?(Type.new(:NIL))).to eq(true)
+      expect(Type.optional_of(Type.new(:String, sync: :symbol)).accepts?(Type.optional_of(:Any))).to eq(true)
+      expect(Type.binary_op(:EQ, Type.optional_of(:Any), Type.new(:Bool)).type).to eq(Type.new(:Bool))
       expect(Type.error_union_of(:String).accepts?(Type.new(:String))).to eq(true)
       expect(Type.array_of(:Int64).accepts?(Type.array_of(:Byte))).to eq(true)
       expect(Type.new(:"HashMap<Any>").accepts?(Type.new(:"HashMap<String>"))).to eq(true)

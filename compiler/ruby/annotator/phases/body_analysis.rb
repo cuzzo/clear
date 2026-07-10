@@ -461,6 +461,7 @@ module Annotator
 
             if node.fn_var_call
               summary.has_fnptr_call = true
+              summary.raises_directly = true if !frame.failure_absorbed && fn_var_call_error_fallible?(node)
             else
               summary.callees.add(node.name)
               summary.propagating_callees.add(node.name) unless frame.failure_absorbed
@@ -468,6 +469,18 @@ module Annotator
           end
         end
       end
+
+      sig { params(node: AST::FuncCall).returns(T::Boolean) }
+      def fn_var_call_error_fallible?(node)
+        sig = FunctionSignature.unwrap(node.matched_signature) if node.respond_to?(:matched_signature)
+        return true if sig&.return_type&.error_union?
+
+        call_type = node.full_type if node.respond_to?(:full_type)
+        call_type.is_a?(Type) && call_type.error_union?
+      rescue StandardError
+        false
+      end
+      private :fn_var_call_error_fallible?
 
       sig { params(node: AST::WithBlock).returns(T::Boolean) }
       def with_block_raises_directly?(node)
