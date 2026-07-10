@@ -690,7 +690,7 @@ RSpec.describe SemanticAnnotator do
         expect(out).to include("|*__it")
       end
 
-      it "emits pool slot scan for EACH on @pool" do
+      it "emits compact Pool sidecar scan for EACH on @pool" do
         out = transpile_fn(<<~CLEAR)
           STRUCT Score { value: Float64 }
           FN f() RETURNS !Void ->
@@ -699,8 +699,8 @@ RSpec.describe SemanticAnnotator do
             RETURN;
           END
         CLEAR
-        expect(out).to include("slots)")
-        expect(out).to include("__each_slot.alive")
+        expect(out).to include("__each_src.isAliveIndex(__each_idx)")
+        expect(out).to include("__each_src.values[__each_idx]")
       end
 
       it "emits runtime sharded-pool EACH helper for EACH on @pool:sharded(4)" do
@@ -2634,8 +2634,8 @@ RSpec.describe SemanticAnnotator do
 
       it "emits slot materialization loop" do
         zig = ZigTranspiler.new.transpile(code)
-        expect(zig).to include("pipe_src_list.slots)")
-        expect(zig).to include("__pslot.alive")
+        expect(zig).to include("pipe_src_list.isAliveIndex(__pslot_idx)")
+        expect(zig).to include("pipe_src_list.values[__pslot_idx]")
         expect(zig).to include("pipe_mat.append")
         expect(zig).to include("sum_result")
       end
@@ -2692,7 +2692,7 @@ RSpec.describe SemanticAnnotator do
 
       it "emits alive-slot materialization before the find loop" do
         zig = ZigTranspiler.new.transpile(code)
-        expect(zig).to include("__pslot.alive")
+        expect(zig).to include("pipe_src_list.isAliveIndex(__pslot_idx)")
         expect(zig).to include("pipe_mat.append")
       end
 

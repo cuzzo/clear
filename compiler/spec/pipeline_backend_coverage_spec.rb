@@ -605,7 +605,8 @@ RSpec.describe "pipeline backend coverage" do
       expect(soa_pool.statements[2].body.first).to be_a(MIR::IfStmt)
 
       pool = materializer.items_setup(collection_type(:"Int64[8]", collection: :pool))
-      expect(pool.statements[2].iter.field).to eq("slots")
+      expect(pool.statements[2].iter).to be_a(MIR::IterRange)
+      expect(pool.statements[2].body.first.cond.method).to eq("isAliveIndex")
 
       set = materializer.items_setup(collection_type(:"Int64[]", collection: :set))
       expect(set.statements[2].name).to eq("__skit")
@@ -1295,7 +1296,9 @@ RSpec.describe "pipeline backend coverage" do
 
       pool = id("pool_items", type: Type.new(:"Int64[]", collection: :pool))
       pool_block = each_lowerer.lower(pool, each_op)
-      expect(collect_mir_nodes(pool_block, MIR::ForStmt).first.iter).to eq(MIR::FieldGet.new(MIR::Ident.new("__each_src"), "slots"))
+      pool_loop = collect_mir_nodes(pool_block, MIR::ForStmt).first
+      expect(pool_loop.iter).to be_a(MIR::IterRange)
+      expect(pool_loop.body.first.cond.operand.method).to eq("isAliveIndex")
 
       each_host.bc_target = true
       bc_pool = each_lowerer.lower(pool, each_op)

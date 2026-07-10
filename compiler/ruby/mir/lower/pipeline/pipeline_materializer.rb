@@ -431,15 +431,16 @@ class PipelineMaterializer
     elem_zig = T.must(lhs_type.element_type).zig_type
     buffer = var_and_defer(elem_zig)
 
+    shard_expr = MIR::IndexGet.new(
+      MIR::FieldGet.new(MIR::Ident.new("pipe_src_list"), "shards"),
+      MIR::Ident.new("__psi"))
     inner_loop = MIR::ForStmt.new(
-      MIR::FieldGet.new(
-        MIR::IndexGet.new(MIR::FieldGet.new(MIR::Ident.new("pipe_src_list"), "shards"),
-                          MIR::Ident.new("__psi")),
-        "slots"),
-      "*__pslot",
+      MIR::IterRange.new(MIR::Lit.new("0"),
+        MIR::Cast.new(MIR::FieldGet.new(shard_expr, "capacity"), "usize", :intCast), :usize),
+      "__pslot_idx",
       [MIR::IfStmt.new(
-        MIR::FieldGet.new(MIR::Ident.new("__pslot"), "alive"),
-        [append(MIR::FieldGet.new(MIR::Ident.new("__pslot"), "value"))],
+        MIR::MethodCall.new(shard_expr, "isAliveIndex", [MIR::Ident.new("__pslot_idx")], false, MIR::CallableContract.no_ownership(1)),
+        [append(MIR::IndexGet.new(MIR::FieldGet.new(shard_expr, "values"), MIR::Ident.new("__pslot_idx")))],
         nil)],
       nil)
 
@@ -480,11 +481,12 @@ class PipelineMaterializer
     buffer = var_and_defer(elem_zig)
 
     loop_node = MIR::ForStmt.new(
-      MIR::FieldGet.new(MIR::Ident.new("pipe_src_list"), "slots"),
-      "*__pslot",
+      MIR::IterRange.new(MIR::Lit.new("0"),
+        MIR::Cast.new(MIR::FieldGet.new(MIR::Ident.new("pipe_src_list"), "capacity"), "usize", :intCast), :usize),
+      "__pslot_idx",
       [MIR::IfStmt.new(
-        MIR::FieldGet.new(MIR::Ident.new("__pslot"), "alive"),
-        [append(MIR::FieldGet.new(MIR::Ident.new("__pslot"), "value"))],
+        MIR::MethodCall.new(MIR::Ident.new("pipe_src_list"), "isAliveIndex", [MIR::Ident.new("__pslot_idx")], false, MIR::CallableContract.no_ownership(1)),
+        [append(MIR::IndexGet.new(MIR::FieldGet.new(MIR::Ident.new("pipe_src_list"), "values"), MIR::Ident.new("__pslot_idx")))],
         nil)],
       nil)
 

@@ -276,14 +276,14 @@ collapse, measured median-of-five combined times:
 
 | Implementation | Combined time | Peak bytes/capacity |
 |---|---:|---:|
-| Ideal unchecked C `u32` indices | 307.3 ms | 24 |
-| Proposed paged compact slot map | 365.8 ms | 36 |
-| Unsafe C slot map | 374.9 ms | 36 |
-| Ideal C raw pointers | 390.3 ms | 40 |
-| CLEAR manual pool | 427.1 ms | 52 |
-| Go pointers + forced GC | 1,027.3 ms | allocator-reported separately |
-| CLEAR LINK/RESOLVE | 1,073.4 ms | 80 |
-| Rust `Rc<RefCell>` / `Weak` | 1,085.3 ms | 72 estimated |
+| Ideal unchecked C `u32` indices | 299.5 ms | 24 |
+| Proposed paged compact slot map | 362.8 ms | 36 |
+| Unsafe C slot map | 366.2 ms | 36 |
+| CLEAR manual pool | 373.9 ms | 48 |
+| Ideal C raw pointers | 378.6 ms | 40 |
+| Go pointers + forced GC | 977.0 ms | allocator-reported separately |
+| CLEAR LINK/RESOLVE | 1,008.5 ms | 80 |
+| Rust `Rc<RefCell>` / `Weak` | 1,023.4 ms | 72 estimated |
 
 The CLEAR baselines call the real `Pool`, `Rc`, `WeakRc`, downgrade, upgrade,
 and release runtime functions. Rust uses `Rc<RefCell<Node>>` and `Weak`. Go uses
@@ -301,16 +301,17 @@ overall. CLEAR uses 80 requested bytes per capacity versus Rust's estimated 72;
 the remaining difference is primarily Zig's 16-byte `?Rc` wrapper versus
 Rust's 8-byte niche-optimized `Option<Rc>`.
 
-Against ideal unchecked direct-index C, the paged slot map is 1.19x overall at
-1M. Random traversal is 1.18x ideal C, 5% faster than C's unsafe slot map, and
-within 1% of Go. While compact C remains cache-resident, random traversal is
-still 1.55x–2.08x ideal C; no universal 1.15x claim is supported.
+Against ideal unchecked direct-index C, the paged slot map is 1.21x overall at
+1M. Random traversal is 1.18x ideal C and 2% faster than corrected Pool. While
+compact C remains cache-resident, random traversal is still 1.51x–2.24x ideal
+C; no universal 1.15x claim is supported.
 
 Before deletion, random handle traversal is slower than pool because
 `GraphId -> dense index -> payload` is a dependent two-load chain while pool
 directly names its slot. Compact IDs reduce bandwidth but cannot remove that
 latency. After 99% deletion, the normalized sparse scan takes 0.315 ms in the
-slotmap versus 308.9 ms in pool: dense survivor iteration is about 981x faster.
+slotmap versus 45.5 ms in corrected Pool: dense survivor iteration is about
+147x faster.
 It is still 4.04x ideal C's vectorized dense scan in absolute terms. The feature
 is therefore compelling for sparse/churned graphs, not as a universal
 replacement for a dense pool.
@@ -466,8 +467,10 @@ The dense slot map is the best **general default for a closed, mutable graph**
 only if the paged prototype passes the acceptance gate. It is not a universal
 replacement for `@pool`, `@arena`, or `@link`. In particular, a dense graph
 whose dominant operation is random edge traversal should continue to be able
-to use `@pool`; in the corrected 1M run the slot map is about 10% slower overall
-and its random-traversal phase about 35% slower than the pool.
+to use `@pool`. Corrected Pool wins the combined trace by 27% at 4K, 27% at
+16K, 29% at 65K, and 12% at 262K. SlotMap crosses over at 1M, where it is 3%
+faster overall and 2% faster on random traversal because its compact edges and
+payload reduce DRAM traffic.
 
 The direct-pool alternative is not an implementation of this `@graph`
 contract. A physical-slot handle cannot survive arbitrary payload movement
@@ -495,12 +498,12 @@ against CLEAR's goal of visible, predictable costs.
 
 ## Compiler implementation plan
 
-### G1: Characterize and fix pool cleanup first
+### G1: Characterize and fix pool cleanup first — complete
 
-Before adding a collection, add a regression proving that removing a
-cleanup-bearing pool element destroys it exactly once. The current
-`Pool.remove` only marks the slot dead. Fixing or explicitly documenting that
-existing bug is prerequisite evidence for graph cleanup design.
+Pool removal now destroys cleanup-bearing elements immediately and exactly
+once. Its payload and packed liveness/generation metadata are separate arrays,
+initialization is failure-safe, sparse high-index survivors are cleaned at
+teardown, and generation exhaustion retires a slot instead of wrapping.
 
 ### G2: Parse and type the collection shape
 

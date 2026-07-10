@@ -165,14 +165,21 @@ class PipelineEachLowerer < T::Struct
     MIR::ScopeBlock.new([
       MIR::Let.new("__each_src", MIR::UnaryOp.new("&", source_mir), false, nil, nil),
       MIR::ForStmt.new(
-        MIR::FieldGet.new(MIR::Ident.new("__each_src"), "slots"),
-        "*__each_slot",
+        MIR::IterRange.new(
+          MIR::Lit.new("0"),
+          MIR::Cast.new(MIR::FieldGet.new(MIR::Ident.new("__each_src"), "capacity"), "usize", :intCast),
+          :usize),
+        "__each_idx",
         [
           MIR::IfStmt.new(
-            MIR::UnaryOp.new("!", MIR::FieldGet.new(MIR::Ident.new("__each_slot"), "alive")),
+            MIR::UnaryOp.new("!", MIR::MethodCall.new(
+              MIR::Ident.new("__each_src"), "isAliveIndex", [MIR::Ident.new("__each_idx")],
+              false, MIR::CallableContract.no_ownership(1))),
             [MIR::ContinueStmt.new(nil)], nil),
           MIR::Let.new("__each_item",
-            MIR::UnaryOp.new("&", MIR::FieldGet.new(MIR::Ident.new("__each_slot"), "value")),
+            MIR::UnaryOp.new("&", MIR::IndexGet.new(
+              MIR::FieldGet.new(MIR::Ident.new("__each_src"), "values"),
+              MIR::Ident.new("__each_idx"))),
             false, nil, nil),
           *pool_body_mir,
         ],

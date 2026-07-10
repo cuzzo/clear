@@ -2612,9 +2612,9 @@ class Type
   #   :indexed_slice -- usize index iterates a slice. Suffix is
   #                     ".items" for ArrayList-backed collections,
   #                     "" for raw arrays.
-  #   :pool_indexed  -- usize index iterates `coll.slots`, skipping
-  #                     entries where `.alive == false`. The bound
-  #                     element is `slot.value`.
+  #   :pool_indexed  -- usize index iterates Pool capacity, checking
+  #                     the packed state sidecar and binding the
+  #                     corresponding direct payload value.
   #   :iterator      -- a stateful iterator object lives on ctx;
   #                     `.next()` returns ?T (or ?*T for sets), and
   #                     the bound var captures the unwrapped value.

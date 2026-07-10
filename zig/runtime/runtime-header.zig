@@ -2849,12 +2849,11 @@ pub const CheatLib = struct {
         return @hasField(T, "metadata") and @hasDecl(T, "deinit");
     }
 
-    /// Returns true if T is a Pool(U) — has slots, free_stack, free_top, capacity.
+    /// Returns true if T is a Pool(U).
     fn isPool(comptime T: type) bool {
         const info = @typeInfo(T);
         if (info != .@"struct") return false;
-        return @hasField(T, "slots") and @hasField(T, "free_stack") and
-               @hasField(T, "free_top") and @hasField(T, "capacity");
+        return @hasDecl(T, "is_pool");
     }
 
     fn isPagedSlotMap(comptime T: type) bool {
@@ -3553,14 +3552,14 @@ pub const CheatLib = struct {
         if (comptime isPool(T)) {
             var result = try T.initCapacity(alloc, value.capacity);
             errdefer result.deinit(alloc);
-            const max_used = value.capacity - value.free_top;
-            for (value.slots[0..max_used]) |slot| {
-                if (!slot.alive) continue;
-                const ElemT = @TypeOf(slot.value);
+            for (value.states, 0..) |state, idx| {
+                if ((state & 1) == 0) continue;
+                const elem = value.values[idx];
+                const ElemT = @TypeOf(elem);
                 const v = if (comptime needsCleanup(ElemT))
-                    try dupeValue(ElemT, slot.value, alloc)
+                    try dupeValue(ElemT, elem, alloc)
                 else
-                    slot.value;
+                    elem;
                 _ = try result.insert(alloc, v);
             }
             return result;
@@ -3594,14 +3593,14 @@ pub const CheatLib = struct {
             errdefer result.deinit(alloc);
             inline for (0..@typeInfo(@TypeOf(value.shards)).array.len) |idx| {
                 const shard = value.shards[idx];
-                const max_used = shard.capacity - shard.free_top;
-                for (shard.slots[0..max_used]) |slot| {
-                    if (!slot.alive) continue;
-                    const ElemT = @TypeOf(slot.value);
+                for (shard.states, 0..) |state, value_idx| {
+                    if ((state & 1) == 0) continue;
+                    const elem = shard.values[value_idx];
+                    const ElemT = @TypeOf(elem);
                     const copied = if (comptime needsCleanup(ElemT))
-                        try dupeValue(ElemT, slot.value, alloc)
+                        try dupeValue(ElemT, elem, alloc)
                     else
-                        slot.value;
+                        elem;
                     _ = try result.shards[idx].insert(alloc, copied);
                 }
             }

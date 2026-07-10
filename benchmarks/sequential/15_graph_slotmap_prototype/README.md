@@ -40,11 +40,18 @@ unsafe 32-bit slot with no stale-handle protection.
 ## Preliminary results
 
 The corrected phase-separated, cache-scale results are in [RESULTS.md](RESULTS.md).
-At one million nodes the paged safe slotmap takes 365.83 ms versus 307.27 ms for
-ideal unchecked direct-index C: 1.19x overall. Random traversal is 1.18x ideal
-C, 5% faster than C's unsafe slotmap, and within 1% of Go. Cache-resident random
-reads remain 1.55x–2.08x ideal C because checked stable IDs require the
+At one million nodes the paged safe slotmap takes 362.76 ms versus 299.55 ms for
+ideal unchecked direct-index C: 1.21x overall. Random traversal is 1.18x ideal
+C and 2% faster than the corrected CLEAR Pool. Cache-resident random reads
+remain 1.51x–2.24x ideal C because checked stable IDs require the
 handle-to-dense dependency.
+
+The corrected Pool now uses separate payload, packed state, and free-stack
+arrays; removal performs exact-once cleanup and generations retire instead of
+wrapping. It drops from 52 to 48 bytes per capacity in this workload and its
+sparse scan improves from 308.92 ms to 45.53 ms. Pool wins the combined trace
+through 262K nodes; SlotMap crosses over at 1M and wins there by 3%, while
+retaining 7.96 MiB after collapse versus Pool's 45.78 MiB.
 
 The corrected CLEAR Rc implementation now matches idiomatic Rust phase by
 phase and is about 1% faster overall at 1M. The prior 1,526 ms LINK number was invalid because

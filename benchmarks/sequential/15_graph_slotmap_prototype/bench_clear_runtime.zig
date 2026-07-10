@@ -113,6 +113,10 @@ const PoolNode = struct {
     edges: [edge_count]u64,
 };
 
+inline fn poolInitialHandle(slot: u32) u64 {
+    return (@as(u64, 1) << 32) | slot;
+}
+
 fn runPool(capacity: u32) !void {
     var counter = CountingAllocator{ .backing = std.heap.c_allocator };
     const allocator = counter.allocator();
@@ -138,9 +142,9 @@ fn runPool(capacity: u32) !void {
 
     for (0..capacity) |raw_i| {
         const i: u32 = @intCast(raw_i);
-        const node = pool.get(i).?;
+        const node = pool.get(poolInitialHandle(i)).?;
         inline for (0..edge_count) |raw_edge| {
-            node.edges[raw_edge] = localTarget(i, @intCast(raw_edge), core_count);
+            node.edges[raw_edge] = poolInitialHandle(localTarget(i, @intCast(raw_edge), core_count));
         }
     }
 
@@ -149,7 +153,7 @@ fn runPool(capacity: u32) !void {
     var checksum: u64 = 0;
     for (0..read_rounds) |_| {
         for (0..core_count) |raw_i| {
-            const node = pool.get(@intCast(raw_i)).?;
+            const node = pool.get(poolInitialHandle(@intCast(raw_i))).?;
             inline for (0..edge_count) |edge| checksum +%= pool.get(node.edges[edge]).?.value;
         }
     }
@@ -160,12 +164,12 @@ fn runPool(capacity: u32) !void {
         const use_random = (round & 1) != 0 or round + 1 == write_rounds;
         for (0..capacity) |raw_i| {
             const i: u32 = @intCast(raw_i);
-            const node = pool.get(i).?;
+            const node = pool.get(poolInitialHandle(i)).?;
             inline for (0..edge_count) |edge| {
                 node.edges[edge] = if (use_random)
-                    randomTarget(i, @intCast(edge), core_count)
+                    poolInitialHandle(randomTarget(i, @intCast(edge), core_count))
                 else
-                    localTarget(i, @intCast(edge), core_count);
+                    poolInitialHandle(localTarget(i, @intCast(edge), core_count));
             }
         }
     }
@@ -175,7 +179,7 @@ fn runPool(capacity: u32) !void {
     var random_checksum: u64 = 0;
     for (0..read_rounds) |_| {
         for (0..core_count) |raw_i| {
-            const node = pool.get(@intCast(raw_i)).?;
+            const node = pool.get(poolInitialHandle(@intCast(raw_i))).?;
             inline for (0..edge_count) |edge| random_checksum +%= pool.get(node.edges[edge]).?.value;
         }
     }
@@ -187,7 +191,7 @@ fn runPool(capacity: u32) !void {
             pool.remove(handle);
             var replacement = PoolNode{ .value = i + round, .edges = .{0} ** edge_count };
             inline for (0..edge_count) |edge| {
-                replacement.edges[edge] = randomTarget(@intCast(i), @intCast(edge), core_count);
+                replacement.edges[edge] = poolInitialHandle(randomTarget(@intCast(i), @intCast(edge), core_count));
             }
             churn_handles[i] = try pool.insert(allocator, replacement);
         }
@@ -197,16 +201,17 @@ fn runPool(capacity: u32) !void {
     phase = Timer.start();
     const keep = @max(1, capacity / 100);
     var i = keep;
-    while (i < core_count) : (i += 1) pool.remove(i);
+    while (i < core_count) : (i += 1) pool.remove(poolInitialHandle(i));
     for (churn_handles) |handle| pool.remove(handle);
 
     const collapse_ns = phase.read();
     var sparse_timer = Timer.start();
     var sparse_checksum: u64 = 0;
     for (0..sparse_rounds) |_| {
-        for (pool.slots) |slot| if (slot.alive) {
-            sparse_checksum +%= slot.value.value;
-        };
+        for (0..pool.capacity) |idx| {
+            const node = pool.valueAtIndexConst(idx) orelse continue;
+            sparse_checksum +%= node.value;
+        }
     }
     const sparse_ns = sparse_timer.read();
     const elapsed_ns = build_ns + local_read_ns + edge_write_ns + random_read_ns + churn_ns + collapse_ns;

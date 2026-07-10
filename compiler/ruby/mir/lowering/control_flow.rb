@@ -424,19 +424,24 @@ module MIRLoweringControlFlow
       )
       loop_stmt = MIR::ScopeBlock.new([iter_init, while_stmt])
     elsif ct.pool?
-      # Pool: iterate over slots, skip dead entries.
-      # Emits: for (pool.slots) |*__pslot_N| { if (!__pslot_N.alive) continue; const var = __pslot_N.value; body }
-      slot_var = "__pslot_#{lowering_counters.next_for_loop_id}"
+      # Pool payload and liveness metadata are separate sidecars. Iterate
+      # physical indices, skip vacant entries, then read the direct payload.
+      slot_var = "__pslot_idx_#{lowering_counters.next_for_loop_id}"
       slot_ident = MIR::Ident.new(slot_var)
-      slots_iter = MIR::FieldGet.new(coll, "slots")
+      slots_iter = MIR::IterRange.new(
+        MIR::Lit.new("0"),
+        MIR::Cast.new(MIR::FieldGet.new(coll, "capacity"), "usize", :intCast),
+        :usize)
       skip_dead = MIR::IfStmt.new(
-        MIR::UnaryOp.new("!", MIR::FieldGet.new(slot_ident, "alive")),
+        MIR::UnaryOp.new("!", MIR::MethodCall.new(coll, "isAliveIndex", [slot_ident], false, MIR::CallableContract.no_ownership(1))),
         [MIR::ContinueStmt.new(nil)],
         nil
       )
-      value_bind = MIR::Let.new(var, MIR::FieldGet.new(slot_ident, "value"), false, nil, nil)
+      value_bind = MIR::Let.new(var,
+        MIR::IndexGet.new(MIR::FieldGet.new(coll, "values"), slot_ident),
+        false, nil, nil)
       full_body = [skip_dead, value_bind] + body
-      loop_stmt = MIR::ForStmt.new(slots_iter, "*#{slot_var}", full_body, nil, mark_per_iter, tight)
+      loop_stmt = MIR::ForStmt.new(slots_iter, slot_var, full_body, nil, mark_per_iter, tight)
     elsif ct.dynamic_stream? || ct.open_stream?
       # Finite/open stream (~T[] / ~?T[]): next() returns ?T; while-loop with optional capture.
       loop_stmt = MIR::WhileStmt.new(

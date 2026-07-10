@@ -37,37 +37,37 @@ Parentheses are ratios to unchecked direct-index C at the same size.
 
 | Capacity | C u32 index | C raw pointers | C unsafe slotmap | Proposed safe slotmap | CLEAR pool | CLEAR LINK/RESOLVE | Rust Rc/Weak | Go GC |
 |---:|---:|---:|---:|---:|---:|---:|---:|---:|
-| 4,096 | 34.49 ms | 38.53 (1.12x) | 50.36 (1.46x) | 53.97 (1.56x) | 41.38 (1.20x) | 100.11 (2.90x) | 130.34 (3.78x) | 147.78 (4.28x) |
-| 16,384 | 37.62 ms | 41.33 (1.10x) | 53.78 (1.43x) | 57.66 (1.53x) | 45.61 (1.21x) | 108.05 (2.87x) | 136.97 (3.64x) | 165.42 (4.40x) |
-| 65,536 | 45.00 ms | 52.55 (1.17x) | 70.16 (1.56x) | 73.96 (1.64x) | 66.20 (1.47x) | 184.56 (4.10x) | 215.65 (4.79x) | 222.08 (4.94x) |
-| 262,144 | 91.07 ms | 115.49 (1.27x) | 119.81 (1.32x) | 133.95 (1.47x) | 162.76 (1.79x) | 430.02 (4.72x) | 450.41 (4.95x) | 392.55 (4.31x) |
-| 1,000,000 | 307.27 ms | 390.26 (1.27x) | 374.86 (1.22x) | 365.83 (1.19x) | 427.06 (1.39x) | 1,073.37 (3.49x) | 1,085.26 (3.53x) | 1,027.34 (3.34x) |
+| 4,096 | 35.47 ms | 39.02 (1.10x) | 50.43 (1.42x) | 54.71 (1.54x) | 39.92 (1.13x) | 101.60 (2.86x) | 141.63 (3.99x) | 147.09 (4.15x) |
+| 16,384 | 37.53 ms | 41.51 (1.11x) | 53.18 (1.42x) | 58.94 (1.57x) | 42.97 (1.15x) | 105.69 (2.82x) | 145.48 (3.88x) | 165.70 (4.42x) |
+| 65,536 | 44.02 ms | 51.91 (1.18x) | 68.98 (1.57x) | 75.97 (1.73x) | 53.64 (1.22x) | 178.55 (4.06x) | 210.67 (4.79x) | 220.63 (5.01x) |
+| 262,144 | 91.52 ms | 115.40 (1.26x) | 121.50 (1.33x) | 130.99 (1.43x) | 114.73 (1.25x) | 433.01 (4.73x) | 453.31 (4.95x) | 393.20 (4.30x) |
+| 1,000,000 | 299.55 ms | 378.65 (1.26x) | 366.22 (1.22x) | 362.76 (1.21x) | 373.88 (1.25x) | 1,008.46 (3.37x) | 1,023.40 (3.42x) | 977.03 (3.26x) |
 
-At DRAM scale the paged slotmap is 1.19x ideal direct-index C, slightly faster
-than C's unsafe slotmap, and 6% faster than raw-pointer C. While compact C is
-cache-resident it remains 1.47x–1.64x overall; the 1.15x expectation therefore
+At DRAM scale the paged slotmap is 1.21x ideal direct-index C, slightly faster
+than C's unsafe slotmap, and 4% faster than raw-pointer C. While compact C is
+cache-resident it remains 1.43x–1.73x overall; the 1.15x expectation therefore
 only describes the large memory-bound case, not a universal ratio.
 
 ## All scenarios at one million nodes
 
 | Scenario | C u32 index | C raw pointers | C unsafe slotmap | Proposed safe slotmap | CLEAR pool | CLEAR LINK/RESOLVE | Rust Rc/Weak | Go GC |
 |---|---:|---:|---:|---:|---:|---:|---:|---:|
-| Build | 18.91 ms | 26.23 | 22.86 | 21.35 | 52.69 | 66.24 | 64.90 | 86.41 |
-| Local reads | 17.31 ms | 31.98 | 20.67 | 22.80 | 47.81 | 103.95 | 103.17 | 67.63 |
-| Edge writes | 32.71 ms | 35.17 | 32.70 | 29.08 | 31.27 | 235.28 | 240.80 | 82.46 |
-| Random reads | 229.83 ms | 289.22 | 284.92 | 270.43 | 280.69 | 475.79 | 479.81 | 268.92 |
-| Vertex churn | 7.32 ms | 7.68 | 9.80 | 9.74 | 8.81 | 122.33 | 131.35 | 352.49 |
-| Collapse to 1% | <0.001 ms | <0.001 | 3.98 | 9.84 | 4.81 | 69.58 | 68.05 | 157.16 |
-| Sparse full scans | 0.078 ms | 0.086 | 0.331 | 0.314 | 308.92 | 73.19 | 48.98 | 61.03 |
+| Build | 18.57 ms | 25.60 | 22.45 | 21.08 | 26.57 | 63.41 | 63.11 | 85.83 |
+| Local reads | 15.57 ms | 24.43 | 19.94 | 22.28 | 32.68 | 91.32 | 94.12 | 60.20 |
+| Edge writes | 32.30 ms | 33.88 | 32.50 | 28.95 | 30.19 | 226.98 | 224.31 | 82.26 |
+| Random reads | 226.79 ms | 287.43 | 277.78 | 267.68 | 273.19 | 435.16 | 450.53 | 257.54 |
+| Vertex churn | 7.24 ms | 7.81 | 9.41 | 9.59 | 9.16 | 118.72 | 123.34 | 330.35 |
+| Collapse to 1% | <0.001 ms | <0.001 | 3.84 | 9.42 | 1.56 | 65.09 | 66.75 | 152.35 |
+| Sparse full scans | 0.076 ms | 0.088 | 0.335 | 0.310 | 45.53 | 68.75 | 45.54 | 59.91 |
 
-Ratios for the proposed slotmap versus direct-index C are 1.13x build, 1.32x
-local reads, 0.89x edge writes, 1.18x random reads, 1.33x churn, and 4.03x
+Ratios for the proposed slotmap versus direct-index C are 1.14x build, 1.43x
+local reads, 0.90x edge writes, 1.18x random reads, 1.32x churn, and 4.08x
 sparse dense iteration. Collapse cannot have a meaningful ratio because ideal
 C does no deletion work at all.
 
 Random-read overhead is most severe while the compact C payload is cache
-resident: the proposed slotmap is 2.08x C at 4K, 1.89x at 16K, 2.06x at 64K,
-1.55x at 256K, and 1.18x at 1M. At large sizes both representations become
+resident: the proposed slotmap is 2.11x C at 4K, 2.02x at 16K, 2.24x at 64K,
+1.51x at 256K, and 1.18x at 1M. At large sizes both representations become
 memory-latency bound, narrowing the ratio.
 
 ## Memory at one million capacity
@@ -78,10 +78,16 @@ memory-latency bound, narrowing the ratio.
 | C raw pointers | 40 | 38.15 MiB (preallocated) |
 | C unsafe slotmap | 36 | 34.33 MiB (preallocated) |
 | Proposed paged safe slotmap | 36 | 34.33 MiB peak committed; 7.96 MiB retained committed estimate |
-| CLEAR pool | 52 | 49.59 MiB (preallocated) |
+| CLEAR pool | 48 | 45.78 MiB (preallocated) |
 | CLEAR LINK/RESOLVE | 80 | 18.28 MiB requested |
 | Rust Rc/Weak | 72 estimated | retained figure is only a lower bound |
 | Go tracing GC | allocator-reported | 96.52 MiB peak heap, 41.99 MiB retained heap |
+
+The corrected direct Pool stores payloads, packed liveness/generation state,
+and its free stack in separate arrays. This removes four bytes per capacity and
+reduces a normalized sparse scan from 308.92 ms to 45.53 ms by scanning the
+four-byte state sidecar instead of 48-byte tombstoned slots. It still retains
+all 45.78 MiB after collapse because live values never move.
 
 The paged dense segment keeps contiguous virtual addressing but decommits empty
 4,096-node tail regions with `madvise(DONTNEED)` after swap-removal. `mincore`
@@ -95,11 +101,13 @@ work.
 ## Interpretation
 
 The paged dense slotmap remains much faster than LINK/RESOLVE and Rust Rc/Weak,
-and its sparse survivor iteration is dramatically better than a tombstone pool.
-At 1M it is 14% faster than CLEAR's pool overall, 4% faster on random reads,
-within 1% of Go's random reads, and 5% faster than C's unsafe slotmap on random
-reads. Its remaining cache-resident penalty versus ideal direct-index C is the
-unavoidable checked `logical slot -> dense position -> payload` chain.
+and its sparse survivor iteration remains dramatically better than the
+corrected direct Pool. At 1M it is 3% faster than Pool overall and 2% faster on
+random reads, while Pool is 12% faster overall at 262K and 29% faster at 65K.
+The SlotMap's remaining cache-resident penalty versus direct Pool is the
+checked `logical slot -> dense position -> payload` chain; its large-scale
+crossover comes from four-byte edges, denser payloads, and reduced memory
+traffic.
 
 After removing the redundant 16-byte allocator value from every non-atomic Rc
 control block, CLEAR LINK/RESOLVE matches Rust phase by phase and is 1% faster
