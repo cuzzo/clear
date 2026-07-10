@@ -388,6 +388,9 @@ fn is_dark_arm_result(
             .unwrap_or(category)
     )
     .to_ascii_lowercase();
+    if haystack.contains("dead") {
+        return false;
+    }
     haystack.contains("dark-arm") || haystack.contains("dark arm")
 }
 
@@ -645,5 +648,42 @@ mod tests {
         
         assert_eq!(stats3.artifacts, 1);
         assert_eq!(stats3.findings, 2);
+
+        let dead_json = dir.path().join("dead_test.sarif");
+        fs::write(
+            &dead_json,
+            r#"{
+              "version":"2.1.0",
+              "runs":[{
+                "tool":{"driver":{"name":"SlopCop"}},
+                "results":[{
+                  "ruleId":"slopcop.dark-arm.dead",
+                  "level":"warning",
+                  "message":{"text":"dark arm: dead"},
+                  "locations":[{
+                    "physicalLocation":{
+                      "artifactLocation":{"uri":"src/demo.rb"}
+                    }
+                  }],
+                  "properties":{"kind":"dead"}
+                }]
+              }]
+            }"#,
+        ).unwrap();
+        
+        let stats4 = ingest_sarif_paths(
+            &storage,
+            dir.path(),
+            &[dead_json],
+            "test_source",
+            "abc",
+            None,
+            false,
+        ).unwrap();
+        
+        assert_eq!(stats4.findings, 1);
+        let findings = storage.sarif_findings_for_path("src/demo.rb").unwrap();
+        let dead_finding = findings.iter().find(|f| f.rule_id == "slopcop.dark-arm.dead").unwrap();
+        assert_eq!(dead_finding.is_dark_arm, false);
     }
 }

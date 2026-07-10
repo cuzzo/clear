@@ -8,16 +8,35 @@ set -e
 DB_PATH=${1:-/tmp/lineage.db}
 COMMIT_HASH=$(git rev-parse HEAD)
 
-echo "=== [1/4] Running Tests & Generating Coverage ==="
-# Ruby spec coverage
+# Clean old coverage results
+rm -rf coverage/.resultset.json coverage/coverage.xml
+
+# Ruby spec coverage (unit + integration)
 echo "Running Ruby specs under coverage..."
-COVERAGE=1 bundle exec prspec compiler/spec/
+COVERAGE=1 bundle exec prspec compiler/spec/ || true
+COVERAGE=1 bundle exec prspec compiler/spec/ --tag integration || true
+
+# Transpile, corpus, and bc-lower coverages
+echo "Running transpile-tests generation under coverage..."
+COVERAGE=1 bundle exec ruby transpile-tests/gen.rb || true
+
+echo "Running corpus transpile coverage..."
+COVERAGE=1 bundle exec ruby tools/corpus_transpile_coverage.rb || true
+
+echo "Running corpus runtime coverage..."
+COVERAGE=1 bundle exec ruby tools/corpus_runtime_coverage.rb || true
+
+echo "Running bytecode lowering coverage..."
+COVERAGE=1 bundle exec ruby tools/bc_lower_coverage.rb --jobs $(nproc) || true
+
+# Collate all Ruby coverage resultsets
+echo "Collating Ruby coverage resultsets..."
 bundle exec ruby compiler/spec/collate_coverage.rb
 
 # Zig unit/Loom/VOPR test coverage
 echo "Running Zig unit tests under coverage (kcov)..."
 cd zig
-zig build test -Dcoverage
+zig build test -Dcoverage || true
 cd ..
 
 echo "=== [2/4] Generating SARIF Findings ==="
