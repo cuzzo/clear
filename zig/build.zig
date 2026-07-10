@@ -227,11 +227,13 @@ pub fn build(b: *std.Build) void {
         .{ .path = "net-steal-hammer-test.zig", .tsan = true, .hammer = true },
         .{ .path = "parking-lot-cycle-test.zig", .tsan = true },
         .{ .path = "parking-lot-hammer-test.zig", .tsan = true, .hammer = true },
+        .{ .path = "paged-slot-map-hammer-test.zig", .hammer = true },
         // parking-lot-loom-test is built as an executable above (search for
         // pl_loom_exe). Building via b.addTest puts the test_runner at
         // module root, hiding `pub const SimAtomic` from the comptime
         // Atomic alias and silently disabling Loom — see GAP-B.
         .{ .path = "parking-lot-test.zig", .tsan = true },
+        .{ .path = "paged-slot-map-test.zig" },
         .{ .path = "pool-test.zig", .tsan = true },
         .{ .path = "queues-test.zig", .tsan = true },
         .{ .path = "routing-crash-test.zig", .tsan = true },

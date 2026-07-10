@@ -4,6 +4,7 @@ const fp = @import("../runtime/scheduler.zig");
 const Task = @import("../runtime/queues.zig").Task;
 const queues = @import("../runtime/queues.zig");
 const pl = @import("parking-lot.zig");
+const paged_slot_map = @import("paged-slot-map.zig");
 
 // Comptime atomic type selection for fields exercised by the loom suite.
 // Mirrors queues.zig: when the test root exports SimAtomic
@@ -38,6 +39,21 @@ pub fn bind(comptime deps: type) type {
         fn dupeValue(comptime T: type, value: T, alloc: std.mem.Allocator) !T {
             return deps.dupeValue(T, value, alloc);
         }
+
+    pub fn PagedSlotMap(comptime T: type) type {
+        return paged_slot_map.PagedSlotMap(T, struct {
+            fn drop(alloc: std.mem.Allocator, ptr: *T) void {
+                cleanup(T, alloc, ptr);
+            }
+        }.drop);
+    }
+
+    pub fn PagedSlotMapWithDrop(
+        comptime T: type,
+        comptime dropFn: fn (std.mem.Allocator, *T) void,
+    ) type {
+        return paged_slot_map.PagedSlotMap(T, dropFn);
+    }
 
     pub fn makeHashMap(comptime V: type) std.StringHashMapUnmanaged(V) {
         return std.StringHashMapUnmanaged(V){};

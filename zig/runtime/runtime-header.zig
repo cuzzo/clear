@@ -1029,6 +1029,8 @@ pub const CheatLib = struct {
     pub const BoundedChannel = DataStructures.BoundedChannel;
     pub const BatchWindow = DataStructures.BatchWindow;
     pub const Pool = DataStructures.Pool;
+    pub const PagedSlotMap = DataStructures.PagedSlotMap;
+    pub const PagedSlotMapWithDrop = DataStructures.PagedSlotMapWithDrop;
     pub const SoaList = DataStructures.SoaList;
     pub const SoaPool = DataStructures.SoaPool;
     pub const ShardedPool = DataStructures.ShardedPool;
@@ -2855,6 +2857,10 @@ pub const CheatLib = struct {
                @hasField(T, "free_top") and @hasField(T, "capacity");
     }
 
+    fn isPagedSlotMap(comptime T: type) bool {
+        return @typeInfo(T) == .@"struct" and @hasDecl(T, "is_paged_slot_map");
+    }
+
     /// Returns true if T is a SoaPool(U) — same ownership contract as Pool(U),
     /// with field-column storage instead of Slot{value}.
     fn isSoaPool(comptime T: type) bool {
@@ -3237,6 +3243,12 @@ pub const CheatLib = struct {
             return;
         }
 
+        // PagedSlotMap owns two allocator domains and stores both internally.
+        if (comptime isPagedSlotMap(T)) {
+            ptr.deinit();
+            return;
+        }
+
         // 6. Set(U)
         if (comptime isSetType(T)) {
             // Release owned keys before freeing the backing map.
@@ -3272,7 +3284,7 @@ pub const CheatLib = struct {
         // 8. Structs with a deinit method (ShardedList, ShardedMap, etc.)
         //    Detect deinit arity: 1 alloc (ShardedList) vs 2 allocs (ShardedMap).
         if (@typeInfo(T) == .@"struct" and @hasDecl(T, "deinit") and
-            !isStringMap(T) and !isPool(T) and !isNumericMap(T))
+            !isStringMap(T) and !isPool(T) and !isPagedSlotMap(T) and !isNumericMap(T))
         {
             const deinit_info = @typeInfo(@TypeOf(T.deinit));
             const param_count = deinit_info.@"fn".params.len;
@@ -3690,6 +3702,7 @@ pub const CheatLib = struct {
         if (isStringMap(FT)) return true;
         if (isNumericMap(FT)) return true;
         if (isPool(FT)) return true;
+        if (isPagedSlotMap(FT)) return true;
         // Pointers and non-string slices trivially need cleanup (heap data).
         // Check BEFORE recursing to avoid exponential blowup on recursive types.
         if (ft_info == .pointer and ft_info.pointer.size == .one) return true;
