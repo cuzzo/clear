@@ -371,6 +371,9 @@ fn is_dark_arm_result(
     message: &str,
     category: &str,
 ) -> bool {
+    if result_is_explicitly_dead(result, properties, rule_id, category) {
+        return false;
+    }
     if properties
         .get("dark_arm")
         .and_then(Value::as_bool)
@@ -388,10 +391,33 @@ fn is_dark_arm_result(
             .unwrap_or(category)
     )
     .to_ascii_lowercase();
-    if haystack.contains("dead") {
-        return false;
-    }
     haystack.contains("dark-arm") || haystack.contains("dark arm")
+}
+
+fn result_is_explicitly_dead(
+    result: &Value,
+    properties: &Value,
+    rule_id: &str,
+    category: &str,
+) -> bool {
+    let property_is_dead = ["category", "arm_category", "kind", "type", "status", "classification"]
+        .iter()
+        .filter_map(|key| properties.get(key).and_then(Value::as_str))
+        .any(|value| value.eq_ignore_ascii_case("dead"));
+    if property_is_dead || category.eq_ignore_ascii_case("dead") {
+        return true;
+    }
+
+    [
+        rule_id,
+        result.get("ruleId").and_then(Value::as_str).unwrap_or(""),
+    ]
+    .iter()
+    .any(|value| {
+        value
+            .split(|character: char| !character.is_ascii_alphanumeric())
+            .any(|segment| segment.eq_ignore_ascii_case("dead"))
+    })
 }
 
 fn partial_fingerprint(result: &Value) -> Option<String> {
@@ -454,6 +480,27 @@ mod tests {
     use tempfile::tempdir;
 
     #[test]
+    fn dead_classification_is_exact_and_does_not_match_deadline() {
+        let deadline = serde_json::json!({"ruleId": "slopcop.dark-arm"});
+        assert!(is_dark_arm_result(
+            &deadline,
+            &serde_json::json!({}),
+            "slopcop.dark-arm",
+            "dark arm can miss a deadline",
+            "dark-arm",
+        ));
+
+        let dead = serde_json::json!({"ruleId": "slopcop.dark-arm.dead"});
+        assert!(!is_dark_arm_result(
+            &dead,
+            &serde_json::json!({"dark_arm": true, "kind": "dead"}),
+            "slopcop.dark-arm.dead",
+            "dark arm",
+            "dead",
+        ));
+    }
+
+    #[test]
     fn ingests_sarif_findings_and_replaces_idempotently() {
         let dir = tempdir().unwrap();
         fs::create_dir_all(dir.path().join("src")).unwrap();
@@ -513,7 +560,7 @@ mod tests {
         let stats = ingest_sarif_paths(
             &storage,
             dir.path(),
-            &[sarif.clone()],
+            std::slice::from_ref(&sarif),
             "slopcop",
             "abc",
             Some(20),
@@ -543,7 +590,7 @@ mod tests {
     fn test_sarif_ingest_edge_cases() {
         let dir = tempdir().unwrap();
         let storage = Storage::open_memory().unwrap();
-        
+
         let u1 = LogicalUnit::new(
             "U1".to_string(),
             UnitKind::Function,
@@ -569,16 +616,16 @@ mod tests {
 
         let sub = dir.path().join("sub");
         fs::create_dir(&sub).unwrap();
-        
+
         let sarif1 = sub.join("report1.sarif");
         fs::write(&sarif1, "{}").unwrap();
         let json1 = sub.join("report2.json");
         fs::write(&json1, "{}").unwrap();
         let txt1 = sub.join("report3.txt");
         fs::write(&txt1, "{}").unwrap();
-        
+
         let bad_path = dir.path().join("does_not_exist");
-        
+
         let stats = ingest_sarif_paths(
             &storage,
             dir.path(),
@@ -588,9 +635,9 @@ mod tests {
             None,
             false,
         ).unwrap();
-        
-        assert_eq!(stats.skipped_files, 2); 
-        
+
+        assert_eq!(stats.skipped_files, 2);
+
         let invalid_json = sub.join("invalid.json");
         fs::write(&invalid_json, "invalid JSON content").unwrap();
         let stats2 = ingest_sarif_paths(
@@ -635,7 +682,7 @@ mod tests {
               }]
             }"#,
         ).unwrap();
-        
+
         let stats3 = ingest_sarif_paths(
             &storage,
             dir.path(),
@@ -645,7 +692,7 @@ mod tests {
             None,
             false,
         ).unwrap();
-        
+
         assert_eq!(stats3.artifacts, 1);
         assert_eq!(stats3.findings, 2);
 
@@ -670,7 +717,7 @@ mod tests {
               }]
             }"#,
         ).unwrap();
-        
+
         let stats4 = ingest_sarif_paths(
             &storage,
             dir.path(),
@@ -680,10 +727,10 @@ mod tests {
             None,
             false,
         ).unwrap();
-        
+
         assert_eq!(stats4.findings, 1);
         let findings = storage.sarif_findings_for_path("src/demo.rb").unwrap();
         let dead_finding = findings.iter().find(|f| f.rule_id == "slopcop.dark-arm.dead").unwrap();
-        assert_eq!(dead_finding.is_dark_arm, false);
+        assert!(!dead_finding.is_dark_arm);
     }
 }

@@ -5,6 +5,9 @@ set -e
 # Updates the Lineage database for a new commit by running tests, generating coverage/SARIF,
 # and ingesting the results, reusing pre-existing mutant facts.
 
+ROOT_DIR=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)
+cd "$ROOT_DIR"
+
 DB_PATH=${1:-/tmp/lineage.db}
 COMMIT_HASH=$(git rev-parse HEAD)
 
@@ -27,7 +30,7 @@ echo "Running corpus runtime coverage..."
 COVERAGE=1 bundle exec ruby tools/corpus_runtime_coverage.rb || true
 
 echo "Running bytecode lowering coverage..."
-COVERAGE=1 bundle exec ruby tools/bc_lower_coverage.rb --jobs $(nproc) || true
+COVERAGE=1 bundle exec ruby tools/bc_lower_coverage.rb --jobs "$(nproc)" || true
 
 # Collate all Ruby coverage resultsets
 echo "Collating Ruby coverage resultsets..."
@@ -47,9 +50,9 @@ ruby tools/generate_generalized_gem_sarif.rb \
   --repo . \
   --out-dir tmp/generalized-gems-sarif \
   --decomplex-binary gems/decomplex/target/release/decomplex-rust \
-  --coverage /home/yahn/easy-vm/coverage/.resultset.json \
-  --coverage /home/yahn/easy-vm/coverage/coverage.xml \
-  --coverage /home/yahn/easy-vm/zig/zig-out/coverage/merged/kcov-merged/cobertura.xml \
+  --coverage "$ROOT_DIR/coverage/.resultset.json" \
+  --coverage "$ROOT_DIR/coverage/coverage.xml" \
+  --coverage "$ROOT_DIR/zig/zig-out/coverage/merged/kcov-merged/cobertura.xml" \
   --coverage /tmp/cov-artifacts/ruby-gems/.resultset.json \
   --coverage /tmp/cov-artifacts/ruby-gems/coverage.xml \
   --coverage /tmp/cov-artifacts/fact/cobertura.xml \
@@ -63,8 +66,8 @@ gems/lineage/bin/lineage-import \
   --out-dir tmp/lineage-import \
   --no-build-tools \
   --max-commits 100 \
-  --coverage /home/yahn/easy-vm/coverage/coverage.xml \
-  --coverage /home/yahn/easy-vm/zig/zig-out/coverage/merged/kcov-merged/cobertura.xml \
+  --coverage "$ROOT_DIR/coverage/coverage.xml" \
+  --coverage "$ROOT_DIR/zig/zig-out/coverage/merged/kcov-merged/cobertura.xml" \
   --coverage /tmp/cov-artifacts/ruby-gems/.resultset.json \
   --coverage /tmp/cov-artifacts/ruby-gems/coverage.xml \
   --coverage /tmp/cov-artifacts/fact/cobertura.xml \

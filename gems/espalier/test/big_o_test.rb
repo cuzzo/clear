@@ -7,7 +7,7 @@ require_relative "../lib/espalier/nil_kill_evidence"
 class BigOTest < Minitest::Test
   def test_multiply_complexity
     analyzer = Espalier::BigOAnalyzer.new
-    
+
     # Basic multiplications
     assert_equal "O(N)", analyzer.send(:multiply_complexity, "O(1)", "O(N)")
     assert_equal "O(N)", analyzer.send(:multiply_complexity, "O(N)", "O(1)")
@@ -62,17 +62,17 @@ class BigOTest < Minitest::Test
     nil_kill_evidence = {
       "10" => { "items" => "Array" }
     }
-    
+
     analyzer = Espalier::BigOAnalyzer.new(nil_kill_evidence: nil_kill_evidence)
-    
+
     ast_mock = [
       { type: :call, receiver: "items", method: "sort", line: 10 },
       { type: :loop, line: 11 },
       { type: :callback, line: 12 }
     ]
-    
+
     result = analyzer.analyze_method("process_items", ast_mock)
-    
+
     assert_equal "process_items", result[:method]
     assert_equal "O(N log N)", result[:lower_bound_complexity]
     assert_empty result[:unknown_operations]
@@ -230,7 +230,7 @@ class BigOTest < Minitest::Test
 
   def test_recursion_detection_types
     require_relative "../lib/espalier/structural_big_o"
-    
+
     # Mock source cache
     source_cache = {
       "fact.rb" => [
@@ -251,6 +251,13 @@ class BigOTest < Minitest::Test
         "  bsearch(n / 2)\n",
         "end\n"
       ],
+      "branching_dc.rb" => [
+        "def split_search(n)\n",
+        "  return if n <= 1\n",
+        "  split_search(n / 2)\n",
+        "  split_search(n / 2)\n",
+        "end\n"
+      ],
       "perm.rb" => [
         "def permute(arr)\n",
         "  arr.each do |x|\n",
@@ -269,6 +276,13 @@ class BigOTest < Minitest::Test
     assert_equal "O(N)", hints[0][:space]
     assert_equal true, hints[0][:is_dynamic]
     assert_equal "line 1", hints[0][:trigger]
+
+    # Two half-size calls visit a linear number of recursion nodes; classifying
+    # this as logarithmic ignores the second branch.
+    hints = s.hints_for("branching_dc.rb", { name: "split_search", line: 1, span: [1, 0, 5, 3] }, "Math")
+    assert_equal 1, hints.size
+    assert_equal "O(N)", hints[0][:complexity]
+    assert_equal "O(log N)", hints[0][:space]
 
     # 2. Exponential recursion: fib(n - 1) + fib(n - 2)
     hints = s.hints_for("fib.rb", { name: "fib", line: 1, span: [1, 0, 4, 3] }, "Math")
@@ -337,7 +351,7 @@ class BigOTest < Minitest::Test
     assert_equal "line 1", nested_hint[:trigger] # 'n' parameter defined on line 1
 
     # Check loop classifications manually
-    constants = Set.new(["limit"])
+    constants = Set.new
     lines = source_cache["demo.rb"]
     c1 = s.send(:classify_loop, "5.times do |i|", 3, 1, lines, constants)
     assert_equal false, c1[:is_dynamic]
@@ -378,6 +392,17 @@ class BigOTest < Minitest::Test
     g2 = s.send(:classify_loop, "for j := 0; j < n; j++ {", 4, 1, go_lines, go_constants)
     assert_equal true, g2[:is_dynamic]
     assert_equal "line 1", g2[:trigger] # parameter 'n' defined on line 1
+
+    source_cache["go_case.go"] = go_lines
+    go_hints = s.hints_for(
+      "go_case.go",
+      { name: "process", line: 1, span: [1, 0, 8, 1] },
+      "Go"
+    )
+    go_nested = go_hints.find { |hint| hint[:complexity] == "O(N^2)" }
+    refute_nil go_nested
+    assert_equal true, go_nested[:is_dynamic]
+    assert_equal "line 1", go_nested[:trigger]
 
     # 4. Test Rust loops:
     rust_lines = [

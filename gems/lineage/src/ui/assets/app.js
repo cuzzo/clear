@@ -225,7 +225,7 @@
       .forEach(restoreInput);
     document.querySelectorAll(".comment-fold-toggle[data-persist-key]").forEach(restoreCommentFold);
     document.querySelectorAll(".fn-fold-toggle[data-persist-key]").forEach(restoreFnFold);
-    
+
     const privateFoldingLayer = document.getElementById("layer-private-folding");
     if (privateFoldingLayer) {
       privateFoldingLayer.addEventListener("change", () => {

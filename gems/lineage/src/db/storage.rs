@@ -336,6 +336,11 @@ impl Storage {
         self.ensure_logical_unit_column("last_test_exposure_at", "INTEGER DEFAULT 0")?;
         self.ensure_column("test_exposure_events", "mutation_kind", "TEXT NOT NULL DEFAULT ''")?;
         self.ensure_column(
+            "coverage_line_events",
+            "is_partial",
+            "INTEGER NOT NULL DEFAULT 0",
+        )?;
+        self.ensure_column(
             "ui_file_summaries",
             "mutant_verified_covered_lines",
             "INTEGER NOT NULL DEFAULT 0",
@@ -656,11 +661,10 @@ impl Storage {
         let active_ids = if let Some(ref hash) = target_commit {
             if let Ok(Some(state_json)) = self.load_engine_state(hash) {
                 if let Ok(state) = serde_json::from_str::<serde_json::Value>(&state_json) {
-                    if let Some(previous) = state.get("previous").and_then(|p| p.as_object()) {
-                        Some(previous.keys().cloned().collect::<HashSet<_>>())
-                    } else {
-                        None
-                    }
+                    state
+                        .get("previous")
+                        .and_then(|previous| previous.as_object())
+                        .map(|previous| previous.keys().cloned().collect::<HashSet<_>>())
                 } else {
                     None
                 }
@@ -1369,6 +1373,7 @@ impl Storage {
         self.record_coverage_line_with_source(commit_hash, timestamp, path, line, hits, false, "coverage")
     }
 
+    #[allow(clippy::too_many_arguments)]
     pub fn record_coverage_line_with_source(
         &self,
         commit_hash: &str,
@@ -1390,6 +1395,7 @@ impl Storage {
               is_partial = MAX(coverage_line_events.is_partial, excluded.is_partial)
             WHERE excluded.timestamp > coverage_line_events.timestamp
                OR excluded.hits > coverage_line_events.hits
+               OR excluded.is_partial > coverage_line_events.is_partial
             "#,
             params![
                 commit_hash,
@@ -2525,6 +2531,48 @@ fn checked_table(table: &str) -> Result<&str> {
 mod tests {
     use super::*;
     use crate::model::{EventType, UnitKind};
+
+    #[test]
+    fn migrates_partial_coverage_and_merges_partial_observations() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("legacy.db");
+        let legacy = Connection::open(&path).unwrap();
+        legacy
+            .execute_batch(
+                r#"
+                CREATE TABLE coverage_line_events (
+                  id INTEGER PRIMARY KEY AUTOINCREMENT,
+                  commit_hash TEXT NOT NULL,
+                  timestamp INTEGER NOT NULL,
+                  path TEXT NOT NULL,
+                  line INTEGER NOT NULL,
+                  hits INTEGER NOT NULL,
+                  source TEXT NOT NULL DEFAULT 'coverage',
+                  UNIQUE(commit_hash, path, line, source)
+                );
+                "#,
+            )
+            .unwrap();
+        drop(legacy);
+
+        let storage = Storage::open(&path).unwrap();
+        assert!(storage
+            .record_coverage_line_with_source("abc", 10, "src/a.rb", 3, 1, false, "unit")
+            .unwrap());
+        assert!(storage
+            .record_coverage_line_with_source("abc", 10, "src/a.rb", 3, 1, true, "unit")
+            .unwrap());
+
+        let is_partial: i64 = storage
+            .connection()
+            .query_row(
+                "SELECT is_partial FROM coverage_line_events WHERE path = 'src/a.rb'",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(is_partial, 1);
+    }
 
     #[test]
     fn creates_schema_and_records_events() {

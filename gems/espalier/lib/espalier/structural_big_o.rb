@@ -10,6 +10,7 @@ module Espalier
 
     LOOP_START = /
       \b(?:while|until)\b|
+      ^\s*for\b|
       \bloop\s+do\b|
       \.(?:each|each_key|each_value|each_with_index|map|map!|select|reject|filter|filter_map|flat_map|sort_by|reverse_each)\b
     /x.freeze
@@ -261,7 +262,22 @@ module Espalier
         ]
       end
 
-      if divide_and_conquer_recursion?(lines, recursive_calls)
+      if recursive_calls.length >= 2 && halving_recursion?(lines, recursive_calls)
+        return [
+          structural_hint(
+            line: recursive_calls.first,
+            complexity: "O(N)",
+            space: "O(log N)",
+            is_dynamic: true,
+            trigger: "line #{start_line}",
+            operation: method_name,
+            reason: "multiple recursive branches over divided input",
+            detail: lines[recursive_calls.first - 1].to_s.strip
+          )
+        ]
+      end
+
+      if halving_recursion?(lines, recursive_calls)
         return [
           structural_hint(
             line: recursive_calls.first,
@@ -291,7 +307,7 @@ module Espalier
       ]
     end
 
-    def divide_and_conquer_recursion?(lines, recursive_calls)
+    def halving_recursion?(lines, recursive_calls)
       recursive_calls.any? do |line_no|
         line = lines[line_no - 1].to_s
         line.match?(%r{/\s*2\b|>>\s*1\b|\bsplit\b|\bslice\b|mid\b})
@@ -571,13 +587,14 @@ module Espalier
 
     def classify_loop(loop_line, loop_line_no, start_line, lines, constants)
       trigger_var = extract_bound_variable(loop_line)
-      if trigger_var.nil? || constants.include?(trigger_var)
-        { is_dynamic: false, trigger: nil }
-      else
-        def_line = find_variable_definition_line(lines, trigger_var, loop_line_no, start_line)
-        trigger = def_line ? "line #{def_line}" : nil
-        { is_dynamic: true, trigger: trigger }
+      return { is_dynamic: false, trigger: nil } if trigger_var.nil? || constants.include?(trigger_var)
+
+      def_line = find_variable_definition_line(lines, trigger_var, loop_line_no, start_line)
+      if def_line && fixed_bound_definition?(lines[def_line - 1].to_s, trigger_var)
+        return { is_dynamic: false, trigger: nil }
       end
+
+      { is_dynamic: true, trigger: def_line ? "line #{def_line}" : nil }
     end
 
     def extract_bound_variable(loop_line)
@@ -590,17 +607,20 @@ module Espalier
         return $1
       end
       # 3. i < limit / i <= n / j < len(users)
-      if loop_line =~ /(?:<|>|<=|>=)\s*([a-zA-Z_]\w*)\b/
+      if loop_line =~ /(?:<=|>=|<|>)\s*(?:len|length|size)\s*\(\s*([a-zA-Z_]\w*)\b/
+        return $1
+      end
+      if loop_line =~ /(?:<=|>=|<|>)\s*([a-zA-Z_]\w*)\b/
         return $1
       end
       # 4. collection.each / collection.map
       if loop_line =~ /\b([a-zA-Z_]\w*)\.(?:each|each_key|each_value|each_with_index|map|map!|select|reject|filter|filter_map|flat_map|sort_by)\b/
         return $1
       end
-      
+
       # Fallback: first non-ignored token
       tokens = loop_line.scan(/[a-zA-Z_]\w*/)
-      ignored_tokens = %w[for while until do each times loop in range let mut var int i j k class module def end return]
+      ignored_tokens = %w[for while until do each times loop in range let mut var int i j k class module def end return true false]
       other_tokens = tokens - ignored_tokens
       other_tokens.first
     end
@@ -608,7 +628,7 @@ module Espalier
     def find_variable_definition_line(lines, var_name, loop_line_no, start_line)
       (loop_line_no - 1).downto(start_line) do |idx|
         line = lines[idx - 1].to_s
-        if line =~ /\b(?:let(?:\s+mut)?\s+)?#{Regexp.escape(var_name)}\s*(?:=|\+=|-=|:=)\b/
+        if line =~ /\b#{Regexp.escape(var_name)}\s*(?:=(?!=)|\+=|-=|:=)/
           return idx
         end
         if idx == start_line
@@ -618,6 +638,11 @@ module Espalier
         end
       end
       nil
+    end
+
+    def fixed_bound_definition?(line, var_name)
+      escaped = Regexp.escape(var_name)
+      line.match?(/\b#{escaped}\s*(?:=(?!=)|:=)\s*-?\d+(?:\.\d+)?\b/)
     end
   end
 end

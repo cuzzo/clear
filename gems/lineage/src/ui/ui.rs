@@ -1851,10 +1851,19 @@ fn top_complexity_functions(
 ) -> Result<Vec<UiComplexityFunction>> {
     let mut stmt = storage.connection().prepare(
         r#"
+        WITH latest_espalier AS (
+          SELECT commit_hash
+          FROM sarif_findings
+          WHERE rule_id = 'espalier.function'
+             OR (LOWER(tool_name) = 'espalier' AND rule_id LIKE '%.function')
+          ORDER BY timestamp DESC, id DESC
+          LIMIT 1
+        )
         SELECT path, start_line, properties_json, message
         FROM sarif_findings
-        WHERE rule_id = 'espalier.function'
-           OR (tool_name = 'espalier' AND rule_id LIKE '%.function')
+        WHERE (rule_id = 'espalier.function'
+           OR (LOWER(tool_name) = 'espalier' AND rule_id LIKE '%.function'))
+          AND commit_hash = (SELECT commit_hash FROM latest_espalier)
         "#,
     )?;
     let rows = stmt.query_map([], |row| {
@@ -1925,14 +1934,9 @@ fn top_complexity_functions(
             .unwrap_or("")
             .to_string();
 
-        let rank = match big_o.as_str() {
-            s if s.contains("N^3") => 3,
-            s if s.contains("N^2") => 2,
-            s if s.contains("N log N") => 1,
-            _ => 0,
-        };
+        let rank = complexity_display_rank(&big_o);
 
-        if rank >= 1 {
+        if rank > 10 {
             seen.insert(key);
             functions.push((path, start_line, name, big_o, big_o_space, is_dynamic, trigger, rank));
         }
@@ -1969,6 +1973,30 @@ fn top_complexity_functions(
         .collect();
 
     Ok(result)
+}
+
+fn complexity_display_rank(complexity: &str) -> u32 {
+    match complexity {
+        "O(1)" => 1,
+        "O(log N)" => 2,
+        "O(N)" => 10,
+        "O(N log N)" => 11,
+        "O(N * M)" => 14,
+        "O(2^N)" => 100,
+        "O(N!)" => 200,
+        value => value
+            .strip_prefix("O(N^")
+            .and_then(|tail| tail.split_once(')'))
+            .and_then(|(power, suffix)| {
+                power
+                    .strip_suffix(" log N")
+                    .map(|power| (power, 1))
+                    .or(Some((power, 0)))
+                    .filter(|(_, _)| suffix.is_empty())
+            })
+            .and_then(|(power, log)| power.parse::<u32>().ok().map(|power| 10 + power * 2 + log))
+            .unwrap_or(1),
+    }
 }
 
 
@@ -3088,7 +3116,7 @@ fn espalier_function_effects(
     let mut effects = storage
         .sarif_findings_for_path(path)?
         .into_iter()
-        .filter(|finding| is_espalier_function_finding(finding))
+        .filter(is_espalier_function_finding)
         .filter_map(|finding| espalier_effect_from_finding(&finding))
         .collect::<Vec<_>>();
     if effects.is_empty() {
@@ -3104,9 +3132,8 @@ fn espalier_function_effects(
         let calls = effect
             .internal_calls
             .iter()
+            .filter(|call| impure_names.contains(*call))
             .cloned()
-            .into_iter()
-            .filter(|call| impure_names.contains(call))
             .collect::<Vec<_>>();
         effect.impure_calls = calls;
     }
@@ -3916,6 +3943,7 @@ fn apply_history_heat(
     Ok(())
 }
 
+#[allow(clippy::too_many_arguments)]
 fn apply_semantic_churn(
     storage: &Storage,
     path: &str,
@@ -4685,6 +4713,7 @@ fn branch_context(repo: &Path) -> UiBranchContext {
         })
 }
 
+#[allow(clippy::too_many_arguments)]
 fn render_index_page(
     storage: &Storage,
     repo: &Path,
@@ -5260,7 +5289,7 @@ fn render_outline_symbol_link(
 
     out.push_str("<a href=\"#L");
     out.push_str(&symbol.start_line.to_string());
-    out.push_str("\"");
+    out.push('"');
     let effect_title = outline_effect_title(symbol);
     if !effect_title.is_empty() {
         out.push_str(" title=\"");
@@ -6235,6 +6264,7 @@ fn render_hazard_quality_bar(hazards: i64, covered_hazards: i64, killed_hazards:
     )
 }
 
+#[allow(clippy::too_many_arguments)]
 fn render_coverage_table_row(
     href: Option<&str>,
     icon_class: &str,
@@ -6715,7 +6745,7 @@ fn render_code_line(
         if fn_fold.map(|f| f.is_private).unwrap_or(false) {
             out.push_str("\" checked");
         } else {
-            out.push_str("\"");
+            out.push('"');
         }
         out.push_str(" data-persist-key=\"lineage.fn-fold.");
         out.push_str(&html_escape(path));
@@ -6754,7 +6784,7 @@ fn render_code_line(
     out.push_str(&hazard_title);
     out.push_str("></span><span class=\"gutter\"");
     out.push_str(&gutter_title);
-    out.push_str(">");
+    out.push('>');
     if let Some(annotation) = annotation {
         if has_hazards {
             out.push_str(&render_hazard_control(annotation, &hazard_id));
@@ -7857,7 +7887,7 @@ fn scan_string(
     delimiter: char,
 ) -> usize {
     let mut escaped = false;
-    while let Some((index, ch)) = chars.next() {
+    for (index, ch) in chars.by_ref() {
         if escaped {
             escaped = false;
             continue;
@@ -9635,6 +9665,16 @@ mod tests {
         assert!(hazards.contains("<details class=\"dashboard-section dashboard-disclosure\">"));
         assert!(!hazards.contains(" open"));
         assert!(hazards.contains("No active systems hazards are recorded."));
+    }
+
+    #[test]
+    fn complexity_display_rank_orders_all_emitted_complexities() {
+        assert_eq!(complexity_display_rank("O(N)"), 10);
+        assert_eq!(complexity_display_rank("O(N log N)"), 11);
+        assert_eq!(complexity_display_rank("O(N^4)"), 18);
+        assert_eq!(complexity_display_rank("O(N^4 log N)"), 19);
+        assert_eq!(complexity_display_rank("O(2^N)"), 100);
+        assert_eq!(complexity_display_rank("O(N!)"), 200);
     }
 
     #[test]

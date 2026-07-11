@@ -87,7 +87,7 @@ impl LanguageNormalizer for RepoPathNormalizer {
             for marker in ["/compiler/", "/src/", "/gems/", "/zig/"] {
                 if let Some(index) = path.find(marker) {
                     let actual_idx = index + 1;
-                    if best_match.map_or(true, |(best_idx, _)| actual_idx < best_idx) {
+                    if best_match.is_none_or(|(best_idx, _)| actual_idx < best_idx) {
                         best_match = Some((actual_idx, marker));
                     }
                 }
@@ -537,4 +537,3 @@ mod tests {
         assert_eq!(normalizer.normalize_path("./foo.rb"), "foo.rb");
     }
 }
-

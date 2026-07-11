@@ -4,6 +4,9 @@ set -e
 # tools/lineage_build_db.sh
 # Rebuilds the Lineage database from scratch by running tests, generating coverage/mutants, and ingesting the results.
 
+ROOT_DIR=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)
+cd "$ROOT_DIR"
+
 DB_PATH=${1:-/tmp/lineage.db}
 COMMIT_HASH=$(git rev-parse HEAD)
 
@@ -27,7 +30,7 @@ echo "Running corpus runtime coverage..."
 COVERAGE=1 bundle exec ruby tools/corpus_runtime_coverage.rb || true
 
 echo "Running bytecode lowering coverage..."
-COVERAGE=1 bundle exec ruby tools/bc_lower_coverage.rb --jobs $(nproc) || true
+COVERAGE=1 bundle exec ruby tools/bc_lower_coverage.rb --jobs "$(nproc)" || true
 
 # Collate all Ruby coverage resultsets
 echo "Collating Ruby coverage resultsets..."
@@ -59,9 +62,9 @@ ruby tools/generate_generalized_gem_sarif.rb \
   --repo . \
   --out-dir tmp/generalized-gems-sarif \
   --decomplex-binary gems/decomplex/target/release/decomplex-rust \
-  --coverage /home/yahn/easy-vm/coverage/.resultset.json \
-  --coverage /home/yahn/easy-vm/coverage/coverage.xml \
-  --coverage /home/yahn/easy-vm/zig/zig-out/coverage/merged/kcov-merged/cobertura.xml \
+  --coverage "$ROOT_DIR/coverage/.resultset.json" \
+  --coverage "$ROOT_DIR/coverage/coverage.xml" \
+  --coverage "$ROOT_DIR/zig/zig-out/coverage/merged/kcov-merged/cobertura.xml" \
   --coverage /tmp/cov-artifacts/ruby-gems/.resultset.json \
   --coverage /tmp/cov-artifacts/ruby-gems/coverage.xml \
   --coverage /tmp/cov-artifacts/fact/cobertura.xml \
@@ -75,8 +78,8 @@ gems/lineage/bin/lineage-import \
   --out-dir tmp/lineage-import \
   --no-build-tools \
   --max-commits 100 \
-  --coverage /home/yahn/easy-vm/coverage/coverage.xml \
-  --coverage /home/yahn/easy-vm/zig/zig-out/coverage/merged/kcov-merged/cobertura.xml \
+  --coverage "$ROOT_DIR/coverage/coverage.xml" \
+  --coverage "$ROOT_DIR/zig/zig-out/coverage/merged/kcov-merged/cobertura.xml" \
   --coverage /tmp/cov-artifacts/ruby-gems/.resultset.json \
   --coverage /tmp/cov-artifacts/ruby-gems/coverage.xml \
   --coverage /tmp/cov-artifacts/fact/cobertura.xml \
@@ -87,12 +90,18 @@ gems/lineage/bin/lineage-import \
 echo "=== [4/5] Ingesting Mutant & Test Exposure Facts ==="
 cargo run --release --manifest-path gems/lineage/Cargo.toml -- ingest-test-exposure --db "$DB_PATH" --repo . --commit "$COMMIT_HASH" --input /tmp/clear-fuzz-mutants-new.json
 cargo run --release --manifest-path gems/lineage/Cargo.toml -- ingest-test-exposure --db "$DB_PATH" --repo . --commit "$COMMIT_HASH" --input /tmp/clear-transpile-mutants-new.json
-cargo run --release --manifest-path gems/lineage/Cargo.toml -- ingest-test-exposure --db "$DB_PATH" --repo . --commit "$COMMIT_HASH" --input /tmp/zig-system-exposure.json
+if [ -f /tmp/zig-system-exposure.json ]; then
+  cargo run --release --manifest-path gems/lineage/Cargo.toml -- ingest-test-exposure --db "$DB_PATH" --repo . --commit "$COMMIT_HASH" --input /tmp/zig-system-exposure.json
+fi
 
 # Stochastic/Unit mutant facts
-cargo run --release --manifest-path gems/lineage/Cargo.toml -- ingest-mutants --db "$DB_PATH" --repo . --input /tmp/rust-mutants-lineage-100/mutant-facts.json --commit "$COMMIT_HASH" --test-type unit
 cargo run --release --manifest-path gems/lineage/Cargo.toml -- ingest-mutants --db "$DB_PATH" --repo . --input /tmp/boobytrap-go-mutants.json --commit "$COMMIT_HASH" --test-type unit
-cargo run --release --manifest-path gems/lineage/Cargo.toml -- ingest-mutants --db "$DB_PATH" --repo . --input /tmp/litedb-mutant-facts-normalized.json --commit "$COMMIT_HASH" --test-type unit
+if [ -f /tmp/rust-mutants-lineage-100/mutant-facts.json ]; then
+  cargo run --release --manifest-path gems/lineage/Cargo.toml -- ingest-mutants --db "$DB_PATH" --repo . --input /tmp/rust-mutants-lineage-100/mutant-facts.json --commit "$COMMIT_HASH" --test-type unit
+fi
+if [ -f /tmp/litedb-mutant-facts-normalized.json ]; then
+  cargo run --release --manifest-path gems/lineage/Cargo.toml -- ingest-mutants --db "$DB_PATH" --repo . --input /tmp/litedb-mutant-facts-normalized.json --commit "$COMMIT_HASH" --test-type unit
+fi
 
 # PR 141 shards (if present)
 for file in /tmp/pr141-*/mutant-facts.json; do

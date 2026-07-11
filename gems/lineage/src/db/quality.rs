@@ -436,19 +436,14 @@ fn parse_cobertura_records(input: &str) -> Result<Vec<CoverageRecord>> {
         let Some(raw_filename) = class.attribute("filename") else {
             continue;
         };
-        let path = if !sources.is_empty() {
-            let mut resolved = String::new();
-            for source in &sources {
-                let combined = if raw_filename.starts_with('/') {
-                    raw_filename.to_string()
-                } else if source.ends_with('/') {
-                    format!("{}{}", source, raw_filename)
-                } else {
-                    format!("{}/{}", source, raw_filename)
-                };
-                resolved = combined;
-                break;
-            }
+        let path = if let Some(source) = sources.first() {
+            let resolved = if raw_filename.starts_with('/') {
+                raw_filename.to_string()
+            } else if source.ends_with('/') {
+                format!("{}{}", source, raw_filename)
+            } else {
+                format!("{}/{}", source, raw_filename)
+            };
             normalize_path(&resolved)
         } else {
             normalize_path(raw_filename)
@@ -515,7 +510,7 @@ fn normalize_path(path: &str) -> String {
         let marker = format!("/{root}");
         if let Some(index) = trimmed.find(&marker) {
             let actual_idx = index + 1;
-            if best_match.map_or(true, |(best_idx, _)| actual_idx < best_idx) {
+            if best_match.is_none_or(|(best_idx, _)| actual_idx < best_idx) {
                 best_match = Some((actual_idx, root));
             }
         }
