@@ -1,15 +1,19 @@
--- query-id: storage.resolve_current_path.v1
-WITH current_paths AS (
-              SELECT DISTINCT COALESCE((
-                SELECT latest.path
-                FROM events latest
-                WHERE latest.unit_id = u.id
-                ORDER BY latest.timestamp DESC, latest.id DESC
-                LIMIT 1
-              ), u.original_path) AS current_path
-              FROM logical_units u
-            )
-            SELECT current_path
-            FROM current_paths
-            WHERE current_path = ?1
-            ORDER BY current_path
+-- query-id: storage.resolve_current_path.v2
+SELECT e.path AS current_path
+FROM events e
+WHERE e.path = ?1
+  AND e.id = (
+    SELECT latest.id
+    FROM events latest
+    WHERE latest.unit_id = e.unit_id
+    ORDER BY latest.timestamp DESC, latest.id DESC
+    LIMIT 1
+  )
+UNION ALL
+SELECT u.original_path AS current_path
+FROM logical_units u
+WHERE u.original_path = ?1
+  AND NOT EXISTS (
+    SELECT 1 FROM events e WHERE e.unit_id = u.id
+  )
+LIMIT 1;

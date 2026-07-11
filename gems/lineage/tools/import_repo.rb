@@ -167,8 +167,9 @@ def discover_coverage(repo, explicit)
   paths.uniq
        .select { |path| File.file?(path) }
        .reject do |path|
-         File.basename(path) == "coverage.json" &&
-           File.file?(File.join(File.dirname(path), "cobertura.xml"))
+         (path.include?("zig-out/coverage/") && !path.include?("merged/")) ||
+           (File.basename(path) == "coverage.json" &&
+             File.file?(File.join(File.dirname(path), "cobertura.xml")))
        end
 end
 
