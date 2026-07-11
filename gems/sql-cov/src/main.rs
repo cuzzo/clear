@@ -60,6 +60,10 @@ enum Command {
         format: String,
         #[arg(long)]
         output: Option<PathBuf>,
+        #[arg(long)]
+        sqlfluff: bool,
+        #[arg(long)]
+        sqlfluff_sarif: Option<PathBuf>,
     },
 }
 
@@ -137,10 +141,12 @@ async fn main() -> Result<()> {
             dialect,
             format,
             output,
+            sqlfluff,
+            sqlfluff_sarif,
         } => {
-            let dialect = DialectName::parse(&dialect)?;
+            let dialect_name = DialectName::parse(&dialect)?;
             let setup = setup.map(fs::read_to_string).transpose()?;
-            let schema = match dialect {
+            let schema = match dialect_name {
                 DialectName::Sqlite => {
                     let pool = sqlite_pool(&database).await?;
                     if let Some(setup) = &setup {
@@ -167,9 +173,59 @@ async fn main() -> Result<()> {
                 bail!("hazard analysis requires a populated SQLite schema; pass --setup or --database");
             }
             let source = fs::read_to_string(&input)?;
-            let report = analyze_hazards(&input.to_string_lossy(), &source, dialect, &schema)?;
+            let report = analyze_hazards(&input.to_string_lossy(), &source, dialect_name, &schema)?;
+
+            let mut sqlfluff_sarif_content = None;
+            if let Some(path) = sqlfluff_sarif {
+                sqlfluff_sarif_content = Some(fs::read_to_string(path)?);
+            } else if sqlfluff {
+                let sqlfluff_paths = vec![
+                    "sqlfluff",
+                    "/home/yahn/.sqlfluff-venv/bin/sqlfluff"
+                ];
+                let mut found_bin = None;
+                for p in sqlfluff_paths {
+                    if std::process::Command::new(p)
+                        .arg("--version")
+                        .output()
+                        .is_ok()
+                    {
+                        found_bin = Some(p);
+                        break;
+                    }
+                }
+
+                if let Some(bin) = found_bin {
+                    let output = std::process::Command::new(bin)
+                        .args([
+                            "lint",
+                            "--dialect",
+                            match dialect_name {
+                                DialectName::Sqlite => "sqlite",
+                                DialectName::Postgres => "postgres",
+                                DialectName::Mysql => "mysql",
+                            },
+                            "--format",
+                            "sarif",
+                            &input.to_string_lossy()
+                        ])
+                        .output();
+                    match output {
+                        Ok(out) => {
+                            let stdout = String::from_utf8_lossy(&out.stdout);
+                            sqlfluff_sarif_content = Some(stdout.into_owned());
+                        }
+                        Err(e) => {
+                            eprintln!("Warning: failed to execute sqlfluff lint: {}", e);
+                        }
+                    }
+                } else {
+                    eprintln!("Warning: sqlfluff binary not found in PATH or ~/.sqlfluff-venv/bin/");
+                }
+            }
+
             let rendered = match format.as_str() {
-                "sarif" => sarif::hazard_sarif(&report)?,
+                "sarif" => sarif::hazard_sarif(&report, sqlfluff_sarif_content.as_deref())?,
                 "json" => sarif::hazard_json(&report)?,
                 other => bail!("unsupported hazard format {other:?}; use sarif or json"),
             };

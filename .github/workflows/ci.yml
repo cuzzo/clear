@@ -1513,6 +1513,9 @@ jobs:
         run: |
           sudo apt-get update
           sudo apt-get install -y z3
+      - name: Install SQLFluff
+        run: |
+          pip install sqlfluff
       - uses: dtolnay/rust-toolchain@stable
       - uses: actions/setup-go@v5
         with:

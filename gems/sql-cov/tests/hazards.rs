@@ -69,7 +69,7 @@ WHERE s.status = 'active';"#;
         .iter()
         .any(|finding| finding.kind == HazardKind::OuterJoinNullRejection));
 
-    let sarif = sarif::hazard_sarif(&report).unwrap();
+    let sarif = sarif::hazard_sarif(&report, None).unwrap();
     assert!(sarif.contains("\"version\": \"2.1.0\""));
     assert!(sarif.contains("\"schemaValidated\": true"));
     assert!(sarif.contains("SQL006"));

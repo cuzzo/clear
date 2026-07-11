@@ -205,7 +205,7 @@ fn test_reporter_invalid_formats() {
         unresolved_schema_facts: vec!["unresolved fact".to_string()],
     };
     assert!(sql_cov::sarif::hazard_json(&hazard_report).is_ok());
-    assert!(sql_cov::sarif::hazard_sarif(&hazard_report).is_ok());
+    assert!(sql_cov::sarif::hazard_sarif(&hazard_report, None).is_ok());
 }
 
 #[test]
@@ -256,5 +256,83 @@ fn test_more_hazards_and_nullability() {
     for q in coalesce_queries {
         analyze_sql("test.sql", q, DialectName::Sqlite, Some(&schema)).unwrap();
     }
+}
+
+#[test]
+fn test_sqlfluff_sarif_merging_and_tiering() {
+    use sql_cov::sarif;
+
+    use sql_cov::hazard::analyze_hazards;
+    use sql_cov::schema::SchemaCatalog;
+
+    let schema = SchemaCatalog {
+        tables: std::collections::HashMap::new(),
+    };
+    let report = analyze_hazards(
+        "test.sql",
+        "SELECT * FROM users WHERE age IS NULL",
+        DialectName::Sqlite,
+        &schema,
+    )
+    .unwrap();
+
+    // Mock a SQLFluff SARIF report
+    let mock_sqlfluff_sarif = r#"{
+      "runs": [
+        {
+          "tool": {
+            "driver": {
+              "name": "SQLFluff",
+              "rules": [
+                {
+                  "id": "AM05",
+                  "name": "ambiguous.join",
+                  "properties": {}
+                },
+                {
+                  "id": "CV02",
+                  "name": "convention.coalesce",
+                  "properties": {}
+                },
+                {
+                  "id": "LT01",
+                  "name": "layout.spacing",
+                  "properties": {}
+                }
+              ]
+            }
+          },
+          "results": [
+            {
+              "ruleId": "AM05",
+              "message": { "text": "Implicit join used." },
+              "properties": {}
+            },
+            {
+              "ruleId": "CV02",
+              "message": { "text": "Use COALESCE instead." },
+              "properties": {}
+            },
+            {
+              "ruleId": "LT01",
+              "message": { "text": "Incorrect spacing." },
+              "properties": {}
+            }
+          ]
+        }
+      ]
+    }"#;
+
+    let sarif_output = sarif::hazard_sarif(&report, Some(mock_sqlfluff_sarif)).unwrap();
+    
+    // Verify that the rules and results are successfully merged
+    assert!(sarif_output.contains("AM05"));
+    assert!(sarif_output.contains("CV02"));
+    assert!(sarif_output.contains("LT01"));
+    
+    // Verify that the correct tiers are assigned
+    assert!(sarif_output.contains(r#""tier": "T1""#)); // SQL-cov findings and AM05
+    assert!(sarif_output.contains(r#""tier": "T2""#)); // CV02
+    assert!(sarif_output.contains(r#""tier": "T3""#)); // LT01
 }
 

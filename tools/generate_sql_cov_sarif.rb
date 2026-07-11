@@ -37,7 +37,8 @@ sql_files = Dir.glob(File.join(repo, "gems/lineage/sql/**/*.sql"))
 
 warn "Found #{sql_files.size} SQL files to scan"
 
-all_findings = []
+rules = {}
+results = []
 all_unresolved = []
 
 sql_files.each do |file|
@@ -48,7 +49,8 @@ sql_files.each do |file|
     "--input", file,
     "--setup", setup_file,
     "--dialect", "sqlite",
-    "--format", "json"
+    "--format", "sarif",
+    "--sqlfluff"
   ]
   
   stdout, stderr, status = Open3.capture3(*cmd)
@@ -58,66 +60,38 @@ sql_files.each do |file|
   end
 
   begin
-    report = JSON.parse(stdout)
-    report["findings"]&.each do |finding|
-      # Keep track of file path relative to repo root
-      finding["file_path"] = rel_path
-      all_findings << finding
-    end
-    report["unresolved_schema_facts"]&.each do |fact|
-      all_unresolved << "#{rel_path}: #{fact}"
+    sarif_doc = JSON.parse(stdout)
+    run = sarif_doc["runs"]&.first
+    if run
+      # Extract rules
+      run["tool"]&.[]("driver")&.[]("rules")&.each do |rule|
+        rules[rule["id"]] = rule
+      end
+      
+      # Extract results
+      run["results"]&.each do |result|
+        # Fix file URI paths to be relative for GitHub actions
+        if result["locations"]
+          result["locations"].each do |loc|
+            if loc["physicalLocation"] && loc["physicalLocation"]["artifactLocation"]
+              loc["physicalLocation"]["artifactLocation"]["uri"] = rel_path
+            end
+          end
+        end
+        results << result
+      end
+      
+      # Extract unresolved schema facts
+      run["properties"]&.[]("unresolvedSchemaFacts")&.each do |fact|
+        all_unresolved << "#{rel_path}: #{fact}"
+      end
     end
   rescue => e
     warn "Failed to parse sql-cov output for #{rel_path}: #{e.message}"
   end
 end
 
-# Build rules BTreeMap
-rules = {}
-all_findings.each do |finding|
-  rules[finding["rule_id"]] ||= {
-    "id" => finding["rule_id"],
-    "name" => finding["kind"],
-    "shortDescription" => { "text" => finding["message"] },
-    "help" => { "text" => finding["recommendation"] },
-    "properties" => {
-      "category" => "SQL three-valued logic",
-      "precision" => "high",
-      "tags" => ["correctness", "sql", "null", "unknown"]
-    }
-  }
-end
-
-# Build results
-results = all_findings.map do |finding|
-  {
-    "ruleId" => finding["rule_id"],
-    "level" => "warning",
-    "message" => {
-      "text" => "#{finding["message"]}. #{finding["evidence"].join("; ")}"
-    },
-    "locations" => [{
-      "physicalLocation" => {
-        "artifactLocation" => { "uri" => finding["file_path"] },
-        "region" => {
-          "startLine" => finding["span"]["start_line"],
-          "startColumn" => finding["span"]["start_column"],
-          "endLine" => finding["span"]["end_line"],
-          "endColumn" => finding["span"]["end_column"],
-          "snippet" => { "text" => finding["span"]["raw_expression"] }
-        }
-      }
-    }],
-    "properties" => {
-      "kind" => finding["kind"],
-      "nullabilityEvidence" => finding["evidence"],
-      "recommendation" => finding["recommendation"],
-      "schemaValidated" => true
-    }
-  }
-end
-
-# Build SARIF document
+# Build master SARIF document
 sarif_doc = {
   "$schema" => "https://json.schemastore.org/sarif-2.1.0.json",
   "version" => "2.1.0",
@@ -151,10 +125,16 @@ if results.empty?
   md_content << "No SQL logic hazards or three-valued logic bugs detected in database queries.\n"
 else
   md_content << "### Findings Summary\n\n"
-  md_content << "| File | Line | Expression | Hazard | Message |\n"
-  md_content << "| --- | --- | --- | --- | --- |\n"
-  all_findings.each do |finding|
-    md_content << "| `#{finding["file_path"]}` | #{finding["span"]["start_line"]} | `#{finding["span"]["raw_expression"]}` | **#{finding["kind"]}** | #{finding["message"]} |\n"
+  md_content << "| File | Line | Expression | Hazard | Message | Tier |\n"
+  md_content << "| --- | --- | --- | --- | --- | --- |\n"
+  results.each do |res|
+    file = res["locations"]&.first&.[]("physicalLocation")&.[]("artifactLocation")&.[]("uri") || "unknown"
+    line = res["locations"]&.first&.[]("physicalLocation")&.[]("region")&.[]("startLine") || 0
+    expr = res["locations"]&.first&.[]("physicalLocation")&.[]("region")&.[]("snippet")&.[]("text") || ""
+    hazard = res["properties"]&.[]("kind") || res["ruleId"]
+    msg = res["message"]&.[]("text") || ""
+    tier = res["properties"]&.[]("tier") || "T1"
+    md_content << "| `#{file}` | #{line} | `#{expr}` | **#{hazard}** | #{msg} | #{tier} |\n"
   end
 end
 File.write(md_path, md_content)
