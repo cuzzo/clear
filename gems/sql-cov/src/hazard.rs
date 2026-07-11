@@ -7,7 +7,7 @@ use sqlparser::ast::{
     Select, SelectItem, SetExpr, Spanned, Statement, TableFactor, UnaryOperator, Value, Visit,
     Visitor,
 };
-use sqlparser::dialect::{Dialect, PostgreSqlDialect, SQLiteDialect};
+use sqlparser::dialect::{Dialect, MySqlDialect, PostgreSqlDialect, SQLiteDialect};
 use sqlparser::parser::Parser;
 use std::collections::{HashMap, HashSet};
 use std::ops::ControlFlow;
@@ -128,6 +128,7 @@ pub fn analyze_hazards(
     let dialect_impl: Box<dyn Dialect> = match dialect {
         DialectName::Sqlite => Box::new(SQLiteDialect {}),
         DialectName::Postgres => Box::new(PostgreSqlDialect {}),
+        DialectName::Mysql => Box::new(MySqlDialect {}),
     };
     let statements = Parser::parse_sql(dialect_impl.as_ref(), source)
         .with_context(|| format!("parse SQL hazards in {file_path}"))?;
@@ -377,7 +378,7 @@ impl HazardVisitor<'_, '_> {
                 "SQL005",
                 HazardKind::NullableAnyAll,
                 nullability(left, self.resolver, false)
-                    .merge(nullability(right, self.resolver, false)),
+                    .merge(quantified_rhs_nullability(right, self.resolver)),
                 "ANY/ALL can evaluate to UNKNOWN when a compared value is NULL",
                 "Filter NULL from the compared set or encode the intended NULL policy explicitly.",
             )),
@@ -440,6 +441,19 @@ impl HazardVisitor<'_, '_> {
             recommendation: recommendation.to_string(),
             span,
         });
+    }
+}
+
+fn quantified_rhs_nullability(expr: &Expr, resolver: &Resolver<'_>) -> NullabilityEvidence {
+    match expr {
+        Expr::Subquery(query) => subquery_output_nullability(query, resolver.schema),
+        Expr::Array(array) => array
+            .elem
+            .iter()
+            .fold(NullabilityEvidence::never(), |state, item| {
+                state.merge(nullability(item, resolver, false))
+            }),
+        _ => nullability(expr, resolver, false),
     }
 }
 

@@ -1,11 +1,14 @@
 use anyhow::{bail, Context, Result};
 use clap::{Parser, Subcommand};
-use sql_cov::driver::sqlite_pool;
+use sql_cov::driver::{mysql_pool, postgres_pool, sqlite_pool};
 use sql_cov::hazard::analyze_hazards;
 use sql_cov::reporter;
 use sql_cov::sarif;
 use sql_cov::schema::SchemaCatalog;
-use sql_cov::{analyze_sql, cover_sqlite, execute_sqlite_setup, DialectName};
+use sql_cov::{
+    analyze_sql, cover_mysql, cover_postgres, cover_sqlite, execute_mysql_setup,
+    execute_postgres_setup, execute_sqlite_setup, DialectName,
+};
 use std::fs;
 use std::path::PathBuf;
 
@@ -89,16 +92,32 @@ async fn main() -> Result<()> {
             parameters,
         } => {
             let dialect = DialectName::parse(&dialect)?;
-            if dialect != DialectName::Sqlite {
-                bail!("the initial execution driver supports SQLite; postgres parsing is available through analyze");
-            }
             let source = fs::read_to_string(&input)?;
             let analysis = analyze_sql(&input.to_string_lossy(), &source, dialect)?;
-            let pool = sqlite_pool(&database).await?;
-            if let Some(setup) = setup {
-                execute_sqlite_setup(&pool, &fs::read_to_string(&setup)?).await?;
-            }
-            let coverage = cover_sqlite(&pool, &analysis, &parameters).await?;
+            let setup = setup.map(fs::read_to_string).transpose()?;
+            let coverage = match dialect {
+                DialectName::Sqlite => {
+                    let pool = sqlite_pool(&database).await?;
+                    if let Some(setup) = &setup {
+                        execute_sqlite_setup(&pool, setup).await?;
+                    }
+                    cover_sqlite(&pool, &analysis, &parameters).await?
+                }
+                DialectName::Postgres => {
+                    let pool = postgres_pool(&database).await?;
+                    if let Some(setup) = &setup {
+                        execute_postgres_setup(&pool, setup).await?;
+                    }
+                    cover_postgres(&pool, &analysis, &parameters).await?
+                }
+                DialectName::Mysql => {
+                    let pool = mysql_pool(&database).await?;
+                    if let Some(setup) = &setup {
+                        execute_mysql_setup(&pool, setup).await?;
+                    }
+                    cover_mysql(&pool, &analysis, &parameters).await?
+                }
+            };
             let rendered = render(&coverage, &format)?;
             write_output(output, &rendered)?;
         }
@@ -111,14 +130,30 @@ async fn main() -> Result<()> {
             output,
         } => {
             let dialect = DialectName::parse(&dialect)?;
-            if dialect != DialectName::Sqlite {
-                bail!("schema-aware hazard analysis currently supports SQLite");
-            }
-            let pool = sqlite_pool(&database).await?;
-            if let Some(setup) = setup {
-                execute_sqlite_setup(&pool, &fs::read_to_string(&setup)?).await?;
-            }
-            let schema = SchemaCatalog::load_sqlite(&pool).await?;
+            let setup = setup.map(fs::read_to_string).transpose()?;
+            let schema = match dialect {
+                DialectName::Sqlite => {
+                    let pool = sqlite_pool(&database).await?;
+                    if let Some(setup) = &setup {
+                        execute_sqlite_setup(&pool, setup).await?;
+                    }
+                    SchemaCatalog::load_sqlite(&pool).await?
+                }
+                DialectName::Postgres => {
+                    let pool = postgres_pool(&database).await?;
+                    if let Some(setup) = &setup {
+                        execute_postgres_setup(&pool, setup).await?;
+                    }
+                    SchemaCatalog::load_postgres(&pool).await?
+                }
+                DialectName::Mysql => {
+                    let pool = mysql_pool(&database).await?;
+                    if let Some(setup) = &setup {
+                        execute_mysql_setup(&pool, setup).await?;
+                    }
+                    SchemaCatalog::load_mysql(&pool).await?
+                }
+            };
             if schema.tables.is_empty() {
                 bail!("hazard analysis requires a populated SQLite schema; pass --setup or --database");
             }

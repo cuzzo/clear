@@ -227,18 +227,16 @@
         .filter(Boolean);
       if (!buttons.length || panels.length !== buttons.length) return;
 
-      const select = (button, allowCollapse) => {
+      const select = (button) => {
         const panel = document.getElementById(button.dataset.dashboardPanel);
-        const collapse = allowCollapse && button.classList.contains("active") && panel.open;
         buttons.forEach((candidate) => {
           candidate.classList.remove("active");
           candidate.setAttribute("aria-selected", "false");
         });
-        panels.forEach((candidate) => { candidate.open = false; });
-        if (collapse) return;
+        panels.forEach((candidate) => { candidate.hidden = true; });
         button.classList.add("active");
         button.setAttribute("aria-selected", "true");
-        panel.open = true;
+        panel.hidden = false;
       };
 
       buttons.forEach((button, index) => {
@@ -246,7 +244,7 @@
         const panel = document.getElementById(button.dataset.dashboardPanel);
         panel.setAttribute("role", "tabpanel");
         panel.setAttribute("aria-labelledby", button.id);
-        button.addEventListener("click", () => select(button, true));
+        button.addEventListener("click", () => select(button));
         button.addEventListener("keydown", (event) => {
           let target = null;
           if (event.key === "ArrowRight") target = buttons[(index + 1) % buttons.length];
@@ -256,11 +254,10 @@
           if (!target) return;
           event.preventDefault();
           target.focus();
-          select(target, false);
+          select(target);
         });
       });
-      switcher.classList.add("is-enhanced");
-      select(buttons[0], false);
+      select(buttons[0]);
     });
   };
 

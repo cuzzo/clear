@@ -21,6 +21,8 @@ pub struct ExpressionSpan {
     pub normalized_expression: String,
     pub context: String,
     pub nullable: bool,
+    /// Zero-based source parameter ordinals used by anonymous `?` placeholders.
+    pub parameter_indices: Vec<usize>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -31,6 +33,15 @@ pub struct CoverageMetric {
     pub hit_true_count: u64,
     pub hit_false_count: u64,
     pub hit_unknown_count: u64,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct StatementCoverage {
+    pub id: usize,
+    pub start_line: usize,
+    pub end_line: usize,
+    pub hit_count: u64,
+    pub normalized_sql: String,
 }
 
 impl CoverageMetric {
@@ -64,6 +75,7 @@ pub struct SourceFileCoverage {
     pub dialect: String,
     pub raw_source: String,
     pub metrics: Vec<CoverageMetric>,
+    pub statements: Vec<StatementCoverage>,
     pub unsupported: Vec<String>,
 }
 

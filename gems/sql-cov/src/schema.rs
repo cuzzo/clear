@@ -1,6 +1,6 @@
 use anyhow::{Context, Result};
 use serde::{Deserialize, Serialize};
-use sqlx::{Row, SqlitePool};
+use sqlx::{MySqlPool, PgPool, Row, SqlitePool};
 use std::collections::HashMap;
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -59,6 +59,84 @@ impl SchemaCatalog {
             catalog.tables.insert(normalize_identifier(&name), table);
         }
         Ok(catalog)
+    }
+
+    pub async fn load_postgres(pool: &PgPool) -> Result<Self> {
+        let rows = sqlx::query(
+            r#"SELECT c.table_name, c.column_name, c.is_nullable,
+                      EXISTS (
+                        SELECT 1
+                        FROM information_schema.table_constraints tc
+                        JOIN information_schema.key_column_usage kcu
+                          ON kcu.constraint_name = tc.constraint_name
+                         AND kcu.constraint_schema = tc.constraint_schema
+                         AND kcu.table_name = tc.table_name
+                        WHERE tc.constraint_type = 'PRIMARY KEY'
+                          AND tc.table_schema = c.table_schema
+                          AND tc.table_name = c.table_name
+                          AND kcu.column_name = c.column_name
+                      ) AS primary_key
+               FROM information_schema.columns c
+               WHERE c.table_schema = ANY(current_schemas(false))
+               ORDER BY c.table_name, c.ordinal_position"#,
+        )
+        .fetch_all(pool)
+        .await
+        .context("inspect PostgreSQL information_schema")?;
+        let mut catalog = Self::default();
+        for row in rows {
+            let table_name: String = row.try_get("table_name")?;
+            let column_name: String = row.try_get("column_name")?;
+            let primary_key: bool = row.try_get("primary_key")?;
+            let nullable = row.try_get::<String, _>("is_nullable")? == "YES" && !primary_key;
+            catalog.insert_column(table_name, column_name, nullable, primary_key);
+        }
+        Ok(catalog)
+    }
+
+    pub async fn load_mysql(pool: &MySqlPool) -> Result<Self> {
+        let rows = sqlx::query(
+            r#"SELECT table_name, column_name, is_nullable, column_key
+               FROM information_schema.columns
+               WHERE table_schema = DATABASE()
+               ORDER BY table_name, ordinal_position"#,
+        )
+        .fetch_all(pool)
+        .await
+        .context("inspect MySQL/MariaDB information_schema")?;
+        let mut catalog = Self::default();
+        for row in rows {
+            let table_name: String = row.try_get("table_name")?;
+            let column_name: String = row.try_get("column_name")?;
+            let primary_key = row.try_get::<String, _>("column_key")? == "PRI";
+            let nullable = row.try_get::<String, _>("is_nullable")? == "YES" && !primary_key;
+            catalog.insert_column(table_name, column_name, nullable, primary_key);
+        }
+        Ok(catalog)
+    }
+
+    fn insert_column(
+        &mut self,
+        table_name: String,
+        column_name: String,
+        nullable: bool,
+        primary_key: bool,
+    ) {
+        let table = self
+            .tables
+            .entry(normalize_identifier(&table_name))
+            .or_insert_with(|| TableSchema {
+                name: table_name,
+                columns: HashMap::new(),
+            });
+        table.columns.insert(
+            normalize_identifier(&column_name),
+            ColumnSchema {
+                name: column_name,
+                nullable,
+                primary_key,
+            },
+        );
     }
 
     pub fn column(&self, table: &str, column: &str) -> Option<&ColumnSchema> {

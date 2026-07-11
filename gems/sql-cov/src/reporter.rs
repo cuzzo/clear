@@ -9,11 +9,17 @@ pub fn json(coverage: &SourceFileCoverage) -> Result<String> {
 pub fn lcov(coverage: &SourceFileCoverage) -> String {
     let mut out = format!("TN:sql-cov\nSF:{}\n", coverage.file_path);
     let mut lines = BTreeMap::<usize, u64>::new();
+    for statement in &coverage.statements {
+        for line in statement.start_line..=statement.end_line {
+            lines
+                .entry(line)
+                .and_modify(|hits| *hits = (*hits).max(statement.hit_count))
+                .or_insert(statement.hit_count);
+        }
+    }
     let mut branch_found = 0;
     let mut branch_hit = 0;
     for metric in coverage.metrics.iter().filter(|metric| metric.measurable) {
-        let total = metric.hit_true_count + metric.hit_false_count + metric.hit_unknown_count;
-        *lines.entry(metric.span.start_line).or_default() += total;
         let states = [
             metric.hit_true_count,
             metric.hit_false_count,

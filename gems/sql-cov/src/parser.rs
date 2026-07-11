@@ -1,10 +1,10 @@
-use crate::model::{CoverageMetric, ExpressionSpan, SourceFileCoverage};
+use crate::model::{CoverageMetric, ExpressionSpan, SourceFileCoverage, StatementCoverage};
 use anyhow::{bail, Context, Result};
 use serde::{Deserialize, Serialize};
 use sqlparser::ast::{
     BinaryOperator, Expr, JoinConstraint, JoinOperator, SetExpr, Spanned, Statement, Visit, Visitor,
 };
-use sqlparser::dialect::{Dialect, PostgreSqlDialect, SQLiteDialect};
+use sqlparser::dialect::{Dialect, MySqlDialect, PostgreSqlDialect, SQLiteDialect};
 use sqlparser::parser::Parser;
 use std::ops::ControlFlow;
 
@@ -13,6 +13,7 @@ use std::ops::ControlFlow;
 pub enum DialectName {
     Sqlite,
     Postgres,
+    Mysql,
 }
 
 impl DialectName {
@@ -20,7 +21,10 @@ impl DialectName {
         match value.to_ascii_lowercase().as_str() {
             "sqlite" | "sqlite3" => Ok(Self::Sqlite),
             "postgres" | "postgresql" | "pg" => Ok(Self::Postgres),
-            other => bail!("unsupported SQL dialect {other:?}; use sqlite or postgres"),
+            "mysql" | "mariadb" | "maria" => Ok(Self::Mysql),
+            other => {
+                bail!("unsupported SQL dialect {other:?}; use sqlite, postgres, mysql, or mariadb")
+            }
         }
     }
 
@@ -28,12 +32,14 @@ impl DialectName {
         match self {
             Self::Sqlite => "sqlite",
             Self::Postgres => "postgres",
+            Self::Mysql => "mysql",
         }
     }
 }
 
 #[derive(Debug, Clone)]
 pub struct TelemetryDomain {
+    pub with_sql: String,
     pub from_sql: String,
     pub expression_ids: Vec<usize>,
 }
@@ -42,20 +48,33 @@ pub struct TelemetryDomain {
 pub struct Analysis {
     pub coverage: SourceFileCoverage,
     pub domains: Vec<TelemetryDomain>,
+    pub statement_sql: Vec<String>,
 }
 
 pub fn analyze_sql(file_path: &str, source: &str, dialect: DialectName) -> Result<Analysis> {
     let dialect_impl: Box<dyn Dialect> = match dialect {
         DialectName::Sqlite => Box::new(SQLiteDialect {}),
         DialectName::Postgres => Box::new(PostgreSqlDialect {}),
+        DialectName::Mysql => Box::new(MySqlDialect {}),
     };
     let statements = Parser::parse_sql(dialect_impl.as_ref(), source)
         .with_context(|| format!("parse SQL in {file_path}"))?;
     let mut metrics = Vec::new();
     let mut domains = Vec::new();
     let mut unsupported = Vec::new();
+    let mut statement_coverage = Vec::new();
+    let mut statement_sql = Vec::new();
 
-    for statement in &statements {
+    for (statement_id, statement) in statements.iter().enumerate() {
+        let span = statement.span();
+        statement_coverage.push(StatementCoverage {
+            id: statement_id,
+            start_line: span.start.line.max(1) as usize,
+            end_line: span.end.line.max(span.start.line).max(1) as usize,
+            hit_count: 0,
+            normalized_sql: statement.to_string(),
+        });
+        statement_sql.push(statement.to_string());
         let Statement::Query(query) = statement else {
             unsupported.push(format!(
                 "statement {} is parsed but not executable coverage input",
@@ -75,9 +94,15 @@ pub fn analyze_sql(file_path: &str, source: &str, dialect: DialectName) -> Resul
             .map(ToString::to_string)
             .collect::<Vec<_>>()
             .join(", ");
+        let with_sql = query
+            .with
+            .as_ref()
+            .map(ToString::to_string)
+            .unwrap_or_default();
         if let Some(selection) = &select.selection {
             let ids = collect_exprs(selection, "where", true, source, &mut metrics)?;
             domains.push(TelemetryDomain {
+                with_sql: with_sql.clone(),
                 from_sql: from_sql.clone(),
                 expression_ids: ids,
             });
@@ -108,9 +133,11 @@ pub fn analyze_sql(file_path: &str, source: &str, dialect: DialectName) -> Resul
             dialect: dialect.as_str().to_string(),
             raw_source: source.to_string(),
             metrics,
+            statements: statement_coverage,
             unsupported,
         },
         domains,
+        statement_sql,
     })
 }
 
@@ -240,7 +267,37 @@ fn expression_span(expr: &Expr, context: &str, source: &str) -> Option<Expressio
                 | Expr::IsDistinctFrom(_, _)
                 | Expr::IsNotDistinctFrom(_, _)
         ),
+        parameter_indices: anonymous_parameter_indices(source, start_offset, end_offset),
     })
+}
+
+fn anonymous_parameter_indices(source: &str, start: usize, end: usize) -> Vec<usize> {
+    let mut indices = Vec::new();
+    let mut ordinal = 0;
+    let mut quote = None;
+    let bytes = source.as_bytes();
+    let mut offset = 0;
+    while offset < bytes.len() {
+        let byte = bytes[offset];
+        if let Some(active) = quote {
+            if byte == active {
+                if bytes.get(offset + 1) == Some(&active) {
+                    offset += 2;
+                    continue;
+                }
+                quote = None;
+            }
+        } else if matches!(byte, b'\'' | b'"' | b'`') {
+            quote = Some(byte);
+        } else if byte == b'?' {
+            if offset >= start && offset < end {
+                indices.push(ordinal);
+            }
+            ordinal += 1;
+        }
+        offset += 1;
+    }
+    indices
 }
 
 fn location_offset(source: &str, line: usize, column: usize) -> Option<usize> {

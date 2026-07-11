@@ -32,6 +32,16 @@ async fn sqlite_driver_captures_true_false_and_unknown() {
     execute_sqlite_setup(&pool, SETUP).await.unwrap();
     let coverage = cover_sqlite(&pool, &analysis, &[]).await.unwrap();
 
+    assert_eq!(coverage.statements.len(), 1);
+    assert_eq!(coverage.statements[0].hit_count, 1);
+    assert_eq!(
+        (
+            coverage.statements[0].start_line,
+            coverage.statements[0].end_line
+        ),
+        (1, 3)
+    );
+
     let top = &coverage.metrics[0];
     assert_eq!(
         (
@@ -64,6 +74,9 @@ async fn sqlite_driver_captures_true_false_and_unknown() {
     let lcov = reporter::lcov(&coverage);
     assert!(lcov.contains("BRF:9"));
     assert!(lcov.contains("BRH:9"));
+    assert!(lcov.contains("DA:1,1"));
+    assert!(lcov.contains("DA:2,1"));
+    assert!(lcov.contains("DA:3,1"));
     assert!(lcov.contains("end_of_record"));
     let html = reporter::html(&coverage);
     assert!(html.contains("SQL expression coverage"));

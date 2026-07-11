@@ -627,7 +627,6 @@ struct DashboardTemplate<'a> {
 #[template(path = "dashboard_disclosure.html")]
 struct DashboardDisclosureTemplate<'a> {
     id: &'a str,
-    title: &'a str,
     open: bool,
     body: &'a str,
 }
@@ -6268,7 +6267,7 @@ fn render_review_next_section(dashboard: &UiDashboard, directory: &str, filter: 
     if dashboard.review_next.len() > 10 {
         body.push_str(&render_queue_see_more("review-next", directory));
     }
-    render_dashboard_disclosure("Review Next", !items.is_empty(), &body)
+    render_dashboard_disclosure("Review Next", false, &body)
 }
 
 fn render_test_next_section(dashboard: &UiDashboard, directory: &str, filter: &str) -> String {
@@ -6312,7 +6311,7 @@ fn render_test_next_section(dashboard: &UiDashboard, directory: &str, filter: &s
     if has_more {
         body.push_str(&render_queue_see_more("test-next", directory));
     }
-    render_dashboard_disclosure("Test Next", !items.is_empty(), &body)
+    render_dashboard_disclosure("Test Next", false, &body)
 }
 
 fn test_next_recommendation(unit: &UiUnitHotspot) -> Option<(&'static str, String, f64)> {
@@ -6501,7 +6500,11 @@ fn render_queue_pagination(
     total: usize,
 ) -> String {
     if total == 0 {
-        return String::new();
+        return render_dashboard_disclosure(
+            "Finding Changes",
+            false,
+            "<p class=\"empty-inline\">No finding changes are recorded in this scope.</p>",
+        );
     }
     let previous = if page > 1 {
         format!(
@@ -6591,7 +6594,7 @@ fn render_finding_changes_section(dashboard: &UiDashboard) -> String {
         dashboard.resolved_findings,
         dashboard.persisted_findings,
     );
-    render_dashboard_disclosure("Finding Changes", dashboard.new_findings > 0, &body)
+    render_dashboard_disclosure("Finding Changes", false, &body)
 }
 
 fn render_dashboard_disclosure(title: &str, open: bool, body: &str) -> String {
@@ -6599,7 +6602,6 @@ fn render_dashboard_disclosure(title: &str, open: bool, body: &str) -> String {
     render_template_string(
         DashboardDisclosureTemplate {
             id,
-            title,
             open,
             body,
         },
@@ -6641,7 +6643,7 @@ fn render_active_hazards_section(dashboard: &UiDashboard) -> String {
             "hazard-bar",
         ));
     }
-    render_dashboard_disclosure("Active Hazards", dashboard.active_hazards > 0, &body)
+    render_dashboard_disclosure("Active Hazards", true, &body)
 }
 
 fn render_highest_hazard_files_section(dashboard: &UiDashboard, filter: &str) -> String {
@@ -10732,16 +10734,15 @@ mod tests {
             &branch_context,
         );
 
-        assert!(html.contains("class=\"dashboard-section dashboard-disclosure\" open>"));
+        assert!(html.contains("class=\"dashboard-section dashboard-panel\""));
         assert!(html.contains("class=\"dashboard-section-bar\" role=\"tablist\""));
         assert!(html.contains("data-dashboard-panel=\"dashboard-panel-active-hazards\""));
         assert!(html.contains("role=\"tab\" class=\"active\" aria-selected=\"true\""));
         assert!(html.contains("id=\"dashboard-panel-active-hazards\""));
-        assert!(html.contains("<h2>Active Hazards</h2>"));
-        assert!(html.contains("<h2>Finding Changes</h2>"));
+        assert!(!html.contains("<details id=\"dashboard-panel-"));
         assert!(html.contains("3</strong> new"));
-        assert!(html.contains("<h2>Review Next</h2>"));
-        assert!(html.contains("<h2>Test Next</h2>"));
+        assert!(html.contains(">Review Next</button>"));
+        assert!(html.contains(">Test Next</button>"));
         assert!(!html.contains("<h2>Analyzer and Artifact Health</h2>"));
         assert!(!html.contains("class=\"analyzer-status"));
         assert!(html.contains("class=\"directory-status-cell\""));
@@ -10749,9 +10750,9 @@ mod tests {
         assert!(html.contains("fa-triangle-exclamation"));
         assert!(html.contains("regenerate the artifact with a higher result cap"));
         assert!(html.contains("queue=review-next"));
-        assert!(html.contains("<h2>Risky Units</h2>"));
-        assert!(html.contains("<h2>Architectural Risks</h2>"));
-        assert!(html.contains("<h2>Expensive Functions</h2>"));
+        assert!(html.contains(">Risky Units</button>"));
+        assert!(html.contains(">Architectural Risks</button>"));
+        assert!(html.contains(">Expensive Functions</button>"));
         assert!(html.contains("class=\"coverage-bar line-quality-bar\""));
         assert!(html.contains("8 of 10 lines covered; 1 partial, 2 missed"));
         assert!(!html.contains(">8 covered lines</span>"));
@@ -10794,8 +10795,8 @@ mod tests {
             ..dashboard
         };
         let hazards = render_active_hazards_section(&no_hazard);
-        assert!(hazards.contains("class=\"dashboard-section dashboard-disclosure\">"));
-        assert!(!hazards.contains(" open"));
+        assert!(hazards.contains("class=\"dashboard-section dashboard-panel\""));
+        assert!(!hazards.contains(" hidden"));
         assert!(hazards.contains("No active systems hazards are recorded."));
     }
 

@@ -196,6 +196,7 @@ impl Storage {
               line INTEGER NOT NULL,
               hits INTEGER NOT NULL,
               is_partial INTEGER NOT NULL DEFAULT 0,
+              coverage_percent REAL,
               source TEXT NOT NULL DEFAULT 'coverage',
               UNIQUE(commit_hash, path, line, source)
             );
@@ -425,6 +426,7 @@ impl Storage {
             "is_partial",
             "INTEGER NOT NULL DEFAULT 0",
         )?;
+        self.ensure_column("coverage_line_events", "coverage_percent", "REAL")?;
         self.ensure_column(
             "ui_file_summaries",
             "mutant_verified_covered_lines",
@@ -1565,18 +1567,37 @@ impl Storage {
         is_partial: bool,
         source: &str,
     ) -> Result<bool> {
+        self.record_coverage_line_with_details(
+            commit_hash, timestamp, path, line, hits, is_partial, None, source,
+        )
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    pub fn record_coverage_line_with_details(
+        &self,
+        commit_hash: &str,
+        timestamp: i64,
+        path: &str,
+        line: u32,
+        hits: u32,
+        is_partial: bool,
+        coverage_percent: Option<f64>,
+        source: &str,
+    ) -> Result<bool> {
         let changed = self.conn.execute(
             r#"
             INSERT INTO coverage_line_events
-              (commit_hash, timestamp, path, line, hits, is_partial, source)
-            VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)
+              (commit_hash, timestamp, path, line, hits, is_partial, coverage_percent, source)
+            VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)
             ON CONFLICT(commit_hash, path, line, source) DO UPDATE SET
               timestamp = MAX(coverage_line_events.timestamp, excluded.timestamp),
               hits = MAX(coverage_line_events.hits, excluded.hits),
-              is_partial = MAX(coverage_line_events.is_partial, excluded.is_partial)
+              is_partial = MAX(coverage_line_events.is_partial, excluded.is_partial),
+              coverage_percent = COALESCE(excluded.coverage_percent, coverage_line_events.coverage_percent)
             WHERE excluded.timestamp > coverage_line_events.timestamp
                OR excluded.hits > coverage_line_events.hits
                OR excluded.is_partial > coverage_line_events.is_partial
+               OR COALESCE(excluded.coverage_percent, -1) <> COALESCE(coverage_line_events.coverage_percent, -1)
             "#,
             params![
                 commit_hash,
@@ -1585,6 +1606,7 @@ impl Storage {
                 line,
                 hits,
                 if is_partial { 1 } else { 0 },
+                coverage_percent,
                 source
             ],
         )?;
@@ -1897,9 +1919,9 @@ impl Storage {
               GROUP BY current_path
             ),
             latest_source_lines AS (
-              SELECT path, line, source, hits
+              SELECT path, line, source, hits, coverage_percent
               FROM (
-                SELECT path, line, source, hits,
+                SELECT path, line, source, hits, coverage_percent,
                        ROW_NUMBER() OVER (
                          PARTITION BY path, line, source
                          ORDER BY timestamp DESC, id DESC
@@ -1909,14 +1931,16 @@ impl Storage {
               WHERE rank = 1
             ),
             latest_lines AS (
-              SELECT path, line, MAX(hits) AS hits
+              SELECT path, line, MAX(hits) AS hits,
+                     MAX(COALESCE(coverage_percent, CASE WHEN hits > 0 THEN 100.0 ELSE 0.0 END)) AS coverage_percent
               FROM latest_source_lines
               GROUP BY path, line
             ),
             line_file AS (
               SELECT path,
                      COUNT(*) AS tracked_lines,
-                     SUM(CASE WHEN hits > 0 THEN 1 ELSE 0 END) AS covered_lines
+                     SUM(CASE WHEN hits > 0 THEN 1 ELSE 0 END) AS covered_lines,
+                     AVG(coverage_percent) AS coverage_percent
               FROM latest_lines
               GROUP BY path
             ),
@@ -2126,7 +2150,7 @@ impl Storage {
                    COALESCE(lf.covered_lines, 0),
                    CASE
                      WHEN COALESCE(lf.tracked_lines, 0) > 0
-                     THEN 100.0 * COALESCE(lf.covered_lines, 0) / lf.tracked_lines
+                     THEN COALESCE(lf.coverage_percent, 0.0)
                      ELSE COALESCE(uf.fallback_line_coverage, 0.0)
                    END,
                    COALESCE(uf.mutant_coverage, 0.0),

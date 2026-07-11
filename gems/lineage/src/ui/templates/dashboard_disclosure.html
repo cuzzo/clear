@@ -1,9 +1,5 @@
-<details id="{{ id }}" class="dashboard-section dashboard-disclosure"{% if open %} open{% endif %}>
-  <summary>
-    <span class="dashboard-disclosure-arrow" aria-hidden="true"></span>
-    <h2>{{ title }}</h2>
-  </summary>
+<section id="{{ id }}" class="dashboard-section dashboard-panel"{% if !open %} hidden{% endif %}>
   <div class="dashboard-section-body">
     {{ body|safe }}
   </div>
-</details>
+</section>
