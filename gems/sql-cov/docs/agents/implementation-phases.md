@@ -4,12 +4,12 @@
 
 | Phase | Status | Evidence |
 | --- | --- | --- |
-| 1 — parser/source map | Implemented | Nested expression span tests; SQLite and PostgreSQL parser selection |
-| 2 — SQLite instrumentation | Implemented for top-level `SELECT ... WHERE` | TRUE/FALSE/UNKNOWN fixture oracle |
+| 1 — parser/source map | Implemented | Nested expression span tests; SQLite, PostgreSQL, and MySQL/MariaDB parser selection |
+| 2 — instrumentation | Implemented for top-level `SELECT ... WHERE` in all three launch dialects | TRUE/FALSE/UNKNOWN fixture oracle and compiled live-driver suites |
 | 3 — reports | Implemented | `sql-cov/v1` JSON, LCOV `BRDA`, standalone highlighted HTML |
-| 4 — real-query harness | Implemented for Lineage's architecture subsystem | 15 independently parsed/prepared files and an executed owner-inventory coverage oracle |
-| 5 — cross-dialect execution | Not started | PostgreSQL parses, but only SQLite executes telemetry |
-| SQL hazard analysis | Implemented for the initial UNKNOWN catalog | SQLite schema validation and SARIF 2.1.0 output |
+| 4 — real-query harness | Implemented for Lineage's architecture subsystem | All 15 files independently parse, prepare, and execute through SQL-COV |
+| 5 — cross-dialect execution | Driver complete; live CI environments required | PostgreSQL and MySQL/MariaDB pools, setup, typed parameters, schema loaders, telemetry, and environment-gated live tests |
+| SQL hazard analysis | Implemented for the initial UNKNOWN catalog | Three-dialect schema validation, exhaustive quantified-comparison tests, and SARIF 2.1.0 output |
 
 JOIN and HAVING expressions are discovered and source-mapped, but marked
 unmeasurable and excluded from branch percentages. This avoids claiming a
@@ -61,4 +61,8 @@ Acceptance: Lineage uses the exact `.sql` files tested independently, and SQL-CO
 - Integrate the SQL hazard and semantic-witness model described in Lineage's SQL design.
 - Add mutation testing for NULL and join-cardinality hazards.
 
-This phase follows the initial SQLite implementation and is not required for the first usable release.
+PostgreSQL and MySQL/MariaDB driver code is implemented. Live tests require
+`SQL_COV_POSTGRES_URL`, `SQL_COV_MYSQL_URL`, or `SQL_COV_MARIADB_URL`; this
+workspace has no corresponding server, so database-backed execution was not
+run locally. Mutation testing and additional dialect-specific JOIN/HAVING
+strategies remain future work.
