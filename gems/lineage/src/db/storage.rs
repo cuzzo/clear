@@ -1380,7 +1380,7 @@ impl Storage {
               FROM commit_snapshots
             ),
             current_findings AS (
-              SELECT finding.source, finding.tool_name, finding.rule_id, finding.fingerprint
+              SELECT DISTINCT finding.source, finding.tool_name, finding.rule_id, finding.fingerprint
               FROM sarif_findings finding
               JOIN ranked_snapshots snapshot
                 ON snapshot.source = finding.source
@@ -1389,39 +1389,34 @@ impl Storage {
                AND snapshot.snapshot_rank = 1
             ),
             previous_findings AS (
-              SELECT finding.source, finding.tool_name, finding.rule_id, finding.fingerprint
+              SELECT DISTINCT finding.source, finding.tool_name, finding.rule_id, finding.fingerprint
               FROM sarif_findings finding
               JOIN ranked_snapshots snapshot
                 ON snapshot.source = finding.source
                AND snapshot.tool_name = finding.tool_name
                AND snapshot.commit_hash = finding.commit_hash
                AND snapshot.snapshot_rank = 2
+            ),
+            all_keys AS (
+              SELECT source, tool_name, rule_id, fingerprint FROM current_findings
+              UNION
+              SELECT source, tool_name, rule_id, fingerprint FROM previous_findings
             )
             SELECT
-              (SELECT COUNT(*) FROM current_findings current
-               WHERE NOT EXISTS (
-                 SELECT 1 FROM previous_findings previous
-                 WHERE previous.source = current.source
-                   AND previous.tool_name = current.tool_name
-                   AND previous.rule_id = current.rule_id
-                   AND previous.fingerprint = current.fingerprint
-               )),
-              (SELECT COUNT(*) FROM previous_findings previous
-               WHERE NOT EXISTS (
-                 SELECT 1 FROM current_findings current
-                 WHERE current.source = previous.source
-                   AND current.tool_name = previous.tool_name
-                   AND current.rule_id = previous.rule_id
-                   AND current.fingerprint = previous.fingerprint
-               )),
-              (SELECT COUNT(*) FROM current_findings current
-               WHERE EXISTS (
-                 SELECT 1 FROM previous_findings previous
-                 WHERE previous.source = current.source
-                   AND previous.tool_name = current.tool_name
-                   AND previous.rule_id = current.rule_id
-                   AND previous.fingerprint = current.fingerprint
-               ))
+              COALESCE(SUM(CASE WHEN current.fingerprint IS NOT NULL AND previous.fingerprint IS NULL THEN 1 ELSE 0 END), 0),
+              COALESCE(SUM(CASE WHEN current.fingerprint IS NULL AND previous.fingerprint IS NOT NULL THEN 1 ELSE 0 END), 0),
+              COALESCE(SUM(CASE WHEN current.fingerprint IS NOT NULL AND previous.fingerprint IS NOT NULL THEN 1 ELSE 0 END), 0)
+            FROM all_keys key
+            LEFT JOIN current_findings current
+              ON current.source = key.source
+             AND current.tool_name = key.tool_name
+             AND current.rule_id = key.rule_id
+             AND current.fingerprint = key.fingerprint
+            LEFT JOIN previous_findings previous
+              ON previous.source = key.source
+             AND previous.tool_name = key.tool_name
+             AND previous.rule_id = key.rule_id
+             AND previous.fingerprint = key.fingerprint
             "#,
             [],
             |row| {

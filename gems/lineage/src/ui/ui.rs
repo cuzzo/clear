@@ -1342,9 +1342,14 @@ fn dashboard_summary_for_directory_with_scope_and_repo(
     let warnings = warnings_for_directory(storage, &directory, scope)?;
     profile_log("dashboard.warnings", warning_start);
     let unit_start = Instant::now();
-    let top_units = top_unit_hotspots(storage, &directory, scope, repo)?;
-    let review_next = review_next_items(storage, &directory, scope)?;
     let test_next_units = test_next_hotspots(storage, &directory, scope, repo)?;
+    let top_units = test_next_units
+        .iter()
+        .filter(|unit| unit.score > 0.0)
+        .take(12)
+        .cloned()
+        .collect();
+    let review_next = review_next_items(storage, &directory, scope)?;
     profile_log("dashboard.top_units", unit_start);
     let architecture_start = Instant::now();
     let top_architecture_risks = top_architecture_risks(storage, &directory, scope)?;
@@ -1367,7 +1372,9 @@ fn dashboard_summary_for_directory_with_scope_and_repo(
     let complexity_start = Instant::now();
     let top_complexity_functions = top_complexity_functions(storage, &directory, scope)?;
     profile_log("dashboard.top_complexity_functions", complexity_start);
+    let health_start = Instant::now();
     let analyzer_health = analyzer_health(storage, &directory, scope)?;
+    profile_log("dashboard.analyzer_health", health_start);
     let lifecycle = if directory.is_empty() {
         storage.sarif_lifecycle_summary()?
     } else {
@@ -1431,29 +1438,62 @@ fn dashboard_summary_for_directory_with_scope_and_repo(
 fn analyzer_health(
     storage: &Storage,
     directory: &str,
-    scope: &CoverageScope,
+    _scope: &CoverageScope,
 ) -> Result<Vec<UiAnalyzerHealth>> {
     let mut scoped_counts = HashMap::<String, i64>::new();
     let mut total_counts = HashMap::<String, i64>::new();
-    let mut findings = storage.connection().prepare(
-        "SELECT source, tool_name, path FROM current_sarif_findings",
+    let finding_high_watermark: i64 = storage.connection().query_row(
+        "SELECT COALESCE(MAX(id), 0) FROM sarif_findings",
+        [],
+        |row| row.get(0),
     )?;
-    let rows = findings.query_map([], |row| {
-        Ok((
-            row.get::<_, String>(0)?,
-            row.get::<_, String>(1)?,
-            row.get::<_, String>(2)?,
-        ))
-    })?;
-    for row in rows {
-        let (source, tool, path) = row?;
-        let analyzer = canonical_analyzer_name(&source, &tool);
-        *total_counts.entry(analyzer.clone()).or_default() += 1;
-        if scope.allows(&path)
-            && is_production_source_path(&path)
-            && path_in_directory(&path, directory)
-        {
-            *scoped_counts.entry(analyzer).or_default() += 1;
+    let count_findings = finding_high_watermark <= 50_000;
+    if count_findings {
+        let mut findings = storage.connection().prepare(
+        r#"
+        SELECT source, tool_name, COUNT(*)
+        FROM current_sarif_findings
+        GROUP BY source, tool_name
+        "#,
+        )?;
+        let rows = findings.query_map([], |row| {
+            Ok((
+                row.get::<_, String>(0)?,
+                row.get::<_, String>(1)?,
+                row.get::<_, i64>(2)?,
+            ))
+        })?;
+        for row in rows {
+            let (source, tool, count) = row?;
+            let analyzer = canonical_analyzer_name(&source, &tool);
+            *total_counts.entry(analyzer.clone()).or_default() += count;
+        }
+        let directory = normalize_directory(directory);
+        if directory.is_empty() {
+            scoped_counts.clone_from(&total_counts);
+        } else {
+            let prefix = format!("{directory}/%");
+            let mut scoped = storage.connection().prepare(
+                r#"
+                SELECT source, tool_name, COUNT(*)
+                FROM current_sarif_findings
+                WHERE path = ?1 OR path LIKE ?2
+                GROUP BY source, tool_name
+                "#,
+            )?;
+            let rows = scoped.query_map(params![directory, prefix], |row| {
+                Ok((
+                    row.get::<_, String>(0)?,
+                    row.get::<_, String>(1)?,
+                    row.get::<_, i64>(2)?,
+                ))
+            })?;
+            for row in rows {
+                let (source, tool, count) = row?;
+                *scoped_counts
+                    .entry(canonical_analyzer_name(&source, &tool))
+                    .or_default() += count;
+            }
         }
     }
 
@@ -1464,9 +1504,9 @@ fn analyzer_health(
     )?;
     let mut stmt = storage.connection().prepare(
         r#"
-        SELECT source, tool_name, commit_hash, timestamp, payload_json
+        SELECT source, tool_name, commit_hash, timestamp
         FROM (
-          SELECT source, tool_name, commit_hash, timestamp, payload_json,
+          SELECT source, tool_name, commit_hash, timestamp,
                  ROW_NUMBER() OVER (
                    PARTITION BY source, tool_name
                    ORDER BY timestamp DESC, id DESC
@@ -1483,33 +1523,25 @@ fn analyzer_health(
             row.get::<_, String>(1)?,
             row.get::<_, String>(2)?,
             row.get::<_, i64>(3)?,
-            row.get::<_, String>(4)?,
         ))
     })?;
     let mut health = Vec::new();
     let mut present = BTreeSet::new();
     for row in rows {
-        let (source, tool, commit, timestamp, payload) = row?;
+        let (source, tool, commit, timestamp) = row?;
         let analyzer = canonical_analyzer_name(&source, &tool);
         present.insert(analyzer.clone());
-        let scoped_findings = scoped_counts.get(&analyzer).copied().unwrap_or(0);
-        let total_findings = total_counts.get(&analyzer).copied().unwrap_or(0);
-        let parsed = serde_json::from_str::<Value>(&payload);
-        let truncated = parsed
-            .as_ref()
-            .ok()
-            .map(sarif_truncated_results)
-            .unwrap_or(0);
+        let scoped_findings = scoped_counts.get(&analyzer).copied().unwrap_or(if count_findings { 0 } else { -1 });
+        let total_findings = total_counts.get(&analyzer).copied().unwrap_or(if count_findings { 0 } else { -1 });
+        let reached_default_cap = analyzer == "Decomplex" && total_findings == 1_000;
         let stale = !current_commit.is_empty() && commit != current_commit;
-        let (status, detail) = if parsed.is_err() {
-            ("unhealthy", "artifact payload cannot be parsed".to_string())
-        } else if stale {
+        let (status, detail) = if stale {
             (
                 "stale",
                 format!("artifact is for {}, not current {}", short_hash(&commit), short_hash(&current_commit)),
             )
-        } else if truncated > 0 {
-            ("degraded", format!("{truncated} findings were truncated by artifact limits"))
+        } else if reached_default_cap {
+            ("degraded", "artifact reached the default 1,000-finding cap".to_string())
         } else if total_findings == 0 {
             ("healthy", "completed with no findings".to_string())
         } else {
@@ -1529,8 +1561,8 @@ fn analyzer_health(
                 analyzer: expected.to_string(),
                 status: "missing".to_string(),
                 detail: "no artifact has been ingested".to_string(),
-                scoped_findings: 0,
-                total_findings: 0,
+                scoped_findings: if count_findings { 0 } else { -1 },
+                total_findings: if count_findings { 0 } else { -1 },
             });
         }
     }
@@ -1542,145 +1574,80 @@ fn analyzer_health(
     Ok(health)
 }
 
-#[derive(Default)]
-struct ReviewNextAccumulator {
-    path: String,
-    start_line: u32,
-    title: String,
-    tools: BTreeSet<String>,
-    findings: i64,
-    warnings: i64,
-    dark_arms: i64,
-    best_tier: Option<u8>,
-    example: String,
-}
-
 fn review_next_items(
     storage: &Storage,
     directory: &str,
     scope: &CoverageScope,
 ) -> Result<Vec<UiReviewNextItem>> {
-    let mut unit_names = HashMap::new();
-    let mut names = storage.connection().prepare("SELECT id, name FROM logical_units")?;
-    let rows = names.query_map([], |row| {
-        Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?))
-    })?;
-    for row in rows {
-        let (id, name) = row?;
-        unit_names.insert(id, name);
-    }
-
+    let directory = normalize_directory(directory);
+    let prefix = format!("{directory}/%");
     let mut stmt = storage.connection().prepare(
         r#"
-        SELECT path, start_line, tool_name, rule_id, level, message,
-               is_dark_arm, unit_id, properties_json
-        FROM current_sarif_findings
-        ORDER BY path, start_line, tool_name, rule_id
+        WITH grouped AS (
+          SELECT finding.path,
+                 MIN(finding.start_line) AS start_line,
+                 COALESCE(unit.name, MIN(finding.rule_id)) AS title,
+                 GROUP_CONCAT(DISTINCT finding.tool_name) AS tools,
+                 COUNT(*) AS findings,
+                 SUM(CASE WHEN lower(finding.level) IN ('error', 'warning') THEN 1 ELSE 0 END) AS warnings,
+                 SUM(finding.is_dark_arm) AS dark_arms,
+                 MIN(finding.rule_id || ': ' || finding.message) AS example,
+                 COUNT(DISTINCT finding.tool_name) AS tool_count
+          FROM current_sarif_findings finding
+          LEFT JOIN logical_units unit ON unit.id = finding.unit_id
+          WHERE finding.path <> ''
+            AND (?1 = '' OR finding.path = ?1 OR finding.path LIKE ?2)
+          GROUP BY finding.path,
+                   COALESCE(finding.unit_id, 'line:' || finding.start_line)
+        )
+        SELECT path, start_line, title, tools, findings, warnings, dark_arms, example, tool_count,
+               warnings * 3.0 + dark_arms * 5.0 + findings + tool_count * 2.0 AS score
+        FROM grouped
+        ORDER BY score DESC, path, start_line
+        LIMIT 500
         "#,
     )?;
-    let rows = stmt.query_map([], |row| {
+    let rows = stmt.query_map(params![directory, prefix], |row| {
         Ok((
             row.get::<_, String>(0)?,
             row.get::<_, u32>(1)?,
             row.get::<_, String>(2)?,
             row.get::<_, String>(3)?,
-            row.get::<_, String>(4)?,
-            row.get::<_, String>(5)?,
-            row.get::<_, i64>(6)? != 0,
-            row.get::<_, Option<String>>(7)?,
-            row.get::<_, String>(8)?,
+            row.get::<_, i64>(4)?,
+            row.get::<_, i64>(5)?,
+            row.get::<_, i64>(6)?,
+            row.get::<_, String>(7)?,
+            row.get::<_, i64>(8)?,
+            row.get::<_, f64>(9)?,
         ))
     })?;
-    let mut grouped = BTreeMap::<(String, String), ReviewNextAccumulator>::new();
+    let mut items = Vec::new();
     for row in rows {
-        let (path, line, tool, rule, level, message, dark_arm, unit_id, properties) = row?;
-        if !scope.allows(&path)
-            || !is_production_source_path(&path)
-            || !path_in_directory(&path, directory)
-        {
+        let (path, start_line, title, tools, findings, warnings, dark_arms, example, tool_count, score) = row?;
+        if !scope.allows(&path) || !is_production_source_path(&path) {
             continue;
         }
-        let identity = unit_id.clone().unwrap_or_else(|| format!("line:{line}"));
-        let title = unit_id
-            .as_ref()
-            .and_then(|id| unit_names.get(id))
-            .cloned()
-            .unwrap_or_else(|| rule.clone());
-        let entry = grouped
-            .entry((path.clone(), identity))
-            .or_insert_with(|| ReviewNextAccumulator {
-                path,
-                start_line: line,
-                title,
-                example: format!("{rule}: {message}"),
-                ..Default::default()
-            });
-        entry.start_line = entry.start_line.min(line);
-        entry.tools.insert(tool);
-        entry.findings += 1;
-        entry.warnings += i64::from(matches!(level.to_lowercase().as_str(), "error" | "warning"));
-        entry.dark_arms += i64::from(dark_arm);
-        if let Some(tier) = finding_tier(&properties) {
-            entry.best_tier = Some(entry.best_tier.map_or(tier, |current| current.min(tier)));
+        let mut reasons = vec![format!("{findings} current findings from {tools}")];
+        if tool_count > 1 {
+            reasons.push(format!("{tool_count} analyzers agree"));
         }
+        if warnings > 0 {
+            reasons.push(format!("{warnings} warning/error"));
+        }
+        if dark_arms > 0 {
+            reasons.push(format!("{dark_arms} uncovered branches"));
+        }
+        reasons.push(example);
+        items.push(UiReviewNextItem {
+            path,
+            start_line,
+            title,
+            detail: reasons.join("; "),
+            score,
+        });
     }
-    let mut items = grouped
-        .into_values()
-        .map(|entry| {
-            let tool_count = entry.tools.len() as i64;
-            let tools = entry.tools.into_iter().collect::<Vec<_>>().join(", ");
-            let mut reasons = vec![format!(
-                "{} current findings from {}",
-                entry.findings,
-                tools
-            )];
-            if tool_count > 1 {
-                reasons.push(format!("{tool_count} analyzers agree"));
-            }
-            if entry.warnings > 0 {
-                reasons.push(format!("{} warning/error", entry.warnings));
-            }
-            if entry.dark_arms > 0 {
-                reasons.push(format!("{} uncovered branches", entry.dark_arms));
-            }
-            if let Some(tier) = entry.best_tier {
-                reasons.push(format!("Tier {tier}"));
-            }
-            reasons.push(entry.example);
-            let score = entry.warnings as f64 * 3.0
-                + entry.dark_arms as f64 * 5.0
-                + entry.findings as f64
-                + tool_count as f64 * 2.0
-                + entry.best_tier.map_or(0.0, |tier| f64::from(4 - tier.min(3)) * 2.0);
-            UiReviewNextItem {
-                path: entry.path,
-                start_line: entry.start_line,
-                title: entry.title,
-                detail: reasons.join("; "),
-                score,
-            }
-        })
-        .collect::<Vec<_>>();
-    items.sort_by(|left, right| {
-        right
-            .score
-            .partial_cmp(&left.score)
-            .unwrap_or(std::cmp::Ordering::Equal)
-            .then_with(|| left.path.cmp(&right.path))
-            .then_with(|| left.start_line.cmp(&right.start_line))
-    });
     items.truncate(20);
     Ok(items)
-}
-
-fn finding_tier(properties: &str) -> Option<u8> {
-    let value = serde_json::from_str::<Value>(properties).ok()?;
-    let tier = value
-        .get("tier")
-        .or_else(|| value.pointer("/decomplex_finding/tier"))?;
-    tier.as_u64()
-        .and_then(|tier| u8::try_from(tier).ok())
-        .or_else(|| tier.as_str()?.chars().find_map(|character| character.to_digit(10)).and_then(|tier| u8::try_from(tier).ok()))
 }
 
 fn canonical_analyzer_name(source: &str, tool: &str) -> String {
@@ -1696,18 +1663,6 @@ fn canonical_analyzer_name(source: &str, tool: &str) -> String {
     } else {
         tool.to_string()
     }
-}
-
-fn sarif_truncated_results(payload: &Value) -> i64 {
-    payload
-        .get("runs")
-        .and_then(Value::as_array)
-        .into_iter()
-        .flatten()
-        .filter_map(|run| run.get("properties"))
-        .filter_map(|properties| properties.get("decomplex.sarif_results_truncated_count"))
-        .filter_map(Value::as_i64)
-        .sum()
 }
 
 fn analyzer_status_rank(status: &str) -> u8 {
@@ -1989,15 +1944,6 @@ struct UnitTestProfile {
     line_coverage: f64,
     integration_coverage: f64,
     is_hard_gated: bool,
-}
-
-fn top_unit_hotspots(
-    storage: &Storage,
-    directory: &str,
-    scope: &CoverageScope,
-    repo: Option<&Path>,
-) -> Result<Vec<UiUnitHotspot>> {
-    unit_hotspots(storage, directory, scope, repo, 12, false)
 }
 
 fn test_next_hotspots(
@@ -6125,10 +6071,15 @@ fn render_analyzer_health_section(dashboard: &UiDashboard) -> String {
             kind: health.status.clone(),
             name: health.analyzer.clone(),
             path: health.detail.clone(),
-            detail: format!(
-                "{} findings in this folder / {} current total",
-                health.scoped_findings, health.total_findings
-            ),
+            detail: if health.scoped_findings >= 0 && health.total_findings >= 0 {
+                format!(
+                    "{} findings in this folder / {} current total",
+                    health.scoped_findings, health.total_findings
+                )
+            } else {
+                "finding counts omitted for responsiveness; use Review Next for ranked findings"
+                    .to_string()
+            },
             score: health.status.clone(),
         })
         .collect::<Vec<_>>();
@@ -9011,7 +8962,15 @@ mod tests {
         assert!(outline.contains("href=\"#L13\""));
 
         let hotspots =
-            top_unit_hotspots(&storage, "src", &CoverageScope::all(), Some(dir.path())).unwrap();
+            unit_hotspots(
+                &storage,
+                "src",
+                &CoverageScope::all(),
+                Some(dir.path()),
+                12,
+                false,
+            )
+            .unwrap();
         let closest_hotspot = hotspots
             .iter()
             .find(|unit| unit.name == "closest_name")
@@ -10355,7 +10314,7 @@ mod tests {
                 .unwrap();
         }
 
-        let review = top_unit_hotspots(&storage, "src", &CoverageScope::all(), None).unwrap();
+        let review = unit_hotspots(&storage, "src", &CoverageScope::all(), None, 12, false).unwrap();
         let test = test_next_hotspots(&storage, "src", &CoverageScope::all(), None).unwrap();
         assert_eq!(review.len(), 1);
         assert_eq!(test.len(), 1);
