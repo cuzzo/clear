@@ -69,6 +69,22 @@ cargo run -- hazards --dialect postgres \
   --output coverage/query-hazards.sarif
 ```
 
+### Generate Check Queries for Hazards
+For any finding identified during the static hazard analysis, you can generate check queries to verify if `NULL` values actually exist in the table, and receive DDL suggestions to safely update the column to `NOT NULL` if the table is free of nulls:
+
+```bash
+cargo run -- generate-check --dialect postgres \
+  --database postgres://localhost/app_test \
+  --input query.sql \
+  --id <FINDING_ID>
+```
+
+> [!NOTE]
+> If the query check return count is `0`, you can safely apply a schema migration to enforce `NOT NULL` on the target column, permanently resolving the hazard:
+> - **PostgreSQL**: `ALTER TABLE <table> ALTER COLUMN <column> SET NOT NULL;`
+> - **MySQL / MariaDB**: `ALTER TABLE <table> MODIFY <column> <datatype> NOT NULL;`
+> - **SQLite**: SQLite does not support direct column alteration; you must rebuild the table structure or use a temporary table rename sequence.
+
 ## CLI Parameters
 
 Parameters passed to `--param` must be typed to ensure correct query binding:

@@ -40,6 +40,7 @@ pub struct HazardSpan {
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct HazardFinding {
+    pub id: String,
     pub rule_id: String,
     pub kind: HazardKind,
     pub message: String,
@@ -90,6 +91,18 @@ pub fn analyze_hazards(
             && left.span.start_offset == right.span.start_offset
             && left.span.end_offset == right.span.end_offset
     });
+
+    use std::collections::hash_map::DefaultHasher;
+    use std::hash::{Hash, Hasher};
+    for finding in &mut findings {
+        let mut hasher = DefaultHasher::new();
+        file_path.hash(&mut hasher);
+        finding.rule_id.hash(&mut hasher);
+        finding.span.start_offset.hash(&mut hasher);
+        finding.span.raw_expression.hash(&mut hasher);
+        finding.id = format!("{:016x}", hasher.finish());
+    }
+
     unresolved.sort();
     unresolved.dedup();
     Ok(HazardReport {
@@ -319,6 +332,7 @@ impl HazardVisitor<'_, '_> {
             return;
         };
         self.findings.push(HazardFinding {
+            id: String::new(),
             rule_id: rule.to_string(),
             kind,
             message: format!("{} in {}", message, self.context),
@@ -387,6 +401,7 @@ fn scan_join_keys(
                 Nullability::Nullable => {
                     if let Some(span) = hazard_span(expr, self.source) {
                         self.findings.push(HazardFinding {
+                            id: String::new(),
                             rule_id: "SQL007".to_string(),
                             kind: HazardKind::NullableJoinKey,
                             message: "nullable join equality has an implicit UNKNOWN/non-match policy in JOIN ON".to_string(),

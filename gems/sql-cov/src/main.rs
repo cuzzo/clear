@@ -65,6 +65,18 @@ enum Command {
         #[arg(long)]
         sqlfluff_sarif: Option<PathBuf>,
     },
+    GenerateCheck {
+        #[arg(long)]
+        input: PathBuf,
+        #[arg(long)]
+        setup: Option<PathBuf>,
+        #[arg(long, default_value = "sqlite::memory:")]
+        database: String,
+        #[arg(long, default_value = "sqlite")]
+        dialect: String,
+        #[arg(long)]
+        id: String,
+    },
 }
 
 #[tokio::main]
@@ -230,6 +242,94 @@ async fn main() -> Result<()> {
                 other => bail!("unsupported hazard format {other:?}; use sarif or json"),
             };
             write_output(output, &rendered)?;
+        }
+        Command::GenerateCheck {
+            input,
+            setup,
+            database,
+            dialect,
+            id,
+        } => {
+            let dialect_name = DialectName::parse(&dialect)?;
+            let setup = setup.map(fs::read_to_string).transpose()?;
+            let schema = match dialect_name {
+                DialectName::Sqlite => {
+                    let pool = sqlite_pool(&database).await?;
+                    if let Some(setup) = &setup {
+                        execute_sqlite_setup(&pool, setup).await?;
+                    }
+                    SchemaCatalog::load_sqlite(&pool).await?
+                }
+                DialectName::Postgres => {
+                    let pool = postgres_pool(&database).await?;
+                    if let Some(setup) = &setup {
+                        execute_postgres_setup(&pool, setup).await?;
+                    }
+                    SchemaCatalog::load_postgres(&pool).await?
+                }
+                DialectName::Mysql => {
+                    let pool = mysql_pool(&database).await?;
+                    if let Some(setup) = &setup {
+                        execute_mysql_setup(&pool, setup).await?;
+                    }
+                    SchemaCatalog::load_mysql(&pool).await?
+                }
+            };
+            let source = fs::read_to_string(&input)?;
+            let report = analyze_hazards(&input.to_string_lossy(), &source, dialect_name, &schema)?;
+            
+            let Some(finding) = report.findings.iter().find(|f| f.id == id) else {
+                bail!("no hazard finding found in {} with id {}", input.to_string_lossy(), id);
+            };
+
+            let mut matched_targets = Vec::new();
+            for ev in &finding.evidence {
+                if ev.starts_with("schema declares ") && ev.ends_with(" nullable") {
+                    let inner = &ev["schema declares ".len()..(ev.len() - " nullable".len())];
+                    if let Some(dot_idx) = inner.find('.') {
+                        let table = &inner[..dot_idx];
+                        let col = &inner[dot_idx + 1..];
+                        matched_targets.push((table.to_string(), col.to_string()));
+                    }
+                } else if ev.starts_with("outer join can synthesize NULL for ") {
+                    let inner = &ev["outer join can synthesize NULL for ".len()..];
+                    if let Some(dot_idx) = inner.find('.') {
+                        let table = &inner[..dot_idx];
+                        let col = &inner[dot_idx + 1..];
+                        matched_targets.push((table.to_string(), col.to_string()));
+                    }
+                }
+            }
+
+            if matched_targets.is_empty() {
+                println!("-- Finding ID: {}", finding.id);
+                println!("-- Kind: {:?}", finding.kind);
+                println!("-- Message: {}", finding.message);
+                println!("-- Recommendation: {}", finding.recommendation);
+                println!("-- No specific nullable table columns could be extracted from evidence: {:?}", finding.evidence);
+                return Ok(());
+            }
+
+            println!("-- Finding ID: {}", finding.id);
+            println!("-- Kind: {:?}", finding.kind);
+            println!("-- Message: {}", finding.message);
+            println!("-- Recommendation: {}", finding.recommendation);
+            println!();
+
+            for (table, col) in matched_targets {
+                println!("-- Checking nullable column {}.{}", table, col);
+                println!("SELECT COUNT(*) AS null_count FROM {} WHERE {} IS NULL;", table, col);
+                println!();
+                println!("-- If the check returns 0, you can safely make the column NOT NULL:");
+                println!("-- PostgreSQL:");
+                println!("--   ALTER TABLE {} ALTER COLUMN {} SET NOT NULL;", table, col);
+                println!("-- MySQL / MariaDB:");
+                println!("--   ALTER TABLE {} MODIFY {} <datatype> NOT NULL;", table, col);
+                println!("-- SQLite:");
+                println!("--   SQLite does not support altering column nullability directly.");
+                println!("--   To apply the constraint, recreate the table with `NOT NULL` on `{}`.", col);
+                println!();
+            }
         }
     }
     Ok(())

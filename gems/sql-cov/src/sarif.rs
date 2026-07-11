@@ -47,6 +47,7 @@ pub fn hazard_sarif(report: &HazardReport, sqlfluff_sarif: Option<&str>) -> Resu
                 }
             }],
             "properties": {
+                "findingId": finding.id,
                 "kind": finding.kind,
                 "nullabilityEvidence": finding.evidence,
                 "recommendation": finding.recommendation,

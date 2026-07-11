@@ -115,7 +115,7 @@ impl SchemaCatalog {
         Ok(catalog)
     }
 
-    fn insert_column(
+    pub fn insert_column(
         &mut self,
         table_name: String,
         column_name: String,

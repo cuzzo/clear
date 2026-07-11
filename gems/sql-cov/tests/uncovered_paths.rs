@@ -194,6 +194,7 @@ fn test_reporter_invalid_formats() {
         dialect: "sqlite".to_string(),
         findings: vec![
             HazardFinding {
+                id: "test-id".to_string(),
                 rule_id: "SQL001".to_string(),
                 kind: sql_cov::HazardKind::NullableAnyAll,
                 message: "Test finding".to_string(),
@@ -334,5 +335,44 @@ fn test_sqlfluff_sarif_merging_and_tiering() {
     assert!(sarif_output.contains(r#""tier": "T1""#)); // SQL-cov findings and AM05
     assert!(sarif_output.contains(r#""tier": "T2""#)); // CV02
     assert!(sarif_output.contains(r#""tier": "T3""#)); // LT01
+}
+
+#[test]
+fn test_generate_check_logic() {
+    use sql_cov::hazard::analyze_hazards;
+    use sql_cov::schema::SchemaCatalog;
+
+    let mut schema = SchemaCatalog {
+        tables: std::collections::HashMap::new(),
+    };
+    schema.insert_column("users".to_string(), "age".to_string(), true, false);
+
+    let report = analyze_hazards(
+        "test.sql",
+        "SELECT * FROM users WHERE age != 18",
+        DialectName::Sqlite,
+        &schema,
+    )
+    .unwrap();
+
+    assert_eq!(report.findings.len(), 1);
+    let finding = &report.findings[0];
+    
+    // Check that we can extract the column from the evidence
+    let mut matched_targets = Vec::new();
+    for ev in &finding.evidence {
+        if ev.starts_with("schema declares ") && ev.ends_with(" nullable") {
+            let inner = &ev["schema declares ".len()..(ev.len() - " nullable".len())];
+            if let Some(dot_idx) = inner.find('.') {
+                let table = &inner[..dot_idx];
+                let col = &inner[dot_idx + 1..];
+                matched_targets.push((table.to_string(), col.to_string()));
+            }
+        }
+    }
+    
+    assert_eq!(matched_targets.len(), 1);
+    assert_eq!(matched_targets[0].0, "users");
+    assert_eq!(matched_targets[0].1, "age");
 }
 
