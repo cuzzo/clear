@@ -5596,7 +5596,7 @@ fn render_highest_hazard_files_section(dashboard: &UiDashboard, filter: &str) ->
     );
     render_dashboard_disclosure(
         "Highest Hazard Files",
-        dashboard.active_hazards > 0 && !dashboard.top_hazard_files.is_empty(),
+        false,
         &body,
     )
 }
@@ -6169,7 +6169,7 @@ fn render_complexity_functions_section(dashboard: &UiDashboard, filter: &str) ->
 
     render_dashboard_disclosure(
         "High Complexity Functions",
-        !dashboard.top_complexity_functions.is_empty(),
+        false,
         &body,
     )
 }
