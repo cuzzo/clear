@@ -1,94 +1,117 @@
 # SQL-COV
 
-SQL-COV measures SQL predicate outcomes as branches. For nullable predicates it
-tracks SQL's three logical states independently: `TRUE`, `FALSE`, and
-`UNKNOWN` (`NULL`). It emits versioned JSON, LCOV branch records, or a
-standalone HTML report.
+SQL-COV measures SQL predicate outcomes as branches. For nullable predicates it tracks SQL's three logical states independently: `TRUE`, `FALSE`, and `UNKNOWN` (`NULL`). It emits versioned JSON, LCOV branch records, or a standalone HTML report.
 
-SQL-COV supports SQLite, PostgreSQL, and MySQL/MariaDB parsing, schema
-introspection, statement execution, predicate telemetry, and hazard SARIF. It
-instruments predicates in a top-level `SELECT ... WHERE` over the query's
-pre-filter row domain. `JOIN ... ON` and `HAVING` predicates are source mapped
-and reported as instrumentation gaps, but are excluded from coverage
-percentages until their telemetry can preserve query semantics.
+Linters and static analyzers help you find syntactic errors. SQL-COV performs dynamic and schema-aware analysis to map the exact branch coverage of query conditions and join constraints.
 
-SQL-COV also owns SQL-specific static hazards. The analyzer consults the live
-SQLite schema before reporting nullable inequality, `NOT IN`, `NOT BETWEEN`,
-`NOT`, `ANY`/`ALL`, nullable join keys, and outer-join null rejection. Proven
-hazards are emitted separately as SARIF 2.1.0; unresolved schema facts remain
-in the JSON report and do not become warnings.
+- See [design.md](docs/agents/design.md) for the architectural blueprint.
+- See [implementation-phases.md](docs/agents/implementation-phases.md) for the development roadmap.
 
-## Run it
+## Getting Started
 
-```sh
+If you want to contribute, see [CONTRIBUTING.md](../../CONTRIBUTING.md).
+
+### Prerequisites
+
+- **Rust / Cargo** (for building/running)
+- **SQLite** (for local/in-memory SQLite queries)
+- **PostgreSQL** or **MySQL/MariaDB** (optional, for live database tests and telemetry runs)
+
+### Installation
+
+From this repository:
+
+```bash
+cargo build --release
+```
+
+## Run It
+
+### Basic AST analysis
+Analyze the query syntax and map its potential coverage branches without executing:
+
+```bash
 cargo run -- analyze \
   --input tests/fixtures/users_query.sql \
   --format json
+```
 
+### In-Memory SQLite Coverage
+Run a query and record coverage against a local SQLite database setup:
+
+```bash
 cargo run -- run \
   --input tests/fixtures/users_query.sql \
   --setup tests/fixtures/users.sql \
   --format lcov
 ```
 
-Run SQL-COV against the extracted Lineage architecture query:
+### Live Database Coverage (PostgreSQL / MySQL)
+Run coverage against external databases using connection strings and typed CLI parameters:
 
-```sh
-cargo run -- run \
-  --input ../lineage/sql/architecture/owner_inventory.sql \
-  --setup tests/fixtures/lineage_architecture.sql \
-  --param 1 \
-  --param owner:1 \
-  --format html \
-  --output coverage/lineage-owner-inventory.html
-```
-
-Analyze schema-proven UNKNOWN hazards:
-
-```sh
-cargo run -- hazards \
-  --input ../lineage/sql/architecture/owner_inventory.sql \
-  --database /path/to/lineage.db \
-  --format sarif \
-  --output coverage/lineage-owner-inventory.sarif
-```
-
-PostgreSQL and MySQL/MariaDB use the same commands with `--dialect` and a
-database URL:
-
-```sh
+```bash
 cargo run -- run --dialect postgres \
   --database postgres://localhost/app_test \
-  --input query.sql --param int:42
-
-cargo run -- hazards --dialect mariadb \
-  --database mysql://localhost/app_test \
-  --input query.sql --format sarif
+  --input query.sql \
+  --param int:42 \
+  --param text:admin
 ```
 
-CLI parameters are typed as `int:42`, `float:1.5`, `bool:true`, or
-`text:value`. Typed NULLs use `null:int`, `null:float`, `null:bool`, and
-`null:text`; bare values remain text for compatibility.
+### Analyze Static Hazards
+Inspect SQL code for implicit nullability traps and output SARIF:
 
-LCOV output uses `BRDA` records for expression states. JSON retains
-byte/line/column spans and raw counts for SQL-aware consumers.
-
-The ownership boundary is intentional: SQL-COV derives SQL semantics and
-produces coverage/SARIF artifacts. SlopCop may consume those artifacts for CI
-policy, while Lineage ingests them as historical evidence; neither needs to
-reimplement SQL parsing or schema nullability.
-
-## Development
-
-```sh
-cargo test
+```bash
+cargo run -- hazards --dialect postgres \
+  --database postgres://localhost/app_test \
+  --input query.sql \
+  --format sarif \
+  --output coverage/query-hazards.sarif
 ```
 
-Live database tests run when `SQL_COV_POSTGRES_URL`, `SQL_COV_MYSQL_URL`, or
-`SQL_COV_MARIADB_URL` is set. Without those variables, parser, instrumentation,
-schema-model, and truth-table tests still run, while live tests return early.
+## CLI Parameters
 
-The implementation plan is in
-[`docs/agents/implementation-phases.md`](docs/agents/implementation-phases.md),
-and the architectural blueprint is in
-[`docs/agents/design.md`](docs/agents/design.md).
+Parameters passed to `--param` must be typed to ensure correct query binding:
+- Primitives: `int:42`, `float:1.5`, `bool:true`, `text:value`
+- Nulls: `null:int`, `null:float`, `null:bool`, `null:text`
+- Bare values are treated as text by default for backwards compatibility.
+
+## Outputs
+
+SQL-COV generates outputs matching standard coverage and static analysis specifications:
+
+- **JSON**: Comprehensive report containing byte/line/column spans, raw hit counts, and nullability profiles for downstream ingestion.
+- **LCOV**: Emits standard `BRDA` branch records, enabling integration with visualization tools like Codecov, Coveralls, or local HTML frontends.
+- **HTML**: Self-contained, premium interactive report highlighting SQL syntax, branch outcomes (True/False/Unknown), and coverage warnings.
+- **SARIF**: Emits SARIF 2.1.0 records representing static hazard findings for GitHub Code Scanning and IDE gutter integrations.
+
+## Supported Dialects Roadmap
+
+SQL-COV leverages dialect-specific frontends and live schema catalogs for exact type and nullability resolution.
+
+- [x] **SQLite**: Fully supported (in-memory and file databases).
+- [x] **PostgreSQL**: Fully supported (via connection string).
+- [x] **MySQL / MariaDB**: Fully supported (via connection string).
+
+## Boundaries
+
+SQL-COV does not:
+- Rewrite production queries;
+- Prove that a query is optimal (e.g. index selection or CPU cost);
+- Inject runtime instrumentation inside production application binaries;
+- Execute without a mock/test database connection when running telemetry.
+
+It resolves SQL branch correctness and maps condition domains.
+
+## CI Integration
+
+The recommended CI integration pattern is:
+1. Extract `.sql` queries from ORM files or source code.
+2. Spin up a temporary test database container during test suites.
+3. Run `sql-cov run` passing the test database URL and parameter payloads.
+4. Export the resulting LCOV/SARIF files into coverage dashboards or PR scanning tools.
+
+## Links
+
+- [CLEAR compiler](../../README.md)
+- [Lineage](../lineage/README.md): CLEAR's verification and LLM review UI which ingests SQL-COV coverage records.
+- [SlopCop](../slopcop/README.md): Categorizes uncovered branches and ranks true test gaps.
