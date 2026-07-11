@@ -604,7 +604,7 @@ struct DashboardTemplate<'a> {
     finding_changes: &'a str,
     review_next: &'a str,
     test_next: &'a str,
-    analyzer_health: &'a str,
+    analyzer_status: &'a str,
     highest_hazard_files: &'a str,
     highest_risk_units: &'a str,
     highest_architecture_risks: &'a str,
@@ -742,6 +742,8 @@ struct IndexQuery {
     commit: Option<String>,
     q: Option<String>,
     sort: Option<String>,
+    queue: Option<String>,
+    page: Option<usize>,
 }
 
 #[derive(Debug, Default, Deserialize)]
@@ -1647,7 +1649,7 @@ fn review_next_items(
             score,
         });
     }
-    items.truncate(20);
+    items.truncate(200);
     Ok(items)
 }
 
@@ -3034,6 +3036,8 @@ async fn index_handler(
         commit,
         filter,
         sort,
+        query.queue.as_deref(),
+        query.page.unwrap_or(1),
     ) {
         Ok(body) => Html(body).into_response(),
         Err(error) => error_response(StatusCode::INTERNAL_SERVER_ERROR, error),
@@ -5077,6 +5081,8 @@ fn render_index_page(
     commit: Option<&str>,
     filter: &str,
     sort: CoverageSort,
+    queue: Option<&str>,
+    queue_page: usize,
 ) -> Result<String> {
     let files = file_index_with_scope(storage, scope, Some(repo))?;
     let selected_path = selected
@@ -5118,15 +5124,24 @@ fn render_index_page(
     };
     let main = match &payload {
         Ok(Some(payload)) => render_source_view(payload, filter, &branch_context),
-        Ok(None) => render_dashboard(
-            &dashboard,
-            &current_directory,
-            &child_directories,
-            &child_files,
-            filter,
-            sort,
-            &branch_context,
-        ),
+        Ok(None) => match queue {
+            Some("review-next") | Some("test-next") => render_queue_page(
+                &dashboard,
+                queue.unwrap_or_default(),
+                &current_directory,
+                filter,
+                queue_page,
+            ),
+            _ => render_dashboard(
+                &dashboard,
+                &current_directory,
+                &child_directories,
+                &child_files,
+                filter,
+                sort,
+                &branch_context,
+            ),
+        },
         Err(error) => render_source_unavailable(&error.to_string()),
     };
     let app = AppTemplate {
@@ -5890,9 +5905,9 @@ fn render_dashboard(
     let warnings = render_warning_banner(&dashboard.warnings);
     let active_hazards = render_active_hazards_section(dashboard);
     let finding_changes = render_finding_changes_section(dashboard);
-    let review_next = render_review_next_section(dashboard, filter);
-    let test_next = render_test_next_section(dashboard, filter);
-    let analyzer_health = render_analyzer_health_section(dashboard);
+    let review_next = render_review_next_section(dashboard, &directory, filter);
+    let test_next = render_test_next_section(dashboard, &directory, filter);
+    let analyzer_status = render_analyzer_status(dashboard);
     let highest_hazard_files = render_highest_hazard_files_section(dashboard, filter);
     let highest_risk_units = render_dashboard_disclosure(
         "Risky Units",
@@ -5927,7 +5942,7 @@ fn render_dashboard(
             finding_changes: &finding_changes,
             review_next: &review_next,
             test_next: &test_next,
-            analyzer_health: &analyzer_health,
+            analyzer_status: &analyzer_status,
             highest_hazard_files: &highest_hazard_files,
             highest_risk_units: &highest_risk_units,
             highest_architecture_risks: &highest_architecture_risks,
@@ -5939,7 +5954,7 @@ fn render_dashboard(
     )
 }
 
-fn render_review_next_section(dashboard: &UiDashboard, filter: &str) -> String {
+fn render_review_next_section(dashboard: &UiDashboard, directory: &str, filter: &str) -> String {
     let items = dashboard
         .review_next
         .iter()
@@ -5955,7 +5970,7 @@ fn render_review_next_section(dashboard: &UiDashboard, filter: &str) -> String {
             }
         })
         .collect::<Vec<_>>();
-    let body = render_template_string(
+    let mut body = render_template_string(
         HotspotListTemplate {
             wrapper_class: "unit-hotspots review-next",
             empty_message: "No current analyzer findings or hazards need review in this folder.",
@@ -5963,10 +5978,13 @@ fn render_review_next_section(dashboard: &UiDashboard, filter: &str) -> String {
         },
         "review next template",
     );
+    if dashboard.review_next.len() > 10 {
+        body.push_str(&render_queue_see_more("review-next", directory));
+    }
     render_dashboard_disclosure("Review Next", !items.is_empty(), &body)
 }
 
-fn render_test_next_section(dashboard: &UiDashboard, filter: &str) -> String {
+fn render_test_next_section(dashboard: &UiDashboard, directory: &str, filter: &str) -> String {
     let mut candidates = dashboard
         .test_next_units
         .iter()
@@ -5983,6 +6001,7 @@ fn render_test_next_section(dashboard: &UiDashboard, filter: &str) -> String {
             .then_with(|| left.0.path.cmp(&right.0.path))
             .then_with(|| left.0.name.cmp(&right.0.name))
     });
+    let has_more = candidates.len() > 10;
     let items = candidates
         .into_iter()
         .take(10)
@@ -5995,7 +6014,7 @@ fn render_test_next_section(dashboard: &UiDashboard, filter: &str) -> String {
             score: format!("{priority:.1}"),
         })
         .collect::<Vec<_>>();
-    let body = render_template_string(
+    let mut body = render_template_string(
         HotspotListTemplate {
             wrapper_class: "unit-hotspots test-next",
             empty_message: "No high-value testing recommendation is available in this folder.",
@@ -6003,6 +6022,9 @@ fn render_test_next_section(dashboard: &UiDashboard, filter: &str) -> String {
         },
         "test next template",
     );
+    if has_more {
+        body.push_str(&render_queue_see_more("test-next", directory));
+    }
     render_dashboard_disclosure("Test Next", !items.is_empty(), &body)
 }
 
@@ -6063,40 +6085,205 @@ fn test_next_recommendation(unit: &UiUnitHotspot) -> Option<(&'static str, Strin
     None
 }
 
-fn render_analyzer_health_section(dashboard: &UiDashboard) -> String {
-    let items = dashboard
-        .analyzer_health
-        .iter()
-        .map(|health| HotspotItem {
-            href: "#".to_string(),
-            kind: health.status.clone(),
-            name: health.analyzer.clone(),
-            path: health.detail.clone(),
-            detail: if health.scoped_findings >= 0 && health.total_findings >= 0 {
-                format!(
-                    "{} findings in this folder / {} current total",
-                    health.scoped_findings, health.total_findings
-                )
-            } else {
-                "finding counts omitted for responsiveness; use Review Next for ranked findings"
-                    .to_string()
-            },
-            score: health.status.clone(),
-        })
-        .collect::<Vec<_>>();
-    let has_problem = dashboard
-        .analyzer_health
-        .iter()
-        .any(|health| health.status != "healthy");
-    let body = render_template_string(
+const QUEUE_PAGE_SIZE: usize = 25;
+const QUEUE_RESULT_LIMIT: usize = 200;
+
+fn render_queue_see_more(queue: &str, directory: &str) -> String {
+    format!(
+        "<p class=\"queue-see-more\"><a href=\"{}\">See more <span aria-hidden=\"true\">&rarr;</span></a></p>",
+        html_escape(&queue_href(queue, directory, 1))
+    )
+}
+
+fn queue_href(queue: &str, directory: &str, page: usize) -> String {
+    let mut pairs = vec![format!("queue={}", percent_encode(queue))];
+    let directory = normalize_directory(directory);
+    if !directory.is_empty() {
+        pairs.push(format!("dir={}", percent_encode(&directory)));
+    }
+    if page > 1 {
+        pairs.push(format!("page={page}"));
+    }
+    format!("/?{}", pairs.join("&"))
+}
+
+fn render_queue_page(
+    dashboard: &UiDashboard,
+    queue: &str,
+    directory: &str,
+    filter: &str,
+    requested_page: usize,
+) -> String {
+    let (title, intro, items) = if queue == "review-next" {
+        let items = dashboard
+            .review_next
+            .iter()
+            .take(QUEUE_RESULT_LIMIT)
+            .map(|item| HotspotItem {
+                href: format!("{}#L{}", page_href(&item.path, None, filter), item.start_line),
+                kind: "review".to_string(),
+                name: item.title.clone(),
+                path: item.path.clone(),
+                detail: item.detail.clone(),
+                score: format!("{:.1}", item.score),
+            })
+            .collect::<Vec<_>>();
+        (
+            "Review Next",
+            "Current analyzer findings ranked by severity, uncovered behavior, and cross-analyzer agreement.",
+            items,
+        )
+    } else {
+        let mut candidates = dashboard
+            .test_next_units
+            .iter()
+            .filter_map(|unit| {
+                let (test_type, rationale, priority) = test_next_recommendation(unit)?;
+                Some((unit, test_type, rationale, priority))
+            })
+            .collect::<Vec<_>>();
+        candidates.sort_by(|left, right| {
+            right
+                .3
+                .partial_cmp(&left.3)
+                .unwrap_or(std::cmp::Ordering::Equal)
+                .then_with(|| left.0.path.cmp(&right.0.path))
+                .then_with(|| left.0.name.cmp(&right.0.name))
+        });
+        let items = candidates
+            .into_iter()
+            .take(QUEUE_RESULT_LIMIT)
+            .map(|(unit, test_type, rationale, priority)| HotspotItem {
+                href: format!("{}#L{}", page_href(&unit.path, None, filter), unit.start_line),
+                kind: test_type.to_string(),
+                name: unit.name.clone(),
+                path: unit.path.clone(),
+                detail: rationale,
+                score: format!("{priority:.1}"),
+            })
+            .collect::<Vec<_>>();
+        (
+            "Test Next",
+            "High-value testing work ranked by risk, coverage gaps, and the recommended testing type.",
+            items,
+        )
+    };
+
+    let page_count = items.len().div_ceil(QUEUE_PAGE_SIZE).max(1);
+    let page = requested_page.clamp(1, page_count);
+    let start = (page - 1) * QUEUE_PAGE_SIZE;
+    let end = (start + QUEUE_PAGE_SIZE).min(items.len());
+    let visible = &items[start..end];
+    let list = render_template_string(
         HotspotListTemplate {
-            wrapper_class: "unit-hotspots analyzer-health",
-            empty_message: "No analyzer artifacts have been configured.",
-            items: &items,
+            wrapper_class: "unit-hotspots queue-page-items",
+            empty_message: "No queue items are available in this folder.",
+            items: visible,
         },
-        "analyzer health template",
+        "queue page items template",
     );
-    render_dashboard_disclosure("Analyzer and Artifact Health", has_problem, &body)
+    let scope_label = if directory.is_empty() {
+        "entire repository".to_string()
+    } else {
+        normalize_directory(directory)
+    };
+    let pagination = render_queue_pagination(queue, directory, page, page_count, items.len());
+    format!(
+        concat!(
+            "<div class=\"viewer\"><section class=\"dashboard queue-page\">",
+            "<header class=\"queue-page-header\">",
+            "<a class=\"queue-back\" href=\"{}\">&larr; Back to directory</a>",
+            "<h1>{}</h1><p>{} Scope: <strong>{}</strong>. Showing up to {} results.</p>",
+            "</header>{}{}</section></div>"
+        ),
+        html_escape(&directory_href(directory, filter)),
+        html_escape(title),
+        html_escape(intro),
+        html_escape(&scope_label),
+        QUEUE_RESULT_LIMIT,
+        list,
+        pagination,
+    )
+}
+
+fn render_queue_pagination(
+    queue: &str,
+    directory: &str,
+    page: usize,
+    page_count: usize,
+    total: usize,
+) -> String {
+    if total == 0 {
+        return String::new();
+    }
+    let previous = if page > 1 {
+        format!(
+            "<a rel=\"prev\" href=\"{}\">&larr; Previous</a>",
+            html_escape(&queue_href(queue, directory, page - 1))
+        )
+    } else {
+        "<span></span>".to_string()
+    };
+    let next = if page < page_count {
+        format!(
+            "<a rel=\"next\" href=\"{}\">Next &rarr;</a>",
+            html_escape(&queue_href(queue, directory, page + 1))
+        )
+    } else {
+        "<span></span>".to_string()
+    };
+    format!(
+        "<nav class=\"queue-pagination\" aria-label=\"Queue pages\">{}<span>Page {} of {} &middot; {} results</span>{}</nav>",
+        previous, page, page_count, total, next
+    )
+}
+
+fn render_analyzer_status(dashboard: &UiDashboard) -> String {
+    let mut problems = BTreeMap::<&str, &UiAnalyzerHealth>::new();
+    for health in dashboard
+        .analyzer_health
+        .iter()
+        .filter(|health| health.status != "healthy")
+    {
+        problems.entry(&health.analyzer).or_insert(health);
+    }
+    if problems.is_empty() {
+        return concat!(
+            "<div class=\"analyzer-status analyzer-status-healthy\" tabindex=\"0\" ",
+            "aria-label=\"Analyzer artifacts are up to date\">",
+            "<i class=\"fa-solid fa-circle-check\" aria-hidden=\"true\"></i>",
+            "<span>Analyzers current</span>",
+            "<span class=\"analyzer-status-tooltip\" role=\"tooltip\">",
+            "All configured analyzer artifacts match the current indexed commit.",
+            "</span></div>"
+        )
+        .to_string();
+    }
+
+    let detail = problems
+        .into_values()
+        .map(|health| {
+            let fix = match health.status.as_str() {
+                "missing" => "run lineage-import with first-party SARIF enabled",
+                "stale" => "rerun lineage-import for the current commit",
+                "degraded" => "regenerate the artifact with a higher result cap",
+                _ => "regenerate and ingest the analyzer artifact",
+            };
+            format!("{}: {}. Fix: {fix}.", health.analyzer, health.detail)
+        })
+        .collect::<Vec<_>>()
+        .join(" ");
+    format!(
+        concat!(
+            "<div class=\"analyzer-status analyzer-status-caution\" tabindex=\"0\" ",
+            "aria-label=\"Analyzer artifacts need attention\">",
+            "<i class=\"fa-solid fa-triangle-exclamation\" aria-hidden=\"true\"></i>",
+            "<span>Analyzer caution</span>",
+            "<span class=\"analyzer-status-tooltip\" role=\"tooltip\">{}</span>",
+            "</div>"
+        ),
+        html_escape(&detail)
+    )
 }
 
 fn render_finding_changes_section(dashboard: &UiDashboard) -> String {
@@ -6141,7 +6328,6 @@ fn dashboard_panel_id(title: &str) -> &'static str {
         "Finding Changes" => "dashboard-panel-finding-changes",
         "Review Next" => "dashboard-panel-review-next",
         "Test Next" => "dashboard-panel-test-next",
-        "Analyzer and Artifact Health" => "dashboard-panel-analyzer-and-artifact-health",
         "Hazard Files" => "dashboard-panel-highest-hazard-files",
         "Risky Units" => "dashboard-panel-highest-risk-units",
         "Architectural Risks" => "dashboard-panel-highest-architectural-risks",
@@ -10095,6 +10281,8 @@ mod tests {
             None,
             "",
             CoverageSort::Path,
+            None,
+            1,
         )
         .unwrap();
 
@@ -10189,7 +10377,15 @@ mod tests {
                 ..ui_file_for_sort("zig/runtime/a.zig", 10, 8, 1)
             }],
             top_units: Vec::new(),
-            review_next: Vec::new(),
+            review_next: (1..=30)
+                .map(|index| UiReviewNextItem {
+                    path: format!("src/review_{index}.rb"),
+                    start_line: index,
+                    title: format!("review_{index}"),
+                    detail: "current warning".to_string(),
+                    score: f64::from(31 - index),
+                })
+                .collect(),
             test_next_units: Vec::new(),
             top_architecture_risks: Vec::new(),
             top_complexity_functions: Vec::new(),
@@ -10227,8 +10423,11 @@ mod tests {
         assert!(html.contains("3</strong> new"));
         assert!(html.contains("<h2>Review Next</h2>"));
         assert!(html.contains("<h2>Test Next</h2>"));
-        assert!(html.contains("<h2>Analyzer and Artifact Health</h2>"));
-        assert!(html.contains("4 findings in this folder / 20 current total"));
+        assert!(!html.contains("<h2>Analyzer and Artifact Health</h2>"));
+        assert!(html.contains("class=\"analyzer-status analyzer-status-caution\""));
+        assert!(html.contains("fa-triangle-exclamation"));
+        assert!(html.contains("regenerate the artifact with a higher result cap"));
+        assert!(html.contains("queue=review-next"));
         assert!(html.contains("<h2>Risky Units</h2>"));
         assert!(html.contains("<h2>Architectural Risks</h2>"));
         assert!(html.contains("<h2>Expensive Functions</h2>"));
@@ -10259,6 +10458,12 @@ mod tests {
             html.find("Hazard Files").unwrap() < html.find("Risky Units").unwrap(),
             "hazard files should render above risk sections"
         );
+
+        let queue_page = render_queue_page(&dashboard, "review-next", "src", "", 2);
+        assert!(queue_page.contains("Page 2 of 2 &middot; 30 results"));
+        assert!(queue_page.contains("review_26"));
+        assert!(queue_page.contains("rel=\"prev\""));
+        assert!(!queue_page.contains("rel=\"next\""));
 
         let no_hazard = UiDashboard {
             active_hazards: 0,
