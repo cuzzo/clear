@@ -59,6 +59,8 @@ module Espalier
       @local_types = local_types if local_types
       complexity = "O(1)"
       space_complexity = "O(1)"
+      is_dynamic = false
+      trigger = nil
       unknown_operations = []
       warnings = []
 
@@ -93,11 +95,16 @@ module Espalier
           # nesting tree, multiple observed loops in one method are a sequential
           # lower bound, not proof of nested O(N^k) behavior.
           complexity = max_complexity(complexity, "O(N)")
+          is_dynamic = true
         elsif node[:type] == :structural
           structural_complexity = node[:complexity].to_s
           complexity = max_complexity(complexity, structural_complexity)
           if node[:space]
             space_complexity = max_space_complexity(space_complexity, node[:space].to_s)
+          end
+          if node[:is_dynamic]
+            is_dynamic = true
+            trigger ||= node[:trigger]
           end
           warnings << structural_warning(node) if structural_complexity != "O(1)"
         elsif node[:type] == :callback || node[:type] == :yield
@@ -109,6 +116,8 @@ module Espalier
         method: method_name,
         lower_bound_complexity: complexity,
         space_complexity: space_complexity,
+        is_dynamic: is_dynamic,
+        trigger: trigger,
         unknown_operations: unknown_operations.uniq,
         warnings: warnings.uniq
       }

@@ -32,18 +32,54 @@ module Espalier
 
       slice = lines[(start_line - 1)..(end_line - 1)] || []
       loops = loop_ranges(slice, start_line)
+
+      constants = Set.new
+      lines.each do |line|
+        if line =~ /\b(?:const\s+([A-Z_a-z]\w*)|([A-Z][A-Z_0-9]*)\s*=)/
+          constants.add($1 || $2)
+        end
+      end
+
       hints = []
-      hints.concat(polynomial_loop_hints(lines, loops))
+      hints.concat(polynomial_loop_hints(lines, loops, start_line, constants))
       hints.concat(recursion_hints(lines, method, start_line, end_line))
       loops.each do |loop_range|
+        classification = classify_loop(loop_range[:text], loop_range[:start], start_line, lines, constants)
+        is_dynamic = classification[:is_dynamic]
+        trigger = classification[:trigger]
+
         if fixpoint_loop?(lines, loop_range)
-          hints.concat(fixpoint_collection_hints(lines, loop_range))
-          hints.concat(project_call_hints(lines, loop_range, owner))
+          hints.concat(
+            fixpoint_collection_hints(lines, loop_range).map do |h|
+              h.merge(is_dynamic: is_dynamic, trigger: trigger)
+            end
+          )
+          hints.concat(
+            project_call_hints(lines, loop_range, owner).map do |h|
+              h.merge(is_dynamic: is_dynamic, trigger: trigger)
+            end
+          )
         end
-        hints.concat(expensive_project_call_hints(lines, loop_range, owner, method[:name].to_s))
-        hints.concat(aggregate_scan_hints(lines, loop_range))
-        hints.concat(shifting_insert_hints(lines, loop_range))
-        hints.concat(graph_traversal_hints(lines, loops, loop_range))
+        hints.concat(
+          expensive_project_call_hints(lines, loop_range, owner, method[:name].to_s).map do |h|
+            h.merge(is_dynamic: is_dynamic, trigger: trigger)
+          end
+        )
+        hints.concat(
+          aggregate_scan_hints(lines, loop_range).map do |h|
+            h.merge(is_dynamic: is_dynamic, trigger: trigger)
+          end
+        )
+        hints.concat(
+          shifting_insert_hints(lines, loop_range).map do |h|
+            h.merge(is_dynamic: is_dynamic, trigger: trigger)
+          end
+        )
+        hints.concat(
+          graph_traversal_hints(lines, loops, loop_range).map do |h|
+            h.merge(is_dynamic: is_dynamic, trigger: trigger)
+          end
+        )
       end
       hints.uniq { |hint| [hint[:line], hint[:reason], hint[:operation]] }
     end
@@ -152,19 +188,23 @@ module Espalier
         body.match?(/\bbreak\s+unless\s+(?:#{FIXPOINT_NAMES.join("|")})\b/)
     end
 
-    def polynomial_loop_hints(lines, loops)
+    def polynomial_loop_hints(lines, loops, start_line, constants)
       block_loops = loops.reject { |loop_range| loop_range[:inline] }
       block_loops.filter_map do |loop_range|
         depth = loop_depth(block_loops, loop_range)
         next if depth < 2
         next if containing_fixpoint_loop?(lines, block_loops, loop_range)
 
+        classification = classify_loop(loop_range[:text], loop_range[:start], start_line, lines, constants)
+
         structural_hint(
           line: loop_range[:start],
           complexity: polynomial_complexity(depth),
           operation: loop_range[:text],
           reason: "nested loop containment depth #{depth}",
-          detail: lines[loop_range[:start] - 1].to_s.strip
+          detail: lines[loop_range[:start] - 1].to_s.strip,
+          is_dynamic: classification[:is_dynamic],
+          trigger: classification[:trigger]
         )
       end
     end
@@ -197,6 +237,8 @@ module Espalier
             line: recursive_calls.first,
             complexity: "O(N!)",
             space: "O(N)",
+            is_dynamic: true,
+            trigger: "line #{start_line}",
             operation: method_name,
             reason: "recursive branching over shrinking collection",
             detail: lines[recursive_calls.first - 1].to_s.strip
@@ -210,6 +252,8 @@ module Espalier
             line: recursive_calls.first,
             complexity: "O(2^N)",
             space: "O(N)",
+            is_dynamic: true,
+            trigger: "line #{start_line}",
             operation: method_name,
             reason: "multiple recursive branches",
             detail: lines[recursive_calls.first - 1].to_s.strip
@@ -223,6 +267,8 @@ module Espalier
             line: recursive_calls.first,
             complexity: "O(log N)",
             space: "O(log N)",
+            is_dynamic: true,
+            trigger: "line #{start_line}",
             operation: method_name,
             reason: "recursive call with division / halving",
             detail: lines[recursive_calls.first - 1].to_s.strip
@@ -236,6 +282,8 @@ module Espalier
           line: recursive_calls.first,
           complexity: "O(N)",
           space: "O(N)",
+          is_dynamic: true,
+          trigger: "line #{start_line}",
           operation: method_name,
           reason: "recursive self call",
           detail: lines[recursive_calls.first - 1].to_s.strip
@@ -455,12 +503,14 @@ module Espalier
       line[/\A\s*/].to_s.length
     end
 
-    def structural_hint(line:, operation:, reason:, detail:, complexity: "O(N^2)", space: nil)
+    def structural_hint(line:, operation:, reason:, detail:, complexity: "O(N^2)", space: nil, is_dynamic: true, trigger: nil)
       {
         type: :structural,
         line: line,
         complexity: complexity,
         space: space,
+        is_dynamic: is_dynamic,
+        trigger: trigger,
         operation: operation,
         reason: reason,
         detail: detail
@@ -517,6 +567,36 @@ module Espalier
       else
         [0, false]
       end
+    end
+
+    def classify_loop(loop_line, loop_line_no, start_line, lines, constants)
+      tokens = loop_line.scan(/[a-zA-Z_]\w*/)
+      ignored_tokens = %w[for while until do each times loop in range let mut var int i j k class module def end return]
+      other_tokens = tokens - ignored_tokens - constants.to_a
+      
+      if other_tokens.empty?
+        { is_dynamic: false, trigger: nil }
+      else
+        trigger_var = other_tokens.first
+        def_line = find_variable_definition_line(lines, trigger_var, loop_line_no, start_line)
+        trigger = def_line ? "line #{def_line}" : nil
+        { is_dynamic: true, trigger: trigger }
+      end
+    end
+
+    def find_variable_definition_line(lines, var_name, loop_line_no, start_line)
+      (loop_line_no - 1).downto(start_line) do |idx|
+        line = lines[idx - 1].to_s
+        if line =~ /\b(?:let(?:\s+mut)?\s+)?#{Regexp.escape(var_name)}\s*(?:=|\+=|-=|:=)\b/
+          return idx
+        end
+        if idx == start_line
+          if line =~ /\b#{Regexp.escape(var_name)}\b/
+            return idx
+          end
+        end
+      end
+      nil
     end
   end
 end

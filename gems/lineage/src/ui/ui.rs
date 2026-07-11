@@ -1908,6 +1908,23 @@ fn top_complexity_functions(
             .unwrap_or("O(1)")
             .to_string();
 
+        let big_o_space = metrics
+            .get("big_o_space")
+            .and_then(|v| v.as_str())
+            .unwrap_or("O(1)")
+            .to_string();
+
+        let is_dynamic = metrics
+            .get("big_o_dynamic")
+            .and_then(|v| v.as_bool())
+            .unwrap_or(true);
+
+        let trigger = metrics
+            .get("complexity_trigger")
+            .and_then(|v| v.as_str())
+            .unwrap_or("")
+            .to_string();
+
         let rank = match big_o.as_str() {
             s if s.contains("N^3") => 3,
             s if s.contains("N^2") => 2,
@@ -1917,27 +1934,35 @@ fn top_complexity_functions(
 
         if rank >= 1 {
             seen.insert(key);
-            functions.push((path, start_line, name, big_o, rank));
+            functions.push((path, start_line, name, big_o, big_o_space, is_dynamic, trigger, rank));
         }
     }
 
     functions.sort_by(|left, right| {
-        right.4.cmp(&left.4)
+        right.7.cmp(&left.7)
             .then_with(|| left.0.cmp(&right.0))
             .then_with(|| left.2.cmp(&right.2))
     });
 
     let result = functions
         .into_iter()
-        .map(|(path, start_line, name, big_o, _)| {
-            let space_complexity = "O(1)".to_string();
-            let detail = format!("Runtime: {} | Space: {}", big_o, space_complexity);
+        .map(|(path, start_line, name, big_o, big_o_space, is_dynamic, trigger, _)| {
+            let complexity_type = if is_dynamic {
+                if !trigger.is_empty() {
+                    format!("Dynamic, triggered by {}", trigger)
+                } else {
+                    "Dynamic".to_string()
+                }
+            } else {
+                "Static/Fixed".to_string()
+            };
+            let detail = format!("Runtime: {} ({}) | Space: {}", big_o, complexity_type, big_o_space);
             UiComplexityFunction {
                 name,
                 path,
                 start_line,
                 runtime_complexity: big_o,
-                space_complexity,
+                space_complexity: big_o_space,
                 detail,
             }
         })

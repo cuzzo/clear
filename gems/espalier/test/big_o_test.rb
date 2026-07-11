@@ -287,4 +287,68 @@ class BigOTest < Minitest::Test
     refute_nil factorial_hint
     assert_equal "O(N)", factorial_hint[:space]
   end
+
+  def test_loop_complexity_classification_and_trigger_tracking
+    require_relative "../lib/espalier/structural_big_o"
+
+    source_cache = {
+      "demo.rb" => [
+        "def process(n)\n",
+        "  limit = 100\n",
+        "  5.times do |i|\n",
+        "    (0..limit).each do |j|\n",
+        "      (0..n).each do |k|\n",
+        "        # nested loops\n",
+        "      end\n",
+        "    end\n",
+        "  end\n",
+        "end\n"
+      ],
+      "demo_const.rb" => [
+        "LIMIT = 100\n",
+        "def run()\n",
+        "  (0..LIMIT).each do |i|\n",
+        "    (0..10).each do |j|\n",
+        "      # nested\n",
+        "    end\n",
+        "  end\n",
+        "end\n"
+      ]
+    }
+
+    s = Espalier::StructuralBigO.new(source_cache: source_cache)
+
+    # 1. Test process(n):
+    # - 5.times -> static
+    # - (0..limit) -> static (limit = 100 constant assignment)
+    # - (0..n) -> dynamic (n parameter)
+    hints = s.hints_for("demo.rb", { name: "process", line: 1, span: [1, 0, 10, 3] }, "Demo")
+    nested_hint = hints.find { |h| h[:complexity] == "O(N^2)" }
+    refute_nil nested_hint
+    assert_equal true, nested_hint[:is_dynamic]
+    assert_equal "line 1", nested_hint[:trigger] # 'n' parameter defined on line 1
+
+    # Check loop classifications manually
+    constants = Set.new(["limit"])
+    lines = source_cache["demo.rb"]
+    c1 = s.send(:classify_loop, "5.times do |i|", 3, 1, lines, constants)
+    assert_equal false, c1[:is_dynamic]
+
+    c2 = s.send(:classify_loop, "(0..limit).each do |j|", 4, 1, lines, constants)
+    assert_equal false, c2[:is_dynamic]
+
+    c3 = s.send(:classify_loop, "(0..n).each do |k|", 5, 1, lines, constants)
+    assert_equal true, c3[:is_dynamic]
+    assert_equal "line 1", c3[:trigger]
+
+    # 2. Test demo_const.rb:
+    # - LIMIT is defined as a constant
+    # - (0..LIMIT).each -> static
+    # - (0..10).each -> static
+    hints2 = s.hints_for("demo_const.rb", { name: "run", line: 2, span: [2, 0, 8, 3] }, "DemoConst")
+    nested_hint2 = hints2.find { |h| h[:complexity] == "O(N^2)" }
+    refute_nil nested_hint2
+    assert_equal false, nested_hint2[:is_dynamic]
+    assert_nil nested_hint2[:trigger]
+  end
 end
