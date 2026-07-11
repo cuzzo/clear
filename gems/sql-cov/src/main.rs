@@ -78,6 +78,7 @@ async fn main() -> Result<()> {
                 &input.to_string_lossy(),
                 &source,
                 DialectName::parse(&dialect)?,
+                None,
             )?;
             let rendered = render(&analysis.coverage, &format)?;
             write_output(output, &rendered)?;
@@ -93,29 +94,37 @@ async fn main() -> Result<()> {
         } => {
             let dialect = DialectName::parse(&dialect)?;
             let source = fs::read_to_string(&input)?;
-            let analysis = analyze_sql(&input.to_string_lossy(), &source, dialect)?;
             let setup = setup.map(fs::read_to_string).transpose()?;
-            let coverage = match dialect {
+            let (_analysis, coverage) = match dialect {
                 DialectName::Sqlite => {
                     let pool = sqlite_pool(&database).await?;
                     if let Some(setup) = &setup {
                         execute_sqlite_setup(&pool, setup).await?;
                     }
-                    cover_sqlite(&pool, &analysis, &parameters).await?
+                    let schema = SchemaCatalog::load_sqlite(&pool).await.ok();
+                    let analysis = analyze_sql(&input.to_string_lossy(), &source, dialect, schema.as_ref())?;
+                    let coverage = cover_sqlite(&pool, &analysis, &parameters).await?;
+                    (analysis, coverage)
                 }
                 DialectName::Postgres => {
                     let pool = postgres_pool(&database).await?;
                     if let Some(setup) = &setup {
                         execute_postgres_setup(&pool, setup).await?;
                     }
-                    cover_postgres(&pool, &analysis, &parameters).await?
+                    let schema = SchemaCatalog::load_postgres(&pool).await.ok();
+                    let analysis = analyze_sql(&input.to_string_lossy(), &source, dialect, schema.as_ref())?;
+                    let coverage = cover_postgres(&pool, &analysis, &parameters).await?;
+                    (analysis, coverage)
                 }
                 DialectName::Mysql => {
                     let pool = mysql_pool(&database).await?;
                     if let Some(setup) = &setup {
                         execute_mysql_setup(&pool, setup).await?;
                     }
-                    cover_mysql(&pool, &analysis, &parameters).await?
+                    let schema = SchemaCatalog::load_mysql(&pool).await.ok();
+                    let analysis = analyze_sql(&input.to_string_lossy(), &source, dialect, schema.as_ref())?;
+                    let coverage = cover_mysql(&pool, &analysis, &parameters).await?;
+                    (analysis, coverage)
                 }
             };
             let rendered = render(&coverage, &format)?;

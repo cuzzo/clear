@@ -2,6 +2,7 @@ pub mod driver;
 pub mod hazard;
 pub mod instrument;
 pub mod model;
+pub mod nullability;
 pub mod parser;
 pub mod reporter;
 pub mod sarif;

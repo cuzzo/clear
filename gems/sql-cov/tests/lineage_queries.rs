@@ -44,7 +44,7 @@ fn all_extracted_lineage_runtime_queries_parse_with_sql_cov() {
         {
             continue;
         }
-        analyze_sql(&path.to_string_lossy(), &sql, DialectName::Sqlite)
+        analyze_sql(&path.to_string_lossy(), &sql, DialectName::Sqlite, None)
             .unwrap_or_else(|error| panic!("SQL-COV could not parse {}: {error}", path.display()));
         analyzed += 1;
     }
@@ -53,27 +53,27 @@ fn all_extracted_lineage_runtime_queries_parse_with_sql_cov() {
 
 #[tokio::test]
 async fn measures_real_lineage_owner_inventory_where_clause() {
+    let pool = sqlite_pool("sqlite::memory:").await.unwrap();
+    execute_sqlite_setup(&pool, SETUP).await.unwrap();
+    let schema = sql_cov::schema::SchemaCatalog::load_sqlite(&pool).await.unwrap();
     let analysis = analyze_sql(
         "gems/lineage/sql/architecture/owner_inventory.sql",
         OWNER_INVENTORY,
         DialectName::Sqlite,
+        Some(&schema),
     )
     .unwrap();
-    let pool = sqlite_pool("sqlite::memory:").await.unwrap();
-    execute_sqlite_setup(&pool, SETUP).await.unwrap();
     let coverage = cover_sqlite(&pool, &analysis, &["1".into(), "owner:1".into()])
         .await
         .unwrap();
 
-    assert_eq!(coverage.metrics.len(), 7);
-    assert_eq!(
-        coverage
-            .metrics
-            .iter()
-            .filter(|metric| metric.measurable)
-            .count(),
-        3
-    );
+    assert_eq!(coverage.metrics.len(), 22);
+    let measurable_count = coverage
+        .metrics
+        .iter()
+        .filter(|metric| metric.measurable)
+        .count();
+    assert_eq!(measurable_count, 10, "measurable count was {}", measurable_count);
     assert_eq!(
         (
             coverage.metrics[0].hit_true_count,
@@ -82,8 +82,8 @@ async fn measures_real_lineage_owner_inventory_where_clause() {
         ),
         (1, 2, 2)
     );
-    assert_eq!(coverage.covered_branches(), 8);
-    assert_eq!(coverage.total_branches(), 9);
+    assert_eq!(coverage.covered_branches(), 19);
+    assert_eq!(coverage.total_branches(), 27);
     assert!(!coverage.metrics[1].is_fully_covered());
 }
 
@@ -149,7 +149,7 @@ fn all_migrated_lineage_architecture_queries_parse() {
         ),
     ];
     for (name, sql) in queries {
-        analyze_sql(name, sql, DialectName::Sqlite)
+        analyze_sql(name, sql, DialectName::Sqlite, None)
             .unwrap_or_else(|error| panic!("SQL-COV could not parse {name}: {error}"));
     }
 }
@@ -287,9 +287,10 @@ async fn every_migrated_lineage_sql_file_executes_as_statement_coverage() {
         ),
     ];
     for (name, sql, parameters) in queries {
-        let analysis = analyze_sql(name, sql, DialectName::Sqlite).unwrap();
         let pool = sqlite_pool("sqlite::memory:").await.unwrap();
         execute_sqlite_setup(&pool, SETUP).await.unwrap();
+        let schema = sql_cov::schema::SchemaCatalog::load_sqlite(&pool).await.unwrap();
+        let analysis = analyze_sql(name, sql, DialectName::Sqlite, Some(&schema)).unwrap();
         let parameters = parameters
             .iter()
             .map(|value| value.to_string())

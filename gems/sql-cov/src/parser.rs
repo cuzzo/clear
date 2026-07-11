@@ -1,4 +1,6 @@
 use crate::model::{CoverageMetric, ExpressionSpan, SourceFileCoverage, StatementCoverage};
+use crate::nullability::{register_factor, Resolver};
+use crate::schema::SchemaCatalog;
 use anyhow::{bail, Context, Result};
 use serde::{Deserialize, Serialize};
 use sqlparser::ast::{
@@ -51,7 +53,12 @@ pub struct Analysis {
     pub statement_sql: Vec<String>,
 }
 
-pub fn analyze_sql(file_path: &str, source: &str, dialect: DialectName) -> Result<Analysis> {
+pub fn analyze_sql(
+    file_path: &str,
+    source: &str,
+    dialect: DialectName,
+    schema: Option<&SchemaCatalog>,
+) -> Result<Analysis> {
     let dialect_impl: Box<dyn Dialect> = match dialect {
         DialectName::Sqlite => Box::new(SQLiteDialect {}),
         DialectName::Postgres => Box::new(PostgreSqlDialect {}),
@@ -64,6 +71,9 @@ pub fn analyze_sql(file_path: &str, source: &str, dialect: DialectName) -> Resul
     let mut unsupported = Vec::new();
     let mut statement_coverage = Vec::new();
     let mut statement_sql = Vec::new();
+
+    let dummy_schema = SchemaCatalog::default();
+    let schema_ref = schema.unwrap_or(&dummy_schema);
 
     for (statement_id, statement) in statements.iter().enumerate() {
         let span = statement.span();
@@ -82,46 +92,17 @@ pub fn analyze_sql(file_path: &str, source: &str, dialect: DialectName) -> Resul
             ));
             continue;
         };
-        let SetExpr::Select(select) = query.body.as_ref() else {
-            unsupported.push(
-                "set operations and non-SELECT query bodies are not instrumented yet".to_string(),
-            );
-            continue;
-        };
-        let from_sql = select
-            .from
-            .iter()
-            .map(ToString::to_string)
-            .collect::<Vec<_>>()
-            .join(", ");
-        let with_sql = query
-            .with
-            .as_ref()
-            .map(ToString::to_string)
-            .unwrap_or_default();
-        if let Some(selection) = &select.selection {
-            let ids = collect_exprs(selection, "where", true, source, &mut metrics)?;
-            domains.push(TelemetryDomain {
-                with_sql: with_sql.clone(),
-                from_sql: from_sql.clone(),
-                expression_ids: ids,
-            });
-        }
-        if let Some(having) = &select.having {
-            collect_exprs(having, "having", false, source, &mut metrics)?;
-            unsupported.push(
-                "HAVING expressions are mapped but not executed in the initial telemetry driver"
-                    .to_string(),
-            );
-        }
-        for table in &select.from {
-            for join in &table.joins {
-                if let Some(expr) = join_expression(&join.join_operator) {
-                    collect_exprs(expr, "join", false, source, &mut metrics)?;
-                    unsupported.push("JOIN ON expressions are mapped but false pre-join rows require a dialect-specific telemetry strategy".to_string());
-                }
-            }
-        }
+
+        let resolver = Resolver::new(schema_ref);
+        traverse_query(
+            query,
+            &resolver,
+            schema,
+            source,
+            &mut metrics,
+            &mut domains,
+            &mut unsupported,
+        )?;
     }
 
     unsupported.sort();
@@ -141,34 +122,327 @@ pub fn analyze_sql(file_path: &str, source: &str, dialect: DialectName) -> Resul
     })
 }
 
-fn collect_exprs(
+fn traverse_query(
+    query: &sqlparser::ast::Query,
+    outer_resolver: &Resolver<'_>,
+    schema: Option<&SchemaCatalog>,
+    source: &str,
+    metrics: &mut Vec<CoverageMetric>,
+    domains: &mut Vec<TelemetryDomain>,
+    unsupported: &mut Vec<String>,
+) -> Result<()> {
+    let mut local_resolver = outer_resolver.clone();
+    let with_clause = &query.with;
+    if let Some(with) = with_clause {
+        for cte in &with.cte_tables {
+            let name = crate::schema::normalize_identifier(&cte.alias.name.value);
+            local_resolver.aliases.insert(name, None);
+            traverse_query(
+                &cte.query,
+                outer_resolver,
+                schema,
+                source,
+                metrics,
+                domains,
+                unsupported,
+            )?;
+        }
+    }
+    traverse_set_expr(
+        &query.body,
+        &local_resolver,
+        schema,
+        source,
+        metrics,
+        domains,
+        unsupported,
+        with_clause,
+        outer_resolver,
+    )?;
+    Ok(())
+}
+
+fn traverse_set_expr(
+    expr: &SetExpr,
+    resolver: &Resolver<'_>,
+    schema: Option<&SchemaCatalog>,
+    source: &str,
+    metrics: &mut Vec<CoverageMetric>,
+    domains: &mut Vec<TelemetryDomain>,
+    unsupported: &mut Vec<String>,
+    with_clause: &Option<sqlparser::ast::With>,
+    outer_resolver: &Resolver<'_>,
+) -> Result<()> {
+    match expr {
+        SetExpr::Select(select) => {
+            traverse_select(
+                select,
+                resolver,
+                schema,
+                source,
+                metrics,
+                domains,
+                unsupported,
+                with_clause,
+                outer_resolver,
+            )?;
+        }
+        SetExpr::Query(query) => {
+            traverse_query(
+                query,
+                resolver,
+                schema,
+                source,
+                metrics,
+                domains,
+                unsupported,
+            )?;
+        }
+        SetExpr::SetOperation { left, right, .. } => {
+            traverse_set_expr(
+                left,
+                resolver,
+                schema,
+                source,
+                metrics,
+                domains,
+                unsupported,
+                &None,
+                outer_resolver,
+            )?;
+            traverse_set_expr(
+                right,
+                resolver,
+                schema,
+                source,
+                metrics,
+                domains,
+                unsupported,
+                &None,
+                outer_resolver,
+            )?;
+        }
+        SetExpr::Values(_)
+        | SetExpr::Insert(_)
+        | SetExpr::Table(_)
+        | SetExpr::Update(_)
+        | SetExpr::Delete(_)
+        | SetExpr::Merge(_) => {}
+    }
+    Ok(())
+}
+
+fn traverse_select(
+    select: &sqlparser::ast::Select,
+    outer_resolver: &Resolver<'_>,
+    schema: Option<&SchemaCatalog>,
+    source: &str,
+    metrics: &mut Vec<CoverageMetric>,
+    domains: &mut Vec<TelemetryDomain>,
+    unsupported: &mut Vec<String>,
+    with_clause: &Option<sqlparser::ast::With>,
+    parent_resolver: &Resolver<'_>,
+) -> Result<()> {
+    let mut resolver = outer_resolver.clone();
+    for table in &select.from {
+        register_factor(&table.relation, false, &mut resolver);
+        for join in &table.joins {
+            let right_is_optional = matches!(
+                join.join_operator,
+                JoinOperator::Left(_) | JoinOperator::LeftOuter(_) | JoinOperator::FullOuter(_)
+            );
+            if matches!(
+                join.join_operator,
+                JoinOperator::Right(_) | JoinOperator::RightOuter(_) | JoinOperator::FullOuter(_)
+            ) {
+                resolver
+                    .outer_nullable_aliases
+                    .extend(resolver.aliases.keys().cloned());
+            }
+            register_factor(&join.relation, right_is_optional, &mut resolver);
+        }
+    }
+
+    let with_sql = with_clause
+        .as_ref()
+        .map(ToString::to_string)
+        .unwrap_or_default();
+    let from_sql = select
+        .from
+        .iter()
+        .map(ToString::to_string)
+        .collect::<Vec<_>>()
+        .join(", ");
+
+    if let Some(selection) = &select.selection {
+        let ids = collect_exprs_with_resolver(
+            selection,
+            "where",
+            true,
+            source,
+            metrics,
+            schema,
+            &resolver,
+            Some(parent_resolver),
+        )?;
+        if !ids.is_empty() {
+            domains.push(TelemetryDomain {
+                with_sql: with_sql.clone(),
+                from_sql: from_sql.clone(),
+                expression_ids: ids,
+            });
+        }
+    }
+
+    if let Some(having) = &select.having {
+        collect_exprs_with_resolver(
+            having,
+            "having",
+            false,
+            source,
+            metrics,
+            schema,
+            &resolver,
+            Some(parent_resolver),
+        )?;
+        unsupported.push(
+            "HAVING expressions are mapped but not executed in the initial telemetry driver"
+                .to_string(),
+        );
+    }
+
+    for table in &select.from {
+        let mut left_side_sql = table.relation.to_string();
+        for join in &table.joins {
+            let right_side_sql = join.relation.to_string();
+            if let Some(join_expr) = join_expression(&join.join_operator) {
+                let ids = collect_exprs_with_resolver(
+                    join_expr,
+                    "join",
+                    true,
+                    source,
+                    metrics,
+                    schema,
+                    &resolver,
+                    Some(parent_resolver),
+                )?;
+                if !ids.is_empty() {
+                    let cross_join_from = format!("({}) CROSS JOIN {}", left_side_sql, right_side_sql);
+                    domains.push(TelemetryDomain {
+                        with_sql: with_sql.clone(),
+                        from_sql: cross_join_from,
+                        expression_ids: ids,
+                    });
+                }
+            }
+            left_side_sql = format!("{} {}", left_side_sql, join);
+        }
+    }
+
+    // Recurse into subqueries inside all clauses of this SELECT query block
+    let mut collector = SubqueryCollector::default();
+    if let Some(selection) = &select.selection {
+        let _ = selection.visit(&mut collector);
+    }
+    if let Some(having) = &select.having {
+        let _ = having.visit(&mut collector);
+    }
+    for item in &select.projection {
+        let _ = item.visit(&mut collector);
+    }
+    for table in &select.from {
+        let _ = table.relation.visit(&mut collector);
+        for join in &table.joins {
+            let _ = join.relation.visit(&mut collector);
+            if let Some(expr) = join_expression(&join.join_operator) {
+                let _ = expr.visit(&mut collector);
+            }
+        }
+    }
+
+    for subquery in collector.subqueries {
+        traverse_query(
+            &subquery,
+            &resolver,
+            schema,
+            source,
+            metrics,
+            domains,
+            unsupported,
+        )?;
+    }
+
+    Ok(())
+}
+
+#[derive(Default)]
+struct SubqueryCollector {
+    subqueries: Vec<sqlparser::ast::Query>,
+}
+
+impl Visitor for SubqueryCollector {
+    type Break = ();
+
+    fn pre_visit_query(&mut self, query: &sqlparser::ast::Query) -> ControlFlow<Self::Break> {
+        self.subqueries.push(query.clone());
+        ControlFlow::Continue(())
+    }
+}
+
+struct ExpressionRecord {
+    span: ExpressionSpan,
+    expr: Expr,
+}
+
+fn collect_exprs_with_resolver(
     root: &Expr,
     context: &str,
     measurable: bool,
     source: &str,
     metrics: &mut Vec<CoverageMetric>,
+    schema: Option<&SchemaCatalog>,
+    resolver: &Resolver<'_>,
+    outer_resolver: Option<&Resolver<'_>>,
 ) -> Result<Vec<usize>> {
-    let mut visitor = ExpressionVisitor {
-        context,
-        source,
-        rows: Vec::new(),
-    };
-    let _ = root.visit(&mut visitor);
+    let mut rows = Vec::new();
+    find_coverage_expressions(root, context, source, &mut rows);
     let mut ids = Vec::new();
-    for mut span in visitor.rows {
-        if let Some(existing) = metrics.iter().find(|metric| {
-            metric.span.start_offset == span.start_offset
-                && metric.span.end_offset == span.end_offset
-                && metric.span.context == span.context
+    for mut row in rows {
+        let is_correlated = if let Some(outer) = outer_resolver {
+            is_correlated_expression(&row.expr, resolver, outer)
+        } else {
+            false
+        };
+
+        let row_measurable = measurable && !is_correlated;
+
+        if let Some(_schema) = schema {
+            let resolver_ref = resolver;
+            let evidence = crate::nullability::nullability(&row.expr, resolver_ref, false);
+            row.span.nullable = match evidence.state {
+                crate::nullability::Nullability::Never => false,
+                _ => true,
+            };
+        }
+
+        if let Some(existing) = metrics.iter_mut().find(|metric| {
+            metric.span.start_offset == row.span.start_offset
+                && metric.span.end_offset == row.span.end_offset
+                && metric.span.context == row.span.context
         }) {
-            ids.push(existing.span.id);
+            if row_measurable {
+                existing.measurable = true;
+                ids.push(existing.span.id);
+            }
             continue;
         }
-        span.id = metrics.len();
-        ids.push(span.id);
+        row.span.id = metrics.len();
+        if row_measurable {
+            ids.push(row.span.id);
+        }
         metrics.push(CoverageMetric {
-            span,
-            measurable,
+            span: row.span,
+            measurable: row_measurable,
             hit_true_count: 0,
             hit_false_count: 0,
             hit_unknown_count: 0,
@@ -177,23 +451,150 @@ fn collect_exprs(
     Ok(ids)
 }
 
-struct ExpressionVisitor<'a> {
-    context: &'a str,
-    source: &'a str,
-    rows: Vec<ExpressionSpan>,
-}
+fn find_coverage_expressions(
+    expr: &Expr,
+    context: &str,
+    source: &str,
+    rows: &mut Vec<ExpressionRecord>,
+) {
+    if is_coverage_expression(expr) {
+        if let Some(span) = expression_span(expr, context, source) {
+            rows.push(ExpressionRecord {
+                span,
+                expr: expr.clone(),
+            });
+        }
+    }
 
-impl Visitor for ExpressionVisitor<'_> {
-    type Break = ();
-
-    fn pre_visit_expr(&mut self, expr: &Expr) -> ControlFlow<Self::Break> {
-        if is_coverage_expression(expr) {
-            if let Some(span) = expression_span(expr, self.context, self.source) {
-                self.rows.push(span);
+    match expr {
+        Expr::Nested(inner) | Expr::UnaryOp { expr: inner, .. } => {
+            find_coverage_expressions(inner, context, source, rows);
+        }
+        Expr::BinaryOp { left, right, .. } => {
+            find_coverage_expressions(left, context, source, rows);
+            find_coverage_expressions(right, context, source, rows);
+        }
+        Expr::Between { expr: val, low, high, .. } => {
+            find_coverage_expressions(val, context, source, rows);
+            find_coverage_expressions(low, context, source, rows);
+            find_coverage_expressions(high, context, source, rows);
+        }
+        Expr::InList { expr: val, list, .. } => {
+            find_coverage_expressions(val, context, source, rows);
+            for item in list {
+                find_coverage_expressions(item, context, source, rows);
             }
         }
-        ControlFlow::Continue(())
+        Expr::InSubquery { expr: val, .. } => {
+            find_coverage_expressions(val, context, source, rows);
+        }
+        Expr::IsNull(inner)
+        | Expr::IsNotNull(inner)
+        | Expr::IsTrue(inner)
+        | Expr::IsNotTrue(inner)
+        | Expr::IsFalse(inner)
+        | Expr::IsNotFalse(inner)
+        | Expr::IsUnknown(inner)
+        | Expr::IsNotUnknown(inner) => {
+            find_coverage_expressions(inner, context, source, rows);
+        }
+        Expr::IsDistinctFrom(left, right)
+        | Expr::IsNotDistinctFrom(left, right) => {
+            find_coverage_expressions(left, context, source, rows);
+            find_coverage_expressions(right, context, source, rows);
+        }
+        Expr::Function(function) => {
+            if let sqlparser::ast::FunctionArguments::List(args) = &function.args {
+                for arg in &args.args {
+                    match arg {
+                        sqlparser::ast::FunctionArg::Unnamed(arg_expr) => {
+                            match arg_expr {
+                                sqlparser::ast::FunctionArgExpr::Expr(e) => {
+                                    find_coverage_expressions(e, context, source, rows);
+                                }
+                                _ => {}
+                            }
+                        }
+                        sqlparser::ast::FunctionArg::Named { arg, .. }
+                        | sqlparser::ast::FunctionArg::ExprNamed { arg, .. } => {
+                            match arg {
+                                sqlparser::ast::FunctionArgExpr::Expr(e) => {
+                                    find_coverage_expressions(e, context, source, rows);
+                                }
+                                _ => {}
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        Expr::Case { operand, conditions, else_result, .. } => {
+            if let Some(op) = operand {
+                find_coverage_expressions(op, context, source, rows);
+            }
+            for cond in conditions {
+                find_coverage_expressions(&cond.condition, context, source, rows);
+                find_coverage_expressions(&cond.result, context, source, rows);
+            }
+            if let Some(el) = else_result {
+                find_coverage_expressions(el, context, source, rows);
+            }
+        }
+        _ => {}
     }
+}
+
+fn is_correlated_expression(
+    expr: &Expr,
+    combined_resolver: &Resolver<'_>,
+    outer_resolver: &Resolver<'_>,
+) -> bool {
+    let refs = crate::nullability::referenced_aliases(expr);
+    for r in refs {
+        if outer_resolver.aliases.contains_key(&r) && !is_local_alias(&r, combined_resolver, outer_resolver) {
+            return true;
+        }
+    }
+
+    struct UnqualifiedVisitor<'a> {
+        combined_resolver: &'a Resolver<'a>,
+        outer_resolver: &'a Resolver<'a>,
+        correlated: bool,
+    }
+    impl Visitor for UnqualifiedVisitor<'_> {
+        type Break = ();
+        fn pre_visit_expr(&mut self, expr: &Expr) -> ControlFlow<Self::Break> {
+            if let Expr::Identifier(id) = expr {
+                let name = &id.value;
+                let in_local = self.combined_resolver.aliases.iter()
+                    .filter(|(alias, _)| !self.outer_resolver.aliases.contains_key(*alias))
+                    .any(|(_, table)| {
+                        table.as_ref().map_or(false, |t| self.combined_resolver.schema.column(t, name).is_some())
+                    });
+                if !in_local {
+                    let in_outer = self.outer_resolver.aliases.iter().any(|(_, table)| {
+                        table.as_ref().map_or(false, |t| self.outer_resolver.schema.column(t, name).is_some())
+                    });
+                    if in_outer {
+                        self.correlated = true;
+                        return ControlFlow::Break(());
+                    }
+                }
+            }
+            ControlFlow::Continue(())
+        }
+    }
+    let mut visitor = UnqualifiedVisitor {
+        combined_resolver,
+        outer_resolver,
+        correlated: false,
+    };
+    let _ = expr.visit(&mut visitor);
+    visitor.correlated
+}
+
+fn is_local_alias(alias: &str, combined: &Resolver<'_>, outer: &Resolver<'_>) -> bool {
+    combined.aliases.contains_key(alias) && !outer.aliases.contains_key(alias)
 }
 
 fn is_coverage_expression(expr: &Expr) -> bool {

@@ -26,7 +26,7 @@ async fn postgres_live_schema_coverage_and_any_all_hazard() {
     assert!(!schema.column("sql_cov_users", "age").unwrap().nullable);
 
     let query = "SELECT name FROM sql_cov_users WHERE bonus <> 0 AND age > 18";
-    let analysis = analyze_sql("postgres.sql", query, DialectName::Postgres).unwrap();
+    let analysis = analyze_sql("postgres.sql", query, DialectName::Postgres, Some(&schema)).unwrap();
     let coverage = cover_postgres(&pool, &analysis, &[]).await.unwrap();
     assert_eq!(coverage.statements[0].hit_count, 1);
     assert!(coverage
@@ -66,7 +66,7 @@ async fn mysql_or_mariadb_live_schema_coverage_and_any_all_hazard() {
     assert!(!schema.column("sql_cov_users", "age").unwrap().nullable);
 
     let query = "SELECT name FROM sql_cov_users WHERE bonus <> 0 AND age > ?";
-    let analysis = analyze_sql("mysql.sql", query, DialectName::Mysql).unwrap();
+    let analysis = analyze_sql("mysql.sql", query, DialectName::Mysql, Some(&schema)).unwrap();
     let coverage = cover_mysql(&pool, &analysis, &["int:18".to_string()])
         .await
         .unwrap();

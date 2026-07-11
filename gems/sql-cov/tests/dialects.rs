@@ -46,7 +46,7 @@ async fn mysql_and_mariadb_any_all_cover_all_comparison_operators() {
 #[test]
 fn mysql_anonymous_parameters_are_rebound_for_each_instrumented_expression() {
     let sql = "SELECT name FROM users WHERE bonus <> ? AND age > ?";
-    let analysis = analyze_sql("mysql.sql", sql, DialectName::Mysql).unwrap();
+    let analysis = analyze_sql("mysql.sql", sql, DialectName::Mysql, None).unwrap();
     let queries = telemetry_queries(&analysis);
     assert_eq!(queries.len(), 1);
     assert_eq!(queries[0].parameter_indices, vec![0, 1, 0, 1]);

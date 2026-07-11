@@ -7,7 +7,7 @@ const SETUP: &str = include_str!("fixtures/users.sql");
 
 #[test]
 fn parser_maps_nested_boolean_spans_to_source() {
-    let analysis = analyze_sql("users_query.sql", QUERY, DialectName::Sqlite).unwrap();
+    let analysis = analyze_sql("users_query.sql", QUERY, DialectName::Sqlite, None).unwrap();
     let expressions = analysis
         .coverage
         .metrics
@@ -27,7 +27,7 @@ fn parser_maps_nested_boolean_spans_to_source() {
 
 #[tokio::test]
 async fn sqlite_driver_captures_true_false_and_unknown() {
-    let analysis = analyze_sql("users_query.sql", QUERY, DialectName::Sqlite).unwrap();
+    let analysis = analyze_sql("users_query.sql", QUERY, DialectName::Sqlite, None).unwrap();
     let pool = sqlite_pool("sqlite::memory:").await.unwrap();
     execute_sqlite_setup(&pool, SETUP).await.unwrap();
     let coverage = cover_sqlite(&pool, &analysis, &[]).await.unwrap();
@@ -86,7 +86,7 @@ async fn sqlite_driver_captures_true_false_and_unknown() {
 
 #[tokio::test]
 async fn reports_partial_branch_coverage() {
-    let analysis = analyze_sql("users_query.sql", QUERY, DialectName::Sqlite).unwrap();
+    let analysis = analyze_sql("users_query.sql", QUERY, DialectName::Sqlite, None).unwrap();
     let pool = sqlite_pool("sqlite::memory:").await.unwrap();
     execute_sqlite_setup(
         &pool,
