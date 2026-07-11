@@ -6579,7 +6579,11 @@ fn render_finding_changes_section(dashboard: &UiDashboard) -> String {
         && dashboard.resolved_findings == 0
         && dashboard.persisted_findings == 0
     {
-        return String::new();
+        return render_dashboard_disclosure(
+            "Finding Changes",
+            false,
+            "<p class=\"empty-inline\">No finding changes are recorded in this scope.</p>",
+        );
     }
 
     let body = format!(
