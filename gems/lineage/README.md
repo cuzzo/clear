@@ -172,12 +172,16 @@ from the same source and commit.
 | Source | Command | Current formats |
 | --- | --- | --- |
 | Git history | `build` | local Git repository |
-| Coverage | `ingest-coverage` | Codecov JSON, SimpleCov JSON, Cobertura XML, kcov Cobertura XML |
+| Coverage | `ingest-coverage` | Codecov JSON, SimpleCov JSON, Cobertura XML, kcov Cobertura XML, SQL-COV JSON (`--format sqlcov`) |
 | Test exposure | `ingest-test-exposure` | Lineage `test-exposure` JSON |
 | Mutation testing | `ingest-mutants` | Ruby `mutant-facts/v1` |
 | Systems hazards | `ingest-hazards` | Zig, Go, Rust, C, C++, C# hazard providers |
 | Stack traces | `ingest` | Sentry-style event JSON |
-| Static analysis and risk findings | `ingest-sarif` | SARIF 2.1.0 files from Decomplex, SlopCop, Boobytrap, Nil-Kill, Espalier, and third-party tools |
+| Static analysis and risk findings | `ingest-sarif` | SARIF 2.1.0 files from Decomplex, SlopCop, Boobytrap, Nil-Kill, Espalier, SQL-COV, and third-party tools |
+
+Standalone `.sql` files are indexed as query logical units. A leading
+`-- query-id:` comment supplies the stable unit name, allowing SQL-COV branch
+coverage and SQL hazard SARIF to attach to the same source view.
 | One-line repository import | `gems/lineage/bin/lineage-import` | Git history, coverage discovery, hazards, bundled first-party SARIF, Go/Rust/Ruby/Zig lint SARIF, extra SARIF |
 
 ### SARIF Findings

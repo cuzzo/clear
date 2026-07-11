@@ -28,6 +28,11 @@ use std::time::Instant;
 use tower_http::set_header::SetResponseHeaderLayer;
 use tower_http::trace::TraceLayer;
 
+const ARCHITECTURE_SYMBOLS_FOR_PATH_SQL: &str =
+    include_str!("../../sql/ui/architecture_symbols_for_path.sql");
+const ARCHITECTURE_OWNER_BY_NAME_SQL: &str =
+    include_str!("../../sql/ui/architecture_owner_by_name.sql");
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct CoverageScope {
     include_prefixes: Vec<String>,
@@ -3573,16 +3578,7 @@ fn persisted_source_symbols(storage: &Storage, path: &str) -> Result<Vec<UiSourc
 }
 
 fn apply_architecture_symbol_links(storage: &Storage, path: &str, symbols: &mut [UiSourceSymbol]) {
-    let Ok(mut stmt) = storage.connection().prepare(
-        r#"SELECT n.analyzer_node_id, n.owner_node_id, n.kind, n.name, n.start_line, n.end_line,
-                  COALESCE(p.score, 0), COALESCE(p.band, 'ordinary'),
-                  COALESCE((SELECT group_concat(DISTINCT s.name) FROM architecture_edges e JOIN architecture_nodes s ON s.artifact_id=e.artifact_id AND s.analyzer_node_id=e.source_node_id WHERE e.artifact_id=n.artifact_id AND e.target_node_id=n.analyzer_node_id AND e.kind='reads'), ''),
-                  COALESCE((SELECT group_concat(DISTINCT s.name) FROM architecture_edges e JOIN architecture_nodes s ON s.artifact_id=e.artifact_id AND s.analyzer_node_id=e.target_node_id WHERE e.artifact_id=n.artifact_id AND e.source_node_id=n.analyzer_node_id AND e.kind='writes'), '')
-           FROM architecture_nodes n
-           LEFT JOIN architecture_pressure p ON p.artifact_id=n.artifact_id AND p.node_id=n.analyzer_node_id
-           WHERE n.artifact_id=(SELECT id FROM architecture_artifacts ORDER BY id DESC LIMIT 1)
-             AND n.path=?1"#,
-    ) else {
+    let Ok(mut stmt) = storage.connection().prepare(ARCHITECTURE_SYMBOLS_FOR_PATH_SQL) else {
         return;
     };
     let Ok(rows) = stmt.query_map(params![path], |row| {
@@ -3621,10 +3617,7 @@ fn apply_architecture_symbol_links(storage: &Storage, path: &str, symbols: &mut 
 
 fn architecture_owner_id_by_name(storage: &Storage, path: &str, owner: &str) -> Option<String> {
     storage.connection().query_row(
-        r#"SELECT analyzer_node_id FROM architecture_nodes
-           WHERE artifact_id=(SELECT id FROM architecture_artifacts ORDER BY id DESC LIMIT 1)
-             AND kind='owner' AND path=?1 AND (name=?2 OR name LIKE ?3)
-           ORDER BY CASE WHEN name=?2 THEN 0 ELSE 1 END, start_line LIMIT 1"#,
+        ARCHITECTURE_OWNER_BY_NAME_SQL,
         params![path, owner, format!("%{owner}")],
         |row| row.get(0),
     ).optional().ok().flatten()
@@ -9310,6 +9303,13 @@ mod tests {
         QualityMetric, SarifArtifact, SarifFinding, TestExposureEvent, UnitKind,
     };
     use tempfile::tempdir;
+
+    #[test]
+    fn standalone_architecture_ui_sql_prepares_against_the_real_schema() {
+        let storage = Storage::open_memory().unwrap();
+        storage.connection().prepare(ARCHITECTURE_SYMBOLS_FOR_PATH_SQL).unwrap();
+        storage.connection().prepare(ARCHITECTURE_OWNER_BY_NAME_SQL).unwrap();
+    }
 
     #[test]
     fn source_payload_includes_coverage_mutation_hazards_and_versions() {

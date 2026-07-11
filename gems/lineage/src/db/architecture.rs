@@ -3,6 +3,20 @@ use anyhow::{bail, Context, Result};
 use rusqlite::{params, OptionalExtension};
 use serde_json::{json, Value};
 
+const DELETE_SNAPSHOT_SQL: &str = include_str!("../../sql/architecture/delete_snapshot.sql");
+const INSERT_ARTIFACT_SQL: &str = include_str!("../../sql/architecture/insert_artifact.sql");
+const INSERT_NODE_SQL: &str = include_str!("../../sql/architecture/insert_node.sql");
+const INSERT_EDGE_SQL: &str = include_str!("../../sql/architecture/insert_edge.sql");
+const INSERT_EDGE_SPAN_SQL: &str = include_str!("../../sql/architecture/insert_edge_span.sql");
+const INSERT_PRESSURE_SQL: &str = include_str!("../../sql/architecture/insert_pressure.sql");
+const RECONCILE_LOGICAL_UNIT_SQL: &str = include_str!("../../sql/architecture/reconcile_logical_unit.sql");
+const SEARCH_SQL: &str = include_str!("../../sql/architecture/search.sql");
+const LATEST_ARTIFACT_SQL: &str = include_str!("../../sql/architecture/latest_artifact.sql");
+const ARTIFACT_HEALTH_SQL: &str = include_str!("../../sql/architecture/artifact_health.sql");
+const LOAD_NODE_SQL: &str = include_str!("../../sql/architecture/load_node.sql");
+const OWNER_INVENTORY_SQL: &str = include_str!("../../sql/architecture/owner_inventory.sql");
+const LOAD_EDGES_SQL: &str = include_str!("../../sql/architecture/load_edges.sql");
+
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct ArchitectureIngestStats {
     pub artifacts: usize,
@@ -53,14 +67,9 @@ pub fn ingest_architecture_json(
         .unwrap_or("");
 
     let tx = storage.connection().unchecked_transaction()?;
+    tx.execute(DELETE_SNAPSHOT_SQL, params![analyzer, commit])?;
     tx.execute(
-        "DELETE FROM architecture_artifacts WHERE analyzer = ?1 AND commit_hash = ?2",
-        params![analyzer, commit],
-    )?;
-    tx.execute(
-        r#"INSERT INTO architecture_artifacts
-           (analyzer, analyzer_version, schema_version, commit_hash, root, complete, generated_at, payload_json)
-           VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)"#,
+        INSERT_ARTIFACT_SQL,
         params![analyzer, analyzer_version, schema_version, commit, root, complete as i64, generated_at, payload],
     )?;
     let artifact_id = tx.last_insert_rowid();
@@ -94,10 +103,7 @@ pub fn ingest_architecture_json(
             .and_then(Value::as_str)
             .unwrap_or("high");
         tx.execute(
-            r#"INSERT INTO architecture_nodes
-               (artifact_id, analyzer_node_id, logical_unit_id, owner_node_id, kind, name, owner,
-                language, path, start_line, start_column, end_line, end_column, confidence, metadata_json)
-               VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15)"#,
+            INSERT_NODE_SQL,
             params![
                 artifact_id, id, logical_unit_id, optional_text(node, "owner_id"), kind, name,
                 optional_text(node, "owner"), optional_text(node, "language"), path, start_line,
@@ -116,9 +122,7 @@ pub fn ingest_architecture_json(
     {
         let edge_id = text(edge, "id");
         tx.execute(
-            r#"INSERT INTO architecture_edges
-               (artifact_id, edge_id, source_node_id, target_node_id, kind, conditional, weight, confidence, metadata_json)
-               VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)"#,
+            INSERT_EDGE_SQL,
             params![
                 artifact_id, edge_id, text(edge, "source"), text(edge, "target"), text(edge, "kind"),
                 boolean(edge, "conditional") as i64, integer(edge, "weight").max(1),
@@ -134,9 +138,7 @@ pub fn ingest_architecture_json(
             .flatten()
         {
             tx.execute(
-                r#"INSERT INTO architecture_edge_spans
-                   (artifact_id, edge_id, path, start_line, start_column, end_line, end_column)
-                   VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)"#,
+                INSERT_EDGE_SPAN_SQL,
                 params![
                     artifact_id,
                     edge_id,
@@ -162,9 +164,7 @@ pub fn ingest_architecture_json(
             .cloned()
             .unwrap_or_else(|| json!({}));
         tx.execute(
-            r#"INSERT INTO architecture_pressure
-               (artifact_id, node_id, score, band, collaboration, state, implementation, operational, explanation_json)
-               VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)"#,
+            INSERT_PRESSURE_SQL,
             params![artifact_id, text(pressure, "node_id"), number(pressure, "score"), text(pressure, "band"),
                 number(&components, "collaboration"), number(&components, "state"),
                 number(&components, "implementation"), number(&components, "operational"),
@@ -188,19 +188,7 @@ fn reconcile_logical_unit(
     } else {
         vec![kind]
     };
-    let mut stmt = tx.prepare(
-        r#"WITH latest_events AS (
-             SELECT e.* FROM events e
-             WHERE e.id = (SELECT x.id FROM events x WHERE x.unit_id=e.unit_id ORDER BY x.timestamp DESC, x.id DESC LIMIT 1)
-           )
-           SELECT u.id
-           FROM logical_units u LEFT JOIN latest_events e ON e.unit_id=u.id
-           WHERE COALESCE(e.path, u.original_path)=?1
-             AND (u.name=?2 OR u.name LIKE ?3)
-             AND u.type IN (?4, ?5)
-           ORDER BY ABS(COALESCE(e.start_line, u.start_line, 1)-?6), u.id
-           LIMIT 1"#,
-    )?;
+    let mut stmt = tx.prepare(RECONCILE_LOGICAL_UNIT_SQL)?;
     let suffix = format!("%{name}");
     Ok(stmt
         .query_row(
@@ -308,12 +296,7 @@ pub fn architecture_search(
 ) -> Result<Value> {
     let artifact_id = latest_artifact_id(storage)?;
     let pattern = format!("%{}%", query.to_ascii_lowercase());
-    let mut stmt = storage.connection().prepare(
-        r#"SELECT analyzer_node_id, kind, name, owner, path, start_line, metadata_json
-           FROM architecture_nodes
-           WHERE artifact_id=?1 AND lower(name) LIKE ?2 AND (?3 IS NULL OR owner_node_id=?3)
-           ORDER BY CASE kind WHEN 'owner' THEN 0 WHEN 'function' THEN 1 ELSE 2 END, name LIMIT 100"#,
-    )?;
+    let mut stmt = storage.connection().prepare(SEARCH_SQL)?;
     let rows = stmt.query_map(params![artifact_id, pattern, owner_id], |row| {
         Ok(json!({"id": row.get::<_, String>(0)?, "kind": row.get::<_, String>(1)?, "name": row.get::<_, String>(2)?,
             "owner": row.get::<_, Option<String>>(3)?, "path": row.get::<_, Option<String>>(4)?, "start_line": row.get::<_, i64>(5)?,
@@ -325,17 +308,13 @@ pub fn architecture_search(
 fn latest_artifact_id(storage: &Storage) -> Result<i64> {
     storage
         .connection()
-        .query_row(
-            "SELECT id FROM architecture_artifacts ORDER BY id DESC LIMIT 1",
-            [],
-            |row| row.get(0),
-        )
+        .query_row(LATEST_ARTIFACT_SQL, [], |row| row.get(0))
         .context("no architecture artifact has been ingested")
 }
 
 fn artifact_health(storage: &Storage, artifact_id: i64) -> Result<Value> {
     storage.connection().query_row(
-        "SELECT analyzer, analyzer_version, schema_version, commit_hash, complete, generated_at FROM architecture_artifacts WHERE id=?1",
+        ARTIFACT_HEALTH_SQL,
         params![artifact_id],
         |row| Ok(json!({"id": artifact_id, "analyzer": row.get::<_, String>(0)?, "analyzer_version": row.get::<_, String>(1)?,
             "schema_version": row.get::<_, i64>(2)?, "commit": row.get::<_, String>(3)?, "complete": row.get::<_, i64>(4)? != 0,
@@ -345,29 +324,13 @@ fn artifact_health(storage: &Storage, artifact_id: i64) -> Result<Value> {
 
 fn load_node(storage: &Storage, artifact_id: i64, id: &str) -> Result<Option<Value>> {
     storage.connection().query_row(
-        r#"SELECT analyzer_node_id, logical_unit_id, owner_node_id, kind, name, owner, language, path,
-                  start_line, start_column, end_line, end_column, confidence, metadata_json
-           FROM architecture_nodes WHERE artifact_id=?1 AND analyzer_node_id=?2"#,
+        LOAD_NODE_SQL,
         params![artifact_id, id], node_from_row,
     ).optional().map_err(Into::into)
 }
 
 fn load_nodes_for_owner(storage: &Storage, artifact_id: i64, owner_id: &str) -> Result<Vec<Value>> {
-    let mut stmt = storage.connection().prepare(
-        r#"SELECT n.analyzer_node_id, n.logical_unit_id, n.owner_node_id, n.kind, n.name, n.owner, n.language, n.path,
-                  n.start_line, n.start_column, n.end_line, n.end_column, n.confidence, n.metadata_json,
-                  p.score, p.band, p.explanation_json,
-                  (SELECT COUNT(*) FROM architecture_edges e WHERE e.artifact_id=n.artifact_id AND e.target_node_id=n.analyzer_node_id) AS incoming,
-                  (SELECT COUNT(*) FROM architecture_edges e WHERE e.artifact_id=n.artifact_id AND e.source_node_id=n.analyzer_node_id) AS outgoing,
-                  (SELECT COUNT(*) FROM unit_hazards h WHERE h.unit_id=n.logical_unit_id AND h.is_active=1) AS hazards,
-                  (SELECT COUNT(*) FROM events e WHERE e.unit_id=n.logical_unit_id AND e.event_type='CHANGE') AS changes,
-                  (SELECT COUNT(*) FROM events e WHERE e.unit_id=n.logical_unit_id AND e.event_type='FIX') AS fixes,
-                  COALESCE(u.current_distinct_tests, 0), COALESCE(u.current_line_cov, 0), COALESCE(u.current_mutant_cov, 0)
-           FROM architecture_nodes n LEFT JOIN architecture_pressure p ON p.artifact_id=n.artifact_id AND p.node_id=n.analyzer_node_id
-           LEFT JOIN logical_units u ON u.id=n.logical_unit_id
-           WHERE n.artifact_id=?1 AND n.owner_node_id=?2
-           ORDER BY COALESCE(p.score, 0) DESC, n.kind, n.name"#,
-    )?;
+    let mut stmt = storage.connection().prepare(OWNER_INVENTORY_SQL)?;
     let rows = stmt.query_map(params![artifact_id, owner_id], |row| {
         let mut value = node_from_row(row)?;
         value["pressure"] = json!({"score": row.get::<_, Option<f64>>(14)?.unwrap_or(0.0), "band": row.get::<_, Option<String>>(15)?.unwrap_or_else(|| "ordinary".into()), "explanation": parse_json(row.get::<_, Option<String>>(16)?.unwrap_or_else(|| "{}".into()))});
@@ -392,12 +355,7 @@ fn node_from_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<Value> {
 }
 
 fn load_edges(storage: &Storage, artifact_id: i64, node_id: &str) -> Result<Vec<Value>> {
-    let mut stmt = storage.connection().prepare(
-        r#"SELECT e.edge_id, e.source_node_id, e.target_node_id, e.kind, e.conditional, e.weight, e.confidence, e.metadata_json,
-                  COALESCE((SELECT json_group_array(json_object('path',s.path,'start_line',s.start_line,'start_column',s.start_column,'end_line',s.end_line,'end_column',s.end_column)) FROM architecture_edge_spans s WHERE s.artifact_id=e.artifact_id AND s.edge_id=e.edge_id), '[]')
-           FROM architecture_edges e WHERE e.artifact_id=?1 AND (e.source_node_id=?2 OR e.target_node_id=?2)
-           ORDER BY e.kind, e.source_node_id, e.target_node_id"#,
-    )?;
+    let mut stmt = storage.connection().prepare(LOAD_EDGES_SQL)?;
     let rows = stmt.query_map(params![artifact_id, node_id], |row| Ok(json!({"id": row.get::<_, String>(0)?, "source": row.get::<_, String>(1)?,
         "target": row.get::<_, String>(2)?, "kind": row.get::<_, String>(3)?, "conditional": row.get::<_, i64>(4)? != 0,
         "weight": row.get::<_, i64>(5)?, "confidence": row.get::<_, String>(6)?, "metadata": parse_json(row.get::<_, String>(7)?),
@@ -431,6 +389,21 @@ fn parse_json(text: String) -> Value {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn standalone_architecture_sql_prepares_against_the_real_schema() {
+        let storage = Storage::open_memory().unwrap();
+        for sql in [
+            DELETE_SNAPSHOT_SQL, INSERT_ARTIFACT_SQL, INSERT_NODE_SQL, INSERT_EDGE_SQL,
+            INSERT_EDGE_SPAN_SQL, INSERT_PRESSURE_SQL, RECONCILE_LOGICAL_UNIT_SQL,
+            SEARCH_SQL, LATEST_ARTIFACT_SQL, ARTIFACT_HEALTH_SQL, LOAD_NODE_SQL,
+            OWNER_INVENTORY_SQL, LOAD_EDGES_SQL,
+        ] {
+            storage.connection().prepare(sql).unwrap_or_else(|error| {
+                panic!("standalone SQL failed to prepare: {error}\n{sql}")
+            });
+        }
+    }
 
     #[test]
     fn ingests_and_queries_focused_architecture() {

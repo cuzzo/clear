@@ -199,9 +199,49 @@ pub fn parse_coverage_records(value: &Value, format: &str) -> Result<Vec<Coverag
     match format {
         "codecov" => Ok(parse_codecov_records(value)),
         "boobytrap" | "generic" => Ok(parse_generic_records(value)),
+        "sqlcov" | "sql-cov" => Ok(parse_sqlcov_records(value)),
         "simplecov" => Ok(parse_simplecov_records(value)),
         other => anyhow::bail!("unsupported coverage format {other:?}"),
     }
+}
+
+fn parse_sqlcov_records(value: &Value) -> Vec<CoverageRecord> {
+    let Some(path) = value.get("file_path").and_then(Value::as_str) else { return Vec::new() };
+    let metrics = value.get("metrics").and_then(Value::as_array).into_iter().flatten()
+        .filter(|metric| metric.get("measurable").and_then(Value::as_bool) != Some(false));
+    let mut covered_branches = 0_u64;
+    let mut total_branches = 0_u64;
+    let mut lines = std::collections::BTreeMap::<u32, (u64, bool)>::new();
+    for metric in metrics {
+        let Some(line) = metric.pointer("/span/start_line").and_then(Value::as_u64)
+            .and_then(|line| u32::try_from(line).ok()) else { continue };
+        let nullable = metric.pointer("/span/nullable").and_then(Value::as_bool).unwrap_or(true);
+        let counts = [
+            metric.get("hit_true_count").and_then(Value::as_u64).unwrap_or(0),
+            metric.get("hit_false_count").and_then(Value::as_u64).unwrap_or(0),
+            metric.get("hit_unknown_count").and_then(Value::as_u64).unwrap_or(0),
+        ];
+        let branch_count = if nullable { 3 } else { 2 };
+        let covered = counts.iter().take(branch_count).filter(|count| **count > 0).count() as u64;
+        covered_branches += covered;
+        total_branches += branch_count as u64;
+        let entry = lines.entry(line).or_insert((0, false));
+        entry.0 += counts.iter().sum::<u64>();
+        entry.1 |= covered < branch_count as u64;
+    }
+    if total_branches == 0 { return Vec::new() }
+    vec![CoverageRecord {
+        path: normalize_path(path),
+        line_coverage: Some(covered_branches as f64 * 100.0 / total_branches as f64),
+        integration_coverage: None,
+        mutant_coverage: None,
+        hard_gated: None,
+        line_hits: lines.into_iter().map(|(line, (hits, is_partial))| CoverageLineHit {
+            line,
+            hits: u32::try_from(hits).unwrap_or(u32::MAX),
+            is_partial,
+        }).collect(),
+    }]
 }
 
 fn parse_codecov_records(value: &Value) -> Vec<CoverageRecord> {
@@ -609,6 +649,25 @@ fn record_metric(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn parses_sqlcov_branch_states_as_partial_line_coverage() {
+        let payload = serde_json::json!({
+            "format": "sql-cov/v1", "file_path": "gems/lineage/sql/demo.sql",
+            "metrics": [{
+                "measurable": true, "span": { "start_line": 2, "nullable": true },
+                "hit_true_count": 3, "hit_false_count": 1, "hit_unknown_count": 0
+            }, {
+                "measurable": false, "span": { "start_line": 3, "nullable": true },
+                "hit_true_count": 0, "hit_false_count": 0, "hit_unknown_count": 0
+            }]
+        });
+        let records = parse_coverage_records(&payload, "sqlcov").unwrap();
+        assert_eq!(records.len(), 1);
+        assert_eq!(records[0].path, "gems/lineage/sql/demo.sql");
+        assert_eq!(records[0].line_coverage, Some(200.0 / 3.0));
+        assert_eq!(records[0].line_hits, vec![CoverageLineHit { line: 2, hits: 4, is_partial: true }]);
+    }
     use crate::model::{CommitMetadata, LogicalUnit, UnitKind};
     use serde_json::json;
 
