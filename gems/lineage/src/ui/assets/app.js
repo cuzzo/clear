@@ -219,6 +219,51 @@
     });
   };
 
+  const setupDashboardSectionSwitchers = () => {
+    document.querySelectorAll("[data-dashboard-section-switcher]").forEach((switcher) => {
+      const buttons = Array.from(switcher.querySelectorAll("[data-dashboard-panel]"));
+      const panels = buttons
+        .map((button) => document.getElementById(button.dataset.dashboardPanel))
+        .filter(Boolean);
+      if (!buttons.length || panels.length !== buttons.length) return;
+
+      const select = (button, allowCollapse) => {
+        const panel = document.getElementById(button.dataset.dashboardPanel);
+        const collapse = allowCollapse && button.classList.contains("active") && panel.open;
+        buttons.forEach((candidate) => {
+          candidate.classList.remove("active");
+          candidate.setAttribute("aria-selected", "false");
+        });
+        panels.forEach((candidate) => { candidate.open = false; });
+        if (collapse) return;
+        button.classList.add("active");
+        button.setAttribute("aria-selected", "true");
+        panel.open = true;
+      };
+
+      buttons.forEach((button, index) => {
+        button.id ||= `dashboard-section-tab-${index}`;
+        const panel = document.getElementById(button.dataset.dashboardPanel);
+        panel.setAttribute("role", "tabpanel");
+        panel.setAttribute("aria-labelledby", button.id);
+        button.addEventListener("click", () => select(button, true));
+        button.addEventListener("keydown", (event) => {
+          let target = null;
+          if (event.key === "ArrowRight") target = buttons[(index + 1) % buttons.length];
+          if (event.key === "ArrowLeft") target = buttons[(index - 1 + buttons.length) % buttons.length];
+          if (event.key === "Home") target = buttons[0];
+          if (event.key === "End") target = buttons[buttons.length - 1];
+          if (!target) return;
+          event.preventDefault();
+          target.focus();
+          select(target, false);
+        });
+      });
+      switcher.classList.add("is-enhanced");
+      select(buttons[0], false);
+    });
+  };
+
   document.addEventListener("DOMContentLoaded", () => {
     document
       .querySelectorAll("input[data-persist-key]:not(.comment-fold-toggle):not(.fn-fold-toggle)")
@@ -244,6 +289,7 @@
     document.querySelectorAll(".layers-panel label[for]").forEach(bindLayerLabel);
     document.querySelectorAll(".line-toggle").forEach(bindLineToggle);
     document.querySelectorAll(".gutter .line-icon[for]").forEach(bindLineToggleLabel);
+    setupDashboardSectionSwitchers();
     setupClickableTokens();
   });
 })();

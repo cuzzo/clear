@@ -4,15 +4,28 @@
   <section class="dashboard">
     {{ branch_context|safe }}
     {{ warnings|safe }}
-    {{ active_hazards|safe }}
-    {{ finding_changes|safe }}
-    {{ review_next|safe }}
-    {{ test_next|safe }}
-    {{ analyzer_health|safe }}
-    {{ highest_hazard_files|safe }}
-    {{ highest_risk_units|safe }}
-    {{ highest_architecture_risks|safe }}
-    {{ highest_complexity_functions|safe }}
+    <div class="dashboard-section-switcher" data-dashboard-section-switcher>
+      <div class="dashboard-section-bar" role="tablist" aria-label="Dashboard sections">
+        <button type="button" role="tab" class="active" aria-selected="true" aria-controls="dashboard-panel-active-hazards" data-dashboard-panel="dashboard-panel-active-hazards">Active Hazards</button>
+        <button type="button" role="tab" aria-selected="false" aria-controls="dashboard-panel-finding-changes" data-dashboard-panel="dashboard-panel-finding-changes">Finding Changes</button>
+        <button type="button" role="tab" aria-selected="false" aria-controls="dashboard-panel-review-next" data-dashboard-panel="dashboard-panel-review-next">Review Next</button>
+        <button type="button" role="tab" aria-selected="false" aria-controls="dashboard-panel-test-next" data-dashboard-panel="dashboard-panel-test-next">Test Next</button>
+        <button type="button" role="tab" aria-selected="false" aria-controls="dashboard-panel-analyzer-and-artifact-health" data-dashboard-panel="dashboard-panel-analyzer-and-artifact-health">Analyzer and Artifact Health</button>
+        <button type="button" role="tab" aria-selected="false" aria-controls="dashboard-panel-highest-hazard-files" data-dashboard-panel="dashboard-panel-highest-hazard-files">Highest Hazard Files</button>
+        <button type="button" role="tab" aria-selected="false" aria-controls="dashboard-panel-highest-risk-units" data-dashboard-panel="dashboard-panel-highest-risk-units">Highest Risk Units</button>
+        <button type="button" role="tab" aria-selected="false" aria-controls="dashboard-panel-highest-architectural-risks" data-dashboard-panel="dashboard-panel-highest-architectural-risks">Highest Architectural Risks</button>
+        <button type="button" role="tab" aria-selected="false" aria-controls="dashboard-panel-high-complexity-functions" data-dashboard-panel="dashboard-panel-high-complexity-functions">High Complexity Functions</button>
+      </div>
+      {{ active_hazards|safe }}
+      {{ finding_changes|safe }}
+      {{ review_next|safe }}
+      {{ test_next|safe }}
+      {{ analyzer_health|safe }}
+      {{ highest_hazard_files|safe }}
+      {{ highest_risk_units|safe }}
+      {{ highest_architecture_risks|safe }}
+      {{ highest_complexity_functions|safe }}
+    </div>
     <section class="dashboard-section">
       <div class="dashboard-section-header">
         <h2>{{ code_tree_heading }}</h2>

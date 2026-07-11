@@ -616,6 +616,7 @@ struct DashboardTemplate<'a> {
 #[derive(Template)]
 #[template(path = "dashboard_disclosure.html")]
 struct DashboardDisclosureTemplate<'a> {
+    id: &'a str,
     title: &'a str,
     open: bool,
     body: &'a str,
@@ -6122,10 +6123,31 @@ fn render_finding_changes_section(dashboard: &UiDashboard) -> String {
 }
 
 fn render_dashboard_disclosure(title: &str, open: bool, body: &str) -> String {
+    let id = dashboard_panel_id(title);
     render_template_string(
-        DashboardDisclosureTemplate { title, open, body },
+        DashboardDisclosureTemplate {
+            id,
+            title,
+            open,
+            body,
+        },
         "dashboard disclosure template",
     )
+}
+
+fn dashboard_panel_id(title: &str) -> &'static str {
+    match title {
+        "Active Hazards" => "dashboard-panel-active-hazards",
+        "Finding Changes" => "dashboard-panel-finding-changes",
+        "Review Next" => "dashboard-panel-review-next",
+        "Test Next" => "dashboard-panel-test-next",
+        "Analyzer and Artifact Health" => "dashboard-panel-analyzer-and-artifact-health",
+        "Highest Hazard Files" => "dashboard-panel-highest-hazard-files",
+        "Highest Risk Units" => "dashboard-panel-highest-risk-units",
+        "Highest Architectural Risks" => "dashboard-panel-highest-architectural-risks",
+        "High Complexity Functions" => "dashboard-panel-high-complexity-functions",
+        _ => "dashboard-panel-other",
+    }
 }
 
 fn render_active_hazards_section(dashboard: &UiDashboard) -> String {
@@ -10195,7 +10217,11 @@ mod tests {
             &branch_context,
         );
 
-        assert!(html.contains("<details class=\"dashboard-section dashboard-disclosure\" open>"));
+        assert!(html.contains("class=\"dashboard-section dashboard-disclosure\" open>"));
+        assert!(html.contains("class=\"dashboard-section-bar\" role=\"tablist\""));
+        assert!(html.contains("data-dashboard-panel=\"dashboard-panel-active-hazards\""));
+        assert!(html.contains("role=\"tab\" class=\"active\" aria-selected=\"true\""));
+        assert!(html.contains("id=\"dashboard-panel-active-hazards\""));
         assert!(html.contains("<h2>Active Hazards</h2>"));
         assert!(html.contains("<h2>Finding Changes</h2>"));
         assert!(html.contains("3</strong> new"));
@@ -10242,7 +10268,7 @@ mod tests {
             ..dashboard
         };
         let hazards = render_active_hazards_section(&no_hazard);
-        assert!(hazards.contains("<details class=\"dashboard-section dashboard-disclosure\">"));
+        assert!(hazards.contains("class=\"dashboard-section dashboard-disclosure\">"));
         assert!(!hazards.contains(" open"));
         assert!(hazards.contains("No active systems hazards are recorded."));
     }
