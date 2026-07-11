@@ -777,12 +777,16 @@ class MIRPass
     return unless stmt.is_a?(AST::IfBind)
     mir_prefix = []
     stmt.bindings.each do |b|
-      facts.with_live_entry_for(b.name) do |entry|
-        mir_prefix << alloc_marker(b.name.to_s, entry.alloc, b.unwrapped_type)
-        drop = MIR::Drop.new(stmt.token, b.name.to_s)
-        drop.cleanup_entry = entry
-        mir_prefix << drop
-      end
+      # Capture cleanup is binding-identity scoped. Looking it up by the
+      # display name lets `IF COPY x AS item` contaminate a later borrowed
+      # `IF x AS item` in the same function.
+      entry = b.mir_binding_entry
+      next unless entry&.needs_cleanup?
+
+      mir_prefix << alloc_marker(b.name.to_s, entry.alloc, b.unwrapped_type)
+      drop = MIR::Drop.new(stmt.token, b.name.to_s)
+      drop.cleanup_entry = entry
+      mir_prefix << drop
     end
     stmt.then_branch = mir_prefix + (stmt.then_branch || []) unless mir_prefix.empty?
   end

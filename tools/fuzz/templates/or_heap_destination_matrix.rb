@@ -73,9 +73,9 @@ def ohd_make_body(shape)
   when :struct_owned
     'out: ?Box = Box{ label: COPY "ok" }; RETURN out;'
   when :list_owned
-    "MUTABLE xs: Int64[]@list = [];\n    xs.append(1_i64);\n    xs.append(2_i64);\n    out: ?Int64[]@list = xs;\n    RETURN out;"
+    "MUTABLE xs: Int64[]@list = [];\n    xs.append(1_i64);\n    xs.append(2_i64);\n    out: ?(Int64[]@list) = xs;\n    RETURN out;"
   when :string_list_owned
-    "out: ?String[]@list = mkStringList(); RETURN out;"
+    "out: ?(String[]@list) = mkStringList(); RETURN out;"
   when :union_owned
     "out: ?Val = Val{ Items: mkStringList() }; RETURN out;"
   when :nested_owned
@@ -140,6 +140,7 @@ end
 
 FuzzGenerator.register(:or_heap_destination_matrix, cells: OR_HEAP_DESTINATION_CELLS) do |p|
   ty = ohd_type(p[:shape])
+  optional_ty = ty.include?("[]") ? "?(#{ty})" : "?#{ty}"
   expr = ohd_or_expr(p[:or_kind], p[:shape])
   prelude = "#{ohd_prelude(p[:shape])}#{ohd_shape_helpers(p[:shape])}"
   fallback_helper = p[:shape] == :list_owned ? <<~CHT : ""
@@ -152,11 +153,11 @@ FuzzGenerator.register(:or_heap_destination_matrix, cells: OR_HEAP_DESTINATION_C
   CHT
   helpers = <<~CHT
     #{prelude}#{fallback_helper}
-    FN maybeSome(flag: Bool) RETURNS ?#{ty} ->
+    FN maybeSome(flag: Bool) RETURNS #{optional_ty} ->
         IF flag THEN
             #{ohd_make_body(p[:shape])}
         END
-        out: ?#{ty} = NIL;
+        out: #{optional_ty} = NIL;
         RETURN out;
     END
 

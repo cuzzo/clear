@@ -16,7 +16,7 @@ def apx_prelude(access)
   when :field, :optional_field, :nested_field
     "STRUCT Box { label: String }\nSTRUCT Wrap { box: Box }\n"
   when :optional_index
-    "FN maybeList(flag: Bool) RETURNS ?String[]@list ->\n    IF flag THEN\n        xs: String[]@list = [COPY \"abc\", COPY \"de\"];\n        RETURN xs;\n    END\n    RETURN NIL;\nEND\n"
+    "FN maybeList(flag: Bool) RETURNS ?(String[]@list) ->\n    IF flag THEN\n        xs: String[]@list = [COPY \"abc\", COPY \"de\"];\n        RETURN xs;\n    END\n    RETURN NIL;\nEND\n"
   else
     ""
   end
@@ -31,7 +31,7 @@ def apx_setup(access)
   when :optional_field
     'maybe: ?Box = Box{ label: COPY "abc" };'
   when :optional_index
-    'maybe: ?String[]@list = maybeList(TRUE);'
+    'maybe: ?(String[]@list) = maybeList(TRUE);'
   when :map_index
     'm: HashMap<String> = {"a": COPY "abc"};'
   when :set_index

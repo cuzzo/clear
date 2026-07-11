@@ -141,11 +141,16 @@ module GenericAnalysis
   def validate_collection_annotation_capabilities!(facts)
     T.bind(self, SemanticAnnotator) rescue nil
     type_obj = facts.type_obj
+    shape = facts.inner
     error!(facts.node, :ATSPLIT_STREAM_ONLY) if type_obj.split? && !type_obj.stream?
-    error!(facts.node, :COLLECTION_NEEDS_ARRAY_TYPE, cap: '@list', example: 'User[]@list or User[N]@list') if type_obj.list_requires_array_shape?
-    error!(facts.node, :COLLECTION_NEEDS_ARRAY_TYPE, cap: '@pool', example: 'User[]@pool or User[N]@pool') if type_obj.pool? && !type_obj.array? && !facts.inner_array
-    error!(facts.node, :COLLECTION_NEEDS_ARRAY_TYPE, cap: '@set', example: 'String[]@set') if type_obj.set_collection? && !type_obj.array? && !facts.inner_array
+    error!(facts.node, :COLLECTION_NEEDS_ARRAY_TYPE, cap: '@list', example: 'User[]@list or User[N]@list') if shape.list_requires_array_shape?
+    error!(facts.node, :COLLECTION_NEEDS_ARRAY_TYPE, cap: '@pool', example: 'User[]@pool or User[N]@pool') if shape.pool? && !shape.array? && !facts.inner_array
+    error!(facts.node, :COLLECTION_NEEDS_ARRAY_TYPE, cap: '@set', example: 'String[]@set') if shape.set_collection? && !shape.array? && !facts.inner_array
     error!(facts.node, :OBSERVABLE_REQUIRES_SET) if type_obj.observable_array_without_set?
+    payload = shape.map? ? shape.value_type : shape.element_type
+    if type_obj.sharded? && payload&.multiowned?
+      error!(facts.node, :SHARDED_ELEMENT_REQUIRES_SHARED, got: payload.to_s)
+    end
   end
 
   sig { params(facts: TypeAnnotationFacts).void }

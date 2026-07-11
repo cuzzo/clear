@@ -173,6 +173,53 @@ RSpec.describe MIRChecker do
       errors = checker.check_fn!(fn_def("extern_trampoline_resource_cleanup", body))
       expect(errors.none? { |e| e.include?("OWNERSHIP_CLEANUP_FOR_BORROW") }).to be true
     end
+
+    it "rejects cleanup on a borrowed IF-bind capture" do
+      entry = CleanupEntry.from({ kind: :rc, alloc: :heap, has_moved_guard: false })
+      bind = MIR::IfBindStmt.new(
+        [{ expr: MIR::IndexGet.new(MIR::Ident.new("items"), MIR::Lit.new("0")), capture: "item", owns_capture: false }],
+        [MIR::Cleanup.new("item", entry)],
+        nil,
+      )
+
+      errors = checker.check_fn!(fn_def("borrowed_if_bind_cleanup", [bind]))
+      expect(errors.any? { |e| e.include?("OWNERSHIP_CLEANUP_FOR_BORROW") && e.include?("item") }).to be true
+    end
+
+    it "allows cleanup on an owning IF-bind capture" do
+      entry = CleanupEntry.from({ kind: :rc, alloc: :heap, has_moved_guard: false })
+      bind = MIR::IfBindStmt.new(
+        [{ expr: MIR::Ident.new("owned_optional"), capture: "item", owns_capture: true }],
+        [MIR::Cleanup.new("item", entry)],
+        nil,
+      )
+
+      errors = checker.check_fn!(fn_def("owned_if_bind_cleanup", [bind]))
+      expect(errors.none? { |e| e.include?("OWNERSHIP_CLEANUP_FOR_BORROW") }).to be true
+    end
+  end
+
+  describe "OWNERSHIP_STRUCTURAL_RC_COPY" do
+    it "rejects direct structural copies of Rc and Arc handles" do
+      rc = MIR::DeepCopy.new(MIR::Ident.new("rc"), "CheatLib.Rc(Item)", nil, :full_value, :heap)
+      arc = MIR::DeepCopy.new(MIR::Ident.new("arc"), "?CheatLib.Arc(Item)", nil, :full_value, :heap)
+
+      errors = checker.check_fn!(fn_def("structural_rc_copy", [MIR::ExprStmt.new(rc, false), MIR::ExprStmt.new(arc, false)]))
+      expect(errors.count { |e| e.include?("OWNERSHIP_STRUCTURAL_RC_COPY") }).to eq(2)
+    end
+
+    it "rejects direct Rc copying regardless of DeepCopy strategy" do
+      rc = MIR::DeepCopy.new(MIR::Ident.new("rc"), "CheatLib.Rc(Item)", nil, :passthrough, nil)
+
+      errors = checker.check_fn!(fn_def("passthrough_rc_copy", [MIR::ExprStmt.new(rc, false)]))
+      expect(errors.count { |e| e.include?("OWNERSHIP_STRUCTURAL_RC_COPY") }).to eq(1)
+    end
+
+    it "allows aggregate deep copies whose RC fields are retained recursively" do
+      copy = MIR::DeepCopy.new(MIR::Ident.new("holder"), "Holder", nil, :full_value, :heap)
+      errors = checker.check_fn!(fn_def("aggregate_rc_copy", [MIR::ExprStmt.new(copy, false)]))
+      expect(errors.none? { |e| e.include?("OWNERSHIP_STRUCTURAL_RC_COPY") }).to be true
+    end
   end
 
   # ===========================================================================
@@ -1791,7 +1838,7 @@ RSpec.describe MIRChecker do
 
       block_expr = MIR::BlockExpr.new("__blk", [MIR::TransferMark.new("x", :block_result)])
       expect(checker.send(:block_expr_transfers_result?, block_expr)).to be true
-      checker.send(:check_expr_sources_for_unhoisted, Object.new, "expression", owned_position: false)
+      checker.send(:check_expr_sources_for_unhoisted, nil, "expression", owned_position: false)
     end
   end
 

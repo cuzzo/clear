@@ -3130,6 +3130,19 @@ class ClearParser
       optional_prefix = "?"
     end
 
+    # Grouped optional container/value: ?(T[]@list). Prefix binding in the
+    # ungrouped spelling is intentionally element-first, so ?T[] means a list
+    # of optional T while ?(T[]) means an optional list of T.
+    if optional_prefix == "?" && match?(:CHAR, '(')
+      if tense_prefix != "" || error_prefix != ""
+        error!(current, :PARSER_EXPECTED, expected: "a grouped optional without an outer tense/error prefix", got: current.value, type: current.type, line: current.line)
+      end
+      consume(:CHAR, '(')
+      wrapped = T.must(parse_type_annotation)
+      consume(:CHAR, ')')
+      return Type.optional_of(wrapped)
+    end
+
     if match?(:KEYWORD, 'Auto') && "#{tense_prefix}#{error_prefix}#{optional_prefix}" != ""
       prefix_chars = "#{tense_prefix}#{error_prefix}#{optional_prefix}"
       error!(current, :AUTO_PREFIX_NOT_SUPPORTED, prefix: prefix_chars, prefix2: prefix_chars, prefix3: prefix_chars, prefix4: prefix_chars)
@@ -3278,7 +3291,24 @@ class ClearParser
       return "SHARED #{type_annotation_source(inner)}"
     end
 
+    if t.optional?
+      wrapped = T.must(t.wrapped_type)
+      inner = type_annotation_source(wrapped)
+      return wrapped.array? || wrapped.map? ? "?(#{inner})" : "?#{inner}"
+    end
+
     parts = [t.resolved.to_s]
+
+    collection = case t.collection
+    when :list then "@list"
+    when :pool then "@pool"
+    when :set then "@set"
+    end
+    if collection
+      collection += ":soa" if t.soa?
+      collection += ":sharded(#{t.shard_count})" if t.sharded? && t.shard_count
+      parts << collection
+    end
 
     ownership = case t.ownership
     when :shared then "@shared"

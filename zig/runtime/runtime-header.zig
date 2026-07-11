@@ -654,7 +654,14 @@ pub const CheatLib = struct {
     }
 
     // Bounds-safe index: returns null on out-of-bounds instead of panicking.
-    pub fn getAtOpt(container: anytype, index: anytype) ?ElementType(@TypeOf(container)) {
+    fn BoundsCheckedElementType(comptime C: type) type {
+        const E = ElementType(C);
+        return if (@typeInfo(E) == .optional) E else ?E;
+    }
+
+    // CLEAR optionals are flattened: indexing ?T[] returns ?T, not ??T.
+    // The same null represents either an out-of-bounds index or a NIL element.
+    pub fn getAtOpt(container: anytype, index: anytype) BoundsCheckedElementType(@TypeOf(container)) {
         const i: usize = @intCast(index);
         const c0 = if (@typeInfo(@TypeOf(container)) == .optional) container.? else container;
         const c = if (@typeInfo(@TypeOf(c0)) == .pointer and @typeInfo(@TypeOf(c0)).pointer.size == .one) c0.* else c0;
@@ -2969,6 +2976,18 @@ pub const CheatLib = struct {
             return value;
         }
         return if (is_atomic) arcRetain(T, value) else rcRetain(T, value);
+    }
+
+    /// Remove every list element while preserving capacity. ArrayList's raw
+    /// clearRetainingCapacity only changes length; CLEAR collections must also
+    /// release cleanup-bearing payloads, including Rc/Arc handles.
+    pub fn clearList(alloc: std.mem.Allocator, list: anytype) void {
+        const ListT = @TypeOf(list.*);
+        const ElemT = @typeInfo(@FieldType(ListT, "items")).pointer.child;
+        if (comptime needsCleanup(ElemT)) {
+            for (list.items) |*item| cleanup(ElemT, alloc, item);
+        }
+        list.clearRetainingCapacity();
     }
 
     /// Release a single ref-counted value. Dispatches to the correct release

@@ -820,7 +820,12 @@ class Type
   def self.surface_name_type(t)
     return "~#{surface_name_type(t.tense_type)}" if t.tense?
     return "!#{surface_name_type(T.must(t.payload_type))}" if t.error_union?
-    return "?#{surface_name_type(T.must(t.wrapped_type))}" if t.optional?
+    if t.optional?
+      wrapped = T.must(t.wrapped_type)
+      inner = surface_name_type(wrapped)
+      return "?(#{inner})" if wrapped.array? || wrapped.map?
+      return "?#{inner}"
+    end
     return "#{surface_name_type(T.must(t.element_type))}#{array_capacity_suffix(t.capacity)}" if t.array?
     return function_type_surface_name(t) if t.fn_type?
 
@@ -3007,7 +3012,16 @@ class Type
 
   sig { returns(T::Boolean) }
   def optional?
-    shape.optional
+    shape.optional && !array?
+  end
+
+  # CLEAR's prefix binds through an array suffix: ?T[] is an array whose
+  # elements are optional T, not an optional array of T. TypeShape retains
+  # the lexical prefix so tense aliases such as ~?T[] can still be
+  # distinguished from ~T[] without reparsing the source spelling.
+  sig { returns(T::Boolean) }
+  def optional_element_array?
+    shape.optional && array?
   end
 
   sig { returns(T.nilable(Type)) }
@@ -3259,18 +3273,30 @@ class Type
   # Used for lazy finite producers like ranges. NEXT returns ?T until exhausted.
   sig { returns(T::Boolean) }
   def dynamic_stream?
-    !!(future? && tense_type.dynamic? && !tense_type.optional? && !list_collection?)
+    !!(future? && tense_type.dynamic? && !tense_type.optional? &&
+      !tense_type.optional_element_array? && !list_collection?)
   end
 
   # New syntax alias: ~?T[] means an open stream of T (NEXT returns ?T).
   # Parsed as future of ?T[] by the general type parser, then reinterpreted here.
   sig { returns(T.nilable(Type)) }
   def optional_stream_shape_type
-    return nil unless future? && tense_type.optional?
-    wrapped = T.let(tense_type.wrapped_type, T.nilable(Type))
-    return nil if wrapped.nil?
+    return nil unless future?
 
-    return wrapped if T.must(wrapped).array?
+    stream_shape = tense_type
+    if stream_shape.optional_element_array?
+      element = stream_shape.element_type
+      return nil if element.nil?
+
+      optional_element = T.must(element)
+      return nil unless optional_element.optional?
+
+      return Type.array_of(T.must(optional_element.wrapped_type), capacity: stream_shape.capacity)
+    end
+
+    return nil unless stream_shape.optional?
+    wrapped = T.let(stream_shape.wrapped_type, T.nilable(Type))
+    return wrapped if wrapped&.array?
 
     nil
   end
@@ -3419,7 +3445,7 @@ class Type
     # Uses the capture from parse_raw_input, ensuring "Number[3]" becomes "Float64"
     raw = Type.type_input_symbol_or_any(shape.element_type_raw)
     t = Type.new(raw)
-    t = Type.new("?#{Type.surface_name(raw)}") if optional? && !t.optional?
+    t = Type.new("?#{Type.surface_name(raw)}") if optional_element_array? && !t.optional?
     t.apply_capabilities!(
       ownership: Type.capability_symbol_or_unset(elem_ownership),
       sync: Type.capability_symbol_or_unset(elem_sync)

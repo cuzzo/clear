@@ -1281,6 +1281,7 @@ RSpec.describe "MIR gap-burn characterization" do
       capture: nil,
     )
     if_bind = AST::IfBind.new(tok, [if_binding], [], nil)
+    if_binding.mir_binding_entry = CleanupEntry.build(:uniform, alloc: :heap)
     pass.send(:stamp_if_bind_cleanup!, if_bind, cleanup_facts({
       "bound" => CleanupEntry.build(:uniform, alloc: :heap),
     }))

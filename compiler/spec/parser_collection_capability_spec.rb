@@ -34,6 +34,21 @@ RSpec.describe "ClearParser collection capability chains" do
     expect(parse_type("Int64[]@list:sharded(1)").shard_count).to eq(1)
   end
 
+  it "distinguishes optional elements from an optional collection" do
+    optional_elements = parse_type("?Counter[]@list")
+    optional_collection = parse_type("?(Counter[]@list)")
+
+    expect(optional_elements.optional?).to be false
+    expect(T.must(optional_elements.element_type).optional?).to be true
+    expect(optional_collection.optional?).to be true
+    expect(T.must(optional_collection.wrapped_type).list_collection?).to be true
+    expect(T.must(T.must(optional_collection.wrapped_type).element_type).optional?).to be false
+    expect(Type.surface_name_type(optional_collection)).to eq("?(Counter[])")
+
+    parser = ClearParser.new(Lexer.new("").tokenize, "")
+    expect(parser.send(:type_annotation_source, optional_collection)).to eq("?(Counter[]@list)")
+  end
+
   it "parses direct constructor modifier tokens before colon chains" do
     list = parse_expr("List[] @sharded(3)")
     pool = parse_expr("Pool[] @soa")

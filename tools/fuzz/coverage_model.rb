@@ -276,6 +276,14 @@ module FuzzCoverageModel
       failure_proves: 'Every cleanup-bearing return shape is promoted, cleaned, or rejected in each return context.',
       high_risk: true
     ),
+    rc_generic_collection_matrix: profile(
+      failure_proves: 'Every ownership-sensitive generic list, pool, and map operation preserves Rc/Arc capability, borrow, transfer, copy, and cleanup semantics.',
+      high_risk: true
+    ),
+    rc_generic_value_matrix: profile(
+      failure_proves: 'Generic COPY and materialization recursively retain Rc/Arc values through structs, unions, optionals, lists, and maps.',
+      high_risk: true
+    ),
     stream_into_boundary: profile(
       failure_proves: 'STREAM NEXT values crossing BG/DO/BG STREAM boundaries obey capability and sync rules.',
       high_risk: true
@@ -463,6 +471,26 @@ module FuzzCoverageModel
         right_surface: :cleanup_value_shapes,
         required_pairs: sink_pairs
       ),
+      CrossProductRequirement.new(
+        name: :generic_collection_operation_by_rc_capability,
+        severity: :p0,
+        left_surface: :generic_collection_operations,
+        right_surface: :rc_storage_capabilities,
+        required_pairs: T.cast(
+          registry.surface(:generic_collection_operations).product(registry.surface(:rc_storage_capabilities)),
+          T::Array[[Symbol, Symbol]],
+        ),
+      ),
+      CrossProductRequirement.new(
+        name: :generic_value_shape_by_rc_capability,
+        severity: :p0,
+        left_surface: :rc_generic_value_shapes,
+        right_surface: :rc_storage_capabilities,
+        required_pairs: T.cast(
+          registry.surface(:rc_generic_value_shapes).product(registry.surface(:rc_storage_capabilities)),
+          T::Array[[Symbol, Symbol]],
+        ),
+      ),
     ]
   end
 
@@ -481,6 +509,30 @@ module FuzzCoverageModel
       next if missing.empty?
 
       gaps << "P0 cross-product escape_sinks:#{sink} x cleanup_value_shapes missing #{missing.join(', ')} (covered by: #{covering.join(', ')})"
+    end
+
+
+    template = T.unsafe(FuzzGenerator)::TEMPLATES[:rc_generic_collection_matrix]
+    if template
+      actual = T.unsafe(template).cells.map { |cell| [T.unsafe(cell)[:operation], T.unsafe(cell)[:capability]] }.to_set
+      required = registry.surface(:generic_collection_operations).product(registry.surface(:rc_storage_capabilities)).to_set
+      (required - actual).each do |operation, capability|
+        gaps << "P0 cross-product generic_collection_operations:#{operation} x rc_storage_capabilities:#{capability} missing"
+      end
+    else
+      gaps << "P0 cross-product rc_generic_collection_matrix template missing"
+    end
+
+
+    value_template = T.unsafe(FuzzGenerator)::TEMPLATES[:rc_generic_value_matrix]
+    if value_template
+      actual = T.unsafe(value_template).cells.map { |cell| [T.unsafe(cell)[:operation], T.unsafe(cell)[:capability]] }.to_set
+      required = registry.surface(:rc_generic_value_shapes).product(registry.surface(:rc_storage_capabilities)).to_set
+      (required - actual).each do |shape, capability|
+        gaps << "P0 cross-product rc_generic_value_shapes:#{shape} x rc_storage_capabilities:#{capability} missing"
+      end
+    else
+      gaps << "P0 cross-product rc_generic_value_matrix template missing"
     end
 
     gaps

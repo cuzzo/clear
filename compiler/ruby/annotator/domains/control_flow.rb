@@ -1103,15 +1103,18 @@ module Annotator
           error!(node, :FOR_IN_NEEDS_COLLECTION, got: coll_type)
         end
 
-        elem_sym = elem_type.is_a?(Type) ? elem_type.resolved : elem_type
+        elem_ti = elem_type.is_a?(Type) ? elem_type : Type.new(elem_type)
 
         # 2. Analyze body with loop variable
         analyze_loop_control_flow_branches([
           proc {
-            current_scope.declare(node.var_name, nil, elem_sym, node.is_mutable == true, false, nil, :stack)
+            current_scope.declare(node.var_name, nil, elem_ti, node.is_mutable == true, false, nil, :borrow)
             record_capture_local!(node.var_name.to_s)
             node.symbol = current_scope.local_entry!(node.var_name)
+            T.must(node.symbol).mark_borrowed_alias!
             classify_ownership!(T.must(node.symbol))
+            og_declare(node.var_name.to_s, nil, elem_ti)
+            ownership_graph[node.var_name.to_s]&.kind = :borrowed
             visit_stmts(node.body)
             finalize_scope(node)
             node.deferred_drops

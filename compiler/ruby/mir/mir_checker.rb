@@ -434,6 +434,8 @@ class MIRChecker
     verify_err_cleanup_transfers!(err_cleanups, transfers)
     verify_return_transfers_heap!(return_transfers, allocs)
     verify_cleanup_sources_own_values!(fn_def.body || [], cleanups, err_cleanups)
+    verify_if_bind_capture_cleanup_ownership!(nodes)
+    verify_no_structural_rc_handle_copies!(nodes)
     verify_allocating_lets_marked!(nodes, allocs)
     verify_aggregate_owned_children!(fn_def.body, allocs)
     verify_alloc_cleanup_match!(allocs, cleanups, errdefer_destroy_names, transfers)
@@ -1336,6 +1338,52 @@ class MIRChecker
         end
       end
       node.body_slots.each { |slot| verify_cleanup_sources_in_scope!(slot.body) }
+    end
+    nil
+  end
+
+  # IF/WHILE optional captures are lexical bindings rather than MIR::Let
+  # nodes, so the ordinary cleanup-source proof cannot see their initializer.
+  # Lowering carries the annotator's ownership decision on each binding; any
+  # cleanup attached to a borrowed capture is a compiler-generated RC UAF.
+  sig { params(nodes: T::Array[MIR::Node]).void }
+  def verify_if_bind_capture_cleanup_ownership!(nodes)
+    nodes.each do |node|
+      next unless node.is_a?(MIR::IfBindStmt)
+
+      cleanup_names = node.then_body.filter_map do |stmt|
+        stmt.name.to_s if stmt.is_a?(MIR::Cleanup) || stmt.is_a?(MIR::ErrCleanup)
+      end.to_set
+      node.bindings.each do |binding|
+        next unless binding.is_a?(Hash)
+        capture = binding[:capture].to_s
+        next unless cleanup_names.include?(capture)
+        next if binding[:owns_capture] == true
+
+        @errors << error(:OWNERSHIP_CLEANUP_FOR_BORROW, capture,
+          "optional capture cleanup requires owns_capture=true; borrowed collection/field/local captures must remain owned by their source")
+      end
+    end
+    nil
+  end
+
+  # Rc/Arc handles are duplicated only by retain/upgrade operations. A direct
+  # DeepCopy would structurally copy ctrl/data pointers and fabricate an owner
+  # that was never counted. Nested aggregates remain legal because runtime
+  # dupeValue recursively dispatches RC fields through retainOne.
+  sig { params(nodes: T::Array[MIR::Node]).void }
+  def verify_no_structural_rc_handle_copies!(nodes)
+    nodes.each do |node|
+      next unless node.is_a?(MIR::DeepCopy)
+      zig_type = node.zig_type.to_s
+      zig_type = T.must(zig_type[1..]) if zig_type.start_with?("?")
+      direct_ref_handle = ["CheatLib.Rc(", "CheatLib.Arc(", "CheatLib.WeakRc(", "CheatLib.WeakArc("].any? do |prefix|
+        zig_type.start_with?(prefix)
+      end
+      next unless direct_ref_handle
+
+      @errors << error(:OWNERSHIP_STRUCTURAL_RC_COPY, node.zig_type,
+        "reference-counted handles must be retained, upgraded, or downgraded; MIR::DeepCopy may not structurally duplicate an Rc/Arc handle")
     end
     nil
   end
@@ -2953,6 +3001,8 @@ class MIRChecker
     :verify_alloc_marks_typed!,
     :verify_allocating_lets_marked!,
     :verify_cleanup_required_finalizers!,
+    :verify_if_bind_capture_cleanup_ownership!,
+    :verify_no_structural_rc_handle_copies!,
     :verify_cleanup_sources_in_scope!,
     :verify_cleanup_sources_own_values!,
     :verify_err_cleanup_transfers!,

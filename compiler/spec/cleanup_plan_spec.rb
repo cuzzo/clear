@@ -133,9 +133,10 @@ RSpec.describe CleanupClassifier do
     end
 
     it "runs capture binding classification through the public plan entrypoint" do
-      weak_value = cleanup_identifier("weak", type: Type.new(:"?String[]"))
+      optional_list = Type.optional_of(Type.new(:"String[]"))
+      weak_value = cleanup_identifier("weak", type: optional_list)
       resolve = AST::ResolveNode.new(tok, weak_value)
-      resolve.full_type = Type.new(:"?String[]")
+      resolve.full_type = Type.optional_of(Type.new(:"String[]"))
       if_bind = AST::IfBind.new(
         tok,
         [AST::Binding.new(expr: resolve, name: "items", name_token: tok)],
@@ -818,9 +819,10 @@ RSpec.describe CleanupClassifier do
     end
 
     it "classifies ownership-transferring capture bindings and heap call fallbacks" do
-      weak_value = cleanup_identifier("weak", type: Type.new(:"?String[]"))
+      optional_list = Type.optional_of(Type.new(:"String[]"))
+      weak_value = cleanup_identifier("weak", type: optional_list)
       resolve = AST::ResolveNode.new(tok, weak_value)
-      resolve.full_type = Type.new(:"?String[]")
+      resolve.full_type = Type.optional_of(Type.new(:"String[]"))
       if_bind = AST::IfBind.new(
         tok,
         [AST::Binding.new(expr: resolve, name: "items", name_token: tok)],

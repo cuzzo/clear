@@ -256,6 +256,7 @@ module AST
   Binding = Struct.new(:expr, :name, :name_token, :unwrapped_type, :symbol, :capture,
                        keyword_init: true) do
     extend T::Sig
+    attr_accessor :mir_binding_entry
     # ruby-to-clear: field-type expr=Node
 
     sig { params(kw: StructKwargs).void }
@@ -499,6 +500,11 @@ module AST
   def self.capture_expr_owns_result?(node)
     return false unless node
     node = node.value while node.is_a?(AST::Cast)
+    return false if borrowed_ownership_view?(node)
+    if call?(node) && node.respond_to?(:matched_signature)
+      signature = T.unsafe(node).matched_signature
+      return false if signature&.respond_to?(:return_lifetime) && !signature.return_lifetime.empty?
+    end
 
     call?(node) || node.is_a?(AST::ResolveNode) ||
       node.is_a?(AST::CopyNode) || node.is_a?(AST::CloneNode) ||

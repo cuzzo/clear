@@ -3235,11 +3235,9 @@ RSpec.describe SemanticAnnotator do
 
       it "rejects hash-shaped intrinsic overloads when the base type cannot match" do
         annotator = SemanticAnnotator.new
-        arg = Struct.new(:resolved_type) do
-          def full_type!(context:)
-            Type.new(:String)
-          end
-        end.new(:String)
+        token = Lexer::Token.new(:IDENTIFIER, "arg", 1, 1)
+        arg = AST::Identifier.new(token, "arg")
+        arg.full_type = Type.new(:String)
 
         definition = FunctionSignature.new(
           params: [AST::Param.new(name: "arg0", type: :Int64)],
@@ -4741,7 +4739,7 @@ RSpec.describe SemanticAnnotator do
       CLEAR
 
       zig = ZigTranspiler.new.transpile(src)
-      expect(zig).to include("items.clearRetainingCapacity()")
+      expect(zig).to include("CheatLib.clearList(rt.heapAlloc(), &items)")
     end
 
     it "supports String.indexOf with a starting offset" do

@@ -40,6 +40,18 @@ pub fn bind(comptime deps: type) type {
             return deps.dupeValue(T, value, alloc);
         }
 
+        fn appendOwnedValue(comptime T: type, list: *std.ArrayListUnmanaged(T), alloc: std.mem.Allocator, value: T) !void {
+            const copied = if (comptime needsCleanup(T)) try dupeValue(T, value, alloc) else value;
+            errdefer if (comptime needsCleanup(T)) cleanup(T, alloc, &copied);
+            try list.append(alloc, copied);
+        }
+
+        fn appendOwnedString(list: *std.ArrayListUnmanaged([]const u8), alloc: std.mem.Allocator, value: []const u8) !void {
+            const copied = if (value.len > 0) try alloc.dupe(u8, value) else value;
+            errdefer if (copied.len > 0) alloc.free(copied);
+            try list.append(alloc, copied);
+        }
+
     pub fn PagedSlotMap(comptime T: type) type {
         return paged_slot_map.PagedSlotMap(T, struct {
             fn drop(alloc: std.mem.Allocator, ptr: *T) void {
@@ -2095,12 +2107,20 @@ pub fn bind(comptime deps: type) type {
         const is_string = T == []const u8;
         const Context = struct {
             pub fn hash(_: @This(), key: T) u64 {
+                // Reference-counted values are identity-bearing handles. Their
+                // payload may be mutated through another alias, so value-based
+                // hashing would invalidate the set's buckets after insertion.
+                // The control-block address is stable for the handle lifetime.
+                if (comptime refInnerType(T) != null) {
+                    return std.hash.Wyhash.hash(0, std.mem.asBytes(&key.ctrl));
+                }
                 var hasher = std.hash.Wyhash.init(0);
                 std.hash.autoHashStrat(&hasher, key, .DeepRecursive);
                 return hasher.final();
             }
 
             pub fn eql(_: @This(), a: T, b: T) bool {
+                if (comptime refInnerType(T) != null) return a.ctrl == b.ctrl;
                 return std.meta.eql(a, b);
             }
         };
@@ -2137,7 +2157,10 @@ pub fn bind(comptime deps: type) type {
                 if (is_string) {
                     if (self.inner.fetchRemove(value)) |kv| alloc.free(kv.key);
                 } else {
-                    _ = self.inner.fetchRemove(value);
+                    if (self.inner.fetchRemove(value)) |kv| {
+                        var removed = kv.key;
+                        if (comptime needsCleanup(T)) cleanup(T, alloc, &removed);
+                    }
                 }
             }
 
@@ -2586,18 +2609,26 @@ pub fn bind(comptime deps: type) type {
 
             pub fn keys(self: *Self, alloc: std.mem.Allocator) !std.ArrayListUnmanaged([]const u8) {
                 var list: std.ArrayListUnmanaged([]const u8) = .empty;
+                errdefer {
+                    for (list.items) |key| if (key.len > 0) alloc.free(key);
+                    list.deinit(alloc);
+                }
                 for (&self.shards) |*shard| {
                     var it = shard.map.keyIterator();
-                    while (it.next()) |k| try list.append(alloc, k.*);
+                    while (it.next()) |k| try appendOwnedString(&list, alloc, k.*);
                 }
                 return list;
             }
 
             pub fn values(self: *Self, alloc: std.mem.Allocator) !std.ArrayListUnmanaged(V) {
                 var list: std.ArrayListUnmanaged(V) = .empty;
+                errdefer {
+                    if (comptime needsCleanup(V)) for (list.items) |*value| cleanup(V, alloc, value);
+                    list.deinit(alloc);
+                }
                 for (&self.shards) |*shard| {
                     var it = shard.map.valueIterator();
-                    while (it.next()) |v| try list.append(alloc, v.*);
+                    while (it.next()) |v| try appendOwnedValue(V, &list, alloc, v.*);
                 }
                 return list;
             }
@@ -2915,9 +2946,13 @@ pub fn bind(comptime deps: type) type {
 
             pub fn values(self: *Self, a: std.mem.Allocator) !std.ArrayListUnmanaged(V) {
                 var list: std.ArrayListUnmanaged(V) = .empty;
+                errdefer {
+                    if (comptime needsCleanup(V)) for (list.items) |*value| cleanup(V, a, value);
+                    list.deinit(a);
+                }
                 for (&self.shards) |*shard| {
                     var it = shard.map.valueIterator();
-                    while (it.next()) |v| try list.append(a, v.*);
+                    while (it.next()) |v| try appendOwnedValue(V, &list, a, v.*);
                 }
                 return list;
             }
@@ -3014,22 +3049,30 @@ pub fn bind(comptime deps: type) type {
 
             pub fn keys(self: *Self, alloc: std.mem.Allocator) !std.ArrayListUnmanaged([]const u8) {
                 var list: std.ArrayListUnmanaged([]const u8) = .empty;
+                errdefer {
+                    for (list.items) |key| if (key.len > 0) alloc.free(key);
+                    list.deinit(alloc);
+                }
                 for (&self.shards) |*shard| {
                     shard.lock.lockShared();
                     defer shard.lock.unlockShared();
                     var it = shard.map.keyIterator();
-                    while (it.next()) |k| try list.append(alloc, k.*);
+                    while (it.next()) |k| try appendOwnedString(&list, alloc, k.*);
                 }
                 return list;
             }
 
             pub fn values(self: *Self, alloc: std.mem.Allocator) !std.ArrayListUnmanaged(V) {
                 var list: std.ArrayListUnmanaged(V) = .empty;
+                errdefer {
+                    if (comptime needsCleanup(V)) for (list.items) |*value| cleanup(V, alloc, value);
+                    list.deinit(alloc);
+                }
                 for (&self.shards) |*shard| {
                     shard.lock.lockShared();
                     defer shard.lock.unlockShared();
                     var it = shard.map.valueIterator();
-                    while (it.next()) |v| try list.append(alloc, v.*);
+                    while (it.next()) |v| try appendOwnedValue(V, &list, alloc, v.*);
                 }
                 return list;
             }
@@ -3193,22 +3236,30 @@ pub fn bind(comptime deps: type) type {
 
             pub fn keys(self: *Self, alloc: std.mem.Allocator) !std.ArrayListUnmanaged([]const u8) {
                 var list: std.ArrayListUnmanaged([]const u8) = .empty;
+                errdefer {
+                    for (list.items) |key| if (key.len > 0) alloc.free(key);
+                    list.deinit(alloc);
+                }
                 for (&self.shards) |*shard| {
                     shard.lock.lock();
                     defer shard.lock.unlock();
                     var it = shard.map.keyIterator();
-                    while (it.next()) |k| try list.append(alloc, k.*);
+                    while (it.next()) |k| try appendOwnedString(&list, alloc, k.*);
                 }
                 return list;
             }
 
             pub fn values(self: *Self, alloc: std.mem.Allocator) !std.ArrayListUnmanaged(V) {
                 var list: std.ArrayListUnmanaged(V) = .empty;
+                errdefer {
+                    if (comptime needsCleanup(V)) for (list.items) |*value| cleanup(V, alloc, value);
+                    list.deinit(alloc);
+                }
                 for (&self.shards) |*shard| {
                     shard.lock.lock();
                     defer shard.lock.unlock();
                     var it = shard.map.valueIterator();
-                    while (it.next()) |v| try list.append(alloc, v.*);
+                    while (it.next()) |v| try appendOwnedValue(V, &list, alloc, v.*);
                 }
                 return list;
             }

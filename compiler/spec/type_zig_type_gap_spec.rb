@@ -208,9 +208,20 @@ RSpec.describe Type, "zig_type gap coverage" do
   it "preserves optional element types for ?T[] arrays" do
     type = Type.new(:"?Counter[]")
 
+    expect(type.optional?).to be false
     elem = T.must(type.element_type)
     expect(elem.to_s).to eq("?Counter")
     expect(elem.optional?).to be true
+    expect(type.zig_type).to eq("std.ArrayListUnmanaged(?Counter)")
+  end
+
+  it "preserves ~?T[] as the open-stream spelling" do
+    type = Type.new(:"~?Counter[]")
+
+    expect(type.open_stream?).to be true
+    expect(type.dynamic_stream?).to be false
+    expect(T.must(type.open_stream_element_type).to_s).to eq("Counter")
+    expect(type.zig_type).to eq("CheatLib.Stream(Counter)")
   end
 
   it "answers raw sync and link wrapper helpers through capabilities" do

@@ -2116,13 +2116,16 @@ module MIRLoweringExpressions
     elsif ti.any_rc?
       func = ti.shared? ? "arcRetain" : "rcRetain"
       MIR::RcRetain.new(source, rc_payload_zig_type(ti), func)
-    elsif ti.optional? && ti.needs_cleanup?(mir_schema_lookup)
+    elsif ti.optional? && (ti.needs_cleanup?(mir_schema_lookup) ||
+                           ti.wrapped_type&.recursive_cleanup_shape?(mir_schema_lookup))
       MIR::DeepCopy.new(source, ti.zig_type, nil, :full_value, alloc)
     elsif ti.string?
       MIR::DeepCopy.new(source, "[]const u8", nil, :full_value, alloc)
     elsif ti.direct_indexable_collection? && dst_ti.direct_indexable_collection? && !dst_ti.string?
       copy_zig = copy_source_zig_type(node.value, ti, dst_ti)
       MIR::DeepCopy.new(source, copy_zig, nil, :full_value, alloc)
+    elsif ti.recursive_cleanup_shape?(mir_schema_lookup)
+      MIR::DeepCopy.new(source, bare_zig_type(ti), nil, :full_value, alloc)
     else
       copy_zig = if dst_ti.collection? && !dst_ti.string?
                    dst_ti.zig_type

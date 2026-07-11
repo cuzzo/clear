@@ -670,7 +670,8 @@ module CleanupClassifier
       expr_ti = Type.from_node!(expr, context: "capture binding")
       inner_ti = expr_ti.wrapped_type
       next unless inner_ti
-      e = classify_binding(inner_ti, anchor_node, schema_lookup)
+      classification_node = anchor_node.is_a?(AST::Binding) ? anchor_node.expr : anchor_node
+      e = classify_binding(inner_ti, classification_node, schema_lookup)
       e ||= entry(:heap_string, has_moved_guard: true) if cleanup_owned_string_type?(inner_ti)
       e ||= entry(:uniform) if inner_ti.needs_explicit_cleanup?(:heap, schema_lookup)
       next unless e
@@ -678,8 +679,9 @@ module CleanupClassifier
       e.set_alloc!(capture_alloc) if capture_alloc
       e[:zig_type] ||= (Type.new(inner_ti.resolved).zig_type rescue inner_ti.resolved.to_s)
       if inner_ti.element_type
-        e[:elem_zig_type] ||= (Type.new(inner_ti.element_type).zig_type rescue "UNKNOWN")
+        e[:elem_zig_type] ||= (Type.new(T.must(inner_ti.element_type)).zig_type rescue "UNKNOWN")
       end
+      anchor_node.mir_binding_entry = e if anchor_node.is_a?(AST::Binding)
       bindings[name] = e
     end
   end
@@ -775,7 +777,7 @@ module CleanupClassifier
       when AST::WhileBindLoop
         yield node.binding_name.to_s, node.condition, node
       when AST::IfBind
-        node.bindings.each { |b| yield b.name.to_s, b.expr, node }
+        node.bindings.each { |b| yield b.name.to_s, b.expr, b }
       end
     end
   end
@@ -1306,7 +1308,7 @@ module CleanupClassifier
 
   sig { params(schema: T.nilable(FieldBearingSchema), schema_lookup: T.nilable(Proc)).returns(T::Boolean) }
   private_class_method def self.elem_has_cleanup_fields?(schema, schema_lookup)
-    return false unless Schemas.field_bearing?(schema) || Schemas.inline_struct?(schema)
+    return false unless Schemas.inline_struct?(schema) || Schemas.field_bearing?(T.cast(schema, Schemas::SchemaValue))
     concrete_schema = T.must(schema)
     borrowed = borrowed_field_names(concrete_schema)
     concrete_schema.fields.any? do |name, v|

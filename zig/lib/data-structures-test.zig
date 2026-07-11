@@ -7,6 +7,23 @@ const ebr = @import("ebr.zig");
 const CheatLib = @import("../runtime/runtime-header.zig").CheatLib;
 const Runtime = rt_mod.Runtime;
 
+test "Set(Rc(T)) uses handle identity and releases removed keys" {
+    const allocator = std.testing.allocator;
+    const RcItem = CheatLib.Rc(u64);
+    var set: CheatLib.Set(RcItem) = .{};
+    defer set.deinit(allocator);
+
+    const item = try CheatLib.rcCreate(u64, allocator, 7);
+    try set.insert(allocator, CheatLib.rcRetain(u64, item));
+    try std.testing.expect(set.contains(item));
+    try std.testing.expectEqual(@as(usize, 2), item.ctrl.strong);
+
+    set.remove(allocator, item);
+    try std.testing.expect(!set.contains(item));
+    try std.testing.expectEqual(@as(usize, 1), item.ctrl.strong);
+    CheatLib.rcRelease(u64, allocator, item);
+}
+
 const PromiseTestState = struct {
     promise: CheatLib.Promise(f64),
     result: f64 = 0.0,

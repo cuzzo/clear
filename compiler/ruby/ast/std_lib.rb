@@ -99,8 +99,9 @@ STD_LIB = T.let({
   "clear" => {
     args: [:"Any[]"],
     return: :Void,
-    zig: "{0}.clearRetainingCapacity()",
+    zig: "CheatLib.clearList({alloc}, &{0})",
     bc: true,
+    alloc: :receiver_storage,
     mutates_receiver: true,
     borrows: :all,
     is_method: true,

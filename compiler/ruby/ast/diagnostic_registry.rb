@@ -2231,6 +2231,20 @@ module DiagnosticRegistry
       cause: "A binding initialized from a borrowed view, such as an indexed element or field payload, received Cleanup/ErrCleanup even though it did not create or receive ownership. Cleaning that alias can free memory still owned by the source aggregate.",
       fix_hint: "Lowering bug — either deep-copy into a fresh owned binding, transfer ownership explicitly, or keep the borrowed alias cleanup-free.",
     },
+    OWNERSHIP_STRUCTURAL_RC_COPY: {
+      severity: :error, category: :mir,
+      template: "%{message}",
+      summary:  "Reference-counted handles cannot be structurally copied.",
+      cause: "Rc/Arc/Weak handles own a control-block count. Copying their pointer fields without a retain fabricates an uncounted owner and causes premature release, leaks, or use-after-free.",
+      fix_hint: "Lowering bug — emit RcRetain/WeakUpgrade/RcDowngrade for direct handles. Aggregate copies must route RC fields through the runtime retain-aware dupeValue path.",
+    },
+    SHARDED_ELEMENT_REQUIRES_SHARED: {
+      severity: :error, category: :ownership,
+      template: "@sharded collections cannot store %{got}; cross-scheduler reference-counted elements must use @shared",
+      summary:  "A scheduler-sharded collection cannot own non-atomic reference counts.",
+      cause: "@multiowned uses scheduler-local non-atomic Rc state and allocator provenance. A shard may destroy or copy an element on a different scheduler, where releasing that Rc is unsafe.",
+      fix_hint: "Declare the element/value as @shared, or use an unsharded collection that remains on one scheduler.",
+    },
     MOVEMARK_WITHOUT_GUARD: {
       severity: :error, category: :mir,
       template: "%{message}",

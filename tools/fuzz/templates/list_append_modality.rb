@@ -94,9 +94,6 @@ LIST_APPEND_EXPECTED_OVERRIDES = {
   [:union_owned_payload, :copy]  => [:pass, "#43"],
   [:union_owned_payload, :give]  => [:pass, "#43"],
   [:hash_map, :copy]             => [:pass, "#58"],
-  [:option_owned_payload, :bare] => [:compile_error, "lang: no list-of-optional (?T[]@list parses as ?(T[]@list))"],
-  [:option_owned_payload, :copy] => [:compile_error, "lang: no list-of-optional (?T[]@list parses as ?(T[]@list))"],
-  [:option_owned_payload, :give] => [:compile_error, "lang: no list-of-optional (?T[]@list parses as ?(T[]@list))"],
 }.freeze
 
 LIST_APPEND_CELLS = LIST_APPEND_SHAPE_SPECS.keys.flat_map do |shape|

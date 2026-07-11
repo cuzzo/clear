@@ -52,6 +52,38 @@ test "dupeValue retains Rc Arc and Weak handles instead of cloning control block
     CheatLib.arcRelease(u64, allocator, arc);
 }
 
+test "dupeValue retains Rc Arc through optional struct union and list shapes" {
+    const allocator = std.testing.allocator;
+    const RcU64 = CheatLib.Rc(u64);
+    const ArcU64 = CheatLib.Arc(u64);
+    const Holder = struct {
+        optional: ?RcU64,
+        shared: ArcU64,
+        refs: std.ArrayListUnmanaged(RcU64),
+    };
+    const Choice = union(enum) { item: RcU64, none: void };
+
+    const rc = try CheatLib.rcCreate(u64, allocator, 11);
+    const arc = try CheatLib.arcCreate(u64, allocator, 13);
+    var refs: std.ArrayListUnmanaged(RcU64) = .empty;
+    try refs.append(allocator, CheatLib.rcRetain(u64, rc));
+    var holder = Holder{ .optional = rc, .shared = arc, .refs = refs };
+
+    var holder_copy = try CheatLib.dupeValue(Holder, holder, allocator);
+    try std.testing.expectEqual(@as(usize, 4), rc.ctrl.strong);
+    try std.testing.expectEqual(@as(usize, 2), arc.ctrl.strong.load(.acquire));
+    CheatLib.cleanup(Holder, allocator, &holder_copy);
+    try std.testing.expectEqual(@as(usize, 2), rc.ctrl.strong);
+    try std.testing.expectEqual(@as(usize, 1), arc.ctrl.strong.load(.acquire));
+
+    var choice = Choice{ .item = CheatLib.rcRetain(u64, rc) };
+    var choice_copy = try CheatLib.dupeValue(Choice, choice, allocator);
+    try std.testing.expectEqual(@as(usize, 4), rc.ctrl.strong);
+    CheatLib.cleanup(Choice, allocator, &choice_copy);
+    CheatLib.cleanup(Choice, allocator, &choice);
+    CheatLib.cleanup(Holder, allocator, &holder);
+}
+
 var global_ebr_ctx: ebr.EbrContext = .{};
 var global_stack_pool: fm.StackPool = undefined;
 var global_shutdown = std.atomic.Value(bool).init(false);
@@ -152,6 +184,14 @@ test "bounds-safe list access returns optionals, mutable aliases, and compact no
     try refs.append(allocator, Ref.fromHandle(7));
     try std.testing.expectEqual(@as(u32, 8), CheatLib.getNodeAt(refs, 0).encoded);
     try std.testing.expect(CheatLib.getNodeAt(refs, 1).isNil());
+}
+
+test "getAtOpt flattens optional list elements" {
+    const values = [_]?u64{ 10, null };
+
+    try std.testing.expectEqual(@as(?u64, 10), CheatLib.getAtOpt(values[0..], 0));
+    try std.testing.expectEqual(@as(?u64, null), CheatLib.getAtOpt(values[0..], 1));
+    try std.testing.expectEqual(@as(?u64, null), CheatLib.getAtOpt(values[0..], 2));
 }
 
 test "optional payload access returns a mutable alias" {
