@@ -1531,6 +1531,7 @@ jobs:
         run: |
           cargo build --release --manifest-path gems/fact-mine/Cargo.toml
           cargo build --release --manifest-path gems/decomplex/Cargo.toml
+          cargo build --release --manifest-path gems/sql-cov/Cargo.toml
       - name: Download Ruby coverage artifacts
         if: ${{ needs['ruby-gems-coverage'].result == 'success' || needs['ruby-unit'].result == 'success' || needs['ruby-integration'].result == 'success' || needs['transpile-tests'].result == 'success' || needs['examples-benchmarks-coverage-shard'].result == 'success' || needs['tools-fuzz-shard'].result == 'success' || needs['bc-lower-coverage-shard'].result == 'success' }}
         uses: actions/download-artifact@v4
@@ -1573,6 +1574,11 @@ jobs:
             --top=80 \
             --decomplex-binary=./gems/decomplex/target/release/decomplex-rust \
             "${coverage_args[@]}"
+          ./tools/generate_sql_cov_sarif.rb \
+            --repo=. \
+            --out-dir=tmp/generalized-gems-sarif \
+            --setup=gems/lineage/sql/storage/init_schema.sql \
+            --sql-cov-bin=./gems/sql-cov/target/release/sql-cov
       - name: Upload Decomplex SARIF
         uses: github/codeql-action/upload-sarif@v4
         with:
@@ -1598,6 +1604,11 @@ jobs:
         with:
           sarif_file: tmp/generalized-gems-sarif/nil-kill.sarif
           category: nil-kill
+      - name: Upload SQL-cov SARIF
+        uses: github/codeql-action/upload-sarif@v4
+        with:
+          sarif_file: tmp/generalized-gems-sarif/sql-cov.sarif
+          category: sql-cov
       - uses: actions/upload-artifact@v4
         with:
           name: generalized-gems-sarif

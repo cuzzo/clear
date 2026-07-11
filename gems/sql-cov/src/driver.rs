@@ -64,6 +64,7 @@ pub async fn sqlite_pool(database_url: &str) -> Result<SqlitePool> {
 pub async fn postgres_pool(database_url: &str) -> Result<PgPool> {
     Ok(PgPoolOptions::new()
         .max_connections(1)
+        .acquire_timeout(std::time::Duration::from_secs(1))
         .connect(database_url)
         .await?)
 }
@@ -71,6 +72,7 @@ pub async fn postgres_pool(database_url: &str) -> Result<PgPool> {
 pub async fn mysql_pool(database_url: &str) -> Result<MySqlPool> {
     Ok(MySqlPoolOptions::new()
         .max_connections(1)
+        .acquire_timeout(std::time::Duration::from_secs(1))
         .connect(database_url)
         .await?)
 }

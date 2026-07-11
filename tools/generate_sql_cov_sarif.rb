@@ -1,0 +1,161 @@
+#!/usr/bin/env ruby
+# frozen_string_literal: true
+
+require "fileutils"
+require "json"
+require "open3"
+require "optparse"
+
+ROOT = File.expand_path("..", __dir__)
+
+options = {
+  repo: ".",
+  out_dir: "tmp/generalized-gems-sarif",
+  setup: "gems/lineage/sql/storage/init_schema.sql",
+  sql_cov_bin: "gems/sql-cov/target/release/sql-cov"
+}
+
+OptionParser.new do |parser|
+  parser.banner = "Usage: generate_sql_cov_sarif.rb [options]"
+  parser.on("--repo=PATH") { |value| options[:repo] = value }
+  parser.on("--out-dir=PATH") { |value| options[:out_dir] = value }
+  parser.on("--setup=PATH") { |value| options[:setup] = value }
+  parser.on("--sql-cov-bin=PATH") { |value| options[:sql_cov_bin] = value }
+end.parse!
+
+repo = File.realpath(options[:repo])
+out_dir = File.expand_path(options[:out_dir])
+setup_file = File.expand_path(options[:setup], repo)
+sql_cov_bin = File.expand_path(options[:sql_cov_bin], ROOT)
+
+FileUtils.mkdir_p(out_dir)
+
+# Find all SQL files in gems/lineage/sql
+sql_files = Dir.glob(File.join(repo, "gems/lineage/sql/**/*.sql"))
+             .reject { |path| path == setup_file || File.basename(path) == "ensure_natural_key_indexes.sql" }
+             .sort
+
+warn "Found #{sql_files.size} SQL files to scan"
+
+all_findings = []
+all_unresolved = []
+
+sql_files.each do |file|
+  rel_path = file.sub("#{repo}/", "")
+  cmd = [
+    sql_cov_bin,
+    "hazards",
+    "--input", file,
+    "--setup", setup_file,
+    "--dialect", "sqlite",
+    "--format", "json"
+  ]
+  
+  stdout, stderr, status = Open3.capture3(*cmd)
+  unless status.success?
+    warn "Failed to scan #{rel_path}: #{stderr}"
+    next
+  end
+
+  begin
+    report = JSON.parse(stdout)
+    report["findings"]&.each do |finding|
+      # Keep track of file path relative to repo root
+      finding["file_path"] = rel_path
+      all_findings << finding
+    end
+    report["unresolved_schema_facts"]&.each do |fact|
+      all_unresolved << "#{rel_path}: #{fact}"
+    end
+  rescue => e
+    warn "Failed to parse sql-cov output for #{rel_path}: #{e.message}"
+  end
+end
+
+# Build rules BTreeMap
+rules = {}
+all_findings.each do |finding|
+  rules[finding["rule_id"]] ||= {
+    "id" => finding["rule_id"],
+    "name" => finding["kind"],
+    "shortDescription" => { "text" => finding["message"] },
+    "help" => { "text" => finding["recommendation"] },
+    "properties" => {
+      "category" => "SQL three-valued logic",
+      "precision" => "high",
+      "tags" => ["correctness", "sql", "null", "unknown"]
+    }
+  }
+end
+
+# Build results
+results = all_findings.map do |finding|
+  {
+    "ruleId" => finding["rule_id"],
+    "level" => "warning",
+    "message" => {
+      "text" => "#{finding["message"]}. #{finding["evidence"].join("; ")}"
+    },
+    "locations" => [{
+      "physicalLocation" => {
+        "artifactLocation" => { "uri" => finding["file_path"] },
+        "region" => {
+          "startLine" => finding["span"]["start_line"],
+          "startColumn" => finding["span"]["start_column"],
+          "endLine" => finding["span"]["end_line"],
+          "endColumn" => finding["span"]["end_column"],
+          "snippet" => { "text" => finding["span"]["raw_expression"] }
+        }
+      }
+    }],
+    "properties" => {
+      "kind" => finding["kind"],
+      "nullabilityEvidence" => finding["evidence"],
+      "recommendation" => finding["recommendation"],
+      "schemaValidated" => true
+    }
+  }
+end
+
+# Build SARIF document
+sarif_doc = {
+  "$schema" => "https://json.schemastore.org/sarif-2.1.0.json",
+  "version" => "2.1.0",
+  "runs" => [{
+    "tool" => {
+      "driver" => {
+        "name" => "sql-cov-hazards",
+        "informationUri" => "https://cuzzo.github.io/clear/blog/an-ode-to-sql/",
+        "semanticVersion" => "0.1.0",
+        "rules" => rules.values
+      }
+    },
+    "results" => results,
+    "properties" => {
+      "format" => "sql-cov/hazard/sarif",
+      "dialect" => "sqlite",
+      "unresolvedSchemaFacts" => all_unresolved
+    }
+  }]
+}
+
+# Write SARIF
+sarif_path = File.join(out_dir, "sql-cov.sarif")
+File.write(sarif_path, JSON.pretty_generate(sarif_doc))
+warn "Wrote #{sarif_path} with #{results.size} findings"
+
+# Write Markdown
+md_path = File.join(out_dir, "sql-cov.md")
+md_content = String.new("# SQL-cov Hazards Report\n\n")
+if results.empty?
+  md_content << "No SQL logic hazards or three-valued logic bugs detected in database queries.\n"
+else
+  md_content << "### Findings Summary\n\n"
+  md_content << "| File | Line | Expression | Hazard | Message |\n"
+  md_content << "| --- | --- | --- | --- | --- |\n"
+  all_findings.each do |finding|
+    md_content << "| `#{finding["file_path"]}` | #{finding["span"]["start_line"]} | `#{finding["span"]["raw_expression"]}` | **#{finding["kind"]}** | #{finding["message"]} |\n"
+  end
+end
+File.write(md_path, md_content)
+warn "Wrote #{md_path}"

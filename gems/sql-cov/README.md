@@ -1,4 +1,5 @@
 # SQL-COV
+[![CI Status](https://github.com/cuzzo/clear/actions/workflows/ci.yml/badge.svg)](https://github.com/cuzzo/clear/actions/workflows/ci.yml)
 
 SQL-COV measures SQL predicate outcomes as branches. For nullable predicates it tracks SQL's three logical states independently: `TRUE`, `FALSE`, and `UNKNOWN` (`NULL`). It emits versioned JSON, LCOV branch records, or a standalone HTML report.
 
@@ -104,11 +105,33 @@ It resolves SQL branch correctness and maps condition domains.
 
 ## CI Integration
 
-The recommended CI integration pattern is:
-1. Extract `.sql` queries from ORM files or source code.
-2. Spin up a temporary test database container during test suites.
-3. Run `sql-cov run` passing the test database URL and parameter payloads.
-4. Export the resulting LCOV/SARIF files into coverage dashboards or PR scanning tools.
+SQL-COV is fully integrated into this project's GitHub Actions workflow to scan for SQL hazards and three-valued logic bugs automatically.
+
+### Workflow Configuration
+
+The scan is executed in the `generalized-gems-sarif` job within [.github/workflows/ci.yml](../../.github/workflows/ci.yml):
+
+```yaml
+      - name: Build Rust binaries
+        run: |
+          cargo build --release --manifest-path gems/sql-cov/Cargo.toml
+          
+      - name: Generate sql-cov SARIF
+        run: |
+          ./tools/generate_sql_cov_sarif.rb \
+            --repo=. \
+            --out-dir=tmp/generalized-gems-sarif \
+            --setup=gems/lineage/sql/storage/init_schema.sql \
+            --sql-cov-bin=./gems/sql-cov/target/release/sql-cov
+
+      - name: Upload SQL-cov SARIF
+        uses: github/codeql-action/upload-sarif@v4
+        with:
+          sarif_file: tmp/generalized-gems-sarif/sql-cov.sarif
+          category: sql-cov
+```
+
+The resulting SARIF report is uploaded directly to GitHub Code Scanning to present alerts on PRs.
 
 ## Links
 
