@@ -6198,14 +6198,14 @@ fn percent_color_class(pct: f64) -> &'static str {
     }
 }
 
-fn render_hazard_quality_bar(hazards: i64, evidence_covered: i64, covered_hazards: i64) -> String {
-    let mutant_killed_percent = if hazards > 0 {
+fn render_hazard_quality_bar(hazards: i64, covered_hazards: i64, killed_hazards: i64) -> String {
+    let covered_percent = if hazards > 0 {
         percent(covered_hazards, hazards)
     } else {
         0.0
     };
-    let covered_percent = if hazards > 0 {
-        percent(evidence_covered, hazards)
+    let mutant_killed_percent = if hazards > 0 {
+        percent(killed_hazards, hazards)
     } else {
         0.0
     };
@@ -6216,8 +6216,8 @@ fn render_hazard_quality_bar(hazards: i64, evidence_covered: i64, covered_hazard
         "{:.1}% hazard coverage; {} total, {} covered, {} mutant killed",
         if hazards > 0 { covered_percent } else { 100.0 },
         hazards,
-        evidence_covered,
-        covered_hazards
+        covered_hazards,
+        killed_hazards
     );
 
     format!(
@@ -6259,7 +6259,7 @@ fn render_coverage_table_row(
         line_coverage
     };
     let hazard_percent_value = if hazards > 0 {
-        percent(evidence_covered_hazards, hazards)
+        percent(covered_hazards, hazards)
     } else {
         100.0
     };
@@ -6297,9 +6297,9 @@ fn render_coverage_table_row(
     out.push_str("</td><td class=\"haz-col\">");
     out.push_str(&hazards.to_string());
     out.push_str("</td><td class=\"haz-col\">");
-    out.push_str(&evidence_covered_hazards.to_string());
-    out.push_str("</td><td class=\"haz-col\">");
     out.push_str(&covered_hazards.to_string());
+    out.push_str("</td><td class=\"haz-col\">");
+    out.push_str(&evidence_covered_hazards.to_string());
     // Coverage bar td
     out.push_str("</td><td class=\"coverage-cell\">");
     out.push_str("<div class=\"cov-bar-wrapper\">");
@@ -6315,8 +6315,8 @@ fn render_coverage_table_row(
     out.push_str("<div class=\"haz-bar-wrapper\">");
     out.push_str(&render_hazard_quality_bar(
         hazards,
-        evidence_covered_hazards,
         covered_hazards,
+        evidence_covered_hazards,
     ));
     out.push_str("</div>");
     // Percentage tds (cov-col and haz-col)
