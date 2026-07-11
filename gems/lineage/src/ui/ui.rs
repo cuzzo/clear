@@ -462,6 +462,9 @@ pub struct UiDashboard {
     pub coverage_percent: f64,
     pub active_hazards: i64,
     pub sarif_findings: i64,
+    pub new_findings: i64,
+    pub resolved_findings: i64,
+    pub persisted_findings: i64,
     pub evidence_covered_hazards: i64,
     pub hazard_evidence_percent: f64,
     pub covered_hazards: i64,
@@ -571,6 +574,7 @@ struct DashboardTemplate<'a> {
     branch_context: &'a str,
     warnings: &'a str,
     active_hazards: &'a str,
+    finding_changes: &'a str,
     highest_hazard_files: &'a str,
     highest_risk_units: &'a str,
     highest_architecture_risks: &'a str,
@@ -1005,7 +1009,7 @@ fn sarif_dark_arm_counts_by_file(storage: &Storage) -> Result<HashMap<String, i6
     let mut stmt = storage.connection().prepare(
         r#"
         SELECT path, COUNT(*) AS findings
-        FROM sarif_findings
+        FROM current_sarif_findings
         WHERE is_dark_arm = 1
         GROUP BY path
         "#,
@@ -1331,6 +1335,11 @@ fn dashboard_summary_for_directory_with_scope_and_repo(
     let complexity_start = Instant::now();
     let top_complexity_functions = top_complexity_functions(storage, &directory, scope)?;
     profile_log("dashboard.top_complexity_functions", complexity_start);
+    let lifecycle = if directory.is_empty() {
+        storage.sarif_lifecycle_summary()?
+    } else {
+        Default::default()
+    };
 
     let dashboard = UiDashboard {
         files: files_count,
@@ -1339,6 +1348,9 @@ fn dashboard_summary_for_directory_with_scope_and_repo(
         coverage_percent: percent(line_counts.covered, line_counts.tracked),
         active_hazards,
         sarif_findings,
+        new_findings: lifecycle.new_findings,
+        resolved_findings: lifecycle.resolved_findings,
+        persisted_findings: lifecycle.persisted_findings,
         evidence_covered_hazards,
         hazard_evidence_percent: percent(evidence_covered_hazards, active_hazards),
         covered_hazards,
@@ -1744,7 +1756,7 @@ fn top_architecture_risks(
     let mut stmt = storage.connection().prepare(
         r#"
         SELECT path, start_line, rule_id, level, message, properties_json
-        FROM sarif_findings
+        FROM current_sarif_findings
         WHERE lower(tool_name) = 'espalier'
            OR lower(run_format) = 'espalier.manifest.sarif.v1'
            OR lower(source) LIKE '%espalier%'
@@ -1853,14 +1865,14 @@ fn top_complexity_functions(
         r#"
         WITH latest_espalier AS (
           SELECT commit_hash
-          FROM sarif_findings
+          FROM current_sarif_findings
           WHERE rule_id = 'espalier.function'
              OR (LOWER(tool_name) = 'espalier' AND rule_id LIKE '%.function')
           ORDER BY timestamp DESC, id DESC
           LIMIT 1
         )
         SELECT path, start_line, properties_json, message
-        FROM sarif_findings
+        FROM current_sarif_findings
         WHERE (rule_id = 'espalier.function'
            OR (LOWER(tool_name) = 'espalier' AND rule_id LIKE '%.function'))
           AND commit_hash = (SELECT commit_hash FROM latest_espalier)
@@ -2089,7 +2101,7 @@ fn unit_signal_counts(storage: &Storage) -> Result<HashMap<String, UnitSignalCou
                      OR lower(rule_id) LIKE 'zig.ast-check%'
                    ) THEN 1 ELSE 0 END) AS lint_findings,
                    SUM(CASE WHEN is_dark_arm = 1 THEN 1 ELSE 0 END) AS dark_arms
-            FROM sarif_findings
+            FROM current_sarif_findings
             WHERE unit_id IS NOT NULL
             GROUP BY unit_id
             "#,
@@ -5536,6 +5548,7 @@ fn render_dashboard(
     let branch_context = render_branch_context(branch_context, &coverage_context, filter);
     let warnings = render_warning_banner(&dashboard.warnings);
     let active_hazards = render_active_hazards_section(dashboard);
+    let finding_changes = render_finding_changes_section(dashboard);
     let highest_hazard_files = render_highest_hazard_files_section(dashboard, filter);
     let highest_risk_units = render_dashboard_disclosure(
         "Highest Risk Units",
@@ -5567,6 +5580,7 @@ fn render_dashboard(
             branch_context: &branch_context,
             warnings: &warnings,
             active_hazards: &active_hazards,
+            finding_changes: &finding_changes,
             highest_hazard_files: &highest_hazard_files,
             highest_risk_units: &highest_risk_units,
             highest_architecture_risks: &highest_architecture_risks,
@@ -5576,6 +5590,29 @@ fn render_dashboard(
         },
         "dashboard template",
     )
+}
+
+fn render_finding_changes_section(dashboard: &UiDashboard) -> String {
+    if dashboard.new_findings == 0
+        && dashboard.resolved_findings == 0
+        && dashboard.persisted_findings == 0
+    {
+        return String::new();
+    }
+
+    let body = format!(
+        concat!(
+            "<p class=\"finding-lifecycle\">",
+            "<strong>{}</strong> new / ",
+            "<strong>{}</strong> resolved / ",
+            "<strong>{}</strong> persisted",
+            "</p>"
+        ),
+        dashboard.new_findings,
+        dashboard.resolved_findings,
+        dashboard.persisted_findings,
+    );
+    render_dashboard_disclosure("Finding Changes", dashboard.new_findings > 0, &body)
 }
 
 fn render_dashboard_disclosure(title: &str, open: bool, body: &str) -> String {
@@ -9578,6 +9615,9 @@ mod tests {
             coverage_percent: 80.0,
             active_hazards: 2,
             sarif_findings: 7,
+            new_findings: 3,
+            resolved_findings: 2,
+            persisted_findings: 4,
             evidence_covered_hazards: 2,
             hazard_evidence_percent: 100.0,
             covered_hazards: 1,
@@ -9623,6 +9663,8 @@ mod tests {
 
         assert!(html.contains("<details class=\"dashboard-section dashboard-disclosure\" open>"));
         assert!(html.contains("<h2>Active Hazards</h2>"));
+        assert!(html.contains("<h2>Finding Changes</h2>"));
+        assert!(html.contains("3</strong> new"));
         assert!(html.contains("<h2>Highest Risk Units</h2>"));
         assert!(html.contains("<h2>Highest Architectural Risks</h2>"));
         assert!(html.contains("<h2>High Complexity Functions</h2>"));

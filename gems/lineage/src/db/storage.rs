@@ -19,6 +19,13 @@ pub struct CurrentUnitSpan {
     pub end_line: u32,
 }
 
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub struct SarifLifecycleSummary {
+    pub new_findings: i64,
+    pub resolved_findings: i64,
+    pub persisted_findings: i64,
+}
+
 #[derive(Debug, Clone, PartialEq)]
 pub struct UnitSummary {
     pub id: String,
@@ -355,6 +362,7 @@ impl Storage {
             "invariant_mutant_verified_covered_lines",
             "INTEGER NOT NULL DEFAULT 0",
         )?;
+        self.refresh_current_sarif_findings_view()?;
         self.backfill_mutation_kind()?;
         self.conn.execute(
             "CREATE INDEX IF NOT EXISTS idx_test_exposure_events_mutation_kind ON test_exposure_events(mutation_kind)",
@@ -370,6 +378,35 @@ impl Storage {
 
     fn ensure_logical_unit_column(&self, name: &str, definition: &str) -> Result<()> {
         self.ensure_column("logical_units", name, definition)
+    }
+
+    fn refresh_current_sarif_findings_view(&self) -> Result<()> {
+        self.conn.execute_batch(
+            r#"
+            DROP VIEW IF EXISTS current_sarif_findings;
+            CREATE VIEW current_sarif_findings AS
+            WITH ranked_artifacts AS (
+              SELECT source, tool_name, commit_hash,
+                     ROW_NUMBER() OVER (
+                       PARTITION BY source, tool_name
+                       ORDER BY timestamp DESC, id DESC
+                     ) AS snapshot_rank
+              FROM sarif_artifacts
+            ),
+            latest_snapshots AS (
+              SELECT source, tool_name, commit_hash
+              FROM ranked_artifacts
+              WHERE snapshot_rank = 1
+            )
+            SELECT findings.*
+            FROM sarif_findings findings
+            JOIN latest_snapshots latest
+              ON latest.source = findings.source
+             AND latest.tool_name = findings.tool_name
+             AND latest.commit_hash = findings.commit_hash;
+            "#,
+        )?;
+        Ok(())
     }
 
     fn ensure_column(&self, table: &str, name: &str, definition: &str) -> Result<()> {
@@ -1281,7 +1318,7 @@ impl Storage {
                    timestamp, rule_id, level, message, path, start_line, start_column,
                    end_line, end_column, category, is_dark_arm, unit_id, fingerprint,
                    properties_json, raw_json
-            FROM sarif_findings
+            FROM current_sarif_findings
             WHERE path = ?1
             ORDER BY start_line, source, tool_name, rule_id, message
             "#,
@@ -1318,12 +1355,83 @@ impl Storage {
         let mut stmt = self.conn.prepare(
             r#"
             SELECT path, COUNT(*) AS findings
-            FROM sarif_findings
+            FROM current_sarif_findings
             GROUP BY path
             "#,
         )?;
         let rows = stmt.query_map([], |row| Ok((row.get::<_, String>(0)?, row.get::<_, i64>(1)?)))?;
         Ok(rows.collect::<std::result::Result<HashMap<_, _>, _>>()?)
+    }
+
+    pub fn sarif_lifecycle_summary(&self) -> Result<SarifLifecycleSummary> {
+        self.conn.query_row(
+            r#"
+            WITH commit_snapshots AS (
+              SELECT source, tool_name, commit_hash, MAX(timestamp) AS timestamp, MAX(id) AS id
+              FROM sarif_artifacts
+              GROUP BY source, tool_name, commit_hash
+            ),
+            ranked_snapshots AS (
+              SELECT source, tool_name, commit_hash,
+                     ROW_NUMBER() OVER (
+                       PARTITION BY source, tool_name
+                       ORDER BY timestamp DESC, id DESC
+                     ) AS snapshot_rank
+              FROM commit_snapshots
+            ),
+            current_findings AS (
+              SELECT finding.source, finding.tool_name, finding.rule_id, finding.fingerprint
+              FROM sarif_findings finding
+              JOIN ranked_snapshots snapshot
+                ON snapshot.source = finding.source
+               AND snapshot.tool_name = finding.tool_name
+               AND snapshot.commit_hash = finding.commit_hash
+               AND snapshot.snapshot_rank = 1
+            ),
+            previous_findings AS (
+              SELECT finding.source, finding.tool_name, finding.rule_id, finding.fingerprint
+              FROM sarif_findings finding
+              JOIN ranked_snapshots snapshot
+                ON snapshot.source = finding.source
+               AND snapshot.tool_name = finding.tool_name
+               AND snapshot.commit_hash = finding.commit_hash
+               AND snapshot.snapshot_rank = 2
+            )
+            SELECT
+              (SELECT COUNT(*) FROM current_findings current
+               WHERE NOT EXISTS (
+                 SELECT 1 FROM previous_findings previous
+                 WHERE previous.source = current.source
+                   AND previous.tool_name = current.tool_name
+                   AND previous.rule_id = current.rule_id
+                   AND previous.fingerprint = current.fingerprint
+               )),
+              (SELECT COUNT(*) FROM previous_findings previous
+               WHERE NOT EXISTS (
+                 SELECT 1 FROM current_findings current
+                 WHERE current.source = previous.source
+                   AND current.tool_name = previous.tool_name
+                   AND current.rule_id = previous.rule_id
+                   AND current.fingerprint = previous.fingerprint
+               )),
+              (SELECT COUNT(*) FROM current_findings current
+               WHERE EXISTS (
+                 SELECT 1 FROM previous_findings previous
+                 WHERE previous.source = current.source
+                   AND previous.tool_name = current.tool_name
+                   AND previous.rule_id = current.rule_id
+                   AND previous.fingerprint = current.fingerprint
+               ))
+            "#,
+            [],
+            |row| {
+                Ok(SarifLifecycleSummary {
+                    new_findings: row.get(0)?,
+                    resolved_findings: row.get(1)?,
+                    persisted_findings: row.get(2)?,
+                })
+            },
+        ).map_err(Into::into)
     }
 
     fn refresh_current_quality_metrics(&self) -> Result<()> {

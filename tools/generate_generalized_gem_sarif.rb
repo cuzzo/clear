@@ -5,6 +5,7 @@ require "fileutils"
 require "json"
 require "open3"
 require "optparse"
+require_relative "sarif_result_cap"
 
 ROOT = File.expand_path("..", __dir__)
 DECOMPLEX_SARIF_MAX_RESULTS = Integer(ENV.fetch("DECOMPLEX_CI_SARIF_MAX_RESULTS", "1000"))
@@ -134,11 +135,15 @@ def cap_sarif_results(path, max_results)
   return unless results.is_a?(Array) && results.size > max_results
 
   original_count = results.size
-  run["results"] = results.take(max_results)
+  retained, selection = SarifResultCap.select(results, max_results)
+  run["results"] = retained
   properties = run["properties"] ||= {}
   properties["decomplex.sarif_results_original_count"] = original_count
   properties["decomplex.sarif_results_limit"] = max_results
   properties["decomplex.sarif_results_truncated_count"] = original_count - max_results
+  properties["decomplex.sarif_results_original_by_rule"] = selection.fetch("original_by_rule")
+  properties["decomplex.sarif_results_retained_by_rule"] = selection.fetch("retained_by_rule")
+  properties["decomplex.sarif_results_truncated_by_rule"] = selection.fetch("truncated_by_rule")
   File.write(path, JSON.pretty_generate(sarif))
   warn "truncated #{path} results from #{original_count} to #{max_results}"
 end

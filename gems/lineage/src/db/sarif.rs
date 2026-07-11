@@ -587,6 +587,92 @@ mod tests {
     }
 
     #[test]
+    fn current_snapshot_and_lifecycle_ignore_stale_findings() {
+        let dir = tempdir().unwrap();
+        let storage = Storage::open_memory().unwrap();
+        let sarif = dir.path().join("report.sarif");
+        let result = |rule: &str, message: &str| {
+            serde_json::json!({
+                "ruleId": rule,
+                "level": "warning",
+                "message": {"text": message},
+                "locations": [{"physicalLocation": {
+                    "artifactLocation": {"uri": "src/demo.rb"},
+                    "region": {"startLine": 2}
+                }}],
+                "partialFingerprints": {"stable": message}
+            })
+        };
+        let document = |results: Vec<Value>| {
+            serde_json::json!({
+                "version": "2.1.0",
+                "runs": [{
+                    "tool": {"driver": {"name": "Decomplex"}},
+                    "results": results,
+                    "properties": {"format": "decomplex.report.sarif.v1"}
+                }]
+            })
+        };
+
+        fs::write(
+            &sarif,
+            serde_json::to_vec(&document(vec![
+                result("decomplex.old", "resolved"),
+                result("decomplex.same", "persisted"),
+            ]))
+            .unwrap(),
+        )
+        .unwrap();
+        ingest_sarif_paths(
+            &storage,
+            dir.path(),
+            std::slice::from_ref(&sarif),
+            "decomplex",
+            "old",
+            Some(10),
+            false,
+        )
+        .unwrap();
+
+        fs::write(
+            &sarif,
+            serde_json::to_vec(&document(vec![
+                result("decomplex.same", "persisted"),
+                result("decomplex.new", "new"),
+            ]))
+            .unwrap(),
+        )
+        .unwrap();
+        ingest_sarif_paths(
+            &storage,
+            dir.path(),
+            &[sarif],
+            "decomplex",
+            "new",
+            Some(20),
+            false,
+        )
+        .unwrap();
+
+        assert_eq!(storage.count_rows("sarif_findings").unwrap(), 4);
+        let current = storage.sarif_findings_for_path("src/demo.rb").unwrap();
+        assert_eq!(current.len(), 2);
+        assert!(current.iter().all(|finding| finding.commit_hash == "new"));
+        assert_eq!(
+            storage.sarif_finding_counts_by_file().unwrap()["src/demo.rb"],
+            2
+        );
+        assert_eq!(
+            storage.sarif_lifecycle_summary().unwrap(),
+            crate::storage::SarifLifecycleSummary {
+                new_findings: 1,
+                resolved_findings: 1,
+                persisted_findings: 1,
+            }
+        );
+    }
+
+    #[test]
     fn test_sarif_ingest_edge_cases() {
         let dir = tempdir().unwrap();
         let storage = Storage::open_memory().unwrap();
