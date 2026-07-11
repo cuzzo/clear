@@ -274,13 +274,31 @@ module Annotator
         method_overloads = definitions.select { |definition| definition.intrinsic_contract.behavior.is_method }
         return false if method_overloads.empty?
 
-        ufcs_args = [node.object] + node.args
+        receiver_type = node.object.full_type!(context: "intrinsic method receiver")
+        implicit_safe_nav = receiver_type.optional? && node.object.respond_to?(:safe_nav_chain) &&
+          node.object.safe_nav_chain == true
+        resolution_receiver = node.object
+        if implicit_safe_nav
+          resolution_receiver = node.object.dup
+          stamp_type!(resolution_receiver, T.must(receiver_type.wrapped_type))
+        end
+
+        ufcs_args = [resolution_receiver] + node.args
         matched_def = find_matching_intrinsic(method_overloads, ufcs_args)
         return false unless matched_def
 
         visit_IntrinsicFunc(node, ufcs_args, matched_def: matched_def)
-        receiver_type = node.object.full_type!(context: "@node intrinsic collection receiver")
-        element_type = receiver_type.element_type
+        navigation = node.object.is_a?(AST::OptionalUnwrap) || implicit_safe_nav
+        if navigation
+          result = node.full_type!(context: "safe-navigation intrinsic method result")
+          unless result.optional?
+            stamp_type!(node, Type.optional_of(result))
+            node.safe_nav_chain = true
+          end
+        end
+
+        resolved_receiver_type = implicit_safe_nav ? T.must(receiver_type.wrapped_type) : receiver_type
+        element_type = resolved_receiver_type.element_type
         if element_type&.node_reference? && ["append", "push", "insert"].include?(node.name) && node.args.any?
           value_arg = T.must(node.args.last)
           actual_type = value_arg.full_type!(context: "@node collection insertion")

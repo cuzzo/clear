@@ -84,6 +84,22 @@ RSpec.describe "optional @list indexing" do
     expect(zig).to include("_r.name")
   end
 
+  it "keeps the single safe boundary through an intrinsic method call" do
+    source = <<~CLEAR
+      STRUCT Item { name: String }
+      FN main() RETURNS Void ->
+        MUTABLE items: Item[]@list = [];
+        items.append(Item{ name: COPY "abc" });
+        size = items[0]?.name.length() OR 0_i64;
+        ASSERT size == 3_i64;
+      END
+    CLEAR
+
+    zig = ZigTranspiler.new(source_dir: Dir.pwd).transpile(source, source_dir: Dir.pwd)
+    expect(zig).to include("@as(?[]const u8, _r.name)")
+    expect(zig).to include("@as(?i64,")
+  end
+
   it "requires another ?. when a member introduces a new optional boundary" do
     source = CHAIN_SOURCE
       .sub("profile: Profile", "profile: ?Profile")

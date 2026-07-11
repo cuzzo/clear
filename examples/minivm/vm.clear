@@ -353,7 +353,7 @@ END
 # or 0 if unknown / out of range. Cheap (one bounds-checked load).
 FN sourceLineFor(sourceLines: Int64[]@list, ip: Int64) RETURNS Int64 ->
     IF ip < 0_i64 || ip >= sourceLines.length() THEN RETURN 0_i64; END
-    RETURN sourceLines[ip];
+    RETURN sourceLines[ip] OR 0_i64;
 END
 
 # Returns the source path for file_id (0 = main file) or empty string
@@ -361,7 +361,7 @@ END
 # is plumbed through for the future multi-file path.
 FN sourcePathFor(sourcePaths: String[]@list, fileId: Int64) RETURNS String ->
     IF fileId < 0_i64 || fileId >= sourcePaths.length() THEN RETURN ""; END
-    RETURN sourcePaths[fileId];
+    RETURN sourcePaths[fileId] OR "";
 END
 
 # Note: `activeFunctionEntryIp` and `snapshotRegisterVars!` live in
@@ -894,7 +894,7 @@ FN runRegisterBytecode!(ops: Int64[], opcodes: RegisterOp[], consts: RegisterVal
             isBreakpoint.append(0_i64);
         END
         FOR bi IN (0_i64 ..< breakpointIps.length()) DO
-            bpIp = breakpointIps[bi];
+            bpIp = breakpointIps[bi] OR -1_i64;
             IF bpIp >= 0_i64 && bpIp < opcodes.length() THEN
                 isBreakpoint[bpIp] = 1_i64;
                 bpLine = sourceLineFor(sourceLines, bpIp);
@@ -1022,7 +1022,7 @@ FN runRegisterBytecode!(ops: Int64[], opcodes: RegisterOp[], consts: RegisterVal
             IF stepOverDepth >= 0_i64 && frameRetIps.length() > stepOverDepth THEN
                 isBreakpoint[ip] = 0_i64;
                 IF stepOverDepth < frameRetIps.length() THEN
-                    retTarget = frameRetIps[stepOverDepth];
+                    retTarget = frameRetIps[stepOverDepth] OR -1_i64;
                     IF retTarget >= 0_i64 && retTarget < isBreakpoint.length() THEN
                         isBreakpoint[retTarget] = 1_i64;
                     END
@@ -1073,7 +1073,7 @@ FN runRegisterBytecode!(ops: Int64[], opcodes: RegisterOp[], consts: RegisterVal
                     # to the caller. With no caller (top frame), there
                     # is nothing to finish to -- act as `:c`.
                     IF frameRetIps.length() > 0_i64 THEN
-                        retTarget = frameRetIps[frameRetIps.length() - 1_i64];
+                        retTarget = frameRetIps[frameRetIps.length() - 1_i64] OR -1_i64;
                         IF retTarget >= 0_i64 && retTarget < isBreakpoint.length() THEN
                             isBreakpoint[retTarget] = 1_i64;
                         END
@@ -1105,12 +1105,12 @@ FN runRegisterBytecode!(ops: Int64[], opcodes: RegisterOp[], consts: RegisterVal
                     IF frameRetIps.length() > 0 THEN
                         retVal = iregs[iBase + src];
                         last = frameRetIps.length() - 1;
-                        retDst = frameRetDsts[last];
-                        ip = frameRetIps[last];
-                        iBase = frameIBases[last];
-                        fBase = frameFBases[last];
-                        iTop = frameITops[last];
-                        fTop = frameFTops[last];
+                        retDst = frameRetDsts[last] OR 0_i64;
+                        ip = frameRetIps[last] OR -1_i64;
+                        iBase = frameIBases[last] OR 0_i64;
+                        fBase = frameFBases[last] OR 0_i64;
+                        iTop = frameITops[last] OR 0_i64;
+                        fTop = frameFTops[last] OR 0_i64;
                         frameRetIps.pop();
                         frameRetDsts.pop();
                         frameIBases.pop();
@@ -1144,11 +1144,11 @@ FN runRegisterBytecode!(ops: Int64[], opcodes: RegisterOp[], consts: RegisterVal
                     IF errored == 1_i64 THEN
                         IF frameRetIps.length() > 0 THEN
                             last = frameRetIps.length() - 1;
-                            ip = frameRetIps[last];
-                            iBase = frameIBases[last];
-                            fBase = frameFBases[last];
-                            iTop = frameITops[last];
-                            fTop = frameFTops[last];
+                            ip = frameRetIps[last] OR -1_i64;
+                            iBase = frameIBases[last] OR 0_i64;
+                            fBase = frameFBases[last] OR 0_i64;
+                            iTop = frameITops[last] OR 0_i64;
+                            fTop = frameFTops[last] OR 0_i64;
                             frameRetIps.pop();
                             frameRetDsts.pop();
                             frameIBases.pop();
@@ -1364,12 +1364,12 @@ FN runRegisterBytecode!(ops: Int64[], opcodes: RegisterOp[], consts: RegisterVal
                     IF frameRetIps.length() > 0 THEN
                         retVal = fregs[fBase + src];
                         last = frameRetIps.length() - 1;
-                        retDst = frameRetDsts[last];
-                        ip = frameRetIps[last];
-                        iBase = frameIBases[last];
-                        fBase = frameFBases[last];
-                        iTop = frameITops[last];
-                        fTop = frameFTops[last];
+                        retDst = frameRetDsts[last] OR 0_i64;
+                        ip = frameRetIps[last] OR -1_i64;
+                        iBase = frameIBases[last] OR 0_i64;
+                        fBase = frameFBases[last] OR 0_i64;
+                        iTop = frameITops[last] OR 0_i64;
+                        fTop = frameFTops[last] OR 0_i64;
                         frameRetIps.pop();
                         frameRetDsts.pop();
                         frameIBases.pop();
@@ -1664,10 +1664,10 @@ FN runRegisterBytecode!(ops: Int64[], opcodes: RegisterOp[], consts: RegisterVal
                     dst = ops[ip]; ip += 1;
                     listReg = ops[ip]; ip += 1;
                     idxReg = ops[ip]; ip += 1;
-                    IF listReg == 0 THEN iregs[iBase + dst] = list0[iregs[iBase + idxReg]];
-                    ELSE_IF listReg == 1 THEN iregs[iBase + dst] = list1[iregs[iBase + idxReg]];
-                    ELSE_IF listReg == 2 THEN iregs[iBase + dst] = list2[iregs[iBase + idxReg]];
-                    ELSE_IF listReg == 3 THEN iregs[iBase + dst] = list3[iregs[iBase + idxReg]]; END,
+                    IF listReg == 0 THEN iregs[iBase + dst] = list0[iregs[iBase + idxReg]] OR 0_i64;
+                    ELSE_IF listReg == 1 THEN iregs[iBase + dst] = list1[iregs[iBase + idxReg]] OR 0_i64;
+                    ELSE_IF listReg == 2 THEN iregs[iBase + dst] = list2[iregs[iBase + idxReg]] OR 0_i64;
+                    ELSE_IF listReg == 3 THEN iregs[iBase + dst] = list3[iregs[iBase + idxReg]] OR 0_i64; END,
             RegisterOp.LLen ->
                 # LLEN dst list
                     dst = ops[ip]; ip += 1;
@@ -1732,10 +1732,10 @@ FN runRegisterBytecode!(ops: Int64[], opcodes: RegisterOp[], consts: RegisterVal
                     dst = ops[ip]; ip += 1;
                     listReg = ops[ip]; ip += 1;
                     idxReg = ops[ip]; ip += 1;
-                    IF listReg == 0 THEN fregs[fBase + dst] = flist0[iregs[iBase + idxReg]];
-                    ELSE_IF listReg == 1 THEN fregs[fBase + dst] = flist1[iregs[iBase + idxReg]];
-                    ELSE_IF listReg == 2 THEN fregs[fBase + dst] = flist2[iregs[iBase + idxReg]];
-                    ELSE_IF listReg == 3 THEN fregs[fBase + dst] = flist3[iregs[iBase + idxReg]]; END,
+                    IF listReg == 0 THEN fregs[fBase + dst] = flist0[iregs[iBase + idxReg]] OR 0.0;
+                    ELSE_IF listReg == 1 THEN fregs[fBase + dst] = flist1[iregs[iBase + idxReg]] OR 0.0;
+                    ELSE_IF listReg == 2 THEN fregs[fBase + dst] = flist2[iregs[iBase + idxReg]] OR 0.0;
+                    ELSE_IF listReg == 3 THEN fregs[fBase + dst] = flist3[iregs[iBase + idxReg]] OR 0.0; END,
             RegisterOp.SEq ->
                 # SEQ dst left right
                     dst = ops[ip]; ip += 1;
@@ -1962,10 +1962,10 @@ FN runRegisterBytecode!(ops: Int64[], opcodes: RegisterOp[], consts: RegisterVal
                     dst = ops[ip]; ip += 1;
                     listReg = ops[ip]; ip += 1;
                     idxReg = ops[ip]; ip += 1;
-                    IF listReg == 0 THEN sregs[dst] = COPY slist0[iregs[iBase + idxReg]];
-                    ELSE_IF listReg == 1 THEN sregs[dst] = COPY slist1[iregs[iBase + idxReg]];
-                    ELSE_IF listReg == 2 THEN sregs[dst] = COPY slist2[iregs[iBase + idxReg]];
-                    ELSE_IF listReg == 3 THEN sregs[dst] = COPY slist3[iregs[iBase + idxReg]]; END,
+                    IF listReg == 0 THEN sregs[dst] = COPY (slist0[iregs[iBase + idxReg]] OR "");
+                    ELSE_IF listReg == 1 THEN sregs[dst] = COPY (slist1[iregs[iBase + idxReg]] OR "");
+                    ELSE_IF listReg == 2 THEN sregs[dst] = COPY (slist2[iregs[iBase + idxReg]] OR "");
+                    ELSE_IF listReg == 3 THEN sregs[dst] = COPY (slist3[iregs[iBase + idxReg]] OR ""); END,
             RegisterOp.LSLen ->
                 # LSLEN dst list
                     dst = ops[ip]; ip += 1;
@@ -2313,28 +2313,28 @@ FN runRegisterBytecode!(ops: Int64[], opcodes: RegisterOp[], consts: RegisterVal
                     listReg = ops[ip]; ip += 1;
                     idxReg = ops[ip]; ip += 1;
                     IF listReg == 0 THEN
-                        PARTIAL MATCH vlist0[iregs[iBase + idxReg]] START
+                        PARTIAL MATCH vlist0[iregs[iBase + idxReg]] OR RegisterValue.Nil START
                             RegisterValue.Nil       -> iregs[iBase + dstTag] = 0_i64;,
                             RegisterValue.Int64Val  -> iregs[iBase + dstTag] = 1_i64;,
                             RegisterValue.Number    -> iregs[iBase + dstTag] = 2_i64;,
                             RegisterValue.Str       -> iregs[iBase + dstTag] = 3_i64;
                         END
                     ELSE_IF listReg == 1 THEN
-                        PARTIAL MATCH vlist1[iregs[iBase + idxReg]] START
+                        PARTIAL MATCH vlist1[iregs[iBase + idxReg]] OR RegisterValue.Nil START
                             RegisterValue.Nil       -> iregs[iBase + dstTag] = 0_i64;,
                             RegisterValue.Int64Val  -> iregs[iBase + dstTag] = 1_i64;,
                             RegisterValue.Number    -> iregs[iBase + dstTag] = 2_i64;,
                             RegisterValue.Str       -> iregs[iBase + dstTag] = 3_i64;
                         END
                     ELSE_IF listReg == 2 THEN
-                        PARTIAL MATCH vlist2[iregs[iBase + idxReg]] START
+                        PARTIAL MATCH vlist2[iregs[iBase + idxReg]] OR RegisterValue.Nil START
                             RegisterValue.Nil       -> iregs[iBase + dstTag] = 0_i64;,
                             RegisterValue.Int64Val  -> iregs[iBase + dstTag] = 1_i64;,
                             RegisterValue.Number    -> iregs[iBase + dstTag] = 2_i64;,
                             RegisterValue.Str       -> iregs[iBase + dstTag] = 3_i64;
                         END
                     ELSE_IF listReg == 3 THEN
-                        PARTIAL MATCH vlist3[iregs[iBase + idxReg]] START
+                        PARTIAL MATCH vlist3[iregs[iBase + idxReg]] OR RegisterValue.Nil START
                             RegisterValue.Nil       -> iregs[iBase + dstTag] = 0_i64;,
                             RegisterValue.Int64Val  -> iregs[iBase + dstTag] = 1_i64;,
                             RegisterValue.Number    -> iregs[iBase + dstTag] = 2_i64;,
@@ -2347,28 +2347,28 @@ FN runRegisterBytecode!(ops: Int64[], opcodes: RegisterOp[], consts: RegisterVal
                     dst = ops[ip]; ip += 1;
                     listReg = ops[ip]; ip += 1;
                     idxReg = ops[ip]; ip += 1;
-                    IF listReg == 0 THEN PARTIAL MATCH vlist0[iregs[iBase + idxReg]] START RegisterValue.Int64Val AS n -> iregs[iBase + dst] = n;, DEFAULT -> PASS; END
-                    ELSE_IF listReg == 1 THEN PARTIAL MATCH vlist1[iregs[iBase + idxReg]] START RegisterValue.Int64Val AS n -> iregs[iBase + dst] = n;, DEFAULT -> PASS; END
-                    ELSE_IF listReg == 2 THEN PARTIAL MATCH vlist2[iregs[iBase + idxReg]] START RegisterValue.Int64Val AS n -> iregs[iBase + dst] = n;, DEFAULT -> PASS; END
-                    ELSE_IF listReg == 3 THEN PARTIAL MATCH vlist3[iregs[iBase + idxReg]] START RegisterValue.Int64Val AS n -> iregs[iBase + dst] = n;, DEFAULT -> PASS; END END,
+                    IF listReg == 0 THEN PARTIAL MATCH vlist0[iregs[iBase + idxReg]] OR RegisterValue.Nil START RegisterValue.Int64Val AS n -> iregs[iBase + dst] = n;, DEFAULT -> PASS; END
+                    ELSE_IF listReg == 1 THEN PARTIAL MATCH vlist1[iregs[iBase + idxReg]] OR RegisterValue.Nil START RegisterValue.Int64Val AS n -> iregs[iBase + dst] = n;, DEFAULT -> PASS; END
+                    ELSE_IF listReg == 2 THEN PARTIAL MATCH vlist2[iregs[iBase + idxReg]] OR RegisterValue.Nil START RegisterValue.Int64Val AS n -> iregs[iBase + dst] = n;, DEFAULT -> PASS; END
+                    ELSE_IF listReg == 3 THEN PARTIAL MATCH vlist3[iregs[iBase + idxReg]] OR RegisterValue.Nil START RegisterValue.Int64Val AS n -> iregs[iBase + dst] = n;, DEFAULT -> PASS; END END,
             RegisterOp.LVGetF ->
                 # LVGETF dst list idx
                     dst = ops[ip]; ip += 1;
                     listReg = ops[ip]; ip += 1;
                     idxReg = ops[ip]; ip += 1;
-                    IF listReg == 0 THEN PARTIAL MATCH vlist0[iregs[iBase + idxReg]] START RegisterValue.Number AS n -> fregs[fBase + dst] = n;, DEFAULT -> PASS; END
-                    ELSE_IF listReg == 1 THEN PARTIAL MATCH vlist1[iregs[iBase + idxReg]] START RegisterValue.Number AS n -> fregs[fBase + dst] = n;, DEFAULT -> PASS; END
-                    ELSE_IF listReg == 2 THEN PARTIAL MATCH vlist2[iregs[iBase + idxReg]] START RegisterValue.Number AS n -> fregs[fBase + dst] = n;, DEFAULT -> PASS; END
-                    ELSE_IF listReg == 3 THEN PARTIAL MATCH vlist3[iregs[iBase + idxReg]] START RegisterValue.Number AS n -> fregs[fBase + dst] = n;, DEFAULT -> PASS; END END,
+                    IF listReg == 0 THEN PARTIAL MATCH vlist0[iregs[iBase + idxReg]] OR RegisterValue.Nil START RegisterValue.Number AS n -> fregs[fBase + dst] = n;, DEFAULT -> PASS; END
+                    ELSE_IF listReg == 1 THEN PARTIAL MATCH vlist1[iregs[iBase + idxReg]] OR RegisterValue.Nil START RegisterValue.Number AS n -> fregs[fBase + dst] = n;, DEFAULT -> PASS; END
+                    ELSE_IF listReg == 2 THEN PARTIAL MATCH vlist2[iregs[iBase + idxReg]] OR RegisterValue.Nil START RegisterValue.Number AS n -> fregs[fBase + dst] = n;, DEFAULT -> PASS; END
+                    ELSE_IF listReg == 3 THEN PARTIAL MATCH vlist3[iregs[iBase + idxReg]] OR RegisterValue.Nil START RegisterValue.Number AS n -> fregs[fBase + dst] = n;, DEFAULT -> PASS; END END,
             RegisterOp.LVGetS ->
                 # LVGETS dst list idx
                     dst = ops[ip]; ip += 1;
                     listReg = ops[ip]; ip += 1;
                     idxReg = ops[ip]; ip += 1;
-                    IF listReg == 0 THEN PARTIAL MATCH vlist0[iregs[iBase + idxReg]] START RegisterValue.Str AS s -> sregs[dst] = COPY s;, DEFAULT -> PASS; END
-                    ELSE_IF listReg == 1 THEN PARTIAL MATCH vlist1[iregs[iBase + idxReg]] START RegisterValue.Str AS s -> sregs[dst] = COPY s;, DEFAULT -> PASS; END
-                    ELSE_IF listReg == 2 THEN PARTIAL MATCH vlist2[iregs[iBase + idxReg]] START RegisterValue.Str AS s -> sregs[dst] = COPY s;, DEFAULT -> PASS; END
-                    ELSE_IF listReg == 3 THEN PARTIAL MATCH vlist3[iregs[iBase + idxReg]] START RegisterValue.Str AS s -> sregs[dst] = COPY s;, DEFAULT -> PASS; END END,
+                    IF listReg == 0 THEN PARTIAL MATCH vlist0[iregs[iBase + idxReg]] OR RegisterValue.Nil START RegisterValue.Str AS s -> sregs[dst] = COPY s;, DEFAULT -> PASS; END
+                    ELSE_IF listReg == 1 THEN PARTIAL MATCH vlist1[iregs[iBase + idxReg]] OR RegisterValue.Nil START RegisterValue.Str AS s -> sregs[dst] = COPY s;, DEFAULT -> PASS; END
+                    ELSE_IF listReg == 2 THEN PARTIAL MATCH vlist2[iregs[iBase + idxReg]] OR RegisterValue.Nil START RegisterValue.Str AS s -> sregs[dst] = COPY s;, DEFAULT -> PASS; END
+                    ELSE_IF listReg == 3 THEN PARTIAL MATCH vlist3[iregs[iBase + idxReg]] OR RegisterValue.Nil START RegisterValue.Str AS s -> sregs[dst] = COPY s;, DEFAULT -> PASS; END END,
             RegisterOp.LSSplit ->
                 # LSSPLIT dst src sep -- fill slist[dst] with the
                 # parts of sregs[src] split on sregs[sep]. Mirrors the
@@ -2484,16 +2484,22 @@ FN runRegisterBytecode!(ops: Int64[], opcodes: RegisterOp[], consts: RegisterVal
             RegisterOp.IHAppend ->
                     handleReg = ops[ip]; ip += 1;
                     src = ops[ip]; ip += 1;
-                    intListHandles[iregs[iBase + handleReg]].values.append(iregs[iBase + src]);,
+                    IF intListHandles[iregs[iBase + handleReg]] AS handle THEN
+                        handle.values.append(iregs[iBase + src]);
+                    END,
             RegisterOp.IHGet ->
                     dst = ops[ip]; ip += 1;
                     handleReg = ops[ip]; ip += 1;
                     idxReg = ops[ip]; ip += 1;
-                    iregs[iBase + dst] = intListHandles[iregs[iBase + handleReg]].values[iregs[iBase + idxReg]];,
+                    IF intListHandles[iregs[iBase + handleReg]] AS handle THEN
+                        iregs[iBase + dst] = handle.values[iregs[iBase + idxReg]] OR 0_i64;
+                    END,
             RegisterOp.IHLen ->
                     dst = ops[ip]; ip += 1;
                     handleReg = ops[ip]; ip += 1;
-                    iregs[iBase + dst] = intListHandles[iregs[iBase + handleReg]].values.length();,
+                    IF intListHandles[iregs[iBase + handleReg]] AS handle THEN
+                        iregs[iBase + dst] = handle.values.length();
+                    END,
             RegisterOp.SHNew ->
                     dst = ops[ip]; ip += 1;
                     newHandle = stringListHandles.length();
@@ -2502,22 +2508,30 @@ FN runRegisterBytecode!(ops: Int64[], opcodes: RegisterOp[], consts: RegisterVal
             RegisterOp.SHAppend ->
                     handleReg = ops[ip]; ip += 1;
                     src = ops[ip]; ip += 1;
-                    stringListHandles[iregs[iBase + handleReg]].values.append(COPY sregs[src]);,
+                    IF stringListHandles[iregs[iBase + handleReg]] AS handle THEN
+                        handle.values.append(COPY sregs[src]);
+                    END,
             RegisterOp.SHGet ->
                     dst = ops[ip]; ip += 1;
                     handleReg = ops[ip]; ip += 1;
                     idxReg = ops[ip]; ip += 1;
-                    sregs[dst] = COPY stringListHandles[iregs[iBase + handleReg]].values[iregs[iBase + idxReg]];,
+                    IF stringListHandles[iregs[iBase + handleReg]] AS handle THEN
+                        sregs[dst] = COPY (handle.values[iregs[iBase + idxReg]] OR "");
+                    END,
             RegisterOp.SHLen ->
                     dst = ops[ip]; ip += 1;
                     handleReg = ops[ip]; ip += 1;
-                    iregs[iBase + dst] = stringListHandles[iregs[iBase + handleReg]].values.length();,
+                    IF stringListHandles[iregs[iBase + handleReg]] AS handle THEN
+                        iregs[iBase + dst] = handle.values.length();
+                    END,
             RegisterOp.BgSpawn ->
                     bgDst = ops[ip]; ip += 1;
                     bgEntry = ops[ip]; ip += 1;
                     ip += 1;
                     MUTABLE bgCaps: RegisterValue[]@list = List[];
-                    FOR bci IN (0_i64 ..< pendingCaps.length()) DO bgCaps.append(COPY pendingCaps[bci]); END
+                    FOR bci IN (0_i64 ..< pendingCaps.length()) DO
+                        bgCaps.append(COPY (pendingCaps[bci] OR RegisterValue.Nil));
+                    END
                     pendingCaps = List[];
                     bgFut: ~RegisterValue = BG { @service ->
                         runRegisterBytecode!(COPY ops, COPY opcodes, COPY consts, COPY sourceLines, COPY sourceColumns, COPY sourcePaths, COPY breakpointIps, COPY varNames, bgEntry, GIVE bgCaps, sharedCells) OR RAISE;
@@ -2534,7 +2548,11 @@ FN runRegisterBytecode!(ops: Int64[], opcodes: RegisterOp[], consts: RegisterVal
                     IF futureResolved[fniKey] AS fniCached THEN
                         fniPv = COPY fniCached;
                     ELSE
-                        fniPv = NEXT futureTable[fniFidVal];
+                        IF futureTable[fniFidVal] AS fniFuture THEN
+                            fniPv = NEXT fniFuture;
+                        ELSE
+                            RAISE "invalid future id";
+                        END
                         futureResolved[fniKey] = COPY fniPv;
                     END
                     PARTIAL MATCH fniPv START
@@ -2551,7 +2569,11 @@ FN runRegisterBytecode!(ops: Int64[], opcodes: RegisterOp[], consts: RegisterVal
                     IF futureResolved[fnfKey] AS fnfCached THEN
                         fnfPv = COPY fnfCached;
                     ELSE
-                        fnfPv = NEXT futureTable[fnfFidVal];
+                        IF futureTable[fnfFidVal] AS fnfFuture THEN
+                            fnfPv = NEXT fnfFuture;
+                        ELSE
+                            RAISE "invalid future id";
+                        END
                         futureResolved[fnfKey] = COPY fnfPv;
                     END
                     PARTIAL MATCH fnfPv START
@@ -2568,7 +2590,11 @@ FN runRegisterBytecode!(ops: Int64[], opcodes: RegisterOp[], consts: RegisterVal
                     IF futureResolved[fnsKey] AS fnsCached THEN
                         fnsPv = COPY fnsCached;
                     ELSE
-                        fnsPv = NEXT futureTable[fnsFidVal];
+                        IF futureTable[fnsFidVal] AS fnsFuture THEN
+                            fnsPv = NEXT fnsFuture;
+                        ELSE
+                            RAISE "invalid future id";
+                        END
                         futureResolved[fnsKey] = COPY fnsPv;
                     END
                     PARTIAL MATCH fnsPv START
@@ -2579,7 +2605,7 @@ FN runRegisterBytecode!(ops: Int64[], opcodes: RegisterOp[], consts: RegisterVal
                     cgiDst = ops[ip]; ip += 1;
                     cgiCidx = ops[ip]; ip += 1;
                     cgiIdx = getRegisterConstInt(consts, cgiCidx);
-                    PARTIAL MATCH captureSlots[cgiIdx] START
+                    PARTIAL MATCH captureSlots[cgiIdx] OR RegisterValue.Nil START
                         RegisterValue.Int64Val AS cgiV -> iregs[iBase + cgiDst] = cgiV;,
                         RegisterValue.Number AS cgiN -> iregs[iBase + cgiDst] = toInt(cgiN);,
                         DEFAULT -> iregs[iBase + cgiDst] = 0_i64;
@@ -2588,7 +2614,7 @@ FN runRegisterBytecode!(ops: Int64[], opcodes: RegisterOp[], consts: RegisterVal
                     cgfDst = ops[ip]; ip += 1;
                     cgfCidx = ops[ip]; ip += 1;
                     cgfIdx = getRegisterConstInt(consts, cgfCidx);
-                    PARTIAL MATCH captureSlots[cgfIdx] START
+                    PARTIAL MATCH captureSlots[cgfIdx] OR RegisterValue.Nil START
                         RegisterValue.Number AS cgfV -> fregs[fBase + cgfDst] = cgfV;,
                         RegisterValue.Int64Val AS cgfI -> fregs[fBase + cgfDst] = toFloat(cgfI);,
                         DEFAULT -> fregs[fBase + cgfDst] = 0.0;
@@ -2597,7 +2623,7 @@ FN runRegisterBytecode!(ops: Int64[], opcodes: RegisterOp[], consts: RegisterVal
                     cgsDst = ops[ip]; ip += 1;
                     cgsCidx = ops[ip]; ip += 1;
                     cgsIdx = getRegisterConstInt(consts, cgsCidx);
-                    PARTIAL MATCH captureSlots[cgsIdx] START
+                    PARTIAL MATCH captureSlots[cgsIdx] OR RegisterValue.Nil START
                         RegisterValue.Str AS cgsV -> sregs[cgsDst] = COPY cgsV;,
                         DEFAULT -> sregs[cgsDst] = "";
                     END,
@@ -2623,7 +2649,7 @@ FN runRegisterBytecode!(ops: Int64[], opcodes: RegisterOp[], consts: RegisterVal
                     scgDst = ops[ip]; ip += 1;
                     scgCell = ops[ip]; ip += 1;
                     WITH POLYMORPHIC EXCLUSIVE sharedCells AS sc {
-                        PARTIAL MATCH sc[iregs[iBase + scgCell]] START
+                        PARTIAL MATCH sc[iregs[iBase + scgCell]] OR RegisterValue.Nil START
                             RegisterValue.Int64Val AS scgV -> iregs[iBase + scgDst] = scgV;,
                             RegisterValue.Number AS scgN -> iregs[iBase + scgDst] = toInt(scgN);,
                             DEFAULT -> iregs[iBase + scgDst] = 0_i64;
@@ -2647,7 +2673,7 @@ FN runRegisterBytecode!(ops: Int64[], opcodes: RegisterOp[], consts: RegisterVal
                     WHILE !laAcquired DO
                         WITH POLYMORPHIC EXCLUSIVE sharedCells AS sc {
                             MUTABLE laFree = FALSE;
-                            PARTIAL MATCH sc[laCellIdx + 1_i64] START
+                            PARTIAL MATCH sc[laCellIdx + 1_i64] OR RegisterValue.Nil START
                                 RegisterValue.Int64Val AS laL -> IF laL == 0_i64 THEN laFree = TRUE; END,
                                 DEFAULT -> laFree = TRUE;
                             END

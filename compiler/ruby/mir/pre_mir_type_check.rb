@@ -31,7 +31,7 @@ module PreMirTypeCheck
     Schemas::EnumSchema, Schemas::InlineStructVariant, Schemas::ResourceSchema,
     Schemas::StructSchema, Schemas::UnionSchema
   ].freeze
-  WalkNode = T.type_alias { T.nilable(T.any(AST::Node, AST::RawBody, T::Hash[BasicObject, BasicObject], Struct, T::Struct, Scope, Schemas::EnumSchema, Schemas::InlineStructVariant, Schemas::ResourceSchema, Schemas::StructSchema, Schemas::UnionSchema, SymbolEntry, Lexer::Token, Symbol, String, Numeric, TrueClass, FalseClass, Type)) }
+  WalkNode = T.type_alias { T.nilable(T.any(AST::Node, AST::RawBody, T::Hash[BasicObject, BasicObject], T::Set[BasicObject], Struct, T::Struct, Scope, Schemas::EnumSchema, Schemas::InlineStructVariant, Schemas::ResourceSchema, Schemas::StructSchema, Schemas::UnionSchema, SymbolEntry, Lexer::Token, Symbol, String, Numeric, TrueClass, FalseClass, Type)) }
   Violation = T.type_alias { T::Hash[Symbol, String] }
 
 
@@ -88,7 +88,7 @@ module PreMirTypeCheck
       violations << { cls: node.class.name.to_s.split("::").last, loc: loc }
     end
 
-    if node.is_a?(Array)
+    if node.is_a?(Array) || node.is_a?(Set)
       node.each { |c| walk(c, violations, seen) }
     elsif node.is_a?(Hash)
       node.each_value { |v| walk(v, violations, seen) }

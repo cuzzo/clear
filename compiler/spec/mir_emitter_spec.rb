@@ -586,8 +586,8 @@ RSpec.describe MIREmitter do
   it "emits compact repeated default array init" do
     node = MIR::ArrayDefaultInit.new("[]const u8", "256", MIR::Lit.new("\"\""), :frame, Type.array_of(:String, capacity: 256))
     expect(node.result_type.zig_type).to eq("[256][]const u8")
-    expect(node.ownership_effect.produces_owned).to eq(true)
-    expect(node.ownership_effect.alloc).to eq(:frame)
+    expect(node.ownership_effect.produces_owned).to eq(false)
+    expect(node.ownership_effect.alloc).to be_nil
     expect(e.emit(node)).to eq("[_][]const u8{ \"\" } ** 256")
   end
 
@@ -1690,6 +1690,11 @@ RSpec.describe MIREmitter do
         MIR::Ident.new("value"),
         MIR::Lit.new("0"),
       ))).to eq("(if (maybe) |value| value else 0)")
+      typed_optional = MIR::IfOptional.new(
+        MIR::Ident.new("maybe"), "value", MIR::Ident.new("value"), MIR::Lit.new("@as(?i64, null)"),
+      )
+      typed_optional.result_type = Type.new(:"?Int64")
+      expect(e.emit(typed_optional)).to eq("(if (maybe) |value| @as(?i64, value) else @as(?i64, null))")
       owned_slice = e.emit(MIR::OwnedSlice.new(MIR::Ident.new("list"), :heap))
       expect(owned_slice).to include("try __x.toOwnedSlice(rt.heapAlloc())")
       expect(owned_slice).to include("break :blk_owned_slice_")

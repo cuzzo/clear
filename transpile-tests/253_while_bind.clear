@@ -33,8 +33,10 @@ FN test_resolve_traversal() RETURNS !Void ->
     MUTABLE sum = 0_i64;
     MUTABLE i: Int64 = 0;
     WHILE i < 3 DO
-        IF RESOLVE links[i] AS node THEN
-            sum = sum + node.val;
+        IF links[i] AS link THEN
+            IF RESOLVE link AS node THEN
+                sum = sum + node.val;
+            END
         END
         i = i + 1;
     END

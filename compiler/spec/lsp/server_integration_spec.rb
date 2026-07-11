@@ -14,7 +14,7 @@ require "timeout"
 # Each example is wrapped in a 5-second timeout so a hung server
 # fails fast rather than blocking the suite.
 RSpec.describe "clear-lsp end-to-end (binary)", :integration do
-  REPO_ROOT = File.expand_path("../../..", __FILE__)
+  REPO_ROOT = File.expand_path("../../..", __dir__)
   BIN_PATH  = File.join(REPO_ROOT, "bin", "clear-lsp")
 
   def frame(msg)

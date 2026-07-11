@@ -305,8 +305,8 @@ RSpec.describe "AST coverage burndown" do
       expect(typed_field.type.resolved).to eq(:Any)
 
       inline = Schemas::InlineStructVariant.new(fields: { radius: :Float64, "name" => explicit })
-      expect(inline.fields[:radius].resolved).to eq(:Float64)
-      expect(inline.fields["name"].resolved).to eq(:String)
+      expect(inline.typed_fields["radius"].resolved).to eq(:Float64)
+      expect(inline.typed_fields["name"].resolved).to eq(:String)
       expect(inline.typed_fields.keys).to contain_exactly("radius", "name")
 
       union = Schemas::UnionSchema.new(variants: {
@@ -316,9 +316,9 @@ RSpec.describe "AST coverage burndown" do
         Unit: nil,
         Inline: inline
       })
-      expect(union.variants[:Some].resolved).to eq(:Int64)
-      expect(union.variants["Named"].resolved).to eq(:String)
-      expect(union.variants[:Existing].resolved).to eq(:String)
+      expect(Type.from_variant_input(union.variants[:Some]).resolved).to eq(:Int64)
+      expect(Type.from_variant_input(union.variants["Named"]).resolved).to eq(:String)
+      expect(Type.from_variant_input(union.variants[:Existing]).resolved).to eq(:String)
       expect(union.variants[:Unit]).to be_nil
       expect(union.variants[:Inline]).to equal(inline)
     end
@@ -338,7 +338,7 @@ RSpec.describe "AST coverage burndown" do
         return_type: :String,
         reentrant: true
       )
-      fn_id = Type.new(fn_sig).send(:type_id).key
+      fn_id = Type.from_function_signature(fn_sig).send(:type_id).key
 
       expect(fn_id).to include("fn(")
       expect(fn_id).to include("Int64")
@@ -598,12 +598,13 @@ RSpec.describe "AST coverage burndown" do
       expect(copy.generic_args_raw).to eq([:Int64])
       expect(copy.generic_args_raw).not_to equal(shape.generic_args_raw)
 
-      expect(TypeShape.new(raw: [:tuple, nil, Type.new(:Int64)]).resolved).to eq(:Int64)
-      expect(TypeShape.new(raw: [:tuple, nil, :String]).resolved).to eq(:String)
-      expect(TypeShape.new(raw: [:tuple, nil, "Bool"]).resolved).to eq(:Bool)
-      expect(TypeShape.new(raw: [:tuple, nil, Object.new]).resolved).to eq(:Any)
+      fn_type = Type::FunctionType.new(
+        params: [Type::FunctionTypeParam.new(type: Type.new(:Int64))],
+        return_type: Type.new(:Bool)
+      )
+      expect(TypeShape.new(raw: fn_type).resolved).to eq(:Any)
+      expect(TypeShape.new(raw: fn_type).fn_type?).to be(true)
       expect(TypeShape.new(raw: "Float64").resolved).to eq(:Float64)
-      expect(TypeShape.new(raw: Object.new).resolved).to eq(:Any)
     end
 
     it "covers binary-op numeric and unknown-operator branches" do

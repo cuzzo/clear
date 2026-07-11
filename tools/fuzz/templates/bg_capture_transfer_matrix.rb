@@ -111,7 +111,7 @@ def bct_use(shape, mode)
   when :field_copy
     "observeString(COPY v.label)"
   when :list_index_copy
-    shape == :string_list_owned ? "observeString(COPY v[0_i64]) + 2_i64" : "v.length() + v[0_i64] - 1_i64"
+    shape == :string_list_owned ? "observeString(COPY (v[0_i64] OR \"\")) + 2_i64" : "v.length() + (v[0_i64] OR 0_i64) - 1_i64"
   when :call_arg
     "observe(#{arg})"
   else

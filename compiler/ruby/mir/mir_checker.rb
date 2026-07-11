@@ -1368,11 +1368,11 @@ class MIRChecker
 
   sig { params(node: T.nilable(MIR::Node)).returns(T::Boolean) }
   def value_constructor_expr?(node)
-    return true if node.is_a?(MIR::StructInit) || node.is_a?(MIR::ArrayInit)
+    return true if node.is_a?(MIR::StructInit) || node.is_a?(MIR::ArrayInit) || node.is_a?(MIR::ArrayDefaultInit)
     return false unless node.is_a?(MIR::MethodCall) && ["create", "createBound"].include?(node.method)
 
     receiver = node.receiver
-    receiver.is_a?(MIR::Ident) && receiver.name.start_with?("CheatLib.NodeStore(")
+    receiver.is_a?(MIR::Call) && receiver.callee == "CheatLib.NodeStore"
   end
 
   sig { params(node: MIR::Node).returns(MIR::Node) }

@@ -188,7 +188,12 @@ module MIRLoweringControlFlow
       expr, pending = lower_head do
         if mutable_struct_list_bind?(b.expr)
           index = T.cast(b.expr, AST::GetIndex)
-          emit_builtin(:getAtPtrOpt, [MIR::AddressOf.new(lower(index.target)), lower(index.index)])
+          target = lower(index.target)
+          # Collection parameters are pointer-shaped in the Zig ABI already.
+          # Taking their address here produces **ArrayList and breaks the
+          # optional mutable-element lookup. Locals still need their address.
+          target = MIR::AddressOf.new(target) unless collection_param_receiver?(index.target)
+          emit_builtin(:getAtPtrOpt, [target, lower(index.index)])
         else
           lower_control_condition(b.expr, transfers_to_capture: true)
         end
@@ -205,7 +210,18 @@ module MIRLoweringControlFlow
         node_ref: Type.from_node!(b.expr).node_reference?,
       }
     end
-    then_body = capture_markers + with_if_bind_alias_maps(node) { lower_body(node.then_branch) }
+    lowered_then = with_if_bind_alias_maps(node) { lower_body(node.then_branch) }
+    # CleanupClassifier/MIRPass stamps production IF-bind bodies with the
+    # capture AllocMark + Drop pair. Keep the fallback for directly-constructed
+    # ASTs used by lowering clients, but never emit a second owner for the same
+    # capture when the stamped pair is already present.
+    existing_capture_names = lowered_then.filter_map do |stmt|
+      stmt.name.to_s if stmt.is_a?(MIR::AllocMark)
+    end.to_set
+    capture_markers = capture_markers.reject do |stmt|
+      stmt.respond_to?(:name) && existing_capture_names.include?(stmt.name.to_s)
+    end
+    then_body = capture_markers + lowered_then
 
     else_body = (node.else_branch && !node.else_branch.empty?) ? lower_body(node.else_branch) : nil
     MIR::IfBindStmt.new(mir_bindings, then_body, else_body)
@@ -218,7 +234,13 @@ module MIRLoweringControlFlow
     receiver = expr.target.full_type!(context: "IF list binding receiver")
     result = expr.full_type!(context: "IF list binding result")
     inner = result.optional? ? T.must(result.wrapped_type) : result
-    receiver.list_collection? && inner.struct? && !inner.node_reference?
+    receiver.list_collection? && inner.struct? && !inner.collection? && !inner.node_reference? &&
+      !inner.link? && !inner.any_rc?
+  end
+
+  sig { params(target: AST::Node).returns(T::Boolean) }
+  def collection_param_receiver?(target)
+    target.is_a?(AST::Identifier) && current_function_collection_param?(target.name)
   end
 
   sig do
@@ -339,10 +361,12 @@ module MIRLoweringControlFlow
     if (capture_cleanup = bind_capture_cleanup(node.condition))
       capture_name = node.binding_name.to_s
       capture_type = Type.from_node!(node.condition)
-      body = [
-        MIR::AllocMark.new(capture_name, :heap, capture_type, :iteration),
-        MIR::Cleanup.new(capture_name, capture_cleanup),
-      ] + body
+      unless body.any? { |stmt| stmt.is_a?(MIR::AllocMark) && stmt.name.to_s == capture_name }
+        body = [
+          MIR::AllocMark.new(capture_name, :heap, capture_type, :iteration),
+          MIR::Cleanup.new(capture_name, capture_cleanup),
+        ] + body
+      end
     end
     finalize_loop_frame_alloc_scopes!(body, node.mark_per_iter)
 
@@ -1045,6 +1069,14 @@ module MIRLoweringControlFlow
       names = value_names unless value_names.empty?
     end
     marks = plan.transfer_marks_for(names, function_state.lowered_guarded_cleanup_names)
+    if value.is_a?(MIR::Ident) && marks.empty? && returned_hoist_binding?(value.name.to_s)
+      marks = MIR::OwnershipTransferPlan.new(
+        name: value.name.to_s,
+        target: :return,
+        target_alloc: nil,
+        move_guarded: lowered_guarded_cleanup_name?(value.name.to_s),
+      ).marks
+    end
     marks.empty? ? ret : marks + [ret]
   end
 
@@ -1214,8 +1246,11 @@ module MIRLoweringControlFlow
   def returned_hoist_binding?(name)
     T.bind(self, MIRLowering) rescue nil
     return false unless name.start_with?("__hoist_")
-    entry = function_state.bindings[name]
-    !!(entry&.needs_cleanup?)
+    # Fallible borrowed results are also hoisted, but have no allocation to
+    # transfer. Generic owned values can have an AllocMark without a concrete
+    # destructor, so use the structural allocation fact rather than cleanup
+    # presence to distinguish the two.
+    function_state.lowered_alloc_names.include?(name)
   end
 
   sig { params(name: String).returns(T::Boolean) }

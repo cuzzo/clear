@@ -812,6 +812,12 @@ module FunctionAnalysis
   sig { params(facts: CallArgumentFacts).returns(T::Boolean) }
   def basic_argument_match?(facts)
     T.bind(self, SemanticAnnotator)
+    # Range validation is contextual: an unsuffixed literal is initially
+    # Int64, but the callee's parameter may be Byte/Int8/etc. Validate before
+    # any of the compatibility fast paths return. Previously only the
+    # autocast tail checked this, so accepted numeric coercions could silently
+    # truncate out-of-range call arguments.
+    check_prefixed_int_range!(facts.arg_node, facts.expected_type)
     return true if facts.expected_type.any? || facts.actual == :Any ||
       facts.expected_type.semantic_type_key == facts.actual_type.semantic_type_key
     return true if any_element_collection_param?(facts.expected_type, facts.actual_type)
@@ -825,7 +831,6 @@ module FunctionAnalysis
     return false unless is_safe_autocast?(facts.actual, facts.expected_type)
 
     facts.arg_node.coerced_type = facts.expected_type
-    check_prefixed_int_range!(facts.arg_node, facts.expected_type)
     true
   end
 

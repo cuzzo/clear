@@ -618,7 +618,7 @@ FN evalList!(items: Value[], envId: Id<Env>, MUTABLE pool: Env[50000]@pool) RETU
             IF isError?(argVal) THEN RETURN argVal; END
             evaled.append(argVal);
         END
-        f = evaled[0];
+        f = evaled[0] OR Value.Nil;
         IF isLambda?(f) THEN
             PARTIAL MATCH f START
                 Value.Lambda AS lam ->
@@ -638,8 +638,10 @@ FN evalList!(items: Value[], envId: Id<Env>, MUTABLE pool: Env[50000]@pool) RETU
                     IF pool[callId] AS callEnv THEN callEnv.vars["__p"] = Value{ EnvRef: closureEnv }; END
                     lambdaParamNames = lambdaParamsText.split("\n");
                     FOR pi IN (0_i64 ..< lambdaParamNames.length()) DO
-                        IF lambdaParamNames[pi] != "" THEN
-                            IF pool[callId] AS callEnv2 THEN callEnv2.vars[lambdaParamNames[pi]] = COPY evaled[pi + 1]; END
+                        IF (lambdaParamNames[pi] OR panic("lambda parameter index invariant")) != "" THEN
+                            IF pool[callId] AS callEnv2 THEN
+                                callEnv2.vars[lambdaParamNames[pi] OR panic("lambda parameter index invariant")] = COPY (evaled[pi + 1] OR Value.Nil);
+                            END
                         END
                     END
                     MUTABLE bodyPenv: HashMap<Value> = {};

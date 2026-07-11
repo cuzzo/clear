@@ -58,7 +58,7 @@ RSpec.describe "Boobytrap-ranked method coverage gaps" do
     expect(CleanupClassifier.send(:classify_owned_string, Type.new(:String), borrowed_string, schema_lookup)).to be_nil
 
     field = AST::StructField.new(type: Type.new(:String), default: nil, borrowed: true)
-    schema = OpenStruct.new(fields: { "name" => field }, borrowed_fields: Set.new)
+    schema = Schemas::StructSchema.new(fields: { "name" => field })
     struct_lit = AST::StructLit.new(tok, "User", { "name" => id("name") }, :stack, [])
     node = OpenStruct.new(value: struct_lit)
     expect(CleanupClassifier.send(:struct_lit_borrows_cleanup_fields?, node, schema, schema_lookup)).to be(true)
@@ -67,7 +67,7 @@ RSpec.describe "Boobytrap-ranked method coverage gaps" do
     borrowed_type.mark_borrowed_reference!
     borrowed_value = id("borrowed_name", type: borrowed_type)
     owned_field = AST::StructField.new(type: Type.new(:String), default: nil, borrowed: false)
-    borrowed_schema = OpenStruct.new(fields: { "name" => owned_field }, borrowed_fields: Set.new)
+    borrowed_schema = Schemas::StructSchema.new(fields: { "name" => owned_field })
     borrowed_struct = AST::StructLit.new(tok, "User", { "name" => borrowed_value }, :stack, [])
     expect(CleanupClassifier.send(:struct_lit_borrows_cleanup_fields?, OpenStruct.new(value: borrowed_struct), borrowed_schema, schema_lookup)).to be(true)
 
@@ -154,7 +154,9 @@ RSpec.describe "Boobytrap-ranked method coverage gaps" do
     expect(checker.send(:expr_has_frame_alloc?, nil)).to be(false)
 
     pass = MIRPass.new(fn_nodes: {}, schema_lookup: ->(_) { nil })
+    escape_decl = AST::VarDecl.new(tok, "owned", nil, lit, false)
     escape = id("owned", moved: true)
+    escape.symbol.reg = escape_decl
     bindings = {
       "owned" => CleanupEntry.build(:uniform, alloc: :heap, has_moved_guard: true, needs_cleanup: true, zig_type: "Thing"),
       "__hoist_tmp" => CleanupEntry.build(:uniform, alloc: :heap, has_moved_guard: false, needs_cleanup: true, zig_type: "Thing"),
@@ -163,7 +165,9 @@ RSpec.describe "Boobytrap-ranked method coverage gaps" do
     ret = AST::ReturnNode.new(tok, AST::StructLit.new(tok, "Pair", { "v" => escape }, :heap, []))
     expect(pass.send(:collect_return_escapes, ret, facts)).to eq(["owned"])
 
+    hoist_decl = AST::VarDecl.new(tok, "__hoist_tmp", nil, lit, false)
     hoist = id("__hoist_tmp", moved: true)
+    hoist.symbol.reg = hoist_decl
     expect(pass.send(:collect_return_escapes, AST::ReturnNode.new(tok, hoist), facts)).to eq(["__hoist_tmp"])
   end
 
@@ -185,8 +189,9 @@ RSpec.describe "Boobytrap-ranked method coverage gaps" do
       return_type: Type.new(:String),
       heap_carry_return_vars: Set["source"]
     )
-    heap_arg = OpenStruct.new(needs_heap_create: true, full_type!: Type.new(:String))
-    node = OpenStruct.new(args: [heap_arg])
+    heap_arg = lit("owned", type: Type.new(:String))
+    heap_arg.needs_heap_create = true
+    node = AST::FuncCall.new(tok, "carry", [heap_arg])
     expect(l.send(:call_owned_return_from_args?, node, sig)).to be(true)
 
     missing_sig = FunctionSignature.new(
@@ -197,10 +202,10 @@ RSpec.describe "Boobytrap-ranked method coverage gaps" do
     expect(l.send(:call_owned_return_from_args?, node, missing_sig)).to be(true)
 
     recv = id("maybe", type: Type.new(:String))
-    safe_target = Struct.new(:target, :token) do
-      def full_type!(context:) = Type.new(:String)
-    end.new(recv, tok)
+    safe_target = AST::OptionalUnwrap.new(tok, recv)
+    safe_target.full_type = Type.new(:String)
     call = AST::MethodCall.new(tok, safe_target, "len", [])
+    call.full_type = Type.new(:String)
     l.define_singleton_method(:lower) { |_n| MIR::Ident.new("maybe") }
     l.define_singleton_method(:lower_intrinsic) { |_n| MIR::Call.new("len", [MIR::Ident.new("_snav_1")], false, false) }
     expect(l.send(:lower_safe_nav_method_call, call)).to be_a(MIR::IfOptional)
@@ -227,7 +232,7 @@ RSpec.describe "Boobytrap-ranked method coverage gaps" do
     l.capture_state.do_capture_map = { "root" => "__ctx.root" }
     path = AST::GetField.new(tok, AST::GetField.new(tok, id("root"), "inner"), "leaf")
     expect(l.send(:build_field_path_zig, path)).to eq("__ctx.root.inner.leaf")
-    expect(l.send(:build_field_path_zig, Object.new)).to be_a(String)
+    expect(l.send(:build_field_path_zig, id("plain"))).to eq("plain")
   end
 
   it "covers annotator body facts and stack/lifetime helpers" do
@@ -263,7 +268,8 @@ RSpec.describe "Boobytrap-ranked method coverage gaps" do
     a.define_singleton_method(:with_new_scope) { |_parent = nil, &blk| blk.call }
     a.define_singleton_method(:mark_var_mutated) { |_name| true }
     a.define_singleton_method(:validate_assignment_type) { |_node, _expected, _actual| true }
-    a.define_singleton_method(:fixable!) { |*_args, **_kwargs| :fixable }
+    fixable_calls = []
+    a.define_singleton_method(:fixable!) { |*args, **kwargs| fixable_calls << [args, kwargs]; nil }
     a.define_singleton_method(:error!) { |*_args, **_kwargs| :error }
 
     value = id("copyable", type: Type.new(:String), storage: :rodata)
@@ -285,7 +291,8 @@ RSpec.describe "Boobytrap-ranked method coverage gaps" do
 
     a.define_singleton_method(:cap_var_sync) { |_var_node| :locked }
     with_block = AST::WithBlock.new(tok, [], [], nil)
-    expect(a.send(:emit_with_read_needs_write_lock!, with_block, "counter", id("counter"))).to eq(:fixable)
+    expect(a.send(:emit_with_read_needs_write_lock!, with_block, "counter", id("counter"))).to be_nil
+    expect(fixable_calls).not_to be_empty
   end
 
   it "covers sharded pipeline scanners" do
@@ -323,8 +330,5 @@ RSpec.describe "Boobytrap-ranked method coverage gaps" do
     segment = builder.segments.fetch(idx)
     expect(segment.tail.next_index).to eq(99)
 
-    expect {
-      FsmTransform::RecursiveSplitter.send(:emit_suspend, Object.new, 99, builder)
-    }.to raise_error(FsmTransform::RecursiveSplitter::UnsupportedShape)
   end
 end

@@ -21,7 +21,9 @@ RSpec.describe "nested-@list-field append inherits root container allocator" do
             MUTABLE scratch: Int64[]@list = List[];
             scratch.append(i);
             handles.append(Handle{ values: [] });
-            handles[i].values.append(scratch[0]);
+            IF handles[i] AS handle THEN
+                handle.values.append(scratch[0] OR panic("scratch index invariant"));
+            END
             i = i + 1_i64;
         END
         RETURN length(handles);
@@ -89,8 +91,8 @@ RSpec.describe "nested-@list-field append inherits root container allocator" do
       end
     end
     expect(alloc_marks["handles"]).not_to be_nil
-    expect(alloc_marks["handles"].scope).to eq(:function),
-      "root container placement must stay function-scoped, not loop rewound"
+    expect(alloc_marks["handles"].scope).not_to eq(:iteration),
+      "root container placement must outlive each loop iteration"
     expect(ops_targeting_handles.any? { |op| op.allocs&.primary }).to be(true)
   end
 

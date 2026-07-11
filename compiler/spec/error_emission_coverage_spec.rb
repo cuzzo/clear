@@ -57,7 +57,7 @@ RSpec.describe "error emission coverage" do
     it "embeds Internal Args Error when kwargs miss a %{name} key" do
       out = dummy.format_diagnostic_template("Hello %{name}", [], {})
       expect(out).to include("Internal Args Error")
-      expect(out).to include("kwargs=")
+      expect(out).to include("{}")
     end
 
     it "uses positional template % args when no kwargs and no %{name}" do
@@ -4882,7 +4882,7 @@ RSpec.describe "error emission coverage" do
     it "compiles when the stream is non-observable" do
       run(<<~CLEAR)
         FN main() RETURNS Void ->
-            s: ~Int64[] = BG STREAM { YIELD 1; };
+            s: ~?Int64[] = BG STREAM { YIELD 1; };
             _ = s;
         END
       CLEAR

@@ -577,10 +577,12 @@ module EffectTracker
       # uses_rt deliberately excluded -- alloc_fault is "fn could OOM" and
       # uses_rt fns reference rt without necessarily allocating (e.g.
       # Versioned.read EBR pin).
-      direct_alloc =
-        (fn_node.uses_frame == true) ||
-        (fn_node.uses_heap == true) ||
-        (fn_node.uses_alloc == true)
+      # Placement/runtime use is not the same as allocating here. A caller
+      # that receives an owned list from `build() OR fallback` needs frame/
+      # heap cleanup support, but the callee's allocation fault is terminated
+      # at that OR boundary. `uses_alloc` is the explicit direct-allocation
+      # fact; transitive allocation comes from propagating_callees below.
+      direct_alloc = (fn_node.uses_alloc == true)
       # Contract authority: a fn DECLARED to return an owned heap
       # collection/map/string necessarily allocated that value. The
       # body-count above misses `RETURN [1_i64]` (the makeList is

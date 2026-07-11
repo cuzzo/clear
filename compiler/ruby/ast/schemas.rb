@@ -500,6 +500,6 @@ module Schemas
 
   # Field-bearing schema: StructSchema or ResourceSchema (EXTERN STRUCT
   # ... CLOSE carries fields too), so `.fields` is safe to read.
-  sig { params(s: FieldBearingSchema).returns(T::Boolean) }
+  sig { params(s: SchemaValue).returns(T::Boolean) }
   def self.field_bearing?(s) = s.is_a?(StructSchema) || s.is_a?(ResourceSchema)
 end

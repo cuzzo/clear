@@ -343,7 +343,7 @@ RSpec.describe "Stack Tier Recommendations" do
         END
       CLEAR
       warnings = []
-      allow($stderr).to receive(:puts) { |msg| warnings << msg }
+      allow(Kernel).to receive(:warn) { |msg| warnings << msg }
       analyze(src)
       expect(warnings.any? { |w| w.include?("@stack resolved to @micro") && w.include?("replace @stack with @micro") }).to be true
     end

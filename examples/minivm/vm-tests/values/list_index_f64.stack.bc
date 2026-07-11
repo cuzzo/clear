@@ -20,10 +20,21 @@ instructions:
 0036 LOAD_CONST_I64    4 ; I:1
 0038 I_TO_VAL
 0039 NATIVE_CALL       34 2
-0042 HALT
+0042 STORE_NAME        5
+0044 NOT
+0045 NOT
+0046 JUMP_IF_FALSE     52
+0048 LOAD_NAME         6
+0050 JUMP              55
+0052 LOAD_CONST_F64    7 ; F:0.0
+0054 F_TO_VAL
+0055 HALT
 consts:
 L
 F:1.5
 F:2.5
 F:3.5
 I:1
+SYM:__orelse_34
+SYM:__orelse_34
+F:0.0

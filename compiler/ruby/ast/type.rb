@@ -263,7 +263,9 @@ class TypeShape < T::Struct
     if after_error_str.start_with?("?")
       shape_str = T.must(after_error_str[1..])
       shape_str = T.must(shape_str[1..]) while shape_str.start_with?("?")
-      raise "Invalid type '#{after_error_str}': ?~T (optional of tense) is not allowed — use ~?T instead" if shape_str.start_with?("~")
+      # ?~T is distinct from ~?T: the former is an optional promise (for
+      # example, a bounds-checked lookup in ~T[]@list), while the latter is a
+      # promise/stream whose produced value is optional. Both are meaningful.
     end
 
     array_parts = parse_array_shape(shape_str)

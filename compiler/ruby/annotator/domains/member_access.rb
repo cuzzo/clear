@@ -59,10 +59,11 @@ module Annotator
 
         # Special cases not covered by INDEX_OPS
         elsif target_type_info.promise_list?
-          # Promise list indexing yields ~T (tense type); dispatch_key returns :array
-          # but resolve_index_op guards against this above.
+          # Promise lists obey the same bounds contract as every @list:
+          # indexing may miss, so the promise itself is optional. NEXT must
+          # happen after an explicit IF-AS/safe unwrap.
           elem_t = target_type_info.tense_type.element_type
-          stamp_type!(node, Type.new(:"~#{elem_t.resolved}"))
+          stamp_type!(node, Type.optional_of(Type.new(:"~#{elem_t.resolved}")))
         elsif target_type_info.string? && !target_type_info.raw?
           error!(node, :STRING_INDEX_BY_INT)
         elsif node.target.metatype == :struct

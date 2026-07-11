@@ -1134,7 +1134,7 @@ RSpec.describe SemanticAnnotator do
   describe "SOA opportunity warnings" do
     def capture_notes(code)
       notes = []
-      allow($stderr).to receive(:puts) do |msg|
+      allow(Kernel).to receive(:warn) do |msg|
         notes << msg if msg.include?("[Note]")
       end
       ZigTranspiler.new.transpile(code)

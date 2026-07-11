@@ -472,6 +472,9 @@ module Annotator
 
       sig { params(node: AST::FuncCall).returns(T::Boolean) }
       def fn_var_call_error_fallible?(node)
+        # The backend's uniform callback ABI uses `anyerror!R`, but that is an
+        # implementation channel rather than source-level fallibility. Only a
+        # callback declared with an error-union result makes its caller fail.
         sig = FunctionSignature.unwrap(node.matched_signature) if node.respond_to?(:matched_signature)
         return true if sig&.return_type&.error_union?
 

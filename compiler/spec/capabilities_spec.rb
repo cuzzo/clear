@@ -2074,7 +2074,7 @@ RSpec.describe SemanticAnnotator do
     let(:entry) { STD_LIB["writeFile"] }
 
     def clear_stdlib_signature_cache!
-      IntrinsicRegistry::SIGS_CACHE.delete(STD_LIB.object_id)
+      IntrinsicRegistry::SIGS_CACHE.delete(:STD_LIB)
     end
 
     around do |example|

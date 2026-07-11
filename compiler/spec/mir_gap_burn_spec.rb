@@ -2080,7 +2080,7 @@ RSpec.describe "MIR gap-burn characterization" do
     expect(items).to eq([])
 
     fn_sig = FunctionSignature.new(params: [], return_type: Type.new(:Void))
-    expect(low.send(:mir_cast, MIR::Ident.new("fn"), Type.new(fn_sig), Type.new(:Any))).to be_a(MIR::Cast)
+    expect(low.send(:mir_cast, MIR::Ident.new("fn"), Type.from_function_signature(fn_sig), Type.new(:Any))).to be_a(MIR::Cast)
     expect(low.send(:mir_cast, MIR::Ident.new("err"), Type.new(:Int64), Type.new(:"!String"))).to be_a(MIR::Cast)
     expect(low.send(:mir_cast, MIR::Ident.new("i"), Type.new(:Float64), Type.new(:Int64)).expr.method).to eq(:intFromFloat)
     expect(low.send(:mir_cast, MIR::Ident.new("f"), Type.new(:Float32), Type.new(:Float64)).expr.method).to eq(:floatCast)
@@ -3671,7 +3671,7 @@ RSpec.describe "MIR gap-burn characterization" do
     )
     pool_loop = low.send(:for_each_loop_stmt, AST::ForEach.new(tok, "item", id("pool", type: pool_type), [], nil, false), pool_plan)
     expect(pool_loop).to be_a(MIR::ForStmt)
-    expect(pool_loop.capture).to match(/\*__pslot_\d+/)
+    expect(pool_loop.capture).to match(/__pslot_idx_\d+/)
     expect(pool_loop.body.first).to be_a(MIR::IfStmt)
     expect(low.send(:for_each_owned_collection_source_alloc, MIR::Ident.new("items"), Type.new(:String))).to be_a(Symbol)
 
@@ -3858,7 +3858,7 @@ RSpec.describe "MIR gap-burn characterization" do
 
     lambda_sig = FunctionSignature.new(params: [], return_type: Type.new(:Int64))
     lambda_node = AST::LambdaLit.new(tok, [], ["raw_capture"], [lit(1, type: :Int64)], nil, nil)
-    lambda_node.full_type = Type.new(lambda_sig)
+    lambda_node.full_type = Type.from_function_signature(lambda_sig)
     lambda_out = lowering.send(:lower_lambda, lambda_node)
     expect(lambda_out.captures).to eq(["raw_capture"])
   end

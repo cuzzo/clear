@@ -15,7 +15,7 @@ FN frameContextIBase(
     IF frameIndex == 0_i64 THEN RETURN iBase; END
     idx = frameIBases.length() - frameIndex;
     IF idx < 0_i64 || idx >= frameIBases.length() THEN RETURN iBase; END
-    RETURN frameIBases[idx];
+    RETURN frameIBases[idx] OR iBase;
 END
 
 FN frameContextFBase(
@@ -26,7 +26,7 @@ FN frameContextFBase(
     IF frameIndex == 0_i64 THEN RETURN fBase; END
     idx = frameFBases.length() - frameIndex;
     IF idx < 0_i64 || idx >= frameFBases.length() THEN RETURN fBase; END
-    RETURN frameFBases[idx];
+    RETURN frameFBases[idx] OR fBase;
 END
 
 FN frameContextIp(
@@ -37,7 +37,7 @@ FN frameContextIp(
     IF frameIndex == 0_i64 THEN RETURN ip; END
     idx = frameRetIps.length() - frameIndex;
     IF idx < 0_i64 || idx >= frameRetIps.length() THEN RETURN ip; END
-    RETURN frameRetIps[idx];
+    RETURN frameRetIps[idx] OR ip;
 END
 
 # Stdin-based debugger pause for the register VM. The runner is
@@ -189,16 +189,16 @@ FN debugPrintBacktrace!(frameRetIps: Int64[]@list, currentIp: Int64, currentLine
     MUTABLE i: Int64 = frameRetIps.length() - 1_i64;
     MUTABLE depth: Int64 = 1_i64;
     TIGHT WHILE i >= 0_i64 DO
-        retIp = frameRetIps[i];
+        retIp = frameRetIps[i] OR -1_i64;
         # Inline `sourceLineFor` / column lookup -- declared later in
         # vm.clear (after this file is REQUIREd), so we can't call them.
         MUTABLE retLine: Int64 = 0_i64;
         IF retIp >= 0_i64 && retIp < sourceLines.length() THEN
-            retLine = sourceLines[retIp];
+            retLine = sourceLines[retIp] OR 0_i64;
         END
         MUTABLE retCol: Int64 = 0_i64;
         IF retIp >= 0_i64 && retIp < sourceColumns.length() THEN
-            retCol = sourceColumns[retIp];
+            retCol = sourceColumns[retIp] OR 0_i64;
         END
         depthStr = depth.toString() OR "?";
         retIpStr = retIp.toString() OR "?";
@@ -226,12 +226,12 @@ FN debugPrintBreakpoints!(
         RETURN;
     END
     FOR bi IN (0_i64 ..< breakpointEntries.length()) DO
-        b: BreakpointEntry = breakpointEntries[bi];
+        b = breakpointEntries[bi] OR BreakpointEntry{ id: 0_i64, sourceLine: 0_i64, ip: -1_i64, enabled: 0_i64 };
         idStr = b.id.toString() OR "?";
         lineStr = b.sourceLine.toString() OR "?";
         ipStr = b.ip.toString() OR "?";
         MUTABLE state: String = "off";
-        IF b.ip >= 0_i64 && b.ip < isBreakpoint.length() && isBreakpoint[b.ip] != 0_i64 THEN
+        IF b.ip >= 0_i64 && b.ip < isBreakpoint.length() && (isBreakpoint[b.ip] OR 0_i64) != 0_i64 THEN
             state = "on";
         END
         print("  #" + idStr + "  line " + lineStr + "  ip=" + ipStr + "  " + state);
@@ -255,7 +255,7 @@ FN debugAddBreakpoint!(
     END
     MUTABLE targetIp: Int64 = -1_i64;
     FOR bi IN (0_i64 ..< sourceLines.length()) DO
-        IF sourceLines[bi] == line THEN
+        IF (sourceLines[bi] OR -1_i64) == line THEN
             targetIp = bi;
             BREAK;
         END
@@ -294,12 +294,13 @@ FN debugDeleteBreakpoint!(
 ) RETURNS !Void ->
     MUTABLE found: Bool = FALSE;
     FOR bi IN (0_i64 ..< breakpointEntries.length()) DO
-        b: BreakpointEntry = breakpointEntries[bi];
-        IF b.id == id THEN
-            IF b.ip >= 0_i64 && b.ip < isBreakpoint.length() THEN
-                isBreakpoint[b.ip] = 0_i64;
+        IF breakpointEntries[bi] AS b THEN
+            IF b.id == id THEN
+                IF b.ip >= 0_i64 && b.ip < isBreakpoint.length() THEN
+                    isBreakpoint[b.ip] = 0_i64;
+                END
+                found = TRUE;
             END
-            found = TRUE;
         END
     END
     IF found == FALSE THEN
@@ -318,8 +319,10 @@ END
 FN activeFunctionEntryIp(varNames: RegisterVarName[]@list, currentIp: Int64) RETURNS Int64 ->
     MUTABLE bestEntry: Int64 = 0_i64;
     FOR ni IN (0_i64 ..< varNames.length()) DO
-        e = varNames[ni].funcEntryIp;
-        IF e <= currentIp && e > bestEntry THEN bestEntry = e; END
+        IF varNames[ni] AS entry THEN
+            e = entry.funcEntryIp;
+            IF e <= currentIp && e > bestEntry THEN bestEntry = e; END
+        END
     END
     RETURN bestEntry;
 END
@@ -356,20 +359,21 @@ FN snapshotRegisterVars!(
     MUTABLE winnerIdx: HashMap<Int64> = {};
     MUTABLE winnerLine: HashMap<Int64> = {};
     FOR vni IN (0_i64 ..< varNames.length()) DO
-        vEntry = varNames[vni];
-        IF vEntry.funcEntryIp == bestEntry && vEntry.sourceLine < pauseLine THEN
-            key = vEntry.kind + ":" + vEntry.physIdx.toString();
-            existing = winnerLine[key] OR -1_i64;
-            IF vEntry.sourceLine > existing THEN
-                winnerLine[key] = vEntry.sourceLine;
-                winnerIdx[key] = vni;
+        IF varNames[vni] AS vEntry THEN
+            IF vEntry.funcEntryIp == bestEntry && vEntry.sourceLine < pauseLine THEN
+                key = vEntry.kind + ":" + vEntry.physIdx.toString();
+                existing = winnerLine[key] OR -1_i64;
+                IF vEntry.sourceLine > existing THEN
+                    winnerLine[key] = vEntry.sourceLine;
+                    winnerIdx[key] = vni;
+                END
             END
         END
     END
 
     FOR vni IN (0_i64 ..< varNames.length()) DO
-        vEntry = varNames[vni];
-        IF vEntry.funcEntryIp == bestEntry && vEntry.sourceLine < pauseLine THEN
+        IF varNames[vni] AS vEntry THEN
+          IF vEntry.funcEntryIp == bestEntry && vEntry.sourceLine < pauseLine THEN
             key = vEntry.kind + ":" + vEntry.physIdx.toString();
             chosen = winnerIdx[key] OR -1_i64;
             IF chosen == vni THEN
@@ -384,21 +388,27 @@ FN snapshotRegisterVars!(
                 IF vEntry.kind == "i" THEN
                     ridx = iBase + vEntry.physIdx;
                     IF ridx >= 0_i64 && ridx < 512_i64 THEN
-                        valStr = iregs[ridx].toString() OR "?";
-                        varSnapshot[COPY vEntry.name] = typedPrefix + valStr;
+                        intValStr = iregs[ridx].toString() OR "?";
+                        intRendered = typedPrefix + intValStr;
+                        varSnapshot[vEntry.name] = intRendered;
                     END
                 ELSE_IF vEntry.kind == "f" THEN
                     ridx = fBase + vEntry.physIdx;
                     IF ridx >= 0_i64 && ridx < 512_i64 THEN
-                        valStr = fregs[ridx].toString() OR "?";
-                        varSnapshot[COPY vEntry.name] = typedPrefix + valStr;
+                        # Float formatting is not yet available in the tiny
+                        # debugger surface; keep the binding visible and typed.
+                        floatValStr = "?";
+                        floatRendered = typedPrefix + floatValStr;
+                        varSnapshot[vEntry.name] = floatRendered;
                     END
                 ELSE_IF vEntry.kind == "s" THEN
                     IF vEntry.physIdx >= 0_i64 && vEntry.physIdx < 256_i64 THEN
-                        varSnapshot[COPY vEntry.name] = typedPrefix + sregs[vEntry.physIdx];
+                        stringRendered = typedPrefix + sregs[vEntry.physIdx];
+                        varSnapshot[vEntry.name] = stringRendered;
                     END
                 END
             END
+          END
         END
     END
     RETURN varSnapshot;
@@ -426,7 +436,7 @@ FN replayBackward!(
 ) RETURNS !Void ->
     MUTABLE i: Int64 = events.length() - 1_i64;
     TIGHT WHILE i >= 0_i64 DO
-        e = events[i];
+      IF events[i] AS e THEN
         IF e.step <= toStep THEN BREAK; END
         IF e.step <= fromStep THEN
             IF e.kind == 1_i64 THEN
@@ -439,10 +449,11 @@ FN replayBackward!(
                 END
             ELSE_IF e.kind == 3_i64 THEN
                 IF e.slot >= 0_i64 && e.slot < sregs.length() && e.iBefore >= 0_i64 && e.iBefore < traceStrings.length() THEN
-                    sregs[e.slot] = COPY traceStrings[e.iBefore];
+                    sregs[e.slot] = COPY (traceStrings[e.iBefore] OR "");
                 END
             END
         END
+      END
         i = i - 1_i64;
     END
     RETURN;
@@ -542,9 +553,9 @@ FN registerDebugPause!(
                 viewColumn = 0_i64;
                 MUTABLE probe: Int64 = viewIp;
                 TIGHT WHILE probe < sourceLines.length() && viewLine == 0_i64 DO
-                    viewLine = sourceLines[probe];
+                    viewLine = sourceLines[probe] OR 0_i64;
                     IF probe < sourceColumns.length() THEN
-                        viewColumn = sourceColumns[probe];
+                        viewColumn = sourceColumns[probe] OR 0_i64;
                     END
                     probe = probe + 1_i64;
                 END
@@ -570,9 +581,9 @@ FN registerDebugPause!(
                 viewColumn = 0_i64;
                 MUTABLE probe: Int64 = viewIp;
                 TIGHT WHILE probe < sourceLines.length() && viewLine == 0_i64 DO
-                    viewLine = sourceLines[probe];
+                    viewLine = sourceLines[probe] OR 0_i64;
                     IF probe < sourceColumns.length() THEN
-                        viewColumn = sourceColumns[probe];
+                        viewColumn = sourceColumns[probe] OR 0_i64;
                     END
                     probe = probe + 1_i64;
                 END
@@ -600,9 +611,9 @@ FN registerDebugPause!(
                 viewColumn = 0_i64;
                 MUTABLE probe: Int64 = viewIp;
                 TIGHT WHILE probe < sourceLines.length() && viewLine == 0_i64 DO
-                    viewLine = sourceLines[probe];
+                    viewLine = sourceLines[probe] OR 0_i64;
                     IF probe < sourceColumns.length() THEN
-                        viewColumn = sourceColumns[probe];
+                        viewColumn = sourceColumns[probe] OR 0_i64;
                     END
                     probe = probe + 1_i64;
                 END
@@ -640,7 +651,7 @@ FN registerDebugPause!(
             END
         ELSE_IF trimmed == ":dumpevents" THEN
             FOR di IN (0_i64 ..< traceEvents.length()) DO
-                e = traceEvents[di];
+                e = traceEvents[di] OR TraceEvent{ step: 0_i64, kind: 0_i64, slot: 0_i64, iBefore: 0_i64, iAfter: 0_i64, fBefore: 0.0, fAfter: 0.0, ip: 0_i64 };
                 idxStr = di.toString() OR "?";
                 stepStr = e.step.toString() OR "?";
                 kindStr = e.kind.toString() OR "?";
@@ -678,7 +689,7 @@ FN registerDebugPause!(
                     print("at start of trace -- nothing earlier to undo");
                 ELSE
                     targetIdx = traceCursor - 1_i64;
-                    target = traceEvents[targetIdx];
+                    target = traceEvents[targetIdx] OR TraceEvent{ step: 0_i64, kind: 0_i64, slot: 0_i64, iBefore: 0_i64, iAfter: 0_i64, fBefore: 0.0, fAfter: 0.0, ip: 0_i64 };
                     IF target.kind == 1_i64 THEN
                         IF target.slot >= 0_i64 && target.slot < iregs.length() THEN
                             iregs[target.slot] = target.iBefore;
@@ -689,7 +700,7 @@ FN registerDebugPause!(
                         END
                     ELSE_IF target.kind == 3_i64 THEN
                         IF target.slot >= 0_i64 && target.slot < sregs.length() && target.iBefore >= 0_i64 && target.iBefore < traceStrings.length() THEN
-                            sregs[target.slot] = COPY traceStrings[target.iBefore];
+                            sregs[target.slot] = COPY (traceStrings[target.iBefore] OR "");
                         END
                     END
                     traceCursor = targetIdx;
@@ -714,7 +725,7 @@ FN registerDebugPause!(
             IF traceCursor >= traceEvents.length() THEN
                 print("at end of trace -- nothing later to redo");
             ELSE
-                target = traceEvents[traceCursor];
+                target = traceEvents[traceCursor] OR TraceEvent{ step: 0_i64, kind: 0_i64, slot: 0_i64, iBefore: 0_i64, iAfter: 0_i64, fBefore: 0.0, fAfter: 0.0, ip: 0_i64 };
                 IF target.kind == 1_i64 THEN
                     IF target.slot >= 0_i64 && target.slot < iregs.length() THEN
                         iregs[target.slot] = target.iAfter;
@@ -725,7 +736,7 @@ FN registerDebugPause!(
                     END
                 ELSE_IF target.kind == 3_i64 THEN
                     IF target.slot >= 0_i64 && target.slot < sregs.length() && target.iAfter >= 0_i64 && target.iAfter < traceStrings.length() THEN
-                        sregs[target.slot] = COPY traceStrings[target.iAfter];
+                        sregs[target.slot] = COPY (traceStrings[target.iAfter] OR "");
                     END
                 END
                 traceCursor = traceCursor + 1_i64;

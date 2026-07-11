@@ -187,6 +187,9 @@ module MIRLoweringVariables
       init,
       let_node
     ).statements
+    nodes.each do |item|
+      function_state.lowered_alloc_names.add(item.name.to_s) if item.is_a?(MIR::AllocMark)
+    end
 
     # A node handle is non-owning, but mutations of collection fields inside
     # its NodeStore payload still need allocator provenance. The store is
@@ -773,6 +776,11 @@ module MIRLoweringVariables
         lowered = lower(node.value)
         place_value_for_destination(lowered, node.value, assign_alloc, node.full_type!)
       end
+      # Some synthetic/branch-local BindExpr reassignments do not retain a
+      # name-keyed cleanup entry. The lowered owning value still carries its
+      # authoritative allocator; preserve it on the sink transfer rather than
+      # emitting unverifiable target_alloc=nil.
+      assign_alloc ||= mir_owned_alloc(value)
       value = copy_container_borrow_if_needed(value, node.value)
       stamp_allocating_result_target!(value, target_name, alloc: assign_alloc) if assign_alloc && value
       value = hoist_alloc(value, node.value, err_cleanup: true) if value && mir_allocates?(value) &&
@@ -914,6 +922,15 @@ module MIRLoweringVariables
     result = MIR::Set.new(plan.target, value)
     target_alloc = if plan.cleanup_field
       placement_for_node(root_receiver_node(T.must(plan.cleanup_field)) || T.must(plan.cleanup_field))
+    elsif node.name.is_a?(String) || node.name.is_a?(AST::Identifier)
+      # Reassigning an owning scalar (most commonly a mutable String) moves
+      # the new value into the existing binding. Preserve that binding's
+      # allocator on the transfer so MIR can prove frame-vs-heap safety.
+      raw_name = node.name.is_a?(AST::Identifier) ? node.name.name.to_s : node.name
+      safe_name = assignment_storage_name(raw_name, renamed: false)
+      entry = function_state.bindings[safe_name] || function_state.bindings[raw_name]
+      entry&.alloc || mir_owned_alloc(value) ||
+        (node.name.is_a?(AST::Identifier) ? placement_for_node(node.name) : nil)
     end
     with_ownership_consumption_for_value(result, value, node.value, "MIR::Set", target_alloc: target_alloc)
     mark_field_assignment_cleanup!(result, plan)

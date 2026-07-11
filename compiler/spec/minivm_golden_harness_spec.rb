@@ -49,6 +49,10 @@ RSpec.describe "MiniVM golden harness", :integration do
     types/union_tag_i64.clear
     values/map_contains_i64.clear
     values/map_delete_i64.clear
+    values/list_index_f64.clear
+    values/list_index_i64.clear
+    values/list_set_f64.clear
+    values/list_set_i64.clear
     values/string_length.clear
     values/union_helper_multi_return_i64.clear
   ].to_set.freeze

@@ -1042,25 +1042,15 @@ module CleanupClassifier
     # Strong / weak / optional Rc/Arc all flow through CheatLib.cleanup's
     # refInnerType + releaseOne arms (which detect weak/atomic via
     # comptime). The Ruby just needs the binding's allocator and -- for
-    # struct-wrapping-Rc bindings -- a side-channel to release inner
-    # heap fields after Rc strong=0 (no field cleanup is done by the
-    # uniform releaseOne path).
+    # struct-wrapping-Rc bindings -- payload cleanup is performed exactly once
+    # by rcRelease/arcRelease when the final strong reference disappears.
     if ti.link?
       entry(:rc)
     elsif ti.optional?
       entry(:rc, rc_alloc: wrapper_alloc(ti))
     else
       rc_alloc = wrapper_alloc(ti)
-      e = entry(:rc, rc_alloc: rc_alloc)
-      if ti.any_rc? && !ti.sync
-        schema = schema_lookup.call(ti.resolved) rescue nil
-        if Schemas.field_bearing?(schema)
-          base_type = ti.non_optional_type
-          e[:needs_release_fields] = true
-          e[:base_zig] = base_type.zig_type
-        end
-      end
-      e
+      entry(:rc, rc_alloc: rc_alloc)
     end
   end
 
@@ -1138,6 +1128,15 @@ module CleanupClassifier
     return nil if ti.any_rc? || ti.link? || SymbolEntry.cleanup_sync?(sync)
     return nil if ti.implicitly_copyable?(schema_lookup)
     return nil if ti.collection?
+    # Raw fixed arrays are inline Zig values even when conservative escape
+    # analysis heap-places the containing function frame. Primitive elements
+    # carry no independent resources, so there is no allocation or cleanup to
+    # mark. Resource-bearing elements are handled earlier by
+    # classify_array_struct_strings.
+    if ti.fixed? && ti.array?
+      elem = ti.element_type
+      return nil if elem && !elem_type_needs_cleanup?(elem, schema_lookup)
+    end
 
     return entry(:heap_string) if cleanup_owned_string_type?(ti)
     return entry(:uniform) if ti.array? && !ti.collection?
@@ -1176,6 +1175,10 @@ module CleanupClassifier
     # Primitives (f64, i64, Bool, Byte) are stack values -- never need heap cleanup
     # even if storage was incorrectly set to :heap by upstream passes.
     return nil if ti.primitive?
+    if ti.fixed? && ti.array?
+      elem = ti.element_type
+      return nil if elem && !elem_type_needs_cleanup?(elem, schema_lookup)
+    end
 
     schema = schema_lookup.call(ti.resolved) rescue nil
     if Schemas.union?(schema)

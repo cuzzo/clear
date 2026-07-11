@@ -226,7 +226,10 @@ module MIRLoweringLiterals
     unless count.is_a?(Integer)
       Kernel.raise "default fixed-array literal requires an integer capacity"
     end
-    MIR::ArrayDefaultInit.new(elem_zig, count.to_s, default_array_value(elem_type), function_state.current_decl_alloc || alloc_for_node(node), type_info)
+    # A raw `[N]T` value is inline storage in Zig even when escape analysis
+    # places the surrounding function frame on the heap. It never performs a
+    # separate heap allocation and must not acquire heap AllocMark semantics.
+    MIR::ArrayDefaultInit.new(elem_zig, count.to_s, default_array_value(elem_type), :frame, type_info)
   end
 
   sig { params(elem_type: Type).returns(MIR::Lit) }

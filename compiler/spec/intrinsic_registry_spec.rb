@@ -406,10 +406,10 @@ RSpec.describe IntrinsicRegistry do
     expect(IntrinsicRegistry.send(:lifetime_source_string, :value)).to eq("value")
     expect(IntrinsicRegistry.send(:coerce_symbol, "value")).to eq(:value)
     expect(IntrinsicRegistry.send(:coerce_symbol, :value)).to eq(:value)
-    expect { IntrinsicRegistry.send(:coerce_symbol, 1) }.to raise_error(TypeError)
+    expect { IntrinsicRegistry.send(:coerce_symbol, 1) }.to raise_error(RuntimeError, /symbol-compatible/)
     expect(IntrinsicRegistry.send(:coerce_integer, "2")).to eq(2)
     expect(IntrinsicRegistry.send(:coerce_integer, 2)).to eq(2)
-    expect { IntrinsicRegistry.send(:coerce_integer, :two) }.to raise_error(TypeError)
+    expect { IntrinsicRegistry.send(:coerce_integer, :two) }.to raise_error(RuntimeError, /integer-compatible/)
 
     method_sig = IntrinsicRegistry.send(:convert_entry, "method", {
       args: [{ name: "receiver", type: :List }, { name: "value", type: :Int64 }],

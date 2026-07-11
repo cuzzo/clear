@@ -2820,7 +2820,11 @@ class MIREmitter
 
   sig { params(node: MIR::IfOptional).returns(String) }
   def emit_if_optional(node)
-    "(if (#{emit(node.optional)}) |#{node.capture}| #{emit(node.then_expr)} else #{emit(node.else_expr)})"
+    then_expr = emit(node.then_expr)
+    if node.result_type&.optional?
+      then_expr = "@as(#{T.must(node.result_type).zig_type}, #{then_expr})"
+    end
+    "(if (#{emit(node.optional)}) |#{node.capture}| #{then_expr} else #{emit(node.else_expr)})"
   end
 
   sig { params(node: MIR::AllocatorRef).returns(String) }

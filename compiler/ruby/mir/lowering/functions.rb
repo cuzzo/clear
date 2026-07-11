@@ -374,7 +374,7 @@ module MIRLoweringFunctions
       lowered_body = lower_body(node.body)
       node_stores = function_state.node_store_types.to_a.sort.flat_map do |zig_type|
         bind_call = MIR::MethodCall.new(
-          MIR::Ident.new("CheatLib.NodeStore(#{zig_type})"),
+          node_store_type_mir(zig_type),
           "bind",
           [MIR::Ident.new(runtime_binding_name)],
           true,
@@ -382,7 +382,7 @@ module MIRLoweringFunctions
         )
         binding = MIR::Ident.new(node_store_binding_name(zig_type))
         release_call = MIR::MethodCall.new(
-          MIR::Ident.new("CheatLib.NodeStore(#{zig_type})"),
+          node_store_type_mir(zig_type),
           "releaseBound",
           [binding],
           false,
@@ -1403,11 +1403,12 @@ module MIRLoweringFunctions
       # fn-type variable call
       all_args = [MIR::Ident.new(runtime_binding_name)] + args_mir
       contract = callable_contract_for_lowered_args(FunctionSignature.unwrap(node.matched_signature), node.args, args_mir)
-      sig = FunctionSignature.unwrap(node.matched_signature)
-      return_type = sig&.return_type || node.full_type!(context: "function pointer call")
-      fn_ptr_can_fail = return_type.is_a?(Type) && return_type.error_union?
-      callee = fn_ptr_can_fail ? "try #{node.name}" : node.name
-      return MIR::Call.new(callee, all_args, false, call_owned_return?(node), contract)
+      # Function values use CLEAR's uniform callback ABI:
+      #   *const fn (*Runtime, ...) anyerror!R
+      # even when R itself is not an error union. The indirect call must
+      # therefore always consume/propagate the ABI error channel. Omitting
+      # `try` produced invalid Zig for ordinary `FN(Int64) -> Bool` values.
+      return MIR::Call.new("try #{node.name}", all_args, false, call_owned_return?(node), contract)
     end
 
     # Resolve rt/fail from fn_sigs
@@ -1650,10 +1651,14 @@ module MIRLoweringFunctions
 
     call_mir  = lower_intrinsic(synthetic)
 
-    MIR::IfOptional.new(
+    result_type = node.full_type!(context: "safe-navigation method result")
+    result_type = Type.optional_of(result_type) unless result_type.optional?
+    result = MIR::IfOptional.new(
       inner_mir, snav_var, call_mir,
-      optional_nil_mir(node.full_type!(context: "safe-navigation method result")),
+      optional_nil_mir(result_type),
     )
+    result.result_type = result_type
+    result
   end
 
   sig { params(node: T.any(AST::FuncCall, AST::MethodCall)).returns(MIR::Node) }

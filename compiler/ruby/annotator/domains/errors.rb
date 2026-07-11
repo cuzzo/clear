@@ -688,7 +688,7 @@ module Annotator
           payload_type = t_left_type.payload_type
 
           # Type check: RHS must be compatible with payload type
-          unless payload_type.accepts?(t_right_type) || t_right_type.accepts?(payload_type)
+          unless t_right_type.resolved == :NoReturn || payload_type.accepts?(t_right_type) || t_right_type.accepts?(payload_type)
             error!(node, :TYPE_MISMATCH_IN_OR, expected: payload_type.resolved, got: t_right_type.resolved)
           end
 
@@ -701,7 +701,7 @@ module Annotator
         # Handle optional types: ?T OR default -> T
         if t_left_type.optional?
           wrapped = t_left_type.wrapped_type
-          unless wrapped.accepts?(t_right_type) || t_right_type.accepts?(wrapped)
+          unless t_right_type.resolved == :NoReturn || wrapped.accepts?(t_right_type) || t_right_type.accepts?(wrapped)
             error!(node, :TYPE_MISMATCH_IN_OR, expected: wrapped.resolved, got: t_right_type.resolved)
           end
           coerce_empty_collection_fallback!(node.right, wrapped)

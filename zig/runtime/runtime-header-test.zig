@@ -19,6 +19,15 @@ const CheatLib = header.CheatLib;
 const Runtime = rt_mod.Runtime;
 const alloc = std.heap.c_allocator;
 
+test "dupeValue promotes a fixed array into an owned ArrayList" {
+    const allocator = std.testing.allocator;
+    const source = [3]i64{ 4, 5, 6 };
+    var copied = try CheatLib.dupeValue(std.ArrayListUnmanaged(i64), source, allocator);
+    defer copied.deinit(allocator);
+
+    try std.testing.expectEqualSlices(i64, source[0..], copied.items);
+}
+
 var global_ebr_ctx: ebr.EbrContext = .{};
 var global_stack_pool: fm.StackPool = undefined;
 var global_shutdown = std.atomic.Value(bool).init(false);
@@ -107,6 +116,11 @@ test "bounds-safe list access returns optionals, mutable aliases, and compact no
     ptr.* = 25;
     try std.testing.expectEqual(@as(u64, 25), values.items[0]);
     try std.testing.expect(CheatLib.getAtPtrOpt(&values, 1) == null);
+    const values_ptr = &values;
+    const forwarded_ptr = &values_ptr;
+    const forwarded = CheatLib.getAtPtrOpt(forwarded_ptr, 0).?;
+    forwarded.* = 30;
+    try std.testing.expectEqual(@as(u64, 30), values.items[0]);
 
     const Ref = CheatLib.NodeRef(NodeStorePayload);
     var refs: std.ArrayListUnmanaged(Ref) = .empty;
@@ -345,12 +359,7 @@ test "Root Stack Trampoline: C Standard Library Integration" {
 
     std.debug.print("\n\n--- Start FFI Trampoline Test ---", .{});
 
-    try sched.submitSpawn(
-        @intFromPtr(&Runtime.entryWrapper),
-        @as(qs.TaskFn, @ptrCast(&fiberFfiTask)),
-        null,
-        .{}
-    );
+    try sched.submitSpawn(@intFromPtr(&Runtime.entryWrapper), @as(qs.TaskFn, @ptrCast(&fiberFfiTask)), null, .{});
 
     // This will run until the fiber finishes.
     sched.run();

@@ -680,7 +680,7 @@ RSpec.describe LoopFrameAnalysis do
             futures.append(BG { sleep(1_i64); });
           END
           FOR j IN (0_i64 ..< count) DO
-            NEXT futures[j];
+            IF futures[j] AS future THEN NEXT future; END
           END
           RETURN;
         END

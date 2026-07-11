@@ -4004,7 +4004,10 @@ module MIR
     def ownership_source_exprs = []
     sig { returns(OwnershipEffect) }
     def ownership_effect
-      owned_effect_for_alloc(alloc)
+      # `[_]T{default} ** N` is inline value initialization. Supported
+      # defaults are scalar/borrowed-empty values, so this expression neither
+      # allocates nor creates an ownership obligation.
+      OwnershipEffect.none
     end
   end
 

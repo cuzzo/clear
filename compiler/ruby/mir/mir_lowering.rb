@@ -573,7 +573,7 @@ class MIRLowering
     payload = T.must(destination.node_payload_type)
     zig_type = transpile_type(payload.resolved.to_s)
     function_state.node_store_types << zig_type
-    store = MIR::Ident.new("CheatLib.NodeStore(#{zig_type})")
+    store = node_store_type_mir(zig_type)
     call = MIR::MethodCall.new(
       store,
       "createBound",
@@ -585,6 +585,19 @@ class MIRLowering
     call
   end
 
+  # NodeStore is a comptime Zig type factory. Keep the application structural
+  # in MIR so identifiers remain identifiers rather than encoded expressions.
+  sig { params(zig_type: String).returns(MIR::Call) }
+  def node_store_type_mir(zig_type)
+    MIR::Call.new(
+      "CheatLib.NodeStore",
+      [MIR::Ident.new(zig_type)],
+      false,
+      false,
+      MIR::CallableContract.no_ownership(1),
+    )
+  end
+
   # Optional @node values use NodeRef's zero handle as NIL so they remain a
   # compact four-byte value. Every other optional uses Zig's native null.
   sig { params(type: Type).returns(MIR::Node) }
@@ -592,7 +605,11 @@ class MIRLowering
     if type.node_reference?
       MIR::StructInit.new(type.zig_type, [])
     else
-      MIR::Lit.new("null")
+      # Zig peer-type resolution does not infer a typed optional from a bare
+      # `else null` when the success arm yields slices and other pointer-like
+      # values. Preserve the annotated CLEAR optional type explicitly.
+      optional_type = type.optional? ? type : Type.optional_of(type)
+      MIR::Cast.new(MIR::Lit.new("null"), optional_type.zig_type, :as)
     end
   end
 
@@ -961,7 +978,9 @@ class MIRLowering
 
     # --- Marker nodes from MIRPass ---
     when MIR::Drop              then lower_drop(node)
-    when MIR::AllocMark         then node
+    when MIR::AllocMark
+      function_state.lowered_alloc_names.add(node.name.to_s)
+      node
     when MIR::SuppressCleanup
       safe = zig_safe_name(node.name)
       if pipeline_guarded_cleanup_name?(safe)

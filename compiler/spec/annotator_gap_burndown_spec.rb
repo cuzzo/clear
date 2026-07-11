@@ -2057,7 +2057,7 @@ RSpec.describe "annotator branch gap burndown" do
     promise_list.full_type = Type.new(:"~Int64[]", collection: :list)
     promise_get = AST::GetIndex.new(token(:LBRACKET, "["), promise_list, idx)
     index_ann.send(:visit_GetIndex, promise_get)
-    expect(promise_get.resolved_type).to eq(:"~Int64")
+    expect(promise_get.resolved_type).to eq(:"?~Int64")
 
     struct_type = Type.new(:StructLike)
     struct_type.define_singleton_method(:metatype) { :struct }
@@ -2632,8 +2632,8 @@ RSpec.describe "annotator branch gap burndown" do
     ann.send(:emit_registry_mismatch!, close, :Inpug, [:Input], "bad registry", "known type")
     ann.send(:emit_registry_mismatch!, token(:TYPE_ID, "zzzz"), :zzzz, [:Input], "bad registry", "known type")
 
-    ann.send(:emit_variant_typo!, FixableHelper::AnchorToken.new(1, 1), "Alpa", [:Alpha], "bad variant", "known variant")
-    ann.send(:emit_variant_typo!, FixableHelper::AnchorToken.new(1, 1), "zzzz", [:Alpha], "bad variant", "known variant")
+    ann.send(:emit_variant_typo!, AnchorToken.new(1, 1), "Alpa", [:Alpha], "bad variant", "known variant")
+    ann.send(:emit_variant_typo!, AnchorToken.new(1, 1), "zzzz", [:Alpha], "bad variant", "known variant")
 
     match = AST::MatchStatement.new(token(:MATCH, "MATCH"), AST::Identifier.new(token, "x"), [], nil, [], nil, false, nil)
     ann.send(:emit_match_partial_fix!, match, :MATCH_NON_EXHAUSTIVE, kind: "union", name: "Choice", missing: "Other")

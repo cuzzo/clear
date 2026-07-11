@@ -84,7 +84,7 @@ def cof_baseline(t)
   # reproducer, where `maybe("STRINGS")` is compared against "STRINGS".
   case t
   when :heap_string then "\"X\""        # == cof_call_arg(:heap_string)
-  when :heap_list   then "[7_i64]"      # == cof_call_arg(:heap_list)
+  when :heap_list   then "List[7_i64]"  # == cof_call_arg(:heap_list)
   end
 end
 
@@ -114,7 +114,7 @@ end
 def cof_call_arg(t)
   case t
   when :heap_string then "\"X\""
-  when :heap_list   then "[7_i64]"
+  when :heap_list   then "List[7_i64]"
   end
 end
 

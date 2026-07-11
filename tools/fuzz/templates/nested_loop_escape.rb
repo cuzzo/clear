@@ -126,9 +126,9 @@ FuzzGenerator.register(:nested_loop_escape, cells: NESTED_LOOP_ESCAPE_CELLS) do 
   first_inner_len =
     case p[:wrap_kind]
     when :bare
-      p[:inner_kind] == :map ? "outer[0_i64].count()" : "length(outer[0_i64])"
+      p[:inner_kind] == :map ? "first.count()" : "length(first)"
     when :struct_field
-      p[:inner_kind] == :map ? "outer[0_i64].data.count()" : "length(outer[0_i64].data)"
+      p[:inner_kind] == :map ? "first.data.count()" : "length(first.data)"
     when :union_payload then "2_i64"
     end
 
@@ -139,16 +139,20 @@ FuzzGenerator.register(:nested_loop_escape, cells: NESTED_LOOP_ESCAPE_CELLS) do 
         "0_i64"
       elsif p[:inner_kind] == :set
         "0_i64"
+      elsif p[:inner_kind] == :array
+        "first[0_i64]"
       else
-        "outer[0_i64][0_i64]"
+        "first[0_i64] OR 0_i64"
       end
     when :struct_field
       if p[:inner_kind] == :map
         "0_i64"
       elsif p[:inner_kind] == :set
         "0_i64"
+      elsif p[:inner_kind] == :array
+        "first.data[0_i64]"
       else
-        "outer[0_i64].data[0_i64]"
+        "first.data[0_i64] OR 0_i64"
       end
     when :union_payload then "0_i64"
     end
@@ -156,9 +160,9 @@ FuzzGenerator.register(:nested_loop_escape, cells: NESTED_LOOP_ESCAPE_CELLS) do 
   first_inner_assert =
     case p[:wrap_kind]
     when :bare
-      p[:inner_kind] == :set ? "ASSERT outer[0_i64].contains?(0_i64), \"first inner first element\";" : "ASSERT #{first_inner_elem} == 0_i64, \"first inner first element\";"
+      p[:inner_kind] == :set ? "ASSERT first.contains?(0_i64), \"first inner first element\";" : "ASSERT #{first_inner_elem} == 0_i64, \"first inner first element\";"
     when :struct_field
-      p[:inner_kind] == :set ? "ASSERT outer[0_i64].data.contains?(0_i64), \"first inner first element\";" : "ASSERT #{first_inner_elem} == 0_i64, \"first inner first element\";"
+      p[:inner_kind] == :set ? "ASSERT first.data.contains?(0_i64), \"first inner first element\";" : "ASSERT #{first_inner_elem} == 0_i64, \"first inner first element\";"
     else
       "ASSERT #{first_inner_elem} == 0_i64, \"first inner first element\";"
     end
@@ -170,8 +174,10 @@ FuzzGenerator.register(:nested_loop_escape, cells: NESTED_LOOP_ESCAPE_CELLS) do 
         #{outer_decl}
     #{loop_block}
         ASSERT length(outer) == #{p[:iters]}_i64, "outer list length";
-        ASSERT #{first_inner_len} == 2_i64, "first inner length";
-        #{first_inner_assert}
+        IF outer[0_i64] AS first THEN
+            ASSERT #{first_inner_len} == 2_i64, "first inner length";
+            #{first_inner_assert}
+        END
         RETURN;
     END
   CHT

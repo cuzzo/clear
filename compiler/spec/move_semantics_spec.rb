@@ -144,9 +144,9 @@ RSpec.describe "Move semantics for heap-owning types" do
         END
       CLEAR
       body = fn_body(zig, "run")
-      expect(body).to include("errdefer if (!__tmp_1_moved) CheatLib.cleanup(@TypeOf(__tmp_1), rt.heapAlloc(), &__tmp_1)")
-      expect(body).to match(/try __hm\.put\(rt\.heapAlloc\(\), rt\.heapAlloc\(\), "a", __tmp_1\);\s*__tmp_1_moved = true;/)
-      expect(body).to match(/try __hm\.put\(rt\.heapAlloc\(\), rt\.heapAlloc\(\), "b", __tmp_2\);\s*__tmp_2_moved = true;/)
+      expect(body).to include("defer if (!__tmp_1_moved) CheatLib.cleanup(@TypeOf(__tmp_1), rt.heapAlloc(), &__tmp_1)")
+      expect(body).to match(/try __hm\.put[^\n]*__tmp_1[^\n]*\n__tmp_1_moved = true;/)
+      expect(body).to match(/try __hm\.put[^\n]*__tmp_2[^\n]*\n__tmp_2_moved = true;/)
     end
   end
 

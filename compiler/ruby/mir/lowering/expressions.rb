@@ -1098,7 +1098,7 @@ module MIRLoweringExpressions
         payload = T.must(inner_type.node_payload_type)
         zig_type = transpile_type(payload.resolved.to_s)
         function_state.node_store_types << zig_type
-        store = MIR::Ident.new("CheatLib.NodeStore(#{zig_type})")
+        store = node_store_type_mir(zig_type)
         inner_mir = MIR::MethodCall.new(
           store,
           "getBound",
@@ -1108,11 +1108,15 @@ module MIRLoweringExpressions
         )
       end
       plan = field_access_plan(node, MIR::Ident.new("_r"))
-      return MIR::IfOptional.new(
+      result_type = node.full_type!(context: "safe-navigation field result")
+      result_type = Type.optional_of(result_type) unless result_type.optional?
+      result = MIR::IfOptional.new(
         inner_mir, "_r",
         plan.value,
-        optional_nil_mir(node.full_type!(context: "safe-navigation field result"))
+        optional_nil_mir(result_type)
       )
+      result.result_type = result_type
+      return result
     end
 
     target = lower(node.target)
@@ -1121,7 +1125,7 @@ module MIRLoweringExpressions
       payload = T.must(target_type.node_payload_type)
       zig_type = transpile_type(payload.resolved.to_s)
       function_state.node_store_types << zig_type
-      store = MIR::Ident.new("CheatLib.NodeStore(#{zig_type})")
+      store = node_store_type_mir(zig_type)
       resolved = MIR::MethodCall.new(
         store,
         "getBound",
@@ -1312,10 +1316,14 @@ module MIRLoweringExpressions
     plan = index_access_plan(node)
     value = index_access_value(plan)
     if plan.optional?
-      return MIR::IfOptional.new(
+      result_type = node.full_type!(context: "safe-navigation index result")
+      result_type = Type.optional_of(result_type) unless result_type.optional?
+      result = MIR::IfOptional.new(
         T.must(plan.optional_source), "_r", value,
-        optional_nil_mir(node.full_type!(context: "safe-navigation index result")),
+        optional_nil_mir(result_type),
       )
+      result.result_type = result_type
+      return result
     end
 
     value

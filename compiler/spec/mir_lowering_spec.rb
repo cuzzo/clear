@@ -1020,7 +1020,9 @@ RSpec.describe MIRLowering do
       node = AST::VarDecl.new(tok, "unused", nil, value, false)
       node.full_type = :Number
       node.var_used = false
-      result = lowering.lower(node)
+      low = lowering
+      install_function_context(low)
+      result = low.lower(node)
       expect(result.suppression).to eq("_ = unused;")
     end
 
@@ -2569,7 +2571,7 @@ RSpec.describe MIRLowering do
       expect(emit(result)).to eq("sum3(point)")
     end
 
-    it "passes runtime to non-fallible function variable calls without try" do
+    it "uses the uniform fallible ABI for function variable calls" do
       arg = make_lit(:NUMBER, 5, full_type: :Int64)
       arg.coerced_type = :Int64
       node = AST::FuncCall.new(tok, "callback", [arg])
@@ -2579,7 +2581,7 @@ RSpec.describe MIRLowering do
       result = lowering.lower(node)
 
       expect(result).to be_a(MIR::Call)
-      expect(result.callee).to eq("callback")
+      expect(result.callee).to eq("try callback")
       expect(result.args.map { |a| emit(a) }).to eq(["rt", "5"])
     end
 
@@ -4542,6 +4544,8 @@ RSpec.describe "MIRLowering allocation cleanup classification" do
     expect(result.elem_type).to eq("i64")
     expect(result.count).to eq("2")
     expect(result.default_value).to eq(MIR::Lit.new("0"))
+    expect(result.alloc).to eq(:frame)
+    expect(result.ownership_effect.produces_owned).to be(false)
     expect(result.result_type.resolved).to eq(:"Int64[2]")
   end
 

@@ -57,7 +57,7 @@ RSpec.describe "primitive non-shared atomics in functions" do
 
   it "warns when a call reads multiple atomic cells as independent bare values" do
     warnings = []
-    allow($stderr).to receive(:puts) { |msg| warnings << msg }
+    allow(Kernel).to receive(:warn) { |msg| warnings << msg }
 
     out = transpile(<<~CLEAR)
       FN add(x: Int64, y: Int64) RETURNS Int64 ->
@@ -78,7 +78,7 @@ RSpec.describe "primitive non-shared atomics in functions" do
 
   it "does not warn for a single atomic cell loaded into a bare parameter" do
     warnings = []
-    allow($stderr).to receive(:puts) { |msg| warnings << msg }
+    allow(Kernel).to receive(:warn) { |msg| warnings << msg }
 
     out = transpile(<<~CLEAR)
       FN inc(x: Int64) RETURNS Int64 ->

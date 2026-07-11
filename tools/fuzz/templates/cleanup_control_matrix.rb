@@ -26,7 +26,7 @@ def ccm_spec(shape)
   when :optional
     ["", "?String", 'COPY "abc"', "1_i64", "1_i64"]
   when :nested
-    ["STRUCT Inner { label: String }\nSTRUCT Box { items: Inner[]@list }\n", "Box", "makeBox() OR RAISE", "x.items[0_i64].label.length()", "3_i64"]
+    ["STRUCT Inner { label: String }\nSTRUCT Box { items: Inner[]@list }\n", "Box", "makeBox() OR RAISE", "(x.items[0_i64]?.label OR \"\").length()", "3_i64"]
   end
 end
 

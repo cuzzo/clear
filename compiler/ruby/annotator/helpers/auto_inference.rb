@@ -8,6 +8,7 @@ AutoInferenceWalkNode = T.type_alias do
     AST::Node,
     AST::RawBody,
     T::Hash[BasicObject, BasicObject],
+    T::Set[BasicObject],
     Struct,
     T::Struct,
     Schemas::EnumSchema,
@@ -245,7 +246,7 @@ class AutoConstraintCollector
          Schemas::EnumSchema, Schemas::InlineStructVariant, Schemas::ResourceSchema,
          Schemas::StructSchema, Schemas::UnionSchema
       # leaf
-    when Array
+    when Array, Set
       node.each { |c| walk(c, current_fn: current_fn) }
     when Hash
       node.each_value { |v| walk(v, current_fn: current_fn) }

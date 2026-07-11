@@ -683,9 +683,9 @@ RSpec.describe SemanticAnnotator do
         expect(t.stream_capacity).to eq 3
       end
 
-      it "runtime_stream_storage_element_type returns payload for bounded optional streams" do
+      it "runtime_stream_storage_element_type preserves optional bounded elements" do
         t = Type.new(:"~?Float64[3]")
-        expect(t.runtime_stream_storage_element_type.resolved).to eq(:Float64)
+        expect(t.runtime_stream_storage_element_type.resolved).to eq(:"?Float64")
       end
 
       it "runtime_stream_storage_element_type returns payload for open streams" do
@@ -1427,22 +1427,22 @@ RSpec.describe SemanticAnnotator do
       end
     end
 
-    describe "native ~T[] finite streams" do
-      it "allows bare ~T[] in BindExpr declaration for finite streams" do
+    describe "BG STREAM open streams" do
+      it "allows ~?T[] in BindExpr declarations" do
         src = <<~CLEAR
           FN f() RETURNS !Void ->
-            s: ~Float64[] = BG STREAM { YIELD 1.0; };
+            s: ~?Float64[] = BG STREAM { YIELD 1.0; };
             RETURN;
           END
         CLEAR
         expect { run(src) }.not_to raise_error
       end
 
-      it "allows bare ~T[] in VarDecl (MUTABLE declaration) path" do
+      it "allows ~?T[] in VarDecl (MUTABLE declaration) path" do
         # VarDecl path: MUTABLE declarations
         src = <<~CLEAR
           FN f() RETURNS !Void ->
-            MUTABLE s: ~Float64[] = BG STREAM { YIELD 1.0; };
+            MUTABLE s: ~?Float64[] = BG STREAM { YIELD 1.0; };
             RETURN;
           END
         CLEAR
@@ -1692,19 +1692,21 @@ RSpec.describe SemanticAnnotator do
         expect { run(src) }.not_to raise_error
       end
 
-      it "allows indexing a promise list: futures[0] binds as ~Int64 (consumed via NEXT)" do
+      it "requires promise-list indexing to be explicitly bounds-checked" do
         src = <<~CLEAR
           FN f() RETURNS !Void ->
             MUTABLE futures: ~Int64[]@list = [];
             append(futures, BG { 42; });
-            v: Int64 = NEXT futures[0];
+            IF futures[0] AS future THEN
+              v: Int64 = NEXT future;
+            END
             RETURN;
           END
         CLEAR
         expect { run(src) }.not_to raise_error
       end
 
-      it "NEXT futures[i] returns the element type (Int64)" do
+      it "rejects NEXT directly on a possibly out-of-bounds promise-list index" do
         src = <<~CLEAR
           FN f() RETURNS !Void ->
             MUTABLE futures: ~Int64[]@list = [];
@@ -1713,7 +1715,7 @@ RSpec.describe SemanticAnnotator do
             RETURN;
           END
         CLEAR
-        expect { run(src) }.not_to raise_error
+        expect { run(src) }.to raise_error(SourceError)
       end
     end
 
@@ -1766,7 +1768,7 @@ RSpec.describe SemanticAnnotator do
         expect(out).to include("futures.append(")
       end
 
-      it "emits indexed access plus .next() for NEXT futures[0]" do
+      it "requires and emits an explicit bounds unwrap before NEXT futures[0]" do
         # Indexing now defers to CheatLib.getAt (polymorphic ArrayList/slice
         # dispatch via comptime @hasField). The lowering no longer hard-codes
         # `.items[i]` for @list.
@@ -1774,12 +1776,14 @@ RSpec.describe SemanticAnnotator do
           FN f() RETURNS !Void ->
             MUTABLE futures: ~Int64[]@list = [];
             append(futures, BG { 7; });
-            v: Int64 = NEXT futures[0];
+            IF futures[0] AS future THEN
+              v: Int64 = NEXT future;
+            END
             RETURN;
           END
         CLEAR
         out = transpile_fn(src)
-        expect(out).to match(/CheatLib\.getAt\(futures, 0\)\.next\(\)/)
+        expect(out).to match(/CheatLib\.getAtOpt\(futures, 0\).*\.next\(\)/m)
       end
 
       it "emits await-all materialization for NEXT futures" do

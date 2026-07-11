@@ -298,16 +298,10 @@ RSpec.describe DiagnosticRegistry do
     end
   end
 
-  describe "backward compatibility with ErrorDefinitions::MESSAGES" do
-    it "MESSAGES has an entry for every registered code" do
-      missing = DiagnosticRegistry.codes - ErrorDefinitions::MESSAGES.keys
-      expect(missing).to be_empty
-    end
-
-    it "MESSAGES values match the registry's templates" do
-      DiagnosticRegistry::DIAGNOSTICS.each do |code, entry|
-        expect(ErrorDefinitions::MESSAGES[code]).to eq(entry[:template]),
-          -> { "MESSAGES[#{code}] differs from registry template" }
+  describe "single-source diagnostic templates" do
+    it "exposes a template for every registered code" do
+      DiagnosticRegistry.codes.each do |code|
+        expect(DiagnosticRegistry::DIAGNOSTICS.fetch(code).fetch(:template)).to be_a(String)
       end
     end
   end

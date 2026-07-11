@@ -29,7 +29,7 @@ RSpec.describe ZigTranspiler do
         END
       CLEAR
 
-      expect(zig).to include('@panic(@as([]const u8, "bad"))')
+      expect(zig).to include('@panic("bad")')
       expect(zig).to include("fn choose(x: i64) i64")
     end
   end
@@ -528,7 +528,7 @@ RSpec.describe ZigTranspiler do
             keys.append("a");
             keys.append("b");
             MUTABLE counts: HashMap<Int64>@sharded(4) = {};
-            (0_i64 ..< 2_i64) |> SHARD(keys[_], counts) |> CONCURRENT EACH {
+            (0_i64 ..< 2_i64) |> SHARD(keys[_] OR panic("keys index invariant"), counts) |> CONCURRENT EACH {
                 cur = counts[_] OR 0;
                 counts[_] = cur + 1;
             };
@@ -815,7 +815,7 @@ RSpec.describe ZigTranspiler do
         END
       CLEAR
       warnings = []
-      allow($stderr).to receive(:puts) { |msg| warnings << msg }
+      allow(Kernel).to receive(:warn) { |msg| warnings << msg }
       transpile(src)
       expect(warnings.any? { |w| w.include?("MUTABLE 'x' is never reassigned") }).to be true
     end
@@ -1372,7 +1372,7 @@ RSpec.describe ZigTranspiler do
         STRUCT Env { vars: HashMap<Int64> }
 
         FN has!(envId: Id<Env>, name: String, MUTABLE pool: Env[10]@pool) RETURNS Bool ->
-            RETURN pool[envId]?.vars.contains?(name);
+            RETURN pool[envId]?.vars.contains?(name) OR FALSE;
         END
       CLEAR
 
@@ -1646,7 +1646,7 @@ RSpec.describe ZigTranspiler do
             needle = "the";
             MUTABLE futures: ~Void[]@list = [];
             futures.append(BG { print(msg); print(needle); });
-            NEXT futures[0];
+            IF futures[0] AS future THEN NEXT future; END
             RETURN;
         END
       CLEAR
@@ -2134,7 +2134,7 @@ RSpec.describe ZigTranspiler do
             MUTABLE seeds: Int64[]@list = [];
             seeds.append(1_i64);
             seeds.append(2_i64);
-            (0..<2) |> SHARD(makeKey(seeds[_]), counts) |> CONCURRENT EACH {
+            (0..<2) |> SHARD(makeKey(seeds[_] OR panic("seeds index invariant")), counts) |> CONCURRENT EACH {
                 cur = counts[_] OR 0;
                 counts[_] = cur + 1;
             };

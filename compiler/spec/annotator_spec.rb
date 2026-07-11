@@ -475,10 +475,10 @@ RSpec.describe SemanticAnnotator do
         expect(get_last_type(code)).to eq(:Float64)
       end
 
-      it "rejects old syntax name: Type = default" do
+      it "accepts the canonical name: Type = default syntax" do
         expect {
           run("FN foo(n: Float64 = 1) -> RETURN n; END")
-        }.to raise_error(ParserError)
+        }.not_to raise_error
       end
 
       context "Multiple defaults" do
@@ -2261,22 +2261,21 @@ RSpec.describe SemanticAnnotator do
       end
     end
 
-    # Assuming your Annotator adheres to the "Explicit Capture Only" rule implied by USE
-    context "when accessing a variable NOT in the USE list" do
+    context "when accessing a module binding without USE" do
       let(:code) {
         <<~FLUX
           secret = 42;
 
-          # We forgot USE(secret)
+          # Named functions may read module bindings directly. USE is for
+          # explicit closure capture of a local lexical binding.
           FN leak() RETURNS Float64 ->
             RETURN secret;
           END
         FLUX
       }
 
-      it "raises a semantic error for accessing uncaptured variable" do
-         # Note: Adjust error message to match your specific compiler error
-        expect { run(code) }.to raise_error(/Undefined variable/i)
+      it "resolves the module binding" do
+        expect { run(code) }.not_to raise_error
       end
     end
 
@@ -2627,8 +2626,12 @@ RSpec.describe SemanticAnnotator do
       # If this fails, it means the parser/annotator crashed or didn't produce a function
       raise "No FunctionDef found in AST" unless func_node
 
-      signature = func_node.full_type
-      signature = signature.raw if signature.is_a?(Type)
+      fn_type = func_node.full_type.function_type
+      raise "FunctionDef full_type did not contain a function type" unless fn_type
+
+      signature = fn_type.source_signature
+      raise "Function type did not retain its source signature" unless signature
+
       signature.return_strategy
     end
 
