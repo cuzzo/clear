@@ -33,8 +33,16 @@ module Espalier
 
       # Group methods by owner
       methods_by_owner = Hash.new { |h, k| h[k] = [] }
+      methods_by_id = {}
+      accesses_by_function = Hash.new { |h, k| h[k] = [] }
+      Array(evidence.dig("facts", "state_accesses")).each do |access|
+        accesses_by_function[access["function_id"]] << access
+      end
       Array(evidence["methods"]).each do |m|
+        accesses = accesses_by_function[m["id"]]
         meth = {
+          id: m["id"],
+          owner_id: m["owner_id"],
           name: m["name"],
           signature: m["signature"],
           parameters: Array(m["params"]),
@@ -43,35 +51,40 @@ module Espalier
           span: m["span"],
           file: m["path"],
           language: m["language"]&.to_sym,
-          effects: { reads: Set.new, writes: Set.new },
+          effects: {
+            reads: accesses.select { |row| row["kind"] == "reads" }.map { |row| row["field"] }.to_set,
+            writes: accesses.select { |row| row["kind"] == "writes" }.map { |row| row["field"] }.to_set
+          },
           delegations: []
         }
         methods_by_owner[m["owner"]] << meth
+        methods_by_id[m["id"]] = meth
       end
 
       # Group fields by owner
       fields_by_owner = Hash.new { |h, k| h[k] = [] }
       first_field_by_owner = {}
       Array(evidence["fields"]).each do |f|
-        fields_by_owner[f["owner"]] << f["name"]
+        fields_by_owner[f["owner"]] << f
         first_field_by_owner[f["owner"]] ||= f
       end
 
       # Index call graph edges (internal calls)
       internal_calls = Hash.new { |h, k| h[k] = [] }
-      Array(evidence.dig("facts", "call_graph_edges")).each do |edge|
-        next unless edge["kind"] == "internal_call"
-        if edge["source"] =~ /^fn:(.+)#(.+)$/
-          edge_owner, func = $1, $2
-          if edge["target"] =~ /^fn:.+#(.+)$/
-            target_func = $1
-            internal_calls["#{edge_owner}##{func}"] << {
-              receiver: "self",
-              message: target_func,
-              type: edge["conditional"] ? :conditional : :always
-            }
-          end
-        end
+      Array(evidence.dig("facts", "calls")).each do |call|
+        source = methods_by_id[call["source"]]
+        next unless source
+
+        target = methods_by_id[call["target"]]
+        source[:delegations] << {
+          receiver: call["receiver"].to_s.empty? ? "self" : call["receiver"],
+          message: target ? target[:name] : call["message"],
+          line: call["line"]&.to_i,
+          span: call["span"],
+          type: call["conditional"] ? :conditional : :always,
+          confidence: call["confidence"],
+          unresolved_reason: call["unresolved_reason"]
+        }
       end
 
       # Map state protocols and param origins to reads/writes and delegations
@@ -84,7 +97,6 @@ module Espalier
         meths = methods_by_owner[p_owner] || []
         meth = meths.find { |m_item| m_item[:name] == func }
         if meth
-          meth[:effects][:reads].add(field)
           meth[:delegations] << {
             receiver: field,
             message: proto,
@@ -101,9 +113,7 @@ module Espalier
 
         meths = methods_by_owner[o_owner] || []
         meth = meths.find { |m_item| m_item[:name] == func }
-        if meth
-          meth[:effects][:writes].add(field)
-        end
+        meth # parameter origin is metadata, not proof of a write
       end
 
       # Add internal call delegations
@@ -126,8 +136,9 @@ module Espalier
           line: meta[:line],
           span: meta[:span],
           language: meta[:language],
-          states: fields_by_owner[owner].to_set,
-          ivar_types: {},
+          states: fields_by_owner[owner].map { |field| field["name"] }.to_set,
+          state_records: fields_by_owner[owner],
+          ivar_types: fields_by_owner[owner].to_h { |field| [field["name"], field["declared_type"]] }.compact,
           ivar_properties: {},
           methods: methods_by_owner[owner]
         }
@@ -232,10 +243,15 @@ module Espalier
     end
 
     def build_payload(facts, files, deduped, state_protocols, state_param_origins)
+      owners = Array(facts["owners"])
       methods = Array(facts["methods"])
       fields = Array(facts["fields"])
       state_types = facts["state_types"] || {}
       signatures = facts["signatures"] || {}
+      calls = Array(facts["calls"])
+      state_accesses = Array(facts["state_accesses"])
+      call_graph_edges = Array(facts["call_graph_edges"])
+      state_type_edges = Array(facts["state_type_edges"])
       collection_index_lookups = Array(facts["collection_index_lookups"])
       hash_record_blockers = Array(facts["hash_record_blockers"])
       tlet_sites = Array(facts["tlet_sites"])
@@ -318,9 +334,14 @@ module Espalier
         "target_exclude_dirs" => Espalier.target_exclude_dirs(root: @root).map { |dir| rel(dir) },
         "runtime_fields" => false,
         "files" => files.map { |file| file_record(file) },
+        "owners" => owners.sort_by { |owner| [owner["path"].to_s, owner["line"].to_i, owner["name"].to_s] },
         "fields" => fields.uniq { |field| field["id"] }.sort_by { |field| [field["path"], field["owner"], field["name"]] },
         "methods" => methods.sort_by { |method| [method["path"], method["owner"], method["line"].to_i, method["name"]] },
         "facts" => {
+          "calls" => calls.sort_by { |call| [call["path"].to_s, call["line"].to_i, call["id"].to_s] },
+          "state_accesses" => state_accesses.sort_by { |access| [access["path"].to_s, access["line"].to_i, access["id"].to_s] },
+          "call_graph_edges" => call_graph_edges.sort_by { |edge| [edge["source"].to_s, edge["target"].to_s, edge["kind"].to_s] },
+          "state_type_edges" => state_type_edges.sort_by { |edge| [edge["source"].to_s, edge["target"].to_s, edge["label"].to_s] },
           "state_types" => Hash[state_types.sort],
           "state_type_records" => deduped[:state_type_records].sort_by { |r| [r["language"].to_s, r["path"].to_s, r["owner"].to_s, r["field"].to_s] },
           "state_protocols" => state_protocols,
@@ -358,8 +379,11 @@ module Espalier
         },
         "summary" => {
           "files" => files.size,
+          "owners" => owners.size,
           "methods" => methods.size,
           "fields" => fields.uniq { |field| field["id"] }.size,
+          "calls" => calls.size,
+          "state_accesses" => state_accesses.size,
           "signatures" => typed_signature_count,
           "state_types" => state_types.size,
           "state_type_records" => deduped[:state_type_records].size,

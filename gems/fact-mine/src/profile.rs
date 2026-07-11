@@ -38,6 +38,8 @@ pub enum Profile {
 /// The enriched output matching what Ruby's EspalierProfile::Builder.build returns.
 #[derive(Clone, Debug, Serialize, Default)]
 pub struct ProfileOutput {
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub owners: Vec<OwnerRecord>,
     pub methods: Vec<MethodRecord>,
     pub fields: Vec<FieldRecord>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
@@ -61,6 +63,13 @@ pub struct ProfileOutput {
     /// Internal call edges between functions in the same owner.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub call_graph_edges: Vec<CallGraphEdge>,
+    /// Lossless normalized call sites. Espalier resolves cross-file targets
+    /// after all files have been merged.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub calls: Vec<CallRecord>,
+    /// Direct function/state relationships from normalized extraction.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub state_accesses: Vec<StateAccessRecord>,
     // NilKill-only fields
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub collection_index_lookups: Vec<serde_json::Value>,
@@ -103,6 +112,55 @@ pub struct ProfileOutput {
 }
 
 #[derive(Clone, Debug, Serialize)]
+pub struct OwnerRecord {
+    pub id: String,
+    pub name: String,
+    pub kind: String,
+    pub language: String,
+    pub path: String,
+    pub line: usize,
+    pub span: [usize; 4],
+    pub confidence: String,
+}
+
+#[derive(Clone, Debug, Serialize)]
+pub struct CallRecord {
+    pub id: String,
+    pub source: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub target: Option<String>,
+    pub kind: String,
+    pub owner: String,
+    pub function: String,
+    pub receiver: String,
+    pub message: String,
+    pub path: String,
+    pub line: usize,
+    pub span: [usize; 4],
+    pub conditional: bool,
+    pub confidence: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub unresolved_reason: Option<String>,
+}
+
+#[derive(Clone, Debug, Serialize)]
+pub struct StateAccessRecord {
+    pub id: String,
+    pub function_id: String,
+    pub state_id: String,
+    pub owner: String,
+    pub function: String,
+    pub field: String,
+    pub receiver: String,
+    pub kind: String,
+    pub path: String,
+    pub line: usize,
+    pub span: [usize; 4],
+    pub conditional: bool,
+    pub confidence: String,
+}
+
+#[derive(Clone, Debug, Serialize)]
 pub struct CallGraphEdge {
     pub source: String,
     pub target: String,
@@ -126,6 +184,8 @@ pub struct StateTypeEdge {
 
 #[derive(Clone, Debug, Serialize)]
 pub struct MethodRecord {
+    pub id: String,
+    pub owner_id: String,
     pub key: Vec<String>,
     pub owner: String,
     pub name: String,
@@ -135,7 +195,18 @@ pub struct MethodRecord {
     pub span: Option<[usize; 4]>,
     pub language: String,
     pub signature: String,
+    pub visibility: String,
+    pub local_complexity: f64,
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub complexity_signals: BTreeMap<String, usize>,
     pub params: Vec<String>,
+    /// Exact source covered by the parser's function span. Consumers that need
+    /// function bodies must use this projection rather than re-parsing files.
+    pub raw_source: String,
+    /// A deterministic, formatting-insensitive projection for experiment and
+    /// indexing consumers. This is intentionally lexical normalization, not a
+    /// replacement for FactMine's normalized structural facts.
+    pub normalized_source: String,
     #[serde(skip_serializing_if = "Vec::is_empty")]
     pub untraceable_params: Vec<String>,
     pub source: serde_json::Value,
@@ -147,6 +218,7 @@ pub struct FieldRecord {
     pub language: String,
     pub path: String,
     pub owner: String,
+    pub owner_id: String,
     pub name: String,
     pub line: usize,
     pub span: Option<[usize; 4]>,
@@ -270,6 +342,7 @@ pub fn extract(document: &Document, profile: Profile) -> ProfileOutput {
         .map(|l| l.to_string())
         .collect::<Vec<_>>();
 
+    let owners = extract_owners(document, &language, &path);
     let methods = extract_methods(&lines, document, &language, &path);
     let fields = extract_fields(document, &language, &path);
     let (state_types, mut state_type_records) = extract_state_types(document, &language, &path);
@@ -306,6 +379,8 @@ pub fn extract(document: &Document, profile: Profile) -> ProfileOutput {
     }
     let state_type_edges = extract_state_type_edges(document, &language, &path);
     let call_graph_edges = extract_call_graph_edges(document);
+    let calls = extract_calls(document, &language, &path);
+    let state_accesses = extract_state_accesses(document, &language, &path);
 
     let mut tlet_sites = Vec::new();
     let mut dead_nil_checks = Vec::new();
@@ -511,6 +586,7 @@ pub fn extract(document: &Document, profile: Profile) -> ProfileOutput {
     }
 
     ProfileOutput {
+        owners,
         methods,
         fields,
         struct_declarations,
@@ -526,6 +602,8 @@ pub fn extract(document: &Document, profile: Profile) -> ProfileOutput {
         array_shapes,
         state_type_edges,
         call_graph_edges,
+        calls,
+        state_accesses,
         collection_index_lookups,
         hash_record_blockers,
         tlet_sites,
@@ -551,6 +629,7 @@ pub fn extract(document: &Document, profile: Profile) -> ProfileOutput {
 /// Merge outputs from multiple files into one (like Ruby's per-file accumulation).
 pub fn merge(outputs: Vec<ProfileOutput>, profile: Profile) -> ProfileOutput {
     let nil_kill = profile == Profile::NilKill;
+    let mut owners = Vec::new();
     let mut methods = Vec::new();
     let mut fields = Vec::new();
     let mut struct_declarations = Vec::new();
@@ -566,6 +645,8 @@ pub fn merge(outputs: Vec<ProfileOutput>, profile: Profile) -> ProfileOutput {
     let mut array_shapes = Vec::new();
     let mut state_type_edges = Vec::new();
     let mut call_graph_edges = Vec::new();
+    let mut calls = Vec::new();
+    let mut state_accesses = Vec::new();
     let mut collection_index_lookups = Vec::new();
     let mut hash_record_blockers = Vec::new();
     let mut tlet_sites = Vec::new();
@@ -587,6 +668,7 @@ pub fn merge(outputs: Vec<ProfileOutput>, profile: Profile) -> ProfileOutput {
     let mut struct_field_array_shapes = BTreeMap::new();
 
     for output in outputs {
+        owners.extend(output.owners);
         methods.extend(output.methods);
         fields.extend(output.fields);
         struct_declarations.extend(output.struct_declarations);
@@ -608,6 +690,9 @@ pub fn merge(outputs: Vec<ProfileOutput>, profile: Profile) -> ProfileOutput {
         hash_shapes.extend(output.hash_shapes);
         array_shapes.extend(output.array_shapes);
         state_type_edges.extend(output.state_type_edges);
+        call_graph_edges.extend(output.call_graph_edges);
+        calls.extend(output.calls);
+        state_accesses.extend(output.state_accesses);
         if nil_kill {
             collection_index_lookups.extend(output.collection_index_lookups);
             hash_record_blockers.extend(output.hash_record_blockers);
@@ -640,7 +725,16 @@ pub fn merge(outputs: Vec<ProfileOutput>, profile: Profile) -> ProfileOutput {
         .map(|(k, v)| (k, v.into_iter().collect()))
         .collect();
 
+    owners.sort_by(|a, b| a.id.cmp(&b.id));
+    owners.dedup_by(|a, b| a.id == b.id);
+    call_graph_edges.sort_by(|a, b| a.source.cmp(&b.source).then_with(|| a.target.cmp(&b.target)).then_with(|| a.kind.cmp(&b.kind)));
+    calls.sort_by(|a, b| a.id.cmp(&b.id));
+    calls.dedup_by(|a, b| a.id == b.id);
+    state_accesses.sort_by(|a, b| a.id.cmp(&b.id));
+    state_accesses.dedup_by(|a, b| a.id == b.id);
+
     ProfileOutput {
+        owners,
         methods,
         fields,
         struct_declarations,
@@ -656,6 +750,8 @@ pub fn merge(outputs: Vec<ProfileOutput>, profile: Profile) -> ProfileOutput {
         array_shapes,
         state_type_edges,
         call_graph_edges,
+        calls,
+        state_accesses,
         collection_index_lookups,
         hash_record_blockers,
         tlet_sites,
@@ -798,8 +894,15 @@ fn extract_methods(
             let kind = method_kind(fn_def, &owner);
             let signature = method_signature(lines, fn_def, language);
             let source = method_source(&signature, language);
+            let raw_source = source_for_span(lines, fn_def.span);
+            let normalized_source = raw_source.split_whitespace().collect::<Vec<_>>().join(" ");
+            let complexity = document
+                .local_complexity_scores
+                .get(&format!("{}#{}", owner, name));
 
             MethodRecord {
+                id: function_id(language, path, fn_def),
+                owner_id: owner_id(language, path, &owner, owner_span(document, &owner)),
                 key: vec![owner.clone(), name.clone(), kind.clone()],
                 owner,
                 name,
@@ -809,12 +912,103 @@ fn extract_methods(
                 span: Some(fn_def.span),
                 language: language.to_string(),
                 signature,
+                visibility: fn_def.visibility.clone().unwrap_or_else(|| "public".to_string()),
+                local_complexity: complexity.map(|row| row.score).unwrap_or(0.0),
+                complexity_signals: complexity.map(|row| row.signals.clone()).unwrap_or_default(),
                 params: fn_def.params.clone(),
+                raw_source,
+                normalized_source,
                 untraceable_params: extract_untraceable_params(lines, fn_def, language),
                 source,
             }
         })
         .collect()
+}
+
+fn extract_owners(document: &Document, language: &str, path: &str) -> Vec<OwnerRecord> {
+    let mut owners = document.owner_defs.iter().map(|owner| OwnerRecord {
+        id: owner_id(language, path, &owner.name, Some(owner.span)),
+        name: owner.name.clone(),
+        kind: owner.kind.clone(),
+        language: language.to_string(),
+        path: path.to_string(),
+        line: owner.line,
+        span: owner.span,
+        confidence: "high".to_string(),
+    }).collect::<Vec<_>>();
+
+    // Some grammars attach functions to an implicit/file owner without a
+    // separate owner definition. Preserve that owner instead of forcing
+    // Espalier to infer it from display names.
+    for function in &document.function_defs {
+        if function.owner.is_empty() || owners.iter().any(|owner| owner.name == function.owner) {
+            continue;
+        }
+        owners.push(OwnerRecord {
+            id: owner_id(language, path, &function.owner, None),
+            name: function.owner.clone(),
+            kind: "owner".to_string(),
+            language: language.to_string(),
+            path: path.to_string(),
+            line: function.line,
+            span: function.span,
+            confidence: "partial".to_string(),
+        });
+    }
+    owners
+}
+
+fn owner_span(document: &Document, owner: &str) -> Option<[usize; 4]> {
+    document.owner_defs.iter().find(|row| row.name == owner).map(|row| row.span)
+}
+
+fn owner_id(language: &str, path: &str, owner: &str, span: Option<[usize; 4]>) -> String {
+    stable_id("owner", &[language, path, owner, &span.map(span_key).unwrap_or_default()])
+}
+
+fn function_id(language: &str, path: &str, function: &syntax::FunctionDef) -> String {
+    stable_id("fn", &[language, path, &function.owner, &function.name, &function.signature, &span_key(function.span)])
+}
+
+fn span_key(span: [usize; 4]) -> String {
+    format!("{}:{}:{}:{}", span[0], span[1], span[2], span[3])
+}
+
+fn stable_id(prefix: &str, parts: &[&str]) -> String {
+    // FNV-1a is sufficient here: the unhashed identity components remain in
+    // the artifact and collisions can be diagnosed. Unlike DefaultHasher its
+    // result is stable across processes and Rust releases.
+    let mut hash = 0xcbf29ce484222325_u64;
+    for part in parts {
+        for byte in part.as_bytes().iter().chain(std::iter::once(&0_u8)) {
+            hash ^= u64::from(*byte);
+            hash = hash.wrapping_mul(0x100000001b3);
+        }
+    }
+    format!("{prefix}:{hash:016x}")
+}
+
+fn source_for_span(lines: &[String], span: [usize; 4]) -> String {
+    let [start_line, start_column, end_line, end_column] = span;
+    if start_line == 0 || end_line == 0 || start_line > end_line || end_line > lines.len() {
+        return String::new();
+    }
+
+    let mut selected = lines[start_line - 1..end_line].to_vec();
+    if selected.len() == 1 {
+        let line = &selected[0];
+        let start = start_column.min(line.len());
+        let end = end_column.min(line.len()).max(start);
+        return line.get(start..end).unwrap_or_default().to_string();
+    }
+
+    if let Some(first) = selected.first_mut() {
+        *first = first.get(start_column.min(first.len())..).unwrap_or_default().to_string();
+    }
+    if let Some(last) = selected.last_mut() {
+        *last = last.get(..end_column.min(last.len())).unwrap_or_default().to_string();
+    }
+    selected.join("\n")
 }
 
 fn method_kind(fn_def: &syntax::FunctionDef, owner: &str) -> String {
@@ -971,6 +1165,7 @@ fn extract_fields(document: &Document, language: &str, path: &str) -> Vec<FieldR
             language: language.to_string(),
             path: path.to_string(),
             owner: state.owner.clone(),
+            owner_id: owner_id(language, path, &state.owner, owner_span(document, &state.owner)),
             name,
             line: state.line,
             span: Some(state.span),
@@ -1014,6 +1209,7 @@ fn extract_fields(document: &Document, language: &str, path: &str) -> Vec<FieldR
             language: language.to_string(),
             path: path.to_string(),
             owner: write.owner.clone(),
+            owner_id: owner_id(language, path, &write.owner, owner_span(document, &write.owner)),
             name,
             line: write.line,
             span: Some(write.span),
@@ -1028,7 +1224,7 @@ fn extract_fields(document: &Document, language: &str, path: &str) -> Vec<FieldR
 }
 
 fn field_id(language: &str, path: &str, owner: &str, name: &str) -> String {
-    [language, path, owner, "field", name].join("\u{0}")
+    stable_id("state", &[language, path, owner, name])
 }
 
 // ---------------------------------------------------------------------------
@@ -2329,6 +2525,128 @@ fn extract_call_graph_edges(document: &Document) -> Vec<CallGraphEdge> {
     merged
 }
 
+fn source_function_id(
+    document: &Document,
+    language: &str,
+    path: &str,
+    owner: &str,
+    function: &str,
+    line: usize,
+) -> String {
+    let candidates = document.function_defs.iter().filter(|row| {
+        row.owner == owner && row.name == function
+    }).collect::<Vec<_>>();
+    let selected = candidates.iter().copied().find(|row| {
+        row.span[0] <= line && line <= row.span[2]
+    }).or_else(|| candidates.first().copied());
+    selected.map(|row| function_id(language, path, row)).unwrap_or_else(|| {
+        stable_id("fn", &[language, path, owner, function])
+    })
+}
+
+fn extract_calls(document: &Document, language: &str, path: &str) -> Vec<CallRecord> {
+    document.call_sites.iter().map(|call| {
+        let source = source_function_id(
+            document, language, path, &call.owner, &call.function, call.line,
+        );
+        let implicit = call.receiver.is_empty() || call.receiver == "self" || call.receiver == "this";
+        let target_def = implicit.then(|| {
+            document.function_defs.iter().find(|row| {
+                row.owner == call.owner && row.name == call.message
+            })
+        }).flatten();
+        let target = target_def.map(|row| function_id(language, path, row));
+        let state_receiver = document.state_declarations.iter().any(|row| {
+            call.receiver == row.field
+                || call.receiver.trim_start_matches('@') == row.field.trim_start_matches('@')
+                || call.receiver.strip_prefix("self.") == Some(row.field.trim_start_matches('@'))
+                || call.receiver.strip_prefix("this.") == Some(row.field.trim_start_matches('@'))
+        });
+        let kind = if target.is_some() {
+            "internal_call"
+        } else if state_receiver {
+            "delegation"
+        } else if implicit {
+            "unresolved_call"
+        } else {
+            "external_call"
+        };
+        let unresolved_reason = if target.is_some() {
+            None
+        } else if state_receiver {
+            Some("state_receiver_requires_corpus_resolution".to_string())
+        } else if implicit {
+            Some("target_not_defined_in_document".to_string())
+        } else {
+            Some("receiver_requires_corpus_resolution".to_string())
+        };
+        CallRecord {
+            id: stable_id("edge", &[&source, path, &span_key(call.span), kind, &call.message]),
+            source,
+            target,
+            kind: kind.to_string(),
+            owner: call.owner.clone(),
+            function: call.function.clone(),
+            receiver: call.receiver.clone(),
+            message: call.message.clone(),
+            path: path.to_string(),
+            line: call.line,
+            span: call.span,
+            conditional: call.conditional,
+            confidence: if kind == "internal_call" { "high" } else { "partial" }.to_string(),
+            unresolved_reason,
+        }
+    }).collect()
+}
+
+fn extract_state_accesses(document: &Document, language: &str, path: &str) -> Vec<StateAccessRecord> {
+    let reads = document.state_reads.iter().map(|row| {
+        state_access_record(
+            document, language, path, &row.owner, &row.function, &row.field,
+            &row.receiver, "reads", row.line, row.span,
+        )
+    });
+    let writes = document.state_writes.iter().map(|row| {
+        state_access_record(
+            document, language, path, &row.owner, &row.function, &row.field,
+            &row.receiver, "writes", row.line, row.span,
+        )
+    });
+    reads.chain(writes).collect()
+}
+
+#[allow(clippy::too_many_arguments)]
+fn state_access_record(
+    document: &Document,
+    language: &str,
+    path: &str,
+    owner: &str,
+    function: &str,
+    field: &str,
+    receiver: &str,
+    kind: &str,
+    line: usize,
+    span: [usize; 4],
+) -> StateAccessRecord {
+    let function_id = source_function_id(document, language, path, owner, function, line);
+    let state_id = field_id(language, path, owner, field);
+    StateAccessRecord {
+        id: stable_id("edge", &[&function_id, &state_id, kind, path, &span_key(span)]),
+        function_id,
+        state_id,
+        owner: owner.to_string(),
+        function: function.to_string(),
+        field: field.to_string(),
+        receiver: receiver.to_string(),
+        kind: kind.to_string(),
+        path: path.to_string(),
+        line,
+        span,
+        conditional: false,
+        confidence: "high".to_string(),
+    }
+}
+
 // ---------------------------------------------------------------------------
 // Helpers
 // ---------------------------------------------------------------------------
@@ -3267,6 +3585,31 @@ def py_fn(a: int) -> str:
     #[test]
     fn test_nil_kill_profile_merge() {
         test_nil_kill_profile_merge_impl();
+    }
+
+    #[test]
+    fn merge_preserves_lossless_relationships() {
+        let mut output = ProfileOutput::default();
+        output.calls.push(CallRecord {
+            id: "edge:call".into(), source: "fn:a".into(), target: Some("fn:b".into()),
+            kind: "internal_call".into(), owner: "Demo".into(), function: "a".into(),
+            receiver: "self".into(), message: "b".into(), path: "demo.rb".into(), line: 2,
+            span: [2, 0, 2, 3], conditional: false, confidence: "high".into(), unresolved_reason: None,
+        });
+        output.state_accesses.push(StateAccessRecord {
+            id: "edge:state".into(), function_id: "fn:a".into(), state_id: "state:x".into(),
+            owner: "Demo".into(), function: "a".into(), field: "x".into(), receiver: "self".into(),
+            kind: "writes".into(), path: "demo.rb".into(), line: 3, span: [3, 0, 3, 1],
+            conditional: false, confidence: "high".into(),
+        });
+        output.call_graph_edges.push(CallGraphEdge {
+            source: "fn:a".into(), target: "fn:b".into(), kind: "internal_call".into(),
+            label: "internal".into(), conditional: false, weight: 1,
+        });
+        let merged = merge(vec![output], Profile::Espalier);
+        assert_eq!(merged.calls.len(), 1);
+        assert_eq!(merged.state_accesses.len(), 1);
+        assert_eq!(merged.call_graph_edges.len(), 1);
     }
     #[test]
     fn test_comprehensive_profile_extraction() {

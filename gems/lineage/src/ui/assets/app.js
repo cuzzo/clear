@@ -264,6 +264,42 @@
     });
   };
 
+  const setupArchitectureView = () => {
+    const search = document.querySelector("[data-architecture-search]");
+    if (search) {
+      search.addEventListener("input", () => {
+        const query = search.value.trim().toLowerCase();
+        document.querySelectorAll(".architecture-member").forEach((member) => {
+          member.hidden = query && !String(member.dataset.memberName || "").toLowerCase().includes(query);
+        });
+      });
+    }
+    const relationshipSearch = document.querySelector("[data-relationship-search]");
+    if (relationshipSearch) {
+      relationshipSearch.addEventListener("input", () => {
+        const query = relationshipSearch.value.trim().toLowerCase();
+        document.querySelectorAll("[data-relationship-row]").forEach((row) => {
+          row.hidden = query && !row.textContent.toLowerCase().includes(query);
+        });
+      });
+    }
+    document.querySelectorAll("[data-architecture-fit]").forEach((button) => {
+      button.addEventListener("click", () => {
+        const viewport = button.closest(".architecture-focus")?.querySelector(".architecture-graph-viewport");
+        if (viewport) viewport.scrollTo({ left: 0, top: 0, behavior: "smooth" });
+      });
+    });
+    const graphLinks = Array.from(document.querySelectorAll(".architecture-graph a"));
+    graphLinks.forEach((link, index) => {
+      link.addEventListener("keydown", (event) => {
+        if (!['ArrowLeft', 'ArrowRight', 'ArrowUp', 'ArrowDown'].includes(event.key)) return;
+        event.preventDefault();
+        const delta = event.key === 'ArrowLeft' || event.key === 'ArrowUp' ? -1 : 1;
+        graphLinks[(index + delta + graphLinks.length) % graphLinks.length]?.focus();
+      });
+    });
+  };
+
   document.addEventListener("DOMContentLoaded", () => {
     document
       .querySelectorAll("input[data-persist-key]:not(.comment-fold-toggle):not(.fn-fold-toggle)")
@@ -291,5 +327,6 @@
     document.querySelectorAll(".gutter .line-icon[for]").forEach(bindLineToggleLabel);
     setupDashboardSectionSwitchers();
     setupClickableTokens();
+    setupArchitectureView();
   });
 })();

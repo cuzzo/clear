@@ -24,7 +24,7 @@ end
 OptionParser.new do |opts|
   opts.banner = "Usage: espalier [options] <files/directories...>"
 
-  opts.on("-f", "--format FORMAT", [:markdown, :yaml, :report, :dot, :sarif, :json], "Output format (markdown, yaml, report, dot, sarif, json). Default: markdown") do |f|
+  opts.on("-f", "--format FORMAT", [:markdown, :yaml, :report, :dot, :sarif, :json, :architecture], "Output format (markdown, yaml, report, dot, sarif, json, architecture). Default: markdown") do |f|
     options[:format] = f
   end
 
@@ -136,7 +136,22 @@ if options[:risk] && File.exist?(options[:risk])
 end
 
 # Extract Static Skeletons
-evidence = Espalier::StaticEvidence.build(targets, root: Dir.pwd, vcs: options[:vcs])
+evidence = Espalier::StaticEvidence.build(
+  targets,
+  root: Dir.pwd,
+  vcs: options[:vcs],
+  include_annotations: options[:format] != :architecture
+)
+
+if options[:format] == :architecture
+  output_contents = JSON.pretty_generate(Espalier::ArchitectureArtifact.build(evidence, root: Dir.pwd))
+  if options[:output]
+    File.write(options[:output], output_contents)
+  else
+    puts output_contents
+  end
+  exit 0
+end
 
 # Group flat evidence into module structures expected by aggregator/analyzers
 modules = Espalier::StaticEvidence.project_modules(evidence)

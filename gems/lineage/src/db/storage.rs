@@ -286,6 +286,78 @@ impl Storage {
               state_json TEXT NOT NULL
             );
 
+            CREATE TABLE IF NOT EXISTS architecture_artifacts (
+              id INTEGER PRIMARY KEY AUTOINCREMENT,
+              analyzer TEXT NOT NULL,
+              analyzer_version TEXT NOT NULL,
+              schema_version INTEGER NOT NULL,
+              commit_hash TEXT NOT NULL,
+              root TEXT NOT NULL,
+              complete INTEGER NOT NULL,
+              generated_at TEXT NOT NULL,
+              payload_json TEXT NOT NULL
+            );
+
+            CREATE TABLE IF NOT EXISTS architecture_nodes (
+              artifact_id INTEGER NOT NULL,
+              analyzer_node_id TEXT NOT NULL,
+              logical_unit_id TEXT,
+              owner_node_id TEXT,
+              kind TEXT NOT NULL,
+              name TEXT NOT NULL,
+              owner TEXT,
+              language TEXT,
+              path TEXT,
+              start_line INTEGER NOT NULL,
+              start_column INTEGER NOT NULL,
+              end_line INTEGER NOT NULL,
+              end_column INTEGER NOT NULL,
+              confidence TEXT NOT NULL,
+              metadata_json TEXT NOT NULL,
+              PRIMARY KEY (artifact_id, analyzer_node_id),
+              FOREIGN KEY(artifact_id) REFERENCES architecture_artifacts(id) ON DELETE CASCADE,
+              FOREIGN KEY(logical_unit_id) REFERENCES logical_units(id)
+            );
+
+            CREATE TABLE IF NOT EXISTS architecture_edges (
+              artifact_id INTEGER NOT NULL,
+              edge_id TEXT NOT NULL,
+              source_node_id TEXT NOT NULL,
+              target_node_id TEXT NOT NULL,
+              kind TEXT NOT NULL,
+              conditional INTEGER NOT NULL,
+              weight INTEGER NOT NULL,
+              confidence TEXT NOT NULL,
+              metadata_json TEXT NOT NULL,
+              PRIMARY KEY (artifact_id, edge_id),
+              FOREIGN KEY(artifact_id) REFERENCES architecture_artifacts(id) ON DELETE CASCADE
+            );
+
+            CREATE TABLE IF NOT EXISTS architecture_edge_spans (
+              artifact_id INTEGER NOT NULL,
+              edge_id TEXT NOT NULL,
+              path TEXT NOT NULL,
+              start_line INTEGER NOT NULL,
+              start_column INTEGER NOT NULL,
+              end_line INTEGER NOT NULL,
+              end_column INTEGER NOT NULL,
+              FOREIGN KEY(artifact_id) REFERENCES architecture_artifacts(id) ON DELETE CASCADE
+            );
+
+            CREATE TABLE IF NOT EXISTS architecture_pressure (
+              artifact_id INTEGER NOT NULL,
+              node_id TEXT NOT NULL,
+              score REAL NOT NULL,
+              band TEXT NOT NULL,
+              collaboration REAL NOT NULL,
+              state REAL NOT NULL,
+              implementation REAL NOT NULL,
+              operational REAL NOT NULL,
+              explanation_json TEXT NOT NULL,
+              PRIMARY KEY (artifact_id, node_id),
+              FOREIGN KEY(artifact_id) REFERENCES architecture_artifacts(id) ON DELETE CASCADE
+            );
+
             CREATE INDEX IF NOT EXISTS idx_events_unit_id ON events(unit_id);
             CREATE INDEX IF NOT EXISTS idx_events_unit_latest
               ON events(unit_id, timestamp DESC, id DESC);
@@ -329,6 +401,12 @@ impl Storage {
             CREATE INDEX IF NOT EXISTS idx_ui_warning_units_path ON ui_warning_units(current_path);
             CREATE INDEX IF NOT EXISTS idx_events_path ON events(path);
             CREATE INDEX IF NOT EXISTS idx_logical_units_original_path ON logical_units(original_path);
+            CREATE INDEX IF NOT EXISTS idx_architecture_artifacts_commit ON architecture_artifacts(commit_hash, id DESC);
+            CREATE INDEX IF NOT EXISTS idx_architecture_nodes_owner ON architecture_nodes(artifact_id, owner_node_id, kind);
+            CREATE INDEX IF NOT EXISTS idx_architecture_nodes_logical ON architecture_nodes(logical_unit_id);
+            CREATE INDEX IF NOT EXISTS idx_architecture_nodes_path ON architecture_nodes(artifact_id, path, start_line);
+            CREATE INDEX IF NOT EXISTS idx_architecture_edges_source ON architecture_edges(artifact_id, source_node_id, kind);
+            CREATE INDEX IF NOT EXISTS idx_architecture_edges_target ON architecture_edges(artifact_id, target_node_id, kind);
             "#,
         )?;
         self.ensure_logical_unit_column("start_line", "INTEGER DEFAULT 1")?;

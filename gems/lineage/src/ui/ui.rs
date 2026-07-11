@@ -1,6 +1,7 @@
 use crate::extract::{
     is_production_source_path, BoundaryExtractor, HeuristicExtractor, SourceFilter,
 };
+use crate::architecture::{architecture_search, node_neighborhood, owner_inventory, state_access};
 use crate::git::GitProvider;
 use crate::model::BlobFile;
 use crate::storage::Storage;
@@ -15,10 +16,10 @@ use axum::response::{Html, IntoResponse};
 use axum::routing::get;
 use axum::{Json, Router};
 use git2::{BlameOptions, Oid, Repository};
-use rusqlite::params;
+use rusqlite::{params, OptionalExtension};
 use rust_embed::RustEmbed;
 use serde::{Deserialize, Serialize};
-use serde_json::Value;
+use serde_json::{json, Value};
 use std::collections::{BTreeMap, BTreeSet, HashMap};
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -309,6 +310,10 @@ pub struct UiSourceSymbol {
     pub unverified_hazards: i64,
     pub bug_weight: f64,
     pub semantic_churn: f64,
+    pub architecture_id: Option<String>,
+    pub architecture_owner_id: Option<String>,
+    pub architecture_pressure: f64,
+    pub architecture_band: String,
 }
 
 #[derive(Debug, Clone, Serialize, PartialEq)]
@@ -420,6 +425,7 @@ pub struct UiArchitectureRisk {
     pub functions: i64,
     pub impure_functions: i64,
     pub privacy_candidates: i64,
+    pub architecture_id: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, PartialEq)]
@@ -837,6 +843,12 @@ fn ui_router(state: UiServerState) -> Router {
         .route("/api/dashboard", get(api_dashboard_handler))
         .route("/api/source", get(api_source_handler))
         .route("/api/definition", get(api_definition_handler))
+        .route("/api/architecture/owners/:owner_id", get(api_architecture_owner_handler))
+        .route("/api/architecture/functions/:node_id/neighborhood", get(api_architecture_neighborhood_handler))
+        .route("/api/architecture/state/:state_id/access", get(api_architecture_state_handler))
+        .route("/api/architecture/search", get(api_architecture_search_handler))
+        .route("/architecture/unit/:node_id", get(architecture_page_handler))
+        .route("/architecture/state/:node_id", get(architecture_page_handler))
         .route("/assets/*path", get(asset_handler))
         .route("/favicon.ico", get(favicon_handler))
         .with_state(state)
@@ -845,6 +857,216 @@ fn ui_router(state: UiServerState) -> Router {
             HeaderValue::from_static("no-store"),
         ))
         .layer(TraceLayer::new_for_http())
+}
+
+#[derive(Debug, Default, Deserialize)]
+struct ArchitecturePageQuery {
+    lens: Option<String>,
+    limit: Option<usize>,
+}
+
+#[derive(Debug, Default, Deserialize)]
+struct ArchitectureSearchQuery {
+    owner: Option<String>,
+    q: Option<String>,
+}
+
+async fn api_architecture_owner_handler(
+    State(state): State<UiServerState>,
+    AxumPath(owner_id): AxumPath<String>,
+) -> Response<Body> {
+    architecture_json_response(&state, |storage| owner_inventory(storage, &owner_id))
+}
+
+async fn api_architecture_neighborhood_handler(
+    State(state): State<UiServerState>,
+    AxumPath(node_id): AxumPath<String>,
+    Query(query): Query<ArchitecturePageQuery>,
+) -> Response<Body> {
+    let limit = query.limit.unwrap_or(40).clamp(1, 100);
+    architecture_json_response(&state, |storage| node_neighborhood(storage, &node_id, limit))
+}
+
+async fn api_architecture_state_handler(
+    State(state): State<UiServerState>,
+    AxumPath(state_id): AxumPath<String>,
+) -> Response<Body> {
+    architecture_json_response(&state, |storage| state_access(storage, &state_id))
+}
+
+async fn api_architecture_search_handler(
+    State(state): State<UiServerState>,
+    Query(query): Query<ArchitectureSearchQuery>,
+) -> Response<Body> {
+    architecture_json_response(&state, |storage| {
+        architecture_search(storage, query.owner.as_deref(), query.q.as_deref().unwrap_or_default())
+    })
+}
+
+fn architecture_json_response(
+    state: &UiServerState,
+    operation: impl FnOnce(&Storage) -> Result<Value>,
+) -> Response<Body> {
+    let storage = match Storage::open_existing(state.db.as_ref()) {
+        Ok(storage) => storage,
+        Err(error) => return error_json(StatusCode::INTERNAL_SERVER_ERROR, error),
+    };
+    match operation(&storage) {
+        Ok(mut value) => {
+            annotate_architecture_freshness(&mut value, state.repo.as_ref());
+            Json(value).into_response()
+        }
+        Err(error) => error_json(StatusCode::NOT_FOUND, error),
+    }
+}
+
+async fn architecture_page_handler(
+    State(state): State<UiServerState>,
+    AxumPath(node_id): AxumPath<String>,
+    Query(query): Query<ArchitecturePageQuery>,
+) -> Response<Body> {
+    let storage = match Storage::open_existing(state.db.as_ref()) {
+        Ok(storage) => storage,
+        Err(error) => return error_response(StatusCode::INTERNAL_SERVER_ERROR, error),
+    };
+    let mut neighborhood = match node_neighborhood(&storage, &node_id, query.limit.unwrap_or(40).clamp(1, 100)) {
+        Ok(value) => value,
+        Err(error) => return error_response(StatusCode::NOT_FOUND, error),
+    };
+    annotate_architecture_freshness(&mut neighborhood, state.repo.as_ref());
+    let selected = &neighborhood["selected"];
+    let owner_id = selected.get("owner_id").and_then(Value::as_str).unwrap_or(&node_id);
+    let inventory = owner_inventory(&storage, owner_id).unwrap_or_else(|_| json!({"owner": selected, "members": []}));
+    Html(render_architecture_page(
+        &inventory,
+        &neighborhood,
+        query.lens.as_deref().unwrap_or("combined"),
+    )).into_response()
+}
+
+fn annotate_architecture_freshness(value: &mut Value, repo: &Path) {
+    let current = Repository::open(repo).ok().and_then(|repository| repository.head().ok().and_then(|head| head.target()).map(|oid| oid.to_string()));
+    let artifact_commit = value.pointer("/artifact/commit").and_then(Value::as_str).unwrap_or("");
+    let stale = current.as_deref().is_some_and(|commit| !artifact_commit.is_empty() && commit != artifact_commit);
+    if let Some(artifact) = value.get_mut("artifact") {
+        artifact["current_commit"] = json!(current);
+        artifact["stale"] = json!(stale);
+    }
+}
+
+fn render_architecture_page(inventory: &Value, neighborhood: &Value, lens: &str) -> String {
+    let owner = &inventory["owner"];
+    let selected = &neighborhood["selected"];
+    let owner_name = owner.get("name").and_then(Value::as_str).unwrap_or("Architecture");
+    let selected_name = selected.get("name").and_then(Value::as_str).unwrap_or("");
+    let members = inventory.get("members").and_then(Value::as_array).cloned().unwrap_or_default();
+    let mut edges = neighborhood.get("edges").and_then(Value::as_array).cloned().unwrap_or_default();
+    let omitted = neighborhood.get("omitted_relationships").and_then(Value::as_array).cloned().unwrap_or_default();
+    let all_edges = edges.iter().chain(omitted.iter()).cloned().collect::<Vec<_>>();
+    edges.retain(|edge| architecture_edge_in_lens(edge, lens));
+    let nodes = neighborhood.get("nodes").and_then(Value::as_array).cloned().unwrap_or_default();
+    let commit = neighborhood.pointer("/artifact/commit").and_then(Value::as_str).unwrap_or("");
+
+    let mut out = String::new();
+    out.push_str("<!doctype html><html lang=\"en\"><head><meta charset=\"utf-8\"><meta name=\"viewport\" content=\"width=device-width,initial-scale=1\">");
+    out.push_str("<title>"); out.push_str(&html_escape(owner_name)); out.push_str(" architecture</title><link rel=\"stylesheet\" href=\"/assets/app.css\">");
+    out.push_str("</head><body class=\"architecture-page\"><main class=\"architecture-shell\">");
+    out.push_str("<header class=\"architecture-header\"><div><a href=\"/\">← Lineage</a><h1>");
+    out.push_str(&html_escape(owner_name)); out.push_str("</h1><p>");
+    out.push_str(&html_escape(owner.get("path").and_then(Value::as_str).unwrap_or("")));
+    out.push_str("</p></div><div><strong>Focused: "); out.push_str(&html_escape(selected_name));
+    out.push_str("</strong><small>artifact "); out.push_str(&html_escape(&short_hash(commit))); out.push_str("</small></div></header>");
+    if neighborhood.pointer("/artifact/stale").and_then(Value::as_bool) == Some(true) {
+        out.push_str("<div class=\"architecture-stale\" role=\"status\"><strong>Architecture artifact is stale.</strong> Regenerate it for the currently viewed commit.</div>");
+    }
+    out.push_str("<nav class=\"architecture-lenses\" aria-label=\"Architecture lens\">");
+    for candidate in ["combined", "calls", "state", "risk"] {
+        out.push_str("<a href=\"?lens="); out.push_str(candidate); out.push_str("\" class=\"");
+        if candidate == lens { out.push_str("active"); }
+        out.push_str("\">"); out.push_str(&html_escape(&capitalize(candidate))); out.push_str("</a>");
+    }
+    out.push_str("</nav><div class=\"architecture-workspace\"><aside class=\"architecture-members\"><label>Members<input type=\"search\" placeholder=\"Search members…\" data-architecture-search></label>");
+    for member in &members {
+        let id = member.get("id").and_then(Value::as_str).unwrap_or("");
+        let kind = member.get("kind").and_then(Value::as_str).unwrap_or("");
+        let route = if kind == "state" { "state" } else { "unit" };
+        let band = member.pointer("/pressure/band").and_then(Value::as_str).unwrap_or("ordinary");
+        let score = member.pointer("/pressure/score").and_then(Value::as_f64).unwrap_or(0.0);
+        out.push_str("<a class=\"architecture-member architecture-band-"); out.push_str(&html_escape(band));
+        if id == selected.get("id").and_then(Value::as_str).unwrap_or("") { out.push_str(" selected"); }
+        out.push_str("\" data-member-name=\""); out.push_str(&html_escape(member.get("name").and_then(Value::as_str).unwrap_or("")));
+        out.push_str("\" href=\"/architecture/"); out.push_str(route); out.push('/'); out.push_str(&percent_encode(id)); out.push_str("?lens="); out.push_str(&percent_encode(lens)); out.push_str("\">");
+        out.push_str("<span><small>"); out.push_str(&html_escape(kind)); out.push_str("</small>"); out.push_str(&html_escape(member.get("name").and_then(Value::as_str).unwrap_or(""))); out.push_str("</span>");
+        out.push_str("<b>"); out.push_str(&format!("{score:.0}")); out.push_str("</b></a>");
+    }
+    out.push_str("</aside><section class=\"architecture-focus\"><div class=\"architecture-graph-toolbar\"><strong>Focused neighborhood</strong><button type=\"button\" data-architecture-fit>Fit</button></div>");
+    out.push_str(&render_architecture_svg(selected, &nodes, &edges));
+    out.push_str("<section class=\"architecture-evidence\"><h2>Why this is highlighted</h2>");
+    let pressure = members.iter().find(|member| member.get("id") == selected.get("id")).and_then(|member| member.get("pressure"));
+    if let Some(pressure) = pressure {
+        out.push_str("<p><strong>"); out.push_str(&format!("{:.1} architecture pressure", pressure.get("score").and_then(Value::as_f64).unwrap_or(0.0))); out.push_str("</strong></p><pre>");
+        out.push_str(&html_escape(&serde_json::to_string_pretty(&pressure["explanation"]).unwrap_or_default())); out.push_str("</pre>");
+    } else { out.push_str("<p>Pressure is not scored for this node.</p>"); }
+    out.push_str("</section><section class=\"architecture-relationships\"><h2>All known relationships</h2><input type=\"search\" placeholder=\"Filter relationships…\" aria-label=\"Filter relationships\" data-relationship-search><table><thead><tr><th>Kind</th><th>From</th><th>To</th><th>Confidence</th><th>Evidence</th></tr></thead><tbody>");
+    let node_names = nodes.iter().filter_map(|node| Some((node.get("id")?.as_str()?, node.get("name")?.as_str()?))).collect::<HashMap<_, _>>();
+    for edge in &all_edges {
+        let source = edge.get("source").and_then(Value::as_str).unwrap_or("");
+        let target = edge.get("target").and_then(Value::as_str).unwrap_or("");
+        out.push_str("<tr data-relationship-row><td>"); out.push_str(&html_escape(edge.get("kind").and_then(Value::as_str).unwrap_or(""))); out.push_str("</td><td>");
+        out.push_str(&html_escape(node_names.get(source).copied().unwrap_or(source))); out.push_str("</td><td>"); out.push_str(&html_escape(node_names.get(target).copied().unwrap_or(target))); out.push_str("</td><td>");
+        out.push_str(&html_escape(edge.get("confidence").and_then(Value::as_str).unwrap_or(""))); out.push_str("</td><td>");
+        if let Some(span) = edge.get("spans").and_then(Value::as_array).and_then(|spans| spans.first()) {
+            let path = span.get("path").and_then(Value::as_str).unwrap_or(""); let line = span.get("start_line").and_then(Value::as_i64).unwrap_or(1);
+            out.push_str("<a href=\"/?path="); out.push_str(&percent_encode(path)); out.push_str("#L"); out.push_str(&line.to_string()); out.push_str("\">"); out.push_str(&html_escape(path)); out.push(':'); out.push_str(&line.to_string()); out.push_str("</a>");
+        }
+        out.push_str("</td></tr>");
+    }
+    out.push_str("</tbody></table></section></section></div></main><script src=\"/assets/app.js\"></script></body></html>");
+    out
+}
+
+fn architecture_edge_in_lens(edge: &Value, lens: &str) -> bool {
+    let kind = edge.get("kind").and_then(Value::as_str).unwrap_or("");
+    match lens {
+        "calls" => kind.contains("call") || kind == "delegation",
+        "state" => matches!(kind, "reads" | "writes"),
+        _ => true,
+    }
+}
+
+fn render_architecture_svg(selected: &Value, nodes: &[Value], edges: &[Value]) -> String {
+    let selected_id = selected.get("id").and_then(Value::as_str).unwrap_or("");
+    let inbound = edges.iter().filter_map(|edge| (edge.get("target").and_then(Value::as_str) == Some(selected_id)).then(|| edge.get("source").and_then(Value::as_str)).flatten()).collect::<Vec<_>>();
+    let outbound = edges.iter().filter_map(|edge| (edge.get("source").and_then(Value::as_str) == Some(selected_id)).then(|| edge.get("target").and_then(Value::as_str)).flatten()).collect::<Vec<_>>();
+    let mut positions = HashMap::<&str, (i32, i32)>::new();
+    positions.insert(selected_id, (400, 180));
+    for (index, id) in inbound.iter().enumerate() { positions.insert(id, (100, 60 + index as i32 * 90)); }
+    for (index, id) in outbound.iter().enumerate() { positions.insert(id, (700, 60 + index as i32 * 90)); }
+    let height = (inbound.len().max(outbound.len()).max(2) * 90 + 70).max(320);
+    let mut out = format!("<div class=\"architecture-graph-viewport\"><svg class=\"architecture-graph\" viewBox=\"0 0 800 {height}\" role=\"img\" aria-label=\"Focused architecture relationships\">");
+    out.push_str("<defs><marker id=\"architecture-arrow\" markerWidth=\"8\" markerHeight=\"8\" refX=\"7\" refY=\"3\" orient=\"auto\"><path d=\"M0,0 L0,6 L8,3 z\"></path></marker></defs>");
+    for edge in edges {
+        let source = edge.get("source").and_then(Value::as_str).unwrap_or(""); let target = edge.get("target").and_then(Value::as_str).unwrap_or("");
+        let (Some((sx, sy)), Some((tx, ty))) = (positions.get(source), positions.get(target)) else { continue };
+        let dashed = edge.get("confidence").and_then(Value::as_str) != Some("high") || edge.get("conditional").and_then(Value::as_bool) == Some(true);
+        out.push_str("<path class=\"architecture-edge"); if dashed { out.push_str(" partial"); } out.push_str("\" d=\"M");
+        out.push_str(&(sx + 85).to_string()); out.push(','); out.push_str(&sy.to_string()); out.push_str(" L"); out.push_str(&(tx - 85).to_string()); out.push(','); out.push_str(&ty.to_string()); out.push_str("\" marker-end=\"url(#architecture-arrow)\"><title>");
+        out.push_str(&html_escape(edge.get("kind").and_then(Value::as_str).unwrap_or("relationship"))); out.push_str("</title></path>");
+    }
+    for node in nodes {
+        let id = node.get("id").and_then(Value::as_str).unwrap_or(""); let Some((x, y)) = positions.get(id) else { continue };
+        let kind = node.get("kind").and_then(Value::as_str).unwrap_or(""); let route = if kind == "state" { "state" } else { "unit" };
+        if kind != "aggregate" { out.push_str("<a href=\"/architecture/"); out.push_str(route); out.push('/'); out.push_str(&percent_encode(id)); out.push_str("\">"); }
+        out.push_str("<g class=\"architecture-node "); out.push_str(&html_escape(kind)); if id == selected_id { out.push_str(" selected"); } out.push_str("\" tabindex=\"0\"><rect x=\"");
+        out.push_str(&(x - 85).to_string()); out.push_str("\" y=\""); out.push_str(&(y - 26).to_string()); out.push_str("\" width=\"170\" height=\"52\" rx=\"8\"></rect><text x=\""); out.push_str(&x.to_string()); out.push_str("\" y=\""); out.push_str(&(y + 5).to_string()); out.push_str("\" text-anchor=\"middle\">"); out.push_str(&html_escape(node.get("name").and_then(Value::as_str).unwrap_or(id))); out.push_str("</text></g>");
+        if kind != "aggregate" { out.push_str("</a>"); }
+    }
+    out.push_str("</svg></div>"); out
+}
+
+fn capitalize(value: &str) -> String {
+    let mut chars = value.chars();
+    chars.next().map(|first| first.to_uppercase().collect::<String>() + chars.as_str()).unwrap_or_default()
 }
 
 pub fn file_index(storage: &Storage, repo: Option<&Path>) -> Result<Vec<UiFile>> {
@@ -2170,6 +2392,7 @@ fn top_architecture_risks(
         .map(|risk| {
             let score = architecture_risk_score(&risk);
             UiArchitectureRisk {
+                architecture_id: architecture_owner_id_by_name(storage, &risk.path, &risk.owner),
                 path: risk.path,
                 owner: risk.owner,
                 owner_kind: risk.owner_kind,
@@ -2966,6 +3189,7 @@ pub fn source_payload_with_overlays(
     profile_log("source.file_versions", versions_start);
     let symbols_start = Instant::now();
     let mut symbols = source_symbols(storage, &file)?;
+    apply_architecture_symbol_links(storage, path, &mut symbols);
     profile_log("source.symbols", symbols_start);
     let effects_start = Instant::now();
     let effects = espalier_function_effects(storage, path)?;
@@ -3306,6 +3530,10 @@ fn empty_source_symbol(
         unverified_hazards: 0,
         bug_weight: 0.0,
         semantic_churn: 0.0,
+        architecture_id: None,
+        architecture_owner_id: None,
+        architecture_pressure: 0.0,
+        architecture_band: "ordinary".to_string(),
     }
 }
 
@@ -3342,6 +3570,64 @@ fn persisted_source_symbols(storage: &Storage, path: &str) -> Result<Vec<UiSourc
         ))
     })?;
     Ok(rows.collect::<std::result::Result<Vec<_>, _>>()?)
+}
+
+fn apply_architecture_symbol_links(storage: &Storage, path: &str, symbols: &mut [UiSourceSymbol]) {
+    let Ok(mut stmt) = storage.connection().prepare(
+        r#"SELECT n.analyzer_node_id, n.owner_node_id, n.kind, n.name, n.start_line, n.end_line,
+                  COALESCE(p.score, 0), COALESCE(p.band, 'ordinary'),
+                  COALESCE((SELECT group_concat(DISTINCT s.name) FROM architecture_edges e JOIN architecture_nodes s ON s.artifact_id=e.artifact_id AND s.analyzer_node_id=e.source_node_id WHERE e.artifact_id=n.artifact_id AND e.target_node_id=n.analyzer_node_id AND e.kind='reads'), ''),
+                  COALESCE((SELECT group_concat(DISTINCT s.name) FROM architecture_edges e JOIN architecture_nodes s ON s.artifact_id=e.artifact_id AND s.analyzer_node_id=e.target_node_id WHERE e.artifact_id=n.artifact_id AND e.source_node_id=n.analyzer_node_id AND e.kind='writes'), '')
+           FROM architecture_nodes n
+           LEFT JOIN architecture_pressure p ON p.artifact_id=n.artifact_id AND p.node_id=n.analyzer_node_id
+           WHERE n.artifact_id=(SELECT id FROM architecture_artifacts ORDER BY id DESC LIMIT 1)
+             AND n.path=?1"#,
+    ) else {
+        return;
+    };
+    let Ok(rows) = stmt.query_map(params![path], |row| {
+        Ok((row.get::<_, String>(0)?, row.get::<_, Option<String>>(1)?, row.get::<_, String>(2)?,
+            row.get::<_, String>(3)?, row.get::<_, u32>(4)?, row.get::<_, u32>(5)?,
+            row.get::<_, f64>(6)?, row.get::<_, String>(7)?, row.get::<_, String>(8)?, row.get::<_, String>(9)?))
+    }) else {
+        return;
+    };
+    let records = rows.filter_map(std::result::Result::ok).collect::<Vec<_>>();
+    for symbol in symbols {
+        let wanted_kind = if is_outline_container(symbol) { "owner" } else { "function" };
+        let short_name = outline_short_name(&symbol.name);
+        let matched = records.iter().filter(|record| record.2 == wanted_kind).min_by_key(|record| {
+            let name_penalty = if record.3 == symbol.name || record.3 == short_name { 0 } else { 10_000 };
+            name_penalty + record.4.abs_diff(symbol.start_line)
+        });
+        if let Some((id, owner_id, _, _, _, _, score, band, reads, writes)) = matched {
+            symbol.architecture_id = Some(id.clone());
+            symbol.architecture_owner_id = owner_id.clone().or_else(|| Some(id.clone()));
+            symbol.architecture_pressure = *score;
+            symbol.architecture_band = band.clone();
+            if wanted_kind == "function" {
+                let reads = reads.split(',').filter(|value| !value.is_empty()).collect::<Vec<_>>();
+                let writes = writes.split(',').filter(|value| !value.is_empty()).collect::<Vec<_>>();
+                symbol.effect_known = true;
+                symbol.impure = !writes.is_empty();
+                symbol.effect_summary.clear();
+                if !reads.is_empty() { symbol.effect_summary.push(format!("reads {}", reads.join(", "))); }
+                if !writes.is_empty() { symbol.effect_summary.push(format!("writes {}", writes.join(", "))); }
+                if reads.is_empty() && writes.is_empty() { symbol.effect_summary.push("pure (no state effects)".to_string()); }
+            }
+        }
+    }
+}
+
+fn architecture_owner_id_by_name(storage: &Storage, path: &str, owner: &str) -> Option<String> {
+    storage.connection().query_row(
+        r#"SELECT analyzer_node_id FROM architecture_nodes
+           WHERE artifact_id=(SELECT id FROM architecture_artifacts ORDER BY id DESC LIMIT 1)
+             AND kind='owner' AND path=?1 AND (name=?2 OR name LIKE ?3)
+           ORDER BY CASE WHEN name=?2 THEN 0 ELSE 1 END, start_line LIMIT 1"#,
+        params![path, owner, format!("%{owner}")],
+        |row| row.get(0),
+    ).optional().ok().flatten()
 }
 
 fn source_blame(
@@ -5694,6 +5980,17 @@ fn render_outline_symbol_link(
         out.push_str(" <i class=\"fa-solid fa-recycle reentrant-icon\" title=\"Re-entrant\"></i>");
     }
     out.push_str("</span></a>");
+    if let Some(architecture_id) = &symbol.architecture_id {
+        out.push_str("<a class=\"outline-architecture architecture-band-");
+        out.push_str(&html_escape(&symbol.architecture_band));
+        out.push_str("\" href=\"/architecture/unit/");
+        out.push_str(&percent_encode(architecture_id));
+        out.push_str("\" title=\"Architecture pressure ");
+        out.push_str(&format!("{:.1}", symbol.architecture_pressure));
+        out.push_str("\" aria-label=\"Open architecture view for ");
+        out.push_str(&html_escape(display_name));
+        out.push_str("\">A</a>");
+    }
 }
 
 fn outline_kind_label(symbol: &UiSourceSymbol) -> String {
@@ -6915,7 +7212,7 @@ fn render_architecture_risks(risks: &[UiArchitectureRisk], filter: &str) -> Stri
     let items = risks
         .iter()
         .map(|risk| HotspotItem {
-            href: format!("{}#L{}", page_href(&risk.path, None, filter), risk.start_line),
+            href: risk.architecture_id.as_ref().map(|id| format!("/architecture/unit/{}", percent_encode(id))).unwrap_or_else(|| format!("{}#L{}", page_href(&risk.path, None, filter), risk.start_line)),
             kind: unit_kind_label(&risk.owner_kind, &risk.owner),
             name: risk.owner.clone(),
             path: risk.path.clone(),

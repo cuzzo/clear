@@ -5,7 +5,7 @@ use lineage::{
     ingest_mutant_facts_json, ingest_sarif_paths, ingest_stack_traces,
     ingest_test_exposure_json, parse_coverage_input, resolve_coverage_record_paths, serve_lsp,
     serve_ui_with_overlays, CoverageIngestOptions, GitProvider, HeuristicExtractor, LineageEngine,
-    RepoPathNormalizer, SentryProvider, Storage,
+    RepoPathNormalizer, SentryProvider, Storage, ingest_architecture_json,
 };
 use std::fs;
 use std::path::PathBuf;
@@ -24,6 +24,13 @@ enum Command {
     Init {
         #[arg(long, default_value = "lineage.db")]
         db: PathBuf,
+    },
+    /// Ingest a versioned Espalier architecture graph artifact.
+    IngestArchitecture {
+        #[arg(long, default_value = "lineage.db")]
+        db: PathBuf,
+        #[arg(long)]
+        input: PathBuf,
     },
     /// Build lineage data for a Git repository.
     Build {
@@ -176,6 +183,15 @@ fn main() -> Result<()> {
         Command::Init { db } => {
             Storage::open(&db)?;
             println!("initialized {}", db.display());
+        }
+        Command::IngestArchitecture { db, input } => {
+            let storage = Storage::open(&db)?;
+            let payload = fs::read_to_string(&input)?;
+            let stats = ingest_architecture_json(&storage, &payload)?;
+            println!(
+                "ingested architecture: artifacts={} nodes={} edges={} spans={} reconciled_units={}",
+                stats.artifacts, stats.nodes, stats.edges, stats.spans, stats.reconciled_units
+            );
         }
         Command::Build {
             repo,

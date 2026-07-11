@@ -89,6 +89,29 @@ cargo run --manifest-path gems/lineage/Cargo.toml -- ui \
   --port 8080
 ```
 
+### Focused architecture view
+
+Generate Espalier's structured graph, ingest it transactionally, and serve the
+focused owner/function/state view:
+
+```bash
+FACT_MINE_RUST_BINARY="$PWD/gems/fact-mine/target/release/fact-mine-rust" \
+  ruby -Igems/espalier/lib gems/espalier/exe/espalier \
+  --format architecture \
+  --output tmp/espalier-architecture.json \
+  gems/espalier/lib gems/lineage/src
+
+cargo run --manifest-path gems/lineage/Cargo.toml -- ingest-architecture \
+  --db lineage.db \
+  --input tmp/espalier-architecture.json
+
+cargo run --manifest-path gems/lineage/Cargo.toml -- ui \
+  --db lineage.db --repo . --port 8080
+```
+
+Architecture actions then appear beside matched symbols in the source outline.
+The graph APIs are also available under `/api/architecture`.
+
 ## Outputs
 
 Lineage can output a SQLite evidence database, text or JSON risk
@@ -122,6 +145,11 @@ Core tables include:
 - `test_exposure_events`
 - `sarif_artifacts`
 - `sarif_findings`
+- `architecture_artifacts`
+- `architecture_nodes`
+- `architecture_edges`
+- `architecture_edge_spans`
+- `architecture_pressure`
 
 Inspect the unit-level signal:
 
