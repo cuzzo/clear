@@ -217,6 +217,7 @@ pub struct UiFinding {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum FirstPartyFindingTool {
     Decomplex,
+    SqlCov,
     Espalier,
     NilKill,
     Lint,
@@ -224,12 +225,13 @@ enum FirstPartyFindingTool {
 
 impl FirstPartyFindingTool {
     fn all() -> &'static [Self] {
-        &[Self::Decomplex, Self::Espalier, Self::NilKill, Self::Lint]
+        &[Self::Decomplex, Self::SqlCov, Self::Espalier, Self::NilKill, Self::Lint]
     }
 
     fn key(self) -> &'static str {
         match self {
             Self::Decomplex => "decomplex",
+            Self::SqlCov => "sql-cov",
             Self::Espalier => "espalier",
             Self::NilKill => "nil-kill",
             Self::Lint => "lint",
@@ -239,6 +241,7 @@ impl FirstPartyFindingTool {
     fn title(self) -> &'static str {
         match self {
             Self::Decomplex => "Decomplex",
+            Self::SqlCov => "SQL-COV",
             Self::Espalier => "Espalier",
             Self::NilKill => "Nil-Kill",
             Self::Lint => "Lint",
@@ -254,7 +257,7 @@ impl FirstPartyFindingTool {
 
     fn icon_class(self) -> &'static str {
         match self {
-            Self::Decomplex => "fa-puzzle-piece",
+            Self::Decomplex | Self::SqlCov => "fa-puzzle-piece",
             Self::Espalier => "fa-tree",
             Self::NilKill => "fa-skull",
             Self::Lint => "fa-note-sticky",
@@ -264,6 +267,7 @@ impl FirstPartyFindingTool {
     fn panel_class(self) -> &'static str {
         match self {
             Self::Decomplex => "decomplex-panel",
+            Self::SqlCov => "sql-cov-panel",
             Self::Espalier => "espalier-panel",
             Self::NilKill => "nil-kill-panel",
             Self::Lint => "lint-panel",
@@ -273,6 +277,7 @@ impl FirstPartyFindingTool {
     fn toggle_class(self) -> &'static str {
         match self {
             Self::Decomplex => "decomplex-toggle",
+            Self::SqlCov => "sql-cov-toggle",
             Self::Espalier => "espalier-toggle",
             Self::NilKill => "nil-kill-toggle",
             Self::Lint => "lint-toggle",
@@ -282,6 +287,7 @@ impl FirstPartyFindingTool {
     fn open_class(self) -> &'static str {
         match self {
             Self::Decomplex => "decomplex-open",
+            Self::SqlCov => "sql-cov-open",
             Self::Espalier => "espalier-open",
             Self::NilKill => "nil-kill-open",
             Self::Lint => "lint-open",
@@ -291,6 +297,7 @@ impl FirstPartyFindingTool {
     fn control_class(self) -> &'static str {
         match self {
             Self::Decomplex => "decomplex-finding",
+            Self::SqlCov => "sql-cov-finding",
             Self::Espalier => "espalier-finding",
             Self::NilKill => "nil-kill-finding",
             Self::Lint => "lint-finding",
@@ -8598,7 +8605,7 @@ fn coverage_background(annotation: &UiLineAnnotation, gutter: bool) -> String {
         if gutter {
             "rgba(31, 41, 55, 0.32)".to_string()
         } else {
-            "rgba(34, 197, 94, 0.08)".to_string()
+            "rgba(31, 41, 55, 0.16)".to_string()
         }
     } else if annotation.covered && (annotation.mutant_tested || annotation.mutant_killed_tests > 0) {
         if gutter {
@@ -8657,7 +8664,9 @@ fn gutter_title(annotation: &UiLineAnnotation) -> String {
         ));
     }
     if annotation.covered {
-        rows.push(if annotation.mutant_tested {
+        rows.push(if annotation.is_partial {
+            "coverage quality: partial".to_string()
+        } else if annotation.mutant_tested {
             "coverage quality: mutant tested".to_string()
         } else {
             "coverage quality: covered".to_string()
@@ -10268,6 +10277,16 @@ mod tests {
                         span: None,
                     },
                     UiFinding {
+                        source: "sql-cov-hazards".to_string(),
+                        tool: "sql-cov-hazards".to_string(),
+                        rule_id: "SQL007".to_string(),
+                        level: "warning".to_string(),
+                        message: "nullable join equality has an implicit UNKNOWN policy".to_string(),
+                        category: "nullable_join_key".to_string(),
+                        tier: None,
+                        span: Some([2, 2, 2, 12]),
+                    },
+                    UiFinding {
                         source: "first-party".to_string(),
                         tool: "Decomplex".to_string(),
                         rule_id: "decomplex.decision-pressure".to_string(),
@@ -10398,18 +10417,23 @@ mod tests {
         assert!(html.contains("<i class=\"fa-solid fa-skull\" aria-hidden=\"true\"></i>"));
         assert!(html.contains("<i class=\"fa-regular fa-note-sticky\" aria-hidden=\"true\"></i>"));
         assert!(html.contains("class=\"line-toggle tool-toggle decomplex-toggle\""));
+        assert!(html.contains("class=\"line-toggle tool-toggle sql-cov-toggle\""));
         assert!(html.contains("class=\"line-toggle tool-toggle espalier-toggle\""));
         assert!(html.contains("class=\"line-toggle tool-toggle nil-kill-toggle\""));
         assert!(html.contains("class=\"line-toggle tool-toggle lint-toggle\""));
         assert!(html.contains("class=\"decomplex-finding line-icon\""));
+        assert!(html.contains("class=\"sql-cov-finding line-icon\""));
         assert!(html.contains("class=\"espalier-finding line-icon\""));
         assert!(html.contains("class=\"nil-kill-finding line-icon\""));
         assert!(html.contains("class=\"lint-finding line-icon\""));
         assert!(html.contains("class=\"line-panel finding-panel decomplex-panel\""));
+        assert!(html.contains("class=\"line-panel finding-panel sql-cov-panel\""));
         assert!(html.contains("class=\"line-panel finding-panel espalier-panel\""));
         assert!(html.contains("class=\"line-panel finding-panel nil-kill-panel\""));
         assert!(html.contains("class=\"line-panel finding-panel lint-panel\""));
         assert!(html.contains("Decomplex SARIF signals"));
+        assert!(html.contains("SQL-COV SARIF signals"));
+        assert!(html.contains("<strong>SQL007</strong>: nullable join equality has an implicit UNKNOWN policy"));
         assert!(html.contains("Espalier SARIF signals"));
         assert!(html.contains("Nil-Kill SARIF signals"));
         assert!(html.contains("Lint SARIF signals"));
@@ -10457,10 +10481,12 @@ mod tests {
         assert!(STYLE.contains(".meta-toggle:checked ~ .meta-panel"));
         assert!(STYLE.contains(".hazard-toggle:checked ~ .hazard-panel"));
         assert!(STYLE.contains(".decomplex-toggle:checked ~ .decomplex-panel"));
+        assert!(STYLE.contains(".sql-cov-toggle:checked ~ .sql-cov-panel"));
         assert!(STYLE.contains(".espalier-toggle:checked ~ .espalier-panel"));
         assert!(STYLE.contains(".nil-kill-toggle:checked ~ .nil-kill-panel"));
         assert!(STYLE.contains(".row.hazard-panel-open .hazard-panel"));
         assert!(STYLE.contains(".row.decomplex-open .decomplex-panel"));
+        assert!(STYLE.contains(".row.sql-cov-open .sql-cov-panel"));
         assert!(STYLE.contains(".row.espalier-open .espalier-panel"));
         assert!(STYLE.contains(".row.nil-kill-open .nil-kill-panel"));
         assert!(STYLE.contains(".decomplex-finding,"));
@@ -11572,10 +11598,11 @@ flags:
         annotation.dark_arms = vec!["dark arm: else".to_string()];
 
         let bg = coverage_background(&annotation, false);
-        assert_eq!(bg, "rgba(34, 197, 94, 0.08)");
+        assert_eq!(bg, "rgba(31, 41, 55, 0.16)");
 
         let gutter_bg = coverage_background(&annotation, true);
         assert_eq!(gutter_bg, "rgba(31, 41, 55, 0.32)");
+        assert_eq!(gutter_title(&annotation), "coverage quality: partial");
     }
 
     #[test]

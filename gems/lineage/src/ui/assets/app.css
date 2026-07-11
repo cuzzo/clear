@@ -1233,11 +1233,14 @@
     line-height: 18px;
   }
   .decomplex-finding,
+  .sql-cov-finding,
   .espalier-finding,
   .nil-kill-finding,
   .lint-finding { color: var(--muted); }
   .decomplex-finding:hover,
   .decomplex-finding:focus-visible,
+  .sql-cov-finding:hover,
+  .sql-cov-finding:focus-visible,
   .espalier-finding:hover,
   .espalier-finding:focus-visible,
   .nil-kill-finding:hover,
@@ -1248,6 +1251,7 @@
   .line-meta i,
   .bug-history i,
   .decomplex-finding i,
+  .sql-cov-finding i,
   .espalier-finding i,
   .nil-kill-finding i,
   .lint-finding i {
@@ -1269,6 +1273,7 @@
   .meta-toggle:checked ~ .meta-panel,
   .hazard-toggle:checked ~ .hazard-panel,
   .decomplex-toggle:checked ~ .decomplex-panel,
+  .sql-cov-toggle:checked ~ .sql-cov-panel,
   .espalier-toggle:checked ~ .espalier-panel,
   .nil-kill-toggle:checked ~ .nil-kill-panel,
   .lint-toggle:checked ~ .lint-panel,
@@ -1276,6 +1281,7 @@
   .row.meta-open .meta-panel,
   .row.hazard-panel-open .hazard-panel,
   .row.decomplex-open .decomplex-panel,
+  .row.sql-cov-open .sql-cov-panel,
   .row.espalier-open .espalier-panel,
   .row.nil-kill-open .nil-kill-panel,
   .row.lint-open .lint-panel { display: block; }
