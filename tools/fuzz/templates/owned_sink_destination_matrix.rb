@@ -23,9 +23,6 @@ end
       expected = %i[field_borrow index_borrow].include?(source) && sink == :takes_arg ? :compile_error : :pass
       expected = :compile_error if source == :index_borrow && sink == :struct_field
       expected = :compile_error if source == :index_borrow && sink == :return_value
-      # Mutable indexed union bindings are pointer aliases; the current
-      # by-value normal-argument ABI does not yet auto-dereference that alias.
-      expected = :compile_error if source == :index_borrow && sink == :normal_arg && shape == :union_owned
       expected = :compile_error if shape == :union_owned && sink == :return_value
       OWNED_SINK_DESTINATION_CELLS << { source: source, sink: sink, shape: shape, expected: expected }
     end
@@ -243,12 +240,19 @@ FuzzGenerator.register(:owned_sink_destination_matrix, cells: OWNED_SINK_DESTINA
     CHT
   when :normal_arg
     if p[:source] == :index_borrow
+      # A union payload owns its active variant. Materialize the indexed borrow
+      # explicitly before crossing a by-value argument boundary.
+      observe_borrowed = if p[:shape] == :union_owned
+        "owned: #{ty} = COPY borrowed;\n            ASSERT observe(owned) == 3_i64, \"owned sink arg\";"
+      else
+        "ASSERT observe(borrowed) == 3_i64, \"owned sink arg\";"
+      end
       <<~CHT
         #{helpers}
         FN main() RETURNS Void ->
             #{setup}
             IF #{expr} AS borrowed THEN
-                ASSERT observe(borrowed) == 3_i64, "owned sink arg";
+                #{observe_borrowed}
             ELSE
                 ASSERT FALSE, "indexed source should exist";
             END
