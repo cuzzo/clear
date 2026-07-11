@@ -3,8 +3,9 @@ use crate::schema::{normalize_identifier, SchemaCatalog};
 use anyhow::{Context, Result};
 use serde::{Deserialize, Serialize};
 use sqlparser::ast::{
-    BinaryOperator, Expr, JoinOperator, Query, Select, SelectItem, SetExpr, Spanned, Statement,
-    TableFactor, UnaryOperator, Value, Visit, Visitor,
+    BinaryOperator, Expr, FunctionArg, FunctionArgExpr, FunctionArguments, JoinOperator, Query,
+    Select, SelectItem, SetExpr, Spanned, Statement, TableFactor, UnaryOperator, Value, Visit,
+    Visitor,
 };
 use sqlparser::dialect::{Dialect, PostgreSqlDialect, SQLiteDialect};
 use sqlparser::parser::Parser;
@@ -400,14 +401,12 @@ impl HazardVisitor<'_, '_> {
         if affected.is_empty() {
             return;
         }
+        let evidence = nullability(expr, self.resolver, true);
         self.push_if_proven(
             "SQL006",
             HazardKind::OuterJoinNullRejection,
             expr,
-            NullabilityEvidence::nullable(format!(
-                "outer join introduces NULL for alias(es): {}",
-                affected.join(", ")
-            )),
+            evidence,
             "a filter on the optional side of an outer join rejects unmatched rows",
             "Move the predicate into JOIN ... ON, accept the unmatched row with IS NULL, or use INNER JOIN if rejection is intentional.",
         );
@@ -533,6 +532,9 @@ fn nullability(
         Expr::Nested(value) | Expr::UnaryOp { expr: value, .. } => {
             nullability(value, resolver, outer_join_context)
         }
+        Expr::Function(function) if function.name.to_string().eq_ignore_ascii_case("coalesce") => {
+            coalesce_nullability(&function.args, resolver, outer_join_context)
+        }
         Expr::BinaryOp { left, right, .. } => nullability(left, resolver, outer_join_context)
             .merge(nullability(right, resolver, outer_join_context)),
         Expr::Between {
@@ -575,6 +577,48 @@ fn nullability(
             }
         }
     }
+}
+
+fn coalesce_nullability(
+    arguments: &FunctionArguments,
+    resolver: &Resolver<'_>,
+    outer_join_context: bool,
+) -> NullabilityEvidence {
+    let FunctionArguments::List(arguments) = arguments else {
+        return NullabilityEvidence::unknown("COALESCE arguments are unresolved");
+    };
+    let states = arguments
+        .args
+        .iter()
+        .filter_map(|argument| {
+            let argument = match argument {
+                FunctionArg::Named { arg, .. }
+                | FunctionArg::ExprNamed { arg, .. }
+                | FunctionArg::Unnamed(arg) => arg,
+            };
+            match argument {
+                FunctionArgExpr::Expr(expr) => {
+                    Some(nullability(expr, resolver, outer_join_context))
+                }
+                _ => None,
+            }
+        })
+        .collect::<Vec<_>>();
+    if states.iter().any(|state| state.state == Nullability::Never) {
+        return NullabilityEvidence::never();
+    }
+    if states.is_empty()
+        || states
+            .iter()
+            .any(|state| state.state == Nullability::Unknown)
+    {
+        return NullabilityEvidence::unknown(
+            "COALESCE has an argument with unresolved nullability",
+        );
+    }
+    states
+        .into_iter()
+        .fold(NullabilityEvidence::never(), NullabilityEvidence::merge)
 }
 
 struct NullableColumnVisitor<'a> {

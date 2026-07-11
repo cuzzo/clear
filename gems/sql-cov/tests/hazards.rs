@@ -91,6 +91,20 @@ WHERE s.status = 'active' OR s.status IS NULL;"#;
 }
 
 #[tokio::test]
+async fn coalesce_with_non_null_fallback_suppresses_outer_join_rejection() {
+    let schema = schema().await;
+    let sql = r#"SELECT u.name
+FROM users u
+LEFT JOIN subscriptions s ON u.id = s.user_id
+WHERE COALESCE(s.status, 'missing') = 'active';"#;
+    let report = analyze_hazards("outer_join.sql", sql, DialectName::Sqlite, &schema).unwrap();
+    assert!(!report
+        .findings
+        .iter()
+        .any(|finding| finding.kind == HazardKind::OuterJoinNullRejection));
+}
+
+#[tokio::test]
 async fn nullable_subquery_output_and_postgres_all_are_detected() {
     let schema = schema().await;
     let not_in = analyze_hazards(
