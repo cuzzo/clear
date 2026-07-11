@@ -604,7 +604,6 @@ struct DashboardTemplate<'a> {
     finding_changes: &'a str,
     review_next: &'a str,
     test_next: &'a str,
-    analyzer_status: &'a str,
     highest_hazard_files: &'a str,
     highest_risk_units: &'a str,
     highest_architecture_risks: &'a str,
@@ -5907,7 +5906,6 @@ fn render_dashboard(
     let finding_changes = render_finding_changes_section(dashboard);
     let review_next = render_review_next_section(dashboard, &directory, filter);
     let test_next = render_test_next_section(dashboard, &directory, filter);
-    let analyzer_status = render_analyzer_status(dashboard);
     let highest_hazard_files = render_highest_hazard_files_section(dashboard, filter);
     let highest_risk_units = render_dashboard_disclosure(
         "Risky Units",
@@ -5942,7 +5940,6 @@ fn render_dashboard(
             finding_changes: &finding_changes,
             review_next: &review_next,
             test_next: &test_next,
-            analyzer_status: &analyzer_status,
             highest_hazard_files: &highest_hazard_files,
             highest_risk_units: &highest_risk_units,
             highest_architecture_risks: &highest_architecture_risks,
@@ -6238,7 +6235,7 @@ fn render_queue_pagination(
     )
 }
 
-fn render_analyzer_status(dashboard: &UiDashboard) -> String {
+fn render_directory_analyzer_status(dashboard: &UiDashboard) -> String {
     let mut problems = BTreeMap::<&str, &UiAnalyzerHealth>::new();
     for health in dashboard
         .analyzer_health
@@ -6249,13 +6246,12 @@ fn render_analyzer_status(dashboard: &UiDashboard) -> String {
     }
     if problems.is_empty() {
         return concat!(
-            "<div class=\"analyzer-status analyzer-status-healthy\" tabindex=\"0\" ",
-            "aria-label=\"Analyzer artifacts are up to date\">",
+            "<span class=\"directory-health directory-health-current\" tabindex=\"0\" ",
+            "aria-label=\"Analyzer artifacts for this directory are up to date\">",
             "<i class=\"fa-solid fa-circle-check\" aria-hidden=\"true\"></i>",
-            "<span>Analyzers current</span>",
-            "<span class=\"analyzer-status-tooltip\" role=\"tooltip\">",
+            "<span class=\"directory-health-tooltip\" role=\"tooltip\">",
             "All configured analyzer artifacts match the current indexed commit.",
-            "</span></div>"
+            "</span></span>"
         )
         .to_string();
     }
@@ -6275,12 +6271,11 @@ fn render_analyzer_status(dashboard: &UiDashboard) -> String {
         .join(" ");
     format!(
         concat!(
-            "<div class=\"analyzer-status analyzer-status-caution\" tabindex=\"0\" ",
-            "aria-label=\"Analyzer artifacts need attention\">",
+            "<span class=\"directory-health directory-health-caution\" tabindex=\"0\" ",
+            "aria-label=\"Analyzer artifacts for this directory need attention\">",
             "<i class=\"fa-solid fa-triangle-exclamation\" aria-hidden=\"true\"></i>",
-            "<span>Analyzer caution</span>",
-            "<span class=\"analyzer-status-tooltip\" role=\"tooltip\">{}</span>",
-            "</div>"
+            "<span class=\"directory-health-tooltip\" role=\"tooltip\">{}</span>",
+            "</span>"
         ),
         html_escape(&detail)
     )
@@ -6632,9 +6627,15 @@ fn render_code_tree_table(
     let partial_header = render_sort_link("Partial", CoverageSort::Partial, sort, directory, filter);
     let missed_header = render_sort_link("Missed", CoverageSort::Missed, sort, directory, filter);
     let percent_header = render_sort_link("%", CoverageSort::Percent, sort, directory, filter);
+    let directory_status = render_directory_analyzer_status(dashboard);
     let mut rows = String::new();
     for entry in sorted_code_tree_entries(directories, files, sort) {
-        rows.push_str(&render_code_tree_row(&entry, directory, filter));
+        rows.push_str(&render_code_tree_row(
+            &entry,
+            directory,
+            filter,
+            &directory_status,
+        ));
     }
     let empty = directories.is_empty() && files.is_empty();
     let partial = files
@@ -6643,6 +6644,7 @@ fn render_code_tree_table(
         .sum::<i64>();
     let partial = partial.clamp(0, dashboard.covered_lines);
     let subtotal = render_coverage_table_row(
+        None,
         None,
         "",
         "Subtotal",
@@ -6774,9 +6776,16 @@ fn code_tree_entry_kind_rank(entry: &CodeTreeEntry<'_>) -> u8 {
     }
 }
 
-fn render_code_tree_row(entry: &CodeTreeEntry<'_>, directory: &str, filter: &str) -> String {
+fn render_code_tree_row(
+    entry: &CodeTreeEntry<'_>,
+    directory: &str,
+    filter: &str,
+    directory_status: &str,
+) -> String {
     match entry {
-        CodeTreeEntry::Directory(child) => render_directory_coverage_row(child, directory, filter),
+        CodeTreeEntry::Directory(child) => {
+            render_directory_coverage_row(child, directory, filter, directory_status)
+        }
         CodeTreeEntry::File(file) => render_file_coverage_row(file, directory, filter),
     }
 }
@@ -6818,6 +6827,7 @@ fn render_file_coverage_row(file: &UiFile, directory: &str, filter: &str) -> Str
         file.hazards, file.sarif_findings, file.distinct_tests, file.mutant_killed_tests
     );
     render_coverage_table_row(
+        None,
         Some(&page_href(&file.path, None, filter)),
         "fa-regular fa-file-lines",
         &display_path,
@@ -6834,7 +6844,12 @@ fn render_file_coverage_row(file: &UiFile, directory: &str, filter: &str) -> Str
     )
 }
 
-fn render_directory_coverage_row(directory: &UiDirectory, parent: &str, filter: &str) -> String {
+fn render_directory_coverage_row(
+    directory: &UiDirectory,
+    parent: &str,
+    filter: &str,
+    analyzer_status: &str,
+) -> String {
     let mut display_path = file_display_path(&directory.path, parent);
     if !display_path.ends_with('/') {
         display_path.push('/');
@@ -6849,6 +6864,7 @@ fn render_directory_coverage_row(directory: &UiDirectory, parent: &str, filter: 
         directory.mutant_killed_tests
     );
     render_coverage_table_row(
+        Some(analyzer_status),
         Some(&directory_href(&directory.path, filter)),
         "fa-regular fa-folder",
         &display_path,
@@ -7017,6 +7033,7 @@ fn render_hazard_quality_bar(hazards: i64, covered_hazards: i64, killed_hazards:
 
 #[allow(clippy::too_many_arguments)]
 fn render_coverage_table_row(
+    analyzer_status: Option<&str>,
     href: Option<&str>,
     icon_class: &str,
     name: &str,
@@ -7045,7 +7062,11 @@ fn render_coverage_table_row(
         100.0
     };
     let mut out = String::new();
-    out.push_str("<tr>");
+    out.push_str("<tr><td class=\"directory-status-cell\">");
+    if let Some(analyzer_status) = analyzer_status {
+        out.push_str(analyzer_status);
+    }
+    out.push_str("</td>");
     out.push_str("<th scope=\"row\" class=\"coverage-name\">");
     if let Some(href) = href {
         out.push_str("<a href=\"");
@@ -10399,6 +10420,7 @@ mod tests {
             warnings: Vec::new(),
         };
         let files = dashboard.top_hazard_files.iter().collect::<Vec<_>>();
+        let directories = directory_index(&dashboard.top_hazard_files, "");
         let branch_context = UiBranchContext {
             branch: "feature".to_string(),
             commit: "abcdef123456".to_string(),
@@ -10406,7 +10428,7 @@ mod tests {
         let html = render_dashboard(
             &dashboard,
             "",
-            &[],
+            &directories,
             &files,
             "",
             CoverageSort::Path,
@@ -10424,7 +10446,9 @@ mod tests {
         assert!(html.contains("<h2>Review Next</h2>"));
         assert!(html.contains("<h2>Test Next</h2>"));
         assert!(!html.contains("<h2>Analyzer and Artifact Health</h2>"));
-        assert!(html.contains("class=\"analyzer-status analyzer-status-caution\""));
+        assert!(!html.contains("class=\"analyzer-status"));
+        assert!(html.contains("class=\"directory-status-cell\""));
+        assert!(html.contains("class=\"directory-health directory-health-caution\""));
         assert!(html.contains("fa-triangle-exclamation"));
         assert!(html.contains("regenerate the artifact with a higher result cap"));
         assert!(html.contains("queue=review-next"));
@@ -10436,7 +10460,7 @@ mod tests {
         assert!(!html.contains(">8 covered lines</span>"));
         assert!(html.contains("4 mutant-backed / 1 stochastic / 2 invariant"));
         assert!(html.contains("class=\"ratio-bar hazard-bar\""));
-        assert!(html.contains("Directory entries (0 dirs - 1 files - 7 SARIF findings)"));
+        assert!(html.contains("Directory entries (1 dirs - 1 files - 7 SARIF findings)"));
         assert!(html.contains("class=\"coverage-name-link\"><i class=\"fa-regular fa-file-lines\""));
         assert!(!html.contains("class=\"metric\""));
         assert!(!html.contains("class=\"dashboard-bars\""));

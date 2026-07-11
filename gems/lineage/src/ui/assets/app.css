@@ -577,65 +577,6 @@
   .dashboard-section-switcher {
     margin-top: 16px;
   }
-  .dashboard-section-controls {
-    display: grid;
-    grid-template-columns: auto minmax(0, 1fr);
-    align-items: stretch;
-    gap: 8px;
-  }
-  .analyzer-status {
-    position: relative;
-    display: grid;
-    grid-template-columns: auto minmax(0, 1fr);
-    gap: 7px;
-    align-items: center;
-    min-width: 138px;
-    border: 1px solid var(--line);
-    border-radius: 7px;
-    padding: 7px 10px;
-    font-size: 12px;
-    font-weight: 650;
-  }
-  .analyzer-status-healthy {
-    border-color: #86efac;
-    background: #f0fdf4;
-    color: #166534;
-  }
-  .analyzer-status-caution {
-    border-color: #fbbf24;
-    background: #fffbeb;
-    color: #92400e;
-    cursor: help;
-  }
-  .analyzer-status-caution:hover,
-  .analyzer-status-caution:focus-visible {
-    border-color: #d97706;
-    background: #fef3c7;
-    outline: 2px solid rgba(217, 119, 6, 0.25);
-    outline-offset: 1px;
-  }
-  .analyzer-status-tooltip {
-    position: absolute;
-    z-index: 20;
-    top: calc(100% + 7px);
-    left: 0;
-    display: none;
-    width: min(420px, 80vw);
-    border: 1px solid #d97706;
-    border-radius: 7px;
-    padding: 10px 12px;
-    background: #fffdf5;
-    color: var(--text);
-    font-size: 12px;
-    font-weight: 400;
-    line-height: 1.45;
-    box-shadow: 0 8px 24px rgba(15, 23, 42, 0.16);
-  }
-  .analyzer-status:hover .analyzer-status-tooltip,
-  .analyzer-status:focus .analyzer-status-tooltip,
-  .analyzer-status:focus-within .analyzer-status-tooltip {
-    display: block;
-  }
   .dashboard-section-bar {
     display: flex;
     max-width: 100%;
@@ -734,15 +675,6 @@
   .queue-pagination span {
     color: var(--muted);
     font-size: 12px;
-  }
-  @media (max-width: 760px) {
-    .dashboard-section-controls {
-      grid-template-columns: 1fr;
-    }
-    .analyzer-status {
-      width: max-content;
-      max-width: 100%;
-    }
   }
   .dashboard-bar-row {
     display: grid;
@@ -881,6 +813,63 @@
     font-size: 11px;
     font-weight: 700;
     text-transform: uppercase;
+  }
+  .coverage-table .status-col,
+  .coverage-table .directory-status-cell {
+    width: 38px;
+    min-width: 38px;
+    padding-inline: 6px;
+    text-align: center;
+  }
+  .directory-health {
+    position: relative;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 24px;
+    min-height: 24px;
+    border-radius: 5px;
+    cursor: help;
+  }
+  .directory-health-current {
+    color: #16a34a;
+  }
+  .directory-health-caution {
+    color: #b45309;
+    background: #fffbeb;
+  }
+  .directory-health-caution:hover,
+  .directory-health-caution:focus-visible {
+    color: #92400e;
+    background: #fef3c7;
+    outline: 2px solid rgba(217, 119, 6, 0.3);
+  }
+  .directory-health-tooltip {
+    position: absolute;
+    z-index: 30;
+    top: calc(100% + 5px);
+    left: 0;
+    display: none;
+    width: min(420px, 75vw);
+    border: 1px solid #d97706;
+    border-radius: 7px;
+    padding: 10px 12px;
+    background: #fffdf5;
+    color: var(--text);
+    text-align: left;
+    font-size: 12px;
+    font-weight: 400;
+    line-height: 1.45;
+    box-shadow: 0 8px 24px rgba(15, 23, 42, 0.16);
+  }
+  .directory-health-current .directory-health-tooltip {
+    border-color: #86efac;
+    background: #f0fdf4;
+  }
+  .directory-health:hover .directory-health-tooltip,
+  .directory-health:focus .directory-health-tooltip,
+  .directory-health:focus-within .directory-health-tooltip {
+    display: block;
   }
   .sort-link {
     display: inline-flex;
