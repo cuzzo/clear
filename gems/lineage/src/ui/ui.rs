@@ -5895,12 +5895,12 @@ fn render_dashboard(
     let analyzer_health = render_analyzer_health_section(dashboard);
     let highest_hazard_files = render_highest_hazard_files_section(dashboard, filter);
     let highest_risk_units = render_dashboard_disclosure(
-        "Highest Risk Units",
+        "Risky Units",
         false,
         &render_unit_hotspots(&dashboard.top_units, filter),
     );
     let highest_architecture_risks = render_dashboard_disclosure(
-        "Highest Architectural Risks",
+        "Architectural Risks",
         false,
         &render_architecture_risks(&dashboard.top_architecture_risks, filter),
     );
@@ -6142,10 +6142,10 @@ fn dashboard_panel_id(title: &str) -> &'static str {
         "Review Next" => "dashboard-panel-review-next",
         "Test Next" => "dashboard-panel-test-next",
         "Analyzer and Artifact Health" => "dashboard-panel-analyzer-and-artifact-health",
-        "Highest Hazard Files" => "dashboard-panel-highest-hazard-files",
-        "Highest Risk Units" => "dashboard-panel-highest-risk-units",
-        "Highest Architectural Risks" => "dashboard-panel-highest-architectural-risks",
-        "High Complexity Functions" => "dashboard-panel-high-complexity-functions",
+        "Hazard Files" => "dashboard-panel-highest-hazard-files",
+        "Risky Units" => "dashboard-panel-highest-risk-units",
+        "Architectural Risks" => "dashboard-panel-highest-architectural-risks",
+        "Expensive Functions" => "dashboard-panel-high-complexity-functions",
         _ => "dashboard-panel-other",
     }
 }
@@ -6189,7 +6189,7 @@ fn render_highest_hazard_files_section(dashboard: &UiDashboard, filter: &str) ->
         "dashboard hazard files template",
     );
     render_dashboard_disclosure(
-        "Highest Hazard Files",
+        "Hazard Files",
         false,
         &body,
     )
@@ -6762,7 +6762,7 @@ fn render_complexity_functions_section(dashboard: &UiDashboard, filter: &str) ->
     );
 
     render_dashboard_disclosure(
-        "High Complexity Functions",
+        "Expensive Functions",
         false,
         &body,
     )
@@ -10229,9 +10229,9 @@ mod tests {
         assert!(html.contains("<h2>Test Next</h2>"));
         assert!(html.contains("<h2>Analyzer and Artifact Health</h2>"));
         assert!(html.contains("4 findings in this folder / 20 current total"));
-        assert!(html.contains("<h2>Highest Risk Units</h2>"));
-        assert!(html.contains("<h2>Highest Architectural Risks</h2>"));
-        assert!(html.contains("<h2>High Complexity Functions</h2>"));
+        assert!(html.contains("<h2>Risky Units</h2>"));
+        assert!(html.contains("<h2>Architectural Risks</h2>"));
+        assert!(html.contains("<h2>Expensive Functions</h2>"));
         assert!(html.contains("class=\"coverage-bar line-quality-bar\""));
         assert!(html.contains("8 of 10 lines covered; 1 partial, 2 missed"));
         assert!(!html.contains(">8 covered lines</span>"));
@@ -10256,7 +10256,7 @@ mod tests {
             "hazards should render above code tree"
         );
         assert!(
-            html.find("Highest Hazard Files").unwrap() < html.find("Highest Risk Units").unwrap(),
+            html.find("Hazard Files").unwrap() < html.find("Risky Units").unwrap(),
             "hazard files should render above risk sections"
         );
 
