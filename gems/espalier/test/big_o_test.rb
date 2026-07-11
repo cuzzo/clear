@@ -267,18 +267,24 @@ class BigOTest < Minitest::Test
     assert_equal 1, hints.size
     assert_equal "O(N)", hints[0][:complexity]
     assert_equal "O(N)", hints[0][:space]
+    assert_equal true, hints[0][:is_dynamic]
+    assert_equal "line 1", hints[0][:trigger]
 
     # 2. Exponential recursion: fib(n - 1) + fib(n - 2)
     hints = s.hints_for("fib.rb", { name: "fib", line: 1, span: [1, 0, 4, 3] }, "Math")
     assert_equal 1, hints.size
     assert_equal "O(2^N)", hints[0][:complexity]
     assert_equal "O(N)", hints[0][:space]
+    assert_equal true, hints[0][:is_dynamic]
+    assert_equal "line 1", hints[0][:trigger]
 
     # 3. Divide and conquer: bsearch(n / 2)
     hints = s.hints_for("dc.rb", { name: "bsearch", line: 1, span: [1, 0, 4, 3] }, "Math")
     assert_equal 1, hints.size
     assert_equal "O(log N)", hints[0][:complexity]
     assert_equal "O(log N)", hints[0][:space]
+    assert_equal true, hints[0][:is_dynamic]
+    assert_equal "line 1", hints[0][:trigger]
 
     # 4. Factorial recursion: permute(arr - [x]) in loop
     hints = s.hints_for("perm.rb", { name: "permute", line: 1, span: [1, 0, 5, 3] }, "Math")
@@ -286,6 +292,8 @@ class BigOTest < Minitest::Test
     factorial_hint = hints.find { |h| h[:complexity] == "O(N!)" }
     refute_nil factorial_hint
     assert_equal "O(N)", factorial_hint[:space]
+    assert_equal true, factorial_hint[:is_dynamic]
+    assert_equal "line 1", factorial_hint[:trigger]
   end
 
   def test_loop_complexity_classification_and_trigger_tracking
