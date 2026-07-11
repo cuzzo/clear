@@ -627,11 +627,19 @@ module MIRLoweringVariables
 
     placed = with_expected_type(ft) { lower(node.value) }
     placed = place_value_for_destination(placed, node.value, decl_alloc, ft)
-    if has_caps && !placed.is_a?(MIR::CapWrap) && !source_already_has_declared_capability?(node.value, ft)
+    if has_caps && !capability_wrapped_mir?(placed) && !source_already_has_declared_capability?(node.value, ft)
       compose_capability_wrap(placed, bare_zig, ft, decl_alloc)
     else
       placed
     end
+  end
+
+  sig { params(node: MIR::Node).returns(T::Boolean) }
+  def capability_wrapped_mir?(node)
+    return true if node.is_a?(MIR::CapWrap)
+    return capability_wrapped_mir?(node.expr) if node.is_a?(MIR::Cast) || node.is_a?(MIR::TryExpr)
+
+    false
   end
 
   sig { params(source_node: AST::Node, target_type: Type).returns(T::Boolean) }
@@ -949,7 +957,7 @@ module MIRLoweringVariables
     nil
   end
 
-  sig { params(name: AST::Node).returns(T::Boolean) }
+  sig { params(name: T.any(String, AST::Node)).returns(T::Boolean) }
   def conditional_field_assignment?(name)
     name.is_a?(AST::GetField) && name.target.is_a?(AST::OptionalUnwrap)
   end
@@ -1509,6 +1517,7 @@ module MIRLoweringVariables
   private :classified_cleanup_var_decl_plan
   private :cleanup_entry_for_ast_binding
   private :compose_capability_wrap
+  private :capability_wrapped_mir?
   private :ensure_cleanup_binding_owns_string_init
   private :field_access_moves_owner?
   private :field_assignment_requires_cleanup?

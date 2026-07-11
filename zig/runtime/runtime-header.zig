@@ -2953,6 +2953,24 @@ pub const CheatLib = struct {
         return !@hasDecl(FT, "getData");
     }
 
+    /// Duplicate an Rc/Arc/Weak handle by retaining its control block. Generic
+    /// collection copies must never recursively clone the control block/data
+    /// pointers: those are one allocation owned by the reference counts.
+    pub fn retainOne(comptime FT: type, value: FT) FT {
+        const T = comptime refInnerType(FT) orelse @compileError("retainOne expects an Rc/Arc/Weak handle");
+        const is_weak = comptime isWeakRef(FT);
+        const is_atomic = comptime isAtomicRef(FT);
+        if (is_weak) {
+            if (is_atomic) {
+                _ = value.ctrl.weak.fetchAdd(1, .monotonic);
+            } else {
+                value.ctrl.weak += 1;
+            }
+            return value;
+        }
+        return if (is_atomic) arcRetain(T, value) else rcRetain(T, value);
+    }
+
     /// Release a single ref-counted value. Dispatches to the correct release
     /// function based on the comptime type (Rc/Arc/WeakRc/WeakArc).
     pub fn releaseOne(comptime FT: type, alloc: std.mem.Allocator, value: FT) void {
@@ -3572,6 +3590,10 @@ pub const CheatLib = struct {
         }
         if (T == []u8) {
             return if (value.len > 0) try alloc.dupe(u8, value) else value;
+        }
+
+        if (comptime refInnerType(T) != null) {
+            return retainOne(T, value);
         }
 
         if (info == .optional) {

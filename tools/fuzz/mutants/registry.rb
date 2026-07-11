@@ -247,7 +247,7 @@ module FuzzMutants
                    'Branch exits must still run finalizers on every live path.',
       invariant: :branch_cleanup_finalizers,
       patch: File.join(PATCH_DIR, 'mir_emitter_cleanup_noop.patch'),
-      templates: [:branch_cleanup],
+      templates: [:branch_cleanup, :bind_capture_cleanup],
       kill: { bucket: :fail, min_delta: 1 }
     ),
     Mutant.new(

@@ -28,6 +28,30 @@ test "dupeValue promotes a fixed array into an owned ArrayList" {
     try std.testing.expectEqualSlices(i64, source[0..], copied.items);
 }
 
+test "dupeValue retains Rc Arc and Weak handles instead of cloning control blocks" {
+    const allocator = std.testing.allocator;
+
+    const rc = try CheatLib.rcCreate(u64, allocator, 7);
+    const rc_copy = try CheatLib.dupeValue(CheatLib.Rc(u64), rc, allocator);
+    try std.testing.expectEqual(rc.ctrl, rc_copy.ctrl);
+    try std.testing.expectEqual(@as(usize, 2), rc.ctrl.strong);
+    CheatLib.rcRelease(u64, allocator, rc_copy);
+
+    const weak = CheatLib.rcDowngrade(u64, rc);
+    const weak_copy = try CheatLib.dupeValue(CheatLib.WeakRc(u64), weak, allocator);
+    try std.testing.expectEqual(weak.ctrl, weak_copy.ctrl);
+    CheatLib.weakRcRelease(u64, allocator, weak_copy);
+    CheatLib.weakRcRelease(u64, allocator, weak);
+    CheatLib.rcRelease(u64, allocator, rc);
+
+    const arc = try CheatLib.arcCreate(u64, allocator, 9);
+    const arc_copy = try CheatLib.dupeValue(CheatLib.Arc(u64), arc, allocator);
+    try std.testing.expectEqual(arc.ctrl, arc_copy.ctrl);
+    try std.testing.expectEqual(@as(usize, 2), arc.ctrl.strong.load(.acquire));
+    CheatLib.arcRelease(u64, allocator, arc_copy);
+    CheatLib.arcRelease(u64, allocator, arc);
+}
+
 var global_ebr_ctx: ebr.EbrContext = .{};
 var global_stack_pool: fm.StackPool = undefined;
 var global_shutdown = std.atomic.Value(bool).init(false);

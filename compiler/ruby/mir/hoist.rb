@@ -641,7 +641,11 @@ module MIRHoistLowering
     T.bind(self, MIRLowering) rescue nil
     return expr if expr.is_a?(MIR::BlockExpr) && expr.lazy_boundary
     if expr.respond_to?(:expr?) && expr.expr?
-      function_state.pending_stmts.concat(normalize_allocating_result_expr!(expr, transfer_on_success: err_cleanup == true))
+      function_state.pending_stmts.concat(normalize_allocating_result_expr!(
+        expr,
+        transfer_on_success: err_cleanup == true,
+        owned_position: MIR::OwnershipEffect.of(expr).produces_owned,
+      ))
     end
     union_return_needs_hoist =
       ast_node && T.unsafe(self).send(:call_union_return_needs_hoist?, expr, ast_node)
@@ -683,7 +687,12 @@ module MIRHoistLowering
       Type.new(deep_copy_zig_type(mir, nil), location: alloc)
     when MIR::CapWrap
       wrapped = mir.sync_type || mir.zig_base
-      Type.new(wrapped.to_s, layout: mir.sync_fn || mir.own_fn ? :indirect : nil, location: alloc)
+      ownership = case mir.own_fn
+                  when "rcCreate" then :multiowned
+                  when "arcCreate" then :shared
+                  end
+      Type.new(wrapped.to_s, ownership: ownership,
+               layout: mir.sync_fn || mir.own_fn ? :indirect : nil, location: alloc)
     when MIR::SharePromote, MIR::WeakUpgrade
       Type.new(mir.zig_base.to_s, ownership: :shared, location: :heap)
     when MIR::RcRetain, MIR::RcDowngrade, MIR::FreezeExpr
@@ -1018,6 +1027,17 @@ module MIRHoistLowering
     return [prefix, expr] unless expr.respond_to?(:expr?) && expr.expr?
     return [prefix, expr] if expr.is_a?(MIR::Ident)
     return [prefix, expr] if expr.is_a?(MIR::BlockExpr) && expr.lazy_boundary
+    if expr.is_a?(MIR::IfOptional)
+      optional_prefix, optional_normalized = normalize_allocating_used_expr(
+        expr.optional,
+        transfer_on_success: false,
+      )
+      replace_mir_expr_child!(expr, expr.optional, optional_normalized)
+      prefix.concat(optional_prefix)
+      # The capture only exists inside then_expr. Never hoist work from either
+      # branch across this lexical boundary.
+      return [prefix, expr]
+    end
 
     if !mutating_receiver_allocator_op?(expr) && mir_produces_owned_result?(expr)
       type_info = mir_alloc_mark_type_info(expr, nil, context: "normalized MIR allocation")
@@ -1172,11 +1192,15 @@ module MIRHoistLowering
     hoist_alloc(copied, ast_node, err_cleanup: true)
   end
 
-  sig { params(ast_node: T.nilable(AST::Node), source: String).returns(CleanupEntry) }
-  def rc_cleanup_entry(ast_node, source:)
-    raise "RC hoist cleanup: missing type info for #{source}" unless ast_node
-
-    ti = Type.from_node!(ast_node, context: "RC hoist cleanup")
+  sig { params(ast_node: T.nilable(AST::Node), source: String, mir: T.nilable(MIR::Node)).returns(CleanupEntry) }
+  def rc_cleanup_entry(ast_node, source:, mir: nil)
+    ti = if ast_node
+      Type.from_node!(ast_node, context: "RC hoist cleanup")
+    elsif mir
+      mir_alloc_mark_type_info(mir, nil, context: "RC hoist cleanup for #{source}")
+    else
+      raise "RC hoist cleanup: missing type info for #{source}"
+    end
     zig_t = ti.zig_type
     CleanupEntry.build(:rc, alloc: :heap, has_moved_guard: false,
                        zig_type: zig_t, rc_variant: :standard, rc_alloc: :heap)
@@ -1220,12 +1244,12 @@ module MIRHoistLowering
       if mir.sync_fn
         uniform_cleanup_entry(mir.sync_type, alloc: alloc)
       elsif mir.own_fn
-        rc_cleanup_entry(ast_node, source: "MIR::CapWrap (own_fn=#{mir.own_fn})")
+        rc_cleanup_entry(ast_node, source: "MIR::CapWrap (own_fn=#{mir.own_fn})", mir: mir)
       elsif mir.strategy == :local
         uniform_cleanup_entry("*#{mir.zig_base}", alloc: alloc)
       end
     when MIR::SharePromote
-      rc_cleanup_entry(ast_node, source: "MIR::SharePromote")
+      rc_cleanup_entry(ast_node, source: "MIR::SharePromote", mir: mir)
     when MIR::RcRetain, MIR::RcDowngrade, MIR::WeakUpgrade
       cleanup_entry_for_owned_result(ast_node, alloc: alloc) || CleanupEntry.build(:rc, alloc: alloc, has_moved_guard: false)
     when MIR::FreezeExpr

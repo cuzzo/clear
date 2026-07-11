@@ -252,8 +252,12 @@ module Annotator
         # A slice of T[3] is T[] (Fixed becomes Dynamic view)
         target_type = node.target.full_type!(context: "slice target")
         if target_type&.array?
-          element = target_type.element_type.resolved
-          stamp_type!(node, Type.new(:"#{element}[]"))
+          element = target_type.element_type
+          slice_type = Type.new(:"#{element.resolved}[]")
+          slice_type.elem_ownership = element.ownership
+          slice_type.elem_sync = element.sync
+          stamp_type!(node, slice_type)
+          node.container_borrow = true
         else
           stamp_type!(node, :Any)
         end
@@ -637,25 +641,25 @@ module Annotator
         stamp_type!(node, Type.new(:"~#{base_type}[]"))
       end
 
-      sig { params(args: T::Array[AST::Node], node: T.nilable(AST::Node)).returns(Symbol) }
+      sig { params(args: T::Array[AST::Node], node: T.nilable(AST::Node)).returns(Type) }
       def infer_element_type(args, node)
         T.bind(self, SemanticAnnotator)
 
         receiver = args.first
         ti = receiver.is_a?(AST::Locatable) ? receiver.full_type!(context: "element receiver") : nil
-        ti&.element_type&.resolved || :Any
+        ti&.element_type || Type.new(:Any)
       end
 
       # Infer return type for list.pop() — returns ?T (optional element type).
 
-      sig { params(args: T::Array[AST::Node], node: T.nilable(AST::Node)).returns(Symbol) }
+      sig { params(args: T::Array[AST::Node], node: T.nilable(AST::Node)).returns(Type) }
       def infer_optional_element_type(args, node)
         T.bind(self, SemanticAnnotator)
 
         receiver = args.first
         ti = receiver.is_a?(AST::Locatable) ? receiver.full_type!(context: "optional element receiver") : nil
-        elem = ti&.element_type&.resolved || :Any
-        :"?#{elem}"
+        elem = ti&.element_type || Type.new(:Any)
+        Type.optional_of(elem)
       end
 
       # Infer return type for stream/list `.toList()` — an owned heap list
@@ -665,7 +669,8 @@ module Annotator
       def infer_to_list(args, node)
         T.bind(self, SemanticAnnotator)
 
-        recv_t = Type.new(T.must(args[0]).resolved_type)
+        receiver = T.must(args[0])
+        recv_t = receiver.full_type!(context: "toList receiver")
         elem_t = if recv_t.dynamic_stream? || recv_t.promise_list?
           recv_t.tense_type.element_type
         elsif recv_t.bounded_stream?
@@ -677,7 +682,11 @@ module Annotator
         else
           recv_t.element_type
         end
-        Type.new(:"#{T.must(elem_t).resolved}[]", collection: :list, location: :heap)
+        elem = T.must(elem_t)
+        list = Type.new(:"#{elem.resolved}[]", collection: :list, location: :heap)
+        list.elem_ownership = elem.ownership
+        list.elem_sync = elem.sync
+        list
       end
     end
   end

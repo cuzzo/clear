@@ -2105,7 +2105,15 @@ module MIRLoweringExpressions
     # with_decl_alloc. Only a context-free explicit COPY defaults to heap.
     alloc = function_state.current_decl_alloc || node.alloc || :heap
 
-    if ti.any_rc?
+    if ti.optional? && ti.wrapped_type&.any_rc?
+      wrapped = T.must(ti.wrapped_type)
+      capture = "__copy_rc_#{lowering_counters.next_tmp_id}"
+      func = wrapped.shared? ? "arcRetain" : "rcRetain"
+      retained = MIR::RcRetain.new(MIR::Ident.new(capture), rc_payload_zig_type(wrapped), func)
+      copied = MIR::IfOptional.new(source, capture, retained, MIR::Lit.new("null"))
+      copied.result_type = Type.new(ti)
+      copied
+    elsif ti.any_rc?
       func = ti.shared? ? "arcRetain" : "rcRetain"
       MIR::RcRetain.new(source, rc_payload_zig_type(ti), func)
     elsif ti.optional? && ti.needs_cleanup?(mir_schema_lookup)
@@ -2158,10 +2166,20 @@ module MIRLoweringExpressions
     source_type.non_string_array? && dest_type.collection? ? source_type.zig_type : dest_type.zig_type
   end
 
-  sig { params(node: AST::CloneNode).returns(MIR::RcRetain) }
+  sig { params(node: AST::CloneNode).returns(MIR::Node) }
   def lower_clone(node)
     T.bind(self, MIRLowering) rescue nil
     ti = Type.from_node!(node.value, context: "CLONE value")
+    if ti.optional? && ti.wrapped_type&.any_rc?
+      wrapped = T.must(ti.wrapped_type)
+      capture = "__clone_rc_#{lowering_counters.next_tmp_id}"
+      func = wrapped.shared? ? "arcRetain" : "rcRetain"
+      retained = MIR::RcRetain.new(MIR::Ident.new(capture), rc_payload_zig_type(wrapped), func)
+      cloned = MIR::IfOptional.new(lower(node.value), capture, retained, MIR::Lit.new("null"))
+      cloned.result_type = Type.new(ti)
+      return cloned
+    end
+
     func = if ti.split_open_stream?
       "splitRetain"
     elsif ti.shared_promise? || ti.shared?
@@ -2215,6 +2233,28 @@ module MIRLoweringExpressions
     source_ti = node.value.full_type!
     source_ti = Type.new(source_ti) if source_ti && !source_ti.is_a?(Type)
     raise "Internal: lower_share requires typed source" unless source_ti
+
+    if source_ti.optional? && source_ti.wrapped_type&.any_rc?
+      wrapped = T.must(source_ti.wrapped_type)
+      source = lower(node.value)
+      capture = "__share_rc_#{lowering_counters.next_tmp_id}"
+      zig_base = rc_payload_zig_type(wrapped)
+      shared_payload = if wrapped.shared?
+        MIR::RcRetain.new(MIR::Ident.new(capture), zig_base, "arcRetain")
+      else
+        MIR::SharePromote.new(MIR::Ident.new(capture), zig_base, :heap)
+      end
+      shared = MIR::IfOptional.new(source, capture, shared_payload, MIR::Lit.new("null"))
+      shared.result_type = Type.from_node!(node, context: "SHARE optional result")
+      return shared if wrapped.shared?
+
+      return with_ownership_consumption(
+        shared,
+        mir_ident_names(source),
+        "MIR::IfOptional(SHARE)",
+        target_alloc: :heap,
+      )
+    end
 
     zig_base = rc_payload_zig_type(source_ti)
 

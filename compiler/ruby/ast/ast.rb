@@ -491,6 +491,20 @@ module AST
     !!(sym && (sym.is_param || sym.reg))
   end
 
+  # Whether a successful IF/WHILE optional capture receives a value that it
+  # owns and must clean up. Keep this policy centralized: cleanup
+  # classification and MIR lowering must agree or an RC capture is either
+  # leaked (missing cleanup) or released out from under its source owner.
+  sig { params(node: T.nilable(AST::Node)).returns(T::Boolean) }
+  def self.capture_expr_owns_result?(node)
+    return false unless node
+    node = node.value while node.is_a?(AST::Cast)
+
+    call?(node) || node.is_a?(AST::ResolveNode) ||
+      node.is_a?(AST::CopyNode) || node.is_a?(AST::CloneNode) ||
+      node.is_a?(AST::MoveNode) || node.is_a?(AST::ShareNode)
+  end
+
   sig { params(node: T.nilable(AST::Node)).returns(T::Boolean) }
   def self.collection_method_call?(node)
     !!(node.is_a?(AST::MethodCall) &&

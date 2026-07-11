@@ -1,9 +1,8 @@
-diff --git a/src/backends/mir_emitter.rb b/src/backends/mir_emitter.rb
---- a/src/backends/mir_emitter.rb
-+++ b/src/backends/mir_emitter.rb
-@@ -2244,4 +2244,5 @@ class MIREmitter
+diff --git a/compiler/ruby/backends/mir_emitter.rb b/compiler/ruby/backends/mir_emitter.rb
+--- a/compiler/ruby/backends/mir_emitter.rb
++++ b/compiler/ruby/backends/mir_emitter.rb
+@@ -2331,3 +2331,4 @@ class MIREmitter
+   sig { params(node: T.any(MIR::Cleanup, MIR::ErrCleanup), errdefer: T::Boolean).returns(String) }
    def emit_cleanup(node, errdefer: false)
 +    return "" # MUTANT: cleanup-bearing MIR nodes no longer emit runtime finalizers.
      entry = node.cleanup_entry
-     alloc = alloc_from_entry(entry)
-     name = node.name

@@ -502,8 +502,8 @@ RSpec.describe ZigTranspiler do
       CLEAR
       zig = transpile(src)
       expect(zig).to include("try ctx.__shard_map.*.putDirect(ctx.shard")
-      expect(zig).to include(%(@as([]const u8, "value")))
-      expect(zig).not_to include(%(dupe(u8, @as([]const u8, "value"))))
+      expect(zig).to include(%(putDirect(ctx.shard, __rt.heapAlloc(), __sh1_key, "value")))
+      expect(zig).not_to match(/dupe\(u8, (?:@as\(\[\]const u8, )?"value"/)
     end
 
     it "keeps borrowed SHARD string map reads borrowed through OR fallback" do

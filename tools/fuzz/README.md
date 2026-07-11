@@ -152,7 +152,7 @@ expected hard error is absent.
 | `or_positional`             | 60              | `expr OR <action>` in every syntactic position × action × inner outcome |
 | `cond_or_fallback`          | 12              | `(maybe(...) OR fallback) <cmp> baseline` inside IF / WHILE conditions. Surfaces bug #1 (lower_if hoist ordering) per docs/agents/clear-bug123-forensic.md — `:heap_string` cells fail today, pass once lower_if isolates cond `@pending_stmts`. |
 | `loop_local_method_temp`    | 12              | Method-call result bound as a per-iteration temp inside WHILE / FOR. Surfaces bug #2 (FRAME_NO_REWIND lowering-synthesis gap) per docs/agents/clear-bug123-forensic.md — `:split` cells fail today, pass once `LoopFrameAnalysis.local_frame_decls` recognises stdlib-method frame returns. |
-| `bind_capture_cleanup`      | 6               | Bind-expression capture cleanup for optional/list payloads. |
+| `bind_capture_cleanup`      | 32              | Owned bind cleanup plus borrowed/owned Rc/Arc bindings across list, map, pool, optional field/local, calls, COPY, CLONE, SHARE, multi-bind, pop, and map-value materialization. |
 | `cleanup_classifier_shapes` | 20              | Cleanup-classifier shape coverage for struct/union/option/capability/pipeline payloads. |
 | `cross_fiber_consumer`      | 21              | BG STREAM / observable producer values consumed across fiber boundaries. |
 | `loop_local_cleanup_alloc`  | 16              | Loop-local allocation forms that must be cleaned or promoted consistently, including direct `String[]@list` locals. |

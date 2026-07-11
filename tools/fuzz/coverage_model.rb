@@ -88,7 +88,8 @@ module FuzzCoverageModel
       failure_proves: 'Binary operator admission and lowering produce valid typed MIR/Zig for supported operands.'
     ),
     bind_capture_cleanup: profile(
-      failure_proves: 'Bind-expression captures clean optional and list payloads on every exit path.'
+      failure_proves: 'Bind captures distinguish borrowed container Rc/Arc handles from owned pop/resolve payloads without premature release, leaks, or capability loss.',
+      high_risk: true
     ),
     branch_cleanup: profile(
       failure_proves: 'Branch-local cleanup-bearing allocations are cleaned across both arms and early exits.',

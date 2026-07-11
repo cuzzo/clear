@@ -905,7 +905,9 @@ RSpec.describe SemanticAnnotator do
         out = ZigTranspiler.new.transpile(src)
         expect(out).to include("fn keep(comptime T: type, rt: *Runtime, x: CheatLib.Arc(T)) !CheatLib.Arc(T)")
         expect(out).to include("keep(CheatLib.Versioned(Box), rt, b)")
-        expect(out).to include("CheatLib.arcRetain(T, x)")
+        # The return coercion may retain the already-monomorphized Arc through
+        # a representation-preserving @as wrapper; either form must retain T.
+        expect(out).to include("CheatLib.arcRetain(T,")
       end
     end
 

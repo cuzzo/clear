@@ -137,9 +137,10 @@ module Annotator
         # Do NOT store the full node.full_type — it embeds ownership/sync from
         # finalize_storage!, which breaks resolve_type in declare_capability_scope!
         # (WITH EXCLUSIVE unwrapping reads the raw entry.type expecting just the base type).
-        scope_type = if node_type.collection && !(final_type.is_a?(Type) && final_type.collection)
+        scope_type = if node_type.collection_value?
           ft = Type.new(final_type)
           ft.copy_collection_shape_from!(node_type)
+          ft.copy_element_capabilities_from!(node_type)
           ft
         else
           final_type

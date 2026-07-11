@@ -2893,14 +2893,18 @@ class MIRLowering
   # Mirrors transpile_cast logic but returns MIR nodes instead of strings.
   sig { params(mir_node: MIR::Node, from_type: Type, to_type: Type::TypeInput).returns(T.nilable(MIR::Cast)) }
   def mir_cast(mir_node, from_type, to_type)
-    from = from_type.respond_to?(:resolved) ? from_type.resolved : from_type
-    to   = to_type.is_a?(Type) ? to_type.resolved : to_type
-    return nil if from == to
+    from_t = from_type.is_a?(Type) ? from_type : Type.new(from_type)
+    to_t   = to_type.is_a?(Type)   ? to_type   : Type.new(to_type)
+    return nil if from_t.semantic_type_key == to_t.semantic_type_key
+    # Placement and constraint metadata can differ while the emitted value
+    # representation is identical. Do not manufacture an @as cast in that
+    # case; capability-changing coercions still differ in zig_type and fall
+    # through to the real cast paths below.
+    return nil if from_t.zig_type == to_t.zig_type
 
-    from_t = from_type.is_a?(Type) ? from_type : Type.new(from)
-    to_t   = to_type.is_a?(Type)   ? to_type   : Type.new(to)
-
-    zig_to = transpile_type(to)
+    # Keep the complete destination shape. Reducing this to `resolved` drops
+    # optionality and ownership, turning `?T@multiowned` into `?T` in Zig.
+    zig_to = transpile_type(to_t)
 
     # fn_type: generic @as cast
     return MIR::Cast.new(mir_node, zig_to, :as) if from_t.fn_type? || to_t.fn_type?

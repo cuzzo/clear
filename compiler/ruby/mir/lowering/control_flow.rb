@@ -275,12 +275,10 @@ module MIRLoweringControlFlow
 
   sig { params(expr: AST::Node).returns(T.nilable(CleanupEntry)) }
   def bind_capture_cleanup(expr)
-    # An indexed/container lookup yields a borrowed view into storage owned by
-    # the collection.  IF ... AS must not release that view at block exit: for
-    # RC payloads doing so decrements the collection's strong reference and
-    # leaves its slot dangling.  COPY/RESOLVE remain owning expressions and
-    # therefore still receive normal capture cleanup.
-    return nil if AST.borrowed_ownership_view?(expr)
+    # Variable, field, and index optional access borrows from an existing
+    # owner. Calls and explicit ownership-producing wrappers create a fresh
+    # successful payload whose capture must be released at block exit.
+    return nil unless AST.capture_expr_owns_result?(expr)
 
     ti = Type.from_node!(expr)
     ti = ti.success_type || ti

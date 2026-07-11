@@ -317,6 +317,8 @@ module Annotator
         # CapabilityWrap always allocates on the heap.
         if node.ownership || node.sync || node.layout
           current_fn_ctx&.record_heap_use!
+          current_fn_ctx&.record_alloc_use!
+          current_fn_ctx&.mark_runtime_used!
           record_effect(EffectTracker::HEAP)
         end
 

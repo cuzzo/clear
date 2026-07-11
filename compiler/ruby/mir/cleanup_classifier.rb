@@ -666,7 +666,7 @@ module CleanupClassifier
   sig { params(body: T::Array[AST::Node], schema_lookup: Proc, bindings: T::Hash[String, CleanupEntry]).void }
   private_class_method def self.walk_capture_bindings(body, schema_lookup, bindings)
     each_capture_binding(body) do |name, expr, anchor_node|
-      next unless capture_expr_owns_result?(expr)
+      next unless AST.capture_expr_owns_result?(expr)
       expr_ti = Type.from_node!(expr, context: "capture binding")
       inner_ti = expr_ti.wrapped_type
       next unless inner_ti
@@ -682,11 +682,6 @@ module CleanupClassifier
       end
       bindings[name] = e
     end
-  end
-
-  sig { params(expr: AST::Node).returns(T::Boolean) }
-  private_class_method def self.capture_expr_owns_result?(expr)
-    AST.call?(expr) || expr.is_a?(AST::MethodCall) || expr.is_a?(AST::ResolveNode)
   end
 
   sig { params(expr: AST::Node, schema_lookup: Proc).returns(T::Boolean) }

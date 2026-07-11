@@ -127,11 +127,21 @@ class FunctionReturn
     when Kind::IdOfElement
       Type.new(:"Id<#{T.must(T.must(receiver).element_type).resolved}>")
     when Kind::OptionalOfValue
-      Type.new(:"?#{T.must(receiver).value_type.resolved}")
+      # Preserve ownership/synchronization on map values. Rebuilding from
+      # `resolved` silently turned HashMap<T@multiowned>[k] into ?T@affine.
+      Type.optional_of(T.must(receiver).value_type)
     when Kind::ValueList
-      Type.new(:"#{T.must(receiver).value_type.resolved}[]@list")
+      value = T.must(receiver).value_type
+      list = Type.new(:"#{value.resolved}[]", collection: :list)
+      list.elem_ownership = value.ownership
+      list.elem_sync = value.sync
+      list
     when Kind::KeyList
-      Type.new(:"#{T.must(receiver).key_type.resolved}[]@list")
+      key = T.must(receiver).key_type
+      list = Type.new(:"#{key.resolved}[]", collection: :list)
+      list.elem_ownership = key.ownership
+      list.elem_sync = key.sync
+      list
     when Kind::Infer
       resolve_infer(args, host)
     else
