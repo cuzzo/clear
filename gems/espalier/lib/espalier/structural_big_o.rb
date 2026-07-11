@@ -570,18 +570,39 @@ module Espalier
     end
 
     def classify_loop(loop_line, loop_line_no, start_line, lines, constants)
-      tokens = loop_line.scan(/[a-zA-Z_]\w*/)
-      ignored_tokens = %w[for while until do each times loop in range let mut var int i j k class module def end return]
-      other_tokens = tokens - ignored_tokens - constants.to_a
-      
-      if other_tokens.empty?
+      trigger_var = extract_bound_variable(loop_line)
+      if trigger_var.nil? || constants.include?(trigger_var)
         { is_dynamic: false, trigger: nil }
       else
-        trigger_var = other_tokens.first
         def_line = find_variable_definition_line(lines, trigger_var, loop_line_no, start_line)
         trigger = def_line ? "line #{def_line}" : nil
         { is_dynamic: true, trigger: trigger }
       end
+    end
+
+    def extract_bound_variable(loop_line)
+      # 1. for x in collection / for x in &collection
+      if loop_line =~ /\bin\s+&?(?:mut\s+)?([a-zA-Z_]\w*)\b/
+        return $1
+      end
+      # 2. for x := range collection
+      if loop_line =~ /\brange\s+([a-zA-Z_]\w*)\b/
+        return $1
+      end
+      # 3. i < limit / i <= n / j < len(users)
+      if loop_line =~ /(?:<|>|<=|>=)\s*([a-zA-Z_]\w*)\b/
+        return $1
+      end
+      # 4. collection.each / collection.map
+      if loop_line =~ /\b([a-zA-Z_]\w*)\.(?:each|each_key|each_value|each_with_index|map|map!|select|reject|filter|filter_map|flat_map|sort_by)\b/
+        return $1
+      end
+      
+      # Fallback: first non-ignored token
+      tokens = loop_line.scan(/[a-zA-Z_]\w*/)
+      ignored_tokens = %w[for while until do each times loop in range let mut var int i j k class module def end return]
+      other_tokens = tokens - ignored_tokens
+      other_tokens.first
     end
 
     def find_variable_definition_line(lines, var_name, loop_line_no, start_line)

@@ -350,5 +350,65 @@ class BigOTest < Minitest::Test
     refute_nil nested_hint2
     assert_equal false, nested_hint2[:is_dynamic]
     assert_nil nested_hint2[:trigger]
+
+    # 3. Test Go loops:
+    go_lines = [
+      "func process(n int) {\n",
+      "\tlimit := 10\n",
+      "\tfor i := 0; i < limit; i++ {\n",
+      "\t\tfor j := 0; j < n; j++ {\n",
+      "\t\t\t// nested\n",
+      "\t\t}\n",
+      "\t}\n",
+      "}\n"
+    ]
+    go_constants = Set.new(["limit"])
+    # - Loop 1: i < limit -> static
+    g1 = s.send(:classify_loop, "for i := 0; i < limit; i++ {", 3, 1, go_lines, go_constants)
+    assert_equal false, g1[:is_dynamic]
+    # - Loop 2: j < n -> dynamic
+    g2 = s.send(:classify_loop, "for j := 0; j < n; j++ {", 4, 1, go_lines, go_constants)
+    assert_equal true, g2[:is_dynamic]
+    assert_equal "line 1", g2[:trigger] # parameter 'n' defined on line 1
+
+    # 4. Test Rust loops:
+    rust_lines = [
+      "fn run(items: Vec<i32>) {\n",
+      "\tconst LIMIT: usize = 5;\n",
+      "\tfor i in 0..LIMIT {\n",
+      "\t\tfor item in &items {\n",
+      "\t\t\t// nested\n",
+      "\t\t}\n",
+      "\t}\n",
+      "}\n"
+    ]
+    rust_constants = Set.new(["LIMIT"])
+    # - Loop 1: 0..LIMIT -> static
+    r1 = s.send(:classify_loop, "for i in 0..LIMIT {", 3, 1, rust_lines, rust_constants)
+    assert_equal false, r1[:is_dynamic]
+    # - Loop 2: in &items -> dynamic
+    r2 = s.send(:classify_loop, "for item in &items {", 4, 1, rust_lines, rust_constants)
+    assert_equal true, r2[:is_dynamic]
+    assert_equal "line 1", r2[:trigger] # parameter 'items' defined on line 1
+
+    # 5. Test Java/C loops:
+    c_lines = [
+      "void run(int n) {\n",
+      "\tconst int LIMIT = 8;\n",
+      "\tfor (int i = 0; i < LIMIT; i++) {\n",
+      "\t\tfor (int j = 0; j < n; j++) {\n",
+      "\t\t\t// nested\n",
+      "\t\t}\n",
+      "\t}\n",
+      "}\n"
+    ]
+    c_constants = Set.new(["LIMIT"])
+    # - Loop 1: i < LIMIT -> static
+    c1 = s.send(:classify_loop, "for (int i = 0; i < LIMIT; i++) {", 3, 1, c_lines, c_constants)
+    assert_equal false, c1[:is_dynamic]
+    # - Loop 2: j < n -> dynamic
+    c2 = s.send(:classify_loop, "for (int j = 0; j < n; j++) {", 4, 1, c_lines, c_constants)
+    assert_equal true, c2[:is_dynamic]
+    assert_equal "line 1", c2[:trigger] # parameter 'n' defined on line 1
   end
 end
