@@ -230,6 +230,7 @@ fn parse_sqlcov_records(value: &Value) -> Vec<CoverageRecord> {
         .filter(|metric| metric.get("measurable").and_then(Value::as_bool) != Some(false));
     let mut covered_branches = 0_u64;
     let mut total_branches = 0_u64;
+    let mut branches_by_line = std::collections::BTreeMap::<u32, (u64, u64)>::new();
     for metric in metrics {
         let Some(line) = metric.pointer("/span/start_line").and_then(Value::as_u64)
             .and_then(|line| u32::try_from(line).ok()) else { continue };
@@ -243,6 +244,9 @@ fn parse_sqlcov_records(value: &Value) -> Vec<CoverageRecord> {
         let covered = counts.iter().take(branch_count).filter(|count| **count > 0).count() as u64;
         covered_branches += covered;
         total_branches += branch_count as u64;
+        let branch_totals = branches_by_line.entry(line).or_default();
+        branch_totals.0 += covered;
+        branch_totals.1 += branch_count as u64;
         let entry = lines.entry(line).or_insert(CoverageLineHit {
             line,
             hits: 0,
@@ -251,9 +255,17 @@ fn parse_sqlcov_records(value: &Value) -> Vec<CoverageRecord> {
         });
         entry.is_partial |= covered < branch_count as u64;
     }
+    for (line, (covered, total)) in branches_by_line {
+        if let Some(entry) = lines.get_mut(&line) {
+            entry.coverage_percent = (total > 0).then_some(covered as f64 * 100.0 / total as f64);
+        }
+    }
     if lines.is_empty() { return Vec::new() }
-    let covered_lines = lines.values().filter(|line| line.hits > 0).count();
-    let line_coverage = covered_lines as f64 * 100.0 / lines.len() as f64;
+    let line_coverage = lines
+        .values()
+        .map(|line| line.coverage_percent.unwrap_or(if line.hits > 0 { 100.0 } else { 0.0 }))
+        .sum::<f64>()
+        / lines.len() as f64;
     vec![CoverageRecord {
         path: normalize_path(path),
         line_coverage: Some(line_coverage),
@@ -690,10 +702,10 @@ mod tests {
         let records = parse_coverage_records(&payload, "sqlcov").unwrap();
         assert_eq!(records.len(), 1);
         assert_eq!(records[0].path, "gems/lineage/sql/demo.sql");
-        assert_eq!(records[0].line_coverage, Some(100.0));
+        assert!((records[0].line_coverage.unwrap() - 250.0 / 3.0).abs() < 0.000_001);
         assert_eq!(records[0].integration_coverage, Some(200.0 / 3.0));
         assert_eq!(records[0].line_hits, vec![
-            CoverageLineHit { line: 2, hits: 1, is_partial: true, coverage_percent: Some(100.0) },
+            CoverageLineHit { line: 2, hits: 1, is_partial: true, coverage_percent: Some(200.0 / 3.0) },
             CoverageLineHit { line: 3, hits: 1, is_partial: false, coverage_percent: Some(100.0) },
         ]);
     }

@@ -1,8 +1,55 @@
 use sql_cov::driver::sqlite_pool;
 use sql_cov::{analyze_sql, cover_sqlite, execute_sqlite_setup, DialectName};
+use std::fs;
+use std::path::{Path, PathBuf};
 
 const OWNER_INVENTORY: &str = include_str!("../../lineage/sql/architecture/owner_inventory.sql");
 const SETUP: &str = include_str!("fixtures/lineage_architecture.sql");
+
+fn sql_files(root: &Path) -> Vec<PathBuf> {
+    let mut files = Vec::new();
+    for entry in fs::read_dir(root).unwrap() {
+        let path = entry.unwrap().path();
+        if path.is_dir() {
+            files.extend(sql_files(&path));
+        } else if path.extension().and_then(|value| value.to_str()) == Some("sql") {
+            files.push(path);
+        }
+    }
+    files.sort();
+    files
+}
+
+#[test]
+fn all_extracted_lineage_runtime_queries_parse_with_sql_cov() {
+    let lineage_sql = Path::new(env!("CARGO_MANIFEST_DIR")).join("../lineage/sql");
+    let files = [lineage_sql.join("storage"), lineage_sql.join("ui/runtime")]
+        .into_iter()
+        .flat_map(|root| sql_files(&root))
+        .collect::<Vec<_>>();
+    assert!(files.len() >= 70, "expected the embedded SQL extraction corpus");
+    let mut analyzed = 0;
+    for path in files {
+        let sql = fs::read_to_string(&path)
+            .unwrap()
+            .replace("{column}", "current_line_cov");
+        let statement = sql
+            .lines()
+            .filter(|line| !line.trim_start().starts_with("--"))
+            .collect::<Vec<_>>()
+            .join("\n");
+        if ["PRAGMA", "CREATE", "DROP"]
+            .iter()
+            .any(|keyword| statement.trim_start().starts_with(keyword))
+        {
+            continue;
+        }
+        analyze_sql(&path.to_string_lossy(), &sql, DialectName::Sqlite)
+            .unwrap_or_else(|error| panic!("SQL-COV could not parse {}: {error}", path.display()));
+        analyzed += 1;
+    }
+    assert!(analyzed >= 60, "expected at least 60 SQL-COV-analyzed queries");
+}
 
 #[tokio::test]
 async fn measures_real_lineage_owner_inventory_where_clause() {

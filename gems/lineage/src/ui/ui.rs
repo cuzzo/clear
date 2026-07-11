@@ -28,6 +28,8 @@ use std::time::Instant;
 use tower_http::set_header::SetResponseHeaderLayer;
 use tower_http::trace::TraceLayer;
 
+mod controllers;
+
 const ARCHITECTURE_SYMBOLS_FOR_PATH_SQL: &str =
     include_str!("../../sql/ui/architecture_symbols_for_path.sql");
 const ARCHITECTURE_OWNER_BY_NAME_SQL: &str =
@@ -39,10 +41,12 @@ pub struct CoverageScope {
     ignore_patterns: Vec<String>,
 }
 
-#[derive(Debug, Default, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Default, Clone, Copy, PartialEq)]
 struct LineCoverageStats {
     tracked: i64,
     covered: i64,
+    partial: i64,
+    coverage_percent_sum: f64,
 }
 
 #[derive(Debug, Clone, Serialize, PartialEq)]
@@ -58,6 +62,7 @@ pub struct UiFile {
     pub mutant_killed_tests: i64,
     pub tracked_lines: i64,
     pub covered_lines: i64,
+    pub partial_lines: i64,
     pub line_coverage: f64,
     pub mutant_coverage: f64,
     pub mutant_verified_covered_lines: i64,
@@ -212,6 +217,8 @@ pub struct UiFinding {
     pub category: String,
     pub tier: Option<i64>,
     pub span: Option<[u32; 4]>,
+    pub commit: String,
+    pub stale: bool,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -847,22 +854,7 @@ async fn serve_ui_async(
 }
 
 fn ui_router(state: UiServerState) -> Router {
-    Router::new()
-        .route("/", get(index_handler))
-        .route("/index.html", get(index_handler))
-        .route("/api/files", get(api_files_handler))
-        .route("/api/dashboard", get(api_dashboard_handler))
-        .route("/api/source", get(api_source_handler))
-        .route("/api/definition", get(api_definition_handler))
-        .route("/api/architecture/owners/:owner_id", get(api_architecture_owner_handler))
-        .route("/api/architecture/functions/:node_id/neighborhood", get(api_architecture_neighborhood_handler))
-        .route("/api/architecture/state/:state_id/access", get(api_architecture_state_handler))
-        .route("/api/architecture/search", get(api_architecture_search_handler))
-        .route("/architecture/unit/:node_id", get(architecture_page_handler))
-        .route("/architecture/state/:node_id", get(architecture_page_handler))
-        .route("/assets/*path", get(asset_handler))
-        .route("/favicon.ico", get(favicon_handler))
-        .with_state(state)
+    controllers::router(state)
         .layer(SetResponseHeaderLayer::if_not_present(
             header::CACHE_CONTROL,
             HeaderValue::from_static("no-store"),
@@ -882,203 +874,16 @@ struct ArchitectureSearchQuery {
     q: Option<String>,
 }
 
-async fn api_architecture_owner_handler(
-    State(state): State<UiServerState>,
-    AxumPath(owner_id): AxumPath<String>,
-) -> Response<Body> {
-    architecture_json_response(&state, |storage| owner_inventory(storage, &owner_id))
-}
 
-async fn api_architecture_neighborhood_handler(
-    State(state): State<UiServerState>,
-    AxumPath(node_id): AxumPath<String>,
-    Query(query): Query<ArchitecturePageQuery>,
-) -> Response<Body> {
-    let limit = query.limit.unwrap_or(40).clamp(1, 100);
-    architecture_json_response(&state, |storage| node_neighborhood(storage, &node_id, limit))
-}
 
-async fn api_architecture_state_handler(
-    State(state): State<UiServerState>,
-    AxumPath(state_id): AxumPath<String>,
-) -> Response<Body> {
-    architecture_json_response(&state, |storage| state_access(storage, &state_id))
-}
 
-async fn api_architecture_search_handler(
-    State(state): State<UiServerState>,
-    Query(query): Query<ArchitectureSearchQuery>,
-) -> Response<Body> {
-    architecture_json_response(&state, |storage| {
-        architecture_search(storage, query.owner.as_deref(), query.q.as_deref().unwrap_or_default())
-    })
-}
 
-fn architecture_json_response(
-    state: &UiServerState,
-    operation: impl FnOnce(&Storage) -> Result<Value>,
-) -> Response<Body> {
-    let storage = match Storage::open_existing(state.db.as_ref()) {
-        Ok(storage) => storage,
-        Err(error) => return error_json(StatusCode::INTERNAL_SERVER_ERROR, error),
-    };
-    match operation(&storage) {
-        Ok(mut value) => {
-            annotate_architecture_freshness(&mut value, state.repo.as_ref());
-            Json(value).into_response()
-        }
-        Err(error) => error_json(StatusCode::NOT_FOUND, error),
-    }
-}
 
-async fn architecture_page_handler(
-    State(state): State<UiServerState>,
-    AxumPath(node_id): AxumPath<String>,
-    Query(query): Query<ArchitecturePageQuery>,
-) -> Response<Body> {
-    let storage = match Storage::open_existing(state.db.as_ref()) {
-        Ok(storage) => storage,
-        Err(error) => return error_response(StatusCode::INTERNAL_SERVER_ERROR, error),
-    };
-    let mut neighborhood = match node_neighborhood(&storage, &node_id, query.limit.unwrap_or(40).clamp(1, 100)) {
-        Ok(value) => value,
-        Err(error) => return error_response(StatusCode::NOT_FOUND, error),
-    };
-    annotate_architecture_freshness(&mut neighborhood, state.repo.as_ref());
-    let selected = &neighborhood["selected"];
-    let owner_id = selected.get("owner_id").and_then(Value::as_str).unwrap_or(&node_id);
-    let inventory = owner_inventory(&storage, owner_id).unwrap_or_else(|_| json!({"owner": selected, "members": []}));
-    Html(render_architecture_page(
-        &inventory,
-        &neighborhood,
-        query.lens.as_deref().unwrap_or("combined"),
-    )).into_response()
-}
 
-fn annotate_architecture_freshness(value: &mut Value, repo: &Path) {
-    let current = Repository::open(repo).ok().and_then(|repository| repository.head().ok().and_then(|head| head.target()).map(|oid| oid.to_string()));
-    let artifact_commit = value.pointer("/artifact/commit").and_then(Value::as_str).unwrap_or("");
-    let stale = current.as_deref().is_some_and(|commit| !artifact_commit.is_empty() && commit != artifact_commit);
-    if let Some(artifact) = value.get_mut("artifact") {
-        artifact["current_commit"] = json!(current);
-        artifact["stale"] = json!(stale);
-    }
-}
 
-fn render_architecture_page(inventory: &Value, neighborhood: &Value, lens: &str) -> String {
-    let owner = &inventory["owner"];
-    let selected = &neighborhood["selected"];
-    let owner_name = owner.get("name").and_then(Value::as_str).unwrap_or("Architecture");
-    let selected_name = selected.get("name").and_then(Value::as_str).unwrap_or("");
-    let members = inventory.get("members").and_then(Value::as_array).cloned().unwrap_or_default();
-    let mut edges = neighborhood.get("edges").and_then(Value::as_array).cloned().unwrap_or_default();
-    let omitted = neighborhood.get("omitted_relationships").and_then(Value::as_array).cloned().unwrap_or_default();
-    let all_edges = edges.iter().chain(omitted.iter()).cloned().collect::<Vec<_>>();
-    edges.retain(|edge| architecture_edge_in_lens(edge, lens));
-    let nodes = neighborhood.get("nodes").and_then(Value::as_array).cloned().unwrap_or_default();
-    let commit = neighborhood.pointer("/artifact/commit").and_then(Value::as_str).unwrap_or("");
 
-    let mut out = String::new();
-    out.push_str("<!doctype html><html lang=\"en\"><head><meta charset=\"utf-8\"><meta name=\"viewport\" content=\"width=device-width,initial-scale=1\">");
-    out.push_str("<title>"); out.push_str(&html_escape(owner_name)); out.push_str(" architecture</title><link rel=\"stylesheet\" href=\"/assets/app.css\">");
-    out.push_str("</head><body class=\"architecture-page\"><main class=\"architecture-shell\">");
-    out.push_str("<header class=\"architecture-header\"><div><a href=\"/\">← Lineage</a><h1>");
-    out.push_str(&html_escape(owner_name)); out.push_str("</h1><p>");
-    out.push_str(&html_escape(owner.get("path").and_then(Value::as_str).unwrap_or("")));
-    out.push_str("</p></div><div><strong>Focused: "); out.push_str(&html_escape(selected_name));
-    out.push_str("</strong><small>artifact "); out.push_str(&html_escape(&short_hash(commit))); out.push_str("</small></div></header>");
-    if neighborhood.pointer("/artifact/stale").and_then(Value::as_bool) == Some(true) {
-        out.push_str("<div class=\"architecture-stale\" role=\"status\"><strong>Architecture artifact is stale.</strong> Regenerate it for the currently viewed commit.</div>");
-    }
-    out.push_str("<nav class=\"architecture-lenses\" aria-label=\"Architecture lens\">");
-    for candidate in ["combined", "calls", "state", "risk"] {
-        out.push_str("<a href=\"?lens="); out.push_str(candidate); out.push_str("\" class=\"");
-        if candidate == lens { out.push_str("active"); }
-        out.push_str("\">"); out.push_str(&html_escape(&capitalize(candidate))); out.push_str("</a>");
-    }
-    out.push_str("</nav><div class=\"architecture-workspace\"><aside class=\"architecture-members\"><label>Members<input type=\"search\" placeholder=\"Search members…\" data-architecture-search></label>");
-    for member in &members {
-        let id = member.get("id").and_then(Value::as_str).unwrap_or("");
-        let kind = member.get("kind").and_then(Value::as_str).unwrap_or("");
-        let route = if kind == "state" { "state" } else { "unit" };
-        let band = member.pointer("/pressure/band").and_then(Value::as_str).unwrap_or("ordinary");
-        let score = member.pointer("/pressure/score").and_then(Value::as_f64).unwrap_or(0.0);
-        out.push_str("<a class=\"architecture-member architecture-band-"); out.push_str(&html_escape(band));
-        if id == selected.get("id").and_then(Value::as_str).unwrap_or("") { out.push_str(" selected"); }
-        out.push_str("\" data-member-name=\""); out.push_str(&html_escape(member.get("name").and_then(Value::as_str).unwrap_or("")));
-        out.push_str("\" href=\"/architecture/"); out.push_str(route); out.push('/'); out.push_str(&percent_encode(id)); out.push_str("?lens="); out.push_str(&percent_encode(lens)); out.push_str("\">");
-        out.push_str("<span><small>"); out.push_str(&html_escape(kind)); out.push_str("</small>"); out.push_str(&html_escape(member.get("name").and_then(Value::as_str).unwrap_or(""))); out.push_str("</span>");
-        out.push_str("<b>"); out.push_str(&format!("{score:.0}")); out.push_str("</b></a>");
-    }
-    out.push_str("</aside><section class=\"architecture-focus\"><div class=\"architecture-graph-toolbar\"><strong>Focused neighborhood</strong><button type=\"button\" data-architecture-fit>Fit</button></div>");
-    out.push_str(&render_architecture_svg(selected, &nodes, &edges));
-    out.push_str("<section class=\"architecture-evidence\"><h2>Why this is highlighted</h2>");
-    let pressure = members.iter().find(|member| member.get("id") == selected.get("id")).and_then(|member| member.get("pressure"));
-    if let Some(pressure) = pressure {
-        out.push_str("<p><strong>"); out.push_str(&format!("{:.1} architecture pressure", pressure.get("score").and_then(Value::as_f64).unwrap_or(0.0))); out.push_str("</strong></p><pre>");
-        out.push_str(&html_escape(&serde_json::to_string_pretty(&pressure["explanation"]).unwrap_or_default())); out.push_str("</pre>");
-    } else { out.push_str("<p>Pressure is not scored for this node.</p>"); }
-    out.push_str("</section><section class=\"architecture-relationships\"><h2>All known relationships</h2><input type=\"search\" placeholder=\"Filter relationships…\" aria-label=\"Filter relationships\" data-relationship-search><table><thead><tr><th>Kind</th><th>From</th><th>To</th><th>Confidence</th><th>Evidence</th></tr></thead><tbody>");
-    let node_names = nodes.iter().filter_map(|node| Some((node.get("id")?.as_str()?, node.get("name")?.as_str()?))).collect::<HashMap<_, _>>();
-    for edge in &all_edges {
-        let source = edge.get("source").and_then(Value::as_str).unwrap_or("");
-        let target = edge.get("target").and_then(Value::as_str).unwrap_or("");
-        out.push_str("<tr data-relationship-row><td>"); out.push_str(&html_escape(edge.get("kind").and_then(Value::as_str).unwrap_or(""))); out.push_str("</td><td>");
-        out.push_str(&html_escape(node_names.get(source).copied().unwrap_or(source))); out.push_str("</td><td>"); out.push_str(&html_escape(node_names.get(target).copied().unwrap_or(target))); out.push_str("</td><td>");
-        out.push_str(&html_escape(edge.get("confidence").and_then(Value::as_str).unwrap_or(""))); out.push_str("</td><td>");
-        if let Some(span) = edge.get("spans").and_then(Value::as_array).and_then(|spans| spans.first()) {
-            let path = span.get("path").and_then(Value::as_str).unwrap_or(""); let line = span.get("start_line").and_then(Value::as_i64).unwrap_or(1);
-            out.push_str("<a href=\"/?path="); out.push_str(&percent_encode(path)); out.push_str("#L"); out.push_str(&line.to_string()); out.push_str("\">"); out.push_str(&html_escape(path)); out.push(':'); out.push_str(&line.to_string()); out.push_str("</a>");
-        }
-        out.push_str("</td></tr>");
-    }
-    out.push_str("</tbody></table></section></section></div></main><script src=\"/assets/app.js\"></script></body></html>");
-    out
-}
 
-fn architecture_edge_in_lens(edge: &Value, lens: &str) -> bool {
-    let kind = edge.get("kind").and_then(Value::as_str).unwrap_or("");
-    match lens {
-        "calls" => kind.contains("call") || kind == "delegation",
-        "state" => matches!(kind, "reads" | "writes"),
-        _ => true,
-    }
-}
 
-fn render_architecture_svg(selected: &Value, nodes: &[Value], edges: &[Value]) -> String {
-    let selected_id = selected.get("id").and_then(Value::as_str).unwrap_or("");
-    let inbound = edges.iter().filter_map(|edge| (edge.get("target").and_then(Value::as_str) == Some(selected_id)).then(|| edge.get("source").and_then(Value::as_str)).flatten()).collect::<Vec<_>>();
-    let outbound = edges.iter().filter_map(|edge| (edge.get("source").and_then(Value::as_str) == Some(selected_id)).then(|| edge.get("target").and_then(Value::as_str)).flatten()).collect::<Vec<_>>();
-    let mut positions = HashMap::<&str, (i32, i32)>::new();
-    positions.insert(selected_id, (400, 180));
-    for (index, id) in inbound.iter().enumerate() { positions.insert(id, (100, 60 + index as i32 * 90)); }
-    for (index, id) in outbound.iter().enumerate() { positions.insert(id, (700, 60 + index as i32 * 90)); }
-    let height = (inbound.len().max(outbound.len()).max(2) * 90 + 70).max(320);
-    let mut out = format!("<div class=\"architecture-graph-viewport\"><svg class=\"architecture-graph\" viewBox=\"0 0 800 {height}\" role=\"img\" aria-label=\"Focused architecture relationships\">");
-    out.push_str("<defs><marker id=\"architecture-arrow\" markerWidth=\"8\" markerHeight=\"8\" refX=\"7\" refY=\"3\" orient=\"auto\"><path d=\"M0,0 L0,6 L8,3 z\"></path></marker></defs>");
-    for edge in edges {
-        let source = edge.get("source").and_then(Value::as_str).unwrap_or(""); let target = edge.get("target").and_then(Value::as_str).unwrap_or("");
-        let (Some((sx, sy)), Some((tx, ty))) = (positions.get(source), positions.get(target)) else { continue };
-        let dashed = edge.get("confidence").and_then(Value::as_str) != Some("high") || edge.get("conditional").and_then(Value::as_bool) == Some(true);
-        out.push_str("<path class=\"architecture-edge"); if dashed { out.push_str(" partial"); } out.push_str("\" d=\"M");
-        out.push_str(&(sx + 85).to_string()); out.push(','); out.push_str(&sy.to_string()); out.push_str(" L"); out.push_str(&(tx - 85).to_string()); out.push(','); out.push_str(&ty.to_string()); out.push_str("\" marker-end=\"url(#architecture-arrow)\"><title>");
-        out.push_str(&html_escape(edge.get("kind").and_then(Value::as_str).unwrap_or("relationship"))); out.push_str("</title></path>");
-    }
-    for node in nodes {
-        let id = node.get("id").and_then(Value::as_str).unwrap_or(""); let Some((x, y)) = positions.get(id) else { continue };
-        let kind = node.get("kind").and_then(Value::as_str).unwrap_or(""); let route = if kind == "state" { "state" } else { "unit" };
-        if kind != "aggregate" { out.push_str("<a href=\"/architecture/"); out.push_str(route); out.push('/'); out.push_str(&percent_encode(id)); out.push_str("\">"); }
-        out.push_str("<g class=\"architecture-node "); out.push_str(&html_escape(kind)); if id == selected_id { out.push_str(" selected"); } out.push_str("\" tabindex=\"0\"><rect x=\"");
-        out.push_str(&(x - 85).to_string()); out.push_str("\" y=\""); out.push_str(&(y - 26).to_string()); out.push_str("\" width=\"170\" height=\"52\" rx=\"8\"></rect><text x=\""); out.push_str(&x.to_string()); out.push_str("\" y=\""); out.push_str(&(y + 5).to_string()); out.push_str("\" text-anchor=\"middle\">"); out.push_str(&html_escape(node.get("name").and_then(Value::as_str).unwrap_or(id))); out.push_str("</text></g>");
-        if kind != "aggregate" { out.push_str("</a>"); }
-    }
-    out.push_str("</svg></div>"); out
-}
-
-fn capitalize(value: &str) -> String {
-    let mut chars = value.chars();
-    chars.next().map(|first| first.to_uppercase().collect::<String>() + chars.as_str()).unwrap_or_default()
-}
 
 pub fn file_index(storage: &Storage, repo: Option<&Path>) -> Result<Vec<UiFile>> {
     file_index_with_scope(storage, &CoverageScope::all(), repo)
@@ -1109,43 +914,7 @@ pub fn file_index_with_scope(
         profile_log("file_index.line_coverage_by_file", line_start);
         let query_start = Instant::now();
         let mut stmt = storage.connection().prepare(
-            r#"
-            WITH current_units AS (
-              SELECT
-                u.id,
-              COALESCE((
-                SELECT latest.path
-                FROM events latest
-                WHERE latest.unit_id = u.id
-                  ORDER BY latest.timestamp DESC, latest.id DESC
-                  LIMIT 1
-                ), u.original_path) AS current_path,
-                u.current_line_cov,
-                u.current_mutant_cov,
-                u.current_distinct_tests,
-                u.current_mutant_killed_tests
-              FROM logical_units u
-            ),
-            hazard_counts AS (
-              SELECT unit_id, COUNT(*) AS hazards
-              FROM unit_hazards
-              WHERE is_active = 1
-              GROUP BY unit_id
-            )
-            SELECT
-              cu.current_path,
-              COUNT(DISTINCT cu.id) AS units,
-              COALESCE(SUM(hc.hazards), 0) AS hazards,
-              COALESCE(SUM(cu.current_distinct_tests), 0) AS distinct_tests,
-              COALESCE(SUM(cu.current_mutant_killed_tests), 0) AS mutant_killed_tests,
-              COALESCE(AVG(cu.current_line_cov), 0.0) AS line_coverage,
-              COALESCE(AVG(cu.current_mutant_cov), 0.0) AS mutant_coverage
-            FROM current_units cu
-            LEFT JOIN hazard_counts hc ON hc.unit_id = cu.id
-            WHERE cu.current_path <> ''
-            GROUP BY cu.current_path
-            ORDER BY hazards DESC, mutant_killed_tests DESC, distinct_tests DESC, cu.current_path
-            "#,
+            include_str!("../../sql/ui/runtime/file_index_with_scope.sql"),
         )?;
         let rows = stmt.query_map([], |row| {
             let path = row.get::<_, String>(0)?;
@@ -1165,8 +934,9 @@ pub fn file_index_with_scope(
                 mutant_killed_tests: row.get(4)?,
                 tracked_lines: stats.tracked,
                 covered_lines: stats.covered,
+                partial_lines: stats.partial,
                 line_coverage: if stats.tracked > 0 {
-                    percent(stats.covered, stats.tracked)
+                    stats.coverage_percent_sum / stats.tracked as f64
                 } else {
                     fallback_line_coverage
                 },
@@ -1246,6 +1016,7 @@ fn append_sarif_only_files(
             mutant_killed_tests: 0,
             tracked_lines: 0,
             covered_lines: 0,
+            partial_lines: 0,
             line_coverage: 0.0,
             mutant_coverage: 0.0,
             mutant_verified_covered_lines: 0,
@@ -1272,12 +1043,7 @@ fn append_sarif_only_files(
 
 fn sarif_dark_arm_counts_by_file(storage: &Storage) -> Result<HashMap<String, i64>> {
     let mut stmt = storage.connection().prepare(
-        r#"
-        SELECT path, COUNT(*) AS findings
-        FROM current_sarif_findings
-        WHERE is_dark_arm = 1
-        GROUP BY path
-        "#,
+        include_str!("../../sql/ui/runtime/sarif_dark_arm_counts_by_file.sql"),
     )?;
     let rows = stmt.query_map([], |row| Ok((row.get::<_, String>(0)?, row.get::<_, i64>(1)?)))?;
     Ok(rows.collect::<std::result::Result<HashMap<_, _>, _>>()?)
@@ -1294,28 +1060,7 @@ fn read_model_file_index_with_scope(
         return Ok(None);
     }
     let mut stmt = storage.connection().prepare(
-        r#"
-        SELECT path,
-               units,
-               hazards,
-               evidence_covered_hazards,
-               covered_hazards,
-               distinct_tests,
-               mutant_killed_tests,
-               tracked_lines,
-               covered_lines,
-               line_coverage,
-               mutant_coverage,
-               mutant_verified_covered_lines,
-               mutant_killed_covered_lines,
-               stochastic_mutant_verified_covered_lines,
-               stochastic_mutant_killed_covered_lines,
-               invariant_mutant_verified_covered_lines,
-               invariant_mutant_killed_covered_lines,
-               multi_type_covered_lines
-        FROM ui_file_summaries
-        ORDER BY hazards DESC, mutant_killed_tests DESC, distinct_tests DESC, path
-        "#,
+        include_str!("../../sql/ui/runtime/read_model_file_index_with_scope.sql"),
     )?;
     let rows = stmt.query_map([], |row| {
         let path = row.get::<_, String>(0)?;
@@ -1333,15 +1078,16 @@ fn read_model_file_index_with_scope(
             mutant_killed_tests: row.get(6)?,
             tracked_lines: row.get(7)?,
             covered_lines: row.get(8)?,
-            line_coverage: row.get(9)?,
-            mutant_coverage: row.get(10)?,
-            mutant_verified_covered_lines: row.get(11)?,
-            mutant_killed_covered_lines: row.get(12)?,
-            stochastic_mutant_verified_covered_lines: row.get(13)?,
-            stochastic_mutant_killed_covered_lines: row.get(14)?,
-            invariant_mutant_verified_covered_lines: row.get(15)?,
-            invariant_mutant_killed_covered_lines: row.get(16)?,
-            multi_type_covered_lines: row.get(17)?,
+            partial_lines: row.get(9)?,
+            line_coverage: row.get(10)?,
+            mutant_coverage: row.get(11)?,
+            mutant_verified_covered_lines: row.get(12)?,
+            mutant_killed_covered_lines: row.get(13)?,
+            stochastic_mutant_verified_covered_lines: row.get(14)?,
+            stochastic_mutant_killed_covered_lines: row.get(15)?,
+            invariant_mutant_verified_covered_lines: row.get(16)?,
+            invariant_mutant_killed_covered_lines: row.get(17)?,
+            multi_type_covered_lines: row.get(18)?,
             read_model: true,
         })
     })?;
@@ -1465,32 +1211,18 @@ fn line_coverage_by_file(
 ) -> Result<HashMap<String, LineCoverageStats>> {
     let mut by_file = HashMap::<String, LineCoverageStats>::new();
     let mut stmt = storage.connection().prepare(
-        r#"
-        WITH latest_source_lines AS (
-          SELECT path, line, hits
-          FROM (
-            SELECT path, line, source, hits,
-                   ROW_NUMBER() OVER (
-                     PARTITION BY path, line, source
-                     ORDER BY timestamp DESC, id DESC
-                   ) AS rank
-            FROM coverage_line_events
-          )
-          WHERE rank = 1
-        ),
-        latest_lines AS (
-          SELECT path, line, MAX(hits) AS hits
-          FROM latest_source_lines
-          GROUP BY path, line
-        )
-        SELECT path, hits
-        FROM latest_lines
-        ORDER BY path
-        "#,
+        include_str!("../../sql/ui/runtime/line_coverage_by_file.sql"),
     )?;
-    let rows = stmt.query_map([], |row| Ok((row.get::<_, String>(0)?, row.get::<_, u32>(1)?)))?;
+    let rows = stmt.query_map([], |row| {
+        Ok((
+            row.get::<_, String>(0)?,
+            row.get::<_, u32>(1)?,
+            row.get::<_, i64>(2)? != 0,
+            row.get::<_, f64>(3)?,
+        ))
+    })?;
     for row in rows {
-        let (path, hits) = row?;
+        let (path, hits, is_partial, coverage_percent) = row?;
         if !scope.allows(&path) || !is_production_source_path(&path) {
             continue;
         }
@@ -1498,7 +1230,11 @@ fn line_coverage_by_file(
         entry.tracked += 1;
         if hits > 0 {
             entry.covered += 1;
+            if is_partial {
+                entry.partial += 1;
+            }
         }
+        entry.coverage_percent_sum += coverage_percent;
     }
     Ok(by_file)
 }
@@ -1685,11 +1421,7 @@ fn analyzer_health(
     let count_findings = finding_high_watermark <= 50_000;
     if count_findings {
         let mut findings = storage.connection().prepare(
-        r#"
-        SELECT source, tool_name, COUNT(*)
-        FROM current_sarif_findings
-        GROUP BY source, tool_name
-        "#,
+        include_str!("../../sql/ui/runtime/analyzer_health.sql"),
         )?;
         let rows = findings.query_map([], |row| {
             Ok((
@@ -1709,12 +1441,7 @@ fn analyzer_health(
         } else {
             let prefix = format!("{directory}/%");
             let mut scoped = storage.connection().prepare(
-                r#"
-                SELECT source, tool_name, COUNT(*)
-                FROM current_sarif_findings
-                WHERE path = ?1 OR path LIKE ?2
-                GROUP BY source, tool_name
-                "#,
+                include_str!("../../sql/ui/runtime/analyzer_health_2.sql"),
             )?;
             let rows = scoped.query_map(params![directory, prefix], |row| {
                 Ok((
@@ -1738,19 +1465,7 @@ fn analyzer_health(
         |row| row.get(0),
     )?;
     let mut stmt = storage.connection().prepare(
-        r#"
-        SELECT source, tool_name, commit_hash, timestamp
-        FROM (
-          SELECT source, tool_name, commit_hash, timestamp,
-                 ROW_NUMBER() OVER (
-                   PARTITION BY source, tool_name
-                   ORDER BY timestamp DESC, id DESC
-                 ) AS rank
-          FROM sarif_artifacts
-        )
-        WHERE rank = 1
-        ORDER BY lower(tool_name), lower(source)
-        "#,
+        include_str!("../../sql/ui/runtime/analyzer_health_3.sql"),
     )?;
     let rows = stmt.query_map([], |row| {
         Ok((
@@ -1817,30 +1532,7 @@ fn review_next_items(
     let directory = normalize_directory(directory);
     let prefix = format!("{directory}/%");
     let mut stmt = storage.connection().prepare(
-        r#"
-        WITH grouped AS (
-          SELECT finding.path,
-                 MIN(finding.start_line) AS start_line,
-                 COALESCE(unit.name, MIN(finding.rule_id)) AS title,
-                 GROUP_CONCAT(DISTINCT finding.tool_name) AS tools,
-                 COUNT(*) AS findings,
-                 SUM(CASE WHEN lower(finding.level) IN ('error', 'warning') THEN 1 ELSE 0 END) AS warnings,
-                 SUM(finding.is_dark_arm) AS dark_arms,
-                 MIN(finding.rule_id || ': ' || finding.message) AS example,
-                 COUNT(DISTINCT finding.tool_name) AS tool_count
-          FROM current_sarif_findings finding
-          LEFT JOIN logical_units unit ON unit.id = finding.unit_id
-          WHERE finding.path <> ''
-            AND (?1 = '' OR finding.path = ?1 OR finding.path LIKE ?2)
-          GROUP BY finding.path,
-                   COALESCE(finding.unit_id, 'line:' || finding.start_line)
-        )
-        SELECT path, start_line, title, tools, findings, warnings, dark_arms, example, tool_count,
-               warnings * 3.0 + dark_arms * 5.0 + findings + tool_count * 2.0 AS score
-        FROM grouped
-        ORDER BY score DESC, path, start_line
-        LIMIT 500
-        "#,
+        include_str!("../../sql/ui/runtime/review_next_items.sql"),
     )?;
     let rows = stmt.query_map(params![directory, prefix], |row| {
         Ok((
@@ -1942,18 +1634,7 @@ fn warning_units(storage: &Storage) -> Result<Vec<WarningUnit>> {
     let start = Instant::now();
     if storage.count_rows("ui_warning_units")? > 0 {
         let mut stmt = storage.connection().prepare(
-            r#"
-            SELECT current_path,
-                   current_distinct_tests,
-                   current_mutant_verified_tests,
-                   last_test_exposure_at,
-                   last_mutant_run_at,
-                   changes_after_test_exposure,
-                   semantic_changes_after_mutant_run,
-                   verification_stale_seconds,
-                   reopened_count
-            FROM ui_warning_units
-            "#,
+            include_str!("../../sql/ui/runtime/warning_units.sql"),
         )?;
         let rows = stmt.query_map([], |row| {
             Ok(WarningUnit {
@@ -1973,100 +1654,7 @@ fn warning_units(storage: &Storage) -> Result<Vec<WarningUnit>> {
         return Ok(units);
     }
     let mut stmt = storage.connection().prepare(
-        r#"
-        WITH latest_events AS (
-          SELECT unit_id, path
-          FROM (
-            SELECT unit_id, path,
-                   ROW_NUMBER() OVER (
-                     PARTITION BY unit_id
-                     ORDER BY timestamp DESC, id DESC
-                   ) AS rank
-            FROM events
-          )
-          WHERE rank = 1
-        ),
-        current_units AS (
-          SELECT u.id,
-                 COALESCE(le.path, u.original_path) AS current_path,
-                 u.current_distinct_tests,
-                 u.current_mutant_verified_tests,
-                 u.last_test_exposure_at
-          FROM logical_units u
-          LEFT JOIN latest_events le ON le.unit_id = u.id
-        ),
-        db_clock AS (
-          SELECT COALESCE(MAX(timestamp), 0) AS observed_at
-          FROM (
-            SELECT timestamp FROM metadata
-            UNION ALL SELECT timestamp FROM events
-            UNION ALL SELECT timestamp FROM quality_events
-            UNION ALL SELECT timestamp FROM crash_events
-            UNION ALL SELECT timestamp FROM test_exposure_events
-          )
-        ),
-        mutant_runs AS (
-          SELECT unit_id, MAX(timestamp) AS last_mutant_run_at
-          FROM test_exposure_events
-          WHERE is_mutation_verified = 1 OR is_mutation_killed = 1
-          GROUP BY unit_id
-        ),
-        event_counts AS (
-          SELECT cu.id,
-                 SUM(CASE
-                   WHEN cu.last_test_exposure_at > 0
-                    AND e.semantic_change = 1
-                    AND e.event_type IN ('FIX', 'CHANGE')
-                    AND e.timestamp > cu.last_test_exposure_at
-                   THEN 1 ELSE 0
-                 END) AS changes_after_test_exposure,
-                 SUM(CASE
-                   WHEN COALESCE(m.last_mutant_run_at, 0) > 0
-                    AND e.semantic_change = 1
-                    AND e.event_type IN ('FIX', 'CHANGE')
-                    AND e.timestamp > m.last_mutant_run_at
-                   THEN 1 ELSE 0
-                 END) AS semantic_changes_after_mutant_run
-          FROM current_units cu
-          LEFT JOIN mutant_runs m ON m.unit_id = cu.id
-          LEFT JOIN events e ON e.unit_id = cu.id
-          GROUP BY cu.id
-        ),
-        reopened AS (
-          SELECT c.unit_id, COUNT(DISTINCT c.id) AS reopened_count
-          FROM crash_events c
-          WHERE EXISTS (
-            SELECT 1
-            FROM events fix
-            WHERE fix.unit_id = c.unit_id
-              AND fix.event_type = 'FIX'
-              AND fix.semantic_change = 1
-              AND fix.path = c.path
-              AND c.line BETWEEN fix.start_line AND fix.end_line
-              AND c.timestamp > fix.timestamp
-          )
-          GROUP BY c.unit_id
-        )
-        SELECT cu.current_path,
-               cu.current_distinct_tests,
-               cu.current_mutant_verified_tests,
-               cu.last_test_exposure_at,
-               COALESCE(m.last_mutant_run_at, 0) AS last_mutant_run_at,
-               COALESCE(ec.changes_after_test_exposure, 0) AS changes_after_test_exposure,
-               COALESCE(ec.semantic_changes_after_mutant_run, 0) AS semantic_changes_after_mutant_run,
-               CASE
-                 WHEN COALESCE(m.last_mutant_run_at, 0) > 0
-                  AND clock.observed_at > m.last_mutant_run_at
-                 THEN clock.observed_at - m.last_mutant_run_at
-                 ELSE 0
-               END AS verification_stale_seconds,
-               COALESCE(r.reopened_count, 0) AS reopened_count
-        FROM current_units cu
-        LEFT JOIN mutant_runs m ON m.unit_id = cu.id
-        LEFT JOIN event_counts ec ON ec.id = cu.id
-        LEFT JOIN reopened r ON r.unit_id = cu.id
-        CROSS JOIN db_clock clock
-        "#,
+        include_str!("../../sql/ui/runtime/warning_units_2.sql"),
     )?;
     let rows = stmt.query_map([], |row| {
         Ok(WarningUnit {
@@ -2292,10 +1880,7 @@ fn unit_hotspots(
 
 fn unit_test_profiles(storage: &Storage) -> Result<HashMap<String, UnitTestProfile>> {
     let mut stmt = storage.connection().prepare(
-        r#"
-        SELECT id, current_line_cov, current_integration_cov, is_hard_gated
-        FROM logical_units
-        "#,
+        include_str!("../../sql/ui/runtime/unit_test_profiles.sql"),
     )?;
     let rows = stmt.query_map([], |row| {
         Ok((
@@ -2329,13 +1914,7 @@ fn top_architecture_risks(
     scope: &CoverageScope,
 ) -> Result<Vec<UiArchitectureRisk>> {
     let mut stmt = storage.connection().prepare(
-        r#"
-        SELECT path, start_line, rule_id, level, message, properties_json
-        FROM current_sarif_findings
-        WHERE lower(tool_name) = 'espalier'
-           OR lower(run_format) = 'espalier.manifest.sarif.v1'
-           OR lower(source) LIKE '%espalier%'
-        "#,
+        include_str!("../../sql/ui/runtime/top_architecture_risks.sql"),
     )?;
     let rows = stmt.query_map([], |row| {
         Ok((
@@ -2438,21 +2017,7 @@ fn top_complexity_functions(
     scope: &CoverageScope,
 ) -> Result<Vec<UiComplexityFunction>> {
     let mut stmt = storage.connection().prepare(
-        r#"
-        WITH latest_espalier AS (
-          SELECT commit_hash
-          FROM current_sarif_findings
-          WHERE rule_id = 'espalier.function'
-             OR (LOWER(tool_name) = 'espalier' AND rule_id LIKE '%.function')
-          ORDER BY timestamp DESC, id DESC
-          LIMIT 1
-        )
-        SELECT path, start_line, properties_json, message
-        FROM current_sarif_findings
-        WHERE (rule_id = 'espalier.function'
-           OR (LOWER(tool_name) = 'espalier' AND rule_id LIKE '%.function'))
-          AND commit_hash = (SELECT commit_hash FROM latest_espalier)
-        "#,
+        include_str!("../../sql/ui/runtime/top_complexity_functions.sql"),
     )?;
     let rows = stmt.query_map([], |row| {
         Ok((
@@ -2656,31 +2221,7 @@ fn unit_signal_counts(storage: &Storage) -> Result<HashMap<String, UnitSignalCou
     let mut counts = HashMap::<String, UnitSignalCounts>::new();
     {
         let mut stmt = storage.connection().prepare(
-            r#"
-            SELECT unit_id,
-                   SUM(CASE WHEN NOT (
-                     lower(category) = 'lint'
-                     OR lower(source) LIKE '%lint%'
-                     OR lower(tool_name) IN ('rubocop', 'clippy', 'zig ast check')
-                     OR lower(rule_id) LIKE 'lint/%'
-                     OR lower(rule_id) LIKE 'security/%'
-                     OR lower(rule_id) LIKE 'clippy::%'
-                     OR lower(rule_id) LIKE 'zig.ast-check%'
-                   ) THEN 1 ELSE 0 END) AS sarif_findings,
-                   SUM(CASE WHEN (
-                     lower(category) = 'lint'
-                     OR lower(source) LIKE '%lint%'
-                     OR lower(tool_name) IN ('rubocop', 'clippy', 'zig ast check')
-                     OR lower(rule_id) LIKE 'lint/%'
-                     OR lower(rule_id) LIKE 'security/%'
-                     OR lower(rule_id) LIKE 'clippy::%'
-                     OR lower(rule_id) LIKE 'zig.ast-check%'
-                   ) THEN 1 ELSE 0 END) AS lint_findings,
-                   SUM(CASE WHEN is_dark_arm = 1 THEN 1 ELSE 0 END) AS dark_arms
-            FROM current_sarif_findings
-            WHERE unit_id IS NOT NULL
-            GROUP BY unit_id
-            "#,
+            include_str!("../../sql/ui/runtime/unit_signal_counts.sql"),
         )?;
         let rows = stmt.query_map([], |row| {
             Ok((
@@ -2700,12 +2241,7 @@ fn unit_signal_counts(storage: &Storage) -> Result<HashMap<String, UnitSignalCou
     }
     {
         let mut stmt = storage.connection().prepare(
-            r#"
-            SELECT unit_id, COUNT(*) AS hazards
-            FROM unit_hazards
-            WHERE is_active = 1
-            GROUP BY unit_id
-            "#,
+            include_str!("../../sql/ui/runtime/unit_signal_counts_2.sql"),
         )?;
         let rows = stmt.query_map([], |row| {
             Ok((row.get::<_, String>(0)?, row.get::<_, i64>(1)?))
@@ -2764,74 +2300,7 @@ fn dashboard_line_counts(
     let mut counts = DashboardLineCounts::default();
     let exposure_start = Instant::now();
     let mut stmt = storage.connection().prepare(
-        r#"
-        WITH latest_source_lines AS (
-          SELECT path, line, hits
-          FROM (
-            SELECT path, line, source, hits,
-                   ROW_NUMBER() OVER (
-                     PARTITION BY path, line, source
-                     ORDER BY timestamp DESC, id DESC
-                   ) AS rank
-            FROM coverage_line_events
-          )
-          WHERE rank = 1
-        ),
-        latest_lines AS (
-          SELECT path, line, MAX(hits) AS hits
-          FROM latest_source_lines
-          GROUP BY path, line
-        ),
-        ranked_exposure AS (
-          SELECT path, line, branch_id, test_id, test_type, is_verified,
-                 is_mutation_verified, is_mutation_killed, mutation_kind,
-                 ROW_NUMBER() OVER (
-                   PARTITION BY path, line, COALESCE(branch_id, ''), test_id, test_type
-                   ORDER BY timestamp DESC, id DESC
-                 ) AS rank
-          FROM test_exposure_events
-          WHERE line IS NOT NULL
-        ),
-        latest_exposure AS (
-          SELECT *
-          FROM ranked_exposure
-          WHERE rank = 1
-        )
-        SELECT path,
-               line,
-               latest_lines.hits,
-               COUNT(DISTINCT CASE WHEN is_verified = 1 THEN test_type END) AS verified_test_types,
-               MAX(CASE WHEN is_verified = 1 AND is_mutation_verified = 1 THEN 1 ELSE 0 END) AS mutant_verified,
-               MAX(CASE WHEN is_verified = 1 AND is_mutation_killed = 1 THEN 1 ELSE 0 END) AS mutant_killed,
-               MAX(CASE
-                 WHEN is_verified = 1
-                  AND is_mutation_verified = 1
-                  AND lower(COALESCE(mutation_kind, '')) = 'stochastic'
-                 THEN 1 ELSE 0
-               END) AS stochastic_mutant_verified,
-               MAX(CASE
-                 WHEN is_verified = 1
-                  AND is_mutation_killed = 1
-                  AND lower(COALESCE(mutation_kind, '')) = 'stochastic'
-                 THEN 1 ELSE 0
-               END) AS stochastic_mutant_killed,
-               MAX(CASE
-                 WHEN is_verified = 1
-                  AND is_mutation_killed = 1
-                  AND lower(COALESCE(mutation_kind, '')) IN ('invariant', 'contract')
-                 THEN 1 ELSE 0
-               END) AS invariant_mutant_killed,
-               MAX(CASE
-                 WHEN is_verified = 1
-                  AND is_mutation_verified = 1
-                  AND lower(COALESCE(mutation_kind, '')) IN ('invariant', 'contract')
-                 THEN 1 ELSE 0
-               END) AS invariant_mutant_verified
-        FROM latest_exposure
-        JOIN latest_lines USING (path, line)
-        WHERE latest_lines.hits > 0
-        GROUP BY path, line
-        "#,
+        include_str!("../../sql/ui/runtime/dashboard_line_counts.sql"),
     )?;
     let rows = stmt.query_map([], |row| {
         Ok((
@@ -2902,27 +2371,7 @@ fn dashboard_coverage_line_counts(
     let start = Instant::now();
     let mut counts = DashboardLineCounts::default();
     let mut stmt = storage.connection().prepare(
-        r#"
-        WITH latest_source_lines AS (
-          SELECT path, line, hits
-          FROM (
-            SELECT path, line, source, hits,
-                   ROW_NUMBER() OVER (
-                     PARTITION BY path, line, source
-                     ORDER BY timestamp DESC, id DESC
-                   ) AS rank
-            FROM coverage_line_events
-          )
-          WHERE rank = 1
-        ),
-        latest_lines AS (
-          SELECT path, line, MAX(hits) AS hits
-          FROM latest_source_lines
-          GROUP BY path, line
-        )
-        SELECT path, hits
-        FROM latest_lines
-        "#,
+        include_str!("../../sql/ui/runtime/dashboard_coverage_line_counts.sql"),
     )?;
     let rows = stmt.query_map([], |row| Ok((row.get::<_, String>(0)?, row.get::<_, u32>(1)?)))?;
     for row in rows {
@@ -2952,113 +2401,7 @@ fn dashboard_hazard_counts(
     let mut evidence_covered = 0;
     let mut verified = 0;
     let mut stmt = storage.connection().prepare(
-        r#"
-        WITH active_hazards AS (
-          SELECT *
-          FROM unit_hazards
-          WHERE is_active = 1
-        ),
-        ranked_exposure AS (
-          SELECT t.unit_id,
-                 t.path,
-                 t.line,
-                 t.test_type,
-                 t.is_verified,
-                 t.is_mutation_killed,
-                 t.mutation_kind,
-                 ROW_NUMBER() OVER (
-                   PARTITION BY t.path, t.line, COALESCE(t.branch_id, ''), t.test_id, t.test_type
-                   ORDER BY t.timestamp DESC, t.id DESC
-                 ) AS rank
-          FROM test_exposure_events t
-          JOIN active_hazards h
-            ON h.unit_id = t.unit_id
-           AND h.path = t.path
-           AND h.line = t.line
-          WHERE t.line IS NOT NULL
-        ),
-        latest_exposure AS (
-          SELECT *
-          FROM ranked_exposure
-          WHERE rank = 1
-        ),
-        latest_source_lines AS (
-          SELECT path, line, source, hits
-          FROM (
-            SELECT path, line, source, hits,
-                   ROW_NUMBER() OVER (
-                     PARTITION BY path, line, source
-                     ORDER BY timestamp DESC, id DESC
-                   ) AS rank
-            FROM coverage_line_events
-          )
-          WHERE rank = 1
-        ),
-        latest_lines AS (
-          SELECT path, line, MAX(hits) AS hits
-          FROM latest_source_lines
-          GROUP BY path, line
-        ),
-        evidence AS (
-          SELECT unit_id,
-                 path,
-                 line,
-                 lower(test_type) AS test_type,
-                 MAX(CASE WHEN is_verified = 1 THEN 1 ELSE 0 END) AS has_evidence,
-                 MAX(CASE
-                   WHEN is_verified = 1
-                    AND is_mutation_killed = 1
-                    AND lower(COALESCE(mutation_kind, '')) IN ('invariant', 'contract')
-                   THEN 1 ELSE 0
-                 END) AS has_invariant_mutation
-          FROM latest_exposure
-          GROUP BY unit_id, path, line, lower(test_type)
-        )
-        SELECT h.path,
-               CASE
-                 WHEN MAX(CASE
-                        WHEN (e.test_type = lower(h.required_evidence)
-                           OR e.test_type LIKE '%' || lower(h.required_evidence) || '%')
-                         AND e.has_evidence = 1
-                        THEN 1 ELSE 0
-                      END) = 1
-                   OR MAX(CASE
-                        WHEN ls.hits > 0
-                         AND (lower(ls.source) = lower(h.required_evidence)
-                           OR lower(ls.source) LIKE '%' || lower(h.required_evidence) || '%')
-                        THEN 1 ELSE 0
-                      END) = 1
-                 THEN 1 ELSE 0
-               END AS evidence_present,
-               CASE
-                 WHEN MAX(CASE WHEN l.hits > 0 THEN 1 ELSE 0 END) = 1
-                   OR MAX(CASE
-                        WHEN (e.test_type = lower(h.required_evidence)
-                           OR e.test_type LIKE '%' || lower(h.required_evidence) || '%')
-                         AND e.has_evidence = 1
-                        THEN 1 ELSE 0
-                      END) = 1
-                   OR MAX(CASE
-                        WHEN ls.hits > 0
-                         AND (lower(ls.source) = lower(h.required_evidence)
-                           OR lower(ls.source) LIKE '%' || lower(h.required_evidence) || '%')
-                        THEN 1 ELSE 0
-                      END) = 1
-                 THEN 1 ELSE 0
-               END AS verified
-        FROM active_hazards h
-        LEFT JOIN evidence e
-          ON e.unit_id = h.unit_id
-         AND e.path = h.path
-         AND e.line = h.line
-        LEFT JOIN latest_lines l
-          ON l.path = h.path
-         AND l.line = h.line
-        LEFT JOIN latest_source_lines ls
-          ON ls.path = h.path
-         AND ls.line = h.line
-        GROUP BY h.id, h.path
-        "#,
+        include_str!("../../sql/ui/runtime/dashboard_hazard_counts.sql"),
     )?;
     let rows = stmt.query_map([], |row| {
         Ok((
@@ -3102,14 +2445,14 @@ pub fn directory_index(files: &[UiFile], directory: &str) -> Vec<UiDirectory> {
         entry.covered_hazards += file.covered_hazards;
         entry.sarif_findings += file.sarif_findings;
         entry.dark_arm_findings += file.dark_arm_findings;
-        entry.partial_lines += partial_line_count(file.covered_lines, file.dark_arm_findings);
+        entry.partial_lines += file_partial_line_count(file);
         entry.distinct_tests += file.distinct_tests;
         entry.mutant_killed_tests += file.mutant_killed_tests;
         entry.tracked_lines += file.tracked_lines;
         entry.covered_lines += file.covered_lines;
         entry.mutant_killed_covered_lines += file.mutant_killed_covered_lines;
         entry.multi_type_covered_lines += file.multi_type_covered_lines;
-        entry.line_coverage_sum += file.line_coverage;
+        entry.line_coverage_sum += file.line_coverage * file.tracked_lines.max(1) as f64;
         entry.mutant_coverage_sum += file.mutant_coverage;
         if file.tracked_lines == 0 {
             entry.fallback_files += 1;
@@ -3119,7 +2462,7 @@ pub fn directory_index(files: &[UiFile], directory: &str) -> Vec<UiDirectory> {
         .map(|(path, builder)| {
             let files = builder.files.max(1) as f64;
             let line_coverage = if builder.tracked_lines > 0 {
-                percent(builder.covered_lines, builder.tracked_lines)
+                builder.line_coverage_sum / builder.tracked_lines as f64
             } else {
                 builder.line_coverage_sum / files
             };
@@ -3191,6 +2534,7 @@ pub fn source_payload_with_overlays(
     let lines = file.contents.lines().map(str::to_string).collect::<Vec<_>>();
     let annotation_start = Instant::now();
     let mut annotations = line_annotations(storage, path, overlays)?;
+    annotate_sarif_freshness(repo, path, &file.contents, &mut annotations);
     profile_log("source.line_annotations", annotation_start);
     let paint_start = Instant::now();
     paint_statement_continuations(&lines, &mut annotations);
@@ -3227,6 +2571,35 @@ pub fn source_payload_with_overlays(
     })
 }
 
+fn annotate_sarif_freshness(
+    repo: &Path,
+    path: &str,
+    viewed_source: &str,
+    annotations: &mut [UiLineAnnotation],
+) {
+    let commits = annotations
+        .iter()
+        .flat_map(|annotation| annotation.findings.iter())
+        .map(|finding| finding.commit.clone())
+        .filter(|commit| !commit.is_empty())
+        .collect::<BTreeSet<_>>();
+    let stale_by_commit = commits
+        .into_iter()
+        .map(|commit| {
+            let stale = read_source(repo, path, Some(&commit))
+                .ok()
+                .is_some_and(|analyzed| analyzed.contents != viewed_source);
+            (commit, stale)
+        })
+        .collect::<HashMap<_, _>>();
+    for finding in annotations
+        .iter_mut()
+        .flat_map(|annotation| annotation.findings.iter_mut())
+    {
+        finding.stale = stale_by_commit.get(&finding.commit).copied().unwrap_or(false);
+    }
+}
+
 impl UiOverlays {
     pub fn load(paths: &[PathBuf]) -> Result<Self> {
         let mut overlays = Self::default();
@@ -3241,106 +2614,6 @@ impl UiOverlays {
     }
 }
 
-async fn index_handler(
-    State(state): State<UiServerState>,
-    Query(query): Query<IndexQuery>,
-) -> Response<Body> {
-    let storage = match Storage::open_existing(state.db.as_ref()) {
-        Ok(storage) => storage,
-        Err(error) => return error_response(StatusCode::INTERNAL_SERVER_ERROR, error),
-    };
-    let scope = CoverageScope::from_repo(state.repo.as_ref());
-    let commit = query
-        .commit
-        .as_deref()
-        .filter(|value| !value.is_empty() && *value != "current");
-    let filter = query.q.as_deref().unwrap_or_default();
-    let sort = query
-        .sort
-        .as_deref()
-        .map(CoverageSort::parse)
-        .unwrap_or(CoverageSort::Path);
-    match render_index_page(
-        &storage,
-        state.repo.as_ref(),
-        state.overlays.as_ref(),
-        &scope,
-        query.path.as_deref(),
-        query.dir.as_deref(),
-        commit,
-        filter,
-        sort,
-        query.queue.as_deref(),
-        query.page.unwrap_or(1),
-    ) {
-        Ok(body) => Html(body).into_response(),
-        Err(error) => error_response(StatusCode::INTERNAL_SERVER_ERROR, error),
-    }
-}
-
-async fn api_files_handler(State(state): State<UiServerState>) -> Response<Body> {
-    let storage = match Storage::open_existing(state.db.as_ref()) {
-        Ok(storage) => storage,
-        Err(error) => return error_json(StatusCode::INTERNAL_SERVER_ERROR, error),
-    };
-    let scope = CoverageScope::from_repo(state.repo.as_ref());
-    match file_index_with_scope(&storage, &scope, Some(state.repo.as_ref())) {
-        Ok(files) => Json(files).into_response(),
-        Err(error) => error_json(StatusCode::INTERNAL_SERVER_ERROR, error),
-    }
-}
-
-async fn api_dashboard_handler(
-    State(state): State<UiServerState>,
-    Query(query): Query<DirectoryQuery>,
-) -> Response<Body> {
-    let storage = match Storage::open_existing(state.db.as_ref()) {
-        Ok(storage) => storage,
-        Err(error) => return error_json(StatusCode::INTERNAL_SERVER_ERROR, error),
-    };
-    let scope = CoverageScope::from_repo(state.repo.as_ref());
-    let directory = query.dir.as_deref().unwrap_or_default();
-    match dashboard_summary_for_directory_with_scope_and_repo(
-        &storage,
-        directory,
-        &scope,
-        Some(state.repo.as_ref()),
-    ) {
-        Ok(dashboard) => Json(dashboard).into_response(),
-        Err(error) => error_json(StatusCode::INTERNAL_SERVER_ERROR, error),
-    }
-}
-
-async fn api_source_handler(
-    State(state): State<UiServerState>,
-    Query(query): Query<SourceQuery>,
-) -> Response<Body> {
-    let Some(source_path) = query.path.as_deref() else {
-        return (
-            StatusCode::BAD_REQUEST,
-            Json(serde_json::json!({ "error": "missing path" })),
-        )
-            .into_response();
-    };
-    let storage = match Storage::open_existing(state.db.as_ref()) {
-        Ok(storage) => storage,
-        Err(error) => return error_json(StatusCode::INTERNAL_SERVER_ERROR, error),
-    };
-    let commit = query
-        .commit
-        .as_deref()
-        .filter(|value| !value.is_empty() && *value != "current");
-    match source_payload_with_overlays(
-        &storage,
-        state.repo.as_ref(),
-        source_path,
-        commit,
-        state.overlays.as_ref(),
-    ) {
-        Ok(payload) => Json(payload).into_response(),
-        Err(error) => error_json(StatusCode::NOT_FOUND, error),
-    }
-}
 
 #[derive(Debug, serde::Deserialize)]
 struct DefinitionQuery {
@@ -3355,63 +2628,6 @@ struct DefinitionResult {
     line: u32,
 }
 
-async fn api_definition_handler(
-    State(state): State<UiServerState>,
-    Query(query): Query<DefinitionQuery>,
-) -> Response<Body> {
-    let storage = match Storage::open_existing(state.db.as_ref()) {
-        Ok(storage) => storage,
-        Err(error) => return error_json(StatusCode::INTERNAL_SERVER_ERROR, error),
-    };
-    let commit = query.commit.as_deref().filter(|value| !value.is_empty() && *value != "current");
-    match storage.find_definitions(&query.name, commit, query.path.as_deref()) {
-        Ok(definitions) => {
-            let results: Vec<DefinitionResult> = definitions
-                .into_iter()
-                .map(|(path, line)| DefinitionResult { path, line })
-                .collect();
-            Json(results).into_response()
-        }
-        Err(error) => error_json(StatusCode::INTERNAL_SERVER_ERROR, error),
-    }
-}
-
-async fn asset_handler(AxumPath(path): AxumPath<String>) -> Response<Body> {
-    let path = path.trim_start_matches('/');
-    let embedded_path = embedded_asset_path(path);
-    let Some(asset) = EmbeddedUi::get(&embedded_path) else {
-        return StatusCode::NOT_FOUND.into_response();
-    };
-    Response::builder()
-        .status(StatusCode::OK)
-        .header(header::CONTENT_TYPE, asset_content_type(&embedded_path))
-        .header(header::CACHE_CONTROL, "no-store")
-        .body(Body::from(asset.data.into_owned()))
-        .unwrap_or_else(|_| StatusCode::INTERNAL_SERVER_ERROR.into_response())
-}
-
-fn embedded_asset_path(path: &str) -> String {
-    format!("assets/{}", path.trim_start_matches('/'))
-}
-
-async fn favicon_handler() -> Response<Body> {
-    Response::builder()
-        .status(StatusCode::NO_CONTENT)
-        .header(header::CACHE_CONTROL, "public, max-age=86400")
-        .body(Body::empty())
-        .unwrap_or_else(|_| StatusCode::NO_CONTENT.into_response())
-}
-
-fn asset_content_type(path: &str) -> &'static str {
-    match Path::new(path).extension().and_then(|extension| extension.to_str()) {
-        Some("css") => "text/css; charset=utf-8",
-        Some("js") => "text/javascript; charset=utf-8",
-        Some("html") => "text/html; charset=utf-8",
-        Some("json") => "application/json",
-        Some("svg") => "image/svg+xml",
-        _ => "application/octet-stream",
-    }
-}
 
 fn error_response(status: StatusCode, error: impl std::fmt::Display) -> Response<Body> {
     (status, Html(format!("<p>{}</p>", html_escape(&error.to_string())))).into_response()
@@ -3450,41 +2666,7 @@ fn safe_join(repo: &Path, path: &str) -> Result<PathBuf> {
 
 fn file_versions(storage: &Storage, path: &str) -> Result<Vec<UiVersion>> {
     let mut stmt = storage.connection().prepare(
-        r#"
-        WITH latest_events AS (
-          SELECT e.unit_id, e.path
-          FROM events e
-          WHERE e.id = (
-            SELECT latest.id
-            FROM events latest
-            WHERE latest.unit_id = e.unit_id
-            ORDER BY latest.timestamp DESC, latest.id DESC
-            LIMIT 1
-          )
-        ),
-        current_units AS (
-          SELECT u.id
-          FROM logical_units u
-          LEFT JOIN latest_events le ON le.unit_id = u.id
-          WHERE COALESCE(le.path, u.original_path) = ?1
-        ),
-        union_query AS (
-          SELECT e.commit_hash, e.timestamp, e.event_type, e.path, e.name,
-                 e.start_line, e.end_line, e.semantic_change, e.id
-          FROM current_units cu
-          CROSS JOIN events e ON e.unit_id = cu.id
-          UNION
-          SELECT e.commit_hash, e.timestamp, e.event_type, e.path, e.name,
-                 e.start_line, e.end_line, e.semantic_change, e.id
-          FROM events e
-          WHERE e.path = ?1
-        )
-        SELECT commit_hash, timestamp, event_type, path, name,
-               start_line, end_line, semantic_change
-        FROM union_query
-        ORDER BY timestamp DESC, id DESC
-        LIMIT 200
-        "#,
+        include_str!("../../sql/ui/runtime/file_versions.sql"),
     )?;
     let rows = stmt.query_map(params![path], |row| {
         Ok(UiVersion {
@@ -3550,27 +2732,7 @@ fn empty_source_symbol(
 
 fn persisted_source_symbols(storage: &Storage, path: &str) -> Result<Vec<UiSourceSymbol>> {
     let mut stmt = storage.connection().prepare(
-        r#"
-        WITH latest_events AS (
-          SELECT e.*
-          FROM events e
-          WHERE e.id = (
-            SELECT latest.id
-            FROM events latest
-            WHERE latest.unit_id = e.unit_id
-            ORDER BY latest.timestamp DESC, latest.id DESC
-            LIMIT 1
-          )
-        )
-        SELECT u.type,
-               u.name,
-               COALESCE(le.start_line, 1) AS start_line,
-               COALESCE(le.end_line, le.start_line, 1) AS end_line
-        FROM logical_units u
-        LEFT JOIN latest_events le ON le.unit_id = u.id
-        WHERE COALESCE(le.path, u.original_path) = ?1
-        ORDER BY start_line, end_line, u.type, u.name
-        "#,
+        include_str!("../../sql/ui/runtime/persisted_source_symbols.sql"),
     )?;
     let rows = stmt.query_map(params![path], |row| {
         Ok(empty_source_symbol(
@@ -4265,27 +3427,7 @@ fn apply_unit_quality(
     paint_line_coverage: bool,
 ) -> Result<()> {
     let mut stmt = storage.connection().prepare(
-        r#"
-        WITH latest_events AS (
-          SELECT e.*
-          FROM events e
-          WHERE e.id = (
-            SELECT latest.id
-            FROM events latest
-            WHERE latest.unit_id = e.unit_id
-            ORDER BY latest.timestamp DESC, latest.id DESC
-            LIMIT 1
-          )
-        )
-        SELECT COALESCE(le.start_line, 1),
-               COALESCE(le.end_line, le.start_line, 1),
-               u.current_line_cov,
-               u.current_mutant_cov,
-               u.current_test_types
-        FROM logical_units u
-        LEFT JOIN latest_events le ON le.unit_id = u.id
-        WHERE COALESCE(le.path, u.original_path) = ?1
-        "#,
+        include_str!("../../sql/ui/runtime/apply_unit_quality.sql"),
     )?;
     let rows = stmt.query_map(params![path], |row| {
         Ok((
@@ -4322,26 +3464,7 @@ fn apply_line_coverage(
     lines: &mut BTreeMap<u32, AnnotationBuilder>,
 ) -> Result<bool> {
     let mut stmt = storage.connection().prepare(
-        r#"
-        WITH latest_source AS (
-          SELECT line, source, hits, is_partial,
-                 ROW_NUMBER() OVER (
-                   PARTITION BY line, source
-                   ORDER BY timestamp DESC, id DESC
-                 ) AS rank
-          FROM coverage_line_events
-          WHERE path = ?1
-        ),
-        latest AS (
-          SELECT line, MAX(hits) AS hits, MAX(is_partial) AS is_partial
-          FROM latest_source
-          WHERE rank = 1
-          GROUP BY line
-        )
-        SELECT line, hits, COALESCE(is_partial, 0)
-        FROM latest
-        ORDER BY line
-        "#,
+        include_str!("../../sql/ui/runtime/apply_line_coverage.sql"),
     )?;
     let rows = stmt.query_map(params![path], |row| {
         Ok((row.get::<_, u32>(0)?, row.get::<_, u32>(1)?, row.get::<_, i64>(2)?))
@@ -4370,39 +3493,7 @@ fn apply_test_exposure(
     paint_line_coverage: bool,
 ) -> Result<()> {
     let mut stmt = storage.connection().prepare(
-        r#"
-        WITH ranked_exposure AS (
-          SELECT path, line, branch_id, test_id, test_type, is_verified,
-                 is_mutation_verified, is_mutation_killed, mutation_kind,
-                 ROW_NUMBER() OVER (
-                   PARTITION BY path, line, COALESCE(branch_id, ''), test_id, test_type
-                   ORDER BY timestamp DESC, id DESC
-                 ) AS rank
-          FROM test_exposure_events
-          WHERE path = ?1 AND line IS NOT NULL
-        ),
-        latest_exposure AS (
-          SELECT *
-          FROM ranked_exposure
-          WHERE rank = 1
-        )
-        SELECT line, test_type, COUNT(DISTINCT test_id),
-               COUNT(DISTINCT CASE WHEN is_mutation_verified = 1 THEN test_id END),
-               COUNT(DISTINCT CASE WHEN is_mutation_killed = 1 THEN test_id END),
-               COUNT(DISTINCT CASE
-                 WHEN is_mutation_verified = 1
-                  AND lower(COALESCE(mutation_kind, '')) = 'stochastic'
-                 THEN test_id
-               END),
-               COUNT(DISTINCT CASE
-                 WHEN is_mutation_verified = 1
-                  AND lower(COALESCE(mutation_kind, '')) IN ('invariant', 'contract')
-                 THEN test_id
-               END)
-        FROM latest_exposure
-        WHERE is_verified = 1
-        GROUP BY line, test_type
-        "#,
+        include_str!("../../sql/ui/runtime/apply_test_exposure.sql"),
     )?;
     let rows = stmt.query_map(params![path], |row| {
         Ok((
@@ -4447,101 +3538,7 @@ fn apply_hazards(
     lines: &mut BTreeMap<u32, AnnotationBuilder>,
 ) -> Result<()> {
     let mut stmt = storage.connection().prepare(
-        r#"
-        WITH ranked_exposure AS (
-          SELECT unit_id, path, line, test_type, is_verified, is_mutation_killed, mutation_kind,
-                 ROW_NUMBER() OVER (
-                   PARTITION BY path, line, COALESCE(branch_id, ''), test_id, test_type
-                   ORDER BY timestamp DESC, id DESC
-                 ) AS rank
-          FROM test_exposure_events
-          WHERE path = ?1 AND line IS NOT NULL
-        ),
-        latest_exposure AS (
-          SELECT *
-          FROM ranked_exposure
-          WHERE rank = 1
-        ),
-        latest_source_lines AS (
-          SELECT path, line, source, hits
-          FROM (
-            SELECT path, line, source, hits,
-                   ROW_NUMBER() OVER (
-                     PARTITION BY path, line, source
-                     ORDER BY timestamp DESC, id DESC
-                   ) AS rank
-            FROM coverage_line_events
-            WHERE path = ?1
-          )
-          WHERE rank = 1
-        ),
-        latest_lines AS (
-          SELECT path, line, MAX(hits) AS hits
-          FROM latest_source_lines
-          GROUP BY path, line
-        ),
-        evidence AS (
-          SELECT unit_id,
-                 path,
-                 line,
-                 lower(test_type) AS test_type,
-                 MAX(CASE WHEN is_verified = 1 THEN 1 ELSE 0 END) AS has_evidence,
-                 MAX(CASE
-                   WHEN is_verified = 1
-                    AND is_mutation_killed = 1
-                    AND lower(COALESCE(mutation_kind, '')) IN ('invariant', 'contract')
-                   THEN 1 ELSE 0
-                 END) AS has_invariant_mutation
-          FROM latest_exposure
-          GROUP BY unit_id, path, line, lower(test_type)
-        )
-        SELECT h.line, h.hazard_type, h.required_evidence, h.source,
-               CASE
-                 WHEN MAX(CASE
-                        WHEN (e.test_type = lower(h.required_evidence)
-                           OR e.test_type LIKE '%' || lower(h.required_evidence) || '%')
-                         AND e.has_evidence = 1
-                        THEN 1 ELSE 0
-                      END) = 1
-                   OR MAX(CASE
-                        WHEN ls.hits > 0
-                         AND (lower(ls.source) = lower(h.required_evidence)
-                           OR lower(ls.source) LIKE '%' || lower(h.required_evidence) || '%')
-                        THEN 1 ELSE 0
-                      END) = 1
-                 THEN 1 ELSE 0
-               END AS evidence_present,
-               CASE
-                 WHEN MAX(CASE WHEN l.hits > 0 THEN 1 ELSE 0 END) = 1
-                   OR MAX(CASE
-                        WHEN (e.test_type = lower(h.required_evidence)
-                           OR e.test_type LIKE '%' || lower(h.required_evidence) || '%')
-                         AND e.has_evidence = 1
-                        THEN 1 ELSE 0
-                      END) = 1
-                   OR MAX(CASE
-                        WHEN ls.hits > 0
-                         AND (lower(ls.source) = lower(h.required_evidence)
-                           OR lower(ls.source) LIKE '%' || lower(h.required_evidence) || '%')
-                        THEN 1 ELSE 0
-                      END) = 1
-                 THEN 1 ELSE 0
-               END AS verified
-        FROM unit_hazards h
-        LEFT JOIN evidence e
-          ON e.unit_id = h.unit_id
-         AND e.path = h.path
-         AND e.line = h.line
-        LEFT JOIN latest_lines l
-          ON l.path = h.path
-         AND l.line = h.line
-        LEFT JOIN latest_source_lines ls
-          ON ls.path = h.path
-         AND ls.line = h.line
-        WHERE h.path = ?1 AND h.is_active = 1
-        GROUP BY h.id, h.line, h.hazard_type, h.required_evidence, h.source
-        ORDER BY h.line, h.hazard_type
-        "#,
+        include_str!("../../sql/ui/runtime/apply_hazards.sql"),
     )?;
     let rows = stmt.query_map(params![path], |row| {
         Ok((
@@ -4596,147 +3593,7 @@ fn apply_semantic_churn(
     discount_old_fixes_after_quality_jumps: bool,
 ) -> Result<()> {
     let mut stmt = storage.connection().prepare(
-        r#"
-        WITH fix_commit_raw AS (
-          SELECT commit_hash,
-                 COUNT(DISTINCT CASE
-                   WHEN NOT (
-                     path LIKE 'spec/%'
-                     OR path LIKE 'test/%'
-                     OR path LIKE 'tests/%'
-                     OR path LIKE 'transpile-tests/%'
-                     OR path LIKE 'tools/fuzz/%'
-                     OR path LIKE '%/spec/%'
-                     OR path LIKE '%/test/%'
-                     OR path LIKE '%_spec.%'
-                     OR path LIKE '%_test.%'
-                   )
-                   THEN unit_id END) AS code_units,
-                 COUNT(DISTINCT CASE
-                   WHEN NOT (
-                     path LIKE 'spec/%'
-                     OR path LIKE 'test/%'
-                     OR path LIKE 'tests/%'
-                     OR path LIKE 'transpile-tests/%'
-                     OR path LIKE 'tools/fuzz/%'
-                     OR path LIKE '%/spec/%'
-                     OR path LIKE '%/test/%'
-                     OR path LIKE '%_spec.%'
-                     OR path LIKE '%_test.%'
-                   )
-                   THEN path END) AS code_files,
-                 COALESCE(SUM(CASE
-                   WHEN NOT (
-                     path LIKE 'spec/%'
-                     OR path LIKE 'test/%'
-                     OR path LIKE 'tests/%'
-                     OR path LIKE 'transpile-tests/%'
-                     OR path LIKE 'tools/fuzz/%'
-                     OR path LIKE '%/spec/%'
-                     OR path LIKE '%/test/%'
-                     OR path LIKE '%_spec.%'
-                     OR path LIKE '%_test.%'
-                   )
-                   THEN ABS(lines_added) + ABS(lines_removed) ELSE 0 END), 0) AS code_lines
-          FROM events
-          WHERE event_type = 'FIX'
-            AND semantic_change = 1
-          GROUP BY commit_hash
-        ),
-        fix_commit_profiles AS (
-          SELECT commit_hash,
-                 CASE
-                   WHEN code_units BETWEEN 1 AND 3
-                    AND code_files BETWEEN 1 AND 3
-                    AND code_lines <= 80
-                   THEN 1.0
-                   WHEN code_units BETWEEN 1 AND 8
-                    AND code_files BETWEEN 1 AND 5
-                    AND code_lines <= 200
-                   THEN 0.65
-                   WHEN code_units BETWEEN 1 AND 20
-                    AND code_files BETWEEN 1 AND 10
-                    AND code_lines <= 500
-                   THEN 0.30
-                   ELSE 0.10
-                 END AS target_factor
-          FROM fix_commit_raw
-        ),
-        latest_events AS (
-          SELECT e.*
-          FROM events e
-          WHERE e.id = (
-            SELECT latest.id
-            FROM events latest
-            WHERE latest.unit_id = e.unit_id
-            ORDER BY latest.timestamp DESC, latest.id DESC
-            LIMIT 1
-          )
-        )
-        SELECT COALESCE(le.start_line, 1) AS current_start,
-               COALESCE(le.end_line, le.start_line, 1) AS current_end,
-               e.path,
-               e.start_line,
-               e.end_line,
-               e.event_type,
-               e.commit_hash,
-               e.timestamp,
-               e.name,
-               COALESCE(m.message, '') AS message,
-               CASE
-                 WHEN ?2 = 1 THEN COALESCE((
-                   SELECT MIN(CASE
-                     WHEN q.metric_type = 'MUTANT_COV'
-                      AND q.old_value IS NOT NULL
-                      AND q.new_value >= 70.0
-                      AND q.new_value - q.old_value >= 25.0
-                     THEN 0.15
-                     WHEN q.metric_type IN ('LINE_COV', 'INTEGRATION_COV')
-                      AND q.old_value IS NOT NULL
-                      AND q.new_value >= 80.0
-                      AND q.new_value - q.old_value >= 25.0
-                     THEN 0.35
-                     WHEN q.metric_type IN ('LINE_COV', 'INTEGRATION_COV', 'MUTANT_COV')
-                      AND q.old_value IS NOT NULL
-                      AND q.new_value - q.old_value >= 15.0
-                     THEN 0.60
-                     ELSE 1.0
-                   END)
-                   FROM quality_events q
-                   WHERE q.unit_id = e.unit_id
-                     AND q.timestamp > e.timestamp
-                     AND q.metric_type IN ('LINE_COV', 'INTEGRATION_COV', 'MUTANT_COV')
-                 ), 1.0)
-                 ELSE 1.0
-               END AS protection_factor,
-               CASE WHEN e.event_type = 'FIX'
-                    THEN COALESCE(fp.target_factor, 0.10)
-                    ELSE 1.0
-               END AS target_factor,
-               CASE
-                 WHEN e.event_type = 'FIX'
-                  AND COALESCE(fp.target_factor, 0.10) >= 0.65
-                  AND EXISTS (
-                    SELECT 1
-                    FROM test_exposure_events t
-                    WHERE t.unit_id = e.unit_id
-                      AND t.timestamp > e.timestamp
-                      AND t.is_mutation_killed = 1
-                    LIMIT 1
-                  )
-                 THEN 0.25
-                 ELSE 1.0
-               END AS mutation_hardening_factor
-        FROM logical_units u
-        LEFT JOIN latest_events le ON le.unit_id = u.id
-        CROSS JOIN events e ON e.unit_id = u.id
-        LEFT JOIN metadata m ON m.commit_hash = e.commit_hash
-        LEFT JOIN fix_commit_profiles fp ON fp.commit_hash = e.commit_hash
-        WHERE COALESCE(le.path, u.original_path) = ?1
-          AND e.semantic_change = 1
-          AND e.event_type IN ('CHANGE', 'FIX')
-        ORDER BY e.timestamp DESC, e.id DESC
-        "#,
+        include_str!("../../sql/ui/runtime/apply_semantic_churn.sql"),
     )?;
     let quality_discount_enabled = if discount_old_fixes_after_quality_jumps {
         1
@@ -4827,33 +3684,7 @@ fn apply_crash_history(
     last_timestamp: i64,
 ) -> Result<()> {
     let mut stmt = storage.connection().prepare(
-        r#"
-        WITH latest_events AS (
-          SELECT e.*
-          FROM events e
-          WHERE e.id = (
-            SELECT latest.id
-            FROM events latest
-            WHERE latest.unit_id = e.unit_id
-            ORDER BY latest.timestamp DESC, latest.id DESC
-            LIMIT 1
-          )
-        )
-        SELECT COALESCE(le.start_line, 1) AS current_start,
-               COALESCE(le.end_line, le.start_line, 1) AS current_end,
-               c.path,
-               c.line,
-               c.commit_hash,
-               c.timestamp,
-               c.error_class,
-               c.provider_id,
-               c.function
-        FROM logical_units u
-        LEFT JOIN latest_events le ON le.unit_id = u.id
-        JOIN crash_events c ON c.unit_id = u.id
-        WHERE COALESCE(le.path, u.original_path) = ?1
-        ORDER BY c.timestamp DESC, c.id DESC
-        "#,
+        include_str!("../../sql/ui/runtime/apply_crash_history.sql"),
     )?;
     let rows = stmt.query_map(params![path], |row| {
         Ok((
@@ -4914,30 +3745,14 @@ fn apply_crash_history(
 
 fn decay_bounds(storage: &Storage) -> Result<(i64, i64)> {
     let mut stmt = storage.connection().prepare(
-        r#"
-        SELECT COALESCE(MIN(timestamp), 0), COALESCE(MAX(timestamp), 0)
-        FROM (
-          SELECT timestamp
-          FROM events
-          WHERE semantic_change = 1
-            AND event_type IN ('CHANGE', 'FIX')
-          UNION ALL
-          SELECT timestamp
-          FROM crash_events
-        )
-        "#,
+        include_str!("../../sql/ui/runtime/decay_bounds.sql"),
     )?;
     Ok(stmt.query_row([], |row| Ok((row.get(0)?, row.get(1)?)))?)
 }
 
 fn fix_decay_bounds(storage: &Storage) -> Result<Option<(i64, i64)>> {
     let mut stmt = storage.connection().prepare(
-        r#"
-        SELECT MIN(timestamp), MAX(timestamp)
-        FROM events
-        WHERE semantic_change = 1
-          AND event_type = 'FIX'
-        "#,
+        include_str!("../../sql/ui/runtime/fix_decay_bounds.sql"),
     )?;
     let (first, last) = stmt.query_row([], |row| {
         Ok((row.get::<_, Option<i64>>(0)?, row.get::<_, Option<i64>>(1)?))
@@ -4947,11 +3762,7 @@ fn fix_decay_bounds(storage: &Storage) -> Result<Option<(i64, i64)>> {
 
 fn has_multicommit_quality_history(storage: &Storage) -> Result<bool> {
     let count: i64 = storage.connection().query_row(
-        r#"
-        SELECT COUNT(DISTINCT commit_hash)
-        FROM quality_events
-        WHERE metric_type IN ('LINE_COV', 'INTEGRATION_COV', 'MUTANT_COV')
-        "#,
+        include_str!("../../sql/ui/runtime/has_multicommit_quality_history.sql"),
         [],
         |row| row.get(0),
     )?;
@@ -5061,6 +3872,8 @@ fn apply_sarif_findings(
             category: finding.category.clone(),
             tier: sarif_finding_tier(&finding.properties_json),
             span,
+            commit: finding.commit_hash.clone(),
+            stale: false,
         };
         lines
             .entry(finding.start_line)
@@ -6845,6 +5658,13 @@ fn partial_line_count(covered_lines: i64, partial_findings: i64) -> i64 {
     partial_findings.clamp(0, covered_lines.max(0))
 }
 
+fn file_partial_line_count(file: &UiFile) -> i64 {
+    partial_line_count(
+        file.covered_lines,
+        file.partial_lines.max(file.dark_arm_findings),
+    )
+}
+
 fn missed_line_count(tracked_lines: i64, covered_lines: i64) -> i64 {
     tracked_lines.saturating_sub(covered_lines.clamp(0, tracked_lines.max(0)))
 }
@@ -7137,7 +5957,7 @@ fn render_file_coverage_row(file: &UiFile, directory: &str, filter: &str) -> Str
         &detail,
         file.tracked_lines,
         file.covered_lines,
-        file.dark_arm_findings,
+        file_partial_line_count(file),
         file.multi_type_covered_lines,
         file.mutant_verified_covered_lines,
         file.line_coverage,
@@ -7354,8 +6174,8 @@ fn render_coverage_table_row(
     let partial = partial_line_count(covered_lines, partial_findings);
     let covered = covered_lines.saturating_sub(partial);
     let missed = missed_line_count(tracked_lines, covered_lines);
-    let percent_value = if tracked_lines > 0 {
-        percent(covered_lines, tracked_lines)
+    let percent_value = if tracked_lines > 0 && line_coverage.is_finite() {
+        line_coverage.clamp(0.0, 100.0)
     } else {
         line_coverage
     };
@@ -8401,11 +7221,19 @@ fn render_finding_control(
         title.push('\n');
         title.push_str(rule);
     }
+    let stale = findings.iter().any(|finding| finding.stale);
+    if stale {
+        title.push_str("\nout of date: source changed since SARIF ingestion");
+    }
 
     let mut out = String::new();
     out.push_str("<label class=\"");
     out.push_str(tool.control_class());
-    out.push_str(" line-icon\" for=\"");
+    out.push_str(" line-icon");
+    if stale {
+        out.push_str(" finding-stale");
+    }
+    out.push_str("\" for=\"");
     out.push_str(&html_escape(panel_id));
     out.push_str("\" title=\"");
     out.push_str(&html_escape(&title));
@@ -8427,6 +7255,9 @@ fn render_finding_panel(annotation: &UiLineAnnotation, tool: FirstPartyFindingTo
     out.push_str("\">");
     for finding in findings {
         out.push_str("<p>");
+        if finding.stale {
+            out.push_str("<span class=\"finding-stale-badge\">out of date</span> ");
+        }
         if let Some(tier) = finding.tier {
             out.push_str("<span class=\"finding-tier\">tier ");
             out.push_str(&tier.to_string());
@@ -9318,6 +8149,55 @@ mod tests {
         QualityMetric, SarifArtifact, SarifFinding, TestExposureEvent, UnitKind,
     };
     use tempfile::tempdir;
+
+    #[test]
+    fn sarif_staleness_tracks_file_content_instead_of_head_age() {
+        let dir = tempdir().unwrap();
+        let repo = Repository::init(dir.path()).unwrap();
+        fs::create_dir_all(dir.path().join("sql")).unwrap();
+        fs::write(dir.path().join("sql/query.sql"), "SELECT 1;\n").unwrap();
+        let signature = git2::Signature::now("Lineage", "lineage@example.test").unwrap();
+        let mut index = repo.index().unwrap();
+        index.add_path(Path::new("sql/query.sql")).unwrap();
+        index.write().unwrap();
+        let tree_id = index.write_tree().unwrap();
+        let tree = repo.find_tree(tree_id).unwrap();
+        let analyzed_commit = repo
+            .commit(Some("HEAD"), &signature, &signature, "analyze", &tree, &[])
+            .unwrap();
+        drop(tree);
+
+        fs::write(dir.path().join("README.md"), "unrelated\n").unwrap();
+        let mut index = repo.index().unwrap();
+        index.add_path(Path::new("README.md")).unwrap();
+        index.write().unwrap();
+        let tree_id = index.write_tree().unwrap();
+        let tree = repo.find_tree(tree_id).unwrap();
+        let parent = repo.find_commit(analyzed_commit).unwrap();
+        repo.commit(Some("HEAD"), &signature, &signature, "unrelated", &tree, &[&parent])
+            .unwrap();
+        drop(tree);
+
+        let mut annotation = empty_annotation(1);
+        annotation.findings.push(UiFinding {
+            source: "sql-cov".to_string(),
+            tool: "SQL-COV".to_string(),
+            rule_id: "SQL007".to_string(),
+            level: "warning".to_string(),
+            message: "nullable equality".to_string(),
+            category: "nullable".to_string(),
+            tier: None,
+            span: None,
+            commit: analyzed_commit.to_string(),
+            stale: false,
+        });
+        let mut annotations = vec![annotation];
+        annotate_sarif_freshness(dir.path(), "sql/query.sql", "SELECT 1;\n", &mut annotations);
+        assert!(!annotations[0].findings[0].stale);
+
+        annotate_sarif_freshness(dir.path(), "sql/query.sql", "SELECT 2;\n", &mut annotations);
+        assert!(annotations[0].findings[0].stale);
+    }
 
     #[test]
     fn standalone_architecture_ui_sql_prepares_against_the_real_schema() {
@@ -10275,6 +9155,8 @@ mod tests {
                         category: "complexity".to_string(),
                         tier: Some(2),
                         span: None,
+                        commit: "abc".to_string(),
+                        stale: false,
                     },
                     UiFinding {
                         source: "sql-cov-hazards".to_string(),
@@ -10285,6 +9167,8 @@ mod tests {
                         category: "nullable_join_key".to_string(),
                         tier: None,
                         span: Some([2, 2, 2, 12]),
+                        commit: "abc".to_string(),
+                        stale: true,
                     },
                     UiFinding {
                         source: "first-party".to_string(),
@@ -10295,6 +9179,8 @@ mod tests {
                         category: "complexity".to_string(),
                         tier: Some(1),
                         span: None,
+                        commit: "abc".to_string(),
+                        stale: false,
                     },
                     UiFinding {
                         source: "espalier".to_string(),
@@ -10305,6 +9191,8 @@ mod tests {
                         category: "architecture".to_string(),
                         tier: None,
                         span: None,
+                        commit: "abc".to_string(),
+                        stale: false,
                     },
                     UiFinding {
                         source: "nil-kill".to_string(),
@@ -10315,6 +9203,8 @@ mod tests {
                         category: "nil-kill.static.untyped-signature".to_string(),
                         tier: None,
                         span: None,
+                        commit: "abc".to_string(),
+                        stale: false,
                     },
                     UiFinding {
                         source: "lint".to_string(),
@@ -10325,6 +9215,8 @@ mod tests {
                         category: "lint".to_string(),
                         tier: None,
                         span: None,
+                        commit: "abc".to_string(),
+                        stale: false,
                     },
                 ],
                 hazards: vec![UiHazard {
@@ -10422,7 +9314,7 @@ mod tests {
         assert!(html.contains("class=\"line-toggle tool-toggle nil-kill-toggle\""));
         assert!(html.contains("class=\"line-toggle tool-toggle lint-toggle\""));
         assert!(html.contains("class=\"decomplex-finding line-icon\""));
-        assert!(html.contains("class=\"sql-cov-finding line-icon\""));
+        assert!(html.contains("class=\"sql-cov-finding line-icon finding-stale\""));
         assert!(html.contains("class=\"espalier-finding line-icon\""));
         assert!(html.contains("class=\"nil-kill-finding line-icon\""));
         assert!(html.contains("class=\"lint-finding line-icon\""));
@@ -10433,6 +9325,8 @@ mod tests {
         assert!(html.contains("class=\"line-panel finding-panel lint-panel\""));
         assert!(html.contains("Decomplex SARIF signals"));
         assert!(html.contains("SQL-COV SARIF signals"));
+        assert!(html.contains("out of date: source changed since SARIF ingestion"));
+        assert!(html.contains("class=\"finding-stale-badge\">out of date</span>"));
         assert!(html.contains("<strong>SQL007</strong>: nullable join equality has an implicit UNKNOWN policy"));
         assert!(html.contains("Espalier SARIF signals"));
         assert!(html.contains("Nil-Kill SARIF signals"));
@@ -10646,14 +9540,6 @@ mod tests {
         assert!(html.contains("class=\"outline-hotspot\""));
         assert!(html.contains("<span class=\"outline-name\">run</span>"));
         assert!(html.contains("class=\"coverage-bar line-quality-bar\""));
-    }
-
-    #[test]
-    fn embedded_asset_paths_resolve_css_and_js() {
-        assert_eq!(embedded_asset_path("app.css"), "assets/app.css");
-        assert_eq!(embedded_asset_path("/app.js"), "assets/app.js");
-        assert!(EmbeddedUi::get(&embedded_asset_path("app.css")).is_some());
-        assert!(EmbeddedUi::get(&embedded_asset_path("app.js")).is_some());
     }
 
     #[test]
@@ -11183,6 +10069,7 @@ mod tests {
                 mutant_killed_tests: 4,
                 tracked_lines: 10,
                 covered_lines: 5,
+                partial_lines: 0,
                 line_coverage: 50.0,
                 mutant_coverage: 25.0,
                 mutant_verified_covered_lines: 0,
@@ -11206,6 +10093,7 @@ mod tests {
                 mutant_killed_tests: 6,
                 tracked_lines: 30,
                 covered_lines: 15,
+                partial_lines: 0,
                 line_coverage: 75.0,
                 mutant_coverage: 50.0,
                 mutant_verified_covered_lines: 0,
@@ -11229,6 +10117,7 @@ mod tests {
                 mutant_killed_tests: 9,
                 tracked_lines: 4,
                 covered_lines: 4,
+                partial_lines: 0,
                 line_coverage: 100.0,
                 mutant_coverage: 0.0,
                 mutant_verified_covered_lines: 0,
@@ -11248,7 +10137,7 @@ mod tests {
         assert_eq!(root[0].hazards, 3);
         assert_eq!(root[0].tracked_lines, 40);
         assert_eq!(root[0].covered_lines, 20);
-        assert_eq!(root[0].line_coverage, 50.0);
+        assert_eq!(root[0].line_coverage, 68.75);
 
         let src = directory_index(&files, "src");
         assert_eq!(src.len(), 1);
@@ -11657,6 +10546,7 @@ flags:
             mutant_killed_tests: 0,
             tracked_lines,
             covered_lines,
+            partial_lines: partial,
             line_coverage: percent(covered_lines, tracked_lines),
             mutant_coverage: 0.0,
             mutant_verified_covered_lines: 0,

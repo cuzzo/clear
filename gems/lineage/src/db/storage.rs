@@ -79,336 +79,7 @@ impl Storage {
 
     pub fn init_schema(&self) -> Result<()> {
         self.conn.execute_batch(
-            r#"
-            PRAGMA foreign_keys = ON;
-            PRAGMA synchronous = NORMAL;
-
-            CREATE TABLE IF NOT EXISTS logical_units (
-              id TEXT PRIMARY KEY,
-              name TEXT NOT NULL,
-              type TEXT NOT NULL,
-              original_path TEXT NOT NULL,
-              created_at INTEGER NOT NULL,
-              start_line INTEGER DEFAULT 1,
-              current_line_cov REAL DEFAULT 0.0,
-              current_integration_cov REAL DEFAULT 0.0,
-              current_mutant_cov REAL DEFAULT 0.0,
-              is_hard_gated INTEGER DEFAULT 0,
-              current_distinct_tests INTEGER DEFAULT 0,
-              current_test_types TEXT DEFAULT '',
-              current_mutant_verified_tests INTEGER DEFAULT 0,
-              current_mutant_killed_tests INTEGER DEFAULT 0,
-              last_test_exposure_at INTEGER DEFAULT 0
-            );
-
-            CREATE TABLE IF NOT EXISTS events (
-              id INTEGER PRIMARY KEY AUTOINCREMENT,
-              unit_id TEXT NOT NULL,
-              commit_hash TEXT NOT NULL,
-              event_type TEXT NOT NULL CHECK (event_type IN ('CHANGE', 'MOVE', 'FIX')),
-              path TEXT NOT NULL,
-              name TEXT NOT NULL,
-              start_line INTEGER NOT NULL,
-              end_line INTEGER NOT NULL,
-              semantic_change INTEGER NOT NULL CHECK (semantic_change IN (0, 1)),
-              lines_added INTEGER NOT NULL DEFAULT 0,
-              lines_removed INTEGER NOT NULL DEFAULT 0,
-              timestamp INTEGER NOT NULL,
-              FOREIGN KEY(unit_id) REFERENCES logical_units(id)
-            );
-
-            CREATE TABLE IF NOT EXISTS metadata (
-              commit_hash TEXT PRIMARY KEY,
-              message TEXT NOT NULL,
-              sentry_id TEXT,
-              coverage_delta REAL,
-              timestamp INTEGER NOT NULL
-            );
-
-            CREATE TABLE IF NOT EXISTS quality_events (
-              id INTEGER PRIMARY KEY AUTOINCREMENT,
-              unit_id TEXT NOT NULL,
-              commit_hash TEXT NOT NULL,
-              timestamp INTEGER NOT NULL,
-              metric_type TEXT NOT NULL CHECK (
-                metric_type IN ('LINE_COV', 'INTEGRATION_COV', 'MUTANT_COV', 'GATE_STATUS')
-              ),
-              old_value REAL,
-              new_value REAL NOT NULL,
-              FOREIGN KEY(unit_id) REFERENCES logical_units(id)
-            );
-
-            CREATE TABLE IF NOT EXISTS crash_events (
-              id INTEGER PRIMARY KEY AUTOINCREMENT,
-              unit_id TEXT NOT NULL,
-              commit_hash TEXT NOT NULL,
-              timestamp INTEGER NOT NULL,
-              error_class TEXT NOT NULL,
-              provider_id TEXT NOT NULL,
-              is_verified INTEGER NOT NULL CHECK (is_verified IN (0, 1)),
-              path TEXT NOT NULL,
-              line INTEGER NOT NULL,
-              function TEXT NOT NULL,
-              FOREIGN KEY(unit_id) REFERENCES logical_units(id)
-            );
-
-            CREATE TABLE IF NOT EXISTS test_exposure_events (
-              id INTEGER PRIMARY KEY AUTOINCREMENT,
-              unit_id TEXT NOT NULL,
-              commit_hash TEXT NOT NULL,
-              timestamp INTEGER NOT NULL,
-              path TEXT NOT NULL,
-              function TEXT,
-              line INTEGER,
-              branch_id TEXT,
-              test_id TEXT NOT NULL,
-              test_type TEXT NOT NULL,
-              mutation_status TEXT,
-              mutation_kind TEXT NOT NULL DEFAULT '',
-              is_mutation_verified INTEGER NOT NULL CHECK (is_mutation_verified IN (0, 1)),
-              is_mutation_killed INTEGER NOT NULL CHECK (is_mutation_killed IN (0, 1)),
-              is_verified INTEGER NOT NULL CHECK (is_verified IN (0, 1)),
-              payload_json TEXT NOT NULL,
-              FOREIGN KEY(unit_id) REFERENCES logical_units(id)
-            );
-
-            CREATE TABLE IF NOT EXISTS unit_hazards (
-              id INTEGER PRIMARY KEY AUTOINCREMENT,
-              unit_id TEXT NOT NULL,
-              language TEXT NOT NULL,
-              hazard_type TEXT NOT NULL,
-              required_evidence TEXT NOT NULL,
-              path TEXT NOT NULL,
-              line INTEGER NOT NULL,
-              symbol TEXT,
-              source TEXT NOT NULL,
-              detected_at_hash TEXT NOT NULL,
-              is_active INTEGER NOT NULL DEFAULT 1 CHECK (is_active IN (0, 1)),
-              payload_json TEXT NOT NULL,
-              FOREIGN KEY(unit_id) REFERENCES logical_units(id)
-            );
-
-            CREATE TABLE IF NOT EXISTS coverage_line_events (
-              id INTEGER PRIMARY KEY AUTOINCREMENT,
-              commit_hash TEXT NOT NULL,
-              timestamp INTEGER NOT NULL,
-              path TEXT NOT NULL,
-              line INTEGER NOT NULL,
-              hits INTEGER NOT NULL,
-              is_partial INTEGER NOT NULL DEFAULT 0,
-              coverage_percent REAL,
-              source TEXT NOT NULL DEFAULT 'coverage',
-              UNIQUE(commit_hash, path, line, source)
-            );
-
-            CREATE TABLE IF NOT EXISTS sarif_artifacts (
-              id INTEGER PRIMARY KEY AUTOINCREMENT,
-              source TEXT NOT NULL,
-              tool_name TEXT NOT NULL,
-              run_format TEXT NOT NULL,
-              artifact_path TEXT NOT NULL,
-              artifact_sha256 TEXT NOT NULL,
-              commit_hash TEXT NOT NULL,
-              timestamp INTEGER NOT NULL,
-              payload_json TEXT NOT NULL,
-              ingested_at INTEGER NOT NULL DEFAULT (strftime('%s', 'now')),
-              UNIQUE(source, commit_hash, artifact_path, artifact_sha256)
-            );
-
-            CREATE TABLE IF NOT EXISTS sarif_findings (
-              id INTEGER PRIMARY KEY AUTOINCREMENT,
-              artifact_id INTEGER NOT NULL,
-              finding_key TEXT NOT NULL,
-              source TEXT NOT NULL,
-              tool_name TEXT NOT NULL,
-              run_format TEXT NOT NULL,
-              commit_hash TEXT NOT NULL,
-              timestamp INTEGER NOT NULL,
-              rule_id TEXT NOT NULL,
-              level TEXT NOT NULL,
-              message TEXT NOT NULL,
-              path TEXT NOT NULL,
-              start_line INTEGER NOT NULL,
-              start_column INTEGER,
-              end_line INTEGER,
-              end_column INTEGER,
-              category TEXT NOT NULL,
-              is_dark_arm INTEGER NOT NULL CHECK (is_dark_arm IN (0, 1)),
-              unit_id TEXT,
-              fingerprint TEXT NOT NULL,
-              properties_json TEXT NOT NULL,
-              raw_json TEXT NOT NULL,
-              FOREIGN KEY(artifact_id) REFERENCES sarif_artifacts(id) ON DELETE CASCADE,
-              FOREIGN KEY(unit_id) REFERENCES logical_units(id),
-              UNIQUE(source, commit_hash, finding_key)
-            );
-
-            CREATE TABLE IF NOT EXISTS ui_file_summaries (
-              path TEXT PRIMARY KEY,
-              units INTEGER NOT NULL,
-              hazards INTEGER NOT NULL,
-              evidence_covered_hazards INTEGER NOT NULL,
-              covered_hazards INTEGER NOT NULL,
-              distinct_tests INTEGER NOT NULL,
-              mutant_killed_tests INTEGER NOT NULL,
-              tracked_lines INTEGER NOT NULL,
-              covered_lines INTEGER NOT NULL,
-              line_coverage REAL NOT NULL,
-              mutant_coverage REAL NOT NULL,
-              mutant_verified_covered_lines INTEGER NOT NULL,
-              mutant_killed_covered_lines INTEGER NOT NULL,
-              stochastic_mutant_verified_covered_lines INTEGER NOT NULL,
-              stochastic_mutant_killed_covered_lines INTEGER NOT NULL,
-              invariant_mutant_verified_covered_lines INTEGER NOT NULL,
-              invariant_mutant_killed_covered_lines INTEGER NOT NULL,
-              multi_type_covered_lines INTEGER NOT NULL
-            );
-
-            CREATE TABLE IF NOT EXISTS ui_warning_units (
-              unit_id TEXT PRIMARY KEY,
-              current_path TEXT NOT NULL,
-              current_distinct_tests INTEGER NOT NULL,
-              current_mutant_verified_tests INTEGER NOT NULL,
-              last_test_exposure_at INTEGER NOT NULL,
-              last_mutant_run_at INTEGER NOT NULL,
-              changes_after_test_exposure INTEGER NOT NULL,
-              semantic_changes_after_mutant_run INTEGER NOT NULL,
-              verification_stale_seconds INTEGER NOT NULL,
-              reopened_count INTEGER NOT NULL
-            );
-
-            CREATE TABLE IF NOT EXISTS ui_refresh_metadata (
-              key TEXT PRIMARY KEY,
-              value TEXT NOT NULL
-            );
-
-            CREATE TABLE IF NOT EXISTS engine_state (
-              commit_hash TEXT PRIMARY KEY,
-              state_json TEXT NOT NULL
-            );
-
-            CREATE TABLE IF NOT EXISTS architecture_artifacts (
-              id INTEGER PRIMARY KEY AUTOINCREMENT,
-              analyzer TEXT NOT NULL,
-              analyzer_version TEXT NOT NULL,
-              schema_version INTEGER NOT NULL,
-              commit_hash TEXT NOT NULL,
-              root TEXT NOT NULL,
-              complete INTEGER NOT NULL,
-              generated_at TEXT NOT NULL,
-              payload_json TEXT NOT NULL
-            );
-
-            CREATE TABLE IF NOT EXISTS architecture_nodes (
-              artifact_id INTEGER NOT NULL,
-              analyzer_node_id TEXT NOT NULL,
-              logical_unit_id TEXT,
-              owner_node_id TEXT,
-              kind TEXT NOT NULL,
-              name TEXT NOT NULL,
-              owner TEXT,
-              language TEXT,
-              path TEXT,
-              start_line INTEGER NOT NULL,
-              start_column INTEGER NOT NULL,
-              end_line INTEGER NOT NULL,
-              end_column INTEGER NOT NULL,
-              confidence TEXT NOT NULL,
-              metadata_json TEXT NOT NULL,
-              PRIMARY KEY (artifact_id, analyzer_node_id),
-              FOREIGN KEY(artifact_id) REFERENCES architecture_artifacts(id) ON DELETE CASCADE,
-              FOREIGN KEY(logical_unit_id) REFERENCES logical_units(id)
-            );
-
-            CREATE TABLE IF NOT EXISTS architecture_edges (
-              artifact_id INTEGER NOT NULL,
-              edge_id TEXT NOT NULL,
-              source_node_id TEXT NOT NULL,
-              target_node_id TEXT NOT NULL,
-              kind TEXT NOT NULL,
-              conditional INTEGER NOT NULL,
-              weight INTEGER NOT NULL,
-              confidence TEXT NOT NULL,
-              metadata_json TEXT NOT NULL,
-              PRIMARY KEY (artifact_id, edge_id),
-              FOREIGN KEY(artifact_id) REFERENCES architecture_artifacts(id) ON DELETE CASCADE
-            );
-
-            CREATE TABLE IF NOT EXISTS architecture_edge_spans (
-              artifact_id INTEGER NOT NULL,
-              edge_id TEXT NOT NULL,
-              path TEXT NOT NULL,
-              start_line INTEGER NOT NULL,
-              start_column INTEGER NOT NULL,
-              end_line INTEGER NOT NULL,
-              end_column INTEGER NOT NULL,
-              FOREIGN KEY(artifact_id) REFERENCES architecture_artifacts(id) ON DELETE CASCADE
-            );
-
-            CREATE TABLE IF NOT EXISTS architecture_pressure (
-              artifact_id INTEGER NOT NULL,
-              node_id TEXT NOT NULL,
-              score REAL NOT NULL,
-              band TEXT NOT NULL,
-              collaboration REAL NOT NULL,
-              state REAL NOT NULL,
-              implementation REAL NOT NULL,
-              operational REAL NOT NULL,
-              explanation_json TEXT NOT NULL,
-              PRIMARY KEY (artifact_id, node_id),
-              FOREIGN KEY(artifact_id) REFERENCES architecture_artifacts(id) ON DELETE CASCADE
-            );
-
-            CREATE INDEX IF NOT EXISTS idx_events_unit_id ON events(unit_id);
-            CREATE INDEX IF NOT EXISTS idx_events_unit_latest
-              ON events(unit_id, timestamp DESC, id DESC);
-            CREATE INDEX IF NOT EXISTS idx_events_unit_type_semantic_time
-              ON events(unit_id, event_type, semantic_change, timestamp);
-            CREATE INDEX IF NOT EXISTS idx_events_commit_hash ON events(commit_hash);
-            CREATE INDEX IF NOT EXISTS idx_events_type ON events(event_type);
-            CREATE INDEX IF NOT EXISTS idx_quality_events_unit_id ON quality_events(unit_id);
-            CREATE INDEX IF NOT EXISTS idx_quality_events_commit_hash ON quality_events(commit_hash);
-            CREATE INDEX IF NOT EXISTS idx_crash_events_unit_id ON crash_events(unit_id);
-            CREATE INDEX IF NOT EXISTS idx_crash_events_unit_path_line_time
-              ON crash_events(unit_id, path, line, timestamp);
-            CREATE INDEX IF NOT EXISTS idx_crash_events_commit_hash ON crash_events(commit_hash);
-            CREATE INDEX IF NOT EXISTS idx_test_exposure_events_unit_id ON test_exposure_events(unit_id);
-            CREATE INDEX IF NOT EXISTS idx_test_exposure_events_unit_mutant_time
-              ON test_exposure_events(unit_id, is_mutation_verified, is_mutation_killed, timestamp);
-            CREATE INDEX IF NOT EXISTS idx_test_exposure_events_path_line_latest
-              ON test_exposure_events(path, line, branch_id, test_id, test_type, timestamp DESC, id DESC);
-            CREATE INDEX IF NOT EXISTS idx_test_exposure_events_commit_hash ON test_exposure_events(commit_hash);
-            CREATE INDEX IF NOT EXISTS idx_test_exposure_events_test_id ON test_exposure_events(test_id);
-            CREATE INDEX IF NOT EXISTS idx_test_exposure_events_type ON test_exposure_events(test_type);
-            CREATE INDEX IF NOT EXISTS idx_unit_hazards_unit_id ON unit_hazards(unit_id);
-            CREATE INDEX IF NOT EXISTS idx_unit_hazards_path_line ON unit_hazards(path, line);
-            CREATE INDEX IF NOT EXISTS idx_unit_hazards_type ON unit_hazards(hazard_type);
-            CREATE INDEX IF NOT EXISTS idx_unit_hazards_detected_at ON unit_hazards(detected_at_hash);
-            CREATE INDEX IF NOT EXISTS idx_coverage_line_events_path_line ON coverage_line_events(path, line);
-            CREATE INDEX IF NOT EXISTS idx_coverage_line_events_path_line_source_latest
-              ON coverage_line_events(path, line, source, timestamp DESC, id DESC);
-            CREATE INDEX IF NOT EXISTS idx_coverage_line_events_commit_hash ON coverage_line_events(commit_hash);
-            CREATE INDEX IF NOT EXISTS idx_sarif_artifacts_source_commit
-              ON sarif_artifacts(source, commit_hash);
-            CREATE INDEX IF NOT EXISTS idx_sarif_findings_path_line
-              ON sarif_findings(path, start_line);
-            CREATE INDEX IF NOT EXISTS idx_sarif_findings_source_commit
-              ON sarif_findings(source, commit_hash);
-            CREATE INDEX IF NOT EXISTS idx_sarif_findings_unit_id
-              ON sarif_findings(unit_id);
-            CREATE INDEX IF NOT EXISTS idx_sarif_findings_rule_id
-              ON sarif_findings(rule_id);
-            CREATE INDEX IF NOT EXISTS idx_ui_file_summaries_path ON ui_file_summaries(path);
-            CREATE INDEX IF NOT EXISTS idx_ui_warning_units_path ON ui_warning_units(current_path);
-            CREATE INDEX IF NOT EXISTS idx_events_path ON events(path);
-            CREATE INDEX IF NOT EXISTS idx_logical_units_original_path ON logical_units(original_path);
-            CREATE INDEX IF NOT EXISTS idx_architecture_artifacts_commit ON architecture_artifacts(commit_hash, id DESC);
-            CREATE INDEX IF NOT EXISTS idx_architecture_nodes_owner ON architecture_nodes(artifact_id, owner_node_id, kind);
-            CREATE INDEX IF NOT EXISTS idx_architecture_nodes_logical ON architecture_nodes(logical_unit_id);
-            CREATE INDEX IF NOT EXISTS idx_architecture_nodes_path ON architecture_nodes(artifact_id, path, start_line);
-            CREATE INDEX IF NOT EXISTS idx_architecture_edges_source ON architecture_edges(artifact_id, source_node_id, kind);
-            CREATE INDEX IF NOT EXISTS idx_architecture_edges_target ON architecture_edges(artifact_id, target_node_id, kind);
-            "#,
+            include_str!("../../sql/storage/init_schema.sql"),
         )?;
         self.ensure_logical_unit_column("start_line", "INTEGER DEFAULT 1")?;
         self.ensure_logical_unit_column("current_line_cov", "REAL DEFAULT 0.0")?;
@@ -427,6 +98,11 @@ impl Storage {
             "INTEGER NOT NULL DEFAULT 0",
         )?;
         self.ensure_column("coverage_line_events", "coverage_percent", "REAL")?;
+        self.ensure_column(
+            "ui_file_summaries",
+            "partial_lines",
+            "INTEGER NOT NULL DEFAULT 0",
+        )?;
         self.ensure_column(
             "ui_file_summaries",
             "mutant_verified_covered_lines",
@@ -462,29 +138,7 @@ impl Storage {
 
     fn refresh_current_sarif_findings_view(&self) -> Result<()> {
         self.conn.execute_batch(
-            r#"
-            DROP VIEW IF EXISTS current_sarif_findings;
-            CREATE VIEW current_sarif_findings AS
-            WITH ranked_artifacts AS (
-              SELECT source, tool_name, commit_hash,
-                     ROW_NUMBER() OVER (
-                       PARTITION BY source, tool_name
-                       ORDER BY timestamp DESC, id DESC
-                     ) AS snapshot_rank
-              FROM sarif_artifacts
-            ),
-            latest_snapshots AS (
-              SELECT source, tool_name, commit_hash
-              FROM ranked_artifacts
-              WHERE snapshot_rank = 1
-            )
-            SELECT findings.*
-            FROM sarif_findings findings
-            JOIN latest_snapshots latest
-              ON latest.source = findings.source
-             AND latest.tool_name = findings.tool_name
-             AND latest.commit_hash = findings.commit_hash;
-            "#,
+            include_str!("../../sql/storage/refresh_current_sarif_findings_view.sql"),
         )?;
         Ok(())
     }
@@ -507,122 +161,14 @@ impl Storage {
 
     fn ensure_natural_key_indexes(&self) -> Result<()> {
         self.conn.execute_batch(
-            r#"
-            DELETE FROM coverage_line_events
-            WHERE id NOT IN (
-              SELECT (
-                SELECT c2.id
-                FROM coverage_line_events c2
-                WHERE c2.commit_hash = c1.commit_hash
-                  AND c2.path = c1.path
-                  AND c2.line = c1.line
-                  AND c2.source = c1.source
-                ORDER BY c2.hits DESC, c2.timestamp DESC, c2.id DESC
-                LIMIT 1
-              )
-              FROM coverage_line_events c1
-              GROUP BY c1.commit_hash, c1.path, c1.line, c1.source
-            );
-            CREATE UNIQUE INDEX IF NOT EXISTS idx_coverage_line_events_natural_key
-              ON coverage_line_events(commit_hash, path, line, source);
-
-            DELETE FROM quality_events
-            WHERE id NOT IN (
-              SELECT (
-                SELECT q2.id
-                FROM quality_events q2
-                WHERE q2.unit_id = q1.unit_id
-                  AND q2.commit_hash = q1.commit_hash
-                  AND q2.metric_type = q1.metric_type
-                ORDER BY q2.new_value DESC, q2.timestamp DESC, q2.id DESC
-                LIMIT 1
-              )
-              FROM quality_events q1
-              GROUP BY q1.unit_id, q1.commit_hash, q1.metric_type
-            );
-            CREATE UNIQUE INDEX IF NOT EXISTS idx_quality_events_natural_key
-              ON quality_events(unit_id, commit_hash, metric_type);
-
-            DELETE FROM crash_events
-            WHERE id NOT IN (
-              SELECT (
-                SELECT e2.id
-                FROM crash_events e2
-                WHERE e2.unit_id = e1.unit_id
-                  AND e2.commit_hash = e1.commit_hash
-                  AND e2.error_class = e1.error_class
-                  AND e2.provider_id = e1.provider_id
-                  AND e2.path = e1.path
-                  AND e2.line = e1.line
-                  AND e2.function = e1.function
-                ORDER BY e2.is_verified DESC, e2.timestamp DESC, e2.id DESC
-                LIMIT 1
-              )
-              FROM crash_events e1
-              GROUP BY e1.unit_id, e1.commit_hash, e1.error_class, e1.provider_id,
-                       e1.path, e1.line, e1.function
-            );
-            CREATE UNIQUE INDEX IF NOT EXISTS idx_crash_events_natural_key
-              ON crash_events(unit_id, commit_hash, error_class, provider_id, path, line, function);
-
-            DELETE FROM test_exposure_events
-            WHERE id NOT IN (
-              SELECT (
-                SELECT t2.id
-                FROM test_exposure_events t2
-                WHERE t2.unit_id = t1.unit_id
-                  AND t2.commit_hash = t1.commit_hash
-                  AND t2.path = t1.path
-                  AND COALESCE(t2.line, -1) = COALESCE(t1.line, -1)
-                  AND COALESCE(t2.branch_id, '') = COALESCE(t1.branch_id, '')
-                  AND t2.test_id = t1.test_id
-                  AND t2.test_type = t1.test_type
-                ORDER BY t2.is_verified DESC,
-                         t2.is_mutation_killed DESC,
-                         t2.is_mutation_verified DESC,
-                         CASE
-                           WHEN lower(COALESCE(t2.mutation_kind, '')) IN ('invariant', 'contract') THEN 2
-                           WHEN COALESCE(t2.mutation_kind, '') <> '' THEN 1
-                           ELSE 0
-                         END DESC,
-                         t2.timestamp DESC,
-                         t2.id DESC
-                LIMIT 1
-              )
-              FROM test_exposure_events t1
-              GROUP BY t1.unit_id, t1.commit_hash, t1.path, COALESCE(t1.line, -1),
-                       COALESCE(t1.branch_id, ''), t1.test_id, t1.test_type
-            );
-            CREATE UNIQUE INDEX IF NOT EXISTS idx_test_exposure_events_natural_key
-              ON test_exposure_events(
-                unit_id,
-                commit_hash,
-                path,
-                COALESCE(line, -1),
-                COALESCE(branch_id, ''),
-                test_id,
-                test_type
-              );
-            "#,
+            include_str!("../../sql/storage/ensure_natural_key_indexes.sql"),
         )?;
         Ok(())
     }
 
     fn backfill_mutation_kind(&self) -> Result<()> {
         self.conn.execute(
-            r#"
-            UPDATE test_exposure_events
-            SET mutation_kind = CASE
-              WHEN lower(COALESCE(test_type, '') || ' ' || COALESCE(test_id, '')) LIKE '%invariant%'
-                OR lower(COALESCE(test_type, '') || ' ' || COALESCE(test_id, '')) LIKE '%contract%'
-                OR lower(COALESCE(test_type, '') || ' ' || COALESCE(test_id, '')) LIKE '%property%'
-                OR lower(COALESCE(test_type, '') || ' ' || COALESCE(test_id, '')) LIKE '%fuzz%'
-              THEN 'invariant'
-              ELSE 'stochastic'
-            END
-            WHERE is_mutation_verified = 1
-              AND COALESCE(mutation_kind, '') = ''
-            "#,
+            include_str!("../../sql/storage/backfill_mutation_kind.sql"),
             [],
         )?;
         Ok(())
@@ -645,10 +191,7 @@ impl Storage {
 
     pub fn insert_metadata(&self, metadata: &CommitMetadata) -> Result<()> {
         self.conn.execute(
-            r#"
-            INSERT OR IGNORE INTO metadata (commit_hash, message, timestamp)
-            VALUES (?1, ?2, ?3)
-            "#,
+            include_str!("../../sql/storage/insert_metadata.sql"),
             params![metadata.hash, metadata.message, metadata.timestamp],
         )?;
         Ok(())
@@ -689,11 +232,7 @@ impl Storage {
 
     pub fn upsert_logical_unit(&self, unit: &LogicalUnit, created_at: i64) -> Result<()> {
         self.conn.execute(
-            r#"
-            INSERT INTO logical_units (id, name, type, original_path, created_at, start_line)
-            VALUES (?1, ?2, ?3, ?4, ?5, ?6)
-            ON CONFLICT(id) DO NOTHING
-            "#,
+            include_str!("../../sql/storage/upsert_logical_unit.sql"),
             params![unit.id, unit.name, unit.kind.as_str(), unit.path, created_at, unit.start_line],
         )?;
         Ok(())
@@ -793,29 +332,7 @@ impl Storage {
         };
 
         let mut stmt = self.conn.prepare(
-            r#"
-            SELECT u.id,
-              COALESCE((
-                SELECT latest.path
-                FROM events latest
-                WHERE latest.unit_id = u.id
-                ORDER BY latest.timestamp DESC, latest.id DESC
-                LIMIT 1
-              ), u.original_path) AS path,
-              COALESCE((
-                SELECT latest.start_line
-                FROM events latest
-                WHERE latest.unit_id = u.id
-                ORDER BY latest.timestamp DESC, latest.id DESC
-                LIMIT 1
-              ), u.start_line) AS start_line
-            FROM logical_units u
-            WHERE u.name = ?1
-               OR u.name LIKE '%.' || ?1
-               OR u.name LIKE '%::' || ?1
-               OR u.name LIKE '%#' || ?1
-            LIMIT 100
-            "#,
+            include_str!("../../sql/storage/find_definitions.sql"),
         )?;
         let rows = stmt.query_map(params![name], |row| {
             Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?, row.get::<_, u32>(2)?))
@@ -867,12 +384,7 @@ impl Storage {
 
     pub fn insert_event(&self, event: &Event) -> Result<()> {
         self.conn.execute(
-            r#"
-            INSERT INTO events
-              (unit_id, commit_hash, event_type, path, name, start_line, end_line,
-               semantic_change, lines_added, lines_removed, timestamp)
-            VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11)
-            "#,
+            include_str!("../../sql/storage/insert_event.sql"),
             params![
                 event.unit_id,
                 event.commit_hash,
@@ -892,18 +404,7 @@ impl Storage {
 
     pub fn unit_ids_for_current_path(&self, path: &str) -> Result<Vec<String>> {
         let mut stmt = self.conn.prepare(
-            r#"
-            SELECT u.id
-            FROM logical_units u
-            WHERE COALESCE((
-              SELECT latest.path
-              FROM events latest
-              WHERE latest.unit_id = u.id
-              ORDER BY latest.timestamp DESC, latest.id DESC
-              LIMIT 1
-            ), u.original_path) = ?1
-            ORDER BY u.name, u.id
-            "#,
+            include_str!("../../sql/storage/unit_ids_for_current_path.sql"),
         )?;
         let rows = stmt.query_map(params![path], |row| row.get::<_, String>(0))?;
         Ok(rows.collect::<Result<Vec<_>, _>>()?)
@@ -912,22 +413,7 @@ impl Storage {
     pub fn resolve_current_path(&self, path: &str) -> Result<Option<String>> {
         let normalized = path.trim_start_matches("./");
         let mut stmt = self.conn.prepare(
-            r#"
-            WITH current_paths AS (
-              SELECT DISTINCT COALESCE((
-                SELECT latest.path
-                FROM events latest
-                WHERE latest.unit_id = u.id
-                ORDER BY latest.timestamp DESC, latest.id DESC
-                LIMIT 1
-              ), u.original_path) AS current_path
-              FROM logical_units u
-            )
-            SELECT current_path
-            FROM current_paths
-            WHERE current_path = ?1
-            ORDER BY current_path
-            "#,
+            include_str!("../../sql/storage/resolve_current_path.sql"),
         )?;
         let exact = stmt
             .query_map(params![normalized], |row| row.get::<_, String>(0))?
@@ -938,23 +424,7 @@ impl Storage {
 
         let suffix = format!("%/{normalized}");
         let mut stmt = self.conn.prepare(
-            r#"
-            WITH current_paths AS (
-              SELECT DISTINCT COALESCE((
-                SELECT latest.path
-                FROM events latest
-                WHERE latest.unit_id = u.id
-                ORDER BY latest.timestamp DESC, latest.id DESC
-                LIMIT 1
-              ), u.original_path) AS current_path
-              FROM logical_units u
-            )
-            SELECT current_path
-            FROM current_paths
-            WHERE current_path LIKE ?1
-            ORDER BY current_path
-            LIMIT 2
-            "#,
+            include_str!("../../sql/storage/resolve_current_path_2.sql"),
         )?;
         let candidates = stmt
             .query_map(params![suffix], |row| row.get::<_, String>(0))?
@@ -972,20 +442,7 @@ impl Storage {
         }
 
         let mut stmt = self.conn.prepare(
-            r#"
-            SELECT u.id
-            FROM logical_units u
-            WHERE u.name = ?2
-              AND COALESCE((
-                SELECT latest.path
-                FROM events latest
-                WHERE latest.unit_id = u.id
-                ORDER BY latest.timestamp DESC, latest.id DESC
-                LIMIT 1
-              ), u.original_path) = ?1
-            ORDER BY u.created_at DESC
-            LIMIT 1
-            "#,
+            include_str!("../../sql/storage/resolve_unit_id.sql"),
         )?;
         let mut rows = stmt.query(params![path, name])?;
         Ok(rows.next()?.map(|row| row.get(0)).transpose()?)
@@ -1015,11 +472,7 @@ impl Storage {
             }
 
             self.conn.execute(
-                r#"
-                UPDATE quality_events
-                SET timestamp = ?2, new_value = ?3
-                WHERE id = ?1
-                "#,
+                include_str!("../../sql/storage/record_quality_metric.sql"),
                 params![id, event.timestamp, merged_value],
             )?;
             return Ok(true);
@@ -1033,11 +486,7 @@ impl Storage {
         }
 
         self.conn.execute(
-            r#"
-            INSERT INTO quality_events
-              (unit_id, commit_hash, timestamp, metric_type, old_value, new_value)
-            VALUES (?1, ?2, ?3, ?4, ?5, ?6)
-            "#,
+            include_str!("../../sql/storage/record_quality_metric_2.sql"),
             params![
                 event.unit_id,
                 event.commit_hash,
@@ -1061,13 +510,7 @@ impl Storage {
         metric: QualityMetric,
     ) -> Result<Option<(i64, f64)>> {
         let mut stmt = self.conn.prepare(
-            r#"
-            SELECT id, new_value
-            FROM quality_events
-            WHERE unit_id = ?1 AND commit_hash = ?2 AND metric_type = ?3
-            ORDER BY id DESC
-            LIMIT 1
-            "#,
+            include_str!("../../sql/storage/existing_quality_event.sql"),
         )?;
         Ok(stmt
             .query_row(params![unit_id, commit_hash, metric.as_str()], |row| {
@@ -1078,11 +521,7 @@ impl Storage {
 
     pub fn delete_coverage_for_commit(&self, commit_hash: &str) -> Result<usize> {
         let quality = self.conn.execute(
-            r#"
-            DELETE FROM quality_events
-            WHERE commit_hash = ?1
-              AND metric_type IN ('LINE_COV', 'INTEGRATION_COV', 'MUTANT_COV', 'GATE_STATUS')
-            "#,
+            include_str!("../../sql/storage/delete_coverage_for_commit.sql"),
             params![commit_hash],
         )?;
         let lines = self.conn.execute(
@@ -1111,20 +550,13 @@ impl Storage {
         test_id: &str,
     ) -> Result<usize> {
         let mut stmt = self.conn.prepare(
-            r#"
-            SELECT DISTINCT unit_id
-            FROM test_exposure_events
-            WHERE commit_hash = ?1 AND test_type = ?2 AND test_id = ?3
-            "#,
+            include_str!("../../sql/storage/delete_test_exposure_for_commit_test.sql"),
         )?;
         let unit_ids = stmt
             .query_map(params![commit_hash, test_type, test_id], |row| row.get::<_, String>(0))?
             .collect::<Result<Vec<_>, _>>()?;
         let deleted = self.conn.execute(
-            r#"
-            DELETE FROM test_exposure_events
-            WHERE commit_hash = ?1 AND test_type = ?2 AND test_id = ?3
-            "#,
+            include_str!("../../sql/storage/delete_test_exposure_for_commit_test_2.sql"),
             params![commit_hash, test_type, test_id],
         )?;
         for unit_id in unit_ids {
@@ -1147,18 +579,7 @@ impl Storage {
 
     pub fn insert_sarif_artifact(&self, artifact: &SarifArtifact) -> Result<i64> {
         self.conn.execute(
-            r#"
-            INSERT INTO sarif_artifacts
-              (source, tool_name, run_format, artifact_path, artifact_sha256,
-               commit_hash, timestamp, payload_json)
-            VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)
-            ON CONFLICT(source, commit_hash, artifact_path, artifact_sha256) DO UPDATE SET
-              tool_name = excluded.tool_name,
-              run_format = excluded.run_format,
-              timestamp = excluded.timestamp,
-              payload_json = excluded.payload_json,
-              ingested_at = strftime('%s', 'now')
-            "#,
+            include_str!("../../sql/storage/insert_sarif_artifact.sql"),
             params![
                 artifact.source,
                 artifact.tool_name,
@@ -1171,14 +592,7 @@ impl Storage {
             ],
         )?;
         let id = self.conn.query_row(
-            r#"
-            SELECT id
-            FROM sarif_artifacts
-            WHERE source = ?1
-              AND commit_hash = ?2
-              AND artifact_path = ?3
-              AND artifact_sha256 = ?4
-            "#,
+            include_str!("../../sql/storage/insert_sarif_artifact_2.sql"),
             params![
                 artifact.source,
                 artifact.commit_hash,
@@ -1192,15 +606,7 @@ impl Storage {
 
     pub fn insert_sarif_finding(&self, finding: &SarifFinding) -> Result<bool> {
         let inserted = self.conn.execute(
-            r#"
-            INSERT OR IGNORE INTO sarif_findings
-              (artifact_id, finding_key, source, tool_name, run_format, commit_hash,
-               timestamp, rule_id, level, message, path, start_line, start_column,
-               end_line, end_column, category, is_dark_arm, unit_id, fingerprint,
-               properties_json, raw_json)
-            VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12,
-                    ?13, ?14, ?15, ?16, ?17, ?18, ?19, ?20, ?21)
-            "#,
+            include_str!("../../sql/storage/insert_sarif_finding.sql"),
             params![
                 finding.artifact_id,
                 finding.finding_key,
@@ -1239,38 +645,7 @@ impl Storage {
 
     pub fn current_unit_spans_for_path(&self, path: &str) -> Result<Vec<CurrentUnitSpan>> {
         let mut stmt = self.conn.prepare(
-            r#"
-            WITH filtered_units AS (
-              SELECT id FROM logical_units WHERE original_path = ?1
-              UNION
-              SELECT unit_id AS id FROM events WHERE path = ?1
-            ),
-            latest_events AS (
-              SELECT *
-              FROM (
-                SELECT e.*,
-                       ROW_NUMBER() OVER (
-                         PARTITION BY e.unit_id
-                         ORDER BY e.timestamp DESC, e.id DESC
-                       ) AS rank
-                FROM events e
-                WHERE e.unit_id IN (SELECT id FROM filtered_units)
-              )
-              WHERE rank = 1
-            ),
-            current_units AS (
-              SELECT u.id,
-                     COALESCE(le.path, u.original_path) AS current_path,
-                     COALESCE(le.start_line, 1) AS start_line,
-                     COALESCE(le.end_line, le.start_line, 1) AS end_line
-              FROM logical_units u
-              LEFT JOIN latest_events le ON le.unit_id = u.id
-              WHERE u.id IN (SELECT id FROM filtered_units)
-            )
-            SELECT id, current_path, start_line, end_line
-            FROM current_units
-            WHERE current_path = ?1
-            "#,
+            include_str!("../../sql/storage/current_unit_spans_for_path.sql"),
         )?;
         let rows = stmt.query_map(params![path], |row| {
             Ok(CurrentUnitSpan {
@@ -1286,31 +661,7 @@ impl Storage {
 
     pub fn current_unit_spans(&self) -> Result<Vec<CurrentUnitSpan>> {
         let mut stmt = self.conn.prepare(
-            r#"
-            WITH latest_events AS (
-              SELECT *
-              FROM (
-                SELECT e.*,
-                       ROW_NUMBER() OVER (
-                         PARTITION BY e.unit_id
-                         ORDER BY e.timestamp DESC, e.id DESC
-                       ) AS rank
-                FROM events e
-              )
-              WHERE rank = 1
-            ),
-            current_units AS (
-              SELECT u.id,
-                     COALESCE(le.path, u.original_path) AS current_path,
-                     COALESCE(le.start_line, 1) AS start_line,
-                     COALESCE(le.end_line, le.start_line, 1) AS end_line
-              FROM logical_units u
-              LEFT JOIN latest_events le ON le.unit_id = u.id
-            )
-            SELECT id, current_path, start_line, end_line
-            FROM current_units
-            WHERE current_path <> ''
-            "#,
+            include_str!("../../sql/storage/current_unit_spans.sql"),
         )?;
         let rows = stmt.query_map([], |row| {
             Ok(CurrentUnitSpan {
@@ -1393,15 +744,7 @@ impl Storage {
 
     pub fn sarif_findings_for_path(&self, path: &str) -> Result<Vec<SarifFinding>> {
         let mut stmt = self.conn.prepare(
-            r#"
-            SELECT artifact_id, finding_key, source, tool_name, run_format, commit_hash,
-                   timestamp, rule_id, level, message, path, start_line, start_column,
-                   end_line, end_column, category, is_dark_arm, unit_id, fingerprint,
-                   properties_json, raw_json
-            FROM current_sarif_findings
-            WHERE path = ?1
-            ORDER BY start_line, source, tool_name, rule_id, message
-            "#,
+            include_str!("../../sql/storage/sarif_findings_for_path.sql"),
         )?;
         let rows = stmt.query_map(params![path], |row| {
             Ok(SarifFinding {
@@ -1433,11 +776,7 @@ impl Storage {
 
     pub fn sarif_finding_counts_by_file(&self) -> Result<HashMap<String, i64>> {
         let mut stmt = self.conn.prepare(
-            r#"
-            SELECT path, COUNT(*) AS findings
-            FROM current_sarif_findings
-            GROUP BY path
-            "#,
+            include_str!("../../sql/storage/sarif_finding_counts_by_file.sql"),
         )?;
         let rows = stmt.query_map([], |row| Ok((row.get::<_, String>(0)?, row.get::<_, i64>(1)?)))?;
         Ok(rows.collect::<std::result::Result<HashMap<_, _>, _>>()?)
@@ -1445,59 +784,7 @@ impl Storage {
 
     pub fn sarif_lifecycle_summary(&self) -> Result<SarifLifecycleSummary> {
         self.conn.query_row(
-            r#"
-            WITH commit_snapshots AS (
-              SELECT source, tool_name, commit_hash, MAX(timestamp) AS timestamp, MAX(id) AS id
-              FROM sarif_artifacts
-              GROUP BY source, tool_name, commit_hash
-            ),
-            ranked_snapshots AS (
-              SELECT source, tool_name, commit_hash,
-                     ROW_NUMBER() OVER (
-                       PARTITION BY source, tool_name
-                       ORDER BY timestamp DESC, id DESC
-                     ) AS snapshot_rank
-              FROM commit_snapshots
-            ),
-            current_findings AS (
-              SELECT DISTINCT finding.source, finding.tool_name, finding.rule_id, finding.fingerprint
-              FROM sarif_findings finding
-              JOIN ranked_snapshots snapshot
-                ON snapshot.source = finding.source
-               AND snapshot.tool_name = finding.tool_name
-               AND snapshot.commit_hash = finding.commit_hash
-               AND snapshot.snapshot_rank = 1
-            ),
-            previous_findings AS (
-              SELECT DISTINCT finding.source, finding.tool_name, finding.rule_id, finding.fingerprint
-              FROM sarif_findings finding
-              JOIN ranked_snapshots snapshot
-                ON snapshot.source = finding.source
-               AND snapshot.tool_name = finding.tool_name
-               AND snapshot.commit_hash = finding.commit_hash
-               AND snapshot.snapshot_rank = 2
-            ),
-            all_keys AS (
-              SELECT source, tool_name, rule_id, fingerprint FROM current_findings
-              UNION
-              SELECT source, tool_name, rule_id, fingerprint FROM previous_findings
-            )
-            SELECT
-              COALESCE(SUM(CASE WHEN current.fingerprint IS NOT NULL AND previous.fingerprint IS NULL THEN 1 ELSE 0 END), 0),
-              COALESCE(SUM(CASE WHEN current.fingerprint IS NULL AND previous.fingerprint IS NOT NULL THEN 1 ELSE 0 END), 0),
-              COALESCE(SUM(CASE WHEN current.fingerprint IS NOT NULL AND previous.fingerprint IS NOT NULL THEN 1 ELSE 0 END), 0)
-            FROM all_keys key
-            LEFT JOIN current_findings current
-              ON current.source = key.source
-             AND current.tool_name = key.tool_name
-             AND current.rule_id = key.rule_id
-             AND current.fingerprint = key.fingerprint
-            LEFT JOIN previous_findings previous
-              ON previous.source = key.source
-             AND previous.tool_name = key.tool_name
-             AND previous.rule_id = key.rule_id
-             AND previous.fingerprint = key.fingerprint
-            "#,
+            include_str!("../../sql/storage/sarif_lifecycle_summary.sql"),
             [],
             |row| {
                 Ok(SarifLifecycleSummary {
@@ -1511,13 +798,7 @@ impl Storage {
 
     fn refresh_current_quality_metrics(&self) -> Result<()> {
         self.conn.execute_batch(
-            r#"
-            UPDATE logical_units
-            SET current_line_cov = 0.0,
-                current_integration_cov = 0.0,
-                current_mutant_cov = 0.0,
-                is_hard_gated = 0;
-            "#,
+            include_str!("../../sql/storage/refresh_current_quality_metrics.sql"),
         )?;
         for (metric, column) in [
             (QualityMetric::LineCoverage, "current_line_cov"),
@@ -1527,17 +808,8 @@ impl Storage {
         ] {
             self.conn.execute(
                 &format!(
-                    r#"
-                    UPDATE logical_units
-                    SET {column} = COALESCE((
-                      SELECT q.new_value
-                      FROM quality_events q
-                      WHERE q.unit_id = logical_units.id
-                        AND q.metric_type = ?1
-                      ORDER BY q.timestamp DESC, q.id DESC
-                      LIMIT 1
-                    ), 0.0)
-                    "#
+                    include_str!("../../sql/storage/refresh_current_quality_metrics_2.sql"),
+                    column = column
                 ),
                 params![metric.as_str()],
             )?;
@@ -1585,20 +857,7 @@ impl Storage {
         source: &str,
     ) -> Result<bool> {
         let changed = self.conn.execute(
-            r#"
-            INSERT INTO coverage_line_events
-              (commit_hash, timestamp, path, line, hits, is_partial, coverage_percent, source)
-            VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)
-            ON CONFLICT(commit_hash, path, line, source) DO UPDATE SET
-              timestamp = MAX(coverage_line_events.timestamp, excluded.timestamp),
-              hits = MAX(coverage_line_events.hits, excluded.hits),
-              is_partial = MAX(coverage_line_events.is_partial, excluded.is_partial),
-              coverage_percent = COALESCE(excluded.coverage_percent, coverage_line_events.coverage_percent)
-            WHERE excluded.timestamp > coverage_line_events.timestamp
-               OR excluded.hits > coverage_line_events.hits
-               OR excluded.is_partial > coverage_line_events.is_partial
-               OR COALESCE(excluded.coverage_percent, -1) <> COALESCE(coverage_line_events.coverage_percent, -1)
-            "#,
+            include_str!("../../sql/storage/record_coverage_line_with_details.sql"),
             params![
                 commit_hash,
                 timestamp,
@@ -1632,19 +891,7 @@ impl Storage {
 
     pub fn insert_crash_event(&self, event: &CrashEvent) -> Result<bool> {
         let mut stmt = self.conn.prepare(
-            r#"
-            SELECT id, timestamp, is_verified
-            FROM crash_events
-            WHERE unit_id = ?1
-              AND commit_hash = ?2
-              AND error_class = ?3
-              AND provider_id = ?4
-              AND path = ?5
-              AND line = ?6
-              AND function = ?7
-            ORDER BY id DESC
-            LIMIT 1
-            "#,
+            include_str!("../../sql/storage/insert_crash_event.sql"),
         )?;
         let existing = stmt
             .query_row(
@@ -1679,12 +926,7 @@ impl Storage {
         }
 
         self.conn.execute(
-            r#"
-            INSERT INTO crash_events
-              (unit_id, commit_hash, timestamp, error_class, provider_id,
-               is_verified, path, line, function)
-            VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)
-            "#,
+            include_str!("../../sql/storage/insert_crash_event_2.sql"),
             params![
                 event.unit_id,
                 event.commit_hash,
@@ -1709,33 +951,7 @@ impl Storage {
 
     pub fn insert_test_exposure_event(&self, event: &TestExposureEvent) -> Result<bool> {
         let changed = self.conn.execute(
-            r#"
-            INSERT INTO test_exposure_events
-              (unit_id, commit_hash, timestamp, path, function, line, branch_id,
-               test_id, test_type, mutation_status, mutation_kind, is_mutation_verified,
-               is_mutation_killed, is_verified, payload_json)
-            VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, COALESCE(?11, ''), ?12, ?13, ?14, ?15)
-            ON CONFLICT DO UPDATE SET
-              timestamp = MAX(test_exposure_events.timestamp, excluded.timestamp),
-              function = COALESCE(excluded.function, test_exposure_events.function),
-              mutation_status = COALESCE(excluded.mutation_status, test_exposure_events.mutation_status),
-              mutation_kind = CASE
-                WHEN lower(COALESCE(test_exposure_events.mutation_kind, '')) IN ('invariant', 'contract') THEN test_exposure_events.mutation_kind
-                WHEN lower(COALESCE(excluded.mutation_kind, '')) IN ('invariant', 'contract') THEN excluded.mutation_kind
-                WHEN COALESCE(excluded.mutation_kind, '') <> '' THEN excluded.mutation_kind
-                ELSE test_exposure_events.mutation_kind
-              END,
-              is_mutation_verified = MAX(test_exposure_events.is_mutation_verified, excluded.is_mutation_verified),
-              is_mutation_killed = MAX(test_exposure_events.is_mutation_killed, excluded.is_mutation_killed),
-              is_verified = MAX(test_exposure_events.is_verified, excluded.is_verified),
-              payload_json = excluded.payload_json
-            WHERE excluded.timestamp > test_exposure_events.timestamp
-               OR excluded.is_mutation_verified > test_exposure_events.is_mutation_verified
-               OR excluded.is_mutation_killed > test_exposure_events.is_mutation_killed
-               OR excluded.is_verified > test_exposure_events.is_verified
-               OR COALESCE(excluded.mutation_kind, '') <> COALESCE(test_exposure_events.mutation_kind, '')
-               OR excluded.payload_json <> test_exposure_events.payload_json
-            "#,
+            include_str!("../../sql/storage/insert_test_exposure_event.sql"),
             params![
                 event.unit_id,
                 event.commit_hash,
@@ -1769,12 +985,7 @@ impl Storage {
 
     pub fn insert_hazard_event(&self, event: &HazardEvent) -> Result<()> {
         self.conn.execute(
-            r#"
-            INSERT INTO unit_hazards
-              (unit_id, language, hazard_type, required_evidence, path, line,
-               symbol, source, detected_at_hash, is_active, payload_json)
-            VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11)
-            "#,
+            include_str!("../../sql/storage/insert_hazard_event.sql"),
             params![
                 event.unit_id,
                 event.language,
@@ -1794,13 +1005,7 @@ impl Storage {
 
     fn refresh_test_exposure_summary(&self, unit_id: &str) -> Result<()> {
         let mut latest_stmt = self.conn.prepare(
-            r#"
-            SELECT commit_hash, timestamp
-            FROM test_exposure_events
-            WHERE unit_id = ?1
-            ORDER BY timestamp DESC, id DESC
-            LIMIT 1
-            "#,
+            include_str!("../../sql/storage/refresh_test_exposure_summary.sql"),
         )?;
         let mut latest_rows = latest_stmt.query(params![unit_id])?;
         let Some(latest_row) = latest_rows.next()? else {
@@ -1810,39 +1015,22 @@ impl Storage {
         let latest_timestamp: i64 = latest_row.get(1)?;
 
         let distinct_tests: i64 = self.conn.query_row(
-            r#"
-            SELECT COUNT(DISTINCT test_id)
-            FROM test_exposure_events
-            WHERE unit_id = ?1 AND commit_hash = ?2
-            "#,
+            include_str!("../../sql/storage/refresh_test_exposure_summary_2.sql"),
             params![unit_id, latest_commit],
             |row| row.get(0),
         )?;
         let mutant_verified: i64 = self.conn.query_row(
-            r#"
-            SELECT COUNT(DISTINCT test_id)
-            FROM test_exposure_events
-            WHERE unit_id = ?1 AND commit_hash = ?2 AND is_mutation_verified = 1
-            "#,
+            include_str!("../../sql/storage/refresh_test_exposure_summary_3.sql"),
             params![unit_id, latest_commit],
             |row| row.get(0),
         )?;
         let mutant_killed: i64 = self.conn.query_row(
-            r#"
-            SELECT COUNT(DISTINCT test_id)
-            FROM test_exposure_events
-            WHERE unit_id = ?1 AND commit_hash = ?2 AND is_mutation_killed = 1
-            "#,
+            include_str!("../../sql/storage/refresh_test_exposure_summary_4.sql"),
             params![unit_id, latest_commit],
             |row| row.get(0),
         )?;
         let mut type_stmt = self.conn.prepare(
-            r#"
-            SELECT DISTINCT test_type
-            FROM test_exposure_events
-            WHERE unit_id = ?1 AND commit_hash = ?2 AND test_type <> ''
-            ORDER BY test_type
-            "#,
+            include_str!("../../sql/storage/refresh_test_exposure_summary_5.sql"),
         )?;
         let type_rows = type_stmt.query_map(params![unit_id, latest_commit], |row| {
             row.get::<_, String>(0)
@@ -1852,15 +1040,7 @@ impl Storage {
             .join(",");
 
         self.conn.execute(
-            r#"
-            UPDATE logical_units
-            SET current_distinct_tests = ?2,
-                current_test_types = ?3,
-                current_mutant_verified_tests = ?4,
-                current_mutant_killed_tests = ?5,
-                last_test_exposure_at = ?6
-            WHERE id = ?1
-            "#,
+            include_str!("../../sql/storage/refresh_test_exposure_summary_6.sql"),
             params![
                 unit_id,
                 distinct_tests,
@@ -1881,404 +1061,7 @@ impl Storage {
     pub fn refresh_ui_summaries(&self) -> Result<()> {
         self.begin_transaction()?;
         let result = self.conn.execute_batch(
-            r#"
-            DELETE FROM ui_file_summaries;
-            DELETE FROM ui_warning_units;
-
-            WITH latest_events AS (
-              SELECT unit_id, path
-              FROM (
-                SELECT unit_id, path,
-                       ROW_NUMBER() OVER (
-                         PARTITION BY unit_id
-                         ORDER BY timestamp DESC, id DESC
-                       ) AS rank
-                FROM events
-              )
-              WHERE rank = 1
-            ),
-            current_units AS (
-              SELECT u.id,
-                     COALESCE(le.path, u.original_path) AS current_path,
-                     u.current_line_cov,
-                     u.current_mutant_cov,
-                     u.current_distinct_tests,
-                     u.current_mutant_killed_tests
-              FROM logical_units u
-              LEFT JOIN latest_events le ON le.unit_id = u.id
-            ),
-            unit_file AS (
-              SELECT current_path AS path,
-                     COUNT(DISTINCT id) AS units,
-                     COALESCE(SUM(current_distinct_tests), 0) AS distinct_tests,
-                     COALESCE(SUM(current_mutant_killed_tests), 0) AS mutant_killed_tests,
-                     COALESCE(AVG(current_line_cov), 0.0) AS fallback_line_coverage,
-                     COALESCE(AVG(current_mutant_cov), 0.0) AS mutant_coverage
-              FROM current_units
-              WHERE current_path <> ''
-              GROUP BY current_path
-            ),
-            latest_source_lines AS (
-              SELECT path, line, source, hits, coverage_percent
-              FROM (
-                SELECT path, line, source, hits, coverage_percent,
-                       ROW_NUMBER() OVER (
-                         PARTITION BY path, line, source
-                         ORDER BY timestamp DESC, id DESC
-                       ) AS rank
-                FROM coverage_line_events
-              )
-              WHERE rank = 1
-            ),
-            latest_lines AS (
-              SELECT path, line, MAX(hits) AS hits,
-                     MAX(COALESCE(coverage_percent, CASE WHEN hits > 0 THEN 100.0 ELSE 0.0 END)) AS coverage_percent
-              FROM latest_source_lines
-              GROUP BY path, line
-            ),
-            line_file AS (
-              SELECT path,
-                     COUNT(*) AS tracked_lines,
-                     SUM(CASE WHEN hits > 0 THEN 1 ELSE 0 END) AS covered_lines,
-                     AVG(coverage_percent) AS coverage_percent
-              FROM latest_lines
-              GROUP BY path
-            ),
-            ranked_exposure AS (
-              SELECT path, line, branch_id, test_id, test_type, is_verified,
-                     is_mutation_verified, is_mutation_killed, mutation_kind,
-                     ROW_NUMBER() OVER (
-                       PARTITION BY path, line, COALESCE(branch_id, ''), test_id, test_type
-                       ORDER BY timestamp DESC, id DESC
-                     ) AS rank
-              FROM test_exposure_events
-              WHERE line IS NOT NULL
-            ),
-            latest_exposure AS (
-              SELECT *
-              FROM ranked_exposure
-              WHERE rank = 1
-            ),
-            line_exposure AS (
-              SELECT e.path,
-                     e.line,
-                     l.hits,
-                     COUNT(DISTINCT CASE WHEN e.is_verified = 1 THEN e.test_type END) AS verified_test_types,
-                     MAX(CASE WHEN e.is_verified = 1 AND e.is_mutation_verified = 1 THEN 1 ELSE 0 END) AS mutant_verified,
-                     MAX(CASE WHEN e.is_verified = 1 AND e.is_mutation_killed = 1 THEN 1 ELSE 0 END) AS mutant_killed,
-                     MAX(CASE
-                       WHEN e.is_verified = 1
-                        AND e.is_mutation_verified = 1
-                        AND lower(COALESCE(e.mutation_kind, '')) = 'stochastic'
-                       THEN 1 ELSE 0
-                     END) AS stochastic_mutant_verified,
-                     MAX(CASE
-                       WHEN e.is_verified = 1
-                        AND e.is_mutation_killed = 1
-                        AND lower(COALESCE(e.mutation_kind, '')) = 'stochastic'
-                       THEN 1 ELSE 0
-                     END) AS stochastic_mutant_killed,
-                     MAX(CASE
-                       WHEN e.is_verified = 1
-                        AND e.is_mutation_killed = 1
-                        AND lower(COALESCE(e.mutation_kind, '')) IN ('invariant', 'contract')
-                       THEN 1 ELSE 0
-                     END) AS invariant_mutant_killed,
-                     MAX(CASE
-                       WHEN e.is_verified = 1
-                        AND e.is_mutation_verified = 1
-                        AND lower(COALESCE(e.mutation_kind, '')) IN ('invariant', 'contract')
-                       THEN 1 ELSE 0
-                     END) AS invariant_mutant_verified
-              FROM latest_exposure e
-              JOIN latest_lines l
-                ON l.path = e.path
-               AND l.line = e.line
-               AND l.hits > 0
-              GROUP BY e.path, e.line
-            ),
-            exposure_file AS (
-              SELECT path,
-                     SUM(mutant_verified) AS mutant_verified_covered_lines,
-                     SUM(mutant_killed) AS mutant_killed_covered_lines,
-                     SUM(stochastic_mutant_verified) AS stochastic_mutant_verified_covered_lines,
-                     SUM(stochastic_mutant_killed) AS stochastic_mutant_killed_covered_lines,
-                     SUM(invariant_mutant_verified) AS invariant_mutant_verified_covered_lines,
-                     SUM(invariant_mutant_killed) AS invariant_mutant_killed_covered_lines,
-                     SUM(CASE WHEN verified_test_types >= 2 OR hits > 1 THEN 1 ELSE 0 END) AS multi_type_covered_lines
-              FROM line_exposure
-              GROUP BY path
-            ),
-            active_hazards AS (
-              SELECT *
-              FROM unit_hazards
-              WHERE is_active = 1
-            ),
-            hazard_ranked_exposure AS (
-              SELECT t.unit_id,
-                     t.path,
-                     t.line,
-                     t.branch_id,
-                     t.test_id,
-                     t.test_type,
-                     t.is_verified,
-                     t.is_mutation_killed,
-                     t.mutation_kind,
-                     ROW_NUMBER() OVER (
-                       PARTITION BY t.path, t.line, COALESCE(t.branch_id, ''), t.test_id, t.test_type
-                       ORDER BY t.timestamp DESC, t.id DESC
-                     ) AS rank
-              FROM test_exposure_events t
-              JOIN active_hazards h
-                ON h.unit_id = t.unit_id
-               AND h.path = t.path
-               AND h.line = t.line
-              WHERE t.line IS NOT NULL
-            ),
-            hazard_latest_exposure AS (
-              SELECT *
-              FROM hazard_ranked_exposure
-              WHERE rank = 1
-            ),
-            hazard_evidence AS (
-              SELECT unit_id,
-                     path,
-                     line,
-                     lower(test_type) AS test_type,
-                     MAX(CASE WHEN is_verified = 1 THEN 1 ELSE 0 END) AS has_evidence,
-                     MAX(CASE
-                       WHEN is_verified = 1
-                        AND is_mutation_killed = 1
-                        AND lower(COALESCE(mutation_kind, '')) IN ('invariant', 'contract')
-                       THEN 1 ELSE 0
-                     END) AS has_invariant_mutation
-              FROM hazard_latest_exposure
-              GROUP BY unit_id, path, line, lower(test_type)
-            ),
-            hazard_rows AS (
-              SELECT h.id,
-                     h.path,
-                     CASE
-                       WHEN MAX(CASE
-                              WHEN (e.test_type = lower(h.required_evidence)
-                                 OR e.test_type LIKE '%' || lower(h.required_evidence) || '%')
-                               AND e.has_evidence = 1
-                              THEN 1 ELSE 0
-                            END) = 1
-                         OR MAX(CASE
-                              WHEN ls.hits > 0
-                               AND (lower(ls.source) = lower(h.required_evidence)
-                                 OR lower(ls.source) LIKE '%' || lower(h.required_evidence) || '%')
-                              THEN 1 ELSE 0
-                            END) = 1
-                       THEN 1 ELSE 0
-                     END AS evidence_present,
-                     CASE
-                       WHEN MAX(CASE WHEN l.hits > 0 THEN 1 ELSE 0 END) = 1
-                         OR MAX(CASE
-                              WHEN (e.test_type = lower(h.required_evidence)
-                                 OR e.test_type LIKE '%' || lower(h.required_evidence) || '%')
-                               AND e.has_evidence = 1
-                              THEN 1 ELSE 0
-                            END) = 1
-                         OR MAX(CASE
-                              WHEN ls.hits > 0
-                               AND (lower(ls.source) = lower(h.required_evidence)
-                                 OR lower(ls.source) LIKE '%' || lower(h.required_evidence) || '%')
-                              THEN 1 ELSE 0
-                            END) = 1
-                       THEN 1 ELSE 0
-                     END AS verified
-              FROM active_hazards h
-              LEFT JOIN hazard_evidence e
-                ON e.unit_id = h.unit_id
-               AND e.path = h.path
-               AND e.line = h.line
-              LEFT JOIN latest_lines l
-                ON l.path = h.path
-               AND l.line = h.line
-              LEFT JOIN latest_source_lines ls
-                ON ls.path = h.path
-               AND ls.line = h.line
-              GROUP BY h.id, h.path
-            ),
-            hazard_file AS (
-              SELECT path,
-                     COUNT(*) AS hazards,
-                     SUM(evidence_present) AS evidence_covered_hazards,
-                     SUM(verified) AS covered_hazards
-              FROM hazard_rows
-              GROUP BY path
-            ),
-            paths AS (
-              SELECT path FROM unit_file
-              UNION
-              SELECT path FROM line_file
-              UNION
-              SELECT path FROM exposure_file
-              UNION
-              SELECT path FROM hazard_file
-            )
-            INSERT INTO ui_file_summaries (
-              path,
-              units,
-              hazards,
-              evidence_covered_hazards,
-              covered_hazards,
-              distinct_tests,
-              mutant_killed_tests,
-              tracked_lines,
-              covered_lines,
-              line_coverage,
-              mutant_coverage,
-              mutant_verified_covered_lines,
-              mutant_killed_covered_lines,
-              stochastic_mutant_verified_covered_lines,
-              stochastic_mutant_killed_covered_lines,
-              invariant_mutant_verified_covered_lines,
-              invariant_mutant_killed_covered_lines,
-              multi_type_covered_lines
-            )
-            SELECT p.path,
-                   COALESCE(uf.units, 0),
-                   COALESCE(hf.hazards, 0),
-                   COALESCE(hf.evidence_covered_hazards, 0),
-                   COALESCE(hf.covered_hazards, 0),
-                   COALESCE(uf.distinct_tests, 0),
-                   COALESCE(uf.mutant_killed_tests, 0),
-                   COALESCE(lf.tracked_lines, 0),
-                   COALESCE(lf.covered_lines, 0),
-                   CASE
-                     WHEN COALESCE(lf.tracked_lines, 0) > 0
-                     THEN COALESCE(lf.coverage_percent, 0.0)
-                     ELSE COALESCE(uf.fallback_line_coverage, 0.0)
-                   END,
-                   COALESCE(uf.mutant_coverage, 0.0),
-                   COALESCE(ef.mutant_verified_covered_lines, 0),
-                   COALESCE(ef.mutant_killed_covered_lines, 0),
-                   COALESCE(ef.stochastic_mutant_verified_covered_lines, 0),
-                   COALESCE(ef.stochastic_mutant_killed_covered_lines, 0),
-                   COALESCE(ef.invariant_mutant_verified_covered_lines, 0),
-                   COALESCE(ef.invariant_mutant_killed_covered_lines, 0),
-                   COALESCE(ef.multi_type_covered_lines, 0)
-            FROM paths p
-            LEFT JOIN unit_file uf ON uf.path = p.path
-            LEFT JOIN line_file lf ON lf.path = p.path
-            LEFT JOIN exposure_file ef ON ef.path = p.path
-            LEFT JOIN hazard_file hf ON hf.path = p.path
-            WHERE p.path <> '';
-
-            WITH latest_events AS (
-              SELECT unit_id, path
-              FROM (
-                SELECT unit_id, path,
-                       ROW_NUMBER() OVER (
-                         PARTITION BY unit_id
-                         ORDER BY timestamp DESC, id DESC
-                       ) AS rank
-                FROM events
-              )
-              WHERE rank = 1
-            ),
-            current_units AS (
-              SELECT u.id,
-                     COALESCE(le.path, u.original_path) AS current_path,
-                     u.current_distinct_tests,
-                     u.current_mutant_verified_tests,
-                     u.last_test_exposure_at
-              FROM logical_units u
-              LEFT JOIN latest_events le ON le.unit_id = u.id
-            ),
-            db_clock AS (
-              SELECT COALESCE(MAX(timestamp), 0) AS observed_at
-              FROM (
-                SELECT timestamp FROM metadata
-                UNION ALL SELECT timestamp FROM events
-                UNION ALL SELECT timestamp FROM quality_events
-                UNION ALL SELECT timestamp FROM crash_events
-                UNION ALL SELECT timestamp FROM test_exposure_events
-              )
-            ),
-            mutant_runs AS (
-              SELECT unit_id, MAX(timestamp) AS last_mutant_run_at
-              FROM test_exposure_events
-              WHERE is_mutation_verified = 1 OR is_mutation_killed = 1
-              GROUP BY unit_id
-            ),
-            event_counts AS (
-              SELECT cu.id,
-                     SUM(CASE
-                       WHEN cu.last_test_exposure_at > 0
-                        AND e.semantic_change = 1
-                        AND e.event_type IN ('FIX', 'CHANGE')
-                        AND e.timestamp > cu.last_test_exposure_at
-                       THEN 1 ELSE 0
-                     END) AS changes_after_test_exposure,
-                     SUM(CASE
-                       WHEN COALESCE(m.last_mutant_run_at, 0) > 0
-                        AND e.semantic_change = 1
-                        AND e.event_type IN ('FIX', 'CHANGE')
-                        AND e.timestamp > m.last_mutant_run_at
-                       THEN 1 ELSE 0
-                     END) AS semantic_changes_after_mutant_run
-              FROM current_units cu
-              LEFT JOIN mutant_runs m ON m.unit_id = cu.id
-              LEFT JOIN events e ON e.unit_id = cu.id
-              GROUP BY cu.id
-            ),
-            reopened AS (
-              SELECT c.unit_id, COUNT(DISTINCT c.id) AS reopened_count
-              FROM crash_events c
-              WHERE EXISTS (
-                SELECT 1
-                FROM events fix
-                WHERE fix.unit_id = c.unit_id
-                  AND fix.event_type = 'FIX'
-                  AND fix.semantic_change = 1
-                  AND fix.path = c.path
-                  AND c.line BETWEEN fix.start_line AND fix.end_line
-                  AND c.timestamp > fix.timestamp
-              )
-              GROUP BY c.unit_id
-            )
-            INSERT INTO ui_warning_units (
-              unit_id,
-              current_path,
-              current_distinct_tests,
-              current_mutant_verified_tests,
-              last_test_exposure_at,
-              last_mutant_run_at,
-              changes_after_test_exposure,
-              semantic_changes_after_mutant_run,
-              verification_stale_seconds,
-              reopened_count
-            )
-            SELECT cu.id,
-                   cu.current_path,
-                   cu.current_distinct_tests,
-                   cu.current_mutant_verified_tests,
-                   cu.last_test_exposure_at,
-                   COALESCE(m.last_mutant_run_at, 0),
-                   COALESCE(ec.changes_after_test_exposure, 0),
-                   COALESCE(ec.semantic_changes_after_mutant_run, 0),
-                   CASE
-                     WHEN COALESCE(m.last_mutant_run_at, 0) > 0
-                      AND clock.observed_at > m.last_mutant_run_at
-                     THEN clock.observed_at - m.last_mutant_run_at
-                     ELSE 0
-                   END,
-                   COALESCE(r.reopened_count, 0)
-            FROM current_units cu
-            LEFT JOIN mutant_runs m ON m.unit_id = cu.id
-            LEFT JOIN event_counts ec ON ec.id = cu.id
-            LEFT JOIN reopened r ON r.unit_id = cu.id
-            CROSS JOIN db_clock clock
-            WHERE cu.current_path <> '';
-
-            INSERT INTO ui_refresh_metadata (key, value)
-            VALUES ('refreshed_at', strftime('%s', 'now'))
-            ON CONFLICT(key) DO UPDATE SET value = excluded.value;
-            "#,
+            include_str!("../../sql/storage/refresh_ui_summaries.sql"),
         );
         if let Err(error) = result {
             let _ = self.rollback_transaction();
@@ -2566,108 +1349,14 @@ impl Storage {
 
 fn configure_connection(conn: &Connection) -> Result<()> {
     conn.execute_batch(
-        r#"
-        PRAGMA foreign_keys = ON;
-        PRAGMA synchronous = NORMAL;
-        "#,
+        include_str!("../../sql/storage/configure_connection.sql"),
     )?;
     Ok(())
 }
 
 fn apply_decayed_risk(conn: &Connection, summaries: &mut HashMap<String, UnitSummary>) -> Result<()> {
     let mut stmt = conn.prepare(
-        r#"
-        WITH fix_commit_raw AS (
-          SELECT commit_hash,
-                 COUNT(DISTINCT CASE
-                   WHEN NOT (
-                     path LIKE 'spec/%'
-                     OR path LIKE 'test/%'
-                     OR path LIKE 'tests/%'
-                     OR path LIKE 'transpile-tests/%'
-                     OR path LIKE 'tools/fuzz/%'
-                     OR path LIKE '%/spec/%'
-                     OR path LIKE '%/test/%'
-                     OR path LIKE '%_spec.%'
-                     OR path LIKE '%_test.%'
-                   )
-                   THEN unit_id END) AS code_units,
-                 COUNT(DISTINCT CASE
-                   WHEN NOT (
-                     path LIKE 'spec/%'
-                     OR path LIKE 'test/%'
-                     OR path LIKE 'tests/%'
-                     OR path LIKE 'transpile-tests/%'
-                     OR path LIKE 'tools/fuzz/%'
-                     OR path LIKE '%/spec/%'
-                     OR path LIKE '%/test/%'
-                     OR path LIKE '%_spec.%'
-                     OR path LIKE '%_test.%'
-                   )
-                   THEN path END) AS code_files,
-                 COALESCE(SUM(CASE
-                   WHEN NOT (
-                     path LIKE 'spec/%'
-                     OR path LIKE 'test/%'
-                     OR path LIKE 'tests/%'
-                     OR path LIKE 'transpile-tests/%'
-                     OR path LIKE 'tools/fuzz/%'
-                     OR path LIKE '%/spec/%'
-                     OR path LIKE '%/test/%'
-                     OR path LIKE '%_spec.%'
-                     OR path LIKE '%_test.%'
-                   )
-                   THEN ABS(lines_added) + ABS(lines_removed) ELSE 0 END), 0) AS code_lines
-          FROM events
-          WHERE event_type = 'FIX'
-            AND semantic_change = 1
-          GROUP BY commit_hash
-        ),
-        fix_commit_profiles AS (
-          SELECT commit_hash,
-                 CASE
-                   WHEN code_units BETWEEN 1 AND 3
-                    AND code_files BETWEEN 1 AND 3
-                    AND code_lines <= 80
-                   THEN 1.0
-                   WHEN code_units BETWEEN 1 AND 8
-                    AND code_files BETWEEN 1 AND 5
-                    AND code_lines <= 200
-                   THEN 0.65
-                   WHEN code_units BETWEEN 1 AND 20
-                    AND code_files BETWEEN 1 AND 10
-                    AND code_lines <= 500
-                   THEN 0.30
-                   ELSE 0.10
-                 END AS target_factor
-          FROM fix_commit_raw
-        )
-        SELECT e.unit_id,
-               e.event_type,
-               e.timestamp,
-               CASE WHEN e.event_type = 'FIX'
-                    THEN COALESCE(fp.target_factor, 0.10)
-                    ELSE 1.0
-               END AS target_factor,
-               CASE
-                 WHEN e.event_type = 'FIX'
-                  AND COALESCE(fp.target_factor, 0.10) >= 0.65
-                  AND EXISTS (
-                    SELECT 1
-                    FROM test_exposure_events t
-                    WHERE t.unit_id = e.unit_id
-                      AND t.timestamp > e.timestamp
-                      AND t.is_mutation_killed = 1
-                    LIMIT 1
-                  )
-                 THEN 0.25
-                 ELSE 1.0
-               END AS mutation_hardening_factor
-        FROM events e
-        LEFT JOIN fix_commit_profiles fp ON fp.commit_hash = e.commit_hash
-        WHERE e.semantic_change = 1
-          AND e.event_type IN ('FIX', 'CHANGE')
-        "#,
+        include_str!("../../sql/storage/apply_decayed_risk.sql"),
     )?;
     let rows = stmt.query_map([], |row| {
         Ok((
@@ -2736,6 +1425,81 @@ fn checked_table(table: &str) -> Result<&str> {
 mod tests {
     use super::*;
     use crate::model::{EventType, UnitKind};
+    use std::fs;
+
+    fn collected_sql_files(root: &Path) -> Vec<std::path::PathBuf> {
+        let mut files = Vec::new();
+        for entry in fs::read_dir(root).unwrap() {
+            let path = entry.unwrap().path();
+            if path.is_dir() {
+                files.extend(collected_sql_files(&path));
+            } else if path.extension().and_then(|value| value.to_str()) == Some("sql") {
+                files.push(path);
+            }
+        }
+        files.sort();
+        files
+    }
+
+    #[test]
+    fn extracted_storage_and_ui_queries_prepare_against_the_real_schema() {
+        let storage = Storage::open_memory().unwrap();
+        let sql_root = Path::new(env!("CARGO_MANIFEST_DIR")).join("sql");
+        let files = [sql_root.join("storage"), sql_root.join("ui/runtime")]
+            .into_iter()
+            .flat_map(|root| collected_sql_files(&root))
+            .collect::<Vec<_>>();
+        assert!(files.len() >= 70);
+        for path in files {
+            let sql = fs::read_to_string(&path)
+                .unwrap()
+                .replace("{column}", "current_line_cov");
+            storage
+                .connection()
+                .prepare(&sql)
+                .unwrap_or_else(|error| panic!("{} did not prepare: {error}", path.display()));
+        }
+    }
+
+    #[test]
+    fn partial_line_percentage_is_not_masked_by_a_full_coverage_source() {
+        let storage = Storage::open_memory().unwrap();
+        storage
+            .record_coverage_line_with_details(
+                "old",
+                10,
+                "sql/query.sql",
+                3,
+                1,
+                false,
+                Some(100.0),
+                "coverage:legacy",
+            )
+            .unwrap();
+        storage
+            .record_coverage_line_with_details(
+                "new",
+                20,
+                "sql/query.sql",
+                3,
+                1,
+                true,
+                Some(200.0 / 3.0),
+                "coverage:sql-cov",
+            )
+            .unwrap();
+        storage.refresh_ui_summaries().unwrap();
+        let (partial, coverage) = storage
+            .connection()
+            .query_row(
+                "SELECT partial_lines, line_coverage FROM ui_file_summaries WHERE path = ?1",
+                ["sql/query.sql"],
+                |row| Ok((row.get::<_, i64>(0)?, row.get::<_, f64>(1)?)),
+            )
+            .unwrap();
+        assert_eq!(partial, 1);
+        assert!((coverage - 200.0 / 3.0).abs() < 0.000_001);
+    }
 
     #[test]
     fn migrates_partial_coverage_and_merges_partial_observations() {

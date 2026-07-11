@@ -619,6 +619,16 @@ mod tests {
             serde_json::to_vec(&document(vec![
                 result("decomplex.old", "resolved"),
                 result("decomplex.same", "persisted"),
+                serde_json::json!({
+                    "ruleId": "decomplex.other",
+                    "level": "warning",
+                    "message": {"text": "other file retained"},
+                    "locations": [{"physicalLocation": {
+                        "artifactLocation": {"uri": "src/other.rb"},
+                        "region": {"startLine": 1}
+                    }}],
+                    "partialFingerprints": {"stable": "other file retained"}
+                }),
             ]))
             .unwrap(),
         )
@@ -654,10 +664,13 @@ mod tests {
         )
         .unwrap();
 
-        assert_eq!(storage.count_rows("sarif_findings").unwrap(), 4);
+        assert_eq!(storage.count_rows("sarif_findings").unwrap(), 5);
         let current = storage.sarif_findings_for_path("src/demo.rb").unwrap();
         assert_eq!(current.len(), 2);
         assert!(current.iter().all(|finding| finding.commit_hash == "new"));
+        let retained = storage.sarif_findings_for_path("src/other.rb").unwrap();
+        assert_eq!(retained.len(), 1);
+        assert_eq!(retained[0].commit_hash, "old");
         assert_eq!(
             storage.sarif_finding_counts_by_file().unwrap()["src/demo.rb"],
             2
@@ -665,7 +678,7 @@ mod tests {
         assert_eq!(
             storage.sarif_lifecycle_summary().unwrap(),
             crate::storage::SarifLifecycleSummary {
-                new_findings: 1,
+                new_findings: 2,
                 resolved_findings: 1,
                 persisted_findings: 1,
             }
