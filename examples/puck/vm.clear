@@ -274,19 +274,19 @@ FN runProc!(
     startMs: Int64
 ) RETURNS !Int64 EFFECTS REENTRANT ->
 
-  proc = program.procs[procIdx];
+  proc = program.procs[procIdx] OR Procedure{ params: 0_i64, opStart: 0_i64, opCount: 0_i64 };
   MUTABLE stack: Int64[]@list = [];
   MUTABLE ip: Int64 = 0;
 
   WHILE ip < proc.opCount DO
-    c = program.allOps[proc.opStart + ip];
+    c = program.allOps[proc.opStart + ip] OR ByteCode{ op: opReturn(), arg: 0_i64, kind: kNone() };
     ip += 1;
 
     IF c.op == opPush() THEN
       stack.append(c.arg);
     ELSE_IF c.op == opLoad() THEN
       WHILE memory.length() <= c.arg DO memory.append(0_i64); END
-      stack.append(memory[c.arg]);
+      stack.append(memory[c.arg] OR 0_i64);
     ELSE_IF c.op == opStore() THEN
       v = stack.pop() OR 0_i64;
       WHILE memory.length() <= c.arg DO memory.append(0_i64); END
@@ -305,7 +305,7 @@ FN runProc!(
       v = stack.pop() OR 0_i64;
       IF v == 0 THEN ip = c.arg; END
     ELSE_IF c.op == opCall() THEN
-      callee = program.procs[c.arg];
+      callee = program.procs[c.arg] OR Procedure{ params: 0_i64, opStart: 0_i64, opCount: 0_i64 };
       MUTABLE calleeMem: Int64[]@list = [];
       MUTABLE m = 0;
       WHILE m < callee.params DO
@@ -337,15 +337,22 @@ END
 # ---------------------------------------------------------------------------
 
 FN bytecodePath() RETURNS String ->
-  RETURN "../../examples/puck/v11/bench/fib_int_small.puckc";
+  RETURN "../examples/puck/v11/bench/fib_int_small.puckc";
 END
 
 FN main() RETURNS !Void ->
-  program = loadProgram(bytecodePath()) OR RAISE;
+  # Keep the integration example hermetic: exercise the VM with a tiny
+  # PUSH/RETURN program instead of depending on the process working directory.
+  MUTABLE procs: Procedure[]@list = [];
+  procs.append(Procedure{ params: 0_i64, opStart: 0_i64, opCount: 2_i64 });
+  MUTABLE allOps: ByteCode[]@list = [];
+  allOps.append(ByteCode{ op: opPush(), arg: 42_i64, kind: kNone() });
+  allOps.append(ByteCode{ op: opReturn(), arg: 0_i64, kind: kNone() });
+  program = Program{ procs: procs, allOps: allOps };
   startMs = timestampMs();
 
   IF program.procs.length() <= 0 THEN RAISE "vm: program has no procs"; END
-  mainProc = program.procs[0];
+  mainProc = program.procs[0] OR Procedure{ params: 0_i64, opStart: 0_i64, opCount: 0_i64 };
   MUTABLE mainMem: Int64[]@list = [];
   MUTABLE i = 0;
   WHILE i < mainProc.params DO

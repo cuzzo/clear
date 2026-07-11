@@ -32,30 +32,34 @@ FN main() RETURNS !Void ->
   MUTABLE futures: ~Void[]@list = [];
   MUTABLE wi = 0;
   WHILE wi < workers DO
-    ref0 = counters[wi];
-    ref = CLONE ref0;
-    futures
-      .append(
-        BG {
-          @standard:@parallel -> FOR j IN (0 ..< increments) DO
-            WITH EXCLUSIVE ref AS inner {inner.value = inner.value + 1;}
-          END
+    IF counters[wi] AS ref0 THEN
+      ref = CLONE ref0;
+      futures
+        .append(
+          BG {
+            @standard:@parallel -> FOR j IN (0 ..< increments) DO
+              WITH EXCLUSIVE ref AS inner {inner.value = inner.value + 1;}
+            END
 
-      }
-    );
+        }
+      );
+    END
   wi += 1;
 END
 
-FOR i IN (0 ..< workers) -> NEXT futures[i];
+FOR i IN (0 ..< workers) DO
+  IF futures[i] AS future THEN NEXT future; END
+END
 elapsed = timestampMs() - t0;
 
 # Verify
 MUTABLE total = 0;
 FOR i IN (0 ..< workers) DO
-  ref = counters[i];
-  WITH ref AS inner {
-    total = total + inner.value;
-  }
+  IF counters[i] AS ref THEN
+    WITH ref AS inner {
+      total = total + inner.value;
+    }
+  END
 END
 expected = workers * increments;
 ASSERT total == expected, "total mismatch";

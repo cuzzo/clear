@@ -744,10 +744,15 @@ class PipelineRewriter
   sig { params(rhs: AST::Locatable).returns(T::Boolean) }
   def callee_returns_error?(rhs)
     ti = rhs.full_type!(context: "pipeline callee")
-    raw = ti.raw
-    return false unless raw.is_a?(FunctionSignature)
-    ret_type = raw.return_type
-    ret_type&.error_union? || false
+    # Annotated function identifiers are represented by Type::FunctionType;
+    # older producers exposed a bare FunctionSignature. Handle the canonical
+    # representation first so fallible pipelines stay in MIR lowering, where
+    # CATCH snapshot capture is inserted before the call.
+    function_type = ti.function_type
+    return function_type.return_type.error_union? if function_type
+
+    signature = FunctionSignature.unwrap(ti)
+    signature&.return_type&.error_union? || false
   end
 
   # Returns true if the source requires MIR pipeline lowering (pool, sharded,

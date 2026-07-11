@@ -738,8 +738,8 @@ jobs:
           key: clear-examples-coverage-${{ runner.os }}-zig${{ env.ZIG_VERSION }}-${{ hashFiles('compiler/ruby/**', 'zig/runtime/**', 'zig/lib/**', 'examples/**/*.clear', 'benchmarks/**/*.clear', 'Gemfile.lock') }}
           restore-keys: |
             clear-examples-coverage-${{ runner.os }}-zig${{ env.ZIG_VERSION }}-
-      - run: bundle exec ruby tools/corpus_transpile_coverage.rb --shard ${{ matrix.shard }}/5
-      - run: bundle exec ruby tools/corpus_runtime_coverage.rb --shard ${{ matrix.shard }}/5
+      - run: bundle exec ruby tools/corpus_transpile_coverage.rb --strict --shard ${{ matrix.shard }}/5
+      - run: bundle exec ruby tools/corpus_runtime_coverage.rb --strict --shard ${{ matrix.shard }}/5
       - run: bundle exec ruby compiler/spec/collate_coverage.rb
       - uses: actions/upload-artifact@v4
         with:

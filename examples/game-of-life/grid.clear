@@ -19,7 +19,8 @@ END
 FN containsCell?(cells: Cell[]@list, cell: Cell) RETURNS Bool ->
   MUTABLE i = 0;
   WHILE i < cells.length() DO
-    IF sameCell?(cells[i], cell) -> RETURN TRUE;
+    candidate = cells[i] OR Cell{ x: 0_i64, y: 0_i64 };
+    IF sameCell?(candidate, cell) -> RETURN TRUE;
     i += 1;
   END
   RETURN FALSE;
@@ -52,12 +53,12 @@ FN buildGrid(liveCells: Cell[]@list) RETURNS !HashMap<CellState> ->
   MUTABLE states: HashMap<CellState> = {};
   MUTABLE i = 0;
   WHILE i < liveCells.length() DO
-    cell = liveCells[i];
+    cell = liveCells[i] OR Cell{ x: 0_i64, y: 0_i64 };
     neighbors = cellNeighbors(cell);
 
     MUTABLE n = 0;
     WHILE n < neighbors.length() DO
-      neighbor = neighbors[n];
+      neighbor = neighbors[n] OR Cell{ x: 0_i64, y: 0_i64 };
       key = cellKey(neighbor);
       MUTABLE state = states[key] OR CellState{ life: FALSE, neighbors: 0 };
       state.neighbors += 1;
@@ -93,11 +94,12 @@ FN candidateCells(liveCells: Cell[]@list) RETURNS !Cell[]@list ->
   MUTABLE candidates: Cell[]@list = [];
   MUTABLE i = 0;
   WHILE i < liveCells.length() DO
-    cell = liveCells[i];
+    cell = liveCells[i] OR Cell{ x: 0_i64, y: 0_i64 };
     neighbors = cellNeighbors(cell);
     MUTABLE n = 0;
     WHILE n < neighbors.length() DO
-      appendUniqueCell!(candidates, neighbors[n]);
+      neighbor = neighbors[n] OR Cell{ x: 0_i64, y: 0_i64 };
+      appendUniqueCell!(candidates, neighbor);
       n += 1;
     END
     appendUniqueCell!(candidates, cell);
@@ -112,7 +114,7 @@ FN advance(liveCells: Cell[]@list) RETURNS !Cell[]@list ->
   MUTABLE next: Cell[]@list = [];
   MUTABLE i = 0;
   WHILE i < candidates.length() DO
-    cell = candidates[i];
+    cell = candidates[i] OR Cell{ x: 0_i64, y: 0_i64 };
     state = states[cellKey(cell)] OR CellState{ life: FALSE, neighbors: 0 };
     IF evolve(state) THEN
       next.append(cell);

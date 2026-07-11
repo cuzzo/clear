@@ -44,8 +44,10 @@ FN main() RETURNS Void ->
 
   MUTABLE total = 0;
   FOR j IN (0 ..< 64) DO
-    result = NEXT futures[j];
-    total = total %+ result;
+    IF futures[j] AS future THEN
+      result = NEXT future;
+      total = total %+ result;
+    END
   END
   elapsed = timestampMs() - t0;
 

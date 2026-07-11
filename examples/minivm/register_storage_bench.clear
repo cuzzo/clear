@@ -9,7 +9,7 @@ FN benchDenseIntList(n: Int64) RETURNS !Int64 ->
     END
     MUTABLE total: Int64 = 0_i64;
     FOR i IN (0_i64 ..< n) DO
-        total = total + values[i];
+        total = total + (values[i] OR 0_i64);
     END
     elapsed = timestampMs() - t0;
     print("dense_int_list total=${total.toString()} ms=${elapsed.toString()}");
@@ -39,10 +39,10 @@ FN benchFloatList(n: Int64) RETURNS !Int64 ->
     END
     MUTABLE total: Float64 = 0.0;
     FOR i IN (0_i64 ..< n) DO
-        total = total + values[i];
+        total = total + (values[i] OR 0.0);
     END
     elapsed = timestampMs() - t0;
-    print("float_list total=${total.toString()} ms=${elapsed.toString()}");
+    print("float_list total=${toInt(total).toString()} ms=${elapsed.toString()}");
     RETURN elapsed;
 END
 

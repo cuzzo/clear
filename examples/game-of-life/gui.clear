@@ -4,7 +4,7 @@ FN liveCellMap(cells: Cell[]@list) RETURNS !HashMap<Int64> ->
   MUTABLE live: HashMap<Int64> = {};
   MUTABLE i = 0;
   WHILE i < cells.length() DO
-    live[cellKey(cells[i])] = 1;
+    IF cells[i] AS cell THEN live[cellKey(cell)] = 1; END
     i += 1;
   END
   RETURN live;
@@ -18,16 +18,19 @@ FN bounds(cells: Cell[]@list) RETURNS !Cell[]@list ->
     RETURN result;
   END
 
-  MUTABLE minX = cells[0].x;
-  MUTABLE maxX = cells[0].x;
-  MUTABLE minY = cells[0].y;
-  MUTABLE maxY = cells[0].y;
+  first = cells[0] OR Cell{ x: 0_i64, y: 0_i64 };
+  MUTABLE minX = first.x;
+  MUTABLE maxX = first.x;
+  MUTABLE minY = first.y;
+  MUTABLE maxY = first.y;
   MUTABLE i = 1;
   WHILE i < cells.length() DO
-    IF cells[i].x < minX -> minX = cells[i].x;
-    IF cells[i].x > maxX -> maxX = cells[i].x;
-    IF cells[i].y < minY -> minY = cells[i].y;
-    IF cells[i].y > maxY -> maxY = cells[i].y;
+    IF cells[i] AS cell THEN
+      IF cell.x < minX -> minX = cell.x;
+      IF cell.x > maxX -> maxX = cell.x;
+      IF cell.y < minY -> minY = cell.y;
+      IF cell.y > maxY -> maxY = cell.y;
+    END
     i += 1;
   END
 
@@ -39,8 +42,8 @@ END
 FN graph(cells: Cell[]@list) RETURNS !String[]@list ->
   live = liveCellMap(cells);
   b = bounds(cells);
-  min = b[0];
-  max = b[1];
+  min = b[0] OR Cell{ x: 0_i64, y: 0_i64 };
+  max = b[1] OR Cell{ x: 0_i64, y: 0_i64 };
   MUTABLE rows: String[]@list = [];
 
   MUTABLE x = min.x - 1;
@@ -65,14 +68,14 @@ END
 
 FN render(cells: Cell[]@list) RETURNS !Void ->
   b = bounds(cells);
-  min = b[0];
-  max = b[1];
+  min = b[0] OR Cell{ x: 0_i64, y: 0_i64 };
+  max = b[1] OR Cell{ x: 0_i64, y: 0_i64 };
   print("---GENERATION---");
   print("(${min.x.toString()},${min.y.toString()}) (${max.x.toString()},${max.y.toString()})");
   rows = graph(cells);
   MUTABLE i = 0;
   WHILE i < rows.length() DO
-    print(rows[i]);
+    print(rows[i] OR "");
     i += 1;
   END
   RETURN;

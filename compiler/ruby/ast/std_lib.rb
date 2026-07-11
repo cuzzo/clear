@@ -1567,6 +1567,7 @@ BUILTIN_OPS = T.let({
   getAt: { zig: "CheatLib.getAt({0}, {1})", bc: true, borrows: :all },
   getAtOpt: { zig: "CheatLib.getAtOpt({0}, {1})", bc: true, bc_op: :getAt, borrows: :all },
   getAtPtrOpt: { zig: "CheatLib.getAtPtrOpt({0}, {1})", bc: true, bc_op: :getAt, borrows: :all },
+  getOptionalPtr: { zig: "CheatLib.getOptionalPtr({0})", bc: false, borrows: :all },
   getNodeAt: { zig: "CheatLib.getNodeAt({0}, {1})", bc: true, bc_op: :getAt, borrows: :all },
   setAt: { zig: "CheatLib.setAt({0}, {1}, {2})", bc: true, borrows: :all },
   numericMapGet: { zig: "CheatLib.numericMapGet({0}, {1}, {2}, {3})", bc: true, borrows: :all },

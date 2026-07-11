@@ -31,7 +31,7 @@ FN bytesToString(bytes: Int64[]@list) RETURNS !String ->
   parts.reserve(bytes.length());
   MUTABLE i = 0;
   WHILE i < bytes.length() DO
-    parts.append(byteToString(bytes[i]));
+    parts.append(byteToString(bytes[i] OR 0_i64));
     i += 1;
   END
   RETURN parts.join("");
@@ -74,7 +74,7 @@ FN copyBytes(bytes: Int64[]@list) RETURNS !Int64[]@list ->
   copied.reserve(bytes.length());
   MUTABLE i = 0;
   WHILE i < bytes.length() DO
-    copied.append(bytes[i]);
+    copied.append(bytes[i] OR 0_i64);
     i += 1;
   END
   RETURN copied;
@@ -227,23 +227,23 @@ RETURNS !Int64[]@list ->
       END
       pointer -= 1;
     ELSE_IF op == "+" THEN
-      tape[pointer] = incByte(tape[pointer]);
+      tape[pointer] = incByte(tape[pointer] OR 0_i64);
     ELSE_IF op == "-" THEN
-      tape[pointer] = decByte(tape[pointer]);
+      tape[pointer] = decByte(tape[pointer] OR 0_i64);
     ELSE_IF op == "." THEN
-      output.append(tape[pointer]);
+      output.append(tape[pointer] OR 0_i64);
     ELSE_IF op == "," THEN
       IF inputPos < inputBytes.length() THEN
-        tape[pointer] = inputBytes[inputPos];
+        tape[pointer] = inputBytes[inputPos] OR 0_i64;
         inputPos += 1;
       END
     ELSE_IF op == "[" THEN
-      IF tape[pointer] == 0 THEN
-        ip = jumps[ip];
+      IF (tape[pointer] OR 0_i64) == 0 THEN
+        ip = jumps[ip] OR ip;
       END
     ELSE_IF op == "]" THEN
-      IF tape[pointer] != 0 THEN
-        ip = jumps[ip];
+      IF (tape[pointer] OR 0_i64) != 0 THEN
+        ip = jumps[ip] OR ip;
       END
     END
 

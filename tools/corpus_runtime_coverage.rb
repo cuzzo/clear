@@ -10,7 +10,7 @@ ROOT = File.expand_path("..", __dir__)
 opts = {
   examples: true,
   benchmarks: true,
-  strict: false,
+  strict: true,
   shard: nil,
   limit: nil,
   timeout: Integer(ENV.fetch("CORPUS_RUNTIME_TIMEOUT", "120")),
@@ -21,6 +21,7 @@ OptionParser.new do |o|
   o.on("--examples-only") { opts[:benchmarks] = false }
   o.on("--benchmarks-only") { opts[:examples] = false }
   o.on("--strict") { opts[:strict] = true }
+  o.on("--allow-failures") { opts[:strict] = false }
   o.on("--limit N", Integer) { |v| opts[:limit] = v }
   o.on("--timeout N", Integer) { |v| opts[:timeout] = v }
   o.on("--shard I/N") do |v|

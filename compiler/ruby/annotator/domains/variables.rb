@@ -588,12 +588,12 @@ module Annotator
       # doesn't bottom out at one. Used to attribute receiver mutation back to
       # the declared binding.
 
-      sig { params(node: T.any(AST::GetField, AST::GetIndex, AST::Identifier)).returns(T.nilable(String)) }
+      sig { params(node: T.any(AST::GetField, AST::GetIndex, AST::OptionalUnwrap, AST::Identifier)).returns(T.nilable(String)) }
       def chain_root_name(node)
         T.bind(self, SemanticAnnotator)
 
-        curr = T.let(node, T.any(AST::GetField, AST::GetIndex, AST::Identifier))
-        while curr.is_a?(AST::GetField) || curr.is_a?(AST::GetIndex)
+        curr = T.let(node, T.any(AST::GetField, AST::GetIndex, AST::OptionalUnwrap, AST::Identifier))
+        while curr.is_a?(AST::GetField) || curr.is_a?(AST::GetIndex) || curr.is_a?(AST::OptionalUnwrap)
           curr = curr.target
         end
         curr.is_a?(AST::Identifier) ? curr.name : nil
@@ -782,9 +782,13 @@ module Annotator
         end
 
         # 4. Type Check
+        assignment_field_type = field_node.full_type!(context: "assignment field")
+        if field_node.safe_nav_chain == true && assignment_field_type.optional?
+          assignment_field_type = T.must(assignment_field_type.wrapped_type)
+        end
         validate_assignment_type(
           assignment_node,
-          field_node.full_type!(context: "assignment field"),
+          assignment_field_type,
           assignment_node.value.full_type!(context: "assignment value")
         )
 

@@ -659,8 +659,9 @@ module Annotator
 
         path = []
         curr = T.let(node, T.untyped)
-        while curr.is_a?(AST::GetField) || curr.is_a?(AST::GetIndex)
-          path.unshift(curr.is_a?(AST::GetField) ? curr.field.to_sym : :*)
+        while curr.is_a?(AST::GetField) || curr.is_a?(AST::GetIndex) || curr.is_a?(AST::OptionalUnwrap)
+          path.unshift(curr.field.to_sym) if curr.is_a?(AST::GetField)
+          path.unshift(:*) if curr.is_a?(AST::GetIndex)
           curr = curr.target
         end
         return [] unless curr.is_a?(AST::Identifier)

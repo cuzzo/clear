@@ -472,9 +472,11 @@ intrinsic methods, mutation, and generated Zig. The read-side paths now retain
 the typed optional in MIR and accept `x?.foo.bar()` for a single optional
 boundary. Keep those paths unified as the compiler evolves so users do not
 need `(x?.foo OR default).bar()` merely to satisfy a backend detail. For
-mutation, support an explicit conditional form such as
-`items[i]?.field = value` only if its "do nothing when missing" semantics are
-unambiguous; otherwise `IF items[i] AS item` is the locally honest form.
+mutation, `items[i]?.field = value` is the explicit conditional form: when the
+index/optional receiver is missing, the write is skipped and the right-hand
+side is not evaluated. This matches the expression's visible `?.` boundary.
+Use `IF items[i] AS item` with an `ELSE` branch when absence must be handled
+rather than intentionally ignored.
 
 ### 5. Make move syntax destination-driven where the choice is unique
 
@@ -648,10 +650,11 @@ Next, in priority order:
 5. **Decide `@node` lifetime domains.** Align WALKTHROUGH, implementation, and
    RAII claims; add two-independent-graphs and nested-scope tests.
 6. **Prototype minimal static protocols** on three compiler use cases.
-7. **Finish safe-navigation mutation semantics.** Read-side fields and methods
-   now implement the documented `x?.foo.bar()` single-boundary rule; decide
-   whether conditional mutation is explicit `IF-AS` only or also admits an
-   unambiguous `items[i]?.field = value` form.
+7. **Finish safe-navigation mutation semantics (completed on `graphs`).**
+   Read-side fields and methods implement the documented `x?.foo.bar()`
+   single-boundary rule. Conditional assignment uses
+   `items[i]?.field = value`; absence skips both the write and RHS evaluation.
+   `IF-AS` remains the explicit form when absence needs an `ELSE` action.
 8. **Pay down or explicitly baseline static-analysis debt.** The current
    Sorbet and signature-lint commands are not green and should not remain
    ambiguous CI signals.

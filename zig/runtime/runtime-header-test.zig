@@ -130,6 +130,17 @@ test "bounds-safe list access returns optionals, mutable aliases, and compact no
     try std.testing.expect(CheatLib.getNodeAt(refs, 1).isNil());
 }
 
+test "optional payload access returns a mutable alias" {
+    const Payload = struct { value: u64 };
+    var present: ?Payload = .{ .value = 4 };
+    const ptr = CheatLib.getOptionalPtr(&present).?;
+    ptr.value = 9;
+    try std.testing.expectEqual(@as(u64, 9), present.?.value);
+
+    var absent: ?Payload = null;
+    try std.testing.expect(CheatLib.getOptionalPtr(&absent) == null);
+}
+
 test "Rc and WeakRc share one allocation while preserving the ctrl.data ABI" {
     const allocator = std.testing.allocator;
     const profile_allocs_before = alloc_profile.totalAllocs();

@@ -47,7 +47,9 @@ FN main() RETURNS Void ->
   WHILE it < iters DO
     MUTABLE idx = 0;
     WHILE idx < n_docs DO
-      s_rc += docs[idx].title.length() + docs[idx].body.length() + docs[idx].tag.length();
+      IF docs[idx] AS doc THEN
+        s_rc += doc.title.length() + doc.body.length() + doc.tag.length();
+      END
       idx += 1;
     END
     it += 1;

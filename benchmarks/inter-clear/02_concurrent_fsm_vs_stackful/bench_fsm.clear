@@ -23,8 +23,10 @@ FN main() RETURNS Void ->
   END
 
   FOR j IN (0 ..< count) DO
-    r: Int64 = NEXT futures[j];
-    total = total + r;
+    IF futures[j] AS future THEN
+      r: Int64 = NEXT future;
+      total = total + r;
+    END
   END
 
   ASSERT total > 0, "non-zero result";

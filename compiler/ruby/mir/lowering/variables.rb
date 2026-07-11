@@ -941,11 +941,81 @@ module MIRLoweringVariables
   sig { params(node: AST::Assignment).returns(T.nilable(MIR::Stmt)) }
   def special_assignment_result(node)
     name = node.name
+    return lower_conditional_field_assignment(node) if conditional_field_assignment?(name)
     return T.cast(lower_indexed_assignment(node), MIR::Stmt) if name.is_a?(AST::GetIndex)
     return T.cast(lower_auto_lock_assignment(node), MIR::Stmt) if name.is_a?(AST::GetField) && node.auto_lock
     return lower_field_assignment_with_cleanup(node) if name.is_a?(AST::GetField) && node.field_pre_cleanup
 
     nil
+  end
+
+  sig { params(name: AST::Node).returns(T::Boolean) }
+  def conditional_field_assignment?(name)
+    name.is_a?(AST::GetField) && name.target.is_a?(AST::OptionalUnwrap)
+  end
+
+  sig { params(node: AST::Assignment).returns(MIR::IfBindStmt) }
+  def lower_conditional_field_assignment(node)
+    T.bind(self, MIRLowering) rescue nil
+    field = T.cast(node.name, AST::GetField)
+    unwrap = T.cast(field.target, AST::OptionalUnwrap)
+    source = unwrap.target
+    target_alloc = placement_for_node(source)
+    source_type = Type.from_node!(source, context: "conditional assignment receiver")
+    optional_ptr = if source.is_a?(AST::GetIndex)
+      index = T.cast(source, AST::GetIndex)
+      receiver = lower(index.target)
+      receiver = MIR::AddressOf.new(receiver) unless collection_param_receiver?(index.target)
+      target_alloc = placement_for_node(index.target)
+      emit_builtin(:getAtPtrOpt, [receiver, lower(index.index)])
+    elsif source_type.node_reference?
+      payload = T.must(source_type.node_payload_type)
+      zig_type = transpile_type(payload.resolved.to_s)
+      function_state.node_store_types << zig_type
+      MIR::MethodCall.new(
+        node_store_type_mir(zig_type),
+        "getBound",
+        [MIR::Ident.new(node_store_binding_name(zig_type)), T.cast(lower(source), MIR::Node)],
+        false,
+        MIR::CallableContract.no_ownership(1),
+      )
+    else
+      emit_builtin(:getOptionalPtr, [MIR::AddressOf.new(T.cast(lower(source), MIR::Node))])
+    end
+    capture = "__conditional_mut_#{lowering_counters.next_tmp_id}"
+    target = MIR::FieldGet.new(MIR::Ident.new(capture), field.field.to_s)
+    field_type = field.full_type!(context: "conditional assignment field")
+    field_type = T.must(field_type.wrapped_type) if field.safe_nav_chain == true && field_type.optional?
+    value, value_pending = lower_head do
+      lowered = with_decl_alloc(target_alloc) do
+        raw = lower(node.value)
+        place_value_for_destination(raw, node.value, target_alloc, field_type)
+      end
+      materialized = if field_assignment_requires_cleanup?(field)
+        materialize_owned_sink_value(lowered, node.value, target_alloc)
+      else
+        lowered
+      end
+      mir_allocates?(materialized) ? hoist_alloc(materialized, node.value, err_cleanup: true) : materialized
+    end
+    set = MIR::Set.new(target, value)
+    stmt = with_ownership_consumption_for_value(
+      set, value, node.value, "MIR::Set", target_alloc: target_alloc
+    )
+    then_body = T.let([], T::Array[MIR::Stmt])
+    then_body.concat(T.cast(value_pending, T::Array[MIR::Stmt]))
+    if field_assignment_requires_cleanup?(field)
+      cleanup_call = MIR::Call.new("CheatLib.cleanup", [
+        MIR::TypeOf.new(target), MIR::AllocatorRef.new(target_alloc), MIR::AddressOf.new(target)
+      ], false, false, MIR::CallableContract.no_ownership(3))
+      then_body << MIR::ExprStmt.new(cleanup_call, false)
+    end
+    then_body << T.cast(stmt, MIR::Stmt)
+    MIR::IfBindStmt.new(
+      [{ expr: optional_ptr, capture: capture, node_ref: false }],
+      then_body,
+      nil,
+    )
   end
 
   sig { params(node: AST::Assignment).returns(AssignmentTargetPlan) }
@@ -985,6 +1055,9 @@ module MIRLoweringVariables
   def field_assignment_requires_cleanup?(field)
     T.bind(self, MIRLowering) rescue nil
     field_type = field.full_type!
+    if field.safe_nav_chain == true && field_type.optional?
+      field_type = T.must(field_type.wrapped_type)
+    end
     return true if field_type.needs_cleanup?(mir_schema_lookup)
     return false unless field_type.string?
 

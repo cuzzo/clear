@@ -17,6 +17,10 @@ FN main() RETURNS Void ->
   root.children.append(Node{ id: 3 });
 
   ASSERT root.left?.id == 2, "optional node edge resolves";
+  root.left?.id = 4_i64;
+  ASSERT root.left?.id == 4_i64, "optional node edge mutates its stored payload";
+  root.left?.right = Node{ id: 5_i64 };
+  ASSERT root.left?.right?.id == 5_i64, "conditional edge assignment inserts a node";
   ASSERT root.children[0]?.id == 3, "node list element resolves";
   ASSERT nodeId(root) == 1, "node store is implicitly threaded through calls";
 

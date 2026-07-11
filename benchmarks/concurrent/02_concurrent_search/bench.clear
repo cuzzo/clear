@@ -69,7 +69,7 @@ FN main() RETURNS Void ->
 
     counts = search_batch!(files, batch_start, batch_end, data_dir, needle);
     FOR k IN (0 ..< counts.length()) DO
-      results.append(SearchResult{ file_idx: batch_start + k, count: counts[k] });
+      results.append(SearchResult{ file_idx: batch_start + k, count: counts[k] OR 0_i64 });
     END
 
     batch_start = batch_end;
@@ -79,22 +79,26 @@ FN main() RETURNS Void ->
   FOR j IN (0 ..< 10) DO
     MUTABLE best = j;
     FOR m IN (j + 1 ..< n) DO
-      IF results[m].count > results[best].count THEN
-        best = m;
+      IF results[m] AS candidate THEN
+        IF results[best] AS currentBest THEN
+          IF candidate.count > currentBest.count THEN best = m; END
+        END
       END
     END
     IF best != j THEN
-      tmp = results[j];
-      results[j] = results[best];
-      results[best] = tmp;
+      IF (results[j] AS tmp) && (results[best] AS bestResult) THEN
+        results[j] = bestResult;
+        results[best] = tmp;
+      END
     END
   END
 
   # Print top 10.
   print("Top 10 files by '", needle, "' count:");
   FOR p IN (0 ..< 10) DO
-    r = results[p];
-    print("  ", files[r.file_idx], "  ", r.count);
+    IF results[p] AS r THEN
+      print("  ", files[r.file_idx], "  ", r.count);
+    END
   END
 
   elapsed = timestampMs() - t0;

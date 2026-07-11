@@ -8,7 +8,7 @@ FN main() RETURNS Void ->
     t1 = timestampMs();
     MUTABLE total: Int64 = 0_i64;
     FOR j IN (0_i64 ..< values.length()) DO
-        total = total + values[j];
+        total = total + (values[j] OR 0_i64);
     END
     sumMs = timestampMs() - t1;
     totalMs = appendMs + sumMs;

@@ -992,7 +992,7 @@ class ClearParser
   def parse_tight_stmt
     tight_token = consume(:KEYWORD, 'TIGHT')
     if match?(:KEYWORD, 'FOR')
-      for_node = T.cast(parse_for_range, AST::ForRange)
+      for_node = T.cast(parse_for_range, T.any(AST::ForRange, AST::ForEach))
       for_node.tight = true
       return for_node
     end

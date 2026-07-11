@@ -558,6 +558,17 @@ STRUCT TreeNode {
 
 An `@list` indexed read has type `?T` and returns NIL when the index is out of bounds. Use `IF users[i] AS user THEN ... END` when mutating a struct element; the binding aliases the actual list slot rather than a temporary copy.
 
+Safe navigation can also make that mutation conditional:
+
+```ruby clear illustrative
+users[i]?.name = nextName();
+```
+
+If `i` is out of bounds, the assignment is skipped and `nextName()` is not
+evaluated. The `?.` is therefore a visible conditional-write marker. Use
+`IF users[i] AS user THEN ... ELSE ... END` when a missing element must be
+reported or handled rather than ignored.
+
 ### Independent Lifetimes with `LINK` / `RESOLVE`
 
 Use `LINK` / `RESOLVE` instead of `@node` when the objects do **not** share a

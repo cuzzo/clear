@@ -101,7 +101,9 @@ FN main() RETURNS Void ->
       );
     wi += 1;
   END
-  FOR si IN (0 ..< workers) -> NEXT set_futures[si];
+  FOR si IN (0 ..< workers) DO
+    IF set_futures[si] AS future THEN NEXT future; END
+  END
   setMs = timestampMs() - t0;
 
   # Workload 2: Uniform GET
@@ -128,7 +130,9 @@ FN main() RETURNS Void ->
     wi += 1;
   END
   MUTABLE total_hits = 0;
-  FOR gi IN (0 ..< workers) -> total_hits += NEXT get_futures[gi];
+  FOR gi IN (0 ..< workers) DO
+    IF get_futures[gi] AS future THEN total_hits += NEXT future; END
+  END
   getMs = timestampMs() - t1;
 
   # Workload 3: Zipfian GET
@@ -160,7 +164,9 @@ FN main() RETURNS Void ->
     wi += 1;
   END
   MUTABLE zipf_hits = 0;
-  FOR zi IN (0 ..< workers) -> zipf_hits += NEXT zipf_futures[zi];
+  FOR zi IN (0 ..< workers) DO
+    IF zipf_futures[zi] AS future THEN zipf_hits += NEXT future; END
+  END
   zipfMs = timestampMs() - t2;
 
   # Workload 4: Mixed 80/20 (Zipfian)
@@ -199,7 +205,9 @@ FN main() RETURNS Void ->
     wi += 1;
   END
   MUTABLE mix_hits = 0;
-  FOR mi IN (0 ..< workers) -> mix_hits += NEXT mix_futures[mi];
+  FOR mi IN (0 ..< workers) DO
+    IF mix_futures[mi] AS future THEN mix_hits += NEXT future; END
+  END
   mixMs = timestampMs() - t3;
 
   # Assert against workers*chunk, not n: integer division may drop a

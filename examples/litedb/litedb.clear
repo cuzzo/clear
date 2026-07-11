@@ -41,7 +41,9 @@ END
 FN findKeyIndex(keys: Int64[]@list, key: Int64) RETURNS Int64 ->
   MUTABLE i = 0;
   WHILE i < keys.length() DO
-    IF keys[i] >= key -> RETURN i;
+    IF keys[i] AS candidate THEN
+      IF candidate >= key -> RETURN i;
+    END
     i += 1;
   END
   RETURN i;
@@ -51,13 +53,15 @@ FN scanWithFilter(keys: Int64[]@list, filter: FN (Int64) -> Bool) RETURNS !Int64
   MUTABLE count = 0;
   MUTABLE i = 0;
   WHILE i < keys.length() DO
-    IF filter(keys[i]) -> count += 1;
+    IF keys[i] AS candidate THEN
+      IF filter(candidate) -> count += 1;
+    END
     i += 1;
   END
   RETURN count;
 END
 
-FN main() RETURNS Void ->
+FN main() RETURNS !Void ->
   MUTABLE nodes: Node[]@list = [];
   MUTABLE children: HashMap<Int64> = {};
 
@@ -94,15 +98,19 @@ FN main() RETURNS Void ->
   ASSERT opName == "scan", "ENUM dispatch";
 
   # Tree structure
-  ASSERT nodes[root].isLeaf == FALSE, "root is internal";
-  ASSERT nodes[root].keys[0] == 30, "root key 30";
-  ASSERT nodes[0].keys[1] == 20, "left key 1 = 20";
-  ASSERT nodes[1].keys[0] == 40, "right key 0 = 40";
+  rootNode = nodes[root] OR Node{ keys: [], vals: [], numChildren: 0_i64, isLeaf: TRUE };
+  leftNode = nodes[0] OR Node{ keys: [], vals: [], numChildren: 0_i64, isLeaf: TRUE };
+  rightNode = nodes[1] OR Node{ keys: [], vals: [], numChildren: 0_i64, isLeaf: TRUE };
+  ASSERT rootNode.isLeaf == FALSE, "root is internal";
+  ASSERT (rootNode.keys[0] OR 0_i64) == 30, "root key 30";
+  ASSERT (leftNode.keys[1] OR 0_i64) == 20, "left key 1 = 20";
+  ASSERT (rightNode.keys[0] OR 0_i64) == 40, "right key 0 = 40";
 
   # Tree search: descend from root to find key 20
-  cp = findKeyIndex(nodes[root].keys, 20);
+  cp = findKeyIndex(rootNode.keys, 20);
   leafIdx = children[childKey(root, cp)] OR (0 - 1);
-  ASSERT nodes[leafIdx].keys[1] == 20, "tree search: key 20";
+  leafNode = nodes[leafIdx] OR Node{ keys: [], vals: [], numChildren: 0_i64, isLeaf: TRUE };
+  ASSERT (leafNode.keys[1] OR 0_i64) == 20, "tree search: key 20";
 
   # Collect all keys for pipeline queries
   MUTABLE allKeys: Int64[]@list = [];
@@ -147,7 +155,7 @@ FN main() RETURNS Void ->
   END
   fi = 0;
   WHILE fi < 4 DO
-    NEXT futures[fi];
+    IF futures[fi] AS future THEN NEXT future; END
     fi += 1;
   END
   WITH stats AS s {

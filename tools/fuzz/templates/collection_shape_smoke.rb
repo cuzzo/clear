@@ -220,7 +220,11 @@ FuzzGenerator.register(:collection_shape_smoke, cells: COLLECTION_SHAPE_SMOKE_CE
           inner.append(6_i64);
           outer.append(inner);
           ASSERT outer.length() == 1_i64, "nested outer length";
-          ASSERT outer[0_i64][1_i64] == 6_i64, "nested readback";
+          IF outer[0_i64] AS inner_read THEN
+              ASSERT inner_read[1_i64] == 6_i64, "nested readback";
+          ELSE
+              ASSERT FALSE, "nested outer element should exist";
+          END
           RETURN;
       END
     CHT

@@ -84,6 +84,39 @@ RSpec.describe "optional @list indexing" do
     expect(zig).to include("_r.name")
   end
 
+  it "conditionally mutates an indexed element through ?. without evaluating a missing RHS" do
+    source = <<~CLEAR
+      STRUCT Item { name: Int64 }
+      FN main() RETURNS Void ->
+        MUTABLE items: Item[]@list = [];
+        items.append(Item{ name: 1_i64 });
+        items[0]?.name = 7_i64;
+        items[9]?.name = 99_i64;
+        ASSERT (items[0]?.name OR 0_i64) == 7_i64;
+      END
+    CLEAR
+
+    zig = ZigTranspiler.new(source_dir: Dir.pwd).transpile(source, source_dir: Dir.pwd)
+    expect(zig).to include("CheatLib.getAtPtrOpt(&items, 0)")
+    expect(zig).to include("CheatLib.getAtPtrOpt(&items, 9)")
+    expect(zig).to match(/if \(CheatLib\.getAtPtrOpt\(&items, 0\)\) \|__conditional_mut_\d+\|/)
+  end
+
+  it "conditionally mutates an optional struct field in place" do
+    source = <<~CLEAR
+      STRUCT Child { value: Int64 }
+      STRUCT Parent { child: ?Child }
+      FN main() RETURNS Void ->
+        MUTABLE parent = Parent{ child: Child{ value: 1_i64 } };
+        parent.child?.value = 8_i64;
+        ASSERT (parent.child?.value OR 0_i64) == 8_i64;
+      END
+    CLEAR
+
+    zig = ZigTranspiler.new(source_dir: Dir.pwd).transpile(source, source_dir: Dir.pwd)
+    expect(zig).to include("CheatLib.getOptionalPtr(&parent.child)")
+  end
+
   it "keeps the single safe boundary through an intrinsic method call" do
     source = <<~CLEAR
       STRUCT Item { name: String }

@@ -692,6 +692,19 @@ pub const CheatLib = struct {
         }
     }
 
+    fn OptionalChild(comptime P: type) type {
+        const pointer = @typeInfo(P).pointer;
+        return @typeInfo(pointer.child).optional.child;
+    }
+
+    // Mutable alias to an optional payload. This is the field/local analogue
+    // of getAtPtrOpt and powers conditional assignment through `?.` without
+    // copying the payload out of its owner.
+    pub fn getOptionalPtr(optional_ptr: anytype) ?*OptionalChild(@TypeOf(optional_ptr)) {
+        if (optional_ptr.*) |*value| return value;
+        return null;
+    }
+
     // First element, or null if empty. Backs CLEAR's `.first()` predicate.
     pub fn firstOpt(container: anytype) ?ElementType(@TypeOf(container)) {
         const c0 = if (@typeInfo(@TypeOf(container)) == .optional) container.? else container;

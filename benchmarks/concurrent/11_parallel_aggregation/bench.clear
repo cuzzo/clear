@@ -41,7 +41,7 @@ FN main() RETURNS Void ->
   t0 = timestampMs();
   MUTABLE counts: HashMap<Int64, Int64> @sharded(32) = {};
   (0 ..< n)
-    |> SHARD(absInt(seeds[_]) MOD buckets, counts)
+    |> SHARD(absInt(seeds[_] OR 0_i64) MOD buckets, counts)
     |> CONCURRENT(batch: 512) EACH {counts[_] = (counts[_] OR 0) + 1;};
   shardMs = timestampMs() - t0;
 

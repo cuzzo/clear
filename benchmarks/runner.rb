@@ -217,6 +217,7 @@ def run_coverage_bench(dir)
       failed += 1
       puts "    WARNING: coverage benchmark failed"
       puts output.lines.last(20).map { |line| "      #{line}" }.join
+      record_benchmark_failure("#{source}: coverage build or execution failed")
     end
   end
   puts "Coverage benchmark summary: #{passed} ok, #{failed} failed"
@@ -349,6 +350,7 @@ def run_bench(dir)
       output = `./clear build --optimized #{source_path} -o #{bin} 2>&1`
       unless File.exist?(bin)
         puts "WARNING: CLEAR variant #{label} failed: #{output.lines.last&.strip}"
+        record_benchmark_failure("#{dir}/#{label}: CLEAR variant build failed")
         next
       end
       puts "Running CLEAR variant #{label} (best of #{runs}, CLEAR_THREADS=#{threads}#{jemalloc_note}, scale=#{scale})..."
@@ -450,6 +452,7 @@ def run_bench(dir)
         has_clear = true
       else
         puts "WARNING: bench_clear was not generated."
+        record_benchmark_failure("#{dir}: CLEAR runtime Zig build failed")
       end
       FileUtils.rm("zig/bench.zig") if File.exist?("zig/bench.zig")
     elsif use_zig
@@ -463,6 +466,7 @@ def run_bench(dir)
         has_clear = true
       else
         puts "WARNING: bench_clear was not generated."
+        record_benchmark_failure("#{dir}: CLEAR native Zig build failed")
       end
       FileUtils.rm("zig/bench.zig") if File.exist?("zig/bench.zig")
     elsif File.exist?("#{dir}/bench.clear")
@@ -472,6 +476,7 @@ def run_bench(dir)
         has_clear = true
       else
         puts "WARNING: CLEAR build failed: #{output.lines.last&.strip}"
+        record_benchmark_failure("#{dir}: CLEAR build failed")
       end
     else
       puts "No CLEAR source found, skipping CLEAR."
@@ -635,7 +640,9 @@ def run_server_bench(dir, timeout: RUN_TIMEOUT)
     `go build -o client_go client.go 2>&1`
   end
   unless File.exist?("#{dir}/client_go")
-    puts "ERROR: client_go failed to build"; return
+    puts "ERROR: client_go failed to build"
+    record_benchmark_failure("#{dir}: shared Go client build failed")
+    return
   end
 
   # Go server
@@ -663,6 +670,7 @@ def run_server_bench(dir, timeout: RUN_TIMEOUT)
       has_clear = true
     else
       puts "WARNING: CLEAR server failed to compile: #{output.lines.last&.strip}"
+      record_benchmark_failure("#{dir}: CLEAR server build failed")
     end
   end
 
