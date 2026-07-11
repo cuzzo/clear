@@ -381,7 +381,31 @@ pub struct UiUnitHotspot {
     pub fixes: i64,
     pub changes: i64,
     pub mutant_killed_tests: i64,
+    pub mutant_verified_tests: i64,
     pub distinct_tests: i64,
+    pub test_types: String,
+    pub line_coverage: f64,
+    pub integration_coverage: f64,
+    pub is_hard_gated: bool,
+    pub reopened_count: i64,
+}
+
+#[derive(Debug, Clone, Serialize, PartialEq, Eq)]
+pub struct UiAnalyzerHealth {
+    pub analyzer: String,
+    pub status: String,
+    pub detail: String,
+    pub scoped_findings: i64,
+    pub total_findings: i64,
+}
+
+#[derive(Debug, Clone, Serialize, PartialEq)]
+pub struct UiReviewNextItem {
+    pub path: String,
+    pub start_line: u32,
+    pub title: String,
+    pub detail: String,
+    pub score: f64,
 }
 
 #[derive(Debug, Clone, Serialize, PartialEq)]
@@ -486,8 +510,11 @@ pub struct UiDashboard {
     pub files_with_coverage: i64,
     pub top_hazard_files: Vec<UiFile>,
     pub top_units: Vec<UiUnitHotspot>,
+    pub review_next: Vec<UiReviewNextItem>,
+    pub test_next_units: Vec<UiUnitHotspot>,
     pub top_architecture_risks: Vec<UiArchitectureRisk>,
     pub top_complexity_functions: Vec<UiComplexityFunction>,
+    pub analyzer_health: Vec<UiAnalyzerHealth>,
     pub warnings: Vec<UiWarning>,
 }
 
@@ -575,6 +602,9 @@ struct DashboardTemplate<'a> {
     warnings: &'a str,
     active_hazards: &'a str,
     finding_changes: &'a str,
+    review_next: &'a str,
+    test_next: &'a str,
+    analyzer_health: &'a str,
     highest_hazard_files: &'a str,
     highest_risk_units: &'a str,
     highest_architecture_risks: &'a str,
@@ -1313,6 +1343,8 @@ fn dashboard_summary_for_directory_with_scope_and_repo(
     profile_log("dashboard.warnings", warning_start);
     let unit_start = Instant::now();
     let top_units = top_unit_hotspots(storage, &directory, scope, repo)?;
+    let review_next = review_next_items(storage, &directory, scope)?;
+    let test_next_units = test_next_hotspots(storage, &directory, scope, repo)?;
     profile_log("dashboard.top_units", unit_start);
     let architecture_start = Instant::now();
     let top_architecture_risks = top_architecture_risks(storage, &directory, scope)?;
@@ -1335,6 +1367,7 @@ fn dashboard_summary_for_directory_with_scope_and_repo(
     let complexity_start = Instant::now();
     let top_complexity_functions = top_complexity_functions(storage, &directory, scope)?;
     profile_log("dashboard.top_complexity_functions", complexity_start);
+    let analyzer_health = analyzer_health(storage, &directory, scope)?;
     let lifecycle = if directory.is_empty() {
         storage.sarif_lifecycle_summary()?
     } else {
@@ -1384,12 +1417,311 @@ fn dashboard_summary_for_directory_with_scope_and_repo(
         files_with_coverage,
         top_hazard_files,
         top_units,
+        review_next,
+        test_next_units,
         top_architecture_risks,
         top_complexity_functions,
+        analyzer_health,
         warnings,
     };
     profile_log("dashboard.total", total_start);
     Ok(dashboard)
+}
+
+fn analyzer_health(
+    storage: &Storage,
+    directory: &str,
+    scope: &CoverageScope,
+) -> Result<Vec<UiAnalyzerHealth>> {
+    let mut scoped_counts = HashMap::<String, i64>::new();
+    let mut total_counts = HashMap::<String, i64>::new();
+    let mut findings = storage.connection().prepare(
+        "SELECT source, tool_name, path FROM current_sarif_findings",
+    )?;
+    let rows = findings.query_map([], |row| {
+        Ok((
+            row.get::<_, String>(0)?,
+            row.get::<_, String>(1)?,
+            row.get::<_, String>(2)?,
+        ))
+    })?;
+    for row in rows {
+        let (source, tool, path) = row?;
+        let analyzer = canonical_analyzer_name(&source, &tool);
+        *total_counts.entry(analyzer.clone()).or_default() += 1;
+        if scope.allows(&path)
+            && is_production_source_path(&path)
+            && path_in_directory(&path, directory)
+        {
+            *scoped_counts.entry(analyzer).or_default() += 1;
+        }
+    }
+
+    let current_commit: String = storage.connection().query_row(
+        "SELECT COALESCE((SELECT commit_hash FROM metadata ORDER BY timestamp DESC LIMIT 1), '')",
+        [],
+        |row| row.get(0),
+    )?;
+    let mut stmt = storage.connection().prepare(
+        r#"
+        SELECT source, tool_name, commit_hash, timestamp, payload_json
+        FROM (
+          SELECT source, tool_name, commit_hash, timestamp, payload_json,
+                 ROW_NUMBER() OVER (
+                   PARTITION BY source, tool_name
+                   ORDER BY timestamp DESC, id DESC
+                 ) AS rank
+          FROM sarif_artifacts
+        )
+        WHERE rank = 1
+        ORDER BY lower(tool_name), lower(source)
+        "#,
+    )?;
+    let rows = stmt.query_map([], |row| {
+        Ok((
+            row.get::<_, String>(0)?,
+            row.get::<_, String>(1)?,
+            row.get::<_, String>(2)?,
+            row.get::<_, i64>(3)?,
+            row.get::<_, String>(4)?,
+        ))
+    })?;
+    let mut health = Vec::new();
+    let mut present = BTreeSet::new();
+    for row in rows {
+        let (source, tool, commit, timestamp, payload) = row?;
+        let analyzer = canonical_analyzer_name(&source, &tool);
+        present.insert(analyzer.clone());
+        let scoped_findings = scoped_counts.get(&analyzer).copied().unwrap_or(0);
+        let total_findings = total_counts.get(&analyzer).copied().unwrap_or(0);
+        let parsed = serde_json::from_str::<Value>(&payload);
+        let truncated = parsed
+            .as_ref()
+            .ok()
+            .map(sarif_truncated_results)
+            .unwrap_or(0);
+        let stale = !current_commit.is_empty() && commit != current_commit;
+        let (status, detail) = if parsed.is_err() {
+            ("unhealthy", "artifact payload cannot be parsed".to_string())
+        } else if stale {
+            (
+                "stale",
+                format!("artifact is for {}, not current {}", short_hash(&commit), short_hash(&current_commit)),
+            )
+        } else if truncated > 0 {
+            ("degraded", format!("{truncated} findings were truncated by artifact limits"))
+        } else if total_findings == 0 {
+            ("healthy", "completed with no findings".to_string())
+        } else {
+            ("healthy", format!("current artifact timestamp {timestamp}"))
+        };
+        health.push(UiAnalyzerHealth {
+            analyzer,
+            status: status.to_string(),
+            detail,
+            scoped_findings,
+            total_findings,
+        });
+    }
+    for expected in ["Decomplex", "SlopCop", "Nil-Kill", "Espalier"] {
+        if !present.contains(expected) {
+            health.push(UiAnalyzerHealth {
+                analyzer: expected.to_string(),
+                status: "missing".to_string(),
+                detail: "no artifact has been ingested".to_string(),
+                scoped_findings: 0,
+                total_findings: 0,
+            });
+        }
+    }
+    health.sort_by(|left, right| {
+        analyzer_status_rank(&left.status)
+            .cmp(&analyzer_status_rank(&right.status))
+            .then_with(|| left.analyzer.cmp(&right.analyzer))
+    });
+    Ok(health)
+}
+
+#[derive(Default)]
+struct ReviewNextAccumulator {
+    path: String,
+    start_line: u32,
+    title: String,
+    tools: BTreeSet<String>,
+    findings: i64,
+    warnings: i64,
+    dark_arms: i64,
+    best_tier: Option<u8>,
+    example: String,
+}
+
+fn review_next_items(
+    storage: &Storage,
+    directory: &str,
+    scope: &CoverageScope,
+) -> Result<Vec<UiReviewNextItem>> {
+    let mut unit_names = HashMap::new();
+    let mut names = storage.connection().prepare("SELECT id, name FROM logical_units")?;
+    let rows = names.query_map([], |row| {
+        Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?))
+    })?;
+    for row in rows {
+        let (id, name) = row?;
+        unit_names.insert(id, name);
+    }
+
+    let mut stmt = storage.connection().prepare(
+        r#"
+        SELECT path, start_line, tool_name, rule_id, level, message,
+               is_dark_arm, unit_id, properties_json
+        FROM current_sarif_findings
+        ORDER BY path, start_line, tool_name, rule_id
+        "#,
+    )?;
+    let rows = stmt.query_map([], |row| {
+        Ok((
+            row.get::<_, String>(0)?,
+            row.get::<_, u32>(1)?,
+            row.get::<_, String>(2)?,
+            row.get::<_, String>(3)?,
+            row.get::<_, String>(4)?,
+            row.get::<_, String>(5)?,
+            row.get::<_, i64>(6)? != 0,
+            row.get::<_, Option<String>>(7)?,
+            row.get::<_, String>(8)?,
+        ))
+    })?;
+    let mut grouped = BTreeMap::<(String, String), ReviewNextAccumulator>::new();
+    for row in rows {
+        let (path, line, tool, rule, level, message, dark_arm, unit_id, properties) = row?;
+        if !scope.allows(&path)
+            || !is_production_source_path(&path)
+            || !path_in_directory(&path, directory)
+        {
+            continue;
+        }
+        let identity = unit_id.clone().unwrap_or_else(|| format!("line:{line}"));
+        let title = unit_id
+            .as_ref()
+            .and_then(|id| unit_names.get(id))
+            .cloned()
+            .unwrap_or_else(|| rule.clone());
+        let entry = grouped
+            .entry((path.clone(), identity))
+            .or_insert_with(|| ReviewNextAccumulator {
+                path,
+                start_line: line,
+                title,
+                example: format!("{rule}: {message}"),
+                ..Default::default()
+            });
+        entry.start_line = entry.start_line.min(line);
+        entry.tools.insert(tool);
+        entry.findings += 1;
+        entry.warnings += i64::from(matches!(level.to_lowercase().as_str(), "error" | "warning"));
+        entry.dark_arms += i64::from(dark_arm);
+        if let Some(tier) = finding_tier(&properties) {
+            entry.best_tier = Some(entry.best_tier.map_or(tier, |current| current.min(tier)));
+        }
+    }
+    let mut items = grouped
+        .into_values()
+        .map(|entry| {
+            let tool_count = entry.tools.len() as i64;
+            let tools = entry.tools.into_iter().collect::<Vec<_>>().join(", ");
+            let mut reasons = vec![format!(
+                "{} current findings from {}",
+                entry.findings,
+                tools
+            )];
+            if tool_count > 1 {
+                reasons.push(format!("{tool_count} analyzers agree"));
+            }
+            if entry.warnings > 0 {
+                reasons.push(format!("{} warning/error", entry.warnings));
+            }
+            if entry.dark_arms > 0 {
+                reasons.push(format!("{} uncovered branches", entry.dark_arms));
+            }
+            if let Some(tier) = entry.best_tier {
+                reasons.push(format!("Tier {tier}"));
+            }
+            reasons.push(entry.example);
+            let score = entry.warnings as f64 * 3.0
+                + entry.dark_arms as f64 * 5.0
+                + entry.findings as f64
+                + tool_count as f64 * 2.0
+                + entry.best_tier.map_or(0.0, |tier| f64::from(4 - tier.min(3)) * 2.0);
+            UiReviewNextItem {
+                path: entry.path,
+                start_line: entry.start_line,
+                title: entry.title,
+                detail: reasons.join("; "),
+                score,
+            }
+        })
+        .collect::<Vec<_>>();
+    items.sort_by(|left, right| {
+        right
+            .score
+            .partial_cmp(&left.score)
+            .unwrap_or(std::cmp::Ordering::Equal)
+            .then_with(|| left.path.cmp(&right.path))
+            .then_with(|| left.start_line.cmp(&right.start_line))
+    });
+    items.truncate(20);
+    Ok(items)
+}
+
+fn finding_tier(properties: &str) -> Option<u8> {
+    let value = serde_json::from_str::<Value>(properties).ok()?;
+    let tier = value
+        .get("tier")
+        .or_else(|| value.pointer("/decomplex_finding/tier"))?;
+    tier.as_u64()
+        .and_then(|tier| u8::try_from(tier).ok())
+        .or_else(|| tier.as_str()?.chars().find_map(|character| character.to_digit(10)).and_then(|tier| u8::try_from(tier).ok()))
+}
+
+fn canonical_analyzer_name(source: &str, tool: &str) -> String {
+    let identity = format!("{source} {tool}").to_lowercase();
+    if identity.contains("decomplex") {
+        "Decomplex".to_string()
+    } else if identity.contains("slopcop") {
+        "SlopCop".to_string()
+    } else if identity.contains("nil-kill") || identity.contains("nil_kill") {
+        "Nil-Kill".to_string()
+    } else if identity.contains("espalier") {
+        "Espalier".to_string()
+    } else {
+        tool.to_string()
+    }
+}
+
+fn sarif_truncated_results(payload: &Value) -> i64 {
+    payload
+        .get("runs")
+        .and_then(Value::as_array)
+        .into_iter()
+        .flatten()
+        .filter_map(|run| run.get("properties"))
+        .filter_map(|properties| properties.get("decomplex.sarif_results_truncated_count"))
+        .filter_map(Value::as_i64)
+        .sum()
+}
+
+fn analyzer_status_rank(status: &str) -> u8 {
+    match status {
+        "unhealthy" => 0,
+        "missing" => 1,
+        "stale" => 2,
+        "degraded" => 3,
+        _ => 4,
+    }
+}
+
+fn short_hash(hash: &str) -> &str {
+    hash.get(..hash.len().min(8)).unwrap_or(hash)
 }
 
 fn warnings_for_directory(
@@ -1652,11 +1984,38 @@ struct UnitSignalCounts {
     hazards: i64,
 }
 
+#[derive(Clone, Copy, Default)]
+struct UnitTestProfile {
+    line_coverage: f64,
+    integration_coverage: f64,
+    is_hard_gated: bool,
+}
+
 fn top_unit_hotspots(
     storage: &Storage,
     directory: &str,
     scope: &CoverageScope,
     repo: Option<&Path>,
+) -> Result<Vec<UiUnitHotspot>> {
+    unit_hotspots(storage, directory, scope, repo, 12, false)
+}
+
+fn test_next_hotspots(
+    storage: &Storage,
+    directory: &str,
+    scope: &CoverageScope,
+    repo: Option<&Path>,
+) -> Result<Vec<UiUnitHotspot>> {
+    unit_hotspots(storage, directory, scope, repo, 200, true)
+}
+
+fn unit_hotspots(
+    storage: &Storage,
+    directory: &str,
+    scope: &CoverageScope,
+    repo: Option<&Path>,
+    limit: usize,
+    include_test_risk: bool,
 ) -> Result<Vec<UiUnitHotspot>> {
     let prefixes = if directory.is_empty() {
         Vec::new()
@@ -1670,6 +2029,7 @@ fn top_unit_hotspots(
             && path_in_directory(&summary.current_path, directory)
     });
     let signals = unit_signal_counts(storage)?;
+    let test_profiles = unit_test_profiles(storage)?;
     let mut candidates = summaries
         .into_iter()
         .map(|summary| {
@@ -1677,7 +2037,14 @@ fn top_unit_hotspots(
             let score = unit_hotspot_score(&summary, &signal);
             (summary, signal, score)
         })
-        .filter(|(_, _, score)| *score > 0.0)
+        .filter(|(summary, _, score)| {
+            let profile = test_profiles.get(&summary.id).copied().unwrap_or_default();
+            *score > 0.0
+                || (include_test_risk
+                    && (profile.is_hard_gated
+                        || summary.current_distinct_tests == 0
+                        || summary.current_mutant_verified_tests == 0))
+        })
         .collect::<Vec<_>>();
     candidates.sort_by(|left, right| {
         right.2
@@ -1688,7 +2055,7 @@ fn top_unit_hotspots(
             .then_with(|| left.0.current_path.cmp(&right.0.current_path))
             .then_with(|| left.0.name.cmp(&right.0.name))
     });
-    candidates.truncate(12);
+    candidates.truncate(limit);
 
     let top_summaries: Vec<_> = candidates.iter().map(|(s, _, _)| s.clone()).collect();
     let top_ids: Vec<String> = top_summaries.iter().map(|s| s.id.clone()).collect();
@@ -1704,6 +2071,7 @@ fn top_unit_hotspots(
     let final_units = candidates
         .into_iter()
         .map(|(summary, signal, score)| {
+            let test_profile = test_profiles.get(&summary.id).copied().unwrap_or_default();
             let key = (
                 summary.current_path.clone(),
                 summary.name.clone(),
@@ -1727,12 +2095,38 @@ fn top_unit_hotspots(
                 fixes: summary.fixes,
                 changes: summary.changes,
                 mutant_killed_tests: summary.current_mutant_killed_tests,
+                mutant_verified_tests: summary.current_mutant_verified_tests,
                 distinct_tests: summary.current_distinct_tests,
+                test_types: summary.current_test_types,
+                line_coverage: test_profile.line_coverage,
+                integration_coverage: test_profile.integration_coverage,
+                is_hard_gated: test_profile.is_hard_gated,
+                reopened_count: summary.reopened_count,
             }
         })
         .collect::<Vec<_>>();
 
     Ok(final_units)
+}
+
+fn unit_test_profiles(storage: &Storage) -> Result<HashMap<String, UnitTestProfile>> {
+    let mut stmt = storage.connection().prepare(
+        r#"
+        SELECT id, current_line_cov, current_integration_cov, is_hard_gated
+        FROM logical_units
+        "#,
+    )?;
+    let rows = stmt.query_map([], |row| {
+        Ok((
+            row.get::<_, String>(0)?,
+            UnitTestProfile {
+                line_coverage: row.get(1)?,
+                integration_coverage: row.get(2)?,
+                is_hard_gated: row.get::<_, i64>(3)? != 0,
+            },
+        ))
+    })?;
+    Ok(rows.collect::<std::result::Result<HashMap<_, _>, _>>()?)
 }
 
 #[derive(Debug, Default, Clone)]
@@ -5549,6 +5943,9 @@ fn render_dashboard(
     let warnings = render_warning_banner(&dashboard.warnings);
     let active_hazards = render_active_hazards_section(dashboard);
     let finding_changes = render_finding_changes_section(dashboard);
+    let review_next = render_review_next_section(dashboard, filter);
+    let test_next = render_test_next_section(dashboard, filter);
+    let analyzer_health = render_analyzer_health_section(dashboard);
     let highest_hazard_files = render_highest_hazard_files_section(dashboard, filter);
     let highest_risk_units = render_dashboard_disclosure(
         "Highest Risk Units",
@@ -5581,6 +5978,9 @@ fn render_dashboard(
             warnings: &warnings,
             active_hazards: &active_hazards,
             finding_changes: &finding_changes,
+            review_next: &review_next,
+            test_next: &test_next,
+            analyzer_health: &analyzer_health,
             highest_hazard_files: &highest_hazard_files,
             highest_risk_units: &highest_risk_units,
             highest_architecture_risks: &highest_architecture_risks,
@@ -5590,6 +5990,161 @@ fn render_dashboard(
         },
         "dashboard template",
     )
+}
+
+fn render_review_next_section(dashboard: &UiDashboard, filter: &str) -> String {
+    let items = dashboard
+        .review_next
+        .iter()
+        .take(10)
+        .map(|item| {
+            HotspotItem {
+                href: format!("{}#L{}", page_href(&item.path, None, filter), item.start_line),
+                kind: "review".to_string(),
+                name: item.title.clone(),
+                path: item.path.clone(),
+                detail: item.detail.clone(),
+                score: format!("{:.1}", item.score),
+            }
+        })
+        .collect::<Vec<_>>();
+    let body = render_template_string(
+        HotspotListTemplate {
+            wrapper_class: "unit-hotspots review-next",
+            empty_message: "No current analyzer findings or hazards need review in this folder.",
+            items: &items,
+        },
+        "review next template",
+    );
+    render_dashboard_disclosure("Review Next", !items.is_empty(), &body)
+}
+
+fn render_test_next_section(dashboard: &UiDashboard, filter: &str) -> String {
+    let mut candidates = dashboard
+        .test_next_units
+        .iter()
+        .filter_map(|unit| {
+            let (test_type, rationale, priority) = test_next_recommendation(unit)?;
+            Some((unit, test_type, rationale, priority))
+        })
+        .collect::<Vec<_>>();
+    candidates.sort_by(|left, right| {
+        right
+            .3
+            .partial_cmp(&left.3)
+            .unwrap_or(std::cmp::Ordering::Equal)
+            .then_with(|| left.0.path.cmp(&right.0.path))
+            .then_with(|| left.0.name.cmp(&right.0.name))
+    });
+    let items = candidates
+        .into_iter()
+        .take(10)
+        .map(|(unit, test_type, rationale, priority)| HotspotItem {
+            href: format!("{}#L{}", page_href(&unit.path, None, filter), unit.start_line),
+            kind: test_type.to_string(),
+            name: unit.name.clone(),
+            path: unit.path.clone(),
+            detail: rationale,
+            score: format!("{priority:.1}"),
+        })
+        .collect::<Vec<_>>();
+    let body = render_template_string(
+        HotspotListTemplate {
+            wrapper_class: "unit-hotspots test-next",
+            empty_message: "No high-value testing recommendation is available in this folder.",
+            items: &items,
+        },
+        "test next template",
+    );
+    render_dashboard_disclosure("Test Next", !items.is_empty(), &body)
+}
+
+fn test_next_recommendation(unit: &UiUnitHotspot) -> Option<(&'static str, String, f64)> {
+    let normalized_types = unit.test_types.to_lowercase();
+    let only_sparse_unit_tests = unit.distinct_tests <= 2
+        && !normalized_types.is_empty()
+        && normalized_types
+            .split(',')
+            .all(|test_type| test_type.trim() == "unit");
+    let uncovered = unit.line_coverage <= 0.0;
+    let historically_buggy = unit.fixes > 0 || unit.reopened_count > 0;
+    let base = unit.score + if unit.is_hard_gated { 5.0 } else { 0.0 };
+
+    if unit.is_hard_gated && (unit.integration_coverage < 80.0 || only_sparse_unit_tests) {
+        return Some((
+            "integration",
+            format!(
+                "critical path; {}; {}; {} - add integration tests",
+                if uncovered { "uncovered" } else { "coverage is incomplete" },
+                if historically_buggy { "historically buggy" } else { "high-risk behavior" },
+                if only_sparse_unit_tests { "only sparse unit tests" } else { "integration coverage is weak" },
+            ),
+            base + 8.0,
+        ));
+    }
+    if unit.reopened_count > 0 {
+        return Some((
+            "regression",
+            format!("{} fixes reopened; add a regression test for the failing workflow", unit.reopened_count),
+            base + 7.0,
+        ));
+    }
+    if unit.dark_arms > 0
+        && !normalized_types.contains("property")
+        && !normalized_types.contains("fuzz")
+    {
+        return Some((
+            "property",
+            format!("{} uncovered branch arms; add property or fuzz tests", unit.dark_arms),
+            base + 5.0,
+        ));
+    }
+    if unit.distinct_tests > 0 && unit.mutant_verified_tests == 0 {
+        return Some((
+            "mutation",
+            "covered, but no test is mutation-verified; add assertions that kill representative mutants".to_string(),
+            base + 3.0,
+        ));
+    }
+    if uncovered || unit.distinct_tests == 0 {
+        return Some((
+            "unit",
+            format!("{}; add focused unit tests before refactoring", if historically_buggy { "historically buggy and uncovered" } else { "uncovered behavior" }),
+            base + 2.0,
+        ));
+    }
+    None
+}
+
+fn render_analyzer_health_section(dashboard: &UiDashboard) -> String {
+    let items = dashboard
+        .analyzer_health
+        .iter()
+        .map(|health| HotspotItem {
+            href: "#".to_string(),
+            kind: health.status.clone(),
+            name: health.analyzer.clone(),
+            path: health.detail.clone(),
+            detail: format!(
+                "{} findings in this folder / {} current total",
+                health.scoped_findings, health.total_findings
+            ),
+            score: health.status.clone(),
+        })
+        .collect::<Vec<_>>();
+    let has_problem = dashboard
+        .analyzer_health
+        .iter()
+        .any(|health| health.status != "healthy");
+    let body = render_template_string(
+        HotspotListTemplate {
+            wrapper_class: "unit-hotspots analyzer-health",
+            empty_message: "No analyzer artifacts have been configured.",
+            items: &items,
+        },
+        "analyzer health template",
+    );
+    render_dashboard_disclosure("Analyzer and Artifact Health", has_problem, &body)
 }
 
 fn render_finding_changes_section(dashboard: &UiDashboard) -> String {
@@ -8690,7 +9245,7 @@ mod tests {
                 rule_id: "slopcop.dark-arm.dead".into(),
                 level: "note".into(),
                 message: "dark arm: dead".into(),
-                path: "src/other.rb".into(),
+                path: "other/other.rb".into(),
                 start_line: 1,
                 start_column: None,
                 end_line: None,
@@ -8710,12 +9265,23 @@ mod tests {
         let line = payload.annotations.iter().find(|line| line.line == 2).unwrap();
         let dashboard = dashboard_summary(&storage).unwrap();
         let files = file_index(&storage, None).unwrap();
+        let scoped_review = review_next_items(&storage, "src", &CoverageScope::all()).unwrap();
+        let scoped_health = analyzer_health(&storage, "src", &CoverageScope::all()).unwrap();
+        let slopcop_health = scoped_health
+            .iter()
+            .find(|health| health.analyzer == "SlopCop")
+            .unwrap();
 
         assert_eq!(line.findings.len(), 1);
         assert_eq!(line.findings[0].tool, "SlopCop");
         assert_eq!(line.dark_arm_spans[0].span, Some([2, 2, 2, 6]));
         assert_eq!(dashboard.sarif_findings, 2);
-        assert!(files.iter().any(|file| file.path == "src/other.rb" && file.sarif_findings == 1));
+        assert_eq!(scoped_review.len(), 1);
+        assert_eq!(scoped_review[0].path, "src/demo.rb");
+        assert!(scoped_review[0].detail.contains("SlopCop"));
+        assert_eq!(slopcop_health.scoped_findings, 1);
+        assert_eq!(slopcop_health.total_findings, 2);
+        assert!(files.iter().any(|file| file.path == "other/other.rb" && file.sarif_findings == 1));
     }
 
     #[test]
@@ -9642,8 +10208,17 @@ mod tests {
                 ..ui_file_for_sort("zig/runtime/a.zig", 10, 8, 1)
             }],
             top_units: Vec::new(),
+            review_next: Vec::new(),
+            test_next_units: Vec::new(),
             top_architecture_risks: Vec::new(),
             top_complexity_functions: Vec::new(),
+            analyzer_health: vec![UiAnalyzerHealth {
+                analyzer: "Decomplex".to_string(),
+                status: "degraded".to_string(),
+                detail: "12 findings were truncated by artifact limits".to_string(),
+                scoped_findings: 4,
+                total_findings: 20,
+            }],
             warnings: Vec::new(),
         };
         let files = dashboard.top_hazard_files.iter().collect::<Vec<_>>();
@@ -9665,6 +10240,10 @@ mod tests {
         assert!(html.contains("<h2>Active Hazards</h2>"));
         assert!(html.contains("<h2>Finding Changes</h2>"));
         assert!(html.contains("3</strong> new"));
+        assert!(html.contains("<h2>Review Next</h2>"));
+        assert!(html.contains("<h2>Test Next</h2>"));
+        assert!(html.contains("<h2>Analyzer and Artifact Health</h2>"));
+        assert!(html.contains("4 findings in this folder / 20 current total"));
         assert!(html.contains("<h2>Highest Risk Units</h2>"));
         assert!(html.contains("<h2>Highest Architectural Risks</h2>"));
         assert!(html.contains("<h2>High Complexity Functions</h2>"));
@@ -9707,6 +10286,81 @@ mod tests {
         assert!(hazards.contains("<details class=\"dashboard-section dashboard-disclosure\">"));
         assert!(!hazards.contains(" open"));
         assert!(hazards.contains("No active systems hazards are recorded."));
+    }
+
+    #[test]
+    fn test_next_prioritizes_integration_for_sparse_critical_path_testing() {
+        let unit = UiUnitHotspot {
+            path: "src/payments.rb".to_string(),
+            name: "charge".to_string(),
+            kind: "function".to_string(),
+            start_line: 12,
+            score: 9.0,
+            risk_score: 7.0,
+            sarif_findings: 2,
+            dark_arms: 1,
+            hazards: 1,
+            fixes: 3,
+            changes: 8,
+            mutant_killed_tests: 0,
+            mutant_verified_tests: 0,
+            distinct_tests: 1,
+            test_types: "unit".to_string(),
+            line_coverage: 0.0,
+            integration_coverage: 0.0,
+            is_hard_gated: true,
+            reopened_count: 0,
+        };
+
+        let (test_type, rationale, _) = test_next_recommendation(&unit).unwrap();
+        assert_eq!(test_type, "integration");
+        assert!(rationale.contains("critical path"));
+        assert!(rationale.contains("uncovered"));
+        assert!(rationale.contains("historically buggy"));
+        assert!(rationale.contains("only sparse unit tests"));
+        assert!(rationale.contains("add integration tests"));
+    }
+
+    #[test]
+    fn review_and_test_candidates_stay_inside_the_current_directory() {
+        let storage = Storage::open_memory().unwrap();
+        for (name, path) in [("inside", "src/inside.rb"), ("outside", "other/outside.rb")] {
+            let signature = format!("def {name}");
+            let body = format!("def {name}\n1\nend");
+            let unit = LogicalUnit::new(
+                name,
+                UnitKind::Function,
+                path,
+                1,
+                1,
+                3,
+                signature,
+                &body,
+            );
+            storage.upsert_logical_unit(&unit, 10).unwrap();
+            storage
+                .insert_event(&Event {
+                    unit_id: unit.id,
+                    commit_hash: "abc".to_string(),
+                    event_type: EventType::Fix,
+                    path: path.to_string(),
+                    name: name.to_string(),
+                    start_line: 1,
+                    end_line: 3,
+                    semantic_change: true,
+                    lines_added: 1,
+                    lines_removed: 1,
+                    timestamp: 10,
+                })
+                .unwrap();
+        }
+
+        let review = top_unit_hotspots(&storage, "src", &CoverageScope::all(), None).unwrap();
+        let test = test_next_hotspots(&storage, "src", &CoverageScope::all(), None).unwrap();
+        assert_eq!(review.len(), 1);
+        assert_eq!(test.len(), 1);
+        assert_eq!(review[0].path, "src/inside.rb");
+        assert_eq!(test[0].path, "src/inside.rb");
     }
 
     #[test]
