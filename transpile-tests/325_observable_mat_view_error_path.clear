@@ -1,5 +1,5 @@
 # A15: WITH MATERIALIZED VIEW must free the owned snapshot even when
-# the body exits via RAISE / OR EXIT. The cleanup template emits a
+# the body exits via RAISE / OR_ELSE EXIT. The cleanup template emits a
 # `defer free(...)` (Zig defer fires on every exit path including
 # error-return and early break), so the materialized slice should be
 # freed before the raise propagates.
@@ -26,14 +26,14 @@ END
 
 FN main() RETURNS Void ->
     # Happy path: body completes normally, snap is freed at end-of-WITH.
-    happy = runMatViewWithRaise(FALSE) OR RAISE;
+    happy = runMatViewWithRaise(FALSE) OR_ELSE RAISE;
     ASSERT happy == 1_i64, "happy path returned 1";
 
     # Error path: body raises mid-WITH; snap must still be freed.
     # CATCH the raised error so the test process exits cleanly while
     # the DebugAllocator still flags a leak if the cleanup didn't fire.
-    sad = runMatViewWithRaise(TRUE) OR -1_i64;
-    ASSERT sad == -1_i64, "error path returned the OR fallback";
+    sad = runMatViewWithRaise(TRUE) OR_ELSE -1_i64;
+    ASSERT sad == -1_i64, "error path returned the OR_ELSE fallback";
 
     print("ok");
     RETURN;

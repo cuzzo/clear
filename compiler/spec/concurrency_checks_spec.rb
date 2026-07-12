@@ -110,7 +110,7 @@ RSpec.describe "P3 effect inference + correctness checks" do
 
         FN main() RETURNS Void ->
           c = Counter{ value: 0 } @shared:locked;
-          bump(c) OR RAISE;
+          bump(c) OR_ELSE RAISE;
         END
       CHT
       expect { annotate(src) }.not_to raise_error

@@ -200,7 +200,7 @@ FN run() RETURNS !Int64[]@list ->
 END
 
 FN main() RETURNS Void ->
-    result = run() OR PASS;
+    result = run() OR_ELSE PASS;
     RETURN;
 END
 ```
@@ -210,8 +210,8 @@ Symptom: `1 tests leaked memory.`
 
 | Position × outcome=success | Result |
 |---|---|
-| `result = inner() OR PASS` | LEAK (heap_list, heap_string) |
-| `result = inner() OR RAISE` | LEAK |
+| `result = inner() OR_ELSE PASS` | LEAK (heap_list, heap_string) |
+| `result = inner() OR_ELSE RAISE` | LEAK |
 | `result = inner() OR <default>` | LEAK |
 | `outer.append(inner() OR …)` | LEAK (heap_string), MIR-FAIL (heap_list) |
 | `RETURN inner() OR …` | LEAK or MIR-FAIL depending on action/type |
@@ -219,7 +219,7 @@ Symptom: `1 tests leaked memory.`
 | `[inner() OR …]` (collection lit) | mixed, mostly OK on heap_list |
 | `consume(inner() OR …)` (fn arg) | mostly OK; one runtime FAIL |
 
-The bug isn't just `OR PASS` — `OR RAISE`, `OR <default>` all exhibit
+The bug isn't just `OR_ELSE PASS` — `OR_ELSE RAISE`, `OR <default>` all exhibit
 similar cleanup-pairing failures depending on syntactic position. The
 inner value's allocation isn't paired with a cleanup defer at the OR
 expression's binding site (or doesn't propagate through the chosen OR
@@ -252,7 +252,7 @@ they can be removed when the underlying bug is fixed.
 | `access_gate` | `RETURNS !T` for any fn containing WITH | WITH blocks are fallible |
 | `access_gate` | dropped `!~T` syntax (`RETURNS !~Int64` → `RETURNS ~Int64`) | `!` and `~` don't combine in return type |
 | `polymorphic_sync_admission` | Most callees `RETURNS Void` (not `!Void`) | Bare Void avoids "error union ignored" caller errors |
-| `loop_cleanup` | `OR PASS` instead of `OR RAISE` for caller | (a) raise re-propagates and exits the test non-zero; (b) `... OR PASS` itself appears to leak (#10) |
+| `loop_cleanup` | `OR_ELSE PASS` instead of `OR_ELSE RAISE` for caller | (a) raise re-propagates and exits the test non-zero; (b) `... OR_ELSE PASS` itself appears to leak (#10) |
 | All DO templates | Per-branch unique binding names (`c1`, `c2`) | DO branches share scope; reusing a name causes immutable-rebind error |
 
 ## Fixed elsewhere (informational)

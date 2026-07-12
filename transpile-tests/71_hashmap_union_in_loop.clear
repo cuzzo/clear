@@ -18,9 +18,9 @@ FN main() RETURNS Void ->
     END
 
     # Verify values survive the loop's arena rewind
-    v0 = map["k0"] OR Value.Nil;
-    v1 = map["k1"] OR Value.Nil;
-    v2 = map["k2"] OR Value.Nil;
+    v0 = map["k0"] OR_ELSE Value.Nil;
+    v1 = map["k1"] OR_ELSE Value.Nil;
+    v2 = map["k2"] OR_ELSE Value.Nil;
 
     PARTIAL MATCH v0 START Value.Str AS s -> ASSERT s == "alpha", "k0 == alpha";, DEFAULT -> ASSERT FALSE, "k0 missing"; END
     PARTIAL MATCH v1 START Value.Str AS s -> ASSERT s == "beta", "k1 == beta";, DEFAULT -> ASSERT FALSE, "k1 missing"; END

@@ -27,7 +27,7 @@ the post-mortem on how these slipped through to this stage.
 | 10 | Error-union return over `@list` mis-lowers (`*const anyerror!T`) | ✅ FIXED (coerced_type = payload, never `!T`) |
 | 11 | `expr OR <fallback>` over a *user* callee doesn't reset `can_fail` | ✅ FIXED (channel-termination authority) |
 | 12 | Bare arena op (`split`/concat/`makeList`/`append`) in plain fn emits `try` | ✅ FIXED (alloc-as-FAULT model) |
-| 13 | `@list` returned across an error-union boundary leaks at caller | ⬜ open (precisely isolated: declared `RETURNS !T@list` returning a LITERAL bound via `r = f() OR RAISE`; callee ∉ E1 heap_fns; safe fix double-frees 527 — needs dedicated cleanup-machinery change) |
+| 13 | `@list` returned across an error-union boundary leaks at caller | ⬜ open (precisely isolated: declared `RETURNS !T@list` returning a LITERAL bound via `r = f() OR_ELSE RAISE`; callee ∉ E1 heap_fns; safe fix double-frees 527 — needs dedicated cleanup-machinery change) |
 
 ### Unified resolution: allocation is a FAULT, not an ERROR
 
@@ -46,7 +46,7 @@ The fix (register-machine branch, 7 steps):
   `error_fallible` ONLY: a FAULT-only fn stays `RETURNS T`. Future
   STRICT flips exactly this one gate.
 - Unhandled alloc fault panics `[System/OutOfMemory]`; interceptable
-  anywhere via `OR PASS` / `CATCH` (uniform `!T` path).
+  anywhere via `OR_ELSE PASS` / `CATCH` (uniform `!T` path).
 - A returned value's `coerced_type` is the PAYLOAD, never `!T` (#10).
 - Deterministic OOM injection (`CLEAR_OOM_AFTER`) proves
   unhandled-panic + OR-PASS-recovery.
@@ -68,12 +68,12 @@ gate. None are regressions; each is a distinct root cause.
 Affects `cht` source of the shape:
 
 ```clear
-IF (someFallible(args) OR fallback) != "literal" THEN
+IF (someFallible(args) OR_ELSE fallback) != "literal" THEN
   RAISE "...";
 END
 ```
 
-CLEAR's hoisting pass lifts the `OR fallback` expression into an anonymous
+CLEAR's hoisting pass lifts the `OR_ELSE fallback` expression into an anonymous
 local (`__tmp_N`), but emits the `const __tmp_N = ...` line **inside** the
 `if` body — after the `if` condition has already referenced the name:
 
@@ -151,7 +151,7 @@ runs the verification, never the synthesis.
 ## 3. Effect inference treats `foo.charAt(i) OR ""` as making the
 caller fallible
 
-A `String.charAt(i) OR fallback` expression is *not* fallible — the `OR`
+A `String.charAt(i) OR_ELSE fallback` expression is *not* fallible — the `OR`
 swallows the option. But CLEAR's effect inference still propagates a
 `can_fail` to the enclosing function, forcing every caller up the chain
 to add `OR <action>` or change its return type to `!T`.
@@ -367,7 +367,7 @@ carry it.
 the callees whose error channel is NOT locally terminated. Threading
 an `absorbed` flag through the AST walk, the `.left` of an
 `OR_RESCUE` whose rhs does not re-propagate (anything but
-`OrRaise`/`OrExit`/`OR RETURN`/`OR EXIT`-expr) is marked absorbed.
+`OrRaise`/`OrExit`/`OR_ELSE RETURN`/`OR_ELSE EXIT`-expr) is marked absorbed.
 `@fn_propagating_callees` stores this per fn and is the SINGLE
 authority `compute_can_fail!` propagates over; `@call_graph` is
 unchanged (reentrancy/needs_rt still see every callee). This is the
@@ -412,7 +412,7 @@ heap-`@list` return).
 ## 13. `@list` returned across an error-union boundary leaks at the caller
 
 Found while attempting #10. `FN f() RETURNS !Int64[]@list -> RETURN
-[1_i64]; END` with `r = f() OR RAISE;` compiles (under the attempted
+[1_i64]; END` with `r = f() OR_ELSE RAISE;` compiles (under the attempted
 #10 coerce-strip) and asserts correctly, but the returned list is
 never freed at the caller — `[DebugAllocator] memory ... leaked`
 (array_list backing buffer). The success-path ownership of a `@list`
@@ -430,7 +430,7 @@ lost). Three derived sites then fail to see the heap collection:
      (FuncCall/Identifier/GetField) and misses literal returns
      (`RETURN [1_i64]`), so the fn never enters `heap_fns`.
   2. `EscapeAnalysis.tag_transitive_provenance!` (E3a) matches only
-     `val.is_a?(FuncCall)`, so `r = f() OR RAISE` (an OR_RESCUE) never
+     `val.is_a?(FuncCall)`, so `r = f() OR_ELSE RAISE` (an OR_RESCUE) never
      gets heap provenance → no caller cleanup.
   3. A contract-level check on `fn.return_type` also fails because
      `payload_type` lost `@collection`.

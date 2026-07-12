@@ -17,7 +17,7 @@ RSpec.describe "SHARD + CONCURRENT EACH lowering" do
       FN main() RETURNS Void ->
           MUTABLE counts: HashMap<Int64, Int64>@sharded(4) = {};
           (0..<16_i64) |> SHARD(_ MOD 4_i64, counts) |> CONCURRENT EACH {
-              counts[_] = (counts[_] OR 0_i64) + 1_i64;
+              counts[_] = (counts[_] OR_ELSE 0_i64) + 1_i64;
           };
       END
     CLEAR
@@ -39,7 +39,7 @@ RSpec.describe "SHARD + CONCURRENT EACH lowering" do
           items.append(1_i64);
           MUTABLE counts: HashMap<Int64, Int64>@sharded(4) = {};
           items |> CONCURRENT EACH {
-              counts[_] = (counts[_] OR 0_i64) + 1_i64;
+              counts[_] = (counts[_] OR_ELSE 0_i64) + 1_i64;
           };
       END
     CLEAR
@@ -59,8 +59,8 @@ RSpec.describe "SHARD + CONCURRENT EACH lowering" do
             MUTABLE a: HashMap<Int64, Int64>@sharded(4) = {};
             MUTABLE b: HashMap<Int64, Int64>@sharded(4) = {};
             items |> CONCURRENT EACH {
-                a[_] = (a[_] OR 0_i64) + 1_i64;
-                b[_] = (b[_] OR 0_i64) + 1_i64;
+                a[_] = (a[_] OR_ELSE 0_i64) + 1_i64;
+                b[_] = (b[_] OR_ELSE 0_i64) + 1_i64;
             };
         END
       CLEAR
@@ -93,8 +93,8 @@ RSpec.describe "SHARD + CONCURRENT EACH lowering" do
             items.append(1_i64);
             MUTABLE counts: HashMap<Int64, Int64>@sharded(4) = {};
             items |> CONCURRENT EACH {
-                counts[_] = (counts[_] OR 0_i64) + 1_i64;
-                counts[_ + 1_i64] = (counts[_ + 1_i64] OR 0_i64) + 1_i64;
+                counts[_] = (counts[_] OR_ELSE 0_i64) + 1_i64;
+                counts[_ + 1_i64] = (counts[_ + 1_i64] OR_ELSE 0_i64) + 1_i64;
             };
         END
       CLEAR

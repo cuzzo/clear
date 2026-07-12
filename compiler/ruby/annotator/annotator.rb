@@ -862,8 +862,8 @@ private
     # passes read a single source of truth.
     validate_and_resolve_sync_policy!(node)
 
-    # Error type names are whole-program declarations: later RAISE/OR EXIT
-    # sites with an explicit kind make type-only OR EXIT/CATCH sites valid.
+    # Error type names are whole-program declarations: later RAISE/OR_ELSE EXIT
+    # sites with an explicit kind make type-only OR_ELSE EXIT/CATCH sites valid.
     seed_error_type_registrations!(declarations)
 
     analyze_program_bodies!(declarations, node)

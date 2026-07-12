@@ -13,13 +13,13 @@ FN main() RETURNS Void ->
     map["charlie"] = 300;
 
     # Get values (acquires read lock on shard — concurrent readers allowed).
-    a = map["alice"] OR 0;
+    a = map["alice"] OR_ELSE 0;
     ASSERT a == 100, "alice should be 100";
 
-    b = map["bob"] OR 0;
+    b = map["bob"] OR_ELSE 0;
     ASSERT b == 200, "bob should be 200";
 
-    c = map["charlie"] OR 0;
+    c = map["charlie"] OR_ELSE 0;
     ASSERT c == 300, "charlie should be 300";
 
     # Contains check.
@@ -37,13 +37,13 @@ FN main() RETURNS Void ->
 
     # Overwrite.
     map["alice"] = 999;
-    a2 = map["alice"] OR 0;
+    a2 = map["alice"] OR_ELSE 0;
     ASSERT a2 == 999, "alice should be overwritten to 999";
 
     # Also test @shared:sharded(N):locked (Mutex variant).
     MUTABLE map2: HashMap<Int64>@shared:sharded(2):locked = {};
     map2["x"] = 42;
-    x = map2["x"] OR 0;
+    x = map2["x"] OR_ELSE 0;
     ASSERT x == 42, "mutex variant should work";
 
     RETURN;

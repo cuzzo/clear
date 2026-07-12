@@ -380,7 +380,7 @@ class MIRPass
     when AST::MoveNode, AST::Cast, AST::FreezeNode
       unwrap_return_expr(expr.value)
     when AST::BinaryOp
-      expr.op == :OR_RESCUE ? unwrap_return_expr(expr.left) : expr
+      expr.op == :OR_ELSE ? unwrap_return_expr(expr.left) : expr
     else
       expr
     end

@@ -83,7 +83,7 @@ RSpec.describe ZigTranspiler do
         FN convert!(token: String) RETURNS !Val ->
           IF token == "nil" THEN RETURN Val.Nil; END
           IF charAt(token, 0) == "\\"" THEN RETURN Val{ Str: substr(token, 1, token.length() - 2) }; END
-          n = toNumber(token) OR (0.0 - 999999.0);
+          n = toNumber(token) OR_ELSE (0.0 - 999999.0);
           IF n != 0.0 - 999999.0 THEN RETURN Val{ Num: n }; END
           RETURN Val{ Str: COPY token };
         END
@@ -97,7 +97,7 @@ RSpec.describe ZigTranspiler do
         FN main() RETURNS Void ->
           MUTABLE stack: Int64[]@list = [];
           stack.append(1_i64);
-          v = stack.pop() OR 0_i64;
+          v = stack.pop() OR_ELSE 0_i64;
           ASSERT v == 1_i64, "primitive pop fallback";
           RETURN;
         END
@@ -111,7 +111,7 @@ RSpec.describe ZigTranspiler do
         FN main() RETURNS Void ->
           MUTABLE src: String[]@list = [];
           src.append(COPY "a");
-          v = src.pop() OR COPY "fallback";
+          v = src.pop() OR_ELSE COPY "fallback";
           ASSERT v.length() > 0_i64, "owned pop fallback";
           RETURN;
         END
@@ -441,7 +441,7 @@ RSpec.describe ZigTranspiler do
         FN main() RETURNS Void ->
             MUTABLE counts: HashMap<Int64>@sharded(4) = {};
             (0_i64 ..< 100_i64) |> SHARD(makeKey(_), counts) |> CONCURRENT EACH {
-                cur = counts[_] OR 0;
+                cur = counts[_] OR_ELSE 0;
                 counts[_] = cur + 1;
             };
             RETURN;
@@ -460,7 +460,7 @@ RSpec.describe ZigTranspiler do
         FN main() RETURNS Void ->
             MUTABLE counts: HashMap<Int64>@sharded(4) = {};
             (0_i64 ..< 100_i64) |> SHARD(makeKey(_), counts) |> CONCURRENT EACH {
-                cur = counts[_] OR 0;
+                cur = counts[_] OR_ELSE 0;
                 counts[_] = cur + 1;
             };
             RETURN;
@@ -480,7 +480,7 @@ RSpec.describe ZigTranspiler do
         FN main() RETURNS Void ->
             MUTABLE counts: HashMap<Int64>@sharded(4) = {};
             (0_i64 ..< 100_i64) |> SHARD(makeKey(_), counts) |> CONCURRENT EACH {
-                cur = counts[_] OR 0;
+                cur = counts[_] OR_ELSE 0;
                 counts[_] = cur + 1;
             };
             RETURN;
@@ -508,12 +508,12 @@ RSpec.describe ZigTranspiler do
       expect(zig).not_to match(/dupe\(u8, (?:@as\(\[\]const u8, )?"value"/)
     end
 
-    it "keeps borrowed SHARD string map reads borrowed through OR fallback" do
+    it "keeps borrowed SHARD string map reads borrowed through OR_ELSE fallback" do
       src = <<~CLEAR
         FN main() RETURNS Void ->
             MUTABLE map: HashMap<String>@sharded(4) = {};
             (0_i64 ..< 10_i64) |> SHARD("k:" + toString(_), map) |> CONCURRENT EACH {
-                got = map[_] OR "";
+                got = map[_] OR_ELSE "";
             };
             RETURN;
         END
@@ -530,8 +530,8 @@ RSpec.describe ZigTranspiler do
             keys.append("a");
             keys.append("b");
             MUTABLE counts: HashMap<Int64>@sharded(4) = {};
-            (0_i64 ..< 2_i64) |> SHARD(keys[_] OR panic("keys index invariant"), counts) |> CONCURRENT EACH {
-                cur = counts[_] OR 0;
+            (0_i64 ..< 2_i64) |> SHARD(keys[_] OR_ELSE panic("keys index invariant"), counts) |> CONCURRENT EACH {
+                cur = counts[_] OR_ELSE 0;
                 counts[_] = cur + 1;
             };
             RETURN;
@@ -1374,7 +1374,7 @@ RSpec.describe ZigTranspiler do
         STRUCT Env { vars: HashMap<Int64> }
 
         FN has!(envId: Id<Env>, name: String, MUTABLE pool: Env[10]@pool) RETURNS Bool ->
-            RETURN pool[envId]?.vars.contains?(name) OR FALSE;
+            RETURN pool[envId]?.vars.contains?(name) OR_ELSE FALSE;
         END
       CLEAR
 
@@ -1783,7 +1783,7 @@ RSpec.describe ZigTranspiler do
         END
 
         FN main() RETURNS Void ->
-            n: Node = mk() OR RAISE;
+            n: Node = mk() OR_ELSE RAISE;
             PARTIAL MATCH n START
                 Node.Pair AS p -> ASSERT TRUE, "recursive pair returned";,
                 DEFAULT -> ASSERT FALSE, "expected recursive pair";
@@ -1812,7 +1812,7 @@ RSpec.describe ZigTranspiler do
             RETURN "ok";
         END
         FN test!() RETURNS !String ->
-            RETURN useVal(makeVal!() OR RAISE);
+            RETURN useVal(makeVal!() OR_ELSE RAISE);
         END
       CLEAR
       zig = transpile(src)
@@ -2136,8 +2136,8 @@ RSpec.describe ZigTranspiler do
             MUTABLE seeds: Int64[]@list = [];
             seeds.append(1_i64);
             seeds.append(2_i64);
-            (0..<2) |> SHARD(makeKey(seeds[_] OR panic("seeds index invariant")), counts) |> CONCURRENT EACH {
-                cur = counts[_] OR 0;
+            (0..<2) |> SHARD(makeKey(seeds[_] OR_ELSE panic("seeds index invariant")), counts) |> CONCURRENT EACH {
+                cur = counts[_] OR_ELSE 0;
                 counts[_] = cur + 1;
             };
             RETURN;

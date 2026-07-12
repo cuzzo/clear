@@ -11,11 +11,11 @@ FN main() RETURNS Void ->
     counts["bob"] = 20;
     counts["charlie"] = 30;
 
-    # Get values back (map[key] returns ?V — use OR to unwrap).
-    a = counts["alice"] OR 0;
+    # Get values back (map[key] returns ?V — use OR_ELSE to unwrap).
+    a = counts["alice"] OR_ELSE 0;
     ASSERT a == 10, "alice should be 10";
 
-    b = counts["bob"] OR 0;
+    b = counts["bob"] OR_ELSE 0;
     ASSERT b == 20, "bob should be 20";
 
     # Contains check.

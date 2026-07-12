@@ -11,6 +11,6 @@ FN main() RETURNS Void ->
     };
 
     ASSERT map.count() == n, "all frame-built keys inserted";
-    ASSERT (map["k:0"] OR 0_i64) == 1_i64, "first key present";
-    ASSERT (map["k:127"] OR 0_i64) == 1_i64, "last key present";
+    ASSERT (map["k:0"] OR_ELSE 0_i64) == 1_i64, "first key present";
+    ASSERT (map["k:127"] OR_ELSE 0_i64) == 1_i64, "last key present";
 END

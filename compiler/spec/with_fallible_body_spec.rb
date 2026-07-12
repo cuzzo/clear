@@ -16,7 +16,7 @@ RSpec.describe "fallible work inside WITH bodies" do
       FN update() RETURNS !Void ->
         c = Box{ value: 0 } @versioned;
         WITH SNAPSHOT c AS MUTABLE y {
-          y.value = toInt("1") OR RAISE;
+          y.value = toInt("1") OR_ELSE RAISE;
         } ON MvccConflict RAISE
         RETURN;
       END
@@ -33,13 +33,13 @@ RSpec.describe "fallible work inside WITH bodies" do
       STRUCT Box { value: Int64 }
       FN update(x: SHARED T) RETURNS !Void ->
         WITH POLYMORPHIC x AS y {
-          _ = toInt("1") OR RAISE;
+          _ = toInt("1") OR_ELSE RAISE;
         }
         RETURN;
       END
       FN main() RETURNS !Void ->
         b = Box{ value: 0 } @shared:locked;
-        update(b) OR RAISE;
+        update(b) OR_ELSE RAISE;
         RETURN;
       END
     CLEAR
@@ -56,7 +56,7 @@ RSpec.describe "fallible work inside WITH bodies" do
       FN update() RETURNS !Void ->
         c = Box{ value: 0 } @shared:locked;
         WITH EXCLUSIVE c AS y {
-          y.value = toInt("1") OR RAISE;
+          y.value = toInt("1") OR_ELSE RAISE;
         }
         RETURN;
       END

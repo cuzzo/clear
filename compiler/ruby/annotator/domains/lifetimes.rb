@@ -228,7 +228,7 @@ module Annotator
         end
 
         # RESOLVE returns ?T@multiowned or ?T@shared.
-        # Use RESOLVE(link)?.field OR fallback to safely access the target.
+        # Use RESOLVE(link)?.field OR_ELSE fallback to safely access the target.
         source = ti.link_source || :multiowned
         resolved_type = Type.new(:"?#{ti.resolved}")
         resolved_type.apply_reference_ownership!(source == :shared ? :shared : :multiowned, link_source: source)

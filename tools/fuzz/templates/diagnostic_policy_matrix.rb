@@ -57,7 +57,7 @@ FuzzGenerator.register(:diagnostic_policy_matrix, cells: DIAGNOSTIC_POLICY_CELLS
       FN main() RETURNS Void ->
         c = Counter{ value: 0_i64 } @locked;
         WITH EXCLUSIVE c AS ref {
-          ref.value = bounded(4_i64) OR 0_i64;
+          ref.value = bounded(4_i64) OR_ELSE 0_i64;
         }
         RETURN;
       END
@@ -155,7 +155,7 @@ FuzzGenerator.register(:diagnostic_policy_matrix, cells: DIAGNOSTIC_POLICY_CELLS
       END
 
       FN main() RETURNS Void ->
-        _ = apply(fib, 4_i64) OR 0_i64;
+        _ = apply(fib, 4_i64) OR_ELSE 0_i64;
         RETURN;
       END
     CHT
@@ -227,7 +227,7 @@ FuzzGenerator.register(:diagnostic_policy_matrix, cells: DIAGNOSTIC_POLICY_CELLS
       END
 
       FN main() RETURNS Void ->
-        x = leak() OR EXIT "no";
+        x = leak() OR_ELSE EXIT "no";
         RETURN;
       END
     CHT

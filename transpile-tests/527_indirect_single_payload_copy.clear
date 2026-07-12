@@ -25,7 +25,7 @@ FN main() RETURNS Void ->
         DEFAULT -> ASSERT FALSE, "expected Str";
     END
 
-    boxed = wrap!() OR RAISE;
+    boxed = wrap!() OR_ELSE RAISE;
     PARTIAL MATCH boxed START
         U.Box AS inner ->
             c = COPY inner;

@@ -16,8 +16,8 @@ FN main() RETURNS !Void ->
     MUTABLE map: HashMap<Value> = {};
     payload = "owned-" + "payload";
 
-    storeCopy!("out", Value{ Str: COPY payload }, map) OR RAISE;
-    got = map["out"] OR Value.Nil;
+    storeCopy!("out", Value{ Str: COPY payload }, map) OR_ELSE RAISE;
+    got = map["out"] OR_ELSE Value.Nil;
 
     PARTIAL MATCH got START
         Value.Str AS s -> ASSERT s == "owned-payload", "stored copy should preserve payload";,

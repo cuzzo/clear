@@ -243,7 +243,7 @@ Example diagnostic:
   Alternative: pin x: Int64 at the signature.
     line 12: FN parseValue(x: Int64) -> ...
     line 30: parseValue(count)            -- already an Int64
-    line 45: parseValue(Int.fromString(s) OR RAISE)
+    line 45: parseValue(Int.fromString(s) OR_ELSE RAISE)
 
   Pick a fix or restructure to converge on one type.
 ```

@@ -56,7 +56,7 @@ PRIVATE FN assertTokenStr!(
 )
 RETURNS !Void ->
   ASSERT symbolTextEquals?(token.type, token_type), "token type";
-  actual = tokenString!(token) OR RAISE;
+  actual = tokenString!(token) OR_ELSE RAISE;
   ASSERT actual == value, "token string value";
   ASSERT token.line == line, "token line";
   ASSERT token.column == column, "token column";
@@ -65,7 +65,7 @@ END
 
 PRIVATE FN assertTokenStrValue!(token: Token, token_type: String, value: String) RETURNS !Void ->
   ASSERT symbolTextEquals?(token.type, token_type), "token type";
-  actual = tokenString!(token) OR RAISE;
+  actual = tokenString!(token) OR_ELSE RAISE;
   ASSERT actual == value, "token string value";
   RETURN;
 END
@@ -79,7 +79,7 @@ PRIVATE FN assertTokenInt!(
 )
 RETURNS !Void ->
   ASSERT symbolTextEquals?(token.type, token_type), "token type";
-  actual = tokenInt!(token) OR RAISE;
+  actual = tokenInt!(token) OR_ELSE RAISE;
   ASSERT actual == value, "token integer value";
   ASSERT token.line == line, "token line";
   ASSERT token.column == column, "token column";
@@ -95,7 +95,7 @@ PRIVATE FN assertTokenUInt!(
 )
 RETURNS !Void ->
   ASSERT symbolTextEquals?(token.type, token_type), "token type";
-  actual = tokenUInt!(token) OR RAISE;
+  actual = tokenUInt!(token) OR_ELSE RAISE;
   ASSERT actual == value, "token unsigned integer value";
   ASSERT token.line == line, "token line";
   ASSERT token.column == column, "token column";
@@ -111,7 +111,7 @@ PRIVATE FN assertTokenFloat!(
 )
 RETURNS !Void ->
   ASSERT symbolTextEquals?(token.type, token_type), "token type";
-  actual = tokenFloat!(token) OR RAISE;
+  actual = tokenFloat!(token) OR_ELSE RAISE;
   MUTABLE diff = actual - value;
   IF diff < 0.0 THEN
     diff = 0.0 - diff;
@@ -128,7 +128,7 @@ PRIVATE FN assertEOF(token: Token) RETURNS Void ->
 END
 
 PRIVATE FN lexHasError(source: String@raw) RETURNS Bool ->
-  tokenizeSource!(source) OR RAISE;
+  tokenizeSource!(source) OR_ELSE RAISE;
   RETURN FALSE;
 
 CATCH Input
@@ -145,88 +145,88 @@ END
 TEST Lexer DO
   WHEN "basic tokenization" DO
     TEST THAT "tokenizes a variable assignment with columns" DO
-      tokens = tokenizeSource!("x = 42") OR RAISE;
+      tokens = tokenizeSource!("x = 42") OR_ELSE RAISE;
 
       ASSERT tokens.length() == 4, "assignment token count";
-      assertTokenStr!(tokens[0], "VAR_ID", "x", 1, 1) OR RAISE;
-      assertTokenStr!(tokens[1], "CHAR", "=", 1, 3) OR RAISE;
-      assertTokenInt!(tokens[2], "INT64", 42, 1, 5) OR RAISE;
+      assertTokenStr!(tokens[0], "VAR_ID", "x", 1, 1) OR_ELSE RAISE;
+      assertTokenStr!(tokens[1], "CHAR", "=", 1, 3) OR_ELSE RAISE;
+      assertTokenInt!(tokens[2], "INT64", 42, 1, 5) OR_ELSE RAISE;
       assertEOF(tokens[3]);
     END
 
     TEST THAT "distinguishes keywords, types, and variables" DO
-      tokens = tokenizeSource!("IF If if WITH SNAPSHOT x AS y") OR RAISE;
+      tokens = tokenizeSource!("IF If if WITH SNAPSHOT x AS y") OR_ELSE RAISE;
 
-      assertTokenStr!(tokens[0], "KEYWORD", "IF", 1, 1) OR RAISE;
-      assertTokenStr!(tokens[1], "TYPE_ID", "If", 1, 4) OR RAISE;
-      assertTokenStr!(tokens[2], "VAR_ID", "if", 1, 7) OR RAISE;
-      assertTokenStr!(tokens[3], "KEYWORD", "WITH", 1, 10) OR RAISE;
-      assertTokenStr!(tokens[4], "KEYWORD", "SNAPSHOT", 1, 15) OR RAISE;
-      assertTokenStr!(tokens[5], "VAR_ID", "x", 1, 24) OR RAISE;
-      assertTokenStr!(tokens[6], "KEYWORD", "AS", 1, 26) OR RAISE;
-      assertTokenStr!(tokens[7], "VAR_ID", "y", 1, 29) OR RAISE;
+      assertTokenStr!(tokens[0], "KEYWORD", "IF", 1, 1) OR_ELSE RAISE;
+      assertTokenStr!(tokens[1], "TYPE_ID", "If", 1, 4) OR_ELSE RAISE;
+      assertTokenStr!(tokens[2], "VAR_ID", "if", 1, 7) OR_ELSE RAISE;
+      assertTokenStr!(tokens[3], "KEYWORD", "WITH", 1, 10) OR_ELSE RAISE;
+      assertTokenStr!(tokens[4], "KEYWORD", "SNAPSHOT", 1, 15) OR_ELSE RAISE;
+      assertTokenStr!(tokens[5], "VAR_ID", "x", 1, 24) OR_ELSE RAISE;
+      assertTokenStr!(tokens[6], "KEYWORD", "AS", 1, 26) OR_ELSE RAISE;
+      assertTokenStr!(tokens[7], "VAR_ID", "y", 1, 29) OR_ELSE RAISE;
     END
 
     TEST THAT "skips whitespace and comments while tracking position" DO
-      tokens = tokenizeSource!("IF # comment\n x\n  = 10") OR RAISE;
+      tokens = tokenizeSource!("IF # comment\n x\n  = 10") OR_ELSE RAISE;
 
-      assertTokenStr!(tokens[0], "KEYWORD", "IF", 1, 1) OR RAISE;
-      assertTokenStr!(tokens[1], "VAR_ID", "x", 2, 2) OR RAISE;
-      assertTokenStr!(tokens[2], "CHAR", "=", 3, 3) OR RAISE;
-      assertTokenInt!(tokens[3], "INT64", 10, 3, 5) OR RAISE;
+      assertTokenStr!(tokens[0], "KEYWORD", "IF", 1, 1) OR_ELSE RAISE;
+      assertTokenStr!(tokens[1], "VAR_ID", "x", 2, 2) OR_ELSE RAISE;
+      assertTokenStr!(tokens[2], "CHAR", "=", 3, 3) OR_ELSE RAISE;
+      assertTokenInt!(tokens[3], "INT64", 10, 3, 5) OR_ELSE RAISE;
     END
   END
 
   WHEN "strings" DO
     TEST THAT "handles simple and triple quoted strings" DO
-      simple = tokenizeSource!(" \"Hello\" ") OR RAISE;
-      assertTokenStr!(simple[0], "STRING", "Hello", 1, 2) OR RAISE;
+      simple = tokenizeSource!(" \"Hello\" ") OR_ELSE RAISE;
+      assertTokenStr!(simple[0], "STRING", "Hello", 1, 2) OR_ELSE RAISE;
 
-      triple = tokenizeSource!("\"\"\"\n A\n\"\"\"\nIF") OR RAISE;
-      assertTokenStr!(triple[0], "STRING", "\n A\n", 1, 1) OR RAISE;
-      assertTokenStr!(triple[1], "KEYWORD", "IF", 4, 1) OR RAISE;
+      triple = tokenizeSource!("\"\"\"\n A\n\"\"\"\nIF") OR_ELSE RAISE;
+      assertTokenStr!(triple[0], "STRING", "\n A\n", 1, 1) OR_ELSE RAISE;
+      assertTokenStr!(triple[1], "KEYWORD", "IF", 4, 1) OR_ELSE RAISE;
     END
 
     TEST THAT "splits interpolation into concatenation tokens" DO
       source = "\"Hello " + "$" + "{name}!\"";
-      tokens = tokenizeSource!(source) OR RAISE;
+      tokens = tokenizeSource!(source) OR_ELSE RAISE;
 
-      assertTokenStr!(tokens[0], "STRING", "Hello ", 1, 1) OR RAISE;
-      assertTokenStrValue!(tokens[1], "CHAR", "+") OR RAISE;
-      assertTokenStrValue!(tokens[2], "CHAR", "(") OR RAISE;
-      assertTokenStrValue!(tokens[3], "VAR_ID", "name") OR RAISE;
-      assertTokenStrValue!(tokens[4], "CHAR", ")") OR RAISE;
-      assertTokenStrValue!(tokens[5], "CHAR", "+") OR RAISE;
-      assertTokenStrValue!(tokens[6], "STRING", "!") OR RAISE;
+      assertTokenStr!(tokens[0], "STRING", "Hello ", 1, 1) OR_ELSE RAISE;
+      assertTokenStrValue!(tokens[1], "CHAR", "+") OR_ELSE RAISE;
+      assertTokenStrValue!(tokens[2], "CHAR", "(") OR_ELSE RAISE;
+      assertTokenStrValue!(tokens[3], "VAR_ID", "name") OR_ELSE RAISE;
+      assertTokenStrValue!(tokens[4], "CHAR", ")") OR_ELSE RAISE;
+      assertTokenStrValue!(tokens[5], "CHAR", "+") OR_ELSE RAISE;
+      assertTokenStrValue!(tokens[6], "STRING", "!") OR_ELSE RAISE;
       assertEOF(tokens[7]);
     END
   END
 
   WHEN "numbers" DO
     TEST THAT "parses based integer literals and separators" DO
-      hex = tokenizeSource!("0xFF") OR RAISE;
-      binary = tokenizeSource!("0b1010_0101") OR RAISE;
-      octal = tokenizeSource!("0o12_34") OR RAISE;
-      suffixed = tokenizeSource!("0xFF_FF_u32") OR RAISE;
+      hex = tokenizeSource!("0xFF") OR_ELSE RAISE;
+      binary = tokenizeSource!("0b1010_0101") OR_ELSE RAISE;
+      octal = tokenizeSource!("0o12_34") OR_ELSE RAISE;
+      suffixed = tokenizeSource!("0xFF_FF_u32") OR_ELSE RAISE;
 
-      assertTokenInt!(hex[0], "PREFIXED_INT", 255, 1, 1) OR RAISE;
-      assertTokenInt!(binary[0], "PREFIXED_INT", 165, 1, 1) OR RAISE;
-      assertTokenInt!(octal[0], "PREFIXED_INT", 668, 1, 1) OR RAISE;
-      assertTokenInt!(suffixed[0], "UINT32", 65_535, 1, 1) OR RAISE;
+      assertTokenInt!(hex[0], "PREFIXED_INT", 255, 1, 1) OR_ELSE RAISE;
+      assertTokenInt!(binary[0], "PREFIXED_INT", 165, 1, 1) OR_ELSE RAISE;
+      assertTokenInt!(octal[0], "PREFIXED_INT", 668, 1, 1) OR_ELSE RAISE;
+      assertTokenInt!(suffixed[0], "UINT32", 65_535, 1, 1) OR_ELSE RAISE;
     END
 
     TEST THAT "parses decimal separators and numeric suffixes" DO
-      plain = tokenizeSource!("1_000") OR RAISE;
-      int32 = tokenizeSource!("1_000_i32") OR RAISE;
-      uint64 = tokenizeSource!("1_000_u64") OR RAISE;
-      float32 = tokenizeSource!("1_234.5_f32") OR RAISE;
-      float64 = tokenizeSource!("3.141_592_f64") OR RAISE;
+      plain = tokenizeSource!("1_000") OR_ELSE RAISE;
+      int32 = tokenizeSource!("1_000_i32") OR_ELSE RAISE;
+      uint64 = tokenizeSource!("1_000_u64") OR_ELSE RAISE;
+      float32 = tokenizeSource!("1_234.5_f32") OR_ELSE RAISE;
+      float64 = tokenizeSource!("3.141_592_f64") OR_ELSE RAISE;
 
-      assertTokenInt!(plain[0], "INT64", 1000, 1, 1) OR RAISE;
-      assertTokenInt!(int32[0], "INT32", 1000, 1, 1) OR RAISE;
-      assertTokenUInt!(uint64[0], "UINT64", 1000_u64, 1, 1) OR RAISE;
-      assertTokenFloat!(float32[0], "FLOAT32", 1234.5, 1, 1) OR RAISE;
-      assertTokenFloat!(float64[0], "NUMBER", 3.141_592, 1, 1) OR RAISE;
+      assertTokenInt!(plain[0], "INT64", 1000, 1, 1) OR_ELSE RAISE;
+      assertTokenInt!(int32[0], "INT32", 1000, 1, 1) OR_ELSE RAISE;
+      assertTokenUInt!(uint64[0], "UINT64", 1000_u64, 1, 1) OR_ELSE RAISE;
+      assertTokenFloat!(float32[0], "FLOAT32", 1234.5, 1, 1) OR_ELSE RAISE;
+      assertTokenFloat!(float64[0], "NUMBER", 3.141_592, 1, 1) OR_ELSE RAISE;
     END
 
     TEST THAT "rejects suffixed integer overflow" DO
@@ -238,30 +238,30 @@ TEST Lexer DO
 
   WHEN "operators and suffix identifiers" DO
     TEST THAT "recognizes multi-character operators before single characters" DO
-      tokens = tokenizeSource!(".. -> |> OR || && != +=") OR RAISE;
+      tokens = tokenizeSource!(".. -> |> OR_ELSE || && != +=") OR_ELSE RAISE;
 
-      assertTokenStr!(tokens[0], "RANGE", "..", 1, 1) OR RAISE;
-      assertTokenStr!(tokens[1], "ARROW", "->", 1, 4) OR RAISE;
-      assertTokenStr!(tokens[2], "SMOOTH", "|>", 1, 7) OR RAISE;
-      assertTokenStr!(tokens[3], "OR_RESCUE", "OR", 1, 10) OR RAISE;
-      assertTokenStr!(tokens[4], "CHAR", "||", 1, 13) OR RAISE;
-      assertTokenStr!(tokens[5], "CHAR", "&&", 1, 16) OR RAISE;
-      assertTokenStr!(tokens[6], "CHAR", "!=", 1, 19) OR RAISE;
-      assertTokenStr!(tokens[7], "COMPOUND_ASSIGN", "+=", 1, 22) OR RAISE;
+      assertTokenStr!(tokens[0], "RANGE", "..", 1, 1) OR_ELSE RAISE;
+      assertTokenStr!(tokens[1], "ARROW", "->", 1, 4) OR_ELSE RAISE;
+      assertTokenStr!(tokens[2], "SMOOTH", "|>", 1, 7) OR_ELSE RAISE;
+      assertTokenStr!(tokens[3], "OR_ELSE", "OR_ELSE", 1, 10) OR_ELSE RAISE;
+      assertTokenStr!(tokens[4], "CHAR", "||", 1, 13) OR_ELSE RAISE;
+      assertTokenStr!(tokens[5], "CHAR", "&&", 1, 16) OR_ELSE RAISE;
+      assertTokenStr!(tokens[6], "CHAR", "!=", 1, 19) OR_ELSE RAISE;
+      assertTokenStr!(tokens[7], "COMPOUND_ASSIGN", "+=", 1, 22) OR_ELSE RAISE;
     END
 
     TEST THAT "keeps predicate and mutating suffixes only where they belong" DO
-      predicate = tokenizeSource!("check?(x) value? value?.field") OR RAISE;
-      assertTokenStr!(predicate[0], "VAR_ID", "check?", 1, 1) OR RAISE;
-      assertTokenStr!(predicate[4], "VAR_ID", "value", 1, 11) OR RAISE;
-      assertTokenStr!(predicate[5], "CHAR", "?", 1, 16) OR RAISE;
-      assertTokenStr!(predicate[6], "VAR_ID", "value", 1, 18) OR RAISE;
-      assertTokenStr!(predicate[7], "CHAR", "?", 1, 23) OR RAISE;
-      assertTokenStr!(predicate[8], "CHAR", ".", 1, 24) OR RAISE;
+      predicate = tokenizeSource!("check?(x) value? value?.field") OR_ELSE RAISE;
+      assertTokenStr!(predicate[0], "VAR_ID", "check?", 1, 1) OR_ELSE RAISE;
+      assertTokenStr!(predicate[4], "VAR_ID", "value", 1, 11) OR_ELSE RAISE;
+      assertTokenStr!(predicate[5], "CHAR", "?", 1, 16) OR_ELSE RAISE;
+      assertTokenStr!(predicate[6], "VAR_ID", "value", 1, 18) OR_ELSE RAISE;
+      assertTokenStr!(predicate[7], "CHAR", "?", 1, 23) OR_ELSE RAISE;
+      assertTokenStr!(predicate[8], "CHAR", ".", 1, 24) OR_ELSE RAISE;
 
-      mutating = tokenizeSource!("mutate!(x) x != y") OR RAISE;
-      assertTokenStr!(mutating[0], "VAR_ID", "mutate!", 1, 1) OR RAISE;
-      assertTokenStr!(mutating[5], "CHAR", "!=", 1, 14) OR RAISE;
+      mutating = tokenizeSource!("mutate!(x) x != y") OR_ELSE RAISE;
+      assertTokenStr!(mutating[0], "VAR_ID", "mutate!", 1, 1) OR_ELSE RAISE;
+      assertTokenStr!(mutating[5], "CHAR", "!=", 1, 14) OR_ELSE RAISE;
     END
   END
 END

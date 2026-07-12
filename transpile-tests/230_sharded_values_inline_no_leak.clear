@@ -7,7 +7,7 @@ FN main() RETURNS Void ->
     n = 20_i64;
     FOR i IN (0_i64 ..< n) DO
         k = i.toString();
-        counts[k] = (counts[k] OR 0_i64) + 1_i64;
+        counts[k] = (counts[k] OR_ELSE 0_i64) + 1_i64;
     END
 
     # Inline values() as pipeline source for each CONCURRENT op variant.
@@ -25,7 +25,7 @@ FN main() RETURNS Void ->
     # Also test numeric-keyed sharded map inline values().
     MUTABLE ncounts: HashMap<Int64, Int64>@sharded(4) = {};
     FOR j IN (0_i64 ..< n) DO
-        ncounts[j] = (ncounts[j] OR 0_i64) + 1_i64;
+        ncounts[j] = (ncounts[j] OR_ELSE 0_i64) + 1_i64;
     END
 
     ntotal = ncounts.values() |> CONCURRENT SUM toFloat(_);

@@ -3,6 +3,6 @@ FN main() RETURNS Float64 ->
     append(data, 1.5);
     append(data, 2.25);
     append(data, 3.5);
-    data[1_i64] = (data[1_i64] OR 0.0) + 0.75;
-    RETURN data[1_i64] OR 0.0;
+    data[1_i64] = (data[1_i64] OR_ELSE 0.0) + 0.75;
+    RETURN data[1_i64] OR_ELSE 0.0;
 END

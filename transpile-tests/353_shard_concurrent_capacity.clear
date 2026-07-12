@@ -6,7 +6,7 @@ FN main() RETURNS Void ->
     MUTABLE counts: HashMap<Int64, Int64>@sharded(4) = {};
 
     (0..<n) |> SHARD(_ MOD buckets, counts) |> CONCURRENT(capacity: 2, batch: 3) EACH {
-        counts[_] = (counts[_] OR 0_i64) + 1_i64;
+        counts[_] = (counts[_] OR_ELSE 0_i64) + 1_i64;
     };
 
     ASSERT counts.count() == buckets, "expected bucket count";

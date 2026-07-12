@@ -184,6 +184,8 @@ RSpec.describe "MIR gap-burn characterization" do
   it "builds rc, move, pointer-local, and default fiber capture specs structurally" do
     expect(FiberCtxBuilder::CaptureRcKind::Rc.retain_func).to eq("rcRetain")
     expect(FiberCtxBuilder::CaptureRcKind::Arc.release_func).to eq("arcRelease")
+    expect(FiberCtxBuilder::CaptureRcKind::AtomicPtr.retain_func).to eq("atomicPtrRetain")
+    expect(FiberCtxBuilder::CaptureRcKind::AtomicPtr.release_func).to eq("atomicPtrRelease")
 
     shared_type = Type.new(:Widget)
     shared_type.apply_reference_ownership!(:shared)
@@ -203,6 +205,24 @@ RSpec.describe "MIR gap-burn characterization" do
     expect(MIREmitter.new.emit(rc_cleanup.alloc)).to eq("ctx.alloc")
     rc_finalizer = T.must(rc.specs.first.finalizer_mir_for("ctx"))
     expect(MIREmitter.new.emit(rc_finalizer.alloc)).to eq("ctx.alloc")
+
+    atomic_ptr_type = Type.new(:Counter, sync: :atomic, layout: :indirect)
+    atomic_ptr_sym = SymbolEntry.new(reg: "cell", type: atomic_ptr_type, mutable: true, storage: :local)
+    atomic_ptr_analysis = CapabilityHelper::CaptureAnalysis.new(
+      captures: { "cell" => atomic_ptr_type },
+      strategies: {
+        "cell" => CaptureStrategy::RcClone.new(
+          zig_type: "*CheatLib.AtomicPtr(Counter)",
+          ctx_init_name: "cell"
+        ),
+      },
+      pointer_captures: Set.new,
+      capture_symbols: { "cell" => atomic_ptr_sym },
+    )
+    atomic_ptr = FiberCtxBuilder.build(atomic_ptr_analysis, body_access_prefix: "ctx", fresh_heap_id: 4)
+    expect(atomic_ptr.specs.first.setup_mir.first.init.callee).to eq("CheatLib.atomicPtrRetain")
+    atomic_ptr_cleanup = T.must(atomic_ptr.specs.first.cleanup_mir_for("ctx")).body
+    expect(atomic_ptr_cleanup.func).to eq("atomicPtrRelease")
 
     moved_analysis = CapabilityHelper::CaptureAnalysis.new(
       captures: { "owned" => Type.new(:String), "count" => Type.new(:Int64) },
@@ -1214,7 +1234,7 @@ RSpec.describe "MIR gap-burn characterization" do
 
     moved_return = AST::MoveNode.new(tok, id("returned", type: :String))
     expect(pass.send(:unwrap_return_expr, moved_return).name).to eq("returned")
-    rescued_return = AST::BinaryOp.new(tok, id("fallible", type: :String), :OR_RESCUE, lit("fallback"))
+    rescued_return = AST::BinaryOp.new(tok, id("fallible", type: :String), :OR_ELSE, lit("fallback"))
     expect(pass.send(:unwrap_return_expr, rescued_return).name).to eq("fallible")
 
     guarded = CleanupEntry.build(:uniform, alloc: :heap, has_moved_guard: false)
@@ -1743,11 +1763,11 @@ RSpec.describe "MIR gap-burn characterization" do
     expect(freeze).to be_a(MIR::FreezeExpr)
     expect(freeze.alloc).to eq(:heap)
     expect(low.lower(AST::Slice.new(tok, id("items", type: :"Int64[]"), lit(0, type: :Int64), lit(1, type: :Int64)))).to be_a(MIR::SliceExpr)
-    expect(low.lower(AST::OrRaise.new(tok))).to be_a(MIR::FieldGet)
-    expect(low.lower(AST::OrBreak.new(tok))).to be_a(MIR::BreakStmt)
-    expect(low.lower(AST::OrPass.new(tok))).to be_a(MIR::DefaultValue)
-    expect(low.lower(AST::OrPrune.new(tok))).to be_a(MIR::DefaultValue)
-    expect(low.lower(AST::OrExit.new(tok, :Runtime, nil, nil))).to be_a(MIR::ScopeBlock)
+    expect(low.lower(AST::OrElseRaise.new(tok))).to be_a(MIR::FieldGet)
+    expect(low.lower(AST::OrElseBreak.new(tok))).to be_a(MIR::BreakStmt)
+    expect(low.lower(AST::OrElsePass.new(tok))).to be_a(MIR::DefaultValue)
+    expect(low.lower(AST::OrElsePrune.new(tok))).to be_a(MIR::DefaultValue)
+    expect(low.lower(AST::OrElseExit.new(tok, :Runtime, nil, nil))).to be_a(MIR::ScopeBlock)
     expect(low.lower(AST::AssertRaises.new(tok, :Runtime, nil, lit(1, type: :Int64)))).to be_a(MIR::AssertRaisesCheck)
     expect { low.lower(AST::ThenChain.new(tok, [])) }.to raise_error(/ThenChain should be flattened/)
     expect(low.send(:ast_void_type?, Type.new(:Int64))).to eq(false)
@@ -1935,7 +1955,7 @@ RSpec.describe "MIR gap-burn characterization" do
       type_info: Type.new(:String),
       dest_alloc: :heap,
     )
-    string_or_ast = AST::BinaryOp.new(tok, id("left", type: :String), :OR_RESCUE, lit("right", type: :String))
+    string_or_ast = AST::BinaryOp.new(tok, id("left", type: :String), :OR_ELSE, lit("right", type: :String))
     string_or_ast.full_type = Type.new(:String)
     expect(string_or_plan.place(low, MIR::Ident.new("left"), string_or_ast)).to be_a(MIR::DupeSlice)
 
@@ -1980,7 +2000,7 @@ RSpec.describe "MIR gap-burn characterization" do
     expect(bin_mir.left).to be_a(MIR::Ident)
     expect(low.send(:flush_pending)).to include(an_instance_of(MIR::AllocMark), an_instance_of(MIR::Let), an_instance_of(MIR::Cleanup))
 
-    discarded_or = AST::BinaryOp.new(tok, id("fallible", type: Type.new(:"!String")), :OR_RESCUE, AST::OrPass.new(tok))
+    discarded_or = AST::BinaryOp.new(tok, id("fallible", type: Type.new(:"!String")), :OR_ELSE, AST::OrElsePass.new(tok))
     discarded_or.full_type = Type.new(:String)
     try_call = MIR::Call.new("run", [], false, true, nil)
     try_call.result_type = Type.new(:String)
@@ -1995,7 +2015,7 @@ RSpec.describe "MIR gap-burn characterization" do
     expect(T.cast(try_catch_fallback, MIR::BlockExpr).body.grep(MIR::Let).first.init).to be_a(MIR::DupeSlice)
     expect(MIR::OwnershipEffect.of(try_let.init).produces_owned).to eq(true)
 
-    discarded_optional = AST::BinaryOp.new(tok, id("maybe", type: Type.new(:"?String")), :OR_RESCUE, lit("fallback", type: :String))
+    discarded_optional = AST::BinaryOp.new(tok, id("maybe", type: Type.new(:"?String")), :OR_ELSE, lit("fallback", type: :String))
     discarded_optional.full_type = Type.new(:String)
     optional_call = MIR::Call.new("maybe", [], false, true, nil)
     optional_call.result_type = Type.new(:String)
@@ -2263,7 +2283,7 @@ RSpec.describe "MIR gap-burn characterization" do
 
     borrowed_left = id("maybe_owned", storage: :heap)
     borrowed_left.container_borrow = true
-    fallback = AST::BinaryOp.new(tok, borrowed_left, :OR_RESCUE, lit("fallback"))
+    fallback = AST::BinaryOp.new(tok, borrowed_left, :OR_ELSE, lit("fallback"))
     fallback.full_type = Type.new(:String)
     expect(Hoist.send(:owned_fallback_temp?, fallback, nil)).to eq(true)
     fallback_hoists = []
@@ -2962,7 +2982,7 @@ RSpec.describe "MIR gap-burn characterization" do
     expect(low.send(:substitute_mir_type, unchanged_tense, { T: :Int64 })).to equal(unchanged_tense)
 
     left = id("fallible", type: Type.new(:"!String"))
-    op = AST::BinaryOp.new(tok, left, :OR_RESCUE, lit("fallback", type: :String))
+    op = AST::BinaryOp.new(tok, left, :OR_ELSE, lit("fallback", type: :String))
     op.full_type = Type.new(:String)
     expect(low.send(:or_fallback_expected_type, op).resolved).to eq(:String)
 
@@ -3147,18 +3167,18 @@ RSpec.describe "MIR gap-burn characterization" do
     }.to raise_error(/missing finalized needs_rt metadata/)
   end
 
-  it "covers heap-destination OR placement without flattening branch ownership" do
+  it "covers heap-destination OR_ELSE placement without flattening branch ownership" do
     low = lowering
     left = id("maybe", type: Type.new(:"?String"), storage: :frame)
     right = id("fallback", type: :String, storage: :frame)
-    op = AST::BinaryOp.new(tok, left, :OR_RESCUE, right)
+    op = AST::BinaryOp.new(tok, left, :OR_ELSE, right)
     op.full_type = Type.new(:String)
 
     optional_placed = low.send(:place_string_or_for_heap_destination, MIR::Orelse.new(MIR::Ident.new("maybe"), MIR::Ident.new("fallback")), op)
     expect(optional_placed).to be_a(MIR::DupeSlice)
 
     fallible_left = id("fallible", type: Type.new(:"!String"), storage: :frame)
-    fallible = AST::BinaryOp.new(tok, fallible_left, :OR_RESCUE, right)
+    fallible = AST::BinaryOp.new(tok, fallible_left, :OR_ELSE, right)
     fallible.full_type = Type.new(:String)
     low.define_singleton_method(:heap_owned_result?) { |_mir, ast| ast.equal?(fallible_left) }
     placed = low.send(:place_string_or_for_heap_destination,
@@ -3197,7 +3217,7 @@ RSpec.describe "MIR gap-burn characterization" do
     expect(low.send(:deep_copy_zig_type, inferred, inferred_ast)).to eq("[]const u8")
   end
 
-  it "covers expression literal, operator, field, and OR edge branches" do
+  it "covers expression literal, operator, field, and OR_ELSE edge branches" do
     low = MIRLowering.new(input: MIRLoweringInput.new(union_schemas: { Result: Schemas::UnionSchema.new(variants: { Ok: :String, Done: nil }) }))
     low.define_singleton_method(:emit_builtin) do |name, args|
       sig = FunctionSignature.new(params: [], return_type: Type.new(:String), intrinsic: true)
@@ -3250,9 +3270,9 @@ RSpec.describe "MIR gap-burn characterization" do
     low.define_singleton_method(:place_value_for_destination) do |_value, *_args|
       MIR::Ident.new("__placed")
     end
-    or_rescue = AST::BinaryOp.new(tok, lit("fallback"), :OR_RESCUE, lit("fallback"))
-    or_rescue.full_type = Type.new(:String)
-    expect(low.send(:string_comparison_operand, MIR::Ident.new("value"), or_rescue).name).to eq("__placed")
+    or_else = AST::BinaryOp.new(tok, lit("fallback"), :OR_ELSE, lit("fallback"))
+    or_else.full_type = Type.new(:String)
+    expect(low.send(:string_comparison_operand, MIR::Ident.new("value"), or_else).name).to eq("__placed")
 
     low.define_singleton_method(:pipeline_host) do
       Object.new.tap { |host| host.define_singleton_method(:lower_pipeline) { |_node| nil } }
@@ -3264,33 +3284,33 @@ RSpec.describe "MIR gap-burn characterization" do
     plan = low.send(:field_access_plan, AST::GetField.new(tok, result_value, "Ok"), MIR::Ident.new("result"))
     expect(plan.value).to be_a(MIR::UnionVariantGet)
 
-    [AST::OrExit.new(tok, :Runtime, nil, nil), AST::OrPass.new(tok), AST::OrBreak.new(tok)].each do |right|
-      node = AST::BinaryOp.new(tok, id("plain", type: :Int64), :OR_RESCUE, right)
+    [AST::OrElseExit.new(tok, :Runtime, nil, nil), AST::OrElsePass.new(tok), AST::OrElseBreak.new(tok)].each do |right|
+      node = AST::BinaryOp.new(tok, id("plain", type: :Int64), :OR_ELSE, right)
       node.full_type = Type.new(:Int64)
-      expect(low.send(:lower_or_rescue, node)).to be_a(MIR::Ident)
+      expect(low.send(:lower_or_else, node)).to be_a(MIR::Ident)
     end
 
-    fallback = AST::BinaryOp.new(tok, id("plain", type: :Int64), :OR_RESCUE, lit(2, type: :Int64))
+    fallback = AST::BinaryOp.new(tok, id("plain", type: :Int64), :OR_ELSE, lit(2, type: :Int64))
     fallback.full_type = Type.new(:Int64)
     expect(low.send(:or_fallback_expected_type, fallback).resolved).to eq(:Int64)
 
-    any_fallback = AST::BinaryOp.new(tok, id("any_value", type: :Any), :OR_RESCUE, lit("fallback"))
+    any_fallback = AST::BinaryOp.new(tok, id("any_value", type: :Any), :OR_ELSE, lit("fallback"))
     any_fallback.full_type = Type.new(:String)
     expect(low.send(:or_fallback_expected_type, any_fallback).resolved).to eq(:String)
 
     call = AST::FuncCall.new(tok, "fallible", [])
     call.full_type = Type.new(:Any)
     call.error_union_type = :"!String"
-    error_fallback = AST::BinaryOp.new(tok, call, :OR_RESCUE, lit("fallback"))
+    error_fallback = AST::BinaryOp.new(tok, call, :OR_ELSE, lit("fallback"))
     error_fallback.full_type = Type.new(:String)
     expect(low.send(:or_fallback_expected_type, error_fallback).resolved).to eq(:String)
 
-    ex = AST::OrExit.new(tok, nil, :MvccConflict, nil)
-    facts = low.send(:or_exit_facts, ex, 11)
+    ex = AST::OrElseExit.new(tok, nil, :MvccConflict, nil)
+    facts = low.send(:or_else_exit_facts, ex, 11)
     expect(facts.kind).to eq(AST.kind_of_type(:MvccConflict).to_s)
     expect(facts.name_id).to eq(AST.id_of_type(:MvccConflict))
 
-    string_or = AST::BinaryOp.new(tok, id("left", type: :String), :OR_RESCUE, lit("right"))
+    string_or = AST::BinaryOp.new(tok, id("left", type: :String), :OR_ELSE, lit("right"))
     string_or.full_type = Type.new(:String)
     placed_or = low.send(:place_string_or_for_heap_destination,
       MIR::Orelse.new(MIR::Ident.new("left"), MIR::Ident.new("right")),
@@ -3346,8 +3366,8 @@ RSpec.describe "MIR gap-burn characterization" do
     expect(low.send(:root_receiver_node,
       AST::Slice.new(tok, AST::GetIndex.new(tok, id("items", type: :String), lit(0, type: :Int64)), nil, nil)).name).to eq("items")
 
-    bc_or_exit = MIRLowering.new(input: MIRLoweringInput.new(target: :bc)).send(:lower_or_exit, AST::OrExit.new(tok, :Runtime, nil, lit("stop")))
-    expect(bc_or_exit.body.first.expr).to be_a(MIR::OrExitBcRewrite)
+    bc_or_else_exit = MIRLowering.new(input: MIRLoweringInput.new(target: :bc)).send(:lower_or_else_exit, AST::OrElseExit.new(tok, :Runtime, nil, lit("stop")))
+    expect(bc_or_else_exit.body.first.expr).to be_a(MIR::OrElseExitBcRewrite)
 
     type_ast = AST::Program.new(tok, [
       AST::StructDef.new(tok, "PublicType", {}, :pub, nil),

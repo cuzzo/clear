@@ -230,7 +230,7 @@ RSpec.describe "DEBUG_POST clauses on function signatures" do
         END
 
         FN main() RETURNS !Void ->
-          y = safeDouble!(3) OR RAISE;
+          y = safeDouble!(3) OR_ELSE RAISE;
           ASSERT y == 6, "safeDouble";
           RETURN;
         END

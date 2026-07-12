@@ -61,8 +61,8 @@ FN shared_list_access() RETURNS !Void ->
 END
 
 FN main() RETURNS !Void ->
-  safe_filter() OR RAISE;
-  shared_list_access() OR RAISE;
+  safe_filter() OR_ELSE RAISE;
+  shared_list_access() OR_ELSE RAISE;
 END
 
 # Summary:

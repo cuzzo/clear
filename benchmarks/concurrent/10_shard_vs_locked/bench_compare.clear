@@ -37,7 +37,7 @@ FN main() RETURNS Void ->
   WHILE wi < workers DO
     start = wi * chunk;
     get_futures
-      .append(BG {FOR i IN (start ..< start + chunk) -> MUTABLE got = locked_map["key:" + i.toString()] OR "";});
+      .append(BG {FOR i IN (start ..< start + chunk) -> MUTABLE got = locked_map["key:" + i.toString()] OR_ELSE "";});
     wi += 1;
   END
   FOR gi IN (0 ..< workers) DO
@@ -64,7 +64,7 @@ FN main() RETURNS Void ->
   WHILE wi < workers DO
     start = wi * mix_get_chunk;
     mix_get_futures
-      .append(BG {FOR i IN (start ..< start + mix_get_chunk) -> MUTABLE got = locked_map["key:" + i.toString()] OR "";});
+      .append(BG {FOR i IN (start ..< start + mix_get_chunk) -> MUTABLE got = locked_map["key:" + i.toString()] OR_ELSE "";});
     wi += 1;
   END
   FOR mgi IN (0 ..< workers) DO
@@ -88,7 +88,7 @@ FN main() RETURNS Void ->
   # GET 1M
   (0 ..< n)
     |> SHARD("key:" + _.toString(), sn_map)
-    |> CONCURRENT EACH {got = sn_map[_] OR "";};
+    |> CONCURRENT EACH {got = sn_map[_] OR_ELSE "";};
 
   # Mixed: 200K SET + 800K GET
   (0 ..< (n / 5))
@@ -96,7 +96,7 @@ FN main() RETURNS Void ->
     |> CONCURRENT EACH {sn_map[_] = "updated";};
   (0 ..< ((n / 5) * 4))
     |> SHARD("key:" + _.toString(), sn_map)
-    |> CONCURRENT EACH {got = sn_map[_] OR "";};
+    |> CONCURRENT EACH {got = sn_map[_] OR_ELSE "";};
 
   ASSERT sn_map.count() == n;
   print("shared-nothing: OK");

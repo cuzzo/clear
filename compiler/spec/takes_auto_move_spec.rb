@@ -70,8 +70,8 @@ RSpec.describe "TAKES auto-move" do
         END
 
         FN main() RETURNS !Void ->
-            first() OR RAISE;
-            second() OR RAISE;
+            first() OR_ELSE RAISE;
+            second() OR_ELSE RAISE;
             RETURN;
         END
       CLEAR

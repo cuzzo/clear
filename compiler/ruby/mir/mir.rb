@@ -2453,7 +2453,7 @@ module MIR
 
 
   # Final state. Renders to:
-  #   inner.result = err_or_pass_through;  // err_action handles
+  #   inner.result = err_or_else_pass_through;  // err_action handles
   #   inner.wg.done();
   #   alloc.destroy(ctx);
   #   return .{ .Done = {} };
@@ -4896,7 +4896,7 @@ module MIR
   # Register/bytecode OR-EXIT error rewrite. This used to ride through
   # InlineBc as an ad hoc metadata hash, but InlineBc now has one role:
   # stdlib/function-signature-backed bytecode intrinsic dispatch.
-  OrExitBcRewrite = Struct.new(:kind, :name_id, :clear_type, :has_message, :line, :message) do
+  OrElseExitBcRewrite = Struct.new(:kind, :name_id, :clear_type, :has_message, :line, :message) do
     include Expr
     extend T::Sig
 

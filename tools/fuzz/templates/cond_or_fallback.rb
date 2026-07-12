@@ -1,4 +1,4 @@
-# Template: `(maybe(...) OR fallback) <cmp> baseline` in a control-flow
+# Template: `(maybe(...) OR_ELSE fallback) <cmp> baseline` in a control-flow
 # condition. Surfaces the lower_if hoist-ordering bug catalogued in
 # docs/agents/clear-bug123-forensic.md #1.
 #
@@ -8,11 +8,11 @@
 #     RETURN COPY s;                                 # heap-allocating return
 #   END
 #   FN main() RETURNS !Void ->
-#     IF (maybe("X") OR "") != "X" THEN RAISE "..."; END
+#     IF (maybe("X") OR_ELSE "") != "X" THEN RAISE "..."; END
 #   END
 #
-# The result of `maybe(...) OR ""` is heap-allocated (because maybe's
-# success path COPYs into a heap dupe and OR's fallback is the literal
+# The result of `maybe(...) OR_ELSE ""` is heap-allocated (because maybe's
+# success path COPYs into a heap dupe and OR_ELSE's fallback is the literal
 # ""), so `hoist_alloc` lifts it into a `__tmp_N` Let. The Let is pushed
 # to `@pending_stmts`. lower_if then calls `lower_body(then_branch)`,
 # which flushes that pending Let INTO the then-body, before the cond's
@@ -32,11 +32,11 @@ COND_OR_FALLBACK_CELLS = []
   [:empty, :default].each do |fb|
     [:heap_string, :heap_list].each do |value_type|
       cell = { container: ctr, fallback: fb, value_type: value_type }
-      # Every cell is active. A condition-position OR fallback must either
+      # Every cell is active. A condition-position OR_ELSE fallback must either
       # compile correctly or expose a real regression.
-      # :return cells exercise OR-fallback in RETURN position
-      # (`RETURN maybe(x) OR fallback`) -- the escape analysis
-      # return-value heap decision for BinaryOp/OR_RESCUE.
+      # :return cells exercise OR_ELSE-fallback in RETURN position
+      # (`RETURN maybe(x) OR_ELSE fallback`) -- the escape analysis
+      # return-value heap decision for BinaryOp/OR_ELSE.
       cell[:expected] = :pass
       COND_OR_FALLBACK_CELLS << cell
     end
@@ -133,12 +133,12 @@ def cof_container_block(p, cond, body)
   when :if
     "IF #{cond} THEN\n        #{body}\n    END"
   when :return
-    # OR-fallback in RETURN position is handled by a separate renderer
+    # OR_ELSE-fallback in RETURN position is handled by a separate renderer
     # path; this block is unused for :return.
     ""
   when :while
     # Bound by an unrelated counter so the loop terminates. The cond's
-    # OR-fallback expression is the second clause; both halves must
+    # OR_ELSE-fallback expression is the second clause; both halves must
     # short-circuit before the loop exits.
     <<~BODY.chomp
       MUTABLE iter: Int64 = 0_i64;
@@ -157,9 +157,9 @@ FuzzGenerator.register(:cond_or_fallback, cells: COND_OR_FALLBACK_CELLS) do |p|
   fb_lit   = cof_fallback_literal(p[:fallback], p[:value_type])
 
   if p[:container] == :return
-    # OR-fallback in RETURN position: a wrapper fn returns
-    # `maybe(arg) OR fallback`. Exercises the return-value heap decision
-    # for BinaryOp/OR_RESCUE in escape analysis.
+    # OR_ELSE-fallback in RETURN position: a wrapper fn returns
+    # `maybe(arg) OR_ELSE fallback`. Exercises the return-value heap decision
+    # for BinaryOp/OR_ELSE in escape analysis.
     rt = cof_value_type(p[:value_type])
     param_t = cof_value_type(p[:value_type])
     next <<~CHT
@@ -167,7 +167,7 @@ FuzzGenerator.register(:cond_or_fallback, cells: COND_OR_FALLBACK_CELLS) do |p|
       #{extra_fn}
 
       FN wrap(x: #{param_t}) RETURNS #{rt} ->
-          RETURN maybe(x) OR #{fb_lit};
+          RETURN maybe(x) OR_ELSE #{fb_lit};
       END
 
       FN main() RETURNS Void ->
@@ -179,7 +179,7 @@ FuzzGenerator.register(:cond_or_fallback, cells: COND_OR_FALLBACK_CELLS) do |p|
   end
 
   baseline = cof_baseline(p[:value_type])
-  expr     = "maybe(#{arg}) OR #{fb_lit}"
+  expr     = "maybe(#{arg}) OR_ELSE #{fb_lit}"
   cond     = cof_compare(p[:value_type], expr, baseline)
   body     = "RAISE \"cond_or_fallback_body\";"
   block    = cof_container_block(p, cond, body)

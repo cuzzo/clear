@@ -962,11 +962,29 @@ pub const CheatLib = struct {
         cell.* = try APT.init(alloc, data);
         return cell;
     }
+    pub fn atomicPtrRetain(comptime Cell: type, cell: *Cell) *Cell {
+        _ = cell.refs.fetchAdd(1, .monotonic);
+        return cell;
+    }
+    pub fn atomicPtrRelease(comptime Cell: type, alloc: std.mem.Allocator, cell: *Cell) void {
+        const previous = cell.refs.fetchSub(1, .release);
+        std.debug.assert(previous > 0);
+        if (previous != 1) return;
+        _ = cell.refs.load(.acquire);
+
+        const InnerT = Cell.Inner;
+        const inner_ptr = cell.ptr.swap(null, .acq_rel);
+        if (inner_ptr) |ip| {
+            cleanup(InnerT, alloc, ip);
+            alloc.destroy(ip);
+        }
+        alloc.destroy(cell);
+    }
     /// Tear down a `*AtomicPtr(T)` cell, retiring the currently-published
     /// `*T` through EBR before destroying the cell.
     pub fn atomicPtrDestroy(comptime T: type, rt: *Runtime, alloc: std.mem.Allocator, cell: *@import("../lib/atomic_ptr.zig").AtomicPtr(T)) void {
-        cell.deinit(rt, alloc) catch {};
-        alloc.destroy(cell);
+        _ = rt;
+        atomicPtrRelease(@import("../lib/atomic_ptr.zig").AtomicPtr(T), alloc, cell);
     }
     /// Allocate `*Versioned(T)` on the heap, init it with `data`,
     /// return the heap pointer. Mirrors `lockedCreate` for
@@ -3519,16 +3537,7 @@ pub const CheatLib = struct {
             break :blk @hasDecl(child, "compareAndPublish");
         }) {
             const Cell = @typeInfo(T).pointer.child;
-            const InnerT = Cell.Inner;
-            // Swap to null so we own the inner pointer; cleanup
-            // recursively (handles String fields and nested heaps)
-            // before destroying.
-            const inner_ptr = ptr.*.ptr.swap(null, .acq_rel);
-            if (inner_ptr) |ip| {
-                cleanup(InnerT, alloc, ip);
-                alloc.destroy(ip);
-            }
-            alloc.destroy(ptr.*);
+            atomicPtrRelease(Cell, alloc, ptr.*);
             return;
         }
 

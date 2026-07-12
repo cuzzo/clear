@@ -70,8 +70,8 @@ FN shared_mutation() RETURNS !Void ->
 END
 
 FN main() RETURNS !Void ->
-  demonstrate_ownership() OR RAISE;
-  shared_mutation() OR RAISE;
+  demonstrate_ownership() OR_ELSE RAISE;
+  shared_mutation() OR_ELSE RAISE;
 END
 
 # Summary:

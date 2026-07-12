@@ -3,5 +3,5 @@ FN ok!() RETURNS !Int64 ->
 END
 
 FN main() RETURNS Int64 ->
-    RETURN ok!() OR 42_i64;
+    RETURN ok!() OR_ELSE 42_i64;
 END

@@ -36,8 +36,8 @@ FN handleData(data: String) RETURNS !String ->
             END
             idStr = substr(rest, 0_i64, colonPos);
             nStr = substr(rest, colonPos + 1, rest.length() - colonPos - 1);
-            MUTABLE id = toInt(toNumber(idStr) OR 0.0);
-            MUTABLE n = toInt(toNumber(nStr) OR 0.0);
+            MUTABLE id = toInt(toNumber(idStr) OR_ELSE 0.0);
+            MUTABLE n = toInt(toNumber(nStr) OR_ELSE 0.0);
             IF n < 1 THEN n = 1; END
             result = heavyCompute(id, n);
             resp = resp + ":${result.toString()}\r\n";

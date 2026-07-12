@@ -447,12 +447,12 @@ RSpec.describe "AST coverage burndown" do
       }.to raise_error(ParserError, /duplicate REQUIRES/)
     end
 
-    it "parses OR-rescue variants and IF bind validation paths" do
-      return_fallback = parse_expr("call() OR RETURN")
+    it "parses OR_ELSE-rescue variants and IF bind validation paths" do
+      return_fallback = parse_expr("call() OR_ELSE RETURN")
       expect(return_fallback.right).to be_a(AST::ReturnNode)
-      exit_fallback = parse_expr("call() OR EXIT")
-      expect(exit_fallback.right).to be_a(AST::OrExit)
-      else_fallback = parse_expr("call() OR ELSE 0")
+      exit_fallback = parse_expr("call() OR_ELSE EXIT")
+      expect(exit_fallback.right).to be_a(AST::OrElseExit)
+      else_fallback = parse_expr("call() OR_ELSE ELSE 0")
       expect(else_fallback.right.value).to eq(0)
 
       lhs = AST::Identifier.new(token, "value")

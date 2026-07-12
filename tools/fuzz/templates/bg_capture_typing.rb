@@ -27,7 +27,7 @@ FuzzGenerator.register(:bg_capture_typing, cells: BG_CAPTURE_TYPING_CELLS) do |p
             RETURN NEXT f;
         END
       CHT
-      call = "runit() OR RAISE"
+      call = "runit() OR_ELSE RAISE"
     else
       body = <<~CHT.chomp
         FN runit(ops: #{list_t}) RETURNS !Int64 ->
@@ -35,7 +35,7 @@ FuzzGenerator.register(:bg_capture_typing, cells: BG_CAPTURE_TYPING_CELLS) do |p
             RETURN NEXT f;
         END
       CHT
-      call = "{ #{ctor}\n        n = runit(c0) OR RAISE; }"
+      call = "{ #{ctor}\n        n = runit(c0) OR_ELSE RAISE; }"
     end
   elsif p[:shape] == :struct_field # struct with a nested @list field
     consume = "STRUCT Bag { items: #{list_t} }\n    FN consume(b: Bag) RETURNS Int64 -> RETURN b.items.length(); END"
@@ -48,7 +48,7 @@ FuzzGenerator.register(:bg_capture_typing, cells: BG_CAPTURE_TYPING_CELLS) do |p
             RETURN NEXT f;
         END
       CHT
-      call = "runit() OR RAISE"
+      call = "runit() OR_ELSE RAISE"
     else
       body = <<~CHT.chomp
         FN runit(ops: Bag) RETURNS !Int64 ->
@@ -56,7 +56,7 @@ FuzzGenerator.register(:bg_capture_typing, cells: BG_CAPTURE_TYPING_CELLS) do |p
             RETURN NEXT f;
         END
       CHT
-      call = "{ #{ctor}\n        n = runit(bg0) OR RAISE; }"
+      call = "{ #{ctor}\n        n = runit(bg0) OR_ELSE RAISE; }"
     end
   elsif p[:shape] == :nested_list
     nested_t = "#{zig}[][]@list"
@@ -70,7 +70,7 @@ FuzzGenerator.register(:bg_capture_typing, cells: BG_CAPTURE_TYPING_CELLS) do |p
             RETURN NEXT f;
         END
       CHT
-      call = "runit() OR RAISE"
+      call = "runit() OR_ELSE RAISE"
     else
       body = <<~CHT.chomp
         FN runit(ops: #{nested_t}) RETURNS !Int64 ->
@@ -78,7 +78,7 @@ FuzzGenerator.register(:bg_capture_typing, cells: BG_CAPTURE_TYPING_CELLS) do |p
             RETURN NEXT f;
         END
       CHT
-      call = "{ #{ctor}\n        n = runit(c0) OR RAISE; }"
+      call = "{ #{ctor}\n        n = runit(c0) OR_ELSE RAISE; }"
     end
   elsif p[:shape] == :set_field
     set_t = "#{zig}[]@set"
@@ -92,7 +92,7 @@ FuzzGenerator.register(:bg_capture_typing, cells: BG_CAPTURE_TYPING_CELLS) do |p
             RETURN NEXT f;
         END
       CHT
-      call = "runit() OR RAISE"
+      call = "runit() OR_ELSE RAISE"
     else
       body = <<~CHT.chomp
         FN runit(ops: Bag) RETURNS !Int64 ->
@@ -100,7 +100,7 @@ FuzzGenerator.register(:bg_capture_typing, cells: BG_CAPTURE_TYPING_CELLS) do |p
             RETURN NEXT f;
         END
       CHT
-      call = "{ #{ctor}\n        n = runit(bg0) OR RAISE; }"
+      call = "{ #{ctor}\n        n = runit(bg0) OR_ELSE RAISE; }"
     end
   else # :map_field
     map_t = "HashMap<#{zig}>"
@@ -114,7 +114,7 @@ FuzzGenerator.register(:bg_capture_typing, cells: BG_CAPTURE_TYPING_CELLS) do |p
             RETURN NEXT f;
         END
       CHT
-      call = "runit() OR RAISE"
+      call = "runit() OR_ELSE RAISE"
     else
       body = <<~CHT.chomp
         FN runit(ops: Bag) RETURNS !Int64 ->
@@ -122,7 +122,7 @@ FuzzGenerator.register(:bg_capture_typing, cells: BG_CAPTURE_TYPING_CELLS) do |p
             RETURN NEXT f;
         END
       CHT
-      call = "{ #{ctor}\n        n = runit(bg0) OR RAISE; }"
+      call = "{ #{ctor}\n        n = runit(bg0) OR_ELSE RAISE; }"
     end
   end
 

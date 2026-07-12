@@ -13,5 +13,5 @@ FN main() RETURNS Int64 ->
     IF m.contains?(1_i64) THEN
         RETURN 0_i64;
     END
-    RETURN (m[2_i64] OR 0_i64) + m.length();
+    RETURN (m[2_i64] OR_ELSE 0_i64) + m.length();
 END

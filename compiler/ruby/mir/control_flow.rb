@@ -288,7 +288,7 @@ class FunctionCFG
       return true if can_fail_fns.include?(node.name)
     end
     return true if node.is_a?(AST::StaticCall) && node.can_fail
-    return true if node.is_a?(AST::FreezeNode) || node.is_a?(AST::Raise) || node.is_a?(AST::OrRaise)
+    return true if node.is_a?(AST::FreezeNode) || node.is_a?(AST::Raise) || node.is_a?(AST::OrElseRaise)
 
     MIRControlFlowExpr.children(node).any? { |child| stmt_can_fail?(child, can_fail_fns) }
   end

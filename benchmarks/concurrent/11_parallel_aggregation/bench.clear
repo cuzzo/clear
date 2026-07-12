@@ -41,8 +41,8 @@ FN main() RETURNS Void ->
   t0 = timestampMs();
   MUTABLE counts: HashMap<Int64, Int64> @sharded(32) = {};
   (0 ..< n)
-    |> SHARD(absInt(seeds[_] OR 0_i64) MOD buckets, counts)
-    |> CONCURRENT(batch: 512) EACH {counts[_] = (counts[_] OR 0) + 1;};
+    |> SHARD(absInt(seeds[_] OR_ELSE 0_i64) MOD buckets, counts)
+    |> CONCURRENT(batch: 512) EACH {counts[_] = (counts[_] OR_ELSE 0) + 1;};
   shardMs = timestampMs() - t0;
 
   # Phase 2: Stats over histogram values (partial aggregation)

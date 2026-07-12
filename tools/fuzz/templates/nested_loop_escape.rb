@@ -142,7 +142,7 @@ FuzzGenerator.register(:nested_loop_escape, cells: NESTED_LOOP_ESCAPE_CELLS) do 
       elsif p[:inner_kind] == :array
         "first[0_i64]"
       else
-        "first[0_i64] OR 0_i64"
+        "first[0_i64] OR_ELSE 0_i64"
       end
     when :struct_field
       if p[:inner_kind] == :map
@@ -152,7 +152,7 @@ FuzzGenerator.register(:nested_loop_escape, cells: NESTED_LOOP_ESCAPE_CELLS) do 
       elsif p[:inner_kind] == :array
         "first.data[0_i64]"
       else
-        "first.data[0_i64] OR 0_i64"
+        "first.data[0_i64] OR_ELSE 0_i64"
       end
     when :union_payload then "0_i64"
     end

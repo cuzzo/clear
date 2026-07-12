@@ -324,7 +324,7 @@ RSpec.describe "PRE clauses on function signatures" do
             RETURN x;
           END
           FN main() RETURNS !Void ->
-            v = identity?(7) OR RAISE;
+            v = identity?(7) OR_ELSE RAISE;
             ASSERT v == 7, "ok";
             RETURN;
           END

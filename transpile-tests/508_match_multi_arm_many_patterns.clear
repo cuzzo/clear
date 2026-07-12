@@ -1,5 +1,5 @@
 # 7-pattern arm. Stress-tests the comma loop in the parser, the
-# extra_values list in the annotator, and the OR'd condition in the
+# extra_values list in the annotator, and the OR_ELSE'd condition in the
 # union if-chain lowering.
 
 UNION Tag { A, B, C, D, E, F, G, H }

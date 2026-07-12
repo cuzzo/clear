@@ -191,8 +191,8 @@ END
 MUTABLE mvcc_cfg   = Config{ port: 8080 } @versioned;
 MUTABLE atomic_cfg = Config{ port: 8080 } @indirect:atomic;
 
-updateConfig!(mvcc_cfg) OR RAISE;    # may surface MvccConflict
-updateConfig!(atomic_cfg) OR RAISE;  # may surface AtomicConflict
+updateConfig!(mvcc_cfg) OR_ELSE RAISE;    # may surface MvccConflict
+updateConfig!(atomic_cfg) OR_ELSE RAISE;  # may surface AtomicConflict
 ```
 
 The body must be safe to retry. Fallible work inside a retryable body is

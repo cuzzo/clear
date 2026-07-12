@@ -47,6 +47,13 @@ RSpec.describe CaptureStrategy do
       strat = classify(type: t(:Counter, ownership: :shared))
       expect(strat).to be_a(CaptureStrategy::RcClone)
     end
+
+    it "classifies @indirect:atomic as an internally retained RcClone" do
+      type = t(:Counter, sync: :atomic, layout: :indirect)
+      strat = classify(type: type)
+      expect(strat).to be_a(CaptureStrategy::RcClone)
+      expect(CaptureStrategy.field_zig_type(type)).to eq("*CheatLib.AtomicPtr(Counter)")
+    end
   end
 
   # ----------------------------------------------------------------

@@ -8,7 +8,7 @@ module Annotator
     module Errors
       extend T::Sig
 
-      # Resolve CATCH clauses after body typing. Explicit RAISE/OR EXIT type
+      # Resolve CATCH clauses after body typing. Explicit RAISE/OR_ELSE EXIT type
       # declarations are already seeded from DeclarationIndex, so CATCH Type
       # clauses are source-order independent while type-only error sites stay
       # strict about requiring a registered name.
@@ -233,7 +233,7 @@ module Annotator
               emit_registry_mismatch!(
                 item.token, item.name, AST::ERROR_TYPES.keys,
                 "CATCH #{item.name}: error type '#{item.name}' is not registered. A type " \
-                "must be registered via RAISE/OR EXIT before it can be CATCHed.",
+                "must be registered via RAISE/OR_ELSE EXIT before it can be CATCHed.",
                 "closest registered type"
               )
             end
@@ -311,7 +311,7 @@ module Annotator
         @branch_terminated = true
       end
 
-      # Unified registration for RAISE / OR EXIT / EXIT sites that name an
+      # Unified registration for RAISE / OR_ELSE EXIT / EXIT sites that name an
       # error type. Rules:
       #   - kind given + type given  : register or verify (kind, type).
       #   - kind nil   + type given  : type MUST already be registered;
@@ -321,7 +321,7 @@ module Annotator
       #   - kind nil   + type nil    : no-op (legacy message-only form).
       # On collision, emits a diagnostic anchored at the second site,
       # naming the first registration line for context.
-      sig { params(node: T.any(AST::Raise, AST::OrExit), kind_sym: T.nilable(Symbol), type_name_str: T.nilable(String), site_tok: Lexer::Token).returns(NilClass) }
+      sig { params(node: T.any(AST::Raise, AST::OrElseExit), kind_sym: T.nilable(Symbol), type_name_str: T.nilable(String), site_tok: Lexer::Token).returns(NilClass) }
       def resolve_error_registration!(node, kind_sym, type_name_str, site_tok)
         T.bind(self, SemanticAnnotator)
 
@@ -595,16 +595,16 @@ module Annotator
       end
 
       # =========================================================
-      # OR / RESCUE
+      # OR_ELSE / RESCUE
       # =========================================================
       sig { params(node: AST::BinaryOp).returns(T.nilable(Symbol)) }
-      def visit_OrRescue(node)
+      def visit_OrElse(node)
         T.bind(self, SemanticAnnotator)
 
-        # Logic: val OR default
+        # Logic: val OR_ELSE default
         rhs_propagates =
-          node.right.is_a?(AST::OrRaise) ||
-          node.right.is_a?(AST::OrExit) ||
+          node.right.is_a?(AST::OrElseRaise) ||
+          node.right.is_a?(AST::OrElseExit) ||
           node.right.is_a?(AST::ThrowNode) ||
           node.right.is_a?(AST::ReturnNode)
         with_body_fact_failure_absorbed(!rhs_propagates) do
@@ -615,19 +615,19 @@ module Annotator
 
         # If the LHS is a fallible call, the auto-propagate strip moved the
         # `!T` from `full_type` (which is now the success T) to
-        # `error_union_type`. OR-RESCUE needs the original `!T` to decide
+        # `error_union_type`. OR_ELSE needs the original `!T` to decide
         # whether to emit `catch fallback` (error union) or `orelse fallback`
         # (optional). Prefer the saved union if present.
         t_left_type = if node.left.respond_to?(:error_union_type) && node.left.error_union_type
                         eu = node.left.error_union_type
                         eu.is_a?(Type) ? eu : Type.new(eu)
                       else
-                        node.left.full_type!(context: "OR left")
+                        node.left.full_type!(context: "OR_ELSE left")
                       end
-        t_right_type = node.right.full_type!(context: "OR right")
+        t_right_type = node.right.full_type!(context: "OR_ELSE right")
 
-        # Handle OR EXIT "msg": set error context + propagate (same as OR RAISE for types)
-        if node.right.is_a?(AST::OrExit)
+        # Handle OR_ELSE EXIT "msg": set error context + propagate (same as OR_ELSE RAISE for types)
+        if node.right.is_a?(AST::OrElseExit)
           if t_left_type.error_union?
             stamp_type!(node, t_left_type.payload_type)
           else
@@ -636,20 +636,20 @@ module Annotator
           return
         end
 
-        # Handle OR RAISE: bubble up error (Zig's try)
-        if node.right.is_a?(AST::OrRaise)
+        # Handle OR_ELSE RAISE: bubble up error (Zig's try)
+        if node.right.is_a?(AST::OrElseRaise)
           if t_left_type.error_union?
             # Unwrap to payload type - error will be propagated
             stamp_type!(node, t_left_type.payload_type)
           else
-            # OR RAISE on non-error type just passes through
+            # OR_ELSE RAISE on non-error type just passes through
             stamp_type!(node, t_left_type)
           end
           return
         end
 
-        # Handle OR PASS: ignore error, use undefined/default
-        if node.right.is_a?(AST::OrPass)
+        # Handle OR_ELSE PASS: ignore error, use undefined/default
+        if node.right.is_a?(AST::OrElsePass)
           if t_left_type.error_union?
             # Unwrap to payload type - error will be ignored
             stamp_type!(node, t_left_type.payload_type)
@@ -659,8 +659,8 @@ module Annotator
           return
         end
 
-        # Handle OR BREAK: error-to-break coercion (valid only inside loops)
-        if node.right.is_a?(AST::OrBreak)
+        # Handle OR_ELSE BREAK: error-to-break coercion (valid only inside loops)
+        if node.right.is_a?(AST::OrElseBreak)
           if current_loop_depth <= 0
             error!(node, :OR_BREAK_OUTSIDE_WHILE)
           end
@@ -672,8 +672,8 @@ module Annotator
           return
         end
 
-        # Handle OR PRUNE: discard error, skip item (used in CONCURRENT SELECT/WHERE)
-        if node.right.is_a?(AST::OrPrune)
+        # Handle OR_ELSE PRUNE: discard error, skip item (used in CONCURRENT SELECT/WHERE)
+        if node.right.is_a?(AST::OrElsePrune)
           if t_left_type.error_union?
             # Unwrap to payload type - error causes item to be skipped
             stamp_type!(node, t_left_type.payload_type)
@@ -683,9 +683,11 @@ module Annotator
           return
         end
 
-        # Handle error union types: !T OR default -> T
+        # A value fallback handles every immediately-resolved absence layer.
+        # In particular, !?T OR_ELSE T collapses both failure and NIL with
+        # the same fallback. Temporal (~) layers are never crossed here.
         if t_left_type.error_union?
-          payload_type = t_left_type.payload_type
+          payload_type = t_left_type.value_payload_type
 
           # Type check: RHS must be compatible with payload type
           unless t_right_type.resolved == :NoReturn || payload_type.accepts?(t_right_type) || t_right_type.accepts?(payload_type)
@@ -698,7 +700,7 @@ module Annotator
           return
         end
 
-        # Handle optional types: ?T OR default -> T
+        # Handle optional types: ?T OR_ELSE default -> T
         if t_left_type.optional?
           wrapped = t_left_type.wrapped_type
           unless t_right_type.resolved == :NoReturn || wrapped.accepts?(t_right_type) || t_right_type.accepts?(wrapped)
@@ -731,40 +733,40 @@ module Annotator
         stamp_type!(rhs, expected)
       end
 
-      sig { params(node: AST::OrRaise).returns(Symbol) }
-      def visit_OrRaise(node)
+      sig { params(node: AST::OrElseRaise).returns(Symbol) }
+      def visit_OrElseRaise(node)
         T.bind(self, SemanticAnnotator)
 
         stamp_type!(node, :Void)
       end
 
-      sig { params(node: AST::OrBreak).returns(Symbol) }
-      def visit_OrBreak(node)
+      sig { params(node: AST::OrElseBreak).returns(Symbol) }
+      def visit_OrElseBreak(node)
         T.bind(self, SemanticAnnotator)
 
         stamp_type!(node, :Void)
       end
 
-      sig { params(node: AST::OrPass).returns(Symbol) }
-      def visit_OrPass(node)
+      sig { params(node: AST::OrElsePass).returns(Symbol) }
+      def visit_OrElsePass(node)
         T.bind(self, SemanticAnnotator)
 
-        # This is a marker node for OR PASS - no type annotation needed
-        # The actual type handling is done in visit_OrRescue
+        # This is a marker node for OR_ELSE PASS - no type annotation needed
+        # The actual type handling is done in visit_OrElse
         stamp_type!(node, :Void)
       end
 
-      sig { params(node: AST::OrPrune).returns(Symbol) }
-      def visit_OrPrune(node)
+      sig { params(node: AST::OrElsePrune).returns(Symbol) }
+      def visit_OrElsePrune(node)
         T.bind(self, SemanticAnnotator)
 
-        # This is a marker node for OR PRUNE - no type annotation needed
-        # The actual type handling is done in visit_OrRescue
+        # This is a marker node for OR_ELSE PRUNE - no type annotation needed
+        # The actual type handling is done in visit_OrElse
         stamp_type!(node, :Void)
       end
 
-      sig { params(node: AST::OrExit).returns(T.nilable(Symbol)) }
-      def visit_OrExit(node)
+      sig { params(node: AST::OrElseExit).returns(T.nilable(Symbol)) }
+      def visit_OrElseExit(node)
         T.bind(self, SemanticAnnotator)
 
         visit(node.message) if node.message

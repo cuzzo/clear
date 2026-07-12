@@ -27,7 +27,7 @@ FN main() RETURNS Void ->
   readStart = timestampMs();
   TIGHT FOR round IN (0_i64 ..< readRounds) DO
     TIGHT FOR i IN (0_i64 ..< n) DO
-      checksum += nodes[i]?.next?.id OR 0_i64;
+      checksum += nodes[i]?.next?.id OR_ELSE 0_i64;
     END
   END
   readMs = timestampMs() - readStart;

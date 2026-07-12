@@ -25,7 +25,7 @@ FN main() RETURNS Void ->
     addItem!(items, "x", "second", "b");
 
     # Verify replacement worked
-    item = items["x"] OR Item{ name: "", tags: [] };
+    item = items["x"] OR_ELSE Item{ name: "", tags: [] };
     ASSERT item.name == "second", "replaced value";
 
     print("181: hashmap struct list field PASSED");

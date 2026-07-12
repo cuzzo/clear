@@ -821,7 +821,7 @@ class PipelineConcurrentLowerer < T::Struct
 
   sig { params(expr: AST::Node).returns(PipelineConcurrentBcExpression) }
   def bc_error_policy(expr)
-    return default_bc_expression(expr) unless expr.is_a?(AST::BinaryOp) && expr.op == :OR_RESCUE
+    return default_bc_expression(expr) unless expr.is_a?(AST::BinaryOp) && expr.op == :OR_ELSE
 
     policy = bc_rescue_policy(T.cast(expr.right, AST::Node))
     return default_bc_expression(expr) unless policy
@@ -837,8 +837,8 @@ class PipelineConcurrentLowerer < T::Struct
   sig { params(expr: AST::Node).returns(T.nilable(Symbol)) }
   def bc_rescue_policy(expr)
     case expr
-    when AST::OrPrune then :prune
-    when AST::OrRaise then :raise
+    when AST::OrElsePrune then :prune
+    when AST::OrElseRaise then :raise
     end
   end
 

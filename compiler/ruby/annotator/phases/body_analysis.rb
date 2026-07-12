@@ -430,7 +430,7 @@ module Annotator
             end
           when AST::Identifier
             summary.references_snapshot = true if node.name == "snapshot"
-          when AST::Raise, AST::OrRaise, AST::BgBlock, AST::BgStreamBlock
+          when AST::Raise, AST::OrElseRaise, AST::BgBlock, AST::BgStreamBlock
             summary.raises_directly = true
           when AST::WithBlock
             summary.raises_directly = true if with_block_raises

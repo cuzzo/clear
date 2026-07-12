@@ -49,8 +49,8 @@ FN off_by_one() RETURNS !Void ->
 END
 
 FN main() RETURNS Void ->
-  safe_access() OR RAISE;
-  off_by_one() OR RAISE;
+  safe_access() OR_ELSE RAISE;
+  off_by_one() OR_ELSE RAISE;
 END
 
 # Summary:

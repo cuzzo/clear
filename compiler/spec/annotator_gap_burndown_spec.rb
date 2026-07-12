@@ -515,7 +515,7 @@ RSpec.describe "annotator branch gap burndown" do
 
   it "resolves CATCH types after body traversal registers error types" do
     ann = quiet_annotator
-    exit_node = AST::OrExit.new(token(:OR, "OR"), :Input, "GapSeededError", nil)
+    exit_node = AST::OrElseExit.new(token(:OR_ELSE, "OR_ELSE"), :Input, "GapSeededError", nil)
     fn = function_def("seeded")
     fn.body = [exit_node]
     clause = AST::CatchClause.new(
@@ -570,7 +570,7 @@ RSpec.describe "annotator branch gap burndown" do
 
   it "reports unregistered type-only error exits" do
     ann = quiet_annotator
-    exit_node = AST::OrExit.new(token(:OR, "OR"), nil, "NeverRegisteredGapError", nil)
+    exit_node = AST::OrElseExit.new(token(:OR_ELSE, "OR_ELSE"), nil, "NeverRegisteredGapError", nil)
 
     ann.send(:resolve_error_registration!, exit_node, nil, "NeverRegisteredGapError", exit_node.token)
 
@@ -620,30 +620,30 @@ RSpec.describe "annotator branch gap burndown" do
     expect(direct_errors(ann).map { |err| err[1] }).to include(:RETURN_INDEX_FROM_WITH_SCOPED)
   end
 
-  it "covers OR EXIT, OR BREAK, and optional OR fallback branches" do
+  it "covers OR_ELSE EXIT, OR_ELSE BREAK, and optional OR_ELSE fallback branches" do
     ann = quiet_annotator
     ann.define_singleton_method(:visit) { |_node| nil }
 
     left = AST::Identifier.new(token, "value")
     left.full_type = Type.new(:Int64)
-    exit_right = AST::OrExit.new(token(:OR, "OR"), nil, nil, nil)
+    exit_right = AST::OrElseExit.new(token(:OR_ELSE, "OR_ELSE"), nil, nil, nil)
     exit_right.full_type = Type.new(:NoReturn)
-    exit_expr = AST::BinaryOp.new(token(:OR, "OR"), left, :OR_RESCUE, exit_right)
-    ann.send(:visit_OrRescue, exit_expr)
+    exit_expr = AST::BinaryOp.new(token(:OR_ELSE, "OR_ELSE"), left, :OR_ELSE, exit_right)
+    ann.send(:visit_OrElse, exit_expr)
     expect(exit_expr.full_type!.resolved).to eq(:Int64)
 
-    break_right = AST::OrBreak.new(token(:OR, "OR"))
+    break_right = AST::OrElseBreak.new(token(:OR_ELSE, "OR_ELSE"))
     break_right.full_type = Type.new(:NoReturn)
-    break_expr = AST::BinaryOp.new(token(:OR, "OR"), left, :OR_RESCUE, break_right)
-    ann.send(:with_loop_context) { ann.send(:visit_OrRescue, break_expr) }
+    break_expr = AST::BinaryOp.new(token(:OR_ELSE, "OR_ELSE"), left, :OR_ELSE, break_right)
+    ann.send(:with_loop_context) { ann.send(:visit_OrElse, break_expr) }
     expect(break_expr.full_type!.resolved).to eq(:Int64)
 
     optional_left = AST::Identifier.new(token, "maybe")
     optional_left.full_type = Type.optional_of(:Int64)
     fallback = AST::Identifier.new(token, "fallback")
     fallback.full_type = Type.new(:String)
-    optional_expr = AST::BinaryOp.new(token(:OR, "OR"), optional_left, :OR_RESCUE, fallback)
-    ann.send(:visit_OrRescue, optional_expr)
+    optional_expr = AST::BinaryOp.new(token(:OR_ELSE, "OR_ELSE"), optional_left, :OR_ELSE, fallback)
+    ann.send(:visit_OrElse, optional_expr)
 
     expect(optional_expr.full_type!.resolved).to eq(:Int64)
     expect(direct_errors(ann).map { |err| err[1] }).to include(:TYPE_MISMATCH_IN_OR)
@@ -653,8 +653,8 @@ RSpec.describe "annotator branch gap burndown" do
     optional_map.full_type = Type.optional_of(map_type)
     map_fallback = AST::Identifier.new(token, "map_fallback")
     map_fallback.full_type = map_type
-    map_expr = AST::BinaryOp.new(token(:OR, "OR"), optional_map, :OR_RESCUE, map_fallback)
-    ann.send(:visit_OrRescue, map_expr)
+    map_expr = AST::BinaryOp.new(token(:OR_ELSE, "OR_ELSE"), optional_map, :OR_ELSE, map_fallback)
+    ann.send(:visit_OrElse, map_expr)
 
     expect(map_expr.full_type!).to be_map
     expect(map_expr.full_type!.value_type.resolved).to eq(:Any)
@@ -1079,7 +1079,7 @@ RSpec.describe "annotator branch gap burndown" do
           RAISE Input;
         END
         FN main() RETURNS !Void ->
-          s: String = make(TRUE) OR RAISE;
+          s: String = make(TRUE) OR_ELSE RAISE;
           ASSERT s.length() == 2_i64, "fallible return";
           RETURN;
         END
@@ -1167,7 +1167,7 @@ RSpec.describe "annotator branch gap burndown" do
           items["a"] = 1_i64;
           items["b"] = 2_i64;
           FOR k IN items DO
-            v = items[k] OR 0_i64;
+            v = items[k] OR_ELSE 0_i64;
             IF v == 1_i64 THEN CONTINUE; END
           END
           RETURN;
@@ -2196,15 +2196,15 @@ RSpec.describe "annotator branch gap burndown" do
     with_node = AST::WithBlock.new(token(:WITH, "WITH"), [], [])
     attach_capability_plan!(with_node)
     raise_node = AST::Raise.new(token(:RAISE, "RAISE"), nil, nil, nil)
-    or_raise = AST::OrRaise.new(token(:OR, "OR"))
+    or_else_raise = AST::OrElseRaise.new(token(:OR_ELSE, "OR_ELSE"))
 
     body_fact_summary(ann) do
       ann.send(:record_body_fact_with_block!, with_node)
       ann.send(:with_body_fact_scope, with_node) do
-        [raise_node, or_raise, method, static, frozen, fn].each { |node| ann.send(:record_body_fact_node!, node) }
+        [raise_node, or_else_raise, method, static, frozen, fn].each { |node| ann.send(:record_body_fact_node!, node) }
       end
       sources = ann.send(:retryable_with_fallible_sources, with_node)
-      expect(sources).to include("RAISE", "OR RAISE", "fallible_fn", "fallible_method()", "fallible_static", "FREEZE")
+      expect(sources).to include("RAISE", "OR_ELSE RAISE", "fallible_fn", "fallible_method()", "fallible_static", "FREEZE")
     end
 
   end
@@ -3844,16 +3844,16 @@ RSpec.describe "annotator branch gap burndown" do
     expect(summary.raises_directly).to be(true)
   end
 
-  it "marks call-site facts as locally absorbed by OR fallbacks" do
+  it "marks call-site facts as locally absorbed by OR_ELSE fallbacks" do
     ann = SemanticAnnotator.new(source_code: "")
     call = AST::FuncCall.new(token(:VAR_ID, "fallible"), "fallible", [])
     fallback = AST::Literal.new(token(:NUMBER, "1_i64"), :INT64, 1, :stack)
-    rescue_expr = AST::BinaryOp.new(token(:OR_RESCUE, "OR"), call, :OR_RESCUE, fallback)
+    rescue_expr = AST::BinaryOp.new(token(:OR_ELSE, "OR_ELSE"), call, :OR_ELSE, fallback)
 
     summary = body_fact_summary(ann) do
       rhs_propagates =
-        fallback.is_a?(AST::OrRaise) ||
-        fallback.is_a?(AST::OrExit) ||
+        fallback.is_a?(AST::OrElseRaise) ||
+        fallback.is_a?(AST::OrElseExit) ||
         fallback.is_a?(AST::ThrowNode) ||
         fallback.is_a?(AST::ReturnNode)
       ann.send(:with_body_fact_failure_absorbed, !rhs_propagates) do

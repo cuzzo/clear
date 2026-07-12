@@ -91,8 +91,8 @@ FuzzGenerator.register(:branch_cleanup, cells: BRANCH_CLEANUP_CELLS) do |p|
     END
 
     FN main() RETURNS Void ->
-        run(TRUE) OR PASS;
-        run(FALSE) OR PASS;
+        run(TRUE) OR_ELSE PASS;
+        run(FALSE) OR_ELSE PASS;
         RETURN;
     END
   CHT

@@ -1166,14 +1166,14 @@ RSpec.describe SemanticAnnotator do
       expect(out).to include("@intCast(CheatLib.threadCount())")
     end
 
-    it "CONCURRENT SELECT fn OR PRUNE — expression type is unwrapped T (not !T)" do
+    it "CONCURRENT SELECT fn OR_ELSE PRUNE — expression type is unwrapped T (not !T)" do
       src = <<~CLEAR
         FN mayFail(x: Float64) RETURNS !Float64 ->
           RETURN x * 2.0;
         END
         FN f() RETURNS !Void ->
           items: Float64[] = [1.0, 2.0];
-          results = items |> CONCURRENT(workers: 2) SELECT mayFail(_) OR PRUNE;
+          results = items |> CONCURRENT(workers: 2) SELECT mayFail(_) OR_ELSE PRUNE;
           RETURN;
         END
       CLEAR
@@ -1184,14 +1184,14 @@ RSpec.describe SemanticAnnotator do
       expect(out).to include("f64")
     end
 
-    it "CONCURRENT SELECT fn OR RAISE — expression type is unwrapped T" do
+    it "CONCURRENT SELECT fn OR_ELSE RAISE — expression type is unwrapped T" do
       src = <<~CLEAR
         FN mayFail(x: Float64) RETURNS !Float64 ->
           RETURN x * 2.0;
         END
         FN f() RETURNS !Void ->
           items: Float64[] = [1.0, 2.0];
-          results = items |> CONCURRENT(workers: 2) SELECT mayFail(_) OR RAISE;
+          results = items |> CONCURRENT(workers: 2) SELECT mayFail(_) OR_ELSE RAISE;
           RETURN;
         END
       CLEAR
@@ -1225,14 +1225,14 @@ RSpec.describe SemanticAnnotator do
       expect(user_code).to include(", true, .{ .stack_size = .Standard }")
     end
 
-    it "CONCURRENT SELECT fn OR PRUNE emits catch |_| return in fiber body" do
+    it "CONCURRENT SELECT fn OR_ELSE PRUNE emits catch |_| return in fiber body" do
       src = <<~CLEAR
         FN mayFail(x: Float64) RETURNS !Float64 ->
           RETURN x * 2.0;
         END
         FN f() RETURNS !Void ->
           items: Float64[] = [1.0, 2.0];
-          results = items |> CONCURRENT(workers: 2) SELECT mayFail(_) OR PRUNE;
+          results = items |> CONCURRENT(workers: 2) SELECT mayFail(_) OR_ELSE PRUNE;
           RETURN;
         END
       CLEAR
@@ -1240,14 +1240,14 @@ RSpec.describe SemanticAnnotator do
       expect(out).to include("catch return")
     end
 
-    it "CONCURRENT SELECT fn OR RAISE leaves error propagation to the runtime helper" do
+    it "CONCURRENT SELECT fn OR_ELSE RAISE leaves error propagation to the runtime helper" do
       src = <<~CLEAR
         FN mayFail(x: Float64) RETURNS !Float64 ->
           RETURN x * 2.0;
         END
         FN f() RETURNS !Void ->
           items: Float64[] = [1.0, 2.0];
-          results = items |> CONCURRENT(workers: 2) SELECT mayFail(_) OR RAISE;
+          results = items |> CONCURRENT(workers: 2) SELECT mayFail(_) OR_ELSE RAISE;
           RETURN;
         END
       CLEAR
@@ -1350,45 +1350,45 @@ RSpec.describe SemanticAnnotator do
     end
 
     # -------------------------------------------------------------------------
-    # CONCURRENT OR PRUNE / OR RAISE validation
+    # CONCURRENT OR_ELSE PRUNE / OR_ELSE RAISE validation
     # -------------------------------------------------------------------------
-    context "CONCURRENT OR PRUNE / OR RAISE validation" do
-      it "rejects OR PRUNE when expression is not error-returning" do
+    context "CONCURRENT OR_ELSE PRUNE / OR_ELSE RAISE validation" do
+      it "rejects OR_ELSE PRUNE when expression is not error-returning" do
         code = <<~CLEAR
           FN double(x: Float64) RETURNS Float64 ->
             RETURN x * 2.0;
           END
           FN main() RETURNS Void ->
             nums: Float64[] = [1.0, 2.0];
-            result = nums |> CONCURRENT SELECT double(_) OR PRUNE;
+            result = nums |> CONCURRENT SELECT double(_) OR_ELSE PRUNE;
             RETURN;
           END
         CLEAR
-        expect { run(code) }.to raise_error(/OR PRUNE requires the expression to return an error union/)
+        expect { run(code) }.to raise_error(/OR_ELSE PRUNE requires the expression to return an error union/)
       end
 
-      it "rejects OR RAISE when expression is not error-returning" do
+      it "rejects OR_ELSE RAISE when expression is not error-returning" do
         code = <<~CLEAR
           FN double(x: Float64) RETURNS Float64 ->
             RETURN x * 2.0;
           END
           FN main() RETURNS Void ->
             nums: Float64[] = [1.0, 2.0];
-            result = nums |> CONCURRENT SELECT double(_) OR RAISE;
+            result = nums |> CONCURRENT SELECT double(_) OR_ELSE RAISE;
             RETURN;
           END
         CLEAR
-        expect { run(code) }.to raise_error(/OR RAISE requires the expression to return an error union/)
+        expect { run(code) }.to raise_error(/OR_ELSE RAISE requires the expression to return an error union/)
       end
 
-      it "accepts OR PRUNE when expression returns !T" do
+      it "accepts OR_ELSE PRUNE when expression returns !T" do
         code = <<~CLEAR
           FN mayFail(x: Float64) RETURNS !Float64 ->
             RETURN x * 2.0;
           END
           FN main() RETURNS Void ->
             nums: Float64[] = [1.0, 2.0];
-            result = nums |> CONCURRENT SELECT mayFail(_) OR PRUNE;
+            result = nums |> CONCURRENT SELECT mayFail(_) OR_ELSE PRUNE;
             RETURN;
           END
         CLEAR

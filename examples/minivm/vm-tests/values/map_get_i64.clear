@@ -1,5 +1,5 @@
 FN main() RETURNS Int64 ->
     MUTABLE m: HashMap<Int64> = {};
     m["answer"] = 42_i64;
-    RETURN m["answer"] OR 0_i64;
+    RETURN m["answer"] OR_ELSE 0_i64;
 END

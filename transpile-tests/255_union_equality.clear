@@ -9,7 +9,7 @@
 # source.
 #
 # The bug bit _bc_runner.clear's lock_acquire path (Phase B):
-#   IF (lenv.vars["__locked"] OR Value.Nil) == Value.Nil THEN ...
+#   IF (lenv.vars["__locked"] OR_ELSE Value.Nil) == Value.Nil THEN ...
 # which never compiled. Worked around in commit 1bc679ec by rewriting
 # as MATCH.
 

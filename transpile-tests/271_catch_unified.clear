@@ -5,9 +5,9 @@
 #   2. CATCH Kind WITH(T)                      -- kind + single type
 #   3. CATCH Kind WITH(T1, T2)                 -- kind + multi-type filter
 #   4. CATCH Type                              -- direct type match
-#   5. CATCH Kind1, Kind2                      -- multi-kind OR
-#   6. CATCH Type1, Type2                      -- multi-type OR
-#   7. CATCH Kind1, Type2                      -- mixed item list OR
+#   5. CATCH Kind1, Kind2                      -- multi-kind OR_ELSE
+#   6. CATCH Type1, Type2                      -- multi-type OR_ELSE
+#   7. CATCH Kind1, Type2                      -- mixed item list OR_ELSE
 #   8. CATCH Kind WITH("message")              -- message filter
 #   9. CATCH Kind WITH(Type, "message")        -- mixed filter
 
@@ -19,7 +19,7 @@ FN raiseTransient() RETURNS !Int64 -> RAISE Transient, "flaky";        RETURN 0;
 
 # CATCH Type directly matches the registered-kind type.
 FN directType(mode: Int64) RETURNS !Int64 ->
-    IF mode == 1 THEN v = raiseParseErr() OR RAISE; RETURN v; END
+    IF mode == 1 THEN v = raiseParseErr() OR_ELSE RAISE; RETURN v; END
     RETURN 0;
 CATCH ParseErr
     RETURN -1;
@@ -27,8 +27,8 @@ END
 
 # CATCH Kind WITH(Type) narrows to a specific type.
 FN withSingle(mode: Int64) RETURNS !Int64 ->
-    IF mode == 1 THEN v = raiseParseErr()    OR RAISE; RETURN v; END
-    IF mode == 2 THEN v = raisePlainInput()  OR RAISE; RETURN v; END
+    IF mode == 1 THEN v = raiseParseErr()    OR_ELSE RAISE; RETURN v; END
+    IF mode == 2 THEN v = raisePlainInput()  OR_ELSE RAISE; RETURN v; END
     RETURN 0;
 CATCH Input WITH(ParseErr)
     RETURN -1;
@@ -38,9 +38,9 @@ END
 
 # CATCH Kind WITH(T1, T2) filters on multiple types.
 FN withMulti(mode: Int64) RETURNS !Int64 ->
-    IF mode == 1 THEN v = raiseOtherInput() OR RAISE; RETURN v; END
-    IF mode == 2 THEN v = raiseExtraIn()    OR RAISE; RETURN v; END
-    IF mode == 3 THEN v = raisePlainInput() OR RAISE; RETURN v; END
+    IF mode == 1 THEN v = raiseOtherInput() OR_ELSE RAISE; RETURN v; END
+    IF mode == 2 THEN v = raiseExtraIn()    OR_ELSE RAISE; RETURN v; END
+    IF mode == 3 THEN v = raisePlainInput() OR_ELSE RAISE; RETURN v; END
     RETURN 0;
 CATCH Input WITH(OtherIn, ExtraIn)
     RETURN -1;
@@ -50,7 +50,7 @@ END
 
 # CATCH Kind matches any error of that kind.
 FN kindOnly(mode: Int64) RETURNS !Int64 ->
-    IF mode == 1 THEN v = raiseTransient() OR RAISE; RETURN v; END
+    IF mode == 1 THEN v = raiseTransient() OR_ELSE RAISE; RETURN v; END
     RETURN 0;
 CATCH Transient
     RETURN -1;
@@ -62,8 +62,8 @@ FN raiseMsgGood() RETURNS !Int64  -> RAISE Input, ParseErr, "other";      RETURN
 
 # Multi-kind CATCH Kind1, Kind2
 FN multiKind(mode: Int64) RETURNS !Int64 ->
-    IF mode == 1 THEN v = raisePlainInput() OR RAISE; RETURN v; END
-    IF mode == 2 THEN v = raiseNotFound()   OR RAISE; RETURN v; END
+    IF mode == 1 THEN v = raisePlainInput() OR_ELSE RAISE; RETURN v; END
+    IF mode == 2 THEN v = raiseNotFound()   OR_ELSE RAISE; RETURN v; END
     RETURN 0;
 CATCH Input, NotFound
     RETURN -1;
@@ -71,8 +71,8 @@ END
 
 # Multi-type CATCH Type1, Type2
 FN multiType(mode: Int64) RETURNS !Int64 ->
-    IF mode == 1 THEN v = raiseParseErr()  OR RAISE; RETURN v; END
-    IF mode == 2 THEN v = raiseOtherInput() OR RAISE; RETURN v; END
+    IF mode == 1 THEN v = raiseParseErr()  OR_ELSE RAISE; RETURN v; END
+    IF mode == 2 THEN v = raiseOtherInput() OR_ELSE RAISE; RETURN v; END
     RETURN 0;
 CATCH ParseErr, OtherIn
     RETURN -1;
@@ -80,10 +80,10 @@ CATCH Input
     RETURN -2;
 END
 
-# Mixed item list CATCH Kind1, Type2 (OR semantics)
+# Mixed item list CATCH Kind1, Type2 (OR_ELSE semantics)
 FN mixedItems(mode: Int64) RETURNS !Int64 ->
-    IF mode == 1 THEN v = raiseNotFound() OR RAISE; RETURN v; END
-    IF mode == 2 THEN v = raiseParseErr() OR RAISE; RETURN v; END
+    IF mode == 1 THEN v = raiseNotFound() OR_ELSE RAISE; RETURN v; END
+    IF mode == 2 THEN v = raiseParseErr() OR_ELSE RAISE; RETURN v; END
     RETURN 0;
 CATCH NotFound, ParseErr
     RETURN -1;
@@ -91,8 +91,8 @@ END
 
 # CATCH Kind WITH("message") — pure message filter
 FN withMessage(mode: Int64) RETURNS !Int64 ->
-    IF mode == 1 THEN v = raiseMsgBad()  OR RAISE; RETURN v; END
-    IF mode == 2 THEN v = raiseMsgGood() OR RAISE; RETURN v; END
+    IF mode == 1 THEN v = raiseMsgBad()  OR_ELSE RAISE; RETURN v; END
+    IF mode == 2 THEN v = raiseMsgGood() OR_ELSE RAISE; RETURN v; END
     RETURN 0;
 CATCH Input WITH("bad header")
     RETURN -1;
@@ -102,9 +102,9 @@ END
 
 # CATCH Kind WITH(Type, "message") — mixed filter
 FN withMixed(mode: Int64) RETURNS !Int64 ->
-    IF mode == 1 THEN v = raiseOtherInput() OR RAISE; RETURN v; END  # matches type OtherIn
-    IF mode == 2 THEN v = raiseMsgBad()     OR RAISE; RETURN v; END  # matches message
-    IF mode == 3 THEN v = raisePlainInput() OR RAISE; RETURN v; END  # matches nothing -> DEFAULT
+    IF mode == 1 THEN v = raiseOtherInput() OR_ELSE RAISE; RETURN v; END  # matches type OtherIn
+    IF mode == 2 THEN v = raiseMsgBad()     OR_ELSE RAISE; RETURN v; END  # matches message
+    IF mode == 3 THEN v = raisePlainInput() OR_ELSE RAISE; RETURN v; END  # matches nothing -> DEFAULT
     RETURN 0;
 CATCH Input WITH(OtherIn, "bad header")
     RETURN -1;
@@ -145,7 +145,7 @@ FN main() RETURNS Void ->
     ASSERT withMessage(1) == -1, "CATCH Input WITH(\"bad header\") matches message";
     ASSERT withMessage(2) == -2, "different message falls through to kind CATCH";
 
-    # Mixed filter (type OR message)
+    # Mixed filter (type OR_ELSE message)
     ASSERT withMixed(1) == -1, "mixed filter matches by type OtherIn";
     ASSERT withMixed(2) == -1, "mixed filter matches by message";
     ASSERT withMixed(3) == -99, "no match -> DEFAULT";

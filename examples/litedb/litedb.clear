@@ -98,19 +98,19 @@ FN main() RETURNS !Void ->
   ASSERT opName == "scan", "ENUM dispatch";
 
   # Tree structure
-  rootNode = nodes[root] OR Node{ keys: [], vals: [], numChildren: 0_i64, isLeaf: TRUE };
-  leftNode = nodes[0] OR Node{ keys: [], vals: [], numChildren: 0_i64, isLeaf: TRUE };
-  rightNode = nodes[1] OR Node{ keys: [], vals: [], numChildren: 0_i64, isLeaf: TRUE };
+  rootNode = nodes[root] OR_ELSE Node{ keys: [], vals: [], numChildren: 0_i64, isLeaf: TRUE };
+  leftNode = nodes[0] OR_ELSE Node{ keys: [], vals: [], numChildren: 0_i64, isLeaf: TRUE };
+  rightNode = nodes[1] OR_ELSE Node{ keys: [], vals: [], numChildren: 0_i64, isLeaf: TRUE };
   ASSERT rootNode.isLeaf == FALSE, "root is internal";
-  ASSERT (rootNode.keys[0] OR 0_i64) == 30, "root key 30";
-  ASSERT (leftNode.keys[1] OR 0_i64) == 20, "left key 1 = 20";
-  ASSERT (rightNode.keys[0] OR 0_i64) == 40, "right key 0 = 40";
+  ASSERT (rootNode.keys[0] OR_ELSE 0_i64) == 30, "root key 30";
+  ASSERT (leftNode.keys[1] OR_ELSE 0_i64) == 20, "left key 1 = 20";
+  ASSERT (rightNode.keys[0] OR_ELSE 0_i64) == 40, "right key 0 = 40";
 
   # Tree search: descend from root to find key 20
   cp = findKeyIndex(rootNode.keys, 20);
-  leafIdx = children[childKey(root, cp)] OR (0 - 1);
-  leafNode = nodes[leafIdx] OR Node{ keys: [], vals: [], numChildren: 0_i64, isLeaf: TRUE };
-  ASSERT (leafNode.keys[1] OR 0_i64) == 20, "tree search: key 20";
+  leafIdx = children[childKey(root, cp)] OR_ELSE (0 - 1);
+  leafNode = nodes[leafIdx] OR_ELSE Node{ keys: [], vals: [], numChildren: 0_i64, isLeaf: TRUE };
+  ASSERT (leafNode.keys[1] OR_ELSE 0_i64) == 20, "tree search: key 20";
 
   # Collect all keys for pipeline queries
   MUTABLE allKeys: Int64[]@list = [];

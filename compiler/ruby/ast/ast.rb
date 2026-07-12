@@ -473,7 +473,7 @@ module AST
   def self.container_borrow?(node)
     return false unless node
     return true if node.respond_to?(:container_borrow) && T.unsafe(node).container_borrow == true
-    return false unless node.is_a?(AST::BinaryOp) && (node.op == :OR || node.op == :OR_RESCUE)
+    return false unless node.is_a?(AST::BinaryOp) && (node.op == :OR || node.op == :OR_ELSE)
 
     container_borrow?(node.left)
   end
@@ -1959,14 +1959,14 @@ module AST
         end
     end
     attr_accessor :string_concat  # true when this is string + (stamped by annotator)
-    attr_accessor :or_fallback_dupe  # true when OR_RESCUE fallback struct needs string-field heap dupe
+    attr_accessor :or_fallback_dupe  # true when OR_ELSE fallback struct needs string-field heap dupe
     # Lazy positions: fields whose lowering must NOT leak @pending_stmts to
     # outer scope. The lowering's `descend` helper consults this and wraps
     # the field's emission in MIR::BlockExpr when the field actually emitted
-    # any pending allocs. OR_RESCUE's right side is the fallback expression;
+    # any pending allocs. OR_ELSE's right side is the fallback expression;
     # boolean AND/OR's right side must only run after short-circuiting allows it.
     sig { returns(T::Array[Symbol]) }
-    def lazy_fields = (%i[AND OR OR_RESCUE].include?(op) ? [:right] : [])
+    def lazy_fields = (%i[AND OR OR_ELSE].include?(op) ? [:right] : [])
     sig { returns(T::Boolean) }
     def smooth?
       op == :SMOOTH
@@ -2223,7 +2223,7 @@ module AST
     attr_accessor :error_union_type  # when the callee
                                      # returns `!T`, `full_type` is stripped to the success
                                      # type `T` (so `x = call()` makes x of type T). The
-                                     # original `!T` is stashed here for OR-RESCUE consumers
+                                     # original `!T` is stashed here for OR_ELSE consumers
                                      # that need to know whether to emit `catch fallback`
                                      # (error union) or `orelse fallback` (optional).
     sig { returns(FalseClass) }
@@ -2423,20 +2423,20 @@ module AST
     sig { returns(T.nilable(String)) }
     def name; target.respond_to?(:name) ? target.name : nil end
   end
-  OrRaise        = Struct.new(:token) { include Locatable }  # OR RAISE - bubble up error (Zig's try)
-  # OR EXIT forms under the unified error system. Unspecified fields
+  OrElseRaise        = Struct.new(:token) { include Locatable }  # OR_ELSE RAISE - bubble up error (Zig's try)
+  # OR_ELSE EXIT forms under the unified error system. Unspecified fields
   # inherit from the pre-existing rt.__error set by the failing call:
-  #   OR EXIT "msg"                — message-only override (kind/type inherited)
-  #   OR EXIT Kind                 — set kind, clear type
-  #   OR EXIT Kind, "msg"          — kind + msg, clear type
-  #   OR EXIT Kind, Type           — kind + type
-  #   OR EXIT Kind, Type, "msg"    — full override
-  #   OR EXIT Type                 — set type (kind auto-resolved)
-  #   OR EXIT Type, "msg"          — type + msg
-  OrExit         = Struct.new(:token, :kind, :error_name, :message) { include Locatable }
-  OrPass         = Struct.new(:token) { include Locatable }  # OR PASS - ignore error, use undefined
-  OrPrune        = Struct.new(:token) { include Locatable }  # OR PRUNE - discard error, skip item (concurrent only)
-  OrBreak        = Struct.new(:token) { include Locatable }  # OR BREAK - error-to-break coercion in loops
+  #   OR_ELSE EXIT "msg"                — message-only override (kind/type inherited)
+  #   OR_ELSE EXIT Kind                 — set kind, clear type
+  #   OR_ELSE EXIT Kind, "msg"          — kind + msg, clear type
+  #   OR_ELSE EXIT Kind, Type           — kind + type
+  #   OR_ELSE EXIT Kind, Type, "msg"    — full override
+  #   OR_ELSE EXIT Type                 — set type (kind auto-resolved)
+  #   OR_ELSE EXIT Type, "msg"          — type + msg
+  OrElseExit         = Struct.new(:token, :kind, :error_name, :message) { include Locatable }
+  OrElsePass         = Struct.new(:token) { include Locatable }  # OR_ELSE PASS - ignore error, use undefined
+  OrElsePrune        = Struct.new(:token) { include Locatable }  # OR_ELSE PRUNE - discard error, skip item (concurrent only)
+  OrElseBreak        = Struct.new(:token) { include Locatable }  # OR_ELSE BREAK - error-to-break coercion in loops
   CatchItem = Struct.new(:form, :name, :token, keyword_init: true) do
     extend T::Sig
     sig { returns(Symbol) }
@@ -3234,9 +3234,9 @@ module AST
     5 => precedence_info(ops: ['==', '!=', '<', '>', '<=', '>='], assoc: :left),
     4 => precedence_info(ops: ['&&'], assoc: :left),
     3 => precedence_info(ops: ['||'], assoc: :left),
-    # LEVEL 1: Both Pipe and Rescue live here.
+    # LEVEL 1: Both Pipe and fallback live here.
     # They bind loosely and strictly left-to-right.
-    1 => precedence_info(ops: ['OR', '|>', 'AS'], assoc: :left)
+    1 => precedence_info(ops: ['OR_ELSE', '|>', 'AS'], assoc: :left)
   }, T::Hash[Integer, PrecedenceInfo])
   MAX_PRECEDENCE = T.let(T.must(PRECEDENCE_MAP.keys.max), Integer)
 
@@ -3276,7 +3276,7 @@ module AST
     '&&' => :AND,
     '||' => :OR,
     'MOD' => :MOD,
-    'OR' => :OR_RESCUE,
+    'OR_ELSE' => :OR_ELSE,
     '~' => :BITWISE_NOT,
     'AS' => :BIND_VAR,
     '%+' => :WRAP_ADD,

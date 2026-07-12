@@ -19,6 +19,20 @@ const CheatLib = header.CheatLib;
 const Runtime = rt_mod.Runtime;
 const alloc = std.heap.c_allocator;
 
+test "AtomicPtr fiber retains keep the cell and managed payload alive until the final release" {
+    const allocator = std.testing.allocator;
+    const Payload = struct { text: []const u8 };
+    const owned = try allocator.dupe(u8, "retained");
+    const cell = try CheatLib.atomicPtrCreate(Payload, allocator, .{ .text = owned });
+    const Cell = @TypeOf(cell.*);
+
+    const captured = CheatLib.atomicPtrRetain(Cell, cell);
+    try std.testing.expectEqual(@as(usize, 2), cell.refs.load(.acquire));
+    CheatLib.atomicPtrRelease(Cell, allocator, cell);
+    try std.testing.expectEqualStrings("retained", captured.ptr.load(.acquire).?.text);
+    CheatLib.atomicPtrRelease(Cell, allocator, captured);
+}
+
 const ArcTeardownGate = struct {
     deinit_entered: std.atomic.Value(bool) = .init(false),
     may_finish: std.atomic.Value(bool) = .init(false),

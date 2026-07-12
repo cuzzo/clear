@@ -81,7 +81,7 @@ FN main() RETURNS Void ->
   n = 200;
   (0 ..< n)
     |> SHARD("b:${toString(_ MOD 10)}", buckets)
-    |> CONCURRENT EACH {cur = buckets[_] OR 0; buckets[_] = cur + 1;};
+    |> CONCURRENT EACH {cur = buckets[_] OR_ELSE 0; buckets[_] = cur + 1;};
   ASSERT buckets.count() == 10, "SHARD created 10 buckets";
 
   print("All data pipeline tests passed!");

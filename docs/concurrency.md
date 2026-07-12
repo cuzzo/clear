@@ -111,14 +111,14 @@ result = BG {
 
 ```ruby clear illustrative
 result = BG {
-    fetch(url) OR RAISE           # propagate error to caller
+    fetch(url) OR_ELSE RAISE           # propagate error to caller
       AS response THEN parse(response) OR default_value
       AS parsed THEN transform(parsed);
 };
 ```
 
-- `OR RAISE` - propagate the error (caller sees it via `NEXT`)
-- `OR value` - replace error with a fallback, chain continues
+- `OR_ELSE RAISE` - propagate the error (caller sees it via `NEXT`)
+- `OR_ELSE value` - replace error with a fallback, chain continues
 
 ## DO — Fork-Join
 
@@ -221,11 +221,11 @@ items |> CONCURRENT(workers: 2) EACH { _.value = 0.0; };
 ```ruby clear illustrative
 # Skip failed items
 results = items
-  |> CONCURRENT(workers: 4) SELECT risky_fn OR PRUNE;
+  |> CONCURRENT(workers: 4) SELECT risky_fn OR_ELSE PRUNE;
 
 # Propagate first error
 results = items
-  |> CONCURRENT(workers: 4) SELECT risky_fn OR RAISE;
+  |> CONCURRENT(workers: 4) SELECT risky_fn OR_ELSE RAISE;
 ```
 
 ### How It Works
@@ -234,7 +234,7 @@ results = items
 
 ```ruby clear
 results = items
-  |> SELECT BG { risky_fn OR RAISE };
+  |> SELECT BG { risky_fn OR_ELSE RAISE };
 # this is valid, but it would spawn N tasks, all at once.  It is NOT recommended.
 ```
 

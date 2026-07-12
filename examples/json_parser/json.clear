@@ -148,7 +148,7 @@ FN parseValue!(
       END
     END
     penv["__jp"] = p;
-    n = numStr.toNumber() OR 0.0;
+    n = numStr.toNumber() OR_ELSE 0.0;
     RETURN JsonValue{ JNum: n };
   END
 
@@ -183,7 +183,7 @@ FN parseValue!(
     WHILE parsing && p < json.length() DO
       item = parseValue!(json, p, penv, depth + 1);
       items.append(item);
-      p = penv["__jp"] OR 0;
+      p = penv["__jp"] OR_ELSE 0;
       p = skipWhitespace(json, p);
       IF p < json.length() && json.charAt(p) == "," THEN
         p += 1;
@@ -213,7 +213,7 @@ FN parseValue!(
       # Parse key
       p = skipWhitespace(json, p);
       key = parseString!(json, p, penv);
-      p = penv["__jp"] OR 0;
+      p = penv["__jp"] OR_ELSE 0;
       # Skip :
       p = skipWhitespace(json, p);
       IF p < json.length() && json.charAt(p) == ":" THEN
@@ -221,7 +221,7 @@ FN parseValue!(
       END
       # Parse value
       val = parseValue!(json, p, penv, depth + 1);
-      p = penv["__jp"] OR 0;
+      p = penv["__jp"] OR_ELSE 0;
       obj[key] = val;
       # Skip comma or end
       p = skipWhitespace(json, p);
@@ -251,7 +251,7 @@ END
 FN jsonGet!(MUTABLE v: JsonValue, key: String) RETURNS !JsonValue ->
   PARTIAL MATCH v START
     JsonValue.JObj AS map ->
-      raw = map[key] OR JsonValue.Null;
+      raw = map[key] OR_ELSE JsonValue.Null;
       # COPY string values so caller owns an independent copy.
       # Without COPY, both the map and the returned value share the same
       # heap string pointer, causing a double-free when both are cleaned up.

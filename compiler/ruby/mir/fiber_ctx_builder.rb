@@ -78,15 +78,18 @@ module FiberCtxBuilder
     enums do
       Rc = new("rc")
       Arc = new("arc")
+      AtomicPtr = new("atomic_ptr")
     end
 
     sig { returns(String) }
     def retain_func
+      return "atomicPtrRetain" if self == AtomicPtr
       self == Arc ? "arcRetain" : "rcRetain"
     end
 
     sig { returns(String) }
     def release_func
+      return "atomicPtrRelease" if self == AtomicPtr
       self == Arc ? "arcRelease" : "rcRelease"
     end
   end
@@ -322,8 +325,15 @@ module FiberCtxBuilder
         source_ref = source_overrides[name] || name
         ti = _type_obj.is_a?(Type) ? _type_obj : Type.new(_type_obj)
         sym = analysis&.capture_symbols&.dig(name)
-        shared_capture = ti.shared? || sym&.storage == :shared
-        rc_kind = shared_capture ? CaptureRcKind::Arc : CaptureRcKind::Rc
+        atomic_ptr_capture = ti.atomic_ptr?
+        shared_capture = atomic_ptr_capture || ti.shared? || sym&.storage == :shared
+        rc_kind = if atomic_ptr_capture
+                    CaptureRcKind::AtomicPtr
+                  elsif shared_capture
+                    CaptureRcKind::Arc
+                  else
+                    CaptureRcKind::Rc
+                  end
         payload_type_zig = rc_payload_zig_type(ti)
         retain_setup_mir = T.let([MIR::Let.new(retain_var, MIR::Call.new(
           "CheatLib.#{rc_kind.retain_func}",

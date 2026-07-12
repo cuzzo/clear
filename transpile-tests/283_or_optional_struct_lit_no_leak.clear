@@ -1,6 +1,6 @@
-# Regression: `nodes[k] OR Node{ label: "?" }` against an HashMap<Node>
+# Regression: `nodes[k] OR_ELSE Node{ label: "?" }` against an HashMap<Node>
 # where the fallback's struct literal has a heap-allocated string field.
-# HashMap.get returns Optional<Node>, so the OR branch is `orelse`, not
+# HashMap.get returns Optional<Node>, so the OR_ELSE branch is `orelse`, not
 # `catch` (no error union). The lowering's early-path "dupe inside the
 # failure handler" guard only fired for error_union; the optional case
 # fell through, eagerly hoisted the "?" dupe outside the orelse with
@@ -8,7 +8,7 @@
 # the common case when the key is present).
 #
 # Reproduces in examples/graphdb/graph.clear's `neighbors!` FOR-loop.
-# Each iteration's `nodes[targetId] OR Node{ label: "?" }` leaked a
+# Each iteration's `nodes[targetId] OR_ELSE Node{ label: "?" }` leaked a
 # 1-byte allocation when the key was present (which it always was, in
 # graphdb's test data).
 #
@@ -29,9 +29,9 @@ FN main() RETURNS Void ->
     # per-iteration allocation accumulates (the original graphdb shape).
     MUTABLE found_count: Int64 = 0;
     FOR i IN (0_i64 ..< 100) DO
-        found_a = nodes["a"] OR Node{ label: "?" };
+        found_a = nodes["a"] OR_ELSE Node{ label: "?" };
         IF found_a.label == "Alice" THEN found_count = found_count + 1; END
-        found_b = nodes["b"] OR Node{ label: "?" };
+        found_b = nodes["b"] OR_ELSE Node{ label: "?" };
         IF found_b.label == "Bob" THEN found_count = found_count + 1; END
     END
     ASSERT found_count == 200, "primary path returns lookup value";

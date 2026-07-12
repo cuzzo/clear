@@ -23,11 +23,11 @@ STRUCT Page {
 
 # Extract the <title>...</title> from HTML.
 FN extractTitle(html: String) RETURNS !String ->
-  startTag = html.indexOf("<title>") OR -1;
+  startTag = html.indexOf("<title>") OR_ELSE -1;
   IF startTag >= 0 THEN
     titleStart = startTag + 7;
     rest = html.substr(titleStart, html.length() - titleStart);
-    endTag = rest.indexOf("</title>") OR -1;
+    endTag = rest.indexOf("</title>") OR_ELSE -1;
     IF endTag >= 0 THEN
       RETURN html.substr(titleStart, endTag);
     END

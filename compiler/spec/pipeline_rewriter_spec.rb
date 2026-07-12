@@ -71,7 +71,7 @@ RSpec.describe PipelineRewriter do
     expect(bind.value.zig_pattern).to eq("CheatLib.len({0})")
   end
 
-  it "rewrites RECOVER pipelines into OR fallback expressions" do
+  it "rewrites RECOVER pipelines into OR_ELSE fallback expressions" do
     ast = parse_and_rewrite(<<~CLEAR)
       FN risky(n: Int64) RETURNS !Int64 -> RETURN n; END
       FN main() RETURNS Void ->
@@ -83,7 +83,7 @@ RSpec.describe PipelineRewriter do
     bind = main.body.find { |s| s.respond_to?(:name) && s.name == "result" }
 
     expect(bind.value).to be_a(AST::BinaryOp)
-    expect(bind.value.op).to eq(:OR_RESCUE)
+    expect(bind.value.op).to eq(:OR_ELSE)
     expect(bind.value.left).to be_a(AST::FuncCall)
     expect(bind.value.left.name).to eq("risky")
     expect(bind.value.right).to be_a(AST::Literal)

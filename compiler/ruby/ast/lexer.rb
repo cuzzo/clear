@@ -18,7 +18,7 @@ class Lexer
       CAST AS
       STRUCT ENUM UNION TRUE FALSE NIL Auto
       ASSERT RAISE CATCH EXIT DIE PASS PRUNE
-      MOD OR
+      MOD OR OR_ELSE
       REQUIRE
       SELECT WHERE INDEX REDUCE ORDER_BY LIMIT SKIP UNNEST DISTINCT EACH TAP FIND ANY ALL COUNT SUM AVERAGE MIN MAX CONCURRENT SHARD TAKE_WHILE WINDOW JOIN RECOVER COLLECT
       GIVE TAKES COPY MOVE CLONE SHARE LINK RESOLVE FREEZE
@@ -60,7 +60,7 @@ class Lexer
       when @s.scan(/\.\./) then add(:RANGE, '..', start_col)
       when @s.scan(/->/) then add(:ARROW, '->', start_col)
       when @s.scan(/\|>/) then add(:SMOOTH, '|>', start_col)
-      when @s.scan(/OR\b/) then add(:OR_RESCUE, 'OR', start_col)
+      when @s.scan(/OR_ELSE\b/) then add(:OR_ELSE, 'OR_ELSE', start_col)
       when @s.scan(/==/) then add(:CHAR, '==', start_col)
       when @s.scan(/>=/) then add(:CHAR, '>=', start_col)
       when @s.scan(/<=/) then add(:CHAR, '<=', start_col)

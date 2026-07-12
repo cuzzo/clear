@@ -13,7 +13,7 @@ FN readAtom(token: String) RETURNS !Value ->
     # Typed literals: 42:i64, 3.14:f64
     IF contains?(token, ":i64") THEN
         numPart = substr(token, 0, token.length() - 4);
-        n = toNumber(numPart) OR (0.0 - 999999.0);
+        n = toNumber(numPart) OR_ELSE (0.0 - 999999.0);
         IF n != 0.0 - 999999.0 THEN
             intVal = toInt(n);
             RETURN Value{ Int64Val: intVal };
@@ -21,11 +21,11 @@ FN readAtom(token: String) RETURNS !Value ->
     END
     IF contains?(token, ":f64") THEN
         numPart = substr(token, 0, token.length() - 4);
-        n = toNumber(numPart) OR (0.0 - 999999.0);
+        n = toNumber(numPart) OR_ELSE (0.0 - 999999.0);
         IF n != 0.0 - 999999.0 THEN RETURN Value{ Number: n }; END
     END
 
-    n = toNumber(token) OR (0.0 - 999999.0);
+    n = toNumber(token) OR_ELSE (0.0 - 999999.0);
     IF n != 0.0 - 999999.0 THEN RETURN Value{ Number: n }; END
     RETURN Value{ Symbol: COPY token };
 END
@@ -83,16 +83,16 @@ FN tokenizeToEnv!(MUTABLE penv: HashMap<Value>, str: String) RETURNS !Void ->
 END
 
 FN getTokenStr!(MUTABLE penv: HashMap<Value>, idx: Int64) RETURNS !String ->
-    val = penv["__t" + idx.toString()] OR Value.Nil;
+    val = penv["__t" + idx.toString()] OR_ELSE Value.Nil;
     RETURN getStr(val);
 END
 
 FN readFormEnv!(MUTABLE penv: HashMap<Value>) RETURNS !Value EFFECTS REENTRANT ->
-    posVal = penv["__rp"] OR Value{ Number: 0.0 };
-    tcVal = penv["__tc"] OR Value{ Number: 0.0 };
+    posVal = penv["__rp"] OR_ELSE Value{ Number: 0.0 };
+    tcVal = penv["__tc"] OR_ELSE Value{ Number: 0.0 };
     pos = toInt(getNum(posVal));
     tc = toInt(getNum(tcVal));
-    tok = getTokenStr!(penv, pos) OR RAISE;
+    tok = getTokenStr!(penv, pos) OR_ELSE RAISE;
 
     IF pos >= tc THEN
         RETURN Value.Nil;
@@ -100,29 +100,29 @@ FN readFormEnv!(MUTABLE penv: HashMap<Value>) RETURNS !Value EFFECTS REENTRANT -
 
     IF tok == "(" || tok == "[" THEN
         penv["__rp"] = Value{ Number: toFloat(pos + 1) };
-        RETURN readListEnv!(penv) OR RAISE;
+        RETURN readListEnv!(penv) OR_ELSE RAISE;
     END
 
     penv["__rp"] = Value{ Number: toFloat(pos + 1) };
-    RETURN readAtom(tok) OR RAISE;
+    RETURN readAtom(tok) OR_ELSE RAISE;
 END
 
 FN readListEnv!(MUTABLE penv: HashMap<Value>) RETURNS !Value EFFECTS REENTRANT ->
     MUTABLE items: Value[]@list = List[];
     MUTABLE listDone = FALSE;
     WHILE listDone == FALSE DO
-        curPosVal = penv["__rp"] OR Value{ Number: 0.0 };
-        tcVal2 = penv["__tc"] OR Value{ Number: 0.0 };
+        curPosVal = penv["__rp"] OR_ELSE Value{ Number: 0.0 };
+        tcVal2 = penv["__tc"] OR_ELSE Value{ Number: 0.0 };
         curPos = toInt(getNum(curPosVal));
         tc2 = toInt(getNum(tcVal2));
         IF curPos >= tc2 THEN listDone = TRUE;
         ELSE
-            curTok = getTokenStr!(penv, curPos) OR RAISE;
+            curTok = getTokenStr!(penv, curPos) OR_ELSE RAISE;
             IF curTok == ")" || curTok == "]" THEN
                 penv["__rp"] = Value{ Number: toFloat(curPos + 1) };
                 listDone = TRUE;
             ELSE
-                item = readFormEnv!(penv) OR RAISE;
+                item = readFormEnv!(penv) OR_ELSE RAISE;
                 items.append(item);
             END
         END

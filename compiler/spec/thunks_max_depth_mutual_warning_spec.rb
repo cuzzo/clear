@@ -43,7 +43,7 @@ RSpec.describe "EFFECTS REENTRANT:MAX_DEPTH(N) mutual-cycle warning" do
         EFFECTS REENTRANT:MAX_DEPTH(64) ->
         RETURN ping(n - 1_i64);
       END
-      FN main() RETURNS Void -> _ = ping(5_i64) OR EXIT "boom"; RETURN; END
+      FN main() RETURNS Void -> _ = ping(5_i64) OR_ELSE EXIT "boom"; RETURN; END
     CLEAR
     relevant = finds.select { |f| f.message =~ /MAX_DEPTH.*mutual cycle/i }
     expect(relevant).not_to be_empty
@@ -59,7 +59,7 @@ RSpec.describe "EFFECTS REENTRANT:MAX_DEPTH(N) mutual-cycle warning" do
         EFFECTS REENTRANT:MAX_DEPTH(64) ->
         RETURN n + 1_i64;
       END
-      FN main() RETURNS Void -> _ = bounded(5_i64) OR EXIT "boom"; RETURN; END
+      FN main() RETURNS Void -> _ = bounded(5_i64) OR_ELSE EXIT "boom"; RETURN; END
     CLEAR
     expect(finds.select { |f| f.message =~ /MAX_DEPTH.*mutual cycle/i }).to be_empty
   end
@@ -70,7 +70,7 @@ RSpec.describe "EFFECTS REENTRANT:MAX_DEPTH(N) mutual-cycle warning" do
         EFFECTS REENTRANT:MAX_DEPTH(64) ->
         RETURN dec(n - 1_i64);
       END
-      FN main() RETURNS Void -> _ = dec(5_i64) OR EXIT "boom"; RETURN; END
+      FN main() RETURNS Void -> _ = dec(5_i64) OR_ELSE EXIT "boom"; RETURN; END
     CLEAR
     expect(finds.select { |f| f.message =~ /MAX_DEPTH.*mutual cycle/i }).to be_empty
   end
@@ -86,7 +86,7 @@ RSpec.describe "EFFECTS REENTRANT:MAX_DEPTH(N) mutual-cycle warning" do
           EFFECTS REENTRANT:MAX_DEPTH(64) ->
           RETURN dec(n - 1_i64);
         END
-        FN main() RETURNS Void -> _ = dec(5_i64) OR EXIT "boom"; RETURN; END
+        FN main() RETURNS Void -> _ = dec(5_i64) OR_ELSE EXIT "boom"; RETURN; END
       CLEAR
     }.not_to raise_error
   end

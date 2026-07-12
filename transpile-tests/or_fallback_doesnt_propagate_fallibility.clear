@@ -1,18 +1,18 @@
 # Regression for docs/agents/puck-clear-bugs.md #3.
 #
-# `expr OR fallback` consumes the failure - any function whose internals
-# only ever observe `expr OR fallback` is itself infallible. CLEAR's
+# `expr OR_ELSE fallback` consumes the failure - any function whose internals
+# only ever observe `expr OR_ELSE fallback` is itself infallible. CLEAR's
 # effect inference currently propagates `can_fail` anyway and forces
-# every caller to declare `!T` and add `OR <action>` at the call site.
+# every caller to declare `!T` and add `OR_ELSE <action>` at the call site.
 #
-# The function below uses `.charAt(i) OR ""` and never RAISEs. It must
+# The function below uses `.charAt(i) OR_ELSE ""` and never RAISEs. It must
 # compile with `RETURNS Int64`, not `RETURNS !Int64`.
 
 FN findInAlphabet(c: String) RETURNS Int64 ->
   alphabet = "ABCDEFGH";
   MUTABLE i = 0;
   WHILE i < alphabet.length() DO
-    ch = alphabet.charAt(i) OR "";
+    ch = alphabet.charAt(i) OR_ELSE "";
     IF ch == c THEN RETURN i; END
     i += 1;
   END

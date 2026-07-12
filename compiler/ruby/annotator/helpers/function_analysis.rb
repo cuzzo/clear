@@ -496,7 +496,7 @@ module FunctionAnalysis
         # docs/agents/error-handling.md: "the compiler handles error
         # propagation for you by default."
         # The original `!T` is stashed on `error_union_type` so
-        # OR-RESCUE handlers (which read the LHS's union to pick
+        # OR_ELSE handlers (which read the LHS's union to pick
         # `catch`/`orelse`) can still see the un-stripped form.
         call_type = node.full_type!(context: "function call result")
         if call_type.respond_to?(:error_union?) &&

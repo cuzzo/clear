@@ -8,7 +8,7 @@ FN failsInShard() RETURNS !Bool ->
         IF _ == 7_i64 THEN
             RAISE Input, ShardBoom, "boom";
         END
-        counts[_] = (counts[_] OR 0_i64) + 1_i64;
+        counts[_] = (counts[_] OR_ELSE 0_i64) + 1_i64;
     };
 
     RETURN FALSE;
@@ -17,6 +17,6 @@ CATCH Input WITH(ShardBoom)
 END
 
 FN main() RETURNS !Void ->
-    caught = failsInShard() OR RAISE;
+    caught = failsInShard() OR_ELSE RAISE;
     ASSERT caught, "worker error propagated";
 END

@@ -16,7 +16,7 @@ module LexerHarnessSupport
     { 'name' => 'interpolation', 'source' => '"Hello ${name}!"' },
     { 'name' => 'based_literals', 'source' => '0xFF 0b1010_0101 0o12_34 0xFF_FF_u32' },
     { 'name' => 'decimal_literals', 'source' => '1_000 1_000_i32 1_000_u64 1_234.5_f32 3.141_592_f64' },
-    { 'name' => 'operators', 'source' => '.. -> |> OR || && != +=' },
+    { 'name' => 'operators', 'source' => '.. -> |> OR_ELSE || && != +=' },
     { 'name' => 'suffix_ids', 'source' => 'check?(x) value? value?.field update! value! name!=' },
     { 'name' => 'pipeline', 'source' => 'items |> WHERE _.ok?() |> SELECT _.name' }
   ].freeze

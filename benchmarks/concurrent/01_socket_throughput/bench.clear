@@ -9,7 +9,7 @@
 #   CLEAR (pool):  tcpRead → CheatLib.socketRead → ReadPool.acquire()
 #                  — 0 GPA malloc calls in the hot path
 #                  — 1 bitmask @ctz per read to find a free slot
-#                  — slot released via restoreFrameMark (1 bitmask OR)
+#                  — slot released via restoreFrameMark (1 bitmask OR_ELSE)
 #
 # HOW IT WORKS:
 #   Writer fiber: connects to the server and writes 100 000 × 256-byte messages

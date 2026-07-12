@@ -1529,8 +1529,8 @@ RSpec.describe Formatter do
           suboo = SubOp.A;
           MATCH op START
             Op.Get ->
-              IF suboo == SubOp.A THEN PARTIAL MATCH suboo OR SubOp.A START SubOp.A -> PASS;, DEFAULT -> PASS; END
-              ELSE_IF suboo == SubOp.B THEN PARTIAL MATCH suboo OR SubOp.A START SubOp.B -> PASS;, DEFAULT -> PASS; END
+              IF suboo == SubOp.A THEN PARTIAL MATCH suboo OR_ELSE SubOp.A START SubOp.A -> PASS;, DEFAULT -> PASS; END
+              ELSE_IF suboo == SubOp.B THEN PARTIAL MATCH suboo OR_ELSE SubOp.A START SubOp.B -> PASS;, DEFAULT -> PASS; END
               END
             ,
             Op.Put -> PASS;

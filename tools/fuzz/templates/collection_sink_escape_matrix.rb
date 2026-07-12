@@ -95,7 +95,7 @@ FuzzGenerator.register(:collection_sink_escape_matrix, cells: COLLECTION_SINK_ES
       END
 
       FN main() RETURNS Void ->
-          out: #{ty}[] = build() OR RAISE;
+          out: #{ty}[] = build() OR_ELSE RAISE;
           ASSERT out.length() == 2_i64, "collection literal return";
           RETURN;
       END

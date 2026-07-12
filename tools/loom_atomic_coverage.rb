@@ -239,7 +239,7 @@ module LoomAtomicCoverage
     puts "  covered total:            #{covered} (#{format('%.1f', pct)}%)"
     puts "  uncovered (0-hit):        #{zero_hit_real}    (instrumented, line never executed)"
     puts "  uncovered (file unloaded):#{file_not_loaded}   (file not loaded by any loom test)"
-    puts "  uncovered (line missing): #{line_missing}    (file loaded; line may be inline-elided OR unreached)"
+    puts "  uncovered (line missing): #{line_missing}    (file loaded; line may be inline-elided OR_ELSE unreached)"
     puts "  uncovered total:          #{uncovered}"
   end
 

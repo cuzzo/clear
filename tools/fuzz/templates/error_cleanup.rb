@@ -6,8 +6,8 @@
 # Cross-references:
 #   - CLAUDE.md INV-9: "If an operation can fail, the error path must not
 #     change the allocator identity of any live value."
-#   - docs/agents/mir-bugs.md #7 (OrRescue Fallback Dupe Fragility)
-#   - docs/agents/formal-verification-bugs.md #10 (`x = expr OR PASS` leaks
+#   - docs/agents/mir-bugs.md #7 (OrElse Fallback Dupe Fragility)
+#   - docs/agents/formal-verification-bugs.md #10 (`x = expr OR_ELSE PASS` leaks
 #     for heap-returning fn)
 #
 # Cell schema:
@@ -15,11 +15,11 @@
 #
 #   alloc   ∈ ALLOC_KINDS (from _cleanup_dimensions.rb)
 #   pattern ∈ {
-#     :success_or_pass,    # inner returns value, OR PASS no-op
-#     :raise_or_pass,      # inner raises, OR PASS swallows
-#     :success_or_raise,   # inner returns value, OR RAISE no-op
-#     :raise_or_raise,     # inner raises, OR RAISE re-propagates
-#     :success_or_default, # inner returns value, OR <default> no-op
+#     :success_or_pass,    # inner returns value, OR_ELSE PASS no-op
+#     :raise_or_pass,      # inner raises, OR_ELSE PASS swallows
+#     :success_or_raise,   # inner returns value, OR_ELSE RAISE no-op
+#     :raise_or_raise,     # inner raises, OR_ELSE RAISE re-propagates
+#     :success_or_default, # inner returns value, OR_ELSE <default> no-op
 #     :raise_or_default,   # inner raises, fallback value used
 #   }
 
@@ -66,11 +66,11 @@ def err_caller(alloc, pattern)
   vt = CleanupDims.value_type(alloc)
   call = case pattern
   when :success_or_pass, :raise_or_pass
-    "result: #{vt} = inner() OR PASS;"
+    "result: #{vt} = inner() OR_ELSE PASS;"
   when :success_or_raise, :raise_or_raise
-    "result: #{vt} = inner() OR RAISE;"
+    "result: #{vt} = inner() OR_ELSE RAISE;"
   when :success_or_default, :raise_or_default
-    "result: #{vt} = inner() OR #{err_default_value(alloc)};"
+    "result: #{vt} = inner() OR_ELSE #{err_default_value(alloc)};"
   end
   call
 end
@@ -80,14 +80,14 @@ FuzzGenerator.register(:error_cleanup, cells: ERROR_CLEANUP_CELLS) do |p|
   inner_fn = err_inner_fn(p[:alloc], raises: raises)
   caller_line = err_caller(p[:alloc], p[:pattern])
 
-  # main absorbs any propagated raise via OR PASS so the test exits
+  # main absorbs any propagated raise via OR_ELSE PASS so the test exits
   # cleanly. The matrix oracle is leak / Invalid-free; not whether the
   # raise propagated.
   <<~CHT
     #{inner_fn}
 
     FN main() RETURNS Void ->
-        run() OR PASS;
+        run() OR_ELSE PASS;
         RETURN;
     END
 

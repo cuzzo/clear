@@ -11,7 +11,7 @@ FN runit() RETURNS !Int64 ->
 END
 
 FN main() RETURNS !Void ->
-    n: Int64 = runit() OR RAISE;
+    n: Int64 = runit() OR_ELSE RAISE;
     ASSERT n == 1_i64, "bare String[]@list COPY into BG";
     RETURN;
 END

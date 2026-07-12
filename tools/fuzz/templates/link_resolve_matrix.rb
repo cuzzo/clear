@@ -25,7 +25,7 @@ FuzzGenerator.register(:link_resolve_matrix, cells: LR_CELLS) do |p|
           RETURN LINK strong;
       END
     CLEAR
-    "weak = makeDead_#{suffix}(); resolved = RESOLVE weak; value = resolved?.value OR -1_i64; ASSERT value == -1_i64;"
+    "weak = makeDead_#{suffix}(); resolved = RESOLVE weak; value = resolved?.value OR_ELSE -1_i64; ASSERT value == -1_i64;"
   end
 
   <<~CLEAR

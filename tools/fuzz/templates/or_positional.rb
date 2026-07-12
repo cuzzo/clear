@@ -1,25 +1,25 @@
-# Template: `expr OR <action>` in every syntactic position.
+# Template: `expr OR_ELSE <action>` in every syntactic position.
 #
-# Bug #10 in formal-verification-bugs.md: `result = run() OR PASS;`
+# Bug #10 in formal-verification-bugs.md: `result = run() OR_ELSE PASS;`
 # leaks when run() returns a heap-allocated value. The cleanup defer
 # for `result` doesn't get attached. The fuzz hypothesis is that
-# `OR <action>` lowering paths each have their own cleanup logic, and
+# `OR_ELSE <action>` lowering paths each have their own cleanup logic, and
 # the pairing is position-specific — so the bug surface is wider than
 # just assignment-RHS.
 #
-# This matrix exercises every position OR can appear in × every action ×
+# This matrix exercises every position OR_ELSE can appear in × every action ×
 # both success and failure of the inner expression.
 #
 # Cell schema:
 #   { position:, action:, outcome:, inner_t: }
 #
 #   position ∈ {
-#     :assign_rhs,    # x = expr OR action
-#     :fn_arg,        # consume(expr OR action)
-#     :method_arg,    # outer.append(expr OR action)
-#     :return_expr,   # RETURN expr OR action
-#     :with_source,   # WITH EXCLUSIVE (expr OR action) AS x { ... }
-#     :collection_lit,# [expr OR action]
+#     :assign_rhs,    # x = expr OR_ELSE action
+#     :fn_arg,        # consume(expr OR_ELSE action)
+#     :method_arg,    # outer.append(expr OR_ELSE action)
+#     :return_expr,   # RETURN expr OR_ELSE action
+#     :with_source,   # WITH EXCLUSIVE (expr OR_ELSE action) AS x { ... }
+#     :collection_lit,# [expr OR_ELSE action]
 #   }
 #
 #   action  ∈ {:pass, :raise, :default}
@@ -37,7 +37,7 @@ OR_POSITIONS.each do |pos|
   OR_ACTIONS.each do |act|
     OR_OUTCOMES.each do |out|
       OR_INNER_TS.each do |t|
-        # OR RAISE in :raise outcome propagates and exits non-zero — that
+        # OR_ELSE RAISE in :raise outcome propagates and exits non-zero — that
         # masks leak detection. Skip; the other actions cover the path.
         next if act == :raise && out == :raise
         OR_POSITIONAL_CELLS << { position: pos, action: act, outcome: out, inner_t: t }
@@ -100,7 +100,7 @@ end
 def or_body(p)
   vt   = or_inner_value_type(p[:inner_t])
   act  = or_action_text(p[:action], p[:inner_t])
-  expr = "inner() OR #{act}"
+  expr = "inner() OR_ELSE #{act}"
 
   case p[:position]
   when :assign_rhs
@@ -112,7 +112,7 @@ def or_body(p)
     # method-arg position: append a heap-allocated value into outer list.
     "MUTABLE outer: #{or_outer_list_type(p[:inner_t])} = []; outer.append(#{expr});"
   when :return_expr
-    # The OR expression IS the function's return; signature differs from
+    # The OR_ELSE expression IS the function's return; signature differs from
     # other positions. Caller binds the result.
     "RETURN #{expr};"
   when :with_source
@@ -168,7 +168,7 @@ FuzzGenerator.register(:or_positional, cells: OR_POSITIONAL_CELLS) do |p|
     END
 
     FN main() RETURNS Void ->
-        run() OR PASS;
+        run() OR_ELSE PASS;
         RETURN;
     END
   CHT

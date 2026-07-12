@@ -88,7 +88,7 @@ RSpec.describe ClearFixSupport do
       FN bad() RETURNS !Int64 -> RAISE Transient, "oops"; RETURN 0; END
 
       FN main() RETURNS Int64 ->
-        x = bad() OR EXIT "boom";
+        x = bad() OR_ELSE EXIT "boom";
         RETURN x;
       CATCH LockTimout
         RETURN -1;

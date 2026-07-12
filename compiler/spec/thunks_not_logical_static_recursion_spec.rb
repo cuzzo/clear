@@ -9,7 +9,7 @@ require_relative "../ruby/annotator" unless defined?(SemanticAnnotator)
 #
 # Today the runtime StackGuard catches re-entry on the live path
 # (raises System UnexpectedRecursion). But if the static call-graph
-# already shows `f -> f` directly OR transitively, the contract is
+# already shows `f -> f` directly OR_ELSE transitively, the contract is
 # unkeepable: the runtime is guaranteed to fire on EVERY call. The
 # user almost certainly meant `:THUNK` (handle the recursion) or
 # `:MAX_DEPTH(N)` (bound it). Reject loudly with that nudge.
@@ -32,7 +32,7 @@ RSpec.describe "EFFECTS REENTRANT:NOT_LOGICAL static-recursion validation" do
           EFFECTS REENTRANT:NOT_LOGICAL ->
           RETURN f(n - 1_i64);
         END
-        FN main() RETURNS Void -> _ = f(5_i64) OR EXIT "boom"; RETURN; END
+        FN main() RETURNS Void -> _ = f(5_i64) OR_ELSE EXIT "boom"; RETURN; END
       CLEAR
     }.to raise_error(/NOT_LOGICAL on 'f'.*directly calls itself/i)
   end
@@ -48,7 +48,7 @@ RSpec.describe "EFFECTS REENTRANT:NOT_LOGICAL static-recursion validation" do
           EFFECTS REENTRANT:NOT_LOGICAL ->
           RETURN ping(n - 1_i64);
         END
-        FN main() RETURNS Void -> _ = ping(5_i64) OR EXIT "boom"; RETURN; END
+        FN main() RETURNS Void -> _ = ping(5_i64) OR_ELSE EXIT "boom"; RETURN; END
       CLEAR
     }.to raise_error(/NOT_LOGICAL.*ping|reachable from itself/i)
   end
@@ -61,7 +61,7 @@ RSpec.describe "EFFECTS REENTRANT:NOT_LOGICAL static-recursion validation" do
           RETURN cb(x);
         END
         FN double(x: Int64) RETURNS Int64 -> RETURN x * 2; END
-        FN main() RETURNS Void -> _ = apply(double, 7_i64) OR EXIT "boom"; RETURN; END
+        FN main() RETURNS Void -> _ = apply(double, 7_i64) OR_ELSE EXIT "boom"; RETURN; END
       CLEAR
     }.not_to raise_error
   end
@@ -73,7 +73,7 @@ RSpec.describe "EFFECTS REENTRANT:NOT_LOGICAL static-recursion validation" do
           EFFECTS REENTRANT:NOT_LOGICAL ->
           RETURN f(n - 1_i64);
         END
-        FN main() RETURNS Void -> _ = f(5_i64) OR EXIT "boom"; RETURN; END
+        FN main() RETURNS Void -> _ = f(5_i64) OR_ELSE EXIT "boom"; RETURN; END
       CLEAR
     }.to raise_error(/THUNK.*MAX_DEPTH|MAX_DEPTH.*THUNK/m)
   end

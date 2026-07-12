@@ -10,7 +10,7 @@ FN main() RETURNS Void ->
     FOR j IN (0_i64 ..< 60000_i64) DO
         IF m.contains?(j) THEN
             hits = hits + 1_i64;
-            total = total + (m[j] OR 0_i64);
+            total = total + (m[j] OR_ELSE 0_i64);
         END
         IF (j MOD 4_i64) == 0_i64 THEN
             m.delete(j);

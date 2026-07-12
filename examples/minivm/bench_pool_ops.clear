@@ -22,7 +22,7 @@ FN run!(MUTABLE pool: Env[200000]@pool) RETURNS Int64
         IF eid AS id THEN
             WITH POLYMORPHIC EXCLUSIVE pool AS p {
                 IF p[id] AS env THEN
-                    PARTIAL MATCH env.vars["k2"] OR Value.Nil START
+                    PARTIAL MATCH env.vars["k2"] OR_ELSE Value.Nil START
                         Value.Int64Val AS v -> total = total + v;,
                         DEFAULT -> PASS;
                     END

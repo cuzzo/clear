@@ -107,7 +107,7 @@ RSpec.describe "Thunk Phase 4g -- stack sizing per reentrance kind" do
             RETURN n + 1;
           END
           FN main() RETURNS Void ->
-            p: ~Int64 = BG { bounded(0_i64) OR EXIT System, "x"; };
+            p: ~Int64 = BG { bounded(0_i64) OR_ELSE EXIT System, "x"; };
             _ = NEXT p;
             RETURN;
           END
@@ -182,7 +182,7 @@ RSpec.describe "Thunk Phase 4g -- stack sizing per reentrance kind" do
             RETURN a(n);
           END
           FN main() RETURNS Void ->
-            p: ~Int64 = BG { a(4_i64) OR EXIT System, "x"; };
+            p: ~Int64 = BG { a(4_i64) OR_ELSE EXIT System, "x"; };
             _ = NEXT p;
             RETURN;
           END

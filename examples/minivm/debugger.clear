@@ -6,12 +6,12 @@ REQUIRE "types.clear";
 REQUIRE "parser.clear";
 
 FN readFileOr!(path: String, fallback: String, MUTABLE pool: Env[50000]@pool) RETURNS !String ->
-    content = readFile(path) OR RAISE;
+    content = readFile(path) OR_ELSE RAISE;
     RETURN content;
 END
 
 FN readFileSafe!(path: String, MUTABLE pool: Env[50000]@pool) RETURNS !String ->
-    content = readFileOr!(path, "", pool) OR "";
+    content = readFileOr!(path, "", pool) OR_ELSE "";
     RETURN content;
 END
 
@@ -47,7 +47,7 @@ FN debugPause!(reason: String, envId: Id<Env>, inspectResult: String, MUTABLE po
     MUTABLE debugAction: Int64 = 0;
     MUTABLE debugActive = TRUE;
     WHILE debugActive DO
-        MUTABLE cmdRaw = readFileSafe!("/tmp/_debug_cmd.txt", pool) OR RAISE;
+        MUTABLE cmdRaw = readFileSafe!("/tmp/_debug_cmd.txt", pool) OR_ELSE RAISE;
         IF cmdRaw.length() > 0 THEN
             writeFile("/tmp/_debug_cmd.txt", "");
             IF cmdRaw == ":c" || cmdRaw == ":continue" THEN
@@ -62,9 +62,9 @@ FN debugPause!(reason: String, envId: Id<Env>, inspectResult: String, MUTABLE po
                 # Parse the inspect expression, store AST in env, return 4
                 inspectExpr = substr(cmdRaw, 3, cmdRaw.length() - 3);
                 MUTABLE inspPenv: HashMap<Value> = {};
-                tokenizeToEnv!(inspPenv, inspectExpr) OR RAISE;
+                tokenizeToEnv!(inspPenv, inspectExpr) OR_ELSE RAISE;
                 inspPenv["__rp"] = Value{ Number: 0.0 };
-                inspAst = readFormEnv!(inspPenv) OR RAISE;
+                inspAst = readFormEnv!(inspPenv) OR_ELSE RAISE;
                 WITH POLYMORPHIC EXCLUSIVE pool AS p {
                     IF p[envId] AS dbgInspEnv THEN dbgInspEnv.vars["__dbg_inspect"] = COPY inspAst; END
                 }

@@ -143,7 +143,7 @@ end
 body << "# ===== nil-kill combined dispatcher =====\n"
 body << "FN main() RETURNS !Void ->\n"
 dispatch.each do |name, return_type|
-  call = Type.new(return_type).error_union? ? "#{name}() OR RAISE;" : "#{name}();"
+  call = Type.new(return_type).error_union? ? "#{name}() OR_ELSE RAISE;" : "#{name}();"
   body << "  #{call}\n"
 end
 body << "  RETURN;\n"

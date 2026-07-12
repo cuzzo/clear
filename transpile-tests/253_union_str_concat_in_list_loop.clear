@@ -32,12 +32,12 @@ FN main() RETURNS Void ->
 
     # After 10 loop iterations the frame has been rewound 10 times.
     # The Str slices inside list[*] point to reclaimed frame memory.
-    PARTIAL MATCH (list[0] OR Value.Nil) START
+    PARTIAL MATCH (list[0] OR_ELSE Value.Nil) START
         Value.Str AS s -> ASSERT s == "item_0", "list[0] should be item_0";,
         DEFAULT -> ASSERT FALSE, "list[0] should be Str variant";
     END
 
-    PARTIAL MATCH (list[9] OR Value.Nil) START
+    PARTIAL MATCH (list[9] OR_ELSE Value.Nil) START
         Value.Str AS s -> ASSERT s == "item_9", "list[9] should be item_9";,
         DEFAULT -> ASSERT FALSE, "list[9] should be Str variant";
     END

@@ -50,7 +50,7 @@ FN compute(x: Float64) RETURNS !Float64 ->
 END
 ```
 
-You don't need `OR RAISE` on every call. The compiler sees that `divide` can fail, and automatically emits error propagation. `!Float64` tells callers that `compute` can fail.
+You don't need `OR_ELSE RAISE` on every call. The compiler sees that `divide` can fail, and automatically emits error propagation. `!Float64` tells callers that `compute` can fail.
 
 ## RAISE
 
@@ -72,30 +72,30 @@ RAISE "something went wrong";
 val = divide(10.0, 0.0) OR 0.0;
 ```
 
-### OR RAISE -- Propagate explicitly
+### OR_ELSE RAISE -- Propagate explicitly
 
 ```ruby clear illustrative
-half = divide(x, 2.0) OR RAISE;
+half = divide(x, 2.0) OR_ELSE RAISE;
 ```
 
-### OR EXIT "message" -- Annotate and propagate
+### OR_ELSE EXIT "message" -- Annotate and propagate
 
 ```ruby clear illustrative
-parsed = parseHeader(data) OR EXIT "failed at header parsing";
+parsed = parseHeader(data) OR_ELSE EXIT "failed at header parsing";
 ```
 
 Sets the error context message, then propagates. Useful in pipelines where you want to know *which step* failed.
 
-### OR PASS -- Silence the error
+### OR_ELSE PASS -- Silence the error
 
 ```ruby clear illustrative
-val = risky_operation() OR PASS;
+val = risky_operation() OR_ELSE PASS;
 ```
 
-### OR PRUNE -- Filter in concurrent pipelines
+### OR_ELSE PRUNE -- Filter in concurrent pipelines
 
 ```ruby clear illustrative
-results = data s> CONCURRENT(workers: 4) SELECT process(_) OR PRUNE;
+results = data s> CONCURRENT(workers: 4) SELECT process(_) OR_ELSE PRUNE;
 ```
 
 ### RECOVER(default) -- Pipeline error recovery
@@ -109,11 +109,11 @@ result = fetchData(url) s> RECOVER(defaultData());
 | Syntax | Behavior | Use when |
 |---|---|---|
 | *(no handler)* | Auto-propagate | Default -- let errors bubble up |
-| `OR value` | Use fallback | You have a sensible default |
-| `OR RAISE` | Propagate explicitly | You want the error path visible |
-| `OR EXIT "msg"` | Annotate + propagate | Pipeline step identification |
-| `OR PASS` | Silence | Low-level code, failure is OK |
-| `OR PRUNE` | Drop from pipeline | Concurrent pipelines |
+| `OR_ELSE value` | Use fallback | You have a sensible default |
+| `OR_ELSE RAISE` | Propagate explicitly | You want the error path visible |
+| `OR_ELSE EXIT "msg"` | Annotate + propagate | Pipeline step identification |
+| `OR_ELSE PASS` | Silence | Low-level code, failure is OK |
+| `OR_ELSE PRUNE` | Drop from pipeline | Concurrent pipelines |
 | `s> RECOVER(val)` | Pipeline fallback | Error recovery in chains |
 
 ## CATCH Blocks
@@ -122,8 +122,8 @@ CATCH blocks go at the bottom of a function, before `END`. They match on error K
 
 ```ruby clear illustrative
 FN fetchAndParse(url: String) RETURNS String ->
-    data = fetch(url) OR RAISE;
-    parsed = parse(data) OR EXIT "parse step failed";
+    data = fetch(url) OR_ELSE RAISE;
+    parsed = parse(data) OR_ELSE EXIT "parse step failed";
     RETURN transform(parsed);
 
 CATCH Transient
@@ -148,7 +148,7 @@ Rules:
 When an error occurs inside a pipeline, the ErrorContext's `.snapshot` field captures the element that caused the failure:
 
 ```ruby clear illustrative
-data s> WHERE validate(_) OR PRUNE;
+data s> WHERE validate(_) OR_ELSE PRUNE;
 ```
 
 Snapshots are heap-allocated. If allocation fails during error handling, snapshot is null -- the error still propagates, you just lose the debug data.
@@ -169,4 +169,4 @@ Error unions are a tagged union. On the happy path, the error code is zero and t
 
 ### Errors Are Values
 
-Because errors are values, they compose naturally with pipelines. `OR PRUNE` is just a value-level filter. `RECOVER(default)` is just `catch`. No special exception machinery.
+Because errors are values, they compose naturally with pipelines. `OR_ELSE PRUNE` is just a value-level filter. `RECOVER(default)` is just `catch`. No special exception machinery.

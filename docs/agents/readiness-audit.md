@@ -471,7 +471,7 @@ The migration exposed separate lowering paths for field chains, method calls,
 intrinsic methods, mutation, and generated Zig. The read-side paths now retain
 the typed optional in MIR and accept `x?.foo.bar()` for a single optional
 boundary. Keep those paths unified as the compiler evolves so users do not
-need `(x?.foo OR default).bar()` merely to satisfy a backend detail. For
+need `(x?.foo OR_ELSE default).bar()` merely to satisfy a backend detail. For
 mutation, `items[i]?.field = value` is the explicit conditional form: when the
 index/optional receiver is missing, the write is skipped and the right-hand
 side is not evaluated. This matches the expression's visible `?.` boundary.

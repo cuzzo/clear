@@ -1,5 +1,5 @@
 # Multi-pattern arm on STRING subjects. Lowered as if-chain with
-# OR'd strEql() calls.
+# OR_ELSE'd strEql() calls.
 
 FN day_kind(s: String) RETURNS String ->
   MUTABLE out: String = "?";

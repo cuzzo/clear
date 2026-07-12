@@ -55,7 +55,7 @@ module FuzzMutants
       name: :lower_if_cond_pending_leak,
       description: 'Stop lower_if draining the condition\'s @pending_stmts ' \
                    'before lowering the then-body. Hoisted temps from a ' \
-                   '`maybe() OR ""` cond then leak into the then-body, ' \
+                   '`maybe() OR_ELSE ""` cond then leak into the then-body, ' \
                    'declared after the cond that references them. The ' \
                    'cond_or_fallback :if cells fail to compile (Zig: ' \
                    'use of undeclared identifier __tmp_N).',
@@ -194,7 +194,7 @@ module FuzzMutants
     ),
     Mutant.new(
       name: :or_rescue_catch_allocator_identity,
-      description: 'Skip destination allocator placement for OR/catch fallback ' \
+      description: 'Skip destination allocator placement for OR_ELSE/catch fallback ' \
                    'values. Success and fallback branches must preserve one ' \
                    'allocator identity for the resulting binding.',
       invariant: :error_path_allocator_identity,
@@ -269,7 +269,7 @@ module FuzzMutants
     ),
     Mutant.new(
       name: :error_cleanup_emits_finalizers,
-      description: 'Disable cleanup emission for error-path owned values. OR, ' \
+      description: 'Disable cleanup emission for error-path owned values. OR_ELSE, ' \
                    'RAISE, and DEFAULT paths must still clean or transfer owned roots.',
       invariant: :error_cleanup_finalizers,
       patch: File.join(PATCH_DIR, 'mir_emitter_cleanup_noop.patch'),
@@ -347,7 +347,7 @@ module FuzzMutants
     ),
     Mutant.new(
       name: :or_heap_destination_branch_placement,
-      description: 'Disable destination placement for owned OR branch values. ' \
+      description: 'Disable destination placement for owned OR_ELSE branch values. ' \
                    'Success and fallback branches must agree on destination ' \
                    'allocator facts for heap-owned results.',
       invariant: :or_branch_destination_placement,
@@ -357,8 +357,8 @@ module FuzzMutants
     ),
     Mutant.new(
       name: :or_positional_branch_placement,
-      description: 'Disable destination placement for owned OR values in ' \
-                   'different syntactic positions. Positional OR lowering must ' \
+      description: 'Disable destination placement for owned OR_ELSE values in ' \
+                   'different syntactic positions. Positional OR_ELSE lowering must ' \
                    'keep cleanup and allocator facts coherent.',
       invariant: :or_positional_destination_placement,
       patch: File.join(PATCH_DIR, 'owned_branch_destination_noop.patch'),

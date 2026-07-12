@@ -36,7 +36,7 @@ FuzzGenerator.register(:collection_iteration_storage_matrix, cells: COLLECTION_I
   when :map
     decl = 'MUTABLE items: HashMap<Int64> = {}; items["a"] = 1_i64; items["b"] = 2_i64; items["c"] = 3_i64;'
     iter = "items"
-    value = "(items[v] OR 0_i64)"
+    value = "(items[v] OR_ELSE 0_i64)"
     sum_assert = "6_i64"
   when :pool
     decl = "MUTABLE items: Item[8]@pool = []; items.insert(Item{ value: 1_i64 }); items.insert(Item{ value: 2_i64 }); items.insert(Item{ value: 3_i64 });"
@@ -154,7 +154,7 @@ FuzzGenerator.register(:collection_iteration_storage_matrix, cells: COLLECTION_I
       END
 
       FN main() RETURNS !Void ->
-        ASSERT (run() OR RAISE) == #{sum_assert}, "collection return fn";
+        ASSERT (run() OR_ELSE RAISE) == #{sum_assert}, "collection return fn";
         RETURN;
       END
     CHT

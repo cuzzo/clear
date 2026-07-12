@@ -1616,7 +1616,7 @@ module MIRLoweringFunctions
     T.bind(self, MIRLowering) rescue nil
     node = expr
     node = node.value if node.is_a?(AST::MoveNode)
-    node = node.left if node.is_a?(AST::BinaryOp) && node.op == :OR_RESCUE
+    node = node.left if node.is_a?(AST::BinaryOp) && node.op == :OR_ELSE
     return false if node.respond_to?(:storage) && [:rodata, :borrow].include?(node.storage)
     return false if node.respond_to?(:rodata_provenance?) && node.rodata_provenance?
     return false if node.respond_to?(:borrow_provenance?) && node.borrow_provenance?

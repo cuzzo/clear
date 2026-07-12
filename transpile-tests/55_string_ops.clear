@@ -21,10 +21,10 @@ FN main() RETURNS Void ->
     ASSERT s2 == "hello", "substr from start";
 
     # toNumber and toInt
-    n = toNumber("42.5") OR 0.0;
+    n = toNumber("42.5") OR_ELSE 0.0;
     ASSERT n == 42.5, "toNumber parses float";
-    bad = toNumber("not_a_number") OR -1.0;
-    ASSERT bad == -1.0, "toNumber OR default";
+    bad = toNumber("not_a_number") OR_ELSE -1.0;
+    ASSERT bad == -1.0, "toNumber OR_ELSE default";
     i = toInt(42.9);
     ASSERT i == 42_i64, "toInt truncates";
 

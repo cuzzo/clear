@@ -13,7 +13,7 @@ FN main() RETURNS Void ->
 
     MUTABLE scores: HashMap<Int64> = {"alice": 10_i64, "bob": 20_i64};
     ASSERT scores.count() == 2_i64, "hash literal stays hash";
-    ASSERT scores["alice"] OR 0_i64 == 10_i64, "hash literal readback";
+    ASSERT scores["alice"] OR_ELSE 0_i64 == 10_i64, "hash literal readback";
 
     RETURN;
 END

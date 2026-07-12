@@ -2094,7 +2094,7 @@ RSpec.describe SemanticAnnotator do
     def find_call(ast, name)
       # Walk top-level statements looking for a call with the given name.
       # writeFile("p","c"); becomes a FuncCall statement (or wrapped if it
-      # can fail and the fn return is !Void — try/OR form).
+      # can fail and the fn return is !Void — try/OR_ELSE form).
       ast.statements.each do |s|
         return s if s.is_a?(AST::FuncCall) && s.name == name
         if s.is_a?(AST::BinaryOp) && s.left.is_a?(AST::FuncCall) && s.left.name == name
@@ -2105,7 +2105,7 @@ RSpec.describe SemanticAnnotator do
     end
 
     it "stamps error_kind and error_type from the matched stdlib entry" do
-      src = 'writeFile("p", "c") OR 0;'
+      src = 'writeFile("p", "c") OR_ELSE 0;'
       call = find_call(run(src), "writeFile")
       expect(call).not_to be_nil
       expect(call.error_kind).to eq(:Transient)
@@ -2116,7 +2116,7 @@ RSpec.describe SemanticAnnotator do
       entry.delete(:error_kind)
       entry.delete(:error_type)
       clear_stdlib_signature_cache!
-      src = 'writeFile("p", "c") OR 0;'
+      src = 'writeFile("p", "c") OR_ELSE 0;'
       call = find_call(run(src), "writeFile")
       expect(call).not_to be_nil
       expect(call.error_kind).to be_nil
@@ -2231,7 +2231,7 @@ RSpec.describe SemanticAnnotator do
       src = <<~FLUX
         FN a() RETURNS !Void -> RAISE Input, ParseError, "bad"; END
         FN b() RETURNS !Int64 ->
-          a() OR RAISE;
+          a() OR_ELSE RAISE;
           RETURN 1;
         CATCH Input WITH(ParseError)
           RETURN -1;
@@ -2243,7 +2243,7 @@ RSpec.describe SemanticAnnotator do
     it "accepts CATCH Kind WITH(Type) when the RAISE appears LATER in source (pre-pass seeding)" do
       src = <<~FLUX
         FN b() RETURNS !Int64 ->
-          a() OR RAISE;
+          a() OR_ELSE RAISE;
           RETURN 1;
         CATCH Input WITH(LateType)
           RETURN -1;
@@ -2261,7 +2261,7 @@ RSpec.describe SemanticAnnotator do
       src = <<~FLUX
         FN a() RETURNS !Void -> RAISE Input, MyErr, "bad"; END
         FN b() RETURNS !Int64 ->
-          a() OR RAISE;
+          a() OR_ELSE RAISE;
           RETURN 1;
         CATCH NotFound WITH(MyErr)
           RETURN -1;
@@ -2300,8 +2300,8 @@ RSpec.describe SemanticAnnotator do
         FN a() RETURNS !Void -> RAISE Input, ParseErr,   "p"; END
         FN b() RETURNS !Void -> RAISE Input, InvalidJson, "j"; END
         FN c() RETURNS !Int64 ->
-          a() OR RAISE;
-          b() OR RAISE;
+          a() OR_ELSE RAISE;
+          b() OR_ELSE RAISE;
           RETURN 1;
         CATCH Input WITH(ParseErr, InvalidJson)
           RETURN -1;
@@ -2315,7 +2315,7 @@ RSpec.describe SemanticAnnotator do
         FN a() RETURNS !Void -> RAISE Input,    Ok,   "p"; END
         FN b() RETURNS !Void -> RAISE NotFound, Miss, "m"; END
         FN c() RETURNS !Int64 ->
-          a() OR RAISE;
+          a() OR_ELSE RAISE;
           RETURN 1;
         CATCH Input WITH(Ok, Miss)
           RETURN -1;
@@ -2330,7 +2330,7 @@ RSpec.describe SemanticAnnotator do
         FN b() RETURNS !Void -> RAISE Input, B, "b"; END
         FN c() RETURNS !Void -> RAISE Input, C, "c"; END
         FN handler() RETURNS !Int64 ->
-          a() OR RAISE;
+          a() OR_ELSE RAISE;
           RETURN 1;
         CATCH Input WITH(A, B, C)
           RETURN -1;
@@ -2345,7 +2345,7 @@ RSpec.describe SemanticAnnotator do
       src = <<~FLUX
         FN fail() RETURNS !Void -> RAISE Input, DirectErr, "bad"; END
         FN go() RETURNS !Int64 ->
-          fail() OR RAISE;
+          fail() OR_ELSE RAISE;
           RETURN 1;
         CATCH DirectErr
           RETURN -1;
@@ -2358,7 +2358,7 @@ RSpec.describe SemanticAnnotator do
       src = <<~FLUX
         FN maybeTimeout() RETURNS !Void -> RAISE Transient, LockTimeout, "slow"; END
         FN go() RETURNS !Int64 ->
-          maybeTimeout() OR RAISE;
+          maybeTimeout() OR_ELSE RAISE;
           RETURN 1;
         CATCH LockTimeout
           RETURN -1;
@@ -2384,8 +2384,8 @@ RSpec.describe SemanticAnnotator do
         FN failInput() RETURNS !Void -> RAISE Input, "b"; END
         FN failNF()    RETURNS !Void -> RAISE NotFound, "b"; END
         FN go(mode: Int64) RETURNS !Int64 ->
-          IF mode == 1 THEN failInput() OR RAISE; END
-          IF mode == 2 THEN failNF()    OR RAISE; END
+          IF mode == 1 THEN failInput() OR_ELSE RAISE; END
+          IF mode == 2 THEN failNF()    OR_ELSE RAISE; END
           RETURN 1;
         CATCH Input, NotFound
           RETURN -1;
@@ -2399,7 +2399,7 @@ RSpec.describe SemanticAnnotator do
         FN a() RETURNS !Void -> RAISE Input, A, "a"; END
         FN b() RETURNS !Void -> RAISE Input, B, "b"; END
         FN go() RETURNS !Int64 ->
-          a() OR RAISE;
+          a() OR_ELSE RAISE;
           RETURN 1;
         CATCH A, B
           RETURN -1;
@@ -2415,7 +2415,7 @@ RSpec.describe SemanticAnnotator do
       src = <<~FLUX
         FN a() RETURNS !Void -> RAISE NotFound, MissingItem, "m"; END
         FN go() RETURNS !Int64 ->
-          a() OR RAISE;
+          a() OR_ELSE RAISE;
           RETURN 1;
         CATCH Input, MissingItem
           RETURN -1;
@@ -2440,7 +2440,7 @@ RSpec.describe SemanticAnnotator do
       src = <<~FLUX
         FN a() RETURNS !Void -> RAISE Input, "bad header"; END
         FN go() RETURNS !Int64 ->
-          a() OR RAISE;
+          a() OR_ELSE RAISE;
           RETURN 1;
         CATCH Input WITH("bad header")
           RETURN -1;
@@ -2453,7 +2453,7 @@ RSpec.describe SemanticAnnotator do
       src = <<~FLUX
         FN a() RETURNS !Void -> RAISE Input, ParseErr, "bad"; END
         FN go() RETURNS !Int64 ->
-          a() OR RAISE;
+          a() OR_ELSE RAISE;
           RETURN 1;
         CATCH Input WITH(ParseErr, "bad header")
           RETURN -1;
@@ -2466,7 +2466,7 @@ RSpec.describe SemanticAnnotator do
       src = <<~FLUX
         FN a() RETURNS !Void -> RAISE Input, MyErr, "nope"; END
         FN go() RETURNS !Int64 ->
-          a() OR RAISE;
+          a() OR_ELSE RAISE;
           RETURN 1;
         CATCH MyErr WITH("nope")
           RETURN -1;
@@ -2486,7 +2486,7 @@ RSpec.describe SemanticAnnotator do
     end
   end
 
-  describe "OR EXIT grammar — unified with inherit semantics" do
+  describe "OR_ELSE EXIT grammar — unified with inherit semantics" do
     def outer_wrap(inner)
       <<~FLUX
         FN fail() RETURNS !Int64 -> RAISE Input, OrigErr, "original"; RETURN 0; END
@@ -2507,53 +2507,53 @@ RSpec.describe SemanticAnnotator do
       FLUX
     end
 
-    it "parses OR EXIT \"msg\" (message only)" do
-      expect { run(outer_wrap('OR EXIT "replaced"')) }.not_to raise_error
+    it "parses OR_ELSE EXIT \"msg\" (message only)" do
+      expect { run(outer_wrap('OR_ELSE EXIT "replaced"')) }.not_to raise_error
     end
 
-    it "parses OR EXIT Kind (kind only)" do
-      expect { run(outer_wrap('OR EXIT NotFound')) }.not_to raise_error
+    it "parses OR_ELSE EXIT Kind (kind only)" do
+      expect { run(outer_wrap('OR_ELSE EXIT NotFound')) }.not_to raise_error
     end
 
-    it "parses OR EXIT Kind, \"msg\"" do
-      expect { run(outer_wrap('OR EXIT NotFound, "msg"')) }.not_to raise_error
+    it "parses OR_ELSE EXIT Kind, \"msg\"" do
+      expect { run(outer_wrap('OR_ELSE EXIT NotFound, "msg"')) }.not_to raise_error
     end
 
-    it "parses OR EXIT Kind, Type (registers the type on first use)" do
-      src = outer_wrap('OR EXIT NotFound, SomeNew')
+    it "parses OR_ELSE EXIT Kind, Type (registers the type on first use)" do
+      src = outer_wrap('OR_ELSE EXIT NotFound, SomeNew')
       expect { run(src) }.not_to raise_error
       expect(AST.kind_of_type(:SomeNew)).to eq(:NotFound)
     end
 
-    it "parses OR EXIT Kind, Type, \"msg\" (full override)" do
-      src = outer_wrap('OR EXIT System, SysIssue, "whoops"')
+    it "parses OR_ELSE EXIT Kind, Type, \"msg\" (full override)" do
+      src = outer_wrap('OR_ELSE EXIT System, SysIssue, "whoops"')
       expect { run(src) }.not_to raise_error
       expect(AST.kind_of_type(:SysIssue)).to eq(:System)
     end
 
-    it "parses OR EXIT Type (kind auto-resolved from the registry)" do
+    it "parses OR_ELSE EXIT Type (kind auto-resolved from the registry)" do
       # OrigErr was registered as Input by the fail() helper in outer_wrap.
-      src = outer_wrap('OR EXIT OrigErr, "x"')
+      src = outer_wrap('OR_ELSE EXIT OrigErr, "x"')
       expect { run(src) }.not_to raise_error
     end
 
-    it "rejects OR EXIT Type when Type is unregistered (no kind to infer)" do
-      src = outer_wrap('OR EXIT UnknownType, "x"')
+    it "rejects OR_ELSE EXIT Type when Type is unregistered (no kind to infer)" do
+      src = outer_wrap('OR_ELSE EXIT UnknownType, "x"')
       expect { run(src) }.to raise_error(/Error type 'UnknownType' is not registered/)
     end
 
-    it "registers a new (Kind, Type) at an OR EXIT site (first-use behavior)" do
-      src = outer_wrap('OR EXIT Input, ExitRegistered, "msg"')
+    it "registers a new (Kind, Type) at an OR_ELSE EXIT site (first-use behavior)" do
+      src = outer_wrap('OR_ELSE EXIT Input, ExitRegistered, "msg"')
       expect { run(src) }.not_to raise_error
       expect(AST.kind_of_type(:ExitRegistered)).to eq(:Input)
     end
 
-    it "rejects OR EXIT Kind, Type when Type is already registered with a different kind" do
+    it "rejects OR_ELSE EXIT Kind, Type when Type is already registered with a different kind" do
       src = <<~FLUX
         FN seed()  RETURNS !Int64 -> RAISE Input,    Fixed, "first"; RETURN 0; END
         FN other() RETURNS !Int64 -> RAISE NotFound, "x"; RETURN 0; END
         FN go() RETURNS Int64 ->
-          v: Int64 = other() OR EXIT NotFound, Fixed, "conflict";
+          v: Int64 = other() OR_ELSE EXIT NotFound, Fixed, "conflict";
           RETURN v;
         CATCH NotFound
           RETURN -1;
@@ -2569,7 +2569,7 @@ RSpec.describe SemanticAnnotator do
         FN a() RETURNS !Void -> RAISE Input,    Bad,     "b"; END
         FN b() RETURNS !Void -> RAISE Transient, Flaky,  "f"; END
         FN go() RETURNS !Int64 ->
-          a() OR RAISE;
+          a() OR_ELSE RAISE;
           RETURN 1;
         CATCH Input WITH(Bad)
           RETURN -1;

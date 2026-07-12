@@ -40,7 +40,7 @@ FN main() RETURNS !Void ->
     # nested rewind path with overflow blocks.
     MUTABLE outer: Int64 = 0;
     WHILE outer < 50 DO
-        heavyInner!(outer) OR EXIT;
+        heavyInner!(outer) OR_ELSE EXIT;
         outer += 1;
     END
     print("PASS");

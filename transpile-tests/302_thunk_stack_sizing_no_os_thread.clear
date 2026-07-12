@@ -29,7 +29,7 @@ FN main() RETURNS Void ->
   # Each BG runs on a default fiber tier (no @service required).
   p1: ~Int64 = BG { factorial(8_i64); };
   p2: ~Int64 = BG { sum_tc(50_i64, 0_i64); };
-  p3: ~Int64 = BG { bounded(0_i64) OR EXIT System, "x"; };
+  p3: ~Int64 = BG { bounded(0_i64) OR_ELSE EXIT System, "x"; };
 
   r1 = NEXT p1;
   r2 = NEXT p2;

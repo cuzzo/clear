@@ -7,11 +7,11 @@ FN inner() RETURNS !Int64[]@list ->
 END
 
 FN main() RETURNS Void ->
-    run() OR PASS;
+    run() OR_ELSE PASS;
     RETURN;
 END
 
 FN run() RETURNS !Void ->
-    result: Int64[]@list = inner() OR RAISE;
+    result: Int64[]@list = inner() OR_ELSE RAISE;
     RETURN;
 END

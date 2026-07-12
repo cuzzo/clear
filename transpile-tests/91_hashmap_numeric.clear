@@ -1,7 +1,7 @@
 # 91_hashmap_numeric.clear — Numeric-key HashMap (HashMap<Int64, Float64>)
 #
 # Exercises the [] operator for both read and write on a numeric map.
-# map[key] returns ?V — use OR to provide a fallback for missing keys.
+# map[key] returns ?V — use OR_ELSE to provide a fallback for missing keys.
 
 FN main() RETURNS Void ->
     # HashMap<Int64, Float64> uses AutoHashMapUnmanaged (no key copies)
@@ -13,16 +13,16 @@ FN main() RETURNS Void ->
     scores[3_i64] = 30.0;
 
     # read via [] operator → numericMapGet (returns ?Float64)
-    ASSERT scores[1_i64] OR 0.0 == 10.0, "key 1 should be 10";
-    ASSERT scores[2_i64] OR 0.0 == 20.0, "key 2 should be 20";
-    ASSERT scores[3_i64] OR 0.0 == 30.0, "key 3 should be 30";
+    ASSERT scores[1_i64] OR_ELSE 0.0 == 10.0, "key 1 should be 10";
+    ASSERT scores[2_i64] OR_ELSE 0.0 == 20.0, "key 2 should be 20";
+    ASSERT scores[3_i64] OR_ELSE 0.0 == 30.0, "key 3 should be 30";
 
-    # missing key returns nil — OR provides default
-    ASSERT scores[99_i64] OR 0.0 == 0.0, "missing key should return 0 via OR";
+    # missing key returns nil — OR_ELSE provides default
+    ASSERT scores[99_i64] OR_ELSE 0.0 == 0.0, "missing key should return 0 via OR_ELSE";
 
     # update existing key
     scores[2_i64] = 99.0;
-    ASSERT scores[2_i64] OR 0.0 == 99.0, "updated key 2 should be 99";
+    ASSERT scores[2_i64] OR_ELSE 0.0 == 99.0, "updated key 2 should be 99";
 
     # count / contains / delete via method API
     ASSERT scores.count() == 3, "should have 3 entries";

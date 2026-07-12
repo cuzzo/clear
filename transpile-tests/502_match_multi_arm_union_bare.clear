@@ -1,5 +1,5 @@
 # Multi-pattern arm on a UNION (no payload capture). Bodies are shared
-# across all variants in the arm; the if-chain lowering OR's the
+# across all variants in the arm; the if-chain lowering OR_ELSE's the
 # tag-checks: `tag == .A or tag == .B or tag == .C`.
 
 UNION Status { Pending, Running, Paused, Done, Cancelled, Failed }

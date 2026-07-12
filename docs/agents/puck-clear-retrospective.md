@@ -26,7 +26,7 @@ Three structural gaps, in order of severity:
    spirit* is rejected with a low-level error message.
 3. **Hoisting and effect inference each have well-formed unit
    behaviours that compose badly.** Each transformation is locally
-   correct; their interaction in the presence of `OR fallback` and
+   correct; their interaction in the presence of `OR_ELSE fallback` and
    nested heap shapes is what produces incorrect Zig and surprising
    fallibility cascades.
 
@@ -53,7 +53,7 @@ discussion here:
   never ran. **Severity: high** — every non-trivial loop hits it, and
   the only escape is hoisting every transient out of the loop body.
 
-- **Bug #3 / #8** (`OR fallback` doesn't reset `can_fail` in effect
+- **Bug #3 / #8** (`OR_ELSE fallback` doesn't reset `can_fail` in effect
   inference): a function whose only "fallible" operation is consumed by
   `OR ""` is still marked fallible, forcing the whole call chain to
   declare `!T`. **Severity: medium** — silently *enlarges the signature*
@@ -82,7 +82,7 @@ asks "did you remember to make this work when used together with that?"
 
 The bugs we hit are interaction bugs:
 
-- Bug #1 needs: fallible call + OR fallback + comparison + IF condition
+- Bug #1 needs: fallible call + OR_ELSE fallback + comparison + IF condition
   (four features, each fine individually).
 - Bug #9 needs: STRUCT with @list field + outer @list + WHILE loop +
   MUTABLE-declared inner @list (four features, each fine individually).
@@ -148,7 +148,7 @@ lives), instead of the parent block (where the temp's value is
 naming, just not for emission ordering.
 
 Bug #3 is similar in flavour: the effect inference pass and the
-expression typer each have a defensible view of `OR fallback`, and they
+expression typer each have a defensible view of `OR_ELSE fallback`, and they
 disagree about whether the residual function "can fail". Each pass is
 locally consistent; the cross-product is the bug.
 

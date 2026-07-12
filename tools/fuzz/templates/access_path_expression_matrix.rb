@@ -61,11 +61,11 @@ def apx_expr(access)
 end
 
 def apx_return_expr(access)
-  %i[map_index set_index].include?(access) ? "COPY (#{apx_expr(access)} OR COPY \"\")" : "COPY #{apx_expr(access)}"
+  %i[map_index set_index].include?(access) ? "COPY (#{apx_expr(access)} OR_ELSE COPY \"\")" : "COPY #{apx_expr(access)}"
 end
 
 def apx_observe(access, name)
-  %i[optional_field optional_index map_index set_index].include?(access) ? "(#{name} OR COPY \"\").length()" : "#{name}.length()"
+  %i[optional_field optional_index map_index set_index].include?(access) ? "(#{name} OR_ELSE COPY \"\").length()" : "#{name}.length()"
 end
 
 FuzzGenerator.register(:access_path_expression_matrix, cells: ACCESS_PATH_EXPRESSION_CELLS) do |p|
@@ -103,7 +103,7 @@ FuzzGenerator.register(:access_path_expression_matrix, cells: ACCESS_PATH_EXPRES
     arg_type = optional_access ? "?String" : "String"
     <<~CHT
       #{prelude}FN observe(x: #{arg_type}) RETURNS Int64 ->
-          RETURN #{optional_access ? '(x OR COPY "").length()' : 'x.length()'};
+          RETURN #{optional_access ? '(x OR_ELSE COPY "").length()' : 'x.length()'};
       END
 
       FN main() RETURNS Void ->

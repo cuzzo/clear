@@ -36,25 +36,25 @@ FN qsort!(MUTABLE arr: Float64[], n: Int64) RETURNS !Void ->
   # TIGHT: pure compare-and-swap, no per-iteration allocation.
   TIGHT WHILE sp > 0 DO
     sp -= 1;
-    lo = lo_stk[sp] OR 0_i64;
-    hi = hi_stk[sp] OR 0_i64;
+    lo = lo_stk[sp] OR_ELSE 0_i64;
+    hi = hi_stk[sp] OR_ELSE 0_i64;
 
     IF lo < hi THEN
-      pivot = arr[hi] OR 0.0;
+      pivot = arr[hi] OR_ELSE 0.0;
       MUTABLE i = lo - 1;
       MUTABLE j = lo;
       TIGHT WHILE j < hi DO
-        IF (arr[j] OR 0.0) <= pivot THEN
+        IF (arr[j] OR_ELSE 0.0) <= pivot THEN
           i += 1;
-          tmp = arr[i] OR 0.0;
-          arr[i] = arr[j] OR 0.0;
+          tmp = arr[i] OR_ELSE 0.0;
+          arr[i] = arr[j] OR_ELSE 0.0;
           arr[j] = tmp;
         END
         j += 1;
       END
       i += 1;
-      tmp = arr[i] OR 0.0;
-      arr[i] = arr[hi] OR 0.0;
+      tmp = arr[i] OR_ELSE 0.0;
+      arr[i] = arr[hi] OR_ELSE 0.0;
       arr[hi] = tmp;
       pi = i;
 
@@ -94,18 +94,18 @@ FN msort!(MUTABLE arr: Float64[], MUTABLE tmp: Float64[], n: Int64) RETURNS !Voi
         MUTABLE j = mid;
         MUTABLE k = lo;
         TIGHT WHILE k < hi DO
-          IF j >= hi || (i < mid && (arr[i] OR 0.0) <= (arr[j] OR 0.0)) THEN
-            tmp[k] = arr[i] OR 0.0;
+          IF j >= hi || (i < mid && (arr[i] OR_ELSE 0.0) <= (arr[j] OR_ELSE 0.0)) THEN
+            tmp[k] = arr[i] OR_ELSE 0.0;
             i += 1;
           ELSE
-            tmp[k] = arr[j] OR 0.0;
+            tmp[k] = arr[j] OR_ELSE 0.0;
             j += 1;
           END
           k += 1;
         END
         MUTABLE ci = lo;
         TIGHT WHILE ci < hi DO
-          arr[ci] = tmp[ci] OR 0.0;
+          arr[ci] = tmp[ci] OR_ELSE 0.0;
           ci += 1;
         END
       END
@@ -133,8 +133,8 @@ FN main() RETURNS !Void ->
   t0 = timestampMs();
   qsort!(arr, n);
   qsortMs = timestampMs() - t0;
-  ASSERT (arr[0] OR 0.0) <= (arr[1] OR 0.0), "qsort: not sorted at start";
-  ASSERT (arr[n - 2] OR 0.0) <= (arr[n - 1] OR 0.0), "qsort: not sorted at end";
+  ASSERT (arr[0] OR_ELSE 0.0) <= (arr[1] OR_ELSE 0.0), "qsort: not sorted at start";
+  ASSERT (arr[n - 2] OR_ELSE 0.0) <= (arr[n - 1] OR_ELSE 0.0), "qsort: not sorted at end";
 
   # Refill for mergesort
   seed_i = 0;
@@ -150,8 +150,8 @@ FN main() RETURNS !Void ->
   t1 = timestampMs();
   msort!(arr, tmp_arr, n);
   msortMs = timestampMs() - t1;
-  ASSERT (arr[0] OR 0.0) <= (arr[1] OR 0.0), "msort: not sorted at start";
-  ASSERT (arr[n - 2] OR 0.0) <= (arr[n - 1] OR 0.0), "msort: not sorted at end";
+  ASSERT (arr[0] OR_ELSE 0.0) <= (arr[1] OR_ELSE 0.0), "msort: not sorted at start";
+  ASSERT (arr[n - 2] OR_ELSE 0.0) <= (arr[n - 1] OR_ELSE 0.0), "msort: not sorted at end";
 
   totalMs = qsortMs + msortMs;
   print("BENCH_RESULT: ${totalMs.toString()} ms");

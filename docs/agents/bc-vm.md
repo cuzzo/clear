@@ -57,7 +57,7 @@ These features compile and execute correctly via the bytecode path:
   typed `find_field_index` so same-named fields across structs disambiguate
 - **WITH blocks**: WITH BORROWED, WITH RESTRICT (mut/immut), WITH EXCLUSIVE
   on @locked, WITH SHARED on Arc, alias writeback after the block
-- **Error machinery**: RAISE Kind/Type/msg -> RAISE_ERR opcode, OR RAISE
+- **Error machinery**: RAISE Kind/Type/msg -> RAISE_ERR opcode, OR_ELSE RAISE
   propagation via Value.Error sentinel, single-FN CATCH (kind dispatch via
   GET_ERR_KIND + EQ chain), OR <fallback> via TryCatch
 - **Print**: std.debug.print template arg parser respects nested parens,

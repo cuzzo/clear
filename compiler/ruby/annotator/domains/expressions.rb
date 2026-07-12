@@ -150,7 +150,7 @@ module Annotator
         case node.op
         when :SMOOTH then return visit_Smooth(node)
         when :BIND_VAR then return visit_BindVar(node)
-        when :OR_RESCUE then return visit_OrRescue(node)
+        when :OR_ELSE then return visit_OrElse(node)
         end
 
         # Standard binary operations - visit children first

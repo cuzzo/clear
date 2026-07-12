@@ -1934,7 +1934,7 @@ module FixableHelper
     msg << "    candidate types observed are: #{types_list}.\n"
     msg << "    Pick the one whose semantics match your intent and\n"
     msg << "    convert the others (e.g. `Int64.toString(x)`,\n"
-    msg << "    `Int.fromString(s) OR RAISE`).\n"
+    msg << "    `Int.fromString(s) OR_ELSE RAISE`).\n"
 
     # Option 2: types not obviously compatible.
     msg << "  Option 2: if these types do not have an obvious\n"

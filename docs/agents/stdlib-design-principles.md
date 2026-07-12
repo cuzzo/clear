@@ -84,9 +84,9 @@ CLEAR should not make opening files or doing file/network IO as hard as Java or
 Zig for ordinary users. A user should be able to write obvious high-level code:
 
 ```ruby clear illustrative
-text = fs.read("config.clear") OR RAISE;
-lines = fs.readLines("users.txt") OR RAISE;
-fs.write("out.txt", report) OR RAISE;
+text = fs.read("config.clear") OR_ELSE RAISE;
+lines = fs.readLines("users.txt") OR_ELSE RAISE;
+fs.write("out.txt", report) OR_ELSE RAISE;
 ```
 
 The same principle applies to pipelines. The pipeline system should default to
@@ -97,7 +97,7 @@ explicit terminal or destination type.
 Illustrative shape:
 
 ```ruby clear illustrative
-users: User[] = (fs.readLines("users.csv") OR RAISE)
+users: User[] = (fs.readLines("users.csv") OR_ELSE RAISE)
     |> MAP { parseUser(_) }
     |> SELECT { _.active?() };
 ```
@@ -111,16 +111,16 @@ If the user wants a stream, hashmap, set, or another collection, they should ask
 for it explicitly:
 
 ```ruby clear illustrative
-active_stream = (fs.readLines("users.csv") OR RAISE)
+active_stream = (fs.readLines("users.csv") OR_ELSE RAISE)
     |> MAP { parseUser(_) }
     |> SELECT { _.active?() }
     |> AS_STREAM;
 
-users_by_id = (fs.readLines("users.csv") OR RAISE)
+users_by_id = (fs.readLines("users.csv") OR_ELSE RAISE)
     |> MAP { parseUser(_) }
     |> COLLECT_MAP { _.id => _ };
 
-unique_domains = (fs.readLines("emails.txt") OR RAISE)
+unique_domains = (fs.readLines("emails.txt") OR_ELSE RAISE)
     |> MAP { domainOf(_) }
     |> COLLECT_SET;
 ```
@@ -136,7 +136,7 @@ The exact names are not settled. The principle is settled:
 Ordering is explicit:
 
 ```ruby clear illustrative
-files = fs.glob("src/**/*.clear") OR RAISE;
+files = fs.glob("src/**/*.clear") OR_ELSE RAISE;
 sorted = files |> ORDER_BY _;
 ```
 

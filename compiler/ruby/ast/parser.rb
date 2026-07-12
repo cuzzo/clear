@@ -2118,12 +2118,12 @@ class ClearParser
 
   sig { params(token: Lexer::Token).returns(T.nilable(Integer)) }
   def get_precedence(token)
-    return nil unless token.type == :CHAR || token.type == :KEYWORD || token.type == :SMOOTH || token.type == :OR_RESCUE || token.type == :RANGE_EXCL || token.type == :RANGE_INCL
+    return nil unless token.type == :CHAR || token.type == :KEYWORD || token.type == :SMOOTH || token.type == :OR_ELSE || token.type == :RANGE_EXCL || token.type == :RANGE_INCL
 
     # Precedence levels (higher = tighter binding)
     case T.cast(token.value, String)
     when '|>'             then 1
-    when 'OR', 'AS'       then 2
+    when 'OR_ELSE', 'OR', 'AS' then 2
     when '..<', '..<=', '..=' then 3
     when '||'             then 4
     when '&&'             then 5
@@ -2149,9 +2149,35 @@ class ClearParser
       end
       return AST::BinaryOp.new(op_token, lhs, :BIND_VAR, as_rhs)
 
+    when 'OR_ELSE'
+      or_rhs = parse_or_else
+      return AST::BinaryOp.new(op_token, lhs, :OR_ELSE, or_rhs)
+
     when 'OR'
-      or_rhs = parse_or_rescue
-      return AST::BinaryOp.new(op_token, lhs, :OR_RESCUE, or_rhs)
+      fix = Fix.new(
+        description: fix_description(
+          :REPLACE_OPERATOR_TYPO,
+          match: "OR",
+          replace: "OR_ELSE",
+          label: "fallback operator (use `OR_ELSE`, not `OR`)",
+        ),
+        confidence: :auto,
+        edits: [Edit.new(
+          span: Span.new(file: nil, line: op_token.line, col: op_token.column, length: 2),
+          replacement: "OR_ELSE"
+        )]
+      )
+      fixable!(op_token,
+        code: :OPERATOR_TYPO_SUGGESTION,
+        match: "OR",
+        replace: "OR_ELSE",
+        category: :type,
+        level: :error,
+        fixes: [fix])
+      # In fix-collection mode only, preserve the old parse shape so the
+      # frontend can collect and apply every migration edit in one pass.
+      or_rhs = parse_or_else
+      return AST::BinaryOp.new(op_token, lhs, :OR_ELSE, or_rhs)
 
     when 'IS_A'
       is_a_rhs = parse_is_a_rhs
@@ -2214,23 +2240,23 @@ class ClearParser
   end
 
   sig { returns(AST::Node) }
-  def parse_or_rescue
-    # Syntax: ... OR RETURN
+  def parse_or_else
+    # Syntax: ... OR_ELSE RETURN
     if match!(:KEYWORD, 'RETURN')
       rhs = AST::ReturnNode.new(previous, nil)
 
-    # Syntax: ... OR RAISE (bubble up error - Zig's `try`)
+    # Syntax: ... OR_ELSE RAISE (bubble up error - Zig's `try`)
     elsif match!(:KEYWORD, 'RAISE')
-      rhs = AST::OrRaise.new(previous)
+      rhs = AST::OrElseRaise.new(previous)
 
-    # Syntax: ... OR EXIT  (unified error system — mirrors RAISE):
-    #   OR EXIT "msg"                   — inherit kind/type, replace msg
-    #   OR EXIT Kind                    — set kind, clear type
-    #   OR EXIT Kind, "msg"             — set kind, clear type, replace msg
-    #   OR EXIT Kind, Type              — set kind + type
-    #   OR EXIT Kind, Type, "msg"       — full
-    #   OR EXIT Type                    — set type (kind auto-resolved)
-    #   OR EXIT Type, "msg"             — set type + msg
+    # Syntax: ... OR_ELSE EXIT  (unified error system — mirrors RAISE):
+    #   OR_ELSE EXIT "msg"                   — inherit kind/type, replace msg
+    #   OR_ELSE EXIT Kind                    — set kind, clear type
+    #   OR_ELSE EXIT Kind, "msg"             — set kind, clear type, replace msg
+    #   OR_ELSE EXIT Kind, Type              — set kind + type
+    #   OR_ELSE EXIT Kind, Type, "msg"       — full
+    #   OR_ELSE EXIT Type                    — set type (kind auto-resolved)
+    #   OR_ELSE EXIT Type, "msg"             — set type + msg
     # Disambiguation: first TYPE_ID is a kind iff it's in ERROR_KINDS;
     # otherwise it's a type. Unspecified fields inherit from the
     # pre-existing rt.__error at lowering time.
@@ -2241,7 +2267,7 @@ class ClearParser
       message = nil
 
       if match?(:STRING)
-        # OR EXIT "msg" — pure message override
+        # OR_ELSE EXIT "msg" — pure message override
         message = parse_expression
       elsif match?(:TYPE_ID)
         first_tok = consume(:TYPE_ID)
@@ -2267,22 +2293,22 @@ class ClearParser
         end
       else
         # No args — legacy "just bubble the existing error" form.
-        # Kept for backward compat; equivalent to OR RAISE.
+        # Kept for backward compat; equivalent to OR_ELSE RAISE.
       end
 
-      rhs = AST::OrExit.new(exit_tok, kind, error_name, message)
+      rhs = AST::OrElseExit.new(exit_tok, kind, error_name, message)
 
-    # Syntax: ... OR PASS (ignore error, use undefined/default)
+    # Syntax: ... OR_ELSE PASS (ignore error, use undefined/default)
     elsif match!(:KEYWORD, 'PASS')
-      rhs = AST::OrPass.new(previous)
+      rhs = AST::OrElsePass.new(previous)
 
-    # Syntax: ... OR PRUNE (discard error, skip item — concurrent SELECT/WHERE)
+    # Syntax: ... OR_ELSE PRUNE (discard error, skip item — concurrent SELECT/WHERE)
     elsif match!(:KEYWORD, 'PRUNE')
-      rhs = AST::OrPrune.new(previous)
+      rhs = AST::OrElsePrune.new(previous)
 
-    # Syntax: ... OR BREAK (error-to-break coercion, valid only inside loops)
+    # Syntax: ... OR_ELSE BREAK (error-to-break coercion, valid only inside loops)
     elsif match!(:KEYWORD, 'BREAK')
-      rhs = AST::OrBreak.new(previous)
+      rhs = AST::OrElseBreak.new(previous)
 
     else
       # Syntax: ... OR ELSE value, or standard `... OR expression`.

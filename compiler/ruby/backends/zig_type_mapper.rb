@@ -28,7 +28,7 @@ module ZigTypeMapper
     :BITWISE_NOT => "~",
 
     # Special AST nodes you might map to operators
-    #:OR_RESCUE   => "orelse"
+    #:OR_ELSE   => "orelse"
   }, T::Hash[Symbol, String])
 
   ZIG_PRIMITIVES = ["i8", "i16", "i32", "i64", "u8", "u16", "u32", "u64", "f32", "f64", "bool", "void", "[]const u8"]

@@ -67,7 +67,7 @@ module VoprCoverage
   TEST_FILE_RE = /\A(?:.*-test|vopr[\w-]*|loom[\w-]*|[\w-]+-loom|[\w-]+-vopr|[\w-]+-bench|size_check|runtime-header)\.zig\z/
 
   # Pattern definitions per category.  Each entry is a literal substring
-  # OR a Regexp.  All matched against the line WITH comments stripped
+  # OR_ELSE a Regexp.  All matched against the line WITH comments stripped
   # (so commented-out usages don't count) but BEFORE retry-marker
   # stripping (so a marker on the same line as a call still counts as
   # both a marker and a call).

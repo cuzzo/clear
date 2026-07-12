@@ -846,7 +846,7 @@ module EscapeAnalysis
   sig { params(expr: NodeValue, include_allocating_expr: T::Boolean).returns(T::Boolean) }
   private_class_method def self.ownership_transferring_expr?(expr, include_allocating_expr:)
     value = unwrap_value(expr)
-    value = unwrap_value(value.left) if value.is_a?(AST::BinaryOp) && value.op == :OR_RESCUE
+    value = unwrap_value(value.left) if value.is_a?(AST::BinaryOp) && value.op == :OR_ELSE
     return true if value.is_a?(AST::CopyNode) || value.is_a?(AST::CloneNode)
     return true if value.is_a?(AST::Locatable) && expr_has_heap_identifier?(value)
     return true if include_allocating_expr && value.is_a?(AST::Locatable) && string_concat_expr?(value)
@@ -1127,7 +1127,7 @@ module EscapeAnalysis
   sig { params(expr: AST::Node).returns(T::Boolean) }
   private_class_method def self.returned_call_result?(expr)
     node = unwrap_value(expr)
-    node = unwrap_value(node.left) if node.is_a?(AST::BinaryOp) && node.op == :OR_RESCUE
+    node = unwrap_value(node.left) if node.is_a?(AST::BinaryOp) && node.op == :OR_ELSE
     !!(node.is_a?(AST::Locatable) && AST.call?(node))
   end
 
@@ -1191,7 +1191,7 @@ module EscapeAnalysis
   sig { params(value: AST::Node, fn_nodes: FnNodes, schema_lookup: T.nilable(Proc), facts_by_name: T::Hash[String, FunctionFacts]).returns(T::Boolean) }
   private_class_method def self.call_result_is_heap?(value, fn_nodes, schema_lookup, facts_by_name: {})
     call = unwrap_value(value)
-    call = unwrap_value(call.left) if call.is_a?(AST::BinaryOp) && call.op == :OR_RESCUE
+    call = unwrap_value(call.left) if call.is_a?(AST::BinaryOp) && call.op == :OR_ELSE
     return false unless call.is_a?(AST::Locatable) && AST.call?(call)
     call = T.cast(call, T.any(AST::FuncCall, AST::MethodCall))
     callee = fn_nodes[call.name.to_s]
@@ -1253,7 +1253,7 @@ module EscapeAnalysis
   sig { params(expr: NodeValue).returns(T::Boolean) }
   private_class_method def self.expr_produces_heap?(expr)
     node = unwrap_value(expr)
-    node = unwrap_value(node.left) if node.is_a?(AST::BinaryOp) && node.op == :OR_RESCUE
+    node = unwrap_value(node.left) if node.is_a?(AST::BinaryOp) && node.op == :OR_ELSE
     return false if T.unsafe(node).respond_to?(:storage) && [:rodata, :borrow].include?(T.unsafe(node).storage)
     return false if T.unsafe(node).respond_to?(:rodata_provenance?) && T.unsafe(node).rodata_provenance?
     return false if T.unsafe(node).respond_to?(:borrow_provenance?) && T.unsafe(node).borrow_provenance?

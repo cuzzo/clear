@@ -6,7 +6,7 @@ require "fileutils"
 # Deterministic OOM fault injection (runtime.zig __oom_failing, gated
 # by CLEAR_OOM_AFTER). Validates the FAULT model end-to-end:
 #   - unhandled alloc fault PANICS with [System/OutOfMemory] (step 5),
-#   - the SAME allocating call under `OR PASS` RECOVERS (no crash),
+#   - the SAME allocating call under `OR_ELSE PASS` RECOVERS (no crash),
 #   - zero behavior change when the env var is unset.
 # Not a fuzz cell: fuzz cannot force allocator state. This is the
 # deterministic VOPR-style fault test CLAUDE.md requires for faults.
@@ -63,25 +63,25 @@ RSpec.describe "OOM fault injection (alloc-as-FAULT model)", :integration do
       END
     CLEAR
     # Low index: the fault lands early (a runtime/user alloc) with no
-    # OR/CATCH in scope -> must abort with the fault diagnostic.
+    # OR_ELSE/CATCH in scope -> must abort with the fault diagnostic.
     out, status = run(bin, env: "CLEAR_OOM_AFTER=3")
     expect(status).not_to eq(0)
     expect(out).to match(/out of memory \[System\/OutOfMemory\]/)
   end
 
-  it "the SAME call under `OR PASS` recovers the fault (no crash)" do
+  it "the SAME call under `OR_ELSE PASS` recovers the fault (no crash)" do
     # Large alloc loop so the injected fault (past runtime startup)
-    # lands inside grow(), which is guarded by `OR PASS` at the call.
+    # lands inside grow(), which is guarded by `OR_ELSE PASS` at the call.
     bin = build(GROW + <<~CLEAR)
       FN main() RETURNS Void ->
-        k = grow(100000_i64) OR PASS;
-        print("survived OOM via OR PASS\\n");
+        k = grow(100000_i64) OR_ELSE PASS;
+        print("survived OOM via OR_ELSE PASS\\n");
         RETURN;
       END
     CLEAR
     out, status = run(bin, env: "CLEAR_OOM_AFTER=200")
     expect(status).to eq(0)
-    expect(out).to include("survived OOM via OR PASS")
+    expect(out).to include("survived OOM via OR_ELSE PASS")
     expect(out).not_to match(/System\/OutOfMemory/)
   end
 end

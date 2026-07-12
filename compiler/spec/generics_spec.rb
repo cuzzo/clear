@@ -711,7 +711,7 @@ RSpec.describe SemanticAnnotator do
           END
           FN main() RETURNS !Void ->
             b = Box{ value: 1 } @shared:locked;
-            got = copyOut(b) OR EXIT;
+            got = copyOut(b) OR_ELSE EXIT;
             RETURN;
           END
         CLEAR

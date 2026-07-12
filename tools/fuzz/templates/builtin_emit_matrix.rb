@@ -30,7 +30,7 @@ FuzzGenerator.register(:builtin_emit_matrix, cells: BUILTIN_EMIT_CELLS) do |p|
   when :string_contains
     %(FN main() RETURNS Void ->\n    s: String = COPY "abcd";\n    ASSERT s.contains?("bc"), "string contains";\n    RETURN;\nEND\n)
   when :string_char_at
-    %(FN main() RETURNS Void ->\n    s: String = COPY "abcd";\n    c = s.charAt(1_i64) OR RAISE;\n    ASSERT c == "b", "string charAt";\n    RETURN;\nEND\n)
+    %(FN main() RETURNS Void ->\n    s: String = COPY "abcd";\n    c = s.charAt(1_i64) OR_ELSE RAISE;\n    ASSERT c == "b", "string charAt";\n    RETURN;\nEND\n)
   when :string_split
     %(FN main() RETURNS Void ->\n    parts = (COPY "a bb ccc").split(" ");\n    ASSERT parts.length() == 3_i64, "string split";\n    RETURN;\nEND\n)
   when :int_to_string

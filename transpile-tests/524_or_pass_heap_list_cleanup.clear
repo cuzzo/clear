@@ -1,5 +1,5 @@
 # Regression: a heap-owned @list returned from a fallible function through
-# OR PASS must be cleaned with the heap allocator in the receiving binding.
+# OR_ELSE PASS must be cleaned with the heap allocator in the receiving binding.
 FN inner() RETURNS !Int64[]@list ->
     MUTABLE v: Int64[]@list = [];
     v.append(1_i64);
@@ -7,12 +7,12 @@ FN inner() RETURNS !Int64[]@list ->
 END
 
 FN run() RETURNS !Void ->
-    result: Int64[]@list = inner() OR PASS;
-    ASSERT length(result) == 1_i64, "OR PASS returned list length";
+    result: Int64[]@list = inner() OR_ELSE PASS;
+    ASSERT length(result) == 1_i64, "OR_ELSE PASS returned list length";
     RETURN;
 END
 
 FN main() RETURNS Void ->
-    run() OR PASS;
+    run() OR_ELSE PASS;
     RETURN;
 END

@@ -155,7 +155,7 @@ end
 FuzzGenerator.register(:polymorphic_sync_admission, cells: POLYMORPHIC_ADMISSION_CELLS) do |p|
   callee_def = admission_callee_def(p[:callee])
   caller_decl = admission_caller_decl(p[:caller])
-  call = %i[shared_param req_locked req_versioned].include?(p[:callee]) ? "tick!(c) OR RAISE" : "tick!(c)"
+  call = %i[shared_param req_locked req_versioned].include?(p[:callee]) ? "tick!(c) OR_ELSE RAISE" : "tick!(c)"
 
   <<~CHT
     STRUCT Counter { value: Int64 }

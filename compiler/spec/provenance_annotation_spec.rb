@@ -103,7 +103,7 @@ RSpec.describe "Provenance annotation" do
       ast, _ = annotate(<<~CLEAR)
         FN riskyOp(x: String) RETURNS !String -> RETURN "ok"; END
         FN handle(x: String) RETURNS !String ->
-            r = riskyOp(x) OR RAISE;
+            r = riskyOp(x) OR_ELSE RAISE;
             RETURN r;
         CATCH Transient
             RETURN "caught";

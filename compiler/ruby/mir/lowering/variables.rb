@@ -587,8 +587,8 @@ module MIRLoweringVariables
     end
 
     rhs = node.value
-    rhs_unwrapped = (rhs.is_a?(AST::BinaryOp) && rhs.op == :OR_RESCUE) ? rhs.left : rhs
-    if rhs.is_a?(AST::BinaryOp) && rhs.op == :OR_RESCUE
+    rhs_unwrapped = (rhs.is_a?(AST::BinaryOp) && rhs.op == :OR_ELSE) ? rhs.left : rhs
+    if rhs.is_a?(AST::BinaryOp) && rhs.op == :OR_ELSE
       placed = with_expected_type(ft) { lower(rhs) }
       return place_value_for_destination(placed, rhs, decl_alloc, ft)
     end

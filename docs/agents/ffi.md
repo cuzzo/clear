@@ -157,7 +157,7 @@ EXTERN FN parseFromSliceLeaky<T>(comptime: T, content: String, options: ParseOpt
     RETURNS !T EFFECTS :alloc:heap FROM "std.json";
 
 -- Usage: T is resolved to JsonRecord at compile time
-record = parseFromSliceLeaky(JsonRecord, content, ParseOptions{}) OR RAISE;
+record = parseFromSliceLeaky(JsonRecord, content, ParseOptions{}) OR_ELSE RAISE;
 ```
 
 ## Method Calls on EXTERN Structs

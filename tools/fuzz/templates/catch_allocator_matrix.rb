@@ -1,8 +1,8 @@
-# Template: catch / OR-rescue allocator-identity matrix (the P0).
+# Template: catch / OR_ELSE-rescue allocator-identity matrix (the P0).
 #
 # Targets src/mir/mir_lowering.rb#infer_catch_value_allocator (12/12
 # dark -- invariant #9: error paths must preserve allocator identity)
-# + #lower_or_rescue. The decision is: when `v = mayFail() OR fallback`,
+# + #lower_or_else. The decision is: when `v = mayFail() OR_ELSE fallback`,
 # the success value and the fallback value may have DIFFERENT
 # allocators (heap COPY vs frame literal vs primitive). If lowering
 # binds one allocator on success and a different one on the error path,
@@ -110,7 +110,7 @@ FuzzGenerator.register(:catch_allocator_matrix, cells: CAM_CELLS) do |p|
     #{cam_inner(p[:value])}
 
     FN main() RETURNS Void ->
-    #{setup_line}    r = maybe(#{cam_call_arg(p[:taken])}) OR #{cam_fallback_expr(p[:value], p[:fallback])};
+    #{setup_line}    r = maybe(#{cam_call_arg(p[:taken])}) OR_ELSE #{cam_fallback_expr(p[:value], p[:fallback])};
         #{cam_assert(p[:value], p[:taken])}
         RETURN;
     END

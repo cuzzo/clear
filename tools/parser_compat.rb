@@ -254,7 +254,7 @@ module ParserCompat
   def clear_harness_source(cases)
     parser_path = File.join(LexerHarnessSupport::ROOT, 'compiler', 'src', 'ast', 'parser.clear')
     calls = cases.each_with_index.map do |entry, index|
-      "  dumpCase!(#{LexerHarnessSupport.clear_string_expr(entry['source'])}, #{index}, #{LexerHarnessSupport.clear_string_expr(entry['name'])}) OR RAISE;"
+      "  dumpCase!(#{LexerHarnessSupport.clear_string_expr(entry['source'])}, #{index}, #{LexerHarnessSupport.clear_string_expr(entry['name'])}) OR_ELSE RAISE;"
     end.join("\n")
 
     <<~CLEAR
@@ -391,7 +391,7 @@ module ParserCompat
       END
 
       PRIVATE FN dumpCase!(source: String@raw, index: Int64, name: String) RETURNS !Void ->
-        tokens = tokenizeSource!(source) OR RAISE;
+        tokens = tokenizeSource!(source) OR_ELSE RAISE;
         MUTABLE parser = clearParser__new(tokens, source);
         program = parse(parser);
         IF program == NIL THEN

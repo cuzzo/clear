@@ -143,13 +143,13 @@ END
 
 FN main() RETURNS Void ->
   print("--- correct: NEXT before lock ---");
-  correct_next_before_lock() OR RAISE;
+  correct_next_before_lock() OR_ELSE RAISE;
 
   print("--- correct: no re-entrancy ---");
-  correct_no_reentrant() OR RAISE;
+  correct_no_reentrant() OR_ELSE RAISE;
 
   print("--- correct: sequential locks ---");
-  sequential_transfer() OR RAISE;
+  sequential_transfer() OR_ELSE RAISE;
 END
 
 # Summary:

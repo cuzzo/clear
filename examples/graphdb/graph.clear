@@ -25,7 +25,7 @@ END
 
 # Add a directed edge from -> to with a weight.
 FN addEdge!(MUTABLE nodes: HashMap<Node>, from: String, to: String, weight: Float64) RETURNS !Void ->
-  node = nodes[from] OR Node{ label: "", edges: [] };
+  node = nodes[from] OR_ELSE Node{ label: "", edges: [] };
   # Build new edges list (workaround: COPY on list-from-struct is broken)
   MUTABLE edges: Edge[]@list = [];
   FOR i IN (0 ..< node.edges.length()) DO
@@ -40,11 +40,11 @@ END
 
 # Get neighbor labels for a given node.
 FN neighbors!(nodes: HashMap<Node>, id: String) RETURNS !String[]@list ->
-  node = nodes[id] OR Node{ label: "", edges: [] };
+  node = nodes[id] OR_ELSE Node{ label: "", edges: [] };
   MUTABLE result: String[]@list = [];
   FOR i IN (0 ..< node.edges.length()) DO
     IF node.edges[i] AS edge THEN
-      targetNode = nodes[edge.target] OR Node{ label: "?", edges: [] };
+      targetNode = nodes[edge.target] OR_ELSE Node{ label: "?", edges: [] };
       result.append(COPY targetNode.label);
     END
   END
@@ -53,13 +53,13 @@ END
 
 # Get the label of a node by ID.
 FN getLabel(nodes: HashMap<Node>, id: String) RETURNS !String ->
-  node = nodes[id] OR Node{ label: "", edges: [] };
+  node = nodes[id] OR_ELSE Node{ label: "", edges: [] };
   RETURN node.label;
 END
 
 # Check if a node exists.
 FN hasNode(nodes: HashMap<Node>, id: String) RETURNS !Bool ->
-  node = nodes[id] OR Node{ label: "", edges: [] };
+  node = nodes[id] OR_ELSE Node{ label: "", edges: [] };
   RETURN node.label != "";
 END
 
@@ -93,14 +93,14 @@ FN shortestPath!(nodes: HashMap<Node>, source: String, target: String) RETURNS !
   MUTABLE iters = 0;
   WHILE iters < 20 && head < queue.length() && found == FALSE DO
     iters = iters + 1;
-    current = COPY (queue[head] OR "");
+    current = COPY (queue[head] OR_ELSE "");
     head = head + 1;
 
-    bfsNode = nodes[current] OR Node{ label: "", edges: [] };
+    bfsNode = nodes[current] OR_ELSE Node{ label: "", edges: [] };
     FOR i IN (0 ..< bfsNode.edges.length()) DO
       IF bfsNode.edges[i] AS edge THEN
         neighbor = COPY edge.target;
-        alreadyVisited = visited[neighbor] OR "";
+        alreadyVisited = visited[neighbor] OR_ELSE "";
         IF alreadyVisited == "" THEN
           visited[neighbor] = "1";
           parent[neighbor] = COPY current;
@@ -123,7 +123,7 @@ FN shortestPath!(nodes: HashMap<Node>, source: String, target: String) RETURNS !
   MUTABLE path: String[]@list = [];
   MUTABLE cur = COPY target;
   WHILE cur != source DO
-    nextCur = parent[cur] OR "";
+    nextCur = parent[cur] OR_ELSE "";
     path.append(COPY cur);
     cur = COPY nextCur;
   END
@@ -149,7 +149,7 @@ FN dfs!(nodes: HashMap<Node>, start: String) RETURNS !String[]@list ->
   WHILE iters < 100 && stack.any?() DO
     iters = iters + 1;
     # Pop from end of stack
-    top = COPY (stack[stack.length() - 1] OR "");
+    top = COPY (stack[stack.length() - 1] OR_ELSE "");
     # Shrink stack by rebuilding without last element
     MUTABLE newStack: String[]@list = [];
     FOR si IN (0 ..< stack.length() - 1) DO
@@ -157,18 +157,18 @@ FN dfs!(nodes: HashMap<Node>, start: String) RETURNS !String[]@list ->
     END
     stack = newStack;
 
-    alreadySeen = visited[top] OR "";
+    alreadySeen = visited[top] OR_ELSE "";
     IF alreadySeen == "" THEN
       visited[top] = "1";
       result.append(COPY top);
 
       # Push neighbors in reverse order for consistent DFS ordering
-      dfsNode = nodes[top] OR Node{ label: "", edges: [] };
+      dfsNode = nodes[top] OR_ELSE Node{ label: "", edges: [] };
       FOR i IN (0 ..< dfsNode.edges.length()) DO
         idx = dfsNode.edges.length() - 1 - i;
         IF dfsNode.edges[idx] AS edge THEN
           neighbor = COPY edge.target;
-          neighborSeen = visited[neighbor] OR "";
+          neighborSeen = visited[neighbor] OR_ELSE "";
           IF neighborSeen == "" THEN
             stack.append(COPY neighbor);
           END

@@ -52,8 +52,8 @@ FN handleClient!(client: TCPClient) RETURNS !Void ->
           END
           idStr = rest.substr(0, colonPos);
           nStr = rest.substr(colonPos + 1, rest.length() - colonPos - 1);
-          MUTABLE id = (idStr.toNumber() OR 0.0).toInt();
-          MUTABLE n = (nStr.toNumber() OR 0.0).toInt();
+          MUTABLE id = (idStr.toNumber() OR_ELSE 0.0).toInt();
+          MUTABLE n = (nStr.toNumber() OR_ELSE 0.0).toInt();
           IF n < 1 THEN
             n = 1;
           END

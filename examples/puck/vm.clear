@@ -123,7 +123,7 @@ STRUCT Program {
 # ---------------------------------------------------------------------------
 
 FN parseInt(s: String) RETURNS Int64 ->
-  RETURN (s.toNumber() OR 0.0).toInt();
+  RETURN (s.toNumber() OR_ELSE 0.0).toInt();
 END
 
 FN tailAfterFirstSpace(line: String) RETURNS !String ->
@@ -146,23 +146,23 @@ FN firstToken(line: String) RETURNS !String ->
 END
 
 FN loadProgram(path: String) RETURNS !Program ->
-  raw = readFile(path) OR RAISE;
+  raw = readFile(path) OR_ELSE RAISE;
   lines = raw.split("\n");
 
   IF lines.length() < 4 THEN RAISE "vm: truncated puckc"; END
   IF lines[0] != "PUCKC 1" THEN RAISE "vm: not a puckc file"; END
 
-  # Workaround for puck-clear-bugs.md #1: bind the OR-defaulted expression
+  # Workaround for puck-clear-bugs.md #1: bind the OR_ELSE-defaulted expression
   # to a named local so the lifted temp lands in the right scope.
-  stringsTok = firstToken(lines[1]) OR "";
+  stringsTok = firstToken(lines[1]) OR_ELSE "";
   IF stringsTok != "STRINGS" THEN RAISE "vm: missing STRINGS header"; END
-  stringsTail = tailAfterFirstSpace(lines[1]) OR "";
+  stringsTail = tailAfterFirstSpace(lines[1]) OR_ELSE "";
   stringCount = parseInt(stringsTail);
   MUTABLE pos: Int64 = 2 + stringCount;
 
-  procsTok = firstToken(lines[pos]) OR "";
+  procsTok = firstToken(lines[pos]) OR_ELSE "";
   IF procsTok != "PROCS" THEN RAISE "vm: missing PROCS header"; END
-  procsTail = tailAfterFirstSpace(lines[pos]) OR "";
+  procsTail = tailAfterFirstSpace(lines[pos]) OR_ELSE "";
   procCount = parseInt(procsTail);
   pos += 1;
 
@@ -190,9 +190,9 @@ FN loadProgram(path: String) RETURNS !Program ->
     opStart = allOps.length();
     MUTABLE i = 0;
     WHILE i < codesLen DO
-      head = firstToken(lines[pos]) OR "";
-      tail = tailAfterFirstSpace(lines[pos]) OR "";
-      opcode = parseOpName(head) OR RAISE;
+      head = firstToken(lines[pos]) OR_ELSE "";
+      tail = tailAfterFirstSpace(lines[pos]) OR_ELSE "";
+      opcode = parseOpName(head) OR_ELSE RAISE;
       argInt = 0;
       kind = kNone();
       IF opcode == opMath() || opcode == opCompare() THEN
@@ -251,7 +251,7 @@ FN handleSyscall!(
     startMs: Int64
 ) RETURNS !Void ->
   IF id == 1 THEN
-    v = stack.pop() OR 0_i64;
+    v = stack.pop() OR_ELSE 0_i64;
     print("OUTPUT: " + v.toString());
     RETURN;
   END
@@ -261,7 +261,7 @@ FN handleSyscall!(
     RETURN;
   END
   IF id == 9 THEN
-    v = stack.pop() OR 0_i64;
+    v = stack.pop() OR_ELSE 0_i64;
     RAISE "halt(" + v.toString() + ")";
   END
   RAISE "vm.clear: SYSCALL " + id.toString() + " not implemented";
@@ -274,38 +274,38 @@ FN runProc!(
     startMs: Int64
 ) RETURNS !Int64 EFFECTS REENTRANT ->
 
-  proc = program.procs[procIdx] OR Procedure{ params: 0_i64, opStart: 0_i64, opCount: 0_i64 };
+  proc = program.procs[procIdx] OR_ELSE Procedure{ params: 0_i64, opStart: 0_i64, opCount: 0_i64 };
   MUTABLE stack: Int64[]@list = [];
   MUTABLE ip: Int64 = 0;
 
   WHILE ip < proc.opCount DO
-    c = program.allOps[proc.opStart + ip] OR ByteCode{ op: opReturn(), arg: 0_i64, kind: kNone() };
+    c = program.allOps[proc.opStart + ip] OR_ELSE ByteCode{ op: opReturn(), arg: 0_i64, kind: kNone() };
     ip += 1;
 
     IF c.op == opPush() THEN
       stack.append(c.arg);
     ELSE_IF c.op == opLoad() THEN
       WHILE memory.length() <= c.arg DO memory.append(0_i64); END
-      stack.append(memory[c.arg] OR 0_i64);
+      stack.append(memory[c.arg] OR_ELSE 0_i64);
     ELSE_IF c.op == opStore() THEN
-      v = stack.pop() OR 0_i64;
+      v = stack.pop() OR_ELSE 0_i64;
       WHILE memory.length() <= c.arg DO memory.append(0_i64); END
       memory[c.arg] = v;
     ELSE_IF c.op == opMath() THEN
-      b = stack.pop() OR 0_i64;
-      a = stack.pop() OR 0_i64;
+      b = stack.pop() OR_ELSE 0_i64;
+      a = stack.pop() OR_ELSE 0_i64;
       stack.append(doMath(c.kind, a, b));
     ELSE_IF c.op == opCompare() THEN
-      b = stack.pop() OR 0_i64;
-      a = stack.pop() OR 0_i64;
+      b = stack.pop() OR_ELSE 0_i64;
+      a = stack.pop() OR_ELSE 0_i64;
       stack.append(doCompare(c.kind, a, b));
     ELSE_IF c.op == opJump() THEN
       ip = c.arg;
     ELSE_IF c.op == opJumpIfFalse() THEN
-      v = stack.pop() OR 0_i64;
+      v = stack.pop() OR_ELSE 0_i64;
       IF v == 0 THEN ip = c.arg; END
     ELSE_IF c.op == opCall() THEN
-      callee = program.procs[c.arg] OR Procedure{ params: 0_i64, opStart: 0_i64, opCount: 0_i64 };
+      callee = program.procs[c.arg] OR_ELSE Procedure{ params: 0_i64, opStart: 0_i64, opCount: 0_i64 };
       MUTABLE calleeMem: Int64[]@list = [];
       MUTABLE m = 0;
       WHILE m < callee.params DO
@@ -314,15 +314,15 @@ FN runProc!(
       END
       MUTABLE j: Int64 = callee.params - 1;
       WHILE j >= 0 DO
-        calleeMem[j] = stack.pop() OR 0_i64;
+        calleeMem[j] = stack.pop() OR_ELSE 0_i64;
         j -= 1;
       END
-      res = runProc!(program, c.arg, calleeMem, startMs) OR RAISE;
+      res = runProc!(program, c.arg, calleeMem, startMs) OR_ELSE RAISE;
       stack.append(res);
     ELSE_IF c.op == opReturn() THEN
-      RETURN stack.pop() OR 0_i64;
+      RETURN stack.pop() OR_ELSE 0_i64;
     ELSE_IF c.op == opSyscall() THEN
-      handleSyscall!(stack, c.arg, startMs) OR RAISE;
+      handleSyscall!(stack, c.arg, startMs) OR_ELSE RAISE;
     ELSE
       RAISE "vm: op " + c.op.toString() + " not supported by vm.clear (use v10 or v11)";
     END
@@ -352,13 +352,13 @@ FN main() RETURNS !Void ->
   startMs = timestampMs();
 
   IF program.procs.length() <= 0 THEN RAISE "vm: program has no procs"; END
-  mainProc = program.procs[0] OR Procedure{ params: 0_i64, opStart: 0_i64, opCount: 0_i64 };
+  mainProc = program.procs[0] OR_ELSE Procedure{ params: 0_i64, opStart: 0_i64, opCount: 0_i64 };
   MUTABLE mainMem: Int64[]@list = [];
   MUTABLE i = 0;
   WHILE i < mainProc.params DO
     mainMem.append(0_i64);
     i += 1;
   END
-  runProc!(program, 0, mainMem, startMs) OR RAISE;
+  runProc!(program, 0, mainMem, startMs) OR_ELSE RAISE;
   RETURN;
 END

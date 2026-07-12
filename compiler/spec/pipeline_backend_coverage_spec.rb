@@ -790,7 +790,7 @@ RSpec.describe "pipeline backend coverage" do
       expect(concurrent_call(list, AST::MinOp.new(tok, id("_")))).to eq(:bc_min)
       expect(concurrent_call(list, AST::MaxOp.new(tok, id("_")))).to eq(:bc_max)
       expect(concurrent_call(list, AST::AverageOp.new(tok, id("_")))).to eq(:bc_average)
-      prune_expr = AST::BinaryOp.new(tok, id("_"), :OR_RESCUE, AST::OrPrune.new(tok))
+      prune_expr = AST::BinaryOp.new(tok, id("_"), :OR_ELSE, AST::OrElsePrune.new(tok))
       expect(concurrent_call(list, AST::SelectOp.new(tok, prune_expr))).to eq(:bc_select_prune)
       expect(concurrent_call(list, AST::WhereOp.new(tok, prune_expr))).to eq(:bc_where_prune)
       concurrent_host.bc_target = false
@@ -876,7 +876,7 @@ RSpec.describe "pipeline backend coverage" do
       expect(shard_plan.shard_context).to be_a(AST::PipelineShardContext)
 
       concurrent_host.bc_target = true
-      prune_expr = AST::BinaryOp.new(tok, id("_"), :OR_RESCUE, AST::OrPrune.new(tok))
+      prune_expr = AST::BinaryOp.new(tok, id("_"), :OR_ELSE, AST::OrElsePrune.new(tok))
       bc = AST::ConcurrentOp.new(tok, AST::SelectOp.new(tok, prune_expr), {})
       typed(bc, Type.new(:"Int64[]"))
       bind = AST::BinaryOp.new(tok, list, :BIND_VAR, id("$u"))
@@ -941,7 +941,7 @@ RSpec.describe "pipeline backend coverage" do
         concurrent_call(list, AST::ReduceOp.new(tok, lit(0), id("_")))
       }.to raise_error(/unsupported inner op/)
 
-      raise_expr = AST::BinaryOp.new(tok, id("_"), :OR_RESCUE, AST::OrRaise.new(tok))
+      raise_expr = AST::BinaryOp.new(tok, id("_"), :OR_ELSE, AST::OrElseRaise.new(tok))
       expect(concurrent_lowerer.send(:bc_error_policy, raise_expr).policy).to eq(:raise)
       concurrent_host.bc_target = false
 

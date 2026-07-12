@@ -92,7 +92,7 @@ RSpec.describe "optional @list indexing" do
         items.append(Item{ name: 1_i64 });
         items[0]?.name = 7_i64;
         items[9]?.name = 99_i64;
-        ASSERT (items[0]?.name OR 0_i64) == 7_i64;
+        ASSERT (items[0]?.name OR_ELSE 0_i64) == 7_i64;
       END
     CLEAR
 
@@ -109,7 +109,7 @@ RSpec.describe "optional @list indexing" do
       FN main() RETURNS Void ->
         MUTABLE parent = Parent{ child: Child{ value: 1_i64 } };
         parent.child?.value = 8_i64;
-        ASSERT (parent.child?.value OR 0_i64) == 8_i64;
+        ASSERT (parent.child?.value OR_ELSE 0_i64) == 8_i64;
       END
     CLEAR
 
@@ -123,7 +123,7 @@ RSpec.describe "optional @list indexing" do
       FN main() RETURNS Void ->
         MUTABLE items: Item[]@list = [];
         items.append(Item{ name: COPY "abc" });
-        size = items[0]?.name.length() OR 0_i64;
+        size = items[0]?.name.length() OR_ELSE 0_i64;
         ASSERT size == 3_i64;
       END
     CLEAR

@@ -425,15 +425,15 @@ RSpec.describe MIREmitter do
   end
 
   # =========================================================================
-  # Phase 5: OR_RESCUE comparison
+  # Phase 5: OR_ELSE comparison
   # =========================================================================
 
-  describe "OR_RESCUE error chain comparison" do
+  describe "OR_ELSE error chain comparison" do
     it "lowers optional orelse correctly" do
       src = <<~CLEAR
         FN main() RETURNS Void ->
           items = [1, 2, 3];
-          first = items[0] OR 0;
+          first = items[0] OR_ELSE 0;
           RETURN;
         END
       CLEAR

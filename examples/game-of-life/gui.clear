@@ -18,7 +18,7 @@ FN bounds(cells: Cell[]@list) RETURNS !Cell[]@list ->
     RETURN result;
   END
 
-  first = cells[0] OR Cell{ x: 0_i64, y: 0_i64 };
+  first = cells[0] OR_ELSE Cell{ x: 0_i64, y: 0_i64 };
   MUTABLE minX = first.x;
   MUTABLE maxX = first.x;
   MUTABLE minY = first.y;
@@ -42,8 +42,8 @@ END
 FN graph(cells: Cell[]@list) RETURNS !String[]@list ->
   live = liveCellMap(cells);
   b = bounds(cells);
-  min = b[0] OR Cell{ x: 0_i64, y: 0_i64 };
-  max = b[1] OR Cell{ x: 0_i64, y: 0_i64 };
+  min = b[0] OR_ELSE Cell{ x: 0_i64, y: 0_i64 };
+  max = b[1] OR_ELSE Cell{ x: 0_i64, y: 0_i64 };
   MUTABLE rows: String[]@list = [];
 
   MUTABLE x = min.x - 1;
@@ -52,7 +52,7 @@ FN graph(cells: Cell[]@list) RETURNS !String[]@list ->
     MUTABLE y = min.y - 1;
     WHILE y <= max.y + 1 DO
       key = cellKey(Cell{ x: x, y: y });
-      IF (live[key] OR 0) == 1 THEN
+      IF (live[key] OR_ELSE 0) == 1 THEN
         row = row + "X";
       ELSE
         row = row + "O";
@@ -68,14 +68,14 @@ END
 
 FN render(cells: Cell[]@list) RETURNS !Void ->
   b = bounds(cells);
-  min = b[0] OR Cell{ x: 0_i64, y: 0_i64 };
-  max = b[1] OR Cell{ x: 0_i64, y: 0_i64 };
+  min = b[0] OR_ELSE Cell{ x: 0_i64, y: 0_i64 };
+  max = b[1] OR_ELSE Cell{ x: 0_i64, y: 0_i64 };
   print("---GENERATION---");
   print("(${min.x.toString()},${min.y.toString()}) (${max.x.toString()},${max.y.toString()})");
   rows = graph(cells);
   MUTABLE i = 0;
   WHILE i < rows.length() DO
-    print(rows[i] OR "");
+    print(rows[i] OR_ELSE "");
     i += 1;
   END
   RETURN;

@@ -6,11 +6,11 @@ FN inner() RETURNS !String ->
 END
 
 FN main() RETURNS Void ->
-    run() OR PASS;
+    run() OR_ELSE PASS;
     RETURN;
 END
 
 FN run() RETURNS !Void ->
-    result: String = inner() OR "";
+    result: String = inner() OR_ELSE "";
     RETURN;
 END

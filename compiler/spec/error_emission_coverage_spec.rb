@@ -630,8 +630,8 @@ RSpec.describe "error emission coverage" do
   end
 
   # @example_for: DUPLICATE_SYNC_CAP
-  # @fix: A type's sync axis takes one capability — pick @locked OR
-  # @fix: @writeLocked OR @atomic OR @versioned, not multiple. The
+  # @fix: A type's sync axis takes one capability — pick @locked OR_ELSE
+  # @fix: @writeLocked OR_ELSE @atomic OR_ELSE @versioned, not multiple. The
   # @fix: capability chain `@a:b` is only for combining different
   # @fix: axes (e.g. @shared:locked = ownership + sync).
   describe ":DUPLICATE_SYNC_CAP — two sync capabilities on one type" do
@@ -1441,7 +1441,7 @@ RSpec.describe "error emission coverage" do
             p = Pair{a: v, b: Value.Nil};
             RETURN;
         END
-        FN main() RETURNS Void -> f!(Value.Nil) OR PASS; END
+        FN main() RETURNS Void -> f!(Value.Nil) OR_ELSE PASS; END
       CLEAR
     end
   end
@@ -1572,7 +1572,7 @@ RSpec.describe "error emission coverage" do
             keep = v;
             RETURN;
         END
-        FN main() RETURNS Void -> store!(Value.Nil) OR PASS; END
+        FN main() RETURNS Void -> store!(Value.Nil) OR_ELSE PASS; END
       CLEAR
     end
   end
@@ -2244,7 +2244,7 @@ RSpec.describe "error emission coverage" do
             RETURN greeting + ", " + name;
         END
         FN main() RETURNS Void ->
-            s = greet!("Alice") OR "Hi";
+            s = greet!("Alice") OR_ELSE "Hi";
             print(s);
         END
       CLEAR
@@ -2654,7 +2654,7 @@ RSpec.describe "error emission coverage" do
   # :type — Optional / error union bucket (Type Bucket 4).
   #
   # Note: 4 codes deferred. MODIFIER_NEEDS_ERROR_UNION fires only
-  # inside CONCURRENT pipeline ops with `OR PRUNE` / `OR RAISE` on
+  # inside CONCURRENT pipeline ops with `OR_ELSE PRUNE` / `OR_ELSE RAISE` on
   # a non-fallible inner expression — niche shape. RETRY_ONLY_TRANSIENT
   # requires a WITH/EXCLUSIVE/Lock setup with an `ON ... RETRY(N)`
   # selector naming a non-Transient error type. ERROR_TYPE_RESERVED_BY_STDLIB
@@ -2752,28 +2752,28 @@ RSpec.describe "error emission coverage" do
   end
 
   # @example_for: TYPE_MISMATCH_IN_OR
-  # @fix: `expr OR alt` — when `expr` is `!T` or `?T`, the
+  # @fix: `expr OR_ELSE alt` — when `expr` is `!T` or `?T`, the
   # @fix: fallback `alt` must produce a value of type `T` (the
   # @fix: payload). Adjust `alt` to return T, or change the
   # @fix: function's declared return so they line up.
-  describe ":TYPE_MISMATCH_IN_OR — `expr OR alt` fallback type doesn't match payload" do
+  describe ":TYPE_MISMATCH_IN_OR — `expr OR_ELSE alt` fallback type doesn't match payload" do
     it "raises when a !Int64 is rescued with a String literal" do
       expect {
         run(<<~CLEAR)
           FN risky() RETURNS !Int64 -> RAISE Input, "bad"; RETURN 0; END
           FN main() RETURNS Void ->
-              n = risky() OR "fallback";
+              n = risky() OR_ELSE "fallback";
               _ = n;
           END
         CLEAR
-      }.to raise_error(CompilerError, /Type mismatch in OR: expected Int64/)
+      }.to raise_error(CompilerError, /Type mismatch in OR_ELSE: expected Int64/)
     end
 
     it "compiles when the fallback's type matches the payload" do
       run(<<~CLEAR)
         FN risky() RETURNS !Int64 -> RAISE Input, "bad"; RETURN 0; END
         FN main() RETURNS Void ->
-            n = risky() OR -1_i64;
+            n = risky() OR_ELSE -1_i64;
             print(n.toString());
         END
       CLEAR
@@ -2781,30 +2781,30 @@ RSpec.describe "error emission coverage" do
   end
 
   # @example_for: OR_BREAK_OUTSIDE_WHILE
-  # @fix: `expr OR BREAK` is a loop-control fallback — it only
+  # @fix: `expr OR_ELSE BREAK` is a loop-control fallback — it only
   # @fix: makes sense inside a WHILE body. Outside a loop, use
-  # @fix: `OR RAISE`, `OR <fallback-value>`, or wrap the call in
+  # @fix: `OR_ELSE RAISE`, `OR_ELSE <fallback-value>`, or wrap the call in
   # @fix: a CATCH block.
-  describe ":OR_BREAK_OUTSIDE_WHILE — `OR BREAK` outside a loop" do
-    it "raises when OR BREAK is used at top level" do
+  describe ":OR_BREAK_OUTSIDE_WHILE — `OR_ELSE BREAK` outside a loop" do
+    it "raises when OR_ELSE BREAK is used at top level" do
       expect {
         run(<<~CLEAR)
           FN risky() RETURNS !Int64 -> RAISE Input, "bad"; RETURN 0; END
           FN main() RETURNS Void ->
-              n = risky() OR BREAK;
+              n = risky() OR_ELSE BREAK;
               print(n.toString());
           END
         CLEAR
-      }.to raise_error(CompilerError, /OR BREAK can only be used inside a WHILE loop/)
+      }.to raise_error(CompilerError, /OR_ELSE BREAK can only be used inside a WHILE loop/)
     end
 
-    it "compiles when OR BREAK is inside a WHILE loop body" do
+    it "compiles when OR_ELSE BREAK is inside a WHILE loop body" do
       run(<<~CLEAR)
         FN risky() RETURNS !Int64 -> RAISE Input, "bad"; RETURN 0; END
         FN main() RETURNS Void ->
             MUTABLE i = 0_i64;
             WHILE i < 10_i64 DO
-                n = risky() OR BREAK;
+                n = risky() OR_ELSE BREAK;
                 print(n.toString());
                 i = i + 1_i64;
             END
@@ -2825,12 +2825,12 @@ RSpec.describe "error emission coverage" do
         run(<<~CLEAR)
           FN risky() RETURNS !Int64 -> RAISE Input, ParseErr, "bad"; RETURN 0; END
           FN safe() RETURNS !Int64 ->
-              n = risky() OR RAISE;
+              n = risky() OR_ELSE RAISE;
               RETURN n;
           CATCH Input WITH(NeverDeclared)
               RETURN -1;
           END
-          FN main() RETURNS Void -> _ = safe() OR PASS; END
+          FN main() RETURNS Void -> _ = safe() OR_ELSE PASS; END
         CLEAR
       }.to raise_error(CompilerError, /error type 'NeverDeclared' is not registered/)
     end
@@ -2839,7 +2839,7 @@ RSpec.describe "error emission coverage" do
       run(<<~CLEAR)
         FN risky() RETURNS !Int64 -> RAISE Input, ParseErr, "bad"; RETURN 0; END
         FN safe() RETURNS Int64 ->
-            n = risky() OR -1;
+            n = risky() OR_ELSE -1;
             RETURN n;
         CATCH Input WITH(ParseErr)
             RETURN -1;
@@ -2863,7 +2863,7 @@ RSpec.describe "error emission coverage" do
       expect {
         run(<<~CLEAR)
           FN risky() RETURNS !Int64 -> RAISE BrandNew, "first use"; RETURN 0; END
-          FN main() RETURNS Void -> _ = risky() OR PASS; END
+          FN main() RETURNS Void -> _ = risky() OR_ELSE PASS; END
         CLEAR
       }.to raise_error(CompilerError, /Error type 'BrandNew' is not registered/)
     end
@@ -2872,7 +2872,7 @@ RSpec.describe "error emission coverage" do
       run(<<~CLEAR)
         FN risky() RETURNS !Int64 -> RAISE Input, BrandNew, "first use"; RETURN 0; END
         FN main() RETURNS Void ->
-            n = risky() OR -1;
+            n = risky() OR_ELSE -1;
             print(n.toString());
         END
       CLEAR
@@ -4463,7 +4463,7 @@ RSpec.describe "error emission coverage" do
     it "compiles when the static call uses a known resource type" do
       run(<<~CLEAR)
         FN main() RETURNS !Void ->
-            f = File::open("/tmp/x") OR RAISE;
+            f = File::open("/tmp/x") OR_ELSE RAISE;
             print("opened");
             RETURN;
         END
@@ -4518,7 +4518,7 @@ RSpec.describe "error emission coverage" do
     it "compiles with a real static method on File" do
       run(<<~CLEAR)
         FN main() RETURNS !Void ->
-            f = File::open("/tmp/x") OR RAISE;
+            f = File::open("/tmp/x") OR_ELSE RAISE;
             print("opened");
             RETURN;
         END
@@ -4544,7 +4544,7 @@ RSpec.describe "error emission coverage" do
     it "compiles when File::open is called with one argument" do
       run(<<~CLEAR)
         FN main() RETURNS !Void ->
-            f = File::open("/tmp/x") OR RAISE;
+            f = File::open("/tmp/x") OR_ELSE RAISE;
             print("opened");
             RETURN;
         END
@@ -4571,7 +4571,7 @@ RSpec.describe "error emission coverage" do
     it "compiles when the argument type matches" do
       run(<<~CLEAR)
         FN main() RETURNS !Void ->
-            f = File::open("/tmp/x") OR RAISE;
+            f = File::open("/tmp/x") OR_ELSE RAISE;
             print("opened");
             RETURN;
         END
@@ -4611,7 +4611,7 @@ RSpec.describe "error emission coverage" do
             print(n.toString());
             RETURN;
         END
-        FN main() RETURNS Void -> takes!() OR PASS; END
+        FN main() RETURNS Void -> takes!() OR_ELSE PASS; END
       CLEAR
     end
   end
@@ -4662,7 +4662,7 @@ RSpec.describe "error emission coverage" do
             print(n.toString());
             RETURN;
         END
-        FN main() RETURNS Void -> takes!() OR PASS; END
+        FN main() RETURNS Void -> takes!() OR_ELSE PASS; END
       CLEAR
     end
   end
@@ -4678,7 +4678,7 @@ RSpec.describe "error emission coverage" do
         run(<<~CLEAR)
           FN factorial(n: Int64) RETURNS !Int64 EFFECTS REENTRANT ->
               IF n <= 1 THEN RETURN 1; END
-              inner = @thunk(64) factorial(n - 1) OR RAISE;
+              inner = @thunk(64) factorial(n - 1) OR_ELSE RAISE;
               RETURN n * inner;
           END
           FN main() RETURNS Void -> END

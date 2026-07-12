@@ -119,7 +119,7 @@ RSpec.describe "Lifetime escape audit matrix (M2.6)" do
   # ── Multi-source RETURN (the user-flagged partial-match case) ─
 
   describe "RETURN bg from a multi-source-tied BG" do
-    it "POS: `RETURNS (a, b):T` accepts when bg ties to a OR b" do
+    it "POS: `RETURNS (a, b):T` accepts when bg ties to a OR_ELSE b" do
       expect {
         annotate(<<~CLEAR)
           FN spawn(a: Int64, b: Int64) RETURNS (a, b):~Void

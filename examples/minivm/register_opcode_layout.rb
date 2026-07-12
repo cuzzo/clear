@@ -241,7 +241,7 @@ module MiniVM
         Opcode.new(name: :EFLAG,    code: 135, arity: 1, vm_name: "EFlag"),
         Opcode.new(name: :EMATCHN,  code: 136, arity: 2, vm_name: "EMatchN"),
         Opcode.new(name: :EMATCHM,  code: 137, arity: 2, vm_name: "EMatchM"),
-        # OR EXIT partial error-field override. mask bits: 1=kind
+        # OR_ELSE EXIT partial error-field override. mask bits: 1=kind
         # 2=name 4=msg 8=line; unset fields inherit the active error.
         Opcode.new(name: :EREWRITE, code: 138, arity: 5, vm_name: "ERewrite"),
         Opcode.new(name: :BGSPAWN, code: 139, arity: 3, vm_name: "BgSpawn"),

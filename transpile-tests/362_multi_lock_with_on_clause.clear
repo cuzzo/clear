@@ -43,33 +43,33 @@ FN main() RETURNS !Void ->
     MUTABLE b = Counter{ value: 2 } @shared:locked;
 
     # Both predicates hold: body runs, RETURN TRUE escapes WITH.
-    ok1 = bothPositive!(a, b) OR RAISE;
+    ok1 = bothPositive!(a, b) OR_ELSE RAISE;
     ASSERT ok1 == TRUE, "both-positive: predicates hold";
 
-    s1 = sumIfPositive!(a, b) OR RAISE;
+    s1 = sumIfPositive!(a, b) OR_ELSE RAISE;
     ASSERT s1 == 3, "both-positive: sum returned from inside WITH";
 
-    bumpBoth!(a, b) OR RAISE;
-    s2 = sumIfPositive!(a, b) OR RAISE;
+    bumpBoth!(a, b) OR_ELSE RAISE;
+    s2 = sumIfPositive!(a, b) OR_ELSE RAISE;
     ASSERT s2 == 5, "after bump: 2 + 3";
 
     # Drive one predicate false: ON GuardFail RETURN -1 fires.
     MUTABLE c = Counter{ value: 0 } @shared:locked;
-    s_neg = sumIfPositive!(a, c) OR RAISE;
+    s_neg = sumIfPositive!(a, c) OR_ELSE RAISE;
     ASSERT s_neg == -1_i64, "guard fail: ON-clause RETURN took over";
 
-    ok2 = bothPositive!(a, c) OR RAISE;
+    ok2 = bothPositive!(a, c) OR_ELSE RAISE;
     ASSERT ok2 == FALSE, "guard fail: bothPositive returned FALSE";
 
     # Same locks in reverse argument order also works (sorted-acquire is
     # by mutex address, not by declaration order).
-    s3 = sumIfPositive!(b, a) OR RAISE;
+    s3 = sumIfPositive!(b, a) OR_ELSE RAISE;
     ASSERT s3 == 5, "argument order swapped: still works";
 
     # Exercise the RETRY(N) path. No contention here, so the first
     # iteration of the acquire loop succeeds and the body runs.
-    bumpWithRetry!(a, b) OR RAISE;
-    s4 = sumIfPositive!(a, b) OR RAISE;
+    bumpWithRetry!(a, b) OR_ELSE RAISE;
+    s4 = sumIfPositive!(a, b) OR_ELSE RAISE;
     ASSERT s4 == 25, "after retry-bump: 12 + 13";
 
     RETURN;

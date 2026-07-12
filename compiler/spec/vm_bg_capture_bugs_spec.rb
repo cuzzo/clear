@@ -217,7 +217,7 @@ RSpec.describe "VM Phase 2 compiler bugs (see docs/agents/vm-bugs.md)", :integra
       FN main() RETURNS !Void ->
           MUTABLE arr: Int64[]@list = List[];
           arr.append(1_i64); arr.append(2_i64); arr.append(3_i64);
-          n: Int64 = runit(GIVE arr) OR RAISE;
+          n: Int64 = runit(GIVE arr) OR_ELSE RAISE;
           ASSERT n == 3, "@list-param + COPY captures into BG";
       END
     CHT

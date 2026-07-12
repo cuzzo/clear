@@ -285,7 +285,7 @@ def ownership_surface_escape_sink_cell(sink)
       FN main() RETURNS Void ->
           MUTABLE xs: HashMap<Int64> = {};
           xs["k"] = 7_i64;
-          ASSERT xs["k"] OR 0_i64 == 7_i64, "map put sink";
+          ASSERT xs["k"] OR_ELSE 0_i64 == 7_i64, "map put sink";
           RETURN;
       END
     CHT
@@ -415,7 +415,7 @@ def ownership_surface_contract_cell(contract)
           RETURN s;
       END
       FN main() RETURNS Void ->
-          maybe(TRUE) OR PASS;
+          maybe(TRUE) OR_ELSE PASS;
           s = maybe(FALSE);
           ASSERT s.length() > 0_i64, "error path allocator identity";
           RETURN;

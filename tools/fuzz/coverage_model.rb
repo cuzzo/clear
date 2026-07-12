@@ -137,7 +137,7 @@ module FuzzCoverageModel
       failure_proves: 'Owned values stored into list/set/map/pool and collection literals keep cleanup facts visible.'
     ),
     cond_or_fallback: profile(
-      failure_proves: 'OR fallback values inside conditions are hoisted before branch bodies read their temporaries.'
+      failure_proves: 'OR_ELSE fallback values inside conditions are hoisted before branch bodies read their temporaries.'
     ),
     cross_fiber_consumer: profile(
       failure_proves: 'Cross-fiber producer/consumer values remain owned and cleaned across fiber boundaries.'
@@ -155,7 +155,7 @@ module FuzzCoverageModel
       failure_proves: 'Fixed-shape destructuring declarations, assignments, mutable targets, and discards lower directly.'
     ),
     error_cleanup: profile(
-      failure_proves: 'Error paths clean or transfer owned values under OR PASS, RAISE, and DEFAULT.',
+      failure_proves: 'Error paths clean or transfer owned values under OR_ELSE PASS, RAISE, and DEFAULT.',
       high_risk: true
     ),
     escape_mechanism_matrix: profile(
@@ -174,7 +174,7 @@ module FuzzCoverageModel
       failure_proves: 'Extern boundary declarations and calls reject unsupported ownership/effect combinations.'
     ),
     fsm_edge_matrix: profile(
-      failure_proves: 'FSM splitting preserves ownership across OR fallback, nested suspension, streams, and locks.'
+      failure_proves: 'FSM splitting preserves ownership across OR_ELSE fallback, nested suspension, streams, and locks.'
     ),
     fsm_suspension_matrix: profile(
       failure_proves: 'FSM suspension/resume segments preserve owned suspend results, lock segments, and cleanup.',
@@ -261,11 +261,11 @@ module FuzzCoverageModel
       high_risk: true
     ),
     or_heap_destination_matrix: profile(
-      failure_proves: 'Owned OR/TryCatch/optional branch results are placed into destination allocators coherently.',
+      failure_proves: 'Owned OR_ELSE/TryCatch/optional branch results are placed into destination allocators coherently.',
       high_risk: true
     ),
     or_positional: profile(
-      failure_proves: 'OR actions in every syntactic position preserve cleanup and error-path ownership.',
+      failure_proves: 'OR_ELSE actions in every syntactic position preserve cleanup and error-path ownership.',
       high_risk: true
     ),
     owned_sink_destination_matrix: profile(

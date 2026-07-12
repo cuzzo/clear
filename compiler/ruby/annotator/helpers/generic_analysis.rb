@@ -663,7 +663,7 @@ module GenericAnalysis
     true
   end
 
-  # Walk through OR/OR_RESCUE to find the root container/struct variable name.
+  # Walk through OR/OR_ELSE to find the root container/struct variable name.
   # Returns the root variable name when the expression borrows from a container
   # (GetIndex on map/list) or extracts a non-Copy field from a struct (GetField).
   sig { params(expr: T.untyped).returns(T.nilable(String)) }
@@ -693,7 +693,7 @@ module GenericAnalysis
     if expr.is_a?(AST::GetField)
       return field_container_source(expr)
     end
-    if expr.is_a?(AST::BinaryOp) && (expr.op == :OR || expr.op == :OR_RESCUE)
+    if expr.is_a?(AST::BinaryOp) && (expr.op == :OR || expr.op == :OR_ELSE)
       return find_container_source(expr.left)
     end
     # pool[id]? parses as OptionalUnwrap(GetIndex) - peel through the unwrap.

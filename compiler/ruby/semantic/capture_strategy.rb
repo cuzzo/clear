@@ -294,6 +294,11 @@ module CaptureStrategy
   # topologies. All of these preserve the safe-sharing guarantee.
   sig { params(type: Type).returns(T::Boolean) }
   def self.safe_shared_across_fibers?(type)
+    # @indirect:atomic is a heap-pinned, internally ref-counted cell. Its
+    # pointer representation deliberately does not spell Arc in Zig, but a
+    # fiber capture must retain the cell exactly like an Arc capture.
+    return true if type.respond_to?(:atomic_ptr?) && type.atomic_ptr?
+
     zig = type.zig_type
     zig.start_with?("CheatLib.Arc(") || zig.start_with?("CheatLib.Rc(")
   end
@@ -317,6 +322,8 @@ module CaptureStrategy
   sig { params(type: Type).returns(String) }
   def self.field_zig_type(type)
     base = type.zig_type(is_field: true)
+    return base if type.respond_to?(:atomic_ptr?) && type.atomic_ptr?
+
     (type.respond_to?(:needs_pointer_passing?) && type.needs_pointer_passing?) ? "*#{base}" : base
   end
 

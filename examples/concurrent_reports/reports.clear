@@ -7,7 +7,7 @@
 #   - BG fiber captures (strings promoted to heap)
 #   - Struct returns with @list fields from BG fibers
 #   - Promise lists of structs (~Report[])
-#   - Error propagation through fibers (RAISE in fiber → OR at NEXT)
+#   - Error propagation through fibers (RAISE in fiber → OR_ELSE at NEXT)
 #
 # This is the highest-risk untested intersection in the compiler.
 
@@ -77,18 +77,18 @@ FN main() RETURNS Void ->
   # -------------------------------------------------------
   # Launch a fiber that will error (empty data).
   errFiber: ~Report = BG {@large ->
-    buildReportOrFail("bad", "") OR Report{ name: "fallback", itemCount: 0, total: 0 };
+    buildReportOrFail("bad", "") OR_ELSE Report{ name: "fallback", itemCount: 0, total: 0 };
   };
 
   errReport = NEXT errFiber;
-  ASSERT errReport.name == "fallback", "error fiber should use OR fallback";
+  ASSERT errReport.name == "fallback", "error fiber should use OR_ELSE fallback";
   ASSERT errReport.total == 0, "error fiber fallback total";
 
   # -------------------------------------------------------
   # Test 3: Mix of success and fallback fibers
   # -------------------------------------------------------
   ok: ~Report = BG {@large ->
-    buildReportOrFail("ok", "1,2,3") OR Report{ name: "err", itemCount: 0, total: 0 };
+    buildReportOrFail("ok", "1,2,3") OR_ELSE Report{ name: "err", itemCount: 0, total: 0 };
   };
 
   okReport = NEXT ok;

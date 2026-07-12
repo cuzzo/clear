@@ -1251,7 +1251,7 @@ module DiagnosticRegistry
       severity: :error, category: :type,
       template: "%{name} requires the expression to return an error union (!T), but got %{got}",
       summary:  "Pipeline modifier (`RAISE`, `RECOVER`, etc.) needs an error-union-typed input.",
-      cause: "Pipeline modifiers like `RAISE`, `RECOVER`, `OR EXIT`, `OR RAISE` operate on the error half of an error-union (`!T`). On a plain `T` they have nothing to dispatch on — there's no error case to handle. CLEAR rejects them at compile time so the user catches the misuse early.",
+      cause: "Pipeline modifiers like `RAISE`, `RECOVER`, `OR_ELSE EXIT`, `OR_ELSE RAISE` operate on the error half of an error-union (`!T`). On a plain `T` they have nothing to dispatch on — there's no error case to handle. CLEAR rejects them at compile time so the user catches the misuse early.",
       fix_hint: "Either remove the modifier (the value is already plain T), make the upstream call fallible so it returns `!T` (e.g. mark the called fn `RETURNS !U`), or wrap the value with an explicit RAISE if you want to inject a failure.",
     },
 
@@ -1754,27 +1754,27 @@ module DiagnosticRegistry
       fix_hint: "Replace `Auto` with a concrete type, or add enough typed use sites for inference to converge.",
     },
 
-    # OR / IF expression / unwrap
+    # OR_ELSE / IF expression / unwrap
     OR_BREAK_OUTSIDE_WHILE: {
       severity: :error, category: :type,
-      template: "OR BREAK can only be used inside a WHILE loop",
-      summary:  "`expr OR BREAK` is only valid inside a WHILE loop body.",
-      cause: "`OR BREAK` is sugar for \"if the expression yielded NIL or an error, break out of the surrounding loop.\" Outside any loop there's nothing to break out of — the keyword has no target.",
-      fix_hint: "Wrap the expression in a `WHILE` loop if iteration is what you want, OR use a different fallback (`OR EXIT`, `OR RAISE`, `OR <default>`) that has a defined meaning at the current scope.",
+      template: "OR_ELSE BREAK can only be used inside a WHILE loop",
+      summary:  "`expr OR_ELSE BREAK` is only valid inside a WHILE loop body.",
+      cause: "`OR_ELSE BREAK` is sugar for \"if the expression yielded NIL or an error, break out of the surrounding loop.\" Outside any loop there's nothing to break out of — the keyword has no target.",
+      fix_hint: "Wrap the expression in a `WHILE` loop if iteration is what you want, OR use a different fallback (`OR_ELSE EXIT`, `OR_ELSE RAISE`, `OR <default>`) that has a defined meaning at the current scope.",
     },
     TYPE_MISMATCH_IN_OR: {
       severity: :error, category: :type,
-      template: "Type mismatch in OR: expected %{expected}, got %{got}",
-      summary:  "Right-hand side of `OR` must match the optional/error-union's payload type.",
-      cause: "`expr OR fallback` substitutes the fallback when `expr` is NIL (optional case) or an error (error-union case). The fallback's type must match the payload type because both branches feed into the same downstream binding — without type alignment, the binding would have no determinable type.",
-      fix_hint: "Either change the fallback to produce a value of the expected payload type (e.g. `OR 0` when the payload is `Int64`), CAST it explicitly (`OR CAST(x AS PayloadT)`), or rewrite the LHS to widen its payload to a common type with the fallback.",
+      template: "Type mismatch in OR_ELSE: expected %{expected}, got %{got}",
+      summary:  "Right-hand side of `OR_ELSE` must match the optional/error-union's payload type.",
+      cause: "`expr OR_ELSE fallback` substitutes the fallback when `expr` is NIL (optional case) or an error (error-union case). The fallback's type must match the payload type because both branches feed into the same downstream binding — without type alignment, the binding would have no determinable type.",
+      fix_hint: "Either change the fallback to produce a value of the expected payload type (e.g. `OR_ELSE 0` when the payload is `Int64`), CAST it explicitly (`OR_ELSE CAST(x AS PayloadT)`), or rewrite the LHS to widen its payload to a common type with the fallback.",
     },
     UNWRAP_NON_OPTIONAL: {
       severity: :error, category: :type,
       template: "Cannot unwrap non-optional type '%{got}' with '?'",
       summary:  "`expr?` only applies to optional types (`?T`).",
       cause: "The `?` postfix is the optional-unwrap operator: it asserts non-NIL and yields the inner `T`. On a plain `T` it would be a no-op, but allowing it would mask later refactors that change the type — so the compiler rejects it explicitly.",
-      fix_hint: "Drop the trailing `?` (the value is already non-optional). If you intended to PROPAGATE failure, use `OR RAISE` / `OR EXIT` / `OR <default>` on a fallible source instead.",
+      fix_hint: "Drop the trailing `?` (the value is already non-optional). If you intended to PROPAGATE failure, use `OR_ELSE RAISE` / `OR_ELSE EXIT` / `OR <default>` on a fallible source instead.",
     },
     IF_EXPR_THEN_NEEDS_VALUE: {
       severity: :error, category: :type,
@@ -2846,9 +2846,9 @@ module DiagnosticRegistry
     },
     ERROR_TYPE_NOT_REGISTERED: {
       severity: :error, category: :type,
-      template: "Error type '%{name}' is not registered. The first RAISE / OR EXIT site that names a new type must provide a kind: use 'RAISE Kind, %{name}, \"msg\"' or similar.",
+      template: "Error type '%{name}' is not registered. The first RAISE / OR_ELSE EXIT site that names a new type must provide a kind: use 'RAISE Kind, %{name}, \"msg\"' or similar.",
       summary:  "Error type was never registered with a kind.",
-      cause: "CLEAR's error registry binds a type name to a *kind* (Transient, Permanent, Internal, Reserved). The kind drives recovery semantics — RETRY targets Transient, OR EXIT exits on Permanent, etc. The first site that names a new type must declare the kind so the registry has it for every later use.",
+      cause: "CLEAR's error registry binds a type name to a *kind* (Transient, Permanent, Internal, Reserved). The kind drives recovery semantics — RETRY targets Transient, OR_ELSE EXIT exits on Permanent, etc. The first site that names a new type must declare the kind so the registry has it for every later use.",
       fix_hint: "At the first RAISE site for `%{name}`, include the kind: `RAISE Transient, %{name}, \"description\"` (or Permanent / Internal). Subsequent RAISE / CATCH sites can omit the kind — the registered binding is reused.",
     },
     ERROR_TYPE_RESERVED_BY_STDLIB: {
@@ -2955,7 +2955,7 @@ module DiagnosticRegistry
       template: "RETRY only targets Transient errors. Non-retryable types in selector: %{types}",
       summary:  "RETRY clause must select Transient error types only.",
       cause: "RETRY presumes the operation can succeed on a later attempt — only Transient-kind errors carry that promise. Permanent errors (a missing file, a parse error) won't change between attempts; Internal errors signal a bug rather than something to retry. The compiler rejects RETRY clauses that select non-Transient kinds so retry storms can't accidentally hide real bugs.",
-      fix_hint: "Drop the non-Transient selector(s) from the RETRY clause, OR change the recovery action: `OR RAISE` to propagate, `OR EXIT` to exit the program, `CATCH e WITH(...) { ... }` to handle each kind explicitly.",
+      fix_hint: "Drop the non-Transient selector(s) from the RETRY clause, OR change the recovery action: `OR_ELSE RAISE` to propagate, `OR_ELSE EXIT` to exit the program, `CATCH e WITH(...) { ... }` to handle each kind explicitly.",
     },
     PARTIAL_MATCH_EXPR_NEEDS_DEFAULT: {
       severity: :error, category: :type,

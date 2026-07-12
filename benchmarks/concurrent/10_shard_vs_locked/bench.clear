@@ -32,7 +32,7 @@ FN main() RETURNS Void ->
   t1 = timestampMs();
   (0 ..< n)
     |> SHARD("key:" + _.toString(), map)
-    |> CONCURRENT(batch: 128) EACH {got = map[_] OR "";};
+    |> CONCURRENT(batch: 128) EACH {got = map[_] OR_ELSE "";};
   getMs = timestampMs() - t1;
 
   # Workload 3: Mixed — 200K SET (overwrite) + 800K GET
@@ -42,7 +42,7 @@ FN main() RETURNS Void ->
     |> CONCURRENT(batch: 128) EACH {map[_] = "updated";};
   (0 ..< ((n / 5) * 4))
     |> SHARD("key:" + _.toString(), map)
-    |> CONCURRENT(batch: 128) EACH {got = map[_] OR "";};
+    |> CONCURRENT(batch: 128) EACH {got = map[_] OR_ELSE "";};
   mixMs = timestampMs() - t2;
 
   ASSERT map.count() > 0;

@@ -102,7 +102,7 @@ RSpec.describe "automatic box transport — TDD contract" do
           RETURN Foo{ name: COPY "returned" };
         END
         FN main() RETURNS !Void ->
-          f = make() OR RAISE;
+          f = make() OR_ELSE RAISE;
           ASSERT f.name == "returned";
           RETURN;
         END
@@ -217,7 +217,7 @@ RSpec.describe "automatic box transport — TDD contract" do
           RETURN Foo{ name: COPY "return" };
         END
         FN main() RETURNS !Void ->
-          value = make() OR RAISE;
+          value = make() OR_ELSE RAISE;
           ASSERT value.name == "return";
           RETURN;
         END

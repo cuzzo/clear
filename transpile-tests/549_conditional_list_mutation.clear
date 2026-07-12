@@ -27,17 +27,17 @@ FN main() RETURNS Void ->
   items[0]?.value = 7_i64;
   items[9]?.value = rhs!(calls);
 
-  ASSERT (items[0]?.value OR 0_i64) == 7_i64;
+  ASSERT (items[0]?.value OR_ELSE 0_i64) == 7_i64;
   ASSERT calls.length() == 0_i64;
 
   MUTABLE parent = Parent{ child: Item{ value: 3_i64 } };
   parent.child?.value = 11_i64;
-  ASSERT (parent.child?.value OR 0_i64) == 11_i64;
+  ASSERT (parent.child?.value OR_ELSE 0_i64) == 11_i64;
 
   MUTABLE owned: OwnedItem[]@list = [];
   owned.append(OwnedItem{ name: COPY "old" });
   owned[0]?.name = COPY "new";
-  ASSERT (owned[0]?.name OR "") == "new";
+  ASSERT (owned[0]?.name OR_ELSE "") == "new";
 
   # IF-bind aliases an RC element owned by the list. Leaving the branch must
   # not decrement the list's strong reference or make the next lookup dangle.

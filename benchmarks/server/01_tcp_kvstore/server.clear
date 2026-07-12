@@ -28,7 +28,7 @@ FN handleClient!(client: TCPClient, MUTABLE store: HashMap<String>, MUTABLE coun
             crPos += 1;
           END
           MUTABLE countStr = data.substr(pos, crPos - pos);
-          MUTABLE argCount = (countStr.toNumber() OR (0.0 - 1.0)).toInt();
+          MUTABLE argCount = (countStr.toNumber() OR_ELSE (0.0 - 1.0)).toInt();
           pos = crPos + 2;
 
           MUTABLE arg0 = "";
@@ -43,7 +43,7 @@ FN handleClient!(client: TCPClient, MUTABLE store: HashMap<String>, MUTABLE coun
                 crPos2 += 1;
               END
               MUTABLE lenStr = data.substr(pos, crPos2 - pos);
-              MUTABLE len = (lenStr.toNumber() OR (0.0 - 1.0)).toInt();
+              MUTABLE len = (lenStr.toNumber() OR_ELSE (0.0 - 1.0)).toInt();
               pos = crPos2 + 2;
               MUTABLE val = data.substr(pos, len);
               pos += len;
@@ -64,7 +64,7 @@ FN handleClient!(client: TCPClient, MUTABLE store: HashMap<String>, MUTABLE coun
             store[arg1] = arg2;
             resp = resp + "+OK\r\n";
           ELSE_IF arg0 == "GET" || arg0 == "get" THEN
-            MUTABLE result = store[arg1] OR "";
+            MUTABLE result = store[arg1] OR_ELSE "";
             IF result.any?() THEN
               resp = resp + "$${result.length().toString()}\r\n${result}\r\n";
             ELSE
@@ -72,7 +72,7 @@ FN handleClient!(client: TCPClient, MUTABLE store: HashMap<String>, MUTABLE coun
             END
           ELSE_IF arg0 == "INCR" || arg0 == "incr" THEN
             IF arg1.any?() THEN
-              newVal = (counters[arg1] OR 0) + 1;
+              newVal = (counters[arg1] OR_ELSE 0) + 1;
               counters[arg1] = newVal;
               resp = resp + ":${newVal.toString()}\r\n";
             ELSE
@@ -80,7 +80,7 @@ FN handleClient!(client: TCPClient, MUTABLE store: HashMap<String>, MUTABLE coun
             END
           ELSE_IF arg0 == "DECR" || arg0 == "decr" THEN
             IF arg1.any?() THEN
-              newVal = (counters[arg1] OR 0) - 1;
+              newVal = (counters[arg1] OR_ELSE 0) - 1;
               counters[arg1] = newVal;
               resp = resp + ":${newVal.toString()}\r\n";
             ELSE

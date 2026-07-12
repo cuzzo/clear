@@ -16,16 +16,16 @@ FN main() RETURNS Void ->
     modify!(m, "gamma", 3);
 
     # Keys must still be valid after callee frame rewinds
-    a = m["alpha"] OR 0;
+    a = m["alpha"] OR_ELSE 0;
     ASSERT a == 1, "alpha survives frame rewind";
-    b = m["beta"] OR 0;
+    b = m["beta"] OR_ELSE 0;
     ASSERT b == 2, "beta survives frame rewind";
-    c = m["gamma"] OR 0;
+    c = m["gamma"] OR_ELSE 0;
     ASSERT c == 3, "gamma survives frame rewind";
 
     # Overwrite via another call
     modify!(m, "alpha", 99);
-    a2 = m["alpha"] OR 0;
+    a2 = m["alpha"] OR_ELSE 0;
     ASSERT a2 == 99, "overwrite after frame rewind";
 
     RETURN;

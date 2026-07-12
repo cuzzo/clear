@@ -18,7 +18,7 @@ FN double(x: Int64) RETURNS Int64 -> RETURN x * 2; END
 FN main() RETURNS Void ->
   # Non-recursive call -- StackGuard adds + removes the entry,
   # the inner call returns 14 normally.
-  result: Int64 = apply(double, 7) OR EXIT System, "apply failed";
+  result: Int64 = apply(double, 7) OR_ELSE EXIT System, "apply failed";
   ASSERT result == 14_i64, "apply(double, 7) == 14";
   RETURN;
 END

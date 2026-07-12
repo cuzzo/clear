@@ -1,6 +1,6 @@
-# Template: OR heap destination matrix.
+# Template: OR_ELSE heap destination matrix.
 #
-# Targets MIR lowering's heap-destination placement for owned OR/TryCatch/
+# Targets MIR lowering's heap-destination placement for owned OR_ELSE/TryCatch/
 # optional branches. Every cell is a valid source program; a failure is a
 # surfaced compiler bug, not a fuzz harness exception.
 
@@ -92,7 +92,7 @@ def ohd_fallback(shape)
   when :struct_owned
     'Box{ label: COPY "fb" }'
   when :list_owned
-    'fallbackList() OR RAISE'
+    'fallbackList() OR_ELSE RAISE'
   when :string_list_owned
     'mkStringList()'
   when :union_owned
@@ -128,13 +128,13 @@ end
 def ohd_or_expr(or_kind, shape)
   case or_kind
   when :orelse_success
-    "maybeSome(TRUE) OR #{ohd_fallback_call(shape)}"
+    "maybeSome(TRUE) OR_ELSE #{ohd_fallback_call(shape)}"
   when :orelse_fallback
-    "maybeSome(FALSE) OR #{ohd_fallback_call(shape)}"
+    "maybeSome(FALSE) OR_ELSE #{ohd_fallback_call(shape)}"
   when :try_success
-    "makeFallible(TRUE) OR #{ohd_fallback_call(shape)}"
+    "makeFallible(TRUE) OR_ELSE #{ohd_fallback_call(shape)}"
   when :try_fallback
-    "makeFallible(FALSE) OR #{ohd_fallback_call(shape)}"
+    "makeFallible(FALSE) OR_ELSE #{ohd_fallback_call(shape)}"
   end
 end
 

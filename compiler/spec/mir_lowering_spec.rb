@@ -1286,7 +1286,7 @@ RSpec.describe MIRLowering do
       end
     end
 
-    it "lowers CONCURRENT WHERE OR PRUNE through the BC error-sentinel path" do
+    it "lowers CONCURRENT WHERE OR_ELSE PRUNE through the BC error-sentinel path" do
       low, value = compile_first_binding_value(<<~CLEAR, "out", target: :bc)
         FN maybePositive(x: Float64) RETURNS !Bool ->
           RETURN x > 1.0;
@@ -1294,7 +1294,7 @@ RSpec.describe MIRLowering do
 
         FN main() RETURNS Void ->
           vals: Float64[] = [1.0, 2.0, 3.0];
-          out = vals |> CONCURRENT(workers: 2) WHERE maybePositive(_) OR PRUNE;
+          out = vals |> CONCURRENT(workers: 2) WHERE maybePositive(_) OR_ELSE PRUNE;
           RETURN;
         END
       CLEAR
@@ -3462,40 +3462,40 @@ RSpec.describe MIRLowering do
   # =========================================================================
 
   describe "Or* error chain lowering" do
-    it "lowers OrRaise to a structural error value" do
-      node = AST::OrRaise.new(tok)
+    it "lowers OrElseRaise to a structural error value" do
+      node = AST::OrElseRaise.new(tok)
       result = lowering.lower(node)
       expect(result).to be_a(MIR::FieldGet)
-      expect(emit(result)).to eq("error.OrRaise")
+      expect(emit(result)).to eq("error.OrElseRaise")
     end
 
-    it "lowers OrBreak to BreakStmt" do
-      node = AST::OrBreak.new(tok)
+    it "lowers OrElseBreak to BreakStmt" do
+      node = AST::OrElseBreak.new(tok)
       result = lowering.lower(node)
       expect(result).to be_a(MIR::BreakStmt)
       expect(emit(result)).to eq("break;")
     end
 
-    it "lowers OrPass to a structural undefined default" do
-      node = AST::OrPass.new(tok)
+    it "lowers OrElsePass to a structural undefined default" do
+      node = AST::OrElsePass.new(tok)
       result = lowering.lower(node)
       expect(result).to be_a(MIR::DefaultValue)
       expect(emit(result)).to eq("undefined")
     end
 
-    it "lowers OrPrune to a structural undefined default" do
-      node = AST::OrPrune.new(tok)
+    it "lowers OrElsePrune to a structural undefined default" do
+      node = AST::OrElsePrune.new(tok)
       result = lowering.lower(node)
       expect(result).to be_a(MIR::DefaultValue)
       expect(emit(result)).to eq("undefined")
     end
 
-    it "lowers OrExit with message (pure message override)" do
-      # New unified OR EXIT: 4-arg (token, kind, error_name, message).
+    it "lowers OrElseExit with message (pure message override)" do
+      # New unified OR_ELSE EXIT: 4-arg (token, kind, error_name, message).
       # Pure "msg" form passes nil kind + nil error_name; lowering
       # inherits both from rt.__error and only updates message.
       msg = make_lit(:STRING, "fatal", full_type: :String)
-      node = AST::OrExit.new(tok, nil, nil, msg)
+      node = AST::OrElseExit.new(tok, nil, nil, msg)
       result = lowering.lower(node)
       expect(result).to be_a(MIR::ScopeBlock)
       zig = emit(result)
@@ -3506,9 +3506,9 @@ RSpec.describe MIRLowering do
       expect(zig).not_to include("rt.__error.error_name =")
     end
 
-    it "lowers OrExit Kind,Type,msg (full override) with direct field writes" do
+    it "lowers OrElseExit Kind,Type,msg (full override) with direct field writes" do
       msg = make_lit(:STRING, "bad", full_type: :String)
-      node = AST::OrExit.new(tok, :Input, "ParseErr", msg)
+      node = AST::OrElseExit.new(tok, :Input, "ParseErr", msg)
       result = lowering.lower(node)
       zig = emit(result)
       expect(zig).to include("rt.__error.kind = .Input")
@@ -3517,8 +3517,8 @@ RSpec.describe MIRLowering do
       expect(zig).to include("return error.CheatError")
     end
 
-    it "lowers OrExit Kind (kind-only) with type cleared to 0" do
-      node = AST::OrExit.new(tok, :Input, nil, nil)
+    it "lowers OrElseExit Kind (kind-only) with type cleared to 0" do
+      node = AST::OrElseExit.new(tok, :Input, nil, nil)
       result = lowering.lower(node)
       zig = emit(result)
       expect(zig).to include("rt.__error.kind = .Input")
@@ -3526,8 +3526,8 @@ RSpec.describe MIRLowering do
       expect(zig).to include("rt.__error.error_name = 0")
     end
 
-    it "builds bytecode OR EXIT reassign metadata" do
-      facts = MIRLoweringExpressions::OrExitFacts.new(
+    it "builds bytecode OR_ELSE EXIT reassign metadata" do
+      facts = MIRLoweringExpressions::OrElseExitFacts.new(
         kind: "Input",
         error_name: nil,
         name_id: 9,
@@ -3537,9 +3537,9 @@ RSpec.describe MIRLowering do
       )
       message = MIR::Lit.new("\"bad\"")
 
-      result = lowering.send(:or_exit_bc_reassign, facts, message)
+      result = lowering.send(:or_else_exit_bc_reassign, facts, message)
 
-      expect(result).to be_a(MIR::OrExitBcRewrite)
+      expect(result).to be_a(MIR::OrElseExitBcRewrite)
       expect(result.kind).to eq("Input")
       expect(result.name_id).to eq(9)
       expect(result.clear_type).to eq(true)
@@ -3548,13 +3548,13 @@ RSpec.describe MIRLowering do
       expect(result.message).to eq(message)
     end
 
-    it "lowers OR EXIT on fallible expressions to a catch block that rewrites error context" do
+    it "lowers OR_ELSE EXIT on fallible expressions to a catch block that rewrites error context" do
       call = AST::FuncCall.new(tok, "parse", [])
       call.full_type = :Int64
       call.error_union_type = Type.new(:"!Int64")
       call.can_fail = true
-      exit = AST::OrExit.new(tok, :Input, "ParseErr", make_lit(:STRING, "bad", full_type: :String))
-      node = AST::BinaryOp.new(tok, call, :OR_RESCUE, exit)
+      exit = AST::OrElseExit.new(tok, :Input, "ParseErr", make_lit(:STRING, "bad", full_type: :String))
+      node = AST::BinaryOp.new(tok, call, :OR_ELSE, exit)
       node.full_type = :Int64
 
       result = lowering.lower(node)
@@ -3567,34 +3567,34 @@ RSpec.describe MIRLowering do
       expect(zig).to include("return __exit_err")
     end
 
-    it "lowers OR fallback to error catch and optional orelse based on left type" do
+    it "lowers OR_ELSE fallback to error catch and optional orelse based on left type" do
       fallible = AST::FuncCall.new(tok, "fallible", [])
       fallible.full_type = :Int64
       fallible.error_union_type = Type.new(:"!Int64")
       fallback = make_lit(:INT64, 0, full_type: :Int64)
-      error_node = AST::BinaryOp.new(tok, fallible, :OR_RESCUE, fallback)
+      error_node = AST::BinaryOp.new(tok, fallible, :OR_ELSE, fallback)
       error_node.full_type = :Int64
 
       maybe = make_id("maybe", full_type: :"?Int64")
-      optional_node = AST::BinaryOp.new(tok, maybe, :OR_RESCUE, fallback)
+      optional_node = AST::BinaryOp.new(tok, maybe, :OR_ELSE, fallback)
       optional_node.full_type = :Int64
 
       expect(lowering.lower(error_node)).to be_a(MIR::TryCatch)
       expect(lowering.lower(optional_node)).to be_a(MIR::Orelse)
     end
 
-    it "uses structural OR PASS defaults instead of Zig-spelled literals" do
+    it "uses structural OR_ELSE PASS defaults instead of Zig-spelled literals" do
       string_call = AST::FuncCall.new(tok, "fallible_string", [])
       string_call.full_type = Type.new(:"!String")
-      string_default = lowering.send(:or_pass_fallback, string_call)
+      string_default = lowering.send(:or_else_pass_fallback, string_call)
 
       list_call = AST::FuncCall.new(tok, "fallible_list", [])
       list_call.full_type = Type.new(:"!Int64[]", collection: :list)
-      list_default = lowering.send(:or_pass_fallback, list_call)
+      list_default = lowering.send(:or_else_pass_fallback, list_call)
 
       int_call = AST::FuncCall.new(tok, "fallible_int", [])
       int_call.full_type = Type.new(:"!Int64")
-      int_default = lowering.send(:or_pass_fallback, int_call)
+      int_default = lowering.send(:or_else_pass_fallback, int_call)
 
       expect(string_default).to be_a(MIR::DefaultValue)
       expect(T.cast(string_default, MIR::DefaultValue).kind).to eq(:string_empty)
@@ -3605,7 +3605,7 @@ RSpec.describe MIRLowering do
       expect([string_default, list_default, int_default].any? { |node| node.is_a?(MIR::Lit) }).to be(false)
     end
 
-    it "materializes owned OR PASS results before stdlib TAKES argument verification" do
+    it "materializes owned OR_ELSE PASS results before stdlib TAKES argument verification" do
       mir = lower_source_mir(<<~CLEAR)
         FN inner() RETURNS !String ->
           MUTABLE v: String = ""; v = v + "x";
@@ -3614,7 +3614,7 @@ RSpec.describe MIRLowering do
 
         FN run() RETURNS !Void ->
           MUTABLE outer: String[]@list = [];
-          outer.append(inner() OR PASS);
+          outer.append(inner() OR_ELSE PASS);
           RETURN;
         END
       CLEAR
@@ -3630,12 +3630,12 @@ RSpec.describe MIRLowering do
       expect(T.must(consuming_call).args[1].expr).to be_a(MIR::Ident)
     end
 
-    it "lowers OR BREAK catch fallback as a structural break expression" do
+    it "lowers OR_ELSE BREAK catch fallback as a structural break expression" do
       fallible = AST::FuncCall.new(tok, "fallible", [])
       fallible.full_type = :Int64
       fallible.error_union_type = Type.new(:"!Int64")
       fallible.can_fail = true
-      node = AST::BinaryOp.new(tok, fallible, :OR_RESCUE, AST::OrBreak.new(tok))
+      node = AST::BinaryOp.new(tok, fallible, :OR_ELSE, AST::OrElseBreak.new(tok))
       node.full_type = :Int64
 
       result = lowering.lower(node)
@@ -4284,10 +4284,10 @@ RSpec.describe MIRLowering do
   end
 
   # =========================================================================
-  # Phase 5: OR_RESCUE error chain
+  # Phase 5: OR_ELSE error chain
   # =========================================================================
 
-  describe "OR_RESCUE error chain lowering" do
+  describe "OR_ELSE error chain lowering" do
     def make_error_expr(name)
       id = make_id(name, full_type: :"!Number")
       # Simulate error union type
@@ -4295,10 +4295,10 @@ RSpec.describe MIRLowering do
       id
     end
 
-    it "lowers OR RAISE with error to try" do
+    it "lowers OR_ELSE RAISE with error to try" do
       left = make_error_expr("getData")
-      right = AST::OrRaise.new(tok)
-      node = AST::BinaryOp.new(tok, left, :OR_RESCUE, right)
+      right = AST::OrElseRaise.new(tok)
+      node = AST::BinaryOp.new(tok, left, :OR_ELSE, right)
       node.full_type = :Number
 
       result = lowering.lower(node)
@@ -4307,10 +4307,10 @@ RSpec.describe MIRLowering do
       expect(zig).to include("getData")
     end
 
-    it "lowers OR RAISE with non-error to passthrough" do
+    it "lowers OR_ELSE RAISE with non-error to passthrough" do
       left = make_id("x", full_type: :Number)
-      right = AST::OrRaise.new(tok)
-      node = AST::BinaryOp.new(tok, left, :OR_RESCUE, right)
+      right = AST::OrElseRaise.new(tok)
+      node = AST::BinaryOp.new(tok, left, :OR_ELSE, right)
       node.full_type = :Number
 
       result = lowering.lower(node)
@@ -4318,10 +4318,10 @@ RSpec.describe MIRLowering do
       expect(zig).to eq("x")
     end
 
-    it "lowers OR PASS with error to catch undefined" do
+    it "lowers OR_ELSE PASS with error to catch undefined" do
       left = make_error_expr("getData")
-      right = AST::OrPass.new(tok)
-      node = AST::BinaryOp.new(tok, left, :OR_RESCUE, right)
+      right = AST::OrElsePass.new(tok)
+      node = AST::BinaryOp.new(tok, left, :OR_ELSE, right)
       node.full_type = :Number
 
       result = lowering.lower(node)
@@ -4329,10 +4329,10 @@ RSpec.describe MIRLowering do
       expect(zig).to include("catch undefined")
     end
 
-    it "lowers OR BREAK with error to catch break" do
+    it "lowers OR_ELSE BREAK with error to catch break" do
       left = make_error_expr("getData")
-      right = AST::OrBreak.new(tok)
-      node = AST::BinaryOp.new(tok, left, :OR_RESCUE, right)
+      right = AST::OrElseBreak.new(tok)
+      node = AST::BinaryOp.new(tok, left, :OR_ELSE, right)
       node.full_type = :Number
 
       result = lowering.lower(node)
@@ -4340,11 +4340,11 @@ RSpec.describe MIRLowering do
       expect(zig).to include("catch break")
     end
 
-    it "lowers OR EXIT with error to catch + setError" do
+    it "lowers OR_ELSE EXIT with error to catch + setError" do
       left = make_error_expr("getData")
       msg = make_lit(:STRING, "failed", full_type: :String)
-      right = AST::OrExit.new(tok, msg)
-      node = AST::BinaryOp.new(tok, left, :OR_RESCUE, right)
+      right = AST::OrElseExit.new(tok, msg)
+      node = AST::BinaryOp.new(tok, left, :OR_ELSE, right)
       node.full_type = :Number
 
       result = lowering.lower(node)
@@ -4357,7 +4357,7 @@ RSpec.describe MIRLowering do
       left = make_error_expr("getData")
       right = make_lit(:NUMBER, 0, full_type: :Number)
       right.coerced_type = nil
-      node = AST::BinaryOp.new(tok, left, :OR_RESCUE, right)
+      node = AST::BinaryOp.new(tok, left, :OR_ELSE, right)
       node.full_type = :Number
 
       result = lowering.lower(node)
@@ -4370,7 +4370,7 @@ RSpec.describe MIRLowering do
       left = make_id("maybe", full_type: :"?Number")
       right = make_lit(:NUMBER, 99, full_type: :Number)
       right.coerced_type = nil
-      node = AST::BinaryOp.new(tok, left, :OR_RESCUE, right)
+      node = AST::BinaryOp.new(tok, left, :OR_ELSE, right)
       node.full_type = :Number
 
       result = lowering.lower(node)
@@ -4379,10 +4379,10 @@ RSpec.describe MIRLowering do
       expect(zig).to include("99")
     end
 
-    it "lowers OR PRUNE with error to catch undefined" do
+    it "lowers OR_ELSE PRUNE with error to catch undefined" do
       left = make_error_expr("getData")
-      right = AST::OrPrune.new(tok)
-      node = AST::BinaryOp.new(tok, left, :OR_RESCUE, right)
+      right = AST::OrElsePrune.new(tok)
+      node = AST::BinaryOp.new(tok, left, :OR_ELSE, right)
       node.full_type = :Number
 
       result = lowering.lower(node)
@@ -4395,7 +4395,7 @@ RSpec.describe MIRLowering do
       # while lowering it must NOT escape to outer FunctionState pending statements -- they
       # belong to the orelse/catch fallback branch and must only run when
       # that branch is actually taken. AST::BinaryOp#lazy_fields declares
-      # :right as lazy when op == :OR_RESCUE; descend() wraps the right
+      # :right as lazy when op == :OR_ELSE; descend() wraps the right
       # side in MIR::BlockExpr containing the scoped pending stmts.
       it "wraps an allocating fallback (struct lit with heap field) in BlockExpr" do
         # Allocating fallback: a StructLit whose String field gets a
@@ -4411,7 +4411,7 @@ RSpec.describe MIRLowering do
         struct_lit = AST::StructLit.new(tok, "Node", { "label" => copy })
         struct_lit.full_type = :Node
 
-        node = AST::BinaryOp.new(tok, left, :OR_RESCUE, struct_lit)
+        node = AST::BinaryOp.new(tok, left, :OR_ELSE, struct_lit)
         node.full_type = :Node
 
         l = lowering(struct_schemas: { Node: Schemas::StructSchema.new(fields: { "label" => Type.new(:String) }) })
@@ -4428,7 +4428,7 @@ RSpec.describe MIRLowering do
         left  = make_id("opt_str", full_type: :"?String")
         right = make_lit(:STRING, "default", full_type: Type.new(:String, location: :rodata))
 
-        node = AST::BinaryOp.new(tok, left, :OR_RESCUE, right)
+        node = AST::BinaryOp.new(tok, left, :OR_ELSE, right)
         node.full_type = :String
 
         l = lowering

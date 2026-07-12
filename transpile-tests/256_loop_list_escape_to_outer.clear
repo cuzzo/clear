@@ -19,7 +19,7 @@ FN main() RETURNS Void ->
         # Rebuild items as all but the last element.
         MUTABLE next: String[]@list = [];
         FOR j IN (0_i64 ..< items.length() - 1) DO
-            next.append(COPY (items[j] OR ""));
+            next.append(COPY (items[j] OR_ELSE ""));
         END
         # Without the fix: next is frame-backed; frame rewind frees it between iterations.
         # With the fix: next is heap-backed; survives the frame rewind as the new items.

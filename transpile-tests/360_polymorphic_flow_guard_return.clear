@@ -26,18 +26,18 @@ FN valueOf!(MUTABLE c: Counter) RETURNS !Int64 ->
 END
 
 FN check!(MUTABLE c: Counter, expected_before: Int64) RETURNS !Void ->
-    before = valueOf!(c) OR RAISE;
+    before = valueOf!(c) OR_ELSE RAISE;
     ASSERT before == expected_before, "before";
 
-    changed = isPositive(c) OR RAISE;
+    changed = isPositive(c) OR_ELSE RAISE;
     ASSERT changed == (expected_before > 0), "changed";
 
     IF expected_before > 0 THEN
-        bumped = bumpAndReturn!(c) OR RAISE;
+        bumped = bumpAndReturn!(c) OR_ELSE RAISE;
         ASSERT bumped == expected_before + 1, "bumped return";
     END
 
-    after = valueOf!(c) OR RAISE;
+    after = valueOf!(c) OR_ELSE RAISE;
     IF expected_before > 0 THEN
         ASSERT after == expected_before + 1, "after changed";
     ELSE
@@ -62,25 +62,25 @@ FN main() RETURNS !Void ->
     MUTABLE bare_wlocked_c   = Counter{ value: 1 } @writeLocked;
     MUTABLE bare_versioned_c = Counter{ value: 1 } @versioned;
 
-    check!(plain_c, 1) OR RAISE;
-    check!(local_c, 1) OR RAISE;
-    check!(multi_c, 1) OR RAISE;
-    check!(shared_c, 1) OR RAISE;
-    check!(indirect_c, 1) OR RAISE;
-    check!(locked_c, 1) OR RAISE;
-    check!(wlocked_c, 1) OR RAISE;
-    check!(versioned_c, 1) OR RAISE;
-    check!(atomic_c, 1) OR RAISE;
-    check!(bare_locked_c, 1) OR RAISE;
-    check!(bare_wlocked_c, 1) OR RAISE;
-    check!(bare_versioned_c, 1) OR RAISE;
+    check!(plain_c, 1) OR_ELSE RAISE;
+    check!(local_c, 1) OR_ELSE RAISE;
+    check!(multi_c, 1) OR_ELSE RAISE;
+    check!(shared_c, 1) OR_ELSE RAISE;
+    check!(indirect_c, 1) OR_ELSE RAISE;
+    check!(locked_c, 1) OR_ELSE RAISE;
+    check!(wlocked_c, 1) OR_ELSE RAISE;
+    check!(versioned_c, 1) OR_ELSE RAISE;
+    check!(atomic_c, 1) OR_ELSE RAISE;
+    check!(bare_locked_c, 1) OR_ELSE RAISE;
+    check!(bare_wlocked_c, 1) OR_ELSE RAISE;
+    check!(bare_versioned_c, 1) OR_ELSE RAISE;
 
     MUTABLE locked_zero = Counter{ value: 0 } @shared:locked;
     MUTABLE versioned_zero = Counter{ value: 0 } @shared:versioned;
     MUTABLE atomic_zero = Counter{ value: 0 } @indirect:atomic;
 
-    check!(locked_zero, 0) OR RAISE;
-    check!(versioned_zero, 0) OR RAISE;
-    check!(atomic_zero, 0) OR RAISE;
+    check!(locked_zero, 0) OR_ELSE RAISE;
+    check!(versioned_zero, 0) OR_ELSE RAISE;
+    check!(atomic_zero, 0) OR_ELSE RAISE;
     RETURN;
 END

@@ -103,7 +103,7 @@ FuzzGenerator.register(:collection_shape_smoke, cells: COLLECTION_SHAPE_SMOKE_CE
           vals["a"] = 10_i64;
           vals["b"] = 20_i64;
           ASSERT vals.count() == 2_i64, "map count";
-          ASSERT vals["b"] OR 0_i64 == 20_i64, "map readback";
+          ASSERT vals["b"] OR_ELSE 0_i64 == 20_i64, "map readback";
           RETURN;
       END
     CHT
@@ -157,7 +157,7 @@ FuzzGenerator.register(:collection_shape_smoke, cells: COLLECTION_SHAPE_SMOKE_CE
           vals["a"] = 10_i64;
           vals["b"] = 20_i64;
           ASSERT vals.count() == 2_i64, "sharded map count";
-          ASSERT vals["a"] OR 0_i64 == 10_i64, "sharded map readback";
+          ASSERT vals["a"] OR_ELSE 0_i64 == 10_i64, "sharded map readback";
           RETURN;
       END
     CHT

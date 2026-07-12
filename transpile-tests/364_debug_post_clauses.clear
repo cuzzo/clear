@@ -79,11 +79,11 @@ FN main() RETURNS !Void ->
     ASSERT s == 7, "sum(3, 4) == 7";
 
     # safeDouble: PRE holds, POST holds.
-    sd = safeDouble!(3) OR RAISE;
+    sd = safeDouble!(3) OR_ELSE RAISE;
     ASSERT sd == 6, "safeDouble(3) == 6";
 
-    # safeDouble: PRE fails, caller recovers via OR.
-    sd_neg = safeDouble!(-1_i64) OR -42_i64;
+    # safeDouble: PRE fails, caller recovers via OR_ELSE.
+    sd_neg = safeDouble!(-1_i64) OR_ELSE -42_i64;
     ASSERT sd_neg == -42_i64, "safeDouble(-1): PRE x > 0 fails";
 
     # Void-return DEBUG_POST: predicate holds (n=7 >= 0), body runs,
@@ -97,12 +97,12 @@ FN main() RETURNS !Void ->
 
     # Error-propagating body: the inner raises, `try` propagates
     # before the POST predicate evaluates. Caller catches the
-    # error via OR — no panic.
-    err_recovered = doubleOrRaise!(-5_i64) OR -77_i64;
+    # error via OR_ELSE — no panic.
+    err_recovered = doubleOrRaise!(-5_i64) OR_ELSE -77_i64;
     ASSERT err_recovered == -77_i64, "POST does not fire on error path";
 
     # Same fn, success path: POST predicate (result > 0) holds.
-    ok_path = doubleOrRaise!(4) OR RAISE;
+    ok_path = doubleOrRaise!(4) OR_ELSE RAISE;
     ASSERT ok_path == 8, "POST allows the success path";
 
     # Nested-call DEBUG_POST chain: top -> mid -> base. Each layer's

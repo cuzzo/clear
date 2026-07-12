@@ -170,7 +170,7 @@ FuzzGenerator.register(:return_value_modality, cells: RETURN_VALUE_CELLS) do |p|
     if p[:shape] == :option_owned_payload
       body = "        #{build}\n        RETURN xs;"
     else
-      body = "        #{build}\n        RETURN maybe(FALSE) OR xs;"
+      body = "        #{build}\n        RETURN maybe(FALSE) OR_ELSE xs;"
     end
   when :call_forward
     body = "        RETURN helper();"

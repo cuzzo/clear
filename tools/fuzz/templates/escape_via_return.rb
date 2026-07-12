@@ -165,7 +165,7 @@ def escape_via_return_shape_cell(shape)
           MUTABLE outer: Int64[][]@list = [];
           outer.append(inner);
           MUTABLE missing: Int64[]@list = [];
-          RETURN COPY (outer[0_i64] OR missing);
+          RETURN COPY (outer[0_i64] OR_ELSE missing);
       END
 
       FN main() RETURNS Void ->
@@ -227,8 +227,8 @@ FuzzGenerator.register(:escape_via_return, cells: ESCAPE_VIA_RETURN_CELLS) do |p
     values      = (1..size).map { |i| p[:elem] == :int ? "#{i}_i64" : %("v#{i}") }
     len_check   = "ASSERT length(result) == #{size}_i64, \"returned length\";"
     first_check = (p[:elem] == :int) ?
-                  "ASSERT (result[0] OR 0_i64) == 1_i64, \"first element\";" :
-                  'ASSERT eql?(result[0] OR "", "v1"), "first element";'
+                  "ASSERT (result[0] OR_ELSE 0_i64) == 1_i64, \"first element\";" :
+                  'ASSERT eql?(result[0] OR_ELSE "", "v1"), "first element";'
     type_decl   = ""
 
   when :set_int, :set_string

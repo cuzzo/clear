@@ -155,7 +155,7 @@ module LexerCompat
   def clear_harness_source(cases)
     lexer_path = File.join(LexerHarnessSupport::ROOT, 'compiler', 'src', 'ast', 'lexer.clear')
     calls = cases.each_with_index.map do |entry, idx|
-      "  dumpCase!(#{LexerHarnessSupport.clear_string_expr(entry['source'])}, #{idx}, #{LexerHarnessSupport.clear_string_expr(entry['name'])}) OR RAISE;"
+      "  dumpCase!(#{LexerHarnessSupport.clear_string_expr(entry['source'])}, #{idx}, #{LexerHarnessSupport.clear_string_expr(entry['name'])}) OR_ELSE RAISE;"
     end.join("\n")
 
     <<~CLEAR
@@ -257,7 +257,7 @@ module LexerCompat
 
       PRIVATE FN dumpCase!(source: String@raw, index: Int64, name: String) RETURNS !Void ->
         print("CASE|" + index.toString() + "|" + escapeCompat(name) + "|ok|");
-        tokens = tokenizeSource!(source) OR RAISE;
+        tokens = tokenizeSource!(source) OR_ELSE RAISE;
         MUTABLE i = 0;
         WHILE i < tokens.length() DO
           dumpToken(tokens[i]);

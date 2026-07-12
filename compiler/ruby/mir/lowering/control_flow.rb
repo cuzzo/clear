@@ -1308,7 +1308,7 @@ module MIRLoweringControlFlow
     when AST::ListLit
       expr.items.each { |v| collect_returned_binding_names(v, names) }
     when AST::BinaryOp
-      if expr.op == :OR_RESCUE
+      if expr.op == :OR_ELSE
         collect_returned_binding_names(expr.left, names)
         collect_returned_binding_names(expr.right, names)
       end

@@ -12,11 +12,11 @@ FN main() RETURNS Void ->
     scores["bob"] = 200;
     scores["charlie"] = 300;
 
-    # Get values back (map[key] returns ?V — use OR to unwrap).
-    a = scores["alice"] OR 0;
+    # Get values back (map[key] returns ?V — use OR_ELSE to unwrap).
+    a = scores["alice"] OR_ELSE 0;
     ASSERT a == 100, "alice should be 100";
 
-    b = scores["bob"] OR 0;
+    b = scores["bob"] OR_ELSE 0;
     ASSERT b == 200, "bob should be 200";
 
     # Contains check.
@@ -34,7 +34,7 @@ FN main() RETURNS Void ->
 
     # Overwrite.
     scores["alice"] = 999;
-    a2 = scores["alice"] OR 0;
+    a2 = scores["alice"] OR_ELSE 0;
     ASSERT a2 == 999, "alice should be overwritten to 999";
 
     RETURN;

@@ -48,9 +48,9 @@ FN record!(MUTABLE items: TraceItem[]@list, step: Int64) RETURNS !Void ->
 END
 
 FN burnFrame!(value: Int64) RETURNS !String ->
-    s1 = value.toString() OR "?";
-    s2 = (value * 2_i64).toString() OR "?";
-    s3 = (value + 1000_i64).toString() OR "?";
+    s1 = value.toString() OR_ELSE "?";
+    s2 = (value * 2_i64).toString() OR_ELSE "?";
+    s3 = (value + 1000_i64).toString() OR_ELSE "?";
     RETURN s1 + ":" + s2 + ":" + s3;
 END
 

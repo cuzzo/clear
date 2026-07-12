@@ -31,7 +31,7 @@ FN generateJson(id: Int64) RETURNS String ->
 END
 
 FN parseJsonArraySum(content: String) RETURNS !Int64 ->
-    parsed = parseFromSlice(JsonRecord, content, ParseOptions{}) OR RAISE;
+    parsed = parseFromSlice(JsonRecord, content, ParseOptions{}) OR_ELSE RAISE;
     MUTABLE sum: Int64 = 0;
     FOR i IN (0_i64 ..< parsed.value.data.length()) DO
         sum += parsed.value.data[i];
@@ -66,15 +66,15 @@ FN handleClient!(client: TCPClient) RETURNS !Void ->
                     # skip empty lines
                 ELSE_IF startsWith?(line, "SET:") THEN
                     idStr = substr(line, 4, line.length() - 4);
-                    id = toInt(toNumber(idStr) OR 0.0);
+                    id = toInt(toNumber(idStr) OR_ELSE 0.0);
                     json = generateJson(id);
                     writeFile("data/${id.toString()}.json", json);
                     resp = resp + "+OK\r\n";
                 ELSE_IF startsWith?(line, "GET:") THEN
                     idStr = substr(line, 4, line.length() - 4);
-                    id = toInt(toNumber(idStr) OR 0.0);
+                    id = toInt(toNumber(idStr) OR_ELSE 0.0);
                     content = readFile("data/${id.toString()}.json");
-                    sum = parseJsonArraySum(content) OR RAISE;
+                    sum = parseJsonArraySum(content) OR_ELSE RAISE;
                     resp = resp + ":${sum.toString()}\r\n";
                 ELSE_IF line == "QUIT" THEN
                     resp = resp + "+OK\r\n";

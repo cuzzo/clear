@@ -85,7 +85,7 @@ RSpec.describe "Recursion-yield + WITH lock (P3.3 propagation)" do
         FN main() RETURNS Void ->
           c1 = Counter{ value: 0_i64 } @locked;
           WITH EXCLUSIVE c1 AS inner {
-            _ = bounded(5_i64) OR EXIT "boom";
+            _ = bounded(5_i64) OR_ELSE EXIT "boom";
           }
           RETURN;
         END
@@ -106,7 +106,7 @@ RSpec.describe "Recursion-yield + WITH lock (P3.3 propagation)" do
         FN main() RETURNS Void ->
           c1 = Counter{ value: 0_i64 } @locked;
           WITH EXCLUSIVE c1 AS inner {
-            _ = bounded(5_i64) OR EXIT "boom";
+            _ = bounded(5_i64) OR_ELSE EXIT "boom";
           }
           RETURN;
         END
@@ -151,7 +151,7 @@ RSpec.describe "Recursion-yield + WITH lock (P3.3 propagation)" do
         FN main() RETURNS Void ->
           c1 = Counter{ value: 0_i64 } @locked;
           WITH EXCLUSIVE c1 AS inner {
-            _ = apply(doubler, 5_i64) OR EXIT "boom";
+            _ = apply(doubler, 5_i64) OR_ELSE EXIT "boom";
           }
           RETURN;
         END

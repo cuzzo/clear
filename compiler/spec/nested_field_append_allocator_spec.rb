@@ -22,7 +22,7 @@ RSpec.describe "nested-@list-field append inherits root container allocator" do
             scratch.append(i);
             handles.append(Handle{ values: [] });
             IF handles[i] AS handle THEN
-                handle.values.append(scratch[0] OR panic("scratch index invariant"));
+                handle.values.append(scratch[0] OR_ELSE panic("scratch index invariant"));
             END
             i = i + 1_i64;
         END
@@ -30,7 +30,7 @@ RSpec.describe "nested-@list-field append inherits root container allocator" do
     END
 
     FN main() RETURNS Void ->
-        r: Int64 = run(3_i64) OR PASS;
+        r: Int64 = run(3_i64) OR_ELSE PASS;
         ASSERT r == 3_i64, "three handles";
         RETURN;
     END

@@ -3,5 +3,5 @@ FN main() RETURNS Float64 ->
     append(data, 1.5);
     append(data, 2.5);
     append(data, 3.5);
-    RETURN data[1_i64] OR 0.0;
+    RETURN data[1_i64] OR_ELSE 0.0;
 END

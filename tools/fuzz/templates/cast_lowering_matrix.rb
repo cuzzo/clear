@@ -80,7 +80,7 @@ FuzzGenerator.register(:cast_lowering_matrix, cells: CAST_LOWERING_CELLS) do |p|
       <<~CHT
         #{prelude}FN call(f: #{ty}) RETURNS !Int64 REQUIRES f: NON_REENTRANT -> RETURN f(1_i64); END
         FN main() RETURNS Void ->
-            ASSERT (call(#{expr}) OR 0_i64) == #{expected}, "cast arg fn";
+            ASSERT (call(#{expr}) OR_ELSE 0_i64) == #{expected}, "cast arg fn";
             RETURN;
         END
       CHT

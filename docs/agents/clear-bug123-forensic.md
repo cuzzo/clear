@@ -199,9 +199,9 @@ program exits 0."
 
 ---
 
-## Bug #3 / #8 — `expr OR fallback` doesn't stop fallibility propagation
+## Bug #3 / #8 — `expr OR_ELSE fallback` doesn't stop fallibility propagation
 
-**Symptom**: a function whose body uses `expr OR fallback` (`charAt(i) OR ""`)
+**Symptom**: a function whose body uses `expr OR_ELSE fallback` (`charAt(i) OR ""`)
 gets rejected with `Function 'X' can fail (raises directly via RAISE) but its return type doesn't declare it`.
 The function contains zero literal `RAISE` statements.
 
@@ -262,7 +262,7 @@ before MIR. No checker invariant applies.
 
 ### Fuzz template: none cover this shape either
 
-`or_positional` tests OR fallback semantics at the call site, not
+`or_positional` tests OR_ELSE fallback semantics at the call site, not
 the containing function's signature. A template
 `fallibility_inference` would cross:
 

@@ -236,9 +236,9 @@ class PipelineRewriter
       return call
     end
 
-    # CASE 4: x |> RECOVER(default) -> x OR default
+    # CASE 4: x |> RECOVER(default) -> x OR_ELSE default
     if rhs.is_a?(AST::RecoverOp)
-      op = AST::BinaryOp.new(rhs.token, source.dup, :OR_RESCUE, rhs.default_expr.dup)
+      op = AST::BinaryOp.new(rhs.token, source.dup, :OR_ELSE, rhs.default_expr.dup)
       AST.stamp_synthetic_type!(op, node.full_type!, context: "synthetic AST type")
       op.storage   = node.storage
       return op

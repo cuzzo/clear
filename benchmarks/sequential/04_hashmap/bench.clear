@@ -16,7 +16,7 @@ FN main() RETURNS Void ->
   # Lookup phase: sum all values to prevent dead-code elimination
   t1 = timestampMs();
   MUTABLE total = 0.0;
-  TIGHT FOR j IN (0 ..< 1_000_000) -> total = total + (m[j] OR 0.0);
+  TIGHT FOR j IN (0 ..< 1_000_000) -> total = total + (m[j] OR_ELSE 0.0);
   lookupMs = timestampMs() - t1;
 
   ASSERT total > 0.0, "total must be positive";

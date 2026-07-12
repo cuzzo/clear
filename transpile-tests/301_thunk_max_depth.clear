@@ -18,7 +18,7 @@ FN main() RETURNS Void ->
   MUTABLE total: Int64 = 0;
   MUTABLE i: Int64 = 0;
   WHILE i < 100 DO
-    v: Int64 = bounded(i) OR EXIT System, "bounded failed";
+    v: Int64 = bounded(i) OR_ELSE EXIT System, "bounded failed";
     total = total + v;
     i = i + 1;
   END

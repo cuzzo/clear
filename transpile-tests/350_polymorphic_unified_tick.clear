@@ -60,53 +60,53 @@ FN main() RETURNS !Void ->
     MUTABLE bare_versioned_c = Counter{ value: 0 } @versioned;
 
     # Three increments per family. Each must finish at value=3.
-    tick!(plain_c)         OR EXIT;
-    tick!(plain_c)         OR EXIT;
-    tick!(plain_c)         OR EXIT;
+    tick!(plain_c)         OR_ELSE EXIT;
+    tick!(plain_c)         OR_ELSE EXIT;
+    tick!(plain_c)         OR_ELSE EXIT;
 
-    tick!(local_c)         OR EXIT;
-    tick!(local_c)         OR EXIT;
-    tick!(local_c)         OR EXIT;
+    tick!(local_c)         OR_ELSE EXIT;
+    tick!(local_c)         OR_ELSE EXIT;
+    tick!(local_c)         OR_ELSE EXIT;
 
-    tick!(multi_c)         OR EXIT;
-    tick!(multi_c)         OR EXIT;
-    tick!(multi_c)         OR EXIT;
+    tick!(multi_c)         OR_ELSE EXIT;
+    tick!(multi_c)         OR_ELSE EXIT;
+    tick!(multi_c)         OR_ELSE EXIT;
 
-    tick!(shared_c)        OR EXIT;
-    tick!(shared_c)        OR EXIT;
-    tick!(shared_c)        OR EXIT;
+    tick!(shared_c)        OR_ELSE EXIT;
+    tick!(shared_c)        OR_ELSE EXIT;
+    tick!(shared_c)        OR_ELSE EXIT;
 
-    tick!(indirect_c)      OR EXIT;
-    tick!(indirect_c)      OR EXIT;
-    tick!(indirect_c)      OR EXIT;
+    tick!(indirect_c)      OR_ELSE EXIT;
+    tick!(indirect_c)      OR_ELSE EXIT;
+    tick!(indirect_c)      OR_ELSE EXIT;
 
-    tick!(locked_c)        OR EXIT;
-    tick!(locked_c)        OR EXIT;
-    tick!(locked_c)        OR EXIT;
+    tick!(locked_c)        OR_ELSE EXIT;
+    tick!(locked_c)        OR_ELSE EXIT;
+    tick!(locked_c)        OR_ELSE EXIT;
 
-    tick!(wlocked_c)       OR EXIT;
-    tick!(wlocked_c)       OR EXIT;
-    tick!(wlocked_c)       OR EXIT;
+    tick!(wlocked_c)       OR_ELSE EXIT;
+    tick!(wlocked_c)       OR_ELSE EXIT;
+    tick!(wlocked_c)       OR_ELSE EXIT;
 
-    tick!(versioned_c)     OR EXIT;
-    tick!(versioned_c)     OR EXIT;
-    tick!(versioned_c)     OR EXIT;
+    tick!(versioned_c)     OR_ELSE EXIT;
+    tick!(versioned_c)     OR_ELSE EXIT;
+    tick!(versioned_c)     OR_ELSE EXIT;
 
-    tick!(atomic_c)        OR EXIT;
-    tick!(atomic_c)        OR EXIT;
-    tick!(atomic_c)        OR EXIT;
+    tick!(atomic_c)        OR_ELSE EXIT;
+    tick!(atomic_c)        OR_ELSE EXIT;
+    tick!(atomic_c)        OR_ELSE EXIT;
 
-    tick!(bare_locked_c)   OR EXIT;
-    tick!(bare_locked_c)   OR EXIT;
-    tick!(bare_locked_c)   OR EXIT;
+    tick!(bare_locked_c)   OR_ELSE EXIT;
+    tick!(bare_locked_c)   OR_ELSE EXIT;
+    tick!(bare_locked_c)   OR_ELSE EXIT;
 
-    tick!(bare_wlocked_c)  OR EXIT;
-    tick!(bare_wlocked_c)  OR EXIT;
-    tick!(bare_wlocked_c)  OR EXIT;
+    tick!(bare_wlocked_c)  OR_ELSE EXIT;
+    tick!(bare_wlocked_c)  OR_ELSE EXIT;
+    tick!(bare_wlocked_c)  OR_ELSE EXIT;
 
-    tick!(bare_versioned_c) OR EXIT;
-    tick!(bare_versioned_c) OR EXIT;
-    tick!(bare_versioned_c) OR EXIT;
+    tick!(bare_versioned_c) OR_ELSE EXIT;
+    tick!(bare_versioned_c) OR_ELSE EXIT;
+    tick!(bare_versioned_c) OR_ELSE EXIT;
 
     # Read each cell through its native read shape and ASSERT.
     # A wrong dispatch (e.g. Versioned silently lowering as no-op)

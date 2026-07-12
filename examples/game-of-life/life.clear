@@ -3,13 +3,13 @@ REQUIRE "gui.clear";
 
 FN parseCell(line: String) RETURNS !Cell ->
   parts = line.split(",");
-  x = (parts[0].toNumber() OR 0.0).toInt();
-  y = (parts[1].toNumber() OR 0.0).toInt();
+  x = (parts[0].toNumber() OR_ELSE 0.0).toInt();
+  y = (parts[1].toNumber() OR_ELSE 0.0).toInt();
   RETURN Cell{ x: x, y: y };
 END
 
 FN readGrid(path: String) RETURNS !Cell[]@list ->
-  raw = readFile(path) OR RAISE;
+  raw = readFile(path) OR_ELSE RAISE;
   lines = raw.split("\n");
   MUTABLE cells: Cell[]@list = [];
   MUTABLE i = 0;

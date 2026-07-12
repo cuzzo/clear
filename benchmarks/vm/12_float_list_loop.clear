@@ -7,11 +7,11 @@ FN main() RETURNS Void ->
         current = current + 1.5;
     END
     FOR j IN (0_i64 ..< values.length()) DO
-        values[j] = (values[j] OR 0.0) + 0.25;
+        values[j] = (values[j] OR_ELSE 0.0) + 0.25;
     END
     MUTABLE total: Float64 = 0.0;
     FOR k IN (0_i64 ..< values.length()) DO
-        total = total + (values[k] OR 0.0);
+        total = total + (values[k] OR_ELSE 0.0);
     END
     whole = toInt(total);
     totalMs = timestampMs() - t0;

@@ -43,7 +43,7 @@ module AstMatchers
         end
       end
 
-      #<struct AST::BinaryOp line=2, left=#<struct AST::BinaryOp line=2, left=#<struct AST::BinaryOp line=2, left=#<struct AST::Identifier line=2, name="x">, op=:SMOOTH, right=#<struct AST::Identifier line=2, name="fail_task">>, op=:OR_RESCUE, right=#<struct AST::ThrowNode line=2, value=#<struct AST::Literal line=2, type=:STRING, value="NOK">>>, op=:SMOOTH, right=#<struct AST::Identifier line=2, name="recover_task">>
+      #<struct AST::BinaryOp line=2, left=#<struct AST::BinaryOp line=2, left=#<struct AST::BinaryOp line=2, left=#<struct AST::Identifier line=2, name="x">, op=:SMOOTH, right=#<struct AST::Identifier line=2, name="fail_task">>, op=:OR_ELSE, right=#<struct AST::ThrowNode line=2, value=#<struct AST::Literal line=2, type=:STRING, value="NOK">>>, op=:SMOOTH, right=#<struct AST::Identifier line=2, name="recover_task">>
       def description
         # Generate a DSL-like description (e.g. "Smooth(left: Var(x), right: ...)")
         name = dsl_name
@@ -63,7 +63,7 @@ module AstMatchers
 
       def dsl_name
         return "Smooth" if @attributes[:op] == :SMOOTH
-        return "OrRescue" if @attributes[:op] == :OR_RESCUE
+        return "OrElse" if @attributes[:op] == :OR_ELSE
         return "Var" if @node_class.name.end_with?("Identifier")
         @node_class.name.split('::').last
       end
@@ -76,8 +76,8 @@ module AstMatchers
         when AST::BinaryOp
           if node.op == :SMOOTH
             "Smooth(left: #{format_actual(node.left)}, right: #{format_actual(node.right)})"
-          elsif node.op == :OR_RESCUE
-            "OrRescue(left: #{format_actual(node.left)}, right: #{format_actual(node.right)})"
+          elsif node.op == :OR_ELSE
+            "OrElse(left: #{format_actual(node.left)}, right: #{format_actual(node.right)})"
           else
             "BinaryOp(op: #{node.op.inspect}, left: #{format_actual(node.left)}, right: #{format_actual(node.right)})"
           end
@@ -117,13 +117,13 @@ module AstMatchers
       NodeMatcher.new(AST::BinaryOp, attrs)
     end
 
-    def OrRescue(*args, left: nil, right: nil)
+    def OrElse(*args, left: nil, right: nil)
       if args.any?
         left = args[0]
         right = args[1]
       end
 
-      attrs = { op: :OR_RESCUE }
+      attrs = { op: :OR_ELSE }
       attrs[:left] = left if left
       attrs[:right] = right if right
 

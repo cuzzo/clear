@@ -13,7 +13,7 @@ END
 
 # Function with CATCH blocks
 FN handleWithCatch(mode: String) RETURNS !String ->
-    result = riskyOp(mode) OR RAISE;
+    result = riskyOp(mode) OR_ELSE RAISE;
     RETURN result;
 
 CATCH Transient

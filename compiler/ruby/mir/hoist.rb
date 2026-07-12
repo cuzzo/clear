@@ -28,7 +28,7 @@ module MIRHoistFacts
   sig { params(ast_node: T.nilable(AST::Node)).returns(T::Boolean) }
   def self.container_borrow_expr?(ast_node)
     return false unless ast_node
-    if ast_node.is_a?(AST::BinaryOp) && (ast_node.op == :OR || ast_node.op == :OR_RESCUE)
+    if ast_node.is_a?(AST::BinaryOp) && (ast_node.op == :OR || ast_node.op == :OR_ELSE)
       return container_borrow_expr?(ast_node.left)
     end
 
@@ -160,7 +160,7 @@ module Hoist
       expected = expected.success_type if expected
       value_type = Type.from_node!(stmt.value, context: "return value hoist")
       expected = value_type if value_type&.collection?
-      if stmt.value.is_a?(AST::BinaryOp) && (stmt.value.op == :OR || stmt.value.op == :OR_RESCUE)
+      if stmt.value.is_a?(AST::BinaryOp) && (stmt.value.op == :OR || stmt.value.op == :OR_ELSE)
         right_type = stmt.value.right.is_a?(AST::Locatable) ? stmt.value.right.full_type! : Type.from_node!(stmt.value.right, context: "return OR right hoist")
         expected = right_type if right_type&.collection?
       end
@@ -386,7 +386,7 @@ module Hoist
 
   sig { params(ast_node: AST::Node, schema_lookup: T.nilable(Proc)).returns(T::Boolean) }
   def self.owned_fallback_temp?(ast_node, schema_lookup)
-    return false unless ast_node.is_a?(AST::BinaryOp) && (ast_node.op == :OR || ast_node.op == :OR_RESCUE)
+    return false unless ast_node.is_a?(AST::BinaryOp) && (ast_node.op == :OR || ast_node.op == :OR_ELSE)
     return false unless ast_container_borrow_expr?(ast_node.left)
 
     ti = Type.from_node!(ast_node, context: "owned fallback temp")
@@ -409,7 +409,7 @@ module Hoist
   sig { params(ast_node: AST::Node).returns(T::Boolean) }
   def self.ast_access_path?(ast_node)
     node = ast_node
-    if node.is_a?(AST::BinaryOp) && (node.op == :OR || node.op == :OR_RESCUE)
+    if node.is_a?(AST::BinaryOp) && (node.op == :OR || node.op == :OR_ELSE)
       node = node.left
     end
     node.is_a?(AST::GetField) || node.is_a?(AST::GetIndex)

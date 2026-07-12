@@ -14,16 +14,16 @@
 # collected `!String[]`.
 
 PUB FN read(path: String) RETURNS !String ->
-    RETURN readFile(path) OR RAISE;
+    RETURN readFile(path) OR_ELSE RAISE;
 END
 
 PUB FN readLines(path: String) RETURNS !String[] ->
-    content = readFile(path) OR RAISE;
+    content = readFile(path) OR_ELSE RAISE;
     RETURN content.split("\n");
 END
 
 PUB FN write(path: String, content: String) RETURNS !Void ->
-    writeFile(path, content) OR RAISE;
+    writeFile(path, content) OR_ELSE RAISE;
     RETURN;
 END
 

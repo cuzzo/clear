@@ -9,7 +9,7 @@ FN benchDenseIntList(n: Int64) RETURNS !Int64 ->
     END
     MUTABLE total: Int64 = 0_i64;
     FOR i IN (0_i64 ..< n) DO
-        total = total + (values[i] OR 0_i64);
+        total = total + (values[i] OR_ELSE 0_i64);
     END
     elapsed = timestampMs() - t0;
     print("dense_int_list total=${total.toString()} ms=${elapsed.toString()}");
@@ -24,7 +24,7 @@ FN benchNumericHashMap(n: Int64) RETURNS !Int64 ->
     END
     MUTABLE total: Int64 = 0_i64;
     FOR i IN (0_i64 ..< n) DO
-        total = total + (values[i] OR 0_i64);
+        total = total + (values[i] OR_ELSE 0_i64);
     END
     elapsed = timestampMs() - t0;
     print("numeric_hashmap total=${total.toString()} ms=${elapsed.toString()}");
@@ -39,7 +39,7 @@ FN benchFloatList(n: Int64) RETURNS !Int64 ->
     END
     MUTABLE total: Float64 = 0.0;
     FOR i IN (0_i64 ..< n) DO
-        total = total + (values[i] OR 0.0);
+        total = total + (values[i] OR_ELSE 0.0);
     END
     elapsed = timestampMs() - t0;
     print("float_list total=${toInt(total).toString()} ms=${elapsed.toString()}");
@@ -56,9 +56,9 @@ FN benchStringHashMap(n: Int64) RETURNS !Int64 ->
     END
     MUTABLE total: Int64 = 0_i64;
     FOR i IN (0_i64 ..< n) DO
-        total = total + (values["alpha"] OR 0_i64);
-        total = total + (values["beta"] OR 0_i64);
-        total = total + (values["gamma"] OR 0_i64);
+        total = total + (values["alpha"] OR_ELSE 0_i64);
+        total = total + (values["beta"] OR_ELSE 0_i64);
+        total = total + (values["gamma"] OR_ELSE 0_i64);
     END
     elapsed = timestampMs() - t0;
     print("string_hashmap total=${total.toString()} ms=${elapsed.toString()}");
@@ -67,10 +67,10 @@ END
 
 FN main() RETURNS !Void ->
     n = 1000000_i64;
-    denseMs = benchDenseIntList(n) OR RAISE;
-    numericMapMs = benchNumericHashMap(n) OR RAISE;
-    floatListMs = benchFloatList(n) OR RAISE;
-    stringMapMs = benchStringHashMap(n) OR RAISE;
+    denseMs = benchDenseIntList(n) OR_ELSE RAISE;
+    numericMapMs = benchNumericHashMap(n) OR_ELSE RAISE;
+    floatListMs = benchFloatList(n) OR_ELSE RAISE;
+    stringMapMs = benchStringHashMap(n) OR_ELSE RAISE;
     print("RATIO numeric_hashmap_vs_dense_int_list=${numericMapMs.toString()}/${denseMs.toString()}");
     print("RATIO string_hashmap_vs_dense_int_list=${stringMapMs.toString()}/${denseMs.toString()}");
     print("RATIO float_list_vs_dense_int_list=${floatListMs.toString()}/${denseMs.toString()}");

@@ -35,8 +35,8 @@ FN main() RETURNS Void ->
     END
 
     # Verify values are accessible
-    ASSERT prStr(env["a"] OR Value.Nil) == "hello", "a is hello";
-    ASSERT prStr(env["b"] OR Value.Nil) == "world", "b is world";
+    ASSERT prStr(env["a"] OR_ELSE Value.Nil) == "hello", "a is hello";
+    ASSERT prStr(env["b"] OR_ELSE Value.Nil) == "world", "b is world";
 
     print("176: hashmap union dupe PASSED");
 END

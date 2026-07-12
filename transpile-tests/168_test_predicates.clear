@@ -88,7 +88,7 @@ TEST Predicates DO
   END
 
   WHEN "blank? on optional collections" DO
-    # blank? = nil? OR empty?  — only meaningful on `?T` shapes.
+    # blank? = nil? OR_ELSE empty?  — only meaningful on `?T` shapes.
     # For non-optional collections, users write `.empty?` (CLEAR
     # avoids two predicates for the same check on the same shape).
 

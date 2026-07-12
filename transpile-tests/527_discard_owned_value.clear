@@ -16,18 +16,18 @@ END
 
 FN run() RETURNS !Void ->
     # Discarded owned values: must compile to a real temp AND be freed.
-    _ = mkList() OR RAISE;
-    _ = mkBag() OR RAISE;
+    _ = mkList() OR_ELSE RAISE;
+    _ = mkBag() OR_ELSE RAISE;
     # The same functions, bound, prove they actually produce the values
     # (the discard path must not corrupt or alter behavior).
-    keep: Int64[]@list = mkList() OR RAISE;
-    bag: Bag = mkBag() OR RAISE;
+    keep: Int64[]@list = mkList() OR_ELSE RAISE;
+    bag: Bag = mkBag() OR_ELSE RAISE;
     ASSERT length(keep) == 1_i64, "discard path leaves mkList correct";
     ASSERT length(bag.items) == 1_i64, "discard path leaves mkBag correct";
     RETURN;
 END
 
 FN main() RETURNS Void ->
-    run() OR PASS;
+    run() OR_ELSE PASS;
     RETURN;
 END

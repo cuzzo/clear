@@ -292,8 +292,8 @@ module Annotator
           case source_node
           when AST::Raise
             sources << "RAISE"
-          when AST::OrRaise
-            sources << "OR RAISE"
+          when AST::OrElseRaise
+            sources << "OR_ELSE RAISE"
           when AST::FuncCall
             sources << source_node.name.to_s if retryable_with_call_fallible?(source_node)
           when AST::MethodCall

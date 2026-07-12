@@ -389,12 +389,12 @@ RSpec.describe CleanupClassifier do
   # Container borrows: data owned by container, no cleanup
   # =========================================================================
   describe "container borrow" do
-    context "HashMap get with OR default" do
+    context "HashMap get with OR_ELSE default" do
       let(:plan) do
         cleanup_for(<<~CLEAR, "test!")
           UNION Value { Nil, Str: String }
           FN test!(MUTABLE map: HashMap<Value>) RETURNS !String ->
-              val = map["t0"] OR Value.Nil;
+              val = map["t0"] OR_ELSE Value.Nil;
               PARTIAL MATCH val START
                   Value.Str AS s -> RETURN s;,
                   DEFAULT -> RETURN "";
@@ -1275,7 +1275,7 @@ RSpec.describe CleanupClassifier do
             RETURN "ok:" + mode;
         END
         FN handleWithCatch(mode: String) RETURNS !String ->
-            result = riskyOp(mode) OR RAISE;
+            result = riskyOp(mode) OR_ELSE RAISE;
             RETURN result;
         CATCH Transient
             RETURN "recovered";

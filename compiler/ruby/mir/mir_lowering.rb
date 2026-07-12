@@ -771,7 +771,7 @@ class MIRLowering
 
   sig { params(node: T.nilable(AST::Node)).returns(T::Boolean) }
   def or_binary?(node)
-    node.is_a?(AST::BinaryOp) && (node.op == :OR_RESCUE || node.op == :OR)
+    node.is_a?(AST::BinaryOp) && (node.op == :OR_ELSE || node.op == :OR)
   end
 
   sig { params(mir: MIR::Node, ast_node: AST::Node).returns(DestinationSourceFact) }
@@ -1142,7 +1142,7 @@ class MIRLowering
     when AST::ForRange          then lower_for_range(node)
     when AST::MatchStatement    then lower_match(node)
     when AST::ReturnNode        then lower_return(node)
-    when AST::BreakNode, AST::OrBreak then MIR::BreakStmt.new(nil, nil)
+    when AST::BreakNode, AST::OrElseBreak then MIR::BreakStmt.new(nil, nil)
     when AST::ContinueNode      then MIR::ContinueStmt.new(nil)
     when AST::PassStmt          then MIR::Noop.new("pass")
 
@@ -1201,9 +1201,9 @@ class MIRLowering
     when AST::YieldExpr        then lower_yield(node)
     when AST::NextExpr         then lower_next_expr(node)
     when AST::StaticCall       then lower_static_call(node)
-    when AST::OrRaise          then MIR::FieldGet.new(MIR::Ident.new("error"), "OrRaise")
-    when AST::OrPass, AST::OrPrune then MIR::DefaultValue.new(kind: :undefined)
-    when AST::OrExit           then lower_or_exit(node)
+    when AST::OrElseRaise          then MIR::FieldGet.new(MIR::Ident.new("error"), "OrElseRaise")
+    when AST::OrElsePass, AST::OrElsePrune then MIR::DefaultValue.new(kind: :undefined)
+    when AST::OrElseExit           then lower_or_else_exit(node)
     when AST::ThenChain        then raise "Internal: ThenChain should be flattened by BgBlock lowering"
     when AST::AssertRaises     then lower_assert_raises(node)
     when AST::StubDecl         then lower_stub_decl(node)
@@ -3405,9 +3405,9 @@ class MIRLowering
     )
   end
 
-  sig { params(node: AST::OrExit).returns(MIR::ScopeBlock) }
-  def lower_or_exit(node)
-    facts = or_exit_facts(node, node.token.line)
+  sig { params(node: AST::OrElseExit).returns(MIR::ScopeBlock) }
+  def lower_or_else_exit(node)
+    facts = or_else_exit_facts(node, node.token.line)
 
     # Register VM: structural sibling of the Zig backend sequence below.
     # The bc emitter cannot parse Zig (CLAUDE.md), so carry the
@@ -3416,13 +3416,13 @@ class MIRLowering
     if bc_target?
       msg_mir = node.message ? lower(node.message) : nil
       return MIR::ScopeBlock.new([
-        MIR::ExprStmt.new(or_exit_bc_reassign(facts, msg_mir), false),
+        MIR::ExprStmt.new(or_else_exit_bc_reassign(facts, msg_mir), false),
         MIR::ReturnStmt.new(MIR::FieldGet.new(MIR::Ident.new("error"), "CheatError"))
       ])
     end
 
     msg_mir = node.message ? lower(node.message) : nil
-    or_exit_scope(facts, msg_mir, MIR::FieldGet.new(MIR::Ident.new("error"), "CheatError"))
+    or_else_exit_scope(facts, msg_mir, MIR::FieldGet.new(MIR::Ident.new("error"), "CheatError"))
   end
 
   # Test-framework MIR lowering (lower_test_block, lower_assert_raises,

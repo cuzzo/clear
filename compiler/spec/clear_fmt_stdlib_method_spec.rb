@@ -15,7 +15,7 @@ RSpec.describe Formatter, "stdlib METHOD UFCS rewrite" do
     it "rewrites toInt(s) to s.toInt()" do
       src = <<~CLEAR
         FN main() RETURNS Void ->
-          n = toInt("42") OR 0;
+          n = toInt("42") OR_ELSE 0;
           RETURN;
         END
       CLEAR
@@ -35,7 +35,7 @@ RSpec.describe Formatter, "stdlib METHOD UFCS rewrite" do
     it "rewrites toFloat(s) to s.toFloat()" do
       src = <<~CLEAR
         FN main() RETURNS Void ->
-          f = toFloat("3.14") OR 0.0;
+          f = toFloat("3.14") OR_ELSE 0.0;
           RETURN;
         END
       CLEAR

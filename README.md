@@ -38,7 +38,7 @@ bill = users AS $u
 
 ```ruby
 FN myFunc(id: Int64, name: String) RETURNS !MyPage ->
-  page = fetchData(id, name) OR RAISE
+  page = fetchData(id, name) OR_ELSE RAISE
     |> parseHeader
     |> parseBody
     |> fetchUser

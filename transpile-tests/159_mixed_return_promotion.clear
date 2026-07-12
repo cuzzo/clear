@@ -13,7 +13,7 @@ FN convert!(token: String) RETURNS !Val ->
     IF token == "nil" THEN RETURN Val.Nil; END
     IF charAt(token, 0) == "\"" THEN RETURN Val{ Str: substr(token, 1, token.length() - 2) }; END
     # Path 2: number (no promotion needed)
-    n = toNumber(token) OR (0.0 - 999999.0);
+    n = toNumber(token) OR_ELSE (0.0 - 999999.0);
     IF n != 0.0 - 999999.0 THEN RETURN Val{ Num: n }; END
     # Path 3: COPY string (already heap, must not double-promote)
     RETURN Val{ Str: COPY token };

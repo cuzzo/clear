@@ -1,20 +1,20 @@
-# Register VM: Error-Union Runtime (RAISE / OR RAISE / OR EXIT / CATCH)
+# Register VM: Error-Union Runtime (RAISE / OR_ELSE RAISE / OR_ELSE EXIT / CATCH)
 
 Status: IN PROGRESS (started 2026-05-17, `register-machine` branch).
-Owner cluster: roadmap P2 "CatchWrapper / RAISE / OR EXIT", ~13 tests.
+Owner cluster: roadmap P2 "CatchWrapper / RAISE / OR_ELSE EXIT", ~13 tests.
 
 ## Why this is structured, not Zig-text
 
 `MIR::CatchWrapper.code` is a Zig string (Zig-backend path) and MUST
 NOT be parsed (CLAUDE.md no-Zig rule). But CatchWrapper also carries
-fully structured fields, and RAISE / OR RAISE lower to ordinary
+fully structured fields, and RAISE / OR_ELSE RAISE lower to ordinary
 structured MIR — verified by MIR dump of `76_catch_blocks`:
 
 | Surface | Structured MIR |
 |---|---|
 | `RAISE K, T, "m"` | `ExprStmt MethodCall rt.setError(.K, @intFromEnum(ErrorName.T), "m", line)` then `ReturnStmt Ident("error.CheatError")` |
-| `call() OR RAISE` | `MIR::TryExpr(Call)` |
-| `call() OR EXIT ...` | `MIR::TryExpr(Call)` + `CatchWrapper.error_reassigns` |
+| `call() OR_ELSE RAISE` | `MIR::TryExpr(Call)` |
+| `call() OR_ELSE EXIT ...` | `MIR::TryExpr(Call)` + `CatchWrapper.error_reassigns` |
 | CATCH/DEFAULT fn | `MIR::CatchWrapper{ clause_meta, clause_bodies, has_default }` |
 
 `clause_meta` example (`76`):
@@ -62,7 +62,7 @@ unused); `errored=1` is what callers test.
 
 - `rt.setError(...)` MethodCall  -> `ERAISE` (replaces the current
   no-op at register_bc_emitter.rb:952 for setError specifically).
-- `MIR::TryExpr(call)` / OR RAISE -> compile the call, then `EGUARD
+- `MIR::TryExpr(call)` / OR_ELSE RAISE -> compile the call, then `EGUARD
   fn_error_epilogue`. The epilogue is a per-fn label that RETs
   (errored stays 1 -> propagates one frame up).
 - `MIR::CatchWrapper` -> emit call to the inner `__*_body` FnDef
@@ -75,7 +75,7 @@ unused); `errored=1` is what callers test.
     First true clause: `ECLR`, run its `clause_body` (ends in RETURN).
   - else if `has_default`: `ECLR`, run default body.
   - else: leave errored=1, RET (re-propagate).
-- OR EXIT (`error_reassigns`): before propagating, call `rt.setError`
+- OR_ELSE EXIT (`error_reassigns`): before propagating, call `rt.setError`
   with overridden (kind|name|message) fields, inheriting the current
   `rt.__error` value for any field not overridden (B clears type to
   0; A inherits kind+type, replaces msg only; etc. per `272`).
@@ -83,7 +83,7 @@ unused); `errored=1` is what callers test.
 ## Commit plan
 
 1. **Foundation**: `errored` flag, `ERAISE`, `EGUARD`, `ECLR`,
-   `EMATCHK`; TryExpr/OR RAISE propagation; CatchWrapper kind-only +
+   `EMATCHK`; TryExpr/OR_ELSE RAISE propagation; CatchWrapper kind-only +
    DEFAULT dispatch. Target: kind-only / DEFAULT asserts of
    `76_catch_blocks`, `271_catch_unified` (`kindOnly`, `multiKind`,
    `directType` partial).
@@ -91,7 +91,7 @@ unused); `errored=1` is what callers test.
    `CATCH Kind WITH(T)`, `WITH(T1,T2)`, multi-type. Full `271`.
 3. `EMATCHM` + `filter_messages`: `WITH("msg")`, `WITH(T,"msg")`.
    Completes `76`, `271`.
-4. OR EXIT `error_reassigns` (inherit-vs-override matrix). `272`.
+4. OR_ELSE EXIT `error_reassigns` (inherit-vs-override matrix). `272`.
 5. `MIR::TryCatch` / `MIR::TryExpr` at expression-stmt position
    (216, 217, 350, 360, 381, 519, 524).
 6. Snapshot forms if reachable (`77`, `78`); else mark pending.
@@ -135,10 +135,10 @@ all work (e.g. `271` asserts every CATCH form). So commit 2 (kind)
 and commit 3 (name/EMATCHN + message/EMATCHM, with per-program
 ErrorName registry id resolution) must both land before any error
 test flips. Plan the increments accordingly (foundation -> Int64
-kind+name+message vertical slice -> string via option 1 -> OR EXIT).
+kind+name+message vertical slice -> string via option 1 -> OR_ELSE EXIT).
 
 Status: foundation committed (63723816). Commit 2 LANDED: Int64-return
-error-union (RAISE -> ERAISE+EGUARD; OR RAISE -> TryExpr+EGUARD;
+error-union (RAISE -> ERAISE+EGUARD; OR_ELSE RAISE -> TryExpr+EGUARD;
 CatchWrapper full clause matching via EFLAG/EMATCHK/EMATCHN/EMATCHM,
 predicate accumulated with IADD/IGT/IMUL since there is no JT
 opcode). `271_catch_unified` passes (every CATCH form); allowlisted.
@@ -164,23 +164,23 @@ Commit 5 LANDED: MIR::TryCatch at statement position (`call() OR
 {...};`) -> compile_try_catch_stmt (EFLAG/JF + ECLR + catch body).
 Correct + 0 regressions but no test flips yet: the 4 TryCatch tests
 each hit an orthogonal downstream blocker, now cleanly PENDING:
-- 216/217: MIR::InlineZig stmt "or_exit_line" (OR EXIT line marker).
+- 216/217: MIR::InlineZig stmt "or_exit_line" (OR_ELSE EXIT line marker).
 - 350: cap-param helper cluster.
 - 524: TryCatch in let-init position (inferred_expr_type /
   compile_let lacks MIR::TryCatch).
 
 Remaining (next commits), all cleanly PENDING with accurate reasons:
-- OR EXIT error_reassigns + "or_exit_line" InlineZig (272/216/217).
+- OR_ELSE EXIT error_reassigns + "or_exit_line" InlineZig (272/216/217).
 - TryCatch as let-init / expression value (524).
 - 77_error_snapshot -- snapshot-path DupeSlice site (orthogonal).
 - 352 / 335 / 360 -- cap-param helper cluster (orthogonal).
 
-## OR EXIT + TryCatch-as-value attempt (reverted) -- findings
+## OR_ELSE EXIT + TryCatch-as-value attempt (reverted) -- findings
 
 Attempted both in one commit; REVERTED to 5597801f (241) after a
 net regression. What was built and learned, for the next attempt:
 
-1. **Structured OR EXIT lowering works.** `lower_or_exit` with a
+1. **Structured OR_ELSE EXIT lowering works.** `lower_or_exit` with a
    `@target == :bc` branch emitting a single
    `MIR::InlineBc.new(:or_exit, [msg_mir], { kind:, name_id:,
    clear_type:, has_message:, line: })` is the right shape (Zig
@@ -196,7 +196,7 @@ net regression. What was built and learned, for the next attempt:
    path (e.g. only when the catch_body is an OR-EXIT/propagating
    ScopeBlock), leaving the static heuristic intact for existing
    value-fallback callers.
-4. **`v = call() OR EXIT ...` is `Let v = TryCatch(Call,
+4. **`v = call() OR_ELSE EXIT ...` is `Let v = TryCatch(Call,
    ScopeBlock[InlineBc:or_exit, RETURN error.CheatError])`.** The
    propagating catch_body is a ScopeBlock in *value* position;
    compile_*_expr(ScopeBlock) currently expects a block-with-break,
@@ -222,19 +222,19 @@ net regression. What was built and learned, for the next attempt:
    ever incidentally masked.
 
 Recommended next sequence: do (6b) first (decouple the gate from
-the masking), THEN OR EXIT/524 as an additive dynamic TryCatch
+the masking), THEN OR_ELSE EXIT/524 as an additive dynamic TryCatch
 (keeping items 1-2, avoiding item 3's mistake).
 
-## DONE: gate decoupled + OR EXIT landed
+## DONE: gate decoupled + OR_ELSE EXIT landed
 
 - (6b) Gate decoupled: 6 fragile frame_peak tests dropped,
   --min-pass 238 -> 235 (4f525ec0).
-- OR EXIT foundation: structured InlineBc :or_exit lowering +
+- OR_ELSE EXIT foundation: structured InlineBc :or_exit lowering +
   EREWRITE opcode, inert (8e788160).
-- OR EXIT wired (commit 6): there are TWO OR EXIT generators in
+- OR_ELSE EXIT wired (commit 6): there are TWO OR_ELSE EXIT generators in
   mir_lowering -- lower_or_exit (4377, stmt position) AND the
   AssignNode `node.right.is_a?(AST::OrExit)` path (~5211, binding
-  position `v = call() OR EXIT ...`). BOTH need the @target == :bc
+  position `v = call() OR_ELSE EXIT ...`). BOTH need the @target == :bc
   structured-InlineBc branch; the foundation only patched the
   first, which is why 272 stayed on InlineZig until the second was
   patched. compile_or_exit -> EREWRITE; propagating_catch? makes
@@ -269,9 +269,9 @@ allowlist pending is 93_tight_loop.
 
 ## Value-position TryCatch (commit 10) -- routing landed
 
-compile_value_expr now handles MIR::TryCatch (OR PASS / propagating
+compile_value_expr now handles MIR::TryCatch (OR_ELSE PASS / propagating
 catch) symmetrically with the i64/f64/string dispatchers: propagating
-catch -> EFLAG/JF + catch body; OR PASS / value-fallback -> use the
+catch -> EFLAG/JF + catch body; OR_ELSE PASS / value-fallback -> use the
 protected value. Additive, 0 regressions, allowlist still 244/244.
 524 progresses past TryCatch-routing but is NOT yet passing: it needs
 the deeper heap-list-through-fallible-return path (compile_value_expr
@@ -280,7 +280,7 @@ received @list). That is its own cluster (list ownership through OR
 PASS), tracked separately -- not a quick fix.
 
 Still PENDING (orthogonal):
-- 524_or_pass_heap_list_cleanup: heap @list returned through OR PASS;
+- 524_or_pass_heap_list_cleanup: heap @list returned through OR_ELSE PASS;
   needs list-temp value resolution + heap cleanup (own cluster).
 - 93_tight_loop (allowlisted): MIR::AddressOf i64 expressions.
 - 350/360: cap-param + defer resolved; now MIR::PolymorphicMutate /

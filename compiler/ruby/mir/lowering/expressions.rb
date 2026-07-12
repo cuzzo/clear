@@ -19,7 +19,7 @@ module MIRLoweringExpressions
     end
   end
 
-  class OrExitFacts < T::Struct
+  class OrElseExitFacts < T::Struct
     const :kind, T.nilable(String)
     const :error_name, T.nilable(String)
     const :name_id, T.nilable(Integer)
@@ -28,8 +28,9 @@ module MIRLoweringExpressions
     const :line, Integer
   end
 
-  class OrRescueFacts < T::Struct
+  class OrElseFacts < T::Struct
     const :left_is_error, T::Boolean
+    const :left_success_optional, T::Boolean
     const :line, Integer
     const :target, Symbol
   end
@@ -338,7 +339,7 @@ module MIRLoweringExpressions
     return lower_smooth(node) if node.smooth?
 
     # Error chain: expr OR handler
-    return lower_or_rescue(node) if node.op == :OR_RESCUE
+    return lower_or_else(node) if node.op == :OR_ELSE
 
     # Named pipeline binding (AS $v): passthrough to LHS value.
     # The $v registration is handled by the pipeline host at the binding point.
@@ -658,7 +659,7 @@ module MIRLoweringExpressions
   sig { params(value: MIR::Node, ast_node: AST::Node).returns(MIR::Node) }
   def string_comparison_operand(value, ast_node)
     T.bind(self, MIRLowering)
-    if ast_node.is_a?(AST::BinaryOp) && ast_node.op == :OR_RESCUE
+    if ast_node.is_a?(AST::BinaryOp) && ast_node.op == :OR_ELSE
       return place_value_for_destination(value, ast_node, :heap, ast_node.full_type!)
     end
     value
@@ -922,18 +923,18 @@ module MIRLoweringExpressions
   end
 
   # ================================================================
-  # OR_RESCUE error chain
+  # OR_ELSE error chain
   # ================================================================
 
   sig { params(node: AST::BinaryOp).returns(MIR::Node) }
-  def lower_or_rescue(node)
+  def lower_or_else(node)
     T.bind(self, MIRLowering) rescue nil
-    facts = or_rescue_facts(node)
+    facts = or_else_facts(node)
 
     left = T.cast(lower(node.left), MIR::Node)
 
-    # OR RAISE: bubble up error (Zig's try)
-    if node.right.is_a?(AST::OrRaise)
+    # OR_ELSE RAISE: bubble up error (Zig's try)
+    if node.right.is_a?(AST::OrElseRaise)
       # Extern trampolines already propagate errors internally (if frame.err |e| return e).
       # Wrapping in TryExpr produces invalid `try { block }` — Zig's try takes an expression.
       return left if left.is_a?(MIR::ExternTrampoline)
@@ -941,21 +942,21 @@ module MIRLoweringExpressions
       return left
     end
 
-    # OR EXIT <unified form>: selectively update kind / error_name /
+    # OR_ELSE EXIT <unified form>: selectively update kind / error_name /
     # message on rt.__error before propagating. Unspecified fields
     # inherit from whatever the failing call set. Kind-without-Type
     # clears the type explicitly (to avoid carrying a stale type
     # from the prior context that no longer matches the new kind).
-    if node.right.is_a?(AST::OrExit)
+    if node.right.is_a?(AST::OrElseExit)
       if facts.left_is_error && facts.target == :bc
         # Register VM: structured sibling (no Zig text). One InlineBc
         # carries the reassignment; RETURN error.CheatError propagates
         # via the bc error-union (EGUARD / inline-exit).
         ex = node.right
-        exit_facts = or_exit_facts(ex, facts.line)
+        exit_facts = or_else_exit_facts(ex, facts.line)
         msg_mir = ex.message ? T.cast(lower(ex.message), MIR::Node) : nil
         catch_block = MIR::ScopeBlock.new([
-          MIR::ExprStmt.new(or_exit_bc_reassign(exit_facts, msg_mir), false),
+          MIR::ExprStmt.new(or_else_exit_bc_reassign(exit_facts, msg_mir), false),
           MIR::ReturnStmt.new(MIR::FieldGet.new(MIR::Ident.new("error"), "CheatError"))
         ])
         return try_catch_with_provenance(left, catch_block, "__exit_err")
@@ -963,37 +964,37 @@ module MIRLoweringExpressions
 
       if facts.left_is_error
         ex = node.right
-        exit_facts = or_exit_facts(ex, facts.line)
+        exit_facts = or_else_exit_facts(ex, facts.line)
         msg_mir = ex.message ? T.cast(lower(ex.message), MIR::Node) : nil
-        catch_block = or_exit_scope(exit_facts, msg_mir, MIR::Ident.new("__exit_err"))
+        catch_block = or_else_exit_scope(exit_facts, msg_mir, MIR::Ident.new("__exit_err"))
         return try_catch_with_provenance(left, catch_block, "__exit_err")
       end
       return left
     end
 
-    # OR PASS: ignore error (Zig's catch undefined)
-    if node.right.is_a?(AST::OrPass)
-      return try_catch_with_provenance(left, or_pass_fallback(node.left), nil) if facts.left_is_error
+    # OR_ELSE PASS: ignore error (Zig's catch undefined)
+    if node.right.is_a?(AST::OrElsePass)
+      return try_catch_with_provenance(left, or_else_pass_fallback(node.left), nil) if facts.left_is_error
       return left
     end
 
-    # OR BREAK: error-to-break (Zig's catch break)
-    if node.right.is_a?(AST::OrBreak)
+    # OR_ELSE BREAK: error-to-break (Zig's catch break)
+    if node.right.is_a?(AST::OrElseBreak)
       return try_catch_with_provenance(left, MIR::BreakExpr.new(nil, nil), nil) if facts.left_is_error
       return left
     end
 
-    # OR PRUNE: same as OR PASS for now
-    if node.right.is_a?(AST::OrPrune)
-      return try_catch_with_provenance(left, or_pass_fallback(node.left), nil) if facts.left_is_error
+    # OR_ELSE PRUNE: same as OR_ELSE PASS for now
+    if node.right.is_a?(AST::OrElsePrune)
+      return try_catch_with_provenance(left, or_else_pass_fallback(node.left), nil) if facts.left_is_error
       return left
     end
 
-    # Default: expr OR fallback -> error union catch or optional orelse.
+    # Default: expr OR_ELSE fallback -> error union catch or optional orelse.
     # The fallback is evaluated lazily (only when left short-circuits to it),
     # so any allocations done while lowering it must NOT escape to outer
     # function_state.pending_stmts. AST::BinaryOp#lazy_fields declares :right as lazy when
-    # op == :OR_RESCUE; descend() consults that and wraps the right side in
+    # op == :OR_ELSE; descend() consults that and wraps the right side in
     # a MIR::BlockExpr containing the scoped pending stmts. Hot path: zero
     # allocation. Fallback path: dupes (auto-COPY etc.) happen inside the
     # block, only when actually entered.
@@ -1005,12 +1006,22 @@ module MIRLoweringExpressions
     end
 
     if facts.left_is_error
-      return try_catch_with_provenance(left, right, nil, fallback: right)
+      caught = try_catch_with_provenance(left, right, nil, fallback: right)
+      # !?T OR_ELSE fallback uses the same fallback for both failure and
+      # successful-NIL. The catch branch peer-coerces T to ?T; orelse then
+      # handles NIL. These fallback sites are mutually exclusive, so the
+      # source fallback executes at most once.
+      if facts.left_success_optional
+        out = MIR::Orelse.new(caught, right)
+        out.result_type = Type.from_node!(node, context: "fallible optional OR_ELSE result")
+        return out
+      end
+      return caught
     end
 
     # Optional orelse
     out = MIR::Orelse.new(left, right)
-    out.result_type = Type.from_node!(node, context: "optional OR result")
+    out.result_type = Type.from_node!(node, context: "optional OR_ELSE result")
     out
   end
 
@@ -1018,18 +1029,18 @@ module MIRLoweringExpressions
   def or_fallback_expected_type(node)
     T.bind(self, MIRLowering) rescue nil
     function_state.current_expected_type = T.let(function_state.current_expected_type, T.nilable(Type))
-    left_type = Type.from_node!(node.left, context: "OR fallback left type")
-    success = left_type.success_type
-    return success if success && !success.any?
+    left_type = Type.from_node!(node.left, context: "OR_ELSE fallback left type")
+    value_payload = left_type.value_payload_type
+    return value_payload unless value_payload.any?
 
     error_union = node.left.respond_to?(:error_union_type) ? node.left.error_union_type : nil
     if error_union
       eu_type = Type.new(error_union)
-      eu_success = eu_type.success_type
-      return eu_success if eu_success && !eu_success.any?
+      eu_payload = eu_type.value_payload_type
+      return eu_payload unless eu_payload.any?
     end
 
-    function_state.current_expected_type || node.full_type!(context: "OR fallback expected type")
+    function_state.current_expected_type || node.full_type!(context: "OR_ELSE fallback expected type")
   end
 
   sig { params(value: MIR::Node, ast_node: AST::Node).returns(MIR::Node) }
@@ -1039,7 +1050,7 @@ module MIRLoweringExpressions
     return value unless or_fallback_access_path?(ast_node)
 
     return value unless ast_node.is_a?(AST::Locatable)
-    ti = ast_node.full_type!(context: "OR fallback materialization")
+    ti = ast_node.full_type!(context: "OR_ELSE fallback materialization")
     return value unless ti.string? || ti.recursive_cleanup_shape?(mir_schema_lookup) || ti.needs_cleanup?(mir_schema_lookup)
 
     alloc = function_state.current_decl_alloc || :heap
@@ -1052,28 +1063,34 @@ module MIRLoweringExpressions
     ast_node.is_a?(AST::GetField) || ast_node.is_a?(AST::GetIndex)
   end
 
-  sig { params(node: AST::BinaryOp).returns(OrRescueFacts) }
-  def or_rescue_facts(node)
+  sig { params(node: AST::BinaryOp).returns(OrElseFacts) }
+  def or_else_facts(node)
     T.bind(self, MIRLowering) rescue nil
-    left_type = Type.from_node!(node.left, context: "OR/OR_RESCUE left")
+    left_type = Type.from_node!(node.left, context: "OR/OR_ELSE left")
     # CLEAR's auto-propagate strips `!T` from a fallible call's
     # full_type (so `x = call()` is x: T at the binding level). The
-    # original `!T` is stashed on `error_union_type`. OR-RESCUE needs
+    # original `!T` is stashed on `error_union_type`. OR_ELSE needs
     # to honor that to keep emitting `catch fallback` (error union)
     # rather than `orelse fallback` (optional).
     has_error_union = node.left.respond_to?(:error_union_type) && node.left.error_union_type
     can_fail = node.left.respond_to?(:can_fail) && node.left.can_fail
-    OrRescueFacts.new(
+    effective_left = if has_error_union
+                       Type.new(T.cast(node.left.error_union_type, Type::TypeInput))
+                     else
+                       left_type
+                     end
+    OrElseFacts.new(
       left_is_error: left_type.error_union? || can_fail || !!has_error_union,
+      left_success_optional: effective_left.error_union? && effective_left.success_type.optional?,
       line: node.token&.line || 0,
       target: lowering_target
     )
   end
 
   sig { params(node: AST::Node).returns(MIR::DefaultValue) }
-  def or_pass_fallback(node)
+  def or_else_pass_fallback(node)
     T.bind(self, MIRLowering) rescue nil
-    ti = Type.from_node!(node, context: "OR fallback")
+    ti = Type.from_node!(node, context: "OR_ELSE fallback")
     ti = ti.success_type || ti
     return MIR::DefaultValue.new(kind: :string_empty) if ti.string?
     return MIR::DefaultValue.new(kind: :collection_empty, zig_type: ti.zig_type) if ti.list_collection?
@@ -1214,8 +1231,8 @@ module MIRLoweringExpressions
     :direct
   end
 
-  sig { params(ex: AST::OrExit, line: Integer).returns(OrExitFacts) }
-  def or_exit_facts(ex, line)
+  sig { params(ex: AST::OrElseExit, line: Integer).returns(OrElseExitFacts) }
+  def or_else_exit_facts(ex, line)
     kind = T.let(nil, T.nilable(String))
     error_name = T.let(nil, T.nilable(String))
     name_id = T.let(nil, T.nilable(Integer))
@@ -1235,7 +1252,7 @@ module MIRLoweringExpressions
       name_id = AST.id_of_type(ex.error_name.to_sym)
     end
 
-    OrExitFacts.new(
+    OrElseExitFacts.new(
       kind: kind,
       error_name: error_name,
       name_id: name_id,
@@ -1251,8 +1268,8 @@ module MIRLoweringExpressions
     MIR::FieldGet.new(MIR::FieldGet.new(MIR::Ident.new(runtime_binding_name), "__error"), field)
   end
 
-  sig { params(facts: OrExitFacts).returns(T::Array[MIR::Stmt]) }
-  def or_exit_error_update_stmts(facts)
+  sig { params(facts: OrElseExitFacts).returns(T::Array[MIR::Stmt]) }
+  def or_else_exit_error_update_stmts(facts)
     T.bind(self, MIRLowering) rescue nil
     stmts = T.let([], T::Array[MIR::Stmt])
     if facts.kind
@@ -1269,9 +1286,9 @@ module MIRLoweringExpressions
     stmts
   end
 
-  sig { params(facts: OrExitFacts, msg_mir: T.nilable(MIR::Node)).returns(MIR::OrExitBcRewrite) }
-  def or_exit_bc_reassign(facts, msg_mir)
-    MIR::OrExitBcRewrite.new(
+  sig { params(facts: OrElseExitFacts, msg_mir: T.nilable(MIR::Node)).returns(MIR::OrElseExitBcRewrite) }
+  def or_else_exit_bc_reassign(facts, msg_mir)
+    MIR::OrElseExitBcRewrite.new(
       facts.kind,
       facts.name_id,
       facts.clear_type,
@@ -1281,10 +1298,10 @@ module MIRLoweringExpressions
     )
   end
 
-  sig { params(facts: OrExitFacts, msg_mir: T.nilable(MIR::Node), return_value: MIR::Node).returns(MIR::ScopeBlock) }
-  def or_exit_scope(facts, msg_mir, return_value)
+  sig { params(facts: OrElseExitFacts, msg_mir: T.nilable(MIR::Node), return_value: MIR::Node).returns(MIR::ScopeBlock) }
+  def or_else_exit_scope(facts, msg_mir, return_value)
     T.bind(self, MIRLowering) rescue nil
-    stmts = or_exit_error_update_stmts(facts)
+    stmts = or_else_exit_error_update_stmts(facts)
     stmts << MIR::Set.new(runtime_error_field("message"), msg_mir) if msg_mir
     stmts << MIR::Set.new(runtime_error_field("clear_line"), MIR::Lit.new(facts.line.to_s))
     stmts << MIR::ReturnStmt.new(return_value)
@@ -2426,7 +2443,7 @@ module MIRLoweringExpressions
   private :lower_direct_or_builtin_index_get
   private :lower_identifier
   private :lower_lazy_boolean_op
-  private :lower_or_rescue
+  private :lower_or_else
   private :lower_recover_smooth
   private :lower_smooth
   private :lower_smooth_call_rhs
@@ -2434,14 +2451,14 @@ module MIRLoweringExpressions
   private :lower_smooth_identifier_call
   private :materialize_or_fallback_value
   private :move_mark_field!
-  private :or_exit_bc_reassign
-  private :or_exit_error_update_stmts
-  private :or_exit_facts
-  private :or_exit_scope
+  private :or_else_exit_bc_reassign
+  private :or_else_exit_error_update_stmts
+  private :or_else_exit_facts
+  private :or_else_exit_scope
   private :or_fallback_access_path?
   private :or_fallback_expected_type
-  private :or_pass_fallback
-  private :or_rescue_facts
+  private :or_else_pass_fallback
+  private :or_else_facts
   private :pick_equality_helper
   private :recursive_field_copy_required?
   private :signed_integer_modulo?

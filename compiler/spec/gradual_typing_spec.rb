@@ -1826,7 +1826,7 @@ RSpec.describe "Gradual typing — forward-flow `[]` / `{}` inference (M2.2)" do
       findings = FixCollector.drain
       resolved = findings.select { |f| f.message.start_with?("Inferred type") }
       # Either both halves resolved → exactly one binding-level
-      # finding with a wrapped type, OR partial resolution → no
+      # finding with a wrapped type, OR_ELSE partial resolution → no
       # binding-level finding at all (and unresolved sub-slot
       # findings instead).
       resolved.each do |f|

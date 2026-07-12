@@ -109,7 +109,7 @@ FN readAtom(token: String) RETURNS !Value ->
     IF token == "true" THEN RETURN Value.TrueVal; END
     IF token == "false" THEN RETURN Value.FalseVal; END
     IF charAt(token, 0) == "\"" THEN RETURN Value{ Str: substr(token, 1, token.length() - 2) }; END
-    n = toNumber(token) OR (0.0 - 999999.0);
+    n = toNumber(token) OR_ELSE (0.0 - 999999.0);
     IF n != 0.0 - 999999.0 THEN RETURN Value{ Number: n }; END
     RETURN Value{ Symbol: COPY token };
 END
@@ -128,18 +128,18 @@ FN prStr(v: Value, readably: Bool) RETURNS !String EFFECTS REENTRANT ->
             MUTABLE out = "(";
             FOR li IN (0_i64 ..< items.length()) DO
                 IF li > 0 THEN out = out + " "; END
-                out = out + (prStr(items[li], readably) OR RAISE);
+                out = out + (prStr(items[li], readably) OR_ELSE RAISE);
             END
             RETURN out + ")";,
         Value.Vector AS velems ->
             MUTABLE vout = "#(";
             FOR vi IN (0_i64 ..< velems.length()) DO
                 IF vi > 0 THEN vout = vout + " "; END
-                vout = vout + (prStr(velems[vi], readably) OR RAISE);
+                vout = vout + (prStr(velems[vi], readably) OR_ELSE RAISE);
             END
             RETURN vout + ")";,
         Value.Pair AS p ->
-            RETURN "(" + (prStr(p.pairCar, readably) OR RAISE) + " . " + (prStr(p.pairCdr, readably) OR RAISE) + ")";,
+            RETURN "(" + (prStr(p.pairCar, readably) OR_ELSE RAISE) + " . " + (prStr(p.pairCdr, readably) OR_ELSE RAISE) + ")";,
         Value.NativeFn AS nid -> RETURN "#<native:" + nid.toString() + ">";,
         Value.Lambda -> RETURN "#<function>";,
         Value.EnvRef -> RETURN "#<envref>";,
@@ -158,21 +158,21 @@ FN tokenizeToEnv!(MUTABLE penv: HashMap<Value>, str: String) RETURNS !Void ->
     MUTABLE count: Int64 = 0;
     MUTABLE i: Int64 = 0;
     WHILE i < str.length() DO
-        c = charAt(str, i) OR RAISE;
+        c = charAt(str, i) OR_ELSE RAISE;
         IF c == " " || c == "," || c == "\n" || c == "\t" THEN i += 1;
         ELSE_IF c == "(" || c == ")" || c == "[" || c == "]" THEN
             penv["__t" + count.toString()] = Value{ Str: COPY c };
             count += 1;
             i += 1;
         ELSE_IF c == ";" THEN
-            WHILE i < str.length() && (charAt(str, i) OR RAISE) != "\n" DO i += 1; END
+            WHILE i < str.length() && (charAt(str, i) OR_ELSE RAISE) != "\n" DO i += 1; END
         ELSE_IF c == "\"" THEN
             MUTABLE s = "\""; i += 1;
-            WHILE i < str.length() && (charAt(str, i) OR RAISE) != "\"" DO
-                IF (charAt(str, i) OR RAISE) == "\\" THEN
-                    s = s + (charAt(str, i) OR RAISE); i += 1;
-                    IF i < str.length() THEN s = s + (charAt(str, i) OR RAISE); i += 1; END
-                ELSE s = s + (charAt(str, i) OR RAISE); i += 1;
+            WHILE i < str.length() && (charAt(str, i) OR_ELSE RAISE) != "\"" DO
+                IF (charAt(str, i) OR_ELSE RAISE) == "\\" THEN
+                    s = s + (charAt(str, i) OR_ELSE RAISE); i += 1;
+                    IF i < str.length() THEN s = s + (charAt(str, i) OR_ELSE RAISE); i += 1; END
+                ELSE s = s + (charAt(str, i) OR_ELSE RAISE); i += 1;
                 END
             END
             s = s + "\"";
@@ -181,8 +181,8 @@ FN tokenizeToEnv!(MUTABLE penv: HashMap<Value>, str: String) RETURNS !Void ->
             i += 1;
         ELSE
             MUTABLE s = "";
-            WHILE i < str.length() && (charAt(str, i) OR RAISE) != " " && (charAt(str, i) OR RAISE) != "," && (charAt(str, i) OR RAISE) != "\n" && (charAt(str, i) OR RAISE) != "\t" && (charAt(str, i) OR RAISE) != "(" && (charAt(str, i) OR RAISE) != ")" && (charAt(str, i) OR RAISE) != "[" && (charAt(str, i) OR RAISE) != "]" && (charAt(str, i) OR RAISE) != "\"" && (charAt(str, i) OR RAISE) != ";" DO
-                s = s + (charAt(str, i) OR RAISE); i += 1;
+            WHILE i < str.length() && (charAt(str, i) OR_ELSE RAISE) != " " && (charAt(str, i) OR_ELSE RAISE) != "," && (charAt(str, i) OR_ELSE RAISE) != "\n" && (charAt(str, i) OR_ELSE RAISE) != "\t" && (charAt(str, i) OR_ELSE RAISE) != "(" && (charAt(str, i) OR_ELSE RAISE) != ")" && (charAt(str, i) OR_ELSE RAISE) != "[" && (charAt(str, i) OR_ELSE RAISE) != "]" && (charAt(str, i) OR_ELSE RAISE) != "\"" && (charAt(str, i) OR_ELSE RAISE) != ";" DO
+                s = s + (charAt(str, i) OR_ELSE RAISE); i += 1;
             END
             IF s.length() > 0 THEN
                 penv["__t" + count.toString()] = Value{ Str: COPY s };
@@ -195,16 +195,16 @@ FN tokenizeToEnv!(MUTABLE penv: HashMap<Value>, str: String) RETURNS !Void ->
 END
 
 FN getTokenStr!(MUTABLE penv: HashMap<Value>, idx: Int64) RETURNS !String ->
-    val = penv["__t" + idx.toString()] OR Value.Nil;
+    val = penv["__t" + idx.toString()] OR_ELSE Value.Nil;
     RETURN COPY getStr(val);
 END
 
 FN readFormEnv!(MUTABLE penv: HashMap<Value>) RETURNS !Value EFFECTS REENTRANT ->
-    posVal = penv["__rp"] OR Value{ Number: 0.0 };
-    tcVal = penv["__tc"] OR Value{ Number: 0.0 };
+    posVal = penv["__rp"] OR_ELSE Value{ Number: 0.0 };
+    tcVal = penv["__tc"] OR_ELSE Value{ Number: 0.0 };
     pos = toInt(getNum(posVal));
     tc = toInt(getNum(tcVal));
-    tok = getTokenStr!(penv, pos) OR RAISE;
+    tok = getTokenStr!(penv, pos) OR_ELSE RAISE;
 
     IF pos >= tc THEN
         RETURN Value.Nil;
@@ -212,29 +212,29 @@ FN readFormEnv!(MUTABLE penv: HashMap<Value>) RETURNS !Value EFFECTS REENTRANT -
 
     IF tok == "(" || tok == "[" THEN
         penv["__rp"] = Value{ Number: toFloat(pos + 1) };
-        RETURN readListEnv!(penv) OR RAISE;
+        RETURN readListEnv!(penv) OR_ELSE RAISE;
     END
 
     penv["__rp"] = Value{ Number: toFloat(pos + 1) };
-    RETURN readAtom(tok) OR RAISE;
+    RETURN readAtom(tok) OR_ELSE RAISE;
 END
 
 FN readListEnv!(MUTABLE penv: HashMap<Value>) RETURNS !Value EFFECTS REENTRANT ->
     MUTABLE items: Value[]@list = List[];
     MUTABLE listDone = FALSE;
     WHILE listDone == FALSE DO
-        curPosVal = penv["__rp"] OR Value{ Number: 0.0 };
-        tcVal2 = penv["__tc"] OR Value{ Number: 0.0 };
+        curPosVal = penv["__rp"] OR_ELSE Value{ Number: 0.0 };
+        tcVal2 = penv["__tc"] OR_ELSE Value{ Number: 0.0 };
         curPos = toInt(getNum(curPosVal));
         tc2 = toInt(getNum(tcVal2));
         IF curPos >= tc2 THEN listDone = TRUE;
         ELSE
-            curTok = getTokenStr!(penv, curPos) OR RAISE;
+            curTok = getTokenStr!(penv, curPos) OR_ELSE RAISE;
             IF curTok == ")" || curTok == "]" THEN
                 penv["__rp"] = Value{ Number: toFloat(curPos + 1) };
                 listDone = TRUE;
             ELSE
-                item = readFormEnv!(penv) OR RAISE;
+                item = readFormEnv!(penv) OR_ELSE RAISE;
                 items.append(item);
             END
         END
@@ -273,7 +273,7 @@ FN applyNative!(id: Int64, evaled: Value[], envId: Id<Env>, MUTABLE pool: Env[50
     IF id == 12 THEN RETURN boolVal(listLen(evaled[1]) == 0); END
     IF id == 13 THEN RETURN Value{ Number: toFloat(listLen(evaled[1])) }; END
     IF id == 14 THEN RETURN boolVal(isTruthy?(evaled[1]) == FALSE); END
-    IF id == 15 THEN appendOutput!(envId, (prStr(evaled[1], TRUE) OR "") + "\n", pool) OR RAISE; RETURN Value.Nil; END
+    IF id == 15 THEN appendOutput!(envId, (prStr(evaled[1], TRUE) OR_ELSE "") + "\n", pool) OR_ELSE RAISE; RETURN Value.Nil; END
     # Vector
     IF id == 16 THEN
         MUTABLE velems: Value[]@list = List[];
@@ -281,14 +281,14 @@ FN applyNative!(id: Int64, evaled: Value[], envId: Id<Env>, MUTABLE pool: Env[50
             velems.append(COPY evaled[vi]);
         RETURN Value{ Vector: velems };
     END
-    IF id == 17 THEN RETURN vecRef(evaled[1], toInt(getNum(evaled[2]))) OR RAISE; END
+    IF id == 17 THEN RETURN vecRef(evaled[1], toInt(getNum(evaled[2]))) OR_ELSE RAISE; END
     IF id == 18 THEN RETURN Value.Nil; END
     IF id == 19 THEN RETURN Value{ Number: toFloat(vecLen(evaled[1])) }; END
     IF id == 20 THEN RETURN boolVal(isVector?(evaled[1])); END
     # Pair
     IF id == 21 THEN RETURN Value.Pair{ pairCar: COPY evaled[1], pairCdr: COPY evaled[2] }; END
-    IF id == 22 THEN RETURN pairCar(evaled[1]) OR RAISE; END
-    IF id == 23 THEN RETURN pairCdr(evaled[1]) OR RAISE; END
+    IF id == 22 THEN RETURN pairCar(evaled[1]) OR_ELSE RAISE; END
+    IF id == 23 THEN RETURN pairCdr(evaled[1]) OR_ELSE RAISE; END
     IF id == 24 THEN RETURN boolVal(isPair?(evaled[1])); END
     IF id == 25 THEN RETURN boolVal(valEqual?(evaled[1], evaled[2])); END
     # String
@@ -317,7 +317,7 @@ FN applyNative!(id: Int64, evaled: Value[], envId: Id<Env>, MUTABLE pool: Env[50
         RETURN Value{ Str: toInt(n).toString() };
     END
     IF id == 31 THEN
-        parsed = toNumber(getStr(evaled[1])) OR (0.0 - 999999.0);
+        parsed = toNumber(getStr(evaled[1])) OR_ELSE (0.0 - 999999.0);
         IF parsed == 0.0 - 999999.0 THEN RETURN Value.FalseVal; END
         RETURN Value{ Number: parsed };
     END
@@ -325,7 +325,7 @@ FN applyNative!(id: Int64, evaled: Value[], envId: Id<Env>, MUTABLE pool: Env[50
         PARTIAL MATCH evaled[1] START Value.Str -> RETURN Value.TrueVal;, DEFAULT -> RETURN Value.FalseVal; END
         RETURN Value.FalseVal;
     END
-    IF id == 33 THEN appendOutput!(envId, prStr(evaled[1], FALSE) OR "", pool) OR RAISE; RETURN Value.Nil; END
+    IF id == 33 THEN appendOutput!(envId, prStr(evaled[1], FALSE) OR_ELSE "", pool) OR_ELSE RAISE; RETURN Value.Nil; END
 
     RETURN Value.Nil;
 END
@@ -336,10 +336,10 @@ FN envGet!(envId: Id<Env>, name: String, MUTABLE pool: Env[50000]@pool) RETURNS 
     MUTABLE parentVal: Value = Value.Nil;
     IF pool[envId] AS env THEN
         IF env.vars[name] AS found THEN RETURN COPY found; END
-        parentVal = COPY (env.vars["__p"] OR Value.Nil);
+        parentVal = COPY (env.vars["__p"] OR_ELSE Value.Nil);
     END
     PARTIAL MATCH parentVal START
-        Value.EnvRef AS pid -> RETURN envGet!(pid, name, pool) OR RAISE;,
+        Value.EnvRef AS pid -> RETURN envGet!(pid, name, pool) OR_ELSE RAISE;,
         DEFAULT -> RETURN Value.Nil;
     END
 END
@@ -353,27 +353,27 @@ FN envSet!(envId: Id<Env>, name: String, TAKES val: Value, MUTABLE pool: Env[500
             env.vars[name] = val;
             RETURN TRUE;
         END
-        parentVal = COPY (env.vars["__p"] OR Value.Nil);
+        parentVal = COPY (env.vars["__p"] OR_ELSE Value.Nil);
     END
     PARTIAL MATCH parentVal START
-        Value.EnvRef AS pid -> RETURN envSet!(pid, name, val, pool) OR RAISE;,
+        Value.EnvRef AS pid -> RETURN envSet!(pid, name, val, pool) OR_ELSE RAISE;,
         DEFAULT -> RETURN FALSE;
     END
 END
 
 FN appendOutput!(envId: Id<Env>, chunk: String, MUTABLE pool: Env[50000]@pool) RETURNS !Void EFFECTS REENTRANT ->
-    current = envGet!(envId, "__output", pool) OR Value.Nil;
-    envSet!(envId, "__output", Value{ Str: COPY (getStr(current) + chunk) }, pool) OR RAISE;
+    current = envGet!(envId, "__output", pool) OR_ELSE Value.Nil;
+    envSet!(envId, "__output", Value{ Str: COPY (getStr(current) + chunk) }, pool) OR_ELSE RAISE;
     RETURN;
 END
 
 FN readOutput!(envId: Id<Env>, MUTABLE pool: Env[50000]@pool) RETURNS !String ->
-    current = envGet!(envId, "__output", pool) OR Value.Nil;
+    current = envGet!(envId, "__output", pool) OR_ELSE Value.Nil;
     RETURN COPY getStr(current);
 END
 
 FN clearOutput!(envId: Id<Env>, MUTABLE pool: Env[50000]@pool) RETURNS !Void ->
-    envSet!(envId, "__output", Value{ Str: "" }, pool) OR RAISE;
+    envSet!(envId, "__output", Value{ Str: "" }, pool) OR_ELSE RAISE;
     RETURN;
 END
 
@@ -468,9 +468,9 @@ FN eval!(astIn: Value, envId: Id<Env>, MUTABLE pool: Env[50000]@pool) RETURNS !V
     WHILE tcoActive DO
         PARTIAL MATCH ast START
             Value.Symbol AS sym ->
-                RETURN envGet!(curEnv, sym, pool) OR Value.Error{ errMsg: "lookup failed", errKind: "RuntimeError" };,
+                RETURN envGet!(curEnv, sym, pool) OR_ELSE Value.Error{ errMsg: "lookup failed", errKind: "RuntimeError" };,
             Value.List AS listItems ->
-                result = evalList!(listItems, curEnv, pool) OR RAISE;
+                result = evalList!(listItems, curEnv, pool) OR_ELSE RAISE;
                 PARTIAL MATCH result START
                     Value.Tco AS tco ->
                         ast = COPY tco.tcoAst;
@@ -492,15 +492,15 @@ FN evalList!(items: Value[], envId: Id<Env>, MUTABLE pool: Env[50000]@pool) RETU
 
     # Error introspection: special forms to avoid error propagation
     IF formName == "error?" THEN
-        val = eval!(COPY items[1], envId, pool) OR RAISE;
+        val = eval!(COPY items[1], envId, pool) OR_ELSE RAISE;
         RETURN boolVal(isError?(val));
 
     ELSE_IF formName == "error-message" THEN
-        val = eval!(items[1], envId, pool) OR RAISE;
+        val = eval!(items[1], envId, pool) OR_ELSE RAISE;
         RETURN Value{ Str: COPY getErrMsg(val) };
 
     ELSE_IF formName == "error-kind" THEN
-        val = eval!(items[1], envId, pool) OR RAISE;
+        val = eval!(items[1], envId, pool) OR_ELSE RAISE;
         RETURN Value{ Str: COPY getErrKind(val) };
 
     ELSE_IF formName == "quote" THEN
@@ -508,36 +508,36 @@ FN evalList!(items: Value[], envId: Id<Env>, MUTABLE pool: Env[50000]@pool) RETU
         RETURN COPY quoted;
 
     ELSE_IF formName == "raise" THEN
-        msg = eval!(items[1], envId, pool) OR RAISE;
+        msg = eval!(items[1], envId, pool) OR_ELSE RAISE;
         IF isError?(msg) THEN RETURN COPY msg; END
-        kind = eval!(items[2], envId, pool) OR RAISE;
+        kind = eval!(items[2], envId, pool) OR_ELSE RAISE;
         IF isError?(kind) THEN RETURN COPY kind; END
         RETURN Value.Error{ errMsg: COPY getStr(msg), errKind: COPY getStr(kind) };
 
     ELSE_IF formName == "try" THEN
         # (try expr (catch e handler))
-        MUTABLE tryResult: Value = eval!(items[1], envId, pool) OR RAISE;
+        MUTABLE tryResult: Value = eval!(items[1], envId, pool) OR_ELSE RAISE;
         PARTIAL MATCH tryResult START
             Value.Error AS e ->
-                RETURN handleCatch!(items[2], e.errMsg, e.errKind, envId, pool) OR Value.Error{ errMsg: COPY e.errMsg, errKind: COPY e.errKind };,
+                RETURN handleCatch!(items[2], e.errMsg, e.errKind, envId, pool) OR_ELSE Value.Error{ errMsg: COPY e.errMsg, errKind: COPY e.errKind };,
             DEFAULT -> RETURN COPY tryResult;
         END
         RETURN COPY tryResult;
 
     ELSE_IF formName == "def!" || formName == "define" THEN
         defName = getSymName(items[1]);
-        val = eval!(items[2], envId, pool) OR RAISE;
+        val = eval!(items[2], envId, pool) OR_ELSE RAISE;
         IF isError?(val) THEN RETURN COPY val; END
         IF pool[envId] AS defEnv THEN defEnv.vars[defName] = val; END
         MUTABLE result = Value.Nil;
-        IF pool[envId] AS defEnv2 THEN result = defEnv2.vars[defName] OR Value.Nil; END
+        IF pool[envId] AS defEnv2 THEN result = defEnv2.vars[defName] OR_ELSE Value.Nil; END
         RETURN COPY result;
 
     ELSE_IF formName == "set!" THEN
         setName = getSymName(items[1]);
-        setVal = eval!(items[2], envId, pool) OR RAISE;
+        setVal = eval!(items[2], envId, pool) OR_ELSE RAISE;
         IF isError?(setVal) THEN RETURN COPY setVal; END
-        envSet!(envId, setName, COPY setVal, pool) OR FALSE;
+        envSet!(envId, setName, COPY setVal, pool) OR_ELSE FALSE;
         RETURN COPY setVal;
 
     ELSE_IF formName == "let*" || formName == "let" THEN
@@ -550,7 +550,7 @@ FN evalList!(items: Value[], envId: Id<Env>, MUTABLE pool: Env[50000]@pool) RETU
                         PARTIAL MATCH binds[bi] START
                             Value.List AS pair ->
                                 bName = getSymName(pair[0]);
-                                bVal = eval!(COPY pair[1], letId, pool) OR RAISE;
+                                bVal = eval!(COPY pair[1], letId, pool) OR_ELSE RAISE;
                                 IF isError?(bVal) THEN RETURN bVal; END
                                 IF pool[letId] AS letEnv2 THEN letEnv2.vars[bName] = COPY bVal; END,
                             DEFAULT -> PASS;
@@ -560,7 +560,7 @@ FN evalList!(items: Value[], envId: Id<Env>, MUTABLE pool: Env[50000]@pool) RETU
                     MUTABLE bi: Int64 = 0;
                     WHILE bi < binds.length() DO
                         bName = getSymName(binds[bi]);
-                        bVal = eval!(COPY binds[bi + 1], letId, pool) OR RAISE;
+                        bVal = eval!(COPY binds[bi + 1], letId, pool) OR_ELSE RAISE;
                         IF isError?(bVal) THEN RETURN bVal; END
                         IF pool[letId] AS letEnv3 THEN letEnv3.vars[bName] = COPY bVal; END
                         bi += 2;
@@ -580,7 +580,7 @@ FN evalList!(items: Value[], envId: Id<Env>, MUTABLE pool: Env[50000]@pool) RETU
                     IF pi > 0 THEN paramsText = paramsText + "\n"; END
                     paramsText = paramsText + getSymName(pnames[pi]);
                 END
-                bodyText = prStr(items[2], TRUE) OR "";
+                bodyText = prStr(items[2], TRUE) OR_ELSE "";
                 IF pool[metaId] AS meta THEN
                     meta.vars["__p"] = Value{ EnvRef: envId };
                     meta.vars["__params"] = Value{ Str: COPY paramsText };
@@ -593,13 +593,13 @@ FN evalList!(items: Value[], envId: Id<Env>, MUTABLE pool: Env[50000]@pool) RETU
 
     ELSE_IF formName == "do" || formName == "begin" THEN
         FOR di IN (1_i64 ..< items.length() - 1) DO
-            stepResult = eval!(COPY items[di], envId, pool) OR RAISE;
+            stepResult = eval!(COPY items[di], envId, pool) OR_ELSE RAISE;
             IF isError?(stepResult) THEN RETURN stepResult; END
         END
         RETURN Value.Tco{ tcoAst: COPY items[items.length() - 1], tcoEnv: envId };
 
     ELSE_IF formName == "if" THEN
-        cond = eval!(COPY items[1], envId, pool) OR RAISE;
+        cond = eval!(COPY items[1], envId, pool) OR_ELSE RAISE;
         IF isError?(cond) THEN RETURN cond; END
         IF isTruthy?(cond) THEN
             RETURN Value.Tco{ tcoAst: COPY items[2], tcoEnv: envId };
@@ -613,11 +613,11 @@ FN evalList!(items: Value[], envId: Id<Env>, MUTABLE pool: Env[50000]@pool) RETU
     ELSE
         MUTABLE evaled: Value[]@list = List[];
         FOR ei IN (0_i64 ..< items.length()) DO
-            argVal = eval!(COPY items[ei], envId, pool) OR RAISE;
+            argVal = eval!(COPY items[ei], envId, pool) OR_ELSE RAISE;
             IF isError?(argVal) THEN RETURN argVal; END
             evaled.append(argVal);
         END
-        f = evaled[0] OR Value.Nil;
+        f = evaled[0] OR_ELSE Value.Nil;
         IF isLambda?(f) THEN
             PARTIAL MATCH f START
                 Value.Lambda AS lam ->
@@ -627,31 +627,31 @@ FN evalList!(items: Value[], envId: Id<Env>, MUTABLE pool: Env[50000]@pool) RETU
                     MUTABLE lambdaBodyText = "";
                     MUTABLE lambdaParamsText = "";
                     IF pool[lambdaMetaId] AS meta THEN
-                        PARTIAL MATCH meta.vars["__p"] OR Value.Nil START
+                        PARTIAL MATCH meta.vars["__p"] OR_ELSE Value.Nil START
                             Value.EnvRef AS pid -> closureEnv = pid;,
                             DEFAULT -> PASS;
                         END
-                        lambdaBodyText = getStr(meta.vars["__body"] OR Value.Nil);
-                        lambdaParamsText = getStr(meta.vars["__params"] OR Value.Nil);
+                        lambdaBodyText = getStr(meta.vars["__body"] OR_ELSE Value.Nil);
+                        lambdaParamsText = getStr(meta.vars["__params"] OR_ELSE Value.Nil);
                     END
                     IF pool[callId] AS callEnv THEN callEnv.vars["__p"] = Value{ EnvRef: closureEnv }; END
                     lambdaParamNames = lambdaParamsText.split("\n");
                     FOR pi IN (0_i64 ..< lambdaParamNames.length()) DO
                         IF lambdaParamNames[pi] != "" THEN
                             IF pool[callId] AS callEnv2 THEN
-                                callEnv2.vars[lambdaParamNames[pi]] = COPY (evaled[pi + 1] OR Value.Nil);
+                                callEnv2.vars[lambdaParamNames[pi]] = COPY (evaled[pi + 1] OR_ELSE Value.Nil);
                             END
                         END
                     END
                     MUTABLE bodyPenv: HashMap<Value> = {};
-                    lambdaResult = runTest!(lambdaBodyText, callId, pool, bodyPenv) OR RAISE;
+                    lambdaResult = runTest!(lambdaBodyText, callId, pool, bodyPenv) OR_ELSE RAISE;
                     RETURN COPY lambdaResult;,
                 DEFAULT -> RETURN Value.Nil;
             END
         ELSE
             fnId = getNativeId(f);
             IF fnId > 0 THEN
-                RETURN applyNative!(fnId, evaled, envId, pool) OR Value.Error{ errMsg: "native call failed", errKind: "RuntimeError" };
+                RETURN applyNative!(fnId, evaled, envId, pool) OR_ELSE Value.Error{ errMsg: "native call failed", errKind: "RuntimeError" };
             END
             RETURN Value.Nil;
         END
@@ -661,10 +661,10 @@ END
 # runTest: tokenize + parse + eval
 
 FN runTest!(input: String, envId: Id<Env>, MUTABLE pool: Env[50000]@pool, MUTABLE penv: HashMap<Value>) RETURNS !Value EFFECTS REENTRANT ->
-    tokenizeToEnv!(penv, input) OR RAISE;
+    tokenizeToEnv!(penv, input) OR_ELSE RAISE;
     penv["__rp"] = Value{ Number: 0.0 };
-    ast = readFormEnv!(penv) OR RAISE;
-    RETURN eval!(ast, envId, pool) OR RAISE;
+    ast = readFormEnv!(penv) OR_ELSE RAISE;
+    RETURN eval!(ast, envId, pool) OR_ELSE RAISE;
 END
 
 # Setup: create root env with all native functions registered.
@@ -714,16 +714,16 @@ END
 # Test helpers: create fresh interpreter, run input, return result string.
 
 FN evalIn!(input: String, readable: Bool, rootId: Id<Env>, MUTABLE pool: Env[50000]@pool, MUTABLE penv: HashMap<Value>) RETURNS !String ->
-    result = runTest!(input, rootId, pool, penv) OR RAISE;
-    RETURN prStr(result, readable) OR RAISE;
+    result = runTest!(input, rootId, pool, penv) OR_ELSE RAISE;
+    RETURN prStr(result, readable) OR_ELSE RAISE;
 END
 
 FN evalSeqIn!(inputs: String[], readable: Bool, rootId: Id<Env>, MUTABLE pool: Env[50000]@pool, MUTABLE penv: HashMap<Value>) RETURNS !String ->
     MUTABLE result: Value = Value.Nil;
     FOR i IN (0_i64 ..< inputs.length()) DO
-        result = runTest!(inputs[i], rootId, pool, penv) OR RAISE;
+        result = runTest!(inputs[i], rootId, pool, penv) OR_ELSE RAISE;
     END
-    RETURN prStr(result, readable) OR RAISE;
+    RETURN prStr(result, readable) OR_ELSE RAISE;
 END
 
 FN main() RETURNS Void ->

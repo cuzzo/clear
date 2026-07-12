@@ -168,7 +168,7 @@ REGISTER_ROADMAP = [
   # pending without being roadmap items.
 
   # ---- P2: hard / specialized ----
-  { priority: "P2", title: "CatchWrapper / RAISE / OR EXIT (error-union runtime)",
+  { priority: "P2", title: "CatchWrapper / RAISE / OR_ELSE EXIT (error-union runtime)",
     tests: 5, effort: "1 week",
     detail: "Needs new VM opcodes: RAISE, error register, dispatch by " \
             "error-kind/error-type. Outer fn body is a single MIR::" \

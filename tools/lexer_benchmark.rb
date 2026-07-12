@@ -95,14 +95,14 @@ module LexerBenchmark
   def clear_benchmark_source(cases, iterations)
     lexer_path = File.join(LexerHarnessSupport::ROOT, 'compiler', 'src', 'ast', 'lexer.clear')
     case_calls = cases.map do |entry|
-      "      total += consume!(#{LexerHarnessSupport.clear_string_expr(entry['source'])}) OR RAISE;"
+      "      total += consume!(#{LexerHarnessSupport.clear_string_expr(entry['source'])}) OR_ELSE RAISE;"
     end.join("\n")
 
     <<~CLEAR
       REQUIRE #{LexerHarnessSupport.clear_string_literal(lexer_path)};
 
       PRIVATE FN consume!(source: String@raw) RETURNS !Int64 ->
-        tokens = tokenizeSource!(source) OR RAISE;
+        tokens = tokenizeSource!(source) OR_ELSE RAISE;
         RETURN tokens.length();
       END
 

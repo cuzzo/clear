@@ -22,8 +22,8 @@ FN main() RETURNS Void ->
     env["b"] = Value{ Str: COPY s };
     env["c"] = Value{ Number: 42.0 };
 
-    ASSERT getStr(env["a"] OR Value.Nil) == "hello", "a";
-    ASSERT getStr(env["b"] OR Value.Nil) == "hello", "b";
+    ASSERT getStr(env["a"] OR_ELSE Value.Nil) == "hello", "a";
+    ASSERT getStr(env["b"] OR_ELSE Value.Nil) == "hello", "b";
 
     print("179: hashmap structlit no double dupe PASSED");
 END

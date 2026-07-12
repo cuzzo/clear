@@ -31,7 +31,7 @@ FN bytesToString(bytes: Int64[]@list) RETURNS !String ->
   parts.reserve(bytes.length());
   MUTABLE i = 0;
   WHILE i < bytes.length() DO
-    parts.append(byteToString(bytes[i] OR 0_i64));
+    parts.append(byteToString(bytes[i] OR_ELSE 0_i64));
     i += 1;
   END
   RETURN parts.join("");
@@ -74,7 +74,7 @@ FN copyBytes(bytes: Int64[]@list) RETURNS !Int64[]@list ->
   copied.reserve(bytes.length());
   MUTABLE i = 0;
   WHILE i < bytes.length() DO
-    copied.append(bytes[i] OR 0_i64);
+    copied.append(bytes[i] OR_ELSE 0_i64);
     i += 1;
   END
   RETURN copied;
@@ -129,7 +129,7 @@ FN makeJumpTable(program: String) RETURNS !Int64[]@list ->
     IF ch == "[" THEN
       stack.append(i);
     ELSE_IF ch == "]" THEN
-      open = stack.pop() OR -1;
+      open = stack.pop() OR_ELSE -1;
       IF open < 0 THEN
         RAISE "brnfk unmatched ] at instruction ${i.toString()}";
       END
@@ -140,7 +140,7 @@ FN makeJumpTable(program: String) RETURNS !Int64[]@list ->
   END
 
   IF stack.any?() THEN
-    open = stack.pop() OR -1;
+    open = stack.pop() OR_ELSE -1;
     RAISE "brnfk unmatched [ at instruction ${open.toString()}";
   END
 
@@ -164,22 +164,22 @@ FN runFileBytes(path: String, input: String) RETURNS !Int64[]@list ->
 END
 
 FN runFileWithLimits(path: String, input: String, tapeSize: Int64, maxSteps: Int64) RETURNS !String ->
-  bytes = runFileBytesWithLimits(path, input, tapeSize, maxSteps) OR RAISE;
+  bytes = runFileBytesWithLimits(path, input, tapeSize, maxSteps) OR_ELSE RAISE;
   RETURN ownedBytesToString(GIVE bytes);
 END
 
 FN runFileBytesWithLimits(path: String, input: String, tapeSize: Int64, maxSteps: Int64) RETURNS !Int64[]@list ->
-  program = readFile(path) OR RAISE;
+  program = readFile(path) OR_ELSE RAISE;
   RETURN runBytesWithLimits(program, input, tapeSize, maxSteps);
 END
 
 FN runWithLimits(program: String, input: String, tapeSize: Int64, maxSteps: Int64) RETURNS !String ->
-  bytes = runBytesWithLimits(program, input, tapeSize, maxSteps) OR RAISE;
+  bytes = runBytesWithLimits(program, input, tapeSize, maxSteps) OR_ELSE RAISE;
   RETURN ownedBytesToString(GIVE bytes);
 END
 
 FN runBytesWithLimits(program: String, input: String, tapeSize: Int64, maxSteps: Int64) RETURNS !Int64[]@list ->
-  inputBytes = stringToBytes(input) OR RAISE;
+  inputBytes = stringToBytes(input) OR_ELSE RAISE;
   RETURN runOwnedByteInputWithLimits(program, GIVE inputBytes, tapeSize, maxSteps);
 END
 
@@ -190,7 +190,7 @@ FN runByteInputWithLimits(
     maxSteps: Int64
 )
 RETURNS !Int64[]@list ->
-  ownedInput = copyBytes(inputBytes) OR RAISE;
+  ownedInput = copyBytes(inputBytes) OR_ELSE RAISE;
   RETURN runOwnedByteInputWithLimits(program, GIVE ownedInput, tapeSize, maxSteps);
 END
 
@@ -227,23 +227,23 @@ RETURNS !Int64[]@list ->
       END
       pointer -= 1;
     ELSE_IF op == "+" THEN
-      tape[pointer] = incByte(tape[pointer] OR 0_i64);
+      tape[pointer] = incByte(tape[pointer] OR_ELSE 0_i64);
     ELSE_IF op == "-" THEN
-      tape[pointer] = decByte(tape[pointer] OR 0_i64);
+      tape[pointer] = decByte(tape[pointer] OR_ELSE 0_i64);
     ELSE_IF op == "." THEN
-      output.append(tape[pointer] OR 0_i64);
+      output.append(tape[pointer] OR_ELSE 0_i64);
     ELSE_IF op == "," THEN
       IF inputPos < inputBytes.length() THEN
-        tape[pointer] = inputBytes[inputPos] OR 0_i64;
+        tape[pointer] = inputBytes[inputPos] OR_ELSE 0_i64;
         inputPos += 1;
       END
     ELSE_IF op == "[" THEN
-      IF (tape[pointer] OR 0_i64) == 0 THEN
-        ip = jumps[ip] OR ip;
+      IF (tape[pointer] OR_ELSE 0_i64) == 0 THEN
+        ip = jumps[ip] OR_ELSE ip;
       END
     ELSE_IF op == "]" THEN
-      IF (tape[pointer] OR 0_i64) != 0 THEN
-        ip = jumps[ip] OR ip;
+      IF (tape[pointer] OR_ELSE 0_i64) != 0 THEN
+        ip = jumps[ip] OR_ELSE ip;
       END
     END
 

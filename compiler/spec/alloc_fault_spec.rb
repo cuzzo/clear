@@ -57,7 +57,7 @@ RSpec.describe "alloc_fault (allocation FAULT axis)" do
     expect(fn(ast, "viaBare").alloc_fault).to eq(true)
   end
 
-  it "does NOT propagate when the alloc callee's fault channel is OR-absorbed (#11 authority)" do
+  it "does NOT propagate when the alloc callee's fault channel is OR_ELSE-absorbed (#11 authority)" do
     ast = annotate(<<~CLEAR)
       FN build() RETURNS Int64[]@list ->
         MUTABLE xs: Int64[]@list = [];
@@ -65,13 +65,13 @@ RSpec.describe "alloc_fault (allocation FAULT axis)" do
         RETURN xs;
       END
       FN viaAbsorbed(flag: Bool) RETURNS Int64 ->
-        zs = build() OR PASS;
+        zs = build() OR_ELSE PASS;
         IF flag THEN RETURN 1_i64; END
         RETURN 0_i64;
       END
     CLEAR
     # viaAbsorbed itself does not allocate; the only allocating callee
-    # is reached via `build() OR PASS`, so the fault channel terminates
+    # is reached via `build() OR_ELSE PASS`, so the fault channel terminates
     # there and must not propagate.
     expect(fn(ast, "viaAbsorbed").alloc_fault).to eq(false)
   end

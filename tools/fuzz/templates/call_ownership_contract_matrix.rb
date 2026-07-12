@@ -73,11 +73,11 @@ def com_decl(shape, name = "v")
   case shape
   when :string then "#{name}: String = COPY \"abc\";"
   when :list then "MUTABLE #{name}: Int64[]@list = []; #{name}.append(1_i64);"
-  when :string_list then "#{name}: String[]@list = mkStringList() OR RAISE;"
+  when :string_list then "#{name}: String[]@list = mkStringList() OR_ELSE RAISE;"
   when :struct_string then "#{name}: Box = Box{ name: COPY \"abc\" };"
-  when :union_owned then "#{name}: Val = Val{ Items: mkStringList() OR RAISE };"
+  when :union_owned then "#{name}: Val = Val{ Items: mkStringList() OR_ELSE RAISE };"
   when :nested_list then "MUTABLE inner: Int64[]@list = []; inner.append(1_i64); #{name}: Nest = Nest{ items: inner };"
-  when :nested_string_list then "#{name}: StringNest = StringNest{ items: mkStringList() OR RAISE };"
+  when :nested_string_list then "#{name}: StringNest = StringNest{ items: mkStringList() OR_ELSE RAISE };"
   end
 end
 
@@ -96,12 +96,12 @@ end
 def com_literal(shape)
   case shape
   when :string then 'COPY "abc"'
-  when :list then "mkList() OR RAISE"
-  when :string_list then "mkStringList() OR RAISE"
+  when :list then "mkList() OR_ELSE RAISE"
+  when :string_list then "mkStringList() OR_ELSE RAISE"
   when :struct_string then 'Box{ name: COPY "abc" }'
-  when :union_owned then "Val{ Items: mkStringList() OR RAISE }"
-  when :nested_list then "Nest{ items: mkList() OR RAISE }"
-  when :nested_string_list then "StringNest{ items: mkStringList() OR RAISE }"
+  when :union_owned then "Val{ Items: mkStringList() OR_ELSE RAISE }"
+  when :nested_list then "Nest{ items: mkList() OR_ELSE RAISE }"
+  when :nested_string_list then "StringNest{ items: mkStringList() OR_ELSE RAISE }"
   end
 end
 
@@ -173,7 +173,7 @@ FuzzGenerator.register(:call_ownership_contract_matrix, cells: CALL_OWNERSHIP_CE
       END
 
       FN main() RETURNS !Void ->
-        v: #{ty} = make() OR RAISE;
+        v: #{ty} = make() OR_ELSE RAISE;
         ASSERT #{com_len_expr(p[:shape], "v")} == #{com_expected_count(p[:shape])}_i64, "call return owned";
         RETURN;
       END
@@ -182,12 +182,12 @@ FuzzGenerator.register(:call_ownership_contract_matrix, cells: CALL_OWNERSHIP_CE
   when :return_or_fallback
     fallback = case p[:shape]
                when :string then 'COPY "fallback"'
-               when :list then "mkList() OR RAISE"
-               when :string_list then "mkStringList() OR RAISE"
+               when :list then "mkList() OR_ELSE RAISE"
+               when :string_list then "mkStringList() OR_ELSE RAISE"
                when :struct_string then 'Box{ name: COPY "fallback" }'
-               when :union_owned then "Val{ Items: mkStringList() OR RAISE }"
-               when :nested_list then "Nest{ items: mkList() OR RAISE }"
-               when :nested_string_list then "StringNest{ items: mkStringList() OR RAISE }"
+               when :union_owned then "Val{ Items: mkStringList() OR_ELSE RAISE }"
+               when :nested_list then "Nest{ items: mkList() OR_ELSE RAISE }"
+               when :nested_string_list then "StringNest{ items: mkStringList() OR_ELSE RAISE }"
                end
     <<~CHT
       #{pre}#{helper_list}
@@ -197,7 +197,7 @@ FuzzGenerator.register(:call_ownership_contract_matrix, cells: CALL_OWNERSHIP_CE
       END
 
       FN main() RETURNS !Void ->
-        v: #{ty} = maybe(FALSE) OR #{fallback};
+        v: #{ty} = maybe(FALSE) OR_ELSE #{fallback};
         ASSERT #{com_len_expr(p[:shape], "v")} >= 1_i64, "call return fallback";
         RETURN;
       END
@@ -206,12 +206,12 @@ FuzzGenerator.register(:call_ownership_contract_matrix, cells: CALL_OWNERSHIP_CE
   when :fallible_arg
     fallback = case p[:shape]
                when :string then 'COPY "fallback"'
-               when :list then "mkList() OR RAISE"
-               when :string_list then "mkStringList() OR RAISE"
+               when :list then "mkList() OR_ELSE RAISE"
+               when :string_list then "mkStringList() OR_ELSE RAISE"
                when :struct_string then 'Box{ name: COPY "fallback" }'
-               when :union_owned then "Val{ Items: mkStringList() OR RAISE }"
-               when :nested_list then "Nest{ items: mkList() OR RAISE }"
-               when :nested_string_list then "StringNest{ items: mkStringList() OR RAISE }"
+               when :union_owned then "Val{ Items: mkStringList() OR_ELSE RAISE }"
+               when :nested_list then "Nest{ items: mkList() OR_ELSE RAISE }"
+               when :nested_string_list then "StringNest{ items: mkStringList() OR_ELSE RAISE }"
                end
     <<~CHT
       #{pre}#{helper_list}
@@ -222,7 +222,7 @@ FuzzGenerator.register(:call_ownership_contract_matrix, cells: CALL_OWNERSHIP_CE
       FN observe(x: #{ty}) RETURNS Int64 -> RETURN #{com_len_expr(p[:shape])}; END
 
       FN main() RETURNS !Void ->
-        ASSERT observe(maybe(FALSE) OR #{fallback}) >= 1_i64, "fallible call arg";
+        ASSERT observe(maybe(FALSE) OR_ELSE #{fallback}) >= 1_i64, "fallible call arg";
         RETURN;
       END
     CHT

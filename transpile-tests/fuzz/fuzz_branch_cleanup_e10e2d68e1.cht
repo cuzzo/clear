@@ -12,7 +12,7 @@ FN run(cond: Bool) RETURNS !Void ->
 END
 
 FN main() RETURNS Void ->
-    run(TRUE) OR PASS;
-    run(FALSE) OR PASS;
+    run(TRUE) OR_ELSE PASS;
+    run(FALSE) OR_ELSE PASS;
     RETURN;
 END

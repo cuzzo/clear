@@ -27,7 +27,7 @@ END
 
 FN main() RETURNS !Void ->
   FOR i IN (0 ..< 5) DO
-    handle_request(1) OR RAISE;
+    handle_request(1) OR_ELSE RAISE;
   END
 
   # ----------------------------------------------------------------

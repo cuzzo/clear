@@ -1,5 +1,5 @@
 # Test: EXTERN FFI to Zig standard library (no native shims).
-# Exercises: comptime type args, EFFECTS :alloc:heap, OR RAISE, CLOSE cleanup,
+# Exercises: comptime type args, EFFECTS :alloc:heap, OR_ELSE RAISE, CLOSE cleanup,
 # C-string params (String -> [*:0]const u8), UInt32 suffix.
 
 EXTERN STRUCT ParseOptions {} FROM "std.json";
@@ -14,7 +14,7 @@ FN main() RETURNS Void ->
 
     # std.json.parseFromSlice: comptime type arg baked into call, not a struct field
     opts: ParseOptions = ParseOptions{};
-    parsed = parseFromSlice(Value, "{\"x\":3,\"y\":4}", opts) OR RAISE;
+    parsed = parseFromSlice(Value, "{\"x\":3,\"y\":4}", opts) OR_ELSE RAISE;
     print("stdlib FFI ok");
     RETURN;
 END

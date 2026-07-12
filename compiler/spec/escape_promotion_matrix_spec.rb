@@ -149,7 +149,7 @@ RSpec.describe "Escape promotion matrix (Phase 1a)" do
         storage = d.respond_to?(:symbol) && d.symbol ? d.symbol.storage : d.storage
         expect(storage).to eq(expected_storage), "storage for #{name}: got #{storage.inspect}, want #{expected_storage.inspect}"
         if expected_cleanup.nil?
-          # No cleanup entry expected (Copy types) OR entry exists but
+          # No cleanup entry expected (Copy types) OR_ELSE entry exists but
           # cleanup is unnecessary (frame-string returned via codegen
           # promotion).
           expect(entry.nil? || !entry[:needs_cleanup]).to(be(true),

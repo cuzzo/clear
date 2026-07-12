@@ -31,7 +31,7 @@ def lbm_shape(shape)
   when :string
     ["", "String", 'COPY "abc"', "x.length()", "3_i64"]
   when :list
-    ["", "Int64[]@list", "mkList() OR RAISE", "x.length()", "2_i64"]
+    ["", "Int64[]@list", "mkList() OR_ELSE RAISE", "x.length()", "2_i64"]
   when :struct
     ["STRUCT Box { label: String }\n", "Box", 'Box{ label: COPY "abc" }', "x.label.length()", "3_i64"]
   end
@@ -98,7 +98,7 @@ FuzzGenerator.register(:lowering_boundary_matrix, cells: LBM_CELLS) do |p|
         END
 
         FN main() RETURNS !Void ->
-            x: #{ty} = build() OR RAISE;
+            x: #{ty} = build() OR_ELSE RAISE;
             ASSERT #{observe} == #{expected}, "lower returned call";
             RETURN;
         END
@@ -219,7 +219,7 @@ FuzzGenerator.register(:lowering_boundary_matrix, cells: LBM_CELLS) do |p|
         END
 
         FN wrap(x: Int64) RETURNS !Int64 ->
-            out = (x |> risky) OR RAISE;
+            out = (x |> risky) OR_ELSE RAISE;
             RETURN out;
         CATCH Input
             RETURN -1_i64;
@@ -238,7 +238,7 @@ FuzzGenerator.register(:lowering_boundary_matrix, cells: LBM_CELLS) do |p|
         END
 
         FN wrap(x: Int64) RETURNS !Int64 ->
-            out = (x |> risky_add(3_i64)) OR RAISE;
+            out = (x |> risky_add(3_i64)) OR_ELSE RAISE;
             RETURN out;
         CATCH Input
             RETURN -1_i64;
@@ -254,7 +254,7 @@ FuzzGenerator.register(:lowering_boundary_matrix, cells: LBM_CELLS) do |p|
         STRUCT Item { key: String, value: Int64 }
         FN item(k: String, v: Int64) RETURNS !Item -> RETURN Item{ key: COPY k, value: v }; END
         FN main() RETURNS !Void ->
-            s: ~?Item[] = BG STREAM { YIELD item("a", 1_i64) OR RAISE; YIELD item("b", 2_i64) OR RAISE; };
+            s: ~?Item[] = BG STREAM { YIELD item("a", 1_i64) OR_ELSE RAISE; YIELD item("b", 2_i64) OR_ELSE RAISE; };
             m = s |> INDEX _.key;
             ASSERT m["a"]?.length() == 1_i64, "pipeline index";
             RETURN;

@@ -16,7 +16,7 @@ FN main() RETURNS Void ->
     MUTABLE counts: HashMap<Int64> = {};
     counts["a"] = 1_i64;
     counts["a"] = 2_i64;
-    v = counts["a"] OR 0_i64;
+    v = counts["a"] OR_ELSE 0_i64;
     ASSERT v == 2, "overwrite should work";
 
     # Test with promoted list returns

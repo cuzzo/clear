@@ -491,7 +491,7 @@ module EffectTracker
   private :propagate_needs_rt!
 
   # Post-pass: compute can_fail for every function.
-  # A function can fail if it has direct failure sources (Raise/OrRaise, frame alloc,
+  # A function can fail if it has direct failure sources (Raise/OrElseRaise, frame alloc,
   # fn pointer call, guarded reentrance prologue) or any transitive callee can fail.
   # main always can_fail (entry point). Callees not in @fn_nodes (stdlib/extern)
   # are excluded from propagation — they don't use CLEAR's error union convention.
@@ -563,7 +563,7 @@ module EffectTracker
     # ── FAULT axis: allocation (OOM) ─────────────────────────────────
     # Computed parallel to can_fail, with the SAME single authority for
     # channel termination (function_propagating_callees, #11): a callee
-    # reached only via `f() OR <fallback>` / `OR PASS` has its fault
+    # reached only via `f() OR <fallback>` / `OR_ELSE PASS` has its fault
     # channel terminated locally and does not propagate the alloc fault
     # into the caller. A FAULT rides the same Zig `!T`+try path as an
     # ERROR (so codegen stays uniform -- step 3 folds this into
@@ -578,7 +578,7 @@ module EffectTracker
       # uses_rt fns reference rt without necessarily allocating (e.g.
       # Versioned.read EBR pin).
       # Placement/runtime use is not the same as allocating here. A caller
-      # that receives an owned list from `build() OR fallback` needs frame/
+      # that receives an owned list from `build() OR_ELSE fallback` needs frame/
       # heap cleanup support, but the callee's allocation fault is terminated
       # at that OR boundary. `uses_alloc` is the explicit direct-allocation
       # fact; transitive allocation comes from propagating_callees below.
@@ -639,7 +639,7 @@ module EffectTracker
     # pipeline (uniform codegen). The ERROR/FAULT split is preserved on
     # the node so enforce_fallible_returns! (step 4) requires explicit
     # `RETURNS !T` for error_fallible ONLY -- a FAULT-only fn stays
-    # `RETURNS T` (panics on unhandled OOM; catchable via OR/CATCH).
+    # `RETURNS T` (panics on unhandled OOM; catchable via OR_ELSE/CATCH).
     fn_nodes.each do |name, fn_node|
       ef = (error_fallible[name] == true)
       af = (alloc_fault[name] == true)
@@ -676,7 +676,7 @@ module EffectTracker
       # alloc-only FAULT (can_fail true purely via alloc_fault) never
       # forces `RETURNS !T`: it stays `RETURNS T`, panics (System/
       # OutOfMemory) on unhandled OOM, and is catchable anywhere via
-      # OR/CATCH -- because at the Zig level it still rides the uniform
+      # OR_ELSE/CATCH -- because at the Zig level it still rides the uniform
       # `!T`+try pipeline (step 3). This is the single ERROR-vs-FAULT
       # decision point; a future STRICT mode flips exactly this gate to
       # also require/surface the fault. (puck-clear-bugs.md #3/#12)

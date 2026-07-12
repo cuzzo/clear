@@ -34,7 +34,7 @@ FN main() RETURNS Void ->
     items.append(30_i64);
     p: ~Int64 = BG {
         snapshot = COPY items;
-        (snapshot[0_i64] OR 0_i64) + (snapshot[1_i64] OR 0_i64) + (snapshot[2_i64] OR 0_i64);
+        (snapshot[0_i64] OR_ELSE 0_i64) + (snapshot[1_i64] OR_ELSE 0_i64) + (snapshot[2_i64] OR_ELSE 0_i64);
     };
     r = NEXT p;
     ASSERT r == 60_i64, "BG body COPY of captured @list snapshots correctly";

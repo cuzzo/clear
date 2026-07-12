@@ -44,7 +44,7 @@ FN main() RETURNS !Void ->
     # occurs inside this loop.
     MUTABLE k: Int64 = 0;
     WHILE k < 200 DO
-        processLines!(20) OR EXIT;
+        processLines!(20) OR_ELSE EXIT;
         k += 1;
     END
     print("PASS");

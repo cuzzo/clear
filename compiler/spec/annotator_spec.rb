@@ -3557,7 +3557,7 @@ RSpec.describe SemanticAnnotator do
           EXTERN FN cwd() RETURNS Dir FROM "std.fs";
           EXTERN FN Dir.makePath(self: Dir, path: String) RETURNS !Void FROM "std.fs";
           FN main() RETURNS Void ->
-            cwd().makePath("data") OR RAISE;
+            cwd().makePath("data") OR_ELSE RAISE;
             RETURN;
           END
         CLEAR
@@ -3565,7 +3565,7 @@ RSpec.describe SemanticAnnotator do
         expect(output).not_to match(/try\s*\{/)
       end
 
-      it "direct EXTERN FN returning !Void with OR RAISE does not emit try { block }" do
+      it "direct EXTERN FN returning !Void with OR_ELSE RAISE does not emit try { block }" do
         # Same root cause as above but via a direct (non-method) EXTERN call.
         # Both build_extern_trampoline_call and build_extern_trampoline_method produce
         # MIR::ExternTrampoline already handles error
@@ -3573,7 +3573,7 @@ RSpec.describe SemanticAnnotator do
         code = <<~CLEAR
           EXTERN FN mkdir(path: String) RETURNS !Void FROM "std.fs";
           FN main() RETURNS Void ->
-            mkdir("data") OR RAISE;
+            mkdir("data") OR_ELSE RAISE;
             RETURN;
           END
         CLEAR

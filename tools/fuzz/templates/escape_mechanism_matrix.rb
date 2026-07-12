@@ -23,7 +23,7 @@ ESCAPE_MECHANISM_CELLS = [
   { mechanism: :takes_arg },
   { mechanism: :give_arg },
   { mechanism: :call_return_receiver },
-  { mechanism: :or_rescue_return_receiver },
+  { mechanism: :or_else_return_receiver },
   { mechanism: :return_nested_struct_list },
   { mechanism: :return_recursive_union_payload },
   { mechanism: :outer_store_nested_array },
@@ -48,7 +48,7 @@ FuzzGenerator.register(:escape_mechanism_matrix, cells: ESCAPE_MECHANISM_CELLS) 
       END
 
       FN main() RETURNS Void ->
-          out: String = mk() OR RAISE;
+          out: String = mk() OR_ELSE RAISE;
           ASSERT out.length() == 3_i64, "return string";
           RETURN;
       END
@@ -63,7 +63,7 @@ FuzzGenerator.register(:escape_mechanism_matrix, cells: ESCAPE_MECHANISM_CELLS) 
       END
 
       FN main() RETURNS Void ->
-          out: Int64[]@list = mk() OR RAISE;
+          out: Int64[]@list = mk() OR_ELSE RAISE;
           ASSERT out.length() == 1_i64, "return list";
           RETURN;
       END
@@ -143,7 +143,7 @@ FuzzGenerator.register(:escape_mechanism_matrix, cells: ESCAPE_MECHANISM_CELLS) 
               s: String = i.toString();
               xs[0_i64] = s;
           END
-          ASSERT (xs[0_i64]?.length() OR 0_i64) == 1_i64, "outer index store";
+          ASSERT (xs[0_i64]?.length() OR_ELSE 0_i64) == 1_i64, "outer index store";
           RETURN;
       END
     CHT
@@ -211,7 +211,7 @@ FuzzGenerator.register(:escape_mechanism_matrix, cells: ESCAPE_MECHANISM_CELLS) 
       END
 
       FN main() RETURNS Void ->
-          xs: String[] = mk() OR RAISE;
+          xs: String[] = mk() OR_ELSE RAISE;
           ASSERT xs[0_i64].length() == 3_i64, "collection literal return";
           RETURN;
       END
@@ -262,14 +262,14 @@ FuzzGenerator.register(:escape_mechanism_matrix, cells: ESCAPE_MECHANISM_CELLS) 
 
       FN main() RETURNS Void ->
           MUTABLE xs: String[]@list = [];
-          out: String = mk() OR RAISE;
+          out: String = mk() OR_ELSE RAISE;
           xs.append(out);
-          ASSERT (xs[0_i64]?.length() OR 0_i64) == 3_i64, "call return receiver";
+          ASSERT (xs[0_i64]?.length() OR_ELSE 0_i64) == 3_i64, "call return receiver";
           RETURN;
       END
     CHT
 
-  when :or_rescue_return_receiver
+  when :or_else_return_receiver
     <<~CHT
       FN mk() RETURNS !String ->
           s: String = COPY "abc";
@@ -278,9 +278,9 @@ FuzzGenerator.register(:escape_mechanism_matrix, cells: ESCAPE_MECHANISM_CELLS) 
 
       FN main() RETURNS Void ->
           MUTABLE xs: String[]@list = [];
-          out: String = mk() OR COPY "fallback";
+          out: String = mk() OR_ELSE COPY "fallback";
           xs.append(out);
-          ASSERT (xs[0_i64]?.length() OR 0_i64) == 3_i64, "or rescue return receiver";
+          ASSERT (xs[0_i64]?.length() OR_ELSE 0_i64) == 3_i64, "or rescue return receiver";
           RETURN;
       END
     CHT
@@ -297,8 +297,8 @@ FuzzGenerator.register(:escape_mechanism_matrix, cells: ESCAPE_MECHANISM_CELLS) 
       END
 
       FN main() RETURNS Void ->
-          out: Outer = mk() OR RAISE;
-          ASSERT (out.items[0_i64]?.name OR "").length() == 3_i64, "return nested struct list";
+          out: Outer = mk() OR_ELSE RAISE;
+          ASSERT (out.items[0_i64]?.name OR_ELSE "").length() == 3_i64, "return nested struct list";
           RETURN;
       END
     CHT
@@ -314,7 +314,7 @@ FuzzGenerator.register(:escape_mechanism_matrix, cells: ESCAPE_MECHANISM_CELLS) 
       END
 
       FN main() RETURNS Void ->
-          n: Node = mk() OR RAISE;
+          n: Node = mk() OR_ELSE RAISE;
           PARTIAL MATCH n START
               Node.Pair AS p -> ASSERT TRUE, "recursive pair returned";,
               DEFAULT -> ASSERT FALSE, "expected recursive pair";
@@ -380,7 +380,7 @@ FuzzGenerator.register(:escape_mechanism_matrix, cells: ESCAPE_MECHANISM_CELLS) 
       STRUCT Holder { items: Item[]@list }
 
       FN consume(TAKES h: Holder) RETURNS Int64 ->
-          RETURN (h.items[0_i64]?.label OR "").length();
+          RETURN (h.items[0_i64]?.label OR_ELSE "").length();
       END
 
       FN main() RETURNS Void ->
@@ -404,7 +404,7 @@ FuzzGenerator.register(:escape_mechanism_matrix, cells: ESCAPE_MECHANISM_CELLS) 
               out.append(h);
           END
           IF out[1_i64] AS holder THEN
-              ASSERT (holder.table["k"] OR "").length() == 1_i64, "loop carry nested map";
+              ASSERT (holder.table["k"] OR_ELSE "").length() == 1_i64, "loop carry nested map";
           END
           RETURN;
       END
@@ -422,10 +422,10 @@ FuzzGenerator.register(:escape_mechanism_matrix, cells: ESCAPE_MECHANISM_CELLS) 
       END
 
       FN main() RETURNS Void ->
-          p: Payload = mk() OR RAISE;
+          p: Payload = mk() OR_ELSE RAISE;
           MUTABLE n: Int64 = 0_i64;
           PARTIAL MATCH p START
-              Payload.Items AS xs -> n = xs[0_i64]?.length() OR 0_i64;,
+              Payload.Items AS xs -> n = xs[0_i64]?.length() OR_ELSE 0_i64;,
               DEFAULT -> n = 0_i64;
           END
           ASSERT n == 3_i64, "return union with list payload";
@@ -475,7 +475,7 @@ FuzzGenerator.register(:escape_mechanism_matrix, cells: ESCAPE_MECHANISM_CELLS) 
 
       FN main() RETURNS Void ->
           h: ?Holder = Holder{ label: COPY "abc" };
-          f: ~Int64 = BG { (h OR Holder{ label: COPY "" }).label.length(); };
+          f: ~Int64 = BG { (h OR_ELSE Holder{ label: COPY "" }).label.length(); };
           ASSERT (NEXT f) == 3_i64, "bg capture optional struct";
           RETURN;
       END

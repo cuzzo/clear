@@ -31,9 +31,9 @@ FN main() RETURNS Void ->
 
     # Test 2: HashMap in struct survives function return
     MUTABLE h2 = buildMapDirect();
-    v2 = h2.data["x"] OR 0_i64;
+    v2 = h2.data["x"] OR_ELSE 0_i64;
     ASSERT v2 == 100;
-    v2y = h2.data["y"] OR 0_i64;
+    v2y = h2.data["y"] OR_ELSE 0_i64;
     ASSERT v2y == 200;
 
     RETURN;

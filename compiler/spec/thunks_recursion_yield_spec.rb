@@ -226,7 +226,7 @@ RSpec.describe "Recursion co-op yield + :TIGHT opt-out" do
         END
         FN double(x: Int64) RETURNS Int64 -> RETURN x * 2; END
         FN main() RETURNS Void ->
-          _ = apply(double, 7_i64) OR EXIT System, "x";
+          _ = apply(double, 7_i64) OR_ELSE EXIT System, "x";
           RETURN;
         END
       CLEAR

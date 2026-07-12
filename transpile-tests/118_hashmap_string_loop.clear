@@ -13,9 +13,9 @@ FN main() RETURNS Void ->
         i += 1;
     END
 
-    v0 = map["t0"] OR Value.Nil;
-    v1 = map["t1"] OR Value.Nil;
-    v2 = map["t2"] OR Value.Nil;
+    v0 = map["t0"] OR_ELSE Value.Nil;
+    v1 = map["t1"] OR_ELSE Value.Nil;
+    v2 = map["t2"] OR_ELSE Value.Nil;
 
     PARTIAL MATCH v0 START Value.Str AS s -> ASSERT s == "a", "t0=a";, DEFAULT -> ASSERT FALSE, "t0 missing"; END
     PARTIAL MATCH v1 START Value.Str AS s -> ASSERT s == "b", "t1=b";, DEFAULT -> ASSERT FALSE, "t1 missing"; END

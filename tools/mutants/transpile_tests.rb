@@ -23,7 +23,7 @@ module TranspileTestMutants
   REGISTRY = T.let([
     Mutant.new(
       name: :lower_if_cond_pending_leak,
-      description: 'Disable lower_head pending-statement isolation; condition OR-fallback hoists should fail.',
+      description: 'Disable lower_head pending-statement isolation; condition OR_ELSE-fallback hoists should fail.',
       patch: File.join(PATCH_DIR, 'lower_if_cond_pending_leak.patch'),
       files: ['transpile-tests/or_fallback_in_if_condition_hoist.clear']
     ),

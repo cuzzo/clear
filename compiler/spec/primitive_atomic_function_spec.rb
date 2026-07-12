@@ -123,7 +123,7 @@ RSpec.describe "primitive non-shared atomics in functions" do
         RETURN c;
       END
       FN main() RETURNS !Void ->
-        y = get() OR EXIT;
+        y = get() OR_ELSE EXIT;
         RETURN;
       END
     CLEAR

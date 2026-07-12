@@ -25,7 +25,7 @@ FuzzGenerator.register(:bg_copy_param_reentrant, cells: BG_COPY_PARAM_REENTRANT_
     FN worker!(TAKES sl: #{lt}, depth: Int64) RETURNS !Int64 EFFECTS REENTRANT:MAX_DEPTH(8) ->
         IF depth <= 0_i64 THEN RETURN consume(sl); END
         f: ~Int64 = BG { @service ->
-            worker!(COPY sl, depth - 1_i64) OR RAISE;
+            worker!(COPY sl, depth - 1_i64) OR_ELSE RAISE;
         };
         RETURN NEXT f;
     END
@@ -33,7 +33,7 @@ FuzzGenerator.register(:bg_copy_param_reentrant, cells: BG_COPY_PARAM_REENTRANT_
     FN main() RETURNS !Void ->
         MUTABLE xs: #{lt} = List[];
         xs.append(#{push});
-        n: Int64 = worker!(GIVE xs, #{n}_i64) OR RAISE;
+        n: Int64 = worker!(GIVE xs, #{n}_i64) OR_ELSE RAISE;
         ASSERT n == 1_i64, "COPY @list param through reentrant BG";
         RETURN;
     END

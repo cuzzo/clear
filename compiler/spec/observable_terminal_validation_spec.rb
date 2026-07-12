@@ -27,7 +27,7 @@ RSpec.describe "T13/T14: observable terminal validation + nesting" do
   end
 
   describe "T13: REDUCE on observable requires a numeric scalar accumulator" do
-    it "rejects ~Bool@observable = stream |> REDUCE(false, _ OR acc)" do
+    it "rejects ~Bool@observable = stream |> REDUCE(false, _ OR_ELSE acc)" do
       # Bool accumulator routes to AtomicFor(bool) which @compileErrors
       # in Zig; H10's whitelist catches it earlier as a CLEAR coerce
       # failure (the lift to ~Bool@observable doesn't fire, so the
@@ -38,7 +38,7 @@ RSpec.describe "T13/T14: observable terminal validation + nesting" do
                 MUTABLE i: Int64 = 0_i64;
                 WHILE i < 4_i64 DO YIELD i; i = i + 1_i64; END
             };
-            running: ~Bool@observable = gen |> REDUCE(false) (_ > 1_i64) OR acc;
+            running: ~Bool@observable = gen |> REDUCE(false) (_ > 1_i64) || acc;
             _ = NEXT running;
             RETURN;
         END

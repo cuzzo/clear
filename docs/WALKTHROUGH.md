@@ -373,13 +373,13 @@ names = users |> SELECT _.name;
 entities |> EACH { _.x += _.vx; };
 result = data |> process |> validate |> format;
 
-# 3. Error Handling: Inline OR / OR RAISE
+# 3. Error Handling: Inline OR / OR_ELSE RAISE
 val = parseInt("abc") OR 0;                         # OKAY: Fallback value
-content = readFile("config.json") OR RAISE;         # OKAY: Explicit propagation
+content = readFile("config.json") OR_ELSE RAISE;         # OKAY: Explicit propagation
 
 # 4. Function-level CATCH
 FN main() RETURNS Void ->
-    result = loadConfig("config.json") OR RAISE;
+    result = loadConfig("config.json") OR_ELSE RAISE;
     print("Config: ${result}");
     RETURN;
 CATCH e
@@ -478,7 +478,7 @@ items.append(42);
 MUTABLE users: User[100]@pool = [];
 
 id = users.insert(User{ name: "Alice" });           # Returns stable handle
-user = users.get(id) OR RAISE;                      # Returns ?T (checks stale handles)
+user = users.get(id) OR_ELSE RAISE;                      # Returns ?T (checks stale handles)
 ```
 
 ### Element-Level Capabilities
@@ -655,7 +655,7 @@ END
 Key rules:
 - `LINK` only works on `@multiowned` or `@shared` values (compile-time error otherwise)
 - `RESOLVE` only works on `@link` values (compile-time error otherwise)
-- `RESOLVE` returns `?T` -- bind the result first, then use `resolved?.field OR fallback` to handle the dropped case
+- `RESOLVE` returns `?T` -- bind the result first, then use `resolved?.field OR_ELSE fallback` to handle the dropped case
 - Cleanup is automatic: weak references are released when they go out of scope
 - Unlike `@node`, every strong object is reference-counted independently and every `RESOLVE` performs an upgrade check
 

@@ -26,15 +26,15 @@ END
 FN main() RETURNS !Void ->
   # Happy path: buf ownership moves to result, freed when result goes
   # out of scope.
-  result = process("hello") OR RAISE;
+  result = process("hello") OR_ELSE RAISE;
   print(result);
 
   # Error path (commented out — would propagate the error up): buf
   # inside process() is freed automatically before the error
-  # propagates. No leak. CLEAR's `OR EXIT` / `OR RAISE` are the
-  # modern shapes; there is no `OR { handler }` block form.
+  # propagates. No leak. CLEAR's `OR_ELSE EXIT` / `OR_ELSE RAISE` are the
+  # modern shapes; there is no `OR_ELSE { handler }` block form.
   #
-  #   process("!bad") OR RAISE;
+  #   process("!bad") OR_ELSE RAISE;
 
   # ----------------------------------------------------------------
   # The broken version — what MIRChecker catches:

@@ -212,7 +212,7 @@ RSpec.describe "SHARE keyword" do
 
         FN main() RETURNS !Void ->
           b = Box{ value: 1 };
-          crosses_boundary(SHARE b) OR EXIT;
+          crosses_boundary(SHARE b) OR_ELSE EXIT;
           RETURN;
         END
       CLEAR

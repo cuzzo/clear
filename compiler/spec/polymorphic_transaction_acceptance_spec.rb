@@ -173,7 +173,7 @@ RSpec.describe "Polymorphic transaction function — acceptance" do
   # ── 4. SNAPSHOTTED polymorphic — verifies comptime dispatch ──
 
   describe "REQUIRES c: SNAPSHOTTED + WITH SNAPSHOT lowers polymorphically" do
-    it "emits one body that comptime-dispatches to Versioned.update OR AtomicPtr.update" do
+    it "emits one body that comptime-dispatches to Versioned.update OR_ELSE AtomicPtr.update" do
       src = fn_with_requires(
         suffix: "Snapshotted",
         requires_clause: "REQUIRES c: SNAPSHOTTED",
@@ -317,12 +317,12 @@ RSpec.describe "Polymorphic transaction function — acceptance" do
           MUTABLE versioned_c = Counter{ value: 0 } @shared:versioned;
           MUTABLE atomic_c    = Counter{ value: 0 } @indirect:atomic;
 
-          tick!(local_c)     OR EXIT;
-          tick!(multi_c)     OR EXIT;
-          tick!(locked_c)    OR EXIT;
-          tick!(wlocked_c)   OR EXIT;
-          tick!(versioned_c) OR EXIT;
-          tick!(atomic_c)    OR EXIT;
+          tick!(local_c)     OR_ELSE EXIT;
+          tick!(multi_c)     OR_ELSE EXIT;
+          tick!(locked_c)    OR_ELSE EXIT;
+          tick!(wlocked_c)   OR_ELSE EXIT;
+          tick!(versioned_c) OR_ELSE EXIT;
+          tick!(atomic_c)    OR_ELSE EXIT;
 
           RETURN;
         END

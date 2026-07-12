@@ -64,13 +64,13 @@ FN test_safe_field_access() RETURNS !Void ->
     n = Node{ value: 42 } @multiowned;
     w = LINK n;
     resolved = RESOLVE w;
-    val = resolved?.value OR -1_i64;
+    val = resolved?.value OR_ELSE -1_i64;
     ASSERT val == 42_i64, "field access on live ref";
 
     # Dropped: fallback triggers
     dead_w = makeDeadWeakNode();
     dead_r = RESOLVE dead_w;
-    dead_val = dead_r?.value OR -1_i64;
+    dead_val = dead_r?.value OR_ELSE -1_i64;
     ASSERT dead_val == -1_i64, "field access on dropped ref";
 
     RETURN;

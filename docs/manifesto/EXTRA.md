@@ -31,8 +31,8 @@ CATCH
 END
 
 FN myVectorGetterAdder(v) ->
-  x = v[10] OR RETURN 5;                   -- OK: IFF you return a value, not the error.
-  x = v[10] OR RETURN v[0];                -- COMPILER ERROR: OBVIOUSLY!
+  x = v[10] OR_ELSE RETURN 5;                   -- OK: IFF you return a value, not the error.
+  x = v[10] OR_ELSE RETURN v[0];                -- COMPILER ERROR: OBVIOUSLY!
   RETURN x + 5;
 END
 
@@ -257,7 +257,7 @@ END
 FN myReallyCarefullFn %(myList) ->
   myList
    s> fetchData OR SKIP -- SKIP any error
-   s> OTHERWISE(fetchFromBackup) OR RETURN  -- Don't proceed any further, bubble this right up to the user
+   s> OTHERWISE(fetchFromBackup) OR_ELSE RETURN  -- Don't proceed any further, bubble this right up to the user
    s> parseData -- this could return an error!
    s> renderPage; -- this could return an error!
 
@@ -270,8 +270,8 @@ END
 FN myVeryCarefullFn %(myList) ->
   myList
    s> fetchData OR SKIP -- SKIP any error
-   s> OTHERWISE(fetchFromBackup) OR RETURN  -- Don't proceed any further, bubble this right up to the user
-   s> parseData OR EXIT -- Don't proceed any further, but try to pass this to a catch block below
+   s> OTHERWISE(fetchFromBackup) OR_ELSE RETURN  -- Don't proceed any further, bubble this right up to the user
+   s> parseData OR_ELSE EXIT -- Don't proceed any further, but try to pass this to a catch block below
    s> renderPage; -- this could return an error!
 
 CATCH -- anything
@@ -284,7 +284,7 @@ END
 FN myExtremelyCarefullFn %(myList) ->
   myList
    s> fetchData OR SKIP -- SKIP any error
-   s> OTHERWISE(fetchFromBackup) OR RETURN  -- Don't proceed any further, bubble this right up to the user
+   s> OTHERWISE(fetchFromBackup) OR_ELSE RETURN  -- Don't proceed any further, bubble this right up to the user
    s> parseData OR GOTO_RECOVER -- Don't proceed any further, JUMP to the first RECOVER down the chain
    s> renderPage -- this could return an error!
    s> RECOVER(makeDefaultPage());
@@ -300,10 +300,10 @@ END
 FN myMostCarefulFn %(myList) ->
   myList
    s> fetchData OR SKIP -- SKIP any error
-   s> OTHERWISE(fetchFromBackup) OR RETURN  -- Don't proceed any further, bubble this right up to the user
+   s> OTHERWISE(fetchFromBackup) OR_ELSE RETURN  -- Don't proceed any further, bubble this right up to the user
    s> parseData OR GOTO_RECOVER -- Don't proceed any further, JUMP to the first RECOVER down the chain
-   s> renderPage OR EXIT "RenderPage failed"
-   s> RECOVER(makeDefaultPage()) OR EXIT "RenderBackupPageFailed";
+   s> renderPage OR_ELSE EXIT "RenderPage failed"
+   s> RECOVER(makeDefaultPage()) OR_ELSE EXIT "RenderBackupPageFailed";
 
 CATCH -- anything
   -- Here, there might be two RenderPage errors

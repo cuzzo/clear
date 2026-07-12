@@ -35,7 +35,7 @@ FN main() RETURNS Void ->
     MUTABLE total = 0_i64;
     FOR k IN m DO
       sleep(1);
-      total = total + (m[k] OR 0_i64);
+      total = total + (m[k] OR_ELSE 0_i64);
     END
     total;
   };

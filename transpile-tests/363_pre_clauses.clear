@@ -17,26 +17,26 @@ END
 
 FN main() RETURNS !Void ->
     # Both PREs hold: body runs.
-    a = double!(5) OR RAISE;
+    a = double!(5) OR_ELSE RAISE;
     ASSERT a == 10, "double(5) == 10";
 
-    b = double!(99) OR RAISE;
+    b = double!(99) OR_ELSE RAISE;
     ASSERT b == 198, "double(99) == 198";
 
-    # First PRE fails (x > 0): caller catches via OR.
-    fallback = double!(0) OR -1_i64;
+    # First PRE fails (x > 0): caller catches via OR_ELSE.
+    fallback = double!(0) OR_ELSE -1_i64;
     ASSERT fallback == -1_i64, "double(0): first PRE fails, caller takes fallback";
 
-    # Second PRE fails (x < 100): caller catches via OR.
-    fb2 = double!(100) OR -2_i64;
+    # Second PRE fails (x < 100): caller catches via OR_ELSE.
+    fb2 = double!(100) OR_ELSE -2_i64;
     ASSERT fb2 == -2_i64, "double(100): second PRE fails, caller takes fallback";
 
     # Multi-arg case: both PREs hold.
-    s = sumIfBoth!(3, 4) OR RAISE;
+    s = sumIfBoth!(3, 4) OR_ELSE RAISE;
     ASSERT s == 7, "sumIfBoth(3, 4) == 7";
 
     # Multi-arg case: second arg violates its PRE.
-    s_bad = sumIfBoth!(3, -1_i64) OR -99_i64;
+    s_bad = sumIfBoth!(3, -1_i64) OR_ELSE -99_i64;
     ASSERT s_bad == -99_i64, "sumIfBoth(3, -1): y >= 0 fails";
 
     RETURN;

@@ -12,7 +12,7 @@ module AST
   # ErrorType is an open, auto-registered set. The stdlib seeds it with
   # the lock-safety types at stable low IDs (LockTimeout=1, LockCycle=2,
   # Deadlock=3). User types get ids from 4 onwards in order of first
-  # use. First use requires a kind (at RAISE / OR EXIT); subsequent uses
+  # use. First use requires a kind (at RAISE / OR_ELSE EXIT); subsequent uses
   # can provide only the type and the kind is looked up. Collisions
   # (same type, different kind) produce a diagnostic pointing at the
   # first registration site.

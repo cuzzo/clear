@@ -121,7 +121,7 @@ FuzzGenerator.register(:indirect_recursive_union, cells: INDIRECT_RU_CELLS) do |
       END
 
       FN main() RETURNS Void ->
-          subject = make!() OR RAISE;
+          subject = make!() OR_ELSE RAISE;
           #{match_block}
           RETURN;
       END

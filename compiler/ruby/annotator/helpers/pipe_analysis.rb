@@ -1482,26 +1482,26 @@ module PipeAnalysis
       error!(conc, :CONCURRENT_BAD_FOLLOWING_OP, got: conc.op.class.name.split('::').last)
     end
 
-    # Validate that OR PRUNE / OR RAISE is only used with error-returning expressions
+    # Validate that OR_ELSE PRUNE / OR_ELSE RAISE is only used with error-returning expressions
     inner_expr = case conc.op
     when AST::SelectOp, AST::WhereOp then conc.op.expression
     else nil
     end
 
-    if inner_expr.is_a?(AST::BinaryOp) && inner_expr.op == :OR_RESCUE
+    if inner_expr.is_a?(AST::BinaryOp) && inner_expr.op == :OR_ELSE
       modifier = inner_expr.right
-      if modifier.is_a?(AST::OrPrune) || modifier.is_a?(AST::OrRaise)
+      if modifier.is_a?(AST::OrElsePrune) || modifier.is_a?(AST::OrElseRaise)
         inner_fn_type = inner_expr.left.full_type!(context: "inner pipeline left")
         # CLEAR's auto-propagate strips `!T` from a fallible call's
         # full_type (saving the union on `error_union_type`). The
-        # OR PRUNE / OR RAISE validators must honor that fallback so
-        # `f() OR PRUNE` (where f is `!T`) doesn't false-positive
+        # OR_ELSE PRUNE / OR_ELSE RAISE validators must honor that fallback so
+        # `f() OR_ELSE PRUNE` (where f is `!T`) doesn't false-positive
         # as "got T (not !T)".
         is_error_union = inner_fn_type&.error_union? ||
                          (inner_expr.left.respond_to?(:error_union_type) &&
                           inner_expr.left.error_union_type)
         unless is_error_union
-          mod_name = modifier.is_a?(AST::OrPrune) ? "OR PRUNE" : "OR RAISE"
+          mod_name = modifier.is_a?(AST::OrElsePrune) ? "OR_ELSE PRUNE" : "OR_ELSE RAISE"
           error!(modifier, :MODIFIER_NEEDS_ERROR_UNION, name: mod_name, got: inner_expr.left.resolved_type)
         end
       end

@@ -668,7 +668,7 @@ RSpec.describe SemanticAnnotator do
           FN test!() RETURNS !Void ->
               MUTABLE list: Int64[]@list = List[];
               list.append(1_i64);
-              consume!(list[0] OR 0_i64);
+              consume!(list[0] OR_ELSE 0_i64);
               RETURN;
           END
         CLEAR
@@ -768,7 +768,7 @@ RSpec.describe SemanticAnnotator do
         <<~CLEAR
           UNION Value { Nil, Str: String }
           FN test!(MUTABLE map: HashMap<Value>) RETURNS !String ->
-              val = map["t0"] OR Value.Nil;
+              val = map["t0"] OR_ELSE Value.Nil;
               PARTIAL MATCH val START
                   Value.Str AS s -> RETURN s;,
                   DEFAULT -> RETURN "";

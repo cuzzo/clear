@@ -16,7 +16,7 @@ def ccm_spec(shape)
   when :string
     ["", "String", 'COPY "abc"', "x.length()", "3_i64"]
   when :list
-    ["", "Int64[]@list", "makeList() OR RAISE", "x.length()", "2_i64"]
+    ["", "Int64[]@list", "makeList() OR_ELSE RAISE", "x.length()", "2_i64"]
   when :hash
     ["", "HashMap<String>", '{"a": COPY "aa", "b": COPY "bb"}', "x.count()", "2_i64"]
   when :struct
@@ -26,7 +26,7 @@ def ccm_spec(shape)
   when :optional
     ["", "?String", 'COPY "abc"', "1_i64", "1_i64"]
   when :nested
-    ["STRUCT Inner { label: String }\nSTRUCT Box { items: Inner[]@list }\n", "Box", "makeBox() OR RAISE", "(x.items[0_i64]?.label OR \"\").length()", "3_i64"]
+    ["STRUCT Inner { label: String }\nSTRUCT Box { items: Inner[]@list }\n", "Box", "makeBox() OR_ELSE RAISE", "(x.items[0_i64]?.label OR_ELSE \"\").length()", "3_i64"]
   end
 end
 
@@ -148,8 +148,8 @@ FuzzGenerator.register(:cleanup_control_matrix, cells: CCM_CELLS) do |p|
       END
 
       FN main() RETURNS Void ->
-          ok: Int64 = run(FALSE) OR 0_i64;
-          bad: Int64 = run(TRUE) OR 0_i64;
+          ok: Int64 = run(FALSE) OR_ELSE 0_i64;
+          bad: Int64 = run(TRUE) OR_ELSE 0_i64;
           ASSERT ok == #{expected}, "cleanup catch ok";
           ASSERT bad == 0_i64, "cleanup catch fallback";
           RETURN;
@@ -164,7 +164,7 @@ FuzzGenerator.register(:cleanup_control_matrix, cells: CCM_CELLS) do |p|
       END
 
       FN main() RETURNS !Void ->
-          x: #{ty} = build() OR RAISE;
+          x: #{ty} = build() OR_ELSE RAISE;
           ASSERT #{observe} == #{expected}, "cleanup return";
           RETURN;
       END

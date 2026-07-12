@@ -591,9 +591,9 @@ RSpec.describe MIREmitter do
     expect(e.emit(node)).to eq("[_][]const u8{ \"\" } ** 256")
   end
 
-  it "preserves OR-EXIT bytecode rewrite metadata and child message" do
+  it "preserves OR_ELSE-EXIT bytecode rewrite metadata and child message" do
     message = MIR::Lit.new("\"fail\"")
-    node = MIR::OrExitBcRewrite.new("Runtime", 3, true, true, 12, message)
+    node = MIR::OrElseExitBcRewrite.new("Runtime", 3, true, true, 12, message)
 
     expect(node.kind).to eq("Runtime")
     expect(node.name_id).to eq(3)

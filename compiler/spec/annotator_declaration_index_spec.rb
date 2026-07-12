@@ -52,7 +52,7 @@ RSpec.describe Annotator::Phases::DeclarationIndexer do
 
   it "does not inspect function bodies while indexing declarations" do
     raise_node = AST::Raise.new(tok("RAISE"), :System, "DeclaredInBody", nil)
-    exit_node = AST::OrExit.new(tok("OR"), :Input, "DeclaredInCatch", nil)
+    exit_node = AST::OrElseExit.new(tok("OR_ELSE"), :Input, "DeclaredInCatch", nil)
     catch_clause = AST::CatchClause.new(body: [exit_node])
     fn = function_def("main")
     fn.body = [raise_node]

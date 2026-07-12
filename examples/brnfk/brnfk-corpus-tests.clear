@@ -16,10 +16,10 @@ FN expectedSquares() RETURNS !String ->
 END
 
 FN main() RETURNS Void ->
-  ASSERT runFile(testPath("null.b") OR RAISE, "") == "", "null.b produces no output";
-  ASSERT runFile(testPath("rot13.b") OR RAISE, "~mlk zyx") == "~zyx mlk", "rot13.b transforms known input";
-  ASSERT runFile(testPath("xmastree.b") OR RAISE, "") == "*\n", "xmastree.b smoke output";
-  ASSERT runFile(testPath("squares.b") OR RAISE, "") == expectedSquares(), "squares.b prints 0..100 squared";
+  ASSERT runFile(testPath("null.b") OR_ELSE RAISE, "") == "", "null.b produces no output";
+  ASSERT runFile(testPath("rot13.b") OR_ELSE RAISE, "~mlk zyx") == "~zyx mlk", "rot13.b transforms known input";
+  ASSERT runFile(testPath("xmastree.b") OR_ELSE RAISE, "") == "*\n", "xmastree.b smoke output";
+  ASSERT runFile(testPath("squares.b") OR_ELSE RAISE, "") == expectedSquares(), "squares.b prints 0..100 squared";
 
   ioProbe = ">,>+++++++++,>+++++++++++[<++++++<++++++<+>>>-]<<.>.<<-.>.>.<<.";
   ASSERT runWithLimits(ioProbe, "\n", 30_000, 100_000) == "LK\nLK\n", "Cristofani newline/EOF probe";

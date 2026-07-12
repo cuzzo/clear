@@ -122,7 +122,7 @@ FN main() RETURNS Void ->
 
   # (Error-propagation across the suspend boundary is verified
   #  structurally by spec/fsm_classifier_spec.rb — the CLEAR-level
-  #  NEXT-OR-fallback grammar is more constrained than runStep1's
+  #  NEXT-OR_ELSE-fallback grammar is more constrained than runStep1's
   #  catch-into-inner.result wrapper. The wrapper is structurally
   #  identical to B1's, which is exercised end-to-end via stackful
   #  BG paths today.)

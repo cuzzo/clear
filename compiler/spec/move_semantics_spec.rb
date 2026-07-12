@@ -139,7 +139,7 @@ RSpec.describe "Move semantics for heap-owning types" do
             RETURN x.count();
         END
         FN main() RETURNS Void ->
-            bad: Int64 = run(TRUE) OR 0_i64;
+            bad: Int64 = run(TRUE) OR_ELSE 0_i64;
             RETURN;
         END
       CLEAR

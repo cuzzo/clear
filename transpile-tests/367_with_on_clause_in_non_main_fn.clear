@@ -53,13 +53,13 @@ END
 FN main() RETURNS !Void ->
     MUTABLE c = Counter{ value: 0 } @shared:locked;
 
-    v1 = bumpOrFallback!(c) OR RAISE;
+    v1 = bumpOrFallback!(c) OR_ELSE RAISE;
     ASSERT v1 == 1_i64, "bumpOrFallback ran the body";
 
-    v2 = bumpOrBlock!(c) OR RAISE;
+    v2 = bumpOrBlock!(c) OR_ELSE RAISE;
     ASSERT v2 == 2_i64, "bumpOrBlock ran the body";
 
-    v3 = bumpOrPassWithRetry!(c) OR RAISE;
+    v3 = bumpOrPassWithRetry!(c) OR_ELSE RAISE;
     ASSERT v3 == 3_i64, "bumpOrPassWithRetry ran the body";
 
     RETURN;
