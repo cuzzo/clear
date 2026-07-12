@@ -247,7 +247,16 @@ module FuzzMutants
                    'Branch exits must still run finalizers on every live path.',
       invariant: :branch_cleanup_finalizers,
       patch: File.join(PATCH_DIR, 'mir_emitter_cleanup_noop.patch'),
-      templates: [:branch_cleanup, :bind_capture_cleanup, :rc_generic_collection_matrix, :rc_generic_value_matrix],
+      templates: [
+        :branch_cleanup,
+        :bind_capture_cleanup,
+        :link_resolve_matrix,
+        :managed_payload_capability_matrix,
+        :node_graph_matrix,
+        :rc_generic_collection_matrix,
+        :rc_generic_value_matrix,
+        :stateful_container_matrix,
+      ],
       kill: { bucket: :fail, min_delta: 1 }
     ),
     Mutant.new(
@@ -276,7 +285,7 @@ module FuzzMutants
                    'values instead of silently compiling them.',
       invariant: :parallel_boundary_admission,
       patch: File.join(PATCH_DIR, 'execution_boundary_parallel_accept.patch'),
-      templates: [:execution_boundary],
+      templates: [:execution_boundary, :recursive_execution_boundary_matrix],
       kill: { bucket: :unexpected_pass, min_delta: 1 }
     ),
     Mutant.new(

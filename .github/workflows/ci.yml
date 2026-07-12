@@ -822,7 +822,7 @@ jobs:
       # positive fuzz cells and runs that Zig test root under kcov; negative
       # cells stay compile-only so SimpleCov does not fan out through every
       # child `clear test` / `clear build` process.
-      - run: bundle exec ruby tools/fuzz/run.rb --matrix --skip-quarantined --shard ${{ matrix.shard }}/5 --out /tmp/clear-fuzz-ci-${{ matrix.shard }} --clean --jobs "$(nproc)"
+      - run: bundle exec ruby tools/fuzz/run.rb --matrix --shard ${{ matrix.shard }}/5 --out /tmp/clear-fuzz-ci-${{ matrix.shard }} --clean --jobs "$(nproc)"
       - run: bundle exec ruby compiler/spec/collate_coverage.rb
       - uses: actions/upload-artifact@v4
         with:
@@ -857,6 +857,7 @@ jobs:
     needs:
       - changes
       - tools-fuzz-shard
+      - tools-fuzz-isolated-shard
     if: ${{ always() && needs.changes.outputs.run_src == 'true' }}
     steps:
       - name: Require every fuzz shard
@@ -865,23 +866,22 @@ jobs:
             echo "tools/fuzz shard matrix result: ${{ needs.tools-fuzz-shard.result }}"
             exit 1
           fi
+          if [ "${{ needs.tools-fuzz-isolated-shard.result }}" != "success" ]; then
+            echo "tools/fuzz isolated shard matrix result: ${{ needs.tools-fuzz-isolated-shard.result }}"
+            exit 1
+          fi
           echo "all tools/fuzz shards passed"
 
-  tools-fuzz-quarantined:
-    name: tools/fuzz quarantined shard ${{ matrix.shard }}/5
+  tools-fuzz-isolated-shard:
+    name: tools/fuzz fail-complete isolated shard ${{ matrix.shard }}/5
     needs: changes
     if: ${{ needs.changes.outputs.run_src == 'true' }}
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-22.04
     timeout-minutes: 30
     strategy:
       fail-fast: false
       matrix:
         shard: [0, 1, 2, 3, 4]
-    # Non-blocking: runs the quarantined templates (templates with a
-    # known compiler bug or generator defect, listed in
-    # tools/fuzz/quarantine.txt). Visible signal without blocking PRs.
-    # A template leaves quarantine.txt the moment its bug is fixed.
-    continue-on-error: true
     steps:
       - uses: actions/checkout@v4
       - uses: ruby/setup-ruby@v1
@@ -891,15 +891,16 @@ jobs:
       - uses: mlugg/setup-zig@v2
         with:
           version: ${{ env.ZIG_VERSION }}
+          use-cache: false
       - uses: actions/cache@v4
         with:
           path: |
             zig/.clear-cache
             zig/.clear-transpile-cache
-          key: clear-fuzz-${{ runner.os }}-zig${{ env.ZIG_VERSION }}-${{ hashFiles('compiler/ruby/**', 'zig/runtime/**', 'zig/lib/**', 'tools/fuzz/**', 'Gemfile.lock') }}
+          key: clear-fuzz-isolated-${{ runner.os }}-zig${{ env.ZIG_VERSION }}-${{ hashFiles('compiler/ruby/**', 'zig/runtime/**', 'zig/lib/**', 'tools/fuzz/**', 'Gemfile.lock') }}
           restore-keys: |
-            clear-fuzz-${{ runner.os }}-zig${{ env.ZIG_VERSION }}-
-      - run: bundle exec ruby tools/fuzz/run.rb --matrix --only-quarantined --shard ${{ matrix.shard }}/5 --out /tmp/clear-fuzz-quar-${{ matrix.shard }} --clean
+            clear-fuzz-isolated-${{ runner.os }}-zig${{ env.ZIG_VERSION }}-
+      - run: bundle exec ruby tools/fuzz/run.rb --matrix --isolate-positives --shard ${{ matrix.shard }}/5 --out /tmp/clear-fuzz-isolated-${{ matrix.shard }} --clean --jobs "$(nproc)"
 
   bc-lower-coverage-shard:
     name: bc-lowering coverage shard ${{ matrix.shard }}/5

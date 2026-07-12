@@ -3,8 +3,7 @@
 # `MUTABLE container: T[]@list = []; container.append(<modality> xs);` over
 # the FULL :cleanup_value_shapes registry. Many element-type x list-of
 # combinations may be language-illegal (pool-of-pool, list-of-set, etc.);
-# such cells become :in_dev with a "language-not-supported" note rather than
-# being silently omitted.
+# those remain active :compile_error cells rather than being silently omitted.
 
 # Per-shape spec: [prelude, element_type, build_block_ending_in_xs].
 LIST_APPEND_SHAPE_SPECS = {
@@ -55,8 +54,8 @@ LIST_APPEND_SHAPE_SPECS = {
 #                     is an owning collection (pool/set/sharded/soa/etc).
 #                     The fuzz suite ASSERTS the rejection: if the language
 #                     adds support later, the cell flips to unexpected_pass.
-#   :in_dev        -- real bug: lowering produces incorrect Zig for this
-#                     (shape, modality) combination.
+# A compiler/runtime defect is never an expected outcome; it leaves the
+# required matrix red until fixed.
 LIST_APPEND_EXPECTED_OVERRIDES = {
   # Language doesn't support `OwningT[]@list` for these element types
   # (transpiler rejects -- list-of-pool, list-of-set, etc. not modelled).

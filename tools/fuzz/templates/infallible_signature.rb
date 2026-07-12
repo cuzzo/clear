@@ -80,7 +80,7 @@ INFALLIBLE_SIG_FAIL_SOURCES.each do |fs|
       #     catchable anywhere via OR/CATCH. fallible_callee_absorbed
       #     stays infallible (#11). All ret_shapes incl heap_list now
       #     transpile (6a: declared-collection-return -> alloc_fault ->
-      #     Zig `!`). No :in_dev parks remain -- the gate is now the
+      #     Zig `!`). No inactive cells exist -- the gate is now the
       #     full regression oracle for the model.
       expected =
         if decl == :plain && true_fallible

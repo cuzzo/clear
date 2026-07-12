@@ -3,7 +3,7 @@
 # Cells are ENUMERATED from the registry's :cleanup_value_shapes, not picked
 # from imagination. Every shape in CALLEE_PARAM_VALUE_SHAPES from
 # surface_registry.rb gets a cell per modality. Cells currently failing are
-# :in_dev with a tracker bug ref; cells passing are :pass. No silent omissions.
+# required failures with a tracker bug ref; cells passing are :pass. No silent omissions.
 #
 # Bug history (the kind of blind spot this template now blocks):
 #   #37  @list/@set/@pool/@map via bare/COPY -- mis-lowered as slice
@@ -120,7 +120,7 @@ TAKES_MOVE_SHAPE_SPECS = {
 }.freeze
 
 # Empirically-classified expected outcomes per (shape, modality). Cells found
-# failing on this branch are :in_dev with the bug task ID. Default = :pass.
+# failing on this branch must fail the required matrix. Default = :pass.
 # Every failure flipped via `ruby tools/fuzz/run.rb --matrix --templates
 # takes_move_modality` + standalone classification. NO speculation; NO silent
 # omissions.

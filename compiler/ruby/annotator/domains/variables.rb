@@ -103,6 +103,18 @@ module Annotator
         final_type, error = value.coerce!(node.type)
         error!(node, :TYPE_COERCION_FAILED, detail: error) if error
 
+        # A capability constructor is the architectural type decision even
+        # when the declaration spells only the payload type (`x: Int64 =
+        # 0 @shared:atomic`). Keep the validated capability shape as the
+        # lowering coercion target; casting the resulting `*Atomic(Int64)`
+        # back to the payload `Int64` produces invalid Zig and discards the
+        # declared runtime semantics.
+        if value.is_a?(AST::CapabilityWrap) && (value.ownership || value.sync || value.layout)
+          capability_target = node.type ? Type.new(node.type) : Type.new(value.full_type!(context: "capability declaration value"))
+          capability_target.merge_capabilities_from!(value.full_type!(context: "capability declaration value"))
+          value.coerced_type = capability_target
+        end
+
         # Empty collection literals annotated as Auto need a permissive
         # container type in scope so method dispatch works during the body walk;
         # the declaration annotation remains Auto for the later constraint pass.

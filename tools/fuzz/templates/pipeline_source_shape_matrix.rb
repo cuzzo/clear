@@ -222,8 +222,8 @@ FuzzGenerator.register(:pipeline_source_shape_matrix, cells: PIPELINE_SOURCE_CEL
       FN main() RETURNS !Void ->
         #{decl}
         grouped = s |> INDEX _.category;
-        ASSERT grouped["a"].length() == 2_i64, "pipeline index a";
-        ASSERT grouped["b"].length() == 1_i64, "pipeline index b";
+        ASSERT grouped["a"]?.length() == 2_i64, "pipeline index a";
+        ASSERT grouped["b"]?.length() == 1_i64, "pipeline index b";
         RETURN;
       END
     CHT

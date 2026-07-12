@@ -15,22 +15,24 @@ UNION Value {
 }
 
 FN envGet!(envId: Id<Env>, name: String, MUTABLE pool: Env[10000]@pool) RETURNS !Value EFFECTS REENTRANT ->
+    MUTABLE parentVal: Value = Value.Nil;
     IF pool[envId] AS env THEN
         val = COPY (env.vars[name] OR Value{ Number: 0.0 - 777777.0 });
         PARTIAL MATCH val START
             Value.Number AS n ->
                 IF n == 0.0 - 777777.0 THEN
-                    parentVal = env.vars["__p"] OR Value.Nil;
-                    PARTIAL MATCH parentVal START
-                        Value.EnvRef AS pid -> RETURN envGet!(pid, name, pool);,
-                        DEFAULT -> RETURN Value.Nil;
-                    END
+                    parentVal = COPY (env.vars["__p"] OR Value.Nil);
+                ELSE
+                    RETURN val;
                 END
-                RETURN val;,
+                ,
             DEFAULT -> RETURN val;
         END
     END
-    RETURN Value.Nil;
+    PARTIAL MATCH parentVal START
+        Value.EnvRef AS pid -> RETURN envGet!(pid, name, pool);,
+        DEFAULT -> RETURN Value.Nil;
+    END
 END
 
 FN main() RETURNS Void ->

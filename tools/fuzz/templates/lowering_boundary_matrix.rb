@@ -161,7 +161,7 @@ FuzzGenerator.register(:lowering_boundary_matrix, cells: LBM_CELLS) do |p|
     when :next_owned_string
       %(FN main() RETURNS Void ->\n    h: ~String = BG { COPY "abc"; };\n    s: String = NEXT h;\n    ASSERT s.length() == 3_i64, "next owned string";\n    RETURN;\nEND\n)
     when :next_stream_string
-      %(FN main() RETURNS Void ->\n    s: ~String[INF] = BG STREAM { WHILE TRUE DO YIELD COPY "abc"; END };\n    x: String = NEXT s;\n    ASSERT x.length() == 3_i64, "next stream string";\n    RETURN;\nEND\n)
+      %(FN ownedString(value: String) RETURNS String -> RETURN COPY value; END\nFN main() RETURNS Void ->\n    s: ~String[INF] = BG STREAM { WHILE TRUE DO YIELD ownedString("abc"); END };\n    x: String = NEXT s;\n    ASSERT x.length() == 3_i64, "next stream string";\n    RETURN;\nEND\n)
     when :pipeline_collect
       %(FN main() RETURNS Void ->\n    s: ~Int64[] = 1_i64 ..< 5_i64;\n    total = s |> SELECT _ * 2_i64 |> SUM _;\n    ASSERT total == 20_i64, "pipeline collect";\n    RETURN;\nEND\n)
     when :pipeline_collect_inline
@@ -256,7 +256,7 @@ FuzzGenerator.register(:lowering_boundary_matrix, cells: LBM_CELLS) do |p|
         FN main() RETURNS !Void ->
             s: ~?Item[] = BG STREAM { YIELD item("a", 1_i64) OR RAISE; YIELD item("b", 2_i64) OR RAISE; };
             m = s |> INDEX _.key;
-            ASSERT m["a"].length() == 1_i64, "pipeline index";
+            ASSERT m["a"]?.length() == 1_i64, "pipeline index";
             RETURN;
         END
       CHT

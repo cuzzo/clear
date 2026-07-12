@@ -391,6 +391,7 @@ RSpec.describe MIRLowering do
 
       expect(program).to include("fn makeUser(rt: *Runtime) !*User")
       expect(program).to include("try rt.heapAlloc().create(User)")
+      expect(program).not_to include("__p.* = @as(*User")
       expect(program).not_to include("return u;")
     end
   end

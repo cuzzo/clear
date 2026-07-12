@@ -12,8 +12,8 @@
 # also set, positive cells are bundled and run under kcov so the same fuzz shard
 # contributes Zig runtime coverage.
 #
-# Cells may be marked :in_dev to reserve matrix space for unlanded features
-# (e.g., LEND). They are emitted as comments and not run.
+# Every registered cell is active. Unsupported behavior belongs in an explicit
+# :compile_error cell; there is no quarantine or inactive-cell escape hatch.
 
 require 'optparse'
 require 'fileutils'
@@ -40,6 +40,7 @@ opts = {
   templates: nil,
   shard: nil,
   jobs: Integer(ENV.fetch('FUZZ_JOBS', Etc.nprocessors.to_s)),
+  isolate_positives: false,
 }
 
 OptionParser.new do |o|
@@ -51,14 +52,8 @@ OptionParser.new do |o|
   o.on('--generate-only')       { opts[:generate_only] = true }
   o.on('--clean')               { opts[:clean] = true }
   o.on('--templates LIST')      { |v| opts[:templates] = v.split(',').map(&:to_sym) }
-  o.on('--exclude LIST')        { |v| opts[:exclude] = v.split(',').map(&:to_sym) }
   o.on('--jobs N', Integer)     { |v| opts[:jobs] = v }
-  # Quarantine: tools/fuzz/quarantine.txt lists templates with a known
-  # bug. --skip-quarantined runs the green gate (full matrix minus
-  # quarantine); --only-quarantined runs just the quarantined set
-  # (non-blocking informational job).
-  o.on('--skip-quarantined')    { opts[:quarantine] = :skip }
-  o.on('--only-quarantined')    { opts[:quarantine] = :only }
+  o.on('--isolate-positives')   { opts[:isolate_positives] = true }
   o.on('--shard I/N') do |v|
     idx, total = v.split('/', 2).map(&:to_i)
     abort "--shard expects I/N with N > 0 and 0 <= I < N" unless total && total > 0 && idx && idx >= 0 && idx < total
@@ -82,39 +77,15 @@ tuples = opts[:mode] == :matrix ? gen.full_matrix : gen.sample(opts[:count])
 if opts[:templates]
   tuples = tuples.select { |t| opts[:templates].include?(t[:template]) }
 end
-if opts[:exclude]
-  tuples = tuples.reject { |t| opts[:exclude].include?(t[:template]) }
-end
-if opts[:quarantine]
-  qfile = File.expand_path('quarantine.txt', __dir__)
-  quarantined = File.readlines(qfile)
-                    .map { |l| l.sub(/#.*/, '').strip }
-                    .reject(&:empty?)
-                    .map(&:to_sym)
-                    .to_set
-  before_quarantine = tuples.length
-  tuples =
-    if opts[:quarantine] == :skip
-      tuples.reject { |t| quarantined.include?(t[:template]) }
-    else
-      tuples.select { |t| quarantined.include?(t[:template]) }
-    end
-  skipped = before_quarantine - tuples.length
-  puts "[fuzz] quarantine filter=#{opts[:quarantine]} skipped=#{skipped} selected=#{tuples.length}"
-end
 if opts[:shard]
   idx, total = opts[:shard]
   tuples = tuples.each_with_index.select { |_tuple, i| (i % total) == idx }.map(&:first)
 end
 
 emitted = []   # array of { path:, expected:, kind:, error_code: }
-in_dev_count = 0
 tuples.each do |tuple|
   result = gen.emit(tuple)
-  if result[:expected] == :in_dev
-    in_dev_count += 1
-    next
-  end
+  abort "[fuzz] invalid expectation #{result[:expected].inspect}" unless %i[pass compile_error].include?(result[:expected])
   hash = Digest::SHA1.hexdigest(result[:source])[0, 10]
   ext = result[:kind] == :mir_checker ? "rb" : "clear"
   name = "fuzz_#{tuple[:template]}_#{hash}.#{ext}"
@@ -128,12 +99,7 @@ tuples.each do |tuple|
   }
 end
 
-puts "[fuzz] emitted #{emitted.size} programs to #{opts[:out]} (seed=#{opts[:seed]}, mode=#{opts[:mode]}, in_dev=#{in_dev_count})"
-puts "[fuzz] skipped in_dev=#{in_dev_count}"
-if in_dev_count.positive?
-  warn "[fuzz] ERROR: :in_dev cells are not allowed in the required fuzz matrix"
-  exit 1
-end
+puts "[fuzz] emitted #{emitted.size} programs to #{opts[:out]} (seed=#{opts[:seed]}, mode=#{opts[:mode]})"
 
 if opts[:generate_only]
   exit 0
@@ -270,6 +236,24 @@ def fuzz_worker_count(entries, env_key, default_workers)
     Integer(ENV.fetch(env_key, default_workers.to_s)),
     entries.size,
   ].min.then { |n| n < 1 ? 1 : n }
+end
+
+def disk_safe_isolated_workers(out_dir, default_workers)
+  # Debug CLEAR binaries can transiently consume several GiB while LLVM/DWARF
+  # linking is active. Keep 6 GiB in reserve and budget 3 GiB per concurrent
+  # isolated link. CI runners with ample disk still use up to four workers;
+  # constrained developer machines scale down instead of producing false
+  # NoSpaceLeft test failures.
+  out, status = Open3.capture2e('df', '-Pk', out_dir)
+  return [default_workers, 4].min unless status.success?
+
+  available_kib = out.lines.last.to_s.split.fetch(3).to_i
+  reserve_kib = 6 * 1024 * 1024
+  per_worker_kib = 3 * 1024 * 1024
+  disk_workers = [(available_kib - reserve_kib) / per_worker_kib, 1].max
+  [default_workers, 4, disk_workers].min
+rescue StandardError
+  [default_workers, 4].min
 end
 
 def simplecov_child_command!(name)
@@ -457,13 +441,17 @@ def async_runtime_cell?(entry)
   src.include?('BG') || src.include?('DO {')
 end
 
-def run_positive_files(entries, default_workers)
+def run_positive_files(entries, out_dir, default_workers)
   return [[], [], [], []] if entries.empty?
 
   started = Process.clock_gettime(Process::CLOCK_MONOTONIC)
   clear = File.expand_path('../../clear', __dir__)
   pass, fails, leaks, mir_errors = [], [], [], []
-  workers = fuzz_worker_count(entries, 'FUZZ_ISOLATED_WORKERS', default_workers)
+  # A CLEAR runtime test binary carries full Zig debug/runtime metadata. Link
+  # concurrency is disk-aware; all non-link work still uses the full --jobs
+  # count. FUZZ_ISOLATED_WORKERS may lower the ceiling further.
+  disk_default = disk_safe_isolated_workers(out_dir, default_workers)
+  workers = fuzz_worker_count(entries, 'FUZZ_ISOLATED_WORKERS', disk_default)
   queue = Queue.new
   entries.each { |entry| queue << entry }
   mutex = Mutex.new
@@ -506,14 +494,19 @@ def run_positive_files(entries, default_workers)
   [pass, fails, mir_errors, leaks]
 end
 
-def hybrid_run(emitted, out_dir, default_workers)
+def hybrid_run(emitted, out_dir, default_workers, isolate_positives: false)
   pass_entries = emitted.select { |e| e[:kind] != :mir_checker && e[:expected] == :pass }
   negative_entries = emitted.select { |e| e[:kind] != :mir_checker && e[:expected] == :compile_error }
   mir_negative_entries = emitted.select { |e| e[:kind] == :mir_checker && e[:expected] == :compile_error }
 
-  isolated_pass_entries, bundled_pass_entries = pass_entries.partition { |entry| async_runtime_cell?(entry) }
+  isolated_pass_entries, bundled_pass_entries =
+    if isolate_positives
+      [pass_entries, []]
+    else
+      pass_entries.partition { |entry| async_runtime_cell?(entry) }
+    end
   pass_ok, fails, mir_errors, leaks = run_pass_bundle(bundled_pass_entries, out_dir)
-  iso_ok, iso_fails, iso_mir_errors, iso_leaks = run_positive_files(isolated_pass_entries, default_workers)
+  iso_ok, iso_fails, iso_mir_errors, iso_leaks = run_positive_files(isolated_pass_entries, out_dir, default_workers)
   negative_ok, unexpected_pass = run_negative_builds(negative_entries, out_dir, default_workers)
   mir_negative_ok, mir_unexpected_pass = run_mir_checker_negatives(mir_negative_entries, default_workers)
 
@@ -582,7 +575,7 @@ pass, fails, leaks, mir_errors, unexpected_pass =
   if ENV['COVERAGE'] == '1'
     coverage_run(emitted, opts[:out], opts[:jobs])
   else
-    hybrid_run(emitted, opts[:out], opts[:jobs])
+    hybrid_run(emitted, opts[:out], opts[:jobs], isolate_positives: opts[:isolate_positives])
   end
 
 if ZigCoverageSupport.enabled?
@@ -607,6 +600,19 @@ puts "=" * 60
   list.each do |path, out|
     puts "  - #{path}"
     print_failure_excerpt(out)
+  end
+end
+
+unless fails.empty? && leaks.empty? && mir_errors.empty? && unexpected_pass.empty?
+  puts
+  puts "Compact failure manifest:"
+  [
+    ["fail", fails],
+    ["leak", leaks],
+    ["mir-error", mir_errors],
+    ["unexpected-pass", unexpected_pass],
+  ].each do |kind, list|
+    list.each { |path, _out| puts "  #{kind}: #{path}" }
   end
 end
 

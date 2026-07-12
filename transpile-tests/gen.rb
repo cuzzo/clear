@@ -365,5 +365,5 @@ end
 
 `zig fmt zig/all-tests.zig`
 run_generated_zig_tests! if ENV['TRANSPILE_RUN_ZIG'] == '1' || ZigCoverageSupport.enabled?
-puts "Done. Run with: zig test #{OUTPUT_FILE} -lc"
+puts "Done. Run with: zig test #{OUTPUT_FILE} zig/runtime/switch.S zig/runtime/onRoot.S -lc"
 end

@@ -279,6 +279,7 @@ pub fn build(b: *std.Build) void {
         // comptime seam in lib/compat.zig and silently disabling
         // them (same GAP-B issue parking-lot-loom hit pre-2026-05).
         .{ .path = "atomic-ptr-stress-test.zig", .tsan = true },
+        .{ .path = "arc-weak-hammer-test.zig", .tsan = true, .hammer = true },
 
         // Single-threaded / pure logic — debug build only
         .{ .path = "arena-fuzz-test.zig", .hammer = true },
@@ -1096,6 +1097,7 @@ pub fn build(b: *std.Build) void {
         entry: []const u8, // path under zig/, e.g. "scheduler-timeout-vopr-test.zig"
     };
     const vopr_exes = [_]VoprExe{
+        .{ .name = "arc-weak-vopr", .entry = "arc-weak-vopr-test.zig" },
         .{ .name = "scheduler-timeout-vopr", .entry = "scheduler-timeout-vopr-test.zig" },
         .{ .name = "atomic-ptr-vopr", .entry = "atomic-ptr-vopr-test.zig" },
         .{ .name = "versioned-vopr", .entry = "versioned-vopr-test.zig" },

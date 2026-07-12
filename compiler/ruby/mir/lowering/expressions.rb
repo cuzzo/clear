@@ -1601,7 +1601,12 @@ module MIRLoweringExpressions
     T.bind(self, MIRLowering) rescue nil
     hoisted = T.let([], T::Array[MIR::Node])
     field_types = struct_lit_field_types(node)
-    struct_alloc = alloc_for_node(node)
+    coerced_destination = node.coerced_type_info
+    # NodeStore owns payloads until the lexical node domain is released and
+    # destroys them with its heap allocator. Construct every managed field of
+    # a payload destined for @node with the same allocator; frame-backed String
+    # slices would otherwise be freed through the heap allocator at teardown.
+    struct_alloc = coerced_destination&.node_reference? ? :heap : alloc_for_node(node)
 
     fields = node.fields.map { |k, v|
       ft = field_types[k.to_s]

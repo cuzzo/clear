@@ -328,6 +328,9 @@ module MIRLoweringConcurrency
     return :affine_write_locked if boundary_capture_write_locked?(symbol, captured_type)
     return :affine_versioned if boundary_capture_versioned?(symbol, captured_type)
 
+    type_info = captured_type || symbol&.type
+    return T.must(type_info).parallel_boundary_forbidden_reason(mir_schema_lookup) if type_info
+
     nil
   end
 
@@ -643,8 +646,19 @@ module MIRLoweringConcurrency
       context_init_field(s.name, init_val)
     }
     setup_stmts = capture_setup_stmts(caps.specs)
-    fresh_heap_cleanup_names = caps.specs.filter_map { |spec| spec.needs_moved_guard? ? spec.name : nil }
-    capture_finalizers = caps.specs.filter_map { |spec| spec.finalizer_mir_for("__ctx_#{names.id}") }
+    fresh_heap_cleanup_names = caps.specs.filter_map do |spec|
+      next nil if capture_close_plans.key?(spec.name)
+
+      spec.needs_moved_guard? ? spec.name : nil
+    end
+    capture_finalizers = caps.specs.filter_map do |spec|
+      # A specialized close plan and the generic capture finalizer are two
+      # representations of the same ownership obligation. Emitting both makes
+      # destroyTask deinit the captured container twice.
+      next nil if capture_close_plans.key?(spec.name)
+
+      spec.finalizer_mir_for("__ctx_#{names.id}")
+    end
     capture_frees = captured.filter_map { |name, _|
       close_plan = capture_close_plans[name]
       if close_plan

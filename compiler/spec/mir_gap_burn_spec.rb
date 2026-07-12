@@ -1675,6 +1675,11 @@ RSpec.describe "MIR gap-burn characterization" do
     same.coerced_type = :Int64
     expect(low.send(:apply_lowered_coercion, MIR::Ident.new("n"), same)).to be_a(MIR::Ident)
 
+    indirect_payload = id("cfg", type: :Cfg, storage: :frame)
+    indirect_type = Type.new(:Cfg, layout: :indirect)
+    indirect_payload.coerced_type = indirect_type
+    expect(low.send(:apply_lowered_coercion, MIR::Ident.new("cfg"), indirect_payload)).to be_a(MIR::Ident)
+
     plain = MIR::Let.new("tmp", MIR::DupeSlice.new(MIR::Ident.new("s"), :heap), false, Type.new("[]const u8"), nil)
     fact = low.send(:implicit_allocating_result_fact, plain, ownership_finalization_context)
     expect(fact.name).to eq("tmp")
@@ -4075,7 +4080,11 @@ RSpec.describe "MIR gap-burn characterization" do
     field.full_type = Type.new(:Payload, ownership: :shared)
     field_assign = AST::Assignment.new(tok, field, id("payload", type: Type.new(:Payload, ownership: :shared), storage: :heap))
     field_assign.full_type = Type.new(:Payload, ownership: :shared)
-    expect(field_low.send(:lower_assignment, field_assign).needs_field_cleanup).to eq(true)
+    field_result = field_low.send(:lower_assignment, field_assign)
+    expect(field_result).to be_a(MIR::ScopeBlock)
+    expect(field_result.body.map(&:class)).to eq([MIR::ExprStmt, MIR::Set])
+    expect(field_result.body.first.expr.callee).to eq("CheatLib.cleanup")
+    expect(field_result.body.last.value).to be_a(MIR::RcRetain)
 
     direct_low = lowering
     direct_low.define_singleton_method(:lower) do |node|

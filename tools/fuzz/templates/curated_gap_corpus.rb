@@ -5,7 +5,11 @@
 
 TRANSPILE_TEST_ROOT = File.expand_path("../../../transpile-tests", __dir__)
 
-CURATED_GAP_CORPUS_SKIP = %w[
+# These are not standalone fuzz programs: they are multi-file REQUIRE entry
+# points, helper/library units without main(), or FFI integration fixtures.
+# The transpile/integration suites run them in their native context. They are
+# not registered fuzz cells and therefore are not an inactive fuzz set.
+CURATED_GAP_CORPUS_SEPARATE_INTEGRATION = %w[
   50_require.clear
   51_require_types.clear
   224_extern_std_ffi.clear
@@ -15,15 +19,17 @@ CURATED_GAP_CORPUS_SKIP = %w[
   require_types_helper.clear
 ].freeze
 
-CURATED_GAP_CORPUS_SKIP_PREFIXES = %w[
+CURATED_GAP_CORPUS_SEPARATE_INTEGRATION_PREFIXES = %w[
   minivm-golden-
 ].freeze
 
 CURATED_GAP_CORPUS_CELLS =
   Dir[File.join(TRANSPILE_TEST_ROOT, "*.clear")]
     .map { |path| { file: File.basename(path) } }
-    .reject { |cell| CURATED_GAP_CORPUS_SKIP.include?(cell[:file]) }
-    .reject { |cell| CURATED_GAP_CORPUS_SKIP_PREFIXES.any? { |prefix| cell[:file].start_with?(prefix) } }
+    .reject { |cell| CURATED_GAP_CORPUS_SEPARATE_INTEGRATION.include?(cell[:file]) }
+    .reject do |cell|
+      CURATED_GAP_CORPUS_SEPARATE_INTEGRATION_PREFIXES.any? { |prefix| cell[:file].start_with?(prefix) }
+    end
     .sort_by { |cell| cell[:file] }
     .freeze
 

@@ -54,6 +54,26 @@ RSpec.describe "@node capability" do
     expect(zig).to include("defer CheatLib.NodeStore(Node).releaseBound(__node_store_Node)")
     expect(zig).to include("CheatLib.NodeStore(Node).createBound(__node_store_Node, Node{")
     expect(zig).to include("CheatLib.NodeStore(Node).getBound(__node_store_Node, root).?.left")
-    expect(zig).to include("children.append(rt.heapAlloc(), try CheatLib.NodeStore(Node).createBound")
+    create_child = "const __eval_2 = try CheatLib.NodeStore(Node).createBound(__node_store_Node, Node{ .id = 3 });"
+    append_child = "children.append(rt.heapAlloc(), __eval_2);"
+    expect(zig).to include(create_child)
+    expect(zig).to include(append_child)
+    expect(zig.index(create_child)).to be < zig.index(append_child)
+  end
+
+  it "does not transfer copyable struct fields into node storage" do
+    source = <<~CLEAR
+      STRUCT Node { id: Int64 }
+      FN main() RETURNS Void ->
+        MUTABLE nodes: Node@node[8]@list = [];
+        TIGHT FOR i IN (0_i64 ..< 8_i64) DO
+          nodes.append(Node{ id: i });
+        END
+      END
+    CLEAR
+
+    zig = ZigTranspiler.new(source_dir: Dir.pwd).transpile(source, source_dir: Dir.pwd)
+
+    expect(zig).to include("createBound(__node_store_Node, Node{ .id = i })")
   end
 end

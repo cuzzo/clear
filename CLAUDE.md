@@ -30,7 +30,7 @@ Default build has Zig safety checks (bounds/overflow/null) but no `__morestack` 
 - `./clear test transpile-tests/` — all .clear transpile tests
 - `cd transpile-tests/module-integration && zig build test` — package integration
 - `cd transpile-tests/ffi-integration && zig build test` — FFI integration
-- `ruby tools/fuzz/run.rb --matrix --skip-quarantined --out /tmp/clear-fuzz-ci --clean` — full fuzz matrix minus quarantine (run last). Quarantined templates (tools/fuzz/quarantine.txt) have a known bug; `--only-quarantined` runs just those.
+- `ruby tools/fuzz/run.rb --matrix --out /tmp/clear-fuzz-ci --clean` — full fuzz matrix (run last). Every registered cell is mandatory; fuzz quarantine and inactive-cell mechanisms are forbidden.
 - `bundle exec prspec spec/ --tag integration` — CLI/stack-verifier integration (~3-4 min)
 
 **Benchmarks:** `ruby benchmarks/runner.rb [--smoke|--fast|--release] [path | --sequential | --concurrent | --server | --all]`. See `benchmarks/README.md`.
@@ -158,7 +158,7 @@ Verify the Memory Safety Invariants (INV-1 through INV-10 above) are not violate
 - If you added a new type or collection: is its cleanup driven by MIR nodes, not transpiler heuristics? (INV-7, INV-8)
 - If you changed escape analysis or storage decisions: does every escaping value get heap-allocated at declaration, not frame-then-promoted? (INV-1, INV-5)
 - If you changed error handling: does the error path preserve allocator identity? No `catch` fallbacks returning data from a different allocator? (INV-9)
-- Run `bundle exec prspec spec/`, `./clear test transpile-tests/`, then `ruby tools/fuzz/run.rb --matrix --skip-quarantined --out /tmp/clear-fuzz-ci --clean` to verify no regressions.
+- Run `bundle exec prspec spec/`, `./clear test transpile-tests/`, then `ruby tools/fuzz/run.rb --matrix --out /tmp/clear-fuzz-ci --clean` to verify no regressions.
 
 ### When fixing a bug:
 

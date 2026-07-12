@@ -1,4 +1,5 @@
 require "tmpdir"
+require "yaml"
 
 require_relative "../../tools/fuzz/generator"
 require_relative "../../tools/fuzz/surface_registry"
@@ -45,6 +46,37 @@ RSpec.describe FuzzCoverageModel do
 
     expect(mutant_templates - template_names).to be_empty
     expect(missing_patches).to be_empty
+  end
+
+  it "has no quarantine file, runner flags, or non-blocking CI lane" do
+    root = File.expand_path("../..", __dir__)
+    runner = File.read(File.join(root, "tools/fuzz/run.rb"))
+    workflow = File.read(File.join(root, ".github/workflows/ci.yml"))
+    guidance = ["CLAUDE.md", "tools/fuzz/README.md", "docs/agents/annotator-genuine-gaps-burndown.md"].map do |path|
+      File.read(File.join(root, path))
+    end.join("\n")
+
+    expect(File).not_to exist(File.join(root, "tools/fuzz/quarantine.txt"))
+    expect(runner).not_to include("skip-quarantined", "only-quarantined", "o.on('--exclude")
+    expect(workflow).not_to include("skip-quarantined", "only-quarantined", "tools-fuzz-quarantined")
+    expect(guidance).not_to include("skip-quarantined", "only-quarantined")
+    expectations = FuzzGenerator::TEMPLATES.values.flat_map(&:cells).map { |cell| cell.fetch(:expected, :pass) }.uniq
+    expect(expectations).to all(satisfy { |value| %i[pass compile_error].include?(value) })
+
+    jobs = YAML.safe_load(workflow, aliases: true).fetch("jobs")
+    %w[tools-fuzz-shard tools-fuzz-isolated-shard].each do |name|
+      job = jobs.fetch(name)
+      expect(job["continue-on-error"]).not_to eq(true)
+      command = job.fetch("steps").filter_map { |step| step["run"] }.find { |run| run.include?("tools/fuzz/run.rb") }
+      expect(command).to include("--matrix")
+      expect(command).not_to include("--templates", "--exclude", "quarant")
+    end
+  end
+
+  it "rejects every inactive expectation at registration" do
+    expect do
+      FuzzGenerator.register(:invalid_inactive_cell, cells: [{ expected: :disabled }]) { "" }
+    end.to raise_error(/invalid fuzz expectation/)
   end
 
   it "reports stale README active-cell counts" do

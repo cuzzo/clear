@@ -195,6 +195,10 @@ module FuzzCoverageModel
       failure_proves: 'BG handles tied to lifetime-bound captures cannot escape their source scope.',
       high_risk: true
     ),
+    link_resolve_matrix: profile(
+      failure_proves: 'Rc/Arc weak links resolve only while a strong owner lives and retain managed payloads exactly once.',
+      high_risk: true
+    ),
     list_append_modality: profile(
       failure_proves: 'Every cleanup-bearing element shape appended to heap lists is cleaned or transferred correctly.',
       high_risk: true,
@@ -218,6 +222,10 @@ module FuzzCoverageModel
       failure_proves: 'MIR lowering boundaries preserve call contracts, WITH variants, BG/DO/NEXT, and pipeline ownership.',
       high_risk: true
     ),
+    managed_payload_capability_matrix: profile(
+      failure_proves: 'Rc/Arc operations recursively retain and finalize String-owning payloads through every generic operation.',
+      high_risk: true
+    ),
     match_matrix: profile(
       failure_proves: 'MATCH lowering over union/scalar shapes binds payloads and cleans owned arms.'
     ),
@@ -238,6 +246,10 @@ module FuzzCoverageModel
     ),
     nested_loop_escape: profile(
       failure_proves: 'Nested loop-local collection escapes force safe promotion for outer-container storage.',
+      high_risk: true
+    ),
+    node_graph_matrix: profile(
+      failure_proves: '@node cycles, replacement, growth, optional traversal, and lexical teardown preserve handles and managed payloads.',
       high_risk: true
     ),
     or_heap_destination_matrix: profile(
@@ -282,6 +294,14 @@ module FuzzCoverageModel
     ),
     rc_generic_value_matrix: profile(
       failure_proves: 'Generic COPY and materialization recursively retain Rc/Arc values through structs, unions, optionals, lists, and maps.',
+      high_risk: true
+    ),
+    recursive_execution_boundary_matrix: profile(
+      failure_proves: 'Parallel-boundary admission recursively rejects scheduler-local and Rc capabilities hidden in aggregate fields.',
+      high_risk: true
+    ),
+    stateful_container_matrix: profile(
+      failure_proves: 'Map overwrite, reinsertion, COPY, and live element borrows preserve managed values and reject invalidating mutation.',
       high_risk: true
     ),
     stream_into_boundary: profile(
@@ -412,7 +432,7 @@ module FuzzCoverageModel
     names.each do |name|
       next unless documented_counts.key?(name)
       template = T.unsafe(templates.fetch(name))
-      active = T.unsafe(template).cells.count { |cell| (T.unsafe(cell)[:expected] || :pass) != :in_dev }
+      active = T.unsafe(template).cells.length
       documented = documented_counts.fetch(name)
       next if documented == active
 

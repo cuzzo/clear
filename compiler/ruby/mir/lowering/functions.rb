@@ -1759,7 +1759,13 @@ module MIRLoweringFunctions
     val_alloc_placeholder = arg_materialization.val_alloc_placeholder
     mir_args = mir_args.each_with_index.map do |arg_mir, index|
       ast_arg = intrinsic_ast_arg(node, stdlib_facts, index)
-      mir_allocates?(arg_mir) ? hoist_alloc(arg_mir, ast_arg, err_cleanup: ownership_facts.takes?(index)) : arg_mir
+      if node_store_create_call?(arg_mir)
+        hoist_evaluation_barrier(arg_mir)
+      elsif mir_allocates?(arg_mir)
+        hoist_alloc(arg_mir, ast_arg, err_cleanup: ownership_facts.takes?(index))
+      else
+        arg_mir
+      end
     end
 
     result_type = Type.from_node!(node, context: "intrinsic result")

@@ -8,7 +8,7 @@
 #   + the 4-way sync_fn&&own_fn / sync_only / own_only / else.
 # One cell per sync mode + one per ownership wrap = exhaustive over
 # the dispatch labels. Every surface form is CONFIRMED from
-# transpile-tests (all sigils occur there); nothing is :in_dev.
+# transpile-tests (all sigils occur there); every cell is active.
 #
 # expected :pass; a failing/leaking :pass cell is a SURFACED bug.
 

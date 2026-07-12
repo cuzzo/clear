@@ -47,6 +47,11 @@ const WeakI64 = Weak(i64);
 var g_arc_x: ArcI64 = undefined;
 var g_arc_y: ArcI64 = undefined;
 var g_weak: WeakI64 = undefined;
+const CheatLib = header.CheatLib;
+const CheatArcI64 = CheatLib.Arc(i64);
+const CheatWeakI64 = CheatLib.WeakArc(i64);
+var g_cheat_arc: CheatArcI64 = undefined;
+var g_cheat_weak: CheatWeakI64 = undefined;
 
 const HarnessSlot = struct {
     fiber: Fiber = undefined,
@@ -219,6 +224,38 @@ fn runConcurrentDowngrade(allocator: std.mem.Allocator, schedule: []const u8) !v
     g_arc_x.deinit();
 }
 
+// Scenario 4: exercise the Arc/WeakArc implementation emitted by the CLEAR
+// compiler, not only lib/ownership.zig's standalone smart pointer. SimAtomic
+// is wired into runtime-header.zig, so upgrade CAS and last-strong/last-weak
+// transitions yield at every atomic operation.
+fn entryCheatWeakUpgrade() callconv(.c) void {
+    if (CheatLib.weakArcUpgrade(i64, g_cheat_weak)) |upgraded| {
+        CheatLib.arcRelease(i64, std.heap.c_allocator, upgraded);
+    }
+    harness.slots[0].done = true;
+    while (true) fc.__fiber.?.yield();
+}
+
+fn entryCheatStrongDrop() callconv(.c) void {
+    CheatLib.arcRelease(i64, std.heap.c_allocator, g_cheat_arc);
+    harness.slots[1].done = true;
+    while (true) fc.__fiber.?.yield();
+}
+
+fn runCheatWeakUpgradeRace(allocator: std.mem.Allocator, schedule: []const u8) !void {
+    g_cheat_arc = try CheatLib.arcCreate(i64, allocator, 123);
+    g_cheat_weak = CheatLib.arcDowngrade(i64, g_cheat_arc);
+
+    var h = OwnershipLoomHarness.init(allocator, schedule);
+    defer h.deinit();
+    harness = &h;
+
+    try h.createThread(0, @intFromPtr(&entryCheatWeakUpgrade));
+    try h.createThread(1, @intFromPtr(&entryCheatStrongDrop));
+    try h.run();
+    CheatLib.weakArcRelease(i64, g_cheat_weak);
+}
+
 fn fillBinarySchedule(buf: []u8, value: usize) void {
     for (buf, 0..) |*slot, i| {
         slot.* = @intCast((value >> @as(u6, @intCast(i))) & 1);
@@ -275,12 +312,11 @@ const scenarios = [_]Scenario{
     .{ .name = "clone-vs-deinit", .func = &runCloneDeinit },
     .{ .name = "weak-upgrade-vs-strong-drop", .func = &runWeakUpgradeRace },
     .{ .name = "concurrent-downgrade", .func = &runConcurrentDowngrade },
+    .{ .name = "cheatlib-weak-upgrade-vs-strong-drop", .func = &runCheatWeakUpgradeRace },
     .{ .name = "inspect-accessors", .func = &runInspectAccessors },
 };
 
 fn runRuntimeHeaderArcCoverage(allocator: std.mem.Allocator) !void {
-    const CheatLib = header.CheatLib;
-
     const arc = try CheatLib.arcCreate(i64, allocator, 5);
     const retained = CheatLib.arcRetain(i64, arc);
     const weak = CheatLib.arcDowngrade(i64, arc);

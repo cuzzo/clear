@@ -15,8 +15,8 @@ FN main() RETURNS Void ->
         BG { makeItem("a", 30); },
     ];
     grouped = s1 |> INDEX _.category;
-    ASSERT grouped["a"].length() == 2, "two 'a' items";
-    ASSERT grouped["b"].length() == 1, "one 'b' item";
+    ASSERT grouped["a"]?.length() == 2, "two 'a' items";
+    ASSERT grouped["b"]?.length() == 1, "one 'b' item";
 
     # INDEX on bounded stream with WHERE pre-filter
     s2: ~Item[4] = [
@@ -26,9 +26,9 @@ FN main() RETURNS Void ->
         BG { makeItem("z", 4); },
     ];
     grouped2 = s2 |> WHERE _.score > 1 |> INDEX _.category;
-    ASSERT grouped2["x"].length() == 1, "one 'x' with score > 1";
-    ASSERT grouped2["y"].length() == 1, "one 'y'";
-    ASSERT grouped2["z"].length() == 1, "one 'z'";
+    ASSERT grouped2["x"]?.length() == 1, "one 'x' with score > 1";
+    ASSERT grouped2["y"]?.length() == 1, "one 'y'";
+    ASSERT grouped2["z"]?.length() == 1, "one 'z'";
 
     print("OK");
     RETURN;

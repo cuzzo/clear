@@ -236,8 +236,8 @@ module FuzzSurfaceRegistry
 
     # Truthful owner of :list_append across EVERY element value shape (the
     # ASSIGN_INTO_HEAP_VALUE_SHAPES superset). Many element-type x list-of
-    # combinations may be language-illegal -- such cells are :in_dev with a
-    # "language-not-supported" tag rather than silently omitted.
+    # combinations may be language-illegal -- those remain active
+    # :compile_error cells rather than being silently omitted.
     list_append_modality: {
       cleanup_value_shapes: [
         :string, :frame_string_concat, :dynamic_array, :frame_list, :heap_list,

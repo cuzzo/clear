@@ -19,19 +19,14 @@ UAF / double-free (at runtime via `std.testing.allocator`).
     # Custom output dir + clean previous run
     ruby tools/fuzz/run.rb --matrix --out /tmp/fuzz --clean
 
-    # CI gate: full matrix; quarantine must be empty
-    ruby tools/fuzz/run.rb --matrix --skip-quarantined --out /tmp/fuzz --clean
+    # CI gate: every registered cell, with no quarantine mechanism
+    ruby tools/fuzz/run.rb --matrix --out /tmp/fuzz --clean
 
-    # Just the quarantined templates; this must select zero templates
-    ruby tools/fuzz/run.rb --matrix --only-quarantined --out /tmp/fuzz --clean
+## No quarantine
 
-## Quarantine
-
-`tools/fuzz/quarantine.txt` must contain zero active template names. The
-runner prints the quarantine skipped count whenever `--skip-quarantined` or
-`--only-quarantined` is used, and quarantined failures are not converted into
-success. A nonzero quarantine count is a visible compiler work item, not a
-green state.
+Every registered fuzz cell runs. There is no quarantine file, skip flag, or
+non-blocking fuzz lane. Unsupported language behavior must be represented by
+an active `:compile_error` cell, and a compiler/runtime defect must make CI red.
 
 Exit code is 0 only if every program parses, type-checks, transpiles, runs,
 and reports zero leaks.
@@ -142,6 +137,11 @@ expected hard error is absent.
 | `mir_lowering_shape_matrix` | 87          | MIR lowering shape coverage for list/hash literals, var declarations, returns, branch locals, function args, loop locals, and node dispatch shapes. |
 | `stream_into_boundary`      | 66           | NEXT value passed across BG / DO / BG STREAM boundary, all sync wrappers |
 | `lifetimed_return`          | 36           | BG handle escape rejection — exercises bg_lifetime_sources stamping |
+| `link_resolve_matrix`       | 7            | Managed Rc/Arc weak-link liveness, repeated resolution, list storage, and dead-owner behavior. |
+| `managed_payload_capability_matrix` | 22   | String-owning payloads through generic Rc/Arc construction, COPY, collection, optional, union, and cleanup operations. |
+| `node_graph_matrix`         | 7            | Managed `@node` cycles, replacement, optional chains, handle reuse, 5,000-node growth, and lexical teardown. |
+| `recursive_execution_boundary_matrix` | 14 | Recursive aggregate admission across `@multiowned`/`@shared` fields and parallel BG boundaries. |
+| `stateful_container_matrix` | 16           | Numeric/string maps under overwrite, delete/reinsert, COPY, and active-borrow invalidation. |
 | `access_gate`               | 100             | WITH-alias escape rules — 5 alias-perm tuples × 10 patterns |
 | `polymorphic_sync_admission`| 30              | Which (callee × caller binding) tuples are admitted |
 | `execution_boundary`        | 81              | What can / can't cross BG / DO / BG STREAM × @parallel / @pinned |
@@ -200,7 +200,7 @@ Per-cell parameters:
 DO+@local+borrow+string is expected `:compile_error`; DO+@local+copy+string is legal
 because each branch receives its own owned copy.
 
-**Phase B** (36 active, was 90 :in_dev): `@shared` with each of 4 sync wrappers ×
+**Phase B** (36 active): `@shared` with each of 4 sync wrappers ×
 {borrow, copy, clone} × 3 consumers. Per-sync value: `@atomic` uses Int64 (bare
 Atomic, no Arc); `@locked` / `@writeLocked` / `@versioned` use a Counter struct.
 Access dispatch: WITH EXCLUSIVE for locked/writeLocked, WITH SNAPSHOT for versioned,
@@ -218,9 +218,9 @@ Outstanding `:pass` failures (real findings the matrix surfaces):
   is to call a helper fn with `REQUIRES c: ATOMIC` rather than read directly.
 - (BG, versioned, copy, struct): single edge case currently MIR-fails.
 
-**Phase C** (18 :in_dev): LEND keyword (TODO.md:41 — not yet parsed). The
-LEND escape-poisoning rules will become negative-test cells (`expected:
-:compile_error`) when LEND lands.
+LEND is not included because it is not a CLEAR keyword. When LEND lands, its
+escape-poisoning rules must be added directly as active negative-test cells
+(`expected: :compile_error`).
 
 ### `access_gate` matrix
 
@@ -430,8 +430,8 @@ Each cell carries an `expected:` annotation:
 - `:compile_error` — must fail compilation (CLEAR-level or Zig-level codegen). Used for
   documented capability boundaries (e.g., `(DO + @local)` — DO branches lower to inner
   Zig fns that don't close over enclosing locals; DO is meant for @shared state).
-- `:in_dev` — forbidden in the required matrix. The runner reports the skipped
-  count and exits nonzero if any cell tries to hide here.
+No inactive or skipped expectation exists. Registration rejects every status
+other than `:pass` and `:compile_error`.
 
 The runner reports `UNEXPECTED-PASS` when a `:compile_error` cell compiles successfully —
 that's the signal a feature has landed and the cell should be flipped to `:pass`.

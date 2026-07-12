@@ -11,6 +11,10 @@ class FuzzGenerator
 
   def self.register(name, cells:, &renderer)
     raise "duplicate template #{name}" if TEMPLATES.key?(name)
+    invalid = cells.find { |cell| !%i[pass compile_error].include?(cell.fetch(:expected, :pass)) }
+    if invalid
+      raise "invalid fuzz expectation: template=#{name} cell=#{invalid.inspect}; expected pass or compile_error"
+    end
     TEMPLATES[name] = Template.new(name: name, cells: cells, renderer: renderer)
   end
 
@@ -37,10 +41,8 @@ class FuzzGenerator
   end
 
   # Returns a hash:
-  #   { source: <text>, expected: :pass | :compile_error | :in_dev,
+  #   { source: <text>, expected: :pass | :compile_error,
   #     kind: :clear | :mir_checker, error_code: Symbol | nil }.
-  # :in_dev cells are skipped by the runner — they reserve space in the matrix
-  # for features not yet landed (e.g., LEND) so the matrix counts stay stable.
   def emit(tuple)
     t = TEMPLATES.fetch(tuple[:template])
     cell = tuple[:params].dup

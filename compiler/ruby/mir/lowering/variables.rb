@@ -952,7 +952,8 @@ module MIRLoweringVariables
     return lower_conditional_field_assignment(node) if conditional_field_assignment?(name)
     return T.cast(lower_indexed_assignment(node), MIR::Stmt) if name.is_a?(AST::GetIndex)
     return T.cast(lower_auto_lock_assignment(node), MIR::Stmt) if name.is_a?(AST::GetField) && node.auto_lock
-    return lower_field_assignment_with_cleanup(node) if name.is_a?(AST::GetField) && node.field_pre_cleanup
+    return lower_field_assignment_with_cleanup(node) if name.is_a?(AST::GetField) &&
+      (node.field_pre_cleanup || field_assignment_requires_cleanup?(name))
 
     nil
   end
@@ -1004,7 +1005,13 @@ module MIRLoweringVariables
       else
         lowered
       end
-      mir_allocates?(materialized) ? hoist_alloc(materialized, node.value, err_cleanup: true) : materialized
+      if node_store_create_call?(materialized)
+        hoist_evaluation_barrier(materialized)
+      elsif mir_allocates?(materialized)
+        hoist_alloc(materialized, node.value, err_cleanup: true)
+      else
+        materialized
+      end
     end
     set = MIR::Set.new(target, value)
     stmt = with_ownership_consumption_for_value(
@@ -1049,6 +1056,7 @@ module MIRLoweringVariables
   def assignment_value(node)
     T.bind(self, MIRLowering) rescue nil
     value = T.cast(lower(node.value), MIR::Emittable)
+    value = hoist_evaluation_barrier(value) if node_store_create_call?(value)
     copy_container_borrow_if_needed(value, node.value)
   end
 

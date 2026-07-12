@@ -1,4 +1,0 @@
-# Fuzz template quarantine.
-#
-# There must be zero quarantined templates. If this file ever contains an
-# active template name, tools/fuzz/run.rb reports the skipped count explicitly.

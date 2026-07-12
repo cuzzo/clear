@@ -110,8 +110,7 @@ FN debugPrintInfo!(varSnapshot: HashMap<String>) RETURNS !Void ->
     IF keys.length() == 0_i64 THEN
         print("no bindings in scope");
     ELSE
-        FOR ki IN (0_i64 ..< keys.length()) DO
-            k = keys[ki];
+        FOR k IN keys DO
             v = varSnapshot[k] OR "";
             # Snapshot values carry a `Type = value` prefix when the
             # emitter resolved a type for the binding (the colon form

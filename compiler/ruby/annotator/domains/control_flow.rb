@@ -509,6 +509,12 @@ module Annotator
               # makes the new binding a borrow into locked data; it must not
               # escape the enclosing WITH scope either.
               container_source = find_container_source(b.expr)
+              # Compact @node handles and ordinary Copy payloads are returned
+              # by value. Binding them does not borrow the collection storage,
+              # so a later handle assignment cannot invalidate the binding.
+              if unwrapped.node_reference? || unwrapped.implicitly_copyable?
+                container_source = nil
+              end
               if (src_sym = AST.root_identifier(b.expr)&.symbol)
                 entry.mark_non_escaping! if src_sym.non_escaping
                 if container_source
@@ -518,7 +524,10 @@ module Annotator
               end
               classify_ownership!(entry)
               og_declare(b.name.to_s, nil, unwrapped)
-              ownership_graph[b.name.to_s]&.kind = :borrowed if container_source
+              if container_source
+                ownership_graph[b.name.to_s]&.kind = :borrowed
+                ownership_graph.borrow(b.name.to_s, container_source, mutable: false)
+              end
             end
             visit_stmts(node.then_branch)
             nil

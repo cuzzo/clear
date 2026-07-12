@@ -44,17 +44,35 @@ module Annotator
             actual_type = value_arg.full_type!(context: "@node collection insertion")
             value_arg.coerced_type = element_type if !actual_type.node_reference? && element_type.accepts?(actual_type)
           end
+          reject_mutating_borrowed_receiver!(node)
           record_predicate_call_site!(node)
           return
         end
 
-        return if resolve_extern_method_call!(node)
-        return if resolve_intrinsic_method_call!(node)
+        if resolve_extern_method_call!(node)
+          reject_mutating_borrowed_receiver!(node)
+          return
+        end
+        if resolve_intrinsic_method_call!(node)
+          reject_mutating_borrowed_receiver!(node)
+          return
+        end
 
         # Fall through to UFCS: obj.method(args) -> method(obj, args).
         resolve_call(node, [node.object] + node.args)
         record_predicate_call_site!(node)
         record_call_site(node.name) if node.name.is_a?(String)
+      end
+
+      sig { params(node: AST::MethodCall).void }
+      def reject_mutating_borrowed_receiver!(node)
+        return unless node.mutates_receiver
+
+        root = root_variable_name(node.object)
+        return unless root
+        return if ownership_graph.can_write?(root)
+
+        error!(node, :ASSIGN_WHILE_BORROWED, name: root)
       end
 
       sig { params(node: AST::StaticCall).void }

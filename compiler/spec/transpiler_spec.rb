@@ -148,7 +148,9 @@ RSpec.describe ZigTranspiler do
         END
       CLEAR
 
-      expect { transpile(src) }.not_to raise_error
+      zig = transpile(src)
+      expect(zig).to include("CheatLib.cleanup(@TypeOf((__ctx_0.s.ctrl.data.*.data).message)")
+      expect(zig).to include('heapAlloc().dupe(u8, "hello from producer")')
     end
 
     it "allows footguns/07-style relay BG to NEXT a producer promise captured from the same scope" do

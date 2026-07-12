@@ -3847,6 +3847,69 @@ class Type
     ownership_bearing_type?(schema_lookup)
   end
 
+  # Returns the first capability that prevents a value of this type from
+  # crossing an explicitly parallel execution boundary. This is recursive on
+  # purpose: an ordinary aggregate is not thread-safe merely because the Rc,
+  # scheduler-local node, or affine synchronization cell is one field down.
+  # Both annotation and MIR lowering consume this single classification.
+  sig { params(schema_lookup: T.nilable(SchemaLookup), seen: T.nilable(T::Set[String])).returns(T.nilable(Symbol)) }
+  def parallel_boundary_forbidden_reason(schema_lookup = nil, seen = nil)
+    return :local_scheduler_affinity if local?
+    return :non_atomic_rc if multiowned?
+    return nil if shared?
+    return :scheduler_local_node if node?
+    return :affine_locked if locked?
+    return :affine_write_locked if write_locked?
+    return :affine_versioned if versioned?
+
+    child_types = T.let([], T::Array[Type])
+    optional_child = wrapped_type
+    child_types << T.must(optional_child) if optional_child
+    array_child = element_type
+    child_types << T.must(array_child) if array_child
+    if map?
+      child_types << key_type
+      child_types << value_type
+    end
+    generic_args.each { |arg| child_types << arg }
+    child_types.each do |child|
+      reason = child.parallel_boundary_forbidden_reason(schema_lookup, seen)
+      return reason if reason
+    end
+
+    return nil unless schema_lookup
+    seen_types = seen || T.let(Set.new, T::Set[String])
+    schema_key = resolved.to_s
+    return nil if seen_types.include?(schema_key)
+
+    schema = T.must(schema_lookup).call(resolved)
+    return nil unless schema
+
+    next_seen = seen_types.dup
+    next_seen << schema_key
+    if schema.is_a?(Schemas::StructSchema) || schema.is_a?(Schemas::ResourceSchema)
+      schema.fields.each_value do |field|
+        reason = Type.from_input(field.type).parallel_boundary_forbidden_reason(schema_lookup, next_seen)
+        return reason if reason
+      end
+    elsif schema.is_a?(Schemas::UnionSchema)
+      schema.variants.each_value do |variant|
+        next if variant.nil?
+        if variant.is_a?(Schemas::InlineStructVariant)
+          variant.fields.each_value do |field_type|
+            reason = Type.from_input(field_type).parallel_boundary_forbidden_reason(schema_lookup, next_seen)
+            return reason if reason
+          end
+        else
+          reason = Type.from_input(variant).parallel_boundary_forbidden_reason(schema_lookup, next_seen)
+          return reason if reason
+        end
+      end
+    end
+
+    nil
+  end
+
   sig { params(schema_lookup: T.nilable(SchemaLookup)).returns(T::Boolean) }
   # ruby-to-clear: effects reentrant
   def ownership_bearing_type?(schema_lookup = nil)
@@ -3871,6 +3934,7 @@ class Type
   sig { params(allocator: Symbol, schema_lookup: T.nilable(SchemaLookup)).returns(T::Boolean) }
   # ruby-to-clear: effects reentrant
   def needs_explicit_cleanup?(allocator, schema_lookup = nil)
+    return false if node_reference?
     return false if primitive? || void? || any?
     return false if implicitly_copyable?(schema_lookup)
     # Copy types never need cleanup regardless of allocator

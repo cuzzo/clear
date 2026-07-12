@@ -593,6 +593,25 @@ module MIRHoistLowering
     node.child_exprs.any? { |child| mir_allocates?(child) }
   end
 
+  # createBound may grow or compact the PagedSlotMap and invalidate payload
+  # pointers already resolved from that store. It is an evaluation barrier
+  # even though its result is a copyable NodeRef rather than an owned value.
+  sig { params(node: T.nilable(MIR::Node)).returns(T::Boolean) }
+  def node_store_create_call?(node)
+    return false unless node
+    return true if node.is_a?(MIR::MethodCall) && node.method == "createBound"
+    return false unless node.respond_to?(:child_exprs)
+
+    node.child_exprs.any? { |child| node_store_create_call?(child) }
+  end
+
+  sig { params(expr: MIR::Node).returns(MIR::Ident) }
+  def hoist_evaluation_barrier(expr)
+    name = "__eval_#{lowering_counters.next_tmp_id}"
+    function_state.pending_stmts << MIR::Let.new(name, expr, false, nil, nil)
+    MIR::Ident.new(name)
+  end
+
   sig { params(node: T.nilable(MIR::Node)).returns(T::Boolean) }
   def mutating_receiver_allocator_op?(node)
     return false unless node.respond_to?(:mutating_receiver_allocator_op?)

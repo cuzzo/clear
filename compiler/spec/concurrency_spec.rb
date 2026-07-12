@@ -510,6 +510,27 @@ RSpec.describe SemanticAnnotator do
       end
     end
 
+    context "@parallel + @multiowned nested in an ordinary aggregate" do
+      let(:code) {
+        <<~FLUX
+          STRUCT Item { value: Int64 }
+          STRUCT Holder { item: Item@multiowned }
+          FN useHolder(holder: Holder) RETURNS Void -> RETURN; END
+          FN f() RETURNS !Void ->
+              item = Item{ value: 7 } @multiowned;
+              holder = Holder{ item: item };
+              p: ~Void = BG { @parallel -> useHolder(holder); };
+              NEXT p;
+              RETURN;
+          END
+        FLUX
+      }
+
+      it "rejects the recursively contained non-atomic Rc" do
+        expect { run(code) }.to raise_error(CompilerError, /parallel.*non_atomic_rc|parallel.*non-atomic/i)
+      end
+    end
+
     # --- @local safety ---
 
     context "BG @parallel + @local" do

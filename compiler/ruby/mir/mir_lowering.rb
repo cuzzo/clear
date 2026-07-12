@@ -568,8 +568,8 @@ class MIRLowering
     plan.place(self, mir, ast_node)
   end
 
-  sig { params(value: MIR::Node, destination: Type).returns(MIR::MethodCall) }
-  def node_create_mir(value, destination)
+  sig { params(value: MIR::Node, destination: Type, source_node: AST::Node).returns(MIR::MethodCall) }
+  def node_create_mir(value, destination, source_node)
     payload = T.must(destination.node_payload_type)
     zig_type = transpile_type(payload.resolved.to_s)
     function_state.node_store_types << zig_type
@@ -582,7 +582,13 @@ class MIRLowering
       MIR::CallableContract.no_ownership(2),
     )
     call.result_type = Type.new(destination)
-    call
+    T.cast(with_ownership_consumption_for_value(
+      call,
+      value,
+      source_node,
+      "NodeStore.createBound",
+      target_alloc: :heap,
+    ), MIR::MethodCall)
   end
 
   # NodeStore is a comptime Zig type factory. Keep the application structural
@@ -1116,7 +1122,7 @@ class MIRLowering
       if actual_type.resolved == :NIL
         return MIR::StructInit.new(coerced_type.zig_type, [])
       end
-      return node_create_mir(T.cast(mir, MIR::Node), coerced_type)
+      return node_create_mir(T.cast(mir, MIR::Node), coerced_type, T.cast(node, AST::Node))
     end
 
     union_wrapped = lower_union_payload_coercion(mir, node, actual_type, coerced_type)
@@ -2896,6 +2902,14 @@ class MIRLowering
     from_t = from_type.is_a?(Type) ? from_type : Type.new(from_type)
     to_t   = to_type.is_a?(Type)   ? to_type   : Type.new(to_type)
     return nil if from_t.semantic_type_key == to_t.semantic_type_key
+    # @indirect is constructed by destination placement (HeapCreate); it is
+    # not a Zig coercion. Emitting `@as(*T, value)` here wraps the payload in a
+    # pointer cast before HeapCreate, so the generated initializer tries to
+    # assign `*T` into a `T` cell. Keep numeric/shape coercions intact, but let
+    # the dedicated placement step perform this same-payload layout change.
+    if to_t.indirect? && !from_t.indirect? && from_t.resolved == to_t.resolved
+      return nil
+    end
     # Placement and constraint metadata can differ while the emitted value
     # representation is identical. Do not manufacture an @as cast in that
     # case; capability-changing coercions still differ in zig_type and fall

@@ -2,7 +2,7 @@
 #
 # `STRUCT Box { f: T }; b = Box{ f: <modality> xs };` exercised over the FULL
 # :cleanup_value_shapes registry. Cells are enumerated from the registry,
-# not hand-picked. Failing cells :in_dev with a tracker bug ref.
+# not hand-picked. Failing cells fail the required matrix.
 #
 # The cross-cut SINK_REQUIRES_SHAPES[:struct_field_store] expects the full
 # ASSIGN_INTO_HEAP_VALUE_SHAPES set; ownership_surface_smoke declares them
@@ -104,8 +104,8 @@ STRUCT_FIELD_STORE_SHAPE_SPECS = {
   ],
 }.freeze
 
-# Empirical overrides per (shape, modality). Default = :pass. Every :in_dev
-# cell carries its bug task ID inline. Classified by `ruby tools/fuzz/run.rb
+# Empirical overrides per (shape, modality). Default = :pass. Every repaired
+# cell carries its historical bug task ID inline. Classified by `ruby tools/fuzz/run.rb
 # --matrix --templates struct_field_store_modality` + per-cell ./clear run.
 STRUCT_FIELD_STORE_EXPECTED_OVERRIDES = {
   # #55 -- COPY into struct field broken for set/pool/sharded/soa/map/nested/union/list

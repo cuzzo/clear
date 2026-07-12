@@ -4,6 +4,15 @@ const linux = std.os.linux;
 const compat = @import("../lib/compat.zig");
 pub const Runtime = @import("runtime.zig").Runtime;
 
+// Deterministic-interleaving seam for the compiler-used CheatLib Arc/WeakArc.
+// Production roots resolve directly to std.atomic.Value with no branch or
+// wrapper. Loom/VOPR roots export SimAtomic so every refcount transition is a
+// scheduler yield point and the actual runtime implementation is exercised.
+const RuntimeAtomic = blk: {
+    const root = @import("root");
+    break :blk if (@hasDecl(root, "SimAtomic")) root.SimAtomic else std.atomic.Value;
+};
+
 // ── CLEAR_PROFILE comptime gate ────────────────────────────────────
 // `clear profile` prepends `pub const CLEAR_PROFILE = true;` to the
 // transpiled entry module. The runtime reads that const from the root
@@ -2722,8 +2731,8 @@ pub const CheatLib = struct {
 
     pub fn ArcControlBlock(comptime T: type) type {
         return struct {
-            strong: std.atomic.Value(usize),
-            weak: std.atomic.Value(usize),
+            strong: RuntimeAtomic(usize),
+            weak: RuntimeAtomic(usize),
             data: *T,
             alloc: std.mem.Allocator,
         };
@@ -2773,11 +2782,16 @@ pub const CheatLib = struct {
 
     pub fn arcCreate(comptime T: type, alloc: std.mem.Allocator, data: T) !Arc(T) {
         const ctrl = try alloc.create(ArcControlBlock(T));
+        errdefer alloc.destroy(ctrl);
         const data_ptr = try alloc.create(T);
         data_ptr.* = data;
         ctrl.* = .{
-            .strong = std.atomic.Value(usize).init(1),
-            .weak = std.atomic.Value(usize).init(0),
+            .strong = RuntimeAtomic(usize).init(1),
+            // One implicit weak reference is held for as long as any strong
+            // reference exists. This keeps the control block alive while the
+            // last strong owner destroys T, even when the last explicit weak
+            // reference is released concurrently.
+            .weak = RuntimeAtomic(usize).init(1),
             .data = data_ptr,
             .alloc = alloc,
         };
@@ -2798,7 +2812,11 @@ pub const CheatLib = struct {
             // RwLocked/Locked wrap types that may own heap memory (StringMap keys, etc.).
             arcDeinitInner(T, arc.ctrl.alloc, arc.ctrl.data);
             arc.ctrl.alloc.destroy(arc.ctrl.data);
-            if (arc.ctrl.weak.load(.acquire) == 0) {
+            // Payload destruction is complete. Release the implicit weak;
+            // whichever participant releases the final weak owns ctrl.
+            const weak_prev = arc.ctrl.weak.fetchSub(1, .release);
+            if (weak_prev == 1) {
+                _ = arc.ctrl.weak.load(.acquire);
                 arc.ctrl.alloc.destroy(arc.ctrl);
             }
         }
@@ -2839,6 +2857,10 @@ pub const CheatLib = struct {
             } else {
                 ptr.deinit();
             }
+        } else if (comptime needsCleanup(T)) {
+            // Ordinary structs, unions, optionals, and containers may own
+            // managed fields without defining a custom deinit method.
+            cleanup(T, a, ptr);
         }
     }
 
@@ -2888,6 +2910,7 @@ pub const CheatLib = struct {
 
     pub fn weakArcUpgrade(comptime T: type, weak: WeakArc(T)) ?Arc(T) {
         // CAS loop: atomically increment strong if > 0
+        // HAMMER-WAIT-LOOP-BEGIN: tag=weak-arc-upgrade-cas
         while (true) {
             const strong = weak.ctrl.strong.load(.acquire);
             if (strong == 0) return null;
@@ -2897,14 +2920,17 @@ pub const CheatLib = struct {
                 return Arc(T){ .ctrl = weak.ctrl };
             }
         }
+        // HAMMER-WAIT-LOOP-END: tag=weak-arc-upgrade-cas
     }
 
     pub fn weakArcRelease(comptime T: type, weak: WeakArc(T)) void {
         const prev = weak.ctrl.weak.fetchSub(1, .release);
         if (prev == 1) {
-            if (weak.ctrl.strong.load(.acquire) == 0) {
-                weak.ctrl.alloc.destroy(weak.ctrl);
-            }
+            _ = weak.ctrl.weak.load(.acquire);
+            // The implicit weak prevents this path while a strong owner or
+            // the last-strong payload destructor can still access ctrl.
+            std.debug.assert(weak.ctrl.strong.load(.monotonic) == 0);
+            weak.ctrl.alloc.destroy(weak.ctrl);
         }
     }
 
@@ -3272,6 +3298,18 @@ pub const CheatLib = struct {
             return;
         }
 
+        // Inline lock-wrapper values (not the ordinary heap `*Locked(T)`
+        // binding form) appear as Arc payloads for `@shared:locked` and
+        // `@shared:writeLocked`. Their mutex/rw fields contain runtime
+        // bookkeeping pointers that are non-owning. Only the wrapped `.data`
+        // participates in CLEAR cleanup.
+        if (comptime isLockWrapper(T)) {
+            if (comptime needsCleanup(@TypeOf(ptr.data))) {
+                cleanup(@TypeOf(ptr.data), alloc, &ptr.data);
+            }
+            return;
+        }
+
         // Heap-allocated sync wrappers (Locked / RwLocked / Versioned) +
         // RefCell-like single-field cells own their data. Lowering must
         // materialize constructor input into owned storage before wrapping.
@@ -3627,10 +3665,17 @@ pub const CheatLib = struct {
         if (info == .pointer and info.pointer.size == .slice) {
             const ElemT = info.pointer.child;
             var buf = try alloc.alloc(ElemT, value.len);
-            errdefer alloc.free(buf);
+            var initialized: usize = 0;
+            errdefer {
+                if (comptime needsCleanup(ElemT)) {
+                    for (buf[0..initialized]) |*elem| cleanup(ElemT, alloc, elem);
+                }
+                alloc.free(buf);
+            }
             if (comptime needsCleanup(ElemT)) {
                 for (value, 0..) |elem, i| {
                     buf[i] = try dupeValue(ElemT, elem, alloc);
+                    initialized += 1;
                 }
             } else {
                 @memcpy(buf, value);
@@ -3662,6 +3707,34 @@ pub const CheatLib = struct {
             return try T.init(alloc, inner);
         }
 
+        // Numeric map: std's dupe() copies value bytes but does not know that
+        // Rc/Arc/String/nested payloads carry ownership. Rebuild entry by
+        // entry so every managed value is recursively retained/duplicated.
+        if (comptime isNumericMap(T)) {
+            var result: T = .{};
+            errdefer cleanup(T, alloc, &result);
+            var src_mut = value;
+            var it = src_mut.iterator();
+            while (it.next()) |entry| {
+                const KeyT = @TypeOf(entry.key_ptr.*);
+                const ValT = @TypeOf(entry.value_ptr.*);
+                var key = if (comptime needsCleanup(KeyT))
+                    try dupeValue(KeyT, entry.key_ptr.*, alloc)
+                else
+                    entry.key_ptr.*;
+                var val = if (comptime needsCleanup(ValT))
+                    try dupeValue(ValT, entry.value_ptr.*, alloc)
+                else
+                    entry.value_ptr.*;
+                result.put(alloc, key, val) catch |err| {
+                    if (comptime needsCleanup(KeyT)) cleanup(KeyT, alloc, &key);
+                    if (comptime needsCleanup(ValT)) cleanup(ValT, alloc, &val);
+                    return err;
+                };
+            }
+            return result;
+        }
+
         if (comptime hasAllocatorDupe(T)) {
             return try value.dupe(alloc);
         }
@@ -3686,7 +3759,7 @@ pub const CheatLib = struct {
                 else => @compileError("ArrayList COPY source must be a list, array, or slice"),
             };
             var result = try T.initCapacity(alloc, source_items.len);
-            errdefer result.deinit(alloc);
+            errdefer cleanup(T, alloc, &result);
             if (comptime needsCleanup(ElemT)) {
                 for (source_items) |elem| {
                     const duped = try dupeValue(ElemT, elem, alloc);
@@ -3837,17 +3910,36 @@ pub const CheatLib = struct {
         }
 
         if (info == .@"struct" and !@hasDecl(T, "deinit")) {
-            var result = value;
-            inline for (info.@"struct".fields) |field| {
-                const FT = field.type;
-                if (comptime needsCleanup(FT)) {
-                    @field(result, field.name) = try dupeValue(FT, @field(value, field.name), alloc);
-                }
-            }
+            var result: T = undefined;
+            try dupeStructFields(T, &result, value, alloc, 0);
             return result;
         }
 
         return value;
+    }
+
+    fn dupeStructFields(
+        comptime T: type,
+        result: *T,
+        value: T,
+        alloc: std.mem.Allocator,
+        comptime index: usize,
+    ) !void {
+        const fields = @typeInfo(T).@"struct".fields;
+        if (index == fields.len) return;
+
+        const field = fields[index];
+        const FT = field.type;
+        if (comptime needsCleanup(FT)) {
+            @field(result, field.name) = try dupeValue(FT, @field(value, field.name), alloc);
+            dupeStructFields(T, result, value, alloc, index + 1) catch |err| {
+                cleanup(FT, alloc, &@field(result, field.name));
+                return err;
+            };
+        } else {
+            @field(result, field.name) = @field(value, field.name);
+            try dupeStructFields(T, result, value, alloc, index + 1);
+        }
     }
 
     fn hasAllocatorDupe(comptime T: type) bool {

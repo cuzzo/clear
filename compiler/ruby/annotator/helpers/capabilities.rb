@@ -932,9 +932,15 @@ module CapabilityHelper
     T.bind(self, SemanticAnnotator) rescue nil
     alias_name = fact.alias_name
     inner_type = unwrapped_capability_alias_type(fact)
-    current_scope.declare(alias_name, nil, inner_type, true, false, nil, :stack)
+    # Synchronization wrappers are heap-resident and the alias points into
+    # their owned payload. Preserve that pointee provenance so a managed field
+    # overwrite materializes the replacement with the heap allocator and
+    # cleans the previous value with the same allocator.
+    current_scope.declare(alias_name, nil, inner_type, true, false, nil, :heap)
     record_capture_local!(alias_name) if fact.alias_explicit
-    current_scope.local_entry!(alias_name).mark_non_escaping!
+    alias_entry = current_scope.local_entry!(alias_name)
+    alias_entry.mark_non_escaping!
+    alias_entry.mark_borrowed_alias!
     og_declare(alias_name, nil, inner_type)
   end
 
@@ -1198,6 +1204,11 @@ module CapabilityHelper
     result.has_local ||= info.local?
     result.has_rc ||= info.storage == :multiowned
     ti = info.type
+    recursive_boundary_reason = ti.parallel_boundary_forbidden_reason(
+      ->(type_name) { lookup_type_schema(type_name) },
+    )
+    result.has_local ||= recursive_boundary_reason == :local_scheduler_affinity
+    result.has_rc ||= recursive_boundary_reason == :non_atomic_rc
     sync_capture = !(ti.striped? && (ti.shared? || ti.multiowned?)) && !info.atomic?
     sharded_capture = sync_capture && ti.sharded?
     result.has_shared ||= sharded_capture ||

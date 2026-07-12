@@ -2041,7 +2041,10 @@ module AST
       if res && items.any?
         element_type = Type.new(res).element_type
         if element_type
-          items.each { |item| item.coerce!(element_type.resolved) }
+          # Preserve element ownership/synchronization. Reducing to
+          # `resolved` turned `T@multiowned[]`/`T@shared[]` literals into a
+          # request to cast Rc(T)/Arc(T) back to plain T after construction.
+          items.each { |item| item.coerce!(element_type) }
         end
       end
       [res, nil]
