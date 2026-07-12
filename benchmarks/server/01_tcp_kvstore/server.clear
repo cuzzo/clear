@@ -18,13 +18,13 @@ FN handleClient!(client: TCPClient, MUTABLE store: HashMap<String>, MUTABLE coun
       # Batch all responses into one string, write once at the end.
       MUTABLE resp = "";
       MUTABLE pos = 0;
-      WHILE pos < data.length() && running DO
+      WHILE pos < data.length() AND running DO
         ch = data.charAt(pos);
         IF ch == "*" THEN
           # RESP array: *N\r\n$L\r\nBULK\r\n...
           pos += 1;
           MUTABLE crPos = pos;
-          WHILE crPos < data.length() && data.charAt(crPos) != "\r" DO
+          WHILE crPos < data.length() AND data.charAt(crPos) != "\r" DO
             crPos += 1;
           END
           MUTABLE countStr = data.substr(pos, crPos - pos);
@@ -35,11 +35,11 @@ FN handleClient!(client: TCPClient, MUTABLE store: HashMap<String>, MUTABLE coun
           MUTABLE arg1 = "";
           MUTABLE arg2 = "";
           MUTABLE ai = 0;
-          WHILE ai < argCount && pos < data.length() DO
+          WHILE ai < argCount AND pos < data.length() DO
             IF data.charAt(pos) == "$" THEN
               pos += 1;
               MUTABLE crPos2 = pos;
-              WHILE crPos2 < data.length() && data.charAt(crPos2) != "\r" DO
+              WHILE crPos2 < data.length() AND data.charAt(crPos2) != "\r" DO
                 crPos2 += 1;
               END
               MUTABLE lenStr = data.substr(pos, crPos2 - pos);
@@ -60,17 +60,17 @@ FN handleClient!(client: TCPClient, MUTABLE store: HashMap<String>, MUTABLE coun
           END
 
           # Dispatch command — append to response buffer
-          IF arg0 == "SET" || arg0 == "set" THEN
+          IF arg0 == "SET" OR arg0 == "set" THEN
             store[arg1] = arg2;
             resp = resp + "+OK\r\n";
-          ELSE_IF arg0 == "GET" || arg0 == "get" THEN
+          ELSE_IF arg0 == "GET" OR arg0 == "get" THEN
             MUTABLE result = store[arg1] OR_ELSE "";
             IF result.any?() THEN
               resp = resp + "$${result.length().toString()}\r\n${result}\r\n";
             ELSE
               resp = resp + "$-1\r\n";
             END
-          ELSE_IF arg0 == "INCR" || arg0 == "incr" THEN
+          ELSE_IF arg0 == "INCR" OR arg0 == "incr" THEN
             IF arg1.any?() THEN
               newVal = (counters[arg1] OR_ELSE 0) + 1;
               counters[arg1] = newVal;
@@ -78,7 +78,7 @@ FN handleClient!(client: TCPClient, MUTABLE store: HashMap<String>, MUTABLE coun
             ELSE
               resp = resp + "-ERR wrong number of arguments for 'INCR'\r\n";
             END
-          ELSE_IF arg0 == "DECR" || arg0 == "decr" THEN
+          ELSE_IF arg0 == "DECR" OR arg0 == "decr" THEN
             IF arg1.any?() THEN
               newVal = (counters[arg1] OR_ELSE 0) - 1;
               counters[arg1] = newVal;
@@ -86,49 +86,49 @@ FN handleClient!(client: TCPClient, MUTABLE store: HashMap<String>, MUTABLE coun
             ELSE
               resp = resp + "-ERR wrong number of arguments for 'DECR'\r\n";
             END
-          ELSE_IF arg0 == "PING" || arg0 == "ping" THEN
+          ELSE_IF arg0 == "PING" OR arg0 == "ping" THEN
             resp = resp + "+PONG\r\n";
-          ELSE_IF arg0 == "COMMAND" || arg0 == "command" THEN
+          ELSE_IF arg0 == "COMMAND" OR arg0 == "command" THEN
             resp = resp + "*0\r\n";
-          ELSE_IF arg0 == "CONFIG" || arg0 == "config" THEN
+          ELSE_IF arg0 == "CONFIG" OR arg0 == "config" THEN
             # CONFIG GET returns empty list; CONFIG SET returns OK
-            IF arg1 == "SET" || arg1 == "set" THEN
+            IF arg1 == "SET" OR arg1 == "set" THEN
               resp = resp + "+OK\r\n";
             ELSE
               resp = resp + "*0\r\n";
             END
-          ELSE_IF arg0 == "CLIENT" || arg0 == "client" THEN
+          ELSE_IF arg0 == "CLIENT" OR arg0 == "client" THEN
             resp = resp + "+OK\r\n";
-          ELSE_IF arg0 == "FLUSHALL" || arg0 == "flushall" THEN
+          ELSE_IF arg0 == "FLUSHALL" OR arg0 == "flushall" THEN
             resp = resp + "+OK\r\n";
-          ELSE_IF arg0 == "FLUSHDB" || arg0 == "flushdb" THEN
+          ELSE_IF arg0 == "FLUSHDB" OR arg0 == "flushdb" THEN
             resp = resp + "+OK\r\n";
-          ELSE_IF arg0 == "DBSIZE" || arg0 == "dbsize" THEN
+          ELSE_IF arg0 == "DBSIZE" OR arg0 == "dbsize" THEN
             resp = resp + ":0\r\n";
-          ELSE_IF arg0 == "QUIT" || arg0 == "quit" THEN
+          ELSE_IF arg0 == "QUIT" OR arg0 == "quit" THEN
             resp = resp + "+OK\r\n";
             running = FALSE;
           ELSE
             resp = resp + "-ERR unknown command '${arg0}'\r\n";
           END
-        ELSE_IF ch == "\r" || ch == "\n" THEN
+        ELSE_IF ch == "\r" OR ch == "\n" THEN
           pos += 1;
         ELSE
           # Inline command: scan to \r or \n, extract with substr
           MUTABLE cmdEnd = pos;
-          WHILE cmdEnd < data.length() && data.charAt(cmdEnd) != "\r" && data.charAt(cmdEnd) != "\n" DO
+          WHILE cmdEnd < data.length() AND data.charAt(cmdEnd) != "\r" AND data.charAt(cmdEnd) != "\n" DO
             cmdEnd += 1;
           END
           MUTABLE cmd = data.substr(pos, cmdEnd - pos);
           pos = cmdEnd;
-          WHILE pos < data.length() && (data.charAt(pos) == "\r" || data.charAt(pos) == "\n") DO
+          WHILE pos < data.length() AND (data.charAt(pos) == "\r" OR data.charAt(pos) == "\n") DO
             pos += 1;
           END
-          IF cmd == "PING" || cmd == "ping" THEN
+          IF cmd == "PING" OR cmd == "ping" THEN
             resp = resp + "+PONG\r\n";
           ELSE_IF cmd == "READY?" THEN
             resp = resp + "+READY\r\n";
-          ELSE_IF cmd == "QUIT" || cmd == "quit" THEN
+          ELSE_IF cmd == "QUIT" OR cmd == "quit" THEN
             resp = resp + "+OK\r\n";
             running = FALSE;
           ELSE

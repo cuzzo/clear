@@ -5,10 +5,10 @@ FN main() RETURNS Void ->
     MUTABLE i: Int64 = 0_i64;
     WHILE i < 200000_i64 DO
         d = i MOD 11_i64;
-        IF d != 0_i64 && (100_i64 / d) > 9_i64 THEN
+        IF d != 0_i64 AND (100_i64 / d) > 9_i64 THEN
             hits = hits + 1_i64;
         END
-        IF d == 0_i64 || (100_i64 / d) < 4_i64 THEN
+        IF d == 0_i64 OR (100_i64 / d) < 4_i64 THEN
             skips = skips + 1_i64;
         END
         i = i + 1_i64;

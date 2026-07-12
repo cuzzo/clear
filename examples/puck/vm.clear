@@ -195,7 +195,7 @@ FN loadProgram(path: String) RETURNS !Program ->
       opcode = parseOpName(head) OR_ELSE RAISE;
       argInt = 0;
       kind = kNone();
-      IF opcode == opMath() || opcode == opCompare() THEN
+      IF opcode == opMath() OR opcode == opCompare() THEN
         kind = parseKindName(tail);
       ELSE
         argInt = parseInt(tail);

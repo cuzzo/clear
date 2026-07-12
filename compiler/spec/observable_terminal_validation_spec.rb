@@ -38,7 +38,7 @@ RSpec.describe "T13/T14: observable terminal validation + nesting" do
                 MUTABLE i: Int64 = 0_i64;
                 WHILE i < 4_i64 DO YIELD i; i = i + 1_i64; END
             };
-            running: ~Bool@observable = gen |> REDUCE(false) (_ > 1_i64) || acc;
+            running: ~Bool@observable = gen |> REDUCE(false) (_ > 1_i64) OR acc;
             _ = NEXT running;
             RETURN;
         END

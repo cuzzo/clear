@@ -58,7 +58,7 @@ FN main() RETURNS Void ->
     p3 = Point{ x: 15, y: 25 };
     MUTABLE guarded: Int64 = 0;
     PARTIAL MATCH p3 START
-        WHEN p3.x >= 10 && p3.y >= 20 -> guarded = p3.x + p3.y;,
+        WHEN p3.x >= 10 AND p3.y >= 20 -> guarded = p3.x + p3.y;,
         DEFAULT -> guarded = -1;
     END
     ASSERT guarded == 40, "WHEN guard with field access";

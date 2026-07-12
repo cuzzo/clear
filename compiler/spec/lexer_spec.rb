@@ -163,11 +163,11 @@ RSpec.describe Lexer do
     end
 
     it "handles complex operators" do
-      lexer = Lexer.new(".. -> |> OR_ELSE || &&")
+      lexer = Lexer.new(".. -> |> OR_ELSE OR AND")
       tokens = lexer.tokenize
 
       expect(tokens.map(&:type)).to eq([
-        :RANGE, :ARROW, :SMOOTH, :OR_ELSE, :CHAR, :CHAR, :EOF
+        :RANGE, :ARROW, :SMOOTH, :OR_ELSE, :KEYWORD, :KEYWORD, :EOF
       ])
     end
 

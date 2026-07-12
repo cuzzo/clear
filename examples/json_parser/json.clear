@@ -8,10 +8,10 @@
 #   - Pool-free recursion (tests @list frame-escape promotion)
 #
 # Run: ruby src/transpiler.rb examples/json_parser/json.clear > zig/interp.zig
-#      cd zig && zig build-exe interp.zig -lc switch.S onRoot.S && ./interp
+#      cd zig AND zig build-exe interp.zig -lc switch.S onRoot.S AND ./interp
 
 FN isDigit?(c: String) RETURNS Bool ->
-  IF c == "0" || c == "1" || c == "2" || c == "3" || c == "4" || c == "5" || c == "6" || c == "7" || c == "8" || c == "9" -> RETURN TRUE;
+  IF c == "0" OR c == "1" OR c == "2" OR c == "3" OR c == "4" OR c == "5" OR c == "6" OR c == "7" OR c == "8" OR c == "9" -> RETURN TRUE;
   RETURN FALSE;
 END
 
@@ -64,7 +64,7 @@ FN skipWhitespace(json: String, pos: Int64) RETURNS !Int64 ->
   MUTABLE p = pos;
   WHILE p < json.length() DO
     c = json.charAt(p);
-    IF c == " " || c == "\n" || c == "\r" || c == "\t" THEN
+    IF c == " " OR c == "\n" OR c == "\r" OR c == "\t" THEN
       p += 1;
     ELSE
       RETURN p;
@@ -135,12 +135,12 @@ FN parseValue!(
   END
 
   # Number (simple: digits, optional minus, optional dot)
-  IF c == "-" || isDigit?(c) THEN
+  IF c == "-" OR isDigit?(c) THEN
     MUTABLE numStr = "";
     MUTABLE inNum = TRUE;
-    WHILE p < json.length() && inNum DO
+    WHILE p < json.length() AND inNum DO
       nc = json.charAt(p);
-      IF nc == "-" || nc == "." || nc == "+" || nc == "e" || nc == "E" || isDigit?(nc) THEN
+      IF nc == "-" OR nc == "." OR nc == "+" OR nc == "e" OR nc == "E" OR isDigit?(nc) THEN
         numStr = numStr + nc;
         p += 1;
       ELSE
@@ -175,24 +175,24 @@ FN parseValue!(
     p += 1;
     MUTABLE items: JsonValue[]@list = List[];
     p = skipWhitespace(json, p);
-    IF p < json.length() && json.charAt(p) == "]" THEN
+    IF p < json.length() AND json.charAt(p) == "]" THEN
       penv["__jp"] = p + 1;
       RETURN JsonValue{ JArray: items };
     END
     MUTABLE parsing = TRUE;
-    WHILE parsing && p < json.length() DO
+    WHILE parsing AND p < json.length() DO
       item = parseValue!(json, p, penv, depth + 1);
       items.append(item);
       p = penv["__jp"] OR_ELSE 0;
       p = skipWhitespace(json, p);
-      IF p < json.length() && json.charAt(p) == "," THEN
+      IF p < json.length() AND json.charAt(p) == "," THEN
         p += 1;
       ELSE
         parsing = FALSE;
       END
     END
     p = skipWhitespace(json, p);
-    IF p < json.length() && json.charAt(p) == "]" THEN
+    IF p < json.length() AND json.charAt(p) == "]" THEN
       p += 1;
     END
     penv["__jp"] = p;
@@ -204,19 +204,19 @@ FN parseValue!(
     p += 1;
     MUTABLE obj: HashMap<JsonValue> = {};
     p = skipWhitespace(json, p);
-    IF p < json.length() && json.charAt(p) == "}" THEN
+    IF p < json.length() AND json.charAt(p) == "}" THEN
       penv["__jp"] = p + 1;
       RETURN JsonValue{ JObj: obj };
     END
     MUTABLE parsing = TRUE;
-    WHILE parsing && p < json.length() DO
+    WHILE parsing AND p < json.length() DO
       # Parse key
       p = skipWhitespace(json, p);
       key = parseString!(json, p, penv);
       p = penv["__jp"] OR_ELSE 0;
       # Skip :
       p = skipWhitespace(json, p);
-      IF p < json.length() && json.charAt(p) == ":" THEN
+      IF p < json.length() AND json.charAt(p) == ":" THEN
         p += 1;
       END
       # Parse value
@@ -225,14 +225,14 @@ FN parseValue!(
       obj[key] = val;
       # Skip comma or end
       p = skipWhitespace(json, p);
-      IF p < json.length() && json.charAt(p) == "," THEN
+      IF p < json.length() AND json.charAt(p) == "," THEN
         p += 1;
       ELSE
         parsing = FALSE;
       END
     END
     p = skipWhitespace(json, p);
-    IF p < json.length() && json.charAt(p) == "}" THEN
+    IF p < json.length() AND json.charAt(p) == "}" THEN
       p += 1;
     END
     penv["__jp"] = p;

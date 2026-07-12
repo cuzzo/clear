@@ -55,10 +55,10 @@ RSpec.describe "PRE clauses on function signatures" do
       expect(fn.pre_clauses.length).to eq(2)
     end
 
-    it "parses PRE with && and || combinators" do
+    it "parses PRE with AND and OR combinators" do
       ast = parse(<<~CLEAR)
         FN foo(x: Int64) RETURNS !Int64
-          PRE: x > 0 && x < 100
+          PRE: x > 0 AND x < 100
         ->
           RETURN x;
         END
@@ -67,7 +67,7 @@ RSpec.describe "PRE clauses on function signatures" do
       expect(fn.pre_clauses.length).to eq(1)
       entry = fn.pre_clauses.first
       expect(entry[:expr]).to be_a(AST::BinaryOp)
-      expect(entry[:source]).to eq("x > 0 && x < 100")
+      expect(entry[:source]).to eq("x > 0 AND x < 100")
     end
 
     it "parses PRE that references multiple parameters" do

@@ -5,7 +5,7 @@ TEST ClearParserEFFECTSREENTRANTClause DO
     ClearParser.new(tokens, source).parse();
   END
   FN fn(ast: Auto, name = "main": Auto) RETURNS Auto ->
-    ast.statements() |> FIND (isA?(_, "AST::FunctionDef") && (_.name() == name));
+    ast.statements() |> FIND (isA?(_, "AST::FunctionDef") AND (_.name() == name));
   END
   WHEN "examples" DO
     TEST THAT "leaves effects_decl nil when no clause is present" DO
@@ -110,7 +110,7 @@ TEST ClearParserREQUIRESNONREENTRANTClause DO
     ClearParser.new(tokens, source).parse();
   END
   FN fn(ast: Auto, name = "main": Auto) RETURNS Auto ->
-    ast.statements() |> FIND (isA?(_, "AST::FunctionDef") && (_.name() == name));
+    ast.statements() |> FIND (isA?(_, "AST::FunctionDef") AND (_.name() == name));
   END
   WHEN "examples" DO
     TEST THAT "leaves requires_clauses nil when none are declared" DO

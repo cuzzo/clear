@@ -1303,7 +1303,7 @@ RSpec.describe "Gradual typing — operator-aware suggestions (M2.1)" do
       expect(ranked.map(&:type_sym)).to eq([:Int64])
     end
 
-    it "ranks `&&` and `||` as Bool only" do
+    it "ranks `AND` and `OR` as Bool only" do
       expect(host.send(:auto_rank_candidates, Set[:AND]).map(&:type_sym)).to eq([:Bool])
       expect(host.send(:auto_rank_candidates, Set[:OR]).map(&:type_sym)).to eq([:Bool])
     end
@@ -1317,7 +1317,7 @@ RSpec.describe "Gradual typing — operator-aware suggestions (M2.1)" do
     end
 
     it "produces an empty list when ops have no common candidate" do
-      # `+` allows numeric+String; `&&` only allows Bool. No intersection.
+      # `+` allows numeric+String; `AND` only allows Bool. No intersection.
       ranked = host.send(:auto_rank_candidates, Set[:ADD, :AND])
       expect(ranked).to be_empty
     end

@@ -94,7 +94,7 @@ FN msort!(MUTABLE arr: Float64[], MUTABLE tmp: Float64[], n: Int64) RETURNS !Voi
         MUTABLE j = mid;
         MUTABLE k = lo;
         TIGHT WHILE k < hi DO
-          IF j >= hi || (i < mid && (arr[i] OR_ELSE 0.0) <= (arr[j] OR_ELSE 0.0)) THEN
+          IF j >= hi OR (i < mid AND (arr[i] OR_ELSE 0.0) <= (arr[j] OR_ELSE 0.0)) THEN
             tmp[k] = arr[i] OR_ELSE 0.0;
             i += 1;
           ELSE

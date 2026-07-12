@@ -14,7 +14,7 @@ FN frameContextIBase(
 ) RETURNS Int64 ->
     IF frameIndex == 0_i64 THEN RETURN iBase; END
     idx = frameIBases.length() - frameIndex;
-    IF idx < 0_i64 || idx >= frameIBases.length() THEN RETURN iBase; END
+    IF idx < 0_i64 OR idx >= frameIBases.length() THEN RETURN iBase; END
     RETURN frameIBases[idx] OR_ELSE iBase;
 END
 
@@ -25,7 +25,7 @@ FN frameContextFBase(
 ) RETURNS Int64 ->
     IF frameIndex == 0_i64 THEN RETURN fBase; END
     idx = frameFBases.length() - frameIndex;
-    IF idx < 0_i64 || idx >= frameFBases.length() THEN RETURN fBase; END
+    IF idx < 0_i64 OR idx >= frameFBases.length() THEN RETURN fBase; END
     RETURN frameFBases[idx] OR_ELSE fBase;
 END
 
@@ -36,7 +36,7 @@ FN frameContextIp(
 ) RETURNS Int64 ->
     IF frameIndex == 0_i64 THEN RETURN ip; END
     idx = frameRetIps.length() - frameIndex;
-    IF idx < 0_i64 || idx >= frameRetIps.length() THEN RETURN ip; END
+    IF idx < 0_i64 OR idx >= frameRetIps.length() THEN RETURN ip; END
     RETURN frameRetIps[idx] OR_ELSE ip;
 END
 
@@ -149,14 +149,14 @@ FN debugPrintList!(sourcePath: String, line: Int64, column: Int64) RETURNS !Void
         liStr = li.toString() OR_ELSE "?";
         # `lines` is 0-indexed but CLEAR source lines are 1-based.
         idx = li - 1_i64;
-        IF idx >= 0_i64 && idx < lines.length() THEN
+        IF idx >= 0_i64 AND idx < lines.length() THEN
             print(marker + " " + liStr + "  " + lines[idx]);
             # Caret line below the active source line, if a non-zero
             # column was supplied. The caret offset matches the column
             # (1-based); we pad the prefix to match the line-number
             # width plus the marker / spaces (`> NN  `) so the `^`
             # lines up under the source character.
-            IF li == line && column > 0_i64 THEN
+            IF li == line AND column > 0_i64 THEN
                 # Match the source-line `print` prefix exactly:
                 #   marker (2 chars, "> " or "  ") + " " + liStr + "  "
                 # = 5 + linenum-width chars before the source content.
@@ -192,11 +192,11 @@ FN debugPrintBacktrace!(frameRetIps: Int64[]@list, currentIp: Int64, currentLine
         # Inline `sourceLineFor` / column lookup -- declared later in
         # vm.clear (after this file is REQUIREd), so we can't call them.
         MUTABLE retLine: Int64 = 0_i64;
-        IF retIp >= 0_i64 && retIp < sourceLines.length() THEN
+        IF retIp >= 0_i64 AND retIp < sourceLines.length() THEN
             retLine = sourceLines[retIp] OR_ELSE 0_i64;
         END
         MUTABLE retCol: Int64 = 0_i64;
-        IF retIp >= 0_i64 && retIp < sourceColumns.length() THEN
+        IF retIp >= 0_i64 AND retIp < sourceColumns.length() THEN
             retCol = sourceColumns[retIp] OR_ELSE 0_i64;
         END
         depthStr = depth.toString() OR_ELSE "?";
@@ -230,7 +230,7 @@ FN debugPrintBreakpoints!(
         lineStr = b.sourceLine.toString() OR_ELSE "?";
         ipStr = b.ip.toString() OR_ELSE "?";
         MUTABLE state: String = "off";
-        IF b.ip >= 0_i64 && b.ip < isBreakpoint.length() && (isBreakpoint[b.ip] OR_ELSE 0_i64) != 0_i64 THEN
+        IF b.ip >= 0_i64 AND b.ip < isBreakpoint.length() AND (isBreakpoint[b.ip] OR_ELSE 0_i64) != 0_i64 THEN
             state = "on";
         END
         print("  #" + idStr + "  line " + lineStr + "  ip=" + ipStr + "  " + state);
@@ -295,7 +295,7 @@ FN debugDeleteBreakpoint!(
     FOR bi IN (0_i64 ..< breakpointEntries.length()) DO
         IF breakpointEntries[bi] AS b THEN
             IF b.id == id THEN
-                IF b.ip >= 0_i64 && b.ip < isBreakpoint.length() THEN
+                IF b.ip >= 0_i64 AND b.ip < isBreakpoint.length() THEN
                     isBreakpoint[b.ip] = 0_i64;
                 END
                 found = TRUE;
@@ -320,7 +320,7 @@ FN activeFunctionEntryIp(varNames: RegisterVarName[]@list, currentIp: Int64) RET
     FOR ni IN (0_i64 ..< varNames.length()) DO
         IF varNames[ni] AS entry THEN
             e = entry.funcEntryIp;
-            IF e <= currentIp && e > bestEntry THEN bestEntry = e; END
+            IF e <= currentIp AND e > bestEntry THEN bestEntry = e; END
         END
     END
     RETURN bestEntry;
@@ -359,7 +359,7 @@ FN snapshotRegisterVars!(
     MUTABLE winnerLine: HashMap<Int64> = {};
     FOR vni IN (0_i64 ..< varNames.length()) DO
         IF varNames[vni] AS vEntry THEN
-            IF vEntry.funcEntryIp == bestEntry && vEntry.sourceLine < pauseLine THEN
+            IF vEntry.funcEntryIp == bestEntry AND vEntry.sourceLine < pauseLine THEN
                 key = vEntry.kind + ":" + vEntry.physIdx.toString();
                 existing = winnerLine[key] OR_ELSE -1_i64;
                 IF vEntry.sourceLine > existing THEN
@@ -372,7 +372,7 @@ FN snapshotRegisterVars!(
 
     FOR vni IN (0_i64 ..< varNames.length()) DO
         IF varNames[vni] AS vEntry THEN
-          IF vEntry.funcEntryIp == bestEntry && vEntry.sourceLine < pauseLine THEN
+          IF vEntry.funcEntryIp == bestEntry AND vEntry.sourceLine < pauseLine THEN
             key = vEntry.kind + ":" + vEntry.physIdx.toString();
             chosen = winnerIdx[key] OR_ELSE -1_i64;
             IF chosen == vni THEN
@@ -386,14 +386,14 @@ FN snapshotRegisterVars!(
                 END
                 IF vEntry.kind == "i" THEN
                     ridx = iBase + vEntry.physIdx;
-                    IF ridx >= 0_i64 && ridx < 512_i64 THEN
+                    IF ridx >= 0_i64 AND ridx < 512_i64 THEN
                         intValStr = iregs[ridx].toString() OR_ELSE "?";
                         intRendered = typedPrefix + intValStr;
                         varSnapshot[vEntry.name] = intRendered;
                     END
                 ELSE_IF vEntry.kind == "f" THEN
                     ridx = fBase + vEntry.physIdx;
-                    IF ridx >= 0_i64 && ridx < 512_i64 THEN
+                    IF ridx >= 0_i64 AND ridx < 512_i64 THEN
                         # Float formatting is not yet available in the tiny
                         # debugger surface; keep the binding visible and typed.
                         floatValStr = "?";
@@ -401,7 +401,7 @@ FN snapshotRegisterVars!(
                         varSnapshot[vEntry.name] = floatRendered;
                     END
                 ELSE_IF vEntry.kind == "s" THEN
-                    IF vEntry.physIdx >= 0_i64 && vEntry.physIdx < 256_i64 THEN
+                    IF vEntry.physIdx >= 0_i64 AND vEntry.physIdx < 256_i64 THEN
                         stringRendered = typedPrefix + sregs[vEntry.physIdx];
                         varSnapshot[vEntry.name] = stringRendered;
                     END
@@ -439,15 +439,15 @@ FN replayBackward!(
         IF e.step <= toStep THEN BREAK; END
         IF e.step <= fromStep THEN
             IF e.kind == 1_i64 THEN
-                IF e.slot >= 0_i64 && e.slot < iregs.length() THEN
+                IF e.slot >= 0_i64 AND e.slot < iregs.length() THEN
                     iregs[e.slot] = e.iBefore;
                 END
             ELSE_IF e.kind == 2_i64 THEN
-                IF e.slot >= 0_i64 && e.slot < fregs.length() THEN
+                IF e.slot >= 0_i64 AND e.slot < fregs.length() THEN
                     fregs[e.slot] = e.fBefore;
                 END
             ELSE_IF e.kind == 3_i64 THEN
-                IF e.slot >= 0_i64 && e.slot < sregs.length() && e.iBefore >= 0_i64 && e.iBefore < traceStrings.length() THEN
+                IF e.slot >= 0_i64 AND e.slot < sregs.length() AND e.iBefore >= 0_i64 AND e.iBefore < traceStrings.length() THEN
                     sregs[e.slot] = COPY (traceStrings[e.iBefore] OR_ELSE "");
                 END
             END
@@ -515,25 +515,25 @@ FN registerDebugPause!(
         # out of commands.
         IF trimmed == "" THEN
             action = 0_i64; polling = FALSE;
-        ELSE_IF trimmed == ":c" || trimmed == ":continue" THEN
+        ELSE_IF trimmed == ":c" OR trimmed == ":continue" THEN
             action = 0_i64; polling = FALSE;
-        ELSE_IF trimmed == ":s" || trimmed == ":step" THEN
+        ELSE_IF trimmed == ":s" OR trimmed == ":step" THEN
             action = 1_i64; polling = FALSE;
         ELSE_IF trimmed == ":si" THEN
             action = 2_i64; polling = FALSE;
-        ELSE_IF trimmed == ":n" || trimmed == ":next" THEN
+        ELSE_IF trimmed == ":n" OR trimmed == ":next" THEN
             action = 3_i64; polling = FALSE;
-        ELSE_IF trimmed == ":fin" || trimmed == ":finish" THEN
+        ELSE_IF trimmed == ":fin" OR trimmed == ":finish" THEN
             action = 4_i64; polling = FALSE;
-        ELSE_IF trimmed == ":q" || trimmed == ":quit" THEN
+        ELSE_IF trimmed == ":q" OR trimmed == ":quit" THEN
             action = -1_i64; polling = FALSE;
         ELSE_IF trimmed == ":info" THEN
             debugPrintInfo!(varSnapshot);
         ELSE_IF trimmed == ":info b" THEN
             debugPrintBreakpoints!(breakpointEntries, isBreakpoint);
-        ELSE_IF trimmed == ":l" || trimmed == ":list" THEN
+        ELSE_IF trimmed == ":l" OR trimmed == ":list" THEN
             debugPrintList!(sourcePath, viewLine, viewColumn);
-        ELSE_IF trimmed == ":bt" || trimmed == ":backtrace" THEN
+        ELSE_IF trimmed == ":bt" OR trimmed == ":backtrace" THEN
             debugPrintBacktrace!(frameRetIps, ip, line, column, sourceLines, sourceColumns, currentFrame);
         ELSE_IF trimmed == ":up" THEN
             IF currentFrame >= frameRetIps.length() THEN
@@ -551,7 +551,7 @@ FN registerDebugPause!(
                 viewLine = 0_i64;
                 viewColumn = 0_i64;
                 MUTABLE probe: Int64 = viewIp;
-                TIGHT WHILE probe < sourceLines.length() && viewLine == 0_i64 DO
+                TIGHT WHILE probe < sourceLines.length() AND viewLine == 0_i64 DO
                     viewLine = sourceLines[probe] OR_ELSE 0_i64;
                     IF probe < sourceColumns.length() THEN
                         viewColumn = sourceColumns[probe] OR_ELSE 0_i64;
@@ -579,7 +579,7 @@ FN registerDebugPause!(
                 viewLine = 0_i64;
                 viewColumn = 0_i64;
                 MUTABLE probe: Int64 = viewIp;
-                TIGHT WHILE probe < sourceLines.length() && viewLine == 0_i64 DO
+                TIGHT WHILE probe < sourceLines.length() AND viewLine == 0_i64 DO
                     viewLine = sourceLines[probe] OR_ELSE 0_i64;
                     IF probe < sourceColumns.length() THEN
                         viewColumn = sourceColumns[probe] OR_ELSE 0_i64;
@@ -594,7 +594,7 @@ FN registerDebugPause!(
         ELSE_IF startsWith?(trimmed, ":frame ") THEN
             arg = substr(trimmed, 7_i64, trimmed.length() - 7_i64);
             target = toInt(trim(arg)) OR_ELSE -1_i64;
-            IF target < 0_i64 || target > frameRetIps.length() THEN
+            IF target < 0_i64 OR target > frameRetIps.length() THEN
                 print("frame index out of range (0.." + (frameRetIps.length().toString() OR_ELSE "?") + ")");
             ELSE
                 currentFrame = target;
@@ -609,7 +609,7 @@ FN registerDebugPause!(
                 viewLine = 0_i64;
                 viewColumn = 0_i64;
                 MUTABLE probe: Int64 = viewIp;
-                TIGHT WHILE probe < sourceLines.length() && viewLine == 0_i64 DO
+                TIGHT WHILE probe < sourceLines.length() AND viewLine == 0_i64 DO
                     viewLine = sourceLines[probe] OR_ELSE 0_i64;
                     IF probe < sourceColumns.length() THEN
                         viewColumn = sourceColumns[probe] OR_ELSE 0_i64;
@@ -663,7 +663,7 @@ FN registerDebugPause!(
             stepStr = currentStep.toString() OR_ELSE "?";
             evtStr = traceEvents.length().toString() OR_ELSE "?";
             print("step=" + stepStr + " events=" + evtStr);
-        ELSE_IF trimmed == ":rs" || trimmed == ":reverse-step" THEN
+        ELSE_IF trimmed == ":rs" OR trimmed == ":reverse-step" THEN
             # Walk one register-write event back. Multiple register
             # writes can happen in a single step (e.g. cmp ops emit
             # only one). For v1, "reverse-step" means "undo the most
@@ -690,15 +690,15 @@ FN registerDebugPause!(
                     targetIdx = traceCursor - 1_i64;
                     target = traceEvents[targetIdx] OR_ELSE TraceEvent{ step: 0_i64, kind: 0_i64, slot: 0_i64, iBefore: 0_i64, iAfter: 0_i64, fBefore: 0.0, fAfter: 0.0, ip: 0_i64 };
                     IF target.kind == 1_i64 THEN
-                        IF target.slot >= 0_i64 && target.slot < iregs.length() THEN
+                        IF target.slot >= 0_i64 AND target.slot < iregs.length() THEN
                             iregs[target.slot] = target.iBefore;
                         END
                     ELSE_IF target.kind == 2_i64 THEN
-                        IF target.slot >= 0_i64 && target.slot < fregs.length() THEN
+                        IF target.slot >= 0_i64 AND target.slot < fregs.length() THEN
                             fregs[target.slot] = target.fBefore;
                         END
                     ELSE_IF target.kind == 3_i64 THEN
-                        IF target.slot >= 0_i64 && target.slot < sregs.length() && target.iBefore >= 0_i64 && target.iBefore < traceStrings.length() THEN
+                        IF target.slot >= 0_i64 AND target.slot < sregs.length() AND target.iBefore >= 0_i64 AND target.iBefore < traceStrings.length() THEN
                             sregs[target.slot] = COPY (traceStrings[target.iBefore] OR_ELSE "");
                         END
                     END
@@ -717,7 +717,7 @@ FN registerDebugPause!(
                     );
                 END
             END
-        ELSE_IF trimmed == ":fs" || trimmed == ":forward-step" THEN
+        ELSE_IF trimmed == ":fs" OR trimmed == ":forward-step" THEN
             # Re-apply the next recorded event (the one undone by the
             # most recent `:rs`). Lets the user scrub back and forth
             # through the trace without losing it.
@@ -726,15 +726,15 @@ FN registerDebugPause!(
             ELSE
                 target = traceEvents[traceCursor] OR_ELSE TraceEvent{ step: 0_i64, kind: 0_i64, slot: 0_i64, iBefore: 0_i64, iAfter: 0_i64, fBefore: 0.0, fAfter: 0.0, ip: 0_i64 };
                 IF target.kind == 1_i64 THEN
-                    IF target.slot >= 0_i64 && target.slot < iregs.length() THEN
+                    IF target.slot >= 0_i64 AND target.slot < iregs.length() THEN
                         iregs[target.slot] = target.iAfter;
                     END
                 ELSE_IF target.kind == 2_i64 THEN
-                    IF target.slot >= 0_i64 && target.slot < fregs.length() THEN
+                    IF target.slot >= 0_i64 AND target.slot < fregs.length() THEN
                         fregs[target.slot] = target.fAfter;
                     END
                 ELSE_IF target.kind == 3_i64 THEN
-                    IF target.slot >= 0_i64 && target.slot < sregs.length() && target.iAfter >= 0_i64 && target.iAfter < traceStrings.length() THEN
+                    IF target.slot >= 0_i64 AND target.slot < sregs.length() AND target.iAfter >= 0_i64 AND target.iAfter < traceStrings.length() THEN
                         sregs[target.slot] = COPY (traceStrings[target.iAfter] OR_ELSE "");
                     END
                 END

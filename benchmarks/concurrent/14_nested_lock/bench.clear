@@ -57,7 +57,7 @@ FN main() RETURNS Void ->
               # Read lock on bank to access accounts list,
               # then exclusive locks on both accounts for transfer.
               WITH bank AS bk {
-                IF (bk.accounts[lo] AS loAcct) && (bk.accounts[hi] AS hiAcct) THEN
+                IF (bk.accounts[lo] AS loAcct) AND (bk.accounts[hi] AS hiAcct) THEN
                   WITH
                     EXCLUSIVE loAcct AS la,
                     EXCLUSIVE hiAcct AS ha {

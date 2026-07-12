@@ -180,7 +180,7 @@ FN valEqual?(a: Value, b: Value) RETURNS Bool EFFECTS REENTRANT ->
             DEFAULT -> RETURN FALSE; END,
         Value.Pair AS pa -> PARTIAL MATCH b START
             Value.Pair AS pb ->
-                RETURN valEqual?(pa.pairCar, pb.pairCar) && valEqual?(pa.pairCdr, pb.pairCdr);,
+                RETURN valEqual?(pa.pairCar, pb.pairCar) AND valEqual?(pa.pairCdr, pb.pairCdr);,
             DEFAULT -> RETURN FALSE; END,
         DEFAULT -> RETURN FALSE;
     END
@@ -274,16 +274,16 @@ FN tokenizeToEnv!(MUTABLE penv: HashMap<Value>, str: String) RETURNS Void ->
     MUTABLE i: Int64 = 0;
     WHILE i < str.length() DO
         c = charAt(str, i);
-        IF c == " " || c == "," || c == "\n" || c == "\t" THEN i += 1;
-        ELSE_IF c == "(" || c == ")" || c == "[" || c == "]" THEN
+        IF c == " " OR c == "," OR c == "\n" OR c == "\t" THEN i += 1;
+        ELSE_IF c == "(" OR c == ")" OR c == "[" OR c == "]" THEN
             penv["__t" + count.toString()] = Value{ Str: COPY c };
             count += 1;
             i += 1;
         ELSE_IF c == ";" THEN
-            WHILE i < str.length() && charAt(str, i) != "\n" DO i += 1; END
+            WHILE i < str.length() AND charAt(str, i) != "\n" DO i += 1; END
         ELSE_IF c == "\"" THEN
             MUTABLE s = "\""; i += 1;
-            WHILE i < str.length() && charAt(str, i) != "\"" DO
+            WHILE i < str.length() AND charAt(str, i) != "\"" DO
                 s = s + charAt(str, i); i += 1;
             END
             s = s + "\"";
@@ -292,7 +292,7 @@ FN tokenizeToEnv!(MUTABLE penv: HashMap<Value>, str: String) RETURNS Void ->
             i += 1;
         ELSE
             MUTABLE s = "";
-            WHILE i < str.length() && charAt(str, i) != " " && charAt(str, i) != "," && charAt(str, i) != "\n" && charAt(str, i) != "\t" && charAt(str, i) != "(" && charAt(str, i) != ")" && charAt(str, i) != "[" && charAt(str, i) != "]" && charAt(str, i) != "\"" && charAt(str, i) != ";" DO
+            WHILE i < str.length() AND charAt(str, i) != " " AND charAt(str, i) != "," AND charAt(str, i) != "\n" AND charAt(str, i) != "\t" AND charAt(str, i) != "(" AND charAt(str, i) != ")" AND charAt(str, i) != "[" AND charAt(str, i) != "]" AND charAt(str, i) != "\"" AND charAt(str, i) != ";" DO
                 s = s + charAt(str, i); i += 1;
             END
             IF s.length() > 0 THEN
@@ -321,7 +321,7 @@ FN readFormEnv!(MUTABLE penv: HashMap<Value>) RETURNS Value EFFECTS REENTRANT ->
         RETURN Value.Nil;
     END
 
-    IF tok == "(" || tok == "[" THEN
+    IF tok == "(" OR tok == "[" THEN
         penv["__rp"] = Value{ Number: toFloat(pos + 1) };
         RETURN readListEnv!(penv);
     END
@@ -341,7 +341,7 @@ FN readListEnv!(MUTABLE penv: HashMap<Value>) RETURNS Value EFFECTS REENTRANT ->
         IF curPos >= tc2 THEN listDone = TRUE;
         ELSE
             curTok = getTokenStr!(penv, curPos);
-            IF curTok == ")" || curTok == "]" THEN
+            IF curTok == ")" OR curTok == "]" THEN
                 penv["__rp"] = Value{ Number: toFloat(curPos + 1) };
                 listDone = TRUE;
             ELSE
@@ -383,11 +383,11 @@ FN applyNative(id: Int64, evaled: Value[]) RETURNS !Value EFFECTS REENTRANT ->
         RETURN Value{ Number: getNum(evaled[1]) + getNum(evaled[2]) };
     END
     IF id == 2 THEN
-        IF isInt64?(evaled[1]) && isInt64?(evaled[2]) THEN RETURN Value{ Int64Val: getInt(evaled[1]) - getInt(evaled[2]) }; END
+        IF isInt64?(evaled[1]) AND isInt64?(evaled[2]) THEN RETURN Value{ Int64Val: getInt(evaled[1]) - getInt(evaled[2]) }; END
         RETURN Value{ Number: getNum(evaled[1]) - getNum(evaled[2]) };
     END
     IF id == 3 THEN
-        IF isInt64?(evaled[1]) && isInt64?(evaled[2]) THEN RETURN Value{ Int64Val: getInt(evaled[1]) * getInt(evaled[2]) }; END
+        IF isInt64?(evaled[1]) AND isInt64?(evaled[2]) THEN RETURN Value{ Int64Val: getInt(evaled[1]) * getInt(evaled[2]) }; END
         RETURN Value{ Number: getNum(evaled[1]) * getNum(evaled[2]) };
     END
     IF id == 4 THEN RETURN Value{ Number: getNum(evaled[1]) / getNum(evaled[2]) }; END
@@ -520,11 +520,11 @@ FN applyNative(id: Int64, evaled: Value[]) RETURNS !Value EFFECTS REENTRANT ->
         # trim: strip leading/trailing whitespace
         s = getStr(evaled[1]);
         MUTABLE trimStart: Int64 = 0;
-        WHILE trimStart < s.length() && (charAt(s, trimStart) == " " || charAt(s, trimStart) == "\n" || charAt(s, trimStart) == "\t" || charAt(s, trimStart) == "\r") DO
+        WHILE trimStart < s.length() AND (charAt(s, trimStart) == " " OR charAt(s, trimStart) == "\n" OR charAt(s, trimStart) == "\t" OR charAt(s, trimStart) == "\r") DO
             trimStart += 1;
         END
         MUTABLE trimEnd: Int64 = s.length();
-        WHILE trimEnd > trimStart && (charAt(s, trimEnd - 1) == " " || charAt(s, trimEnd - 1) == "\n" || charAt(s, trimEnd - 1) == "\t" || charAt(s, trimEnd - 1) == "\r") DO
+        WHILE trimEnd > trimStart AND (charAt(s, trimEnd - 1) == " " OR charAt(s, trimEnd - 1) == "\n" OR charAt(s, trimEnd - 1) == "\t" OR charAt(s, trimEnd - 1) == "\r") DO
             trimEnd -= 1;
         END
         RETURN Value{ Str: substr(s, trimStart, trimEnd - trimStart) };
@@ -817,13 +817,13 @@ FN debugPause!(reason: String, envId: Id<Env>, MUTABLE pool: Env[50000]@pool) RE
         MUTABLE cmdRaw = readFileSafe!("/tmp/_debug_cmd.txt", pool);
         IF cmdRaw.length() > 0 THEN
             writeFile("/tmp/_debug_cmd.txt", "");
-            IF cmdRaw == ":c" || cmdRaw == ":continue" THEN
+            IF cmdRaw == ":c" OR cmdRaw == ":continue" THEN
                 debugAction = 0; debugActive = FALSE;
-            ELSE_IF cmdRaw == ":s" || cmdRaw == ":step" THEN
+            ELSE_IF cmdRaw == ":s" OR cmdRaw == ":step" THEN
                 debugAction = 1; debugActive = FALSE;
-            ELSE_IF cmdRaw == ":n" || cmdRaw == ":next" THEN
+            ELSE_IF cmdRaw == ":n" OR cmdRaw == ":next" THEN
                 debugAction = 2; debugActive = FALSE;
-            ELSE_IF cmdRaw == ":f" || cmdRaw == ":finish" THEN
+            ELSE_IF cmdRaw == ":f" OR cmdRaw == ":finish" THEN
                 debugAction = 3; debugActive = FALSE;
             ELSE_IF startsWith?(cmdRaw, ":i ") THEN
                 inspectExpr = substr(cmdRaw, 3, cmdRaw.length() - 3);
@@ -833,7 +833,7 @@ FN debugPause!(reason: String, envId: Id<Env>, MUTABLE pool: Env[50000]@pool) RE
                 inspAst = readFormEnv!(inspPenv);
                 inspResult = eval!(COPY inspAst, envId, pool);
                 writeFile("/tmp/_debug_resp.txt", prStr(inspResult, TRUE));
-            ELSE_IF cmdRaw == ":l" || cmdRaw == ":locals" THEN
+            ELSE_IF cmdRaw == ":l" OR cmdRaw == ":locals" THEN
                 # Dump all known variable names from locals tracking
                 localsStr = envGet!(envId, "__dbg_locals", pool);
                 MUTABLE localDump = "";
@@ -843,7 +843,7 @@ FN debugPause!(reason: String, envId: Id<Env>, MUTABLE pool: Env[50000]@pool) RE
                     localDump = "(no tracked locals)";
                 END
                 writeFile("/tmp/_debug_resp.txt", localDump);
-            ELSE_IF cmdRaw == ":w" || cmdRaw == ":where" || cmdRaw == ":bt" THEN
+            ELSE_IF cmdRaw == ":w" OR cmdRaw == ":where" OR cmdRaw == ":bt" THEN
                 IF stackDisplay.length() > 0 THEN
                     writeFile("/tmp/_debug_resp.txt", stackDisplay);
                 ELSE
@@ -1651,7 +1651,7 @@ FN evalList!(TAKES items: Value[], envId: Id<Env>, MUTABLE pool: Env[50000]@pool
         END
         RETURN tryResult;
 
-    ELSE_IF formName == "def!" || formName == "define" THEN
+    ELSE_IF formName == "def!" OR formName == "define" THEN
         defName = getSymName(items[1]);
         val = eval!(COPY items[2], envId, pool);
         IF isError?(val) THEN RETURN val; END
@@ -1666,12 +1666,12 @@ FN evalList!(TAKES items: Value[], envId: Id<Env>, MUTABLE pool: Env[50000]@pool
         envSet!(envId, setName, setVal, pool);
         RETURN setVal;
 
-    ELSE_IF formName == "let*" || formName == "let" THEN
+    ELSE_IF formName == "let*" OR formName == "let" THEN
         PARTIAL MATCH items[1] START
             Value.List AS binds ->
                 letId: Id<Env> = pool.insert(Env{ vars: {} });
                 pool[letId]?.vars["__p"] = Value{ EnvRef: envId };
-                IF binds.length() > 0 && isList?(binds[0]) THEN
+                IF binds.length() > 0 AND isList?(binds[0]) THEN
                     FOR bi IN (0_i64 ..< binds.length()) DO
                         PARTIAL MATCH binds[bi] START
                             Value.List AS pair ->
@@ -1697,7 +1697,7 @@ FN evalList!(TAKES items: Value[], envId: Id<Env>, MUTABLE pool: Env[50000]@pool
         END
         RETURN Value.Nil;
 
-    ELSE_IF formName == "fn*" || formName == "lambda" THEN
+    ELSE_IF formName == "fn*" OR formName == "lambda" THEN
         PARTIAL MATCH items[1] START
             Value.List AS pnames ->
                 RETURN Value.Lambda{ params: COPY pnames, body: COPY items[2], envId: envId };,
@@ -1705,7 +1705,7 @@ FN evalList!(TAKES items: Value[], envId: Id<Env>, MUTABLE pool: Env[50000]@pool
         END
         RETURN Value.Nil;
 
-    ELSE_IF formName == "do" || formName == "begin" THEN
+    ELSE_IF formName == "do" OR formName == "begin" THEN
         FOR di IN (1_i64 ..< items.length() - 1) DO
             stepResult = eval!(COPY items[di], envId, pool);
             IF isError?(stepResult) THEN RETURN stepResult; END
@@ -1754,9 +1754,9 @@ FN evalList!(TAKES items: Value[], envId: Id<Env>, MUTABLE pool: Env[50000]@pool
             # Step-into: always break
             IF stepMode == 1.0 THEN shouldBreak = TRUE; END
             # Step-over: break when depth <= target
-            IF stepMode == 2.0 && curDepth <= targetDepth THEN shouldBreak = TRUE; END
+            IF stepMode == 2.0 AND curDepth <= targetDepth THEN shouldBreak = TRUE; END
             # Step-out: break when depth < target
-            IF stepMode == 3.0 && curDepth < targetDepth THEN shouldBreak = TRUE; END
+            IF stepMode == 3.0 AND curDepth < targetDepth THEN shouldBreak = TRUE; END
 
             IF shouldBreak THEN
                 # Push call stack
@@ -2074,7 +2074,7 @@ FN compile!(ast: Value, envId: Id<Env>, MUTABLE pool: Env[50000]@pool) RETURNS !
                 cidx = consts.length(); consts.append(COPY items[1]);
                 ops.append(Value{ Number: 1.0 }); ops.append(Value{ Number: toFloat(cidx) });
 
-            ELSE_IF formName == "+" || formName == "-" || formName == "*" || formName == "/" || formName == "=" || formName == "<" || formName == ">" || formName == "<=" || formName == ">=" THEN
+            ELSE_IF formName == "+" OR formName == "-" OR formName == "*" OR formName == "/" OR formName == "=" OR formName == "<" OR formName == ">" OR formName == "<=" OR formName == ">=" THEN
                 # Eval sub-args with tree-walker, store results as consts
                 ev1 = eval!(COPY items[1], envId, pool);
                 c1 = consts.length(); consts.append(ev1);
@@ -2099,7 +2099,7 @@ FN compile!(ast: Value, envId: Id<Env>, MUTABLE pool: Env[50000]@pool) RETURNS !
                 ops.append(Value{ Number: 1.0 }); ops.append(Value{ Number: toFloat(c1) });
                 ops.append(Value{ Number: 30.0 });
 
-            ELSE_IF formName == "define" || formName == "def!" THEN
+            ELSE_IF formName == "define" OR formName == "def!" THEN
                 ev1 = eval!(COPY items[2], envId, pool);
                 c1 = consts.length(); consts.append(ev1);
                 ops.append(Value{ Number: 1.0 }); ops.append(Value{ Number: toFloat(c1) });
@@ -2136,7 +2136,7 @@ FN compile!(ast: Value, envId: Id<Env>, MUTABLE pool: Env[50000]@pool) RETURNS !
                 END
                 ops[jumpEndIdx] = Value{ Number: toFloat(ops.length()) };
 
-            ELSE_IF formName == "begin" || formName == "do" THEN
+            ELSE_IF formName == "begin" OR formName == "do" THEN
                 FOR di IN (1_i64 ..< items.length()) DO
                     evd = eval!(COPY items[di], envId, pool);
                     cd = consts.length(); consts.append(evd);
@@ -2188,7 +2188,7 @@ FN exec!(ops: Int64[], consts: Value[], envId: Id<Env>, MUTABLE pool: Env[50000]
     # Pre-allocate 64 slots
     FOR si IN (0_i64 ..< 64) DO slots.append(Value.Nil); END
 
-    WHILE running && ip < ops.length() DO
+    WHILE running AND ip < ops.length() DO
         MUTABLE pv: Value = Value.Nil;
         op = ops[ip];
         ip += 1;

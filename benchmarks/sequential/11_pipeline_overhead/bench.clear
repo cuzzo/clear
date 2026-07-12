@@ -24,7 +24,7 @@
 #   conditional reductions more aggressively (54ms vs 338ms for 4-stage C).
 #
 # HANDWRITTEN LOOP NOTE:
-#   longFusedLoop uses && to write flat conditions (v > 200 && v*2 < 1500),
+#   longFusedLoop uses AND to write flat conditions (v > 200 AND v*2 < 1500),
 #   which LLVM can vectorize. A nested-if with intermediate variable (the
 #   "natural" form) blocks LLVM vectorization and gives 962ms instead of 338ms.
 
@@ -85,7 +85,7 @@ FN longFusedLoop(data: Float64[]) RETURNS Float64 ->
   MUTABLE sum = 0.0;
   FOR i IN (0 ..< data.length()) DO
     v = data[i];
-    IF v > 200.0 && v * 2.0 < 1500.0 THEN
+    IF v > 200.0 AND v * 2.0 < 1500.0 THEN
       sum += v * 2.0;
     END
   END

@@ -77,7 +77,7 @@ FN applyNative(id: Int64, evaled: Value[]) RETURNS !Value EFFECTS REENTRANT ->
     # "integer part of floating point value out of bounds" for values
     # that occur naturally in wrap-arithmetic chains (`%* * %+`).
     IF id == 37 THEN
-        IF isInt64?(evaled[1]) && isInt64?(evaled[2]) THEN
+        IF isInt64?(evaled[1]) AND isInt64?(evaled[2]) THEN
             iam = getInt(evaled[1]);
             ibm = getInt(evaled[2]);
             MUTABLE modIntResult: Int64 = 0;
@@ -102,15 +102,15 @@ FN applyNative(id: Int64, evaled: Value[]) RETURNS !Value EFFECTS REENTRANT ->
         RETURN Value{ Number: getNum(evaled[1]) + getNum(evaled[2]) };
     END
     IF id == 2 THEN
-        IF isInt64?(evaled[1]) && isInt64?(evaled[2]) THEN RETURN Value{ Int64Val: getInt(evaled[1]) - getInt(evaled[2]) }; END
+        IF isInt64?(evaled[1]) AND isInt64?(evaled[2]) THEN RETURN Value{ Int64Val: getInt(evaled[1]) - getInt(evaled[2]) }; END
         RETURN Value{ Number: getNum(evaled[1]) - getNum(evaled[2]) };
     END
     IF id == 3 THEN
-        IF isInt64?(evaled[1]) && isInt64?(evaled[2]) THEN RETURN Value{ Int64Val: getInt(evaled[1]) * getInt(evaled[2]) }; END
+        IF isInt64?(evaled[1]) AND isInt64?(evaled[2]) THEN RETURN Value{ Int64Val: getInt(evaled[1]) * getInt(evaled[2]) }; END
         RETURN Value{ Number: getNum(evaled[1]) * getNum(evaled[2]) };
     END
     IF id == 4 THEN
-        IF isInt64?(evaled[1]) && isInt64?(evaled[2]) THEN
+        IF isInt64?(evaled[1]) AND isInt64?(evaled[2]) THEN
             ia = getInt(evaled[1]);
             ib = getInt(evaled[2]);
             IF ib == 0 THEN RETURN Value{ Int64Val: 0 }; END
@@ -262,11 +262,11 @@ FN applyNative(id: Int64, evaled: Value[]) RETURNS !Value EFFECTS REENTRANT ->
         # trim: strip leading/trailing whitespace
         s = getStr(evaled[1]);
         MUTABLE trimStart: Int64 = 0;
-        WHILE trimStart < s.length() && (charAt(s, trimStart) == " " || charAt(s, trimStart) == "\n" || charAt(s, trimStart) == "\t" || charAt(s, trimStart) == "\r") DO
+        WHILE trimStart < s.length() AND (charAt(s, trimStart) == " " OR charAt(s, trimStart) == "\n" OR charAt(s, trimStart) == "\t" OR charAt(s, trimStart) == "\r") DO
             trimStart += 1;
         END
         MUTABLE trimEnd: Int64 = s.length();
-        WHILE trimEnd > trimStart && (charAt(s, trimEnd - 1) == " " || charAt(s, trimEnd - 1) == "\n" || charAt(s, trimEnd - 1) == "\t" || charAt(s, trimEnd - 1) == "\r") DO
+        WHILE trimEnd > trimStart AND (charAt(s, trimEnd - 1) == " " OR charAt(s, trimEnd - 1) == "\n" OR charAt(s, trimEnd - 1) == "\t" OR charAt(s, trimEnd - 1) == "\r") DO
             trimEnd -= 1;
         END
         RETURN Value{ Str: substr(s, trimStart, trimEnd - trimStart) };
@@ -1807,7 +1807,7 @@ FN evalList!(TAKES items: Value[], envId: Id<Env>, MUTABLE pool: Env[50000]@pool
         END
         RETURN tryResult;
 
-    ELSE_IF formName == "def!" || formName == "define" THEN
+    ELSE_IF formName == "def!" OR formName == "define" THEN
         defName = getSymName(items[1]);
         val = (eval!(COPY items[2], envId, pool) OR_ELSE RAISE);
         IF isError?(val) THEN RETURN val; END
@@ -1852,7 +1852,7 @@ FN evalList!(TAKES items: Value[], envId: Id<Env>, MUTABLE pool: Env[50000]@pool
         lraCurrent = envGet!(envId, lraName, pool);
         PARTIAL MATCH lraCurrent START
             Value.List AS lraElems ->
-                IF lraIdx < 0 || lraIdx >= lraElems.length() THEN RETURN Value.Nil; END
+                IF lraIdx < 0 OR lraIdx >= lraElems.length() THEN RETURN Value.Nil; END
                 lraRemoved = COPY lraElems[lraIdx];
                 MUTABLE lraNew: Value[]@list = List[];
                 FOR lri IN (0_i64 ..< lraElems.length()) DO
@@ -1861,7 +1861,7 @@ FN evalList!(TAKES items: Value[], envId: Id<Env>, MUTABLE pool: Env[50000]@pool
                 envSet!(envId, lraName, Value{ List: lraNew }, pool) OR_ELSE RAISE;
                 RETURN lraRemoved;,
             Value.TypedI64Arr AS lraIarr ->
-                IF lraIdx < 0 || lraIdx >= lraIarr.length() THEN RETURN Value.Nil; END
+                IF lraIdx < 0 OR lraIdx >= lraIarr.length() THEN RETURN Value.Nil; END
                 lraRemovedI = lraIarr[lraIdx];
                 MUTABLE lraNewI: Int64[]@list = List[];
                 FOR lri IN (0_i64 ..< lraIarr.length()) DO
@@ -1870,7 +1870,7 @@ FN evalList!(TAKES items: Value[], envId: Id<Env>, MUTABLE pool: Env[50000]@pool
                 envSet!(envId, lraName, Value{ TypedI64Arr: lraNewI }, pool) OR_ELSE RAISE;
                 RETURN Value{ Int64Val: lraRemovedI };,
             Value.TypedF64Arr AS lraFarr ->
-                IF lraIdx < 0 || lraIdx >= lraFarr.length() THEN RETURN Value.Nil; END
+                IF lraIdx < 0 OR lraIdx >= lraFarr.length() THEN RETURN Value.Nil; END
                 lraRemovedF = lraFarr[lraIdx];
                 MUTABLE lraNewF: Float64[]@list = List[];
                 FOR lri IN (0_i64 ..< lraFarr.length()) DO
@@ -1898,7 +1898,7 @@ FN evalList!(TAKES items: Value[], envId: Id<Env>, MUTABLE pool: Env[50000]@pool
             DEFAULT -> RETURN Value.Nil;
         END
 
-    ELSE_IF formName == "let*" || formName == "let" THEN
+    ELSE_IF formName == "let*" OR formName == "let" THEN
         PARTIAL MATCH items[1] START
             Value.List AS binds ->
                 MUTABLE letIdHolder: ?Id<Env> = NIL;
@@ -1910,7 +1910,7 @@ FN evalList!(TAKES items: Value[], envId: Id<Env>, MUTABLE pool: Env[50000]@pool
                     letIdHolder = letIdNew;
                 }
                 IF letIdHolder AS letId THEN
-                    IF binds.length() > 0 && isList?(binds[0]) THEN
+                    IF binds.length() > 0 AND isList?(binds[0]) THEN
                         FOR bi IN (0_i64 ..< binds.length()) DO
                             PARTIAL MATCH binds[bi] START
                                 Value.List AS pair ->
@@ -1942,7 +1942,7 @@ FN evalList!(TAKES items: Value[], envId: Id<Env>, MUTABLE pool: Env[50000]@pool
         END
         RETURN Value.Nil;
 
-    ELSE_IF formName == "fn*" || formName == "lambda" THEN
+    ELSE_IF formName == "fn*" OR formName == "lambda" THEN
         PARTIAL MATCH items[1] START
             Value.List AS pnames ->
                 MUTABLE lambdaBody: Value = Value.Nil;
@@ -1952,7 +1952,7 @@ FN evalList!(TAKES items: Value[], envId: Id<Env>, MUTABLE pool: Env[50000]@pool
         END
         RETURN Value.Nil;
 
-    ELSE_IF formName == "do" || formName == "begin" THEN
+    ELSE_IF formName == "do" OR formName == "begin" THEN
         FOR di IN (1_i64 ..< items.length() - 1) DO
             stepResult = (eval!(COPY items[di], envId, pool) OR_ELSE RAISE);
             IF isError?(stepResult) THEN RETURN stepResult; END
@@ -2012,9 +2012,9 @@ FN evalList!(TAKES items: Value[], envId: Id<Env>, MUTABLE pool: Env[50000]@pool
             # Step-into: always break
             IF stepMode == 1.0 THEN shouldBreak = TRUE; END
             # Step-over: break when depth <= target
-            IF stepMode == 2.0 && curDepth <= targetDepth THEN shouldBreak = TRUE; END
+            IF stepMode == 2.0 AND curDepth <= targetDepth THEN shouldBreak = TRUE; END
             # Step-out: break when depth < target
-            IF stepMode == 3.0 && curDepth < targetDepth THEN shouldBreak = TRUE; END
+            IF stepMode == 3.0 AND curDepth < targetDepth THEN shouldBreak = TRUE; END
 
             IF shouldBreak THEN
                 # Push call stack
@@ -2282,10 +2282,10 @@ FN loadBytecodeConsts!(path: String, MUTABLE pool: Env[50000]@pool) RETURNS !Val
         # S: records are length-prefixed: `S:<bytesize>:<exactly bytesize bytes>`.
         # The byte payload is read verbatim; it may contain any byte
         # (including \n). Other records are line-terminated.
-        IF pos + 1 < n && charAt(raw, pos) == "S" && charAt(raw, pos + 1) == ":" THEN
+        IF pos + 1 < n AND charAt(raw, pos) == "S" AND charAt(raw, pos + 1) == ":" THEN
             # Find the colon after the length
             MUTABLE lenEnd: Int64 = pos + 2;
-            WHILE lenEnd < n && charAt(raw, lenEnd) != ":" DO
+            WHILE lenEnd < n AND charAt(raw, lenEnd) != ":" DO
                 lenEnd += 1;
             END
             lenStr = substr(raw, pos + 2, lenEnd - pos - 2);
@@ -2295,11 +2295,11 @@ FN loadBytecodeConsts!(path: String, MUTABLE pool: Env[50000]@pool) RETURNS !Val
             consts.append(Value{ Str: COPY payload });
             pos = payloadStart + payloadLen;
             # Skip trailing record separator (if any)
-            IF pos < n && charAt(raw, pos) == "\n" THEN pos += 1; END
+            IF pos < n AND charAt(raw, pos) == "\n" THEN pos += 1; END
         ELSE
             # Line-terminated record
             MUTABLE lineEnd: Int64 = pos;
-            WHILE lineEnd < n && charAt(raw, lineEnd) != "\n" DO
+            WHILE lineEnd < n AND charAt(raw, lineEnd) != "\n" DO
                 lineEnd += 1;
             END
             line = substr(raw, pos, lineEnd - pos);
@@ -2403,7 +2403,7 @@ FN compile!(ast: Value, envId: Id<Env>, MUTABLE pool: Env[50000]@pool) RETURNS !
                 cidx = consts.length(); consts.append(COPY items[1]);
                 ops.append(Value{ Number: 0.0 }); ops.append(Value{ Number: toFloat(cidx) });
 
-            ELSE_IF formName == "+" || formName == "-" || formName == "*" || formName == "/" || formName == "=" || formName == "<" || formName == ">" || formName == "<=" || formName == ">=" THEN
+            ELSE_IF formName == "+" OR formName == "-" OR formName == "*" OR formName == "/" OR formName == "=" OR formName == "<" OR formName == ">" OR formName == "<=" OR formName == ">=" THEN
                 ev1 = (eval!(COPY items[1], envId, pool) OR_ELSE RAISE);
                 c1 = consts.length(); consts.append(ev1);
                 ops.append(Value{ Number: 0.0 }); ops.append(Value{ Number: toFloat(c1) });
@@ -2427,7 +2427,7 @@ FN compile!(ast: Value, envId: Id<Env>, MUTABLE pool: Env[50000]@pool) RETURNS !
                 ops.append(Value{ Number: 0.0 }); ops.append(Value{ Number: toFloat(c1) });
                 ops.append(Value{ Number: 13.0 });
 
-            ELSE_IF formName == "define" || formName == "def!" THEN
+            ELSE_IF formName == "define" OR formName == "def!" THEN
                 ev1 = (eval!(COPY items[2], envId, pool) OR_ELSE RAISE);
                 c1 = consts.length(); consts.append(ev1);
                 ops.append(Value{ Number: 0.0 }); ops.append(Value{ Number: toFloat(c1) });
@@ -2467,7 +2467,7 @@ FN compile!(ast: Value, envId: Id<Env>, MUTABLE pool: Env[50000]@pool) RETURNS !
                 END
                 ops[jumpEndIdx] = Value{ Number: toFloat(ops.length()) };
 
-            ELSE_IF formName == "begin" || formName == "do" THEN
+            ELSE_IF formName == "begin" OR formName == "do" THEN
                 FOR di IN (1_i64 ..< items.length()) DO
                     evd = (eval!(COPY items[di], envId, pool) OR_ELSE RAISE);
                     cd = consts.length(); consts.append(evd);
@@ -2599,7 +2599,7 @@ FN exec!(ops: Int64[], consts: Value[], envId: Id<Env>, MUTABLE pool: Env[50000]
     MUTABLE streamFidByIdx: HashMap<Value> = {};
     MUTABLE streamCount: Int64 = 0_i64;
 
-    WHILE running && ip < ops.length() DO
+    WHILE running AND ip < ops.length() DO
         MUTABLE pv: Value = Value.Nil;
         op = ops[ip];
         ip += 1;
@@ -2634,7 +2634,7 @@ FN exec!(ops: Int64[], consts: Value[], envId: Id<Env>, MUTABLE pool: Env[50000]
                 IF sp >= stack.length() THEN stack.append(pv); ELSE stack[sp] = pv; END
                 sp += 1;,
             5 ->  # SUB (polymorphic — Int64/Int64 stays integer)
-                IF isInt64?((stack[sp - 2] OR_ELSE Value.Nil)) && isInt64?((stack[sp - 1] OR_ELSE Value.Nil)) THEN
+                IF isInt64?((stack[sp - 2] OR_ELSE Value.Nil)) AND isInt64?((stack[sp - 1] OR_ELSE Value.Nil)) THEN
                     pv = Value{ Int64Val: getInt((stack[sp - 2] OR_ELSE Value.Nil)) - getInt((stack[sp - 1] OR_ELSE Value.Nil)) };
                 ELSE
                     pv = Value{ Number: getNum((stack[sp - 2] OR_ELSE Value.Nil)) - getNum((stack[sp - 1] OR_ELSE Value.Nil)) };
@@ -2643,7 +2643,7 @@ FN exec!(ops: Int64[], consts: Value[], envId: Id<Env>, MUTABLE pool: Env[50000]
                 IF sp >= stack.length() THEN stack.append(pv); ELSE stack[sp] = pv; END
                 sp += 1;,
             6 ->  # MUL (polymorphic — Int64/Int64 stays integer)
-                IF isInt64?((stack[sp - 2] OR_ELSE Value.Nil)) && isInt64?((stack[sp - 1] OR_ELSE Value.Nil)) THEN
+                IF isInt64?((stack[sp - 2] OR_ELSE Value.Nil)) AND isInt64?((stack[sp - 1] OR_ELSE Value.Nil)) THEN
                     pv = Value{ Int64Val: getInt((stack[sp - 2] OR_ELSE Value.Nil)) * getInt((stack[sp - 1] OR_ELSE Value.Nil)) };
                 ELSE
                     pv = Value{ Number: getNum((stack[sp - 2] OR_ELSE Value.Nil)) * getNum((stack[sp - 1] OR_ELSE Value.Nil)) };
@@ -2652,7 +2652,7 @@ FN exec!(ops: Int64[], consts: Value[], envId: Id<Env>, MUTABLE pool: Env[50000]
                 IF sp >= stack.length() THEN stack.append(pv); ELSE stack[sp] = pv; END
                 sp += 1;,
             7 ->  # DIV (polymorphic — Int64/Int64 stays integer division when divisor != 0)
-                IF isInt64?((stack[sp - 2] OR_ELSE Value.Nil)) && isInt64?((stack[sp - 1] OR_ELSE Value.Nil)) THEN
+                IF isInt64?((stack[sp - 2] OR_ELSE Value.Nil)) AND isInt64?((stack[sp - 1] OR_ELSE Value.Nil)) THEN
                     divIb = getInt((stack[sp - 1] OR_ELSE Value.Nil));
                     IF divIb == 0 THEN pv = Value{ Int64Val: 0 };
                     ELSE pv = Value{ Int64Val: getInt((stack[sp - 2] OR_ELSE Value.Nil)) / divIb }; END
@@ -2945,9 +2945,9 @@ FN exec!(ops: Int64[], consts: Value[], envId: Id<Env>, MUTABLE pool: Env[50000]
                     MUTABLE dbgPrompt = "dbg> ";
                     writeFile("/dev/stderr", dbgPrompt);
                     MUTABLE dbgCmd = readLine!();
-                    IF eql?(dbgCmd, ":c") || eql?(dbgCmd, ":continue") THEN
+                    IF eql?(dbgCmd, ":c") OR eql?(dbgCmd, ":continue") THEN
                         dbgRunning = FALSE;
-                    ELSE_IF eql?(dbgCmd, ":stack") || eql?(dbgCmd, ":s") THEN
+                    ELSE_IF eql?(dbgCmd, ":stack") OR eql?(dbgCmd, ":s") THEN
                         print("  value stack (sp=" + toString(sp) + "):");
                         FOR di IN (0_i64 ..< sp) DO
                             print("    [" + toString(di) + "] " + prStr((stack[di] OR_ELSE Value.Nil), TRUE));
@@ -2962,7 +2962,7 @@ FN exec!(ops: Int64[], consts: Value[], envId: Id<Env>, MUTABLE pool: Env[50000]
                         FOR di IN (0_i64 ..< fsp) DO
                             print("    [" + toString(di) + "] " + toString(fstack[di]));
                         END
-                    ELSE_IF eql?(dbgCmd, ":locals") || eql?(dbgCmd, ":l") THEN
+                    ELSE_IF eql?(dbgCmd, ":locals") OR eql?(dbgCmd, ":l") THEN
                         print("  slots:");
                         FOR di IN (0_i64 ..< 256) DO
                             PARTIAL MATCH (slots[di] OR_ELSE Value.Nil) START
@@ -2994,7 +2994,7 @@ FN exec!(ops: Int64[], consts: Value[], envId: Id<Env>, MUTABLE pool: Env[50000]
                         dbgAst = readFormEnv!(dbgPenv) OR_ELSE RAISE;
                         dbgResult = (eval!(COPY dbgAst, curEnv, pool) OR_ELSE RAISE);
                         print("  => " + prStr(dbgResult, TRUE));
-                    ELSE_IF eql?(dbgCmd, ":help") || eql?(dbgCmd, ":h") || eql?(dbgCmd, "?") THEN
+                    ELSE_IF eql?(dbgCmd, ":help") OR eql?(dbgCmd, ":h") OR eql?(dbgCmd, "?") THEN
                         print("  :c          continue execution");
                         print("  :stack      show value stack");
                         print("  :istack     show i64 stack");
@@ -3354,7 +3354,7 @@ FN exec!(ops: Int64[], consts: Value[], envId: Id<Env>, MUTABLE pool: Env[50000]
                         # bgFid Int64Val instead of the fiber's result.)
                         IF getSymName(pcar) == "__future__" THEN
                             fid = getInt(fp.pairCdr);
-                            IF fid >= 0_i64 && fid < futureTable.length() THEN
+                            IF fid >= 0_i64 AND fid < futureTable.length() THEN
                                 fkey = fid.toString();
                                 IF futureResolved[fkey] AS cached THEN
                                     pv = COPY cached;
@@ -3383,7 +3383,7 @@ FN exec!(ops: Int64[], consts: Value[], envId: Id<Env>, MUTABLE pool: Env[50000]
                                     aliCar = COPY aliP.pairCar;
                                     IF getSymName(aliCar) == "__future__" THEN
                                         aliFid = getInt(aliP.pairCdr);
-                                        IF aliFid >= 0_i64 && aliFid < futureTable.length() THEN
+                                        IF aliFid >= 0_i64 AND aliFid < futureTable.length() THEN
                                             aliKey = aliFid.toString();
                                             IF futureResolved[aliKey] AS aliCached THEN
                                                 awaitedList.append(COPY aliCached);
@@ -3916,7 +3916,7 @@ FN exec!(ops: Int64[], consts: Value[], envId: Id<Env>, MUTABLE pool: Env[50000]
                 END,
             121 -> # STREAM_NEXT [chan_slot]: spin until channel.has=TrueVal
                    # (or channel.closed=TrueVal). Take v, set has=Nil, push v.
-                   # On closed && !has, push Nil to signal the consumer
+                   # On closed AND !has, push Nil to signal the consumer
                    # the stream is exhausted (rare in practice; consumers
                    # bound the read with LIMIT/REDUCE/etc.).
                 nxtChanSlot = ops[ip]; ip += 1;
@@ -4015,7 +4015,7 @@ FN exec!(ops: Int64[], consts: Value[], envId: Id<Env>, MUTABLE pool: Env[50000]
         smKey = smI.toString();
         IF streamFidByIdx[smKey] AS smFidV THEN
             smFid = getInt(smFidV);
-            IF smFid >= 0_i64 && smFid < futureTable.length() THEN
+            IF smFid >= 0_i64 AND smFid < futureTable.length() THEN
                 IF futureTable[smFid] AS future THEN
                     smDrained = NEXT future;
                 END

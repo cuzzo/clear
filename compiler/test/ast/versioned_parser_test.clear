@@ -80,7 +80,7 @@ TEST VersionedParser DO
       """;
       ast = parse_full(src);
       fn = ast.statements().first();
-      ASSERT fn.requires()["x"].contains?(:VERSIONED) && fn.requires()["x"].contains?(:LOCKED), "expected fn.requires()[\"x\"] to include(:VERSIONED, :LOCKED)";
+      ASSERT fn.requires()["x"].contains?(:VERSIONED) AND fn.requires()["x"].contains?(:LOCKED), "expected fn.requires()[\"x\"] to include(:VERSIONED, :LOCKED)";
     END
   END
 END

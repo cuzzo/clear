@@ -225,7 +225,7 @@ FuzzGenerator.register(:hoist_edge_matrix, cells: HOIST_EDGE_CELLS) do |p|
 
       FN main() RETURNS !Void ->
           MUTABLE count: Int64 = 0_i64;
-          WHILE count < 1_i64 && nonempty(COPY "a" + COPY "b") DO
+          WHILE count < 1_i64 AND nonempty(COPY "a" + COPY "b") DO
               count = count + 1_i64;
           END
           ASSERT count == 1_i64, "hoist while condition";

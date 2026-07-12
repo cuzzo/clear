@@ -7,7 +7,7 @@ RSpec.describe "OR_ELSE fallback migration" do
     ClearParser.new(Lexer.new(source).tokenize, source).parse
   end
 
-  it "lexes OR_ELSE as the fallback token and leaves legacy OR distinguishable" do
+  it "lexes OR_ELSE as the fallback token and logical OR as a keyword" do
     tokens = Lexer.new("a OR_ELSE b; a OR b;").tokenize
     expect(tokens.select { |token| token.value == "OR_ELSE" }.map(&:type)).to eq([:OR_ELSE])
     expect(tokens.select { |token| token.value == "OR" }.map(&:type)).to eq([:KEYWORD])
@@ -28,29 +28,18 @@ RSpec.describe "OR_ELSE fallback migration" do
     expect(value).to be_a(AST::BinaryOp)
   end
 
-  it "rejects legacy fallback OR with an exact automatic migration edit" do
+  it "keeps fallback OR_ELSE distinct from logical OR" do
     source = <<~CLEAR
       FN main() RETURNS Void ->
           maybe: ?Int64 = 1_i64;
-          value = maybe OR 0_i64;
+          value = maybe OR_ELSE 0_i64;
+          flag = TRUE OR FALSE;
       END
     CLEAR
-
-    expect { parse(source) }
-      .to raise_error(ParserError, /did you mean `OR_ELSE`/)
-
-    FixCollector.enable!
-    begin
-      parse(source)
-      finding = FixCollector.drain.find { |item| item.message.include?("did you mean `OR_ELSE`") }
-      expect(finding).not_to be_nil
-      fix = finding.fixes.fetch(0)
-      expect(fix.confidence).to eq(:auto)
-      expect(fix.edits.fetch(0).replacement).to eq("OR_ELSE")
-      expect(fix.edits.fetch(0).span.length).to eq(2)
-    ensure
-      FixCollector.disable!
+    ops = parse(source).statements.first.body.filter_map do |node|
+      node.value.op if node.respond_to?(:value) && node.value.is_a?(AST::BinaryOp)
     end
+    expect(ops).to include(:OR_ELSE, :OR)
   end
 
   it "types one fallback over both layers of !?T" do

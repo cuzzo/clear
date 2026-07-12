@@ -419,9 +419,18 @@ module PredicateRewriter
   def self.expression_terminator_op?(source, j)
     return true if source[j, 2] == '==' || source[j, 2] == '!=' ||
                    source[j, 2] == '>=' || source[j, 2] == '<=' ||
-                   source[j, 2] == '&&' || source[j, 2] == '||'
+                   keyword_operator_at?(source, j, 'AND') ||
+                   keyword_operator_at?(source, j, 'OR')
     return true if '<>'.include?(source[j])
     false
+  end
+
+  sig { params(source: String, offset: Integer, keyword: String).returns(T::Boolean) }
+  def self.keyword_operator_at?(source, offset, keyword)
+    return false unless source[offset, keyword.length] == keyword
+
+    following = source[offset + keyword.length]
+    following.nil? || following !~ /[A-Za-z0-9_]/
   end
 
   # Extract the receiver source text for a `coll.length()` call.

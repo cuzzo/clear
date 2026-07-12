@@ -255,7 +255,7 @@ FN valEqual?(a: Value, b: Value) RETURNS Bool EFFECTS REENTRANT ->
             DEFAULT -> RETURN FALSE; END,
         Value.Pair AS pa -> PARTIAL MATCH b START
             Value.Pair AS pb ->
-                RETURN valEqual?(pa.pairCar, pb.pairCar) && valEqual?(pa.pairCdr, pb.pairCdr);,
+                RETURN valEqual?(pa.pairCar, pb.pairCar) AND valEqual?(pa.pairCdr, pb.pairCdr);,
             DEFAULT -> RETURN FALSE; END,
         DEFAULT -> RETURN FALSE;
     END

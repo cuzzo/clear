@@ -56,6 +56,21 @@ RSpec.describe "./clear fix", :integration do
     expect(File.read(path)).to eq("FN main() RETURNS Int64 ->\n  x = 42;\n  RETURN x;\nEND\n")
   end
 
+  it "migrates every legacy Boolean glyph in one pass" do
+    path = write("logical.clear", <<~CLEAR)
+      FN main() RETURNS Void ->
+        result = TRUE && FALSE || TRUE;
+        ASSERT result;
+      END
+    CLEAR
+
+    out, err, status = run_clear("autofix", "--only=syntax", path)
+
+    expect(status).to eq(0), err
+    expect(out).to include("applied 2 edit(s)")
+    expect(File.read(path)).to include("TRUE AND FALSE OR TRUE")
+  end
+
   it "does not rewrite uppercase constructor names to in-scope variables" do
     path = write("constructor_name.clear", <<~CLEAR)
       FN main(src: String) RETURNS Void ->

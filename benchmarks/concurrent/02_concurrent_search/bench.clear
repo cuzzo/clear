@@ -86,7 +86,7 @@ FN main() RETURNS Void ->
       END
     END
     IF best != j THEN
-      IF (COPY results[j] AS tmp) && (COPY results[best] AS bestResult) THEN
+      IF (COPY results[j] AS tmp) AND (COPY results[best] AS bestResult) THEN
         results[j] = bestResult;
         results[best] = tmp;
       END

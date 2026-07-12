@@ -20,7 +20,7 @@ FN byteToString(n: Int64) RETURNS !String ->
   IF n == 10 THEN
     RETURN "\n";
   END
-  IF n >= 32 && n <= 126 THEN
+  IF n >= 32 AND n <= 126 THEN
     RETURN "" + printableAscii().charAt(n - 32);
   END
   RAISE "brnfk cannot render non-printable byte ${n.toString()} as String";
@@ -81,8 +81,8 @@ FN copyBytes(bytes: Int64[]@list) RETURNS !Int64[]@list ->
 END
 
 FN isCommand(ch: String) RETURNS Bool ->
-  RETURN ch == ">" || ch == "<" || ch == "+" || ch == "-" ||
-  ch == "." || ch == "," || ch == "[" || ch == "]";
+  RETURN ch == ">" OR ch == "<" OR ch == "+" OR ch == "-" OR
+  ch == "." OR ch == "," OR ch == "[" OR ch == "]";
 END
 
 FN commands(program: String) RETURNS !String ->

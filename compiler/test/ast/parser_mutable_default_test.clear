@@ -2,7 +2,7 @@ TEST ClearParserMutableFixedArrayDefaults DO
   FN parse_main_body(source: Auto) RETURNS Auto ->
     MUTABLE ast = NIL;
     ast = ClearParser.new(Lexer.new(source).tokenize(), source).parse();
-    ast.statements() |> FIND (isA?(_, "AST::FunctionDef") && (_.name() == "main")).body();
+    ast.statements() |> FIND (isA?(_, "AST::FunctionDef") AND (_.name() == "main")).body();
   END
   WHEN "examples" DO
     TEST THAT "keeps bare mutable fixed primitive array defaults compact" DO

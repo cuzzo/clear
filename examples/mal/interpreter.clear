@@ -96,7 +96,7 @@ FN valEqual?(a: Value, b: Value) RETURNS Bool EFFECTS REENTRANT ->
             DEFAULT -> RETURN FALSE; END,
         Value.Pair AS pa -> PARTIAL MATCH b START
             Value.Pair AS pb ->
-                RETURN valEqual?(pa.pairCar, pb.pairCar) && valEqual?(pa.pairCdr, pb.pairCdr);,
+                RETURN valEqual?(pa.pairCar, pb.pairCar) AND valEqual?(pa.pairCdr, pb.pairCdr);,
             DEFAULT -> RETURN FALSE; END,
         DEFAULT -> RETURN FALSE;
     END
@@ -159,16 +159,16 @@ FN tokenizeToEnv!(MUTABLE penv: HashMap<Value>, str: String) RETURNS !Void ->
     MUTABLE i: Int64 = 0;
     WHILE i < str.length() DO
         c = charAt(str, i) OR_ELSE RAISE;
-        IF c == " " || c == "," || c == "\n" || c == "\t" THEN i += 1;
-        ELSE_IF c == "(" || c == ")" || c == "[" || c == "]" THEN
+        IF c == " " OR c == "," OR c == "\n" OR c == "\t" THEN i += 1;
+        ELSE_IF c == "(" OR c == ")" OR c == "[" OR c == "]" THEN
             penv["__t" + count.toString()] = Value{ Str: COPY c };
             count += 1;
             i += 1;
         ELSE_IF c == ";" THEN
-            WHILE i < str.length() && (charAt(str, i) OR_ELSE RAISE) != "\n" DO i += 1; END
+            WHILE i < str.length() AND (charAt(str, i) OR_ELSE RAISE) != "\n" DO i += 1; END
         ELSE_IF c == "\"" THEN
             MUTABLE s = "\""; i += 1;
-            WHILE i < str.length() && (charAt(str, i) OR_ELSE RAISE) != "\"" DO
+            WHILE i < str.length() AND (charAt(str, i) OR_ELSE RAISE) != "\"" DO
                 IF (charAt(str, i) OR_ELSE RAISE) == "\\" THEN
                     s = s + (charAt(str, i) OR_ELSE RAISE); i += 1;
                     IF i < str.length() THEN s = s + (charAt(str, i) OR_ELSE RAISE); i += 1; END
@@ -181,7 +181,7 @@ FN tokenizeToEnv!(MUTABLE penv: HashMap<Value>, str: String) RETURNS !Void ->
             i += 1;
         ELSE
             MUTABLE s = "";
-            WHILE i < str.length() && (charAt(str, i) OR_ELSE RAISE) != " " && (charAt(str, i) OR_ELSE RAISE) != "," && (charAt(str, i) OR_ELSE RAISE) != "\n" && (charAt(str, i) OR_ELSE RAISE) != "\t" && (charAt(str, i) OR_ELSE RAISE) != "(" && (charAt(str, i) OR_ELSE RAISE) != ")" && (charAt(str, i) OR_ELSE RAISE) != "[" && (charAt(str, i) OR_ELSE RAISE) != "]" && (charAt(str, i) OR_ELSE RAISE) != "\"" && (charAt(str, i) OR_ELSE RAISE) != ";" DO
+            WHILE i < str.length() AND (charAt(str, i) OR_ELSE RAISE) != " " AND (charAt(str, i) OR_ELSE RAISE) != "," AND (charAt(str, i) OR_ELSE RAISE) != "\n" AND (charAt(str, i) OR_ELSE RAISE) != "\t" AND (charAt(str, i) OR_ELSE RAISE) != "(" AND (charAt(str, i) OR_ELSE RAISE) != ")" AND (charAt(str, i) OR_ELSE RAISE) != "[" AND (charAt(str, i) OR_ELSE RAISE) != "]" AND (charAt(str, i) OR_ELSE RAISE) != "\"" AND (charAt(str, i) OR_ELSE RAISE) != ";" DO
                 s = s + (charAt(str, i) OR_ELSE RAISE); i += 1;
             END
             IF s.length() > 0 THEN
@@ -210,7 +210,7 @@ FN readFormEnv!(MUTABLE penv: HashMap<Value>) RETURNS !Value EFFECTS REENTRANT -
         RETURN Value.Nil;
     END
 
-    IF tok == "(" || tok == "[" THEN
+    IF tok == "(" OR tok == "[" THEN
         penv["__rp"] = Value{ Number: toFloat(pos + 1) };
         RETURN readListEnv!(penv) OR_ELSE RAISE;
     END
@@ -230,7 +230,7 @@ FN readListEnv!(MUTABLE penv: HashMap<Value>) RETURNS !Value EFFECTS REENTRANT -
         IF curPos >= tc2 THEN listDone = TRUE;
         ELSE
             curTok = getTokenStr!(penv, curPos) OR_ELSE RAISE;
-            IF curTok == ")" || curTok == "]" THEN
+            IF curTok == ")" OR curTok == "]" THEN
                 penv["__rp"] = Value{ Number: toFloat(curPos + 1) };
                 listDone = TRUE;
             ELSE
@@ -524,7 +524,7 @@ FN evalList!(items: Value[], envId: Id<Env>, MUTABLE pool: Env[50000]@pool) RETU
         END
         RETURN COPY tryResult;
 
-    ELSE_IF formName == "def!" || formName == "define" THEN
+    ELSE_IF formName == "def!" OR formName == "define" THEN
         defName = getSymName(items[1]);
         val = eval!(items[2], envId, pool) OR_ELSE RAISE;
         IF isError?(val) THEN RETURN COPY val; END
@@ -540,12 +540,12 @@ FN evalList!(items: Value[], envId: Id<Env>, MUTABLE pool: Env[50000]@pool) RETU
         envSet!(envId, setName, COPY setVal, pool) OR_ELSE FALSE;
         RETURN COPY setVal;
 
-    ELSE_IF formName == "let*" || formName == "let" THEN
+    ELSE_IF formName == "let*" OR formName == "let" THEN
         PARTIAL MATCH items[1] START
             Value.List AS binds ->
                 letId: Id<Env> = pool.insert(Env{ vars: {} });
                 IF pool[letId] AS letEnv THEN letEnv.vars["__p"] = Value{ EnvRef: envId }; END
-                IF binds.length() > 0 && isList?(binds[0]) THEN
+                IF binds.length() > 0 AND isList?(binds[0]) THEN
                     FOR bi IN (0_i64 ..< binds.length()) DO
                         PARTIAL MATCH binds[bi] START
                             Value.List AS pair ->
@@ -571,7 +571,7 @@ FN evalList!(items: Value[], envId: Id<Env>, MUTABLE pool: Env[50000]@pool) RETU
         END
         RETURN Value.Nil;
 
-    ELSE_IF formName == "fn*" || formName == "lambda" THEN
+    ELSE_IF formName == "fn*" OR formName == "lambda" THEN
         PARTIAL MATCH items[1] START
             Value.List AS pnames ->
                 metaId: Id<Env> = pool.insert(Env{ vars: {} });
@@ -591,7 +591,7 @@ FN evalList!(items: Value[], envId: Id<Env>, MUTABLE pool: Env[50000]@pool) RETU
         END
         RETURN Value.Nil;
 
-    ELSE_IF formName == "do" || formName == "begin" THEN
+    ELSE_IF formName == "do" OR formName == "begin" THEN
         FOR di IN (1_i64 ..< items.length() - 1) DO
             stepResult = eval!(COPY items[di], envId, pool) OR_ELSE RAISE;
             IF isError?(stepResult) THEN RETURN stepResult; END

@@ -92,15 +92,15 @@ FN applyNative(id: Int64, evaled: Value[]) RETURNS !Value EFFECTS REENTRANT ->
         RETURN Value{ Number: getNum(evaled[1]) + getNum(evaled[2]) };
     END
     IF id == 2 THEN
-        IF isInt64?(evaled[1]) && isInt64?(evaled[2]) THEN RETURN Value{ Int64Val: getInt(evaled[1]) - getInt(evaled[2]) }; END
+        IF isInt64?(evaled[1]) AND isInt64?(evaled[2]) THEN RETURN Value{ Int64Val: getInt(evaled[1]) - getInt(evaled[2]) }; END
         RETURN Value{ Number: getNum(evaled[1]) - getNum(evaled[2]) };
     END
     IF id == 3 THEN
-        IF isInt64?(evaled[1]) && isInt64?(evaled[2]) THEN RETURN Value{ Int64Val: getInt(evaled[1]) * getInt(evaled[2]) }; END
+        IF isInt64?(evaled[1]) AND isInt64?(evaled[2]) THEN RETURN Value{ Int64Val: getInt(evaled[1]) * getInt(evaled[2]) }; END
         RETURN Value{ Number: getNum(evaled[1]) * getNum(evaled[2]) };
     END
     IF id == 4 THEN
-        IF isInt64?(evaled[1]) && isInt64?(evaled[2]) THEN
+        IF isInt64?(evaled[1]) AND isInt64?(evaled[2]) THEN
             ia = getInt(evaled[1]);
             ib = getInt(evaled[2]);
             IF ib == 0 THEN RETURN Value{ Int64Val: 0 }; END
@@ -250,11 +250,11 @@ FN applyNative(id: Int64, evaled: Value[]) RETURNS !Value EFFECTS REENTRANT ->
         # trim: strip leading/trailing whitespace
         s = getStr(evaled[1]);
         MUTABLE trimStart: Int64 = 0;
-        WHILE trimStart < s.length() && (charAt(s, trimStart) == " " || charAt(s, trimStart) == "\n" || charAt(s, trimStart) == "\t" || charAt(s, trimStart) == "\r") DO
+        WHILE trimStart < s.length() AND (charAt(s, trimStart) == " " OR charAt(s, trimStart) == "\n" OR charAt(s, trimStart) == "\t" OR charAt(s, trimStart) == "\r") DO
             trimStart += 1;
         END
         MUTABLE trimEnd: Int64 = s.length();
-        WHILE trimEnd > trimStart && (charAt(s, trimEnd - 1) == " " || charAt(s, trimEnd - 1) == "\n" || charAt(s, trimEnd - 1) == "\t" || charAt(s, trimEnd - 1) == "\r") DO
+        WHILE trimEnd > trimStart AND (charAt(s, trimEnd - 1) == " " OR charAt(s, trimEnd - 1) == "\n" OR charAt(s, trimEnd - 1) == "\t" OR charAt(s, trimEnd - 1) == "\r") DO
             trimEnd -= 1;
         END
         RETURN Value{ Str: substr(s, trimStart, trimEnd - trimStart) };
@@ -1526,7 +1526,7 @@ FN evalList!(TAKES items: Value[], envId: Id<Env>, MUTABLE pool: Env[50000]@pool
         END
         RETURN tryResult;
 
-    ELSE_IF formName == "def!" || formName == "define" THEN
+    ELSE_IF formName == "def!" OR formName == "define" THEN
         defName = getSymName(items[1]);
         val = eval!(COPY items[2], envId, pool);
         IF isError?(val) THEN RETURN val; END
@@ -1571,7 +1571,7 @@ FN evalList!(TAKES items: Value[], envId: Id<Env>, MUTABLE pool: Env[50000]@pool
         lraCurrent = envGet!(envId, lraName, pool);
         PARTIAL MATCH lraCurrent START
             Value.List AS lraElems ->
-                IF lraIdx < 0 || lraIdx >= lraElems.length() THEN RETURN Value.Nil; END
+                IF lraIdx < 0 OR lraIdx >= lraElems.length() THEN RETURN Value.Nil; END
                 lraRemoved = COPY lraElems[lraIdx];
                 MUTABLE lraNew: Value[]@list = List[];
                 FOR lri IN (0_i64 ..< lraElems.length()) DO
@@ -1580,7 +1580,7 @@ FN evalList!(TAKES items: Value[], envId: Id<Env>, MUTABLE pool: Env[50000]@pool
                 envSet!(envId, lraName, Value{ List: lraNew }, pool);
                 RETURN lraRemoved;,
             Value.TypedI64Arr AS lraIarr ->
-                IF lraIdx < 0 || lraIdx >= lraIarr.length() THEN RETURN Value.Nil; END
+                IF lraIdx < 0 OR lraIdx >= lraIarr.length() THEN RETURN Value.Nil; END
                 lraRemovedI = lraIarr[lraIdx];
                 MUTABLE lraNewI: Int64[]@list = List[];
                 FOR lri IN (0_i64 ..< lraIarr.length()) DO
@@ -1589,7 +1589,7 @@ FN evalList!(TAKES items: Value[], envId: Id<Env>, MUTABLE pool: Env[50000]@pool
                 envSet!(envId, lraName, Value{ TypedI64Arr: lraNewI }, pool);
                 RETURN Value{ Int64Val: lraRemovedI };,
             Value.TypedF64Arr AS lraFarr ->
-                IF lraIdx < 0 || lraIdx >= lraFarr.length() THEN RETURN Value.Nil; END
+                IF lraIdx < 0 OR lraIdx >= lraFarr.length() THEN RETURN Value.Nil; END
                 lraRemovedF = lraFarr[lraIdx];
                 MUTABLE lraNewF: Float64[]@list = List[];
                 FOR lri IN (0_i64 ..< lraFarr.length()) DO
@@ -1617,13 +1617,13 @@ FN evalList!(TAKES items: Value[], envId: Id<Env>, MUTABLE pool: Env[50000]@pool
             DEFAULT -> RETURN Value.Nil;
         END
 
-    ELSE_IF formName == "let*" || formName == "let" THEN
+    ELSE_IF formName == "let*" OR formName == "let" THEN
         PARTIAL MATCH items[1] START
             Value.List AS binds ->
                 letId: Id<Env> = pool.insert(Env{ vars: {} });
                 IF pool[letId] AS letEnv THEN
                     letEnv.vars["__p"] = Value{ EnvRef: envId };
-                    IF binds.length() > 0 && isList?(binds[0]) THEN
+                    IF binds.length() > 0 AND isList?(binds[0]) THEN
                         FOR bi IN (0_i64 ..< binds.length()) DO
                             PARTIAL MATCH binds[bi] START
                                 Value.List AS pair ->
@@ -1650,7 +1650,7 @@ FN evalList!(TAKES items: Value[], envId: Id<Env>, MUTABLE pool: Env[50000]@pool
         END
         RETURN Value.Nil;
 
-    ELSE_IF formName == "fn*" || formName == "lambda" THEN
+    ELSE_IF formName == "fn*" OR formName == "lambda" THEN
         PARTIAL MATCH items[1] START
             Value.List AS pnames ->
                 MUTABLE lambdaBody: Value = Value.Nil;
@@ -1660,7 +1660,7 @@ FN evalList!(TAKES items: Value[], envId: Id<Env>, MUTABLE pool: Env[50000]@pool
         END
         RETURN Value.Nil;
 
-    ELSE_IF formName == "do" || formName == "begin" THEN
+    ELSE_IF formName == "do" OR formName == "begin" THEN
         FOR di IN (1_i64 ..< items.length() - 1) DO
             stepResult = eval!(COPY items[di], envId, pool);
             IF isError?(stepResult) THEN RETURN stepResult; END
@@ -1720,9 +1720,9 @@ FN evalList!(TAKES items: Value[], envId: Id<Env>, MUTABLE pool: Env[50000]@pool
             # Step-into: always break
             IF stepMode == 1.0 THEN shouldBreak = TRUE; END
             # Step-over: break when depth <= target
-            IF stepMode == 2.0 && curDepth <= targetDepth THEN shouldBreak = TRUE; END
+            IF stepMode == 2.0 AND curDepth <= targetDepth THEN shouldBreak = TRUE; END
             # Step-out: break when depth < target
-            IF stepMode == 3.0 && curDepth < targetDepth THEN shouldBreak = TRUE; END
+            IF stepMode == 3.0 AND curDepth < targetDepth THEN shouldBreak = TRUE; END
 
             IF shouldBreak THEN
                 # Push call stack
@@ -2067,7 +2067,7 @@ FN compile!(ast: Value, envId: Id<Env>, MUTABLE pool: Env[50000]@pool) RETURNS !
                 cidx = consts.length(); consts.append(COPY items[1]);
                 ops.append(Value{ Number: 0.0 }); ops.append(Value{ Number: toFloat(cidx) });
 
-            ELSE_IF formName == "+" || formName == "-" || formName == "*" || formName == "/" || formName == "=" || formName == "<" || formName == ">" || formName == "<=" || formName == ">=" THEN
+            ELSE_IF formName == "+" OR formName == "-" OR formName == "*" OR formName == "/" OR formName == "=" OR formName == "<" OR formName == ">" OR formName == "<=" OR formName == ">=" THEN
                 ev1 = eval!(COPY items[1], envId, pool);
                 c1 = consts.length(); consts.append(ev1);
                 ops.append(Value{ Number: 0.0 }); ops.append(Value{ Number: toFloat(c1) });
@@ -2091,7 +2091,7 @@ FN compile!(ast: Value, envId: Id<Env>, MUTABLE pool: Env[50000]@pool) RETURNS !
                 ops.append(Value{ Number: 0.0 }); ops.append(Value{ Number: toFloat(c1) });
                 ops.append(Value{ Number: 13.0 });
 
-            ELSE_IF formName == "define" || formName == "def!" THEN
+            ELSE_IF formName == "define" OR formName == "def!" THEN
                 ev1 = eval!(COPY items[2], envId, pool);
                 c1 = consts.length(); consts.append(ev1);
                 ops.append(Value{ Number: 0.0 }); ops.append(Value{ Number: toFloat(c1) });
@@ -2129,7 +2129,7 @@ FN compile!(ast: Value, envId: Id<Env>, MUTABLE pool: Env[50000]@pool) RETURNS !
                 END
                 ops[jumpEndIdx] = Value{ Number: toFloat(ops.length()) };
 
-            ELSE_IF formName == "begin" || formName == "do" THEN
+            ELSE_IF formName == "begin" OR formName == "do" THEN
                 FOR di IN (1_i64 ..< items.length()) DO
                     evd = eval!(COPY items[di], envId, pool);
                     cd = consts.length(); consts.append(evd);
@@ -2197,7 +2197,7 @@ FN exec!(ops: Int64[], consts: Value[], envId: Id<Env>, MUTABLE pool: Env[50000]
     FOR si IN (0_i64 ..< 64) DO islots.append(0_i64); END
     FOR si IN (0_i64 ..< 64) DO fslots.append(0.0); END
 
-    WHILE running && ip < ops.length() DO
+    WHILE running AND ip < ops.length() DO
         MUTABLE pv: Value = Value.Nil;
         op = ops[ip];
         ip += 1;
@@ -2496,9 +2496,9 @@ FN exec!(ops: Int64[], consts: Value[], envId: Id<Env>, MUTABLE pool: Env[50000]
                     MUTABLE dbgPrompt = "dbg> ";
                     writeFile("/dev/stderr", dbgPrompt);
                     MUTABLE dbgCmd = readLine!();
-                    IF eql?(dbgCmd, ":c") || eql?(dbgCmd, ":continue") THEN
+                    IF eql?(dbgCmd, ":c") OR eql?(dbgCmd, ":continue") THEN
                         dbgRunning = FALSE;
-                    ELSE_IF eql?(dbgCmd, ":stack") || eql?(dbgCmd, ":s") THEN
+                    ELSE_IF eql?(dbgCmd, ":stack") OR eql?(dbgCmd, ":s") THEN
                         print("  value stack (sp=" + toString(sp) + "):");
                         FOR di IN (0_i64 ..< sp) DO
                             print("    [" + toString(di) + "] " + prStr((stack[di] OR_ELSE Value.Nil), TRUE));
@@ -2513,7 +2513,7 @@ FN exec!(ops: Int64[], consts: Value[], envId: Id<Env>, MUTABLE pool: Env[50000]
                         FOR di IN (0_i64 ..< fsp) DO
                             print("    [" + toString(di) + "] " + toString(fstack[di]));
                         END
-                    ELSE_IF eql?(dbgCmd, ":locals") || eql?(dbgCmd, ":l") THEN
+                    ELSE_IF eql?(dbgCmd, ":locals") OR eql?(dbgCmd, ":l") THEN
                         print("  slots:");
                         FOR di IN (0_i64 ..< 64) DO
                             PARTIAL MATCH (slots[di] OR_ELSE Value.Nil) START
@@ -2545,7 +2545,7 @@ FN exec!(ops: Int64[], consts: Value[], envId: Id<Env>, MUTABLE pool: Env[50000]
                         dbgAst = readFormEnv!(dbgPenv);
                         dbgResult = eval!(COPY dbgAst, curEnv, pool);
                         print("  => " + prStr(dbgResult, TRUE));
-                    ELSE_IF eql?(dbgCmd, ":help") || eql?(dbgCmd, ":h") || eql?(dbgCmd, "?") THEN
+                    ELSE_IF eql?(dbgCmd, ":help") OR eql?(dbgCmd, ":h") OR eql?(dbgCmd, "?") THEN
                         print("  :c          continue execution");
                         print("  :stack      show value stack");
                         print("  :istack     show i64 stack");

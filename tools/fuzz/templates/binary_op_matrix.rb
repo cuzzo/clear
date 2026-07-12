@@ -37,6 +37,8 @@ end
 BOM_CELLS << { op: :concat, type: :str_lit }
 BOM_CELLS << { op: :concat, type: :heap_str }
 BOM_CELLS << { op: :or_fallback, type: :heap_str }
+BOM_CELLS << { op: :logical_and, type: :bool }
+BOM_CELLS << { op: :logical_or, type: :bool }
 %i[error nil value].each do |outcome|
   BOM_CELLS << { op: :or_nested_fallback, type: outcome }
   BOM_CELLS << { op: :or_nested_managed, type: outcome }
@@ -48,6 +50,7 @@ def bom_provider(t)
   when :float    then "FN lhs() RETURNS Float64 -> RETURN 1.5; END\nFN rhs() RETURNS Float64 -> RETURN 2.5; END"
   when :str_lit  then "FN lhs() RETURNS String -> RETURN \"abc\"; END\nFN rhs() RETURNS String -> RETURN \"abd\"; END"
   when :heap_str then "FN lhs() RETURNS !String -> RETURN COPY \"abc\"; END\nFN rhs() RETURNS !String -> RETURN COPY \"abd\"; END"
+  when :bool     then "FN explode() RETURNS Bool -> ASSERT FALSE, \"logical RHS executed\"; RETURN TRUE; END"
   end
 end
 
@@ -79,6 +82,10 @@ def bom_body(op, t)
     "    t: String = #{l} + #{r};\n    ASSERT t.length() == 6_i64, \"concat #{t}\";"
   when :or_fallback
     "    v: String = mightFail() OR_ELSE \"fb\";\n    ASSERT v.length() >= 2_i64, \"or fallback\";"
+  when :logical_and
+    "    ASSERT !(FALSE AND explode()), \"AND short circuit\";"
+  when :logical_or
+    "    ASSERT TRUE OR explode(), \"OR short circuit\";"
   when :or_nested_fallback
     mode = { error: 0, nil: 1, value: 2 }.fetch(t)
     expected = { error: 5, nil: 5, value: 11 }.fetch(t)

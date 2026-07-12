@@ -238,14 +238,14 @@ TEST Lexer DO
 
   WHEN "operators and suffix identifiers" DO
     TEST THAT "recognizes multi-character operators before single characters" DO
-      tokens = tokenizeSource!(".. -> |> OR_ELSE || && != +=") OR_ELSE RAISE;
+      tokens = tokenizeSource!(".. -> |> OR_ELSE OR AND != +=") OR_ELSE RAISE;
 
       assertTokenStr!(tokens[0], "RANGE", "..", 1, 1) OR_ELSE RAISE;
       assertTokenStr!(tokens[1], "ARROW", "->", 1, 4) OR_ELSE RAISE;
       assertTokenStr!(tokens[2], "SMOOTH", "|>", 1, 7) OR_ELSE RAISE;
       assertTokenStr!(tokens[3], "OR_ELSE", "OR_ELSE", 1, 10) OR_ELSE RAISE;
-      assertTokenStr!(tokens[4], "CHAR", "||", 1, 13) OR_ELSE RAISE;
-      assertTokenStr!(tokens[5], "CHAR", "&&", 1, 16) OR_ELSE RAISE;
+      assertTokenStr!(tokens[4], "CHAR", "OR", 1, 13) OR_ELSE RAISE;
+      assertTokenStr!(tokens[5], "CHAR", "AND", 1, 16) OR_ELSE RAISE;
       assertTokenStr!(tokens[6], "CHAR", "!=", 1, 19) OR_ELSE RAISE;
       assertTokenStr!(tokens[7], "COMPOUND_ASSIGN", "+=", 1, 22) OR_ELSE RAISE;
     END

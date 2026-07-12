@@ -503,7 +503,7 @@ candidate concrete types per operator class and presents them as
 | `/` | `Float64` | `Int64` | "Int64 = integer division (truncates)"|
 | `%` | `Int64` | — | numeric integer only |
 | `==`, `!=`, `<`, `>`, `<=`, `>=` | `Int64` | `Float64`, `String`, comparable types | "must be a comparable type" |
-| `&&`, `||` | `Bool` | — | logical |
+| `AND`, `OR` | `Bool` | — | logical |
 | `&` (string concat alt) | `String` | — | when explicit concat |
 
 For an unresolved slot, the body walker that visits operator

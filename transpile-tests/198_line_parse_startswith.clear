@@ -17,12 +17,12 @@ FN handleData(data: String) RETURNS !String ->
     MUTABLE pos: Int64 = 0;
     WHILE pos < data.length() DO
         MUTABLE eol = pos;
-        WHILE eol < data.length() && charAt(data, eol) != "\r" && charAt(data, eol) != "\n" DO
+        WHILE eol < data.length() AND charAt(data, eol) != "\r" AND charAt(data, eol) != "\n" DO
             eol += 1;
         END
         line = substr(data, pos, eol - pos);
         pos = eol;
-        WHILE pos < data.length() && (charAt(data, pos) == "\r" || charAt(data, pos) == "\n") DO
+        WHILE pos < data.length() AND (charAt(data, pos) == "\r" OR charAt(data, pos) == "\n") DO
             pos += 1;
         END
 
@@ -31,7 +31,7 @@ FN handleData(data: String) RETURNS !String ->
         ELSE_IF startsWith?(line, "WORK:") THEN
             rest: String@raw = substr(line, 5_i64, line.length() - 5);
             MUTABLE colonPos: Int64 = 0;
-            WHILE colonPos < rest.length() && charAt(rest, colonPos) != ":" DO
+            WHILE colonPos < rest.length() AND charAt(rest, colonPos) != ":" DO
                 colonPos += 1;
             END
             idStr = substr(rest, 0_i64, colonPos);

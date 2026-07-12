@@ -146,8 +146,8 @@ FuzzGenerator.register(:bind_capture_cleanup, cells: BIND_CAPTURE_CELLS) do |p|
         FN main() RETURNS Void ->
             MUTABLE left: ?RefItem#{cap} = RefItem{ value: 7_i64 } #{cap};
             MUTABLE right: ?RefItem#{cap} = RefItem{ value: 8_i64 } #{cap};
-            IF (left AS l) && (right AS r) THEN ASSERT l.value + r.value == 15_i64, "borrowed multi-bind"; END
-            IF (left AS l) && (right AS r) THEN ASSERT l.value + r.value == 15_i64, "owners survived multi-bind"; END
+            IF (left AS l) AND (right AS r) THEN ASSERT l.value + r.value == 15_i64, "borrowed multi-bind"; END
+            IF (left AS l) AND (right AS r) THEN ASSERT l.value + r.value == 15_i64, "owners survived multi-bind"; END
             RETURN;
         END
       CHT

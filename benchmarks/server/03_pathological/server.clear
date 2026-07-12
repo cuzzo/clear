@@ -33,12 +33,12 @@ FN handleClient!(client: TCPClient) RETURNS !Void ->
       MUTABLE pos = 0;
       WHILE pos < data.length() DO
         MUTABLE eol = pos;
-        WHILE eol < data.length() && data.charAt(eol) != "\r" && data.charAt(eol) != "\n" DO
+        WHILE eol < data.length() AND data.charAt(eol) != "\r" AND data.charAt(eol) != "\n" DO
           eol += 1;
         END
         line = data.substr(pos, eol - pos);
         pos = eol;
-        WHILE pos < data.length() && (data.charAt(pos) == "\r" || data.charAt(pos) == "\n") DO
+        WHILE pos < data.length() AND (data.charAt(pos) == "\r" OR data.charAt(pos) == "\n") DO
           pos += 1;
         END
 
@@ -47,7 +47,7 @@ FN handleClient!(client: TCPClient) RETURNS !Void ->
         ELSE_IF line.startsWith?("WORK:") THEN
           rest: String@raw = line.substr(5, line.length() - 5);
           MUTABLE colonPos = 0;
-          WHILE colonPos < rest.length() && rest.charAt(colonPos) != ":" DO
+          WHILE colonPos < rest.length() AND rest.charAt(colonPos) != ":" DO
             colonPos += 1;
           END
           idStr = rest.substr(0, colonPos);

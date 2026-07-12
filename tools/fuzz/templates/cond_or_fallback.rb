@@ -142,7 +142,7 @@ def cof_container_block(p, cond, body)
     # short-circuit before the loop exits.
     <<~BODY.chomp
       MUTABLE iter: Int64 = 0_i64;
-          WHILE iter < 3_i64 && #{cond} DO
+          WHILE iter < 3_i64 AND #{cond} DO
               iter = iter + 1_i64;
               #{body}
           END

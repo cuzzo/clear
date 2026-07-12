@@ -3232,8 +3232,8 @@ module AST
     7 => precedence_info(ops: ['*', '/', 'MOD'], assoc: :left),
     6 => precedence_info(ops: ['+', '-'], assoc: :left),
     5 => precedence_info(ops: ['==', '!=', '<', '>', '<=', '>='], assoc: :left),
-    4 => precedence_info(ops: ['&&'], assoc: :left),
-    3 => precedence_info(ops: ['||'], assoc: :left),
+    4 => precedence_info(ops: ['AND'], assoc: :left),
+    3 => precedence_info(ops: ['OR'], assoc: :left),
     # LEVEL 1: Both Pipe and fallback live here.
     # They bind loosely and strictly left-to-right.
     1 => precedence_info(ops: ['OR_ELSE', '|>', 'AS'], assoc: :left)
@@ -3273,8 +3273,8 @@ module AST
     '>'  => :GT,
     '>=' => :GTE,
     '!' => :NOT,
-    '&&' => :AND,
-    '||' => :OR,
+    'AND' => :AND,
+    'OR' => :OR,
     'MOD' => :MOD,
     'OR_ELSE' => :OR_ELSE,
     '~' => :BITWISE_NOT,

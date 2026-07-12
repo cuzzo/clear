@@ -522,7 +522,7 @@ RSpec.describe LoopFrameAnalysis do
     it "WhileLoop stores a loop-local string into a frame-owned outer list by moving heap-owned escaped data" do
       src = <<~CLEAR
         FN isCommand(ch: String) RETURNS Bool ->
-          RETURN ch == ">" || ch == "<";
+          RETURN ch == ">" OR ch == "<";
         END
 
         FN commands(program: String) RETURNS !String ->

@@ -1,6 +1,6 @@
 FN main() RETURNS Int64 ->
-    IF startsWith?("clear", "cl") && !startsWith?("clear", "zz") THEN
-        IF startsWith?("vm", "no") || startsWith?("vm", "v") THEN
+    IF startsWith?("clear", "cl") AND !startsWith?("clear", "zz") THEN
+        IF startsWith?("vm", "no") OR startsWith?("vm", "v") THEN
             RETURN 1_i64;
         END
     END

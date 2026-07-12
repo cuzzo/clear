@@ -264,7 +264,7 @@ FN loadRegisterVarNames!(path: String) RETURNS !RegisterVarName[]@list ->
                 srcCol = toInt(fields[2]) OR_ELSE 0_i64;
                 endSrc = toInt(fields[3]) OR_ELSE -1_i64;
                 physIdx = toInt(fields[5]) OR_ELSE -1_i64;
-                IF funcIp >= 0_i64 && srcLine >= 0_i64 && physIdx >= 0_i64 THEN
+                IF funcIp >= 0_i64 AND srcLine >= 0_i64 AND physIdx >= 0_i64 THEN
                     entries.append(RegisterVarName{
                         funcEntryIp: funcIp, sourceLine: srcLine, sourceColumn: srcCol,
                         endSourceLine: endSrc,
@@ -277,7 +277,7 @@ FN loadRegisterVarNames!(path: String) RETURNS !RegisterVarName[]@list ->
                 srcLine = toInt(fields[1]) OR_ELSE -1_i64;
                 endSrc = toInt(fields[2]) OR_ELSE -1_i64;
                 physIdx = toInt(fields[4]) OR_ELSE -1_i64;
-                IF funcIp >= 0_i64 && srcLine >= 0_i64 && physIdx >= 0_i64 THEN
+                IF funcIp >= 0_i64 AND srcLine >= 0_i64 AND physIdx >= 0_i64 THEN
                     entries.append(RegisterVarName{
                         funcEntryIp: funcIp, sourceLine: srcLine, sourceColumn: 0_i64,
                         endSourceLine: endSrc,
@@ -289,7 +289,7 @@ FN loadRegisterVarNames!(path: String) RETURNS !RegisterVarName[]@list ->
                 funcIp = toInt(fields[0]) OR_ELSE -1_i64;
                 srcLine = toInt(fields[1]) OR_ELSE -1_i64;
                 physIdx = toInt(fields[3]) OR_ELSE -1_i64;
-                IF funcIp >= 0_i64 && srcLine >= 0_i64 && physIdx >= 0_i64 THEN
+                IF funcIp >= 0_i64 AND srcLine >= 0_i64 AND physIdx >= 0_i64 THEN
                     entries.append(RegisterVarName{
                         funcEntryIp: funcIp, sourceLine: srcLine, sourceColumn: 0_i64,
                         endSourceLine: -1_i64,
@@ -301,7 +301,7 @@ FN loadRegisterVarNames!(path: String) RETURNS !RegisterVarName[]@list ->
                 funcIp = toInt(fields[0]) OR_ELSE -1_i64;
                 srcLine = toInt(fields[1]) OR_ELSE -1_i64;
                 physIdx = toInt(fields[3]) OR_ELSE -1_i64;
-                IF funcIp >= 0_i64 && srcLine >= 0_i64 && physIdx >= 0_i64 THEN
+                IF funcIp >= 0_i64 AND srcLine >= 0_i64 AND physIdx >= 0_i64 THEN
                     entries.append(RegisterVarName{
                         funcEntryIp: funcIp, sourceLine: srcLine, sourceColumn: 0_i64,
                         endSourceLine: -1_i64,
@@ -352,7 +352,7 @@ END
 # Returns the CLEAR source line for the instruction starting at `ip`,
 # or 0 if unknown / out of range. Cheap (one bounds-checked load).
 FN sourceLineFor(sourceLines: Int64[]@list, ip: Int64) RETURNS Int64 ->
-    IF ip < 0_i64 || ip >= sourceLines.length() THEN RETURN 0_i64; END
+    IF ip < 0_i64 OR ip >= sourceLines.length() THEN RETURN 0_i64; END
     RETURN sourceLines[ip] OR_ELSE 0_i64;
 END
 
@@ -360,7 +360,7 @@ END
 # if unknown. Today every line attributes to file_id 0; the parameter
 # is plumbed through for the future multi-file path.
 FN sourcePathFor(sourcePaths: String[]@list, fileId: Int64) RETURNS String ->
-    IF fileId < 0_i64 || fileId >= sourcePaths.length() THEN RETURN ""; END
+    IF fileId < 0_i64 OR fileId >= sourcePaths.length() THEN RETURN ""; END
     RETURN sourcePaths[fileId] OR_ELSE "";
 END
 
@@ -390,7 +390,7 @@ FN nextDifferentLineIp(opcodes: RegisterOp[], sourceLines: Int64[]@list, ip: Int
     MUTABLE candidate: Int64 = nextOpcodeIp(opcodes, ip);
     TIGHT WHILE candidate >= 0_i64 DO
         candLine = sourceLineFor(sourceLines, candidate);
-        IF candLine > 0_i64 && candLine != currentLine THEN RETURN candidate; END
+        IF candLine > 0_i64 AND candLine != currentLine THEN RETURN candidate; END
         candidate = nextOpcodeIp(opcodes, candidate);
     END
     RETURN -1_i64;
@@ -429,7 +429,7 @@ FN loadPackedRegisterProgram!(path: String) RETURNS !PackedRegisterProgram ->
     MUTABLE opcodes: RegisterOp[]@list = List[];
     IF bytes.length() < 4 THEN RETURN PackedRegisterProgram{ ops: ops, opcodes: opcodes }; END
     # RBC1
-    IF byteAt(bytes, 0) != 82_i64 || byteAt(bytes, 1) != 66_i64 || byteAt(bytes, 2) != 67_i64 || byteAt(bytes, 3) != 49_i64 THEN
+    IF byteAt(bytes, 0) != 82_i64 OR byteAt(bytes, 1) != 66_i64 OR byteAt(bytes, 2) != 67_i64 OR byteAt(bytes, 3) != 49_i64 THEN
         RETURN PackedRegisterProgram{ ops: ops, opcodes: opcodes };
     END
 
@@ -812,7 +812,7 @@ FN parseRegisterConstLine!(line: String) RETURNS !RegisterValue ->
     END
     IF startsWith?(line, "S:") THEN
         MUTABLE colonPos: Int64 = 2;
-        TIGHT WHILE colonPos < line.length() && charAt(line, colonPos) != ":" DO
+        TIGHT WHILE colonPos < line.length() AND charAt(line, colonPos) != ":" DO
             colonPos += 1;
         END
         IF colonPos < line.length() THEN
@@ -829,7 +829,7 @@ FN loadRegisterConsts!(path: String) RETURNS !RegisterValue[] ->
     n = raw.length();
     TIGHT WHILE pos < n DO
         MUTABLE lineEnd: Int64 = pos;
-        TIGHT WHILE lineEnd < n && charAt(raw, lineEnd) != "\n" DO
+        TIGHT WHILE lineEnd < n AND charAt(raw, lineEnd) != "\n" DO
             lineEnd += 1;
         END
         line = substr(raw, pos, lineEnd - pos);
@@ -895,7 +895,7 @@ FN runRegisterBytecode!(ops: Int64[], opcodes: RegisterOp[], consts: RegisterVal
         END
         FOR bi IN (0_i64 ..< breakpointIps.length()) DO
             bpIp = breakpointIps[bi] OR_ELSE -1_i64;
-            IF bpIp >= 0_i64 && bpIp < opcodes.length() THEN
+            IF bpIp >= 0_i64 AND bpIp < opcodes.length() THEN
                 isBreakpoint[bpIp] = 1_i64;
                 bpLine = sourceLineFor(sourceLines, bpIp);
                 breakpointEntries.append(BreakpointEntry{
@@ -1013,17 +1013,17 @@ FN runRegisterBytecode!(ops: Int64[], opcodes: RegisterOp[], consts: RegisterVal
         # file-based debugger pause (`registerDebugPause!`). Action
         # codes from the REPL: 0 continue, 1 step-source-line, 2
         # step-instruction, -1 quit.
-        IF debuggerActive && isBreakpoint[ip] != 0_i64 THEN
+        IF debuggerActive AND isBreakpoint[ip] != 0_i64 THEN
             # Step-over filter: while a `:n` is active, suppress pauses
             # that fire deeper than the entry depth. We re-arm the BP
             # at the return-IP of the originating frame so we naturally
             # re-pause once control returns to the user's frame, then
             # continue dispatching without prompting.
-            IF stepOverDepth >= 0_i64 && frameRetIps.length() > stepOverDepth THEN
+            IF stepOverDepth >= 0_i64 AND frameRetIps.length() > stepOverDepth THEN
                 isBreakpoint[ip] = 0_i64;
                 IF stepOverDepth < frameRetIps.length() THEN
                     retTarget = frameRetIps[stepOverDepth] OR_ELSE -1_i64;
-                    IF retTarget >= 0_i64 && retTarget < isBreakpoint.length() THEN
+                    IF retTarget >= 0_i64 AND retTarget < isBreakpoint.length() THEN
                         isBreakpoint[retTarget] = 1_i64;
                     END
                 END
@@ -1048,14 +1048,14 @@ FN runRegisterBytecode!(ops: Int64[], opcodes: RegisterOp[], consts: RegisterVal
                 IF action == 2_i64 THEN
                     # Step-instruction: pause at the very next opcode.
                     nextIp = nextOpcodeIp(opcodes, ip);
-                    IF nextIp >= 0_i64 && nextIp < isBreakpoint.length() THEN
+                    IF nextIp >= 0_i64 AND nextIp < isBreakpoint.length() THEN
                         isBreakpoint[nextIp] = 1_i64;
                     END
                 ELSE_IF action == 1_i64 THEN
                     # Step-source-line: pause at the next opcode whose
                     # source line differs from the current one.
                     nextIp = nextDifferentLineIp(opcodes, sourceLines, ip, line);
-                    IF nextIp >= 0_i64 && nextIp < isBreakpoint.length() THEN
+                    IF nextIp >= 0_i64 AND nextIp < isBreakpoint.length() THEN
                         isBreakpoint[nextIp] = 1_i64;
                     END
                 ELSE_IF action == 3_i64 THEN
@@ -1063,7 +1063,7 @@ FN runRegisterBytecode!(ops: Int64[], opcodes: RegisterOp[], consts: RegisterVal
                     # filter above silently skips pauses deeper than
                     # the current call depth.
                     nextIp = nextDifferentLineIp(opcodes, sourceLines, ip, line);
-                    IF nextIp >= 0_i64 && nextIp < isBreakpoint.length() THEN
+                    IF nextIp >= 0_i64 AND nextIp < isBreakpoint.length() THEN
                         isBreakpoint[nextIp] = 1_i64;
                     END
                     stepOverDepth = frameRetIps.length();
@@ -1074,7 +1074,7 @@ FN runRegisterBytecode!(ops: Int64[], opcodes: RegisterOp[], consts: RegisterVal
                     # is nothing to finish to -- act as `:c`.
                     IF frameRetIps.length() > 0_i64 THEN
                         retTarget = frameRetIps[frameRetIps.length() - 1_i64] OR_ELSE -1_i64;
-                        IF retTarget >= 0_i64 && retTarget < isBreakpoint.length() THEN
+                        IF retTarget >= 0_i64 AND retTarget < isBreakpoint.length() THEN
                             isBreakpoint[retTarget] = 1_i64;
                         END
                     END
@@ -1173,7 +1173,7 @@ FN runRegisterBytecode!(ops: Int64[], opcodes: RegisterOp[], consts: RegisterVal
                     kc = ops[ip]; ip += 1;
                     slot = iBase + dst;
                     oldVal = iregs[slot];
-                    IF errored == 1_i64 && errKind == getRegisterConstInt(consts, kc) THEN
+                    IF errored == 1_i64 AND errKind == getRegisterConstInt(consts, kc) THEN
                         iregs[slot] = 1_i64;
                     ELSE
                         iregs[slot] = 0_i64;
@@ -1193,7 +1193,7 @@ FN runRegisterBytecode!(ops: Int64[], opcodes: RegisterOp[], consts: RegisterVal
                     nc = ops[ip]; ip += 1;
                     slot = iBase + dst;
                     oldVal = iregs[slot];
-                    IF errored == 1_i64 && errName == getRegisterConstInt(consts, nc) THEN
+                    IF errored == 1_i64 AND errName == getRegisterConstInt(consts, nc) THEN
                         iregs[slot] = 1_i64;
                     ELSE
                         iregs[slot] = 0_i64;
@@ -1206,7 +1206,7 @@ FN runRegisterBytecode!(ops: Int64[], opcodes: RegisterOp[], consts: RegisterVal
                     mc = ops[ip]; ip += 1;
                     slot = iBase + dst;
                     oldVal = iregs[slot];
-                    IF errored == 1_i64 && errMsg == (getRegisterConstString(consts, mc) OR_ELSE RAISE) THEN
+                    IF errored == 1_i64 AND errMsg == (getRegisterConstString(consts, mc) OR_ELSE RAISE) THEN
                         iregs[slot] = 1_i64;
                     ELSE
                         iregs[slot] = 0_i64;

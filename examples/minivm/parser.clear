@@ -36,11 +36,11 @@ END
 # This avoids toString() inside WHILE loops for position updates.
 
 FN isWhitespace?(c: String) RETURNS Bool ->
-    RETURN c == " " || c == "," || c == "\n" || c == "\t";
+    RETURN c == " " OR c == "," OR c == "\n" OR c == "\t";
 END
 
 FN isDelimiter?(c: String) RETURNS Bool ->
-    RETURN c == " " || c == "," || c == "\n" || c == "\t" || c == "(" || c == ")" || c == "[" || c == "]" || c == "\"" || c == ";";
+    RETURN c == " " OR c == "," OR c == "\n" OR c == "\t" OR c == "(" OR c == ")" OR c == "[" OR c == "]" OR c == "\"" OR c == ";";
 END
 
 FN tokenizeToEnv!(MUTABLE penv: HashMap<Value>, str: String) RETURNS !Void ->
@@ -50,17 +50,17 @@ FN tokenizeToEnv!(MUTABLE penv: HashMap<Value>, str: String) RETURNS !Void ->
     WHILE i < len DO
         c = charAt(str, i);
         IF isWhitespace?(c) THEN i += 1;
-        ELSE_IF c == "(" || c == ")" || c == "[" || c == "]" THEN
+        ELSE_IF c == "(" OR c == ")" OR c == "[" OR c == "]" THEN
             penv["__t" + count.toString()] = Value{ Str: COPY c };
             count += 1;
             i += 1;
         ELSE_IF c == ";" THEN
-            WHILE i < len && charAt(str, i) != "\n" DO i += 1; END
+            WHILE i < len AND charAt(str, i) != "\n" DO i += 1; END
         ELSE_IF c == "\"" THEN
             # String literal: scan for closing quote, extract with substr
             start = i;
             i += 1;
-            WHILE i < len && charAt(str, i) != "\"" DO
+            WHILE i < len AND charAt(str, i) != "\"" DO
                 i += 1;
             END
             IF i < len THEN i += 1; END
@@ -69,7 +69,7 @@ FN tokenizeToEnv!(MUTABLE penv: HashMap<Value>, str: String) RETURNS !Void ->
         ELSE
             # Symbol/number: scan to next delimiter, extract with substr
             start = i;
-            WHILE i < len && isDelimiter?(charAt(str, i)) == FALSE DO
+            WHILE i < len AND isDelimiter?(charAt(str, i)) == FALSE DO
                 i += 1;
             END
             IF i > start THEN
@@ -98,7 +98,7 @@ FN readFormEnv!(MUTABLE penv: HashMap<Value>) RETURNS !Value EFFECTS REENTRANT -
         RETURN Value.Nil;
     END
 
-    IF tok == "(" || tok == "[" THEN
+    IF tok == "(" OR tok == "[" THEN
         penv["__rp"] = Value{ Number: toFloat(pos + 1) };
         RETURN readListEnv!(penv) OR_ELSE RAISE;
     END
@@ -118,7 +118,7 @@ FN readListEnv!(MUTABLE penv: HashMap<Value>) RETURNS !Value EFFECTS REENTRANT -
         IF curPos >= tc2 THEN listDone = TRUE;
         ELSE
             curTok = getTokenStr!(penv, curPos) OR_ELSE RAISE;
-            IF curTok == ")" || curTok == "]" THEN
+            IF curTok == ")" OR curTok == "]" THEN
                 penv["__rp"] = Value{ Number: toFloat(curPos + 1) };
                 listDone = TRUE;
             ELSE

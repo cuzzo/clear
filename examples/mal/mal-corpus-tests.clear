@@ -5,7 +5,7 @@ FN testPath(name: String) RETURNS !String ->
 END
 
 FN stripCr(line: String) RETURNS !String ->
-  IF line.length() > 0 && (line.charAt(line.length() - 1) OR_ELSE RAISE) == "\r" THEN
+  IF line.length() > 0 AND (line.charAt(line.length() - 1) OR_ELSE RAISE) == "\r" THEN
     RETURN line.substr(0, line.length() - 1) OR_ELSE RAISE;
   END
   RETURN line;
@@ -32,11 +32,11 @@ FN runMalFileCore!(path: String) RETURNS !Int64 ->
     rawLine = stripCr(lines[i]) OR_ELSE RAISE;
     line = rawLine.trim();
 
-    IF startsWith?(line, ";>>>") && line.contains?("deferrable=True") THEN
+    IF startsWith?(line, ";>>>") AND line.contains?("deferrable=True") THEN
       RETURN ran;
     END
 
-    IF line == "" || startsWith?(line, ";;") THEN
+    IF line == "" OR startsWith?(line, ";;") THEN
       i += 1;
     ELSE_IF startsWith?(rawLine, ";/") THEN
       expectedOut = expectedOut + rawLine.substr(2, rawLine.length() - 2) + "\n";

@@ -26,7 +26,7 @@ END
 FN runLife(path: String, generations: Int64) RETURNS !Void ->
   MUTABLE cells = readGrid(path);
   MUTABLE generation = 0;
-  WHILE generation < generations && cells.any?() DO
+  WHILE generation < generations AND cells.any?() DO
     render(cells);
     cells = advance(cells);
     generation += 1;
@@ -46,7 +46,7 @@ END
 FN main() RETURNS Void ->
   MUTABLE cells = defaultGlider();
   MUTABLE generation = 0;
-  WHILE generation < 4 && cells.any?() DO
+  WHILE generation < 4 AND cells.any?() DO
     render(cells);
     cells = advance(cells);
     generation += 1;

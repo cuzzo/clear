@@ -2118,15 +2118,15 @@ class ClearParser
 
   sig { params(token: Lexer::Token).returns(T.nilable(Integer)) }
   def get_precedence(token)
-    return nil unless token.type == :CHAR || token.type == :KEYWORD || token.type == :SMOOTH || token.type == :OR_ELSE || token.type == :RANGE_EXCL || token.type == :RANGE_INCL
+    return nil unless token.type == :CHAR || token.type == :KEYWORD || token.type == :LEGACY_LOGICAL || token.type == :SMOOTH || token.type == :OR_ELSE || token.type == :RANGE_EXCL || token.type == :RANGE_INCL
 
     # Precedence levels (higher = tighter binding)
     case T.cast(token.value, String)
     when '|>'             then 1
-    when 'OR_ELSE', 'OR', 'AS' then 2
+    when 'OR_ELSE', 'AS' then 2
     when '..<', '..<=', '..=' then 3
-    when '||'             then 4
-    when '&&'             then 5
+    when 'OR', '||'       then 4
+    when 'AND', '&&'      then 5
     when 'IS_A', '==', '!=', '<', '>', '<=', '>=' then 6
     when '+', '-', '%+', '%-', '!+', '!-' then 7
     when '*', '/', 'MOD', '%*', '!*'     then 8
@@ -2154,30 +2154,39 @@ class ClearParser
       return AST::BinaryOp.new(op_token, lhs, :OR_ELSE, or_rhs)
 
     when 'OR'
+      or_rhs = parse_expression(next_prec)
+      return AST::BinaryOp.new(op_token, lhs, :OR, or_rhs)
+
+    when 'AND'
+      and_rhs = parse_expression(next_prec)
+      return AST::BinaryOp.new(op_token, lhs, :AND, and_rhs)
+
+    when '&&', '||'
+      replacement = op_val == '&&' ? 'AND' : 'OR'
       fix = Fix.new(
         description: fix_description(
           :REPLACE_OPERATOR_TYPO,
-          match: "OR",
-          replace: "OR_ELSE",
-          label: "fallback operator (use `OR_ELSE`, not `OR`)",
+          match: op_val,
+          replace: replacement,
+          label: "Boolean operator (use `#{replacement}`, not `#{op_val}`)",
         ),
         confidence: :auto,
         edits: [Edit.new(
           span: Span.new(file: nil, line: op_token.line, col: op_token.column, length: 2),
-          replacement: "OR_ELSE"
+          replacement: replacement
         )]
       )
       fixable!(op_token,
         code: :OPERATOR_TYPO_SUGGESTION,
-        match: "OR",
-        replace: "OR_ELSE",
-        category: :type,
+        match: op_val,
+        replace: replacement,
+        category: :syntax,
         level: :error,
         fixes: [fix])
-      # In fix-collection mode only, preserve the old parse shape so the
+      # In fix-collection mode only, preserve the logical parse shape so the
       # frontend can collect and apply every migration edit in one pass.
-      or_rhs = parse_or_else
-      return AST::BinaryOp.new(op_token, lhs, :OR_ELSE, or_rhs)
+      rhs = parse_expression(next_prec)
+      return AST::BinaryOp.new(op_token, lhs, op_val == '&&' ? :AND : :OR, rhs)
 
     when 'IS_A'
       is_a_rhs = parse_is_a_rhs
@@ -2414,7 +2423,7 @@ class ClearParser
       consume(:KEYWORD, 'AS')
       name_tok = consume(:VAR_ID)
       # Bare multi-bind error: IF expr AS name && expr2 AS name2 THEN
-      if match?(:CHAR, '&&')
+      if match?(:KEYWORD, 'AND') || match?(:LEGACY_LOGICAL, '&&')
         error!(if_token, :MULTIPLE_BINDINGS_NEED_PARENS)
       end
       bindings = [AST::Binding.new(expr: condition, name: T.must(name_tok).value, name_token: name_tok)]

@@ -8,7 +8,7 @@ FN parseLine(data: String) RETURNS !String ->
     WHILE pos < data.length() DO
         # Find end of line
         MUTABLE eol = pos;
-        WHILE eol < data.length() && charAt(data, eol) != "\n" DO
+        WHILE eol < data.length() AND charAt(data, eol) != "\n" DO
             eol += 1;
         END
 
@@ -16,7 +16,7 @@ FN parseLine(data: String) RETURNS !String ->
 
         # Skip past newline
         pos = eol;
-        WHILE pos < data.length() && charAt(data, pos) == "\n" DO
+        WHILE pos < data.length() AND charAt(data, pos) == "\n" DO
             pos += 1;
         END
 

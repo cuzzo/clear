@@ -26,7 +26,7 @@ FN main() RETURNS Void ->
 
     v2 = makePair!("wor", "ld");
     PARTIAL MATCH v2 START
-        Val.Pair AS p -> ASSERT p.car == "world" && p.cdr == "ldwor", "case2: Pair variant";,
+        Val.Pair AS p -> ASSERT p.car == "world" AND p.cdr == "ldwor", "case2: Pair variant";,
         DEFAULT -> ASSERT FALSE, "case2: should be Pair";
     END
 

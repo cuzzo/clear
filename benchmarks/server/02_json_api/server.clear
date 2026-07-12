@@ -56,14 +56,14 @@ FN handleClient!(client: TCPClient) RETURNS !Void ->
       WHILE pos < data.length() DO
         # Find end of line
         MUTABLE eol = pos;
-        WHILE eol < data.length() && data.charAt(eol) != "\r" && data.charAt(eol) != "\n" DO
+        WHILE eol < data.length() AND data.charAt(eol) != "\r" AND data.charAt(eol) != "\n" DO
           eol += 1;
         END
         line = data.substr(pos, eol - pos);
 
         # Skip \r\n
         pos = eol;
-        WHILE pos < data.length() && (data.charAt(pos) == "\r" || data.charAt(pos) == "\n") DO
+        WHILE pos < data.length() AND (data.charAt(pos) == "\r" OR data.charAt(pos) == "\n") DO
           pos += 1;
         END
 

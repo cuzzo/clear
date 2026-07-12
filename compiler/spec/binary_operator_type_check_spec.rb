@@ -42,8 +42,8 @@ RSpec.describe Type, "binary operator type checking" do
   end
 
   it "accepts valid boolean logic" do
-    expect_compile_expr("TRUE && FALSE")
-    expect_compile_expr("TRUE || FALSE")
+    expect_compile_expr("TRUE AND FALSE")
+    expect_compile_expr("TRUE OR FALSE")
   end
 
   it "rejects nonnumeric arithmetic operands" do
@@ -57,8 +57,8 @@ RSpec.describe Type, "binary operator type checking" do
   end
 
   it "rejects non-Bool logical operands" do
-    expect_reject_expr("TRUE && 1")
-    expect_reject_expr('"x" || FALSE')
+    expect_reject_expr("TRUE AND 1")
+    expect_reject_expr('"x" OR FALSE')
   end
 
   it "accepts optional payload equality and ordering against concrete payloads" do
@@ -69,7 +69,7 @@ RSpec.describe Type, "binary operator type checking" do
           maybe_count: ?Int64 = 1_i64;
           maybe_color: ?Color = Color.Red;
           concrete_color: Color = Color.Blue;
-          RETURN maybe_count >= 0_i64 && maybe_color != concrete_color;
+          RETURN maybe_count >= 0_i64 AND maybe_color != concrete_color;
         END
       CLEAR
     }.not_to raise_error

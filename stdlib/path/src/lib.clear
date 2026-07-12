@@ -14,7 +14,7 @@ PUB FN basename(path: String, suffix = "" :String) RETURNS String ->
   END
 
   name = path.substr(start, path.length() - start);
-  IF suffix.any?() && name.ends_with?(suffix) THEN
+  IF suffix.any?() AND name.ends_with?(suffix) THEN
     RETURN name.substr(0, name.length() - suffix.length());
   END
   RETURN name;
@@ -43,7 +43,7 @@ PUB FN join(left: String, right = "" :String) RETURNS String ->
   IF right.empty?() THEN
     RETURN left;
   END
-  IF left.empty?() || right.starts_with?("/") THEN
+  IF left.empty?() OR right.starts_with?("/") THEN
     RETURN right;
   END
   IF left.ends_with?("/") THEN
@@ -53,7 +53,7 @@ PUB FN join(left: String, right = "" :String) RETURNS String ->
 END
 
 PUB FN expand(path: String, base = "" :String) RETURNS String ->
-  IF path.starts_with?("/") || base.empty?() THEN
+  IF path.starts_with?("/") OR base.empty?() THEN
     RETURN path;
   END
   RETURN join(base, path);

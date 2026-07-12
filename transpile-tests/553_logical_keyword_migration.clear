@@ -1,0 +1,12 @@
+FN explode() RETURNS Bool ->
+  ASSERT FALSE, "short-circuited operand executed";
+  RETURN TRUE;
+END
+
+FN main() RETURNS Void ->
+  ASSERT TRUE OR explode();
+  ASSERT !(FALSE AND explode());
+  ASSERT TRUE OR FALSE AND FALSE;
+  ASSERT !(FALSE OR TRUE AND FALSE);
+  RETURN;
+END

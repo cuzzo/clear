@@ -91,7 +91,7 @@ FN shortestPath!(nodes: HashMap<Node>, source: String, target: String) RETURNS !
   MUTABLE found = FALSE;
   MUTABLE head = 0;
   MUTABLE iters = 0;
-  WHILE iters < 20 && head < queue.length() && found == FALSE DO
+  WHILE iters < 20 AND head < queue.length() AND found == FALSE DO
     iters = iters + 1;
     current = COPY (queue[head] OR_ELSE "");
     head = head + 1;
@@ -146,7 +146,7 @@ FN dfs!(nodes: HashMap<Node>, start: String) RETURNS !String[]@list ->
   stack.append(COPY start);
 
   MUTABLE iters = 0;
-  WHILE iters < 100 && stack.any?() DO
+  WHILE iters < 100 AND stack.any?() DO
     iters = iters + 1;
     # Pop from end of stack
     top = COPY (stack[stack.length() - 1] OR_ELSE "");

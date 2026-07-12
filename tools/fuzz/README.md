@@ -126,7 +126,7 @@ expected hard error is absent.
 | `bg_capture_typing`         | 20              | Type-inference cells for BG-block captures. |
 | `bg_copy_param_reentrant`   | 8               | COPY of @list param into BG calling reentrant function. |
 | `infallible_signature`      | 60              | Cells exercising infallible (non-`!T`) function signature lowering. |
-| `binary_op_matrix`         | 43           | Binary operator lowering/admission combinations, including scalar and managed single-fallback `!?T` collapse. |
+| `binary_op_matrix`         | 45           | Binary operator lowering/admission combinations, including AND/OR short-circuiting and scalar/managed single-fallback `!?T` collapse. |
 | `capability_wrap_matrix`   | 21           | Capability wrapper construction/admission cells. |
 | `catch_allocator_matrix`   | 20           | Error/catch paths that preserve allocator identity. |
 | `catch_reassign_matrix`    | 16           | Catch/fallback reassignment ownership cells. |
@@ -185,7 +185,7 @@ expected hard error is absent.
 | `lowering_boundary_matrix`   | 28           | MIR lowering boundary coverage for call contracts, WITH variants, BG/DO/NEXT, and pipeline terminals. |
 | `test_framework_matrix`      | 6            | TEST/WHEN/TEST THAT grammar through hooks, LET bindings, stubs, pending tests, benchmark, smash, and profile forms. |
 | `extern_boundary_matrix`     | 6            | Negative extern declaration/call boundaries for free functions, trampolines, extern methods/resources, generic comptime calls, and tight-loop rejection. |
-| `curated_gap_corpus`         | 471          | Self-contained `transpile-tests/*.clear` corpus reused as broad compile-mode fuzz coverage for parser, annotator, MIR lowering, and emission. |
+| `curated_gap_corpus`         | 472          | Self-contained `transpile-tests/*.clear` corpus reused as broad compile-mode fuzz coverage for parser, annotator, MIR lowering, and emission. |
 
 ### `stream_into_boundary` matrix
 

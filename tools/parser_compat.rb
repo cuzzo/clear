@@ -291,7 +291,7 @@ module ParserCompat
 
       PRIVATE FN trimTrailingZeros(value: String) RETURNS String ->
         MUTABLE end_index = value.length();
-        WHILE end_index > 0 && value.substr(end_index - 1, 1) == "0" DO
+        WHILE end_index > 0 AND value.substr(end_index - 1, 1) == "0" DO
           end_index -= 1;
         END
         IF end_index == 0 THEN

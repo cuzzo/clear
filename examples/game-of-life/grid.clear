@@ -13,7 +13,7 @@ FN cellKey(cell: Cell) RETURNS !String ->
 END
 
 FN sameCell?(a: Cell, b: Cell) RETURNS Bool ->
-  RETURN a.x == b.x && a.y == b.y;
+  RETURN a.x == b.x AND a.y == b.y;
 END
 
 FN containsCell?(cells: Cell[]@list, cell: Cell) RETURNS Bool ->
@@ -39,7 +39,7 @@ FN cellNeighbors(cell: Cell) RETURNS !Cell[]@list ->
   WHILE dx <= 1 DO
     MUTABLE dy = -1;
     WHILE dy <= 1 DO
-      IF dx != 0 || dy != 0 THEN
+      IF dx != 0 OR dy != 0 THEN
         neighbors.append(Cell{ x: cell.x + dx, y: cell.y + dy });
       END
       dy += 1;
@@ -76,15 +76,15 @@ FN buildGrid(liveCells: Cell[]@list) RETURNS !HashMap<CellState> ->
 END
 
 FN revive?(lifeState: Bool, liveNeighbors: Int64) RETURNS Bool ->
-  RETURN lifeState == FALSE && liveNeighbors >= 3 && liveNeighbors <= 3;
+  RETURN lifeState == FALSE AND liveNeighbors >= 3 AND liveNeighbors <= 3;
 END
 
 FN survive?(lifeState: Bool, liveNeighbors: Int64) RETURNS Bool ->
-  RETURN lifeState == TRUE && liveNeighbors >= 2 && liveNeighbors <= 3;
+  RETURN lifeState == TRUE AND liveNeighbors >= 2 AND liveNeighbors <= 3;
 END
 
 FN evolve(state: CellState) RETURNS Bool ->
-  IF survive?(state.life, state.neighbors) || revive?(state.life, state.neighbors) THEN
+  IF survive?(state.life, state.neighbors) OR revive?(state.life, state.neighbors) THEN
     RETURN TRUE;
   END
   RETURN FALSE;
