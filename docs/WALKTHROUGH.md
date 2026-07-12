@@ -219,6 +219,27 @@ FN findUser(id: Int64) RETURNS ?User ->
 END
 ```
 
+An optional is never implicitly truthy. Test presence with postfix `EXISTS`,
+or bind the present payload with `EXISTS AS`:
+
+```ruby clear illustrative
+maybeUser = findUser(7_i64);
+hasUser = maybeUser EXISTS;                         # Bool
+
+IF maybeUser EXISTS AS user THEN
+    print(user.name);
+END
+```
+
+For non-Boolean optionals, `AND` and `OR` test presence. `?Bool` is deliberately
+not coerced because “present” and “present and true” are different questions:
+
+```ruby clear illustrative
+IF maybeUser EXISTS AND cacheReady THEN refresh(); END
+present = maybeFlag EXISTS OR fallback;
+enabled = (maybeFlag OR_ELSE FALSE) OR fallback;
+```
+
 Failible/Optional returns:
 
 ```ruby clear illustrative
@@ -227,6 +248,19 @@ FN findUser(id: Int64) RETURNS !?User ->
     IF id == 42 -> RETURN;
     RETURN User{ name: "Alice" };
 END
+```
+
+Postfix `IS_OK` tests whether a fallible expression succeeded. `IS_OK AS`
+binds its successful payload. Predicates refine left-to-right, so stacked
+tenses remain explicit when their states matter:
+
+```ruby clear illustrative
+IF findUser(7_i64) IS_OK AS maybeUser AND maybeUser EXISTS AS user THEN
+    print(user.name);
+END
+
+# When failure and absence share one fallback, OR_ELSE peels both layers of !?T.
+user = findUser(7_i64) OR_ELSE User{ name: "Guest" };
 ```
 
 ### Recursion
@@ -373,9 +407,9 @@ names = users |> SELECT _.name;
 entities |> EACH { _.x += _.vx; };
 result = data |> process |> validate |> format;
 
-# 3. Error Handling: Inline OR / OR_ELSE RAISE
-val = parseInt("abc") OR 0;                         # OKAY: Fallback value
-content = readFile("config.json") OR_ELSE RAISE;         # OKAY: Explicit propagation
+# 3. Error Handling: OR_ELSE fallback or propagation
+val = parseInt("abc") OR_ELSE 0;                   # OKAY: Fallback value
+content = readFile("config.json") OR_ELSE RAISE;   # OKAY: Explicit propagation
 
 # 4. Function-level CATCH
 FN main() RETURNS Void ->
@@ -387,6 +421,11 @@ CATCH e
     RETURN;
 END
 ```
+
+> [!NOTE]
+> CLEAR's error system also supports typed errors, propagation, function-level
+> `CATCH`, stacked tenses, and multi-layer fallback. See the
+> [error-handling design](agents/error-handling.md) for the complete model.
 
 See [docs/pipelines.md#operators](docs/pipelines.md#operators) for a full list of higher-order function operators.
 
@@ -403,6 +442,7 @@ Tense represents a value that will exist in the future. CLEAR eliminates the com
 ```ruby clear illustrative
 # 1. Promise (~T): A single future value
 p: ~String = BG { sleep(100); RETURN "Data"; };
+ready = p IS_READY;                                 # Poll only; never consumes or binds
 val = NEXT p;                                       # OKAY: Blocks until ready
 
 # 2. Open Stream (~?T[]): Asynchronous generator
@@ -420,6 +460,10 @@ counter: ~Int64[INF] = BG STREAM {
 };
 v1 = NEXT counter;                                  # OKAY: Returns Int64 (never NIL)
 ```
+
+`IS_READY` answers only whether a single future has settled. It cannot use
+`AS`, because readiness does not distinguish successful and failed outcomes;
+`NEXT` is the operation that consumes the future and produces its result.
 
 > See [Tense Composition](tense-composition.md) for more details on `?` optional tense, and `!` fallible tense.
 
@@ -543,7 +587,7 @@ FN buildGraph() RETURNS Void ->
     root.children.append(Node{ id: 3 });
 
     # Cycles are legal. IF binds the optional node for mutation.
-    IF root.left AS left THEN
+    IF root.left EXISTS AS left THEN
         left.right = root;
     END
     ASSERT root.left?.right?.id == 1;
@@ -595,9 +639,9 @@ there is more than one performance-distinct choice—such as `left` and `right`
 recursive edges. Moving a value into `T[]@list` never causes boxing: list
 elements remain inline and contiguous.
 
-`?.` is the safe navigate operator to peek into optional types. It combines with `OR` to handle missing data like an error. One `?.` guards a continuous chain of non-optional members, so `user?.profile.name` is sufficient when only `user` is optional. A member that is itself optional introduces a new boundary (`user?.optionalProfile?.name`). Bounds-safe `@list` indexing also introduces a boundary: `users[i]?.profile.name`.
+`?.` is the safe navigate operator to peek into optional types. It combines with `OR_ELSE` to handle missing data like an error. One `?.` guards a continuous chain of non-optional members, so `user?.profile.name` is sufficient when only `user` is optional. A member that is itself optional introduces a new boundary (`user?.optionalProfile?.name`). Bounds-safe `@list` indexing also introduces a boundary: `users[i]?.profile.name`.
 
-An `@list` indexed read has type `?T` and returns NIL when the index is out of bounds. Use `IF users[i] AS user THEN ... END` when mutating a struct element; the binding aliases the actual list slot rather than a temporary copy.
+An `@list` indexed read has type `?T` and returns NIL when the index is out of bounds. Use `IF users[i] EXISTS AS user THEN ... END` when mutating a struct element; the binding aliases the actual list slot rather than a temporary copy.
 
 Safe navigation can also make that mutation conditional:
 
@@ -607,7 +651,7 @@ users[i]?.name = nextName();
 
 If `i` is out of bounds, the assignment is skipped and `nextName()` is not
 evaluated. The `?.` is therefore a visible conditional-write marker. Use
-`IF users[i] AS user THEN ... ELSE ... END` when a missing element must be
+`IF users[i] EXISTS AS user THEN ... ELSE ... END` when a missing element must be
 reported or handled rather than ignored.
 
 ### Independent Lifetimes with `LINK` / `RESOLVE`
@@ -645,7 +689,7 @@ FN main() RETURNS Void ->
 
     # RESOLVE checks whether the independently-owned parent is still alive.
     resolved = RESOLVE child.parent;
-    name = resolved?.name OR "dropped";
+    name = resolved?.name OR_ELSE "dropped";
     ASSERT name == "Alice", "resolved";
 
     RETURN;
