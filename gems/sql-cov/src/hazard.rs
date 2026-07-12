@@ -838,11 +838,16 @@ fn scan_join_keys(
             if !matches!(op, BinaryOperator::Eq | BinaryOperator::NotEq) {
                 return ControlFlow::Continue(());
             }
-            let evidence = nullability(left, self.resolver, false).merge(nullability(
-                right,
-                self.resolver,
-                false,
-            ));
+            let left_ev = nullability(left, self.resolver, false);
+            let right_ev = nullability(right, self.resolver, false);
+
+            // If either side is guaranteed to be non-nullable, no NULL-to-NULL match is possible.
+            // Normal equality (=) is completely safe and equivalent to IS.
+            if left_ev.state == Nullability::Never || right_ev.state == Nullability::Never {
+                return ControlFlow::Continue(());
+            }
+
+            let evidence = left_ev.merge(right_ev);
             match evidence.state {
                 Nullability::Unknown => self.unresolved.extend(evidence.reasons),
                 Nullability::Nullable => {

@@ -59,6 +59,7 @@ pub struct Resolver<'a> {
     pub schema: &'a SchemaCatalog,
     pub aliases: HashMap<String, Option<String>>,
     pub outer_nullable_aliases: HashSet<String>,
+    pub non_nullable_columns: HashSet<(Option<String>, String)>,
 }
 
 impl<'a> Resolver<'a> {
@@ -67,6 +68,7 @@ impl<'a> Resolver<'a> {
             schema,
             aliases: HashMap::new(),
             outer_nullable_aliases: HashSet::new(),
+            non_nullable_columns: HashSet::new(),
         }
     }
 }
@@ -91,6 +93,11 @@ pub fn resolver_for_select<'a>(select: &Select, schema: &'a SchemaCatalog) -> Re
             register_factor(&join.relation, right_is_optional, &mut resolver);
         }
     }
+    
+    if let Some(selection) = &select.selection {
+        populate_non_nullable_columns(selection, &mut resolver);
+    }
+    
     resolver
 }
 
@@ -273,10 +280,16 @@ pub fn resolve_qualified(
     outer_join_context: bool,
 ) -> NullabilityEvidence {
     let alias = normalize_identifier(alias);
+    let col_name = normalize_identifier(column);
     if outer_join_context && resolver.outer_nullable_aliases.contains(&alias) {
         return NullabilityEvidence::nullable(format!(
             "outer join can synthesize NULL for {alias}.{column}"
         ));
+    }
+    if resolver.non_nullable_columns.contains(&(Some(alias.clone()), col_name.clone()))
+        || resolver.non_nullable_columns.contains(&(None, col_name.clone()))
+    {
+        return NullabilityEvidence::never();
     }
     let Some(table) = resolver.aliases.get(&alias) else {
         return NullabilityEvidence::unknown(format!("schema alias `{alias}` is unresolved"));
@@ -299,6 +312,7 @@ pub fn resolve_qualified(
 }
 
 pub fn resolve_unqualified(column: &str, resolver: &Resolver<'_>) -> NullabilityEvidence {
+    let col_name = normalize_identifier(column);
     let matches = resolver
         .aliases
         .iter()
@@ -322,6 +336,14 @@ pub fn resolve_unqualified(column: &str, resolver: &Resolver<'_>) -> Nullability
         return NullabilityEvidence::nullable(format!(
             "outer join can synthesize NULL for unqualified column {column}"
         ));
+    }
+    if resolver.non_nullable_columns.contains(&(None, col_name.clone())) {
+        return NullabilityEvidence::never();
+    }
+    if matches.iter().any(|(alias, _, _)| {
+        resolver.non_nullable_columns.contains(&(Some((*alias).clone()), col_name.clone()))
+    }) {
+        return NullabilityEvidence::never();
     }
     if let Some((_, table, schema)) = matches.iter().find(|(_, _, schema)| schema.nullable) {
         return NullabilityEvidence::nullable(format!(
@@ -424,6 +446,64 @@ pub fn join_expr(operator: &JoinOperator) -> Option<&Expr> {
     }
 }
 
+pub fn populate_non_nullable_columns(where_expr: &Expr, resolver: &mut Resolver<'_>) {
+    let mut conjuncts = Vec::new();
+    find_conjuncts(where_expr, &mut conjuncts);
+
+    for expr in conjuncts {
+        if let Expr::IsNotNull(inner_expr) = expr {
+            let cols = collect_column_references(inner_expr);
+            for (opt_alias, col_name) in cols {
+                resolver.non_nullable_columns.insert((opt_alias, col_name));
+            }
+        }
+    }
+}
+
+fn find_conjuncts<'a>(expr: &'a Expr, conjuncts: &mut Vec<&'a Expr>) {
+    match expr {
+        Expr::BinaryOp { left, op: BinaryOperator::And, right } => {
+            find_conjuncts(left, conjuncts);
+            find_conjuncts(right, conjuncts);
+        }
+        Expr::Nested(e) => {
+            find_conjuncts(e, conjuncts);
+        }
+        _ => {
+            conjuncts.push(expr);
+        }
+    }
+}
+
+fn collect_column_references(expr: &Expr) -> Vec<(Option<String>, String)> {
+    let mut columns: Vec<(Option<String>, String)> = Vec::new();
+    struct ColumnVisitor {
+        columns: Vec<(Option<String>, String)>,
+    }
+    impl Visitor for ColumnVisitor {
+        type Break = ();
+        fn pre_visit_expr(&mut self, expr: &Expr) -> ControlFlow<Self::Break> {
+            match expr {
+                Expr::Identifier(ident) => {
+                    self.columns.push((None, normalize_identifier(&ident.value)));
+                }
+                Expr::CompoundIdentifier(idents) => {
+                    if idents.len() >= 2 {
+                        let alias = normalize_identifier(&idents[idents.len() - 2].value);
+                        let column = normalize_identifier(&idents[idents.len() - 1].value);
+                        self.columns.push((Some(alias), column));
+                    }
+                }
+                _ => {}
+            }
+            ControlFlow::Continue(())
+        }
+    }
+    let mut visitor = ColumnVisitor { columns: Vec::new() };
+    let _ = expr.visit(&mut visitor);
+    visitor.columns
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -477,6 +557,7 @@ mod tests {
             schema: &schema,
             aliases: HashMap::new(),
             outer_nullable_aliases: HashSet::new(),
+            non_nullable_columns: HashSet::new(),
         };
         let sqlparser::ast::SelectItem::UnnamedExpr(expr3) = &select3.projection[0] else { panic!() };
         let ev3 = nullability(expr3, &resolver3, false);
@@ -508,6 +589,7 @@ mod tests {
             schema: &schema_with_bonus,
             aliases,
             outer_nullable_aliases: HashSet::new(),
+            non_nullable_columns: HashSet::new(),
         };
         // COALESCE(NULL, 1) -> Never nullable since 1 is never nullable
         let sqlparser::ast::SelectItem::UnnamedExpr(Expr::Function(func1)) = &select4.projection[0] else { panic!() };
@@ -540,6 +622,7 @@ mod tests {
             schema: &schema_with_cols,
             aliases,
             outer_nullable_aliases,
+            non_nullable_columns: HashSet::new(),
         };
         let ev1 = resolve_qualified("sub", "id", &resolver, false);
         assert_eq!(ev1.state, Nullability::Unknown);
@@ -571,5 +654,22 @@ mod tests {
         for op in operators {
             let _ = join_expr(&op);
         }
+
+        // 7. Predicate propagation test
+        let mut schema_with_line = SchemaCatalog::default();
+        schema_with_line.insert_column("test_exposure_events".to_string(), "line".to_string(), true, false);
+        let sql = "SELECT t.line FROM test_exposure_events t WHERE t.line IS NOT NULL";
+        let statements = Parser::parse_sql(&dialect, sql).unwrap();
+        let sqlparser::ast::Statement::Query(query_prop) = &statements[0] else { panic!() };
+        let sqlparser::ast::SetExpr::Select(select_prop) = &*query_prop.body else { panic!() };
+        let resolver_prop = resolver_for_select(select_prop, &schema_with_line);
+        
+        // Assert that t.line is resolved to Never nullable because of the WHERE t.line IS NOT NULL clause
+        let t_line_expr = Expr::CompoundIdentifier(vec![
+            sqlparser::ast::Ident::new("t"),
+            sqlparser::ast::Ident::new("line"),
+        ]);
+        let ev_prop = nullability(&t_line_expr, &resolver_prop, false);
+        assert_eq!(ev_prop.state, Nullability::Never);
     }
 }

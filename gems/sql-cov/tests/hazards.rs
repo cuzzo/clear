@@ -57,7 +57,7 @@ async fn outer_join_filter_and_nullable_join_key_are_distinct_hazards() {
     let schema = schema().await;
     let sql = r#"SELECT u.name
 FROM users u
-LEFT JOIN subscriptions s ON u.id = s.user_id
+LEFT JOIN subscriptions s ON u.bonus = s.user_id
 WHERE s.status = 'active';"#;
     let report = analyze_hazards("outer_join.sql", sql, DialectName::Sqlite, &schema).unwrap();
     assert!(report
@@ -190,4 +190,38 @@ async fn test_schema_inferred_join_hazard_detection() {
     let sql_safe = "SELECT SUM(DISTINCT companies.annual_revenue) FROM companies JOIN employees ON companies.company_id = employees.company_id";
     let report_safe = analyze_hazards_with_looker("test.sql", sql_safe, DialectName::Sqlite, &mock_schema, &[]).unwrap();
     assert!(!report_safe.findings.iter().any(|f| f.rule_id == "SCHEMA_JOIN_HAZARD"));
+}
+
+#[tokio::test]
+async fn test_cte_is_not_null_propagation() {
+    use sql_cov::analyze_hazards;
+    let mut schema = SchemaCatalog::default();
+    schema.insert_column("test_exposure_events".to_string(), "line".to_string(), true, false);
+    schema.insert_column("active_hazards".to_string(), "line".to_string(), true, false);
+    schema.insert_column("active_hazards".to_string(), "unit_id".to_string(), true, false);
+    schema.insert_column("test_exposure_events".to_string(), "unit_id".to_string(), true, false);
+    schema.insert_column("active_hazards".to_string(), "path".to_string(), true, false);
+    schema.insert_column("test_exposure_events".to_string(), "path".to_string(), true, false);
+
+    let sql = r#"
+        WITH active_hazards AS (
+            SELECT * FROM unit_hazards
+        ),
+        ranked_exposure AS (
+            SELECT t.line
+            FROM test_exposure_events t
+            JOIN active_hazards h
+              ON h.unit_id = t.unit_id
+             AND h.path = t.path
+             AND h.line = t.line
+            WHERE t.line IS NOT NULL
+        )
+        SELECT * FROM ranked_exposure;
+    "#;
+    let report = analyze_hazards("test.sql", sql, DialectName::Sqlite, &schema).unwrap();
+    // Check if there are any NullableJoinKey findings for t.line
+    let has_finding_for_t_line = report.findings.iter().any(|f| {
+        f.kind == sql_cov::HazardKind::NullableJoinKey && f.span.raw_expression.contains("h.line = t.line")
+    });
+    assert!(!has_finding_for_t_line);
 }
