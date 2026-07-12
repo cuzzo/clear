@@ -55,6 +55,15 @@ ALIAS_PERMS.each do |alias_kind, perm|
     ESCAPE_PATTERNS.each do |escape|
       cell = { alias: alias_kind, perm: perm, payload: payload, escape: escape }
       cell[:expected] = escape.to_s.start_with?('baseline_') ? :pass : :compile_error
+      # A WITH alias of Counter{Int64} denotes a Copy value even when its
+      # source is locked/versioned. GIVE into TAKES therefore copies the
+      # complete value; plain BORROWED field/list stores do too. No alias
+      # escapes. String-bearing Counter values remain non-Copy.
+      copy_value_escape = payload == :int && (
+        escape == :takes_consume ||
+        (alias_kind == :borrowed && [:store_field, :list_append].include?(escape))
+      )
+      cell[:expected] = :pass if copy_value_escape
       ACCESS_GATE_CELLS << cell
     end
   end

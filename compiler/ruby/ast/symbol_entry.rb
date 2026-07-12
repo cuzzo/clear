@@ -148,6 +148,18 @@ class SymbolEntry
   sig { returns(Integer) }
   attr_reader :binding_id
 
+  # The declaration identity used by cross-routine semantic facts. A capture
+  # gets a fresh local SymbolEntry, but it still denotes the captured outer
+  # binding. Keeping that relationship on the symbol prevents analyses from
+  # reconstructing it by walking syntax or comparing names.
+  sig { returns(Integer) }
+  attr_reader :ownership_binding_id
+
+  sig { params(source: SymbolEntry).void }
+  def inherit_ownership_identity!(source)
+    @ownership_binding_id = source.ownership_binding_id
+  end
+
   sig { params(value: LifetimeInput).void }
   def lifetime=(value)
     @lifetime = normalize_lifetime(value)
@@ -473,6 +485,7 @@ class SymbolEntry
                  size: 0, capabilities: Set.new,
                  valid: true, invalid_reason: nil, resource: nil, close_plan: nil)
     @binding_id = T.let(self.class.next_binding_id, Integer)
+    @ownership_binding_id = T.let(@binding_id, Integer)
     @reg = reg
     normalized_type = if type.nil?
       Type.new(:Untyped)

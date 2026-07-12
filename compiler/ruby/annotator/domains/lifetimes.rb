@@ -76,16 +76,6 @@ module Annotator
         expected_t = expected_type.is_a?(Type) ? expected_type : (expected_type ? Type.new(expected_type) : nil)
         return nil if expected_t&.symbol? && vti.symbol?
 
-        if language_mode != :strict && val_node.is_a?(AST::Identifier) && T.unsafe(val_node).ownership_future_use == true &&
-            !vti.implicitly_copyable? { |name| lookup_type_schema(name) }
-          keyword = vti.any_rc? || vti.split? ? "CLONE" : "COPY"
-          wrapper = keyword == "CLONE" ? AST::CloneNode.new(val_node.token, val_node) : AST::CopyNode.new(val_node.token, val_node)
-          visit(wrapper)
-          wrapper.storage = container_alloc
-          T.unsafe(wrapper).alloc = container_alloc
-          return wrapper
-        end
-
         if vti.list_collection?
           # When the target field is also @list (ArrayList), skip CopyNode wrapping.
           # The move mechanism will transfer the ArrayList struct directly.
@@ -133,6 +123,18 @@ module Annotator
 
         record_capture_site!(node, copied: true)
         without_capture_moves { visit(node.value) }
+        finish_previsited_copy!(node)
+      end
+
+      # Ownership transport decisions are made after the routine's ordinary
+      # annotation has emitted all liveness facts.  At that point the source
+      # expression is already fully resolved, and its lexical scope may have
+      # closed.  Finish the synthetic COPY from those facts; never re-walk the
+      # source AST or perform a second name lookup.
+      sig { params(node: AST::CopyNode).returns(T.nilable(T::Boolean)) }
+      def finish_previsited_copy!(node)
+        T.bind(self, SemanticAnnotator)
+
         # COPY produces an owned deep-copy. The source is NOT consumed.
         # Clone the Type so mutating provenance doesn't affect the inner node.
         inner_type = node.value.full_type!(context: "COPY value")
@@ -255,6 +257,15 @@ module Annotator
 
         record_capture_site!(node, copied: true)
         without_capture_moves { visit(node.value) }
+        finish_previsited_clone!(node)
+      end
+
+      # See finish_previsited_copy!: this consumes resolved semantic facts and
+      # deliberately does not revisit the source expression.
+      sig { params(node: AST::CloneNode).returns(T.nilable(T::Boolean)) }
+      def finish_previsited_clone!(node)
+        T.bind(self, SemanticAnnotator)
+
         type = node.value.full_type!(context: "CLONE value")
         root = get_root_object(node.value)
         if root.is_a?(AST::Identifier) && root.symbol&.non_escaping
@@ -347,7 +358,17 @@ module Annotator
 
         plan = node.respond_to?(:ownership_transport_plan) ? T.unsafe(node).ownership_transport_plan : nil
         return if language_mode != :strict && plan.is_a?(OwnershipTransportPlan) && plan.action != :move
+        return if language_mode != :strict && node.value.is_a?(AST::Identifier) &&
+          T.unsafe(node.value).ownership_pending_transfer == true
         return if node.value.is_a?(AST::CopyNode)
+
+        # DEFAULT/EASY field and index reads are local borrowed views unless
+        # the user explicitly writes a transfer form. The container-borrow
+        # fact is registered later, after the destination symbol exists; do
+        # not simultaneously mark the source place moved here. Doing both
+        # suppressed the parent's cleanup while also suppressing cleanup on
+        # the borrowed destination, leaking owned fields.
+        return if language_mode != :strict && AST.borrowed_ownership_view?(node.value)
 
         reject_scoped_assignment_move!(node)
 

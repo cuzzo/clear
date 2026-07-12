@@ -651,6 +651,7 @@ module GenericAnalysis
     ownership_graph[var_name]&.kind = :borrowed
     T.must(node.symbol).mark_borrowed_alias! if node.respond_to?(:symbol) && node.symbol
     node.container_borrow = true
+    node.value.container_borrow = true if node.value.respond_to?(:container_borrow=)
     node.storage = :borrow if node.respond_to?(:storage=)
     true
   end

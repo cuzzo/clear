@@ -72,8 +72,6 @@ module Annotator
         root = root_variable_name(node.object)
         return unless root
         return if ownership_graph.can_write?(root)
-        return if reject_inferred_alias_call_mutation!(node, root)
-
         error!(node, :ASSIGN_WHILE_BORROWED, name: root)
       end
 

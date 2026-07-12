@@ -265,7 +265,11 @@ pub fn Versioned(comptime T: type) type {
         /// caller's behalf -- caller may retry the whole `update`
         /// (typically with backoff at a higher layer) or treat as
         /// "operation failed."
-        pub const UpdateError = std.mem.Allocator.Error || error{UpdateRetriesExhausted};
+        // A managed payload may provide an allocator-aware `dupe` operation
+        // with its own declared failures. Do not narrow that error contract to
+        // OutOfMemory: update must faithfully propagate every failure from
+        // constructing the unpublished candidate, plus retry exhaustion.
+        pub const UpdateError = anyerror;
 
         // 3. Write: Copy-On-Write with CAS.
         //

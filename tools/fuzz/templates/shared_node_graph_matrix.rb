@@ -26,7 +26,7 @@ FuzzGenerator.register(:shared_node_graph_matrix, cells: SHARED_NODE_GRAPH_CELLS
   when :replace
     'MUTABLE root: Node@shared:node = Node{ id: 1, name: COPY "root" }; root.left = Node{ id: 2, name: COPY "old" }; root.left = Node{ id: 3, name: COPY "new" }; ASSERT root.left?.name == "new";'
   when :managed_read
-    'MUTABLE root: Node@shared:node = Node{ id: 1, name: COPY "managed" }; snapshot = root.name; root.name = COPY "changed"; ASSERT snapshot == "managed"; ASSERT root.name == "changed";'
+    'MUTABLE root: Node@shared:node = Node{ id: 1, name: COPY "managed" }; snapshot = COPY root.name; root.name = COPY "changed"; ASSERT snapshot == "managed"; ASSERT root.name == "changed";'
   when :list_growth
     <<~CLEAR.chomp
       MUTABLE root: Node@shared:node = Node{ id: 1, name: COPY "root" };

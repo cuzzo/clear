@@ -7,9 +7,11 @@ AUTO_OWNERSHIP_TRANSPORT_CELLS = [
   { shape: :takes_snapshot, expected: :pass },
   { shape: :struct_snapshot, expected: :pass },
   { shape: :direct_mutation, expected: :compile_error },
+  { shape: :field_alias_mutation, expected: :compile_error },
   { shape: :stdlib_mutation, expected: :compile_error },
   { shape: :user_method_mutation, expected: :compile_error },
   { shape: :user_function_mutation, expected: :compile_error },
+  { shape: :nested_place_mutation, expected: :compile_error },
   { shape: :exclusive_branches, expected: :pass },
   { shape: :loop_backedge, expected: :compile_error },
   { shape: :rc_mutation, expected: :compile_error },
@@ -17,6 +19,9 @@ AUTO_OWNERSHIP_TRANSPORT_CELLS = [
   { shape: :boundary_local_mutation, expected: :compile_error },
   { shape: :boundary_rc_mutation, expected: :compile_error },
   { shape: :boundary_read, expected: :pass },
+  { shape: :boundary_nested_alias_mutation, expected: :compile_error },
+  { shape: :lambda_capture_mutation, expected: :compile_error },
+  { shape: :boundary_shadowing, expected: :pass },
 ].freeze
 
 FuzzGenerator.register(:auto_ownership_transport_matrix, cells: AUTO_OWNERSHIP_TRANSPORT_CELLS) do |p|
@@ -53,6 +58,14 @@ FuzzGenerator.register(:auto_ownership_transport_matrix, cells: AUTO_OWNERSHIP_T
         MUTABLE x = U{ n: 1, label: "a" }; y = x; x.n = 2_i64; ASSERT y.n == 1;
       END
     CLEAR
+  when :field_alias_mutation
+    <<~CLEAR
+      STRUCT U { label: String }
+      FN main() RETURNS Void ->
+        MUTABLE x = U{ label: COPY "before" }; snapshot = x.label;
+        x.label = COPY "after"; ASSERT snapshot == "before";
+      END
+    CLEAR
   when :stdlib_mutation
     <<~CLEAR
       FN main() RETURNS Void ->
@@ -73,6 +86,14 @@ FuzzGenerator.register(:auto_ownership_transport_matrix, cells: AUTO_OWNERSHIP_T
       FN setN!(MUTABLE u: U, n: Int64) RETURNS Void -> u.n = n; END
       FN main() RETURNS Void ->
         MUTABLE x = U{ n: 1, label: "a" }; y = x; setN!(x, 2); ASSERT y.n == 1;
+      END
+    CLEAR
+  when :nested_place_mutation
+    <<~CLEAR
+      STRUCT Holder { values: Int64[]@list, label: String }
+      FN main() RETURNS Void ->
+        MUTABLE x = Holder{ values: [1], label: "a" }; y = x;
+        x.values.append(2); ASSERT y.values.length() == 1;
       END
     CLEAR
   when :exclusive_branches
@@ -121,6 +142,41 @@ FuzzGenerator.register(:auto_ownership_transport_matrix, cells: AUTO_OWNERSHIP_T
         x = U{ n: 1, label: "a" }; y = x;
         pending: ~Int64 = BG { read(x); };
         ASSERT y.n == 1; n = NEXT pending; ASSERT n == 1; RETURN;
+      END
+    CLEAR
+  when :boundary_nested_alias_mutation
+    <<~CLEAR
+      STRUCT U { n: Int64, label: String }
+      FN setN!(MUTABLE u: U, n: Int64) RETURNS Void -> u.n = n; END
+      FN main() RETURNS !Void ->
+        pending: ~Void = BG {
+          MUTABLE x = U{ n: 1, label: "nested" }; y = x;
+          setN!(x, 2); ASSERT y.n == 1;
+        };
+        NEXT pending; RETURN;
+      END
+    CLEAR
+  when :lambda_capture_mutation
+    <<~CLEAR
+      STRUCT U { n: Int64, label: String }
+      FN setN!(MUTABLE u: U) RETURNS Void -> u.n = 2_i64; END
+      FN main() RETURNS Void ->
+        MUTABLE x = U{ n: 1, label: "outer" }; y = x;
+        callback: FN() -> Void = %() USE(MUTABLE x) -> setN!(x);
+        callback(); ASSERT y.n == 1;
+      END
+    CLEAR
+  when :boundary_shadowing
+    <<~CLEAR
+      STRUCT U { n: Int64, label: String }
+      STRUCT P { n: Int64 }
+      FN main() RETURNS !Void ->
+        x = U{ n: 1, label: "outer" }; y = x;
+        pending: ~Void = BG {
+          MUTABLE x = P{ n: 2 }; snapshot = x;
+          x.n = 3_i64; ASSERT snapshot.n == 2;
+        };
+        ASSERT y.label == "outer"; NEXT pending; RETURN;
       END
     CLEAR
   end

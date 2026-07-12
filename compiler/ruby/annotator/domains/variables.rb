@@ -319,18 +319,30 @@ module Annotator
       def prepare_implicit_ownership_transport!(node)
         T.bind(self, SemanticAnnotator)
         plan = T.unsafe(node).ownership_transport_plan
-        return unless plan.is_a?(OwnershipTransportPlan)
         # STRICT preserves CLEAR's explicit affine contract: a plain
         # non-Copy assignment is a move. Ownership inference is a
         # DEFAULT/EASY feature.
         return if language_mode == :strict
+        unless plan.is_a?(OwnershipTransportPlan)
+          source = node.value
+          return unless OwnershipTransportFacts.source?(source)
+          source_name = OwnershipTransportFacts.source_display(source)
+          T.unsafe(node).ownership_transport_plan = OwnershipTransportPlan.new(
+            action: :pending,
+            source: source_name,
+            destination: node.name.to_s,
+            alias_root: source_name,
+          )
+          return
+        end
+        return if plan.action == :pending
         return if plan.action == :move
 
         # The transport planner deliberately runs before type annotation, but
         # Copy values never create aliases.  Consult the already-declared
         # source binding before applying the planner's conservative alias
         # result so primitive/value mutation remains ordinary value mutation.
-        source_type = current_scope.resolve_full_type(plan.source)
+        source_type = node.value.full_type!(context: "implicit ownership transport source")
         return if source_type.implicitly_copyable? { |name| lookup_type_schema(name) }
 
         if plan.conflicting_mutation
@@ -373,8 +385,7 @@ module Annotator
         return unless plan.action == :materialize
 
         source = node.value
-        return unless source.is_a?(AST::Identifier)
-        source_type = current_scope.resolve_full_type(source.name)
+        source_type = source.full_type!(context: "implicit ownership materialization source")
         keyword = source_type.any_rc? || source_type.split? ? "CLONE" : "COPY"
         if language_mode == :strict
           detail = "STRICT ownership cost: `#{plan.destination} = #{plan.source}` requires an implicit " \
@@ -401,72 +412,92 @@ module Annotator
         node.value = wrapper
       end
 
+      sig { params(facts: OwnershipTransportFacts).void }
+      def finalize_ownership_transport_facts!(facts)
+        T.bind(self, SemanticAnnotator)
+        facts.decisions.each do |decision|
+          node = decision.alias_fact.declaration
+          T.unsafe(node).ownership_transport_plan = decision.plan
+          if decision.plan.action == :move
+            handle_assign_move(node)
+            next
+          end
+
+          previous_value = node.value
+          prepare_implicit_ownership_transport!(node)
+          if !node.value.equal?(previous_value)
+            wrapper = node.value
+            record_capture_site!(wrapper, copied: true)
+            if wrapper.is_a?(AST::CloneNode)
+              finish_previsited_clone!(wrapper)
+            else
+              finish_previsited_copy!(T.cast(wrapper, AST::CopyNode))
+            end
+          end
+          symbol = node.respond_to?(:symbol) ? T.unsafe(node).symbol : nil
+          establish_inferred_alias!(node, symbol) if symbol.is_a?(SymbolEntry)
+        end
+        facts.transfer_decisions.each { |decision| finalize_pending_transfer!(decision) }
+      end
+
+      sig { params(decision: OwnershipTransportFacts::TransferDecision).void }
+      def finalize_pending_transfer!(decision)
+        T.bind(self, SemanticAnnotator)
+        transfer = decision.transfer
+        source = transfer.source
+        if decision.materialize
+          source_type = source.full_type!(context: "finalized ownership transfer")
+          wrapper = if source_type.any_rc? || source_type.split?
+            AST::CloneNode.new(source.token, source)
+          else
+            AST::CopyNode.new(source.token, source)
+          end
+          record_capture_site!(wrapper, copied: true)
+          if wrapper.is_a?(AST::CloneNode)
+            finish_previsited_clone!(wrapper)
+          else
+            finish_previsited_copy!(T.cast(wrapper, AST::CopyNode))
+          end
+          container = transfer.container
+          case container
+          when AST::FuncCall
+            container.args[T.cast(transfer.slot, Integer)] = wrapper
+          when AST::MethodCall
+            index = T.cast(transfer.slot, Integer)
+            if index.zero?
+              container.object = wrapper
+            else
+              container.args[index - 1] = wrapper
+            end
+          when AST::StructLit
+            container.fields[T.cast(transfer.slot, String)] = wrapper
+          when AST::Assignment
+            container.value = wrapper
+          end
+        else
+          source.was_moved = true
+          T.unsafe(transfer.container).was_moved = true if transfer.container.respond_to?(:was_moved=)
+          og_set_moved(source.name, at_token: source.token, action: :move)
+        end
+      end
+
       sig { params(node: DeclarationNode, symbol: SymbolEntry).void }
       def establish_inferred_alias!(node, symbol)
         T.bind(self, SemanticAnnotator)
         plan = T.unsafe(node).ownership_transport_plan
         return unless plan.is_a?(OwnershipTransportPlan)
         return if language_mode == :strict
+        return if plan.action == :pending
         return if plan.action == :move || plan.last_alias_use.nil?
-        source_type = current_scope.resolve_full_type(plan.source)
+        source_type = node.value.full_type!(context: "inferred alias source")
         return if source_type.implicitly_copyable? { |name| lookup_type_schema(name) }
 
-        err = ownership_graph.borrow(plan.destination, plan.alias_root, mutable: false)
-        error!(node, :LIFETIME_ALREADY_BORROWED, name: plan.alias_root) if err
         return unless plan.action == :borrow
 
         symbol.mark_non_escaping!
         symbol.mark_borrowed_alias!
         graph_node = ownership_graph[plan.destination]
         graph_node.kind = :borrowed if graph_node
-      end
-
-      # Emit the same prescriptive alias-collision diagnostic for a mutating
-      # call that direct-assignment planning emits. This runs only after call
-      # resolution has stamped the matched signature's mutates_receiver fact.
-      sig { params(mutation: AST::Node, source: String).returns(T::Boolean) }
-      def reject_inferred_alias_call_mutation!(mutation, source)
-        T.bind(self, SemanticAnnotator)
-        edge = ownership_graph.edges.find do |candidate|
-          candidate.to == source && candidate.kind == :borrows
-        end
-        return false unless edge
-
-        alias_entry = current_scope.resolve_entry(edge.from)
-        declaration = alias_entry&.reg
-        return false unless declaration.respond_to?(:ownership_transport_plan)
-        plan = declaration.ownership_transport_plan
-        return false unless plan.is_a?(OwnershipTransportPlan)
-
-        source_node = declaration.value
-        return false unless source_node.is_a?(AST::Identifier)
-        detail = "Aliasing Error: `#{plan.destination} = #{plan.source}` creates an inferred alias, " \
-          "but the resolved call mutates `#{source}` while `#{plan.destination}` is still live. " \
-          "CLEAR never guesses snapshot-versus-shared mutation semantics. Write " \
-          "`#{plan.destination} = COPY #{plan.source}` for an independent value, or explicitly use " \
-          "@multiowned/@shared and `CLONE #{plan.source}`."
-        fixes = T.let([Fix.new(
-          description: fix_description(:PREFIX_COPY_SNAPSHOT),
-          confidence: :interactive,
-          edits: [Edit.new(
-            span: Span.new(file: nil, line: source_node.token.line, col: source_node.token.column, length: 0),
-            replacement: "COPY ",
-          )],
-        )], T::Array[Fix])
-        source_type = current_scope.resolve_full_type(source)
-        if source_type.any_rc? || source_type.split?
-          fixes << Fix.new(
-            description: fix_description(:PREFIX_EXPLICIT_OWNERSHIP_COST, keyword: "CLONE"),
-            confidence: :interactive,
-            edits: [Edit.new(
-              span: Span.new(file: nil, line: source_node.token.line, col: source_node.token.column, length: 0),
-              replacement: "CLONE ",
-            )],
-          )
-        end
-        fixable!(mutation, code: :INFERRED_ALIAS_MUTATION, detail: detail,
-          category: :ownership, level: :error, fixes: fixes, raise_in_collector: true)
-        true
       end
 
       sig { params(node: AST::VarDecl).void }
@@ -634,7 +665,6 @@ module Annotator
         owner&.mark_read(node.name)
         node.symbol = owner&.entry_for_write(node.name)
         record_capture_identifier!(node)
-        (T.unsafe(node).ownership_alias_releases || []).each { |borrower| ownership_graph.release_borrow(borrower) }
         node.symbol
       end
 
@@ -779,9 +809,6 @@ module Annotator
       def visit_Assignment(node)
         T.bind(self, SemanticAnnotator)
 
-        (T.unsafe(node).ownership_alias_releases_before || []).each do |borrower|
-          ownership_graph.release_borrow(borrower)
-        end
 
         # If the assignment target is a `@locked` / `@writeLocked` field
         # write (e.g. `c.value = c.value + 1`), the auto-lock path emits
@@ -864,10 +891,10 @@ module Annotator
         end
 
         expected_type = scope.resolve_full_type(var_name)
-        owned = if node.value.is_a?(AST::Identifier) && T.unsafe(node.value).ownership_future_use == true
-          ensure_owned_value!(node.value, expected_type, "binding '#{var_name}'", container_alloc: node.storage || :heap)
+        if language_mode != :strict && node.value.is_a?(AST::Identifier) &&
+            !node.value.full_type!(context: "pending binding assignment").implicitly_copyable? { |name| lookup_type_schema(name) }
+          T.unsafe(node.value).ownership_pending_transfer = true
         end
-        node.value = owned if owned
         validate_assignment_type(node, scope.resolve_type(var_name), node.value.resolved_type)
         stamp_type!(node, scope.resolve_type(var_name))
         scope.resolve_entry(var_name)&.reassigned = true
@@ -912,10 +939,10 @@ module Annotator
           end
         end
 
-        owned = if assignment_node.value.is_a?(AST::Identifier) && T.unsafe(assignment_node.value).ownership_future_use == true
-          ensure_owned_value!(assignment_node.value, assign_type, "indexed collection element")
+        if language_mode != :strict && assignment_node.value.is_a?(AST::Identifier) &&
+            !assignment_node.value.full_type!(context: "pending indexed assignment").implicitly_copyable? { |name| lookup_type_schema(name) }
+          T.unsafe(assignment_node.value).ownership_pending_transfer = true
         end
-        assignment_node.value = owned if owned
 
         validate_assignment_type(assignment_node, assign_type, assignment_node.value.resolved_type)
 
@@ -972,10 +999,10 @@ module Annotator
         if field_node.safe_nav_chain == true && assignment_field_type.optional?
           assignment_field_type = T.must(assignment_field_type.wrapped_type)
         end
-        owned = if assignment_node.value.is_a?(AST::Identifier) && T.unsafe(assignment_node.value).ownership_future_use == true
-          ensure_owned_value!(assignment_node.value, assignment_field_type, "field '#{field_node.field}'")
+        if language_mode != :strict && assignment_node.value.is_a?(AST::Identifier) &&
+            !assignment_node.value.full_type!(context: "pending field assignment").implicitly_copyable? { |name| lookup_type_schema(name) }
+          T.unsafe(assignment_node.value).ownership_pending_transfer = true
         end
-        assignment_node.value = owned if owned
         validate_assignment_type(
           assignment_node,
           assignment_field_type,

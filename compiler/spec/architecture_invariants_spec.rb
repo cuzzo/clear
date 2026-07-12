@@ -147,6 +147,23 @@ RSpec.describe "architecture invariants: annotator shell" do
   end
 end
 
+RSpec.describe "architecture invariants: ownership transport facts" do
+  it "records ownership facts through normal annotation without a custom AST walker" do
+    facts = File.read(File.join(ARCH_ROOT, "compiler/ruby/semantic/ownership_transport.rb"))
+    annotator = File.read(File.join(ARCH_ROOT, "compiler/ruby/annotator/annotator.rb"))
+    finalizer = File.read(File.join(ARCH_ROOT, "compiler/ruby/annotator/domains/variables.rb"))
+    finalization_methods = finalizer[/def finalize_ownership_transport_facts!.*?(?=sig \{ params\(node: DeclarationNode)/m]
+
+    expect(facts).not_to match(/AST\.(?:each_child_node|each_locatable|each_wrapped_node|wrapped_children)/)
+    expect(facts).not_to include("OwnershipTransportPlanner")
+    expect(annotator).to include("record_ownership_transport_fact!(node)")
+    expect(annotator).to include("signature.params.each_with_index")
+    expect(finalization_methods).not_to match(/visit\((?:node\.value|wrapper)\)/)
+    expect(finalizer).to include("finish_previsited_copy!")
+    expect(finalizer).to include("finish_previsited_clone!")
+  end
+end
+
 RSpec.describe "architecture invariants: MIR pass order" do
   def source(rel)
     File.read(File.join(ARCH_ROOT, rel))

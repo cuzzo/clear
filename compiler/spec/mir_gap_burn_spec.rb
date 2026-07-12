@@ -4084,7 +4084,11 @@ RSpec.describe "MIR gap-burn characterization" do
     expect(field_result).to be_a(MIR::ScopeBlock)
     expect(field_result.body.map(&:class)).to eq([MIR::ExprStmt, MIR::Set])
     expect(field_result.body.first.expr.callee).to eq("CheatLib.cleanup")
-    expect(field_result.body.last.value).to be_a(MIR::RcRetain)
+    expect(field_result.body.last.value).to be_a(MIR::Ident)
+    field_pending = field_low.send(:flush_pending)
+    retained = field_pending.grep(MIR::Let).find { |stmt| stmt.init.is_a?(MIR::RcRetain) }
+    expect(retained).not_to be_nil
+    expect(field_result.body.last.value.name).to eq(retained.name)
 
     direct_low = lowering
     direct_low.define_singleton_method(:lower) do |node|

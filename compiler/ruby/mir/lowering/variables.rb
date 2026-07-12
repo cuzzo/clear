@@ -692,6 +692,7 @@ module MIRLoweringVariables
 
   sig { params(value: AST::GetField).returns(T::Boolean) }
   def field_access_moves_owner?(value)
+    return false if AST.container_borrow?(value)
     return true if AST.moved?(value)
     return true if value.respond_to?(:indirect_field) && value.indirect_field == true
 
@@ -1404,17 +1405,22 @@ module MIRLoweringVariables
   sig { params(node: AST::Assignment).returns(MIR::ScopeBlock) }
   def lower_field_assignment_with_cleanup(node)
     T.bind(self, MIRLowering) rescue nil
-    target = lower(node.name.target)
-    field = node.name.field.to_s
     # Field cleanup uses the container binding's finalized placement.
     alloc_sym = placement_for_node(root_receiver_node(node.name) || node.name)
+    receiver_type = Type.from_node!(node.name.target, context: "field assignment receiver")
+    # @node payloads outlive the compact handle's local frame. Their managed
+    # fields always belong to the node store's heap-backed lifetime domain.
+    alloc_sym = :heap if receiver_type.node_reference?
     value = with_decl_alloc(alloc_sym) do
       lowered = lower(node.value)
       place_value_for_destination(lowered, node.value, alloc_sym, node.name.full_type!)
     end
     value = materialize_owned_sink_value(value, node.value, alloc_sym)
+    value = hoist_alloc(value, node.value, err_cleanup: true) if mir_allocates?(value)
     alloc = MIR::AllocatorRef.new(alloc_sym)
-    field_get = MIR::FieldGet.new(target, field)
+    # Lower the complete field path so @node receivers resolve through their
+    # store (and @shared:node through its guard) before mutation.
+    field_get = T.cast(lower(node.name), MIR::Emittable)
     # The field name is known statically; comptime resolves the type from the
     # binding's actual shape at emission.
     type_expr = MIR::TypeOf.new(field_get)

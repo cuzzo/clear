@@ -464,6 +464,10 @@ def run_positive_files(entries, out_dir, default_workers)
 
         path = entry[:path]
         out, status = Open3.capture2e(clear, 'test', path)
+        # Crashing native tests may include arbitrary bytes in diagnostics.
+        # Preserve fail-complete execution instead of letting one worker die
+        # while classifying the captured output.
+        out = out.scrub
         compile_error = out.include?('MIR ownership verification failed') ||
                         out.include?('[Compiler Error]') ||
                         out.include?('Transpilation failed') ||

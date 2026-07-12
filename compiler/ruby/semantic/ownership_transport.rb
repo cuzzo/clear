@@ -4,9 +4,7 @@
 require "sorbet-runtime"
 require "set"
 
-# Immutable semantic decision for one implicit ownership operation. DEFAULT
-# and EASY consume the plan. STRICT may retain it for explanations and fixes,
-# but preserves explicit affine lowering instead of applying inference.
+# Final contract consumed by annotation, MIR ownership dataflow, and lowering.
 class OwnershipTransportPlan < T::Struct
   const :action, Symbol
   const :source, String
@@ -17,182 +15,267 @@ class OwnershipTransportPlan < T::Struct
   const :hidden_cost, T.nilable(Symbol), default: nil
 end
 
-class OwnershipTransportPlanner
+# Facts are emitted by the normal semantic visitor after binding resolution.
+# There is intentionally no AST walker here: identifiers are keyed by their
+# SymbolEntry binding id, and mutable calls arrive only after exact signature
+# resolution has identified MUTABLE parameters.
+class OwnershipTransportFacts
   extend T::Sig
 
-  Event = Struct.new(:node, :ancestors, :ordinal)
-  sig { params(body: T.any(AST::Node, T::Array[AST::Node]), parameter_names: T::Set[String], language_mode: Symbol).void }
-  def self.plan!(body, parameter_names: Set.new, language_mode: :default)
-    roots = body.is_a?(Array) ? body : [body]
-    events = T.let([], T::Array[Event])
-    roots.each { |root| collect(root, [], events) }
-    stamp_future_uses!(events)
-    stamp_alias_plans!(events, parameter_names)
-    nil
+  class Event < T::Struct
+    const :node, AST::Node
+    const :binding_id, Integer
+    const :ordinal, Integer
+    const :ancestors, T::Array[AST::Node]
+    const :escape, T::Boolean, default: false
   end
 
-  sig { params(node: AST::Node, ancestors: T::Array[AST::Node], events: T::Array[Event]).void }
-  def self.collect(node, ancestors, events)
-    events << Event.new(node, ancestors.freeze, events.length)
-    return if node.is_a?(AST::FunctionDef)
-
-    next_ancestors = ancestors + [node]
-    AST.each_child_node(node) { |child| collect(child, next_ancestors, events) }
+  class Alias < T::Struct
+    const :declaration, T.any(AST::VarDecl, AST::BindExpr)
+    const :source, AST::Node
+    const :source_id, Integer
+    const :destination_id, Integer
+    const :source_name, String
+    const :destination_name, String
+    const :root_id, Integer
+    const :root_name, String
+    const :ordinal, Integer
+    const :ancestors, T::Array[AST::Node]
+    const :whole_binding, T::Boolean
   end
-  private_class_method :collect
 
-  sig { params(events: T::Array[Event]).void }
-  def self.stamp_future_uses!(events)
-    last = T.let({}, T::Hash[String, Integer])
-    events.each do |event|
-      node = event.node
-      last[node.name] = event.ordinal if node.is_a?(AST::Identifier)
+  class Decision < T::Struct
+    const :alias_fact, Alias
+    const :plan, OwnershipTransportPlan
+  end
+
+  class Transfer < T::Struct
+    const :container, AST::Node
+    const :slot, T.any(Integer, String)
+    const :source, AST::Identifier
+    const :source_id, Integer
+    const :ordinal, Integer
+  end
+
+  class TransferDecision < T::Struct
+    const :transfer, Transfer
+    const :materialize, T::Boolean
+  end
+
+  sig { params(parameter_ids: T::Set[Integer]).void }
+  def initialize(parameter_ids: Set.new)
+    @parameter_ids = T.let(parameter_ids, T::Set[Integer])
+    @reads = T.let([], T::Array[Event])
+    @mutations = T.let([], T::Array[Event])
+    @aliases = T.let([], T::Array[Alias])
+    @transfers = T.let([], T::Array[Transfer])
+    @alias_roots = T.let({}, T::Hash[Integer, [Integer, String]])
+    @ordinal = T.let(0, Integer)
+  end
+
+  sig { params(node: AST::Node).returns(T::Boolean) }
+  def self.source?(node)
+    node.is_a?(AST::Identifier) || node.is_a?(AST::GetField) || node.is_a?(AST::GetIndex)
+  end
+
+  sig { params(node: AST::Node).returns(String) }
+  def self.source_display(node)
+    case node
+    when AST::Identifier
+      node.name
+    when AST::GetField
+      "#{source_display(node.target)}.#{node.field}"
+    when AST::GetIndex
+      "#{source_display(node.target)}[...]"
+    else
+      "value"
     end
-    events.each do |event|
-      node = event.node
-      next unless node.is_a?(AST::Identifier)
-      T.unsafe(node).ownership_future_use = T.must(last[node.name]) > event.ordinal
-    end
   end
-  private_class_method :stamp_future_uses!
 
-  sig { params(events: T::Array[Event], parameter_names: T::Set[String]).void }
-  def self.stamp_alias_plans!(events, parameter_names)
-    declared = parameter_names.dup
-    alias_roots = T.let({}, T::Hash[String, String])
-    events.each do |event|
-      node = event.node
-      next unless node.is_a?(AST::VarDecl) || node.is_a?(AST::BindExpr)
-      # BindExpr also represents language-defined borrows such as
-      # `IF values[i] AS item`. Those already have precise, construct-specific
-      # ownership rules and must never be reinterpreted as a plain alias.
-      next if node.is_a?(AST::BindExpr) && event.ancestors.any? { |ancestor| ancestor.is_a?(AST::IfBind) }
-      # BG/lambda bodies have their own capture and escape contracts. A local
-      # declaration inside one is not an escape merely because the enclosing
-      # execution boundary itself escapes.
-      next if event.ancestors.any? do |ancestor|
-        ancestor.is_a?(AST::BgBlock) || ancestor.is_a?(AST::BgStreamBlock) || ancestor.is_a?(AST::LambdaLit)
-      end
-      destination = node.name.to_s
-      declared.add(destination)
-      source_node = node.value
-      next unless source_node.is_a?(AST::Identifier)
+  sig { returns(Integer) }
+  def next_ordinal
+    value = @ordinal
+    @ordinal += 1
+    value
+  end
 
-      source = source_node.name
-      alias_root = alias_roots.fetch(source, source)
-      # The declaration event precedes its RHS children in the preorder list;
-      # those identifiers are the current transfer, not future uses.
-      later = events.drop(event.ordinal + 1).reject { |candidate| candidate.ancestors.include?(node) }
-      source_uses = later.select do |candidate|
-        identifier_named?(candidate.node, source) || identifier_named?(candidate.node, alias_root)
-      end
-      destination_uses = later.select { |candidate| identifier_named?(candidate.node, destination) }
-      if source_uses.empty? && !parameter_names.include?(source) && !alias_roots.key?(source)
-        T.unsafe(node).ownership_transport_plan = OwnershipTransportPlan.new(
-          action: :move, source: source, destination: destination, alias_root: alias_root,
-        )
-        next
-      end
+  sig { params(node: AST::Identifier, ancestors: T::Array[AST::Node]).void }
+  def record_read(node, ancestors)
+    id = binding_id(node)
+    return unless id
+    @reads << Event.new(
+      node: node,
+      binding_id: id,
+      ordinal: next_ordinal,
+      ancestors: ancestors.dup.freeze,
+      escape: ancestors.any? { |ancestor| escape_ancestor?(ancestor) },
+    )
+  end
 
-      last_alias_event = destination_uses.last
-      last_alias = last_alias_event&.node
-      if last_alias.is_a?(AST::Identifier)
-        releases = T.unsafe(last_alias).ownership_alias_releases || []
-        T.unsafe(last_alias).ownership_alias_releases = releases + [destination]
+  sig { params(node: AST::Node, identifier: AST::Identifier, ancestors: T::Array[AST::Node]).void }
+  def record_mutation(node, identifier, ancestors)
+    id = binding_id(identifier)
+    return unless id
+    record_mutation_id(node, id, ancestors)
+  end
+
+  sig { params(node: AST::Node, binding_id: Integer, ancestors: T::Array[AST::Node]).void }
+  def record_mutation_id(node, binding_id, ancestors)
+    @mutations << Event.new(
+      node: node,
+      binding_id: binding_id,
+      ordinal: next_ordinal,
+      ancestors: ancestors.dup.freeze,
+    )
+  end
+
+  sig { params(node: T.any(AST::VarDecl, AST::BindExpr), ancestors: T::Array[AST::Node]).void }
+  def record_alias(node, ancestors)
+    source = node.value
+    symbol = node.respond_to?(:symbol) ? T.unsafe(node).symbol : nil
+    return unless self.class.source?(source) && symbol.is_a?(SymbolEntry)
+    root = source_root_identifier(source)
+    return unless root
+    source_id = binding_id(root)
+    return unless source_id
+    source_name = self.class.source_display(source)
+    root_id, root_name = @alias_roots.fetch(source_id, [source_id, source_name])
+    fact = Alias.new(
+      declaration: node,
+      source: source,
+      source_id: source_id,
+      destination_id: symbol.binding_id,
+      source_name: source_name,
+      destination_name: node.name.to_s,
+      root_id: root_id,
+      root_name: root_name,
+      ordinal: next_ordinal,
+      ancestors: ancestors.dup.freeze,
+      whole_binding: source.is_a?(AST::Identifier),
+    )
+    @aliases << fact
+    @alias_roots[symbol.binding_id] = [root_id, root_name]
+  end
+
+  sig { params(container: AST::Node, slot: T.any(Integer, String), source: AST::Identifier).void }
+  def record_transfer(container, slot, source)
+    id = binding_id(source)
+    return unless id
+    @transfers << Transfer.new(
+      container: container,
+      slot: slot,
+      source: source,
+      source_id: id,
+      ordinal: next_ordinal,
+    )
+  end
+
+  sig { returns(T::Array[Decision]) }
+  def decisions
+    @aliases.map do |fact|
+      source_reads = @reads.select do |event|
+        event.ordinal > fact.ordinal && (event.binding_id == fact.source_id || event.binding_id == fact.root_id)
       end
-      # Direct assignments are syntactically unambiguous here. Calls are
-      # deliberately checked later, after normal overload resolution has
-      # selected the exact stdlib or user FunctionSignature.
-      mutations = later.select { |candidate| mutation_of?(candidate.node, alias_root, destination) }
+      destination_reads = @reads.select do |event|
+        event.ordinal > fact.ordinal && event.binding_id == fact.destination_id
+      end
+      mutations = @mutations.select do |event|
+        event.ordinal > fact.ordinal && [fact.source_id, fact.root_id, fact.destination_id].include?(event.binding_id)
+      end
       conflict = mutations.find do |mutation|
-        destination_uses.any? do |use|
-          ((use.ordinal > mutation.ordinal) || loop_backedge_reaches?(event, mutation, use)) &&
+        counterpart_reads = if mutation.binding_id == fact.destination_id
+          source_reads
+        else
+          destination_reads
+        end
+        counterpart_reads.any? do |use|
+          ((use.ordinal > mutation.ordinal) || loop_backedge_reaches?(fact, mutation, use)) &&
             !mutually_exclusive?(mutation, use)
         end
       end
-      # NLL across branches: if a mutation can only execute on paths where the
-      # alias has no later use, release that branch's borrow before the write.
-      mutations.each do |mutation|
-        next if destination_uses.any? do |use|
-          ((use.ordinal > mutation.ordinal) || loop_backedge_reaches?(event, mutation, use)) &&
-            !mutually_exclusive?(mutation, use)
-        end
-        next unless mutation.node.is_a?(AST::Assignment)
-        releases = T.unsafe(mutation.node).ownership_alias_releases_before || []
-        T.unsafe(mutation.node).ownership_alias_releases_before = releases + [destination]
+      last_alias = destination_reads.last&.node
+      escapes = destination_reads.any?(&:escape)
+      action = if fact.whole_binding && source_reads.empty? && !@parameter_ids.include?(fact.source_id) && !@alias_roots.key?(fact.source_id)
+        :move
+      elsif escapes
+        :materialize
+      else
+        :borrow
       end
-      escapes = destination_uses.any? { |candidate| escape_use?(candidate) }
-      T.unsafe(node).ownership_transport_plan = OwnershipTransportPlan.new(
-        action: escapes ? :materialize : :borrow,
-        source: source,
-        destination: destination,
-        alias_root: alias_root,
-        last_alias_use: last_alias.is_a?(AST::Identifier) ? last_alias : nil,
-        conflicting_mutation: conflict&.node,
-        hidden_cost: escapes ? :copy_or_retain : nil,
+      Decision.new(
+        alias_fact: fact,
+        plan: OwnershipTransportPlan.new(
+          action: action,
+          source: fact.source_name,
+          destination: fact.destination_name,
+          alias_root: fact.root_name,
+          last_alias_use: last_alias.is_a?(AST::Identifier) ? last_alias : nil,
+          conflicting_mutation: conflict&.node,
+          hidden_cost: action == :materialize ? :copy_or_retain : nil,
+        ),
       )
-      alias_roots[destination] = alias_root unless escapes
     end
   end
-  private_class_method :stamp_alias_plans!
 
-  sig { params(node: AST::Node, name: String).returns(T::Boolean) }
-  def self.identifier_named?(node, name)
-    node.is_a?(AST::Identifier) && node.name == name
-  end
-  private_class_method :identifier_named?
 
-  sig { params(node: AST::Node, source: String, destination: String).returns(T::Boolean) }
-  def self.mutation_of?(node, source, destination)
-    names = Set[source, destination]
-    if node.is_a?(AST::Assignment) || node.is_a?(AST::BindExpr)
-      root = AST.root_identifier(node.name) rescue nil
-      assigned = root&.name || (node.name.is_a?(String) ? node.name : nil)
-      return true if assigned && names.include?(assigned.to_s)
-    end
-    false
-  end
-  private_class_method :mutation_of?
-
-  sig { params(event: Event).returns(T::Boolean) }
-  def self.escape_use?(event)
-    event.ancestors.any? do |ancestor|
-      ancestor.is_a?(AST::ReturnNode) || ancestor.is_a?(AST::BgBlock) ||
-        ancestor.is_a?(AST::BgStreamBlock) || ancestor.is_a?(AST::LambdaLit)
+  sig { returns(T::Array[TransferDecision]) }
+  def transfer_decisions
+    @transfers.map do |transfer|
+      later_read = @reads.any? do |event|
+        event.ordinal > transfer.ordinal && event.binding_id == transfer.source_id
+      end
+      TransferDecision.new(transfer: transfer, materialize: later_read)
     end
   end
-  private_class_method :escape_use?
+
+  private
+
+  sig { params(node: AST::Identifier).returns(T.nilable(Integer)) }
+  def binding_id(node)
+    symbol = node.symbol
+    symbol.is_a?(SymbolEntry) ? symbol.ownership_binding_id : nil
+  end
+
+  sig { params(node: AST::Node).returns(T.nilable(AST::Identifier)) }
+  def source_root_identifier(node)
+    root = AST.root_identifier(node)
+    root.is_a?(AST::Identifier) ? root : nil
+  end
+
+  sig { params(node: AST::Node).returns(T::Boolean) }
+  def escape_ancestor?(node)
+    node.is_a?(AST::ReturnNode) || node.is_a?(AST::BgBlock) ||
+      node.is_a?(AST::BgStreamBlock) || node.is_a?(AST::LambdaLit)
+  end
 
   sig { params(left: Event, right: Event).returns(T::Boolean) }
-  def self.mutually_exclusive?(left, right)
-    shared = left.ancestors.select { |ancestor| ancestor.is_a?(AST::IfStatement) }
-    shared.any? do |conditional|
+  def mutually_exclusive?(left, right)
+    left.ancestors.filter_map do |node|
+      node if node.is_a?(AST::IfStatement)
+    end.any? do |conditional|
       left_side = conditional_side(left, conditional)
       right_side = conditional_side(right, conditional)
       left_side && right_side && left_side != right_side
     end
   end
-  private_class_method :mutually_exclusive?
 
   sig { params(event: Event, conditional: AST::IfStatement).returns(T.nilable(Symbol)) }
-  def self.conditional_side(event, conditional)
+  def conditional_side(event, conditional)
     index = event.ancestors.index(conditional)
     return nil unless index
     child = event.ancestors[index + 1] || event.node
     return :then if conditional.then_branch.include?(child)
     return :else if conditional.else_branch.include?(child)
-
     nil
   end
-  private_class_method :conditional_side
 
-  sig { params(declaration: Event, mutation: Event, use: Event).returns(T::Boolean) }
-  def self.loop_backedge_reaches?(declaration, mutation, use)
+  sig { params(declaration: Alias, mutation: Event, use: Event).returns(T::Boolean) }
+  def loop_backedge_reaches?(declaration, mutation, use)
     mutation.ancestors.any? do |ancestor|
       loop_node = ancestor.is_a?(AST::WhileLoop) || ancestor.is_a?(AST::WhileBindLoop) ||
         ancestor.is_a?(AST::ForRange) || ancestor.is_a?(AST::ForEach)
-      loop_node && use.ancestors.include?(ancestor) && !declaration.ancestors.include?(ancestor)
+      loop_node && use.ancestors.include?(ancestor) &&
+        !declaration.ancestors.include?(ancestor)
     end
   end
-  private_class_method :loop_backedge_reaches?
 end

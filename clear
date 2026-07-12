@@ -32,6 +32,7 @@ require 'digest'
 require 'set'
 require 'json'
 require 'rbconfig'
+require 'open3'
 require_relative 'compiler/ruby/tools/clear_build_support'
 require_relative 'tools/zig_coverage_support'
 
@@ -200,6 +201,7 @@ end
 # Build: transpile + compile
 # -------------------------------------------------------------------------
 def do_build(source, output: nil, opt_level: 'Debug', extra_flags: [], module_mode: false, default_stack: nil, profile: false, profile_max: nil, strict_test: false, force: false, exact_tiers: nil, use_c_allocator: false, use_debug_allocator: false, main_tier: nil, bypass_transpile_cache: false, zig_coverage: false, zig_coverage_suite: 'clear-cli', zig_coverage_name: nil, zig_coverage_run_dir: nil, ownership_mode: :default)
+  invocation_cwd = Dir.pwd
   error "File not found: #{source}" unless File.exist?(source)
   source = File.expand_path(source)
   source_dir = File.dirname(source)
@@ -420,6 +422,18 @@ def do_build(source, output: nil, opt_level: 'Debug', extra_flags: [], module_mo
 
   cmd_parts += [tmp_name, *RUNTIME_FILES]
   cmd_parts += ['-lc']
+  if module_mode && !coverage_module_mode
+    # Zig runs test binaries from its compilation directory. CLEAR programs
+    # resolve relative filesystem paths from the user's invocation directory,
+    # so preserve that cwd explicitly for isolated `clear test file.clear`.
+    cmd_parts += [
+      '--test-cmd', RbConfig.ruby,
+      '--test-cmd', '-e',
+      '--test-cmd', 'cwd = ARGV.shift; binary = File.expand_path(ARGV.shift); Dir.chdir(cwd) { exec(binary, *ARGV) }',
+      '--test-cmd', invocation_cwd,
+      '--test-cmd-bin',
+    ]
+  end
   extra_link_libs = ENV.fetch('CLEAR_EXTRA_LINK_LIBS', '').split(/[,\s]+/).reject(&:empty?)
   extra_link_libs.each do |lib|
     error "Invalid CLEAR_EXTRA_LINK_LIBS entry: #{lib}" unless lib.match?(/\A[A-Za-z0-9_.+\-]+\z/)
@@ -433,7 +447,6 @@ def do_build(source, output: nil, opt_level: 'Debug', extra_flags: [], module_mo
     cmd_parts += ['--name', bin_name]
   end
 
-  cmd = cmd_parts.join(' ')
   if coverage_module_mode
     compile_output, compile_status = ZigCoverageSupport.run_zig_test(
       zig: ZIG,
@@ -445,8 +458,8 @@ def do_build(source, output: nil, opt_level: 'Debug', extra_flags: [], module_mo
     )
     success = compile_status.success?
   else
-    compile_output = `cd #{build_dir} && #{cmd} 2>&1`
-    success = $?.success?
+    compile_output, compile_status = Open3.capture2e(*cmd_parts, chdir: build_dir)
+    success = compile_status.success?
   end
 
   # Move binary to output location (zig puts it in the build dir)
@@ -1087,6 +1100,16 @@ when 'test'
     else
       tag_filters.each { |t| cmd_parts += ['--test-filter', "##{t}"] }
     end
+    unless coverage_mode
+      invocation_cwd = Dir.pwd
+      cmd_parts += [
+        '--test-cmd', RbConfig.ruby,
+        '--test-cmd', '-e',
+        '--test-cmd', 'cwd = ARGV.shift; binary = File.expand_path(ARGV.shift); Dir.chdir(cwd) { exec(binary, *ARGV) }',
+        '--test-cmd', invocation_cwd,
+        '--test-cmd-bin',
+      ]
+    end
     if coverage_mode
       compile_output, compile_status = ZigCoverageSupport.run_zig_test(
         zig: ZIG,
@@ -1099,9 +1122,8 @@ when 'test'
       success = compile_status.success?
       cleanup_paths.each { |path| FileUtils.rm_f(path) } unless ENV['ZIG_COVERAGE_KEEP_BUNDLE'] == '1'
     else
-      cmd = cmd_parts.join(' ')
-      compile_output = `cd #{build_dir} && #{cmd} 2>&1`
-      success = $?.success?
+      compile_output, compile_status = Open3.capture2e(*cmd_parts, chdir: build_dir)
+      success = compile_status.success?
       FileUtils.rm_rf(build_dir)
     end
 

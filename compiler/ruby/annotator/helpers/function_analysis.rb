@@ -99,12 +99,13 @@ module FunctionAnalysis
       with_routine_analysis_scope(node) do
         declare_and_verify_params(node)
         declare_captures(node)
-        parameter_names = node.respond_to?(:params) ? node.params.map { |param| param.name.to_s }.to_set : Set.new
-        OwnershipTransportPlanner.plan!(
-          body,
-          parameter_names: parameter_names,
-          language_mode: language_mode,
-        )
+        parameter_ids = if node.respond_to?(:params)
+          node.params.filter_map { |param| current_scope.resolve_entry(param.name.to_s)&.binding_id }.to_set
+        else
+          Set.new
+        end
+        transport_facts = OwnershipTransportFacts.new(parameter_ids: parameter_ids)
+        phase_receiver_state.ownership_transport_frames << transport_facts unless language_mode == :strict
 
         # PRE clauses run at function entry -- visit them with parameters in
         # scope so each predicate type-checks and resolves identifiers
@@ -112,10 +113,18 @@ module FunctionAnalysis
         # locals can't leak into the predicate's symbol scope.
         visit_pre_clauses!(node) if node.is_a?(AST::FunctionDef)
 
-        if body.is_a?(Array)
-          visit_stmts(body)
-        else
-          visit(body)
+        begin
+          if body.is_a?(Array)
+            visit_stmts(body)
+          else
+            visit(body)
+          end
+          finalize_ownership_transport_facts!(transport_facts) unless language_mode == :strict
+        ensure
+          unless language_mode == :strict
+            popped = phase_receiver_state.ownership_transport_frames.pop
+            Kernel.raise "BUG: ownership transport fact frame mismatch" unless popped.equal?(transport_facts)
+          end
         end
 
         # DEBUG_POST clauses run AFTER the body is annotated (return type
@@ -681,25 +690,8 @@ module FunctionAnalysis
     end
     return unless facts.param.takes || facts.is_give
 
-    inferred_materialized = T.let(false, T::Boolean)
     inner_identifier = facts.inner_node.is_a?(AST::Identifier) ? T.cast(facts.inner_node, AST::Identifier) : nil
-    if language_mode != :strict && !facts.is_give && inner_identifier &&
-        T.unsafe(inner_identifier).ownership_future_use == true &&
-        !inner_identifier.full_type!(context: "implicit TAKES copyability").implicitly_copyable? { |name| lookup_type_schema(name) } &&
-        !facts.arg_node.is_a?(AST::CopyNode) && !facts.arg_node.is_a?(AST::CloneNode)
-      source_type = inner_identifier.full_type!(context: "implicit TAKES transport")
-      keyword = source_type.any_rc? || source_type.split? ? "CLONE" : "COPY"
-      owned_arg = if keyword == "CLONE"
-        AST::CloneNode.new(inner_identifier.token, inner_identifier)
-      else
-        AST::CopyNode.new(inner_identifier.token, inner_identifier)
-      end
-      visit(owned_arg)
-      facts.site.replace_arg!(facts.index, owned_arg)
-      inferred_materialized = true
-    end
-
-    verify_owned_takes_argument!(facts) unless inferred_materialized
+    verify_owned_takes_argument!(facts)
     container_alloc = receiver_container_alloc(facts.site.node) || :heap
     # Explicit GIVE suppresses lifetime-driven auto-materialization, but it
     # must retain the existing representation conversion for frame lists and
@@ -708,7 +700,7 @@ module FunctionAnalysis
     inner_type = facts.inner_node.full_type!(context: "TAKES representation transport")
     give_needs_representation_copy = facts.is_give &&
       (inner_type.list_collection? || (inner_type.string? && inner_type.rodata?))
-    owned = if inferred_materialized || (facts.is_give && !give_needs_representation_copy)
+    owned = if facts.is_give && !give_needs_representation_copy
       nil
     else
       ensure_owned_value!(facts.inner_node, facts.param.type, nil, container_alloc: container_alloc)
@@ -716,7 +708,14 @@ module FunctionAnalysis
     facts.site.replace_arg!(facts.index, owned) if owned
     current_arg = facts.site.args[facts.index]
     current_arg.alloc = container_alloc if current_arg.is_a?(AST::CopyNode) && container_alloc != :heap
-    return if inferred_materialized || owned
+    return if owned
+
+    if language_mode != :strict && !facts.is_give && inner_identifier &&
+        !inner_identifier.full_type!(context: "pending TAKES transport").implicitly_copyable? { |name| lookup_type_schema(name) } &&
+        !facts.arg_node.is_a?(AST::CopyNode) && !facts.arg_node.is_a?(AST::CloneNode)
+      T.unsafe(inner_identifier).ownership_pending_transfer = true
+      return
+    end
 
     move_if_takes_ownership!(
       facts.inner_node,
@@ -994,7 +993,6 @@ module FunctionAnalysis
     return true if !arg_node.is_a?(AST::Identifier)
 
     if param.mutable && !ownership_graph.can_write?(arg_node.name)
-      reject_inferred_alias_call_mutation!(arg_node, arg_node.name)
       error!(arg_node, :MUTABLE_ARG_RESTRICTED, name: arg_node.name)
     end
 
@@ -1254,7 +1252,8 @@ module FunctionAnalysis
     return if captures.nil? || captures.empty?
 
     captures.each do |cap|
-      current_scope.declare(
+      owner_entry = lookup_scope_for(cap.name)&.resolve_entry(cap.name)
+      capture_entry = current_scope.declare(
         cap.name,
         nil,
         cap.type,
@@ -1263,6 +1262,7 @@ module FunctionAnalysis
         nil,
         cap.storage
       )
+      capture_entry.inherit_ownership_identity!(owner_entry) if owner_entry
     end
     nil
   end

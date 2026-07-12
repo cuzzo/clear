@@ -1,28 +1,10 @@
-diff --git a/compiler/ruby/annotator/domains/variables.rb b/compiler/ruby/annotator/domains/variables.rb
---- a/compiler/ruby/annotator/domains/variables.rb
-+++ b/compiler/ruby/annotator/domains/variables.rb
-@@ -426,6 +426,7 @@ module Annotator
-       # resolution has stamped the matched signature's mutates_receiver fact.
-       sig { params(mutation: AST::Node, source: String).returns(T::Boolean) }
-       def reject_inferred_alias_call_mutation!(mutation, source)
-+        return false
-         T.bind(self, SemanticAnnotator)
-         edge = ownership_graph.edges.find do |candidate|
-           candidate.to == source && candidate.kind == :borrows
-diff --git a/compiler/ruby/annotator/helpers/function_analysis.rb b/compiler/ruby/annotator/helpers/function_analysis.rb
---- a/compiler/ruby/annotator/helpers/function_analysis.rb
-+++ b/compiler/ruby/annotator/helpers/function_analysis.rb
-@@ -996,4 +996,4 @@
--    if param.mutable && !ownership_graph.can_write?(arg_node.name)
-+    if false && param.mutable && !ownership_graph.can_write?(arg_node.name)
-       reject_inferred_alias_call_mutation!(arg_node, arg_node.name)
-       error!(arg_node, :MUTABLE_ARG_RESTRICTED, name: arg_node.name)
-     end
-diff --git a/compiler/ruby/annotator/phases/expression_domains.rb b/compiler/ruby/annotator/phases/expression_domains.rb
---- a/compiler/ruby/annotator/phases/expression_domains.rb
-+++ b/compiler/ruby/annotator/phases/expression_domains.rb
-@@ -68,3 +68,4 @@
-       sig { params(node: AST::MethodCall).void }
-       def reject_mutating_borrowed_receiver!(node)
-+        return
-         return unless node.mutates_receiver
+diff --git a/compiler/ruby/semantic/ownership_transport.rb b/compiler/ruby/semantic/ownership_transport.rb
+--- a/compiler/ruby/semantic/ownership_transport.rb
++++ b/compiler/ruby/semantic/ownership_transport.rb
+@@ -101,5 +101,6 @@ class OwnershipTransportFacts
+   sig { params(node: AST::Node, binding_id: Integer, ancestors: T::Array[AST::Node]).void }
+   def record_mutation_id(node, binding_id, ancestors)
++    return
+     @mutations << Event.new(
+       node: node,
+       binding_id: binding_id,

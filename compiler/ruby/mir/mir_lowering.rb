@@ -605,8 +605,8 @@ class MIRLowering
     )
   end
 
-  sig { params(nodes: T::Array[MIR::Node]).returns(T::Array[String]) }
-  def shared_node_store_types_in_mir(nodes)
+  sig { params(nodes: T::Array[MIR::Node], include_bodies: T::Boolean).returns(T::Array[String]) }
+  def shared_node_store_types_in_mir(nodes, include_bodies: true)
     found = T.let(Set.new, T::Set[String])
     pending = T.let(nodes.dup, T::Array[MIR::Node])
     until pending.empty?
@@ -618,7 +618,13 @@ class MIRLowering
       end
       if node.is_a?(MIR::Emittable)
         node.child_exprs.each { |child| pending << child if child.is_a?(MIR::Emittable) }
-        node.body_slots.each { |slot| slot.body.each { |child| pending << child } }
+        # ScopeBlock/BlockExpr bodies are the current statement's inline
+        # evaluation, not nested control-flow statements. Traverse those so a
+        # field assignment's cleanup+set pair shares one guard. Do not descend
+        # into While/If/etc.; their bodies are guarded when lowered.
+        if include_bodies || node.is_a?(MIR::ScopeBlock) || node.is_a?(MIR::BlockExpr)
+          node.body_slots.each { |slot| slot.body.each { |child| pending << child } }
+        end
       end
     end
     found.to_a.sort
@@ -626,7 +632,10 @@ class MIRLowering
 
   sig { params(stmt: LowerableStmt, nodes: T::Array[MIR::Node]).returns(T::Array[MIR::Node]) }
   def guard_shared_node_statement(stmt, nodes)
-    types = shared_node_store_types_in_mir(nodes)
+    # Nested bodies are lowered and guarded statement-by-statement. Looking
+    # through them here would hold an outer guard across an entire loop/branch
+    # and then emit a second same-named guard inside the body.
+    types = shared_node_store_types_in_mir(nodes, include_bodies: false)
     return nodes if types.empty?
 
     write = stmt.is_a?(AST::Assignment) || stmt.is_a?(AST::MethodCall) ||
@@ -659,12 +668,36 @@ class MIRLowering
       ))
     end
 
-    access_nodes = nodes.select { |node| !shared_node_store_types_in_mir([node]).empty? }
+    access_nodes = nodes.select do |node|
+      !shared_node_store_types_in_mir([node], include_bodies: false).empty?
+    end
     if access_nodes.length == 1 && access_nodes.first.is_a?(MIR::Let)
       binding = T.cast(access_nodes.first, MIR::Let)
       label = "__shared_node_access_#{lowering_counters.next_tmp_id}"
       original_init = binding.init
-      block = MIR::BlockExpr.new(label, prefix + [MIR::BreakStmt.new(label, original_init)])
+      body = T.let(prefix, T::Array[MIR::Node])
+      if mir_allocates?(original_init)
+        value_name = "__shared_node_value_#{lowering_counters.next_tmp_id}"
+        value_type = if original_init.respond_to?(:result_type) && T.unsafe(original_init).result_type
+          Type.new(T.unsafe(original_init).result_type)
+        else
+          binding.annotation || Type.new(:Any)
+        end
+        value_alloc = mir_owned_alloc(original_init) || :heap
+        materialized = MIR::BindingMaterialization.new(
+          name: value_name,
+          expr: original_init,
+          alloc: value_alloc,
+          type_info: value_type,
+          mutable: false,
+        )
+        body.concat(materialized.statements)
+        body.concat(ownership_transfer_marks(value_name, :block_result, target_alloc: value_alloc))
+        body << MIR::BreakStmt.new(label, MIR::Ident.new(value_name))
+      else
+        body << MIR::BreakStmt.new(label, original_init)
+      end
+      block = MIR::BlockExpr.new(label, body)
       block.result_type = original_init.result_type if original_init.respond_to?(:result_type)
       binding.init = block
       return nodes
@@ -763,6 +796,7 @@ class MIRLowering
 
   sig { params(node: AST::Node).returns(T::Boolean) }
   def owner_transfer_node?(node)
+    return false if AST.container_borrow?(node)
     return true if AST.moved?(node)
     return true if node.is_a?(AST::GetField) && node.indirect_field == true
     return Type.indirect_type?(node.full_type!(context: "owner transfer source")) if node.is_a?(AST::GetField)

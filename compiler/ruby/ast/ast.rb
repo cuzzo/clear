@@ -1849,7 +1849,6 @@ module AST
 	    include Locatable
 	    include StatementVoidType
 	    attr_accessor :auto_lock  # AutoLockPlan set by annotator for inline @locked/@writeLocked guards.
-    attr_accessor :ownership_alias_releases_before
     attr_accessor :field_pre_cleanup  # stamped by MIRPass: Symbol (:heap or :frame) -- the allocator to free the OLD value with before the field overwrite. nil = no pre-cleanup needed.
     # Preserves the source compound operator so atomic targets can lower to
     # fetch_<op> instead of load/modify/store.
@@ -1986,8 +1985,7 @@ module AST
     attr_accessor :fn_ref           # true when the identifier refers to a named function used as a value
     attr_accessor :heap_dupe_result # true when this identifier's value must be heap-duped at use site
     attr_accessor :atomic_borrow    # true when sync=:atomic ident is in fn-arg position (skip load wrap)
-    attr_accessor :ownership_future_use
-    attr_accessor :ownership_alias_releases
+    attr_accessor :ownership_pending_transfer
     sig { returns(FalseClass) }
     def wildcard?; false end
     # ruby-to-clear: data-api

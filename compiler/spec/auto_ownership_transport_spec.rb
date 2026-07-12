@@ -28,6 +28,28 @@ RSpec.describe "automatic ownership transport" do
     expect(zig).not_to match(/cleanupValue\([^\n]*y/)
   end
 
+  it "keeps parent cleanup when a local field view is inferred as a borrow" do
+    zig = transpile(<<~CLEAR)
+      STRUCT Node { value: Int64 }
+      STRUCT Container { node: Node @indirect, id: Int64 }
+      FN makeContainer(v: Int64) RETURNS !Container ->
+        node: Node @indirect = Node{ value: v };
+        RETURN Container{ node: node, id: 1 };
+      END
+      FN main() RETURNS !Void ->
+        container = makeContainer(777);
+        extracted = container.node;
+        ASSERT extracted.value == 777;
+        RETURN;
+      END
+    CLEAR
+
+    expect(zig).to include("cleanup(@TypeOf(container)")
+    expect(zig).to include("cleanup(@TypeOf(extracted)")
+    clear_main = zig.split("fn clearMain", 2).last
+    expect(clear_main).not_to include("container_moved = true")
+  end
+
   it "allows source mutation after the inferred alias last use" do
     expect {
       transpile(<<~CLEAR)
@@ -119,6 +141,24 @@ RSpec.describe "automatic ownership transport" do
     expect { transpile(source) }.to raise_error(/Aliasing Error/)
   end
 
+  it "does not invent a cross-iteration alias when the alias is declared inside the loop" do
+    source = <<~CLEAR
+      STRUCT User { id: Int64, name: String }
+      FN main() RETURNS Void ->
+        MUTABLE i = 0_i64;
+        WHILE i < 2 DO
+          MUTABLE x = User{ id: i, name: "Ada" };
+          y = x;
+          ASSERT y.id == i;
+          x.id = x.id + 1;
+          i = i + 1;
+        END
+      END
+    CLEAR
+
+    expect { transpile(source) }.not_to raise_error
+  end
+
   it "rejects overlapping mutation in DEFAULT and EASY" do
     source = <<~CLEAR
       STRUCT User { id: Int64, name: String }
@@ -197,6 +237,20 @@ RSpec.describe "automatic ownership transport" do
     end
   end
 
+  it "records resolved mutation through a nested place against its root binding" do
+    source = <<~CLEAR
+      STRUCT Holder { values: Int64[]@list, name: String }
+      FN main() RETURNS Void ->
+        MUTABLE holder = Holder{ values: [1], name: "Ada" };
+        snapshot = holder;
+        holder.values.append(2);
+        ASSERT snapshot.values.length() == 1;
+      END
+    CLEAR
+
+    expect { transpile(source) }.to raise_error(/Aliasing Error/m)
+  end
+
   it "rejects mutation through the inferred alias as well as through its source" do
     source = <<~CLEAR
       STRUCT Foo { value: Int64, label: String }
@@ -209,6 +263,20 @@ RSpec.describe "automatic ownership transport" do
     CLEAR
 
     expect { transpile(source) }.to raise_error(/Aliasing Error/m)
+  end
+
+  it "rejects mutation of a field place while an inferred field alias remains live" do
+    source = <<~CLEAR
+      STRUCT Foo { value: String }
+      FN main() RETURNS Void ->
+        MUTABLE x = Foo{ value: COPY "before" };
+        snapshot = x.value;
+        x.value = COPY "after";
+        ASSERT snapshot == "before";
+      END
+    CLEAR
+
+    expect { transpile(source) }.to raise_error(/Aliasing Error.*snapshot.*x\.value/m)
   end
 
   it "rejects mutable alias overlap across pinned and ordinary execution boundaries" do
@@ -250,6 +318,63 @@ RSpec.describe "automatic ownership transport" do
           ASSERT y.value == 1;
           result = NEXT pending;
           ASSERT result == 1;
+          RETURN;
+        END
+      CLEAR
+    }.not_to raise_error
+  end
+
+  it "plans aliases declared inside execution boundaries instead of skipping nested bodies" do
+    source = <<~CLEAR
+      STRUCT Foo { value: Int64, label: String }
+      FN mutate!(MUTABLE value: Foo) RETURNS Void -> value.value = value.value + 1; END
+      FN main() RETURNS !Void ->
+        pending: ~Void = BG {
+          MUTABLE x = Foo{ value: 1, label: "nested" };
+          y = x;
+          mutate!(x);
+          ASSERT y.value == 1;
+        };
+        NEXT pending;
+        RETURN;
+      END
+    CLEAR
+
+    expect { transpile(source) }.to raise_error(/Aliasing Error/m)
+  end
+
+  it "propagates captured-binding mutations out of nested routine fact frames" do
+    source = <<~CLEAR
+      STRUCT Foo { value: Int64, label: String }
+      FN mutate!(MUTABLE value: Foo) RETURNS Void -> value.value = 2_i64; END
+      FN main() RETURNS Void ->
+        MUTABLE x = Foo{ value: 1, label: "outer" };
+        y = x;
+        callback: FN() -> Void = %() USE(MUTABLE x) -> mutate!(x);
+        callback();
+        ASSERT y.value == 1;
+      END
+    CLEAR
+
+    expect { transpile(source) }.to raise_error(/Aliasing Error/m)
+  end
+
+  it "uses binding identities so nested shadowing cannot contaminate outer aliases" do
+    expect {
+      transpile(<<~CLEAR)
+        STRUCT Foo { value: Int64, label: String }
+        STRUCT Point { value: Int64 }
+        FN main() RETURNS !Void ->
+          x = Foo{ value: 1, label: "outer" };
+          y = x;
+          pending: ~Void = BG {
+            MUTABLE x = Point{ value: 2 };
+            snapshot = x;
+            x.value = 3_i64;
+            ASSERT snapshot.value == 2;
+          };
+          ASSERT y.label == "outer";
+          NEXT pending;
           RETURN;
         END
       CLEAR

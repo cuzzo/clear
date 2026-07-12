@@ -154,6 +154,8 @@ class SemanticAnnotator
     prop :effect_state, T.nilable(EffectTracker::EffectState), default: nil
     prop :lock_analysis, LockHelper::LockAnalysisState, factory: -> { LockHelper::LockAnalysisState.new }
     prop :ownership_graph, OwnershipGraph, factory: -> { OwnershipGraph.new }
+    prop :ownership_transport_frames, T::Array[OwnershipTransportFacts], factory: -> { [] }
+    prop :annotation_ancestors, T::Array[AST::Node], factory: -> { [] }
   end
 
   sig { returns(T::Hash[String, AST::FunctionDef]) }
@@ -743,21 +745,94 @@ private
   sig { params(node: T.nilable(AST::Node)).returns(T.untyped) }
   def visit(node)
     return unless node
+    @receiver_state.annotation_ancestors << node
+    begin
+      result = case node
+      when AST::StructDef, AST::ExternStructDecl, AST::EnumDef, AST::UnionDef
+        register_type_declaration(node)
+      when AST::ExternFnDecl
+        register_extern_function_signature(node)
+        nil
+      else
+        method_name = "visit_#{node.class.name.split('::').last}"
+        send(method_name, node)
+      end
+      record_body_fact_node!(node)
+      record_ownership_transport_fact!(node)
+      result
+    ensure
+      popped = @receiver_state.annotation_ancestors.pop
+      Kernel.raise "BUG: annotation ancestor stack mismatch" unless popped.equal?(node)
+    end
+  end
 
-    case node
-    when AST::StructDef, AST::ExternStructDecl, AST::EnumDef, AST::UnionDef
-      return register_type_declaration(node)
-    when AST::ExternFnDecl
-      register_extern_function_signature(node)
+  sig { params(node: AST::Node).void }
+  def record_ownership_transport_fact!(node)
+    return if language_mode == :strict
+    fact_frames = @receiver_state.ownership_transport_frames
+    facts = fact_frames.last
+    return unless facts
+    ancestors = @receiver_state.annotation_ancestors[0...-1] || []
+
+    if node.is_a?(AST::Identifier)
+      fact_frames.each { |frame| frame.record_read(node, ancestors) }
       return
     end
+    if (node.is_a?(AST::VarDecl) || node.is_a?(AST::BindExpr)) &&
+        T.unsafe(node).ownership_transport_plan.is_a?(OwnershipTransportPlan) &&
+        T.unsafe(node).ownership_transport_plan.action == :pending
+      facts.record_alias(node, ancestors)
+    end
 
-    # Dynamic Dispatch
-    method_name = "visit_#{node.class.name.split('::').last}"
-    result = send(method_name, node)
-    record_body_fact_node!(node)
-    result
+    if node.is_a?(AST::Assignment)
+      target = node.name
+      root = if target.is_a?(AST::Identifier) || target.is_a?(AST::GetField) || target.is_a?(AST::GetIndex)
+        AST.root_identifier(target)
+      end
+      if root.is_a?(AST::Identifier)
+        fact_frames.each { |frame| frame.record_mutation(node, root, ancestors) }
+      end
+      value = node.value
+      if value.is_a?(AST::Identifier) && T.unsafe(value).ownership_pending_transfer == true
+        facts.record_transfer(node, "value", value)
+      end
+    elsif node.is_a?(AST::BindExpr) && node.mode != :decl
+      entry = current_scope.resolve_entry(node.name.to_s)
+      if entry
+        fact_frames.each do |frame|
+          frame.record_mutation_id(node, entry.ownership_binding_id, ancestors)
+        end
+      end
+    end
+
+    if node.is_a?(AST::FuncCall) || node.is_a?(AST::MethodCall)
+      signature = node.matched_signature
+      actuals = node.is_a?(AST::MethodCall) ? [node.object] + node.args : node.args
+      if signature
+        signature.params.each_with_index do |param, index|
+          argument = actuals[index]
+          if param.mutable && argument
+            root = AST.root_identifier(argument)
+            if root.is_a?(AST::Identifier)
+              fact_frames.each { |frame| frame.record_mutation(node, root, ancestors) }
+            end
+          end
+        end
+      end
+      actuals.each_with_index do |argument, index|
+        if argument.is_a?(AST::Identifier) && T.unsafe(argument).ownership_pending_transfer == true
+          facts.record_transfer(node, index, argument)
+        end
+      end
+    elsif node.is_a?(AST::StructLit)
+      node.fields.each do |field_name, value|
+        if value.is_a?(AST::Identifier) && T.unsafe(value).ownership_pending_transfer == true
+          facts.record_transfer(node, field_name, value)
+        end
+      end
+    end
   end
+  private :record_ownership_transport_fact!
 
   # Outer scope variable set.
   sig { returns(T::Set[String]) }

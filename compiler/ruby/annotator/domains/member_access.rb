@@ -500,7 +500,11 @@ module Annotator
             val_node.coerced_type = expected_type unless indirect_construction || (nil_value && expected_type.indirect?)
           end
 
-          move_if_not_copyable!(val_node) unless field_is_borrowed
+          pending_owned_transfer = language_mode != :strict && !field_is_borrowed && !is_call_arg &&
+            val_node.is_a?(AST::Identifier) &&
+            !actual_type.implicitly_copyable? { |name| lookup_type_schema(name) }
+          T.unsafe(val_node).ownership_pending_transfer = true if pending_owned_transfer
+          move_if_not_copyable!(val_node) unless field_is_borrowed || pending_owned_transfer
         end
 
         # Non-escaping propagation: structs with BORROWED fields inherit non_escaping.

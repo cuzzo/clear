@@ -1275,6 +1275,7 @@ class OwnershipDataflow
   sig { params(node: AST::Node).returns(T::Boolean) }
   def owning_field_move?(node)
     return false unless node.is_a?(AST::GetField)
+    return false if AST.container_borrow?(node)
     ti = node.full_type!(context: "ownership dataflow field move")
     Type.indirect_type?(ti)
   rescue
