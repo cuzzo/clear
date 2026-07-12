@@ -579,6 +579,19 @@ impl Storage {
     }
 
     pub fn prune_stale_sarif_data(&self) -> Result<()> {
+        // Delete findings for files that have been modified in a newer commit
+        self.conn.execute(
+            r#"
+            DELETE FROM sarif_findings
+            WHERE EXISTS (
+              SELECT 1 FROM events e
+              WHERE e.path = sarif_findings.path
+                AND e.timestamp > sarif_findings.timestamp
+            )
+            "#,
+            [],
+        )?;
+
         // Delete findings belonging to snapshots older than 2 (rank >= 3)
         self.conn.execute(
             r#"

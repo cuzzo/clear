@@ -65,8 +65,8 @@ pub fn ingest_sarif_paths(
                 &mut stats,
             )?;
         }
-        storage.refresh_current_sarif_findings_view()?;
         storage.prune_stale_sarif_data()?;
+        storage.refresh_current_sarif_findings_view()?;
         Ok(())
     })();
     match result {
