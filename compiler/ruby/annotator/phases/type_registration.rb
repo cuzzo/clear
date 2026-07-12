@@ -50,23 +50,67 @@ module Annotator
           internal = edges.select { |edge| component.include?(edge.owner) && component.include?(edge.target) }
           next if internal.empty?
 
-          if internal.length == 1 && language_mode == :easy
-            edge = T.must(internal.first)
-            edge.type.layout = :indirect
-            next
-          end
-
           labels = internal.map { |edge| "#{edge.owner}.#{edge.field_name}" }.join(", ")
+          fixes = recursive_layout_fixes(internal)
+          owner_node = T.must(structs.find { |node| node.name.to_sym == T.must(internal.first).owner })
           if internal.length == 1
-            error!(T.must(structs.find { |node| node.name.to_sym == T.must(internal.first).owner }),
-              :RECURSIVE_LAYOUT_REQUIRES_INDIRECT, edge: labels)
+            fixable!(owner_node,
+              code: :RECURSIVE_LAYOUT_REQUIRES_INDIRECT, edge: labels,
+              category: :type, level: :error, fixes: fixes, raise_in_collector: true)
           else
-            error!(T.must(structs.find { |node| node.name.to_sym == T.must(internal.first).owner }),
-              :RECURSIVE_LAYOUT_AMBIGUOUS, edges: labels)
+            fixable!(owner_node,
+              code: :RECURSIVE_LAYOUT_AMBIGUOUS, edges: labels,
+              category: :type, level: :error, fixes: fixes, raise_in_collector: true)
           end
         end
       end
       private :resolve_recursive_struct_layouts!
+
+      sig { params(edges: T::Array[RecursiveFieldEdge]).returns(T::Array[Fix]) }
+      def recursive_layout_fixes(edges)
+        T.bind(self, SemanticAnnotator)
+        source = diagnostic_source_code
+        return [] unless source
+
+        choices = [
+          ["@node", "Store this edge in the compiler-managed graph slot map"],
+          ["@indirect", "Make this a unique owned heap edge"],
+          ["@multiowned", "Use local reference-counted shared identity"],
+          ["@shared", "Use cross-execution atomic shared identity"],
+          ["@link", "Make this a non-owning link to an independently owned node"],
+        ]
+        fixes = T.let([], T::Array[Fix])
+        edges.each do |edge|
+          span = recursive_field_suffix_span(source, edge)
+          next unless span
+          choices.each do |capability, description|
+            fixes << Fix.new(
+              description: fix_description(:CHOOSE_RECURSIVE_LAYOUT,
+                description: description,
+                edge: "#{edge.owner}.#{edge.field_name}",
+                capability: capability),
+              confidence: :interactive,
+              edits: [Edit.new(span: span, replacement: capability)],
+            )
+          end
+        end
+        fixes
+      end
+      private :recursive_layout_fixes
+
+      sig { params(source: String, edge: RecursiveFieldEdge).returns(T.nilable(Span)) }
+      def recursive_field_suffix_span(source, edge)
+        pattern = /\b#{Regexp.escape(edge.field_name)}\s*:\s*\??#{Regexp.escape(edge.target.to_s)}\b/
+        match = pattern.match(source)
+        return nil unless match
+        insert_offset = match.end(0)
+        prefix = T.must(source[0...insert_offset])
+        line = prefix.count("\n") + 1
+        last_newline = prefix.rindex("\n")
+        col = insert_offset - (last_newline || -1)
+        Span.new(file: nil, line: line, col: col, length: 0)
+      end
+      private :recursive_field_suffix_span
 
       sig { params(type: Type, names: T::Set[Symbol]).returns(T.nilable(Symbol)) }
       def inline_recursive_target(type, names)

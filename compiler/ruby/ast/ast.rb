@@ -97,6 +97,8 @@ module AST
     dst.matched_signature = src.matched_signature if src.matched_signature
     dst.stdlib_allocates = src.stdlib_allocates unless src.stdlib_allocates.nil?
     dst.mutates_receiver = src.mutates_receiver unless src.mutates_receiver.nil?
+    dst.implicit_layout_cost = src.implicit_layout_cost unless src.implicit_layout_cost.nil?
+    dst.layout_transport = src.layout_transport unless src.layout_transport.nil?
     dst.can_fail = src.can_fail unless src.can_fail.nil?
     dst.error_kind = src.error_kind if src.error_kind
     dst.error_type = src.error_type if src.error_type
@@ -1040,6 +1042,26 @@ module AST
     sig { params(val: T.nilable(T::Boolean)).returns(T.nilable(T::Boolean)) }
     def needs_heap_create=(val)
       @needs_heap_create = T.let(val, T.nilable(T::Boolean))
+    end
+
+    sig { returns(T.nilable(T::Boolean)) }
+    def implicit_layout_cost
+      @implicit_layout_cost = T.let(@implicit_layout_cost, T.nilable(T::Boolean))
+    end
+
+    sig { params(val: T.nilable(T::Boolean)).returns(T.nilable(T::Boolean)) }
+    def implicit_layout_cost=(val)
+      @implicit_layout_cost = T.let(val, T.nilable(T::Boolean))
+    end
+
+    sig { returns(T.nilable(Symbol)) }
+    def layout_transport
+      @layout_transport = T.let(@layout_transport, T.nilable(Symbol))
+    end
+
+    sig { params(val: T.nilable(Symbol)).returns(T.nilable(Symbol)) }
+    def layout_transport=(val)
+      @layout_transport = T.let(val, T.nilable(Symbol))
     end
 
     sig { returns(T.nilable(Type)) }

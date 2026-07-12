@@ -7,6 +7,19 @@ const ebr = @import("ebr.zig");
 const CheatLib = @import("../runtime/runtime-header.zig").CheatLib;
 const Runtime = rt_mod.Runtime;
 
+test "unboxMove releases only the unique box shell and transfers payload ownership" {
+    const allocator = std.testing.allocator;
+    const Payload = struct { bytes: []u8 };
+
+    const boxed = try CheatLib.localCreate(Payload, allocator, .{
+        .bytes = try allocator.dupe(u8, "owned payload"),
+    });
+    const moved = CheatLib.unboxMove(Payload, allocator, boxed);
+    defer allocator.free(moved.bytes);
+
+    try std.testing.expectEqualStrings("owned payload", moved.bytes);
+}
+
 test "Set(Rc(T)) uses handle identity and releases removed keys" {
     const allocator = std.testing.allocator;
     const RcItem = CheatLib.Rc(u64);

@@ -514,6 +514,15 @@ pub fn bind(comptime deps: type) type {
         return ptr;
     }
 
+    /// Move the payload out of a unique @indirect allocation and release only
+    /// its allocation shell. Ownership of every cleanup-bearing field moves
+    /// into the returned value; no destructor and no deep copy runs here.
+    pub fn unboxMove(comptime T: type, alloc: std.mem.Allocator, boxed: *T) T {
+        const value = boxed.*;
+        alloc.destroy(boxed);
+        return value;
+    }
+
     pub fn lockedCreate(comptime T: type, alloc: std.mem.Allocator, data: T) !*Locked(T) {
         const ptr = try alloc.create(Locked(T));
         ptr.* = Locked(T).init(data);

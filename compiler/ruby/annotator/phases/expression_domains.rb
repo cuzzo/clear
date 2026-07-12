@@ -37,6 +37,7 @@ module Annotator
         node.args.each { |arg| visit(arg) }
 
         if resolve_collection_method(node)
+          validate_indirect_collection_insertion!(node)
           receiver_type = node.object.full_type!(context: "@node collection receiver")
           element_type = receiver_type.element_type
           if element_type&.node_reference? && ["append", "push", "insert"].include?(node.name) && node.args.any?
@@ -54,6 +55,7 @@ module Annotator
           return
         end
         if resolve_intrinsic_method_call!(node)
+          validate_indirect_collection_insertion!(node)
           reject_mutating_borrowed_receiver!(node)
           return
         end

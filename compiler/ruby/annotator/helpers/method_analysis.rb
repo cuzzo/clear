@@ -174,6 +174,79 @@ module MethodAnalysis
     true
   end
 
+  sig { params(node: AST::MethodCall).void }
+  def validate_indirect_collection_insertion!(node)
+    T.bind(self, SemanticAnnotator) rescue nil
+    receiver_type = node.object.full_type!(context: "collection insertion receiver")
+    return unless receiver_type.linear_collection?
+    signature = FunctionSignature.unwrap(node.matched_stdlib_def) if node.respond_to?(:matched_stdlib_def)
+    signature ||= FunctionSignature.unwrap(node.matched_signature) if node.respond_to?(:matched_signature)
+    return unless signature
+    takes_indices = signature.params.each_index.select { |index| T.must(signature.params[index]).takes }
+    return unless takes_indices.length == 1
+    # Intrinsic signatures include the method receiver at index 0; AST::MethodCall#args does not.
+    value_index = T.must(takes_indices.first) - 1
+    return if value_index.negative?
+    value_arg = node.args[value_index]
+    return unless value_arg
+
+    element_type = receiver_type.element_type
+    return unless element_type
+    actual_type = T.must(value_arg).full_type!(context: "collection insertion")
+    return unless element_type.resolved == actual_type.resolved
+
+    if element_type.indirect? && !actual_type.indirect?
+      if actual_type.any_rc? || actual_type.node_reference? || actual_type.link?
+        error!(T.must(value_arg), :INDIRECT_ELEMENT_IDENTITY,
+          type: element_type.resolved, actual: indirect_identity_display(actual_type))
+      elsif language_mode != :easy
+        emit_indirect_element_explicit_error!(T.must(value_arg), element_type)
+      else
+        node.implicit_layout_cost = true
+        T.must(value_arg).layout_transport = :box
+      end
+    elsif !element_type.indirect? && actual_type.indirect?
+      T.must(value_arg).layout_transport = :unbox
+    elsif element_type.indirect? != actual_type.indirect? &&
+        (actual_type.any_rc? || actual_type.node_reference? || actual_type.link?)
+      error!(T.must(value_arg), :INDIRECT_ELEMENT_IDENTITY,
+        type: element_type.resolved, actual: indirect_identity_display(actual_type))
+    end
+  end
+
+  sig { params(type: Type).returns(String) }
+  def indirect_identity_display(type)
+    parts = [Type.surface_name_type(type)]
+    ownership = type.ownership_surface_name
+    parts << ownership if ownership
+    parts << "@indirect" if type.indirect?
+    parts.join
+  end
+
+  sig { params(value_arg: AST::Node, element_type: Type).void }
+  def emit_indirect_element_explicit_error!(value_arg, element_type)
+    T.bind(self, SemanticAnnotator) rescue nil
+    token = value_arg.token
+    fixes = T.let([], T::Array[Fix])
+    if token
+      fixes << Fix.new(
+        description: fix_description(:CONSTRUCT_INDIRECT_LAYOUT),
+        confidence: :interactive,
+        edits: [Edit.new(
+          span: Span.new(file: nil, line: token.line, col: token.column + token.value.to_s.length, length: 0),
+          replacement: " @indirect",
+        )],
+      )
+    end
+    fixable!(value_arg,
+      code: :INDIRECT_ELEMENT_EXPLICIT,
+      type: element_type.resolved,
+      category: :type,
+      level: :error,
+      fixes: fixes,
+      raise_in_collector: true)
+  end
+
   sig { params(node: AST::MethodCall, obj_type: Type, defn: FunctionSignature).void }
   def narrow_receiver_collection!(node, obj_type, defn)
     T.bind(self, SemanticAnnotator) rescue nil

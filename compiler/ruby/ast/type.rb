@@ -34,6 +34,7 @@ class TypeCapabilities < T::Struct
   const :soa, T::Boolean, default: false
   const :elem_ownership, T.nilable(Symbol), default: nil
   const :elem_sync, T.nilable(Symbol), default: nil
+  const :elem_layout, T.nilable(Symbol), default: nil
   const :link_source, T.nilable(Symbol), default: nil
   const :observable, T::Boolean, default: false
   const :observable_terminal, T.nilable(Symbol), default: nil
@@ -56,6 +57,7 @@ class TypeCapabilities < T::Struct
       soa: MaybeBoolean,
       elem_ownership: MaybeSymbol,
       elem_sync: MaybeSymbol,
+      elem_layout: MaybeSymbol,
       link_source: MaybeSymbol,
       observable: MaybeBoolean,
       observable_terminal: MaybeSymbol,
@@ -73,6 +75,7 @@ class TypeCapabilities < T::Struct
     soa: UNSET,
     elem_ownership: UNSET,
     elem_sync: UNSET,
+    elem_layout: UNSET,
     link_source: UNSET,
     observable: UNSET,
     observable_terminal: UNSET,
@@ -88,6 +91,7 @@ class TypeCapabilities < T::Struct
     next_soa = T.let(soa.equal?(UNSET) ? self.soa : T.cast(soa, T::Boolean), T::Boolean)
     next_elem_ownership = T.let(elem_ownership.equal?(UNSET) ? self.elem_ownership : T.cast(elem_ownership, T.nilable(Symbol)), T.nilable(Symbol))
     next_elem_sync = T.let(elem_sync.equal?(UNSET) ? self.elem_sync : T.cast(elem_sync, T.nilable(Symbol)), T.nilable(Symbol))
+    next_elem_layout = T.let(elem_layout.equal?(UNSET) ? self.elem_layout : T.cast(elem_layout, T.nilable(Symbol)), T.nilable(Symbol))
     next_link_source = T.let(link_source.equal?(UNSET) ? self.link_source : T.cast(link_source, T.nilable(Symbol)), T.nilable(Symbol))
     next_observable = T.let(observable.equal?(UNSET) ? self.observable : T.cast(observable, T::Boolean), T::Boolean)
     next_observable_terminal = T.let(observable_terminal.equal?(UNSET) ? self.observable_terminal : T.cast(observable_terminal, T.nilable(Symbol)), T.nilable(Symbol))
@@ -104,6 +108,7 @@ class TypeCapabilities < T::Struct
       soa: next_soa,
       elem_ownership: next_elem_ownership,
       elem_sync: next_elem_sync,
+      elem_layout: next_elem_layout,
       link_source: next_link_source,
       observable: next_observable,
       observable_terminal: next_observable_terminal,
@@ -119,7 +124,8 @@ class TypeCapabilities < T::Struct
       sync: nil,
       layout: nil,
       elem_ownership: nil,
-      elem_sync: nil
+      elem_sync: nil,
+      elem_layout: nil
     )
   end
 end
@@ -1453,6 +1459,17 @@ class Type
   end
 
   sig { params(value: T.nilable(Symbol)).returns(T.nilable(Symbol)) }
+  def elem_layout=(value)
+    apply_capabilities!(elem_layout: Type.capability_symbol(value))
+    value
+  end
+
+  sig { returns(T.nilable(Symbol)) }
+  def elem_layout
+    @capabilities.elem_layout
+  end
+
+  sig { params(value: T.nilable(Symbol)).returns(T.nilable(Symbol)) }
   def link_source=(value)
     apply_capabilities!(link_source: Type.capability_symbol(value))
     value
@@ -1522,6 +1539,7 @@ class Type
       soa: TypeCapabilities::MaybeBoolean,
       elem_ownership: TypeCapabilities::MaybeSymbol,
       elem_sync: TypeCapabilities::MaybeSymbol,
+      elem_layout: TypeCapabilities::MaybeSymbol,
       link_source: TypeCapabilities::MaybeSymbol,
       observable: TypeCapabilities::MaybeBoolean,
       observable_terminal: TypeCapabilities::MaybeSymbol,
@@ -1539,6 +1557,7 @@ class Type
     soa: TypeCapabilities::UNSET,
     elem_ownership: TypeCapabilities::UNSET,
     elem_sync: TypeCapabilities::UNSET,
+    elem_layout: TypeCapabilities::UNSET,
     link_source: TypeCapabilities::UNSET,
     observable: TypeCapabilities::UNSET,
     observable_terminal: TypeCapabilities::UNSET,
@@ -1555,6 +1574,7 @@ class Type
       soa: soa,
       elem_ownership: elem_ownership,
       elem_sync: elem_sync,
+      elem_layout: elem_layout,
       link_source: link_source,
       observable: observable,
       observable_terminal: observable_terminal,
@@ -1714,12 +1734,13 @@ class Type
     )
   end
 
-  sig { params(soa: T::Boolean, elem_ownership: T.nilable(Symbol), elem_sync: T.nilable(Symbol), observable_token: T.nilable(Lexer::Token)).returns(TypeCapabilities) }
-  def apply_type_annotation_extras!(soa:, elem_ownership:, elem_sync:, observable_token:)
+  sig { params(soa: T::Boolean, elem_ownership: T.nilable(Symbol), elem_sync: T.nilable(Symbol), elem_layout: T.nilable(Symbol), observable_token: T.nilable(Lexer::Token)).returns(TypeCapabilities) }
+  def apply_type_annotation_extras!(soa:, elem_ownership:, elem_sync:, elem_layout:, observable_token:)
     apply_capabilities!(
       soa: Type.capability_boolean_or_unset(soa),
       elem_ownership: Type.capability_symbol_or_unset(elem_ownership),
       elem_sync: Type.capability_symbol_or_unset(elem_sync),
+      elem_layout: Type.capability_symbol_or_unset(elem_layout),
       observable_token: Type.capability_token_or_unset(observable_token)
     )
   end
@@ -1848,7 +1869,8 @@ class Type
   def copy_element_capabilities_from!(source)
     apply_capabilities!(
       elem_ownership: Type.capability_symbol_or_unset(source.elem_ownership),
-      elem_sync: Type.capability_symbol_or_unset(source.elem_sync)
+      elem_sync: Type.capability_symbol_or_unset(source.elem_sync),
+      elem_layout: Type.capability_symbol_or_unset(source.elem_layout)
     )
   end
 
@@ -1885,8 +1907,10 @@ class Type
     end
     value_elem_ownership = value_type.nil? ? nil : T.must(value_type).elem_ownership
     value_elem_sync = value_type.nil? ? nil : T.must(value_type).elem_sync
+    value_elem_layout = value_type.nil? ? nil : T.must(value_type).elem_layout
     declared_elem_ownership = final_type.elem_ownership
     declared_elem_sync = final_type.elem_sync
+    declared_elem_layout = final_type.elem_layout
     elem_ownership = if !declared_elem_ownership.nil?
       declared_elem_ownership
     else
@@ -1896,6 +1920,11 @@ class Type
       declared_elem_sync
     else
       value_elem_sync
+    end
+    elem_layout = if !declared_elem_layout.nil?
+      declared_elem_layout
+    else
+      value_elem_layout
     end
     value_collection = value_type.nil? ? nil : T.must(value_type).collection
     link_src = !value_type.nil? && T.must(value_type).link? ? T.must(value_type).link_source : nil
@@ -1908,6 +1937,7 @@ class Type
       observable_terminal: Type.capability_symbol_or_unset(observable_terminal),
       elem_ownership: Type.capability_symbol_or_unset(elem_ownership),
       elem_sync: Type.capability_symbol_or_unset(elem_sync),
+      elem_layout: Type.capability_symbol_or_unset(elem_layout),
       layout: Type.capability_symbol_or_unset(final_type.layout),
       link_source: Type.capability_symbol_or_unset(link_src)
     )
@@ -1922,6 +1952,7 @@ class Type
     source_sync = source.sync
     source_elem_ownership = source.elem_ownership
     source_elem_sync = source.elem_sync
+    source_elem_layout = source.elem_layout
     source_link_source = source.link_source
     source_observable_terminal = source.observable_terminal
     source_observable_token = source.observable_token
@@ -1937,6 +1968,7 @@ class Type
       soa: Type.capability_boolean_or_unset(source.soa? && (!preserve_existing || !soa?)),
       elem_ownership: Type.capability_symbol_or_unset((!preserve_existing || elem_ownership.nil?) && !source_elem_ownership.nil? ? source_elem_ownership : nil),
       elem_sync: Type.capability_symbol_or_unset((!preserve_existing || elem_sync.nil?) && !source_elem_sync.nil? ? source_elem_sync : nil),
+      elem_layout: Type.capability_symbol_or_unset((!preserve_existing || elem_layout.nil?) && !source_elem_layout.nil? ? source_elem_layout : nil),
       link_source: Type.capability_symbol_or_unset((!preserve_existing || link_source.nil?) && !source_link_source.nil? ? source_link_source : nil),
       observable: Type.capability_boolean_or_unset(source.observable? && (!preserve_existing || !observable?)),
       observable_terminal: Type.capability_symbol_or_unset((!preserve_existing || observable_terminal.nil?) && !source_observable_terminal.nil? ? source_observable_terminal : nil),
@@ -2024,6 +2056,7 @@ class Type
     provenance_key = provenance.nil? ? "stack" : T.must(provenance).to_s
     collection_key = collection.nil? ? "none" : T.must(collection).to_s
     shards_key = shard_count.nil? ? "0" : Type.integer_string(T.must(shard_count))
+    elem_layout_key = elem_layout.nil? ? "direct" : T.must(elem_layout).to_s
     [
       semantic_shape_key,
       "own=#{ownership_key}",
@@ -2032,6 +2065,7 @@ class Type
       "loc=#{provenance_key}",
       "collection=#{collection_key}",
       "shards=#{shards_key}",
+      "elem_layout=#{elem_layout_key}",
     ].join("|")
   end
 
@@ -3457,7 +3491,8 @@ class Type
     t = Type.new("?#{Type.surface_name(raw)}") if optional_element_array? && !t.optional?
     t.apply_capabilities!(
       ownership: Type.capability_symbol_or_unset(elem_ownership),
-      sync: Type.capability_symbol_or_unset(elem_sync)
+      sync: Type.capability_symbol_or_unset(elem_sync),
+      layout: Type.capability_symbol_or_unset(elem_layout)
     )
     t
   end

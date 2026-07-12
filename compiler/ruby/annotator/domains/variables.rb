@@ -446,6 +446,10 @@ module Annotator
         transfer = decision.transfer
         source = transfer.source
         if decision.materialize
+          if transfer.container.respond_to?(:implicit_layout_cost) &&
+              T.unsafe(transfer.container).implicit_layout_cost == true
+            error!(source, :INDIRECT_TRANSFER_REQUIRES_COPY, name: source.name)
+          end
           source_type = source.full_type!(context: "finalized ownership transfer")
           wrapper = if source_type.any_rc? || source_type.split?
             AST::CloneNode.new(source.token, source)

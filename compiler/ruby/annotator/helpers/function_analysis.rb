@@ -755,6 +755,17 @@ module FunctionAnalysis
   sig { params(facts: CallArgumentFacts, signature: FunctionSignature, atomic_bare_value_args: T::Array[AST::Locatable]).void }
   def verify_argument_type!(facts, signature, atomic_bare_value_args)
     T.bind(self, SemanticAnnotator)
+    if facts.expected_type.array? && facts.actual_type.array?
+      expected_element = facts.expected_type.element_type
+      actual_element = facts.actual_type.element_type
+      if expected_element && actual_element &&
+          expected_element.resolved == actual_element.resolved &&
+          expected_element.indirect? != actual_element.indirect?
+        error!(facts.arg_node, :COLLECTION_ELEMENT_LAYOUT_MISMATCH,
+          expected: collection_layout_display(facts.expected_type),
+          actual: collection_layout_display(facts.actual_type))
+      end
+    end
     if facts.expected_type.indirect? && !facts.actual_type.indirect? &&
         facts.expected_type.resolved == facts.actual_type.resolved
       unless language_mode == :easy
@@ -774,6 +785,17 @@ module FunctionAnalysis
       index: facts.index + 1,
       expected: Type.coercion_surface_name(facts.expected_type),
       got: Type.coercion_surface_name(facts.actual_type))
+  end
+
+  sig { params(type: Type).returns(String) }
+  def collection_layout_display(type)
+    element = type.element_type
+    return Type.coercion_surface_name(type) unless element
+
+    element_name = Type.surface_name_type(element)
+    element_name += "@indirect" if element.indirect?
+    collection_name = type.collection ? "@#{type.collection}" : ""
+    "#{element_name}[]#{collection_name}"
   end
 
   sig { params(facts: CallArgumentFacts).returns(T::Boolean) }
@@ -1468,6 +1490,7 @@ module FunctionAnalysis
   private :atomic_cell_to_atomic_param?
   private :atomic_cell_to_bare_value_param?
   private :basic_argument_match?
+  private :collection_layout_display
   private :borrowed_takes_argument?
   private :build_lambda_signature
   private :call_argument_facts

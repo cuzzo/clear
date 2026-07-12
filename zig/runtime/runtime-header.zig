@@ -999,6 +999,7 @@ pub const CheatLib = struct {
     pub const refCellCreate = DataStructures.refCellCreate;
     pub const refCellDestroy = DataStructures.refCellDestroy;
     pub const localCreate = DataStructures.localCreate;
+    pub const unboxMove = DataStructures.unboxMove;
     pub const lockedCreate = DataStructures.lockedCreate;
     pub const lockedDestroy = DataStructures.lockedDestroy;
     pub const RwLocked = DataStructures.RwLocked;

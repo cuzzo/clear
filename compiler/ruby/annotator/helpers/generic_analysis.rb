@@ -148,6 +148,9 @@ module GenericAnalysis
     error!(facts.node, :COLLECTION_NEEDS_ARRAY_TYPE, cap: '@set', example: 'String[]@set') if shape.set_collection? && !shape.array? && !facts.inner_array
     error!(facts.node, :OBSERVABLE_REQUIRES_SET) if type_obj.observable_array_without_set?
     payload = shape.map? ? shape.value_type : shape.element_type
+    if payload&.indirect? && payload.primitive?
+      error!(facts.node, :INDIRECT_ELEMENT_PRIMITIVE, type: payload.resolved)
+    end
     if type_obj.sharded? && payload&.multiowned?
       error!(facts.node, :SHARDED_ELEMENT_REQUIRES_SHARED, got: payload.to_s)
     end
@@ -443,7 +446,9 @@ module GenericAnalysis
       if str.end_with?('[]')
         inner = T.must(str[0..-3]).to_sym
         if subst.key?(inner)
-          return Type.new(:"#{generic_binding_source(T.must(subst[inner]))}[]")
+          substituted_array = Type.new(:"#{generic_binding_source(T.must(subst[inner]))}[]")
+          substituted_array.merge_capabilities_from!(t)
+          return substituted_array
         end
       end
 
@@ -513,7 +518,8 @@ module GenericAnalysis
       !type.sync.nil? ||
       !type.layout.nil? ||
       !type.elem_ownership.nil? ||
-      !type.elem_sync.nil?
+      !type.elem_sync.nil? ||
+      !type.elem_layout.nil?
   end
 
   sig { params(type: GenericBinding).returns(String) }
@@ -526,6 +532,7 @@ module GenericAnalysis
     sync = t.sync_surface_name
     parts << ownership if ownership
     parts << sync if sync
+    parts << "@indirect" if t.indirect?
 
     parts.join("")
   end

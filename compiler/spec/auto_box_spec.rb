@@ -15,17 +15,15 @@ RSpec.describe "EASY automatic indirection" do
     CLEAR
   end
 
-  it "infers the unique recursive edge in EASY through the explicit lowering path" do
-    inferred = transpile(recursive_source, mode: :easy)
-    explicit = transpile(recursive_source.sub("?Node", "?Node@indirect"), mode: :default)
-    expect(inferred).to include("next: ?*Node")
-    expect(inferred).to eq(explicit)
+  it "requires an explicit topology choice for a unique recursive edge even in EASY" do
+    expect { transpile(recursive_source, mode: :easy) }
+      .to raise_error(/recursive field Node.next.*@node.*@indirect.*@multiowned.*@shared.*@link/m)
   end
 
   it "requires explicit recursive layout in DEFAULT and STRICT" do
     %i[default strict].each do |mode|
       expect { transpile(recursive_source, mode: mode) }
-        .to raise_error(/recursive field Node.next.*Add `@indirect`/m)
+        .to raise_error(/recursive field Node.next.*@node.*@indirect/m)
     end
   end
 
@@ -58,12 +56,59 @@ RSpec.describe "EASY automatic indirection" do
     expect { transpile(source, mode: :default) }.to raise_error(/Layout Error.*argument 1/m)
   end
 
-  it "builds and runs recursive construction through the inferred layout", :integration do
+  it "moves a TAKES parameter into an inline list without a deep COPY" do
+    source = <<~CLEAR
+      STRUCT Foo { name: String }
+      FN add!(TAKES f: Foo, MUTABLE items: Foo[]@list) RETURNS Void ->
+        items.append(f);
+      END
+      FN main() RETURNS Void ->
+        MUTABLE items: Foo[]@list = [];
+        f = Foo{ name: COPY "owned" };
+        add!(f, items);
+        ASSERT items.length() == 1;
+      END
+    CLEAR
+
+    zig = transpile(source, mode: :default)
+    add_body = zig.split("fn add", 2).last.split("fn clearMain", 2).first
+    expect(add_body).to include("items.append(rt.heapAlloc(), f)")
+    expect(add_body).to include("f_moved = true")
+    expect(add_body).not_to include("dupeValue")
+  end
+
+  it "distinguishes a boxed list header from boxed list elements" do
+    source = <<~CLEAR
+      STRUCT Foo { value: Int64 }
+      FN main() RETURNS Void ->
+        MUTABLE items: Foo[]@list:indirect = [];
+        items.append(Foo{ value: 1 });
+      END
+    CLEAR
+
+    zig = transpile(source, mode: :default)
+    expect(zig).to include("*std.ArrayListUnmanaged(Foo)")
+    expect(zig).not_to include("std.ArrayListUnmanaged(*Foo)")
+  end
+
+  it "models element-level @indirect independently from collection layout" do
+    source = <<~CLEAR
+      STRUCT Foo { value: Int64 }
+      FN main() RETURNS Void ->
+        MUTABLE items: Foo@indirect[]@list = [];
+      END
+    CLEAR
+
+    zig = transpile(source, mode: :default)
+    expect(zig).to include("std.ArrayListUnmanaged(*Foo)")
+  end
+
+  it "builds and runs recursive construction through an explicit unique-owner layout", :integration do
     Dir.mktmpdir("clear-auto-box") do |dir|
       source = File.join(dir, "main.clear")
       binary = File.join(dir, "main")
       File.write(source, <<~CLEAR)
-        STRUCT Node { value: Int64, name: String, next: ?Node }
+        STRUCT Node { value: Int64, name: String, next: ?Node@indirect }
         FN main() RETURNS Void ->
           leaf = Node{ value: 1, name: COPY "leaf", next: NIL };
           root = Node{ value: 2, name: COPY "root", next: leaf };

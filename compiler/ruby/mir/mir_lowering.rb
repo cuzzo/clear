@@ -3970,6 +3970,40 @@ class MIRLowering
   sig { params(value: MIR::Node, ast_node: T.nilable(AST::Node), sink_alloc: Symbol, sink_type: T.nilable(Type::TypeInput)).returns(MIR::Node) }
   def materialize_owned_sink_value(value, ast_node, sink_alloc, sink_type = nil)
     return value unless ast_node
+    source_type = ast_node.is_a?(AST::CopyNode) ? T.unsafe(self).copy_source_type_info(ast_node.value) : Type.from_node!(ast_node, context: "owned sink layout transport")
+    destination_type = sink_type ? (sink_type.is_a?(Type) ? sink_type : Type.new(sink_type)) : source_type
+
+    # Layout transport is destination-driven and remains structural in MIR.
+    # A consumed direct value can be moved into a unique box without copying
+    # its payload. Conversely, consuming a unique box into a direct sink moves
+    # the payload out and destroys only the now-empty allocation shell.
+    layout_transport = ast_node.respond_to?(:layout_transport) ? T.unsafe(ast_node).layout_transport : nil
+    if layout_transport == :box && destination_type.indirect? && !source_type.indirect? &&
+        destination_type.resolved == source_type.resolved && !value.is_a?(MIR::HeapCreate)
+      return T.cast(with_ownership_consumption(
+        MIR::HeapCreate.new(transpile_type(source_type.resolved.to_s), value, sink_alloc, "box_move"),
+        mir_ident_names(value),
+        "MIR::HeapCreate(layout move)",
+        target_alloc: sink_alloc,
+      ), MIR::Node)
+    end
+    if layout_transport == :unbox && source_type.indirect? && !destination_type.indirect? &&
+        destination_type.resolved == source_type.resolved
+      unboxed = MIR::Call.new(
+        "CheatLib.unboxMove",
+        [MIR::Ident.new(transpile_type(destination_type.resolved.to_s)), MIR::AllocatorRef.new(sink_alloc), value],
+        false,
+        false,
+        MIR::CallableContract.no_ownership(3),
+      )
+      return T.cast(with_ownership_consumption_for_value(
+        unboxed,
+        value,
+        ast_node,
+        "CheatLib.unboxMove",
+        target_alloc: sink_alloc,
+      ), MIR::Node)
+    end
     plan = owned_sink_plan(value, ast_node, sink_alloc, sink_type)
     return value if plan.keep?
 

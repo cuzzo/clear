@@ -3210,6 +3210,7 @@ class ClearParser
     elem_caps = parse_element_capability
     elem_ownership = elem_caps[:ownership]
     elem_sync = elem_caps[:sync]
+    elem_layout = elem_caps[:layout]
 
     if match!(:CHAR, '[')
       # Case 1: Dynamic "Number[]"
@@ -3283,7 +3284,7 @@ class ClearParser
     end
     t = Type.new(base_sym, ownership: ownership, sync: sync, layout: layout, location: loc, collection: collection, shard_count: shard_count, observable: observable, auto: auto_type)
     t.auto_token = auto_tok if auto_tok
-    t.apply_type_annotation_extras!(soa: is_soa, elem_ownership: elem_ownership, elem_sync: elem_sync, observable_token: observable_token)
+    t.apply_type_annotation_extras!(soa: is_soa, elem_ownership: elem_ownership, elem_sync: elem_sync, elem_layout: elem_layout, observable_token: observable_token)
     t
   end
 
@@ -3430,7 +3431,7 @@ class ClearParser
   end
 
   # All recognized capability tokens.
-  ELEMENT_CAPABILITY_TOKENS = %w[@shared @multiowned @node @locked @writeLocked @link].freeze
+  ELEMENT_CAPABILITY_TOKENS = %w[@shared @multiowned @node @locked @writeLocked @link @indirect].freeze
   ELEMENT_SYNC_TOKENS = %w[@locked @writeLocked locked writeLocked].freeze
   CAPABILITY_TOKENS = %w[@multiowned @shared @node @split @locked @writeLocked @local @versioned @atomic @indirect @link @raw @symbol @list @pool @set @soa @sharded @observable].freeze
   CAPABILITY_OWNERSHIP_VALUES = T.let({
@@ -3518,7 +3519,7 @@ class ClearParser
 
   sig { returns(ElementCapability) }
   def parse_element_capability
-    result = { ownership: nil, sync: nil }
+    result = { ownership: nil, sync: nil, layout: nil }
     return result unless match?(:VAR_ID) && ELEMENT_CAPABILITY_TOKENS.include?(current.value)
     return result unless element_capability_suffix?
 
@@ -3562,6 +3563,8 @@ class ClearParser
       result[:sync] = :write_locked
     when "@link"
       result[:ownership] = :link
+    when "@indirect", "indirect"
+      result[:layout] = :indirect
     end
   end
 
