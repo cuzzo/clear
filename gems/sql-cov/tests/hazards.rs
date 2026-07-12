@@ -131,3 +131,39 @@ async fn nullable_subquery_output_and_postgres_all_are_detected() {
         .iter()
         .any(|finding| finding.kind == HazardKind::NullableAnyAll));
 }
+
+#[tokio::test]
+async fn test_looker_join_hazard_detection() {
+    use sql_cov::{analyze_hazards_with_looker, parse_lookml, LookerJoin};
+    let schema = schema().await;
+    
+    let lookml = r#"
+explore: companies {
+  join: employees {
+    relationship: one_to_many
+    sql_on: ${companies.company_id} = ${employees.company_id} ;;
+  }
+}
+"#;
+    let joins = parse_lookml(lookml);
+    assert_eq!(joins.len(), 1);
+    assert_eq!(joins[0].explore, "companies");
+    assert_eq!(joins[0].join_table, "employees");
+    assert_eq!(joins[0].relationship, "one_to_many");
+
+    // Let's mock companies and employees in SchemaCatalog
+    let mut mock_schema = SchemaCatalog::default();
+    mock_schema.insert_column("companies".to_string(), "company_id".to_string(), false, true);
+    mock_schema.insert_column("companies".to_string(), "annual_revenue".to_string(), false, false);
+    mock_schema.insert_column("employees".to_string(), "company_id".to_string(), false, true);
+
+    // Hazard query: joining companies and employees, aggregating annual_revenue (from one-side) without DISTINCT
+    let sql_hazard = "SELECT SUM(companies.annual_revenue) FROM companies JOIN employees ON companies.company_id = employees.company_id";
+    let report_hazard = analyze_hazards_with_looker("test.sql", sql_hazard, DialectName::Sqlite, &mock_schema, &joins).unwrap();
+    assert!(report_hazard.findings.iter().any(|f| f.kind == HazardKind::LookerJoinHazard));
+
+    // Safe query: uses DISTINCT modifier on the aggregation
+    let sql_safe = "SELECT SUM(DISTINCT companies.annual_revenue) FROM companies JOIN employees ON companies.company_id = employees.company_id";
+    let report_safe = analyze_hazards_with_looker("test.sql", sql_safe, DialectName::Sqlite, &mock_schema, &joins).unwrap();
+    assert!(!report_safe.findings.iter().any(|f| f.kind == HazardKind::LookerJoinHazard));
+}

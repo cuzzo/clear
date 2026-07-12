@@ -102,7 +102,7 @@ pub fn analyze_sql(
             &mut metrics,
             &mut domains,
             &mut unsupported,
-        )?;
+        );
     }
 
     unsupported.sort();
@@ -130,7 +130,7 @@ fn traverse_query(
     metrics: &mut Vec<CoverageMetric>,
     domains: &mut Vec<TelemetryDomain>,
     unsupported: &mut Vec<String>,
-) -> Result<()> {
+) {
     let mut local_resolver = outer_resolver.clone();
     let with_clause = &query.with;
     if let Some(with) = with_clause {
@@ -145,7 +145,7 @@ fn traverse_query(
                 metrics,
                 domains,
                 unsupported,
-            )?;
+            );
         }
     }
     traverse_set_expr(
@@ -158,8 +158,7 @@ fn traverse_query(
         unsupported,
         with_clause,
         outer_resolver,
-    )?;
-    Ok(())
+    );
 }
 
 fn traverse_set_expr(
@@ -172,7 +171,7 @@ fn traverse_set_expr(
     unsupported: &mut Vec<String>,
     with_clause: &Option<sqlparser::ast::With>,
     outer_resolver: &Resolver<'_>,
-) -> Result<()> {
+) {
     match expr {
         SetExpr::Select(select) => {
             traverse_select(
@@ -185,7 +184,7 @@ fn traverse_set_expr(
                 unsupported,
                 with_clause,
                 outer_resolver,
-            )?;
+            );
         }
         SetExpr::Query(query) => {
             traverse_query(
@@ -196,7 +195,7 @@ fn traverse_set_expr(
                 metrics,
                 domains,
                 unsupported,
-            )?;
+            );
         }
         SetExpr::SetOperation { left, right, .. } => {
             traverse_set_expr(
@@ -209,7 +208,7 @@ fn traverse_set_expr(
                 unsupported,
                 &None,
                 outer_resolver,
-            )?;
+            );
             traverse_set_expr(
                 right,
                 resolver,
@@ -220,7 +219,7 @@ fn traverse_set_expr(
                 unsupported,
                 &None,
                 outer_resolver,
-            )?;
+            );
         }
         SetExpr::Values(_)
         | SetExpr::Insert(_)
@@ -229,7 +228,6 @@ fn traverse_set_expr(
         | SetExpr::Delete(_)
         | SetExpr::Merge(_) => {}
     }
-    Ok(())
 }
 
 fn traverse_select(
@@ -242,7 +240,7 @@ fn traverse_select(
     unsupported: &mut Vec<String>,
     with_clause: &Option<sqlparser::ast::With>,
     parent_resolver: &Resolver<'_>,
-) -> Result<()> {
+) {
     let mut resolver = outer_resolver.clone();
     for table in &select.from {
         register_factor(&table.relation, false, &mut resolver);
@@ -283,8 +281,8 @@ fn traverse_select(
             metrics,
             schema,
             &resolver,
-            Some(parent_resolver),
-        )?;
+            parent_resolver,
+        );
         if !ids.is_empty() {
             domains.push(TelemetryDomain {
                 with_sql: with_sql.clone(),
@@ -295,7 +293,7 @@ fn traverse_select(
     }
 
     if let Some(having) = &select.having {
-        collect_exprs_with_resolver(
+        let _ids = collect_exprs_with_resolver(
             having,
             "having",
             false,
@@ -303,8 +301,8 @@ fn traverse_select(
             metrics,
             schema,
             &resolver,
-            Some(parent_resolver),
-        )?;
+            parent_resolver,
+        );
         unsupported.push(
             "HAVING expressions are mapped but not executed in the initial telemetry driver"
                 .to_string(),
@@ -324,8 +322,8 @@ fn traverse_select(
                     metrics,
                     schema,
                     &resolver,
-                    Some(parent_resolver),
-                )?;
+                    parent_resolver,
+                );
                 if !ids.is_empty() {
                     let cross_join_from = format!("({}) CROSS JOIN {}", left_side_sql, right_side_sql);
                     domains.push(TelemetryDomain {
@@ -369,10 +367,8 @@ fn traverse_select(
             metrics,
             domains,
             unsupported,
-        )?;
+        );
     }
-
-    Ok(())
 }
 
 #[derive(Default)]
@@ -402,17 +398,13 @@ fn collect_exprs_with_resolver(
     metrics: &mut Vec<CoverageMetric>,
     schema: Option<&SchemaCatalog>,
     resolver: &Resolver<'_>,
-    outer_resolver: Option<&Resolver<'_>>,
-) -> Result<Vec<usize>> {
+    outer_resolver: &Resolver<'_>,
+) -> Vec<usize> {
     let mut rows = Vec::new();
     find_coverage_expressions(root, context, source, &mut rows);
     let mut ids = Vec::new();
     for mut row in rows {
-        let is_correlated = if let Some(outer) = outer_resolver {
-            is_correlated_expression(&row.expr, resolver, outer)
-        } else {
-            false
-        };
+        let is_correlated = is_correlated_expression(&row.expr, resolver, outer_resolver);
 
         let row_measurable = measurable && !is_correlated;
 
@@ -448,7 +440,7 @@ fn collect_exprs_with_resolver(
             hit_unknown_count: 0,
         });
     }
-    Ok(ids)
+    ids
 }
 
 fn find_coverage_expressions(
@@ -507,23 +499,14 @@ fn find_coverage_expressions(
             if let sqlparser::ast::FunctionArguments::List(args) = &function.args {
                 for arg in &args.args {
                     match arg {
-                        sqlparser::ast::FunctionArg::Unnamed(arg_expr) => {
-                            match arg_expr {
-                                sqlparser::ast::FunctionArgExpr::Expr(e) => {
-                                    find_coverage_expressions(e, context, source, rows);
-                                }
-                                _ => {}
-                            }
+                        sqlparser::ast::FunctionArg::Unnamed(sqlparser::ast::FunctionArgExpr::Expr(e)) => {
+                            find_coverage_expressions(e, context, source, rows);
                         }
-                        sqlparser::ast::FunctionArg::Named { arg, .. }
-                        | sqlparser::ast::FunctionArg::ExprNamed { arg, .. } => {
-                            match arg {
-                                sqlparser::ast::FunctionArgExpr::Expr(e) => {
-                                    find_coverage_expressions(e, context, source, rows);
-                                }
-                                _ => {}
-                            }
+                        sqlparser::ast::FunctionArg::Named { arg: sqlparser::ast::FunctionArgExpr::Expr(e), .. }
+                        | sqlparser::ast::FunctionArg::ExprNamed { arg: sqlparser::ast::FunctionArgExpr::Expr(e), .. } => {
+                            find_coverage_expressions(e, context, source, rows);
                         }
+                        _ => {}
                     }
                 }
             }
@@ -741,5 +724,114 @@ fn join_expression(operator: &JoinOperator) -> Option<&Expr> {
     match constraint {
         JoinConstraint::On(expr) => Some(expr),
         _ => None,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_parser_edge_cases() {
+        let schema = SchemaCatalog::default();
+
+        // 1. CTE traversal
+        let sql = "WITH cte AS (SELECT 1) SELECT * FROM cte";
+        let analysis = analyze_sql("test.sql", sql, DialectName::Sqlite, Some(&schema)).unwrap();
+        assert!(analysis.domains.is_empty());
+
+        // 2. HAVING expression
+        let sql = "SELECT age FROM users GROUP BY age HAVING age > 18";
+        let analysis = analyze_sql("test.sql", sql, DialectName::Sqlite, Some(&schema)).unwrap();
+        assert!(analysis.coverage.unsupported.iter().any(|u| u.contains("HAVING")));
+
+        // 3. Correlated subquery with unqualified outer columns
+        let mut schema_with_cols = SchemaCatalog::default();
+        schema_with_cols.insert_column("users".to_string(), "age".to_string(), false, false);
+        let sql = "SELECT * FROM users WHERE age > (SELECT MIN(age) FROM users WHERE age > 18)";
+        let analysis = analyze_sql("test.sql", sql, DialectName::Sqlite, Some(&schema_with_cols)).unwrap();
+        assert_eq!(analysis.coverage.metrics.len(), 2);
+
+        // 4. Parenthesized query in set expression & escaped quotes
+        let sql_set = "SELECT 1 UNION (SELECT 'hello''world' WHERE age > 20)";
+        let analysis_set = analyze_sql("test.sql", sql_set, DialectName::Sqlite, Some(&schema_with_cols)).unwrap();
+        println!("SET METRICS: {:#?}", analysis_set.coverage.metrics);
+        assert_eq!(analysis_set.coverage.metrics.len(), 1);
+
+        // 5. Named arguments & wildcard function args & JoinOperator coverage
+        let sql_func = "SELECT 1 WHERE my_func(x => COUNT(*)) = 1 AND my_func(COUNT(*)) = 1";
+        let dialect_pg = sqlparser::dialect::PostgreSqlDialect {};
+        let statements_func = sqlparser::parser::Parser::parse_sql(&dialect_pg, sql_func).unwrap();
+        let sqlparser::ast::Statement::Query(query_func) = &statements_func[0] else { panic!() };
+        let sqlparser::ast::SetExpr::Select(select_func) = &*query_func.body else { panic!() };
+        let selection_func = select_func.selection.as_ref().unwrap();
+        let mut metrics_func = Vec::new();
+        find_coverage_expressions(selection_func, "where", sql_func, &mut metrics_func);
+        assert!(!metrics_func.is_empty());
+
+        // 6. Direct collect_exprs_with_resolver calls for deduplication
+        let mut metrics = Vec::new();
+        let resolver = Resolver::new(&schema);
+        let dialect = sqlparser::dialect::GenericDialect;
+        let statements = sqlparser::parser::Parser::parse_sql(&dialect, "SELECT 1 IS NULL").unwrap();
+        let sqlparser::ast::Statement::Query(query_dedup) = &statements[0] else { panic!() };
+        let sqlparser::ast::SetExpr::Select(select_dedup) = &*query_dedup.body else { panic!() };
+        let sqlparser::ast::SelectItem::UnnamedExpr(expr) = &select_dedup.projection[0] else { panic!() };
+        
+        let source_str = "1 IS NULL";
+        let ids1 = collect_exprs_with_resolver(
+            &expr,
+            "where",
+            true,
+            source_str,
+            &mut metrics,
+            Some(&schema),
+            &resolver,
+            &resolver,
+        );
+        assert_eq!(ids1.len(), 1);
+        
+        // Call it again to hit deduplication path
+        let ids2 = collect_exprs_with_resolver(
+            &expr,
+            "where",
+            true,
+            source_str,
+            &mut metrics,
+            Some(&schema),
+            &resolver,
+            &resolver,
+        );
+        assert_eq!(ids2.len(), 1);
+
+        // 7. location_offset and expression_span edge cases
+        assert!(location_offset("test", 0, 0).is_none());
+        assert!(location_offset("test", 5, 5).is_none());
+        assert!(expression_span(&expr, "where", "").is_none());
+
+        // 8. Join operators coverage
+        use sqlparser::ast::{JoinConstraint, JoinOperator, ValueWithSpan, Value};
+        let op_expr = sqlparser::ast::Expr::Value(ValueWithSpan { value: Value::Null, span: sqlparser::tokenizer::Span::empty() });
+        let operators = vec![
+            JoinOperator::Join(JoinConstraint::On(op_expr.clone())),
+            JoinOperator::Inner(JoinConstraint::On(op_expr.clone())),
+            JoinOperator::Left(JoinConstraint::On(op_expr.clone())),
+            JoinOperator::LeftOuter(JoinConstraint::On(op_expr.clone())),
+            JoinOperator::Right(JoinConstraint::On(op_expr.clone())),
+            JoinOperator::RightOuter(JoinConstraint::On(op_expr.clone())),
+            JoinOperator::FullOuter(JoinConstraint::On(op_expr.clone())),
+            JoinOperator::CrossJoin(JoinConstraint::On(op_expr.clone())),
+            JoinOperator::Semi(JoinConstraint::On(op_expr.clone())),
+            JoinOperator::LeftSemi(JoinConstraint::On(op_expr.clone())),
+            JoinOperator::RightSemi(JoinConstraint::On(op_expr.clone())),
+            JoinOperator::Anti(JoinConstraint::On(op_expr.clone())),
+            JoinOperator::LeftAnti(JoinConstraint::On(op_expr.clone())),
+            JoinOperator::RightAnti(JoinConstraint::On(op_expr.clone())),
+            JoinOperator::StraightJoin(JoinConstraint::On(op_expr.clone())),
+            JoinOperator::Join(JoinConstraint::None),
+        ];
+        for op in operators {
+            let _ = join_expression(&op);
+        }
     }
 }

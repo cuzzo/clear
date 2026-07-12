@@ -12,6 +12,9 @@ pub use driver::{
     cover_mysql, cover_postgres, cover_sqlite, execute_mysql_setup, execute_postgres_setup,
     execute_sqlite_setup,
 };
-pub use hazard::{analyze_hazards, HazardFinding, HazardKind, HazardReport};
+pub use hazard::{
+    analyze_hazards, analyze_hazards_with_looker, parse_lookml, HazardFinding, HazardKind,
+    HazardReport, LookerJoin,
+};
 pub use model::{CoverageMetric, SourceFileCoverage, ThreeValuedLogicState};
 pub use parser::{analyze_sql, DialectName};

@@ -127,6 +127,7 @@ where
             })
             .collect();
 
+        let mut last_commit_hash = None;
         for (commit_idx, commit) in commits.into_iter().enumerate().skip(start_idx) {
             self.storage.insert_metadata(&commit)?;
             let mut current = HashMap::new();
@@ -261,13 +262,16 @@ where
                     .push(unit.id.clone());
             }
             stats.commits += 1;
+            last_commit_hash = Some(commit.hash.clone());
+        }
 
+        if let Some(hash) = last_commit_hash {
             let state = EngineState {
                 previous: previous.clone(),
                 aliases: aliases.clone(),
             };
             let state_json = serde_json::to_string(&state)?;
-            self.storage.save_engine_state(&commit.hash, &state_json)?;
+            self.storage.save_engine_state(&hash, &state_json)?;
         }
 
         Ok(stats)

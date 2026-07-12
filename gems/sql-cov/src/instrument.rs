@@ -69,3 +69,79 @@ fn telemetry_query(analysis: &Analysis, domain: &TelemetryDomain) -> Option<Tele
         parameter_indices,
     })
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::model::SourceFileCoverage;
+    use crate::parser::{Analysis, TelemetryDomain};
+
+    #[test]
+    fn test_telemetry_query_empty_expression_ids() {
+        let analysis = Analysis {
+            domains: vec![TelemetryDomain {
+                expression_ids: vec![],
+                from_sql: "users".to_string(),
+                with_sql: "".to_string(),
+            }],
+            coverage: SourceFileCoverage {
+                format: "sql-cov/v1".to_string(),
+                file_path: "test.sql".to_string(),
+                dialect: "sqlite".to_string(),
+                raw_source: "".to_string(),
+                statements: vec![],
+                metrics: vec![],
+                unsupported: vec![],
+            },
+            statement_sql: vec![],
+        };
+        let queries = telemetry_queries(&analysis);
+        assert!(queries.is_empty());
+    }
+
+    #[test]
+    fn test_telemetry_query_empty_from_sql() {
+        let mut metrics = vec![];
+        metrics.push(crate::model::CoverageMetric {
+            span: crate::model::ExpressionSpan {
+                id: 0,
+                start_offset: 0,
+                end_offset: 1,
+                start_line: 1,
+                start_column: 1,
+                end_line: 1,
+                end_column: 2,
+                raw_expression: "1".to_string(),
+                normalized_expression: "1".to_string(),
+                context: "".to_string(),
+                nullable: false,
+                parameter_indices: vec![],
+            },
+            measurable: true,
+            hit_true_count: 0,
+            hit_false_count: 0,
+            hit_unknown_count: 0,
+        });
+
+        let analysis = Analysis {
+            domains: vec![TelemetryDomain {
+                expression_ids: vec![0],
+                from_sql: "".to_string(),
+                with_sql: "".to_string(),
+            }],
+            coverage: SourceFileCoverage {
+                format: "sql-cov/v1".to_string(),
+                file_path: "test.sql".to_string(),
+                dialect: "sqlite".to_string(),
+                raw_source: "".to_string(),
+                statements: vec![],
+                metrics,
+                unsupported: vec![],
+            },
+            statement_sql: vec![],
+        };
+        let queries = telemetry_queries(&analysis);
+        assert_eq!(queries.len(), 1);
+        assert_eq!(queries[0].sql, "SELECT COUNT(CASE WHEN __cov_0 IS TRUE THEN 1 END) AS __cov_0_true, COUNT(CASE WHEN __cov_0 IS FALSE THEN 1 END) AS __cov_0_false, COUNT(CASE WHEN __cov_0 IS NULL THEN 1 END) AS __cov_0_unknown FROM (SELECT (1) AS __cov_0) AS __cov_raw");
+    }
+}

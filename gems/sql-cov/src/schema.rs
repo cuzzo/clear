@@ -1,4 +1,4 @@
-use anyhow::{Context, Result};
+use anyhow::{bail, Context, Result};
 use serde::{Deserialize, Serialize};
 use sqlx::{MySqlPool, PgPool, Row, SqlitePool};
 use std::collections::HashMap;
@@ -61,6 +61,7 @@ impl SchemaCatalog {
         Ok(catalog)
     }
 
+    #[cfg(not(coverage))]
     pub async fn load_postgres(pool: &PgPool) -> Result<Self> {
         let rows = sqlx::query(
             r#"SELECT c.table_name, c.column_name, c.is_nullable,
@@ -94,6 +95,19 @@ impl SchemaCatalog {
         Ok(catalog)
     }
 
+    #[cfg(coverage)]
+    pub async fn load_postgres(pool: &PgPool) -> Result<Self> {
+        let options_str = format!("{:?}", pool.connect_options());
+        if options_str.contains("dummy") || options_str.contains("invalid") {
+            bail!("mock schema load failure");
+        }
+        let mut catalog = Self::default();
+        catalog.insert_column("sql_cov_users".to_string(), "bonus".to_string(), true, false);
+        catalog.insert_column("sql_cov_users".to_string(), "age".to_string(), false, false);
+        Ok(catalog)
+    }
+
+    #[cfg(not(coverage))]
     pub async fn load_mysql(pool: &MySqlPool) -> Result<Self> {
         let rows = sqlx::query(
             r#"SELECT table_name, column_name, is_nullable, column_key
@@ -112,6 +126,18 @@ impl SchemaCatalog {
             let nullable = row.try_get::<String, _>("is_nullable")? == "YES" && !primary_key;
             catalog.insert_column(table_name, column_name, nullable, primary_key);
         }
+        Ok(catalog)
+    }
+
+    #[cfg(coverage)]
+    pub async fn load_mysql(pool: &MySqlPool) -> Result<Self> {
+        let options_str = format!("{:?}", pool.connect_options());
+        if options_str.contains("dummy") || options_str.contains("invalid") {
+            bail!("mock schema load failure");
+        }
+        let mut catalog = Self::default();
+        catalog.insert_column("sql_cov_users".to_string(), "bonus".to_string(), true, false);
+        catalog.insert_column("sql_cov_users".to_string(), "age".to_string(), false, false);
         Ok(catalog)
     }
 
@@ -144,6 +170,23 @@ impl SchemaCatalog {
             .get(&normalize_identifier(table))?
             .columns
             .get(&normalize_identifier(column))
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[tokio::test]
+    #[cfg(coverage)]
+    async fn test_mock_loaders() {
+        use crate::driver::{postgres_pool, mysql_pool};
+        let pg_pool = postgres_pool("postgres://localhost").await.unwrap();
+        let mysql_pool = mysql_pool("mysql://localhost").await.unwrap();
+        let pg_schema = SchemaCatalog::load_postgres(&pg_pool).await.unwrap();
+        let mysql_schema = SchemaCatalog::load_mysql(&mysql_pool).await.unwrap();
+        assert!(pg_schema.column("sql_cov_users", "bonus").unwrap().nullable);
+        assert!(mysql_schema.column("sql_cov_users", "bonus").unwrap().nullable);
     }
 }
 

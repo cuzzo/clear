@@ -153,3 +153,48 @@ fn push_source_segment(output: &mut String, source: &str, state: u8) {
     };
     output.push_str(&format!("<mark class=\"{class}\">{escaped}</mark>"));
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::model::{CoverageMetric, ExpressionSpan};
+
+    #[test]
+    fn test_reporter_edge_cases() {
+        let mut coverage = SourceFileCoverage {
+            format: "sql-cov/v1".to_string(),
+            file_path: "test.sql".to_string(),
+            dialect: "sqlite".to_string(),
+            raw_source: "SELECT age".to_string(),
+            statements: vec![],
+            metrics: vec![],
+            unsupported: vec![],
+        };
+        
+        let h = html(&coverage);
+        assert!(h.contains("100.0%"));
+
+        coverage.metrics.push(CoverageMetric {
+            span: ExpressionSpan {
+                id: 0,
+                start_offset: 7,
+                end_offset: 10,
+                start_line: 1,
+                start_column: 8,
+                end_line: 1,
+                end_column: 11,
+                raw_expression: "age".to_string(),
+                normalized_expression: "age".to_string(),
+                context: "".to_string(),
+                nullable: false,
+                parameter_indices: vec![],
+            },
+            measurable: false,
+            hit_true_count: 0,
+            hit_false_count: 0,
+            hit_unknown_count: 0,
+        });
+        let h2 = html(&coverage);
+        assert!(h2.contains("class=\"unsupported\""));
+    }
+}

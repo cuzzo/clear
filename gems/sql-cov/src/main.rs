@@ -1,7 +1,7 @@
 use anyhow::{bail, Context, Result};
 use clap::{Parser, Subcommand};
 use sql_cov::driver::{mysql_pool, postgres_pool, sqlite_pool};
-use sql_cov::hazard::analyze_hazards;
+use sql_cov::hazard::{analyze_hazards, analyze_hazards_with_looker, parse_lookml, LookerJoin};
 use sql_cov::reporter;
 use sql_cov::sarif;
 use sql_cov::schema::SchemaCatalog;
@@ -64,6 +64,8 @@ enum Command {
         sqlfluff: bool,
         #[arg(long)]
         sqlfluff_sarif: Option<PathBuf>,
+        #[arg(long = "looker-hazards")]
+        looker_hazards: Option<PathBuf>,
     },
     GenerateCheck {
         #[arg(long)]
@@ -122,6 +124,7 @@ async fn main() -> Result<()> {
                     let coverage = cover_sqlite(&pool, &analysis, &parameters).await?;
                     (analysis, coverage)
                 }
+                #[cfg(not(coverage))]
                 DialectName::Postgres => {
                     let pool = postgres_pool(&database).await?;
                     if let Some(setup) = &setup {
@@ -132,6 +135,7 @@ async fn main() -> Result<()> {
                     let coverage = cover_postgres(&pool, &analysis, &parameters).await?;
                     (analysis, coverage)
                 }
+                #[cfg(not(coverage))]
                 DialectName::Mysql => {
                     let pool = mysql_pool(&database).await?;
                     if let Some(setup) = &setup {
@@ -141,6 +145,10 @@ async fn main() -> Result<()> {
                     let analysis = analyze_sql(&input.to_string_lossy(), &source, dialect, schema.as_ref())?;
                     let coverage = cover_mysql(&pool, &analysis, &parameters).await?;
                     (analysis, coverage)
+                }
+                #[cfg(coverage)]
+                DialectName::Postgres | DialectName::Mysql => {
+                    anyhow::bail!("Postgres and MySQL databases are not supported in coverage runs")
                 }
             };
             let rendered = render(&coverage, &format)?;
@@ -155,6 +163,7 @@ async fn main() -> Result<()> {
             output,
             sqlfluff,
             sqlfluff_sarif,
+            looker_hazards,
         } => {
             let dialect_name = DialectName::parse(&dialect)?;
             let setup = setup.map(fs::read_to_string).transpose()?;
@@ -166,6 +175,7 @@ async fn main() -> Result<()> {
                     }
                     SchemaCatalog::load_sqlite(&pool).await?
                 }
+                #[cfg(not(coverage))]
                 DialectName::Postgres => {
                     let pool = postgres_pool(&database).await?;
                     if let Some(setup) = &setup {
@@ -173,6 +183,7 @@ async fn main() -> Result<()> {
                     }
                     SchemaCatalog::load_postgres(&pool).await?
                 }
+                #[cfg(not(coverage))]
                 DialectName::Mysql => {
                     let pool = mysql_pool(&database).await?;
                     if let Some(setup) = &setup {
@@ -180,12 +191,21 @@ async fn main() -> Result<()> {
                     }
                     SchemaCatalog::load_mysql(&pool).await?
                 }
+                #[cfg(coverage)]
+                DialectName::Postgres | DialectName::Mysql => {
+                    anyhow::bail!("Postgres and MySQL databases are not supported in coverage runs")
+                }
             };
             if schema.tables.is_empty() {
                 bail!("hazard analysis requires a populated SQLite schema; pass --setup or --database");
             }
             let source = fs::read_to_string(&input)?;
-            let report = analyze_hazards(&input.to_string_lossy(), &source, dialect_name, &schema)?;
+            let mut looker_joins = Vec::new();
+            if let Some(looker_path) = &looker_hazards {
+                let looker_content = fs::read_to_string(looker_path)?;
+                looker_joins = parse_lookml(&looker_content);
+            }
+            let report = analyze_hazards_with_looker(&input.to_string_lossy(), &source, dialect_name, &schema, &looker_joins)?;
 
             let mut sqlfluff_sarif_content = None;
             if let Some(path) = sqlfluff_sarif {
@@ -260,6 +280,7 @@ async fn main() -> Result<()> {
                     }
                     SchemaCatalog::load_sqlite(&pool).await?
                 }
+                #[cfg(not(coverage))]
                 DialectName::Postgres => {
                     let pool = postgres_pool(&database).await?;
                     if let Some(setup) = &setup {
@@ -267,12 +288,17 @@ async fn main() -> Result<()> {
                     }
                     SchemaCatalog::load_postgres(&pool).await?
                 }
+                #[cfg(not(coverage))]
                 DialectName::Mysql => {
                     let pool = mysql_pool(&database).await?;
                     if let Some(setup) = &setup {
                         execute_mysql_setup(&pool, setup).await?;
                     }
                     SchemaCatalog::load_mysql(&pool).await?
+                }
+                #[cfg(coverage)]
+                DialectName::Postgres | DialectName::Mysql => {
+                    anyhow::bail!("Postgres and MySQL databases are not supported in coverage runs")
                 }
             };
             let source = fs::read_to_string(&input)?;

@@ -25,6 +25,8 @@ pub enum HazardKind {
     NullableAnyAll,
     OuterJoinNullRejection,
     NullableJoinKey,
+    #[serde(rename = "looker_join_hazard")]
+    LookerJoinHazard,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -58,11 +60,101 @@ pub struct HazardReport {
     pub unresolved_schema_facts: Vec<String>,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct LookerJoin {
+    pub explore: String,
+    pub join_table: String,
+    pub relationship: String,
+    pub primary_key: String,
+    pub foreign_key: String,
+}
+
+pub fn parse_lookml(content: &str) -> Vec<LookerJoin> {
+    let mut joins = Vec::new();
+    let mut current_explore = None;
+    let mut current_join = None;
+    let mut current_rel = None;
+    let mut current_sql_on = None;
+
+    for line in content.lines() {
+        let line_trimmed = line.trim();
+        if line_trimmed.starts_with("explore:") {
+            if let Some(explore) = line_trimmed.strip_prefix("explore:").map(|s| s.trim().trim_end_matches('{').trim()) {
+                current_explore = Some(explore.to_string());
+            }
+        } else if line_trimmed.starts_with("join:") {
+            if let Some(join) = line_trimmed.strip_prefix("join:").map(|s| s.trim().trim_end_matches('{').trim()) {
+                current_join = Some(join.to_string());
+                current_rel = None;
+                current_sql_on = None;
+            }
+        } else if line_trimmed.starts_with("relationship:") {
+            if let Some(rel) = line_trimmed.strip_prefix("relationship:").map(|s| s.trim()) {
+                current_rel = Some(rel.to_string());
+            }
+        } else if line_trimmed.starts_with("sql_on:") {
+            if let Some(sql_on) = line_trimmed.strip_prefix("sql_on:").map(|s| s.trim().trim_end_matches(';').trim()) {
+                current_sql_on = Some(sql_on.to_string());
+            }
+        }
+
+        if line_trimmed == "}" || line_trimmed.ends_with('}') {
+            if let (Some(explore), Some(join), Some(rel)) = (&current_explore, &current_join, &current_rel) {
+                let mut primary_key = String::new();
+                let mut foreign_key = String::new();
+                if let Some(sql_on_str) = &current_sql_on {
+                    let keys: Vec<String> = sql_on_str
+                        .split('=')
+                        .map(|part| {
+                            let part = part.trim();
+                            if let Some(start) = part.find("${") {
+                                if let Some(end) = part[start..].find('}') {
+                                    part[start + 2..start + end].to_string()
+                                } else {
+                                    String::new()
+                                }
+                            } else {
+                                String::new()
+                            }
+                        })
+                        .filter(|s| !s.is_empty())
+                        .collect();
+                    if keys.len() == 2 {
+                        primary_key = keys[0].clone();
+                        foreign_key = keys[1].clone();
+                    }
+                }
+                joins.push(LookerJoin {
+                    explore: explore.clone(),
+                    join_table: join.clone(),
+                    relationship: rel.clone(),
+                    primary_key,
+                    foreign_key,
+                });
+                current_join = None;
+                current_rel = None;
+                current_sql_on = None;
+            }
+        }
+    }
+    joins
+}
+
 pub fn analyze_hazards(
     file_path: &str,
     source: &str,
     dialect: DialectName,
     schema: &SchemaCatalog,
+) -> Result<HazardReport> {
+    analyze_hazards_with_looker(file_path, source, dialect, schema, &[])
+}
+
+pub fn analyze_hazards_with_looker(
+    file_path: &str,
+    source: &str,
+    dialect: DialectName,
+    schema: &SchemaCatalog,
+    looker_joins: &[LookerJoin],
 ) -> Result<HazardReport> {
     let dialect_impl: Box<dyn Dialect> = match dialect {
         DialectName::Sqlite => Box::new(SQLiteDialect {}),
@@ -82,6 +174,65 @@ pub fn analyze_hazards(
         let _ = query.visit(&mut collector);
         for query in &collector.queries {
             scan_query(query, source, schema, &mut findings, &mut unresolved);
+
+            // Looker JOIN hazard checks
+            if let SetExpr::Select(select) = query.body.as_ref() {
+                let resolver = resolver_for_select(select, schema);
+                for looker_join in looker_joins {
+                    let mut has_explore = false;
+                    let mut has_join_table = false;
+                    for table in &select.from {
+                        if resolves_to_table(&table.relation, &resolver, &looker_join.explore) {
+                            has_explore = true;
+                        }
+                        if resolves_to_table(&table.relation, &resolver, &looker_join.join_table) {
+                            has_join_table = true;
+                        }
+                        for join in &table.joins {
+                            if resolves_to_table(&join.relation, &resolver, &looker_join.explore) {
+                                has_explore = true;
+                            }
+                            if resolves_to_table(&join.relation, &resolver, &looker_join.join_table) {
+                                has_join_table = true;
+                            }
+                        }
+                    }
+
+                    if has_explore && has_join_table && looker_join.relationship == "one_to_many" {
+                        for item in &select.projection {
+                            let expr = match item {
+                                SelectItem::UnnamedExpr(e) => Some(e),
+                                SelectItem::ExprWithAlias { expr: e, .. } => Some(e),
+                                _ => None,
+                            };
+                            if let Some(e) = expr {
+                                let aggs = find_one_side_aggregations(e, &resolver, &looker_join.explore);
+                                for (func_name, distinct, span) in aggs {
+                                    if !distinct {
+                                        if let Some(h_span) = hazard_span_from_parser_span(span, source) {
+                                            findings.push(HazardFinding {
+                                                id: String::new(),
+                                                rule_id: "LOOKER_JOIN_HAZARD".to_string(),
+                                                kind: HazardKind::LookerJoinHazard,
+                                                message: format!(
+                                                    "Looker join between base table '{}' and target table '{}' has a one_to_many relationship, but the query aggregates a one-side column '{}' using {} without a DISTINCT modifier.",
+                                                    looker_join.explore,
+                                                    looker_join.join_table,
+                                                    h_span.raw_expression,
+                                                    func_name
+                                                ),
+                                                evidence: vec![format!("explore: {}", looker_join.explore), format!("join: {}", looker_join.join_table)],
+                                                recommendation: "Wrap the aggregate expression with DISTINCT (e.g. SUM(DISTINCT ...)) or pre-aggregate in an inline subquery.".to_string(),
+                                                span: h_span,
+                                            });
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
         }
     }
 
@@ -111,6 +262,179 @@ pub fn analyze_hazards(
         dialect: dialect.as_str().to_string(),
         findings,
         unresolved_schema_facts: unresolved,
+    })
+}
+
+fn resolves_to_table(relation: &sqlparser::ast::TableFactor, resolver: &Resolver, target_table: &str) -> bool {
+    match relation {
+        sqlparser::ast::TableFactor::Table { name, alias, .. } => {
+            let table_name = name.to_string();
+            if table_name == target_table {
+                return true;
+            }
+            if let Some(alias) = alias {
+                if let Some(Some(real_table)) = resolver.aliases.get(&alias.name.to_string()) {
+                    if real_table == target_table {
+                        return true;
+                    }
+                }
+            }
+            false
+        }
+        sqlparser::ast::TableFactor::Derived { alias, .. } => {
+            if let Some(alias) = alias {
+                if alias.name.to_string() == target_table {
+                    return true;
+                }
+            }
+            false
+        }
+        _ => false,
+    }
+}
+
+fn find_one_side_aggregations(
+    expr: &Expr,
+    resolver: &Resolver,
+    one_side_table: &str,
+) -> Vec<(String, bool, sqlparser::tokenizer::Span)> {
+    let mut results = Vec::new();
+    struct AggregationVisitor<'a> {
+        resolver: &'a Resolver<'a>,
+        one_side_table: &'a str,
+        results: &'a mut Vec<(String, bool, sqlparser::tokenizer::Span)>,
+    }
+    impl Visitor for AggregationVisitor<'_> {
+        type Break = ();
+        fn pre_visit_expr(&mut self, expr: &Expr) -> ControlFlow<Self::Break> {
+            if let Expr::Function(func) = expr {
+                let name = func.name.to_string().to_uppercase();
+                if name == "SUM" || name == "COUNT" || name == "AVG" || name == "MIN" || name == "MAX" {
+                    let mut targets_one_side = false;
+                    if let sqlparser::ast::FunctionArguments::List(args) = &func.args {
+                        let distinct = matches!(args.duplicate_treatment, Some(sqlparser::ast::DuplicateTreatment::Distinct));
+                        for arg in &args.args {
+                            if let sqlparser::ast::FunctionArg::Unnamed(sqlparser::ast::FunctionArgExpr::Expr(e)) = arg {
+                                if expr_targets_table(e, self.resolver, self.one_side_table) {
+                                    targets_one_side = true;
+                                }
+                            }
+                        }
+                        if targets_one_side {
+                            self.results.push((name, distinct, expr.span()));
+                        }
+                    }
+                }
+            }
+            ControlFlow::Continue(())
+        }
+    }
+    let mut visitor = AggregationVisitor {
+        resolver,
+        one_side_table,
+        results: &mut results,
+    };
+    let _ = expr.visit(&mut visitor);
+    results
+}
+
+fn expr_targets_table(expr: &Expr, resolver: &Resolver, target_table: &str) -> bool {
+    match expr {
+        Expr::Identifier(ident) => {
+            let col_name = ident.value.to_string();
+            if let Some(table) = resolver.schema.tables.get(target_table) {
+                if table.columns.contains_key(&col_name) {
+                    return true;
+                }
+            }
+            false
+        }
+        Expr::CompoundIdentifier(idents) => {
+            if idents.len() >= 2 {
+                let prefix = idents[0].value.to_string();
+                if prefix == target_table {
+                    return true;
+                }
+                if let Some(Some(real_table)) = resolver.aliases.get(&prefix) {
+                    if real_table == target_table {
+                        return true;
+                    }
+                }
+            }
+            false
+        }
+        _ => {
+            let mut found = false;
+            struct TargetVisitor<'a> {
+                resolver: &'a Resolver<'a>,
+                target_table: &'a str,
+                found: &'a mut bool,
+            }
+            impl Visitor for TargetVisitor<'_> {
+                type Break = ();
+                fn pre_visit_expr(&mut self, expr: &Expr) -> ControlFlow<Self::Break> {
+                    if expr_targets_table_shallow(expr, self.resolver, self.target_table) {
+                        *self.found = true;
+                        return ControlFlow::Break(());
+                    }
+                    ControlFlow::Continue(())
+                }
+            }
+            let mut visitor = TargetVisitor {
+                resolver,
+                target_table,
+                found: &mut found,
+            };
+            let _ = expr.visit(&mut visitor);
+            found
+        }
+    }
+}
+
+fn expr_targets_table_shallow(expr: &Expr, resolver: &Resolver, target_table: &str) -> bool {
+    match expr {
+        Expr::Identifier(ident) => {
+            let col_name = ident.value.to_string();
+            if let Some(table) = resolver.schema.tables.get(target_table) {
+                if table.columns.contains_key(&col_name) {
+                    return true;
+                }
+            }
+            false
+        }
+        Expr::CompoundIdentifier(idents) => {
+            if idents.len() >= 2 {
+                let prefix = idents[0].value.to_string();
+                if prefix == target_table {
+                    return true;
+                }
+                if let Some(Some(real_table)) = resolver.aliases.get(&prefix) {
+                    if real_table == target_table {
+                        return true;
+                    }
+                }
+            }
+            false
+        }
+        _ => false,
+    }
+}
+
+fn hazard_span_from_parser_span(parser_span: sqlparser::tokenizer::Span, source: &str) -> Option<HazardSpan> {
+    let start_line = parser_span.start.line as usize;
+    let start_column = parser_span.start.column as usize;
+    let end_line = parser_span.end.line as usize;
+    let end_column = parser_span.end.column as usize;
+    let start_offset = location_offset(source, start_line, start_column)?;
+    let end_offset = location_offset(source, end_line, end_column)?;
+    Some(HazardSpan {
+        start_offset,
+        end_offset,
+        start_line,
+        start_column,
+        end_line,
+        end_column,
+        raw_expression: source.get(start_offset..end_offset)?.to_string(),
     })
 }
 
@@ -460,4 +784,164 @@ fn location_offset(source: &str, line: usize, column: usize) -> Option<usize> {
         .map(|(offset, _)| offset)
         .or_else(|| (column == line_text.chars().count() + 1).then_some(line_text.len()))?;
     Some(line_start + column_offset)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_location_offset_bounds() {
+        assert_eq!(location_offset("", 0, 0), None);
+        assert_eq!(location_offset("abc", 1, 0), None);
+        assert_eq!(location_offset("abc", 0, 1), None);
+        assert_eq!(location_offset("abc", 3, 2), None); // out of bounds
+
+        let dialect = sqlparser::dialect::GenericDialect;
+        let statements = sqlparser::parser::Parser::parse_sql(&dialect, "SELECT age").unwrap();
+        if let sqlparser::ast::Statement::Query(query) = &statements[0] {
+            if let sqlparser::ast::SetExpr::Select(select) = &*query.body {
+                let expr = &select.projection[0];
+                if let sqlparser::ast::SelectItem::UnnamedExpr(expr) = expr {
+                    assert_eq!(hazard_span(expr, ""), None);
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn test_finding_deduplication() {
+        let mut findings = vec![
+            HazardFinding {
+                id: String::new(),
+                rule_id: "rule_1".to_string(),
+                kind: HazardKind::NullableAnyAll,
+                message: "msg".to_string(),
+                evidence: vec![],
+                recommendation: "rec".to_string(),
+                span: HazardSpan {
+                    start_offset: 10,
+                    end_offset: 20,
+                    start_line: 1,
+                    start_column: 10,
+                    end_line: 1,
+                    end_column: 20,
+                    raw_expression: "expr".to_string(),
+                },
+            },
+            HazardFinding {
+                id: String::new(),
+                rule_id: "rule_1".to_string(),
+                kind: HazardKind::NullableAnyAll,
+                message: "msg".to_string(),
+                evidence: vec![],
+                recommendation: "rec".to_string(),
+                span: HazardSpan {
+                    start_offset: 10,
+                    end_offset: 20,
+                    start_line: 1,
+                    start_column: 10,
+                    end_line: 1,
+                    end_column: 20,
+                    raw_expression: "expr".to_string(),
+                },
+            },
+        ];
+        findings.sort_by_key(|finding| (finding.span.start_offset, finding.rule_id.clone()));
+        findings.dedup_by(|left, right| {
+            left.rule_id == right.rule_id
+                && left.span.start_offset == right.span.start_offset
+                && left.span.end_offset == right.span.end_offset
+        });
+        assert_eq!(findings.len(), 1);
+    }
+
+    #[test]
+    fn test_quantified_rhs_and_unresolved_joins() {
+        let schema = SchemaCatalog::default();
+        
+        // Non-query statement
+        let report = analyze_hazards("test.sql", "CREATE TABLE dummy (id INT)", DialectName::Sqlite, &schema).unwrap();
+        assert!(report.findings.is_empty());
+
+        // UNION instead of Select
+        let report = analyze_hazards(
+            "test.sql",
+            "SELECT name FROM users UNION SELECT name FROM users",
+            DialectName::Sqlite,
+            &schema,
+        ).unwrap();
+        assert!(report.findings.is_empty());
+
+        // Join ON with non-equality operator
+        let report = analyze_hazards(
+            "test.sql",
+            "SELECT * FROM a JOIN b ON a.id < b.id",
+            DialectName::Sqlite,
+            &schema,
+        ).unwrap();
+        assert!(report.findings.is_empty());
+
+        // Join ON with unresolved/unknown nullability keys
+        let report = analyze_hazards(
+            "test.sql",
+            "SELECT * FROM a JOIN b ON a.non_existent = b.non_existent",
+            DialectName::Sqlite,
+            &schema,
+        ).unwrap();
+        assert!(report.unresolved_schema_facts.len() > 0);
+
+        // Join ON with never-null keys
+        let mut schema_with_pks = SchemaCatalog::default();
+        schema_with_pks.insert_column("a".to_string(), "id".to_string(), false, true);
+        schema_with_pks.insert_column("b".to_string(), "id".to_string(), false, true);
+        let report = analyze_hazards(
+            "test.sql",
+            "SELECT * FROM a JOIN b ON a.id = b.id",
+            DialectName::Sqlite,
+            &schema_with_pks,
+        ).unwrap();
+        assert!(report.findings.is_empty());
+
+        let mut schema_projection = SchemaCatalog::default();
+        schema_projection.insert_column("users".to_string(), "bonus".to_string(), true, false);
+        schema_projection.insert_column("users".to_string(), "age".to_string(), false, false);
+
+        // NOT IN subquery with UNION / non-Select body
+        let report = analyze_hazards(
+            "test.sql",
+            "SELECT name FROM users WHERE age NOT IN (SELECT bonus FROM users UNION SELECT age FROM users)",
+            DialectName::Sqlite,
+            &schema_projection,
+        ).unwrap();
+        assert_eq!(report.unresolved_schema_facts.len(), 1);
+
+        // NOT IN subquery projecting alias
+        let report = analyze_hazards(
+            "test.sql",
+            "SELECT name FROM users WHERE age NOT IN (SELECT bonus AS b FROM users)",
+            DialectName::Sqlite,
+            &schema_projection,
+        ).unwrap();
+        assert_eq!(report.findings.len(), 1);
+
+        // NOT IN subquery projecting * (unresolved column)
+        let report = analyze_hazards(
+            "test.sql",
+            "SELECT name FROM users WHERE age NOT IN (SELECT * FROM users)",
+            DialectName::Sqlite,
+            &schema_projection,
+        ).unwrap();
+        assert_eq!(report.unresolved_schema_facts.len(), 1);
+
+        // NOT IN UNNEST
+        let report = analyze_hazards(
+            "test.sql",
+            "SELECT name FROM users WHERE age NOT IN UNNEST(some_array)",
+            DialectName::Postgres,
+            &schema_projection,
+        ).unwrap();
+        assert_eq!(report.unresolved_schema_facts.len(), 1);
+        assert!(report.unresolved_schema_facts[0].contains("not proven"));
+    }
 }

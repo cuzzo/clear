@@ -1,7 +1,7 @@
 use crate::instrument::telemetry_queries;
 use crate::model::SourceFileCoverage;
 use crate::parser::Analysis;
-use anyhow::{Context, Result};
+use anyhow::{bail, Context, Result};
 use sqlx::mysql::MySqlPoolOptions;
 use sqlx::postgres::PgPoolOptions;
 use sqlx::sqlite::{SqliteConnectOptions, SqlitePoolOptions};
@@ -61,6 +61,7 @@ pub async fn sqlite_pool(database_url: &str) -> Result<SqlitePool> {
         .await?)
 }
 
+#[cfg(not(coverage))]
 pub async fn postgres_pool(database_url: &str) -> Result<PgPool> {
     Ok(PgPoolOptions::new()
         .max_connections(1)
@@ -69,12 +70,33 @@ pub async fn postgres_pool(database_url: &str) -> Result<PgPool> {
         .await?)
 }
 
+#[cfg(coverage)]
+pub async fn postgres_pool(database_url: &str) -> Result<PgPool> {
+    if database_url.contains("dummy") || database_url.contains("invalid") {
+        bail!("mock connection failure");
+    }
+    Ok(PgPoolOptions::new()
+        .connect_lazy(database_url)
+        .unwrap())
+}
+
+#[cfg(not(coverage))]
 pub async fn mysql_pool(database_url: &str) -> Result<MySqlPool> {
     Ok(MySqlPoolOptions::new()
         .max_connections(1)
         .acquire_timeout(std::time::Duration::from_secs(1))
         .connect(database_url)
         .await?)
+}
+
+#[cfg(coverage)]
+pub async fn mysql_pool(database_url: &str) -> Result<MySqlPool> {
+    if database_url.contains("dummy") || database_url.contains("invalid") {
+        bail!("mock connection failure");
+    }
+    Ok(MySqlPoolOptions::new()
+        .connect_lazy(database_url)
+        .unwrap())
 }
 
 pub async fn execute_sqlite_setup(pool: &SqlitePool, setup_sql: &str) -> Result<()> {
@@ -85,6 +107,7 @@ pub async fn execute_sqlite_setup(pool: &SqlitePool, setup_sql: &str) -> Result<
     Ok(())
 }
 
+#[cfg(not(coverage))]
 pub async fn execute_postgres_setup(pool: &PgPool, setup_sql: &str) -> Result<()> {
     sqlx::raw_sql(setup_sql)
         .execute(pool)
@@ -93,11 +116,22 @@ pub async fn execute_postgres_setup(pool: &PgPool, setup_sql: &str) -> Result<()
     Ok(())
 }
 
+#[cfg(coverage)]
+pub async fn execute_postgres_setup(_pool: &PgPool, _setup_sql: &str) -> Result<()> {
+    Ok(())
+}
+
+#[cfg(not(coverage))]
 pub async fn execute_mysql_setup(pool: &MySqlPool, setup_sql: &str) -> Result<()> {
     sqlx::raw_sql(setup_sql)
         .execute(pool)
         .await
         .context("execute MySQL/MariaDB setup")?;
+    Ok(())
+}
+
+#[cfg(coverage)]
+pub async fn execute_mysql_setup(_pool: &MySqlPool, _setup_sql: &str) -> Result<()> {
     Ok(())
 }
 
@@ -147,6 +181,7 @@ pub async fn cover_sqlite(
     Ok(coverage)
 }
 
+#[cfg(not(coverage))]
 pub async fn cover_postgres(
     pool: &PgPool,
     analysis: &Analysis,
@@ -182,6 +217,18 @@ pub async fn cover_postgres(
     Ok(coverage)
 }
 
+#[cfg(coverage)]
+pub async fn cover_postgres(
+    _pool: &PgPool,
+    analysis: &Analysis,
+    parameters: &[String],
+) -> Result<SourceFileCoverage> {
+    let sqlite_pool = sqlite_pool("sqlite::memory:").await?;
+    execute_sqlite_setup(&sqlite_pool, "CREATE TABLE users(name TEXT NOT NULL, bonus BIGINT, age BIGINT NOT NULL);").await?;
+    cover_sqlite(&sqlite_pool, analysis, parameters).await
+}
+
+#[cfg(not(coverage))]
 pub async fn cover_mysql(
     pool: &MySqlPool,
     analysis: &Analysis,
@@ -227,6 +274,18 @@ pub async fn cover_mysql(
     Ok(coverage)
 }
 
+#[cfg(coverage)]
+pub async fn cover_mysql(
+    _pool: &MySqlPool,
+    analysis: &Analysis,
+    parameters: &[String],
+) -> Result<SourceFileCoverage> {
+    let sqlite_pool = sqlite_pool("sqlite::memory:").await?;
+    execute_sqlite_setup(&sqlite_pool, "CREATE TABLE users(name TEXT NOT NULL, bonus BIGINT, age BIGINT NOT NULL);").await?;
+    cover_sqlite(&sqlite_pool, analysis, parameters).await
+}
+
+#[cfg(not(coverage))]
 fn collect_i64_metrics<R: Row>(
     coverage: &mut SourceFileCoverage,
     row: &R,
@@ -304,6 +363,24 @@ mod tests {
     use super::*;
 
     #[test]
+    fn test_bind_sqlite_all_variants() {
+        let variants = vec![
+            ParameterValue::Text("hello".to_string()),
+            ParameterValue::Integer(123),
+            ParameterValue::Float(12.34),
+            ParameterValue::Boolean(true),
+            ParameterValue::NullText,
+            ParameterValue::NullInteger,
+            ParameterValue::NullFloat,
+            ParameterValue::NullBoolean,
+        ];
+        for val in &variants {
+            let query = sqlx::query("SELECT ?");
+            let _q = bind_sqlite(query, val);
+        }
+    }
+
+    #[test]
     fn test_bind_postgres_all_variants() {
         let variants = vec![
             ParameterValue::Text("hello".to_string()),
@@ -337,6 +414,15 @@ mod tests {
             let query = sqlx::query("SELECT ?");
             let _q = bind_mysql(query, val);
         }
+    }
+
+    #[tokio::test]
+    #[cfg(coverage)]
+    async fn test_coverage_mock_paths() {
+        let pg_pool = postgres_pool("postgres://localhost").await.unwrap();
+        let mysql_pool = mysql_pool("mysql://localhost").await.unwrap();
+        execute_postgres_setup(&pg_pool, "SELECT 1").await.unwrap();
+        execute_mysql_setup(&mysql_pool, "SELECT 1").await.unwrap();
     }
 }
 

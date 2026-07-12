@@ -423,3 +423,153 @@ pub fn join_expr(operator: &JoinOperator) -> Option<&Expr> {
         _ => None,
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use sqlparser::dialect::GenericDialect;
+    use sqlparser::parser::Parser;
+    use sqlparser::ast::{Expr, FunctionArg, FunctionArgExpr, Value};
+
+    #[test]
+    fn test_nullability_edge_cases() {
+        let dialect = GenericDialect;
+        let schema = SchemaCatalog::default();
+
+        // 1. Right join / Full outer join
+        let sql = "SELECT * FROM a RIGHT JOIN b ON a.id = b.id FULL OUTER JOIN c ON b.id = c.id";
+        let statements = Parser::parse_sql(&dialect, sql).unwrap();
+        let sqlparser::ast::Statement::Query(query) = &statements[0] else { panic!() };
+        let sqlparser::ast::SetExpr::Select(select) = &*query.body else { panic!() };
+        let resolver = resolver_for_select(select, &schema);
+        assert!(resolver.aliases.contains_key("a"));
+
+        // 2. TableFactor::Derived and other factors
+        let sql = "SELECT * FROM (SELECT 1) AS sub";
+        let statements = Parser::parse_sql(&dialect, sql).unwrap();
+        let sqlparser::ast::Statement::Query(query2) = &statements[0] else { panic!() };
+        let sqlparser::ast::SetExpr::Select(select2) = &*query2.body else { panic!() };
+        let resolver = resolver_for_select(select2, &schema);
+        assert!(resolver.aliases.contains_key("sub"));
+
+        // 2.1 TableFactor::Derived outer_nullable
+        let sql_join = "SELECT * FROM a LEFT JOIN (SELECT 1) AS sub ON a.id = sub.id";
+        let statements_join = Parser::parse_sql(&dialect, sql_join).unwrap();
+        let sqlparser::ast::Statement::Query(query_join) = &statements_join[0] else { panic!() };
+        let sqlparser::ast::SetExpr::Select(select_join) = &*query_join.body else { panic!() };
+        let resolver_join = resolver_for_select(select_join, &schema);
+        assert!(resolver_join.outer_nullable_aliases.contains("sub"));
+
+        // 2.2 TableFactor fallback
+        let mut dummy_resolver = Resolver::new(&schema);
+        let factor = sqlparser::ast::TableFactor::TableFunction {
+            expr: Expr::Value(sqlparser::ast::ValueWithSpan { value: Value::Null, span: sqlparser::tokenizer::Span::empty() }),
+            alias: None,
+        };
+        register_factor(&factor, false, &mut dummy_resolver);
+
+        // 3. Between, Null literal nullability
+        let sql = "SELECT 1 BETWEEN NULL AND 10";
+        let statements = Parser::parse_sql(&dialect, sql).unwrap();
+        let sqlparser::ast::Statement::Query(query3) = &statements[0] else { panic!() };
+        let sqlparser::ast::SetExpr::Select(select3) = &*query3.body else { panic!() };
+        let resolver3 = Resolver {
+            schema: &schema,
+            aliases: HashMap::new(),
+            outer_nullable_aliases: HashSet::new(),
+        };
+        let sqlparser::ast::SelectItem::UnnamedExpr(expr3) = &select3.projection[0] else { panic!() };
+        let ev3 = nullability(expr3, &resolver3, false);
+        assert_eq!(ev3.state, Nullability::Nullable);
+
+        // 3.1 NullableColumnVisitor Null literal
+        let mut schema_visitor = SchemaCatalog::default();
+        schema_visitor.insert_column("users".to_string(), "age".to_string(), false, false);
+        let mut visitor_resolver = Resolver::new(&schema_visitor);
+        visitor_resolver.aliases.insert("users".to_string(), Some("users".to_string()));
+        let sql_lit = "SELECT age + NULL FROM users";
+        let statements_lit = Parser::parse_sql(&dialect, sql_lit).unwrap();
+        let sqlparser::ast::Statement::Query(query_lit) = &statements_lit[0] else { panic!() };
+        let sqlparser::ast::SetExpr::Select(select_lit) = &*query_lit.body else { panic!() };
+        let sqlparser::ast::SelectItem::UnnamedExpr(expr_lit) = &select_lit.projection[0] else { panic!() };
+        let ev_lit = nullability(expr_lit, &visitor_resolver, false);
+        assert_eq!(ev_lit.state, Nullability::Nullable);
+
+        // 4. Coalesce arguments
+        let sql = "SELECT COALESCE(NULL, 1), COALESCE(), COALESCE(bonus)" ;
+        let mut schema_with_bonus = SchemaCatalog::default();
+        schema_with_bonus.insert_column("users".to_string(), "bonus".to_string(), true, false);
+        let mut aliases = HashMap::new();
+        aliases.insert("users".to_string(), Some("users".to_string()));
+        let statements = Parser::parse_sql(&dialect, sql).unwrap();
+        let sqlparser::ast::Statement::Query(query4) = &statements[0] else { panic!() };
+        let sqlparser::ast::SetExpr::Select(select4) = &*query4.body else { panic!() };
+        let resolver4 = Resolver {
+            schema: &schema_with_bonus,
+            aliases,
+            outer_nullable_aliases: HashSet::new(),
+        };
+        // COALESCE(NULL, 1) -> Never nullable since 1 is never nullable
+        let sqlparser::ast::SelectItem::UnnamedExpr(Expr::Function(func1)) = &select4.projection[0] else { panic!() };
+        let ev_c1 = coalesce_nullability(&func1.args, &resolver4, false);
+        assert_eq!(ev_c1.state, Nullability::Never);
+        
+        // COALESCE() empty -> Unknown
+        let sqlparser::ast::SelectItem::UnnamedExpr(Expr::Function(func2)) = &select4.projection[1] else { panic!() };
+        let ev_c2 = coalesce_nullability(&func2.args, &resolver4, false);
+        assert_eq!(ev_c2.state, Nullability::Unknown);
+        
+        // COALESCE(bonus) -> Nullable since bonus is nullable
+        let sqlparser::ast::SelectItem::UnnamedExpr(Expr::Function(func3)) = &select4.projection[2] else { panic!() };
+        let ev_c3 = coalesce_nullability(&func3.args, &resolver4, false);
+        assert_eq!(ev_c3.state, Nullability::Nullable);
+
+        // 4.1 Coalesce non-List and non-Unnamed/named variants
+        let ev_unresolved = coalesce_nullability(&sqlparser::ast::FunctionArguments::None, &resolver4, false);
+        assert_eq!(ev_unresolved.state, Nullability::Unknown);
+
+        // 5. resolve_qualified derived table and resolve_unqualified outer join nullable
+        let mut schema_with_cols = SchemaCatalog::default();
+        schema_with_cols.insert_column("a".to_string(), "id".to_string(), false, true);
+        let mut aliases = HashMap::new();
+        aliases.insert("sub".to_string(), None); // derived table
+        aliases.insert("a".to_string(), Some("a".to_string()));
+        let mut outer_nullable_aliases = HashSet::new();
+        outer_nullable_aliases.insert("a".to_string());
+        let resolver = Resolver {
+            schema: &schema_with_cols,
+            aliases,
+            outer_nullable_aliases,
+        };
+        let ev1 = resolve_qualified("sub", "id", &resolver, false);
+        assert_eq!(ev1.state, Nullability::Unknown);
+        
+        let ev2 = resolve_unqualified("id", &resolver);
+        assert_eq!(ev2.state, Nullability::Nullable);
+
+        // 6. JoinExpr match arms coverage
+        use sqlparser::ast::{JoinConstraint, JoinOperator, ValueWithSpan};
+        let expr = Expr::Value(ValueWithSpan { value: Value::Null, span: sqlparser::tokenizer::Span::empty() });
+        let operators = vec![
+            JoinOperator::Inner(JoinConstraint::On(expr.clone())),
+            JoinOperator::Left(JoinConstraint::On(expr.clone())),
+            JoinOperator::LeftOuter(JoinConstraint::On(expr.clone())),
+            JoinOperator::Right(JoinConstraint::On(expr.clone())),
+            JoinOperator::RightOuter(JoinConstraint::On(expr.clone())),
+            JoinOperator::FullOuter(JoinConstraint::On(expr.clone())),
+            JoinOperator::CrossJoin(JoinConstraint::On(expr.clone())),
+            JoinOperator::Semi(JoinConstraint::On(expr.clone())),
+            JoinOperator::LeftSemi(JoinConstraint::On(expr.clone())),
+            JoinOperator::RightSemi(JoinConstraint::On(expr.clone())),
+            JoinOperator::Anti(JoinConstraint::On(expr.clone())),
+            JoinOperator::LeftAnti(JoinConstraint::On(expr.clone())),
+            JoinOperator::RightAnti(JoinConstraint::On(expr.clone())),
+            JoinOperator::StraightJoin(JoinConstraint::On(expr.clone())),
+            JoinOperator::Join(JoinConstraint::None),
+            JoinOperator::Inner(JoinConstraint::Using(vec![])),
+        ];
+        for op in operators {
+            let _ = join_expr(&op);
+        }
+    }
+}
