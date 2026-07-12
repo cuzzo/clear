@@ -1226,15 +1226,19 @@
   }
   .effect-span {
     text-decoration-line: underline;
-    text-decoration-thickness: 3px;
     text-underline-offset: 3px;
     text-decoration-color: #7f1d1d;
   }
+  .effect-state-read {
+    text-decoration-thickness: 1px;
+  }
   .effect-state-write {
+    text-decoration-thickness: 3px;
     background: rgba(127, 29, 29, 0.08);
   }
   .effect-impure-call {
     text-decoration-style: double;
+    text-decoration-thickness: 3px;
   }
   .bug-history {
     color: #991b1b;

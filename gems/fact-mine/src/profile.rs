@@ -1177,19 +1177,27 @@ fn extract_fields(document: &Document, language: &str, path: &str) -> Vec<FieldR
     }
 
     // Add state_writes not already covered by declarations
-    let valid_owners: BTreeSet<String> = document
-        .owner_defs
-        .iter()
-        .map(|o| o.name.clone())
-        .chain(
-            document
-                .function_defs
-                .iter()
-                .map(|f| f.owner.clone())
-                .filter(|o| !o.is_empty()),
-        )
-        .chain(document.state_declarations.iter().map(|s| s.owner.clone()))
-        .collect();
+    let is_static = matches!(
+        language,
+        "rust" | "go" | "zig" | "c" | "cpp" | "csharp" | "java" | "swift" | "kotlin"
+    );
+    let valid_owners: BTreeSet<String> = if is_static {
+        document.owner_defs.iter().map(|o| o.name.clone()).collect()
+    } else {
+        document
+            .owner_defs
+            .iter()
+            .map(|o| o.name.clone())
+            .chain(
+                document
+                    .function_defs
+                    .iter()
+                    .map(|f| f.owner.clone())
+                    .filter(|o| !o.is_empty()),
+            )
+            .chain(document.state_declarations.iter().map(|s| s.owner.clone()))
+            .collect()
+    };
 
     for write in &document.state_writes {
         let name = write.field.clone();

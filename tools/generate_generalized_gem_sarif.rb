@@ -279,8 +279,9 @@ begin
   end
 
   boobytrap_bin = File.join(ROOT, "gems/boobytrap/exe/boobytrap")
+  go_coverage = coverage_paths.find { |p| p.end_with?("coverage.out") } || coverage_paths.first
   args = ["report", "--repo=#{repo}", "--output=#{File.join(out_dir, "boobytrap.md")}", "--json=#{File.join(out_dir, "boobytrap.sarif")}", "--top=#{options[:top]}"]
-  args << "--coverage=#{coverage}" if coverage && !coverage.empty?
+  args << "--coverage=#{go_coverage}" if go_coverage
   options[:exclude].each { |e| args << "--exclude=#{e}" }
   unless system(boobytrap_bin, *args)
     abort "Failed to execute boobytrap: #{boobytrap_bin} #{args.join(' ')}"
@@ -288,7 +289,7 @@ begin
 
   # Share Boobytrap's computed churn output with SlopCop to avoid re-deriving
   helper_args = ["--repo=#{repo}"]
-  helper_args << "--coverage=#{coverage}" if coverage && !coverage.empty?
+  helper_args << "--coverage=#{go_coverage}" if go_coverage
   out, status = Open3.capture2(boobytrap_bin, *helper_args)
   unless status.success?
     abort "Failed to execute boobytrap helper: #{boobytrap_bin} #{helper_args.join(' ')}\nOutput:\n#{out}"
