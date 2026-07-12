@@ -3,12 +3,94 @@
     {
       "code": "T.any(Schemas::EnumSchema, Schemas::StructSchema)",
       "line": 6,
-      "path": "/home/yahn/cheat/gems/fact-mine/examples/profile/ruby_type_aliases.rb",
+      "path": "/home/yahn/easy-vm/gems/fact-mine/examples/profile/ruby_type_aliases.rb",
       "size": 0,
       "tuple_types": [
         "Schemas::EnumSchema",
         "Schemas::StructSchema"
       ]
+    }
+  ],
+  "calls": [
+    {
+      "conditional": false,
+      "confidence": "partial",
+      "function": "(top-level)",
+      "id": "edge:beab494f7c5451e2",
+      "kind": "external_call",
+      "line": 4,
+      "message": "type_alias",
+      "owner": "Demo",
+      "path": "/home/yahn/easy-vm/gems/fact-mine/examples/profile/ruby_type_aliases.rb",
+      "receiver": "T",
+      "source": "fn:a4f16908d1ca0abc",
+      "span": [
+        4,
+        12,
+        4,
+        24
+      ],
+      "unresolved_reason": "receiver_requires_corpus_resolution"
+    },
+    {
+      "conditional": true,
+      "confidence": "partial",
+      "function": "(top-level)",
+      "id": "edge:ddcb74a4f9f53f77",
+      "kind": "external_call",
+      "line": 4,
+      "message": "[]",
+      "owner": "Demo",
+      "path": "/home/yahn/easy-vm/gems/fact-mine/examples/profile/ruby_type_aliases.rb",
+      "receiver": "T::Array",
+      "source": "fn:a4f16908d1ca0abc",
+      "span": [
+        4,
+        27,
+        4,
+        46
+      ],
+      "unresolved_reason": "receiver_requires_corpus_resolution"
+    },
+    {
+      "conditional": false,
+      "confidence": "partial",
+      "function": "(top-level)",
+      "id": "edge:7d2185a3d4415574",
+      "kind": "external_call",
+      "line": 5,
+      "message": "type_alias",
+      "owner": "Demo",
+      "path": "/home/yahn/easy-vm/gems/fact-mine/examples/profile/ruby_type_aliases.rb",
+      "receiver": "T",
+      "source": "fn:a4f16908d1ca0abc",
+      "span": [
+        5,
+        14,
+        5,
+        26
+      ],
+      "unresolved_reason": "receiver_requires_corpus_resolution"
+    },
+    {
+      "conditional": true,
+      "confidence": "partial",
+      "function": "(top-level)",
+      "id": "edge:b81839abd4b0a9da",
+      "kind": "external_call",
+      "line": 6,
+      "message": "any",
+      "owner": "Demo",
+      "path": "/home/yahn/easy-vm/gems/fact-mine/examples/profile/ruby_type_aliases.rb",
+      "receiver": "T",
+      "source": "fn:a4f16908d1ca0abc",
+      "span": [
+        6,
+        4,
+        6,
+        53
+      ],
+      "unresolved_reason": "receiver_requires_corpus_resolution"
     }
   ],
   "collection_index_lookups": [
@@ -18,37 +100,54 @@
       "origin": {
         "kind": "hash literal"
       },
-      "path": "/home/yahn/cheat/gems/fact-mine/examples/profile/ruby_type_aliases.rb"
+      "path": "/home/yahn/easy-vm/gems/fact-mine/examples/profile/ruby_type_aliases.rb"
     }
   ],
   "fields": [],
   "hash_shapes": [],
   "methods": [],
+  "owners": [
+    {
+      "confidence": "high",
+      "id": "owner:9aa2b17c9a0ef3e7",
+      "kind": "module",
+      "language": "ruby",
+      "line": 3,
+      "name": "Demo",
+      "path": "/home/yahn/easy-vm/gems/fact-mine/examples/profile/ruby_type_aliases.rb",
+      "span": [
+        3,
+        0,
+        8,
+        3
+      ]
+    }
+  ],
   "signatures": {},
   "state_param_origins": {},
   "state_protocols": {},
   "state_types": {},
   "type_definitions": [
     {
-      "id": "ruby\u0000/home/yahn/cheat/gems/fact-mine/examples/profile/ruby_type_aliases.rb\u0000Demo\u0000type_alias\u0000RawBody\u00001\u0000sorbet",
+      "id": "ruby\u0000/home/yahn/easy-vm/gems/fact-mine/examples/profile/ruby_type_aliases.rb\u0000Demo\u0000type_alias\u0000RawBody\u00001\u0000sorbet",
       "kind": "type_alias",
       "language": "ruby",
       "line": 0,
       "name": "RawBody",
       "owner": "Demo",
-      "path": "/home/yahn/cheat/gems/fact-mine/examples/profile/ruby_type_aliases.rb",
+      "path": "/home/yahn/easy-vm/gems/fact-mine/examples/profile/ruby_type_aliases.rb",
       "source": "syntax",
       "target": "T::Array[AST::Node]",
       "type_system": "sorbet"
     },
     {
-      "id": "ruby\u0000/home/yahn/cheat/gems/fact-mine/examples/profile/ruby_type_aliases.rb\u0000Demo\u0000type_alias\u0000ScopeType\u00001\u0000sorbet",
+      "id": "ruby\u0000/home/yahn/easy-vm/gems/fact-mine/examples/profile/ruby_type_aliases.rb\u0000Demo\u0000type_alias\u0000ScopeType\u00001\u0000sorbet",
       "kind": "type_alias",
       "language": "ruby",
       "line": 0,
       "name": "ScopeType",
       "owner": "Demo",
-      "path": "/home/yahn/cheat/gems/fact-mine/examples/profile/ruby_type_aliases.rb",
+      "path": "/home/yahn/easy-vm/gems/fact-mine/examples/profile/ruby_type_aliases.rb",
       "source": "syntax",
       "target": "T.any(Schemas::EnumSchema, Schemas::StructSchema)",
       "type_system": "sorbet"

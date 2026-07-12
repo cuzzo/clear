@@ -356,8 +356,7 @@
         "name": "method_six",
         "owner": "rust",
         "reads": [
-          "cache",
-          "self.cache.clear"
+          "cache"
         ],
         "writes": [
           "cache",
@@ -387,12 +386,6 @@
         "function": "method_six",
         "line": 4,
         "receiver": "self"
-      },
-      {
-        "field": "clear",
-        "function": "method_six",
-        "line": 4,
-        "receiver": "self.cache"
       }
     ],
     "state_writes": [

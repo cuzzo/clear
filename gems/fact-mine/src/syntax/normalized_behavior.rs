@@ -259,6 +259,10 @@ pub(crate) trait NormalizedLanguageBehavior: Sync {
         false
     }
 
+    fn record_method_calls_as_state_reads(&self) -> bool {
+        true
+    }
+
     fn suppress_self_call_state_read(&self, _call: &NormalizedCallProjection) -> bool {
         false
     }

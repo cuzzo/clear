@@ -254,14 +254,7 @@
     "semantic_effects": [],
     "state_declarations": [],
     "state_param_origins": [],
-    "state_reads": [
-      {
-        "field": "do_something",
-        "function": "method_seven",
-        "line": 3,
-        "receiver": "self"
-      }
-    ],
+    "state_reads": [],
     "state_writes": []
   }
 }

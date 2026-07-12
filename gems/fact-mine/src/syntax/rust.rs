@@ -97,6 +97,10 @@ impl NormalizedLanguageBehavior for RustNormalizedBehavior {
         true
     }
 
+    fn record_method_calls_as_state_reads(&self) -> bool {
+        false
+    }
+
     fn suppress_state_read_for_call(
         &self,
         call: &NormalizedCallProjection,
@@ -133,36 +137,6 @@ impl NormalizedLanguageBehavior for RustNormalizedBehavior {
                 | "split_once"
                 | "rsplit"
                 | "rsplit_once"
-                | "parse"
-                | "context"
-                | "strip_prefix"
-                | "strip_suffix"
-                | "starts_with"
-                | "ends_with"
-                | "contains"
-                | "eq_ignore_ascii_case"
-                | "is_some"
-                | "is_none"
-                | "is_ok"
-                | "is_err"
-                | "map"
-                | "and_then"
-                | "or"
-                | "ok"
-                | "err"
-                | "collect"
-                | "join"
-                | "find"
-                | "any"
-                | "all"
-                | "filter"
-                | "then"
-                | "flatten"
-                | "as_slice"
-                | "to_vec"
-                | "to_path_buf"
-                | "borrow"
-                | "borrow_mut"
         )
     }
 
