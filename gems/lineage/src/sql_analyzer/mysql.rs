@@ -52,10 +52,19 @@ impl SqlDialect for MysqlDialect {
                     explain_output: plan.to_string(),
                     table_name: table_name.clone(),
                 });
+            } else if lower.contains("type: index") {
+                findings.push(SqlPerformanceFinding {
+                    rule_id: "SQL_INDEX_SCAN".to_string(),
+                    level: "warning".to_string(),
+                    message: format!("Full scan of index leaf nodes. Asymptotically O(N) key visits, but faster than table scan due to smaller key footprint: {}", line.trim()),
+                    big_o_time: "O(N)".to_string(),
+                    big_o_space: "O(1)".to_string(),
+                    explain_output: plan.to_string(),
+                    table_name: table_name.clone(),
+                });
             } else if (lower.contains("type: ref")
                 || lower.contains("type: eq_ref")
-                || lower.contains("type: range")
-                || lower.contains("type: index"))
+                || lower.contains("type: range"))
                 && !lower.contains("using index")
             {
                 findings.push(SqlPerformanceFinding {
@@ -90,5 +99,17 @@ impl SqlDialect for MysqlDialect {
         let query = format!("SELECT COUNT(*) FROM {}", clean_table);
         let count: i64 = conn.query_first(&query)?.unwrap_or(0);
         Ok(count)
+    }
+
+    fn get_table_size_bytes(&self, conn_str: &str, table: &str) -> Result<i64> {
+        let mut conn = Conn::new(conn_str)
+            .with_context(|| format!("failed to connect to mysql: {}", conn_str))?;
+        let clean_table = table.chars().filter(|c| c.is_alphanumeric() || *c == '_').collect::<String>();
+        let query = format!(
+            "SELECT COALESCE(data_length + index_length, 0) FROM information_schema.tables WHERE table_name = '{}'",
+            clean_table
+        );
+        let size: i64 = conn.query_first(&query)?.unwrap_or(0);
+        Ok(size)
     }
 }

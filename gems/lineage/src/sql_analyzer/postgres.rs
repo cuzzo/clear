@@ -89,4 +89,14 @@ impl SqlDialect for PostgresDialect {
         let count: i64 = row.get(0);
         Ok(count)
     }
+
+    fn get_table_size_bytes(&self, conn_str: &str, table: &str) -> Result<i64> {
+        let mut client = Client::connect(conn_str, NoTls)
+            .with_context(|| format!("failed to connect to postgres: {}", conn_str))?;
+        let clean_table = table.chars().filter(|c| c.is_alphanumeric() || *c == '_').collect::<String>();
+        let query = format!("SELECT pg_relation_size('{}')", clean_table);
+        let row = client.query_one(&query, &[])?;
+        let size: i64 = row.get(0);
+        Ok(size)
+    }
 }

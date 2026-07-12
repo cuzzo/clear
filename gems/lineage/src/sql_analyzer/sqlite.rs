@@ -103,4 +103,24 @@ impl SqlDialect for SqliteDialect {
         let count: i64 = conn.query_row(&query, [], |r| r.get(0))?;
         Ok(count)
     }
+
+    fn get_table_size_bytes(&self, conn_str: &str, table: &str) -> Result<i64> {
+        let conn = Connection::open(conn_str)
+            .with_context(|| format!("failed to open sqlite database: {}", conn_str))?;
+        let clean_table = table.chars().filter(|c| c.is_alphanumeric() || *c == '_').collect::<String>();
+        let mut stmt = conn.prepare(&format!("PRAGMA table_info({})", clean_table))?;
+        let cols: Vec<String> = stmt.query_map([], |r| r.get(1))?
+            .collect::<Result<Vec<String>, _>>()?;
+        if cols.is_empty() {
+            return Ok(0);
+        }
+        let col_expr = cols.iter()
+            .map(|c| format!("coalesce(length(cast([{}] as blob)), 0)", c))
+            .collect::<Vec<_>>()
+            .join(" + ");
+        let query = format!("SELECT avg({}) FROM (SELECT * FROM {} LIMIT 50)", col_expr, clean_table);
+        let avg_row_size: f64 = conn.query_row(&query, [], |r| r.get(0)).unwrap_or(0.0);
+        let count = self.get_table_size(conn_str, table)?;
+        Ok((avg_row_size * count as f64) as i64)
+    }
 }

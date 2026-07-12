@@ -23,6 +23,7 @@ pub trait SqlDialect {
     fn explain_query(&self, conn_str: &str, sql: &str) -> Result<String>;
     fn analyze_plan(&self, plan: &str) -> Vec<SqlPerformanceFinding>;
     fn get_table_size(&self, conn_str: &str, table: &str) -> Result<i64>;
+    fn get_table_size_bytes(&self, conn_str: &str, table: &str) -> Result<i64>;
 }
 
 pub fn analyze_sql_files(
@@ -84,17 +85,41 @@ pub fn analyze_sql_files(
         let findings = dialect.analyze_plan(&plan);
         for finding in findings {
             let mut table_size = None;
+            let mut table_size_bytes = None;
+            let mut cache_warning = None;
+
             if let Some(ref tbl) = finding.table_name {
                 if let Ok(size) = dialect.get_table_size(conn_str, tbl) {
                     table_size = Some(size);
                 }
+                if let Ok(bytes) = dialect.get_table_size_bytes(conn_str, tbl) {
+                    table_size_bytes = Some(bytes);
+                    let limit_bytes = match dialect.name() {
+                        "sqlite" => 64 * 1024 * 1024,
+                        _ => 128 * 1024 * 1024,
+                    };
+                    if bytes > limit_bytes {
+                        cache_warning = Some(format!(
+                            "Estimated size of table '{}' ({:.1} MB) exceeds default buffer pool capacity ({:.1} MB). Prone to memory eviction and disk thrashing.",
+                            tbl,
+                            bytes as f64 / 1_048_576.0,
+                            limit_bytes as f64 / 1_048_576.0
+                        ));
+                    }
+                }
             }
+
+            let message_text = if let Some(ref warn) = cache_warning {
+                format!("{} - {}", finding.message, warn)
+            } else {
+                finding.message.clone()
+            };
 
             results.push(json!({
                 "ruleId": finding.rule_id,
                 "level": finding.level,
                 "message": {
-                    "text": finding.message
+                    "text": message_text
                 },
                 "locations": [
                     {
@@ -116,6 +141,8 @@ pub fn analyze_sql_files(
                     "big_o_space": finding.big_o_space,
                     "table_name": finding.table_name,
                     "table_size_n": table_size,
+                    "table_size_bytes": table_size_bytes,
+                    "cache_warning": cache_warning,
                     "query_id": rule_id_fallback
                 }
             }));
@@ -194,6 +221,7 @@ mod tests {
         assert!(scan_finding["message"]["text"].as_str().unwrap().contains("Full table scan"));
         assert_eq!(scan_finding["properties"]["table_name"].as_str(), Some("users"));
         assert_eq!(scan_finding["properties"]["table_size_n"].as_i64(), Some(1));
+        assert!(scan_finding["properties"]["table_size_bytes"].as_i64().is_some());
         
         Ok(())
     }
