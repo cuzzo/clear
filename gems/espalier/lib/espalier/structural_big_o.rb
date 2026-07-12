@@ -32,7 +32,7 @@ module Espalier
       return [] if start_line <= 0 || end_line < start_line
 
       slice = lines[(start_line - 1)..(end_line - 1)] || []
-      loops = loop_ranges(slice, start_line)
+      loops = loop_ranges(slice, start_line, file)
 
       constants = Set.new
       lines.each do |line|
@@ -91,7 +91,7 @@ module Espalier
       @source_cache[file] ||= File.file?(file) ? File.readlines(file) : []
     end
 
-    def loop_ranges(slice, start_line)
+    def loop_ranges(slice, start_line, file = nil)
       ranges = []
       heredoc_end = nil
       slice.each_with_index do |line, offset|
@@ -108,7 +108,7 @@ module Espalier
         absolute_line = start_line + offset
         ranges << {
           start: absolute_line,
-          finish: block_finish(slice, offset, start_line),
+          finish: block_finish(slice, offset, start_line, file),
           inline: inline_loop?(line),
           text: line.strip
         }
@@ -123,18 +123,25 @@ module Espalier
       line.match?(LOOP_START)
     end
 
-    def block_finish(slice, start_offset, start_line)
+    def block_finish(slice, start_offset, start_line, file = nil)
       return start_line + start_offset if inline_loop?(slice[start_offset])
       return brace_block_finish(slice, start_offset, start_line) if opens_brace_block?(slice[start_offset])
 
+      is_python = file && File.extname(file).downcase == ".py"
       start_indent = indent_width(slice[start_offset])
       ((start_offset + 1)...slice.length).each do |idx|
         line = slice[idx]
         stripped = line.strip
         next if stripped.empty? || stripped.start_with?("#")
 
-        if stripped == "end" && indent_width(line) <= start_indent
-          return start_line + idx
+        if is_python
+          if indent_width(line) <= start_indent
+            return start_line + idx - 1
+          end
+        else
+          if stripped == "end" && indent_width(line) <= start_indent
+            return start_line + idx
+          end
         end
       end
       start_line + slice.length - 1
@@ -426,7 +433,8 @@ module Espalier
 
     def shrinking_collection?(body)
       body.match?(/\b(?:remaining|rest|tail|without|others)\b/) ||
-        body.match?(/\.(?:reject|drop|delete|delete_at|slice)\b/) ||
+        body.match?(/\.(?:reject|drop|delete|delete_at)\b/) ||
+        body.match?(/\.slice\s*\(.+?\)/) ||
         body.match?(/\s-\s*\[/)
     end
 

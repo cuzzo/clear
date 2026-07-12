@@ -465,4 +465,41 @@ class BigOTest < Minitest::Test
     nested_hint = hints.find { |h| h[:complexity] == "O(N^2)" }
     assert_nil nested_hint
   end
+
+  def test_shrinking_collection_ignores_plain_slice
+    source_cache = {
+      "plain_slice.rb" => [
+        "def walk(node)\n",
+        "  return unless node\n",
+        "  val = node.slice.to_s\n",
+        "  node.child_nodes.each do |child|\n",
+        "    walk(child)\n",
+        "  end\n",
+        "end\n"
+      ]
+    }
+    s = Espalier::StructuralBigO.new(source_cache: source_cache)
+    hints = s.hints_for("plain_slice.rb", { name: "walk", line: 1, span: [1, 0, 7, 3] }, "PlainSlice")
+    # walk is recursive but does not have a shrinking collection.
+    # It should be classified as O(N) (linear recursion fallback), NOT O(N!) (factorial).
+    factorial_hint = hints.find { |h| h[:complexity] == "O(N!)" }
+    assert_nil factorial_hint
+  end
+
+  def test_python_indentation_blocks
+    source_cache = {
+      "python_loops.py" => [
+        "def run():\n",
+        "    for i in range(10):\n",
+        "        print(i)\n",
+        "    for j in range(10):\n",
+        "        print(j)\n"
+      ]
+    }
+    s = Espalier::StructuralBigO.new(source_cache: source_cache)
+    hints = s.hints_for("python_loops.py", { name: "run", line: 1, span: [1, 0, 5, 0] }, "PythonLoops")
+    # Sequential loops in Python should not be treated as nested (maximum depth 1, O(N)).
+    nested_hint = hints.find { |h| h[:complexity] == "O(N^2)" }
+    assert_nil nested_hint
+  end
 end
