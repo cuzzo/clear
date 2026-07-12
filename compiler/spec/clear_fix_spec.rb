@@ -86,6 +86,27 @@ RSpec.describe "./clear fix", :integration do
     fixed = File.read(path)
     expect(fixed).to include("IF maybe EXISTS AS value")
     expect(fixed).to include("WHILE maybe EXISTS AS value")
+
+    out2, err2, status2 = run_clear("autofix", "--only=syntax", path)
+    expect(status2).to eq(0), err2
+    expect(out2).to include("no fixable findings")
+    expect(File.read(path)).to eq(fixed)
+  end
+
+  it "rewrites legacy string + to $+ using operand types" do
+    path = write("concat.clear", <<~CLEAR)
+      FN main() RETURNS String ->
+        left = "clear";
+        right = "lang";
+        RETURN left + right;
+      END
+    CLEAR
+
+    out, err, status = run_clear("autofix", path)
+
+    expect(status).to eq(0), err
+    expect(out).to include("applied 1 edit")
+    expect(File.read(path)).to include("left $+ right")
   end
 
   it "does not rewrite uppercase constructor names to in-scope variables" do
