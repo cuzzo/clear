@@ -1,19 +1,26 @@
 -- query-id: ui.runtime.file_index_with_scope.v1
-WITH current_units AS (
+WITH latest_events AS (
+              SELECT unit_id, path
+              FROM (
+                SELECT unit_id, path,
+                       ROW_NUMBER() OVER (
+                         PARTITION BY unit_id
+                         ORDER BY timestamp DESC, id DESC
+                       ) AS rank
+                FROM events
+              )
+              WHERE rank = 1
+            ),
+            current_units AS (
               SELECT
                 u.id,
-              COALESCE((
-                SELECT latest.path
-                FROM events latest
-                WHERE latest.unit_id = u.id
-                  ORDER BY latest.timestamp DESC, latest.id DESC
-                  LIMIT 1
-                ), u.original_path) AS current_path,
+                COALESCE(le.path, u.original_path) AS current_path,
                 u.current_line_cov,
                 u.current_mutant_cov,
                 u.current_distinct_tests,
                 u.current_mutant_killed_tests
               FROM logical_units u
+              LEFT JOIN latest_events le ON le.unit_id = u.id
             ),
             hazard_counts AS (
               SELECT unit_id, COUNT(*) AS hazards

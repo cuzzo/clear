@@ -1,14 +1,15 @@
 -- query-id: ui.runtime.apply_crash_history.v1
 WITH latest_events AS (
-          SELECT e.*
-          FROM events e
-          WHERE e.id = (
-            SELECT latest.id
-            FROM events latest
-            WHERE latest.unit_id = e.unit_id
-            ORDER BY latest.timestamp DESC, latest.id DESC
-            LIMIT 1
+          SELECT *
+          FROM (
+            SELECT *,
+                   ROW_NUMBER() OVER (
+                     PARTITION BY unit_id
+                     ORDER BY timestamp DESC, id DESC
+                   ) AS rank
+            FROM events
           )
+          WHERE rank = 1
         )
         SELECT COALESCE(le.start_line, 1) AS current_start,
                COALESCE(le.end_line, le.start_line, 1) AS current_end,

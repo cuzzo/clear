@@ -1,14 +1,15 @@
 -- query-id: ui.runtime.file_versions.v1
 WITH latest_events AS (
-          SELECT e.unit_id, e.path
-          FROM events e
-          WHERE e.id = (
-            SELECT latest.id
-            FROM events latest
-            WHERE latest.unit_id = e.unit_id
-            ORDER BY latest.timestamp DESC, latest.id DESC
-            LIMIT 1
+          SELECT unit_id, path
+          FROM (
+            SELECT unit_id, path,
+                   ROW_NUMBER() OVER (
+                     PARTITION BY unit_id
+                     ORDER BY timestamp DESC, id DESC
+                   ) AS rank
+            FROM events
           )
+          WHERE rank = 1
         ),
         current_units AS (
           SELECT u.id

@@ -318,6 +318,8 @@ PRAGMA foreign_keys = ON;
               ON sarif_findings(unit_id);
             CREATE INDEX IF NOT EXISTS idx_sarif_findings_rule_id
               ON sarif_findings(rule_id);
+            CREATE INDEX IF NOT EXISTS idx_sarif_findings_composite_latest
+              ON sarif_findings(path, source, tool_name, commit_hash, timestamp, id);
             CREATE INDEX IF NOT EXISTS idx_ui_file_summaries_path ON ui_file_summaries(path);
             CREATE INDEX IF NOT EXISTS idx_ui_warning_units_path ON ui_warning_units(current_path);
             CREATE INDEX IF NOT EXISTS idx_events_path ON events(path);
