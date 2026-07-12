@@ -33,6 +33,9 @@ pub mod test_exposure;
 pub mod ui;
 #[path = "db/vcs.rs"]
 pub mod vcs;
+pub mod sql_analyzer;
+
+pub use sql_analyzer::analyze_sql_files;
 
 pub use engine::{EngineStats, LineageEngine};
 pub use architecture::{architecture_search, ingest_architecture_json, node_neighborhood, owner_inventory, state_access, ArchitectureIngestStats};

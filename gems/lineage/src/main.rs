@@ -175,6 +175,17 @@ enum Command {
         #[arg(long)]
         replace: bool,
     },
+    /// Analyze a directory of SQL files against a database using EXPLAIN and output performance hazard SARIF.
+    AnalyzeSql {
+        #[arg(long, default_value = "sqlite")]
+        dialect: String,
+        #[arg(long)]
+        connection: String,
+        #[arg(long)]
+        queries: PathBuf,
+        #[arg(long)]
+        out: PathBuf,
+    },
 }
 
 fn main() -> Result<()> {
@@ -498,6 +509,10 @@ fn main() -> Result<()> {
                 "ingested stack traces: payloads={} frames={} events={} unverified={} skipped_frames={}",
                 stats.payloads, stats.frames, stats.events, stats.unverified, stats.skipped_frames
             );
+        }
+        Command::AnalyzeSql { dialect, connection, queries, out } => {
+            lineage::analyze_sql_files(&dialect, &connection, &queries, &out)?;
+            println!("analyzed sql: output saved to {}", out.display());
         }
     }
     Ok(())
