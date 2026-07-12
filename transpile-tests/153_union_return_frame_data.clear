@@ -9,7 +9,7 @@ UNION Val {
 }
 
 FN makeStr!(a: String, b: String) RETURNS !Val ->
-    RETURN Val{ Str: a + b };
+    RETURN Val{ Str: a $+ b };
 END
 
 FN main() RETURNS Void ->

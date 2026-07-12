@@ -47,9 +47,9 @@ PUB FN join(left: String, right = "" :String) RETURNS String ->
     RETURN right;
   END
   IF left.ends_with?("/") THEN
-    RETURN left + right;
+    RETURN left $+ right;
   END
-  RETURN left + "/" + right;
+  RETURN left $+ "/" $+ right;
 END
 
 PUB FN expand(path: String, base = "" :String) RETURNS String ->

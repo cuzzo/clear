@@ -192,6 +192,21 @@ module Annotator
         # Delegate type resolution to Type class
         left_type = node.left.full_type!(context: "binary left")
         right_type = node.right.full_type!(context: "binary right")
+        if node.op == :ADD && (left_type.string? || right_type.string?)
+          token = node.token
+          fixable!(node,
+            category: :syntax,
+            level: :error,
+            code: :STRING_CONCAT_REQUIRES_DOLLAR,
+            fixes: [Fix.new(
+              description: fix_description(:REPLACE_STRING_CONCAT_OPERATOR),
+              confidence: :auto,
+              edits: [Edit.new(
+                span: Span.new(file: nil, line: token.line, col: token.column, length: 1),
+                replacement: "$+"
+              )]
+            )])
+        end
         if node.op == :AND || node.op == :OR
           validate_logical_presence_operand!(node.left, left_type, node.op)
           validate_logical_presence_operand!(node.right, right_type, node.op)
@@ -209,9 +224,9 @@ module Annotator
         node.right.coerced_type = result.right_coercion if result.right_coercion
         node.storage = result.storage if result.storage
 
-        # String concat (+) transpiles to std.mem.concat(rt.frameAlloc(), ...) —
+        # String concat ($+) transpiles to std.mem.concat(rt.frameAlloc(), ...) —
         # mark as frame allocation so needs_rt and loop mark elision are correct.
-        if node.op == :ADD && (left_type.string? || right_type.string?)
+        if node.op == :CONCAT || (node.op == :ADD && (left_type.string? || right_type.string?))
           node.string_concat = true
           current_fn_ctx&.record_frame_use!
           # String concat result is frame-allocated.
@@ -233,12 +248,12 @@ module Annotator
           token = operand.token
           span = Span.new(file: nil, line: token.line, col: token.column, length: operand.name.length)
           fixes << Fix.new(
-            description: "Test whether the optional Bool is present with `#{operand.name} EXISTS`.",
+            description: DiagnosticRegistry.fix_description(:TEST_OPTIONAL_BOOL_PRESENCE, name: operand.name),
             confidence: :interactive,
             edits: [Edit.new(span: span, replacement: "#{operand.name} EXISTS")]
           )
           fixes << Fix.new(
-            description: "Use the Bool payload, defaulting NIL to FALSE, with `(#{operand.name} OR_ELSE FALSE)`.",
+            description: DiagnosticRegistry.fix_description(:DEFAULT_OPTIONAL_BOOL_PAYLOAD, name: operand.name),
             confidence: :interactive,
             edits: [Edit.new(span: span, replacement: "(#{operand.name} OR_ELSE FALSE)")]
           )

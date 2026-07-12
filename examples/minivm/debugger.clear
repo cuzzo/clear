@@ -36,7 +36,7 @@ FN debugPause!(reason: String, envId: Id<Env>, inspectResult: String, MUTABLE po
         # Write break info
         MUTABLE breakInfo = COPY reason;
         IF stackDisplay.length() > 0 THEN
-            breakInfo = breakInfo + "\n  stack: " + stackDisplay;
+            breakInfo = breakInfo $+ "\n  stack: " $+ stackDisplay;
         END
         writeFile("/tmp/_debug_break.txt", breakInfo);
     END

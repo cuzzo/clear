@@ -22,7 +22,7 @@ RSpec.describe StringConcatRewriter do
   end
 
   def string_plus(left, right, marked: true)
-    AST::BinaryOp.new(token, left, :ADD, right).tap do |node|
+    AST::BinaryOp.new(token, left, :CONCAT, right).tap do |node|
       node.string_concat = marked
       node.full_type = Type.new(:String)
     end
@@ -50,10 +50,10 @@ RSpec.describe StringConcatRewriter do
   end
 
   describe "2-part concat stays as BinaryOp (no benefit)" do
-    it "does not rewrite a + b" do
+    it "does not rewrite a two-part concat" do
       ast = rewrite(<<~CLEAR)
         FN main() RETURNS Void ->
-            s = "hello" + " world";
+            s = "hello" $+ " world";
             RETURN;
         END
       CLEAR
@@ -64,10 +64,10 @@ RSpec.describe StringConcatRewriter do
   end
 
   describe "3-part concat becomes StringConcat" do
-    it "flattens a + b + c into StringConcat([a, b, c])" do
+    it "flattens a $+ b $+ c into StringConcat([a, b, c])" do
       ast = rewrite(<<~CLEAR)
         FN main() RETURNS Void ->
-            s = "hello" + " " + "world";
+            s = "hello" $+ " " $+ "world";
             RETURN;
         END
       CLEAR
@@ -79,10 +79,10 @@ RSpec.describe StringConcatRewriter do
   end
 
   describe "4-part concat flattens correctly" do
-    it "flattens a + b + c + d into StringConcat([a, b, c, d])" do
+    it "flattens a $+ b $+ c $+ d into StringConcat([a, b, c, d])" do
       ast = rewrite(<<~CLEAR)
         FN greet(name: String) RETURNS !String ->
-            RETURN "Hello, " + name + "! " + "Welcome.";
+            RETURN "Hello, " $+ name $+ "! " $+ "Welcome.";
         END
         FN main() RETURNS Void -> PASS END
       CLEAR

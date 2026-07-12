@@ -121,7 +121,7 @@ RSpec.describe "Move semantics for heap-owning types" do
         STRUCT Box { name: String }
         FN main() RETURNS Void ->
             MUTABLE v: Box = Box{ name: COPY "abc" };
-            v.name = v.name + COPY "d";
+            v.name = v.name $+ COPY "d";
             RETURN;
         END
       CLEAR

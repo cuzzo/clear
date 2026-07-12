@@ -3,7 +3,7 @@
 # Tests that all intermediate concat results are reclaimed per iteration.
 
 FN formatLine(n: Int64) RETURNS !String ->
-    RETURN "[" + n.toString() + "] " + "item";
+    RETURN "[" $+ n.toString() $+ "] " $+ "item";
 END
 
 FN main() RETURNS Void ->

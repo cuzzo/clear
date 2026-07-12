@@ -862,7 +862,7 @@ module EscapeAnalysis
   sig { params(expr: NodeValue).returns(T::Boolean) }
   private_class_method def self.string_concat_expr?(expr)
     expr.is_a?(AST::StringConcat) ||
-      (expr.is_a?(AST::BinaryOp) && expr.op == :ADD && expr.string_concat == true)
+      (expr.is_a?(AST::BinaryOp) && expr.string_concat == true)
   end
 
   sig { params(ti: T.nilable(Type), schema_lookup: T.nilable(Proc)).returns(T::Boolean) }
@@ -1260,7 +1260,7 @@ module EscapeAnalysis
     return true if T.unsafe(node).respond_to?(:heap_storage?) && T.unsafe(node).heap_storage?
     return true if T.unsafe(node).respond_to?(:symbol) && T.unsafe(node).symbol&.heap_storage?
     return true if node.is_a?(AST::StringConcat)
-    return true if node.is_a?(AST::BinaryOp) && node.op == :ADD && node.string_concat
+    return true if node.is_a?(AST::BinaryOp) && node.string_concat
     return false unless node.is_a?(AST::Locatable)
     ti = node.full_type!(context: "heap-producing expression")
     ti.heap_ptr? || ti.recursive_cleanup_shape?(nil)

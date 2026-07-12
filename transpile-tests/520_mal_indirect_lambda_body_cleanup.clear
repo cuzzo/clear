@@ -35,7 +35,7 @@ FN unwrapTco!(f: Value) RETURNS !Value ->
 END
 
 FN main() RETURNS Void ->
-    bodyText = "lambda-" + "body";
+    bodyText = "lambda-" $+ "body";
     MUTABLE params: Value[]@list = [];
     params.append(Value{ Symbol: COPY "x" });
     MUTABLE bodyItems: Value[]@list = [];

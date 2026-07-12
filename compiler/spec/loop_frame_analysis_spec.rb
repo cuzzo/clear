@@ -242,7 +242,7 @@ RSpec.describe LoopFrameAnalysis do
           WHILE i < 5 DO
             MUTABLE part: Int64[]@list = [];
             part.append(i);
-            resp = resp + i.toString();
+            resp = resp $+ i.toString();
             i = i + 1_i64;
           END
           RETURN;
@@ -279,7 +279,7 @@ RSpec.describe LoopFrameAnalysis do
           WHILE i < 5 DO
             MUTABLE parts: Int64[]@list = [];
             parts.append(i);
-            resp = resp + i.toString();
+            resp = resp $+ i.toString();
             i = i + 1_i64;
           END
           RETURN;
@@ -296,7 +296,7 @@ RSpec.describe LoopFrameAnalysis do
       # Placement is decided by escape analysis, not by loop rewinds.
       ast = run_mir(<<~CLEAR)
         FN makePrefix(i: Int64) RETURNS !String ->
-          RETURN "entry-" + i.toString();
+          RETURN "entry-" $+ i.toString();
         END
         FN main() RETURNS Void ->
           MUTABLE last = "";
@@ -341,7 +341,7 @@ RSpec.describe LoopFrameAnalysis do
           MUTABLE result = "";
           FOR i IN (1_i64 ..= 5) DO
             tmp = i.toString();
-            result = prefix + "-" + suffix;
+            result = prefix $+ "-" $+ suffix;
           END
           RETURN;
         END
@@ -466,7 +466,7 @@ RSpec.describe LoopFrameAnalysis do
           MUTABLE s: State = State{ label: "init", count: 0 };
           FOR i IN (1_i64 ..= 3) DO
             s.count = s.count + 1;
-            s.label = "step-" + i.toString();
+            s.label = "step-" $+ i.toString();
           END
           RETURN;
         END
@@ -485,7 +485,7 @@ RSpec.describe LoopFrameAnalysis do
           MUTABLE s: State = State{ label: "init", count: 0 };
           FOR i IN (1_i64 ..= 5) DO
             s.count = s.count + 1;
-            s.label = "step-" + i.toString();
+            s.label = "step-" $+ i.toString();
           END
           ASSERT s.count == 5;
           ASSERT s.label == "step-5";
@@ -726,13 +726,13 @@ RSpec.describe LoopFrameAnalysis do
         FN main() RETURNS Void ->
           MUTABLE outer = 0_i64;
           WHILE outer < 3 DO
-            prefix = "O" + outer.toString();
+            prefix = "O" $+ outer.toString();
             MUTABLE resp = "";
             MUTABLE i = 0_i64;
             WHILE i < 5 DO
               MUTABLE parts: Int64[]@list = [];
               parts.append(i);
-              resp = resp + i.toString() + ";" + prefix.length().toString();
+              resp = resp $+ i.toString() $+ ";" $+ prefix.length().toString();
               i = i + 1_i64;
             END
             outer = outer + 1_i64;
@@ -751,13 +751,13 @@ RSpec.describe LoopFrameAnalysis do
         FN main() RETURNS Void ->
           MUTABLE i = 0_i64;
           WHILE i < 3 DO
-            prefix = "O" + i.toString();
+            prefix = "O" $+ i.toString();
             MUTABLE resp = "";
             MUTABLE j = 0_i64;
             WHILE j < 5 DO
               MUTABLE parts: String[]@list = [];
               parts.append(j.toString());
-              resp = resp + j.toString() + ";" + prefix.length().toString();
+              resp = resp $+ j.toString() $+ ";" $+ prefix.length().toString();
               j = j + 1_i64;
             END
             i = i + 1_i64;
@@ -775,13 +775,13 @@ RSpec.describe LoopFrameAnalysis do
         FN main() RETURNS Void ->
           MUTABLE i = 0_i64;
           WHILE i < 3 DO
-            prefix = "O" + i.toString();
+            prefix = "O" $+ i.toString();
             MUTABLE resp = "";
             MUTABLE j = 0_i64;
             WHILE j < 5 DO
               MUTABLE parts: String[]@list = [];
               parts.append(j.toString());
-              resp = resp + j.toString() + ";" + prefix.length().toString();
+              resp = resp $+ j.toString() $+ ";" $+ prefix.length().toString();
               j = j + 1_i64;
             END
             i = i + 1_i64;

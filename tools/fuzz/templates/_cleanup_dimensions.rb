@@ -11,7 +11,7 @@ module CleanupDims
   # What gets allocated. Each kind has different cleanup requirements:
   #   :heap_list           — `MUTABLE v: Int64[]@list = []` ; ArrayList deinit
   #   :heap_string         — `MUTABLE s: String = ""`       ; alloc.free
-  #   :frame_string_concat — `s: String = "a" + i.toString()` ; frame mark/rewind
+  #   :frame_string_concat — `s: String = "a" $+ i.toString()` ; frame mark/rewind
   #   :frame_list          — `xs: Int64[] = [i, i+1]`        ; frame mark/rewind
   ALLOC_KINDS = [:heap_list, :heap_string, :frame_string_concat, :frame_list]
 
@@ -30,7 +30,7 @@ module CleanupDims
     when :heap_string
       "MUTABLE #{varname}: String = \"\";"
     when :frame_string_concat
-      "#{varname}: String = \"a\" + #{idx_expr}.toString();"
+      "#{varname}: String = \"a\" $+ #{idx_expr}.toString();"
     when :frame_list
       "#{varname}: Int64[] = [#{idx_expr}, #{idx_expr} + 1_i64];"
     end
@@ -40,7 +40,7 @@ module CleanupDims
   def self.use_stmt(kind, varname: "v", idx_expr: "1_i64")
     case kind
     when :heap_list           then "#{varname}.append(#{idx_expr});"
-    when :heap_string         then "#{varname} = #{varname} + #{idx_expr}.toString();"
+    when :heap_string         then "#{varname} = #{varname} $+ #{idx_expr}.toString();"
     when :frame_string_concat then "_ = #{varname}.length();"
     when :frame_list          then "_ = #{varname}[0_i64];"
     end

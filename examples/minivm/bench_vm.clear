@@ -18,7 +18,7 @@ FN main() RETURNS Void ->
         END
         j = j + 1_i64;
     END
-    print("Sum of evens 0..9999: " + sum.toString());
+    print("Sum of evens 0..9999: " $+ sum.toString());
 
     # Timed: 10 iterations
     startMs = timestampMs();
@@ -36,7 +36,7 @@ FN main() RETURNS Void ->
     END
     endMs = timestampMs();
     elapsed = endMs - startMs;
-    print("CLEAR VM: 10 iterations in " + elapsed.toString() + "ms");
+    print("CLEAR VM: 10 iterations in " $+ elapsed.toString() $+ "ms");
 
     RETURN;
 END

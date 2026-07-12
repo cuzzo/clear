@@ -53,7 +53,7 @@ FN main() RETURNS Void ->
     WITH result AS r {
       # Mutex acquire here is a full barrier. Guaranteed to see
       # the producer's write regardless of hardware memory model.
-      print("consumer saw: " + r.data);
+      print("consumer saw: " $+ r.data);
     }
   };
 

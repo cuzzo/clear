@@ -9,7 +9,7 @@ FN main() RETURNS Void ->
     MUTABLE i: Int64 = 0;
     WHILE i < 3 DO
         c = charAt("abc", i);
-        map["t" + i.toString()] = Value{ Str: COPY c };
+        map["t" $+ i.toString()] = Value{ Str: COPY c };
         i += 1;
     END
 

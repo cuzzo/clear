@@ -58,14 +58,14 @@ FN handleClient!(client: TCPClient) RETURNS !Void ->
             n = 1;
           END
           result = heavyCompute(id, n);
-          resp = resp + ":${result.toString()}\r\n";
+          resp = resp $+ ":${result.toString()}\r\n";
         ELSE_IF line == "QUIT" THEN
-          resp = resp + "+OK\r\n";
+          resp = resp $+ "+OK\r\n";
           running = FALSE;
         ELSE_IF line == "READY?" THEN
-          resp = resp + "+READY\r\n";
+          resp = resp $+ "+READY\r\n";
         ELSE
-          resp = resp + "-ERR unknown command\r\n";
+          resp = resp $+ "-ERR unknown command\r\n";
         END
       END
       IF resp.any?() -> client.tcpWrite(resp);

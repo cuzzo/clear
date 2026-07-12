@@ -1272,7 +1272,7 @@ RSpec.describe CleanupClassifier do
     it "gives caller a heap_string cleanup for the result" do
       plan = cleanup_for(<<~CLEAR, "main")
         FN riskyOp(mode: String) RETURNS !String ->
-            RETURN "ok:" + mode;
+            RETURN "ok:" $+ mode;
         END
         FN handleWithCatch(mode: String) RETURNS !String ->
             result = riskyOp(mode) OR_ELSE RAISE;

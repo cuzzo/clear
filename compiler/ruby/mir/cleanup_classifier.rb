@@ -1110,7 +1110,7 @@ module CleanupClassifier
                 fixed_heap ||
                 node_sym&.heap_storage? ||
                 value.is_a?(AST::StringConcat) ||
-                (value.is_a?(AST::BinaryOp) && value.op == :ADD && value.string_concat)
+                (value.is_a?(AST::BinaryOp) && value.string_concat)
     return nil unless owns_heap
     e = entry(:heap_string, has_moved_guard: true)
     e[:fixed_alloc] = true if fixed_heap

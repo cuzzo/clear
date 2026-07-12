@@ -4,7 +4,7 @@
 
 # Pattern 1: Simple string concat return
 FN greet(name: String) RETURNS !String ->
-    RETURN "Hello, " + name + "!";
+    RETURN "Hello, " $+ name $+ "!";
 END
 
 # Pattern 2: Loop builds intermediates, returns final string
@@ -17,13 +17,13 @@ END
 # Pattern 3: Multiple early returns (IF/ELSE_IF chain)
 FN classify(n: Int64) RETURNS !String ->
     IF n < 0 THEN
-        RETURN "negative:" + n.toString();
+        RETURN "negative:" $+ n.toString();
     ELSE_IF n == 0 THEN
         RETURN "zero";
     ELSE_IF n < 10 THEN
-        RETURN "small:" + n.toString();
+        RETURN "small:" $+ n.toString();
     ELSE
-        RETURN "large:" + n.toString();
+        RETURN "large:" $+ n.toString();
     END
 END
 
@@ -32,7 +32,7 @@ FN formatItem(id: Int64) RETURNS !String ->
     sz = ((id * 7 + 13) MOD 97) + 3;
     MUTABLE parts: String[]@list = [];
     FOR i IN (1_i64 ..= sz) -> parts.append(i.toString());
-    RETURN "{" + join(parts, ",") + "}";
+    RETURN "{" $+ join(parts, ",") $+ "}";
 END
 
 # Pattern 5: String literal return (rodata, no frame alloc in function)

@@ -95,7 +95,7 @@ STRUCT_FIELD_STORE_SHAPE_SPECS = {
   frame_string_concat: [
     "",
     "String",
-    "i: Int64 = 1_i64;\n    xs: String = \"a\" + i.toString();",
+    "i: Int64 = 1_i64;\n    xs: String = \"a\" $+ i.toString();",
   ],
   frame_list: [
     "",

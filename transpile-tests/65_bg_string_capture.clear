@@ -5,7 +5,7 @@
 FN main() RETURNS Void ->
     greeting: String = "world";
     q: ~String = BG {
-        greeting + "!";
+        greeting $+ "!";
     };
     result: String = NEXT q;
     ASSERT result == "world!", "BG string capture: concat result";
@@ -14,7 +14,7 @@ FN main() RETURNS Void ->
     a: String = "foo";
     b: String = "bar";
     r: ~String = BG {
-        a + b;
+        a $+ b;
     };
     result2: String = NEXT r;
     ASSERT result2 == "foobar", "BG multi-string capture";

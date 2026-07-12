@@ -4,7 +4,7 @@
 # the arena region where the dangling pointer would have pointed.
 
 FN makePrefix(i: Int64) RETURNS !String ->
-    RETURN "entry-" + i.toString();
+    RETURN "entry-" $+ i.toString();
 END
 
 FN main() RETURNS Void ->

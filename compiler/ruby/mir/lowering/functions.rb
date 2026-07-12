@@ -1624,7 +1624,7 @@ module MIRLoweringFunctions
     return true if node.respond_to?(:heap_storage?) && node.heap_storage?
     return true if node.respond_to?(:symbol) && node.symbol&.heap_storage?
     return true if node.is_a?(AST::StringConcat)
-    return true if node.is_a?(AST::BinaryOp) && node.op == :ADD && node.string_concat
+    return true if node.is_a?(AST::BinaryOp) && node.string_concat
     return false unless node.is_a?(AST::Locatable)
     ti = node.full_type!(context: "heap-producing call expression")
     ti.heap_ptr? || ti.recursive_cleanup_shape?(mir_schema_lookup)

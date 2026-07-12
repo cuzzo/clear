@@ -9,7 +9,7 @@ STRUCT CellState {
 }
 
 FN cellKey(cell: Cell) RETURNS !String ->
-  RETURN cell.x.toString() + "," + cell.y.toString();
+  RETURN cell.x.toString() $+ "," $+ cell.y.toString();
 END
 
 FN sameCell?(a: Cell, b: Cell) RETURNS Bool ->

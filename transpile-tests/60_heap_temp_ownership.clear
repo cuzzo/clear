@@ -3,7 +3,7 @@
 # GPA leak detection catches any missed cleanup.
 
 FN buildGreeting(name: String) RETURNS !String ->
-    RETURN "Hello, " + name + "!";
+    RETURN "Hello, " $+ name $+ "!";
 END
 
 FN getLength(s: String) RETURNS Int64 ->

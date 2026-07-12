@@ -79,7 +79,7 @@ def ownership_surface_cleanup_cell(shape)
     <<~CHT
       FN main() RETURNS Void ->
           MUTABLE s: String = "";
-          s = s + "owned";
+          s = s $+ "owned";
           ASSERT s.length() == 5_i64, "string cleanup shape";
           RETURN;
       END
@@ -87,7 +87,7 @@ def ownership_surface_cleanup_cell(shape)
   when :frame_string_concat
     <<~CHT
       FN main() RETURNS Void ->
-          s: String = "n" + 1_i64.toString();
+          s: String = "n" $+ 1_i64.toString();
           ASSERT s.length() == 2_i64, "frame string cleanup shape";
           RETURN;
       END
@@ -133,7 +133,7 @@ def ownership_surface_cleanup_cell(shape)
     <<~CHT
       FN main() RETURNS Void ->
           MUTABLE map: HashMap<String> = {};
-          map["k"] = "map" + 1_i64.toString();
+          map["k"] = "map" $+ 1_i64.toString();
           ASSERT map.count() == 1_i64, "hash map cleanup shape";
           RETURN;
       END
@@ -377,7 +377,7 @@ def ownership_surface_contract_cell(contract)
   case contract
   when :promotion_on_escape
     <<~CHT
-      FN make() RETURNS !String -> RETURN "promote" + 1_i64.toString(); END
+      FN make() RETURNS !String -> RETURN "promote" $+ 1_i64.toString(); END
       FN main() RETURNS Void ->
           s = make();
           ASSERT s.length() > 0_i64, "promotion on escape";
@@ -388,10 +388,10 @@ def ownership_surface_contract_cell(contract)
     <<~CHT
       FN main() RETURNS Void ->
           IF TRUE THEN
-              s = "then" + 1_i64.toString();
+              s = "then" $+ 1_i64.toString();
               ASSERT s.length() > 0_i64, "then cleanup";
           ELSE
-              s = "else" + 1_i64.toString();
+              s = "else" $+ 1_i64.toString();
               ASSERT s.length() > 0_i64, "else cleanup";
           END
           RETURN;
@@ -401,7 +401,7 @@ def ownership_surface_contract_cell(contract)
     <<~CHT
       FN main() RETURNS Void ->
           FOR i IN (1_i64 ..= 4_i64) DO
-              s = "loop" + i.toString();
+              s = "loop" $+ i.toString();
               ASSERT s.length() > 0_i64, "loop rewind";
           END
           RETURN;
@@ -410,7 +410,7 @@ def ownership_surface_contract_cell(contract)
   when :error_path_allocator_identity
     <<~CHT
       FN maybe(raise_it: Bool) RETURNS !String ->
-          s = "err" + 1_i64.toString();
+          s = "err" $+ 1_i64.toString();
           IF raise_it THEN RAISE; END
           RETURN s;
       END

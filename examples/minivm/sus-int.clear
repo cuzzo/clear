@@ -223,43 +223,43 @@ FN prStr(v: Value, readably: Bool) RETURNS String EFFECTS REENTRANT ->
             IF n == floor(n) THEN RETURN toInt(n).toString(); END
             RETURN n.toString();,
         Value.Int64Val AS i -> RETURN i.toString();,
-        Value.Str AS s -> IF readably THEN RETURN "\"" + s + "\""; END RETURN s;,
+        Value.Str AS s -> IF readably THEN RETURN "\"" $+ s $+ "\""; END RETURN s;,
         Value.Symbol AS s -> RETURN s;,
         Value.List AS items ->
             MUTABLE out = "(";
             FOR li IN (0_i64 ..< items.length()) DO
-                IF li > 0 THEN out = out + " "; END
-                out = out + prStr(items[li], readably);
+                IF li > 0 THEN out = out $+ " "; END
+                out = out $+ prStr(items[li], readably);
             END
-            RETURN out + ")";,
+            RETURN out $+ ")";,
         Value.Vector AS velems ->
             MUTABLE vout = "#(";
             FOR vi IN (0_i64 ..< velems.length()) DO
-                IF vi > 0 THEN vout = vout + " "; END
-                vout = vout + prStr(velems[vi], readably);
+                IF vi > 0 THEN vout = vout $+ " "; END
+                vout = vout $+ prStr(velems[vi], readably);
             END
-            RETURN vout + ")";,
+            RETURN vout $+ ")";,
         Value.Pair AS p ->
-            RETURN "(" + prStr(p.pairCar, readably) + " . " + prStr(p.pairCdr, readably) + ")";,
+            RETURN "(" $+ prStr(p.pairCar, readably) $+ " . " $+ prStr(p.pairCdr, readably) $+ ")";,
         Value.TypedI64Arr AS iarr ->
             MUTABLE iout = "[";
             FOR ii IN (0_i64 ..< iarr.length()) DO
-                IF ii > 0 THEN iout = iout + " "; END
-                iout = iout + iarr[ii].toString();
+                IF ii > 0 THEN iout = iout $+ " "; END
+                iout = iout $+ iarr[ii].toString();
             END
-            RETURN iout + "]:i64";,
+            RETURN iout $+ "]:i64";,
         Value.TypedF64Arr AS farr ->
             MUTABLE fout = "[";
             FOR fi IN (0_i64 ..< farr.length()) DO
-                IF fi > 0 THEN fout = fout + " "; END
-                fout = fout + farr[fi].toString();
+                IF fi > 0 THEN fout = fout $+ " "; END
+                fout = fout $+ farr[fi].toString();
             END
-            RETURN fout + "]:f64";,
-        Value.NativeFn AS nid -> RETURN "#<native:" + nid.toString() + ">";,
+            RETURN fout $+ "]:f64";,
+        Value.NativeFn AS nid -> RETURN "#<native:" $+ nid.toString() $+ ">";,
         Value.Lambda -> RETURN "#<function>";,
         Value.EnvRef -> RETURN "#<envref>";,
         Value.Tco -> RETURN "#<tco>";,
-        Value.Error AS e -> RETURN "#<error:" + e.errKind + ":" + e.errMsg + ">";
+        Value.Error AS e -> RETURN "#<error:" $+ e.errKind $+ ":" $+ e.errMsg $+ ">";
     END
     RETURN "";
 END
@@ -276,7 +276,7 @@ FN tokenizeToEnv!(MUTABLE penv: HashMap<Value>, str: String) RETURNS Void ->
         c = charAt(str, i);
         IF c == " " OR c == "," OR c == "\n" OR c == "\t" THEN i += 1;
         ELSE_IF c == "(" OR c == ")" OR c == "[" OR c == "]" THEN
-            penv["__t" + count.toString()] = Value{ Str: COPY c };
+            penv["__t" $+ count.toString()] = Value{ Str: COPY c };
             count += 1;
             i += 1;
         ELSE_IF c == ";" THEN
@@ -284,19 +284,19 @@ FN tokenizeToEnv!(MUTABLE penv: HashMap<Value>, str: String) RETURNS Void ->
         ELSE_IF c == "\"" THEN
             MUTABLE s = "\""; i += 1;
             WHILE i < str.length() AND charAt(str, i) != "\"" DO
-                s = s + charAt(str, i); i += 1;
+                s = s $+ charAt(str, i); i += 1;
             END
-            s = s + "\"";
-            penv["__t" + count.toString()] = Value{ Str: COPY s };
+            s = s $+ "\"";
+            penv["__t" $+ count.toString()] = Value{ Str: COPY s };
             count += 1;
             i += 1;
         ELSE
             MUTABLE s = "";
             WHILE i < str.length() AND charAt(str, i) != " " AND charAt(str, i) != "," AND charAt(str, i) != "\n" AND charAt(str, i) != "\t" AND charAt(str, i) != "(" AND charAt(str, i) != ")" AND charAt(str, i) != "[" AND charAt(str, i) != "]" AND charAt(str, i) != "\"" AND charAt(str, i) != ";" DO
-                s = s + charAt(str, i); i += 1;
+                s = s $+ charAt(str, i); i += 1;
             END
             IF s.length() > 0 THEN
-                penv["__t" + count.toString()] = Value{ Str: COPY s };
+                penv["__t" $+ count.toString()] = Value{ Str: COPY s };
                 count += 1;
             END
         END
@@ -306,7 +306,7 @@ FN tokenizeToEnv!(MUTABLE penv: HashMap<Value>, str: String) RETURNS Void ->
 END
 
 FN getTokenStr!(MUTABLE penv: HashMap<Value>, idx: Int64) RETURNS String ->
-    val = penv["__t" + idx.toString()] OR_ELSE Value.Nil;
+    val = penv["__t" $+ idx.toString()] OR_ELSE Value.Nil;
     RETURN getStr(val);
 END
 
@@ -374,7 +374,7 @@ FN applyNative(id: Int64, evaled: Value[]) RETURNS !Value EFFECTS REENTRANT ->
     IF id == 1 THEN
         # + works on i64, f64, and strings
         PARTIAL MATCH evaled[1] START
-            Value.Str AS s1 -> RETURN Value{ Str: s1 + getStr(evaled[2]) };,
+            Value.Str AS s1 -> RETURN Value{ Str: s1 $+ getStr(evaled[2]) };,
             Value.Int64Val AS ia ->
                 IF isInt64?(evaled[2]) THEN RETURN Value{ Int64Val: ia + getInt(evaled[2]) };
                 ELSE RETURN Value{ Number: toFloat(ia) + getNum(evaled[2]) }; END,
@@ -430,7 +430,7 @@ FN applyNative(id: Int64, evaled: Value[]) RETURNS !Value EFFECTS REENTRANT ->
     IF id == 26 THEN
         MUTABLE out = getStr(evaled[1]);
         FOR si IN (2_i64 ..< evaled.length()) DO
-            out = out + getStr(evaled[si]);
+            out = out $+ getStr(evaled[si]);
         END
         RETURN Value{ Str: COPY out };
     END
@@ -544,8 +544,8 @@ FN applyNative(id: Int64, evaled: Value[]) RETURNS !Value EFFECTS REENTRANT ->
         PARTIAL MATCH evaled[1] START
             Value.List AS joinItems ->
                 FOR ji IN (0_i64 ..< joinItems.length()) DO
-                    IF ji > 0 THEN joined = joined + sep; END
-                    joined = joined + getStr(joinItems[ji]);
+                    IF ji > 0 THEN joined = joined $+ sep; END
+                    joined = joined $+ getStr(joinItems[ji]);
                 END,
             DEFAULT -> PASS;
         END
@@ -807,7 +807,7 @@ FN debugPause!(reason: String, envId: Id<Env>, MUTABLE pool: Env[50000]@pool) RE
     # Write break info
     MUTABLE breakInfo = COPY reason;
     IF stackDisplay.length() > 0 THEN
-        breakInfo = breakInfo + "\n  stack: " + stackDisplay;
+        breakInfo = breakInfo $+ "\n  stack: " $+ stackDisplay;
     END
     writeFile("/tmp/_debug_break.txt", breakInfo);
 
@@ -1602,12 +1602,12 @@ FN evalList!(TAKES items: Value[], envId: Id<Env>, MUTABLE pool: Env[50000]@pool
     ELSE_IF formName == "debug-set-break" THEN
         # (debug-set-break "fnName") -> register breakpoint
         bpName = eval!(COPY items[1], envId, pool);
-        pool[envId]?.vars["__bp_" + getStr(bpName)] = Value.TrueVal;
+        pool[envId]?.vars["__bp_" $+ getStr(bpName)] = Value.TrueVal;
         RETURN Value.Nil;
 
     ELSE_IF formName == "debug-clear-break" THEN
         bpName = eval!(COPY items[1], envId, pool);
-        pool[envId]?.vars["__bp_" + getStr(bpName)] = Value.Nil;
+        pool[envId]?.vars["__bp_" $+ getStr(bpName)] = Value.Nil;
         RETURN Value.Nil;
 
     # Error introspection: special forms to avoid error propagation
@@ -1637,7 +1637,7 @@ FN evalList!(TAKES items: Value[], envId: Id<Env>, MUTABLE pool: Env[50000]@pool
         MUTABLE errMsg: String = getStr(msg);
         IF getNum(srcLine) > 0.0 THEN
             lineNum = toInt(getNum(srcLine));
-            errMsg = errMsg + " (line " + lineNum.toString() + ")";
+            errMsg = errMsg $+ " (line " $+ lineNum.toString() $+ ")";
         END
         RETURN Value.Error{ errMsg: COPY errMsg, errKind: COPY getStr(kind) };
 
@@ -1737,15 +1737,15 @@ FN evalList!(TAKES items: Value[], envId: Id<Env>, MUTABLE pool: Env[50000]@pool
         calledName = getSymName(items[0]);
         IF calledName.length() > 0 THEN
             # Build call description
-            MUTABLE callDesc = calledName + "(";
+            MUTABLE callDesc = calledName $+ "(";
             FOR ai IN (1_i64 ..< evaled.length()) DO
-                IF ai > 1 THEN callDesc = callDesc + ", "; END
-                callDesc = callDesc + prStr(evaled[ai] OR_ELSE Value.Nil, TRUE);
+                IF ai > 1 THEN callDesc = callDesc $+ ", "; END
+                callDesc = callDesc $+ prStr(evaled[ai] OR_ELSE Value.Nil, TRUE);
             END
-            callDesc = callDesc + ")";
+            callDesc = callDesc $+ ")";
 
             # Check if we should break: explicit breakpoint OR_ELSE step mode
-            bpKey = envGet!(envId, "__bp_" + calledName, pool);
+            bpKey = envGet!(envId, "__bp_" $+ calledName, pool);
             stepMode = getNum(envGet!(envId, "__dbg_step", pool));
             curDepth = getNum(envGet!(envId, "__dbg_depth", pool));
             targetDepth = getNum(envGet!(envId, "__dbg_target_depth", pool));
@@ -1762,7 +1762,7 @@ FN evalList!(TAKES items: Value[], envId: Id<Env>, MUTABLE pool: Env[50000]@pool
                 # Push call stack
                 oldStack = getStr(envGet!(envId, "__dbg_stack", pool));
                 IF oldStack.length() > 0 THEN
-                    pool[envId]?.vars["__dbg_stack"] = Value{ Str: COPY callDesc + " < " + oldStack };
+                    pool[envId]?.vars["__dbg_stack"] = Value{ Str: COPY callDesc $+ " < " $+ oldStack };
                 ELSE
                     pool[envId]?.vars["__dbg_stack"] = Value{ Str: COPY callDesc };
                 END
@@ -2052,7 +2052,7 @@ FN compile!(ast: Value, envId: Id<Env>, MUTABLE pool: Env[50000]@pool) RETURNS !
     IF isSymbol?(ast) THEN
         symName = getSymName(ast);
         # Check if this symbol has a slot assignment
-        slotLookup = pool[envId]?.vars["__slot_" + symName] OR_ELSE Value{ Number: 0.0 - 1.0 };
+        slotLookup = pool[envId]?.vars["__slot_" $+ symName] OR_ELSE Value{ Number: 0.0 - 1.0 };
         slotNum = toInt(getNum(slotLookup));
         IF slotNum >= 0 THEN
             # Slot-based load
@@ -2107,7 +2107,7 @@ FN compile!(ast: Value, envId: Id<Env>, MUTABLE pool: Env[50000]@pool) RETURNS !
                 defName = getSymName(items[1]);
                 slotCounter = pool[envId]?.vars["__slotN"] OR_ELSE Value{ Number: 0.0 };
                 nextSlot = toInt(getNum(slotCounter));
-                pool[envId]?.vars["__slot_" + defName] = Value{ Number: toFloat(nextSlot) };
+                pool[envId]?.vars["__slot_" $+ defName] = Value{ Number: toFloat(nextSlot) };
                 pool[envId]?.vars["__slotN"] = Value{ Number: toFloat(nextSlot + 1) };
                 ops.append(Value{ Number: 81.0 }); ops.append(Value{ Number: toFloat(nextSlot) });
                 # Also storeName for env compatibility (tree-walker interop)
@@ -2163,11 +2163,11 @@ FN compile!(ast: Value, envId: Id<Env>, MUTABLE pool: Env[50000]@pool) RETURNS !
     # Store in env entry-by-entry (Value.Number is inline, survives arena free)
     pool[envId]?.vars["__bc_opN"] = Value{ Number: toFloat(ops.length()) };
     FOR wi IN (0_i64 ..< ops.length()) DO
-        pool[envId]?.vars["__bc_o" + wi.toString()] = ops[wi] OR_ELSE Value.Nil;
+        pool[envId]?.vars["__bc_o" $+ wi.toString()] = ops[wi] OR_ELSE Value.Nil;
     END
     pool[envId]?.vars["__bc_cN"] = Value{ Number: toFloat(consts.length()) };
     FOR wi IN (0_i64 ..< consts.length()) DO
-        pool[envId]?.vars["__bc_c" + wi.toString()] = consts[wi] OR_ELSE Value.Nil;
+        pool[envId]?.vars["__bc_c" $+ wi.toString()] = consts[wi] OR_ELSE Value.Nil;
     END
     RETURN;
 END
@@ -2212,7 +2212,7 @@ FN exec!(ops: Int64[], consts: Value[], envId: Id<Env>, MUTABLE pool: Env[50000]
             # ADD: handles numbers (i64/f64) and string concatenation
             PARTIAL MATCH (stack[sp - 2] OR_ELSE Value.Nil) START
                 Value.Str AS s1 ->
-                    pv = Value{ Str: s1 + getStr((stack[sp - 1] OR_ELSE Value.Nil)) };,
+                    pv = Value{ Str: s1 $+ getStr((stack[sp - 1] OR_ELSE Value.Nil)) };,
                 Value.Int64Val AS ia ->
                     IF isInt64?((stack[sp - 1] OR_ELSE Value.Nil)) THEN pv = Value{ Int64Val: ia + getInt((stack[sp - 1] OR_ELSE Value.Nil)) };
                     ELSE pv = Value{ Number: toFloat(ia) + getNum((stack[sp - 1] OR_ELSE Value.Nil)) }; END,
@@ -2426,12 +2426,12 @@ FN bcEvalIn!(input: String, readable: Bool, rootId: Id<Env>, MUTABLE pool: Env[5
     constCount = toInt(getNum(pool[rootId]?.vars["__bc_cN"] OR_ELSE Value{ Number: 0.0 }));
     MUTABLE intOps: Int64[]@list = List[];
     FOR oi IN (0_i64 ..< opCount) DO
-        opV = pool[rootId]?.vars["__bc_o" + oi.toString()] OR_ELSE Value{ Number: 0.0 };
+        opV = pool[rootId]?.vars["__bc_o" $+ oi.toString()] OR_ELSE Value{ Number: 0.0 };
         intOps.append(toInt(getNum(opV)));
     END
     MUTABLE bcConsts: Value[]@list = List[];
     FOR ci IN (0_i64 ..< constCount) DO
-        cV = pool[rootId]?.vars["__bc_c" + ci.toString()] OR_ELSE Value.Nil;
+        cV = pool[rootId]?.vars["__bc_c" $+ ci.toString()] OR_ELSE Value.Nil;
         bcConsts.append(COPY cV);
     END
     result = exec!(intOps, bcConsts, rootId, pool) OR_ELSE RAISE;

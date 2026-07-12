@@ -27,10 +27,10 @@ FN safe_filter() RETURNS !Void ->
   odd_count = numbers
     |> WHERE (_ MOD 2) != 0
     |> COUNT TRUE;
-  print("odd_count: " + odd_count.toString());
+  print("odd_count: " $+ odd_count.toString());
 
   # The source list is unchanged.
-  print("numbers length: " + numbers.length().toString());
+  print("numbers length: " $+ numbers.length().toString());
 END
 
 FN shared_list_access() RETURNS !Void ->
@@ -42,7 +42,7 @@ FN shared_list_access() RETURNS !Void ->
       # list is locked for read for the duration of this block.
       # No other fiber can acquire EXCLUSIVE during this WITH.
       sum = list |> REDUCE(0) acc + _;
-      print("sum = " + sum.toString());
+      print("sum = " $+ sum.toString());
     }
     # Lock released here.
   };

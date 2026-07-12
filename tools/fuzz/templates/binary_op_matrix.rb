@@ -79,7 +79,7 @@ def bom_body(op, t)
   when :check_sub then "    a: Int64 = 7_i64;\n    b: Int64 = 5_i64;\n    ASSERT (a !- b) == 2_i64, \"check sub\";"
   when :check_mul then "    a: Int64 = 7_i64;\n    b: Int64 = 5_i64;\n    ASSERT (a !* b) == 35_i64, \"check mul\";"
   when :concat
-    "    t: String = #{l} + #{r};\n    ASSERT t.length() == 6_i64, \"concat #{t}\";"
+    "    t: String = #{l} $+ #{r};\n    ASSERT t.length() == 6_i64, \"concat #{t}\";"
   when :or_fallback
     "    v: String = mightFail() OR_ELSE \"fb\";\n    ASSERT v.length() >= 2_i64, \"or fallback\";"
   when :logical_and

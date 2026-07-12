@@ -5,7 +5,7 @@
 FN main() RETURNS Void ->
     MUTABLE m: HashMap<String, Int64> = {};
     FOR i IN (1_i64 ..= 5) DO
-        m["key-" + i.toString()] = i * 10;
+        m["key-" $+ i.toString()] = i * 10;
     END
     ASSERT m.count() == 5;
     ASSERT m["key-1"] == 10;

@@ -7,7 +7,7 @@ FN main() RETURNS Void ->
 
   # Dynamic command construction
   who = "World";
-  cmd = "echo " + who;
+  cmd = "echo " $+ who;
   dynamic_out = shell(cmd).trim();
 
   ASSERT eql?(dynamic_out, "World"), "Dynamic shell command should work";

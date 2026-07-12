@@ -89,7 +89,7 @@ RSpec.describe "VM Phase 2 compiler bugs (see docs/agents/vm-bugs.md)", :integra
     let(:src) { <<~CHT }
       FN main() RETURNS !Void ->
           base = "#{path_prefix}";
-          path = base + ".txt";
+          path = base $+ ".txt";
           writeFile(path, "hello");
           p: ~Int64 = BG {
               content = readFile(path);

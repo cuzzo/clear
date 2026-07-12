@@ -4,7 +4,7 @@
 
 FN main() RETURNS Void ->
     MUTABLE map: HashMap<Int64> = {};
-    key = "dynamic-" + "key";
+    key = "dynamic-" $+ "key";
 
     map[COPY key] = 1_i64;
     ASSERT map[key] == 1_i64, "COPY key put should store the value";

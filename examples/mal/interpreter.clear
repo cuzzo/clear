@@ -122,29 +122,29 @@ FN prStr(v: Value, readably: Bool) RETURNS !String EFFECTS REENTRANT ->
         Value.Number AS n ->
             IF n == floor(n) THEN RETURN toInt(n).toString(); END
             RETURN toInt(n).toString();,
-        Value.Str AS s -> IF readably THEN RETURN "\"" + s + "\""; END RETURN s;,
+        Value.Str AS s -> IF readably THEN RETURN "\"" $+ s $+ "\""; END RETURN s;,
         Value.Symbol AS s -> RETURN s;,
         Value.List AS items ->
             MUTABLE out = "(";
             FOR li IN (0_i64 ..< items.length()) DO
-                IF li > 0 THEN out = out + " "; END
-                out = out + (prStr(items[li], readably) OR_ELSE RAISE);
+                IF li > 0 THEN out = out $+ " "; END
+                out = out $+ (prStr(items[li], readably) OR_ELSE RAISE);
             END
-            RETURN out + ")";,
+            RETURN out $+ ")";,
         Value.Vector AS velems ->
             MUTABLE vout = "#(";
             FOR vi IN (0_i64 ..< velems.length()) DO
-                IF vi > 0 THEN vout = vout + " "; END
-                vout = vout + (prStr(velems[vi], readably) OR_ELSE RAISE);
+                IF vi > 0 THEN vout = vout $+ " "; END
+                vout = vout $+ (prStr(velems[vi], readably) OR_ELSE RAISE);
             END
-            RETURN vout + ")";,
+            RETURN vout $+ ")";,
         Value.Pair AS p ->
-            RETURN "(" + (prStr(p.pairCar, readably) OR_ELSE RAISE) + " . " + (prStr(p.pairCdr, readably) OR_ELSE RAISE) + ")";,
-        Value.NativeFn AS nid -> RETURN "#<native:" + nid.toString() + ">";,
+            RETURN "(" $+ (prStr(p.pairCar, readably) OR_ELSE RAISE) $+ " . " $+ (prStr(p.pairCdr, readably) OR_ELSE RAISE) $+ ")";,
+        Value.NativeFn AS nid -> RETURN "#<native:" $+ nid.toString() $+ ">";,
         Value.Lambda -> RETURN "#<function>";,
         Value.EnvRef -> RETURN "#<envref>";,
         Value.Tco -> RETURN "#<tco>";,
-        Value.Error AS e -> RETURN "#<error:" + e.errKind + ":" + e.errMsg + ">";
+        Value.Error AS e -> RETURN "#<error:" $+ e.errKind $+ ":" $+ e.errMsg $+ ">";
     END
     RETURN "";
 END
@@ -161,7 +161,7 @@ FN tokenizeToEnv!(MUTABLE penv: HashMap<Value>, str: String) RETURNS !Void ->
         c = charAt(str, i) OR_ELSE RAISE;
         IF c == " " OR c == "," OR c == "\n" OR c == "\t" THEN i += 1;
         ELSE_IF c == "(" OR c == ")" OR c == "[" OR c == "]" THEN
-            penv["__t" + count.toString()] = Value{ Str: COPY c };
+            penv["__t" $+ count.toString()] = Value{ Str: COPY c };
             count += 1;
             i += 1;
         ELSE_IF c == ";" THEN
@@ -170,22 +170,22 @@ FN tokenizeToEnv!(MUTABLE penv: HashMap<Value>, str: String) RETURNS !Void ->
             MUTABLE s = "\""; i += 1;
             WHILE i < str.length() AND (charAt(str, i) OR_ELSE RAISE) != "\"" DO
                 IF (charAt(str, i) OR_ELSE RAISE) == "\\" THEN
-                    s = s + (charAt(str, i) OR_ELSE RAISE); i += 1;
-                    IF i < str.length() THEN s = s + (charAt(str, i) OR_ELSE RAISE); i += 1; END
-                ELSE s = s + (charAt(str, i) OR_ELSE RAISE); i += 1;
+                    s = s $+ (charAt(str, i) OR_ELSE RAISE); i += 1;
+                    IF i < str.length() THEN s = s $+ (charAt(str, i) OR_ELSE RAISE); i += 1; END
+                ELSE s = s $+ (charAt(str, i) OR_ELSE RAISE); i += 1;
                 END
             END
-            s = s + "\"";
-            penv["__t" + count.toString()] = Value{ Str: COPY s };
+            s = s $+ "\"";
+            penv["__t" $+ count.toString()] = Value{ Str: COPY s };
             count += 1;
             i += 1;
         ELSE
             MUTABLE s = "";
             WHILE i < str.length() AND (charAt(str, i) OR_ELSE RAISE) != " " AND (charAt(str, i) OR_ELSE RAISE) != "," AND (charAt(str, i) OR_ELSE RAISE) != "\n" AND (charAt(str, i) OR_ELSE RAISE) != "\t" AND (charAt(str, i) OR_ELSE RAISE) != "(" AND (charAt(str, i) OR_ELSE RAISE) != ")" AND (charAt(str, i) OR_ELSE RAISE) != "[" AND (charAt(str, i) OR_ELSE RAISE) != "]" AND (charAt(str, i) OR_ELSE RAISE) != "\"" AND (charAt(str, i) OR_ELSE RAISE) != ";" DO
-                s = s + (charAt(str, i) OR_ELSE RAISE); i += 1;
+                s = s $+ (charAt(str, i) OR_ELSE RAISE); i += 1;
             END
             IF s.length() > 0 THEN
-                penv["__t" + count.toString()] = Value{ Str: COPY s };
+                penv["__t" $+ count.toString()] = Value{ Str: COPY s };
                 count += 1;
             END
         END
@@ -195,7 +195,7 @@ FN tokenizeToEnv!(MUTABLE penv: HashMap<Value>, str: String) RETURNS !Void ->
 END
 
 FN getTokenStr!(MUTABLE penv: HashMap<Value>, idx: Int64) RETURNS !String ->
-    val = penv["__t" + idx.toString()] OR_ELSE Value.Nil;
+    val = penv["__t" $+ idx.toString()] OR_ELSE Value.Nil;
     RETURN COPY getStr(val);
 END
 
@@ -273,7 +273,7 @@ FN applyNative!(id: Int64, evaled: Value[], envId: Id<Env>, MUTABLE pool: Env[50
     IF id == 12 THEN RETURN boolVal(listLen(evaled[1]) == 0); END
     IF id == 13 THEN RETURN Value{ Number: toFloat(listLen(evaled[1])) }; END
     IF id == 14 THEN RETURN boolVal(isTruthy?(evaled[1]) == FALSE); END
-    IF id == 15 THEN appendOutput!(envId, (prStr(evaled[1], TRUE) OR_ELSE "") + "\n", pool) OR_ELSE RAISE; RETURN Value.Nil; END
+    IF id == 15 THEN appendOutput!(envId, (prStr(evaled[1], TRUE) OR_ELSE "") $+ "\n", pool) OR_ELSE RAISE; RETURN Value.Nil; END
     # Vector
     IF id == 16 THEN
         MUTABLE velems: Value[]@list = List[];
@@ -295,7 +295,7 @@ FN applyNative!(id: Int64, evaled: Value[], envId: Id<Env>, MUTABLE pool: Env[50
     IF id == 26 THEN
         MUTABLE out = getStr(evaled[1]);
         FOR si IN (2_i64 ..< evaled.length()) DO
-            out = out + getStr(evaled[si]);
+            out = out $+ getStr(evaled[si]);
         END
         RETURN Value{ Str: COPY out };
     END
@@ -363,7 +363,7 @@ END
 
 FN appendOutput!(envId: Id<Env>, chunk: String, MUTABLE pool: Env[50000]@pool) RETURNS !Void EFFECTS REENTRANT ->
     current = envGet!(envId, "__output", pool) OR_ELSE Value.Nil;
-    envSet!(envId, "__output", Value{ Str: COPY (getStr(current) + chunk) }, pool) OR_ELSE RAISE;
+    envSet!(envId, "__output", Value{ Str: COPY (getStr(current) $+ chunk) }, pool) OR_ELSE RAISE;
     RETURN;
 END
 
@@ -577,8 +577,8 @@ FN evalList!(items: Value[], envId: Id<Env>, MUTABLE pool: Env[50000]@pool) RETU
                 metaId: Id<Env> = pool.insert(Env{ vars: {} });
                 MUTABLE paramsText = "";
                 FOR pi IN (0_i64 ..< pnames.length()) DO
-                    IF pi > 0 THEN paramsText = paramsText + "\n"; END
-                    paramsText = paramsText + getSymName(pnames[pi]);
+                    IF pi > 0 THEN paramsText = paramsText $+ "\n"; END
+                    paramsText = paramsText $+ getSymName(pnames[pi]);
                 END
                 bodyText = prStr(items[2], TRUE) OR_ELSE "";
                 IF pool[metaId] EXISTS AS meta THEN

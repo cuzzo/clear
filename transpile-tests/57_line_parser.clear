@@ -24,12 +24,12 @@ FN parseLine(data: String) RETURNS !String ->
             # skip empty
         ELSE_IF startsWith?(line, "SET:") THEN
             idStr = substr(line, 4_i64, line.length() - 4);
-            result = result + "SET=" + idStr + ";";
+            result = result $+ "SET=" $+ idStr $+ ";";
         ELSE_IF startsWith?(line, "GET:") THEN
             idStr = substr(line, 4_i64, line.length() - 4);
-            result = result + "GET=" + idStr + ";";
+            result = result $+ "GET=" $+ idStr $+ ";";
         ELSE
-            result = result + "ERR;";
+            result = result $+ "ERR;";
         END
     END
 

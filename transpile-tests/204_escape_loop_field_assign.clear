@@ -9,7 +9,7 @@ FN main() RETURNS Void ->
     MUTABLE s: State = State{ label: "init", count: 0 };
     FOR i IN (1_i64 ..= 5) DO
         s.count = s.count + 1;
-        s.label = "step-" + i.toString();
+        s.label = "step-" $+ i.toString();
     END
     ASSERT s.count == 5;
     ASSERT s.label == "step-5";

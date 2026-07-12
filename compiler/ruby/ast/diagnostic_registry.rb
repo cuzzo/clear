@@ -773,6 +773,12 @@ module DiagnosticRegistry
       summary:  "Logical use of `?Bool` must choose presence or payload truth explicitly.",
       fix_hint: "Use `value EXISTS` for presence, or `(value OR_ELSE FALSE)` for payload truth. `clear fix` offers both edits for named values.",
     },
+    STRING_CONCAT_REQUIRES_DOLLAR: {
+      severity: :error, category: :type,
+      template: "String concatenation uses `$+`; `+` is numeric addition.",
+      summary:  "String concatenation must use the dedicated `$+` operator.",
+      fix_hint: "Replace `+` with `$+`; `clear fix` applies this when operand types prove the expression is string concatenation.",
+    },
     IS_OK_REQUIRES_FALLIBLE: {
       severity: :error, category: :type,
       template: "`IS_OK` requires a fallible value, got '%{got}'.",
@@ -3160,6 +3166,9 @@ module DiagnosticRegistry
     REPLACE_LOCKED_WITH_WRITE_LOCKED: "Change `@locked` to `@writeLocked` on '%{name}' so concurrent readers can take `WITH READ` alongside `WITH EXCLUSIVE` writers.",
     REPLACE_MATCH_WITH_PARTIAL: "Replace `MATCH` with `PARTIAL MATCH` (relaxes exhaustiveness; allows DEFAULT and WHEN guards).",
     REPLACE_OPERATOR_TYPO: "Replace `%{match}` with `%{replace}` -- %{label}.",
+    REPLACE_STRING_CONCAT_OPERATOR: "Replace `+` with `$+` for string concatenation.",
+    TEST_OPTIONAL_BOOL_PRESENCE: "Test whether the optional Bool is present with `%{name} EXISTS`.",
+    DEFAULT_OPTIONAL_BOOL_PAYLOAD: "Use the Bool payload, defaulting NIL to FALSE, with `(%{name} OR_ELSE FALSE)`.",
     REPLACE_REENTRANT_WITH_VARIANT: "Replace `EFFECTS REENTRANT` with `%{suggestion}` (%{reason}).",
     REPLACE_STACK_SIGIL_WITH_SERVICE: "Replace `@%{stack}` with `@service` (this fiber transitively calls a plain :reentrant fn).",
     UPGRADE_VERSIONED_TO_SHARED: "Upgrade `@versioned` to `@shared:versioned` for cross-thread sharing.",

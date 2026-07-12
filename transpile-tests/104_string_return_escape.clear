@@ -5,12 +5,12 @@
 # so subsequent frame allocations in the caller overwrite the returned data.
 
 FN makeGreeting(name: String) RETURNS !String ->
-    result = "Hello " + name;
+    result = "Hello " $+ name;
     RETURN result;
 END
 
 FN makeLabel(prefix: String, value: Int64) RETURNS !String ->
-    result = prefix + value.toString();
+    result = prefix $+ value.toString();
     RETURN result;
 END
 
@@ -22,7 +22,7 @@ FN main() RETURNS Void ->
     # Without promotion, these overwrite greeting's backing data.
     MUTABLE i: Int64 = 0;
     WHILE i < 5 DO
-        junk = "XXXXXXXXXX" + i.toString();
+        junk = "XXXXXXXXXX" $+ i.toString();
         i += 1;
     END
 
@@ -36,7 +36,7 @@ FN main() RETURNS Void ->
     # More frame churn
     MUTABLE j: Int64 = 0;
     WHILE j < 5 DO
-        junk2 = "YYYYYYYYYY" + j.toString();
+        junk2 = "YYYYYYYYYY" $+ j.toString();
         j += 1;
     END
 

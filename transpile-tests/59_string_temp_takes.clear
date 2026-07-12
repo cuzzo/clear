@@ -2,7 +2,7 @@
 # Verifies no double-free or use-after-free.
 
 FN buildStr(name: String) RETURNS !String ->
-    RETURN "Hello, " + name + "!";
+    RETURN "Hello, " $+ name $+ "!";
 END
 
 FN checkLength(s: String) RETURNS Int64 ->

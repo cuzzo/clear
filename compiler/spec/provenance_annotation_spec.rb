@@ -46,7 +46,7 @@ RSpec.describe "Provenance annotation" do
 
   describe "string concat" do
     it "has :frame provenance" do
-      ast, _ = annotate('FN main() RETURNS Void -> x = "a" + "b"; RETURN; END')
+      ast, _ = annotate('FN main() RETURNS Void -> x = "a" $+ "b"; RETURN; END')
       binding = find_binding(ast, "main", "x")
       ti = binding.full_type
       ti = Type.new(ti) if !ti.is_a?(Type)

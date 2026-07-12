@@ -41,10 +41,10 @@ END
 
 FN main() RETURNS Void ->
   result = conditional_sum(0);
-  print("conditional_sum(0) = " + result.toString());
+  print("conditional_sum(0) = " $+ result.toString());
 
   t = init_struct();
-  print("t.c = " + t.c.toString());
+  print("t.c = " $+ t.c.toString());
 END
 
 # Summary:

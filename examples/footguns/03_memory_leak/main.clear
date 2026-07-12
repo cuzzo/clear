@@ -8,7 +8,7 @@
 # before the binary is produced. No valgrind needed.
 
 FN process(input: String) RETURNS !String ->
-  buf: String = "processed: " + input;
+  buf: String = "processed: " $+ input;
   # heap allocation
 
   IF startsWith?(input, "!") THEN

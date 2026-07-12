@@ -28,7 +28,7 @@ FN heavyInner!(outer: Int64) RETURNS !Void ->
             parts.append(k.toString());
             k += 1;
         END
-        resp = resp + i.toString() + ",";
+        resp = resp $+ i.toString() $+ ",";
         i += 1;
     END
     ASSERT resp == "0,1,2,3,4,5,6,7,", "wrong result";

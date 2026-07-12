@@ -15,7 +15,7 @@ UNION Val {
 }
 
 FN makeStr!(prefix: String, suffix: String) RETURNS !String ->
-    RETURN prefix + suffix;
+    RETURN prefix $+ suffix;
 END
 
 FN buildList!() RETURNS !Val ->

@@ -32,8 +32,8 @@ FN safe_access() RETURNS !Void ->
     i = i + 1;
   END
 
-  print("buf[0]=" + buf[0].toString());
-  print("buf[3]=" + buf[3].toString());
+  print("buf[0]=" $+ buf[0].toString());
+  print("buf[3]=" $+ buf[3].toString());
 END
 
 FN off_by_one() RETURNS !Void ->
@@ -45,7 +45,7 @@ FN off_by_one() RETURNS !Void ->
 
   last = arr[arr.length() - 1];
   # safe: always the last element
-  print("arr[7]=" + last.toString());
+  print("arr[7]=" $+ last.toString());
 END
 
 FN main() RETURNS Void ->

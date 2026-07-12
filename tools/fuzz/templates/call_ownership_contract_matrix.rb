@@ -231,7 +231,7 @@ FuzzGenerator.register(:call_ownership_contract_matrix, cells: CALL_OWNERSHIP_CE
     append = case p[:shape]
              when :list then "v.append(2_i64);"
              when :string_list then 'v.append(COPY "z");'
-             when :struct_string then 'v.name = v.name + COPY "d";'
+             when :struct_string then 'v.name = v.name $+ COPY "d";'
              when :nested_list then "v.items.append(2_i64);"
              when :nested_string_list then 'v.items.append(COPY "z");'
              end

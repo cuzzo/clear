@@ -53,7 +53,7 @@ RSpec.describe CleanupClassifier do
       transpile(<<~CLEAR)
         UNION Value { Num: Float64, Text: String }
         FN makeValue(s: String) RETURNS !Value ->
-            label = s + "!";
+            label = s $+ "!";
             RETURN Value{ Text: COPY label };
         END
         FN main() RETURNS Void ->

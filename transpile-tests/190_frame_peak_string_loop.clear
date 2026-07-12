@@ -5,7 +5,7 @@
 FN buildResponse(n: Int64) RETURNS !String ->
     MUTABLE resp = "";
     FOR i IN (1_i64 ..= n) DO
-        resp = resp + ":OK\r\n";
+        resp = resp $+ ":OK\r\n";
     END
     RETURN resp;
 END

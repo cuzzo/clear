@@ -22,7 +22,7 @@ END
 FN buildLargePayload(id: Int64) RETURNS !String ->
     # Simulate generateJson or readFile: build a ~6KB string.
     MUTABLE parts: String[]@list = [];
-    FOR i IN (1_i64 ..= 200) -> parts.append(id.toString() + ":" + i.toString());
+    FOR i IN (1_i64 ..= 200) -> parts.append(id.toString() $+ ":" $+ i.toString());
     RETURN join(parts, ",");
 END
 
@@ -38,7 +38,7 @@ FN main() RETURNS Void ->
         # Simulate parseJsonArraySum: more frame allocation
         sum = parseData(content);
         # Accumulate response (inner loop collapsed: resp grows then rewinds)
-        resp = ":" + sum.toString() + "\r\n";
+        resp = ":" $+ sum.toString() $+ "\r\n";
         i += 1;
     END
 

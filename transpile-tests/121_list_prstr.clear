@@ -15,10 +15,10 @@ FN prStr(v: Value) RETURNS !String EFFECTS REENTRANT ->
         Value.List AS items ->
             MUTABLE out = "(";
             FOR li IN (0_i64 ..< items.length()) DO
-                IF li > 0 THEN out = out + " "; END
-                out = out + prStr(items[li]);
+                IF li > 0 THEN out = out $+ " "; END
+                out = out $+ prStr(items[li]);
             END
-            RETURN out + ")";,
+            RETURN out $+ ")";,
         DEFAULT -> RETURN "?";
     END
     RETURN "?";

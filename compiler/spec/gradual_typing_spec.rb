@@ -1277,10 +1277,11 @@ RSpec.describe "Gradual typing — operator-aware suggestions (M2.1)" do
   describe "auto_rank_candidates table" do
     let(:host) { Class.new { include ErrorHelper; include FixableHelper }.new }
 
-    it "ranks `+` as Int64 default with Float64 and String alternatives" do
+    it "ranks `+` as numeric and `$+` as String-only" do
       ranked = host.send(:auto_rank_candidates, Set[:ADD])
       types = ranked.map(&:type_sym)
-      expect(types).to eq([:Int64, :Float64, :String])
+      expect(types).to eq([:Int64, :Float64])
+      expect(host.send(:auto_rank_candidates, Set[:CONCAT]).map(&:type_sym)).to eq([:String])
     end
 
     it "ranks `*` as Int64 default with Float64 (no String — can't multiply strings)" do
@@ -1383,8 +1384,8 @@ RSpec.describe "Gradual typing — operator-aware suggestions (M2.1)" do
   describe "end-to-end ambiguity diagnostic with operator hints" do
     it "appends ranked candidate fixes when the body uses the param in a BinaryOp" do
       # Two callers pass Int64 and String — ambiguity. Body uses x+x —
-      # operator evidence intersects: {Int64, Float64, String}. The
-      # diagnostic surfaces those candidates as :interactive Fixes.
+      # operator evidence constrains `+` to numeric candidates. String is no
+      # longer suggested because concatenation has its own `$+` operator.
       expect {
         annotate(<<~CLEAR)
         FN parseValue(x: Auto) RETURNS Int64 ->
@@ -1412,7 +1413,8 @@ RSpec.describe "Gradual typing — operator-aware suggestions (M2.1)" do
 
       # Each ranked candidate becomes an :interactive Fix.
       replacements = f.fixes.map { |fx| fx.edits.first.replacement }
-      expect(replacements).to include("Int64", "Float64", "String")
+      expect(replacements).to include("Int64", "Float64")
+      expect(replacements).not_to include("String")
       expect(f.fixes.map(&:confidence).uniq).to eq([:interactive])
     end
   end

@@ -808,16 +808,16 @@ RSpec.describe MIRLowering do
     it "uses declaration identity for same-name branch reassignment cleanup allocators" do
       mir = lower_source_mir(<<~CLEAR)
         FN make() RETURNS String ->
-          RETURN "b" + "c";
+          RETURN "b" $+ "c";
         END
 
         FN main() RETURNS Void ->
           IF TRUE THEN
             MUTABLE s = "a";
-            s = s + "x";
+            s = s $+ "x";
           ELSE
             MUTABLE s = make();
-            s = s + "y";
+            s = s $+ "y";
           END
           RETURN;
         END
@@ -3608,7 +3608,7 @@ RSpec.describe MIRLowering do
     it "materializes owned OR_ELSE PASS results before stdlib TAKES argument verification" do
       mir = lower_source_mir(<<~CLEAR)
         FN inner() RETURNS !String ->
-          MUTABLE v: String = ""; v = v + "x";
+          MUTABLE v: String = ""; v = v $+ "x";
           RETURN v;
         END
 

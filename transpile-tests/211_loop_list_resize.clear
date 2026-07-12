@@ -5,7 +5,7 @@
 FN main() RETURNS Void ->
     MUTABLE items: String[]@list = [];
     FOR i IN (1_i64 ..= 200) DO
-        items.append("entry-" + i.toString());
+        items.append("entry-" $+ i.toString());
     END
     ASSERT items.length() == 200, "all 200 items stored";
     ASSERT items[0] == "entry-1", "first item";
@@ -16,7 +16,7 @@ FN main() RETURNS Void ->
     MUTABLE total: Int64 = 0;
     FOR i IN (0_i64 ..< 200) DO
         j = i + 1;
-        s = "entry-" + j.toString();
+        s = "entry-" $+ j.toString();
         IF items[i] == s THEN total += 1; END
     END
     ASSERT total == 200, "all items match after second pass";

@@ -6,9 +6,9 @@ FN main() RETURNS Void ->
 
     FOR i IN (0_i64 ..< 50000_i64) DO
         IF (i MOD 2_i64) == 0_i64 THEN
-            m["k_" + i.toString()] = Value{ Num: toFloat(i) * 1.5 };
+            m["k_" $+ i.toString()] = Value{ Num: toFloat(i) * 1.5 };
         ELSE
-            m["k_" + i.toString()] = Value{ Str: COPY ("v_" + i.toString()) };
+            m["k_" $+ i.toString()] = Value{ Str: COPY ("v_" $+ i.toString()) };
         END
     END
 
@@ -18,7 +18,7 @@ FN main() RETURNS Void ->
     MUTABLE numCount: Int64 = 0_i64;
     MUTABLE strCount: Int64 = 0_i64;
     FOR j IN (0_i64 ..< 50000_i64) DO
-        v = m["k_" + j.toString()] OR_ELSE Value.Nil;
+        v = m["k_" $+ j.toString()] OR_ELSE Value.Nil;
         PARTIAL MATCH v START
             Value.Num -> numCount = numCount + 1_i64;,
             Value.Str -> strCount = strCount + 1_i64;,

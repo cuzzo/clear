@@ -21,9 +21,9 @@ STRUCT Doc {
 
 FN buildDoc(seed: Int64) RETURNS !Doc@multiowned ->
   RETURN Doc{
-    title: "doc_title_" + seed.toString(),
-    body: "body_content_" + (seed * 13).toString() + "_suffix",
-    tag: "tag_" + (seed MOD 50).toString()
+    title: "doc_title_" $+ seed.toString(),
+    body: "body_content_" $+ (seed * 13).toString() $+ "_suffix",
+    tag: "tag_" $+ (seed MOD 50).toString()
   } @multiowned;
 END
 
@@ -74,11 +74,11 @@ FN main() RETURNS Void ->
   fr_ms = timestampMs() - t1;
 
   print(
-    "RC     (" + n_docs.toString() + " docs x " + iters.toString() + " passes): " +
-    rc_ms.toString() + "ms  sum=" + s_rc.toString()
+    "RC     (" $+ n_docs.toString() $+ " docs x " $+ iters.toString() $+ " passes): " $+
+    rc_ms.toString() $+ "ms  sum=" $+ s_rc.toString()
   );
   print(
-    "Frozen (1 doc  x " + frozen_iters.toString() + " reads):  " +
-    fr_ms.toString() + "ms  sum=" + s_fr.toString()
+    "Frozen (1 doc  x " $+ frozen_iters.toString() $+ " reads):  " $+
+    fr_ms.toString() $+ "ms  sum=" $+ s_fr.toString()
   );
 END

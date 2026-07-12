@@ -117,9 +117,9 @@ FN debugPrintInfo!(varSnapshot: HashMap<String>) RETURNS !Void ->
             # mirrors source: `x: Int64 = 10`). Untyped bindings just
             # show the value.
             IF contains?(v, " = ") THEN
-                print(k + ": " + v);
+                print(k $+ ": " $+ v);
             ELSE
-                print(k + " = " + v);
+                print(k $+ " = " $+ v);
             END
         END
     END
@@ -134,7 +134,7 @@ END
 FN debugPrintList!(sourcePath: String, line: Int64, column: Int64) RETURNS !Void ->
     raw = readFile(sourcePath) OR_ELSE "";
     IF raw.length() == 0_i64 THEN
-        print("no source available for " + sourcePath);
+        print("no source available for " $+ sourcePath);
         RETURN;
     END
     lines = split(raw, "\n");
@@ -150,7 +150,7 @@ FN debugPrintList!(sourcePath: String, line: Int64, column: Int64) RETURNS !Void
         # `lines` is 0-indexed but CLEAR source lines are 1-based.
         idx = li - 1_i64;
         IF idx >= 0_i64 AND idx < lines.length() THEN
-            print(marker + " " + liStr + "  " + lines[idx]);
+            print(marker $+ " " $+ liStr $+ "  " $+ lines[idx]);
             # Caret line below the active source line, if a non-zero
             # column was supplied. The caret offset matches the column
             # (1-based); we pad the prefix to match the line-number
@@ -161,10 +161,10 @@ FN debugPrintList!(sourcePath: String, line: Int64, column: Int64) RETURNS !Void
                 #   marker (2 chars, "> " or "  ") + " " + liStr + "  "
                 # = 5 + linenum-width chars before the source content.
                 MUTABLE pad: String = "     ";
-                FOR pi IN (0_i64 ..< liStr.length()) DO pad = pad + " "; END
+                FOR pi IN (0_i64 ..< liStr.length()) DO pad = pad $+ " "; END
                 MUTABLE caretSpaces: String = "";
-                FOR ci IN (1_i64 ..< column) DO caretSpaces = caretSpaces + " "; END
-                print(pad + caretSpaces + "^");
+                FOR ci IN (1_i64 ..< column) DO caretSpaces = caretSpaces $+ " "; END
+                print(pad $+ caretSpaces $+ "^");
             END
         END
     END
@@ -182,8 +182,8 @@ FN debugPrintBacktrace!(frameRetIps: Int64[]@list, currentIp: Int64, currentLine
     MUTABLE marker0: String = "  ";
     IF activeFrame == 0_i64 THEN marker0 = "* "; END
     MUTABLE colSuffix0: String = "";
-    IF currentColumn > 0_i64 THEN colSuffix0 = ":" + (currentColumn.toString() OR_ELSE "?"); END
-    print(marker0 + "#0  ip=" + currentIpStr + " (line " + currentLineStr + colSuffix0 + ")");
+    IF currentColumn > 0_i64 THEN colSuffix0 = ":" $+ (currentColumn.toString() OR_ELSE "?"); END
+    print(marker0 $+ "#0  ip=" $+ currentIpStr $+ " (line " $+ currentLineStr $+ colSuffix0 $+ ")");
     # Walk the return-IP stack from innermost to outermost.
     MUTABLE i: Int64 = frameRetIps.length() - 1_i64;
     MUTABLE depth: Int64 = 1_i64;
@@ -205,8 +205,8 @@ FN debugPrintBacktrace!(frameRetIps: Int64[]@list, currentIp: Int64, currentLine
         MUTABLE marker: String = "  ";
         IF depth == activeFrame THEN marker = "* "; END
         MUTABLE colSuffix: String = "";
-        IF retCol > 0_i64 THEN colSuffix = ":" + (retCol.toString() OR_ELSE "?"); END
-        print(marker + "#" + depthStr + "  ip=" + retIpStr + " (line " + retLineStr + colSuffix + ")");
+        IF retCol > 0_i64 THEN colSuffix = ":" $+ (retCol.toString() OR_ELSE "?"); END
+        print(marker $+ "#" $+ depthStr $+ "  ip=" $+ retIpStr $+ " (line " $+ retLineStr $+ colSuffix $+ ")");
         i -= 1_i64;
         depth += 1_i64;
     END
@@ -233,7 +233,7 @@ FN debugPrintBreakpoints!(
         IF b.ip >= 0_i64 AND b.ip < isBreakpoint.length() AND (isBreakpoint[b.ip] OR_ELSE 0_i64) != 0_i64 THEN
             state = "on";
         END
-        print("  #" + idStr + "  line " + lineStr + "  ip=" + ipStr + "  " + state);
+        print("  #" $+ idStr $+ "  line " $+ lineStr $+ "  ip=" $+ ipStr $+ "  " $+ state);
     END
     RETURN;
 END
@@ -260,7 +260,7 @@ FN debugAddBreakpoint!(
         END
     END
     IF targetIp < 0_i64 THEN
-        print("no executable code on line " + (line.toString() OR_ELSE "?"));
+        print("no executable code on line " $+ (line.toString() OR_ELSE "?"));
         RETURN;
     END
     IF targetIp >= isBreakpoint.length() THEN
@@ -278,7 +278,7 @@ FN debugAddBreakpoint!(
     idStr = nextId.toString() OR_ELSE "?";
     lineStr = line.toString() OR_ELSE "?";
     ipStr = targetIp.toString() OR_ELSE "?";
-    print("breakpoint #" + idStr + " set at line " + lineStr + " (ip=" + ipStr + ")");
+    print("breakpoint #" $+ idStr $+ " set at line " $+ lineStr $+ " (ip=" $+ ipStr $+ ")");
     RETURN;
 END
 
@@ -303,9 +303,9 @@ FN debugDeleteBreakpoint!(
         END
     END
     IF found == FALSE THEN
-        print("no breakpoint with id " + (id.toString() OR_ELSE "?"));
+        print("no breakpoint with id " $+ (id.toString() OR_ELSE "?"));
     ELSE
-        print("breakpoint #" + (id.toString() OR_ELSE "?") + " disabled");
+        print("breakpoint #" $+ (id.toString() OR_ELSE "?") $+ " disabled");
     END
     RETURN;
 END
@@ -360,7 +360,7 @@ FN snapshotRegisterVars!(
     FOR vni IN (0_i64 ..< varNames.length()) DO
         IF varNames[vni] EXISTS AS vEntry THEN
             IF vEntry.funcEntryIp == bestEntry AND vEntry.sourceLine < pauseLine THEN
-                key = vEntry.kind + ":" + vEntry.physIdx.toString();
+                key = vEntry.kind $+ ":" $+ vEntry.physIdx.toString();
                 existing = winnerLine[key] OR_ELSE -1_i64;
                 IF vEntry.sourceLine > existing THEN
                     winnerLine[key] = vEntry.sourceLine;
@@ -373,7 +373,7 @@ FN snapshotRegisterVars!(
     FOR vni IN (0_i64 ..< varNames.length()) DO
         IF varNames[vni] EXISTS AS vEntry THEN
           IF vEntry.funcEntryIp == bestEntry AND vEntry.sourceLine < pauseLine THEN
-            key = vEntry.kind + ":" + vEntry.physIdx.toString();
+            key = vEntry.kind $+ ":" $+ vEntry.physIdx.toString();
             chosen = winnerIdx[key] OR_ELSE -1_i64;
             IF chosen == vni THEN
                 # Render values typed when the emitter supplied a type
@@ -382,13 +382,13 @@ FN snapshotRegisterVars!(
                 # (no quotes) so it prints as the user would write it.
                 MUTABLE typedPrefix: String = "";
                 IF vEntry.typeName.length() > 0_i64 THEN
-                    typedPrefix = vEntry.typeName + " = ";
+                    typedPrefix = vEntry.typeName $+ " = ";
                 END
                 IF vEntry.kind == "i" THEN
                     ridx = iBase + vEntry.physIdx;
                     IF ridx >= 0_i64 AND ridx < 512_i64 THEN
                         intValStr = iregs[ridx].toString() OR_ELSE "?";
-                        intRendered = typedPrefix + intValStr;
+                        intRendered = typedPrefix $+ intValStr;
                         varSnapshot[vEntry.name] = intRendered;
                     END
                 ELSE_IF vEntry.kind == "f" THEN
@@ -397,12 +397,12 @@ FN snapshotRegisterVars!(
                         # Float formatting is not yet available in the tiny
                         # debugger surface; keep the binding visible and typed.
                         floatValStr = "?";
-                        floatRendered = typedPrefix + floatValStr;
+                        floatRendered = typedPrefix $+ floatValStr;
                         varSnapshot[vEntry.name] = floatRendered;
                     END
                 ELSE_IF vEntry.kind == "s" THEN
                     IF vEntry.physIdx >= 0_i64 AND vEntry.physIdx < 256_i64 THEN
-                        stringRendered = typedPrefix + sregs[vEntry.physIdx];
+                        stringRendered = typedPrefix $+ sregs[vEntry.physIdx];
                         varSnapshot[vEntry.name] = stringRendered;
                     END
                 END
@@ -483,8 +483,8 @@ FN registerDebugPause!(
     lineStr = line.toString() OR_ELSE "?";
     ipStr = ip.toString() OR_ELSE "?";
     MUTABLE colSuffix: String = "";
-    IF column > 0_i64 THEN colSuffix = ":" + (column.toString() OR_ELSE "?"); END
-    print("register-vm trap " + sourcePath + ":" + lineStr + colSuffix + " (ip=" + ipStr + ")");
+    IF column > 0_i64 THEN colSuffix = ":" $+ (column.toString() OR_ELSE "?"); END
+    print("register-vm trap " $+ sourcePath $+ ":" $+ lineStr $+ colSuffix $+ " (ip=" $+ ipStr $+ ")");
 
     # Snapshot of the current frame's bindings. Recomputed when the
     # user moves the inspection cursor with `:up` / `:down` /
@@ -561,7 +561,7 @@ FN registerDebugPause!(
                 varSnapshot = snapshotRegisterVars!(
                     varNames, viewIp, viewLine, iregs, fregs, sregs, fIBase, fFBase
                 );
-                print("#" + (currentFrame.toString() OR_ELSE "?") + "  ip=" + (viewIp.toString() OR_ELSE "?") + " (line " + (viewLine.toString() OR_ELSE "?") + ")");
+                print("#" $+ (currentFrame.toString() OR_ELSE "?") $+ "  ip=" $+ (viewIp.toString() OR_ELSE "?") $+ " (line " $+ (viewLine.toString() OR_ELSE "?") $+ ")");
             END
         ELSE_IF trimmed == ":down" THEN
             IF currentFrame == 0_i64 THEN
@@ -589,13 +589,13 @@ FN registerDebugPause!(
                 varSnapshot = snapshotRegisterVars!(
                     varNames, viewIp, viewLine, iregs, fregs, sregs, fIBase, fFBase
                 );
-                print("#" + (currentFrame.toString() OR_ELSE "?") + "  ip=" + (viewIp.toString() OR_ELSE "?") + " (line " + (viewLine.toString() OR_ELSE "?") + ")");
+                print("#" $+ (currentFrame.toString() OR_ELSE "?") $+ "  ip=" $+ (viewIp.toString() OR_ELSE "?") $+ " (line " $+ (viewLine.toString() OR_ELSE "?") $+ ")");
             END
         ELSE_IF startsWith?(trimmed, ":frame ") THEN
             arg = substr(trimmed, 7_i64, trimmed.length() - 7_i64);
             target = toInt(trim(arg)) OR_ELSE -1_i64;
             IF target < 0_i64 OR target > frameRetIps.length() THEN
-                print("frame index out of range (0.." + (frameRetIps.length().toString() OR_ELSE "?") + ")");
+                print("frame index out of range (0.." $+ (frameRetIps.length().toString() OR_ELSE "?") $+ ")");
             ELSE
                 currentFrame = target;
                 fIBase = frameContextIBase(currentFrame, iBase, frameIBases);
@@ -619,7 +619,7 @@ FN registerDebugPause!(
                 varSnapshot = snapshotRegisterVars!(
                     varNames, viewIp, viewLine, iregs, fregs, sregs, fIBase, fFBase
                 );
-                print("#" + (currentFrame.toString() OR_ELSE "?") + "  ip=" + (viewIp.toString() OR_ELSE "?") + " (line " + (viewLine.toString() OR_ELSE "?") + ")");
+                print("#" $+ (currentFrame.toString() OR_ELSE "?") $+ "  ip=" $+ (viewIp.toString() OR_ELSE "?") $+ " (line " $+ (viewLine.toString() OR_ELSE "?") $+ ")");
             END
         ELSE_IF startsWith?(trimmed, ":p ") THEN
             # `:p NAME` -- print named variable's current value at the
@@ -629,12 +629,12 @@ FN registerDebugPause!(
             IF varSnapshot.contains?(name) THEN
                 value = varSnapshot[name] OR_ELSE "";
                 IF contains?(value, " = ") THEN
-                    print(name + ": " + value);
+                    print(name $+ ": " $+ value);
                 ELSE
-                    print(name + " = " + value);
+                    print(name $+ " = " $+ value);
                 END
             ELSE
-                print("no variable named '" + name + "' in scope");
+                print("no variable named '" $+ name $+ "' in scope");
             END
         ELSE_IF startsWith?(trimmed, ":b ") THEN
             arg = substr(trimmed, 3_i64, trimmed.length() - 3_i64);
@@ -657,12 +657,12 @@ FN registerDebugPause!(
                 slotStr = e.slot.toString() OR_ELSE "?";
                 ibStr = e.iBefore.toString() OR_ELSE "?";
                 iaStr = e.iAfter.toString() OR_ELSE "?";
-                print("  [" + idxStr + "] step=" + stepStr + " kind=" + kindStr + " slot=" + slotStr + " iBefore=" + ibStr + " iAfter=" + iaStr);
+                print("  [" $+ idxStr $+ "] step=" $+ stepStr $+ " kind=" $+ kindStr $+ " slot=" $+ slotStr $+ " iBefore=" $+ ibStr $+ " iAfter=" $+ iaStr);
             END
         ELSE_IF trimmed == ":step?" THEN
             stepStr = currentStep.toString() OR_ELSE "?";
             evtStr = traceEvents.length().toString() OR_ELSE "?";
-            print("step=" + stepStr + " events=" + evtStr);
+            print("step=" $+ stepStr $+ " events=" $+ evtStr);
         ELSE_IF trimmed == ":rs" OR trimmed == ":reverse-step" THEN
             # Walk one register-write event back. Multiple register
             # writes can happen in a single step (e.g. cmp ops emit
@@ -710,7 +710,7 @@ FN registerDebugPause!(
                     ELSE_IF target.kind == 3_i64 THEN kindStr = "sreg";
                     END
                     slotStr = target.slot.toString() OR_ELSE "?";
-                    print("reversed step " + stepStr + " (" + kindStr + " #" + slotStr + ")");
+                    print("reversed step " $+ stepStr $+ " (" $+ kindStr $+ " #" $+ slotStr $+ ")");
                     # Snapshot the now-restored register state for `:p`/`:info`.
                     varSnapshot = snapshotRegisterVars!(
                         varNames, viewIp, viewLine, iregs, fregs, sregs, iBase, fBase
@@ -746,7 +746,7 @@ FN registerDebugPause!(
                 ELSE_IF target.kind == 3_i64 THEN kindStr = "sreg";
                 END
                 slotStr = target.slot.toString() OR_ELSE "?";
-                print("re-applied step " + stepStr + " (" + kindStr + " #" + slotStr + ")");
+                print("re-applied step " $+ stepStr $+ " (" $+ kindStr $+ " #" $+ slotStr $+ ")");
                 varSnapshot = snapshotRegisterVars!(
                     varNames, viewIp, viewLine, iregs, fregs, sregs, iBase, fBase
                 );

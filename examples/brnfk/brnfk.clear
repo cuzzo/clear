@@ -21,7 +21,7 @@ FN byteToString(n: Int64) RETURNS !String ->
     RETURN "\n";
   END
   IF n >= 32 AND n <= 126 THEN
-    RETURN "" + printableAscii().charAt(n - 32);
+    RETURN "" $+ printableAscii().charAt(n - 32);
   END
   RAISE "brnfk cannot render non-printable byte ${n.toString()} as String";
 END

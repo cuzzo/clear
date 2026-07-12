@@ -8,7 +8,7 @@ FN main() RETURNS Void ->
         s += i;
         i += 1;
     END
-    print("sum(0..9999999) = " + s.toString());
+    print("sum(0..9999999) = " $+ s.toString());
     ASSERT s == 49999995000000;
 
     # Timed: 3 iterations
@@ -25,6 +25,6 @@ FN main() RETURNS Void ->
     END
     endMs = timestampMs();
     elapsed = endMs - startMs;
-    print("CLEAR native: 3 iterations in " + elapsed.toString() + "ms");
+    print("CLEAR native: 3 iterations in " $+ elapsed.toString() $+ "ms");
     RETURN;
 END

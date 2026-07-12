@@ -45,7 +45,7 @@ FN fetchPage(baseUrl: String, path: String)
  RETURNS !Page
  EFFECTS REENTRANT
 ->
-  url = baseUrl + path;
+  url = baseUrl $+ path;
   html = httpGet(url);
   title = extractTitle(html);
   links = countLinks(html);

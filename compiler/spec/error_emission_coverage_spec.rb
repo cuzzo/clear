@@ -2228,7 +2228,7 @@ RSpec.describe "error emission coverage" do
       expect {
         run(<<~CLEAR)
           FN greet(name: String, greeting="Hello": String) RETURNS String ->
-              RETURN greeting + ", " + name;
+              RETURN greeting $+ ", " $+ name;
           END
           FN main() RETURNS Void ->
               s = greet();
@@ -2241,7 +2241,7 @@ RSpec.describe "error emission coverage" do
     it "compiles when at least the required arg is passed" do
       run(<<~CLEAR)
         FN greet!(name: String, greeting="Hello": String) RETURNS !String ->
-            RETURN greeting + ", " + name;
+            RETURN greeting $+ ", " $+ name;
         END
         FN main() RETURNS Void ->
             s = greet!("Alice") OR_ELSE "Hi";

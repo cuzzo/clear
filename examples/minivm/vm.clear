@@ -408,11 +408,11 @@ FN formatVmError(message: String, ip: Int64, sourceLines: Int64[]@list, sourcePa
         # attribution lands, look up the file_id parallel to sourceLines.
         path = sourcePathFor(sourcePaths, 0_i64);
         IF path.length() > 0_i64 THEN
-            RETURN "REGISTER VM ERROR (" + path + ":" + lineStr + ", ip=" + ipStr + "): " + message;
+            RETURN "REGISTER VM ERROR (" $+ path $+ ":" $+ lineStr $+ ", ip=" $+ ipStr $+ "): " $+ message;
         END
-        RETURN "REGISTER VM ERROR (line " + lineStr + ", ip=" + ipStr + "): " + message;
+        RETURN "REGISTER VM ERROR (line " $+ lineStr $+ ", ip=" $+ ipStr $+ "): " $+ message;
     END
-    RETURN "REGISTER VM ERROR (ip=" + ipStr + "): " + message;
+    RETURN "REGISTER VM ERROR (ip=" $+ ipStr $+ "): " $+ message;
 END
 
 FN readPackedU16(bytes: String, cursor: Int64) RETURNS Int64 ->
@@ -1591,14 +1591,14 @@ FN runRegisterBytecode!(ops: Int64[], opcodes: RegisterOp[], consts: RegisterVal
                         20 -> iregs[iBase + dst] = indexOf(sregs[argReg0], sregs[argReg1]) OR_ELSE -1_i64;,
                         21 -> iregs[iBase + dst] = 1_i64;,
                         22 -> iregs[iBase + dst] = 0_i64;,
-                        DEFAULT -> print(formatVmError("unknown native " + nativeId.toString(), instructionIp, sourceLines, sourcePaths) OR_ELSE "REGISTER VM ERROR (formatting failed)");
+                        DEFAULT -> print(formatVmError("unknown native " $+ nativeId.toString(), instructionIp, sourceLines, sourcePaths) OR_ELSE "REGISTER VM ERROR (formatting failed)");
                     END,
             RegisterOp.IPrint ->
                 # IPRINT prefix_const int_reg suffix_const
                     prefixIdx = ops[ip]; ip += 1;
                     src = ops[ip]; ip += 1;
                     suffixIdx = ops[ip]; ip += 1;
-                    print((getRegisterConstString(consts, prefixIdx) OR_ELSE RAISE) + iregs[iBase + src].toString() + (getRegisterConstString(consts, suffixIdx) OR_ELSE RAISE));,
+                    print((getRegisterConstString(consts, prefixIdx) OR_ELSE RAISE) $+ iregs[iBase + src].toString() $+ (getRegisterConstString(consts, suffixIdx) OR_ELSE RAISE));,
             RegisterOp.IPrint2 ->
                 # IPRINT2 prefix_const int_reg middle_const int_reg suffix_const
                     prefixIdx = ops[ip]; ip += 1;
@@ -1606,7 +1606,7 @@ FN runRegisterBytecode!(ops: Int64[], opcodes: RegisterOp[], consts: RegisterVal
                     middleIdx = ops[ip]; ip += 1;
                     rightSrc = ops[ip]; ip += 1;
                     suffixIdx = ops[ip]; ip += 1;
-                    print((getRegisterConstString(consts, prefixIdx) OR_ELSE RAISE) + iregs[iBase + leftSrc].toString() + (getRegisterConstString(consts, middleIdx) OR_ELSE RAISE) + iregs[iBase + rightSrc].toString() + (getRegisterConstString(consts, suffixIdx) OR_ELSE RAISE));,
+                    print((getRegisterConstString(consts, prefixIdx) OR_ELSE RAISE) $+ iregs[iBase + leftSrc].toString() $+ (getRegisterConstString(consts, middleIdx) OR_ELSE RAISE) $+ iregs[iBase + rightSrc].toString() $+ (getRegisterConstString(consts, suffixIdx) OR_ELSE RAISE));,
             RegisterOp.SConst ->
                 # SCONST dst const_idx
                     dst = ops[ip]; ip += 1;
@@ -1638,7 +1638,7 @@ FN runRegisterBytecode!(ops: Int64[], opcodes: RegisterOp[], consts: RegisterVal
                     left = ops[ip]; ip += 1;
                     right = ops[ip]; ip += 1;
                     sOldVal = COPY sregs[dst];
-                    sregs[dst] = sregs[left] + sregs[right];
+                    sregs[dst] = sregs[left] $+ sregs[right];
                     IF recordingActive == 1_i64 THEN sBeforeIdx = traceStrings.length(); traceStrings.append(COPY sOldVal); sAfterIdx = traceStrings.length(); traceStrings.append(COPY sregs[dst]); traceEvents.append(TraceEvent{ step: step, kind: 3_i64, slot: dst, iBefore: sBeforeIdx, iAfter: sAfterIdx, fBefore: 0.0, fAfter: 0.0, ip: instructionIp }); END,
             RegisterOp.LNew ->
                 # LNEW dst -- allocate Int64 list. Container kind tag = 1.
@@ -2717,7 +2717,7 @@ FN registerFloatToString(n: Float64) RETURNS !String ->
         tenth = 0;
     END
     IF tenth == 0 THEN RETURN whole.toString(); END
-    RETURN whole.toString() + "." + tenth.toString();
+    RETURN whole.toString() $+ "." $+ tenth.toString();
 END
 
 FN registerFloatToInt(n: Float64) RETURNS Int64 ->

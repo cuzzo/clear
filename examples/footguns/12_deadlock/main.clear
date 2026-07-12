@@ -87,7 +87,7 @@ FN correct_next_before_lock() RETURNS !Void ->
   # wait for producer BEFORE acquiring the lock
 
   WITH s AS inner {
-    print("value = " + inner.value.toString());  # 42
+    print("value = " $+ inner.value.toString());  # 42
   }
 END
 
@@ -112,7 +112,7 @@ FN correct_no_reentrant() RETURNS !Void ->
   NEXT t;
 
   WITH s AS inner {
-    print("final value = " + inner.value.toString());
+    print("final value = " $+ inner.value.toString());
   }
 END
 
@@ -137,8 +137,8 @@ FN sequential_transfer() RETURNS !Void ->
 
   NEXT t;
 
-  WITH a AS ra {print("a = " + ra.balance.toString());}
-  WITH b AS rb {print("b = " + rb.balance.toString());}
+  WITH a AS ra {print("a = " $+ ra.balance.toString());}
+  WITH b AS rb {print("b = " $+ rb.balance.toString());}
 END
 
 FN main() RETURNS Void ->

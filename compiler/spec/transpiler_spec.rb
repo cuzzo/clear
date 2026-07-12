@@ -175,7 +175,7 @@ RSpec.describe ZigTranspiler do
           consumer = BG {
             NEXT relay;
             WITH result AS r {
-              print("consumer saw: " + r.data);
+              print("consumer saw: " $+ r.data);
             }
           };
 
@@ -496,7 +496,7 @@ RSpec.describe ZigTranspiler do
       src = <<~CLEAR
         FN main() RETURNS Void ->
             MUTABLE map: HashMap<String>@sharded(4) = {};
-            (0_i64 ..< 10_i64) |> SHARD("k:" + toString(_), map) |> CONCURRENT EACH {
+            (0_i64 ..< 10_i64) |> SHARD("k:" $+ toString(_), map) |> CONCURRENT EACH {
                 map[_] = "value";
             };
             RETURN;
@@ -512,7 +512,7 @@ RSpec.describe ZigTranspiler do
       src = <<~CLEAR
         FN main() RETURNS Void ->
             MUTABLE map: HashMap<String>@sharded(4) = {};
-            (0_i64 ..< 10_i64) |> SHARD("k:" + toString(_), map) |> CONCURRENT EACH {
+            (0_i64 ..< 10_i64) |> SHARD("k:" $+ toString(_), map) |> CONCURRENT EACH {
                 got = map[_] OR_ELSE "";
             };
             RETURN;
@@ -1624,7 +1624,7 @@ RSpec.describe ZigTranspiler do
       src = <<~CLEAR
         FN main() RETURNS Void ->
             greeting: String = "world";
-            p: ~String = BG { greeting + "!"; };
+            p: ~String = BG { greeting $+ "!"; };
             result: String = NEXT p;
             ASSERT result == "world!", "BG string capture";
             RETURN;
@@ -1858,7 +1858,7 @@ RSpec.describe ZigTranspiler do
         FN main() RETURNS Void ->
             a = "hello";
             b = " world";
-            c = a + b;
+            c = a $+ b;
             RETURN;
         END
       CLEAR

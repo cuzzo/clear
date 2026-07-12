@@ -163,11 +163,11 @@ RSpec.describe Lexer do
     end
 
     it "handles complex operators" do
-      lexer = Lexer.new(".. -> |> OR_ELSE OR AND")
+      lexer = Lexer.new(".. -> |> OR_ELSE OR AND $+")
       tokens = lexer.tokenize
 
       expect(tokens.map(&:type)).to eq([
-        :RANGE, :ARROW, :SMOOTH, :OR_ELSE, :KEYWORD, :KEYWORD, :EOF
+        :RANGE, :ARROW, :SMOOTH, :OR_ELSE, :KEYWORD, :KEYWORD, :CHAR, :EOF
       ])
     end
 
@@ -187,15 +187,15 @@ RSpec.describe Lexer do
   describe "String Interpolation" do
     it "interpolates a variable in the middle of a string" do
       # Source: "Hello ${name}!"
-      # Logic:  "Hello " + (name) + "!"
+      # Logic:  "Hello " $+ (name) $+ "!"
       lexer = Lexer.new('"Hello ${name}!"')
       tokens = lexer.tokenize
 
       # 1. First String Part
       expect_token(tokens[0], :STRING, "Hello ", 1, 1)
 
-      # 2. Injection: + (
-      expect(tokens[1].type).to eq(:CHAR); expect(tokens[1].value).to eq("+")
+      # 2. Injection: $+ (
+      expect(tokens[1].type).to eq(:CHAR); expect(tokens[1].value).to eq("$+")
       expect(tokens[2].type).to eq(:CHAR); expect(tokens[2].value).to eq("(")
 
       # 3. The Variable inside
@@ -203,9 +203,9 @@ RSpec.describe Lexer do
       expect(tokens[3].type).to eq(:VAR_ID)
       expect(tokens[3].value).to eq("name")
 
-      # 4. Injection: ) +
+      # 4. Injection: ) $+
       expect(tokens[4].type).to eq(:CHAR); expect(tokens[4].value).to eq(")")
-      expect(tokens[5].type).to eq(:CHAR); expect(tokens[5].value).to eq("+")
+      expect(tokens[5].type).to eq(:CHAR); expect(tokens[5].value).to eq("$+")
 
       # 5. The Final String Part
       expect_token(tokens[6], :STRING, "!", 1, 15) # Columns resume correctly after advance_pos
@@ -213,7 +213,7 @@ RSpec.describe Lexer do
 
     it "handles interpolation at the start (forces empty string prefix)" do
       # Source: "${x}"
-      # Logic:  "" + (x) + ""
+      # Logic:  "" $+ (x) $+ ""
       # We need that initial "" so the VM treats it as String Concatenation, not Math.
       lexer = Lexer.new('"${x}"')
       tokens = lexer.tokenize
@@ -222,7 +222,7 @@ RSpec.describe Lexer do
       expect_token(tokens[0], :STRING, "", 1, 1)
 
       # 2. Connector
-      expect(tokens[1].value).to eq("+")
+      expect(tokens[1].value).to eq("$+")
 
       # 3. Variable
       expect(tokens[3].value).to eq("x")

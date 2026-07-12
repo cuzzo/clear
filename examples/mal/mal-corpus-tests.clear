@@ -1,7 +1,7 @@
 REQUIRE "interpreter.clear";
 
 FN testPath(name: String) RETURNS !String ->
-  RETURN "../../examples/mal/" + name;
+  RETURN "../../examples/mal/" $+ name;
 END
 
 FN stripCr(line: String) RETURNS !String ->
@@ -39,7 +39,7 @@ FN runMalFileCore!(path: String) RETURNS !Int64 ->
     IF line == "" OR startsWith?(line, ";;") THEN
       i += 1;
     ELSE_IF startsWith?(rawLine, ";/") THEN
-      expectedOut = expectedOut + rawLine.substr(2, rawLine.length() - 2) + "\n";
+      expectedOut = expectedOut $+ rawLine.substr(2, rawLine.length() - 2) $+ "\n";
       i += 1;
     ELSE_IF startsWith?(rawLine, ";=>") THEN
       expected = rawLine.substr(3, rawLine.length() - 3);

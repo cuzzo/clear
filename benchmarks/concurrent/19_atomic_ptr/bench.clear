@@ -181,9 +181,9 @@ FN main() RETURNS Void ->
   elapsed_ap = timestampMs() - t0_ap;
 
   # ───── Report ─────
-  print("RwLock     :  " + elapsed_rw.toString() + " ms (violations: " + total_viol_rw.toString() + ")");
-  print("MVCC       :  " + elapsed_v.toString() + " ms (violations: " + total_viol_v.toString() + ")");
-  print("AtomicPtr  :  " + elapsed_ap.toString() + " ms (violations: " + total_viol_ap.toString() + ")");
-  print("BENCH_RESULT: " + elapsed_ap.toString() + " ms");
+  print("RwLock     :  " $+ elapsed_rw.toString() $+ " ms (violations: " $+ total_viol_rw.toString() $+ ")");
+  print("MVCC       :  " $+ elapsed_v.toString() $+ " ms (violations: " $+ total_viol_v.toString() $+ ")");
+  print("AtomicPtr  :  " $+ elapsed_ap.toString() $+ " ms (violations: " $+ total_viol_ap.toString() $+ ")");
+  print("BENCH_RESULT: " $+ elapsed_ap.toString() $+ " ms");
   RETURN;
 END

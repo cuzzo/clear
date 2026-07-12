@@ -8,7 +8,7 @@ FN riskyOp(mode: String) RETURNS !String ->
     ELSE_IF mode == "notfound" THEN
         RAISE NotFound;
     END
-    RETURN "ok:" + mode;
+    RETURN "ok:" $+ mode;
 END
 
 # Function with CATCH blocks

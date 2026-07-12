@@ -1555,7 +1555,8 @@ module FixableHelper
   # set is the INTERSECTION across ops; ranking is by lowest sum of
   # per-op indices (most-default-across-the-board wins).
   AUTO_OP_CANDIDATES = T.let({
-    ADD:        { default: :Int64,   alts: [:Float64, :String] },
+    ADD:        { default: :Int64,   alts: [:Float64] },
+    CONCAT:     { default: :String,  alts: [] },
     SUB:        { default: :Int64,   alts: [:Float64] },
     MUL:        { default: :Int64,   alts: [:Float64] },
     DIV:        { default: :Float64, alts: [:Int64],

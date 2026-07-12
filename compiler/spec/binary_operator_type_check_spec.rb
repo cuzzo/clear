@@ -37,8 +37,14 @@ RSpec.describe Type, "binary operator type checking" do
   end
 
   it "accepts valid string concatenation and equality" do
-    expect_compile_expr('"a" + "b"', returns: "String")
+    expect_compile_expr('"a" $+ "b"', returns: "String")
     expect_compile_expr('"a" == "b"')
+  end
+
+  it "reserves + for numeric addition and $+ for string concatenation" do
+    expect_reject_expr('"a" + "b"', returns: "String")
+    expect_reject_expr('1 $+ 2', returns: "String")
+    expect(Type.binary_op(:CONCAT, Type.new(:String), Type.new(:Int64)).type.resolved).to eq(:String)
   end
 
   it "accepts valid boolean logic" do

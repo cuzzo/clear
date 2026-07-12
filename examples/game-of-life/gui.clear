@@ -53,9 +53,9 @@ FN graph(cells: Cell[]@list) RETURNS !String[]@list ->
     WHILE y <= max.y + 1 DO
       key = cellKey(Cell{ x: x, y: y });
       IF (live[key] OR_ELSE 0) == 1 THEN
-        row = row + "X";
+        row = row $+ "X";
       ELSE
-        row = row + "O";
+        row = row $+ "O";
       END
       y += 1;
     END

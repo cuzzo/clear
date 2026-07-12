@@ -57,7 +57,7 @@ FN main() RETURNS Void ->
   ASSERT run("+++++++++++++++++++++++++++++++++,. ", "") == "!", "EOF leaves cell unchanged";
   ASSERT run("+++++[>+++++++++++++<-]>.", "") == "A", "loop multiplies into next cell";
 
-  hello = "++++++++++[>+++++++>++++++++++>+++>+<<<<-]>++.>+.+++++++..+++.>++." +
+  hello = "++++++++++[>+++++++>++++++++++>+++>+<<<<-]>++.>+.+++++++..+++.>++." $+
   "<<+++++++++++++++.>.+++.------.--------.>+.>.";
   ASSERT run(hello, "") == "Hello World!\n", "hello world program";
 

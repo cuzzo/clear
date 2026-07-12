@@ -225,7 +225,7 @@ RSpec.describe "MiniVM golden harness", :integration do
       "errors/or_fallible_success_i64.clear",
       "errors/or_map_fallback_i64.clear",
       "errors/or_map_success_i64.clear",
-      "errors/or_else_raise_fallback_i64.clear",
+      "errors/or_raise_fallback_i64.clear",
       "functions/fn_ref_i64.clear",
       "functions/higher_order_fn_ref_i64.clear",
       "functions/higher_order_lambda_i64.clear",

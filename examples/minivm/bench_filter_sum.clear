@@ -21,7 +21,7 @@ FN main() RETURNS Void ->
         j = j + 1_i64;
     END
 
-    print("Sum of evens 0..9999: " + sum.toString());
+    print("Sum of evens 0..9999: " $+ sum.toString());
     ASSERT sum == 24995000, "sum check";
 
     RETURN;

@@ -36,14 +36,14 @@ FN demonstrate_ownership() RETURNS !Void ->
   p2 = COPY p1;
   # copy: p2 is a fresh copy, p1 is still valid
   # p2.x = 99; -- mutation requires MUTABLE declaration
-  print("p2.x = " + p2.x.toString());
+  print("p2.x = " $+ p2.x.toString());
 
   MUTABLE p3 = COPY p1;
   # mutable copy
   p3.x = 99;
-  print("p1.x after p3.x=99: " + p1.x.toString());
+  print("p1.x after p3.x=99: " $+ p1.x.toString());
   # still 1, copy semantics
-  print("p3.x = " + p3.x.toString());
+  print("p3.x = " $+ p3.x.toString());
   # 99
 END
 
@@ -65,7 +65,7 @@ FN shared_mutation() RETURNS !Void ->
   NEXT writer;
 
   WITH counter AS c {
-    print("counter = " + c.value.toString());  # 42
+    print("counter = " $+ c.value.toString());  # 42
   }
 END
 

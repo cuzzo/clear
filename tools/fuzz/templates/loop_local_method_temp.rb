@@ -58,7 +58,7 @@ def llmt_method_call(method)
   # the iteration.
   case method
   when :split     then "haystack.split(\" \")"
-  when :concat    then "haystack + \"-suffix\""
+  when :concat    then "haystack $+ \"-suffix\""
   when :substring then "haystack.substr(0_i64, 3_i64)"
   end
 end

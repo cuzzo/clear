@@ -2188,7 +2188,7 @@ class ClearParser
     when 'OR', '||'       then 4
     when 'AND', '&&'      then 5
     when 'IS_A', '==', '!=', '<', '>', '<=', '>=' then 6
-    when '+', '-', '%+', '%-', '!+', '!-' then 7
+    when '+', '$+', '-', '%+', '%-', '!+', '!-' then 7
     when '*', '/', 'MOD', '%*', '!*'     then 8
     when '**'             then 9
     else nil

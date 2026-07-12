@@ -10,7 +10,7 @@ FN main() RETURNS Void ->
     MUTABLE result = "";
     FOR i IN (1_i64 ..= 10) DO
         tmp = i.toString();          # frame local (forces mark_per_iter)
-        result = prefix + "-" + suffix;
+        result = prefix $+ "-" $+ suffix;
     END
     # After the loop the cursor is at F (rewound). Last iteration's tmp was "10"
     # (2 bytes at F+0). result is at F+2. A post-loop intToString of 3+ chars

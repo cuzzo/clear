@@ -81,7 +81,7 @@ RSpec.describe "Escape promotion matrix (Phase 1a)" do
       # the codegen layer (heap-dupe at the RETURN site). The CALLER's
       # binding is what carries the heap allocator; THIS test asserts
       # the function-side state, which is correctly :frame + no entry.
-      "FN make() RETURNS !String -> MUTABLE s = \"a\" + \"b\"; RETURN s; END",
+      "FN make() RETURNS !String -> MUTABLE s = \"a\" $+ \"b\"; RETURN s; END",
       "s", :heap, nil,
     ],
     list_int: [

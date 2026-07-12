@@ -24,24 +24,24 @@ FN main() RETURNS Void ->
   # Workload 1: Uniform SET (1M keys, partitioned)
   t0 = timestampMs();
   (0 ..< n)
-    |> SHARD("key:" + _.toString(), map)
+    |> SHARD("key:" $+ _.toString(), map)
     |> CONCURRENT(batch: 128) EACH {map[_] = "value";};
   setMs = timestampMs() - t0;
 
   # Workload 2: Uniform GET (1M keys, all local, 100% hit)
   t1 = timestampMs();
   (0 ..< n)
-    |> SHARD("key:" + _.toString(), map)
+    |> SHARD("key:" $+ _.toString(), map)
     |> CONCURRENT(batch: 128) EACH {got = map[_] OR_ELSE "";};
   getMs = timestampMs() - t1;
 
   # Workload 3: Mixed — 200K SET (overwrite) + 800K GET
   t2 = timestampMs();
   (0 ..< (n / 5))
-    |> SHARD("key:" + _.toString(), map)
+    |> SHARD("key:" $+ _.toString(), map)
     |> CONCURRENT(batch: 128) EACH {map[_] = "updated";};
   (0 ..< ((n / 5) * 4))
-    |> SHARD("key:" + _.toString(), map)
+    |> SHARD("key:" $+ _.toString(), map)
     |> CONCURRENT(batch: 128) EACH {got = map[_] OR_ELSE "";};
   mixMs = timestampMs() - t2;
 

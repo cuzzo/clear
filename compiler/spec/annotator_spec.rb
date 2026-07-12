@@ -1837,7 +1837,7 @@ RSpec.describe SemanticAnnotator do
             MUTABLE keys: String[]@list = List[];
             MUTABLE i = 0_i64;
             WHILE i < 10 DO
-              keys.append("b:" + toString(i));
+              keys.append("b:" $+ toString(i));
               i = i + 1_i64;
             END
             RETURN;

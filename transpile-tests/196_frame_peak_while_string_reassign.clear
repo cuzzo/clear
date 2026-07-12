@@ -5,7 +5,7 @@ FN main() RETURNS Void ->
     MUTABLE resp = "";
     MUTABLE i: Int64 = 0;
     WHILE i < 500 DO
-        resp = resp + ":OK";
+        resp = resp $+ ":OK";
         i += 1;
     END
     peak1 = framePeakBytes();

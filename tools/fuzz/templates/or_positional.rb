@@ -72,7 +72,7 @@ end
 def or_inner_construct(t)
   case t
   when :heap_list   then "MUTABLE v: Int64[]@list = []; v.append(1_i64);"
-  when :heap_string then "MUTABLE v: String = \"\"; v = v + \"x\";"
+  when :heap_string then "MUTABLE v: String = \"\"; v = v $+ \"x\";"
   end
 end
 

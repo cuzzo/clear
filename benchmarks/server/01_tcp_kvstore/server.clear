@@ -62,54 +62,54 @@ FN handleClient!(client: TCPClient, MUTABLE store: HashMap<String>, MUTABLE coun
           # Dispatch command — append to response buffer
           IF arg0 == "SET" OR arg0 == "set" THEN
             store[arg1] = arg2;
-            resp = resp + "+OK\r\n";
+            resp = resp $+ "+OK\r\n";
           ELSE_IF arg0 == "GET" OR arg0 == "get" THEN
             MUTABLE result = store[arg1] OR_ELSE "";
             IF result.any?() THEN
-              resp = resp + "$${result.length().toString()}\r\n${result}\r\n";
+              resp = resp $+ "$${result.length().toString()}\r\n${result}\r\n";
             ELSE
-              resp = resp + "$-1\r\n";
+              resp = resp $+ "$-1\r\n";
             END
           ELSE_IF arg0 == "INCR" OR arg0 == "incr" THEN
             IF arg1.any?() THEN
               newVal = (counters[arg1] OR_ELSE 0) + 1;
               counters[arg1] = newVal;
-              resp = resp + ":${newVal.toString()}\r\n";
+              resp = resp $+ ":${newVal.toString()}\r\n";
             ELSE
-              resp = resp + "-ERR wrong number of arguments for 'INCR'\r\n";
+              resp = resp $+ "-ERR wrong number of arguments for 'INCR'\r\n";
             END
           ELSE_IF arg0 == "DECR" OR arg0 == "decr" THEN
             IF arg1.any?() THEN
               newVal = (counters[arg1] OR_ELSE 0) - 1;
               counters[arg1] = newVal;
-              resp = resp + ":${newVal.toString()}\r\n";
+              resp = resp $+ ":${newVal.toString()}\r\n";
             ELSE
-              resp = resp + "-ERR wrong number of arguments for 'DECR'\r\n";
+              resp = resp $+ "-ERR wrong number of arguments for 'DECR'\r\n";
             END
           ELSE_IF arg0 == "PING" OR arg0 == "ping" THEN
-            resp = resp + "+PONG\r\n";
+            resp = resp $+ "+PONG\r\n";
           ELSE_IF arg0 == "COMMAND" OR arg0 == "command" THEN
-            resp = resp + "*0\r\n";
+            resp = resp $+ "*0\r\n";
           ELSE_IF arg0 == "CONFIG" OR arg0 == "config" THEN
             # CONFIG GET returns empty list; CONFIG SET returns OK
             IF arg1 == "SET" OR arg1 == "set" THEN
-              resp = resp + "+OK\r\n";
+              resp = resp $+ "+OK\r\n";
             ELSE
-              resp = resp + "*0\r\n";
+              resp = resp $+ "*0\r\n";
             END
           ELSE_IF arg0 == "CLIENT" OR arg0 == "client" THEN
-            resp = resp + "+OK\r\n";
+            resp = resp $+ "+OK\r\n";
           ELSE_IF arg0 == "FLUSHALL" OR arg0 == "flushall" THEN
-            resp = resp + "+OK\r\n";
+            resp = resp $+ "+OK\r\n";
           ELSE_IF arg0 == "FLUSHDB" OR arg0 == "flushdb" THEN
-            resp = resp + "+OK\r\n";
+            resp = resp $+ "+OK\r\n";
           ELSE_IF arg0 == "DBSIZE" OR arg0 == "dbsize" THEN
-            resp = resp + ":0\r\n";
+            resp = resp $+ ":0\r\n";
           ELSE_IF arg0 == "QUIT" OR arg0 == "quit" THEN
-            resp = resp + "+OK\r\n";
+            resp = resp $+ "+OK\r\n";
             running = FALSE;
           ELSE
-            resp = resp + "-ERR unknown command '${arg0}'\r\n";
+            resp = resp $+ "-ERR unknown command '${arg0}'\r\n";
           END
         ELSE_IF ch == "\r" OR ch == "\n" THEN
           pos += 1;
@@ -125,14 +125,14 @@ FN handleClient!(client: TCPClient, MUTABLE store: HashMap<String>, MUTABLE coun
             pos += 1;
           END
           IF cmd == "PING" OR cmd == "ping" THEN
-            resp = resp + "+PONG\r\n";
+            resp = resp $+ "+PONG\r\n";
           ELSE_IF cmd == "READY?" THEN
-            resp = resp + "+READY\r\n";
+            resp = resp $+ "+READY\r\n";
           ELSE_IF cmd == "QUIT" OR cmd == "quit" THEN
-            resp = resp + "+OK\r\n";
+            resp = resp $+ "+OK\r\n";
             running = FALSE;
           ELSE
-            resp = resp + "-ERR unknown command '${cmd}'\r\n";
+            resp = resp $+ "-ERR unknown command '${cmd}'\r\n";
           END
         END
       END

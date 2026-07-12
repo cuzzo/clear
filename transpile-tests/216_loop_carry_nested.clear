@@ -18,7 +18,7 @@ FN processLines!(n: Int64) RETURNS !Void ->
     MUTABLE outer: Int64 = 0;
     WHILE outer < 10 DO
         # Outer frame-local: forces mark_per_iter on the outer loop.
-        prefix = "O" + outer.toString();
+        prefix = "O" $+ outer.toString();
 
         # Heap carry string: declared outside inner loop, reassigned inside it.
         MUTABLE resp = "";
@@ -29,7 +29,7 @@ FN processLines!(n: Int64) RETURNS !Void ->
             MUTABLE parts: String[]@list = [];
             parts.append(i.toString());
             # Use prefix as length (no move, just read)
-            resp = resp + i.toString() + ";" + prefix.length().toString();
+            resp = resp $+ i.toString() $+ ";" $+ prefix.length().toString();
             i += 1;
         END
 

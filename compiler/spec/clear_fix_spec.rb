@@ -109,6 +109,24 @@ RSpec.describe "./clear fix", :integration do
     expect(File.read(path)).to include("left $+ right")
   end
 
+  it "retains type-aware fixes in a root file with REQUIRE imports" do
+    write("helper.clear", <<~CLEAR)
+      STRUCT Helper { value: Int64 }
+    CLEAR
+    path = write("required_concat.clear", <<~CLEAR)
+      REQUIRE "helper.clear";
+      FN join(left: String, right: String) RETURNS String ->
+        RETURN left + right;
+      END
+    CLEAR
+
+    out, err, status = run_clear("autofix", "--only=syntax", path)
+
+    expect(status).to eq(0), err
+    expect(out).to include("applied 1 edit")
+    expect(File.read(path)).to include("left $+ right")
+  end
+
   it "does not rewrite uppercase constructor names to in-scope variables" do
     path = write("constructor_name.clear", <<~CLEAR)
       FN main(src: String) RETURNS Void ->

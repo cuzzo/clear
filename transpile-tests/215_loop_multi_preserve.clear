@@ -12,9 +12,9 @@ FN main() RETURNS Void ->
         # frame-local forces mark_per_iter
         tmp = i.toString();
         # all three get frame-allocated strings each iteration
-        a = "A" + tmp;
-        b = "BB" + tmp;
-        c = "CCC" + tmp;
+        a = "A" $+ tmp;
+        b = "BB" $+ tmp;
+        c = "CCC" $+ tmp;
     END
     # If preserve is broken, a/b/c all alias the same memory
     # and will show the last-written value ("CCC5"), or garbage.

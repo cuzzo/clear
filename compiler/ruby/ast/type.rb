@@ -1019,6 +1019,8 @@ class Type
     #     types at the constraint sources.
     auto_present = left_type.auto? || right_type.auto?
     if auto_present
+      return BinaryOpResult.new(type: Type.new(:String), storage: :frame) if op == :CONCAT
+
       if logical_op?(op) || bool_result_op?(op)
         return BinaryOpResult.new(type: Type.new(:Bool))
       end
@@ -1033,6 +1035,7 @@ class Type
     return resolve_equality_op(op, left_type, right_type) if equality_op?(op)
     return resolve_ordering_op(op, left_type, right_type) if ordering_op?(op)
     return resolve_numeric_op(left_type, right_type) if number_result_op?(op) || op == :WRAP_ADD || op == :CHECK_ADD
+    return resolve_concat_op(t_left, t_right, left_type, right_type) if op == :CONCAT
     return resolve_add_op(t_left, t_right, left_type, right_type) if op == :ADD
 
     BinaryOpResult.new(error: "Unknown operator: #{op}")
@@ -1226,19 +1229,24 @@ class Type
       return resolve_numeric_op(left_type, right_type)
     end
 
-    # B. String Concatenation
-    if t_left == :String || t_right == :String
-      left_coercion = (t_left != :String && safe_autocast?(t_left, :String)) ? :String : nil
-      right_coercion = (t_right != :String && safe_autocast?(t_right, :String)) ? :String : nil
-      return BinaryOpResult.new(type: Type.new(:String), left_coercion: left_coercion, right_coercion: right_coercion, storage: :frame)
-    end
-
-    # D. Array Concatenation
+    # B. Array Concatenation
     if left_type.array? && right_type.array?
       return BinaryOpResult.new(type: copy_type(left_type), storage: :frame)
     end
 
     BinaryOpResult.new(error: "Cannot add types: #{t_left} and #{t_right}")
+  end
+
+  sig { params(t_left: Symbol, t_right: Symbol, left_type: Type, right_type: Type).returns(BinaryOpResult) }
+  def self.resolve_concat_op(t_left, t_right, left_type, right_type)
+    unless left_type.string? || right_type.string?
+      return BinaryOpResult.new(error: "Operator $+ requires at least one String operand, got #{t_left} and #{t_right}")
+    end
+
+    left_coercion = (!left_type.string? && safe_autocast?(t_left, :String)) ? :String : nil
+    right_coercion = (!right_type.string? && safe_autocast?(t_right, :String)) ? :String : nil
+    BinaryOpResult.new(type: Type.new(:String), left_coercion: left_coercion,
+      right_coercion: right_coercion, storage: :frame)
   end
 
   sig { params(from_type: Symbol, to_type: Symbol).returns(T::Boolean) }

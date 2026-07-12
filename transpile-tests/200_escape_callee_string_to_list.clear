@@ -4,7 +4,7 @@
 # otherwise the loop mark rewind destroys the string (dangling pointer).
 
 FN buildKey(i: Int64) RETURNS !String ->
-    RETURN "key-" + i.toString();
+    RETURN "key-" $+ i.toString();
 END
 
 FN main() RETURNS Void ->

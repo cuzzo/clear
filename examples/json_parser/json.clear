@@ -40,16 +40,16 @@ FN jsonToString(v: JsonValue)
       END
       RETURN "false";,
     JsonValue.JNum AS n -> RETURN n.toInt().toString();,
-    JsonValue.JStr AS s -> RETURN "\"" + s + "\"";,
+    JsonValue.JStr AS s -> RETURN "\"" $+ s $+ "\"";,
     JsonValue.JArray AS items ->
       MUTABLE out = "[";
       FOR i IN (0 ..< items.length()) DO
         IF i > 0 THEN
-          out = out + ",";
+          out = out $+ ",";
         END
-        out = out + jsonToString(items[i]);
+        out = out $+ jsonToString(items[i]);
       END
-      RETURN out + "]";,
+      RETURN out $+ "]";,
     JsonValue.JObj -> RETURN "{object}";,
     DEFAULT -> RETURN "?";
   END
@@ -86,23 +86,23 @@ FN parseString!(json: String, pos: Int64, MUTABLE penv: HashMap<Int64>) RETURNS 
       p += 1;
       esc = json.charAt(p);
       IF esc == "\"" THEN
-        result = result + "\"";
+        result = result $+ "\"";
       ELSE_IF esc == "\\" THEN
-        result = result + "\\";
+        result = result $+ "\\";
       ELSE_IF esc == "n" THEN
-        result = result + "\n";
+        result = result $+ "\n";
       ELSE_IF esc == "r" THEN
-        result = result + "\r";
+        result = result $+ "\r";
       ELSE_IF esc == "t" THEN
-        result = result + "\t";
+        result = result $+ "\t";
       ELSE_IF esc == "/" THEN
-        result = result + "/";
+        result = result $+ "/";
       ELSE
-        result = result + esc;
+        result = result $+ esc;
       END
       p += 1;
     ELSE
-      result = result + c;
+      result = result $+ c;
       p += 1;
     END
   END
@@ -141,7 +141,7 @@ FN parseValue!(
     WHILE p < json.length() AND inNum DO
       nc = json.charAt(p);
       IF nc == "-" OR nc == "." OR nc == "+" OR nc == "e" OR nc == "E" OR isDigit?(nc) THEN
-        numStr = numStr + nc;
+        numStr = numStr $+ nc;
         p += 1;
       ELSE
         inNum = FALSE;
@@ -366,7 +366,7 @@ FN main() RETURNS Void ->
         print("PASS: string hello");
       ELSE
         failed += 1;
-        print("FAIL: string hello got " + s);
+        print("FAIL: string hello got " $+ s);
       END
     ,
     DEFAULT ->
@@ -383,7 +383,7 @@ FN main() RETURNS Void ->
         print("PASS: string escapes");
       ELSE
         failed += 1;
-        print("FAIL: string escapes len=" + s.length().toString());
+        print("FAIL: string escapes len=" $+ s.length().toString());
       END
     ,
     DEFAULT ->
@@ -417,7 +417,7 @@ FN main() RETURNS Void ->
         print("PASS: array [1,2,3]");
       ELSE
         failed += 1;
-        print("FAIL: array [1,2,3] len=" + items.length().toString());
+        print("FAIL: array [1,2,3] len=" $+ items.length().toString());
       END
     ,
     DEFAULT ->
@@ -463,7 +463,7 @@ FN main() RETURNS Void ->
         print("PASS: object.name");
       ELSE
         failed += 1;
-        print("FAIL: object.name got " + s);
+        print("FAIL: object.name got " $+ s);
       END
     ,
     DEFAULT ->

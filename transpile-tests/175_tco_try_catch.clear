@@ -84,8 +84,8 @@ END
 FN prStr(v: Value, readably: Bool) RETURNS !String ->
     PARTIAL MATCH v START
         Value.Nil -> RETURN "nil";,
-        Value.Str AS s -> IF readably THEN RETURN "\"" + s + "\""; END RETURN COPY s;,
-        Value.Error AS e -> RETURN "error:" + e.errMsg;,
+        Value.Str AS s -> IF readably THEN RETURN "\"" $+ s $+ "\""; END RETURN COPY s;,
+        Value.Error AS e -> RETURN "error:" $+ e.errMsg;,
         DEFAULT -> RETURN "?";
     END
     RETURN "";

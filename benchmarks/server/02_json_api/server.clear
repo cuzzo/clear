@@ -74,20 +74,20 @@ FN handleClient!(client: TCPClient) RETURNS !Void ->
           id = (idStr.toNumber() OR_ELSE 0.0).toInt();
           json = generateJson(id);
           ("data/${id.toString()}.json").writeFile(json);
-          resp = resp + "+OK\r\n";
+          resp = resp $+ "+OK\r\n";
         ELSE_IF line.startsWith?("GET:") THEN
           idStr = line.substr(4, line.length() - 4);
           id = (idStr.toNumber() OR_ELSE 0.0).toInt();
           content = ("data/${id.toString()}.json").readFile();
           sum = parseJsonArraySum(content) OR_ELSE RAISE;
-          resp = resp + ":${sum.toString()}\r\n";
+          resp = resp $+ ":${sum.toString()}\r\n";
         ELSE_IF line == "QUIT" THEN
-          resp = resp + "+OK\r\n";
+          resp = resp $+ "+OK\r\n";
           running = FALSE;
         ELSE_IF line == "READY?" THEN
-          resp = resp + "+READY\r\n";
+          resp = resp $+ "+READY\r\n";
         ELSE
-          resp = resp + "-ERR unknown command\r\n";
+          resp = resp $+ "-ERR unknown command\r\n";
         END
       END
       IF resp.any?() -> client.tcpWrite(resp);

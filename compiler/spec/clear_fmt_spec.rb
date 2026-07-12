@@ -780,6 +780,11 @@ RSpec.describe Formatter do
       }.to raise_error(Formatter::Error, /lex error/)
     end
 
+    it "keeps string concatenation as one operator token" do
+      token = tokenize('left $+ right').find { |item| item.raw == '$+' }
+      expect(token&.type).to eq(:OP)
+    end
+
     it "find_fn_arrow returns nil when a `;` interrupts the signature" do
       # Drives the `{` / `}` / `;` early-return at depth 0 in find_fn_arrow.
       toks = tokenize("FN foo();\n")
@@ -1773,8 +1778,11 @@ RSpec.describe Formatter do
   end
 
   it "is idempotent on the whole transpile-tests corpus" do
-    root = File.expand_path("../../transpile-tests", __dir__)
-    files = Dir.glob(File.join(root, "**", "*.clear"))
+    repo = File.expand_path("../..", __dir__)
+    tracked = IO.popen(["git", "-C", repo, "ls-files", "-z", "--", "transpile-tests"], &:read)
+    files = tracked.split("\0")
+      .select { |path| path.end_with?(".clear") }
+      .map { |path| File.join(repo, path) }
     expect(files).not_to be_empty
 
     drifts = []

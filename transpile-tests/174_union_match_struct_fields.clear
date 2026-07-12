@@ -9,7 +9,7 @@ UNION Value {
 }
 
 FN handleCatch!(msg: String, kind: String) RETURNS !Value ->
-    RETURN Value.Wrapped{ inner: "caught:" + msg + ":" + kind };
+    RETURN Value.Wrapped{ inner: "caught:" $+ msg $+ ":" $+ kind };
 END
 
 FN tryEval!(TAKES input: Value) RETURNS !Value ->
@@ -26,7 +26,7 @@ FN prStr(v: Value) RETURNS !String ->
         Value.Nil -> RETURN "nil";,
         Value.Str AS s -> RETURN COPY s;,
         Value.Wrapped AS w -> RETURN COPY w.inner;,
-        Value.Error AS e -> RETURN "error:" + e.errMsg;
+        Value.Error AS e -> RETURN "error:" $+ e.errMsg;
     END
     RETURN "";
 END

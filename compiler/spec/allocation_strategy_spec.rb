@@ -243,7 +243,7 @@ RSpec.describe "Allocation Strategy Invariants" do
       ast = run_mir(<<~CLEAR)
         FN main() RETURNS Void ->
           MUTABLE resp = "";
-          resp = resp + "hello";
+          resp = resp $+ "hello";
           RETURN;
         END
       CLEAR
@@ -467,7 +467,7 @@ RSpec.describe "Allocation Strategy Invariants" do
           WHILE i < 5 DO
             MUTABLE tmp: String[]@list = [];
             tmp.append("x");
-            resp = resp + i.toString();
+            resp = resp $+ i.toString();
             i += 1;
           END
           RETURN;

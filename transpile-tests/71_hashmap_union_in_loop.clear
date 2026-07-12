@@ -12,7 +12,7 @@ FN main() RETURNS Void ->
     # Store strings from loop iterations into the hashmap
     MUTABLE i: Int64 = 0;
     WHILE i < data.length() DO
-        key = "k" + i.toString();
+        key = "k" $+ i.toString();
         map[key] = Value{ Str: COPY data[i] };
         i += 1;
     END

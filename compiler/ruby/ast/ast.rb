@@ -3236,7 +3236,7 @@ module AST
   PRECEDENCE_MAP = T.let({
     8 => precedence_info(ops: ['**'], assoc: :right),
     7 => precedence_info(ops: ['*', '/', 'MOD'], assoc: :left),
-    6 => precedence_info(ops: ['+', '-'], assoc: :left),
+    6 => precedence_info(ops: ['+', '$+', '-'], assoc: :left),
     5 => precedence_info(ops: ['==', '!=', '<', '>', '<=', '>='], assoc: :left),
     4 => precedence_info(ops: ['AND'], assoc: :left),
     3 => precedence_info(ops: ['OR'], assoc: :left),
@@ -3268,6 +3268,7 @@ module AST
   # ruby-to-clear: data-api
   OP_TO_OP_CODE = T.let({
     '+' => :ADD,
+    '$+' => :CONCAT,
     '-' => :SUB,
     '*' => :MUL,
     '/' => :DIV,

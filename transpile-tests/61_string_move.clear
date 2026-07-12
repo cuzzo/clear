@@ -16,7 +16,7 @@ FN main() RETURNS Void ->
     ASSERT a == "world", "string survives function round-trip";
 
     # String built from concat moves correctly
-    b = "foo" + "bar";
+    b = "foo" $+ "bar";
     c = b;
     ASSERT c == "foobar", "concat result moves";
 

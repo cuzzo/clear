@@ -59,7 +59,7 @@ def iam_key_expr(c, k)
   case k
   when :literal  then "\"kk\""
   when :variable then "kvar"
-  when :concat   then "(\"k\" + \"k\")"
+  when :concat   then "(\"k\" $+ \"k\")"
   end
 end
 

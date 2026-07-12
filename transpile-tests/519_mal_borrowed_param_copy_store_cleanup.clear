@@ -14,7 +14,7 @@ END
 
 FN main() RETURNS !Void ->
     MUTABLE map: HashMap<Value> = {};
-    payload = "owned-" + "payload";
+    payload = "owned-" $+ "payload";
 
     storeCopy!("out", Value{ Str: COPY payload }, map) OR_ELSE RAISE;
     got = map["out"] OR_ELSE Value.Nil;

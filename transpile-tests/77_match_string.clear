@@ -23,7 +23,7 @@ FN main() RETURNS Void ->
   # Build a string at runtime via concatenation to prove content equality
   s1 = "hel";
   s2 = "lo";
-  dynamic = s1 + s2;
+  dynamic = s1 $+ s2;
   r4 = classify(dynamic);
   ASSERT r4 == 1, "PARTIAL MATCH string: content equality should match 'hello' built via concat";
 END

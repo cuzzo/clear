@@ -29,6 +29,6 @@ FN main() RETURNS Void ->
     total = run!(pool);
     endMs = timestampMs();
     elapsed = endMs - startMs;
-    print("VM pool ops (nosync) total=" + total.toString() + " in " + elapsed.toString() + "ms");
+    print("VM pool ops (nosync) total=" $+ total.toString() $+ " in " $+ elapsed.toString() $+ "ms");
     RETURN;
 END

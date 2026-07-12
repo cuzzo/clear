@@ -333,7 +333,7 @@ module Hoist
   sig { params(node: T.nilable(AST::Node)).returns(T::Boolean) }
   def self.concat?(node)
     node.is_a?(AST::StringConcat) ||
-      (node.is_a?(AST::BinaryOp) && node.op == :ADD && !!node.string_concat)
+      (node.is_a?(AST::BinaryOp) && !!node.string_concat)
   end
 
   # Build `__hoist_N = <concat>` with a real SymbolEntry, append the decl

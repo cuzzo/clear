@@ -73,7 +73,7 @@ FN parseOpName(s: String) RETURNS !Int64 ->
   IF s == "CALL"          THEN RETURN opCall();        END
   IF s == "RETURN"        THEN RETURN opReturn();      END
   IF s == "SYSCALL"       THEN RETURN opSyscall();     END
-  RAISE "vm: unknown op `" + s + "`";
+  RAISE "vm: unknown op `" $+ s $+ "`";
 END
 
 FN parseKindName(s: String) RETURNS Int64 ->
@@ -133,7 +133,7 @@ FN tailAfterFirstSpace(line: String) RETURNS !String ->
   MUTABLE rest: String = COPY parts[1];
   MUTABLE i = 2;
   WHILE i < parts.length() DO
-    rest = rest + " " + parts[i];
+    rest = rest $+ " " $+ parts[i];
     i += 1;
   END
   RETURN rest;
@@ -252,7 +252,7 @@ FN handleSyscall!(
 ) RETURNS !Void ->
   IF id == 1 THEN
     v = stack.pop() OR_ELSE 0_i64;
-    print("OUTPUT: " + v.toString());
+    print("OUTPUT: " $+ v.toString());
     RETURN;
   END
   IF id == 6 THEN
@@ -262,9 +262,9 @@ FN handleSyscall!(
   END
   IF id == 9 THEN
     v = stack.pop() OR_ELSE 0_i64;
-    RAISE "halt(" + v.toString() + ")";
+    RAISE "halt(" $+ v.toString() $+ ")";
   END
-  RAISE "vm.clear: SYSCALL " + id.toString() + " not implemented";
+  RAISE "vm.clear: SYSCALL " $+ id.toString() $+ " not implemented";
 END
 
 FN runProc!(
@@ -324,7 +324,7 @@ FN runProc!(
     ELSE_IF c.op == opSyscall() THEN
       handleSyscall!(stack, c.arg, startMs) OR_ELSE RAISE;
     ELSE
-      RAISE "vm: op " + c.op.toString() + " not supported by vm.clear (use v10 or v11)";
+      RAISE "vm: op " $+ c.op.toString() $+ " not supported by vm.clear (use v10 or v11)";
     END
   END
 

@@ -69,7 +69,7 @@ def ohd_make_body(shape)
   when :string
     'out: ?String = COPY "ok"; RETURN out;'
   when :concat
-    'out: ?String = COPY "o" + COPY "k"; RETURN out;'
+    'out: ?String = COPY "o" $+ COPY "k"; RETURN out;'
   when :struct_owned
     'out: ?Box = Box{ label: COPY "ok" }; RETURN out;'
   when :list_owned
@@ -88,7 +88,7 @@ def ohd_fallback(shape)
   when :string
     'COPY "fb"'
   when :concat
-    'COPY "f" + COPY "b"'
+    'COPY "f" $+ COPY "b"'
   when :struct_owned
     'Box{ label: COPY "fb" }'
   when :list_owned

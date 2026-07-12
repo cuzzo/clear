@@ -23,8 +23,8 @@ FN main() RETURNS Void ->
 
     # Mutable string concatenation (building a response)
     MUTABLE resp = "";
-    resp = resp + "line1\n";
-    resp = resp + "line2\n";
+    resp = resp $+ "line1\n";
+    resp = resp $+ "line2\n";
     ASSERT resp == "line1\nline2\n", "mutable string concat";
 
     RETURN;

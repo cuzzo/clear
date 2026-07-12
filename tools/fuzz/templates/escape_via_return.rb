@@ -93,7 +93,7 @@ def escape_via_return_shape_cell(shape)
   when :concat
     <<~CHT
       FN make(a: String, b: String) RETURNS !String ->
-          RETURN a + b;
+          RETURN a $+ b;
       END
 
       FN main() RETURNS Void ->

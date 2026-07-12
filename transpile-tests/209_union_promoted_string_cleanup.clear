@@ -1,7 +1,7 @@
 UNION Val { Nil, Str: String }
 
 FN makeVal(label: String) RETURNS !Val ->
-    RETURN Val{ Str: label + "!" };
+    RETURN Val{ Str: label $+ "!" };
 END
 
 FN main() RETURNS Void ->

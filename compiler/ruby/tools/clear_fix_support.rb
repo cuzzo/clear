@@ -16,6 +16,8 @@ require_relative "../annotator"
 module ClearFixSupport
   extend T::Sig
 
+  @importer_cache = T.let({}, T::Hash[String, ModuleImporter])
+
   class UsageError < StandardError; end
   class FileMissingError < StandardError; end
 
@@ -110,6 +112,7 @@ module ClearFixSupport
 
   sig { params(options: Options, out: OutputStream, err: OutputStream, input: InputStream).returns(RunResult) }
   def self.run(options, out: $stdout, err: $stderr, input: $stdin)
+    @importer_cache.clear
     iter = T.let(0, Integer)
     total = T.let(0, Integer)
 
@@ -133,8 +136,8 @@ module ClearFixSupport
     RunResult.new(passes: iter, edits_applied: total)
   end
 
-  sig { params(source: String).returns(T::Array[FixableFinding]) }
-  def self.collect_findings(source)
+  sig { params(source: String, source_dir: String).returns(T::Array[FixableFinding]) }
+  def self.collect_findings(source, source_dir: Dir.pwd)
     FixCollector.enable!
     begin
       SyntaxTypoScanner.scan!(source)
@@ -143,8 +146,28 @@ module ClearFixSupport
       begin
         tokens = Lexer.new(source).tokenize
         ast = ClearParser.new(tokens, source).parse
-        annotator = SemanticAnnotator.new
-        annotator.source_code = source
+        importer = @importer_cache[source_dir] ||= ModuleImporter.new(base_dir: source_dir)
+
+        # Prime REQUIRE modules without collecting their findings. Otherwise a
+        # root-file fix could accidentally apply an imported module's spans to
+        # the root source, and an unresolved REQUIRE can stop type-aware root
+        # fixes before their expressions are visited.
+        if importer.module_cache.empty? && ast.statements.any? { |stmt| stmt.is_a?(AST::RequireNode) }
+          FixCollector.disable!
+          begin
+            SemanticAnnotator.new(importer: importer, source_dir: source_dir,
+              source_code: source).annotate!(ast)
+          rescue CompilerError, ParserError
+            # A root diagnostic is expected during this non-collecting warmup.
+          ensure
+            FixCollector.enable!
+          end
+          tokens = Lexer.new(source).tokenize
+          ast = ClearParser.new(tokens, source).parse
+        end
+
+        annotator = SemanticAnnotator.new(importer: importer, source_dir: source_dir,
+          source_code: source)
         annotator.annotate!(ast)
       rescue CompilerError, ParserError
       end
@@ -372,7 +395,7 @@ module ClearFixSupport
 
   sig { params(path: String, source: String, out: OutputStream).returns(T::Array[FixableFinding]) }
   def self.findings_for_path(path, source, out:)
-    return collect_findings(source) unless path.end_with?(".rb")
+    return collect_findings(source, source_dir: File.dirname(File.expand_path(path))) unless path.end_with?(".rb")
 
     heredocs = extract_clear_heredocs(source)
     if heredocs.empty?

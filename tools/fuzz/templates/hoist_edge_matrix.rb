@@ -62,19 +62,19 @@ end
 
 def hem_expr(shape)
   case shape
-  when :string_concat then 'COPY "a" + COPY "b"'
+  when :string_concat then 'COPY "a" $+ COPY "b"'
   when :list_call then 'mkList() OR_ELSE RAISE'
-  when :struct_literal then 'Box{ label: COPY "a" + COPY "b" }'
-  when :union_literal then 'Slot{ Text: COPY "a" + COPY "b" }'
+  when :struct_literal then 'Box{ label: COPY "a" $+ COPY "b" }'
+  when :union_literal then 'Slot{ Text: COPY "a" $+ COPY "b" }'
   end
 end
 
 def hem_fallback(shape)
   case shape
-  when :string_concat then 'COPY "f" + COPY "b"'
+  when :string_concat then 'COPY "f" $+ COPY "b"'
   when :list_call then 'mkList() OR_ELSE RAISE'
-  when :struct_literal then 'Box{ label: COPY "f" + COPY "b" }'
-  when :union_literal then 'Slot{ Text: COPY "f" + COPY "b" }'
+  when :struct_literal then 'Box{ label: COPY "f" $+ COPY "b" }'
+  when :union_literal then 'Slot{ Text: COPY "f" $+ COPY "b" }'
   end
 end
 
@@ -225,7 +225,7 @@ FuzzGenerator.register(:hoist_edge_matrix, cells: HOIST_EDGE_CELLS) do |p|
 
       FN main() RETURNS !Void ->
           MUTABLE count: Int64 = 0_i64;
-          WHILE count < 1_i64 AND nonempty(COPY "a" + COPY "b") DO
+          WHILE count < 1_i64 AND nonempty(COPY "a" $+ COPY "b") DO
               count = count + 1_i64;
           END
           ASSERT count == 1_i64, "hoist while condition";

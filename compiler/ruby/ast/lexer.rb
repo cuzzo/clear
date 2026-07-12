@@ -68,6 +68,7 @@ class Lexer
       when @s.scan(/&&/) then add(:LEGACY_LOGICAL, '&&', start_col)
       when @s.scan(/\*\*/) then add(:CHAR, '**', start_col)
       when @s.scan(/\|\|/) then add(:LEGACY_LOGICAL, '||', start_col)
+      when @s.scan(/\$\+/) then add(:CHAR, '$+', start_col)
       when @s.scan(/%\*/) then add(:CHAR, '%*', start_col)
       when @s.scan(/%\+/) then add(:CHAR, '%+', start_col)
       when @s.scan(/%-/)  then add(:CHAR, '%-', start_col)
@@ -220,7 +221,7 @@ class Lexer
 
       elsif @s.peek(2) == '${'
         # String interpolation: ${expr}
-        # Desugared to concatenation: "..." + (expr) + "..."
+        # Desugared to concatenation: "..." $+ (expr) $+ "..."
 
         # 1. Emit current buffer
         @tokens << Token.new(:STRING, buffer, @line, chunk_start_col)
@@ -230,8 +231,8 @@ class Lexer
         @s.getch; @s.getch
         advance_pos('${')
 
-        # 3. Inject connector tokens: + (
-        @tokens << Token.new(:CHAR, '+', @line, @column)
+        # 3. Inject connector tokens: $+ (
+        @tokens << Token.new(:CHAR, '$+', @line, @column)
         @tokens << Token.new(:CHAR, '(', @line, @column)
 
         # 4. Sub-lex the expression inside braces
@@ -241,9 +242,9 @@ class Lexer
         sub_tokens.pop if T.must(sub_tokens.last).type == :EOF
         @tokens.concat(sub_tokens)
 
-        # 5. Inject closer tokens: ) +
+        # 5. Inject closer tokens: ) $+
         @tokens << Token.new(:CHAR, ')', @line, @column)
-        @tokens << Token.new(:CHAR, '+', @line, @column)
+        @tokens << Token.new(:CHAR, '$+', @line, @column)
 
         chunk_start_col = @column
 

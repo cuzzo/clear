@@ -78,18 +78,18 @@ def hot_decl_type(value, decl)
 end
 
 # Length-2 producer value. BOTH allocate: list via append, string via
-# concat (`"a" + "b"` -> std.mem.concat) so the producer is alloc-
+# concat (`"a" $+ "b"` -> std.mem.concat) so the producer is alloc-
 # faultable in every form (uniform: all OR_ELSE-bind forms valid).
 def hot_build(value, var)
   if value == :list
     "    MUTABLE #{var}: Int64[]@list = [];\n    #{var}.append(1_i64);\n    #{var}.append(2_i64);\n"
   else
-    "    #{var}: String = \"a\" + \"b\";\n"
+    "    #{var}: String = \"a\" $+ \"b\";\n"
   end
 end
 
 def hot_literal(value)
-  value == :list ? "[1_i64, 2_i64]" : "\"a\" + \"b\""
+  value == :list ? "[1_i64, 2_i64]" : "\"a\" $+ \"b\""
 end
 
 def hot_fallback(value)

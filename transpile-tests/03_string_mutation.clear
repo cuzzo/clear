@@ -4,7 +4,7 @@ FN main() RETURNS Void ->
     s2 = " World";
 
     # This creates a new heap string
-    s3 = s1 + s2;
+    s3 = s1 $+ s2;
 
     # Transpiler must ensure s3 is freed
     RETURN;

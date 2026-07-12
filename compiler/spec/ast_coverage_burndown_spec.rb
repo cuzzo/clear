@@ -467,9 +467,9 @@ RSpec.describe "AST coverage burndown" do
         bad_rhs_parser.send(:parse_binary_op, lhs, op_tok, 2)
       }.to raise_error(ParserError, /Expected identifier after 'AS'/)
 
-      expect {
-        parser_for("IF maybe EXISTS AS a && other AS b THEN PASS; END").send(:parse_statement)
-      }.to raise_error(ParserError, /Multiple optional bindings/)
+      chained = parser_for("IF maybe EXISTS AS a AND other EXISTS AS b THEN PASS; END").send(:parse_statement)
+      expect(chained).to be_a(AST::IfBind)
+      expect(chained.bindings.map(&:name)).to eq(%w[a b])
 
       bare = AST::BinaryOp.new(token, AST::Identifier.new(token, "maybe"), :BIND_VAR, AST::Identifier.new(token, "a"))
       expect {

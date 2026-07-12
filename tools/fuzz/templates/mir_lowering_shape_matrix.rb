@@ -361,7 +361,7 @@ def mlsm_return_program(shape)
   when :string_concat
     <<~CHT
       FN build() RETURNS String ->
-          RETURN COPY "a" + COPY "b";
+          RETURN COPY "a" $+ COPY "b";
       END
 
       FN main() RETURNS Void ->

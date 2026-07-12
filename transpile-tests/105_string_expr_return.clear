@@ -5,14 +5,14 @@
 
 FN greet(first: String, last: String) RETURNS !String ->
     # Build strings that force frame allocation, then return an expression.
-    full = first + " " + last;
-    RETURN "Hello " + full;
+    full = first $+ " " $+ last;
+    RETURN "Hello " $+ full;
 END
 
 FN formatNum(label: String, n: Int64) RETURNS !String ->
     # toString() forces frame usage; return expression uses concat.
     num = n.toString();
-    RETURN label + ": " + num;
+    RETURN label $+ ": " $+ num;
 END
 
 FN main() RETURNS Void ->
@@ -20,7 +20,7 @@ FN main() RETURNS Void ->
     g = greet("John", "Doe");
     MUTABLE i: Int64 = 0;
     WHILE i < 5 DO
-        junk = "XXXXXXXXXX" + i.toString();
+        junk = "XXXXXXXXXX" $+ i.toString();
         i += 1;
     END
     ASSERT g == "Hello John Doe", "expression return string survives frame rewind";
@@ -29,7 +29,7 @@ FN main() RETURNS Void ->
     p = formatNum("count", 42);
     MUTABLE j: Int64 = 0;
     WHILE j < 5 DO
-        junk2 = "YYYYYYYYYY" + j.toString();
+        junk2 = "YYYYYYYYYY" $+ j.toString();
         j += 1;
     END
     ASSERT p == "count: 42", "expression return with toString survives";

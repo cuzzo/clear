@@ -17,7 +17,7 @@ END
 
 # Case 1: frame-allocated string promoted to heap via PromotionPlan
 FN makeFromFrame!(a: String, b: String) RETURNS !Val ->
-    RETURN Val{ Str: a + b };
+    RETURN Val{ Str: a $+ b };
 END
 
 # Case 2: heap-allocated via COPY

@@ -149,7 +149,7 @@ def isig_body(fs, retval)
   when :alloc_split
     %(    parts = a.split(" ");\n    IF parts.length() == 999_i64 THEN RETURN #{retval}; END\n)
   when :alloc_concat
-    %(    cat = a + a;\n    IF cat.length() == 999_i64 THEN RETURN #{retval}; END\n)
+    %(    cat = a $+ a;\n    IF cat.length() == 999_i64 THEN RETURN #{retval}; END\n)
   when :alloc_list_build
     %(    MUTABLE xs: Int64[]@list = [];\n    xs.append(3_i64);\n    IF xs.length() == 999_i64 THEN RETURN #{retval}; END\n)
   when :direct_raise

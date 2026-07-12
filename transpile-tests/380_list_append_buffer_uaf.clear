@@ -51,7 +51,7 @@ FN burnFrame!(value: Int64) RETURNS !String ->
     s1 = value.toString() OR_ELSE "?";
     s2 = (value * 2_i64).toString() OR_ELSE "?";
     s3 = (value + 1000_i64).toString() OR_ELSE "?";
-    RETURN s1 + ":" + s2 + ":" + s3;
+    RETURN s1 $+ ":" $+ s2 $+ ":" $+ s3;
 END
 
 FN main!() RETURNS !Void ->

@@ -1,7 +1,7 @@
 REQUIRE "brnfk.clear";
 
 FN testPath(name: String) RETURNS !String ->
-  RETURN "../../examples/brnfk/tests/" + name;
+  RETURN "../../examples/brnfk/tests/" $+ name;
 END
 
 FN expectedSquares() RETURNS !String ->
@@ -24,7 +24,7 @@ FN main() RETURNS Void ->
   ioProbe = ">,>+++++++++,>+++++++++++[<++++++<++++++<+>>>-]<<.>.<<-.>.>.<<.";
   ASSERT runWithLimits(ioProbe, "\n", 30_000, 100_000) == "LK\nLK\n", "Cristofani newline/EOF probe";
 
-  obscureProbe = "[]++++++++++[>>+>+>++++++[<<+<+++>>>-]<<<<-]" +
+  obscureProbe = "[]++++++++++[>>+>+>++++++[<<+<+++>>>-]<<<<-]" $+
   "\"A*$\";?@![#>>+<<]>[>>]<<<<[>++<[-]]>.>.";
   ASSERT runWithLimits(obscureProbe, "", 30_000, 1_000_000) == "H\n", "Cristofani obscure parser probe";
 

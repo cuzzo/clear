@@ -40,7 +40,7 @@ LIST_APPEND_SHAPE_SPECS = {
   nested_container:     ["", "Int64[]@list",
                          "MUTABLE xs: Int64[]@list = [];\n    xs.append(5_i64);"],
   frame_string_concat:  ["", "String",
-                         "i: Int64 = 1_i64;\n    xs: String = \"a\" + i.toString();"],
+                         "i: Int64 = 1_i64;\n    xs: String = \"a\" $+ i.toString();"],
   frame_list:           ["", "Int64[]",
                          "i: Int64 = 1_i64;\n    xs: Int64[] = [i, i + 1_i64];"],
 }.freeze

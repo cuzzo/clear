@@ -4,14 +4,14 @@ FN riskyParse(input: String) RETURNS !String ->
     IF input == "bad" THEN
         RAISE Input, InvalidJson, "failed to parse";
     END
-    RETURN "parsed:" + input;
+    RETURN "parsed:" $+ input;
 END
 
 FN riskyFetch(url: String) RETURNS !String ->
     IF url == "" THEN
         RAISE Transient, NetworkDown;
     END
-    RETURN "data:" + url;
+    RETURN "data:" $+ url;
 END
 
 FN main() RETURNS Void ->

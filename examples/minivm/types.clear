@@ -57,7 +57,7 @@ FN isTruthy?(v: Value) RETURNS Bool ->
 END
 
 FN getSymName(v: Value) RETURNS !String ->
-    PARTIAL MATCH v START Value.Symbol AS s -> RETURN "" + s;, DEFAULT -> RETURN ""; END
+    PARTIAL MATCH v START Value.Symbol AS s -> RETURN "" $+ s;, DEFAULT -> RETURN ""; END
     RETURN "";
 END
 
@@ -85,7 +85,7 @@ FN isInt64?(v: Value) RETURNS Bool ->
 END
 
 FN getStr(v: Value) RETURNS !String ->
-    PARTIAL MATCH v START Value.Str AS s -> RETURN "" + s;, DEFAULT -> RETURN ""; END
+    PARTIAL MATCH v START Value.Str AS s -> RETURN "" $+ s;, DEFAULT -> RETURN ""; END
     RETURN "";
 END
 
@@ -96,10 +96,10 @@ END
 # the Zig-side numericMapGet/Put.
 FN keyAsStr(v: Value) RETURNS !String ->
     PARTIAL MATCH v START
-        Value.Str AS s         -> RETURN "" + s;,
+        Value.Str AS s         -> RETURN "" $+ s;,
         Value.Int64Val AS i    -> RETURN i.toString();,
         Value.Number AS n      -> RETURN n.toString();,
-        Value.Symbol AS s      -> RETURN "" + s;,
+        Value.Symbol AS s      -> RETURN "" $+ s;,
         DEFAULT                -> RETURN "";
     END
     RETURN "";
@@ -150,52 +150,52 @@ FN prStr(v: Value, readably: Bool) RETURNS !String EFFECTS REENTRANT ->
             IF n == floor(n) THEN RETURN toInt(n).toString(); END
             RETURN n.toString();,
         Value.Int64Val AS i -> RETURN i.toString();,
-        Value.Str AS s -> IF readably THEN RETURN "\"" + s + "\""; END RETURN "" + s;,
-        Value.Symbol AS s -> RETURN "" + s;,
+        Value.Str AS s -> IF readably THEN RETURN "\"" $+ s $+ "\""; END RETURN "" $+ s;,
+        Value.Symbol AS s -> RETURN "" $+ s;,
         Value.List AS items ->
             MUTABLE out = "(";
             FOR li IN (0_i64 ..< items.length()) DO
-                IF li > 0 THEN out = out + " "; END
-                out = out + prStr(items[li], readably);
+                IF li > 0 THEN out = out $+ " "; END
+                out = out $+ prStr(items[li], readably);
             END
-            RETURN out + ")";,
+            RETURN out $+ ")";,
         Value.Vector AS velems ->
             MUTABLE vout = "#(";
             FOR vi IN (0_i64 ..< velems.length()) DO
-                IF vi > 0 THEN vout = vout + " "; END
-                vout = vout + prStr(velems[vi], readably);
+                IF vi > 0 THEN vout = vout $+ " "; END
+                vout = vout $+ prStr(velems[vi], readably);
             END
-            RETURN vout + ")";,
+            RETURN vout $+ ")";,
         Value.Pair AS p ->
-            RETURN "(" + prStr(p.pairCar, readably) + " . " + prStr(p.pairCdr, readably) + ")";,
+            RETURN "(" $+ prStr(p.pairCar, readably) $+ " . " $+ prStr(p.pairCdr, readably) $+ ")";,
         Value.TypedI64Arr AS iarr ->
             MUTABLE iout = "[";
             FOR ii IN (0_i64 ..< iarr.length()) DO
-                IF ii > 0 THEN iout = iout + " "; END
-                iout = iout + iarr[ii].toString();
+                IF ii > 0 THEN iout = iout $+ " "; END
+                iout = iout $+ iarr[ii].toString();
             END
-            RETURN iout + "]:i64";,
+            RETURN iout $+ "]:i64";,
         Value.TypedF64Arr AS farr ->
             MUTABLE fout = "[";
             FOR fi IN (0_i64 ..< farr.length()) DO
-                IF fi > 0 THEN fout = fout + " "; END
-                fout = fout + farr[fi].toString();
+                IF fi > 0 THEN fout = fout $+ " "; END
+                fout = fout $+ farr[fi].toString();
             END
-            RETURN fout + "]:f64";,
-        Value.NativeFn AS nid -> RETURN "#<native:" + nid.toString() + ">";,
+            RETURN fout $+ "]:f64";,
+        Value.NativeFn AS nid -> RETURN "#<native:" $+ nid.toString() $+ ">";,
         Value.Lambda -> RETURN "#<function>";,
         Value.EnvRef -> RETURN "#<envref>";,
         Value.Tco -> RETURN "#<tco>";,
         Value.Error AS e ->
             IF e.errType.length() > 0 THEN
-                RETURN "#<error:" + e.errKind + ":" + e.errType + ":" + e.errMsg + ">";
+                RETURN "#<error:" $+ e.errKind $+ ":" $+ e.errType $+ ":" $+ e.errMsg $+ ">";
             END
-            RETURN "#<error:" + e.errKind + ":" + e.errMsg + ">";,
+            RETURN "#<error:" $+ e.errKind $+ ":" $+ e.errMsg $+ ">";,
         Value.MapRef -> RETURN "#<map>";,
-        Value.Weak AS wkId -> RETURN "#<weak:" + wkId.toString() + ">";,
-        Value.BCFn AS bcFn -> RETURN "#<bcfn:" + bcFn.bcFnIp.toString() + "/" + bcFn.bcFnArgc.toString() + ">";,
+        Value.Weak AS wkId -> RETURN "#<weak:" $+ wkId.toString() $+ ">";,
+        Value.BCFn AS bcFn -> RETURN "#<bcfn:" $+ bcFn.bcFnIp.toString() $+ "/" $+ bcFn.bcFnArgc.toString() $+ ">";,
         Value.Boxed -> RETURN "#<box>";,
-        Value.SplitStream AS sst -> RETURN "#<split:" + sst.splitCursor.toString() + ">";,
+        Value.SplitStream AS sst -> RETURN "#<split:" $+ sst.splitCursor.toString() $+ ">";,
         Value.Channel -> RETURN "#<channel>";
     END
     RETURN "";

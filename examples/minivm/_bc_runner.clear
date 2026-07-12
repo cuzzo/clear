@@ -93,7 +93,7 @@ FN applyNative(id: Int64, evaled: Value[]) RETURNS !Value EFFECTS REENTRANT ->
     IF id == 1 THEN
         # + works on i64, f64, and strings
         PARTIAL MATCH evaled[1] START
-            Value.Str AS s1 -> RETURN Value{ Str: s1 + getStr(evaled[2]) };,
+            Value.Str AS s1 -> RETURN Value{ Str: s1 $+ getStr(evaled[2]) };,
             Value.Int64Val AS ia ->
                 IF isInt64?(evaled[2]) THEN RETURN Value{ Int64Val: ia + getInt(evaled[2]) };
                 ELSE RETURN Value{ Number: toFloat(ia) + getNum(evaled[2]) }; END,
@@ -157,7 +157,7 @@ FN applyNative(id: Int64, evaled: Value[]) RETURNS !Value EFFECTS REENTRANT ->
     IF id == 26 THEN
         MUTABLE out = getStr(evaled[1]);
         FOR si IN (2_i64 ..< evaled.length()) DO
-            out = out + getStr(evaled[si]);
+            out = out $+ getStr(evaled[si]);
         END
         RETURN Value{ Str: COPY out };
     END
@@ -286,8 +286,8 @@ FN applyNative(id: Int64, evaled: Value[]) RETURNS !Value EFFECTS REENTRANT ->
         PARTIAL MATCH evaled[1] START
             Value.List AS joinItems ->
                 FOR ji IN (0_i64 ..< joinItems.length()) DO
-                    IF ji > 0 THEN joined = joined + sep; END
-                    joined = joined + getStr(joinItems[ji]);
+                    IF ji > 0 THEN joined = joined $+ sep; END
+                    joined = joined $+ getStr(joinItems[ji]);
                 END,
             DEFAULT -> PASS;
         END
@@ -1759,12 +1759,12 @@ FN evalList!(TAKES items: Value[], envId: Id<Env>, MUTABLE pool: Env[50000]@pool
     ELSE_IF formName == "debug-set-break" THEN
         # (debug-set-break "fnName") -> register breakpoint
         bpName = (eval!(COPY items[1], envId, pool) OR_ELSE RAISE);
-        WITH POLYMORPHIC EXCLUSIVE pool AS p { IF p[envId] EXISTS AS env THEN env.vars["__bp_" + getStr(bpName)] = Value.TrueVal; END }
+        WITH POLYMORPHIC EXCLUSIVE pool AS p { IF p[envId] EXISTS AS env THEN env.vars["__bp_" $+ getStr(bpName)] = Value.TrueVal; END }
         RETURN Value.Nil;
 
     ELSE_IF formName == "debug-clear-break" THEN
         bpName = (eval!(COPY items[1], envId, pool) OR_ELSE RAISE);
-        WITH POLYMORPHIC EXCLUSIVE pool AS p { IF p[envId] EXISTS AS env THEN env.vars["__bp_" + getStr(bpName)] = Value.Nil; END }
+        WITH POLYMORPHIC EXCLUSIVE pool AS p { IF p[envId] EXISTS AS env THEN env.vars["__bp_" $+ getStr(bpName)] = Value.Nil; END }
         RETURN Value.Nil;
 
     # Error introspection: special forms to avoid error propagation
@@ -1793,7 +1793,7 @@ FN evalList!(TAKES items: Value[], envId: Id<Env>, MUTABLE pool: Env[50000]@pool
         MUTABLE errMsg: String = getStr(msg);
         IF getNum(srcLine) > 0.0 THEN
             lineNum = toInt(getNum(srcLine));
-            errMsg = errMsg + " (line " + lineNum.toString() + ")";
+            errMsg = errMsg $+ " (line " $+ lineNum.toString() $+ ")";
         END
         RETURN Value.Error{ errMsg: COPY errMsg, errKind: COPY getStr(kind), errType: "" };
 
@@ -1995,15 +1995,15 @@ FN evalList!(TAKES items: Value[], envId: Id<Env>, MUTABLE pool: Env[50000]@pool
         calledName = getSymName(items[0]);
         IF calledName.length() > 0 THEN
             # Build call description
-            MUTABLE callDesc = calledName + "(";
+            MUTABLE callDesc = calledName $+ "(";
             FOR ai IN (1_i64 ..< evaled.length()) DO
-                IF ai > 1 THEN callDesc = callDesc + ", "; END
-                callDesc = callDesc + prStr(evaled[ai] OR_ELSE Value.Nil, TRUE);
+                IF ai > 1 THEN callDesc = callDesc $+ ", "; END
+                callDesc = callDesc $+ prStr(evaled[ai] OR_ELSE Value.Nil, TRUE);
             END
-            callDesc = callDesc + ")";
+            callDesc = callDesc $+ ")";
 
             # Check if we should break: explicit breakpoint OR_ELSE step mode
-            bpKey = envGet!(envId, "__bp_" + calledName, pool);
+            bpKey = envGet!(envId, "__bp_" $+ calledName, pool);
             stepMode = getNum(envGet!(envId, "__dbg_step", pool));
             curDepth = getNum(envGet!(envId, "__dbg_depth", pool));
             targetDepth = getNum(envGet!(envId, "__dbg_target_depth", pool));
@@ -2022,7 +2022,7 @@ FN evalList!(TAKES items: Value[], envId: Id<Env>, MUTABLE pool: Env[50000]@pool
                 WITH POLYMORPHIC EXCLUSIVE pool AS p {
                     IF p[envId] EXISTS AS dbgEnv THEN
                         IF oldStack.length() > 0 THEN
-                            dbgEnv.vars["__dbg_stack"] = Value{ Str: COPY callDesc + " < " + oldStack };
+                            dbgEnv.vars["__dbg_stack"] = Value{ Str: COPY callDesc $+ " < " $+ oldStack };
                         ELSE
                             dbgEnv.vars["__dbg_stack"] = Value{ Str: COPY callDesc };
                         END
@@ -2381,7 +2381,7 @@ FN compile!(ast: Value, envId: Id<Env>, MUTABLE pool: Env[50000]@pool) RETURNS !
         symName = getSymName(ast);
         # Check if this symbol has a slot assignment
         MUTABLE slotLookup = Value{ Number: 0.0 - 1.0 };
-        WITH POLYMORPHIC EXCLUSIVE pool AS p { IF p[envId] EXISTS AS slotEnv THEN slotLookup = slotEnv.vars["__slot_" + symName] OR_ELSE Value{ Number: 0.0 - 1.0 }; END }
+        WITH POLYMORPHIC EXCLUSIVE pool AS p { IF p[envId] EXISTS AS slotEnv THEN slotLookup = slotEnv.vars["__slot_" $+ symName] OR_ELSE Value{ Number: 0.0 - 1.0 }; END }
         slotNum = toInt(getNum(slotLookup));
         IF slotNum >= 0 THEN
             # LOAD_SLOT
@@ -2437,7 +2437,7 @@ FN compile!(ast: Value, envId: Id<Env>, MUTABLE pool: Env[50000]@pool) RETURNS !
                     IF p[envId] EXISTS AS defSlotEnv THEN
                         slotCounter = defSlotEnv.vars["__slotN"] OR_ELSE Value{ Number: 0.0 };
                         nextSlot = toInt(getNum(slotCounter));
-                        defSlotEnv.vars["__slot_" + defName] = Value{ Number: toFloat(nextSlot) };
+                        defSlotEnv.vars["__slot_" $+ defName] = Value{ Number: toFloat(nextSlot) };
                         defSlotEnv.vars["__slotN"] = Value{ Number: toFloat(nextSlot + 1) };
                     END
                 }
@@ -2498,11 +2498,11 @@ FN compile!(ast: Value, envId: Id<Env>, MUTABLE pool: Env[50000]@pool) RETURNS !
         IF p[envId] EXISTS AS bcEnv THEN
             bcEnv.vars["__bc_opN"] = Value{ Number: toFloat(ops.length()) };
             FOR wi IN (0_i64 ..< ops.length()) DO
-                bcEnv.vars["__bc_o" + wi.toString()] = ops[wi] OR_ELSE Value.Nil;
+                bcEnv.vars["__bc_o" $+ wi.toString()] = ops[wi] OR_ELSE Value.Nil;
             END
             bcEnv.vars["__bc_cN"] = Value{ Number: toFloat(consts.length()) };
             FOR wi IN (0_i64 ..< consts.length()) DO
-                bcEnv.vars["__bc_c" + wi.toString()] = consts[wi] OR_ELSE Value.Nil;
+                bcEnv.vars["__bc_c" $+ wi.toString()] = consts[wi] OR_ELSE Value.Nil;
             END
         END
     }
@@ -2623,7 +2623,7 @@ FN exec!(ops: Int64[], consts: Value[], envId: Id<Env>, MUTABLE pool: Env[50000]
             4 ->  # ADD (polymorphic)
                 PARTIAL MATCH (stack[sp - 2] OR_ELSE Value.Nil) START
                     Value.Str AS s1 ->
-                        pv = Value{ Str: COPY (s1 + getStr((stack[sp - 1] OR_ELSE Value.Nil))) };,
+                        pv = Value{ Str: COPY (s1 $+ getStr((stack[sp - 1] OR_ELSE Value.Nil))) };,
                     Value.Int64Val AS ia ->
                         IF isInt64?((stack[sp - 1] OR_ELSE Value.Nil)) THEN pv = Value{ Int64Val: ia + getInt((stack[sp - 1] OR_ELSE Value.Nil)) };
                         ELSE pv = Value{ Number: toFloat(ia) + getNum((stack[sp - 1] OR_ELSE Value.Nil)) }; END,
@@ -2856,7 +2856,7 @@ FN exec!(ops: Int64[], consts: Value[], envId: Id<Env>, MUTABLE pool: Env[50000]
             36 -> # CONCAT
                 s1 = prStr((stack[sp - 2] OR_ELSE Value.Nil), FALSE);
                 s2 = prStr((stack[sp - 1] OR_ELSE Value.Nil), FALSE);
-                pv = Value{ Str: COPY (s1 + s2) };
+                pv = Value{ Str: COPY (s1 $+ s2) };
                 sp -= 2;
                 IF sp >= stack.length() THEN stack.append(pv); ELSE stack[sp] = pv; END
                 sp += 1;,
@@ -2939,7 +2939,7 @@ FN exec!(ops: Int64[], consts: Value[], envId: Id<Env>, MUTABLE pool: Env[50000]
                 IF sp >= stack.length() THEN stack.append(pv); ELSE stack[sp] = pv; END
                 sp += 1;,
             58 -> # DEBUG_BREAK
-                print("--- debug break at ip=" + toString(ip) + " ---");
+                print("--- debug break at ip=" $+ toString(ip) $+ " ---");
                 MUTABLE dbgRunning = TRUE;
                 WHILE dbgRunning DO
                     MUTABLE dbgPrompt = "dbg> ";
@@ -2948,19 +2948,19 @@ FN exec!(ops: Int64[], consts: Value[], envId: Id<Env>, MUTABLE pool: Env[50000]
                     IF eql?(dbgCmd, ":c") OR eql?(dbgCmd, ":continue") THEN
                         dbgRunning = FALSE;
                     ELSE_IF eql?(dbgCmd, ":stack") OR eql?(dbgCmd, ":s") THEN
-                        print("  value stack (sp=" + toString(sp) + "):");
+                        print("  value stack (sp=" $+ toString(sp) $+ "):");
                         FOR di IN (0_i64 ..< sp) DO
-                            print("    [" + toString(di) + "] " + prStr((stack[di] OR_ELSE Value.Nil), TRUE));
+                            print("    [" $+ toString(di) $+ "] " $+ prStr((stack[di] OR_ELSE Value.Nil), TRUE));
                         END
                     ELSE_IF eql?(dbgCmd, ":istack") THEN
-                        print("  istack (isp=" + toString(isp) + "):");
+                        print("  istack (isp=" $+ toString(isp) $+ "):");
                         FOR di IN (0_i64 ..< isp) DO
-                            print("    [" + toString(di) + "] " + toString(istack[di]));
+                            print("    [" $+ toString(di) $+ "] " $+ toString(istack[di]));
                         END
                     ELSE_IF eql?(dbgCmd, ":fstack") THEN
-                        print("  fstack (fsp=" + toString(fsp) + "):");
+                        print("  fstack (fsp=" $+ toString(fsp) $+ "):");
                         FOR di IN (0_i64 ..< fsp) DO
-                            print("    [" + toString(di) + "] " + toString(fstack[di]));
+                            print("    [" $+ toString(di) $+ "] " $+ toString(fstack[di]));
                         END
                     ELSE_IF eql?(dbgCmd, ":locals") OR eql?(dbgCmd, ":l") THEN
                         print("  slots:");
@@ -2968,21 +2968,21 @@ FN exec!(ops: Int64[], consts: Value[], envId: Id<Env>, MUTABLE pool: Env[50000]
                             PARTIAL MATCH (slots[di] OR_ELSE Value.Nil) START
                                 Value.Nil ->,
                                 DEFAULT ->
-                                    print("    [" + toString(di) + "] " + prStr((slots[di] OR_ELSE Value.Nil), TRUE));
+                                    print("    [" $+ toString(di) $+ "] " $+ prStr((slots[di] OR_ELSE Value.Nil), TRUE));
                             END
                         END
                     ELSE_IF eql?(dbgCmd, ":ip") THEN
-                        print("  ip=" + toString(ip) + " op=" + toString(ops[ip]));
+                        print("  ip=" $+ toString(ip) $+ " op=" $+ toString(ops[ip]));
                         # Show next 5 opcodes
                         FOR di IN (0_i64 ..< 5) DO
                             IF ip + di < ops.length() THEN
-                                print("    ip+" + toString(di) + ": " + toString(ops[ip + di]));
+                                print("    ip+" $+ toString(di) $+ ": " $+ toString(ops[ip + di]));
                             END
                         END
                     ELSE_IF eql?(dbgCmd, ":consts") THEN
                         print("  constants:");
                         FOR di IN (0_i64 ..< consts.length()) DO
-                            print("    [" + toString(di) + "] " + prStr(consts[di], TRUE));
+                            print("    [" $+ toString(di) $+ "] " $+ prStr(consts[di], TRUE));
                         END
                     ELSE_IF eql?(dbgCmd, ":env") THEN
                         print("  (use :eval <expr> to inspect env bindings)");
@@ -2993,7 +2993,7 @@ FN exec!(ops: Int64[], consts: Value[], envId: Id<Env>, MUTABLE pool: Env[50000]
                         dbgPenv["__rp"] = Value{ Number: 0.0 };
                         dbgAst = readFormEnv!(dbgPenv) OR_ELSE RAISE;
                         dbgResult = (eval!(COPY dbgAst, curEnv, pool) OR_ELSE RAISE);
-                        print("  => " + prStr(dbgResult, TRUE));
+                        print("  => " $+ prStr(dbgResult, TRUE));
                     ELSE_IF eql?(dbgCmd, ":help") OR eql?(dbgCmd, ":h") OR eql?(dbgCmd, "?") THEN
                         print("  :c          continue execution");
                         print("  :stack      show value stack");
@@ -3127,7 +3127,7 @@ FN exec!(ops: Int64[], consts: Value[], envId: Id<Env>, MUTABLE pool: Env[50000]
                             IF p[mapId] EXISTS AS mapEnv THEN
                                 knames = mapEnv.vars.keys();
                                 FOR ki IN (0_i64 ..< knames.length()) DO
-                                    mapKeyList.append(Value{ Str: "" + (knames[ki] OR_ELSE "") });
+                                    mapKeyList.append(Value{ Str: "" $+ (knames[ki] OR_ELSE "") });
                                 END
                             END
                         },
@@ -4040,7 +4040,7 @@ FN main() RETURNS Void ->
     mainCaps: Value[] = [];
     bcResult = exec!(bcOps, bcConsts, rootId, pool, 0_i64, mainCaps) OR_ELSE RAISE;
     IF isError?(bcResult) THEN
-        print("SCHEME ASSERT FAILED: " + (getErrMsg(bcResult) OR_ELSE RAISE));
+        print("SCHEME ASSERT FAILED: " $+ (getErrMsg(bcResult) OR_ELSE RAISE));
     ELSE
         print(prStr(bcResult, FALSE));
         print("SCHEME: all expressions completed");

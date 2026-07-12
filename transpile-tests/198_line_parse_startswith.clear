@@ -40,11 +40,11 @@ FN handleData(data: String) RETURNS !String ->
             MUTABLE n = toInt(toNumber(nStr) OR_ELSE 0.0);
             IF n < 1 THEN n = 1; END
             result = heavyCompute(id, n);
-            resp = resp + ":${result.toString()}\r\n";
+            resp = resp $+ ":${result.toString()}\r\n";
         ELSE_IF line == "QUIT" THEN
-            resp = resp + "+OK\r\n";
+            resp = resp $+ "+OK\r\n";
         ELSE
-            resp = resp + "-ERR unknown\r\n";
+            resp = resp $+ "-ERR unknown\r\n";
         END
     END
     RETURN resp;

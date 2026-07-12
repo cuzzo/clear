@@ -544,16 +544,19 @@ Element-level capabilities are primarily useful in struct fields where individua
 
 ## 12. Strings and Buffers
 
-Strings in CLEAR are Copy (like Rust's `&str` — a pointer + length). Assignment copies the slice header.
+Strings in CLEAR are owned, non-Copy values. DEFAULT and EASY infer a borrow,
+move, or owned copy from use and escape facts; STRICT requires an explicit
+`COPY` whenever preserving the source has a runtime cost.
 
 ```ruby clear
 x = "hello";
-y = x;                         # x is moved (strings are owned, non-Copy)
-# z = x;                       # would be use-after-move error
-z = COPY y;                    # OK: explicit deep-copy
+y = x;                         # DEFAULT/EASY infer the cheapest safe transport
+print(x);                      # OK: x remains live, so this is not inferred as a move
+z = COPY y;                    # Explicit independent snapshot in every mode
 
-# String concatenation
-full = "foo" + "bar";          # "foobar" (single allocation, no intermediate)
+# String interpolation and concatenation
+greeting = "Hello, ${name}!";
+full = "foo" $+ "bar";         # "foobar" (single allocation, no intermediate)
 ```
 
 Like arrays, Strings have capabilities:
@@ -999,3 +1002,6 @@ total = quantity !* price;     # panics on overflow, even in release
 | `!+`, `!-`, `!*` | panic | panic | Financial, safety |
 
 Float arithmetic (`Float64`) is unaffected - IEEE 754 handles overflow via infinity/NaN.
+
+`$+` is string concatenation, pairing with `${...}` interpolation while keeping
+all three integer `+` families unambiguously arithmetic.

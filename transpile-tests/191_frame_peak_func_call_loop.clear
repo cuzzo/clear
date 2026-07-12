@@ -3,7 +3,7 @@
 # caller's frame. The loop mark reclaims intermediates each iteration.
 
 FN greet(name: String) RETURNS !String ->
-    RETURN "Hello, " + name + "!";
+    RETURN "Hello, " $+ name $+ "!";
 END
 
 FN main() RETURNS Void ->
