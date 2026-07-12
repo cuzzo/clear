@@ -473,29 +473,36 @@ module Annotator
       def visit_IfBind(node)
         T.bind(self, SemanticAnnotator)
 
-        # Visit and validate each binding expression.
-        node.bindings.each do |b|
-          visit(b.expr)
-          ti = b.expr.full_type!(context: "IF AS binding expression")
-          unless ti.optional?
-            error!(b.expr, :IF_AS_NEEDS_OPTIONAL, got: b.expr.resolved_type)
-          end
-          # Annotate each binding with the unwrapped type for use in lowering.
-          unwrapped = ti.wrapped_type
-          # RESOLVE returns ?T@multiowned/shared where the caller owns the strong ref.
-          # Propagate ownership so field access auto-derefs through .ctrl.data and
-          # the lowering knows to inject rcRelease cleanup.
-          if b.expr.is_a?(AST::ResolveNode) && (ti.multiowned? || ti.shared?)
-            unwrapped.apply_reference_ownership!(ti.ownership, link_source: ti.link_source)
-          end
-          b.unwrapped_type = unwrapped
-        end
-
         branch_logic = [
           proc {
-            # Declare each binding in the then-scope with the unwrapped type.
+            # Refine and declare left-to-right. A later predicate expression may
+            # use an alias introduced by an earlier predicate in the same chain.
             node.bindings.each do |b|
-              unwrapped = b.unwrapped_type  # always a Type (never nil)
+              if b.predicate == :is_ok
+                with_body_fact_failure_absorbed(true) { visit(b.expr) }
+              else
+                visit(b.expr)
+              end
+              ti = if b.predicate == :is_ok && b.expr.respond_to?(:error_union_type) && T.unsafe(b.expr).error_union_type
+                T.unsafe(b.expr).error_union_type
+              else
+                b.expr.full_type!(context: "IF predicate binding expression")
+              end
+              unwrapped = if b.predicate == :is_ok
+                unless ti.error_union?
+                  error!(b.expr, :IS_OK_REQUIRES_FALLIBLE, got: b.expr.resolved_type)
+                end
+                T.must(ti.success_type)
+              else
+                unless ti.optional?
+                  error!(b.expr, :IF_AS_NEEDS_OPTIONAL, got: b.expr.resolved_type)
+                end
+                T.must(ti.wrapped_type)
+              end
+              if b.expr.is_a?(AST::ResolveNode) && (ti.multiowned? || ti.shared?)
+                unwrapped.apply_reference_ownership!(ti.ownership, link_source: ti.link_source)
+              end
+              b.unwrapped_type = unwrapped
               sym = unwrapped.resolved
               root = AST.root_identifier(b.expr)
               mutable_list_alias = b.expr.is_a?(AST::GetIndex) && root &&

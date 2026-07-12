@@ -161,6 +161,7 @@ class MIREmitter
     when MIR::UnionPayloadGet  then emit_union_payload_get(node)
     when MIR::IndexGet         then emit_index_get(node)
     when MIR::BinOp            then emit_bin_op(node)
+    when MIR::FallibleOk       then "if (#{emit(node.expr)}) |_| true else |_| false"
     when MIR::UnaryOp          then emit_unary_op(node)
     when MIR::Lit              then node.value
     when MIR::SymbolLit        then symbol_literal_name(node.value.to_s)
@@ -1772,6 +1773,10 @@ class MIREmitter
         result += "if (!#{b[:capture]}.isNil()) {\n#{suppress}#{then_body}\n}"
         result += " else {\n#{else_body}\n}" if else_body
         result += "\n}"
+      elsif b[:predicate] == :is_ok
+        result = "if (#{expr}) |#{b[:capture]}| {\n#{suppress}#{then_body}\n}"
+        result += " else |_| {\n#{else_body}\n}" if else_body
+        result += " else |_| {}" unless else_body
       else
         result = "if (#{expr}) |#{b[:capture]}| {\n#{suppress}#{then_body}\n}"
         result += " else {\n#{else_body}\n}" if else_body
@@ -1785,6 +1790,8 @@ class MIREmitter
       inner = node.bindings.map { |b|
         if b[:node_ref]
           "const #{b[:capture]} = #{emit(b[:expr])}; if (#{b[:capture]}.isNil()) break :#{label};"
+        elsif b[:predicate] == :is_ok
+          "const #{b[:capture]} = #{emit(b[:expr])} catch break :#{label};"
         else
           "const #{b[:capture]} = #{emit(b[:expr])} orelse break :#{label};"
         end

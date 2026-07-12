@@ -70,6 +70,30 @@ RSpec.describe "EXISTS optional-binding migration" do
     end
   end
 
+  it "parses and types postfix IS_OK as Bool" do
+    ast = parse("FN main(value: !Int64) RETURNS Bool -> RETURN value IS_OK; END")
+    SemanticAnnotator.new.annotate!(ast)
+    expr = ast.statements.first.body.first.value
+    expect(expr).to be_a(AST::UnaryOp)
+    expect(expr.op).to eq(:IS_OK)
+    expect(expr.resolved_type).to eq(:Bool)
+  end
+
+  it "refines !?T outside-in across an unparenthesized predicate chain" do
+    ast = parse(<<~CLEAR)
+      FN main(value: !?Int64) RETURNS Void ->
+        IF value IS_OK AS maybe_value AND maybe_value EXISTS AS result THEN
+          ASSERT result == 7_i64;
+        END
+      END
+    CLEAR
+    SemanticAnnotator.new.annotate!(ast)
+    bind = ast.statements.first.body.first
+    expect(bind).to be_a(AST::IfBind)
+    expect(bind.bindings.map(&:predicate)).to eq(%i[is_ok exists])
+    expect(bind.bindings.map { |item| item.unwrapped_type.resolved }).to eq([:"?Int64", :Int64])
+  end
+
   it "rejects legacy AS bindings and offers an exact automatic insertion" do
     source = "IF maybe AS value THEN PASS; END"
     expect { parse(source) }.to raise_error(ParserError, /must state its test/)

@@ -3850,6 +3850,13 @@ module MIR
     def child_exprs = compact_child_exprs([operand])
   end
 
+  FallibleOk = Struct.new(:expr) do
+    extend T::Sig
+    include Expr
+    sig { returns(T::Array[Emittable]) }
+    def child_exprs = compact_child_exprs([expr])
+  end
+
   # Literal value. Carries pre-formatted Zig literal string.
   # Zig: 42, 3.14, "hello", true, null, etc.
   Lit = Struct.new(:value) do

@@ -773,6 +773,12 @@ module DiagnosticRegistry
       summary:  "Logical use of `?Bool` must choose presence or payload truth explicitly.",
       fix_hint: "Use `value EXISTS` for presence, or `(value OR_ELSE FALSE)` for payload truth. `clear fix` offers both edits for named values.",
     },
+    IS_OK_REQUIRES_FALLIBLE: {
+      severity: :error, category: :type,
+      template: "`IS_OK` requires a fallible value, got '%{got}'.",
+      summary:  "Postfix `IS_OK` tests whether `!T` succeeded.",
+      fix_hint: "Remove `IS_OK` when the value is not fallible, or correct the expression's type to `!T`.",
+    },
     INSERT_EXISTS_BEFORE_AS: {
       severity: :hint, category: :syntax,
       template: "Insert `EXISTS` before `AS`.",

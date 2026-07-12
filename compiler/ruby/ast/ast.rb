@@ -255,7 +255,7 @@ module AST
 
   end
 
-  Binding = Struct.new(:expr, :name, :name_token, :unwrapped_type, :symbol, :capture,
+  Binding = Struct.new(:expr, :name, :name_token, :unwrapped_type, :symbol, :capture, :predicate,
                        keyword_init: true) do
     extend T::Sig
     attr_accessor :mir_binding_entry
@@ -265,6 +265,7 @@ module AST
     def initialize(**kw)
       super
       self[:unwrapped_type] = Type.new(:Untyped) if self[:unwrapped_type].nil?
+      self[:predicate] = :exists if self[:predicate].nil?
     end
 
     sig { returns(AST::Locatable) }
@@ -305,6 +306,11 @@ module AST
     sig { returns(T.nilable(String)) }
     def capture
       self[:capture]
+    end
+
+    sig { returns(Symbol) }
+    def predicate
+      self[:predicate]
     end
 
   end

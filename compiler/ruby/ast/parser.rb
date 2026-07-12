@@ -287,6 +287,7 @@ class ClearParser
     rule(:CHAR, '(', action: :parse_func_call_suffix),
     rule(:CHAR, '?', action: :parse_optional_unwrap_suffix),
     rule(:KEYWORD, 'EXISTS', action: :parse_exists_suffix),
+    rule(:KEYWORD, 'IS_OK', action: :parse_is_ok_suffix),
     rule(:VAR_ID, '@multiowned', action: :parse_capability_wrap_suffix),
     rule(:VAR_ID, '@shared', action: :parse_capability_wrap_suffix),
     rule(:VAR_ID, '@node', action: :parse_capability_wrap_suffix),
@@ -511,12 +512,12 @@ class ClearParser
     consume(:CHAR, '(')
     expr = parse_expression
     # (expr EXISTS AS name): optional binding group used in IF chains.
-    if match?(:KEYWORD, 'EXISTS')
-      consume(:KEYWORD, 'EXISTS')
+    if match?(:KEYWORD, 'EXISTS') || match?(:KEYWORD, 'IS_OK')
+      predicate_tok = consume(:KEYWORD)
       consume(:KEYWORD, 'AS')
       name_tok = consume(:VAR_ID)
       consume(:CHAR, ')')
-      bind = AST::BinaryOp.new(name_tok, expr, :BIND_VAR,
+      bind = AST::BinaryOp.new(predicate_tok, expr, :BIND_VAR,
                AST::Identifier.new(name_tok, T.must(name_tok).value))
       bind.paren_bind = true
       return parse_suffixes(bind)
@@ -560,6 +561,7 @@ class ClearParser
     when :parse_func_call_suffix then parse_func_call_suffix(lhs)
     when :parse_optional_unwrap_suffix then parse_optional_unwrap_suffix(lhs)
     when :parse_exists_suffix then parse_exists_suffix(lhs)
+    when :parse_is_ok_suffix then parse_is_ok_suffix(lhs)
     when :parse_capability_wrap_suffix then parse_capability_wrap_suffix(lhs)
     when :parse_inline_union_variant_suffix then parse_inline_union_variant_suffix(lhs)
     else
@@ -576,6 +578,14 @@ class ClearParser
 
     token = consume(:KEYWORD, 'EXISTS')
     AST::UnaryOp.new(token, :EXISTS, lhs)
+  end
+
+  sig { params(lhs: AST::Node).returns(SuffixResult) }
+  def parse_is_ok_suffix(lhs)
+    return SUFFIX_DECLINE if peek.type == :KEYWORD && peek.value == 'AS'
+
+    token = consume(:KEYWORD, 'IS_OK')
+    AST::UnaryOp.new(token, :IS_OK, lhs)
   end
 
   sig { params(lhs: AST::Node).returns(AST::Node) }
@@ -2455,15 +2465,18 @@ class ClearParser
       return node
     end
 
-    # Single optional bind: IF expr EXISTS AS name [THEN ...]
-    if match?(:KEYWORD, 'EXISTS')
-      consume(:KEYWORD, 'EXISTS')
-      consume(:KEYWORD, 'AS')
-      name_tok = consume(:VAR_ID)
-      if match?(:KEYWORD, 'AND') || match?(:LEGACY_LOGICAL, '&&')
-        error!(if_token, :MULTIPLE_BINDINGS_NEED_PARENS)
+    # Explicit predicate bindings refine left-to-right, so a later expression
+    # may use an earlier alias without parentheses.
+    if conditional_binding_predicate?
+      bindings = [parse_conditional_binding(condition)]
+      while match?(:KEYWORD, 'AND')
+        consume(:KEYWORD, 'AND')
+        next_expr = parse_expression
+        unless conditional_binding_predicate?
+          error!(current, :PARSER_EXPECTED, expected: "EXISTS AS or IS_OK AS", got: current.value, type: current.type, line: current.line)
+        end
+        bindings << parse_conditional_binding(next_expr)
       end
-      bindings = [AST::Binding.new(expr: condition, name: T.must(name_tok).value, name_token: name_tok)]
       return parse_if_bind_body(if_token, bindings)
     elsif match?(:KEYWORD, 'AS')
       emit_legacy_optional_binding!(current)
@@ -2508,6 +2521,20 @@ class ClearParser
     node
   end
 
+  sig { returns(T::Boolean) }
+  def conditional_binding_predicate?
+    match?(:KEYWORD, 'EXISTS') || match?(:KEYWORD, 'IS_OK')
+  end
+
+  sig { params(expr: AST::Node).returns(AST::Binding) }
+  def parse_conditional_binding(expr)
+    predicate_tok = T.must(consume(:KEYWORD))
+    predicate = predicate_tok.value == 'IS_OK' ? :is_ok : :exists
+    consume(:KEYWORD, 'AS')
+    name_tok = T.must(consume(:VAR_ID))
+    AST::Binding.new(expr: expr, name: name_tok.value, name_token: name_tok, predicate: predicate)
+  end
+
   sig { params(if_token: Lexer::Token, bindings: T::Array[AST::Binding]).returns(AST::IfBind) }
   def parse_if_bind_body(if_token, bindings)
     consume(:KEYWORD, 'THEN')
@@ -2531,7 +2558,8 @@ class ClearParser
     when AST::BinaryOp
       if node.op == :BIND_VAR
         right = T.cast(node.right, AST::Identifier)
-        return node.paren_bind ? [AST::Binding.new(expr: node.left, name: right.name, name_token: right.token)] : []
+        predicate = node.token.value == 'IS_OK' ? :is_ok : :exists
+        return node.paren_bind ? [AST::Binding.new(expr: node.left, name: right.name, name_token: right.token, predicate: predicate)] : []
       elsif node.op == :AND  # && maps to :AND in OP_TO_OP_CODE
         left_binds  = extract_paren_bindings(node.left, if_token)
         right_binds = extract_paren_bindings(node.right, if_token)

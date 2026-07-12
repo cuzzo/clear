@@ -82,7 +82,11 @@ module Annotator
       def visit_UnaryOp(node)
         T.bind(self, SemanticAnnotator)
 
-        visit(node.right)
+        if node.op == :IS_OK
+          with_body_fact_failure_absorbed(true) { visit(node.right) }
+        else
+          visit(node.right)
+        end
 
         case node.op
         when :NOT, "!"
@@ -91,6 +95,16 @@ module Annotator
           operand_type = node.right.full_type!(context: "EXISTS operand")
           unless Type.new(operand_type).optional?
             error!(node, :EXISTS_REQUIRES_OPTIONAL, got: operand_type)
+          end
+          stamp_type!(node, :Bool)
+        when :IS_OK
+          operand_type = if node.right.respond_to?(:error_union_type) && T.unsafe(node.right).error_union_type
+            T.unsafe(node.right).error_union_type
+          else
+            node.right.full_type!(context: "IS_OK operand")
+          end
+          unless Type.new(operand_type).error_union?
+            error!(node, :IS_OK_REQUIRES_FALLIBLE, got: operand_type)
           end
           stamp_type!(node, :Bool)
         else
