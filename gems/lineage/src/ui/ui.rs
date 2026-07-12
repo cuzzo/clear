@@ -2600,7 +2600,7 @@ pub fn source_payload_with_overlays(
     let effects_start = Instant::now();
     let effects = espalier_function_effects(storage, path)?;
     apply_espalier_symbol_effects(&mut symbols, &effects);
-    apply_espalier_effect_spans(&lines, &mut annotations, &effects);
+    apply_espalier_effect_spans(path, &lines, &mut annotations, &effects);
     apply_symbol_hotspots(&mut symbols, &annotations);
     profile_log("source.espalier_effects", effects_start);
     let blame_start = Instant::now();
@@ -3164,6 +3164,7 @@ fn hotspot_level(score: f64) -> &'static str {
 }
 
 fn apply_espalier_effect_spans(
+    path: &str,
     source_lines: &[String],
     annotations: &mut Vec<UiLineAnnotation>,
     effects: &[EspalierFunctionEffect],
@@ -3184,7 +3185,7 @@ fn apply_espalier_effect_spans(
             };
             let mut spans = Vec::new();
             for (kind, label, token) in &tokens {
-                spans.extend(find_effect_token_ranges(source, token).into_iter().map(
+                spans.extend(find_effect_token_ranges(path, source, token).into_iter().map(
                     |(start, end)| UiEffectSpan {
                         kind: kind.clone(),
                         label: label.clone(),
@@ -3233,7 +3234,7 @@ fn effect_tokens(effect: &EspalierFunctionEffect) -> Vec<(String, String, String
     tokens
 }
 
-fn find_effect_token_ranges(source: &str, token: &str) -> Vec<(usize, usize)> {
+fn find_effect_token_ranges(path: &str, source: &str, token: &str) -> Vec<(usize, usize)> {
     let token = token.trim();
     if token.is_empty() {
         return Vec::new();
@@ -3244,12 +3245,48 @@ fn find_effect_token_ranges(source: &str, token: &str) -> Vec<(usize, usize)> {
     while let Some(relative) = source[offset..].find(token) {
         let start = offset + relative;
         let end = start + token.len();
-        if token_boundaries_ok(source, start, end) {
+        if token_boundaries_ok(source, start, end) && !is_in_string_or_comment(path, source, start, end) {
             ranges.push((start, end));
         }
         offset = end;
     }
     ranges
+}
+
+fn is_in_string_or_comment(path: &str, source: &str, range_start: usize, _range_end: usize) -> bool {
+    let language = syntax_language(path);
+    if language == SyntaxLanguage::Plain {
+        return false;
+    }
+    let mut chars = source.char_indices().peekable();
+    while let Some((start, ch)) = chars.next() {
+        if let Some(prefix) = comment_prefix(language) {
+            if source[start..].starts_with(prefix) {
+                if range_start >= start {
+                    return true;
+                }
+                break;
+            }
+        }
+        if is_string_delimiter(language, ch) {
+            let end = scan_string(source, &mut chars, ch);
+            if range_start >= start && range_start < end {
+                return true;
+            }
+            continue;
+        }
+        if ch.is_ascii_digit() {
+            let _ = scan_while(source, &mut chars, |candidate| {
+                candidate.is_ascii_alphanumeric() || matches!(candidate, '_' | '.' | ':')
+            });
+            continue;
+        }
+        if is_identifier_start(ch) {
+            let _ = scan_while(source, &mut chars, is_identifier_continue);
+            continue;
+        }
+    }
+    false
 }
 
 fn token_boundaries_ok(source: &str, start: usize, end: usize) -> bool {
