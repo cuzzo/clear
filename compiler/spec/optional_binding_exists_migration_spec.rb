@@ -45,6 +45,31 @@ RSpec.describe "EXISTS optional-binding migration" do
       .to raise_error(CompilerError, /EXISTS.*requires an optional value/)
   end
 
+  it "uses non-Bool optionals as presence operands for AND and OR" do
+    ast = parse(<<~CLEAR)
+      FN main(name: ?String, enabled: Bool) RETURNS Bool ->
+        RETURN name OR enabled AND name;
+      END
+    CLEAR
+    SemanticAnnotator.new.annotate!(ast)
+    expect(ast.statements.first.body.first.value.resolved_type).to eq(:Bool)
+  end
+
+  it "rejects ambiguous ?Bool logic with presence and payload fixes" do
+    source = "FN main(flag: ?Bool, y: Bool) RETURNS Bool -> RETURN flag OR y; END"
+    ast = parse(source)
+    FixCollector.enable!
+    begin
+      SemanticAnnotator.new(source_code: source).annotate!(ast)
+      finding = FixCollector.drain.find { |item| item.message.include?("Ambiguous ?Bool") }
+      expect(finding).not_to be_nil
+      expect(finding.fixes.map { |fix| fix.edits.first.replacement })
+        .to eq(["flag EXISTS", "(flag OR_ELSE FALSE)"])
+    ensure
+      FixCollector.disable!
+    end
+  end
+
   it "rejects legacy AS bindings and offers an exact automatic insertion" do
     source = "IF maybe AS value THEN PASS; END"
     expect { parse(source) }.to raise_error(ParserError, /must state its test/)

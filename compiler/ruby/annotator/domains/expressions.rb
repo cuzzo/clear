@@ -171,7 +171,13 @@ module Annotator
         # Delegate type resolution to Type class
         left_type = node.left.full_type!(context: "binary left")
         right_type = node.right.full_type!(context: "binary right")
-        result = Type.binary_op(node.op, left_type, right_type)
+        if node.op == :AND || node.op == :OR
+          validate_logical_presence_operand!(node.left, left_type, node.op)
+          validate_logical_presence_operand!(node.right, right_type, node.op)
+        end
+        logical_presence = (node.op == :AND || node.op == :OR) &&
+          (Type.new(left_type).optional? || Type.new(right_type).optional?)
+        result = logical_presence ? BinaryOpResult.new(type: Type.new(:Bool)) : Type.binary_op(node.op, left_type, right_type)
 
         if result.error
           error!(node, :TYPE_ERROR_GENERIC, detail: result.error)
@@ -193,6 +199,35 @@ module Annotator
           ti.mark_frame_allocated! if ti.is_a?(Type)
         end
         result.type
+      end
+
+      sig { params(operand: AST::Node, operand_type: Type, op: Symbol).void }
+      def validate_logical_presence_operand!(operand, operand_type, op)
+        ti = Type.new(operand_type)
+        return unless ti.optional?
+        return unless T.must(ti.wrapped_type).resolved == :Bool
+
+        fixes = T.let([], T::Array[Fix])
+        if operand.is_a?(AST::Identifier)
+          token = operand.token
+          span = Span.new(file: nil, line: token.line, col: token.column, length: operand.name.length)
+          fixes << Fix.new(
+            description: "Test whether the optional Bool is present with `#{operand.name} EXISTS`.",
+            confidence: :interactive,
+            edits: [Edit.new(span: span, replacement: "#{operand.name} EXISTS")]
+          )
+          fixes << Fix.new(
+            description: "Use the Bool payload, defaulting NIL to FALSE, with `(#{operand.name} OR_ELSE FALSE)`.",
+            confidence: :interactive,
+            edits: [Edit.new(span: span, replacement: "(#{operand.name} OR_ELSE FALSE)")]
+          )
+        end
+        fixable!(operand,
+          code: :AMBIGUOUS_OPTIONAL_BOOL_LOGIC,
+          op: op,
+          category: :type,
+          level: :error,
+          fixes: fixes)
       end
 
       sig { params(node: AST::Placeholder).returns(T.nilable(SymbolEntry)) }

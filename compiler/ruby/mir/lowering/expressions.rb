@@ -695,9 +695,17 @@ module MIRLoweringExpressions
     op_str = ZigTypeMapper::ZIG_OPS[node.op]
     raise "MIRLowering: unknown boolean op #{node.op}" unless op_str
 
-    left = lower(node.left)
-    right = lower_scoped { lower(node.right) }
+    left = lower_boolean_operand(node.left)
+    right = lower_scoped { lower_boolean_operand(node.right) }
     MIR::BinOp.new(op_str, left, right)
+  end
+
+  sig { params(node: AST::Node).returns(MIR::Node) }
+  def lower_boolean_operand(node)
+    lowered = T.cast(lower(node), MIR::Node)
+    return lowered unless Type.from_node!(node, context: "logical operand").optional?
+
+    MIR::BinOp.new("!=", lowered, MIR::Lit.new("null"))
   end
 
   # Returns [union_type_name, variant_name] when `node` is a unit-variant

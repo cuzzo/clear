@@ -767,6 +767,12 @@ module DiagnosticRegistry
       summary:  "Postfix `EXISTS` tests whether `?T` contains a value.",
       fix_hint: "Remove `EXISTS` when the value is already non-optional, or correct the expression's type to `?T`.",
     },
+    AMBIGUOUS_OPTIONAL_BOOL_LOGIC: {
+      severity: :error, category: :type,
+      template: "Ambiguous ?Bool %{op} operand: presence and payload truth are different questions. Choose `value EXISTS` (is a Bool present?) or `(value OR_ELSE FALSE)` (is its payload true, defaulting NIL to false?).",
+      summary:  "Logical use of `?Bool` must choose presence or payload truth explicitly.",
+      fix_hint: "Use `value EXISTS` for presence, or `(value OR_ELSE FALSE)` for payload truth. `clear fix` offers both edits for named values.",
+    },
     INSERT_EXISTS_BEFORE_AS: {
       severity: :hint, category: :syntax,
       template: "Insert `EXISTS` before `AS`.",

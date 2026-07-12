@@ -4,4 +4,9 @@ FN main() RETURNS Void ->
     ASSERT present EXISTS;
     ASSERT !(absent EXISTS);
     ASSERT (present EXISTS) AND !(absent EXISTS);
+    maybe_name: ?String = "CLEAR";
+    no_name: ?String = NIL;
+    ASSERT maybe_name OR FALSE;
+    ASSERT no_name OR TRUE;
+    ASSERT maybe_name AND TRUE;
 END
