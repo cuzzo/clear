@@ -490,6 +490,7 @@ class Type
   OWNERSHIP_SURFACE_NAMES = T.let({
     multiowned: "@multiowned",
     shared: "@shared",
+    shared_node: "@shared:node",
     split: "@split",
     link: "@link",
     frozen: "@frozen",
@@ -730,6 +731,7 @@ class Type
     return "@multiowned" if value == :multiowned
     return "@shared" if value == :shared
     return "@node" if value == :node
+    return "@shared:node" if value == :shared_node
     return "@split" if value == :split
     return "@link" if value == :link
     return "@frozen" if value == :frozen
@@ -2369,8 +2371,13 @@ class Type
   end
 
   sig { returns(T::Boolean) }
+  def shared_node?
+    ownership == :shared_node
+  end
+
+  sig { returns(T::Boolean) }
   def node?
-    ownership == :node
+    ownership == :node || shared_node?
   end
 
   sig { returns(T::Boolean) }
@@ -2794,6 +2801,7 @@ class Type
   # and falls back to checking known resource type names.
   sig { returns(T::Boolean) }
   def resource?
+    return false if node? # the store, not each compact handle, owns the payload
     return true if @is_resource == true
 
     Type.resource_type_symbol?(resolved)
@@ -2829,6 +2837,7 @@ class Type
   # ruby-to-clear: skip
   sig { params(schema_lookup: T.nilable(SchemaLookup)).returns(ResourceCloseResult) }
   def resolve_resource_close(schema_lookup = nil)
+    return ResourceCloseResult.new(is_resource: false, close_plan: nil) if node?
     return ResourceCloseResult.new(is_resource: false, close_plan: nil) if any_rc?
     if open_stream? || inf_stream? || split_open_stream?
       return ResourceCloseResult.new(is_resource: true, close_plan: Type.deinit_resource_close_plan)
@@ -3512,6 +3521,7 @@ class Type
 
   sig { returns(T::Boolean) }
   def requires_move?
+    return false if node?                   # compact handles copy; their domain owns payloads
     return false if fn_type?                # Function pointers are pointer-sized; no move semantics
     return false if bounded_stream?         # Bounded streams are consumed incrementally — not linearly affine
     return false if shared_promise?         # Shared promises are non-affine — multiple NEXT calls allowed
@@ -3856,7 +3866,7 @@ class Type
   def parallel_boundary_forbidden_reason(schema_lookup = nil, seen = nil)
     return :local_scheduler_affinity if local?
     return :non_atomic_rc if multiowned?
-    return nil if shared?
+    return nil if shared? || shared_node?
     return :scheduler_local_node if node?
     return :affine_locked if locked?
     return :affine_write_locked if write_locked?
@@ -4523,8 +4533,10 @@ class Type
     sync = T.let(nil, T.nilable(Symbol))
     caps.flat_map { |cap| cap.split(":") }.each do |cap|
       case cap
-      when "shared" then ownership = :shared
-      when "node" then ownership = :node
+      when "shared"
+        ownership = ownership == :node ? :shared_node : :shared
+      when "node"
+        ownership = ownership == :shared ? :shared_node : :node
       when "multiOwned", "multiowned" then ownership = :multiowned
       when "link" then ownership = :link
       when "split" then ownership = :split

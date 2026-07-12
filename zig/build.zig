@@ -246,6 +246,9 @@ pub fn build(b: *std.Build) void {
         .{ .path = "sharded-list-test.zig", .tsan = true },
         .{ .path = "sharded-pool-test.zig", .tsan = true },
         .{ .path = "shared-nothing-test.zig", .tsan = true },
+        .{ .path = "shared-node-store-test.zig", .tsan = true },
+        .{ .path = "shared-node-store-hammer-test.zig", .tsan = true, .hammer = true },
+        .{ .path = "shared-node-store-loom-test.zig", .loom_vopr = true },
         .{ .path = "shared-promise-test.zig", .tsan = true },
         .{ .path = "slab-alloc-test.zig", .tsan = true },
         .{ .path = "slab-alloc-hammer-test.zig", .tsan = true, .hammer = true },
@@ -1105,6 +1108,7 @@ pub fn build(b: *std.Build) void {
         .{ .name = "fsm-vopr", .entry = "fsm-vopr-test.zig" },
         .{ .name = "vopr-runqueue", .entry = "vopr-test.zig" },
         .{ .name = "data-structures-vopr", .entry = "data-structures-vopr-test.zig" },
+        .{ .name = "shared-node-store-vopr", .entry = "shared-node-store-vopr-test.zig" },
     };
     for (vopr_exes) |ve| {
         if (!matchesTestFile(ve.entry, test_file_filter)) continue;

@@ -901,13 +901,13 @@ module MIRLoweringConcurrency
     binding = step.binding
     mir = finalize_bg_discard_expr(step.expr, T.cast(mir, MIR::NodeRoot)) unless binding
     step_pending = flush_pending
-    body_mir.concat(step_pending)
     mir_nodes = bg_mir_nodes(mir)
-    if binding
-      body_mir << MIR::Let.new(binding, T.must(mir_nodes.last), false, nil, nil)
+    produced = if binding
+      step_pending + [MIR::Let.new(binding, T.must(mir_nodes.last), false, nil, nil)]
     else
-      body_mir.concat(mir_nodes)
+      step_pending + mir_nodes
     end
+    body_mir.concat(guard_bg_shared_node_statement(step.expr, produced))
     nil
   end
 
@@ -928,8 +928,7 @@ module MIRLoweringConcurrency
     T.bind(self, MIRLowering) rescue nil
     last_mir = T.cast(finalize_bg_discard_expr(step.expr, T.cast(lower(step.expr), MIR::NodeRoot)), MIR::Node)
     last_pending = flush_pending
-    body_mir.concat(last_pending)
-    body_mir << last_mir
+    body_mir.concat(guard_bg_shared_node_statement(step.expr, last_pending + [last_mir]))
     nil
   end
 
@@ -951,11 +950,20 @@ module MIRLoweringConcurrency
     last_mir = place_value_for_destination(last_mir, step.expr, result_alloc, inner_t)
     last_mir = hoist_alloc(last_mir, step.expr, err_cleanup: true) if mir_allocates?(last_mir)
     last_pending = flush_pending
-    body_mir.concat(last_pending)
     result_target = MIR::FieldGet.new(MIR::FieldGet.new(MIR::Ident.new("__ctx_#{id}"), "inner"), "result")
-    body_mir.concat(ownership_marks_for_transferred_temp(last_mir, target_alloc: :heap))
-    body_mir << MIR::Set.new(result_target, last_mir)
+    produced = last_pending + ownership_marks_for_transferred_temp(last_mir, target_alloc: :heap) +
+      [MIR::Set.new(result_target, last_mir)]
+    body_mir.concat(guard_bg_shared_node_statement(step.expr, produced))
     nil
+  end
+
+  # Unit-level lowering helpers extend this module without the complete
+  # MIRLowering object. Production lowering always supplies the guard method.
+  sig { params(stmt: AST::Node, nodes: T::Array[MIR::Node]).returns(T::Array[MIR::Node]) }
+  def guard_bg_shared_node_statement(stmt, nodes)
+    return nodes unless respond_to?(:guard_shared_node_statement, true)
+
+    T.unsafe(self).guard_shared_node_statement(stmt, nodes)
   end
 
   sig { params(mir: T.any(MIR::Node, T::Array[MIR::Node])).returns(T::Array[MIR::Node]) }

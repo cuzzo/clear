@@ -980,11 +980,12 @@ module MIRLoweringVariables
     elsif source_type.node_reference?
       payload = T.must(source_type.node_payload_type)
       zig_type = transpile_type(payload.resolved.to_s)
-      function_state.node_store_types << zig_type
+      shared = source_type.shared_node?
+      function_state.node_store_types << zig_type unless shared
       MIR::MethodCall.new(
-        node_store_type_mir(zig_type),
+        node_store_type_mir(zig_type, shared: shared),
         "getBound",
-        [MIR::Ident.new(node_store_binding_name(zig_type)), T.cast(lower(source), MIR::Node)],
+        [MIR::Ident.new(node_store_binding_name(zig_type, shared: shared)), T.cast(lower(source), MIR::Node)],
         false,
         MIR::CallableContract.no_ownership(1),
       )

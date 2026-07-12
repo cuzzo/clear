@@ -285,7 +285,7 @@ module FuzzMutants
                    'values instead of silently compiling them.',
       invariant: :parallel_boundary_admission,
       patch: File.join(PATCH_DIR, 'execution_boundary_parallel_accept.patch'),
-      templates: [:execution_boundary, :recursive_execution_boundary_matrix],
+      templates: [:execution_boundary, :recursive_execution_boundary_matrix, :shared_node_graph_matrix],
       kill: { bucket: :unexpected_pass, min_delta: 1 }
     ),
     Mutant.new(

@@ -3312,6 +3312,7 @@ class ClearParser
 
     ownership = case t.ownership
     when :shared then "@shared"
+    when :shared_node then "@shared:node"
     when :multiowned then "@multiowned"
     when :link then "@link"
     when :split then "@split"
@@ -3522,18 +3523,25 @@ class ClearParser
     return false unless token_char?(next_tok, ':')
 
     sync_tok = peek_at(2)
-    token_var?(sync_tok) && ELEMENT_SYNC_TOKENS.include?(T.must(sync_tok).value) && token_char?(peek_at(3), '[')
+    return false unless token_var?(sync_tok) && token_char?(peek_at(3), '[')
+
+    joined = T.must(sync_tok).value
+    ELEMENT_SYNC_TOKENS.include?(joined) || %w[node @node shared @shared].include?(joined)
   end
 
   sig { params(result: ElementCapability, value: String).void }
   def apply_element_capability!(result, value)
     case value
     when "@shared"
-      result[:ownership] = :shared
+      result[:ownership] = result[:ownership] == :node ? :shared_node : :shared
     when "@multiowned"
       result[:ownership] = :multiowned
     when "@node"
-      result[:ownership] = :node
+      result[:ownership] = result[:ownership] == :shared ? :shared_node : :node
+    when "shared"
+      result[:ownership] = result[:ownership] == :node ? :shared_node : :shared
+    when "node"
+      result[:ownership] = result[:ownership] == :shared ? :shared_node : :node
     when "@locked", "locked"
       result[:sync] = :locked
     when "@writeLocked", "writeLocked"
@@ -3560,8 +3568,13 @@ class ClearParser
   def apply_capability!(result, token, value = token.value, validate_shard_count: false)
     ownership = CAPABILITY_OWNERSHIP_VALUES[value]
     if ownership
-      error!(token, :DUPLICATE_OWNERSHIP_CAP) if result.ownership
-      result.ownership = ownership
+      current = result.ownership
+      if (current == :shared && ownership == :node) || (current == :node && ownership == :shared)
+        result.ownership = :shared_node
+      else
+        error!(token, :DUPLICATE_OWNERSHIP_CAP) if current
+        result.ownership = ownership
+      end
       return
     end
 
@@ -4063,6 +4076,10 @@ class ClearParser
     dim = attrs[:dim]
     val = attrs[:val]
     return nil unless dim.is_a?(Symbol) && val.is_a?(Symbol)
+    if dim == :ownership && ((dims[dim] == :shared && val == :node) || (dims[dim] == :node && val == :shared))
+      dims[dim] = :shared_node
+      return :shared_node
+    end
     if dims[dim]
       error!(tok, :DUPLICATE_CAPABILITY_DIM, dim: dim, current: dims[dim], attempted: val)
     end

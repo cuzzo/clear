@@ -173,7 +173,8 @@ module FsmLowering
         end
       end
 
-      pre_mir + result_mir
+      guarded_result = last_step ? guard_shared_node_statement(last_step.expr, result_mir) : result_mir
+      pre_mir + guarded_result
     end
   end
 
@@ -321,13 +322,13 @@ module FsmLowering
     # binding (if any) is already absorbed into the MIR::Let inside
     # the array.
     if mir.is_a?(Array)
-      return pending + mir.compact
+      return guard_shared_node_statement(step.expr, pending + mir.compact)
     end
     return [] unless mir.is_a?(MIR::Emittable)
 
     main = wrap_step_as_stmt(step, mir)
     return pending if main.nil?
-    pending + [main]
+    guard_shared_node_statement(step.expr, pending + [main])
   end
 
   # Wrap an expression-shaped MIR node as a statement-shaped node

@@ -572,12 +572,13 @@ class MIRLowering
   def node_create_mir(value, destination, source_node)
     payload = T.must(destination.node_payload_type)
     zig_type = transpile_type(payload.resolved.to_s)
-    function_state.node_store_types << zig_type
-    store = node_store_type_mir(zig_type)
+    shared = destination.shared_node?
+    function_state.node_store_types << zig_type unless shared
+    store = node_store_type_mir(zig_type, shared: shared)
     call = MIR::MethodCall.new(
       store,
       "createBound",
-      [MIR::Ident.new(node_store_binding_name(zig_type)), value],
+      [MIR::Ident.new(node_store_binding_name(zig_type, shared: shared)), value],
       true,
       MIR::CallableContract.no_ownership(2),
     )
@@ -586,22 +587,102 @@ class MIRLowering
       call,
       value,
       source_node,
-      "NodeStore.createBound",
+      shared ? "SharedNodeStore.createBound" : "NodeStore.createBound",
       target_alloc: :heap,
     ), MIR::MethodCall)
   end
 
   # NodeStore is a comptime Zig type factory. Keep the application structural
   # in MIR so identifiers remain identifiers rather than encoded expressions.
-  sig { params(zig_type: String).returns(MIR::Call) }
-  def node_store_type_mir(zig_type)
+  sig { params(zig_type: String, shared: T::Boolean).returns(MIR::Call) }
+  def node_store_type_mir(zig_type, shared: false)
     MIR::Call.new(
-      "CheatLib.NodeStore",
+      shared ? "CheatLib.SharedNodeStore" : "CheatLib.NodeStore",
       [MIR::Ident.new(zig_type)],
       false,
       false,
       MIR::CallableContract.no_ownership(1),
     )
+  end
+
+  sig { params(nodes: T::Array[MIR::Node]).returns(T::Array[String]) }
+  def shared_node_store_types_in_mir(nodes)
+    found = T.let(Set.new, T::Set[String])
+    pending = T.let(nodes.dup, T::Array[MIR::Node])
+    until pending.empty?
+      node = T.must(pending.pop)
+      if node.is_a?(MIR::MethodCall) && node.receiver.is_a?(MIR::Call) &&
+          T.cast(node.receiver, MIR::Call).callee == "CheatLib.SharedNodeStore"
+        arg = T.cast(node.receiver, MIR::Call).args.first
+        found << arg.name if arg.is_a?(MIR::Ident)
+      end
+      if node.is_a?(MIR::Emittable)
+        node.child_exprs.each { |child| pending << child if child.is_a?(MIR::Emittable) }
+        node.body_slots.each { |slot| slot.body.each { |child| pending << child } }
+      end
+    end
+    found.to_a.sort
+  end
+
+  sig { params(stmt: LowerableStmt, nodes: T::Array[MIR::Node]).returns(T::Array[MIR::Node]) }
+  def guard_shared_node_statement(stmt, nodes)
+    types = shared_node_store_types_in_mir(nodes)
+    return nodes if types.empty?
+
+    write = stmt.is_a?(AST::Assignment) || stmt.is_a?(AST::MethodCall) ||
+      nodes.any? { |node| shared_node_write_mir?(node) }
+    lock_method = write ? "lockWrite" : "lockRead"
+    unlock_method = write ? "unlockWrite" : "unlockRead"
+    prefix = T.let([], T::Array[MIR::Node])
+    types.each do |zig_type|
+      store = node_store_type_mir(zig_type, shared: true)
+      binding = node_store_binding_name(zig_type, shared: true)
+      prefix << MIR::Let.new(
+        binding,
+        MIR::MethodCall.new(
+          store,
+          lock_method,
+          [MIR::Ident.new(runtime_binding_name)],
+          true,
+          MIR::CallableContract.no_ownership(1),
+        ),
+        false,
+        nil,
+        nil,
+      )
+      prefix << MIR::DeferStmt.new(MIR::MethodCall.new(
+        store,
+        unlock_method,
+        [MIR::Ident.new(binding)],
+        false,
+        MIR::CallableContract.no_ownership(1),
+      ))
+    end
+
+    access_nodes = nodes.select { |node| !shared_node_store_types_in_mir([node]).empty? }
+    if access_nodes.length == 1 && access_nodes.first.is_a?(MIR::Let)
+      binding = T.cast(access_nodes.first, MIR::Let)
+      label = "__shared_node_access_#{lowering_counters.next_tmp_id}"
+      original_init = binding.init
+      block = MIR::BlockExpr.new(label, prefix + [MIR::BreakStmt.new(label, original_init)])
+      block.result_type = original_init.result_type if original_init.respond_to?(:result_type)
+      binding.init = block
+      return nodes
+    end
+
+    [MIR::ScopeBlock.new(prefix + nodes)]
+  end
+
+  sig { params(node: MIR::Node).returns(T::Boolean) }
+  def shared_node_write_mir?(node)
+    if node.is_a?(MIR::MethodCall) && node.receiver.is_a?(MIR::Call) &&
+        T.cast(node.receiver, MIR::Call).callee == "CheatLib.SharedNodeStore"
+      return true if ["createBound", "removeBound"].include?(node.method)
+    end
+    return false unless node.is_a?(MIR::Emittable)
+
+    node.child_exprs.any? { |child| child.is_a?(MIR::Emittable) && shared_node_write_mir?(child) } ||
+      node.body_slots.any? { |slot| slot.body.any? { |child| shared_node_write_mir?(child) } }
   end
 
   # Optional @node values use NodeRef's zero handle as NIL so they remain a
@@ -1464,9 +1545,15 @@ class MIRLowering
       else
         dedupe_transfer_marks(ownership_transfers_for_stmt(stmt, state.guarded_cleanup_names))
       end
+    statement_nodes = mir.is_a?(Array) ? mir.compact : [T.cast(mir, MIR::Node)]
+    guarded_nodes = if transfer_only
+      []
+    else
+      guard_shared_node_statement(stmt, pending.compact + statement_nodes)
+    end
     LoweredStmtPacket.new(
-      mir: transfer_only ? [] : T.cast(mir, LoweredMir),
-      pending: pending,
+      mir: transfer_only ? [] : T.cast(guarded_nodes, LoweredMir),
+      pending: transfer_only ? pending : [],
       stmt_transfer_marks: stmt_transfer_marks,
       source_line: transfer_only ? nil : token&.line,
       source_column: transfer_only ? nil : token&.column,
@@ -2392,6 +2479,10 @@ class MIRLowering
     ).returns(T::Array[MIR::OwnershipOperandFact])
   end
   def ownership_operands_for_sink_value(value_mir, ast_value, ti, source, target_alloc, require_visible_owned:)
+    # NodeRef is a copyable generation handle. The store owns and moves the
+    # payload; assigning or capturing the handle never transfers that payload.
+    return [MIR::OwnershipOperandFact.non_owning(ti, source)] if ti.node_reference?
+
     explicit_fact = value_mir.respond_to?(:ownership_consumption) ? value_mir.ownership_consumption : nil
     if explicit_fact.is_a?(MIR::OwnershipConsumptionFact)
       return retarget_ownership_operands(explicit_fact.operands, target_alloc)
@@ -2737,14 +2828,14 @@ class MIRLowering
   # Stable Zig identifier for a hidden per-type @node store. Avoid text/regex
   # rewriting in MIR: this is a character-wise identifier encoding, not a
   # rewrite of generated Zig expressions.
-  sig { params(zig_type: String).returns(String) }
-  def node_store_binding_name(zig_type)
+  sig { params(zig_type: String, shared: T::Boolean).returns(String) }
+  def node_store_binding_name(zig_type, shared: false)
     encoded = zig_type.each_char.map do |char|
       alpha = (char >= "A" && char <= "Z") || (char >= "a" && char <= "z")
       digit = char >= "0" && char <= "9"
       alpha || digit || char == "_" ? char : "_"
     end.join
-    "__node_store_#{encoded}"
+    shared ? "__shared_node_guard_#{encoded}" : "__node_store_#{encoded}"
   end
 
   sig { params(node: AST::Node).returns(Symbol) }

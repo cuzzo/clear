@@ -1097,12 +1097,13 @@ module MIRLoweringExpressions
       if inner_type.node_reference?
         payload = T.must(inner_type.node_payload_type)
         zig_type = transpile_type(payload.resolved.to_s)
-        function_state.node_store_types << zig_type
-        store = node_store_type_mir(zig_type)
+        shared = inner_type.shared_node?
+        function_state.node_store_types << zig_type unless shared
+        store = node_store_type_mir(zig_type, shared: shared)
         inner_mir = MIR::MethodCall.new(
           store,
           "getBound",
-          [MIR::Ident.new(node_store_binding_name(zig_type)), inner_mir],
+          [MIR::Ident.new(node_store_binding_name(zig_type, shared: shared)), inner_mir],
           false,
           MIR::CallableContract.no_ownership(1),
         )
@@ -1124,12 +1125,13 @@ module MIRLoweringExpressions
     if target_type.node_reference?
       payload = T.must(target_type.node_payload_type)
       zig_type = transpile_type(payload.resolved.to_s)
-      function_state.node_store_types << zig_type
-      store = node_store_type_mir(zig_type)
+      shared = target_type.shared_node?
+      function_state.node_store_types << zig_type unless shared
+      store = node_store_type_mir(zig_type, shared: shared)
       resolved = MIR::MethodCall.new(
         store,
         "getBound",
-        [MIR::Ident.new(node_store_binding_name(zig_type)), T.cast(target, MIR::Node)],
+        [MIR::Ident.new(node_store_binding_name(zig_type, shared: shared)), T.cast(target, MIR::Node)],
         false,
         MIR::CallableContract.no_ownership(1),
       )
@@ -2292,9 +2294,9 @@ module MIRLoweringExpressions
   sig { params(node: AST::CapabilityWrap).returns(MIR::Node) }
   def lower_cap_wrap(node)
     T.bind(self, MIRLowering) rescue nil
-    if node.ownership == :node
-      value = lower(node.value)
-      return node_create_mir(T.cast(value, MIR::Node), node.full_type!)
+    if node.ownership == :node || node.ownership == :shared_node
+      node_value = lower(node.value)
+      return node_create_mir(T.cast(node_value, MIR::Node), node.full_type!, node.value)
     end
     inner = with_decl_alloc(:heap) do
       value = lower(node.value)

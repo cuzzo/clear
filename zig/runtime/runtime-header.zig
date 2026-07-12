@@ -1202,6 +1202,150 @@ pub const CheatLib = struct {
             }
         };
     }
+
+    /// A cross-scheduler node domain. Unlike NodeStore, a shared domain is
+    /// retained until Runtime teardown: a task admitted by the scheduler may
+    /// begin after the lexical scope that spawned it has returned. Every map
+    /// access must occur while the matching read or write guard is held; the
+    /// compiler emits those guards around the complete source expression so
+    /// PagedSlotMap growth and swap-remove can never invalidate a live reader.
+    pub fn SharedNodeStore(comptime T: type) type {
+        return struct {
+            const Self = @This();
+            const Ref = NodeRef(T);
+            const Map = PagedSlotMapWithDrop(T, dropValue);
+            const initial_capacity: u32 = Map.region_capacity;
+
+            pub const State = struct {
+                owner: *Runtime,
+                owner_id: u64,
+                map: Map,
+                rw: compat.RwLock,
+                next: ?*State = null,
+            };
+
+            const Cache = struct {
+                owner_id: u64 = 0,
+                state: ?*State = null,
+            };
+
+            var states: ?*State = null;
+            var states_lock: compat.Mutex = .{};
+            threadlocal var cache: Cache = .{};
+
+            fn dropValue(alloc: std.mem.Allocator, value: *T) void {
+                CheatLib.cleanup(T, alloc, value);
+            }
+
+            fn destroy(raw: *anyopaque) void {
+                const current: *State = @ptrCast(@alignCast(raw));
+                states_lock.lock();
+                var link = &states;
+                while (link.*) |candidate| {
+                    if (candidate == current) {
+                        link.* = candidate.next;
+                        break;
+                    }
+                    link = &candidate.next;
+                }
+                states_lock.unlock();
+
+                current.rw.lock();
+                current.map.deinit();
+                current.rw.unlock();
+                current.owner.heap_allocator.destroy(current);
+                if (cache.state == current) cache = .{};
+            }
+
+            fn ensure(rt: *Runtime) !*State {
+                const domain_id = rt.shared_domain_id;
+                if (cache.owner_id == domain_id) {
+                    if (cache.state) |current| return current;
+                }
+
+                states_lock.lock();
+                defer states_lock.unlock();
+                var cursor = states;
+                while (cursor) |current| : (cursor = current.next) {
+                    if (current.owner_id == domain_id) {
+                        cache = .{ .owner_id = domain_id, .state = current };
+                        return current;
+                    }
+                }
+
+                const owner = rt.sharedDomainOwner();
+                const current = try owner.heap_allocator.create(State);
+                errdefer owner.heap_allocator.destroy(current);
+                current.* = .{
+                    .owner = owner,
+                    .owner_id = domain_id,
+                    .map = try Map.initCapacity(owner.heap_allocator, initial_capacity),
+                    .rw = compat.RwLock.init(),
+                    .next = states,
+                };
+                errdefer current.map.deinit();
+                try owner.registerFinalizer(.{ .context = current, .run = destroy });
+                states = current;
+                cache = .{ .owner_id = domain_id, .state = current };
+                return current;
+            }
+
+            pub fn lockRead(rt: *Runtime) !*State {
+                const current = try ensure(rt);
+                current.rw.lockShared();
+                return current;
+            }
+
+            pub fn unlockRead(current: *State) void {
+                current.rw.unlockShared();
+            }
+
+            pub fn lockWrite(rt: *Runtime) !*State {
+                const current = try ensure(rt);
+                current.rw.lock();
+                return current;
+            }
+
+            pub fn unlockWrite(current: *State) void {
+                current.rw.unlock();
+            }
+
+            pub fn createBound(current: *State, value: T) !Ref {
+                return insertGrowing(&current.map, value);
+            }
+
+            fn insertGrowing(map: *Map, value: T) !Ref {
+                const handle = map.insert(value) catch |err| switch (err) {
+                    error.Full => blk: {
+                        const current_capacity: u32 = @intCast(map.nodes.len);
+                        if (current_capacity == Map.max_capacity) return error.Full;
+                        const next_capacity = @min(Map.max_capacity, current_capacity * 2);
+                        try map.growCapacity(next_capacity);
+                        break :blk try map.insert(value);
+                    },
+                };
+                return Ref.fromHandle(handle);
+            }
+
+            pub inline fn getBound(current: *State, ref: Ref) ?*T {
+                const handle = ref.handle() orelse return null;
+                return current.map.get(handle);
+            }
+
+            pub inline fn removeBound(current: *State, ref: Ref) bool {
+                const handle = ref.handle() orelse return false;
+                return current.map.remove(handle);
+            }
+
+            pub inline fn countBound(current: *State) usize {
+                return current.map.length();
+            }
+
+            pub inline fn validateBound(current: *State) bool {
+                return current.map.debugValidate();
+            }
+        };
+    }
     pub const SoaList = DataStructures.SoaList;
     pub const SoaPool = DataStructures.SoaPool;
     pub const ShardedPool = DataStructures.ShardedPool;
@@ -4380,6 +4524,8 @@ pub fn allocFsmTaskRuntime(fsm_task: *fp.FsmTask, parent_rt: *Runtime) !*Runtime
     // fallback; under scheduler dispatch Runtime.currentEbr() returns the
     // active scheduler's thread_ebr.
     rt_ptr.* = try Runtime.initFromSliceWithEbr(&[_]u8{}, parent_rt.ebr, allocator, 0);
+    rt_ptr.shared_domain_id = parent_rt.shared_domain_id;
+    rt_ptr.shared_domain_owner = parent_rt.shared_domain_owner orelse parent_rt;
     rt_ptr.wireAllocator();
 
     fsm_task.task_runtime = rt_ptr;

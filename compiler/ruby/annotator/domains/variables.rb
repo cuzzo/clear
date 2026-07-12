@@ -113,6 +113,7 @@ module Annotator
           capability_target = node.type ? Type.new(node.type) : Type.new(value.full_type!(context: "capability declaration value"))
           capability_target.merge_capabilities_from!(value.full_type!(context: "capability declaration value"))
           value.coerced_type = capability_target
+          final_type = capability_target
         end
 
         # Empty collection literals annotated as Auto need a permissive

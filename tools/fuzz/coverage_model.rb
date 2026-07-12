@@ -252,6 +252,10 @@ module FuzzCoverageModel
       failure_proves: '@node cycles, replacement, growth, optional traversal, and lexical teardown preserve handles and managed payloads.',
       high_risk: true
     ),
+    shared_node_graph_matrix: profile(
+      failure_proves: '@shared:node guards moving payloads, copies managed reads, admits parallel handles, and rejects scheduler-local nodes.',
+      high_risk: true
+    ),
     or_heap_destination_matrix: profile(
       failure_proves: 'Owned OR/TryCatch/optional branch results are placed into destination allocators coherently.',
       high_risk: true

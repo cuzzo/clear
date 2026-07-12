@@ -1262,7 +1262,7 @@ class OwnershipDataflow
       return false
     end
     is_atomic_ptr = ti.atomic_ptr?
-    ti.primitive? || ti.string? || ti.any? || ti.void? || (ti.any_rc? && !is_atomic_ptr)
+    ti.node_reference? || ti.primitive? || ti.string? || ti.any? || ti.void? || (ti.any_rc? && !is_atomic_ptr)
   end
 
   sig { params(node: AST::Node).returns(T::Boolean) }

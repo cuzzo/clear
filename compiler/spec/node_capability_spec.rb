@@ -76,4 +76,62 @@ RSpec.describe "@node capability" do
 
     expect(zig).to include("createBound(__node_store_Node, Node{ .id = i })")
   end
+
+  it "parses shared node composition in either order without Arc-wrapping the handle" do
+    source = <<~CLEAR
+      STRUCT Node { peer: ?Node@shared:node, id: Int64 }
+      FN main() RETURNS Void ->
+        MUTABLE roots: Node@node:shared[]@list = [];
+      END
+    CLEAR
+
+    ast = annotate(source)
+    field = ast.statements.first.field_decls.fetch("peer").type
+    roots = ast.statements.fetch(1).body.first.type
+
+    expect(field.shared_node?).to be(true)
+    expect(field.node_reference?).to be(true)
+    expect(field.ownership_surface_name).to eq("@shared:node")
+    expect(field.zig_type).to eq("CheatLib.NodeRef(Node)")
+    expect(roots.element_type&.shared_node?).to be(true)
+    expect(roots.zig_type).to eq("std.ArrayListUnmanaged(CheatLib.NodeRef(Node))")
+  end
+
+  it "guards the complete shared-node mutation and read statements" do
+    source = <<~CLEAR
+      STRUCT Node { peer: ?Node@shared:node, id: Int64 }
+      FN main() RETURNS Void ->
+        MUTABLE root: Node@shared:node = Node{ id: 1 };
+        root.peer = Node{ id: 2 };
+        ASSERT root.peer?.id == 2;
+      END
+    CLEAR
+
+    zig = ZigTranspiler.new(source_dir: Dir.pwd).transpile(source, source_dir: Dir.pwd)
+
+    expect(zig).to include("try CheatLib.SharedNodeStore(Node).lockWrite(rt)")
+    expect(zig).to include("defer CheatLib.SharedNodeStore(Node).unlockWrite(__shared_node_guard_Node)")
+    expect(zig).to include("SharedNodeStore(Node).createBound(__shared_node_guard_Node")
+    expect(zig).to include("try CheatLib.SharedNodeStore(Node).lockRead(rt)")
+    expect(zig).to include("defer CheatLib.SharedNodeStore(Node).unlockRead(__shared_node_guard_Node)")
+    expect(zig).not_to include("CheatLib.Arc(Node)")
+  end
+
+  it "infers the shared-node binding from an expression capability" do
+    source = <<~CLEAR
+      STRUCT Node { id: Int64 }
+      FN main() RETURNS Void ->
+        root = Node{ id: 1 } @shared:node;
+        ASSERT root.id == 1;
+      END
+    CLEAR
+
+    ast = annotate(source)
+    root = ast.statements.fetch(1).body.first
+    expect(root.value.full_type!.shared_node?).to be(true)
+
+    zig = ZigTranspiler.new(source_dir: Dir.pwd).transpile(source, source_dir: Dir.pwd)
+    expect(zig).to include("SharedNodeStore(Node).createBound")
+    expect(zig).to include("SharedNodeStore(Node).getBound")
+  end
 end

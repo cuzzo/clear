@@ -2595,6 +2595,8 @@ module AST
     sig { returns(T::Boolean) }
     def multiowned? = ownership == :multiowned
 	    sig { returns(T::Boolean) }
+	    def shared_node? = ownership == :shared_node
+	    sig { returns(T::Boolean) }
 	    def write_locked? = sync == :write_locked
 	    sig { returns(T::Boolean) }
 	    def capability? = !!(ownership || sync || layout)

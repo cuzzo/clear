@@ -140,6 +140,7 @@ expected hard error is absent.
 | `link_resolve_matrix`       | 7            | Managed Rc/Arc weak-link liveness, repeated resolution, list storage, and dead-owner behavior. |
 | `managed_payload_capability_matrix` | 22   | String-owning payloads through generic Rc/Arc construction, COPY, collection, optional, union, and cleanup operations. |
 | `node_graph_matrix`         | 7            | Managed `@node` cycles, replacement, optional chains, handle reuse, 5,000-node growth, and lexical teardown. |
+| `shared_node_graph_matrix`  | 6            | Guarded `@shared:node` cycles, replacement, managed reads, 5,000-node growth, parallel mutation, and local-node rejection. |
 | `recursive_execution_boundary_matrix` | 14 | Recursive aggregate admission across `@multiowned`/`@shared` fields and parallel BG boundaries. |
 | `stateful_container_matrix` | 16           | Numeric/string maps under overwrite, delete/reinsert, COPY, and active-borrow invalidation. |
 | `access_gate`               | 100             | WITH-alias escape rules — 5 alias-perm tuples × 10 patterns |
@@ -183,7 +184,7 @@ expected hard error is absent.
 | `lowering_boundary_matrix`   | 28           | MIR lowering boundary coverage for call contracts, WITH variants, BG/DO/NEXT, and pipeline terminals. |
 | `test_framework_matrix`      | 6            | TEST/WHEN/TEST THAT grammar through hooks, LET bindings, stubs, pending tests, benchmark, smash, and profile forms. |
 | `extern_boundary_matrix`     | 6            | Negative extern declaration/call boundaries for free functions, trampolines, extern methods/resources, generic comptime calls, and tight-loop rejection. |
-| `curated_gap_corpus`         | 468          | Self-contained `transpile-tests/*.clear` corpus reused as broad compile-mode fuzz coverage for parser, annotator, MIR lowering, and emission. |
+| `curated_gap_corpus`         | 469          | Self-contained `transpile-tests/*.clear` corpus reused as broad compile-mode fuzz coverage for parser, annotator, MIR lowering, and emission. |
 
 ### `stream_into_boundary` matrix
 

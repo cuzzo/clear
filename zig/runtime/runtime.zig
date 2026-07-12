@@ -215,6 +215,12 @@ pub const Runtime = struct {
     };
     // Control
     instance_id: u64,
+    // Cross-scheduler facilities use one deterministic lifetime domain even
+    // though every FSM owns a lightweight Runtime shell. Root runtimes point
+    // at themselves implicitly (shared_domain_owner == null); task shells
+    // inherit both fields from their spawning runtime.
+    shared_domain_id: u64,
+    shared_domain_owner: ?*Runtime = null,
     // Pointer (not by-value) so the same memory can be registered with
     // EbrContext from a deeper or shallower call site than where rt was
     // constructed. By-value rt.ebr would force registration to happen on
@@ -246,6 +252,7 @@ pub const Runtime = struct {
     // @node stores. They are registered lazily and destroyed before the
     // runtime allocators disappear, in reverse construction order.
     finalizers: std.ArrayListUnmanaged(Finalizer) = .empty,
+    finalizers_lock: compat.Mutex = .{},
 
     // OVERFLOW (The Safety Valve)
     // We use an Arena so we can track all the overflow allocations
@@ -304,8 +311,10 @@ pub const Runtime = struct {
             deadline = milliTimestamp() + @as(i64, @intCast(timeout_ms));
         }
 
+        const instance_id = __next_runtime_id.fetchAdd(1, .monotonic);
         return Runtime{
-            .instance_id = __next_runtime_id.fetchAdd(1, .monotonic),
+            .instance_id = instance_id,
+            .shared_domain_id = instance_id,
             .ebr = ebr,
             .owns_ebr = false,
             .owns_frame_memory = false, // DO NOT FREE THIS in deinit.
@@ -338,7 +347,13 @@ pub const Runtime = struct {
     }
 
     pub fn registerFinalizer(self: *Runtime, finalizer: Finalizer) !void {
+        self.finalizers_lock.lock();
+        defer self.finalizers_lock.unlock();
         try self.finalizers.append(self.heap_allocator, finalizer);
+    }
+
+    pub inline fn sharedDomainOwner(self: *Runtime) *Runtime {
+        return self.shared_domain_owner orelse self;
     }
 
     fn deinitSymbolPool(self: *Runtime) void {
