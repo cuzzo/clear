@@ -72,6 +72,7 @@ async fn api_dashboard_handler(
         directory,
         &scope,
         Some(state.repo.as_ref()),
+        12,
     ) {
         Ok(dashboard) => Json(dashboard).into_response(),
         Err(error) => error_json(StatusCode::INTERNAL_SERVER_ERROR, error),

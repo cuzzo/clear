@@ -31,6 +31,15 @@ module Espalier
     def self.project_modules(evidence)
       return [] unless evidence && evidence["methods"]
 
+      resolve_owner = ->(owner, path, language) {
+        lang = language.to_s.downcase
+        if lang == "rust" || lang == "go" || lang == "zig" || lang == "c" || lang == "cpp" || lang == "csharp"
+          "#{owner}@#{path}"
+        else
+          owner
+        end
+      }
+
       # Group methods by owner
       methods_by_owner = Hash.new { |h, k| h[k] = [] }
       methods_by_id = {}
@@ -57,7 +66,8 @@ module Espalier
           },
           delegations: []
         }
-        methods_by_owner[m["owner"]] << meth
+        owner_key = resolve_owner.call(m["owner"], m["path"], m["language"])
+        methods_by_owner[owner_key] << meth
         methods_by_id[m["id"]] = meth
       end
 
@@ -65,8 +75,9 @@ module Espalier
       fields_by_owner = Hash.new { |h, k| h[k] = [] }
       first_field_by_owner = {}
       Array(evidence["fields"]).each do |f|
-        fields_by_owner[f["owner"]] << f
-        first_field_by_owner[f["owner"]] ||= f
+        owner_key = resolve_owner.call(f["owner"], f["path"], f["language"])
+        fields_by_owner[owner_key] << f
+        first_field_by_owner[owner_key] ||= f
       end
 
       # Index call graph edges (internal calls)
@@ -94,7 +105,8 @@ module Espalier
         field = record["field"]
         proto = record["protocol"]
 
-        meths = methods_by_owner[p_owner] || []
+        owner_key = resolve_owner.call(p_owner, record["path"], record["language"])
+        meths = methods_by_owner[owner_key] || []
         meth = meths.find { |m_item| m_item[:name] == func }
         if meth
           meth[:delegations] << {
@@ -111,7 +123,8 @@ module Espalier
         func = record["function"]
         field = record["field"]
 
-        meths = methods_by_owner[o_owner] || []
+        owner_key = resolve_owner.call(o_owner, record["path"], record["language"])
+        meths = methods_by_owner[owner_key] || []
         meth = meths.find { |m_item| m_item[:name] == func }
         meth # parameter origin is metadata, not proof of a write
       end
