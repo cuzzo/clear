@@ -356,21 +356,10 @@ pub fn analyze_hazards_with_looker(
     })
 }
 
-fn resolves_to_table(relation: &sqlparser::ast::TableFactor, resolver: &Resolver, target_table: &str) -> bool {
+fn resolves_to_table(relation: &sqlparser::ast::TableFactor, _resolver: &Resolver, target_table: &str) -> bool {
     match relation {
-        sqlparser::ast::TableFactor::Table { name, alias, .. } => {
-            let table_name = name.to_string();
-            if table_name == target_table {
-                return true;
-            }
-            if let Some(alias) = alias {
-                if let Some(Some(real_table)) = resolver.aliases.get(&alias.name.to_string()) {
-                    if real_table == target_table {
-                        return true;
-                    }
-                }
-            }
-            false
+        sqlparser::ast::TableFactor::Table { name, .. } => {
+            name.to_string() == target_table
         }
         sqlparser::ast::TableFactor::Derived { alias, .. } => {
             if let Some(alias) = alias {
@@ -462,30 +451,11 @@ fn find_one_side_aggregations(
 }
 
 fn expr_targets_table(expr: &Expr, resolver: &Resolver, target_table: &str) -> bool {
+    if expr_targets_table_shallow(expr, resolver, target_table) {
+        return true;
+    }
     match expr {
-        Expr::Identifier(ident) => {
-            let col_name = ident.value.to_string();
-            if let Some(table) = resolver.schema.tables.get(target_table) {
-                if table.columns.contains_key(&col_name) {
-                    return true;
-                }
-            }
-            false
-        }
-        Expr::CompoundIdentifier(idents) => {
-            if idents.len() >= 2 {
-                let prefix = idents[0].value.to_string();
-                if prefix == target_table {
-                    return true;
-                }
-                if let Some(Some(real_table)) = resolver.aliases.get(&prefix) {
-                    if real_table == target_table {
-                        return true;
-                    }
-                }
-            }
-            false
-        }
+        Expr::Identifier(_) | Expr::CompoundIdentifier(_) => false,
         _ => {
             let mut found = false;
             struct TargetVisitor<'a> {
