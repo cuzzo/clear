@@ -298,3 +298,45 @@ fn bind_mysql<'q>(
         ParameterValue::NullBoolean => query.bind(Option::<bool>::None),
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_bind_postgres_all_variants() {
+        let variants = vec![
+            ParameterValue::Text("hello".to_string()),
+            ParameterValue::Integer(123),
+            ParameterValue::Float(12.34),
+            ParameterValue::Boolean(true),
+            ParameterValue::NullText,
+            ParameterValue::NullInteger,
+            ParameterValue::NullFloat,
+            ParameterValue::NullBoolean,
+        ];
+        for val in &variants {
+            let query = sqlx::query("SELECT $1");
+            let _q = bind_postgres(query, val);
+        }
+    }
+
+    #[test]
+    fn test_bind_mysql_all_variants() {
+        let variants = vec![
+            ParameterValue::Text("hello".to_string()),
+            ParameterValue::Integer(123),
+            ParameterValue::Float(12.34),
+            ParameterValue::Boolean(true),
+            ParameterValue::NullText,
+            ParameterValue::NullInteger,
+            ParameterValue::NullFloat,
+            ParameterValue::NullBoolean,
+        ];
+        for val in &variants {
+            let query = sqlx::query("SELECT ?");
+            let _q = bind_mysql(query, val);
+        }
+    }
+}
+
