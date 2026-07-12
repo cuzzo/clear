@@ -1158,7 +1158,7 @@ module PipeAnalysis
     T.bind(self, SemanticAnnotator) rescue nil
     shard_counts = sharded_names.map do |name|
       sc = lookup_scope_for(name)&.resolve_entry(name)&.type
-      t = sc.is_a?(Type) ? sc : Type.new(sc)
+      t = sc.is_a?(Type) ? sc : Type.new(T.unsafe(sc))
       t.shard_count
     end.compact.uniq
     names_str = sharded_names.to_a.join(', ')
@@ -1233,7 +1233,7 @@ module PipeAnalysis
     return unless scope
     entry = scope.resolve_entry(map_name)
     map_type = entry&.type
-    map_type = Type.new(map_type) unless map_type.is_a?(Type)
+    map_type = Type.new(T.unsafe(map_type)) unless map_type.is_a?(Type)
     return unless map_type.sharded? && entry&.sync.nil?
 
     # Check for multiple different key expressions on the same map

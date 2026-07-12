@@ -41,12 +41,12 @@ class PipelineSourceShape < T::Struct
 
   sig { returns(T::Boolean) }
   def bc_infinite_stream?
-    bc_target && infinite_stream?
+    (bc_target && infinite_stream?) == true
   end
 
   sig { returns(T::Boolean) }
   def bc_named_infinite_stream?
-    bc_infinite_stream? && named_source
+    (bc_infinite_stream? && !named_source.nil?) == true
   end
 end
 

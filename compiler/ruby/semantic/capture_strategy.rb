@@ -272,7 +272,7 @@ module CaptureStrategy
     # managed strings are handled above so they cannot slip through as
     # slice-header copies).
     if schema_lookup && type.respond_to?(:implicitly_copyable?)
-      return true if type.implicitly_copyable?(schema_lookup)
+      return true if type.implicitly_copyable?(T.unsafe(schema_lookup))
     end
     return true if type.respond_to?(:copyable?) && type.copyable?
     false
@@ -284,7 +284,7 @@ module CaptureStrategy
     return false if type.future? || type.any_sync? || type.any_rc? || type.resource?
     return false if type.borrowed_reference?
 
-    type.ownership_bearing?(schema_lookup)
+    type.ownership_bearing?(T.unsafe(schema_lookup))
   end
 
   # True iff the capture can be cloned (Rc/Arc retain) into the fiber's

@@ -219,7 +219,7 @@ module FsmTransform
         if result_var
           res_name = "__res_#{susp_idx}"
           stmts = [
-            MIR::Let.new(res_name, finish_expr, false, Type.new(inner_zig), nil),
+            MIR::Let.new(res_name, finish_expr, false, Type.new(T.unsafe(inner_zig)), nil),
             MIR::Set.new(MIR::FieldGet.new(ctx_ident, result_var), MIR::Ident.new(res_name), false),
           ]
           if result_needs_cleanup

@@ -64,7 +64,7 @@ FN zipfNext!(MUTABLE state: Int64, n: Int64, s: Float64, hIntegral: Float64, hFr
     IF k - x <= hFraction THEN
       RETURN k - 1;
     END
-    IF u >= hInt(k + 0.5, s) - hFunc(k, s) THEN
+    IF u >= hInt(k.toFloat() + 0.5, s) - hFunc(k.toFloat(), s) THEN
       RETURN k - 1;
     END
   END

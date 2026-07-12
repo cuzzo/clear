@@ -507,7 +507,9 @@ module AST
   sig { params(node: T.nilable(AST::Node)).returns(T::Boolean) }
   def self.capture_expr_owns_result?(node)
     return false unless node
-    node = node.value while node.is_a?(AST::Cast)
+    current = T.let(node, AST::Node)
+    current = current.value while current.is_a?(AST::Cast)
+    node = current
     return false if borrowed_ownership_view?(node)
     if call?(node) && node.respond_to?(:matched_signature)
       signature = T.unsafe(node).matched_signature
@@ -1206,7 +1208,7 @@ module AST
       end
 
       # Same logic: Wrap raw values, accept Type objects
-      @coerced_type_object = T.let(val.is_a?(Type) ? val : Type.new(val), T.nilable(Type))
+      @coerced_type_object = T.let(val.is_a?(Type) ? val : Type.new(T.unsafe(val)), T.nilable(Type))
     end
 
     sig { returns(CoerceTypeInput) }
@@ -1231,7 +1233,7 @@ module AST
       # fn_type metadata must not be flattened to a surface symbol: function
       # params/returns are stored in the Type object, including for ?FN.
       if @type_object && (declared_type.nil? || declared_type == :Any)
-        inferred_type = T.must(@type_object)
+        inferred_type = @type_object
         if inferred_type.fn_type? || (inferred_type.optional? && inferred_type.wrapped_type&.fn_type?)
           return [inferred_type, nil]
         end
@@ -1243,8 +1245,8 @@ module AST
       return [inferred, nil] if declared_type.nil? || declared_type == :Any
 
       declared_type_info = declared_type.is_a?(FunctionSignature) ? Type.from_function_signature(declared_type) : Type.new(declared_type)
-      if declared_type_info.symbol? && @type_object && !T.must(@type_object).symbol?
-        error = Type.coerce_error(T.must(@type_object), declared_type_info)
+      if declared_type_info.symbol? && @type_object && !@type_object.symbol?
+        error = Type.coerce_error(@type_object, declared_type_info)
         return [nil, error] if error
       end
 
@@ -1280,8 +1282,8 @@ module AST
 
       # Determine storage from value's type if this node has a value
       node_value = T.let(nil, T.untyped)
-      if T.unsafe(self).respond_to?(:value)
-        node_value = T.unsafe(self).value
+      if respond_to?(:value)
+        node_value = value
       end
 
       if node_value && node_value.type_object
@@ -2096,7 +2098,7 @@ module AST
 
     sig { params(declared_type: CoerceTypeInput).returns(CoerceResult) }
     def coerce!(declared_type)
-      target = declared_type.is_a?(FunctionSignature) ? Type.from_function_signature(declared_type) : Type.new(declared_type)
+      target = declared_type.is_a?(FunctionSignature) ? Type.from_function_signature(declared_type) : Type.new(T.unsafe(declared_type))
       return [nil, "Cannot initialize array of size #{target.capacity} with #{type_info.capacity} elements"] unless target.accepts?(type_info)
 
       [target.resolved, nil]

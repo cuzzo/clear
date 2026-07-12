@@ -165,5 +165,5 @@ FN main() RETURNS Void ->
   print("BENCH_RESULT: ${soaMs.toString()} ms");
   print("SOA layout (${n.toString()} particles x ${iterations.toString()} iters)");
   print("  SOA:         ${soaMs.toString()} ms");
-  print("  checksum:    ${checksum.toString()}");
+  print("  checksum:    ${checksum.toInt().toString()}");
 END

@@ -818,7 +818,7 @@ module FunctionAnalysis
     return false unless facts.actual_type.fn_type?
 
     actual_sig = facts.actual_type.function_signature
-    return false unless actual_sig&.reentrant
+    return false unless actual_sig && T.unsafe(actual_sig).reentrant
 
     callee = function_node_for(facts.site.name)
     return false unless callee&.declared_plain_reentrant?
@@ -832,7 +832,7 @@ module FunctionAnalysis
     return false unless facts.actual_type.fn_type?
 
     actual_sig = facts.actual_type.function_signature
-    return false unless actual_sig&.reentrant
+    return false unless actual_sig && T.unsafe(actual_sig).reentrant
 
     callee = function_node_for(facts.site.name)
     constraint = callee&.requires_clauses&.[](facts.param.name)

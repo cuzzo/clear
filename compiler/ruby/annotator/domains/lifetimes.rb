@@ -1171,8 +1171,9 @@ module Annotator
         entry = current_scope.resolve_entry(name) rescue nil
         kind = classify_og_kind(type_info, sync: entry&.sync)
         ti = type_info.is_a?(Type) ? type_info : Type.new(type_info)
+        line = node.respond_to?(:line) ? T.unsafe(node).line : nil
         ownership_graph.declare(name, kind: kind, type_info: ti,
-                    scope_depth: ownership_graph.scope_depth, line: node && node.respond_to?(:line) ? node.line : 0)
+                    scope_depth: ownership_graph.scope_depth, line: line || 0)
       end
 
       sig { params(node: AST::Node).returns(T::Boolean) }

@@ -62,9 +62,9 @@ FN main() RETURNS Void ->
   print("Buckets: ${buckets.toString()}");
   print("Shard histogram: ${shardMs.toString()} ms");
   print("Aggregation: ${statsMs.toString()} ms");
-  print("Total: ${total.toString()}");
-  print("Max: ${highest.toString()}");
-  print("Min: ${lowest.toString()}");
-  print("Avg: ${average.toString()}");
+  print("Total: ${total.toInt().toString()}");
+  print("Max: ${highest.toInt().toString()}");
+  print("Min: ${lowest.toInt().toString()}");
+  print("Avg: ${average.toInt().toString()}");
   print("Verified: yes");
 END

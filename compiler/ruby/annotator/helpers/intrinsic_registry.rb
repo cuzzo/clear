@@ -67,7 +67,7 @@ module IntrinsicRegistry
 
     e = IntrinsicEmit.new
     h.each do |k, v|
-      key = T.cast(k, Symbol)
+      key = T.unsafe(k)
       unless FS_KEYS.include?(key) || v.nil?
         case key
         when *EMIT_BOOL
@@ -202,7 +202,7 @@ module IntrinsicRegistry
   def self.coerce_int_array(value)
     return value.map { |item| coerce_integer(item) } if value.is_a?(Array)
     return [value] if value.is_a?(Integer)
-    return [T.cast(value, String).to_i] if value.is_a?(String)
+    return [T.unsafe(value).to_i] if value.is_a?(String)
 
     Kernel.raise "IntrinsicRegistry: expected integer-compatible value"
   end
@@ -211,13 +211,13 @@ module IntrinsicRegistry
   def self.normalize_integer_array(value)
     return [] if value.nil?
 
-    coerce_int_array(T.must(value))
+    coerce_int_array(value)
   end
 
   sig { params(value: IntegerValue).returns(Integer) }
   def self.coerce_integer(value)
     return value if value.is_a?(Integer)
-    return T.cast(value, String).to_i if value.is_a?(String)
+    return T.unsafe(value).to_i if value.is_a?(String)
 
     Kernel.raise "IntrinsicRegistry: expected integer-compatible value"
   end
@@ -230,7 +230,7 @@ module IntrinsicRegistry
   sig { params(value: SymbolInput).returns(Symbol) }
   def self.coerce_symbol(value)
     return value if value.is_a?(Symbol)
-    return T.cast(value, String).to_sym if value.is_a?(String)
+    return T.unsafe(value).to_sym if value.is_a?(String)
 
     Kernel.raise "IntrinsicRegistry: expected symbol-compatible value"
   end
@@ -242,7 +242,7 @@ module IntrinsicRegistry
     return nil unless v.is_a?(Hash)
     if (ptr = v[:registry])
       name = registry_name_for(registries, T.cast(ptr, RawRegistry))
-      return IntrinsicEmit.new(registry: T.must(name)) if name
+      return IntrinsicEmit.new(registry: name) if name
       return IntrinsicEmit.new(registry: :unknown)
     end
     build_emit(v, registries)
@@ -253,7 +253,7 @@ module IntrinsicRegistry
     names = registries.keys
     i = T.let(0, Integer)
     while i < names.length
-      name = T.cast(names.fetch(i), Symbol)
+      name = T.unsafe(names.fetch(i))
       return name if registry_matches?(T.must(registries[name]), target)
       i += 1
     end
@@ -286,9 +286,9 @@ module IntrinsicRegistry
 
   sig { params(key: RegistryKey).returns(String) }
   def self.registry_key_string(key)
-    return T.cast(key, String) if key.is_a?(String)
+    return T.unsafe(key) if key.is_a?(String)
 
-    T.cast(key, Symbol).to_s
+    T.unsafe(key).to_s
   end
 
   # Best-effort STATIC view of the return, derived from the typed
@@ -302,7 +302,7 @@ module IntrinsicRegistry
       fixed = rdef.fixed
       Kernel.raise "IntrinsicRegistry: fixed return descriptor missing Type" if fixed.nil?
 
-      T.must(fixed)
+      fixed
     else
       Type.new(:Any)
     end
@@ -345,13 +345,13 @@ module IntrinsicRegistry
     end
     if v.is_a?(Symbol)
       kind = RETURN_VARIANTS[v]
-      return FunctionReturn.variant(T.cast(T.must(kind), Symbol)) if kind
+      return FunctionReturn.variant(kind) if kind
     end
 
     s = v.to_s
-    return FunctionReturn.infer(coerce_symbol(T.cast(v, SymbolInput))) if s.start_with?("infer_", "macro_")
+    return FunctionReturn.infer(coerce_symbol(T.unsafe(v))) if s.start_with?("infer_", "macro_")
 
-    FunctionReturn.fixed(Type.new(T.cast(v, Type::TypeInput)))
+    FunctionReturn.fixed(Type.new(T.unsafe(v)))
   end
 
   sig { params(_name: RegistryKey, h: RawEntry, registries: RegistryMap).returns(FunctionSignature) }
@@ -382,19 +382,19 @@ module IntrinsicRegistry
     if value.is_a?(Array)
       return value
     end
-    [T.cast(value, FunctionSignature::LifetimeSource)]
+    [T.unsafe(value)]
   end
 
   sig { params(value: FunctionSignature::LifetimeSource).returns(String) }
   def self.lifetime_source_string(value)
-    return T.cast(value, String) if value.is_a?(String)
+    return T.unsafe(value) if value.is_a?(String)
 
-    T.cast(value, Symbol).to_s
+    T.unsafe(value).to_s
   end
 
   sig { params(spec: RawArgSpec, h: RawEntry).returns(T::Array[AST::Param]) }
   def self.params_from_arg_spec(spec, h)
-    arg_specs = IntrinsicArgSpec.list_from_registry(T.cast(spec, IntrinsicArgSpec::RawArgSpec))
+    arg_specs = IntrinsicArgSpec.list_from_registry(T.unsafe(spec))
 
     takes_args = normalize_integer_array(T.cast(h[:takes_args], T.nilable(IntegerInput)))
     mutates_receiver = h[:mutates_receiver] == true
@@ -426,7 +426,7 @@ module IntrinsicRegistry
     registry_map = registries
     cache_key = registry_name_for(registry_map, reg)
     if cache_key
-      cached = T.let(SIGS_CACHE[T.must(cache_key)], T.nilable(SigsTable))
+      cached = T.let(SIGS_CACHE[cache_key], T.nilable(SigsTable))
       return cached if cached
     end
 
@@ -451,7 +451,7 @@ module IntrinsicRegistry
       end
       i += 1
     end
-    SIGS_CACHE[T.must(cache_key)] = out if cache_key
+    SIGS_CACHE[cache_key] = out if cache_key
     out
   end
 

@@ -1295,7 +1295,7 @@ class MIREmitter
     when MIR::FailureActionKind::Block
       "#{emit_body(action.body)}\nbreak :#{required_failure_label(action)};"
     else
-      T.absurd(kind)
+      raise "unknown failure action kind: #{kind.inspect}"
     end
   end
 
@@ -3029,6 +3029,8 @@ class MIREmitter
     when Schemas::ResourceCloseCallKind::Function
       args = [target] + runtime_args
       "#{action.name}(#{args.join(", ")})"
+    else
+      raise "unknown resource close call kind: #{action.call_kind.inspect}"
     end
   end
 

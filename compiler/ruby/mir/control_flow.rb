@@ -940,7 +940,7 @@ class OwnershipDataflow
     return nil unless ti && ownership_tracked_type?(ti, heap_storage: is_heap)
 
     allocator = ti ? ((ti.provenance_alloc rescue nil) || (is_heap ? :heap : :frame)) : :frame
-    needs = ti ? (ti.needs_explicit_cleanup?(allocator, @schema_lookup) rescue false) : false
+    needs = ti ? (ti.needs_explicit_cleanup?(allocator, T.unsafe(@schema_lookup)) rescue false) : false
     OwnerEntry.new(state: OWNED, allocator: allocator, needs_cleanup: needs)
   end
 
@@ -1717,7 +1717,7 @@ module LoopFrameAnalysis
     cond_t = loop_node.condition.full_type!(context: "loop capture condition")
     inner = cond_t.wrapped_type
     return false unless inner.is_a?(Type)
-    inner.needs_cleanup?(schema_lookup) && inner.cleanup_allocator(schema_lookup) == :frame
+    inner.needs_cleanup?(T.unsafe(schema_lookup)) && inner.cleanup_allocator(T.unsafe(schema_lookup)) == :frame
   end
 
   # ── SHARD context frame-alloc flags ──────────────────────────────────────
@@ -1924,7 +1924,7 @@ class BorrowChecker
     when AST::MoveNode
       return if state.empty?
       inner = stmt.value
-      check_borrowed_move(inner.name.to_s, T.must(stmt.token), state) if inner.is_a?(AST::Identifier)
+      check_borrowed_move(inner.name.to_s, stmt.token, state) if inner.is_a?(AST::Identifier)
 
     when AST::FuncCall, AST::MethodCall
       return if state.empty?

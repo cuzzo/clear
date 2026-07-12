@@ -52,8 +52,10 @@ FN main() RETURNS Void ->
     IF nodes[i] EXISTS AS node THEN checksum = checksum + node.id; END
 
     IF i > 0 THEN
-      IF RESOLVE parents[i] EXISTS AS r THEN
-        checksum = checksum + r.id;
+      IF parents[i] EXISTS AS parent_link THEN
+        IF RESOLVE parent_link EXISTS AS r THEN
+          checksum = checksum + r.id;
+        END
       END
     END
   END

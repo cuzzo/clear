@@ -236,7 +236,7 @@ module GenericAnalysis
     T.bind(self, SemanticAnnotator) rescue nil
     if arg.optional? || arg.error_union? || arg.tense?
       wrapped = arg.wrapped_type || arg.payload_type || arg.tense_type
-      validate_generic_type_arg!(facts, T.must(wrapped))
+      validate_generic_type_arg!(facts, wrapped)
       return
     end
     if arg.array?
@@ -416,7 +416,7 @@ module GenericAnalysis
     t = type_obj.is_a?(Type) ? type_obj : Type.new(type_obj)
     resolved = t.resolved
     if subst.key?(resolved)
-      substituted = Type.new(subst[resolved])
+      substituted = Type.new(T.unsafe(subst[resolved]))
       if generic_type_has_capabilities?(t)
         merged = Type.new(substituted)
         merged.merge_capabilities_from!(t)

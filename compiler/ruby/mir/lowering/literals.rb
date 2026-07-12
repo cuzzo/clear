@@ -23,7 +23,7 @@ module MIRLoweringLiterals
 
     sig { params(node: AST::ListLit).returns(T::Boolean) }
     def fixed_stack_or_frame?(node)
-      type_info.fixed? && node.stack_or_frame_storage?
+      (type_info.fixed? && node.stack_or_frame_storage?) == true
     end
 
     sig { returns(T::Boolean) }
@@ -425,7 +425,7 @@ module MIRLoweringLiterals
       alloc: function_state.current_decl_alloc || alloc_for_node(node),
       element_type: elem_ti,
       element_zig: elem_ti ? transpile_type(elem_ti) : "u8",
-      element_needs_owned_storage: elem_ti ? elem_ti.recursive_cleanup_shape?(mir_schema_lookup) : false,
+      element_needs_owned_storage: elem_ti ? elem_ti.recursive_cleanup_shape?(T.unsafe(mir_schema_lookup)) : false,
     )
   end
 

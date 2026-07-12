@@ -401,7 +401,7 @@ module MIRLoweringVariables
   sig { params(safe_name: String, node: AST::VarDecl, facts: VarDeclFacts, init: MIR::Node).returns(T.nilable(String)) }
   def var_decl_suppression(safe_name, node, facts, init)
     lowering = T.unsafe(self)
-    return nil unless current_function_context
+    return nil unless T.unsafe(self).__send__(:current_function_context)
 
     owned_cleanup_value = (facts.has_mir_drop ||
                            (lowering.mir_allocates?(init) && lowering.ownership_bearing_type?(facts.ft))) == true
@@ -556,12 +556,12 @@ module MIRLoweringVariables
   def type_requires_alloc_cleanup?(ft, alloc)
     T.bind(self, MIRLowering) rescue nil
     return false if ft.primitive? || ft.void? || ft.any? || ft.id_handle?
-    return true if ft.needs_cleanup?(mir_schema_lookup)
-    return true if ft.needs_explicit_cleanup?(alloc, mir_schema_lookup)
+    return true if ft.needs_cleanup?(T.unsafe(mir_schema_lookup))
+    return true if ft.needs_explicit_cleanup?(alloc, T.unsafe(mir_schema_lookup))
 
     MIR::Placement.explicit_heap?(alloc) && (ft.string? || ft.heap_ptr? || ft.collection_value? ||
       ft.any_sync? || ft.any_rc? || ft.link? || ft.indirect? ||
-      ft.recursive_cleanup_shape?(mir_schema_lookup))
+      ft.recursive_cleanup_shape?(T.unsafe(mir_schema_lookup)))
   end
 
   sig { params(name: String, alloc: Symbol, type_info: Type, binding_entry: CleanupEntry).returns(MIR::AllocMark) }
@@ -802,7 +802,7 @@ module MIRLoweringVariables
         !fallible_self_fallback_reassign?(target_name, value)
       result = if rp
         MIR::ReassignWithCleanup.new(target_name, value, rp.zig_type!, alloc_from_sym(rp.alloc!))
-      elsif heap_return_var && node.full_type!(context: "reassign target").needs_explicit_cleanup?(:heap, mir_schema_lookup)
+      elsif heap_return_var && node.full_type!(context: "reassign target").needs_explicit_cleanup?(:heap, T.unsafe(mir_schema_lookup))
         target_type = node.full_type!(context: "reassign target")
         MIR::ReassignWithCleanup.new(target_name, value, transpile_type(target_type), :heap)
       else
@@ -979,7 +979,7 @@ module MIRLoweringVariables
     target_alloc = placement_for_node(source)
     source_type = Type.from_node!(source, context: "conditional assignment receiver")
     optional_ptr = if source.is_a?(AST::GetIndex)
-      index = T.cast(source, AST::GetIndex)
+      index = T.unsafe(source)
       receiver = lower(index.target)
       receiver = MIR::AddressOf.new(receiver) unless collection_param_receiver?(index.target)
       target_alloc = placement_for_node(index.target)
@@ -1026,7 +1026,7 @@ module MIRLoweringVariables
       set, value, node.value, "MIR::Set", target_alloc: target_alloc
     )
     then_body = T.let([], T::Array[MIR::Stmt])
-    then_body.concat(T.cast(value_pending, T::Array[MIR::Stmt]))
+    then_body.concat(T.unsafe(value_pending))
     if field_assignment_requires_cleanup?(field)
       cleanup_call = MIR::Call.new("CheatLib.cleanup", [
         MIR::TypeOf.new(target), MIR::AllocatorRef.new(target_alloc), MIR::AddressOf.new(target)
@@ -1082,7 +1082,7 @@ module MIRLoweringVariables
     if field.safe_nav_chain == true && field_type.optional?
       field_type = T.must(field_type.wrapped_type)
     end
-    return true if field_type.needs_cleanup?(mir_schema_lookup)
+    return true if field_type.needs_cleanup?(T.unsafe(mir_schema_lookup))
     return false unless field_type.string?
 
     !!field_assignment_root_identifier(field)&.symbol&.heap_storage?
@@ -1352,7 +1352,7 @@ module MIRLoweringVariables
       IntrinsicTemplateKind::Zig
     end
     resolved_allocs = indexed_assignment_allocs(op, target_node, assignment)
-    receiver_alloc = T.unsafe(self).send(:placement_for_node, target_node)
+    receiver_alloc = send(:placement_for_node, target_node)
     IndexedAssignmentDispatch.new(
       target_var: target_var,
       shard_direct: shard_direct,

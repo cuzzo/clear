@@ -18,7 +18,7 @@ module Annotator
         end
         resolve_recursive_struct_layouts!(structs)
         declarations.type_declarations.each do |node|
-          register_type_declaration(T.cast(node, TypeDeclaration))
+          register_type_declaration(node)
         end
       end
 
@@ -336,15 +336,15 @@ module Annotator
           field_type_info = field_type
           field = field_name.to_s
 
-          if field_type_info.indirect?
+          if T.unsafe(field_type_info).indirect?
             entries << Schemas::InlineStructDeinitEntry.indirect(
               field: field,
-              zig_type: Type.new(field_type_info.resolved).zig_type
+              zig_type: Type.new(T.unsafe(field_type_info).resolved).zig_type
             )
-          elsif field_type_info.string? || field_type_info.collection?
-            entries << Schemas::InlineStructDeinitEntry.uniform(field: field, zig_type: field_type_info.zig_type)
-          elsif field_type_info.array? && !field_type_info.string?
-            elem_zig_type = Type.new(field_type_info.element_type).zig_type
+          elsif T.unsafe(field_type_info).string? || T.unsafe(field_type_info).collection?
+            entries << Schemas::InlineStructDeinitEntry.uniform(field: field, zig_type: T.unsafe(field_type_info).zig_type)
+          elsif T.unsafe(field_type_info).array? && !T.unsafe(field_type_info).string?
+            elem_zig_type = Type.new(T.unsafe(field_type_info).element_type).zig_type
             entries << Schemas::InlineStructDeinitEntry.array(field: field, elem_zig_type: elem_zig_type)
           end
         end

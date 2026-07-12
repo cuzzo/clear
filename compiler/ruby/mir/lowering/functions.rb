@@ -623,7 +623,7 @@ module MIRLoweringFunctions
     MIR.each_node(body) do |mir|
       next if found
       next unless mir.respond_to?(:expr?) && mir.expr?
-      found = true if T.unsafe(self).mir_allocates?(mir) ||
+      found = true if T.unsafe(self).__send__(:mir_allocates?, mir) ||
         (mir.is_a?(MIR::MethodCall) && mir.method == "bind" && mir.try_wrap)
     end
     found
@@ -1045,9 +1045,9 @@ module MIRLoweringFunctions
                  !arg.is_a?(MIR::DupeSlice) && !arg.is_a?(MIR::DeepCopy))
     if owned_slice_argument_required?(callee_param, moved_arg, ti, callee_param_type)
       sink_alloc = allocator_for_takes_param!(callee_param)
-      return T.cast(T.unsafe(self).with_ownership_consumption(
+      return T.cast(with_ownership_consumption(
         MIR::OwnedSlice.new(arg, sink_alloc),
-        T.unsafe(self).mir_ident_names(arg),
+        mir_ident_names(arg),
         "MIR::OwnedSlice",
         target_alloc: sink_alloc,
       ), MIR::OwnedSlice)
@@ -1100,8 +1100,8 @@ module MIRLoweringFunctions
     ast_args.each_with_index do |arg, idx|
       param = sig.params[idx]
       next unless call_arg_consumes_ownership?(arg, param)
-      arg_type = Type.new(arg.respond_to?(:coerced_type_info) && arg.coerced_type_info ? arg.coerced_type_info :
-        Type.from_node!(arg, context: "lowered call ownership argument"))
+      arg_type = Type.new(T.unsafe(arg.respond_to?(:coerced_type_info) && arg.coerced_type_info ? arg.coerced_type_info :
+        Type.from_node!(arg, context: "lowered call ownership argument")))
       takes_indices << idx
       unless ownership_tracked_transfer_type?(arg_type)
         operands << MIR::OwnershipOperandFact.non_owning(arg_type, "call argument #{idx}")
@@ -1168,8 +1168,8 @@ module MIRLoweringFunctions
     ast_args.each_with_index do |arg, idx|
       callee_param = sig.params[idx]
       next unless call_arg_consumes_ownership?(arg, callee_param)
-      arg_type = Type.new(arg.respond_to?(:coerced_type_info) && arg.coerced_type_info ? arg.coerced_type_info :
-        Type.from_node!(arg, context: "call ownership argument"))
+      arg_type = Type.new(T.unsafe(arg.respond_to?(:coerced_type_info) && arg.coerced_type_info ? arg.coerced_type_info :
+        Type.from_node!(arg, context: "call ownership argument")))
       takes_indices << idx
       unless ownership_tracked_transfer_type?(arg_type)
         operands << MIR::OwnershipOperandFact.non_owning(arg_type, "call argument #{idx}")
@@ -1362,7 +1362,7 @@ module MIRLoweringFunctions
                           !wants_ptr_mut_list &&
                           !callee_param_type.needs_pointer_passing?
     wants_ptr_intrinsic = ti.is_a?(Type) && Type.new(ti).needs_pointer_passing?
-    wants_ptr_poly      = T.unsafe(self).universal_poly_arg_needs_addr?(a, callee_sig, idx)
+    wants_ptr_poly      = universal_poly_arg_needs_addr?(a, callee_sig, idx)
     !!(wants_ptr_mut_list || wants_ptr_mut_value || wants_ptr_intrinsic || wants_ptr_poly)
   end
 
@@ -1580,9 +1580,9 @@ module MIRLoweringFunctions
       return variants.any? { |_, variant_type| Type.variant_has_heap?(variant_type) }
     end
 
-    ti.ownership_bearing?(mir_schema_lookup) ||
+    ti.ownership_bearing?(T.unsafe(mir_schema_lookup)) ||
       ti.indirect? || ti.collection? || ti.any_rc? || ti.any_sync? ||
-      ti.resource? || ti.recursive_cleanup_shape?(mir_schema_lookup)
+      ti.resource? || ti.recursive_cleanup_shape?(T.unsafe(mir_schema_lookup))
   end
 
   sig { params(node: CallNode, sig_obj: T.nilable(FunctionSignature)).returns(T.nilable(T::Boolean)) }
@@ -1605,7 +1605,7 @@ module MIRLoweringFunctions
     end
     if has_param_return
       ret = sig_obj.return_type.success_type
-      return true if ret&.string? || ret&.recursive_cleanup_shape?(mir_schema_lookup)
+      return true if ret&.string? || ret&.recursive_cleanup_shape?(T.unsafe(mir_schema_lookup))
       return false
     end
     nil
@@ -1627,7 +1627,7 @@ module MIRLoweringFunctions
     return true if node.is_a?(AST::BinaryOp) && node.string_concat
     return false unless node.is_a?(AST::Locatable)
     ti = node.full_type!(context: "heap-producing call expression")
-    ti.heap_ptr? || ti.recursive_cleanup_shape?(mir_schema_lookup)
+    ti.heap_ptr? || ti.recursive_cleanup_shape?(T.unsafe(mir_schema_lookup))
   end
 
   # Safe navigation for method calls: expr?.method(args)
@@ -1903,7 +1903,7 @@ module MIRLoweringFunctions
     T.bind(self, MIRLowering) rescue nil
     ti = type_info.success_type || type_info
     ti = ti.wrapped_type || ti if ti.optional?
-    ti.ownership_bearing?(mir_schema_lookup)
+    ti.ownership_bearing?(T.unsafe(mir_schema_lookup))
   end
 
   sig do
@@ -2076,7 +2076,7 @@ module MIRLoweringFunctions
     sig = T.must(sig.function_signature) if sig.is_a?(Type)
     fn_name = "_lambda_#{lowering_counters.next_lambda_id}"
 
-    params_list = sig.params
+    params_list = T.unsafe(sig).params
     params_mir = T.let([MIR::Param.new("_rt", "*Runtime", false)] + params_list.map { |p|
       p_type = p.type
       type_str = p_type.is_a?(Type) ? p_type.zig_type(is_param: true) : transpile_type(p_type || :Any, is_param: true)
@@ -2086,7 +2086,7 @@ module MIRLoweringFunctions
       MIR::Param.new(p.name, type_str, pp)
     }, T::Array[MIR::Param])
 
-    return_type_zig = sig.return_type.zig_type
+    return_type_zig = T.unsafe(sig).return_type.zig_type
     ret_str = ZigType.new(return_type_zig).anyerror_return_type
 
     # Build body: suppressions + body prefix + implicit final expression return.

@@ -642,7 +642,7 @@ module MIRLoweringCapabilities
       var_name = cap.target_label
       alias_name = cap.alias_name
       if cap.alias_explicit
-        alias_alloc_map[alias_name] = T.unsafe(self).send(:placement_for_node, var_node)
+        alias_alloc_map[alias_name] = send(:placement_for_node, var_node)
         alias_owner_map[alias_name] = var_name.to_s
       end
       case cap.capability

@@ -316,11 +316,11 @@ module MIRLoweringExpressions
   sig { params(ft: Type, field_node: AST::Node, field_alloc: T.nilable(Symbol), field_sink_alloc: Symbol).returns(T::Boolean) }
   def recursive_field_copy_required?(ft, field_node, field_alloc, field_sink_alloc)
     T.bind(self, MIRLowering) rescue nil
-    !!(ft.recursive_cleanup_shape?(mir_schema_lookup) &&
+    !!(ft.recursive_cleanup_shape?(T.unsafe(mir_schema_lookup)) &&
       !ast_expr_produces_heap?(field_node) && field_alloc != field_sink_alloc)
   end
 
-  sig { params(node: AST::UnaryOp).returns(MIR::UnaryOp) }
+  sig { params(node: AST::UnaryOp).returns(MIR::Node) }
   def lower_unary_op(node)
     T.bind(self, MIRLowering) rescue nil
     right = lower(node.right)
@@ -403,7 +403,7 @@ module MIRLoweringExpressions
       return "#{namespace}.#{node.field}"
     end
 
-    raise "MIRLowering: unsupported dotted type expression #{node.inspect}"
+    Kernel.raise "MIRLowering: unsupported dotted type expression #{node.inspect}"
   end
 
   sig { params(node: AST::BinaryOp).returns(BinaryOperationPlan) }
@@ -562,7 +562,7 @@ module MIRLoweringExpressions
     emitter = BINARY_PLAN_EMITTERS[plan.kind]
     raise "MIRLowering: unknown binary operation plan #{plan.kind}" unless emitter
 
-    T.cast(T.unsafe(self).__send__(emitter, plan), MIR::Node)
+    T.cast(__send__(emitter, plan), MIR::Node)
   end
 
   sig { params(plan: BinaryOperationPlan).returns(MIR::Call) }
@@ -704,7 +704,7 @@ module MIRLoweringExpressions
 
   sig { params(node: AST::Node).returns(MIR::Node) }
   def lower_boolean_operand(node)
-    lowered = T.cast(lower(node), MIR::Node)
+    lowered = T.cast(T.unsafe(self).__send__(:lower, node), MIR::Node)
     return lowered unless Type.from_node!(node, context: "logical operand").optional?
 
     MIR::BinOp.new("!=", lowered, MIR::Lit.new("null"))
@@ -1062,7 +1062,7 @@ module MIRLoweringExpressions
 
     return value unless ast_node.is_a?(AST::Locatable)
     ti = ast_node.full_type!(context: "OR_ELSE fallback materialization")
-    return value unless ti.string? || ti.recursive_cleanup_shape?(mir_schema_lookup) || ti.needs_cleanup?(mir_schema_lookup)
+    return value unless ti.string? || ti.recursive_cleanup_shape?(T.unsafe(mir_schema_lookup)) || ti.needs_cleanup?(T.unsafe(mir_schema_lookup))
 
     alloc = function_state.current_decl_alloc || :heap
     copied = MIR::DeepCopy.new(value, ti.zig_type, nil, :full_value, alloc)
@@ -1223,7 +1223,7 @@ module MIRLoweringExpressions
       # An optional indirect field is represented as ?*T. Reading the field
       # must preserve the optional pointer; dereference happens only after
       # safe-navigation/unwrap proves it non-nil.
-      indirect: node.indirect_field == true && !node.full_type!(context: "indirect field access").optional?,
+      indirect: T.unsafe(node.indirect_field == true && !node.full_type!(context: "indirect field access").optional?),
     )
   end
 
@@ -1621,11 +1621,11 @@ module MIRLoweringExpressions
     return val unless aggregate_field_wants_dynamic_slice?(ft)
     return MIR::ItemsAccess.new(val, true) if borrowed_field
 
-    source = T.cast(T.unsafe(self).mir_produces_owned_result?(val) && !val.is_a?(MIR::Ident) ?
-      T.unsafe(self).hoist_alloc(val, ast_node, err_cleanup: true) : val, MIR::Node)
-    T.cast(T.unsafe(self).with_ownership_consumption(
+    source = T.cast(T.unsafe(self).__send__(:mir_produces_owned_result?, val) && !val.is_a?(MIR::Ident) ?
+      T.unsafe(self).__send__(:hoist_alloc, val, ast_node, err_cleanup: true) : val, MIR::Node)
+    T.cast(T.unsafe(self).__send__(:with_ownership_consumption,
       MIR::OwnedSlice.new(source, sink_alloc),
-      T.unsafe(self).mir_ident_names(source),
+      T.unsafe(self).__send__(:mir_ident_names, source),
       "MIR::OwnedSlice",
       target_alloc: sink_alloc,
     ), MIR::OwnedSlice)
@@ -2156,15 +2156,15 @@ module MIRLoweringExpressions
     elsif ti.any_rc?
       func = ti.shared? ? "arcRetain" : "rcRetain"
       MIR::RcRetain.new(source, rc_payload_zig_type(ti), func)
-    elsif ti.optional? && (ti.needs_cleanup?(mir_schema_lookup) ||
-                           ti.wrapped_type&.recursive_cleanup_shape?(mir_schema_lookup))
+    elsif ti.optional? && (ti.needs_cleanup?(T.unsafe(mir_schema_lookup)) ||
+                           ti.wrapped_type&.recursive_cleanup_shape?(T.unsafe(mir_schema_lookup)))
       MIR::DeepCopy.new(source, ti.zig_type, nil, :full_value, alloc)
     elsif ti.string?
       MIR::DeepCopy.new(source, "[]const u8", nil, :full_value, alloc)
     elsif ti.direct_indexable_collection? && dst_ti.direct_indexable_collection? && !dst_ti.string?
       copy_zig = copy_source_zig_type(node.value, ti, dst_ti)
       MIR::DeepCopy.new(source, copy_zig, nil, :full_value, alloc)
-    elsif ti.recursive_cleanup_shape?(mir_schema_lookup)
+    elsif ti.recursive_cleanup_shape?(T.unsafe(mir_schema_lookup))
       MIR::DeepCopy.new(source, bare_zig_type(ti), nil, :full_value, alloc)
     else
       copy_zig = if dst_ti.collection? && !dst_ti.string?
@@ -2172,7 +2172,7 @@ module MIRLoweringExpressions
                  elsif union_schemas.key?(ti.resolved)
                    transpile_type(ti.resolved.to_s)
                  elsif ti.any_sync? || ti.collection_value? || ti.collection? ||
-                       (ti.struct? && ti.needs_promotion?(mir_schema_lookup))
+                       (ti.struct? && ti.needs_promotion?(T.unsafe(mir_schema_lookup)))
                    ti.zig_type
                  end
       copy_zig ? MIR::DeepCopy.new(source, copy_zig, nil, :full_value, alloc) :
@@ -2246,7 +2246,7 @@ module MIRLoweringExpressions
     return unless v.is_a?(AST::Identifier)
     ti = v.full_type!(context: "field move mark")
     tracked = ti && !ti.primitive? && !ti.void? && !ti.any? &&
-              (ti.string? || ti.heap_ptr? || ti.collection_value? || ti.recursive_cleanup_shape?(mir_schema_lookup))
+              (ti.string? || ti.heap_ptr? || ti.collection_value? || ti.recursive_cleanup_shape?(T.unsafe(mir_schema_lookup)))
     return unless tracked
     nm = zig_safe_name(v.name)
     rename_map = function_state.rename_map

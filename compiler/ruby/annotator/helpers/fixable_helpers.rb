@@ -84,9 +84,9 @@ module FixableHelper
     T.bind(self, SemanticAnnotator) rescue nil
     return unless reg
     tok = if reg.is_a?(AST::VarDecl)
-      T.cast(reg, AST::VarDecl).token
+      T.unsafe(reg).token
     else
-      T.cast(reg, AST::DestructureTarget).token
+      T.unsafe(reg).token
     end
     fixes = []
     if tok.value == 'MUTABLE'
@@ -697,7 +697,7 @@ module FixableHelper
       end
     end
 
-    anchor = line ? anchor_at(T.must(line), info.column || 1) : nil
+    anchor = line ? anchor_at(line, info.column || 1) : nil
     fixable!(anchor,
       code: :LOCAL_NEVER_SHARED,
       name: name,
@@ -1036,7 +1036,7 @@ module FixableHelper
       names.each do |alias_name|
         pat = /\bMUTABLE\s+#{Regexp.escape(alias_name)}\b/
         off = 0
-        found = false
+        found = T.let(false, T::Boolean)
         while off < window_lines.length && !found
           line = T.must(window_lines[off])
           idx = line =~ pat
@@ -1339,7 +1339,7 @@ module FixableHelper
                   end
     return nil unless text_length
     Fix.new(
-      description: fix_description(:WRAP_VALUE_WITH_CAST, type: target_name),
+      description: fix_description(:WRAP_VALUE_WITH_CAST, type: T.unsafe(target_name)),
       confidence: :interactive,
       edits: [
         Edit.new(span: Span.new(file: nil, line: tok.line, col: tok.column, length: 0),
@@ -1658,8 +1658,8 @@ module FixableHelper
     idx = 0
     while idx < candidates.length
       candidate = candidates[idx]
-      type_sym = candidate.type_sym
-      note = candidate.note
+      type_sym = T.unsafe(candidate).type_sym
+      note = T.unsafe(candidate).note
       label = ""
       if idx == 0
         label = "(recommended)"

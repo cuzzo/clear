@@ -448,8 +448,8 @@ class PipelineRangeLowerer
   FOLD_OP_OBSERVABLE_TERMINAL = T.let(Type.observable_terminals.each_with_object({}) { |(sym, entry), h|
     tag = entry.ast_class
     unless tag.nil?
-      klass = OBSERVABLE_FOLD_OP_CLASSES[T.must(tag)]
-      h[T.must(klass)] = sym unless klass.nil?
+      klass = OBSERVABLE_FOLD_OP_CLASSES[tag]
+      h[klass] = sym unless klass.nil?
     end
   }.freeze, T::Hash[T::Class[T.anything], Symbol])
 
@@ -847,8 +847,8 @@ class PipelineRangeLowerer
   def pipeline_element_owns_heap?(type_info)
     type_info.string? ||
       type_info.heap_ptr? ||
-      type_info.recursive_cleanup_shape?(@host.range_schema_lookup) ||
-      type_info.needs_explicit_cleanup?(:heap, @host.range_schema_lookup)
+      type_info.recursive_cleanup_shape?(T.unsafe(@host.range_schema_lookup)) ||
+      type_info.needs_explicit_cleanup?(:heap, T.unsafe(@host.range_schema_lookup))
   end
 
   sig { params(range_lit: AST::Node, source_ti: Type, capture_name: T.nilable(String)).returns(T.nilable(PipelineRangeLoopIter)) }

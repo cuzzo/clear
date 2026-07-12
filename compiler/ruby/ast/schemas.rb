@@ -176,7 +176,7 @@ module Schemas
       keys = fields.keys
       i = T.let(0, Integer)
       while i < keys.length
-        out[keys[i].to_s] = normalize_field(T.must(fields[keys[i]]))
+        out[keys[i].to_s] = normalize_field(T.must(fields[T.unsafe(keys[i])]))
         i += 1
       end
       out
@@ -201,7 +201,7 @@ module Schemas
           )
         end
         return AST::StructField.new(
-          type: T.must(raw_type_value),
+          type: raw_type_value,
           default: default_value,
           borrowed: !borrowed_value.nil?
         )
@@ -273,7 +273,7 @@ module Schemas
       keys = @fields.keys
       i = T.let(0, Integer)
       while i < keys.length
-        out[keys[i].to_s] = Type.new(T.must(@fields[keys[i]]))
+        out[keys[i].to_s] = Type.new(T.must(@fields[T.unsafe(keys[i])]))
         i += 1
       end
       out
@@ -406,8 +406,8 @@ module Schemas
       keys = @fields.keys
       i = T.let(0, Integer)
       while i < keys.length
-        default = T.must(@fields[keys[i]]).default
-        out[keys[i]] = T.must(default) unless default.nil?
+        default = T.must(@fields[T.unsafe(keys[i])]).default
+        out[T.unsafe(keys[i])] = T.must(default) unless default.nil?
         i += 1
       end
       out
@@ -419,7 +419,7 @@ module Schemas
       keys = @fields.keys
       i = T.let(0, Integer)
       while i < keys.length
-        out << keys[i] if T.must(@fields[keys[i]]).borrowed
+        out << T.unsafe(keys[i]) if T.must(@fields[T.unsafe(keys[i])]).borrowed
         i += 1
       end
       out
@@ -442,7 +442,7 @@ module Schemas
       keys = fields.keys
       i = T.let(0, Integer)
       while i < keys.length
-        out[keys[i].to_s] = normalize_field(T.must(fields[keys[i]]))
+        out[keys[i].to_s] = normalize_field(T.must(fields[T.unsafe(keys[i])]))
         i += 1
       end
       out
@@ -467,7 +467,7 @@ module Schemas
           )
         end
         return AST::StructField.new(
-          type: T.must(raw_type_value),
+          type: raw_type_value,
           default: default_value,
           borrowed: !borrowed_value.nil?
         )

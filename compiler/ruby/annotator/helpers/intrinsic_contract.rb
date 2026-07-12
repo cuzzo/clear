@@ -47,7 +47,7 @@ class IntrinsicTemplateContract < T::Struct
   def copy_template_value(value)
     return nil if value.nil?
 
-    concrete = T.must(value)
+    concrete = value
     return concrete if concrete.is_a?(Symbol)
 
     concrete.dup

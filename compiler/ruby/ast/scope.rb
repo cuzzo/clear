@@ -439,7 +439,7 @@ module ScopeHelper
 
   sig { returns(T::Array[Scope]) }
   def scope_stack_for_helper
-    T.cast(T.unsafe(self).scope_stack, T::Array[Scope])
+    T.cast(T.unsafe(self).__send__(:scope_stack), T::Array[Scope])
   end
 
   sig { returns(Scope) }

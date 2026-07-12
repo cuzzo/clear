@@ -258,7 +258,7 @@ module Annotator
             edits: [Edit.new(span: span, replacement: "(#{operand.name} OR_ELSE FALSE)")]
           )
         end
-        fixable!(operand,
+        T.unsafe(self).__send__(:fixable!, operand,
           code: :AMBIGUOUS_OPTIONAL_BOOL_LOGIC,
           op: op,
           category: :type,
@@ -564,7 +564,7 @@ module Annotator
         compare_types = concrete.map { |type| expression_branch_compare_type(type) }.uniq
         return nil unless compare_types.length == 1
 
-        Type.optional_of(concrete.first)
+        Type.optional_of(T.unsafe(concrete.first))
       end
       private :expression_branch_compare_type, :merged_expression_branch_type
 

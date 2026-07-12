@@ -1427,8 +1427,8 @@ class MIRChecker
     return false unless node.is_a?(MIR::MethodCall) && ["create", "createBound"].include?(node.method)
 
     receiver = node.receiver
-    receiver.is_a?(MIR::Call) &&
-      ["CheatLib.NodeStore", "CheatLib.SharedNodeStore"].include?(receiver.callee)
+    (receiver.is_a?(MIR::Call) &&
+      ["CheatLib.NodeStore", "CheatLib.SharedNodeStore"].include?(receiver.callee)) == true
   end
 
   sig { params(node: MIR::Node).returns(MIR::Node) }

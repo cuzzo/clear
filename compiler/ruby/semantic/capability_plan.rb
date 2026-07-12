@@ -147,12 +147,12 @@ module CapabilityPlan
 
     sig { returns(T::Boolean) }
     def deferred_lock_param?
-      deferred_sync_param? && lock_capability?
+      (deferred_sync_param? && lock_capability?) == true
     end
 
     sig { returns(T::Boolean) }
     def deferred_sync_param?
-      parameter_target? && sync.nil? && !declared_sync_contract?
+      (parameter_target? && sync.nil? && !declared_sync_contract?) == true
     end
 
     sig { returns(T::Boolean) }

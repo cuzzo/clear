@@ -175,7 +175,7 @@ class SymbolEntry
   # require ordering.
   sig { returns(T.nilable(FunctionSignature)) }
   def fn_signature
-    type.function_signature
+    T.unsafe(type.function_signature)
   end
 
   # Backward-compat alias for `lifetime == :current_scope`.
@@ -507,6 +507,7 @@ class SymbolEntry
     )
     @mutable = T.let(mutable, T::Boolean)
     @rebindable = T.let(rebindable, T::Boolean)
+    @reassigned = T.let(false, T::Boolean)
     @size = T.let(size, Integer)
     @capabilities = T.let(capabilities, T::Set[Symbol])
     @lifetime = T.let([], T::Array[SymbolEntry])

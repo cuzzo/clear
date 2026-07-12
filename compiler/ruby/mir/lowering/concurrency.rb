@@ -286,7 +286,7 @@ module MIRLoweringConcurrency
     T.bind(self, MIRLowering) rescue nil
     prev_alloc_names = function_state.lowered_alloc_names
     prev_guarded_names = function_state.lowered_guarded_cleanup_names
-    T.unsafe(self).append_ownership_transfers_for_mir_body(body)
+    append_ownership_transfers_for_mir_body(body)
   ensure
     T.bind(self, MIRLowering) rescue nil
     function_state.lowered_alloc_names = T.must(prev_alloc_names)
@@ -329,7 +329,7 @@ module MIRLoweringConcurrency
     return :affine_versioned if boundary_capture_versioned?(symbol, captured_type)
 
     type_info = captured_type || symbol&.type
-    return T.must(type_info).parallel_boundary_forbidden_reason(mir_schema_lookup) if type_info
+    return type_info.parallel_boundary_forbidden_reason(T.unsafe(self).__send__(:mir_schema_lookup)) if type_info
 
     nil
   end
@@ -961,9 +961,9 @@ module MIRLoweringConcurrency
   # MIRLowering object. Production lowering always supplies the guard method.
   sig { params(stmt: AST::Node, nodes: T::Array[MIR::Node]).returns(T::Array[MIR::Node]) }
   def guard_bg_shared_node_statement(stmt, nodes)
-    return nodes unless respond_to?(:guard_shared_node_statement, true)
+    return nodes unless T.unsafe(self).respond_to?(:guard_shared_node_statement, true)
 
-    T.unsafe(self).guard_shared_node_statement(stmt, nodes)
+    T.unsafe(self).__send__(:guard_shared_node_statement, stmt, nodes)
   end
 
   sig { params(mir: T.any(MIR::Node, T::Array[MIR::Node])).returns(T::Array[MIR::Node]) }
@@ -1022,7 +1022,7 @@ module MIRLoweringConcurrency
     fsm_structure = transform_result.structure
     result_type = Type.from_node!(node, context: "FSM BG result").tense_type
     fsm_structure.owned_result_required =
-      !!(result_type && T.unsafe(self).ownership_tracked_transfer_type?(result_type))
+      !!(result_type && T.unsafe(self).__send__(:ownership_tracked_transfer_type?, result_type))
     MIRChecker.check_fsm_structure!(fsm_structure, source: node)
     # The fiber body is consumed into the FSM state machine. Exposing it again
     # through run_body would double-walk ownership and manufacture diagnostics.

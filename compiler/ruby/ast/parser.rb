@@ -342,7 +342,7 @@ class ClearParser
       return dispatch_stmt_pattern_action(rule.action, start_token, args)
     end
 
-    case rule.action
+    result = case rule.action
     when :parse_require then parse_require
     when :parse_extern_decl then T.must(parse_extern_decl)
     when :parse_mutable_var_decl then parse_mutable_var_decl
@@ -379,6 +379,7 @@ class ClearParser
     else
       raise "Unknown statement parser action #{rule.action}"
     end
+    T.must(result)
   end
 
   sig { params(action: Symbol, token: Lexer::Token, args: T::Array[PatternCapture]).returns(AST::Node) }
@@ -413,7 +414,7 @@ class ClearParser
       return dispatch_primary_pattern_action(rule.action, start_token, args)
     end
 
-    case rule.action
+    result = case rule.action
     when :parse_if_expr then parse_if_expr
     when :parse_match_expr then parse_match_expr
     when :parse_partial_match_expr then parse_partial_match_expr
@@ -439,6 +440,7 @@ class ClearParser
     else
       raise "Unknown primary parser action #{rule.action}"
     end
+    T.must(result)
   end
 
   sig { params(action: Symbol, token: Lexer::Token, args: T::Array[PatternCapture]).returns(AST::Node) }
@@ -686,6 +688,7 @@ class ClearParser
   def parse_inline_union_variant_suffix(lhs)
     if !suppress_struct_lit? && AST.inline_union_constructor_target?(lhs)
       tok = current
+      field_pairs = T.let([], T::Array[[String, AST::Node]])
       _, field_pairs = parse_comma_seq(:CHAR, '{', '}') do
         key_token = current.type == :TYPE_ID ? consume(:TYPE_ID) : consume(:VAR_ID)
         k = T.cast(T.must(key_token).value, String)
@@ -693,7 +696,6 @@ class ClearParser
         v = parse_expression
         [k, v]
       end
-      field_pairs = T.let(field_pairs, T::Array[[String, AST::Node]])
       target = T.cast(lhs, AST::GetField)
       target_ident = T.cast(target.target, AST::Identifier)
       AST::UnionVariantLit.new(tok, target_ident.name, T.cast(target.field, String), field_pairs.to_h, :stack)
@@ -1020,7 +1022,7 @@ class ClearParser
 
       op_token = consume(:COMPOUND_ASSIGN)
       op_char = T.cast(T.must(op_token).value, String)[0]  # '+=' → '+', '-=' → '-', etc.
-      op_sym = AST::OP_TO_OP_CODE[op_char] || op_char.to_sym
+      op_sym = AST::OP_TO_OP_CODE[T.unsafe(op_char)] || T.unsafe(op_char).to_sym
       rhs = parse_expression
       consume(:CHAR, ';')
 
@@ -1066,7 +1068,7 @@ class ClearParser
   def parse_tight_stmt
     tight_token = consume(:KEYWORD, 'TIGHT')
     if match?(:KEYWORD, 'FOR')
-      for_node = T.cast(parse_for_range, T.any(AST::ForRange, AST::ForEach))
+      for_node = T.unsafe(parse_for_range)
       for_node.tight = true
       return for_node
     end
@@ -1502,15 +1504,15 @@ class ClearParser
         var_name = T.cast(T.must(consume(:TYPE_ID)).value, String)
         if match?(:CHAR, '{')
           # Inline struct variant: Circle { radius: Number, color: String }
+          field_pairs = T.let([], T::Array[[String, Type::TypeInput]])
           _, field_pairs = parse_comma_seq(:CHAR, '{', '}') do
             fname_tok = current.type == :TYPE_ID ? consume(:TYPE_ID) : consume(:VAR_ID)
             fname = T.cast(T.must(fname_tok).value, String)
             consume(:CHAR, ':')
             ftype = parse_type_annotation
             reject_auto_in_aggregate_field!(T.must(ftype), fname, fname_tok, "UNION inline-variant")
-            [fname, T.cast(T.must(ftype), Type::TypeInput)]
+            [fname, T.unsafe(T.must(ftype))]
           end
-          field_pairs = T.let(field_pairs, T::Array[[String, Type::TypeInput]])
           variants[var_name] = Schemas::InlineStructVariant.new(fields: field_pairs.to_h)
         elsif match!(:CHAR, ':')
           # Single-type payload: Data: Number  (or Data: Number @indirect)
@@ -1832,7 +1834,7 @@ class ClearParser
         families << first_family
       else
         if first_reentrance
-          reentrance_kinds << T.must(first_reentrance)
+          reentrance_kinds << first_reentrance
         end
       end
       while match!(:CHAR, '|')
@@ -1843,7 +1845,7 @@ class ClearParser
           families << next_family
         else
           if next_reentrance
-            reentrance_kinds << T.must(next_reentrance)
+            reentrance_kinds << next_reentrance
           end
         end
       end
@@ -2264,7 +2266,7 @@ class ClearParser
       # Predicate suffix: x |> isPositive? parses as OptionalUnwrap(Identifier).
       # Unwrap and restore the ? suffix as part of the function name.
       if pipe_rhs.is_a?(AST::OptionalUnwrap)
-        unwrap_rhs = T.cast(pipe_rhs, AST::OptionalUnwrap)
+        unwrap_rhs = T.unsafe(pipe_rhs)
         if unwrap_rhs.target.is_a?(AST::Identifier)
           target_ident = T.cast(unwrap_rhs.target, AST::Identifier)
           normalized_pipe_rhs = AST::Identifier.new(unwrap_rhs.token, "#{target_ident.name}?")
@@ -2962,6 +2964,7 @@ class ClearParser
 
   sig { returns(T::Hash[String, AST::StructField]) }
   def parse_struct_body
+    pairs = T.let([], T::Array[[String, AST::StructField]])
     _, pairs = parse_comma_seq(:CHAR, '{', '}') do
       name_tok = consume(:VAR_ID)
       name = T.cast(T.must(name_tok).value, String)
@@ -2983,7 +2986,6 @@ class ClearParser
 
       [name, AST::StructField.new(type: type, default: default_val, borrowed: borrowed)]
     end
-    pairs = T.let(pairs, T::Array[[String, AST::StructField]])
     pairs.to_h
   end
 
@@ -3243,7 +3245,7 @@ class ClearParser
     if match?(:VAR_ID) && %w[@reentrant @nonReentrant].include?(current.value)
       error!(current, :PARSER_EXPECTED, expected: "supported function type annotation", got: current.value, type: current.type, line: current.line)
     end
-    Type.function_type_from_parts(param_types, return_type, false, nil)
+    Type.function_type_from_parts(param_types, T.unsafe(return_type), false, nil)
   end
 
   sig { returns(T.nilable(Type)) }

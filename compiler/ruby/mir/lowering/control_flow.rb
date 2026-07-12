@@ -221,7 +221,7 @@ module MIRLoweringControlFlow
       stmt.name.to_s if stmt.is_a?(MIR::AllocMark)
     end.to_set
     capture_markers = capture_markers.reject do |stmt|
-      stmt.respond_to?(:name) && existing_capture_names.include?(stmt.name.to_s)
+      stmt.respond_to?(:name) && existing_capture_names.include?(T.unsafe(stmt).name.to_s)
     end
     then_body = capture_markers + lowered_then
 
@@ -236,13 +236,13 @@ module MIRLoweringControlFlow
     receiver = expr.target.full_type!(context: "IF list binding receiver")
     result = expr.full_type!(context: "IF list binding result")
     inner = result.optional? ? T.must(result.wrapped_type) : result
-    receiver.list_collection? && inner.struct? && !inner.collection? && !inner.node_reference? &&
-      !inner.link? && !inner.any_rc?
+    (receiver.list_collection? && inner.struct? && !inner.collection? && !inner.node_reference? &&
+      !inner.link? && !inner.any_rc?) == true
   end
 
   sig { params(target: AST::Node).returns(T::Boolean) }
   def collection_param_receiver?(target)
-    target.is_a?(AST::Identifier) && current_function_collection_param?(target.name)
+    target.is_a?(AST::Identifier) && T.unsafe(self).__send__(:current_function_collection_param?, target.name)
   end
 
   sig do
@@ -584,22 +584,22 @@ module MIRLoweringControlFlow
     loop_stmt
   end
 
-	  sig { params(mir: MIR::Node).returns(T::Boolean) }
-	  def for_each_owned_collection_source?(mir)
-	    return for_each_owned_collection_source?(mir.expr) if mir.is_a?(MIR::Cast) || mir.is_a?(MIR::TryExpr)
-	    return true if mir.is_a?(MIR::Call) && mir.owned_return?
-	    T.unsafe(self).mir_allocates?(mir)
-	  end
+  sig { params(mir: MIR::Node).returns(T::Boolean) }
+  def for_each_owned_collection_source?(mir)
+    return for_each_owned_collection_source?(mir.expr) if mir.is_a?(MIR::Cast) || mir.is_a?(MIR::TryExpr)
+    return true if mir.is_a?(MIR::Call) && mir.owned_return?
+    T.unsafe(self).__send__(:mir_allocates?, mir)
+  end
 
-	  sig { params(mir: MIR::Node, type_info: Type).returns(Symbol) }
-	  def for_each_owned_collection_source_alloc(mir, type_info)
-	    T.bind(self, MIRLowering) rescue nil
-	    return for_each_owned_collection_source_alloc(mir.expr, type_info) if mir.is_a?(MIR::Cast) || mir.is_a?(MIR::TryExpr)
+  sig { params(mir: MIR::Node, type_info: Type).returns(Symbol) }
+  def for_each_owned_collection_source_alloc(mir, type_info)
+    T.bind(self, MIRLowering) rescue nil
+    return for_each_owned_collection_source_alloc(mir.expr, type_info) if mir.is_a?(MIR::Cast) || mir.is_a?(MIR::TryExpr)
     return :heap if mir.is_a?(MIR::Call) && mir.owned_return?
     owned_alloc = mir_owned_alloc(mir)
     return owned_alloc if owned_alloc
 
-    type_info.cleanup_allocator(mir_schema_lookup)
+    type_info.cleanup_allocator(T.unsafe(mir_schema_lookup))
   end
 
   sig { params(node: AST::ForRange).returns(MIR::ScopeBlock) }
@@ -1056,7 +1056,7 @@ module MIRLoweringControlFlow
 
     ret_type = Type.from_node!(node.value, context: "heap carry recursive return")
     ret_type = ret_type.success_type || ret_type
-    ret_type.recursive_cleanup_shape?(mir_schema_lookup) ? MIR::DeepCopy.new(value, ret_type.zig_type, nil, :full_value, :heap) : value
+    ret_type.recursive_cleanup_shape?(T.unsafe(mir_schema_lookup)) ? MIR::DeepCopy.new(value, ret_type.zig_type, nil, :full_value, :heap) : value
   end
 
   sig { params(value: T.nilable(MIR::Node)).returns(T::Boolean) }
@@ -1269,7 +1269,7 @@ module MIRLoweringControlFlow
     ti = function_state.binding_types[name]
     return false if ti && !ownership_tracked_transfer_type?(ti)
 
-    return true if T.unsafe(self).owned_binding_visible?(name)
+    return true if owned_binding_visible?(name)
 
     !!(entry&.needs_cleanup?)
   end

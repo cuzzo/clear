@@ -587,7 +587,7 @@ module PassWorkProfiler
       next 0 unless value.nil? || value.is_a?(Array) || value.is_a?(Hash) ||
                     value.is_a?(Struct) || value.is_a?(Symbol) ||
                     value.is_a?(String) || value.is_a?(Numeric) ||
-                    value == true || value == false || value.is_a?(Type) ||
+                    value == T.unsafe(true) || value == T.unsafe(false) || value.is_a?(Type) ||
                     value.is_a?(Lexer::Token)
 
       count_nodes(value, namespace, seen)
@@ -609,7 +609,7 @@ module PassWorkProfiler
   sig { params(root: ProfileWalkValue).returns(T::Boolean) }
   def self.scalar?(root)
     root.nil? || root.is_a?(Symbol) || root.is_a?(String) ||
-      root.is_a?(Numeric) || root == true || root == false ||
+      root.is_a?(Numeric) || root == T.unsafe(true) || root == T.unsafe(false) ||
       root.is_a?(Type) || root.is_a?(Lexer::Token)
   end
   private_class_method :scalar?

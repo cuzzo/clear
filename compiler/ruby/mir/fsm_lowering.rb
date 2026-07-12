@@ -60,7 +60,7 @@ module FsmLowering
 
   sig { params(name: String).returns(String) }
   def fsm_zig_safe_name(name)
-    T.cast(T.unsafe(self).__send__(:zig_safe_name, name), String)
+    T.cast(__send__(:zig_safe_name, name), String)
   end
 
   # Lower a list of statements and produce Zig text. If no_result is
@@ -232,7 +232,7 @@ module FsmLowering
       end
     end
     result_type = Type.from_node!(ast_node, context: "FSM result owner")
-    if result_owner.is_a?(MIR::Ident) && T.unsafe(self).ownership_tracked_transfer_type?(result_type)
+    if result_owner.is_a?(MIR::Ident) && T.unsafe(self).__send__(:ownership_tracked_transfer_type?, result_type)
       owner_name = result_owner.name.to_s
       owner_name = rename_map.fetch(owner_name, owner_name)
       mir_entry = bindings[result_owner.name.to_s] || bindings[owner_name] || CleanupEntry::NONE
@@ -298,7 +298,7 @@ module FsmLowering
     rename_map = fsm_fn_name_rename_map
     bindings = fsm_current_bindings
     ti = node.full_type!(context: "FSM owned transfer identifier")
-    return false unless T.unsafe(self).ownership_tracked_transfer_type?(ti)
+    return false unless T.unsafe(self).__send__(:ownership_tracked_transfer_type?, ti)
     safe = fsm_zig_safe_name(node.name.to_s)
     safe = rename_map.fetch(safe, safe)
     entry = bindings[node.name.to_s] || bindings[safe.to_s] || CleanupEntry::NONE

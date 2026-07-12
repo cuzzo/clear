@@ -491,11 +491,11 @@ module EscapeAnalysis
     return false if t.rodata? || t.borrowed_reference?
 
     if t.collection_value?
-      return t.needs_explicit_cleanup?(:frame, schema_lookup)
+      return t.needs_explicit_cleanup?(:frame, T.unsafe(schema_lookup))
     end
 
     return false if t.string? || t.heap_ptr?
-    t.ownership_bearing?(schema_lookup)
+    t.ownership_bearing?(T.unsafe(schema_lookup))
   rescue StandardError
     false
   end
@@ -632,7 +632,7 @@ module EscapeAnalysis
     walk_body(node.body) do |child|
       next unless child.is_a?(AST::VarDecl) || (child.is_a?(AST::BindExpr) && child.mode == :decl)
       ti = child.full_type!(context: "FSM context local").success_type
-      next unless ti&.heap_ptr? || ti&.recursive_cleanup_shape?(schema_lookup)
+      next unless ti&.heap_ptr? || ti&.recursive_cleanup_shape?(T.unsafe(schema_lookup))
       mark_symbol_heap!(child.symbol)
     end
   end
@@ -871,7 +871,7 @@ module EscapeAnalysis
     t = ti.value_payload_type
     return false unless t
     return false if t.rodata? || t.borrowed_reference?
-    t.ownership_bearing?(schema_lookup)
+    t.ownership_bearing?(T.unsafe(schema_lookup))
   rescue StandardError
     false
   end
@@ -1092,14 +1092,14 @@ module EscapeAnalysis
     return false unless ti
     return false if ti.primitive? || ti.void? || ti.any?
     if expr.is_a?(AST::Identifier) && symbol_heap?(expr.symbol)
-      return true if ti.string? || ti.heap_ptr? || ti.recursive_cleanup_shape?(schema_lookup)
+      return true if ti.string? || ti.heap_ptr? || ti.recursive_cleanup_shape?(T.unsafe(schema_lookup))
     end
     expr_t = expr.is_a?(AST::Locatable) ? expr.full_type!(context: "escaping expression") : nil
     return false if !expr.is_a?(AST::Identifier) && expr_t&.rodata?
     return false if ti.rodata? || ti.borrowed_reference?
     top_heap_ptr || ti.ownership != :affine ||
-      ti.ownership_bearing?(schema_lookup) ||
-      ti.needs_explicit_cleanup?(:heap, schema_lookup)
+      ti.ownership_bearing?(T.unsafe(schema_lookup)) ||
+      ti.needs_explicit_cleanup?(:heap, T.unsafe(schema_lookup))
   end
 
   sig { params(fn: AST::FunctionDef, expr: AST::Node).returns(T.nilable(Type)) }
@@ -1183,7 +1183,7 @@ module EscapeAnalysis
     return false if target.is_a?(AST::Identifier)
 
     ti = root.full_type!(context: "escape destination allocator")
-    ti.cleanup_allocator(schema_lookup) == :heap
+    ti.cleanup_allocator(T.unsafe(schema_lookup)) == :heap
   rescue StandardError
     false
   end
@@ -1244,7 +1244,7 @@ module EscapeAnalysis
     if has_param_return
       ret = Type.from_node(return_type)
       ret = ret.success_type if ret
-      return true if ret&.string? || ret&.recursive_cleanup_shape?(schema_lookup)
+      return true if ret&.string? || ret&.recursive_cleanup_shape?(T.unsafe(schema_lookup))
       return false
     end
     nil

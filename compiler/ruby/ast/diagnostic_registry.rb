@@ -3268,7 +3268,7 @@ module DiagnosticRegistry
       end_index = template.index("}", start_index + 2)
       break unless end_index
 
-      keys << template[(start_index + 2)...end_index].to_sym
+      keys << T.unsafe(template[(start_index + 2)...end_index]).to_sym
       offset = end_index + 1
     end
     keys
@@ -3317,7 +3317,7 @@ module DiagnosticRegistry
     i = T.let(0, Integer)
     while i < keys.length
       key = keys.fetch(i)
-      return T.cast(key, Symbol) unless kwargs.key?(key)
+      return T.unsafe(key) unless kwargs.key?(key)
 
       i += 1
     end

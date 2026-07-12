@@ -43,7 +43,7 @@ module ErrorHelper
 
       raise err_class.new(
         source_token,
-        message,
+        T.unsafe(message),
         diagnostic_source_code
       )
   end
@@ -164,7 +164,7 @@ module ErrorHelper
 
   sig { returns(T.nilable(String)) }
   def diagnostic_source_code
-    T.cast(T.unsafe(self).source_code, T.nilable(String))
+    T.cast(T.unsafe(self).__send__(:source_code), T.nilable(String))
   end
 
   sig { params(node_or_token: T.untyped).returns(DiagnosticToken) }

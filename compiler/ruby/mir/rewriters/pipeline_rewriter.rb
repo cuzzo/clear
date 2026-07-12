@@ -443,7 +443,7 @@ class PipelineRewriter
       decl = AST::VarDecl.new(token, res_var, nil, terminal.initial_value.dup, true)
       AST.stamp_synthetic_type!(decl, terminal.full_type!, context: "synthetic AST type")
       decl.storage   = :stack
-      decl.slot_size = Type.new(decl.full_type!).slot_size(schema_lookup)
+      decl.slot_size = Type.new(decl.full_type!).slot_size(T.unsafe(schema_lookup))
       decl.var_used = true
       decl.var_mutated = true
       [decl]
@@ -453,7 +453,7 @@ class PipelineRewriter
       decl = AST::VarDecl.new(token, res_var, nil, val, true)
       AST.stamp_synthetic_type!(decl, smooth_node.full_type!, context: "synthetic AST type")
       decl.storage   = :stack
-      decl.slot_size = Type.new(decl.full_type!).slot_size(schema_lookup)
+      decl.slot_size = Type.new(decl.full_type!).slot_size(T.unsafe(schema_lookup))
       decl.var_used = true
       decl.var_mutated = true
       [decl]
@@ -485,7 +485,7 @@ class PipelineRewriter
       decl = AST::VarDecl.new(token, res_var, nil, lit, true)
       AST.stamp_synthetic_type!(decl, smooth_node.full_type!, context: "synthetic AST type")
       decl.storage   = smooth_node.storage
-      decl.slot_size = Type.new(decl.full_type!).slot_size(schema_lookup)
+      decl.slot_size = Type.new(decl.full_type!).slot_size(T.unsafe(schema_lookup))
       decl.var_used = true
       [decl]
     else

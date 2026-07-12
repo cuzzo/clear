@@ -273,7 +273,7 @@ class SemanticAnnotator
     @comptime_type_param_refinements = previous.merge(type_param => Type.new(narrowed_type))
     blk.call
   ensure
-    @comptime_type_param_refinements = previous
+    @comptime_type_param_refinements = T.unsafe(previous)
   end
   private :with_comptime_type_param_refinement
 
@@ -578,6 +578,7 @@ class SemanticAnnotator
     @semantic_index = T.let(nil, T.nilable(SemanticIndex))
     @program = T.let(nil, T.nilable(AST::Program))
     @language_mode = T.let(:default, Symbol)
+    @comptime_type_param_refinements = T.let({}, T::Hash[Symbol, Type])
     # WITH validations on parameter bindings need caller-sync propagation first.
     @branch_terminated = T.let(false, T::Boolean)
     reset_compilation_state!
@@ -608,7 +609,7 @@ class SemanticAnnotator
     AST.reset_user_types!
     reset_compilation_state!
     @program = T.let(node, T.nilable(AST::Program))  # WithMatchCheck reads node.sync_policy below.
-    @language_mode = T.let(node.language_mode || :default, Symbol)
+    @language_mode = node.language_mode || :default
     visit(node)
     finalize_auto_types!(node)
     run_whole_program_semantics!
@@ -637,7 +638,7 @@ private
     @semantic_index = nil
     @program = nil
     @branch_terminated = false
-    @comptime_type_param_refinements = T.let({}, T::Hash[Symbol, Type])
+    @comptime_type_param_refinements = {}
     effects_init!
     capability_audit_init!
     initialize_builtin_environment!

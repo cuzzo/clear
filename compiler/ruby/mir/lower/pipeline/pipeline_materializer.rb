@@ -278,14 +278,14 @@ class PipelineMaterializer
 
   sig { params(value: MIR::Node, type_info: Type, alloc: Symbol).returns(MIR::Node) }
   def borrowed_pipeline_value(value, type_info, alloc)
-    return value unless type_info.recursive_cleanup_shape?(schema_lookup) || type_info.heap_ptr?
+    return value unless type_info.recursive_cleanup_shape?(T.unsafe(schema_lookup)) || type_info.heap_ptr?
 
     MIR::DeepCopy.new(value, type_info.zig_type, nil, :full_value, alloc)
   end
 
   sig { params(type_info: Type).returns(T::Boolean) }
   def cleanup_bearing_type?(type_info)
-    type_info.recursive_cleanup_shape?(schema_lookup)
+    type_info.recursive_cleanup_shape?(T.unsafe(schema_lookup))
   end
 
   sig { params(name: String, source: MIR::Node, type_info: Type, zig_type: String, alloc: Symbol).returns(T::Array[MIR::Emittable]) }

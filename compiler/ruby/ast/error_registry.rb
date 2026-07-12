@@ -163,8 +163,8 @@ module AST
   # deterministic across runs.
   sig { returns(T::Array[[Symbol, Integer]]) }
   def self.enum_entries
-    [[T.cast(:None, Symbol), T.cast(ERROR_NAME_NONE, Integer)]] +
-      ERROR_TYPES.map { |sym, meta| [T.cast(sym, Symbol), T.cast(meta[:id], Integer)] }.sort_by(&:last)
+    [[T.unsafe(:None), T.unsafe(ERROR_NAME_NONE)]] +
+      ERROR_TYPES.map { |sym, meta| [T.unsafe(sym), T.cast(meta[:id], Integer)] }.sort_by(&:last)
   end
 
   # Returns the Array of error-type Symbols whose :kind == kind. Used by

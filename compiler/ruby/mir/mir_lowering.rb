@@ -837,7 +837,7 @@ class MIRLowering
     return false unless type_info.single_future? || source_type.single_future?
 
     effect = MIR::OwnershipEffect.of(mir)
-    effect.produces_owned && MIR::Placement.heap?(effect.alloc)
+    (effect.produces_owned && MIR::Placement.heap?(effect.alloc)) == true
   end
 
   sig { params(mir: MIR::Node, ti: Type).returns(MIR::Node) }
@@ -1222,7 +1222,7 @@ class MIRLowering
   sig { params(mir: T.nilable(LoweredMir), node: AST::Locatable).returns(T.nilable(LoweredMir)) }
   def apply_lowered_coercion(mir, node)
     return mir unless mir && node.respond_to?(:coerced_type) && node.coerced_type
-    coerced_type = Type.new(node.coerced_type_info || node.coerced_type)
+    coerced_type = Type.new(T.unsafe(node.coerced_type_info || node.coerced_type))
     return mir unless node.typed?
     actual_type = node.full_type!
     return mir if coerced_type.semantic_type_key == actual_type.semantic_type_key
@@ -1237,7 +1237,7 @@ class MIRLowering
       if actual_type.resolved == :NIL
         return MIR::StructInit.new(coerced_type.zig_type, [])
       end
-      return node_create_mir(T.cast(mir, MIR::Node), coerced_type, T.cast(node, AST::Node))
+      return node_create_mir(T.unsafe(mir), coerced_type, T.unsafe(node))
     end
 
     union_wrapped = lower_union_payload_coercion(mir, node, actual_type, coerced_type)
@@ -1281,7 +1281,7 @@ class MIRLowering
 
       [variant_name.to_s, payload]
     end
-    matches.one? ? matches.first : [nil, nil]
+    matches.one? ? T.cast(matches.first, [String, Type]) : [nil, nil]
   end
 
   sig { params(payload_type: Type, actual_type: Type).returns(T::Boolean) }
@@ -1296,7 +1296,7 @@ class MIRLowering
 
   sig { params(mir: MIR::Emittable, node: AST::Locatable, union_type: Type, variant_name: String, payload_type: Type).returns(MIR::Emittable) }
   def union_payload_coercion_value(mir, node, union_type, variant_name, payload_type)
-    ast_node = T.cast(node, AST::Node)
+    ast_node = T.unsafe(node)
     target_alloc = function_state.current_decl_alloc || alloc_for_node(ast_node)
     payload = materialize_owned_sink_value(mir, ast_node, target_alloc, payload_type)
     payload = hoist_alloc(payload, ast_node, err_cleanup: true) if mir_allocates?(payload)
@@ -1586,7 +1586,7 @@ class MIRLowering
       guard_shared_node_statement(stmt, pending.compact + statement_nodes)
     end
     LoweredStmtPacket.new(
-      mir: transfer_only ? [] : T.cast(guarded_nodes, LoweredMir),
+      mir: transfer_only ? [] : T.unsafe(guarded_nodes),
       pending: transfer_only ? pending : [],
       stmt_transfer_marks: stmt_transfer_marks,
       source_line: transfer_only ? nil : token&.line,
@@ -2677,7 +2677,7 @@ class MIRLowering
   def ownership_tracked_transfer_type?(ti)
     return false if ti.primitive? || ti.void? || ti.any? || ti.id_handle?
 
-    ti.ownership_bearing?(mir_schema_lookup)
+    ti.ownership_bearing?(T.unsafe(mir_schema_lookup))
   end
 
   sig { params(node: AST::Node, blk: T.proc.params(arg0: AST::Node).void).void }
@@ -2706,7 +2706,7 @@ class MIRLowering
 
   sig { params(type_info: Type).returns(T::Boolean) }
   def ownership_bearing_type?(type_info)
-    type_info.ownership_bearing?(mir_schema_lookup)
+    type_info.ownership_bearing?(T.unsafe(mir_schema_lookup))
   end
 
   sig { params(arg: T.nilable(AST::Node)).returns(T.nilable(String)) }
@@ -3192,7 +3192,7 @@ class MIRLowering
       data = T.cast(fact.data, Schemas::InlineStructVariant)
 
       fields = data.fields.map { |fname, ftype|
-        zig_t = transpile_type(ftype, is_field: true)
+        zig_t = transpile_type(T.unsafe(ftype), is_field: true)
         MIR::FieldDef.new(fname.to_s, zig_t, nil)
       }
 
@@ -3970,7 +3970,7 @@ class MIRLowering
   sig { params(value: MIR::Node, ast_node: T.nilable(AST::Node), sink_alloc: Symbol, sink_type: T.nilable(Type::TypeInput)).returns(MIR::Node) }
   def materialize_owned_sink_value(value, ast_node, sink_alloc, sink_type = nil)
     return value unless ast_node
-    source_type = ast_node.is_a?(AST::CopyNode) ? T.unsafe(self).copy_source_type_info(ast_node.value) : Type.from_node!(ast_node, context: "owned sink layout transport")
+    source_type = ast_node.is_a?(AST::CopyNode) ? copy_source_type_info(ast_node.value) : Type.from_node!(ast_node, context: "owned sink layout transport")
     destination_type = sink_type ? (sink_type.is_a?(Type) ? sink_type : Type.new(sink_type)) : source_type
 
     # Layout transport is destination-driven and remains structural in MIR.
@@ -3980,12 +3980,12 @@ class MIRLowering
     layout_transport = ast_node.respond_to?(:layout_transport) ? T.unsafe(ast_node).layout_transport : nil
     if layout_transport == :box && destination_type.indirect? && !source_type.indirect? &&
         destination_type.resolved == source_type.resolved && !value.is_a?(MIR::HeapCreate)
-      return T.cast(with_ownership_consumption(
+      return T.unsafe(with_ownership_consumption(
         MIR::HeapCreate.new(transpile_type(source_type.resolved.to_s), value, sink_alloc, "box_move"),
         mir_ident_names(value),
         "MIR::HeapCreate(layout move)",
         target_alloc: sink_alloc,
-      ), MIR::Node)
+      ))
     end
     if layout_transport == :unbox && source_type.indirect? && !destination_type.indirect? &&
         destination_type.resolved == source_type.resolved
@@ -3996,13 +3996,13 @@ class MIRLowering
         false,
         MIR::CallableContract.no_ownership(3),
       )
-      return T.cast(with_ownership_consumption_for_value(
+      return T.unsafe(with_ownership_consumption_for_value(
         unboxed,
         value,
         ast_node,
         "CheatLib.unboxMove",
         target_alloc: sink_alloc,
-      ), MIR::Node)
+      ))
     end
     plan = owned_sink_plan(value, ast_node, sink_alloc, sink_type)
     return value if plan.keep?
@@ -4024,7 +4024,7 @@ class MIRLowering
 
   sig { params(value: MIR::Node, ast_node: AST::Node, sink_alloc: Symbol, sink_type: T.nilable(Type::TypeInput)).returns(OwnedSinkPlan) }
   def owned_sink_plan(value, ast_node, sink_alloc, sink_type = nil)
-    ti = ast_node.is_a?(AST::CopyNode) ? T.unsafe(self).copy_source_type_info(ast_node.value) : Type.from_node!(ast_node, context: "owned sink materialization")
+    ti = ast_node.is_a?(AST::CopyNode) ? copy_source_type_info(ast_node.value) : Type.from_node!(ast_node, context: "owned sink materialization")
     dst_ti = sink_type ? (sink_type.is_a?(Type) ? sink_type : Type.new(sink_type)) : ti
     keep = OwnedSinkPlan.new(action: :keep, target_alloc: sink_alloc, zig_type: nil, copy_mode: nil)
     source = owned_sink_source_fact(value, ast_node, sink_alloc, ti)
@@ -4047,7 +4047,7 @@ class MIRLowering
       )
     end
 
-    if ti.heap_ptr? || ti.collection_value? || ti.recursive_cleanup_shape?(mir_schema_lookup)
+    if ti.heap_ptr? || ti.collection_value? || ti.recursive_cleanup_shape?(T.unsafe(mir_schema_lookup))
       return keep if source.satisfies_sink?(sink_alloc, ti)
       return keep unless source.existing_owned_source
       source_slice_view = T.let(!sink_type.nil? && ti.direct_indexable_collection? && !dst_ti.collection?, T::Boolean)
@@ -4139,7 +4139,7 @@ class MIRLowering
     borrowed = (root&.symbol&.borrow_provenance?) || AST.container_borrow?(ast_node)
     return false unless borrowed
     return false unless union_schemas.key?(ti.resolved)
-    return false if ti.respond_to?(:implicitly_copyable?) && ti.implicitly_copyable?(mir_schema_lookup)
+    return false if ti.respond_to?(:implicitly_copyable?) && ti.implicitly_copyable?(T.unsafe(mir_schema_lookup))
     true
   end
 

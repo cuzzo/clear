@@ -114,7 +114,7 @@ class MIRLoweringOwnershipScanner < T::Struct
   def ownership_tracked_transfer_type?(ti)
     return false if ti.primitive? || ti.void? || ti.any? || ti.id_handle?
 
-    ti.ownership_bearing?(schema_lookup)
+    ti.ownership_bearing?(T.unsafe(schema_lookup))
   end
 
   sig { params(node: AST::Node).returns(T::Boolean) }

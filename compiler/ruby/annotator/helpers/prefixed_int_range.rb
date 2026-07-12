@@ -19,23 +19,23 @@ module PrefixedIntRange
 
     val = integer_literal_range_value(node)
     return if val.nil?
-    literal_value = T.must(val)
+    literal_value = val
 
-    checked_type = T.must(effective_type)
+    checked_type = effective_type
     t = integer_range_target_type(checked_type)
     return if t.nil?
-    type_sym = T.must(t)
+    type_sym = t
 
     max = Type.integer_type_max(type_sym)
     return if max.nil?  # Not a known integer type; let type checker handle the mismatch
-    max_value = T.must(max)
+    max_value = max
     min = Type.integer_type_min(type_sym) || 0
 
     if literal_value < min || literal_value > max_value
       if node.is_a?(AST::Literal)
         handle_prefixed_int_overflow!(node, literal_value, type_sym, min, max_value)
       else
-        error!(node, :INT_LITERAL_OVERFLOW,
+        T.unsafe(self).__send__(:error!, node, :INT_LITERAL_OVERFLOW,
                val: literal_value, type: type_sym, min: min, max: max_value)
       end
     end
@@ -43,7 +43,7 @@ module PrefixedIntRange
 
   sig { params(node: AST::Literal, val: Integer, target_type: Symbol, min: Integer, max: Integer).returns(NilClass) }
   def handle_prefixed_int_overflow!(node, val, target_type, min, max)
-    error!(node, :INT_LITERAL_OVERFLOW,
+    T.unsafe(self).__send__(:error!, node, :INT_LITERAL_OVERFLOW,
            val: val, type: target_type, min: min, max: max)
   end
 

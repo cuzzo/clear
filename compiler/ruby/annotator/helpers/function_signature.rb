@@ -229,7 +229,7 @@ class FunctionSignature
   sig { returns(IntrinsicContract) }
   def intrinsic_contract
     emit = @facts.emit
-    emit ? IntrinsicContract.from_emit(T.must(emit), @contract.params) : IntrinsicContract.empty
+    emit ? IntrinsicContract.from_emit(emit, @contract.params) : IntrinsicContract.empty
   end
   sig { returns(RequiresMap) }
   def requires = @facts.requires
@@ -258,15 +258,11 @@ class FunctionSignature
   # seam). Some producers still hand back a bare FunctionSignature.
   # Every reader that needs the signature goes through here so no site
   # re-derives the Type/FunctionSignature/nil split.
-  sig do
-    type_parameters(:T)
-      .params(x: T.type_parameter(:T))
-      .returns(T.nilable(FunctionSignature))
-  end
+  sig { params(x: T.nilable(T.any(Type, FunctionSignature, T::Array[FunctionSignature]))).returns(T.nilable(FunctionSignature)) }
   def self.unwrap(x)
     return x if x.is_a?(FunctionSignature)
     if x.is_a?(Type)
-      type = T.cast(x, Type)
+      type = x
       function_type = type.function_type
       return nil unless function_type
 
@@ -326,10 +322,10 @@ class FunctionSignature
     parts = T.let([], T::Array[String])
     current = T.let(source, T.nilable(BasicObject))
     while current
-      if current.respond_to?(:field) && current.respond_to?(:target)
+      if T.unsafe(current).respond_to?(:field) && T.unsafe(current).respond_to?(:target)
         parts.unshift(T.unsafe(current).field.to_s)
         current = T.unsafe(current).target
-      elsif current.respond_to?(:name)
+      elsif T.unsafe(current).respond_to?(:name)
         parts.unshift(T.unsafe(current).name.to_s)
         break
       else
@@ -479,7 +475,7 @@ class FunctionSignature
   sig { params(emit: T.nilable(IntrinsicEmit)).returns(FunctionSignature) }
   def replace_intrinsic_emit!(emit)
     if emit
-      @facts.emit = T.must(emit).dup
+      @facts.emit = emit.dup
     else
       @facts.emit = nil
     end
@@ -661,7 +657,7 @@ class FunctionSignature
       owner_type_params: @contract.owner_type_params,
       intrinsic: @contract.intrinsic
     )
-    copy.replace_analysis_storage!(@facts.copy)
+    copy.__send__(:replace_analysis_storage!, @facts.copy)
     copy
   end
 
@@ -698,7 +694,7 @@ class FunctionSignature
   def coerce_return_type(val)
     return Type.new(:Void) if val.nil?
 
-    Type.new(T.must(val))
+    Type.new(val)
   end
 
   # ruby-to-clear: skip
@@ -739,7 +735,7 @@ class FunctionSignature
     if val.is_a?(Array)
       raw = val
     else
-      raw = [T.cast(T.must(val), LifetimeSource)]
+      raw = [val]
     end
     out = T.let([], T::Array[LifetimeSource])
     i = T.let(0, Integer)

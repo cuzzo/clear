@@ -526,12 +526,12 @@ module MIR
       ).returns(OwnershipEffect)
     end
     def self.from_try_fallback(left, right, result_type:, fallback_is_literal:, left_never_success:)
-      first_active_effect([
+      first_active_effect(T.unsafe([
         [same_owned_alloc?(left, right), left],
         [owned_cleanup_result?(left, result_type), left],
         [left.produces_owned && fallback_is_literal, left],
         [right.produces_owned && left_never_success, right],
-      ])
+      ]))
     end
 
     sig { params(left: OwnershipEffect, right: OwnershipEffect, result_type: T.nilable(Type)).returns(OwnershipEffect) }
@@ -598,7 +598,7 @@ module MIR
 
     sig { params(effect: OwnershipEffect, result_type: T.nilable(Type)).returns(T::Boolean) }
     private_class_method def self.owned_cleanup_result?(effect, result_type)
-      effect.produces_owned && cleanup_result_type?(result_type)
+      (effect.produces_owned && cleanup_result_type?(result_type)) == true
     end
 
     sig { params(result_type: T.nilable(Type)).returns(T::Boolean) }
@@ -3632,7 +3632,7 @@ module MIR
     def without_try
       out = Call.new(callee, args, false, owned_return, callable_contract)
       out.never_success = never_success
-      out.result_type = Type.new(result_type) if result_type
+      out.result_type = Type.new(T.unsafe(result_type)) if result_type
       out
     end
 
@@ -3790,7 +3790,7 @@ module MIR
     sig { returns(MethodCall) }
     def without_try
       out = MethodCall.new(receiver, method, args, false, callable_contract, owned_result_alloc)
-      out.result_type = Type.new(result_type) if result_type
+      out.result_type = Type.new(T.unsafe(result_type)) if result_type
       out
     end
 
@@ -5036,7 +5036,7 @@ module MIR
     sig { params(args: T.untyped).void }
     def initialize(*args)
       super
-      T.unsafe(self).stdlib_def = T.unsafe(self).stdlib_def
+      stdlib_def = stdlib_def
     end
   end
   [InlineBc, ShardedMapPut, ShardedMapGet].each do |k|

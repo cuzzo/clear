@@ -297,9 +297,9 @@ class MIRPass
       ti.collection_value? ||
       ti.collection? ||
       ti.any_sync? ||
-      ti.optional? && ti.needs_cleanup?(@schema_lookup) ||
-      ti.needs_cleanup?(@schema_lookup) ||
-      ti.recursive_cleanup_shape?(@schema_lookup)
+      ti.optional? && ti.needs_cleanup?(T.unsafe(@schema_lookup)) ||
+      ti.needs_cleanup?(T.unsafe(@schema_lookup)) ||
+      ti.recursive_cleanup_shape?(T.unsafe(@schema_lookup))
   end
 
   sig { params(node: AST::Assignment).returns(T::Boolean) }
@@ -363,15 +363,15 @@ class MIRPass
 
     if node.is_a?(AST::Identifier)
       return false if fn.params.any? { |param| param.name.to_s == node.name.to_s && param.takes }
-      return !!(ti&.string? || ti&.recursive_cleanup_shape?(@schema_lookup))
+      return !!(ti&.string? || ti&.recursive_cleanup_shape?(T.unsafe(@schema_lookup)))
     end
 
     return true if node.is_a?(AST::StringConcat)
     return true if node.is_a?(AST::BinaryOp) && node.string_concat == true
     !!(ti && !node.is_a?(AST::Literal) &&
        (ti.string? || ti.heap_ptr? || ti.collection_value? ||
-        ti.collection? || ti.needs_cleanup?(@schema_lookup) ||
-        ti.recursive_cleanup_shape?(@schema_lookup)))
+        ti.collection? || ti.needs_cleanup?(T.unsafe(@schema_lookup)) ||
+        ti.recursive_cleanup_shape?(T.unsafe(@schema_lookup))))
   end
 
   sig { params(expr: AST::Node).returns(AST::Node) }
@@ -648,7 +648,7 @@ class MIRPass
     return unless entry.present?
 
     ti = ident.full_type!
-    owns_transferable_value = ti && ti.needs_cleanup?(@schema_lookup)
+    owns_transferable_value = ti && ti.needs_cleanup?(T.unsafe(@schema_lookup))
     return unless entry.needs_cleanup? || owns_transferable_value
 
     if is_move

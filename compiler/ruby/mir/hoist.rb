@@ -209,7 +209,7 @@ module Hoist
 
     return false unless node.is_a?(AST::Locatable)
     ti = node.full_type!(context: "hoist allocation candidate")
-    ti.heap_ptr? || ti.needs_explicit_cleanup?(:heap, schema_lookup)
+    ti.heap_ptr? || ti.needs_explicit_cleanup?(:heap, T.unsafe(schema_lookup))
   end
 
   sig { params(node: T.nilable(AST::Node)).returns(T::Boolean) }
@@ -391,7 +391,7 @@ module Hoist
 
     ti = Type.from_node!(ast_node, context: "owned fallback temp")
 
-    ti.string? || ti.heap_ptr? || ti.collection_value? || ti.recursive_cleanup_shape?(schema_lookup)
+    ti.string? || ti.heap_ptr? || ti.collection_value? || ti.recursive_cleanup_shape?(T.unsafe(schema_lookup))
   end
 
   sig { params(ast_node: T.nilable(AST::Node)).returns(T::Boolean) }
@@ -522,10 +522,10 @@ module MIRHoistLowering
     child = parent.send(field)
     if parent.respond_to?(:lazy_fields) && parent.lazy_fields.include?(field)
       lower_scoped do
-        T.unsafe(self).lower(child)
+        T.unsafe(self).__send__(:lower, child)
       end
     else
-      T.unsafe(self).lower(child)
+      T.unsafe(self).__send__(:lower, child)
     end
   end
 
@@ -534,7 +534,7 @@ module MIRHoistLowering
     T.bind(self, MIRLowering) rescue nil
     return expr unless mir_allocates?(expr)
     name = "__tmp_#{lowering_counters.next_tmp_id}"
-    ti = T.unsafe(self).alloc_mark_type_info(expr, ast_node, "lazy allocating expression")
+    ti = alloc_mark_type_info(expr, ast_node, "lazy allocating expression")
     alloc = mir_owned_alloc(expr) || :heap
     materialized = MIR::BindingMaterialization.new(
       name: name,
@@ -573,8 +573,8 @@ module MIRHoistLowering
     ti.string? ||
       ti.collection? ||
       ti.collection_value? ||
-      ti.recursive_cleanup_shape?(mir_schema_lookup) ||
-      ti.needs_cleanup?(mir_schema_lookup) ||
+      ti.recursive_cleanup_shape?(T.unsafe(mir_schema_lookup)) ||
+      ti.needs_cleanup?(T.unsafe(mir_schema_lookup)) ||
       ti.heap_ptr? ||
       ti.indirect? ||
       ti.any_rc? ||
@@ -607,8 +607,8 @@ module MIRHoistLowering
 
   sig { params(expr: MIR::Node).returns(MIR::Ident) }
   def hoist_evaluation_barrier(expr)
-    name = "__eval_#{lowering_counters.next_tmp_id}"
-    function_state.pending_stmts << MIR::Let.new(name, expr, false, nil, nil)
+    name = "__eval_#{T.unsafe(self).__send__(:lowering_counters).next_tmp_id}"
+    T.unsafe(self).__send__(:function_state).pending_stmts << MIR::Let.new(name, expr, false, nil, nil)
     MIR::Ident.new(name)
   end
 
@@ -667,13 +667,13 @@ module MIRHoistLowering
       ))
     end
     union_return_needs_hoist =
-      ast_node && T.unsafe(self).send(:call_union_return_needs_hoist?, expr, ast_node)
+      ast_node && send(:call_union_return_needs_hoist?, expr, ast_node)
     return expr unless mir_produces_owned_result?(expr) || union_return_needs_hoist
     plan = allocating_hoist_plan(
       T.cast(expr, MIR::Node),
       mutable: mutable,
       transfer_on_success: err_cleanup == true,
-      type_info: T.unsafe(self).alloc_mark_type_info(expr, ast_node, "MIR allocating hoist"),
+      type_info: T.unsafe(self).__send__(:alloc_mark_type_info, expr, T.must(ast_node), "MIR allocating hoist"),
       cleanup_entry: hoist_cleanup_entry(expr, ast_node)
     )
     stamp_allocating_result_target!(expr, plan.name, alloc: plan.alloc)
@@ -684,7 +684,7 @@ module MIRHoistLowering
 
   sig { params(mir: MIR::Node, ast_node: T.nilable(AST::Node), context: String).returns(Type) }
   def mir_alloc_mark_type_info(mir, ast_node = nil, context: "MIR allocation")
-    return T.unsafe(self).alloc_mark_type_info(mir, ast_node, context) if ast_node
+    return T.unsafe(self).__send__(:alloc_mark_type_info, mir, ast_node, context) if ast_node
     explicit_type = mir_explicit_result_type(mir)
     return explicit_type if explicit_type
 
@@ -875,7 +875,7 @@ module MIRHoistLowering
       prefix.concat(normalize_used_expr_attr!(stmt, :target))
       prefix.concat(normalize_allocating_result_expr!(stmt.value))
     when MIR::ReassignWithCleanup
-      unless T.unsafe(self).fallible_self_fallback_reassign?(stmt.name.to_s, stmt.value)
+      unless T.unsafe(self).__send__(:fallible_self_fallback_reassign?, stmt.name.to_s, stmt.value)
         prefix.concat(normalize_used_expr_attr!(stmt, :value))
       end
     when MIR::ExprStmt
@@ -1102,7 +1102,7 @@ module MIRHoistLowering
 
   sig { params(expr: MIR::Node).returns(T::Boolean) }
   def mir_consumes_owned_operands?(expr)
-    contract = T.unsafe(self).ownership_contract_for_node(expr)
+    contract = T.unsafe(self).__send__(:ownership_contract_for_node, expr)
     return false unless contract.is_a?(MIR::OwnershipContract)
 
     contract.operands.any? { |operand| !operand.borrowed && operand.name }
@@ -1305,9 +1305,9 @@ module MIRHoistLowering
     return nil if ti.symbol? || ti.raw?
     return heap_string_entry(alloc: alloc) if ti.string?
     return uniform_cleanup_entry(ti.zig_type, alloc: alloc) if ti.collection?
-    return nil unless ti.needs_explicit_cleanup?(alloc, mir_schema_lookup) ||
-      ti.recursive_cleanup_shape?(mir_schema_lookup) ||
-      ti.needs_cleanup?(mir_schema_lookup) ||
+    return nil unless ti.needs_explicit_cleanup?(alloc, T.unsafe(mir_schema_lookup)) ||
+      ti.recursive_cleanup_shape?(T.unsafe(mir_schema_lookup)) ||
+      ti.needs_cleanup?(T.unsafe(mir_schema_lookup)) ||
       ti.heap_ptr? ||
       ti.collection_value?
 
@@ -1327,7 +1327,7 @@ module MIRHoistLowering
       return nil if ti.symbol? || ti.raw?
       return heap_string_entry(alloc: alloc) if ti.string?
       return uniform_cleanup_entry(ti.zig_type, alloc: alloc) if ti.collection? ||
-        ti.recursive_cleanup_shape?(mir_schema_lookup) || ti.needs_cleanup?(mir_schema_lookup)
+        ti.recursive_cleanup_shape?(T.unsafe(mir_schema_lookup)) || ti.needs_cleanup?(T.unsafe(mir_schema_lookup))
     end
 
     nil

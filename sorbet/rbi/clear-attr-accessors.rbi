@@ -23,10 +23,6 @@ class AST::Assignment
   sig { params(value: T.untyped).returns(T.untyped) }
   def auto_lock=(value); end
   sig { returns(T.untyped) }
-  def compound_op; end
-  sig { params(value: T.untyped).returns(T.untyped) }
-  def compound_op=(value); end
-  sig { returns(T.untyped) }
   def field_pre_cleanup; end
   sig { params(value: T.untyped).returns(T.untyped) }
   def field_pre_cleanup=(value); end
@@ -112,10 +108,6 @@ class AST::BinaryOp
   sig { params(value: T.untyped).returns(T.untyped) }
   def or_fallback_dupe=(value); end
   sig { returns(T.untyped) }
-  def paren_bind; end
-  sig { params(value: T.untyped).returns(T.untyped) }
-  def paren_bind=(value); end
-  sig { returns(T.untyped) }
   def string_concat; end
   sig { params(value: T.untyped).returns(T.untyped) }
   def string_concat=(value); end
@@ -127,10 +119,6 @@ class AST::BindExpr
   sig { params(value: T.untyped).returns(T.untyped) }
   def auto_atomic_op=(value); end
   sig { returns(T.untyped) }
-  def compound_op; end
-  sig { params(value: T.untyped).returns(T.untyped) }
-  def compound_op=(value); end
-  sig { returns(T.untyped) }
   def mir_binding_entry; end
   sig { params(value: T.untyped).returns(T.untyped) }
   def mir_binding_entry=(value); end
@@ -139,21 +127,25 @@ class AST::BindExpr
   sig { params(value: T.untyped).returns(T.untyped) }
   def mode=(value); end
   sig { returns(T.untyped) }
+  def ownership_transport_plan; end
+  sig { params(value: T.untyped).returns(T.untyped) }
+  def ownership_transport_plan=(value); end
+  sig { returns(T.untyped) }
   def reassign_cleanup; end
   sig { params(value: T.untyped).returns(T.untyped) }
   def reassign_cleanup=(value); end
 end
 
+class AST::Binding
+  sig { returns(T.untyped) }
+  def mir_binding_entry; end
+  sig { params(value: T.untyped).returns(T.untyped) }
+  def mir_binding_entry=(value); end
+end
+
 class AST::BodySlot
   sig { returns(AST::RawBody) }
   def body; end
-end
-
-class AST::CapabilityWrap
-  sig { returns(T.untyped) }
-  def lock_rank; end
-  sig { params(value: T.untyped).returns(T.untyped) }
-  def lock_rank=(value); end
 end
 
 class AST::ConcurrentOp
@@ -181,36 +173,11 @@ class AST::DestructureTarget
   def mir_binding_entry=(value); end
 end
 
-class AST::ExternFnDecl
-  sig { returns(T.untyped) }
-  def owner_type; end
-  sig { params(value: T.untyped).returns(T.untyped) }
-  def owner_type=(value); end
-end
-
-class AST::ExternStructDecl
-  sig { returns(T.untyped) }
-  def as_type; end
-  sig { params(value: T.untyped).returns(T.untyped) }
-  def as_type=(value); end
-  sig { returns(T.untyped) }
-  def close_method; end
-  sig { params(value: T.untyped).returns(T.untyped) }
-  def close_method=(value); end
-end
-
 class AST::ForEach
   sig { returns(T.untyped) }
   def mark_per_iter; end
   sig { params(value: T.untyped).returns(T.untyped) }
   def mark_per_iter=(value); end
-  sig { returns(T.untyped) }
-  def tight; end
-  sig { params(value: T.untyped).returns(T.untyped) }
-  def tight=(value); end
-end
-
-class AST::ForRange
   sig { returns(T.untyped) }
   def tight; end
   sig { params(value: T.untyped).returns(T.untyped) }
@@ -266,10 +233,6 @@ class AST::FunctionDef
   sig { params(value: T.untyped).returns(T.untyped) }
   def alloc_fault=(value); end
   sig { returns(T.untyped) }
-  def arrow_token; end
-  sig { params(value: T.untyped).returns(T.untyped) }
-  def arrow_token=(value); end
-  sig { returns(T.untyped) }
   def can_fail; end
   sig { params(value: T.untyped).returns(T.untyped) }
   def can_fail=(value); end
@@ -286,21 +249,9 @@ class AST::FunctionDef
   sig { params(value: T.untyped).returns(T.untyped) }
   def effects=(value); end
   sig { returns(T.untyped) }
-  def effects_decl; end
-  sig { params(value: T.untyped).returns(T.untyped) }
-  def effects_decl=(value); end
-  sig { returns(T.untyped) }
-  def effects_span; end
-  sig { params(value: T.untyped).returns(T.untyped) }
-  def effects_span=(value); end
-  sig { returns(T.untyped) }
   def error_fallible; end
   sig { params(value: T.untyped).returns(T.untyped) }
   def error_fallible=(value); end
-  sig { returns(T.untyped) }
-  def explicit_return_type; end
-  sig { params(value: T.untyped).returns(T.untyped) }
-  def explicit_return_type=(value); end
   sig { returns(T.untyped) }
   def fn_value_ref; end
   sig { params(value: T.untyped).returns(T.untyped) }
@@ -330,14 +281,6 @@ class AST::FunctionDef
   sig { params(value: T.untyped).returns(T.untyped) }
   def inferred_effects=(value); end
   sig { returns(T.untyped) }
-  def is_method; end
-  sig { params(value: T.untyped).returns(T.untyped) }
-  def is_method=(value); end
-  sig { returns(T.untyped) }
-  def max_depth_n; end
-  sig { params(value: T.untyped).returns(T.untyped) }
-  def max_depth_n=(value); end
-  sig { returns(T.untyped) }
   def moved_guard_info; end
   sig { params(value: T.untyped).returns(T.untyped) }
   def moved_guard_info=(value); end
@@ -346,37 +289,13 @@ class AST::FunctionDef
   sig { params(value: T.untyped).returns(T.untyped) }
   def mutual_thunk_plan=(value); end
   sig { returns(T.untyped) }
-  def name_token; end
-  sig { params(value: T.untyped).returns(T.untyped) }
-  def name_token=(value); end
-  sig { returns(T.untyped) }
   def needs_rt; end
   sig { params(value: T.untyped).returns(T.untyped) }
   def needs_rt=(value); end
   sig { returns(T.untyped) }
-  def post_clauses; end
-  sig { params(value: T.untyped).returns(T.untyped) }
-  def post_clauses=(value); end
-  sig { returns(T.untyped) }
-  def pre_clauses; end
-  sig { params(value: T.untyped).returns(T.untyped) }
-  def pre_clauses=(value); end
-  sig { returns(T.untyped) }
   def reentrance_kind; end
   sig { params(value: T.untyped).returns(T.untyped) }
   def reentrance_kind=(value); end
-  sig { returns(T.untyped) }
-  def requires; end
-  sig { params(value: T.untyped).returns(T.untyped) }
-  def requires=(value); end
-  sig { returns(T.untyped) }
-  def requires_clauses; end
-  sig { params(value: T.untyped).returns(T.untyped) }
-  def requires_clauses=(value); end
-  sig { returns(T.untyped) }
-  def return_type_token; end
-  sig { params(value: T.untyped).returns(T.untyped) }
-  def return_type_token=(value); end
   sig { returns(T.untyped) }
   def snapshot_types; end
   sig { params(value: T.untyped).returns(T.untyped) }
@@ -390,17 +309,9 @@ class AST::FunctionDef
   sig { params(value: T.untyped).returns(T.untyped) }
   def stack_vars_bytes=(value); end
   sig { returns(T.untyped) }
-  def tail_call; end
-  sig { params(value: T.untyped).returns(T.untyped) }
-  def tail_call=(value); end
-  sig { returns(T.untyped) }
   def thunk_plan; end
   sig { params(value: T.untyped).returns(T.untyped) }
   def thunk_plan=(value); end
-  sig { returns(T.untyped) }
-  def tight_reentrance; end
-  sig { params(value: T.untyped).returns(T.untyped) }
-  def tight_reentrance=(value); end
   sig { returns(T.untyped) }
   def uses_alloc; end
   sig { params(value: T.untyped).returns(T.untyped) }
@@ -424,6 +335,17 @@ class AST::GetField
   def is_assignment_lhs; end
   sig { params(value: T.untyped).returns(T.untyped) }
   def is_assignment_lhs=(value); end
+  sig { returns(T.untyped) }
+  def safe_nav_chain; end
+  sig { params(value: T.untyped).returns(T.untyped) }
+  def safe_nav_chain=(value); end
+end
+
+class AST::GetIndex
+  sig { returns(T.untyped) }
+  def safe_nav_chain; end
+  sig { params(value: T.untyped).returns(T.untyped) }
+  def safe_nav_chain=(value); end
 end
 
 class AST::Identifier
@@ -439,6 +361,10 @@ class AST::Identifier
   def heap_dupe_result; end
   sig { params(value: T.untyped).returns(T.untyped) }
   def heap_dupe_result=(value); end
+  sig { returns(T.untyped) }
+  def ownership_pending_transfer; end
+  sig { params(value: T.untyped).returns(T.untyped) }
+  def ownership_pending_transfer=(value); end
 end
 
 class AST::IfStatement
@@ -454,6 +380,21 @@ class AST::IfStatement
   def then_result_type; end
   sig { params(value: T.untyped).returns(T.untyped) }
   def then_result_type=(value); end
+end
+
+class AST::IsA
+  sig { returns(T.untyped) }
+  def runtime_indirect_payload_as; end
+  sig { params(value: T.untyped).returns(T.untyped) }
+  def runtime_indirect_payload_as=(value); end
+  sig { returns(T.untyped) }
+  def runtime_payload_type; end
+  sig { params(value: T.untyped).returns(T.untyped) }
+  def runtime_payload_type=(value); end
+  sig { returns(T.untyped) }
+  def runtime_variant_name; end
+  sig { params(value: T.untyped).returns(T.untyped) }
+  def runtime_variant_name=(value); end
 end
 
 class AST::MatchStatement
@@ -501,12 +442,20 @@ class AST::MethodCall
   sig { params(value: T.untyped).returns(T.untyped) }
   def pool_method=(value); end
   sig { returns(T.untyped) }
+  def safe_nav_chain; end
+  sig { params(value: T.untyped).returns(T.untyped) }
+  def safe_nav_chain=(value); end
+  sig { returns(T.untyped) }
   def set_method; end
   sig { params(value: T.untyped).returns(T.untyped) }
   def set_method=(value); end
 end
 
 class AST::Program
+  sig { returns(T.untyped) }
+  def language_mode; end
+  sig { params(value: T.untyped).returns(T.untyped) }
+  def language_mode=(value); end
   sig { returns(T.untyped) }
   def mir_pass_state; end
   sig { params(value: T.untyped).returns(T.untyped) }
@@ -562,18 +511,15 @@ class AST::TestThat
   def synthetic_fn=(value); end
 end
 
-class AST::UnionDef
-  sig { returns(T.untyped) }
-  def methods; end
-  sig { params(value: T.untyped).returns(T.untyped) }
-  def methods=(value); end
-end
-
 class AST::VarDecl
   sig { returns(T.untyped) }
   def mir_binding_entry; end
   sig { params(value: T.untyped).returns(T.untyped) }
   def mir_binding_entry=(value); end
+  sig { returns(T.untyped) }
+  def ownership_transport_plan; end
+  sig { params(value: T.untyped).returns(T.untyped) }
+  def ownership_transport_plan=(value); end
 end
 
 class AST::WhenBlock
@@ -619,10 +565,6 @@ class AST::WhileLoop
   def mark_per_iter; end
   sig { params(value: T.untyped).returns(T.untyped) }
   def mark_per_iter=(value); end
-  sig { returns(T.untyped) }
-  def tight; end
-  sig { params(value: T.untyped).returns(T.untyped) }
-  def tight=(value); end
 end
 
 class AST::WithBlock
@@ -665,10 +607,6 @@ class Assignment
   def auto_lock; end
   sig { params(value: T.untyped).returns(T.untyped) }
   def auto_lock=(value); end
-  sig { returns(T.untyped) }
-  def compound_op; end
-  sig { params(value: T.untyped).returns(T.untyped) }
-  def compound_op=(value); end
   sig { returns(T.untyped) }
   def field_pre_cleanup; end
   sig { params(value: T.untyped).returns(T.untyped) }
@@ -812,10 +750,6 @@ class BinaryOp
   sig { params(value: T.untyped).returns(T.untyped) }
   def or_fallback_dupe=(value); end
   sig { returns(T.untyped) }
-  def paren_bind; end
-  sig { params(value: T.untyped).returns(T.untyped) }
-  def paren_bind=(value); end
-  sig { returns(T.untyped) }
   def string_concat; end
   sig { params(value: T.untyped).returns(T.untyped) }
   def string_concat=(value); end
@@ -827,10 +761,6 @@ class BindExpr
   sig { params(value: T.untyped).returns(T.untyped) }
   def auto_atomic_op=(value); end
   sig { returns(T.untyped) }
-  def compound_op; end
-  sig { params(value: T.untyped).returns(T.untyped) }
-  def compound_op=(value); end
-  sig { returns(T.untyped) }
   def mir_binding_entry; end
   sig { params(value: T.untyped).returns(T.untyped) }
   def mir_binding_entry=(value); end
@@ -839,21 +769,25 @@ class BindExpr
   sig { params(value: T.untyped).returns(T.untyped) }
   def mode=(value); end
   sig { returns(T.untyped) }
+  def ownership_transport_plan; end
+  sig { params(value: T.untyped).returns(T.untyped) }
+  def ownership_transport_plan=(value); end
+  sig { returns(T.untyped) }
   def reassign_cleanup; end
   sig { params(value: T.untyped).returns(T.untyped) }
   def reassign_cleanup=(value); end
 end
 
+class Binding
+  sig { returns(T.untyped) }
+  def mir_binding_entry; end
+  sig { params(value: T.untyped).returns(T.untyped) }
+  def mir_binding_entry=(value); end
+end
+
 class BorrowChecker
   sig { returns(T::Array[String]) }
   def errors; end
-end
-
-class CapabilityWrap
-  sig { returns(T.untyped) }
-  def lock_rank; end
-  sig { params(value: T.untyped).returns(T.untyped) }
-  def lock_rank=(value); end
 end
 
 class ClearFixSupport::LocationToken
@@ -912,24 +846,6 @@ class EffectSet
   def effects; end
 end
 
-class ExternFnDecl
-  sig { returns(T.untyped) }
-  def owner_type; end
-  sig { params(value: T.untyped).returns(T.untyped) }
-  def owner_type=(value); end
-end
-
-class ExternStructDecl
-  sig { returns(T.untyped) }
-  def as_type; end
-  sig { params(value: T.untyped).returns(T.untyped) }
-  def as_type=(value); end
-  sig { returns(T.untyped) }
-  def close_method; end
-  sig { params(value: T.untyped).returns(T.untyped) }
-  def close_method=(value); end
-end
-
 class FieldDef
   sig { returns(T.untyped) }
   def boxed_capture; end
@@ -964,13 +880,6 @@ class ForEach
   def mark_per_iter; end
   sig { params(value: T.untyped).returns(T.untyped) }
   def mark_per_iter=(value); end
-  sig { returns(T.untyped) }
-  def tight; end
-  sig { params(value: T.untyped).returns(T.untyped) }
-  def tight=(value); end
-end
-
-class ForRange
   sig { returns(T.untyped) }
   def tight; end
   sig { params(value: T.untyped).returns(T.untyped) }
@@ -1087,10 +996,6 @@ class FunctionDef
   sig { params(value: T.untyped).returns(T.untyped) }
   def alloc_fault=(value); end
   sig { returns(T.untyped) }
-  def arrow_token; end
-  sig { params(value: T.untyped).returns(T.untyped) }
-  def arrow_token=(value); end
-  sig { returns(T.untyped) }
   def can_fail; end
   sig { params(value: T.untyped).returns(T.untyped) }
   def can_fail=(value); end
@@ -1107,21 +1012,9 @@ class FunctionDef
   sig { params(value: T.untyped).returns(T.untyped) }
   def effects=(value); end
   sig { returns(T.untyped) }
-  def effects_decl; end
-  sig { params(value: T.untyped).returns(T.untyped) }
-  def effects_decl=(value); end
-  sig { returns(T.untyped) }
-  def effects_span; end
-  sig { params(value: T.untyped).returns(T.untyped) }
-  def effects_span=(value); end
-  sig { returns(T.untyped) }
   def error_fallible; end
   sig { params(value: T.untyped).returns(T.untyped) }
   def error_fallible=(value); end
-  sig { returns(T.untyped) }
-  def explicit_return_type; end
-  sig { params(value: T.untyped).returns(T.untyped) }
-  def explicit_return_type=(value); end
   sig { returns(T.untyped) }
   def fn_value_ref; end
   sig { params(value: T.untyped).returns(T.untyped) }
@@ -1151,14 +1044,6 @@ class FunctionDef
   sig { params(value: T.untyped).returns(T.untyped) }
   def inferred_effects=(value); end
   sig { returns(T.untyped) }
-  def is_method; end
-  sig { params(value: T.untyped).returns(T.untyped) }
-  def is_method=(value); end
-  sig { returns(T.untyped) }
-  def max_depth_n; end
-  sig { params(value: T.untyped).returns(T.untyped) }
-  def max_depth_n=(value); end
-  sig { returns(T.untyped) }
   def moved_guard_info; end
   sig { params(value: T.untyped).returns(T.untyped) }
   def moved_guard_info=(value); end
@@ -1167,37 +1052,13 @@ class FunctionDef
   sig { params(value: T.untyped).returns(T.untyped) }
   def mutual_thunk_plan=(value); end
   sig { returns(T.untyped) }
-  def name_token; end
-  sig { params(value: T.untyped).returns(T.untyped) }
-  def name_token=(value); end
-  sig { returns(T.untyped) }
   def needs_rt; end
   sig { params(value: T.untyped).returns(T.untyped) }
   def needs_rt=(value); end
   sig { returns(T.untyped) }
-  def post_clauses; end
-  sig { params(value: T.untyped).returns(T.untyped) }
-  def post_clauses=(value); end
-  sig { returns(T.untyped) }
-  def pre_clauses; end
-  sig { params(value: T.untyped).returns(T.untyped) }
-  def pre_clauses=(value); end
-  sig { returns(T.untyped) }
   def reentrance_kind; end
   sig { params(value: T.untyped).returns(T.untyped) }
   def reentrance_kind=(value); end
-  sig { returns(T.untyped) }
-  def requires; end
-  sig { params(value: T.untyped).returns(T.untyped) }
-  def requires=(value); end
-  sig { returns(T.untyped) }
-  def requires_clauses; end
-  sig { params(value: T.untyped).returns(T.untyped) }
-  def requires_clauses=(value); end
-  sig { returns(T.untyped) }
-  def return_type_token; end
-  sig { params(value: T.untyped).returns(T.untyped) }
-  def return_type_token=(value); end
   sig { returns(T.untyped) }
   def snapshot_types; end
   sig { params(value: T.untyped).returns(T.untyped) }
@@ -1211,17 +1072,9 @@ class FunctionDef
   sig { params(value: T.untyped).returns(T.untyped) }
   def stack_vars_bytes=(value); end
   sig { returns(T.untyped) }
-  def tail_call; end
-  sig { params(value: T.untyped).returns(T.untyped) }
-  def tail_call=(value); end
-  sig { returns(T.untyped) }
   def thunk_plan; end
   sig { params(value: T.untyped).returns(T.untyped) }
   def thunk_plan=(value); end
-  sig { returns(T.untyped) }
-  def tight_reentrance; end
-  sig { params(value: T.untyped).returns(T.untyped) }
-  def tight_reentrance=(value); end
   sig { returns(T.untyped) }
   def uses_alloc; end
   sig { params(value: T.untyped).returns(T.untyped) }
@@ -1295,6 +1148,17 @@ class GetField
   def is_assignment_lhs; end
   sig { params(value: T.untyped).returns(T.untyped) }
   def is_assignment_lhs=(value); end
+  sig { returns(T.untyped) }
+  def safe_nav_chain; end
+  sig { params(value: T.untyped).returns(T.untyped) }
+  def safe_nav_chain=(value); end
+end
+
+class GetIndex
+  sig { returns(T.untyped) }
+  def safe_nav_chain; end
+  sig { params(value: T.untyped).returns(T.untyped) }
+  def safe_nav_chain=(value); end
 end
 
 class Identifier
@@ -1310,6 +1174,10 @@ class Identifier
   def heap_dupe_result; end
   sig { params(value: T.untyped).returns(T.untyped) }
   def heap_dupe_result=(value); end
+  sig { returns(T.untyped) }
+  def ownership_pending_transfer; end
+  sig { params(value: T.untyped).returns(T.untyped) }
+  def ownership_pending_transfer=(value); end
 end
 
 class IfStatement
@@ -1325,6 +1193,28 @@ class IfStatement
   def then_result_type; end
   sig { params(value: T.untyped).returns(T.untyped) }
   def then_result_type=(value); end
+end
+
+class IfStmt
+  sig { returns(T.untyped) }
+  def comptime; end
+  sig { params(value: T.untyped).returns(T.untyped) }
+  def comptime=(value); end
+end
+
+class IsA
+  sig { returns(T.untyped) }
+  def runtime_indirect_payload_as; end
+  sig { params(value: T.untyped).returns(T.untyped) }
+  def runtime_indirect_payload_as=(value); end
+  sig { returns(T.untyped) }
+  def runtime_payload_type; end
+  sig { params(value: T.untyped).returns(T.untyped) }
+  def runtime_payload_type=(value); end
+  sig { returns(T.untyped) }
+  def runtime_variant_name; end
+  sig { params(value: T.untyped).returns(T.untyped) }
+  def runtime_variant_name=(value); end
 end
 
 class MIR::BodySlot
@@ -1355,6 +1245,13 @@ class MIR::FieldDef
   def boxed_capture; end
   sig { params(value: T.untyped).returns(T.untyped) }
   def boxed_capture=(value); end
+end
+
+class MIR::IfStmt
+  sig { returns(T.untyped) }
+  def comptime; end
+  sig { params(value: T.untyped).returns(T.untyped) }
+  def comptime=(value); end
 end
 
 class MIR::OwnershipContract
@@ -1499,6 +1396,10 @@ class MethodCall
   sig { params(value: T.untyped).returns(T.untyped) }
   def pool_method=(value); end
   sig { returns(T.untyped) }
+  def safe_nav_chain; end
+  sig { params(value: T.untyped).returns(T.untyped) }
+  def safe_nav_chain=(value); end
+  sig { returns(T.untyped) }
   def set_method; end
   sig { params(value: T.untyped).returns(T.untyped) }
   def set_method=(value); end
@@ -1536,6 +1437,10 @@ class Pprof::Profile
 end
 
 class Program
+  sig { returns(T.untyped) }
+  def language_mode; end
+  sig { params(value: T.untyped).returns(T.untyped) }
+  def language_mode=(value); end
   sig { returns(T.untyped) }
   def mir_pass_state; end
   sig { params(value: T.untyped).returns(T.untyped) }
@@ -1716,6 +1621,8 @@ class SymbolEntry
   def mutated; end
   sig { returns(T::Boolean) }
   def non_escaping; end
+  sig { returns(Integer) }
+  def ownership_binding_id; end
   sig { returns(T.nilable(Symbol)) }
   def ownership_kind; end
   sig { params(value: T.nilable(Symbol)).returns(T.nilable(Symbol)) }
@@ -1728,6 +1635,10 @@ class SymbolEntry
   def poly_borrow_target; end
   sig { returns(T::Boolean) }
   def read; end
+  sig { returns(T::Boolean) }
+  def reassigned; end
+  sig { params(value: T::Boolean).returns(T::Boolean) }
+  def reassigned=(value); end
   sig { returns(T::Boolean) }
   def rebindable; end
   sig { params(value: T::Boolean).returns(T::Boolean) }
@@ -1836,13 +1747,6 @@ class Type
   def shape; end
 end
 
-class UnionDef
-  sig { returns(T.untyped) }
-  def methods; end
-  sig { params(value: T.untyped).returns(T.untyped) }
-  def methods=(value); end
-end
-
 class UseAfterMoveChecker
   sig { returns(T::Array[String]) }
   def errors; end
@@ -1853,6 +1757,10 @@ class VarDecl
   def mir_binding_entry; end
   sig { params(value: T.untyped).returns(T.untyped) }
   def mir_binding_entry=(value); end
+  sig { returns(T.untyped) }
+  def ownership_transport_plan; end
+  sig { params(value: T.untyped).returns(T.untyped) }
+  def ownership_transport_plan=(value); end
 end
 
 class WhenBlock
@@ -1898,10 +1806,6 @@ class WhileLoop
   def mark_per_iter; end
   sig { params(value: T.untyped).returns(T.untyped) }
   def mark_per_iter=(value); end
-  sig { returns(T.untyped) }
-  def tight; end
-  sig { params(value: T.untyped).returns(T.untyped) }
-  def tight=(value); end
 end
 
 class WithBlock

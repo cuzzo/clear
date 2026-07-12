@@ -120,7 +120,7 @@ class FunctionReturn
     when Kind::ElementOf
       return Type.new(:Any) unless receiver
 
-      el = T.must(receiver).element_type
+      el = receiver.element_type
       el || Type.new(:Any)
     when Kind::OptionalOfElement
       Type.optional_of(T.must(T.must(receiver).element_type))

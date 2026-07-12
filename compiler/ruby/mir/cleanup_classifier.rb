@@ -373,8 +373,8 @@ module CleanupClassifier
 
       field_ti = Type.from_node!(stmt.name, context: "field pre-cleanup")
       field_needs_cleanup =
-        field_ti.needs_cleanup?(schema_lookup) ||
-        field_ti.recursive_cleanup_shape?(schema_lookup)
+        field_ti.needs_cleanup?(T.unsafe(schema_lookup)) ||
+        field_ti.recursive_cleanup_shape?(T.unsafe(schema_lookup))
 
       # Auto-lock string fields: locked/always_mutable structs heap-dupe
       # string fields, so overwriting needs explicit free of the old value.
@@ -463,7 +463,7 @@ module CleanupClassifier
       if node.respond_to?(:symbol) && node.symbol&.heap_storage? &&
          !optional_empty_initializer?(value)
         ti = node.full_type!
-        cleanup = entry(:uniform, alloc: :heap) if ti.needs_explicit_cleanup?(:heap, schema_lookup)
+        cleanup = entry(:uniform, alloc: :heap) if ti.needs_explicit_cleanup?(:heap, T.unsafe(schema_lookup))
       end
     end
     if cleanup
@@ -482,7 +482,7 @@ module CleanupClassifier
   private_class_method def self.no_cleanup_alloc_entry(full_type, schema_lookup)
     ti = full_type.is_a?(Type) ? full_type : Type.new(full_type)
     return nil unless ti.heap_ptr? || ti.collection_value?
-    alloc = ti.cleanup_allocator(schema_lookup)
+    alloc = ti.cleanup_allocator(T.unsafe(schema_lookup))
     CleanupEntry.no_cleanup(alloc: alloc, scope: MIR::Placement.heap?(alloc) ? :heap : :function)
   rescue
     nil
@@ -587,7 +587,7 @@ module CleanupClassifier
 
     # Plain slice (Int64[] without a collection modifier).
     if ti.direct_indexable_collection?
-      elem_zig = ti.element_type ? (Type.new(ti.element_type).zig_type rescue ti.element_type.to_s) : "UNKNOWN"
+      elem_zig = ti.element_type ? (Type.new(T.unsafe(ti.element_type)).zig_type rescue ti.element_type.to_s) : "UNKNOWN"
       return entry(:uniform, elem_zig_type: elem_zig)
     end
 
@@ -650,7 +650,7 @@ module CleanupClassifier
     return nil if variant_type.indirect?
 
     if variant_type.array? && !variant_type.string?
-      elem_zig = variant_type.element_type ? (Type.new(variant_type.element_type).zig_type rescue variant_type.element_type.to_s) : "UNKNOWN"
+      elem_zig = variant_type.element_type ? (Type.new(T.unsafe(variant_type.element_type)).zig_type rescue variant_type.element_type.to_s) : "UNKNOWN"
       return entry(:uniform, alloc: :heap, has_moved_guard: true, match_as: true, elem_zig_type: elem_zig)
     elsif variant_type.map?
       return entry(:uniform, alloc: :heap, has_moved_guard: true, match_as: true)
@@ -673,7 +673,7 @@ module CleanupClassifier
       classification_node = anchor_node.is_a?(AST::Binding) ? anchor_node.expr : anchor_node
       e = classify_binding(inner_ti, classification_node, schema_lookup)
       e ||= entry(:heap_string, has_moved_guard: true) if cleanup_owned_string_type?(inner_ti)
-      e ||= entry(:uniform) if inner_ti.needs_explicit_cleanup?(:heap, schema_lookup)
+      e ||= entry(:uniform) if inner_ti.needs_explicit_cleanup?(:heap, T.unsafe(schema_lookup))
       next unless e
       capture_alloc = capture_expr_owned_alloc(expr, schema_lookup)
       e.set_alloc!(capture_alloc) if capture_alloc
@@ -729,7 +729,7 @@ module CleanupClassifier
     return false unless sig.respond_to?(:return_type)
     ret = Type.new(sig.return_type)
     ret = ret.success_type || ret
-    !!ret && ret.needs_explicit_cleanup?(:heap, schema_lookup)
+    !!ret && ret.needs_explicit_cleanup?(:heap, T.unsafe(schema_lookup))
   end
 
   sig { params(expr: AST::Node).returns(T::Boolean) }
@@ -827,7 +827,7 @@ module CleanupClassifier
     end
     entry ||= classify_mutable_owning_slot(ti, node, schema_lookup)
     entry ||= classify_optional(ti, schema_lookup, node: node)
-    if !entry && facts.heap_storage && ti.recursive_cleanup_shape?(schema_lookup)
+    if !entry && facts.heap_storage && ti.recursive_cleanup_shape?(T.unsafe(schema_lookup))
       entry = entry(:uniform, has_moved_guard: false)
       entry[:fixed_alloc] = true
     end
@@ -859,7 +859,7 @@ module CleanupClassifier
       borrow_provenance: node.borrow_provenance?,
       rodata_provenance: node.rodata_provenance?,
       empty_initializer: optional_empty_initializer?(binding_value(node)),
-      mutable_binding_mutated: node.is_a?(AST::VarDecl) && node.mutable == true && node.var_mutated == true,
+      mutable_binding_mutated: T.unsafe(node.is_a?(AST::VarDecl) && node.mutable == true && node.var_mutated == true),
       resource_close_plan: node.resource_close_plan,
       sync: symbol&.sync,
     )
@@ -887,7 +887,7 @@ module CleanupClassifier
     return nil unless entry
     return entry unless node.respond_to?(:symbol)
     storage = storage_from_symbol(node.symbol, node)
-    type_alloc = ti.cleanup_allocator(schema_lookup)
+    type_alloc = ti.cleanup_allocator(T.unsafe(schema_lookup))
     return entry if entry[:fixed_alloc]
     entry.set_alloc!((type_alloc == :heap || storage == :heap) ? :heap : :frame)
     entry
@@ -922,7 +922,7 @@ module CleanupClassifier
 
   sig { params(ti: Type, schema_lookup: Proc).returns(T::Boolean) }
   private_class_method def self.ownership_bearing_type?(ti, schema_lookup)
-    ti.ownership_bearing?(schema_lookup)
+    ti.ownership_bearing?(T.unsafe(schema_lookup))
   end
 
   sig { params(ti: Type).returns(T::Boolean) }
@@ -934,7 +934,7 @@ module CleanupClassifier
   private_class_method def self.classify_mutable_owning_slot(ti, node, schema_lookup)
     return nil unless mutable_owning_slot?(ti, node, schema_lookup)
     kind = ti.string? ? :heap_string : :uniform
-    alloc = ti.cleanup_allocator(schema_lookup)
+    alloc = ti.cleanup_allocator(T.unsafe(schema_lookup))
     e = entry(kind, alloc: alloc, has_moved_guard: true)
     e
   end
@@ -947,9 +947,9 @@ module CleanupClassifier
     return nil unless sym&.storage == :heap
     ret = ti.success_type
     return nil unless ret && (
-      ret.needs_explicit_cleanup?(:heap, schema_lookup) ||
+      ret.needs_explicit_cleanup?(:heap, T.unsafe(schema_lookup)) ||
         ret.heap_ptr? ||
-        ret.recursive_cleanup_shape?(schema_lookup)
+        ret.recursive_cleanup_shape?(T.unsafe(schema_lookup))
     )
 
     kind = ret.string? ? :heap_string : :uniform
@@ -1090,8 +1090,8 @@ module CleanupClassifier
   sig { params(inner: Type, schema_lookup: Proc).returns(T::Boolean) }
   private_class_method def self.optional_payload_needs_cleanup?(inner, schema_lookup)
     return true if cleanup_owned_string_type?(inner)
-    return true if inner.recursive_cleanup_shape?(schema_lookup)
-    return true if inner.needs_cleanup?(schema_lookup)
+    return true if inner.recursive_cleanup_shape?(T.unsafe(schema_lookup))
+    return true if inner.needs_cleanup?(T.unsafe(schema_lookup))
     schema = schema_lookup.call(inner.resolved) rescue nil
     return union_variants_need_cleanup?(schema, schema_lookup) if Schemas.union?(schema)
     return elem_has_string_fields?(schema) if Schemas.field_bearing?(schema)
@@ -1123,7 +1123,7 @@ module CleanupClassifier
     is_heap = node_sym&.heap_storage?
     return nil unless is_heap
     return nil if ti.any_rc? || ti.link? || SymbolEntry.cleanup_sync?(sync)
-    return nil if ti.implicitly_copyable?(schema_lookup)
+    return nil if ti.implicitly_copyable?(T.unsafe(schema_lookup))
     return nil if ti.collection?
     # Raw fixed arrays are inline Zig values even when conservative escape
     # analysis heap-places the containing function frame. Primitive elements
@@ -1168,7 +1168,7 @@ module CleanupClassifier
   private_class_method def self.classify_heap_composite(ti, node, schema_lookup, sync = nil)
     return nil unless node.respond_to?(:heap_storage?) && node.heap_storage?
     return nil if ti.any_rc? || ti.link? || SymbolEntry.cleanup_sync?(sync)
-    return nil if ti.implicitly_copyable?(schema_lookup)
+    return nil if ti.implicitly_copyable?(T.unsafe(schema_lookup))
     # Primitives (f64, i64, Bool, Byte) are stack values -- never need heap cleanup
     # even if storage was incorrectly set to :heap by upstream passes.
     return nil if ti.primitive?
@@ -1276,7 +1276,7 @@ module CleanupClassifier
   private_class_method def self.elem_type_needs_cleanup?(et, schema_lookup)
     return false if et.borrowed_reference?
     return true if et.string?
-    return true if et.needs_cleanup?(schema_lookup)
+    return true if et.needs_cleanup?(T.unsafe(schema_lookup))
     elem_schema = schema_lookup.call(et.resolved) rescue nil
     return union_variants_need_cleanup?(elem_schema, schema_lookup) if Schemas.union?(elem_schema)
     return elem_has_cleanup_fields?(elem_schema, schema_lookup) if Schemas.field_bearing?(elem_schema)
@@ -1308,7 +1308,7 @@ module CleanupClassifier
 
   sig { params(schema: T.nilable(FieldBearingSchema), schema_lookup: T.nilable(Proc)).returns(T::Boolean) }
   private_class_method def self.elem_has_cleanup_fields?(schema, schema_lookup)
-    return false unless Schemas.inline_struct?(schema) || Schemas.field_bearing?(T.cast(schema, Schemas::SchemaValue))
+    return false unless Schemas.inline_struct?(T.unsafe(schema)) || Schemas.field_bearing?(T.cast(schema, Schemas::SchemaValue))
     concrete_schema = T.must(schema)
     borrowed = borrowed_field_names(concrete_schema)
     concrete_schema.fields.any? do |name, v|
@@ -1321,8 +1321,8 @@ module CleanupClassifier
         t.indirect? ||
         t.any_rc? ||
         t.link? ||
-        (schema_lookup && t.recursive_cleanup_shape?(schema_lookup)) ||
-        (schema_lookup && t.needs_cleanup?(schema_lookup))
+        (schema_lookup && t.recursive_cleanup_shape?(T.unsafe(schema_lookup))) ||
+        (schema_lookup && t.needs_cleanup?(T.unsafe(schema_lookup)))
     end
   end
 

@@ -71,10 +71,10 @@ module Annotator
       def reject_mutating_borrowed_receiver!(node)
         return unless node.mutates_receiver
 
-        root = root_variable_name(node.object)
+        root = T.unsafe(self).__send__(:root_variable_name, node.object)
         return unless root
-        return if ownership_graph.can_write?(root)
-        error!(node, :ASSIGN_WHILE_BORROWED, name: root)
+        return if T.unsafe(self).__send__(:ownership_graph).can_write?(root)
+        T.unsafe(self).__send__(:error!, node, :ASSIGN_WHILE_BORROWED, name: root)
       end
 
       sig { params(node: AST::StaticCall).void }

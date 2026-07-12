@@ -7,7 +7,7 @@ module Annotator
       extend T::Sig
 
       MatchSchema = T.type_alias { T.any(Schemas::EnumSchema, Schemas::StructSchema, Schemas::UnionSchema, Schemas::ResourceSchema) }
-      MatchPayload = T.type_alias { T.any(Type, Symbol, Schemas::InlineStructVariant, NilClass) }
+      MatchPayload = T.type_alias { T.any(Type::FunctionType, Type, Symbol, String, Schemas::InlineStructVariant, NilClass) }
       BranchSnapshot = T.type_alias { T.nilable(OwnershipGraph::LightweightSnapshot) }
 
       class BranchAnalysisResult < T::Struct
@@ -255,7 +255,7 @@ module Annotator
         return T.must(variant_key).to_s if variant_key
 
         payload_matches = schema.variants.keys.select do |variant|
-          payload = normalized_runtime_match_payload(schema.variants[variant], union_subst)
+          payload = normalized_runtime_match_payload(T.unsafe(schema.variants[variant]), union_subst)
           runtime_is_a_payload_matches?(payload, target_names, union_type, variant.to_s)
         end
 
@@ -290,7 +290,7 @@ module Annotator
         when AST::GetField
           runtime_is_a_target_segments(T.cast(node.target, AST::Node)) + [node.field.to_s]
         else
-          [node.token_value.to_s]
+          [T.unsafe(node).token_value.to_s]
         end
       end
 
@@ -397,7 +397,7 @@ module Annotator
 
         type_param = T.cast(refinement[0], Symbol)
         narrowed_type = T.cast(refinement[1], Type)
-        with_comptime_type_param_refinement(type_param, narrowed_type) { blk.call }
+        T.unsafe(self).__send__(:with_comptime_type_param_refinement, type_param, narrowed_type) { blk.call }
       end
 
       sig { params(condition: AST::Node).returns(T.nilable(T::Array[T.untyped])) }
@@ -407,7 +407,7 @@ module Annotator
         return nil unless left.is_a?(AST::Identifier)
 
         type_param = left.name.to_sym
-        return nil unless current_function_type_param?(type_param)
+        return nil unless T.unsafe(self).__send__(:current_function_type_param?, type_param)
 
         narrowed_type = static_is_a_target_type(condition.right)
         narrowed_type ? [type_param, narrowed_type] : nil
@@ -439,7 +439,7 @@ module Annotator
             )
           ],
         )
-        fixable!(
+        T.unsafe(self).__send__(:fixable!,
           node,
           category: :type,
           level: :error,
@@ -459,14 +459,15 @@ module Annotator
           payload_type = condition.runtime_payload_type
           return unless payload_type
 
-          current_scope.declare(binding, nil, payload_type, false, false, nil, :stack)
-          og_declare(binding, nil, payload_type)
-          classify_ownership!(current_scope.local_entry!(binding))
+          scope = T.unsafe(self).__send__(:current_scope)
+          scope.declare(binding, nil, payload_type, false, false, nil, :stack)
+          T.unsafe(self).__send__(:og_declare, binding, nil, payload_type)
+          T.unsafe(self).__send__(:classify_ownership!, scope.local_entry!(binding))
           borrow_match_payload_binding!(binding)
           return
         end
 
-        current_scope.declare(binding, nil, Type.new(:Type), false, false, nil, :stack)
+        T.unsafe(self).__send__(:current_scope).declare(binding, nil, Type.new(:Type), false, false, nil, :stack)
       end
 
       sig { params(node: AST::IfBind).returns(Symbol) }
@@ -668,10 +669,10 @@ module Annotator
 
         return unless variant_name
 
-        head_payload = normalized_match_payload(schema.variants[variant_name], union_subst)
+        head_payload = normalized_match_payload(T.unsafe(schema.variants[variant_name]), union_subst)
         match_variant_names(arm).drop(1).each do |extra_name|
-          extra_payload = normalized_match_payload(schema.variants[extra_name], union_subst)
-          next if head_payload == extra_payload
+          extra_payload = normalized_match_payload(T.unsafe(schema.variants[extra_name]), union_subst)
+          next if head_payload == T.unsafe(extra_payload)
 
           error!(node, :MATCH_MULTI_ARM_PAYLOAD_MISMATCH,
             head: variant_name, other: extra_name, kind: kind, name: name)
@@ -891,7 +892,7 @@ module Annotator
           return
         end
 
-        payload_type = match_payload_binding_type(plan, variant_name, raw_payload, match_case)
+        payload_type = match_payload_binding_type(plan, variant_name, T.unsafe(raw_payload), match_case)
         current_scope.declare(binding, nil, payload_type, false, false, nil, :stack)
         og_declare(binding, nil, payload_type)
         classify_ownership!(current_scope.local_entry!(binding))

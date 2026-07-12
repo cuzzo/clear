@@ -400,8 +400,8 @@ class AutoConstraintCollector
   # user picked a specific collection — don't reinterpret as Auto.
   sig { params(node: T.nilable(AST::Locatable)).returns(T::Boolean) }
   def empty_list_lit?(node)
-    node.is_a?(AST::ListLit) && node.items.empty? &&
-      !node.collection_constructor?
+    (node.is_a?(AST::ListLit) && node.items.empty? &&
+      !node.collection_constructor?) == true
   end
 
   sig { params(node: T.nilable(AST::Locatable)).returns(T::Boolean) }
