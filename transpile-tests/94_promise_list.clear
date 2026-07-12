@@ -25,7 +25,7 @@ FN main() RETURNS Void ->
     MUTABLE sum: Int64 = 0;
     MUTABLE j: Int64 = 0;
     WHILE j < 4 DO
-        IF futures[j] AS future THEN
+        IF futures[j] EXISTS AS future THEN
             sum = sum + NEXT future;
         END
         j = j + 1;

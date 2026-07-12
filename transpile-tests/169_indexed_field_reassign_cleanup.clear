@@ -7,7 +7,7 @@ STRUCT Node { keys: Int64[]@list, vals: String[]@list }
 FN main() RETURNS Void ->
     MUTABLE nodes: Node[]@list = [];
     nodes.append(Node{ keys: [], vals: [] });
-    IF nodes[0] AS node THEN
+    IF nodes[0] EXISTS AS node THEN
         node.keys.append(1);
         node.vals.append("one");
     END
@@ -16,7 +16,7 @@ FN main() RETURNS Void ->
     MUTABLE nv: String[]@list = [];
     nv.append("ten");
     nv.append("twenty");
-    IF nodes[0] AS node THEN node.vals = nv; END
+    IF nodes[0] EXISTS AS node THEN node.vals = nv; END
 
     ASSERT nodes[0]?.vals.length() == 2, "replaced vals has 2 entries";
     ASSERT nodes[0]?.vals[0] == "ten", "val 0 is ten";
@@ -26,7 +26,7 @@ FN main() RETURNS Void ->
     MUTABLE nk: Int64[]@list = [];
     nk.append(10);
     nk.append(20);
-    IF nodes[0] AS node THEN node.keys = nk; END
+    IF nodes[0] EXISTS AS node THEN node.keys = nk; END
 
     ASSERT nodes[0]?.keys.length() == 2, "replaced keys has 2 entries";
     ASSERT nodes[0]?.keys[0] == 10, "key 0 is 10";

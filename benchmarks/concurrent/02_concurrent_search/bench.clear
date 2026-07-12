@@ -79,14 +79,14 @@ FN main() RETURNS Void ->
   FOR j IN (0 ..< 10) DO
     MUTABLE best = j;
     FOR m IN (j + 1 ..< n) DO
-      IF results[m] AS candidate THEN
-        IF results[best] AS currentBest THEN
+      IF results[m] EXISTS AS candidate THEN
+        IF results[best] EXISTS AS currentBest THEN
           IF candidate.count > currentBest.count THEN best = m; END
         END
       END
     END
     IF best != j THEN
-      IF (COPY results[j] AS tmp) AND (COPY results[best] AS bestResult) THEN
+      IF (COPY results[j] EXISTS AS tmp) AND (COPY results[best] EXISTS AS bestResult) THEN
         results[j] = bestResult;
         results[best] = tmp;
       END
@@ -96,7 +96,7 @@ FN main() RETURNS Void ->
   # Print top 10.
   print("Top 10 files by '", needle, "' count:");
   FOR p IN (0 ..< 10) DO
-    IF results[p] AS r THEN
+    IF results[p] EXISTS AS r THEN
       print("  ", files[r.file_idx], "  ", r.count);
     END
   END

@@ -16,7 +16,7 @@ UNION Value {
 
 FN envGet!(envId: Id<Env>, name: String, MUTABLE pool: Env[10000]@pool) RETURNS !Value EFFECTS REENTRANT ->
     MUTABLE parentVal: Value = Value.Nil;
-    IF pool[envId] AS env THEN
+    IF pool[envId] EXISTS AS env THEN
         val = COPY (env.vars[name] OR_ELSE Value{ Number: 0.0 - 777777.0 });
         PARTIAL MATCH val START
             Value.Number AS n ->
@@ -40,13 +40,13 @@ FN main() RETURNS Void ->
 
     # Create root env and set a=10
     rootId: Id<Env> = pool.insert(Env{ vars: {} });
-    IF pool[rootId] AS env THEN
+    IF pool[rootId] EXISTS AS env THEN
         env.vars["a"] = Value{ Number: 10.0 };
     END
 
     # Create child env with __p -> root, set x=5
     childId: Id<Env> = pool.insert(Env{ vars: {} });
-    IF pool[childId] AS env THEN
+    IF pool[childId] EXISTS AS env THEN
         env.vars["__p"] = Value{ EnvRef: rootId };
         env.vars["x"] = Value{ Number: 5.0 };
     END

@@ -43,7 +43,7 @@ FN main() RETURNS Void ->
   # not decrement the list's strong reference or make the next lookup dangle.
   MUTABLE rc_items: RcItem@multiowned[]@list = [];
   rc_items.append(RcItem{ value: 5_i64 } @multiowned);
-  IF rc_items[0] AS rc THEN ASSERT rc.value == 5_i64; END
-  IF rc_items[0] AS rc THEN ASSERT rc.value == 5_i64; END
+  IF rc_items[0] EXISTS AS rc THEN ASSERT rc.value == 5_i64; END
+  IF rc_items[0] EXISTS AS rc THEN ASSERT rc.value == 5_i64; END
   RETURN;
 END

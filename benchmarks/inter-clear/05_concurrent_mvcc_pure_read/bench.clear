@@ -43,7 +43,7 @@ FN main() RETURNS Void ->
     END
 
     MUTABLE s_rw: Int64 = 0_i64;
-    FOR r IN (0_i64 ..< n_readers) DO IF rw_readers[r] AS future THEN s_rw = s_rw + (NEXT future); END END
+    FOR r IN (0_i64 ..< n_readers) DO IF rw_readers[r] EXISTS AS future THEN s_rw = s_rw + (NEXT future); END END
     elapsed_rw_ms = timestampMs() - t0_rw;
 
     # ---------- Variant B: @shared:versioned (MVCC) ----------
@@ -65,7 +65,7 @@ FN main() RETURNS Void ->
     END
 
     MUTABLE s_v: Int64 = 0_i64;
-    FOR r IN (0_i64 ..< n_readers) DO IF v_readers[r] AS future THEN s_v = s_v + (NEXT future); END END
+    FOR r IN (0_i64 ..< n_readers) DO IF v_readers[r] EXISTS AS future THEN s_v = s_v + (NEXT future); END END
     elapsed_v_ms = timestampMs() - t0_v;
 
     # ---------- Report ----------

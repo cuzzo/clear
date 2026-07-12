@@ -16,7 +16,7 @@ FN main() RETURNS Void ->
 
     # @list: pop returns ?T
     MUTABLE popped: Int64 = -1;
-    IF nums.pop() AS last THEN
+    IF nums.pop() EXISTS AS last THEN
         popped = last;
     END
     ASSERT popped == 15, "popped last element";
@@ -25,7 +25,7 @@ FN main() RETURNS Void ->
     # pop on empty list returns nil
     MUTABLE empty: Int64[]@list = [];
     MUTABLE popped_nil: Bool = FALSE;
-    IF empty.pop() AS _ THEN
+    IF empty.pop() EXISTS AS _ THEN
         popped_nil = TRUE;
     ELSE
         popped_nil = FALSE;
@@ -45,7 +45,7 @@ FN main() RETURNS Void ->
     id1 = pool.insert(Item{ val: 42 });
     id2 = pool.insert(Item{ val: 99 });
     ASSERT pool.length() == 2, "pool length";
-    IF pool[id1] AS item THEN
+    IF pool[id1] EXISTS AS item THEN
         ASSERT item.val == 42, "pool get id1";
     END
 

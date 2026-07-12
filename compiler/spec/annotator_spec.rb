@@ -940,7 +940,7 @@ RSpec.describe SemanticAnnotator do
           STRUCT Node { keys: Int64[]@list, vals: String[]@list }
           STRUCT DB { nodes: Node[]@list }
           FN countKeys(db: DB, idx: Int64) RETURNS Int64 ->
-              IF db.nodes[idx] AS node THEN RETURN node.keys.length(); END
+              IF db.nodes[idx] EXISTS AS node THEN RETURN node.keys.length(); END
               RETURN 0_i64;
           END
         FLUX
@@ -952,7 +952,7 @@ RSpec.describe SemanticAnnotator do
           STRUCT Node { keys: Int64[]@list, vals: String[]@list }
           STRUCT DB { nodes: Node[]@list }
           FN addKey!(MUTABLE db: DB, idx: Int64, key: Int64) RETURNS !Void ->
-              IF db.nodes[idx] AS node THEN node.keys.append(key); END
+              IF db.nodes[idx] EXISTS AS node THEN node.keys.append(key); END
           END
         FLUX
         expect { run(code) }.not_to raise_error
@@ -962,7 +962,7 @@ RSpec.describe SemanticAnnotator do
         code = <<~FLUX
           STRUCT Node { keys: Int64[]@list }
           FN addKey!(MUTABLE nodes: Node[]@list, idx: Int64, key: Int64) RETURNS !Void ->
-              IF nodes[idx] AS node THEN node.keys.append(key); END
+              IF nodes[idx] EXISTS AS node THEN node.keys.append(key); END
           END
         FLUX
         ast = run(code)
@@ -976,7 +976,7 @@ RSpec.describe SemanticAnnotator do
         code = <<~FLUX
           STRUCT Node { keys: Int64[]@list }
           FN setKeys!(MUTABLE nodes: Node[]@list, idx: Int64) RETURNS Void ->
-              IF nodes[idx] AS node THEN node.keys = [1, 2, 3]; END
+              IF nodes[idx] EXISTS AS node THEN node.keys = [1, 2, 3]; END
           END
         FLUX
         ast = run(code)
@@ -993,7 +993,7 @@ RSpec.describe SemanticAnnotator do
             MUTABLE nodes: Node[]@list = [];
             nodes.append(Node{ vals: [] });
             MUTABLE nv: String[]@list = [];
-            IF nodes[0] AS node THEN node.vals = nv; END
+            IF nodes[0] EXISTS AS node THEN node.vals = nv; END
           END
         FLUX
         zig = ZigTranspiler.new.transpile(src)
@@ -4753,11 +4753,11 @@ RSpec.describe SemanticAnnotator do
       expect(zig).to include("CheatLib.indexOfFrom(text, needle, @as(i64, offset))")
     end
 
-    it "rejects WHILE AS when the method receiver is immutable" do
+    it "rejects WHILE EXISTS AS when the method receiver is immutable" do
       src = <<~CHT
         FN test() RETURNS Void ->
           str = "a,b,c";
-          WHILE str.indexOf(",") AS pos DO
+          WHILE str.indexOf(",") EXISTS AS pos DO
             BREAK;
           END
           RETURN;
@@ -4766,12 +4766,12 @@ RSpec.describe SemanticAnnotator do
       expect { run(src) }.to raise_error(/immutable|cannot advance|loop forever/i)
     end
 
-    it "allows WHILE AS when the method receiver is MUTABLE" do
+    it "allows WHILE EXISTS AS when the method receiver is MUTABLE" do
       src = <<~CHT
         FN test() RETURNS !Void ->
           MUTABLE items: Int64[5]@list = [];
           items.append(1_i64);
-          WHILE items.pop() AS v DO
+          WHILE items.pop() EXISTS AS v DO
             _ = v;
           END
           RETURN;
@@ -4786,7 +4786,7 @@ RSpec.describe SemanticAnnotator do
         FN test() RETURNS !Void ->
           live = Node{ val: 42 } @multiowned;
           w = LINK live;
-          WHILE RESOLVE w AS node DO
+          WHILE RESOLVE w EXISTS AS node DO
             BREAK;
           END
           RETURN;

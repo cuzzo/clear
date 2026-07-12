@@ -2383,7 +2383,7 @@ RSpec.describe MIRLowering do
         FN main() RETURNS Void ->
           MUTABLE pool: Env[4]@pool = [];
           id: Id<Env> = pool.insert(Env{ vars: {} });
-          IF pool[id] AS env THEN
+          IF pool[id] EXISTS AS env THEN
             env.vars["a"] = 1_i64;
           END
           RETURN;

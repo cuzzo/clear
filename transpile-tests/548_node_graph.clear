@@ -26,7 +26,7 @@ FN main() RETURNS Void ->
 
   # Replacing an edge changes only the compact handle. Both payloads remain
   # owned by the inferred type store until the outermost @node scope exits.
-  IF root.children[0] AS child THEN
+  IF root.children[0] EXISTS AS child THEN
     root.left = child;
   END
   ASSERT root.left?.id == 3, "existing node handle assigns directly";

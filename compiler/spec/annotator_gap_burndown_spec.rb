@@ -481,7 +481,7 @@ RSpec.describe "annotator branch gap burndown" do
     expect(effects).to include(EffectTracker::LOOP_UNBOUND)
   end
 
-  it "skips captured moved values while validating WHILE AS loops" do
+  it "skips captured moved values while validating WHILE EXISTS AS loops" do
     ann = quiet_annotator
     condition = AST::Identifier.new(token, "next_value")
     condition.full_type = Type.optional_of(:String)
@@ -1223,7 +1223,7 @@ RSpec.describe "annotator branch gap burndown" do
       <<~CHT,
         FN main() RETURNS Void ->
           xs: Int64[] = [1_i64, 2_i64];
-          WHILE xs.pop() AS v DO
+          WHILE xs.pop() EXISTS AS v DO
             s: String = COPY "owned";
             GIVE s;
           END

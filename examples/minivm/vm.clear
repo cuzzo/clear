@@ -2484,20 +2484,20 @@ FN runRegisterBytecode!(ops: Int64[], opcodes: RegisterOp[], consts: RegisterVal
             RegisterOp.IHAppend ->
                     handleReg = ops[ip]; ip += 1;
                     src = ops[ip]; ip += 1;
-                    IF intListHandles[iregs[iBase + handleReg]] AS handle THEN
+                    IF intListHandles[iregs[iBase + handleReg]] EXISTS AS handle THEN
                         handle.values.append(iregs[iBase + src]);
                     END,
             RegisterOp.IHGet ->
                     dst = ops[ip]; ip += 1;
                     handleReg = ops[ip]; ip += 1;
                     idxReg = ops[ip]; ip += 1;
-                    IF intListHandles[iregs[iBase + handleReg]] AS handle THEN
+                    IF intListHandles[iregs[iBase + handleReg]] EXISTS AS handle THEN
                         iregs[iBase + dst] = handle.values[iregs[iBase + idxReg]] OR_ELSE 0_i64;
                     END,
             RegisterOp.IHLen ->
                     dst = ops[ip]; ip += 1;
                     handleReg = ops[ip]; ip += 1;
-                    IF intListHandles[iregs[iBase + handleReg]] AS handle THEN
+                    IF intListHandles[iregs[iBase + handleReg]] EXISTS AS handle THEN
                         iregs[iBase + dst] = handle.values.length();
                     END,
             RegisterOp.SHNew ->
@@ -2508,20 +2508,20 @@ FN runRegisterBytecode!(ops: Int64[], opcodes: RegisterOp[], consts: RegisterVal
             RegisterOp.SHAppend ->
                     handleReg = ops[ip]; ip += 1;
                     src = ops[ip]; ip += 1;
-                    IF stringListHandles[iregs[iBase + handleReg]] AS handle THEN
+                    IF stringListHandles[iregs[iBase + handleReg]] EXISTS AS handle THEN
                         handle.values.append(COPY sregs[src]);
                     END,
             RegisterOp.SHGet ->
                     dst = ops[ip]; ip += 1;
                     handleReg = ops[ip]; ip += 1;
                     idxReg = ops[ip]; ip += 1;
-                    IF stringListHandles[iregs[iBase + handleReg]] AS handle THEN
+                    IF stringListHandles[iregs[iBase + handleReg]] EXISTS AS handle THEN
                         sregs[dst] = COPY (handle.values[iregs[iBase + idxReg]] OR_ELSE "");
                     END,
             RegisterOp.SHLen ->
                     dst = ops[ip]; ip += 1;
                     handleReg = ops[ip]; ip += 1;
-                    IF stringListHandles[iregs[iBase + handleReg]] AS handle THEN
+                    IF stringListHandles[iregs[iBase + handleReg]] EXISTS AS handle THEN
                         iregs[iBase + dst] = handle.values.length();
                     END,
             RegisterOp.BgSpawn ->
@@ -2545,10 +2545,10 @@ FN runRegisterBytecode!(ops: Int64[], opcodes: RegisterOp[], consts: RegisterVal
                     fniFidVal = iregs[iBase + fniFid];
                     MUTABLE fniPv: RegisterValue = RegisterValue.Nil;
                     fniKey = fniFidVal.toString();
-                    IF futureResolved[fniKey] AS fniCached THEN
+                    IF futureResolved[fniKey] EXISTS AS fniCached THEN
                         fniPv = COPY fniCached;
                     ELSE
-                        IF futureTable[fniFidVal] AS fniFuture THEN
+                        IF futureTable[fniFidVal] EXISTS AS fniFuture THEN
                             fniPv = NEXT fniFuture;
                         ELSE
                             RAISE "invalid future id";
@@ -2566,10 +2566,10 @@ FN runRegisterBytecode!(ops: Int64[], opcodes: RegisterOp[], consts: RegisterVal
                     fnfFidVal = iregs[iBase + fnfFid];
                     MUTABLE fnfPv: RegisterValue = RegisterValue.Nil;
                     fnfKey = fnfFidVal.toString();
-                    IF futureResolved[fnfKey] AS fnfCached THEN
+                    IF futureResolved[fnfKey] EXISTS AS fnfCached THEN
                         fnfPv = COPY fnfCached;
                     ELSE
-                        IF futureTable[fnfFidVal] AS fnfFuture THEN
+                        IF futureTable[fnfFidVal] EXISTS AS fnfFuture THEN
                             fnfPv = NEXT fnfFuture;
                         ELSE
                             RAISE "invalid future id";
@@ -2587,10 +2587,10 @@ FN runRegisterBytecode!(ops: Int64[], opcodes: RegisterOp[], consts: RegisterVal
                     fnsFidVal = iregs[iBase + fnsFid];
                     MUTABLE fnsPv: RegisterValue = RegisterValue.Nil;
                     fnsKey = fnsFidVal.toString();
-                    IF futureResolved[fnsKey] AS fnsCached THEN
+                    IF futureResolved[fnsKey] EXISTS AS fnsCached THEN
                         fnsPv = COPY fnsCached;
                     ELSE
-                        IF futureTable[fnsFidVal] AS fnsFuture THEN
+                        IF futureTable[fnsFidVal] EXISTS AS fnsFuture THEN
                             fnsPv = NEXT fnsFuture;
                         ELSE
                             RAISE "invalid future id";

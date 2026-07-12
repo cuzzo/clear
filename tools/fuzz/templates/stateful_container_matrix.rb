@@ -22,7 +22,7 @@ FuzzGenerator.register(:stateful_container_matrix, cells: SCM_CELLS) do |p|
     body = <<~CLEAR.chomp
       MUTABLE items: Managed#{cap}[]@list = [];
           items.append(Managed{ text: COPY "old" } #{cap});
-          IF items[0] AS borrowed THEN
+          IF items[0] EXISTS AS borrowed THEN
               #{mutation}
               ASSERT borrowed.text == "old";
           END
@@ -39,9 +39,9 @@ FuzzGenerator.register(:stateful_container_matrix, cells: SCM_CELLS) do |p|
     when :copy_values
       "MUTABLE items: #{map_type} = {}; items[#{key}] = Managed{ text: COPY \"copy\" } #{cap}; copied = COPY items; values = items.values(); items.delete(#{key}); ASSERT copied[#{key}]?.text == \"copy\"; ASSERT values[0]?.text == \"copy\";"
     when :borrow_then_delete
-      "MUTABLE items: #{map_type} = {}; items[#{key}] = Managed{ text: COPY \"old\" } #{cap}; IF items[#{key}] AS borrowed THEN items.delete(#{key}); ASSERT borrowed.text == \"old\"; END"
+      "MUTABLE items: #{map_type} = {}; items[#{key}] = Managed{ text: COPY \"old\" } #{cap}; IF items[#{key}] EXISTS AS borrowed THEN items.delete(#{key}); ASSERT borrowed.text == \"old\"; END"
     when :borrow_then_overwrite
-      "MUTABLE items: #{map_type} = {}; items[#{key}] = Managed{ text: COPY \"old\" } #{cap}; IF items[#{key}] AS borrowed THEN items[#{key}] = Managed{ text: COPY \"new\" } #{cap}; ASSERT borrowed.text == \"old\"; END"
+      "MUTABLE items: #{map_type} = {}; items[#{key}] = Managed{ text: COPY \"old\" } #{cap}; IF items[#{key}] EXISTS AS borrowed THEN items[#{key}] = Managed{ text: COPY \"new\" } #{cap}; ASSERT borrowed.text == \"old\"; END"
     end
   end
 

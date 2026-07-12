@@ -7,12 +7,12 @@ FN run!(MUTABLE pool: Env[200000]@pool) RETURNS Int64 ->
     MUTABLE iter: Int64 = 0;
     WHILE iter < 100000 DO
         id: Id<Env> = pool.insert(Env{ vars: {} });
-        IF pool[id] AS env THEN
+        IF pool[id] EXISTS AS env THEN
             env.vars["k1"] = Value{ Int64Val: iter };
             env.vars["k2"] = Value{ Int64Val: iter * 2 };
             env.vars["k3"] = Value{ Int64Val: iter * 3 };
         END
-        IF pool[id] AS env THEN
+        IF pool[id] EXISTS AS env THEN
             PARTIAL MATCH env.vars["k2"] OR_ELSE Value.Nil START
                 Value.Int64Val AS v -> total = total + v;,
                 DEFAULT -> PASS;

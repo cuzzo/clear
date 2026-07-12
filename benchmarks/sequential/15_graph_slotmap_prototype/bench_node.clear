@@ -17,7 +17,7 @@ FN main() RETURNS Void ->
   END
   TIGHT FOR i IN (0_i64 ..< n) DO
     target = (i * 1_664_525_i64 + 1_013_904_223_i64) MOD n;
-    IF nodes[i] AS node THEN
+    IF nodes[i] EXISTS AS node THEN
       node.next = nodes[target];
     END
   END
@@ -36,7 +36,7 @@ FN main() RETURNS Void ->
   TIGHT FOR round IN (0_i64 ..< writeRounds) DO
     TIGHT FOR i IN (0_i64 ..< n) DO
       target = (i * 22_695_477_i64 + round * 1_103_515_245_i64 + 12_345_i64) MOD n;
-      IF nodes[i] AS node THEN
+      IF nodes[i] EXISTS AS node THEN
         node.next = nodes[target];
       END
     END

@@ -680,7 +680,7 @@ RSpec.describe LoopFrameAnalysis do
             futures.append(BG { sleep(1_i64); });
           END
           FOR j IN (0_i64 ..< count) DO
-            IF futures[j] AS future THEN NEXT future; END
+            IF futures[j] EXISTS AS future THEN NEXT future; END
           END
           RETURN;
         END
@@ -1063,7 +1063,7 @@ RSpec.describe LoopFrameAnalysis do
         STRUCT Box { parts: Int64[]@list }
         FN maybe() RETURNS ?Box -> RETURN NIL; END
         FN main() RETURNS Void ->
-          WHILE maybe() AS box DO
+          WHILE maybe() EXISTS AS box DO
           END
           RETURN;
         END

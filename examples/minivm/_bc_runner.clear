@@ -573,7 +573,7 @@ FN applyNative(id: Int64, evaled: Value[]) RETURNS !Value EFFECTS REENTRANT ->
         # parseFloat(s) -> ?Float64 (returns Nil on parse failure)
         s = getStr(evaled[1]);
         parsed = s.toNumber();
-        IF parsed AS f THEN RETURN Value{ Number: f }; END
+        IF parsed EXISTS AS f THEN RETURN Value{ Number: f }; END
         RETURN Value.Nil;
     END
     IF id == 104 THEN
@@ -744,7 +744,7 @@ FN envSet!(envId: Id<Env>, name: String, val: Value, MUTABLE pool: Env[50000]@po
 ->
     MUTABLE recurseTo: ?Id<Env> = NIL;
     WITH POLYMORPHIC EXCLUSIVE pool AS p {
-        IF p[envId] AS env THEN
+        IF p[envId] EXISTS AS env THEN
             IF env.vars.contains?(name) THEN
                 env.vars[name] = COPY val;
                 RETURN TRUE;
@@ -756,7 +756,7 @@ FN envSet!(envId: Id<Env>, name: String, val: Value, MUTABLE pool: Env[50000]@po
             END
         END
     }
-    IF recurseTo AS pid THEN RETURN envSet!(pid, name, val, pool) OR_ELSE RAISE; END
+    IF recurseTo EXISTS AS pid THEN RETURN envSet!(pid, name, val, pool) OR_ELSE RAISE; END
     RETURN FALSE;
 END
 
@@ -892,14 +892,14 @@ FN handleCatch!(catchExpr: Value, errMsg: String, errKind: String, envId: Id<Env
             MUTABLE catchEnvIdHolder: ?Id<Env> = NIL;
             WITH POLYMORPHIC EXCLUSIVE pool AS p {
                 catchEnvId: Id<Env> = p.insert(Env{ vars: {} });
-                IF p[catchEnvId] AS catchEnv THEN
+                IF p[catchEnvId] EXISTS AS catchEnv THEN
                     catchEnv.vars["__p"] = Value{ EnvRef: envId };
                     errBindName = getSymName(catchItems[1]);
                     catchEnv.vars[errBindName] = Value.Error{ errMsg: COPY errMsg, errKind: COPY errKind, errType: "" };
                 END
                 catchEnvIdHolder = catchEnvId;
             }
-            IF catchEnvIdHolder AS theId THEN
+            IF catchEnvIdHolder EXISTS AS theId THEN
                 RETURN Value.Tco{ tcoAst: COPY catchItems[2], tcoEnv: theId };
             END
             RETURN Value.Error{ errMsg: COPY errMsg, errKind: COPY errKind, errType: "" };,
@@ -1056,7 +1056,7 @@ FN evalList!(TAKES items: Value[], envId: Id<Env>, MUTABLE pool: Env[50000]@pool
             elem = listRef(listVal, di) OR_ELSE RAISE;
             MUTABLE found = FALSE;
             FOR dj IN (0_i64 ..< distinct.length()) DO
-                IF distinct[dj] AS existing THEN
+                IF distinct[dj] EXISTS AS existing THEN
                     IF valEqual?(elem, existing) THEN found = TRUE; END
                 END
             END
@@ -1698,11 +1698,11 @@ FN evalList!(TAKES items: Value[], envId: Id<Env>, MUTABLE pool: Env[50000]@pool
     ELSE_IF formName == "source-line" THEN
         # (source-line N) -> track current CLEAR source line for error messages
         lineVal = (eval!(COPY items[1], envId, pool) OR_ELSE RAISE);
-        WITH POLYMORPHIC EXCLUSIVE pool AS p { IF p[envId] AS env THEN env.vars["__source_line"] = lineVal; END }
+        WITH POLYMORPHIC EXCLUSIVE pool AS p { IF p[envId] EXISTS AS env THEN env.vars["__source_line"] = lineVal; END }
         RETURN Value.Nil;
 
     ELSE_IF formName == "sandbox-enable" THEN
-        WITH POLYMORPHIC EXCLUSIVE pool AS p { IF p[envId] AS env THEN env.vars["__sandbox"] = Value.TrueVal; END }
+        WITH POLYMORPHIC EXCLUSIVE pool AS p { IF p[envId] EXISTS AS env THEN env.vars["__sandbox"] = Value.TrueVal; END }
         RETURN Value.Nil;
 
     ELSE_IF formName == "native-manhattan" THEN
@@ -1759,12 +1759,12 @@ FN evalList!(TAKES items: Value[], envId: Id<Env>, MUTABLE pool: Env[50000]@pool
     ELSE_IF formName == "debug-set-break" THEN
         # (debug-set-break "fnName") -> register breakpoint
         bpName = (eval!(COPY items[1], envId, pool) OR_ELSE RAISE);
-        WITH POLYMORPHIC EXCLUSIVE pool AS p { IF p[envId] AS env THEN env.vars["__bp_" + getStr(bpName)] = Value.TrueVal; END }
+        WITH POLYMORPHIC EXCLUSIVE pool AS p { IF p[envId] EXISTS AS env THEN env.vars["__bp_" + getStr(bpName)] = Value.TrueVal; END }
         RETURN Value.Nil;
 
     ELSE_IF formName == "debug-clear-break" THEN
         bpName = (eval!(COPY items[1], envId, pool) OR_ELSE RAISE);
-        WITH POLYMORPHIC EXCLUSIVE pool AS p { IF p[envId] AS env THEN env.vars["__bp_" + getStr(bpName)] = Value.Nil; END }
+        WITH POLYMORPHIC EXCLUSIVE pool AS p { IF p[envId] EXISTS AS env THEN env.vars["__bp_" + getStr(bpName)] = Value.Nil; END }
         RETURN Value.Nil;
 
     # Error introspection: special forms to avoid error propagation
@@ -1811,7 +1811,7 @@ FN evalList!(TAKES items: Value[], envId: Id<Env>, MUTABLE pool: Env[50000]@pool
         defName = getSymName(items[1]);
         val = (eval!(COPY items[2], envId, pool) OR_ELSE RAISE);
         IF isError?(val) THEN RETURN val; END
-        WITH POLYMORPHIC EXCLUSIVE pool AS p { IF p[envId] AS env THEN env.vars[defName] = COPY val; END }
+        WITH POLYMORPHIC EXCLUSIVE pool AS p { IF p[envId] EXISTS AS env THEN env.vars[defName] = COPY val; END }
         RETURN val;
 
     ELSE_IF formName == "set!" THEN
@@ -1904,12 +1904,12 @@ FN evalList!(TAKES items: Value[], envId: Id<Env>, MUTABLE pool: Env[50000]@pool
                 MUTABLE letIdHolder: ?Id<Env> = NIL;
                 WITH POLYMORPHIC EXCLUSIVE pool AS p {
                     letIdNew: Id<Env> = p.insert(Env{ vars: {} });
-                    IF p[letIdNew] AS letEnv THEN
+                    IF p[letIdNew] EXISTS AS letEnv THEN
                         letEnv.vars["__p"] = Value{ EnvRef: envId };
                     END
                     letIdHolder = letIdNew;
                 }
-                IF letIdHolder AS letId THEN
+                IF letIdHolder EXISTS AS letId THEN
                     IF binds.length() > 0 AND isList?(binds[0]) THEN
                         FOR bi IN (0_i64 ..< binds.length()) DO
                             PARTIAL MATCH binds[bi] START
@@ -1918,7 +1918,7 @@ FN evalList!(TAKES items: Value[], envId: Id<Env>, MUTABLE pool: Env[50000]@pool
                                     bVal = (eval!(COPY pair[1], letId, pool) OR_ELSE RAISE);
                                     IF isError?(bVal) THEN RETURN bVal; END
                                     WITH POLYMORPHIC EXCLUSIVE pool AS p {
-                                        IF p[letId] AS letEnv THEN letEnv.vars[bName] = bVal; END
+                                        IF p[letId] EXISTS AS letEnv THEN letEnv.vars[bName] = bVal; END
                                     },
                                 DEFAULT -> PASS;
                             END
@@ -1930,7 +1930,7 @@ FN evalList!(TAKES items: Value[], envId: Id<Env>, MUTABLE pool: Env[50000]@pool
                             bVal = (eval!(COPY binds[bi + 1], letId, pool) OR_ELSE RAISE);
                             IF isError?(bVal) THEN RETURN bVal; END
                             WITH POLYMORPHIC EXCLUSIVE pool AS p {
-                                IF p[letId] AS letEnv THEN letEnv.vars[bName] = bVal; END
+                                IF p[letId] EXISTS AS letEnv THEN letEnv.vars[bName] = bVal; END
                             }
                             bi += 2;
                         END
@@ -2020,7 +2020,7 @@ FN evalList!(TAKES items: Value[], envId: Id<Env>, MUTABLE pool: Env[50000]@pool
                 # Push call stack
                 oldStack = getStr(envGet!(envId, "__dbg_stack", pool));
                 WITH POLYMORPHIC EXCLUSIVE pool AS p {
-                    IF p[envId] AS dbgEnv THEN
+                    IF p[envId] EXISTS AS dbgEnv THEN
                         IF oldStack.length() > 0 THEN
                             dbgEnv.vars["__dbg_stack"] = Value{ Str: COPY callDesc + " < " + oldStack };
                         ELSE
@@ -2040,7 +2040,7 @@ FN evalList!(TAKES items: Value[], envId: Id<Env>, MUTABLE pool: Env[50000]@pool
 
                 # Set step mode based on debug action
                 WITH POLYMORPHIC EXCLUSIVE pool AS p {
-                    IF p[envId] AS dbgEnv2 THEN
+                    IF p[envId] EXISTS AS dbgEnv2 THEN
                         dbgEnv2.vars["__dbg_step"] = Value{ Number: toFloat(action) };
                         dbgEnv2.vars["__dbg_target_depth"] = Value{ Number: curDepth };
                         # Restore stack
@@ -2050,7 +2050,7 @@ FN evalList!(TAKES items: Value[], envId: Id<Env>, MUTABLE pool: Env[50000]@pool
             END
 
             # Track call depth for step-over/out
-            WITH POLYMORPHIC EXCLUSIVE pool AS p { IF p[envId] AS dbgEnv3 THEN dbgEnv3.vars["__dbg_depth"] = Value{ Number: curDepth + 1.0 }; END }
+            WITH POLYMORPHIC EXCLUSIVE pool AS p { IF p[envId] EXISTS AS dbgEnv3 THEN dbgEnv3.vars["__dbg_depth"] = Value{ Number: curDepth + 1.0 }; END }
         END
 
         IF isLambda?(f) THEN
@@ -2059,7 +2059,7 @@ FN evalList!(TAKES items: Value[], envId: Id<Env>, MUTABLE pool: Env[50000]@pool
                     MUTABLE callIdHolder: ?Id<Env> = NIL;
                     WITH POLYMORPHIC EXCLUSIVE pool AS p {
                         callIdNew: Id<Env> = p.insert(Env{ vars: {} });
-                        IF p[callIdNew] AS callEnv THEN
+                        IF p[callIdNew] EXISTS AS callEnv THEN
                             callEnv.vars["__p"] = Value{ EnvRef: lam.envId };
                             FOR pi IN (0_i64 ..< lam.params.length()) DO
                                 pname = getSymName(lam.params[pi] OR_ELSE Value.Nil);
@@ -2068,7 +2068,7 @@ FN evalList!(TAKES items: Value[], envId: Id<Env>, MUTABLE pool: Env[50000]@pool
                         END
                         callIdHolder = callIdNew;
                     }
-                    IF callIdHolder AS callId THEN
+                    IF callIdHolder EXISTS AS callId THEN
                         bodyAst: Value = COPY lam.body;
                         RETURN (eval!(GIVE bodyAst, callId, pool) OR_ELSE RAISE);
                     END
@@ -2105,7 +2105,7 @@ FN setupEnv!(MUTABLE pool: Env[50000]@pool) RETURNS !Id<Env>
 ->
     WITH POLYMORPHIC EXCLUSIVE pool AS p {
         rootId: Id<Env> = p.insert(Env{ vars: {} });
-        IF p[rootId] AS root THEN
+        IF p[rootId] EXISTS AS root THEN
         # Arithmetic: 1-4
         root.vars["+"] = Value{ NativeFn: 1 };
         root.vars["-"] = Value{ NativeFn: 2 };
@@ -2381,7 +2381,7 @@ FN compile!(ast: Value, envId: Id<Env>, MUTABLE pool: Env[50000]@pool) RETURNS !
         symName = getSymName(ast);
         # Check if this symbol has a slot assignment
         MUTABLE slotLookup = Value{ Number: 0.0 - 1.0 };
-        WITH POLYMORPHIC EXCLUSIVE pool AS p { IF p[envId] AS slotEnv THEN slotLookup = slotEnv.vars["__slot_" + symName] OR_ELSE Value{ Number: 0.0 - 1.0 }; END }
+        WITH POLYMORPHIC EXCLUSIVE pool AS p { IF p[envId] EXISTS AS slotEnv THEN slotLookup = slotEnv.vars["__slot_" + symName] OR_ELSE Value{ Number: 0.0 - 1.0 }; END }
         slotNum = toInt(getNum(slotLookup));
         IF slotNum >= 0 THEN
             # LOAD_SLOT
@@ -2434,7 +2434,7 @@ FN compile!(ast: Value, envId: Id<Env>, MUTABLE pool: Env[50000]@pool) RETURNS !
                 defName = getSymName(items[1]);
                 MUTABLE nextSlot: Int64 = 0;
                 WITH POLYMORPHIC EXCLUSIVE pool AS p {
-                    IF p[envId] AS defSlotEnv THEN
+                    IF p[envId] EXISTS AS defSlotEnv THEN
                         slotCounter = defSlotEnv.vars["__slotN"] OR_ELSE Value{ Number: 0.0 };
                         nextSlot = toInt(getNum(slotCounter));
                         defSlotEnv.vars["__slot_" + defName] = Value{ Number: toFloat(nextSlot) };
@@ -2495,7 +2495,7 @@ FN compile!(ast: Value, envId: Id<Env>, MUTABLE pool: Env[50000]@pool) RETURNS !
     ops.append(Value{ Number: 19.0 });
     # Store in env entry-by-entry (Value.Number is inline, survives arena free)
     WITH POLYMORPHIC EXCLUSIVE pool AS p {
-        IF p[envId] AS bcEnv THEN
+        IF p[envId] EXISTS AS bcEnv THEN
             bcEnv.vars["__bc_opN"] = Value{ Number: toFloat(ops.length()) };
             FOR wi IN (0_i64 ..< ops.length()) DO
                 bcEnv.vars["__bc_o" + wi.toString()] = ops[wi] OR_ELSE Value.Nil;
@@ -2617,7 +2617,7 @@ FN exec!(ops: Int64[], consts: Value[], envId: Id<Env>, MUTABLE pool: Env[50000]
                 sp += 1;,
             2 ->  # STORE_NAME
                 idx = ops[ip]; ip += 1;
-                WITH POLYMORPHIC EXCLUSIVE pool AS p { IF p[curEnv] AS storeEnv THEN storeEnv.vars[getSymName(consts[idx])] = stack[sp - 1] OR_ELSE Value.Nil; END },
+                WITH POLYMORPHIC EXCLUSIVE pool AS p { IF p[curEnv] EXISTS AS storeEnv THEN storeEnv.vars[getSymName(consts[idx])] = stack[sp - 1] OR_ELSE Value.Nil; END },
             3 ->  # POP
                 sp -= 1;,
             4 ->  # ADD (polymorphic)
@@ -2744,7 +2744,7 @@ FN exec!(ops: Int64[], consts: Value[], envId: Id<Env>, MUTABLE pool: Env[50000]
                             MUTABLE bcCallIdHolder: ?Id<Env> = NIL;
                             WITH POLYMORPHIC EXCLUSIVE pool AS p {
                                 bcCallIdNew: Id<Env> = p.insert(Env{ vars: {} });
-                                IF p[bcCallIdNew] AS bcCallEnv THEN
+                                IF p[bcCallIdNew] EXISTS AS bcCallEnv THEN
                                     bcCallEnv.vars["__p"] = Value{ EnvRef: lam.envId };
                                     FOR pi IN (0_i64 ..< argc) DO
                                         pname = getSymName(lam.params[pi]);
@@ -2755,7 +2755,7 @@ FN exec!(ops: Int64[], consts: Value[], envId: Id<Env>, MUTABLE pool: Env[50000]
                             }
                             sp -= argc + 1;
                             pv = Value.Nil;
-                            IF bcCallIdHolder AS bcCallId THEN
+                            IF bcCallIdHolder EXISTS AS bcCallId THEN
                                 pv = (eval!(COPY lam.body, bcCallId, pool) OR_ELSE RAISE);
                             END
                             IF sp >= stack.length() THEN stack.append(pv); ELSE stack[sp] = pv; END
@@ -3056,7 +3056,7 @@ FN exec!(ops: Int64[], consts: Value[], envId: Id<Env>, MUTABLE pool: Env[50000]
                 MUTABLE newMapIdHolder: ?Id<Env> = NIL;
                 WITH POLYMORPHIC EXCLUSIVE pool AS p { newMapIdHolder = p.insert(newMapEnv); }
                 pv = Value.Nil;
-                IF newMapIdHolder AS newMapId THEN pv = Value{ MapRef: newMapId }; END
+                IF newMapIdHolder EXISTS AS newMapId THEN pv = Value{ MapRef: newMapId }; END
                 IF sp >= stack.length() THEN stack.append(pv); ELSE stack[sp] = pv; END
                 sp += 1;,
             67 -> # MAP_PUT: pop map, key, value; insert; push Nil
@@ -3066,7 +3066,7 @@ FN exec!(ops: Int64[], consts: Value[], envId: Id<Env>, MUTABLE pool: Env[50000]
                 PARTIAL MATCH mapPutRef START
                     Value.MapRef AS mapId ->
                         WITH POLYMORPHIC EXCLUSIVE pool AS p {
-                            IF p[mapId] AS mapEnv THEN
+                            IF p[mapId] EXISTS AS mapEnv THEN
                                 mapEnv.vars[keyAsStr(mapPutKey)] = mapPutVal;
                             END
                         },
@@ -3081,7 +3081,7 @@ FN exec!(ops: Int64[], consts: Value[], envId: Id<Env>, MUTABLE pool: Env[50000]
                 PARTIAL MATCH mapGetRef START
                     Value.MapRef AS mapId ->
                         WITH POLYMORPHIC EXCLUSIVE pool AS p {
-                            IF p[mapId] AS mapEnv THEN
+                            IF p[mapId] EXISTS AS mapEnv THEN
                                 pv = COPY (mapEnv.vars[keyAsStr(mapGetKey)] OR_ELSE Value.Nil);
                             END
                         },
@@ -3095,7 +3095,7 @@ FN exec!(ops: Int64[], consts: Value[], envId: Id<Env>, MUTABLE pool: Env[50000]
                 PARTIAL MATCH mapCRef START
                     Value.MapRef AS mapId ->
                         WITH POLYMORPHIC EXCLUSIVE pool AS p {
-                            IF p[mapId] AS mapEnv THEN
+                            IF p[mapId] EXISTS AS mapEnv THEN
                                 pv = boolVal(mapEnv.vars.contains?(keyAsStr(mapCKey)));
                             END
                         },
@@ -3109,7 +3109,7 @@ FN exec!(ops: Int64[], consts: Value[], envId: Id<Env>, MUTABLE pool: Env[50000]
                 PARTIAL MATCH mapDelRef START
                     Value.MapRef AS mapId ->
                         WITH POLYMORPHIC EXCLUSIVE pool AS p {
-                            IF p[mapId] AS mapEnv THEN
+                            IF p[mapId] EXISTS AS mapEnv THEN
                                 mapEnv.vars.delete(keyAsStr(mapDelKey));
                             END
                         },
@@ -3124,7 +3124,7 @@ FN exec!(ops: Int64[], consts: Value[], envId: Id<Env>, MUTABLE pool: Env[50000]
                 PARTIAL MATCH mapKRef START
                     Value.MapRef AS mapId ->
                         WITH POLYMORPHIC EXCLUSIVE pool AS p {
-                            IF p[mapId] AS mapEnv THEN
+                            IF p[mapId] EXISTS AS mapEnv THEN
                                 knames = mapEnv.vars.keys();
                                 FOR ki IN (0_i64 ..< knames.length()) DO
                                     mapKeyList.append(Value{ Str: "" + (knames[ki] OR_ELSE "") });
@@ -3142,7 +3142,7 @@ FN exec!(ops: Int64[], consts: Value[], envId: Id<Env>, MUTABLE pool: Env[50000]
                 PARTIAL MATCH mapLRef START
                     Value.MapRef AS mapId ->
                         WITH POLYMORPHIC EXCLUSIVE pool AS p {
-                            IF p[mapId] AS mapEnv THEN
+                            IF p[mapId] EXISTS AS mapEnv THEN
                                 mapLen = mapEnv.vars.count();
                             END
                         },
@@ -3158,7 +3158,7 @@ FN exec!(ops: Int64[], consts: Value[], envId: Id<Env>, MUTABLE pool: Env[50000]
                     Value.MapRef AS setId ->
                         setKey = prStr(setInsVal, TRUE);
                         WITH POLYMORPHIC EXCLUSIVE pool AS p {
-                            IF p[setId] AS setEnv THEN
+                            IF p[setId] EXISTS AS setEnv THEN
                                 setEnv.vars[setKey] = setInsVal;
                             END
                         },
@@ -3174,7 +3174,7 @@ FN exec!(ops: Int64[], consts: Value[], envId: Id<Env>, MUTABLE pool: Env[50000]
                     Value.MapRef AS setId ->
                         setChkKey = prStr(setChkVal, TRUE);
                         WITH POLYMORPHIC EXCLUSIVE pool AS p {
-                            IF p[setId] AS setEnv THEN
+                            IF p[setId] EXISTS AS setEnv THEN
                                 pv = boolVal(setEnv.vars.contains?(setChkKey));
                             END
                         },
@@ -3189,7 +3189,7 @@ FN exec!(ops: Int64[], consts: Value[], envId: Id<Env>, MUTABLE pool: Env[50000]
                     Value.MapRef AS setId ->
                         setRmKey = prStr(setRmVal, TRUE);
                         WITH POLYMORPHIC EXCLUSIVE pool AS p {
-                            IF p[setId] AS setEnv THEN
+                            IF p[setId] EXISTS AS setEnv THEN
                                 setEnv.vars.delete(setRmKey);
                             END
                         },
@@ -3204,7 +3204,7 @@ FN exec!(ops: Int64[], consts: Value[], envId: Id<Env>, MUTABLE pool: Env[50000]
                 PARTIAL MATCH setTlRef START
                     Value.MapRef AS setId ->
                         WITH POLYMORPHIC EXCLUSIVE pool AS p {
-                            IF p[setId] AS setEnv THEN
+                            IF p[setId] EXISTS AS setEnv THEN
                                 tlKeys = setEnv.vars.keys();
                                 FOR tli IN (0_i64 ..< tlKeys.length()) DO
                                     setTlList.append(COPY (setEnv.vars[tlKeys[tli] OR_ELSE ""] OR_ELSE Value.Nil));
@@ -3356,10 +3356,10 @@ FN exec!(ops: Int64[], consts: Value[], envId: Id<Env>, MUTABLE pool: Env[50000]
                             fid = getInt(fp.pairCdr);
                             IF fid >= 0_i64 AND fid < futureTable.length() THEN
                                 fkey = fid.toString();
-                                IF futureResolved[fkey] AS cached THEN
+                                IF futureResolved[fkey] EXISTS AS cached THEN
                                     pv = COPY cached;
                                 ELSE
-                                    IF futureTable[fid] AS future THEN
+                                    IF futureTable[fid] EXISTS AS future THEN
                                         pv = NEXT future;
                                         futureResolved[fkey] = COPY pv;
                                     END
@@ -3385,10 +3385,10 @@ FN exec!(ops: Int64[], consts: Value[], envId: Id<Env>, MUTABLE pool: Env[50000]
                                         aliFid = getInt(aliP.pairCdr);
                                         IF aliFid >= 0_i64 AND aliFid < futureTable.length() THEN
                                             aliKey = aliFid.toString();
-                                            IF futureResolved[aliKey] AS aliCached THEN
+                                            IF futureResolved[aliKey] EXISTS AS aliCached THEN
                                                 awaitedList.append(COPY aliCached);
                                             ELSE
-                                                IF futureTable[aliFid] AS future THEN
+                                                IF futureTable[aliFid] EXISTS AS future THEN
                                                     aliRes = NEXT future;
                                                     futureResolved[aliKey] = COPY aliRes;
                                                     awaitedList.append(COPY aliRes);
@@ -3555,7 +3555,7 @@ FN exec!(ops: Int64[], consts: Value[], envId: Id<Env>, MUTABLE pool: Env[50000]
                 PARTIAL MATCH mapVRef START
                     Value.MapRef AS mapId ->
                         WITH POLYMORPHIC EXCLUSIVE pool AS p {
-                            IF p[mapId] AS mapEnv THEN
+                            IF p[mapId] EXISTS AS mapEnv THEN
                                 vnames = mapEnv.vars.keys();
                                 FOR vi IN (0_i64 ..< vnames.length()) DO
                                     mapValList.append(COPY (mapEnv.vars[vnames[vi] OR_ELSE ""] OR_ELSE Value.Nil));
@@ -3612,7 +3612,7 @@ FN exec!(ops: Int64[], consts: Value[], envId: Id<Env>, MUTABLE pool: Env[50000]
                 MUTABLE bnIdHolder: ?Id<Env> = NIL;
                 WITH POLYMORPHIC EXCLUSIVE pool AS bnP { bnIdHolder = bnP.insert(bnEnvVal); }
                 pv = Value.Nil;
-                IF bnIdHolder AS bnId THEN pv = Value{ Boxed: bnId }; END
+                IF bnIdHolder EXISTS AS bnId THEN pv = Value{ Boxed: bnId }; END
                 IF sp >= stack.length() THEN stack.append(pv); ELSE stack[sp] = pv; END
                 sp += 1;,
             105 -> # BOX_LOAD: pop Boxed (or any value — passthrough for
@@ -3623,8 +3623,8 @@ FN exec!(ops: Int64[], consts: Value[], envId: Id<Env>, MUTABLE pool: Env[50000]
                 PARTIAL MATCH blRef START
                     Value.Boxed AS blEnvId ->
                         WITH POLYMORPHIC EXCLUSIVE pool AS blP {
-                            IF blP[blEnvId] AS blEnv THEN
-                                IF blEnv.vars["v"] AS blStored THEN
+                            IF blP[blEnvId] EXISTS AS blEnv THEN
+                                IF blEnv.vars["v"] EXISTS AS blStored THEN
                                     pv = COPY blStored;
                                 ELSE
                                     pv = Value.Nil;
@@ -3642,7 +3642,7 @@ FN exec!(ops: Int64[], consts: Value[], envId: Id<Env>, MUTABLE pool: Env[50000]
                 PARTIAL MATCH bsRef START
                     Value.Boxed AS bsEnvId ->
                         WITH POLYMORPHIC EXCLUSIVE pool AS bsP {
-                            IF bsP[bsEnvId] AS bsEnv THEN
+                            IF bsP[bsEnvId] EXISTS AS bsEnv THEN
                                 bsEnv.vars["v"] = COPY bsVal;
                             END
                         },
@@ -3678,12 +3678,12 @@ FN exec!(ops: Int64[], consts: Value[], envId: Id<Env>, MUTABLE pool: Env[50000]
                 MUTABLE ssnEnvIdHolder: ?Id<Env> = NIL;
                 WITH POLYMORPHIC EXCLUSIVE pool AS p {
                     ssnEnvId = p.insert(Env{ vars: {} });
-                    IF p[ssnEnvId] AS ssnEnv THEN
+                    IF p[ssnEnvId] EXISTS AS ssnEnv THEN
                         ssnEnv.vars["b"] = COPY ssnBuf;
                     END
                     ssnEnvIdHolder = ssnEnvId;
                 }
-                IF ssnEnvIdHolder AS ssnEid THEN
+                IF ssnEnvIdHolder EXISTS AS ssnEid THEN
                     pv = Value.SplitStream{ splitBufId: ssnEid, splitCursor: 0_i64 };
                 ELSE
                     pv = Value.Nil;
@@ -3699,7 +3699,7 @@ FN exec!(ops: Int64[], consts: Value[], envId: Id<Env>, MUTABLE pool: Env[50000]
                 PARTIAL MATCH ssxHandle START
                     Value.SplitStream AS ssxH ->
                         WITH POLYMORPHIC EXCLUSIVE pool AS p {
-                            IF p[ssxH.splitBufId] AS ssxBufEnv THEN
+                            IF p[ssxH.splitBufId] EXISTS AS ssxBufEnv THEN
                                 ssxBuf = ssxBufEnv.vars["b"] OR_ELSE Value.Nil;
                                 PARTIAL MATCH ssxBuf START
                                     Value.List AS ssxElems ->
@@ -3749,15 +3749,15 @@ FN exec!(ops: Int64[], consts: Value[], envId: Id<Env>, MUTABLE pool: Env[50000]
                     DEFAULT -> PASS;
                 END
                 MUTABLE lockResult: Value = Value.TrueVal;
-                IF lockEnvIdHolder AS lockEid THEN
+                IF lockEnvIdHolder EXISTS AS lockEid THEN
                     MUTABLE acquired = FALSE;
                     MUTABLE timedOut = FALSE;
                     MUTABLE waited: Int64 = 0;
                     WHILE !acquired DO
                         WITH POLYMORPHIC EXCLUSIVE pool AS p {
-                            IF p[lockEid] AS lenv THEN
+                            IF p[lockEid] EXISTS AS lenv THEN
                                 MUTABLE isUnlocked = FALSE;
-                                IF lenv.vars["__locked"] AS lockVal THEN
+                                IF lenv.vars["__locked"] EXISTS AS lockVal THEN
                                     PARTIAL MATCH lockVal START
                                         Value.Nil -> isUnlocked = TRUE;,
                                         DEFAULT -> PASS;
@@ -3799,7 +3799,7 @@ FN exec!(ops: Int64[], consts: Value[], envId: Id<Env>, MUTABLE pool: Env[50000]
                 PARTIAL MATCH relBoxVal START
                     Value.Boxed AS rid ->
                         WITH POLYMORPHIC EXCLUSIVE pool AS p {
-                            IF p[rid] AS renv THEN
+                            IF p[rid] EXISTS AS renv THEN
                                 renv.vars["__locked"] = Value.Nil;
                             END
                         },
@@ -3828,7 +3828,7 @@ FN exec!(ops: Int64[], consts: Value[], envId: Id<Env>, MUTABLE pool: Env[50000]
                 strmEnv.vars["closed"] = Value.Nil;
                 MUTABLE strmEnvIdHolder: ?Id<Env> = NIL;
                 WITH POLYMORPHIC EXCLUSIVE pool AS strmP { strmEnvIdHolder = strmP.insert(strmEnv); }
-                IF strmEnvIdHolder AS strmEid THEN
+                IF strmEnvIdHolder EXISTS AS strmEid THEN
                     strmChan = Value{ Channel: strmEid };
                     # Build captures: [channel, ...argc captures from stack].
                     MUTABLE strmCaps: Value[]@list = List[];
@@ -3867,21 +3867,21 @@ FN exec!(ops: Int64[], consts: Value[], envId: Id<Env>, MUTABLE pool: Env[50000]
                     Value.Channel AS yldEid -> yldEnvIdHolder = yldEid;,
                     DEFAULT -> PASS;
                 END
-                IF yldEnvIdHolder AS yldEid THEN
+                IF yldEnvIdHolder EXISTS AS yldEid THEN
                     MUTABLE yldDone = FALSE;
                     MUTABLE yldClosed = FALSE;
                     WHILE !yldDone DO
                         WITH POLYMORPHIC EXCLUSIVE pool AS yldP {
-                            IF yldP[yldEid] AS yldEnv THEN
+                            IF yldP[yldEid] EXISTS AS yldEnv THEN
                                 MUTABLE yldHasFlag = FALSE;
                                 MUTABLE yldClosedFlag = FALSE;
-                                IF yldEnv.vars["has"] AS yldHasV THEN
+                                IF yldEnv.vars["has"] EXISTS AS yldHasV THEN
                                     PARTIAL MATCH yldHasV START
                                         Value.TrueVal -> yldHasFlag = TRUE;,
                                         DEFAULT -> PASS;
                                     END
                                 END
-                                IF yldEnv.vars["closed"] AS yldClV THEN
+                                IF yldEnv.vars["closed"] EXISTS AS yldClV THEN
                                     PARTIAL MATCH yldClV START
                                         Value.TrueVal -> yldClosedFlag = TRUE;,
                                         DEFAULT -> PASS;
@@ -3927,27 +3927,27 @@ FN exec!(ops: Int64[], consts: Value[], envId: Id<Env>, MUTABLE pool: Env[50000]
                     DEFAULT -> PASS;
                 END
                 pv = Value.Nil;
-                IF nxtEnvIdHolder AS nxtEid THEN
+                IF nxtEnvIdHolder EXISTS AS nxtEid THEN
                     MUTABLE nxtDone = FALSE;
                     WHILE !nxtDone DO
                         WITH POLYMORPHIC EXCLUSIVE pool AS nxtP {
-                            IF nxtP[nxtEid] AS nxtEnv THEN
+                            IF nxtP[nxtEid] EXISTS AS nxtEnv THEN
                                 MUTABLE nxtHasFlag = FALSE;
                                 MUTABLE nxtClosedFlag = FALSE;
-                                IF nxtEnv.vars["has"] AS nxtHasV THEN
+                                IF nxtEnv.vars["has"] EXISTS AS nxtHasV THEN
                                     PARTIAL MATCH nxtHasV START
                                         Value.TrueVal -> nxtHasFlag = TRUE;,
                                         DEFAULT -> PASS;
                                     END
                                 END
-                                IF nxtEnv.vars["closed"] AS nxtClV THEN
+                                IF nxtEnv.vars["closed"] EXISTS AS nxtClV THEN
                                     PARTIAL MATCH nxtClV START
                                         Value.TrueVal -> nxtClosedFlag = TRUE;,
                                         DEFAULT -> PASS;
                                     END
                                 END
                                 IF nxtHasFlag THEN
-                                    IF nxtEnv.vars["v"] AS nxtStored THEN
+                                    IF nxtEnv.vars["v"] EXISTS AS nxtStored THEN
                                         pv = COPY nxtStored;
                                     END
                                     nxtEnv.vars["has"] = Value.Nil;
@@ -3975,7 +3975,7 @@ FN exec!(ops: Int64[], consts: Value[], envId: Id<Env>, MUTABLE pool: Env[50000]
                 PARTIAL MATCH clsChanRef START
                     Value.Channel AS clsEid ->
                         WITH POLYMORPHIC EXCLUSIVE pool AS clsP {
-                            IF clsP[clsEid] AS clsEnv THEN
+                            IF clsP[clsEid] EXISTS AS clsEnv THEN
                                 clsEnv.vars["closed"] = Value.TrueVal;
                             END
                         },
@@ -3997,11 +3997,11 @@ FN exec!(ops: Int64[], consts: Value[], envId: Id<Env>, MUTABLE pool: Env[50000]
     MUTABLE smI: Int64 = 0_i64;
     WHILE smI < streamCount DO
         smKey = smI.toString();
-        IF streamChanByIdx[smKey] AS smChan THEN
+        IF streamChanByIdx[smKey] EXISTS AS smChan THEN
             PARTIAL MATCH smChan START
                 Value.Channel AS smEid ->
                     WITH POLYMORPHIC EXCLUSIVE pool AS smP {
-                        IF smP[smEid] AS smEnv THEN
+                        IF smP[smEid] EXISTS AS smEnv THEN
                             smEnv.vars["closed"] = Value.TrueVal;
                         END
                     },
@@ -4013,10 +4013,10 @@ FN exec!(ops: Int64[], consts: Value[], envId: Id<Env>, MUTABLE pool: Env[50000]
     smI = 0_i64;
     WHILE smI < streamCount DO
         smKey = smI.toString();
-        IF streamFidByIdx[smKey] AS smFidV THEN
+        IF streamFidByIdx[smKey] EXISTS AS smFidV THEN
             smFid = getInt(smFidV);
             IF smFid >= 0_i64 AND smFid < futureTable.length() THEN
-                IF futureTable[smFid] AS future THEN
+                IF futureTable[smFid] EXISTS AS future THEN
                     smDrained = NEXT future;
                 END
             END

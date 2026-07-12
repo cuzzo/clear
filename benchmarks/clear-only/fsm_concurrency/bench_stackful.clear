@@ -23,7 +23,7 @@ FN main() RETURNS Void ->
   END
 
   FOR j IN (0 ..< count) DO
-    IF futures[j] AS future THEN NEXT future; END
+    IF futures[j] EXISTS AS future THEN NEXT future; END
   END
 
   RETURN;

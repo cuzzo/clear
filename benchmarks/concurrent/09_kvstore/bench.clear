@@ -102,7 +102,7 @@ FN main() RETURNS Void ->
     wi += 1;
   END
   FOR si IN (0 ..< workers) DO
-    IF set_futures[si] AS future THEN NEXT future; END
+    IF set_futures[si] EXISTS AS future THEN NEXT future; END
   END
   setMs = timestampMs() - t0;
 
@@ -131,7 +131,7 @@ FN main() RETURNS Void ->
   END
   MUTABLE total_hits = 0;
   FOR gi IN (0 ..< workers) DO
-    IF get_futures[gi] AS future THEN total_hits += NEXT future; END
+    IF get_futures[gi] EXISTS AS future THEN total_hits += NEXT future; END
   END
   getMs = timestampMs() - t1;
 
@@ -165,7 +165,7 @@ FN main() RETURNS Void ->
   END
   MUTABLE zipf_hits = 0;
   FOR zi IN (0 ..< workers) DO
-    IF zipf_futures[zi] AS future THEN zipf_hits += NEXT future; END
+    IF zipf_futures[zi] EXISTS AS future THEN zipf_hits += NEXT future; END
   END
   zipfMs = timestampMs() - t2;
 
@@ -206,7 +206,7 @@ FN main() RETURNS Void ->
   END
   MUTABLE mix_hits = 0;
   FOR mi IN (0 ..< workers) DO
-    IF mix_futures[mi] AS future THEN mix_hits += NEXT future; END
+    IF mix_futures[mi] EXISTS AS future THEN mix_hits += NEXT future; END
   END
   mixMs = timestampMs() - t3;
 

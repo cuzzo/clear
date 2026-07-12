@@ -72,7 +72,7 @@ FuzzGenerator.register(:collection_shape_smoke, cells: COLLECTION_SHAPE_SMOKE_CE
           MUTABLE pool: Item[8]@pool = [];
           id = pool.insert(Item{ value: 42_i64 });
           ASSERT pool.length() == 1_i64, "pool length";
-          IF pool[id] AS item THEN
+          IF pool[id] EXISTS AS item THEN
               ASSERT item.value == 42_i64, "pool readback";
           ELSE
               ASSERT FALSE, "pool handle should be live";
@@ -220,7 +220,7 @@ FuzzGenerator.register(:collection_shape_smoke, cells: COLLECTION_SHAPE_SMOKE_CE
           inner.append(6_i64);
           outer.append(inner);
           ASSERT outer.length() == 1_i64, "nested outer length";
-          IF outer[0_i64] AS inner_read THEN
+          IF outer[0_i64] EXISTS AS inner_read THEN
               ASSERT inner_read[1_i64] == 6_i64, "nested readback";
           ELSE
               ASSERT FALSE, "nested outer element should exist";

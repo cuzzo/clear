@@ -22,7 +22,7 @@ FN benchFiber(n: Int64, count: Int64) RETURNS !Int64 ->
     MUTABLE total: Int64 = 0;
     i = 0;
     WHILE i < count DO
-        IF tasks[i] AS task THEN
+        IF tasks[i] EXISTS AS task THEN
             total += NEXT task;
         ELSE
             RAISE "missing fiber task";
@@ -43,7 +43,7 @@ FN benchService(n: Int64, count: Int64) RETURNS !Int64 ->
     MUTABLE total: Int64 = 0;
     i = 0;
     WHILE i < count DO
-        IF tasks[i] AS task THEN
+        IF tasks[i] EXISTS AS task THEN
             total += NEXT task;
         ELSE
             RAISE "missing service task";

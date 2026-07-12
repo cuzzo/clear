@@ -207,7 +207,7 @@ FN envGet!(envId: Id<Env>, name: String, MUTABLE pool: Env[50000]@pool) RETURNS 
 ->
     MUTABLE recurseTo: ?Id<Env> = NIL;
     WITH POLYMORPHIC EXCLUSIVE pool AS p {
-        IF p[envId] AS env THEN
+        IF p[envId] EXISTS AS env THEN
             IF env.vars.contains?(name) THEN
                 RETURN COPY (env.vars[name] OR_ELSE Value.Nil);
             END
@@ -218,7 +218,7 @@ FN envGet!(envId: Id<Env>, name: String, MUTABLE pool: Env[50000]@pool) RETURNS 
             END
         END
     }
-    IF recurseTo AS pid THEN RETURN envGet!(pid, name, pool); END
+    IF recurseTo EXISTS AS pid THEN RETURN envGet!(pid, name, pool); END
     RETURN Value.Nil;
 END
 

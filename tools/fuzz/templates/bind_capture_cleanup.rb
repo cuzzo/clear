@@ -59,8 +59,8 @@ FuzzGenerator.register(:bind_capture_cleanup, cells: BIND_CAPTURE_CELLS) do |p|
         #{type_decl}
         FN main() RETURNS Void ->
             #{setup}
-            IF #{lookup} AS item THEN ASSERT item.value == 7_i64, "first borrowed bind"; END
-            IF #{lookup} AS item THEN ASSERT item.value == 7_i64, "owner survived bind"; END
+            IF #{lookup} EXISTS AS item THEN ASSERT item.value == 7_i64, "first borrowed bind"; END
+            IF #{lookup} EXISTS AS item THEN ASSERT item.value == 7_i64, "owner survived bind"; END
             RETURN;
         END
       CHT
@@ -68,12 +68,12 @@ FuzzGenerator.register(:bind_capture_cleanup, cells: BIND_CAPTURE_CELLS) do |p|
       bind = if p[:form] == :while
         <<~CLEAR.chomp
           MUTABLE total = 0_i64;
-              WHILE source.pop() AS item DO total += item.value; END
+              WHILE source.pop() EXISTS AS item DO total += item.value; END
               ASSERT total == 15_i64, "owned RC pop cleanup";
         CLEAR
       else
         <<~CLEAR.chomp
-          IF source.pop() AS item THEN ASSERT item.value == 8_i64, "owned RC pop cleanup";
+          IF source.pop() EXISTS AS item THEN ASSERT item.value == 8_i64, "owned RC pop cleanup";
               ELSE ASSERT FALSE, "expected RC item"; END
         CLEAR
       end
@@ -95,7 +95,7 @@ FuzzGenerator.register(:bind_capture_cleanup, cells: BIND_CAPTURE_CELLS) do |p|
             source["item"] = RefItem{ value: 7_i64 } #{cap};
             values = source.values();
             ASSERT values[0_i64]?.value == 7_i64, "materialized RC map values";
-            IF source["item"] AS item THEN ASSERT item.value == 7_i64, "map retained owner"; END
+            IF source["item"] EXISTS AS item THEN ASSERT item.value == 7_i64, "map retained owner"; END
             RETURN;
         END
       CHT
@@ -107,7 +107,7 @@ FuzzGenerator.register(:bind_capture_cleanup, cells: BIND_CAPTURE_CELLS) do |p|
             RETURN NIL;
         END
         FN main() RETURNS Void ->
-            IF makeRef(TRUE) AS item THEN ASSERT item.value == 7_i64, "owned optional call bind"; END
+            IF makeRef(TRUE) EXISTS AS item THEN ASSERT item.value == 7_i64, "owned optional call bind"; END
             RETURN;
         END
       CHT
@@ -116,8 +116,8 @@ FuzzGenerator.register(:bind_capture_cleanup, cells: BIND_CAPTURE_CELLS) do |p|
         #{type_decl}
         FN main() RETURNS Void ->
             MUTABLE source: ?RefItem#{cap} = RefItem{ value: 7_i64 } #{cap};
-            IF COPY source AS item THEN ASSERT item.value == 7_i64, "owned optional COPY bind"; END
-            IF source AS item THEN ASSERT item.value == 7_i64, "COPY retained source owner"; END
+            IF COPY source EXISTS AS item THEN ASSERT item.value == 7_i64, "owned optional COPY bind"; END
+            IF source EXISTS AS item THEN ASSERT item.value == 7_i64, "COPY retained source owner"; END
             RETURN;
         END
       CHT
@@ -126,8 +126,8 @@ FuzzGenerator.register(:bind_capture_cleanup, cells: BIND_CAPTURE_CELLS) do |p|
         #{type_decl}
         FN main() RETURNS Void ->
             source: ?RefItem#{cap} = RefItem{ value: 7_i64 } #{cap};
-            IF CLONE source AS item THEN ASSERT item.value == 7_i64, "owned optional CLONE bind"; END
-            IF source AS item THEN ASSERT item.value == 7_i64, "CLONE retained source owner"; END
+            IF CLONE source EXISTS AS item THEN ASSERT item.value == 7_i64, "owned optional CLONE bind"; END
+            IF source EXISTS AS item THEN ASSERT item.value == 7_i64, "CLONE retained source owner"; END
             RETURN;
         END
       CHT
@@ -136,7 +136,7 @@ FuzzGenerator.register(:bind_capture_cleanup, cells: BIND_CAPTURE_CELLS) do |p|
         #{type_decl}
         FN main() RETURNS Void ->
             source: ?RefItem#{cap} = RefItem{ value: 7_i64 } #{cap};
-            IF SHARE source AS item THEN ASSERT item.value == 7_i64, "owned optional SHARE bind"; END
+            IF SHARE source EXISTS AS item THEN ASSERT item.value == 7_i64, "owned optional SHARE bind"; END
             RETURN;
         END
       CHT
@@ -146,8 +146,8 @@ FuzzGenerator.register(:bind_capture_cleanup, cells: BIND_CAPTURE_CELLS) do |p|
         FN main() RETURNS Void ->
             MUTABLE left: ?RefItem#{cap} = RefItem{ value: 7_i64 } #{cap};
             MUTABLE right: ?RefItem#{cap} = RefItem{ value: 8_i64 } #{cap};
-            IF (left AS l) AND (right AS r) THEN ASSERT l.value + r.value == 15_i64, "borrowed multi-bind"; END
-            IF (left AS l) AND (right AS r) THEN ASSERT l.value + r.value == 15_i64, "owners survived multi-bind"; END
+            IF (left EXISTS AS l) AND (right EXISTS AS r) THEN ASSERT l.value + r.value == 15_i64, "borrowed multi-bind"; END
+            IF (left EXISTS AS l) AND (right EXISTS AS r) THEN ASSERT l.value + r.value == 15_i64, "owners survived multi-bind"; END
             RETURN;
         END
       CHT
@@ -195,7 +195,7 @@ FuzzGenerator.register(:bind_capture_cleanup, cells: BIND_CAPTURE_CELLS) do |p|
     if p[:form] == :while
       <<~DR.chomp
         MUTABLE seen = 0_i64;
-            WHILE src.pop() AS v DO
+            WHILE src.pop() EXISTS AS v DO
                 #{observe}
                 seen = seen + 1_i64;
             END
@@ -203,7 +203,7 @@ FuzzGenerator.register(:bind_capture_cleanup, cells: BIND_CAPTURE_CELLS) do |p|
       DR
     else
       <<~DR.chomp
-        IF src.pop() AS v THEN
+        IF src.pop() EXISTS AS v THEN
                 #{observe}
             ELSE
                 ASSERT FALSE, "expected a popped value";

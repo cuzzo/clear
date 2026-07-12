@@ -10,7 +10,7 @@ FN test_pop_drain() RETURNS !Void ->
     items.append(3_i64);
 
     MUTABLE sum = 0_i64;
-    WHILE items.pop() AS v DO
+    WHILE items.pop() EXISTS AS v DO
         sum = sum + v;
     END
     ASSERT sum == 6_i64, "pop drain: sum should be 6";
@@ -33,8 +33,8 @@ FN test_resolve_traversal() RETURNS !Void ->
     MUTABLE sum = 0_i64;
     MUTABLE i: Int64 = 0;
     WHILE i < 3 DO
-        IF links[i] AS link THEN
-            IF RESOLVE link AS node THEN
+        IF links[i] EXISTS AS link THEN
+            IF RESOLVE link EXISTS AS node THEN
                 sum = sum + node.val;
             END
         END
@@ -56,7 +56,7 @@ FN test_resolve_terminates() RETURNS !Void ->
 
     MUTABLE found = 0_i64;
     MUTABLE iters = 0_i64;
-    WHILE RESOLVE w AS node DO
+    WHILE RESOLVE w EXISTS AS node DO
         found = node.val;
         iters = iters + 1;
         BREAK;
@@ -66,7 +66,7 @@ FN test_resolve_terminates() RETURNS !Void ->
 
     dead_w = makeWeakNode();
     MUTABLE dead_iters = 0_i64;
-    WHILE RESOLVE dead_w AS node DO
+    WHILE RESOLVE dead_w EXISTS AS node DO
         dead_iters = dead_iters + 1;
     END
     ASSERT dead_iters == 0_i64, "dead ref: loop never runs";

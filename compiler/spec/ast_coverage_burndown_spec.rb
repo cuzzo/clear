@@ -468,7 +468,7 @@ RSpec.describe "AST coverage burndown" do
       }.to raise_error(ParserError, /Expected identifier after 'AS'/)
 
       expect {
-        parser_for("IF maybe AS a && other AS b THEN PASS; END").send(:parse_statement)
+        parser_for("IF maybe EXISTS AS a && other AS b THEN PASS; END").send(:parse_statement)
       }.to raise_error(ParserError, /Multiple optional bindings/)
 
       bare = AST::BinaryOp.new(token, AST::Identifier.new(token, "maybe"), :BIND_VAR, AST::Identifier.new(token, "a"))
@@ -489,7 +489,7 @@ RSpec.describe "AST coverage burndown" do
       destructure = parser_for("MATCH x START 3 { y } -> 5, DEFAULT -> 6 END").send(:parse_match_expr)
       expect(destructure.cases.first.destructure).to be_a(AST::StructPattern)
 
-      loop = parser_for("WHILE maybe AS value -> PASS;").send(:parse_statement)
+      loop = parser_for("WHILE maybe EXISTS AS value -> PASS;").send(:parse_statement)
       expect(loop).to be_a(AST::WhileBindLoop)
       expect(loop.do_branch.first).to be_a(AST::PassStmt)
 

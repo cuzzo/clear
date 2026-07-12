@@ -41,7 +41,7 @@ RSpec.describe ZigTranspiler do
           MUTABLE src: String[]@list = [];
           src.append(COPY "a");
           src.append(COPY "b");
-          IF src.pop() AS v THEN
+          IF src.pop() EXISTS AS v THEN
             ASSERT v.length() >= 0_i64, "captured string";
           ELSE
             ASSERT FALSE, "expected a popped value";
@@ -61,7 +61,7 @@ RSpec.describe ZigTranspiler do
         FN main() RETURNS Void ->
           MUTABLE src: Item[]@list = [];
           src.append(Item{ name: COPY "a" });
-          WHILE src.pop() AS v DO
+          WHILE src.pop() EXISTS AS v DO
             ASSERT v.name.length() >= 0_i64, "captured struct";
           END
           RETURN;
@@ -1648,7 +1648,7 @@ RSpec.describe ZigTranspiler do
             needle = "the";
             MUTABLE futures: ~Void[]@list = [];
             futures.append(BG { print(msg); print(needle); });
-            IF futures[0] AS future THEN NEXT future; END
+            IF futures[0] EXISTS AS future THEN NEXT future; END
             RETURN;
         END
       CLEAR

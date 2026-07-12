@@ -38,10 +38,10 @@ FN main() RETURNS Void ->
   # parents[0] = dummy link to self (root has no parent)
   # parents[i] = LINK to nodes[(i-1)/2] for i > 0
   MUTABLE parents: Node@link[]@list = [];
-  IF nodes[0] AS root THEN parents.append(LINK root); END
+  IF nodes[0] EXISTS AS root THEN parents.append(LINK root); END
   TIGHT FOR i IN (1 ..< n_nodes) DO
     parent_idx = (i - 1) / 2;
-    IF nodes[parent_idx] AS parent THEN parents.append(LINK parent); END
+    IF nodes[parent_idx] EXISTS AS parent THEN parents.append(LINK parent); END
   END
 
   t1 = timestampMs();
@@ -49,10 +49,10 @@ FN main() RETURNS Void ->
   # Phase 2: WALK -- resolve every parent back-pointer
   MUTABLE checksum = 0;
   TIGHT FOR i IN (0 ..< n_nodes) DO
-    IF nodes[i] AS node THEN checksum = checksum + node.id; END
+    IF nodes[i] EXISTS AS node THEN checksum = checksum + node.id; END
 
     IF i > 0 THEN
-      IF RESOLVE parents[i] AS r THEN
+      IF RESOLVE parents[i] EXISTS AS r THEN
         checksum = checksum + r.id;
       END
     END

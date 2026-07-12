@@ -334,8 +334,8 @@ END
 
 FN envGet!(envId: Id<Env>, name: String, MUTABLE pool: Env[50000]@pool) RETURNS !Value EFFECTS REENTRANT ->
     MUTABLE parentVal: Value = Value.Nil;
-    IF pool[envId] AS env THEN
-        IF env.vars[name] AS found THEN RETURN COPY found; END
+    IF pool[envId] EXISTS AS env THEN
+        IF env.vars[name] EXISTS AS found THEN RETURN COPY found; END
         parentVal = COPY (env.vars["__p"] OR_ELSE Value.Nil);
     END
     PARTIAL MATCH parentVal START
@@ -348,7 +348,7 @@ END
 
 FN envSet!(envId: Id<Env>, name: String, TAKES val: Value, MUTABLE pool: Env[50000]@pool) RETURNS !Bool EFFECTS REENTRANT ->
     MUTABLE parentVal: Value = Value.Nil;
-    IF pool[envId] AS env THEN
+    IF pool[envId] EXISTS AS env THEN
         IF env.vars.contains?(name) THEN
             env.vars[name] = val;
             RETURN TRUE;
@@ -445,9 +445,9 @@ FN handleCatch!(catchExpr: Value, errMsg: String, errKind: String, envId: Id<Env
     PARTIAL MATCH catchExpr START
         Value.List AS catchItems ->
             catchEnvId: Id<Env> = pool.insert(Env{ vars: {} });
-            IF pool[catchEnvId] AS catchEnv THEN catchEnv.vars["__p"] = Value{ EnvRef: envId }; END
+            IF pool[catchEnvId] EXISTS AS catchEnv THEN catchEnv.vars["__p"] = Value{ EnvRef: envId }; END
             errBindName = getSymName(catchItems[1]);
-            IF pool[catchEnvId] AS catchEnv2 THEN catchEnv2.vars[errBindName] = Value.Error{ errMsg: COPY errMsg, errKind: COPY errKind }; END
+            IF pool[catchEnvId] EXISTS AS catchEnv2 THEN catchEnv2.vars[errBindName] = Value.Error{ errMsg: COPY errMsg, errKind: COPY errKind }; END
             RETURN Value.Tco{ tcoAst: COPY catchItems[2], tcoEnv: catchEnvId };,
         DEFAULT -> RETURN Value.Error{ errMsg: COPY errMsg, errKind: COPY errKind };
     END
@@ -528,9 +528,9 @@ FN evalList!(items: Value[], envId: Id<Env>, MUTABLE pool: Env[50000]@pool) RETU
         defName = getSymName(items[1]);
         val = eval!(items[2], envId, pool) OR_ELSE RAISE;
         IF isError?(val) THEN RETURN COPY val; END
-        IF pool[envId] AS defEnv THEN defEnv.vars[defName] = val; END
+        IF pool[envId] EXISTS AS defEnv THEN defEnv.vars[defName] = val; END
         MUTABLE result = Value.Nil;
-        IF pool[envId] AS defEnv2 THEN result = defEnv2.vars[defName] OR_ELSE Value.Nil; END
+        IF pool[envId] EXISTS AS defEnv2 THEN result = defEnv2.vars[defName] OR_ELSE Value.Nil; END
         RETURN COPY result;
 
     ELSE_IF formName == "set!" THEN
@@ -544,7 +544,7 @@ FN evalList!(items: Value[], envId: Id<Env>, MUTABLE pool: Env[50000]@pool) RETU
         PARTIAL MATCH items[1] START
             Value.List AS binds ->
                 letId: Id<Env> = pool.insert(Env{ vars: {} });
-                IF pool[letId] AS letEnv THEN letEnv.vars["__p"] = Value{ EnvRef: envId }; END
+                IF pool[letId] EXISTS AS letEnv THEN letEnv.vars["__p"] = Value{ EnvRef: envId }; END
                 IF binds.length() > 0 AND isList?(binds[0]) THEN
                     FOR bi IN (0_i64 ..< binds.length()) DO
                         PARTIAL MATCH binds[bi] START
@@ -552,7 +552,7 @@ FN evalList!(items: Value[], envId: Id<Env>, MUTABLE pool: Env[50000]@pool) RETU
                                 bName = getSymName(pair[0]);
                                 bVal = eval!(COPY pair[1], letId, pool) OR_ELSE RAISE;
                                 IF isError?(bVal) THEN RETURN bVal; END
-                                IF pool[letId] AS letEnv2 THEN letEnv2.vars[bName] = COPY bVal; END,
+                                IF pool[letId] EXISTS AS letEnv2 THEN letEnv2.vars[bName] = COPY bVal; END,
                             DEFAULT -> PASS;
                         END
                     END
@@ -562,7 +562,7 @@ FN evalList!(items: Value[], envId: Id<Env>, MUTABLE pool: Env[50000]@pool) RETU
                         bName = getSymName(binds[bi]);
                         bVal = eval!(COPY binds[bi + 1], letId, pool) OR_ELSE RAISE;
                         IF isError?(bVal) THEN RETURN bVal; END
-                        IF pool[letId] AS letEnv3 THEN letEnv3.vars[bName] = COPY bVal; END
+                        IF pool[letId] EXISTS AS letEnv3 THEN letEnv3.vars[bName] = COPY bVal; END
                         bi += 2;
                     END
                 END
@@ -581,7 +581,7 @@ FN evalList!(items: Value[], envId: Id<Env>, MUTABLE pool: Env[50000]@pool) RETU
                     paramsText = paramsText + getSymName(pnames[pi]);
                 END
                 bodyText = prStr(items[2], TRUE) OR_ELSE "";
-                IF pool[metaId] AS meta THEN
+                IF pool[metaId] EXISTS AS meta THEN
                     meta.vars["__p"] = Value{ EnvRef: envId };
                     meta.vars["__params"] = Value{ Str: COPY paramsText };
                     meta.vars["__body"] = Value{ Str: COPY bodyText };
@@ -626,7 +626,7 @@ FN evalList!(items: Value[], envId: Id<Env>, MUTABLE pool: Env[50000]@pool) RETU
                     MUTABLE closureEnv = lambdaMetaId;
                     MUTABLE lambdaBodyText = "";
                     MUTABLE lambdaParamsText = "";
-                    IF pool[lambdaMetaId] AS meta THEN
+                    IF pool[lambdaMetaId] EXISTS AS meta THEN
                         PARTIAL MATCH meta.vars["__p"] OR_ELSE Value.Nil START
                             Value.EnvRef AS pid -> closureEnv = pid;,
                             DEFAULT -> PASS;
@@ -634,11 +634,11 @@ FN evalList!(items: Value[], envId: Id<Env>, MUTABLE pool: Env[50000]@pool) RETU
                         lambdaBodyText = getStr(meta.vars["__body"] OR_ELSE Value.Nil);
                         lambdaParamsText = getStr(meta.vars["__params"] OR_ELSE Value.Nil);
                     END
-                    IF pool[callId] AS callEnv THEN callEnv.vars["__p"] = Value{ EnvRef: closureEnv }; END
+                    IF pool[callId] EXISTS AS callEnv THEN callEnv.vars["__p"] = Value{ EnvRef: closureEnv }; END
                     lambdaParamNames = lambdaParamsText.split("\n");
                     FOR pi IN (0_i64 ..< lambdaParamNames.length()) DO
                         IF lambdaParamNames[pi] != "" THEN
-                            IF pool[callId] AS callEnv2 THEN
+                            IF pool[callId] EXISTS AS callEnv2 THEN
                                 callEnv2.vars[lambdaParamNames[pi]] = COPY (evaled[pi + 1] OR_ELSE Value.Nil);
                             END
                         END
@@ -672,7 +672,7 @@ END
 
 FN setupEnv!(MUTABLE pool: Env[50000]@pool) RETURNS !Id<Env> ->
     rootId: Id<Env> = pool.insert(Env{ vars: {} });
-    IF pool[rootId] AS root THEN
+    IF pool[rootId] EXISTS AS root THEN
         root.vars["__output"] = Value{ Str: "" };
         root.vars["+"] = Value{ NativeFn: 1 };
         root.vars["-"] = Value{ NativeFn: 2 };

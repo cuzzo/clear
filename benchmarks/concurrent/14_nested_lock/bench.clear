@@ -57,7 +57,7 @@ FN main() RETURNS Void ->
               # Read lock on bank to access accounts list,
               # then exclusive locks on both accounts for transfer.
               WITH bank AS bk {
-                IF (bk.accounts[lo] AS loAcct) AND (bk.accounts[hi] AS hiAcct) THEN
+                IF (bk.accounts[lo] EXISTS AS loAcct) AND (bk.accounts[hi] EXISTS AS hiAcct) THEN
                   WITH
                     EXCLUSIVE loAcct AS la,
                     EXCLUSIVE hiAcct AS ha {
@@ -76,7 +76,7 @@ FN main() RETURNS Void ->
   END
 
   FOR i IN (0 ..< nWorkers) DO
-    IF futures[i] AS future THEN NEXT future; END
+    IF futures[i] EXISTS AS future THEN NEXT future; END
   END
   elapsed = timestampMs() - t0;
 
@@ -91,12 +91,12 @@ FN main() RETURNS Void ->
   acct_refs: Account@shared:locked[]@list = [];
   WITH bank AS bk {
     FOR i IN (0 ..< numAccounts) DO
-      IF bk.accounts[i] AS account THEN acct_refs.append(CLONE account); END
+      IF bk.accounts[i] EXISTS AS account THEN acct_refs.append(CLONE account); END
     END
   }
   MUTABLE total = 0;
   FOR i IN (0 ..< numAccounts) DO
-    IF acct_refs[i] AS a THEN
+    IF acct_refs[i] EXISTS AS a THEN
       WITH a AS inner {
         total = total + inner.balance;
       }

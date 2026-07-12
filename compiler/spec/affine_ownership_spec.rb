@@ -628,7 +628,7 @@ RSpec.describe SemanticAnnotator do
           UNION Value { Nil, Num: Float64, Lambda { body: Value @indirect, id: Int64 } }
           FN test!(MUTABLE list: Value[]@list, MUTABLE map: HashMap<Value>) RETURNS Void ->
               list.append(Value.Nil);
-              IF list[0] AS value THEN map["key"] = value; END
+              IF list[0] EXISTS AS value THEN map["key"] = value; END
               RETURN;
           END
         CLEAR
@@ -648,7 +648,7 @@ RSpec.describe SemanticAnnotator do
           END
           FN test!(MUTABLE list: Value[]@list) RETURNS Void ->
               list.append(Value.Nil);
-              IF list[0] AS value THEN consume!(value); END
+              IF list[0] EXISTS AS value THEN consume!(value); END
               RETURN;
           END
         CLEAR

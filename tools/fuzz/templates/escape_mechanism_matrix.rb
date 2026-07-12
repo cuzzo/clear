@@ -334,7 +334,7 @@ FuzzGenerator.register(:escape_mechanism_matrix, cells: ESCAPE_MECHANISM_CELLS) 
               b = Box{ vals: [s] };
               out.append(b);
           END
-          IF out[2_i64] AS box THEN
+          IF out[2_i64] EXISTS AS box THEN
               ASSERT box.vals[0_i64].length() == 1_i64, "outer store nested array";
           END
           RETURN;
@@ -352,7 +352,7 @@ FuzzGenerator.register(:escape_mechanism_matrix, cells: ESCAPE_MECHANISM_CELLS) 
           h = Holder{ items: xs };
           f: ~Int64 = BG {
               MUTABLE n: Int64 = 0_i64;
-              IF h.items[0_i64] AS item THEN n = item.label.length(); END
+              IF h.items[0_i64] EXISTS AS item THEN n = item.label.length(); END
               n;
           };
           ASSERT (NEXT f) == 3_i64, "bg capture recursive aggregate";
@@ -403,7 +403,7 @@ FuzzGenerator.register(:escape_mechanism_matrix, cells: ESCAPE_MECHANISM_CELLS) 
               h = Holder{ table: { "k": s } };
               out.append(h);
           END
-          IF out[1_i64] AS holder THEN
+          IF out[1_i64] EXISTS AS holder THEN
               ASSERT (holder.table["k"] OR_ELSE "").length() == 1_i64, "loop carry nested map";
           END
           RETURN;

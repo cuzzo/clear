@@ -41,7 +41,7 @@ END
 FN findKeyIndex(keys: Int64[]@list, key: Int64) RETURNS Int64 ->
   MUTABLE i = 0;
   WHILE i < keys.length() DO
-    IF keys[i] AS candidate THEN
+    IF keys[i] EXISTS AS candidate THEN
       IF candidate >= key -> RETURN i;
     END
     i += 1;
@@ -53,7 +53,7 @@ FN scanWithFilter(keys: Int64[]@list, filter: FN (Int64) -> Bool) RETURNS !Int64
   MUTABLE count = 0;
   MUTABLE i = 0;
   WHILE i < keys.length() DO
-    IF keys[i] AS candidate THEN
+    IF keys[i] EXISTS AS candidate THEN
       IF filter(candidate) -> count += 1;
     END
     i += 1;
@@ -155,7 +155,7 @@ FN main() RETURNS !Void ->
   END
   fi = 0;
   WHILE fi < 4 DO
-    IF futures[fi] AS future THEN NEXT future; END
+    IF futures[fi] EXISTS AS future THEN NEXT future; END
     fi += 1;
   END
   WITH stats AS s {

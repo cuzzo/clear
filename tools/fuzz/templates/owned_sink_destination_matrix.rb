@@ -251,7 +251,7 @@ FuzzGenerator.register(:owned_sink_destination_matrix, cells: OWNED_SINK_DESTINA
         #{helpers}
         FN main() RETURNS Void ->
             #{setup}
-            IF #{expr} AS borrowed THEN
+            IF #{expr} EXISTS AS borrowed THEN
                 #{observe_borrowed}
             ELSE
                 ASSERT FALSE, "indexed source should exist";

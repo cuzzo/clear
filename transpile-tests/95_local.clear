@@ -23,7 +23,7 @@ FN main() RETURNS Void ->
     # Wait for all fibers to complete.
     MUTABLE j: Int64 = 0;
     WHILE j < 4 DO
-        IF futures[j] AS future THEN NEXT future; END
+        IF futures[j] EXISTS AS future THEN NEXT future; END
         j = j + 1;
     END
 

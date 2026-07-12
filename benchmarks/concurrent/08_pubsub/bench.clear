@@ -34,7 +34,7 @@ FN main() RETURNS Void ->
         BG {
           @parallel ->
             MUTABLE total = 0;
-            WHILE NEXT subscriber_msgs AS m DO
+            WHILE NEXT subscriber_msgs EXISTS AS m DO
               total = total %+ processMessage(m.seed);
             END
             total;
@@ -44,7 +44,7 @@ FN main() RETURNS Void ->
 
   MUTABLE total = 0;
   FOR j IN (0 ..< 64) DO
-    IF futures[j] AS future THEN
+    IF futures[j] EXISTS AS future THEN
       result = NEXT future;
       total = total %+ result;
     END

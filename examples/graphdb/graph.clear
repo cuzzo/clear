@@ -29,7 +29,7 @@ FN addEdge!(MUTABLE nodes: HashMap<Node>, from: String, to: String, weight: Floa
   # Build new edges list (workaround: COPY on list-from-struct is broken)
   MUTABLE edges: Edge[]@list = [];
   FOR i IN (0 ..< node.edges.length()) DO
-    IF node.edges[i] AS edge THEN
+    IF node.edges[i] EXISTS AS edge THEN
       edges.append(Edge{ target: COPY edge.target, weight: edge.weight });
     END
   END
@@ -43,7 +43,7 @@ FN neighbors!(nodes: HashMap<Node>, id: String) RETURNS !String[]@list ->
   node = nodes[id] OR_ELSE Node{ label: "", edges: [] };
   MUTABLE result: String[]@list = [];
   FOR i IN (0 ..< node.edges.length()) DO
-    IF node.edges[i] AS edge THEN
+    IF node.edges[i] EXISTS AS edge THEN
       targetNode = nodes[edge.target] OR_ELSE Node{ label: "?", edges: [] };
       result.append(COPY targetNode.label);
     END
@@ -98,7 +98,7 @@ FN shortestPath!(nodes: HashMap<Node>, source: String, target: String) RETURNS !
 
     bfsNode = nodes[current] OR_ELSE Node{ label: "", edges: [] };
     FOR i IN (0 ..< bfsNode.edges.length()) DO
-      IF bfsNode.edges[i] AS edge THEN
+      IF bfsNode.edges[i] EXISTS AS edge THEN
         neighbor = COPY edge.target;
         alreadyVisited = visited[neighbor] OR_ELSE "";
         IF alreadyVisited == "" THEN
@@ -132,7 +132,7 @@ FN shortestPath!(nodes: HashMap<Node>, source: String, target: String) RETURNS !
   # Reverse path
   MUTABLE reversed: String[]@list = [];
   FOR ri IN (0 ..< path.length()) DO
-    IF path[path.length() - 1 - ri] AS pathNode THEN reversed.append(COPY pathNode); END
+    IF path[path.length() - 1 - ri] EXISTS AS pathNode THEN reversed.append(COPY pathNode); END
   END
   RETURN reversed;
 END
@@ -153,7 +153,7 @@ FN dfs!(nodes: HashMap<Node>, start: String) RETURNS !String[]@list ->
     # Shrink stack by rebuilding without last element
     MUTABLE newStack: String[]@list = [];
     FOR si IN (0 ..< stack.length() - 1) DO
-      IF stack[si] AS stackNode THEN newStack.append(COPY stackNode); END
+      IF stack[si] EXISTS AS stackNode THEN newStack.append(COPY stackNode); END
     END
     stack = newStack;
 
@@ -166,7 +166,7 @@ FN dfs!(nodes: HashMap<Node>, start: String) RETURNS !String[]@list ->
       dfsNode = nodes[top] OR_ELSE Node{ label: "", edges: [] };
       FOR i IN (0 ..< dfsNode.edges.length()) DO
         idx = dfsNode.edges.length() - 1 - i;
-        IF dfsNode.edges[idx] AS edge THEN
+        IF dfsNode.edges[idx] EXISTS AS edge THEN
           neighbor = COPY edge.target;
           neighborSeen = visited[neighbor] OR_ELSE "";
           IF neighborSeen == "" THEN

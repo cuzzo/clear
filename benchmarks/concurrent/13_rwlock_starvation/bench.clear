@@ -87,7 +87,7 @@ writer = BG {
 
 # Wait for all
 FOR r IN (0 ..< nReaders) DO
-  IF readers[r] AS future THEN NEXT future; END
+  IF readers[r] EXISTS AS future THEN NEXT future; END
 END
 result = NEXT writer;
 elapsed = timestampMs() - t0;

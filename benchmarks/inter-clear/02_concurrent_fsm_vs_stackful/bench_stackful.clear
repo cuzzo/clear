@@ -20,7 +20,7 @@ FN main() RETURNS Void ->
   END
 
   FOR j IN (0 ..< count) DO
-    IF futures[j] AS future THEN
+    IF futures[j] EXISTS AS future THEN
       r: Int64 = NEXT future;
       total = total + r;
     END

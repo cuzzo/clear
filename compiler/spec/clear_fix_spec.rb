@@ -71,6 +71,23 @@ RSpec.describe "./clear fix", :integration do
     expect(File.read(path)).to include("TRUE AND FALSE OR TRUE")
   end
 
+  it "inserts EXISTS for legacy IF and WHILE optional bindings" do
+    path = write("exists.clear", <<~CLEAR)
+      FN main(maybe: ?Int64) RETURNS Void ->
+        IF maybe AS value THEN ASSERT value == 1_i64; END
+        WHILE maybe AS value -> BREAK;
+      END
+    CLEAR
+
+    out, err, status = run_clear("autofix", "--only=syntax", path)
+
+    expect(status).to eq(0), err
+    expect(out).to include("applied 2 edit(s)")
+    fixed = File.read(path)
+    expect(fixed).to include("IF maybe EXISTS AS value")
+    expect(fixed).to include("WHILE maybe EXISTS AS value")
+  end
+
   it "does not rewrite uppercase constructor names to in-scope variables" do
     path = write("constructor_name.clear", <<~CLEAR)
       FN main(src: String) RETURNS Void ->

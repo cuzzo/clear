@@ -32,7 +32,7 @@ FN main() RETURNS !Void ->
   MUTABLE futures: ~Void[]@list = [];
   MUTABLE wi = 0;
   WHILE wi < workers DO
-    IF counters[wi] AS ref0 THEN
+    IF counters[wi] EXISTS AS ref0 THEN
       ref = CLONE ref0;
       futures
         .append(
@@ -48,14 +48,14 @@ FN main() RETURNS !Void ->
 END
 
 FOR i IN (0 ..< workers) DO
-  IF futures[i] AS future THEN NEXT future; END
+  IF futures[i] EXISTS AS future THEN NEXT future; END
 END
 elapsed = timestampMs() - t0;
 
 # Verify
 MUTABLE total = 0;
 FOR i IN (0 ..< workers) DO
-  IF counters[i] AS ref THEN
+  IF counters[i] EXISTS AS ref THEN
     WITH ref AS inner {
       total = total + inner.value;
     }

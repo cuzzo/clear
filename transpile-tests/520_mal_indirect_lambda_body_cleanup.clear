@@ -44,11 +44,11 @@ FN main() RETURNS Void ->
 
     MUTABLE pool: Env[8]@pool = [];
     envId: Id<Env> = pool.insert(Env{ vars: {} });
-    IF pool[envId] AS env THEN
+    IF pool[envId] EXISTS AS env THEN
         env.vars["f"] = Value.Lambda{ params: COPY params, body: Value{ List: bodyItems } };
     END
     MUTABLE lambda = Value.Nil;
-    IF pool[envId] AS env2 THEN
+    IF pool[envId] EXISTS AS env2 THEN
         lambda = env2.vars["f"] OR_ELSE Value.Nil;
     END
 

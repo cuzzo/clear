@@ -1290,11 +1290,11 @@ RSpec.describe "error emission coverage" do
   end
 
   # @example_for: USE_OF_MOVED_IN_LOOP_SHORT
-  # @fix: Same as USE_OF_MOVED_IN_LOOP, but for the `WHILE expr AS x DO`
+  # @fix: Same as USE_OF_MOVED_IN_LOOP, but for the `WHILE expr EXISTS AS x DO`
   # @fix: bind-loop form (drains an optional). The outer binding can
   # @fix: only be TAKEN once. Drop the `TAKES`, upgrade to a refcounted
   # @fix: handle, or hoist the consuming call out of the loop body.
-  describe ":USE_OF_MOVED_IN_LOOP_SHORT — `WHILE expr AS x DO` body moves an outer binding" do
+  describe ":USE_OF_MOVED_IN_LOOP_SHORT — `WHILE expr EXISTS AS x DO` body moves an outer binding" do
     it "raises when the bind-loop body TAKES an outer binding" do
       expect {
         run(<<~CLEAR)
@@ -1305,7 +1305,7 @@ RSpec.describe "error emission coverage" do
               MUTABLE items: Int64[5]@list = [];
               items.append(1_i64);
               items.append(2_i64);
-              WHILE items.pop() AS i DO
+              WHILE items.pop() EXISTS AS i DO
                   consume(msg);
               END
           END
@@ -1322,7 +1322,7 @@ RSpec.describe "error emission coverage" do
             MUTABLE items: Int64[5]@list = [];
             items.append(1_i64);
             items.append(2_i64);
-            WHILE items.pop() AS i DO
+            WHILE items.pop() EXISTS AS i DO
                 inspect(msg, i);
             END
         END
@@ -1593,7 +1593,7 @@ RSpec.describe "error emission coverage" do
           FN main() RETURNS Void ->
               MUTABLE list: Value[]@list = [];
               list.append(Value.Nil);
-            IF list[0_i64] AS value THEN consume(value); END
+            IF list[0_i64] EXISTS AS value THEN consume(value); END
           END
         CLEAR
       }.to raise_error(CompilerError, /Cannot pass borrowed access to TAKES parameter/)
@@ -1606,7 +1606,7 @@ RSpec.describe "error emission coverage" do
         FN main() RETURNS Void ->
             MUTABLE list: Value[]@list = [];
             list.append(Value.Nil);
-            IF list[0_i64] AS value THEN inspect(value); END
+            IF list[0_i64] EXISTS AS value THEN inspect(value); END
         END
       CLEAR
     end
@@ -1668,13 +1668,13 @@ RSpec.describe "error emission coverage" do
       }.to raise_error(CompilerError, /RESOLVE can only be applied to @link/)
     end
 
-    it "compiles when RESOLVE upgrades an @link inside an IF AS binding" do
+    it "compiles when RESOLVE upgrades an @link inside an IF EXISTS AS binding" do
       run(<<~CLEAR)
         STRUCT Node { val: Int64 }
         FN main() RETURNS Void ->
             n = Node{val: 1} @multiowned;
             w = LINK n;
-            IF RESOLVE w AS strong THEN
+            IF RESOLVE w EXISTS AS strong THEN
                 print(strong.val);
             END
         END
@@ -1717,7 +1717,7 @@ RSpec.describe "error emission coverage" do
   # @fix: An `@link` binding is a weak reference — the target may
   # @fix: have been freed. Functions that take a strong reference
   # @fix: cannot accept the weak directly. RESOLVE the link first
-  # @fix: (`IF RESOLVE w AS strong THEN ...`) and pass the
+  # @fix: (`IF RESOLVE w EXISTS AS strong THEN ...`) and pass the
   # @fix: short-lived strong reference inside the IF body.
   describe ":LINK_NEEDS_RESOLVE_FOR_CALL — passing @link to a non-@link parameter" do
     it "raises when an @link binding is passed where a strong reference is expected" do
@@ -1741,7 +1741,7 @@ RSpec.describe "error emission coverage" do
         FN main() RETURNS Void ->
             n = Node{val: 1} @multiowned;
             w = LINK n;
-            IF RESOLVE w AS strong THEN
+            IF RESOLVE w EXISTS AS strong THEN
                 inspect(strong);
             END
         END
@@ -1786,19 +1786,19 @@ RSpec.describe "error emission coverage" do
   end
 
   # @example_for: WHILE_AS_IMMUTABLE_RECEIVER
-  # @fix: `WHILE expr AS x DO ...` re-evaluates `expr` every
+  # @fix: `WHILE expr EXISTS AS x DO ...` re-evaluates `expr` every
   # @fix: iteration. If `expr` is `recv.method()` and `recv` is
   # @fix: immutable, `method` returns the same value every time and
   # @fix: the loop runs forever. Declare the receiver `MUTABLE` (so
   # @fix: methods like `pop()` can advance state) — or use a
   # @fix: regular `WHILE cond DO` with explicit termination.
-  describe ":WHILE_AS_IMMUTABLE_RECEIVER — `WHILE recv.method() AS x` on immutable recv" do
+  describe ":WHILE_AS_IMMUTABLE_RECEIVER — `WHILE recv.method() EXISTS AS x` on immutable recv" do
     it "raises when the bind-loop calls `pop()` on an immutable list" do
       expect {
         run(<<~CLEAR)
           FN main() RETURNS !Void ->
               items: Int64[5]@list = [];
-              WHILE items.pop() AS v DO
+              WHILE items.pop() EXISTS AS v DO
                   _ = v;
               END
           END
@@ -1811,7 +1811,7 @@ RSpec.describe "error emission coverage" do
         FN main() RETURNS !Void ->
             MUTABLE items: Int64[5]@list = [];
             items.append(1_i64);
-            WHILE items.pop() AS v DO
+            WHILE items.pop() EXISTS AS v DO
                 print(v);
             END
         END
@@ -2365,7 +2365,7 @@ RSpec.describe "error emission coverage" do
         FN main() RETURNS Void ->
             MUTABLE pool: Item[100]@pool = [];
             id = pool.insert(Item{v: 1});
-            IF pool[id] AS got THEN
+            IF pool[id] EXISTS AS got THEN
                 print(got.v.toString());
             END
         END
@@ -2681,60 +2681,60 @@ RSpec.describe "error emission coverage" do
       }.to raise_error(CompilerError, /Cannot unwrap non-optional type 'Int64'/)
     end
 
-    it "compiles when consuming the optional via `IF expr AS v THEN ...`" do
+    it "compiles when consuming the optional via `IF expr EXISTS AS v THEN ...`" do
       run(<<~CLEAR)
         FN getN() RETURNS ?Int64 -> RETURN 5_i64; END
         FN main() RETURNS Void ->
-            IF getN() AS v THEN print(v.toString()); END
+            IF getN() EXISTS AS v THEN print(v.toString()); END
         END
       CLEAR
     end
   end
 
   # @example_for: IF_AS_NEEDS_OPTIONAL
-  # @fix: `IF expr AS v THEN ...` is the optional-binding form —
+  # @fix: `IF expr EXISTS AS v THEN ...` is the optional-binding form —
   # @fix: it requires `expr` to be `?T`. For a plain T, use a
   # @fix: regular `IF cond THEN ...` form. To get an optional,
   # @fix: declare the value's type as `?T`.
-  describe ":IF_AS_NEEDS_OPTIONAL — `IF x AS v` for non-optional x" do
-    it "raises when the IF AS expression is a plain Int64" do
+  describe ":IF_AS_NEEDS_OPTIONAL — `IF x EXISTS AS v` for non-optional x" do
+    it "raises when the IF EXISTS AS expression is a plain Int64" do
       expect {
         run(<<~CLEAR)
           FN main() RETURNS Void ->
               n: Int64 = 5_i64;
-              IF n AS v THEN print(v.toString()); END
+              IF n EXISTS AS v THEN print(v.toString()); END
           END
         CLEAR
-      }.to raise_error(CompilerError, /IF \.\.\. AS binding requires an optional type, got 'Int64'/)
+      }.to raise_error(CompilerError, /IF \.\.\. EXISTS AS binding requires an optional type, got 'Int64'/)
     end
 
     it "compiles when the binding source returns `?T`" do
       run(<<~CLEAR)
         FN getN() RETURNS ?Int64 -> RETURN 5_i64; END
         FN main() RETURNS Void ->
-            IF getN() AS v THEN print(v.toString()); END
+            IF getN() EXISTS AS v THEN print(v.toString()); END
         END
       CLEAR
     end
   end
 
   # @example_for: WHILE_AS_NEEDS_OPTIONAL
-  # @fix: `WHILE expr AS v DO ...` drains an optional source until
+  # @fix: `WHILE expr EXISTS AS v DO ...` drains an optional source until
   # @fix: it returns NIL. The condition expression must be `?T`.
   # @fix: For an iteratable source, use a method that returns `?T`
   # @fix: per call (`list.pop()`, `iter.next()`).
-  describe ":WHILE_AS_NEEDS_OPTIONAL — `WHILE x AS v DO` for non-optional x" do
-    it "raises when the WHILE AS expression is a plain Int64" do
+  describe ":WHILE_AS_NEEDS_OPTIONAL — `WHILE x EXISTS AS v DO` for non-optional x" do
+    it "raises when the WHILE EXISTS AS expression is a plain Int64" do
       expect {
         run(<<~CLEAR)
           FN main() RETURNS Void ->
               n: Int64 = 5_i64;
-              WHILE n AS v DO
+              WHILE n EXISTS AS v DO
                   print(v.toString());
               END
           END
         CLEAR
-      }.to raise_error(CompilerError, /WHILE \.\.\. AS binding requires an optional type/)
+      }.to raise_error(CompilerError, /WHILE \.\.\. EXISTS AS binding requires an optional type/)
     end
 
     it "compiles when the loop drains a list via `pop()`" do
@@ -2742,7 +2742,7 @@ RSpec.describe "error emission coverage" do
         FN main() RETURNS !Void ->
             MUTABLE items: Int64[5]@list = [];
             items.append(1_i64);
-            WHILE items.pop() AS v DO
+            WHILE items.pop() EXISTS AS v DO
                 print(v.toString());
             END
             RETURN;
@@ -2978,7 +2978,7 @@ RSpec.describe "error emission coverage" do
   # @example_for: CONDITION_NEEDS_BOOL
   # @fix: `WHILE cond DO ...` requires `cond` to be Bool. Convert
   # @fix: numeric/optional conditions explicitly: `WHILE n != 0_i64`,
-  # @fix: `WHILE optVal AS x DO ...` for the optional-binding form.
+  # @fix: `WHILE optVal EXISTS AS x DO ...` for the optional-binding form.
   describe ":CONDITION_NEEDS_BOOL — non-Bool WHILE condition" do
     it "raises when WHILE condition is an Int64" do
       expect {

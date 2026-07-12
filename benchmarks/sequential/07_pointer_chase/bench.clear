@@ -61,7 +61,7 @@ FN main() RETURNS Void ->
   MUTABLE sum = 0;
   t1 = timestampMs();
   TIGHT FOR steps IN (0 ..< n_nodes) DO
-    IF pool[id_list[cur_idx]] AS n THEN
+    IF pool[id_list[cur_idx]] EXISTS AS n THEN
       sum = sum + n.val;
     END
     cur_idx = (cur_idx + step) MOD n_nodes;

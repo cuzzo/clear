@@ -509,9 +509,18 @@ class ClearParser
   def parse_group_expression
     consume(:CHAR, '(')
     expr = parse_expression
-    # (expr AS name): optional binding group used in IF (expr AS name) && ...
-    # parse_expression stops at AS (guard blocks non-@-prefixed tokens), so check explicitly.
-    if match?(:KEYWORD, 'AS')
+    # (expr EXISTS AS name): optional binding group used in IF chains.
+    if match?(:KEYWORD, 'EXISTS')
+      consume(:KEYWORD, 'EXISTS')
+      consume(:KEYWORD, 'AS')
+      name_tok = consume(:VAR_ID)
+      consume(:CHAR, ')')
+      bind = AST::BinaryOp.new(name_tok, expr, :BIND_VAR,
+               AST::Identifier.new(name_tok, T.must(name_tok).value))
+      bind.paren_bind = true
+      return parse_suffixes(bind)
+    elsif match?(:KEYWORD, 'AS')
+      emit_legacy_optional_binding!(current)
       consume(:KEYWORD, 'AS')
       name_tok = consume(:VAR_ID)
       consume(:CHAR, ')')
@@ -522,6 +531,23 @@ class ClearParser
     end
     consume(:CHAR, ')')
     parse_suffixes(expr)
+  end
+
+  sig { params(as_token: Lexer::Token).void }
+  def emit_legacy_optional_binding!(as_token)
+    fix = Fix.new(
+      description: fix_description(:INSERT_EXISTS_BEFORE_AS),
+      confidence: :auto,
+      edits: [Edit.new(
+        span: Span.new(file: nil, line: as_token.line, col: as_token.column, length: 0),
+        replacement: 'EXISTS '
+      )]
+    )
+    fixable!(as_token,
+      code: :OPTIONAL_BINDING_REQUIRES_EXISTS,
+      category: :syntax,
+      level: :error,
+      fixes: [fix])
   end
 
   sig { params(rule: ParserRule, lhs: AST::Node).returns(SuffixResult) }
@@ -2416,10 +2442,18 @@ class ClearParser
       return node
     end
 
-    # Single bare bind: IF expr AS name [THEN ...]
-    # AS is not consumed by parse_expression (guard blocks non-@-prefixed identifiers),
-    # so we check for it explicitly here.
-    if match?(:KEYWORD, 'AS')
+    # Single optional bind: IF expr EXISTS AS name [THEN ...]
+    if match?(:KEYWORD, 'EXISTS')
+      consume(:KEYWORD, 'EXISTS')
+      consume(:KEYWORD, 'AS')
+      name_tok = consume(:VAR_ID)
+      if match?(:KEYWORD, 'AND') || match?(:LEGACY_LOGICAL, '&&')
+        error!(if_token, :MULTIPLE_BINDINGS_NEED_PARENS)
+      end
+      bindings = [AST::Binding.new(expr: condition, name: T.must(name_tok).value, name_token: name_tok)]
+      return parse_if_bind_body(if_token, bindings)
+    elsif match?(:KEYWORD, 'AS')
+      emit_legacy_optional_binding!(current)
       consume(:KEYWORD, 'AS')
       name_tok = consume(:VAR_ID)
       # Bare multi-bind error: IF expr AS name && expr2 AS name2 THEN
@@ -2430,8 +2464,7 @@ class ClearParser
       return parse_if_bind_body(if_token, bindings)
     end
 
-    # Paren-bind form: IF (expr AS name) [&& (expr2 AS name2)] THEN ...
-    # Paren primary marks BinaryOp(:BIND_VAR) with paren_bind:true when (expr AS name) is parsed.
+    # Paren-bind form: IF (expr EXISTS AS name) AND (...) THEN ...
     bindings = extract_paren_bindings(condition, if_token)
     unless bindings.empty?
       return parse_if_bind_body(if_token, bindings)
@@ -2839,8 +2872,20 @@ class ClearParser
     tok = consume(:KEYWORD, 'WHILE')
     condition = parse_expression
 
-    # WHILE expr AS name [-> stmt | DO ... END]
-    if match?(:KEYWORD, 'AS')
+    # WHILE expr EXISTS AS name [-> stmt | DO ... END]
+    if match?(:KEYWORD, 'EXISTS')
+      consume(:KEYWORD, 'EXISTS')
+      consume(:KEYWORD, 'AS')
+      name_tok = consume(:VAR_ID)
+      if match?(:ARROW, '->')
+        consume(:ARROW, '->')
+        stmt = parse_statement
+        return AST::WhileBindLoop.new(tok, condition, T.must(name_tok).value, name_tok, [stmt].compact, nil)
+      end
+      body = parse_keyword_block('DO')
+      return AST::WhileBindLoop.new(tok, condition, T.must(name_tok).value, name_tok, body, nil)
+    elsif match?(:KEYWORD, 'AS')
+      emit_legacy_optional_binding!(current)
       consume(:KEYWORD, 'AS')
       name_tok = consume(:VAR_ID)
       if match?(:ARROW, '->')

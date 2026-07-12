@@ -4,7 +4,7 @@ FN liveCellMap(cells: Cell[]@list) RETURNS !HashMap<Int64> ->
   MUTABLE live: HashMap<Int64> = {};
   MUTABLE i = 0;
   WHILE i < cells.length() DO
-    IF cells[i] AS cell THEN live[cellKey(cell)] = 1; END
+    IF cells[i] EXISTS AS cell THEN live[cellKey(cell)] = 1; END
     i += 1;
   END
   RETURN live;
@@ -25,7 +25,7 @@ FN bounds(cells: Cell[]@list) RETURNS !Cell[]@list ->
   MUTABLE maxY = first.y;
   MUTABLE i = 1;
   WHILE i < cells.length() DO
-    IF cells[i] AS cell THEN
+    IF cells[i] EXISTS AS cell THEN
       IF cell.x < minX -> minX = cell.x;
       IF cell.x > maxX -> maxX = cell.x;
       IF cell.y < minY -> minY = cell.y;

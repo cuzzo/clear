@@ -503,7 +503,7 @@ END
 # envSet!: walk scope chain, update existing binding. Returns TRUE if found.
 
 FN envSet!(envId: Id<Env>, name: String, val: Value, MUTABLE pool: Env[50000]@pool) RETURNS !Bool REQUIRES pool: LOCKED EFFECTS REENTRANT ->
-    IF pool[envId] AS env THEN
+    IF pool[envId] EXISTS AS env THEN
         IF env.vars.contains?(name) THEN
             env.vars[name] = COPY val;
             RETURN TRUE;
@@ -628,7 +628,7 @@ FN handleCatch!(catchExpr: Value, errMsg: String, errKind: String, envId: Id<Env
     PARTIAL MATCH catchExpr START
         Value.List AS catchItems ->
             catchEnvId: Id<Env> = pool.insert(Env{ vars: {} });
-            IF pool[catchEnvId] AS catchEnv THEN
+            IF pool[catchEnvId] EXISTS AS catchEnv THEN
                 catchEnv.vars["__p"] = Value{ EnvRef: envId };
                 errBindName = getSymName(catchItems[1]);
                 catchEnv.vars[errBindName] = Value.Error{ errMsg: COPY errMsg, errKind: COPY errKind, errType: "" };
@@ -775,7 +775,7 @@ FN evalList!(TAKES items: Value[], envId: Id<Env>, MUTABLE pool: Env[50000]@pool
             elem = listRef(listVal, di);
             MUTABLE found = FALSE;
             FOR dj IN (0_i64 ..< distinct.length()) DO
-                IF distinct[dj] AS existing THEN
+                IF distinct[dj] EXISTS AS existing THEN
                     IF valEqual?(elem, existing) THEN found = TRUE; END
                 END
             END
@@ -1417,11 +1417,11 @@ FN evalList!(TAKES items: Value[], envId: Id<Env>, MUTABLE pool: Env[50000]@pool
     ELSE_IF formName == "source-line" THEN
         # (source-line N) -> track current CLEAR source line for error messages
         lineVal = eval!(COPY items[1], envId, pool);
-        IF pool[envId] AS env THEN env.vars["__source_line"] = lineVal; END
+        IF pool[envId] EXISTS AS env THEN env.vars["__source_line"] = lineVal; END
         RETURN Value.Nil;
 
     ELSE_IF formName == "sandbox-enable" THEN
-        IF pool[envId] AS env THEN env.vars["__sandbox"] = Value.TrueVal; END
+        IF pool[envId] EXISTS AS env THEN env.vars["__sandbox"] = Value.TrueVal; END
         RETURN Value.Nil;
 
     ELSE_IF formName == "native-manhattan" THEN
@@ -1478,12 +1478,12 @@ FN evalList!(TAKES items: Value[], envId: Id<Env>, MUTABLE pool: Env[50000]@pool
     ELSE_IF formName == "debug-set-break" THEN
         # (debug-set-break "fnName") -> register breakpoint
         bpName = eval!(COPY items[1], envId, pool);
-        IF pool[envId] AS env THEN env.vars["__bp_" + getStr(bpName)] = Value.TrueVal; END
+        IF pool[envId] EXISTS AS env THEN env.vars["__bp_" + getStr(bpName)] = Value.TrueVal; END
         RETURN Value.Nil;
 
     ELSE_IF formName == "debug-clear-break" THEN
         bpName = eval!(COPY items[1], envId, pool);
-        IF pool[envId] AS env THEN env.vars["__bp_" + getStr(bpName)] = Value.Nil; END
+        IF pool[envId] EXISTS AS env THEN env.vars["__bp_" + getStr(bpName)] = Value.Nil; END
         RETURN Value.Nil;
 
     # Error introspection: special forms to avoid error propagation
@@ -1530,7 +1530,7 @@ FN evalList!(TAKES items: Value[], envId: Id<Env>, MUTABLE pool: Env[50000]@pool
         defName = getSymName(items[1]);
         val = eval!(COPY items[2], envId, pool);
         IF isError?(val) THEN RETURN val; END
-        IF pool[envId] AS env THEN env.vars[defName] = COPY val; END
+        IF pool[envId] EXISTS AS env THEN env.vars[defName] = COPY val; END
         RETURN val;
 
     ELSE_IF formName == "set!" THEN
@@ -1621,7 +1621,7 @@ FN evalList!(TAKES items: Value[], envId: Id<Env>, MUTABLE pool: Env[50000]@pool
         PARTIAL MATCH items[1] START
             Value.List AS binds ->
                 letId: Id<Env> = pool.insert(Env{ vars: {} });
-                IF pool[letId] AS letEnv THEN
+                IF pool[letId] EXISTS AS letEnv THEN
                     letEnv.vars["__p"] = Value{ EnvRef: envId };
                     IF binds.length() > 0 AND isList?(binds[0]) THEN
                         FOR bi IN (0_i64 ..< binds.length()) DO
@@ -1727,7 +1727,7 @@ FN evalList!(TAKES items: Value[], envId: Id<Env>, MUTABLE pool: Env[50000]@pool
             IF shouldBreak THEN
                 # Push call stack
                 oldStack = getStr(envGet!(envId, "__dbg_stack", pool));
-                IF pool[envId] AS dbgEnv THEN
+                IF pool[envId] EXISTS AS dbgEnv THEN
                     IF oldStack.length() > 0 THEN
                         dbgEnv.vars["__dbg_stack"] = Value{ Str: COPY callDesc + " < " + oldStack };
                     ELSE
@@ -1745,7 +1745,7 @@ FN evalList!(TAKES items: Value[], envId: Id<Env>, MUTABLE pool: Env[50000]@pool
                 END
 
                 # Set step mode based on debug action
-                IF pool[envId] AS dbgEnv2 THEN
+                IF pool[envId] EXISTS AS dbgEnv2 THEN
                     dbgEnv2.vars["__dbg_step"] = Value{ Number: toFloat(action) };
                     dbgEnv2.vars["__dbg_target_depth"] = Value{ Number: curDepth };
                     # Restore stack
@@ -1754,14 +1754,14 @@ FN evalList!(TAKES items: Value[], envId: Id<Env>, MUTABLE pool: Env[50000]@pool
             END
 
             # Track call depth for step-over/out
-            IF pool[envId] AS dbgEnv3 THEN dbgEnv3.vars["__dbg_depth"] = Value{ Number: curDepth + 1.0 }; END
+            IF pool[envId] EXISTS AS dbgEnv3 THEN dbgEnv3.vars["__dbg_depth"] = Value{ Number: curDepth + 1.0 }; END
         END
 
         IF isLambda?(f) THEN
             PARTIAL MATCH f START
                 Value.Lambda AS lam ->
                     callId: Id<Env> = pool.insert(Env{ vars: {} });
-                    IF pool[callId] AS callEnv THEN
+                    IF pool[callId] EXISTS AS callEnv THEN
                         callEnv.vars["__p"] = Value{ EnvRef: lam.envId };
                         FOR pi IN (0_i64 ..< lam.params.length()) DO
                             pname = getSymName(lam.params[pi] OR_ELSE Value.Nil);
@@ -1796,7 +1796,7 @@ END
 
 FN setupEnv!(MUTABLE pool: Env[50000]@pool) RETURNS !Id<Env> REQUIRES pool: LOCKED ->
     rootId: Id<Env> = pool.insert(Env{ vars: {} });
-    IF pool[rootId] AS root THEN
+    IF pool[rootId] EXISTS AS root THEN
         # Arithmetic: 1-4
         root.vars["+"] = Value{ NativeFn: 1 };
         root.vars["-"] = Value{ NativeFn: 2 };
@@ -2045,7 +2045,7 @@ FN compile!(ast: Value, envId: Id<Env>, MUTABLE pool: Env[50000]@pool) RETURNS !
         symName = getSymName(ast);
         # Check if this symbol has a slot assignment
         MUTABLE slotLookup = Value{ Number: 0.0 - 1.0 };
-        IF pool[envId] AS slotEnv THEN slotLookup = slotEnv.vars["__slot_" + symName] OR_ELSE Value{ Number: 0.0 - 1.0 }; END
+        IF pool[envId] EXISTS AS slotEnv THEN slotLookup = slotEnv.vars["__slot_" + symName] OR_ELSE Value{ Number: 0.0 - 1.0 }; END
         slotNum = toInt(getNum(slotLookup));
         IF slotNum >= 0 THEN
             # LOAD_SLOT
@@ -2097,7 +2097,7 @@ FN compile!(ast: Value, envId: Id<Env>, MUTABLE pool: Env[50000]@pool) RETURNS !
                 ops.append(Value{ Number: 0.0 }); ops.append(Value{ Number: toFloat(c1) });
                 defName = getSymName(items[1]);
                 MUTABLE nextSlot: Int64 = 0;
-                IF pool[envId] AS defSlotEnv THEN
+                IF pool[envId] EXISTS AS defSlotEnv THEN
                     slotCounter = defSlotEnv.vars["__slotN"] OR_ELSE Value{ Number: 0.0 };
                     nextSlot = toInt(getNum(slotCounter));
                     defSlotEnv.vars["__slot_" + defName] = Value{ Number: toFloat(nextSlot) };
@@ -2156,7 +2156,7 @@ FN compile!(ast: Value, envId: Id<Env>, MUTABLE pool: Env[50000]@pool) RETURNS !
 
     ops.append(Value{ Number: 19.0 });
     # Store in env entry-by-entry (Value.Number is inline, survives arena free)
-    IF pool[envId] AS bcEnv THEN
+    IF pool[envId] EXISTS AS bcEnv THEN
         bcEnv.vars["__bc_opN"] = Value{ Number: toFloat(ops.length()) };
         FOR wi IN (0_i64 ..< ops.length()) DO
             bcEnv.vars["__bc_o" + wi.toString()] = ops[wi] OR_ELSE Value.Nil;
@@ -2215,7 +2215,7 @@ FN exec!(ops: Int64[], consts: Value[], envId: Id<Env>, MUTABLE pool: Env[50000]
                 sp += 1;,
             2 ->  # STORE_NAME
                 idx = ops[ip]; ip += 1;
-                IF pool[curEnv] AS storeEnv THEN storeEnv.vars[getSymName(consts[idx])] = stack[sp - 1] OR_ELSE Value.Nil; END,
+                IF pool[curEnv] EXISTS AS storeEnv THEN storeEnv.vars[getSymName(consts[idx])] = stack[sp - 1] OR_ELSE Value.Nil; END,
             3 ->  # POP
                 sp -= 1;,
             4 ->  # ADD (polymorphic)
@@ -2300,7 +2300,7 @@ FN exec!(ops: Int64[], consts: Value[], envId: Id<Env>, MUTABLE pool: Env[50000]
                     PARTIAL MATCH fnVal START
                         Value.Lambda AS lam ->
                             callId: Id<Env> = pool.insert(Env{ vars: {} });
-                            IF pool[callId] AS bcCallEnv THEN
+                            IF pool[callId] EXISTS AS bcCallEnv THEN
                                 bcCallEnv.vars["__p"] = Value{ EnvRef: lam.envId };
                                 FOR pi IN (0_i64 ..< argc) DO
                                     pname = getSymName(lam.params[pi]);

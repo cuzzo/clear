@@ -47,7 +47,7 @@ FN main() RETURNS Void ->
   WHILE it < iters DO
     MUTABLE idx = 0;
     WHILE idx < n_docs DO
-      IF docs[idx] AS doc THEN
+      IF docs[idx] EXISTS AS doc THEN
         s_rc += doc.title.length() + doc.body.length() + doc.tag.length();
       END
       idx += 1;

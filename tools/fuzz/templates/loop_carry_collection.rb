@@ -43,14 +43,14 @@ FuzzGenerator.register(:loop_carry_collection, cells: LOOP_CARRY_CELLS) do |p|
           WHILE i < #{p[:outer]}_i64 DO
               #{p[:body] == :frame_alloc ? "MUTABLE scratch: #{zig_type}[]@list = List[];\n            scratch.append(#{push_expr});" : ""}
               lst.append(H{ values: [] });
-              IF lst[i] AS holder THEN
+              IF lst[i] EXISTS AS holder THEN
                   holder.values.append(#{p[:body] == :frame_alloc ? "COPY (scratch[0] OR_ELSE #{p[:elem] == :string ? '""' : '0_i64'})" : push_expr});
               END
               i = i + 1_i64;
           END
           MUTABLE total: Int64 = 0_i64;
           FOR h IN (0_i64 ..< length(lst)) DO
-              IF lst[h] AS holder THEN
+              IF lst[h] EXISTS AS holder THEN
                   total = total + holder.values.length();
               END
           END

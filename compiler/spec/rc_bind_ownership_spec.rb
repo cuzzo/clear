@@ -14,7 +14,7 @@ RSpec.describe "RC ownership through optional collection bindings" do
       FN main() RETURNS Void ->
         MUTABLE items: HashMap<Item@multiowned> = {};
         items["x"] = Item{ value: 1_i64 } @multiowned;
-        IF items["x"] AS item THEN ASSERT item.value == 1_i64; END
+        IF items["x"] EXISTS AS item THEN ASSERT item.value == 1_i64; END
       END
     CLEAR
 
@@ -33,7 +33,7 @@ RSpec.describe "RC ownership through optional collection bindings" do
       FN main() RETURNS Void ->
         MUTABLE items: Item@shared[]@list = [];
         items.append(Item{ value: 1_i64 } @shared);
-        WHILE items.pop() AS item DO ASSERT item.value == 1_i64; END
+        WHILE items.pop() EXISTS AS item DO ASSERT item.value == 1_i64; END
       END
     CLEAR
 
@@ -88,7 +88,7 @@ RSpec.describe "RC ownership through optional collection bindings" do
         RETURN Item{ value: 1_i64 } @multiowned;
       END
       FN main() RETURNS Void ->
-        IF make() AS item THEN ASSERT item.value == 1_i64; END
+        IF make() EXISTS AS item THEN ASSERT item.value == 1_i64; END
       END
     CLEAR
 
@@ -103,8 +103,8 @@ RSpec.describe "RC ownership through optional collection bindings" do
       STRUCT Item { value: Int64 }
       FN main() RETURNS Void ->
         MUTABLE source: ?Item@multiowned = Item{ value: 1_i64 } @multiowned;
-        IF COPY source AS item THEN ASSERT item.value == 1_i64; END
-        IF source AS item THEN ASSERT item.value == 1_i64; END
+        IF COPY source EXISTS AS item THEN ASSERT item.value == 1_i64; END
+        IF source EXISTS AS item THEN ASSERT item.value == 1_i64; END
       END
     CLEAR
 
@@ -119,8 +119,8 @@ RSpec.describe "RC ownership through optional collection bindings" do
       STRUCT Item { value: Int64 }
       FN main() RETURNS Void ->
         source: ?Item@shared = Item{ value: 1_i64 } @shared;
-        IF CLONE source AS item THEN ASSERT item.value == 1_i64; END
-        IF source AS item THEN ASSERT item.value == 1_i64; END
+        IF CLONE source EXISTS AS item THEN ASSERT item.value == 1_i64; END
+        IF source EXISTS AS item THEN ASSERT item.value == 1_i64; END
       END
     CLEAR
 

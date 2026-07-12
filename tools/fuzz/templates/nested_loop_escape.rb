@@ -174,7 +174,7 @@ FuzzGenerator.register(:nested_loop_escape, cells: NESTED_LOOP_ESCAPE_CELLS) do 
         #{outer_decl}
     #{loop_block}
         ASSERT length(outer) == #{p[:iters]}_i64, "outer list length";
-        IF outer[0_i64] AS first THEN
+        IF outer[0_i64] EXISTS AS first THEN
             ASSERT #{first_inner_len} == 2_i64, "first inner length";
             #{first_inner_assert}
         END

@@ -293,7 +293,7 @@ FN debugDeleteBreakpoint!(
 ) RETURNS !Void ->
     MUTABLE found: Bool = FALSE;
     FOR bi IN (0_i64 ..< breakpointEntries.length()) DO
-        IF breakpointEntries[bi] AS b THEN
+        IF breakpointEntries[bi] EXISTS AS b THEN
             IF b.id == id THEN
                 IF b.ip >= 0_i64 AND b.ip < isBreakpoint.length() THEN
                     isBreakpoint[b.ip] = 0_i64;
@@ -318,7 +318,7 @@ END
 FN activeFunctionEntryIp(varNames: RegisterVarName[]@list, currentIp: Int64) RETURNS Int64 ->
     MUTABLE bestEntry: Int64 = 0_i64;
     FOR ni IN (0_i64 ..< varNames.length()) DO
-        IF varNames[ni] AS entry THEN
+        IF varNames[ni] EXISTS AS entry THEN
             e = entry.funcEntryIp;
             IF e <= currentIp AND e > bestEntry THEN bestEntry = e; END
         END
@@ -358,7 +358,7 @@ FN snapshotRegisterVars!(
     MUTABLE winnerIdx: HashMap<Int64> = {};
     MUTABLE winnerLine: HashMap<Int64> = {};
     FOR vni IN (0_i64 ..< varNames.length()) DO
-        IF varNames[vni] AS vEntry THEN
+        IF varNames[vni] EXISTS AS vEntry THEN
             IF vEntry.funcEntryIp == bestEntry AND vEntry.sourceLine < pauseLine THEN
                 key = vEntry.kind + ":" + vEntry.physIdx.toString();
                 existing = winnerLine[key] OR_ELSE -1_i64;
@@ -371,7 +371,7 @@ FN snapshotRegisterVars!(
     END
 
     FOR vni IN (0_i64 ..< varNames.length()) DO
-        IF varNames[vni] AS vEntry THEN
+        IF varNames[vni] EXISTS AS vEntry THEN
           IF vEntry.funcEntryIp == bestEntry AND vEntry.sourceLine < pauseLine THEN
             key = vEntry.kind + ":" + vEntry.physIdx.toString();
             chosen = winnerIdx[key] OR_ELSE -1_i64;
@@ -435,7 +435,7 @@ FN replayBackward!(
 ) RETURNS !Void ->
     MUTABLE i: Int64 = events.length() - 1_i64;
     TIGHT WHILE i >= 0_i64 DO
-      IF events[i] AS e THEN
+      IF events[i] EXISTS AS e THEN
         IF e.step <= toStep THEN BREAK; END
         IF e.step <= fromStep THEN
             IF e.kind == 1_i64 THEN

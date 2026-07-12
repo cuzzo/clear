@@ -21,7 +21,7 @@ FN main() RETURNS Void ->
 
   MUTABLE total = 0;
   FOR j IN (0 ..< 100_000) DO
-    IF futures[j] AS future THEN
+    IF futures[j] EXISTS AS future THEN
       result = NEXT future;
       total = total %+ result;
     END

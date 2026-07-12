@@ -56,17 +56,17 @@ FuzzGenerator.register(:rc_generic_collection_matrix, cells: RC_GENERIC_COLLECTI
   cap = rcgc_cap(p[:capability])
   setup, exercise = case p[:operation]
   when :list_append
-    [rcgc_list_setup(cap), 'IF items[0_i64] AS item THEN ASSERT item.value == 7_i64; END']
+    [rcgc_list_setup(cap), 'IF items[0_i64] EXISTS AS item THEN ASSERT item.value == 7_i64; END']
   when :list_index
-    [rcgc_list_setup(cap), 'IF items[0_i64] AS item THEN ASSERT item.value == 7_i64; END\n    IF items[0_i64] AS item THEN ASSERT item.value == 7_i64; END']
+    [rcgc_list_setup(cap), 'IF items[0_i64] EXISTS AS item THEN ASSERT item.value == 7_i64; END\n    IF items[0_i64] EXISTS AS item THEN ASSERT item.value == 7_i64; END']
   when :list_set
-    [rcgc_list_setup(cap), 'items[0_i64] = RefItem{ value: 8_i64 } ' + cap + ';\n    IF items[0_i64] AS item THEN ASSERT item.value == 8_i64; END']
+    [rcgc_list_setup(cap), 'items[0_i64] = RefItem{ value: 8_i64 } ' + cap + ';\n    IF items[0_i64] EXISTS AS item THEN ASSERT item.value == 8_i64; END']
   when :list_first
-    [rcgc_list_setup(cap), 'IF items.first() AS item THEN ASSERT item.value == 7_i64; END\n    IF items.first() AS item THEN ASSERT item.value == 7_i64; END']
+    [rcgc_list_setup(cap), 'IF items.first() EXISTS AS item THEN ASSERT item.value == 7_i64; END\n    IF items.first() EXISTS AS item THEN ASSERT item.value == 7_i64; END']
   when :list_last
-    [rcgc_list_setup(cap), 'IF items.last() AS item THEN ASSERT item.value == 7_i64; END\n    IF items.last() AS item THEN ASSERT item.value == 7_i64; END']
+    [rcgc_list_setup(cap), 'IF items.last() EXISTS AS item THEN ASSERT item.value == 7_i64; END\n    IF items.last() EXISTS AS item THEN ASSERT item.value == 7_i64; END']
   when :list_pop
-    [rcgc_list_setup(cap), 'IF items.pop() AS item THEN ASSERT item.value == 7_i64; END\n    ASSERT items.empty?();']
+    [rcgc_list_setup(cap), 'IF items.pop() EXISTS AS item THEN ASSERT item.value == 7_i64; END\n    ASSERT items.empty?();']
   when :list_remove
     [rcgc_list_setup(cap), 'item = items.remove(0_i64);\n    ASSERT item.value == 7_i64;\n    ASSERT items.empty?();']
   when :list_clear
@@ -78,7 +78,7 @@ FuzzGenerator.register(:rc_generic_collection_matrix, cells: RC_GENERIC_COLLECTI
   when :list_iteration
     [rcgc_list_setup(cap), 'MUTABLE total = 0_i64;\n    FOR item IN items DO total += item.value; END\n    ASSERT total == 7_i64;\n    ASSERT items[0_i64]?.value == 7_i64;']
   when :pool_insert_get
-    [rcgc_pool_setup(cap), 'IF items[id] AS item THEN ASSERT item.value == 7_i64; END\n    IF items[id] AS item THEN ASSERT item.value == 7_i64; END']
+    [rcgc_pool_setup(cap), 'IF items[id] EXISTS AS item THEN ASSERT item.value == 7_i64; END\n    IF items[id] EXISTS AS item THEN ASSERT item.value == 7_i64; END']
   when :pool_remove
     [rcgc_pool_setup(cap), 'items.remove(id);\n    ASSERT items[id] == NIL;']
   when :pool_copy
@@ -108,7 +108,7 @@ FuzzGenerator.register(:rc_generic_collection_matrix, cells: RC_GENERIC_COLLECTI
   when :set_copy
     [rcgc_set_setup(cap), 'copied = COPY items;\n    ASSERT copied.length() == 1_i64;\n    ASSERT items.length() == 1_i64;']
   when :map_put_get
-    [rcgc_map_setup(cap), 'IF items["item"] AS item THEN ASSERT item.value == 7_i64; END\n    IF items["item"] AS item THEN ASSERT item.value == 7_i64; END']
+    [rcgc_map_setup(cap), 'IF items["item"] EXISTS AS item THEN ASSERT item.value == 7_i64; END\n    IF items["item"] EXISTS AS item THEN ASSERT item.value == 7_i64; END']
   when :map_delete
     [rcgc_map_setup(cap), 'items.delete("item");\n    ASSERT items["item"] == NIL;']
   when :map_values

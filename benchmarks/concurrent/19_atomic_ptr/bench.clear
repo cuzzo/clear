@@ -81,7 +81,7 @@ FN main() RETURNS Void ->
   NEXT w_rw;
   MUTABLE total_viol_rw = 0;
   FOR i IN (0 ..< n_readers) DO
-    IF rfutures_rw[i] AS future THEN total_viol_rw = total_viol_rw + NEXT future; END
+    IF rfutures_rw[i] EXISTS AS future THEN total_viol_rw = total_viol_rw + NEXT future; END
   END
   elapsed_rw = timestampMs() - t0_rw;
 
@@ -129,7 +129,7 @@ FN main() RETURNS Void ->
   NEXT w_v;
   MUTABLE total_viol_v = 0;
   FOR i IN (0 ..< n_readers) DO
-    IF rfutures_v[i] AS future THEN total_viol_v = total_viol_v + NEXT future; END
+    IF rfutures_v[i] EXISTS AS future THEN total_viol_v = total_viol_v + NEXT future; END
   END
   elapsed_v = timestampMs() - t0_v;
 
@@ -176,7 +176,7 @@ FN main() RETURNS Void ->
   NEXT w_ap;
   MUTABLE total_viol_ap = 0;
   FOR i IN (0 ..< n_readers) DO
-    IF rfutures_ap[i] AS future THEN total_viol_ap = total_viol_ap + NEXT future; END
+    IF rfutures_ap[i] EXISTS AS future THEN total_viol_ap = total_viol_ap + NEXT future; END
   END
   elapsed_ap = timestampMs() - t0_ap;
 

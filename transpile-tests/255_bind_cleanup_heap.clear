@@ -31,7 +31,7 @@ FN test_while_pop_heap_capture() RETURNS !Void ->
     pool.append(GIVE c3);
 
     MUTABLE count: Int64 = 0;
-    WHILE pool.pop() AS c DO
+    WHILE pool.pop() EXISTS AS c DO
         count = count + c.vals.length();
     END
     ASSERT count == 3_i64, "should pop 3 containers (one val each)";
@@ -43,7 +43,7 @@ END
 # Without fix: v.vals leaks.
 FN test_if_bind_heap_capture() RETURNS !Void ->
     MUTABLE got_it: Bool = FALSE;
-    IF make_optional_container(42) AS c THEN
+    IF make_optional_container(42) EXISTS AS c THEN
         ASSERT c.vals.length() == 1_i64, "IF bind capture should have 1 element";
         got_it = TRUE;
     END

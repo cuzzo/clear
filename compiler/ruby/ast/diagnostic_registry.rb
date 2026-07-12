@@ -752,8 +752,19 @@ module DiagnosticRegistry
     # ===================================================================
     MULTIPLE_BINDINGS_NEED_PARENS: {
       severity: :error, category: :syntax,
-      template: "Syntax Error: Multiple optional bindings require parentheses around each binding.\n  Found: IF expr AS name && expr AS name THEN\n  Use:   IF (expr AS name) && (expr AS name) THEN",
-      summary:  "Optional-binding chains in IF need each `expr AS name` parenthesised.",
+      template: "Syntax Error: Multiple optional bindings require parentheses around each binding.\n  Found: IF expr EXISTS AS name AND expr EXISTS AS name THEN\n  Use:   IF (expr EXISTS AS name) AND (expr EXISTS AS name) THEN",
+      summary:  "Optional-binding chains in IF need each `expr EXISTS AS name` parenthesised.",
+    },
+    OPTIONAL_BINDING_REQUIRES_EXISTS: {
+      severity: :error, category: :syntax,
+      template: "Optional binding must state its test: use `expr EXISTS AS name`, not `expr AS name`.",
+      summary:  "Optional conditional bindings require the explicit postfix `EXISTS` predicate.",
+      fix_hint: "Insert `EXISTS` before `AS`; `clear fix` applies this mechanically.",
+    },
+    INSERT_EXISTS_BEFORE_AS: {
+      severity: :hint, category: :syntax,
+      template: "Insert `EXISTS` before `AS`.",
+      summary:  "Migrates a legacy optional binding to explicit presence testing.",
     },
     EXPECTED_IDENT_AFTER_AS: {
       severity: :error, category: :syntax,
@@ -1335,7 +1346,7 @@ module DiagnosticRegistry
     # IF / MATCH / WHEN
     IF_AS_NEEDS_OPTIONAL: {
       severity: :error, category: :type,
-      template: "IF ... AS binding requires an optional type, got '%{got}'",
+      template: "IF ... EXISTS AS binding requires an optional type, got '%{got}'",
       summary:  "`IF expr AS name THEN ...` requires `expr` to be optional (`?T`).",
       cause: "`IF expr AS x` is the optional-narrowing form: when `expr` is `?T` and non-NIL, `x` is bound to the unwrapped `T` inside the THEN branch. On a plain `T` there's nothing to unwrap, so the AS binding has no defined meaning.",
       fix_hint: "Drop the `AS x` clause and use `expr` directly (it's already non-optional), OR make the source optional by returning `?T` from a fallible lookup so the AS narrow has something to unwrap.",
@@ -1513,14 +1524,14 @@ module DiagnosticRegistry
     },
     WHILE_AS_NEEDS_OPTIONAL: {
       severity: :error, category: :type,
-      template: "WHILE ... AS binding requires an optional type, got '%{got}'",
+      template: "WHILE ... EXISTS AS binding requires an optional type, got '%{got}'",
       summary:  "`WHILE expr AS name DO ...` requires `expr` to be optional (`?T`).",
       cause: "`WHILE expr AS x DO ...` loops while `expr` returns a non-NIL `?T`, binding the unwrapped `T` to `x` per iteration. On a plain non-optional `T`, the loop has no NIL termination signal — it would run forever — so the form is rejected.",
       fix_hint: "Make the source fallible (e.g. `iter.next()` on a stream returns `?T`), OR use a regular `WHILE <bool-expr> DO ...` for non-optional looping.",
     },
     WHILE_AS_IMMUTABLE_RECEIVER: {
       severity: :error, category: :ownership,
-      template: "WHILE ... AS binding: '%{method}' is called on immutable '%{recv}' -- the condition cannot advance and may loop forever. Declare '%{recv2}' as MUTABLE or use a regular WHILE loop.",
+      template: "WHILE ... EXISTS AS binding: '%{method}' is called on immutable '%{recv}' -- the condition cannot advance and may loop forever. Declare '%{recv2}' as MUTABLE or use a regular WHILE loop.",
       summary:  "`WHILE recv.next() AS x` would never terminate if `recv` is immutable.",
     },
     BREAK_OUTSIDE_LOOP: {
@@ -3103,6 +3114,7 @@ module DiagnosticRegistry
     DROP_WITH_GUARD_MUTABLE: "Drop `MUTABLE` from %{target} so the GUARD predicate stays valid (the body only reads through the alias).",
     INSERT_EXPECTED_AT_END_OF_LINE: "Insert `%{expected}` at end of line %{line}.",
     INSERT_EXPECTED_BEFORE_TOKEN: "Insert `%{expected}` before '%{got}' at line %{line}.",
+    INSERT_EXISTS_BEFORE_AS: "Insert `EXISTS` before `AS`.",
     INSERT_COMPTIME_BEFORE_IF: "Insert COMPTIME before IF.",
     INSERT_RETURNS_ANY: "Insert `RETURNS :Any` so the function accepts the polymorphic return.",
     INSERT_RETURNS_FALLIBLE_VOID: "Insert `RETURNS !Void` so PRE-failure errors can propagate.",

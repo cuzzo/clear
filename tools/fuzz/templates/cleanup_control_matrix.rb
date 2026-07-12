@@ -64,7 +64,7 @@ def ccm_consume_body(shape)
     CHT
   when :optional
     <<~CHT.chomp
-      IF x AS s THEN
+      IF x EXISTS AS s THEN
           RETURN 1_i64;
       ELSE
           RETURN 0_i64;
@@ -119,7 +119,7 @@ FuzzGenerator.register(:cleanup_control_matrix, cells: CCM_CELLS) do |p|
       CHT
     elsif p[:shape] == :optional
       <<~CHT.chomp
-        IF x AS s THEN
+        IF x EXISTS AS s THEN
                   total = 1_i64;
               ELSE
                   total = 0_i64;
