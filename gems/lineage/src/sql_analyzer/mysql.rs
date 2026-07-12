@@ -46,8 +46,23 @@ impl SqlDialect for MysqlDialect {
                 findings.push(SqlPerformanceFinding {
                     rule_id: "SQL_SCAN".to_string(),
                     level: "warning".to_string(),
-                    message: format!("Full table scan: {}", line.trim()),
+                    message: format!("Full table scan (sequential reads, cache-friendly): {}", line.trim()),
                     big_o_time: "O(N)".to_string(),
+                    big_o_space: "O(1)".to_string(),
+                    explain_output: plan.to_string(),
+                    table_name: table_name.clone(),
+                });
+            } else if (lower.contains("type: ref")
+                || lower.contains("type: eq_ref")
+                || lower.contains("type: range")
+                || lower.contains("type: index"))
+                && !lower.contains("using index")
+            {
+                findings.push(SqlPerformanceFinding {
+                    rule_id: "SQL_NON_COVERING_INDEX".to_string(),
+                    level: "warning".to_string(),
+                    message: format!("Non-covering index scan (Cache Miss Hazard: triggers random heap page seeks): {}", line.trim()),
+                    big_o_time: "O(log N + K)".to_string(),
                     big_o_space: "O(1)".to_string(),
                     explain_output: plan.to_string(),
                     table_name: table_name.clone(),

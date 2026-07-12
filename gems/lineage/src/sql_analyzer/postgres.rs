@@ -34,9 +34,13 @@ impl SqlDialect for PostgresDialect {
     fn analyze_plan(&self, plan: &str) -> Vec<SqlPerformanceFinding> {
         let mut findings = Vec::new();
         let re_scan = regex::Regex::new(r"(?i)seq scan on\s+([a-zA-Z0-9_]+)").unwrap();
+        let re_index = regex::Regex::new(r"(?i)index scan using\s+\S+\s+on\s+([a-zA-Z0-9_]+)").unwrap();
         for line in plan.lines() {
             let lower = line.to_lowercase();
-            let table_name = re_scan.captures(line)
+            let scan_table = re_scan.captures(line)
+                .and_then(|cap| cap.get(1))
+                .map(|m| m.as_str().to_string());
+            let index_table = re_index.captures(line)
                 .and_then(|cap| cap.get(1))
                 .map(|m| m.as_str().to_string());
 
@@ -44,11 +48,21 @@ impl SqlDialect for PostgresDialect {
                 findings.push(SqlPerformanceFinding {
                     rule_id: "SQL_SCAN".to_string(),
                     level: "warning".to_string(),
-                    message: format!("Full table scan (Seq Scan): {}", line.trim()),
+                    message: format!("Full table scan (sequential reads, cache-friendly): {}", line.trim()),
                     big_o_time: "O(N)".to_string(),
                     big_o_space: "O(1)".to_string(),
                     explain_output: plan.to_string(),
-                    table_name: table_name.clone(),
+                    table_name: scan_table.clone(),
+                });
+            } else if lower.contains("index scan") && !lower.contains("index only scan") {
+                findings.push(SqlPerformanceFinding {
+                    rule_id: "SQL_NON_COVERING_INDEX".to_string(),
+                    level: "warning".to_string(),
+                    message: format!("Non-covering index scan (Cache Miss Hazard: triggers random heap page seeks): {}", line.trim()),
+                    big_o_time: "O(log N + K)".to_string(),
+                    big_o_space: "O(1)".to_string(),
+                    explain_output: plan.to_string(),
+                    table_name: index_table.clone(),
                 });
             }
             if lower.contains("sort") && lower.contains("temp") {

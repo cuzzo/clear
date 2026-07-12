@@ -37,9 +37,13 @@ impl SqlDialect for SqliteDialect {
     fn analyze_plan(&self, plan: &str) -> Vec<SqlPerformanceFinding> {
         let mut findings = Vec::new();
         let re_scan = regex::Regex::new(r"(?i)SCAN(?:\s+TABLE)?\s+([a-zA-Z0-9_]+)").unwrap();
+        let re_search = regex::Regex::new(r"(?i)SEARCH\s+([a-zA-Z0-9_]+)").unwrap();
         for line in plan.lines() {
             let upper = line.to_uppercase();
-            let table_name = re_scan.captures(line)
+            let scan_table = re_scan.captures(line)
+                .and_then(|cap| cap.get(1))
+                .map(|m| m.as_str().to_string());
+            let search_table = re_search.captures(line)
                 .and_then(|cap| cap.get(1))
                 .map(|m| m.as_str().to_string());
 
@@ -48,23 +52,33 @@ impl SqlDialect for SqliteDialect {
                     findings.push(SqlPerformanceFinding {
                         rule_id: "SQL_INDEX_SCAN".to_string(),
                         level: "warning".to_string(),
-                        message: format!("Full scan of index: {}", line),
+                        message: format!("Full scan of index (Index Leaf Scan): {}", line),
                         big_o_time: "O(N)".to_string(),
                         big_o_space: "O(1)".to_string(),
                         explain_output: plan.to_string(),
-                        table_name: table_name.clone(),
+                        table_name: scan_table.clone(),
                     });
                 } else {
                     findings.push(SqlPerformanceFinding {
                         rule_id: "SQL_SCAN".to_string(),
                         level: "warning".to_string(),
-                        message: format!("Full table scan: {}", line),
+                        message: format!("Full table scan (sequential reads, cache-friendly): {}", line),
                         big_o_time: "O(N)".to_string(),
                         big_o_space: "O(1)".to_string(),
                         explain_output: plan.to_string(),
-                        table_name: table_name.clone(),
+                        table_name: scan_table.clone(),
                     });
                 }
+            } else if upper.contains("SEARCH") && upper.contains("USING INDEX") && !upper.contains("COVERING") {
+                findings.push(SqlPerformanceFinding {
+                    rule_id: "SQL_NON_COVERING_INDEX".to_string(),
+                    level: "warning".to_string(),
+                    message: format!("Non-covering index search (Cache Miss Hazard: triggers random heap page seeks): {}", line),
+                    big_o_time: "O(log N + K)".to_string(),
+                    big_o_space: "O(1)".to_string(),
+                    explain_output: plan.to_string(),
+                    table_name: search_table.clone(),
+                });
             }
             if upper.contains("TEMP B-TREE") || upper.contains("USING TEMP B-TREE") {
                 findings.push(SqlPerformanceFinding {

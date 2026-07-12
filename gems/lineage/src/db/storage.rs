@@ -1084,6 +1084,18 @@ impl Storage {
                 UNION ALL SELECT timestamp FROM test_exposure_events
               )
             ),
+            latest_events AS (
+              SELECT unit_id, path
+              FROM (
+                SELECT unit_id, path,
+                       ROW_NUMBER() OVER (
+                         PARTITION BY unit_id
+                         ORDER BY timestamp DESC, id DESC
+                       ) AS rank
+                FROM events
+              )
+              WHERE rank = 1
+            ),
             mutant_runs AS (
               SELECT unit_id, MAX(timestamp) AS last_mutant_run_at
               FROM test_exposure_events
@@ -1114,13 +1126,7 @@ impl Storage {
                   u.name,
                   u.type,
                   u.original_path,
-                  COALESCE((
-                    SELECT latest.path
-                    FROM events latest
-                    WHERE latest.unit_id = u.id
-                    ORDER BY latest.timestamp DESC, latest.id DESC
-                    LIMIT 1
-                  ), u.original_path) AS current_path,
+                  COALESCE(le.path, u.original_path) AS current_path,
                   COUNT(e.id) AS total_events,
                   SUM(CASE WHEN e.event_type = 'CHANGE' THEN 1 ELSE 0 END) AS changes,
                   SUM(CASE WHEN e.event_type = 'MOVE' THEN 1 ELSE 0 END) AS moves,
@@ -1162,6 +1168,7 @@ impl Storage {
                   END AS verification_stale_seconds,
                   COALESCE(r.reopened_count, 0) AS reopened_count
                 FROM logical_units u
+                LEFT JOIN latest_events le ON le.unit_id = u.id
                 JOIN events e ON e.unit_id = u.id
                 LEFT JOIN mutant_runs m ON m.unit_id = u.id
                 LEFT JOIN reopened r ON r.unit_id = u.id
@@ -1170,7 +1177,7 @@ impl Storage {
                          u.current_distinct_tests, u.current_test_types,
                          u.current_mutant_verified_tests,
                          u.current_mutant_killed_tests, u.last_test_exposure_at,
-                         m.last_mutant_run_at, r.reopened_count, clock.observed_at
+                         m.last_mutant_run_at, r.reopened_count, clock.observed_at, le.path
             "#);
             let mut stmt = self.conn.prepare(&sql)?;
             let rows = stmt.query_map([], |row| {
@@ -1206,17 +1213,10 @@ impl Storage {
         } else {
             sql.push_str(r#"
                 , filtered_units AS (
-                  SELECT * FROM (
-                    SELECT u.*,
-                           COALESCE((
-                             SELECT latest.path
-                             FROM events latest
-                             WHERE latest.unit_id = u.id
-                             ORDER BY latest.timestamp DESC, latest.id DESC
-                             LIMIT 1
-                           ), u.original_path) AS current_path
-                    FROM logical_units u
-                  )
+                  SELECT u.*,
+                         COALESCE(le.path, u.original_path) AS current_path
+                  FROM logical_units u
+                  LEFT JOIN latest_events le ON le.unit_id = u.id
                   WHERE 
             "#);
             for i in 0..only_prefixes.len() {
@@ -1282,7 +1282,7 @@ impl Storage {
                          u.current_distinct_tests, u.current_test_types,
                          u.current_mutant_verified_tests,
                          u.current_mutant_killed_tests, u.last_test_exposure_at,
-                         m.last_mutant_run_at, r.reopened_count, clock.observed_at
+                         m.last_mutant_run_at, r.reopened_count, clock.observed_at, u.current_path
             "#);
             let mut stmt = self.conn.prepare(&sql)?;
             let params: Vec<String> = only_prefixes.iter().map(|p| format!("{}%", p)).collect();
