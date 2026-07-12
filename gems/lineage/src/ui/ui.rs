@@ -1797,8 +1797,9 @@ fn unit_hotspots(
             && is_production_source_path(&summary.current_path)
             && path_in_directory(&summary.current_path, directory)
     });
-    let signals = unit_signal_counts(storage)?;
-    let test_profiles = unit_test_profiles(storage)?;
+    let unit_ids: Vec<String> = summaries.iter().map(|summary| summary.id.clone()).collect();
+    let signals = unit_signal_counts(storage, &unit_ids)?;
+    let test_profiles = unit_test_profiles(storage, &unit_ids)?;
     let mut candidates = summaries
         .into_iter()
         .map(|summary| {
@@ -1878,11 +1879,23 @@ fn unit_hotspots(
     Ok(final_units)
 }
 
-fn unit_test_profiles(storage: &Storage) -> Result<HashMap<String, UnitTestProfile>> {
-    let mut stmt = storage.connection().prepare(
-        include_str!("../../sql/ui/runtime/unit_test_profiles.sql"),
-    )?;
-    let rows = stmt.query_map([], |row| {
+fn unit_test_profiles(
+    storage: &Storage,
+    unit_ids: &[String],
+) -> Result<HashMap<String, UnitTestProfile>> {
+    if unit_ids.is_empty() {
+        return Ok(HashMap::new());
+    }
+    let placeholders = unit_ids.iter().map(|_| "?").collect::<Vec<_>>().join(",");
+    let query = format!(
+        "SELECT id, current_line_cov, current_integration_cov, is_hard_gated
+         FROM logical_units
+         WHERE id IN ({})",
+        placeholders
+    );
+    let mut stmt = storage.connection().prepare(&query)?;
+    let params = rusqlite::params_from_iter(unit_ids);
+    let rows = stmt.query_map(params, |row| {
         Ok((
             row.get::<_, String>(0)?,
             UnitTestProfile {
@@ -2217,13 +2230,45 @@ fn current_source_start_lines(
     spans
 }
 
-fn unit_signal_counts(storage: &Storage) -> Result<HashMap<String, UnitSignalCounts>> {
+fn unit_signal_counts(
+    storage: &Storage,
+    unit_ids: &[String],
+) -> Result<HashMap<String, UnitSignalCounts>> {
+    if unit_ids.is_empty() {
+        return Ok(HashMap::new());
+    }
     let mut counts = HashMap::<String, UnitSignalCounts>::new();
+    let placeholders = unit_ids.iter().map(|_| "?").collect::<Vec<_>>().join(",");
     {
-        let mut stmt = storage.connection().prepare(
-            include_str!("../../sql/ui/runtime/unit_signal_counts.sql"),
-        )?;
-        let rows = stmt.query_map([], |row| {
+        let query = format!(
+            "SELECT unit_id,
+                    SUM(CASE WHEN NOT (
+                      lower(category) = 'lint'
+                      OR lower(source) LIKE '%lint%'
+                      OR lower(tool_name) IN ('rubocop', 'clippy', 'zig ast check')
+                      OR lower(rule_id) LIKE 'lint/%'
+                      OR lower(rule_id) LIKE 'security/%'
+                      OR lower(rule_id) LIKE 'clippy::%'
+                      OR lower(rule_id) LIKE 'zig.ast-check%'
+                    ) THEN 1 ELSE 0 END) AS sarif_findings,
+                    SUM(CASE WHEN (
+                      lower(category) = 'lint'
+                      OR lower(source) LIKE '%lint%'
+                      OR lower(tool_name) IN ('rubocop', 'clippy', 'zig ast check')
+                      OR lower(rule_id) LIKE 'lint/%'
+                      OR lower(rule_id) LIKE 'security/%'
+                      OR lower(rule_id) LIKE 'clippy::%'
+                      OR lower(rule_id) LIKE 'zig.ast-check%'
+                    ) THEN 1 ELSE 0 END) AS lint_findings,
+                    SUM(CASE WHEN is_dark_arm = 1 THEN 1 ELSE 0 END) AS dark_arms
+             FROM current_sarif_findings
+             WHERE unit_id IN ({})
+             GROUP BY unit_id",
+            placeholders
+        );
+        let mut stmt = storage.connection().prepare(&query)?;
+        let params = rusqlite::params_from_iter(unit_ids);
+        let rows = stmt.query_map(params, |row| {
             Ok((
                 row.get::<_, String>(0)?,
                 row.get::<_, i64>(1)?,
@@ -2240,10 +2285,16 @@ fn unit_signal_counts(storage: &Storage) -> Result<HashMap<String, UnitSignalCou
         }
     }
     {
-        let mut stmt = storage.connection().prepare(
-            include_str!("../../sql/ui/runtime/unit_signal_counts_2.sql"),
-        )?;
-        let rows = stmt.query_map([], |row| {
+        let query = format!(
+            "SELECT unit_id, COUNT(*) AS hazards
+             FROM unit_hazards
+             WHERE is_active = 1 AND unit_id IN ({})
+             GROUP BY unit_id",
+            placeholders
+        );
+        let mut stmt = storage.connection().prepare(&query)?;
+        let params = rusqlite::params_from_iter(unit_ids);
+        let rows = stmt.query_map(params, |row| {
             Ok((row.get::<_, String>(0)?, row.get::<_, i64>(1)?))
         })?;
         for row in rows {

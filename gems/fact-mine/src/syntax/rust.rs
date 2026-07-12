@@ -102,7 +102,38 @@ impl NormalizedLanguageBehavior for RustNormalizedBehavior {
         call: &NormalizedCallProjection,
         _span_source: &str,
     ) -> bool {
-        call.receiver == "self" && call.message == "callback"
+        if call.receiver == "self" && call.message == "callback" {
+            return true;
+        }
+        matches!(
+            call.message.as_str(),
+            "to_string"
+                | "to_owned"
+                | "clone"
+                | "unwrap"
+                | "expect"
+                | "unwrap_or"
+                | "unwrap_or_else"
+                | "get"
+                | "get_mut"
+                | "as_ref"
+                | "as_mut"
+                | "as_str"
+                | "as_bytes"
+                | "len"
+                | "is_empty"
+                | "trim"
+                | "trim_start"
+                | "trim_end"
+                | "to_ascii_lowercase"
+                | "to_ascii_uppercase"
+                | "to_lowercase"
+                | "to_uppercase"
+                | "split"
+                | "split_once"
+                | "rsplit"
+                | "rsplit_once"
+        )
     }
 
     fn owner_kind(&self, node: &Node, default_kind: &str) -> String {
