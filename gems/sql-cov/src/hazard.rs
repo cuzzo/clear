@@ -309,7 +309,7 @@ fn find_one_side_aggregations(
         fn pre_visit_expr(&mut self, expr: &Expr) -> ControlFlow<Self::Break> {
             if let Expr::Function(func) = expr {
                 let name = func.name.to_string().to_uppercase();
-                if name == "SUM" || name == "COUNT" || name == "AVG" || name == "MIN" || name == "MAX" {
+                if name == "SUM" || name == "COUNT" || name == "AVG" {
                     let mut targets_one_side = false;
                     if let sqlparser::ast::FunctionArguments::List(args) = &func.args {
                         let distinct = matches!(args.duplicate_treatment, Some(sqlparser::ast::DuplicateTreatment::Distinct));

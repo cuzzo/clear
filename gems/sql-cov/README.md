@@ -69,6 +69,49 @@ cargo run -- hazards --dialect postgres \
   --output coverage/query-hazards.sarif
 ```
 
+### Looker/LookML JOIN Hazards
+You can integrate LookML metadata to detect double-counting hazards caused by joining one-to-many relationships and aggregating one-side columns without deduplication.
+
+To do this, pass the path to a LookML model file using the `--looker-hazards` flag:
+
+```bash
+cargo run -- hazards --dialect postgres \
+  --database postgres://localhost/app_test \
+  --input query.sql \
+  --looker-hazards path/to/model.lkml \
+  --format sarif \
+  --output coverage/query-hazards.sarif
+```
+
+LookML relationships defined as `one_to_many` are evaluated. For example, if a LookML file contains:
+
+```lkml
+explore: companies {
+  join: employees {
+    relationship: one_to_many
+    sql_on: ${companies.company_id} = ${employees.company_id} ;;
+  }
+}
+```
+
+And your query is:
+
+```sql
+SELECT SUM(companies.annual_revenue)
+FROM companies
+JOIN employees ON companies.company_id = employees.company_id
+```
+
+SQL-COV will flag this as a `LookerJoinHazard` because `annual_revenue` (from the one-side table `companies`) is aggregated using `SUM` without a `DISTINCT` modifier, causing values to be double-counted.
+
+To resolve the hazard, use a `DISTINCT` modifier or pre-aggregate in an inline subquery:
+
+```sql
+SELECT SUM(DISTINCT companies.annual_revenue)
+FROM companies
+JOIN employees ON companies.company_id = employees.company_id
+```
+
 ### Generate Check Queries for Hazards
 For any finding identified during the static hazard analysis, you can generate check queries to verify if `NULL` values actually exist in the table, and receive DDL suggestions to safely update the column to `NOT NULL` if the table is free of nulls:
 
