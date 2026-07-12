@@ -23,6 +23,8 @@ rescue JSON::ParserError
   warn "failed to merge nil-kill subprocess coverage"
 end
 
+$LOAD_PATH.unshift(File.join(root, "gems/ruby-to-clear/lib"))
+
 require "simplecov"
 begin
   require "simplecov-cobertura"
@@ -37,7 +39,7 @@ SimpleCov.print_error_status = false
 SimpleCov.minimum_coverage 0
 SimpleCov.start do
   enable_coverage :branch
-  track_files "gems/{auto-type,boobytrap,decomplex,espalier,fact-mine,nil-kill,slopcop}/lib/**/*.rb"
+  track_files "gems/{auto-type,boobytrap,decomplex,espalier,fact-mine,nil-kill,ruby-to-clear,slopcop}/lib/**/*.rb"
   add_filter "/vendor/"
   add_filter "/spec/"
   add_filter "/test/"
@@ -48,6 +50,7 @@ SimpleCov.start do
   add_group "espalier", "gems/espalier/lib"
   add_group "fact-mine", "gems/fact-mine/lib"
   add_group "nil-kill", "gems/nil-kill/lib"
+  add_group "ruby-to-clear", "gems/ruby-to-clear/lib"
   add_group "slopcop", "gems/slopcop/lib"
 
   if cobertura_available
@@ -70,6 +73,7 @@ require "rspec/core"
 rspec_files = Dir[
   "gems/auto-type/spec/**/*_spec.rb",
   "gems/nil-kill/spec/**/*_spec.rb",
+  "gems/ruby-to-clear/spec/**/*_spec.rb",
 ].sort
 minitest_files = Dir[
   "gems/boobytrap/test/**/*_test.rb",

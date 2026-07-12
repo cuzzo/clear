@@ -22,6 +22,7 @@ DEFAULT_EXCLUDES = %w[
   target
   vendor
   bc-lower-shards
+  tmp
 ].freeze
 
 SOURCE_EXTS = {
@@ -64,6 +65,7 @@ options = {
   hazards: true,
   sarif_inputs: [],
   coverage_inputs: [],
+  exclude: [],
   host: "127.0.0.1",
   port: 8080,
   serve: false,
@@ -86,6 +88,7 @@ OptionParser.new do |parser|
   parser.on("--no-hazards", "Skip hazard discovery/ingestion") { options[:hazards] = false }
   parser.on("--coverage=PATH", "Additional coverage artifact. May be repeated") { |value| options[:coverage_inputs] << value }
   parser.on("--sarif-input=PATH", "Additional SARIF file/directory to ingest. May be repeated") { |value| options[:sarif_inputs] << value }
+  parser.on("--exclude=GLOB", "Exclude glob from SARIF generation. May be repeated") { |value| options[:exclude] << value }
   parser.on("--host=HOST", "UI host if --serve is passed. Default: 127.0.0.1") { |value| options[:host] = value }
   parser.on("--port=PORT", Integer, "UI port if --serve is passed. Default: 8080") { |value| options[:port] = value }
   parser.on("--serve", "Serve the UI after import") { options[:serve] = true }
@@ -101,7 +104,7 @@ def repo_relative(path, repo)
 end
 
 def ignored_path?(path)
-  path.to_s.tr("\\", "/").split("/").any? { |part| DEFAULT_EXCLUDES.include?(part) }
+  path.to_s.tr("\\", "/").split("/").any? { |part| DEFAULT_EXCLUDES.include?(part) || part.start_with?("nil-kill-") }
 end
 
 def safe_name(label)
@@ -151,18 +154,20 @@ end
 
 def discover_coverage(repo, explicit)
   paths = explicit.map { |path| File.expand_path(path, repo) }
-  Find.find(repo) do |path|
-    rel = repo_relative(path, repo)
-    if File.directory?(path)
-      Find.prune if ignored_path?(rel)
-      next
+  if explicit.empty?
+    Find.find(repo) do |path|
+      rel = repo_relative(path, repo)
+      if File.directory?(path)
+        Find.prune if ignored_path?(rel)
+        next
+      end
+      next unless File.file?(path)
+
+      base = File.basename(path)
+      next unless COVERAGE_NAMES.include?(base) || base.end_with?(".lcov", ".coverprofile")
+
+      paths << path
     end
-    next unless File.file?(path)
-
-    base = File.basename(path)
-    next unless COVERAGE_NAMES.include?(base) || base.end_with?(".lcov", ".coverprofile")
-
-    paths << path
   end
   paths.uniq
        .select { |path| File.file?(path) }
@@ -451,6 +456,7 @@ if options[:analyzers]
     "--decomplex-binary", decomplex_bin,
   ]
   cmd += ["--exclude", "transpile-tests/**", "--exclude", "stdlib/**", "--exclude", "benchmarks/**"]
+  cmd += options[:exclude].flat_map { |pattern| ["--exclude", pattern] }
   cmd += ["--coverage", analyzer_coverage_paths.join(File::PATH_SEPARATOR)] unless analyzer_coverage_paths.empty?
   ENV["FACT_MINE_RUST_BINARY"] = fact_mine_bin
   run_command("first-party-sarif", cmd, chdir: TOOL_ROOT, log_dir: log_dir, optional: true)

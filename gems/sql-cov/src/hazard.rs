@@ -762,7 +762,7 @@ impl HazardVisitor<'_, '_> {
 
 fn quantified_rhs_nullability(expr: &Expr, resolver: &Resolver<'_>) -> NullabilityEvidence {
     match expr {
-        Expr::Subquery(query) => subquery_output_nullability(query, resolver.schema),
+         /* ~ changed by cargo-mutants ~ */
         Expr::Array(array) => array
             .elem
             .iter()

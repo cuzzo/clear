@@ -437,6 +437,7 @@
   #layer-comment-folding:checked ~ .topbar .comment-fold-layer .switch-off { display: none; }
   .crumbs { display: flex; justify-content: end; gap: 8px; flex-wrap: wrap; }
   .crumbs a { color: #1d4ed8; text-decoration: none; font-size: 12px; }
+  .crumbs a:hover { color: #2563eb; text-decoration: underline; }
   .viewer { flex: 1 1 auto; min-width: 0; min-height: 0; overflow: auto; background: #fbfcfd; }
   .dashboard {
     max-width: 1180px;
@@ -520,6 +521,14 @@
   .branch-crumbs a {
     color: #1d4ed8;
     text-decoration: none;
+  }
+  .branch-crumbs a:hover {
+    color: #2563eb;
+    text-decoration: underline;
+  }
+  .branch-crumbs strong {
+    font-size: 12px;
+    font-weight: 600;
   }
   .branch-crumbs span { color: var(--muted); }
   .coverage-legend {

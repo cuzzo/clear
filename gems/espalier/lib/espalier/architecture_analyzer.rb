@@ -895,13 +895,16 @@ module Espalier
       end
       bridge_methods = []
 
+      # Precompute transitive closure of state touches through internal call graph
+      propagated_touches = propagated_touches_for_module(mod, state_names)
+
       functions(mod).each do |fn|
         method_name = value(fn, :name).to_s
         next if method_name == "initialize"
         next if direct_touches.key?(method_name)
         next if trivial_state_accessor?(fn, state_names)
 
-        touches = propagated_touches_for(fn, by_name, state_names)
+        touches = propagated_touches[method_name] || Set.new
         next if touches.empty?
 
         component_indexes = touches.map { |state_name| component_by_state[state_name] }.compact.uniq
@@ -925,18 +928,48 @@ module Espalier
       }
     end
 
-    def propagated_touches_for(fn, by_name, state_names, visiting = Set.new)
-      name = value(fn, :name).to_s
-      return Set.new if visiting.include?(name)
-
-      visiting.add(name)
-      touches = direct_state_touches(fn, state_names)
-      internal_calls_for(fn).each do |callee_name|
-        callee = by_name[callee_name.to_s]
-        next unless callee
-
-        touches.merge(propagated_touches_for(callee, by_name, state_names, visiting.dup))
+    def propagated_touches_for_module(mod, state_names)
+      by_name = functions(mod).each_with_object({}) { |fn, out| out[value(fn, :name).to_s] = fn }
+      
+      # Initialize direct touches
+      touches = {}
+      by_name.each do |name, fn|
+        touches[name] = direct_state_touches(fn, state_names)
       end
+      
+      # Build dependency graph (reverse of call graph)
+      callers = Hash.new { |h, k| h[k] = Set.new }
+      by_name.each do |name, fn|
+        internal_calls_for(fn).each do |callee_name|
+          callee_name = callee_name.to_s
+          if by_name.key?(callee_name)
+            callers[callee_name].add(name)
+          end
+        end
+      end
+      
+      # Queue of changed nodes
+      queue = by_name.keys.dup
+      in_queue = queue.to_set
+      
+      until queue.empty?
+        current = queue.shift
+        in_queue.delete(current)
+        
+        current_touches = touches[current]
+        next if current_touches.empty?
+        
+        callers[current].each do |caller_name|
+          caller_touches = touches[caller_name]
+          old_size = caller_touches.size
+          caller_touches.merge(current_touches)
+          if caller_touches.size > old_size && !in_queue.include?(caller_name)
+            queue << caller_name
+            in_queue.add(caller_name)
+          end
+        end
+      end
+      
       touches
     end
 

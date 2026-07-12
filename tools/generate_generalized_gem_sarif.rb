@@ -94,7 +94,7 @@ end
 def ignored_path?(path, exclude)
   normalized = path.to_s.tr("\\", "/").sub(%r{\A\./}, "")
   components = normalized.split("/")
-  return true if components.any? { |component| IGNORED_COMPONENTS.include?(component) }
+  return true if components.any? { |component| IGNORED_COMPONENTS.include?(component) || component.start_with?("nil-kill-") }
 
   exclude.any? do |pattern|
     pattern = pattern.tr("\\", "/")
@@ -273,7 +273,7 @@ begin
 
   decomplex_bin = options[:decomplex_binary] || File.join(ROOT, "gems/decomplex/target/release/decomplex-rust")
   if File.executable?(decomplex_bin)
-    run_decomplex_rust(decomplex_bin, changed ? rel_files : ["."], out_dir, repo)
+    run_decomplex_rust(decomplex_bin, rel_files, out_dir, repo)
   else
     abort "decomplex-rust binary not found at #{decomplex_bin}. Please build it or pass --decomplex-binary"
   end
