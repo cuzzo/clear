@@ -286,6 +286,7 @@ class ClearParser
     rule(:CHAR, '.', action: :parse_dot_suffix),
     rule(:CHAR, '(', action: :parse_func_call_suffix),
     rule(:CHAR, '?', action: :parse_optional_unwrap_suffix),
+    rule(:KEYWORD, 'EXISTS', action: :parse_exists_suffix),
     rule(:VAR_ID, '@multiowned', action: :parse_capability_wrap_suffix),
     rule(:VAR_ID, '@shared', action: :parse_capability_wrap_suffix),
     rule(:VAR_ID, '@node', action: :parse_capability_wrap_suffix),
@@ -558,11 +559,23 @@ class ClearParser
     when :parse_dot_suffix then parse_dot_suffix(lhs)
     when :parse_func_call_suffix then parse_func_call_suffix(lhs)
     when :parse_optional_unwrap_suffix then parse_optional_unwrap_suffix(lhs)
+    when :parse_exists_suffix then parse_exists_suffix(lhs)
     when :parse_capability_wrap_suffix then parse_capability_wrap_suffix(lhs)
     when :parse_inline_union_variant_suffix then parse_inline_union_variant_suffix(lhs)
     else
       raise "Unknown suffix parser action #{rule.action}"
     end
+  end
+
+  sig { params(lhs: AST::Node).returns(SuffixResult) }
+  def parse_exists_suffix(lhs)
+    # Conditional binding owns `EXISTS AS`; leave both tokens for the existing
+    # IfBind/WhileBindLoop refinement parser. Everywhere else EXISTS is a
+    # normal postfix Bool expression.
+    return SUFFIX_DECLINE if peek.type == :KEYWORD && peek.value == 'AS'
+
+    token = consume(:KEYWORD, 'EXISTS')
+    AST::UnaryOp.new(token, :EXISTS, lhs)
   end
 
   sig { params(lhs: AST::Node).returns(AST::Node) }

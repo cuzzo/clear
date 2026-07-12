@@ -326,6 +326,7 @@ module MIRLoweringExpressions
     right = lower(node.right)
     case node.op
     when :NOT, "!" then MIR::UnaryOp.new("!", right)
+    when :EXISTS then MIR::BinOp.new("!=", right, MIR::Lit.new("null"))
     when :SUB, "-" then MIR::UnaryOp.new("-", right)
     when :BITWISE_NOT, "~" then MIR::UnaryOp.new("~", right)
     else raise "MIRLowering: unknown unary op #{node.op}"

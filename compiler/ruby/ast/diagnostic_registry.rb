@@ -761,6 +761,12 @@ module DiagnosticRegistry
       summary:  "Optional conditional bindings require the explicit postfix `EXISTS` predicate.",
       fix_hint: "Insert `EXISTS` before `AS`; `clear fix` applies this mechanically.",
     },
+    EXISTS_REQUIRES_OPTIONAL: {
+      severity: :error, category: :type,
+      template: "`EXISTS` requires an optional value, got '%{got}'.",
+      summary:  "Postfix `EXISTS` tests whether `?T` contains a value.",
+      fix_hint: "Remove `EXISTS` when the value is already non-optional, or correct the expression's type to `?T`.",
+    },
     INSERT_EXISTS_BEFORE_AS: {
       severity: :hint, category: :syntax,
       template: "Insert `EXISTS` before `AS`.",

@@ -87,6 +87,12 @@ module Annotator
         case node.op
         when :NOT, "!"
           stamp_type!(node, :Bool)
+        when :EXISTS
+          operand_type = node.right.full_type!(context: "EXISTS operand")
+          unless Type.new(operand_type).optional?
+            error!(node, :EXISTS_REQUIRES_OPTIONAL, got: operand_type)
+          end
+          stamp_type!(node, :Bool)
         else
           stamp_type!(node, node.right.full_type!(context: "unary right"))
         end

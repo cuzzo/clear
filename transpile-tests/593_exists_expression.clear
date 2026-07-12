@@ -1,0 +1,7 @@
+FN main() RETURNS Void ->
+    present: ?Int64 = 7_i64;
+    absent: ?Int64 = NIL;
+    ASSERT present EXISTS;
+    ASSERT !(absent EXISTS);
+    ASSERT (present EXISTS) AND !(absent EXISTS);
+END

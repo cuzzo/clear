@@ -1,5 +1,6 @@
 require "rspec"
 require_relative "../ruby/ast/parser"
+require_relative "../ruby/annotator"
 
 RSpec.describe "EXISTS optional-binding migration" do
   def parse(source)
@@ -22,6 +23,26 @@ RSpec.describe "EXISTS optional-binding migration" do
     ast = parse("IF (left EXISTS AS a) AND (right EXISTS AS b) THEN PASS; END")
     expect(ast.statements.first).to be_a(AST::IfBind)
     expect(ast.statements.first.bindings.map(&:name)).to eq(%w[a b])
+  end
+
+  it "parses postfix EXISTS as an ordinary Bool expression" do
+    ast = parse(<<~CLEAR)
+      FN main(value: ?Int64) RETURNS Bool ->
+        present = value EXISTS;
+        RETURN present AND (value EXISTS);
+      END
+    CLEAR
+    SemanticAnnotator.new.annotate!(ast)
+    first = ast.statements.first.body.first.value
+    expect(first).to be_a(AST::UnaryOp)
+    expect(first.op).to eq(:EXISTS)
+    expect(first.resolved_type).to eq(:Bool)
+  end
+
+  it "rejects EXISTS on non-optional values" do
+    ast = parse("FN main(value: Int64) RETURNS Bool -> RETURN value EXISTS; END")
+    expect { SemanticAnnotator.new.annotate!(ast) }
+      .to raise_error(CompilerError, /EXISTS.*requires an optional value/)
   end
 
   it "rejects legacy AS bindings and offers an exact automatic insertion" do
