@@ -746,6 +746,13 @@ RSpec.describe "annotator branch gap burndown" do
 
     expect(ann.send(:ensure_owned_value!, value, Type.new(:Int64), "Box")).to be_nil
 
+    managed_scoped = symbol_entry(type: Type.new(:String), storage: :borrow)
+    managed_scoped.mark_non_escaping!
+    managed_value = AST::Identifier.new(token, "managed_alias")
+    managed_value.symbol = managed_scoped
+    managed_value.full_type = Type.new(:String)
+    ann.send(:ensure_owned_value!, managed_value, Type.new(:String), "Box")
+
     field = AST::GetField.new(token(:DOT, "."), AST::Identifier.new(token, "root"), "child")
     index = AST::GetIndex.new(token(:LBRACKET, "["), field, AST::Literal.new(token(:INT64, "0"), :INT64, 0, :stack))
     expect(ann.send(:get_root_object, index).name).to eq("root")

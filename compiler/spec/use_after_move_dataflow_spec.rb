@@ -93,8 +93,8 @@ RSpec.describe UseAfterMoveChecker do
       expect(UseAfterMoveChecker.check(empty_function_node)).to eq([])
     end
 
-    it "reports errors after running the checker" do
-      errors = check_errors(<<~CLEAR)
+    it "is preceded by the annotator's equivalent use-after-move invariant" do
+      expect { check_errors(<<~CLEAR) }.to raise_error(CompilerError, /USE AFTER MOVE.*`a`/m)
         STRUCT Box { id: Int64 }
         FN main() RETURNS Void ->
           a: Box @indirect = Box{ id: 1 };
@@ -103,8 +103,6 @@ RSpec.describe UseAfterMoveChecker do
           RETURN;
         END
       CLEAR
-
-      expect(errors).to include("[USE_AFTER_MOVE] main::a -- used after being moved (line 5)")
     end
 
     it "forwards fallibility and schema lookup context into ownership analysis" do
@@ -724,31 +722,29 @@ RSpec.describe UseAfterMoveChecker do
       )
     end
 
-    it "reports SHARE COPY reads of already moved values in call arguments" do
-      errors = check_errors(<<~CLEAR)
-        STRUCT Box { value: Int64 }
+    it "rejects SHARE COPY reads of already moved values in call arguments" do
+      expect { check_errors(<<~CLEAR) }.to raise_error(CompilerError, /USE AFTER MOVE.*`b`/m)
+        STRUCT Box { value: String }
         FN takes_shared(b: Box @shared) RETURNS Void -> RETURN; END
         FN main() RETURNS Void ->
-          b = Box{ value: 1 };
+          b = Box{ value: "one" };
           moved = b;
           takes_shared(SHARE COPY b);
           RETURN;
         END
       CLEAR
-      expect(errors.any? { |e| e.include?("USE_AFTER_MOVE") && e.include?("b") }).to be true
     end
 
-    it "reports SHARE COPY reads of already moved values in expressions" do
-      errors = check_errors(<<~CLEAR)
-        STRUCT Box { value: Int64 }
+    it "rejects SHARE COPY reads of already moved values in expressions" do
+      expect { check_errors(<<~CLEAR) }.to raise_error(CompilerError, /USE AFTER MOVE.*`b`/m)
+        STRUCT Box { value: String }
         FN main() RETURNS Void ->
-          b = Box{ value: 1 };
+          b = Box{ value: "one" };
           moved = b;
           s = SHARE COPY b;
           RETURN;
         END
       CLEAR
-      expect(errors.any? { |e| e.include?("USE_AFTER_MOVE") && e.include?("b") }).to be true
     end
 
     it "treats SHARE of an existing shared handle as a read" do

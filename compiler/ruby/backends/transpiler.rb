@@ -57,24 +57,24 @@ class ZigTranspiler
 
   # Single-file entry point (used by the CLI and simple callers).
   # pkg_paths: { "name" => "/abs/path/to/lib.clear" } for REQUIRE "pkg:name" resolution.
-  sig { params(cheat_code: String, source_dir: String, pkg_paths: T::Hash[String, String], use_c_allocator: T::Boolean, use_debug_allocator: T::Boolean, test_mode: T::Boolean, strict_test: T::Boolean, exact_tiers: T::Hash[Integer, Symbol], main_tier: T.nilable(Symbol), default_stack: T.nilable(String)).returns(T.nilable(String)) }
-  def transpile(cheat_code, source_dir: @source_dir, pkg_paths: {}, use_c_allocator: false, use_debug_allocator: false, test_mode: false, strict_test: false, exact_tiers: {}, main_tier: nil, default_stack: nil)
+  sig { params(cheat_code: String, source_dir: String, pkg_paths: T::Hash[String, String], use_c_allocator: T::Boolean, use_debug_allocator: T::Boolean, test_mode: T::Boolean, strict_test: T::Boolean, exact_tiers: T::Hash[Integer, Symbol], main_tier: T.nilable(Symbol), default_stack: T.nilable(String), ownership_mode: Symbol).returns(T.nilable(String)) }
+  def transpile(cheat_code, source_dir: @source_dir, pkg_paths: {}, use_c_allocator: false, use_debug_allocator: false, test_mode: false, strict_test: false, exact_tiers: {}, main_tier: nil, default_stack: nil, ownership_mode: :default)
     transpile_mir(cheat_code, source_dir: source_dir, pkg_paths: pkg_paths,
                   use_c_allocator: use_c_allocator, use_debug_allocator: use_debug_allocator,
                   test_mode: test_mode, strict_test: strict_test,
                   exact_tiers: exact_tiers, main_tier: main_tier,
-                  default_stack: default_stack)
+                  default_stack: default_stack, ownership_mode: ownership_mode)
   end
 
   # MIR pipeline: front-end -> MIRLowering -> MIREmitter -> Zig output.
-  sig { params(cheat_code: String, source_dir: String, pkg_paths: T::Hash[String, String], use_c_allocator: T::Boolean, use_debug_allocator: T::Boolean, test_mode: T::Boolean, strict_test: T::Boolean, exact_tiers: T::Hash[Integer, Symbol], main_tier: T.nilable(Symbol), default_stack: T.nilable(String)).returns(T.nilable(String)) }
-  def transpile_mir(cheat_code, source_dir: @source_dir, pkg_paths: {}, use_c_allocator: false, use_debug_allocator: false, test_mode: false, strict_test: false, exact_tiers: {}, main_tier: nil, default_stack: nil)
+  sig { params(cheat_code: String, source_dir: String, pkg_paths: T::Hash[String, String], use_c_allocator: T::Boolean, use_debug_allocator: T::Boolean, test_mode: T::Boolean, strict_test: T::Boolean, exact_tiers: T::Hash[Integer, Symbol], main_tier: T.nilable(Symbol), default_stack: T.nilable(String), ownership_mode: Symbol).returns(T.nilable(String)) }
+  def transpile_mir(cheat_code, source_dir: @source_dir, pkg_paths: {}, use_c_allocator: false, use_debug_allocator: false, test_mode: false, strict_test: false, exact_tiers: {}, main_tier: nil, default_stack: nil, ownership_mode: :default)
     @source_dir = File.expand_path(source_dir)
     @test_mode = test_mode
     @default_stack_size = default_stack unless default_stack.nil?
     @importer ||= ModuleImporter.new(base_dir: @source_dir, pkg_paths: pkg_paths, use_mir: true)
 
-    result = CompilerFrontend.compile(cheat_code, importer: @importer, source_dir: @source_dir, strict_test: strict_test)
+    result = CompilerFrontend.compile(cheat_code, importer: @importer, source_dir: @source_dir, strict_test: strict_test, ownership_mode: ownership_mode)
 
     # Apply exact stack tier overrides (from post-build binary analysis).
     if !exact_tiers.empty?
@@ -311,6 +311,12 @@ if __FILE__ == $0
     opts.on('--strict', 'Strict test mode') do
       options[:strict] = true
     end
+    opts.on('--easy', 'EASY ownership and gradual typing mode') do
+      options[:ownership_mode] = :easy
+    end
+    opts.on('--ownership-strict', 'STRICT ownership-cost mode') do
+      options[:ownership_mode] = :strict
+    end
     opts.on('--mir', 'Use MIR pipeline (ignored, MIR is now the only path)') do
       # No-op: MIR is always used. Flag kept for backward compatibility.
     end
@@ -336,14 +342,16 @@ if __FILE__ == $0
     when :test
       puts transpiler.transpile(code, source_dir: source_dir, pkg_paths: options[:pkg_paths],
                                 test_mode: true, strict_test: !!options[:strict],
-                                default_stack: options[:default_stack])
+                                default_stack: options[:default_stack],
+                                ownership_mode: options[:ownership_mode] || :default)
     else
       puts transpiler.transpile(code, source_dir: source_dir, pkg_paths: options[:pkg_paths],
                                 use_c_allocator: !!options[:use_c_allocator],
                                 use_debug_allocator: !!options[:use_debug_allocator],
                                 exact_tiers: options[:exact_tiers] || {},
                                 main_tier: options[:main_tier],
-                                default_stack: options[:default_stack])
+                                default_stack: options[:default_stack],
+                                ownership_mode: options[:ownership_mode] || :default)
     end
   else
     $stderr.puts "Usage: ruby transpiler.rb [--module] [--pkg name=/path/to/lib.clear] <script.clear>"

@@ -394,7 +394,7 @@ module Annotator
           visit(val_node)
           reject_borrowed_value!(val_node, "#{node.name}.#{variant_name}")
           # Ensure value is owned data (implicit COPY for @list/rodata strings).
-          owned = T.let(ensure_owned_value!(val_node, expected_type, "#{node.name}.#{variant_name}"), T.nilable(AST::CopyNode))
+          owned = T.let(ensure_owned_value!(val_node, expected_type, "#{node.name}.#{variant_name}"), T.nilable(AST::Node))
           if owned
             node.fields[variant_name] = owned
             val_node = owned
@@ -470,7 +470,7 @@ module Annotator
           is_call_arg = struct_literal_call_argument_context?
           owned = T.let(unless field_is_borrowed || is_call_arg
             ensure_owned_value!(val_node, expected_type, "#{node.name}.#{field_name}")
-          end, T.nilable(AST::CopyNode))
+          end, T.nilable(AST::Node))
           if owned
             node.fields[field_name] = owned
             val_node = owned
@@ -478,13 +478,26 @@ module Annotator
 
           # Simple Type Check
           actual_type = val_node.full_type!(context: "struct field value")
+          nil_value = val_node.is_a?(AST::Literal) && val_node.type == :NIL
+          expected_layout_value = expected_type.optional? ? T.must(expected_type.wrapped_type) : expected_type
+          actual_layout_value = actual_type.optional? ? T.must(actual_type.wrapped_type) : actual_type
+          indirect_construction = expected_type.indirect? && !actual_type.indirect? && !nil_value &&
+              expected_layout_value.resolved == actual_layout_value.resolved
+          if indirect_construction
+            # The field declaration is the explicit layout decision.  A
+            # literal placed into that field is contextually constructed in
+            # its declared representation in every mode; requiring a second
+            # @indirect at each initializer would duplicate the contract.
+            val_node.needs_heap_create = true
+            current_fn_ctx&.record_heap_use!
+          end
           node_coercion = expected_type.node_reference? && !actual_type.node_reference? && expected_type.accepts?(actual_type)
           if actual_type != expected_type || node_coercion
             unless is_safe_autocast?(actual_type, expected_type) ||
                    (expected_type.node_reference? && expected_type.accepts?(actual_type))
               error!(node, :FIELD_TYPE_MISMATCH, field: field_name, expected: expected_type, got: actual_type)
             end
-            val_node.coerced_type = expected_type
+            val_node.coerced_type = expected_type unless indirect_construction || (nil_value && expected_type.indirect?)
           end
 
           move_if_not_copyable!(val_node) unless field_is_borrowed

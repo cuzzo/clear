@@ -139,6 +139,7 @@ expected hard error is absent.
 | `lifetimed_return`          | 36           | BG handle escape rejection — exercises bg_lifetime_sources stamping |
 | `link_resolve_matrix`       | 7            | Managed Rc/Arc weak-link liveness, repeated resolution, list storage, and dead-owner behavior. |
 | `managed_payload_capability_matrix` | 22   | String-owning payloads through generic Rc/Arc construction, COPY, collection, optional, union, and cleanup operations. |
+| `auto_ownership_transport_matrix` | 14   | DEFAULT move/borrow/materialization plus direct, stdlib, user-method, user-function, branch, loop, Rc, and execution-boundary mutation overlap. Mutation comes from resolved contracts, never a name list. |
 | `node_graph_matrix`         | 7            | Managed `@node` cycles, replacement, optional chains, handle reuse, 5,000-node growth, and lexical teardown. |
 | `shared_node_graph_matrix`  | 6            | Guarded `@shared:node` cycles, replacement, managed reads, 5,000-node growth, parallel mutation, and local-node rejection. |
 | `recursive_execution_boundary_matrix` | 14 | Recursive aggregate admission across `@multiowned`/`@shared` fields and parallel BG boundaries. |

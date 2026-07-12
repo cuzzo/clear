@@ -13,8 +13,115 @@ module Annotator
       sig { params(declarations: DeclarationIndex).void }
       def register_type_declarations(declarations)
         T.bind(self, SemanticAnnotator)
-        declarations.type_declarations.each { |node| register_type_declaration(node) }
+        structs = declarations.type_declarations.filter_map do |node|
+          node if node.is_a?(AST::StructDef)
+        end
+        resolve_recursive_struct_layouts!(structs)
+        declarations.type_declarations.each do |node|
+          register_type_declaration(T.cast(node, TypeDeclaration))
+        end
       end
+
+      class RecursiveFieldEdge < T::Struct
+        const :owner, Symbol
+        const :target, Symbol
+        const :field_name, String
+        const :type, Type
+      end
+
+      sig { params(structs: T::Array[AST::StructDef]).void }
+      def resolve_recursive_struct_layouts!(structs)
+        T.bind(self, SemanticAnnotator)
+        names = structs.map { |node| node.name.to_sym }.to_set
+        edges = T.let([], T::Array[RecursiveFieldEdge])
+        structs.each do |node|
+          node.field_decls.each do |field_name, field|
+            target = inline_recursive_target(field.type, names)
+            edges << RecursiveFieldEdge.new(
+              owner: node.name.to_sym,
+              target: target,
+              field_name: field_name,
+              type: field.type,
+            ) if target
+          end
+        end
+
+        recursive_components(names, edges).each do |component|
+          internal = edges.select { |edge| component.include?(edge.owner) && component.include?(edge.target) }
+          next if internal.empty?
+
+          if internal.length == 1 && language_mode == :easy
+            edge = T.must(internal.first)
+            edge.type.layout = :indirect
+            next
+          end
+
+          labels = internal.map { |edge| "#{edge.owner}.#{edge.field_name}" }.join(", ")
+          if internal.length == 1
+            error!(T.must(structs.find { |node| node.name.to_sym == T.must(internal.first).owner }),
+              :RECURSIVE_LAYOUT_REQUIRES_INDIRECT, edge: labels)
+          else
+            error!(T.must(structs.find { |node| node.name.to_sym == T.must(internal.first).owner }),
+              :RECURSIVE_LAYOUT_AMBIGUOUS, edges: labels)
+          end
+        end
+      end
+      private :resolve_recursive_struct_layouts!
+
+      sig { params(type: Type, names: T::Set[Symbol]).returns(T.nilable(Symbol)) }
+      def inline_recursive_target(type, names)
+        t = type
+        return nil if t.indirect? || t.any_rc? || t.node_reference? || t.link?
+        t = T.must(t.wrapped_type) while t.optional?
+        return nil if t.indirect? || t.any_rc? || t.node_reference? || t.link?
+        return nil if t.collection? || (t.array? && !t.fixed?)
+        target = t.resolved.to_sym
+        names.include?(target) ? target : nil
+      end
+      private :inline_recursive_target
+
+      sig { params(names: T::Set[Symbol], edges: T::Array[RecursiveFieldEdge]).returns(T::Array[T::Set[Symbol]]) }
+      def recursive_components(names, edges)
+        adjacency = T.let(Hash.new { |h, k| h[k] = T.let([], T::Array[Symbol]) }, T::Hash[Symbol, T::Array[Symbol]])
+        edges.each { |edge| T.must(adjacency[edge.owner]) << edge.target }
+        index = T.let(0, Integer)
+        indices = T.let({}, T::Hash[Symbol, Integer])
+        low = T.let({}, T::Hash[Symbol, Integer])
+        stack = T.let([], T::Array[Symbol])
+        on_stack = T.let(Set.new, T::Set[Symbol])
+        result = T.let([], T::Array[T::Set[Symbol]])
+
+        visit = T.let(nil, T.nilable(T.proc.params(node: Symbol).void))
+        visit = Kernel.lambda do |node|
+          indices[node] = index
+          low[node] = index
+          index += 1
+          stack << node
+          on_stack.add(node)
+          T.must(adjacency[node]).each do |target|
+            unless indices.key?(target)
+              T.must(visit).call(target)
+              low[node] = [T.must(low[node]), T.must(low[target])].min
+            else
+              low[node] = [T.must(low[node]), T.must(indices[target])].min if on_stack.include?(target)
+            end
+          end
+          next unless low[node] == indices[node]
+
+          component = T.let(Set.new, T::Set[Symbol])
+          Kernel.loop do
+            member = T.must(stack.pop)
+            on_stack.delete(member)
+            component.add(member)
+            break if member == node
+          end
+          self_loop = T.must(adjacency[node]).include?(node)
+          result << component if component.length > 1 || self_loop
+        end
+        names.each { |name| visit.call(name) unless indices.key?(name) }
+        result
+      end
+      private :recursive_components
 
       sig { params(node: TypeDeclaration).void }
       def register_type_declaration(node)

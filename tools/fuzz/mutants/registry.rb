@@ -25,6 +25,14 @@ module FuzzMutants
 
   REGISTRY = T.let([
     Mutant.new(
+      name: :allow_inferred_alias_call_mutation,
+      description: 'Disable inferred-alias rejection after resolved mutable calls. User and stdlib MUTABLE contracts must still reject mutation while an inferred alias is live.',
+      invariant: :inferred_alias_mutation,
+      patch: File.join(PATCH_DIR, 'allow_inferred_alias_call_mutation.patch'),
+      templates: [:auto_ownership_transport_matrix],
+      kill: { bucket: :unexpected_pass, min_delta: 1 }
+    ),
+    Mutant.new(
       name: :allow_with_alias_return,
       description: 'Disable RETURN rejection for WITH-scoped aliases.',
       invariant: :alias_non_escape,

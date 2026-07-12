@@ -1536,6 +1536,7 @@ module AST
 
   Program      = Struct.new(:token, :statements) do
     include Locatable
+    attr_accessor :language_mode
     # Resolved program-level SYNC POLICY, either user-written or the baked-in
     # default. Lowering reads this when filling unhandled WITH error slots.
     attr_accessor :sync_policy
@@ -1811,6 +1812,7 @@ module AST
     extend T::Sig
     include Locatable
     attr_accessor :mir_binding_entry  # stamped by CleanupClassifier: per-node cleanup entry (avoids same-name collision)
+    attr_accessor :ownership_transport_plan
 
     sig { params(args: InitArgs).void }
     def initialize(*args)
@@ -1847,6 +1849,7 @@ module AST
 	    include Locatable
 	    include StatementVoidType
 	    attr_accessor :auto_lock  # AutoLockPlan set by annotator for inline @locked/@writeLocked guards.
+    attr_accessor :ownership_alias_releases_before
     attr_accessor :field_pre_cleanup  # stamped by MIRPass: Symbol (:heap or :frame) -- the allocator to free the OLD value with before the field overwrite. nil = no pre-cleanup needed.
     # Preserves the source compound operator so atomic targets can lower to
     # fetch_<op> instead of load/modify/store.
@@ -1902,6 +1905,7 @@ module AST
     attr_accessor :reassign_cleanup  # MIR::ReassignPlan(alloc:, zig_type:) when the OLD value of this :assign target needs cleanup before overwrite. nil = no pre-cleanup.
     attr_accessor :mir_binding_entry  # stamped by CleanupClassifier: per-node cleanup entry (avoids same-name collision)
     attr_accessor :auto_atomic_op
+    attr_accessor :ownership_transport_plan
 
     # Seam: same contract as VarDecl#type — annotated/inferred type is
     # always a Type (or nil when unannotated). Coerced at construction
@@ -1982,6 +1986,8 @@ module AST
     attr_accessor :fn_ref           # true when the identifier refers to a named function used as a value
     attr_accessor :heap_dupe_result # true when this identifier's value must be heap-duped at use site
     attr_accessor :atomic_borrow    # true when sync=:atomic ident is in fn-arg position (skip load wrap)
+    attr_accessor :ownership_future_use
+    attr_accessor :ownership_alias_releases
     sig { returns(FalseClass) }
     def wildcard?; false end
     # ruby-to-clear: data-api

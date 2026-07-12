@@ -69,6 +69,7 @@ class ClearParser
   end
 
   @gradual_mode = T.let(false, T.nilable(T::Boolean))
+  @ownership_mode = T.let(:default, T.nilable(Symbol))
 
   sig do
     params(
@@ -137,13 +138,26 @@ class ClearParser
       @gradual_mode = T.let(value, T.nilable(T::Boolean))
       value
     end
+
+    sig { returns(Symbol) }
+    def ownership_mode
+      @ownership_mode || :default
+    end
+
+    sig { params(value: Symbol).returns(Symbol) }
+    def ownership_mode=(value)
+      @ownership_mode = T.let(value, T.nilable(Symbol))
+      value
+    end
   end
 
   sig { returns(T.nilable(AST::Program)) }
   def parse
     stmts = []
     stmts << parse_statement() while current.type != :EOF
-    AST::Program.new(current, stmts)
+    program = AST::Program.new(current, stmts)
+    program.language_mode = @gradual ? :easy : self.class.ownership_mode
+    program
   end
 
   private

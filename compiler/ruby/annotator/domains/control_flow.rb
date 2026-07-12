@@ -526,7 +526,7 @@ module Annotator
               og_declare(b.name.to_s, nil, unwrapped)
               if container_source
                 ownership_graph[b.name.to_s]&.kind = :borrowed
-                ownership_graph.borrow(b.name.to_s, container_source, mutable: false)
+                ownership_graph.borrow(b.name.to_s, container_source, mutable: mutable_list_alias)
               end
             end
             visit_stmts(node.then_branch)

@@ -935,6 +935,7 @@ class OwnershipDataflow
   sig { params(node: AST::Node).returns(T.nilable(OwnershipDataflow::OwnerEntry)) }
   def make_owner_entry(node)
     ti = node.is_a?(AST::Locatable) ? node.full_type!(context: "ownership dataflow owner") : nil
+    return nil if node.respond_to?(:borrow_provenance?) && T.unsafe(node).borrow_provenance?
     is_heap = T.let(node.is_a?(AST::Locatable) ? node.heap_storage? == true : false, T::Boolean)
     return nil unless ti && ownership_tracked_type?(ti, heap_storage: is_heap)
 
@@ -969,11 +970,17 @@ class OwnershipDataflow
     case stmt
     when AST::VarDecl
       # RHS of declaration: non-Copy identifier = ownership transfer.
-      collect_binding_move_places(stmt.value, state).each { |place| mark_moved!(state, place) }
+      plan = T.unsafe(stmt).ownership_transport_plan
+      unless plan.is_a?(OwnershipTransportPlan) && plan.action != :move
+        collect_binding_move_places(stmt.value, state).each { |place| mark_moved!(state, place) }
+      end
       update_declared_owner!(state, stmt.name.to_s, stmt)
 
     when AST::BindExpr
-      collect_binding_move_places(stmt.value, state).each { |place| mark_moved!(state, place) }
+      plan = T.unsafe(stmt).ownership_transport_plan
+      unless plan.is_a?(OwnershipTransportPlan) && plan.action != :move
+        collect_binding_move_places(stmt.value, state).each { |place| mark_moved!(state, place) }
+      end
       update_declared_owner!(state, stmt.name.to_s, stmt) if stmt.mode == :decl
 
     when AST::Assignment, AST::DestructuringAssignment, AST::ReturnNode

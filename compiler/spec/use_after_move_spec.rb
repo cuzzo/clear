@@ -51,7 +51,7 @@ RSpec.describe UseAfterMoveChecker do
       FN main() RETURNS Void ->
           MUTABLE v = Value{ Num: 1.0 };
           MUTABLE items: Value[]@list = List[];
-          items.append(v);
+          items.append(GIVE v);
           items.append(v);
           RETURN;
       END
@@ -92,8 +92,8 @@ RSpec.describe UseAfterMoveChecker do
   # =========================================================================
   # 3. Struct literal consumes captured variables.
   # =========================================================================
-  it "raises on use after move via struct literal" do
-    expect_error(<<~CLEAR, /USE AFTER MOVE/)
+  it "preserves explicit affine field-store moves in STRICT" do
+    expect_error(<<~CLEAR, /USE AFTER MOVE.*`m`/m)
       STRUCT Container { data: HashMap<Int64> }
       FN main() RETURNS Void ->
           MUTABLE m: HashMap<Int64> = {};
@@ -135,7 +135,7 @@ RSpec.describe UseAfterMoveChecker do
       FN main() RETURNS Void ->
           MUTABLE vals: Int64[]@list = List[];
           vals.append(1_i64);
-          n = consume(vals);
+          n = consume(GIVE vals);
           n2 = consume(vals);
           RETURN;
       END

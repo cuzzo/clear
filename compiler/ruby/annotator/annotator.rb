@@ -8,6 +8,7 @@ require_relative "../ast/parser"
 require_relative "../ast/std_lib"
 require_relative "../ast/async_result_shape"
 require_relative "../semantic/ownership_graph"
+require_relative "../semantic/ownership_transport"
 require_relative "phases/annotation_boundary"
 require_relative "phases/body_analysis"
 require_relative "phases/builtin_environment"
@@ -574,6 +575,7 @@ class SemanticAnnotator
     @function_registry = T.let(Annotator::FunctionRegistry.new, Annotator::FunctionRegistry)
     @semantic_index = T.let(nil, T.nilable(SemanticIndex))
     @program = T.let(nil, T.nilable(AST::Program))
+    @language_mode = T.let(:default, Symbol)
     # WITH validations on parameter bindings need caller-sync propagation first.
     @branch_terminated = T.let(false, T::Boolean)
     reset_compilation_state!
@@ -604,6 +606,7 @@ class SemanticAnnotator
     AST.reset_user_types!
     reset_compilation_state!
     @program = T.let(node, T.nilable(AST::Program))  # WithMatchCheck reads node.sync_policy below.
+    @language_mode = T.let(node.language_mode || :default, Symbol)
     visit(node)
     finalize_auto_types!(node)
     run_whole_program_semantics!
@@ -616,6 +619,11 @@ class SemanticAnnotator
     ), T.nilable(SemanticIndex))
     mark_annotation_complete!(node)
     nil
+  end
+
+  sig { returns(Symbol) }
+  def language_mode
+    @language_mode
   end
 
 private

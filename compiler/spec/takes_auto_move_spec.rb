@@ -35,7 +35,7 @@ RSpec.describe "TAKES auto-move" do
     }.not_to raise_error
   end
 
-  it "using variable after TAKES call raises use-after-move" do
+  it "requires an explicit snapshot when STRICT sees a later use" do
     expect {
       annotate(<<~CLEAR)
         UNION Value { Num: Float64, List: Int64[] }
@@ -49,7 +49,7 @@ RSpec.describe "TAKES auto-move" do
             RETURN;
         END
       CLEAR
-    }.to raise_error(CompilerError, /USE AFTER MOVE/)
+    }.to raise_error(CompilerError, /USE AFTER MOVE.*`v`/m)
   end
 
   it "does not leak moved local state into a later function with the same local name" do

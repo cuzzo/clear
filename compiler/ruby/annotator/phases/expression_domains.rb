@@ -60,6 +60,7 @@ module Annotator
 
         # Fall through to UFCS: obj.method(args) -> method(obj, args).
         resolve_call(node, [node.object] + node.args)
+        reject_mutating_borrowed_receiver!(node)
         record_predicate_call_site!(node)
         record_call_site(node.name) if node.name.is_a?(String)
       end
@@ -71,6 +72,7 @@ module Annotator
         root = root_variable_name(node.object)
         return unless root
         return if ownership_graph.can_write?(root)
+        return if reject_inferred_alias_call_mutation!(node, root)
 
         error!(node, :ASSIGN_WHILE_BORROWED, name: root)
       end

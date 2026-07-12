@@ -181,4 +181,12 @@ end
 
 RSpec.configure do |config|
   config.include MirPipelineSpecHelper
+
+  # Low-level annotator/dataflow specs historically exercise explicit affine
+  # moves. Keep those parser-only fixtures in STRICT mode; end-to-end DEFAULT
+  # and EASY behavior is covered through CompilerFrontend/ZigTranspiler with
+  # an explicit ownership_mode, including auto_ownership_transport_spec.
+  config.before do
+    ClearParser.ownership_mode = :strict if defined?(ClearParser)
+  end
 end

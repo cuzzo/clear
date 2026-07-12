@@ -81,12 +81,13 @@ module ClearBuildSupport
       exact_tiers: T.nilable(ExactTiers),
       main_tier: T.nilable(Symbol),
       use_debug_allocator: T::Boolean,
-      profile_max: T.nilable(Integer)
+      profile_max: T.nilable(Integer),
+      ownership_mode: Symbol
     ).returns(BuildSignature)
   end
   def self.build_signature(config:, source:, output:, opt_level:, extra_flags:, module_mode:, profile:,
                            use_c_allocator:, default_stack:, strict_test:, exact_tiers:, main_tier: nil,
-                           use_debug_allocator: false, profile_max: nil)
+                           use_debug_allocator: false, profile_max: nil, ownership_mode: :default)
     {
       "source" => File.expand_path(source),
       "output" => File.expand_path(output),
@@ -101,6 +102,7 @@ module ClearBuildSupport
       "strict_test" => strict_test,
       "exact_tiers" => exact_tiers&.transform_keys(&:to_s),
       "main_tier" => main_tier,
+      "ownership_mode" => ownership_mode.to_s,
       "zig" => config.zig_path
     }
   end

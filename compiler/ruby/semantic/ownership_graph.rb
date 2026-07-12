@@ -300,6 +300,9 @@ class OwnershipGraph
   # Check if a path can be written to (no active borrows on it or ancestors).
   sig { params(path: String).returns(T::Boolean) }
   def can_write?(path)
+    # An immutable alias cannot be used as a mutation back-door. Mutable
+    # RESTRICT aliases use :borrows_mut and remain writable by design.
+    return false if edges_from(path).any? { |edge| edge.kind == :borrows }
     # Check this path and all ancestors
     current = place_id(path)
     loop do

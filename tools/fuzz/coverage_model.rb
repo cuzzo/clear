@@ -74,6 +74,10 @@ module FuzzCoverageModel
     auto_inference_matrix: profile(
       failure_proves: 'Auto inference accepts concrete solvable positions and rejects unresolved/ambiguous ones.'
     ),
+    auto_ownership_transport_matrix: profile(
+      failure_proves: 'DEFAULT ownership transport borrows or materializes mutation-free values and rejects every resolved mutable call or overlapping write.',
+      high_risk: true
+    ),
     bg_capture_transfer_matrix: profile(
       failure_proves: 'BG/DO/BG STREAM captures transfer owned roots without losing cleanup or lifetime facts.',
       high_risk: true

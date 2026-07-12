@@ -256,6 +256,45 @@ test "dupeValue rolls back every initialized managed field under allocator failu
     try std.testing.expect(fail_index < 16);
 }
 
+test "dupeValue copies recursive indirect structs and rolls back every allocation failure" {
+    const Node = struct {
+        name: []u8,
+        next: ?*@This(),
+    };
+    const allocator = std.testing.allocator;
+    const leaf = try allocator.create(Node);
+    leaf.* = .{
+        .name = try allocator.dupe(u8, "leaf"),
+        .next = null,
+    };
+    var source = Node{
+        .name = try allocator.dupe(u8, "root"),
+        .next = leaf,
+    };
+    defer CheatLib.cleanup(Node, allocator, &source);
+
+    var fail_index: usize = 0;
+    var failures: usize = 0;
+    while (fail_index < 16) : (fail_index += 1) {
+        var failing = std.testing.FailingAllocator.init(
+            allocator,
+            .{ .fail_index = fail_index },
+        );
+        var copied = CheatLib.dupeValue(Node, source, failing.allocator()) catch |err| {
+            try std.testing.expectEqual(error.OutOfMemory, err);
+            failures += 1;
+            continue;
+        };
+        try std.testing.expect(copied.next != null);
+        try std.testing.expect(copied.next.? != source.next.?);
+        try std.testing.expectEqualStrings("leaf", copied.next.?.name);
+        CheatLib.cleanup(Node, failing.allocator(), &copied);
+        break;
+    }
+    try std.testing.expect(failures >= 3);
+    try std.testing.expect(fail_index < 16);
+}
+
 test "dupeValue rolls back managed numeric-map values under allocator failure" {
     const Map = std.AutoHashMapUnmanaged(i64, []u8);
     const allocator = std.testing.allocator;

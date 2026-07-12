@@ -85,7 +85,7 @@ RSpec.describe OwnershipDataflow do
         FN main() RETURNS Void ->
           a: User @indirect = User{ id: 1 };
           IF TRUE THEN
-            consume!(a);
+            consume!(GIVE a);
           END
           RETURN;
         END
@@ -102,9 +102,9 @@ RSpec.describe OwnershipDataflow do
         FN main() RETURNS Void ->
           a: User @indirect = User{ id: 1 };
           IF TRUE THEN
-            consume!(a);
+            consume!(GIVE a);
           ELSE
-            consume!(a);
+            consume!(GIVE a);
           END
           RETURN;
         END

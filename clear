@@ -155,7 +155,7 @@ def find_project_build_zig(source)
   nil
 end
 
-def run_project_build_zig!(source, output:, opt_level:, mode:, run_args: [], use_c_allocator: false, use_debug_allocator: false)
+def run_project_build_zig!(source, output:, opt_level:, mode:, run_args: [], use_c_allocator: false, use_debug_allocator: false, ownership_mode: :default)
   project = find_project_build_zig(source)
   return false unless project
 
@@ -171,6 +171,7 @@ def run_project_build_zig!(source, output:, opt_level:, mode:, run_args: [], use
   ]
   cmd << '-Dclear-use-c-allocator=true' if use_c_allocator
   cmd << '-Dclear-use-debug-allocator=true' if use_debug_allocator
+  cmd << "-Dclear-ownership-mode=#{ownership_mode}"
   if mode == :run && run_args.any?
     cmd << '--'
     cmd.concat(run_args)
@@ -198,7 +199,7 @@ end
 # -------------------------------------------------------------------------
 # Build: transpile + compile
 # -------------------------------------------------------------------------
-def do_build(source, output: nil, opt_level: 'Debug', extra_flags: [], module_mode: false, default_stack: nil, profile: false, profile_max: nil, strict_test: false, force: false, exact_tiers: nil, use_c_allocator: false, use_debug_allocator: false, main_tier: nil, bypass_transpile_cache: false, zig_coverage: false, zig_coverage_suite: 'clear-cli', zig_coverage_name: nil, zig_coverage_run_dir: nil)
+def do_build(source, output: nil, opt_level: 'Debug', extra_flags: [], module_mode: false, default_stack: nil, profile: false, profile_max: nil, strict_test: false, force: false, exact_tiers: nil, use_c_allocator: false, use_debug_allocator: false, main_tier: nil, bypass_transpile_cache: false, zig_coverage: false, zig_coverage_suite: 'clear-cli', zig_coverage_name: nil, zig_coverage_run_dir: nil, ownership_mode: :default)
   error "File not found: #{source}" unless File.exist?(source)
   source = File.expand_path(source)
   source_dir = File.dirname(source)
@@ -220,7 +221,8 @@ def do_build(source, output: nil, opt_level: 'Debug', extra_flags: [], module_mo
     default_stack: default_stack,
     strict_test: strict_test,
     exact_tiers: exact_tiers,
-    main_tier: main_tier
+    main_tier: main_tier,
+    ownership_mode: ownership_mode
   )
 
   # Skip rebuild if output is newer than source AND compiler files.
@@ -249,6 +251,8 @@ def do_build(source, output: nil, opt_level: 'Debug', extra_flags: [], module_mo
   transpile_flag += " --debug-allocator" if use_debug_allocator
   transpile_flag += " --default-stack #{default_stack}" if default_stack
   transpile_flag += " --strict" if strict_test
+  transpile_flag += " --easy" if ownership_mode == :easy
+  transpile_flag += " --ownership-strict" if ownership_mode == :strict
   if exact_tiers
     transpile_flag += " --exact-tiers '#{exact_tiers.transform_keys(&:to_s).to_json}'"
   end
@@ -509,6 +513,7 @@ when 'build'
   use_c_allocator = false
   use_debug_allocator = false
   bypass_transpile_cache = false
+  ownership_mode = :default
 
   # Parse build flags
   remaining = []
@@ -581,8 +586,10 @@ when 'build'
       # observed uses. `clear fix` rewrites resolved Autos to their
       # concrete types. Imports are still required to be fully typed
       # (STRICT-imports boundary, §7).
-      require_relative 'compiler/ruby/ast/parser'
-      ClearParser.gradual_mode = true
+      ownership_mode = :easy
+      i += 1
+    when '--strict'
+      ownership_mode = :strict
       i += 1
     else
       remaining << args[i]
@@ -605,12 +612,13 @@ when 'build'
       opt_level: opt_level,
       mode: :build,
       use_c_allocator: use_c_allocator,
-      use_debug_allocator: use_debug_allocator
+      use_debug_allocator: use_debug_allocator,
+      ownership_mode: ownership_mode
     )
     exit 0
   end
 
-  result = do_build(source, output: output, opt_level: opt_level, extra_flags: extra_flags, default_stack: default_stack, force: !!@force_build, use_c_allocator: use_c_allocator, use_debug_allocator: use_debug_allocator, bypass_transpile_cache: bypass_transpile_cache)
+  result = do_build(source, output: output, opt_level: opt_level, extra_flags: extra_flags, default_stack: default_stack, force: !!@force_build, use_c_allocator: use_c_allocator, use_debug_allocator: use_debug_allocator, bypass_transpile_cache: bypass_transpile_cache, ownership_mode: ownership_mode)
   exit 0 if result == :up_to_date
   puts "Built: #{output_path}"
 
@@ -763,6 +771,7 @@ when 'run'
   extra_flags = ['-fno-llvm', '-fno-lld']
   use_c_allocator = false
   no_cache = false
+  ownership_mode = :default
   run_remaining = []
   clear_args.each do |arg|
     case arg
@@ -781,6 +790,10 @@ when 'run'
       use_c_allocator = true
     when '--no-cache'
       no_cache = true
+    when '--gradual'
+      ownership_mode = :easy
+    when '--strict'
+      ownership_mode = :strict
     else
       run_remaining << arg
     end
@@ -799,12 +812,13 @@ when 'run'
       opt_level: opt_level,
       mode: :run,
       run_args: run_args,
-      use_c_allocator: use_c_allocator
+      use_c_allocator: use_c_allocator,
+      ownership_mode: ownership_mode
     )
     exit 0
   end
 
-  do_build(source, output: output, opt_level: opt_level, extra_flags: extra_flags, default_stack: default_stack, use_c_allocator: use_c_allocator, force: no_cache, bypass_transpile_cache: no_cache)
+  do_build(source, output: output, opt_level: opt_level, extra_flags: extra_flags, default_stack: default_stack, use_c_allocator: use_c_allocator, force: no_cache, bypass_transpile_cache: no_cache, ownership_mode: ownership_mode)
 
   # Hints
   unless ENV['CLEAR_THREADS']

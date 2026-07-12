@@ -242,6 +242,9 @@ module MIRLoweringVariables
     node_entry = node.respond_to?(:mir_binding_entry) ? node.mir_binding_entry : nil
     decl_name = node.name.to_s
     binding_entry = node_entry || function_state.bindings[decl_name] || CleanupEntry::NONE
+    transport_plan = T.unsafe(node).ownership_transport_plan
+    inferred_borrow = transport_plan.is_a?(OwnershipTransportPlan) && transport_plan.action == :borrow
+    binding_entry = CleanupEntry::NONE if inferred_borrow
     empty_optional_init = optional_nil_initializer?(ft, node.value)
     binding_entry = CleanupEntry::NONE if empty_optional_init
     has_mir_drop = binding_entry.needs_cleanup? && !binding_entry.match_as?
@@ -280,7 +283,7 @@ module MIRLoweringVariables
     next_owned_alloc = if node.value.is_a?(AST::NextExpr)
       next_result_owned_alloc(Type.from_node!(node.value.expr, context: "NEXT source"), ft, base_decl_alloc)
     end
-    source_owned_alloc = owned_binding_source_alloc(node.value)
+    source_owned_alloc = inferred_borrow ? nil : owned_binding_source_alloc(node.value)
     init_ownership_effect = if next_owned_alloc
       MIR::OwnershipEffect.owned(alloc: next_owned_alloc)
     elsif source_owned_alloc
@@ -346,6 +349,8 @@ module MIRLoweringVariables
   sig { params(node: AST::VarDecl, facts: VarDeclFacts, init_effect: MIR::OwnershipEffect).returns(T::Boolean) }
   def var_decl_source_transfer_required?(node, facts, init_effect)
     T.bind(self, MIRLowering) rescue nil
+    plan = T.unsafe(node).ownership_transport_plan
+    return false if plan.is_a?(OwnershipTransportPlan) && plan.action != :move
     return false if var_decl_source_borrowed?(node)
     return true if facts.source_owned_binding
     return false if init_effect.produces_owned
@@ -748,6 +753,7 @@ module MIRLoweringVariables
       proxy.container_borrow = node.container_borrow if node.respond_to?(:container_borrow) && proxy.respond_to?(:container_borrow=)
       proxy.symbol = node.symbol if node.respond_to?(:symbol) && proxy.respond_to?(:symbol=)
       proxy.mir_binding_entry = node.mir_binding_entry if node.respond_to?(:mir_binding_entry) && proxy.respond_to?(:mir_binding_entry=)
+      T.unsafe(proxy).ownership_transport_plan = T.unsafe(node).ownership_transport_plan
       result = lower_var_decl(proxy)
       # Line-suffix disambiguation in lower_var_decl stores the renamed Zig
       # name under `proxy.object_id`. Annotator-resolved references point to

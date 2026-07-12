@@ -3624,6 +3624,10 @@ class Type
     # payload; copying a handle never copies or transfers the payload.
     return true if node?
     return true if primitive?
+    # Pointer-backed ownership is not implicitly Copy, and—critically—an
+    # indirect edge terminates schema recursion. Re-entering the pointee's
+    # schema here makes recursive structs overflow the compiler stack.
+    return false if indirect? || any_rc? || link?
     if optional?
       return lookup_block ? T.must(wrapped_type).implicitly_copyable?(&lookup_block) : T.must(wrapped_type).implicitly_copyable?(lookup_arg)
     end

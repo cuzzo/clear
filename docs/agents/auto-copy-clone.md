@@ -19,8 +19,8 @@ The required language rule is:
   transport: move, borrow, retain, or materialized deep copy;
 - the compiler never silently changes a plain value into `@multiowned` or
   `@shared`; and
-- STRICT rejects hidden materialization costs but retains zero-cost move and
-  borrow elision.
+- STRICT preserves explicit affine assignment: plain non-Copy assignment
+  moves, and a later use receives the existing fixable use-after-move error.
 
 This is the same design pattern that made `@node` successful. A declaration
 such as `left: ?Node@node` decides the topology and lifetime domain once. The
@@ -336,11 +336,12 @@ Type inference and ownership transport are separate policy dials.
 | --- | --- | --- | --- |
 | EASY | Broad local inference | Automatic move, borrow, retain, and non-mutating materialization | Allowed and explainable; alias/mutation ambiguity is always an error |
 | DEFAULT | Explicit API types; `Auto` locals available | Same semantic automation as EASY | Allowed, with diagnostics and profiling; alias/mutation ambiguity is always an error |
-| STRICT | Explicit types | Zero-cost moves and borrows remain inferred; costly retain/deep-copy materialization must be explicit | Hidden allocation/retain is an error |
+| STRICT | Explicit types | Plain non-Copy assignment moves; `COPY`, `CLONE`, and sharing intent are explicit | Hidden allocation/retain and implicit borrowing are errors |
 
-STRICT should not require Rust-style explicit references. A proven local borrow
-has no hidden runtime cost and no semantic ambiguity. STRICT exists to expose
-cost and effects, not to add syntax for the compiler's internal pointers.
+STRICT preserves the language's original affine mental model. This makes it a
+stable audit mode as DEFAULT/EASY gain more inference: `y = x` transfers a
+non-Copy value, and using `x` afterward produces a fixable error directing the
+programmer to `COPY`, `CLONE`, or an explicit sharing capability.
 
 STRICT diagnostics should distinguish:
 
@@ -395,16 +396,16 @@ Remedies:
   - store a duplicable descriptor type instead
 ```
 
-In STRICT, a non-mutating escape may additionally produce a cost error:
+In STRICT, the equivalent code retains ordinary affine behavior:
 
 ```text
-Strict Cost Error: this assignment requires an implicit deep copy of `profile`.
+USE AFTER MOVE: `profile` was moved into `current` and is used again.
 
   current = profile
             ^^^^^^^ source remains live and the snapshot is later distinguished
 
-Use `current = COPY profile`, restructure the lifetimes, or remove STRICT from
-this scope.
+Use `current = COPY profile`, declare explicit shared identity and `CLONE`, or
+restructure the lifetimes.
 ```
 
 The compiler should provide:
@@ -536,8 +537,10 @@ coverage first.
 
 ### Phase 5: STRICT cost enforcement
 
-Run the same planner, then reject hidden costly actions. Add scoped diagnostics,
-ownership explanations, and performance attribution.
+Run the planner for explanation and fix generation, but preserve explicit
+affine lowering: plain non-Copy assignment moves. Add scoped diagnostics,
+ownership explanations, and performance attribution without enabling the
+DEFAULT/EASY transport plan.
 
 ### Phase 6: EASY integration
 
@@ -626,8 +629,9 @@ GC, while requiring less per-use ceremony than Rust.
 
 ## Final recommendation
 
-Adopt automated ownership transport in EASY and DEFAULT, with STRICT rejecting
-hidden costly materialization. Do not adopt automatic affine-to-Rc/Arc upgrade.
+Adopt automated ownership transport in EASY and DEFAULT, while STRICT preserves
+explicit affine assignment and rejects hidden costly materialization. Do not
+adopt automatic affine-to-Rc/Arc upgrade.
 
 Define plain assignment as eligible for automatic move/borrow/copy only while
 its live alias interval is mutation-free. Make any interleaved mutation a hard

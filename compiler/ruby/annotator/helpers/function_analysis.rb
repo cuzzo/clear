@@ -99,6 +99,12 @@ module FunctionAnalysis
       with_routine_analysis_scope(node) do
         declare_and_verify_params(node)
         declare_captures(node)
+        parameter_names = node.respond_to?(:params) ? node.params.map { |param| param.name.to_s }.to_set : Set.new
+        OwnershipTransportPlanner.plan!(
+          body,
+          parameter_names: parameter_names,
+          language_mode: language_mode,
+        )
 
         # PRE clauses run at function entry -- visit them with parameters in
         # scope so each predicate type-checks and resolves identifiers
@@ -675,12 +681,43 @@ module FunctionAnalysis
     end
     return unless facts.param.takes || facts.is_give
 
-    verify_owned_takes_argument!(facts)
+    inferred_materialized = T.let(false, T::Boolean)
+    inner_identifier = facts.inner_node.is_a?(AST::Identifier) ? T.cast(facts.inner_node, AST::Identifier) : nil
+    if language_mode != :strict && !facts.is_give && inner_identifier &&
+        T.unsafe(inner_identifier).ownership_future_use == true &&
+        !inner_identifier.full_type!(context: "implicit TAKES copyability").implicitly_copyable? { |name| lookup_type_schema(name) } &&
+        !facts.arg_node.is_a?(AST::CopyNode) && !facts.arg_node.is_a?(AST::CloneNode)
+      source_type = inner_identifier.full_type!(context: "implicit TAKES transport")
+      keyword = source_type.any_rc? || source_type.split? ? "CLONE" : "COPY"
+      owned_arg = if keyword == "CLONE"
+        AST::CloneNode.new(inner_identifier.token, inner_identifier)
+      else
+        AST::CopyNode.new(inner_identifier.token, inner_identifier)
+      end
+      visit(owned_arg)
+      facts.site.replace_arg!(facts.index, owned_arg)
+      inferred_materialized = true
+    end
+
+    verify_owned_takes_argument!(facts) unless inferred_materialized
     container_alloc = receiver_container_alloc(facts.site.node) || :heap
-    owned = ensure_owned_value!(facts.inner_node, facts.param.type, nil, container_alloc: container_alloc)
+    # Explicit GIVE suppresses lifetime-driven auto-materialization, but it
+    # must retain the existing representation conversion for frame lists and
+    # rodata strings.  Those conversions create an owned argument rather than
+    # moving the borrowed/frame source itself.
+    inner_type = facts.inner_node.full_type!(context: "TAKES representation transport")
+    give_needs_representation_copy = facts.is_give &&
+      (inner_type.list_collection? || (inner_type.string? && inner_type.rodata?))
+    owned = if inferred_materialized || (facts.is_give && !give_needs_representation_copy)
+      nil
+    else
+      ensure_owned_value!(facts.inner_node, facts.param.type, nil, container_alloc: container_alloc)
+    end
     facts.site.replace_arg!(facts.index, owned) if owned
     current_arg = facts.site.args[facts.index]
     current_arg.alloc = container_alloc if current_arg.is_a?(AST::CopyNode) && container_alloc != :heap
+    return if inferred_materialized || owned
+
     move_if_takes_ownership!(
       facts.inner_node,
       action: facts.is_give ? :give : :takes,
@@ -719,6 +756,14 @@ module FunctionAnalysis
   sig { params(facts: CallArgumentFacts, signature: FunctionSignature, atomic_bare_value_args: T::Array[AST::Locatable]).void }
   def verify_argument_type!(facts, signature, atomic_bare_value_args)
     T.bind(self, SemanticAnnotator)
+    if facts.expected_type.indirect? && !facts.actual_type.indirect? &&
+        facts.expected_type.resolved == facts.actual_type.resolved
+      unless language_mode == :easy
+        error!(facts.arg_node, :INDIRECT_ARGUMENT_EXPLICIT,
+          index: facts.index + 1, expected: Type.coercion_surface_name(facts.expected_type))
+      end
+      facts.arg_node.coerced_type = facts.expected_type
+    end
     match = fn_type_argument_match?(facts)
     verify_atomic_argument!(facts, signature, atomic_bare_value_args)
     match = true if shared_argument_match?(facts, matched: match)
@@ -949,6 +994,7 @@ module FunctionAnalysis
     return true if !arg_node.is_a?(AST::Identifier)
 
     if param.mutable && !ownership_graph.can_write?(arg_node.name)
+      reject_inferred_alias_call_mutation!(arg_node, arg_node.name)
       error!(arg_node, :MUTABLE_ARG_RESTRICTED, name: arg_node.name)
     end
 

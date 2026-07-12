@@ -56,21 +56,35 @@ module Annotator
       # +val_node+:      the AST value node being stored
       # +expected_type+: the target field/param type (Type or Symbol)
       # +container_desc+: string for error messages (e.g. "MyUnion.Variant")
-      sig { params(val_node: AST::Node, expected_type: T.nilable(Type::TypeInput), container_desc: T.nilable(String), container_alloc: Symbol).returns(T.nilable(AST::CopyNode)) }
+      sig { params(val_node: AST::Node, expected_type: T.nilable(Type::TypeInput), container_desc: T.nilable(String), container_alloc: Symbol).returns(T.nilable(AST::Node)) }
       def ensure_owned_value!(val_node, expected_type, container_desc = nil, container_alloc: :heap)
         T.bind(self, SemanticAnnotator)
 
-        # Non-escaping values (WITH block aliases) cannot be stored in containers
-        if val_node.is_a?(AST::Identifier) && val_node.symbol&.non_escaping
-          error!(val_node, :STORE_WITH_SCOPED_INTO_CONTAINER, name: val_node.name, container: container_desc || 'a container')
-        end
+        return nil if val_node.is_a?(AST::Literal) && val_node.type == :NIL
         return nil if val_node.is_a?(AST::CopyNode)
         vti = val_node.full_type!(context: "owned value source")
         vti = Type.new(vti) if vti && !vti.is_a?(Type)
         return nil unless vti
+        return nil if vti.symbol?
+
+        # Copy payloads are stored by value and cannot leak the borrow itself.
+        if val_node.is_a?(AST::Identifier) && val_node.symbol&.non_escaping
+          return nil if vti.implicitly_copyable? { |name| lookup_type_schema(name) }
+          error!(val_node, :STORE_WITH_SCOPED_INTO_CONTAINER, name: val_node.name, container: container_desc || 'a container')
+        end
 
         expected_t = expected_type.is_a?(Type) ? expected_type : (expected_type ? Type.new(expected_type) : nil)
         return nil if expected_t&.symbol? && vti.symbol?
+
+        if language_mode != :strict && val_node.is_a?(AST::Identifier) && T.unsafe(val_node).ownership_future_use == true &&
+            !vti.implicitly_copyable? { |name| lookup_type_schema(name) }
+          keyword = vti.any_rc? || vti.split? ? "CLONE" : "COPY"
+          wrapper = keyword == "CLONE" ? AST::CloneNode.new(val_node.token, val_node) : AST::CopyNode.new(val_node.token, val_node)
+          visit(wrapper)
+          wrapper.storage = container_alloc
+          T.unsafe(wrapper).alloc = container_alloc
+          return wrapper
+        end
 
         if vti.list_collection?
           # When the target field is also @list (ArrayList), skip CopyNode wrapping.
@@ -331,6 +345,8 @@ module Annotator
       def handle_assign_move(node)
         T.bind(self, SemanticAnnotator)
 
+        plan = node.respond_to?(:ownership_transport_plan) ? T.unsafe(node).ownership_transport_plan : nil
+        return if language_mode != :strict && plan.is_a?(OwnershipTransportPlan) && plan.action != :move
         return if node.value.is_a?(AST::CopyNode)
 
         reject_scoped_assignment_move!(node)

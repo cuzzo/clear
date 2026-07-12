@@ -322,12 +322,24 @@ module FixableHelper
     consumer_keyword = use_clone ? "CLONE" : "COPY"
     consumer_description_code = use_clone ? :WRAP_CONSUMER_WITH_CLONE : :WRAP_CONSUMER_WITH_COPY
 
+    replacement_col = move_col
+    replacement_length = name.length
+    source_code = @source_code
+    if source_code
+      move_text = source_code.lines[move_line - 1].to_s
+      prefix = move_text[0, move_col - 1].to_s
+      if (give_prefix = prefix.match(/GIVE\s+\z/))
+        replacement_col = give_prefix.begin(0) + 1
+        replacement_length += T.must(give_prefix[0]).length
+      end
+    end
+
     fixes = []
     fixes << Fix.new(
       description: fix_description(consumer_description_code, line: og_node.move_line),
       confidence: :interactive,
       edits: [Edit.new(
-        span: Span.new(file: nil, line: move_line, col: move_col, length: name.length),
+        span: Span.new(file: nil, line: move_line, col: replacement_col, length: replacement_length),
         replacement: "(#{consumer_keyword} #{name})"
       )]
     )

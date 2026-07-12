@@ -13,6 +13,7 @@ pub fn build(b: *std.Build) void {
     const output = b.option([]const u8, "clear-output", "Output binary path") orelse "clear-self-host";
     const use_c_allocator = b.option(bool, "clear-use-c-allocator", "Use CLEAR's C allocator path") orelse false;
     const use_debug_allocator = b.option(bool, "clear-use-debug-allocator", "Use CLEAR's debug allocator path") orelse false;
+    const ownership_mode = b.option([]const u8, "clear-ownership-mode", "CLEAR ownership mode: easy, default, strict") orelse "default";
 
     const build_root = b.build_root.path orelse ".";
     const clear_bin = b.fmt("{s}/../../clear", .{build_root});
@@ -38,6 +39,8 @@ pub fn build(b: *std.Build) void {
     });
     if (use_c_allocator) build_cmd.addArg("--use-c-allocator");
     if (use_debug_allocator) build_cmd.addArg("--debug-allocator");
+    if (std.mem.eql(u8, ownership_mode, "easy")) build_cmd.addArg("--gradual");
+    if (std.mem.eql(u8, ownership_mode, "strict")) build_cmd.addArg("--strict");
     build_step.dependOn(&build_cmd.step);
 
     const run_step = b.step("clear-run", "Run a CLEAR compiler source with native regex support");
@@ -52,6 +55,8 @@ pub fn build(b: *std.Build) void {
         source,
     });
     if (use_c_allocator) run_cmd.addArg("--use-c-allocator");
+    if (std.mem.eql(u8, ownership_mode, "easy")) run_cmd.addArg("--gradual");
+    if (std.mem.eql(u8, ownership_mode, "strict")) run_cmd.addArg("--strict");
     if (b.args) |args| {
         run_cmd.addArg("--");
         run_cmd.addArgs(args);

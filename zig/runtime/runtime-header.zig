@@ -3783,7 +3783,7 @@ pub const CheatLib = struct {
         // Primitives, enums, untagged unions: no-op (comptime-eliminated)
     }
 
-    pub fn dupeValue(comptime T: type, value: anytype, alloc: std.mem.Allocator) !T {
+    pub fn dupeValue(comptime T: type, value: anytype, alloc: std.mem.Allocator) anyerror!T {
         const info = @typeInfo(T);
 
         if (T == []const u8) {
@@ -4068,7 +4068,7 @@ pub const CheatLib = struct {
         value: T,
         alloc: std.mem.Allocator,
         comptime index: usize,
-    ) !void {
+    ) anyerror!void {
         const fields = @typeInfo(T).@"struct".fields;
         if (index == fields.len) return;
 
@@ -4110,7 +4110,7 @@ pub const CheatLib = struct {
 
     /// `dupeValue`, but derefs a `*const T` borrow first so the
     /// result is an owned value, not a `*const` alias of the caller.
-    pub fn dupeCaptured(comptime S: type, src: S, alloc: std.mem.Allocator) std.mem.Allocator.Error!CapturedValue(S) {
+    pub fn dupeCaptured(comptime S: type, src: S, alloc: std.mem.Allocator) anyerror!CapturedValue(S) {
         const info = @typeInfo(S);
         if (info == .pointer and info.pointer.size == .one and info.pointer.is_const and
             @typeInfo(info.pointer.child) != .@"opaque" and @typeInfo(info.pointer.child) != .@"fn")
@@ -4169,7 +4169,7 @@ pub const CheatLib = struct {
     /// Promote all escapable fields of a struct from frame arena to heap.
     /// DEPRECATED: use promote() for new code. Kept for backward compat.
     /// Deep-copy a union value's heap-owning payload (strings, slices, struct fields).
-    pub fn dupeUnionValue(comptime T: type, value: T, alloc: std.mem.Allocator) std.mem.Allocator.Error!T {
+    pub fn dupeUnionValue(comptime T: type, value: T, alloc: std.mem.Allocator) anyerror!T {
         const info = @typeInfo(T);
         if (info != .@"union" or info.@"union".tag_type == null) return value;
 

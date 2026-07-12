@@ -1108,7 +1108,9 @@ module MIRLoweringExpressions
           MIR::CallableContract.no_ownership(1),
         )
       end
-      plan = field_access_plan(node, MIR::Ident.new("_r"))
+      safe_root = T.let(MIR::Ident.new("_r"), MIR::Node)
+      safe_root = MIR::Deref.new(safe_root) if inner_type.indirect?
+      plan = field_access_plan(node, safe_root)
       result_type = node.full_type!(context: "safe-navigation field result")
       result_type = Type.optional_of(result_type) unless result_type.optional?
       result = MIR::IfOptional.new(
@@ -1190,7 +1192,10 @@ module MIRLoweringExpressions
       path: path,
       union_payload: union_payload == true,
       union_payload_zig: union_payload ? ti.zig_type : nil,
-      indirect: node.indirect_field == true,
+      # An optional indirect field is represented as ?*T. Reading the field
+      # must preserve the optional pointer; dereference happens only after
+      # safe-navigation/unwrap proves it non-nil.
+      indirect: node.indirect_field == true && !node.full_type!(context: "indirect field access").optional?,
     )
   end
 
