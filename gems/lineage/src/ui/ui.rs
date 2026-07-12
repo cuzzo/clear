@@ -8639,6 +8639,8 @@ mod tests {
             })
             .unwrap();
 
+        storage.refresh_current_sarif_findings_view().unwrap();
+
         let payload =
             source_payload_with_overlays(&storage, dir.path(), "src/demo.rb", None, &UiOverlays::default())
                 .unwrap();
@@ -8813,6 +8815,8 @@ mod tests {
                 })
                 .unwrap();
         }
+
+        storage.refresh_current_sarif_findings_view().unwrap();
 
         let payload = source_payload(&storage, dir.path(), "src/demo.rb", None).unwrap();
         let pure_symbol = payload.symbols.iter().find(|symbol| symbol.name == "pure").unwrap();

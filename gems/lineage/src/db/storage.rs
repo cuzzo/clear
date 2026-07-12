@@ -136,7 +136,8 @@ impl Storage {
         self.ensure_column("logical_units", name, definition)
     }
 
-    fn refresh_current_sarif_findings_view(&self) -> Result<()> {
+    pub fn refresh_current_sarif_findings_view(&self) -> Result<()> {
+        let _ = self.conn.execute("DROP VIEW IF EXISTS current_sarif_findings", []);
         self.conn.execute_batch(
             include_str!("../../sql/storage/refresh_current_sarif_findings_view.sql"),
         )?;
@@ -575,6 +576,50 @@ impl Storage {
             params![commit_hash, source],
         )?;
         Ok(findings + artifacts)
+    }
+
+    pub fn prune_stale_sarif_data(&self) -> Result<()> {
+        // Delete findings belonging to snapshots older than 2 (rank >= 3)
+        self.conn.execute(
+            r#"
+            WITH commit_snapshots AS (
+              SELECT path, source, tool_name, commit_hash,
+                     MAX(timestamp) AS timestamp, MAX(id) AS id
+              FROM sarif_findings
+              GROUP BY path, source, tool_name, commit_hash
+            ),
+            ranked_snapshots AS (
+              SELECT path, source, tool_name, commit_hash,
+                     ROW_NUMBER() OVER (
+                       PARTITION BY path, source, tool_name
+                       ORDER BY timestamp DESC, id DESC
+                     ) AS snapshot_rank
+              FROM commit_snapshots
+            ),
+            stale_snapshots AS (
+              SELECT path, source, tool_name, commit_hash
+              FROM ranked_snapshots
+              WHERE snapshot_rank >= 3
+            )
+            DELETE FROM sarif_findings
+            WHERE EXISTS (
+              SELECT 1 FROM stale_snapshots s
+              WHERE s.path = sarif_findings.path
+                AND s.source = sarif_findings.source
+                AND s.tool_name = sarif_findings.tool_name
+                AND s.commit_hash = sarif_findings.commit_hash
+            )
+            "#,
+            [],
+        )?;
+
+        // Delete orphan artifacts whose findings have been pruned
+        self.conn.execute(
+            "DELETE FROM sarif_artifacts WHERE id NOT IN (SELECT DISTINCT artifact_id FROM sarif_findings)",
+            [],
+        )?;
+
+        Ok(())
     }
 
     pub fn insert_sarif_artifact(&self, artifact: &SarifArtifact) -> Result<i64> {
