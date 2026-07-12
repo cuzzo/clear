@@ -85,7 +85,10 @@ WITH EXCLUSIVE counter AS c {
 
 ## 4. Affine Ownership: GIVE & TAKES
 
-CLEAR uses **affine types** by default. Every value has exactly one owner. When you assign a value, ownership is **moved**, not copied.
+CLEAR uses **affine types** by default. Every value has exactly one owner, but
+DEFAULT and EASY infer the cheapest unambiguous transport: move, local borrow,
+or an owned COPY/CLONE when a destination must retain the value. STRICT keeps
+costly transport explicit.
 
 ```ruby clear
 FN process(TAKES s: String) RETURNS Void ->
@@ -96,13 +99,33 @@ END
 FN main() RETURNS Void ->
     msg = "Hello";
 
-    process(msg);                   # OKAY: Implicit transfer (by FN signature)
+    process(msg);                   # DEFAULT/EASY: inferred COPY because msg is used below
+    print(msg);                     # OKAY: msg still owns its original value
 
-    print(GIVE msg);                # COMPILER ERROR: USE AFTER MOVE: You can't GIVE `msg`.  `process(msg)` TOOK it away.
-    print(msg);                     # COMPILER ERROR: USE AFTER MOVE: You can't use `msg`.  `process(msg)` TOOK it away.
+    process(GIVE msg);              # Explicit transfer; msg is now dead
+    print(msg);                     # COMPILER ERROR: USE AFTER MOVE
 
     RETURN;
 END
+```
+
+> **NOTE:** DEFAULT and EASY infer ordinary move/borrow/copy decisions, so the
+> unannotated `process(msg)` above does not produce a use-after-move error.
+> STRICT rejects the hidden copy at that call and offers a fix to insert
+> `COPY`; an explicit `GIVE` always transfers ownership in every mode and a
+> later use always errors.
+
+Inference never guesses through mutation. If `y = x` creates a temporary
+alias and either name is mutated before the other's last use, compilation
+fails in EASY, DEFAULT, and STRICT. Choose the semantics explicitly:
+
+```ruby clear illustrative
+y = x;
+x.update!();
+print(y);          # COMPILER ERROR: ambiguous alias + mutation
+
+y = COPY x;       # independent snapshot
+# or declare shared identity explicitly and use: y = CLONE x
 ```
 
 For more details, see [Sharing Capabilities](sharing-capabilities.md).
@@ -131,7 +154,10 @@ FN bad!(v: Value, MUTABLE map: HashMap<Value>) RETURNS Void ->
 END
 ```
 
-**Zero implicit copies.** Copy types (primitives, strings, enums) can be freely used after assignment. Non-Copy types (unions with `@indirect` or `[]T` variants, structs with heap data) follow move semantics. There are never implicit deep copies.
+DEFAULT/EASY only introduce an owned copy when liveness and the destination
+contract require it. Local read-only aliases remain zero-cost borrows, and a
+last use remains a zero-cost move. STRICT reports every inferred deep copy or
+reference-count retain at its source location and offers an explicit fix.
 
 ## 5. Sharded Shared-Nothing Architecture
 
@@ -554,6 +580,21 @@ STRUCT TreeNode {
 }
 ```
 
+In EASY mode, a uniquely forced recursive edge may omit `@indirect` with
+identical MIR, ABI, allocation count, and cleanup behavior:
+
+```ruby clear illustrative
+STRUCT ChainNode {
+    value: Int64,
+    next: ?ChainNode       # EASY infers ?ChainNode@indirect
+}
+```
+
+DEFAULT and STRICT require the explicit layout. EASY also requires it when
+there is more than one performance-distinct choice—such as `left` and `right`
+recursive edges. Moving a value into `T[]@list` never causes boxing: list
+elements remain inline and contiguous.
+
 `?.` is the safe navigate operator to peek into optional types. It combines with `OR` to handle missing data like an error. One `?.` guards a continuous chain of non-optional members, so `user?.profile.name` is sufficient when only `user` is optional. A member that is itself optional introduces a new boundary (`user?.optionalProfile?.name`). Bounds-safe `@list` indexing also introduces a boundary: `users[i]?.profile.name`.
 
 An `@list` indexed read has type `?T` and returns NIL when the index is out of bounds. Use `IF users[i] AS user THEN ... END` when mutating a struct element; the binding aliases the actual list slot rather than a temporary copy.
@@ -852,7 +893,7 @@ END
 | `@locked` | Mutex (single-scheduler) |
 | `@writeLocked` | RwLock (single-scheduler) |
 | `@local` | Thread-local heap pointer |
-| `@indirect` | Explicit heap allocation (Box) |
+| `@indirect` | Heap allocation (explicit in DEFAULT/STRICT; EASY may infer only a uniquely forced edge) |
 | `@link` | To create cyclic graphs (WeakRef/Ref) |
 | `@sharded(N)` | Shared-nothing partitioned across N shards |
 
