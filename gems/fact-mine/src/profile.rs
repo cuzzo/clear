@@ -70,6 +70,8 @@ pub struct ProfileOutput {
     /// Direct function/state relationships from normalized extraction.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub state_accesses: Vec<StateAccessRecord>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub complexity_facts: Vec<syntax::complexity_facts::MethodComplexityFacts>,
     // NilKill-only fields
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub collection_index_lookups: Vec<serde_json::Value>,
@@ -381,6 +383,7 @@ pub fn extract(document: &Document, profile: Profile) -> ProfileOutput {
     let call_graph_edges = extract_call_graph_edges(document);
     let calls = extract_calls(document, &language, &path);
     let state_accesses = extract_state_accesses(document, &language, &path);
+    let complexity_facts = syntax::complexity_facts::facts(document);
 
     let mut tlet_sites = Vec::new();
     let mut dead_nil_checks = Vec::new();
@@ -604,6 +607,7 @@ pub fn extract(document: &Document, profile: Profile) -> ProfileOutput {
         call_graph_edges,
         calls,
         state_accesses,
+        complexity_facts,
         collection_index_lookups,
         hash_record_blockers,
         tlet_sites,
@@ -647,6 +651,7 @@ pub fn merge(outputs: Vec<ProfileOutput>, profile: Profile) -> ProfileOutput {
     let mut call_graph_edges = Vec::new();
     let mut calls = Vec::new();
     let mut state_accesses = Vec::new();
+    let mut complexity_facts = Vec::new();
     let mut collection_index_lookups = Vec::new();
     let mut hash_record_blockers = Vec::new();
     let mut tlet_sites = Vec::new();
@@ -693,6 +698,7 @@ pub fn merge(outputs: Vec<ProfileOutput>, profile: Profile) -> ProfileOutput {
         call_graph_edges.extend(output.call_graph_edges);
         calls.extend(output.calls);
         state_accesses.extend(output.state_accesses);
+        complexity_facts.extend(output.complexity_facts);
         if nil_kill {
             collection_index_lookups.extend(output.collection_index_lookups);
             hash_record_blockers.extend(output.hash_record_blockers);
@@ -752,6 +758,7 @@ pub fn merge(outputs: Vec<ProfileOutput>, profile: Profile) -> ProfileOutput {
         call_graph_edges,
         calls,
         state_accesses,
+        complexity_facts,
         collection_index_lookups,
         hash_record_blockers,
         tlet_sites,

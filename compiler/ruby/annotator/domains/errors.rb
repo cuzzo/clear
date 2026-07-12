@@ -149,8 +149,9 @@ module Annotator
 
         require_relative 'helpers/with_match_check' unless defined?(WithMatchCheck)
         collapsed = Set.new
+        param_indices = sig.params.each_with_index.to_h { |param, index| [param.name.to_s, index] }
         sig.requires.each do |param_name, _families|
-          idx = sig.params.find_index { |p| p.name.to_s == param_name }
+          idx = param_indices[param_name.to_s]
           next unless idx
           arg = args[idx]
           next unless arg

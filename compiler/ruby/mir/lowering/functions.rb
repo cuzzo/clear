@@ -1803,8 +1803,9 @@ module MIRLoweringFunctions
 
   sig { params(mir_args: T::Array[MIR::Node], stdlib_facts: StdlibCallFacts).returns(T::Array[MIR::RegistryCallArg]) }
   def registry_call_args(mir_args, stdlib_facts)
+    facts_by_index = stdlib_facts.args.to_h { |fact| [fact.index, fact] }
     mir_args.each_with_index.map do |arg_mir, index|
-      arg_fact = stdlib_facts.args.find { |fact| fact.index == index }
+      arg_fact = facts_by_index[index]
       MIR::RegistryCallArg.new(expr: arg_mir, coerce_type: arg_fact&.coerce_type)
     end
   end

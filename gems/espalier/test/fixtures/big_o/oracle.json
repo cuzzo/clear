@@ -1,0 +1,49 @@
+{
+  "ruby_product.rb": {
+    "cartesian_product": "O(N^2)",
+    "fixed_matrix": "O(1)"
+  },
+  "hierarchical.rs": {
+    "walk_documents": "O(N)"
+  },
+  "coverage.go": {
+    "walkCoverage": "O(N)"
+  },
+  "fixed.zig": {
+    "fixedGrid": "O(1)"
+  },
+  "cursors.rb": {
+    "amortized_scan": "O(N)",
+    "independent_scan": "O(N^2)"
+  },
+  "recursion.rb": {
+    "fib": "O(2^N)",
+    "binary_search": "O(log N)",
+    "permute": "O(N!)",
+    "recurse_unknown": "unknown"
+  },
+  "mutual_recursion.rb": {
+    "mutual_a": "unknown",
+    "mutual_b": "unknown",
+    "call_mutual": "unknown"
+  },
+  "fixpoint.rb": {
+    "settle": "O(N^2)",
+    "settle_groups": "O(N^3)",
+    "settle_groups_with_object": "O(N^3)"
+  },
+  "normalized_domains.rb": {
+    "indexed_children": "O(N)",
+    "unknown_result_sizes": "O(N)",
+    "non_iterator_wrapper": "unknown",
+    "callback_result": "O(N)",
+    "repeated_sort": "O(N^2 log N)",
+    "linear_helper": "O(N)",
+    "repeated_helper": "O(N^2)",
+    "unknown_collection_call": "unknown",
+    "allocate_helper": "O(N)",
+    "call_allocate_helper": "O(N)",
+    "scan_partition": "O(N)",
+    "scan_partitions": "O(N)"
+  }
+}

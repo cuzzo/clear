@@ -19,7 +19,8 @@ macro_rules! eprintln {
 use super::effects::{effect_from_call_with_lexicon, EffectLexicon};
 
 use super::normalized_behavior::{
-    eliminable_guard_from_call, matching_paren_index, NormalizedCallParts, NormalizedCallProjection,
+    eliminable_guard_from_call, matching_paren_index, BlockCallSemantics, CardinalityCallSemantics,
+    CollectionAllocationSemantics, NormalizedCallParts, NormalizedCallProjection,
     NormalizedLanguageBehavior, NormalizedNilGuardFact, NormalizedSemanticEffect,
     NormalizedVisibilityEvent, SyntaxMetadata,
 };
@@ -52,6 +53,18 @@ const RUBY_CALLBACK_SET: &[&str] = &[
     "subscribe",
     "callback",
     "hook",
+];
+
+const RUBY_ITERATION_METHODS: &[&str] = &[
+    "each", "each_key", "each_value", "each_with_index", "each_with_object", "each_entry",
+    "each_index", "each_slice", "each_cons", "cycle", "map", "map!", "collect", "collect!",
+    "select", "reject", "filter", "filter_map", "flat_map", "group_by", "partition", "delete_if",
+    "keep_if", "sort_by", "reverse_each", "times", "upto", "downto", "step", "any?", "all?",
+    "none?", "one?", "count", "find", "find_index", "detect", "reduce", "inject", "sum", "loop",
+];
+
+const RUBY_ONCE_BLOCK_METHODS: &[&str] = &[
+    "tap", "then", "yield_self", "synchronize", "with_lock", "transaction", "atomic", "reentrant",
 ];
 
 const RUBY_CORE_CONSTS: &[&str] = &[
@@ -183,6 +196,61 @@ const RUBY_EFFECT_LEXICON: EffectLexicon = EffectLexicon {
 pub(crate) struct RubyNormalizedBehavior;
 
 impl NormalizedLanguageBehavior for RubyNormalizedBehavior {
+    fn collection_allocation_semantics(&self, message: &str) -> CollectionAllocationSemantics {
+        if [
+            "map", "collect", "select", "reject", "filter", "filter_map", "group_by",
+            "partition", "compact", "sort", "sort_by", "reverse", "to_a", "keys", "values",
+        ].contains(&message) {
+            CollectionAllocationSemantics::PreservesReceiver
+        } else if ["flat_map", "flatten"].contains(&message) {
+            CollectionAllocationSemantics::UnknownSize
+        } else {
+            CollectionAllocationSemantics::None
+        }
+    }
+
+    fn block_call_semantics(&self, message: &str) -> BlockCallSemantics {
+        if RUBY_ITERATION_METHODS.contains(&message) {
+            BlockCallSemantics::Iteration
+        } else if RUBY_ONCE_BLOCK_METHODS.contains(&message) {
+            BlockCallSemantics::Once
+        } else {
+            BlockCallSemantics::Unknown
+        }
+    }
+
+    fn cardinality_call_semantics(&self, message: &str) -> CardinalityCallSemantics {
+        if ["length", "size", "count"].contains(&message) {
+            CardinalityCallSemantics::MeasuresReceiver
+        } else if [
+            "map", "map!", "collect", "collect!", "select", "reject", "filter", "filter_map",
+            "flat_map", "compact", "flatten", "sort", "sort_by", "reverse", "to_a", "keys", "values",
+        ].contains(&message) {
+            CardinalityCallSemantics::PreservesReceiver
+        } else {
+            CardinalityCallSemantics::Unknown
+        }
+    }
+
+    fn empty_check_call(&self, message: &str) -> bool {
+        message == "empty?"
+    }
+
+    fn visited_membership_call(&self, message: &str) -> bool {
+        ["include?", "contains"].contains(&message)
+    }
+
+    fn visited_insert_call(&self, message: &str) -> bool {
+        ["add", "insert", "<<"].contains(&message)
+    }
+
+    fn empty_collection_constructor(&self, message: &str) -> bool {
+        message == "new"
+    }
+
+    fn collection_parameter_type(&self, type_name: &str) -> bool {
+        ["Array", "Hash", "Set", "Enumerable"].iter().any(|name| type_name.contains(name))
+    }
     fn supports_parameter_normalization(&self) -> bool {
         true
     }
@@ -1262,6 +1330,19 @@ mod tests {
     #[test]
     fn ruby_behavior_edge_cases() {
         let behavior = RubyNormalizedBehavior;
+
+        assert_eq!(
+            behavior.collection_allocation_semantics("map"),
+            CollectionAllocationSemantics::PreservesReceiver
+        );
+        assert_eq!(
+            behavior.collection_allocation_semantics("flatten"),
+            CollectionAllocationSemantics::UnknownSize
+        );
+        assert_eq!(
+            behavior.collection_allocation_semantics("each"),
+            CollectionAllocationSemantics::None
+        );
         assert_eq!(behavior.core_owner_names(), RUBY_CORE_CONSTS);
         assert_eq!(behavior.self_member_receiver("foo"), "self.foo");
 

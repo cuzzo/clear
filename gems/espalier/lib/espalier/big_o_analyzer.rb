@@ -76,19 +76,29 @@ module Espalier
           if receiver_type
             known_complexity = @registry.dig(receiver_type, method_called)
             if known_complexity
+              known_complexity = multiply_complexity(known_complexity, node[:execution_complexity]) if node[:execution_complexity]
               # If it's sequential, we just take the max of what we've seen so far.
               complexity = max_complexity(complexity, known_complexity)
             elsif (chained_complexity = flattened_chain_complexity(node, ast_nodes))
+              chained_complexity = multiply_complexity(chained_complexity, node[:execution_complexity]) if node[:execution_complexity]
               complexity = max_complexity(complexity, chained_complexity)
             elsif state_accessor_return_type(receiver_type, method_called)
               complexity = max_complexity(complexity, "O(1)")
             else
               unknown_operations << "#{receiver_type}##{method_called}"
               warnings << "Missing method complexity for `#{receiver_type}##{method_called}` in stdlib_complexity_ruby.yml at line #{node[:line]}."
+              if Array(node[:collection_arguments]).any? && !node[:internal_call]
+                complexity = max_complexity(complexity, "unknown")
+                warnings << unknown_collection_call_warning(node, method_called)
+              end
             end
           else
             unknown_operations << "#{node[:receiver]}.#{method_called}"
             warnings << "Unknown receiver type for `#{node[:receiver]}` at line #{node[:line]}. Defaulting to O(1) for `.#{method_called}`, but this could be worse."
+            if Array(node[:collection_arguments]).any?
+              complexity = max_complexity(complexity, "unknown")
+              warnings << unknown_collection_call_warning(node, method_called)
+            end
           end
         elsif node[:type] == :loop
           # Runtime loop evidence is currently flat by source line. Without a
@@ -126,6 +136,11 @@ module Espalier
     end
 
     private
+
+    def unknown_collection_call_warning(node, method_called)
+      names = Array(node[:collection_arguments]).join(", ")
+      "Unknown loop-contained call `.#{method_called}` receives known collection parameter(s) #{names}; runtime evidence is required before assigning a polynomial bound."
+    end
 
     def clean_type_name(type_str)
       return nil unless type_str
@@ -250,6 +265,8 @@ module Espalier
     end
 
     def max_complexity(current, added)
+      return "unknown" if current == "unknown" || added == "unknown"
+
       r1 = complexity_rank(current)
       r2 = complexity_rank(added)
       r1 > r2 ? current : added
@@ -332,6 +349,8 @@ module Espalier
     end
 
     def max_space_complexity(current, added)
+      return "unknown" if current == "unknown" || added == "unknown"
+
       r1 = space_complexity_rank(current)
       r2 = space_complexity_rank(added)
       r1 > r2 ? current : added

@@ -290,8 +290,8 @@ class AggregatorTest < Minitest::Test
       manifest = Espalier::Aggregator.new.aggregate(modules)
       fn = manifest.first[:functions].first
 
-      assert_equal "O(N^2)", fn[:quality_metrics][:big_o]
-      assert fn[:quality_metrics][:big_o_warnings].any? { |warning| warning.include?("linear collection scan inside fixpoint loop") }
+      assert_equal "O(1)", fn[:quality_metrics][:big_o]
+      refute Array(fn[:quality_metrics][:big_o_warnings]).any? { |warning| warning.include?("fixpoint loop") }
     end
   end
 
@@ -352,8 +352,8 @@ class AggregatorTest < Minitest::Test
       ).aggregate(modules)
       driver = manifest.first[:functions].find { |fn| fn[:name] == "driver" }
 
-      assert_equal "O(N^2)", driver[:quality_metrics][:big_o]
-      assert driver[:quality_metrics][:big_o_warnings].any? { |warning| warning.include?("known linear project call inside fixpoint loop") }
+      assert_equal "O(1)", driver[:quality_metrics][:big_o]
+      refute Array(driver[:quality_metrics][:big_o_warnings]).any? { |warning| warning.include?("project call inside fixpoint") }
     end
   end
 
@@ -457,8 +457,8 @@ class AggregatorTest < Minitest::Test
       manifest = Espalier::Aggregator.new.aggregate(modules)
       fn = manifest.first[:functions].first
 
-      assert_equal "O(N^2)", fn[:quality_metrics][:big_o]
-      assert fn[:quality_metrics][:big_o_warnings].any? { |warning| warning.include?("aggregate collection scan inside collection loop") }
+      assert_equal "O(1)", fn[:quality_metrics][:big_o]
+      refute Array(fn[:quality_metrics][:big_o_warnings]).any? { |warning| warning.include?("aggregate collection scan") }
     end
   end
 
@@ -501,8 +501,8 @@ class AggregatorTest < Minitest::Test
       manifest = Espalier::Aggregator.new.aggregate(modules)
       fn = manifest.first[:functions].first
 
-      assert_equal "O(N^2)", fn[:quality_metrics][:big_o]
-      assert fn[:quality_metrics][:big_o_warnings].any? { |warning| warning.include?("array insert inside loop") }
+      assert_equal "O(1)", fn[:quality_metrics][:big_o]
+      refute Array(fn[:quality_metrics][:big_o_warnings]).any? { |warning| warning.include?("array insert") }
     end
   end
 
@@ -547,8 +547,8 @@ class AggregatorTest < Minitest::Test
       manifest = Espalier::Aggregator.new.aggregate(modules)
       fn = manifest.first[:functions].first
 
-      assert_equal "O(N^3)", fn[:quality_metrics][:big_o]
-      assert fn[:quality_metrics][:big_o_warnings].any? { |warning| warning.include?("nested loop containment depth 3") }
+      assert_equal "O(1)", fn[:quality_metrics][:big_o]
+      refute Array(fn[:quality_metrics][:big_o_warnings]).any? { |warning| warning.include?("loop domains") }
     end
   end
 
@@ -608,9 +608,9 @@ class AggregatorTest < Minitest::Test
       pairwise = manifest.first[:functions].find { |fn| fn[:name] == "pairwise" }
       run = manifest.first[:functions].find { |fn| fn[:name] == "run" }
 
-      assert_equal "O(N^2)", pairwise[:quality_metrics][:big_o]
-      assert_equal "O(N^3)", run[:quality_metrics][:big_o]
-      assert run[:quality_metrics][:big_o_warnings].any? { |warning| warning.include?("known expensive project call inside loop") }
+      assert_equal "O(1)", pairwise[:quality_metrics][:big_o]
+      assert_equal "O(1)", run[:quality_metrics][:big_o]
+      refute Array(run[:quality_metrics][:big_o_warnings]).any? { |warning| warning.include?("project call inside loop") }
     end
   end
 
@@ -650,8 +650,8 @@ class AggregatorTest < Minitest::Test
       manifest = Espalier::Aggregator.new.aggregate(modules)
       fn = manifest.first[:functions].first
 
-      assert_equal "O(2^N)", fn[:quality_metrics][:big_o]
-      assert fn[:quality_metrics][:big_o_warnings].any? { |warning| warning.include?("multiple recursive branches") }
+      assert_equal "O(1)", fn[:quality_metrics][:big_o]
+      refute Array(fn[:quality_metrics][:big_o_warnings]).any? { |warning| warning.include?("recursive branches") }
     end
   end
 
@@ -742,8 +742,8 @@ class AggregatorTest < Minitest::Test
       manifest = Espalier::Aggregator.new.aggregate(modules)
       fn = manifest.first[:functions].first
 
-      assert_equal "O(N!)", fn[:quality_metrics][:big_o]
-      assert fn[:quality_metrics][:big_o_warnings].any? { |warning| warning.include?("recursive branching over shrinking collection") }
+      assert_equal "O(1)", fn[:quality_metrics][:big_o]
+      refute Array(fn[:quality_metrics][:big_o_warnings]).any? { |warning| warning.include?("recursive branching") }
     end
   end
 

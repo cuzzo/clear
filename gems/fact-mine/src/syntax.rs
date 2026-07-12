@@ -1,4 +1,5 @@
 pub(crate) mod c;
+pub(crate) mod complexity_facts;
 pub(crate) mod clone_similarity;
 pub(crate) mod complexity;
 pub(crate) mod cpp;

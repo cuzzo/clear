@@ -1,6 +1,6 @@
 use super::effects::{effect_from_call_with_lexicon, EffectLexicon};
 use super::normalized_behavior::{
-    eliminable_guard_from_call, nil_guard_from_predicates, NormalizedCallParts,
+    eliminable_guard_from_call, nil_guard_from_predicates, CardinalityCallSemantics, NormalizedCallParts,
     NormalizedCallProjection, NormalizedLanguageBehavior, NormalizedNilGuardFact,
     NormalizedSemanticEffect, NormalizedStateRead,
 };
@@ -65,6 +65,17 @@ const PYTHON_GUARD_MIDS: &[&str] = &["isNull", "is_null", "is_none", "is_some"];
 pub(crate) struct PythonNormalizedBehavior;
 
 impl NormalizedLanguageBehavior for PythonNormalizedBehavior {
+    fn cardinality_call_semantics(&self, message: &str) -> CardinalityCallSemantics {
+        if message == "len" {
+            CardinalityCallSemantics::MeasuresReceiver
+        } else {
+            CardinalityCallSemantics::Unknown
+        }
+    }
+
+    fn iteration_bound_argument(&self, message: &str, argument_count: usize) -> Option<usize> {
+        (message == "range" && argument_count > 0).then_some(if argument_count == 1 { 0 } else { 1 })
+    }
     fn self_member_receiver(&self, message: &str) -> String {
         format!("self.{message}")
     }

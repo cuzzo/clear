@@ -1,6 +1,7 @@
 # frozen_string_literal: true
 
 require "yaml"
+require "set"
 require_relative "big_o_analyzer"
 require_relative "structural_big_o"
 
@@ -28,9 +29,15 @@ module Espalier
         language: :ruby,
         nil_kill: @nil_kill_evidence
       )
-      method_complexities = structural_method_complexities(modules)
+      internal_calls = internal_calls_by_method(modules)
+      recursive_edges = recursive_internal_edges(internal_calls)
+      method_complexities, method_spaces = structural_method_complexities(modules)
       structural_big_o = Espalier::StructuralBigO.new(
-        method_complexities: method_complexities
+        facts_by_method: complexity_facts_by_method(modules),
+        method_complexities: method_complexities,
+        method_spaces: method_spaces,
+        internal_calls: internal_calls,
+        recursive_edges: recursive_edges
       )
 
       manifest = modules.map do |mod|
@@ -232,7 +239,15 @@ module Espalier
 
     def structural_method_complexities(modules)
       complexities = preliminary_method_complexities(modules)
-      structural_big_o = Espalier::StructuralBigO.new(method_complexities: complexities)
+      spaces = complexities.transform_values { |methods| methods.transform_values { "O(1)" } }
+      internal_calls = internal_calls_by_method(modules)
+      structural_big_o = Espalier::StructuralBigO.new(
+        facts_by_method: complexity_facts_by_method(modules),
+        method_complexities: complexities,
+        method_spaces: spaces,
+        internal_calls: internal_calls,
+        recursive_edges: recursive_internal_edges(internal_calls)
+      )
 
       cores = ENV.fetch("CORES", ENV.fetch("JOBS", "4")).to_i
 
@@ -241,6 +256,9 @@ module Espalier
         # Update method complexities on the cached structural_big_o
         structural_big_o.instance_variable_set(:@method_complexities, complexities.transform_values { |methods|
           methods.transform_values { |c| c }
+        })
+        structural_big_o.instance_variable_set(:@method_spaces, spaces.transform_values { |methods|
+          methods.transform_values { |space| space }
         })
 
         slices = modules.each_slice((modules.size.to_f / cores).ceil).to_a
@@ -261,8 +279,17 @@ module Espalier
                 nodes.concat(structural_big_o.hints_for(mod[:file], method, mod[:name]))
                 result = local_analyzer.analyze_method(key, nodes, local_types: local_types_for_signature(sig))
                 current = complexities[mod[:name]][method[:name].to_s] || "O(1)"
-                if complexity_rank(result[:lower_bound_complexity]) > complexity_rank(current)
-                  local_changes << [mod[:name], method[:name].to_s, result[:lower_bound_complexity]]
+                current_space = spaces[mod[:name]][method[:name].to_s] || "O(1)"
+                time_changed = (result[:lower_bound_complexity] == "unknown" && current != "unknown") ||
+                  complexity_rank(result[:lower_bound_complexity]) > complexity_rank(current)
+                space_changed = (result[:space_complexity] == "unknown" && current_space != "unknown") ||
+                  complexity_rank(result[:space_complexity]) > complexity_rank(current_space)
+                if time_changed || space_changed
+                  local_changes << [
+                    mod[:name], method[:name].to_s,
+                    time_changed ? result[:lower_bound_complexity] : current,
+                    space_changed ? result[:space_complexity] : current_space
+                  ]
                 end
               end
             end
@@ -271,15 +298,63 @@ module Espalier
         end
 
         results = threads.flat_map(&:join).flat_map(&:value)
-        results.each do |mod_name, method_name, complexity|
+        results.each do |mod_name, method_name, complexity, space|
           complexities[mod_name][method_name] = complexity
+          spaces[mod_name][method_name] = space
           changed = true
         end
 
         break unless changed
       end
 
-      complexities
+      [complexities, spaces]
+    end
+
+    def internal_calls_by_method(modules)
+      modules.each_with_object({}) do |mod, owners|
+        method_names = Array(mod[:methods]).map { |method| method[:name].to_s }.to_set
+        owners[mod[:name].to_s] = Array(mod[:methods]).each_with_object({}) do |method, callers|
+          callers[method[:name].to_s] = Array(method[:delegations]).filter_map do |delegation|
+            next unless delegation[:receiver].to_s == "self"
+
+            callee = delegation[:message].to_s
+            callee if method_names.include?(callee)
+          end.to_set
+        end
+      end
+    end
+
+    def recursive_internal_edges(internal_calls)
+      internal_calls.each_with_object({}) do |(owner, graph), recursive|
+        graph.each do |caller, callees|
+          callees.each do |callee|
+            recursive[[owner, caller, callee]] = true if reachable_method?(graph, callee, caller)
+          end
+        end
+      end
+    end
+
+    def reachable_method?(graph, start, target)
+      pending = [start]
+      visited = Set.new
+      until pending.empty?
+        method_name = pending.pop
+        return true if method_name == target
+        next unless visited.add?(method_name)
+
+        pending.concat(Array(graph[method_name]))
+      end
+      false
+    end
+
+    def complexity_facts_by_method(modules)
+      modules.each_with_object({}) do |mod, index|
+        Array(mod[:methods]).each do |method|
+          facts = Array(method[:complexity_facts])
+          index[method[:id].to_s] = facts unless method[:id].to_s.empty?
+          index[[mod[:name].to_s, method[:name].to_s]] = facts
+        end
+      end
     end
 
     def complexity_rank(complexity)
@@ -299,13 +374,27 @@ module Espalier
     end
 
     def big_o_nodes_for(mod, method)
+      call_contexts = Array(method[:complexity_facts]).flat_map do |fact|
+        Array(fact["call_contexts"]).map do |context|
+          context.merge("collection_parameters" => Array(fact["collection_parameters"]))
+        end
+      end
+        .each_with_object({}) do |row, index|
+          key = [row["message"].to_s, row["line"].to_i]
+          index[key] = row if !index[key] || row["power"].to_i > index[key]["power"].to_i
+        end
       nodes = Array(method[:delegations]).map do |delegation|
+        context = call_contexts[[delegation[:message].to_s, (delegation[:line] || method[:line] || 0).to_i]]
         {
           type: :call,
           receiver: delegation[:receiver],
           method: delegation[:message],
-          line: delegation[:line] || method[:line] || 0
-        }
+          line: delegation[:line] || method[:line] || 0,
+          execution_complexity: context && context["execution_multiplicity"],
+          collection_arguments: context && context["power"].to_i.positive? &&
+            (Array(context["parameter_arguments"]) & Array(context["collection_parameters"])),
+          internal_call: delegation[:receiver].to_s == "self" && Array(mod[:methods]).any? { |candidate| candidate[:name].to_s == delegation[:message].to_s }
+        }.compact
       end
 
       meth_line, end_line, end_inclusive = method_line_bounds(mod[:methods], method)

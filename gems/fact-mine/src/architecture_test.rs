@@ -261,6 +261,7 @@ fn shared_ast_normalizer_does_not_own_concrete_parser_tokens() {
 fn syntax_directory_does_not_gain_unreviewed_helper_files() {
     let syntax_dir = crate_src().join("syntax");
     let expected = [
+        "complexity_facts.rs",
         "clone_similarity.rs",
         "complexity.rs",
         "effects.rs",
@@ -315,6 +316,31 @@ fn syntax_directory_does_not_gain_unreviewed_helper_files() {
         offenders.is_empty(),
         "Syntax helper files are an architecture boundary; update this invariant deliberately:\n{}",
         offenders.join("\n")
+    );
+}
+
+#[test]
+fn complexity_fact_extractor_has_no_language_iterator_lexicon() {
+    let source = fs::read_to_string(crate_src().join("syntax/complexity_facts.rs"))
+        .expect("read complexity facts");
+    let production = source.split("#[cfg(test)]").next().unwrap_or(&source);
+    let forbidden = [
+        "RUBY_ITERATION_METHODS",
+        "\"each\"",
+        "\"each_with_object\"",
+        "\"map\"",
+        "\"range\"",
+        "\"times\"",
+    ];
+    let offenders = forbidden
+        .iter()
+        .filter(|token| production.contains(**token))
+        .copied()
+        .collect::<Vec<_>>();
+    assert!(
+        offenders.is_empty(),
+        "language iterator/cardinality identities belong in language adapters: {}",
+        offenders.join(", ")
     );
 }
 

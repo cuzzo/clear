@@ -47,6 +47,11 @@ module Espalier
       Array(evidence.dig("facts", "state_accesses")).each do |access|
         accesses_by_function[access["function_id"]] << access
       end
+      complexity_by_method = Hash.new { |h, k| h[k] = [] }
+      Array(evidence.dig("facts", "complexity_facts")).each do |fact|
+        key = [fact["path"], fact["owner"], fact["function"], fact["line"].to_i]
+        complexity_by_method[key] << fact
+      end
       Array(evidence["methods"]).each do |m|
         accesses = accesses_by_function[m["id"]]
         meth = {
@@ -60,6 +65,7 @@ module Espalier
           span: m["span"],
           file: m["path"],
           language: m["language"]&.to_sym,
+          complexity_facts: complexity_by_method[[m["path"], m["owner"], m["name"], m["line"].to_i]],
           effects: {
             reads: accesses.select { |row| row["kind"] == "reads" }.map { |row| row["field"] }.to_set,
             writes: accesses.select { |row| row["kind"] == "writes" }.map { |row| row["field"] }.to_set
@@ -281,6 +287,7 @@ module Espalier
       hidden_enum_observations = Array(facts["hidden_enum_observations"])
       dispatcher_inferences = Array(facts["dispatcher_inferences"])
       hash_record_member_calls = Array(facts["hash_record_member_calls"])
+      complexity_facts = Array(facts["complexity_facts"])
 
       # Collect languages of owners to know if they need @ prepended for fields
       owner_languages = {}
@@ -353,6 +360,7 @@ module Espalier
         "facts" => {
           "calls" => calls.sort_by { |call| [call["path"].to_s, call["line"].to_i, call["id"].to_s] },
           "state_accesses" => state_accesses.sort_by { |access| [access["path"].to_s, access["line"].to_i, access["id"].to_s] },
+          "complexity_facts" => complexity_facts.sort_by { |fact| [fact["path"].to_s, fact["line"].to_i, fact["function"].to_s] },
           "call_graph_edges" => call_graph_edges.sort_by { |edge| [edge["source"].to_s, edge["target"].to_s, edge["kind"].to_s] },
           "state_type_edges" => state_type_edges.sort_by { |edge| [edge["source"].to_s, edge["target"].to_s, edge["label"].to_s] },
           "state_types" => Hash[state_types.sort],
