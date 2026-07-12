@@ -107,6 +107,13 @@ module Annotator
             error!(node, :IS_OK_REQUIRES_FALLIBLE, got: operand_type)
           end
           stamp_type!(node, :Bool)
+        when :IS_READY
+          operand_type = node.right.full_type!(context: "IS_READY operand")
+          ti = Type.new(operand_type)
+          unless ti.single_future? || ti.shared_promise?
+            error!(node, :IS_READY_REQUIRES_FUTURE, got: operand_type)
+          end
+          stamp_type!(node, :Bool)
         else
           stamp_type!(node, node.right.full_type!(context: "unary right"))
         end

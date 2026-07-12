@@ -94,6 +94,22 @@ RSpec.describe "EXISTS optional-binding migration" do
     expect(bind.bindings.map { |item| item.unwrapped_type.resolved }).to eq([:"?Int64", :Int64])
   end
 
+  it "parses IS_READY as a Bool poll and rejects payload binding" do
+    ast = parse("FN main(future: ~Int64) RETURNS Void -> ready = future IS_READY; _ = NEXT future; END")
+    SemanticAnnotator.new.annotate!(ast)
+    expect(ast.statements.first.body.first.value.resolved_type).to eq(:Bool)
+
+    expect {
+      parse("IF future IS_READY AS value THEN PASS; END")
+    }.to raise_error(ParserError, /IS_READY.*cannot bind/)
+  end
+
+  it "rejects IS_READY on streams" do
+    ast = parse("FN main(stream: ~Int64[2]) RETURNS Bool -> RETURN stream IS_READY; END")
+    expect { SemanticAnnotator.new.annotate!(ast) }
+      .to raise_error(CompilerError, /IS_READY.*requires a single future/)
+  end
+
   it "rejects legacy AS bindings and offers an exact automatic insertion" do
     source = "IF maybe AS value THEN PASS; END"
     expect { parse(source) }.to raise_error(ParserError, /must state its test/)

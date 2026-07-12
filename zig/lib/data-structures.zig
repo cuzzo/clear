@@ -618,6 +618,10 @@ pub fn bind(comptime deps: type) type {
                 return val;
             }
 
+            pub fn isReady(self: Self) bool {
+                return self.inner.wg.isReady();
+            }
+
             /// FSM resume path for NEXT. The FSM dispatch has already
             /// registered/yielded or observed count==0, so it must not call
             /// wait() on the scheduler thread. It only consumes the settled
@@ -702,6 +706,10 @@ pub fn bind(comptime deps: type) type {
                     self.alloc.destroy(self.inner);
                 }
                 return val;
+            }
+
+            pub fn isReady(self: *const Self) bool {
+                return self.resolved != null or self.inner.wg.isReady();
             }
 
             /// Clone this handle, incrementing the shared ref_count.

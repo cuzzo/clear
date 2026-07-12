@@ -42,6 +42,23 @@ const PromiseTestState = struct {
     result: f64 = 0.0,
 };
 
+test "Promise readiness poll is non-consuming" {
+    const allocator = std.testing.allocator;
+    var global_ctx = ebr.EbrContext{};
+    defer global_ctx.deinit(allocator);
+    var stack_pool = fm.StackPool.init(allocator);
+    defer stack_pool.deinit();
+    var sched = try fp.Scheduler.init(allocator, &global_ctx, &stack_pool);
+    defer sched.deinit();
+
+    const promise = try CheatLib.Promise(i64).spawn(allocator, &sched);
+    try std.testing.expect(!promise.isReady());
+    promise.inner.result = 17;
+    promise.inner.wg.done();
+    try std.testing.expect(promise.isReady());
+    try std.testing.expectEqual(@as(i64, 17), try promise.next());
+}
+
 fn promiseProducer(rt: *Runtime, raw_args: ?*anyopaque) anyerror!void {
     _ = rt;
     const inner = @as(*CheatLib.Promise(f64).Inner, @ptrCast(@alignCast(raw_args.?)));

@@ -2611,6 +2611,12 @@ pub const WaitGroup = struct {
         _ = self.counter.fetchAdd(count, .seq_cst);
     }
 
+    /// Non-blocking settlement poll. Acquire pairs with done()'s decrement so
+    /// observing ready also observes the producer's result write.
+    pub fn isReady(self: *const WaitGroup) bool {
+        return self.counter.load(.acquire) == 0;
+    }
+
     pub fn done(self: *WaitGroup) void {
         // Take the lock BEFORE the decrement so wait() cannot observe
         // counter==0 and free the WaitGroup while we're still inside this

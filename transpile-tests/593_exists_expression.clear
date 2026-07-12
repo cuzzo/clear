@@ -1,4 +1,8 @@
 FN main() RETURNS Void ->
+    future: ~Int64 = BG { 42_i64; };
+    ready = future IS_READY;
+    ASSERT ready OR !(ready);
+    ASSERT (NEXT future) == 42_i64;
     present: ?Int64 = 7_i64;
     absent: ?Int64 = NIL;
     ASSERT present EXISTS;

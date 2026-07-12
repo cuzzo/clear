@@ -162,6 +162,7 @@ class MIREmitter
     when MIR::IndexGet         then emit_index_get(node)
     when MIR::BinOp            then emit_bin_op(node)
     when MIR::FallibleOk       then "if (#{emit(node.expr)}) |_| true else |_| false"
+    when MIR::FutureReady      then "#{emit(node.expr)}.isReady()"
     when MIR::UnaryOp          then emit_unary_op(node)
     when MIR::Lit              then node.value
     when MIR::SymbolLit        then symbol_literal_name(node.value.to_s)

@@ -779,6 +779,16 @@ module DiagnosticRegistry
       summary:  "Postfix `IS_OK` tests whether `!T` succeeded.",
       fix_hint: "Remove `IS_OK` when the value is not fallible, or correct the expression's type to `!T`.",
     },
+    IS_READY_CANNOT_BIND: {
+      severity: :error, category: :syntax,
+      template: "`IS_READY` only polls settlement and cannot bind a payload. Use `IF future IS_READY THEN ...` and consume the outcome with `NEXT`.",
+      summary:  "Readiness does not imply that a future succeeded, so `IS_READY AS` is invalid.",
+    },
+    IS_READY_REQUIRES_FUTURE: {
+      severity: :error, category: :type,
+      template: "`IS_READY` requires a single future, got '%{got}'. Streams and promise lists have no single settled state.",
+      summary:  "Postfix `IS_READY` polls a single future without consuming it.",
+    },
     INSERT_EXISTS_BEFORE_AS: {
       severity: :hint, category: :syntax,
       template: "Insert `EXISTS` before `AS`.",

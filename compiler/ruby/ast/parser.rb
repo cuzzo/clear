@@ -288,6 +288,7 @@ class ClearParser
     rule(:CHAR, '?', action: :parse_optional_unwrap_suffix),
     rule(:KEYWORD, 'EXISTS', action: :parse_exists_suffix),
     rule(:KEYWORD, 'IS_OK', action: :parse_is_ok_suffix),
+    rule(:KEYWORD, 'IS_READY', action: :parse_is_ready_suffix),
     rule(:VAR_ID, '@multiowned', action: :parse_capability_wrap_suffix),
     rule(:VAR_ID, '@shared', action: :parse_capability_wrap_suffix),
     rule(:VAR_ID, '@node', action: :parse_capability_wrap_suffix),
@@ -562,6 +563,7 @@ class ClearParser
     when :parse_optional_unwrap_suffix then parse_optional_unwrap_suffix(lhs)
     when :parse_exists_suffix then parse_exists_suffix(lhs)
     when :parse_is_ok_suffix then parse_is_ok_suffix(lhs)
+    when :parse_is_ready_suffix then parse_is_ready_suffix(lhs)
     when :parse_capability_wrap_suffix then parse_capability_wrap_suffix(lhs)
     when :parse_inline_union_variant_suffix then parse_inline_union_variant_suffix(lhs)
     else
@@ -586,6 +588,15 @@ class ClearParser
 
     token = consume(:KEYWORD, 'IS_OK')
     AST::UnaryOp.new(token, :IS_OK, lhs)
+  end
+
+  sig { params(lhs: AST::Node).returns(SuffixResult) }
+  def parse_is_ready_suffix(lhs)
+    if peek.type == :KEYWORD && peek.value == 'AS'
+      error!(current, :IS_READY_CANNOT_BIND)
+    end
+    token = consume(:KEYWORD, 'IS_READY')
+    AST::UnaryOp.new(token, :IS_READY, lhs)
   end
 
   sig { params(lhs: AST::Node).returns(AST::Node) }
