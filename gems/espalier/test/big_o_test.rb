@@ -502,4 +502,125 @@ class BigOTest < Minitest::Test
     nested_hint = hints.find { |h| h[:complexity] == "O(N^2)" }
     assert_nil nested_hint
   end
+
+  def test_exhaustive_big_o_coverage
+    analyzer = Espalier::BigOAnalyzer.new
+
+    # 1. Test clean_type_name
+    assert_nil analyzer.send(:clean_type_name, nil)
+    assert_equal "User", analyzer.send(:clean_type_name, "T.nilable(User)")
+    assert_equal "User", analyzer.send(:clean_type_name, "T.any(NilClass, User)")
+    assert_equal "User", analyzer.send(:clean_type_name, "T.any(User, nil)")
+    assert_equal "User", analyzer.send(:clean_type_name, "T.any(nil, User)")
+    assert_equal "Array", analyzer.send(:clean_type_name, "T::Array[User]")
+    assert_equal "Hash", analyzer.send(:clean_type_name, "T.Hash[String, Integer]")
+    assert_equal "Set", analyzer.send(:clean_type_name, "T.Set[Symbol]")
+    assert_equal "Enumerable", analyzer.send(:clean_type_name, "T.Enumerable[Float]")
+    assert_equal "User", analyzer.send(:clean_type_name, "User")
+    assert_equal "Array", analyzer.send(:clean_type_name, "T.nilable(T::Array[User])")
+
+    # 2. Test complexity_rank
+    assert_equal 1, analyzer.send(:complexity_rank, nil)
+    assert_equal 1, analyzer.send(:complexity_rank, "O(1)")
+    assert_equal 2, analyzer.send(:complexity_rank, "O(log N)")
+    assert_equal 10, analyzer.send(:complexity_rank, "O(N)")
+    assert_equal 11, analyzer.send(:complexity_rank, "O(N log N)")
+    assert_equal 14, analyzer.send(:complexity_rank, "O(N * M)")
+    assert_equal 14, analyzer.send(:complexity_rank, "O(N^2)")
+    assert_equal 15, analyzer.send(:complexity_rank, "O(N^2 log N)")
+    assert_equal 18, analyzer.send(:complexity_rank, "O(N^4)")
+    assert_equal 100, analyzer.send(:complexity_rank, "O(2^N)")
+    assert_equal 200, analyzer.send(:complexity_rank, "O(N!)")
+    assert_equal 1, analyzer.send(:complexity_rank, "O(unknown)")
+
+    # 3. Test space_complexity_rank
+    assert_equal 10, analyzer.send(:space_complexity_rank, "O(N)")
+    assert_equal 5, analyzer.send(:space_complexity_rank, "O(log N)")
+    assert_equal 1, analyzer.send(:space_complexity_rank, "O(1)")
+    assert_equal 1, analyzer.send(:space_complexity_rank, "O(unknown)")
+
+    # 4. Test multiply_complexity edge cases
+    assert_equal "O(N!)", analyzer.send(:multiply_complexity, "O(N!)", "O(1)")
+    assert_equal "O(N!)", analyzer.send(:multiply_complexity, "O(1)", "O(N!)")
+    assert_equal "O(2^N)", analyzer.send(:multiply_complexity, "O(2^N)", "O(1)")
+    assert_equal "O(2^N)", analyzer.send(:multiply_complexity, "O(1)", "O(2^N)")
+    assert_equal "O(log N)", analyzer.send(:multiply_complexity, "O(log N)", "O(log N)")
+    assert_equal "O(N^5 log N)", analyzer.send(:multiply_complexity, "O(N^2 log N)", "O(N^3 log N)")
+    assert_equal "O(N^2)", analyzer.send(:multiply_complexity, "O(N)", "O(N)")
+    assert_equal "O(N^3)", analyzer.send(:multiply_complexity, "O(N^2)", "O(N)")
+    assert_equal "O(1)", analyzer.send(:multiply_complexity, "O(1)", "O(1)")
+
+    # 5. Test resolve_type dotted chains & accessor types
+    nil_kill = Object.new
+    def nil_kill.method_signatures
+      { "User#address" => "def address() -> Address" }
+    end
+    def nil_kill.state_types
+      { "Address" => { "@city" => "City" } }
+    end
+    def nil_kill.respond_to?(method_name)
+      method_name == :state_types || super
+    end
+
+    analyzer_resolve = Espalier::BigOAnalyzer.new(
+      class_name: "User",
+      ivar_types: { "@self" => "User" },
+      nil_kill: nil_kill
+    )
+    assert_equal "Address", analyzer_resolve.send(:resolve_type, "self.address", 10)
+    assert_equal "City", analyzer_resolve.send(:resolve_type, "self.address.city", 10)
+
+    # 6. Test structural loop ranges and block finishes
+    source_cache = {
+      "python_case.py" => [
+        "for i in range(10):\n",
+        "  pass\n",
+        "print('done')\n"
+      ],
+      "brace_case.rb" => [
+        "items.each { |x|\n",
+        "  puts x\n",
+        "}\n"
+      ],
+      "multiline_comment.rs" => [
+        "fn run() {\n",
+        "  /* block\n",
+        "     comment */\n",
+        "  for i in 0..10 {\n",
+        "    // line comment\n",
+        "    let x = \"string { brace }\";\n",
+        "  }\n",
+        "}\n"
+      ]
+    }
+    s = Espalier::StructuralBigO.new(source_cache: source_cache)
+    
+    # Python block finish
+    hints_py = s.hints_for("python_case.py", { name: "run", line: 1, span: [1, 0, 3, 0] }, "PythonCase")
+    refute_nil hints_py
+
+    # Brace block finish
+    hints_brace = s.hints_for("brace_case.rb", { name: "run", line: 1, span: [1, 0, 3, 0] }, "BraceCase")
+    refute_nil hints_brace
+
+    # Multiline comment & string literal brace matching
+    hints_comment = s.hints_for("multiline_comment.rs", { name: "run", line: 1, span: [1, 0, 8, 0] }, "MultilineComment")
+    # Should only find 1 loop at depth 1, no nested loops inside comments/strings
+    assert_equal 0, hints_comment.select { |h| h[:complexity] == "O(N^2)" }.size
+
+    # Single-statement loops in C-style languages
+    c_single_loops = {
+      "single_loop.zig" => [
+        "fn test() void {\n",
+        "  while (cond)\n",
+        "    std.Thread.yield() catch {};\n",
+        "  for (0..5) |i| self.run(i);\n",
+        "}\n"
+      ]
+    }
+    s_single = Espalier::StructuralBigO.new(source_cache: c_single_loops)
+    hints_single = s_single.hints_for("single_loop.zig", { name: "test", line: 1, span: [1, 0, 5, 0] }, "SingleLoop")
+    # Neither loop is nested, so no O(N^2) hints should be produced (depth of both is 1)
+    assert_equal 0, hints_single.select { |h| h[:complexity] == "O(N^2)" }.size
+  end
 end

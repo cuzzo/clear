@@ -1,6 +1,4 @@
 -- query-id: storage.init_schema.v1
-PRAGMA foreign_keys = ON;
-            PRAGMA synchronous = NORMAL;
 
             CREATE TABLE IF NOT EXISTS logical_units (
               id TEXT PRIMARY KEY,

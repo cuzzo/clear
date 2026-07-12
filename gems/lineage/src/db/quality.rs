@@ -1,5 +1,5 @@
 use crate::model::{QualityEvent, QualityMetric};
-use crate::storage::Storage;
+use crate::storage::{Storage, CoverageLineBulk};
 use anyhow::{Context, Result};
 use serde_json::{json, Value};
 
@@ -126,6 +126,7 @@ fn ingest_records(
     stats: &mut CoverageIngestStats,
     options: &CoverageIngestOptions,
 ) -> Result<()> {
+    let mut bulk_lines = Vec::new();
     for record in records {
         let Some(path) = storage.resolve_current_path(&record.path)? else {
             stats.skipped_files += 1;
@@ -172,19 +173,19 @@ fn ingest_records(
             )?;
         }
         for hit in &record.line_hits {
-            stats.line_events += usize::from(storage.record_coverage_line_with_details(
-                commit_hash,
+            bulk_lines.push(CoverageLineBulk {
+                commit_hash: commit_hash.to_string(),
                 timestamp,
-                &path,
-                hit.line,
-                hit.hits,
-                hit.is_partial,
-                hit.coverage_percent,
-                &options.line_source,
-            )?);
+                path: path.clone(),
+                line: hit.line,
+                hits: hit.hits,
+                is_partial: hit.is_partial,
+                coverage_percent: hit.coverage_percent,
+                source: options.line_source.clone(),
+            });
         }
     }
-
+    stats.line_events += storage.record_coverage_lines_bulk(&bulk_lines)?;
     Ok(())
 }
 

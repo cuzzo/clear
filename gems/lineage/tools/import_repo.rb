@@ -9,6 +9,7 @@ require "optparse"
 require "digest"
 require "shellwords"
 require "set"
+require "etc"
 
 TOOL_ROOT = File.expand_path("../../..", __dir__)
 LINEAGE_MANIFEST = File.join(TOOL_ROOT, "gems/lineage/Cargo.toml")
@@ -388,11 +389,19 @@ FileUtils.mkdir_p(out_dir)
 FileUtils.rm_f(db) if options[:fresh]
 
 if options[:build_tools]
-  run_command("build-lineage", ["cargo", "build", "--release", "--manifest-path", LINEAGE_MANIFEST], chdir: TOOL_ROOT, log_dir: log_dir)
-  if options[:analyzers]
-    run_command("build-decomplex", ["cargo", "build", "--release", "--manifest-path", DECOMPLEX_MANIFEST], chdir: TOOL_ROOT, log_dir: log_dir)
-    run_command("build-fact-mine", ["cargo", "build", "--release", "--manifest-path", FACT_MINE_MANIFEST], chdir: TOOL_ROOT, log_dir: log_dir, optional: true)
+  threads = []
+  threads << Thread.new do
+    run_command("build-lineage", ["cargo", "build", "--release", "--manifest-path", LINEAGE_MANIFEST], chdir: TOOL_ROOT, log_dir: log_dir)
   end
+  if options[:analyzers]
+    threads << Thread.new do
+      run_command("build-decomplex", ["cargo", "build", "--release", "--manifest-path", DECOMPLEX_MANIFEST], chdir: TOOL_ROOT, log_dir: log_dir)
+    end
+    threads << Thread.new do
+      run_command("build-fact-mine", ["cargo", "build", "--release", "--manifest-path", FACT_MINE_MANIFEST], chdir: TOOL_ROOT, log_dir: log_dir, optional: true)
+    end
+  end
+  threads.each(&:join)
 end
 
 commit = git_output(repo, "rev-parse", "HEAD").strip
@@ -404,7 +413,7 @@ analyzer_coverage_paths = []
 if options[:coverage]
   suffix_index = tracked_suffix_index(repo)
   discovered = discover_coverage(repo, options[:coverage_inputs])
-  discovered.each do |path|
+  inputs_and_metadata = discovered.map do |path|
     format = coverage_format(path)
     next unless format
 
@@ -412,18 +421,28 @@ if options[:coverage]
     rel = repo_relative(path, repo)
     type = coverage_kind(path)
     test_id = "#{type}:#{rel}"
-    cmd = [
-      lineage_bin, "ingest-coverage",
-      "--db", db,
-      "--repo", repo,
-      "--input", input,
-      "--format", format,
-      "--commit", commit,
-      "--test-type", type,
-      "--test-id", test_id,
-    ]
-    cmd << "--replace" if options[:replace]
-    run_command("coverage-#{rel}", cmd, chdir: repo, log_dir: log_dir, optional: true)
+    [path, format, input, rel, type, test_id]
+  end.compact
+
+  threads = inputs_and_metadata.map do |path, format, input, rel, type, test_id|
+    Thread.new do
+      cmd = [
+        lineage_bin, "ingest-coverage",
+        "--db", db,
+        "--repo", repo,
+        "--input", input,
+        "--format", format,
+        "--commit", commit,
+        "--test-type", type,
+        "--test-id", test_id,
+      ]
+      cmd << "--replace" if options[:replace]
+      run_command("coverage-#{rel}", cmd, chdir: repo, log_dir: log_dir, optional: true)
+    end
+  end
+  threads.each(&:join)
+
+  inputs_and_metadata.each do |path, format, input, rel, type, test_id|
     analyzer_coverage_paths << path if analyzer_coverage_compatible?(path, format)
   end
 end
@@ -438,50 +457,66 @@ if options[:hazards]
     cpp: "cpp",
     csharp: "csharp",
   }
+  threads = []
   provider_by_lang.each do |lang, provider|
     next unless langs.include?(lang)
 
-    cmd = [lineage_bin, "ingest-hazards", "--db", db, "--repo", repo, "--provider", provider, "--commit", commit]
-    run_command("hazards-#{provider}", cmd, chdir: repo, log_dir: log_dir, optional: true)
+    threads << Thread.new do
+      cmd = [lineage_bin, "ingest-hazards", "--db", db, "--repo", repo, "--provider", provider, "--commit", commit]
+      run_command("hazards-#{provider}", cmd, chdir: repo, log_dir: log_dir, optional: true)
+    end
+  end
+  threads.each(&:join)
+end
+
+sarif_threads = []
+
+if options[:analyzers]
+  sarif_threads << Thread.new do
+    first_party_dir = File.join(sarif_dir, "first-party")
+    cmd = [
+      "ruby", File.join(TOOL_ROOT, "tools/generate_generalized_gem_sarif.rb"),
+      "--repo", repo,
+      "--out-dir", first_party_dir,
+      "--top", options[:top].to_s,
+      "--decomplex-binary", decomplex_bin,
+    ]
+    cmd += ["--exclude", "transpile-tests/**", "--exclude", "stdlib/**", "--exclude", "benchmarks/**"]
+    cmd += options[:exclude].flat_map { |pattern| ["--exclude", pattern] }
+    cmd += ["--coverage", analyzer_coverage_paths.join(File::PATH_SEPARATOR)] unless analyzer_coverage_paths.empty?
+    ENV["FACT_MINE_RUST_BINARY"] = fact_mine_bin
+    ENV["CORES"] ||= Etc.nprocessors.to_s
+    ENV["JOBS"] ||= Etc.nprocessors.to_s
+    run_command("first-party-sarif", cmd, chdir: TOOL_ROOT, log_dir: log_dir, optional: true)
+    ingest = [lineage_bin, "ingest-sarif", "--db", db, "--repo", repo, "--input", first_party_dir, "--source", "first-party", "--commit", commit]
+    ingest << "--replace" if options[:replace]
+    run_command("ingest-first-party-sarif", ingest, chdir: repo, log_dir: log_dir, optional: true)
   end
 end
 
-if options[:analyzers]
-  first_party_dir = File.join(sarif_dir, "first-party")
-  cmd = [
-    "ruby", File.join(TOOL_ROOT, "tools/generate_generalized_gem_sarif.rb"),
-    "--repo", repo,
-    "--out-dir", first_party_dir,
-    "--top", options[:top].to_s,
-    "--decomplex-binary", decomplex_bin,
-  ]
-  cmd += ["--exclude", "transpile-tests/**", "--exclude", "stdlib/**", "--exclude", "benchmarks/**"]
-  cmd += options[:exclude].flat_map { |pattern| ["--exclude", pattern] }
-  cmd += ["--coverage", analyzer_coverage_paths.join(File::PATH_SEPARATOR)] unless analyzer_coverage_paths.empty?
-  ENV["FACT_MINE_RUST_BINARY"] = fact_mine_bin
-  run_command("first-party-sarif", cmd, chdir: TOOL_ROOT, log_dir: log_dir, optional: true)
-  ingest = [lineage_bin, "ingest-sarif", "--db", db, "--repo", repo, "--input", first_party_dir, "--source", "first-party", "--commit", commit]
-  ingest << "--replace" if options[:replace]
-  run_command("ingest-first-party-sarif", ingest, chdir: repo, log_dir: log_dir, optional: true)
-end
-
 if options[:lints]
-  lint_dir = File.join(sarif_dir, "lint")
-  cmd = ["ruby", File.join(TOOL_ROOT, "tools/generate_lint_sarif.rb"), "--repo", repo, "--out-dir", lint_dir]
-  run_command("lint-sarif", cmd, chdir: TOOL_ROOT, log_dir: log_dir, optional: true)
-  ingest = [lineage_bin, "ingest-sarif", "--db", db, "--repo", repo, "--input", lint_dir, "--source", "lint", "--commit", commit]
-  ingest << "--replace" if options[:replace]
-  run_command("ingest-lint-sarif", ingest, chdir: repo, log_dir: log_dir, optional: true)
+  sarif_threads << Thread.new do
+    lint_dir = File.join(sarif_dir, "lint")
+    cmd = ["ruby", File.join(TOOL_ROOT, "tools/generate_lint_sarif.rb"), "--repo", repo, "--out-dir", lint_dir]
+    run_command("lint-sarif", cmd, chdir: TOOL_ROOT, log_dir: log_dir, optional: true)
+    ingest = [lineage_bin, "ingest-sarif", "--db", db, "--repo", repo, "--input", lint_dir, "--source", "lint", "--commit", commit]
+    ingest << "--replace" if options[:replace]
+    run_command("ingest-lint-sarif", ingest, chdir: repo, log_dir: log_dir, optional: true)
+  end
 end
 
 options[:sarif_inputs].each do |input|
   input = File.expand_path(input, repo)
   next unless File.exist?(input)
 
-  ingest = [lineage_bin, "ingest-sarif", "--db", db, "--repo", repo, "--input", input, "--source", "external", "--commit", commit]
-  ingest << "--replace" if options[:replace]
-  run_command("ingest-extra-sarif-#{File.basename(input)}", ingest, chdir: repo, log_dir: log_dir, optional: true)
+  sarif_threads << Thread.new do
+    ingest = [lineage_bin, "ingest-sarif", "--db", db, "--repo", repo, "--input", input, "--source", "external", "--commit", commit]
+    ingest << "--replace" if options[:replace]
+    run_command("ingest-extra-sarif-#{File.basename(input)}", ingest, chdir: repo, log_dir: log_dir, optional: true)
+  end
 end
+
+sarif_threads.each(&:join)
 
 run_command("refresh-ui", [lineage_bin, "refresh-ui", "--db", db], chdir: repo, log_dir: log_dir)
 

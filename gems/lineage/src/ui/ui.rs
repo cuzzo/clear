@@ -1240,7 +1240,7 @@ fn line_coverage_by_file(
 }
 
 pub fn dashboard_summary(storage: &Storage) -> Result<UiDashboard> {
-    dashboard_summary_for_directory_with_scope_and_repo(storage, "", &CoverageScope::all(), None)
+    dashboard_summary_for_directory_with_scope_and_repo(storage, "", &CoverageScope::all(), None, 12)
 }
 
 pub fn dashboard_summary_for_directory(storage: &Storage, directory: &str) -> Result<UiDashboard> {
@@ -1249,6 +1249,7 @@ pub fn dashboard_summary_for_directory(storage: &Storage, directory: &str) -> Re
         directory,
         &CoverageScope::all(),
         None,
+        12,
     )
 }
 
@@ -1257,7 +1258,7 @@ pub fn dashboard_summary_for_directory_with_scope(
     directory: &str,
     scope: &CoverageScope,
 ) -> Result<UiDashboard> {
-    dashboard_summary_for_directory_with_scope_and_repo(storage, directory, scope, None)
+    dashboard_summary_for_directory_with_scope_and_repo(storage, directory, scope, None, 200)
 }
 
 fn dashboard_summary_for_directory_with_scope_and_repo(
@@ -1265,6 +1266,7 @@ fn dashboard_summary_for_directory_with_scope_and_repo(
     directory: &str,
     scope: &CoverageScope,
     repo: Option<&Path>,
+    hotspots_limit: usize,
 ) -> Result<UiDashboard> {
     let total_start = Instant::now();
     let directory = normalize_directory(directory);
@@ -1313,7 +1315,7 @@ fn dashboard_summary_for_directory_with_scope_and_repo(
     let warnings = warnings_for_directory(storage, &directory, scope)?;
     profile_log("dashboard.warnings", warning_start);
     let unit_start = Instant::now();
-    let test_next_units = test_next_hotspots(storage, &directory, scope, repo)?;
+    let test_next_units = test_next_hotspots(storage, &directory, scope, repo, hotspots_limit)?;
     let top_units = test_next_units
         .iter()
         .filter(|unit| unit.score > 0.0)
@@ -1774,8 +1776,9 @@ fn test_next_hotspots(
     directory: &str,
     scope: &CoverageScope,
     repo: Option<&Path>,
+    limit: usize,
 ) -> Result<Vec<UiUnitHotspot>> {
-    unit_hotspots(storage, directory, scope, repo, 200, true)
+    unit_hotspots(storage, directory, scope, repo, limit, true)
 }
 
 fn unit_hotspots(
@@ -2210,17 +2213,26 @@ fn current_source_start_lines(
     repo: &Path,
     summaries: &[crate::storage::UnitSummary],
 ) -> HashMap<(String, String, String), u32> {
+    use rayon::prelude::*;
+
     let paths = summaries
         .iter()
         .map(|summary| summary.current_path.as_str())
         .collect::<BTreeSet<_>>();
+
+    let results: Vec<_> = paths
+        .into_par_iter()
+        .filter_map(|path| {
+            let file = read_source(repo, path, None).ok()?;
+            let symbols = source_symbols_from_current_file(&file);
+            Some((path.to_string(), symbols))
+        })
+        .collect();
+
     let mut spans = HashMap::new();
-    for path in paths {
-        let Ok(file) = read_source(repo, path, None) else {
-            continue;
-        };
-        for symbol in source_symbols_from_current_file(&file) {
-            let key = (path.to_string(), symbol.name, symbol.kind);
+    for (path, symbols) in results {
+        for symbol in symbols {
+            let key = (path.clone(), symbol.name, symbol.kind);
             spans
                 .entry(key)
                 .and_modify(|line: &mut u32| *line = (*line).min(symbol.start_line))
@@ -4278,11 +4290,13 @@ fn render_index_page(
         .as_deref()
         .map(parent_directory)
         .unwrap_or(requested_directory);
+    let hotspots_limit = if queue.is_some() { 200 } else { 12 };
     let dashboard = dashboard_summary_for_directory_with_scope_and_repo(
         storage,
         &current_directory,
         scope,
         Some(repo),
+        hotspots_limit,
     )?;
     let child_directories = directory_index(&files, &current_directory);
     let child_files = files_in_directory(&files, &current_directory);
@@ -9876,7 +9890,7 @@ mod tests {
         }
 
         let review = unit_hotspots(&storage, "src", &CoverageScope::all(), None, 12, false).unwrap();
-        let test = test_next_hotspots(&storage, "src", &CoverageScope::all(), None).unwrap();
+        let test = test_next_hotspots(&storage, "src", &CoverageScope::all(), None, 200).unwrap();
         assert_eq!(review.len(), 1);
         assert_eq!(test.len(), 1);
         assert_eq!(review[0].path, "src/inside.rb");

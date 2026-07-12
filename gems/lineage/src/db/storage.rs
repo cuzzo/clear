@@ -11,6 +11,18 @@ pub struct Storage {
     conn: Connection,
 }
 
+#[derive(Debug, Clone)]
+pub struct CoverageLineBulk {
+    pub commit_hash: String,
+    pub timestamp: i64,
+    pub path: String,
+    pub line: u32,
+    pub hits: u32,
+    pub is_partial: bool,
+    pub coverage_percent: Option<f64>,
+    pub source: String,
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct CurrentUnitSpan {
     pub id: String,
@@ -59,7 +71,17 @@ impl Storage {
         let conn = Connection::open(path)?;
         configure_connection(&conn)?;
         let storage = Self { conn };
-        storage.init_schema()?;
+
+        // Check if schema needs to be initialized by verifying if logical_units table exists
+        let has_schema = {
+            let mut stmt = storage.conn.prepare(
+                "SELECT 1 FROM sqlite_master WHERE type='table' AND name='logical_units'"
+            )?;
+            stmt.exists([])?
+        };
+        if !has_schema {
+            storage.init_schema()?;
+        }
         Ok(storage)
     }
 
@@ -78,6 +100,21 @@ impl Storage {
     }
 
     pub fn init_schema(&self) -> Result<()> {
+        let _ = self.conn.execute_batch("PRAGMA journal_mode = WAL;");
+        self.begin_transaction()?;
+        match self.init_schema_impl() {
+            Ok(()) => {
+                self.commit_transaction()?;
+                Ok(())
+            }
+            Err(e) => {
+                let _ = self.rollback_transaction();
+                Err(e)
+            }
+        }
+    }
+
+    fn init_schema_impl(&self) -> Result<()> {
         self.conn.execute_batch(
             include_str!("../../sql/storage/init_schema.sql"),
         )?;
@@ -404,7 +441,7 @@ impl Storage {
     }
 
     pub fn unit_ids_for_current_path(&self, path: &str) -> Result<Vec<String>> {
-        let mut stmt = self.conn.prepare(
+        let mut stmt = self.conn.prepare_cached(
             include_str!("../../sql/storage/unit_ids_for_current_path.sql"),
         )?;
         let rows = stmt.query_map(params![path], |row| row.get::<_, String>(0))?;
@@ -413,7 +450,7 @@ impl Storage {
 
     pub fn resolve_current_path(&self, path: &str) -> Result<Option<String>> {
         let normalized = path.trim_start_matches("./");
-        let mut stmt = self.conn.prepare(
+        let mut stmt = self.conn.prepare_cached(
             include_str!("../../sql/storage/resolve_current_path.sql"),
         )?;
         let exact = stmt
@@ -424,7 +461,7 @@ impl Storage {
         }
 
         let suffix = format!("%/{normalized}");
-        let mut stmt = self.conn.prepare(
+        let mut stmt = self.conn.prepare_cached(
             include_str!("../../sql/storage/resolve_current_path_2.sql"),
         )?;
         let candidates = stmt
@@ -464,18 +501,16 @@ impl Storage {
             self.existing_quality_event(&event.unit_id, &event.commit_hash, event.metric_type)?
         {
             let merged_value = previous_new_value.max(event.new_value);
-            self.conn.execute(
+            self.conn.prepare_cached(
                 &format!("UPDATE logical_units SET {column} = ?2 WHERE id = ?1"),
-                params![event.unit_id, merged_value],
-            )?;
+            )?.execute(params![event.unit_id, merged_value])?;
             if (previous_new_value - merged_value).abs() < 0.0001 {
                 return Ok(false);
             }
 
-            self.conn.execute(
+            self.conn.prepare_cached(
                 include_str!("../../sql/storage/record_quality_metric.sql"),
-                params![id, event.timestamp, merged_value],
-            )?;
+            )?.execute(params![id, event.timestamp, merged_value])?;
             return Ok(true);
         }
 
@@ -486,21 +521,19 @@ impl Storage {
             return Ok(false);
         }
 
-        self.conn.execute(
+        self.conn.prepare_cached(
             include_str!("../../sql/storage/record_quality_metric_2.sql"),
-            params![
-                event.unit_id,
-                event.commit_hash,
-                event.timestamp,
-                event.metric_type.as_str(),
-                old_value,
-                event.new_value
-            ],
-        )?;
-        self.conn.execute(
+        )?.execute(params![
+            event.unit_id,
+            event.commit_hash,
+            event.timestamp,
+            event.metric_type.as_str(),
+            old_value,
+            event.new_value
+        ])?;
+        self.conn.prepare_cached(
             &format!("UPDATE logical_units SET {column} = ?2 WHERE id = ?1"),
-            params![event.unit_id, event.new_value],
-        )?;
+        )?.execute(params![event.unit_id, event.new_value])?;
         Ok(true)
     }
 
@@ -510,7 +543,7 @@ impl Storage {
         commit_hash: &str,
         metric: QualityMetric,
     ) -> Result<Option<(i64, f64)>> {
-        let mut stmt = self.conn.prepare(
+        let mut stmt = self.conn.prepare_cached(
             include_str!("../../sql/storage/existing_quality_event.sql"),
         )?;
         Ok(stmt
@@ -914,20 +947,81 @@ impl Storage {
         coverage_percent: Option<f64>,
         source: &str,
     ) -> Result<bool> {
-        let changed = self.conn.execute(
+        let changed = self.conn.prepare_cached(
             include_str!("../../sql/storage/record_coverage_line_with_details.sql"),
-            params![
-                commit_hash,
-                timestamp,
-                path,
-                line,
-                hits,
-                if is_partial { 1 } else { 0 },
-                coverage_percent,
-                source
-            ],
-        )?;
+        )?.execute(params![
+            commit_hash,
+            timestamp,
+            path,
+            line,
+            hits,
+            if is_partial { 1 } else { 0 },
+            coverage_percent,
+            source
+        ])?;
         Ok(changed > 0)
+    }
+
+    pub fn record_coverage_lines_bulk(
+        &self,
+        lines: &[CoverageLineBulk],
+    ) -> Result<usize> {
+        if lines.is_empty() {
+            return Ok(0);
+        }
+
+        let chunk_size = 500;
+        let mut total_changed = 0;
+
+        for chunk in lines.chunks(chunk_size) {
+            let mut sql = String::from(
+                "INSERT INTO coverage_line_events (commit_hash, timestamp, path, line, hits, is_partial, coverage_percent, source) VALUES "
+            );
+
+            for i in 0..chunk.len() {
+                if i > 0 {
+                    sql.push_str(", ");
+                }
+                sql.push_str("(?, ?, ?, ?, ?, ?, ?, ?)");
+            }
+
+            sql.push_str(
+                " ON CONFLICT(commit_hash, path, line, source) DO UPDATE SET \
+                timestamp = MAX(coverage_line_events.timestamp, excluded.timestamp), \
+                hits = MAX(coverage_line_events.hits, excluded.hits), \
+                is_partial = MAX(coverage_line_events.is_partial, excluded.is_partial), \
+                coverage_percent = COALESCE(excluded.coverage_percent, coverage_line_events.coverage_percent) \
+                WHERE excluded.timestamp > coverage_line_events.timestamp \
+                   OR excluded.hits > coverage_line_events.hits \
+                   OR excluded.is_partial > coverage_line_events.is_partial \
+                   OR COALESCE(excluded.coverage_percent, -1) <> COALESCE(coverage_line_events.coverage_percent, -1)"
+            );
+
+            let mut stmt = self.conn.prepare_cached(&sql)?;
+
+            let mut params: Vec<rusqlite::types::Value> = Vec::with_capacity(chunk.len() * 8);
+            for row in chunk {
+                params.push(rusqlite::types::Value::Text(row.commit_hash.clone()));
+                params.push(rusqlite::types::Value::Integer(row.timestamp));
+                params.push(rusqlite::types::Value::Text(row.path.clone()));
+                params.push(rusqlite::types::Value::Integer(row.line as i64));
+                params.push(rusqlite::types::Value::Integer(row.hits as i64));
+                params.push(rusqlite::types::Value::Integer(if row.is_partial { 1 } else { 0 }));
+                if let Some(pct) = row.coverage_percent {
+                    params.push(rusqlite::types::Value::Real(pct));
+                } else {
+                    params.push(rusqlite::types::Value::Null);
+                }
+                params.push(rusqlite::types::Value::Text(row.source.clone()));
+            }
+
+            let param_refs: Vec<&dyn rusqlite::ToSql> = params.iter().map(|p| p as &dyn rusqlite::ToSql).collect();
+
+            let changed = stmt.execute(&param_refs[..])?;
+            total_changed += changed;
+        }
+
+        Ok(total_changed)
     }
 
     fn current_quality_value(
@@ -942,7 +1036,7 @@ impl Storage {
             QualityMetric::GateStatus => "is_hard_gated",
         };
         let sql = format!("SELECT {column} FROM logical_units WHERE id = ?1");
-        let mut stmt = self.conn.prepare(&sql)?;
+        let mut stmt = self.conn.prepare_cached(&sql)?;
         let mut rows = stmt.query(params![unit_id])?;
         Ok((column, rows.next()?.map(|row| row.get(0)).transpose()?))
     }

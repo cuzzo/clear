@@ -24,8 +24,9 @@ module Espalier
 
     def hints_for(file, method, owner)
       return [] unless file && method[:span].is_a?(Array)
-      lines = source_lines(file)
-      return [] if lines.empty?
+      raw_lines = source_lines(file)
+      return [] if raw_lines.empty?
+      lines = clean_source_lines(file)
 
       start_line = method[:line].to_i
       end_line = method[:span][2].to_i
@@ -82,6 +83,11 @@ module Espalier
           end
         )
       end
+
+      hints.each do |hint|
+        hint[:detail] = raw_lines[hint[:line] - 1].to_s.strip
+      end
+
       hints.uniq { |hint| [hint[:line], hint[:reason], hint[:operation]] }
     end
 
@@ -89,6 +95,68 @@ module Espalier
 
     def source_lines(file)
       @source_cache[file] ||= File.file?(file) ? File.readlines(file) : []
+    end
+
+    def clean_source_lines(file)
+      @clean_source_cache ||= {}
+      @clean_source_cache[file] ||= strip_comments_and_literals_from_file(source_lines(file))
+    end
+
+    def strip_comments_and_literals_from_file(lines)
+      clean_lines = []
+      in_block_comment = false
+      in_double_quote = false
+      in_single_quote = false
+      escaped = false
+
+      lines.each do |line|
+        clean_line = String.new
+        chars = line.chars
+        idx = 0
+        while idx < chars.length
+          ch = chars[idx]
+          if in_block_comment
+            if ch == '*' && chars[idx + 1] == '/'
+              in_block_comment = false
+              idx += 1 # skip '/'
+            end
+          elsif in_double_quote
+            if escaped
+              escaped = false
+            elsif ch == '\\'
+              escaped = true
+            elsif ch == '"'
+              in_double_quote = false
+            end
+          elsif in_single_quote
+            if escaped
+              escaped = false
+            elsif ch == '\\'
+              escaped = true
+            elsif ch == '\''
+              in_single_quote = false
+            end
+          else
+            if ch == '#' || (ch == '/' && chars[idx + 1] == '/') || (ch == '-' && chars[idx + 1] == '-')
+              break
+            elsif ch == '/' && chars[idx + 1] == '*'
+              in_block_comment = true
+              idx += 1 # skip '*'
+            elsif ch == '"'
+              in_double_quote = true
+              escaped = false
+            elsif ch == '\''
+              in_single_quote = true
+              escaped = false
+            else
+              clean_line << ch
+            end
+          end
+          idx += 1
+        end
+        clean_lines << clean_line
+      end
+      clean_lines
     end
 
     def loop_ranges(slice, start_line, file = nil)
@@ -125,6 +193,29 @@ module Espalier
 
     def block_finish(slice, start_offset, start_line, file = nil)
       return start_line + start_offset if inline_loop?(slice[start_offset])
+
+      is_c_style = file && %w[.zig .go .rs .c .h .cpp .cc .cxx .cs].include?(File.extname(file).downcase)
+      if is_c_style
+        if slice[start_offset].include?("{")
+          return brace_block_finish(slice, start_offset, start_line)
+        end
+
+        next_line_idx = start_offset + 1
+        while next_line_idx < slice.length && slice[next_line_idx].strip.empty?
+          next_line_idx += 1
+        end
+
+        if next_line_idx < slice.length && slice[next_line_idx].strip.start_with?("{")
+          return brace_block_finish(slice, next_line_idx, start_line)
+        end
+
+        if slice[start_offset].include?(";")
+          return start_line + start_offset
+        else
+          return start_line + (next_line_idx < slice.length ? next_line_idx : start_offset)
+        end
+      end
+
       return brace_block_finish(slice, start_offset, start_line) if opens_brace_block?(slice[start_offset])
 
       is_python = file && File.extname(file).downcase == ".py"

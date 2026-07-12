@@ -232,30 +232,50 @@ module Espalier
 
     def structural_method_complexities(modules)
       complexities = preliminary_method_complexities(modules)
-      analyzer = Espalier::BigOAnalyzer.new(
-        language: :ruby,
-        nil_kill: @nil_kill_evidence
-      )
+      structural_big_o = Espalier::StructuralBigO.new(method_complexities: complexities)
+
+      cores = ENV.fetch("CORES", ENV.fetch("JOBS", "4")).to_i
 
       8.times do
         changed = false
-        structural_big_o = Espalier::StructuralBigO.new(method_complexities: complexities)
-        modules.each do |mod|
-          Array(mod[:methods]).each do |method|
-            analyzer.instance_variable_set(:@class_name, mod[:name])
-            analyzer.instance_variable_set(:@ivar_types, mod[:ivar_types] || {})
-            key = "#{mod[:name]}##{method[:name]}"
-            sig = @nil_kill_data[key] || method[:signature]
-            nodes = big_o_nodes_for(mod, method)
-            nodes.concat(structural_big_o.hints_for(mod[:file], method, mod[:name]))
-            result = analyzer.analyze_method(key, nodes, local_types: local_types_for_signature(sig))
-            current = complexities[mod[:name]][method[:name].to_s] || "O(1)"
-            next unless complexity_rank(result[:lower_bound_complexity]) > complexity_rank(current)
+        # Update method complexities on the cached structural_big_o
+        structural_big_o.instance_variable_set(:@method_complexities, complexities.transform_values { |methods|
+          methods.transform_values { |c| c }
+        })
 
-            complexities[mod[:name]][method[:name].to_s] = result[:lower_bound_complexity]
-            changed = true
+        slices = modules.each_slice((modules.size.to_f / cores).ceil).to_a
+        threads = slices.map do |slice|
+          Thread.new do
+            local_analyzer = Espalier::BigOAnalyzer.new(
+              language: :ruby,
+              nil_kill: @nil_kill_evidence
+            )
+            local_changes = []
+            slice.each do |mod|
+              Array(mod[:methods]).each do |method|
+                local_analyzer.instance_variable_set(:@class_name, mod[:name])
+                local_analyzer.instance_variable_set(:@ivar_types, mod[:ivar_types] || {})
+                key = "#{mod[:name]}##{method[:name]}"
+                sig = @nil_kill_data[key] || method[:signature]
+                nodes = big_o_nodes_for(mod, method)
+                nodes.concat(structural_big_o.hints_for(mod[:file], method, mod[:name]))
+                result = local_analyzer.analyze_method(key, nodes, local_types: local_types_for_signature(sig))
+                current = complexities[mod[:name]][method[:name].to_s] || "O(1)"
+                if complexity_rank(result[:lower_bound_complexity]) > complexity_rank(current)
+                  local_changes << [mod[:name], method[:name].to_s, result[:lower_bound_complexity]]
+                end
+              end
+            end
+            local_changes
           end
         end
+
+        results = threads.flat_map(&:join).flat_map(&:value)
+        results.each do |mod_name, method_name, complexity|
+          complexities[mod_name][method_name] = complexity
+          changed = true
+        end
+
         break unless changed
       end
 

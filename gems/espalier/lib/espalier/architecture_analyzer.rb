@@ -2,6 +2,7 @@
 
 require "set"
 require_relative "static_helpers"
+require_relative "privacy_analyzer"
 
 module Espalier
   # Ranks macro-level architecture pressure from the normalized Espalier
