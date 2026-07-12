@@ -52,7 +52,7 @@ impl SqlDialect for SqliteDialect {
                     findings.push(SqlPerformanceFinding {
                         rule_id: "SQL_INDEX_SCAN".to_string(),
                         level: "warning".to_string(),
-                        message: format!("Full scan of index (Index Leaf Scan): {}", line),
+                        message: format!("Full scan of index leaf nodes. Asymptotically O(N) key visits, but faster than table scan due to smaller key footprint: {}", line),
                         big_o_time: "O(N)".to_string(),
                         big_o_space: "O(1)".to_string(),
                         explain_output: plan.to_string(),
