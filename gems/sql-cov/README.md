@@ -69,10 +69,11 @@ cargo run -- hazards --dialect postgres \
   --output coverage/query-hazards.sarif
 ```
 
-### Looker/LookML JOIN Hazards
-You can integrate LookML metadata to detect double-counting hazards caused by joining one-to-many relationships and aggregating one-side columns without deduplication.
+### Looker/LookML & Schema-Inferred JOIN Hazards
+You can detect double-counting (fan-out) hazards caused by joining one-to-many relationships and aggregating one-side columns without deduplication. SQL-COV does this in two ways:
 
-To do this, pass the path to a LookML model file using the `--looker-hazards` flag:
+1. **Schema-Inferred (Automatic)**: If a query joins two tables where one table is joined on its **Primary Key** and the other is not, SQL-COV automatically infers a one-to-many join relationship. No additional configuration is required.
+2. **LookML Integration**: If you are using Looker, pass the path to a LookML model file using the `--looker-hazards` flag to evaluate explicitly defined `one_to_many` relationships:
 
 ```bash
 cargo run -- hazards --dialect postgres \
