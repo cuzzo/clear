@@ -232,6 +232,97 @@ pub fn analyze_hazards_with_looker(
                         }
                     }
                 }
+
+                // Schema-driven JOIN hazard detection (uses primary keys to deduce one-to-many joins)
+                for table in &select.from {
+                    for join in &table.joins {
+                        if let Some(join_expr) = join_expr(&join.join_operator) {
+                            struct EqVisitor<'a> {
+                                resolver: &'a Resolver<'a>,
+                                eq_pairs: Vec<((String, String), (String, String))>,
+                            }
+                            impl Visitor for EqVisitor<'_> {
+                                type Break = ();
+                                fn pre_visit_expr(&mut self, expr: &Expr) -> ControlFlow<Self::Break> {
+                                    if let Expr::BinaryOp { left, op: BinaryOperator::Eq, right } = expr {
+                                        if let Some(left_pair) = get_table_and_column(left, self.resolver) {
+                                            if let Some(right_pair) = get_table_and_column(right, self.resolver) {
+                                                self.eq_pairs.push((left_pair, right_pair));
+                                            }
+                                        }
+                                    }
+                                    ControlFlow::Continue(())
+                                }
+                            }
+                            let mut eq_visitor = EqVisitor {
+                                resolver: &resolver,
+                                eq_pairs: Vec::new(),
+                            };
+                            let _ = join_expr.visit(&mut eq_visitor);
+
+                            for ((left_table, left_col), (right_table, right_col)) in eq_visitor.eq_pairs {
+                                let left_is_pk = resolver.schema.tables.get(&left_table)
+                                    .and_then(|t| t.columns.get(&left_col))
+                                    .map(|c| c.primary_key)
+                                    .unwrap_or(false);
+                                let right_is_pk = resolver.schema.tables.get(&right_table)
+                                    .and_then(|t| t.columns.get(&right_col))
+                                    .map(|c| c.primary_key)
+                                    .unwrap_or(false);
+
+                                let mut one_side_table = None;
+                                let mut many_side_table = None;
+                                let mut pk_col = String::new();
+
+                                if left_is_pk && !right_is_pk {
+                                    one_side_table = Some(left_table.clone());
+                                    many_side_table = Some(right_table.clone());
+                                    pk_col = left_col.clone();
+                                } else if right_is_pk && !left_is_pk {
+                                    one_side_table = Some(right_table.clone());
+                                    many_side_table = Some(left_table.clone());
+                                    pk_col = right_col.clone();
+                                }
+
+                                if let Some(one_table) = one_side_table {
+                                    let many_table = many_side_table.unwrap_or_default();
+                                    for item in &select.projection {
+                                        let expr = match item {
+                                            SelectItem::UnnamedExpr(e) => Some(e),
+                                            SelectItem::ExprWithAlias { expr: e, .. } => Some(e),
+                                            _ => None,
+                                        };
+                                        if let Some(e) = expr {
+                                            let aggs = find_one_side_aggregations(e, &resolver, &one_table);
+                                            for (func_name, distinct, span) in aggs {
+                                                if !distinct {
+                                                    if let Some(h_span) = hazard_span_from_parser_span(span, source) {
+                                                        findings.push(HazardFinding {
+                                                            id: String::new(),
+                                                            rule_id: "SCHEMA_JOIN_HAZARD".to_string(),
+                                                            kind: HazardKind::LookerJoinHazard,
+                                                            message: format!(
+                                                                "Schema-inferred one-to-many join between base table '{}' (joined on primary key '{}') and table '{}' aggregates a one-side column '{}' using {} without a DISTINCT modifier.",
+                                                                one_table,
+                                                                pk_col,
+                                                                many_table,
+                                                                h_span.raw_expression,
+                                                                func_name
+                                                            ),
+                                                            evidence: vec![format!("one_side: {}", one_table), format!("many_side: {}", many_table)],
+                                                            recommendation: "Wrap the aggregate expression with DISTINCT (e.g. SUM(DISTINCT ...)) or pre-aggregate in an inline subquery.".to_string(),
+                                                            span: h_span,
+                                                        });
+                                                    }
+                                                }
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
             }
         }
     }
@@ -290,6 +381,38 @@ fn resolves_to_table(relation: &sqlparser::ast::TableFactor, resolver: &Resolver
             false
         }
         _ => false,
+    }
+}
+
+fn get_table_and_column(expr: &Expr, resolver: &Resolver) -> Option<(String, String)> {
+    match expr {
+        Expr::Identifier(ident) => {
+            let col_name = ident.value.to_string();
+            for (_alias, table_opt) in &resolver.aliases {
+                if let Some(table_name) = table_opt {
+                    if let Some(table) = resolver.schema.tables.get(table_name) {
+                        if table.columns.contains_key(&col_name) {
+                            return Some((table_name.clone(), col_name));
+                        }
+                    }
+                }
+            }
+            None
+        }
+        Expr::CompoundIdentifier(idents) => {
+            if idents.len() >= 2 {
+                let prefix = idents[0].value.to_string();
+                let col_name = idents[1].value.to_string();
+                if let Some(Some(table_name)) = resolver.aliases.get(&prefix) {
+                    return Some((table_name.clone(), col_name));
+                }
+                if resolver.schema.tables.contains_key(&prefix) {
+                    return Some((prefix.clone(), col_name));
+                }
+            }
+            None
+        }
+        _ => None,
     }
 }
 

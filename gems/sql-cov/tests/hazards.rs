@@ -167,3 +167,27 @@ explore: companies {
     let report_safe = analyze_hazards_with_looker("test.sql", sql_safe, DialectName::Sqlite, &mock_schema, &joins).unwrap();
     assert!(!report_safe.findings.iter().any(|f| f.kind == HazardKind::LookerJoinHazard));
 }
+
+#[tokio::test]
+async fn test_schema_inferred_join_hazard_detection() {
+    use sql_cov::analyze_hazards_with_looker;
+    
+    // Set up schema: companies (company_id is primary key), employees (company_id is NOT primary key)
+    let mut mock_schema = SchemaCatalog::default();
+    mock_schema.insert_column("companies".to_string(), "company_id".to_string(), false, true); // true = primary key
+    mock_schema.insert_column("companies".to_string(), "annual_revenue".to_string(), false, false);
+    mock_schema.insert_column("employees".to_string(), "company_id".to_string(), false, false); // false = not primary key
+
+    // Run hazard check with empty LookML rules
+    let sql_hazard = "SELECT SUM(companies.annual_revenue) FROM companies JOIN employees ON companies.company_id = employees.company_id";
+    let report = analyze_hazards_with_looker("test.sql", sql_hazard, DialectName::Sqlite, &mock_schema, &[]).unwrap();
+    
+    let finding = report.findings.iter().find(|f| f.rule_id == "SCHEMA_JOIN_HAZARD");
+    assert!(finding.is_some());
+    assert_eq!(finding.unwrap().kind, HazardKind::LookerJoinHazard);
+
+    // Verify DISTINCT modifier prevents the schema-inferred hazard
+    let sql_safe = "SELECT SUM(DISTINCT companies.annual_revenue) FROM companies JOIN employees ON companies.company_id = employees.company_id";
+    let report_safe = analyze_hazards_with_looker("test.sql", sql_safe, DialectName::Sqlite, &mock_schema, &[]).unwrap();
+    assert!(!report_safe.findings.iter().any(|f| f.rule_id == "SCHEMA_JOIN_HAZARD"));
+}
