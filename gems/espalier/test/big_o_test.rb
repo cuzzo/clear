@@ -2,6 +2,7 @@
 
 require "minitest/autorun"
 require_relative "../lib/espalier/big_o_analyzer"
+require_relative "../lib/espalier/structural_big_o"
 require_relative "../lib/espalier/nil_kill_evidence"
 
 class BigOTest < Minitest::Test
@@ -443,5 +444,25 @@ class BigOTest < Minitest::Test
     c2 = s.send(:classify_loop, "for (int j = 0; j < n; j++) {", 4, 1, c_lines, c_constants)
     assert_equal true, c2[:is_dynamic]
     assert_equal "line 1", c2[:trigger] # parameter 'n' defined on line 1
+  end
+
+  def test_brace_matching_ignores_braces_in_strings_and_comments
+    source_cache = {
+      "literal_braces.rb" => [
+        "def run(items)\n",
+        "  items.each do |x|\n",
+        "    if x.trim_end_matches('{') == '}' # comment with {\n",
+        "      puts \"{\"\n",
+        "    end\n",
+        "  end\n",
+        "end\n"
+      ]
+    }
+    s = Espalier::StructuralBigO.new(source_cache: source_cache)
+    hints = s.hints_for("literal_braces.rb", { name: "run", line: 1, span: [1, 0, 7, 3] }, "LiteralBraces")
+    # Should only find the one collection loop (items.each) at depth 1 (O(N)),
+    # NOT nested loops or deeper complexity from false brace nesting.
+    nested_hint = hints.find { |h| h[:complexity] == "O(N^2)" }
+    assert_nil nested_hint
   end
 end

@@ -146,11 +146,53 @@ module Espalier
 
     def brace_block_finish(slice, start_offset, start_line)
       depth = 0
+      in_double_quote = false
+      in_single_quote = false
+      in_comment = false
+      escaped = false
+
       (start_offset...slice.length).each do |idx|
-        slice[idx].each_char do |char|
-          depth += 1 if char == "{"
-          depth -= 1 if char == "}"
+        line = slice[idx]
+        in_comment = false
+        chars = line.chars
+        char_idx = 0
+        while char_idx < chars.length
+          ch = chars[char_idx]
+          if in_comment
+            break
+          elsif in_double_quote
+            if escaped
+              escaped = false
+            elsif ch == '\\'
+              escaped = true
+            elsif ch == '"'
+              in_double_quote = false
+            end
+          elsif in_single_quote
+            if escaped
+              escaped = false
+            elsif ch == '\\'
+              escaped = true
+            elsif ch == '\''
+              in_single_quote = false
+            end
+          else
+            if ch == '#' || (ch == '/' && chars[char_idx + 1] == '/')
+              in_comment = true
+              break
+            elsif ch == '"'
+              in_double_quote = true
+            elsif ch == '\''
+              in_single_quote = true
+            elsif ch == '{'
+              depth += 1
+            elsif ch == '}'
+              depth -= 1
+            end
+          end
+          char_idx += 1
         end
+
         return start_line + idx if depth <= 0
       end
       start_line + slice.length - 1
@@ -171,11 +213,57 @@ module Espalier
 
     def balanced_braces?(line)
       depth = 0
-      line.each_char do |char|
+      strip_literals_and_comments(line).each_char do |char|
         depth += 1 if char == "{"
         depth -= 1 if char == "}"
       end
       depth <= 0
+    end
+
+    def strip_literals_and_comments(line)
+      result = String.new
+      in_double_quote = false
+      in_single_quote = false
+      in_comment = false
+      escaped = false
+
+      chars = line.chars
+      idx = 0
+      while idx < chars.length
+        ch = chars[idx]
+        if in_comment
+          break
+        elsif in_double_quote
+          if escaped
+            escaped = false
+          elsif ch == '\\'
+            escaped = true
+          elsif ch == '"'
+            in_double_quote = false
+          end
+        elsif in_single_quote
+          if escaped
+            escaped = false
+          elsif ch == '\\'
+            escaped = true
+          elsif ch == '\''
+            in_single_quote = false
+          end
+        else
+          if ch == '#' || (ch == '/' && chars[idx + 1] == '/')
+            in_comment = true
+            break
+          elsif ch == '"'
+            in_double_quote = true
+          elsif ch == '\''
+            in_single_quote = true
+          else
+            result << ch
+          end
+        end
+        idx += 1
+      end
+      result
     end
 
     def fixpoint_loop?(lines, loop_range)

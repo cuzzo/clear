@@ -178,27 +178,33 @@ pub fn analyze_hazards_with_looker(
             // Looker JOIN hazard checks
             if let SetExpr::Select(select) = query.body.as_ref() {
                 let resolver = resolver_for_select(select, schema);
+                let mut relations = Vec::new();
+                for table in &select.from {
+                    relations.push(&table.relation);
+                    for join in &table.joins {
+                        relations.push(&join.relation);
+                    }
+                }
+
+                let mut active_joins = Vec::new();
                 for looker_join in looker_joins {
                     let mut has_explore = false;
                     let mut has_join_table = false;
-                    for table in &select.from {
-                        if resolves_to_table(&table.relation, &resolver, &looker_join.explore) {
+                    for relation in &relations {
+                        if resolves_to_table(relation, &resolver, &looker_join.explore) {
                             has_explore = true;
                         }
-                        if resolves_to_table(&table.relation, &resolver, &looker_join.join_table) {
+                        if resolves_to_table(relation, &resolver, &looker_join.join_table) {
                             has_join_table = true;
                         }
-                        for join in &table.joins {
-                            if resolves_to_table(&join.relation, &resolver, &looker_join.explore) {
-                                has_explore = true;
-                            }
-                            if resolves_to_table(&join.relation, &resolver, &looker_join.join_table) {
-                                has_join_table = true;
-                            }
-                        }
                     }
+                    if has_explore && has_join_table {
+                        active_joins.push(looker_join);
+                    }
+                }
 
-                    if has_explore && has_join_table && looker_join.relationship == "one_to_many" {
+                for looker_join in active_joins {
+                    if looker_join.relationship == "one_to_many" {
                         for item in &select.projection {
                             let expr = match item {
                                 SelectItem::UnnamedExpr(e) => Some(e),
@@ -234,6 +240,7 @@ pub fn analyze_hazards_with_looker(
                 }
 
                 // Schema-driven JOIN hazard detection (uses primary keys to deduce one-to-many joins)
+                let mut one_side_tables = Vec::new();
                 for table in &select.from {
                     for join in &table.joins {
                         if let Some(join_expr) = join_expr(&join.join_operator) {
@@ -285,38 +292,41 @@ pub fn analyze_hazards_with_looker(
                                 }
 
                                 if let Some(one_table) = one_side_table {
-                                    let many_table = many_side_table.unwrap_or_default();
-                                    for item in &select.projection {
-                                        let expr = match item {
-                                            SelectItem::UnnamedExpr(e) => Some(e),
-                                            SelectItem::ExprWithAlias { expr: e, .. } => Some(e),
-                                            _ => None,
-                                        };
-                                        if let Some(e) = expr {
-                                            let aggs = find_one_side_aggregations(e, &resolver, &one_table);
-                                            for (func_name, distinct, span) in aggs {
-                                                if !distinct {
-                                                    if let Some(h_span) = hazard_span_from_parser_span(span, source) {
-                                                        findings.push(HazardFinding {
-                                                            id: String::new(),
-                                                            rule_id: "SCHEMA_JOIN_HAZARD".to_string(),
-                                                            kind: HazardKind::LookerJoinHazard,
-                                                            message: format!(
-                                                                "Schema-inferred one-to-many join between base table '{}' (joined on primary key '{}') and table '{}' aggregates a one-side column '{}' using {} without a DISTINCT modifier.",
-                                                                one_table,
-                                                                pk_col,
-                                                                many_table,
-                                                                h_span.raw_expression,
-                                                                func_name
-                                                            ),
-                                                            evidence: vec![format!("one_side: {}", one_table), format!("many_side: {}", many_table)],
-                                                            recommendation: "Wrap the aggregate expression with DISTINCT (e.g. SUM(DISTINCT ...)) or pre-aggregate in an inline subquery.".to_string(),
-                                                            span: h_span,
-                                                        });
-                                                    }
-                                                }
-                                            }
-                                        }
+                                    one_side_tables.push((one_table, pk_col, many_side_table.unwrap_or_default()));
+                                }
+                            }
+                        }
+                    }
+                }
+
+                for (one_table, pk_col, many_table) in one_side_tables {
+                    for item in &select.projection {
+                        let expr = match item {
+                            SelectItem::UnnamedExpr(e) => Some(e),
+                            SelectItem::ExprWithAlias { expr: e, .. } => Some(e),
+                            _ => None,
+                        };
+                        if let Some(e) = expr {
+                            let aggs = find_one_side_aggregations(e, &resolver, &one_table);
+                            for (func_name, distinct, span) in aggs {
+                                if !distinct {
+                                    if let Some(h_span) = hazard_span_from_parser_span(span, source) {
+                                        findings.push(HazardFinding {
+                                            id: String::new(),
+                                            rule_id: "SCHEMA_JOIN_HAZARD".to_string(),
+                                            kind: HazardKind::LookerJoinHazard,
+                                            message: format!(
+                                                "Schema-inferred one-to-many join between base table '{}' (joined on primary key '{}') and table '{}' aggregates a one-side column '{}' using {} without a DISTINCT modifier.",
+                                                one_table,
+                                                pk_col,
+                                                many_table,
+                                                h_span.raw_expression,
+                                                func_name
+                                            ),
+                                            evidence: vec![format!("one_side: {}", one_table), format!("many_side: {}", many_table)],
+                                            recommendation: "Wrap the aggregate expression with DISTINCT (e.g. SUM(DISTINCT ...)) or pre-aggregate in an inline subquery.".to_string(),
+                                            span: h_span,
+                                        });
                                     }
                                 }
                             }
