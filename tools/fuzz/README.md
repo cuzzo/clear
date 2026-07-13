@@ -19,6 +19,10 @@ UAF / double-free (at runtime via `std.testing.allocator`).
     # Custom output dir + clean previous run
     ruby tools/fuzz/run.rb --matrix --out /tmp/fuzz --clean
 
+    # Local diagnosis: recursively isolate every failing positive program.
+    # Green sequential programs still require only one bundled Zig build.
+    ruby tools/fuzz/run.rb --matrix --bisect-positives --out /tmp/fuzz --clean
+
     # CI gate: every registered cell, with no quarantine mechanism
     ruby tools/fuzz/run.rb --matrix --out /tmp/fuzz --clean
 

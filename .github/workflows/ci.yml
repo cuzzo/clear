@@ -857,7 +857,6 @@ jobs:
     needs:
       - changes
       - tools-fuzz-shard
-      - tools-fuzz-isolated-shard
     if: ${{ always() && needs.changes.outputs.run_src == 'true' }}
     steps:
       - name: Require every fuzz shard
@@ -866,41 +865,7 @@ jobs:
             echo "tools/fuzz shard matrix result: ${{ needs.tools-fuzz-shard.result }}"
             exit 1
           fi
-          if [ "${{ needs.tools-fuzz-isolated-shard.result }}" != "success" ]; then
-            echo "tools/fuzz isolated shard matrix result: ${{ needs.tools-fuzz-isolated-shard.result }}"
-            exit 1
-          fi
           echo "all tools/fuzz shards passed"
-
-  tools-fuzz-isolated-shard:
-    name: tools/fuzz fail-complete isolated shard ${{ matrix.shard }}/5
-    needs: changes
-    if: ${{ needs.changes.outputs.run_src == 'true' }}
-    runs-on: ubuntu-22.04
-    timeout-minutes: 30
-    strategy:
-      fail-fast: false
-      matrix:
-        shard: [0, 1, 2, 3, 4]
-    steps:
-      - uses: actions/checkout@v4
-      - uses: ruby/setup-ruby@v1
-        with:
-          ruby-version: ${{ env.RUBY_VERSION }}
-          bundler-cache: true
-      - uses: mlugg/setup-zig@v2
-        with:
-          version: ${{ env.ZIG_VERSION }}
-          use-cache: false
-      - uses: actions/cache@v4
-        with:
-          path: |
-            zig/.clear-cache
-            zig/.clear-transpile-cache
-          key: clear-fuzz-isolated-${{ runner.os }}-zig${{ env.ZIG_VERSION }}-${{ hashFiles('compiler/ruby/**', 'zig/runtime/**', 'zig/lib/**', 'tools/fuzz/**', 'Gemfile.lock') }}
-          restore-keys: |
-            clear-fuzz-isolated-${{ runner.os }}-zig${{ env.ZIG_VERSION }}-
-      - run: bundle exec ruby tools/fuzz/run.rb --matrix --isolate-positives --shard ${{ matrix.shard }}/5 --out /tmp/clear-fuzz-isolated-${{ matrix.shard }} --clean --jobs "$(nproc)"
 
   bc-lower-coverage-shard:
     name: bc-lowering coverage shard ${{ matrix.shard }}/5

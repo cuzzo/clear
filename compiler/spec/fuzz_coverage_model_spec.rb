@@ -64,7 +64,9 @@ RSpec.describe FuzzCoverageModel do
     expect(expectations).to all(satisfy { |value| %i[pass compile_error].include?(value) })
 
     jobs = YAML.safe_load(workflow, aliases: true).fetch("jobs")
-    %w[tools-fuzz-shard tools-fuzz-isolated-shard].each do |name|
+    expect(jobs).not_to have_key("tools-fuzz-isolated-shard")
+    expect(workflow).not_to include("--bisect-positives")
+    %w[tools-fuzz-shard].each do |name|
       job = jobs.fetch(name)
       expect(job["continue-on-error"]).not_to eq(true)
       command = job.fetch("steps").filter_map { |step| step["run"] }.find { |run| run.include?("tools/fuzz/run.rb") }

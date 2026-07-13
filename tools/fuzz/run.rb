@@ -22,6 +22,7 @@ require 'etc'
 require 'open3'
 require 'rbconfig'
 require_relative 'generator'
+require_relative 'fail_complete'
 require_relative '../zig_coverage_support'
 # Route SimpleCov to a 'fuzz' resultset key (gen.rb defaults to
 # 'transpile-tests') so fuzz cell hits stay attributable.
@@ -40,7 +41,7 @@ opts = {
   templates: nil,
   shard: nil,
   jobs: Integer(ENV.fetch('FUZZ_JOBS', Etc.nprocessors.to_s)),
-  isolate_positives: false,
+  bisect_positives: false,
 }
 
 OptionParser.new do |o|
@@ -53,7 +54,7 @@ OptionParser.new do |o|
   o.on('--clean')               { opts[:clean] = true }
   o.on('--templates LIST')      { |v| opts[:templates] = v.split(',').map(&:to_sym) }
   o.on('--jobs N', Integer)     { |v| opts[:jobs] = v }
-  o.on('--isolate-positives')   { opts[:isolate_positives] = true }
+  o.on('--bisect-positives')    { opts[:bisect_positives] = true }
   o.on('--shard I/N') do |v|
     idx, total = v.split('/', 2).map(&:to_i)
     abort "--shard expects I/N with N > 0 and 0 <= I < N" unless total && total > 0 && idx && idx >= 0 && idx < total
@@ -498,18 +499,34 @@ def run_positive_files(entries, out_dir, default_workers)
   [pass, fails, mir_errors, leaks]
 end
 
-def hybrid_run(emitted, out_dir, default_workers, isolate_positives: false)
+def run_fail_complete_bundles(entries, out_dir)
+  return [[], [], [], []] if entries.empty?
+
+  started = Process.clock_gettime(Process::CLOCK_MONOTONIC)
+  attempts = 0
+  result = FuzzFailComplete.run(entries) do |batch|
+    attempts += 1
+    puts "[fuzz] fail-complete bundle attempt #{attempts}: #{batch.size} cells"
+    run_pass_bundle(batch, out_dir)
+  end
+  elapsed = Process.clock_gettime(Process::CLOCK_MONOTONIC) - started
+  puts "[fuzz] fail-complete bundles: #{entries.size} cells in #{attempts} " \
+       "attempt#{attempts == 1 ? '' : 's'} and #{format('%.2f', elapsed)}s"
+  result
+end
+
+def hybrid_run(emitted, out_dir, default_workers, bisect_positives: false)
   pass_entries = emitted.select { |e| e[:kind] != :mir_checker && e[:expected] == :pass }
   negative_entries = emitted.select { |e| e[:kind] != :mir_checker && e[:expected] == :compile_error }
   mir_negative_entries = emitted.select { |e| e[:kind] == :mir_checker && e[:expected] == :compile_error }
 
-  isolated_pass_entries, bundled_pass_entries =
-    if isolate_positives
-      [pass_entries, []]
+  isolated_pass_entries, bundled_pass_entries = pass_entries.partition { |entry| async_runtime_cell?(entry) }
+  pass_ok, fails, mir_errors, leaks =
+    if bisect_positives
+      run_fail_complete_bundles(bundled_pass_entries, out_dir)
     else
-      pass_entries.partition { |entry| async_runtime_cell?(entry) }
+      run_pass_bundle(bundled_pass_entries, out_dir)
     end
-  pass_ok, fails, mir_errors, leaks = run_pass_bundle(bundled_pass_entries, out_dir)
   iso_ok, iso_fails, iso_mir_errors, iso_leaks = run_positive_files(isolated_pass_entries, out_dir, default_workers)
   negative_ok, unexpected_pass = run_negative_builds(negative_entries, out_dir, default_workers)
   mir_negative_ok, mir_unexpected_pass = run_mir_checker_negatives(mir_negative_entries, default_workers)
@@ -579,7 +596,7 @@ pass, fails, leaks, mir_errors, unexpected_pass =
   if ENV['COVERAGE'] == '1'
     coverage_run(emitted, opts[:out], opts[:jobs])
   else
-    hybrid_run(emitted, opts[:out], opts[:jobs], isolate_positives: opts[:isolate_positives])
+    hybrid_run(emitted, opts[:out], opts[:jobs], bisect_positives: opts[:bisect_positives])
   end
 
 if ZigCoverageSupport.enabled?
