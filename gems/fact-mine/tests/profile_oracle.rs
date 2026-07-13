@@ -642,6 +642,7 @@ class Parser
   extend T::Sig
 
   MaybeToken = T.type_alias { T.nilable(Token) }
+  MaybeName = T.type_alias { T.any(String, NilClass) }
 
   sig { returns(Token) }
   def current
@@ -681,8 +682,32 @@ class Parser
     token.nil?
   end
 
+  sig { params(name: MaybeName).returns(T::Boolean) }
+  def optional_name?(name)
+    name.nil?
+  end
+
   def parser_class?
     self.class.name&.include?("Parser")
+  end
+end
+
+module Outer
+  module Inner
+    module Deep
+      extend T::Sig
+
+      sig { params(branch: T.nilable(Symbol)).returns(T::Boolean) }
+      def nested_scope(branch: nil)
+        case branch
+        when :then
+          1
+        when :else
+          2
+        end
+        branch.nil?
+      end
+    end
   end
 end
 "#,
@@ -694,6 +719,11 @@ end
         .iter()
         .find(|record| record["method"] == "consume")
         .context("missing consume return origin")?;
+    let nested_origin = output
+        .return_origins
+        .iter()
+        .find(|record| record["method"] == "nested_scope")
+        .context("missing nested_scope return origin")?;
 
     assert_eq!(origin["candidate_type"], serde_json::json!({
         "kind": "Primitive",
@@ -701,6 +731,11 @@ end
     }), "{origin:#}");
     assert_eq!(origin["confidence"], "strong");
     assert_eq!(origin["blockers"], serde_json::json!([]));
+    assert_eq!(
+        nested_origin["class"],
+        "Outer::Inner::Deep",
+        "nested owners must be qualified exactly once"
+    );
     assert_eq!(
         output
             .deterministic_guards
@@ -716,6 +751,20 @@ end
             .iter()
             .all(|record| record["code"] != "token.nil?"),
         "a nilable type alias must not prove a nil check dead"
+    );
+    assert!(
+        output
+            .dead_nil_checks
+            .iter()
+            .all(|record| record["code"] != "name.nil?"),
+        "a union containing NilClass must not prove a nil check dead"
+    );
+    assert!(
+        output
+            .deterministic_guards
+            .iter()
+            .all(|record| record["method"] != "nested_scope"),
+        "a nil default must not replace the declared nilable parameter type"
     );
     assert!(
         output

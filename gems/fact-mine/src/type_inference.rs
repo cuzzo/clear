@@ -811,11 +811,12 @@ impl<'a> TypeInferenceVisitor<'a> {
 
     fn visit_class_or_module(&mut self, node: &crate::ast::Node) {
         let name = owner_name(node).unwrap_or_else(|| "(anonymous)".to_string());
-        let qualified = if self.current_owners.is_empty() {
-            name
-        } else {
-            format!("{}::{name}", self.current_owners.join("::"))
-        };
+        // Stack entries are already fully qualified. Joining the whole stack
+        // repeats every ancestor once nesting reaches three levels.
+        let qualified = self
+            .current_owners
+            .last()
+            .map_or(name.clone(), |owner| format!("{owner}::{name}"));
         self.current_owners.push(qualified);
         for child in child_nodes(node) {
             self.visit(child);
@@ -1649,7 +1650,7 @@ impl<'a> TypeInferenceVisitor<'a> {
         }
         let (origin_kind, origin_name) = self.predicate_origin(receiver);
         let receiver_type = self.deterministic_guard_subject_type(receiver)?;
-        if receiver_type != TypeExpr::NilClass && !matches!(receiver_type, TypeExpr::Nilable(_)) {
+        if receiver_type.is_non_nil() {
             return Some(self.deterministic_guard_result(
                 false,
                 "nil_check",
@@ -2316,6 +2317,9 @@ impl<'a> TypeInferenceVisitor<'a> {
             "OR" | "AND" => {
                 let left = child_node(node, 0).and_then(|c| self.expression_type_with_locals_and_shapes(c, extra_locals, extra_hash_shapes));
                 let right = child_node(node, 1).and_then(|c| self.expression_type_with_locals_and_shapes(c, extra_locals, extra_hash_shapes));
+                if left.is_none() || right.is_none() {
+                    return None;
+                }
                 let mut non_nil = Vec::new();
                 if let Some(ref l) = left {
                     if *l != TypeExpr::NilClass {

@@ -694,7 +694,11 @@ mod tests {
             param_types: [("x".to_string(), TypeExpr::from("String"))].into_iter().collect(),
             local_types: [
                 ("y".to_string(), TypeExpr::from("NilClass")),
-                ("z".to_string(), TypeExpr::from("T.nilable(Integer)"))
+                ("z".to_string(), TypeExpr::from("T.nilable(Integer)")),
+                (
+                    "w".to_string(),
+                    TypeExpr::Union(vec![TypeExpr::from("String"), TypeExpr::NilClass]),
+                ),
             ].into_iter().collect(),
             in_conditional: false,
             ivar_tlet_types: BTreeMap::new(),
@@ -839,6 +843,39 @@ mod tests {
 
         let res_z = visitor.deterministic_nil_predicate_result(&call_nil_check_z);
         assert!(res_z.is_none());
+
+        let call_nil_check_w: crate::ast::Node = serde_json::from_str(r#"{
+            "type": "CALL",
+            "children": [
+                {"Node": {
+                    "type": "LVAR",
+                    "children": [{"Symbol": "w"}],
+                    "first_lineno": 1,
+                    "first_column": 1,
+                    "last_lineno": 1,
+                    "last_column": 5,
+                    "text": "w"
+                }},
+                {"Symbol": "nil?"},
+                {"Node": {
+                    "type": "LIST",
+                    "children": [],
+                    "first_lineno": 1,
+                    "first_column": 1,
+                    "last_lineno": 1,
+                    "last_column": 5,
+                    "text": ""
+                }}
+            ],
+            "first_lineno": 1,
+            "first_column": 1,
+            "last_lineno": 1,
+            "last_column": 10,
+            "text": "w.nil?"
+        }"#).unwrap();
+
+        let res_w = visitor.deterministic_nil_predicate_result(&call_nil_check_w);
+        assert!(res_w.is_none(), "a union containing NilClass is not deterministically non-nil");
 
         // class_guard_truth tests
         assert_eq!(visitor.class_guard_truth(&TypeExpr::from("Integer"), "String", true), Some(false));
@@ -1158,6 +1195,18 @@ mod tests {
         }"#).unwrap();
 
         assert_eq!(get_type_str(visitor.expression_type(&or_node)), Some("Integer".to_string()));
+
+        let mut or_with_unknown = or_node.clone();
+        if let crate::ast::Child::Node(right) = &mut or_with_unknown.children[1] {
+            right.r#type = "LVAR".to_string();
+            right.children = vec![crate::ast::Child::Symbol("unknown".to_string())];
+            right.text = "unknown".to_string();
+        }
+        assert_eq!(
+            visitor.expression_type(&or_with_unknown),
+            None,
+            "a known short-circuit operand must not hide an unknown alternative"
+        );
     }
 
     fn create_visitor<'a>(
