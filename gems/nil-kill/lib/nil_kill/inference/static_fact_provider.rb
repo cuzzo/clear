@@ -162,6 +162,8 @@ module NilKill
         params = legacy_params(method, definition)
         signature = method["signature"].to_s
         kind, name = legacy_method_kind_and_name(method)
+        return_type = definition && definition["return_type"]
+        non_nil_return_type = unwrap_nilable(return_type)
         {
           "path" => method["path"].to_s,
           "line" => method["line"].to_i,
@@ -172,6 +174,10 @@ module NilKill
           "language" => method["language"].to_s,
           "has_sig" => !signature.empty?,
           "sig" => signature,
+          "return_type" => return_type,
+          "return_type_text" => return_type.to_s,
+          "non_nil_return_type" => non_nil_return_type,
+          "non_nil_return_type_text" => non_nil_return_type.to_s,
           "params" => params,
           "scope" => method["owner"].to_s.split("::").reject(&:empty?),
           "non_nil_params" => params.filter_map { |param| non_nil_type?(param["type"]) ? param["name"].to_s : nil },
@@ -180,6 +186,12 @@ module NilKill
           "protocols" => {},
           "noreturn_candidate" => noreturn_method?(method, definition),
         }
+      end
+
+      def unwrap_nilable(type)
+        return unless type.respond_to?(:kind) && type.kind == "Nilable"
+
+        FactMine::Syntax::TypeExpr.from_json(type.data, language)
       end
 
       def legacy_params(method, definition)

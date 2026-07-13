@@ -1819,6 +1819,108 @@ fn rewriteable_field_type(current_type: &str, candidate: &str) -> bool {
         || collapsible_boolean_union(current, candidate)
 }
 
+fn propose_false_nilable_return_actions(input: &InputState) -> Vec<Action> {
+    let Some(existing_sigs) = input.facts.get("existing_sigs").and_then(|value| value.as_array())
+    else {
+        return Vec::new();
+    };
+    let Some(return_origins) = input.facts.get("return_origins").and_then(|value| value.as_array())
+    else {
+        return Vec::new();
+    };
+
+    let origins_by_location = return_origins
+        .iter()
+        .map(|origin| (fact_location(origin), origin))
+        .collect::<std::collections::HashMap<_, _>>();
+    let mut actions = Vec::new();
+
+    for method in existing_sigs {
+        let Some(non_nil_type) = method.get("non_nil_return_type") else {
+            continue;
+        };
+        if non_nil_type.is_null() {
+            continue;
+        }
+        let Some(origin) = origins_by_location.get(&fact_location(method)) else {
+            continue;
+        };
+        let blockers_empty = origin
+            .get("blockers")
+            .and_then(|value| value.as_array())
+            .is_some_and(Vec::is_empty);
+        if origin.get("confidence").and_then(|value| value.as_str()) != Some("strong")
+            || !blockers_empty
+            || origin.get("candidate_type") != Some(non_nil_type)
+        {
+            continue;
+        }
+
+        let Some(candidate_text) = method
+            .get("non_nil_return_type_text")
+            .and_then(|value| value.as_str())
+            .filter(|value| !value.is_empty())
+        else {
+            continue;
+        };
+        let current_text = method
+            .get("return_type_text")
+            .and_then(|value| value.as_str())
+            .unwrap_or_default();
+        let path = method
+            .get("path")
+            .and_then(|value| value.as_str())
+            .unwrap_or_default();
+        let line = method
+            .get("line")
+            .and_then(|value| value.as_i64())
+            .unwrap_or_default();
+        let mut data = HashMap::new();
+        data.insert(
+            "type".to_string(),
+            serde_json::Value::String(candidate_text.to_string()),
+        );
+        data.insert(
+            "from".to_string(),
+            serde_json::Value::String(current_text.to_string()),
+        );
+        data.insert(
+            "source".to_string(),
+            serde_json::Value::String("static_return_origin".to_string()),
+        );
+
+        actions.push(Action {
+            kind: "fix_sig_return".to_string(),
+            confidence: "high".to_string(),
+            path: path.to_string(),
+            line,
+            message: format!(
+                "declared return {} is always {}",
+                current_text, candidate_text
+            ),
+            data,
+        });
+    }
+
+    actions
+}
+
+fn fact_location(value: &serde_json::Value) -> String {
+    let text = |key| value.get(key).and_then(|item| item.as_str()).unwrap_or_default();
+    let line = value
+        .get("line")
+        .and_then(|item| item.as_i64())
+        .unwrap_or_default();
+    format!(
+        "{}:{}:{}:{}:{}",
+        text("path"),
+        line,
+        text("class"),
+        text("method"),
+        text("kind")
+    )
+}
+
 fn propose_forwarded_return_chain_actions(input: &InputState) -> Vec<Action> {
     let mut actions = Vec::new();
 
@@ -2471,6 +2573,7 @@ pub fn build_actions(input: &InputState) -> Vec<Action> {
 
     let existing = actions.clone();
     actions.extend(propose_static_param_backflow_actions(input, &existing));
+    actions.extend(propose_false_nilable_return_actions(input));
     actions.extend(propose_forwarded_return_chain_actions(input));
     actions.extend(propose_struct_field_sig_actions(input));
 
@@ -2527,6 +2630,52 @@ mod tests {
 
     fn input_from_json(value: serde_json::Value) -> crate::schemas::InputState {
         serde_json::from_value(value).unwrap()
+    }
+
+    #[test]
+    fn strong_static_return_can_remove_false_nilability() {
+        let input = input_from_json(serde_json::json!({
+            "methods": [],
+            "facts": {
+                "existing_sigs": [{
+                    "path": "parser.rb",
+                    "line": 10,
+                    "class": "Parser",
+                    "method": "required_token",
+                    "kind": "instance",
+                    "sig": "sig { returns(T.nilable(Token)) }",
+                    "return_type": {
+                        "kind": "Nilable",
+                        "data": { "kind": "Primitive", "data": "Token" }
+                    },
+                    "return_type_text": "T.nilable(Token)",
+                    "non_nil_return_type": { "kind": "Primitive", "data": "Token" },
+                    "non_nil_return_type_text": "Token"
+                }],
+                "return_origins": [{
+                    "path": "parser.rb",
+                    "line": 10,
+                    "class": "Parser",
+                    "method": "required_token",
+                    "kind": "instance",
+                    "candidate_type": { "kind": "Primitive", "data": "Token" },
+                    "confidence": "strong",
+                    "sources": [{ "kind": "static", "type": "Token", "code": "Token.new(:ID)" }],
+                    "blockers": []
+                }]
+            }
+        }));
+
+        let actions = build_actions(&input);
+        assert!(actions.iter().any(|action| {
+            action.kind == "fix_sig_return"
+                && action.path == "parser.rb"
+                && action.line == 10
+                && action.confidence == "high"
+                && action.data.get("type").and_then(|value| value.as_str()) == Some("Token")
+                && action.data.get("from").and_then(|value| value.as_str())
+                    == Some("T.nilable(Token)")
+        }));
     }
 
     #[test]
