@@ -692,6 +692,43 @@ fn state_writes_without_declarations_extract_as_fields() -> Result<()> {
 }
 
 #[test]
+fn writes_through_local_receivers_do_not_become_owner_state() -> Result<()> {
+    use std::io::Write;
+    let mut tmp = tempfile::Builder::new().suffix(".rb").tempfile()?;
+    tmp.write_all(
+        b"class Parser\n  def populate(block)\n    block.after_all = parse_body\n    value = block.before_all\n    @position = 1\n    value\n  end\nend\n",
+    )?;
+
+    let document = syntax::parse_file(tmp.path().to_path_buf(), Language::Ruby)?;
+
+    assert!(document
+        .state_writes
+        .iter()
+        .any(|write| write.receiver == "block" && write.field == "after_all"));
+    assert!(document
+        .state_reads
+        .iter()
+        .any(|read| read.receiver == "block" && read.field == "before_all"));
+
+    let output = profile::extract(&document, Profile::Espalier);
+    assert!(output
+        .fields
+        .iter()
+        .any(|field| { field.owner == "Parser" && field.name == "position" }));
+    assert!(!output
+        .fields
+        .iter()
+        .any(|field| { field.owner == "Parser" && field.name == "after_all" }));
+    assert!(!output.state_accesses.iter().any(|access| {
+        access.owner == "Parser"
+            && access.receiver == "block"
+            && matches!(access.field.as_str(), "after_all" | "before_all")
+    }));
+
+    Ok(())
+}
+
+#[test]
 fn call_sites_on_fields_emit_state_protocols() -> Result<()> {
     use std::io::Write;
     let mut tmp = tempfile::NamedTempFile::new()?;

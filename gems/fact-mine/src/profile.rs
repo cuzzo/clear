@@ -1733,6 +1733,9 @@ fn extract_fields(document: &Document, language: &str, path: &str) -> Vec<FieldR
     };
 
     for write in &document.state_writes {
+        if !receiver_is_owner(&write.receiver, &write.owner) {
+            continue;
+        }
         let name = write.field.clone();
         let id = field_id(language, path, &write.owner, &name);
         if seen.contains(&id) {
@@ -1771,6 +1774,11 @@ fn extract_fields(document: &Document, language: &str, path: &str) -> Vec<FieldR
 
 fn field_id(language: &str, path: &str, owner: &str, name: &str) -> String {
     stable_id("state", &[language, path, owner, name])
+}
+
+fn receiver_is_owner(receiver: &str, owner: &str) -> bool {
+    matches!(receiver, "self" | "this" | "$this")
+        || (!owner.is_empty() && receiver == owner)
 }
 
 // ---------------------------------------------------------------------------
@@ -3259,34 +3267,42 @@ fn extract_state_accesses(
     language: &str,
     path: &str,
 ) -> Vec<StateAccessRecord> {
-    let reads = document.state_reads.iter().map(|row| {
-        state_access_record(
-            document,
-            language,
-            path,
-            &row.owner,
-            &row.function,
-            &row.field,
-            &row.receiver,
-            "reads",
-            row.line,
-            row.span,
-        )
-    });
-    let writes = document.state_writes.iter().map(|row| {
-        state_access_record(
-            document,
-            language,
-            path,
-            &row.owner,
-            &row.function,
-            &row.field,
-            &row.receiver,
-            "writes",
-            row.line,
-            row.span,
-        )
-    });
+    let reads = document
+        .state_reads
+        .iter()
+        .filter(|row| receiver_is_owner(&row.receiver, &row.owner))
+        .map(|row| {
+            state_access_record(
+                document,
+                language,
+                path,
+                &row.owner,
+                &row.function,
+                &row.field,
+                &row.receiver,
+                "reads",
+                row.line,
+                row.span,
+            )
+        });
+    let writes = document
+        .state_writes
+        .iter()
+        .filter(|row| receiver_is_owner(&row.receiver, &row.owner))
+        .map(|row| {
+            state_access_record(
+                document,
+                language,
+                path,
+                &row.owner,
+                &row.function,
+                &row.field,
+                &row.receiver,
+                "writes",
+                row.line,
+                row.span,
+            )
+        });
     reads.chain(writes).collect()
 }
 
