@@ -203,6 +203,39 @@ end
 }
 
 #[test]
+fn espalier_profile_projects_tlet_state_types_and_aliases() -> Result<()> {
+    use std::io::Write;
+
+    let mut tmp = tempfile::Builder::new().suffix(".rb").tempfile()?;
+    tmp.write_all(
+        br#"class OwnershipDataflow
+  OwnershipState = T.type_alias { T::Hash[String, Integer] }
+
+  def initialize
+    @block_out = T.let({}, T::Hash[Integer, T.nilable(OwnershipState)])
+  end
+end
+"#,
+    )?;
+    let document = syntax::parse_file(tmp.path().to_path_buf(), Language::Ruby)?;
+    let output = profile::extract(&document, Profile::Espalier);
+
+    assert_eq!(
+        output
+            .state_types
+            .get("OwnershipDataflow\0block_out")
+            .map(|value| value.to_sorbet_string()),
+        Some("T::Hash[Integer, T.nilable(OwnershipState)]".to_string())
+    );
+    assert!(output.type_definitions.iter().any(|definition| {
+        definition.kind == "type_alias"
+            && definition.name == "OwnershipState"
+            && definition.target.as_deref() == Some("T::Hash[String, Integer]")
+    }));
+    Ok(())
+}
+
+#[test]
 fn nil_kill_all_profile_examples_extract_successfully() -> Result<()> {
     let mut method_count = 0;
     for entry in fs::read_dir(examples_dir())? {

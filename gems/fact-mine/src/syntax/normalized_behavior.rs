@@ -113,6 +113,10 @@ pub(crate) trait NormalizedLanguageBehavior: Sync {
         None
     }
 
+    fn iteration_yields_collection_value(&self, _message: &str) -> bool {
+        false
+    }
+
     fn empty_check_call(&self, _message: &str) -> bool { false }
     fn visited_membership_call(&self, _message: &str) -> bool { false }
     fn visited_insert_call(&self, _message: &str) -> bool { false }

@@ -61,7 +61,11 @@ module Espalier
           hints << {
             type: :structural,
             line: context.fetch("line", method[:line]).to_i,
-            complexity: propagated_call_complexity(context, callee_complexity || "O(1)"),
+            complexity: propagated_call_complexity(
+              context,
+              callee_complexity || "O(1)",
+              receiver_state_dependent: receiver_state_dependent?(owner.to_s, callee)
+            ),
             space: callee_space,
             is_dynamic: true,
             operation: context["message"],
@@ -171,9 +175,25 @@ module Espalier
       log ? "O(N^#{power} log N)" : "O(N^#{power})"
     end
 
-    def propagated_call_complexity(context, callee_complexity)
+    def receiver_state_dependent?(owner, method, visiting = {})
+      key = [owner, method]
+      return false if visiting[key]
+
+      visiting = visiting.merge(key => true)
+      facts = Array(@facts_by_method[[owner, method]])
+      return true if facts.any? do |fact|
+        Array(fact["iterations"]).any? { |iteration| Array(iteration["state_domains"]).any? }
+      end
+
+      Array(@internal_calls&.dig(owner, method)).any? do |callee|
+        receiver_state_dependent?(owner, callee.to_s, visiting)
+      end
+    end
+
+    def propagated_call_complexity(context, callee_complexity, receiver_state_dependent: false)
       multiplicity = context.fetch("execution_multiplicity", "O(1)")
       return callee_complexity if multiplicity == "O(1)"
+      return multiply(multiplicity, callee_complexity) if receiver_state_dependent
 
       case context["argument_cardinality_relation"]
       when "partition_of"

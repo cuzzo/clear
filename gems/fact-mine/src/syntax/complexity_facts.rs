@@ -1,4 +1,5 @@
 use crate::ast::{self, Child, Node};
+use crate::type_inference::TypeExpr;
 use serde::{Deserialize, Serialize};
 use std::collections::{BTreeMap, BTreeSet};
 
@@ -52,7 +53,11 @@ pub struct IterationFact {
     pub line: usize,
     pub span: [usize; 4],
     pub kind: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub message: Option<String>,
     pub parameter_domains: Vec<String>,
+    #[serde(default)]
+    pub state_domains: Vec<String>,
     pub domain_expression: Vec<String>,
     pub cardinality_relation: String,
     pub bound_classification: String,
@@ -83,9 +88,15 @@ struct Assignment {
 }
 
 #[derive(Clone, Debug, Default)]
+struct CollectionGrowth {
+    power: usize,
+}
+
+#[derive(Clone, Debug, Default)]
 struct LoopContext {
     power: usize,
     params: BTreeSet<String>,
+    independent_collection_bindings: BTreeSet<String>,
     partition_locals: BTreeSet<String>,
     cursor: Option<String>,
     absorb_next: bool,
@@ -110,6 +121,29 @@ pub(crate) fn facts(document: &Document) -> Vec<MethodComplexityFacts> {
             let owner = definition
                 .map(|row| row.owner.as_str())
                 .unwrap_or(&method.owner);
+            let state_types = document
+                .state_declarations
+                .iter()
+                .filter(|state| state.owner == owner)
+                .filter_map(|state| {
+                    state.r#type.as_deref().map(|declared_type| {
+                        (
+                            state.field.trim_start_matches('@').to_string(),
+                            TypeExpr::parse(declared_type, document.language.as_str()),
+                        )
+                    })
+                })
+                .collect::<BTreeMap<_, _>>();
+            let mut scoped_type_aliases = document.type_aliases.clone();
+            for (name, target) in &document.type_aliases {
+                if name.starts_with(&format!("{owner}::")) {
+                    if let Some(short) = name.rsplit("::").next() {
+                        scoped_type_aliases
+                            .entry(short.to_string())
+                            .or_insert_with(|| target.clone());
+                    }
+                }
+            }
             let type_key = format!("{}\u{0}{}", owner, method.name);
             let collection_parameters = document
                 .method_param_types
@@ -128,6 +162,9 @@ pub(crate) fn facts(document: &Document) -> Vec<MethodComplexityFacts> {
                 &method.node,
                 &params,
                 &collection_parameters,
+                &state_types,
+                &scoped_type_aliases,
+                document.language.as_str(),
                 behavior,
             )
         })
@@ -143,6 +180,9 @@ fn fact_for_method(
     node: &Node,
     params: &BTreeSet<String>,
     collection_parameters: &BTreeSet<String>,
+    state_types: &BTreeMap<String, TypeExpr>,
+    type_aliases: &BTreeMap<String, String>,
+    language: &str,
     behavior: &dyn NormalizedLanguageBehavior,
 ) -> Option<MethodComplexityFacts> {
     let mut assignments = BTreeMap::<String, Vec<Assignment>>::new();
@@ -150,6 +190,7 @@ fn fact_for_method(
     let mut max_power = 0;
     let mut evidence = Vec::new();
     let mut call_contexts = Vec::new();
+    let mut collection_growth = BTreeMap::new();
     visit_loops(
         node,
         params,
@@ -158,6 +199,10 @@ fn fact_for_method(
         &mut max_power,
         &mut evidence,
         &mut call_contexts,
+        &mut collection_growth,
+        state_types,
+        type_aliases,
+        language,
         behavior,
     );
     let mut recursion = RecursionFacts::default();
@@ -249,6 +294,10 @@ fn visit_loops(
     max_power: &mut usize,
     evidence: &mut Vec<IterationFact>,
     call_contexts: &mut Vec<CallContainmentFact>,
+    collection_growth: &mut BTreeMap<String, CollectionGrowth>,
+    state_types: &BTreeMap<String, TypeExpr>,
+    type_aliases: &BTreeMap<String, String>,
+    language: &str,
     behavior: &dyn NormalizedLanguageBehavior,
 ) {
     let block_semantics = if node.r#type == "ITER" {
@@ -268,6 +317,10 @@ fn visit_loops(
                 max_power,
                 evidence,
                 call_contexts,
+                collection_growth,
+                state_types,
+                type_aliases,
+                language,
                 behavior,
             );
         }
@@ -294,8 +347,17 @@ fn visit_loops(
             assignments,
             (node.first_lineno, node.first_column),
         );
+        let states = state_names(growth_control.unwrap_or(node));
+        let growth_power = locals
+            .iter()
+            .filter_map(|name| collection_growth.get(name).map(|growth| growth.power))
+            .max();
         let unknown_iteration = node.r#type == "ITER" && block_semantics == BlockCallSemantics::Unknown;
-        let fixed = !unknown_iteration && refs.is_empty() && locals.is_empty();
+        let fixed = !unknown_iteration
+            && refs.is_empty()
+            && states.is_empty()
+            && locals.is_empty()
+            && growth_power.is_none();
         let cursor = growth_control.and_then(|row| {
             local_names(row)
                 .into_iter()
@@ -320,7 +382,11 @@ fn visit_loops(
         } else if parent.absorb_next {
             power = parent.power;
         } else if !fixed {
-            power = if refs.is_empty() {
+            power = if let Some(growth_power) = growth_power {
+                parent.power + growth_power
+            } else if !locals.is_disjoint(&parent.independent_collection_bindings) {
+                parent.power + 1
+            } else if refs.is_empty() {
                 power.max(1)
             } else if amortized {
                 power.max(1)
@@ -337,7 +403,9 @@ fn visit_loops(
             "unknown"
         } else if fixed {
             "fixed"
-        } else if amortized || parent.collapse_direct_child || parent.absorb_next || refs.is_empty() {
+        } else if !locals.is_disjoint(&parent.independent_collection_bindings) {
+            "independent_of"
+        } else if amortized || parent.collapse_direct_child || parent.absorb_next || (refs.is_empty() && states.is_empty()) {
             "partition_of"
         } else {
             "independent_of"
@@ -351,8 +419,10 @@ fn visit_loops(
                 node.last_column,
             ],
             kind: node.r#type.clone(),
+            message: iterator_message(node).map(ToString::to_string),
             parameter_domains: refs.iter().cloned().collect(),
-            domain_expression: locals.iter().cloned().collect(),
+            state_domains: states.iter().cloned().collect(),
+            domain_expression: domain_names.iter().cloned().collect(),
             cardinality_relation: relation.to_string(),
             bound_classification: if unknown_iteration { "unknown" } else if fixed { "fixed" } else { "input" }.to_string(),
             execution_multiplicity: if unknown_iteration { "unknown".to_string() } else { polynomial(power) },
@@ -361,10 +431,27 @@ fn visit_loops(
             amortized,
         });
         let root_line = parent.root_line.or(Some(node.first_lineno));
+        let bindings = loop_binding_names(node);
+        let independent_collection_bindings = if iterator_message(node)
+            .is_some_and(|message| behavior.iteration_yields_collection_value(message))
+            && states.len() == 1
+            && states
+                .iter()
+                .next()
+                .and_then(|state| state_types.get(state.trim_start_matches('@')))
+                .is_some_and(|state_type| {
+                    iteration_yields_collection_value(state_type, type_aliases, language)
+                })
+        {
+            bindings.clone()
+        } else {
+            BTreeSet::new()
+        };
         let context = LoopContext {
             power,
             params: refs,
-            partition_locals: loop_binding_names(node),
+            independent_collection_bindings,
+            partition_locals: bindings,
             cursor,
             absorb_next: fixpoint,
             root_line,
@@ -383,6 +470,10 @@ fn visit_loops(
                 max_power,
                 evidence,
                 call_contexts,
+                collection_growth,
+                state_types,
+                type_aliases,
+                language,
                 behavior,
             );
         }
@@ -395,10 +486,15 @@ fn visit_loops(
                 max_power,
                 evidence,
                 call_contexts,
+                collection_growth,
+                state_types,
+                type_aliases,
+                language,
                 behavior,
             );
         }
     } else {
+        record_collection_growth(node, parent, collection_growth, behavior);
         if let Some(message) = direct_call_message(node) {
             let argument_names = call_argument_nodes(node)
                 .into_iter()
@@ -446,9 +542,40 @@ fn visit_loops(
                 max_power,
                 evidence,
                 call_contexts,
+                collection_growth,
+                state_types,
+                type_aliases,
+                language,
                 behavior,
             );
         }
+    }
+}
+
+fn record_collection_growth(
+    node: &Node,
+    context: &LoopContext,
+    growth: &mut BTreeMap<String, CollectionGrowth>,
+    behavior: &dyn NormalizedLanguageBehavior,
+) {
+    if context.power == 0 {
+        return;
+    }
+    let receiver = if matches!(node.r#type.as_str(), "OP_ASGN1" | "ATTRASGN") {
+        node.children.first().and_then(ast::node)
+    } else if direct_call_message(node)
+        .is_some_and(|message| behavior.mutating_receiver_message(message))
+    {
+        call_receiver(node)
+    } else {
+        None
+    };
+    let Some(receiver) = receiver else {
+        return;
+    };
+    for name in local_names(receiver) {
+        let entry = growth.entry(name).or_default();
+        entry.power = entry.power.max(context.power);
     }
 }
 
@@ -755,7 +882,7 @@ fn collect_recursion(
     behavior: &dyn NormalizedLanguageBehavior,
 ) {
     let now_inside = inside_loop || loop_node(node, behavior);
-    if direct_call_message(node).is_some_and(|message| message == function) {
+    if recursive_self_call(node, function) {
         out.calls += 1;
         let symbols = descendant_symbols(node);
         let assigned_shape = local_names(node)
@@ -783,6 +910,17 @@ fn collect_recursion(
     }
     for child in child_nodes(node) {
         collect_recursion(child, function, now_inside, assignments, out, behavior);
+    }
+}
+
+fn recursive_self_call(node: &Node, function: &str) -> bool {
+    if direct_call_message(node) != Some(function) {
+        return false;
+    }
+    match node.r#type.as_str() {
+        "VCALL" | "FCALL" => true,
+        "CALL" => call_receiver(node).is_some_and(|receiver| receiver.r#type == "SELF"),
+        _ => false,
     }
 }
 
@@ -912,6 +1050,63 @@ fn local_names(node: &Node) -> BTreeSet<String> {
         output.extend(local_names(child));
     }
     output
+}
+
+fn state_names(node: &Node) -> BTreeSet<String> {
+    let mut output = BTreeSet::new();
+    if matches!(node.r#type.as_str(), "IVAR" | "CVAR" | "GVAR") {
+        if let Some(name) = child_string(node.children.first()) {
+            output.insert(name.to_string());
+        } else if !node.text.trim().is_empty() {
+            output.insert(node.text.trim().to_string());
+        }
+    }
+    for child in child_nodes(node) {
+        output.extend(state_names(child));
+    }
+    output
+}
+
+fn iteration_yields_collection_value(
+    receiver_type: &TypeExpr,
+    aliases: &BTreeMap<String, String>,
+    language: &str,
+) -> bool {
+    let mut seen = BTreeSet::new();
+    let receiver_type = resolve_alias_type(receiver_type, aliases, language, &mut seen);
+    let yielded = match &receiver_type {
+        TypeExpr::Hash { value, .. } => Some(value.as_ref()),
+        _ => None,
+    };
+    yielded.is_some_and(|yielded| {
+        let mut seen = BTreeSet::new();
+        matches!(
+            resolve_alias_type(yielded, aliases, language, &mut seen),
+            TypeExpr::Array(_) | TypeExpr::Hash { .. } | TypeExpr::Set(_)
+        )
+    })
+}
+
+fn resolve_alias_type(
+    value: &TypeExpr,
+    aliases: &BTreeMap<String, String>,
+    language: &str,
+    seen: &mut BTreeSet<String>,
+) -> TypeExpr {
+    match value {
+        TypeExpr::Nilable(inner) => resolve_alias_type(inner, aliases, language, seen),
+        TypeExpr::Primitive(name) => {
+            let short = name.split("::").last().unwrap_or(name);
+            let Some(target) = aliases.get(name).or_else(|| aliases.get(short)) else {
+                return value.clone();
+            };
+            if !seen.insert(name.clone()) {
+                return value.clone();
+            }
+            resolve_alias_type(&TypeExpr::parse(target, language), aliases, language, seen)
+        }
+        _ => value.clone(),
+    }
 }
 
 fn child_nodes(node: &Node) -> Vec<&Node> {
@@ -1128,6 +1323,11 @@ def tree(node, seen)
   tree(node.left, seen)
   tree(node.right, seen)
 end
+class Accessor
+  def ownership
+    resolved.ownership
+  end
+end
 def settle(items)
   changed = true
   while changed
@@ -1163,6 +1363,14 @@ end
         assert_eq!(complexity(&rows, "fib"), Some("O(2^N)".into()));
         assert_eq!(complexity(&rows, "permute"), Some("O(N!)".into()));
         assert_eq!(complexity(&rows, "tree"), Some("unknown".into()));
+        assert_eq!(
+            rows.iter()
+                .find(|row| row.function == "ownership")
+                .unwrap()
+                .recursion
+                .calls,
+            0
+        );
         assert_eq!(complexity(&rows, "settle"), Some("O(N^2)".into()));
         assert_eq!(complexity(&rows, "settle_groups"), Some("O(N^3)".into()));
         assert_eq!(

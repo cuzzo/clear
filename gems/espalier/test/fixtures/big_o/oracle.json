@@ -1,4 +1,9 @@
 {
+  "receiver_state_rescan.rb": {
+    "cleanup_decisions": "O(N^3)",
+    "block_exit_cleanup_summary": "O(N^2)",
+    "block_exit_cleanup_summaries": "O(N^2)"
+  },
   "ruby_product.rb": {
     "cartesian_product": "O(N^2)",
     "fixed_matrix": "O(1)"

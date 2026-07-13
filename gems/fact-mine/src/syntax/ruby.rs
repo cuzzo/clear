@@ -28,7 +28,7 @@ use super::normalized_behavior::{
     NormalizedLanguageBehavior, NormalizedNilGuardFact, NormalizedSemanticEffect,
     NormalizedVisibilityEvent, SyntaxMetadata,
 };
-use super::{CallSite, FunctionDef};
+use super::{CallSite, FunctionDef, StateDeclaration};
 use crate::ast::{self, Node, Span};
 use std::collections::{BTreeMap, BTreeSet};
 
@@ -60,11 +60,15 @@ const RUBY_CALLBACK_SET: &[&str] = &[
 ];
 
 const RUBY_ITERATION_METHODS: &[&str] = &[
-    "each", "each_key", "each_value", "each_with_index", "each_with_object", "each_entry",
-    "each_index", "each_slice", "each_cons", "cycle", "map", "map!", "collect", "collect!",
+    "each", "each_key", "each_value", "each_pair", "each_with_index", "each_with_object",
+    "each_entry", "each_index", "each_slice", "each_cons", "each_char", "each_line", "cycle",
+    "with_index", "with_object", "map", "map!", "collect", "collect!",
     "select", "reject", "filter", "filter_map", "flat_map", "group_by", "partition", "delete_if",
-    "keep_if", "sort_by", "reverse_each", "times", "upto", "downto", "step", "any?", "all?",
-    "none?", "one?", "count", "find", "find_index", "detect", "reduce", "inject", "sum", "loop",
+    "keep_if", "select!", "reject!", "sort_by", "sort_by!", "reverse_each", "times", "upto",
+    "downto", "step", "any?", "all?", "none?", "one?", "count", "find", "find_index",
+    "index", "rindex", "detect", "reduce", "inject", "sum", "min_by", "max_by", "uniq",
+    "merge!", "to_h", "gsub", "scan", "loop",
+    "transform_keys", "transform_keys!", "transform_values", "transform_values!",
 ];
 
 const RUBY_ONCE_BLOCK_METHODS: &[&str] = &[
@@ -217,6 +221,7 @@ impl NormalizedLanguageBehavior for RubyNormalizedBehavior {
         if [
             "map", "collect", "select", "reject", "filter", "filter_map", "group_by",
             "partition", "compact", "sort", "sort_by", "reverse", "to_a", "keys", "values",
+            "transform_keys", "transform_values",
         ].contains(&message) {
             CollectionAllocationSemantics::PreservesReceiver
         } else if ["flat_map", "flatten"].contains(&message) {
@@ -242,11 +247,16 @@ impl NormalizedLanguageBehavior for RubyNormalizedBehavior {
         } else if [
             "map", "map!", "collect", "collect!", "select", "reject", "filter", "filter_map",
             "flat_map", "compact", "flatten", "sort", "sort_by", "reverse", "to_a", "keys", "values",
+            "transform_keys", "transform_keys!", "transform_values", "transform_values!",
         ].contains(&message) {
             CardinalityCallSemantics::PreservesReceiver
         } else {
             CardinalityCallSemantics::Unknown
         }
+    }
+
+    fn iteration_yields_collection_value(&self, message: &str) -> bool {
+        message == "each_value"
     }
 
     fn empty_check_call(&self, message: &str) -> bool {
@@ -267,6 +277,59 @@ impl NormalizedLanguageBehavior for RubyNormalizedBehavior {
 
     fn collection_parameter_type(&self, type_name: &str) -> bool {
         ["Array", "Hash", "Set", "Enumerable"].iter().any(|name| type_name.contains(name))
+    }
+
+    fn state_declaration_from_node(
+        &self,
+        node: &Node,
+        owner: &str,
+        _in_method: bool,
+    ) -> Option<StateDeclaration> {
+        if node.r#type != "IASGN" {
+            return None;
+        }
+        let field = node.children.first().and_then(|child| match child {
+            ast::Child::String(value) | ast::Child::Symbol(value) => Some(value.clone()),
+            _ => None,
+        })?;
+        let value = node.children.get(1).and_then(ast::node)?;
+        if !matches!(value.r#type.as_str(), "CALL" | "QCALL") {
+            return None;
+        }
+        let receiver = value.children.first().and_then(ast::node)?;
+        let message = value.children.get(1).and_then(|child| match child {
+            ast::Child::String(value) | ast::Child::Symbol(value) => Some(value.as_str()),
+            _ => None,
+        })?;
+        if receiver.text != "T" || message != "let" {
+            return None;
+        }
+        let arguments = value.children.get(2).and_then(ast::node)?;
+        let declared_type = arguments
+            .children
+            .iter()
+            .filter_map(ast::node)
+            .nth(1)?
+            .text
+            .trim()
+            .to_string();
+        if declared_type.is_empty() || declared_type == "T.untyped" {
+            return None;
+        }
+
+        Some(StateDeclaration {
+            field,
+            owner: owner.to_string(),
+            r#type: Some(declared_type),
+            file: String::new(),
+            line: node.first_lineno,
+            span: [
+                node.first_lineno,
+                node.first_column,
+                node.last_lineno,
+                node.last_column,
+            ],
+        })
     }
     fn supports_parameter_normalization(&self) -> bool {
         true
@@ -1427,6 +1490,11 @@ mod tests {
         assert_eq!(behavior.untyped_type(), "T.untyped");
         assert_eq!(behavior.untyped_array_type(), "T::Array[T.untyped]");
         assert_eq!(behavior.untyped_hash_type(), "T::Hash[T.untyped, T.untyped]");
+        for message in ["each_pair", "with_index", "index", "to_h", "gsub", "transform_values"] {
+            assert_eq!(behavior.block_call_semantics(message), BlockCallSemantics::Iteration);
+        }
+        assert!(behavior.iteration_yields_collection_value("each_value"));
+        assert!(!behavior.iteration_yields_collection_value("each_pair"));
 
         // format_nilable_type
         assert_eq!(behavior.format_nilable_type(""), "");
