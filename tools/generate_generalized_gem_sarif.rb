@@ -20,10 +20,7 @@ LOCAL_RUBY_LOAD_PATHS.reverse_each { |path| $LOAD_PATH.unshift(path) }
 existing_rubylib = ENV.fetch("RUBYLIB", "").split(File::PATH_SEPARATOR).reject(&:empty?)
 ENV["RUBYLIB"] = (LOCAL_RUBY_LOAD_PATHS + existing_rubylib).uniq.join(File::PATH_SEPARATOR)
 
-require "slopcop"
-require "espalier"
-require "nil_kill"
-require "nil_kill/sarif"
+SUPPORTED_TOOLS = %w[decomplex boobytrap slopcop espalier nil-kill].freeze
 
 options = {
   repo: ".",
@@ -32,7 +29,8 @@ options = {
   coverage: [],
   exclude: [],
   top: 50,
-  decomplex_binary: nil
+  decomplex_binary: nil,
+  only: [],
 }
 
 OptionParser.new do |parser|
@@ -45,7 +43,19 @@ OptionParser.new do |parser|
   parser.on("--top=N", Integer) { |value| options[:top] = value }
   parser.on("--exclude=GLOB") { |value| options[:exclude] << value }
   parser.on("--decomplex-binary=PATH") { |value| options[:decomplex_binary] = value }
+  parser.on("--only=TOOL", SUPPORTED_TOOLS, "Generate only one report (repeatable)") do |value|
+    options[:only] << value
+  end
 end.parse!
+
+selected_tools = options[:only].empty? ? SUPPORTED_TOOLS : options[:only].uniq
+
+require "nil_kill/sarif"
+require "slopcop" if selected_tools.include?("slopcop")
+if (selected_tools & %w[espalier nil-kill]).any?
+  require "espalier" if selected_tools.include?("espalier")
+  require "nil_kill"
+end
 
 repo = File.realpath(options[:repo])
 out_dir = File.expand_path(options[:out_dir])
@@ -235,16 +245,18 @@ elsif changed
 end
 
 if rel_files.empty?
-  write(File.join(out_dir, "decomplex.sarif"), empty_sarif("Decomplex", "decomplex.report.sarif.v1"))
-  write(File.join(out_dir, "decomplex.md"), empty_markdown("Decomplex"))
-  write(File.join(out_dir, "boobytrap.sarif"), empty_sarif("Boobytrap", "boobytrap.report.sarif.v1"))
-  write(File.join(out_dir, "boobytrap.md"), empty_markdown("Boobytrap"))
-  write(File.join(out_dir, "slopcop.sarif"), empty_sarif("SlopCop", "slopcop.report.sarif.v1"))
-  write(File.join(out_dir, "slopcop.md"), empty_markdown("SlopCop"))
-  write(File.join(out_dir, "espalier.sarif"), empty_sarif("Espalier", "espalier.manifest.sarif.v1"))
-  write(File.join(out_dir, "espalier.md"), empty_markdown("Espalier"))
-  write(File.join(out_dir, "nil-kill.sarif"), empty_sarif("Nil-Kill", "nil-kill.report.sarif.v1"))
-  write(File.join(out_dir, "nil-kill.md"), empty_markdown("Nil-Kill"))
+  {
+    "decomplex" => ["Decomplex", "decomplex.report.sarif.v1"],
+    "boobytrap" => ["Boobytrap", "boobytrap.report.sarif.v1"],
+    "slopcop" => ["SlopCop", "slopcop.report.sarif.v1"],
+    "espalier" => ["Espalier", "espalier.manifest.sarif.v1"],
+    "nil-kill" => ["Nil-Kill", "nil-kill.report.sarif.v1"],
+  }.each do |tool, (name, format)|
+    next unless selected_tools.include?(tool)
+
+    write(File.join(out_dir, "#{tool}.sarif"), empty_sarif(name, format))
+    write(File.join(out_dir, "#{tool}.md"), empty_markdown(name))
+  end
   exit 0
 end
 
@@ -255,7 +267,8 @@ fact_mine_temp = nil
 churn_temp = nil
 
 begin
-  if !ENV["FACT_MINE_FACTS_FILE"] || ENV["FACT_MINE_FACTS_FILE"].empty?
+  if (selected_tools & %w[espalier nil-kill]).any? &&
+      (!ENV["FACT_MINE_FACTS_FILE"] || ENV["FACT_MINE_FACTS_FILE"].empty?)
     fact_mine_bin = ENV.fetch("FACT_MINE_RUST_BINARY", File.expand_path("gems/fact-mine/target/release/fact-mine-rust", ROOT))
     if File.executable?(fact_mine_bin)
       require "tempfile"
@@ -271,63 +284,77 @@ begin
     end
   end
 
-  decomplex_bin = options[:decomplex_binary] || File.join(ROOT, "gems/decomplex/target/release/decomplex-rust")
-  if File.executable?(decomplex_bin)
-    run_decomplex_rust(decomplex_bin, rel_files, out_dir, repo)
-  else
-    abort "decomplex-rust binary not found at #{decomplex_bin}. Please build it or pass --decomplex-binary"
+  if selected_tools.include?("decomplex")
+    decomplex_bin = options[:decomplex_binary] || File.join(ROOT, "gems/decomplex/target/release/decomplex-rust")
+    if File.executable?(decomplex_bin)
+      run_decomplex_rust(decomplex_bin, rel_files, out_dir, repo)
+    else
+      abort "decomplex-rust binary not found at #{decomplex_bin}. Please build it or pass --decomplex-binary"
+    end
   end
 
   boobytrap_bin = File.join(ROOT, "gems/boobytrap/exe/boobytrap")
   go_coverage = coverage_paths.find { |p| p.end_with?("coverage.out") } || coverage_paths.first
-  args = ["report", "--repo=#{repo}", "--output=#{File.join(out_dir, "boobytrap.md")}", "--json=#{File.join(out_dir, "boobytrap.sarif")}", "--top=#{options[:top]}"]
-  args << "--coverage=#{go_coverage}" if go_coverage
-  options[:exclude].each { |e| args << "--exclude=#{e}" }
-  unless system(boobytrap_bin, *args)
-    abort "Failed to execute boobytrap: #{boobytrap_bin} #{args.join(' ')}"
+  if selected_tools.include?("boobytrap")
+    args = ["report", "--repo=#{repo}", "--output=#{File.join(out_dir, "boobytrap.md")}", "--json=#{File.join(out_dir, "boobytrap.sarif")}", "--top=#{options[:top]}"]
+    # The report subcommand otherwise defaults to coverage/.resultset.json.
+    # An explicitly empty value is Boobytrap's supported no-coverage mode.
+    args << "--coverage=#{go_coverage}"
+    options[:exclude].each { |e| args << "--exclude=#{e}" }
+    unless system(boobytrap_bin, *args)
+      abort "Failed to execute boobytrap: #{boobytrap_bin} #{args.join(' ')}"
+    end
   end
 
-  # Share Boobytrap's computed churn output with SlopCop to avoid re-deriving
-  helper_args = ["--repo=#{repo}"]
-  helper_args << "--coverage=#{go_coverage}" if go_coverage
-  out, status = Open3.capture2(boobytrap_bin, *helper_args)
-  unless status.success?
-    abort "Failed to execute boobytrap helper: #{boobytrap_bin} #{helper_args.join(' ')}\nOutput:\n#{out}"
+  if selected_tools.include?("slopcop")
+    # Share Boobytrap's computed churn output with SlopCop to avoid re-deriving it.
+    helper_args = ["--repo=#{repo}"]
+    helper_args << "--coverage=#{go_coverage}" if go_coverage
+    out, status = Open3.capture2(boobytrap_bin, *helper_args)
+    unless status.success?
+      abort "Failed to execute boobytrap helper: #{boobytrap_bin} #{helper_args.join(' ')}\nOutput:\n#{out}"
+    end
+    fix_scores = (JSON.parse(out)["fix_scores"] || {})
+
+    require "tempfile"
+    churn_temp = Tempfile.new(["boobytrap-churn", ".json"])
+    churn_temp.write(JSON.generate(fix_scores))
+    churn_temp.close
+    ENV["BOOBYTRAP_CHURN_FILE"] = churn_temp.path
+
+    slopcop = SlopCop::Report.new(
+      files: rel_files,
+      repo: repo,
+      resultset: coverage,
+      top: options[:top],
+      exclude: options[:exclude],
+      link_base: out_dir
+    )
+    write(File.join(out_dir, "slopcop.sarif"), slopcop.to_json)
+    write(File.join(out_dir, "slopcop.md"), slopcop.to_markdown)
   end
-  fix_scores = (JSON.parse(out)["fix_scores"] || {})
 
-  require "tempfile"
-  churn_temp = Tempfile.new(["boobytrap-churn", ".json"])
-  churn_temp.write(JSON.generate(fix_scores))
-  churn_temp.close
-  ENV["BOOBYTRAP_CHURN_FILE"] = churn_temp.path
+  if (selected_tools & %w[espalier nil-kill]).any?
+    Dir.chdir(repo) do
+      nil_kill_evidence = build_nil_kill_evidence(rel_files, repo)
+      if selected_tools.include?("espalier")
+        manifest = build_espalier_manifest(rel_files, repo, nil_kill_evidence)
+        write(File.join(out_dir, "espalier.sarif"), Espalier::Formatter.to_sarif(manifest))
+        write(
+          File.join(out_dir, "espalier.md"),
+          Espalier::Reporter.new(manifest, root: repo, link_base: out_dir).to_markdown
+        )
+      end
 
-  slopcop = SlopCop::Report.new(
-    files: rel_files,
-    repo: repo,
-    resultset: coverage,
-    top: options[:top],
-    exclude: options[:exclude],
-    link_base: out_dir
-  )
-  write(File.join(out_dir, "slopcop.sarif"), slopcop.to_json)
-  write(File.join(out_dir, "slopcop.md"), slopcop.to_markdown)
-
-  Dir.chdir(repo) do
-    nil_kill_evidence = build_nil_kill_evidence(rel_files, repo)
-    manifest = build_espalier_manifest(rel_files, repo, nil_kill_evidence)
-    write(File.join(out_dir, "espalier.sarif"), Espalier::Formatter.to_sarif(manifest))
-    write(
-      File.join(out_dir, "espalier.md"),
-      Espalier::Reporter.new(manifest, root: repo, link_base: out_dir).to_markdown
-    )
-
-    nil_kill_report = NilKill::Report.new(["--format", "sarif"], evidence: nil_kill_evidence)
-    write(File.join(out_dir, "nil-kill.sarif"), nil_kill_report.to_sarif(nil_kill_evidence))
-    write(
-      File.join(out_dir, "nil-kill.md"),
-      NilKill::Reporting::MultiLanguageReport.new(nil_kill_evidence).lines.join("\n") + "\n"
-    )
+      if selected_tools.include?("nil-kill")
+        nil_kill_report = NilKill::Report.new(["--format", "sarif"], evidence: nil_kill_evidence)
+        write(File.join(out_dir, "nil-kill.sarif"), nil_kill_report.to_sarif(nil_kill_evidence))
+        write(
+          File.join(out_dir, "nil-kill.md"),
+          NilKill::Reporting::MultiLanguageReport.new(nil_kill_evidence).lines.join("\n") + "\n"
+        )
+      end
+    end
   end
 ensure
   previous_parser.nil? ? ENV.delete("DECOMPLEX_PARSER") : ENV["DECOMPLEX_PARSER"] = previous_parser
