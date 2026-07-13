@@ -165,18 +165,7 @@ pub async fn cover_sqlite(
             .fetch_one(pool)
             .await
             .with_context(|| format!("execute telemetry SQL: {}", telemetry.sql))?;
-        for id in telemetry.expression_ids {
-            let metric = &mut coverage.metrics[id];
-            metric.hit_true_count += row
-                .try_get::<i64, _>(format!("__cov_{id}_true").as_str())?
-                .max(0) as u64;
-            metric.hit_false_count += row
-                .try_get::<i64, _>(format!("__cov_{id}_false").as_str())?
-                .max(0) as u64;
-            metric.hit_unknown_count += row
-                .try_get::<i64, _>(format!("__cov_{id}_unknown").as_str())?
-                .max(0) as u64;
-        }
+        collect_i64_metrics(&mut coverage, &row, &telemetry.expression_ids)?;
     }
     Ok(coverage)
 }
@@ -262,14 +251,7 @@ pub async fn cover_mysql(
             .fetch_one(pool)
             .await
             .with_context(|| format!("execute MySQL/MariaDB telemetry SQL: {}", telemetry.sql))?;
-        for id in telemetry.expression_ids {
-            let metric = &mut coverage.metrics[id];
-            metric.hit_true_count += row.try_get::<u64, _>(format!("__cov_{id}_true").as_str())?;
-            metric.hit_false_count +=
-                row.try_get::<u64, _>(format!("__cov_{id}_false").as_str())?;
-            metric.hit_unknown_count +=
-                row.try_get::<u64, _>(format!("__cov_{id}_unknown").as_str())?;
-        }
+        collect_i64_metrics(&mut coverage, &row, &telemetry.expression_ids)?;
     }
     Ok(coverage)
 }
@@ -285,7 +267,6 @@ pub async fn cover_mysql(
     cover_sqlite(&sqlite_pool, analysis, parameters).await
 }
 
-#[cfg(not(coverage))]
 fn collect_i64_metrics<R: Row>(
     coverage: &mut SourceFileCoverage,
     row: &R,
@@ -297,16 +278,34 @@ where
 {
     for id in ids {
         let metric = &mut coverage.metrics[*id];
-        metric.hit_true_count += row
-            .try_get::<i64, _>(format!("__cov_{id}_true").as_str())?
-            .max(0) as u64;
-        metric.hit_false_count += row
-            .try_get::<i64, _>(format!("__cov_{id}_false").as_str())?
-            .max(0) as u64;
-        metric.hit_unknown_count += row
-            .try_get::<i64, _>(format!("__cov_{id}_unknown").as_str())?
-            .max(0) as u64;
+        let true_column = format!("__cov_{id}_true");
+        let false_column = format!("__cov_{id}_false");
+        let unknown_column = format!("__cov_{id}_unknown");
+        add_metric_count(
+            &mut metric.hit_true_count,
+            row.try_get::<i64, _>(true_column.as_str())?,
+            &true_column,
+        )?;
+        add_metric_count(
+            &mut metric.hit_false_count,
+            row.try_get::<i64, _>(false_column.as_str())?,
+            &false_column,
+        )?;
+        add_metric_count(
+            &mut metric.hit_unknown_count,
+            row.try_get::<i64, _>(unknown_column.as_str())?,
+            &unknown_column,
+        )?;
     }
+    Ok(())
+}
+
+fn add_metric_count(total: &mut u64, count: i64, column: &str) -> Result<()> {
+    let count = u64::try_from(count)
+        .with_context(|| format!("telemetry column {column} returned a negative count"))?;
+    *total = total
+        .checked_add(count)
+        .with_context(|| format!("telemetry column {column} overflowed its coverage counter"))?;
     Ok(())
 }
 
@@ -414,6 +413,17 @@ mod tests {
             let query = sqlx::query("SELECT ?");
             let _q = bind_mysql(query, val);
         }
+    }
+
+    #[test]
+    fn telemetry_counts_reject_negative_values_and_overflow() {
+        let mut count = 3;
+        add_metric_count(&mut count, 4, "count").unwrap();
+        assert_eq!(count, 7);
+
+        assert!(add_metric_count(&mut count, -1, "count").is_err());
+        let mut count = u64::MAX;
+        assert!(add_metric_count(&mut count, 1, "count").is_err());
     }
 
     #[tokio::test]
