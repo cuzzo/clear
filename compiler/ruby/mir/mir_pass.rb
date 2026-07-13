@@ -445,7 +445,6 @@ class MIRPass
   # Returns a new array (does not mutate the input).
   sig { params(stmts: T::Array[AST::Node], ctx: MIRPass::WalkCtx).returns(T::Array[T.untyped]) }
   def transform_body(stmts, ctx)
-    return stmts unless stmts.is_a?(Array)
     result = []
     cleanup_facts = ctx.cleanup_facts
     stmts.each do |stmt|

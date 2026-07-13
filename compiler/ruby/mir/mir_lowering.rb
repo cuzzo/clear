@@ -3029,7 +3029,7 @@ class MIRLowering
   # Mirrors transpile_cast logic but returns MIR nodes instead of strings.
   sig { params(mir_node: MIR::Node, from_type: Type, to_type: Type::TypeInput).returns(T.nilable(MIR::Cast)) }
   def mir_cast(mir_node, from_type, to_type)
-    from_t = from_type.is_a?(Type) ? from_type : Type.new(from_type)
+    from_t = from_type
     to_t   = to_type.is_a?(Type)   ? to_type   : Type.new(to_type)
     return nil if from_t.semantic_type_key == to_t.semantic_type_key
     # @indirect is constructed by destination placement (HeapCreate); it is
@@ -4081,9 +4081,9 @@ class MIRLowering
       moved_without_copy: explicit_owned_sink_transfer?(ast_node, source_node),
       owned_parameter: owned_parameter_source_node?(source_node),
       needs_heap_create: !!(ast_node.respond_to?(:needs_heap_create) && ast_node.needs_heap_create),
-      same_alloc_verifiable: !!entry&.needs_cleanup?,
-      same_alloc_transfer_source: !!entry&.present?,
-      transfer_without_local_cleanup: !!(entry&.present? && !entry.needs_cleanup?),
+      same_alloc_verifiable: entry.needs_cleanup?,
+      same_alloc_transfer_source: entry.present?,
+      transfer_without_local_cleanup: entry.present? && !entry.needs_cleanup?,
       already_owned_value: owned_sink_value?(value, ast_node),
       existing_owned_source: existing_owned_source_node?(source_node),
       borrowed_union_sink: borrowed_union_sink_source?(ast_node, source_node, ti),

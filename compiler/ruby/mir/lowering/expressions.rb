@@ -2067,7 +2067,7 @@ module MIRLoweringExpressions
     lt = type_info_for(left)
     rt = type_info_for(right)
 
-    if (lt&.string_comparable_with?(rt)) || (rt&.string_comparable_with?(lt))
+    if lt.string_comparable_with?(rt) || rt.string_comparable_with?(lt)
       return ["expectEqualStrings", []]
     end
 
