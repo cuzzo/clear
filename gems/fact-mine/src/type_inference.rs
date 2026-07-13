@@ -670,21 +670,63 @@ const CORE_CLASS_CONSTANTS: &[&str] = &[
 
 impl<'a> TypeInferenceVisitor<'a> {
     fn parse_type(&self, s: &str) -> TypeExpr {
-        TypeExpr::parse(s, self.document.language.as_str())
+        let parsed = TypeExpr::parse(s, self.document.language.as_str());
+        self.expand_type_aliases(parsed, &mut BTreeSet::new())
     }
-    
 
-    
+    fn expand_type_aliases(
+        &self,
+        parsed: TypeExpr,
+        seen: &mut BTreeSet<String>,
+    ) -> TypeExpr {
+        match parsed {
+            TypeExpr::Primitive(name) => {
+                let Some(target) = self.type_alias_target(&name) else {
+                    return TypeExpr::Primitive(name);
+                };
+                if !seen.insert(name.clone()) {
+                    return TypeExpr::Primitive(name);
+                }
+                let expanded = self.expand_type_aliases(
+                    TypeExpr::parse(target, self.document.language.as_str()),
+                    seen,
+                );
+                seen.remove(&name);
+                expanded
+            }
+            TypeExpr::Nilable(inner) => TypeExpr::Nilable(Box::new(
+                self.expand_type_aliases(*inner, seen),
+            )),
+            TypeExpr::Array(inner) => TypeExpr::Array(Box::new(
+                self.expand_type_aliases(*inner, seen),
+            )),
+            TypeExpr::Set(inner) => TypeExpr::Set(Box::new(
+                self.expand_type_aliases(*inner, seen),
+            )),
+            TypeExpr::Hash { key, value } => TypeExpr::Hash {
+                key: Box::new(self.expand_type_aliases(*key, seen)),
+                value: Box::new(self.expand_type_aliases(*value, seen)),
+            },
+            TypeExpr::Union(parts) => TypeExpr::Union(
+                parts
+                    .into_iter()
+                    .map(|part| self.expand_type_aliases(part, seen))
+                    .collect(),
+            ),
+            other => other,
+        }
+    }
 
-    
-
-    
-
-    
-
-    
-
-    
+    fn type_alias_target(&self, name: &str) -> Option<&str> {
+        if let Some(target) = self.document.type_aliases.get(name) {
+            return Some(target);
+        }
+        let owner = self.current_owners.last()?;
+        self.document
+            .type_aliases
+            .get(&format!("{owner}::{name}"))
+            .map(String::as_str)
+    }
 
     pub(crate) fn visit(&mut self, node: &crate::ast::Node) {
         match node.r#type.as_str() {

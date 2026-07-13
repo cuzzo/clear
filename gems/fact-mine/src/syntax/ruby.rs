@@ -738,7 +738,13 @@ impl NormalizedLanguageBehavior for RubyNormalizedBehavior {
             return receiver_type.map(|t| t.to_string());
         }
 
-        if message == "to_s" || message == "to_str" || message == "name" {
+        // Module#name is nil for anonymous classes and modules. Keep this Ruby
+        // semantic in the language adapter so generic flow analysis does not
+        // incorrectly declare safe-navigation on `self.class.name` dead.
+        if message == "name" {
+            return Some("T.nilable(String)".to_string());
+        }
+        if message == "to_s" || message == "to_str" {
             return Some("String".to_string());
         }
         if message == "to_sym" || message == "intern" {
@@ -2151,6 +2157,10 @@ mod tests {
         assert_eq!(behavior.static_return_type("==", Some("T.nilable(String)")), Some("T::Boolean".to_string()));
         assert_eq!(behavior.static_return_type("to_i", None), Some("Integer".to_string()));
         assert_eq!(behavior.static_return_type("class", None), Some("Class".to_string()));
+        assert_eq!(
+            behavior.static_return_type("name", Some("Class")),
+            Some("T.nilable(String)".to_string())
+        );
         assert_eq!(behavior.static_return_type("upcase", Some("String")), Some("String".to_string()));
 
         // propagated_collection_return_type first and join

@@ -641,6 +641,8 @@ fn nil_kill_return_flow_ignores_escape_into_noreturn_branch() -> Result<()> {
 class Parser
   extend T::Sig
 
+  MaybeToken = T.type_alias { T.nilable(Token) }
+
   sig { returns(Token) }
   def current
     T.must(@tokens[0])
@@ -673,6 +675,15 @@ class Parser
       raise "invalid"
     end
   end
+
+  sig { params(token: MaybeToken).returns(T::Boolean) }
+  def optional?(token)
+    token.nil?
+  end
+
+  def parser_class?
+    self.class.name&.include?("Parser")
+  end
 end
 "#,
     )?;
@@ -698,6 +709,20 @@ end
             .count(),
         1,
         "prepasses must not duplicate emitted facts"
+    );
+    assert!(
+        output
+            .dead_nil_checks
+            .iter()
+            .all(|record| record["code"] != "token.nil?"),
+        "a nilable type alias must not prove a nil check dead"
+    );
+    assert!(
+        output
+            .dead_nil_checks
+            .iter()
+            .all(|record| !record["code"].as_str().is_some_and(|code| code.contains("class.name"))),
+        "Module#name may be nil for anonymous classes"
     );
 
     Ok(())
