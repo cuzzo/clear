@@ -1,0 +1,86 @@
+# Polymorphic WITH flow path: GUARD + ON GuardFail RETURN, and
+# RETURN from inside the WITH body. This must run through real Zig
+# runtime helpers, not only Ruby codegen specs.
+
+STRUCT Counter { value: Int64 }
+
+FN isPositive(c: Counter) RETURNS !Bool ->
+    WITH POLYMORPHIC c AS x GUARD x.value > 0 {
+        RETURN TRUE;
+    } ON GuardFail RETURN FALSE
+END
+
+FN bumpAndReturn!(MUTABLE c: Counter) RETURNS !Int64 ->
+    WITH POLYMORPHIC c AS x {
+        x.value = x.value + 1;
+        v = x.value;
+        RETURN v;
+    }
+END
+
+FN valueOf!(MUTABLE c: Counter) RETURNS !Int64 ->
+    WITH POLYMORPHIC c AS x {
+        v = x.value;
+        RETURN v;
+    }
+END
+
+FN check!(MUTABLE c: Counter, expected_before: Int64) RETURNS !Void ->
+    before = valueOf!(c) OR_ELSE RAISE;
+    ASSERT before == expected_before, "before";
+
+    changed = isPositive(c) OR_ELSE RAISE;
+    ASSERT changed == (expected_before > 0), "changed";
+
+    IF expected_before > 0 THEN
+        bumped = bumpAndReturn!(c) OR_ELSE RAISE;
+        ASSERT bumped == expected_before + 1, "bumped return";
+    END
+
+    after = valueOf!(c) OR_ELSE RAISE;
+    IF expected_before > 0 THEN
+        ASSERT after == expected_before + 1, "after changed";
+    ELSE
+        ASSERT after == expected_before, "after skipped";
+    END
+    RETURN;
+END
+
+FN main() RETURNS !Void ->
+    MUTABLE plain_c     = Counter{ value: 1 };
+    MUTABLE local_c     = Counter{ value: 1 } @local;
+    MUTABLE multi_c     = Counter{ value: 1 } @multiowned;
+    MUTABLE shared_c    = Counter{ value: 1 } @shared;
+    MUTABLE indirect_c  = Counter{ value: 1 } @indirect;
+
+    MUTABLE locked_c    = Counter{ value: 1 } @shared:locked;
+    MUTABLE wlocked_c   = Counter{ value: 1 } @shared:writeLocked;
+    MUTABLE versioned_c = Counter{ value: 1 } @shared:versioned;
+    MUTABLE atomic_c    = Counter{ value: 1 } @indirect:atomic;
+
+    MUTABLE bare_locked_c    = Counter{ value: 1 } @locked;
+    MUTABLE bare_wlocked_c   = Counter{ value: 1 } @writeLocked;
+    MUTABLE bare_versioned_c = Counter{ value: 1 } @versioned;
+
+    check!(plain_c, 1) OR_ELSE RAISE;
+    check!(local_c, 1) OR_ELSE RAISE;
+    check!(multi_c, 1) OR_ELSE RAISE;
+    check!(shared_c, 1) OR_ELSE RAISE;
+    check!(indirect_c, 1) OR_ELSE RAISE;
+    check!(locked_c, 1) OR_ELSE RAISE;
+    check!(wlocked_c, 1) OR_ELSE RAISE;
+    check!(versioned_c, 1) OR_ELSE RAISE;
+    check!(atomic_c, 1) OR_ELSE RAISE;
+    check!(bare_locked_c, 1) OR_ELSE RAISE;
+    check!(bare_wlocked_c, 1) OR_ELSE RAISE;
+    check!(bare_versioned_c, 1) OR_ELSE RAISE;
+
+    MUTABLE locked_zero = Counter{ value: 0 } @shared:locked;
+    MUTABLE versioned_zero = Counter{ value: 0 } @shared:versioned;
+    MUTABLE atomic_zero = Counter{ value: 0 } @indirect:atomic;
+
+    check!(locked_zero, 0) OR_ELSE RAISE;
+    check!(versioned_zero, 0) OR_ELSE RAISE;
+    check!(atomic_zero, 0) OR_ELSE RAISE;
+    RETURN;
+END

@@ -5,7 +5,7 @@ form against matching Go and Rust stream/channel implementations.
 
 Two distinct measurements live in this directory:
 
-1. **CLEAR-language form** (`bench.cht`): the canonical user pattern
+1. **CLEAR-language form** (`bench.clear`): the canonical user pattern
    that exercises the full pipeline-terminal observable wiring —
    BG STREAM producer + `|> SUM _` consumer-fiber spawn + WaitGroup
    join via `NEXT`. Measures end-to-end cost of the language form,
@@ -13,11 +13,11 @@ Two distinct measurements live in this directory:
 
 2. **Runtime-level helper** (`bench_clear.zig`): hand-written Zig
    for isolating `obs.AtomicSum` itself. This is not used by the
-   benchmark runner's CLEAR headline result because it is not `.cht`
+   benchmark runner's CLEAR headline result because it is not `.clear`
    code.
 
 ```clear
-# bench.cht (the canonical CLEAR form)
+# bench.clear (the canonical CLEAR form)
 running: ~Int64@observable = gen |> SUM _;
 final = NEXT running;
 ```
@@ -36,7 +36,7 @@ consumer's `defer ctx.acc.finish()` issues `wg.done()`.
 
 ## Results (this box, ReleaseFast / `-O` / `--release`)
 
-### CLEAR-language pipeline form (`bench.cht` → `./clear build --optimized`)
+### CLEAR-language pipeline form (`bench.clear` → `./clear build --optimized`)
 
 2M values are produced by a `BG STREAM`, folded via `|> SUM _`
 (which auto-produces a `~Int64@observable`), and joined via `NEXT`.
@@ -153,7 +153,7 @@ proves the producer is genuinely racing).
 
 ## Build & run
 
-  - CLEAR: `./clear build --optimized bench.cht -o bench_clear_lang && ./bench_clear_lang`
+  - CLEAR: `./clear build --optimized bench.clear -o bench_clear_lang && ./bench_clear_lang`
   - Zig:   `zig build-exe --dep obs --dep compat -Mroot=bench_clear.zig -Mobs=../../../zig/lib/observable.zig -Mcompat=../../../zig/lib/compat.zig -lc -OReleaseFast --name bench_clear && ./bench_clear`
   - Go:    `go run bench.go`
   - Rust:  `rustc -O bench.rs -o bench_rust && ./bench_rust`

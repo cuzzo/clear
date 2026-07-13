@@ -1068,9 +1068,9 @@ pub fn concurrentShardedPoolEachInPlace(
 
     if (!fp.scheduler_running or fp.active_scheduler.current_task == null) {
         for (0..N) |i| {
-            for (pool.shards[i].slots) |*slot| {
-                if (!slot.alive) continue;
-                try eachFn(rt, user_ctx, &slot.value);
+            for (0..pool.shards[i].capacity) |idx| {
+                const value = pool.shards[i].valueAtIndex(idx) orelse continue;
+                try eachFn(rt, user_ctx, value);
             }
         }
         return;
@@ -1089,9 +1089,9 @@ pub fn concurrentShardedPoolEachInPlace(
             const worker_rt = @as(*RuntimeT, @ptrCast(@alignCast(raw_rt)));
             const ctx = @as(*@This(), @ptrCast(@alignCast(raw_args.?)));
             defer ctx.wg.done();
-            for (ctx.shard.slots) |*slot| {
-                if (!slot.alive) continue;
-                eachFn(worker_rt, ctx.user_ctx, &slot.value) catch |err| {
+            for (0..ctx.shard.capacity) |idx| {
+                const value = ctx.shard.valueAtIndex(idx) orelse continue;
+                eachFn(worker_rt, ctx.user_ctx, value) catch |err| {
                     _ = ctx.err_code.cmpxchgStrong(0, @intFromError(err), .seq_cst, .seq_cst);
                     continue;
                 };

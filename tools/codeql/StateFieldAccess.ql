@@ -13,13 +13,13 @@ predicate discoveredField(string field) {
     call.getTargetName() = field and
     field != "" and
     field != "[]" and
-    call.getFile().getRelativePath().matches("src/%")
+    call.getFile().getRelativePath().matches("compiler/ruby/%")
   )
   or
   exists(InstanceVariableWriteAccess ivar |
     ivar.getVariable().getName() = "@" + field and
     field != "" and
-    ivar.getFile().getRelativePath().matches("src/%")
+    ivar.getFile().getRelativePath().matches("compiler/ruby/%")
   )
 }
 

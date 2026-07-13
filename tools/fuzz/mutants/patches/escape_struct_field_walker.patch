@@ -1,6 +1,6 @@
-diff --git a/src/semantic/escape_analysis.rb b/src/semantic/escape_analysis.rb
---- a/src/semantic/escape_analysis.rb
-+++ b/src/semantic/escape_analysis.rb
+diff --git a/compiler/ruby/semantic/escape_analysis.rb b/compiler/ruby/semantic/escape_analysis.rb
+--- a/compiler/ruby/semantic/escape_analysis.rb
++++ b/compiler/ruby/semantic/escape_analysis.rb
 @@ -665,5 +665,6 @@ module EscapeAnalysis
    sig { params(receiver: AST::Node, args: T::Array[AST::Node], params: T::Array[AST::Param], fn_nodes: FnNodes, facts_by_name: T::Hash[String, FunctionFacts], schema_lookup: T.nilable(Proc)).void }
    private_class_method def self.mark_receiver_for_owned_sink!(receiver, args, params, fn_nodes, facts_by_name, schema_lookup)

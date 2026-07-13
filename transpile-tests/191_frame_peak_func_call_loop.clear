@@ -1,0 +1,25 @@
+# Test: calling a string-returning function in a loop has bounded frame.
+# The function's preserveAndRewind ensures returned strings are in the
+# caller's frame. The loop mark reclaims intermediates each iteration.
+
+FN greet(name: String) RETURNS !String ->
+    RETURN "Hello, " $+ name $+ "!";
+END
+
+FN main() RETURNS Void ->
+    MUTABLE total: Int64 = 0;
+    FOR i IN (1_i64 ..= 500) DO
+        result = greet("World");
+        total += result.length();
+    END
+    peak = framePeakBytes();
+
+    # 500 calls to greet, each returns ~13 bytes. With proper frame rewind,
+    # peak should be much less than 500 * 13 = 6500 bytes of string data.
+    # Allow generous headroom for arena overhead, but catch unbounded growth.
+    ASSERT peak < 500000, "frame peak should be bounded (not 500x accumulated)";
+    ASSERT total == 6500, "500 * 13 chars";
+
+    print("PASS: frame peak bounded in func call loop");
+    RETURN;
+END

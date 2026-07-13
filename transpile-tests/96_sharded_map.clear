@@ -1,0 +1,35 @@
+# Test: HashMap@sharded(N) — sharded hash maps for lock-free parallel access.
+# Each shard is an independent StringHashMapUnmanaged, routed by key hash.
+# No locks, no atomic ops — sharding IS the concurrency strategy.
+
+FN main() RETURNS Void ->
+    # String-keyed sharded map with 2 shards.
+    MUTABLE counts: HashMap<Int64>@sharded(2) = {};
+
+    # Put values (routed to shards by key hash).
+    counts["alice"] = 10;
+    counts["bob"] = 20;
+    counts["charlie"] = 30;
+
+    # Get values back (map[key] returns ?V — use OR_ELSE to unwrap).
+    a = counts["alice"] OR_ELSE 0;
+    ASSERT a == 10, "alice should be 10";
+
+    b = counts["bob"] OR_ELSE 0;
+    ASSERT b == 20, "bob should be 20";
+
+    # Contains check.
+    ASSERT counts.contains?("alice") == TRUE, "should contain alice";
+    ASSERT counts.contains?("nobody") == FALSE, "should not contain nobody";
+
+    # Count across all shards.
+    n: Int64 = counts.count();
+    ASSERT n == 3, "count should be 3";
+
+    # Delete.
+    counts.delete("bob");
+    ASSERT counts.count() == 2, "count should be 2 after delete";
+    ASSERT counts.contains?("bob") == FALSE, "bob should be removed";
+
+    RETURN;
+END

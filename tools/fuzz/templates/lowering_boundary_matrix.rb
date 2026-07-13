@@ -31,7 +31,7 @@ def lbm_shape(shape)
   when :string
     ["", "String", 'COPY "abc"', "x.length()", "3_i64"]
   when :list
-    ["", "Int64[]@list", "mkList() OR RAISE", "x.length()", "2_i64"]
+    ["", "Int64[]@list", "mkList() OR_ELSE RAISE", "x.length()", "2_i64"]
   when :struct
     ["STRUCT Box { label: String }\n", "Box", 'Box{ label: COPY "abc" }', "x.label.length()", "3_i64"]
   end
@@ -98,7 +98,7 @@ FuzzGenerator.register(:lowering_boundary_matrix, cells: LBM_CELLS) do |p|
         END
 
         FN main() RETURNS !Void ->
-            x: #{ty} = build() OR RAISE;
+            x: #{ty} = build() OR_ELSE RAISE;
             ASSERT #{observe} == #{expected}, "lower returned call";
             RETURN;
         END
@@ -161,7 +161,7 @@ FuzzGenerator.register(:lowering_boundary_matrix, cells: LBM_CELLS) do |p|
     when :next_owned_string
       %(FN main() RETURNS Void ->\n    h: ~String = BG { COPY "abc"; };\n    s: String = NEXT h;\n    ASSERT s.length() == 3_i64, "next owned string";\n    RETURN;\nEND\n)
     when :next_stream_string
-      %(FN main() RETURNS Void ->\n    s: ~String[INF] = BG STREAM { WHILE TRUE DO YIELD COPY "abc"; END };\n    x: String = NEXT s;\n    ASSERT x.length() == 3_i64, "next stream string";\n    RETURN;\nEND\n)
+      %(FN ownedString(value: String) RETURNS String -> RETURN COPY value; END\nFN main() RETURNS Void ->\n    s: ~String[INF] = BG STREAM { WHILE TRUE DO YIELD ownedString("abc"); END };\n    x: String = NEXT s;\n    ASSERT x.length() == 3_i64, "next stream string";\n    RETURN;\nEND\n)
     when :pipeline_collect
       %(FN main() RETURNS Void ->\n    s: ~Int64[] = 1_i64 ..< 5_i64;\n    total = s |> SELECT _ * 2_i64 |> SUM _;\n    ASSERT total == 20_i64, "pipeline collect";\n    RETURN;\nEND\n)
     when :pipeline_collect_inline
@@ -219,7 +219,7 @@ FuzzGenerator.register(:lowering_boundary_matrix, cells: LBM_CELLS) do |p|
         END
 
         FN wrap(x: Int64) RETURNS !Int64 ->
-            out = (x |> risky) OR RAISE;
+            out = (x |> risky) OR_ELSE RAISE;
             RETURN out;
         CATCH Input
             RETURN -1_i64;
@@ -238,7 +238,7 @@ FuzzGenerator.register(:lowering_boundary_matrix, cells: LBM_CELLS) do |p|
         END
 
         FN wrap(x: Int64) RETURNS !Int64 ->
-            out = (x |> risky_add(3_i64)) OR RAISE;
+            out = (x |> risky_add(3_i64)) OR_ELSE RAISE;
             RETURN out;
         CATCH Input
             RETURN -1_i64;
@@ -254,9 +254,9 @@ FuzzGenerator.register(:lowering_boundary_matrix, cells: LBM_CELLS) do |p|
         STRUCT Item { key: String, value: Int64 }
         FN item(k: String, v: Int64) RETURNS !Item -> RETURN Item{ key: COPY k, value: v }; END
         FN main() RETURNS !Void ->
-            s: ~?Item[] = BG STREAM { YIELD item("a", 1_i64) OR RAISE; YIELD item("b", 2_i64) OR RAISE; };
+            s: ~?Item[] = BG STREAM { YIELD item("a", 1_i64) OR_ELSE RAISE; YIELD item("b", 2_i64) OR_ELSE RAISE; };
             m = s |> INDEX _.key;
-            ASSERT m["a"].length() == 1_i64, "pipeline index";
+            ASSERT m["a"]?.length() == 1_i64, "pipeline index";
             RETURN;
         END
       CHT

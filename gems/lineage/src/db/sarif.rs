@@ -65,6 +65,8 @@ pub fn ingest_sarif_paths(
                 &mut stats,
             )?;
         }
+        storage.prune_stale_sarif_data()?;
+        storage.refresh_current_sarif_findings_view()?;
         Ok(())
     })();
     match result {
@@ -371,6 +373,9 @@ fn is_dark_arm_result(
     message: &str,
     category: &str,
 ) -> bool {
+    if result_is_explicitly_dead(result, properties, rule_id, category) {
+        return false;
+    }
     if properties
         .get("dark_arm")
         .and_then(Value::as_bool)
@@ -389,6 +394,32 @@ fn is_dark_arm_result(
     )
     .to_ascii_lowercase();
     haystack.contains("dark-arm") || haystack.contains("dark arm")
+}
+
+fn result_is_explicitly_dead(
+    result: &Value,
+    properties: &Value,
+    rule_id: &str,
+    category: &str,
+) -> bool {
+    let property_is_dead = ["category", "arm_category", "kind", "type", "status", "classification"]
+        .iter()
+        .filter_map(|key| properties.get(key).and_then(Value::as_str))
+        .any(|value| value.eq_ignore_ascii_case("dead"));
+    if property_is_dead || category.eq_ignore_ascii_case("dead") {
+        return true;
+    }
+
+    [
+        rule_id,
+        result.get("ruleId").and_then(Value::as_str).unwrap_or(""),
+    ]
+    .iter()
+    .any(|value| {
+        value
+            .split(|character: char| !character.is_ascii_alphanumeric())
+            .any(|segment| segment.eq_ignore_ascii_case("dead"))
+    })
 }
 
 fn partial_fingerprint(result: &Value) -> Option<String> {
@@ -451,6 +482,27 @@ mod tests {
     use tempfile::tempdir;
 
     #[test]
+    fn dead_classification_is_exact_and_does_not_match_deadline() {
+        let deadline = serde_json::json!({"ruleId": "slopcop.dark-arm"});
+        assert!(is_dark_arm_result(
+            &deadline,
+            &serde_json::json!({}),
+            "slopcop.dark-arm",
+            "dark arm can miss a deadline",
+            "dark-arm",
+        ));
+
+        let dead = serde_json::json!({"ruleId": "slopcop.dark-arm.dead"});
+        assert!(!is_dark_arm_result(
+            &dead,
+            &serde_json::json!({"dark_arm": true, "kind": "dead"}),
+            "slopcop.dark-arm.dead",
+            "dark arm",
+            "dead",
+        ));
+    }
+
+    #[test]
     fn ingests_sarif_findings_and_replaces_idempotently() {
         let dir = tempdir().unwrap();
         fs::create_dir_all(dir.path().join("src")).unwrap();
@@ -510,7 +562,7 @@ mod tests {
         let stats = ingest_sarif_paths(
             &storage,
             dir.path(),
-            &[sarif.clone()],
+            std::slice::from_ref(&sarif),
             "slopcop",
             "abc",
             Some(20),
@@ -537,10 +589,149 @@ mod tests {
     }
 
     #[test]
+    fn current_snapshot_and_lifecycle_ignore_stale_findings() {
+        let dir = tempdir().unwrap();
+        let storage = Storage::open_memory().unwrap();
+        let sarif = dir.path().join("report.sarif");
+        let result = |rule: &str, message: &str| {
+            serde_json::json!({
+                "ruleId": rule,
+                "level": "warning",
+                "message": {"text": message},
+                "locations": [{"physicalLocation": {
+                    "artifactLocation": {"uri": "src/demo.rb"},
+                    "region": {"startLine": 2}
+                }}],
+                "partialFingerprints": {"stable": message}
+            })
+        };
+        let document = |results: Vec<Value>| {
+            serde_json::json!({
+                "version": "2.1.0",
+                "runs": [{
+                    "tool": {"driver": {"name": "Decomplex"}},
+                    "results": results,
+                    "properties": {"format": "decomplex.report.sarif.v1"}
+                }]
+            })
+        };
+
+        fs::write(
+            &sarif,
+            serde_json::to_vec(&document(vec![
+                result("decomplex.old", "resolved"),
+                result("decomplex.same", "persisted"),
+                serde_json::json!({
+                    "ruleId": "decomplex.other",
+                    "level": "warning",
+                    "message": {"text": "other file retained"},
+                    "locations": [{"physicalLocation": {
+                        "artifactLocation": {"uri": "src/other.rb"},
+                        "region": {"startLine": 1}
+                    }}],
+                    "partialFingerprints": {"stable": "other file retained"}
+                }),
+            ]))
+            .unwrap(),
+        )
+        .unwrap();
+        ingest_sarif_paths(
+            &storage,
+            dir.path(),
+            std::slice::from_ref(&sarif),
+            "decomplex",
+            "old",
+            Some(10),
+            false,
+        )
+        .unwrap();
+
+        fs::write(
+            &sarif,
+            serde_json::to_vec(&document(vec![
+                result("decomplex.same", "persisted"),
+                result("decomplex.new", "new"),
+            ]))
+            .unwrap(),
+        )
+        .unwrap();
+        ingest_sarif_paths(
+            &storage,
+            dir.path(),
+            &[sarif],
+            "decomplex",
+            "new",
+            Some(20),
+            false,
+        )
+        .unwrap();
+
+        assert_eq!(storage.count_rows("sarif_findings").unwrap(), 5);
+        let current = storage.sarif_findings_for_path("src/demo.rb").unwrap();
+        assert_eq!(current.len(), 2);
+        assert!(current.iter().all(|finding| finding.commit_hash == "new"));
+        let retained = storage.sarif_findings_for_path("src/other.rb").unwrap();
+        assert_eq!(retained.len(), 1);
+        assert_eq!(retained[0].commit_hash, "old");
+        assert_eq!(
+            storage.sarif_finding_counts_by_file().unwrap()["src/demo.rb"],
+            2
+        );
+        assert_eq!(
+            storage.sarif_lifecycle_summary().unwrap(),
+            crate::storage::SarifLifecycleSummary {
+                new_findings: 2,
+                resolved_findings: 1,
+                persisted_findings: 1,
+            }
+        );
+    }
+
+    #[test]
+    fn ingests_sql_cov_complexity_contract_without_sql_analysis() {
+        let dir = tempdir().unwrap();
+        let storage = Storage::open_memory().unwrap();
+        let sarif = dir.path().join("query-plan.sarif");
+        let document = serde_json::json!({
+            "version": "2.1.0",
+            "runs": [{
+                "tool": {"driver": {"name": "SQL-COV"}},
+                "properties": {"format": "sql-cov.plan.sarif.v1"},
+                "results": [{
+                    "ruleId": "complexity.observation",
+                    "level": "note",
+                    "message": {"text": "orders.list has estimated runtime O(N * M) and auxiliary space O(N)"},
+                    "locations": [{"physicalLocation": {
+                        "artifactLocation": {"uri": "queries/orders.sql"},
+                        "region": {"startLine": 1, "startColumn": 1}
+                    }}],
+                    "partialFingerprints": {"queryId": "orders.list"},
+                    "properties": {"category": "complexity", "complexity": {
+                        "subject_kind": "query", "subject_name": "orders.list",
+                        "time": "O(N * M)", "auxiliary_space": "O(N)",
+                        "dynamic": true, "basis": "postgres-explain"
+                    }}
+                }]
+            }]
+        });
+        fs::write(&sarif, serde_json::to_vec(&document).unwrap()).unwrap();
+
+        let stats = ingest_sarif_paths(&storage, dir.path(), &[sarif], "sql-cov", "abc", Some(20), true).unwrap();
+        assert_eq!(stats.findings, 1);
+        let findings = storage.sarif_findings_for_path("queries/orders.sql").unwrap();
+        assert_eq!(findings.len(), 1);
+        assert_eq!(findings[0].tool_name, "SQL-COV");
+        assert_eq!(findings[0].run_format, "sql-cov.plan.sarif.v1");
+        let properties: Value = serde_json::from_str(&findings[0].properties_json).unwrap();
+        assert_eq!(properties["complexity"]["time"], "O(N * M)");
+        assert_eq!(properties["complexity"]["basis"], "postgres-explain");
+    }
+
+    #[test]
     fn test_sarif_ingest_edge_cases() {
         let dir = tempdir().unwrap();
         let storage = Storage::open_memory().unwrap();
-        
+
         let u1 = LogicalUnit::new(
             "U1".to_string(),
             UnitKind::Function,
@@ -566,16 +757,16 @@ mod tests {
 
         let sub = dir.path().join("sub");
         fs::create_dir(&sub).unwrap();
-        
+
         let sarif1 = sub.join("report1.sarif");
         fs::write(&sarif1, "{}").unwrap();
         let json1 = sub.join("report2.json");
         fs::write(&json1, "{}").unwrap();
         let txt1 = sub.join("report3.txt");
         fs::write(&txt1, "{}").unwrap();
-        
+
         let bad_path = dir.path().join("does_not_exist");
-        
+
         let stats = ingest_sarif_paths(
             &storage,
             dir.path(),
@@ -585,9 +776,9 @@ mod tests {
             None,
             false,
         ).unwrap();
-        
-        assert_eq!(stats.skipped_files, 2); 
-        
+
+        assert_eq!(stats.skipped_files, 2);
+
         let invalid_json = sub.join("invalid.json");
         fs::write(&invalid_json, "invalid JSON content").unwrap();
         let stats2 = ingest_sarif_paths(
@@ -632,7 +823,7 @@ mod tests {
               }]
             }"#,
         ).unwrap();
-        
+
         let stats3 = ingest_sarif_paths(
             &storage,
             dir.path(),
@@ -642,8 +833,45 @@ mod tests {
             None,
             false,
         ).unwrap();
-        
+
         assert_eq!(stats3.artifacts, 1);
         assert_eq!(stats3.findings, 2);
+
+        let dead_json = dir.path().join("dead_test.sarif");
+        fs::write(
+            &dead_json,
+            r#"{
+              "version":"2.1.0",
+              "runs":[{
+                "tool":{"driver":{"name":"SlopCop"}},
+                "results":[{
+                  "ruleId":"slopcop.dark-arm.dead",
+                  "level":"warning",
+                  "message":{"text":"dark arm: dead"},
+                  "locations":[{
+                    "physicalLocation":{
+                      "artifactLocation":{"uri":"src/demo.rb"}
+                    }
+                  }],
+                  "properties":{"kind":"dead"}
+                }]
+              }]
+            }"#,
+        ).unwrap();
+
+        let stats4 = ingest_sarif_paths(
+            &storage,
+            dir.path(),
+            &[dead_json],
+            "test_source",
+            "abc",
+            None,
+            false,
+        ).unwrap();
+
+        assert_eq!(stats4.findings, 1);
+        let findings = storage.sarif_findings_for_path("src/demo.rb").unwrap();
+        let dead_finding = findings.iter().find(|f| f.rule_id == "slopcop.dark-arm.dead").unwrap();
+        assert!(!dead_finding.is_dark_arm);
     }
 }

@@ -397,7 +397,7 @@ pub const Scheduler = struct {
     // pin, generation, atomic per-hop lock-state snapshot, atomic
     // wait-field protocol — false-positive timeouts no longer occur,
     // so the original 100ms can be restored. 100ms is what the
-    // transpile-test 263_with_lock_contention.cht and other timeout
+    // transpile-test 263_with_lock_contention.clear and other timeout
     // tests assume; bumping it broke them silently.
     lock_timeout_ms: i64 = if (builtin.mode == .Debug) 100 else 30_000,
 
@@ -2609,6 +2609,12 @@ pub const WaitGroup = struct {
 
     pub fn add(self: *WaitGroup, count: usize) void {
         _ = self.counter.fetchAdd(count, .seq_cst);
+    }
+
+    /// Non-blocking settlement poll. Acquire pairs with done()'s decrement so
+    /// observing ready also observes the producer's result write.
+    pub fn isReady(self: *const WaitGroup) bool {
+        return self.counter.load(.acquire) == 0;
     }
 
     pub fn done(self: *WaitGroup) void {

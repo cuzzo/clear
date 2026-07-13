@@ -186,8 +186,8 @@ Run after every change to FSM code:
 
 ```bash
 bundle exec rspec spec/fsm_*.rb
-./clear test transpile-tests/27{4,7}_fsm_*.cht  # core FSM coverage
-./clear test transpile-tests/29{1,2,3,4,5}_fsm_*.cht  # ForEach + WITH redesign
+./clear test transpile-tests/27{4,7}_fsm_*.clear  # core FSM coverage
+./clear test transpile-tests/29{1,2,3,4,5}_fsm_*.clear  # ForEach + WITH redesign
 ./clear test transpile-tests/                       # full corpus
 ```
 

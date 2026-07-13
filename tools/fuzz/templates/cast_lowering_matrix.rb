@@ -10,10 +10,9 @@ CAST_LOWERING_CELLS = []
   %i[int_to_float float_to_int byte_to_int int_to_number number_to_float fn_value].each do |shape|
     expected = :pass
     # Function values are first-class at declaration/return/argument
-    # boundaries. Lists of function values and branch reassignment currently
-    # are not valid source shapes, so keep those cells as negative source
-    # coverage rather than treating parser/type diagnostics as compiler bugs.
-    expected = :compile_error if shape == :fn_value && %i[list_literal branch_assign].include?(context)
+    # boundaries and through branch reassignment. Lists of function values are
+    # not yet a valid source shape, so keep that cell as negative coverage.
+    expected = :compile_error if shape == :fn_value && context == :list_literal
     CAST_LOWERING_CELLS << { context: context, shape: shape, expected: expected }
   end
 end
@@ -81,7 +80,7 @@ FuzzGenerator.register(:cast_lowering_matrix, cells: CAST_LOWERING_CELLS) do |p|
       <<~CHT
         #{prelude}FN call(f: #{ty}) RETURNS !Int64 REQUIRES f: NON_REENTRANT -> RETURN f(1_i64); END
         FN main() RETURNS Void ->
-            ASSERT (call(#{expr}) OR 0_i64) == #{expected}, "cast arg fn";
+            ASSERT (call(#{expr}) OR_ELSE 0_i64) == #{expected}, "cast arg fn";
             RETURN;
         END
       CHT

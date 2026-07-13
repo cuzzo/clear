@@ -1,0 +1,35 @@
+FN maybe(ok: Bool) RETURNS ?Int64 ->
+    IF ok THEN RETURN 7_i64; END
+    RETURN NIL;
+END
+
+FN fallible(ok: Bool) RETURNS !Int64 ->
+    IF ok THEN RETURN 9_i64; END
+    RAISE;
+END
+
+FN fallibleOptional(mode: Int64) RETURNS !?Int64 ->
+    IF mode == 0_i64 THEN RAISE; END
+    IF mode == 1_i64 THEN RETURN NIL; END
+    RETURN 11_i64;
+END
+
+FN fallibleOptionalString(mode: Int64) RETURNS !?String ->
+    IF mode == 0_i64 THEN RAISE; END
+    IF mode == 1_i64 THEN RETURN NIL; END
+    RETURN COPY "value";
+END
+
+FN main() RETURNS Void ->
+    ASSERT (maybe(TRUE) OR_ELSE 0_i64) == 7_i64;
+    ASSERT (maybe(FALSE) OR_ELSE 3_i64) == 3_i64;
+    ASSERT (fallible(TRUE) OR_ELSE 0_i64) == 9_i64;
+    ASSERT (fallible(FALSE) OR_ELSE 4_i64) == 4_i64;
+    ASSERT (fallibleOptional(0_i64) OR_ELSE 5_i64) == 5_i64;
+    ASSERT (fallibleOptional(1_i64) OR_ELSE 6_i64) == 6_i64;
+    ASSERT (fallibleOptional(2_i64) OR_ELSE 7_i64) == 11_i64;
+    ASSERT (fallibleOptionalString(0_i64) OR_ELSE COPY "fallback") == "fallback";
+    ASSERT (fallibleOptionalString(1_i64) OR_ELSE COPY "fallback") == "fallback";
+    ASSERT (fallibleOptionalString(2_i64) OR_ELSE COPY "fallback") == "value";
+    RETURN;
+END

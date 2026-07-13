@@ -74,6 +74,10 @@ module FuzzCoverageModel
     auto_inference_matrix: profile(
       failure_proves: 'Auto inference accepts concrete solvable positions and rejects unresolved/ambiguous ones.'
     ),
+    auto_ownership_transport_matrix: profile(
+      failure_proves: 'DEFAULT ownership transport borrows or materializes mutation-free values and rejects every resolved mutable call or overlapping write.',
+      high_risk: true
+    ),
     bg_capture_transfer_matrix: profile(
       failure_proves: 'BG/DO/BG STREAM captures transfer owned roots without losing cleanup or lifetime facts.',
       high_risk: true
@@ -88,7 +92,8 @@ module FuzzCoverageModel
       failure_proves: 'Binary operator admission and lowering produce valid typed MIR/Zig for supported operands.'
     ),
     bind_capture_cleanup: profile(
-      failure_proves: 'Bind-expression captures clean optional and list payloads on every exit path.'
+      failure_proves: 'Bind captures distinguish borrowed container Rc/Arc handles from owned pop/resolve payloads without premature release, leaks, or capability loss.',
+      high_risk: true
     ),
     branch_cleanup: profile(
       failure_proves: 'Branch-local cleanup-bearing allocations are cleaned across both arms and early exits.',
@@ -114,6 +119,9 @@ module FuzzCoverageModel
     catch_reassign_matrix: profile(
       failure_proves: 'Catch fallback reassignment preserves ownership facts for replaced values.'
     ),
+    tense_predicate_matrix: profile(
+      failure_proves: 'EXISTS, IS_OK, IS_READY, optional Boolean ambiguity, and left-to-right stacked-tense refinement preserve their type and binding contracts.'
+    ),
     cleanup_classifier_shapes: profile(
       failure_proves: 'CleanupClassifier recognizes ownership-bearing struct, union, option, capability, and pipeline shapes.'
     ),
@@ -132,7 +140,7 @@ module FuzzCoverageModel
       failure_proves: 'Owned values stored into list/set/map/pool and collection literals keep cleanup facts visible.'
     ),
     cond_or_fallback: profile(
-      failure_proves: 'OR fallback values inside conditions are hoisted before branch bodies read their temporaries.'
+      failure_proves: 'OR_ELSE fallback values inside conditions are hoisted before branch bodies read their temporaries.'
     ),
     cross_fiber_consumer: profile(
       failure_proves: 'Cross-fiber producer/consumer values remain owned and cleaned across fiber boundaries.'
@@ -150,7 +158,7 @@ module FuzzCoverageModel
       failure_proves: 'Fixed-shape destructuring declarations, assignments, mutable targets, and discards lower directly.'
     ),
     error_cleanup: profile(
-      failure_proves: 'Error paths clean or transfer owned values under OR PASS, RAISE, and DEFAULT.',
+      failure_proves: 'Error paths clean or transfer owned values under OR_ELSE PASS, RAISE, and DEFAULT.',
       high_risk: true
     ),
     escape_mechanism_matrix: profile(
@@ -169,7 +177,7 @@ module FuzzCoverageModel
       failure_proves: 'Extern boundary declarations and calls reject unsupported ownership/effect combinations.'
     ),
     fsm_edge_matrix: profile(
-      failure_proves: 'FSM splitting preserves ownership across OR fallback, nested suspension, streams, and locks.'
+      failure_proves: 'FSM splitting preserves ownership across OR_ELSE fallback, nested suspension, streams, and locks.'
     ),
     fsm_suspension_matrix: profile(
       failure_proves: 'FSM suspension/resume segments preserve owned suspend results, lock segments, and cleanup.',
@@ -192,6 +200,10 @@ module FuzzCoverageModel
     ),
     lifetimed_return: profile(
       failure_proves: 'BG handles tied to lifetime-bound captures cannot escape their source scope.',
+      high_risk: true
+    ),
+    link_resolve_matrix: profile(
+      failure_proves: 'Rc/Arc weak links resolve only while a strong owner lives and retain managed payloads exactly once.',
       high_risk: true
     ),
     list_append_modality: profile(
@@ -217,6 +229,10 @@ module FuzzCoverageModel
       failure_proves: 'MIR lowering boundaries preserve call contracts, WITH variants, BG/DO/NEXT, and pipeline ownership.',
       high_risk: true
     ),
+    managed_payload_capability_matrix: profile(
+      failure_proves: 'Rc/Arc operations recursively retain and finalize String-owning payloads through every generic operation.',
+      high_risk: true
+    ),
     match_matrix: profile(
       failure_proves: 'MATCH lowering over union/scalar shapes binds payloads and cleans owned arms.'
     ),
@@ -239,12 +255,20 @@ module FuzzCoverageModel
       failure_proves: 'Nested loop-local collection escapes force safe promotion for outer-container storage.',
       high_risk: true
     ),
+    node_graph_matrix: profile(
+      failure_proves: '@node cycles, replacement, growth, optional traversal, and lexical teardown preserve handles and managed payloads.',
+      high_risk: true
+    ),
+    shared_node_graph_matrix: profile(
+      failure_proves: '@shared:node guards moving payloads, copies managed reads, admits parallel handles, and rejects scheduler-local nodes.',
+      high_risk: true
+    ),
     or_heap_destination_matrix: profile(
-      failure_proves: 'Owned OR/TryCatch/optional branch results are placed into destination allocators coherently.',
+      failure_proves: 'Owned OR_ELSE/TryCatch/optional branch results are placed into destination allocators coherently.',
       high_risk: true
     ),
     or_positional: profile(
-      failure_proves: 'OR actions in every syntactic position preserve cleanup and error-path ownership.',
+      failure_proves: 'OR_ELSE actions in every syntactic position preserve cleanup and error-path ownership.',
       high_risk: true
     ),
     owned_sink_destination_matrix: profile(
@@ -273,6 +297,22 @@ module FuzzCoverageModel
     ),
     return_value_modality: profile(
       failure_proves: 'Every cleanup-bearing return shape is promoted, cleaned, or rejected in each return context.',
+      high_risk: true
+    ),
+    rc_generic_collection_matrix: profile(
+      failure_proves: 'Every ownership-sensitive generic list, pool, and map operation preserves Rc/Arc capability, borrow, transfer, copy, and cleanup semantics.',
+      high_risk: true
+    ),
+    rc_generic_value_matrix: profile(
+      failure_proves: 'Generic COPY and materialization recursively retain Rc/Arc values through structs, unions, optionals, lists, and maps.',
+      high_risk: true
+    ),
+    recursive_execution_boundary_matrix: profile(
+      failure_proves: 'Parallel-boundary admission recursively rejects scheduler-local and Rc capabilities hidden in aggregate fields.',
+      high_risk: true
+    ),
+    stateful_container_matrix: profile(
+      failure_proves: 'Map overwrite, reinsertion, COPY, and live element borrows preserve managed values and reject invalidating mutation.',
       high_risk: true
     ),
     stream_into_boundary: profile(
@@ -403,7 +443,7 @@ module FuzzCoverageModel
     names.each do |name|
       next unless documented_counts.key?(name)
       template = T.unsafe(templates.fetch(name))
-      active = T.unsafe(template).cells.count { |cell| (T.unsafe(cell)[:expected] || :pass) != :in_dev }
+      active = T.unsafe(template).cells.length
       documented = documented_counts.fetch(name)
       next if documented == active
 
@@ -462,6 +502,26 @@ module FuzzCoverageModel
         right_surface: :cleanup_value_shapes,
         required_pairs: sink_pairs
       ),
+      CrossProductRequirement.new(
+        name: :generic_collection_operation_by_rc_capability,
+        severity: :p0,
+        left_surface: :generic_collection_operations,
+        right_surface: :rc_storage_capabilities,
+        required_pairs: T.cast(
+          registry.surface(:generic_collection_operations).product(registry.surface(:rc_storage_capabilities)),
+          T::Array[[Symbol, Symbol]],
+        ),
+      ),
+      CrossProductRequirement.new(
+        name: :generic_value_shape_by_rc_capability,
+        severity: :p0,
+        left_surface: :rc_generic_value_shapes,
+        right_surface: :rc_storage_capabilities,
+        required_pairs: T.cast(
+          registry.surface(:rc_generic_value_shapes).product(registry.surface(:rc_storage_capabilities)),
+          T::Array[[Symbol, Symbol]],
+        ),
+      ),
     ]
   end
 
@@ -480,6 +540,30 @@ module FuzzCoverageModel
       next if missing.empty?
 
       gaps << "P0 cross-product escape_sinks:#{sink} x cleanup_value_shapes missing #{missing.join(', ')} (covered by: #{covering.join(', ')})"
+    end
+
+
+    template = T.unsafe(FuzzGenerator)::TEMPLATES[:rc_generic_collection_matrix]
+    if template
+      actual = T.unsafe(template).cells.map { |cell| [T.unsafe(cell)[:operation], T.unsafe(cell)[:capability]] }.to_set
+      required = registry.surface(:generic_collection_operations).product(registry.surface(:rc_storage_capabilities)).to_set
+      (required - actual).each do |operation, capability|
+        gaps << "P0 cross-product generic_collection_operations:#{operation} x rc_storage_capabilities:#{capability} missing"
+      end
+    else
+      gaps << "P0 cross-product rc_generic_collection_matrix template missing"
+    end
+
+
+    value_template = T.unsafe(FuzzGenerator)::TEMPLATES[:rc_generic_value_matrix]
+    if value_template
+      actual = T.unsafe(value_template).cells.map { |cell| [T.unsafe(cell)[:operation], T.unsafe(cell)[:capability]] }.to_set
+      required = registry.surface(:rc_generic_value_shapes).product(registry.surface(:rc_storage_capabilities)).to_set
+      (required - actual).each do |shape, capability|
+        gaps << "P0 cross-product rc_generic_value_shapes:#{shape} x rc_storage_capabilities:#{capability} missing"
+      end
+    else
+      gaps << "P0 cross-product rc_generic_value_matrix template missing"
     end
 
     gaps

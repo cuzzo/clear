@@ -8,7 +8,7 @@ T::Configuration.default_checked_level = :never
 require "benchmark"
 
 ROOT = File.expand_path("..", __dir__)
-SRC_ROOT = File.join(ROOT, "src")
+SRC_ROOT = File.join(ROOT, "compiler", "ruby")
 $LOAD_PATH.unshift(SRC_ROOT)
 $LOAD_PATH.unshift(File.join(SRC_ROOT, "ast"))
 $LOAD_PATH.unshift(File.join(SRC_ROOT, "mir"))
@@ -20,7 +20,7 @@ require "compiler/module_importer"
 require "mir_lowering"
 require "mir_checker"
 
-source_path = File.expand_path(ARGV.fetch(0) { "examples/minivm/vm.cht" })
+source_path = File.expand_path(ARGV.fetch(0) { "examples/minivm/vm.clear" })
 source = File.read(source_path)
 source_dir = File.dirname(source_path)
 

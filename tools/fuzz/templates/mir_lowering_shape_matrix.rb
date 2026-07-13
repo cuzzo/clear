@@ -102,7 +102,7 @@ def mlsm_list_program(element, context)
       END
 
       FN main() RETURNS Void ->
-          xs: #{type} = build() OR RAISE;
+          xs: #{type} = build() OR_ELSE RAISE;
           ASSERT xs.length() == #{expected}_i64, "list literal return";
           RETURN;
       END
@@ -199,7 +199,7 @@ def mlsm_hash_program(value, context)
       END
 
       FN main() RETURNS Void ->
-          m: #{type} = build() OR RAISE;
+          m: #{type} = build() OR_ELSE RAISE;
           ASSERT m.count() == 2_i64, "hash literal return";
           RETURN;
       END
@@ -341,7 +341,7 @@ def mlsm_return_program(shape)
       END
 
       FN main() RETURNS Void ->
-          xs = build() OR RAISE;
+          xs = build() OR_ELSE RAISE;
           ASSERT xs.length() == 3_i64, "return list shape";
           RETURN;
       END
@@ -353,7 +353,7 @@ def mlsm_return_program(shape)
       END
 
       FN main() RETURNS Void ->
-          m = build() OR RAISE;
+          m = build() OR_ELSE RAISE;
           ASSERT m.count() == 2_i64, "return hash shape";
           RETURN;
       END
@@ -361,7 +361,7 @@ def mlsm_return_program(shape)
   when :string_concat
     <<~CHT
       FN build() RETURNS String ->
-          RETURN COPY "a" + COPY "b";
+          RETURN COPY "a" $+ COPY "b";
       END
 
       FN main() RETURNS Void ->
@@ -408,7 +408,7 @@ def mlsm_return_program(shape)
       END
 
       FN build() RETURNS String ->
-          RETURN maybe(FALSE) OR COPY "fallback";
+          RETURN maybe(FALSE) OR_ELSE COPY "fallback";
       END
 
       FN main() RETURNS Void ->

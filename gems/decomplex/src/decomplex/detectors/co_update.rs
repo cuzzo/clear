@@ -1,7 +1,7 @@
 use crate::decomplex::syntax::{self, Document, Language, Span, StateWrite};
 use anyhow::Result;
 use serde::Serialize;
-use std::collections::{BTreeMap, BTreeSet};
+use std::collections::{BTreeMap, BTreeSet, HashMap};
 use std::path::PathBuf;
 
 #[derive(Clone, Debug, Eq, PartialEq, Serialize)]
@@ -235,22 +235,27 @@ impl Report {
         let pair_recvs = self.pair_recvs();
         let mut out = Vec::new();
 
+
         for ((file, defn), ws) in &self.by_unit {
-            let attrs: BTreeSet<_> = ws.iter().map(|w| w.attr.clone()).collect();
+            let mut writes_by_attr = HashMap::<&str, &Write>::new();
+            for w in ws {
+                writes_by_attr.entry(w.attr.as_str()).or_insert(w);
+            }
+
             for p in &pairs {
                 let a = &p.pair[0];
                 let b = &p.pair[1];
 
-                let (has, miss) = if attrs.contains(a) && !attrs.contains(b) {
+                let (has, miss) = if writes_by_attr.contains_key(a.as_str()) && !writes_by_attr.contains_key(b.as_str()) {
                     (Some(a), Some(b))
-                } else if attrs.contains(b) && !attrs.contains(a) {
+                } else if writes_by_attr.contains_key(b.as_str()) && !writes_by_attr.contains_key(a.as_str()) {
                     (Some(b), Some(a))
                 } else {
                     (None, None)
                 };
 
                 if let (Some(has), Some(miss)) = (has, miss) {
-                    if let Some(w) = ws.iter().find(|x| &x.attr == has) {
+                    if let Some(&w) = writes_by_attr.get(has.as_str()) {
                         let pair_tuple = if a < b { (a.as_str(), b.as_str()) } else { (b.as_str(), a.as_str()) };
                         let matches_owner = if is_unknown(w) {
                             true

@@ -13,7 +13,7 @@
 # The server reads from stdin, writes JSON-RPC frames to stdout, and
 # logs to stderr (LSP convention; clients display server stderr).
 
-require_relative "../src/lsp/server"
+require_relative "../compiler/ruby/lsp/server"
 
 log_level = :info
 ARGV.each do |arg|

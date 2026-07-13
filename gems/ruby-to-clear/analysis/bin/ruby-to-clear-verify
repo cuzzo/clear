@@ -1,0 +1,35 @@
+#!/usr/bin/env ruby
+# frozen_string_literal: true
+
+require "optparse"
+require_relative "../lib/ruby_to_clear/analysis"
+
+repo_root = File.expand_path("../../../..", __dir__)
+analysis_root = File.expand_path("..", __dir__)
+options = {
+  root: repo_root,
+  manifest_path: File.join(analysis_root, "manifest.json"),
+  artifacts_dir: "tmp/ruby-to-clear-verify",
+  report_dir: File.join(analysis_root, "results"),
+  jobs: 2,
+  autofix: false
+}
+
+parser = OptionParser.new do |opts|
+  opts.banner = "Usage: ruby-to-clear-verify [options]"
+  opts.on("--manifest PATH", "Manifest JSON") { |value| options[:manifest_path] = value }
+  opts.on("--artifacts-dir PATH", "Immutable run artifacts") { |value| options[:artifacts_dir] = value }
+  opts.on("--report-dir PATH", "latest.json/latest.md output directory") { |value| options[:report_dir] = value }
+  opts.on("--jobs N", Integer, "Concurrent compiler processes, default 2") { |value| options[:jobs] = value }
+  opts.on("--timeout SECONDS", Integer, "Per-process timeout") { |value| options[:timeout_seconds] = value }
+  opts.on("--autofix", "Evaluate clear fix output separately") { options[:autofix] = true }
+  opts.on("--only REGEXP", "Only units whose source path matches") { |value| options[:only] = value }
+end
+parser.parse!
+
+report = RubyToClear::Analysis::Verifier.new(**options).run
+aggregate = report.fetch("aggregate")
+puts
+puts "Raw clean transpilation (G4): " \
+     "#{aggregate.dig("gates", "g4", "passed_files")}/#{aggregate.fetch("files")} files, " \
+     "#{format("%.2f", aggregate.dig("gates", "g4", "source_loc_percent"))}% source LoC"

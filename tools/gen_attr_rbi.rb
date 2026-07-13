@@ -156,7 +156,7 @@ class_walk = lambda do |node, scope|
   end
 end
 
-Dir.glob('src/**/*.rb').sort.each do |f|
+Dir.glob('compiler/ruby/**/*.rb').sort.each do |f|
   parsed = Prism.parse_file(f)
   next unless parsed.success?
   walk.(parsed.value, [])

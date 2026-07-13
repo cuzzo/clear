@@ -1,0 +1,20 @@
+# Test: HashMap put with string keys in a loop has bounded frame.
+# String keys are duped on the frame for the put. The loop mark
+# should reclaim per-iteration frame temporaries.
+
+FN main() RETURNS Void ->
+    MUTABLE map: HashMap<Int64> = {};
+    FOR i IN (1_i64 ..= 500) DO
+        key = "key_" $+ i.toString();
+        map[key] = i;
+    END
+    peak = framePeakBytes();
+
+    ASSERT map.count() == 500, "map has 500 entries";
+    # Keys are heap-duped by put. Frame temporaries (concat results)
+    # should be reclaimed each iteration. Allow headroom for arena blocks.
+    ASSERT peak < 1000000, "frame peak bounded for hashmap put loop";
+
+    print("PASS: frame peak bounded in hashmap put loop");
+    RETURN;
+END

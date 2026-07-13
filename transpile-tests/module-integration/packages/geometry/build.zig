@@ -5,9 +5,9 @@ pub fn build(b: *std.Build) void {
     const optimize = b.standardOptimizeOption(.{});
 
     const build_root = b.build_root.path orelse ".";
-    const transpiler = b.fmt("{s}/../../../../src/transpiler.rb", .{build_root});
-    const geom_src   = b.fmt("{s}/src/lib.cht", .{build_root});
-    const math_src   = b.fmt("{s}/../math/src/lib.cht", .{build_root});
+    const transpiler = b.fmt("{s}/../../../../compiler/ruby/backends/transpiler.rb", .{build_root});
+    const geom_src   = b.fmt("{s}/src/lib.clear", .{build_root});
+    const math_src   = b.fmt("{s}/../math/src/lib.clear", .{build_root});
     const math_pkg_arg = b.fmt("math={s}", .{math_src});
 
     // cheat_runtime: path relative from packages/geometry/ to zig/
@@ -21,7 +21,7 @@ pub fn build(b: *std.Build) void {
     const math_dep = b.dependency("math", .{ .target = target, .optimize = optimize });
     const math_mod = math_dep.module("math");
 
-    // Transpile lib.cht → Zig source and expose as the "geometry" module
+    // Transpile lib.clear → Zig source and expose as the "geometry" module
     const transpile = b.addSystemCommand(&.{
         "ruby", transpiler, "--module", geom_src,
         "--pkg", math_pkg_arg,

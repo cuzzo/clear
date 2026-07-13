@@ -1,0 +1,21 @@
+# Test: callee returning frame string stored in outer list (Pattern 2 + 4).
+# buildKey() returns via preserveAndRewind — string lives in caller's frame.
+# Appending that to an outer list requires a heap dupe at the call site,
+# otherwise the loop mark rewind destroys the string (dangling pointer).
+
+FN buildKey(i: Int64) RETURNS !String ->
+    RETURN "key-" $+ i.toString();
+END
+
+FN main() RETURNS Void ->
+    MUTABLE keys: String[]@list = [];
+    FOR i IN (1_i64 ..= 5) DO
+        keys.append(buildKey(i));
+    END
+    ASSERT keys.length() == 5;
+    ASSERT keys[0] == "key-1";
+    ASSERT keys[1] == "key-2";
+    ASSERT keys[4] == "key-5";
+    print("PASS");
+    RETURN;
+END

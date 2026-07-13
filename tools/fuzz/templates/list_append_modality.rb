@@ -3,8 +3,7 @@
 # `MUTABLE container: T[]@list = []; container.append(<modality> xs);` over
 # the FULL :cleanup_value_shapes registry. Many element-type x list-of
 # combinations may be language-illegal (pool-of-pool, list-of-set, etc.);
-# such cells become :in_dev with a "language-not-supported" note rather than
-# being silently omitted.
+# those remain active :compile_error cells rather than being silently omitted.
 
 # Per-shape spec: [prelude, element_type, build_block_ending_in_xs].
 LIST_APPEND_SHAPE_SPECS = {
@@ -41,7 +40,7 @@ LIST_APPEND_SHAPE_SPECS = {
   nested_container:     ["", "Int64[]@list",
                          "MUTABLE xs: Int64[]@list = [];\n    xs.append(5_i64);"],
   frame_string_concat:  ["", "String",
-                         "i: Int64 = 1_i64;\n    xs: String = \"a\" + i.toString();"],
+                         "i: Int64 = 1_i64;\n    xs: String = \"a\" $+ i.toString();"],
   frame_list:           ["", "Int64[]",
                          "i: Int64 = 1_i64;\n    xs: Int64[] = [i, i + 1_i64];"],
 }.freeze
@@ -55,8 +54,8 @@ LIST_APPEND_SHAPE_SPECS = {
 #                     is an owning collection (pool/set/sharded/soa/etc).
 #                     The fuzz suite ASSERTS the rejection: if the language
 #                     adds support later, the cell flips to unexpected_pass.
-#   :in_dev        -- real bug: lowering produces incorrect Zig for this
-#                     (shape, modality) combination.
+# A compiler/runtime defect is never an expected outcome; it leaves the
+# required matrix red until fixed.
 LIST_APPEND_EXPECTED_OVERRIDES = {
   # Language doesn't support `OwningT[]@list` for these element types
   # (transpiler rejects -- list-of-pool, list-of-set, etc. not modelled).
@@ -94,9 +93,6 @@ LIST_APPEND_EXPECTED_OVERRIDES = {
   [:union_owned_payload, :copy]  => [:pass, "#43"],
   [:union_owned_payload, :give]  => [:pass, "#43"],
   [:hash_map, :copy]             => [:pass, "#58"],
-  [:option_owned_payload, :bare] => [:compile_error, "lang: no list-of-optional (?T[]@list parses as ?(T[]@list))"],
-  [:option_owned_payload, :copy] => [:compile_error, "lang: no list-of-optional (?T[]@list parses as ?(T[]@list))"],
-  [:option_owned_payload, :give] => [:compile_error, "lang: no list-of-optional (?T[]@list parses as ?(T[]@list))"],
 }.freeze
 
 LIST_APPEND_CELLS = LIST_APPEND_SHAPE_SPECS.keys.flat_map do |shape|

@@ -22,6 +22,7 @@ end
     %i[string struct_owned union_owned].each do |shape|
       expected = %i[field_borrow index_borrow].include?(source) && sink == :takes_arg ? :compile_error : :pass
       expected = :compile_error if source == :index_borrow && sink == :struct_field
+      expected = :compile_error if source == :index_borrow && sink == :return_value
       expected = :compile_error if shape == :union_owned && sink == :return_value
       OWNED_SINK_DESTINATION_CELLS << { source: source, sink: sink, shape: shape, expected: expected }
     end
@@ -89,9 +90,9 @@ def osd_source_setup(source, shape)
   when :copy
     [osd_build_value(shape), "COPY v"]
   when :call_result
-    ["", "make() OR #{osd_return_expr(shape)}"]
+    ["", "make() OR_ELSE #{osd_return_expr(shape)}"]
   when :or_result
-    ["", "maybe(FALSE) OR #{osd_return_expr(shape)}"]
+    ["", "maybe(FALSE) OR_ELSE #{osd_return_expr(shape)}"]
   when :branch_result
     init = case shape
            when :string then 'MUTABLE v: String = COPY "seed";'
@@ -182,7 +183,7 @@ FuzzGenerator.register(:owned_sink_destination_matrix, cells: OWNED_SINK_DESTINA
   case p[:sink]
   when :return_value
     return_type = p[:source] == :or_result ? "!#{ty}" : ty
-    call_expr = p[:source] == :or_result ? "build() OR #{osd_return_expr(p[:shape])}" : "build()"
+    call_expr = p[:source] == :or_result ? "build() OR_ELSE #{osd_return_expr(p[:shape])}" : "build()"
     <<~CHT
       #{helpers}
       FN build() RETURNS #{return_type} ->
@@ -238,13 +239,35 @@ FuzzGenerator.register(:owned_sink_destination_matrix, cells: OWNED_SINK_DESTINA
       END
     CHT
   when :normal_arg
-    <<~CHT
-      #{helpers}
-      FN main() RETURNS Void ->
-          #{setup}
-          ASSERT observe(#{expr}) == 3_i64, "owned sink arg";
-          RETURN;
-      END
-    CHT
+    if p[:source] == :index_borrow
+      # A union payload owns its active variant. Materialize the indexed borrow
+      # explicitly before crossing a by-value argument boundary.
+      observe_borrowed = if p[:shape] == :union_owned
+        "owned: #{ty} = COPY borrowed;\n            ASSERT observe(owned) == 3_i64, \"owned sink arg\";"
+      else
+        "ASSERT observe(borrowed) == 3_i64, \"owned sink arg\";"
+      end
+      <<~CHT
+        #{helpers}
+        FN main() RETURNS Void ->
+            #{setup}
+            IF #{expr} EXISTS AS borrowed THEN
+                #{observe_borrowed}
+            ELSE
+                ASSERT FALSE, "indexed source should exist";
+            END
+            RETURN;
+        END
+      CHT
+    else
+      <<~CHT
+        #{helpers}
+        FN main() RETURNS Void ->
+            #{setup}
+            ASSERT observe(#{expr}) == 3_i64, "owned sink arg";
+            RETURN;
+        END
+      CHT
+    end
   end
 end

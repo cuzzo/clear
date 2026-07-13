@@ -1,0 +1,45 @@
+# FSM ForEach over @set / map. Both use the :iterator descriptor:
+# ctx holds the iterator object (typed via @TypeOf so adding new
+# iterator-style collections is one branch on
+# Type#fsm_foreach_descriptor). Each cond segment advances and
+# binds via Zig optional-unwrap idiom; the tail branches on a
+# per-iter __fehas_<N> bool.
+
+FN main() RETURNS Void ->
+  p1: ~Int64 = BG {
+    # @set: keyIterator yields ?*T, so the descriptor sets deref:
+    # true and the bind reads __nxt.*.
+    MUTABLE s: Int64[]@set = [];
+    s.insert(100_i64);
+    s.insert(200_i64);
+    s.insert(300_i64);
+
+    MUTABLE sum = 0_i64;
+    FOR v IN s DO
+      sleep(1);
+      sum = sum + v;
+    END
+    sum;
+  };
+  result1 = NEXT p1;
+  ASSERT result1 == 600, "1: ForEach over @set with suspend";
+
+  p2: ~Int64 = BG {
+    # HashMap<V>: keyIterator yields ?[]const u8 (string keys).
+    # For :iterator with deref=false the bind reads __nxt directly.
+    MUTABLE m: HashMap<Int64> = {};
+    m["a"] = 1_i64;
+    m["b"] = 2_i64;
+    m["c"] = 3_i64;
+
+    MUTABLE total = 0_i64;
+    FOR k IN m DO
+      sleep(1);
+      total = total + (m[k] OR_ELSE 0_i64);
+    END
+    total;
+  };
+  result2 = NEXT p2;
+  ASSERT result2 == 6, "2: ForEach over HashMap with suspend";
+  RETURN;
+END

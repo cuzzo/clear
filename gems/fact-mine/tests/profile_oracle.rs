@@ -19,7 +19,7 @@ fn ruby_calculator_extracts_methods() -> Result<()> {
 
     let output = profile::extract(&document, Profile::Espalier);
 
-    // Methods — the normalized extractor detects the two functions
+    // Methods - the normalized extractor detects the two functions
     assert!(
         !output.methods.is_empty(),
         "should have at least one method"
@@ -31,6 +31,11 @@ fn ruby_calculator_extracts_methods() -> Result<()> {
         .with_context(|| "missing 'add' method")?;
     assert_eq!(add_method.owner, "Calculator");
     assert_eq!(add_method.kind, "instance");
+    assert!(add_method.raw_source.contains("def add"));
+    assert_eq!(
+        add_method.normalized_source,
+        add_method.raw_source.split_whitespace().collect::<Vec<_>>().join(" ")
+    );
     assert!(
         !add_method.signature.is_empty() || true,
         "signature optional without Sorbet sigs"
@@ -142,6 +147,7 @@ fn nil_kill_profile_produces_same_core_structure() -> Result<()> {
 
 #[test]
 fn nil_kill_all_profile_examples_extract_successfully() -> Result<()> {
+    let mut method_count = 0;
     for entry in fs::read_dir(examples_dir())? {
         let entry = entry?;
         let fixture = entry.path();
@@ -161,12 +167,18 @@ fn nil_kill_all_profile_examples_extract_successfully() -> Result<()> {
         let document = syntax::parse_file(fixture.clone(), lang)
             .with_context(|| format!("parse {}", fixture.display()))?;
         let output = profile::extract(&document, Profile::NilKill);
-        // Ensure it doesn't crash and returns a valid ProfileOutput
-        assert!(output.methods.len() >= 0);
+        method_count += output.methods.len();
+        for method in output.methods {
+            assert!(!method.raw_source.is_empty(), "empty source for {}", method.name);
+            assert_eq!(
+                method.normalized_source,
+                method.raw_source.split_whitespace().collect::<Vec<_>>().join(" ")
+            );
+        }
     }
+    assert!(method_count > 0, "profile examples should contain functions");
     Ok(())
 }
-
 
 #[test]
 fn state_writes_without_declarations_extract_as_fields() -> Result<()> {
@@ -311,8 +323,23 @@ fn normalize_for_oracle(value: &Value, expected: &Value) -> Value {
             });
             Value::Array(normalized)
         }
+        (Value::String(actual), Value::String(_)) => {
+            Value::String(normalize_opaque_id(actual))
+        }
         _ => value.clone(),
     }
+}
+
+/// Profile IDs deliberately hash the source path and therefore differ across
+/// checkouts. The oracle verifies the semantic record and the ID namespace;
+/// exact hash stability belongs in a unit test with a fixed synthetic path.
+fn normalize_opaque_id(value: &str) -> String {
+    for prefix in ["owner:", "fn:", "state:", "edge:"] {
+        if value.starts_with(prefix) {
+            return format!("{prefix}<opaque>");
+        }
+    }
+    value.to_string()
 }
 
 #[test]

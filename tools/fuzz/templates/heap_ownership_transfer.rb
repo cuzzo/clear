@@ -32,32 +32,32 @@ HOT_KNOWN_FAILING = [].freeze
 HOT_CELLS = []
 %i[list string].each do |value|
   # Every producer genuinely allocates (list: append/makeList; string:
-  # concat) so it is alloc-faultable -> can_fail -> the OR-bind forms
+  # concat) so it is alloc-faultable -> can_fail -> the OR_ELSE-bind forms
   # are valid for plain `RETURNS T` too (the FAULT is interceptable,
-  # exactly like `risky() OR PASS`). `:give` is list-only (String is a
+  # exactly like `risky() OR_ELSE PASS`). `:give` is list-only (String is a
   # Copy type; GIVE moves non-Copy). `:field` (GetField return) is
   # dropped here -- escape_via_return's struct_with_list covers E1's
   # GetField branch callee-side and a valid in-template construct for
   # it conflates value-shape with the binding-form axis.
-  # `:or_rescue` -- producer's RETURN is `mkInner!() OR RAISE`, which
-  # parses to a BinaryOp(:OR_RESCUE) wrapping the inner call. Valid
-  # only for fallible producers (RETURNS !T) since OR RAISE bubbles
-  # an error. Drives the OR_RESCUE arms in return_value_is_heap? and
+  # `:or_else` -- producer's RETURN is `mkInner!() OR_ELSE RAISE`, which
+  # parses to a BinaryOp(:OR_ELSE) wrapping the inner call. Valid
+  # only for fallible producers (RETURNS !T) since OR_ELSE RAISE bubbles
+  # an error. Drives the OR_ELSE arms in return_value_is_heap? and
   # direct_return_decls that the other ret_forms can't reach.
-  ret_forms = value == :list ? %i[ident literal call give or_rescue] : %i[ident literal call or_rescue]
+  ret_forms = value == :list ? %i[ident literal call give or_else] : %i[ident literal call or_else]
   ret_forms.each do |ret_form|
     %i[bare or_raise or_fallback discard discard_or_raise onward].each do |bind_form|
       %i[plain err].each do |decl|
-        # `OR <value>` (orelse) needs a surface optional/error to
+        # `OR_ELSE <value>` (orelse) needs a surface optional/error to
         # rescue. A FAULT (alloc) is NOT surface-visible on a plain
         # `RETURNS T` (that is the whole model), so `plain + or_fallback`
         # is model-invalid -- not a bug, an inexpressible combo. The
-        # FAULT-interception path for plain producers is `OR PASS` /
-        # `OR RAISE` (the :or_raise / :discard_or_raise cells), which
+        # FAULT-interception path for plain producers is `OR_ELSE PASS` /
+        # `OR_ELSE RAISE` (the :or_raise / :discard_or_raise cells), which
         # operate on the fault CHANNEL, not a surface optional.
         next if bind_form == :or_fallback && decl == :plain
-        # :or_rescue ret_form needs a fallible producer to OR-rescue.
-        next if ret_form == :or_rescue && decl == :plain
+        # :or_else ret_form needs a fallible producer to OR_ELSE-rescue.
+        next if ret_form == :or_else && decl == :plain
 
         key = [value, ret_form, bind_form, decl]
         expected = :pass
@@ -78,18 +78,18 @@ def hot_decl_type(value, decl)
 end
 
 # Length-2 producer value. BOTH allocate: list via append, string via
-# concat (`"a" + "b"` -> std.mem.concat) so the producer is alloc-
-# faultable in every form (uniform: all OR-bind forms valid).
+# concat (`"a" $+ "b"` -> std.mem.concat) so the producer is alloc-
+# faultable in every form (uniform: all OR_ELSE-bind forms valid).
 def hot_build(value, var)
   if value == :list
     "    MUTABLE #{var}: Int64[]@list = [];\n    #{var}.append(1_i64);\n    #{var}.append(2_i64);\n"
   else
-    "    #{var}: String = \"a\" + \"b\";\n"
+    "    #{var}: String = \"a\" $+ \"b\";\n"
   end
 end
 
 def hot_literal(value)
-  value == :list ? "[1_i64, 2_i64]" : "\"a\" + \"b\""
+  value == :list ? "[1_i64, 2_i64]" : "\"a\" $+ \"b\""
 end
 
 def hot_fallback(value)
@@ -113,9 +113,9 @@ def hot_producer(value, ret_form, rt)
     "#{inner}\n\nFN mk() RETURNS #{rt} ->\n    RETURN mkInner();\nEND"
   when :give
     "FN mk() RETURNS #{rt} ->\n#{hot_build(value, 'v')}    RETURN GIVE v;\nEND"
-  when :or_rescue
+  when :or_else
     inner = "FN mkInner() RETURNS #{rt} ->\n#{hot_build(value, 'v')}    RETURN v;\nEND"
-    "#{inner}\n\nFN mk() RETURNS #{rt} ->\n    RETURN mkInner() OR RAISE;\nEND"
+    "#{inner}\n\nFN mk() RETURNS #{rt} ->\n    RETURN mkInner() OR_ELSE RAISE;\nEND"
   end
 end
 
@@ -127,21 +127,21 @@ def hot_main(value, bind_form, decl)
     mret = decl == :err ? "!Void" : "Void"
     "FN main() RETURNS #{mret} ->\n    r = mk();\n    #{hot_len_assert(value, 'r')}\n    RETURN;\nEND"
   when :or_raise
-    "FN main() RETURNS !Void ->\n    r = mk() OR RAISE;\n    #{hot_len_assert(value, 'r')}\n    RETURN;\nEND"
+    "FN main() RETURNS !Void ->\n    r = mk() OR_ELSE RAISE;\n    #{hot_len_assert(value, 'r')}\n    RETURN;\nEND"
   when :or_fallback
     mret = decl == :err ? "!Void" : "Void"
-    "FN main() RETURNS #{mret} ->\n    r = mk() OR #{fb};\n    RETURN;\nEND"
+    "FN main() RETURNS #{mret} ->\n    r = mk() OR_ELSE #{fb};\n    RETURN;\nEND"
   when :discard
     mret = decl == :err ? "!Void" : "Void"
     "FN main() RETURNS #{mret} ->\n    _ = mk();\n    RETURN;\nEND"
   when :discard_or_raise
-    "FN main() RETURNS !Void ->\n    _ = mk() OR RAISE;\n    RETURN;\nEND"
+    "FN main() RETURNS !Void ->\n    _ = mk() OR_ELSE RAISE;\n    RETURN;\nEND"
   when :onward
     # Wrapper returns mk() onward; main binds the wrapper.
     wret = decl == :err ? "!#{hot_type(value)}" : hot_type(value)
     w = "FN onward() RETURNS #{wret} ->\n    RETURN mk();\nEND"
     if decl == :err
-      "#{w}\n\nFN main() RETURNS !Void ->\n    r = onward() OR RAISE;\n    #{hot_len_assert(value, 'r')}\n    RETURN;\nEND"
+      "#{w}\n\nFN main() RETURNS !Void ->\n    r = onward() OR_ELSE RAISE;\n    #{hot_len_assert(value, 'r')}\n    RETURN;\nEND"
     else
       "#{w}\n\nFN main() RETURNS Void ->\n    r = onward();\n    #{hot_len_assert(value, 'r')}\n    RETURN;\nEND"
     end

@@ -1,0 +1,174 @@
+# Footgun: Deadlock — CLEAR
+#
+# CLEAR's cooperative fiber scheduler means the classic AB/BA two-lock
+# deadlock does NOT occur on a single scheduler: fibers don't yield
+# between acquiring the first and second lock inside a WITH EXCLUSIVE
+# block, so the second fiber never gets to hold its lock while the first
+# is waiting.
+#
+# The CLEAR deadlock footguns are different:
+#
+# 1. Re-entrant locking: a fiber tries to acquire a lock it already holds.
+#    CLEAR uses non-recursive pthread_mutex_t. A second acquire from the
+#    same fiber blocks the OS thread permanently — the fiber holding the
+#    lock IS the blocked fiber, so it can never release it.
+#
+# 2. NEXT inside WITH: a fiber holds a lock and awaits a promise from
+#    another fiber that also needs that lock. WITH EXCLUSIVE holds the
+#    lock for the entire block duration — it is NOT released on yield.
+#    The awaited fiber blocks on the lock; the awaiting fiber blocks on
+#    NEXT; neither can proceed.
+#
+# CLEAR does NOT yet enforce lock-ordering or re-entrancy at compile time.
+# That is planned for STRICT EXTREME (v0.3 roadmap).
+
+STRUCT State {
+  value: Int64
+}
+STRUCT Account {
+  balance: Int64
+}
+
+# -------------------------------------------------------------------------
+# BROKEN 1: Re-entrant locking
+# -------------------------------------------------------------------------
+# A fiber acquires @locked variable 's', then tries to acquire 's' again
+# inside the same WITH EXCLUSIVE block. The non-recursive mutex blocks
+# the OS thread. Nothing can ever release the lock — hang.
+#
+# FN broken_reentrant() RETURNS Void ->
+#     s = State{ value: 0 } @locked;
+#     t = BG {
+#         WITH EXCLUSIVE s AS outer {
+#             outer.value = 1;
+#             WITH EXCLUSIVE s AS inner {  -- re-acquires the same lock — DEADLOCK
+#                 inner.value = 2;
+#             }
+#         }
+#     };
+#     NEXT t;  -- hangs here
+# END
+
+# -------------------------------------------------------------------------
+# BROKEN 2: NEXT inside WITH
+# -------------------------------------------------------------------------
+# Consumer holds a lock and awaits a producer that also needs that lock.
+# WITH EXCLUSIVE does not release the lock on yield — it holds it for the
+# entire block. Producer is stuck waiting for the lock; consumer is stuck
+# waiting for producer.
+#
+# FN broken_next_inside_with() RETURNS Void ->
+#     s = State{ value: 0 } @locked;
+#     producer = BG {
+#         WITH EXCLUSIVE s AS inner { inner.value = 42; }
+#     };
+#     consumer = BG {
+#         WITH EXCLUSIVE s AS outer {
+#             NEXT producer;          -- producer needs 's'; consumer holds it — DEADLOCK
+#             print(outer.value.toString());
+#         }
+#     };
+#     NEXT consumer;  -- hangs here
+# END
+
+# -------------------------------------------------------------------------
+# CORRECT: Resolve promises before acquiring locks
+# -------------------------------------------------------------------------
+FN correct_next_before_lock() RETURNS !Void ->
+  s = State{ value: 0 } @locked;
+
+  producer = BG {
+    WITH EXCLUSIVE s AS inner {
+      inner.value = 42;
+    }
+  };
+
+  NEXT producer;
+  # wait for producer BEFORE acquiring the lock
+
+  WITH s AS inner {
+    print("value = " $+ inner.value.toString());  # 42
+  }
+END
+
+# -------------------------------------------------------------------------
+# CORRECT: Pass already-locked value to helpers (avoid re-entrancy)
+# -------------------------------------------------------------------------
+FN update_value!(MUTABLE inner: State) RETURNS Void ->
+  # Receives the already-locked struct value — no lock needed.
+  inner.value = 2;
+END
+
+FN correct_no_reentrant() RETURNS !Void ->
+  s = State{ value: 0 } @locked;
+
+  t = BG {
+    WITH EXCLUSIVE s AS inner {
+      inner.value = 1;
+      update_value!(inner);  # pass the value, not the lock
+    }
+  };
+
+  NEXT t;
+
+  WITH s AS inner {
+    print("final value = " $+ inner.value.toString());
+  }
+END
+
+# -------------------------------------------------------------------------
+# CORRECT: Sequential locks — never hold two at once
+# -------------------------------------------------------------------------
+FN sequential_transfer() RETURNS !Void ->
+  a = Account{ balance: 100 } @locked;
+  b = Account{ balance: 200 } @locked;
+
+  t = BG {
+    MUTABLE amount = 0;
+    WITH EXCLUSIVE a AS ra {
+      amount = ra.balance / 2;
+      ra.balance = ra.balance - amount;
+    }
+    # 'a' is unlocked here — no two locks held simultaneously
+    WITH EXCLUSIVE b AS rb {
+      rb.balance = rb.balance + amount;
+    }
+  };
+
+  NEXT t;
+
+  WITH a AS ra {print("a = " $+ ra.balance.toString());}
+  WITH b AS rb {print("b = " $+ rb.balance.toString());}
+END
+
+FN main() RETURNS Void ->
+  print("--- correct: NEXT before lock ---");
+  correct_next_before_lock() OR_ELSE RAISE;
+
+  print("--- correct: no re-entrancy ---");
+  correct_no_reentrant() OR_ELSE RAISE;
+
+  print("--- correct: sequential locks ---");
+  sequential_transfer() OR_ELSE RAISE;
+END
+
+# Summary:
+#
+# CLEAR deadlock footguns vs C/Go/Rust:
+#
+#   C/Go/Rust: Classic AB/BA lock-order deadlock is the primary concern
+#              because threads run truly concurrently. No language-level
+#              detection. Hang forever.
+#
+#   CLEAR (single scheduler): AB/BA does not occur — cooperative fibers
+#              don't yield mid-WITH-EXCLUSIVE. The footguns are:
+#              (1) re-entrant locking — fiber locks what it already holds
+#              (2) NEXT inside WITH — holding a lock while awaiting a
+#                  fiber that also needs that lock
+#              Both hang forever in standard mode.
+#
+#   CLEAR (STRICT EXTREME, roadmap): compile-time error for re-entrancy
+#              and AB/BA cycles via OwnershipGraph lock-ordering analysis.
+#
+#   Pony/BEAM: Actor model — no shared mutable locks, deadlock by this
+#              mechanism is structurally impossible.

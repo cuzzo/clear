@@ -28,7 +28,7 @@
         {
           "comment": "Control flow",
           "name": "keyword.control.clear",
-          "match": "\\b(IF|THEN|ELSE|ELSE_IF|END|WHILE|DO|FOR|IN|BG|NEXT|BREAK|CONTINUE|RETURN|RETURNS|MATCH|PARTIAL|START|DEFAULT|WHEN|IFF|CATCH|EXIT|DIE|PASS|PRUNE|RAISE|ASSERT|TIGHT|YIELD|OR_RESCUE|ON|RETRY)\\b"
+          "match": "\\b(IF|THEN|ELSE|ELSE_IF|END|COMPTIME|WHILE|DO|FOR|IN|BG|NEXT|BREAK|CONTINUE|RETURN|RETURNS|MATCH|PARTIAL|START|DEFAULT|WHEN|IFF|CATCH|EXIT|DIE|PASS|PRUNE|RAISE|ASSERT|TIGHT|YIELD|OR_RESCUE|ON|RETRY)\\b"
         },
         {
           "comment": "Storage / declarations",
@@ -78,7 +78,7 @@
         {
           "comment": "Word-shaped operators",
           "name": "keyword.operator.word.clear",
-          "match": "\\b(AND|OR|NOT|MOD|IS)\\b"
+          "match": "\\b(AND|OR|NOT|MOD|IS|IS_A)\\b"
         },
         {
           "name": "constant.language.boolean.clear",

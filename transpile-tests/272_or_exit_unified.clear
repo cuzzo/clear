@@ -1,0 +1,107 @@
+# Test: unified OR_ELSE EXIT grammar end-to-end.
+# Verifies all the inherit-vs-override rules by:
+#   1. a helper that raises a specific (Kind, Type, msg) error,
+#   2. wrapping the call with various OR_ELSE EXIT forms,
+#   3. CATCHing the result and inspecting what kind/type/msg landed.
+#
+# Forms covered:
+#   A. OR_ELSE EXIT "msg"           -- inherit kind + type, replace msg only
+#   B. OR_ELSE EXIT Kind            -- replace kind, CLEAR type (no stale type)
+#   C. OR_ELSE EXIT Kind, "msg"     -- replace kind + msg, clear type
+#   D. OR_ELSE EXIT Kind, Type      -- replace kind + type
+#   E. OR_ELSE EXIT Kind, Type, "msg"  -- full override
+#   F. OR_ELSE EXIT Type            -- replace type (kind auto-inferred)
+#   G. OR_ELSE EXIT Type, "msg"     -- replace type + msg
+
+FN raiseOriginal() RETURNS !Int64 -> RAISE Input, OrigErr, "original"; RETURN 0; END
+
+# A. pure message replace — should inherit Input + OrigErr.
+FN caseA() RETURNS !Int64 ->
+    v = raiseOriginal() OR_ELSE EXIT "A_msg";
+    RETURN v;
+CATCH Input WITH(OrigErr, "A_msg")
+    # Matches because kind+type inherited and message was set to "A_msg".
+    RETURN 1;
+DEFAULT
+    RETURN 99;
+END
+
+# B. kind-only — clears the type to 0.
+FN caseB() RETURNS !Int64 ->
+    v = raiseOriginal() OR_ELSE EXIT NotFound;
+    RETURN v;
+CATCH NotFound
+    # Matches NotFound kind; message was not rewritten so remains "original".
+    RETURN 2;
+DEFAULT
+    RETURN 99;
+END
+
+# C. kind + message, clears type.
+FN caseC() RETURNS !Int64 ->
+    v = raiseOriginal() OR_ELSE EXIT NotFound, "C_msg";
+    RETURN v;
+CATCH NotFound WITH("C_msg")
+    RETURN 3;
+DEFAULT
+    RETURN 99;
+END
+
+# D. full kind + type replacement, no message.
+FN caseD() RETURNS !Int64 ->
+    v = raiseOriginal() OR_ELSE EXIT System, DErr;
+    RETURN v;
+CATCH DErr
+    RETURN 4;
+DEFAULT
+    RETURN 99;
+END
+
+# E. full override.
+FN caseE() RETURNS !Int64 ->
+    v = raiseOriginal() OR_ELSE EXIT System, EErr, "E_msg";
+    RETURN v;
+CATCH EErr WITH("E_msg")
+    RETURN 5;
+DEFAULT
+    RETURN 99;
+END
+
+# F. type-only; kind auto-resolved from the registered FErr -> Input.
+FN caseF() RETURNS !Int64 ->
+    v = raiseOriginal() OR_ELSE EXIT FErr;
+    RETURN v;
+CATCH FErr
+    RETURN 6;
+DEFAULT
+    RETURN 99;
+END
+
+# G. type + message; kind auto-resolved.
+FN caseG() RETURNS !Int64 ->
+    v = raiseOriginal() OR_ELSE EXIT GErr, "G_msg";
+    RETURN v;
+CATCH GErr WITH("G_msg")
+    RETURN 7;
+DEFAULT
+    RETURN 99;
+END
+
+# Registration primers so FErr/GErr/DErr/EErr are known with their
+# intended kinds. The annotator's pre-pass seeds the registry from
+# every RAISE site in the program, regardless of call reachability.
+FN primerF() RETURNS !Int64 -> RAISE Input,  FErr, "x"; RETURN 0; END
+FN primerG() RETURNS !Int64 -> RAISE Input,  GErr, "x"; RETURN 0; END
+FN primerD() RETURNS !Int64 -> RAISE System, DErr, "x"; RETURN 0; END
+FN primerE() RETURNS !Int64 -> RAISE System, EErr, "x"; RETURN 0; END
+
+FN main() RETURNS Void ->
+    ASSERT caseA() == 1, "A: OR_ELSE EXIT \"msg\" inherits Input+OrigErr, replaces msg";
+    ASSERT caseB() == 2, "B: OR_ELSE EXIT Kind replaces kind, clears type";
+    ASSERT caseC() == 3, "C: OR_ELSE EXIT Kind, \"msg\" replaces kind+msg";
+    ASSERT caseD() == 4, "D: OR_ELSE EXIT Kind, Type replaces kind+type";
+    ASSERT caseE() == 5, "E: OR_ELSE EXIT Kind, Type, \"msg\" full override";
+    ASSERT caseF() == 6, "F: OR_ELSE EXIT Type (kind auto-resolved)";
+    ASSERT caseG() == 7, "G: OR_ELSE EXIT Type, \"msg\"";
+    RETURN;
+END

@@ -9,12 +9,12 @@
 #   collections -- T::Array[/T::Hash[/T::Set[/T::Enumerable[ with an
 #                  untyped or nilable element
 #
-# Scope defaults to src/ (the compiler). Pass dirs as ARGV to override.
+# Scope defaults to compiler/ruby/ (the compiler). Pass dirs as ARGV to override.
 # Output is deterministic; diff two runs to measure epic progress.
 
 require "json"
 
-DIRS = ARGV.empty? ? %w[src] : ARGV
+DIRS = ARGV.empty? ? %w[compiler/ruby] : ARGV
 files = DIRS.flat_map { |d| Dir.glob(File.join(d, "**", "*.rb")) }.sort
 
 C = Hash.new(0)

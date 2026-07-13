@@ -1,0 +1,12 @@
+# Regression from examples/mal:
+# HashMap put duplicates string keys internally. A COPY expression used as the
+# key must still be cleaned up by MIR lowering.
+
+FN main() RETURNS Void ->
+    MUTABLE map: HashMap<Int64> = {};
+    key = "dynamic-" $+ "key";
+
+    map[COPY key] = 1_i64;
+    ASSERT map[key] == 1_i64, "COPY key put should store the value";
+    RETURN;
+END

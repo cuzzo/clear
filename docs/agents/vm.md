@@ -6,7 +6,7 @@ lives under `examples/minivm` and uses bytecode/register-machine paths.
 
 ## Overview
 
-CLEAR's primary target is high-performance Zig/Native code. However, for rapid prototyping, scripting, and environments where a full compilation step is undesirable, CLEAR explored a **VM Mode**. This historical mode lowered CLEAR source to S-expression Scheme and executed it on a specialized interpreter written in CLEAR itself (`examples/mal/interpreter.cht`).
+CLEAR's primary target is high-performance Zig/Native code. However, for rapid prototyping, scripting, and environments where a full compilation step is undesirable, CLEAR explored a **VM Mode**. This historical mode lowered CLEAR source to S-expression Scheme and executed it on a specialized interpreter written in CLEAR itself (`examples/mal/interpreter.clear`).
 
 ## Why This Matters
 
@@ -55,21 +55,21 @@ The GC vs. arena gap is an implementation detail invisible to the programmer.
 
 ```bash
 # Run a CLEAR script directly on the VM
-./clear run --vm myfile.cht
+./clear run --vm myfile.clear
 
 # Transpile to Scheme without running
-./clear transpile --scheme myfile.cht > myfile.scm
+./clear transpile --scheme myfile.clear > myfile.scm
 
 # Interactive REPL
 ./clear repl
 
 # REPL with a file's definitions loaded
-./clear repl myfile.cht
+./clear repl myfile.clear
 ```
 
 ## Current State: The Interpreter
 
-`examples/mal/interpreter.cht` is a Mal Level 4 implementation written in CLEAR. It supports:
+`examples/mal/interpreter.clear` is a Mal Level 4 implementation written in CLEAR. It supports:
 
 - Lexer/parser for S-expressions
 - `def!`, `let*`, `fn*`, `do`, `if`
@@ -84,12 +84,12 @@ The `TODO.md` lists 8 compilation blockers - **all are already implemented**:
 | Feature | Status | Evidence |
 |---------|--------|---------|
 | String escape sequences (`\"`, `\n`) | Done | `lexer.rb:172-210` |
-| String indexing (`charAt`) | Done | `std_lib.rb:67-72`, `transpile-tests/55_string_ops.cht` |
-| `substr()` | Done | `std_lib.rb:29-36`, `transpile-tests/55_string_ops.cht` |
-| `toNumber()` with `OR` fallback | Done | `std_lib.rb:88-93`, `transpile-tests/55_string_ops.cht` |
+| String indexing (`charAt`) | Done | `std_lib.rb:67-72`, `transpile-tests/55_string_ops.clear` |
+| `substr()` | Done | `std_lib.rb:29-36`, `transpile-tests/55_string_ops.clear` |
+| `toNumber()` with `OR` fallback | Done | `std_lib.rb:88-93`, `transpile-tests/55_string_ops.clear` |
 | `MATCH ... AS` payload extraction | Done | `parser.rb:1298`, `transpiler.rb:1266`, `match_spec.rb:601-648` |
-| `@indirect` on union fields | Done | `parser.rb:1786`, `transpile-tests/97_stack_heap_interop.cht` |
-| `@shared` construction | Done | `transpile-tests/35_shared.cht`, `capabilities_spec.rb` |
+| `@indirect` on union fields | Done | `parser.rb:1786`, `transpile-tests/97_stack_heap_interop.clear` |
+| `@shared` construction | Done | `transpile-tests/35_shared.clear`, `capabilities_spec.rb` |
 | `RAISE` inside `WHILE` | Done | Error handling fully implemented |
 
 The additional features the interpreter uses (`EFFECTS REENTRANT`, `@pool`, `Id<T>`, `HashMap<Value>` with `OR` fallback, `@list`, UNION with struct-like variants) are also all implemented and tested. **The interpreter should compile today.** The TODO.md is stale.
@@ -194,8 +194,8 @@ The interpreter's runtime - `Value` union, environment pool, native function tab
 | `src/scheme_transpiler.rb` | CLEAR AST -> `Instruction[]` | No |
 | `src/sexp_renderer.rb` | `Instruction[]` -> S-expression string | No (becomes `--scheme` debug output) |
 | `src/bytecode_renderer.rb` | `Instruction[]` -> `u8[]` | New file (~200 lines) |
-| `interpreter.cht` (runtime) | Value, Env, native fns, debugger | No |
-| `interpreter.cht` (eval) | Tree-walks S-expressions | Replaced by dispatch loop |
+| `interpreter.clear` (runtime) | Value, Env, native fns, debugger | No |
+| `interpreter.clear` (eval) | Tree-walks S-expressions | Replaced by dispatch loop |
 
 The cut line is between the transpiler and the renderer. Everything above stays. Everything below swaps.
 
@@ -234,7 +234,7 @@ No `CALL_CC`. No `EVAL`. No `MACRO_EXPAND`. The opcode set is closed because the
 **None.** All required compiler features are already implemented. The interpreter should compile and run its 21 tests today. Verify with:
 
 ```bash
-./clear test examples/mal/interpreter.cht
+./clear test examples/mal/interpreter.clear
 ```
 
 ### Phase 1: Interpreter Maturation (~15-25 commits)
@@ -303,7 +303,7 @@ A new `src/scheme_transpiler.rb` that lowers CLEAR AST to S-expressions.
 
 - Wire up `./clear run --vm` execution loop
 - Stack scaling for VM mode (interpreter C stack overhead)
-- Compliance test generator: run 130+ existing `.cht` transpile tests in both strict and loose modes
+- Compliance test generator: run 130+ existing `.clear` transpile tests in both strict and loose modes
 - Verify `ASSERT` statements pass identically on VM and native backends
 - Performance baseline: establish "fast enough" threshold for interactive use
 

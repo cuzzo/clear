@@ -99,7 +99,7 @@ Final-boss exact gates added after P3:
 ## Transpile Tests
 
 The transpile gate applies targeted compiler mutations and runs the precise
-`.cht` file that should fail. It writes the generated Zig file directly under
+`.clear` file that should fail. It writes the generated Zig file directly under
 `zig/` so `@import("runtime/...")` resolves the same way as normal
 transpile-tests.
 
@@ -107,11 +107,11 @@ Current active mutants:
 
 | mutant | killed by |
 |---|---|
-| `lower_if_cond_pending_leak` | `transpile-tests/or_fallback_in_if_condition_hoist.cht` |
-| `escape_struct_field_walker` | `transpile-tests/200_escape_callee_string_to_list.cht` |
-| `loop_frame_scope_stamp` | `transpile-tests/while_loop_with_local_split_no_rewind.cht` |
-| `union_match_drops_payload_capture` | `transpile-tests/174_union_match_struct_fields.cht` |
-| `fsm_suspend_returns_done` | `transpile-tests/256_sleep_int_literal.cht` |
+| `lower_if_cond_pending_leak` | `transpile-tests/or_fallback_in_if_condition_hoist.clear` |
+| `escape_struct_field_walker` | `transpile-tests/200_escape_callee_string_to_list.clear` |
+| `loop_frame_scope_stamp` | `transpile-tests/while_loop_with_local_split_no_rewind.clear` |
+| `union_match_drops_payload_capture` | `transpile-tests/174_union_match_struct_fields.clear` |
+| `fsm_suspend_returns_done` | `transpile-tests/256_sleep_int_literal.clear` |
 
 Current local validation:
 
@@ -138,7 +138,7 @@ ownership verification, lifetime facts, cleanup emission, error-path allocator
 identity, lowering order, execution-boundary admission, FSM suspension, union
 payload binding, ownership-surface finalization, and runtime/codegen move guard
 emission. It is still not A+ because it is a curated invariant registry, not
-native language-level mutation over every `.cht` program.
+native language-level mutation over every `.clear` program.
 
 Active mutants:
 
@@ -210,12 +210,12 @@ including 27/27 high-risk templates.
 ## Transpile Tests To A-Level
 
 The current transpile mutant gate is useful but still C+/B- quality: it proves
-five hand-picked compiler patch mutants against five `.cht` files. That is too
+five hand-picked compiler patch mutants against five `.clear` files. That is too
 small to validate the transpile corpus as a whole.
 
 The easiest credible path to A-level is native CLEAR-source mutation tooling:
 
-1. Add a `clear mutant` runner that operates on `.cht` source programs.
+1. Add a `clear mutant` runner that operates on `.clear` source programs.
 2. Start with deterministic source/AST mutation operators:
    - boolean and comparison operator flips;
    - arithmetic operator flips;

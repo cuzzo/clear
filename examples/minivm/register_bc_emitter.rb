@@ -1,8 +1,8 @@
 # frozen_string_literal: true
 
 require "set"
-require_relative "../../src/mir/mir"
-require_relative "../../src/ast/error_registry"
+require_relative "../../compiler/ruby/mir/mir"
+require_relative "../../compiler/ruby/ast/error_registry"
 require_relative "register_opcode_layout"
 require_relative "register_pipeline"
 
@@ -235,7 +235,7 @@ class RegisterBcEmitter
       referenced = collect_qualified_calls(program.items)
       @importer.module_cache.each do |abs_path, mod|
         next unless mod.respond_to?(:mir_items) && mod.mir_items
-        alias_name = File.basename(abs_path, ".cht")
+        alias_name = File.basename(abs_path, ".clear")
         mod.mir_items.each do |item|
           next unless item.is_a?(MIR::FnDef)
           qualified = "#{alias_name}.#{item.name}"
@@ -456,7 +456,7 @@ class RegisterBcEmitter
   # Walks the AST::Program for top-level `AST::FunctionDef` nodes and
   # builds `name -> token.line`. Used by `compile_function` to stamp each
   # emitted opcode with the function's start line so VM crash messages
-  # can say "vm.cht:142 in fn fib" instead of just "ip=387". Per-statement
+  # can say "vm.clear:142 in fn fib" instead of just "ip=387". Per-statement
   # granularity would require threading source-line through MIR; for now
   # function-level is the cheapest meaningful upgrade.
   def collect_function_source_lines(ast)
@@ -706,8 +706,8 @@ class RegisterBcEmitter
       compile_return(stmt)
     when MIR::InlineBc
       compile_inline_bc_stmt(stmt)
-    when MIR::OrExitBcRewrite
-      compile_or_exit(stmt)
+    when MIR::OrElseExitBcRewrite
+      compile_or_else_exit(stmt)
     when MIR::Call
       compile_call_stmt(stmt)
     when MIR::DeferStmt
@@ -754,11 +754,11 @@ class RegisterBcEmitter
       # the ExprStmt path so the same dispatch handles it.
       compile_expr_stmt(MIR::ExprStmt.new(stmt, false))
     when MIR::TryExpr
-      # `call() OR RAISE;` at statement position (result discarded).
+      # `call() OR_ELSE RAISE;` at statement position (result discarded).
       # Compile the inner call, then propagate if it raised.
       compile_try_stmt(stmt)
     when MIR::TryCatch
-      # `call() OR { ... };` at statement position -- run the catch
+      # `call() OR_ELSE { ... };` at statement position -- run the catch
       # body if the call raised (ECLR first), else fall through.
       compile_try_catch_stmt(stmt)
     when MIR::FallibleLockBinding
@@ -1244,11 +1244,11 @@ class RegisterBcEmitter
 
     # InlineBc / InlineZig as bare ExprStmt (e.g. `pool.remove(id);`,
     # `sleep(ms);`) -- delegate to the stmt-shaped dispatch.
-    if expr.is_a?(MIR::InlineBc) || inline_zig_node?(expr) || expr.is_a?(MIR::OrExitBcRewrite)
+    if expr.is_a?(MIR::InlineBc) || inline_zig_node?(expr) || expr.is_a?(MIR::OrElseExitBcRewrite)
       return compile_inline_bc_stmt(expr)
     end
 
-    # `try expr;` / `call() OR RAISE;` as an ExprStmt -- compile the
+    # `try expr;` / `call() OR_ELSE RAISE;` as an ExprStmt -- compile the
     # inner (result discarded), then propagate if it raised.
     if expr.is_a?(MIR::TryExpr)
       return compile_try_stmt(expr)
@@ -2072,7 +2072,7 @@ class RegisterBcEmitter
 
   def compile_inline_bc_stmt(stmt)
     return compile_inline_zig_stmt(stmt) if inline_zig_node?(stmt)
-    return compile_or_exit(stmt) if stmt.is_a?(MIR::OrExitBcRewrite)
+    return compile_or_else_exit(stmt) if stmt.is_a?(MIR::OrElseExitBcRewrite)
 
     case stmt.op
     when :append, :insert, :push
@@ -2179,8 +2179,8 @@ class RegisterBcEmitter
       else
         raise Unsupported, "register emitter does not support remove on #{target_kind.inspect}"
       end
-    when :or_exit
-      compile_or_exit(stmt)
+    when :or_else_exit
+      compile_or_else_exit(stmt)
     else
       raise Unsupported, "register emitter does not support MIR::InlineBc stmt #{stmt.op.inspect} yet"
     end
@@ -2284,7 +2284,7 @@ class RegisterBcEmitter
     end
   end
 
-  # `set.contains?(elem)` -- read the underlying map's slot via OR
+  # `set.contains?(elem)` -- read the underlying map's slot via OR_ELSE
   # 0 fallback; non-zero means present. (Sets store 1 on insert.)
   def compile_set_contains(set_name, key_expr, kind)
     map_reg = @vreg_by_name.fetch(set_name)
@@ -2676,7 +2676,7 @@ class RegisterBcEmitter
     when MIR::Pipeline
       compile_i64_expr(expr.inner)
     when MIR::TryExpr
-      # `try expr` / OR RAISE. Compile inner (its call emitted), then
+      # `try expr` / OR_ELSE RAISE. Compile inner (its call emitted), then
       # EGUARD: if the callee raised, propagate (return-from-fn).
       compile_try_expr(compile_i64_expr(expr.expr))
     when MIR::TryCatch
@@ -2828,7 +2828,7 @@ class RegisterBcEmitter
     raise Unsupported, "register emitter does not support InlineZig string expression #{code.inspect} yet"
   end
 
-  # `expr OR fallback` lowers to MIR::TryCatch with a fallback branch.
+  # `expr OR_ELSE fallback` lowers to MIR::TryCatch with a fallback branch.
   # When both arms produce a String, the result is whichever side
   # succeeded. We compile the body into the shared destination and
   # emit a guarded jump that overwrites with the fallback on error.
@@ -2837,7 +2837,7 @@ class RegisterBcEmitter
   # raise on failure -- so the fallback path is reachable only when
   # a string-producing native explicitly signals "no value" via an
   # empty result. For `readLine!`, EOF returns "" which the caller
-  # can match against; keeping the OR fallback as a no-op preserves
+  # can match against; keeping the OR_ELSE fallback as a no-op preserves
   # source compatibility without expanding the bytecode contract.
   def compile_string_try_catch(expr)
     compile_string_expr(expr.body)
@@ -3436,7 +3436,7 @@ class RegisterBcEmitter
       return emit_f64_ncall(N_STRING_TO_NUMBER_OR, [[ARG_S, str], [ARG_F, fallback]])
     end
 
-    raise Unsupported, "register emitter only supports OR fallback for toNumber and HashMap<Int64, Float64> get in Float64 expressions in this tranche"
+    raise Unsupported, "register emitter only supports OR_ELSE fallback for toNumber and HashMap<Int64, Float64> get in Float64 expressions in this tranche"
   end
 
   def compile_f64_sharded_map_get(expr, fallback_reg:)
@@ -3448,19 +3448,19 @@ class RegisterBcEmitter
   end
 
   # A propagating catch_body re-raises rather than producing a
-  # fallback value: OR EXIT (OrExitBcRewrite) or a bare
+  # fallback value: OR_ELSE EXIT (OrElseExitBcRewrite) or a bare
   # RETURN error.CheatError. Distinct from a value-fallback catch.
   def propagating_catch?(cb)
     return false unless cb.is_a?(MIR::ScopeBlock)
 
     semantic_body(cb.body || []).any? do |s|
       returns_cheat_error?(s) ||
-        (s.is_a?(MIR::ExprStmt) && s.expr.is_a?(MIR::OrExitBcRewrite))
+        (s.is_a?(MIR::ExprStmt) && s.expr.is_a?(MIR::OrElseExitBcRewrite))
     end
   end
 
   def compile_scalar_try_catch(expr, type)
-    # Additive dynamic path for propagating catches (OR EXIT / re-
+    # Additive dynamic path for propagating catches (OR_ELSE EXIT / re-
     # raise). The static heuristic below is left intact for ordinary
     # value-fallback callers (no regression).
     if propagating_catch?(expr.catch_body)
@@ -3475,7 +3475,7 @@ class RegisterBcEmitter
     end
 
     unless expr.expr.is_a?(MIR::Call)
-      raise Unsupported, "register emitter only supports OR fallback around helper calls in this tranche"
+      raise Unsupported, "register emitter only supports OR_ELSE fallback around helper calls in this tranche"
     end
 
     function = @functions_by_name[expr.expr.callee.to_s]
@@ -3486,7 +3486,7 @@ class RegisterBcEmitter
     end
 
     if function_has_unsupported_raise?(function)
-      raise Unsupported, "register emitter only supports statically successful or statically raising scalar OR helpers in this tranche"
+      raise Unsupported, "register emitter only supports statically successful or statically raising scalar OR_ELSE helpers in this tranche"
     end
 
     type == :f64 ? compile_f64_expr(expr.expr) : compile_i64_expr(expr.expr)
@@ -3619,11 +3619,11 @@ class RegisterBcEmitter
     end
   end
 
-  # OR EXIT: structured partial rewrite of the active error
-  # (OrExitBcRewrite from lower_or_exit's :bc branch). Unset fields
+  # OR_ELSE EXIT: structured partial rewrite of the active error
+  # (OrElseExitBcRewrite from lower_or_else_exit's :bc branch). Unset fields
   # inherit the error set by the failing call; errored stays set so
   # the following RETURN error.CheatError propagates.
-  def compile_or_exit(stmt)
+  def compile_or_else_exit(stmt)
     mask = 0
     kind_c = add_const(0)
     name_c = add_const(0)
@@ -3642,7 +3642,7 @@ class RegisterBcEmitter
     if stmt.has_message
       msg_arg = stmt.message
       unless msg_arg.is_a?(MIR::Lit)
-        raise Unsupported, "register emitter OR EXIT supports literal messages in this commit"
+        raise Unsupported, "register emitter OR_ELSE EXIT supports literal messages in this commit"
       end
       msg_c = add_const(string_lit_text(msg_arg))
       mask |= 4
@@ -3652,21 +3652,21 @@ class RegisterBcEmitter
     emit(EREWRITE, kind_c, name_c, msg_c, line_c, add_const(mask))
   end
 
-  # OR RAISE: inner already compiled (its call emitted); propagate if
+  # OR_ELSE RAISE: inner already compiled (its call emitted); propagate if
   # the callee set the error state.
   def compile_try_expr(inner_reg)
     emit_err_propagate
     inner_reg
   end
 
-  # `call() OR RAISE;` at statement position -- compile the inner
+  # `call() OR_ELSE RAISE;` at statement position -- compile the inner
   # (value discarded), then propagate if it raised.
   def compile_try_stmt(try_expr)
     compile_expr_stmt(MIR::ExprStmt.new(try_expr.expr, false))
     emit_err_propagate
   end
 
-  # `call() OR { ...catch... };` at statement position. Compile the
+  # `call() OR_ELSE { ...catch... };` at statement position. Compile the
   # call (value discarded); if it raised, ECLR and run the catch
   # body; else skip the catch.
   def compile_try_catch_stmt(stmt)
@@ -3679,8 +3679,8 @@ class RegisterBcEmitter
     cb = stmt.catch_body
     if cb.is_a?(MIR::ScopeBlock)
       semantic_body(cb.body || []).each { |c| compile_stmt(c) }
-    elsif or_pass_sentinel?(cb)
-      # OR PASS: error suppressed; ECLR above is the whole handler.
+    elsif or_else_pass_sentinel?(cb)
+      # OR_ELSE PASS: error suppressed; ECLR above is the whole handler.
       nil
     elsif cb
       compile_stmt(cb)
@@ -3688,16 +3688,16 @@ class RegisterBcEmitter
     @ops[skip] = @ops.length
   end
 
-  # OR PASS lowers the catch body to `MIR::Ident("undefined")`
+  # OR_ELSE PASS lowers the catch body to `MIR::Ident("undefined")`
   # (Zig `catch undefined`). It means "swallow the error"; the
   # preceding ECLR is the entire handler -- nothing to emit.
-  def or_pass_sentinel?(node)
+  def or_else_pass_sentinel?(node)
     node.is_a?(MIR::Ident) && node.name.to_s == "undefined"
   end
 
   # Wrapper fn whose body is a single MIR::CatchWrapper. Calls
   # __<fn>_body(rt, params...); on success returns its value; on error
-  # dispatches by clause_meta (kinds/types OR, narrowed by
+  # dispatches by clause_meta (kinds/types OR_ELSE, narrowed by
   # filter_types/filter_messages), else DEFAULT, else propagate.
   # Uses clause_bodies/clause_meta only -- never the Zig `code`.
   # Int64/Bool/Float64/String returns. String/Bool wrappers are
@@ -4288,7 +4288,7 @@ class RegisterBcEmitter
       # is transparent.
       compile_value_expr(expr.expr)
     when MIR::TryExpr
-      # `try expr` / OR RAISE -- compile inner, then EGUARD propagate.
+      # `try expr` / OR_ELSE RAISE -- compile inner, then EGUARD propagate.
       r = compile_value_expr(expr.expr)
       emit(EGUARD)
       r
@@ -4303,7 +4303,7 @@ class RegisterBcEmitter
         @ops[done] = @ops.length
         r
       else
-        # OR PASS / value fallback: use the protected value. (OR PASS
+        # OR_ELSE PASS / value fallback: use the protected value. (OR_ELSE PASS
         # on a raised error yields undefined in Zig; the supported
         # bc cases don't dynamically raise at this site.)
         compile_value_expr(expr.expr)
@@ -4656,7 +4656,7 @@ class RegisterBcEmitter
     }
   end
 
-  # `valueMap[k] OR Value.<TagName>` -- the typical read path for
+  # `valueMap[k] OR_ELSE Value.<TagName>` -- the typical read path for
   # HashMap<UserUnion>. Emits VMGETTAG with the fallback variant's tag
   # id, then VMGETI/F/S for each non-Nil variant the union exposes.
   # The result is a synthetic union local that downstream MATCH arms
@@ -4678,7 +4678,7 @@ class RegisterBcEmitter
     fallback_variant = extract_fallback_variant(expr.fallback)
     miss_info = variant_map[fallback_variant]
     unless miss_info && miss_info[:kind] == :nil
-      raise Unsupported, "register emitter only supports `... OR <Union>.<NilVariant>` fallback for HashMap<UserUnion> reads in Phase 1 (got #{fallback_variant.inspect})"
+      raise Unsupported, "register emitter only supports `... OR_ELSE <Union>.<NilVariant>` fallback for HashMap<UserUnion> reads in Phase 1 (got #{fallback_variant.inspect})"
     end
 
     map_reg = @vreg_by_name.fetch(map_name)
@@ -6044,11 +6044,11 @@ class RegisterBcEmitter
       return compile_i64_sharded_map_get(expr.expr, fallback_reg: fallback_reg)
     end
 
-    raise Unsupported, "register emitter only supports OR fallback for HashMap<Int64> get in this tranche"
+    raise Unsupported, "register emitter only supports OR_ELSE fallback for HashMap<Int64> get in this tranche"
   end
 
   def compile_i64_sharded_map_get(expr, fallback_reg:)
-    # Bare `map[k]` (no OR fallback) shows up in `==`/comparison
+    # Bare `map[k]` (no OR_ELSE fallback) shows up in `==`/comparison
     # contexts. CLEAR's Optional<Int64> compared against a literal is
     # a "is the key present and equal" check; missing key compares
     # false. Use 0 as the implicit miss value so the comparison is

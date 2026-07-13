@@ -1,0 +1,86 @@
+TEST VersionedParser DO
+  FN parse_type(src: Auto) RETURNS Auto ->
+    MUTABLE tokens = NIL;
+    tokens = Lexer.new(src).tokenize();
+    ClearParser.new(tokens, src).parse_type_annotation();
+  END
+  FN parse_full(src: Auto) RETURNS Auto ->
+    MUTABLE tokens = NIL;
+    tokens = Lexer.new(src).tokenize();
+    ClearParser.new(tokens, src).parse();
+  END
+  WHEN "type-level `T@versioned`" DO
+    TEST THAT "parses Counter@versioned with sync == :versioned" DO
+      MUTABLE t = parse_type("Counter@versioned");
+      ASSERT t.sync() == :versioned, "expected t.sync() to eq(:versioned)";
+      ASSERT t.versioned?() == TRUE, "expected t.versioned?() to be true";
+    END
+    TEST THAT "is a separate sync from :locked / :write_locked" DO
+      t = parse_type("Counter@versioned");
+      ASSERT t.locked?() == FALSE, "expected t.locked?() to be false";
+      ASSERT t.write_locked?() == FALSE, "expected t.write_locked?() to be false";
+    END
+    TEST THAT "is recognized as any_sync? (participates in capability machinery)" DO
+      t = parse_type("Counter@versioned");
+      ASSERT t.any_sync?() == TRUE, "expected t.any_sync?() to be true";
+    END
+    TEST THAT "lowers to *CheatLib.Versioned(Counter)" DO
+      t = parse_type("Counter@versioned");
+      ASSERT t.zig_type() == "*CheatLib.Versioned(Counter)", "expected t.zig_type() to eq(\"*CheatLib.Versioned(Counter)\")";
+    END
+  END
+  WHEN "join chain `@shared:versioned`" DO
+    TEST THAT "composes Arc<Versioned(T)>" DO
+      t = parse_type("Counter@shared:versioned");
+      ASSERT t.shared?() == TRUE, "expected t.shared?() to be true";
+      ASSERT t.versioned?() == TRUE, "expected t.versioned?() to be true";
+      ASSERT t.zig_type() == "CheatLib.Arc(CheatLib.Versioned(Counter))", "expected t.zig_type() to eq(\"CheatLib.Arc(CheatLib.Versioned(Counter))\")";
+    END
+    TEST THAT "is order-independent: `@versioned:shared` parses identically" DO
+      MUTABLE a = parse_type("Counter@shared:versioned");
+      MUTABLE b = parse_type("Counter@versioned:shared");
+      ASSERT a.shared?() == b.shared?(), "expected a.shared?() to eq(b.shared?)";
+      ASSERT a.versioned?() == b.versioned?(), "expected a.versioned?() to eq(b.versioned?)";
+      ASSERT a.zig_type() == b.zig_type(), "expected a.zig_type() to eq(b.zig_type)";
+    END
+  END
+  WHEN "duplicate-sync rejection" DO
+    TEST THAT "rejects `@versioned:locked` (two sync wrappers in one chain)" DO
+      ASSERT_RAISES Input, parse_type("Counter@versioned:locked");
+    END
+    TEST THAT "rejects `@locked:versioned` (the symmetric case)" DO
+      ASSERT_RAISES Input, parse_type("Counter@locked:versioned");
+    END
+    TEST THAT "rejects `@versioned:writeLocked`" DO
+      ASSERT_RAISES Input, parse_type("Counter@versioned:writeLocked");
+    END
+  END
+  WHEN "primitive @versioned" DO
+    TEST THAT "parses Int64@versioned" DO
+      t = parse_type("Int64@versioned");
+      ASSERT t.versioned?() == TRUE, "expected t.versioned?() to be true";
+      ASSERT t.zig_type() == "*CheatLib.Versioned(i64)", "expected t.zig_type() to eq(\"*CheatLib.Versioned(i64)\")";
+    END
+    TEST THAT "parses Float64@versioned" DO
+      t = parse_type("Float64@versioned");
+      ASSERT t.versioned?() == TRUE, "expected t.versioned?() to be true";
+      ASSERT t.zig_type() == "*CheatLib.Versioned(f64)", "expected t.zig_type() to eq(\"*CheatLib.Versioned(f64)\")";
+    END
+  END
+  WHEN "REQUIRES VERSIONED parsing (already in REQUIRES_VALID_FAMILIES)" DO
+    TEST THAT "accepts `REQUIRES x: VERSIONED`" DO
+      MUTABLE src = """        FN tx(x: Counter@versioned) RETURNS Void REQUIRES x: VERSIONED -> RETURN; END
+      """;
+      MUTABLE ast = parse_full(src);
+      MUTABLE fn = ast.statements().first();
+      ASSERT fn.requires()["x"].contains?(:VERSIONED), "expected fn.requires()[\"x\"] to include(:VERSIONED)";
+    END
+    TEST THAT "accepts `REQUIRES x: VERSIONED | LOCKED` (polymorphic)" DO
+      src = """        FN poly(x: Counter@versioned) RETURNS Void REQUIRES x: VERSIONED | LOCKED -> RETURN; END
+      """;
+      ast = parse_full(src);
+      fn = ast.statements().first();
+      ASSERT fn.requires()["x"].contains?(:VERSIONED) AND fn.requires()["x"].contains?(:LOCKED), "expected fn.requires()[\"x\"] to include(:VERSIONED, :LOCKED)";
+    END
+  END
+END

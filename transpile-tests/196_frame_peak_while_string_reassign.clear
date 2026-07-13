@@ -1,0 +1,18 @@
+# Test: MUTABLE string reassignment in WHILE loop (not FOR) has bounded frame.
+# Same pattern as test 190 but with WHILE to verify both loop types work.
+
+FN main() RETURNS Void ->
+    MUTABLE resp = "";
+    MUTABLE i: Int64 = 0;
+    WHILE i < 500 DO
+        resp = resp $+ ":OK";
+        i += 1;
+    END
+    peak1 = framePeakBytes();
+
+    ASSERT resp.length() == 1500, "500 * 3 chars";
+    ASSERT peak1 < 2000000, "frame peak bounded in WHILE string reassign";
+
+    print("PASS: frame peak bounded in WHILE string reassign");
+    RETURN;
+END

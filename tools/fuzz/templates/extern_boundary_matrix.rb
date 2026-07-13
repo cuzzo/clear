@@ -46,7 +46,7 @@ FuzzGenerator.register(:extern_boundary_matrix, cells: EXTERN_BOUNDARY_CELLS) do
 
       FN main() RETURNS !Void ->
         d = cwd();
-        d.makePath("tmp") OR RAISE;
+        d.makePath("tmp") OR_ELSE RAISE;
         RETURN;
       END
     CHT
@@ -70,7 +70,7 @@ FuzzGenerator.register(:extern_boundary_matrix, cells: EXTERN_BOUNDARY_CELLS) do
       EXTERN FN parseFromSlice<T>(comptime: T, content: String) RETURNS !Parsed EFFECTS :alloc:heap FROM "std.json";
 
       FN main() RETURNS !Void ->
-        parsed = parseFromSlice(Parsed, "{}") OR RAISE;
+        parsed = parseFromSlice(Parsed, "{}") OR_ELSE RAISE;
         RETURN;
       END
     CHT

@@ -1,12 +1,12 @@
 #!/usr/bin/env ruby
 # bc_run.rb: compile a CLEAR source file to bytecode and run it on the bytecode VM.
-# Usage: ruby bc_run.rb program.cht [--run]
+# Usage: ruby bc_run.rb program.clear [--run]
 #
 # Runs CompilerFrontend -> MIRLowering -> MIRChecker -> BcEmitter,
 # writes ops/consts to temp files, then executes the compiled _bc_runner binary.
-# The _bc_runner binary is built once from _bc_runner.cht and cached.
+# The _bc_runner binary is built once from _bc_runner.clear and cached.
 
-src_root = File.expand_path("../../src", __dir__)
+src_root = File.expand_path("../../compiler/ruby", __dir__)
 $LOAD_PATH.unshift(src_root)
 $LOAD_PATH.unshift(File.join(src_root, "ast"))
 $LOAD_PATH.unshift(File.join(src_root, "mir"))
@@ -66,7 +66,7 @@ def clear_build_env
 end
 
 if $PROGRAM_NAME == __FILE__ && ARGV.empty?
-  $stderr.puts "Usage: ruby bc_run.rb <file.cht>"
+  $stderr.puts "Usage: ruby bc_run.rb <file.clear>"
   exit 1
 end
 
@@ -100,7 +100,7 @@ if $PROGRAM_NAME == __FILE__
     optimized = !ENV["BC_OPT"].nil? && ENV["BC_OPT"] != "0"
     runner_basename = optimized ? "vm_opt" : "vm"
     register_runner_path = File.join(__dir__, runner_basename)
-    register_runner_template_src = File.join(__dir__, "vm.cht")
+    register_runner_template_src = File.join(__dir__, "vm.clear")
     register_packed_ops_file = File.join(__dir__, "_register_ops.rbc")
     register_consts_file = File.join(__dir__, "_register_consts.txt")
     register_lines_file = File.join(__dir__, "_register_lines.bin")
@@ -125,7 +125,7 @@ if $PROGRAM_NAME == __FILE__
     debug_mode = !ENV["BC_DEBUG"].nil? && ENV["BC_DEBUG"] != "0"
 
     # The cached register runner reads a fixed set of _register_* artifact
-    # paths baked into vm_generated_*.cht. Parallel integration/fuzz runs can
+    # paths baked into vm_generated_*.clear. Parallel integration/fuzz runs can
     # otherwise overwrite or delete another runner's bytecode/source tables
     # mid-execution, surfacing as FileNotFound or mismatched breakpoints.
     artifact_lock_path = File.join(__dir__, "_register_artifacts.lock")
@@ -143,21 +143,21 @@ if $PROGRAM_NAME == __FILE__
       base = runner_src_text[0...main_idx] if main_idx
 
       runner_main = "FN main() RETURNS !Void ->\n"
-      runner_main += "    program = loadPackedRegisterProgram!(\"#{register_packed_ops_file}\") OR RAISE;\n"
-      runner_main += "    consts = loadRegisterConsts!(\"#{register_consts_file}\") OR RAISE;\n"
-      runner_main += "    sourceLines = loadRegisterSourceLines!(\"#{register_lines_file}\") OR RAISE;\n"
-      runner_main += "    sourceColumns = loadRegisterSourceLines!(\"#{register_columns_file}\") OR RAISE;\n"
-      runner_main += "    sourcePaths = loadRegisterSourcePaths!(\"#{register_source_path_file}\") OR RAISE;\n"
-      runner_main += "    breakpoints = loadRegisterBreakpoints!(\"#{register_breakpoints_file}\") OR RAISE;\n"
-      runner_main += "    varNames = loadRegisterVarNames!(\"#{register_names_file}\") OR RAISE;\n"
+      runner_main += "    program = loadPackedRegisterProgram!(\"#{register_packed_ops_file}\") OR_ELSE RAISE;\n"
+      runner_main += "    consts = loadRegisterConsts!(\"#{register_consts_file}\") OR_ELSE RAISE;\n"
+      runner_main += "    sourceLines = loadRegisterSourceLines!(\"#{register_lines_file}\") OR_ELSE RAISE;\n"
+      runner_main += "    sourceColumns = loadRegisterSourceLines!(\"#{register_columns_file}\") OR_ELSE RAISE;\n"
+      runner_main += "    sourcePaths = loadRegisterSourcePaths!(\"#{register_source_path_file}\") OR_ELSE RAISE;\n"
+      runner_main += "    breakpoints = loadRegisterBreakpoints!(\"#{register_breakpoints_file}\") OR_ELSE RAISE;\n"
+      runner_main += "    varNames = loadRegisterVarNames!(\"#{register_names_file}\") OR_ELSE RAISE;\n"
       runner_main += "    rootCaps: RegisterValue[]@list = List[];\n"
       runner_main += "    MUTABLE rootSharedCells: RegisterValue[]@list:shared:locked = List[];\n"
-      runner_main += "    result = runRegisterBytecode!(program.ops, program.opcodes, consts, sourceLines, sourceColumns, sourcePaths, breakpoints, varNames, 0_i64, rootCaps, rootSharedCells) OR RAISE;\n"
-      runner_main += "    printRegisterResult(result) OR RAISE;\n"
+      runner_main += "    result = runRegisterBytecode!(program.ops, program.opcodes, consts, sourceLines, sourceColumns, sourcePaths, breakpoints, varNames, 0_i64, rootCaps, rootSharedCells) OR_ELSE RAISE;\n"
+      runner_main += "    printRegisterResult(result) OR_ELSE RAISE;\n"
       runner_main += "    RETURN;\nEND\n"
 
       template_digest = Digest::SHA1.file(register_runner_template_src).hexdigest[0, 12]
-      register_runner_src = File.join(__dir__, "vm_generated_#{template_digest}.cht")
+      register_runner_src = File.join(__dir__, "vm_generated_#{template_digest}.clear")
       File.write(register_runner_src, base + runner_main)
 
       # `--stack-check` is the post-build verifier that parses
@@ -172,9 +172,9 @@ if $PROGRAM_NAME == __FILE__
       # only surfaces at scheduler teardown as
       # `free(): invalid pointer`.
       #
-      # NOTE: this should NOT be needed once vm.cht is moved to an
+      # NOTE: this should NOT be needed once vm.clear is moved to an
       # FSM-style dispatch (the giant locals become heap-resident
-      # ctx fields). Today vm.cht is the one stackful task in the
+      # ctx fields). Today vm.clear is the one stackful task in the
       # tree; the rest of CLEAR runs FSM-compiled BG bodies that
       # don't carry function-frame stack pressure.
       build_args = ["build", "--use-c-allocator", "--stack-check"]
@@ -219,7 +219,7 @@ if $PROGRAM_NAME == __FILE__
       File.binwrite(register_packed_ops_file, MiniVM::Register::OpcodeSpec.pack_ops(bytecode.ops).pack("C*"))
       File.write(register_consts_file, bytecode.consts.map { |c| emitter.serialize_const(c) }.join("\n"))
       # Source-line table: parallel to ops, packed as little-endian u32.
-      # The runner consults this on error to print "vm.cht:LINE" instead
+      # The runner consults this on error to print "vm.clear:LINE" instead
       # of "ip=N". Always-on: tiny (~4 bytes/op), zero runtime cost on
       # the success path.
       lines_blob = bytecode.source_lines.map { |l| [l.to_i].pack("V") }.join
@@ -262,7 +262,7 @@ if $PROGRAM_NAME == __FILE__
         end
       end
       File.write(register_breakpoints_file, bp_ips.uniq.join("\n") + (bp_ips.empty? ? "" : "\n"))
-      # Names table: written when --debug is set OR when any breakpoint
+      # Names table: written when --debug is set OR_ELSE when any breakpoint
       # is requested via BC_PAUSE_ON (the REPL's `:p NAME` is useless
       # without it). Empty file in non-debug, non-paused runs keeps the
       # runner's `loadRegisterVarNames!` happy with zero artifact cost.
@@ -300,7 +300,7 @@ if $PROGRAM_NAME == __FILE__
       end
 
       # Inherit stdin so the in-process debugger REPL (registerDebugPause!
-      # in vm.cht) can read commands from the user's terminal. With
+      # in vm.clear) can read commands from the user's terminal. With
       # popen2e+stdin.close the runner saw EOF immediately and the trap
       # arm spun forever on empty readLine! results. Streaming stdout
       # line-by-line keeps tests' output deterministic; stderr is merged.
@@ -338,7 +338,7 @@ if $PROGRAM_NAME == __FILE__
                     else "_bc_runner"
                     end
   bc_runner_path = File.join(__dir__, runner_basename)
-  bc_runner_template_src = File.join(__dir__, "_bc_runner.cht")
+  bc_runner_template_src = File.join(__dir__, "_bc_runner.clear")
   bc_ops_file    = File.join(__dir__, "_bc_ops.txt")
   bc_consts_file = File.join(__dir__, "_bc_consts.txt")
   completion_marker = "SCHEME: all expressions completed"
@@ -356,11 +356,11 @@ if $PROGRAM_NAME == __FILE__
     bc_runner_main  = "FN main() RETURNS Void ->\n"
     bc_runner_main += "    MUTABLE pool: Env[50000]@pool:shared:locked = [];\n"
     bc_runner_main += "    MUTABLE penv: HashMap<Value> = {};\n"
-    bc_runner_main += "    rootId = setupEnv!(pool) OR RAISE;\n"
-    bc_runner_main += "    bcOps = loadBytecodeOps!(\"#{bc_ops_file}\", pool) OR RAISE;\n"
-    bc_runner_main += "    bcConsts = loadBytecodeConsts!(\"#{bc_consts_file}\", pool) OR RAISE;\n"
+    bc_runner_main += "    rootId = setupEnv!(pool) OR_ELSE RAISE;\n"
+    bc_runner_main += "    bcOps = loadBytecodeOps!(\"#{bc_ops_file}\", pool) OR_ELSE RAISE;\n"
+    bc_runner_main += "    bcConsts = loadBytecodeConsts!(\"#{bc_consts_file}\", pool) OR_ELSE RAISE;\n"
     bc_runner_main += "    mainCaps: Value[] = [];\n"
-    bc_runner_main += "    bcResult = exec!(bcOps, bcConsts, rootId, pool, 0_i64, mainCaps) OR RAISE;\n"
+    bc_runner_main += "    bcResult = exec!(bcOps, bcConsts, rootId, pool, 0_i64, mainCaps) OR_ELSE RAISE;\n"
     bc_runner_main += "    IF isError?(bcResult) THEN\n"
     bc_runner_main += "        print(\"SCHEME ASSERT FAILED: \" + getErrMsg(bcResult));\n"
     bc_runner_main += "    ELSE\n"
@@ -370,7 +370,7 @@ if $PROGRAM_NAME == __FILE__
     bc_runner_main += "    RETURN;\nEND\n"
 
     template_digest = Digest::SHA1.file(bc_runner_template_src).hexdigest[0, 12]
-    bc_runner_src = File.join(__dir__, "_bc_runner_generated_#{template_digest}.cht")
+    bc_runner_src = File.join(__dir__, "_bc_runner_generated_#{template_digest}.clear")
     File.write(bc_runner_src, interp_base + bc_runner_main)
 
     build_args = ["build"]
@@ -384,7 +384,7 @@ if $PROGRAM_NAME == __FILE__
     build_args << "--optimized" if optimized
     build_args.concat([bc_runner_src, "-o", bc_runner_path])
     # Always surface stderr -- silently redirecting it to /dev/null
-    # is what hid Phase A/B/C's broken _bc_runner.cht source for
+    # is what hid Phase A/B/C's broken _bc_runner.clear source for
     # months: the build kept failing and the cached binary kept
     # serving stale tests, so the new BG/lock/sleep code was never
     # actually exercised. Stdout is suppressed (it's just Zig's

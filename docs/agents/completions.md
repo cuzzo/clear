@@ -5,8 +5,8 @@ filtered per subcommand:
 
 | Subcommand | Completes to |
 |---|---|
-| `clear build`, `run`, `fmt`, `fix`, `profile`, `explain` | `*.cht` files (and directories to navigate) |
-| `clear test`, `benchmark` | `*.cht` files or directories |
+| `clear build`, `run`, `fmt`, `fix`, `profile`, `explain` | `*.clear` files (and directories to navigate) |
+| `clear test`, `benchmark` | `*.clear` files or directories |
 | `clear doctor` | `*.profile/` directories |
 | `clear completions` | `bash` / `zsh` / `fish` |
 
@@ -64,7 +64,7 @@ No rc-file edit needed.
 ```sh
 clear <TAB>                       # lists subcommands
 clear doctor <TAB>                # lists *.profile/ dirs
-clear profile examples/<TAB>      # lists *.cht files in examples/
+clear profile examples/<TAB>      # lists *.clear files in examples/
 ```
 
 ## Updating

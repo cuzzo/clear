@@ -27,7 +27,7 @@
 #                    (:direct_raise, :or_raise_builtin,
 #                     :fallible_callee_propagated)
 #   infallible    := everything else, INCLUDING every :alloc_* source
-#                    and :fallible_callee_absorbed (the OR-fallback /
+#                    and :fallible_callee_absorbed (the OR_ELSE-fallback /
 #                    absorbed-callee cases) and :none.
 #
 #   decl :plain        + infallible      -> :pass
@@ -70,17 +70,17 @@ INFALLIBLE_SIG_FAIL_SOURCES.each do |fs|
       true_fallible = INFALLIBLE_SIG_TRUE_FALLIBLE.include?(fs)
       # ERROR-vs-FAULT oracle (the unified alloc-as-FAULT model;
       # puck-clear-bugs.md #3/#10/#12/#13):
-      #   - GENUINE ERROR (RAISE / OR RAISE / propagated ERROR callee)
+      #   - GENUINE ERROR (RAISE / OR_ELSE RAISE / propagated ERROR callee)
       #     with a plain `RETURNS T` is UNDER-DECLARED -> :compile_error
       #     (surface enforcement: errors must be in the type).
       #   - Everything else compiles. An allocating FAULT source
       #     (none/alloc_*) with `RETURNS T` is LEGAL: the fn rides the
       #     uniform Zig !T pipeline (alloc_fault -> can_fail) but is
       #     surface-exempt; unhandled OOM panics (System/OutOfMemory),
-      #     catchable anywhere via OR/CATCH. fallible_callee_absorbed
+      #     catchable anywhere via OR_ELSE/CATCH. fallible_callee_absorbed
       #     stays infallible (#11). All ret_shapes incl heap_list now
       #     transpile (6a: declared-collection-return -> alloc_fault ->
-      #     Zig `!`). No :in_dev parks remain -- the gate is now the
+      #     Zig `!`). No inactive cells exist -- the gate is now the
       #     full regression oracle for the model.
       expected =
         if decl == :plain && true_fallible
@@ -128,7 +128,7 @@ end
 
 # Body fragment that introduces the fail_source.
 #
-# CRITICAL: the infallible sources must contain ZERO `RAISE`/`OR RAISE`
+# CRITICAL: the infallible sources must contain ZERO `RAISE`/`OR_ELSE RAISE`
 # /propagation -- the whole point of bug #3 is that ALLOCATION ALONE
 # (no failure path) wrongly forces `!T`. The guard uses an impossible
 # `== 999` comparison and a plain `RETURN <retval>` (a RETURN is not a
@@ -137,7 +137,7 @@ end
 # the final RETURN deterministically at runtime.
 #
 # Only the three INFALLIBLE_SIG_TRUE_FALLIBLE sources emit a real
-# RAISE / OR RAISE / propagated callee error.
+# RAISE / OR_ELSE RAISE / propagated callee error.
 def isig_body(fs, retval)
   case fs
   when :none
@@ -145,25 +145,25 @@ def isig_body(fs, retval)
   when :alloc_string_literal
     %(    lit = "abcd";\n    IF lit.length() == 999_i64 THEN RETURN #{retval}; END\n)
   when :alloc_charAt
-    %(    ch = a.charAt(0_i64) OR "";\n    IF ch.length() == 999_i64 THEN RETURN #{retval}; END\n)
+    %(    ch = a.charAt(0_i64) OR_ELSE "";\n    IF ch.length() == 999_i64 THEN RETURN #{retval}; END\n)
   when :alloc_split
     %(    parts = a.split(" ");\n    IF parts.length() == 999_i64 THEN RETURN #{retval}; END\n)
   when :alloc_concat
-    %(    cat = a + a;\n    IF cat.length() == 999_i64 THEN RETURN #{retval}; END\n)
+    %(    cat = a $+ a;\n    IF cat.length() == 999_i64 THEN RETURN #{retval}; END\n)
   when :alloc_list_build
     %(    MUTABLE xs: Int64[]@list = [];\n    xs.append(3_i64);\n    IF xs.length() == 999_i64 THEN RETURN #{retval}; END\n)
   when :direct_raise
     # Statically a RAISE path; the guard is impossible at runtime.
     %(    IF a.length() == 999_i64 THEN RAISE "never"; END\n)
   when :or_raise_builtin
-    # Propagate a builtin-fallible op's failure via OR RAISE.
-    %(    ch = a.charAt(0_i64) OR RAISE;\n    IF ch.length() == 999_i64 THEN RETURN #{retval}; END\n)
+    # Propagate a builtin-fallible op's failure via OR_ELSE RAISE.
+    %(    ch = a.charAt(0_i64) OR_ELSE RAISE;\n    IF ch.length() == 999_i64 THEN RETURN #{retval}; END\n)
   when :fallible_callee_propagated
     # Call a `RETURNS !String` helper and propagate its error.
-    %(    h = isigFlaky(a) OR RAISE;\n    IF h.length() == 999_i64 THEN RETURN #{retval}; END\n)
+    %(    h = isigFlaky(a) OR_ELSE RAISE;\n    IF h.length() == 999_i64 THEN RETURN #{retval}; END\n)
   when :fallible_callee_absorbed
     # Call the same helper but ABSORB the error -> subject infallible.
-    %(    h = isigFlaky(a) OR "fallback";\n    IF h.length() == 999_i64 THEN RETURN #{retval}; END\n)
+    %(    h = isigFlaky(a) OR_ELSE "fallback";\n    IF h.length() == 999_i64 THEN RETURN #{retval}; END\n)
   end
 end
 
@@ -181,7 +181,7 @@ FuzzGenerator.register(:infallible_signature, cells: INFALLIBLE_SIG_CELLS) do |p
   retval   = isig_retval(p[:ret_shape])
   body     = isig_body(p[:fail_source], retval)
   # main consumes the subject's error iff the subject is declared !T.
-  consume  = p[:decl] == :error_union ? " OR RAISE" : ""
+  consume  = p[:decl] == :error_union ? " OR_ELSE RAISE" : ""
   assert   = isig_assert(p[:ret_shape])
 
   <<~CHT

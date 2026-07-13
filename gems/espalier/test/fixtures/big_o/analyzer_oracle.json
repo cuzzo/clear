@@ -1,0 +1,72 @@
+{
+  "config": {
+    "class_name": "Owner",
+    "ivar_types": {
+      "@items": "Array",
+      "@values": "Hash",
+      "@widget": "Widget",
+      "@cfg": "FunctionCFG"
+    },
+    "local_types": {
+      "users": "T.nilable(T::Array[User])"
+    },
+    "nil_kill_evidence": {
+      "20": { "evidence_items": "T::Array[String]" }
+    },
+    "method_signatures": {
+      "Owner#children": "sig { returns(T::Array[Child]) }",
+      "User#address": "def address() -> Address"
+    },
+    "state_types": {
+      "FunctionCFG": { "@blocks": "Array" },
+      "Address": { "@city": "City" }
+    }
+  },
+  "type_resolutions": {
+    "self": "Owner",
+    "items": "Array",
+    "@items": "Array",
+    "users": "Array",
+    "children": "Array",
+    "cfg.blocks": "Array",
+    "evidence_items": "Array"
+  },
+  "analysis": {
+    "expected_complexity": "O(N^2)",
+    "expected_space": "O(N)",
+    "nodes": [
+      { "type": "call", "receiver": "items", "method": "sort", "line": 1 },
+      { "type": "call", "receiver": "cfg", "method": "blocks", "line": 2 },
+      { "type": "call", "receiver": "cfg", "method": "sort_by", "line": 2 },
+      { "type": "call", "receiver": "widget", "method": "work", "line": 3 },
+      { "type": "call", "receiver": "mystery", "method": "work", "line": 4 },
+      { "type": "loop", "line": 5 },
+      { "type": "callback", "line": 6 },
+      { "type": "yield", "line": 7 },
+      { "type": "structural", "line": 8, "complexity": "O(N^2)", "space": "O(N)", "is_dynamic": true, "trigger": "normalized-domain", "reason": "two domains", "operation": "normalized_ast" }
+    ]
+  },
+  "multiplications": [
+    ["O(1)", "O(N)", "O(N)"],
+    ["O(N)", "O(1)", "O(N)"],
+    ["O(N!)", "O(N^3)", "O(N!)"],
+    ["O(2^N)", "O(N)", "O(2^N)"],
+    ["O(N)", "O(N)", "O(N^2)"],
+    ["O(N^2)", "O(N^3)", "O(N^5)"],
+    ["O(N^2 log N)", "O(N^3 log N)", "O(N^5 log N)"],
+    ["O(N log N)", "O(N)", "O(N^2 log N)"],
+    ["O(log N)", "O(log N)", "O(log N)"],
+    ["unknown", "unknown", "O(1)"]
+  ],
+  "ranks": {
+    "O(1)": 1,
+    "O(log N)": 2,
+    "O(N)": 10,
+    "O(N log N)": 11,
+    "O(N * M)": 14,
+    "O(N^4)": 18,
+    "O(2^N)": 100,
+    "O(N!)": 200,
+    "unknown": 1
+  }
+}

@@ -1,0 +1,28 @@
+# Test: IF (x AS y) AND (z AS a) multi-binding syntax
+
+FN main() RETURNS Void ->
+    str1 = "hello world";
+    str2 = "foo bar";
+
+    # Test 1: both bindings present
+    MUTABLE both_found: Bool = FALSE;
+    IF (str1.indexOf("world") EXISTS AS p1) AND (str2.indexOf("bar") EXISTS AS p2) THEN
+        both_found = TRUE;
+        ASSERT p1 == 6_i64, "world at 6";
+        ASSERT p2 == 4_i64, "bar at 4";
+    END
+    ASSERT both_found == TRUE, "both bindings found";
+
+    # Test 2: second binding nil, else taken
+    MUTABLE result: Bool = FALSE;
+    IF (str1.indexOf("hello") EXISTS AS p1) AND (str2.indexOf("xyz") EXISTS AS p2) THEN
+        result = TRUE;
+        found_pos = p1 + p2;
+    ELSE
+        result = FALSE;
+    END
+    ASSERT result == FALSE, "second nil: else taken";
+
+    print("252: IF multi-bind PASSED");
+    RETURN;
+END

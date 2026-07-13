@@ -102,14 +102,14 @@ plainly rather than guessed.
   invariants are structurally blind to it (vm-bugs.md "Gap
   analysis"). The fix is in the **lowering** (emit a capture/
   ownership marker, or refuse the unsafe capture) — not the checker,
-  not a vm.cht workaround.
+  not a vm.clear workaround.
 - **Architecturally-correct response:** R2-R6 (stack-VM fiber
   replication) is **blocked behind the vm-bugs.md BG-capture family
   + P0** (guest frame-arena + giant-function FSM/heap-resident).
   These compiler fixes land first, architecturally, per the
   vm-bugs.md fix-priorities — **explicitly not** flattening VM
   structs, **not** a Condition-7 band-aid, **not** working around
-  it in `vm.cht`. Cross-referenced in
+  it in `vm.clear`. Cross-referenced in
   `stack-vm-fiber-replication.md` ("Faithful re-reproduction").
 
 ---
@@ -233,7 +233,7 @@ gaps, each of which alone would have caught it:
    `transpile-tests/` had loop-carried collections and had
    structs-with-`@list`-fields, but never a struct-with-nested-
    `@list` carried across a *non-tight, frame-allocating* loop with
-   a *nested-field* mutation. `vm.cht` is the first program in the
+   a *nested-field* mutation. `vm.clear` is the first program in the
    tree that does (its handle tables) -- and only when de-TIGHT'd,
    which nothing tested because the dispatch loop was always TIGHT.
 
@@ -282,7 +282,7 @@ canonical walker, not N drifting").
 - **Fuzz:** `loop_carry_collection.rb` gained
   `carrier ∈ {flat,nested}` and `body ∈ {plain,frame_alloc}` axes;
   nested+frame_alloc cells are positive and fail pre-fix.
-- **Integration:** `transpile-tests/528_nested_list_loop_rewind.cht`
+- **Integration:** `transpile-tests/528_nested_list_loop_rewind.clear`
   -- concrete leak-checked regression with a runtime assertion.
 
 **Sibling-template audit (done, not deferred).**

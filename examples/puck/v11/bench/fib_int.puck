@@ -1,5 +1,5 @@
 (* Integer-only fib(35) bench. No string literals so the .puckc has no
-   ALLOC ops, which keeps the CLEAR-side vm.cht runnable on it. v10 and
+   ALLOC ops, which keeps the CLEAR-side vm.clear runnable on it. v10 and
    v11 produce identical output. *)
 
 MODULE FibIntBench;

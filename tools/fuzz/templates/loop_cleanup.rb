@@ -74,7 +74,7 @@ def loop_cleanup_fn_wrap(p, body)
 
   # Always !T — any of our alloc kinds use fallible operations (List.append,
   # String concat with OOM). RETURNS !T propagates the error union; caller
-  # handles via `OR RAISE`. Avoids per-cell guessing about which bodies are
+  # handles via `OR_ELSE RAISE`. Avoids per-cell guessing about which bodies are
   # fallible.
   ret_t = if needs_outer
     "!#{CleanupDims.outer_list_type(p[:alloc])}"
@@ -89,9 +89,9 @@ def loop_cleanup_fn_wrap(p, body)
   # raise-disruptor cells exit non-zero just because they raised, which
   # the runner can't distinguish from a real bug.
   inner_call = if needs_outer
-    "_ = run() OR PASS;"
+    "_ = run() OR_ELSE PASS;"
   else
-    "run() OR PASS;"
+    "run() OR_ELSE PASS;"
   end
 
   fn_def = <<~CHT.chomp

@@ -2,13 +2,13 @@
 # clear - CLEAR language compiler CLI
 #
 # Usage:
-#   clear build foo.cht [-o output] [--release|--safe]
-#   clear run foo.cht [-- args...]
-#   clear test foo.cht
+#   clear build foo.clear [-o output] [--release|--safe]
+#   clear run foo.clear [-- args...]
+#   clear test foo.clear
 #
 # See docs/clear-man.md for full documentation.
 
-# Set up Bundler so src/ files can `require "sorbet-runtime"` etc.
+# Set up Bundler so compiler/ruby files can `require "sorbet-runtime"` etc.
 # without relying on system gems. Soft-fails when Bundler isn't
 # available so end users running a vendored binary aren't blocked.
 begin
@@ -19,7 +19,7 @@ rescue LoadError
 end
 
 # Compiler runtime type wrappers are useful while debugging compiler internals,
-# but they dominate normal build time if enabled before src/ is loaded.
+# but they dominate normal build time if enabled before compiler/ruby is loaded.
 begin
   require "sorbet-runtime"
   T::Configuration.default_checked_level = :never unless ENV["CLEAR_SORBET_RUNTIME"] == "1"
@@ -31,19 +31,21 @@ require 'optparse'
 require 'digest'
 require 'set'
 require 'json'
-require_relative 'src/tools/clear_build_support'
+require 'rbconfig'
+require 'open3'
+require_relative 'compiler/ruby/tools/clear_build_support'
 require_relative 'tools/zig_coverage_support'
 
-# Coverage bootstrap MUST run before any src/ require so SimpleCov can
+# Coverage bootstrap MUST run before any compiler/ruby require so SimpleCov can
 # instrument every file the subcommand loads. No-op unless COVERAGE=1.
-# See spec/coverage_bootstrap.rb.
-require_relative 'spec/coverage_bootstrap'
+# See compiler/spec/coverage_bootstrap.rb.
+require_relative 'compiler/spec/coverage_bootstrap'
 CoverageBootstrap.start('clear-cli')
 
 # Resolve paths relative to this script (works from any directory)
 CLEAR_ROOT = File.expand_path('..', __FILE__)
 ZIG_DIR    = File.join(CLEAR_ROOT, 'zig')
-SRC_DIR    = File.join(CLEAR_ROOT, 'src')
+SRC_DIR    = File.join(CLEAR_ROOT, 'compiler', 'ruby')
 TRANSPILER = File.join(SRC_DIR, 'backends', 'transpiler.rb')
 TRANSPILER_CACHE_DIR = File.join(ZIG_DIR, '.clear-transpile-cache')
 
@@ -132,6 +134,56 @@ def error(msg)
   exit 1
 end
 
+def find_project_build_zig(source)
+  return nil if ENV['CLEAR_DISABLE_BUILD_ZIG'] == '1'
+
+  dir = File.dirname(File.expand_path(source))
+  loop do
+    path = File.join(dir, 'build.zig')
+    if File.file?(path)
+      begin
+        return [dir, path] if File.read(path, 4096).include?('CLEAR_BUILD_ENTRY')
+      rescue SystemCallError
+      end
+    end
+
+    parent = File.dirname(dir)
+    break if parent == dir
+
+    dir = parent
+  end
+
+  nil
+end
+
+def run_project_build_zig!(source, output:, opt_level:, mode:, run_args: [], use_c_allocator: false, use_debug_allocator: false, ownership_mode: :default)
+  project = find_project_build_zig(source)
+  return false unless project
+
+  build_root, build_file = project
+  step = mode == :run ? 'clear-run' : 'clear-build'
+  cmd = [
+    ZIG,
+    'build',
+    step,
+    "-Dclear-source=#{File.expand_path(source)}",
+    "-Dclear-output=#{File.expand_path(output)}",
+    "-Doptimize=#{opt_level}"
+  ]
+  cmd << '-Dclear-use-c-allocator=true' if use_c_allocator
+  cmd << '-Dclear-use-debug-allocator=true' if use_debug_allocator
+  cmd << "-Dclear-ownership-mode=#{ownership_mode}"
+  if mode == :run && run_args.any?
+    cmd << '--'
+    cmd.concat(run_args)
+  end
+
+  $stderr.puts "\e[90musing project build: #{build_file}\e[0m"
+  ok = Dir.chdir(build_root) { system(*cmd) }
+  exit($?.exitstatus || 1) unless ok
+  true
+end
+
 # Walk AST to collect BG block nodes in order (matching transpiler's @bg_block_counter).
 def find_bg_blocks(node, result)
   case node
@@ -148,11 +200,12 @@ end
 # -------------------------------------------------------------------------
 # Build: transpile + compile
 # -------------------------------------------------------------------------
-def do_build(source, output: nil, opt_level: 'Debug', extra_flags: [], module_mode: false, default_stack: nil, profile: false, profile_max: nil, strict_test: false, force: false, exact_tiers: nil, use_c_allocator: false, use_debug_allocator: false, main_tier: nil, bypass_transpile_cache: false, zig_coverage: false, zig_coverage_suite: 'clear-cli', zig_coverage_name: nil, zig_coverage_run_dir: nil)
+def do_build(source, output: nil, opt_level: 'Debug', extra_flags: [], module_mode: false, default_stack: nil, profile: false, profile_max: nil, strict_test: false, force: false, exact_tiers: nil, use_c_allocator: false, use_debug_allocator: false, main_tier: nil, bypass_transpile_cache: false, zig_coverage: false, zig_coverage_suite: 'clear-cli', zig_coverage_name: nil, zig_coverage_run_dir: nil, ownership_mode: :default)
+  invocation_cwd = Dir.pwd
   error "File not found: #{source}" unless File.exist?(source)
   source = File.expand_path(source)
   source_dir = File.dirname(source)
-  base_name = File.basename(source, '.cht')
+  base_name = File.basename(source, '.clear')
 
   # Output binary path
   output ||= File.join(source_dir, base_name)
@@ -170,7 +223,8 @@ def do_build(source, output: nil, opt_level: 'Debug', extra_flags: [], module_mo
     default_stack: default_stack,
     strict_test: strict_test,
     exact_tiers: exact_tiers,
-    main_tier: main_tier
+    main_tier: main_tier,
+    ownership_mode: ownership_mode
   )
 
   # Skip rebuild if output is newer than source AND compiler files.
@@ -199,12 +253,14 @@ def do_build(source, output: nil, opt_level: 'Debug', extra_flags: [], module_mo
   transpile_flag += " --debug-allocator" if use_debug_allocator
   transpile_flag += " --default-stack #{default_stack}" if default_stack
   transpile_flag += " --strict" if strict_test
+  transpile_flag += " --easy" if ownership_mode == :easy
+  transpile_flag += " --ownership-strict" if ownership_mode == :strict
   if exact_tiers
     transpile_flag += " --exact-tiers '#{exact_tiers.transform_keys(&:to_s).to_json}'"
   end
   transpile_flag += " --main-tier #{main_tier}" if main_tier
 
-  # Auto-detect package requires: REQUIRE "pkg:name" → look for packages/name/src/lib.cht
+  # Auto-detect package requires: REQUIRE "pkg:name" → look for packages/name/src/lib.clear
   source_text = File.read(source)
   pkg_requires = source_text.scan(/REQUIRE\s+"pkg:([^"]+)"/).flatten.uniq
   pkg_flags = pkg_requires.map do |pkg_name|
@@ -274,14 +330,23 @@ def do_build(source, output: nil, opt_level: 'Debug', extra_flags: [], module_mo
   ClearBuildSupport.write_if_changed(tmp_zig, zig_code)
   cleanup_paths << tmp_zig if coverage_module_mode
 
-  # Auto-detect FFI modules: scan source for EXTERN ... FROM "module" declarations
-  # and check for either a sibling module.zig or packages/module/src/lib.zig.
-  extern_modules = source_text.scan(/FROM\s+"([^"]+)"/).flatten.uniq
+  # Auto-detect FFI modules: scan the entry and local REQUIRE graph for
+  # EXTERN ... FROM "module" declarations. Required helper files can own native
+  # declarations even when the entry file only has REQUIRE lines.
+  begin
+    ffi_dependency_paths = ClearBuildSupport.collect_clear_dependencies(source).to_a
+  rescue ClearBuildSupport::BuildError
+    ffi_dependency_paths = [source]
+  end
+  ffi_scan_text = ffi_dependency_paths.map { |path| File.exist?(path) ? File.read(path) : "" }.join("\n")
+  extra_native_dirs = ENV.fetch('CLEAR_EXTRA_NATIVE_DIRS', '').split(File::PATH_SEPARATOR).reject(&:empty?)
+  ffi_search_dirs = ([source_dir] + ffi_dependency_paths.map { |path| File.dirname(path) } + extra_native_dirs).map { |dir| File.expand_path(dir) }.uniq
+  extern_modules = ffi_scan_text.scan(/FROM\s+"([^"]+)"/).flatten.uniq
   ffi_modules = extern_modules.filter_map do |m|
     next if m.start_with?('std.')
 
-    sibling = File.join(source_dir, "#{m}.zig")
-    src_mod = if File.exist?(sibling)
+    sibling = ffi_search_dirs.map { |dir| File.join(dir, "#{m}.zig") }.find { |path| File.exist?(path) }
+    src_mod = if sibling
                 sibling
               else
                 ClearBuildSupport.find_zig_package_source(m, start_dir: source_dir)
@@ -357,6 +422,23 @@ def do_build(source, output: nil, opt_level: 'Debug', extra_flags: [], module_mo
 
   cmd_parts += [tmp_name, *RUNTIME_FILES]
   cmd_parts += ['-lc']
+  if module_mode && !coverage_module_mode
+    # Zig runs test binaries from its compilation directory. CLEAR programs
+    # resolve relative filesystem paths from the user's invocation directory,
+    # so preserve that cwd explicitly for isolated `clear test file.clear`.
+    cmd_parts += [
+      '--test-cmd', RbConfig.ruby,
+      '--test-cmd', '-e',
+      '--test-cmd', 'cwd = ARGV.shift; binary = File.expand_path(ARGV.shift); Dir.chdir(cwd) { exec(binary, *ARGV) }',
+      '--test-cmd', invocation_cwd,
+      '--test-cmd-bin',
+    ]
+  end
+  extra_link_libs = ENV.fetch('CLEAR_EXTRA_LINK_LIBS', '').split(/[,\s]+/).reject(&:empty?)
+  extra_link_libs.each do |lib|
+    error "Invalid CLEAR_EXTRA_LINK_LIBS entry: #{lib}" unless lib.match?(/\A[A-Za-z0-9_.+\-]+\z/)
+    cmd_parts << "-l#{lib}"
+  end
 
   unless module_mode
     bin_name = "#{File.basename(output)}-#{$$}"
@@ -365,7 +447,6 @@ def do_build(source, output: nil, opt_level: 'Debug', extra_flags: [], module_mo
     cmd_parts += ['--name', bin_name]
   end
 
-  cmd = cmd_parts.join(' ')
   if coverage_module_mode
     compile_output, compile_status = ZigCoverageSupport.run_zig_test(
       zig: ZIG,
@@ -377,8 +458,8 @@ def do_build(source, output: nil, opt_level: 'Debug', extra_flags: [], module_mo
     )
     success = compile_status.success?
   else
-    compile_output = `cd #{build_dir} && #{cmd} 2>&1`
-    success = $?.success?
+    compile_output, compile_status = Open3.capture2e(*cmd_parts, chdir: build_dir)
+    success = compile_status.success?
   end
 
   # Move binary to output location (zig puts it in the build dir)
@@ -434,7 +515,7 @@ when 'build'
   if fix_mode
     sub_args = args - %w[--fix --fix=auto --fix=yes]
     source   = first_positional_arg(sub_args)
-    error "Usage: clear build --fix <file.cht>" unless source
+    error "Usage: clear build --fix <file.clear>" unless source
     run_with_fix_retry(__FILE__, 'build', sub_args, source, fix_mode)
     exit 0
   end
@@ -445,6 +526,7 @@ when 'build'
   use_c_allocator = false
   use_debug_allocator = false
   bypass_transpile_cache = false
+  ownership_mode = :default
 
   # Parse build flags
   remaining = []
@@ -517,8 +599,10 @@ when 'build'
       # observed uses. `clear fix` rewrites resolved Autos to their
       # concrete types. Imports are still required to be fully typed
       # (STRICT-imports boundary, §7).
-      require_relative 'src/ast/parser'
-      ClearParser.gradual_mode = true
+      ownership_mode = :easy
+      i += 1
+    when '--strict'
+      ownership_mode = :strict
       i += 1
     else
       remaining << args[i]
@@ -527,21 +611,34 @@ when 'build'
   end
 
   source = remaining.first
-  error "Usage: clear build <file.cht> [-o output] [--release|--safe] [--stack-check] [--force]" unless source
+  error "Usage: clear build <file.clear> [-o output] [--release|--safe] [--stack-check] [--force]" unless source
 
   # Auto-detect stack check: off for debug (20MB binaries make objdump slow), on for release/safe.
   stack_check = (opt_level != 'Debug') if stack_check.nil?
 
   default_stack = (opt_level == 'Debug') ? 'Large' : nil
-  result = do_build(source, output: output, opt_level: opt_level, extra_flags: extra_flags, default_stack: default_stack, force: !!@force_build, use_c_allocator: use_c_allocator, use_debug_allocator: use_debug_allocator, bypass_transpile_cache: bypass_transpile_cache)
-  output_path = output || File.join(File.dirname(File.expand_path(source)), File.basename(source, '.cht'))
+  output_path = output || File.join(File.dirname(File.expand_path(source)), File.basename(source, '.clear'))
+  if find_project_build_zig(source)
+    run_project_build_zig!(
+      source,
+      output: output_path,
+      opt_level: opt_level,
+      mode: :build,
+      use_c_allocator: use_c_allocator,
+      use_debug_allocator: use_debug_allocator,
+      ownership_mode: ownership_mode
+    )
+    exit 0
+  end
+
+  result = do_build(source, output: output, opt_level: opt_level, extra_flags: extra_flags, default_stack: default_stack, force: !!@force_build, use_c_allocator: use_c_allocator, use_debug_allocator: use_debug_allocator, bypass_transpile_cache: bypass_transpile_cache, ownership_mode: ownership_mode)
   exit 0 if result == :up_to_date
   puts "Built: #{output_path}"
 
   # Post-build stack verification and exact sizing
   if stack_check && File.exist?(output_path) && File.read(source).scan(/REQUIRE\s+"pkg:([^"]+)"/).empty?
-    require_relative 'src/tools/stack_verifier'
-    require_relative 'src/backends/transpiler'
+    require_relative 'compiler/ruby/tools/stack_verifier'
+    require_relative 'compiler/ruby/backends/transpiler'
 
     begin
       src_text = File.read(source)
@@ -553,18 +650,18 @@ when 'build'
       # raises "REQUIRE is only supported when using the Importer" --
       # the rescue below silently logs `[stack-check] Analysis failed`
       # and the build proceeds without exact-tier sizing. For files with
-      # large frames (e.g. examples/minivm/vm.cht's runRegisterBytecode!
+      # large frames (e.g. examples/minivm/vm.clear's runRegisterBytecode!
       # at ~478 KB), the missing tier upgrade leaves them on the default
       # 16 KB Standard stack, overflowing into adjacent slab memory
       # and corrupting fiber slab headers at scheduler shutdown.
-      require_relative 'src/compiler/module_importer'
+      require_relative 'compiler/ruby/compiler/module_importer'
       source_dir = File.dirname(File.expand_path(source))
       importer = ModuleImporter.new(base_dir: source_dir, use_mir: true)
       annotator = SemanticAnnotator.new(importer: importer, source_dir: source_dir)
       annotator.annotate!(ast)
       fn_nodes = annotator.semantic_function_nodes
 
-      base_name = File.basename(source, '.cht')
+      base_name = File.basename(source, '.clear')
       prefix = "._clear_tmp_#{base_name}"
       verifier = StackVerifier.new(output_path, prefix)
 
@@ -675,7 +772,7 @@ when 'run'
   if fix_mode
     sub_args = clear_args - %w[--fix --fix=auto --fix=yes]
     source   = first_positional_arg(sub_args)
-    error "Usage: clear run --fix <file.cht>" unless source
+    error "Usage: clear run --fix <file.clear>" unless source
     full_args = sub_args.dup
     full_args += ['--'] + run_args unless run_args.empty?
     run_with_fix_retry(__FILE__, 'run', full_args, source, fix_mode)
@@ -687,6 +784,7 @@ when 'run'
   extra_flags = ['-fno-llvm', '-fno-lld']
   use_c_allocator = false
   no_cache = false
+  ownership_mode = :default
   run_remaining = []
   clear_args.each do |arg|
     case arg
@@ -705,18 +803,35 @@ when 'run'
       use_c_allocator = true
     when '--no-cache'
       no_cache = true
+    when '--gradual'
+      ownership_mode = :easy
+    when '--strict'
+      ownership_mode = :strict
     else
       run_remaining << arg
     end
   end
 
   source = run_remaining.first
-  error "Usage: clear run <file.cht> [--optimized|--safe] [-- args...]" unless source
+  error "Usage: clear run <file.clear> [--optimized|--safe] [-- args...]" unless source
 
   source = File.expand_path(source)
-  output = File.join(File.dirname(source), File.basename(source, '.cht'))
+  output = File.join(File.dirname(source), File.basename(source, '.clear'))
   default_stack = (opt_level == 'Debug') ? 'Large' : nil
-  do_build(source, output: output, opt_level: opt_level, extra_flags: extra_flags, default_stack: default_stack, use_c_allocator: use_c_allocator, force: no_cache, bypass_transpile_cache: no_cache)
+  if find_project_build_zig(source)
+    run_project_build_zig!(
+      source,
+      output: output,
+      opt_level: opt_level,
+      mode: :run,
+      run_args: run_args,
+      use_c_allocator: use_c_allocator,
+      ownership_mode: ownership_mode
+    )
+    exit 0
+  end
+
+  do_build(source, output: output, opt_level: opt_level, extra_flags: extra_flags, default_stack: default_stack, use_c_allocator: use_c_allocator, force: no_cache, bypass_transpile_cache: no_cache, ownership_mode: ownership_mode)
 
   # Hints
   unless ENV['CLEAR_THREADS']
@@ -734,6 +849,45 @@ when 'run'
 
 when 'test'
   test_args = ARGV[1..] || []
+  compat_stage = nil
+  compat_out = nil
+  i = 0
+  while i < test_args.length
+    case test_args[i]
+    when '--compat-stage', '--compat'
+      compat_stage = test_args[i + 1]
+      error "#{test_args[i]} requires a value (currently: lexer, parser)" unless compat_stage
+      test_args.slice!(i, 2)
+      next
+    when /\A--compat-stage=(.+)\z/, /\A--compat=(.+)\z/
+      compat_stage = Regexp.last_match(1)
+      test_args.delete_at(i)
+      next
+    when '--compat-out'
+      compat_out = test_args[i + 1]
+      error "--compat-out requires a path" unless compat_out
+      test_args.slice!(i, 2)
+      next
+    when /\A--compat-out=(.+)\z/
+      compat_out = Regexp.last_match(1)
+      test_args.delete_at(i)
+      next
+    end
+    i += 1
+  end
+
+  if compat_stage
+    compat_scripts = {
+      'lexer' => 'lexer_compat.rb',
+      'parser' => 'parser_compat.rb'
+    }
+    error "Unknown compatibility stage: #{compat_stage} (currently supported: lexer, parser)" unless compat_scripts.key?(compat_stage)
+    compat_script = File.join(CLEAR_ROOT, 'tools', compat_scripts.fetch(compat_stage))
+    compat_args = []
+    compat_args += ['--out', compat_out] if compat_out
+    exec(RbConfig.ruby, compat_script, *compat_args)
+  end
+
   profile_mode = test_args.delete('--profile')
   strict_mode = test_args.delete('--strict')
   frame_debug = test_args.delete('--debug-frame') || test_args.delete('--no-frame')
@@ -755,7 +909,7 @@ when 'test'
   end
 
   source = test_args.first
-  error "Usage: clear test <file.cht|directory> [--profile] [--strict] [--debug-frame] [--coverage] [--tag <name>]" unless source
+  error "Usage: clear test <file.clear|directory> [--profile] [--strict] [--debug-frame] [--coverage] [--tag <name>]" unless source
   frame_env = frame_debug ? "CLEAR_FRAME_DEBUG=1 " : ""
 
   if File.directory?(source)
@@ -887,7 +1041,7 @@ when 'test'
     # Transpiled tests import runtime/runtime-header.zig and lib/* via
     # directory-relative paths; top-level zig/*.zig symlinks are no longer
     # sufficient after the Zig 0.16 runtime/layout changes.
-    base_name = File.basename(source, '.cht')
+    base_name = File.basename(source, '.clear')
     build_dir = coverage_mode ? ZIG_DIR : File.join(ZIG_DIR, ".build-#{$$}")
     cleanup_paths = []
     FileUtils.mkdir_p(build_dir)
@@ -897,12 +1051,20 @@ when 'test'
       ClearBuildSupport.ensure_symlink(File.join(build_dir, 'experimental'), File.join(ZIG_DIR, 'experimental'))
     end
     source_dir = File.dirname(File.expand_path(source))
-    extern_modules = File.read(source).scan(/FROM\s+"([^"]+)"/).flatten.uniq
+    begin
+      ffi_dependency_paths = ClearBuildSupport.collect_clear_dependencies(source).to_a
+    rescue ClearBuildSupport::BuildError
+      ffi_dependency_paths = [source]
+    end
+    ffi_scan_text = ffi_dependency_paths.map { |path| File.exist?(path) ? File.read(path) : "" }.join("\n")
+    extra_native_dirs = ENV.fetch('CLEAR_EXTRA_NATIVE_DIRS', '').split(File::PATH_SEPARATOR).reject(&:empty?)
+    ffi_search_dirs = ([source_dir] + ffi_dependency_paths.map { |path| File.dirname(path) } + extra_native_dirs).map { |dir| File.expand_path(dir) }.uniq
+    extern_modules = ffi_scan_text.scan(/FROM\s+"([^"]+)"/).flatten.uniq
     ffi_modules = extern_modules.filter_map do |m|
       next if m.start_with?('std.')
 
-      sibling = File.join(source_dir, "#{m}.zig")
-      src_mod = if File.exist?(sibling)
+      sibling = ffi_search_dirs.map { |dir| File.join(dir, "#{m}.zig") }.find { |path| File.exist?(path) }
+      src_mod = if sibling
                   sibling
                 else
                   ClearBuildSupport.find_zig_package_source(m, start_dir: source_dir)
@@ -938,6 +1100,16 @@ when 'test'
     else
       tag_filters.each { |t| cmd_parts += ['--test-filter', "##{t}"] }
     end
+    unless coverage_mode
+      invocation_cwd = Dir.pwd
+      cmd_parts += [
+        '--test-cmd', RbConfig.ruby,
+        '--test-cmd', '-e',
+        '--test-cmd', 'cwd = ARGV.shift; binary = File.expand_path(ARGV.shift); Dir.chdir(cwd) { exec(binary, *ARGV) }',
+        '--test-cmd', invocation_cwd,
+        '--test-cmd-bin',
+      ]
+    end
     if coverage_mode
       compile_output, compile_status = ZigCoverageSupport.run_zig_test(
         zig: ZIG,
@@ -950,9 +1122,8 @@ when 'test'
       success = compile_status.success?
       cleanup_paths.each { |path| FileUtils.rm_f(path) } unless ENV['ZIG_COVERAGE_KEEP_BUNDLE'] == '1'
     else
-      cmd = cmd_parts.join(' ')
-      compile_output = `cd #{build_dir} && #{cmd} 2>&1`
-      success = $?.success?
+      compile_output, compile_status = Open3.capture2e(*cmd_parts, chdir: build_dir)
+      success = compile_status.success?
       FileUtils.rm_rf(build_dir)
     end
 
@@ -971,10 +1142,15 @@ when 'test'
 
 when 'benchmark'
   bench_args = ARGV[1..] || []
+  if bench_args.delete('--lexer')
+    benchmark_script = File.join(CLEAR_ROOT, 'tools', 'lexer_benchmark.rb')
+    exec(RbConfig.ruby, benchmark_script, *bench_args)
+  end
+
   coverage_mode = bench_args.delete('--coverage')
   ENV['ZIG_COVERAGE'] ||= '1' if coverage_mode
   source = bench_args.first
-  error "Usage: clear benchmark <file.cht> [--coverage]" unless source
+  error "Usage: clear benchmark <file.clear> [--coverage]" unless source
   # Benchmark mode: same as test but also runs BENCHMARK/SMASH blocks
   do_build(
     source,
@@ -1045,10 +1221,10 @@ when 'profile'
   sample_n = 100 if sync_callstacks && sample_n.nil?
 
   source = clear_args.first
-  error "Usage: clear profile <file.cht> [--profile-max=N] [--sample=N] [--sync-callstacks] [-- args...]" unless source
+  error "Usage: clear profile <file.clear> [--profile-max=N] [--sample=N] [--sync-callstacks] [-- args...]" unless source
 
   source = File.expand_path(source)
-  base_name = File.basename(source, '.cht')
+  base_name = File.basename(source, '.clear')
   output = File.join(File.dirname(source), base_name)
   profile_dir = File.join(File.dirname(source), "#{base_name}.profile")
   FileUtils.mkdir_p(profile_dir)
@@ -1065,7 +1241,7 @@ when 'profile'
 
   # Copy the CLEAR source alongside the transpiled.zig so `clear doctor`
   # can show source snippets next to hot-line attributions.
-  FileUtils.cp(source, File.join(profile_dir, 'source.cht')) rescue nil
+  FileUtils.cp(source, File.join(profile_dir, 'source.clear')) rescue nil
 
   # CPU profiling via perf
   has_perf = system('which perf > /dev/null 2>&1') &&
@@ -1113,7 +1289,7 @@ when 'profile'
   # `pprof` tool can render flamegraphs / call graphs / source views
   # directly. Heap / lock / mvcc are encoded in pure Ruby; CPU defers
   # to the standard `perf_to_profile` Go binary if it's on PATH.
-  require_relative 'src/tools/pprof_converter'
+  require_relative 'compiler/ruby/tools/pprof_converter'
   pprof_files = PprofConverter.convert_all(profile_dir)
   if File.exist?(perf_data) && !pprof_files[:cpu]
     hint "perf_to_profile not on PATH — skipping CPU pprof. Install: " \
@@ -1136,7 +1312,7 @@ when 'profile'
   end
 
 when 'doctor'
-  require_relative 'src/tools/doctor'
+  require_relative 'compiler/ruby/tools/doctor'
   # Parse flags: --cumulative shows cum bytes/count alongside flat;
   # --focus=REGEX filters samples whose trace touches a function
   # matching the pattern; --diff <before-dir> compares two profile
@@ -1168,8 +1344,8 @@ when 'doctor'
   end
   Doctor.run(positional.first, **doctor_opts)
 
-when 'fix'
-  require_relative 'src/tools/clear_fix_support'
+when 'fix', 'autofix'
+  require_relative 'compiler/ruby/tools/clear_fix_support'
 
   begin
     ClearFixSupport.run_args(ARGV[1..] || [])
@@ -1178,7 +1354,7 @@ when 'fix'
   end
 
 when 'fmt', 'format'
-  require_relative 'src/tools/formatter'
+  require_relative 'compiler/ruby/tools/formatter'
 
   args = ARGV[1..] || []
   check_only = false
@@ -1198,7 +1374,7 @@ when 'fmt', 'format'
     end
   end
 
-  error "Usage: clear fmt [--check|--stdout|--verify] <file.cht|dir>..." if paths.empty?
+  error "Usage: clear fmt [--check|--stdout|--verify] <file.clear|dir>..." if paths.empty?
 
   # --verify: confirm fmt is semantics-preserving by transpiling the
   # original AND the formatted source to Zig and comparing byte-for-byte.
@@ -1206,18 +1382,18 @@ when 'fmt', 'format'
   # Returns exit status = number of files where output differed (or
   # transpilation raised). Does not write files.
   if verify_mode
-    require_relative 'src/tools/fmt_verifier'
+    require_relative 'compiler/ruby/tools/fmt_verifier'
     files = []
     paths.each do |p|
       if File.directory?(p)
-        files.concat(Dir.glob(File.join(p, '**', '*.cht')).sort)
+        files.concat(Dir.glob(File.join(p, '**', '*.clear')).sort)
       elsif File.file?(p)
         files << p
       else
         error "No such file or directory: #{p}"
       end
     end
-    error "No .cht files found" if files.empty?
+    error "No .clear files found" if files.empty?
     results = files.map { |f| FmtVerifier.verify(f) }
     fail_count = FmtVerifier.report(results)
     exit(fail_count.zero? ? 0 : 3)
@@ -1226,14 +1402,14 @@ when 'fmt', 'format'
   files = []
   paths.each do |p|
     if File.directory?(p)
-      files.concat(Dir.glob(File.join(p, '**', '*.cht')).sort)
+      files.concat(Dir.glob(File.join(p, '**', '*.clear')).sort)
     elsif File.file?(p)
       files << p
     else
       error "No such file or directory: #{p}"
     end
   end
-  error "No .cht files found" if files.empty?
+  error "No .clear files found" if files.empty?
 
   changed = 0
   failed  = 0
@@ -1287,8 +1463,8 @@ when 'explain'
   # the registered diagnostic's category, severity, message template,
   # summary, and (when set) cause / fix-hint / worked examples. With
   # no argument, lists every registered code.
-  require_relative 'src/ast/diagnostic_registry'
-  require_relative 'src/ast/diagnostic_examples'
+  require_relative 'compiler/ruby/ast/diagnostic_registry'
+  require_relative 'compiler/ruby/ast/diagnostic_examples'
   arg = ARGV[1]
   if arg.nil? || arg.empty?
     puts "Usage: clear explain <CODE>"
@@ -1394,7 +1570,7 @@ when 'completions'
     $stderr.puts "  clear completions fish > ~/.config/fish/completions/clear.fish"
     exit 1
   end
-  require_relative 'src/tools/completions'
+  require_relative 'compiler/ruby/tools/completions'
   print Completions.script_for(shell)
   exit 0
 
@@ -1403,16 +1579,18 @@ when 'help', '--help', '-h', nil
     CLEAR Language Compiler
 
     Usage:
-      clear build <file.cht> [-o output] [--optimized|--safe|--debug]
-      clear run <file.cht> [-- args...]
-      clear test <file.cht>          Test a single file
-      clear test <directory>         Test all .cht files in directory
+      clear build <file.clear> [-o output] [--optimized|--safe|--debug]
+      clear run <file.clear> [-- args...]
+      clear test <file.clear>          Test a single file
+      clear test <directory>         Test all .clear files in directory
+      clear test --compat-stage lexer|parser Compare Ruby and CLEAR stage output; writes MessagePack artifacts
       clear test ... --debug-frame   Enable debug frame arena (slow, detects use-after-rewind)
-      clear profile <file.cht>      Build + run with profiling (heap + CPU)
+      clear benchmark --lexer        Benchmark the Ruby lexer against the CLEAR lexer
+      clear profile <file.clear>      Build + run with profiling (heap + CPU)
       clear doctor <profile-dir>    Analyze profile data
       clear build --fix <file>      On compile error, run `clear fix` then retry once
       clear run --fix <file>        Same, for `clear run`
-      clear fix <file.cht>          Apply auto-fixable findings; prompt for others
+      clear fix <file.clear>          Apply auto-fixable findings; prompt for others
       clear fix --dry-run <file>    Show findings and chosen fixes, do not write
       clear fix --yes <file>        Take the first fix for every finding
       clear fix --only=lint,... <f> Restrict to categories (lint, ownership, ...)

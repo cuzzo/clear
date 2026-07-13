@@ -85,7 +85,10 @@ WITH EXCLUSIVE counter AS c {
 
 ## 4. Affine Ownership: GIVE & TAKES
 
-CLEAR uses **affine types** by default. Every value has exactly one owner. When you assign a value, ownership is **moved**, not copied.
+CLEAR uses **affine types** by default. Every value has exactly one owner, but
+DEFAULT and EASY infer the cheapest unambiguous transport: move, local borrow,
+or an owned COPY/CLONE when a destination must retain the value. STRICT keeps
+costly transport explicit.
 
 ```ruby clear
 FN process(TAKES s: String) RETURNS Void ->
@@ -96,13 +99,33 @@ END
 FN main() RETURNS Void ->
     msg = "Hello";
 
-    process(msg);                   # OKAY: Implicit transfer (by FN signature)
+    process(msg);                   # DEFAULT/EASY: inferred COPY because msg is used below
+    print(msg);                     # OKAY: msg still owns its original value
 
-    print(GIVE msg);                # COMPILER ERROR: USE AFTER MOVE: You can't GIVE `msg`.  `process(msg)` TOOK it away.
-    print(msg);                     # COMPILER ERROR: USE AFTER MOVE: You can't use `msg`.  `process(msg)` TOOK it away.
+    process(GIVE msg);              # Explicit transfer; msg is now dead
+    print(msg);                     # COMPILER ERROR: USE AFTER MOVE
 
     RETURN;
 END
+```
+
+> **NOTE:** DEFAULT and EASY infer ordinary move/borrow/copy decisions, so the
+> unannotated `process(msg)` above does not produce a use-after-move error.
+> STRICT rejects the hidden copy at that call and offers a fix to insert
+> `COPY`; an explicit `GIVE` always transfers ownership in every mode and a
+> later use always errors.
+
+Inference never guesses through mutation. If `y = x` creates a temporary
+alias and either name is mutated before the other's last use, compilation
+fails in EASY, DEFAULT, and STRICT. Choose the semantics explicitly:
+
+```ruby clear illustrative
+y = x;
+x.update!();
+print(y);          # COMPILER ERROR: ambiguous alias + mutation
+
+y = COPY x;       # independent snapshot
+# or declare shared identity explicitly and use: y = CLONE x
 ```
 
 For more details, see [Sharing Capabilities](sharing-capabilities.md).
@@ -131,7 +154,10 @@ FN bad!(v: Value, MUTABLE map: HashMap<Value>) RETURNS Void ->
 END
 ```
 
-**Zero implicit copies.** Copy types (primitives, strings, enums) can be freely used after assignment. Non-Copy types (unions with `@indirect` or `[]T` variants, structs with heap data) follow move semantics. There are never implicit deep copies.
+DEFAULT/EASY only introduce an owned copy when liveness and the destination
+contract require it. Local read-only aliases remain zero-cost borrows, and a
+last use remains a zero-cost move. STRICT reports every inferred deep copy or
+reference-count retain at its source location and offers an explicit fix.
 
 ## 5. Sharded Shared-Nothing Architecture
 
@@ -193,6 +219,27 @@ FN findUser(id: Int64) RETURNS ?User ->
 END
 ```
 
+An optional is never implicitly truthy. Test presence with postfix `EXISTS`,
+or bind the present payload with `EXISTS AS`:
+
+```ruby clear illustrative
+maybeUser = findUser(7_i64);
+hasUser = maybeUser EXISTS;                         # Bool
+
+IF maybeUser EXISTS AS user THEN
+    print(user.name);
+END
+```
+
+For non-Boolean optionals, `AND` and `OR` test presence. `?Bool` is deliberately
+not coerced because “present” and “present and true” are different questions:
+
+```ruby clear illustrative
+IF maybeUser EXISTS AND cacheReady THEN refresh(); END
+present = maybeFlag EXISTS OR fallback;
+enabled = (maybeFlag OR_ELSE FALSE) OR fallback;
+```
+
 Failible/Optional returns:
 
 ```ruby clear illustrative
@@ -201,6 +248,19 @@ FN findUser(id: Int64) RETURNS !?User ->
     IF id == 42 -> RETURN;
     RETURN User{ name: "Alice" };
 END
+```
+
+Postfix `IS_OK` tests whether a fallible expression succeeded. `IS_OK AS`
+binds its successful payload. Predicates refine left-to-right, so stacked
+tenses remain explicit when their states matter:
+
+```ruby clear illustrative
+IF findUser(7_i64) IS_OK AS maybeUser AND maybeUser EXISTS AS user THEN
+    print(user.name);
+END
+
+# When failure and absence share one fallback, OR_ELSE peels both layers of !?T.
+user = findUser(7_i64) OR_ELSE User{ name: "Guest" };
 ```
 
 ### Recursion
@@ -347,13 +407,13 @@ names = users |> SELECT _.name;
 entities |> EACH { _.x += _.vx; };
 result = data |> process |> validate |> format;
 
-# 3. Error Handling: Inline OR / OR RAISE
-val = parseInt("abc") OR 0;                         # OKAY: Fallback value
-content = readFile("config.json") OR RAISE;         # OKAY: Explicit propagation
+# 3. Error Handling: OR_ELSE fallback or propagation
+val = parseInt("abc") OR_ELSE 0;                   # OKAY: Fallback value
+content = readFile("config.json") OR_ELSE RAISE;   # OKAY: Explicit propagation
 
 # 4. Function-level CATCH
 FN main() RETURNS Void ->
-    result = loadConfig("config.json") OR RAISE;
+    result = loadConfig("config.json") OR_ELSE RAISE;
     print("Config: ${result}");
     RETURN;
 CATCH e
@@ -361,6 +421,11 @@ CATCH e
     RETURN;
 END
 ```
+
+> [!NOTE]
+> CLEAR's error system also supports typed errors, propagation, function-level
+> `CATCH`, stacked tenses, and multi-layer fallback. See the
+> [error-handling design](agents/error-handling.md) for the complete model.
 
 See [docs/pipelines.md#operators](docs/pipelines.md#operators) for a full list of higher-order function operators.
 
@@ -377,6 +442,7 @@ Tense represents a value that will exist in the future. CLEAR eliminates the com
 ```ruby clear illustrative
 # 1. Promise (~T): A single future value
 p: ~String = BG { sleep(100); RETURN "Data"; };
+ready = p IS_READY;                                 # Poll only; never consumes or binds
 val = NEXT p;                                       # OKAY: Blocks until ready
 
 # 2. Open Stream (~?T[]): Asynchronous generator
@@ -394,6 +460,10 @@ counter: ~Int64[INF] = BG STREAM {
 };
 v1 = NEXT counter;                                  # OKAY: Returns Int64 (never NIL)
 ```
+
+`IS_READY` answers only whether a single future has settled. It cannot use
+`AS`, because readiness does not distinguish successful and failed outcomes;
+`NEXT` is the operation that consumes the future and produces its result.
 
 > See [Tense Composition](tense-composition.md) for more details on `?` optional tense, and `!` fallible tense.
 
@@ -421,7 +491,7 @@ ASSERT NEXT b == 20, "order is preserved for all subscribers";
 
 `CLONE` is mandatory for `@split` streams. Plain assignment moves the handle.
 
-This is the model CLEAR intends for pub/sub style workloads. For a concrete benchmark in this area, see [08_pubsub/bench.cht](../benchmarks/concurrent/08_pubsub/bench.cht).
+This is the model CLEAR intends for pub/sub style workloads. For a concrete benchmark in this area, see [08_pubsub/bench.clear](../benchmarks/concurrent/08_pubsub/bench.clear).
 
 ## 11. Collections: Array, List, and Pool
 
@@ -452,7 +522,7 @@ items.append(42);
 MUTABLE users: User[100]@pool = [];
 
 id = users.insert(User{ name: "Alice" });           # Returns stable handle
-user = users.get(id) OR RAISE;                      # Returns ?T (checks stale handles)
+user = users.get(id) OR_ELSE RAISE;                      # Returns ?T (checks stale handles)
 ```
 
 ### Element-Level Capabilities
@@ -474,16 +544,19 @@ Element-level capabilities are primarily useful in struct fields where individua
 
 ## 12. Strings and Buffers
 
-Strings in CLEAR are Copy (like Rust's `&str` — a pointer + length). Assignment copies the slice header.
+Strings in CLEAR are owned, non-Copy values. DEFAULT and EASY infer a borrow,
+move, or owned copy from use and escape facts; STRICT requires an explicit
+`COPY` whenever preserving the source has a runtime cost.
 
 ```ruby clear
 x = "hello";
-y = x;                         # x is moved (strings are owned, non-Copy)
-# z = x;                       # would be use-after-move error
-z = COPY y;                    # OK: explicit deep-copy
+y = x;                         # DEFAULT/EASY infer the cheapest safe transport
+print(x);                      # OK: x remains live, so this is not inferred as a move
+z = COPY y;                    # Explicit independent snapshot in every mode
 
-# String concatenation
-full = "foo" + "bar";          # "foobar" (single allocation, no intermediate)
+# String interpolation and concatenation
+greeting = "Hello, ${name}!";
+full = "foo" $+ "bar";         # "foobar" (single allocation, no intermediate)
 ```
 
 Like arrays, Strings have capabilities:
@@ -492,59 +565,134 @@ Like arrays, Strings have capabilities:
 - `String@symbol` - compile-time interned identifier. Literals use Ruby-style `:ok` syntax. The compiler embeds the string in read-only static memory and deduplicates identical literals, so equality is O(1) pointer comparison and the value needs no cleanup (program-lifetime). Use for status tags, option names, event names, and map keys where the set of values is known at compile time. Note: interned HashMaps carry their own per-map symbol table for runtime string keys - this avoids a globally locked intern table, which would create a contention hotspot incompatible with CLEAR's scalability goals.
 - `String@ring` (v0.2) - circular buffer for streaming.
 
-## 13. Graphs, Cycles, and @indirect
+## 13. Graphs, Cycles, and `@node`
 
-For recursive or cyclic data structures, use `@indirect` (heap-allocated pointer, like Rust's `Box<T>`). Combine it with `EFFECTS REENTRANT` for recursive traversal:
+Use `@node` for a closed graph: a group of vertices that naturally shares one
+lifetime, such as an AST, scene graph, dependency graph, or UI tree with
+back-pointers. Declare the capability on references inside the node type and
+then construct and assign ordinary structs:
 
 ```ruby clear illustrative
-# Recursive tree node using @indirect for child pointers
 STRUCT Node {
-    value: Int64,
-    left: ?Node@indirect,     # Optional heap-allocated child
-    right: ?Node@indirect
+    id: Int64,
+    left: ?Node@node,
+    right: ?Node@node,
+    children: Node@node[]@list
 }
 
-# Recursive traversal must declare EFFECTS REENTRANT
-FN sumTree(n: Node) RETURNS Int64 EFFECTS REENTRANT ->
-    MUTABLE total = n.value;
-    IF n.left -> total += sumTree(n?.left OR 0);
-    IF n.right -> total += sumTree(n?.right OR 0);
-    RETURN total;
+FN buildGraph() RETURNS Void ->
+    MUTABLE root: Node@node = Node{ id: 1 };
+
+    # The destination is already Node@node, so CLEAR inserts each new value
+    # into the implicit graph store. No GraphId or pool API is exposed.
+    root.left = Node{ id: 2 };
+    root.right = root.left;                 # sharing is ordinary assignment
+    root.children.append(Node{ id: 3 });
+
+    # Cycles are legal. IF binds the optional node for mutation.
+    IF root.left EXISTS AS left THEN
+        left.right = root;
+    END
+    ASSERT root.left?.right?.id == 1;
 END
 ```
 
-`@indirect` gives the node a stable heap address, enabling graph structures. `@multiowned` (Rc) enables shared ownership for DAGs. For cyclic graphs, use `@link` -- CLEAR's weak reference.
+The compiler represents each reference as a compact generational handle and
+stores payloads densely in a hidden paged slot map. Stale handles resolve to
+NIL, and users still program against objects and fields rather than pool
+indices.
 
-`?.` is the safe navigate operator to peek into optional types.  It combines with `OR` to handle missing data like an error.
+> [!INFO]
+> `@node` cleanup is automatic RAII. Each function using a node type acquires
+> an implicit graph-scope lease and the compiler emits its release as a
+> `defer`. When the outermost lease ends, CLEAR synchronously destroys every
+> live payload in that type's implicit store—even if the nodes form cycles.
+> Nested Strings, Lists, and `EXTERN STRUCT ... CLOSE` resources are cleaned
+> exactly once before control returns to the caller. A graph is reclaimed as
+> a unit; no tracing garbage collector or manual walk is involved.
 
-### Weak References with @link
+`@node` is deliberately graph-lifetime ownership, not per-edge ownership.
+Losing one handle does not prove that its vertex is unreachable; the complete
+implicit store is reclaimed when its outermost graph scope ends. This is what
+makes cycles inexpensive and cleanup deterministic.
 
-`@link` creates a weak reference that does not keep the target alive. It works with both `@multiowned` (WeakRc) and `@shared` (WeakArc).
+For a uniquely owned recursive tree that does not need sharing or cycles,
+`@indirect` remains the simpler pointer-like representation:
+
+```ruby clear illustrative
+STRUCT TreeNode {
+    value: Int64,
+    left: ?TreeNode@indirect,
+    right: ?TreeNode@indirect
+}
+```
+
+In EASY mode, a uniquely forced recursive edge may omit `@indirect` with
+identical MIR, ABI, allocation count, and cleanup behavior:
+
+```ruby clear illustrative
+STRUCT ChainNode {
+    value: Int64,
+    next: ?ChainNode       # EASY infers ?ChainNode@indirect
+}
+```
+
+DEFAULT and STRICT require the explicit layout. EASY also requires it when
+there is more than one performance-distinct choice—such as `left` and `right`
+recursive edges. Moving a value into `T[]@list` never causes boxing: list
+elements remain inline and contiguous.
+
+`?.` is the safe navigate operator to peek into optional types. It combines with `OR_ELSE` to handle missing data like an error. One `?.` guards a continuous chain of non-optional members, so `user?.profile.name` is sufficient when only `user` is optional. A member that is itself optional introduces a new boundary (`user?.optionalProfile?.name`). Bounds-safe `@list` indexing also introduces a boundary: `users[i]?.profile.name`.
+
+An `@list` indexed read has type `?T` and returns NIL when the index is out of bounds. Use `IF users[i] EXISTS AS user THEN ... END` when mutating a struct element; the binding aliases the actual list slot rather than a temporary copy.
+
+Safe navigation can also make that mutation conditional:
+
+```ruby clear illustrative
+users[i]?.name = nextName();
+```
+
+If `i` is out of bounds, the assignment is skipped and `nextName()` is not
+evaluated. The `?.` is therefore a visible conditional-write marker. Use
+`IF users[i] EXISTS AS user THEN ... ELSE ... END` when a missing element must be
+reported or handled rather than ignored.
+
+### Independent Lifetimes with `LINK` / `RESOLVE`
+
+Use `LINK` / `RESOLVE` instead of `@node` when the objects do **not** share a
+closed graph lifetime—for example, a request temporarily observing a global
+registry, a cache entry watched by unrelated components, or an object that
+must remain alive after the function that created its neighbors returns.
+
+`@multiowned` and `@shared` give each object an independent reference-counted
+lifetime. `@link` creates a weak reference that observes the object without
+keeping it alive. It works with both `@multiowned` (WeakRc) and `@shared`
+(WeakArc).
 
 - `LINK expr` -- downgrade a strong reference to a weak reference
 - `RESOLVE expr` -- upgrade a weak reference back to an optional strong reference (`?T`)
 
 ```ruby clear illustrative
-# Parent-child with back-pointer cycle
+# The parent has an independent Rc lifetime. Its child only observes it.
 STRUCT Parent {
     name: String,
-    child: ?Child@multiowned@indirect
 }
 
 STRUCT Child {
     name: String,
-    parent: ?Parent@link          # weak back-pointer, breaks the cycle
+    parent: ?Parent@link
 }
 
 FN main() RETURNS Void ->
-    p = Parent{ name: "Alice", child: NIL } @multiowned;
+    p = Parent{ name: "Alice" } @multiowned;
 
-    # LINK downgrades the strong Rc to a WeakRc
+    # LINK downgrades the strong Rc to a WeakRc without extending its life.
     weak_p = LINK p;
+    child = Child{ name: "Bob", parent: weak_p };
 
-    # RESOLVE returns ?Parent@multiowned; bind first, then use ?. to safely access fields
-    resolved = RESOLVE weak_p;
-    name = resolved?.name OR "dropped";
+    # RESOLVE checks whether the independently-owned parent is still alive.
+    resolved = RESOLVE child.parent;
+    name = resolved?.name OR_ELSE "dropped";
     ASSERT name == "Alice", "resolved";
 
     RETURN;
@@ -554,9 +702,14 @@ END
 Key rules:
 - `LINK` only works on `@multiowned` or `@shared` values (compile-time error otherwise)
 - `RESOLVE` only works on `@link` values (compile-time error otherwise)
-- `RESOLVE` returns `?T` -- bind the result first, then use `resolved?.field OR fallback` to handle the dropped case
+- `RESOLVE` returns `?T` -- bind the result first, then use `resolved?.field OR_ELSE fallback` to handle the dropped case
 - Cleanup is automatic: weak references are released when they go out of scope
-- No runtime cost when the strong reference is still alive; RESOLVE is a simple count check
+- Unlike `@node`, every strong object is reference-counted independently and every `RESOLVE` performs an upgrade check
+
+In short: choose `@node` for a high-performance closed topology with one RAII
+lifetime. Choose `LINK` / `RESOLVE` when lifetime boundaries are open and
+independent, and a weak observer must safely discover whether another object
+still exists.
 
 ## 14. Concurrency: BG & DO
 
@@ -592,7 +745,7 @@ results = items |> CONCURRENT(workers: 8) SELECT transform(_);
 CLEAR uses a simple namespace-based module system via `REQUIRE`.
 
 ```ruby clear illustrative
-REQUIRE "math_utils.cht" AS m;                      # Local file alias
+REQUIRE "math_utils.clear" AS m;                      # Local file alias
 REQUIRE "pkg:geometry";                             # Package import
 
 FN main() RETURNS Void ->
@@ -658,7 +811,7 @@ buf = createBuffer("hello");
 # defer buf.deinit() emitted automatically
 ```
 
- * See [json_api](benchmarks/24_json_api/server.cht) for an example.
+ * See [json_api](benchmarks/24_json_api/server.clear) for an example.
  * See [docs/agents/ffi.md](docs/agents/ffi.md) for the complete FFI guide.
 
 ## 17. Memory Model
@@ -787,7 +940,7 @@ END
 | `@locked` | Mutex (single-scheduler) |
 | `@writeLocked` | RwLock (single-scheduler) |
 | `@local` | Thread-local heap pointer |
-| `@indirect` | Explicit heap allocation (Box) |
+| `@indirect` | Heap allocation (explicit in DEFAULT/STRICT; EASY may infer only a uniquely forced edge) |
 | `@link` | To create cyclic graphs (WeakRef/Ref) |
 | `@sharded(N)` | Shared-nothing partitioned across N shards |
 
@@ -849,3 +1002,6 @@ total = quantity !* price;     # panics on overflow, even in release
 | `!+`, `!-`, `!*` | panic | panic | Financial, safety |
 
 Float arithmetic (`Float64`) is unaffected - IEEE 754 handles overflow via infinity/NaN.
+
+`$+` is string concatenation, pairing with `${...}` interpolation while keeping
+all three integer `+` families unambiguously arithmetic.

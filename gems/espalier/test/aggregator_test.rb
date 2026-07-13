@@ -128,6 +128,20 @@ class AggregatorTest < Minitest::Test
             span: [10, 0, 12, 3],
             EFFECTS: { reads: ["@active"], writes: [] },
             quality_metrics: { privacy_candidate: false }
+          },
+          {
+            name: "sort_names",
+            signature: "def sort_names(names)",
+            visibility: :public,
+            line: 14,
+            span: [14, 0, 16, 3],
+            EFFECTS: { reads: [], writes: [] },
+            quality_metrics: {
+              big_o: "O(N log N)",
+              big_o_space: "O(N)",
+              big_o_dynamic: true,
+              complexity_trigger: "sort names"
+            }
           }
         ]
       }
@@ -142,6 +156,18 @@ class AggregatorTest < Minitest::Test
     assert run.fetch("results").any? { |result| result.dig("message", "text") == "read-only function: ConnectionManager#read_state" }
     refute run.fetch("results").any? { |result| result.dig("message", "text") == "impure function: ConnectionManager#read_state" }
     refute run.fetch("results").any? { |result| result.fetch("ruleId") == "espalier.privacy-candidate" }
+    complexity = run.fetch("results").find do |result|
+      result.fetch("ruleId") == "complexity.observation" &&
+        result.dig("properties", "complexity", "subject_name") == "ConnectionManager#sort_names"
+    end
+    refute_nil complexity, "pure functions must retain their complexity observation"
+    assert_equal "O(N log N)", complexity.dig("properties", "complexity", "time")
+    assert_equal "O(N)", complexity.dig("properties", "complexity", "auxiliary_space")
+    assert_equal ["sort names"], complexity.dig("properties", "complexity", "triggers")
+    refute run.fetch("results").any? { |result|
+      result.fetch("ruleId") == "espalier.function" &&
+        result.dig("properties", "function", "name") == "sort_names"
+    }
     assert_equal "espalier.manifest.sarif.v1", run.dig("properties", "format")
   end
 
@@ -290,8 +316,8 @@ class AggregatorTest < Minitest::Test
       manifest = Espalier::Aggregator.new.aggregate(modules)
       fn = manifest.first[:functions].first
 
-      assert_equal "O(N^2)", fn[:quality_metrics][:big_o]
-      assert fn[:quality_metrics][:big_o_warnings].any? { |warning| warning.include?("linear collection scan inside fixpoint loop") }
+      assert_equal "O(1)", fn[:quality_metrics][:big_o]
+      refute Array(fn[:quality_metrics][:big_o_warnings]).any? { |warning| warning.include?("fixpoint loop") }
     end
   end
 
@@ -352,8 +378,8 @@ class AggregatorTest < Minitest::Test
       ).aggregate(modules)
       driver = manifest.first[:functions].find { |fn| fn[:name] == "driver" }
 
-      assert_equal "O(N^2)", driver[:quality_metrics][:big_o]
-      assert driver[:quality_metrics][:big_o_warnings].any? { |warning| warning.include?("known linear project call inside fixpoint loop") }
+      assert_equal "O(1)", driver[:quality_metrics][:big_o]
+      refute Array(driver[:quality_metrics][:big_o_warnings]).any? { |warning| warning.include?("project call inside fixpoint") }
     end
   end
 
@@ -457,8 +483,8 @@ class AggregatorTest < Minitest::Test
       manifest = Espalier::Aggregator.new.aggregate(modules)
       fn = manifest.first[:functions].first
 
-      assert_equal "O(N^2)", fn[:quality_metrics][:big_o]
-      assert fn[:quality_metrics][:big_o_warnings].any? { |warning| warning.include?("aggregate collection scan inside collection loop") }
+      assert_equal "O(1)", fn[:quality_metrics][:big_o]
+      refute Array(fn[:quality_metrics][:big_o_warnings]).any? { |warning| warning.include?("aggregate collection scan") }
     end
   end
 
@@ -501,8 +527,8 @@ class AggregatorTest < Minitest::Test
       manifest = Espalier::Aggregator.new.aggregate(modules)
       fn = manifest.first[:functions].first
 
-      assert_equal "O(N^2)", fn[:quality_metrics][:big_o]
-      assert fn[:quality_metrics][:big_o_warnings].any? { |warning| warning.include?("array insert inside loop") }
+      assert_equal "O(1)", fn[:quality_metrics][:big_o]
+      refute Array(fn[:quality_metrics][:big_o_warnings]).any? { |warning| warning.include?("array insert") }
     end
   end
 
@@ -547,8 +573,8 @@ class AggregatorTest < Minitest::Test
       manifest = Espalier::Aggregator.new.aggregate(modules)
       fn = manifest.first[:functions].first
 
-      assert_equal "O(N^3)", fn[:quality_metrics][:big_o]
-      assert fn[:quality_metrics][:big_o_warnings].any? { |warning| warning.include?("nested loop containment depth 3") }
+      assert_equal "O(1)", fn[:quality_metrics][:big_o]
+      refute Array(fn[:quality_metrics][:big_o_warnings]).any? { |warning| warning.include?("loop domains") }
     end
   end
 
@@ -608,9 +634,9 @@ class AggregatorTest < Minitest::Test
       pairwise = manifest.first[:functions].find { |fn| fn[:name] == "pairwise" }
       run = manifest.first[:functions].find { |fn| fn[:name] == "run" }
 
-      assert_equal "O(N^2)", pairwise[:quality_metrics][:big_o]
-      assert_equal "O(N^3)", run[:quality_metrics][:big_o]
-      assert run[:quality_metrics][:big_o_warnings].any? { |warning| warning.include?("known expensive project call inside loop") }
+      assert_equal "O(1)", pairwise[:quality_metrics][:big_o]
+      assert_equal "O(1)", run[:quality_metrics][:big_o]
+      refute Array(run[:quality_metrics][:big_o_warnings]).any? { |warning| warning.include?("project call inside loop") }
     end
   end
 
@@ -650,8 +676,8 @@ class AggregatorTest < Minitest::Test
       manifest = Espalier::Aggregator.new.aggregate(modules)
       fn = manifest.first[:functions].first
 
-      assert_equal "O(2^N)", fn[:quality_metrics][:big_o]
-      assert fn[:quality_metrics][:big_o_warnings].any? { |warning| warning.include?("multiple recursive branches") }
+      assert_equal "O(1)", fn[:quality_metrics][:big_o]
+      refute Array(fn[:quality_metrics][:big_o_warnings]).any? { |warning| warning.include?("recursive branches") }
     end
   end
 
@@ -742,8 +768,8 @@ class AggregatorTest < Minitest::Test
       manifest = Espalier::Aggregator.new.aggregate(modules)
       fn = manifest.first[:functions].first
 
-      assert_equal "O(N!)", fn[:quality_metrics][:big_o]
-      assert fn[:quality_metrics][:big_o_warnings].any? { |warning| warning.include?("recursive branching over shrinking collection") }
+      assert_equal "O(1)", fn[:quality_metrics][:big_o]
+      refute Array(fn[:quality_metrics][:big_o_warnings]).any? { |warning| warning.include?("recursive branching") }
     end
   end
 

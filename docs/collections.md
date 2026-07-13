@@ -64,20 +64,20 @@ MUTABLE enemies: Enemy[1000]@pool = [];
 id1: Id<Enemy> = enemies.insert(Enemy{ hp: 100, name: "Goblin" });
 id2: Id<Enemy> = enemies.insert(Enemy{ hp: 200, name: "Dragon" });
 
-# Access via handle — returns ?T (optional). Must use OR to unwrap:
-goblin = enemies.get(id1) OR Enemy{ hp: 0, name: "none" };
+# Access via handle — returns ?T (optional). Must use OR_ELSE to unwrap:
+goblin = enemies.get(id1) OR_ELSE Enemy{ hp: 0, name: "none" };
 
 # Or via [] syntax (equivalent to .get):
-dragon = enemies[id2] OR Enemy{ hp: 0, name: "none" };
+dragon = enemies[id2] OR_ELSE Enemy{ hp: 0, name: "none" };
 
 # Remove: slot is freed, generation increments
 enemies.remove(id1);
 
-# Stale handle returns null — OR provides a safe fallback:
-gone = enemies.get(id1) OR Enemy{ hp: 0, name: "removed" };
+# Stale handle returns null — OR_ELSE provides a safe fallback:
+gone = enemies.get(id1) OR_ELSE Enemy{ hp: 0, name: "removed" };
 ```
 
-**Important: every pool access returns `?T` (optional).** Like `@writeLocked`, using a pool is not a one-line optimization — it changes how you access data. Every `pool.get(id)` or `pool[id]` requires `OR default` to handle the case where the handle is stale or the slot was removed. This is by design: the pool guarantees you never read invalid data, but you must handle the "not found" case explicitly.
+**Important: every pool access returns `?T` (optional).** Like `@writeLocked`, using a pool is not a one-line optimization — it changes how you access data. Every `pool.get(id)` or `pool[id]` requires `OR_ELSE default` to handle the case where the handle is stale or the slot was removed. This is by design: the pool guarantees you never read invalid data, but you must handle the "not found" case explicitly.
 
 ### How Generational Handles Work
 

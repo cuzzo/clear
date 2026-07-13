@@ -210,7 +210,7 @@ title) listing the 5 questions and the single answer-source for each.
   (ArrayList / HashMap / Pool) still fall through `dupeValue`'s
   shallow path -- that is the language-level COPY @list bug 258
   and is out of scope for this builder. Test:
-  `transpile-tests/281_bg_body_copy_struct.cht`.
+  `transpile-tests/281_bg_body_copy_struct.clear`.
 - ✓ `Scope#initialize_copy` deep-copy contract documented + helper
   extracted (Phase 3 / Option A): `Scope.live_param_syms(fn)` is the
   canonical way to refresh a SymbolEntry cache against the live

@@ -1134,6 +1134,7 @@ module NilKill
       end
       roots = methods.values.flat_map { |entry| entry["deps"].select { |dep| dep.start_with?("root:") } }.uniq
       param_flows = Array(evidence.dig("facts", "param_origins")).select { |origin| %w[typed_return untyped_return].include?(origin["origin_kind"]) }
+      param_flows_by_source = param_flows.group_by { |flow| flow["source_method"].to_s }
       roots.each_with_object({}) do |root_dep, pressure|
         resolved = Set[root_dep]
         unlocked = Set.new
@@ -1153,7 +1154,8 @@ module NilKill
         direct = methods.select { |key, entry| entry["deps"].include?(root_dep) && unlocked.include?(key) }.keys.to_set
         cascade = unlocked - direct
         method_names = unlocked.map { |key| methods[key]["method_name"] }.select { |name| unambiguous_return_name?(name, method_name_counts) }.to_set
-        params = param_flows.select { |flow| method_names.include?(flow["source_method"].to_s) }.map { |flow| "#{flow["path"]}:#{flow["line"]} #{flow["callee"]}(#{flow["slot"]})" }.to_set
+        params = method_names.flat_map { |name| Array(param_flows_by_source[name]) }
+          .map { |flow| "#{flow["path"]}:#{flow["line"]} #{flow["callee"]}(#{flow["slot"]})" }.to_set
         root = root_dep.delete_prefix("root:")
         pressure[root] = {
           "returns" => unlocked,
@@ -1169,6 +1171,7 @@ module NilKill
     def forwarded_return_blocker_pressure(origins, evidence)
       status = forwarded_return_status_index(evidence)
       param_flows = Array(evidence.dig("facts", "param_origins")).select { |origin| %w[typed_return untyped_return].include?(origin["origin_kind"]) }
+      param_flows_by_source = param_flows.group_by { |flow| flow["source_method"].to_s }
       pressure = Hash.new { |hash, key| hash[key] = { "returns" => Set.new, "params" => Set.new, "examples" => [], "status" => "unknown" } }
       origins.each do |origin|
         callees = Array(origin["sources"]).select { |source| source["kind"].to_s == "call_untyped" }.map { |source| source["callee"].to_s }.reject(&:empty?)
@@ -1182,7 +1185,7 @@ module NilKill
         end
       end
       pressure.each do |callee, data|
-        param_flows.select { |flow| flow["source_method"].to_s == callee }.each do |flow|
+        Array(param_flows_by_source[callee]).each do |flow|
           data["params"] << "#{flow["path"]}:#{flow["line"]} #{flow["callee"]}(#{flow["slot"]})"
         end
       end

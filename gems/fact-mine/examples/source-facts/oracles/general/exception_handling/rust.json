@@ -425,20 +425,7 @@
     ],
     "state_declarations": [],
     "state_param_origins": [],
-    "state_reads": [
-      {
-        "field": "cleanup",
-        "function": "method_two",
-        "line": 9,
-        "receiver": "self"
-      },
-      {
-        "field": "log",
-        "function": "method_two",
-        "line": 6,
-        "receiver": "self"
-      }
-    ],
+    "state_reads": [],
     "state_writes": []
   }
 }

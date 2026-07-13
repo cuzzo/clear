@@ -1,0 +1,63 @@
+# @leak: 25600000 -> 25600
+# @leak: 100000 -> 100
+# Socket Throughput Benchmark
+#
+# WHAT WE ARE MEASURING:
+#
+#   C (baseline):  read() into char buf[4096] on the stack — 0 allocations
+#
+#   CLEAR (pool):  tcpRead → CheatLib.socketRead → ReadPool.acquire()
+#                  — 0 GPA malloc calls in the hot path
+#                  — 1 bitmask @ctz per read to find a free slot
+#                  — slot released via restoreFrameMark (1 bitmask OR_ELSE)
+#
+# HOW IT WORKS:
+#   Writer fiber: connects to the server and writes 100 000 × 256-byte messages
+#   Reader loop:  accepts the connection and reads until all 25 600 000 bytes received
+#
+#   TCPClient::connect("127.0.0.1", port) → try CheatLib.socketConnect(host, port)
+#   BG { ... } spawns the writer as a background fiber
+#   NEXT w waits for the writer to finish before main returns
+#
+# NOTE: TCP coalesces multiple writes into larger reads, so the number of
+#       tcpRead calls < 100 000. We count bytes to know when we're done.
+#
+# MEMORY SAFETY:
+#   `conn` (writer fd) is an i32 captured by value into the BG fiber.
+#   `defer socketClose(conn)` fires after NEXT w completes — no double-close.
+#   `client` (reader fd) is owned by main; its defer fires on RETURN.
+
+FN main() RETURNS Void ->
+  server = TCPServer::listen(14_537);
+  conn = TCPClient::connect("127.0.0.1", 14_537);
+  client = server.accept();
+
+  # Writer fiber: sends 100 000 × 256-byte messages.
+  # `conn` is an i32, captured by value into the BG closure.
+  # The fiber runs concurrently with the reader loop below.
+  msg = "XXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXX";
+  w: ~Void = BG {
+    MUTABLE wi = 0;
+    WHILE wi < 100_000 DO
+      conn.tcpWrite(msg);
+      wi += 1;
+    END
+  };
+
+  # Reader loop: reads until all 25 600 000 bytes received.
+  # TCP coalesces writes so each tcpRead may return more than 256 bytes.
+  # Timer covers only the read loop (same scope as C/Rust BENCH_RESULT).
+  t0 = timestampMs();
+  MUTABLE total_bytes = 0;
+  WHILE total_bytes < 25_600_000 DO
+    data = client.tcpRead();
+    total_bytes = total_bytes + data.length();
+  END
+  elapsed = timestampMs() - t0;
+
+  print("BENCH_RESULT: ${elapsed.toString()} ms");
+
+  # Wait for writer to finish, then let defers close both fds.
+  NEXT w;
+  RETURN;
+END

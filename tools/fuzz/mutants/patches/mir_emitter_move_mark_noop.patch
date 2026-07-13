@@ -1,6 +1,6 @@
-diff --git a/src/backends/mir_emitter.rb b/src/backends/mir_emitter.rb
---- a/src/backends/mir_emitter.rb
-+++ b/src/backends/mir_emitter.rb
+diff --git a/compiler/ruby/backends/mir_emitter.rb b/compiler/ruby/backends/mir_emitter.rb
+--- a/compiler/ruby/backends/mir_emitter.rb
++++ b/compiler/ruby/backends/mir_emitter.rb
 @@ -2289,7 +2289,7 @@ class MIREmitter
  
    sig { params(node: MIR::MoveMark).returns(String) }

@@ -1,0 +1,7 @@
+FN main() RETURNS Int64 ->
+    left = "hello" $+ " " $+ "world";
+    IF eql?(left, "hello world") THEN
+        RETURN 1_i64;
+    END
+    RETURN 0_i64;
+END

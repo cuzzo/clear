@@ -3,29 +3,41 @@
 #
 # We do NOT run these programs (running exercises the emitted Zig binary,
 # not the Ruby compiler). We transpile each one in a single process so
-# every .cht drives the real pass pipeline — CompilerFrontend.compile →
+# every .clear drives the real pass pipeline — CompilerFrontend.compile →
 # MIRLowering → MIRChecker → MIREmitter — and SimpleCov records the
-# branch arms each shape takes in src/. One process, no Zig, no 100x
-# Ruby startup. Per-file errors are swallowed: many examples are module
-# or package fragments that don't transpile standalone, and even a
-# failed compile exercises parser/annotator/escape paths we want counted.
+# branch arms each shape takes in compiler/ruby. One process, no Zig, no 100x
+# Ruby startup. Per-file errors are collected so the entire corpus is reported,
+# then strict mode (the default) exits non-zero if any active source failed.
+# `--allow-failures` is available only for an explicitly diagnostic run.
 #
 # Usage: COVERAGE=1 ruby tools/corpus_transpile_coverage.rb
-#        bundle exec ruby spec/collate_coverage.rb
+#        bundle exec ruby compiler/spec/collate_coverage.rb
 #        ruby tools/branch_gap_report.rb
 
 require 'bundler/setup'
 require 'optparse'
-require_relative '../spec/coverage_bootstrap'
+require_relative '../compiler/spec/coverage_bootstrap'
 CoverageBootstrap.start('corpus-transpile')
 
-require_relative '../src/backends/transpiler'
+require_relative '../compiler/ruby/backends/transpiler'
 
 ROOT = File.expand_path('..', __dir__)
-opts = { shard: nil }
+opts = { shard: nil, strict: true }
+
+# Historical MiniVM snapshots, retained as source/reference material. They are
+# not active programs: _bc_runner.clear is the maintained runner and exercises
+# the same compiler surface. Keep this list exact and visible; strict mode must
+# still fail for every active example and benchmark rather than swallowing an
+# open-ended set of errors.
+REFERENCE_ONLY = %w[
+  examples/minivm/_scheme_runner.clear
+  examples/minivm/sus-int.clear
+].freeze
 
 OptionParser.new do |o|
-  o.banner = "Usage: COVERAGE=1 ruby tools/corpus_transpile_coverage.rb [--shard I/N]"
+  o.banner = "Usage: COVERAGE=1 ruby tools/corpus_transpile_coverage.rb [--shard I/N] [--allow-failures]"
+  o.on("--strict") { opts[:strict] = true }
+  o.on("--allow-failures") { opts[:strict] = false }
   o.on("--shard I/N") do |v|
     idx, total = v.split("/", 2).map(&:to_i)
     abort "--shard expects I/N with N > 0 and 0 <= I < N" unless total && total.positive? && idx && idx >= 0 && idx < total
@@ -33,9 +45,10 @@ OptionParser.new do |o|
   end
 end.parse!
 
-files = Dir.glob(File.join(ROOT, '{examples,benchmarks}', '**', '*.cht'))
+files = Dir.glob(File.join(ROOT, '{examples,benchmarks}', '**', '*.clear'))
               .reject { |f| File.basename(f).start_with?('._') }
               .reject { |f| f.split(File::SEPARATOR).include?('bench.profile') }
+              .reject { |f| REFERENCE_ONLY.include?(f.sub(ROOT + '/', '')) }
               .sort
 if opts[:shard]
   idx, total = opts[:shard]
@@ -72,3 +85,4 @@ files.each do |path|
 end
 
 puts "corpus transpile coverage: #{ok} transpiled, #{fail} skipped, #{files.size} total"
+exit 1 if opts[:strict] && fail.positive?

@@ -198,7 +198,7 @@ cleanup() shim's @hasDecl(child, "compareAndPublish") branch fires.
 Ad-hoc test produced a leak.
 
 **Fix:** Two parts:
-1. **Test:** `transpile-tests/346_atomic_ptr_escape_return.cht`
+1. **Test:** `transpile-tests/346_atomic_ptr_escape_return.clear`
    demonstrating the escape pattern (small fn returning an
    @indirect:atomic cell; caller reads it).
 2. **Investigate:** the actual leak when I tried the test. Likely
@@ -286,7 +286,7 @@ contract surface.
 **Signal:** Test runner builds binaries into `transpile-tests/337_*`
 (no extension) as a build artifact. They show up as untracked in
 `git status` after every test run. Other tests have the same pattern
-(`transpile-tests/<NNN>_<name>` binary alongside the `.cht` source).
+(`transpile-tests/<NNN>_<name>` binary alongside the `.clear` source).
 
 **Fix:** Add `transpile-tests/[0-9][0-9][0-9]_*` (with no extension)
 to `.gitignore`, OR make the test runner build into a temp dir.

@@ -1,0 +1,14 @@
+FN main() RETURNS Void ->
+  # Basic shell echo test
+  greeting = shell("echo 'Hello from Shell'");
+  clean = greeting.trim();
+
+  ASSERT eql?(clean, "Hello from Shell"), "Shell output should match";
+
+  # Dynamic command construction
+  who = "World";
+  cmd = "echo " $+ who;
+  dynamic_out = shell(cmd).trim();
+
+  ASSERT eql?(dynamic_out, "World"), "Dynamic shell command should work";
+END

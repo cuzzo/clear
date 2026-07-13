@@ -86,6 +86,9 @@ pub fn AtomicPtr(comptime T: type) type {
         // The atomic word holds the published `*T`. `?*T` so cleanup
         // can null the cell on teardown without a sentinel value.
         ptr: Atomic(?*T),
+        /// Strong references to the heap-pinned cell itself. The lexical
+        /// binding owns one reference; every fiber capture retains one.
+        refs: Atomic(usize),
 
         // Re-export of T so generic code can recover the inner type
         // from a `*AtomicPtr(T)` value via `@TypeOf(cell.*).Inner`.
@@ -99,7 +102,10 @@ pub fn AtomicPtr(comptime T: type) type {
         pub fn init(allocator: std.mem.Allocator, val: T) !Self {
             const node = try allocator.create(T);
             node.* = val;
-            return Self{ .ptr = Atomic(?*T).init(node) };
+            return Self{
+                .ptr = Atomic(?*T).init(node),
+                .refs = Atomic(usize).init(1),
+            };
         }
 
         /// Retire-via-EBR teardown. The currently-published `*T` is

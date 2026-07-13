@@ -110,7 +110,9 @@ module SlopCop
             category: cat,
             arm_category: cat,
             source: a.source || :coverage,
-            message: "dark arm: #{cat}"
+            message: "dark arm: #{cat}",
+            span: a.span,
+            decision_span: a.decision_span
           }
           next unless cat == :genuine
 

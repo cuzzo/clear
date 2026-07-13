@@ -39,6 +39,11 @@
       "source": "zig/runtime/control-plane.zig",
       "test_command": "cd zig && zig build test-tsan -Dtest-file=control-plane-test.zig -j1 && zig build test-hammer -Dtest-file=control-plane-hammer-test.zig -j1",
       "timeout_seconds": 60
+    },
+    {
+      "source": "zig/runtime/scheduler.zig",
+      "test_command": "cd zig && zig build test-tsan -Dtest-file=scheduler-test.zig -j1 && zig build test-tsan -Dtest-file=scheduler-direct-test.zig -j1 && zig build test-tsan -Dtest-file=spsc-scheduler-test.zig -j1 && zig build test-hammer -Dtest-file=scheduler-primitives-hammer-test.zig -j1 && zig build test-loom-vopr -Dtest-file=scheduler-timeout-vopr-test.zig -j1",
+      "timeout_seconds": 300
     }
   ]
 }

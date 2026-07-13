@@ -1,0 +1,70 @@
+TEST IndirectAtomicParserM32 DO
+  FN parse_type(src: Auto) RETURNS Auto ->
+    MUTABLE tokens = NIL;
+    tokens = Lexer.new(src).tokenize();
+    ClearParser.new(tokens, src).parse_type_annotation();
+  END
+  WHEN "type-level `T@indirect:atomic`" DO
+    TEST THAT "parses Counter@indirect:atomic with sync == :atomic and layout == :indirect" DO
+      MUTABLE t = parse_type("Counter@indirect:atomic");
+      ASSERT t.sync() == :atomic, "expected t.sync() to eq(:atomic)";
+      ASSERT t.layout() == :indirect, "expected t.layout() to eq(:indirect)";
+    END
+    TEST THAT "atomic? AND indirect? both true on the produced Type" DO
+      t = parse_type("Counter@indirect:atomic");
+      ASSERT t.atomic?() == TRUE, "expected t.atomic?() to be true";
+      ASSERT t.indirect?() == TRUE, "expected t.indirect?() to be true";
+    END
+    TEST THAT "is recognized as any_sync? (participates in capability machinery)" DO
+      t = parse_type("Counter@indirect:atomic");
+      ASSERT t.any_sync?() == TRUE, "expected t.any_sync?() to be true";
+    END
+    TEST THAT "lowers Counter@indirect:atomic to *CheatLib.AtomicPtr(Counter)" DO
+      t = parse_type("Counter@indirect:atomic");
+      ASSERT t.zig_type() == "*CheatLib.AtomicPtr(Counter)", "expected t.zig_type() to eq(\"*CheatLib.AtomicPtr(Counter)\")";
+    END
+    TEST THAT "@indirect:atomic forces :heap provenance" DO
+      t = parse_type("Counter@indirect:atomic");
+      ASSERT t.provenance() == :heap, "expected t.provenance() to eq(:heap)";
+    END
+  END
+  WHEN "order independence in the sigil chain" DO
+    TEST THAT "@atomic:indirect parses identically to @indirect:atomic" DO
+      MUTABLE a = parse_type("Counter@indirect:atomic");
+      MUTABLE b = parse_type("Counter@atomic:indirect");
+      ASSERT a.sync() == b.sync(), "expected a.sync() to eq(b.sync)";
+      ASSERT a.layout() == b.layout(), "expected a.layout() to eq(b.layout)";
+      ASSERT a.zig_type() == b.zig_type(), "expected a.zig_type() to eq(b.zig_type)";
+    END
+  END
+  WHEN "composition with @shared" DO
+    TEST THAT "@shared:indirect:atomic preserves the bare *AtomicPtr(T) form (no double Arc)" DO
+      t = parse_type("Counter@shared:indirect:atomic");
+      ASSERT t.shared?() == TRUE, "expected t.shared?() to be true";
+      ASSERT t.atomic?() == TRUE, "expected t.atomic?() to be true";
+      ASSERT t.indirect?() == TRUE, "expected t.indirect?() to be true";
+      ASSERT t.zig_type() == "*CheatLib.AtomicPtr(Counter)", "expected t.zig_type() to eq(\"*CheatLib.AtomicPtr(Counter)\")";
+    END
+    TEST THAT "all three orderings of @shared:indirect:atomic produce equivalent Types" DO
+      a = parse_type("Counter@shared:indirect:atomic");
+      b = parse_type("Counter@indirect:shared:atomic");
+      MUTABLE c = parse_type("Counter@atomic:indirect:shared");
+      ASSERT a.zig_type() == b.zig_type(), "expected a.zig_type() to eq(b.zig_type)";
+      ASSERT b.zig_type() == c.zig_type(), "expected b.zig_type() to eq(c.zig_type)";
+      ASSERT a.sync() == b.sync(), "expected a.sync() to eq(b.sync)";
+      ASSERT a.layout() == b.layout(), "expected a.layout() to eq(b.layout)";
+      ASSERT a.ownership() == b.ownership(), "expected a.ownership() to eq(b.ownership)";
+    END
+  END
+  WHEN "duplicate / illegal joins" DO
+    TEST THAT "rejects `@indirect:atomic:locked` (atomic + lock-sync collision)" DO
+      ASSERT_RAISES Input, parse_type("Counter@indirect:atomic:locked");
+    END
+    TEST THAT "rejects `@indirect:atomic:versioned` (atomic + versioned-sync collision)" DO
+      ASSERT_RAISES Input, parse_type("Counter@indirect:atomic:versioned");
+    END
+    TEST THAT "rejects `@indirect:indirect` (duplicate layout)" DO
+      ASSERT_RAISES Input, parse_type("Counter@indirect:indirect");
+    END
+  END
+END

@@ -1,15 +1,15 @@
 #! /usr/bin/env ruby
 require 'bundler/setup'
 
-# Coverage bootstrap MUST run before src/ requires. No-op unless
-# COVERAGE=1. See spec/coverage_bootstrap.rb.
-require_relative '../spec/coverage_bootstrap'
+# Coverage bootstrap MUST run before compiler/ruby requires. No-op unless
+# COVERAGE=1. See compiler/spec/coverage_bootstrap.rb.
+require_relative '../compiler/spec/coverage_bootstrap'
 CoverageBootstrap.start(ENV.fetch('COVERAGE_BOOTSTRAP_NAME', 'transpile-tests'))
 require_relative '../tools/zig_coverage_support'
 
-require_relative '../src/backends/transpiler'
+require_relative '../compiler/ruby/backends/transpiler'
 
-# Generates Zig test blocks from .cht files using MIRLowering + MIREmitter.
+# Generates Zig test blocks from .clear files using MIRLowering + MIREmitter.
 class TestGenerator
   def generate_test_block(filename, cheat_code, source_dir: Dir.pwd)
     source_dir = File.expand_path(source_dir)
@@ -52,6 +52,7 @@ class TestGenerator
     body_items = program.items.reject { |item| preamble_items.include?(item) || item.is_a?(MIR::Import) || item.is_a?(MIR::TypeAlias) }
     preamble = preamble_items.filter_map { |item| emitter.emit(item) }.join("\n\n")
     transpiled_body = body_items.filter_map { |item| emitter.emit(item) }.join("\n\n")
+    symbol_pool = emitter.symbol_pool_declarations
 
     # Detect if test uses DO/BG blocks, TCP resources, sharded EACH,
     # or any of the CONCURRENT runtime helpers. The structural list
@@ -126,6 +127,8 @@ class TestGenerator
           #{preamble}
           #{error_name_enum}
           const S = struct {
+              #{symbol_pool}
+
               #{transpiled_body}
           };
 
@@ -214,12 +217,12 @@ if __FILE__ == $0
 # Accept --mir for backward compatibility (ignored, MIR is always used)
 ARGV.delete('--mir')
 
-# Single-file mode: ruby gen.rb --single foo.cht
+# Single-file mode: ruby gen.rb --single foo.clear
 # Outputs a complete zig test file to stdout.
 if ARGV.delete('--single')
   test_file = ARGV.first
   unless test_file && File.exist?(test_file)
-    $stderr.puts "Usage: ruby gen.rb --single <file.cht>"
+    $stderr.puts "Usage: ruby gen.rb --single <file.clear>"
     exit 1
   end
   code = File.read(test_file)
@@ -316,11 +319,11 @@ end
 
 puts "Generating #{OUTPUT_FILE}..."
 
-# Iterate through all .cht files before opening the output file. Worker
+# Iterate through all .clear files before opening the output file. Worker
 # processes inherit open file descriptors; keeping OUTPUT_FILE closed during
 # fork prevents each child from flushing a copy of the parent's header buffer.
 test_source_dir = File.expand_path(TEST_DIR)
-test_files = Dir.glob("#{TEST_DIR}/*.cht").sort
+test_files = Dir.glob("#{TEST_DIR}/*.clear").sort
 
 puts "  - Processing #{test_files.length} files with #{[GEN_JOBS, test_files.length].min} worker(s)"
 generated_blocks = generate_blocks_parallel(test_files, test_source_dir, GEN_JOBS)
@@ -362,5 +365,5 @@ end
 
 `zig fmt zig/all-tests.zig`
 run_generated_zig_tests! if ENV['TRANSPILE_RUN_ZIG'] == '1' || ZigCoverageSupport.enabled?
-puts "Done. Run with: zig test #{OUTPUT_FILE} -lc"
+puts "Done. Run with: zig test #{OUTPUT_FILE} zig/runtime/switch.S zig/runtime/onRoot.S -lc"
 end

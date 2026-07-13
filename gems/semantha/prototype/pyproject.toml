@@ -1,0 +1,31 @@
+[build-system]
+requires = ["setuptools>=69"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "semantha-prototype"
+version = "0.1.0"
+description = "Measured semantic code-search and architecture-anomaly spike"
+requires-python = ">=3.11"
+dependencies = []
+
+[project.optional-dependencies]
+model = ["sentence-transformers>=5.0,<6"]
+store = ["lancedb>=0.24,<1", "pyarrow>=18,<22"]
+cluster = ["numpy>=2,<3", "scikit-learn>=1.7,<2", "networkx>=3.5,<4"]
+test = ["pytest>=8,<10"]
+all = [
+  "sentence-transformers>=5.0,<6",
+  "lancedb>=0.24,<1",
+  "pyarrow>=18,<22",
+  "numpy>=2,<3",
+  "scikit-learn>=1.7,<2",
+  "networkx>=3.5,<4",
+]
+
+[project.scripts]
+semantha = "semantha.cli:main"
+
+[tool.setuptools.packages.find]
+where = ["."]
+include = ["semantha*"]

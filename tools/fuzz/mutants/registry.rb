@@ -25,6 +25,14 @@ module FuzzMutants
 
   REGISTRY = T.let([
     Mutant.new(
+      name: :allow_inferred_alias_call_mutation,
+      description: 'Disable inferred-alias rejection after resolved mutable calls. User and stdlib MUTABLE contracts must still reject mutation while an inferred alias is live.',
+      invariant: :inferred_alias_mutation,
+      patch: File.join(PATCH_DIR, 'allow_inferred_alias_call_mutation.patch'),
+      templates: [:auto_ownership_transport_matrix],
+      kill: { bucket: :unexpected_pass, min_delta: 1 }
+    ),
+    Mutant.new(
       name: :allow_with_alias_return,
       description: 'Disable RETURN rejection for WITH-scoped aliases.',
       invariant: :alias_non_escape,
@@ -47,7 +55,7 @@ module FuzzMutants
       name: :lower_if_cond_pending_leak,
       description: 'Stop lower_if draining the condition\'s @pending_stmts ' \
                    'before lowering the then-body. Hoisted temps from a ' \
-                   '`maybe() OR ""` cond then leak into the then-body, ' \
+                   '`maybe() OR_ELSE ""` cond then leak into the then-body, ' \
                    'declared after the cond that references them. The ' \
                    'cond_or_fallback :if cells fail to compile (Zig: ' \
                    'use of undeclared identifier __tmp_N).',
@@ -186,7 +194,7 @@ module FuzzMutants
     ),
     Mutant.new(
       name: :or_rescue_catch_allocator_identity,
-      description: 'Skip destination allocator placement for OR/catch fallback ' \
+      description: 'Skip destination allocator placement for OR_ELSE/catch fallback ' \
                    'values. Success and fallback branches must preserve one ' \
                    'allocator identity for the resulting binding.',
       invariant: :error_path_allocator_identity,
@@ -247,12 +255,21 @@ module FuzzMutants
                    'Branch exits must still run finalizers on every live path.',
       invariant: :branch_cleanup_finalizers,
       patch: File.join(PATCH_DIR, 'mir_emitter_cleanup_noop.patch'),
-      templates: [:branch_cleanup],
+      templates: [
+        :branch_cleanup,
+        :bind_capture_cleanup,
+        :link_resolve_matrix,
+        :managed_payload_capability_matrix,
+        :node_graph_matrix,
+        :rc_generic_collection_matrix,
+        :rc_generic_value_matrix,
+        :stateful_container_matrix,
+      ],
       kill: { bucket: :fail, min_delta: 1 }
     ),
     Mutant.new(
       name: :error_cleanup_emits_finalizers,
-      description: 'Disable cleanup emission for error-path owned values. OR, ' \
+      description: 'Disable cleanup emission for error-path owned values. OR_ELSE, ' \
                    'RAISE, and DEFAULT paths must still clean or transfer owned roots.',
       invariant: :error_cleanup_finalizers,
       patch: File.join(PATCH_DIR, 'mir_emitter_cleanup_noop.patch'),
@@ -276,7 +293,7 @@ module FuzzMutants
                    'values instead of silently compiling them.',
       invariant: :parallel_boundary_admission,
       patch: File.join(PATCH_DIR, 'execution_boundary_parallel_accept.patch'),
-      templates: [:execution_boundary],
+      templates: [:execution_boundary, :recursive_execution_boundary_matrix, :shared_node_graph_matrix],
       kill: { bucket: :unexpected_pass, min_delta: 1 }
     ),
     Mutant.new(
@@ -330,7 +347,7 @@ module FuzzMutants
     ),
     Mutant.new(
       name: :or_heap_destination_branch_placement,
-      description: 'Disable destination placement for owned OR branch values. ' \
+      description: 'Disable destination placement for owned OR_ELSE branch values. ' \
                    'Success and fallback branches must agree on destination ' \
                    'allocator facts for heap-owned results.',
       invariant: :or_branch_destination_placement,
@@ -340,8 +357,8 @@ module FuzzMutants
     ),
     Mutant.new(
       name: :or_positional_branch_placement,
-      description: 'Disable destination placement for owned OR values in ' \
-                   'different syntactic positions. Positional OR lowering must ' \
+      description: 'Disable destination placement for owned OR_ELSE values in ' \
+                   'different syntactic positions. Positional OR_ELSE lowering must ' \
                    'keep cleanup and allocator facts coherent.',
       invariant: :or_positional_destination_placement,
       patch: File.join(PATCH_DIR, 'owned_branch_destination_noop.patch'),

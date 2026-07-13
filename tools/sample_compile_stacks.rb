@@ -6,7 +6,7 @@ require "json"
 require "optparse"
 
 ROOT = File.expand_path("..", __dir__)
-SRC_ROOT = File.join(ROOT, "src")
+SRC_ROOT = File.join(ROOT, "compiler", "ruby")
 $LOAD_PATH.unshift(SRC_ROOT)
 $LOAD_PATH.unshift(File.join(SRC_ROOT, "ast"))
 $LOAD_PATH.unshift(File.join(SRC_ROOT, "mir"))
@@ -22,7 +22,7 @@ options = {
 }
 
 OptionParser.new do |opts|
-  opts.banner = "Usage: ruby tools/sample_compile_stacks.rb [options] path/to/file.cht"
+  opts.banner = "Usage: ruby tools/sample_compile_stacks.rb [options] path/to/file.clear"
   opts.on("--interval SECONDS", Float, "Sampling interval, default 0.001") { |v| options[:interval] = v }
   opts.on("-o", "--output PATH", "Write JSON report") { |v| options[:output] = v }
   opts.on("--checked", "Enable Sorbet runtime call validation before loading compiler") { options[:checked] = true }

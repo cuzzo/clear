@@ -1,0 +1,132 @@
+# True-Sync-Polymorphism Gate 3 -- END-TO-END verification.
+#
+# A SINGLE `tick!` body works under every sync family CLEAR supports.
+# The runtime helper `CheatLib.polymorphicMutate` comptime-dispatches
+# by the post-Arc inner type:
+#   - has `.update`  -> Versioned / AtomicPtr (CAS retry)
+#   - has `.write`   -> RwLocked
+#   - has `.acquire` -> Locked
+#   - else           -> plain *T
+# So the same Zig source is monomorphized per call site; only one
+# branch's code survives in each instance.
+#
+# This file exists alongside spec/polymorphic_transaction_acceptance_spec.rb
+# for a reason: the unit specs only verify that codegen emits the right
+# Zig substrings. THIS file verifies that the binary actually runs and
+# mutation flows back correctly through every sync mechanism.
+#
+# Coverage: 12 capability shapes, all sharing the same tick! body:
+#   plain T               auto-borrow `&c` at call site (Gate 3 plain-T)
+#   @local                heap *T direct mutation
+#   @multiowned           Rc *T direct mutation
+#   @shared               Arc *T direct mutation
+#   @indirect             heap *T direct mutation (auto-monomorph)
+#   @shared:locked        Arc(Locked(T)) acquire/release
+#   @shared:writeLocked   Arc(RwLocked(T)) write/release
+#   @shared:versioned     Arc(Versioned(T)) update + CAS retry
+#   @indirect:atomic      AtomicPtr(T) update + CAS retry
+#   @locked               Locked(T) bare acquire/release
+#   @writeLocked          RwLocked(T) bare write/release
+#   @versioned            Versioned(T) bare update + CAS retry
+
+STRUCT Counter { value: Int64 }
+
+FN tick!(MUTABLE c: Counter) RETURNS !Void ->
+    WITH POLYMORPHIC c AS x { x.value = x.value + 1; }
+    RETURN;
+END
+
+FN main() RETURNS !Void ->
+    # Plain T: bare struct, no sigil. The annotator stamps
+    # poly_borrow_target on the symbol so the call site emits `&c`
+    # and the var_decl emits `var c` (mutable Zig storage).
+    MUTABLE plain_c     = Counter{ value: 0 };
+
+    # Non-sync containers: pointer flows through, mutation persists.
+    MUTABLE local_c     = Counter{ value: 0 } @local;
+    MUTABLE multi_c     = Counter{ value: 0 } @multiowned;
+    MUTABLE shared_c    = Counter{ value: 0 } @shared;
+    MUTABLE indirect_c  = Counter{ value: 0 } @indirect;
+
+    # Arc-wrapped sync containers.
+    MUTABLE locked_c    = Counter{ value: 0 } @shared:locked;
+    MUTABLE wlocked_c   = Counter{ value: 0 } @shared:writeLocked;
+    MUTABLE versioned_c = Counter{ value: 0 } @shared:versioned;
+    MUTABLE atomic_c    = Counter{ value: 0 } @indirect:atomic;
+
+    # Bare (no Arc) sync containers.
+    MUTABLE bare_locked_c    = Counter{ value: 0 } @locked;
+    MUTABLE bare_wlocked_c   = Counter{ value: 0 } @writeLocked;
+    MUTABLE bare_versioned_c = Counter{ value: 0 } @versioned;
+
+    # Three increments per family. Each must finish at value=3.
+    tick!(plain_c)         OR_ELSE EXIT;
+    tick!(plain_c)         OR_ELSE EXIT;
+    tick!(plain_c)         OR_ELSE EXIT;
+
+    tick!(local_c)         OR_ELSE EXIT;
+    tick!(local_c)         OR_ELSE EXIT;
+    tick!(local_c)         OR_ELSE EXIT;
+
+    tick!(multi_c)         OR_ELSE EXIT;
+    tick!(multi_c)         OR_ELSE EXIT;
+    tick!(multi_c)         OR_ELSE EXIT;
+
+    tick!(shared_c)        OR_ELSE EXIT;
+    tick!(shared_c)        OR_ELSE EXIT;
+    tick!(shared_c)        OR_ELSE EXIT;
+
+    tick!(indirect_c)      OR_ELSE EXIT;
+    tick!(indirect_c)      OR_ELSE EXIT;
+    tick!(indirect_c)      OR_ELSE EXIT;
+
+    tick!(locked_c)        OR_ELSE EXIT;
+    tick!(locked_c)        OR_ELSE EXIT;
+    tick!(locked_c)        OR_ELSE EXIT;
+
+    tick!(wlocked_c)       OR_ELSE EXIT;
+    tick!(wlocked_c)       OR_ELSE EXIT;
+    tick!(wlocked_c)       OR_ELSE EXIT;
+
+    tick!(versioned_c)     OR_ELSE EXIT;
+    tick!(versioned_c)     OR_ELSE EXIT;
+    tick!(versioned_c)     OR_ELSE EXIT;
+
+    tick!(atomic_c)        OR_ELSE EXIT;
+    tick!(atomic_c)        OR_ELSE EXIT;
+    tick!(atomic_c)        OR_ELSE EXIT;
+
+    tick!(bare_locked_c)   OR_ELSE EXIT;
+    tick!(bare_locked_c)   OR_ELSE EXIT;
+    tick!(bare_locked_c)   OR_ELSE EXIT;
+
+    tick!(bare_wlocked_c)  OR_ELSE EXIT;
+    tick!(bare_wlocked_c)  OR_ELSE EXIT;
+    tick!(bare_wlocked_c)  OR_ELSE EXIT;
+
+    tick!(bare_versioned_c) OR_ELSE EXIT;
+    tick!(bare_versioned_c) OR_ELSE EXIT;
+    tick!(bare_versioned_c) OR_ELSE EXIT;
+
+    # Read each cell through its native read shape and ASSERT.
+    # A wrong dispatch (e.g. Versioned silently lowering as no-op)
+    # shows up here as a 0/1/2 instead of the expected 3.
+    ASSERT plain_c.value     == 3_i64, "plain T: 3 ticks -> 3";
+    ASSERT local_c.value     == 3_i64, "local: 3 ticks -> 3";
+    ASSERT multi_c.value     == 3_i64, "multi: 3 ticks -> 3";
+    ASSERT shared_c.value    == 3_i64, "shared: 3 ticks -> 3";
+    ASSERT indirect_c.value  == 3_i64, "indirect: 3 ticks -> 3";
+    WITH EXCLUSIVE locked_c       AS l_view { ASSERT l_view.value == 3_i64, "shared:locked: 3 ticks -> 3"; }
+    WITH EXCLUSIVE wlocked_c      AS w_view { ASSERT w_view.value == 3_i64, "shared:writeLocked: 3 ticks -> 3"; }
+    WITH SNAPSHOT  versioned_c    AS v_view { ASSERT v_view.value == 3_i64, "shared:versioned: 3 ticks -> 3"; }
+    WITH SNAPSHOT  atomic_c       AS a_view { ASSERT a_view.value == 3_i64, "indirect:atomic: 3 ticks -> 3"; }
+    WITH EXCLUSIVE bare_locked_c  AS bl_view { ASSERT bl_view.value == 3_i64, "bare locked: 3 ticks -> 3"; }
+    WITH EXCLUSIVE bare_wlocked_c AS bw_view { ASSERT bw_view.value == 3_i64, "bare writeLocked: 3 ticks -> 3"; }
+    WITH SNAPSHOT  bare_versioned_c AS bv_view { ASSERT bv_view.value == 3_i64, "bare versioned: 3 ticks -> 3"; }
+
+    print(COPY "OK");
+    RETURN;
+END
+
+# expect:
+# OK

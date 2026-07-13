@@ -1,7 +1,7 @@
 # Puck-on-CLEAR — Retrospective
 
 A short postmortem on the CLEAR compiler bugs surfaced while porting
-`v10/vm.c` to `examples/puck/vm.cht`. The four reproducers in
+`v10/vm.c` to `examples/puck/vm.clear`. The four reproducers in
 [`transpile-tests/known-failing/`](../../transpile-tests/known-failing/)
 all came out of writing roughly 300 lines of straightforward stack-machine
 interpreter code — that is, the bug-discovery rate was about one per
@@ -15,7 +15,7 @@ about the test surface?**
 Three structural gaps, in order of severity:
 
 1. **The test corpus is mostly happy-path examples.** Existing
-   `transpile-tests/*.cht` files demonstrate that a working program
+   `transpile-tests/*.clear` files demonstrate that a working program
    compiles and runs. The bugs we hit are not "what compiles" failures
    but "what compiles incorrectly" or "what compiles awkwardly" failures
    — adversarial shapes that no existing test was probing.
@@ -26,7 +26,7 @@ Three structural gaps, in order of severity:
    spirit* is rejected with a low-level error message.
 3. **Hoisting and effect inference each have well-formed unit
    behaviours that compose badly.** Each transformation is locally
-   correct; their interaction in the presence of `OR fallback` and
+   correct; their interaction in the presence of `OR_ELSE fallback` and
    nested heap shapes is what produces incorrect Zig and surprising
    fallibility cascades.
 
@@ -53,7 +53,7 @@ discussion here:
   never ran. **Severity: high** — every non-trivial loop hits it, and
   the only escape is hoisting every transient out of the loop body.
 
-- **Bug #3 / #8** (`OR fallback` doesn't reset `can_fail` in effect
+- **Bug #3 / #8** (`OR_ELSE fallback` doesn't reset `can_fail` in effect
   inference): a function whose only "fallible" operation is consumed by
   `OR ""` is still marked fallible, forcing the whole call chain to
   declare `!T`. **Severity: medium** — silently *enlarges the signature*
@@ -73,7 +73,7 @@ discussion here:
 `transpile-tests/` has ~456 entries, all of which exercise a feature
 that *worked at the time it was added*. The structure of those tests is:
 
-> Write a `.cht` file that compiles and runs.
+> Write a `.clear` file that compiles and runs.
 > If it compiles and prints the right thing, we ship.
 
 Every entry in the corpus was authored *after* the corresponding feature
@@ -82,7 +82,7 @@ asks "did you remember to make this work when used together with that?"
 
 The bugs we hit are interaction bugs:
 
-- Bug #1 needs: fallible call + OR fallback + comparison + IF condition
+- Bug #1 needs: fallible call + OR_ELSE fallback + comparison + IF condition
   (four features, each fine individually).
 - Bug #9 needs: STRUCT with @list field + outer @list + WHILE loop +
   MUTABLE-declared inner @list (four features, each fine individually).
@@ -93,7 +93,7 @@ property test, no quickcheck-style "two random `transpile-tests/`
 patterns concatenated" runner.
 
 This is the dominant cause. The other two below are downstream of it —
-they're things the corpus didn't notice because nobody wrote a `.cht` in
+they're things the corpus didn't notice because nobody wrote a `.clear` in
 that shape until now.
 
 ### Cause 2 — MIR verifies but doesn't always synthesise
@@ -130,7 +130,7 @@ build-time error.
 Bug #1 is a hoisting bug, but the hoister isn't broken in isolation.
 A simpler shape:
 
-```cht
+```clear
 foo = maybe("x") OR "y";
 IF foo != "z" THEN RAISE "..."; END
 ```
@@ -148,7 +148,7 @@ lives), instead of the parent block (where the temp's value is
 naming, just not for emission ordering.
 
 Bug #3 is similar in flavour: the effect inference pass and the
-expression typer each have a defensible view of `OR fallback`, and they
+expression typer each have a defensible view of `OR_ELSE fallback`, and they
 disagree about whether the residual function "can fail". Each pass is
 locally consistent; the cross-product is the bug.
 
@@ -202,7 +202,7 @@ For each bug:
 
 - It was reproduced in ≤20 lines of standalone CLEAR (see the
   `transpile-tests/known-failing/` reproducers).
-- A workaround was applied to `vm.cht` so the file compiles today.
+- A workaround was applied to `vm.clear` so the file compiles today.
 - The workaround is referenced from the bugs doc by section number so
   a future fix can find both the symptom and the rewrite.
 
@@ -248,4 +248,4 @@ Puck VM — surfaces ~4 distinct compiler bugs in the first 300 lines.
 That isn't a CLEAR-is-bad signal; it's a "the corpus has not yet
 sampled real application shapes" signal. The fix is more programs,
 written end-to-end, with no fallback to "just ignore the bug and move
-on" — which is how vm.cht ended up in its current shape.
+on" — which is how vm.clear ended up in its current shape.

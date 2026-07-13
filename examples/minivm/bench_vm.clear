@@ -1,0 +1,42 @@
+# VM Benchmark: filter + sum, timed with timestampMs
+
+FN main() RETURNS Void ->
+    # Single run to verify correctness
+    MUTABLE nums: Int64[] = [];
+    MUTABLE i = 0_i64;
+    WHILE i < 10000 DO
+        nums.append(i);
+        i = i + 1_i64;
+    END
+
+    MUTABLE sum = 0_i64;
+    MUTABLE j = 0_i64;
+    WHILE j < nums.length() DO
+        n = nums[j];
+        IF n MOD 2 == 0 THEN
+            sum = sum + n;
+        END
+        j = j + 1_i64;
+    END
+    print("Sum of evens 0..9999: " $+ sum.toString());
+
+    # Timed: 10 iterations
+    startMs = timestampMs();
+    MUTABLE iter = 0_i64;
+    WHILE iter < 10 DO
+        MUTABLE s = 0_i64;
+        MUTABLE k = 0_i64;
+        WHILE k < 10000 DO
+            IF k MOD 2 == 0 THEN
+                s = s + k;
+            END
+            k = k + 1_i64;
+        END
+        iter = iter + 1_i64;
+    END
+    endMs = timestampMs();
+    elapsed = endMs - startMs;
+    print("CLEAR VM: 10 iterations in " $+ elapsed.toString() $+ "ms");
+
+    RETURN;
+END

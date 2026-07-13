@@ -4,6 +4,7 @@ const fp = @import("../runtime/scheduler.zig");
 const Task = @import("../runtime/queues.zig").Task;
 const queues = @import("../runtime/queues.zig");
 const pl = @import("parking-lot.zig");
+const paged_slot_map = @import("paged-slot-map.zig");
 
 // Comptime atomic type selection for fields exercised by the loom suite.
 // Mirrors queues.zig: when the test root exports SimAtomic
@@ -38,6 +39,33 @@ pub fn bind(comptime deps: type) type {
         fn dupeValue(comptime T: type, value: T, alloc: std.mem.Allocator) !T {
             return deps.dupeValue(T, value, alloc);
         }
+
+        fn appendOwnedValue(comptime T: type, list: *std.ArrayListUnmanaged(T), alloc: std.mem.Allocator, value: T) !void {
+            const copied = if (comptime needsCleanup(T)) try dupeValue(T, value, alloc) else value;
+            errdefer if (comptime needsCleanup(T)) cleanup(T, alloc, &copied);
+            try list.append(alloc, copied);
+        }
+
+        fn appendOwnedString(list: *std.ArrayListUnmanaged([]const u8), alloc: std.mem.Allocator, value: []const u8) !void {
+            const copied = if (value.len > 0) try alloc.dupe(u8, value) else value;
+            errdefer if (copied.len > 0) alloc.free(copied);
+            try list.append(alloc, copied);
+        }
+
+    pub fn PagedSlotMap(comptime T: type) type {
+        return paged_slot_map.PagedSlotMap(T, struct {
+            fn drop(alloc: std.mem.Allocator, ptr: *T) void {
+                cleanup(T, alloc, ptr);
+            }
+        }.drop);
+    }
+
+    pub fn PagedSlotMapWithDrop(
+        comptime T: type,
+        comptime dropFn: fn (std.mem.Allocator, *T) void,
+    ) type {
+        return paged_slot_map.PagedSlotMap(T, dropFn);
+    }
 
     pub fn makeHashMap(comptime V: type) std.StringHashMapUnmanaged(V) {
         return std.StringHashMapUnmanaged(V){};
@@ -486,6 +514,15 @@ pub fn bind(comptime deps: type) type {
         return ptr;
     }
 
+    /// Move the payload out of a unique @indirect allocation and release only
+    /// its allocation shell. Ownership of every cleanup-bearing field moves
+    /// into the returned value; no destructor and no deep copy runs here.
+    pub fn unboxMove(comptime T: type, alloc: std.mem.Allocator, boxed: *T) T {
+        const value = boxed.*;
+        alloc.destroy(boxed);
+        return value;
+    }
+
     pub fn lockedCreate(comptime T: type, alloc: std.mem.Allocator, data: T) !*Locked(T) {
         const ptr = try alloc.create(Locked(T));
         ptr.* = Locked(T).init(data);
@@ -581,6 +618,10 @@ pub fn bind(comptime deps: type) type {
                 return val;
             }
 
+            pub fn isReady(self: Self) bool {
+                return self.inner.wg.isReady();
+            }
+
             /// FSM resume path for NEXT. The FSM dispatch has already
             /// registered/yielded or observed count==0, so it must not call
             /// wait() on the scheduler thread. It only consumes the settled
@@ -665,6 +706,10 @@ pub fn bind(comptime deps: type) type {
                     self.alloc.destroy(self.inner);
                 }
                 return val;
+            }
+
+            pub fn isReady(self: *const Self) bool {
+                return self.resolved != null or self.inner.wg.isReady();
             }
 
             /// Clone this handle, incrementing the shared ref_count.
@@ -1655,7 +1700,8 @@ pub fn bind(comptime deps: type) type {
     // Fixed-capacity pool with generational handles and O(1) insert/remove.
     //
     // Handles are u64 values encoding [generation: upper 32 bits][index: lower 32 bits].
-    // Generation counters prevent use-after-remove (ABA safety).
+    // Odd generations are live and even generations are vacant. This packs
+    // liveness into the generation sidecar without padding every payload.
     //
     // All slots are pre-allocated upfront — zero allocator calls during operation.
     // A free stack provides O(1) insert (pop) and O(1) remove (push).
@@ -1670,51 +1716,51 @@ pub fn bind(comptime deps: type) type {
         return struct {
             const Self = @This();
 
-            const Slot = struct {
-                generation: u32 = 0,
-                alive: bool = false,
-                value: T = undefined,
-            };
+            pub const is_pool = true;
 
-            slots: []Slot = &.{},
+            values: []T = &.{},
+            /// Odd = live, even = vacant. A slot is retired rather than
+            /// wrapping after generation 0xffffffff.
+            states: []u32 = &.{},
             /// Stack of free slot indices. Top is at free_stack[free_top - 1].
             free_stack: []u32 = &.{},
             free_top: u32 = 0,
             capacity: u32 = 0,
             live_count: u32 = 0,
+            allocator: std.mem.Allocator = std.heap.page_allocator,
 
             /// Pre-allocate all slots and build the free stack.
             pub fn initCapacity(allocator: std.mem.Allocator, cap: u32) !Self {
-                const slots = try allocator.alloc(Slot, cap);
-                // Zero the entire buffer so alive=false for all slots.
-                // @memset with Slot{} leaves value=undefined which may not
-                // zero the alive field (Zig fills undefined with 0xAA in debug).
-                @memset(std.mem.sliceAsBytes(slots), 0);
+                const values = try allocator.alloc(T, cap);
+                errdefer allocator.free(values);
+                const states = try allocator.alloc(u32, cap);
+                errdefer allocator.free(states);
+                @memset(states, 0);
                 const free_stack = try allocator.alloc(u32, cap);
+                errdefer allocator.free(free_stack);
                 // Fill free stack so index 0 is popped first (LIFO: push N-1..0)
                 for (0..cap) |i| {
                     free_stack[i] = @intCast(cap - 1 - i);
                 }
                 return Self{
-                    .slots = slots,
+                    .values = values,
+                    .states = states,
                     .free_stack = free_stack,
                     .free_top = cap,
                     .capacity = cap,
+                    .allocator = allocator,
                 };
             }
 
-            pub fn deinit(self: *Self, allocator: std.mem.Allocator) void {
-                // Only scan slots that could have been used. Slots are allocated
-                // from the free stack in LIFO order (0, 1, 2, ...) so the highest
-                // possible used index is capacity - free_top.
-                const max_used = self.capacity - self.free_top;
-                for (self.slots[0..max_used]) |*slot| {
-                    if (slot.alive) {
-                        deinitFields(&slot.value, allocator);
-                    }
+            pub fn deinit(self: *Self, _: std.mem.Allocator) void {
+                const allocator = self.allocator;
+                for (self.states, 0..) |state, idx| {
+                    if (isLiveState(state)) deinitFields(&self.values[idx], allocator);
                 }
-                allocator.free(self.slots);
                 allocator.free(self.free_stack);
+                allocator.free(self.states);
+                allocator.free(self.values);
+                self.* = .{};
             }
 
             /// Cleanup all fields of a struct value using cleanup.
@@ -1723,14 +1769,15 @@ pub fn bind(comptime deps: type) type {
             }
 
             /// Insert a value, returning a stable u64 handle. O(1).
-            /// Panics if the pool is full.
+            /// Returns error.Full if the pool is full or every slot has
+            /// exhausted its generation space.
             pub fn insert(self: *Self, _: std.mem.Allocator, value: T) !u64 {
-                if (self.free_top == 0) @panic("Pool is full");
+                if (self.free_top == 0) return error.Full;
                 self.free_top -= 1;
                 const idx = self.free_stack[self.free_top];
-                const slot = &self.slots[idx];
-                const gen = slot.generation;
-                slot.* = .{ .generation = gen, .alive = true, .value = value };
+                const gen = self.states[idx] + 1;
+                self.values[idx] = value;
+                self.states[idx] = gen;
                 self.live_count += 1;
                 return (@as(u64, gen) << 32) | @as(u64, idx);
             }
@@ -1740,9 +1787,8 @@ pub fn bind(comptime deps: type) type {
                 const idx = @as(u32, @truncate(id));
                 const gen = @as(u32, @truncate(id >> 32));
                 if (idx >= self.capacity) return null;
-                const slot = &self.slots[idx];
-                if (!slot.alive or slot.generation != gen) return null;
-                return &slot.value;
+                if (!isLiveState(gen) or self.states[idx] != gen) return null;
+                return &self.values[idx];
             }
 
             /// Remove a slot. O(1). Increments generation (ABA protection).
@@ -1751,13 +1797,36 @@ pub fn bind(comptime deps: type) type {
                 const idx = @as(u32, @truncate(id));
                 const gen = @as(u32, @truncate(id >> 32));
                 if (idx >= self.capacity) return;
-                const slot = &self.slots[idx];
-                if (!slot.alive or slot.generation != gen) return;
-                slot.alive = false;
-                slot.generation +%= 1;
-                self.free_stack[self.free_top] = idx;
-                self.free_top += 1;
+                if (!isLiveState(gen) or self.states[idx] != gen) return;
+
+                deinitFields(&self.values[idx], self.allocator);
+                if (gen == std.math.maxInt(u32)) {
+                    // Keep an even dead state and permanently retire the slot.
+                    self.states[idx] = gen - 1;
+                } else {
+                    self.states[idx] = gen + 1;
+                    self.free_stack[self.free_top] = idx;
+                    self.free_top += 1;
+                }
                 self.live_count -= 1;
+            }
+
+            pub inline fn isAliveIndex(self: *const Self, idx: usize) bool {
+                return idx < self.states.len and isLiveState(self.states[idx]);
+            }
+
+            pub inline fn valueAtIndex(self: *Self, idx: usize) ?*T {
+                if (!self.isAliveIndex(idx)) return null;
+                return &self.values[idx];
+            }
+
+            pub inline fn valueAtIndexConst(self: *const Self, idx: usize) ?*const T {
+                if (!self.isAliveIndex(idx)) return null;
+                return &self.values[idx];
+            }
+
+            inline fn isLiveState(state: u32) bool {
+                return (state & 1) != 0;
             }
 
             /// Returns the number of live (non-removed) slots.
@@ -2055,12 +2124,20 @@ pub fn bind(comptime deps: type) type {
         const is_string = T == []const u8;
         const Context = struct {
             pub fn hash(_: @This(), key: T) u64 {
+                // Reference-counted values are identity-bearing handles. Their
+                // payload may be mutated through another alias, so value-based
+                // hashing would invalidate the set's buckets after insertion.
+                // The control-block address is stable for the handle lifetime.
+                if (comptime refInnerType(T) != null) {
+                    return std.hash.Wyhash.hash(0, std.mem.asBytes(&key.ctrl));
+                }
                 var hasher = std.hash.Wyhash.init(0);
                 std.hash.autoHashStrat(&hasher, key, .DeepRecursive);
                 return hasher.final();
             }
 
             pub fn eql(_: @This(), a: T, b: T) bool {
+                if (comptime refInnerType(T) != null) return a.ctrl == b.ctrl;
                 return std.meta.eql(a, b);
             }
         };
@@ -2097,7 +2174,10 @@ pub fn bind(comptime deps: type) type {
                 if (is_string) {
                     if (self.inner.fetchRemove(value)) |kv| alloc.free(kv.key);
                 } else {
-                    _ = self.inner.fetchRemove(value);
+                    if (self.inner.fetchRemove(value)) |kv| {
+                        var removed = kv.key;
+                        if (comptime needsCleanup(T)) cleanup(T, alloc, &removed);
+                    }
                 }
             }
 
@@ -2546,18 +2626,26 @@ pub fn bind(comptime deps: type) type {
 
             pub fn keys(self: *Self, alloc: std.mem.Allocator) !std.ArrayListUnmanaged([]const u8) {
                 var list: std.ArrayListUnmanaged([]const u8) = .empty;
+                errdefer {
+                    for (list.items) |key| if (key.len > 0) alloc.free(key);
+                    list.deinit(alloc);
+                }
                 for (&self.shards) |*shard| {
                     var it = shard.map.keyIterator();
-                    while (it.next()) |k| try list.append(alloc, k.*);
+                    while (it.next()) |k| try appendOwnedString(&list, alloc, k.*);
                 }
                 return list;
             }
 
             pub fn values(self: *Self, alloc: std.mem.Allocator) !std.ArrayListUnmanaged(V) {
                 var list: std.ArrayListUnmanaged(V) = .empty;
+                errdefer {
+                    if (comptime needsCleanup(V)) for (list.items) |*value| cleanup(V, alloc, value);
+                    list.deinit(alloc);
+                }
                 for (&self.shards) |*shard| {
                     var it = shard.map.valueIterator();
-                    while (it.next()) |v| try list.append(alloc, v.*);
+                    while (it.next()) |v| try appendOwnedValue(V, &list, alloc, v.*);
                 }
                 return list;
             }
@@ -2875,9 +2963,13 @@ pub fn bind(comptime deps: type) type {
 
             pub fn values(self: *Self, a: std.mem.Allocator) !std.ArrayListUnmanaged(V) {
                 var list: std.ArrayListUnmanaged(V) = .empty;
+                errdefer {
+                    if (comptime needsCleanup(V)) for (list.items) |*value| cleanup(V, a, value);
+                    list.deinit(a);
+                }
                 for (&self.shards) |*shard| {
                     var it = shard.map.valueIterator();
-                    while (it.next()) |v| try list.append(a, v.*);
+                    while (it.next()) |v| try appendOwnedValue(V, &list, a, v.*);
                 }
                 return list;
             }
@@ -2974,22 +3066,30 @@ pub fn bind(comptime deps: type) type {
 
             pub fn keys(self: *Self, alloc: std.mem.Allocator) !std.ArrayListUnmanaged([]const u8) {
                 var list: std.ArrayListUnmanaged([]const u8) = .empty;
+                errdefer {
+                    for (list.items) |key| if (key.len > 0) alloc.free(key);
+                    list.deinit(alloc);
+                }
                 for (&self.shards) |*shard| {
                     shard.lock.lockShared();
                     defer shard.lock.unlockShared();
                     var it = shard.map.keyIterator();
-                    while (it.next()) |k| try list.append(alloc, k.*);
+                    while (it.next()) |k| try appendOwnedString(&list, alloc, k.*);
                 }
                 return list;
             }
 
             pub fn values(self: *Self, alloc: std.mem.Allocator) !std.ArrayListUnmanaged(V) {
                 var list: std.ArrayListUnmanaged(V) = .empty;
+                errdefer {
+                    if (comptime needsCleanup(V)) for (list.items) |*value| cleanup(V, alloc, value);
+                    list.deinit(alloc);
+                }
                 for (&self.shards) |*shard| {
                     shard.lock.lockShared();
                     defer shard.lock.unlockShared();
                     var it = shard.map.valueIterator();
-                    while (it.next()) |v| try list.append(alloc, v.*);
+                    while (it.next()) |v| try appendOwnedValue(V, &list, alloc, v.*);
                 }
                 return list;
             }
@@ -3153,22 +3253,30 @@ pub fn bind(comptime deps: type) type {
 
             pub fn keys(self: *Self, alloc: std.mem.Allocator) !std.ArrayListUnmanaged([]const u8) {
                 var list: std.ArrayListUnmanaged([]const u8) = .empty;
+                errdefer {
+                    for (list.items) |key| if (key.len > 0) alloc.free(key);
+                    list.deinit(alloc);
+                }
                 for (&self.shards) |*shard| {
                     shard.lock.lock();
                     defer shard.lock.unlock();
                     var it = shard.map.keyIterator();
-                    while (it.next()) |k| try list.append(alloc, k.*);
+                    while (it.next()) |k| try appendOwnedString(&list, alloc, k.*);
                 }
                 return list;
             }
 
             pub fn values(self: *Self, alloc: std.mem.Allocator) !std.ArrayListUnmanaged(V) {
                 var list: std.ArrayListUnmanaged(V) = .empty;
+                errdefer {
+                    if (comptime needsCleanup(V)) for (list.items) |*value| cleanup(V, alloc, value);
+                    list.deinit(alloc);
+                }
                 for (&self.shards) |*shard| {
                     shard.lock.lock();
                     defer shard.lock.unlock();
                     var it = shard.map.valueIterator();
-                    while (it.next()) |v| try list.append(alloc, v.*);
+                    while (it.next()) |v| try appendOwnedValue(V, &list, alloc, v.*);
                 }
                 return list;
             }

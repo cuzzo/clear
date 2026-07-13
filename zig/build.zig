@@ -227,11 +227,13 @@ pub fn build(b: *std.Build) void {
         .{ .path = "net-steal-hammer-test.zig", .tsan = true, .hammer = true },
         .{ .path = "parking-lot-cycle-test.zig", .tsan = true },
         .{ .path = "parking-lot-hammer-test.zig", .tsan = true, .hammer = true },
+        .{ .path = "paged-slot-map-hammer-test.zig", .hammer = true },
         // parking-lot-loom-test is built as an executable above (search for
         // pl_loom_exe). Building via b.addTest puts the test_runner at
         // module root, hiding `pub const SimAtomic` from the comptime
         // Atomic alias and silently disabling Loom — see GAP-B.
         .{ .path = "parking-lot-test.zig", .tsan = true },
+        .{ .path = "paged-slot-map-test.zig" },
         .{ .path = "pool-test.zig", .tsan = true },
         .{ .path = "queues-test.zig", .tsan = true },
         .{ .path = "routing-crash-test.zig", .tsan = true },
@@ -244,6 +246,9 @@ pub fn build(b: *std.Build) void {
         .{ .path = "sharded-list-test.zig", .tsan = true },
         .{ .path = "sharded-pool-test.zig", .tsan = true },
         .{ .path = "shared-nothing-test.zig", .tsan = true },
+        .{ .path = "shared-node-store-test.zig", .tsan = true },
+        .{ .path = "shared-node-store-hammer-test.zig", .tsan = true, .hammer = true },
+        .{ .path = "shared-node-store-loom-test.zig", .loom_vopr = true },
         .{ .path = "shared-promise-test.zig", .tsan = true },
         .{ .path = "slab-alloc-test.zig", .tsan = true },
         .{ .path = "slab-alloc-hammer-test.zig", .tsan = true, .hammer = true },
@@ -277,6 +282,7 @@ pub fn build(b: *std.Build) void {
         // comptime seam in lib/compat.zig and silently disabling
         // them (same GAP-B issue parking-lot-loom hit pre-2026-05).
         .{ .path = "atomic-ptr-stress-test.zig", .tsan = true },
+        .{ .path = "arc-weak-hammer-test.zig", .tsan = true, .hammer = true },
 
         // Single-threaded / pure logic — debug build only
         .{ .path = "arena-fuzz-test.zig", .hammer = true },
@@ -1094,6 +1100,7 @@ pub fn build(b: *std.Build) void {
         entry: []const u8, // path under zig/, e.g. "scheduler-timeout-vopr-test.zig"
     };
     const vopr_exes = [_]VoprExe{
+        .{ .name = "arc-weak-vopr", .entry = "arc-weak-vopr-test.zig" },
         .{ .name = "scheduler-timeout-vopr", .entry = "scheduler-timeout-vopr-test.zig" },
         .{ .name = "atomic-ptr-vopr", .entry = "atomic-ptr-vopr-test.zig" },
         .{ .name = "versioned-vopr", .entry = "versioned-vopr-test.zig" },
@@ -1101,6 +1108,7 @@ pub fn build(b: *std.Build) void {
         .{ .name = "fsm-vopr", .entry = "fsm-vopr-test.zig" },
         .{ .name = "vopr-runqueue", .entry = "vopr-test.zig" },
         .{ .name = "data-structures-vopr", .entry = "data-structures-vopr-test.zig" },
+        .{ .name = "shared-node-store-vopr", .entry = "shared-node-store-vopr-test.zig" },
     };
     for (vopr_exes) |ve| {
         if (!matchesTestFile(ve.entry, test_file_filter)) continue;

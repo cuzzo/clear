@@ -1,8 +1,17 @@
 <div class="app">
+  <input type="checkbox" id="sidebar-toggle" class="sidebar-toggle" checked data-persist-key="lineage.sidebar-toggle">
   <aside{% if source_sidebar %} class="source-sidebar"{% endif %}>
+    <div class="sidebar-collapse-container">
+      <label for="sidebar-toggle" class="sidebar-collapse-btn" title="Collapse Sidebar">
+        <i class="fa-solid fa-angles-left"></i> Collapse
+      </label>
+    </div>
     {{ sidebar|safe }}
   </aside>
   <main>
+    <label for="sidebar-toggle" class="sidebar-expand-btn" title="Expand Sidebar">
+      <i class="fa-solid fa-angles-right"></i>
+    </label>
     {{ main|safe }}
   </main>
 </div>

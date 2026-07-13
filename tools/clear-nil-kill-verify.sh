@@ -2,7 +2,7 @@
 set -euo pipefail
 
 bundle exec srb tc
-bundle exec prspec spec/
+bundle exec prspec compiler/spec/
 bundle exec prspec gems/nil-kill/spec
 bundle exec prspec gems/auto-type/spec
 bundle exec ruby -c tools/nil-kill

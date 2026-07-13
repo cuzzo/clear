@@ -16,7 +16,7 @@ def apx_prelude(access)
   when :field, :optional_field, :nested_field
     "STRUCT Box { label: String }\nSTRUCT Wrap { box: Box }\n"
   when :optional_index
-    "FN maybeList(flag: Bool) RETURNS ?String[]@list ->\n    IF flag THEN\n        xs: String[]@list = [COPY \"abc\", COPY \"de\"];\n        RETURN xs;\n    END\n    RETURN NIL;\nEND\n"
+    "FN maybeList(flag: Bool) RETURNS ?(String[]@list) ->\n    IF flag THEN\n        xs: String[]@list = [COPY \"abc\", COPY \"de\"];\n        RETURN xs;\n    END\n    RETURN NIL;\nEND\n"
   else
     ""
   end
@@ -31,7 +31,7 @@ def apx_setup(access)
   when :optional_field
     'maybe: ?Box = Box{ label: COPY "abc" };'
   when :optional_index
-    'maybe: ?String[]@list = maybeList(TRUE);'
+    'maybe: ?(String[]@list) = maybeList(TRUE);'
   when :map_index
     'm: HashMap<String> = {"a": COPY "abc"};'
   when :set_index
@@ -61,11 +61,11 @@ def apx_expr(access)
 end
 
 def apx_return_expr(access)
-  %i[map_index set_index].include?(access) ? "COPY (#{apx_expr(access)} OR COPY \"\")" : "COPY #{apx_expr(access)}"
+  %i[map_index set_index].include?(access) ? "COPY (#{apx_expr(access)} OR_ELSE COPY \"\")" : "COPY #{apx_expr(access)}"
 end
 
 def apx_observe(access, name)
-  %i[optional_field optional_index map_index set_index].include?(access) ? "(#{name} OR COPY \"\").length()" : "#{name}.length()"
+  %i[optional_field optional_index map_index set_index].include?(access) ? "(#{name} OR_ELSE COPY \"\").length()" : "#{name}.length()"
 end
 
 FuzzGenerator.register(:access_path_expression_matrix, cells: ACCESS_PATH_EXPRESSION_CELLS) do |p|
@@ -103,7 +103,7 @@ FuzzGenerator.register(:access_path_expression_matrix, cells: ACCESS_PATH_EXPRES
     arg_type = optional_access ? "?String" : "String"
     <<~CHT
       #{prelude}FN observe(x: #{arg_type}) RETURNS Int64 ->
-          RETURN #{optional_access ? '(x OR COPY "").length()' : 'x.length()'};
+          RETURN #{optional_access ? '(x OR_ELSE COPY "").length()' : 'x.length()'};
       END
 
       FN main() RETURNS Void ->

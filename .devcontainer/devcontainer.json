@@ -15,7 +15,7 @@
 
   // Runs once after the container is created. See setup.sh — installs
   // gems, downloads the pinned Zig toolchain, and compiles the VS Code
-  // extension so the LSP is ready as soon as the user opens a .cht file.
+  // extension so the LSP is ready as soon as the user opens a .clear file.
   "postCreateCommand": "bash .devcontainer/setup.sh",
 
   // Runs on every container start (including rebuilds and resumes from
@@ -28,7 +28,7 @@
     "vscode": {
       "settings": {
         "files.associations": {
-          "*.cht": "clear"
+          "*.clear": "clear"
         },
         "[clear]": {
           "editor.tabSize": 2,

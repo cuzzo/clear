@@ -1,0 +1,35 @@
+# FSM-vs-stackful benchmark (FSM variant). Spawn N short-lived
+# BG fibers each doing trivial work, then await all.
+#
+# Default BG (no @xl) -> FSM-eligible. With NO suspends in the
+# body, this is B1 (pure-compute) FSM: ctx struct holds task /
+# rt / inner / alloc + the bound result, ~64-96 bytes. The
+# stackful @xl variant allocates a 256+ KB stack per BG; the
+# difference dominates peak RSS at scale.
+# @leak: 100_000_i64 -> 1_000_i64
+
+FN bench_work(x: Int64) RETURNS Int64 ->
+  RETURN x * 2 + 1;
+END
+
+FN main() RETURNS Void ->
+  count: Int64 = 100_000_i64;
+
+  MUTABLE futures: ~Int64[]@list = [];
+  MUTABLE total: Int64 = 0_i64;
+
+  FOR i IN (0 ..< count) DO
+    futures.append(BG { bench_work(i); });
+  END
+
+  FOR j IN (0 ..< count) DO
+    IF futures[j] EXISTS AS future THEN
+      r: Int64 = NEXT future;
+      total = total + r;
+    END
+  END
+
+  ASSERT total > 0, "non-zero result";
+  print("BENCH_INFO: fsm current_rss_kb=", currentMemoryKb(), " peak_rss_kb=", peakMemoryKb(), " peak_vm_kb=", peakVirtualMemoryKb());
+  RETURN;
+END

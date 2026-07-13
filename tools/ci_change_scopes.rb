@@ -45,7 +45,7 @@ module CIChangeScopes
       scope.run_gems = true
     when %r{\Azig/}
       scope.run_zig = true
-    when %r{\A(?:src|spec|transpile-tests|examples|benchmarks|tools)/}
+    when %r{\A(?:compiler/ruby|compiler/spec|src|spec|transpile-tests|examples|benchmarks|tools)/}
       scope.run_src = true
     when "Gemfile", "Gemfile.lock", ".ruby-version", ".rubocop.yml", "sorbet/config", "clear"
       scope.run_gems = true

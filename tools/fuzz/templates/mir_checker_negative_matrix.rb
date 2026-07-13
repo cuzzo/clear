@@ -44,6 +44,8 @@ MIR_CHECKER_NEGATIVE_CELLS = [
   { case_name: :allocating_let_without_alloc, error_code: :ALLOCATING_LET_WITHOUT_ALLOC },
   { case_name: :cleanup_for_borrow_field, error_code: :OWNERSHIP_CLEANUP_FOR_BORROW },
   { case_name: :cleanup_for_borrow_index, error_code: :OWNERSHIP_CLEANUP_FOR_BORROW },
+  { case_name: :cleanup_for_borrow_if_bind, error_code: :OWNERSHIP_CLEANUP_FOR_BORROW },
+  { case_name: :structural_rc_deep_copy, error_code: :OWNERSHIP_STRUCTURAL_RC_COPY },
   { case_name: :frame_field_store_escape, error_code: :FRAME_ALLOC_ESCAPES },
   { case_name: :frame_capture_escape, error_code: :FRAME_ALLOC_ESCAPES },
   { case_name: :frame_aggregate_escape, error_code: :FRAME_ALLOC_ESCAPES },
@@ -351,6 +353,25 @@ def mir_checker_negative_case(case_name)
         MIR::Cleanup.new("x", cleanup(:heap, false)),
       ]
     RUBY
+  when :cleanup_for_borrow_if_bind
+    <<~RUBY
+      [
+        MIR::IfBindStmt.new(
+          [{ expr: MIR::Ident.new("owner"), capture: "item", owns_capture: false }],
+          [MIR::Cleanup.new("item", cleanup(:heap, false))],
+          nil,
+        ),
+      ]
+    RUBY
+  when :structural_rc_deep_copy
+    <<~RUBY
+      [
+        MIR::ExprStmt.new(
+          MIR::DeepCopy.new(MIR::Ident.new("owner"), "CheatLib.Rc(Item)", nil, :passthrough, nil),
+          false,
+        ),
+      ]
+    RUBY
   when :frame_field_store_escape
     <<~RUBY
       [
@@ -409,11 +430,11 @@ def mir_checker_negative_source(case_name, error_code)
   body_src = mir_checker_negative_case(case_name)
   <<~RUBY
     require 'bundler/setup'
-    require File.expand_path('spec/coverage_bootstrap', Dir.pwd) if ENV['COVERAGE'] == '1'
-    require File.expand_path('src/ast/ast', Dir.pwd)
-    require File.expand_path('src/mir/mir', Dir.pwd)
-    require File.expand_path('src/mir/cleanup_entry', Dir.pwd)
-    require File.expand_path('src/mir/mir_checker', Dir.pwd)
+    require File.expand_path('compiler/spec/coverage_bootstrap', Dir.pwd) if ENV['COVERAGE'] == '1'
+    require File.expand_path('compiler/ruby/ast/ast', Dir.pwd)
+    require File.expand_path('compiler/ruby/mir/mir', Dir.pwd)
+    require File.expand_path('compiler/ruby/mir/cleanup_entry', Dir.pwd)
+    require File.expand_path('compiler/ruby/mir/mir_checker', Dir.pwd)
 
     def fn_def(name, body)
       MIR::FnDef.new(name, [], "void", body, :pub, false, nil)

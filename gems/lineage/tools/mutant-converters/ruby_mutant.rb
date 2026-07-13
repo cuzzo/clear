@@ -32,6 +32,8 @@ module RubySpecMutants
   end
 
   SUBJECT_FILE = T.let(File.expand_path('src_subjects.yml', __dir__), String)
+  COMPILER_RUBY_LOAD_PATH = T.let(File.join(MutationTesting::ROOT, 'compiler', 'ruby'), String)
+  RUBY_SOURCE_ROOTS = T.let(['compiler/ruby', 'tools'].freeze, T::Array[String])
   DEFAULT_MAX_TIMEOUTS = 100
 
   class Options < T::Struct
@@ -55,7 +57,7 @@ module RubySpecMutants
 
   sig { params(subject: Subject, since: T.nilable(String)).returns(T::Array[String]) }
   def self.mutant_argv(subject, since)
-    argv = T.let(['bundle', 'exec', 'mutant', '--zombie', 'run', '--usage', 'opensource', '-I', 'src'], T::Array[String])
+    argv = T.let(['bundle', 'exec', 'mutant', '--zombie', 'run', '--usage', 'opensource', '-I', 'compiler/ruby'], T::Array[String])
     subject.requires.each { |req| argv.concat(['-r', req]) }
     argv.concat([
       '--integration', 'rspec',
@@ -123,12 +125,22 @@ module RubySpecMutants
   def self.subject_specs(entry)
     raw_specs = entry['specs']
     if raw_specs
-      specs = T.cast(raw_specs, T::Array[T.untyped]).map { |spec| String(spec) }
+      specs = T.cast(raw_specs, T::Array[T.untyped]).map { |spec| resolve_spec_path(String(spec)) }
       raise "empty specs for mutant subject #{entry['subject']}" if specs.empty?
       return specs
     end
 
-    [String(entry.fetch('spec'))]
+    [resolve_spec_path(String(entry.fetch('spec')))]
+  end
+
+  sig { params(spec: String).returns(String) }
+  def self.resolve_spec_path(spec)
+    return spec if File.file?(File.join(MutationTesting::ROOT, spec))
+
+    candidate = spec.sub(/\Aspec\//, 'compiler/spec/')
+    return candidate if candidate != spec && File.file?(File.join(MutationTesting::ROOT, candidate))
+
+    spec
   end
 
   sig { returns(T::Array[Subject]) }
@@ -237,7 +249,7 @@ module RubySpecMutants
     owner = subject.expression.delete_suffix('*').split(/[.#]/, 2).first.to_s
     hint = underscore(owner.split('::').last.to_s)
     candidates = subject.requires.filter_map do |req|
-      ['src', 'tools'].filter_map do |root|
+      RUBY_SOURCE_ROOTS.filter_map do |root|
         rel = File.join(root, "#{req.delete_suffix('.rb')}.rb")
         rel if File.file?(File.join(MutationTesting::ROOT, rel))
       end
@@ -247,7 +259,7 @@ module RubySpecMutants
 
   sig { params(subject: Subject).returns(T.nilable(String)) }
   def self.source_location_file_for(subject)
-    $LOAD_PATH.unshift(File.join(MutationTesting::ROOT, 'src')) unless $LOAD_PATH.include?(File.join(MutationTesting::ROOT, 'src'))
+    $LOAD_PATH.unshift(COMPILER_RUBY_LOAD_PATH) unless $LOAD_PATH.include?(COMPILER_RUBY_LOAD_PATH)
     subject.requires.each { |req| require req }
 
     expression = subject.expression.delete_suffix('*')
@@ -300,7 +312,7 @@ module RubySpecMutants
 
   sig { returns(T::Array[String]) }
   def self.ruby_source_files
-    ['src', 'tools'].flat_map do |root|
+    RUBY_SOURCE_ROOTS.flat_map do |root|
       Dir.glob(File.join(MutationTesting::ROOT, root, '**', '*.rb')).map do |path|
         relative_repo_path(path)
       end

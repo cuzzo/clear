@@ -58,9 +58,9 @@ File and network IO are the test case. CLEAR should not make ordinary IO
 as hard as Java or Zig.
 
 ```ruby clear illustrative
-text = fs.read("config.clear") OR RAISE;
-lines = fs.readLines("users.txt") OR RAISE;
-fs.write("out.txt", report) OR RAISE;
+text = fs.read("config.clear") OR_ELSE RAISE;
+lines = fs.readLines("users.txt") OR_ELSE RAISE;
+fs.write("out.txt", report) OR_ELSE RAISE;
 ```
 
 Pipelines should default to using streams internally where that is the
@@ -70,7 +70,7 @@ terminal such as `COLLECT_LIST`, `COLLECT_SET`, `COLLECT_MAP`, or
 `AS_STREAM`.
 
 ```ruby clear illustrative
-users = (fs.readLines("users.csv") OR RAISE)
+users = (fs.readLines("users.csv") OR_ELSE RAISE)
     |> MAP { parseUser(_) }
     |> SELECT { _.active?() };
 ```
@@ -82,16 +82,16 @@ Users who want a stream, map, set, or another collection request it
 explicitly:
 
 ```ruby clear illustrative
-active_stream = (fs.readLines("users.csv") OR RAISE)
+active_stream = (fs.readLines("users.csv") OR_ELSE RAISE)
     |> MAP { parseUser(_) }
     |> SELECT { _.active?() }
     |> AS_STREAM;
 
-users_by_id = (fs.readLines("users.csv") OR RAISE)
+users_by_id = (fs.readLines("users.csv") OR_ELSE RAISE)
     |> MAP { parseUser(_) }
     |> COLLECT_MAP { _.id => _ };
 
-unique_domains = (fs.readLines("emails.txt") OR RAISE)
+unique_domains = (fs.readLines("emails.txt") OR_ELSE RAISE)
     |> MAP { domainOf(_) }
     |> COLLECT_SET;
 ```
@@ -104,7 +104,7 @@ Ordering is explicit. Directory scans and globbing should be unsorted
 streams unless the user asks otherwise:
 
 ```ruby clear illustrative
-files = fs.glob("src/**/*.cht") OR RAISE;
+files = fs.glob("src/**/*.clear") OR_ELSE RAISE;
 sorted = files |> ORDER_BY _;
 ```
 

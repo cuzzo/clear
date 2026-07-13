@@ -620,7 +620,9 @@ impl<'a> Extractor<'a> {
             call.span,
         );
         if self.seen_calls.insert(key) {
-            self.record_state_read_for_call(&projected, node);
+            if self.behavior.record_method_calls_as_state_reads() {
+                self.record_state_read_for_call(&projected, node);
+            }
             self.record_state_write_for_mutating_call(&call);
             if call.receiver == "self" && node.text.contains(".(") {
                 self.record_semantic_effect(

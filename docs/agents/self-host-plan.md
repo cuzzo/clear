@@ -1,5 +1,9 @@
 # CLEAR Self-Host Plan
 
+Status note: this is the broader historical plan. The current measured
+translation status, blocker counts, and near-term commit criteria live in
+`docs/agents/self-host.md`.
+
 Goal: port the Ruby compiler in `src/` to CLEAR using a deterministic bulk
 translator, then use LLM-assisted repair and oracle tests to reach a real
 stage1/stage2 self-host.

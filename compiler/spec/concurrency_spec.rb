@@ -1,0 +1,2104 @@
+require "rspec"
+require "byebug"
+require "tmpdir"
+require "fileutils"
+
+require_relative "../ruby/backends/transpiler" unless defined?(ZigTranspiler)
+require_relative "../ruby/ast/ast" unless defined?(MIR::ReassignPlan)
+
+RSpec.describe SemanticAnnotator do
+  def run(source)
+    tokens = Lexer.new(source).tokenize
+    ast = ClearParser.new(tokens, source).parse
+    annotator = SemanticAnnotator.new
+    annotator.annotate!(ast)
+    return ast
+  end
+
+  def get_last_type(source)
+    run(source).statements.last.resolved_type
+  end
+
+  let(:ast) { run(code) }
+  let(:result) { ast.statements.last.resolved_type }
+
+  # ---------------------------------------------------------------------------
+  # DO block (fork-join parallelism)
+  # ---------------------------------------------------------------------------
+
+  describe "DO block (fork-join parallelism)" do
+    context "simple expression branches" do
+      let(:code) {
+        <<~FLUX
+          STRUCT Task { id: Float64 }
+          FN process(t: Task) RETURNS Void -> RETURN; END
+          a = Task{ id: 1 };
+          b = Task{ id: 2 };
+          DO {
+            process(a),
+            process(b)
+          }
+        FLUX
+      }
+
+      it "annotates as Void" do
+        expect(result).to eq(:Void)
+      end
+
+      it "succeeds without errors" do
+        expect { ast }.not_to raise_error
+      end
+    end
+
+    context "block branches with @locked shared state" do
+      let(:code) {
+        <<~FLUX
+          STRUCT Counter { value: Float64 }
+          c = Counter{ value: 0 } @locked;
+          DO {
+            WITH EXCLUSIVE c AS inner { inner.value = inner.value + 1; },
+            WITH EXCLUSIVE c AS inner { inner.value = inner.value + 1; }
+          }
+        FLUX
+      }
+
+      it "succeeds" do
+        expect { ast }.not_to raise_error
+      end
+
+      it "annotates as Void" do
+        expect(result).to eq(:Void)
+      end
+    end
+
+    context "block branches with @writeLocked shared state" do
+      let(:code) {
+        <<~FLUX
+          STRUCT Counter { value: Float64 }
+          c = Counter{ value: 0 } @writeLocked;
+          DO {
+            WITH EXCLUSIVE c AS inner { inner.value = inner.value + 1; },
+            WITH c AS inner_r { }
+          }
+        FLUX
+      }
+
+      it "succeeds (one write branch, one read branch)" do
+        expect { ast }.not_to raise_error
+      end
+    end
+
+    context "single branch DO block" do
+      let(:code) {
+        <<~FLUX
+          FN work() RETURNS Void -> RETURN; END
+          DO {
+            work()
+          }
+        FLUX
+      }
+
+      it "succeeds and resolves to Void" do
+        expect { ast }.not_to raise_error
+        expect(result).to eq(:Void)
+      end
+    end
+
+    context "type error inside a DO branch" do
+      let(:code) {
+        <<~FLUX
+          FN add(a: Float64, b: Float64) RETURNS Float64 -> RETURN a + b; END
+          x = "not-a-number";
+          DO {
+            add(x, 1)
+          }
+        FLUX
+      }
+
+      it "propagates the type error from inside the branch" do
+        expect { ast }.to raise_error(/Type Error/i)
+      end
+    end
+  end
+
+  describe "DO block — Phase 5: @pinned branch syntax" do
+    subject(:ast) { run(code) }
+    let(:result) { ast.statements.last.full_type&.resolved }
+
+    context "@pinned branch in single-branch DO block" do
+      let(:code) {
+        <<~FLUX
+          FN work() RETURNS Void -> RETURN; END
+          DO { @pinned -> work() }
+        FLUX
+      }
+
+      it "succeeds without errors" do
+        expect { ast }.not_to raise_error
+      end
+
+      it "resolves to Void" do
+        expect(result).to eq(:Void)
+      end
+    end
+
+    context "mixed pinned and unpinned branches" do
+      let(:code) {
+        <<~FLUX
+          FN alpha() RETURNS Void -> RETURN; END
+          FN beta()  RETURNS Void -> RETURN; END
+          DO {
+            alpha(),
+            @pinned -> beta()
+          }
+        FLUX
+      }
+
+      it "succeeds without errors" do
+        expect { ast }.not_to raise_error
+      end
+
+      it "resolves to Void" do
+        expect(result).to eq(:Void)
+      end
+    end
+
+    context "all pinned branches" do
+      let(:code) {
+        <<~FLUX
+          FN a() RETURNS Void -> RETURN; END
+          FN b() RETURNS Void -> RETURN; END
+          DO {
+            @pinned -> a(),
+            @pinned -> b()
+          }
+        FLUX
+      }
+
+      it "succeeds without errors" do
+        expect { ast }.not_to raise_error
+      end
+    end
+
+    context "type error inside @pinned branch is still reported" do
+      let(:code) {
+        <<~FLUX
+          FN add(x: Float64, y: Float64) RETURNS Float64 -> RETURN x + y; END
+          bad = "not-a-number";
+          DO { @pinned -> add(bad, 1) }
+        FLUX
+      }
+
+      it "raises a Type Error" do
+        expect { ast }.to raise_error(/Type Error/i)
+      end
+    end
+
+    context "Zig output: @pinned branch emits submitSpawn (pin to local)" do
+      let(:code) {
+        <<~FLUX
+          FN work() RETURNS Void -> RETURN; END
+          DO { @pinned -> work() }
+        FLUX
+      }
+
+      it "emits submitSpawn for pinned branch" do
+        zig = ZigTranspiler.new.transpile(code)
+        expect(zig).to include("submitSpawn")
+      end
+    end
+
+    context "Zig output: unpinned branch emits spawnBest, pinned emits submitSpawn" do
+      let(:code) {
+        <<~FLUX
+          FN a() RETURNS Void -> RETURN; END
+          FN b() RETURNS Void -> RETURN; END
+          DO { a(), @pinned -> b() }
+        FLUX
+      }
+
+      it "emits both spawnBest (regular) and submitSpawn (pinned)" do
+        zig = ZigTranspiler.new.transpile(code)
+        expect(zig).to include("submitSpawn")
+        expect(zig).to include("CheatHeader.spawnBest")
+      end
+    end
+  end
+
+  describe "Auto-pinning — shared/locked captures" do
+    let(:counter_struct) { "STRUCT Counter { value: Int64 }\n" }
+
+    context "BG block capturing @locked variable" do
+      let(:code) {
+        counter_struct + <<~FLUX
+          FN f() RETURNS !Void ->
+              c = Counter{ value: 0 } @locked;
+              p: ~Void = BG { WITH EXCLUSIVE c AS inner { inner.value = inner.value + 1; } };
+              NEXT p;
+              RETURN;
+          END
+        FLUX
+      }
+
+      it "auto-pins (emits submitSpawn, not spawnBest)" do
+        zig = ZigTranspiler.new.transpile(code)
+        # The BG block should be auto-pinned: emits submitSpawn (local scheduler), not spawnBest
+        expect(zig).to include("submitSpawn")
+        expect(zig).not_to include("spawnBest")
+      end
+    end
+
+    context "BG block capturing @writeLocked variable" do
+      let(:code) {
+        counter_struct + <<~FLUX
+          FN f() RETURNS !Void ->
+              c = Counter{ value: 0 } @writeLocked;
+              p: ~Void = BG { WITH EXCLUSIVE c AS inner { inner.value = inner.value + 1; } };
+              NEXT p;
+              RETURN;
+          END
+        FLUX
+      }
+
+      it "auto-pins to scheduler (local)" do
+        zig = ZigTranspiler.new.transpile(code)
+        # Auto-pinned: emits submitSpawn (local scheduler), not spawnBest
+        expect(zig).to include("submitSpawn")
+        expect(zig).not_to include("spawnBest")
+      end
+    end
+
+    context "BG block with @parallel override on @locked capture" do
+      let(:code) {
+        counter_struct + <<~FLUX
+          FN f() RETURNS !Void ->
+              c = Counter{ value: 0 } @locked;
+              p: ~Void = BG { @parallel -> WITH EXCLUSIVE c AS inner { inner.value = inner.value + 1; } };
+              NEXT p;
+              RETURN;
+          END
+        FLUX
+      }
+
+      it "rejects unsafe @parallel dispatch for an affine locked capture" do
+        expect { ZigTranspiler.new.transpile(code) }
+          .to raise_error(RuntimeError, /BOUNDARY_CAPTURE_NOT_PARALLEL_SAFE/)
+      end
+    end
+
+    context "BG block without shared/locked captures" do
+      let(:code) {
+        <<~FLUX
+          FN f() RETURNS !Void ->
+              p: ~Float64 = BG { 42.0; };
+              r: Float64 = NEXT p;
+              RETURN;
+          END
+        FLUX
+      }
+
+      it "uses local FSM submit by default" do
+        zig = ZigTranspiler.new.transpile(code)
+        user_code = zig.split("// 3. Main Entry").first
+        # Pure-compute body becomes an FSM (Phase B1). Plain BG stays
+        # scheduler-local; explicit @parallel is the distributed path.
+        expect(user_code).to include("submitFsmSpawn")
+        expect(user_code).not_to match(/spawn(Best|FsmBest)/)
+      end
+    end
+
+    context "DO block with @locked capture in unpinned branch" do
+      let(:code) {
+        counter_struct + <<~FLUX
+          FN f() RETURNS !Void ->
+              c = Counter{ value: 0 } @locked;
+              DO { WITH EXCLUSIVE c AS inner { inner.value = inner.value + 1; } }
+              RETURN;
+          END
+        FLUX
+      }
+
+      it "auto-pins the branch (emits submitSpawn)" do
+        zig = ZigTranspiler.new.transpile(code)
+        user_code = zig.split("// 3. Main Entry").first
+        expect(user_code).to include("submitSpawn")
+      end
+    end
+
+    context "DO block with @parallel override on @locked capture" do
+      let(:code) {
+        counter_struct + <<~FLUX
+          FN f() RETURNS !Void ->
+              c = Counter{ value: 0 } @locked;
+              DO { @parallel -> WITH EXCLUSIVE c AS inner { inner.value = inner.value + 1; } }
+              RETURN;
+          END
+        FLUX
+      }
+
+      it "rejects unsafe @parallel dispatch for an affine locked capture" do
+        expect { ZigTranspiler.new.transpile(code) }
+          .to raise_error(RuntimeError, /BOUNDARY_CAPTURE_NOT_PARALLEL_SAFE/)
+      end
+    end
+
+    context "DO block with @parallel override on @shared:locked capture" do
+      let(:code) {
+        counter_struct + <<~FLUX
+          FN touch(v: Int64) RETURNS Void -> RETURN; END
+          FN f() RETURNS !Void ->
+              c = Counter{ value: 0_i64 } @shared:locked;
+              DO {
+                @parallel -> WITH EXCLUSIVE c AS inner { touch(inner.value); },
+                @parallel -> WITH EXCLUSIVE c AS inner { touch(inner.value); }
+              }
+              RETURN;
+          END
+        FLUX
+      }
+
+      it "preserves shared ownership in MIR boundary facts" do
+        expect { ZigTranspiler.new.transpile(code) }.not_to raise_error
+      end
+    end
+  end
+
+  describe "@local capability" do
+    let(:counter_struct) { "STRUCT Counter { value: Int64 }\n" }
+
+    context "type predicates" do
+      it "local? returns true for @local type" do
+        t = Type.new(:Counter, sync: :local)
+        expect(t.local?).to be true
+        expect(t.locked?).to be false
+        expect(t.any_sync?).to be true
+      end
+
+      it "zig_type returns *Counter for @local" do
+        t = Type.new(:Counter, sync: :local)
+        expect(t.zig_type).to eq("*Counter")
+      end
+
+      it "requires_move? returns false for @local" do
+        t = Type.new(:Counter, sync: :local)
+        expect(t.requires_move?).to be false
+      end
+    end
+
+    context "transpiler" do
+      it "emits localCreate for @local" do
+        code = counter_struct + "FN f() RETURNS !Void -> c = Counter{ value: 0 } @local; RETURN; END"
+        zig = ZigTranspiler.new.transpile(code)
+        expect(zig).to include("CheatLib.localCreate(Counter")
+      end
+
+      it "emits const (not var) for @local binding" do
+        code = counter_struct + "FN f() RETURNS !Void -> MUTABLE c = Counter{ value: 0 } @local; RETURN; END"
+        zig = ZigTranspiler.new.transpile(code)
+        expect(zig).to include("const c =")
+        expect(zig).not_to include("var c =")
+      end
+
+      it "BG capturing @local emits submitSpawn (same-scheduler, not round-robin)" do
+        code = counter_struct + <<~FLUX
+          FN f() RETURNS !Void ->
+              MUTABLE c = Counter{ value: 0 } @local;
+              p: ~Void = BG { c.value = 1; };
+              NEXT p;
+              RETURN;
+          END
+        FLUX
+        zig = ZigTranspiler.new.transpile(code)
+        user_code = zig.split("// 3. Main Entry").first
+        # @local fibers must stay on the caller's scheduler - no synchronization.
+        # Pure-compute body is Phase-B1 FSM-eligible, so dispatch is via
+        # submitFsmSpawn (same-scheduler FSM queue) rather than submitSpawn.
+        expect(user_code).to match(/submit(Spawn|FsmSpawn)/)
+        expect(user_code).not_to include("spawnPinned")
+        expect(user_code).not_to include("spawnBest(")
+        expect(user_code).not_to include("spawnFsmBest(")
+      end
+    end
+
+    context "@parallel + @local = compile error" do
+      it "raises error when @parallel BG captures @local" do
+        code = counter_struct + <<~FLUX
+          FN f() RETURNS !Void ->
+              MUTABLE c = Counter{ value: 0 } @local;
+              p: ~Void = BG { @parallel -> c.value = 1; };
+              NEXT p;
+              RETURN;
+          END
+        FLUX
+        expect { run(code) }.to raise_error(CompilerError, /@local.*@parallel/)
+      end
+    end
+
+    context "primitive types cannot have capabilities" do
+      it "raises error when @local is used on a number literal" do
+        code = "FN f() RETURNS !Void -> x = 10 @local; RETURN; END"
+        expect { run(code) }.to raise_error(CompilerError, /Capability @local cannot be applied to primitive type/)
+      end
+
+      it "raises error when @locked is used on a number literal" do
+        code = "FN f() RETURNS !Void -> x = 10 @locked; RETURN; END"
+        expect { run(code) }.to raise_error(CompilerError, /Capability @locked cannot be applied to primitive type/)
+      end
+
+      it "raises error when @indirect is used on a number literal" do
+        code = "FN f() RETURNS !Void -> x = 42 @indirect; RETURN; END"
+        expect { run(code) }.to raise_error(CompilerError, /Capability @indirect cannot be applied to primitive type/)
+      end
+    end
+  end
+
+  describe "BG/DO capture safety — thread-safety enforcement" do
+    let(:counter_struct) { "STRUCT Counter { value: Int64 }\n" }
+    let(:noop_fn) { "FN noop() RETURNS Void -> RETURN; END\n" }
+
+    # --- @multiowned (Rc) safety ---
+
+    context "BG capturing @multiowned without @parallel" do
+      let(:code) {
+        counter_struct + noop_fn + <<~FLUX
+          FN f() RETURNS !Void ->
+              c = Counter{ value: 0 } @multiowned;
+              p: ~Void = BG { noop(); };
+              NEXT p;
+              RETURN;
+          END
+        FLUX
+      }
+
+      it "compiles without error" do
+        expect { run(code) }.not_to raise_error
+      end
+    end
+
+    context "BG @parallel + @multiowned (direct identifier reference)" do
+      let(:code) {
+        counter_struct + <<~FLUX
+          FN useRc(c: Counter) RETURNS Void -> RETURN; END
+          FN f() RETURNS !Void ->
+              c = Counter{ value: 0 } @multiowned;
+              p: ~Void = BG { @parallel -> useRc(c); };
+              NEXT p;
+              RETURN;
+          END
+        FLUX
+      }
+
+      it "raises compile error (Rc is not thread-safe)" do
+        expect { run(code) }.to raise_error(CompilerError, /multiowned.*Rc.*non-atomic/)
+      end
+    end
+
+    context "DO @parallel + @multiowned (direct identifier reference)" do
+      let(:code) {
+        counter_struct + <<~FLUX
+          FN useRc(c: Counter) RETURNS Void -> RETURN; END
+          FN f() RETURNS !Void ->
+              c = Counter{ value: 0 } @multiowned;
+              DO { @parallel -> useRc(c) }
+              RETURN;
+          END
+        FLUX
+      }
+
+      it "raises compile error (Rc is not thread-safe)" do
+        expect { run(code) }.to raise_error(CompilerError, /multiowned.*Rc.*non-atomic/)
+      end
+    end
+
+    context "@parallel + @multiowned nested in an ordinary aggregate" do
+      let(:code) {
+        <<~FLUX
+          STRUCT Item { value: Int64 }
+          STRUCT Holder { item: Item@multiowned }
+          FN useHolder(holder: Holder) RETURNS Void -> RETURN; END
+          FN f() RETURNS !Void ->
+              item = Item{ value: 7 } @multiowned;
+              holder = Holder{ item: item };
+              p: ~Void = BG { @parallel -> useHolder(holder); };
+              NEXT p;
+              RETURN;
+          END
+        FLUX
+      }
+
+      it "rejects the recursively contained non-atomic Rc" do
+        expect { run(code) }.to raise_error(CompilerError, /parallel.*non_atomic_rc|parallel.*non-atomic/i)
+      end
+    end
+
+    # --- @local safety ---
+
+    context "BG @parallel + @local" do
+      let(:code) {
+        counter_struct + <<~FLUX
+          FN f() RETURNS !Void ->
+              MUTABLE c = Counter{ value: 0 } @local;
+              p: ~Void = BG { @parallel -> c.value = 1; };
+              NEXT p;
+              RETURN;
+          END
+        FLUX
+      }
+
+      it "raises compile error (@local has no sync)" do
+        expect { run(code) }.to raise_error(CompilerError, /@local.*@parallel/)
+      end
+    end
+
+    # --- @shared (Arc) — thread-safe, @parallel is allowed ---
+
+    context "BG @parallel + @shared (no WITH needed — just reference)" do
+      let(:code) {
+        counter_struct + <<~FLUX
+          FN useArc(c: Counter) RETURNS Void -> RETURN; END
+          FN f() RETURNS !Void ->
+              c = Counter{ value: 0 } @shared;
+              p: ~Void = BG { @parallel -> useArc(c); };
+              NEXT p;
+              RETURN;
+          END
+        FLUX
+      }
+
+      it "allows @parallel (Arc is thread-safe)" do
+        expect { run(code) }.not_to raise_error
+      end
+    end
+
+    # --- @locked — thread-safe, @parallel is allowed ---
+
+    context "BG @parallel + @locked (no WITH needed — just reference)" do
+      let(:code) {
+        counter_struct + <<~FLUX
+          FN useLocked(c: Counter) RETURNS Void -> RETURN; END
+          FN f() RETURNS !Void ->
+              c = Counter{ value: 0 } @locked;
+              p: ~Void = BG { @parallel -> useLocked(c); };
+              NEXT p;
+              RETURN;
+          END
+        FLUX
+      }
+
+      it "allows @parallel (Mutex is thread-safe)" do
+        expect { run(code) }.not_to raise_error
+      end
+    end
+
+    # --- Plain affine type — moved into BG, not shared ---
+
+    context "BG capturing affine struct" do
+      let(:code) {
+        counter_struct + <<~FLUX
+          FN f() RETURNS !Void ->
+              c = Counter{ value: 0 };
+              p: ~Void = BG { print(c.value); };
+              NEXT p;
+              RETURN;
+          END
+        FLUX
+      }
+
+      it "moves the struct (outer scope loses access)" do
+        expect { run(code) }.not_to raise_error
+      end
+    end
+
+    # --- Primitives — always safe (value copy) ---
+
+    context "BG capturing primitive Int64" do
+      let(:code) {
+        <<~FLUX
+          FN f() RETURNS !Void ->
+              x: Int64 = 42;
+              p: ~Int64 = BG { x; };
+              r: Int64 = NEXT p;
+              RETURN;
+          END
+        FLUX
+      }
+
+      it "copies the value (no move, no pinning needed)" do
+        expect { run(code) }.not_to raise_error
+      end
+    end
+  end
+
+  describe "DO block — stack size prefix syntax" do
+    subject(:ast) { run(code) }
+    let(:preamble) { "FN work() RETURNS Void -> RETURN; END\n" }
+
+    context "bare @micro -> branch" do
+      let(:code) { preamble + "DO { @micro -> work() }" }
+
+      it "parses without error" do
+        expect { ast }.not_to raise_error
+      end
+
+      it "sets stack_size :micro on the branch" do
+        branch = ast.statements.last.branches.first
+        expect(branch).to be_a(AST::DoBranch)
+        expect(branch.stack_size).to eq(:micro)
+        expect(branch.pinned).to eq(false)
+      end
+    end
+
+    context "bare @large -> branch" do
+      let(:code) { preamble + "DO { @large -> work() }" }
+
+      it "sets stack_size :large on the branch" do
+        expect(ast.statements.last.branches.first.stack_size).to eq(:large)
+      end
+    end
+
+    context "bare @xl -> branch" do
+      let(:code) { preamble + "DO { @xl -> work() }" }
+
+      it "sets stack_size :xl on the branch" do
+        expect(ast.statements.last.branches.first.stack_size).to eq(:xl)
+      end
+    end
+
+    context "bare @standard -> branch" do
+      let(:code) { preamble + "DO { @standard -> work() }" }
+
+      it "sets stack_size :standard on the branch" do
+        expect(ast.statements.last.branches.first.stack_size).to eq(:standard)
+      end
+    end
+
+    context "no prefix — branch defaults to nil stack_size" do
+      let(:code) { preamble + "DO { work() }" }
+
+      it "leaves stack_size nil" do
+        expect(ast.statements.last.branches.first.stack_size).to be_nil
+      end
+    end
+
+    context "@micro:pinned join (size first)" do
+      let(:code) { preamble + "DO { @micro:pinned -> work() }" }
+
+      it "sets both stack_size :micro and pinned true" do
+        branch = ast.statements.last.branches.first
+        expect(branch.stack_size).to eq(:micro)
+        expect(branch.pinned).to eq(true)
+      end
+    end
+
+    context "@pinned:large join (pin first)" do
+      let(:code) { preamble + "DO { @pinned:large -> work() }" }
+
+      it "sets both pinned true and stack_size :large (order-independent)" do
+        branch = ast.statements.last.branches.first
+        expect(branch.stack_size).to eq(:large)
+        expect(branch.pinned).to eq(true)
+      end
+    end
+
+    context "mixed branches with different sizes" do
+      let(:code) {
+        preamble +
+        "FN heavy() RETURNS Void -> RETURN; END\n" \
+        "DO { @micro -> work(), @large -> heavy(), work() }"
+      }
+
+      it "assigns the right sizes to each branch" do
+        branches = ast.statements.last.branches
+        expect(branches[0].stack_size).to eq(:micro)
+        expect(branches[1].stack_size).to eq(:large)
+        expect(branches[2].stack_size).to be_nil
+      end
+    end
+
+    context "Zig output: DO @micro branch emits .Micro task config" do
+      let(:code) { preamble + "DO { @micro -> work() }" }
+
+      it "emits .stack_size = .Micro in submitSpawn" do
+        zig = ZigTranspiler.new.transpile(code)
+        expect(zig).to include(".stack_size = .Micro")
+      end
+    end
+
+    context "Zig output: DO @stack branch emits computed stack tier exactly" do
+      let(:code) { preamble + "DO { @stack -> work() }" }
+
+      it "emits .Micro rather than the default .Standard" do
+        zig = ZigTranspiler.new.transpile(code)
+        expect(zig).to include(".stack_size = .Micro")
+      end
+    end
+
+    context "Zig output: DO @large branch emits .Large task config" do
+      let(:code) { preamble + "DO { @large -> work() }" }
+
+      it "emits .stack_size = .Large in submitSpawn" do
+        zig = ZigTranspiler.new.transpile(code)
+        expect(zig).to include(".stack_size = .Large")
+      end
+    end
+
+    context "Zig output: DO no-prefix branch uses auto-sized tier" do
+      let(:code) { preamble + "DO { work() }" }
+
+      it "emits a stack_size tier from call-graph analysis" do
+        zig = ZigTranspiler.new.transpile(code)
+        expect(zig).to match(/\.stack_size = \.(Micro|Standard|Large|Xl)/)
+      end
+    end
+
+    context "Zig output: @xl:pinned emits .Xl in submitSpawn (pinned to local)" do
+      let(:code) { preamble + "DO { @xl:pinned -> work() }" }
+
+      it "emits submitSpawn with .stack_size = .Xl" do
+        zig = ZigTranspiler.new.transpile(code)
+        expect(zig).to include("submitSpawn")
+        expect(zig).to include(".stack_size = .Xl")
+      end
+    end
+  end
+
+  describe "BG block — stack size prefix syntax" do
+    subject(:ast) { run(code) }
+    let(:work_fn) { "FN work() RETURNS Void -> RETURN; END\n" }
+
+    context "BG { @micro -> expr; }" do
+      let(:code) { work_fn + "FN f() RETURNS !Void -> p: ~Void = BG { @micro -> work(); }; NEXT p; RETURN; END" }
+
+      it "parses without error" do
+        expect { ast }.not_to raise_error
+      end
+
+      it "sets stack_size :micro on the BgBlock" do
+        fn   = ast.statements.last
+        bg   = fn.body.first.value
+        expect(bg).to be_a(AST::BgBlock)
+        expect(bg.stack_size).to eq(:micro)
+      end
+    end
+
+    context "BG { @stack -> expr; }" do
+      let(:code) { work_fn + "FN f() RETURNS !Void -> p: ~Void = BG { @stack -> work(); }; NEXT p; RETURN; END" }
+
+      it "sets stack_size :stack on the BgBlock" do
+        fn = ast.statements.last
+        bg = fn.body.first.value
+        expect(bg.stack_size).to eq(:stack)
+      end
+    end
+
+    context "BG { @large -> expr; }" do
+      let(:code) { work_fn + "FN f() RETURNS !Void -> p: ~Void = BG { @large -> work(); }; NEXT p; RETURN; END" }
+
+      it "sets stack_size :large on the BgBlock" do
+        fn = ast.statements.last
+        bg = fn.body.first.value
+        expect(bg.stack_size).to eq(:large)
+      end
+    end
+
+    context "BG { expr; } with no prefix" do
+      let(:code) { work_fn + "FN f() RETURNS !Void -> p: ~Void = BG { work(); }; NEXT p; RETURN; END" }
+
+      it "leaves stack_size nil" do
+        fn = ast.statements.last
+        bg = fn.body.first.value
+        expect(bg.stack_size).to be_nil
+      end
+    end
+
+    context "BG with @xl prefix" do
+      let(:code) {
+        "FN add(x: Float64, y: Float64) RETURNS Float64 -> RETURN x + y; END\n" \
+        "FN f() RETURNS !Void -> p: ~Float64 = BG { @xl -> add(1.0, 2.0); }; r: Float64 = NEXT p; RETURN; END"
+      }
+
+      it "parses and type-checks correctly" do
+        expect { ast }.not_to raise_error
+      end
+
+      it "sets stack_size :xl on the BgBlock" do
+        fn = ast.statements.last
+        bg = fn.body.first.value
+        expect(bg.stack_size).to eq(:xl)
+      end
+    end
+
+    context "Zig output: BG @micro emits .Micro task config" do
+      let(:code) { work_fn + "FN f() RETURNS !Void -> p: ~Void = BG { @micro -> work(); }; NEXT p; RETURN; END" }
+
+      it "emits .stack_size = .Micro in submitSpawn" do
+        zig = ZigTranspiler.new.transpile(code)
+        expect(zig).to include(".stack_size = .Micro")
+      end
+    end
+
+    context "Zig output: BG @stack emits computed stack tier exactly" do
+      let(:code) { work_fn + "FN f() RETURNS !Void -> p: ~Void = BG { @stack -> work(); }; NEXT p; RETURN; END" }
+
+      it "emits .Micro rather than the default .Standard" do
+        zig = ZigTranspiler.new.transpile(code)
+        expect(zig).to include(".stack_size = .Micro")
+        expect(zig).not_to include("FsmTask")
+      end
+    end
+
+    context "Zig output: BG no prefix uses auto-sized tier" do
+      let(:code) { work_fn + "FN f() RETURNS !Void -> p: ~Void = BG { work(); }; NEXT p; RETURN; END" }
+
+      it "emits a stack_size tier from call-graph analysis" do
+        zig = ZigTranspiler.new.transpile(code)
+        expect(zig).to match(/\.stack_size = \.(Micro|Standard|Large|Xl)/)
+      end
+    end
+  end
+
+  describe "CONCURRENT — size option parsing" do
+    subject(:ast) { run(code) }
+    let(:preamble) {
+      "FN double(x: Float64) RETURNS Float64 -> RETURN x * 2.0; END\n"
+    }
+
+    context "CONCURRENT(size: LARGE) SELECT" do
+      let(:code) {
+        preamble +
+        "FN f() RETURNS !Void -> items: Float64[] = [1.0, 2.0]; " \
+        "r = items |> CONCURRENT(size: LARGE) SELECT double(_); RETURN; END"
+      }
+
+      it "parses without error" do
+        expect { ast }.not_to raise_error
+      end
+
+      it "captures size option as an Identifier node" do
+        fn   = ast.statements.last
+        # r = items |> CONCURRENT(...) SELECT ...
+        # fn.body[0] = items decl, fn.body[1] = r bind (BinaryOp SMOOTH on RHS)
+        pipe = fn.body[1].value        # BinaryOp(:SMOOTH, items, ConcurrentOp)
+        conc = pipe.right              # ConcurrentOp
+        expect(conc).to be_a(AST::ConcurrentOp)
+        size_node = conc.options["size"]
+        expect(size_node).to be_a(AST::Identifier)
+        expect(size_node.name).to eq("LARGE")
+      end
+    end
+
+    context "CONCURRENT(workers: 4, size: MICRO) WHERE" do
+      let(:code) {
+        preamble +
+        "FN big(x: Float64) RETURNS Bool -> RETURN x > 1.0; END\n" \
+        "FN f() RETURNS !Void -> items: Float64[] = [1.0, 2.0]; " \
+        "r = items |> CONCURRENT(workers: 4, size: MICRO) WHERE big(_); RETURN; END"
+      }
+
+      it "parses both workers and size options" do
+        fn   = ast.statements.last
+        pipe = fn.body[1].value        # BinaryOp(:SMOOTH, items, ConcurrentOp)
+        conc = pipe.right
+        expect(conc).to be_a(AST::ConcurrentOp)
+        expect(conc.options["workers"]).to be_a(AST::Literal)
+        size_node = conc.options["size"]
+        expect(size_node).to be_a(AST::Identifier)
+        expect(size_node.name).to eq("MICRO")
+      end
+    end
+
+    context "CONCURRENT(workers: 4, batch: 8) WHERE" do
+      let(:code) {
+        preamble +
+        "FN big(x: Float64) RETURNS Bool -> RETURN x > 1.0; END\n" \
+        "FN f() RETURNS !Void -> items: Float64[] = [1.0, 2.0]; " \
+        "r = items |> CONCURRENT(workers: 4, batch: 8) WHERE big(_); RETURN; END"
+      }
+
+      it "parses workers and batch options" do
+        fn   = ast.statements.last
+        pipe = fn.body[1].value
+        conc = pipe.right
+        expect(conc).to be_a(AST::ConcurrentOp)
+        expect(conc.options["workers"]).to be_a(AST::Literal)
+        expect(conc.options["batch"]).to be_a(AST::Literal)
+      end
+    end
+
+    context "CONCURRENT(size: STANDARD) EACH" do
+      let(:code) {
+        preamble +
+        "FN f() RETURNS !Void -> items: Float64[] = [1.0]; " \
+        "items |> CONCURRENT(size: STANDARD) EACH { double(_); }; RETURN; END"
+      }
+
+      it "accepts STANDARD as a valid size" do
+        expect { ast }.not_to raise_error
+      end
+    end
+
+    context "CONCURRENT(size: XL) SELECT" do
+      let(:code) {
+        preamble +
+        "FN f() RETURNS !Void -> items: Float64[] = [1.0]; " \
+        "r = items |> CONCURRENT(size: XL) SELECT double(_); RETURN; END"
+      }
+
+      it "accepts XL as a valid size" do
+        expect { ast }.not_to raise_error
+      end
+    end
+
+    context "CONCURRENT(size: HUGE) — invalid size" do
+      let(:code) {
+        preamble +
+        "FN f() RETURNS !Void -> items: Float64[] = [1.0]; " \
+        "r = items |> CONCURRENT(size: HUGE) SELECT double(_); RETURN; END"
+      }
+
+      it "raises a Compiler Error" do
+        expect { ast }.to raise_error(/CONCURRENT size must be one of/i)
+      end
+    end
+
+    context "Zig output: CONCURRENT(size: MICRO) emits .Micro task config" do
+      let(:code) {
+        preamble +
+        "FN f() RETURNS !Void -> items: Float64[] = [1.0, 2.0]; " \
+        "r = items |> CONCURRENT(size: MICRO) SELECT double(_); RETURN; END"
+      }
+
+      it "emits .stack_size = .Micro in each spawned fiber" do
+        zig = ZigTranspiler.new.transpile(code)
+        expect(zig).to include(".stack_size = .Micro")
+      end
+    end
+
+    context "Zig output: CONCURRENT with no size emits .Standard" do
+      let(:code) {
+        preamble +
+        "FN f() RETURNS !Void -> items: Float64[] = [1.0, 2.0]; " \
+        "r = items |> CONCURRENT SELECT double(_); RETURN; END"
+      }
+
+      it "emits .stack_size = .Standard (the default)" do
+        zig = ZigTranspiler.new.transpile(code)
+        expect(zig).to include(".stack_size = .Standard")
+      end
+    end
+
+    context "Zig output: default_stack Large upgrades unsized CONCURRENT" do
+      let(:code) {
+        preamble +
+        "FN f() RETURNS !Void -> items: Float64[] = [1.0, 2.0]; " \
+        "r = items |> CONCURRENT SELECT double(_); RETURN; END"
+      }
+
+      it "emits .stack_size = .Large" do
+        zig = ZigTranspiler.new.transpile(code, default_stack: "Large")
+        expect(zig).to include(".stack_size = .Large")
+      end
+    end
+
+    context "Zig output: CONCURRENT(size: LARGE) WHERE emits .Large" do
+      let(:code) {
+        preamble +
+        "FN big(x: Float64) RETURNS Bool -> RETURN x > 1.0; END\n" \
+        "FN f() RETURNS !Void -> items: Float64[] = [1.0, 2.0]; " \
+        "r = items |> CONCURRENT(size: LARGE) WHERE big(_); RETURN; END"
+      }
+
+      it "emits .stack_size = .Large" do
+        zig = ZigTranspiler.new.transpile(code)
+        expect(zig).to include(".stack_size = .Large")
+      end
+    end
+  end
+
+  # ===========================================================================
+  # CONCURRENT modifier — parallel SELECT, WHERE, EACH
+  # ===========================================================================
+  describe "CONCURRENT modifier (parallel pipeline operator)" do
+    def transpile_fn(src)
+      ZigTranspiler.new.transpile(src)
+    end
+
+    # -------------------------------------------------------------------------
+    # Type resolution
+    # -------------------------------------------------------------------------
+    it "CONCURRENT SELECT resolves to element_type[]" do
+      tree = run(<<~CLEAR)
+        FN double(x: Float64) RETURNS Float64 ->
+          RETURN x * 2.0;
+        END
+        FN f() RETURNS !Void ->
+          items: Float64[] = [1.0, 2.0, 3.0];
+          results = items |> CONCURRENT SELECT double(_);
+          RETURN;
+        END
+      CLEAR
+      fn_node = tree.statements.find { |n| n.is_a?(AST::FunctionDef) && n.name == "f" }
+      bind = fn_node.body.find { |n| n.is_a?(AST::BindExpr) && n.name == "results" }
+      expect(bind.resolved_type).to eq(:"Float64[]")
+    end
+
+    it "CONCURRENT WHERE resolves to item_type[]" do
+      tree = run(<<~CLEAR)
+        STRUCT Item { value: Float64 }
+        FN f() RETURNS !Void ->
+          items: Item[] = [];
+          evens = items |> CONCURRENT WHERE _.value > 0.0;
+          RETURN;
+        END
+      CLEAR
+      fn_node = tree.statements.find { |n| n.is_a?(AST::FunctionDef) && n.name == "f" }
+      bind = fn_node.body.find { |n| n.is_a?(AST::BindExpr) && n.name == "evens" }
+      expect(bind.resolved_type).to eq(:"Item[]")
+    end
+
+    it "CONCURRENT EACH resolves to Void" do
+      tree = run(<<~CLEAR)
+        STRUCT Score { value: Float64 }
+        FN f() RETURNS !Void ->
+          items: Score[] = [];
+          items |> CONCURRENT EACH { _.value = 0.0; };
+          RETURN;
+        END
+      CLEAR
+      fn_node = tree.statements.find { |n| n.is_a?(AST::FunctionDef) && n.name == "f" }
+      # The EACH pipeline is a BinaryOp with SMOOTH operator at top level
+      smooth = fn_node.body.find { |n| n.is_a?(AST::BinaryOp) && n.op == :SMOOTH }
+      expect(smooth.resolved_type).to eq(:Void)
+    end
+
+    it "CONCURRENT(workers: N) SELECT accepts numeric workers" do
+      expect {
+        run(<<~CLEAR)
+          FN f() RETURNS !Void ->
+            items: Float64[] = [1.0, 2.0];
+            results = items |> CONCURRENT(workers: 4) SELECT _ * 2.0;
+            RETURN;
+          END
+        CLEAR
+      }.not_to raise_error
+    end
+
+    # -------------------------------------------------------------------------
+    # Error cases
+    # -------------------------------------------------------------------------
+    it "raises an error when CONCURRENT SELECT is applied to a non-array" do
+      expect {
+        run(<<~CLEAR)
+          FN f() RETURNS !Void ->
+            x: Float64 = 42.0;
+            r = x |> CONCURRENT SELECT _ * 2.0;
+            RETURN;
+          END
+        CLEAR
+      }.to raise_error(CompilerError, /Cannot SELECT from non-list type/)
+    end
+
+    it "raises an error when CONCURRENT WHERE predicate is non-Bool" do
+      expect {
+        run(<<~CLEAR)
+          FN f() RETURNS !Void ->
+            items: Float64[] = [1.0, 2.0];
+            r = items |> CONCURRENT WHERE _ * 2.0;
+            RETURN;
+          END
+        CLEAR
+      }.to raise_error(CompilerError, /WHERE clause must evaluate to Bool/)
+    end
+
+    # -------------------------------------------------------------------------
+    # Zig output
+    # -------------------------------------------------------------------------
+    it "CONCURRENT SELECT routes through the list runtime helper" do
+      out = transpile_fn(<<~CLEAR)
+        FN f() RETURNS !Void ->
+          items: Float64[] = [1.0, 2.0, 3.0];
+          results = items |> CONCURRENT(workers: 3) SELECT _ * 2.0;
+          RETURN;
+        END
+      CLEAR
+      expect(out).to include("CheatLib.concurrentListSelect")
+      expect(out).to include("@intCast(3)")
+      expect(out).to include("return (__item * 2.0)")
+      expect(out).not_to include("Semaphore") # no semaphore in worker pool
+    end
+
+    it "CONCURRENT WHERE routes through the list runtime helper" do
+      out = transpile_fn(<<~CLEAR)
+        FN f() RETURNS !Void ->
+          items: Float64[] = [1.0, 2.0, 3.0];
+          evens = items |> CONCURRENT WHERE _ > 1.0;
+          RETURN;
+        END
+      CLEAR
+      expect(out).to include("CheatLib.concurrentListWhere")
+      expect(out).to include("@intCast(CheatLib.threadCount())")
+      expect(out).to include("return (__item > 1.0)")
+      expect(out).not_to include("Semaphore")
+    end
+
+    it "CONCURRENT EACH routes through the list runtime helper" do
+      out = transpile_fn(<<~CLEAR)
+        STRUCT Score { value: Float64 }
+        FN f() RETURNS !Void ->
+          items: Score[] = [];
+          items |> CONCURRENT(workers: 2) EACH { _.value = 0.0; };
+          RETURN;
+        END
+      CLEAR
+      expect(out).to include("CheatLib.concurrentListEachInPlace")
+      expect(out).to include("@intCast(2)")
+      expect(out).not_to include("Semaphore")
+    end
+
+    it "CONCURRENT SELECT uses threadCount as default workers when omitted" do
+      out = transpile_fn(<<~CLEAR)
+        FN f() RETURNS !Void ->
+          items: Float64[] = [1.0, 2.0];
+          results = items |> CONCURRENT SELECT _ * 2.0;
+          RETURN;
+        END
+      CLEAR
+      expect(out).to include("@intCast(CheatLib.threadCount())")
+    end
+
+    it "CONCURRENT SELECT fn OR_ELSE PRUNE — expression type is unwrapped T (not !T)" do
+      src = <<~CLEAR
+        FN mayFail(x: Float64) RETURNS !Float64 ->
+          RETURN x * 2.0;
+        END
+        FN f() RETURNS !Void ->
+          items: Float64[] = [1.0, 2.0];
+          results = items |> CONCURRENT(workers: 2) SELECT mayFail(_) OR_ELSE PRUNE;
+          RETURN;
+        END
+      CLEAR
+      # Should not raise; resolved type is Float64[] not !Float64[]
+      expect { transpile_fn(src) }.not_to raise_error
+      out = transpile_fn(src)
+      expect(out).to include("CheatLib.concurrentListSelect")
+      expect(out).to include("f64")
+    end
+
+    it "CONCURRENT SELECT fn OR_ELSE RAISE — expression type is unwrapped T" do
+      src = <<~CLEAR
+        FN mayFail(x: Float64) RETURNS !Float64 ->
+          RETURN x * 2.0;
+        END
+        FN f() RETURNS !Void ->
+          items: Float64[] = [1.0, 2.0];
+          results = items |> CONCURRENT(workers: 2) SELECT mayFail(_) OR_ELSE RAISE;
+          RETURN;
+        END
+      CLEAR
+      expect { transpile_fn(src) }.not_to raise_error
+      out = transpile_fn(src)
+      expect(out).to include("CheatLib.concurrentListSelect")
+      expect(out).to include("f64")
+    end
+
+    it "CONCURRENT default requests local scheduler dispatch" do
+      out = transpile_fn(<<~CLEAR)
+        FN f() RETURNS !Void ->
+          items: Float64[] = [1.0, 2.0, 3.0];
+          results = items |> CONCURRENT(workers: 2) SELECT _ * 2.0;
+          RETURN;
+        END
+      CLEAR
+      user_code = out.split("// 3. Main Entry").first
+      expect(user_code).to include(", false, .{ .stack_size = .Standard }")
+    end
+
+    it "CONCURRENT(parallel: TRUE) requests spawnBest dispatch" do
+      out = transpile_fn(<<~CLEAR)
+        FN f() RETURNS !Void ->
+          items: Float64[] = [1.0, 2.0, 3.0];
+          results = items |> CONCURRENT(workers: 2, parallel: TRUE) SELECT _ * 2.0;
+          RETURN;
+        END
+      CLEAR
+      user_code = out.split("// 3. Main Entry").first
+      expect(user_code).to include(", true, .{ .stack_size = .Standard }")
+    end
+
+    it "CONCURRENT SELECT fn OR_ELSE PRUNE emits catch |_| return in fiber body" do
+      src = <<~CLEAR
+        FN mayFail(x: Float64) RETURNS !Float64 ->
+          RETURN x * 2.0;
+        END
+        FN f() RETURNS !Void ->
+          items: Float64[] = [1.0, 2.0];
+          results = items |> CONCURRENT(workers: 2) SELECT mayFail(_) OR_ELSE PRUNE;
+          RETURN;
+        END
+      CLEAR
+      out = transpile_fn(src)
+      expect(out).to include("catch return")
+    end
+
+    it "CONCURRENT SELECT fn OR_ELSE RAISE leaves error propagation to the runtime helper" do
+      src = <<~CLEAR
+        FN mayFail(x: Float64) RETURNS !Float64 ->
+          RETURN x * 2.0;
+        END
+        FN f() RETURNS !Void ->
+          items: Float64[] = [1.0, 2.0];
+          results = items |> CONCURRENT(workers: 2) SELECT mayFail(_) OR_ELSE RAISE;
+          RETURN;
+        END
+      CLEAR
+      out = transpile_fn(src)
+      expect(out).to include("CheatLib.concurrentListSelect")
+      expect(out).to include("return mayFail(__item)")
+    end
+
+    # -------------------------------------------------------------------------
+    # CONCURRENT option validation
+    # -------------------------------------------------------------------------
+    context "CONCURRENT option validation" do
+      it "rejects workers of 0" do
+        code = <<~CLEAR
+          FN main() RETURNS Void ->
+            nums: Float64[] = [1.0, 2.0];
+            result = nums |> CONCURRENT(workers: 0) SELECT _ * 2.0;
+            RETURN;
+          END
+        CLEAR
+        expect { run(code) }.to raise_error(/workers must be greater than 0/)
+      end
+
+      it "rejects negative workers" do
+        code = <<~CLEAR
+          FN main() RETURNS Void ->
+            nums: Float64[] = [1.0];
+            result = nums |> CONCURRENT(workers: -1) SELECT _ * 2.0;
+            RETURN;
+          END
+        CLEAR
+        expect { run(code) }.to raise_error(/workers must be greater than 0/)
+      end
+
+      it "rejects unknown options" do
+        code = <<~CLEAR
+          FN main() RETURNS Void ->
+            nums: Float64[] = [1.0];
+            result = nums |> CONCURRENT(invalid_opt: 4) SELECT _ * 2.0;
+            RETURN;
+          END
+        CLEAR
+        expect { run(code) }.to raise_error(/Unknown CONCURRENT option/)
+      end
+
+      it "rejects capacity for direct collection sources" do
+        code = <<~CLEAR
+          FN main() RETURNS Void ->
+            nums: Float64[] = [1.0, 2.0];
+            result = nums |> CONCURRENT(workers: 2, capacity: 8) SELECT _ * 2.0;
+            RETURN;
+          END
+        CLEAR
+        expect { run(code) }.to raise_error(/capacity only applies to stream or sharded sources.*batch: N/)
+      end
+
+      it "rejects batch of 0" do
+        code = <<~CLEAR
+          FN main() RETURNS Void ->
+            nums: Float64[] = [1.0, 2.0];
+            result = nums |> CONCURRENT(workers: 2, batch: 0) SELECT _ * 2.0;
+            RETURN;
+          END
+        CLEAR
+        expect { run(code) }.to raise_error(/batch must be greater than 0/)
+      end
+
+      it "rejects negative batch values" do
+        code = <<~CLEAR
+          FN main() RETURNS Void ->
+            nums: Float64[] = [1.0, 2.0];
+            result = nums |> CONCURRENT(workers: 2, batch: -1) SELECT _ * 2.0;
+            RETURN;
+          END
+        CLEAR
+        expect { run(code) }.to raise_error(/batch must be greater than 0/)
+      end
+
+      it "rejects non-number batch values" do
+        code = <<~CLEAR
+          FN main() RETURNS Void ->
+            nums: Float64[] = [1.0, 2.0];
+            result = nums |> CONCURRENT(workers: 2, batch: TRUE) SELECT _ * 2.0;
+            RETURN;
+          END
+        CLEAR
+        expect { run(code) }.to raise_error(/batch must be a number/)
+      end
+
+      it "rejects non-Bool pin value" do
+        code = <<~CLEAR
+          FN main() RETURNS Void ->
+            nums: Float64[] = [1.0];
+            result = nums |> CONCURRENT(workers: 4, parallel: 1) SELECT _ * 2.0;
+            RETURN;
+          END
+        CLEAR
+        expect { run(code) }.to raise_error(/parallel must be a Bool/)
+      end
+    end
+
+    # -------------------------------------------------------------------------
+    # CONCURRENT OR_ELSE PRUNE / OR_ELSE RAISE validation
+    # -------------------------------------------------------------------------
+    context "CONCURRENT OR_ELSE PRUNE / OR_ELSE RAISE validation" do
+      it "rejects OR_ELSE PRUNE when expression is not error-returning" do
+        code = <<~CLEAR
+          FN double(x: Float64) RETURNS Float64 ->
+            RETURN x * 2.0;
+          END
+          FN main() RETURNS Void ->
+            nums: Float64[] = [1.0, 2.0];
+            result = nums |> CONCURRENT SELECT double(_) OR_ELSE PRUNE;
+            RETURN;
+          END
+        CLEAR
+        expect { run(code) }.to raise_error(/OR_ELSE PRUNE requires the expression to return an error union/)
+      end
+
+      it "rejects OR_ELSE RAISE when expression is not error-returning" do
+        code = <<~CLEAR
+          FN double(x: Float64) RETURNS Float64 ->
+            RETURN x * 2.0;
+          END
+          FN main() RETURNS Void ->
+            nums: Float64[] = [1.0, 2.0];
+            result = nums |> CONCURRENT SELECT double(_) OR_ELSE RAISE;
+            RETURN;
+          END
+        CLEAR
+        expect { run(code) }.to raise_error(/OR_ELSE RAISE requires the expression to return an error union/)
+      end
+
+      it "accepts OR_ELSE PRUNE when expression returns !T" do
+        code = <<~CLEAR
+          FN mayFail(x: Float64) RETURNS !Float64 ->
+            RETURN x * 2.0;
+          END
+          FN main() RETURNS Void ->
+            nums: Float64[] = [1.0, 2.0];
+            result = nums |> CONCURRENT SELECT mayFail(_) OR_ELSE PRUNE;
+            RETURN;
+          END
+        CLEAR
+        expect { run(code) }.not_to raise_error
+      end
+    end
+  end
+
+  # ===========================================================================
+  # BG THEN chains
+  # ===========================================================================
+  describe "BG THEN chains" do
+    it "two-step THEN chain resolves to the last step's type" do
+      code = <<~CLEAR
+        FN double(x: Float64) RETURNS Float64 ->
+          RETURN x * 2.0;
+        END
+        FN main() RETURNS Void ->
+          h = BG { 5.0 AS n THEN double(n) };
+          v = NEXT h;
+          RETURN;
+        END
+      CLEAR
+      tree = run(code)
+      bg = tree.statements.find { |n| n.is_a?(AST::FunctionDef) && n.name == "main" }
+             .body.first.value
+      expect(bg.full_type.to_s).to eq("~Float64")
+    end
+
+    it "three-step THEN chain resolves to the last step's type" do
+      code = <<~CLEAR
+        FN add_one(x: Float64) RETURNS Float64 ->
+          RETURN x + 1.0;
+        END
+        FN double(x: Float64) RETURNS Float64 ->
+          RETURN x * 2.0;
+        END
+        FN main() RETURNS Void ->
+          h = BG { add_one(2.0) AS a THEN double(a) AS b THEN add_one(b) };
+          v = NEXT h;
+          RETURN;
+        END
+      CLEAR
+      tree = run(code)
+      bg = tree.statements.find { |n| n.is_a?(AST::FunctionDef) && n.name == "main" }
+             .body.first.value
+      expect(bg.full_type.to_s).to eq("~Float64")
+    end
+
+    it "THEN without AS binding resolves to last step's type" do
+      code = <<~CLEAR
+        FN double(x: Float64) RETURNS Float64 ->
+          RETURN x * 2.0;
+        END
+        FN main() RETURNS Void ->
+          h = BG { double(1.0) THEN double(2.0) };
+          v = NEXT h;
+          RETURN;
+        END
+      CLEAR
+      tree = run(code)
+      bg = tree.statements.find { |n| n.is_a?(AST::FunctionDef) && n.name == "main" }
+             .body.first.value
+      expect(bg.full_type.to_s).to eq("~Float64")
+    end
+
+    it "AS binding is accessible to subsequent THEN steps" do
+      code = <<~CLEAR
+        FN add(a: Float64, b: Float64) RETURNS Float64 ->
+          RETURN a + b;
+        END
+        FN main() RETURNS Void ->
+          h = BG { 3.0 AS x THEN add(x, x) };
+          v = NEXT h;
+          RETURN;
+        END
+      CLEAR
+      expect { run(code) }.not_to raise_error
+    end
+
+    it "raises a parse error when AS appears without THEN" do
+      code = <<~CLEAR
+        FN foo() RETURNS !Float64 ->
+          RETURN 1.0;
+        END
+        FN main() RETURNS Void ->
+          h = BG { foo() AS f; };
+          RETURN;
+        END
+      CLEAR
+      expect { run(code) }.to raise_error(/Expected THEN after AS binding/)
+    end
+
+    it "ThenChain node is produced in BG block body" do
+      code = <<~CLEAR
+        FN double(x: Float64) RETURNS Float64 ->
+          RETURN x * 2.0;
+        END
+        FN main() RETURNS Void ->
+          h = BG { double(1.0) AS r THEN double(r) };
+          v = NEXT h;
+          RETURN;
+        END
+      CLEAR
+      tree = run(code)
+      bg_node = tree.statements.find { |n| n.is_a?(AST::FunctionDef) && n.name == "main" }
+                  .body.first.value
+      expect(bg_node.body.first).to be_a(AST::ThenChain)
+    end
+
+    it "THEN chain mixed with a setup statement resolves correctly" do
+      code = <<~CLEAR
+        FN double(x: Float64) RETURNS Float64 ->
+          RETURN x * 2.0;
+        END
+        FN main() RETURNS Void ->
+          h = BG {
+            n = double(1.0);
+            n AS x THEN double(x)
+          };
+          v = NEXT h;
+          RETURN;
+        END
+      CLEAR
+      tree = run(code)
+      bg = tree.statements.find { |n| n.is_a?(AST::FunctionDef) && n.name == "main" }
+             .body.first.value
+      expect(bg.full_type.to_s).to eq("~Float64")
+    end
+
+    it "unwraps error union in AS binding (!T -> T)" do
+      code = <<~CLEAR
+        FN might_fail(x: Float64) RETURNS !Float64 ->
+          IF x < 0.0 THEN RAISE "negative"; END
+          RETURN x * 2.0;
+        END
+        FN add_one(x: Float64) RETURNS Float64 ->
+          RETURN x + 1.0;
+        END
+        FN main() RETURNS Void ->
+          h = BG { might_fail(5.0) AS r THEN add_one(r) };
+          v = NEXT h;
+        END
+      CLEAR
+      tree = run(code)
+      # Should compile without error - r is Float64, not !Float64
+      main_fn = tree.statements.find { |n| n.is_a?(AST::FunctionDef) && n.name == "main" }
+      expect(main_fn).not_to be_nil
+    end
+  end
+
+  # ===================================================================
+  # BG / ~T (Tense / Promise) — Phase 2: Annotator & Ownership
+  # ===================================================================
+  describe "BG / ~T Phase 2: annotator and ownership" do
+    # Helper: construct and annotate a BgBlock directly (no parser needed yet)
+    def make_bg_block(body_nodes)
+      token = Lexer::Token.new(:KEYWORD, 'BG', 1, 1)
+      AST::BgBlock.new(token, body_nodes)
+    end
+
+    def make_next_expr(expr_node)
+      token = Lexer::Token.new(:KEYWORD, 'NEXT', 1, 1)
+      AST::NextExpr.new(token, expr_node)
+    end
+
+    # Helper: AST::Literal for a Float64 value (no scope lookup required by visit_Literal)
+    def make_num_lit(val = 42.0)
+      tok = Lexer::Token.new(:NUMBER, val, 1, 1)
+      AST::Literal.new(tok, :NUMBER, val, nil)
+    end
+
+    describe "visit_BgBlock" do
+      it "sets full_type to ~Void when body is empty" do
+        annotator = SemanticAnnotator.new
+        node = make_bg_block([])
+        annotator.send(:visit_BgBlock, node)
+        expect(node.full_type).to eq(:"~Void")
+      end
+
+      it "wraps the last expression's type in ~ (Float64 literal body)" do
+        annotator = SemanticAnnotator.new
+        bg = make_bg_block([make_num_lit])
+        annotator.send(:visit_BgBlock, bg)
+        expect(bg.full_type).to eq(:"~Float64")
+      end
+    end
+
+    describe "visit_NextExpr" do
+      it "raises when NEXT is called on a Float64 literal (non-tense)" do
+        annotator = SemanticAnnotator.new
+        next_node = make_next_expr(make_num_lit)
+        expect { annotator.send(:visit_NextExpr, next_node) }
+          .to raise_error(SourceError, /NEXT requires a future value/)
+      end
+    end
+
+    describe "~T in type annotations (lexer + parser)" do
+      it "tokenises ~ as a CHAR token" do
+        tokens = Lexer.new("~Float64").tokenize
+        expect(tokens[0]).to have_attributes(type: :CHAR, value: '~')
+        expect(tokens[1]).to have_attributes(type: :TYPE_ID, value: 'Float64')
+      end
+
+      it "tokenises ~!Float64 with tilde, bang, type" do
+        tokens = Lexer.new("~!Float64").tokenize
+        expect(tokens[0]).to have_attributes(type: :CHAR, value: '~')
+        expect(tokens[1]).to have_attributes(type: :CHAR, value: '!')
+        expect(tokens[2]).to have_attributes(type: :TYPE_ID, value: 'Float64')
+      end
+
+      it "parse_type_annotation produces a tense Type for ~Float64" do
+        tokens = Lexer.new("~Float64").tokenize
+        parser = ClearParser.new(tokens, "~Float64")
+        t = parser.send(:parse_type_annotation)
+        expect(t.tense?).to be true
+        expect(t.tense_type).to eq(:Float64)
+        expect(t.zig_type).to eq("CheatLib.Promise(f64)")
+      end
+    end
+
+    describe "ownership tracker linear check" do
+      it "raises when a tense variable is live at scope end" do
+        annotator = SemanticAnnotator.new
+        dummy_token = Lexer::Token.new(:KEYWORD, 'BG', 1, 1)
+        dummy_node  = AST::BgBlock.new(dummy_token, [])
+
+        # with_new_scope yields and then pops — we call finalize_scope inside the block
+        expect {
+          annotator.send(:with_new_scope) do
+            annotator.send(:current_scope).declare('p', nil, :"~Float64", false, false, nil, :stack)
+            annotator.send(:og_declare, 'p', nil, :"~Float64")
+            annotator.send(:finalize_scope, dummy_node)
+          end
+        }.to raise_error(SourceError, /Promise 'p' must be consumed/)
+      end
+
+      it "does NOT raise when the tense variable has been moved (consumed)" do
+        annotator = SemanticAnnotator.new
+        dummy_token = Lexer::Token.new(:KEYWORD, 'BG', 1, 1)
+        dummy_node  = AST::BgBlock.new(dummy_token, [])
+
+        expect {
+          annotator.send(:with_new_scope) do
+            annotator.send(:current_scope).declare('p', nil, :"~Float64", false, false, nil, :stack)
+            annotator.send(:og_declare, 'p', nil, :"~Float64")
+            annotator.send(:og_set_moved, 'p')
+            annotator.send(:finalize_scope, dummy_node)
+          end
+        }.not_to raise_error
+      end
+    end
+  end
+
+  # ===================================================================
+  # BG / ~T (Tense / Promise) — Phase 1: Type System
+  # ===================================================================
+  describe "~T (tense/promise) type system" do
+    describe "Type parsing" do
+      it "recognises ~Float64 as a tense type" do
+        t = Type.new(:"~Float64")
+        expect(t.tense?).to be true
+        expect(t.tense_type).to eq(:Float64)
+      end
+
+      it "recognises ~Void as a tense type" do
+        t = Type.new(:"~Void")
+        expect(t.tense?).to be true
+        expect(t.tense_type).to eq(:Void)
+      end
+
+      it "recognises ~!Float64 as a promise of a failable Float64" do
+        t = Type.new(:"~!Float64")
+        expect(t.tense?).to be true
+        expect(t.tense_type.error_union?).to be true
+        expect(t.tense_type.payload_type).to eq(:Float64)
+      end
+
+      it "is not a struct, primitive, optional, or error_union" do
+        t = Type.new(:"~Float64")
+        expect(t.struct?).to be false
+        expect(t.primitive?).to be false
+        expect(t.optional?).to be false
+        expect(t.error_union?).to be false
+      end
+    end
+
+    describe "Type#requires_move?" do
+      it "returns true for tense types — promises are linear" do
+        expect(Type.new(:"~Float64").requires_move?).to be true
+        expect(Type.new(:"~Void").requires_move?).to be true
+      end
+    end
+
+    describe "Type#accepts?" do
+      it "accepts the same tense type" do
+        expect(Type.new(:"~Float64").accepts?(Type.new(:"~Float64"))).to be true
+      end
+
+      it "does not accept a non-tense type" do
+        expect(Type.new(:"~Float64").accepts?(Type.new(:Float64))).to be false
+      end
+
+      it "does not accept a different tense type" do
+        expect(Type.new(:"~Float64").accepts?(Type.new(:"~Bool"))).to be false
+      end
+    end
+
+    describe "Type#zig_type" do
+      it "emits CheatLib.Promise(f64) for ~Float64" do
+        expect(Type.new(:"~Float64").zig_type).to eq("CheatLib.Promise(f64)")
+      end
+
+      it "emits CheatLib.Promise(void) for ~Void" do
+        expect(Type.new(:"~Void").zig_type).to eq("CheatLib.Promise(void)")
+      end
+
+      it "emits CheatLib.Promise(!f64) for ~!Float64" do
+        expect(Type.new(:"~!Float64").zig_type).to eq("CheatLib.Promise(!f64)")
+      end
+    end
+
+    describe "Lexer" do
+      it "tokenises BG as a keyword" do
+        tokens = Lexer.new("BG").tokenize
+        expect(tokens[0].type).to eq(:KEYWORD)
+        expect(tokens[0].value).to eq("BG")
+      end
+
+      it "tokenises NEXT as a keyword" do
+        tokens = Lexer.new("NEXT").tokenize
+        expect(tokens[0].type).to eq(:KEYWORD)
+        expect(tokens[0].value).to eq("NEXT")
+      end
+    end
+  end
+
+  # ===================================================================
+  # BG / ~T (Tense / Promise) — Phase 5: Integration
+  # ===================================================================
+  describe "BG/NEXT — Phase 5: integration (collect_do_identifiers fix)" do
+    def transpile_fn(clear_src)
+      ZigTranspiler.new.transpile(clear_src)
+    end
+
+    it "collect_do_identifiers does not capture locally-bound names from BindExpr" do
+      # If 'step1' is declared inside BG, it must NOT appear as a capture field.
+      src = <<~CLEAR
+        FN f() RETURNS !Void ->
+          x: Float64 = 5.0;
+          q: ~Float64 = BG { x + 1.0; };
+          r: Float64 = NEXT q;
+          RETURN;
+        END
+      CLEAR
+      out = transpile_fn(src)
+      # x IS captured (outer variable). Field uses @TypeOf for the deduced type.
+      expect(out).to include("x: @TypeOf(x)")
+      # step1 is NOT a capture (it doesn't exist; this just verifies no spurious fields)
+      expect(out).not_to include("step1:")
+    end
+
+    it "multiple concurrent BG blocks get independent context structs" do
+      src = <<~CLEAR
+        FN f() RETURNS !Void ->
+          a: ~Float64 = BG { 10.0; };
+          b: ~Float64 = BG { 20.0; };
+          ra: Float64 = NEXT a;
+          rb: Float64 = NEXT b;
+          RETURN;
+        END
+      CLEAR
+      out = transpile_fn(src)
+      # Should have two separate context structs
+      expect(out).to include("__BgCtx0")
+      expect(out).to include("__BgCtx1")
+      # And two separate labeled blocks
+      expect(out).to include("__bg0:")
+      expect(out).to include("__bg1:")
+      # Both NEXTs
+      expect(out).to include("a.next()")
+      expect(out).to include("b.next()")
+    end
+
+    it "BG with function call inside captures its args by value" do
+      src = <<~CLEAR
+        FN double(x: Float64) RETURNS Float64 ->
+          RETURN x * 2.0;
+        END
+        FN f() RETURNS !Void ->
+          base: Float64 = 5.0;
+          p: ~Float64 = BG { double(base); };
+          r: Float64 = NEXT p;
+          RETURN;
+        END
+      CLEAR
+      out = transpile_fn(src)
+      expect(out).to include("base: @TypeOf(base)")
+      expect(out).to include(".base = base")
+      expect(out).to include("__ctx_0.base")
+      expect(out).to include("p.next()")
+    end
+
+    it "discards value-returning stackful BG pre-step calls" do
+      src = <<~CLEAR
+        STRUCT Entity { health: Int64 }
+        FN f() RETURNS !Void ->
+          p: ~Int64 = BG {
+            MUTABLE pool: Entity[8]@pool = [];
+            pool.insert(Entity{ health: 10_i64 });
+            sleep(1_i64);
+            1_i64;
+          };
+          r: Int64 = NEXT p;
+          RETURN;
+        END
+      CLEAR
+
+      out = transpile_fn(src)
+
+      expect(out).to match(/_ = try pool(?:_L\d+)?\.insert\(/)
+    end
+  end
+
+  # ===================================================================
+  # BG / ~T (Tense / Promise) — Phase 4: ClearParser + Transpiler
+  # ===================================================================
+  describe "BG/NEXT — Phase 4: parser and transpiler" do
+    def transpile_fn(clear_src)
+      ZigTranspiler.new.transpile(clear_src)
+    end
+
+    describe "ClearParser" do
+      it "parses BG { expr; } as a BgBlock node" do
+        tokens = Lexer.new("BG { 42.0; }").tokenize
+        parser = ClearParser.new(tokens, "BG { 42.0; }")
+        node   = parser.send(:parse_bg_block)
+        expect(node).to be_a(AST::BgBlock)
+        expect(node.body.length).to eq(1)
+      end
+
+      it "parses NEXT expr as a NextExpr node" do
+        tokens = Lexer.new("NEXT p").tokenize
+        parser = ClearParser.new(tokens, "NEXT p")
+        node   = parser.send(:parse_next_expr)
+        expect(node).to be_a(AST::NextExpr)
+        expect(node.expr).to be_a(AST::Identifier)
+        expect(node.expr.name).to eq("p")
+      end
+
+      it "parses BG { expr; } as the RHS of a bind expression" do
+        src    = "FN f() RETURNS !Void -> p: ~Float64 = BG { 1.0; }; RETURN; END"
+        tokens = Lexer.new(src).tokenize
+        ast    = ClearParser.new(tokens, src).parse
+        fn_node = ast.statements.first
+        bind    = fn_node.body.first
+        expect(bind.value).to be_a(AST::BgBlock)
+      end
+
+      it "parses NEXT as an expression in a bind" do
+        src    = "FN f() RETURNS !Void -> p: ~Float64 = BG { 1.0; }; r: Float64 = NEXT p; RETURN; END"
+        tokens = Lexer.new(src).tokenize
+        ast    = ClearParser.new(tokens, src).parse
+        fn_node = ast.statements.first
+        next_bind = fn_node.body[1]
+        expect(next_bind.value).to be_a(AST::NextExpr)
+      end
+    end
+
+    describe "Transpiler" do
+      it "BgBlock emits a labeled block with Promise spawn and local submit by default" do
+        src = "FN f() RETURNS !Void -> p: ~Float64 = BG { 42.0; }; r: Float64 = NEXT p; RETURN; END"
+        out = transpile_fn(src)
+        expect(out).to include("CheatLib.Promise(f64).spawn(")
+        # Pure-compute body is Phase-B1 FSM-eligible; default dispatch is
+        # scheduler-local, while explicit @parallel uses spawnFsmBest.
+        expect(out).to include("submitFsmSpawn(")
+        expect(out).not_to match(/spawn(Best|FsmBest)\(/)
+        expect(out).to include("break :")
+        expect(out).to include("__ctx_0.inner.result = 42")
+      end
+
+      it "BgBlock captures outer variable by value (no pointer)" do
+        src = "FN f() RETURNS !Void -> x: Float64 = 7.0; q: ~Float64 = BG { x + 1.0; }; r: Float64 = NEXT q; RETURN; END"
+        out = transpile_fn(src)
+        # Field type uses @TypeOf so Zig deduces the actual local type --
+        # this handles Arc-wrapped captures and already-pointer collection
+        # params correctly without per-case Ruby logic.
+        expect(out).to include("x: @TypeOf(x)")
+        # Initialized as .x = x  (never .x = &x: doubling pointers breaks
+        # collection params and Arc captures.)
+        expect(out).to include(".x = x")
+        # Accessed without deref: ctx.x (not ctx.x.*)
+        expect(out).to include("__ctx_0.x")
+        expect(out).not_to include("__ctx_0.x.*")
+      end
+
+      it "NextExpr emits .next() on the promise" do
+        src = "FN f() RETURNS !Void -> p: ~Float64 = BG { 99.0; }; r: Float64 = NEXT p; RETURN; END"
+        out = transpile_fn(src)
+        expect(out).to include("p.next()")
+      end
+
+      it "Promise(void) Zig type string is correct at the type level" do
+        expect(Type.new(:"~Void").zig_type).to eq("CheatLib.Promise(void)")
+      end
+
+      it "NEXT on a non-tense type raises an annotator error" do
+        src = "FN f() RETURNS !Void -> x: Float64 = 1.0; r: Float64 = NEXT x; RETURN; END"
+        expect { transpile_fn(src) }.to raise_error(SourceError, /NEXT requires a future value/)
+      end
+    end
+  end
+
+  # ===================================================================
+  # BG resource capture close — defer close in fiber run function
+  # ===================================================================
+  describe "BG resource capture close" do
+    def transpile_fn(clear_src)
+      ZigTranspiler.new.transpile(clear_src)
+    end
+
+    it "emits defer socketClose for TCPClient captured by BG" do
+      out = transpile_fn(<<~CLEAR)
+        FN f(server: TCPServer) RETURNS !Void ->
+          client = accept(server);
+          p: ~Void = BG { tcpWrite(client, "hi"); };
+          r: Void = NEXT p;
+          RETURN;
+        END
+      CLEAR
+      # Fiber takes ownership and closes the resource.
+      expect(out).to include("socketClose(__ctx_0.client)")
+      # Unconditional BG: ownership transfer is explicit for MIRChecker.
+      expect(out).to include("client_moved = true")
+      expect(out).to include("defer if (!client_moved)")
+    end
+
+    it "emits defer file.close() for File captured by BG" do
+      out = transpile_fn(<<~CLEAR)
+        FN f() RETURNS !Void ->
+          file = File::open("data.txt");
+          p: ~Void = BG { fileWrite(file, "hello"); };
+          r: Void = NEXT p;
+          RETURN;
+        END
+      CLEAR
+      expect(out).to include("__ctx_0.file.close()")
+    end
+
+    it "allows a captured TCPClient to be reused inside a BG loop" do
+      expect {
+        transpile_fn(<<~CLEAR)
+          FN f() RETURNS !Void ->
+            conn = TCPClient::connect("127.0.0.1", 8080);
+            p: ~Void = BG {
+              MUTABLE i = 0;
+              WHILE i < 2 DO
+                conn.tcpWrite("hi");
+                i += 1;
+              END
+            };
+            r: Void = NEXT p;
+            RETURN;
+          END
+        CLEAR
+      }.not_to raise_error
+    end
+
+    it "unconditional BG capture eliminates outer defer entirely" do
+      out = transpile_fn(<<~CLEAR)
+        FN f(server: TCPServer) RETURNS !Void ->
+          client = accept(server);
+          p: ~Void = BG { tcpWrite(client, "hi"); };
+          r: Void = NEXT p;
+          RETURN;
+        END
+      CLEAR
+      # Dataflow detects resource is always moved to BG fiber; the move
+      # guard records that transfer for MIRChecker.
+      expect(out).to include("client_moved = true")
+    end
+
+    it "emits guarded defer + suppress for resource captured by BG inside while loop" do
+      out = transpile_fn(<<~CLEAR)
+        FN f(server: TCPServer) RETURNS !Void ->
+          MUTABLE tasks: ~Void[]@list = [];
+          WHILE TRUE DO
+            client = accept(server);
+            tasks.append(BG { tcpWrite(client, "hi"); });
+          END
+          RETURN;
+        END
+      CLEAR
+      # The per-iteration binding owns the resource until the BG context is
+      # successfully populated; after transfer the moved guard suppresses the
+      # outer cleanup and the fiber closes its captured client.
+      expect(out).to include("client_moved")
+      expect(out).to include("defer if (!client_moved) CheatLib.socketClose(client)")
+      expect(out).to include("defer CheatLib.socketClose(__ctx_0.client)")
+    end
+
+    it "does not emit verifier-only cleanup mirrors for moved locked BG captures" do
+      out = transpile_fn(File.read(File.expand_path("../../transpile-tests/263_with_lock_contention.clear", __dir__)))
+
+      expect(out).not_to include("var __ctx_0.c_moved")
+      expect(out).not_to include("CheatLib.cleanup(@TypeOf(__ctx_0.c)")
+      expect(out).to include("defer CheatLib.arcRelease(CheatLib.Locked(Counter)")
+      expect(out).to include("ctx.alloc")
+      expect(out).not_to include("std.heap.page_allocator")
+    end
+  end
+
+  describe "DO block" do
+
+    context "three concurrent branches accessing the same @locked counter" do
+      let(:code) {
+        <<~FLUX
+          STRUCT Counter { value: Float64 }
+          c = Counter{ value: 0 } @locked;
+          DO {
+            WITH EXCLUSIVE c AS inner { inner.value = inner.value + 1; },
+            WITH EXCLUSIVE c AS inner { inner.value = inner.value + 1; },
+            WITH EXCLUSIVE c AS inner { inner.value = inner.value + 1; }
+          }
+        FLUX
+      }
+
+      it "succeeds (mutex serialises concurrent mutations)" do
+        expect { ast }.not_to raise_error
+      end
+    end
+  end
+
+  # =========================================================================
+  # WITH BORROWED — immutable borrow, zero-copy binding
+  # =========================================================================
+  describe "WITH BORROWED" do
+    it "compiles a basic BORROWED binding" do
+      src = <<~CLEAR
+        FN main() RETURNS Void ->
+          name = "hello";
+          WITH BORROWED name AS ref {
+            print(ref);
+          }
+          RETURN;
+        END
+      CLEAR
+      expect { run(src) }.not_to raise_error
+    end
+
+    it "emits a const binding in Zig (zero allocation)" do
+      src = <<~CLEAR
+        FN main() RETURNS Void ->
+          name = "hello";
+          WITH BORROWED name AS ref {
+            print(ref);
+          }
+          RETURN;
+        END
+      CLEAR
+      zig = ZigTranspiler.new.transpile(src)
+      expect(zig).to include("const ref = name;")
+    end
+
+    it "supports multiple BORROWED bindings in one WITH" do
+      src = <<~CLEAR
+        FN main() RETURNS Void ->
+          a = "first";
+          b = "second";
+          WITH BORROWED a AS ra, BORROWED b AS rb {
+            print(ra);
+            print(rb);
+          }
+          RETURN;
+        END
+      CLEAR
+      expect { run(src) }.not_to raise_error
+    end
+
+    it "supports borrowing struct fields via dot access" do
+      src = <<~CLEAR
+        STRUCT Pair { x: Float64, y: Float64 }
+        FN main() RETURNS Void ->
+          p = Pair{ x: 1.0, y: 2.0 };
+          WITH BORROWED p AS ref {
+            print(ref.x.toString());
+          }
+          RETURN;
+        END
+      CLEAR
+      expect { run(src) }.not_to raise_error
+    end
+
+    it "allows nested WITH BORROWED blocks" do
+      src = <<~CLEAR
+        FN main() RETURNS Void ->
+          outer = "a";
+          WITH BORROWED outer AS r1 {
+            inner = "b";
+            WITH BORROWED inner AS r2 {
+              print(r1);
+              print(r2);
+            }
+          }
+          RETURN;
+        END
+      CLEAR
+      expect { run(src) }.not_to raise_error
+    end
+  end
+
+end

@@ -8,7 +8,7 @@ T::Configuration.default_checked_level = :never
 require "benchmark"
 
 ROOT = File.expand_path("..", __dir__)
-SRC_ROOT = File.join(ROOT, "src")
+SRC_ROOT = File.join(ROOT, "compiler", "ruby")
 $LOAD_PATH.unshift(SRC_ROOT)
 $LOAD_PATH.unshift(File.join(SRC_ROOT, "ast"))
 $LOAD_PATH.unshift(File.join(SRC_ROOT, "mir"))
@@ -21,7 +21,7 @@ require "mir_lowering"
 require "mir_checker"
 require "backends/mir_emitter"
 
-source_path = File.expand_path(ARGV.fetch(0) { "examples/minivm/vm.cht" })
+source_path = File.expand_path(ARGV.fetch(0) { "examples/minivm/vm.clear" })
 source = File.read(source_path)
 source_dir = File.dirname(source_path)
 
@@ -37,10 +37,10 @@ def src_caller
     path = frame.absolute_path || frame.path
     path.start_with?(SRC_ROOT) &&
       !path.end_with?("tools/profile_structural_multipliers.rb") &&
-      !path.end_with?("src/ast/ast.rb") &&
-      !path.end_with?("src/ast/scope.rb") &&
-      !path.end_with?("src/ast/symbol_entry.rb") &&
-      !path.end_with?("src/semantic/ownership_graph.rb")
+      !path.end_with?("compiler/ruby/ast/ast.rb") &&
+      !path.end_with?("compiler/ruby/ast/scope.rb") &&
+      !path.end_with?("compiler/ruby/ast/symbol_entry.rb") &&
+      !path.end_with?("compiler/ruby/semantic/ownership_graph.rb")
   end
   return "unknown" unless loc
 

@@ -135,7 +135,7 @@ def fuzz_val_decl(p)
 
   case p[:value]
   when :int    # @shared:atomic Int64 — bare Atomic, no struct
-    "raw: Int64 = NEXT src;\n    MUTABLE val: Int64 = raw @shared:#{sync_word};"
+    "raw: Int64 = NEXT src;\n    MUTABLE val = raw @shared:#{sync_word};"
   when :struct # Counter wrapper — locked / writeLocked / versioned
     "raw: Int64 = NEXT src;\n    val = Counter{ value: raw } @#{sync_word};"
   end

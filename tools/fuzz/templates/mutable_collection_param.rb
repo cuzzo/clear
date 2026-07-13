@@ -34,7 +34,7 @@ FuzzGenerator.register(:mutable_collection_param, cells: MUTABLE_PARAM_CELLS) do
                p[:elem] == :int ? "xs.insert(xs.length());" : "xs.insert(xs.length().toString());"
              when :map
                push_value = (p[:elem] == :int) ? "99_i64" : '"hello"'
-               "xs[\"k\" + xs.count().toString()] = #{push_value};"
+               "xs[\"k\" $+ xs.count().toString()] = #{push_value};"
              end
 
   # `xs.append` is fallible (OOM) so callee must declare !Void.

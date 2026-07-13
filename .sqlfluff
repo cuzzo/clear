@@ -1,0 +1,10 @@
+[sqlfluff]
+dialect = sqlite
+templater = placeholder
+# Only semantic ambiguity rules with a plausible correctness consequence are
+# included in PR SARIF. Parser/templater failures are always reported too.
+rules = AL04,AL08,AM01,AM02,AM07,AM08,AM09,RF01,ST03,ST10,ST11
+
+[sqlfluff:templater:placeholder]
+param_regex = \{(?P<param_name>[A-Za-z_][A-Za-z0-9_]*)\}
+column = current_line_cov

@@ -1,7 +1,0 @@
-FN ok!() RETURNS !Int64 ->
-    RETURN 7_i64;
-END
-
-FN main() RETURNS Int64 ->
-    RETURN ok!() OR 42_i64;
-END

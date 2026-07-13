@@ -1,8 +1,8 @@
 # Bytecode VM Status
 
 The bytecode VM consists of `bc_emitter.rb` (compiles MIR -> bytecode) and
-`_bc_runner.cht` (interpreter, written in CLEAR, run as a native binary).
-This document tracks the VM's coverage of `transpile-tests/*.cht` (~307
+`_bc_runner.clear` (interpreter, written in CLEAR, run as a native binary).
+This document tracks the VM's coverage of `transpile-tests/*.clear` (~307
 runnable tests after VM_UNSUPPORTED filter) and known issues.
 
 ## Latest Coverage (post 2026-04-29 session)
@@ -57,7 +57,7 @@ These features compile and execute correctly via the bytecode path:
   typed `find_field_index` so same-named fields across structs disambiguate
 - **WITH blocks**: WITH BORROWED, WITH RESTRICT (mut/immut), WITH EXCLUSIVE
   on @locked, WITH SHARED on Arc, alias writeback after the block
-- **Error machinery**: RAISE Kind/Type/msg -> RAISE_ERR opcode, OR RAISE
+- **Error machinery**: RAISE Kind/Type/msg -> RAISE_ERR opcode, OR_ELSE RAISE
   propagation via Value.Error sentinel, single-FN CATCH (kind dispatch via
   GET_ERR_KIND + EQ chain), OR <fallback> via TryCatch
 - **Print**: std.debug.print template arg parser respects nested parens,
@@ -126,7 +126,7 @@ crashing the post-fix path).
 ### What's confirmed
 
 - The crash is **build-mode-dependent** in the *runner itself*:
-  - Default debug build (`./clear build _bc_runner.cht --use-c-allocator`):
+  - Default debug build (`./clear build _bc_runner.clear --use-c-allocator`):
     crashes with `double free or corruption (out)`.
   - GPA debug build (no `--use-c-allocator`): **passes**.
   - `--safe` (LLVM ReleaseSafe + GPA): **passes**.
@@ -209,5 +209,5 @@ The VM-side responsibilities of `bc_emitter.rb`:
   CatchWrapper Zig source) are parsed structurally — the lowering must
   emit them in a stable form.
 
-The runner (`_bc_runner.cht`) is itself a CLEAR program subject to the same
+The runner (`_bc_runner.clear`) is itself a CLEAR program subject to the same
 checker, so bugs in the runner's own lowering are real compiler bugs.

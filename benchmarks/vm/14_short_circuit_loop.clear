@@ -1,0 +1,23 @@
+FN main() RETURNS Void ->
+    t0 = timestampMs();
+    MUTABLE hits: Int64 = 0_i64;
+    MUTABLE skips: Int64 = 0_i64;
+    MUTABLE i: Int64 = 0_i64;
+    WHILE i < 200000_i64 DO
+        d = i MOD 11_i64;
+        IF d != 0_i64 AND (100_i64 / d) > 9_i64 THEN
+            hits = hits + 1_i64;
+        END
+        IF d == 0_i64 OR (100_i64 / d) < 4_i64 THEN
+            skips = skips + 1_i64;
+        END
+        i = i + 1_i64;
+    END
+    score = (hits * 3_i64) + (skips * 7_i64);
+    elapsed = timestampMs() - t0;
+    print("hits = ${hits.toString()}");
+    print("skips = ${skips.toString()}");
+    print("score = ${score.toString()}");
+    print("BENCH_RESULT: ${elapsed.toString()} ms");
+    RETURN;
+END

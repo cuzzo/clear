@@ -15,8 +15,8 @@ run_one() {
   printf -- "------------ ----------\n"
 
   # CLEAR BC VM
-  if [ -f "$DIR/${name}.cht" ]; then
-    out=$(timeout 60 ruby "$DIR/../../examples/minivm/bc_run.rb" "$DIR/${name}.cht" 2>&1)
+  if [ -f "$DIR/${name}.clear" ]; then
+    out=$(timeout 60 ruby "$DIR/../../examples/minivm/bc_run.rb" "$DIR/${name}.clear" 2>&1)
     ms=$(echo "$out" | extract_bench_ms)
     printf "%-12s %10s\n" "clear-bc" "${ms:-TIMEOUT}"
   fi
@@ -43,8 +43,8 @@ run_one() {
   fi
 
   # CLEAR Zig backend (for comparison; --release for ReleaseFast)
-  if [ -f "$DIR/${name}.cht" ]; then
-    "$(dirname "$DIR")/../clear" build "$DIR/${name}.cht" -o "$DIR/.bench_clear" --optimized > /dev/null 2>&1
+  if [ -f "$DIR/${name}.clear" ]; then
+    "$(dirname "$DIR")/../clear" build "$DIR/${name}.clear" -o "$DIR/.bench_clear" --optimized > /dev/null 2>&1
     if [ -x "$DIR/.bench_clear" ]; then
       out=$(timeout 60 "$DIR/.bench_clear" 2>&1)
       ms=$(echo "$out" | extract_bench_ms)
@@ -85,8 +85,8 @@ run_one() {
 if [ -n "$1" ]; then
   run_one "$1"
 else
-  for f in "$DIR"/*.cht; do
-    name=$(basename "$f" .cht)
+  for f in "$DIR"/*.clear; do
+    name=$(basename "$f" .clear)
     run_one "$name"
   done
 fi

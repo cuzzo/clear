@@ -1,0 +1,23 @@
+# 7-pattern arm. Stress-tests the comma loop in the parser, the
+# extra_values list in the annotator, and the OR_ELSE'd condition in the
+# union if-chain lowering.
+
+UNION Tag { A, B, C, D, E, F, G, H }
+
+FN is_first_seven(t: Tag) RETURNS Bool ->
+  RETURN PARTIAL MATCH t START
+    Tag.A, Tag.B, Tag.C, Tag.D, Tag.E, Tag.F, Tag.G -> TRUE,
+    DEFAULT                                          -> FALSE
+  END;
+END
+
+FN main() RETURNS Void ->
+  ASSERT is_first_seven(Tag.A) == TRUE,  "A";
+  ASSERT is_first_seven(Tag.B) == TRUE,  "B";
+  ASSERT is_first_seven(Tag.C) == TRUE,  "C";
+  ASSERT is_first_seven(Tag.D) == TRUE,  "D";
+  ASSERT is_first_seven(Tag.E) == TRUE,  "E";
+  ASSERT is_first_seven(Tag.F) == TRUE,  "F";
+  ASSERT is_first_seven(Tag.G) == TRUE,  "G";
+  ASSERT is_first_seven(Tag.H) == FALSE, "H";
+END

@@ -195,3 +195,75 @@ test "RAII pattern: Pool zero-init + deinit (mirrors compiler output)" {
     const id = try p.insert(std.testing.allocator, Point{ .x = 5.0, .y = 6.0 });
     try std.testing.expect(p.get(id) != null);
 }
+
+const CountedResource = struct {
+    drops: *usize,
+
+    pub fn deinit(self: *@This(), _: std.mem.Allocator) void {
+        self.drops.* += 1;
+    }
+};
+
+test "Pool.remove destroys a cleanup-bearing payload immediately and exactly once" {
+    var drops: usize = 0;
+    var pool = try CheatLib.Pool(CountedResource).initCapacity(std.testing.allocator, 2);
+    const id = try pool.insert(std.testing.allocator, .{ .drops = &drops });
+    pool.remove(id);
+    try std.testing.expectEqual(@as(usize, 1), drops);
+    pool.remove(id);
+    try std.testing.expectEqual(@as(usize, 1), drops);
+    pool.deinit(std.testing.allocator);
+    try std.testing.expectEqual(@as(usize, 1), drops);
+}
+
+test "Pool.deinit finds high-index survivors after sparse removals" {
+    var drops: usize = 0;
+    var pool = try CheatLib.Pool(CountedResource).initCapacity(std.testing.allocator, 4);
+    var ids: [4]u64 = undefined;
+    for (&ids) |*id| id.* = try pool.insert(std.testing.allocator, .{ .drops = &drops });
+    pool.remove(ids[0]);
+    pool.remove(ids[1]);
+    pool.remove(ids[2]);
+    try std.testing.expectEqual(@as(usize, 3), drops);
+    pool.deinit(std.testing.allocator);
+    try std.testing.expectEqual(@as(usize, 4), drops);
+}
+
+test "Pool compact sidecars expose live direct slots without padded Slot structs" {
+    var pool = try CheatLib.Pool(Point).initCapacity(std.testing.allocator, 3);
+    defer pool.deinit(std.testing.allocator);
+    const id = try pool.insert(std.testing.allocator, .{ .x = 7, .y = 8 });
+    try std.testing.expect(pool.isAliveIndex(0));
+    try std.testing.expect(!pool.isAliveIndex(1));
+    try std.testing.expect(!pool.isAliveIndex(99));
+    try std.testing.expectEqual(@as(f64, 7), pool.valueAtIndex(0).?.x);
+    try std.testing.expect(pool.valueAtIndex(1) == null);
+    try std.testing.expectEqual(@as(f64, 8), pool.valueAtIndexConst(0).?.y);
+    pool.remove(id);
+    try std.testing.expect(pool.valueAtIndexConst(0) == null);
+}
+
+test "Pool reports Full and permanently retires an exhausted generation" {
+    var pool = try CheatLib.Pool(Point).initCapacity(std.testing.allocator, 1);
+    defer pool.deinit(std.testing.allocator);
+    pool.states[0] = std.math.maxInt(u32) - 1;
+    const last = try pool.insert(std.testing.allocator, .{ .x = 1, .y = 2 });
+    try std.testing.expectEqual(std.math.maxInt(u32), @as(u32, @truncate(last >> 32)));
+    try std.testing.expectError(error.Full, pool.insert(std.testing.allocator, .{ .x = 3, .y = 4 }));
+    pool.remove(last);
+    try std.testing.expectError(error.Full, pool.insert(std.testing.allocator, .{ .x = 5, .y = 6 }));
+}
+
+test "Pool init frees every successful partial allocation after OOM" {
+    var fail_index: usize = 0;
+    while (fail_index < 3) : (fail_index += 1) {
+        var failing = std.testing.FailingAllocator.init(std.testing.allocator, .{ .fail_index = fail_index });
+        try std.testing.expectError(error.OutOfMemory, CheatLib.Pool(Point).initCapacity(failing.allocator(), 4));
+    }
+}
+
+test "Pool supports an empty capacity" {
+    var pool = try CheatLib.Pool(Point).initCapacity(std.testing.allocator, 0);
+    defer pool.deinit(std.testing.allocator);
+    try std.testing.expectError(error.Full, pool.insert(std.testing.allocator, .{ .x = 0, .y = 0 }));
+}

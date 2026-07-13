@@ -7,6 +7,7 @@ const fsm = @import("fsm.zig");
 const ebr = @import("../lib/ebr.zig");
 const header = @import("runtime-header.zig");
 const compat = @import("../lib/compat.zig");
+const alloc_profile = @import("alloc-profile.zig");
 
 // Import the C library
 const c = @cImport({
@@ -18,9 +19,471 @@ const CheatLib = header.CheatLib;
 const Runtime = rt_mod.Runtime;
 const alloc = std.heap.c_allocator;
 
+test "AtomicPtr fiber retains keep the cell and managed payload alive until the final release" {
+    const allocator = std.testing.allocator;
+    const Payload = struct { text: []const u8 };
+    const owned = try allocator.dupe(u8, "retained");
+    const cell = try CheatLib.atomicPtrCreate(Payload, allocator, .{ .text = owned });
+    const Cell = @TypeOf(cell.*);
+
+    const captured = CheatLib.atomicPtrRetain(Cell, cell);
+    try std.testing.expectEqual(@as(usize, 2), cell.refs.load(.acquire));
+    CheatLib.atomicPtrRelease(Cell, allocator, cell);
+    try std.testing.expectEqualStrings("retained", captured.ptr.load(.acquire).?.text);
+    CheatLib.atomicPtrRelease(Cell, allocator, captured);
+}
+
+const ArcTeardownGate = struct {
+    deinit_entered: std.atomic.Value(bool) = .init(false),
+    may_finish: std.atomic.Value(bool) = .init(false),
+};
+
+const BlockingArcPayload = struct {
+    gate: *ArcTeardownGate,
+
+    pub fn deinit(self: *@This(), _: std.mem.Allocator) void {
+        self.gate.deinit_entered.store(true, .release);
+        while (!self.gate.may_finish.load(.acquire)) std.atomic.spinLoopHint();
+    }
+};
+
+fn releaseBlockingArc(arc: CheatLib.Arc(BlockingArcPayload)) void {
+    CheatLib.arcRelease(BlockingArcPayload, std.testing.allocator, arc);
+}
+
+test "dupeValue promotes a fixed array into an owned ArrayList" {
+    const allocator = std.testing.allocator;
+    const source = [3]i64{ 4, 5, 6 };
+    var copied = try CheatLib.dupeValue(std.ArrayListUnmanaged(i64), source, allocator);
+    defer copied.deinit(allocator);
+
+    try std.testing.expectEqualSlices(i64, source[0..], copied.items);
+}
+
+test "dupeValue retains Rc Arc and Weak handles instead of cloning control blocks" {
+    const allocator = std.testing.allocator;
+
+    const rc = try CheatLib.rcCreate(u64, allocator, 7);
+    const rc_copy = try CheatLib.dupeValue(CheatLib.Rc(u64), rc, allocator);
+    try std.testing.expectEqual(rc.ctrl, rc_copy.ctrl);
+    try std.testing.expectEqual(@as(usize, 2), rc.ctrl.strong);
+    CheatLib.rcRelease(u64, allocator, rc_copy);
+
+    const weak = CheatLib.rcDowngrade(u64, rc);
+    const weak_copy = try CheatLib.dupeValue(CheatLib.WeakRc(u64), weak, allocator);
+    try std.testing.expectEqual(weak.ctrl, weak_copy.ctrl);
+    CheatLib.weakRcRelease(u64, allocator, weak_copy);
+    CheatLib.weakRcRelease(u64, allocator, weak);
+    CheatLib.rcRelease(u64, allocator, rc);
+
+    const arc = try CheatLib.arcCreate(u64, allocator, 9);
+    const arc_copy = try CheatLib.dupeValue(CheatLib.Arc(u64), arc, allocator);
+    try std.testing.expectEqual(arc.ctrl, arc_copy.ctrl);
+    try std.testing.expectEqual(@as(usize, 2), arc.ctrl.strong.load(.acquire));
+    CheatLib.arcRelease(u64, allocator, arc_copy);
+    CheatLib.arcRelease(u64, allocator, arc);
+}
+
+test "Arc recursively destroys managed fields in ordinary payload structs" {
+    const allocator = std.testing.allocator;
+    const Managed = struct { text: []u8 };
+    const text = try allocator.dupe(u8, "owned by Arc");
+    const arc = try CheatLib.arcCreate(Managed, allocator, .{ .text = text });
+
+    CheatLib.arcRelease(Managed, allocator, arc);
+}
+
+test "arcCreate rolls back every partial allocation on OOM" {
+    var fail_index: usize = 0;
+    while (fail_index < 2) : (fail_index += 1) {
+        var failing = std.testing.FailingAllocator.init(
+            std.testing.allocator,
+            .{ .fail_index = fail_index },
+        );
+        try std.testing.expectError(
+            error.OutOfMemory,
+            CheatLib.arcCreate(u64, failing.allocator(), 42),
+        );
+    }
+}
+
+test "Arc cleanup covers managed optional list union and nested struct payloads" {
+    const allocator = std.testing.allocator;
+    const Choice = union(enum) { text: []u8, none: void };
+    const Nested = struct { text: []u8 };
+    const Managed = struct {
+        direct: []u8,
+        optional: ?[]u8,
+        list: std.ArrayListUnmanaged([]u8),
+        choice: Choice,
+        nested: Nested,
+    };
+
+    var list: std.ArrayListUnmanaged([]u8) = .empty;
+    try list.append(allocator, try allocator.dupe(u8, "list item"));
+    const arc = try CheatLib.arcCreate(Managed, allocator, .{
+        .direct = try allocator.dupe(u8, "direct"),
+        .optional = try allocator.dupe(u8, "optional"),
+        .list = list,
+        .choice = .{ .text = try allocator.dupe(u8, "union") },
+        .nested = .{ .text = try allocator.dupe(u8, "nested") },
+    });
+    CheatLib.arcRelease(Managed, allocator, arc);
+}
+
+test "last strong and last explicit WeakArc may be released during payload destruction" {
+    var gate = ArcTeardownGate{};
+    const arc = try CheatLib.arcCreate(
+        BlockingArcPayload,
+        std.testing.allocator,
+        .{ .gate = &gate },
+    );
+    const weak = CheatLib.arcDowngrade(BlockingArcPayload, arc);
+    const release_thread = try std.Thread.spawn(.{}, releaseBlockingArc, .{arc});
+
+    while (!gate.deinit_entered.load(.acquire)) std.atomic.spinLoopHint();
+
+    // The strong count is already zero, but strong teardown still owns an
+    // implicit weak reference until payload destruction is complete.
+    CheatLib.weakArcRelease(BlockingArcPayload, weak);
+
+    gate.may_finish.store(true, .release);
+    release_thread.join();
+}
+
+test "dupeValue retains Rc Arc through optional struct union and list shapes" {
+    const allocator = std.testing.allocator;
+    const RcU64 = CheatLib.Rc(u64);
+    const ArcU64 = CheatLib.Arc(u64);
+    const Holder = struct {
+        optional: ?RcU64,
+        shared: ArcU64,
+        refs: std.ArrayListUnmanaged(RcU64),
+    };
+    const Choice = union(enum) { item: RcU64, none: void };
+
+    const rc = try CheatLib.rcCreate(u64, allocator, 11);
+    const arc = try CheatLib.arcCreate(u64, allocator, 13);
+    var refs: std.ArrayListUnmanaged(RcU64) = .empty;
+    try refs.append(allocator, CheatLib.rcRetain(u64, rc));
+    var holder = Holder{ .optional = rc, .shared = arc, .refs = refs };
+
+    var holder_copy = try CheatLib.dupeValue(Holder, holder, allocator);
+    try std.testing.expectEqual(@as(usize, 4), rc.ctrl.strong);
+    try std.testing.expectEqual(@as(usize, 2), arc.ctrl.strong.load(.acquire));
+    CheatLib.cleanup(Holder, allocator, &holder_copy);
+    try std.testing.expectEqual(@as(usize, 2), rc.ctrl.strong);
+    try std.testing.expectEqual(@as(usize, 1), arc.ctrl.strong.load(.acquire));
+
+    var choice = Choice{ .item = CheatLib.rcRetain(u64, rc) };
+    var choice_copy = try CheatLib.dupeValue(Choice, choice, allocator);
+    try std.testing.expectEqual(@as(usize, 4), rc.ctrl.strong);
+    CheatLib.cleanup(Choice, allocator, &choice_copy);
+    CheatLib.cleanup(Choice, allocator, &choice);
+    CheatLib.cleanup(Holder, allocator, &holder);
+}
+
 var global_ebr_ctx: ebr.EbrContext = .{};
 var global_stack_pool: fm.StackPool = undefined;
 var global_shutdown = std.atomic.Value(bool).init(false);
+var node_store_drop_count: usize = 0;
+var arc_payload_drop_count: usize = 0;
+
+const CountedArcPayload = struct {
+    text: []u8,
+
+    pub fn deinit(self: *@This(), allocator: std.mem.Allocator) void {
+        arc_payload_drop_count += 1;
+        allocator.free(self.text);
+    }
+};
+
+test "Arc payload destructor runs exactly once at the final strong release" {
+    const allocator = std.testing.allocator;
+    arc_payload_drop_count = 0;
+    const arc = try CheatLib.arcCreate(CountedArcPayload, allocator, .{
+        .text = try allocator.dupe(u8, "counted"),
+    });
+    const retained = CheatLib.arcRetain(CountedArcPayload, arc);
+    const weak = CheatLib.arcDowngrade(CountedArcPayload, arc);
+
+    CheatLib.arcRelease(CountedArcPayload, allocator, retained);
+    try std.testing.expectEqual(@as(usize, 0), arc_payload_drop_count);
+    CheatLib.arcRelease(CountedArcPayload, allocator, arc);
+    try std.testing.expectEqual(@as(usize, 1), arc_payload_drop_count);
+    try std.testing.expect(CheatLib.weakArcUpgrade(CountedArcPayload, weak) == null);
+    CheatLib.weakArcRelease(CountedArcPayload, weak);
+    try std.testing.expectEqual(@as(usize, 1), arc_payload_drop_count);
+}
+
+test "Arc lock-wrapper payload cleanup ignores non-owning lock internals" {
+    const allocator = std.testing.allocator;
+    const Payload = struct { text: []u8 };
+
+    const locked = try CheatLib.arcCreate(
+        CheatLib.Locked(Payload),
+        allocator,
+        CheatLib.Locked(Payload).init(.{ .text = try allocator.dupe(u8, "locked") }),
+    );
+    CheatLib.arcRelease(CheatLib.Locked(Payload), allocator, locked);
+
+    const rw_locked = try CheatLib.arcCreate(
+        CheatLib.RwLocked(Payload),
+        allocator,
+        CheatLib.RwLocked(Payload).init(.{ .text = try allocator.dupe(u8, "rw-locked") }),
+    );
+    CheatLib.arcRelease(CheatLib.RwLocked(Payload), allocator, rw_locked);
+}
+
+test "dupeValue rolls back every initialized managed field under allocator failure" {
+    const Managed = struct {
+        direct: []u8,
+        optional: ?[]u8,
+        list: std.ArrayListUnmanaged([]u8),
+    };
+    const allocator = std.testing.allocator;
+    var source_list: std.ArrayListUnmanaged([]u8) = .empty;
+    try source_list.append(allocator, try allocator.dupe(u8, "list"));
+    var source = Managed{
+        .direct = try allocator.dupe(u8, "direct"),
+        .optional = try allocator.dupe(u8, "optional"),
+        .list = source_list,
+    };
+    defer CheatLib.cleanup(Managed, allocator, &source);
+
+    var fail_index: usize = 0;
+    var failures: usize = 0;
+    while (fail_index < 16) : (fail_index += 1) {
+        var failing = std.testing.FailingAllocator.init(
+            allocator,
+            .{ .fail_index = fail_index },
+        );
+        var copied = CheatLib.dupeValue(Managed, source, failing.allocator()) catch |err| {
+            try std.testing.expectEqual(error.OutOfMemory, err);
+            failures += 1;
+            continue;
+        };
+        CheatLib.cleanup(Managed, failing.allocator(), &copied);
+        break;
+    }
+    try std.testing.expect(failures >= 4);
+    try std.testing.expect(fail_index < 16);
+}
+
+test "dupeValue copies recursive indirect structs and rolls back every allocation failure" {
+    const Node = struct {
+        name: []u8,
+        next: ?*@This(),
+    };
+    const allocator = std.testing.allocator;
+    const leaf = try allocator.create(Node);
+    leaf.* = .{
+        .name = try allocator.dupe(u8, "leaf"),
+        .next = null,
+    };
+    var source = Node{
+        .name = try allocator.dupe(u8, "root"),
+        .next = leaf,
+    };
+    defer CheatLib.cleanup(Node, allocator, &source);
+
+    var fail_index: usize = 0;
+    var failures: usize = 0;
+    while (fail_index < 16) : (fail_index += 1) {
+        var failing = std.testing.FailingAllocator.init(
+            allocator,
+            .{ .fail_index = fail_index },
+        );
+        var copied = CheatLib.dupeValue(Node, source, failing.allocator()) catch |err| {
+            try std.testing.expectEqual(error.OutOfMemory, err);
+            failures += 1;
+            continue;
+        };
+        try std.testing.expect(copied.next != null);
+        try std.testing.expect(copied.next.? != source.next.?);
+        try std.testing.expectEqualStrings("leaf", copied.next.?.name);
+        CheatLib.cleanup(Node, failing.allocator(), &copied);
+        break;
+    }
+    try std.testing.expect(failures >= 3);
+    try std.testing.expect(fail_index < 16);
+}
+
+test "dupeValue rolls back managed numeric-map values under allocator failure" {
+    const Map = std.AutoHashMapUnmanaged(i64, []u8);
+    const allocator = std.testing.allocator;
+    var source: Map = .empty;
+    try source.put(allocator, 1, try allocator.dupe(u8, "one"));
+    try source.put(allocator, 2, try allocator.dupe(u8, "two"));
+    try source.put(allocator, 3, try allocator.dupe(u8, "three"));
+    defer CheatLib.cleanup(Map, allocator, &source);
+
+    var fail_index: usize = 0;
+    var failures: usize = 0;
+    while (fail_index < 16) : (fail_index += 1) {
+        var failing = std.testing.FailingAllocator.init(
+            allocator,
+            .{ .fail_index = fail_index },
+        );
+        var copied = CheatLib.dupeValue(Map, source, failing.allocator()) catch |err| {
+            try std.testing.expectEqual(error.OutOfMemory, err);
+            failures += 1;
+            continue;
+        };
+        CheatLib.cleanup(Map, failing.allocator(), &copied);
+        break;
+    }
+    try std.testing.expect(failures >= 4);
+    try std.testing.expect(fail_index < 16);
+}
+
+const NodeStorePayload = struct {
+    value: u64,
+
+    pub fn deinit(_: *@This(), _: std.mem.Allocator) void {
+        node_store_drop_count += 1;
+    }
+};
+
+test "NodeStore uses compact nullable handles, rejects stale handles, and finalizes payloads" {
+    const allocator = std.testing.allocator;
+    var context = ebr.EbrContext{};
+    defer context.deinit(allocator);
+
+    var rt = try Runtime.init(allocator, 64 * 1024, &context);
+    node_store_drop_count = 0;
+
+    const Ref = CheatLib.NodeRef(NodeStorePayload);
+    const Store = CheatLib.NodeStore(NodeStorePayload);
+    try std.testing.expectEqual(@as(usize, 4), @sizeOf(Ref));
+    try std.testing.expect((Ref{}).isNil());
+
+    const first = try Store.create(&rt, .{ .value = 11 });
+    const second = try Store.create(&rt, .{ .value = 22 });
+    try std.testing.expectEqual(@as(u64, 11), Store.get(&rt, first).?.value);
+    try std.testing.expectEqual(@as(usize, 2), Store.count(&rt));
+
+    try std.testing.expect(Store.remove(&rt, first));
+    try std.testing.expect(Store.get(&rt, first) == null);
+    try std.testing.expectEqual(@as(usize, 1), node_store_drop_count);
+    try std.testing.expectEqual(@as(u64, 22), Store.get(&rt, second).?.value);
+
+    // Cross the 4,096-slot initial capacity. Growth must preserve all compact
+    // handles and must not drop bitwise-moved payloads.
+    var i: usize = 0;
+    while (i < 4096) : (i += 1) {
+        _ = try Store.create(&rt, .{ .value = @intCast(100 + i) });
+    }
+    try std.testing.expectEqual(@as(usize, 4097), Store.count(&rt));
+    try std.testing.expectEqual(@as(u64, 22), Store.get(&rt, second).?.value);
+    try std.testing.expectEqual(@as(usize, 1), node_store_drop_count);
+
+    rt.deinit();
+    try std.testing.expectEqual(@as(usize, 4098), node_store_drop_count);
+    try std.testing.expect(Store.get(&rt, second) == null);
+}
+
+test "NodeStore releases every payload at the outermost lexical binding" {
+    const allocator = std.testing.allocator;
+    var context = ebr.EbrContext{};
+    defer context.deinit(allocator);
+
+    var rt = try Runtime.init(allocator, 64 * 1024, &context);
+    defer rt.deinit();
+    node_store_drop_count = 0;
+
+    const Store = CheatLib.NodeStore(NodeStorePayload);
+    const outer = try Store.bind(&rt);
+    const inner = try Store.bind(&rt);
+    try std.testing.expectEqual(outer, inner);
+
+    const first = try Store.createBound(outer, .{ .value = 1 });
+    _ = try Store.createBound(inner, .{ .value = 2 });
+    Store.releaseBound(inner);
+    try std.testing.expectEqual(@as(usize, 0), node_store_drop_count);
+    try std.testing.expectEqual(@as(u64, 1), Store.getBound(outer, first).?.value);
+
+    Store.releaseBound(outer);
+    try std.testing.expectEqual(@as(usize, 2), node_store_drop_count);
+    try std.testing.expect(Store.getBound(outer, first) == null);
+}
+
+test "bounds-safe list access returns optionals, mutable aliases, and compact node NIL" {
+    const allocator = std.testing.allocator;
+    var values: std.ArrayListUnmanaged(u64) = .empty;
+    defer values.deinit(allocator);
+    try values.append(allocator, 10);
+
+    try std.testing.expectEqual(@as(?u64, 10), CheatLib.getAtOpt(values, 0));
+    try std.testing.expectEqual(@as(?u64, null), CheatLib.getAtOpt(values, 1));
+    const ptr = CheatLib.getAtPtrOpt(&values, 0).?;
+    ptr.* = 25;
+    try std.testing.expectEqual(@as(u64, 25), values.items[0]);
+    try std.testing.expect(CheatLib.getAtPtrOpt(&values, 1) == null);
+    const values_ptr = &values;
+    const forwarded_ptr = &values_ptr;
+    const forwarded = CheatLib.getAtPtrOpt(forwarded_ptr, 0).?;
+    forwarded.* = 30;
+    try std.testing.expectEqual(@as(u64, 30), values.items[0]);
+
+    const Ref = CheatLib.NodeRef(NodeStorePayload);
+    var refs: std.ArrayListUnmanaged(Ref) = .empty;
+    defer refs.deinit(allocator);
+    try refs.append(allocator, Ref.fromHandle(7));
+    try std.testing.expectEqual(@as(u32, 8), CheatLib.getNodeAt(refs, 0).encoded);
+    try std.testing.expect(CheatLib.getNodeAt(refs, 1).isNil());
+}
+
+test "getAtOpt flattens optional list elements" {
+    const values = [_]?u64{ 10, null };
+
+    try std.testing.expectEqual(@as(?u64, 10), CheatLib.getAtOpt(values[0..], 0));
+    try std.testing.expectEqual(@as(?u64, null), CheatLib.getAtOpt(values[0..], 1));
+    try std.testing.expectEqual(@as(?u64, null), CheatLib.getAtOpt(values[0..], 2));
+}
+
+test "optional payload access returns a mutable alias" {
+    const Payload = struct { value: u64 };
+    var present: ?Payload = .{ .value = 4 };
+    const ptr = CheatLib.getOptionalPtr(&present).?;
+    ptr.value = 9;
+    try std.testing.expectEqual(@as(u64, 9), present.?.value);
+
+    var absent: ?Payload = null;
+    try std.testing.expect(CheatLib.getOptionalPtr(&absent) == null);
+}
+
+test "Rc and WeakRc share one allocation while preserving the ctrl.data ABI" {
+    const allocator = std.testing.allocator;
+    const profile_allocs_before = alloc_profile.totalAllocs();
+    const rc = try CheatLib.rcCreate(u64, allocator, 42);
+    const weak = CheatLib.rcDowngrade(u64, rc);
+
+    try std.testing.expectEqual(3 * @sizeOf(usize), @sizeOf(CheatLib.RcControlBlock(u64)));
+    try std.testing.expectEqual(@as(u64, 42), rc.ctrl.data.*);
+    const ctrl_addr = @intFromPtr(rc.ctrl);
+    const data_addr = @intFromPtr(rc.ctrl.data);
+    try std.testing.expect(data_addr > ctrl_addr);
+    try std.testing.expect(data_addr - ctrl_addr <= @sizeOf(CheatLib.RcControlBlock(u64)) + @alignOf(u64));
+
+    CheatLib.rcRelease(u64, allocator, rc);
+    try std.testing.expect(CheatLib.weakRcUpgrade(u64, weak) == null);
+    CheatLib.weakRcRelease(u64, allocator, weak);
+    try std.testing.expectEqual(profile_allocs_before, alloc_profile.totalAllocs());
+}
+
+test "last Rc strong release keeps the control block alive through self-WeakRc cleanup" {
+    const SelfLinked = struct {
+        self: CheatLib.WeakRc(@This()),
+    };
+    const allocator = std.testing.allocator;
+    const rc = try CheatLib.rcCreate(SelfLinked, allocator, undefined);
+    rc.ctrl.data.self = CheatLib.rcDowngrade(SelfLinked, rc);
+
+    // The payload's WeakRc release runs inside this last-strong release. The
+    // implicit weak must prevent an inner free followed by an outer double-free.
+    CheatLib.rcRelease(SelfLinked, allocator, rc);
+}
 
 test "CheatLib.read returns immediately when fd already has bytes" {
     var fds: [2]i32 = undefined;
@@ -219,12 +682,7 @@ test "Root Stack Trampoline: C Standard Library Integration" {
 
     std.debug.print("\n\n--- Start FFI Trampoline Test ---", .{});
 
-    try sched.submitSpawn(
-        @intFromPtr(&Runtime.entryWrapper),
-        @as(qs.TaskFn, @ptrCast(&fiberFfiTask)),
-        null,
-        .{}
-    );
+    try sched.submitSpawn(@intFromPtr(&Runtime.entryWrapper), @as(qs.TaskFn, @ptrCast(&fiberFfiTask)), null, .{});
 
     // This will run until the fiber finishes.
     sched.run();

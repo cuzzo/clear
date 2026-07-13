@@ -1,0 +1,105 @@
+# Benchmark 24: TCP JSON File Server -- CLEAR
+#
+# Protocol (inline text, \r\n terminated):
+#   SET:N  -> generate JSON file data/N.json, respond +OK\r\n
+#   GET:N  -> read + parse JSON via std.json FFI, respond :SUM\r\n
+#   QUIT   -> close connection
+#   READY? -> respond +READY\r\n (health check)
+#
+# JSON format: {"id":N,"data":[1,2,3,...,size]}
+# Size distribution: size(id) = ((id * 7 + 13) MOD 997) + 10
+
+# Direct std.json FFI -- no json_native.zig shim needed.
+EXTERN STRUCT ParseOptions {} FROM "std.json";
+EXTERN STRUCT JsonRecord { id: Int64, data: Int64[] };
+EXTERN STRUCT Parsed {
+  value: JsonRecord
+} CLOSE "deinit" AS "Parsed(JsonRecord)" FROM "std.json";
+EXTERN FN parseFromSlice<T>(comptime: T, content: String, options: ParseOptions) RETURNS !Parsed EFFECTS :alloc:heap FROM "std.json";
+
+EXTERN FN mkdir(path: String, mode: UInt32) RETURNS Int64 FROM "std.c";
+
+FN sizeForId(id: Int64) RETURNS Int64 ->
+    RETURN ((id * 7 + 13) MOD 997) + 10;
+END
+
+FN generateJson(id: Int64) RETURNS String ->
+    sz = sizeForId(id);
+    MUTABLE parts: String[]@list = [];
+    FOR i IN (1_i64 ..= sz) -> parts.append(i.toString());
+    RETURN "{\"id\":${id.toString()},\"data\":[${join(parts, ",")}]}";
+END
+
+FN parseJsonArraySum(content: String) RETURNS !Int64 ->
+    parsed = parseFromSlice(JsonRecord, content, ParseOptions{}) OR_ELSE RAISE;
+    MUTABLE sum: Int64 = 0;
+    FOR i IN (0_i64 ..< parsed.value.data.length()) DO
+        sum += parsed.value.data[i];
+    END
+    RETURN sum;
+END
+
+FN handleClient!(client: TCPClient) RETURNS !Void ->
+    MUTABLE running: Bool = TRUE;
+    WHILE running DO
+        data = tcpRead(client);
+        IF data.length() == 0 THEN
+            running = FALSE;
+        ELSE
+            MUTABLE resp = "";
+            MUTABLE pos: Int64 = 0;
+            WHILE pos < data.length() DO
+                # Find end of line
+                MUTABLE eol = pos;
+                WHILE eol < data.length() AND charAt(data, eol) != "\r" AND charAt(data, eol) != "\n" DO
+                    eol += 1;
+                END
+                line = substr(data, pos, eol - pos);
+
+                # Skip \r\n
+                pos = eol;
+                WHILE pos < data.length() AND (charAt(data, pos) == "\r" OR charAt(data, pos) == "\n") DO
+                    pos += 1;
+                END
+
+                IF line.length() == 0 THEN
+                    # skip empty lines
+                ELSE_IF startsWith?(line, "SET:") THEN
+                    idStr = substr(line, 4, line.length() - 4);
+                    id = toInt(toNumber(idStr) OR_ELSE 0.0);
+                    json = generateJson(id);
+                    writeFile("data/${id.toString()}.json", json);
+                    resp = resp $+ "+OK\r\n";
+                ELSE_IF startsWith?(line, "GET:") THEN
+                    idStr = substr(line, 4, line.length() - 4);
+                    id = toInt(toNumber(idStr) OR_ELSE 0.0);
+                    content = readFile("data/${id.toString()}.json");
+                    sum = parseJsonArraySum(content) OR_ELSE RAISE;
+                    resp = resp $+ ":${sum.toString()}\r\n";
+                ELSE_IF line == "QUIT" THEN
+                    resp = resp $+ "+OK\r\n";
+                    running = FALSE;
+                ELSE_IF line == "READY?" THEN
+                    resp = resp $+ "+READY\r\n";
+                ELSE
+                    resp = resp $+ "-ERR unknown command\r\n";
+                END
+            END
+            IF resp.length() > 0 -> tcpWrite(client, resp);
+        END
+    END
+END
+
+FN main() RETURNS Void ->
+    mkdir("data", 0o755_u32);
+    server = TCPServer::listen(6390);
+    print("CLEAR json-api listening on port 6390");
+
+    MUTABLE tasks: ~Void[]@list = [];
+    WHILE TRUE DO
+        client = accept(server);
+        tasks.append(BG {
+            handleClient!(client);
+        });
+    END
+END

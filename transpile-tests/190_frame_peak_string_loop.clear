@@ -1,0 +1,32 @@
+# Test: MUTABLE string concat in FOR loop has bounded frame arena.
+# Each iteration's old string value is reclaimed via loopPreserveAndRewind.
+# Peak frame usage should stay bounded regardless of iteration count.
+
+FN buildResponse(n: Int64) RETURNS !String ->
+    MUTABLE resp = "";
+    FOR i IN (1_i64 ..= n) DO
+        resp = resp $+ ":OK\r\n";
+    END
+    RETURN resp;
+END
+
+FN main() RETURNS Void ->
+    # Run twice to verify frame is reclaimed between calls.
+    r1 = buildResponse(500);
+    peak1 = framePeakBytes();
+
+    r2 = buildResponse(500);
+    peak2 = framePeakBytes();
+
+    # Peak is a high-water mark, so peak2 >= peak1. But it should NOT grow
+    # proportionally with the number of calls. If unbounded, peak2 would be
+    # much larger than peak1. Allow generous headroom for GPA/suite overhead.
+    ASSERT peak2 < 2000000, "frame peak should stay bounded (< 2 MB for 500-iteration concat)";
+
+    # Final result correctness
+    ASSERT r1.length() > 0, "should have built a response";
+    ASSERT r2.length() == r1.length(), "second call same result";
+
+    print("PASS: frame peak bounded in string loop");
+    RETURN;
+END

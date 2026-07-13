@@ -6,7 +6,7 @@ pub fn build(b: *std.Build) void {
 
     const build_root = b.build_root.path orelse ".";
     const transpiler = b.fmt("{s}/../../src/backends/transpiler.rb", .{build_root});
-    const main_src = b.fmt("{s}/src/main.cht", .{build_root});
+    const main_src = b.fmt("{s}/src/main.clear", .{build_root});
 
     // cheat_runtime module: root at zig/ so ../lib/ imports in runtime-header.zig work
     const cheat_runtime_mod = b.createModule(.{
@@ -22,7 +22,7 @@ pub fn build(b: *std.Build) void {
         .optimize = optimize,
     });
 
-    // Transpile main.cht → Zig module
+    // Transpile main.clear → Zig module
     const transpile_main = b.addSystemCommand(&.{ "ruby", transpiler, "--module", main_src });
     const main_zig = transpile_main.captureStdOut(.{ .basename = "main.zig" });
 

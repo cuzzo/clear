@@ -7,7 +7,7 @@ require "optparse"
 require "benchmark"
 
 root = File.expand_path("..", __dir__)
-src_root = File.join(root, "src")
+src_root = File.join(root, "compiler", "ruby")
 $LOAD_PATH.unshift(src_root)
 $LOAD_PATH.unshift(File.join(src_root, "ast"))
 $LOAD_PATH.unshift(File.join(src_root, "mir"))
@@ -24,7 +24,7 @@ options = {
 }
 
 OptionParser.new do |opts|
-  opts.banner = "Usage: ruby tools/dump_mir_tree.rb [options] path/to/file.cht"
+  opts.banner = "Usage: ruby tools/dump_mir_tree.rb [options] path/to/file.clear"
   opts.on("-o", "--output PATH", "Write JSON to PATH") { |path| options[:output] = path }
   opts.on("--program", "Dump lower_program instead of lower_module") { options[:module_mode] = false }
 end.parse!
@@ -37,7 +37,7 @@ end
 source_path = File.expand_path(source_path)
 source = File.read(source_path)
 source_dir = File.dirname(source_path)
-output_path = options[:output] || File.join("/tmp", "#{File.basename(source_path, ".cht")}.mir-tree.json")
+output_path = options[:output] || File.join("/tmp", "#{File.basename(source_path, ".clear")}.mir-tree.json")
 
 def primitive_json_value?(value)
   value.nil? || value.equal?(true) || value.equal?(false) ||

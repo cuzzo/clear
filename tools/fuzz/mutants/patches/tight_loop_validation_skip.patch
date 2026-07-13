@@ -1,6 +1,6 @@
-diff --git a/src/annotator/helpers/effects.rb b/src/annotator/helpers/effects.rb
---- a/src/annotator/helpers/effects.rb
-+++ b/src/annotator/helpers/effects.rb
+diff --git a/compiler/ruby/annotator/helpers/effects.rb b/compiler/ruby/annotator/helpers/effects.rb
+--- a/compiler/ruby/annotator/helpers/effects.rb
++++ b/compiler/ruby/annotator/helpers/effects.rb
 @@ -1156,6 +1156,7 @@ module EffectTracker
    sig { params(stmts: AstScanInput, loop_node: TightLoopNode).void }
    def validate_tight_body!(stmts, loop_node)

@@ -17,14 +17,14 @@ This tracker focuses on CLEAR's memory-safety mutation coverage. The P1 goal was
 
 ## Current P2 Status
 
-P2 is the targeted safety wall: compiler patch mutants that deliberately break one memory-safety invariant and prove the relevant fuzz/transpile surface catches it. The fuzz side is now the stronger P2 gate because it runs matrix templates instead of one hand-picked `.cht` file.
+P2 is the targeted safety wall: compiler patch mutants that deliberately break one memory-safety invariant and prove the relevant fuzz/transpile surface catches it. The fuzz side is now the stronger P2 gate because it runs matrix templates instead of one hand-picked `.clear` file.
 
 | Area | Gate strategy | Current result | Status |
 | :--- | :--- | :--- | :--- |
 | Fuzz safety mutants | 37 targeted compiler patch mutants | 37/37 killed; every baseline matrix clean | Complete for current P2 scope |
 | Fuzz coverage registry | Registered/documented template coverage | 64/64 templates documented; no coverage gaps | Clean |
 | MIR negative matrix | Direct malformed MIR cells | 45/45 baseline cells reject with expected diagnostics | Strengthened |
-| Transpile patch mutants | 5 targeted `.cht` fixtures | 5/5 killed on the existing gate | Useful smoke, not the primary P2 wall |
+| Transpile patch mutants | 5 targeted `.clear` fixtures | 5/5 killed on the existing gate | Useful smoke, not the primary P2 wall |
 
 New P2 mutants added:
 
@@ -94,4 +94,4 @@ deduplication, recursive capture-map construction, and recursive destroy-action
 registration. Future work should add exact gates for newly stabilized helpers
 instead of trying to promote the entire emit module at once.
 
-Future work should add exact hard gates for newly discovered safety predicates rather than raising broad facade gates unless the subject is split into smaller cohesive units. Native CLEAR-source mutation for every `.cht` transpile-test is still separate from P2 patch mutants; patch mutants prove compiler invariants are load-bearing, while source mutants would prove individual corpus assertions are load-bearing.
+Future work should add exact hard gates for newly discovered safety predicates rather than raising broad facade gates unless the subject is split into smaller cohesive units. Native CLEAR-source mutation for every `.clear` transpile-test is still separate from P2 patch mutants; patch mutants prove compiler invariants are load-bearing, while source mutants would prove individual corpus assertions are load-bearing.

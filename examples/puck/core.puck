@@ -1,7 +1,7 @@
 # Core Puck surface library.
 #
 # This file is intentionally Puck source, not CLEAR. The CLEAR parser in
-# puck.cht validates this syntax shape. These macros define the first layer of
+# puck.clear validates this syntax shape. These macros define the first layer of
 # realistic Oberon surface syntax over the primitive core:
 # assignment, calls, IF, LOOP, EXIT, macro expansion, and scope cleanup.
 

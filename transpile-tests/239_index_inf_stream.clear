@@ -1,0 +1,31 @@
+# Test: INDEX on ~T[INF] streams with LIMIT (and optional WHERE)
+
+FN main() RETURNS Void ->
+    # INDEX on ~T[INF] with LIMIT: group integers by their string representation
+    c1: ~Int64[INF] = BG STREAM {
+        MUTABLE i: Int64 = 0;
+        WHILE TRUE DO
+            YIELD i MOD 3;
+            i = i + 1;
+        END
+    };
+    grouped1 = c1 |> LIMIT 9 |> INDEX toString(_);
+    ASSERT grouped1["0"]?.length() == 3, "three 0s";
+    ASSERT grouped1["1"]?.length() == 3, "three 1s";
+    ASSERT grouped1["2"]?.length() == 3, "three 2s";
+
+    # INDEX on ~T[INF] with WHERE then LIMIT: only values < 2
+    c2: ~Int64[INF] = BG STREAM {
+        MUTABLE j: Int64 = 0;
+        WHILE TRUE DO
+            YIELD j MOD 4;
+            j = j + 1;
+        END
+    };
+    grouped2 = c2 |> WHERE _ < 2 |> LIMIT 6 |> INDEX toString(_);
+    ASSERT grouped2["0"]?.length() == 3, "three 0s after WHERE";
+    ASSERT grouped2["1"]?.length() == 3, "three 1s after WHERE";
+
+    print("OK");
+    RETURN;
+END

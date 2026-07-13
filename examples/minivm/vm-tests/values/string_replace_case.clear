@@ -1,0 +1,9 @@
+FN main() RETURNS Int64 ->
+    replaced = replace("hello world", "world", "clear");
+    lower = downcase("MiXeD");
+    upper = upcase("MiXeD");
+    IF replaced == "hello clear" AND lower == "mixed" AND upper == "MIXED" THEN
+        RETURN 1_i64;
+    END
+    RETURN 0_i64;
+END

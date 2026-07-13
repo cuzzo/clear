@@ -3,11 +3,24 @@
 
 require_relative "../lib/ruby_to_clear"
 
-if ARGV.empty?
-  puts "Usage: ruby-to-clear <file.rb>"
+usage = "Usage: ruby-to-clear [--strict] [--helper-config path.json] <file.rb>"
+
+if ARGV.empty? || ARGV.include?("--help") || ARGV.include?("-h")
+  puts usage
   exit 1
 end
 
+strict = ARGV.delete("--strict")
+helper_config = nil
+if (idx = ARGV.index("--helper-config"))
+  helper_config = ARGV[idx + 1]
+  unless helper_config
+    warn "--helper-config requires a path"
+    exit 1
+  end
+  ARGV.delete_at(idx + 1)
+  ARGV.delete_at(idx)
+end
 path = ARGV[0]
 unless File.exist?(path)
   puts "File not found: #{path}"
@@ -15,7 +28,7 @@ unless File.exist?(path)
 end
 
 begin
-  puts RubyToClear.transpile_file(path)
+  puts RubyToClear.transpile_file(path, raise_on_error: strict, helper_config: helper_config)
 rescue StandardError => e
   warn "Error: #{e.message}"
   exit 1

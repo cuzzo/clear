@@ -1,0 +1,15 @@
+FN main() RETURNS Void ->
+    t0 = timestampMs();
+    MUTABLE m: HashMap<Int64, Int64> = {};
+    FOR i IN (0_i64 ..< 100000_i64) DO m[i] = i * 2_i64; END
+    insertMs = timestampMs() - t0;
+    t1 = timestampMs();
+    MUTABLE total: Int64 = 0_i64;
+    FOR j IN (0_i64 ..< 100000_i64) DO total = total + (m[j] OR_ELSE 0_i64); END
+    lookupMs = timestampMs() - t1;
+    totalMs = insertMs + lookupMs;
+    print("total = ${total.toString()}");
+    print("Insert: ${insertMs.toString()} ms | Lookup: ${lookupMs.toString()} ms");
+    print("BENCH_RESULT: ${totalMs.toString()} ms");
+    RETURN;
+END

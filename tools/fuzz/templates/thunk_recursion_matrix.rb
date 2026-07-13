@@ -197,7 +197,7 @@ FuzzGenerator.register(:thunk_recursion_matrix, cells: THUNK_RECURSION_CELLS) do
       FN repeat(n: Int64, acc: String) RETURNS String
         EFFECTS REENTRANT:THUNK ->
         IF n <= 0_i64 -> RETURN acc;
-        RETURN repeat(n - 1_i64, acc + COPY "x");
+        RETURN repeat(n - 1_i64, acc $+ COPY "x");
       END
 
       FN main() RETURNS Void ->

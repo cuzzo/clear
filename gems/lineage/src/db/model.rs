@@ -63,6 +63,7 @@ pub struct LogicalUnit {
 }
 
 impl LogicalUnit {
+    #[allow(clippy::too_many_arguments)]
     pub fn new(
         name: impl Into<String>,
         kind: UnitKind,

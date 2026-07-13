@@ -1,6 +1,6 @@
-# Template: OR heap destination matrix.
+# Template: OR_ELSE heap destination matrix.
 #
-# Targets MIR lowering's heap-destination placement for owned OR/TryCatch/
+# Targets MIR lowering's heap-destination placement for owned OR_ELSE/TryCatch/
 # optional branches. Every cell is a valid source program; a failure is a
 # surfaced compiler bug, not a fuzz harness exception.
 
@@ -69,13 +69,13 @@ def ohd_make_body(shape)
   when :string
     'out: ?String = COPY "ok"; RETURN out;'
   when :concat
-    'out: ?String = COPY "o" + COPY "k"; RETURN out;'
+    'out: ?String = COPY "o" $+ COPY "k"; RETURN out;'
   when :struct_owned
     'out: ?Box = Box{ label: COPY "ok" }; RETURN out;'
   when :list_owned
-    "MUTABLE xs: Int64[]@list = [];\n    xs.append(1_i64);\n    xs.append(2_i64);\n    out: ?Int64[]@list = xs;\n    RETURN out;"
+    "MUTABLE xs: Int64[]@list = [];\n    xs.append(1_i64);\n    xs.append(2_i64);\n    out: ?(Int64[]@list) = xs;\n    RETURN out;"
   when :string_list_owned
-    "out: ?String[]@list = mkStringList(); RETURN out;"
+    "out: ?(String[]@list) = mkStringList(); RETURN out;"
   when :union_owned
     "out: ?Val = Val{ Items: mkStringList() }; RETURN out;"
   when :nested_owned
@@ -88,11 +88,11 @@ def ohd_fallback(shape)
   when :string
     'COPY "fb"'
   when :concat
-    'COPY "f" + COPY "b"'
+    'COPY "f" $+ COPY "b"'
   when :struct_owned
     'Box{ label: COPY "fb" }'
   when :list_owned
-    'fallbackList() OR RAISE'
+    'fallbackList() OR_ELSE RAISE'
   when :string_list_owned
     'mkStringList()'
   when :union_owned
@@ -128,18 +128,19 @@ end
 def ohd_or_expr(or_kind, shape)
   case or_kind
   when :orelse_success
-    "maybeSome(TRUE) OR #{ohd_fallback_call(shape)}"
+    "maybeSome(TRUE) OR_ELSE #{ohd_fallback_call(shape)}"
   when :orelse_fallback
-    "maybeSome(FALSE) OR #{ohd_fallback_call(shape)}"
+    "maybeSome(FALSE) OR_ELSE #{ohd_fallback_call(shape)}"
   when :try_success
-    "makeFallible(TRUE) OR #{ohd_fallback_call(shape)}"
+    "makeFallible(TRUE) OR_ELSE #{ohd_fallback_call(shape)}"
   when :try_fallback
-    "makeFallible(FALSE) OR #{ohd_fallback_call(shape)}"
+    "makeFallible(FALSE) OR_ELSE #{ohd_fallback_call(shape)}"
   end
 end
 
 FuzzGenerator.register(:or_heap_destination_matrix, cells: OR_HEAP_DESTINATION_CELLS) do |p|
   ty = ohd_type(p[:shape])
+  optional_ty = ty.include?("[]") ? "?(#{ty})" : "?#{ty}"
   expr = ohd_or_expr(p[:or_kind], p[:shape])
   prelude = "#{ohd_prelude(p[:shape])}#{ohd_shape_helpers(p[:shape])}"
   fallback_helper = p[:shape] == :list_owned ? <<~CHT : ""
@@ -152,11 +153,11 @@ FuzzGenerator.register(:or_heap_destination_matrix, cells: OR_HEAP_DESTINATION_C
   CHT
   helpers = <<~CHT
     #{prelude}#{fallback_helper}
-    FN maybeSome(flag: Bool) RETURNS ?#{ty} ->
+    FN maybeSome(flag: Bool) RETURNS #{optional_ty} ->
         IF flag THEN
             #{ohd_make_body(p[:shape])}
         END
-        out: ?#{ty} = NIL;
+        out: #{optional_ty} = NIL;
         RETURN out;
     END
 

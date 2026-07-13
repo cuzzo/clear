@@ -8,7 +8,7 @@
 #   - docs/sharing-capabilities.md (the canonical Types/Capabilities/
 #     Boundaries model)
 #   - src/ast/parser.rb:1546 REQUIRES_VALID_FAMILIES
-#   - transpile-tests/349_polymorphic_transaction_acceptance.cht
+#   - transpile-tests/349_polymorphic_transaction_acceptance.clear
 #     (canonical end-to-end pattern)
 #   - spec/sync_polymorphism_integration_spec.rb /
 #     polymorphic_transaction_acceptance_spec.rb (annotator-level coverage)
@@ -84,7 +84,7 @@ def admission_callee_def(callee)
     END
   CHT
 
-  # Match the patterns from transpile-tests/349_polymorphic_transaction_acceptance.cht:
+  # Match the patterns from transpile-tests/349_polymorphic_transaction_acceptance.clear:
   # - LOCKED/LOCAL/concrete: RETURNS Void (default sync policy handles LockTimeout)
   # - VERSIONED/ATOMIC: RETURNS !Void (MvccConflict surfaces explicitly)
   case callee
@@ -155,7 +155,7 @@ end
 FuzzGenerator.register(:polymorphic_sync_admission, cells: POLYMORPHIC_ADMISSION_CELLS) do |p|
   callee_def = admission_callee_def(p[:callee])
   caller_decl = admission_caller_decl(p[:caller])
-  call = %i[shared_param req_locked req_versioned].include?(p[:callee]) ? "tick!(c) OR RAISE" : "tick!(c)"
+  call = %i[shared_param req_locked req_versioned].include?(p[:callee]) ? "tick!(c) OR_ELSE RAISE" : "tick!(c)"
 
   <<~CHT
     STRUCT Counter { value: Int64 }

@@ -5,7 +5,7 @@ fix). Each is reproduced by a `:pass` fuzz cell that currently fails;
 the red cell is the live ticket.
 
 All three are the **same family**: the catch / OR-rescue path
-(`expr OR fallback`) mishandling allocator identity / cleanup across
+(`expr OR_ELSE fallback`) mishandling allocator identity / cleanup across
 the success vs error split. This is invariant #9 ("error paths
 preserve allocator identity") and is exactly the decision
 `branch_gap_triage` flagged as the P0 — `infer_catch_value_allocator`
@@ -13,7 +13,7 @@ was 12/12 dark and `lower_or_rescue` / `walk_catch_body_for_reassigns`
 heavily fuzz_axis. The modality plan predicted this cluster; the
 targeted matrices confirmed real bugs there.
 
-## B1 — invalid free: OR fallback is a frame value, success is heap
+## B1 — invalid free: OR_ELSE fallback is a frame value, success is heap
 Template `catch_allocator_matrix`, cell
 `{value: string, fallback: frame_var, taken: failure}`.
 

@@ -419,11 +419,11 @@ After these three fixes, the following uses of BORROWED aliases remain valid:
 
 After all three fixes, add two transpile tests to verify end-to-end correctness:
 
-**`transpile-tests/237_borrowed_valid_uses.cht`** - comprehensive positive test: all currently
+**`transpile-tests/237_borrowed_valid_uses.clear`** - comprehensive positive test: all currently
 valid patterns from the "remains allowed" table above should compile and run cleanly with no
 memory leaks.
 
-**`transpile-tests/238_borrowed_field_borrow.cht`** - iterate a struct with a BORROWED field,
+**`transpile-tests/238_borrowed_field_borrow.clear`** - iterate a struct with a BORROWED field,
 verify the iterator pattern from test 185 still compiles and runs. Regression guard.
 
 These are in addition to the annotator-level specs that verify each error fires at compile

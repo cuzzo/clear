@@ -1,0 +1,69 @@
+TEST AtomicParser DO
+  FN parse_type(src: Auto) RETURNS Auto ->
+    MUTABLE tokens = NIL;
+    tokens = Lexer.new(src).tokenize();
+    ClearParser.new(tokens, src).parse_type_annotation();
+  END
+  WHEN "type-level `T@atomic`" DO
+    TEST THAT "parses Int64@atomic with sync == :atomic" DO
+      MUTABLE t = parse_type("Int64@atomic");
+      ASSERT t.sync() == :atomic, "expected t.sync() to eq(:atomic)";
+      ASSERT t.atomic?() == TRUE, "expected t.atomic?() to be true";
+    END
+    TEST THAT "is a separate sync from :locked / :write_locked / :versioned" DO
+      t = parse_type("Int64@atomic");
+      ASSERT t.locked?() == FALSE, "expected t.locked?() to be false";
+      ASSERT t.write_locked?() == FALSE, "expected t.write_locked?() to be false";
+      ASSERT t.versioned?() == FALSE, "expected t.versioned?() to be false";
+    END
+    TEST THAT "is recognized as any_sync? (participates in capability machinery)" DO
+      t = parse_type("Int64@atomic");
+      ASSERT t.any_sync?() == TRUE, "expected t.any_sync?() to be true";
+    END
+    TEST THAT "lowers Int64@atomic to *CheatLib.Atomic(i64)" DO
+      t = parse_type("Int64@atomic");
+      ASSERT t.zig_type() == "*CheatLib.Atomic(i64)", "expected t.zig_type() to eq(\"*CheatLib.Atomic(i64)\")";
+    END
+  END
+  WHEN "join chain `@shared:atomic`" DO
+    TEST THAT "drops the Arc wrap \u{2014} bare `*Atomic(Int64)` (M2.2)" DO
+      t = parse_type("Int64@shared:atomic");
+      ASSERT t.shared?() == TRUE, "expected t.shared?() to be true";
+      ASSERT t.atomic?() == TRUE, "expected t.atomic?() to be true";
+      ASSERT t.zig_type() == "*CheatLib.Atomic(i64)", "expected t.zig_type() to eq(\"*CheatLib.Atomic(i64)\")";
+    END
+    TEST THAT "is order-independent: `@atomic:shared` parses identically" DO
+      MUTABLE a = parse_type("Int64@shared:atomic");
+      MUTABLE b = parse_type("Int64@atomic:shared");
+      ASSERT a.shared?() == b.shared?(), "expected a.shared?() to eq(b.shared?)";
+      ASSERT a.sync() == b.sync(), "expected a.sync() to eq(b.sync)";
+      ASSERT a.zig_type() == b.zig_type(), "expected a.zig_type() to eq(b.zig_type)";
+    END
+  END
+  WHEN "duplicate / illegal joins" DO
+    TEST THAT "rejects `@atomic:locked` (two sync capabilities)" DO
+      ASSERT_RAISES Input, parse_type("Counter@atomic:locked");
+    END
+    TEST THAT "rejects `@atomic:versioned` (two sync capabilities)" DO
+      ASSERT_RAISES Input, parse_type("Counter@atomic:versioned");
+    END
+    TEST THAT "rejects `@locked:atomic` (two sync capabilities, reverse order)" DO
+      ASSERT_RAISES Input, parse_type("Counter@locked:atomic");
+    END
+  END
+  WHEN "primitive cells" DO
+    TEST THAT "parser accepts Int64@shared:atomic" DO
+      t = parse_type("Int64@shared:atomic");
+      ASSERT t.sync() == :atomic, "expected t.sync() to eq(:atomic)";
+      ASSERT t.shared?() == TRUE, "expected t.shared?() to be true";
+    END
+    TEST THAT "parser accepts Float64@shared:atomic" DO
+      t = parse_type("Float64@shared:atomic");
+      ASSERT t.sync() == :atomic, "expected t.sync() to eq(:atomic)";
+    END
+    TEST THAT "parser accepts Bool@shared:atomic" DO
+      t = parse_type("Bool@shared:atomic");
+      ASSERT t.sync() == :atomic, "expected t.sync() to eq(:atomic)";
+    END
+  END
+END

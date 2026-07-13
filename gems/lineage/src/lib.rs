@@ -5,6 +5,8 @@
 
 #[path = "db/engine.rs"]
 pub mod engine;
+#[path = "db/architecture.rs"]
+pub mod architecture;
 #[path = "db/extract.rs"]
 pub mod extract;
 #[path = "db/git.rs"]
@@ -31,8 +33,8 @@ pub mod test_exposure;
 pub mod ui;
 #[path = "db/vcs.rs"]
 pub mod vcs;
-
 pub use engine::{EngineStats, LineageEngine};
+pub use architecture::{architecture_search, ingest_architecture_json, node_neighborhood, owner_inventory, state_access, ArchitectureIngestStats};
 pub use extract::{BoundaryExtractor, HeuristicExtractor, SourceFilter};
 pub use git::GitProvider;
 pub use hazard::{ingest_hazards, HazardIngestStats};

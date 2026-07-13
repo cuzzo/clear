@@ -26,10 +26,10 @@ Suite remains: 342/342 transpile-tests, 2583/0 specs, 0 leaks.
 
 Four latent compiler/stdlib bugs remain, with disabled-test repros:
 
-- `transpile-tests/255_union_equality.cht.disabled` — `IF s == Status.Active` on a payload-bearing union compiles to Zig that fails.
-- `transpile-tests/256_sleep_int_literal.cht.disabled` — `sleep(1)` compiles to Zig that rejects `@bitCast` on `comptime_int`.
-- ~~`transpile-tests/257_concurrent_capture_locked_param.cht.disabled`~~ FIXED. Three bugs combined here, all now closed: (1) pipeline_host's `*const T` + `&name` ctx pattern → migrated to `@TypeOf(name)`; (2) list-source CONCURRENT EACH didn't populate `conc_op.capture_analysis` (analyze_each_op was the non-concurrent analyzer) → now runs `analyze_fiber_captures` after the proxy dispatch; (3) the dual-SymbolEntry root cause: `Scope#initialize_copy` deep-copies SymbolEntries when entering child scopes, so the entry capture analysis sees inside a CONCURRENT body is a stale copy of the function-param entry that propagate_caller_sync! mutates. Fixed by `BgCaptureClassifier` re-resolving captures against `fn.params[i][:symbol]` (the live entry) before classification, and `with_fiber_capture_map` threading the live capture_symbols through to body lowerings so `WITH EXCLUSIVE`'s `with_cap_sync_storage` reads the live `:shared` storage instead of the deep-copy's stale `:stack`.
-- `transpile-tests/258_bg_body_copy_capture.cht.disabled` — `BG { snapshot = COPY items; ... }` for a captured `@list`. CaptureStrategy returns FreshHeapCopy for this, but neither the strategy's `marker_plan` (`[:alloc_mark, ...] + [:cleanup, ...]`) nor the body-side COPY lowering is wired. The body's COPY currently crashes at MIREmitter (`unknown node type Array`); even once lowering succeeds, the heap copy still wouldn't be emitted, producing a silent UAF.
+- `transpile-tests/255_union_equality.clear.disabled` — `IF s == Status.Active` on a payload-bearing union compiles to Zig that fails.
+- `transpile-tests/256_sleep_int_literal.clear.disabled` — `sleep(1)` compiles to Zig that rejects `@bitCast` on `comptime_int`.
+- ~~`transpile-tests/257_concurrent_capture_locked_param.clear.disabled`~~ FIXED. Three bugs combined here, all now closed: (1) pipeline_host's `*const T` + `&name` ctx pattern → migrated to `@TypeOf(name)`; (2) list-source CONCURRENT EACH didn't populate `conc_op.capture_analysis` (analyze_each_op was the non-concurrent analyzer) → now runs `analyze_fiber_captures` after the proxy dispatch; (3) the dual-SymbolEntry root cause: `Scope#initialize_copy` deep-copies SymbolEntries when entering child scopes, so the entry capture analysis sees inside a CONCURRENT body is a stale copy of the function-param entry that propagate_caller_sync! mutates. Fixed by `BgCaptureClassifier` re-resolving captures against `fn.params[i][:symbol]` (the live entry) before classification, and `with_fiber_capture_map` threading the live capture_symbols through to body lowerings so `WITH EXCLUSIVE`'s `with_cap_sync_storage` reads the live `:shared` storage instead of the deep-copy's stale `:stack`.
+- `transpile-tests/258_bg_body_copy_capture.clear.disabled` — `BG { snapshot = COPY items; ... }` for a captured `@list`. CaptureStrategy returns FreshHeapCopy for this, but neither the strategy's `marker_plan` (`[:alloc_mark, ...] + [:cleanup, ...]`) nor the body-side COPY lowering is wired. The body's COPY currently crashes at MIREmitter (`unknown node type Array`); even once lowering succeeds, the heap copy still wouldn't be emitted, producing a silent UAF.
 
 ## Catalog of bugs fixed
 
@@ -67,18 +67,18 @@ Four latent compiler/stdlib bugs remain, with disabled-test repros:
    but AWAIT checked the marker via `getStr(pcar)` which returns `""` for non-`Str`
    variants. The equality always failed and AWAIT silently returned the bgFid
    `Int64Val` instead of NEXTing the promise. Strictly a CLEAR-program bug in
-   `_bc_runner.cht`, not a compiler bug — the compiler had no way to catch it
+   `_bc_runner.clear`, not a compiler bug — the compiler had no way to catch it
    because both `getStr` and `getSymName` are valid `Value -> String` functions.
 
 ### Compiler/stdlib bugs that I worked around but did not fix
 
-6. **`Value == Value` on payload union** (worked around in commit `1bc679ec`, repro at `255_union_equality.cht.disabled`)
+6. **`Value == Value` on payload union** (worked around in commit `1bc679ec`, repro at `255_union_equality.clear.disabled`)
    The compiler emits Zig `==` between two values of a payload-bearing union. Zig
    rejects. The compiler should either (a) reject `==` on such unions at the CLEAR
    level with a clear diagnostic pointing at the source line, or (b) synthesize a
    per-union equality helper (compare active tag, then variant-specific equality).
 
-7. **`sleep(1)` comptime_int** (worked around in commit `1bc679ec`, repro at `256_sleep_int_literal.cht.disabled`)
+7. **`sleep(1)` comptime_int** (worked around in commit `1bc679ec`, repro at `256_sleep_int_literal.clear.disabled`)
    The stdlib template `rt.sleep(@intCast(@as(u64, @bitCast({0}))))` substitutes the
    raw expression text. For `sleep(1)` it expands to `@bitCast(1)`, and Zig rejects
    `@bitCast` on `comptime_int`. The annotator knows the param is `:Int64` and the
@@ -124,7 +124,7 @@ Three failure modes did most of the work.
 
 `bc_run.rb` discarded stderr from the bc_runner build. Combined with a file-mtime
 cache that left a stale binary in place when the rebuild failed, this turned every
-commit that broke `_bc_runner.cht` into a no-op:
+commit that broke `_bc_runner.clear` into a no-op:
 
 > Test runs use the cached binary from before the commit ⇒ tests pass ⇒ commit
 > looks green ⇒ commit lands ⇒ next commit inherits a stale-binary state ⇒

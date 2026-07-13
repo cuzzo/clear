@@ -1,6 +1,0 @@
-FN main() RETURNS String ->
-    MUTABLE result = "";
-    result = result + "SET=";
-    result = result + "1;";
-    RETURN result;
-END

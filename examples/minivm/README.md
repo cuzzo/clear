@@ -47,12 +47,12 @@ runtime contract. If that support does not exist yet, the correct behavior is pe
 
 ## Active Path: Bytecode VM
 
-The active execution path is the bytecode compiler + `_bc_runner.cht`.
+The active execution path is the bytecode compiler + `_bc_runner.clear`.
 
 `bc_emitter.rb` compiles a verified `MIR::Program` (post-MIRChecker) to bytecode.
-`_bc_runner.cht` is the CLEAR program that implements `exec!` -- the bytecode interpreter.
+`_bc_runner.clear` is the CLEAR program that implements `exec!` -- the bytecode interpreter.
 
-All collection types (HashMap, @set, @list) in `_bc_runner.cht` use the native CLEAR
+All collection types (HashMap, @set, @list) in `_bc_runner.clear` use the native CLEAR
 `CheatLib.*` implementations via the same API surface as user programs.
 
 ## Running Tests
@@ -79,14 +79,14 @@ ruby examples/minivm/update_vm_golden.rb --target stack
 Run a single CLEAR program on the MiniVM:
 
 ```bash
-ruby examples/minivm/clear run path/to/file.cht
+ruby examples/minivm/clear run path/to/file.clear
 ```
 
 Run a single program through a specific bytecode VM target:
 
 ```bash
-ruby examples/minivm/bc_run.rb examples/minivm/fib21.cht --run --vm=stack
-ruby examples/minivm/bc_run.rb examples/minivm/fib21.cht --run --vm=register
+ruby examples/minivm/bc_run.rb examples/minivm/fib21.clear --run --vm=stack
+ruby examples/minivm/bc_run.rb examples/minivm/fib21.clear --run --vm=register
 ```
 
 Run the register transpile-test allowlist:
@@ -129,7 +129,7 @@ does not obscure semantics or drift from the runtime invariants above.
 Already in place:
 
 - register bytecode emits typed register operations instead of stack operations
-- the register runner is a CLEAR VM in `vm.cht`, not a Ruby interpreter
+- the register runner is a CLEAR VM in `vm.clear`, not a Ruby interpreter
 - register opcodes are predecoded into the dense `RegisterOp` enum
 - dispatch uses a full `MATCH` on `RegisterOp`, which the optimized compiler can
   lower to a jump table
@@ -192,7 +192,7 @@ type_name)` with the user-facing CLEAR type ("Int64" / "Float64" / "String" /
 "Bool"). The names table picks up the `(source_line, source_column,
 end_source_line, type_name)` columns automatically.
 
-### 3. Decoder + arity tables (`vm.cht`)
+### 3. Decoder + arity tables (`vm.clear`)
 
 Three places to extend:
 
@@ -201,7 +201,7 @@ Three places to extend:
 - `registerOpArity` — the runtime arity returned for IP-step calculations.
 - The dispatch loop's `MATCH opcode START` body — the actual implementation.
 
-### 4. Dispatch arm + trace recording (`vm.cht`)
+### 4. Dispatch arm + trace recording (`vm.clear`)
 
 Each register-writing arm follows this pattern:
 
@@ -224,7 +224,7 @@ RegisterOp.IConst ->
 
 The pattern is verbose by design — it's inlined rather than hidden behind a
 helper FN because a `MUTABLE @list` parameter currently doesn't get its
-escape-promotion across file boundaries (`register_debugger.cht` is REQUIREd,
+escape-promotion across file boundaries (`register_debugger.clear` is REQUIREd,
 not same-file). Caller's `traceEvents` cleanup uses `frameAlloc` while a
 helper's append would use `heapAlloc`, producing a double-free. Once
 escape analysis sees cross-file callees (a follow-up to the importer
@@ -235,7 +235,7 @@ traceIWrite!(traceEvents, step, slot, oldVal, iregs[slot], instructionIp,
              recordingActive) OR RAISE;,
 ```
 
-The helper functions are pre-declared in `register_debugger.cht`
+The helper functions are pre-declared in `register_debugger.clear`
 (`traceIWrite!` / `traceFWrite!` / `traceSWrite!` / `traceAlloc!`) so the
 migration is one-pass `sed` over the dispatch arms when cross-file escape
 analysis lands.

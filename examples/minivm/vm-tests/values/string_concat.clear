@@ -1,0 +1,3 @@
+FN main() RETURNS String ->
+    RETURN "hello" $+ " " $+ "vm";
+END

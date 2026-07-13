@@ -1,6 +1,6 @@
-diff --git a/src/mir/hoist.rb b/src/mir/hoist.rb
---- a/src/mir/hoist.rb
-+++ b/src/mir/hoist.rb
+diff --git a/compiler/ruby/mir/hoist.rb b/compiler/ruby/mir/hoist.rb
+--- a/compiler/ruby/mir/hoist.rb
++++ b/compiler/ruby/mir/hoist.rb
 @@ -499,12 +499,8 @@ module Hoist
    sig { params(blk: T.proc.returns(T.untyped)).returns([T.untyped, T::Array[T.untyped]]) }
    def lower_head(&blk)

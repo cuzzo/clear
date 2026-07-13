@@ -4758,6 +4758,9 @@ if pre_init.is_empty() {
     }
 
     pub(in crate::ast) fn dotted_call(&self, node: TreeSitterNode<'_>) -> bool {
+        if node.kind() == "generic_function" {
+            return false;
+        }
         let raw_named = self.raw_named_children(node);
         if raw_named.len() == 1
             && node_text(node, self.source) == node_text(raw_named[0], self.source)

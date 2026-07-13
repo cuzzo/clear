@@ -243,7 +243,7 @@ Example diagnostic:
   Alternative: pin x: Int64 at the signature.
     line 12: FN parseValue(x: Int64) -> ...
     line 30: parseValue(count)            -- already an Int64
-    line 45: parseValue(Int.fromString(s) OR RAISE)
+    line 45: parseValue(Int.fromString(s) OR_ELSE RAISE)
 
   Pick a fix or restructure to converge on one type.
 ```
@@ -445,13 +445,13 @@ shows the ambiguity surface.
 - **Local re-binding ambiguity**: `MUTABLE x: Auto = 0_i64; x = "hi"`
   produces the ranked diagnostic.
 
-`transpile-tests/3XX_gradual_basic.cht`:
+`transpile-tests/3XX_gradual_basic.clear`:
 
 - End-to-end `--gradual` build of a small program with empty
   containers, omitted param/return types, and a single resolved-by-use
   binding. Compiles and runs.
 
-`transpile-tests/3XX_gradual_ambiguity.cht`:
+`transpile-tests/3XX_gradual_ambiguity.clear`:
 
 - A program that produces an ambiguity. Expects the build to fail
   with the ranked diagnostic.
@@ -503,7 +503,7 @@ candidate concrete types per operator class and presents them as
 | `/` | `Float64` | `Int64` | "Int64 = integer division (truncates)"|
 | `%` | `Int64` | — | numeric integer only |
 | `==`, `!=`, `<`, `>`, `<=`, `>=` | `Int64` | `Float64`, `String`, comparable types | "must be a comparable type" |
-| `&&`, `||` | `Bool` | — | logical |
+| `AND`, `OR` | `Bool` | — | logical |
 | `&` (string concat alt) | `String` | — | when explicit concat |
 
 For an unresolved slot, the body walker that visits operator

@@ -1,0 +1,19 @@
+{
+  "mutual_recursion.rb": {
+    "mutual_a": "unknown",
+    "mutual_b": "unknown",
+    "call_mutual": "unknown"
+  },
+  "normalized_domains.rb": {
+    "repeated_sort": "O(N)",
+    "callback_result": "unknown",
+    "allocate_helper": "O(N)",
+    "call_allocate_helper": "O(N)"
+  },
+  "recursion.rb": {
+    "fib": "O(N)",
+    "binary_search": "O(log N)",
+    "permute": "O(N)",
+    "recurse_unknown": "unknown"
+  }
+}

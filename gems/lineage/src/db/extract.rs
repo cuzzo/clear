@@ -6,7 +6,7 @@ use streaming_iterator::StreamingIterator;
 
 pub const DEFAULT_CODE_EXTENSIONS: &[&str] = &[
     "rb", "zig", "py", "js", "jsx", "mjs", "cjs", "ts", "tsx", "lua", "c", "h", "cc", "cpp",
-    "cxx", "hh", "hpp", "hxx", "cs", "java", "swift", "kt", "kts", "go", "rs", "php", "S",
+    "cxx", "hh", "hpp", "hxx", "cs", "java", "swift", "kt", "kts", "go", "rs", "php", "sql", "S",
 ];
 const DEFAULT_IGNORED_COMPONENTS: &[&str] = &[
     ".git",
@@ -177,6 +177,7 @@ impl BoundaryExtractor for HeuristicExtractor {
         let ext = extension(&file.path).map(|value| normalize_extension(&value));
         let lines: Vec<&str> = file.contents.lines().collect();
         let candidates = match ext.as_deref() {
+            Some("sql") => sql_candidates(file, &lines),
             Some(extension) if TreeSitterAdapter::for_extension(extension).is_some() => {
                 tree_sitter_candidates(file, extension, &lines).unwrap_or_default()
             }
@@ -215,6 +216,30 @@ impl BoundaryExtractor for HeuristicExtractor {
             })
             .collect()
     }
+}
+
+fn sql_candidates(file: &BlobFile, lines: &[&str]) -> Vec<Candidate> {
+    if lines.is_empty() {
+        return Vec::new();
+    }
+    let query_id = lines.iter().find_map(|line| {
+        line.trim()
+            .strip_prefix("-- query-id:")
+            .map(str::trim)
+            .filter(|value| !value.is_empty())
+    });
+    let fallback = file.path.rsplit('/').next().unwrap_or(&file.path)
+        .strip_suffix(".sql").unwrap_or(&file.path);
+    let signature = lines.iter().map(|line| line.trim())
+        .find(|line| !line.is_empty() && !line.starts_with("--"))
+        .unwrap_or("SQL query").to_string();
+    vec![Candidate {
+        name: query_id.unwrap_or(fallback).to_string(),
+        kind: UnitKind::Function,
+        signature,
+        line: 1,
+        end_line: Some(lines.len() as u32),
+    }]
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -864,6 +889,21 @@ fn normalize_extension(ext: &str) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn extracts_standalone_sql_query_as_a_logical_unit() {
+        let file = BlobFile {
+            path: "gems/lineage/sql/demo.sql".into(),
+            contents: "-- query-id: demo.lookup.v1\nSELECT value FROM demo WHERE value <> 0;\n".into(),
+        };
+        let extractor = HeuristicExtractor::default();
+        let units = extractor.extract_units(&file);
+        assert_eq!(units.len(), 1);
+        assert_eq!(units[0].name, "demo.lookup.v1");
+        assert_eq!(units[0].start_line, 1);
+        assert_eq!(units[0].end_line, 2);
+        assert!(extractor.supports_path(&file.path));
+    }
 
     #[test]
     fn extracts_units_from_supported_languages() {

@@ -69,6 +69,20 @@ bundle exec gems/espalier/exe/espalier \
 Espalier can output a compact architecture manifest for tools and LLMs,
 or a Markdown report for human architectural review.
 
+### Versioned architecture graph
+
+```bash
+bundle exec gems/espalier/exe/espalier \
+  --format architecture \
+  --output=tmp/espalier-architecture.json \
+  src/
+```
+
+This output contains stable owner/function/state IDs, first-class call and
+state-access edges, confidence, source citations, and explainable function
+pressure. It is the structured ingestion contract for Lineage; SARIF, DOT, and
+human-readable manifests are not parsed to reconstruct the graph.
+
 ### Architecture Report
 
 ```bash

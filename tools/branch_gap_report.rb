@@ -8,7 +8,7 @@
 # took.
 #
 # This is deliberately NOT a percentage chase. A never-taken branch in the
-# escape / frame / lowering code is a concrete "no .cht program exercises
+# escape / frame / lowering code is a concrete "no .clear program exercises
 # this decision" finding — each one is a forensic candidate of the
 # bug-#1/#2/#9 class (a shape the corpus never produces). A branch being
 # *taken* says nothing about whether it's correct for every shape; that's

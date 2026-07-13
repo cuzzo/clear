@@ -1,0 +1,69 @@
+# Benchmark: @service (OS thread) vs green fiber for heavy compute.
+# Measures wall time for parallel compute at different workload sizes.
+
+FN heavyCompute(n: Int64) RETURNS Int64 ->
+    MUTABLE x: Int64 = 0;
+    MUTABLE i: Int64 = 0;
+    WHILE i < n DO
+        x = x %+ (i %* i %+ 1);
+        i += 1;
+    END
+    RETURN x;
+END
+
+FN benchFiber(n: Int64, count: Int64) RETURNS !Int64 ->
+    MUTABLE tasks: ~Int64[]@list = [];
+    MUTABLE i: Int64 = 0;
+    WHILE i < count DO
+        tasks.append(BG { heavyCompute(n); });
+        i += 1;
+    END
+    # Await all
+    MUTABLE total: Int64 = 0;
+    i = 0;
+    WHILE i < count DO
+        IF tasks[i] EXISTS AS task THEN
+            total += NEXT task;
+        ELSE
+            RAISE "missing fiber task";
+        END
+        i += 1;
+    END
+    RETURN total;
+END
+
+FN benchService(n: Int64, count: Int64) RETURNS !Int64 ->
+    MUTABLE tasks: ~Int64[]@list = [];
+    MUTABLE i: Int64 = 0;
+    WHILE i < count DO
+        tasks.append(BG { @service -> heavyCompute(n); });
+        i += 1;
+    END
+    # Await all
+    MUTABLE total: Int64 = 0;
+    i = 0;
+    WHILE i < count DO
+        IF tasks[i] EXISTS AS task THEN
+            total += NEXT task;
+        ELSE
+            RAISE "missing service task";
+        END
+        i += 1;
+    END
+    RETURN total;
+END
+
+FN main() RETURNS Void ->
+    # Small workload: fibers should win (less overhead)
+    fiberSmall = benchFiber(10000, 4);
+    serviceSmall = benchService(10000, 4);
+    ASSERT fiberSmall == serviceSmall, "small: same result";
+
+    # Large workload: OS threads benefit from true parallelism
+    fiberLarge = benchFiber(1000000, 4);
+    serviceLarge = benchService(1000000, 4);
+    ASSERT fiberLarge == serviceLarge, "large: same result";
+
+    print("All @service benchmark tests passed!");
+    RETURN;
+END

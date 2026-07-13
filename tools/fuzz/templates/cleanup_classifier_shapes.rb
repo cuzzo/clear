@@ -90,7 +90,7 @@ FuzzGenerator.register(:cleanup_classifier_shapes,
     <<~CHT
       FN main() RETURNS Void ->
           maybe: ?String = COPY "present";
-          IF maybe AS s THEN
+          IF maybe EXISTS AS s THEN
               ASSERT s == "present", "optional owned string";
           ELSE
               ASSERT FALSE, "expected Some";
@@ -106,7 +106,7 @@ FuzzGenerator.register(:cleanup_classifier_shapes,
       FN main() RETURNS Void ->
           inner = Boxed{ label: "tag" };
           maybe: ?Boxed = inner;
-          IF maybe AS bx THEN
+          IF maybe EXISTS AS bx THEN
               ASSERT bx.label == "tag", "optional owned struct";
           ELSE
               ASSERT FALSE, "expected Some";
@@ -167,7 +167,7 @@ FuzzGenerator.register(:cleanup_classifier_shapes,
     <<~CHT
       FN main() RETURNS Void ->
           maybe: ?String = NIL;
-          IF maybe AS s THEN
+          IF maybe EXISTS AS s THEN
               ASSERT s == "impossible", "optional nil should not bind";
           ELSE
               ASSERT TRUE, "optional nil fallback";

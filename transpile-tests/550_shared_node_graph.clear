@@ -1,0 +1,24 @@
+# @shared:node preserves ordinary graph syntax while guarding the complete
+# payload access against cross-scheduler growth, removal, and mutation.
+STRUCT SharedNode {
+  peer: ?SharedNode@shared:node,
+  id: Int64
+}
+
+FN main() RETURNS Void ->
+  MUTABLE root: SharedNode@shared:node = SharedNode{ id: 1 };
+  root.peer = SharedNode{ id: 2 };
+  ASSERT root.peer?.id == 2, "shared node edge resolves";
+  root.peer?.id = 3_i64;
+  ASSERT root.peer?.id == 3_i64, "shared node edge mutates under a write guard";
+
+  first: ~Void = BG { @parallel ->
+    root.id = root.id + 1_i64;
+  };
+  second: ~Void = BG { @parallel ->
+    root.id = root.id + 1_i64;
+  };
+  NEXT first;
+  NEXT second;
+  ASSERT root.id == 3_i64, "parallel read-modify-write statements are serialized";
+END

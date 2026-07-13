@@ -1,0 +1,26 @@
+# Test: outer ArrayList grows across many loop iterations, forcing internal resize.
+# Appending to an outer list in a loop triggers heap promotion (direct_outer_mutations).
+# After resize, all previously-stored elements must survive frame rewinds.
+
+FN main() RETURNS Void ->
+    MUTABLE items: String[]@list = [];
+    FOR i IN (1_i64 ..= 200) DO
+        items.append("entry-" $+ i.toString());
+    END
+    ASSERT items.length() == 200, "all 200 items stored";
+    ASSERT items[0] == "entry-1", "first item";
+    ASSERT items[99] == "entry-100", "100th item";
+    ASSERT items[199] == "entry-200", "last item";
+
+    # Verify items after a second pass that also frame-allocates
+    MUTABLE total: Int64 = 0;
+    FOR i IN (0_i64 ..< 200) DO
+        j = i + 1;
+        s = "entry-" $+ j.toString();
+        IF items[i] == s THEN total += 1; END
+    END
+    ASSERT total == 200, "all items match after second pass";
+
+    print("PASS");
+    RETURN;
+END

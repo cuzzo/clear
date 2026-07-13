@@ -27,7 +27,7 @@ end
 unless File.exist?(manifest_path)
   puts "\e[31merror:\e[0m espalier_manifest.yml not found."
   puts "Please generate it first by running:"
-  puts "  bundle exec gems/espalier/exe/espalier --nil-kill=/tmp/clear-nil-kill/evidence.json --format yaml --output=espalier_manifest.yml src/"
+  puts "  bundle exec gems/espalier/exe/espalier --nil-kill=/tmp/clear-nil-kill/evidence.json --format yaml --output=espalier_manifest.yml compiler/ruby/"
   exit 1
 end
 

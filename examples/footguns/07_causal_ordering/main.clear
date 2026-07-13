@@ -1,0 +1,72 @@
+# Footgun: Causal Message Ordering — CLEAR
+#
+# CLEAR's concurrency model is based on structured fibers and @shared:locked
+# state. It does not have explicit message-passing channels, so the relay
+# pattern from C/Go/Rust maps differently.
+#
+# CLEAR's happens-before guarantees:
+#   - NEXT p awaits the BG fiber that produced p. All writes inside that
+#     fiber are visible after NEXT returns. This is a full barrier.
+#   - WITH / WITH EXCLUSIVE acquire the mutex before any access inside
+#     the block. The Mutex acquire is itself a full barrier.
+#
+# Because BG fibers communicate through @shared:locked values (not raw
+# shared memory + a signal), and because WITH blocks are the only access
+# path, every read is guarded by a mutex acquire — which subsumes the
+# happens-before guarantee. The broken relay pattern from C cannot be
+# expressed: there is no way to read shared state without acquiring the
+# lock that serializes it with the writer's release.
+#
+# The causal ordering "footgun" in CLEAR looks different: it is possible
+# to observe stale values if you read the same @shared:locked value twice
+# from two separate WITH blocks, with another fiber modifying it in between.
+# This is the TOCTOU pattern (see 05_toctou), not a memory ordering issue.
+
+STRUCT Payload {
+  data: String
+}
+
+FN main() RETURNS Void ->
+  result = Payload{ data: "" } @shared:locked;
+
+  # Producer: writes data under the lock.
+  producer = BG {
+    WITH EXCLUSIVE result AS r {
+      r.data = "important result";
+      # Mutex release here is a full barrier on all architectures.
+    }
+  };
+
+  # Relay: waits for producer, then signals consumer.
+  # NEXT producer ensures all of producer's writes are visible before
+  # this fiber proceeds. The happens-before chain is preserved because
+  # NEXT is a synchronization point, not a plain channel forward.
+  relay = BG {
+    NEXT producer;
+    # Nothing to forward: the data lives in 'result'. Consumer
+    # will see it because WITH EXCLUSIVE issues a mutex acquire.
+  };
+
+  # Consumer: waits for relay, then reads data.
+  consumer = BG {
+    NEXT relay;
+    WITH result AS r {
+      # Mutex acquire here is a full barrier. Guaranteed to see
+      # the producer's write regardless of hardware memory model.
+      print("consumer saw: " $+ r.data);
+    }
+  };
+
+  NEXT consumer;
+END
+
+# Summary:
+#
+# CLEAR sidesteps the causal ordering footgun by eliminating the pattern
+# that causes it: shared data is always accessed through a mutex-guarded
+# WITH block, and fiber synchronization is always through NEXT (a full
+# barrier). There is no way to forward a "signal" separately from the
+# data without also forwarding the happens-before.
+#
+# The footgun still exists at the logical level (TOCTOU across two WITH
+# blocks) but not at the memory ordering level (mutex always SC).

@@ -980,7 +980,6 @@
         "name": "none_ready",
         "owner": "RustSourceFactBehavior",
         "reads": [
-          "self.value.is_none",
           "value"
         ],
         "writes": []
@@ -991,12 +990,7 @@
         "owner": "RustSourceFactBehavior",
         "reads": [
           "Some",
-          "callback",
-          "local.is_none",
-          "local.is_some",
-          "result.push_str",
-          "std::fs.read_to_string",
-          "std::fs::read_to_string.call(\"config\").ok"
+          "callback"
         ],
         "writes": [
           "value"
@@ -1052,42 +1046,6 @@
     ],
     "state_param_origins": [],
     "state_reads": [
-      {
-        "field": "is_none",
-        "function": "none_ready",
-        "line": 28,
-        "receiver": "self.value"
-      },
-      {
-        "field": "is_none",
-        "function": "update",
-        "line": 12,
-        "receiver": "local"
-      },
-      {
-        "field": "is_some",
-        "function": "update",
-        "line": 16,
-        "receiver": "local"
-      },
-      {
-        "field": "ok",
-        "function": "update",
-        "line": 19,
-        "receiver": "std::fs::read_to_string.call(\"config\")"
-      },
-      {
-        "field": "push_str",
-        "function": "update",
-        "line": 23,
-        "receiver": "result"
-      },
-      {
-        "field": "read_to_string",
-        "function": "update",
-        "line": 19,
-        "receiver": "std::fs"
-      },
       {
         "field": "value",
         "function": "none_ready",

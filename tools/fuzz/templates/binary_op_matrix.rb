@@ -1,15 +1,15 @@
 # Template: binary-operator lowering matrix — ENUMERATED, not sampled.
 #
-# Targets src/mir/mir_lowering.rb#lower_binary_op + #lower_or_rescue.
+# Targets src/mir/mir_lowering.rb#lower_binary_op + #lower_or_else.
 # The cell set is the dispatch's OWN discriminant set read from the
 # source: the string-compare `case node.op` has arms
 # {EQ,NEQ,LT,LTE,GT,GTE}; POW (**), DIV, MOD, wrapping/checked integer
-# arithmetic, concat (+), OR (OR_RESCUE) are the other op branches. Every
+# arithmetic, concat (+), OR_ELSE (OR_ELSE) are the other op branches. Every
 # comparison arm x every operand type is emitted -- exhaustive by construction,
 # not a guessed axis.
 #
 # Surface syntax confirmed from lexer/transpile-tests:
-#   == != < <= > >=  ;  **=POW  ;  MOD  ;  + (concat)  ;  OR (rescue).
+#   == != < <= > >=  ;  **=POW  ;  MOD  ;  + (concat)  ;  OR_ELSE (rescue).
 # The symbol-path `case node.op {EQ,NEQ}` is EXCLUDED: CLEAR has no
 # surface symbol literal (only a union *variant* named Symbol), so
 # those 2 arms are not source-reachable -> accept/invariant_guarded,
@@ -37,6 +37,12 @@ end
 BOM_CELLS << { op: :concat, type: :str_lit }
 BOM_CELLS << { op: :concat, type: :heap_str }
 BOM_CELLS << { op: :or_fallback, type: :heap_str }
+BOM_CELLS << { op: :logical_and, type: :bool }
+BOM_CELLS << { op: :logical_or, type: :bool }
+%i[error nil value].each do |outcome|
+  BOM_CELLS << { op: :or_nested_fallback, type: outcome }
+  BOM_CELLS << { op: :or_nested_managed, type: outcome }
+end
 
 def bom_provider(t)
   case t
@@ -44,6 +50,7 @@ def bom_provider(t)
   when :float    then "FN lhs() RETURNS Float64 -> RETURN 1.5; END\nFN rhs() RETURNS Float64 -> RETURN 2.5; END"
   when :str_lit  then "FN lhs() RETURNS String -> RETURN \"abc\"; END\nFN rhs() RETURNS String -> RETURN \"abd\"; END"
   when :heap_str then "FN lhs() RETURNS !String -> RETURN COPY \"abc\"; END\nFN rhs() RETURNS !String -> RETURN COPY \"abd\"; END"
+  when :bool     then "FN explode() RETURNS Bool -> ASSERT FALSE, \"logical RHS executed\"; RETURN TRUE; END"
   end
 end
 
@@ -72,14 +79,41 @@ def bom_body(op, t)
   when :check_sub then "    a: Int64 = 7_i64;\n    b: Int64 = 5_i64;\n    ASSERT (a !- b) == 2_i64, \"check sub\";"
   when :check_mul then "    a: Int64 = 7_i64;\n    b: Int64 = 5_i64;\n    ASSERT (a !* b) == 35_i64, \"check mul\";"
   when :concat
-    "    t: String = #{l} + #{r};\n    ASSERT t.length() == 6_i64, \"concat #{t}\";"
+    "    t: String = #{l} $+ #{r};\n    ASSERT t.length() == 6_i64, \"concat #{t}\";"
   when :or_fallback
-    "    v: String = mightFail() OR \"fb\";\n    ASSERT v.length() >= 2_i64, \"or fallback\";"
+    "    v: String = mightFail() OR_ELSE \"fb\";\n    ASSERT v.length() >= 2_i64, \"or fallback\";"
+  when :logical_and
+    "    ASSERT !(FALSE AND explode()), \"AND short circuit\";"
+  when :logical_or
+    "    ASSERT TRUE OR explode(), \"OR short circuit\";"
+  when :or_nested_fallback
+    mode = { error: 0, nil: 1, value: 2 }.fetch(t)
+    expected = { error: 5, nil: 5, value: 11 }.fetch(t)
+    "    v: Int64 = nested(#{mode}_i64) OR_ELSE 5_i64;\n    ASSERT v == #{expected}_i64, \"nested OR_ELSE #{t}\";"
+  when :or_nested_managed
+    mode = { error: 0, nil: 1, value: 2 }.fetch(t)
+    expected = t == :value ? "value" : "fallback"
+    "    v: String = nestedManaged(#{mode}_i64) OR_ELSE COPY \"fallback\";\n    ASSERT v == \"#{expected}\", \"managed nested OR_ELSE #{t}\";"
   end
 end
 
 def bom_extra_fn(op)
-  op == :or_fallback ? "FN mightFail() RETURNS !String ->\n    RETURN COPY \"ok\";\nEND\n" : ""
+  return "FN mightFail() RETURNS !String ->\n    RETURN COPY \"ok\";\nEND\n" if op == :or_fallback
+  return <<~CHT if op == :or_nested_fallback
+    FN nested(mode: Int64) RETURNS !?Int64 ->
+        IF mode == 0_i64 THEN RAISE; END
+        IF mode == 1_i64 THEN RETURN NIL; END
+        RETURN 11_i64;
+    END
+  CHT
+  return <<~CHT if op == :or_nested_managed
+    FN nestedManaged(mode: Int64) RETURNS !?String ->
+        IF mode == 0_i64 THEN RAISE; END
+        IF mode == 1_i64 THEN RETURN NIL; END
+        RETURN COPY "value";
+    END
+  CHT
+  ""
 end
 
 FuzzGenerator.register(:binary_op_matrix, cells: BOM_CELLS) do |p|

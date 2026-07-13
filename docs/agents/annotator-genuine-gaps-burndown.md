@@ -71,7 +71,7 @@ For each item:
 5. Regenerate full coverage:
    `COVERAGE=1 bundle exec prspec spec/`,
    `COVERAGE=1 bundle exec ruby transpile-tests/gen.rb`,
-   `COVERAGE=1 bundle exec ruby tools/fuzz/run.rb --matrix --skip-quarantined --out /tmp/clear-fuzz-ci --clean`,
+   `COVERAGE=1 bundle exec ruby tools/fuzz/run.rb --matrix --out /tmp/clear-fuzz-ci --clean`,
    `COVERAGE=1 bundle exec ruby tools/bc_lower_coverage.rb --jobs 32`,
    `bundle exec ruby spec/collate_coverage.rb`.
 6. Regenerate SlopCop, Boobytrap, and Decomplex reports for `src/annotator`.

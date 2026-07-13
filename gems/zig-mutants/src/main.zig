@@ -735,13 +735,16 @@ fn copyWorkspace(allocator: Allocator, io: std.Io, root: []const u8, out_dir: []
         \\mkdir -p "$1" &&
         \\tar \
         \\  --exclude=.git \
-        \\  --exclude=.zig-cache \
-        \\  --exclude=zig-cache \
-        \\  --exclude=zig/.clear-cache \
-        \\  --exclude=zig/zig-out \
+        \\  --exclude="*/.zig-cache" \
+        \\  --exclude="*/zig-cache" \
+        \\  --exclude="*/.clear-cache" \
+        \\  --exclude="*/zig-out" \
+        \\  --exclude="*/target" \
+        \\  --exclude="*/node_modules" \
+        \\  --exclude="*/tmp" \
         \\  -C "$0" -cf - . | tar -C "$1" -xf -
     ;
-    const argv = [_][]const u8{ "bash", "-lc", script, root, out_dir };
+    const argv = [_][]const u8{ "bash", "-c", script, root, out_dir };
     const result = try std.process.run(allocator, io, .{
         .argv = &argv,
         .stdout_limit = .limited(1024 * 1024),

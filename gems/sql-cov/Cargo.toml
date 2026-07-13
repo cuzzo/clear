@@ -1,0 +1,27 @@
+[package]
+name = "sql-cov"
+version = "0.1.0"
+edition = "2021"
+description = "Expression-level three-valued-logic coverage for SQL"
+license = "MIT"
+
+[lib]
+name = "sql_cov"
+path = "src/lib.rs"
+
+[[bin]]
+name = "sql-cov"
+path = "src/main.rs"
+
+[dependencies]
+anyhow = "1.0"
+clap = { version = "4.5", features = ["derive"] }
+html-escape = "0.2"
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+sqlparser = { version = "0.62", features = ["visitor"] }
+sqlx = { version = "0.8", default-features = false, features = ["runtime-tokio", "sqlite", "postgres", "mysql", "json"] }
+tokio = { version = "1", features = ["macros", "rt-multi-thread"] }
+
+[dev-dependencies]
+tempfile = "3.10"

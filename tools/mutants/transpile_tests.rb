@@ -23,33 +23,33 @@ module TranspileTestMutants
   REGISTRY = T.let([
     Mutant.new(
       name: :lower_if_cond_pending_leak,
-      description: 'Disable lower_head pending-statement isolation; condition OR-fallback hoists should fail.',
+      description: 'Disable lower_head pending-statement isolation; condition OR_ELSE-fallback hoists should fail.',
       patch: File.join(PATCH_DIR, 'lower_if_cond_pending_leak.patch'),
-      files: ['transpile-tests/or_fallback_in_if_condition_hoist.cht']
+      files: ['transpile-tests/or_fallback_in_if_condition_hoist.clear']
     ),
     Mutant.new(
       name: :escape_struct_field_walker,
       description: 'Disable receiver-escape walkers for wrapped loop-local collection sinks.',
       patch: File.join(PATCH_DIR, 'escape_struct_field_walker.patch'),
-      files: ['transpile-tests/200_escape_callee_string_to_list.cht']
+      files: ['transpile-tests/200_escape_callee_string_to_list.clear']
     ),
     Mutant.new(
       name: :loop_frame_scope_stamp,
       description: 'Force loop-local frame allocations to lower as function-scoped.',
       patch: File.join(PATCH_DIR, 'local_frame_decls_stdlib_provenance.patch'),
-      files: ['transpile-tests/while_loop_with_local_split_no_rewind.cht']
+      files: ['transpile-tests/while_loop_with_local_split_no_rewind.clear']
     ),
     Mutant.new(
       name: :union_match_drops_payload_capture,
       description: 'Render union match arms without payload captures.',
       patch: File.join(PATCH_DIR, 'union_match_drops_payload_capture.patch'),
-      files: ['transpile-tests/174_union_match_struct_fields.cht']
+      files: ['transpile-tests/174_union_match_struct_fields.clear']
     ),
     Mutant.new(
       name: :fsm_suspend_returns_done,
       description: 'Return Done instead of yielding from FSM suspend tails.',
       patch: File.join(PATCH_DIR, 'fsm_suspend_returns_done.patch'),
-      files: ['transpile-tests/256_sleep_int_literal.cht']
+      files: ['transpile-tests/256_sleep_int_literal.clear']
     ),
   ].freeze, T::Array[Mutant])
 
@@ -136,7 +136,7 @@ module TranspileTestMutants
   sig { params(file: String, out_dir: String, log_path: String).returns(T::Boolean) }
   def self.run_transpile_file(file, out_dir, log_path)
     FileUtils.mkdir_p(out_dir)
-    zig_file = File.join(ROOT, 'zig', "mutant_#{File.basename(file, '.cht')}.zig")
+    zig_file = File.join(ROOT, 'zig', "mutant_#{File.basename(file, '.clear')}.zig")
     begin
       generated = MutationTesting.run_cmd(
         ['bundle', 'exec', 'ruby', 'transpile-tests/gen.rb', '--single', file],

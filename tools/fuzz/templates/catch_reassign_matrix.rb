@@ -2,11 +2,11 @@
 #
 # Targets src/mir/mir_lowering.rb#walk_catch_body_for_reassigns (12/13
 # fuzz_axis dark). The decision: an outer MUTABLE binding is reassigned
-# from a fallible expression `acc = maybe(...) OR acc;`. On the error
+# from a fallible expression `acc = maybe(...) OR_ELSE acc;`. On the error
 # path the binding keeps its OLD value/allocator; on success it takes
 # the new one. If lowering mishandles the reassignment cleanup across
 # the success/error split, that is a double-free or leak (invariant
-# #9). The corpus never reassigned an outer binding through OR-rescue.
+# #9). The corpus never reassigned an outer binding through OR_ELSE-rescue.
 #
 # var_kind x value_type x path-taken. Both paths exercised. expected
 # :pass; a leak / mir-error on a :pass cell is the SURFACED bug.
@@ -87,7 +87,7 @@ FuzzGenerator.register(:catch_reassign_matrix, cells: CRM_CELLS) do |p|
 
       FN main() RETURNS Void ->
           #{init}
-          acc = maybe(#{crm_arg(p[:taken])}) OR acc;
+          acc = maybe(#{crm_arg(p[:taken])}) OR_ELSE acc;
           #{crm_assert(p[:value], p[:taken])}
           RETURN;
       END
@@ -123,7 +123,7 @@ FuzzGenerator.register(:catch_reassign_matrix, cells: CRM_CELLS) do |p|
 
       FN main() RETURNS Void ->
           #{holder_init}
-          h.acc = maybe(#{crm_arg(p[:taken])}) OR h.acc;
+          h.acc = maybe(#{crm_arg(p[:taken])}) OR_ELSE h.acc;
           ASSERT #{rd} == #{exp}, "struct field reassign #{p[:taken]}";
           RETURN;
       END

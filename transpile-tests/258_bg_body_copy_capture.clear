@@ -1,0 +1,41 @@
+# BG body COPY of a captured @list bound to a local @list variable.
+#
+# Exercises three layered fixes:
+#
+#   1. FreshHeapCopy capture wiring (Phase 2 of sync-boundary-unification):
+#      `COPY items` inside the BG body classifies the capture as
+#      FreshHeapCopy, so the BG ctx field gets a `dupeValue` init and
+#      a corresponding cleanup. (See transpile-tests/281.)
+#
+#   2. dupeValue for ArrayList (bug 258): without this, dupeValue used
+#      to fall through `return value` for any type with a deinit
+#      method, leaving the ctx field aliased to the outer buffer.
+#      (See transpile-tests/282.)
+#
+#   3. lower_var_decl handles `CopyNode` in the list_collection branch
+#      (bug 258b): without this, `snapshot = COPY items` was lowered
+#      as `var snapshot = .empty;` because the list_collection branch
+#      unconditionally emitted ContainerInit(:list_empty) and
+#      ignored the RHS. The new branch routes COPY/CLONE through
+#      `MIR::DeepCopy(:full_value)` -> `try CheatLib.dupeValue(@TypeOf
+#      (src), src, alloc)`, which returns an ArrayList of the same
+#      shape as the destination.
+#
+# Independence is verified by mutating the outer `items` AFTER the
+# BG fiber has been spawned -- the fiber's `snapshot` must reflect
+# the pre-mutation state. (Implicit here because the body reads only
+# snapshot[0..2]; see transpile-tests/282 for the explicit
+# post-spawn-mutation assertion.)
+
+FN main() RETURNS Void ->
+    items: Int64[]@list = [];
+    items.append(10_i64);
+    items.append(20_i64);
+    items.append(30_i64);
+    p: ~Int64 = BG {
+        snapshot = COPY items;
+        (snapshot[0_i64] OR_ELSE 0_i64) + (snapshot[1_i64] OR_ELSE 0_i64) + (snapshot[2_i64] OR_ELSE 0_i64);
+    };
+    r = NEXT p;
+    ASSERT r == 60_i64, "BG body COPY of captured @list snapshots correctly";
+END

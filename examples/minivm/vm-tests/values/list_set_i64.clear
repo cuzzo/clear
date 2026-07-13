@@ -1,0 +1,8 @@
+FN main() RETURNS Int64 ->
+    MUTABLE items: Int64[]@list = [];
+    append(items, 10_i64);
+    append(items, 20_i64);
+    append(items, 30_i64);
+    items[1_i64] = (items[1_i64] OR_ELSE 0_i64) + 5_i64;
+    RETURN items[1_i64] OR_ELSE 0_i64;
+END

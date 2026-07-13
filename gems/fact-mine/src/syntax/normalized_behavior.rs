@@ -70,7 +70,49 @@ pub(crate) struct NormalizedNilGuardFact {
     pub(crate) non_nil_when_true: bool,
 }
 
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub(crate) enum BlockCallSemantics {
+    Iteration,
+    Once,
+    Unknown,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub(crate) enum CardinalityCallSemantics {
+    PreservesReceiver,
+    MeasuresReceiver,
+    Unknown,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub(crate) enum CollectionAllocationSemantics {
+    None,
+    PreservesReceiver,
+    UnknownSize,
+}
+
 pub(crate) trait NormalizedLanguageBehavior: Sync {
+    fn collection_allocation_semantics(&self, _message: &str) -> CollectionAllocationSemantics {
+        CollectionAllocationSemantics::None
+    }
+
+    fn block_call_semantics(&self, _message: &str) -> BlockCallSemantics {
+        BlockCallSemantics::Unknown
+    }
+
+    fn cardinality_call_semantics(&self, _message: &str) -> CardinalityCallSemantics {
+        CardinalityCallSemantics::Unknown
+    }
+
+    fn iteration_bound_argument(&self, _message: &str, _argument_count: usize) -> Option<usize> {
+        None
+    }
+
+    fn empty_check_call(&self, _message: &str) -> bool { false }
+    fn visited_membership_call(&self, _message: &str) -> bool { false }
+    fn visited_insert_call(&self, _message: &str) -> bool { false }
+    fn empty_collection_constructor(&self, _message: &str) -> bool { false }
+    fn collection_parameter_type(&self, _type_name: &str) -> bool { false }
     fn supports_parameter_normalization(&self) -> bool {
         false
     }
@@ -257,6 +299,10 @@ pub(crate) trait NormalizedLanguageBehavior: Sync {
         _span_source: &str,
     ) -> bool {
         false
+    }
+
+    fn record_method_calls_as_state_reads(&self) -> bool {
+        true
     }
 
     fn suppress_self_call_state_read(&self, _call: &NormalizedCallProjection) -> bool {

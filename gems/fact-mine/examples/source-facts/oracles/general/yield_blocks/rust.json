@@ -306,10 +306,7 @@
         "line": 5,
         "name": "method_with_empty_block",
         "owner": "rust",
-        "reads": [
-          "arr.iter",
-          "arr.iter().for_each"
-        ],
+        "reads": [],
         "writes": []
       }
     ],
@@ -317,26 +314,7 @@
     "semantic_effects": [],
     "state_declarations": [],
     "state_param_origins": [],
-    "state_reads": [
-      {
-        "field": "f",
-        "function": "method_three",
-        "line": 2,
-        "receiver": "self"
-      },
-      {
-        "field": "for_each",
-        "function": "method_with_empty_block",
-        "line": 7,
-        "receiver": "arr.iter()"
-      },
-      {
-        "field": "iter",
-        "function": "method_with_empty_block",
-        "line": 7,
-        "receiver": "arr"
-      }
-    ],
+    "state_reads": [],
     "state_writes": []
   }
 }

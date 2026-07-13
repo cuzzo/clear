@@ -1,0 +1,41 @@
+# Atomic Contention Benchmark — CLEAR
+#
+# 1024 fibers each increment a shared counter 10 000 times.
+# Total expected: 10 240 000.
+#
+# @local: zero-cost shared mutable reference (*Counter, no Mutex).
+# All BG blocks are auto-pinned to the local scheduler because the
+# compiler sees @local capture.  Cooperative single-threaded execution
+# means the counter's cache line stays in L1 Modified state — zero
+# bus traffic, zero lock overhead.
+#
+# Compare to Go's atomic.AddInt64 which bounces the cache line across
+# cores under M:N scheduling (~15ns/op on 2 cores, worse on more).
+
+STRUCT Counter {
+  value: Int64
+}
+
+FN main() RETURNS Void ->
+  MUTABLE c = Counter{ value: 0 } @local;
+
+  t0 = timestampMs();
+  MUTABLE futures: ~Void[]@list = [];
+  FOR i IN (0 ..< 1024) DO
+    futures.append(
+      BG {
+        FOR j IN (0 ..< 10_000) -> c.value += 1;
+      }
+    );
+  END
+
+  FOR k IN (0 ..< 1024) DO
+    IF futures[k] EXISTS AS future THEN NEXT future; END
+  END
+  elapsed = timestampMs() - t0;
+
+  print("Counter: ${c.value.toString()}");
+  print("BENCH_RESULT: ${elapsed.toString()} ms");
+  print("Time: ${elapsed.toString()} ms");
+  RETURN;
+END

@@ -1,0 +1,17 @@
+FN main() RETURNS Int64 ->
+    MUTABLE m: HashMap<Int64, Int64> = {};
+    m[1_i64] = 10_i64;
+    m[2_i64] = 20_i64;
+    m[2_i64] = 22_i64;
+    IF m.contains?(3_i64) THEN
+        RETURN 0_i64;
+    END
+    IF m.contains?(1_i64) == FALSE THEN
+        RETURN 0_i64;
+    END
+    m.delete(1_i64);
+    IF m.contains?(1_i64) THEN
+        RETURN 0_i64;
+    END
+    RETURN (m[2_i64] OR_ELSE 0_i64) + m.length();
+END

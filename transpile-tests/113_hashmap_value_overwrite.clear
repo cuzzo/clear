@@ -1,0 +1,31 @@
+# Test: HashMap value overwrite with list data frees old value
+#
+# When a HashMap<Int64[]> entry is overwritten, the old slice is replaced.
+# The StringMap should free the old value if it's heap-owned.
+# This mirrors the scheme interpreter pattern where env bindings are overwritten.
+
+FN makeList(n: Int64) RETURNS !Int64[] ->
+    MUTABLE items: Int64[]@list = List[];
+    items.append(n);
+    items.append(n + 1_i64);
+    RETURN items;
+END
+
+FN main() RETURNS Void ->
+    # Direct test: overwrite a list in a HashMap
+    MUTABLE counts: HashMap<Int64> = {};
+    counts["a"] = 1_i64;
+    counts["a"] = 2_i64;
+    v = counts["a"] OR_ELSE 0_i64;
+    ASSERT v == 2, "overwrite should work";
+
+    # Test with promoted list returns
+    list1 = makeList(10_i64);
+    ASSERT list1.length() == 2, "list1 should have 2 items";
+    ASSERT list1[0] == 10, "first item should be 10";
+
+    list2 = makeList(20_i64);
+    ASSERT list2[0] == 20, "first item should be 20";
+
+    RETURN;
+END

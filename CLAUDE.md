@@ -6,20 +6,20 @@
 
 ## MiniVM Rules
 
-Active MiniVM: `examples/minivm/bc_emitter.rb` + `examples/minivm/_bc_runner.cht`.
+Active MiniVM: `examples/minivm/bc_emitter.rb` + `examples/minivm/_bc_runner.clear`.
 
 **NEVER parse Zig code strings in the MiniVM.** `MIR::InlineZig` and `MIR::RawZig` are Zig backend artifacts. The bc_emitter must use the AST fallback (`compile_ast_stmt` / `compile_ast_expr`); never inspect `.code`. If no AST is available, raise `Unimplemented`.
 
 ## Build & Test
 
 ```bash
-./clear build foo.cht                # Default Zig backend (~2s, safety on, 64KB stacks)
-./clear build foo.cht --optimized    # LLVM, ReleaseFast (~22s, 16KB stacks)
-./clear build foo.cht --safe         # LLVM, ReleaseSafe (~28s)
-./clear build foo.cht --stack-check  # Verify per-fn stack usage via objdump
-./clear run foo.cht [-- args]
+./clear build foo.clear                # Default Zig backend (~2s, safety on, 64KB stacks)
+./clear build foo.clear --optimized    # LLVM, ReleaseFast (~22s, 16KB stacks)
+./clear build foo.clear --safe         # LLVM, ReleaseSafe (~28s)
+./clear build foo.clear --stack-check  # Verify per-fn stack usage via objdump
+./clear run foo.clear [-- args]
 ./clear test <file|dir>              # Test with leak detection
-./clear profile foo.cht              # Heap/CPU/syscall profiling
+./clear profile foo.clear              # Heap/CPU/syscall profiling
 ./clear doctor foo.profile/          # Analyze profile, print advice
 ```
 
@@ -27,10 +27,10 @@ Default build has Zig safety checks (bounds/overflow/null) but no `__morestack` 
 
 **Test suites (run after compiler changes):**
 - `bundle exec prspec spec/` — Ruby specs, parallel, ~1s
-- `./clear test transpile-tests/` — all .cht transpile tests
+- `./clear test transpile-tests/` — all .clear transpile tests
 - `cd transpile-tests/module-integration && zig build test` — package integration
 - `cd transpile-tests/ffi-integration && zig build test` — FFI integration
-- `ruby tools/fuzz/run.rb --matrix --skip-quarantined --out /tmp/clear-fuzz-ci --clean` — full fuzz matrix minus quarantine (run last). Quarantined templates (tools/fuzz/quarantine.txt) have a known bug; `--only-quarantined` runs just those.
+- `ruby tools/fuzz/run.rb --matrix --out /tmp/clear-fuzz-ci --clean` — full fuzz matrix (run last). Every registered cell is mandatory; fuzz quarantine and inactive-cell mechanisms are forbidden.
 - `bundle exec prspec spec/ --tag integration` — CLI/stack-verifier integration (~3-4 min)
 
 **Benchmarks:** `ruby benchmarks/runner.rb [--smoke|--fast|--release] [path | --sequential | --concurrent | --server | --all]`. See `benchmarks/README.md`.
@@ -158,7 +158,7 @@ Verify the Memory Safety Invariants (INV-1 through INV-10 above) are not violate
 - If you added a new type or collection: is its cleanup driven by MIR nodes, not transpiler heuristics? (INV-7, INV-8)
 - If you changed escape analysis or storage decisions: does every escaping value get heap-allocated at declaration, not frame-then-promoted? (INV-1, INV-5)
 - If you changed error handling: does the error path preserve allocator identity? No `catch` fallbacks returning data from a different allocator? (INV-9)
-- Run `bundle exec prspec spec/`, `./clear test transpile-tests/`, then `ruby tools/fuzz/run.rb --matrix --skip-quarantined --out /tmp/clear-fuzz-ci --clean` to verify no regressions.
+- Run `bundle exec prspec spec/`, `./clear test transpile-tests/`, then `ruby tools/fuzz/run.rb --matrix --out /tmp/clear-fuzz-ci --clean` to verify no regressions.
 
 ### When fixing a bug:
 

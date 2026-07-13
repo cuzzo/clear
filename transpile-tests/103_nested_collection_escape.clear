@@ -1,0 +1,40 @@
+# Test: Nested collection escape through struct returns
+#
+# Validates that collections (HashMap, @list) survive function returns
+# when they're fields of a returned struct literal.
+
+STRUCT ListHolder { items: Int64[], label: String }
+STRUCT MapHolder { data: HashMap<Int64>, label: String }
+
+# Return struct containing @list via StructLit (direct escape)
+FN buildListDirect() RETURNS !ListHolder ->
+    MUTABLE vals: Int64[]@list = List[];
+    vals.append(10_i64);
+    vals.append(20_i64);
+    vals.append(30_i64);
+    RETURN ListHolder{ items: vals, label: "direct" };
+END
+
+# Return struct containing HashMap via StructLit (direct escape)
+FN buildMapDirect() RETURNS !MapHolder ->
+    MUTABLE m: HashMap<Int64> = {};
+    m["x"] = 100_i64;
+    m["y"] = 200_i64;
+    RETURN MapHolder{ data: m, label: "direct" };
+END
+
+FN main() RETURNS Void ->
+    # Test 1: List in struct survives function return
+    h1 = buildListDirect();
+    ASSERT h1.items.length() == 3;
+    ASSERT h1.label == "direct";
+
+    # Test 2: HashMap in struct survives function return
+    MUTABLE h2 = buildMapDirect();
+    v2 = h2.data["x"] OR_ELSE 0_i64;
+    ASSERT v2 == 100;
+    v2y = h2.data["y"] OR_ELSE 0_i64;
+    ASSERT v2y == 200;
+
+    RETURN;
+END

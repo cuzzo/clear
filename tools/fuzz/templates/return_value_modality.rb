@@ -6,7 +6,7 @@
 # RETURN value; END` boundary. Cells are enumerated from
 # surface_registry.SINK_REQUIRES_SHAPES[:return_value] -- not hand-picked.
 #
-# One cell per shape. Failing cells :in_dev with a tracker bug ref. The
+# One cell per shape. Failing cells fail the required matrix. The
 # expansion will surface every previously-hidden shape × return-value blind
 # spot the same way takes_move_modality's expansion did (filed #51/#52/#53).
 
@@ -114,7 +114,7 @@ RETURN_VALUE_SHAPE_SPECS = {
 }.freeze
 
 # Empirical overrides for cells that fail today. Default = :pass. Every
-# :in_dev cell carries its bug task ID inline. Classified by
+# non-passing cell carries its bug task ID inline. Classified by
 # `ruby tools/fuzz/run.rb --matrix --templates return_value_modality` +
 # per-cell ./clear run.
 RETURN_VALUE_EXPECTED_OVERRIDES = {
@@ -170,7 +170,7 @@ FuzzGenerator.register(:return_value_modality, cells: RETURN_VALUE_CELLS) do |p|
     if p[:shape] == :option_owned_payload
       body = "        #{build}\n        RETURN xs;"
     else
-      body = "        #{build}\n        RETURN maybe(FALSE) OR xs;"
+      body = "        #{build}\n        RETURN maybe(FALSE) OR_ELSE xs;"
     end
   when :call_forward
     body = "        RETURN helper();"

@@ -15,10 +15,10 @@ BENCH_DIR=benchmarks/clear-only/thunk_recursion
 RUNS=${RUNS:-5}
 
 echo "Building bench_thunk (optimized)..."
-$CLEAR build $BENCH_DIR/bench_thunk.cht --optimized -o $BENCH_DIR/bench_thunk > /dev/null
+$CLEAR build $BENCH_DIR/bench_thunk.clear --optimized -o $BENCH_DIR/bench_thunk > /dev/null
 
 echo "Building bench_reentrant (optimized)..."
-$CLEAR build $BENCH_DIR/bench_reentrant.cht --optimized -o $BENCH_DIR/bench_reentrant > /dev/null
+$CLEAR build $BENCH_DIR/bench_reentrant.clear --optimized -o $BENCH_DIR/bench_reentrant > /dev/null
 
 run_n() {
   local label="$1" bin="$2" rss_total=0 elapsed_total=0

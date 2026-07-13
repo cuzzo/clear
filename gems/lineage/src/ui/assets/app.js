@@ -110,6 +110,40 @@
     input.addEventListener("change", () => setFoldRows(input));
   };
 
+  const setFnFoldRows = (input) => {
+    const foldId = input.dataset.foldId;
+    const sourceView = input.closest(".source-view");
+    const row = input.closest(".row");
+    if (row) {
+      row.classList.toggle("fn-fold-collapsed", input.checked);
+      row.classList.toggle("fn-fold-expanded", !input.checked);
+    }
+    if (!foldId || !sourceView) return;
+    sourceView
+      .querySelectorAll(`[data-fn-fold-child="${foldId}"]`)
+      .forEach((row) => row.classList.toggle("fn-fold-hidden", input.checked));
+  };
+
+  const restoreFnFold = (input) => {
+    const key = input.dataset.persistKey;
+    const stored = key ? read(key) : null;
+    if (stored === null) {
+      if (input.classList.contains("private-fn-fold")) {
+        const privateFoldingLayer = document.getElementById("layer-private-folding");
+        input.checked = privateFoldingLayer ? privateFoldingLayer.checked : true;
+      } else {
+        input.checked = false;
+      }
+    } else {
+      input.checked = (stored === "true");
+    }
+    input.addEventListener("change", () => {
+      if (key) write(key, String(input.checked));
+      setFnFoldRows(input);
+    });
+    setFnFoldRows(input);
+  };
+
   const restoreWarningDismissal = (control) => {
     const key = control.dataset.dismissKey;
     const warning = control.closest(".warning");
@@ -185,15 +219,111 @@
     });
   };
 
+  const setupDashboardSectionSwitchers = () => {
+    document.querySelectorAll("[data-dashboard-section-switcher]").forEach((switcher) => {
+      const buttons = Array.from(switcher.querySelectorAll("[data-dashboard-panel]"));
+      const panels = buttons
+        .map((button) => document.getElementById(button.dataset.dashboardPanel))
+        .filter(Boolean);
+      if (!buttons.length || panels.length !== buttons.length) return;
+
+      const select = (button) => {
+        const panel = document.getElementById(button.dataset.dashboardPanel);
+        buttons.forEach((candidate) => {
+          candidate.classList.remove("active");
+          candidate.setAttribute("aria-selected", "false");
+        });
+        panels.forEach((candidate) => { candidate.hidden = true; });
+        button.classList.add("active");
+        button.setAttribute("aria-selected", "true");
+        panel.hidden = false;
+      };
+
+      buttons.forEach((button, index) => {
+        button.id ||= `dashboard-section-tab-${index}`;
+        const panel = document.getElementById(button.dataset.dashboardPanel);
+        panel.setAttribute("role", "tabpanel");
+        panel.setAttribute("aria-labelledby", button.id);
+        button.addEventListener("click", () => select(button));
+        button.addEventListener("keydown", (event) => {
+          let target = null;
+          if (event.key === "ArrowRight") target = buttons[(index + 1) % buttons.length];
+          if (event.key === "ArrowLeft") target = buttons[(index - 1 + buttons.length) % buttons.length];
+          if (event.key === "Home") target = buttons[0];
+          if (event.key === "End") target = buttons[buttons.length - 1];
+          if (!target) return;
+          event.preventDefault();
+          target.focus();
+          select(target);
+        });
+      });
+      select(buttons[0]);
+    });
+  };
+
+  const setupArchitectureView = () => {
+    const search = document.querySelector("[data-architecture-search]");
+    if (search) {
+      search.addEventListener("input", () => {
+        const query = search.value.trim().toLowerCase();
+        document.querySelectorAll(".architecture-member").forEach((member) => {
+          member.hidden = query && !String(member.dataset.memberName || "").toLowerCase().includes(query);
+        });
+      });
+    }
+    const relationshipSearch = document.querySelector("[data-relationship-search]");
+    if (relationshipSearch) {
+      relationshipSearch.addEventListener("input", () => {
+        const query = relationshipSearch.value.trim().toLowerCase();
+        document.querySelectorAll("[data-relationship-row]").forEach((row) => {
+          row.hidden = query && !row.textContent.toLowerCase().includes(query);
+        });
+      });
+    }
+    document.querySelectorAll("[data-architecture-fit]").forEach((button) => {
+      button.addEventListener("click", () => {
+        const viewport = button.closest(".architecture-focus")?.querySelector(".architecture-graph-viewport");
+        if (viewport) viewport.scrollTo({ left: 0, top: 0, behavior: "smooth" });
+      });
+    });
+    const graphLinks = Array.from(document.querySelectorAll(".architecture-graph a"));
+    graphLinks.forEach((link, index) => {
+      link.addEventListener("keydown", (event) => {
+        if (!['ArrowLeft', 'ArrowRight', 'ArrowUp', 'ArrowDown'].includes(event.key)) return;
+        event.preventDefault();
+        const delta = event.key === 'ArrowLeft' || event.key === 'ArrowUp' ? -1 : 1;
+        graphLinks[(index + delta + graphLinks.length) % graphLinks.length]?.focus();
+      });
+    });
+  };
+
   document.addEventListener("DOMContentLoaded", () => {
     document
-      .querySelectorAll("input[data-persist-key]:not(.comment-fold-toggle)")
+      .querySelectorAll("input[data-persist-key]:not(.comment-fold-toggle):not(.fn-fold-toggle)")
       .forEach(restoreInput);
     document.querySelectorAll(".comment-fold-toggle[data-persist-key]").forEach(restoreCommentFold);
+    document.querySelectorAll(".fn-fold-toggle[data-persist-key]").forEach(restoreFnFold);
+
+    const privateFoldingLayer = document.getElementById("layer-private-folding");
+    if (privateFoldingLayer) {
+      privateFoldingLayer.addEventListener("change", () => {
+        document.querySelectorAll(".private-fn-fold").forEach(input => {
+          const key = input.dataset.persistKey;
+          const stored = key ? read(key) : null;
+          if (stored === null) {
+            input.checked = privateFoldingLayer.checked;
+            input.dispatchEvent(new Event("change", { bubbles: true }));
+          }
+        });
+      });
+    }
+
     document.querySelectorAll(".warning-dismiss[data-dismiss-key]").forEach(restoreWarningDismissal);
     document.querySelectorAll(".layers-panel label[for]").forEach(bindLayerLabel);
     document.querySelectorAll(".line-toggle").forEach(bindLineToggle);
     document.querySelectorAll(".gutter .line-icon[for]").forEach(bindLineToggleLabel);
+    setupDashboardSectionSwitchers();
     setupClickableTokens();
+    setupArchitectureView();
   });
 })();

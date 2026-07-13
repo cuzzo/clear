@@ -1,0 +1,53 @@
+TEST ClearParserCollectionCapabilityChains DO
+  FN parse_expr(source: Auto) RETURNS Auto ->
+    ClearParser.new(Lexer.new(source).tokenize(), source).parse_expression();
+  END
+  FN parse_type(source: Auto) RETURNS Auto ->
+    ClearParser.new(Lexer.new(source).tokenize(), source).parse_type_annotation();
+  END
+  WHEN "examples" DO
+    TEST THAT "parses constructor collection modifiers through the unified capability parser" DO
+      MUTABLE list = parse_expr("List[]:sharded(3)");
+      MUTABLE pool = parse_expr("Pool[]:soa");
+      MUTABLE set = parse_expr("Set[]");
+      ASSERT list.constructor_collection() == :list, "expected list.constructor_collection() to eq(:list)";
+      ASSERT list.constructor_shard_count() == 3, "expected list.constructor_shard_count() to eq(3)";
+      ASSERT list.constructor_soa?() == FALSE, "expected list.constructor_soa?() to be false";
+      ASSERT pool.constructor_collection() == :pool, "expected pool.constructor_collection() to eq(:pool)";
+      ASSERT pool.constructor_shard_count().nil?(), "expected pool.constructor_shard_count() to be_nil";
+      ASSERT pool.constructor_soa?() == TRUE, "expected pool.constructor_soa?() to be true";
+      ASSERT set.constructor_collection() == :set, "expected set.constructor_collection() to eq(:set)";
+      ASSERT set.constructor_shard_count().nil?(), "expected set.constructor_shard_count() to be_nil";
+      ASSERT set.constructor_soa?() == FALSE, "expected set.constructor_soa?() to be false";
+    END
+    TEST THAT "validates constructor shard counts while type annotations defer to semantic validation" DO
+      ASSERT_RAISES Input, parse_expr("List[]:sharded(1)");
+      ASSERT parse_type("Int64[]@list:sharded(1)").shard_count() == 1, "expected parse_type(\"Int64[]@list:sharded(1)\").shard_count() to eq(1)";
+    END
+    TEST THAT "parses direct constructor modifier tokens before colon chains" DO
+      list = parse_expr("List[] @sharded(3)");
+      pool = parse_expr("Pool[] @soa");
+      ASSERT list.constructor_shard_count() == 3, "expected list.constructor_shard_count() to eq(3)";
+      ASSERT list.constructor_soa?() == FALSE, "expected list.constructor_soa?() to be false";
+      ASSERT pool.constructor_shard_count().nil?(), "expected pool.constructor_shard_count() to be_nil";
+      ASSERT pool.constructor_soa?() == TRUE, "expected pool.constructor_soa?() to be true";
+    END
+    TEST THAT "rejects duplicate local sync capability in type chains" DO
+      ASSERT_RAISES Input, parse_type("Int64 @locked:local");
+    END
+    TEST THAT "parses local sync capability and rejects direct bad constructor modifiers" DO
+      ASSERT parse_type("Int64 @local").sync() == :local, "expected parse_type(\"Int64 @local\").sync() to eq(:local)";
+      ASSERT_RAISES Input, parse_expr("List[] @locked");
+    END
+    TEST THAT "rejects unsupported constructor modifiers instead of silently ignoring them" DO
+      ASSERT_RAISES Input, parse_expr("List[]:locked");
+    END
+    TEST THAT "round-trips polymorphic SHARED annotations without keeping the marker on the inner type" DO
+      MUTABLE parser = ClearParser.new(Lexer.new("").tokenize(), "");
+      MUTABLE type = Type.new(:Counter);
+      type.apply_reference_ownership!(:shared);
+      type.mark_polymorphic_shared!();
+      ASSERT parser.type_annotation_source(type) == "SHARED Counter", "expected parser.type_annotation_source(type) to eq(\"SHARED Counter\")";
+    END
+  END
+END

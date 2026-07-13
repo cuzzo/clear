@@ -1,6 +1,6 @@
 # Register VM
 
-The register VM (`examples/minivm/vm.cht` + `examples/minivm/register_*.rb`)
+The register VM (`examples/minivm/vm.clear` + `examples/minivm/register_*.rb`)
 is a parallel CLEAR-hosted VM to the stack VM (`bc-vm.md`). Same goal — a
 debugger and visualization platform that runs CLEAR programs through the
 real Zig runtime — but built around a register-based bytecode and a
@@ -42,7 +42,7 @@ plumbed through the register VM. Touch these schemas only when extending —
 the file format is versioned by field count and the runtime accepts older
 shapes for cross-version cleanliness.
 
-### Per-instruction parallel arrays (`bc_run.rb` writes; `vm.cht` reads)
+### Per-instruction parallel arrays (`bc_run.rb` writes; `vm.clear` reads)
 
 | File | Contents | Width |
 |------|----------|-------|
@@ -74,7 +74,7 @@ they're consulted by IP. The other text formats are read-once at startup.
 | `name`            | User-facing CLEAR identifier. |
 | `typeName`        | "Int64" / "Float64" / "String" / "Bool" / "" (empty when emitter didn't resolve). |
 
-`vm.cht`'s `loadRegisterVarNames!` accepts 5/6/7/8-field rows so traces
+`vm.clear`'s `loadRegisterVarNames!` accepts 5/6/7/8-field rows so traces
 captured with older schema versions still parse cleanly.
 
 ### TraceEvent (time-travel trace)
@@ -115,9 +115,9 @@ breaks the new opcode in some configuration:
 
 1. `register_opcode_layout.rb` — opcode code + operand kinds.
 2. `register_bc_emitter.rb` — emit case (auto-stamps line+column).
-3. `vm.cht::decodeRegisterOpcodes!` — packed-encoding cursor advance.
-4. `vm.cht::registerOpArity` — runtime arity for IP-step.
-5. `vm.cht`'s dispatch loop — the actual implementation, including the
+3. `vm.clear::decodeRegisterOpcodes!` — packed-encoding cursor advance.
+4. `vm.clear::registerOpArity` — runtime arity for IP-step.
+5. `vm.clear`'s dispatch loop — the actual implementation, including the
    inline trace-recording block if the opcode writes a register.
 
 The README (`examples/minivm/README.md`) has the full recipe with code
@@ -130,7 +130,7 @@ THEN traceEvents.append(...) END` block. The natural refactor is a helper
 FN like `traceIWrite!(traceEvents, ...)`, but that helper crashes today
 with a double-free because:
 
-1. The helper FN lives in `register_debugger.cht` (cross-file from `vm.cht`).
+1. The helper FN lives in `register_debugger.clear` (cross-file from `vm.clear`).
 2. `register_bc_emitter.rb`'s emitted MIR for the call uses `MUTABLE @list`
    pointer-passing, which the post-`hotfix-list-append-buffer-uaf`
    resolver promotes to `heapAlloc()` for the helper's append.
@@ -145,7 +145,7 @@ with a double-free because:
 The fix is to teach `escape_analysis.rb` Condition 9 to walk cross-file
 callees by consulting the `FunctionSignature`s populated by the importer
 (`src/backends/importer.rb`'s reconstruction). Once that lands, the
-helper FNs (already pre-declared in `register_debugger.cht` —
+helper FNs (already pre-declared in `register_debugger.clear` —
 `traceIWrite!` / `traceFWrite!` / `traceSWrite!` / `traceAlloc!`)
 become safe to call and the inline blocks collapse to one line per arm.
 
@@ -189,11 +189,11 @@ non-allowlisted test by failure reason (the sweep below).
 ### CI status (important)
 
 - The **Register-VM allowlist** CI job is **disabled** (`if: false`
-  in `ci.yml`): the register VM compiles `vm.cht` to a native binary
+  in `ci.yml`): the register VM compiles `vm.clear` to a native binary
   per run and times out on GitHub-hosted runners. Coverage is
   enforced locally only: `bundle exec ruby
   examples/minivm/run_tests.rb --vm=register`.
-- The golden harness's `vm.cht`-binary-executing examples (6 in
+- The golden harness's `vm.clear`-binary-executing examples (6 in
   `minivm_golden_harness_spec`, all of `minivm_register_debugger_spec`
   = 19) **skip on CI** (`ENV["CI"]`) for the same timeout reason.
   The in-process Ruby-emitter compile/snapshot tests still run on CI.

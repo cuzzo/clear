@@ -12,7 +12,7 @@ DEFAULT_RESULTSET = File.join(ROOT, "coverage", ".resultset.json")
 
 options = {
   resultset: DEFAULT_RESULTSET,
-  only: "src/annotator",
+  only: "compiler/ruby/annotator",
   category: nil,
   top: 120,
   format: "md",

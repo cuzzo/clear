@@ -1,0 +1,33 @@
+# @node fields and collection elements use ordinary object construction and
+# assignment. The compiler inserts the hidden PagedSlotMap operations.
+STRUCT Node {
+  left: ?Node@node,
+  right: ?Node@node,
+  children: Node@node[]@list,
+  id: Int64
+}
+
+FN nodeId(node: Node@node) RETURNS Int64 ->
+  RETURN node.id;
+END
+
+FN main() RETURNS Void ->
+  MUTABLE root: Node@node = Node{ id: 1 };
+  root.left = Node{ id: 2 };
+  root.children.append(Node{ id: 3 });
+
+  ASSERT root.left?.id == 2, "optional node edge resolves";
+  root.left?.id = 4_i64;
+  ASSERT root.left?.id == 4_i64, "optional node edge mutates its stored payload";
+  root.left?.right = Node{ id: 5_i64 };
+  ASSERT root.left?.right?.id == 5_i64, "conditional edge assignment inserts a node";
+  ASSERT root.children[0]?.id == 3, "node list element resolves";
+  ASSERT nodeId(root) == 1, "node store is implicitly threaded through calls";
+
+  # Replacing an edge changes only the compact handle. Both payloads remain
+  # owned by the inferred type store until the outermost @node scope exits.
+  IF root.children[0] EXISTS AS child THEN
+    root.left = child;
+  END
+  ASSERT root.left?.id == 3, "existing node handle assigns directly";
+END

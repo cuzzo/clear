@@ -1,0 +1,70 @@
+# Footgun: TOCTOU — CLEAR
+#
+# CLEAR does not prevent logical TOCTOU at the type level — that would
+# require reasoning about invariants across time, which no type system
+# currently does. However, WITH EXCLUSIVE scopes the check and act to
+# one atomic region by construction, making the correct pattern the
+# natural one and the broken pattern visibly wrong.
+
+STRUCT Account {
+  balance: Int64
+}
+
+FN main() RETURNS Void ->
+  acct = Account{ balance: 100 } @shared:locked;
+
+  # ----------------------------------------------------------------
+  # BROKEN: check in one WITH, act in a separate WITH.
+  # The lock is released between the two blocks — a concurrent fiber
+  # can modify balance in the window, exactly as in C/Go/Rust.
+  #
+  # WITH acct AS a {
+  #     IF a.balance >= 80 THEN
+  #         -- lock released here; window opens
+  #     END
+  # }
+  # WITH EXCLUSIVE acct AS a {
+  #     a.balance = a.balance - 80;  -- acting on a stale check
+  # }
+  # ----------------------------------------------------------------
+
+  # CORRECT: check and act inside one WITH EXCLUSIVE block.
+  # The lock is held for the entire check+act, closing the window.
+  # This is the natural way to write it in CLEAR; the block structure
+  # makes the atomic scope explicit.
+
+  p1 = BG {
+    WITH EXCLUSIVE acct AS a {
+      IF a.balance >= 80 THEN
+        a.balance = a.balance - 80;
+        print("fiber 1 withdrew 80");
+      ELSE
+        print("fiber 1: insufficient funds");
+      END
+    }
+  };
+
+  p2 = BG {
+    WITH EXCLUSIVE acct AS a {
+      IF a.balance >= 80 THEN
+        a.balance = a.balance - 80;
+        print("fiber 2 withdrew 80");
+      ELSE
+        print("fiber 2: insufficient funds");
+      END
+    }
+  };
+
+  NEXT p1;
+  NEXT p2;
+
+  WITH acct AS a {
+    # Always 20: exactly one withdrawal succeeded.
+    print("balance = " $+ a.balance.toString());
+  }
+END
+
+# Note: CLEAR cannot prevent TOCTOU in general (e.g. filesystem races
+# or check-then-act patterns spanning multiple @shared values) any more
+# than Rust or Go can. The WITH EXCLUSIVE syntax makes the atomic scope
+# of check+act obvious, reducing the chance of accidental window creation.

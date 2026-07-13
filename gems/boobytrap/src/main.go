@@ -969,6 +969,108 @@ func detectLanguage(path string) string {
 	return ""
 }
 
+func parseGoCoverprofile(data []byte, repo string, files map[string]FileCoverage) error {
+	scanner := bufio.NewScanner(bytes.NewReader(data))
+	for scanner.Scan() {
+		line := strings.TrimSpace(scanner.Text())
+		if line == "" || strings.HasPrefix(line, "mode:") {
+			continue
+		}
+		parts := strings.Fields(line)
+		if len(parts) != 3 {
+			continue
+		}
+		covPart := parts[0]
+		countVal, err := strconv.Atoi(parts[2])
+		if err != nil {
+			continue
+		}
+		colonIdx := strings.LastIndex(covPart, ":")
+		if colonIdx == -1 {
+			continue
+		}
+		filePath := covPart[:colonIdx]
+		rangePart := covPart[colonIdx+1:]
+
+		absFile := filePath
+		if !filepath.IsAbs(filePath) {
+			candidate := filepath.Join(repo, filePath)
+			if _, err := os.Stat(candidate); err == nil {
+				absFile = filepath.Clean(candidate)
+			} else {
+				parts := strings.Split(filePath, "/")
+				resolved := false
+				for i := 1; i < len(parts); i++ {
+					sub := filepath.Join(parts[i:]...)
+					candidate = filepath.Join(repo, sub)
+					if _, err := os.Stat(candidate); err == nil {
+						absFile = filepath.Clean(candidate)
+						resolved = true
+						break
+					}
+				}
+				if !resolved {
+					absFile = filepath.Clean(filepath.Join(repo, filePath))
+				}
+			}
+		}
+
+		commaIdx := strings.Index(rangePart, ",")
+		if commaIdx == -1 {
+			continue
+		}
+		startPart := rangePart[:commaIdx]
+		endPart := rangePart[commaIdx+1:]
+
+		startDot := strings.Index(startPart, ".")
+		endDot := strings.Index(endPart, ".")
+		if startDot == -1 || endDot == -1 {
+			continue
+		}
+		startLine, err := strconv.Atoi(startPart[:startDot])
+		if err != nil {
+			continue
+		}
+		endLine, err := strconv.Atoi(endPart[:endDot])
+		if err != nil {
+			continue
+		}
+
+		dst, exists := files[absFile]
+		if !exists {
+			dst = FileCoverage{
+				Lines:      []*int{},
+				Branches:   make(map[string]map[string]int),
+				SourcePath: relpathNoEval(absFile, repo),
+				Format:     "go_coverprofile",
+				Language:   "go",
+			}
+		}
+
+		for len(dst.Lines) < endLine {
+			dst.Lines = append(dst.Lines, nil)
+		}
+
+		for l := startLine; l <= endLine; l++ {
+			if dst.Lines[l-1] == nil {
+				val := countVal
+				dst.Lines[l-1] = &val
+			} else {
+				*dst.Lines[l-1] = maxInt(*dst.Lines[l-1], countVal)
+			}
+		}
+		files[absFile] = dst
+	}
+	return scanner.Err()
+}
+
+func maxInt(a, b int) int {
+	if a > b {
+		return a
+	}
+	return b
+}
+
 func parseNilKillJsonl(data []byte, repo string, files map[string]FileCoverage) error {
 	scanner := bufio.NewScanner(bytes.NewReader(data))
 	for scanner.Scan() {
@@ -1193,7 +1295,11 @@ func processCoverage(covPath, repo string) (*CoverageDataset, map[string]FileGap
 		}
 
 		trimmed := bytes.TrimSpace(data)
-		if bytes.HasPrefix(trimmed, []byte("<")) {
+		if bytes.HasPrefix(trimmed, []byte("mode:")) {
+			if err := parseGoCoverprofile(data, repo, files); err != nil {
+				return nil, nil, err
+			}
+		} else if bytes.HasPrefix(trimmed, []byte("<")) {
 			var xmlCov CoberturaCoverage
 			if err := xml.Unmarshal(data, &xmlCov); err != nil {
 				return nil, nil, err

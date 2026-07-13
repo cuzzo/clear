@@ -59,7 +59,7 @@ def iam_key_expr(c, k)
   case k
   when :literal  then "\"kk\""
   when :variable then "kvar"
-  when :concat   then "(\"k\" + \"k\")"
+  when :concat   then "(\"k\" $+ \"k\")"
   end
 end
 
@@ -83,9 +83,9 @@ def iam_expected_read(c, key_e, v)
   if %i[array list].include?(c)
     "ASSERT box[#{key_e}] == 9_i64, \"seq indexed set\";"
   elsif v == :primitive
-    "ASSERT (box[#{key_e}] OR 0_i64) == 9_i64, \"map int set\";"
+    "ASSERT (box[#{key_e}] OR_ELSE 0_i64) == 9_i64, \"map int set\";"
   else
-    "ASSERT (box[#{key_e}] OR \"\") == \"vv\", \"map str set\";"
+    "ASSERT (box[#{key_e}] OR_ELSE \"\") == \"vv\", \"map str set\";"
   end
 end
 

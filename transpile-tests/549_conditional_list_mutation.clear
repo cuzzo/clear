@@ -1,0 +1,49 @@
+STRUCT Item {
+  value: Int64
+}
+
+STRUCT Parent {
+  child: ?Item
+}
+
+STRUCT OwnedItem {
+  name: String
+}
+
+STRUCT RcItem {
+  value: Int64
+}
+
+FN rhs!(MUTABLE calls: Int64[]@list) RETURNS Int64 ->
+  calls.append(1_i64);
+  RETURN 99_i64;
+END
+
+FN main() RETURNS Void ->
+  MUTABLE items: Item[]@list = [];
+  MUTABLE calls: Int64[]@list = [];
+  items.append(Item{ value: 1_i64 });
+
+  items[0]?.value = 7_i64;
+  items[9]?.value = rhs!(calls);
+
+  ASSERT (items[0]?.value OR_ELSE 0_i64) == 7_i64;
+  ASSERT calls.length() == 0_i64;
+
+  MUTABLE parent = Parent{ child: Item{ value: 3_i64 } };
+  parent.child?.value = 11_i64;
+  ASSERT (parent.child?.value OR_ELSE 0_i64) == 11_i64;
+
+  MUTABLE owned: OwnedItem[]@list = [];
+  owned.append(OwnedItem{ name: COPY "old" });
+  owned[0]?.name = COPY "new";
+  ASSERT (owned[0]?.name OR_ELSE "") == "new";
+
+  # IF-bind aliases an RC element owned by the list. Leaving the branch must
+  # not decrement the list's strong reference or make the next lookup dangle.
+  MUTABLE rc_items: RcItem@multiowned[]@list = [];
+  rc_items.append(RcItem{ value: 5_i64 } @multiowned);
+  IF rc_items[0] EXISTS AS rc THEN ASSERT rc.value == 5_i64; END
+  IF rc_items[0] EXISTS AS rc THEN ASSERT rc.value == 5_i64; END
+  RETURN;
+END

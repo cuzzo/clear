@@ -60,6 +60,31 @@ module FuzzSurfaceRegistry
       :nested_collection,
     ],
 
+    rc_storage_capabilities: [
+      :multiowned,
+      :shared,
+    ],
+
+    # Operations whose result, mutation, or destruction depends on the
+    # collection element's ownership capability. Scalar-only queries are not
+    # included because they never touch an element value.
+    generic_collection_operations: [
+      :list_append, :list_index, :list_set, :list_first, :list_last,
+      :list_pop, :list_remove, :list_clear, :list_slice, :list_copy,
+      :list_iteration, :pool_insert_get, :pool_remove, :pool_copy,
+      :pool_iteration, :set_insert_iteration, :set_contains, :set_index,
+      :set_remove, :set_copy, :map_put_get, :map_delete, :map_values, :map_copy,
+      :map_iteration, :sharded_list_copy, :sharded_pool_copy, :sharded_set_copy,
+      :sharded_map_values, :sharded_map_keys, :sharded_map_copy,
+    ],
+
+    # Recursive value shapes that generic COPY/materialization must traverse
+    # without structurally duplicating Rc/Arc control-block handles.
+    rc_generic_value_shapes: [
+      :struct_copy, :optional_struct_copy, :union_copy,
+      :optional_union_copy, :list_optional_copy, :map_optional_values,
+    ],
+
     escape_sources: [
       :frame_local,
       :loop_local,
@@ -176,6 +201,23 @@ module FuzzSurfaceRegistry
       mir_ownership_contracts: [:promotion_on_escape],
     },
 
+    rc_generic_collection_matrix: {
+      storage_capabilities: [:multiowned, :shared],
+      collection_shapes: [:list, :pool, :hash_map],
+      rc_storage_capabilities: [:multiowned, :shared],
+      generic_collection_operations: [
+        :list_append, :list_index, :list_set, :list_first, :list_last,
+        :list_pop, :list_remove, :list_clear, :list_slice, :list_copy,
+        :list_iteration, :pool_insert_get, :pool_remove, :pool_copy,
+        :pool_iteration, :set_insert_iteration, :set_contains, :set_index,
+        :set_remove, :set_copy, :map_put_get, :map_delete, :map_values, :map_copy,
+        :map_iteration, :sharded_list_copy, :sharded_pool_copy, :sharded_set_copy,
+        :sharded_map_values, :sharded_map_keys, :sharded_map_copy,
+      ],
+      mir_ownership_contracts: [:cleanup_on_all_paths, :move_suppresses_cleanup,
+                                 :collection_mutation_visible_to_mir],
+    },
+
     # Truthful owner of :struct_field_store across EVERY value shape. Cells
     # enumerated from the registry (ASSIGN_INTO_HEAP_VALUE_SHAPES -- adds the
     # caller-side frame_* shapes that ownership_surface_smoke claims but
@@ -194,8 +236,8 @@ module FuzzSurfaceRegistry
 
     # Truthful owner of :list_append across EVERY element value shape (the
     # ASSIGN_INTO_HEAP_VALUE_SHAPES superset). Many element-type x list-of
-    # combinations may be language-illegal -- such cells are :in_dev with a
-    # "language-not-supported" tag rather than silently omitted.
+    # combinations may be language-illegal -- those remain active
+    # :compile_error cells rather than being silently omitted.
     list_append_modality: {
       cleanup_value_shapes: [
         :string, :frame_string_concat, :dynamic_array, :frame_list, :heap_list,
@@ -266,6 +308,14 @@ module FuzzSurfaceRegistry
         :constructor_modifiers,
         :nested_collection,
       ],
+    },
+    rc_generic_value_matrix: {
+      rc_storage_capabilities: [:multiowned, :shared],
+      rc_generic_value_shapes: [
+        :struct_copy, :optional_struct_copy, :union_copy,
+        :optional_union_copy, :list_optional_copy, :map_optional_values,
+      ],
+      mir_ownership_contracts: [:cleanup_on_all_paths, :non_copy_requires_explicit_move_or_copy],
     },
 
     ownership_surface_smoke: {

@@ -147,7 +147,7 @@ The pattern collapses N read-sites + N decision implementations into 1 writer + 
 - DeepCopy strategy collapse (SIMP-03): `:string` and `:union` → `:full_value`. lower_copy 6 → 4 strategies. emit_deep_copy: 6 → 4 case-arms. hoist_cleanup_entry: 4 → 2 DeepCopy branches. `node.zig_type` overrides `@TypeOf(src)` to preserve named union types and explicit `[]const u8` for strings.
 
 **Attempted and reverted:**
-- SIMP-02 (delete promoteDeep): blocked. `promote()` is frame-aware and skips already-heap data; `promoteDeep()` always dupes. The whole-struct return path needs promoteDeep semantics for HPT-independence: when the source binding is about to be freed, the return value must own its data regardless of allocator. Swap caused "Invalid free" in 77_error_snapshot.cht. Real fix needs a per-binding "source about to be cleaned up?" stamp at lowering time.
+- SIMP-02 (delete promoteDeep): blocked. `promote()` is frame-aware and skips already-heap data; `promoteDeep()` always dupes. The whole-struct return path needs promoteDeep semantics for HPT-independence: when the source binding is about to be freed, the return value must own its data regardless of allocator. Swap caused "Invalid free" in 77_error_snapshot.clear. Real fix needs a per-binding "source about to be cleaned up?" stamp at lowering time.
 
 **Why each remaining PC needs more than one session:**
 - **PC-A (Type#layout deletion)**: Type#layout is read by `indirect?` which is called in 8+ files via `ti.indirect?`. Symbol#layout is also independently read in 4+ files. Deleting Type#layout while keeping AtomicPtr semantics requires replacing every `*T` emission with an explicit MIR wrapper at every construction site. Audit-heavy and risk-prone.

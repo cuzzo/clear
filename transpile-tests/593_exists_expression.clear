@@ -1,0 +1,29 @@
+FN main() RETURNS Void ->
+    future: ~Int64 = BG { 42_i64; };
+    ready = future IS_READY;
+    ASSERT ready OR !(ready);
+    ASSERT (NEXT future) == 42_i64;
+    present: ?Int64 = 7_i64;
+    absent: ?Int64 = NIL;
+    ASSERT present EXISTS;
+    ASSERT !(absent EXISTS);
+    ASSERT (present EXISTS) AND !(absent EXISTS);
+    maybe_name: ?String = "CLEAR";
+    no_name: ?String = NIL;
+    ASSERT maybe_name OR FALSE;
+    ASSERT no_name OR TRUE;
+    ASSERT maybe_name AND TRUE;
+    ASSERT fallibleOptional(2_i64) IS_OK;
+    ASSERT !(fallibleOptional(0_i64) IS_OK);
+    IF fallibleOptional(2_i64) IS_OK AS maybe_value AND maybe_value EXISTS AS result THEN
+        ASSERT result == 11_i64;
+    ELSE
+        ASSERT FALSE;
+    END
+END
+
+FN fallibleOptional(mode: Int64) RETURNS !?Int64 ->
+    IF mode == 0_i64 THEN RAISE; END
+    IF mode == 1_i64 THEN RETURN NIL; END
+    RETURN 11_i64;
+END

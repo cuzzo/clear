@@ -1,6 +1,6 @@
 # Template: Additional FSM edge shapes.
 #
-# Complements fsm_suspension_matrix with suspend points around fallible OR
+# Complements fsm_suspension_matrix with suspend points around fallible OR_ELSE
 # expressions, nested branch/loop state, early BG returns, and stream branches.
 
 FSM_EDGE_CELLS = [
@@ -28,7 +28,7 @@ FuzzGenerator.register(:fsm_edge_matrix, cells: FSM_EDGE_CELLS) do |p|
       FN main() RETURNS Void ->
         h: ~Int64 = BG {
           sleep(1);
-          risky(FALSE) OR 3_i64;
+          risky(FALSE) OR_ELSE 3_i64;
         };
         ASSERT (NEXT h) == 9_i64, "fsm or success";
         RETURN;
@@ -45,7 +45,7 @@ FuzzGenerator.register(:fsm_edge_matrix, cells: FSM_EDGE_CELLS) do |p|
       FN main() RETURNS Void ->
         h: ~Int64 = BG {
           sleep(1);
-          risky(TRUE) OR 3_i64;
+          risky(TRUE) OR_ELSE 3_i64;
         };
         ASSERT (NEXT h) == 3_i64, "fsm or fallback";
         RETURN;
@@ -156,7 +156,7 @@ FuzzGenerator.register(:fsm_edge_matrix, cells: FSM_EDGE_CELLS) do |p|
       FN main() RETURNS Void ->
         h: ~String = BG {
           sleep(1);
-          maybe(TRUE) OR COPY "fallback";
+          maybe(TRUE) OR_ELSE COPY "fallback";
         };
         out: String = NEXT h;
         ASSERT out.length() == 8_i64, "fsm owned or fallback";

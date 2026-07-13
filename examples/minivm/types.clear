@@ -1,0 +1,263 @@
+# Shared types and pure helpers for the Mal interpreter.
+# Value union, Env struct, and accessor functions.
+
+STRUCT Env {
+    vars: HashMap<Value>
+}
+
+UNION Value {
+    Nil, TrueVal, FalseVal,
+    Number: Float64, Str: String, Symbol: String,
+    List: Value[],
+    Vector: Value[],
+    Pair { pairCar: Value @indirect, pairCdr: Value @indirect },
+    Lambda { params: Value[], body: Value @indirect, envId: Id<Env> },
+    NativeFn: Int64,
+    EnvRef: Id<Env>,
+    Tco { tcoAst: Value @indirect, tcoEnv: Id<Env> },
+    Error { errMsg: String, errKind: String, errType: String },
+    Int64Val: Int64,
+    TypedI64Arr: Int64[],
+    TypedF64Arr: Float64[],
+    MapRef: Id<Env>,
+    Weak: Int64,
+    # Bytecode-compiled function pointer. bcIp is the entry IP into the
+    # ops stream; bcArgc is the number of arguments the helper expects.
+    # Created by MAKE_BC_FN, called via the regular CALL opcode (which
+    # detects BCFn and dispatches to BC_CALL semantics inline).
+    BCFn { bcFnIp: Int64, bcFnArgc: Int64 },
+    # Shared mutable cell. Holds an Id<Env> whose vars["v"] is the cell
+    # value. Created by BOX_NEW for @local / @shared:locked bindings.
+    # BG fibers see the same Env id (the pool is shared across exec!
+    # recursion), so mutations through BOX_STORE propagate.
+    Boxed: Id<Env>,
+    # Split stream handle. bufId references an Env in the shared pool
+    # whose vars["b"] holds the materialized buffer list (Value.List).
+    # cursor is the per-handle read position. CLONE creates a new
+    # SplitStream with the same bufId and current cursor; NEXT reads
+    # buf[cursor] and advances the handle's cursor (writeback to slot).
+    SplitStream { splitBufId: Id<Env>, splitCursor: Int64 },
+    # Rendezvous channel for ~T[INF] BG STREAM: producer fiber YIELDs
+    # one item, consumer NEXTs. Channel cell vars: "v" holds the in-flight
+    # value; "has" is TrueVal/FalseVal; "closed" is TrueVal/FalseVal so
+    # the producer fiber can exit when the consumer drops the channel.
+    Channel: Id<Env>,
+}
+
+# Pure helpers
+
+FN boolVal(b: Bool) RETURNS Value ->
+    IF b -> RETURN Value.TrueVal;
+    RETURN Value.FalseVal;
+END
+
+FN isTruthy?(v: Value) RETURNS Bool ->
+    PARTIAL MATCH v START Value.Nil -> RETURN FALSE;, Value.FalseVal -> RETURN FALSE;, DEFAULT -> RETURN TRUE; END
+    RETURN TRUE;
+END
+
+FN getSymName(v: Value) RETURNS !String ->
+    PARTIAL MATCH v START Value.Symbol AS s -> RETURN "" $+ s;, DEFAULT -> RETURN ""; END
+    RETURN "";
+END
+
+FN getNum(v: Value) RETURNS Float64 ->
+    PARTIAL MATCH v START
+        Value.Number AS n -> RETURN n;,
+        Value.Int64Val AS i -> RETURN toFloat(i);,
+        DEFAULT -> RETURN 0.0;
+    END
+    RETURN 0.0;
+END
+
+FN getInt(v: Value) RETURNS Int64 ->
+    PARTIAL MATCH v START
+        Value.Int64Val AS i -> RETURN i;,
+        Value.Number AS n -> tr = toInt(n); RETURN tr;,
+        DEFAULT -> RETURN 0;
+    END
+    RETURN 0;
+END
+
+FN isInt64?(v: Value) RETURNS Bool ->
+    PARTIAL MATCH v START Value.Int64Val -> RETURN TRUE;, DEFAULT -> RETURN FALSE; END
+    RETURN FALSE;
+END
+
+FN getStr(v: Value) RETURNS !String ->
+    PARTIAL MATCH v START Value.Str AS s -> RETURN "" $+ s;, DEFAULT -> RETURN ""; END
+    RETURN "";
+END
+
+# Key conversion for HashMap operations. String keys pass through; numeric
+# keys (Int64Val / Number) stringify so HashMap<Int64, V> and HashMap<F64, V>
+# share the env-backed string-keyed storage. Stringification is round-trip
+# stable for integers and is unique for finite floats, so semantics match
+# the Zig-side numericMapGet/Put.
+FN keyAsStr(v: Value) RETURNS !String ->
+    PARTIAL MATCH v START
+        Value.Str AS s         -> RETURN "" $+ s;,
+        Value.Int64Val AS i    -> RETURN i.toString();,
+        Value.Number AS n      -> RETURN n.toString();,
+        Value.Symbol AS s      -> RETURN "" $+ s;,
+        DEFAULT                -> RETURN "";
+    END
+    RETURN "";
+END
+
+FN getNativeId(v: Value) RETURNS Int64 ->
+    PARTIAL MATCH v START Value.NativeFn AS id -> RETURN id;, DEFAULT -> RETURN 0; END
+    RETURN 0;
+END
+
+FN isList?(v: Value) RETURNS Bool ->
+    PARTIAL MATCH v START Value.List -> RETURN TRUE;, DEFAULT -> RETURN FALSE; END
+    RETURN FALSE;
+END
+
+FN listLen(v: Value) RETURNS Int64 ->
+    PARTIAL MATCH v START
+        Value.List AS items -> RETURN items.length();,
+        Value.TypedI64Arr AS iarr -> RETURN iarr.length();,
+        Value.TypedF64Arr AS farr -> RETURN farr.length();,
+        Value.Str AS s -> RETURN s.length();,
+        DEFAULT -> RETURN 0;
+    END
+    RETURN 0;
+END
+
+FN isLambda?(v: Value) RETURNS Bool ->
+    PARTIAL MATCH v START Value.Lambda -> RETURN TRUE;, DEFAULT -> RETURN FALSE; END
+    RETURN FALSE;
+END
+
+FN isBCFn?(v: Value) RETURNS Bool ->
+    PARTIAL MATCH v START Value.BCFn -> RETURN TRUE;, DEFAULT -> RETURN FALSE; END
+    RETURN FALSE;
+END
+
+FN isBoxed?(v: Value) RETURNS Bool ->
+    PARTIAL MATCH v START Value.Boxed -> RETURN TRUE;, DEFAULT -> RETURN FALSE; END
+    RETURN FALSE;
+END
+
+FN prStr(v: Value, readably: Bool) RETURNS !String EFFECTS REENTRANT ->
+    PARTIAL MATCH v START
+        Value.Nil -> RETURN "nil";,
+        Value.TrueVal -> RETURN "true";,
+        Value.FalseVal -> RETURN "false";,
+        Value.Number AS n ->
+            IF n == floor(n) THEN RETURN toInt(n).toString(); END
+            RETURN n.toString();,
+        Value.Int64Val AS i -> RETURN i.toString();,
+        Value.Str AS s -> IF readably THEN RETURN "\"" $+ s $+ "\""; END RETURN "" $+ s;,
+        Value.Symbol AS s -> RETURN "" $+ s;,
+        Value.List AS items ->
+            MUTABLE out = "(";
+            FOR li IN (0_i64 ..< items.length()) DO
+                IF li > 0 THEN out = out $+ " "; END
+                out = out $+ prStr(items[li], readably);
+            END
+            RETURN out $+ ")";,
+        Value.Vector AS velems ->
+            MUTABLE vout = "#(";
+            FOR vi IN (0_i64 ..< velems.length()) DO
+                IF vi > 0 THEN vout = vout $+ " "; END
+                vout = vout $+ prStr(velems[vi], readably);
+            END
+            RETURN vout $+ ")";,
+        Value.Pair AS p ->
+            RETURN "(" $+ prStr(p.pairCar, readably) $+ " . " $+ prStr(p.pairCdr, readably) $+ ")";,
+        Value.TypedI64Arr AS iarr ->
+            MUTABLE iout = "[";
+            FOR ii IN (0_i64 ..< iarr.length()) DO
+                IF ii > 0 THEN iout = iout $+ " "; END
+                iout = iout $+ iarr[ii].toString();
+            END
+            RETURN iout $+ "]:i64";,
+        Value.TypedF64Arr AS farr ->
+            MUTABLE fout = "[";
+            FOR fi IN (0_i64 ..< farr.length()) DO
+                IF fi > 0 THEN fout = fout $+ " "; END
+                fout = fout $+ farr[fi].toString();
+            END
+            RETURN fout $+ "]:f64";,
+        Value.NativeFn AS nid -> RETURN "#<native:" $+ nid.toString() $+ ">";,
+        Value.Lambda -> RETURN "#<function>";,
+        Value.EnvRef -> RETURN "#<envref>";,
+        Value.Tco -> RETURN "#<tco>";,
+        Value.Error AS e ->
+            IF e.errType.length() > 0 THEN
+                RETURN "#<error:" $+ e.errKind $+ ":" $+ e.errType $+ ":" $+ e.errMsg $+ ">";
+            END
+            RETURN "#<error:" $+ e.errKind $+ ":" $+ e.errMsg $+ ">";,
+        Value.MapRef -> RETURN "#<map>";,
+        Value.Weak AS wkId -> RETURN "#<weak:" $+ wkId.toString() $+ ">";,
+        Value.BCFn AS bcFn -> RETURN "#<bcfn:" $+ bcFn.bcFnIp.toString() $+ "/" $+ bcFn.bcFnArgc.toString() $+ ">";,
+        Value.Boxed -> RETURN "#<box>";,
+        Value.SplitStream AS sst -> RETURN "#<split:" $+ sst.splitCursor.toString() $+ ">";,
+        Value.Channel -> RETURN "#<channel>";
+    END
+    RETURN "";
+END
+
+FN envGet!(envId: Id<Env>, name: String, MUTABLE pool: Env[50000]@pool) RETURNS !Value
+  REQUIRES pool: LOCKED
+  EFFECTS REENTRANT
+->
+    MUTABLE recurseTo: ?Id<Env> = NIL;
+    WITH POLYMORPHIC EXCLUSIVE pool AS p {
+        IF p[envId] EXISTS AS env THEN
+            IF env.vars.contains?(name) THEN
+                RETURN COPY (env.vars[name] OR_ELSE Value.Nil);
+            END
+            parentVal = env.vars["__p"] OR_ELSE Value.Nil;
+            PARTIAL MATCH parentVal START
+                Value.EnvRef AS pid -> recurseTo = pid;,
+                DEFAULT -> recurseTo = NIL;
+            END
+        END
+    }
+    IF recurseTo EXISTS AS pid THEN RETURN envGet!(pid, name, pool); END
+    RETURN Value.Nil;
+END
+
+FN valEqual?(a: Value, b: Value) RETURNS Bool EFFECTS REENTRANT ->
+    PARTIAL MATCH a START
+        Value.Nil -> PARTIAL MATCH b START Value.Nil -> RETURN TRUE;, DEFAULT -> RETURN FALSE; END,
+        Value.TrueVal -> PARTIAL MATCH b START Value.TrueVal -> RETURN TRUE;, DEFAULT -> RETURN FALSE; END,
+        Value.FalseVal -> PARTIAL MATCH b START Value.FalseVal -> RETURN TRUE;, DEFAULT -> RETURN FALSE; END,
+        Value.Number AS na -> PARTIAL MATCH b START
+            Value.Number AS nb -> RETURN na == nb;,
+            Value.Int64Val AS ib -> RETURN na == toFloat(ib);,
+            DEFAULT -> RETURN FALSE; END,
+        Value.Int64Val AS ia -> PARTIAL MATCH b START
+            Value.Int64Val AS ib -> RETURN ia == ib;,
+            Value.Number AS nb -> RETURN toFloat(ia) == nb;,
+            DEFAULT -> RETURN FALSE; END,
+        Value.Str AS sa -> PARTIAL MATCH b START Value.Str AS sb -> RETURN sa == sb;, DEFAULT -> RETURN FALSE; END,
+        Value.Symbol AS sa -> PARTIAL MATCH b START Value.Symbol AS sb -> RETURN sa == sb;, DEFAULT -> RETURN FALSE; END,
+        Value.List AS la -> PARTIAL MATCH b START
+            Value.List AS lb ->
+                IF la.length() != lb.length() THEN RETURN FALSE; END
+                FOR ci IN (0_i64 ..< la.length()) DO
+                    IF valEqual?(la[ci], lb[ci]) == FALSE THEN RETURN FALSE; END
+                END
+                RETURN TRUE;,
+            DEFAULT -> RETURN FALSE; END,
+        Value.Vector AS va -> PARTIAL MATCH b START
+            Value.Vector AS vb ->
+                IF va.length() != vb.length() THEN RETURN FALSE; END
+                FOR vi IN (0_i64 ..< va.length()) DO
+                    IF valEqual?(va[vi], vb[vi]) == FALSE THEN RETURN FALSE; END
+                END
+                RETURN TRUE;,
+            DEFAULT -> RETURN FALSE; END,
+        Value.Pair AS pa -> PARTIAL MATCH b START
+            Value.Pair AS pb ->
+                RETURN valEqual?(pa.pairCar, pb.pairCar) AND valEqual?(pa.pairCdr, pb.pairCdr);,
+            DEFAULT -> RETURN FALSE; END,
+        DEFAULT -> RETURN FALSE;
+    END
+    RETURN FALSE;
+END

@@ -1,7 +1,7 @@
 # Bugs #1 / #2 / #3 Forensic
 
 Same shape as [`bug9-forensic.md`](bug9-forensic.md). For each of the
-remaining CLEAR-side bugs uncovered while building `vm.cht`, this
+remaining CLEAR-side bugs uncovered while building `vm.clear`, this
 document identifies:
 
 1. **Which MIR pipeline stage** is responsible.
@@ -9,7 +9,7 @@ document identifies:
 3. **What the minimal fix or coverage delta is.**
 
 The reproducers are
-[`transpile-tests/known-failing/bug{1,2,3}_*.cht`](../../transpile-tests/known-failing/).
+[`transpile-tests/known-failing/bug{1,2,3}_*.clear`](../../transpile-tests/known-failing/).
 
 ---
 
@@ -93,7 +93,7 @@ OR_POSITIONS = [:assign_rhs, :fn_arg, :method_arg, :return_expr,
 
 A reproducer in the template would look like:
 
-```cht
+```clear
 FN main() RETURNS !Void ->
   IF (mayFail() OR "fallback") != "expected" THEN
     RAISE "wrong";
@@ -199,9 +199,9 @@ program exits 0."
 
 ---
 
-## Bug #3 / #8 — `expr OR fallback` doesn't stop fallibility propagation
+## Bug #3 / #8 — `expr OR_ELSE fallback` doesn't stop fallibility propagation
 
-**Symptom**: a function whose body uses `expr OR fallback` (`charAt(i) OR ""`)
+**Symptom**: a function whose body uses `expr OR_ELSE fallback` (`charAt(i) OR ""`)
 gets rejected with `Function 'X' can fail (raises directly via RAISE) but its return type doesn't declare it`.
 The function contains zero literal `RAISE` statements.
 
@@ -262,7 +262,7 @@ before MIR. No checker invariant applies.
 
 ### Fuzz template: none cover this shape either
 
-`or_positional` tests OR fallback semantics at the call site, not
+`or_positional` tests OR_ELSE fallback semantics at the call site, not
 the containing function's signature. A template
 `fallibility_inference` would cross:
 

@@ -13,15 +13,14 @@ quality work scalable.
 ## Projects
 
 - `decomplex`: static complexity and duplicated-decision analysis.
-- `boobytrap`: risk ranking from coverage, branch gaps, churn, and
-  structural evidence.
+- `boobytrap`: risk ranking from coverage, branch gaps, churn, and structural evidence.
 - `slopcop`: sloppiness and guardrail reporting.
 - `nil-kill`: nil/type-pressure evidence.
-- `auto-type`: automated type and nilability rewrites driven by analyzer
-  evidence.
+- `auto-type`: automated type and nilability rewrites driven by analyzer evidence.
 - `espalier`: architecture and public-surface analysis.
 - `lineage`: source/test/quality lineage UI and ingestion tooling.
 - `zig-mutants`: mutation testing for Zig runtime/lib code.
+- `sql-cov`: dynamic and schema-aware SQL branch coverage and logic hazard analysis.
 
 ## Contribution Rules
 

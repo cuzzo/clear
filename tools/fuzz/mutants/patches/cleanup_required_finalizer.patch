@@ -1,6 +1,6 @@
-diff --git a/src/mir/mir_checker.rb b/src/mir/mir_checker.rb
---- a/src/mir/mir_checker.rb
-+++ b/src/mir/mir_checker.rb
+diff --git a/compiler/ruby/mir/mir_checker.rb b/compiler/ruby/mir/mir_checker.rb
+--- a/compiler/ruby/mir/mir_checker.rb
++++ b/compiler/ruby/mir/mir_checker.rb
 @@ -433,7 +433,6 @@ class MIRChecker
      verify_allocating_lets_marked!(nodes, allocs)
      verify_aggregate_owned_children!(fn_def.body, allocs)

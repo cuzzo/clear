@@ -25,7 +25,7 @@ Next step: reduce to a small test that stores a union variant with an
 `@indirect` recursive payload inside `HashMap<Value>` or `@pool`, copies it out,
 and then lets both containers clean up.
 
-Repro: `transpile-tests/520_mal_indirect_lambda_body_cleanup.cht`
+Repro: `transpile-tests/520_mal_indirect_lambda_body_cleanup.clear`
 
 Current status: fixed by marking inline-struct union `@indirect` fields as
 heap/runtime-using during annotation, and by deep-copying cleanup-needing union
@@ -45,7 +45,7 @@ Next step: reduce to a minimal `HashMap<Int64>` test using `map[COPY key] = 1`
 under the debug allocator. Decide whether the fix is compiler cleanup,
 diagnostics, or documentation that map keys are borrowed at the source level.
 
-Repro: `transpile-tests/518_mal_hashmap_copy_key_cleanup.cht`
+Repro: `transpile-tests/518_mal_hashmap_copy_key_cleanup.clear`
 
 Current status: fixed by hoisting allocating string-map key expressions before
 `put`, giving the temporary a visible MIR cleanup path.
@@ -66,7 +66,7 @@ Next step: reduce to a minimal function that accepts a borrowed union/string,
 stores `COPY val` into a `HashMap`, and is called with a freshly allocated union
 payload.
 
-Repro: `transpile-tests/519_mal_borrowed_param_copy_store_cleanup.cht`
+Repro: `transpile-tests/519_mal_borrowed_param_copy_store_cleanup.clear`
 
 Current status: fixed by hoisting cleanup-needing union literal arguments into
 owned MIR temporaries when they are passed to borrowed parameters.

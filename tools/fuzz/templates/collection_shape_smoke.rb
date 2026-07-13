@@ -72,7 +72,7 @@ FuzzGenerator.register(:collection_shape_smoke, cells: COLLECTION_SHAPE_SMOKE_CE
           MUTABLE pool: Item[8]@pool = [];
           id = pool.insert(Item{ value: 42_i64 });
           ASSERT pool.length() == 1_i64, "pool length";
-          IF pool[id] AS item THEN
+          IF pool[id] EXISTS AS item THEN
               ASSERT item.value == 42_i64, "pool readback";
           ELSE
               ASSERT FALSE, "pool handle should be live";
@@ -103,7 +103,7 @@ FuzzGenerator.register(:collection_shape_smoke, cells: COLLECTION_SHAPE_SMOKE_CE
           vals["a"] = 10_i64;
           vals["b"] = 20_i64;
           ASSERT vals.count() == 2_i64, "map count";
-          ASSERT vals["b"] OR 0_i64 == 20_i64, "map readback";
+          ASSERT vals["b"] OR_ELSE 0_i64 == 20_i64, "map readback";
           RETURN;
       END
     CHT
@@ -157,7 +157,7 @@ FuzzGenerator.register(:collection_shape_smoke, cells: COLLECTION_SHAPE_SMOKE_CE
           vals["a"] = 10_i64;
           vals["b"] = 20_i64;
           ASSERT vals.count() == 2_i64, "sharded map count";
-          ASSERT vals["a"] OR 0_i64 == 10_i64, "sharded map readback";
+          ASSERT vals["a"] OR_ELSE 0_i64 == 10_i64, "sharded map readback";
           RETURN;
       END
     CHT
@@ -220,7 +220,11 @@ FuzzGenerator.register(:collection_shape_smoke, cells: COLLECTION_SHAPE_SMOKE_CE
           inner.append(6_i64);
           outer.append(inner);
           ASSERT outer.length() == 1_i64, "nested outer length";
-          ASSERT outer[0_i64][1_i64] == 6_i64, "nested readback";
+          IF outer[0_i64] EXISTS AS inner_read THEN
+              ASSERT inner_read[1_i64] == 6_i64, "nested readback";
+          ELSE
+              ASSERT FALSE, "nested outer element should exist";
+          END
           RETURN;
       END
     CHT

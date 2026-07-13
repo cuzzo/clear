@@ -36,7 +36,7 @@ this batch size. At 4+ cores the parallelism dominates.
 
 ## Search kernel (stdlib note)
 
-bench.cht calls `countOccurrences(content, needle)` which is currently a
+bench.clear calls `countOccurrences(content, needle)` which is currently a
 stdlib function wrapping libc `memchr`. This is effectively a native shim:
 CLEAR cannot express the raw pointer iteration that SIMD byte search
 requires without unsafe pointer arithmetic, which the language does not yet

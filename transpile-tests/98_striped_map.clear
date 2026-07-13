@@ -1,0 +1,41 @@
+# Test: HashMap@sharded(N):locked — lock-striped hash maps via capability composition.
+# @sharded(N) provides the topology; :locked adds per-shard Mutex for skew safety.
+# Any thread can access any shard.  Trades ~20ns/op lock overhead for resilience
+# to hot-key skew.
+
+FN main() RETURNS Void ->
+    # String-keyed sharded+locked map with 4 stripes.
+    MUTABLE scores: HashMap<Int64>@sharded(4):locked = {};
+
+    # Put values (any thread can write to any stripe).
+    scores["alice"] = 100;
+    scores["bob"] = 200;
+    scores["charlie"] = 300;
+
+    # Get values back (map[key] returns ?V — use OR_ELSE to unwrap).
+    a = scores["alice"] OR_ELSE 0;
+    ASSERT a == 100, "alice should be 100";
+
+    b = scores["bob"] OR_ELSE 0;
+    ASSERT b == 200, "bob should be 200";
+
+    # Contains check.
+    ASSERT scores.contains?("alice") == TRUE, "should contain alice";
+    ASSERT scores.contains?("nobody") == FALSE, "should not contain nobody";
+
+    # Count across all stripes.
+    n: Int64 = scores.count();
+    ASSERT n == 3, "count should be 3";
+
+    # Delete.
+    scores.delete("bob");
+    ASSERT scores.count() == 2, "count should be 2 after delete";
+    ASSERT scores.contains?("bob") == FALSE, "bob should be removed";
+
+    # Overwrite.
+    scores["alice"] = 999;
+    a2 = scores["alice"] OR_ELSE 0;
+    ASSERT a2 == 999, "alice should be overwritten to 999";
+
+    RETURN;
+END

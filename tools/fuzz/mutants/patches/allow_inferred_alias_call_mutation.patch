@@ -1,0 +1,10 @@
+diff --git a/compiler/ruby/semantic/ownership_transport.rb b/compiler/ruby/semantic/ownership_transport.rb
+--- a/compiler/ruby/semantic/ownership_transport.rb
++++ b/compiler/ruby/semantic/ownership_transport.rb
+@@ -101,5 +101,6 @@ class OwnershipTransportFacts
+   sig { params(node: AST::Node, binding_id: Integer, ancestors: T::Array[AST::Node]).void }
+   def record_mutation_id(node, binding_id, ancestors)
++    return
+     @mutations << Event.new(
+       node: node,
+       binding_id: binding_id,

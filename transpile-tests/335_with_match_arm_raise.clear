@@ -1,0 +1,55 @@
+# MVCC L7.4 followup (G2): a raise inside a WITH MATCH arm body must
+# release the per-arm Guard before unwinding. The L7.4 prelude emits
+# `var __guard = ...; defer __guard.release();` so Zig's stack
+# unwinding fires the defer on the raise path -- this test pins that
+# contract.
+#
+# Shape: a fn raises inside a WITH MATCH arm and is `OR_ELSE FALSE`'d at
+# the call site to absorb the error. The cell is then re-read via
+# WITH SNAPSHOT / WITH EXCLUSIVE to confirm:
+#   1. The cell is still readable (Guard released, no panic / hang).
+#   2. The cell's value is unchanged (the arm only raises; no commit).
+#
+# If the L7.4 prelude's `defer __guard.release()` regressed, the
+# post-CATCH read would either deadlock (lock-style guards), panic
+# with an EBR-pinned epoch never released, or read-after-free the
+# snapshot pointer.
+
+STRUCT Counter { value: Int64 }
+
+# Returns Bool so `OR_ELSE FALSE` can absorb the error in expression
+# position. Always raises (the IF guard always succeeds for value > 0).
+FN raise_in_arm!(MUTABLE c: Counter) RETURNS !Bool
+  REQUIRES c: VERSIONED | LOCKED
+->
+    WITH c AS va MATCH
+        WHEN VERSIONED -> {
+            IF va.value > 0 THEN RAISE "guard-release smoke"; END
+        }
+        WHEN LOCKED -> {
+            IF va.value > 0 THEN RAISE "guard-release smoke"; END
+        }
+    END
+    RETURN TRUE;
+END
+
+FN main() RETURNS Void ->
+    # VERSIONED arm raises mid-body; cell stays at value=42.
+    MUTABLE c1 = Counter{ value: 42 } @versioned;
+    ok1 = raise_in_arm!(c1) OR_ELSE FALSE;
+    ASSERT ok1 == FALSE, "raise propagated";
+    WITH SNAPSHOT c1 AS view {
+        ASSERT view.value == 42, "VERSIONED: cell readable post-Guard-release";
+    }
+
+    # LOCKED arm: lock acquired, body raises, defer release fires,
+    # mutex freed; subsequent WITH EXCLUSIVE acquires without deadlock.
+    MUTABLE c2 = Counter{ value: 7 } @locked;
+    ok2 = raise_in_arm!(c2) OR_ELSE FALSE;
+    ASSERT ok2 == FALSE, "raise propagated";
+    WITH EXCLUSIVE c2 AS inner {
+        ASSERT inner.value == 7, "LOCKED: lock released, cell readable";
+    }
+
+    RETURN;
+END

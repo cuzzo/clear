@@ -1,7 +1,7 @@
 # VM Phase 2 / Concurrency — Compiler Bugs and Gap Analysis
 
 Discovered while attempting to land real `rt.spawnFiber`-backed
-concurrency in `examples/minivm/_bc_runner.cht`'s `BG_SPAWN` handler.
+concurrency in `examples/minivm/_bc_runner.clear`'s `BG_SPAWN` handler.
 Every bug observed in the VM's compiled code is, by definition, a bug
 in the compiler that compiled it — this doc tracks each.
 
@@ -19,7 +19,7 @@ without ownership transfer, and the outer scope's auto-generated
 
 ### Reproducer #1 — direct slice borrow
 
-```cht
+```clear
 FN work(xs: Int64[]) RETURNS Int64 -> RETURN xs.length(); END
 
 FN runit() RETURNS Int64 ->
@@ -37,7 +37,7 @@ Observed: compiles clean; runtime assertion fails (fiber reads 0, not 3).
 
 ### Reproducer #2 — same pattern through a union variant
 
-```cht
+```clear
 UNION V { Nil, IntV: Int64 }
 
 FN consumeSlice(xs: V[]) RETURNS Int64 ->
@@ -65,9 +65,9 @@ Observed: compiles clean; `ASSERTION FAILED` at runtime (reads 0, not 42).
 
 ### Reproducer #3 — the VM's Phase 2 attempt
 
-Inside `_bc_runner.cht`'s BG_SPAWN opcode handler:
+Inside `_bc_runner.clear`'s BG_SPAWN opcode handler:
 
-```cht
+```clear
 MUTABLE bgCapsList: Value[]@list = List[];
 FOR bi IN (0_i64 ..< bgArgc) DO
     bgCapsList.append(COPY stack[sp - bgArgc + bi]);
@@ -80,7 +80,7 @@ append(futures, BG {
 
 Observed: compiles clean; fiber reads empty captures (zero-length
 slice → `slot[0] = Nil` → `0 + 1.0 = 1.0` instead of `7.0 + 1.0 = 8.0`
-for the `58_bg.cht` test).
+for the `58_bg.clear` test).
 
 ### Why all three are the same bug
 
@@ -109,7 +109,7 @@ field owns a heap container, and the result is captured into BG.
 
 ### Reproducer
 
-```cht
+```clear
 UNION V { Nil, IntV: Int64, Vec: V[] }
 
 FN consumeVec(v: V) RETURNS Int64 ->
@@ -322,8 +322,8 @@ Discovered 2026-05-16 during Phase 0 gate stabilization on the
 `register-machine` branch.
 
 **Not a CLEAR compiler bug.** Native CLEAR compiles and runs all
-affected tests correctly (`./clear run transpile-tests/66_list_loop_arena.cht`
-exits 0). This is a `register_bc_emitter.rb` / `vm.cht` runner design
+affected tests correctly (`./clear run transpile-tests/66_list_loop_arena.clear`
+exits 0). This is a `register_bc_emitter.rb` / `vm.clear` runner design
 gap.
 
 ### Symptom
@@ -350,7 +350,7 @@ gap.
     (`register_bc_emitter.rb:533-534`).
 - But guest frame-allocated collections (`vals: Float64[]@list`) are
   still emitted as LFNEW/LFAPPEND that allocate on the **runner's
-  real** `rt.frameAlloc()` arena (`vm.cht` dispatch).
+  real** `rt.frameAlloc()` arena (`vm.clear` dispatch).
 - A guest loop that frame-allocates per iteration therefore
   **accumulates unbounded memory in the runner's arena** instead of
   being rewound each iteration. The runner's arena overflows; the
@@ -401,7 +401,7 @@ state as closure.
 ## Compiler: control_flow.scan_direct sig rejects nil sub-bodies
 
 Found 2026-05-18 while replicating the stack VM's fibers into the
-register VM (BGSPAWN + EFFECTS REENTRANT in vm.cht).
+register VM (BGSPAWN + EFFECTS REENTRANT in vm.clear).
 
 ### Symptom
 
@@ -426,7 +426,7 @@ Latent: only fires on code paths where `collect_local_names` /
 `scan_direct` traverses an IF-without-ELSE (or MATCH-without-DEFAULT)
 under the effect/reentrancy analysis — exposed here by adding
 `EFFECTS REENTRANT` + a BG block containing an `IF ... THEN ... END`
-(no ELSE) to `vm.cht`.
+(no ELSE) to `vm.clear`.
 
 ### Fix (applied)
 
@@ -448,7 +448,7 @@ slice-param case).
 
 ### Minimal reproduction
 
-```cht
+```clear
 FN consume(xs: Int64[]@list) RETURNS Int64 -> RETURN xs.length(); END
 FN runit(ops: Int64[]@list) RETURNS !Int64 ->
     p: ~Int64 = BG { consume(COPY ops); };
@@ -488,7 +488,7 @@ is a borrowed `*const ArrayList(T)`, so the ctx field is declared
 `*const ArrayList` while it actually holds an owned dupe ->
 `*T` vs `*const T` mismatch in the fiber body / forwarded call.
 
-### Architecturally-correct fix (applied, NOT a band-aid, NOT vm.cht-side)
+### Architecturally-correct fix (applied, NOT a band-aid, NOT vm.clear-side)
 
 The ctx field type must describe **the value the field holds** (the
 deep-copied owned value), not the borrowed source it was copied
@@ -554,7 +554,7 @@ them ("Second free"). Two coordinated canonical-isations:
    `dupeUnionValue` alone no-op'd).
 The COPY now owns independent element payloads; its cleanup and the
 source's target disjoint memory. Regression:
-`transpile-tests/531_bgcopy_string_list_element_ownership.cht`
+`transpile-tests/531_bgcopy_string_list_element_ownership.clear`
 (leak-checked) + the re-enabled `:string` cells of
 `tools/fuzz/templates/bg_capture_typing.rb`.
 
@@ -596,7 +596,7 @@ register-VM probe (`docs/agents/stack-vm-fiber-replication.md`).
 ### Symptom
 
 `_ = <owned/cleanup-bearing expr>;` (an `AST::BindExpr` decl with
-`name == "_"` -- e.g. `_ = makeList() OR RAISE;`, `_ = NEXT fut;`)
+`name == "_"` -- e.g. `_ = makeList() OR_ELSE RAISE;`, `_ = NEXT fut;`)
 lowered to literal Zig:
 
 ```zig
@@ -636,7 +636,7 @@ through as an ordinary name in two places:
 
 Type-agnostic (owned `@list`, struct-with-`@list`-field, `NEXT`
 future all verified). Regression: `transpile-tests/527_discard_
-owned_value.cht` (multi-discard, leak-checked). Verified: prspec
+owned_value.clear` (multi-discard, leak-checked). Verified: prspec
 4802/0, transpile-tests 555/555 (0 leak), fuzz matrix 145/145
 (0 fail/leak), register allowlist 245/245.
 
@@ -644,9 +644,9 @@ owned_value.cht` (multi-discard, leak-checked). Verified: prspec
 
 Found 2026-05-18, faithfully reproduced from the register-VM
 de-TIGHT P0 (`stack-vm-fiber-replication.md`). Minimal repro
-(`transpile-tests/528_nested_list_loop_rewind.cht`):
+(`transpile-tests/528_nested_list_loop_rewind.clear`):
 
-```cht
+```clear
 STRUCT Handle { values: Int64[]@list }
 FN run(n: Int64) RETURNS !Int64 ->
     MUTABLE handles: Handle[]@list = List[];
@@ -710,7 +710,7 @@ container element is itself heap-backed, so `:heap` is correct.
 This unifies the allocator-resolution root with the checker's
 attribution root -- not a per-condition band-aid.
 
-Regression: `transpile-tests/528_nested_list_loop_rewind.cht`;
+Regression: `transpile-tests/528_nested_list_loop_rewind.clear`;
 fuzz axis added to `tools/fuzz/templates/loop_carry_collection.rb`
 (see post-mortem).
 
@@ -726,7 +726,7 @@ proxy; bounded-native-stack recursion (`:thunk`, `:tail_call`,
 and the already-permitted `:max_depth`/`:not_logical`) is allowed
 in TIGHT loops. Net complexity reduction: one fewer place that
 re-derives "is this recursion bounded". Regression:
-`transpile-tests/529_tailcall_reentrant_in_tight_loop.cht`
+`transpile-tests/529_tailcall_reentrant_in_tight_loop.clear`
 (compile+run) and `spec/error_emission_coverage_spec.rb`
 ":TIGHT_CALLS_REENTRANT_FN" (unit: plain :reentrant still blocked;
 :TAIL_CALL/:THUNK permitted -- load-bearing, fails pre-fix).
@@ -793,7 +793,7 @@ ONE canonical comptime `@hasField(@TypeOf(x),"items")` dispatch
 every other backing access already uses (ArrayList -> `.items`,
 slice -> `[0..]`, `*const ArrayList` -> `.*.items`), zero runtime
 cost. The deep-copy no longer re-derives "this is an ArrayList".
-Regression: `transpile-tests/530_bgcopy_list_param_reentrant.cht`
+Regression: `transpile-tests/530_bgcopy_list_param_reentrant.clear`
 (compile+run) + fuzz `tools/fuzz/templates/bg_copy_param_reentrant.rb`
 (re-enabled: `CALLEES = [:reentrant]`). Unblocks register-VM R3
 Step 3.
@@ -804,17 +804,17 @@ where `sourceLines: Int64[]@list` is a parameter). Blocks R3 Step 3.
 
 ### Minimal reproduction (~18 lines, transpile-tests-shaped)
 
-```cht
+```clear
 FN consume(xs: Int64[]@list) RETURNS Int64 -> RETURN xs.length(); END
 FN worker!(sl: Int64[]@list, depth: Int64) RETURNS !Int64 EFFECTS REENTRANT:MAX_DEPTH(8) ->
     IF depth <= 0_i64 THEN RETURN consume(sl); END
-    f: ~Int64 = BG { @service -> worker!(COPY sl, depth - 1_i64) OR RAISE; };
+    f: ~Int64 = BG { @service -> worker!(COPY sl, depth - 1_i64) OR_ELSE RAISE; };
     RETURN NEXT f;
 END
 FN main() RETURNS !Void ->
     MUTABLE xs: Int64[]@list = List[];
     xs.append(1_i64); xs.append(2_i64); xs.append(3_i64);
-    n: Int64 = worker!(GIVE xs, 2_i64) OR RAISE;
+    n: Int64 = worker!(GIVE xs, 2_i64) OR_ELSE RAISE;
     ASSERT n == 3_i64, "reentrant BG COPY @list param";
 END
 ```
@@ -858,7 +858,7 @@ exact axis combination here was unsampled).
 
 R3 Step 3 (BGSPAWN/FNEXT runtime, saved /tmp/r3_step3.patch) is
 structurally complete and reverted-pending this fix; not hacked
-around in vm.cht.
+around in vm.clear.
 
 ## TODO (architectural debt, no open bug): collapse the FiberCtxBuilder parallel capture system
 
@@ -888,8 +888,8 @@ FreshHeapCopy fork. No correctness fire forces this; own workstream.
 Superseded. R6 made the register-VM lock real:
 - R6.2/R6.3: single-i64-field @shared:locked structs are backed by
   shared store cells with a real per-cell spin-flag lock
-  (LOCKACQ/LOCKREL, 100ms fallible timeout, RETRY) in vm.cht,
-  ported verbatim from _bc_runner.cht's LOCK_ACQUIRE/LOCK_RELEASE.
+  (LOCKACQ/LOCKREL, 100ms fallible timeout, RETRY) in vm.clear,
+  ported verbatim from _bc_runner.clear's LOCK_ACQUIRE/LOCK_RELEASE.
 - R6.4: a @shared:locked capture marshals its cell index (kind
   :cell); the BG runs as a REAL fiber (BGSPAWN) sharing the cell by
   id, for both scalar-return and void-payload bodies.
@@ -919,7 +919,7 @@ the stack VM (262/263/267/280/281/367 pass identically on both).
 Earlier note said R6 should "start by un-deferring Step D". That
 is WRONG: Step D is the Zig-backend FiberCtxBuilder collapse,
 orthogonal to the register VM. The register VM has its own capture
-machinery (the :fiber emitter + vm.cht pendingCaps/captureSlots).
+machinery (the :fiber emitter + vm.clear pendingCaps/captureSlots).
 
 Real root: the register VM has NO shared cap-wrapped store. The
 stack VM threads one `pool: Env[N]@pool:shared:locked` as an
@@ -963,11 +963,11 @@ MIRLowering/global registry under parallel workers. Not yet root-caused.
 
 R6 added a guest-level per-cell spin-flag lock (LOCKACQ/LOCKREL +
 SCELL store cells) implemented entirely in CLEAR in
-`examples/minivm/vm.cht`, layered on top of the EXISTING, already-
+`examples/minivm/vm.clear`, layered on top of the EXISTING, already-
 loom/hammer/VOPR-validated host `CheatLib.Locked` and the existing
 cooperative fiber scheduler (`BG { @service }` / `NEXT`). No new
 `zig/runtime/` atomic, lock, thread, or FFI primitive was introduced
-(only `vm.cht` CLEAR + the Ruby register emitter changed).
+(only `vm.clear` CLEAR + the Ruby register emitter changed).
 
 Battery decision:
 

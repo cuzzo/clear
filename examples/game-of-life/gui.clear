@@ -1,0 +1,82 @@
+REQUIRE "grid.clear";
+
+FN liveCellMap(cells: Cell[]@list) RETURNS !HashMap<Int64> ->
+  MUTABLE live: HashMap<Int64> = {};
+  MUTABLE i = 0;
+  WHILE i < cells.length() DO
+    IF cells[i] EXISTS AS cell THEN live[cellKey(cell)] = 1; END
+    i += 1;
+  END
+  RETURN live;
+END
+
+FN bounds(cells: Cell[]@list) RETURNS !Cell[]@list ->
+  MUTABLE result: Cell[]@list = [];
+  IF cells.empty?() THEN
+    result.append(Cell{ x: 0, y: 0 });
+    result.append(Cell{ x: 0, y: 0 });
+    RETURN result;
+  END
+
+  first = cells[0] OR_ELSE Cell{ x: 0_i64, y: 0_i64 };
+  MUTABLE minX = first.x;
+  MUTABLE maxX = first.x;
+  MUTABLE minY = first.y;
+  MUTABLE maxY = first.y;
+  MUTABLE i = 1;
+  WHILE i < cells.length() DO
+    IF cells[i] EXISTS AS cell THEN
+      IF cell.x < minX -> minX = cell.x;
+      IF cell.x > maxX -> maxX = cell.x;
+      IF cell.y < minY -> minY = cell.y;
+      IF cell.y > maxY -> maxY = cell.y;
+    END
+    i += 1;
+  END
+
+  result.append(Cell{ x: minX, y: minY });
+  result.append(Cell{ x: maxX, y: maxY });
+  RETURN result;
+END
+
+FN graph(cells: Cell[]@list) RETURNS !String[]@list ->
+  live = liveCellMap(cells);
+  b = bounds(cells);
+  min = b[0] OR_ELSE Cell{ x: 0_i64, y: 0_i64 };
+  max = b[1] OR_ELSE Cell{ x: 0_i64, y: 0_i64 };
+  MUTABLE rows: String[]@list = [];
+
+  MUTABLE x = min.x - 1;
+  WHILE x <= max.x + 1 DO
+    MUTABLE row = "";
+    MUTABLE y = min.y - 1;
+    WHILE y <= max.y + 1 DO
+      key = cellKey(Cell{ x: x, y: y });
+      IF (live[key] OR_ELSE 0) == 1 THEN
+        row = row $+ "X";
+      ELSE
+        row = row $+ "O";
+      END
+      y += 1;
+    END
+    rows.append(row);
+    x += 1;
+  END
+
+  RETURN rows;
+END
+
+FN render(cells: Cell[]@list) RETURNS !Void ->
+  b = bounds(cells);
+  min = b[0] OR_ELSE Cell{ x: 0_i64, y: 0_i64 };
+  max = b[1] OR_ELSE Cell{ x: 0_i64, y: 0_i64 };
+  print("---GENERATION---");
+  print("(${min.x.toString()},${min.y.toString()}) (${max.x.toString()},${max.y.toString()})");
+  rows = graph(cells);
+  MUTABLE i = 0;
+  WHILE i < rows.length() DO
+    print(rows[i] OR_ELSE "");
+    i += 1;
+  END
+  RETURN;
+END

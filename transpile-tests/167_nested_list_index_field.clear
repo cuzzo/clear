@@ -1,0 +1,44 @@
+# Test: Mutation through struct.list[index].field expressions
+# Verifies that the compiler emits mutable pointer access for GetIndex
+# nodes when the indexed result flows into a mutation context.
+
+STRUCT Node { keys: Int64[]@list, vals: String[]@list }
+STRUCT DB { nodes: Node[]@list }
+
+# Read-only: method call on nested indexed field
+FN countKeys(db: DB, idx: Int64) RETURNS Int64 ->
+    IF db.nodes[idx] EXISTS AS node THEN RETURN node.keys.length(); END
+    RETURN 0_i64;
+END
+
+FN main() RETURNS Void ->
+    MUTABLE nodes: Node[]@list = [];
+    MUTABLE n0 = Node{ keys: [], vals: [] };
+    MUTABLE n1 = Node{ keys: [], vals: [] };
+    nodes.append(n0);
+    nodes.append(n1);
+
+    # Test 1: Mutation via method call on nested indexed field
+    IF nodes[0] EXISTS AS node0 THEN
+        node0.keys.append(10);
+        node0.keys.append(20);
+        node0.keys.append(30);
+    END
+    IF nodes[1] EXISTS AS node1 THEN
+        node1.keys.append(40);
+        node1.keys.append(50);
+    END
+
+    MUTABLE db = DB{ nodes: [] };
+    MUTABLE n2 = Node{ keys: [], vals: [] };
+    n2.keys.append(100);
+    db.nodes.append(n2);
+    ASSERT countKeys(db, 0) == 1, "db node 0 has 1 key";
+
+    # Test 2: Read values back from nested indexed field
+    ASSERT nodes[0]?.keys[0] == 10, "node 0 key 0 is 10";
+    ASSERT nodes[0]?.keys[2] == 30, "node 0 key 2 is 30";
+    ASSERT nodes[1]?.keys[0] == 40, "node 1 key 0 is 40";
+
+    print("167: nested list index field PASSED");
+END

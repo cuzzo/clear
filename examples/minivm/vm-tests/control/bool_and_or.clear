@@ -1,0 +1,8 @@
+FN main() RETURNS Int64 ->
+    IF startsWith?("clear", "cl") AND !startsWith?("clear", "zz") THEN
+        IF startsWith?("vm", "no") OR startsWith?("vm", "v") THEN
+            RETURN 1_i64;
+        END
+    END
+    RETURN 0_i64;
+END

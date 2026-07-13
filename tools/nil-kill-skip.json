@@ -1,19 +1,19 @@
 [
   {
     "kind": "remove_dead_safe_nav",
-    "path": "src/tools/doctor.rb",
+    "path": "compiler/ruby/tools/doctor.rb",
     "code": "resolved&.dig",
     "note": "resolved is nil when no binary/addr2line is available; corpus never exercises that path"
   },
   {
     "kind": "replace_nil_with_default",
-    "path": "src/annotator/helpers/effects.rb",
+    "path": "compiler/ruby/annotator/helpers/effects.rb",
     "code": "reason.nil?",
     "note": "boolean expression — reason.nil? is not a nil-with-default pattern; the result is assigned to fsm_eligible"
   },
   {
     "kind": "add_sig",
-    "path": "src/mir/fsm_transform.rb",
+    "path": "compiler/ruby/mir/fsm_transform.rb",
     "code": "BgTransformValue",
     "note": "Avoid circular load-order dependency on MIRLoweringConcurrency::BgTransformValue"
   }

@@ -43,7 +43,7 @@ Today the stdlib has two different surfaces:
   functions and methods, their types, Zig templates, allocation behavior,
   ownership behavior, mutating receivers, suspension, bytecode lowering, and
   resource schemas.
-- `stdlib/<name>/src/lib.cht` is the first-party package layout. The module
+- `stdlib/<name>/src/lib.clear` is the first-party package layout. The module
   importer auto-resolves `REQUIRE "pkg:<name>"` after explicit `--pkg` paths.
   At the moment only `pkg:testing` exists, and it is a smoke-test skeleton.
 
@@ -183,7 +183,7 @@ The public docs should include:
 - Examples that read like CLEAR, but are labelled illustrative unless they
   compile today.
 
-Do not generate real `stdlib/<pkg>/src/lib.cht` packages for every planned
+Do not generate real `stdlib/<pkg>/src/lib.clear` packages for every planned
 surface yet. A wide stub package tree would make it look like the stdlib is
 available and would encourage early dependency on APIs we still expect to
 change. Until a package is ready for compiler or launch use, the public docs
@@ -203,14 +203,14 @@ First-party packages should follow the existing layout:
 
 ```text
 stdlib/
-  collections/src/lib.cht
-  string/src/lib.cht
-  fs/src/lib.cht
-  path/src/lib.cht
-  regex/src/lib.cht
-  json/src/lib.cht
-  cli/src/lib.cht
-  testing/src/lib.cht
+  collections/src/lib.clear
+  string/src/lib.clear
+  fs/src/lib.clear
+  path/src/lib.clear
+  regex/src/lib.clear
+  json/src/lib.clear
+  cli/src/lib.clear
+  testing/src/lib.clear
 ```
 
 They should be imported as:

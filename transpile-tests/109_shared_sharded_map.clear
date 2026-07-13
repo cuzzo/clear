@@ -1,0 +1,50 @@
+# Test: HashMap@shared:sharded(N):writeLocked — Arc-wrapped lock-striped hash map.
+# Combines @shared (Arc) + @sharded(N) (partitioned) + :writeLocked (RwLock per shard).
+# Methods handle shard selection and locking internally — no WITH blocks needed.
+# This is the DashMap pattern: concurrent reads across shards, exclusive writes per shard.
+
+FN main() RETURNS Void ->
+    # shared:sharded:writeLocked = Arc<ShardedStringMap> with RwLock per shard.
+    MUTABLE map: HashMap<Int64>@shared:sharded(4):writeLocked = {};
+
+    # Put values (each hashes to a shard, acquires write lock on that shard).
+    map["alice"] = 100;
+    map["bob"] = 200;
+    map["charlie"] = 300;
+
+    # Get values (acquires read lock on shard — concurrent readers allowed).
+    a = map["alice"] OR_ELSE 0;
+    ASSERT a == 100, "alice should be 100";
+
+    b = map["bob"] OR_ELSE 0;
+    ASSERT b == 200, "bob should be 200";
+
+    c = map["charlie"] OR_ELSE 0;
+    ASSERT c == 300, "charlie should be 300";
+
+    # Contains check.
+    ASSERT map.contains?("alice") == TRUE, "should contain alice";
+    ASSERT map.contains?("nobody") == FALSE, "should not contain nobody";
+
+    # Count across all shards.
+    n: Int64 = map.count();
+    ASSERT n == 3, "count should be 3";
+
+    # Delete.
+    map.delete("bob");
+    ASSERT map.count() == 2, "count should be 2 after delete";
+    ASSERT map.contains?("bob") == FALSE, "bob should be removed";
+
+    # Overwrite.
+    map["alice"] = 999;
+    a2 = map["alice"] OR_ELSE 0;
+    ASSERT a2 == 999, "alice should be overwritten to 999";
+
+    # Also test @shared:sharded(N):locked (Mutex variant).
+    MUTABLE map2: HashMap<Int64>@shared:sharded(2):locked = {};
+    map2["x"] = 42;
+    x = map2["x"] OR_ELSE 0;
+    ASSERT x == 42, "mutex variant should work";
+
+    RETURN;
+END

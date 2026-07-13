@@ -13,10 +13,10 @@ BENCH_DIR=benchmarks/clear-only/tail_call_loop
 RUNS=${RUNS:-5}
 
 echo "Building bench_tail_call (optimized)..."
-$CLEAR build $BENCH_DIR/bench_tail_call.cht --optimized -o $BENCH_DIR/bench_tail_call > /dev/null
+$CLEAR build $BENCH_DIR/bench_tail_call.clear --optimized -o $BENCH_DIR/bench_tail_call > /dev/null
 
 echo "Building bench_loop (optimized)..."
-$CLEAR build $BENCH_DIR/bench_loop.cht --optimized -o $BENCH_DIR/bench_loop > /dev/null
+$CLEAR build $BENCH_DIR/bench_loop.clear --optimized -o $BENCH_DIR/bench_loop > /dev/null
 
 run_n() {
   local label="$1" bin="$2" rss_total=0 elapsed_total=0

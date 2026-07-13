@@ -1,0 +1,7 @@
+FN greeting(name: String) RETURNS !String ->
+    RETURN "Hello, " $+ name $+ "!";
+END
+
+FN main() RETURNS String ->
+    RETURN greeting("Clear");
+END

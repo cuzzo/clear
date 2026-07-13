@@ -1,0 +1,52 @@
+# Test: heap carry string in doubly-nested loops.
+#
+# The outer loop is mark_per_iter (frame-local `prefix`).
+# The inner loop is mark_per_iter (frame-local `parts`).
+# `resp` is a heap carry var: outer-scoped string reassigned inside the inner loop.
+#
+# This exercises the pattern from benchmark tcp servers where handleClient has:
+#   - outer while(running) with frame data from socketRead
+#   - inner while(pos < len) processing each line
+#   - MUTABLE resp="" that accumulates per-command responses
+#
+# restoreLoopMark must not free overflow blocks (must use softRewind, not rewind).
+# Freeing blocks in the outer loop mark while inner marks still reference their
+# block-index state corrupts the GPA free list and crashes on subsequent
+# trimExcess -> pop calls.
+
+FN processLines!(n: Int64) RETURNS !Void ->
+    MUTABLE outer: Int64 = 0;
+    WHILE outer < 10 DO
+        # Outer frame-local: forces mark_per_iter on the outer loop.
+        prefix = "O" $+ outer.toString();
+
+        # Heap carry string: declared outside inner loop, reassigned inside it.
+        MUTABLE resp = "";
+
+        # Inner loop: frame-local list forces mark_per_iter here too.
+        MUTABLE i: Int64 = 0;
+        WHILE i < n DO
+            MUTABLE parts: String[]@list = [];
+            parts.append(i.toString());
+            # Use prefix as length (no move, just read)
+            resp = resp $+ i.toString() $+ ";" $+ prefix.length().toString();
+            i += 1;
+        END
+
+        # Use resp before it's freed at end of outer iteration.
+        ASSERT resp.length() > 0, "resp empty";
+        outer += 1;
+    END
+END
+
+FN main() RETURNS !Void ->
+    # Run many times: if restoreLoopMark corrupts the frame arena the crash
+    # occurs inside this loop.
+    MUTABLE k: Int64 = 0;
+    WHILE k < 200 DO
+        processLines!(20) OR_ELSE EXIT;
+        k += 1;
+    END
+    print("PASS");
+    RETURN;
+END

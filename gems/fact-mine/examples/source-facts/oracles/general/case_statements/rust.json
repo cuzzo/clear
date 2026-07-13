@@ -605,38 +605,7 @@
     "semantic_effects": [],
     "state_declarations": [],
     "state_param_origins": [],
-    "state_reads": [
-      {
-        "field": "action_one",
-        "function": "method_case_no_val",
-        "line": 11,
-        "receiver": "self"
-      },
-      {
-        "field": "action_one",
-        "function": "method_case_one_pattern",
-        "line": 17,
-        "receiver": "self"
-      },
-      {
-        "field": "action_one",
-        "function": "method_eight",
-        "line": 3,
-        "receiver": "self"
-      },
-      {
-        "field": "action_three",
-        "function": "method_eight",
-        "line": 5,
-        "receiver": "self"
-      },
-      {
-        "field": "action_two",
-        "function": "method_eight",
-        "line": 4,
-        "receiver": "self"
-      }
-    ],
+    "state_reads": [],
     "state_writes": []
   }
 }

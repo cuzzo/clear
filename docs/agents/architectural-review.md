@@ -34,7 +34,7 @@ after the current `architectural-review` work.
    control-flow analysis, and pipe analysis still carry broad mutable phase
    context and dense correctness decisions.
 3. `src/mir/lowering/expressions.rb` still creates target-language default
-   values with Zig-spelled `MIR::Lit` values for `OR PASS` fallback defaults.
+   values with Zig-spelled `MIR::Lit` values for `OR_ELSE PASS` fallback defaults.
    This does not hide cleanup or ownership behavior, so it is not a release
    red flag, but it should become a structural `MIR::DefaultValue` /
    `MIR::TypedEmpty` node rendered only by the emitter.

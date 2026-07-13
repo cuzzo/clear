@@ -211,7 +211,7 @@ FuzzGenerator.register(:pipeline_source_shape_matrix, cells: PIPELINE_SOURCE_CEL
     CHT
 
   when :index_struct
-    decl = p[:source] == :bounded_promises ? "s: ~Item[3] = [BG { makeItem(\"a\", 1_i64); }, BG { makeItem(\"b\", 2_i64); }, BG { makeItem(\"a\", 3_i64); }];" : "s: ~?Item[] = BG STREAM { YIELD makeItem(\"a\", 1_i64) OR RAISE; YIELD makeItem(\"b\", 2_i64) OR RAISE; YIELD makeItem(\"a\", 3_i64) OR RAISE; };"
+    decl = p[:source] == :bounded_promises ? "s: ~Item[3] = [BG { makeItem(\"a\", 1_i64); }, BG { makeItem(\"b\", 2_i64); }, BG { makeItem(\"a\", 3_i64); }];" : "s: ~?Item[] = BG STREAM { YIELD makeItem(\"a\", 1_i64) OR_ELSE RAISE; YIELD makeItem(\"b\", 2_i64) OR_ELSE RAISE; YIELD makeItem(\"a\", 3_i64) OR_ELSE RAISE; };"
     <<~CHT
       STRUCT Item { category: String, score: Int64 }
 
@@ -222,8 +222,8 @@ FuzzGenerator.register(:pipeline_source_shape_matrix, cells: PIPELINE_SOURCE_CEL
       FN main() RETURNS !Void ->
         #{decl}
         grouped = s |> INDEX _.category;
-        ASSERT grouped["a"].length() == 2_i64, "pipeline index a";
-        ASSERT grouped["b"].length() == 1_i64, "pipeline index b";
+        ASSERT grouped["a"]?.length() == 2_i64, "pipeline index a";
+        ASSERT grouped["b"]?.length() == 1_i64, "pipeline index b";
         RETURN;
       END
     CHT
@@ -409,7 +409,7 @@ FuzzGenerator.register(:pipeline_source_shape_matrix, cells: PIPELINE_SOURCE_CEL
       FN main() RETURNS Void ->
         MUTABLE counts: HashMap<Int64, Int64>@sharded(4) = {};
         (0_i64 ..< 4_i64) |> SHARD(_ MOD 4_i64, counts) |> CONCURRENT EACH {
-          counts[_] = (counts[_] OR 0_i64) + 1_i64;
+          counts[_] = (counts[_] OR_ELSE 0_i64) + 1_i64;
         };
         RETURN;
       END

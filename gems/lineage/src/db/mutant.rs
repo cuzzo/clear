@@ -33,6 +33,7 @@ pub struct MutantIngestStats {
     pub skipped_facts: usize,
 }
 
+#[allow(clippy::too_many_arguments)]
 pub fn ingest_mutant_facts_json<P, E>(
     storage: &Storage,
     normalizer: &dyn LanguageNormalizer,
@@ -106,7 +107,7 @@ where
             for unit_match in matched_units {
                 let path = &unit_match.path;
                 let unit = &unit_match.unit;
-                let Some(unit_id) = storage.resolve_unit_id(&unit.id, &path, &unit.name)? else {
+                let Some(unit_id) = storage.resolve_unit_id(&unit.id, path, &unit.name)? else {
                     stats.skipped_facts += 1;
                     continue;
                 };

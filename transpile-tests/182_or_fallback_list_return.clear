@@ -1,0 +1,22 @@
+# Test: OR_ELSE fallback on a function returning !T must call the function.
+# Bug: the transpiler elided the call when binding to a typed @list variable,
+# generating only the fallback value.
+
+FN riskyDouble!(x: Int64) RETURNS !Int64 ->
+    IF x < 0 THEN
+        readFile("negative") OR_ELSE RAISE;
+    END
+    RETURN x * 2;
+END
+
+FN main() RETURNS Void ->
+    # Success path: function is called, OR_ELSE fallback not used
+    result = riskyDouble!(5) OR_ELSE 0;
+    ASSERT result == 10, "success: 5 * 2 = 10";
+
+    # Error path: function fails, OR_ELSE fallback used
+    fallback = riskyDouble!(0 - 1) OR_ELSE 99;
+    ASSERT fallback == 99, "error: fallback to 99";
+
+    print("182: or fallback list return PASSED");
+END

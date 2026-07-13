@@ -19,6 +19,47 @@ class SlopcopReportCovTest < Minitest::Test
     end
   end
 
+  def test_coverage_data_merges_branch_hashes_with_missing_arm_defaults
+    dir = Dir.mktmpdir
+    file = File.join(dir, "a.rb")
+    File.write(file, "def f\n  1\nend\n")
+
+    first = SlopCop::CoverageData::Dataset.new(
+      path: "first",
+      files: {
+        file => SlopCop::CoverageData::FileCoverage.new(
+          file: file,
+          lines: [1],
+          branches: { "if:1" => { "then" => 1 } },
+          format: :simplecov,
+          branch_arms: [],
+          source_path: "a.rb",
+          language: :ruby
+        )
+      }
+    )
+    second = SlopCop::CoverageData::Dataset.new(
+      path: "second",
+      files: {
+        file => SlopCop::CoverageData::FileCoverage.new(
+          file: file,
+          lines: [1],
+          branches: { "if:1" => { "else" => 2 } },
+          format: :simplecov,
+          branch_arms: [],
+          source_path: "a.rb",
+          language: :ruby
+        )
+      }
+    )
+
+    merged = SlopCop::CoverageData.merge_datasets("merged", [first, second])
+
+    assert_equal({ "then" => 1, "else" => 2 }, merged.files.fetch(file).branches.fetch("if:1"))
+  ensure
+    FileUtils.remove_entry(dir) if dir && Dir.exist?(dir)
+  end
+
   def test_classifier_classify_static_file_error
     SlopCop::Classifier.stub :get_branch_arms, ->(*) { raise StandardError, "forced error" } do
       assert_equal [], SlopCop::Classifier.classify_static_file("a.rb")

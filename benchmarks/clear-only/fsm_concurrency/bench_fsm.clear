@@ -1,0 +1,29 @@
+# FSM-concurrency benchmark (FSM variant). Spawn N concurrent
+# fibers that each suspend once (sleep), all parked simultaneously
+# on the scheduler. Measures the per-suspended-fiber cost: with
+# FSMs, each fiber holds only its FsmTask + ctx struct (~96 B);
+# with stackful, each holds a full fiber stack.
+#
+# At high concurrency, FSM peak RSS = N * sizeof(BgCtx) + scheduler
+# overhead; stackful peak RSS = N * (committed pages of fiber stack)
+# + scheduler overhead. The committed pages are typically small
+# (touched only) but scale with N, while ctx structs are tiny.
+#
+# Companion: bench_stackful.clear (same code, @xl forces stackful).
+
+FN main() RETURNS Void ->
+  # All fibers spawn, all suspend on sleep(50ms). Once awoken, all
+  # finish. Concurrency window = N fibers parked at once.
+  count: Int64 = 20000_i64;
+
+  MUTABLE futures: ~Void[]@list = [];
+  FOR i IN (0 ..< count) DO
+    futures.append(BG { sleep(50); });
+  END
+
+  FOR j IN (0 ..< count) DO
+    IF futures[j] EXISTS AS future THEN NEXT future; END
+  END
+
+  RETURN;
+END

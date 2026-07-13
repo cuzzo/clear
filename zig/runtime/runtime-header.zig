@@ -4,6 +4,15 @@ const linux = std.os.linux;
 const compat = @import("../lib/compat.zig");
 pub const Runtime = @import("runtime.zig").Runtime;
 
+// Deterministic-interleaving seam for the compiler-used CheatLib Arc/WeakArc.
+// Production roots resolve directly to std.atomic.Value with no branch or
+// wrapper. Loom/VOPR roots export SimAtomic so every refcount transition is a
+// scheduler yield point and the actual runtime implementation is exercised.
+const RuntimeAtomic = blk: {
+    const root = @import("root");
+    break :blk if (@hasDecl(root, "SimAtomic")) root.SimAtomic else std.atomic.Value;
+};
+
 // ── CLEAR_PROFILE comptime gate ────────────────────────────────────
 // `clear profile` prepends `pub const CLEAR_PROFILE = true;` to the
 // transpiled entry module. The runtime reads that const from the root
@@ -130,7 +139,6 @@ pub const scheduler = fp;
 pub const fiber_memory = @import("fiber-memory.zig");
 pub var partitioned_map_delay_ctx_destroy = false;
 
-
 // Helper Functions
 fn getCwdFd() std.posix.fd_t {
     return std.posix.AT.FDCWD;
@@ -179,25 +187,19 @@ pub const CheatLib = struct {
         task_cfg: fp.TaskConfig,
         user_ctx: ?*anyopaque,
     ) !std.ArrayListUnmanaged(R) {
-        return streams.concurrentBoundedSelect(
-            fp.WaitGroup, T, R, N, mapFn,
-            struct {
-                fn localSpawn(sched: *fp.Scheduler, user_fn: TaskFn, args: ?*anyopaque, config: fp.TaskConfig) !void {
-                    try sched.submitSpawn(@intFromPtr(&Runtime.entryWrapper), user_fn, args, config);
-                }
-            }.localSpawn,
-            struct {
-                fn parallelSpawn(user_fn: TaskFn, args: ?*anyopaque, config: fp.TaskConfig) !void {
-                    try CheatLib.spawnBest(@intFromPtr(&Runtime.entryWrapper), user_fn, args, config);
-                }
-            }.parallelSpawn,
-            struct {
-                fn cleanupResult(alloc_: std.mem.Allocator, ptr: *R) void {
-                    cleanup(R, alloc_, ptr);
-                }
-            }.cleanupResult,
-            alloc, rt, items, workers, batch, parallel, task_cfg, user_ctx
-        );
+        return streams.concurrentBoundedSelect(fp.WaitGroup, T, R, N, mapFn, struct {
+            fn localSpawn(sched: *fp.Scheduler, user_fn: TaskFn, args: ?*anyopaque, config: fp.TaskConfig) !void {
+                try sched.submitSpawn(@intFromPtr(&Runtime.entryWrapper), user_fn, args, config);
+            }
+        }.localSpawn, struct {
+            fn parallelSpawn(user_fn: TaskFn, args: ?*anyopaque, config: fp.TaskConfig) !void {
+                try CheatLib.spawnBest(@intFromPtr(&Runtime.entryWrapper), user_fn, args, config);
+            }
+        }.parallelSpawn, struct {
+            fn cleanupResult(alloc_: std.mem.Allocator, ptr: *R) void {
+                cleanup(R, alloc_, ptr);
+            }
+        }.cleanupResult, alloc, rt, items, workers, batch, parallel, task_cfg, user_ctx);
     }
 
     pub fn concurrentBoundedWhere(
@@ -213,25 +215,19 @@ pub const CheatLib = struct {
         task_cfg: fp.TaskConfig,
         user_ctx: ?*anyopaque,
     ) !std.ArrayListUnmanaged(T) {
-        return streams.concurrentBoundedWhere(
-            fp.WaitGroup, T, N, predFn,
-            struct {
-                fn localSpawn(sched: *fp.Scheduler, user_fn: TaskFn, args: ?*anyopaque, config: fp.TaskConfig) !void {
-                    try sched.submitSpawn(@intFromPtr(&Runtime.entryWrapper), user_fn, args, config);
-                }
-            }.localSpawn,
-            struct {
-                fn parallelSpawn(user_fn: TaskFn, args: ?*anyopaque, config: fp.TaskConfig) !void {
-                    try CheatLib.spawnBest(@intFromPtr(&Runtime.entryWrapper), user_fn, args, config);
-                }
-            }.parallelSpawn,
-            struct {
-                fn cleanupItem(alloc_: std.mem.Allocator, ptr: *T) void {
-                    cleanup(T, alloc_, ptr);
-                }
-            }.cleanupItem,
-            alloc, rt, items, workers, batch, parallel, task_cfg, user_ctx
-        );
+        return streams.concurrentBoundedWhere(fp.WaitGroup, T, N, predFn, struct {
+            fn localSpawn(sched: *fp.Scheduler, user_fn: TaskFn, args: ?*anyopaque, config: fp.TaskConfig) !void {
+                try sched.submitSpawn(@intFromPtr(&Runtime.entryWrapper), user_fn, args, config);
+            }
+        }.localSpawn, struct {
+            fn parallelSpawn(user_fn: TaskFn, args: ?*anyopaque, config: fp.TaskConfig) !void {
+                try CheatLib.spawnBest(@intFromPtr(&Runtime.entryWrapper), user_fn, args, config);
+            }
+        }.parallelSpawn, struct {
+            fn cleanupItem(alloc_: std.mem.Allocator, ptr: *T) void {
+                cleanup(T, alloc_, ptr);
+            }
+        }.cleanupItem, alloc, rt, items, workers, batch, parallel, task_cfg, user_ctx);
     }
 
     pub fn concurrentBoundedEach(
@@ -246,20 +242,15 @@ pub const CheatLib = struct {
         task_cfg: fp.TaskConfig,
         user_ctx: ?*anyopaque,
     ) !void {
-        return streams.concurrentBoundedEach(
-            fp.WaitGroup, T, N, eachFn,
-            struct {
-                fn localSpawn(sched: *fp.Scheduler, user_fn: TaskFn, args: ?*anyopaque, config: fp.TaskConfig) !void {
-                    try sched.submitSpawn(@intFromPtr(&Runtime.entryWrapper), user_fn, args, config);
-                }
-            }.localSpawn,
-            struct {
-                fn parallelSpawn(user_fn: TaskFn, args: ?*anyopaque, config: fp.TaskConfig) !void {
-                    try CheatLib.spawnBest(@intFromPtr(&Runtime.entryWrapper), user_fn, args, config);
-                }
-            }.parallelSpawn,
-            rt, items, workers, batch, parallel, task_cfg, user_ctx
-        );
+        return streams.concurrentBoundedEach(fp.WaitGroup, T, N, eachFn, struct {
+            fn localSpawn(sched: *fp.Scheduler, user_fn: TaskFn, args: ?*anyopaque, config: fp.TaskConfig) !void {
+                try sched.submitSpawn(@intFromPtr(&Runtime.entryWrapper), user_fn, args, config);
+            }
+        }.localSpawn, struct {
+            fn parallelSpawn(user_fn: TaskFn, args: ?*anyopaque, config: fp.TaskConfig) !void {
+                try CheatLib.spawnBest(@intFromPtr(&Runtime.entryWrapper), user_fn, args, config);
+            }
+        }.parallelSpawn, rt, items, workers, batch, parallel, task_cfg, user_ctx);
     }
 
     // Dynamic-stream concurrent helpers: feeder fiber + N worker fibers
@@ -280,25 +271,19 @@ pub const CheatLib = struct {
         task_cfg: fp.TaskConfig,
         user_ctx: ?*anyopaque,
     ) !std.ArrayListUnmanaged(R) {
-        return streams.concurrentStreamSelect(
-            fp.WaitGroup, BoundedChannel(T), T, R, mapFn,
-            struct {
-                fn localSpawn(sched: *fp.Scheduler, user_fn: TaskFn, args: ?*anyopaque, config: fp.TaskConfig) !void {
-                    try sched.submitSpawn(@intFromPtr(&Runtime.entryWrapper), user_fn, args, config);
-                }
-            }.localSpawn,
-            struct {
-                fn parallelSpawn(user_fn: TaskFn, args: ?*anyopaque, config: fp.TaskConfig) !void {
-                    try CheatLib.spawnBest(@intFromPtr(&Runtime.entryWrapper), user_fn, args, config);
-                }
-            }.parallelSpawn,
-            struct {
-                fn cleanupResult(alloc_: std.mem.Allocator, ptr: *R) void {
-                    cleanup(R, alloc_, ptr);
-                }
-            }.cleanupResult,
-            is_inf, alloc, rt, src, workers, capacity, batch, parallel, task_cfg, user_ctx
-        );
+        return streams.concurrentStreamSelect(fp.WaitGroup, BoundedChannel(T), T, R, mapFn, struct {
+            fn localSpawn(sched: *fp.Scheduler, user_fn: TaskFn, args: ?*anyopaque, config: fp.TaskConfig) !void {
+                try sched.submitSpawn(@intFromPtr(&Runtime.entryWrapper), user_fn, args, config);
+            }
+        }.localSpawn, struct {
+            fn parallelSpawn(user_fn: TaskFn, args: ?*anyopaque, config: fp.TaskConfig) !void {
+                try CheatLib.spawnBest(@intFromPtr(&Runtime.entryWrapper), user_fn, args, config);
+            }
+        }.parallelSpawn, struct {
+            fn cleanupResult(alloc_: std.mem.Allocator, ptr: *R) void {
+                cleanup(R, alloc_, ptr);
+            }
+        }.cleanupResult, is_inf, alloc, rt, src, workers, capacity, batch, parallel, task_cfg, user_ctx);
     }
 
     pub fn concurrentStreamWhere(
@@ -315,25 +300,19 @@ pub const CheatLib = struct {
         task_cfg: fp.TaskConfig,
         user_ctx: ?*anyopaque,
     ) !std.ArrayListUnmanaged(T) {
-        return streams.concurrentStreamWhere(
-            fp.WaitGroup, BoundedChannel(T), T, predFn,
-            struct {
-                fn localSpawn(sched: *fp.Scheduler, user_fn: TaskFn, args: ?*anyopaque, config: fp.TaskConfig) !void {
-                    try sched.submitSpawn(@intFromPtr(&Runtime.entryWrapper), user_fn, args, config);
-                }
-            }.localSpawn,
-            struct {
-                fn parallelSpawn(user_fn: TaskFn, args: ?*anyopaque, config: fp.TaskConfig) !void {
-                    try CheatLib.spawnBest(@intFromPtr(&Runtime.entryWrapper), user_fn, args, config);
-                }
-            }.parallelSpawn,
-            struct {
-                fn cleanupItem(alloc_: std.mem.Allocator, ptr: *T) void {
-                    cleanup(T, alloc_, ptr);
-                }
-            }.cleanupItem,
-            is_inf, alloc, rt, src, workers, capacity, batch, parallel, task_cfg, user_ctx
-        );
+        return streams.concurrentStreamWhere(fp.WaitGroup, BoundedChannel(T), T, predFn, struct {
+            fn localSpawn(sched: *fp.Scheduler, user_fn: TaskFn, args: ?*anyopaque, config: fp.TaskConfig) !void {
+                try sched.submitSpawn(@intFromPtr(&Runtime.entryWrapper), user_fn, args, config);
+            }
+        }.localSpawn, struct {
+            fn parallelSpawn(user_fn: TaskFn, args: ?*anyopaque, config: fp.TaskConfig) !void {
+                try CheatLib.spawnBest(@intFromPtr(&Runtime.entryWrapper), user_fn, args, config);
+            }
+        }.parallelSpawn, struct {
+            fn cleanupItem(alloc_: std.mem.Allocator, ptr: *T) void {
+                cleanup(T, alloc_, ptr);
+            }
+        }.cleanupItem, is_inf, alloc, rt, src, workers, capacity, batch, parallel, task_cfg, user_ctx);
     }
 
     pub fn concurrentStreamEach(
@@ -350,20 +329,15 @@ pub const CheatLib = struct {
         task_cfg: fp.TaskConfig,
         user_ctx: ?*anyopaque,
     ) !void {
-        return streams.concurrentStreamEach(
-            fp.WaitGroup, BoundedChannel(T), T, eachFn,
-            struct {
-                fn localSpawn(sched: *fp.Scheduler, user_fn: TaskFn, args: ?*anyopaque, config: fp.TaskConfig) !void {
-                    try sched.submitSpawn(@intFromPtr(&Runtime.entryWrapper), user_fn, args, config);
-                }
-            }.localSpawn,
-            struct {
-                fn parallelSpawn(user_fn: TaskFn, args: ?*anyopaque, config: fp.TaskConfig) !void {
-                    try CheatLib.spawnBest(@intFromPtr(&Runtime.entryWrapper), user_fn, args, config);
-                }
-            }.parallelSpawn,
-            is_inf, alloc, rt, src, workers, capacity, batch, parallel, task_cfg, user_ctx
-        );
+        return streams.concurrentStreamEach(fp.WaitGroup, BoundedChannel(T), T, eachFn, struct {
+            fn localSpawn(sched: *fp.Scheduler, user_fn: TaskFn, args: ?*anyopaque, config: fp.TaskConfig) !void {
+                try sched.submitSpawn(@intFromPtr(&Runtime.entryWrapper), user_fn, args, config);
+            }
+        }.localSpawn, struct {
+            fn parallelSpawn(user_fn: TaskFn, args: ?*anyopaque, config: fp.TaskConfig) !void {
+                try CheatLib.spawnBest(@intFromPtr(&Runtime.entryWrapper), user_fn, args, config);
+            }
+        }.parallelSpawn, is_inf, alloc, rt, src, workers, capacity, batch, parallel, task_cfg, user_ctx);
     }
 
     // List-source concurrent helpers: persistent worker pool over a
@@ -382,25 +356,19 @@ pub const CheatLib = struct {
         task_cfg: fp.TaskConfig,
         user_ctx: ?*anyopaque,
     ) !std.ArrayListUnmanaged(R) {
-        return streams.concurrentListSelect(
-            fp.WaitGroup, T, R, mapFn,
-            struct {
-                fn localSpawn(sched: *fp.Scheduler, user_fn: TaskFn, args: ?*anyopaque, config: fp.TaskConfig) !void {
-                    try sched.submitSpawn(@intFromPtr(&Runtime.entryWrapper), user_fn, args, config);
-                }
-            }.localSpawn,
-            struct {
-                fn parallelSpawn(user_fn: TaskFn, args: ?*anyopaque, config: fp.TaskConfig) !void {
-                    try CheatLib.spawnBest(@intFromPtr(&Runtime.entryWrapper), user_fn, args, config);
-                }
-            }.parallelSpawn,
-            struct {
-                fn cleanupResult(alloc_: std.mem.Allocator, ptr: *R) void {
-                    cleanup(R, alloc_, ptr);
-                }
-            }.cleanupResult,
-            alloc, rt, items, workers, batch, parallel, task_cfg, user_ctx
-        );
+        return streams.concurrentListSelect(fp.WaitGroup, T, R, mapFn, struct {
+            fn localSpawn(sched: *fp.Scheduler, user_fn: TaskFn, args: ?*anyopaque, config: fp.TaskConfig) !void {
+                try sched.submitSpawn(@intFromPtr(&Runtime.entryWrapper), user_fn, args, config);
+            }
+        }.localSpawn, struct {
+            fn parallelSpawn(user_fn: TaskFn, args: ?*anyopaque, config: fp.TaskConfig) !void {
+                try CheatLib.spawnBest(@intFromPtr(&Runtime.entryWrapper), user_fn, args, config);
+            }
+        }.parallelSpawn, struct {
+            fn cleanupResult(alloc_: std.mem.Allocator, ptr: *R) void {
+                cleanup(R, alloc_, ptr);
+            }
+        }.cleanupResult, alloc, rt, items, workers, batch, parallel, task_cfg, user_ctx);
     }
 
     pub fn concurrentListWhere(
@@ -415,25 +383,19 @@ pub const CheatLib = struct {
         task_cfg: fp.TaskConfig,
         user_ctx: ?*anyopaque,
     ) !std.ArrayListUnmanaged(T) {
-        return streams.concurrentListWhere(
-            fp.WaitGroup, T, predFn,
-            struct {
-                fn localSpawn(sched: *fp.Scheduler, user_fn: TaskFn, args: ?*anyopaque, config: fp.TaskConfig) !void {
-                    try sched.submitSpawn(@intFromPtr(&Runtime.entryWrapper), user_fn, args, config);
-                }
-            }.localSpawn,
-            struct {
-                fn parallelSpawn(user_fn: TaskFn, args: ?*anyopaque, config: fp.TaskConfig) !void {
-                    try CheatLib.spawnBest(@intFromPtr(&Runtime.entryWrapper), user_fn, args, config);
-                }
-            }.parallelSpawn,
-            struct {
-                fn cleanupItem(alloc_: std.mem.Allocator, ptr: *T) void {
-                    cleanup(T, alloc_, ptr);
-                }
-            }.cleanupItem,
-            alloc, rt, items, workers, batch, parallel, task_cfg, user_ctx
-        );
+        return streams.concurrentListWhere(fp.WaitGroup, T, predFn, struct {
+            fn localSpawn(sched: *fp.Scheduler, user_fn: TaskFn, args: ?*anyopaque, config: fp.TaskConfig) !void {
+                try sched.submitSpawn(@intFromPtr(&Runtime.entryWrapper), user_fn, args, config);
+            }
+        }.localSpawn, struct {
+            fn parallelSpawn(user_fn: TaskFn, args: ?*anyopaque, config: fp.TaskConfig) !void {
+                try CheatLib.spawnBest(@intFromPtr(&Runtime.entryWrapper), user_fn, args, config);
+            }
+        }.parallelSpawn, struct {
+            fn cleanupItem(alloc_: std.mem.Allocator, ptr: *T) void {
+                cleanup(T, alloc_, ptr);
+            }
+        }.cleanupItem, alloc, rt, items, workers, batch, parallel, task_cfg, user_ctx);
     }
 
     pub fn concurrentListEach(
@@ -447,20 +409,15 @@ pub const CheatLib = struct {
         task_cfg: fp.TaskConfig,
         user_ctx: ?*anyopaque,
     ) !void {
-        return streams.concurrentListEach(
-            fp.WaitGroup, T, eachFn,
-            struct {
-                fn localSpawn(sched: *fp.Scheduler, user_fn: TaskFn, args: ?*anyopaque, config: fp.TaskConfig) !void {
-                    try sched.submitSpawn(@intFromPtr(&Runtime.entryWrapper), user_fn, args, config);
-                }
-            }.localSpawn,
-            struct {
-                fn parallelSpawn(user_fn: TaskFn, args: ?*anyopaque, config: fp.TaskConfig) !void {
-                    try CheatLib.spawnBest(@intFromPtr(&Runtime.entryWrapper), user_fn, args, config);
-                }
-            }.parallelSpawn,
-            rt, items, workers, batch, parallel, task_cfg, user_ctx
-        );
+        return streams.concurrentListEach(fp.WaitGroup, T, eachFn, struct {
+            fn localSpawn(sched: *fp.Scheduler, user_fn: TaskFn, args: ?*anyopaque, config: fp.TaskConfig) !void {
+                try sched.submitSpawn(@intFromPtr(&Runtime.entryWrapper), user_fn, args, config);
+            }
+        }.localSpawn, struct {
+            fn parallelSpawn(user_fn: TaskFn, args: ?*anyopaque, config: fp.TaskConfig) !void {
+                try CheatLib.spawnBest(@intFromPtr(&Runtime.entryWrapper), user_fn, args, config);
+            }
+        }.parallelSpawn, rt, items, workers, batch, parallel, task_cfg, user_ctx);
     }
 
     pub fn concurrentListEachInPlace(
@@ -474,20 +431,15 @@ pub const CheatLib = struct {
         task_cfg: fp.TaskConfig,
         user_ctx: ?*anyopaque,
     ) !void {
-        return streams.concurrentListEachInPlace(
-            fp.WaitGroup, T, eachFn,
-            struct {
-                fn localSpawn(sched: *fp.Scheduler, user_fn: TaskFn, args: ?*anyopaque, config: fp.TaskConfig) !void {
-                    try sched.submitSpawn(@intFromPtr(&Runtime.entryWrapper), user_fn, args, config);
-                }
-            }.localSpawn,
-            struct {
-                fn parallelSpawn(user_fn: TaskFn, args: ?*anyopaque, config: fp.TaskConfig) !void {
-                    try CheatLib.spawnBest(@intFromPtr(&Runtime.entryWrapper), user_fn, args, config);
-                }
-            }.parallelSpawn,
-            rt, items, workers, batch, parallel, task_cfg, user_ctx
-        );
+        return streams.concurrentListEachInPlace(fp.WaitGroup, T, eachFn, struct {
+            fn localSpawn(sched: *fp.Scheduler, user_fn: TaskFn, args: ?*anyopaque, config: fp.TaskConfig) !void {
+                try sched.submitSpawn(@intFromPtr(&Runtime.entryWrapper), user_fn, args, config);
+            }
+        }.localSpawn, struct {
+            fn parallelSpawn(user_fn: TaskFn, args: ?*anyopaque, config: fp.TaskConfig) !void {
+                try CheatLib.spawnBest(@intFromPtr(&Runtime.entryWrapper), user_fn, args, config);
+            }
+        }.parallelSpawn, rt, items, workers, batch, parallel, task_cfg, user_ctx);
     }
 
     pub fn concurrentListCount(
@@ -501,20 +453,15 @@ pub const CheatLib = struct {
         task_cfg: fp.TaskConfig,
         user_ctx: ?*anyopaque,
     ) !i64 {
-        return streams.concurrentListCount(
-            fp.WaitGroup, T, predFn,
-            struct {
-                fn localSpawn(sched: *fp.Scheduler, user_fn: TaskFn, args: ?*anyopaque, config: fp.TaskConfig) !void {
-                    try sched.submitSpawn(@intFromPtr(&Runtime.entryWrapper), user_fn, args, config);
-                }
-            }.localSpawn,
-            struct {
-                fn parallelSpawn(user_fn: TaskFn, args: ?*anyopaque, config: fp.TaskConfig) !void {
-                    try CheatLib.spawnBest(@intFromPtr(&Runtime.entryWrapper), user_fn, args, config);
-                }
-            }.parallelSpawn,
-            rt, items, workers, batch, parallel, task_cfg, user_ctx
-        );
+        return streams.concurrentListCount(fp.WaitGroup, T, predFn, struct {
+            fn localSpawn(sched: *fp.Scheduler, user_fn: TaskFn, args: ?*anyopaque, config: fp.TaskConfig) !void {
+                try sched.submitSpawn(@intFromPtr(&Runtime.entryWrapper), user_fn, args, config);
+            }
+        }.localSpawn, struct {
+            fn parallelSpawn(user_fn: TaskFn, args: ?*anyopaque, config: fp.TaskConfig) !void {
+                try CheatLib.spawnBest(@intFromPtr(&Runtime.entryWrapper), user_fn, args, config);
+            }
+        }.parallelSpawn, rt, items, workers, batch, parallel, task_cfg, user_ctx);
     }
 
     pub fn concurrentListReduce(
@@ -531,20 +478,15 @@ pub const CheatLib = struct {
         initial: R,
         comptime kind: streams.ConcurrentReduceKind,
     ) !R {
-        return streams.concurrentListReduce(
-            fp.WaitGroup, T, R, mapFn,
-            struct {
-                fn localSpawn(sched: *fp.Scheduler, user_fn: TaskFn, args: ?*anyopaque, config: fp.TaskConfig) !void {
-                    try sched.submitSpawn(@intFromPtr(&Runtime.entryWrapper), user_fn, args, config);
-                }
-            }.localSpawn,
-            struct {
-                fn parallelSpawn(user_fn: TaskFn, args: ?*anyopaque, config: fp.TaskConfig) !void {
-                    try CheatLib.spawnBest(@intFromPtr(&Runtime.entryWrapper), user_fn, args, config);
-                }
-            }.parallelSpawn,
-            rt, items, workers, batch, parallel, task_cfg, user_ctx, initial, kind
-        );
+        return streams.concurrentListReduce(fp.WaitGroup, T, R, mapFn, struct {
+            fn localSpawn(sched: *fp.Scheduler, user_fn: TaskFn, args: ?*anyopaque, config: fp.TaskConfig) !void {
+                try sched.submitSpawn(@intFromPtr(&Runtime.entryWrapper), user_fn, args, config);
+            }
+        }.localSpawn, struct {
+            fn parallelSpawn(user_fn: TaskFn, args: ?*anyopaque, config: fp.TaskConfig) !void {
+                try CheatLib.spawnBest(@intFromPtr(&Runtime.entryWrapper), user_fn, args, config);
+            }
+        }.parallelSpawn, rt, items, workers, batch, parallel, task_cfg, user_ctx, initial, kind);
     }
 
     pub fn concurrentShardedListEachInPlace(
@@ -557,20 +499,15 @@ pub const CheatLib = struct {
         task_cfg: fp.TaskConfig,
         user_ctx: ?*anyopaque,
     ) !void {
-        return streams.concurrentShardedListEachInPlace(
-            fp.WaitGroup, T, N, eachFn,
-            struct {
-                fn localSpawn(sched: *fp.Scheduler, user_fn: TaskFn, args: ?*anyopaque, config: fp.TaskConfig) !void {
-                    try sched.submitSpawn(@intFromPtr(&Runtime.entryWrapper), user_fn, args, config);
-                }
-            }.localSpawn,
-            struct {
-                fn parallelSpawn(user_fn: TaskFn, args: ?*anyopaque, config: fp.TaskConfig) !void {
-                    try CheatLib.spawnBest(@intFromPtr(&Runtime.entryWrapper), user_fn, args, config);
-                }
-            }.parallelSpawn,
-            rt, list, parallel, task_cfg, user_ctx
-        );
+        return streams.concurrentShardedListEachInPlace(fp.WaitGroup, T, N, eachFn, struct {
+            fn localSpawn(sched: *fp.Scheduler, user_fn: TaskFn, args: ?*anyopaque, config: fp.TaskConfig) !void {
+                try sched.submitSpawn(@intFromPtr(&Runtime.entryWrapper), user_fn, args, config);
+            }
+        }.localSpawn, struct {
+            fn parallelSpawn(user_fn: TaskFn, args: ?*anyopaque, config: fp.TaskConfig) !void {
+                try CheatLib.spawnBest(@intFromPtr(&Runtime.entryWrapper), user_fn, args, config);
+            }
+        }.parallelSpawn, rt, list, parallel, task_cfg, user_ctx);
     }
 
     pub fn concurrentShardedPoolEachInPlace(
@@ -583,20 +520,15 @@ pub const CheatLib = struct {
         task_cfg: fp.TaskConfig,
         user_ctx: ?*anyopaque,
     ) !void {
-        return streams.concurrentShardedPoolEachInPlace(
-            fp.WaitGroup, T, N, eachFn,
-            struct {
-                fn localSpawn(sched: *fp.Scheduler, user_fn: TaskFn, args: ?*anyopaque, config: fp.TaskConfig) !void {
-                    try sched.submitSpawn(@intFromPtr(&Runtime.entryWrapper), user_fn, args, config);
-                }
-            }.localSpawn,
-            struct {
-                fn parallelSpawn(user_fn: TaskFn, args: ?*anyopaque, config: fp.TaskConfig) !void {
-                    try CheatLib.spawnBest(@intFromPtr(&Runtime.entryWrapper), user_fn, args, config);
-                }
-            }.parallelSpawn,
-            rt, pool, parallel, task_cfg, user_ctx
-        );
+        return streams.concurrentShardedPoolEachInPlace(fp.WaitGroup, T, N, eachFn, struct {
+            fn localSpawn(sched: *fp.Scheduler, user_fn: TaskFn, args: ?*anyopaque, config: fp.TaskConfig) !void {
+                try sched.submitSpawn(@intFromPtr(&Runtime.entryWrapper), user_fn, args, config);
+            }
+        }.localSpawn, struct {
+            fn parallelSpawn(user_fn: TaskFn, args: ?*anyopaque, config: fp.TaskConfig) !void {
+                try CheatLib.spawnBest(@intFromPtr(&Runtime.entryWrapper), user_fn, args, config);
+            }
+        }.parallelSpawn, rt, pool, parallel, task_cfg, user_ctx);
     }
 
     pub const File = struct {
@@ -706,12 +638,10 @@ pub const CheatLib = struct {
     }
 
     fn ElementType(comptime C: type) type {
-        // Unwrap one layer of optional, then one layer of single-pointer
-        // (e.g. *ArrayList from a MUTABLE @list param forwarded into a
-        // borrow-shape helper), so containers can be read polymorphically
-        // regardless of whether the caller passed by value or by pointer.
-        const Inner0 = if (@typeInfo(C) == .optional) @typeInfo(C).optional.child else C;
-        const Inner = if (@typeInfo(Inner0) == .pointer and @typeInfo(Inner0).pointer.size == .one) @typeInfo(Inner0).pointer.child else Inner0;
+        // A mutable collection can be forwarded through an immutable generic
+        // parameter, producing **ArrayList at a later borrow-shaped lookup.
+        // Strip every optional/single-pointer wrapper before discovering T.
+        const Inner = ContainerType(C);
         if (@hasField(Inner, "items")) {
             // ArrayList: .items is []T, element type is T
             for (@typeInfo(Inner).@"struct".fields) |f| {
@@ -724,8 +654,23 @@ pub const CheatLib = struct {
         }
     }
 
+    fn ContainerType(comptime C: type) type {
+        return switch (@typeInfo(C)) {
+            .optional => |info| ContainerType(info.child),
+            .pointer => |info| if (info.size == .one) ContainerType(info.child) else C,
+            else => C,
+        };
+    }
+
     // Bounds-safe index: returns null on out-of-bounds instead of panicking.
-    pub fn getAtOpt(container: anytype, index: anytype) ?ElementType(@TypeOf(container)) {
+    fn BoundsCheckedElementType(comptime C: type) type {
+        const E = ElementType(C);
+        return if (@typeInfo(E) == .optional) E else ?E;
+    }
+
+    // CLEAR optionals are flattened: indexing ?T[] returns ?T, not ??T.
+    // The same null represents either an out-of-bounds index or a NIL element.
+    pub fn getAtOpt(container: anytype, index: anytype) BoundsCheckedElementType(@TypeOf(container)) {
         const i: usize = @intCast(index);
         const c0 = if (@typeInfo(@TypeOf(container)) == .optional) container.? else container;
         const c = if (@typeInfo(@TypeOf(c0)) == .pointer and @typeInfo(@TypeOf(c0)).pointer.size == .one) c0.* else c0;
@@ -736,6 +681,44 @@ pub const CheatLib = struct {
             if (i >= c.len) return null;
             return c[i];
         }
+    }
+
+    // Bounds-safe indexing for @node lists. NodeRef already reserves zero as
+    // NIL, so returning a Zig optional would add a second nullable encoding
+    // and break its compact four-byte representation. An out-of-bounds read
+    // therefore becomes the element type's zero/default NodeRef sentinel.
+    pub fn getNodeAt(container: anytype, index: anytype) ElementType(@TypeOf(container)) {
+        return getAtOpt(container, index) orelse .{};
+    }
+
+    // Mutable counterpart used by `IF list[i] AS item`: the optional pointer
+    // keeps the bounds check explicit while making the captured struct an
+    // alias of the real list slot rather than a detached value copy.
+    pub fn getAtPtrOpt(container: anytype, index: anytype) ?*ElementType(@TypeOf(container)) {
+        const i: usize = @intCast(index);
+        const c0 = if (@typeInfo(@TypeOf(container)) == .optional) container.? else container;
+        const c1 = if (@typeInfo(@TypeOf(c0)) == .pointer and @typeInfo(@TypeOf(c0)).pointer.size == .one) c0 else &c0;
+        const c = if (@typeInfo(@TypeOf(c1.*)) == .pointer and @typeInfo(@TypeOf(c1.*)).pointer.size == .one) c1.* else c1;
+        if (@hasField(@TypeOf(c.*), "items")) {
+            if (i >= c.items.len) return null;
+            return &c.items[i];
+        } else {
+            if (i >= c.len) return null;
+            return &c[i];
+        }
+    }
+
+    fn OptionalChild(comptime P: type) type {
+        const pointer = @typeInfo(P).pointer;
+        return @typeInfo(pointer.child).optional.child;
+    }
+
+    // Mutable alias to an optional payload. This is the field/local analogue
+    // of getAtPtrOpt and powers conditional assignment through `?.` without
+    // copying the payload out of its owner.
+    pub fn getOptionalPtr(optional_ptr: anytype) ?*OptionalChild(@TypeOf(optional_ptr)) {
+        if (optional_ptr.*) |*value| return value;
+        return null;
     }
 
     // First element, or null if empty. Backs CLEAR's `.first()` predicate.
@@ -979,11 +962,29 @@ pub const CheatLib = struct {
         cell.* = try APT.init(alloc, data);
         return cell;
     }
+    pub fn atomicPtrRetain(comptime Cell: type, cell: *Cell) *Cell {
+        _ = cell.refs.fetchAdd(1, .monotonic);
+        return cell;
+    }
+    pub fn atomicPtrRelease(comptime Cell: type, alloc: std.mem.Allocator, cell: *Cell) void {
+        const previous = cell.refs.fetchSub(1, .release);
+        std.debug.assert(previous > 0);
+        if (previous != 1) return;
+        _ = cell.refs.load(.acquire);
+
+        const InnerT = Cell.Inner;
+        const inner_ptr = cell.ptr.swap(null, .acq_rel);
+        if (inner_ptr) |ip| {
+            cleanup(InnerT, alloc, ip);
+            alloc.destroy(ip);
+        }
+        alloc.destroy(cell);
+    }
     /// Tear down a `*AtomicPtr(T)` cell, retiring the currently-published
     /// `*T` through EBR before destroying the cell.
     pub fn atomicPtrDestroy(comptime T: type, rt: *Runtime, alloc: std.mem.Allocator, cell: *@import("../lib/atomic_ptr.zig").AtomicPtr(T)) void {
-        cell.deinit(rt, alloc) catch {};
-        alloc.destroy(cell);
+        _ = rt;
+        atomicPtrRelease(@import("../lib/atomic_ptr.zig").AtomicPtr(T), alloc, cell);
     }
     /// Allocate `*Versioned(T)` on the heap, init it with `data`,
     /// return the heap pointer. Mirrors `lockedCreate` for
@@ -1016,6 +1017,7 @@ pub const CheatLib = struct {
     pub const refCellCreate = DataStructures.refCellCreate;
     pub const refCellDestroy = DataStructures.refCellDestroy;
     pub const localCreate = DataStructures.localCreate;
+    pub const unboxMove = DataStructures.unboxMove;
     pub const lockedCreate = DataStructures.lockedCreate;
     pub const lockedDestroy = DataStructures.lockedDestroy;
     pub const RwLocked = DataStructures.RwLocked;
@@ -1029,6 +1031,340 @@ pub const CheatLib = struct {
     pub const BoundedChannel = DataStructures.BoundedChannel;
     pub const BatchWindow = DataStructures.BatchWindow;
     pub const Pool = DataStructures.Pool;
+    pub const PagedSlotMap = DataStructures.PagedSlotMap;
+    pub const PagedSlotMapWithDrop = DataStructures.PagedSlotMapWithDrop;
+
+    /// A nullable, typed, generational graph reference. Zero is NIL; live
+    /// PagedSlotMap handles are stored plus one, so both `T@node` and
+    /// `?T@node` occupy exactly four bytes.
+    pub fn NodeRef(comptime T: type) type {
+        _ = T;
+        return packed struct(u32) {
+            const Self = @This();
+            encoded: u32 = 0,
+
+            pub inline fn fromHandle(raw_handle: u32) Self {
+                return .{ .encoded = raw_handle +% 1 };
+            }
+
+            pub inline fn handle(self: Self) ?u32 {
+                if (self.encoded == 0) return null;
+                return self.encoded -% 1;
+            }
+
+            pub inline fn isNil(self: Self) bool {
+                return self.encoded == 0;
+            }
+        };
+    }
+
+    /// Per-(Runtime,T) storage synthesized for `T@node`. Source programs see
+    /// ordinary object references; the compiler inserts these calls at node
+    /// construction and dereference sites.
+    pub fn NodeStore(comptime T: type) type {
+        return struct {
+            const Self = @This();
+            const Ref = NodeRef(T);
+            const Map = PagedSlotMapWithDrop(T, dropValue);
+            const initial_capacity: u32 = Map.region_capacity;
+
+            const State = struct {
+                owner: *Runtime,
+                owner_id: u64,
+                map: Map,
+                active_bindings: usize = 0,
+                next: ?*State = null,
+            };
+
+            const Cache = struct {
+                owner_id: u64 = 0,
+                state: ?*State = null,
+            };
+
+            var states: ?*State = null;
+            var states_lock: compat.Mutex = .{};
+            threadlocal var cache: Cache = .{};
+
+            fn dropValue(alloc: std.mem.Allocator, value: *T) void {
+                CheatLib.cleanup(T, alloc, value);
+            }
+
+            fn destroy(raw: *anyopaque) void {
+                const current: *State = @ptrCast(@alignCast(raw));
+                states_lock.lock();
+                var link = &states;
+                while (link.*) |candidate| {
+                    if (candidate == current) {
+                        link.* = candidate.next;
+                        break;
+                    }
+                    link = &candidate.next;
+                }
+                states_lock.unlock();
+                current.map.deinit();
+                current.owner.heap_allocator.destroy(current);
+                if (cache.state == current) cache = .{};
+            }
+
+            fn ensure(rt: *Runtime) !*State {
+                if (cache.owner_id == rt.instance_id) {
+                    if (cache.state) |current| return current;
+                }
+
+                states_lock.lock();
+                defer states_lock.unlock();
+                var cursor = states;
+                while (cursor) |current| : (cursor = current.next) {
+                    if (current.owner_id == rt.instance_id) {
+                        cache = .{ .owner_id = rt.instance_id, .state = current };
+                        return current;
+                    }
+                }
+
+                const current = try rt.heap_allocator.create(State);
+                errdefer rt.heap_allocator.destroy(current);
+                current.* = .{
+                    .owner = rt,
+                    .owner_id = rt.instance_id,
+                    .map = try Map.initCapacity(rt.heap_allocator, initial_capacity),
+                    .next = states,
+                };
+                errdefer current.map.deinit();
+                try rt.registerFinalizer(.{ .context = current, .run = destroy });
+                states = current;
+                cache = .{ .owner_id = rt.instance_id, .state = current };
+                return current;
+            }
+
+            inline fn lookup(rt: *Runtime) ?*State {
+                if (cache.owner_id == rt.instance_id) return cache.state;
+
+                states_lock.lock();
+                defer states_lock.unlock();
+                var cursor = states;
+                while (cursor) |current| : (cursor = current.next) {
+                    if (current.owner_id == rt.instance_id) {
+                        cache = .{ .owner_id = rt.instance_id, .state = current };
+                        return current;
+                    }
+                }
+                return null;
+            }
+
+            pub fn create(rt: *Runtime, value: T) !Ref {
+                const current = try ensure(rt);
+                return insertGrowing(&current.map, value);
+            }
+
+            pub fn bind(rt: *Runtime) !*Map {
+                const current = try ensure(rt);
+                states_lock.lock();
+                defer states_lock.unlock();
+                current.active_bindings += 1;
+                return &current.map;
+            }
+
+            /// Release one compiler-synthesized lexical binding. The final
+            /// binding owns the implicit graph lifetime, so clearing it runs
+            /// payload cleanup synchronously even when the topology is cyclic.
+            pub fn releaseBound(map: *Map) void {
+                const current: *State = @fieldParentPtr("map", map);
+                states_lock.lock();
+                defer states_lock.unlock();
+                std.debug.assert(current.active_bindings > 0);
+                current.active_bindings -= 1;
+                if (current.active_bindings == 0) current.map.clear();
+            }
+
+            pub fn createBound(map: *Map, value: T) !Ref {
+                return insertGrowing(map, value);
+            }
+
+            fn insertGrowing(map: *Map, value: T) !Ref {
+                const handle = map.insert(value) catch |err| switch (err) {
+                    error.Full => blk: {
+                        const current_capacity: u32 = @intCast(map.nodes.len);
+                        if (current_capacity == Map.max_capacity) return error.Full;
+                        const next_capacity = @min(Map.max_capacity, current_capacity * 2);
+                        try map.growCapacity(next_capacity);
+                        break :blk try map.insert(value);
+                    },
+                };
+                return Ref.fromHandle(handle);
+            }
+
+            pub inline fn getBound(map: *Map, ref: Ref) ?*T {
+                const handle = ref.handle() orelse return null;
+                return map.get(handle);
+            }
+
+            pub inline fn removeBound(map: *Map, ref: Ref) bool {
+                const handle = ref.handle() orelse return false;
+                return map.remove(handle);
+            }
+
+            pub inline fn get(rt: *Runtime, ref: Ref) ?*T {
+                const handle = ref.handle() orelse return null;
+                const current = lookup(rt) orelse return null;
+                return current.map.get(handle);
+            }
+
+            pub inline fn remove(rt: *Runtime, ref: Ref) bool {
+                const handle = ref.handle() orelse return false;
+                const current = lookup(rt) orelse return false;
+                return current.map.remove(handle);
+            }
+
+            pub inline fn count(rt: *Runtime) usize {
+                const current = lookup(rt) orelse return 0;
+                return current.map.length();
+            }
+        };
+    }
+
+    /// A cross-scheduler node domain. Unlike NodeStore, a shared domain is
+    /// retained until Runtime teardown: a task admitted by the scheduler may
+    /// begin after the lexical scope that spawned it has returned. Every map
+    /// access must occur while the matching read or write guard is held; the
+    /// compiler emits those guards around the complete source expression so
+    /// PagedSlotMap growth and swap-remove can never invalidate a live reader.
+    pub fn SharedNodeStore(comptime T: type) type {
+        return struct {
+            const Self = @This();
+            const Ref = NodeRef(T);
+            const Map = PagedSlotMapWithDrop(T, dropValue);
+            const initial_capacity: u32 = Map.region_capacity;
+
+            pub const State = struct {
+                owner: *Runtime,
+                owner_id: u64,
+                map: Map,
+                rw: compat.RwLock,
+                next: ?*State = null,
+            };
+
+            const Cache = struct {
+                owner_id: u64 = 0,
+                state: ?*State = null,
+            };
+
+            var states: ?*State = null;
+            var states_lock: compat.Mutex = .{};
+            threadlocal var cache: Cache = .{};
+
+            fn dropValue(alloc: std.mem.Allocator, value: *T) void {
+                CheatLib.cleanup(T, alloc, value);
+            }
+
+            fn destroy(raw: *anyopaque) void {
+                const current: *State = @ptrCast(@alignCast(raw));
+                states_lock.lock();
+                var link = &states;
+                while (link.*) |candidate| {
+                    if (candidate == current) {
+                        link.* = candidate.next;
+                        break;
+                    }
+                    link = &candidate.next;
+                }
+                states_lock.unlock();
+
+                current.rw.lock();
+                current.map.deinit();
+                current.rw.unlock();
+                current.owner.heap_allocator.destroy(current);
+                if (cache.state == current) cache = .{};
+            }
+
+            fn ensure(rt: *Runtime) !*State {
+                const domain_id = rt.shared_domain_id;
+                if (cache.owner_id == domain_id) {
+                    if (cache.state) |current| return current;
+                }
+
+                states_lock.lock();
+                defer states_lock.unlock();
+                var cursor = states;
+                while (cursor) |current| : (cursor = current.next) {
+                    if (current.owner_id == domain_id) {
+                        cache = .{ .owner_id = domain_id, .state = current };
+                        return current;
+                    }
+                }
+
+                const owner = rt.sharedDomainOwner();
+                const current = try owner.heap_allocator.create(State);
+                errdefer owner.heap_allocator.destroy(current);
+                current.* = .{
+                    .owner = owner,
+                    .owner_id = domain_id,
+                    .map = try Map.initCapacity(owner.heap_allocator, initial_capacity),
+                    .rw = compat.RwLock.init(),
+                    .next = states,
+                };
+                errdefer current.map.deinit();
+                try owner.registerFinalizer(.{ .context = current, .run = destroy });
+                states = current;
+                cache = .{ .owner_id = domain_id, .state = current };
+                return current;
+            }
+
+            pub fn lockRead(rt: *Runtime) !*State {
+                const current = try ensure(rt);
+                current.rw.lockShared();
+                return current;
+            }
+
+            pub fn unlockRead(current: *State) void {
+                current.rw.unlockShared();
+            }
+
+            pub fn lockWrite(rt: *Runtime) !*State {
+                const current = try ensure(rt);
+                current.rw.lock();
+                return current;
+            }
+
+            pub fn unlockWrite(current: *State) void {
+                current.rw.unlock();
+            }
+
+            pub fn createBound(current: *State, value: T) !Ref {
+                return insertGrowing(&current.map, value);
+            }
+
+            fn insertGrowing(map: *Map, value: T) !Ref {
+                const handle = map.insert(value) catch |err| switch (err) {
+                    error.Full => blk: {
+                        const current_capacity: u32 = @intCast(map.nodes.len);
+                        if (current_capacity == Map.max_capacity) return error.Full;
+                        const next_capacity = @min(Map.max_capacity, current_capacity * 2);
+                        try map.growCapacity(next_capacity);
+                        break :blk try map.insert(value);
+                    },
+                };
+                return Ref.fromHandle(handle);
+            }
+
+            pub inline fn getBound(current: *State, ref: Ref) ?*T {
+                const handle = ref.handle() orelse return null;
+                return current.map.get(handle);
+            }
+
+            pub inline fn removeBound(current: *State, ref: Ref) bool {
+                const handle = ref.handle() orelse return false;
+                return current.map.remove(handle);
+            }
+
+            pub inline fn countBound(current: *State) usize {
+                return current.map.length();
+            }
+
+            pub inline fn validateBound(current: *State) bool {
+                return current.map.debugValidate();
+            }
+        };
+    }
     pub const SoaList = DataStructures.SoaList;
     pub const SoaPool = DataStructures.SoaPool;
     pub const ShardedPool = DataStructures.ShardedPool;
@@ -1419,7 +1755,7 @@ pub const CheatLib = struct {
                         return error.EndOfStream;
                     }
                     if (pos < line_len) {
-                        std.mem.copyForwards(u8, buf[pos..line_len - 1], buf[pos + 1 .. line_len]);
+                        std.mem.copyForwards(u8, buf[pos .. line_len - 1], buf[pos + 1 .. line_len]);
                         line_len -= 1;
                         rlRefresh(stderr_fd, prompt, buf[0..line_len], pos);
                     }
@@ -1531,7 +1867,7 @@ pub const CheatLib = struct {
                                 var tilde: [1]u8 = undefined;
                                 _ = std.posix.read(stdin_fd, &tilde) catch break;
                                 if (tilde[0] == '~' and pos < line_len) {
-                                    std.mem.copyForwards(u8, buf[pos..line_len - 1], buf[pos + 1 .. line_len]);
+                                    std.mem.copyForwards(u8, buf[pos .. line_len - 1], buf[pos + 1 .. line_len]);
                                     line_len -= 1;
                                     rlRefresh(stderr_fd, prompt, buf[0..line_len], pos);
                                 }
@@ -1687,6 +2023,14 @@ pub const CheatLib = struct {
         return str[u_start .. u_start + u_len];
     }
 
+    // TODO(symbols): add intern(rt, s) for dynamic String@symbol values.
+    // Static symbol literals are canonicalized by compiler-emitted top-level
+    // constants. Dynamic interning should use Runtime.globalAlloc() and a
+    // StringHashMapUnmanaged-backed pool. StringHashMapUnmanaged is not
+    // thread-safe for concurrent access, so wrap the pool in synchronization
+    // (Mutex/RwLock or a sharded locked map) before sharing it across
+    // schedulers/threads.
+
     // String Equality (Content check)
     pub fn strEql(s1: []const u8, s2: []const u8) bool {
         return std.mem.eql(u8, s1, s2);
@@ -1730,6 +2074,14 @@ pub const CheatLib = struct {
             remaining = rest[1..];
         }
         return null;
+    }
+
+    pub fn indexOfFrom(haystack: []const u8, needle: []const u8, start: i64) ?i64 {
+        if (start < 0) return null;
+        const offset: usize = @intCast(start);
+        if (offset > haystack.len) return null;
+        const relative = indexOf(haystack[offset..], needle) orelse return null;
+        return start + relative;
     }
     // toString: Int64 -> String (heap-allocated decimal representation)
     /// Parse a string to i64. Returns error on invalid input.
@@ -2156,9 +2508,9 @@ pub const CheatLib = struct {
 
         const addr = std.posix.sockaddr.in{
             .family = std.posix.AF.INET,
-            .port   = std.mem.nativeToBig(u16, port),
-            .addr   = 0, // INADDR_ANY
-            .zero   = [_]u8{0} ** 8,
+            .port = std.mem.nativeToBig(u16, port),
+            .addr = 0, // INADDR_ANY
+            .zero = [_]u8{0} ** 8,
         };
         try compat.bind(fd, @ptrCast(&addr), @sizeOf(@TypeOf(addr)));
         try compat.listen(fd, 128);
@@ -2274,9 +2626,9 @@ pub const CheatLib = struct {
         const s_addr = try parseIpv4Addr(host);
         const addr = std.posix.sockaddr.in{
             .family = std.posix.AF.INET,
-            .port   = std.mem.nativeToBig(u16, port),
-            .addr   = s_addr,
-            .zero   = [_]u8{0} ** 8,
+            .port = std.mem.nativeToBig(u16, port),
+            .addr = s_addr,
+            .zero = [_]u8{0} ** 8,
         };
 
         const sched = fp.active_scheduler;
@@ -2318,7 +2670,7 @@ pub const CheatLib = struct {
 
         // Assemble as host-byte-order then flip to network byte order.
         const host_order: u32 = (@as(u32, parts[0]) << 24) | (@as(u32, parts[1]) << 16) |
-                                 (@as(u32, parts[2]) << 8)  |  @as(u32, parts[3]);
+            (@as(u32, parts[2]) << 8) | @as(u32, parts[3]);
         return std.mem.nativeToBig(u32, host_order);
     }
 
@@ -2454,8 +2806,23 @@ pub const CheatLib = struct {
             strong: usize,
             weak: usize,
             data: *T,
-            alloc: std.mem.Allocator,
         };
+    }
+
+    /// One allocation backs both the stable weak-reference control block and
+    /// its payload. `ctrl.data` remains a pointer so generated CLEAR code keeps
+    /// the existing ABI (`rc.ctrl.data.*`), while rcCreate avoids a second
+    /// allocator call and allocator header per object.
+    fn RcAllocation(comptime T: type) type {
+        return struct {
+            ctrl: RcControlBlock(T),
+            data: T,
+        };
+    }
+
+    fn destroyRcAllocation(comptime T: type, alloc: std.mem.Allocator, ctrl: *RcControlBlock(T)) void {
+        const allocation: *RcAllocation(T) = @alignCast(@fieldParentPtr("ctrl", ctrl));
+        alloc.destroy(allocation);
     }
 
     /// Rc(T): a reference-counted wrapper around a heap-allocated T.
@@ -2465,18 +2832,24 @@ pub const CheatLib = struct {
             const Self = @This();
             ctrl: *RcControlBlock(T),
             // Convenience: access data through .data for compatibility
-            pub fn getData(self: Self) *T { return self.ctrl.data; }
+            pub fn getData(self: Self) *T {
+                return self.ctrl.data;
+            }
         };
     }
 
     pub fn rcCreate(comptime T: type, alloc: std.mem.Allocator, data: T) !Rc(T) {
         const alloc_profile = @import("alloc-profile.zig");
-        const ctrl = try alloc.create(RcControlBlock(T));
-        const data_ptr = try alloc.create(T);
-        data_ptr.* = data;
-        ctrl.* = .{ .strong = 1, .weak = 0, .data = data_ptr, .alloc = alloc };
-        alloc_profile.recordAlloc(@returnAddress(), @sizeOf(RcControlBlock(T)) + @sizeOf(T));
-        return Rc(T){ .ctrl = ctrl };
+        const allocation = try alloc.create(RcAllocation(T));
+        allocation.data = data;
+        // `weak` includes one implicit weak reference while strong > 0.
+        // It keeps the control block alive while last-strong cleanup releases
+        // payload-owned WeakRc fields (including self-links).
+        allocation.ctrl = .{ .strong = 1, .weak = 1, .data = &allocation.data };
+        if (comptime CLEAR_PROFILE) {
+            alloc_profile.recordAlloc(@returnAddress(), @sizeOf(RcAllocation(T)));
+        }
+        return Rc(T){ .ctrl = &allocation.ctrl };
     }
 
     pub fn Frozen(comptime T: type) type {
@@ -2487,7 +2860,7 @@ pub const CheatLib = struct {
         return freeze_mod.freeze(T, alloc, val);
     }
 
-    pub fn rcRetain(comptime T: type, rc: Rc(T)) Rc(T) {
+    pub inline fn rcRetain(comptime T: type, rc: Rc(T)) Rc(T) {
         rc.ctrl.strong += 1;
         return rc;
     }
@@ -2496,18 +2869,21 @@ pub const CheatLib = struct {
         return stream.retain();
     }
 
-    pub fn rcRelease(comptime T: type, alloc: std.mem.Allocator, rc: Rc(T)) void {
-        _ = alloc; // alloc stored in control block
+    pub inline fn rcRelease(comptime T: type, alloc: std.mem.Allocator, rc: Rc(T)) void {
+        // `alloc` must match rcCreate's allocator. MIR cleanup already carries
+        // that provenance; keeping it at the call site avoids storing a
+        // 16-byte Allocator value in every non-atomic control block.
         rc.ctrl.strong -= 1;
         if (rc.ctrl.strong == 0) {
             if (comptime isLocked(T) or isRwLocked(T)) {
-                arcDeinitInner(T, rc.ctrl.alloc, rc.ctrl.data);
+                arcDeinitInner(T, alloc, rc.ctrl.data);
             } else if (comptime needsCleanup(T)) {
-                cleanup(T, rc.ctrl.alloc, rc.ctrl.data);
+                cleanup(T, alloc, rc.ctrl.data);
             }
-            rc.ctrl.alloc.destroy(rc.ctrl.data);
+            // Payload destruction is complete; release the implicit weak.
+            rc.ctrl.weak -= 1;
             if (rc.ctrl.weak == 0) {
-                rc.ctrl.alloc.destroy(rc.ctrl);
+                destroyRcAllocation(T, alloc, rc.ctrl);
             }
         }
     }
@@ -2518,8 +2894,8 @@ pub const CheatLib = struct {
 
     pub fn ArcControlBlock(comptime T: type) type {
         return struct {
-            strong: std.atomic.Value(usize),
-            weak: std.atomic.Value(usize),
+            strong: RuntimeAtomic(usize),
+            weak: RuntimeAtomic(usize),
             data: *T,
             alloc: std.mem.Allocator,
         };
@@ -2531,7 +2907,9 @@ pub const CheatLib = struct {
         return struct {
             const Self = @This();
             ctrl: *ArcControlBlock(T),
-            pub fn getData(self: Self) *T { return self.ctrl.data; }
+            pub fn getData(self: Self) *T {
+                return self.ctrl.data;
+            }
         };
     }
 
@@ -2567,11 +2945,16 @@ pub const CheatLib = struct {
 
     pub fn arcCreate(comptime T: type, alloc: std.mem.Allocator, data: T) !Arc(T) {
         const ctrl = try alloc.create(ArcControlBlock(T));
+        errdefer alloc.destroy(ctrl);
         const data_ptr = try alloc.create(T);
         data_ptr.* = data;
         ctrl.* = .{
-            .strong = std.atomic.Value(usize).init(1),
-            .weak = std.atomic.Value(usize).init(0),
+            .strong = RuntimeAtomic(usize).init(1),
+            // One implicit weak reference is held for as long as any strong
+            // reference exists. This keeps the control block alive while the
+            // last strong owner destroys T, even when the last explicit weak
+            // reference is released concurrently.
+            .weak = RuntimeAtomic(usize).init(1),
             .data = data_ptr,
             .alloc = alloc,
         };
@@ -2592,7 +2975,11 @@ pub const CheatLib = struct {
             // RwLocked/Locked wrap types that may own heap memory (StringMap keys, etc.).
             arcDeinitInner(T, arc.ctrl.alloc, arc.ctrl.data);
             arc.ctrl.alloc.destroy(arc.ctrl.data);
-            if (arc.ctrl.weak.load(.acquire) == 0) {
+            // Payload destruction is complete. Release the implicit weak;
+            // whichever participant releases the final weak owns ctrl.
+            const weak_prev = arc.ctrl.weak.fetchSub(1, .release);
+            if (weak_prev == 1) {
+                _ = arc.ctrl.weak.load(.acquire);
                 arc.ctrl.alloc.destroy(arc.ctrl);
             }
         }
@@ -2633,6 +3020,10 @@ pub const CheatLib = struct {
             } else {
                 ptr.deinit();
             }
+        } else if (comptime needsCleanup(T)) {
+            // Ordinary structs, unions, optionals, and containers may own
+            // managed fields without defining a custom deinit method.
+            cleanup(T, a, ptr);
         }
     }
 
@@ -2647,21 +3038,24 @@ pub const CheatLib = struct {
         };
     }
 
-    pub fn rcDowngrade(comptime T: type, rc: Rc(T)) WeakRc(T) {
+    pub inline fn rcDowngrade(comptime T: type, rc: Rc(T)) WeakRc(T) {
         rc.ctrl.weak += 1;
         return WeakRc(T){ .ctrl = rc.ctrl };
     }
 
-    pub fn weakRcUpgrade(comptime T: type, weak: WeakRc(T)) ?Rc(T) {
+    pub inline fn weakRcUpgrade(comptime T: type, weak: WeakRc(T)) ?Rc(T) {
         if (weak.ctrl.strong == 0) return null;
         weak.ctrl.strong += 1;
         return Rc(T){ .ctrl = weak.ctrl };
     }
 
-    pub fn weakRcRelease(comptime T: type, weak: WeakRc(T)) void {
+    pub inline fn weakRcRelease(comptime T: type, alloc: std.mem.Allocator, weak: WeakRc(T)) void {
+        // Same allocator-provenance contract as rcRelease. Weak cleanup is
+        // always reached through cleanup/releaseOne, which already has alloc.
         weak.ctrl.weak -= 1;
-        if (weak.ctrl.weak == 0 and weak.ctrl.strong == 0) {
-            weak.ctrl.alloc.destroy(weak.ctrl);
+        if (weak.ctrl.weak == 0) {
+            std.debug.assert(weak.ctrl.strong == 0);
+            destroyRcAllocation(T, alloc, weak.ctrl);
         }
     }
 
@@ -2679,6 +3073,7 @@ pub const CheatLib = struct {
 
     pub fn weakArcUpgrade(comptime T: type, weak: WeakArc(T)) ?Arc(T) {
         // CAS loop: atomically increment strong if > 0
+        // HAMMER-WAIT-LOOP-BEGIN: tag=weak-arc-upgrade-cas
         while (true) {
             const strong = weak.ctrl.strong.load(.acquire);
             if (strong == 0) return null;
@@ -2688,14 +3083,17 @@ pub const CheatLib = struct {
                 return Arc(T){ .ctrl = weak.ctrl };
             }
         }
+        // HAMMER-WAIT-LOOP-END: tag=weak-arc-upgrade-cas
     }
 
     pub fn weakArcRelease(comptime T: type, weak: WeakArc(T)) void {
         const prev = weak.ctrl.weak.fetchSub(1, .release);
         if (prev == 1) {
-            if (weak.ctrl.strong.load(.acquire) == 0) {
-                weak.ctrl.alloc.destroy(weak.ctrl);
-            }
+            _ = weak.ctrl.weak.load(.acquire);
+            // The implicit weak prevents this path while a strong owner or
+            // the last-strong payload destructor can still access ctrl.
+            std.debug.assert(weak.ctrl.strong.load(.monotonic) == 0);
+            weak.ctrl.alloc.destroy(weak.ctrl);
         }
     }
 
@@ -2751,6 +3149,36 @@ pub const CheatLib = struct {
         return !@hasDecl(FT, "getData");
     }
 
+    /// Duplicate an Rc/Arc/Weak handle by retaining its control block. Generic
+    /// collection copies must never recursively clone the control block/data
+    /// pointers: those are one allocation owned by the reference counts.
+    pub fn retainOne(comptime FT: type, value: FT) FT {
+        const T = comptime refInnerType(FT) orelse @compileError("retainOne expects an Rc/Arc/Weak handle");
+        const is_weak = comptime isWeakRef(FT);
+        const is_atomic = comptime isAtomicRef(FT);
+        if (is_weak) {
+            if (is_atomic) {
+                _ = value.ctrl.weak.fetchAdd(1, .monotonic);
+            } else {
+                value.ctrl.weak += 1;
+            }
+            return value;
+        }
+        return if (is_atomic) arcRetain(T, value) else rcRetain(T, value);
+    }
+
+    /// Remove every list element while preserving capacity. ArrayList's raw
+    /// clearRetainingCapacity only changes length; CLEAR collections must also
+    /// release cleanup-bearing payloads, including Rc/Arc handles.
+    pub fn clearList(alloc: std.mem.Allocator, list: anytype) void {
+        const ListT = @TypeOf(list.*);
+        const ElemT = @typeInfo(@FieldType(ListT, "items")).pointer.child;
+        if (comptime needsCleanup(ElemT)) {
+            for (list.items) |*item| cleanup(ElemT, alloc, item);
+        }
+        list.clearRetainingCapacity();
+    }
+
     /// Release a single ref-counted value. Dispatches to the correct release
     /// function based on the comptime type (Rc/Arc/WeakRc/WeakArc).
     pub fn releaseOne(comptime FT: type, alloc: std.mem.Allocator, value: FT) void {
@@ -2761,7 +3189,7 @@ pub const CheatLib = struct {
             if (is_atomic) {
                 weakArcRelease(T, .{ .ctrl = @ptrCast(value.ctrl) });
             } else {
-                weakRcRelease(T, .{ .ctrl = @ptrCast(value.ctrl) });
+                weakRcRelease(T, alloc, .{ .ctrl = @ptrCast(value.ctrl) });
             }
         } else {
             if (is_atomic) {
@@ -2806,12 +3234,15 @@ pub const CheatLib = struct {
         return @hasField(T, "metadata") and @hasDecl(T, "deinit");
     }
 
-    /// Returns true if T is a Pool(U) — has slots, free_stack, free_top, capacity.
+    /// Returns true if T is a Pool(U).
     fn isPool(comptime T: type) bool {
         const info = @typeInfo(T);
         if (info != .@"struct") return false;
-        return @hasField(T, "slots") and @hasField(T, "free_stack") and
-               @hasField(T, "free_top") and @hasField(T, "capacity");
+        return @hasDecl(T, "is_pool");
+    }
+
+    fn isPagedSlotMap(comptime T: type) bool {
+        return @typeInfo(T) == .@"struct" and @hasDecl(T, "is_paged_slot_map");
     }
 
     /// Returns true if T is a SoaPool(U) — same ownership contract as Pool(U),
@@ -2820,8 +3251,8 @@ pub const CheatLib = struct {
         const info = @typeInfo(T);
         if (info != .@"struct") return false;
         return @hasField(T, "data") and @hasField(T, "generations") and
-               @hasField(T, "alive") and @hasField(T, "free_stack") and
-               @hasField(T, "free_top") and @hasField(T, "capacity");
+            @hasField(T, "alive") and @hasField(T, "free_stack") and
+            @hasField(T, "free_top") and @hasField(T, "capacity");
     }
 
     /// Returns true if T is a ShardedPool(U, N): an array of Pool(U) shards.
@@ -2838,8 +3269,8 @@ pub const CheatLib = struct {
         const info = @typeInfo(T);
         if (info != .@"struct") return false;
         return @hasField(T, "data") and !@hasField(T, "alive") and
-               @hasDecl(T, "append") and @hasDecl(T, "get") and
-               @hasDecl(T, "length");
+            @hasDecl(T, "append") and @hasDecl(T, "get") and
+            @hasDecl(T, "length");
     }
 
     /// Returns true if T is a Set(U) — has inner field and is not a StringMap.
@@ -3030,6 +3461,18 @@ pub const CheatLib = struct {
             return;
         }
 
+        // Inline lock-wrapper values (not the ordinary heap `*Locked(T)`
+        // binding form) appear as Arc payloads for `@shared:locked` and
+        // `@shared:writeLocked`. Their mutex/rw fields contain runtime
+        // bookkeeping pointers that are non-owning. Only the wrapped `.data`
+        // participates in CLEAR cleanup.
+        if (comptime isLockWrapper(T)) {
+            if (comptime needsCleanup(@TypeOf(ptr.data))) {
+                cleanup(@TypeOf(ptr.data), alloc, &ptr.data);
+            }
+            return;
+        }
+
         // Heap-allocated sync wrappers (Locked / RwLocked / Versioned) +
         // RefCell-like single-field cells own their data. Lowering must
         // materialize constructor input into owned storage before wrapping.
@@ -3094,16 +3537,7 @@ pub const CheatLib = struct {
             break :blk @hasDecl(child, "compareAndPublish");
         }) {
             const Cell = @typeInfo(T).pointer.child;
-            const InnerT = Cell.Inner;
-            // Swap to null so we own the inner pointer; cleanup
-            // recursively (handles String fields and nested heaps)
-            // before destroying.
-            const inner_ptr = ptr.*.ptr.swap(null, .acq_rel);
-            if (inner_ptr) |ip| {
-                cleanup(InnerT, alloc, ip);
-                alloc.destroy(ip);
-            }
-            alloc.destroy(ptr.*);
+            atomicPtrRelease(Cell, alloc, ptr.*);
             return;
         }
 
@@ -3196,6 +3630,12 @@ pub const CheatLib = struct {
             return;
         }
 
+        // PagedSlotMap owns two allocator domains and stores both internally.
+        if (comptime isPagedSlotMap(T)) {
+            ptr.deinit();
+            return;
+        }
+
         // 6. Set(U)
         if (comptime isSetType(T)) {
             // Release owned keys before freeing the backing map.
@@ -3231,7 +3671,7 @@ pub const CheatLib = struct {
         // 8. Structs with a deinit method (ShardedList, ShardedMap, etc.)
         //    Detect deinit arity: 1 alloc (ShardedList) vs 2 allocs (ShardedMap).
         if (@typeInfo(T) == .@"struct" and @hasDecl(T, "deinit") and
-            !isStringMap(T) and !isPool(T) and !isNumericMap(T))
+            !isStringMap(T) and !isPool(T) and !isPagedSlotMap(T) and !isNumericMap(T))
         {
             const deinit_info = @typeInfo(@TypeOf(T.deinit));
             const param_count = deinit_info.@"fn".params.len;
@@ -3353,7 +3793,7 @@ pub const CheatLib = struct {
         // Primitives, enums, untagged unions: no-op (comptime-eliminated)
     }
 
-    pub fn dupeValue(comptime T: type, value: T, alloc: std.mem.Allocator) std.mem.Allocator.Error!T {
+    pub fn dupeValue(comptime T: type, value: anytype, alloc: std.mem.Allocator) anyerror!T {
         const info = @typeInfo(T);
 
         if (T == []const u8) {
@@ -3361,6 +3801,10 @@ pub const CheatLib = struct {
         }
         if (T == []u8) {
             return if (value.len > 0) try alloc.dupe(u8, value) else value;
+        }
+
+        if (comptime refInnerType(T) != null) {
+            return retainOne(T, value);
         }
 
         if (info == .optional) {
@@ -3375,10 +3819,17 @@ pub const CheatLib = struct {
         if (info == .pointer and info.pointer.size == .slice) {
             const ElemT = info.pointer.child;
             var buf = try alloc.alloc(ElemT, value.len);
-            errdefer alloc.free(buf);
+            var initialized: usize = 0;
+            errdefer {
+                if (comptime needsCleanup(ElemT)) {
+                    for (buf[0..initialized]) |*elem| cleanup(ElemT, alloc, elem);
+                }
+                alloc.free(buf);
+            }
             if (comptime needsCleanup(ElemT)) {
                 for (value, 0..) |elem, i| {
                     buf[i] = try dupeValue(ElemT, elem, alloc);
+                    initialized += 1;
                 }
             } else {
                 @memcpy(buf, value);
@@ -3410,6 +3861,34 @@ pub const CheatLib = struct {
             return try T.init(alloc, inner);
         }
 
+        // Numeric map: std's dupe() copies value bytes but does not know that
+        // Rc/Arc/String/nested payloads carry ownership. Rebuild entry by
+        // entry so every managed value is recursively retained/duplicated.
+        if (comptime isNumericMap(T)) {
+            var result: T = .{};
+            errdefer cleanup(T, alloc, &result);
+            var src_mut = value;
+            var it = src_mut.iterator();
+            while (it.next()) |entry| {
+                const KeyT = @TypeOf(entry.key_ptr.*);
+                const ValT = @TypeOf(entry.value_ptr.*);
+                var key = if (comptime needsCleanup(KeyT))
+                    try dupeValue(KeyT, entry.key_ptr.*, alloc)
+                else
+                    entry.key_ptr.*;
+                var val = if (comptime needsCleanup(ValT))
+                    try dupeValue(ValT, entry.value_ptr.*, alloc)
+                else
+                    entry.value_ptr.*;
+                result.put(alloc, key, val) catch |err| {
+                    if (comptime needsCleanup(KeyT)) cleanup(KeyT, alloc, &key);
+                    if (comptime needsCleanup(ValT)) cleanup(ValT, alloc, &val);
+                    return err;
+                };
+            }
+            return result;
+        }
+
         if (comptime hasAllocatorDupe(T)) {
             return try value.dupe(alloc);
         }
@@ -3425,15 +3904,23 @@ pub const CheatLib = struct {
         // isArrayList accepts).
         if (comptime isArrayList(T)) {
             const ElemT = comptime arrayListElemType(T).?;
-            var result = try T.initCapacity(alloc, value.items.len);
-            errdefer result.deinit(alloc);
+            const ValueT = @TypeOf(value);
+            const source_items = if (comptime isArrayList(ValueT))
+                value.items
+            else switch (@typeInfo(ValueT)) {
+                .array => value[0..],
+                .pointer => |ptr| if (ptr.size == .slice) value else @compileError("ArrayList COPY source must be a list, array, or slice"),
+                else => @compileError("ArrayList COPY source must be a list, array, or slice"),
+            };
+            var result = try T.initCapacity(alloc, source_items.len);
+            errdefer cleanup(T, alloc, &result);
             if (comptime needsCleanup(ElemT)) {
-                for (value.items) |elem| {
+                for (source_items) |elem| {
                     const duped = try dupeValue(ElemT, elem, alloc);
                     result.appendAssumeCapacity(duped);
                 }
             } else {
-                result.appendSliceAssumeCapacity(value.items);
+                result.appendSliceAssumeCapacity(source_items);
             }
             return result;
         }
@@ -3500,14 +3987,14 @@ pub const CheatLib = struct {
         if (comptime isPool(T)) {
             var result = try T.initCapacity(alloc, value.capacity);
             errdefer result.deinit(alloc);
-            const max_used = value.capacity - value.free_top;
-            for (value.slots[0..max_used]) |slot| {
-                if (!slot.alive) continue;
-                const ElemT = @TypeOf(slot.value);
+            for (value.states, 0..) |state, idx| {
+                if ((state & 1) == 0) continue;
+                const elem = value.values[idx];
+                const ElemT = @TypeOf(elem);
                 const v = if (comptime needsCleanup(ElemT))
-                    try dupeValue(ElemT, slot.value, alloc)
+                    try dupeValue(ElemT, elem, alloc)
                 else
-                    slot.value;
+                    elem;
                 _ = try result.insert(alloc, v);
             }
             return result;
@@ -3541,14 +4028,14 @@ pub const CheatLib = struct {
             errdefer result.deinit(alloc);
             inline for (0..@typeInfo(@TypeOf(value.shards)).array.len) |idx| {
                 const shard = value.shards[idx];
-                const max_used = shard.capacity - shard.free_top;
-                for (shard.slots[0..max_used]) |slot| {
-                    if (!slot.alive) continue;
-                    const ElemT = @TypeOf(slot.value);
+                for (shard.states, 0..) |state, value_idx| {
+                    if ((state & 1) == 0) continue;
+                    const elem = shard.values[value_idx];
+                    const ElemT = @TypeOf(elem);
                     const copied = if (comptime needsCleanup(ElemT))
-                        try dupeValue(ElemT, slot.value, alloc)
+                        try dupeValue(ElemT, elem, alloc)
                     else
-                        slot.value;
+                        elem;
                     _ = try result.shards[idx].insert(alloc, copied);
                 }
             }
@@ -3577,17 +4064,36 @@ pub const CheatLib = struct {
         }
 
         if (info == .@"struct" and !@hasDecl(T, "deinit")) {
-            var result = value;
-            inline for (info.@"struct".fields) |field| {
-                const FT = field.type;
-                if (comptime needsCleanup(FT)) {
-                    @field(result, field.name) = try dupeValue(FT, @field(value, field.name), alloc);
-                }
-            }
+            var result: T = undefined;
+            try dupeStructFields(T, &result, value, alloc, 0);
             return result;
         }
 
         return value;
+    }
+
+    fn dupeStructFields(
+        comptime T: type,
+        result: *T,
+        value: T,
+        alloc: std.mem.Allocator,
+        comptime index: usize,
+    ) anyerror!void {
+        const fields = @typeInfo(T).@"struct".fields;
+        if (index == fields.len) return;
+
+        const field = fields[index];
+        const FT = field.type;
+        if (comptime needsCleanup(FT)) {
+            @field(result, field.name) = try dupeValue(FT, @field(value, field.name), alloc);
+            dupeStructFields(T, result, value, alloc, index + 1) catch |err| {
+                cleanup(FT, alloc, &@field(result, field.name));
+                return err;
+            };
+        } else {
+            @field(result, field.name) = @field(value, field.name);
+            try dupeStructFields(T, result, value, alloc, index + 1);
+        }
     }
 
     fn hasAllocatorDupe(comptime T: type) bool {
@@ -3614,7 +4120,7 @@ pub const CheatLib = struct {
 
     /// `dupeValue`, but derefs a `*const T` borrow first so the
     /// result is an owned value, not a `*const` alias of the caller.
-    pub fn dupeCaptured(comptime S: type, src: S, alloc: std.mem.Allocator) std.mem.Allocator.Error!CapturedValue(S) {
+    pub fn dupeCaptured(comptime S: type, src: S, alloc: std.mem.Allocator) anyerror!CapturedValue(S) {
         const info = @typeInfo(S);
         if (info == .pointer and info.pointer.size == .one and info.pointer.is_const and
             @typeInfo(info.pointer.child) != .@"opaque" and @typeInfo(info.pointer.child) != .@"fn")
@@ -3649,6 +4155,7 @@ pub const CheatLib = struct {
         if (isStringMap(FT)) return true;
         if (isNumericMap(FT)) return true;
         if (isPool(FT)) return true;
+        if (isPagedSlotMap(FT)) return true;
         // Pointers and non-string slices trivially need cleanup (heap data).
         // Check BEFORE recursing to avoid exponential blowup on recursive types.
         if (ft_info == .pointer and ft_info.pointer.size == .one) return true;
@@ -3672,7 +4179,7 @@ pub const CheatLib = struct {
     /// Promote all escapable fields of a struct from frame arena to heap.
     /// DEPRECATED: use promote() for new code. Kept for backward compat.
     /// Deep-copy a union value's heap-owning payload (strings, slices, struct fields).
-    pub fn dupeUnionValue(comptime T: type, value: T, alloc: std.mem.Allocator) std.mem.Allocator.Error!T {
+    pub fn dupeUnionValue(comptime T: type, value: T, alloc: std.mem.Allocator) anyerror!T {
         const info = @typeInfo(T);
         if (info != .@"union" or info.@"union".tag_type == null) return value;
 
@@ -4027,6 +4534,8 @@ pub fn allocFsmTaskRuntime(fsm_task: *fp.FsmTask, parent_rt: *Runtime) !*Runtime
     // fallback; under scheduler dispatch Runtime.currentEbr() returns the
     // active scheduler's thread_ebr.
     rt_ptr.* = try Runtime.initFromSliceWithEbr(&[_]u8{}, parent_rt.ebr, allocator, 0);
+    rt_ptr.shared_domain_id = parent_rt.shared_domain_id;
+    rt_ptr.shared_domain_owner = parent_rt.shared_domain_owner orelse parent_rt;
     rt_ptr.wireAllocator();
 
     fsm_task.task_runtime = rt_ptr;

@@ -165,7 +165,7 @@ def collect_locatable_attrs(ast_path)
   attrs.uniq
 end
 
-ast_path = File.join(ROOT, "src", "ast", "ast.rb")
+ast_path = File.join(ROOT, "compiler", "ruby", "ast", "ast.rb")
 locatable_attrs = collect_locatable_attrs(ast_path)
 
 attr_collector = ClassAttrCollector.new(locatable_attrs)
@@ -231,7 +231,7 @@ class RespondToCollector < Prism::Visitor
 end
 
 site_records = []
-Dir.glob(File.join(ROOT, "src/**/*.rb")).sort.each do |path|
+Dir.glob(File.join(ROOT, "compiler/ruby/**/*.rb")).sort.each do |path|
   rel = path.sub(ROOT + "/", "")
   src = File.read(path)
   collector = RespondToCollector.new(rel)

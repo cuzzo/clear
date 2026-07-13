@@ -1,0 +1,112 @@
+# 17c: MVCC vs RwLock under WRITER PRESSURE.
+#
+# Why this scenario: 03_concurrent_mvcc_vs_rwlock has 4 writers x 1k writes vs
+# 32 readers x 100k reads = 4k writes vs 3.2M reads (~0.1%). At that
+# ratio writers barely show up in the timeline. This bench drives
+# writers hard so the RwLock's writer-preferring fairness policy
+# forces reader pile-ups: every time a writer arrives, new read-
+# acquires block until the writer drains. MVCC writers don't block
+# readers at any point.
+#
+# Workload: 28 readers x 100k iters + 4 writers x 25k iters. Writes
+# are now ~3.5% of reads, sustained for the full run.
+#
+# Expected: 4-7x MVCC win on 32 cores. The mechanism is reader-pile-up
+# amplification under writer-preferring fairness, which compounds the
+# baseline ~2x lock-acquire-overhead win.
+# @leak: 100000_i64 -> 1000_i64
+# @leak: 25000_i64 -> 250_i64
+
+STRUCT Counter { value: Int64 }
+
+FN main() RETURNS Void ->
+    n_readers:  Int64 = 28_i64;
+    reads_per:  Int64 = 100000_i64;
+    n_writers:  Int64 = 4_i64;
+    writes_per: Int64 = 25000_i64;
+    total_reads: Int64 = n_readers * reads_per;
+
+    # ---------- Variant A: @shared:writeLocked (RwLock) ----------
+    MUTABLE c_rw = Counter{ value: 0_i64 } @shared:writeLocked;
+
+    t0_rw = timestampMs();
+
+    MUTABLE rw_readers: ~Int64[]@list = [];
+    FOR r IN (0_i64 ..< n_readers) DO
+        rw_readers.append(BG { @parallel ->
+            MUTABLE s: Int64 = 0_i64;
+            MUTABLE i: Int64 = 0_i64;
+            WHILE i < reads_per DO
+                WITH c_rw AS v { s = s + v.value; }
+                i = i + 1_i64;
+            END
+            s;
+        });
+    END
+
+    MUTABLE rw_writers: ~Void[]@list = [];
+    FOR w IN (0_i64 ..< n_writers) DO
+        rw_writers.append(BG { @parallel ->
+            MUTABLE i: Int64 = 0_i64;
+            WHILE i < writes_per DO
+                WITH EXCLUSIVE c_rw AS inner { inner.value = inner.value + 1_i64; }
+                i = i + 1_i64;
+            END
+        });
+    END
+
+    MUTABLE s_rw: Int64 = 0_i64;
+    FOR r IN (0_i64 ..< n_readers) DO IF rw_readers[r] EXISTS AS future THEN s_rw = s_rw + (NEXT future); END END
+    FOR w IN (0_i64 ..< n_writers) DO IF rw_writers[w] EXISTS AS future THEN NEXT future; END END
+    elapsed_rw_ms = timestampMs() - t0_rw;
+
+    # ---------- Variant B: @shared:versioned (MVCC) ----------
+    MUTABLE c_v = Counter{ value: 0_i64 } @shared:versioned;
+
+    t0_v = timestampMs();
+
+    MUTABLE v_readers: ~Int64[]@list = [];
+    FOR r IN (0_i64 ..< n_readers) DO
+        v_readers.append(BG { @parallel ->
+            MUTABLE s: Int64 = 0_i64;
+            MUTABLE i: Int64 = 0_i64;
+            WHILE i < reads_per DO
+                WITH SNAPSHOT c_v AS view { s = s + view.value; }
+                i = i + 1_i64;
+            END
+            s;
+        });
+    END
+
+    MUTABLE v_writers: ~Void[]@list = [];
+    FOR w IN (0_i64 ..< n_writers) DO
+        v_writers.append(BG { @parallel ->
+            MUTABLE i: Int64 = 0_i64;
+            WHILE i < writes_per DO
+                WITH SNAPSHOT c_v AS MUTABLE va { va.value = va.value + 1_i64; } ON MvccConflict RAISE
+                i = i + 1_i64;
+            END
+        });
+    END
+
+    MUTABLE s_v: Int64 = 0_i64;
+    FOR r IN (0_i64 ..< n_readers) DO IF v_readers[r] EXISTS AS future THEN s_v = s_v + (NEXT future); END END
+    FOR w IN (0_i64 ..< n_writers) DO IF v_writers[w] EXISTS AS future THEN NEXT future; END END
+    elapsed_v_ms = timestampMs() - t0_v;
+
+    # ---------- Report ----------
+    rw_ops_per_sec = (total_reads * 1000_i64) / elapsed_rw_ms;
+    v_ops_per_sec  = (total_reads * 1000_i64) / elapsed_v_ms;
+    speedup_x100 = (elapsed_rw_ms * 100_i64) / elapsed_v_ms;
+
+    print("\n=== Writer pressure: ${n_readers.toString()} readers x ${reads_per.toString()} reads + ${n_writers.toString()} writers x ${writes_per.toString()} writes ===\n");
+    print("BENCH_INFO: RwLock  ${elapsed_rw_ms.toString()} ms  (${rw_ops_per_sec.toString()} reads/sec)\n");
+    print("BENCH_INFO: MVCC    ${elapsed_v_ms.toString()} ms  (${v_ops_per_sec.toString()} reads/sec)\n");
+    print("BENCH_INFO: MVCC speedup vs RwLock: ${speedup_x100.toString()}/100 x\n");
+
+    ASSERT s_rw >= 0_i64, "rwlock sum sanity";
+    ASSERT s_v  >= 0_i64, "mvcc sum sanity";
+
+    print("BENCH_RESULT: ${elapsed_v_ms.toString()} ms\n");
+    RETURN;
+END

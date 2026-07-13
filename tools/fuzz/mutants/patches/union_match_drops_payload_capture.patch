@@ -1,7 +1,7 @@
-diff --git a/src/backends/mir_emitter.rb b/src/backends/mir_emitter.rb
+diff --git a/compiler/ruby/backends/mir_emitter.rb b/compiler/ruby/backends/mir_emitter.rb
 index 000000000..000000000 100644
---- a/src/backends/mir_emitter.rb
-+++ b/src/backends/mir_emitter.rb
+--- a/compiler/ruby/backends/mir_emitter.rb
++++ b/compiler/ruby/backends/mir_emitter.rb
 @@ -1876,6 +1876,6 @@ class MIREmitter
        body = emit_body(arm.body)
        payload = arm.payload

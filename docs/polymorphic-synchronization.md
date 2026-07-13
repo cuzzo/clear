@@ -191,8 +191,8 @@ END
 MUTABLE mvcc_cfg   = Config{ port: 8080 } @versioned;
 MUTABLE atomic_cfg = Config{ port: 8080 } @indirect:atomic;
 
-updateConfig!(mvcc_cfg) OR RAISE;    # may surface MvccConflict
-updateConfig!(atomic_cfg) OR RAISE;  # may surface AtomicConflict
+updateConfig!(mvcc_cfg) OR_ELSE RAISE;    # may surface MvccConflict
+updateConfig!(atomic_cfg) OR_ELSE RAISE;  # may surface AtomicConflict
 ```
 
 The body must be safe to retry. Fallible work inside a retryable body is
@@ -357,7 +357,7 @@ The current implementation is covered by:
 * Multi-object specs that reject any multi-cell transaction admitting
   `ATOMIC`.
 * End-to-end transpile tests, especially
-  `transpile-tests/350_polymorphic_unified_tick.cht`, which verifies one
+  `transpile-tests/350_polymorphic_unified_tick.clear`, which verifies one
   polymorphic mutation body across local, shared, locked, write-locked,
   versioned, and atomic-pointer storage.
 

@@ -56,7 +56,7 @@ hot keys map to 1-2 shards, creating a bottleneck. With 128 shards (matching Rus
 **Evidence**: At 8 shards, sharded-rw mixed goes from 213ms (1w) to 206ms (32w) = 1.0x.
 At 128 shards, it goes from 216ms (1w) to 72ms (32w) = 3.0x.
 
-**Current state**: bench.cht uses `@shared:sharded(128):locked`.
+**Current state**: bench.clear uses `@shared:sharded(128):locked`.
 
 ### 3. Fiber execution model overhead (~139ms, NOT generated code)
 

@@ -58,7 +58,7 @@ GitHub Actions needs:
 - `vars.BENCHER_TESTBED` -- optional; defaults to `ubuntu-latest`
 
 The runner automatically:
-- Transpiles `.cht` -> Zig -> binary (ReleaseFast)
+- Transpiles `.clear` -> Zig -> binary (ReleaseFast)
 - Compiles C (`bench.c`), Rust (`bench.rs`/`Cargo.toml`), and Go (`bench.go`) baselines if present
 - Runs best-of-5 wall-clock timing for each language
 - Reports CLEAR vs C/Go/Rust overhead percentages
@@ -145,7 +145,7 @@ Two override files can be placed in any benchmark directory:
 
 1. Choose the right category directory (`sequential/`, `concurrent/`, or `server/`)
 2. Number it next in sequence within that category
-3. Create `bench.cht` with a `FN main()` entry point
+3. Create `bench.clear` with a `FN main()` entry point
 4. Optionally add `bench.c`, `bench.go`, `bench.rs` for cross-language baselines
 5. For memory reporting, use `currentMemoryKb()` and `peakMemoryKb()`
 6. Run: `ruby benchmarks/runner.rb benchmarks/<category>/NN_name/`

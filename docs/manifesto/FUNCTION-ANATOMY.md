@@ -15,12 +15,12 @@ It should return exactly *ONE* type. A user should never need to post-process a 
 ```CLEAR
 PUBLIC FN getFullyFormedUser(id: Number) -> RETURNS User OR User::DEFAULT
   -- 1. Input Hygiene: Handle invalid inputs *uniformly* at the top.
-  GUARD id > 0 OR RETURN DEFAULT; 
+  GUARD id > 0 OR_ELSE RETURN DEFAULT;
 
   -- 2. The Happy Path: A clear, easy-to-follow stream of data using 's>'
   RETURN id
    s> fetchUserFromCache
-   s> OTHERWISE(fetchFromDb!!) OR EXIT -- If cache misses, try DB
+   s> OTHERWISE(fetchFromDb!!) OR_ELSE EXIT -- If cache misses, try DB
    s> hydrateFromOtherDb;
 
 -- 3. The Catch-All:

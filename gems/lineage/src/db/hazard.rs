@@ -503,9 +503,7 @@ fn scan_zig_sites(path: &str, contents: &str) -> Vec<HazardSite> {
         if vopr_ex {
             continue;
         }
-        if start_retry {
-            final_sites.push(site(path, line_no, line, "zig_vopr_retry", "vopr"));
-        } else if retry_direct {
+        if start_retry || retry_direct {
             final_sites.push(site(path, line_no, line, "zig_vopr_retry", "vopr"));
         } else if retry && !line.trim().is_empty() && !line.contains("VOPR-") {
             let has_structural_vopr = final_sites.iter().any(|s| s.line == line_no && s.hazard_type.starts_with("zig_vopr_"));

@@ -1,0 +1,75 @@
+REQUIRE "interpreter.clear";
+
+FN testPath(name: String) RETURNS !String ->
+  RETURN "../../examples/mal/" $+ name;
+END
+
+FN stripCr(line: String) RETURNS !String ->
+  IF line.length() > 0 AND (line.charAt(line.length() - 1) OR_ELSE RAISE) == "\r" THEN
+    RETURN line.substr(0, line.length() - 1) OR_ELSE RAISE;
+  END
+  RETURN line;
+END
+
+FN evalCorpusExpr!(expr: String, rootId: Id<Env>, MUTABLE pool: Env[50000]@pool, MUTABLE penv: HashMap<Value>) RETURNS !String ->
+  result = runTest!(expr, rootId, pool, penv) OR_ELSE RAISE;
+  RETURN prStr(result, TRUE) OR_ELSE RAISE;
+END
+
+FN runMalFileCore!(path: String) RETURNS !Int64 ->
+  raw = readFile(path) OR_ELSE RAISE;
+  lines = raw.split("\n");
+
+  MUTABLE pool: Env[50000]@pool = [];
+  MUTABLE penv: HashMap<Value> = {};
+  rootId = setupEnv!(pool) OR_ELSE RAISE;
+
+  MUTABLE pendingExpr = "";
+  MUTABLE expectedOut = "";
+  MUTABLE ran: Int64 = 0;
+  MUTABLE i: Int64 = 0;
+  WHILE i < lines.length() DO
+    rawLine = stripCr(lines[i]) OR_ELSE RAISE;
+    line = rawLine.trim();
+
+    IF startsWith?(line, ";>>>") AND line.contains?("deferrable=True") THEN
+      RETURN ran;
+    END
+
+    IF line == "" OR startsWith?(line, ";;") THEN
+      i += 1;
+    ELSE_IF startsWith?(rawLine, ";/") THEN
+      expectedOut = expectedOut $+ rawLine.substr(2, rawLine.length() - 2) $+ "\n";
+      i += 1;
+    ELSE_IF startsWith?(rawLine, ";=>") THEN
+      expected = rawLine.substr(3, rawLine.length() - 3);
+      clearOutput!(rootId, pool) OR_ELSE RAISE;
+      got = evalCorpusExpr!(pendingExpr, rootId, pool, penv) OR_ELSE RAISE;
+      gotOut = readOutput!(rootId, pool) OR_ELSE "";
+      ASSERT got == expected, "MAL corpus result mismatch";
+      ASSERT gotOut == expectedOut, "MAL corpus output mismatch";
+
+      ran += 1;
+      pendingExpr = "";
+      expectedOut = "";
+      i += 1;
+    ELSE_IF startsWith?(rawLine, ";") THEN
+      i += 1;
+    ELSE
+      IF pendingExpr != "" THEN
+        clearOutput!(rootId, pool) OR_ELSE RAISE;
+        evalCorpusExpr!(pendingExpr, rootId, pool, penv) OR_ELSE RAISE;
+      END
+      pendingExpr = rawLine;
+      expectedOut = "";
+      i += 1;
+    END
+  END
+  RETURN ran;
+END
+
+FN main() RETURNS !Void ->
+  count = runMalFileCore!(testPath("step4_tests.mal") OR_ELSE RAISE) OR_ELSE RAISE;
+  ASSERT count > 0, "step4 corpus should run at least one test";
+  RETURN;
+END

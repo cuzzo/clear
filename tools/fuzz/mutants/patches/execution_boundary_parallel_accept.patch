@@ -1,7 +1,7 @@
-diff --git a/src/annotator/helpers/capabilities.rb b/src/annotator/helpers/capabilities.rb
---- a/src/annotator/helpers/capabilities.rb
-+++ b/src/annotator/helpers/capabilities.rb
-@@ -1246,7 +1246,7 @@ module CapabilityHelper
+diff --git a/compiler/ruby/annotator/helpers/capabilities.rb b/compiler/ruby/annotator/helpers/capabilities.rb
+--- a/compiler/ruby/annotator/helpers/capabilities.rb
++++ b/compiler/ruby/annotator/helpers/capabilities.rb
+@@ -1256,7 +1256,7 @@ module CapabilityHelper
    def validate_capture_analysis!(node, analysis, is_parallel, is_pinned)
      T.bind(self, SemanticAnnotator) rescue nil
  
@@ -10,9 +10,9 @@ diff --git a/src/annotator/helpers/capabilities.rb b/src/annotator/helpers/capab
        if analysis.has_local
          error!(node, :LOCAL_VAR_NOT_IN_PARALLEL)
        end
-diff --git a/src/annotator/domains/execution_boundaries.rb b/src/annotator/domains/execution_boundaries.rb
---- a/src/annotator/domains/execution_boundaries.rb
-+++ b/src/annotator/domains/execution_boundaries.rb
+diff --git a/compiler/ruby/annotator/domains/execution_boundaries.rb b/compiler/ruby/annotator/domains/execution_boundaries.rb
+--- a/compiler/ruby/annotator/domains/execution_boundaries.rb
++++ b/compiler/ruby/annotator/domains/execution_boundaries.rb
 @@ -643,7 +643,7 @@ class SemanticAnnotator
            analysis_result = T.must(full_analysis)
            branch.capture_analysis = analysis_result
@@ -31,10 +31,10 @@ diff --git a/src/annotator/domains/execution_boundaries.rb b/src/annotator/domai
            error!(node, :LOCAL_VAR_NOT_IN_PARALLEL) if analysis_result.has_local
            error!(node, :MULTIOWNED_NOT_IN_PARALLEL) if analysis_result.has_rc
          end
-diff --git a/src/mir/mir_checker.rb b/src/mir/mir_checker.rb
---- a/src/mir/mir_checker.rb
-+++ b/src/mir/mir_checker.rb
-@@ -2520,6 +2520,7 @@ class MIRChecker
+diff --git a/compiler/ruby/mir/mir_checker.rb b/compiler/ruby/mir/mir_checker.rb
+--- a/compiler/ruby/mir/mir_checker.rb
++++ b/compiler/ruby/mir/mir_checker.rb
+@@ -2587,6 +2587,7 @@ class MIRChecker
        next unless fact.dispatch == :parallel
        next if capture.parallel_safe
  

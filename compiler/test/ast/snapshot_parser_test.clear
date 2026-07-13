@@ -1,0 +1,119 @@
+TEST WITHSNAPSHOTParser DO
+  FN parse_block(src: Auto) RETURNS Auto ->
+    MUTABLE ast = NIL;
+    MUTABLE fn = NIL;
+    MUTABLE full = NIL;
+    MUTABLE tokens = NIL;
+    full = "FN main() RETURNS Void -> ${src} END";
+    tokens = Lexer.new(full).tokenize();
+    ast = ClearParser.new(tokens, full).parse();
+    fn = ast.statements().first();
+    fn.body() |> FIND isA?(_, "AST::WithBlock");
+  END
+  WHEN "single-cell read" DO
+    TEST THAT "parses `WITH SNAPSHOT a AS y { ... }`" DO
+      MUTABLE node = parse_block("WITH SNAPSHOT a AS y { x = 1; }");
+      ASSERT isA?(node, "AST::WithBlock"), "expected node to be_a(AST::WithBlock)";
+      ASSERT node.snapshot_mode() == :read, "expected node.snapshot_mode() to eq(:read)";
+      ASSERT node.capabilities().size() == 1, "expected node.capabilities().size() to eq(1)";
+      MUTABLE cap = node.capabilities().first();
+      ASSERT cap[:capability] == symbol("SNAPSHOT"), "expected cap[:capability] to eq(:SNAPSHOT)";
+      ASSERT cap[:alias] == "y", "expected cap[:alias] to eq(\"y\")";
+      ASSERT cap[:alias_mutable] == FALSE, "expected cap[:alias_mutable] to be false";
+    END
+    TEST THAT "binds the alias to the variable" DO
+      node = parse_block("WITH SNAPSHOT counter AS view { x = 1; }");
+      cap = node.capabilities().first();
+      ASSERT cap[:var_node].name() == "counter", "expected cap[:var_node].name() to eq(\"counter\")";
+      ASSERT cap[:alias] == "view", "expected cap[:alias] to eq(\"view\")";
+    END
+    TEST THAT "preserves the SNAPSHOT token (used for diagnostics)" DO
+      node = parse_block("WITH SNAPSHOT a AS y { x = 1; }");
+      cap = node.capabilities().first();
+      ASSERT !(cap([:snapshot_token]).nil?()), "expected cap[:snapshot_token] not_to be_nil";
+      ASSERT cap[:snapshot_token].value() == "SNAPSHOT", "expected cap[:snapshot_token].value() to eq(\"SNAPSHOT\")";
+    END
+  END
+  WHEN "single-cell transaction (MUTABLE)" DO
+    TEST THAT "parses `WITH SNAPSHOT a AS MUTABLE va { ... } ON MvccConflict RAISE`" DO
+      node = parse_block("WITH SNAPSHOT a AS MUTABLE va { va.x = 1; } ON MvccConflict RAISE");
+      ASSERT node.snapshot_mode() == :transaction, "expected node.snapshot_mode() to eq(:transaction)";
+      cap = node.capabilities().first();
+      ASSERT cap[:alias] == "va", "expected cap[:alias] to eq(\"va\")";
+      ASSERT cap[:alias_mutable] == TRUE, "expected cap[:alias_mutable] to be true";
+      ASSERT !(node.lock_error_clause().nil?()), "expected node.lock_error_clause() not_to be_nil";
+      ASSERT node
+        .lock_error_clause()
+        .selectors()
+        .first()
+        .name() == :MvccConflict, "expected node.lock_error_clause().selectors().first().name() to eq(:MvccConflict)";
+    END
+    TEST THAT "parses ON MvccConflict RETRY(3) THEN PASS" DO
+      node = parse_block("WITH SNAPSHOT a AS MUTABLE va { va.x = 1; } ON MvccConflict RETRY(3) THEN PASS");
+      ASSERT node.lock_error_clause().retries() == 3, "expected node.lock_error_clause().retries() to eq(3)";
+      ASSERT node.lock_error_clause().action() == AST.ErrorActionKind.Pass, "expected node.lock_error_clause().action() to eq(AST::ErrorActionKind::Pass)";
+    END
+    TEST THAT "parses ON MvccConflict with -> { ... } block action" DO
+      node = parse_block(
+        """        WITH SNAPSHOT a AS MUTABLE va { va.x = 1; }
+              ON MvccConflict -> { y = 0; }
+      """
+      );
+      ASSERT !(node.lock_error_clause().nil?()), "expected node.lock_error_clause() not_to be_nil";
+      ASSERT node.lock_error_clause().action() == AST.ErrorActionKind.Block, "expected node.lock_error_clause().action() to eq(AST::ErrorActionKind::Block)";
+    END
+    TEST THAT "RETRY(0) is rejected (RETRY(N) requires N > 0)" DO
+      ASSERT_RAISES Input, parse_block("WITH SNAPSHOT a AS MUTABLE va { va.x = 1; } ON MvccConflict RETRY(0) THEN PASS");
+    END
+  END
+  WHEN "multi-cell" DO
+    TEST THAT "parses two read-only SNAPSHOTs" DO
+      node = parse_block("""        WITH SNAPSHOT a AS ya, SNAPSHOT b AS yb { x = 1; }
+      """);
+      ASSERT node.snapshot_mode() == :read, "expected node.snapshot_mode() to eq(:read)";
+      ASSERT node.capabilities().size() == 2, "expected node.capabilities().size() to eq(2)";
+      ASSERT node.capabilities() |> SELECT _[:alias] == ["ya", "yb"], "expected node.capabilities() |> SELECT _[:alias] to eq(%w[ya yb])";
+      ASSERT node.capabilities() |> SELECT _[:alias_mutable] == [FALSE, FALSE], "expected node.capabilities() |> SELECT _[:alias_mutable] to eq([false, false])";
+    END
+    TEST THAT "parses two mutable SNAPSHOTs (ON MvccConflict required at L5)" DO
+      node = parse_block(
+        """        WITH SNAPSHOT a AS MUTABLE va, SNAPSHOT b AS MUTABLE vb {
+              va.x = 1; vb.y = 2;
+            } ON MvccConflict RAISE
+      """
+      );
+      ASSERT node.snapshot_mode() == :transaction, "expected node.snapshot_mode() to eq(:transaction)";
+      ASSERT node.capabilities().size() == 2, "expected node.capabilities().size() to eq(2)";
+      ASSERT node.capabilities() |> SELECT _[:alias_mutable] == [TRUE, TRUE], "expected node.capabilities() |> SELECT _[:alias_mutable] to eq([true, true])";
+    END
+    TEST THAT "parses mixed read + mutable -> snapshot_mode :transaction" DO
+      node = parse_block(
+        """        WITH SNAPSHOT a AS ya, SNAPSHOT b AS MUTABLE vb { ya.x = 1; vb.y = 2; }
+              ON MvccConflict RAISE
+      """
+      );
+      ASSERT node.snapshot_mode() == :transaction, "expected node.snapshot_mode() to eq(:transaction)";
+      MUTABLE cells = node.capabilities();
+      ASSERT cells[0][:alias_mutable] == FALSE, "expected cells[0][:alias_mutable] to be false";
+      ASSERT cells[1][:alias_mutable] == TRUE, "expected cells[1][:alias_mutable] to be true";
+    END
+    TEST THAT "parses three SNAPSHOTs" DO
+      node = parse_block(
+        """        WITH SNAPSHOT a AS MUTABLE va, SNAPSHOT b AS MUTABLE vb, SNAPSHOT c AS MUTABLE vc {
+              va.x = 1; vb.y = 2; vc.z = 3;
+            } ON MvccConflict RAISE
+      """
+      );
+      ASSERT node.capabilities().size() == 3, "expected node.capabilities().size() to eq(3)";
+      ASSERT node.capabilities() |> SELECT _[:alias] == ["va", "vb", "vc"], "expected node.capabilities() |> SELECT _[:alias] to eq(%w[va vb vc])";
+    END
+  END
+  WHEN "regression: traditional WITH still works" DO
+    TEST THAT "WITH EXCLUSIVE locked AS s { ... } unchanged by SNAPSHOT routing" DO
+      node = parse_block("WITH EXCLUSIVE c AS s { x = 1; }");
+      ASSERT isA?(node, "AST::WithBlock"), "expected node to be_a(AST::WithBlock)";
+      ASSERT node.snapshot_mode().nil?(), "expected node.snapshot_mode() to be_nil";
+      ASSERT node.capabilities().first()[:capability] == symbol("EXCLUSIVE"), "expected node.capabilities().first()[:capability] to eq(:EXCLUSIVE)";
+    END
+  END
+END

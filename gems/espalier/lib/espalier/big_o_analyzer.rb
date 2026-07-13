@@ -58,6 +58,9 @@ module Espalier
       previous_local_types = @local_types
       @local_types = local_types if local_types
       complexity = "O(1)"
+      space_complexity = "O(1)"
+      is_dynamic = false
+      trigger = nil
       unknown_operations = []
       warnings = []
 
@@ -73,28 +76,46 @@ module Espalier
           if receiver_type
             known_complexity = @registry.dig(receiver_type, method_called)
             if known_complexity
+              known_complexity = multiply_complexity(known_complexity, node[:execution_complexity]) if node[:execution_complexity]
               # If it's sequential, we just take the max of what we've seen so far.
               complexity = max_complexity(complexity, known_complexity)
             elsif (chained_complexity = flattened_chain_complexity(node, ast_nodes))
+              chained_complexity = multiply_complexity(chained_complexity, node[:execution_complexity]) if node[:execution_complexity]
               complexity = max_complexity(complexity, chained_complexity)
             elsif state_accessor_return_type(receiver_type, method_called)
               complexity = max_complexity(complexity, "O(1)")
             else
               unknown_operations << "#{receiver_type}##{method_called}"
               warnings << "Missing method complexity for `#{receiver_type}##{method_called}` in stdlib_complexity_ruby.yml at line #{node[:line]}."
+              if Array(node[:collection_arguments]).any? && !node[:internal_call]
+                complexity = max_complexity(complexity, "unknown")
+                warnings << unknown_collection_call_warning(node, method_called)
+              end
             end
           else
             unknown_operations << "#{node[:receiver]}.#{method_called}"
             warnings << "Unknown receiver type for `#{node[:receiver]}` at line #{node[:line]}. Defaulting to O(1) for `.#{method_called}`, but this could be worse."
+            if Array(node[:collection_arguments]).any?
+              complexity = max_complexity(complexity, "unknown")
+              warnings << unknown_collection_call_warning(node, method_called)
+            end
           end
         elsif node[:type] == :loop
           # Runtime loop evidence is currently flat by source line. Without a
           # nesting tree, multiple observed loops in one method are a sequential
           # lower bound, not proof of nested O(N^k) behavior.
           complexity = max_complexity(complexity, "O(N)")
+          is_dynamic = true
         elsif node[:type] == :structural
           structural_complexity = node[:complexity].to_s
           complexity = max_complexity(complexity, structural_complexity)
+          if node[:space]
+            space_complexity = max_space_complexity(space_complexity, node[:space].to_s)
+          end
+          if node[:is_dynamic]
+            is_dynamic = true
+            trigger ||= node[:trigger]
+          end
           warnings << structural_warning(node) if structural_complexity != "O(1)"
         elsif node[:type] == :callback || node[:type] == :yield
           warnings << "Function pointer / callback executed at line #{node[:line]}. This could execute arbitrary O(N^x) code, meaning our calculation is strictly a LOWER BOUND."
@@ -104,6 +125,9 @@ module Espalier
       {
         method: method_name,
         lower_bound_complexity: complexity,
+        space_complexity: space_complexity,
+        is_dynamic: is_dynamic,
+        trigger: trigger,
         unknown_operations: unknown_operations.uniq,
         warnings: warnings.uniq
       }
@@ -112,6 +136,11 @@ module Espalier
     end
 
     private
+
+    def unknown_collection_call_warning(node, method_called)
+      names = Array(node[:collection_arguments]).join(", ")
+      "Unknown loop-contained call `.#{method_called}` receives known collection parameter(s) #{names}; runtime evidence is required before assigning a polynomial bound."
+    end
 
     def clean_type_name(type_str)
       return nil unless type_str
@@ -236,6 +265,8 @@ module Espalier
     end
 
     def max_complexity(current, added)
+      return "unknown" if current == "unknown" || added == "unknown"
+
       r1 = complexity_rank(current)
       r2 = complexity_rank(added)
       r1 > r2 ? current : added
@@ -314,6 +345,23 @@ module Espalier
         new_log ? "O(N log N)" : "O(N)"
       else
         new_log ? "O(N^#{new_pow} log N)" : "O(N^#{new_pow})"
+      end
+    end
+
+    def max_space_complexity(current, added)
+      return "unknown" if current == "unknown" || added == "unknown"
+
+      r1 = space_complexity_rank(current)
+      r2 = space_complexity_rank(added)
+      r1 > r2 ? current : added
+    end
+
+    def space_complexity_rank(space)
+      case space.to_s
+      when "O(N)" then 10
+      when "O(log N)" then 5
+      when "O(1)" then 1
+      else 1
       end
     end
   end

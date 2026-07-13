@@ -7,10 +7,57 @@ const ebr = @import("ebr.zig");
 const CheatLib = @import("../runtime/runtime-header.zig").CheatLib;
 const Runtime = rt_mod.Runtime;
 
+test "unboxMove releases only the unique box shell and transfers payload ownership" {
+    const allocator = std.testing.allocator;
+    const Payload = struct { bytes: []u8 };
+
+    const boxed = try CheatLib.localCreate(Payload, allocator, .{
+        .bytes = try allocator.dupe(u8, "owned payload"),
+    });
+    const moved = CheatLib.unboxMove(Payload, allocator, boxed);
+    defer allocator.free(moved.bytes);
+
+    try std.testing.expectEqualStrings("owned payload", moved.bytes);
+}
+
+test "Set(Rc(T)) uses handle identity and releases removed keys" {
+    const allocator = std.testing.allocator;
+    const RcItem = CheatLib.Rc(u64);
+    var set: CheatLib.Set(RcItem) = .{};
+    defer set.deinit(allocator);
+
+    const item = try CheatLib.rcCreate(u64, allocator, 7);
+    try set.insert(allocator, CheatLib.rcRetain(u64, item));
+    try std.testing.expect(set.contains(item));
+    try std.testing.expectEqual(@as(usize, 2), item.ctrl.strong);
+
+    set.remove(allocator, item);
+    try std.testing.expect(!set.contains(item));
+    try std.testing.expectEqual(@as(usize, 1), item.ctrl.strong);
+    CheatLib.rcRelease(u64, allocator, item);
+}
+
 const PromiseTestState = struct {
     promise: CheatLib.Promise(f64),
     result: f64 = 0.0,
 };
+
+test "Promise readiness poll is non-consuming" {
+    const allocator = std.testing.allocator;
+    var global_ctx = ebr.EbrContext{};
+    defer global_ctx.deinit(allocator);
+    var stack_pool = fm.StackPool.init(allocator);
+    defer stack_pool.deinit();
+    var sched = try fp.Scheduler.init(allocator, &global_ctx, &stack_pool);
+    defer sched.deinit();
+
+    const promise = try CheatLib.Promise(i64).spawn(allocator, &sched);
+    try std.testing.expect(!promise.isReady());
+    promise.inner.result = 17;
+    promise.inner.wg.done();
+    try std.testing.expect(promise.isReady());
+    try std.testing.expectEqual(@as(i64, 17), try promise.next());
+}
 
 fn promiseProducer(rt: *Runtime, raw_args: ?*anyopaque) anyerror!void {
     _ = rt;
@@ -90,7 +137,7 @@ fn promiseConsumerAfterDone(rt: *Runtime, raw_args: ?*anyopaque) anyerror!void {
 // makes Promise idempotent (e.g. by folding it into SharedPromise's
 // retain/refcount), the BC's `futureResolved` cache becomes
 // optimization-only and this test should be revisited alongside
-// `_bc_runner.cht`'s AWAIT branch.
+// `_bc_runner.clear`'s AWAIT branch.
 test "Promise(f64).next() consumes the handle: documented contract" {
     // Assert the type-level shape: Inner has a wg + result; alloc is the
     // GPA used to destroy() Inner on next(). Calling next() twice on

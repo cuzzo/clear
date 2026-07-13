@@ -15,10 +15,9 @@
 #   bundle exec ruby tools/diagnostic_tracker.rb --bucket=type_match_pattern
 #   bundle exec ruby tools/diagnostic_tracker.rb --verbose
 
-$LOAD_PATH.unshift(File.expand_path('..', __dir__))
-require 'src/ast/diagnostic_registry'
-require 'src/ast/diagnostic_examples'
-require 'src/ast/diagnostic_buckets'
+require_relative '../compiler/ruby/ast/diagnostic_registry'
+require_relative '../compiler/ruby/ast/diagnostic_examples'
+require_relative '../compiler/ruby/ast/diagnostic_buckets'
 
 category = :type
 bucket_filter = nil

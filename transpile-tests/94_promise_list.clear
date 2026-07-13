@@ -1,0 +1,38 @@
+# Test: Promise List (~T[]@list) — dynamic list of BG tasks
+# Exercises: declaring a ~T[]@list, appending BG { } blocks,
+# indexing with futures[i] to get a ~T, and NEXT-ing each promise.
+
+FN main() RETURNS Void ->
+    # Declare a promise list: std.ArrayListUnmanaged(CheatLib.Promise(i64))
+    MUTABLE futures: ~Int64[]@list = [];
+
+    # Spawn 4 concurrent fibers and collect their promises into the list.
+    # loop_appends_outer_list? ensures mark_per_iter = false (no frame reset per iter).
+    MUTABLE i: Int64 = 0;
+    WHILE i < 4 DO
+        base: Int64 = i;
+        append(futures, BG {
+            # Inside the BG fiber, __rt is the fiber's own Runtime.
+            # readFile / countOccurrences would use __rt.frameAlloc() here.
+            base * 2;
+        });
+        i = i + 1;
+    END
+
+    # Collect results by NEXTing each promise in order.
+    # futures[j] is bounds-safe and returns an optional promise. IF-AS
+    # unwraps it before NEXT calls .next() and obtains the i64.
+    MUTABLE sum: Int64 = 0;
+    MUTABLE j: Int64 = 0;
+    WHILE j < 4 DO
+        IF futures[j] EXISTS AS future THEN
+            sum = sum + NEXT future;
+        END
+        j = j + 1;
+    END
+
+    # 0*2 + 1*2 + 2*2 + 3*2 = 0+2+4+6 = 12
+    ASSERT sum == 12, "promise list sum should be 12";
+
+    RETURN;
+END

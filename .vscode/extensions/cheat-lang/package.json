@@ -1,7 +1,7 @@
 {
   "name": "clear-lang",
   "displayName": "CLEAR Language Support",
-  "description": "Syntax highlighting + LSP integration for the CLEAR programming language (.cht files)",
+  "description": "Syntax highlighting + LSP integration for the CLEAR programming language (.clear files)",
   "version": "0.2.0",
   "publisher": "clear",
   "engines": {
@@ -19,7 +19,7 @@
       {
         "id": "clear",
         "aliases": ["CLEAR", "clear"],
-        "extensions": [".cht"],
+        "extensions": [".clear"],
         "configuration": "./language-configuration.json"
       }
     ],

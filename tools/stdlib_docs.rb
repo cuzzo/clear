@@ -72,7 +72,7 @@ module StdlibDocs
       allocators, or stream machinery.
 
       Fallible stdlib APIs use CLEAR's `!T` fallible tense. If a caller does
-      not handle the error inline with `OR ...`, it bubbles through the caller's
+      not handle the error inline with `OR_ELSE ...`, it bubbles through the caller's
       fallible return path. We will not hide IO or parsing errors like Ruby.
 
       Illustrative examples use `ruby clear illustrative` fences. They are
@@ -134,9 +134,9 @@ module StdlibDocs
       as hard as Java or Zig.
 
       ```ruby clear illustrative
-      text = fs.read("config.clear") OR RAISE;
-      lines = fs.readLines("users.txt") OR RAISE;
-      fs.write("out.txt", report) OR RAISE;
+      text = fs.read("config.clear") OR_ELSE RAISE;
+      lines = fs.readLines("users.txt") OR_ELSE RAISE;
+      fs.write("out.txt", report) OR_ELSE RAISE;
       ```
 
       Pipelines should default to using streams internally where that is the
@@ -146,7 +146,7 @@ module StdlibDocs
       `AS_STREAM`.
 
       ```ruby clear illustrative
-      users = (fs.readLines("users.csv") OR RAISE)
+      users = (fs.readLines("users.csv") OR_ELSE RAISE)
           |> MAP { parseUser(_) }
           |> SELECT { _.active?() };
       ```
@@ -158,16 +158,16 @@ module StdlibDocs
       explicitly:
 
       ```ruby clear illustrative
-      active_stream = (fs.readLines("users.csv") OR RAISE)
+      active_stream = (fs.readLines("users.csv") OR_ELSE RAISE)
           |> MAP { parseUser(_) }
           |> SELECT { _.active?() }
           |> AS_STREAM;
 
-      users_by_id = (fs.readLines("users.csv") OR RAISE)
+      users_by_id = (fs.readLines("users.csv") OR_ELSE RAISE)
           |> MAP { parseUser(_) }
           |> COLLECT_MAP { _.id => _ };
 
-      unique_domains = (fs.readLines("emails.txt") OR RAISE)
+      unique_domains = (fs.readLines("emails.txt") OR_ELSE RAISE)
           |> MAP { domainOf(_) }
           |> COLLECT_SET;
       ```
@@ -180,7 +180,7 @@ module StdlibDocs
       streams unless the user asks otherwise:
 
       ```ruby clear illustrative
-      files = fs.glob("src/**/*.cht") OR RAISE;
+      files = fs.glob("src/**/*.clear") OR_ELSE RAISE;
       sorted = files |> ORDER_BY _;
       ```
 
@@ -195,7 +195,7 @@ module StdlibDocs
       2. Choose explicit collection target syntax: `AS_STREAM`, `COLLECT_LIST`,
          `COLLECT_MAP`, `COLLECT_SET`, and typed collection targets.
       3. Define the named error taxonomy and future `Result` relationship;
-         prototype stdlib APIs use native `!T` fallibility and `OR`
+         prototype stdlib APIs use native `!T` fallibility and `OR_ELSE`
          propagation.
       4. Decide which effects are public stdlib contracts for self-host
          packages: file read/write, process/env, network read/write, time,
@@ -314,11 +314,11 @@ module StdlibDocs
       | `fs.glob(pattern)` | `planned`, `self-host required` | Unsorted stream of matching paths. |
 
       ```ruby clear illustrative
-      source = fs.read("src/ast/parser.cht") OR RAISE;
-      lines = fs.readLines("src/ast/lexer.cht") OR RAISE;
-      fs.write("build/report.txt", report) OR RAISE;
+      source = fs.read("src/ast/parser.clear") OR_ELSE RAISE;
+      lines = fs.readLines("src/ast/lexer.clear") OR_ELSE RAISE;
+      fs.write("build/report.txt", report) OR_ELSE RAISE;
 
-      ordered_files = (fs.glob("src/**/*.cht") OR RAISE)
+      ordered_files = (fs.glob("src/**/*.clear") OR_ELSE RAISE)
           |> ORDER_BY _;
       ```
 

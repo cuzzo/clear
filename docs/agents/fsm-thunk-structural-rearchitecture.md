@@ -115,8 +115,8 @@ reference from construction time.
 ### Phase 0: Baseline and Guardrails
 
 - Snapshot compile timings for the known pathological imports:
-  - `tmp/nil-kill/require-corpus-shard-0095.cht`
-  - `tmp/nil-kill/require-corpus-shard-0104.cht`
+  - `tmp/nil-kill/require-corpus-shard-0095.clear`
+  - `tmp/nil-kill/require-corpus-shard-0104.clear`
 - Snapshot `decomplex` and `slopcop` reports.
 - Keep the architecture spec blocker for zero regex usage in `src/mir`. It is
   pending while legacy FSM code still violates it; completing this rearchitecture

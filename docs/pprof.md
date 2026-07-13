@@ -19,7 +19,7 @@ need graphviz.
 ## Use
 
 ```sh
-clear profile foo.cht
+clear profile foo.clear
 # -> writes foo.profile/heap.pb.gz, lock.pb.gz, mvcc.pb.gz
 #    (and cpu.pb.gz if perf_to_profile is on PATH)
 
@@ -67,7 +67,7 @@ Standard CPU profile from `perf.data`, converted by
 ## CLEAR source mapping
 
 The transpiler emits `// CLR:N` markers in `transpiled.zig`. Our
-converter walks those back to the user's `.cht` line and stamps it
+converter walks those back to the user's `.clear` line and stamps it
 onto each pprof Location, so `pprof -list <fn>` shows CLEAR source
 lines (not Zig).
 
@@ -79,7 +79,7 @@ default. For workloads where the per-alloc unwind cost matters,
 by N so doctor / pprof see estimated totals:
 
 ```sh
-clear profile foo.cht --sample=100
+clear profile foo.clear --sample=100
 ```
 
 Header records the chosen `sample_n` so consumers can rescale or
@@ -92,8 +92,8 @@ capture in lock-profile and mvcc-profile, so pprof's tree/flame
 views and per-caller attribution work for these profiles too:
 
 ```sh
-clear profile foo.cht --sync-callstacks            # auto-bumps --sample to 100
-clear profile foo.cht --sync-callstacks --sample=1  # full capture, full cost
+clear profile foo.clear --sync-callstacks            # auto-bumps --sample to 100
+clear profile foo.clear --sync-callstacks --sample=1  # full capture, full cost
 ```
 
 Off by default because the FP walk costs ~100-500ns per record.

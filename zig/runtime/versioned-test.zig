@@ -630,6 +630,39 @@ test "Versioned(i64): H2 -- update has bounded retries (returns error.UpdateRetr
     try testing.expectEqual(@as(E, error.UpdateRetriesExhausted), sample_err);
 }
 
+test "Versioned: update propagates managed payload duplication failures" {
+    const Payload = struct {
+        value: i64,
+
+        pub fn dupe(self: @This(), allocator: std.mem.Allocator) error{SnapshotRejected}!@This() {
+            _ = self;
+            _ = allocator;
+            return error.SnapshotRejected;
+        }
+    };
+
+    var ctx = EbrContext{};
+    defer ctx.deinit(testing.allocator);
+
+    var frame: [1024]u8 = undefined;
+    var rt = try makeRuntime(&ctx, &frame);
+    defer rt.deinit();
+
+    var state = try versioned.Versioned(Payload).init(testing.allocator, .{ .value = 1 });
+    defer state.deinit(&rt, testing.allocator) catch unreachable;
+
+    try testing.expectError(error.SnapshotRejected, state.update(
+        &rt,
+        testing.allocator,
+        struct {
+            fn call(payload: *Payload) void {
+                payload.value += 1;
+            }
+        }.call,
+        .{},
+    ));
+}
+
 test "EBR: M2 -- dumpTrash frees items already past safe_threshold (orphan backpressure)" {
     var ctx = EbrContext{};
     defer ctx.deinit(testing.allocator);

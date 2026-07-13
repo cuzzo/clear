@@ -8,8 +8,8 @@
 #
 # Only compiles main/cheatMain. Non-main functions raise Unimplemented.
 
-require_relative "../../src/mir/mir"
-require_relative "../../src/ast/error_registry"
+require_relative "../../compiler/ruby/mir/mir"
+require_relative "../../compiler/ruby/ast/error_registry"
 
 class BcEmitter
   class Unimplemented < StandardError; end
@@ -185,7 +185,7 @@ class BcEmitter
   GET_ERR_TYPE = 108
   GET_ERR_MSG  = 109
   # ERR_SET_*: pop a string (kind/type/msg) and mutate the error sitting
-  # just below on the stack. Used by OR EXIT to inherit-or-replace fields
+  # just below on the stack. Used by OR_ELSE EXIT to inherit-or-replace fields
   # without rebuilding the error sentinel.
   ERR_SET_KIND = 110
   ERR_SET_TYPE = 111
@@ -702,7 +702,7 @@ class BcEmitter
     end
     # Synthesized closure helpers (`__caseA_body`, `__handleWithCatch_body`,
     # `__processUser_body`, ...) likewise have no AST counterpart -- the
-    # lowering generates them around try/catch / OR-fallback / union-arm
+    # lowering generates them around try/catch / OR_ELSE-fallback / union-arm
     # bodies. lookup_ast_fn typically resolves them to an unrelated user
     # fn, which causes MIR/AST length mismatches when compiled. The exception
     # is `__<userFn>_body` which carries the real CATCH-grammar logic --
@@ -1041,7 +1041,7 @@ class BcEmitter
       # `RETURN error.CheatError` is the lowering's RAISE-out-of-fn shape
       # (mir_lowering emits setError + return error.CheatError for any
       # !T-returning function's raise). The VM has no Zig error union;
-      # surface a Value.Error sentinel so callers using TryCatch / OR
+      # surface a Value.Error sentinel so callers using TryCatch / OR_ELSE
       # can detect the failure via IS_ERR.
       if has_value && mir_node.value.is_a?(MIR::Ident) &&
          mir_node.value.name.to_s == "error.CheatError"
@@ -1062,8 +1062,8 @@ class BcEmitter
       end
     when MIR::InlineBc
       compile_inline_bc(mir_node)
-    when MIR::OrExitBcRewrite
-      compile_or_exit_bc_rewrite(mir_node)
+    when MIR::OrElseExitBcRewrite
+      compile_or_else_exit_bc_rewrite(mir_node)
     when MIR::ShardedMapPut
       # Statement-position sharded HashMap put -- emit MAP_PUT (the VM
       # has no shard routing; sharded maps share a single MapRef).
@@ -1273,7 +1273,7 @@ class BcEmitter
     STDERR.puts "DBG compile_expr_stmt expr=#{expr.class}" if ENV["BC_TRACE_CALL"]
     if inline_zig_node?(expr)
       reason = expr.respond_to?(:reason) ? expr.reason.to_s : ""
-      if reason.start_with?("or_exit_")
+      if reason.start_with?("or_else_exit_")
         push_type(:void)
         return
       end
@@ -2458,8 +2458,8 @@ class BcEmitter
       # `try EXPR` (Zig-style): if EXPR is a Value.Error, propagate by
       # returning early from the enclosing helper fn with the error
       # sentinel still on the stack. Otherwise leave EXPR's value on
-      # the stack and fall through. Without this, OR-RAISE patterns
-      # like `readFile(x) OR RAISE` silently swallowed the failure.
+      # the stack and fall through. Without this, OR_ELSE-RAISE patterns
+      # like `readFile(x) OR_ELSE RAISE` silently swallowed the failure.
       compile_expr(node.expr); ensure_value_stack; pop_type
       # IS_ERR pops the operand and pushes a bool, so stash the value
       # first and reload it on each path.
@@ -2486,7 +2486,7 @@ class BcEmitter
       emit_op(LOAD_SLOT, @slots[tmp])
       push_type(:any)
     when MIR::TryCatch
-      # `expr OR catch_body`. compile expr; stash to a temp slot; check
+      # `expr OR_ELSE catch_body`. compile expr; stash to a temp slot; check
       # IS_ERR; if error: bind to node.binding (if any), evaluate
       # catch_body; else: load the original value. Mirrors Zig's
       # `try/catch` control flow with the VM's Value.Error sentinel.
@@ -2505,13 +2505,13 @@ class BcEmitter
         emit_op(LOAD_SLOT, @slots[tmp])
         emit_op(STORE_SLOT, @slots[node.binding.to_s])
       end
-      # OR EXIT pattern detection: the catch_body is a ScopeBlock of
-      # RawZigs with reason starting with `or_exit_` plus a trailing
+      # OR_ELSE EXIT pattern detection: the catch_body is a ScopeBlock of
+      # RawZigs with reason starting with `or_else_exit_` plus a trailing
       # ReturnStmt. The RawZigs are no-ops in BC; the actual field
       # mutations need to happen via ERR_SET_KIND/TYPE/MSG against the
       # bound error. Detect and lower to opcodes.
-      if compile_or_exit_catch_body(node, tmp)
-        # compile_or_exit_catch_body emits BC_RET, no further work needed.
+      if compile_or_else_exit_catch_body(node, tmp)
+        # compile_or_else_exit_catch_body emits BC_RET, no further work needed.
         emit_op(JUMP); end_patch = @ops.length; emit_op(0)
         @ops[keep_patch] = @ops.length
         emit_op(LOAD_SLOT, @slots[tmp])
@@ -2661,8 +2661,8 @@ class BcEmitter
       compile_orelse(node)
     when MIR::InlineBc
       compile_inline_bc(node)
-    when MIR::OrExitBcRewrite
-      compile_or_exit_bc_rewrite(node)
+    when MIR::OrElseExitBcRewrite
+      compile_or_else_exit_bc_rewrite(node)
     when MIR::ShardedMapPut
       compile_sharded_map_put(node)
     when MIR::ShardedMapGet
@@ -3853,7 +3853,7 @@ class BcEmitter
       push_type(:split_stream); return
     when :is_error
       # Pop a Value, push :bool — TRUE if Value.Error, FALSE otherwise.
-      # Used by CONCURRENT ... OR PRUNE lowering in BC mode to gate
+      # Used by CONCURRENT ... OR_ELSE PRUNE lowering in BC mode to gate
       # append-on-success without triggering the auto-try error
       # propagation that lower_select normally emits for failable expressions.
       compile_expr_to_value(node.args[0]); pop_type
@@ -4721,17 +4721,17 @@ class BcEmitter
     emit_op(STORE_SLOT, @slots["snapshot"])
   end
 
-  # OR EXIT structural rewrite in expression position. The normal
-  # `call OR EXIT ...` lowering is handled by compile_or_exit_catch_body;
+  # OR_ELSE EXIT structural rewrite in expression position. The normal
+  # `call OR_ELSE EXIT ...` lowering is handled by compile_or_else_exit_catch_body;
   # this typed node keeps expression-position lowering independent from
   # Zig text pattern matching.
-  def compile_or_exit_bc_rewrite(node)
+  def compile_or_else_exit_bc_rewrite(node)
     emit_op(PUSH_ERR)
-    emit_or_exit_rewrite_fields(node)
+    emit_or_else_exit_rewrite_fields(node)
     push_type(:any)
   end
 
-  def emit_or_exit_rewrite_fields(node)
+  def emit_or_else_exit_rewrite_fields(node)
     if node.kind
       emit_op(LOAD_CONST, add_const([:str, node.kind.to_s]))
       emit_op(ERR_SET_KIND)
@@ -4767,7 +4767,7 @@ class BcEmitter
 
   # On match, emit ERR_SET_* opcodes against the error stashed in tmp,
   # then BC_RET the mutated error. Returns true on match, false otherwise.
-  def compile_or_exit_catch_body(node, tmp)
+  def compile_or_else_exit_catch_body(node, tmp)
     body = node.catch_body
     return false unless body.is_a?(MIR::ScopeBlock)
     stmts = body.body
@@ -4777,7 +4777,7 @@ class BcEmitter
     rewrites = []
     stmts[0...-1].each do |s|
       return false unless s.is_a?(MIR::ExprStmt)
-      if s.expr.is_a?(MIR::OrExitBcRewrite)
+      if s.expr.is_a?(MIR::OrElseExitBcRewrite)
         rewrites << s.expr
       else
         return false
@@ -4785,7 +4785,7 @@ class BcEmitter
     end
     # Load the error sentinel and mutate fields in-place.
     emit_op(LOAD_SLOT, @slots[tmp])
-    rewrites.each { |rewrite| emit_or_exit_rewrite_fields(rewrite) }
+    rewrites.each { |rewrite| emit_or_else_exit_rewrite_fields(rewrite) }
     # Store mutated error back to tmp, then BC_RET it (the catch_body's
     # ReturnStmt expects __exit_err which we already bound at the slot).
     emit_op(STORE_SLOT, @slots[tmp])
@@ -5668,7 +5668,7 @@ class BcEmitter
   end
 
   def compile_orelse(node)
-    # expr OR fallback: if expr is nil/falsy, use fallback
+    # expr OR_ELSE fallback: if expr is nil/falsy, use fallback
     tmp = "__orelse_#{@ops.length}"
     compile_expr(node.expr); ensure_value_stack
     emit_op(STORE_NAME, add_const(tmp))   # keep value in env (stays on stack too)
@@ -6200,7 +6200,7 @@ class BcEmitter
     when AST::OptionalUnwrap
       # `expr?` — safe-navigation prefix. The VM's Value union is already
       # nullable (Value.Nil is a variant), so OptionalUnwrap is identity:
-      # the surrounding `OR fallback` (parser-introduced for `?.field OR x`)
+      # the surrounding `OR_ELSE fallback` (parser-introduced for `?.field OR_ELSE x`)
       # already does the nil dispatch.
       compile_ast_expr(node.target)
     when AST::Copy
@@ -6279,8 +6279,8 @@ class BcEmitter
     op = node.op
     if op == :SMOOTH
       raise Unimplemented, "SMOOTH pipeline"
-    elsif op == :OR_RESCUE
-      # `expr OR fallback` — if expr evaluates to nil/falsy, replace with
+    elsif op == :OR_ELSE
+      # `expr OR_ELSE fallback` — if expr evaluates to nil/falsy, replace with
       # fallback. Mirror compile_orelse's MIR-side flow: stash expr in a
       # temp slot, NOT-NOT to boolify, JUMP_IF_FALSE to the fallback path,
       # otherwise reload the original.

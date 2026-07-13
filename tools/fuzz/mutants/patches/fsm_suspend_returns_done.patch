@@ -1,7 +1,7 @@
-diff --git a/src/backends/fsm_wrapper_emitter.rb b/src/backends/fsm_wrapper_emitter.rb
+diff --git a/compiler/ruby/backends/fsm_wrapper_emitter.rb b/compiler/ruby/backends/fsm_wrapper_emitter.rb
 index 000000000..000000000 100644
---- a/src/backends/fsm_wrapper_emitter.rb
-+++ b/src/backends/fsm_wrapper_emitter.rb
+--- a/compiler/ruby/backends/fsm_wrapper_emitter.rb
++++ b/compiler/ruby/backends/fsm_wrapper_emitter.rb
 @@ -414,13 +414,13 @@ module FsmWrapperEmitter
      when MIR::FsmTailYield
        [

@@ -91,10 +91,10 @@ WITH sharedAccount AS acc {
 
 ```CLEAR
 FN myFunc(a, b, c) ->
-  -- OR RAISE bubbles up the error
-  val = fetchData(a, b, c) OR RAISE
-   s> parseHeader OR EXIT "Invalid Header"
-   s> parseBody OR EXIT "Invalid Body"
+  -- OR_ELSE RAISE bubbles up the error
+  val = fetchData(a, b, c) OR_ELSE RAISE
+   s> parseHeader OR_ELSE EXIT "Invalid Header"
+   s> parseBody OR_ELSE EXIT "Invalid Body"
    s> fetchUser
       s> RECOVER(DefaultUser())
 

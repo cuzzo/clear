@@ -17,7 +17,7 @@ TESTS=(
 )
 pass=0; fail=0; err=0
 for t in "${TESTS[@]}"; do
-  out=$(timeout 12 ruby scheme_transpiler.rb ../../transpile-tests/${t}.cht --run 2>&1)
+  out=$(timeout 12 ruby scheme_transpiler.rb ../../transpile-tests/${t}.clear --run 2>&1)
   if echo "$out" | grep -q "SCHEME: all expressions completed"; then
     echo "  PASS  $t"
     ((pass++))

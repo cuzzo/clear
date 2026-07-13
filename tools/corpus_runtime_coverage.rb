@@ -10,7 +10,7 @@ ROOT = File.expand_path("..", __dir__)
 opts = {
   examples: true,
   benchmarks: true,
-  strict: false,
+  strict: true,
   shard: nil,
   limit: nil,
   timeout: Integer(ENV.fetch("CORPUS_RUNTIME_TIMEOUT", "120")),
@@ -21,6 +21,7 @@ OptionParser.new do |o|
   o.on("--examples-only") { opts[:benchmarks] = false }
   o.on("--benchmarks-only") { opts[:examples] = false }
   o.on("--strict") { opts[:strict] = true }
+  o.on("--allow-failures") { opts[:strict] = false }
   o.on("--limit N", Integer) { |v| opts[:limit] = v }
   o.on("--timeout N", Integer) { |v| opts[:timeout] = v }
   o.on("--shard I/N") do |v|
@@ -47,17 +48,17 @@ def skipped_example?(path)
   return true if rel.start_with?("examples/footguns/")
 
   case rel
-  when "examples/minivm/_bc_runner.cht",
-       "examples/minivm/_scheme_runner.cht",
-       "examples/minivm/bench_pool_ops.cht",
-       "examples/minivm/bench_pool_ops_nosync.cht",
-       "examples/minivm/debugger.cht",
-       "examples/minivm/parser.cht",
-       "examples/minivm/register_debugger.cht",
-       "examples/minivm/sus-int.cht",
-       "examples/minivm/types.cht",
-       "examples/minivm/vm.cht",
-       "examples/minivm/vtest.cht"
+  when "examples/minivm/_bc_runner.clear",
+       "examples/minivm/_scheme_runner.clear",
+       "examples/minivm/bench_pool_ops.clear",
+       "examples/minivm/bench_pool_ops_nosync.clear",
+       "examples/minivm/debugger.clear",
+       "examples/minivm/parser.clear",
+       "examples/minivm/register_debugger.clear",
+       "examples/minivm/sus-int.clear",
+       "examples/minivm/types.clear",
+       "examples/minivm/vm.clear",
+       "examples/minivm/vtest.clear"
     true
   else
     false
@@ -108,7 +109,7 @@ failed = 0
 skipped = 0
 
 if opts[:examples]
-  examples = Dir.glob(File.join(ROOT, "examples", "**", "*.cht")).sort
+  examples = Dir.glob(File.join(ROOT, "examples", "**", "*.clear")).sort
                 .reject { |path| skipped_example?(path) }
   runnable, non_runnable = examples.partition { |path| runnable_example?(path) }
   skipped += non_runnable.size

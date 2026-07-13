@@ -127,6 +127,7 @@ where
             })
             .collect();
 
+        let mut last_commit_hash = None;
         for (commit_idx, commit) in commits.into_iter().enumerate().skip(start_idx) {
             self.storage.insert_metadata(&commit)?;
             let mut current = HashMap::new();
@@ -261,13 +262,16 @@ where
                     .push(unit.id.clone());
             }
             stats.commits += 1;
+            last_commit_hash = Some(commit.hash.clone());
+        }
 
+        if let Some(hash) = last_commit_hash {
             let state = EngineState {
                 previous: previous.clone(),
                 aliases: aliases.clone(),
             };
             let state_json = serde_json::to_string(&state)?;
-            self.storage.save_engine_state(&commit.hash, &state_json)?;
+            self.storage.save_engine_state(&hash, &state_json)?;
         }
 
         Ok(stats)
@@ -324,7 +328,7 @@ fn is_meaningless_line(line: &str, path: &str) -> bool {
     match ext.as_str() {
         "rb" | "lua" => trimmed.eq_ignore_ascii_case("end"),
         "go" | "rs" | "c" | "h" | "cc" | "cpp" | "cxx" | "hh" | "hpp" | "hxx" | "cs" | "java" | "kt" | "kts" | "swift" | "js" | "jsx" | "ts" | "tsx" | "zig" | "php" => {
-            trimmed == "}" || trimmed == "{" || trimmed == "};" || trimmed == "{" || trimmed == "{}"
+            matches!(trimmed, "}" | "{" | "};" | "{}")
         }
         _ => false
     }
@@ -362,15 +366,11 @@ fn is_valid_cross_file_move(prev: &LogicalUnit, current: &LogicalUnit) -> bool {
     let current_body_len = current_lines.len() - 1;
 
     // If it's a single line body statement, we require it to be non-trivial.
-    if prev_body_len == 1 {
-        if is_trivial_line(prev_lines[1]) {
-            return false;
-        }
+    if prev_body_len == 1 && is_trivial_line(prev_lines[1]) {
+        return false;
     }
-    if current_body_len == 1 {
-        if is_trivial_line(current_lines[1]) {
-            return false;
-        }
+    if current_body_len == 1 && is_trivial_line(current_lines[1]) {
+        return false;
     }
 
     true

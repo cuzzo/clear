@@ -1,0 +1,28 @@
+# Element-level @indirect is distinct from a boxed collection header.
+# Consuming transport never deep-copies the payload:
+#   indirect -> indirect moves the pointer
+#   indirect -> inline moves out the payload and frees only the box shell
+
+STRUCT BoxedItem { name: String }
+
+FN appendBox!(TAKES item: BoxedItem@indirect, MUTABLE items: BoxedItem@indirect[]@list) RETURNS Void ->
+  items.append(item);
+END
+
+FN appendInline!(TAKES item: BoxedItem@indirect, MUTABLE items: BoxedItem[]@list) RETURNS Void ->
+  items.append(item);
+END
+
+FN main() RETURNS Void ->
+  MUTABLE boxed: BoxedItem@indirect[]@list = [];
+  first = BoxedItem{ name: COPY "boxed" } @indirect;
+  appendBox!(first, boxed);
+  ASSERT boxed.length() == 1;
+  ASSERT boxed[0]?.name == "boxed";
+
+  MUTABLE direct_items: BoxedItem[]@list = [];
+  second = BoxedItem{ name: COPY "inline" } @indirect;
+  appendInline!(second, direct_items);
+  ASSERT direct_items.length() == 1;
+  ASSERT direct_items[0]?.name == "inline";
+END

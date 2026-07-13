@@ -56,14 +56,14 @@ FuzzGenerator.register(:loop_local_cleanup_alloc, cells: LLCA_CELLS) do |p|
       "holder = #{carrier_init};\n            IF #{carrier_peek} < 0_i64 THEN RAISE \"unreached\"; END",
     ]
   when :struct_with_optional_string
-    item_peek = p[:element_shape] == :string_elems ? "holder.tag.length()" : "(holder.item OR 1_i64).toString().length()"
+    item_peek = p[:element_shape] == :string_elems ? "holder.tag.length()" : "(holder.item OR_ELSE 1_i64).toString().length()"
     carrier_init = "Holder{ item: #{elem_val}, tag: COPY \"t\" }"
     [
       "STRUCT Holder { item: ?#{elem_zig}, tag: String }",
       "holder = #{carrier_init};\n            IF #{item_peek} < 0_i64 THEN RAISE \"unreached\"; END",
     ]
   when :struct_with_map
-    map_peek = p[:element_shape] == :string_elems ? "holder.items.count()" : "(holder.items[\"k\"] OR 1_i64).toString().length()"
+    map_peek = p[:element_shape] == :string_elems ? "holder.items.count()" : "(holder.items[\"k\"] OR_ELSE 1_i64).toString().length()"
     carrier_init = "Holder{ items: { \"k\": #{elem_val} }, tag: COPY \"t\" }"
     [
       "STRUCT Holder { items: HashMap<#{elem_zig}>, tag: String }",

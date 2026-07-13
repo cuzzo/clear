@@ -185,7 +185,7 @@ in favor of binding-level queries.
 
 ## Remaining for SIMP-13f
 
-13 reader sites still use the inline OR fallback `|| ti.X_provenance?` for
+13 reader sites still use the inline OR_ELSE fallback `|| ti.X_provenance?` for
 non-binding expressions (literals, FuncCall returns, CopyNode results,
 BinaryOp string_concat, etc.). To delete Type#provenance entirely:
 

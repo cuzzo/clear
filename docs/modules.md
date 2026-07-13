@@ -11,7 +11,7 @@ Importing a CLEAR module makes its `PUB` and package-private symbols available u
 Use a relative path string to import files in your own project:
 
 ```ruby clear illustrative
-REQUIRE "math_utils.cht";
+REQUIRE "math_utils.clear";
 
 FN main() RETURNS Void ->
     res = math_utils.add(10, 20);
@@ -35,7 +35,7 @@ END
 You can rename any import to avoid collisions:
 
 ```ruby clear illustrative
-REQUIRE "math_utils.cht" AS m;
+REQUIRE "math_utils.clear" AS m;
 REQUIRE "pkg:geometry" AS geo;
 
 FN main() RETURNS Void ->
@@ -51,14 +51,14 @@ CLEAR enforces three levels of visibility. Access control is checked at compile-
 
 | Keyword | Level | Visibility |
 |---------|-------|------------|
-| `PRIVATE` | File Private | Only accessible within the `.cht` file where it is defined. |
+| `PRIVATE` | File Private | Only accessible within the `.clear` file where it is defined. |
 | *(None)* | Package Private | Accessible to any file in the **same directory**. |
 | `PUB` | Public | Accessible to any file that `REQUIRE`s this module or package. |
 
 ### Example
 
 ```ruby clear illustrative
-# internal_helper.cht
+# internal_helper.clear
 
 PRIVATE FN secret_calc() RETURNS Int64 -> ... END
 
@@ -72,8 +72,8 @@ END
 ```
 
 ```ruby clear illustrative
-# main.cht
-REQUIRE "internal_helper.cht";
+# main.clear
+REQUIRE "internal_helper.clear";
 
 FN main() RETURNS Void ->
     internal_helper.public_api();     # OK: PUB
@@ -97,7 +97,7 @@ CLEAR features a built-in dependency manager that handles recursive `REQUIRE` ca
 Packages are mapped to file paths at compile-time using the `--pkg` flag:
 
 ```bash
-ruby src/transpiler.rb --pkg geometry=./libs/geometry/lib.cht main.cht > main.zig
+ruby src/transpiler.rb --pkg geometry=./libs/geometry/lib.clear main.clear > main.zig
 ```
 
 ### Module Transpilation
@@ -105,7 +105,7 @@ ruby src/transpiler.rb --pkg geometry=./libs/geometry/lib.cht main.cht > main.zi
 To compile a library as a standalone Zig module (without the CLEAR runtime footer), use the `--module` flag. This is useful when building CLEAR code to be consumed by native Zig applications.
 
 ```bash
-ruby src/transpiler.rb --module my_lib.cht > my_lib.zig
+ruby src/transpiler.rb --module my_lib.clear > my_lib.zig
 ```
 
 ### How it Works
@@ -118,10 +118,10 @@ ruby src/transpiler.rb --module my_lib.cht > my_lib.zig
 
 ```text
 my_project/
-├── main.cht            # Entry point
-├── logic.cht           # Local module
+├── main.clear            # Entry point
+├── logic.clear           # Local module
 └── lib/
     └── math/
-        ├── lib.cht     # Package entry point (exports PUB symbols)
-        └── private.cht  # Internal logic (default visibility)
+        ├── lib.clear     # Package entry point (exports PUB symbols)
+        └── private.clear  # Internal logic (default visibility)
 ```

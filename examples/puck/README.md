@@ -85,7 +85,7 @@ expansion, and so on).
 
 ## The CLEAR-side reference (separate from the tutorial)
 
-Alongside V1-V11 there is a `puck.cht` written in CLEAR (this repo's
+Alongside V1-V11 there is a `puck.clear` written in CLEAR (this repo's
 in-progress production language) that prototypes a Puck-shaped parser
 directly. It exists for CLEAR-language work and is not part of the
 incremental tutorial - read the version directories for that.

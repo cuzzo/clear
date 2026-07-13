@@ -64,7 +64,7 @@ done
 echo "[devcontainer] $(date '+%H:%M:%S')  setup complete"
 echo ""
 echo "  Try it:"
-echo "    1. Open any .cht file (try transpile-tests/01_smoke.cht)"
+echo "    1. Open any .clear file (try transpile-tests/01_smoke.clear)"
 echo "    2. Squiggles, hover (mouse-over), and Ctrl+. (quick fix) all work."
 echo ""
 echo "  Run the test suite:"

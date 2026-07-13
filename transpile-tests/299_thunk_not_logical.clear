@@ -1,0 +1,24 @@
+# Thunk Phase 4f.2 -- :NOT_LOGICAL traps actual recursion at
+# runtime via the existing safety.StackGuard machinery.
+#
+# The function asserts (at runtime) the call won't recurse.
+# When the assertion holds, the call returns the value normally;
+# when it doesn't, the StackGuard raises System UnexpectedRecursion
+# which the caller can CATCH or propagate.
+
+# The shape we're guarding: a callback that COULD reach back into
+# 'apply' through indirect routes; the user asserts it won't.
+FN apply(cb: FN(Int64) -> Int64, x: Int64) RETURNS !Int64
+  EFFECTS REENTRANT:NOT_LOGICAL ->
+  RETURN cb(x);
+END
+
+FN double(x: Int64) RETURNS Int64 -> RETURN x * 2; END
+
+FN main() RETURNS Void ->
+  # Non-recursive call -- StackGuard adds + removes the entry,
+  # the inner call returns 14 normally.
+  result: Int64 = apply(double, 7) OR_ELSE EXIT System, "apply failed";
+  ASSERT result == 14_i64, "apply(double, 7) == 14";
+  RETURN;
+END

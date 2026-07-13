@@ -1,7 +1,7 @@
 # clear-lang — VS Code extension for CLEAR
 
 Syntax highlighting + Language Server integration for the CLEAR
-programming language (`.cht` files). Surfaces diagnostics, hover
+programming language (`.clear` files). Surfaces diagnostics, hover
 documentation, and quick-fix code actions in VS Code, the same way
 the Neovim setup does.
 
@@ -37,7 +37,7 @@ when you open the workspace. No manual install step needed beyond
 
 ## Verifying
 
-Open any `.cht` file. The status bar should show "CLEAR" as the
+Open any `.clear` file. The status bar should show "CLEAR" as the
 language. Open the Output panel (Ctrl+Shift+U) and select
 "CLEAR Language Server" from the dropdown — you should see startup
 log lines from the server.

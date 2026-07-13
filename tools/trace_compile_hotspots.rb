@@ -6,7 +6,7 @@ require "benchmark"
 require "optparse"
 
 root = File.expand_path("..", __dir__)
-src_root = File.join(root, "src")
+src_root = File.join(root, "compiler", "ruby")
 $LOAD_PATH.unshift(src_root)
 $LOAD_PATH.unshift(File.join(src_root, "ast"))
 $LOAD_PATH.unshift(File.join(src_root, "mir"))
@@ -21,7 +21,7 @@ require "backends/mir_emitter"
 
 options = { phase: "annotate", limit: 50 }
 OptionParser.new do |opts|
-  opts.banner = "Usage: ruby tools/trace_compile_hotspots.rb [options] path/to/file.cht"
+  opts.banner = "Usage: ruby tools/trace_compile_hotspots.rb [options] path/to/file.clear"
   opts.on("--phase NAME", "annotate, mir_pass, lower, checker") { |v| options[:phase] = v }
   opts.on("--limit N", Integer) { |v| options[:limit] = v }
 end.parse!
