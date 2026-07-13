@@ -295,6 +295,11 @@ pub struct StateRead {
     pub owner: String,
 }
 
+pub fn receiver_targets_owner(receiver: &str, owner: &str) -> bool {
+    matches!(receiver, "self" | "this" | "$this")
+        || (!owner.is_empty() && receiver == owner)
+}
+
 #[derive(Clone, Debug, Default, Deserialize, Eq, PartialEq, Serialize)]
 pub struct StateParamOrigin {
     pub field: String,

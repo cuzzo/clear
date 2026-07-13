@@ -1733,7 +1733,7 @@ fn extract_fields(document: &Document, language: &str, path: &str) -> Vec<FieldR
     };
 
     for write in &document.state_writes {
-        if !receiver_is_owner(&write.receiver, &write.owner) {
+        if !syntax::receiver_targets_owner(&write.receiver, &write.owner) {
             continue;
         }
         let name = write.field.clone();
@@ -1774,11 +1774,6 @@ fn extract_fields(document: &Document, language: &str, path: &str) -> Vec<FieldR
 
 fn field_id(language: &str, path: &str, owner: &str, name: &str) -> String {
     stable_id("state", &[language, path, owner, name])
-}
-
-fn receiver_is_owner(receiver: &str, owner: &str) -> bool {
-    matches!(receiver, "self" | "this" | "$this")
-        || (!owner.is_empty() && receiver == owner)
 }
 
 // ---------------------------------------------------------------------------
@@ -3270,7 +3265,7 @@ fn extract_state_accesses(
     let reads = document
         .state_reads
         .iter()
-        .filter(|row| receiver_is_owner(&row.receiver, &row.owner))
+        .filter(|row| syntax::receiver_targets_owner(&row.receiver, &row.owner))
         .map(|row| {
             state_access_record(
                 document,
@@ -3288,7 +3283,7 @@ fn extract_state_accesses(
     let writes = document
         .state_writes
         .iter()
-        .filter(|row| receiver_is_owner(&row.receiver, &row.owner))
+        .filter(|row| syntax::receiver_targets_owner(&row.receiver, &row.owner))
         .map(|row| {
             state_access_record(
                 document,

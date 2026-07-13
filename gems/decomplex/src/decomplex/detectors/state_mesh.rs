@@ -196,7 +196,11 @@ impl StateMesh {
         for document in documents {
             let dialect = crate::decomplex::dialect::dialect_for_document(document);
             for write in &document.state_writes {
-                let norm = self.state_identity(&write.identity, &self.normalize(&write.field, &*dialect));
+                if !syntax::receiver_targets_owner(&write.receiver, &write.owner) {
+                    continue;
+                }
+                let norm =
+                    self.state_identity(&write.identity, &self.normalize(&write.field, &*dialect));
                 self.writes.push(Write {
                     attr: write.field.clone(),
                     norm,
@@ -217,7 +221,11 @@ impl StateMesh {
         for document in documents {
             let dialect = crate::decomplex::dialect::dialect_for_document(document);
             for read in &document.state_reads {
-                let norm = self.state_identity(&read.identity, &self.normalize(&read.field, &*dialect));
+                if !syntax::receiver_targets_owner(&read.receiver, &read.owner) {
+                    continue;
+                }
+                let norm =
+                    self.state_identity(&read.identity, &self.normalize(&read.field, &*dialect));
                 if !field_norms.contains(&norm) {
                     continue;
                 }
@@ -667,6 +675,31 @@ mod tests {
     use serde_json::json;
 
     #[test]
+    fn local_receiver_members_are_not_owner_state() {
+        let document: Document = serde_json::from_value(json!({
+            "file": "parser.rb",
+            "language": "ruby",
+            "state_writes": [
+                { "field": "after_all", "receiver": "block", "file": "parser.rb", "function": "populate", "line": 3, "span": [3, 4, 3, 37], "owner": "Parser" },
+                { "field": "position", "receiver": "self", "file": "parser.rb", "function": "populate", "line": 4, "span": [4, 4, 4, 17], "owner": "Parser" }
+            ],
+            "state_reads": [
+                { "field": "before_all", "receiver": "block", "file": "parser.rb", "function": "populate", "line": 5, "span": [5, 12, 5, 28], "owner": "Parser" },
+                { "field": "position", "receiver": "self", "file": "parser.rb", "function": "populate", "line": 6, "span": [6, 4, 6, 13], "owner": "Parser" }
+            ]
+        }))
+        .unwrap();
+
+        let mut mesh = StateMesh::new(1);
+        mesh.load_document_facts(&[document]);
+        let report = mesh.to_json_graph();
+
+        assert!(report.fields.contains_key("position"));
+        assert!(!report.fields.contains_key("after_all"));
+        assert!(!report.fields.contains_key("before_all"));
+    }
+
+    #[test]
     fn test_state_mesh_gaps() {
         // 1. Test load_document_facts when field_norms.is_empty() (line 214)
         let doc_no_writes: Document = serde_json::from_value(json!({
@@ -712,8 +745,9 @@ mod tests {
 
         let mut sm = StateMesh::new(1);
         sm.load_document_facts(&[doc_conditions]);
-        // All reads had some mismatch, so none were skipped!
-        assert_eq!(sm.reads.len(), 5);
+        // The external-receiver read is not owner state. The remaining reads
+        // each differ from the write target in another dimension.
+        assert_eq!(sm.reads.len(), 4);
 
         // 3. Test find_re_derivations when field_norms.is_empty() (line 255)
         let mut sm = StateMesh::new(1);
