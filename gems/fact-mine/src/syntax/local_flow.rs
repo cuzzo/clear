@@ -505,11 +505,17 @@ impl<'a> LocalFlow<'a> {
                 }
             }
         });
-        reads.extend(textual_local_reads(
-            &ast::slice(node, &self.lines),
-            local_names,
-            writes,
-        ));
+        // Text scanning is a fallback for adapters whose normalized tree does
+        // not expose local reads. Mixing it into structural evidence lets
+        // identifiers in comments and string fragments masquerade as data
+        // dependencies even when the AST already supplied the real reads.
+        if reads.is_empty() {
+            reads.extend(textual_local_reads(
+                &ast::slice(node, &self.lines),
+                local_names,
+                writes,
+            ));
+        }
         reads.into_iter().collect()
     }
 
@@ -1207,6 +1213,49 @@ mod tests {
         };
         let reads_empty = detector.local_reads(&node_empty, &local_names, &writes);
         assert!(reads_empty.is_empty());
+    }
+
+    #[test]
+    fn structural_reads_exclude_comment_only_identifiers() {
+        let behavior = crate::syntax::ruby::behavior();
+        let detector = LocalFlow::new(
+            "foo.rb".to_string(),
+            vec!["result = caps # outer_ref is illustrative".to_string()],
+            BTreeMap::new(),
+            BTreeMap::new(),
+            behavior,
+        );
+        let rhs = Node {
+            r#type: "LVAR".to_string(),
+            children: vec![Child::Symbol("caps".to_string())],
+            first_lineno: 1,
+            first_column: 9,
+            last_lineno: 1,
+            last_column: 13,
+            text: "caps".to_string(),
+        };
+        let node = Node {
+            r#type: "LASGN".to_string(),
+            children: vec![
+                Child::Symbol("result".to_string()),
+                Child::Node(Box::new(rhs)),
+            ],
+            first_lineno: 1,
+            first_column: 0,
+            last_lineno: 1,
+            last_column: 41,
+            text: "result = caps # outer_ref is illustrative".to_string(),
+        };
+        let local_names = BTreeSet::from([
+            "caps".to_string(),
+            "outer_ref".to_string(),
+            "result".to_string(),
+        ]);
+        let writes = BTreeSet::from(["result".to_string()]);
+        let reads = detector.local_reads(&node, &local_names, &writes);
+
+        assert!(reads.contains("caps"));
+        assert!(!reads.contains("outer_ref"));
     }
 
     #[test]

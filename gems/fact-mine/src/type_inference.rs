@@ -2443,6 +2443,29 @@ impl<'a> TypeInferenceVisitor<'a> {
         extra_locals: &std::collections::BTreeMap<String, TypeExpr>,
         extra_hash_shapes: &std::collections::BTreeMap<String, serde_json::Value>,
     ) -> Option<TypeExpr> {
+        let inferred = self.static_expression_type_with_locals_and_shapes_raw(
+            node,
+            extra_locals,
+            extra_hash_shapes,
+        )?;
+
+        // A safe-navigation call may skip execution and evaluate to nil even
+        // when the invoked method's ordinary return type is concrete. Keep
+        // that control-flow alternative attached to the inferred result so a
+        // later call in the same chain cannot manufacture a non-nil proof.
+        Some(if node.r#type == "QCALL" {
+            inferred.make_nilable()
+        } else {
+            inferred
+        })
+    }
+
+    fn static_expression_type_with_locals_and_shapes_raw(
+        &self,
+        node: &crate::ast::Node,
+        extra_locals: &std::collections::BTreeMap<String, TypeExpr>,
+        extra_hash_shapes: &std::collections::BTreeMap<String, serde_json::Value>,
+    ) -> Option<TypeExpr> {
         let is_iter = node.r#type == "ITER";
         let call_node = if is_iter {
             child_node(node, 0).unwrap_or(node)

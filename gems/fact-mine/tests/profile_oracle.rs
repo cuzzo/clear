@@ -963,7 +963,12 @@ fn profile_oracle_matches_ruby_output() -> Result<()> {
 
         let document = syntax::parse_file(fixture.clone(), lang)
             .with_context(|| format!("parse {}", fixture.display()))?;
-        let actual = profile::extract(&document, Profile::Espalier);
+        let selected_profile = if stem.ends_with("_nil_kill") {
+            Profile::NilKill
+        } else {
+            Profile::Espalier
+        };
+        let actual = profile::extract(&document, selected_profile);
         let actual_json = serde_json::to_value(&actual)?;
 
         let expected: Value = serde_json::from_str(&fs::read_to_string(&oracle_path)?)?;

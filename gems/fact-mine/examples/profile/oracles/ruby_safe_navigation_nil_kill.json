@@ -1,0 +1,7 @@
+{
+  "dead_nil_checks": [
+    {
+      "code": "required.nil?"
+    }
+  ]
+}
