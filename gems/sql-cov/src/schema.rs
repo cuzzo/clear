@@ -110,7 +110,8 @@ impl SchemaCatalog {
     #[cfg(not(coverage))]
     pub async fn load_mysql(pool: &MySqlPool) -> Result<Self> {
         let rows = sqlx::query(
-            r#"SELECT table_name, column_name, is_nullable, column_key
+            r#"SELECT CAST(table_name AS CHAR), CAST(column_name AS CHAR),
+                      CAST(is_nullable AS CHAR), CAST(column_key AS CHAR)
                FROM information_schema.columns
                WHERE table_schema = DATABASE()
                ORDER BY table_name, ordinal_position"#,
@@ -120,9 +121,9 @@ impl SchemaCatalog {
         .context("inspect MySQL/MariaDB information_schema")?;
         let mut catalog = Self::default();
         for row in rows {
-            // MySQL preserves INFORMATION_SCHEMA's uppercase column labels while
-            // MariaDB commonly returns lowercase labels. Ordinals are stable for
-            // this private query and avoid a dialect/version-dependent lookup.
+            // MySQL exposes some INFORMATION_SCHEMA identifiers as VARBINARY,
+            // whereas MariaDB exposes them as character values. CAST gives SQLx
+            // one stable representation; ordinals avoid label-casing differences.
             let table_name: String = row.try_get(0)?;
             let column_name: String = row.try_get(1)?;
             let nullable_label: String = row.try_get(2)?;
