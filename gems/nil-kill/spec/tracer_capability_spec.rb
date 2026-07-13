@@ -105,9 +105,9 @@ RSpec.describe "nil-kill tracer capability matrix" do
     end
   end
 
-  it "records frame-only edges for strongly typed methods without sampling params or returns" do
+  it "prunes a typed caller without losing evidence from an unresolved callee" do
     in_tmp do |dir|
-      lib_path = lib(dir, <<~RUBY)
+      lib(dir, <<~RUBY)
         require "sorbet-runtime"
         class W
           extend T::Sig
@@ -116,7 +116,7 @@ RSpec.describe "nil-kill tracer capability matrix" do
             inner(v)
           end
 
-          sig { params(v: String).returns(String) }
+          sig { params(v: T.untyped).returns(T.untyped) }
           def inner(v)
             v.upcase
           end
@@ -126,23 +126,40 @@ RSpec.describe "nil-kill tracer capability matrix" do
       r = mini_collect(dir, "lib.rb", %(require_relative "lib"\nW.new.outer("ok")\n))
 
       expect(r[:status]).to be_success, r[:err]
-      expect(r[:instr_lib]).to include('record_source_method_call("W", "outer"')
+      expect(r[:instr_lib]).not_to include('record_source_method_call("W", "outer"')
       expect(r[:instr_lib]).to include('record_source_method_call("W", "inner"')
+      expect(r[:methods]).not_to include(a_hash_including("class" => "W", "method" => "outer"))
       expect(r[:methods]).to include(a_hash_including(
-        "class" => "W",
-        "method" => "outer",
-        "calls" => 1,
-        "ok_calls" => 1,
-        "params_by_name" => {},
-        "returns" => []
+        "class" => "W", "method" => "inner", "calls" => 1,
+        "params_by_name" => a_hash_including("v" => ["String"]),
+        "returns" => ["String"]
       ))
-      expect(r[:method_edges]).to include(a_hash_including(
-        "caller" => a_hash_including("path" => File.expand_path(lib_path), "method" => "outer"),
-        "callee" => a_hash_including("path" => File.expand_path(lib_path), "method" => "inner"),
-        "calls" => 1,
-        "ok_calls" => 1,
-        "raised_calls" => 0
+      expect(r[:method_edges]).to be_empty
+    end
+  end
+
+  it "elides resolved ivars while retaining unresolved ivar evidence" do
+    in_tmp do |dir|
+      lib(dir, <<~RUBY)
+        require "sorbet-runtime"
+        class W
+          extend T::Sig
+
+          sig { void }
+          def initialize
+            @resolved = T.let("known", String)
+            @unresolved = T.let("observed", T.untyped)
+          end
+        end
+      RUBY
+
+      r = mini_collect(dir, "lib.rb", %(require_relative "lib"\nW.new\n))
+
+      expect(r[:status]).to be_success, r[:err]
+      expect(r[:ivars]).to include(a_hash_including(
+        "class" => "W", "name" => "@unresolved", "classes" => ["String"]
       ))
+      expect(r[:ivars]).not_to include(a_hash_including("class" => "W", "name" => "@resolved"))
     end
   end
 

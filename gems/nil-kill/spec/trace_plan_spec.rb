@@ -22,6 +22,7 @@ RSpec.describe NilKill::TracePlan do
       "params" => [{ "name" => "x", "type" => "T.untyped" }]
     )
     expect(e["sample"]).to be(true)
+    expect(e["frame"]).to be(true)
   end
 
   it "samples a method whose return is T.untyped even if params are typed" do
@@ -32,6 +33,7 @@ RSpec.describe NilKill::TracePlan do
       "params" => [{ "name" => "x", "type" => "Integer" }]
     )
     expect(e["sample"]).to be(true)
+    expect(e["frame"]).to be(true)
   end
 
   it "prunes a method that is fully typed (nothing to learn) -- expected, not a bug" do
@@ -42,6 +44,7 @@ RSpec.describe NilKill::TracePlan do
       "params" => [{ "name" => "x", "type" => "Integer" }]
     )
     expect(e["sample"]).to be(false)
+    expect(e["frame"]).to be(false)
   end
 
   it "prunes a method whose ONLY untyped slot is a block param (block is ~always Proc; acceptable). The report must label such a slot arg_untraced, not never_run." do
@@ -54,5 +57,22 @@ RSpec.describe NilKill::TracePlan do
       "params" => [{ "name" => "type", "type" => "Symbol" }, { "name" => "value", "type" => "String" }]
     )
     expect(e["sample"]).to be(false)
+    expect(e["frame"]).to be(false)
+  end
+
+  it "uses T.let facts to prune resolved ivars without pruning unresolved ivars" do
+    plan = described_class.new
+    path = File.expand_path("src/worker.rb", NilKill::ROOT)
+    tlets = {
+      [path, 5] => "String",
+      [path, 6] => "T.untyped",
+    }
+
+    plan.send(:add_static_field, { "owner" => "Worker", "name" => "resolved", "path" => path, "line" => 5 }, tlets)
+    plan.send(:add_static_field, { "owner" => "Worker", "name" => "unresolved", "path" => path, "line" => 6 }, tlets)
+
+    fields = plan.instance_variable_get(:@struct_fields)
+    expect(fields[["Worker", "resolved"].join("\0")]).to be(false)
+    expect(fields[["Worker", "unresolved"].join("\0")]).to be(true)
   end
 end

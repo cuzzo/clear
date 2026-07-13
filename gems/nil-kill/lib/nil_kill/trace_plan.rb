@@ -16,11 +16,15 @@ module NilKill
     def write(path)
       files = NilKill.target_files
       unless files.empty?
-        static = StaticEvidence.build(files, root: ROOT, language: :ruby, include_annotations: false)
+        static = StaticEvidence.build(files, root: ROOT, language: :ruby, include_annotations: true)
         static.fetch("methods", []).each { |method| add_static_method(method) }
         facts = Hash(static["facts"])
-        Array(facts["tlet_sites"]).each { |site| add_tlet(site) }
+        tlet_types = Array(facts["tlet_sites"]).to_h do |site|
+          add_tlet(site)
+          [[File.expand_path(site["path"], ROOT), site["line"].to_i], site["type"]]
+        end
         Array(facts["struct_declarations"]).each { |decl| add_struct_decl(decl) }
+        static.fetch("fields", []).each { |field| add_static_field(field, tlet_types) }
         Array(facts["state_type_records"]).each { |field| add_static_state_type(field) }
       end
       FileUtils.mkdir_p(File.dirname(path))
@@ -49,11 +53,12 @@ module NilKill
       end
       return_type = NilKill.extract_return_type(method["sig"])
       sample_return = !method["sig"].to_s.include?(".void") && !NilKill.strong_trace_type?(return_type)
+      sample_method = params.values.any? || sample_return
       @methods[key] = {
-        "frame" => true,
+        "frame" => sample_method,
         "params" => params,
         "return" => sample_return,
-        "sample" => params.values.any? || sample_return,
+        "sample" => sample_method,
       }
     end
 
@@ -67,6 +72,7 @@ module NilKill
       end
       return_type = NilKill.extract_return_type(signature)
       sample_return = !signature.include?(".void") && !NilKill.strong_trace_type?(return_type)
+      sample_method = params.values.any? || sample_return
       name = method_name(method)
       key = [
         method["owner"].to_s,
@@ -76,10 +82,10 @@ module NilKill
         method["line"],
       ].join("\0")
       @methods[key] = {
-        "frame" => true,
+        "frame" => sample_method,
         "params" => params,
         "return" => sample_return,
-        "sample" => params.values.any? || sample_return,
+        "sample" => sample_method,
       }
     end
 
@@ -109,6 +115,17 @@ module NilKill
       name = field["field"].to_s.sub(/\A@/, "")
       type = field["declared_type"].to_s
       return if klass.empty? || name.empty? || type.empty?
+
+      @struct_fields[[klass, name].join("\0")] = !NilKill.strong_trace_type?(type)
+    end
+
+    def add_static_field(field, tlet_types)
+      klass = field["owner"].to_s
+      name = (field["name"] || field["field"]).to_s.sub(/\A@/, "")
+      path = File.expand_path(field["path"], ROOT)
+      type = field["declared_type"]
+      type = tlet_types[[path, field["line"].to_i]] if type.to_s.empty?
+      return if klass.empty? || name.empty? || type.to_s.empty?
 
       @struct_fields[[klass, name].join("\0")] = !NilKill.strong_trace_type?(type)
     end

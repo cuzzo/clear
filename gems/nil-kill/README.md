@@ -76,6 +76,12 @@ added without changing Nil-kill's analyzer.
 > Run `nil-kill infer` first when possible; resolving obvious static
 > types makes subsequent collects faster.
 
+Nil-Kill's trace plan omits method boundaries, T.let sites, and state fields
+whose contracts are already strong. Unknown and weak slots are retained
+conservatively, including weak generic payloads such as
+`T::Array[T.untyped]`. See [Resolved Runtime Trace Elision](docs/agents/resolved-trace-elision.md)
+for the safety boundary and CLEAR compiler measurements.
+
 > SUBPROCESSES: `nil-kill collect` instruments your target source **in place** for the duration of the collect (the pristine tree is snapshotted and restored automatically, including after a crash). There is exactly one copy of every target file, at its real path, and it is always instrumented -- so the wrapped code runs regardless of how it is loaded: `require`, `require_relative`, `Kernel#load`, autoload, an absolute-path require, a bare `ruby file.rb` entrypoint, a re-exec, or any Ruby subprocess your tests/runner spawn. Subprocess collection is therefore **in scope and guaranteed**: a method body that executes is recorded, whatever process or load path reached it. (Non-Ruby subprocesses still execute no Ruby and so produce no Ruby evidence -- there is nothing to record there.)
 
 ### How do I know how much it might help?

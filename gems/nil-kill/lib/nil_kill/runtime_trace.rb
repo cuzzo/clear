@@ -236,6 +236,24 @@ module NilKillRuntimeTrace
     false
   end
 
+  # Ordinary ivars are open-ended, unlike Struct/Data fields. A missing
+  # plan entry therefore means "not statically resolved" and must remain
+  # sampled. Only an explicit false may elide runtime observation.
+  def self.sample_state_field?(klass_name, field)
+    plan = trace_plan
+    return true unless plan
+
+    field = field.to_s.sub(/\A@/, "")
+    parts = klass_name.to_s.split("::")
+    (1..parts.length).each do |i|
+      suffix = parts[-i..-1].join("::")
+      value = plan.dig("struct_fields", [suffix, field].join("\0"))
+      return value unless value.nil?
+    end
+
+    true
+  end
+
   # In-place instrumentation: the wrapped file IS at its real src
   # path, so there is no parallel-tree remap to undo. Just expand
   # (cached). The NIL_KILL_INSTRUMENTED_ROOT translation is gone with
@@ -1687,6 +1705,9 @@ module NilKillRuntimeTrace
   def self.record_ivar_assignment(receiver, name, value, path, line)
     abs = File.expand_path(path, ROOT)
     if target_path?(abs)
+      cls = safe_module_name(receiver.class)
+      return value if cls && !sample_state_field?(cls, name)
+
       with_collection_hooks_disabled do
         @lock.synchronize do
           register_collection_owner(value, owner_kind: "ivar", name: name.to_s, path: abs, line: line)
@@ -1694,7 +1715,6 @@ module NilKillRuntimeTrace
           # contract like `.type_info` is backed by `@type_info`; the
           # Union Decomplexity report joins this to attribute the
           # producer types feeding its is_a?(Type) guards.
-          cls = safe_module_name(receiver.class)
           if cls
             rec = (@ivar_runtime[[cls, name.to_s]] ||= { calls: 0, classes: NKSet.new })
             rec[:calls] += 1
