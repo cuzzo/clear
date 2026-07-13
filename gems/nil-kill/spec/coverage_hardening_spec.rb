@@ -779,6 +779,8 @@ RSpec.describe "NilKill coverage hardening" do
         "struct_fields" => {
           ["User", "name"].join("\0") => true,
           ["User", "resolved"].join("\0") => false,
+          ["GenericParts", "generic_args_raw"].join("\0") => true,
+          ["TypeShape::GenericParts", "generic_args_raw"].join("\0") => false,
         },
       }
       FileUtils.mkdir_p(File.dirname(described_class::TRACE_PLAN_PATH))
@@ -795,6 +797,8 @@ RSpec.describe "NilKill coverage hardening" do
       expect(described_class.sample_state_field?("Models::User", "name")).to be(true)
       expect(described_class.sample_state_field?("Models::User", "resolved")).to be(false)
       expect(described_class.sample_state_field?("Models::User", "unknown")).to be(true)
+      expect(described_class.sample_struct_field?("TypeShape::GenericParts", "generic_args_raw")).to be(false)
+      expect(described_class.sample_state_field?("TypeShape::GenericParts", "generic_args_raw")).to be(false)
 
       planned = described_class.planned_methods_by_class
       expect(planned["Worker"].map { |entry| entry[:method_id] }).to eq(["targeted"])

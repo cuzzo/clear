@@ -26,6 +26,11 @@ module NilKill
         Array(facts["struct_declarations"]).each { |decl| add_struct_decl(decl) }
         static.fetch("fields", []).each { |field| add_static_field(field, tlet_types) }
         Array(facts["state_type_records"]).each { |field| add_static_state_type(field) }
+        # Flow-derived state records are intentionally conservative and may
+        # report T.untyped for assignments to a field whose declaration is
+        # already strong. The declaration is the enforceable Sorbet contract,
+        # so apply it last and let it suppress redundant runtime sampling.
+        Array(facts["type_definitions"]).each { |definition| add_static_type_definition(definition) }
       end
       FileUtils.mkdir_p(File.dirname(path))
       File.write(path, JSON.pretty_generate({
@@ -52,7 +57,7 @@ module NilKill
         params[name] = !NilKill.strong_trace_type?(type)
       end
       return_type = NilKill.extract_return_type(method["sig"])
-      sample_return = !method["sig"].to_s.include?(".void") && !NilKill.strong_trace_type?(return_type)
+      sample_return = !void_signature?(method["sig"]) && !NilKill.strong_trace_type?(return_type)
       sample_method = params.values.any? || sample_return
       @methods[key] = {
         "frame" => sample_method,
@@ -71,7 +76,7 @@ module NilKill
         [name.to_s, !NilKill.strong_trace_type?(type)]
       end
       return_type = NilKill.extract_return_type(signature)
-      sample_return = !signature.include?(".void") && !NilKill.strong_trace_type?(return_type)
+      sample_return = !void_signature?(signature) && !NilKill.strong_trace_type?(return_type)
       sample_method = params.values.any? || sample_return
       name = method_name(method)
       key = [
@@ -119,6 +124,17 @@ module NilKill
       @struct_fields[[klass, name].join("\0")] = !NilKill.strong_trace_type?(type)
     end
 
+    def add_static_type_definition(definition)
+      return unless definition["kind"].to_s == "state_field"
+
+      klass = definition["owner"].to_s
+      name = definition["name"].to_s.sub(/\A@/, "")
+      type = definition["declared_type"].to_s
+      return if klass.empty? || name.empty? || type.empty?
+
+      @struct_fields[[klass, name].join("\0")] = !NilKill.strong_trace_type?(type)
+    end
+
     def add_static_field(field, tlet_types)
       klass = field["owner"].to_s
       name = (field["name"] || field["field"]).to_s.sub(/\A@/, "")
@@ -141,6 +157,10 @@ module NilKill
       return "function" if raw == "function" || method["owner"].to_s.empty?
 
       "instance"
+    end
+
+    def void_signature?(signature)
+      signature.to_s.match?(/\bvoid\b/)
     end
   end
 end

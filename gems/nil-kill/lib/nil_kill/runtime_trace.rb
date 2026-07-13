@@ -229,9 +229,10 @@ module NilKillRuntimeTrace
     return true unless plan
     
     parts = klass_name.to_s.split("::")
-    (1..parts.length).each do |i|
+    parts.length.downto(1) do |i|
       suffix = parts[-i..-1].join("::")
-      return true if plan.dig("struct_fields", [suffix, field.to_s].join("\0")) == true
+      value = plan.dig("struct_fields", [suffix, field.to_s].join("\0"))
+      return value unless value.nil?
     end
     
     false
@@ -246,7 +247,7 @@ module NilKillRuntimeTrace
 
     field = field.to_s.sub(/\A@/, "")
     parts = klass_name.to_s.split("::")
-    (1..parts.length).each do |i|
+    parts.length.downto(1) do |i|
       suffix = parts[-i..-1].join("::")
       value = plan.dig("struct_fields", [suffix, field].join("\0"))
       return value unless value.nil?
