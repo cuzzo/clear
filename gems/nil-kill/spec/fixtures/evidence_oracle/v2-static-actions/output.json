@@ -1,0 +1,61 @@
+{
+  "actions": [
+    {
+      "schema_version": 2,
+      "id": "action-db1b74f957b5d1e4",
+      "kind": "replace_deterministic_guard",
+      "language": "python",
+      "confidence": "review",
+      "target": {
+        "path": "src/sample.py",
+        "line": 8,
+        "symbol_id": "python\u0000src/sample.py\u0000static_fact\u0000dead_nil_check\u00008\u0000value is None"
+      },
+      "path": "src/sample.py",
+      "line": 8,
+      "message": "value has a statically non-null type",
+      "preconditions": [],
+      "edits": [],
+      "data": {
+        "code": "value is None",
+        "kind": "nil_check",
+        "line": 8,
+        "path": "src/sample.py",
+        "reason": "value has a statically non-null type",
+        "operation": "replace_condition"
+      },
+      "provenance": {
+        "static_fact": "dead_nil_check"
+      }
+    },
+    {
+      "schema_version": 2,
+      "id": "action-b2412d2a8f5a671e",
+      "kind": "replace_deterministic_guard",
+      "language": "python",
+      "confidence": "review",
+      "target": {
+        "path": "src/sample.py",
+        "line": 12,
+        "symbol_id": "python\u0000src/sample.py\u0000static_fact\u0000deterministic_guard\u000012\u0000isinstance(name, str)"
+      },
+      "path": "src/sample.py",
+      "line": 12,
+      "message": "isinstance(name, str) is always true: name has static type str",
+      "preconditions": [],
+      "edits": [],
+      "data": {
+        "code": "isinstance(name, str)",
+        "line": 12,
+        "path": "src/sample.py",
+        "predicate_kind": "class_guard",
+        "proof_tier": "static_proven",
+        "reason": "name has static type str",
+        "truth_value": true
+      },
+      "provenance": {
+        "static_fact": "deterministic_guard"
+      }
+    }
+  ]
+}
