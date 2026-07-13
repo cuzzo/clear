@@ -296,8 +296,9 @@ pub struct StateRead {
 }
 
 pub fn receiver_targets_owner(receiver: &str, owner: &str) -> bool {
-    matches!(receiver, "self" | "this" | "$this")
-        || (!owner.is_empty() && receiver == owner)
+    // Language adapters normalize an explicit owner receiver to `self`.
+    // Source-language spellings must not leak into this shared predicate.
+    receiver == "self" || (!owner.is_empty() && receiver == owner)
 }
 
 #[derive(Clone, Debug, Default, Deserialize, Eq, PartialEq, Serialize)]
