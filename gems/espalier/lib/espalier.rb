@@ -1,7 +1,8 @@
 # frozen_string_literal: true
 
+require_relative "espalier/root"
+
 module Espalier
-  ROOT = File.expand_path("../../..", __dir__)
   VERSION = "0.0.1"
 end
 

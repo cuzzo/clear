@@ -4,6 +4,7 @@
 require "pathname"
 require "set"
 
+require_relative "root"
 require_relative "type_profile"
 
 module Espalier
