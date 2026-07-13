@@ -130,6 +130,18 @@ async fn nullable_subquery_output_and_postgres_all_are_detected() {
         .findings
         .iter()
         .any(|finding| finding.kind == HazardKind::NullableAnyAll));
+
+    let all_subquery = analyze_hazards(
+        "all_subquery.sql",
+        "SELECT name FROM users WHERE age = ALL (SELECT bonus FROM users);",
+        DialectName::Postgres,
+        &schema,
+    )
+    .unwrap();
+    assert!(all_subquery
+        .findings
+        .iter()
+        .any(|finding| finding.kind == HazardKind::NullableAnyAll));
 }
 
 #[tokio::test]
@@ -328,4 +340,3 @@ explore: companies {
     let sql_non_existent_prefix = "SELECT * FROM companies c JOIN employees e ON non_existent_table.some_col = e.company_id";
     let _ = analyze_hazards_with_looker("test.sql", sql_non_existent_prefix, DialectName::Sqlite, &mock_schema, &joins).unwrap();
 }
-

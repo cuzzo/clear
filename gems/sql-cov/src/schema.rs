@@ -120,10 +120,15 @@ impl SchemaCatalog {
         .context("inspect MySQL/MariaDB information_schema")?;
         let mut catalog = Self::default();
         for row in rows {
-            let table_name: String = row.try_get("table_name")?;
-            let column_name: String = row.try_get("column_name")?;
-            let primary_key = row.try_get::<String, _>("column_key")? == "PRI";
-            let nullable = row.try_get::<String, _>("is_nullable")? == "YES" && !primary_key;
+            // MySQL preserves INFORMATION_SCHEMA's uppercase column labels while
+            // MariaDB commonly returns lowercase labels. Ordinals are stable for
+            // this private query and avoid a dialect/version-dependent lookup.
+            let table_name: String = row.try_get(0)?;
+            let column_name: String = row.try_get(1)?;
+            let nullable_label: String = row.try_get(2)?;
+            let column_key: String = row.try_get(3)?;
+            let primary_key = column_key == "PRI";
+            let nullable = nullable_label == "YES" && !primary_key;
             catalog.insert_column(table_name, column_name, nullable, primary_key);
         }
         Ok(catalog)

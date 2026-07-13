@@ -779,6 +779,7 @@ fn quantified_rhs_nullability(expr: &Expr, resolver: &Resolver<'_>) -> Nullabili
             .fold(NullabilityEvidence::never(), |state, item| {
                 state.merge(nullability(item, resolver, false))
             }),
+        Expr::Subquery(query) => subquery_output_nullability(query, resolver.schema),
         _ => nullability(expr, resolver, false),
     }
 }
