@@ -27,6 +27,7 @@ module NilKillRuntimeTrace
   @tuples = {}
   @collections = {}
   @method_edges = {}
+  @loop_counts = Hash.new(0)
   @objects = {}
   @object_tokens = {}
   # Mutation coalescing: a tight loop mutating ONE object at ONE site
@@ -1426,24 +1427,33 @@ module NilKillRuntimeTrace
           child.instance_variable_set(:@__nil_kill_struct_line, loc.lineno)
         end
       end
-    end)
 
-    T::Struct.prepend(Module.new do
-      def initialize(*args, **kw, &blk)
-        super(*args, **kw, &blk)
-        class_name = NilKillRuntimeTrace.safe_module_name(self.class) || "AnonymousTStruct"
-        if self.class.respond_to?(:props)
-          self.class.props.keys.each do |field|
-            value = self.send(field) rescue nil
-            NilKillRuntimeTrace.record_struct_field(self.class, class_name, field, value)
-          end
-        else
-          kw.each do |field, value|
-            NilKillRuntimeTrace.record_struct_field(self.class, class_name, field, value)
-          end
-        end
+      # Observe construction above #initialize. Sorbet synthesizes and may
+      # replace a T::Struct subclass's initializer while its props are being
+      # declared; prepending an instance initializer to T::Struct makes that
+      # replacement illegal. Class#new is inherited through the singleton
+      # class chain and runs only after the subclass definition is complete.
+      def new(*args, **kw, &blk)
+        instance = super
+        NilKillRuntimeTrace.record_tstruct_instance(instance, kw)
+        instance
       end
     end)
+  end
+
+  def self.record_tstruct_instance(instance, keyword_values = {})
+    klass = instance.class
+    class_name = safe_module_name(klass) || "AnonymousTStruct"
+    if klass.respond_to?(:props)
+      klass.props.each_key do |field|
+        value = instance.send(field) rescue nil
+        record_struct_field(klass, class_name, field, value)
+      end
+    else
+      keyword_values.each do |field, value|
+        record_struct_field(klass, class_name, field, value)
+      end
+    end
   end
 
   def self.install_collection_hook
@@ -1453,8 +1463,7 @@ module NilKillRuntimeTrace
   end
 
   def self.record_loop_iteration(path, line)
-    @loop_file ||= File.open(File.join(OUT_DIR, "loops-#{Process.pid}.jsonl"), "a")
-    @loop_file.puts %({"path":#{path.inspect},"line":#{line}})
+    @loop_counts[[path, line]] += 1
   end
 
   # NOTE: the parallel instrumented tree and its require/require_relative
@@ -1615,37 +1624,55 @@ module NilKillRuntimeTrace
     fields = klass.members
     return if fields.empty?
     klass.instance_variable_set(:@__nil_kill_attached, true)
-    klass.prepend(Module.new do
-      define_method(:initialize) do |*args, **kw, &blk|
-        class_name = NilKillRuntimeTrace.safe_module_name(self.class) || "AnonymousStruct"
-        args.each_with_index do |arg, idx|
-          field = fields[idx]
-          break unless field
-          NilKillRuntimeTrace.record_struct_field(self.class, class_name, field, arg)
-        end
-        kw.each { |field, value| NilKillRuntimeTrace.record_struct_field(self.class, class_name, field, value) }
-        super(*args, **kw, &blk)
-      end
+    # Do not prepend #initialize. A Struct is often assigned to a constant and
+    # reopened immediately with a Sorbet-signed initializer; Sorbet cannot
+    # replace a method hidden behind a prepended module. Observing Class#new
+    # captures the same initial values after construction without constraining
+    # how the generated class may subsequently define its initializer.
+    original_new = klass.method(:new)
+    klass.define_singleton_method(:new) do |*args, **kw, &blk|
+      instance = original_new.call(*args, **kw, &blk)
+      NilKillRuntimeTrace.record_struct_instance(instance, fields)
+      instance
+    end
 
-      define_method(:[]=) do |field, value|
+    if klass.method_defined?(:[]=)
+      original_index_set = klass.instance_method(:[]=)
+      klass.define_method(:[]=) do |field, value|
         class_name = NilKillRuntimeTrace.safe_module_name(self.class) || "AnonymousStruct"
         field_sym = field.to_sym rescue nil
         if field_sym && fields.include?(field_sym)
           NilKillRuntimeTrace.record_struct_field(self.class, class_name, field_sym, value)
         end
-        super(field, value)
+        original_index_set.bind_call(self, field, value)
       end
-    end)
+    end
 
     fields.each do |field|
       setter = "#{field}="
       if !klass.method_defined?(setter) || klass.instance_method(setter).source_location.nil?
-        klass.define_method(setter) do |value|
-          class_name = NilKillRuntimeTrace.safe_module_name(self.class) || "AnonymousStruct"
-          NilKillRuntimeTrace.record_struct_field(self.class, class_name, field, value)
-          self[field] = value
-        end
+        original_setter = klass.instance_method(setter) if klass.method_defined?(setter)
+        klass.define_method(setter, struct_field_setter(field, original_setter))
       end
+    end
+  end
+
+  def self.struct_field_setter(field, original_setter)
+    proc do |value|
+      class_name = NilKillRuntimeTrace.safe_module_name(self.class) || "AnonymousStruct"
+      NilKillRuntimeTrace.record_struct_field(self.class, class_name, field, value)
+      if original_setter
+        original_setter.bind_call(self, value)
+      else
+        self[field] = value
+      end
+    end
+  end
+
+  def self.record_struct_instance(instance, fields)
+    class_name = safe_module_name(instance.class) || "AnonymousStruct"
+    fields.each do |field|
+      record_struct_field(instance.class, class_name, field, instance[field])
     end
   end
 
@@ -1658,18 +1685,15 @@ module NilKillRuntimeTrace
     fields = klass.respond_to?(:members) ? klass.members : []
     return if fields.empty?
     klass.instance_variable_set(:@__nil_kill_attached, true)
-    klass.prepend(Module.new do
-      define_method(:initialize) do |*args, **kw, &blk|
-        class_name = NilKillRuntimeTrace.safe_module_name(self.class) || "AnonymousData"
-        args.each_with_index do |arg, idx|
-          field = fields[idx]
-          break unless field
-          NilKillRuntimeTrace.record_struct_field(self.class, class_name, field, arg)
-        end
-        kw.each { |field, value| NilKillRuntimeTrace.record_struct_field(self.class, class_name, field, value) }
-        super(*args, **kw, &blk)
+    original_new = klass.method(:new)
+    klass.define_singleton_method(:new) do |*args, **kw, &blk|
+      instance = original_new.call(*args, **kw, &blk)
+      class_name = NilKillRuntimeTrace.safe_module_name(instance.class) || "AnonymousData"
+      fields.each do |field|
+        NilKillRuntimeTrace.record_struct_field(instance.class, class_name, field, instance.public_send(field))
       end
-    end)
+      instance
+    end
   end
 
   def self.record_open_struct(instance)
@@ -1871,6 +1895,11 @@ module NilKillRuntimeTrace
           value_shapes: rec[:value_shapes].to_a.sort.map { |shape| shape_payload(shape) },
           mutation_sites: rec[:mutation_sites].sort_by { |site, count| [-count, site.to_s] }.to_h,
         )
+      end
+    end
+    File.open(File.join(OUT_DIR, "loops-#{pid}.jsonl"), "w") do |file|
+      @loop_counts.each do |(path, line), count|
+        file.puts JSON.generate(path: path, line: line, count: count)
       end
     end
     dump_coverage(pid)

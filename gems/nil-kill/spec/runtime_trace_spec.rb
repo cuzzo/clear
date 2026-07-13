@@ -122,6 +122,89 @@ RSpec.describe "nil-kill runtime trace" do
     end
   end
 
+  it "observes T::Struct construction without blocking Sorbet's generated initializer" do
+    Dir.mktmpdir("nil-kill-runtime-tstruct", NilKill::ROOT) do |dir|
+      source = File.join(dir, "sample.rb")
+      File.write(source, <<~RUBY)
+        require "sorbet-runtime"
+
+        class RuntimeRecord < T::Struct
+          const :name, String
+          const :payload, T.untyped
+        end
+
+        record = RuntimeRecord.new(name: "typed", payload: 42)
+        abort "bad construction" unless record.name == "typed"
+      RUBY
+
+      trace_tmp = File.join(dir, "trace-tmp")
+      trace_dir = File.join(trace_tmp, "runtime")
+      tracer = File.join(NilKill::ROOT, "gems", "nil-kill", "lib", "nil_kill", "runtime_trace.rb")
+      env = {
+        "NIL_KILL_TRACE" => "1",
+        "NIL_KILL_TRACE_METHODS" => "1",
+        "NIL_KILL_TMP_DIR" => trace_tmp,
+        "NIL_KILL_TARGETS" => dir,
+        "RUBYOPT" => "-r#{tracer}",
+      }
+
+      _out, err, status = Open3.capture3(env, "bundle", "exec", "ruby", source, chdir: NilKill::ROOT)
+
+      expect(status).to be_success, err
+      struct_events = Dir.glob(File.join(trace_dir, "structs-*.jsonl")).flat_map do |path|
+        File.readlines(path, chomp: true).map { |line| JSON.parse(line) }
+      end
+      expect(struct_events).to include(
+        a_hash_including("class" => "RuntimeRecord", "field" => "name", "classes" => include("String")),
+        a_hash_including("class" => "RuntimeRecord", "field" => "payload", "classes" => include("Integer"))
+      )
+    end
+  end
+
+  it "observes a Struct that is reopened with a Sorbet-signed initializer" do
+    Dir.mktmpdir("nil-kill-runtime-reopened-struct", NilKill::ROOT) do |dir|
+      source = File.join(dir, "sample.rb")
+      File.write(source, <<~RUBY)
+        require "sorbet-runtime"
+
+        RuntimePlainRecord = Struct.new(:name, keyword_init: true)
+        class RuntimePlainRecord
+          extend T::Sig
+
+          sig { params(name: String).void }
+          def initialize(name:)
+            super
+          end
+        end
+
+        record = RuntimePlainRecord.new(name: "typed")
+        record.name = "updated"
+        abort "bad construction" unless record.name == "updated"
+      RUBY
+
+      trace_tmp = File.join(dir, "trace-tmp")
+      trace_dir = File.join(trace_tmp, "runtime")
+      tracer = File.join(NilKill::ROOT, "gems", "nil-kill", "lib", "nil_kill", "runtime_trace.rb")
+      env = {
+        "NIL_KILL_TRACE" => "1",
+        "NIL_KILL_TRACE_METHODS" => "1",
+        "NIL_KILL_TMP_DIR" => trace_tmp,
+        "NIL_KILL_TARGETS" => dir,
+        "RUBYOPT" => "-r#{tracer}",
+      }
+
+      _out, err, status = Open3.capture3(env, "bundle", "exec", "ruby", source, chdir: NilKill::ROOT)
+
+      expect(status).to be_success, err
+      struct_events = Dir.glob(File.join(trace_dir, "structs-*.jsonl")).flat_map do |path|
+        File.readlines(path, chomp: true).map { |line| JSON.parse(line) }
+      end
+      name_events = struct_events.select { |event| event["class"] == "RuntimePlainRecord" && event["field"] == "name" }
+      expect(name_events).not_to be_empty
+      expect(name_events.flat_map { |event| event.fetch("classes") }).to include("String")
+    end
+  end
+
   it "does not force autoloaded constants from the Struct/Data const hook" do
     Dir.mktmpdir("nil-kill-runtime-autoload", NilKill::ROOT) do |dir|
       source = File.join(dir, "sample.rb")
@@ -792,5 +875,19 @@ RSpec.describe "nil-kill runtime trace" do
       )
       expect(instrumented).not_to include("MARKER = __LINE__")
     end
+  end
+
+
+  it "aggregates hot-loop counts in memory instead of writing one row per iteration" do
+    require_relative "../lib/nil_kill/runtime_trace"
+    path = File.join(NilKill::ROOT, "src", "hot_loop.rb")
+    key = [path, 17]
+    counts = NilKillRuntimeTrace.instance_variable_get(:@loop_counts)
+    before = counts[key]
+
+    10_000.times { NilKillRuntimeTrace.record_loop_iteration(path, 17) }
+
+    expect(counts[key] - before).to eq(10_000)
+    expect(NilKillRuntimeTrace.instance_variable_defined?(:@loop_file)).to be(false)
   end
 end

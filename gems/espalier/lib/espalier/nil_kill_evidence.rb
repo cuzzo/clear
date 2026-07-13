@@ -131,7 +131,7 @@ module Espalier
           path = data["path"]
           line_num = data["line"]&.to_i
           if path && line_num
-            @loop_counts[path][line_num] += 1
+            @loop_counts[path][line_num] += Integer(data.fetch("count", 1))
           end
         end
       end
