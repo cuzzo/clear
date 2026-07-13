@@ -323,8 +323,23 @@ fn normalize_for_oracle(value: &Value, expected: &Value) -> Value {
             });
             Value::Array(normalized)
         }
+        (Value::String(actual), Value::String(_)) => {
+            Value::String(normalize_opaque_id(actual))
+        }
         _ => value.clone(),
     }
+}
+
+/// Profile IDs deliberately hash the source path and therefore differ across
+/// checkouts. The oracle verifies the semantic record and the ID namespace;
+/// exact hash stability belongs in a unit test with a fixed synthetic path.
+fn normalize_opaque_id(value: &str) -> String {
+    for prefix in ["owner:", "fn:", "state:", "edge:"] {
+        if value.starts_with(prefix) {
+            return format!("{prefix}<opaque>");
+        }
+    }
+    value.to_string()
 }
 
 #[test]
