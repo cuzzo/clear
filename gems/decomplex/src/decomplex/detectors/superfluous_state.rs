@@ -26,6 +26,15 @@ pub fn scan_files(files: &[PathBuf], language: Language) -> Result<Vec<Superfluo
 }
 
 pub fn scan_documents(documents: &[Document]) -> Vec<SuperfluousStateFinding> {
+    // A state read through another object's public accessor is not represented
+    // as an owner-local state read. Without points-to proof, a same-named
+    // external message is enough to make a `dead_state` verdict unsound.
+    let external_accessor_messages: BTreeSet<String> = documents
+        .iter()
+        .flat_map(|document| document.call_sites.iter())
+        .filter(|call| call.receiver != "self")
+        .map(|call| call.message.clone())
+        .collect();
     let semantic_aliases = semantic_alias::scan_documents(documents);
     let sm_report = state_mesh::scan_documents_with_semantic_aliases_and_min_writes(
         documents,
@@ -59,6 +68,7 @@ pub fn scan_documents(documents: &[Document]) -> Vec<SuperfluousStateFinding> {
             && !self_writes.iter().any(|writer| {
                 opaque_state_escapes.contains(&(writer.file.clone(), writer.defn.clone()))
             })
+            && !external_accessor_messages.contains(norm)
         {
             results.push(SuperfluousStateFinding {
                 field: norm.clone(),
@@ -392,6 +402,27 @@ mod tests {
         assert!(
             findings.is_empty(),
             "opaque aggregate call is a possible read: {findings:?}"
+        );
+    }
+
+    #[test]
+    fn external_accessor_calls_disqualify_dead_state() {
+        let doc: Document = serde_json::from_value(json!({
+            "file": "context.rb",
+            "language": "ruby",
+            "state_writes": [
+                { "field": "alloc_count", "receiver": "self", "file": "context.rb", "function": "initialize", "line": 5, "span": [5, 1, 5, 10], "owner": "Context" }
+            ],
+            "state_reads": [],
+            "call_sites": [
+                { "receiver": "ctx", "message": "alloc_count", "file": "consumer.rb", "function": "finish", "owner": "Consumer", "line": 8, "span": [8, 1, 8, 16], "conditional": false, "arguments": [], "control": null, "safe_navigation": false, "block": false }
+            ]
+        })).unwrap();
+
+        let findings = scan_documents(&[doc]);
+        assert!(
+            findings.iter().all(|finding| finding.field != "alloc_count"),
+            "a public accessor read must prevent a dead-state verdict"
         );
     }
 }

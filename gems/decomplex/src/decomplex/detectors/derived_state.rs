@@ -212,6 +212,23 @@ fn analyze(method: &MethodSummary, asgns: &[Asgn]) -> Vec<DerivedStateRow> {
                 continue;
             }
 
+            // `snapshot = state; state = temporary; state = snapshot` is a
+            // scoped restoration protocol. The snapshot is intentionally read
+            // after mutation and is not a stale cache of the temporary state.
+            let restored_from_snapshot = asgns.iter().skip(i + 1).any(|x| {
+                &x.name == a && x.deps.iter().any(|dependency| dependency == &b.name)
+            });
+            if restored_from_snapshot {
+                continue;
+            }
+
+            let reassignment_reads_derived = method.statements.iter().any(|statement| {
+                statement.index == reasn.statement_index && statement.reads.contains(&b.name)
+            });
+            if reassignment_reads_derived {
+                continue;
+            }
+
             // Is the derived variable b read at or after a's reassignment?
             let is_read_after_reasn = method
                 .statements
@@ -508,5 +525,39 @@ mod tests {
 
         let res = scan_summaries(&[m_non_local]);
         assert_eq!(res.len(), 1);
+    }
+
+    #[test]
+    fn state_snapshot_restoration_is_not_staleness() {
+        let method: MethodSummary = serde_json::from_value(json!({
+            "id": "10", "owner": "T", "name": "with_state", "file": "state.rb", "line": 1, "span": [1,0,10,0],
+            "statements": [
+                { "index": 0, "line": 2, "end_line": 2, "span": [2,0,2,20], "source": "previous = @state", "reads": ["state"], "writes": ["previous"], "dependencies": [["previous", "state"]], "co_uses": [] },
+                { "index": 1, "line": 3, "end_line": 3, "span": [3,0,3,20], "source": "@state = replacement", "reads": ["replacement"], "writes": ["state"], "dependencies": [["state", "replacement"]], "co_uses": [] },
+                { "index": 2, "line": 5, "end_line": 5, "span": [5,0,5,20], "source": "@state = previous", "reads": ["previous"], "writes": ["state"], "dependencies": [["state", "previous"]], "co_uses": [] }
+            ], "boundaries": []
+        })).unwrap();
+
+        assert!(
+            scan_summaries(&[method]).is_empty(),
+            "save/mutate/restore is a scoped state guard, not a stale derived value"
+        );
+    }
+
+    #[test]
+    fn derived_guard_driving_normalization_is_not_staleness() {
+        let method: MethodSummary = serde_json::from_value(json!({
+            "id": "11", "owner": "T", "name": "normalize", "file": "state.rb", "line": 1, "span": [1,0,10,0],
+            "statements": [
+                { "index": 0, "line": 2, "end_line": 2, "span": [2,0,2,30], "source": "wrapped = state.optional?", "reads": ["state"], "writes": ["wrapped"], "dependencies": [["wrapped", "state"]], "co_uses": [] },
+                { "index": 1, "line": 3, "end_line": 3, "span": [3,0,3,35], "source": "state = unwrap(state) if wrapped", "reads": ["state", "wrapped"], "writes": ["state"], "dependencies": [["state", "state"]], "co_uses": [] },
+                { "index": 2, "line": 4, "end_line": 4, "span": [4,0,4,20], "source": "use(wrapped)", "reads": ["wrapped"], "writes": [], "dependencies": [], "co_uses": [] }
+            ], "boundaries": []
+        })).unwrap();
+
+        assert!(
+            scan_summaries(&[method]).is_empty(),
+            "a predicate that controls source normalization is intentionally retained"
+        );
     }
 }
