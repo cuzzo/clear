@@ -632,6 +632,78 @@ end
 }
 
 #[test]
+fn nil_kill_return_flow_ignores_escape_into_noreturn_branch() -> Result<()> {
+    use std::io::Write;
+
+    let mut source = tempfile::Builder::new().suffix(".rb").tempfile()?;
+    source.write_all(
+        br#"
+class Parser
+  extend T::Sig
+
+  sig { returns(Token) }
+  def current
+    T.must(@tokens[0])
+  end
+
+  sig { params(token: Token).returns(T.noreturn) }
+  def fail!(token)
+    raise token.to_s
+  end
+
+  sig { params(ok: T::Boolean).returns(T.nilable(Token)) }
+  def consume(ok)
+    token = current
+    if ok
+      if token.to_s.empty?
+        fail!(token)
+      end
+      token.to_s
+      token
+    else
+      fail!(token)
+    end
+  end
+
+  sig { params(value: String).returns(String) }
+  def validated(value)
+    if value.is_a?(String)
+      value
+    else
+      raise "invalid"
+    end
+  end
+end
+"#,
+    )?;
+    let document = syntax::parse_file(source.path().to_path_buf(), Language::Ruby)?;
+    let output = profile::extract(&document, Profile::NilKill);
+    let origin = output
+        .return_origins
+        .iter()
+        .find(|record| record["method"] == "consume")
+        .context("missing consume return origin")?;
+
+    assert_eq!(origin["candidate_type"], serde_json::json!({
+        "kind": "Primitive",
+        "data": "Token",
+    }), "{origin:#}");
+    assert_eq!(origin["confidence"], "strong");
+    assert_eq!(origin["blockers"], serde_json::json!([]));
+    assert_eq!(
+        output
+            .deterministic_guards
+            .iter()
+            .filter(|record| record["method"] == "validated")
+            .count(),
+        1,
+        "prepasses must not duplicate emitted facts"
+    );
+
+    Ok(())
+}
+
+#[test]
 fn nil_kill_all_profile_examples_extract_successfully() -> Result<()> {
     let mut method_count = 0;
     for entry in fs::read_dir(examples_dir())? {

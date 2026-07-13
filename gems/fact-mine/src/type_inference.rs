@@ -1512,6 +1512,9 @@ impl<'a> TypeInferenceVisitor<'a> {
     }
 
     fn inspect_branch_guard(&mut self, node: &crate::ast::Node, inverted: bool) {
+        if self.is_prepass {
+            return;
+        }
         let Some(predicate) = child_node(node, 0) else {
             return;
         };
@@ -2513,6 +2516,14 @@ impl<'a> TypeInferenceVisitor<'a> {
             let key = (class_name, callee.clone());
             if let Some(ty) = self.inferred_return_types.get(&key) {
                 return Some(ty.clone());
+            }
+            // An unqualified call targets the current owner. Its declared
+            // return remains authoritative when the callee body itself is
+            // too dynamic to infer (for example, a typed collection lookup).
+            if receiver.is_none() {
+                if let Some(ty) = self.known_return_type(&callee) {
+                    return Some(ty);
+                }
             }
 
             if let Some(ty) = self.behavior.static_call_return_type(node, &callee, receiver_type.as_ref().map(|t| t.to_sorbet_string()).as_deref()) {
@@ -3792,6 +3803,11 @@ impl<'a> TypeInferenceVisitor<'a> {
                 return;
             }
             if node.r#type == "CALL" || node.r#type == "QCALL" || node.r#type == "FCALL" || node.r#type == "VCALL" {
+                // Passing a local to a call that cannot return does not let the
+                // value escape onto any continuing control-flow path.
+                if self.noreturn_call(node) {
+                    return;
+                }
                 let opt_method = match node.r#type.as_str() {
                     "VCALL" | "FCALL" => node_symbol(node),
                     "CALL" | "QCALL" => match_call(node).map(|(_, method, _)| method),
@@ -3827,23 +3843,26 @@ impl<'a> TypeInferenceVisitor<'a> {
                     (child.r#type == "LVAR" || child.r#type == "DVAR")
                         && node_symbol(child).as_deref() == Some(name)
                 }) {
-                    let mut is_recursive_arg_list = false;
+                    let mut is_non_escaping_arg_list = false;
                     if let Some(parent) = self.find_parent(root, node) {
                         if parent.r#type == "FCALL" || parent.r#type == "VCALL" {
                             if let Some(callee) = node_symbol(parent) {
                                 if self.current_method.as_ref() == Some(&callee) {
-                                    is_recursive_arg_list = true;
+                                    is_non_escaping_arg_list = true;
                                 }
                             }
                         } else if parent.r#type == "CALL" || parent.r#type == "QCALL" {
                             if let Some((_, callee, _)) = match_call(parent) {
                                 if self.current_method.as_ref() == Some(&callee) {
-                                    is_recursive_arg_list = true;
+                                    is_non_escaping_arg_list = true;
                                 }
                             }
                         }
+                        if self.noreturn_call(parent) {
+                            is_non_escaping_arg_list = true;
+                        }
                     }
-                    if !is_recursive_arg_list {
+                    if !is_non_escaping_arg_list {
                         escapes = true;
                     }
                 }
