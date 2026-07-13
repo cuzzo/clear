@@ -291,8 +291,8 @@ fn test_sqlfluff_sarif_merging_and_tiering() {
                   "properties": {}
                 },
                 {
-                  "id": "CV02",
-                  "name": "convention.coalesce",
+                  "id": "AM09",
+                  "name": "ambiguous.order_by_limit",
                   "properties": {}
                 },
                 {
@@ -310,8 +310,8 @@ fn test_sqlfluff_sarif_merging_and_tiering() {
               "properties": {}
             },
             {
-              "ruleId": "CV02",
-              "message": { "text": "Use COALESCE instead." },
+              "ruleId": "AM09",
+              "message": { "text": "LIMIT has no ORDER BY." },
               "properties": {}
             },
             {
@@ -328,13 +328,14 @@ fn test_sqlfluff_sarif_merging_and_tiering() {
     
     // Verify that the rules and results are successfully merged
     assert!(sarif_output.contains("AM05"));
-    assert!(sarif_output.contains("CV02"));
+    assert!(sarif_output.contains("AM09"));
     assert!(sarif_output.contains("LT01"));
     
     // Verify that the correct tiers are assigned
-    assert!(sarif_output.contains(r#""tier": "T1""#)); // SQL-cov findings and AM05
-    assert!(sarif_output.contains(r#""tier": "T2""#)); // CV02
-    assert!(sarif_output.contains(r#""tier": "T3""#)); // LT01
+    assert!(sarif_output.contains(r#""tier": "T2""#)); // AM09 is an advisory ambiguity
+    assert!(sarif_output.contains(r#""tier": "T3""#)); // AM05 and LT01 are style notes
+    assert!(sarif_output.contains(r#""level": "warning""#));
+    assert!(sarif_output.contains(r#""level": "note""#));
 }
 
 #[test]
@@ -375,4 +376,3 @@ fn test_generate_check_logic() {
     assert_eq!(matched_targets[0].0, "users");
     assert_eq!(matched_targets[0].1, "age");
 }
-

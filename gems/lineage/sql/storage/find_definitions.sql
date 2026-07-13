@@ -19,4 +19,5 @@ SELECT u.id,
                OR u.name LIKE '%.' || ?1
                OR u.name LIKE '%::' || ?1
                OR u.name LIKE '%#' || ?1
+            ORDER BY u.id
             LIMIT 100

@@ -41,19 +41,19 @@ WITH commit_snapshots AS (
               SELECT path, source, tool_name, rule_id, fingerprint FROM previous_findings
             )
             SELECT
-              COALESCE(SUM(CASE WHEN current.fingerprint IS NOT NULL AND previous.fingerprint IS NULL THEN 1 ELSE 0 END), 0),
-              COALESCE(SUM(CASE WHEN current.fingerprint IS NULL AND previous.fingerprint IS NOT NULL THEN 1 ELSE 0 END), 0),
-              COALESCE(SUM(CASE WHEN current.fingerprint IS NOT NULL AND previous.fingerprint IS NOT NULL THEN 1 ELSE 0 END), 0)
-            FROM all_keys key
-            LEFT JOIN current_findings current
-              ON current.path = key.path
-             AND current.source = key.source
-             AND current.tool_name = key.tool_name
-             AND current.rule_id = key.rule_id
-             AND current.fingerprint = key.fingerprint
-            LEFT JOIN previous_findings previous
-              ON previous.path = key.path
-             AND previous.source = key.source
-             AND previous.tool_name = key.tool_name
-             AND previous.rule_id = key.rule_id
-             AND previous.fingerprint = key.fingerprint
+              COALESCE(SUM(CASE WHEN current_finding.fingerprint IS NOT NULL AND previous_finding.fingerprint IS NULL THEN 1 ELSE 0 END), 0),
+              COALESCE(SUM(CASE WHEN current_finding.fingerprint IS NULL AND previous_finding.fingerprint IS NOT NULL THEN 1 ELSE 0 END), 0),
+              COALESCE(SUM(CASE WHEN current_finding.fingerprint IS NOT NULL AND previous_finding.fingerprint IS NOT NULL THEN 1 ELSE 0 END), 0)
+            FROM all_keys finding_key
+            LEFT JOIN current_findings current_finding
+              ON current_finding.path = finding_key.path
+             AND current_finding.source = finding_key.source
+             AND current_finding.tool_name = finding_key.tool_name
+             AND current_finding.rule_id = finding_key.rule_id
+             AND current_finding.fingerprint = finding_key.fingerprint
+            LEFT JOIN previous_findings previous_finding
+              ON previous_finding.path = finding_key.path
+             AND previous_finding.source = finding_key.source
+             AND previous_finding.tool_name = finding_key.tool_name
+             AND previous_finding.rule_id = finding_key.rule_id
+             AND previous_finding.fingerprint = finding_key.fingerprint

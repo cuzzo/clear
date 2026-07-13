@@ -141,7 +141,6 @@ SELECT COALESCE(le.start_line, 1) AS current_start,
             WHERE t.unit_id = e.unit_id
               AND t.timestamp > e.timestamp
               AND t.is_mutation_killed = 1
-            LIMIT 1
           )
          THEN 0.25
          ELSE 1.0

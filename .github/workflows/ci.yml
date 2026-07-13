@@ -1479,8 +1479,7 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y z3
       - name: Install SQLFluff
-        run: |
-          pip install sqlfluff
+        run: pip install sqlfluff==4.2.2
       - uses: dtolnay/rust-toolchain@stable
       - uses: actions/setup-go@v5
         with:
@@ -1547,6 +1546,11 @@ jobs:
             --out-dir=tmp/generalized-gems-sarif \
             --setup=gems/lineage/sql/storage/init_schema.sql \
             --sql-cov-bin=./gems/sql-cov/target/release/sql-cov
+          ./tools/generate_sqlfluff_sarif.rb \
+            --repo=. \
+            --out-dir=tmp/generalized-gems-sarif \
+            --config=.sqlfluff \
+            --sql-path=gems/lineage/sql
       - name: Upload Decomplex SARIF
         uses: github/codeql-action/upload-sarif@v4
         with:
@@ -1577,6 +1581,11 @@ jobs:
         with:
           sarif_file: tmp/generalized-gems-sarif/sql-cov.sarif
           category: sql-cov
+      - name: Upload SQLFluff SARIF
+        uses: github/codeql-action/upload-sarif@v4
+        with:
+          sarif_file: tmp/generalized-gems-sarif/sqlfluff.sarif
+          category: sqlfluff
       - uses: actions/upload-artifact@v4
         with:
           name: generalized-gems-sarif

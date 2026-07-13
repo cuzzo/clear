@@ -5,6 +5,7 @@ require "fileutils"
 require "json"
 require "open3"
 require "optparse"
+require "tempfile"
 
 ROOT = File.expand_path("..", __dir__)
 
@@ -40,24 +41,48 @@ warn "Found #{sql_files.size} SQL files to scan"
 rules = {}
 results = []
 all_unresolved = []
+scanned_files = 0
+skipped_non_query_files = []
+scan_failures = []
 
 sql_files.each do |file|
   rel_path = file.sub("#{repo}/", "")
+  source = File.read(file)
+  statement = source.lines.reject { |line| line.lstrip.start_with?("--") }.join("\n").lstrip
+  if %w[PRAGMA CREATE DROP].any? { |keyword| statement.start_with?(keyword) }
+    skipped_non_query_files << rel_path
+    next
+  end
+
+  normalized_file = nil
+  input_file = file
+  if source.include?("{column}")
+    normalized_file = Tempfile.new(["sql-cov-normalized-", ".sql"])
+    normalized_file.write(source.gsub("{column}", "current_line_cov"))
+    normalized_file.flush
+    input_file = normalized_file.path
+  end
+
   cmd = [
     sql_cov_bin,
     "hazards",
-    "--input", file,
+    "--input", input_file,
     "--setup", setup_file,
     "--dialect", "sqlite",
-    "--format", "sarif",
-    "--sqlfluff"
+    "--format", "sarif"
   ]
   
-  stdout, stderr, status = Open3.capture3(*cmd)
+  begin
+    stdout, stderr, status = Open3.capture3(*cmd)
+  ensure
+    normalized_file&.close!
+  end
   unless status.success?
     warn "Failed to scan #{rel_path}: #{stderr}"
+    scan_failures << "#{rel_path}: #{stderr.strip}"
     next
   end
+  scanned_files += 1
 
   begin
     sarif_doc = JSON.parse(stdout)
@@ -65,11 +90,17 @@ sql_files.each do |file|
     if run
       # Extract rules
       run["tool"]&.[]("driver")&.[]("rules")&.each do |rule|
+        rule["defaultConfiguration"] = { "level" => "warning" }
         rules[rule["id"]] = rule
       end
       
       # Extract results
       run["results"]&.each do |result|
+        # Native SQL-COV hazards are advisory in this repository. SQLFluff is
+        # intentionally not requested above: its SARIF labels every lint and
+        # formatting result as an error, which makes GitHub treat style debt as
+        # a correctness gate.
+        result["level"] = "warning"
         # Fix file URI paths to be relative for GitHub actions
         if result["locations"]
           result["locations"].each do |loc|
@@ -88,7 +119,13 @@ sql_files.each do |file|
     end
   rescue => e
     warn "Failed to parse sql-cov output for #{rel_path}: #{e.message}"
+    scan_failures << "#{rel_path}: invalid SQL-COV SARIF: #{e.message}"
   end
+end
+
+all_unresolved = all_unresolved.sort.uniq
+unless scan_failures.empty?
+  abort "SQL-COV failed to scan #{scan_failures.size} files:\n- #{scan_failures.join("\n- ")}"
 end
 
 # Build master SARIF document
@@ -108,7 +145,9 @@ sarif_doc = {
     "properties" => {
       "format" => "sql-cov/hazard/sarif",
       "dialect" => "sqlite",
-      "unresolvedSchemaFacts" => all_unresolved
+      "unresolvedSchemaFacts" => all_unresolved,
+      "scannedFiles" => scanned_files,
+      "skippedNonQueryFiles" => skipped_non_query_files
     }
   }]
 }
@@ -136,6 +175,20 @@ else
     tier = res["properties"]&.[]("tier") || "T1"
     md_content << "| `#{file}` | #{line} | `#{expr}` | **#{hazard}** | #{msg} | #{tier} |\n"
   end
+end
+
+
+md_content << "\n## Analysis Completeness\n\n"
+md_content << "SQL-COV analyzed #{scanned_files} query files and skipped " \
+              "#{skipped_non_query_files.size} non-query SQL files.\n\n"
+if all_unresolved.empty?
+  md_content << "SQL-COV resolved every schema fact needed by this scan.\n"
+else
+  md_content << "SQL-COV reported #{all_unresolved.size} unresolved schema facts. " \
+                "These are analyzer-completeness gaps, not SQL findings.\n\n"
+  md_content << "<details>\n<summary>Unresolved schema facts</summary>\n\n"
+  all_unresolved.each { |fact| md_content << "- #{fact}\n" }
+  md_content << "\n</details>\n"
 end
 File.write(md_path, md_content)
 warn "Wrote #{md_path}"
