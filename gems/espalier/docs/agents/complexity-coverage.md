@@ -25,12 +25,27 @@ The low complete-total percentage is not a regression in structural analysis. It
 
 | Known runtime component | Functions |
 | --- | ---: |
-| O(1) | 4,254 |
-| O(N) | 1,181 |
-| O(N log N) | 12 |
-| O(N²) | 124 |
-| O(N³) | 2 |
+| O(1) | 4,049 |
+| O(N) | 944 |
+| O(N log N) | 6 |
+| O(N²) | 18 |
+| O(N³) | 1 |
 | structurally unknown | 5 |
+
+The remaining known components are now represented as multivariate polynomials
+rather than being collapsed onto one anonymous `N`. In particular:
+
+- 1,480 functions have at least one named size domain.
+- 140 functions have a known component containing a product of independent
+  domains; 42 are exactly `O(N*M)` and three are exactly `O(N^2*M)`.
+- Espalier emitted 3,677 complexity-variable records. All 3,677 link their
+  display symbol back to a semantic domain id and a source path/span.
+
+`N`, `M`, and subsequent letters are display names only. Rendering assigns them
+first to factors in the highest-degree term, then by greatest exponent, and
+orders factors canonically. It therefore shows `O(N*M + K)`, not `O(M*K + N)`,
+and `O(N^2*M)`, never `O(N*M^2)`. The source-linked variable table preserves
+which program input each symbol denotes.
 
 The former report had 953 `unknown` results, but those figures were lower bounds presented as totals. They must not be compared directly with the new authoritative-total count.
 
@@ -52,7 +67,9 @@ New evidence emitted by FactMine:
 - visited-set guarded structural-recursion facts.
 - argument size-change facts used to prove the safe, single-branch subset of mutually recursive components.
 
-Known components propagate through incomplete callees. For example, the receiver-state golden regression retains its proven O(N³) component while its authoritative total remains unknown if arbitrary leaf work is unresolved.
+Known components propagate through incomplete callees. For example, the
+receiver-state golden regression retains its proven `O(N*M*K)` component while
+its authoritative total remains unknown if arbitrary leaf work is unresolved.
 
 ## Architecture boundary
 
@@ -65,5 +82,5 @@ The dominant remaining gap is receiver/callee resolution, not loop or recursion 
 ## Verification
 
 - FactMine: 272 unit tests plus 20 integration/oracle tests passed.
-- FactMine line coverage: 95.27% overall; the changed `syntax/complexity_facts.rs` pass is 96.91% line-covered.
+- FactMine line coverage: 95.27% overall; the changed `syntax/complexity_facts.rs` pass is 96.85% line-covered.
 - Every Espalier test file, including the cross-layer Big-O golden corpus, passed.

@@ -25,9 +25,39 @@ pub struct MethodComplexityFacts {
     pub allocations: Vec<AllocationFact>,
     pub call_contexts: Vec<CallContainmentFact>,
     #[serde(default)]
+    pub size_domains: Vec<SizeDomainFact>,
+    #[serde(default)]
     pub block_invocations: Vec<BlockInvocationFact>,
     #[serde(default)]
     pub deferred_regions: Vec<DeferredRegionFact>,
+}
+
+#[derive(Clone, Debug, Deserialize, Eq, Ord, PartialEq, PartialOrd, Serialize)]
+pub struct SizeDomainFact {
+    pub id: String,
+    pub name: String,
+    pub source_kind: String,
+    pub path: String,
+    pub span: [usize; 4],
+}
+
+#[derive(Clone, Debug, Deserialize, Eq, Ord, PartialEq, PartialOrd, Serialize)]
+pub struct ComplexityFactorFact {
+    pub domain_id: String,
+    pub exponent: usize,
+}
+
+#[derive(Clone, Debug, Default, Deserialize, Eq, PartialEq, Serialize)]
+pub struct SymbolicComplexityFact {
+    pub factors: Vec<ComplexityFactorFact>,
+    #[serde(default)]
+    pub logarithmic: bool,
+    #[serde(default = "default_true")]
+    pub complete: bool,
+}
+
+fn default_true() -> bool {
+    true
 }
 
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
@@ -75,6 +105,12 @@ pub struct CallContainmentFact {
     pub argument_cardinality_relation: String,
     #[serde(default)]
     pub argument_progress: String,
+    #[serde(default)]
+    pub argument_size_domains: Vec<Vec<String>>,
+    #[serde(default)]
+    pub receiver_size_domains: Vec<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub symbolic_execution: Option<SymbolicComplexityFact>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub known_time_complexity: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -96,6 +132,8 @@ pub struct IterationFact {
     pub bound_classification: String,
     pub execution_multiplicity: String,
     pub power: usize,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub symbolic_time: Option<SymbolicComplexityFact>,
     pub fixed: bool,
     pub amortized: bool,
 }
@@ -125,9 +163,82 @@ struct Assignment {
 #[derive(Clone, Debug, Default)]
 struct CollectionGrowth {
     power: usize,
+    symbolic_factors: BTreeMap<String, usize>,
+    symbolic_complete: bool,
 }
 
-#[derive(Clone, Debug, Default)]
+#[derive(Clone, Debug)]
+struct DomainRegistry {
+    domains: BTreeMap<String, SizeDomainFact>,
+    path: String,
+    owner: String,
+    function: String,
+    function_span: [usize; 4],
+}
+
+impl DomainRegistry {
+    fn new(path: &str, owner: &str, function: &str, function_span: [usize; 4]) -> Self {
+        Self {
+            domains: BTreeMap::new(),
+            path: path.to_string(),
+            owner: owner.to_string(),
+            function: function.to_string(),
+            function_span,
+        }
+    }
+
+    fn insert(&mut self, domain: SizeDomainFact) -> String {
+        let id = domain.id.clone();
+        self.domains.entry(id.clone()).or_insert(domain);
+        id
+    }
+
+    fn values(&self) -> Vec<SizeDomainFact> {
+        self.domains.values().cloned().collect()
+    }
+
+    fn parameter(&mut self, name: &str, span: Option<[usize; 4]>) -> String {
+        self.insert(SizeDomainFact {
+            id: format!("param:{}#{}:{}", self.owner, self.function, name),
+            name: name.to_string(),
+            source_kind: "parameter".to_string(),
+            path: self.path.clone(),
+            span: span.unwrap_or(self.function_span),
+        })
+    }
+
+    fn state(&mut self, name: &str, span: Option<[usize; 4]>) -> String {
+        let display = if name.starts_with('@') {
+            name.to_string()
+        } else {
+            format!("@{name}")
+        };
+        self.insert(SizeDomainFact {
+            id: format!("state:{}:{}", self.owner, display),
+            name: display,
+            source_kind: "state".to_string(),
+            path: self.path.clone(),
+            span: span.unwrap_or(self.function_span),
+        })
+    }
+
+    fn local_loop(&mut self, names: &BTreeSet<String>, span: [usize; 4]) -> String {
+        let name = if names.is_empty() {
+            format!("loop at line {}", span[0])
+        } else {
+            names.iter().cloned().collect::<Vec<_>>().join(" + ")
+        };
+        self.insert(SizeDomainFact {
+            id: format!("loop:{}:{}:{}", self.path, span[0], span[1]),
+            name,
+            source_kind: "loop_expression".to_string(),
+            path: self.path.clone(),
+            span,
+        })
+    }
+}
+
+#[derive(Clone, Debug)]
 struct LoopContext {
     power: usize,
     params: BTreeSet<String>,
@@ -138,6 +249,26 @@ struct LoopContext {
     root_line: Option<usize>,
     collapse_direct_child: bool,
     unknown: bool,
+    symbolic_factors: BTreeMap<String, usize>,
+    symbolic_complete: bool,
+}
+
+impl Default for LoopContext {
+    fn default() -> Self {
+        Self {
+            power: 0,
+            params: BTreeSet::new(),
+            independent_collection_bindings: BTreeSet::new(),
+            partition_locals: BTreeSet::new(),
+            cursor: None,
+            absorb_next: false,
+            root_line: None,
+            collapse_direct_child: false,
+            unknown: false,
+            symbolic_factors: BTreeMap::new(),
+            symbolic_complete: true,
+        }
+    }
 }
 
 pub(crate) fn facts(document: &Document) -> Vec<MethodComplexityFacts> {
@@ -205,6 +336,7 @@ pub(crate) fn facts(document: &Document) -> Vec<MethodComplexityFacts> {
                 .map(|(name, _)| name.clone())
                 .collect::<BTreeSet<_>>();
             fact_for_method(
+                document,
                 &document.file,
                 owner,
                 &method.name,
@@ -311,6 +443,7 @@ fn collect_block_invocations(
 }
 
 fn fact_for_method(
+    document: &Document,
     path: &str,
     owner: &str,
     function: &str,
@@ -327,6 +460,24 @@ fn fact_for_method(
     language: &str,
     behavior: &dyn NormalizedLanguageBehavior,
 ) -> Option<MethodComplexityFacts> {
+    let mut domain_registry = DomainRegistry::new(path, owner, function, span);
+    for parameter in params {
+        let declaration_span = document
+            .places
+            .iter()
+            .find(|place| {
+                place.owner == owner && place.function == function && place.name == *parameter
+            })
+            .map(|place| place.declaration_span);
+        domain_registry.parameter(parameter, declaration_span);
+    }
+    for state in document
+        .state_declarations
+        .iter()
+        .filter(|state| state.owner == owner)
+    {
+        domain_registry.state(&state.field, Some(state.span));
+    }
     let mut assignments = BTreeMap::<String, Vec<Assignment>>::new();
     collect_assignments(node, &mut assignments, behavior);
     let mut max_power = 0;
@@ -354,6 +505,7 @@ fn fact_for_method(
         type_aliases,
         language,
         behavior,
+        &mut domain_registry,
     );
     let mut recursion = RecursionFacts::default();
     let visited_guards = visited_guard_parameters(node, params, behavior);
@@ -396,6 +548,7 @@ fn fact_for_method(
         recursion,
         allocations,
         call_contexts,
+        size_domains: domain_registry.values(),
         block_invocations,
         deferred_regions,
     })
@@ -452,14 +605,14 @@ fn collect_allocations(
             });
             let (relation, bound) =
                 if semantics == CollectionAllocationSemantics::UnknownSize || receiver_is_call {
-                ("unknown", "unknown")
-            } else if !parameter_domains.is_empty() {
-                ("same", "input")
-            } else if fixed_receiver {
-                ("fixed", "fixed")
-            } else {
-                ("unknown", "unknown")
-            };
+                    ("unknown", "unknown")
+                } else if !parameter_domains.is_empty() {
+                    ("same", "input")
+                } else if fixed_receiver {
+                    ("fixed", "fixed")
+                } else {
+                    ("unknown", "unknown")
+                };
             output.push(AllocationFact {
                 line: node.first_lineno,
                 span: [
@@ -499,6 +652,7 @@ fn visit_loops(
     type_aliases: &BTreeMap<String, String>,
     language: &str,
     behavior: &dyn NormalizedLanguageBehavior,
+    domain_registry: &mut DomainRegistry,
 ) {
     let block_semantics = if node.r#type == "ITER" {
         iterator_message(node)
@@ -545,6 +699,7 @@ fn visit_loops(
                 type_aliases,
                 language,
                 behavior,
+                domain_registry,
             );
         }
         return;
@@ -569,6 +724,7 @@ fn visit_loops(
                 type_aliases,
                 language,
                 behavior,
+                domain_registry,
             );
         }
         return;
@@ -595,10 +751,12 @@ fn visit_loops(
             (node.first_lineno, node.first_column),
         );
         let states = state_names(growth_control.unwrap_or(node));
-        let growth_power = locals
+        let growth = locals
             .iter()
-            .filter_map(|name| collection_growth.get(name).map(|growth| growth.power))
-            .max();
+            .filter_map(|name| collection_growth.get(name))
+            .max_by_key(|growth| growth.power)
+            .cloned();
+        let growth_power = growth.as_ref().map(|growth| growth.power);
         let unknown_iteration =
             node.r#type == "ITER" && block_semantics == BlockCallSemantics::Unknown;
         let fixed = !unknown_iteration
@@ -611,6 +769,17 @@ fn visit_loops(
                 .into_iter()
                 .find(|name| !params.contains(name))
         });
+        let mut symbolic_refs = refs.clone();
+        if let Some(cursor) = &cursor {
+            let cursor_names = BTreeSet::from([cursor.clone()]);
+            let cursor_domains = parameter_domains(
+                &cursor_names,
+                params,
+                assignments,
+                (node.first_lineno, node.first_column),
+            );
+            symbolic_refs = symbolic_refs.difference(&cursor_domains).cloned().collect();
+        }
         let amortized = matches!(node.r#type.as_str(), "WHILE" | "UNTIL")
             && !refs.is_empty()
             && refs.is_subset(&parent.params)
@@ -657,6 +826,36 @@ fn visit_loops(
         if fixpoint {
             power = power.max(parent.power + 2);
         }
+        let mut symbolic_factors = parent.symbolic_factors.clone();
+        let mut symbolic_complete = parent.symbolic_complete && !unknown_iteration;
+        let added_power = power.saturating_sub(parent.power);
+        if let Some(growth) = growth.filter(|_| added_power > 0 && !fixed) {
+            symbolic_factors = growth.symbolic_factors;
+            symbolic_complete &= growth.symbolic_complete;
+        } else if added_power > 0 && !fixed {
+            let mut domains = symbolic_refs
+                .iter()
+                .map(|name| domain_registry.parameter(name, None))
+                .collect::<BTreeSet<_>>();
+            domains.extend(states.iter().map(|name| domain_registry.state(name, None)));
+            let domain_id = if domains.len() == 1 {
+                domains.into_iter().next().unwrap()
+            } else {
+                if domains.len() > 1 {
+                    symbolic_complete = false;
+                }
+                domain_registry.local_loop(
+                    &domain_names,
+                    [
+                        node.first_lineno,
+                        node.first_column,
+                        node.last_lineno,
+                        node.last_column,
+                    ],
+                )
+            };
+            *symbolic_factors.entry(domain_id).or_insert(0) += added_power;
+        }
         *max_power = (*max_power).max(power);
         let relation = if unknown_iteration {
             "unknown"
@@ -701,6 +900,7 @@ fn visit_loops(
                 polynomial(power)
             },
             power,
+            symbolic_time: Some(symbolic_complexity(&symbolic_factors, symbolic_complete)),
             fixed,
             amortized,
         });
@@ -730,6 +930,8 @@ fn visit_loops(
             root_line,
             collapse_direct_child: linear_worklist(node, assignments, root_line, params, behavior),
             unknown: parent.unknown || unknown_iteration,
+            symbolic_factors,
+            symbolic_complete,
         };
         // Iterator receiver/control expressions are evaluated before the loop;
         // only the normalized body is loop-contained. Treating a chained
@@ -753,6 +955,7 @@ fn visit_loops(
                 type_aliases,
                 language,
                 behavior,
+                domain_registry,
             );
         }
         if let Some(body) = loop_body(node) {
@@ -774,6 +977,7 @@ fn visit_loops(
                 type_aliases,
                 language,
                 behavior,
+                domain_registry,
             );
         }
     } else {
@@ -812,6 +1016,49 @@ fn visit_loops(
                 assignments,
                 (node.first_lineno, node.first_column),
             );
+            let argument_size_domains = call_argument_nodes(node)
+                .into_iter()
+                .map(|argument| {
+                    let names = local_names(argument);
+                    let parameter_sources = parameter_domains(
+                        &names,
+                        params,
+                        assignments,
+                        (node.first_lineno, node.first_column),
+                    );
+                    let mut domains = parameter_sources
+                        .iter()
+                        .map(|name| domain_registry.parameter(name, None))
+                        .collect::<BTreeSet<_>>();
+                    domains.extend(
+                        state_names(argument)
+                            .iter()
+                            .map(|name| domain_registry.state(name, None)),
+                    );
+                    domains.into_iter().collect::<Vec<_>>()
+                })
+                .collect::<Vec<_>>();
+            let receiver_size_domains = call_receiver(node)
+                .map(|receiver| {
+                    let names = local_names(receiver);
+                    let parameter_sources = parameter_domains(
+                        &names,
+                        params,
+                        assignments,
+                        (node.first_lineno, node.first_column),
+                    );
+                    let mut domains = parameter_sources
+                        .iter()
+                        .map(|name| domain_registry.parameter(name, None))
+                        .collect::<BTreeSet<_>>();
+                    domains.extend(
+                        state_names(receiver)
+                            .iter()
+                            .map(|name| domain_registry.state(name, None)),
+                    );
+                    domains.into_iter().collect::<Vec<_>>()
+                })
+                .unwrap_or_default();
             let argument_cardinality_relation = if parent.power == 0 {
                 "same"
             } else if !argument_names.is_disjoint(&parent.partition_locals) {
@@ -831,27 +1078,33 @@ fn visit_loops(
             )
             .and_then(|receiver_type| behavior.call_complexity(&receiver_type, message));
             call_contexts.push(CallContainmentFact {
-                    line: node.first_lineno,
-                    span: [
-                        node.first_lineno,
-                        node.first_column,
-                        node.last_lineno,
-                        node.last_column,
-                    ],
-                    message: message.to_string(),
+                line: node.first_lineno,
+                span: [
+                    node.first_lineno,
+                    node.first_column,
+                    node.last_lineno,
+                    node.last_column,
+                ],
+                message: message.to_string(),
                 execution_multiplicity: if parent.unknown {
                     "unknown".to_string()
                 } else {
                     polynomial(parent.power)
                 },
-                    power: parent.power,
+                power: parent.power,
                 parameter_arguments: local_names(node).intersection(params).cloned().collect(),
-                    argument_cardinality_relation: argument_cardinality_relation.to_string(),
+                argument_cardinality_relation: argument_cardinality_relation.to_string(),
                 argument_progress: call_argument_progress(
                     node,
                     assignments,
                     (node.first_lineno, node.first_column),
                 ),
+                argument_size_domains,
+                receiver_size_domains,
+                symbolic_execution: Some(symbolic_complexity(
+                    &parent.symbolic_factors,
+                    parent.symbolic_complete && !parent.unknown,
+                )),
                 known_time_complexity: known_call_complexity
                     .map(|complexity| complexity.time.to_string()),
                 known_space_complexity: known_call_complexity
@@ -877,6 +1130,7 @@ fn visit_loops(
                 type_aliases,
                 language,
                 behavior,
+                domain_registry,
             );
         }
     }
@@ -936,7 +1190,11 @@ fn record_collection_growth(
     };
     for name in local_names(receiver) {
         let entry = growth.entry(name).or_default();
-        entry.power = entry.power.max(context.power);
+        if context.power >= entry.power {
+            entry.power = context.power;
+            entry.symbolic_factors = context.symbolic_factors.clone();
+            entry.symbolic_complete = context.symbolic_complete;
+        }
     }
 }
 
@@ -1348,7 +1606,7 @@ fn visited_guard_parameters(
                 .collect::<BTreeSet<_>>();
             if behavior.visited_membership_call(message) {
                 membership.extend(receiver_params.iter().cloned());
-    }
+            }
             if behavior.visited_insert_call(message) {
                 insertion.extend(receiver_params);
             }
@@ -1599,6 +1857,24 @@ fn polynomial(power: usize) -> String {
     }
 }
 
+fn symbolic_complexity(
+    factors: &BTreeMap<String, usize>,
+    complete: bool,
+) -> SymbolicComplexityFact {
+    SymbolicComplexityFact {
+        factors: factors
+            .iter()
+            .filter(|(_, exponent)| **exponent > 0)
+            .map(|(domain_id, exponent)| ComplexityFactorFact {
+                domain_id: domain_id.clone(),
+                exponent: *exponent,
+            })
+            .collect(),
+        logarithmic: false,
+        complete,
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1642,6 +1918,30 @@ mod tests {
             .iter()
             .max_by_key(|fact| fact.power)
             .map(|fact| fact.execution_multiplicity.clone())
+    }
+
+    fn symbolic_factors(rows: &[MethodComplexityFacts], name: &str) -> Vec<(String, usize)> {
+        let row = rows.iter().find(|row| row.function == name).unwrap();
+        let domains = row
+            .size_domains
+            .iter()
+            .map(|domain| (domain.id.as_str(), domain.name.as_str()))
+            .collect::<BTreeMap<_, _>>();
+        let term = row
+            .iterations
+            .iter()
+            .max_by_key(|iteration| iteration.power)
+            .and_then(|iteration| iteration.symbolic_time.as_ref())
+            .unwrap();
+        term.factors
+            .iter()
+            .map(|factor| {
+                (
+                    domains[factor.domain_id.as_str()].to_string(),
+                    factor.exponent,
+                )
+            })
+            .collect()
     }
 
     #[test]
@@ -1736,6 +2036,18 @@ end
         assert_eq!(complexity(&rows, "cartesian"), Some("O(N^2)".into()));
         assert_eq!(complexity(&rows, "amortized"), Some("O(N)".into()));
         assert_eq!(complexity(&rows, "independent"), Some("O(N^2)".into()));
+        assert_eq!(
+            symbolic_factors(&rows, "cartesian"),
+            vec![("xs".into(), 1), ("ys".into(), 1)]
+        );
+        assert_eq!(
+            symbolic_factors(&rows, "independent"),
+            vec![("items".into(), 2)]
+        );
+        assert_eq!(
+            symbolic_factors(&rows, "hierarchy"),
+            vec![("documents".into(), 1)]
+        );
         assert_eq!(complexity(&rows, "callback"), Some("unknown".into()));
         assert_eq!(
             complexity(&rows, "unknown_result_sizes"),

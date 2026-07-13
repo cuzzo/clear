@@ -31,13 +31,14 @@ module Espalier
       )
       internal_calls = internal_calls_by_method(modules)
       recursive_edges = recursive_internal_edges(internal_calls)
-      method_complexities, method_spaces, method_time_complete, method_space_complete = structural_method_complexities(modules)
+      method_complexities, method_spaces, method_time_complete, method_space_complete, method_symbolic_time = structural_method_complexities(modules)
       structural_big_o = Espalier::StructuralBigO.new(
         facts_by_method: complexity_facts_by_method(modules),
         method_complexities: method_complexities,
         method_spaces: method_spaces,
         method_time_complete: method_time_complete,
         method_space_complete: method_space_complete,
+        method_symbolic_time: method_symbolic_time,
         internal_calls: internal_calls,
         recursive_edges: recursive_edges
       )
@@ -123,6 +124,7 @@ module Espalier
           quality[:big_o_space] = big_o_result[:space_complexity] if big_o_result[:space_complexity]
           quality[:big_o_known_component] = big_o_result[:known_time_component]
           quality[:big_o_space_known_component] = big_o_result[:known_space_component]
+          quality[:big_o_variables] = big_o_result[:complexity_variables] unless big_o_result[:complexity_variables].empty?
           quality[:big_o_complete] = big_o_result[:time_complete]
           quality[:big_o_space_complete] = big_o_result[:space_complete]
           quality[:big_o_dynamic] = big_o_result[:is_dynamic]
@@ -231,6 +233,7 @@ module Espalier
       spaces = Hash.new { |h, k| h[k] = {} }
       time_complete = Hash.new { |h, k| h[k] = {} }
       space_complete = Hash.new { |h, k| h[k] = {} }
+      symbolic_time = Hash.new { |h, k| h[k] = {} }
       modules.each do |mod|
         Array(mod[:methods]).each do |method|
           analyzer.instance_variable_set(:@class_name, mod[:name])
@@ -247,13 +250,14 @@ module Espalier
           spaces[mod[:name]][method_name] = result[:known_space_component]
           time_complete[mod[:name]][method_name] = result[:time_complete]
           space_complete[mod[:name]][method_name] = result[:space_complete]
+          symbolic_time[mod[:name]][method_name] = result[:symbolic_time]
         end
       end
-      [complexities, spaces, time_complete, space_complete]
+      [complexities, spaces, time_complete, space_complete, symbolic_time]
     end
 
     def structural_method_complexities(modules)
-      complexities, spaces, time_complete, space_complete = preliminary_method_complexities(modules)
+      complexities, spaces, time_complete, space_complete, symbolic_time = preliminary_method_complexities(modules)
       internal_calls = internal_calls_by_method(modules)
       structural_big_o = Espalier::StructuralBigO.new(
         facts_by_method: complexity_facts_by_method(modules),
@@ -261,6 +265,7 @@ module Espalier
         method_spaces: spaces,
         method_time_complete: time_complete,
         method_space_complete: space_complete,
+        method_symbolic_time: symbolic_time,
         internal_calls: internal_calls,
         recursive_edges: recursive_internal_edges(internal_calls)
       )
@@ -281,6 +286,9 @@ module Espalier
         })
         structural_big_o.instance_variable_set(:@method_space_complete, space_complete.transform_values { |methods|
           methods.transform_values { |complete| complete }
+        })
+        structural_big_o.instance_variable_set(:@method_symbolic_time, symbolic_time.transform_values { |methods|
+          methods.transform_values { |expression| expression }
         })
 
         slices = modules.each_slice((modules.size.to_f / cores).ceil).to_a
@@ -304,19 +312,22 @@ module Espalier
                 current_space = spaces[mod[:name]][method[:name].to_s] || "O(1)"
                 current_time_complete = time_complete[mod[:name]][method[:name].to_s]
                 current_space_complete = space_complete[mod[:name]][method[:name].to_s]
+                current_symbolic = symbolic_time[mod[:name]][method[:name].to_s]
                 time_changed = complexity_rank(result[:known_time_component]) > complexity_rank(current)
                 space_changed = complexity_rank(result[:known_space_component]) > complexity_rank(current_space)
+                symbolic_changed = result[:symbolic_time] && result[:symbolic_time] != current_symbolic
                 next_time_complete = current_time_complete != false && result[:time_complete]
                 next_space_complete = current_space_complete != false && result[:space_complete]
                 time_complete_changed = next_time_complete != current_time_complete
                 space_complete_changed = next_space_complete != current_space_complete
-                if time_changed || space_changed || time_complete_changed || space_complete_changed
+                if time_changed || space_changed || symbolic_changed || time_complete_changed || space_complete_changed
                   local_changes << [
                     mod[:name], method[:name].to_s,
-                    time_changed ? result[:known_time_component] : current,
+                    (time_changed || symbolic_changed) ? result[:known_time_component] : current,
                     space_changed ? result[:known_space_component] : current_space,
                     next_time_complete,
-                    next_space_complete
+                    next_space_complete,
+                    symbolic_changed ? result[:symbolic_time] : current_symbolic
                   ]
                 end
               end
@@ -326,18 +337,19 @@ module Espalier
         end
 
         results = threads.flat_map(&:join).flat_map(&:value)
-        results.each do |mod_name, method_name, complexity, space, complete_time, complete_space|
+        results.each do |mod_name, method_name, complexity, space, complete_time, complete_space, expression|
           complexities[mod_name][method_name] = complexity
           spaces[mod_name][method_name] = space
           time_complete[mod_name][method_name] = complete_time
           space_complete[mod_name][method_name] = complete_space
+          symbolic_time[mod_name][method_name] = expression
           changed = true
         end
 
         break unless changed
       end
 
-      [complexities, spaces, time_complete, space_complete]
+      [complexities, spaces, time_complete, space_complete, symbolic_time]
     end
 
     def internal_calls_by_method(modules)
@@ -388,25 +400,26 @@ module Espalier
     end
 
     def complexity_rank(complexity)
-      case complexity.to_s
-      when "O(1)" then 1
-      when "O(log N)" then 2
-      when "O(N)" then 10
-      when "O(N log N)" then 11
-      when "O(N * M)" then 14
-      when /\AO\(N\^(\d+)( log N)?\)\z/
-        10 + ($1.to_i * 2) + ($2 ? 1 : 0)
-      when "O(2^N)" then 100
-      when "O(N!)" then 200
-      else
-        1
-      end
+      return 1 if complexity.nil? || complexity == "O(1)" || complexity == "unknown"
+      return 2 if complexity == "O(log N)"
+      return 100 if complexity == "O(2^N)"
+      return 200 if complexity == "O(N!)"
+
+      rank = Espalier::SymbolicComplexity.rank_string(complexity)
+      return 1 if rank.negative?
+      return 10 if rank == 1
+      return 11 if rank == 1.1
+
+      10 + (rank.floor * 2) + (rank.modulo(1).positive? ? 1 : 0)
     end
 
     def big_o_nodes_for(mod, method)
       call_contexts = Array(method[:complexity_facts]).flat_map do |fact|
         Array(fact["call_contexts"]).map do |context|
-          context.merge("collection_parameters" => Array(fact["collection_parameters"]))
+          context.merge(
+            "collection_parameters" => Array(fact["collection_parameters"]),
+            "size_domains" => Array(fact["size_domains"])
+          )
         end
       end
         .each_with_object({}) do |row, index|
@@ -423,6 +436,7 @@ module Espalier
           execution_complexity: context && context["execution_multiplicity"],
           known_time_complexity: context && context["known_time_complexity"],
           known_space_complexity: context && context["known_space_complexity"],
+          symbolic_time: context && symbolic_call_complexity(context),
           collection_arguments: context && context["power"].to_i.positive? &&
             (Array(context["parameter_arguments"]) & Array(context["collection_parameters"])),
           internal_call: delegation[:receiver].to_s == "self" && Array(mod[:methods]).any? { |candidate| candidate[:name].to_s == delegation[:message].to_s }
@@ -440,6 +454,22 @@ module Espalier
       end
 
       nodes
+    end
+
+    def symbolic_call_complexity(context)
+      local = Espalier::SymbolicComplexity.relative_call(
+        context["known_time_complexity"],
+        receiver_domains: context["receiver_size_domains"],
+        argument_domains: context["argument_size_domains"],
+        domains: context["size_domains"]
+      )
+      return nil unless local
+
+      execution = Espalier::SymbolicComplexity.from_fact(
+        context["symbolic_execution"],
+        context["size_domains"]
+      )
+      Espalier::SymbolicComplexity.multiply(execution, local)
     end
 
     def local_types_for_signature(signature)

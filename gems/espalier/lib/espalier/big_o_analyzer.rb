@@ -1,6 +1,7 @@
 # frozen_string_literal: true
 
 require "yaml"
+require_relative "symbolic_complexity"
 require "set"
 
 module Espalier
@@ -61,6 +62,7 @@ module Espalier
       space_complexity = "O(1)"
       time_complete = true
       space_complete = true
+      symbolic_time = nil
       is_dynamic = false
       trigger = nil
       unknown_operations = []
@@ -79,7 +81,12 @@ module Espalier
 
           if node[:known_time_complexity]
             known_complexity = node[:known_time_complexity].to_s
-            known_complexity = multiply_complexity(known_complexity, node[:execution_complexity]) if node[:execution_complexity]
+            if node[:symbolic_time]
+              symbolic_time = Espalier::SymbolicComplexity.sum(symbolic_time, node[:symbolic_time])
+              known_complexity = Espalier::SymbolicComplexity.render(symbolic_time)&.first || known_complexity
+            elsif node[:execution_complexity]
+              known_complexity = multiply_complexity(known_complexity, node[:execution_complexity])
+            end
             complexity = max_complexity(complexity, known_complexity)
             if node[:known_space_complexity]
               space_complexity = max_space_complexity(space_complexity, node[:known_space_complexity].to_s)
@@ -127,6 +134,13 @@ module Espalier
           is_dynamic = true
         elsif node[:type] == :structural
           structural_complexity = node[:complexity].to_s
+          if node[:symbolic_time]
+            symbolic_time = Espalier::SymbolicComplexity.sum(symbolic_time, node[:symbolic_time])
+            rendered_symbolic = Espalier::SymbolicComplexity.render(symbolic_time)&.first
+            if rendered_symbolic && complexity_rank(rendered_symbolic) >= complexity_rank(structural_complexity)
+              structural_complexity = rendered_symbolic
+            end
+          end
           time_complete = false if node[:time_complete] == false
           space_complete = false if node[:space_complete] == false
           if structural_complexity == "unknown"
@@ -159,6 +173,8 @@ module Espalier
         space_complexity: space_complete ? space_complexity : "unknown",
         known_time_component: complexity,
         known_space_component: space_complexity,
+        symbolic_time: symbolic_time,
+        complexity_variables: Espalier::SymbolicComplexity.render(symbolic_time)&.last || [],
         time_complete: time_complete,
         space_complete: space_complete,
         is_dynamic: is_dynamic,
@@ -317,20 +333,17 @@ module Espalier
 
     def complexity_rank(complexity)
       return 1 if complexity.nil?
+      return 1 if complexity == "O(1)" || complexity == "unknown"
+      return 2 if complexity == "O(log N)"
+      return 100 if complexity == "O(2^N)"
+      return 200 if complexity == "O(N!)"
 
-      case complexity.to_s
-      when "O(1)" then 1
-      when "O(log N)" then 2
-      when "O(N)" then 10
-      when "O(N log N)" then 11
-      when "O(N * M)" then 14
-      when /\AO\(N\^(\d+)( log N)?\)\z/
-        10 + ($1.to_i * 2) + ($2 ? 1 : 0)
-      when "O(2^N)" then 100
-      when "O(N!)" then 200
-      else
-        1
-      end
+      rank = Espalier::SymbolicComplexity.rank_string(complexity)
+      return 1 if rank.negative?
+      return 10 if rank == 1
+      return 11 if rank == 1.1
+
+      10 + (rank.floor * 2) + (rank.modulo(1).positive? ? 1 : 0)
     end
 
     def multiply_complexity(current, multiplier)

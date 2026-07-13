@@ -140,7 +140,10 @@ class AggregatorTest < Minitest::Test
               big_o: "O(N log N)",
               big_o_space: "O(N)",
               big_o_dynamic: true,
-              complexity_trigger: "sort names"
+              complexity_trigger: "sort names",
+              big_o_variables: [
+                { symbol: "N", name: "names", source_kind: "parameter", path: "lib/conn.rb", span: [14, 15, 14, 20] }
+              ]
             }
           }
         ]
@@ -164,6 +167,9 @@ class AggregatorTest < Minitest::Test
     assert_equal "O(N log N)", complexity.dig("properties", "complexity", "time")
     assert_equal "O(N)", complexity.dig("properties", "complexity", "auxiliary_space")
     assert_equal ["sort names"], complexity.dig("properties", "complexity", "triggers")
+    assert_equal "names", complexity.dig("properties", "complexity", "variables", 0, "name")
+    assert_equal "N is the size of `names` (parameter)", complexity.dig("relatedLocations", 0, "message", "text")
+    assert_equal 14, complexity.dig("relatedLocations", 0, "physicalLocation", "region", "startLine")
     refute run.fetch("results").any? { |result|
       result.fetch("ruleId") == "espalier.function" &&
         result.dig("properties", "function", "name") == "sort_names"

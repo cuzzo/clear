@@ -175,6 +175,7 @@ module Espalier
       trigger = metrics[:complexity_trigger] || metrics["complexity_trigger"]
       warnings = Array(metrics[:big_o_warnings] || metrics["big_o_warnings"])
       unknowns = Array(metrics[:big_o_unknowns] || metrics["big_o_unknowns"])
+      variables = Array(metrics[:big_o_variables] || metrics["big_o_variables"])
       owner = mod[:module] || mod["module"]
       function_name = fn[:name] || fn["name"]
       subject_name = "#{owner}##{function_name}"
@@ -184,7 +185,7 @@ module Espalier
                    "incomplete complexity evidence (known runtime component #{known_time}, known auxiliary-space component #{known_space})"
                  end
 
-      Decomplex::Sarif.result(
+      result = Decomplex::Sarif.result(
         rule_id: "complexity.observation",
         level: "note",
         message: "#{subject_name} has #{estimate}",
@@ -208,10 +209,39 @@ module Espalier
             "confidence" => time_complete && space_complete ? "static-lower-bound" : "partial",
             "triggers" => [trigger].compact,
             "warnings" => warnings,
-            "unknown_operations" => unknowns
+            "unknown_operations" => unknowns,
+            "variables" => variables
           }
         }
       )
+      related = complexity_related_locations(variables)
+      result["relatedLocations"] = related unless related.empty?
+      result
+    end
+
+    def complexity_related_locations(variables)
+      variables.filter_map.with_index(1) do |variable, index|
+        path = variable[:path] || variable["path"]
+        span = Array(variable[:span] || variable["span"])
+        next if path.to_s.empty? || span.empty?
+
+        symbol = variable[:symbol] || variable["symbol"]
+        name = variable[:name] || variable["name"]
+        kind = variable[:source_kind] || variable["source_kind"]
+        {
+          "id" => index,
+          "message" => { "text" => "#{symbol} is the size of `#{name}` (#{kind})" },
+          "physicalLocation" => {
+            "artifactLocation" => { "uri" => Decomplex::Sarif.normalize_path(path) },
+            "region" => {
+              "startLine" => [span[0].to_i, 1].max,
+              "startColumn" => span[1] ? span[1].to_i + 1 : nil,
+              "endLine" => span[2]&.to_i,
+              "endColumn" => span[3] ? span[3].to_i + 1 : nil
+            }.compact
+          }
+        }
+      end
     end
 
     def span_line(fn, index)

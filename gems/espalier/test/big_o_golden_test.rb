@@ -19,7 +19,8 @@ class BigOGoldenTest < Minitest::Test
       owner.fetch(:functions).each do |function|
         metrics = function.fetch(:quality_metrics)
         by_file[file][function.fetch(:name)] = {
-          total: metrics.fetch(:big_o), known: metrics.fetch(:big_o_known_component)
+          total: metrics.fetch(:big_o), known: metrics.fetch(:big_o_known_component),
+          variables: Array(metrics[:big_o_variables])
         }
       end
     end
@@ -46,6 +47,15 @@ class BigOGoldenTest < Minitest::Test
         assert_equal expected, actual_space.dig(file, name, key), "space #{file}:#{name}"
       end
     end
+    cartesian_variables = actual.dig("ruby_product.rb", "cartesian_product", :variables)
+    assert_equal %w[N M], cartesian_variables.map { |variable| variable[:symbol] }
+    assert_equal %w[xs ys], cartesian_variables.map { |variable| variable[:name] }
+    assert cartesian_variables.all? { |variable| variable[:path].end_with?("ruby_product.rb") }
+
+    repeated_helper_variables = actual.dig("normalized_domains.rb", "repeated_helper", :variables)
+    assert_equal ["items"], repeated_helper_variables.map { |variable| variable[:name] }
+    assert_equal ["param:normalized_domains#repeated_helper:items"],
+                 repeated_helper_variables.map { |variable| variable[:domain_id] }
   end
 
   def test_analyzer_oracle
