@@ -153,6 +153,7 @@ transpile-tests/[0-9]*
 # Generated fuzz programs (see tools/fuzz/). Promoted regressions move into
 # transpile-tests/ proper; the fuzz/ dir holds only ephemeral output.
 transpile-tests/fuzz/*.clear
+transpile-tests/fuzz/*.rb
 
 # Catch-all
 **/*.profile/
@@ -160,6 +161,26 @@ transpile-tests/fuzz/*.clear
 **/zig-out/
 **/*.clear-build.json
 **/__pycache__/
+
+# Self-host bootstrap build outputs (sources use explicit extensions).
+compiler/src/ast/lexer
+compiler/src/ast/parser
+
+# Generated gem diagnostics and local analysis output.
+gems/**/*.log
+gems/**/*.orig
+gems/**/*.profraw
+gems/decomplex/report_*.md
+gems/espalier/report_*.md
+gems/fact-mine/check_errors.txt
+gems/fact-mine/coverage.txt
+gems/fact-mine/debug.log
+gems/fact-mine/out.json
+
+# ruby-to-clear verifier output. A deliberately promoted baseline belongs in
+# baseline.{json,md}; each local run overwrites latest.{json,md}.
+gems/ruby-to-clear/analysis/results/latest.json
+gems/ruby-to-clear/analysis/results/latest.md
 
 # Generated architecture reports
 gems/espalier/architecture.yml
