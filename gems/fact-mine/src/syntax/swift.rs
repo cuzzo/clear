@@ -1,3 +1,7 @@
+// CFG-SPECIFIC START: shared CFG profile contract.
+use super::cfg::ControlFlowProfile;
+// CFG-SPECIFIC END
+
 use super::effects::{effect_from_call_with_lexicon, EffectLexicon};
 use super::normalized_behavior::{
     eliminable_guard_from_call, nil_guard_from_predicates, NormalizedCallParts,
@@ -68,9 +72,22 @@ const SWIFT_NIL_PREDICATES: &[&str] = &["isNull", "is_null"];
 const SWIFT_NON_NIL_PREDICATES: &[&str] = &["isSome", "is_some", "present"];
 const SWIFT_GUARD_MIDS: &[&str] = &["isNull", "is_null"];
 
+// CFG-SPECIFIC START: Swift control-flow vocabulary.
+const SWIFT_CFG_PROFILE: ControlFlowProfile = ControlFlowProfile {
+    iterator_messages: &["allSatisfy", "compactMap", "filter", "flatMap", "forEach", "map", "reduce"],
+    ignored_callback_body_sources: &[],
+};
+// CFG-SPECIFIC END
+
 struct SwiftNormalizedBehavior;
 
 impl NormalizedLanguageBehavior for SwiftNormalizedBehavior {
+    // CFG-SPECIFIC START: expose the Swift CFG profile.
+    fn cfg_profile(&self) -> &'static ControlFlowProfile {
+        &SWIFT_CFG_PROFILE
+    }
+    // CFG-SPECIFIC END
+
     fn owner_name_span(&self, _name: &str, node: &Node, default_span: Span) -> Option<Span> {
         (node.r#type == "CLASS").then_some(default_span)
     }

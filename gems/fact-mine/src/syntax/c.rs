@@ -1,3 +1,7 @@
+// CFG-SPECIFIC START: shared CFG profile contract.
+use super::cfg::ControlFlowProfile;
+// CFG-SPECIFIC END
+
 use super::effects::{effect_from_call_with_lexicon, EffectLexicon};
 use super::normalized_behavior::{
     eliminable_guard_from_call, nil_guard_from_predicates, NormalizedCallParts,
@@ -42,9 +46,22 @@ const C_NIL_PREDICATES: &[&str] = &["isNull", "is_null"];
 const C_NON_NIL_PREDICATES: &[&str] = &["isSome", "is_some", "present"];
 const C_GUARD_MIDS: &[&str] = &["isNull", "is_null"];
 
+// CFG-SPECIFIC START: C control-flow vocabulary.
+const C_CFG_PROFILE: ControlFlowProfile = ControlFlowProfile {
+    iterator_messages: &[],
+    ignored_callback_body_sources: &[],
+};
+// CFG-SPECIFIC END
+
 struct CNormalizedBehavior;
 
 impl NormalizedLanguageBehavior for CNormalizedBehavior {
+    // CFG-SPECIFIC START: expose the C CFG profile.
+    fn cfg_profile(&self) -> &'static ControlFlowProfile {
+        &C_CFG_PROFILE
+    }
+    // CFG-SPECIFIC END
+
     fn call_receiver(&self, parts: &NormalizedCallParts) -> String {
         if parts.receiver != "self" {
             return parts.receiver.clone();

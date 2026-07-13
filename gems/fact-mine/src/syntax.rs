@@ -2,6 +2,7 @@ pub(crate) mod c;
 pub(crate) mod complexity_facts;
 pub(crate) mod clone_similarity;
 pub(crate) mod complexity;
+pub mod cfg;
 pub(crate) mod cpp;
 pub(crate) mod csharp;
 pub(crate) mod effects;
@@ -165,6 +166,12 @@ pub struct Document {
     pub comparison_uses: Vec<ComparisonUse>,
     #[serde(default)]
     pub path_condition_sites: Vec<PathConditionSite>,
+    #[serde(default)]
+    pub control_flow_nodes: Vec<cfg::ControlFlowNode>,
+    #[serde(default)]
+    pub control_flow_edges: Vec<cfg::ControlFlowEdge>,
+    #[serde(default)]
+    pub control_flow_metrics: Vec<cfg::ControlFlowMetric>,
     #[serde(default)]
     pub protocol_method_effects: Vec<ProtocolMethodEffect>,
     #[serde(default)]

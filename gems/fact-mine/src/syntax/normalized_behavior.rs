@@ -3,6 +3,7 @@ use super::{
     zig, CallSite, FunctionDef, Language, StateDeclaration,
 };
 use crate::ast::{Node, Span};
+use crate::syntax::cfg::ControlFlowProfile;
 use std::collections::BTreeMap;
 
 #[derive(Clone, Debug, Default)]
@@ -92,6 +93,10 @@ pub(crate) enum CollectionAllocationSemantics {
 }
 
 pub(crate) trait NormalizedLanguageBehavior: Sync {
+    fn cfg_profile(&self) -> &'static ControlFlowProfile {
+        ControlFlowProfile::neutral_ref()
+    }
+
     fn collection_allocation_semantics(&self, _message: &str) -> CollectionAllocationSemantics {
         CollectionAllocationSemantics::None
     }

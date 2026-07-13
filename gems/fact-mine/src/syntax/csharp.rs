@@ -1,3 +1,7 @@
+// CFG-SPECIFIC START: shared CFG profile contract.
+use super::cfg::ControlFlowProfile;
+// CFG-SPECIFIC END
+
 use super::effects::{effect_from_call_with_lexicon, EffectLexicon};
 use super::normalized_behavior::{
     eliminable_guard_from_call, nil_guard_from_predicates, NormalizedCallParts,
@@ -62,9 +66,22 @@ const CSHARP_NIL_PREDICATES: &[&str] = &["isNull", "is_null"];
 const CSHARP_NON_NIL_PREDICATES: &[&str] = &["isSome", "is_some", "present"];
 const CSHARP_GUARD_MIDS: &[&str] = &["isNull", "is_null"];
 
+// CFG-SPECIFIC START: C# control-flow vocabulary.
+const CSHARP_CFG_PROFILE: ControlFlowProfile = ControlFlowProfile {
+    iterator_messages: &["Aggregate", "All", "Any", "ForEach", "Select", "Where"],
+    ignored_callback_body_sources: &[],
+};
+// CFG-SPECIFIC END
+
 pub(crate) struct CSharpNormalizedBehavior;
 
 impl NormalizedLanguageBehavior for CSharpNormalizedBehavior {
+    // CFG-SPECIFIC START: expose the C# CFG profile.
+    fn cfg_profile(&self) -> &'static ControlFlowProfile {
+        &CSHARP_CFG_PROFILE
+    }
+    // CFG-SPECIFIC END
+
     fn self_member_receiver(&self, message: &str) -> String {
         message.to_string()
     }

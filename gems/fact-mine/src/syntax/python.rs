@@ -1,3 +1,7 @@
+// CFG-SPECIFIC START: shared CFG profile contract.
+use super::cfg::ControlFlowProfile;
+// CFG-SPECIFIC END
+
 use super::effects::{effect_from_call_with_lexicon, EffectLexicon};
 use super::normalized_behavior::{
     eliminable_guard_from_call, nil_guard_from_predicates, CardinalityCallSemantics, NormalizedCallParts,
@@ -62,9 +66,22 @@ const PYTHON_NIL_PREDICATES: &[&str] = &["isNull", "is_null", "is_none"];
 const PYTHON_NON_NIL_PREDICATES: &[&str] = &["isSome", "is_some", "present"];
 const PYTHON_GUARD_MIDS: &[&str] = &["isNull", "is_null", "is_none", "is_some"];
 
+// CFG-SPECIFIC START: Python control-flow vocabulary.
+const PYTHON_CFG_PROFILE: ControlFlowProfile = ControlFlowProfile {
+    iterator_messages: &["all", "any", "enumerate", "filter", "map"],
+    ignored_callback_body_sources: &[],
+};
+// CFG-SPECIFIC END
+
 pub(crate) struct PythonNormalizedBehavior;
 
 impl NormalizedLanguageBehavior for PythonNormalizedBehavior {
+    // CFG-SPECIFIC START: expose the Python CFG profile.
+    fn cfg_profile(&self) -> &'static ControlFlowProfile {
+        &PYTHON_CFG_PROFILE
+    }
+    // CFG-SPECIFIC END
+
     fn cardinality_call_semantics(&self, message: &str) -> CardinalityCallSemantics {
         if message == "len" {
             CardinalityCallSemantics::MeasuresReceiver

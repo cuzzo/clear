@@ -1,3 +1,7 @@
+// CFG-SPECIFIC START: shared CFG profile contract.
+use super::cfg::ControlFlowProfile;
+// CFG-SPECIFIC END
+
 #[allow(unused_macros)]
 macro_rules! println {
     ($($arg:tt)*) => {
@@ -193,9 +197,22 @@ const RUBY_EFFECT_LEXICON: EffectLexicon = EffectLexicon {
     bang_mutation: true,
 };
 
+// CFG-SPECIFIC START: Ruby control-flow vocabulary.
+const RUBY_CFG_PROFILE: ControlFlowProfile = ControlFlowProfile {
+    iterator_messages: &["all", "any", "collect", "detect", "downto", "each", "each_cons", "each_entry", "each_key", "each_pair", "each_slice", "each_value", "filter_map", "find", "find_all", "flat_map", "inject", "loop", "map", "none", "reduce", "reject", "select", "step", "times", "upto"],
+    ignored_callback_body_sources: &["do end", "{}"],
+};
+// CFG-SPECIFIC END
+
 pub(crate) struct RubyNormalizedBehavior;
 
 impl NormalizedLanguageBehavior for RubyNormalizedBehavior {
+    // CFG-SPECIFIC START: expose the Ruby CFG profile.
+    fn cfg_profile(&self) -> &'static ControlFlowProfile {
+        &RUBY_CFG_PROFILE
+    }
+    // CFG-SPECIFIC END
+
     fn collection_allocation_semantics(&self, message: &str) -> CollectionAllocationSemantics {
         if [
             "map", "collect", "select", "reject", "filter", "filter_map", "group_by",

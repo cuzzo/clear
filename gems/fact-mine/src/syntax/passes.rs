@@ -1,5 +1,5 @@
 use super::{
-    clone_similarity, complexity, effects, local_flow,
+    cfg, clone_similarity, complexity, effects, local_flow,
     normalized_behavior::{NormalizedLanguageBehavior, SyntaxMetadata},
     normalized_extractor, path_condition, protocols, redundant_nil_guard, visibility,
     CloneCandidate, LocalComplexityScore, PathConditionSite, ProtocolMethodEffect,
@@ -41,6 +41,8 @@ pub(crate) struct StatefulSyntaxMetadata {
     pub(crate) local_methods: Vec<local_flow::MethodSummary>,
     pub(crate) local_complexity_scores: BTreeMap<String, LocalComplexityScore>,
     pub(crate) path_condition_sites: Vec<PathConditionSite>,
+    pub(crate) control_flow: cfg::ControlFlowFacts,
+    pub(crate) control_flow_metrics: Vec<cfg::ControlFlowMetric>,
     pub(crate) protocol_method_effects: Vec<ProtocolMethodEffect>,
     pub(crate) protocol_call_paths: Vec<ProtocolMethodPath>,
     pub(crate) clone_candidates: Vec<CloneCandidate>,
@@ -100,6 +102,8 @@ impl<'a> StatefulSyntaxPass<'a> {
         );
         let path_condition_sites =
             path_condition::normalized_fact_sites(&file, self.lines, self.normalized_root);
+        let control_flow = cfg::build(&local_methods, self.behavior);
+        let control_flow_metrics = cfg::metrics(&control_flow);
         let protocol_method_effects = protocols::method_effects_from_facts(
             self.behavior,
             &facts.function_defs,
@@ -129,6 +133,8 @@ impl<'a> StatefulSyntaxPass<'a> {
             ),
             local_methods,
             path_condition_sites,
+            control_flow,
+            control_flow_metrics,
             protocol_method_effects,
             protocol_call_paths,
             clone_candidates,

@@ -1,3 +1,7 @@
+// CFG-SPECIFIC START: shared CFG profile contract.
+use super::cfg::ControlFlowProfile;
+// CFG-SPECIFIC END
+
 use super::effects::{effect_from_call_with_lexicon, EffectLexicon};
 use super::normalized_behavior::{
     eliminable_guard_from_call, nil_guard_from_predicates, NormalizedCallParts,
@@ -55,9 +59,22 @@ const GO_NIL_PREDICATES: &[&str] = &["isNull", "is_null", "nil"];
 const GO_NON_NIL_PREDICATES: &[&str] = &["isSome", "is_some", "present"];
 const GO_GUARD_MIDS: &[&str] = &["isNull", "is_null"];
 
+// CFG-SPECIFIC START: Go control-flow vocabulary.
+const GO_CFG_PROFILE: ControlFlowProfile = ControlFlowProfile {
+    iterator_messages: &[],
+    ignored_callback_body_sources: &[],
+};
+// CFG-SPECIFIC END
+
 pub(crate) struct GoNormalizedBehavior;
 
 impl NormalizedLanguageBehavior for GoNormalizedBehavior {
+    // CFG-SPECIFIC START: expose the Go CFG profile.
+    fn cfg_profile(&self) -> &'static ControlFlowProfile {
+        &GO_CFG_PROFILE
+    }
+    // CFG-SPECIFIC END
+
     fn self_member_receiver(&self, message: &str) -> String {
         format!("self.{message}")
     }

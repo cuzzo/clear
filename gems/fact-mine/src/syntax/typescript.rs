@@ -1,3 +1,7 @@
+// CFG-SPECIFIC START: shared CFG profile contract.
+use super::cfg::ControlFlowProfile;
+// CFG-SPECIFIC END
+
 use super::effects::effect_from_call_with_lexicon;
 use super::javascript;
 use super::normalized_behavior::{
@@ -14,9 +18,22 @@ const TYPESCRIPT_NIL_PREDICATES: &[&str] = &["isNull", "is_null"];
 const TYPESCRIPT_NON_NIL_PREDICATES: &[&str] = &["isSome", "is_some", "present"];
 const TYPESCRIPT_GUARD_MIDS: &[&str] = &["isNull", "is_null"];
 
+// CFG-SPECIFIC START: TypeScript control-flow vocabulary.
+const TYPESCRIPT_CFG_PROFILE: ControlFlowProfile = ControlFlowProfile {
+    iterator_messages: &["every", "filter", "find", "flatMap", "forEach", "map", "reduce", "some"],
+    ignored_callback_body_sources: &[],
+};
+// CFG-SPECIFIC END
+
 pub(crate) struct TypeScriptNormalizedBehavior;
 
 impl NormalizedLanguageBehavior for TypeScriptNormalizedBehavior {
+    // CFG-SPECIFIC START: expose the TypeScript CFG profile.
+    fn cfg_profile(&self) -> &'static ControlFlowProfile {
+        &TYPESCRIPT_CFG_PROFILE
+    }
+    // CFG-SPECIFIC END
+
     fn self_member_receiver(&self, message: &str) -> String {
         format!("this.{message}")
     }

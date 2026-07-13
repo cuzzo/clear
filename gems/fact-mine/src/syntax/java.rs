@@ -1,3 +1,7 @@
+// CFG-SPECIFIC START: shared CFG profile contract.
+use super::cfg::ControlFlowProfile;
+// CFG-SPECIFIC END
+
 use super::effects::{effect_from_call_with_lexicon, EffectLexicon};
 use super::normalized_behavior::{
     eliminable_guard_from_call, nil_guard_from_predicates, NormalizedCallParts,
@@ -69,9 +73,22 @@ const JAVA_NIL_PREDICATES: &[&str] = &["isNull", "is_null"];
 const JAVA_NON_NIL_PREDICATES: &[&str] = &["isSome", "is_some", "present"];
 const JAVA_GUARD_MIDS: &[&str] = &["isNull", "is_null"];
 
+// CFG-SPECIFIC START: Java control-flow vocabulary.
+const JAVA_CFG_PROFILE: ControlFlowProfile = ControlFlowProfile {
+    iterator_messages: &["allMatch", "anyMatch", "filter", "forEach", "map", "reduce"],
+    ignored_callback_body_sources: &[],
+};
+// CFG-SPECIFIC END
+
 pub(crate) struct JavaNormalizedBehavior;
 
 impl NormalizedLanguageBehavior for JavaNormalizedBehavior {
+    // CFG-SPECIFIC START: expose the Java CFG profile.
+    fn cfg_profile(&self) -> &'static ControlFlowProfile {
+        &JAVA_CFG_PROFILE
+    }
+    // CFG-SPECIFIC END
+
     fn source_message_text(&self, message: &str, node: Option<&Node>) -> String {
         if node.is_some_and(|node| node.text.contains(&format!("{message}()"))) {
             format!("{message}()")
