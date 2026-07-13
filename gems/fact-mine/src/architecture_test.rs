@@ -372,6 +372,10 @@ fn complexity_fact_extractor_has_no_language_iterator_lexicon() {
         "\"map\"",
         "\"range\"",
         "\"times\"",
+        "\"ZLIST\"",
+        "\"DSTR\"",
+        "TypeExpr::Primitive(\"String\"",
+        "NormalizedCallComplexity {",
     ];
     let offenders = forbidden
         .iter()
@@ -380,7 +384,7 @@ fn complexity_fact_extractor_has_no_language_iterator_lexicon() {
         .collect::<Vec<_>>();
     assert!(
         offenders.is_empty(),
-        "language iterator/cardinality identities belong in language adapters: {}",
+        "language iterator, literal, and call-cost identities belong in language adapters: {}",
         offenders.join(", ")
     );
 }

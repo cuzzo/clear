@@ -2849,6 +2849,7 @@ pub(crate) mod tests {
                 },
                 visibility: Some("public".to_string()),
                 params: vec!["name".to_string()],
+                callback_params: Vec::new(),
                 signature: "def hello(name)".to_string(),
             }],
             owner_defs: vec![syntax::OwnerDef {
@@ -3058,6 +3059,7 @@ def py_fn(a: int) -> str:
             },
             visibility: Some("public".to_string()),
             params: vec!["x".to_string()],
+            callback_params: Vec::new(),
             signature: "".to_string(),
         });
 
@@ -3078,6 +3080,7 @@ def py_fn(a: int) -> str:
             },
             visibility: Some("public".to_string()),
             params: vec!["x".to_string()],
+            callback_params: Vec::new(),
             signature: "sig { .params(x: Integer).returns(String) }".to_string(),
         });
 
@@ -3098,6 +3101,7 @@ def py_fn(a: int) -> str:
             },
             visibility: Some("public".to_string()),
             params: vec![],
+            callback_params: Vec::new(),
             signature: "def top_level_fn".to_string(),
         });
 
@@ -3465,6 +3469,7 @@ def py_fn(a: int) -> str:
             },
             visibility: None,
             params: vec!["a".to_string()],
+            callback_params: Vec::new(),
             signature: "".to_string(),
         });
         extract(&doc_py, Profile::Espalier);
@@ -3562,6 +3567,7 @@ def py_fn(a: int) -> str:
             },
             visibility: None,
             params: vec!["a".to_string(), "b".to_string()],
+            callback_params: Vec::new(),
             signature: "".to_string(),
         };
         let sig = method_signature(&lines, &fn_def, "go");

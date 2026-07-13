@@ -59,6 +59,8 @@ module Espalier
       @local_types = local_types if local_types
       complexity = "O(1)"
       space_complexity = "O(1)"
+      time_complete = true
+      space_complete = true
       is_dynamic = false
       trigger = nil
       unknown_operations = []
@@ -70,6 +72,21 @@ module Espalier
       
       ast_nodes.each do |node|
         if node[:type] == :call
+          # Internal calls are summarized by StructuralBigO's fixed point. An
+          # O(1) callee intentionally produces no structural hint, so the call
+          # itself must not be mistaken for unresolved external behavior.
+          next if node[:internal_call]
+
+          if node[:known_time_complexity]
+            known_complexity = node[:known_time_complexity].to_s
+            known_complexity = multiply_complexity(known_complexity, node[:execution_complexity]) if node[:execution_complexity]
+            complexity = max_complexity(complexity, known_complexity)
+            if node[:known_space_complexity]
+              space_complexity = max_space_complexity(space_complexity, node[:known_space_complexity].to_s)
+            end
+            next
+          end
+
           receiver_type = resolve_type(node[:receiver], node[:line])
           method_called = node[:method].to_s
 
@@ -86,17 +103,19 @@ module Espalier
               complexity = max_complexity(complexity, "O(1)")
             else
               unknown_operations << "#{receiver_type}##{method_called}"
+              time_complete = false
+              space_complete = false
               warnings << "Missing method complexity for `#{receiver_type}##{method_called}` in stdlib_complexity_ruby.yml at line #{node[:line]}."
               if Array(node[:collection_arguments]).any? && !node[:internal_call]
-                complexity = max_complexity(complexity, "unknown")
                 warnings << unknown_collection_call_warning(node, method_called)
               end
             end
           else
             unknown_operations << "#{node[:receiver]}.#{method_called}"
+            time_complete = false
+            space_complete = false
             warnings << "Unknown receiver type for `#{node[:receiver]}` at line #{node[:line]}. Defaulting to O(1) for `.#{method_called}`, but this could be worse."
             if Array(node[:collection_arguments]).any?
-              complexity = max_complexity(complexity, "unknown")
               warnings << unknown_collection_call_warning(node, method_called)
             end
           end
@@ -108,9 +127,19 @@ module Espalier
           is_dynamic = true
         elsif node[:type] == :structural
           structural_complexity = node[:complexity].to_s
-          complexity = max_complexity(complexity, structural_complexity)
+          time_complete = false if node[:time_complete] == false
+          space_complete = false if node[:space_complete] == false
+          if structural_complexity == "unknown"
+            time_complete = false
+          else
+            complexity = max_complexity(complexity, structural_complexity)
+          end
           if node[:space]
-            space_complexity = max_space_complexity(space_complexity, node[:space].to_s)
+            if node[:space].to_s == "unknown"
+              space_complete = false
+            else
+              space_complexity = max_space_complexity(space_complexity, node[:space].to_s)
+            end
           end
           if node[:is_dynamic]
             is_dynamic = true
@@ -118,14 +147,20 @@ module Espalier
           end
           warnings << structural_warning(node) if structural_complexity != "O(1)"
         elsif node[:type] == :callback || node[:type] == :yield
+          time_complete = false
+          space_complete = false
           warnings << "Function pointer / callback executed at line #{node[:line]}. This could execute arbitrary O(N^x) code, meaning our calculation is strictly a LOWER BOUND."
         end
       end
 
       {
         method: method_name,
-        lower_bound_complexity: complexity,
-        space_complexity: space_complexity,
+        lower_bound_complexity: time_complete ? complexity : "unknown",
+        space_complexity: space_complete ? space_complexity : "unknown",
+        known_time_component: complexity,
+        known_space_component: space_complexity,
+        time_complete: time_complete,
+        space_complete: space_complete,
         is_dynamic: is_dynamic,
         trigger: trigger,
         unknown_operations: unknown_operations.uniq,

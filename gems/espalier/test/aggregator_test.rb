@@ -271,6 +271,9 @@ class AggregatorTest < Minitest::Test
     fn = manifest.first[:functions].first
 
     assert_equal "O(N log N)", fn[:quality_metrics][:big_o]
+    assert_equal "O(N log N)", fn[:quality_metrics][:big_o_known_component]
+    assert_equal true, fn[:quality_metrics][:big_o_complete]
+    assert_equal true, fn[:quality_metrics][:big_o_space_complete]
     refute fn[:quality_metrics].key?(:big_o_unknowns)
   end
 

@@ -208,6 +208,7 @@ impl<'a> Extractor<'a> {
             body,
             visibility: Some(visibility),
             params: params.clone(),
+            callback_params: self.behavior.callback_parameter_names(node),
             signature: String::new(),
         });
         if let Some(alias) = predicate_alias(node, &self.file, &owner, self.behavior) {

@@ -31,11 +31,13 @@ module Espalier
       )
       internal_calls = internal_calls_by_method(modules)
       recursive_edges = recursive_internal_edges(internal_calls)
-      method_complexities, method_spaces = structural_method_complexities(modules)
+      method_complexities, method_spaces, method_time_complete, method_space_complete = structural_method_complexities(modules)
       structural_big_o = Espalier::StructuralBigO.new(
         facts_by_method: complexity_facts_by_method(modules),
         method_complexities: method_complexities,
         method_spaces: method_spaces,
+        method_time_complete: method_time_complete,
+        method_space_complete: method_space_complete,
         internal_calls: internal_calls,
         recursive_edges: recursive_edges
       )
@@ -119,6 +121,10 @@ module Espalier
           big_o_result = analyzer.analyze_method(key, ast_nodes, local_types: local_types_for_signature(sig))
           quality[:big_o] = big_o_result[:lower_bound_complexity]
           quality[:big_o_space] = big_o_result[:space_complexity] if big_o_result[:space_complexity]
+          quality[:big_o_known_component] = big_o_result[:known_time_component]
+          quality[:big_o_space_known_component] = big_o_result[:known_space_component]
+          quality[:big_o_complete] = big_o_result[:time_complete]
+          quality[:big_o_space_complete] = big_o_result[:space_complete]
           quality[:big_o_dynamic] = big_o_result[:is_dynamic]
           quality[:complexity_trigger] = big_o_result[:trigger] if big_o_result[:trigger]
           quality[:big_o_warnings] = big_o_result[:warnings] unless big_o_result[:warnings].empty?
@@ -221,7 +227,11 @@ module Espalier
         language: :ruby,
         nil_kill: @nil_kill_evidence
       )
-      modules.each_with_object(Hash.new { |h, k| h[k] = {} }) do |mod, complexities|
+      complexities = Hash.new { |h, k| h[k] = {} }
+      spaces = Hash.new { |h, k| h[k] = {} }
+      time_complete = Hash.new { |h, k| h[k] = {} }
+      space_complete = Hash.new { |h, k| h[k] = {} }
+      modules.each do |mod|
         Array(mod[:methods]).each do |method|
           analyzer.instance_variable_set(:@class_name, mod[:name])
           analyzer.instance_variable_set(:@ivar_types, mod[:ivar_types] || {})
@@ -232,19 +242,25 @@ module Espalier
             big_o_nodes_for(mod, method),
             local_types: local_types_for_signature(sig)
           )
-          complexities[mod[:name]][method[:name].to_s] = result[:lower_bound_complexity]
+          method_name = method[:name].to_s
+          complexities[mod[:name]][method_name] = result[:known_time_component]
+          spaces[mod[:name]][method_name] = result[:known_space_component]
+          time_complete[mod[:name]][method_name] = result[:time_complete]
+          space_complete[mod[:name]][method_name] = result[:space_complete]
         end
       end
+      [complexities, spaces, time_complete, space_complete]
     end
 
     def structural_method_complexities(modules)
-      complexities = preliminary_method_complexities(modules)
-      spaces = complexities.transform_values { |methods| methods.transform_values { "O(1)" } }
+      complexities, spaces, time_complete, space_complete = preliminary_method_complexities(modules)
       internal_calls = internal_calls_by_method(modules)
       structural_big_o = Espalier::StructuralBigO.new(
         facts_by_method: complexity_facts_by_method(modules),
         method_complexities: complexities,
         method_spaces: spaces,
+        method_time_complete: time_complete,
+        method_space_complete: space_complete,
         internal_calls: internal_calls,
         recursive_edges: recursive_internal_edges(internal_calls)
       )
@@ -259,6 +275,12 @@ module Espalier
         })
         structural_big_o.instance_variable_set(:@method_spaces, spaces.transform_values { |methods|
           methods.transform_values { |space| space }
+        })
+        structural_big_o.instance_variable_set(:@method_time_complete, time_complete.transform_values { |methods|
+          methods.transform_values { |complete| complete }
+        })
+        structural_big_o.instance_variable_set(:@method_space_complete, space_complete.transform_values { |methods|
+          methods.transform_values { |complete| complete }
         })
 
         slices = modules.each_slice((modules.size.to_f / cores).ceil).to_a
@@ -280,15 +302,21 @@ module Espalier
                 result = local_analyzer.analyze_method(key, nodes, local_types: local_types_for_signature(sig))
                 current = complexities[mod[:name]][method[:name].to_s] || "O(1)"
                 current_space = spaces[mod[:name]][method[:name].to_s] || "O(1)"
-                time_changed = (result[:lower_bound_complexity] == "unknown" && current != "unknown") ||
-                  complexity_rank(result[:lower_bound_complexity]) > complexity_rank(current)
-                space_changed = (result[:space_complexity] == "unknown" && current_space != "unknown") ||
-                  complexity_rank(result[:space_complexity]) > complexity_rank(current_space)
-                if time_changed || space_changed
+                current_time_complete = time_complete[mod[:name]][method[:name].to_s]
+                current_space_complete = space_complete[mod[:name]][method[:name].to_s]
+                time_changed = complexity_rank(result[:known_time_component]) > complexity_rank(current)
+                space_changed = complexity_rank(result[:known_space_component]) > complexity_rank(current_space)
+                next_time_complete = current_time_complete != false && result[:time_complete]
+                next_space_complete = current_space_complete != false && result[:space_complete]
+                time_complete_changed = next_time_complete != current_time_complete
+                space_complete_changed = next_space_complete != current_space_complete
+                if time_changed || space_changed || time_complete_changed || space_complete_changed
                   local_changes << [
                     mod[:name], method[:name].to_s,
-                    time_changed ? result[:lower_bound_complexity] : current,
-                    space_changed ? result[:space_complexity] : current_space
+                    time_changed ? result[:known_time_component] : current,
+                    space_changed ? result[:known_space_component] : current_space,
+                    next_time_complete,
+                    next_space_complete
                   ]
                 end
               end
@@ -298,16 +326,18 @@ module Espalier
         end
 
         results = threads.flat_map(&:join).flat_map(&:value)
-        results.each do |mod_name, method_name, complexity, space|
+        results.each do |mod_name, method_name, complexity, space, complete_time, complete_space|
           complexities[mod_name][method_name] = complexity
           spaces[mod_name][method_name] = space
+          time_complete[mod_name][method_name] = complete_time
+          space_complete[mod_name][method_name] = complete_space
           changed = true
         end
 
         break unless changed
       end
 
-      [complexities, spaces]
+      [complexities, spaces, time_complete, space_complete]
     end
 
     def internal_calls_by_method(modules)
@@ -391,6 +421,8 @@ module Espalier
           method: delegation[:message],
           line: delegation[:line] || method[:line] || 0,
           execution_complexity: context && context["execution_multiplicity"],
+          known_time_complexity: context && context["known_time_complexity"],
+          known_space_complexity: context && context["known_space_complexity"],
           collection_arguments: context && context["power"].to_i.positive? &&
             (Array(context["parameter_arguments"]) & Array(context["collection_parameters"])),
           internal_call: delegation[:receiver].to_s == "self" && Array(mod[:methods]).any? { |candidate| candidate[:name].to_s == delegation[:message].to_s }

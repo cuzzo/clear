@@ -4,6 +4,7 @@ use super::{
 };
 use crate::ast::{Node, Span};
 use crate::syntax::cfg::ControlFlowProfile;
+use crate::type_inference::TypeExpr;
 use std::collections::BTreeMap;
 
 #[derive(Clone, Debug, Default)]
@@ -75,6 +76,7 @@ pub(crate) struct NormalizedNilGuardFact {
 pub(crate) enum BlockCallSemantics {
     Iteration,
     Once,
+    Deferred,
     Unknown,
 }
 
@@ -90,6 +92,12 @@ pub(crate) enum CollectionAllocationSemantics {
     None,
     PreservesReceiver,
     UnknownSize,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub(crate) struct NormalizedCallComplexity {
+    pub(crate) time: &'static str,
+    pub(crate) space: &'static str,
 }
 
 pub(crate) trait NormalizedLanguageBehavior: Sync {
@@ -117,11 +125,30 @@ pub(crate) trait NormalizedLanguageBehavior: Sync {
         false
     }
 
+    fn callback_parameter_names(&self, _function: &Node) -> Vec<String> {
+        Vec::new()
+    }
+
+    fn callback_invocation_message(&self, _message: &str) -> bool {
+        false
+    }
+
     fn empty_check_call(&self, _message: &str) -> bool { false }
     fn visited_membership_call(&self, _message: &str) -> bool { false }
     fn visited_insert_call(&self, _message: &str) -> bool { false }
     fn empty_collection_constructor(&self, _message: &str) -> bool { false }
     fn collection_parameter_type(&self, _type_name: &str) -> bool { false }
+    fn call_complexity(
+        &self,
+        _receiver_type: &TypeExpr,
+        _message: &str,
+    ) -> Option<NormalizedCallComplexity> {
+        None
+    }
+
+    fn literal_receiver_type(&self, _node: &Node) -> Option<TypeExpr> {
+        None
+    }
     fn supports_parameter_normalization(&self) -> bool {
         false
     }
@@ -759,6 +786,7 @@ mod tests {
         assert!(!b.emit_index_assignment_mutation(&node, None));
         assert_eq!(b.self_member_receiver("m"), "m");
         assert!(b.owner_name_from_text(&node).is_none());
+        assert!(b.literal_receiver_type(&node).is_none());
         assert_eq!(b.parameter_list_source("("), "");
         assert!(b.parameter_name_from_signature("").is_none());
         assert!(b.literal_state_refs(&node, "text").is_empty());

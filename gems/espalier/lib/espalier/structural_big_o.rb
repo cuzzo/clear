@@ -8,10 +8,12 @@ module Espalier
   # Tree-sitter normalization layer. Missing facts remain unknown rather than
   # being guessed from source strings.
   class StructuralBigO
-    def initialize(facts_by_method: {}, method_complexities: {}, method_spaces: {}, internal_calls: nil, recursive_edges: nil)
+    def initialize(facts_by_method: {}, method_complexities: {}, method_spaces: {}, method_time_complete: {}, method_space_complete: {}, internal_calls: nil, recursive_edges: nil)
       @facts_by_method = facts_by_method
       @method_complexities = method_complexities
       @method_spaces = method_spaces
+      @method_time_complete = method_time_complete
+      @method_space_complete = method_space_complete
       @internal_calls = internal_calls
       @recursive_edges = recursive_edges || {}
     end
@@ -38,15 +40,18 @@ module Espalier
             # proof yet, so multiplying the previous fixed-point estimate would
             # fabricate ever-growing polynomial powers.
             unless caller == callee
+              mutual = mutual_recursion_summary(owner.to_s, caller)
               hints << {
                 type: :structural,
                 line: context.fetch("line", method[:line]).to_i,
-                complexity: "unknown",
-                space: "unknown",
+                complexity: mutual ? mutual.fetch(:time) : "unknown",
+                space: mutual ? mutual.fetch(:space) : "unknown",
                 is_dynamic: true,
                 operation: callee,
-                reason: "mutually recursive call progress is unknown",
-                confidence: "unknown",
+                reason: mutual ? mutual.fetch(:reason) : "mutually recursive call progress is unknown",
+                confidence: mutual ? "high" : "unknown",
+                time_complete: !mutual.nil?,
+                space_complete: !mutual.nil?,
                 fact_source: "fact_mine"
               }
             end
@@ -55,8 +60,11 @@ module Espalier
 
           callee_complexity = @method_complexities.dig(owner.to_s, callee)
           callee_space = @method_spaces.dig(owner.to_s, callee)
+          callee_time_complete = @method_time_complete.dig(owner.to_s, callee) != false
+          callee_space_complete = @method_space_complete.dig(owner.to_s, callee) != false
           next unless callee_complexity || callee_space
-          next if callee_complexity == "O(1)" && (!callee_space || callee_space == "O(1)")
+          next if callee_complexity == "O(1)" && (!callee_space || callee_space == "O(1)") &&
+            callee_time_complete && callee_space_complete
 
           hints << {
             type: :structural,
@@ -71,6 +79,8 @@ module Espalier
             operation: context["message"],
             reason: "normalized call containment and propagated callee complexity",
             confidence: "high",
+            time_complete: callee_time_complete,
+            space_complete: callee_space_complete,
             fact_source: "fact_mine"
           }
         end
@@ -79,6 +89,51 @@ module Espalier
     end
 
     private
+
+    def mutual_recursion_summary(owner, member)
+      graph = @internal_calls&.fetch(owner, nil)
+      return nil unless graph
+
+      members = graph.keys.select do |candidate|
+        reachable?(graph, member, candidate) && reachable?(graph, candidate, member)
+      end
+      return nil if members.length < 2
+
+      progress = members.flat_map do |caller|
+        recursive_targets = Array(graph[caller]).select { |callee| members.include?(callee.to_s) }
+        return nil unless recursive_targets.length == 1
+
+        contexts = Array(@facts_by_method[[owner, caller]]).flat_map do |fact|
+          Array(fact["call_contexts"])
+        end.select { |context| context["message"].to_s == recursive_targets.first.to_s }
+        return nil unless contexts.length == 1
+
+        edge_progress = contexts.first["argument_progress"].to_s
+        return nil unless %w[shrinking halving].include?(edge_progress)
+        edge_progress
+      end
+
+      logarithmic = progress.all? { |value| value == "halving" }
+      {
+        time: logarithmic ? "O(log N)" : "O(N)",
+        space: logarithmic ? "O(log N)" : "O(N)",
+        reason: "size-change proof for single-branch mutually recursive component"
+      }
+    end
+
+    def reachable?(graph, start, target)
+      pending = [start.to_s]
+      visited = {}
+      until pending.empty?
+        current = pending.pop
+        return true if current == target.to_s
+        next if visited[current]
+
+        visited[current] = true
+        pending.concat(Array(graph[current]).map(&:to_s))
+      end
+      false
+    end
 
     def summary_hint(fact, method)
       iterations = Array(fact["iterations"])
@@ -103,6 +158,8 @@ module Espalier
         operation: "normalized_complexity_facts",
         reason: recursion_reason || iteration_reason(iterations),
         confidence: complexity == "unknown" ? "unknown" : "high",
+        time_complete: complexity != "unknown",
+        space_complete: max_space_complexity(allocation_space, recursion_space) != "unknown",
         fact_source: "fact_mine"
       }
     end
@@ -128,6 +185,10 @@ module Espalier
       return ["O(1)", nil, nil] if calls.zero?
       unknown = recursion.fetch("unknown_progress_calls", 0).to_i
       return ["unknown", "unknown", "recursive argument progress is unknown"] if unknown.positive?
+      visited = recursion.fetch("visited_guarded_calls", 0).to_i
+      if visited.positive?
+        return ["O(N)", "O(N)", "visited-set guarded structural recursion"]
+      end
 
       shrinking = recursion.fetch("shrinking_calls", 0).to_i
       halving = recursion.fetch("halving_calls", 0).to_i

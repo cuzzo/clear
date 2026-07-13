@@ -221,6 +221,8 @@ pub struct FunctionDef {
     pub visibility: Option<String>,
     pub params: Vec<String>,
     #[serde(default)]
+    pub callback_params: Vec<String>,
+    #[serde(default)]
     pub signature: String,
 }
 

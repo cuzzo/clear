@@ -25,11 +25,12 @@ use super::effects::{effect_from_call_with_lexicon, EffectLexicon};
 use super::normalized_behavior::{
     eliminable_guard_from_call, matching_paren_index, BlockCallSemantics, CardinalityCallSemantics,
     CollectionAllocationSemantics, NormalizedCallParts, NormalizedCallProjection,
-    NormalizedLanguageBehavior, NormalizedNilGuardFact, NormalizedSemanticEffect,
+    NormalizedCallComplexity, NormalizedLanguageBehavior, NormalizedNilGuardFact, NormalizedSemanticEffect,
     NormalizedVisibilityEvent, SyntaxMetadata,
 };
 use super::{CallSite, FunctionDef, StateDeclaration};
 use crate::ast::{self, Node, Span};
+use crate::type_inference::TypeExpr;
 use std::collections::{BTreeMap, BTreeSet};
 
 const RUBY_CONTEXT_PAIRS: &[(&str, &[&str])] = &[
@@ -236,6 +237,8 @@ impl NormalizedLanguageBehavior for RubyNormalizedBehavior {
             BlockCallSemantics::Iteration
         } else if RUBY_ONCE_BLOCK_METHODS.contains(&message) {
             BlockCallSemantics::Once
+        } else if ["lambda", "proc"].contains(&message) {
+            BlockCallSemantics::Deferred
         } else {
             BlockCallSemantics::Unknown
         }
@@ -259,6 +262,30 @@ impl NormalizedLanguageBehavior for RubyNormalizedBehavior {
         message == "each_value"
     }
 
+    fn callback_parameter_names(&self, function: &Node) -> Vec<String> {
+        fn collect(node: &Node, output: &mut BTreeSet<String>) {
+            if node.r#type == "LASGN" && node.text.trim_start().starts_with('&') {
+                if let Some(name) = node.children.first().and_then(|child| match child {
+                    ast::Child::String(value) | ast::Child::Symbol(value) => Some(value.clone()),
+                    _ => None,
+                }) {
+                    output.insert(name);
+                }
+            }
+            for child in node.children.iter().filter_map(ast::node) {
+                collect(child, output);
+            }
+        }
+
+        let mut output = BTreeSet::new();
+        collect(function, &mut output);
+        output.into_iter().collect()
+    }
+
+    fn callback_invocation_message(&self, message: &str) -> bool {
+        message == "call"
+    }
+
     fn empty_check_call(&self, message: &str) -> bool {
         message == "empty?"
     }
@@ -277,6 +304,55 @@ impl NormalizedLanguageBehavior for RubyNormalizedBehavior {
 
     fn collection_parameter_type(&self, type_name: &str) -> bool {
         ["Array", "Hash", "Set", "Enumerable"].iter().any(|name| type_name.contains(name))
+    }
+
+    fn call_complexity(&self, receiver_type: &TypeExpr, message: &str) -> Option<NormalizedCallComplexity> {
+        let receiver = match receiver_type.strip_nilable() {
+            TypeExpr::Array(_) => "Array",
+            TypeExpr::Hash { .. } => "Hash",
+            TypeExpr::Set(_) => "Set",
+            TypeExpr::Primitive(name) => match name.rsplit("::").next().unwrap_or(&name) {
+                "Array" => "Array", "Hash" => "Hash", "Set" => "Set", "String" => "String",
+                _ => return None,
+            },
+            _ => return None,
+        };
+        let (time, space) = match (receiver, message) {
+            ("Array", "[]" | "length" | "size" | "first" | "last" | "empty?" | "push" | "pop") => ("O(1)", "O(1)"),
+            ("Array", "include?" | "index" | "rindex") => ("O(N)", "O(1)"),
+            ("Array", "join") => ("O(N)", "O(N)"),
+            ("Array", "each" | "each_with_index" | "each_index" | "reverse_each") => ("O(N)", "O(1)"),
+            ("Array", "map" | "collect" | "select" | "reject" | "filter" | "filter_map" | "compact" | "flatten" | "values" | "to_set" | "+" | "concat") => ("O(N)", "O(N)"),
+            ("Array", "sort" | "sort_by") => ("O(N log N)", "O(N)"),
+            ("Array", "-" | "&" | "|") => ("O(N * M)", "O(N)"),
+            ("Hash", "[]" | "key?" | "has_key?" | "include?" | "length" | "size" | "empty?") => ("O(1)", "O(1)"),
+            ("Hash", "each" | "each_key" | "each_value" | "each_pair" | "delete_if") => ("O(N)", "O(1)"),
+            ("Hash", "map" | "merge" | "keys" | "values" | "dup" | "to_set" | "transform_keys" | "transform_values") => ("O(N)", "O(N)"),
+            ("Hash", "sort" | "sort_by") => ("O(N log N)", "O(N)"),
+            ("Set", "include?" | "contains" | "length" | "size" | "empty?" | "add" | "insert") => ("O(1)", "O(1)"),
+            ("Set", "each") => ("O(N)", "O(1)"),
+            ("Set", "map" | "select" | "reject" | "to_a") => ("O(N)", "O(N)"),
+            ("String", "empty?") => ("O(1)", "O(1)"),
+            ("String", "length" | "size") => ("O(N)", "O(1)"),
+            ("String", "[]") => ("O(N)", "O(N)"),
+            ("String", "scan" | "gsub" | "split" | "+") => ("O(N)", "O(N)"),
+            _ => return None,
+        };
+        Some(NormalizedCallComplexity { time, space })
+    }
+
+    fn literal_receiver_type(&self, node: &Node) -> Option<TypeExpr> {
+        match node.r#type.as_str() {
+            "ARRAY" | "LIST" | "ZLIST" => {
+                Some(TypeExpr::Array(Box::new(TypeExpr::Untyped)))
+            }
+            "HASH" => Some(TypeExpr::Hash {
+                key: Box::new(TypeExpr::Untyped),
+                value: Box::new(TypeExpr::Untyped),
+            }),
+            "STR" | "DSTR" => Some(TypeExpr::Primitive("String".to_string())),
+            _ => None,
+        }
     }
 
     fn state_declaration_from_node(
@@ -1493,6 +1569,31 @@ mod tests {
         for message in ["each_pair", "with_index", "index", "to_h", "gsub", "transform_values"] {
             assert_eq!(behavior.block_call_semantics(message), BlockCallSemantics::Iteration);
         }
+        assert_eq!(behavior.block_call_semantics("lambda"), BlockCallSemantics::Deferred);
+        assert_eq!(behavior.block_call_semantics("proc"), BlockCallSemantics::Deferred);
+        let array = TypeExpr::Array(Box::new(TypeExpr::Primitive("String".into())));
+        let hash = TypeExpr::Hash {
+            key: Box::new(TypeExpr::Primitive("String".into())),
+            value: Box::new(TypeExpr::Primitive("Integer".into())),
+        };
+        let set = TypeExpr::Set(Box::new(TypeExpr::Primitive("String".into())));
+        let string = TypeExpr::Primitive("String".into());
+        for message in ["[]", "include?", "each", "map", "sort", "-"] {
+            assert!(behavior.call_complexity(&array, message).is_some(), "Array##{message}");
+        }
+        for message in ["[]", "each_value", "keys", "sort"] {
+            assert!(behavior.call_complexity(&hash, message).is_some(), "Hash##{message}");
+        }
+        for message in ["include?", "each", "map"] {
+            assert!(behavior.call_complexity(&set, message).is_some(), "Set##{message}");
+        }
+        for message in ["length", "split"] {
+            assert!(behavior.call_complexity(&string, message).is_some(), "String##{message}");
+        }
+        assert!(behavior.call_complexity(&TypeExpr::Primitive("T::Array".into()), "concat").is_some());
+        assert!(behavior.call_complexity(&TypeExpr::Nilable(Box::new(hash)), "key?").is_some());
+        assert!(behavior.call_complexity(&array, "mystery").is_none());
+        assert!(behavior.call_complexity(&TypeExpr::Untyped, "each").is_none());
         assert!(behavior.iteration_yields_collection_value("each_value"));
         assert!(!behavior.iteration_yields_collection_value("each_pair"));
 
@@ -1622,6 +1723,7 @@ mod tests {
             body: mock_body.clone(),
             visibility: None,
             params: Vec::new(),
+            callback_params: Vec::new(),
             signature: String::new(),
         };
         let reader_sets = immutable_struct_reader_sets("class Parent; end", &[mock_fn]);
@@ -1947,6 +2049,7 @@ mod tests {
             body: mock_body.clone(),
             visibility: None,
             params: Vec::new(),
+            callback_params: Vec::new(),
             signature: String::new(),
         };
 

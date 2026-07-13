@@ -24,6 +24,33 @@ pub struct MethodComplexityFacts {
     pub recursion: RecursionFacts,
     pub allocations: Vec<AllocationFact>,
     pub call_contexts: Vec<CallContainmentFact>,
+    #[serde(default)]
+    pub block_invocations: Vec<BlockInvocationFact>,
+    #[serde(default)]
+    pub deferred_regions: Vec<DeferredRegionFact>,
+}
+
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+pub struct DeferredRegionFact {
+    pub line: usize,
+    pub span: [usize; 4],
+    pub constructor: String,
+}
+
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+pub struct BlockInvocationFact {
+    pub parameter: String,
+    pub line: usize,
+    pub execution_multiplicity: String,
+    pub power: usize,
+    pub classification: String,
+}
+
+#[derive(Clone, Debug, Default)]
+struct BlockSummary {
+    power: usize,
+    unknown: bool,
+    invocations: usize,
 }
 
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
@@ -46,6 +73,12 @@ pub struct CallContainmentFact {
     pub power: usize,
     pub parameter_arguments: Vec<String>,
     pub argument_cardinality_relation: String,
+    #[serde(default)]
+    pub argument_progress: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub known_time_complexity: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub known_space_complexity: Option<String>,
 }
 
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
@@ -72,6 +105,8 @@ pub struct RecursionFacts {
     pub calls: usize,
     pub shrinking_calls: usize,
     pub halving_calls: usize,
+    #[serde(default)]
+    pub visited_guarded_calls: usize,
     pub loop_contained_shrinking_calls: usize,
     pub unknown_progress_calls: usize,
 }
@@ -107,6 +142,7 @@ struct LoopContext {
 
 pub(crate) fn facts(document: &Document) -> Vec<MethodComplexityFacts> {
     let behavior = super::normalized_behavior::behavior(document.language);
+    let block_summaries = preliminary_block_summaries(document, behavior);
     document
         .local_methods
         .iter()
@@ -121,6 +157,9 @@ pub(crate) fn facts(document: &Document) -> Vec<MethodComplexityFacts> {
             let owner = definition
                 .map(|row| row.owner.as_str())
                 .unwrap_or(&method.owner);
+            let callback_params = definition
+                .map(|row| row.callback_params.iter().cloned().collect::<BTreeSet<_>>())
+                .unwrap_or_default();
             let state_types = document
                 .state_declarations
                 .iter()
@@ -145,6 +184,18 @@ pub(crate) fn facts(document: &Document) -> Vec<MethodComplexityFacts> {
                 }
             }
             let type_key = format!("{}\u{0}{}", owner, method.name);
+            let parameter_types = document
+                .method_param_types
+                .get(&type_key)
+                .into_iter()
+                .flat_map(|types| types.iter())
+                .map(|(name, value)| {
+                    (
+                        name.clone(),
+                        TypeExpr::parse(value, document.language.as_str()),
+                    )
+                })
+                .collect::<BTreeMap<_, _>>();
             let collection_parameters = document
                 .method_param_types
                 .get(&type_key)
@@ -162,6 +213,9 @@ pub(crate) fn facts(document: &Document) -> Vec<MethodComplexityFacts> {
                 &method.node,
                 &params,
                 &collection_parameters,
+                &parameter_types,
+                &callback_params,
+                &block_summaries,
                 &state_types,
                 &scoped_type_aliases,
                 document.language.as_str(),
@@ -169,6 +223,91 @@ pub(crate) fn facts(document: &Document) -> Vec<MethodComplexityFacts> {
             )
         })
         .collect()
+}
+
+fn preliminary_block_summaries(
+    document: &Document,
+    behavior: &dyn NormalizedLanguageBehavior,
+) -> BTreeMap<(String, String), BlockSummary> {
+    document
+        .local_methods
+        .iter()
+        .filter_map(|method| {
+            let definition = document
+                .function_defs
+                .iter()
+                .find(|row| row.name == method.name && row.line == method.line)?;
+            let callback_params = definition
+                .callback_params
+                .iter()
+                .cloned()
+                .collect::<BTreeSet<_>>();
+            if callback_params.is_empty() {
+                return None;
+            }
+            let mut summary = BlockSummary::default();
+            collect_block_invocations(
+                &method.node,
+                &callback_params,
+                0,
+                false,
+                &mut summary,
+                behavior,
+            );
+            Some(((definition.owner.clone(), method.name.clone()), summary))
+        })
+        .collect()
+}
+
+fn collect_block_invocations(
+    node: &Node,
+    callback_params: &BTreeSet<String>,
+    power: usize,
+    unknown: bool,
+    summary: &mut BlockSummary,
+    behavior: &dyn NormalizedLanguageBehavior,
+) {
+    if deferred_block(node, behavior) {
+        return;
+    }
+    if let Some(message) = direct_call_message(node) {
+        if behavior.callback_invocation_message(message) {
+            let receiver_names = call_receiver(node).map(local_names).unwrap_or_default();
+            if !receiver_names.is_disjoint(callback_params) {
+                summary.invocations += 1;
+                summary.power = summary.power.max(power);
+                summary.unknown |= unknown;
+            }
+        }
+    }
+
+    if loop_node(node, behavior) {
+        let semantics = if node.r#type == "ITER" {
+            iterator_message(node)
+                .map(|message| behavior.block_call_semantics(message))
+                .unwrap_or(BlockCallSemantics::Unknown)
+        } else {
+            BlockCallSemantics::Iteration
+        };
+        if let Some(control) = loop_control(node) {
+            collect_block_invocations(control, callback_params, power, unknown, summary, behavior);
+        }
+        if let Some(body) = loop_body(node) {
+            collect_block_invocations(
+                body,
+                callback_params,
+                power + usize::from(semantics == BlockCallSemantics::Iteration),
+                unknown || semantics == BlockCallSemantics::Unknown,
+                summary,
+                behavior,
+            );
+        }
+        return;
+    }
+
+    for child in child_nodes(node) {
+        collect_block_invocations(child, callback_params, power, unknown, summary, behavior);
+    }
 }
 
 fn fact_for_method(
@@ -180,6 +319,9 @@ fn fact_for_method(
     node: &Node,
     params: &BTreeSet<String>,
     collection_parameters: &BTreeSet<String>,
+    parameter_types: &BTreeMap<String, TypeExpr>,
+    callback_params: &BTreeSet<String>,
+    block_summaries: &BTreeMap<(String, String), BlockSummary>,
     state_types: &BTreeMap<String, TypeExpr>,
     type_aliases: &BTreeMap<String, String>,
     language: &str,
@@ -190,6 +332,9 @@ fn fact_for_method(
     let mut max_power = 0;
     let mut evidence = Vec::new();
     let mut call_contexts = Vec::new();
+    let mut block_invocations = Vec::new();
+    let mut deferred_regions = Vec::new();
+    collect_deferred_regions(node, &mut deferred_regions, behavior);
     let mut collection_growth = BTreeMap::new();
     visit_loops(
         node,
@@ -199,23 +344,43 @@ fn fact_for_method(
         &mut max_power,
         &mut evidence,
         &mut call_contexts,
+        &mut block_invocations,
         &mut collection_growth,
+        parameter_types,
+        owner,
+        callback_params,
+        block_summaries,
         state_types,
         type_aliases,
         language,
         behavior,
     );
     let mut recursion = RecursionFacts::default();
-    collect_recursion(node, function, false, &assignments, &mut recursion, behavior);
-    recursion.unknown_progress_calls = recursion
-        .calls
-        .saturating_sub(recursion.shrinking_calls + recursion.halving_calls);
+    let visited_guards = visited_guard_parameters(node, params, behavior);
+    collect_recursion(
+        node,
+        function,
+        false,
+        &assignments,
+        &visited_guards,
+        &mut recursion,
+        behavior,
+    );
+    recursion.unknown_progress_calls = recursion.calls.saturating_sub(
+        recursion.shrinking_calls + recursion.halving_calls + recursion.visited_guarded_calls,
+    );
     let mut allocations = Vec::new();
     collect_allocations(node, params, &assignments, &mut allocations, behavior);
     allocations.sort_by_key(|fact| (fact.line, fact.span[1], fact.kind.clone()));
     allocations.dedup_by(|left, right| left.span == right.span && left.kind == right.kind);
 
-    if evidence.is_empty() && recursion.calls == 0 && allocations.is_empty() && call_contexts.is_empty() {
+    if evidence.is_empty()
+        && recursion.calls == 0
+        && allocations.is_empty()
+        && call_contexts.is_empty()
+        && block_invocations.is_empty()
+        && deferred_regions.is_empty()
+    {
         return None;
     }
 
@@ -231,7 +396,32 @@ fn fact_for_method(
         recursion,
         allocations,
         call_contexts,
+        block_invocations,
+        deferred_regions,
     })
+}
+
+fn collect_deferred_regions(
+    node: &Node,
+    output: &mut Vec<DeferredRegionFact>,
+    behavior: &dyn NormalizedLanguageBehavior,
+) {
+    if deferred_block(node, behavior) {
+        output.push(DeferredRegionFact {
+            line: node.first_lineno,
+            span: [
+                node.first_lineno,
+                node.first_column,
+                node.last_lineno,
+                node.last_column,
+            ],
+            constructor: iterator_message(node).unwrap_or_default().to_string(),
+        });
+        return;
+    }
+    for child in child_nodes(node) {
+        collect_deferred_regions(child, output, behavior);
+    }
 }
 
 fn collect_allocations(
@@ -241,6 +431,9 @@ fn collect_allocations(
     output: &mut Vec<AllocationFact>,
     behavior: &dyn NormalizedLanguageBehavior,
 ) {
+    if deferred_block(node, behavior) {
+        return;
+    }
     if let Some(message) = direct_call_message(node) {
         let semantics = behavior.collection_allocation_semantics(message);
         if semantics != CollectionAllocationSemantics::None {
@@ -254,9 +447,11 @@ fn collect_allocations(
             let receiver = call_receiver(node);
             let receiver_is_call = receiver.is_some_and(call_has_arguments);
             let fixed_receiver = receiver.is_some_and(|value| {
-                matches!(value.r#type.as_str(), "ARRAY" | "HASH" | "LIST") && local_names(value).is_empty()
+                matches!(value.r#type.as_str(), "ARRAY" | "HASH" | "LIST")
+                    && local_names(value).is_empty()
             });
-            let (relation, bound) = if semantics == CollectionAllocationSemantics::UnknownSize || receiver_is_call {
+            let (relation, bound) =
+                if semantics == CollectionAllocationSemantics::UnknownSize || receiver_is_call {
                 ("unknown", "unknown")
             } else if !parameter_domains.is_empty() {
                 ("same", "input")
@@ -294,7 +489,12 @@ fn visit_loops(
     max_power: &mut usize,
     evidence: &mut Vec<IterationFact>,
     call_contexts: &mut Vec<CallContainmentFact>,
+    block_invocations: &mut Vec<BlockInvocationFact>,
     collection_growth: &mut BTreeMap<String, CollectionGrowth>,
+    parameter_types: &BTreeMap<String, TypeExpr>,
+    owner: &str,
+    callback_params: &BTreeSet<String>,
+    block_summaries: &BTreeMap<(String, String), BlockSummary>,
     state_types: &BTreeMap<String, TypeExpr>,
     type_aliases: &BTreeMap<String, String>,
     language: &str,
@@ -302,11 +502,53 @@ fn visit_loops(
 ) {
     let block_semantics = if node.r#type == "ITER" {
         iterator_message(node)
-            .map(|message| behavior.block_call_semantics(message))
+            .map(|message| {
+                let configured = behavior.block_call_semantics(message);
+                if configured != BlockCallSemantics::Unknown {
+                    configured
+                } else {
+                    block_summaries
+                        .get(&(owner.to_string(), message.to_string()))
+                        .map(|summary| {
+                            if summary.unknown || summary.invocations == 0 {
+                                BlockCallSemantics::Unknown
+                            } else if summary.power == 0 {
+                                BlockCallSemantics::Once
+                            } else {
+                                BlockCallSemantics::Iteration
+                            }
+                        })
+                        .unwrap_or(BlockCallSemantics::Unknown)
+                }
+            })
             .unwrap_or(BlockCallSemantics::Unknown)
     } else {
         BlockCallSemantics::Iteration
     };
+    if block_semantics == BlockCallSemantics::Deferred {
+        if let Some(control) = loop_control(node) {
+            visit_loops(
+                control,
+                params,
+                assignments,
+                parent,
+                max_power,
+                evidence,
+                call_contexts,
+                block_invocations,
+                collection_growth,
+                parameter_types,
+                owner,
+                callback_params,
+                block_summaries,
+                state_types,
+                type_aliases,
+                language,
+                behavior,
+            );
+        }
+        return;
+    }
     if node.r#type == "ITER" && block_semantics == BlockCallSemantics::Once {
         for child in child_nodes(node) {
             visit_loops(
@@ -317,7 +559,12 @@ fn visit_loops(
                 max_power,
                 evidence,
                 call_contexts,
+                block_invocations,
                 collection_growth,
+                parameter_types,
+                owner,
+                callback_params,
+                block_summaries,
                 state_types,
                 type_aliases,
                 language,
@@ -352,7 +599,8 @@ fn visit_loops(
             .iter()
             .filter_map(|name| collection_growth.get(name).map(|growth| growth.power))
             .max();
-        let unknown_iteration = node.r#type == "ITER" && block_semantics == BlockCallSemantics::Unknown;
+        let unknown_iteration =
+            node.r#type == "ITER" && block_semantics == BlockCallSemantics::Unknown;
         let fixed = !unknown_iteration
             && refs.is_empty()
             && states.is_empty()
@@ -382,16 +630,27 @@ fn visit_loops(
         } else if parent.absorb_next {
             power = parent.power;
         } else if !fixed {
+            let inferred_block_power = if node.r#type == "ITER" {
+                iterator_message(node)
+                    .and_then(|message| {
+                        block_summaries.get(&(owner.to_string(), message.to_string()))
+                    })
+                    .filter(|summary| !summary.unknown)
+                    .map(|summary| summary.power.max(1))
+                    .unwrap_or(1)
+            } else {
+                1
+            };
             power = if let Some(growth_power) = growth_power {
                 parent.power + growth_power
             } else if !locals.is_disjoint(&parent.independent_collection_bindings) {
-                parent.power + 1
+                parent.power + inferred_block_power
             } else if refs.is_empty() {
                 power.max(1)
             } else if amortized {
                 power.max(1)
             } else {
-                power + 1
+                power + inferred_block_power
             };
         }
         let fixpoint = fixpoint_loop(node, control, behavior);
@@ -405,7 +664,11 @@ fn visit_loops(
             "fixed"
         } else if !locals.is_disjoint(&parent.independent_collection_bindings) {
             "independent_of"
-        } else if amortized || parent.collapse_direct_child || parent.absorb_next || (refs.is_empty() && states.is_empty()) {
+        } else if amortized
+            || parent.collapse_direct_child
+            || parent.absorb_next
+            || (refs.is_empty() && states.is_empty())
+        {
             "partition_of"
         } else {
             "independent_of"
@@ -424,8 +687,19 @@ fn visit_loops(
             state_domains: states.iter().cloned().collect(),
             domain_expression: domain_names.iter().cloned().collect(),
             cardinality_relation: relation.to_string(),
-            bound_classification: if unknown_iteration { "unknown" } else if fixed { "fixed" } else { "input" }.to_string(),
-            execution_multiplicity: if unknown_iteration { "unknown".to_string() } else { polynomial(power) },
+            bound_classification: if unknown_iteration {
+                "unknown"
+            } else if fixed {
+                "fixed"
+            } else {
+                "input"
+            }
+            .to_string(),
+            execution_multiplicity: if unknown_iteration {
+                "unknown".to_string()
+            } else {
+                polynomial(power)
+            },
             power,
             fixed,
             amortized,
@@ -441,8 +715,7 @@ fn visit_loops(
                 .and_then(|state| state_types.get(state.trim_start_matches('@')))
                 .is_some_and(|state_type| {
                     iteration_yields_collection_value(state_type, type_aliases, language)
-                })
-        {
+                }) {
             bindings.clone()
         } else {
             BTreeSet::new()
@@ -470,7 +743,12 @@ fn visit_loops(
                 max_power,
                 evidence,
                 call_contexts,
+                block_invocations,
                 collection_growth,
+                parameter_types,
+                owner,
+                callback_params,
+                block_summaries,
                 state_types,
                 type_aliases,
                 language,
@@ -486,7 +764,12 @@ fn visit_loops(
                 max_power,
                 evidence,
                 call_contexts,
+                block_invocations,
                 collection_growth,
+                parameter_types,
+                owner,
+                callback_params,
+                block_summaries,
                 state_types,
                 type_aliases,
                 language,
@@ -496,6 +779,29 @@ fn visit_loops(
     } else {
         record_collection_growth(node, parent, collection_growth, behavior);
         if let Some(message) = direct_call_message(node) {
+            if behavior.callback_invocation_message(message) {
+                let receiver_names = call_receiver(node).map(local_names).unwrap_or_default();
+                for parameter in receiver_names.intersection(callback_params) {
+                    block_invocations.push(BlockInvocationFact {
+                        parameter: parameter.clone(),
+                        line: node.first_lineno,
+                        execution_multiplicity: if parent.unknown {
+                            "unknown".to_string()
+                        } else {
+                            polynomial(parent.power)
+                        },
+                        power: parent.power,
+                        classification: if parent.unknown {
+                            "unknown"
+                        } else if parent.power == 0 {
+                            "constant"
+                        } else {
+                            "per_iteration"
+                        }
+                        .to_string(),
+                    });
+                }
+            }
             let argument_names = call_argument_nodes(node)
                 .into_iter()
                 .flat_map(local_names)
@@ -515,6 +821,15 @@ fn visit_loops(
             } else {
                 "unknown"
             };
+            let known_call_complexity = call_receiver_type(
+                node,
+                parameter_types,
+                assignments,
+                state_types,
+                (node.first_lineno, node.first_column),
+                behavior,
+            )
+            .and_then(|receiver_type| behavior.call_complexity(&receiver_type, message));
             call_contexts.push(CallContainmentFact {
                     line: node.first_lineno,
                     span: [
@@ -524,13 +839,23 @@ fn visit_loops(
                         node.last_column,
                     ],
                     message: message.to_string(),
-                    execution_multiplicity: if parent.unknown { "unknown".to_string() } else { polynomial(parent.power) },
+                execution_multiplicity: if parent.unknown {
+                    "unknown".to_string()
+                } else {
+                    polynomial(parent.power)
+                },
                     power: parent.power,
-                    parameter_arguments: local_names(node)
-                        .intersection(params)
-                        .cloned()
-                        .collect(),
+                parameter_arguments: local_names(node).intersection(params).cloned().collect(),
                     argument_cardinality_relation: argument_cardinality_relation.to_string(),
+                argument_progress: call_argument_progress(
+                    node,
+                    assignments,
+                    (node.first_lineno, node.first_column),
+                ),
+                known_time_complexity: known_call_complexity
+                    .map(|complexity| complexity.time.to_string()),
+                known_space_complexity: known_call_complexity
+                    .map(|complexity| complexity.space.to_string()),
             });
         }
         for child in child_nodes(node) {
@@ -542,7 +867,12 @@ fn visit_loops(
                 max_power,
                 evidence,
                 call_contexts,
+                block_invocations,
                 collection_growth,
+                parameter_types,
+                owner,
+                callback_params,
+                block_summaries,
                 state_types,
                 type_aliases,
                 language,
@@ -550,6 +880,37 @@ fn visit_loops(
             );
         }
     }
+}
+
+fn call_receiver_type(
+    node: &Node,
+    parameter_types: &BTreeMap<String, TypeExpr>,
+    assignments: &BTreeMap<String, Vec<Assignment>>,
+    state_types: &BTreeMap<String, TypeExpr>,
+    before: (usize, usize),
+    behavior: &dyn NormalizedLanguageBehavior,
+) -> Option<TypeExpr> {
+    let receiver = call_receiver(node)?;
+    if let Some(literal_type) = behavior.literal_receiver_type(receiver) {
+        return Some(literal_type);
+    }
+
+    for state in state_names(receiver) {
+        if let Some(state_type) = state_types.get(state.trim_start_matches('@')) {
+            return Some(state_type.clone());
+        }
+    }
+    let receiver_names = local_names(receiver);
+    for name in &receiver_names {
+        if let Some(parameter_type) = parameter_types.get(name) {
+            return Some(parameter_type.clone());
+        }
+    }
+    let typed_parameters = parameter_types.keys().cloned().collect::<BTreeSet<_>>();
+    let domains = parameter_domains(&receiver_names, &typed_parameters, assignments, before);
+    domains
+        .into_iter()
+        .find_map(|name| parameter_types.get(&name).cloned())
 }
 
 fn record_collection_growth(
@@ -616,6 +977,9 @@ fn collect_assignments(
     output: &mut BTreeMap<String, Vec<Assignment>>,
     behavior: &dyn NormalizedLanguageBehavior,
 ) {
+    if deferred_block(node, behavior) {
+        return;
+    }
     if matches!(node.r#type.as_str(), "LASGN" | "DASGN") {
         if let Some(name) = child_string(node.children.first()) {
             let dependencies = node
@@ -640,7 +1004,8 @@ fn collect_assignments(
                     halving: symbols
                         .iter()
                         .any(|symbol| matches!(symbol.as_str(), "/" | ">>")),
-                    empty_collection: rhs.is_some_and(|value| empty_collection_expression(value, behavior)),
+                    empty_collection: rhs
+                        .is_some_and(|value| empty_collection_expression(value, behavior)),
                 });
         }
     }
@@ -674,8 +1039,12 @@ fn linear_worklist(
     let body_locals = local_names(body);
     let symbols = descendant_symbols(body);
     let parameter_visited_set = body_locals.intersection(params).count() >= 2
-        && symbols.iter().any(|symbol| behavior.visited_membership_call(symbol))
-        && symbols.iter().any(|symbol| behavior.visited_insert_call(symbol));
+        && symbols
+            .iter()
+            .any(|symbol| behavior.visited_membership_call(symbol))
+        && symbols
+            .iter()
+            .any(|symbol| behavior.visited_insert_call(symbol));
     if parameter_visited_set {
         return true;
     }
@@ -759,10 +1128,7 @@ fn collect_parameter_dependencies(
     }
 }
 
-fn cardinality_names(
-    node: &Node,
-    behavior: &dyn NormalizedLanguageBehavior,
-) -> BTreeSet<String> {
+fn cardinality_names(node: &Node, behavior: &dyn NormalizedLanguageBehavior) -> BTreeSet<String> {
     if matches!(node.r#type.as_str(), "LVAR" | "DVAR") {
         return local_names(node);
     }
@@ -771,18 +1137,7 @@ fn cardinality_names(
     let normalized_operator = message.is_some_and(|message| {
         matches!(
             message,
-            "+" | "-"
-                | "/"
-                | ">>"
-                | "!"
-                | "&&"
-                | "||"
-                | "and"
-                | "or"
-                | "<"
-                | "<="
-                | ">"
-                | ">="
+            "+" | "-" | "/" | ">>" | "!" | "&&" | "||" | "and" | "or" | "<" | "<=" | ">" | ">="
         )
     });
     if normalized_operator {
@@ -790,7 +1145,9 @@ fn cardinality_names(
     }
     if let Some(message) = message {
         if behavior.cardinality_call_semantics(message) != CardinalityCallSemantics::Unknown {
-            return call_receiver(node).map(local_names).unwrap_or_else(|| local_names(node));
+            return call_receiver(node)
+                .map(local_names)
+                .unwrap_or_else(|| local_names(node));
         }
     }
     if message.is_some() {
@@ -836,7 +1193,10 @@ fn iteration_local_names(
     if let Some(index) = direct_call_message(node)
         .and_then(|message| behavior.iteration_bound_argument(message, arguments.len()))
     {
-        return arguments.get(index).map(|argument| local_names(argument)).unwrap_or_default();
+        return arguments
+            .get(index)
+            .map(|argument| local_names(argument))
+            .unwrap_or_default();
     }
     local_names(node)
 }
@@ -873,17 +1233,58 @@ fn call_has_arguments(node: &Node) -> bool {
     })
 }
 
+fn call_argument_progress(
+    node: &Node,
+    assignments: &BTreeMap<String, Vec<Assignment>>,
+    before: (usize, usize),
+) -> String {
+    let arguments = call_argument_nodes(node);
+    let symbols = arguments
+        .iter()
+        .flat_map(|argument| descendant_symbols(argument))
+        .collect::<Vec<_>>();
+    let assigned_shape = arguments
+        .iter()
+        .flat_map(|argument| local_names(argument))
+        .filter_map(|name| {
+            assignments.get(&name).and_then(|rows| {
+                rows.iter()
+                    .rev()
+                    .find(|row| (row.line, row.column) < before)
+            })
+        })
+        .fold((false, false), |shape, row| {
+            (shape.0 || row.shrinking, shape.1 || row.halving)
+        });
+    if symbols
+        .iter()
+        .any(|symbol| matches!(symbol.as_str(), "/" | ">>"))
+        || assigned_shape.1
+    {
+        "halving".to_string()
+    } else if symbols.iter().any(|symbol| symbol == "-") || assigned_shape.0 {
+        "shrinking".to_string()
+    } else {
+        "unknown".to_string()
+    }
+}
+
 fn collect_recursion(
     node: &Node,
     function: &str,
     inside_loop: bool,
     assignments: &BTreeMap<String, Vec<Assignment>>,
+    visited_guards: &BTreeSet<String>,
     out: &mut RecursionFacts,
     behavior: &dyn NormalizedLanguageBehavior,
 ) {
+    if deferred_block(node, behavior) {
+        return;
+    }
     let now_inside = inside_loop || loop_node(node, behavior);
     if recursive_self_call(node, function) {
         out.calls += 1;
+        let guarded = !local_names(node).is_disjoint(visited_guards);
         let symbols = descendant_symbols(node);
         let assigned_shape = local_names(node)
             .iter()
@@ -895,7 +1296,9 @@ fn collect_recursion(
             .fold((false, false), |shape, row| {
                 (shape.0 || row.shrinking, shape.1 || row.halving)
             });
-        if symbols
+        if guarded {
+            out.visited_guarded_calls += 1;
+        } else if symbols
             .iter()
             .any(|symbol| matches!(symbol.as_str(), "/" | ">>"))
             || assigned_shape.1
@@ -909,8 +1312,56 @@ fn collect_recursion(
         }
     }
     for child in child_nodes(node) {
-        collect_recursion(child, function, now_inside, assignments, out, behavior);
+        collect_recursion(
+            child,
+            function,
+            now_inside,
+            assignments,
+            visited_guards,
+            out,
+            behavior,
+        );
     }
+}
+
+fn visited_guard_parameters(
+    node: &Node,
+    params: &BTreeSet<String>,
+    behavior: &dyn NormalizedLanguageBehavior,
+) -> BTreeSet<String> {
+    fn collect(
+        node: &Node,
+        params: &BTreeSet<String>,
+        membership: &mut BTreeSet<String>,
+        insertion: &mut BTreeSet<String>,
+        behavior: &dyn NormalizedLanguageBehavior,
+    ) {
+        if deferred_block(node, behavior) {
+            return;
+        }
+        if let Some(message) = direct_call_message(node) {
+            let receiver_params = call_receiver(node)
+                .map(local_names)
+                .unwrap_or_default()
+                .intersection(params)
+                .cloned()
+                .collect::<BTreeSet<_>>();
+            if behavior.visited_membership_call(message) {
+                membership.extend(receiver_params.iter().cloned());
+    }
+            if behavior.visited_insert_call(message) {
+                insertion.extend(receiver_params);
+            }
+        }
+        for child in child_nodes(node) {
+            collect(child, params, membership, insertion, behavior);
+        }
+    }
+
+    let mut membership = BTreeSet::new();
+    let mut insertion = BTreeSet::new();
+    collect(node, params, &mut membership, &mut insertion, behavior);
+    membership.intersection(&insertion).cloned().collect()
 }
 
 fn recursive_self_call(node: &Node, function: &str) -> bool {
@@ -950,8 +1401,18 @@ fn loop_node(node: &Node, behavior: &dyn NormalizedLanguageBehavior) -> bool {
     matches!(node.r#type.as_str(), "FOR" | "WHILE" | "UNTIL")
         || (node.r#type == "ITER"
             && iterator_message(node).is_some_and(|message| {
-                behavior.block_call_semantics(message) != BlockCallSemantics::Once
+                matches!(
+                    behavior.block_call_semantics(message),
+                    BlockCallSemantics::Iteration | BlockCallSemantics::Unknown
+                )
             }))
+}
+
+fn deferred_block(node: &Node, behavior: &dyn NormalizedLanguageBehavior) -> bool {
+    node.r#type == "ITER"
+        && iterator_message(node).is_some_and(|message| {
+            behavior.block_call_semantics(message) == BlockCallSemantics::Deferred
+        })
 }
 
 fn iterator_message(node: &Node) -> Option<&str> {
@@ -982,7 +1443,12 @@ fn loop_body(node: &Node) -> Option<&Node> {
 
 fn loop_binding_names(node: &Node) -> BTreeSet<String> {
     if node.r#type == "FOR" {
-        return node.children.first().and_then(ast::node).map(local_names).unwrap_or_default();
+        return node
+            .children
+            .first()
+            .and_then(ast::node)
+            .map(local_names)
+            .unwrap_or_default();
     }
     if node.r#type != "ITER" {
         return BTreeSet::new();
@@ -1013,6 +1479,9 @@ fn binding_names(node: &Node) -> BTreeSet<String> {
 }
 
 fn contains_loop(node: &Node, behavior: &dyn NormalizedLanguageBehavior) -> bool {
+    if deferred_block(node, behavior) {
+        return false;
+    }
     child_nodes(node)
         .into_iter()
         .any(|child| loop_node(child, behavior) || contains_loop(child, behavior))
@@ -1146,7 +1615,10 @@ mod tests {
     fn complexity(rows: &[MethodComplexityFacts], name: &str) -> Option<String> {
         let row = rows.iter().find(|row| row.function == name)?;
         let recursion = &row.recursion;
-        if row.iterations.iter().any(|fact| fact.cardinality_relation == "unknown")
+        if row
+            .iterations
+            .iter()
+            .any(|fact| fact.cardinality_relation == "unknown")
             || recursion.unknown_progress_calls > 0
         {
             return Some("unknown".to_string());
@@ -1271,14 +1743,29 @@ end
         );
         assert_eq!(complexity(&rows, "indexed_children"), Some("O(N)".into()));
         assert_eq!(complexity(&rows, "callback_result"), Some("O(N)".into()));
-        let materialize = rows.iter().find(|row| row.function == "materialize").unwrap();
+        let materialize = rows
+            .iter()
+            .find(|row| row.function == "materialize")
+            .unwrap();
         assert_eq!(materialize.allocations[0].cardinality_relation, "same");
         assert_eq!(materialize.allocations[0].parameter_domains, vec!["items"]);
-        let fixed = rows.iter().find(|row| row.function == "fixed_materialize").unwrap();
-        assert!(fixed.allocations.iter().any(|fact| fact.cardinality_relation == "fixed"));
-        let unknown = rows.iter().find(|row| row.function == "unknown_materialize").unwrap();
+        let fixed = rows
+            .iter()
+            .find(|row| row.function == "fixed_materialize")
+            .unwrap();
+        assert!(fixed
+            .allocations
+            .iter()
+            .any(|fact| fact.cardinality_relation == "fixed"));
+        let unknown = rows
+            .iter()
+            .find(|row| row.function == "unknown_materialize")
+            .unwrap();
         assert_eq!(unknown.allocations[0].cardinality_relation, "unknown");
-        let callback_result = rows.iter().find(|row| row.function == "callback_result").unwrap();
+        let callback_result = rows
+            .iter()
+            .find(|row| row.function == "callback_result")
+            .unwrap();
         assert!(callback_result
             .allocations
             .iter()
@@ -1323,6 +1810,12 @@ def tree(node, seen)
   tree(node.left, seen)
   tree(node.right, seen)
 end
+def guarded_tree(node, seen)
+  return if seen.include?(node)
+  seen.add(node)
+  guarded_tree(node.left, seen)
+  guarded_tree(node.right, seen)
+end
 class Accessor
   def ownership
     resolved.ownership
@@ -1363,6 +1856,12 @@ end
         assert_eq!(complexity(&rows, "fib"), Some("O(2^N)".into()));
         assert_eq!(complexity(&rows, "permute"), Some("O(N!)".into()));
         assert_eq!(complexity(&rows, "tree"), Some("unknown".into()));
+        let guarded = rows
+            .iter()
+            .find(|row| row.function == "guarded_tree")
+            .unwrap();
+        assert_eq!(guarded.recursion.visited_guarded_calls, 2);
+        assert_eq!(guarded.recursion.unknown_progress_calls, 0);
         assert_eq!(
             rows.iter()
                 .find(|row| row.function == "ownership")
@@ -1377,6 +1876,110 @@ end
             complexity(&rows, "settle_groups_with_object"),
             Some("O(N^3)".into())
         );
+    }
+
+    #[test]
+    fn normalized_call_edges_carry_size_change_progress() {
+        let rows = ruby_facts(
+            r#"
+class Parser
+  def even_step(n)
+    return if n <= 0
+    odd_step(n - 1)
+  end
+
+  def odd_step(n)
+    return if n <= 0
+    even_step(n / 2)
+  end
+
+  def opaque_step(node)
+    even_step(node.child)
+  end
+end
+"#,
+        );
+        let even = rows.iter().find(|row| row.function == "even_step").unwrap();
+        assert_eq!(
+            even.call_contexts
+                .iter()
+                .find(|call| call.message == "odd_step")
+                .unwrap()
+                .argument_progress,
+            "shrinking"
+        );
+        let odd = rows.iter().find(|row| row.function == "odd_step").unwrap();
+        assert_eq!(
+            odd.call_contexts
+                .iter()
+                .find(|call| call.message == "even_step")
+                .unwrap()
+                .argument_progress,
+            "halving"
+        );
+        let opaque = rows
+            .iter()
+            .find(|row| row.function == "opaque_step")
+            .unwrap();
+        assert_eq!(opaque.call_contexts[0].argument_progress, "unknown");
+    }
+
+    #[test]
+    fn typed_receiver_calls_carry_language_normalized_costs() {
+        let rows = ruby_facts(
+            r#"
+class Index
+  sig { params(items: T::Array[String], table: T::Hash[String, Integer]).void }
+  def check(items, table)
+    copy = items
+    items.include?("x")
+    copy.include?("y")
+    table.key?("x")
+    items.sort
+  end
+
+  def literals
+    [].sort
+    {}.keys
+    "value".split
+  end
+end
+"#,
+        );
+        let row = rows.iter().find(|row| row.function == "check").unwrap();
+        let include = row
+            .call_contexts
+            .iter()
+            .find(|call| call.message == "include?")
+            .unwrap();
+        assert_eq!(include.known_time_complexity.as_deref(), Some("O(N)"));
+        assert_eq!(include.known_space_complexity.as_deref(), Some("O(1)"));
+        let key = row
+            .call_contexts
+            .iter()
+            .find(|call| call.message == "key?")
+            .unwrap();
+        assert_eq!(key.known_time_complexity.as_deref(), Some("O(1)"));
+        let sort = row
+            .call_contexts
+            .iter()
+            .find(|call| call.message == "sort")
+            .unwrap();
+        assert_eq!(sort.known_time_complexity.as_deref(), Some("O(N log N)"));
+        assert_eq!(sort.known_space_complexity.as_deref(), Some("O(N)"));
+        assert_eq!(
+            row.call_contexts
+                .iter()
+                .filter(|call| call.message == "include?")
+                .filter(|call| call.known_time_complexity.as_deref() == Some("O(N)"))
+                .count(),
+            2
+        );
+        let literals = rows.iter().find(|row| row.function == "literals").unwrap();
+        assert!(literals.call_contexts.iter().all(|call| {
+            !matches!(call.message.as_str(), "sort" | "keys" | "split")
+                || call.known_time_complexity.is_some()
+        }));
     }
 
     #[test]
@@ -1413,6 +2016,82 @@ end
         assert_eq!(complexity(&rows, "local_worklist"), Some("O(N)".into()));
         assert_eq!(complexity(&rows, "parameter_worklist"), Some("O(N)".into()));
         assert_eq!(complexity(&rows, "repeated"), Some("O(N^2)".into()));
+    }
+
+    #[test]
+    fn user_block_summaries_distinguish_constant_wrappers_and_traversals() {
+        let rows = ruby_facts(
+            r#"
+class Driver
+  def with_scope(&blk)
+    blk.call
+  end
+
+  def each_item(items, &blk)
+    items.each { |item| blk.call(item) }
+  end
+
+  def wrapped(items)
+    with_scope { items.each { |item| consume(item) } }
+  end
+
+  def traversed(items)
+    each_item(items) { |item| consume(item) }
+  end
+end
+"#,
+        );
+
+        assert_eq!(complexity(&rows, "wrapped"), Some("O(N)".into()));
+        assert_eq!(complexity(&rows, "traversed"), Some("O(N)".into()));
+        let wrapper = rows
+            .iter()
+            .find(|row| row.function == "with_scope")
+            .unwrap();
+        assert_eq!(wrapper.block_invocations[0].classification, "constant");
+        let traversal = rows.iter().find(|row| row.function == "each_item").unwrap();
+        assert_eq!(
+            traversal.block_invocations[0].classification,
+            "per_iteration"
+        );
+        assert_eq!(
+            traversal.block_invocations[0].execution_multiplicity,
+            "O(N)"
+        );
+    }
+
+    #[test]
+    fn deferred_closure_work_is_not_charged_to_creation() {
+        let rows = ruby_facts(
+            r#"
+def build_callback(items)
+  callback = lambda { items.each { |item| consume(item) } }
+  callback
+end
+
+def invoke_callback(items)
+  callback = proc { items.each { |item| consume(item) } }
+  callback.call
+end
+"#,
+        );
+        for name in ["build_callback", "invoke_callback"] {
+            let row = rows.iter().find(|row| row.function == name).unwrap();
+            assert!(row.iterations.is_empty());
+            assert_eq!(row.deferred_regions.len(), 1);
+            assert!(matches!(
+                row.deferred_regions[0].constructor.as_str(),
+                "lambda" | "proc"
+            ));
+        }
+        let invoked = rows
+            .iter()
+            .find(|row| row.function == "invoke_callback")
+            .unwrap();
+        assert!(invoked
+            .call_contexts
+            .iter()
+            .any(|context| context.message == "call"));
     }
 
     #[test]
@@ -1505,7 +2184,11 @@ end
         assert!(!fixpoint_loop(&root, None, behavior));
         let while_without_control = node("WHILE", vec![]);
         assert!(!fixpoint_loop(&while_without_control, None, behavior));
-        assert!(!fixpoint_loop(&while_without_control, Some(&root), behavior));
+        assert!(!fixpoint_loop(
+            &while_without_control,
+            Some(&root),
+            behavior
+        ));
         let nameless_local = node("LVAR", vec![]);
         assert!(!fixpoint_loop(
             &while_without_control,
@@ -1513,7 +2196,11 @@ end
             behavior
         ));
         let flag_local = node("LVAR", vec![Child::String("flag".into())]);
-        assert!(!fixpoint_loop(&while_without_control, Some(&flag_local), behavior));
+        assert!(!fixpoint_loop(
+            &while_without_control,
+            Some(&flag_local),
+            behavior
+        ));
 
         assert!(!linear_worklist(
             &root,
