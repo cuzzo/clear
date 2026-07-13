@@ -893,60 +893,7 @@
       "semantic_effects": [],
       "state_declarations": [],
       "state_param_origins": [],
-      "state_reads": [
-        {
-          "field": "finish",
-          "function": "dispatch",
-          "line": 8,
-          "owner": "Matcher",
-          "receiver": "self",
-          "span": [
-            8,
-            8,
-            8,
-            14
-          ]
-        },
-        {
-          "field": "ignore",
-          "function": "dispatch",
-          "line": 6,
-          "owner": "Matcher",
-          "receiver": "self",
-          "span": [
-            6,
-            17,
-            6,
-            23
-          ]
-        },
-        {
-          "field": "invite",
-          "function": "dispatch",
-          "line": 5,
-          "owner": "Matcher",
-          "receiver": "self",
-          "span": [
-            5,
-            21,
-            5,
-            27
-          ]
-        },
-        {
-          "field": "publish",
-          "function": "dispatch",
-          "line": 4,
-          "owner": "Matcher",
-          "receiver": "self",
-          "span": [
-            4,
-            17,
-            4,
-            24
-          ]
-        }
-      ],
+      "state_reads": [],
       "state_writes": [],
       "type_aliases": {}
     }

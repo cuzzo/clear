@@ -1707,6 +1707,7 @@ mod tests {
             node: body,
             statements,
             boundaries: Vec::new(),
+            param_types: std::collections::BTreeMap::new(),
         }
     }
 

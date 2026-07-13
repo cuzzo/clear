@@ -93,11 +93,15 @@ impl<'a> StatefulSyntaxPass<'a> {
         effects::dedup_semantic_effect_sites(&mut facts.semantic_effect_sites);
 
         let file = self.file.to_string_lossy().to_string();
+        let syntax = self
+            .behavior
+            .syntax_metadata(self.source, &facts.function_defs);
         let local_methods = local_flow::local_methods_from_normalized(
             &file,
             self.lines,
             self.normalized_root,
             &facts.function_defs,
+            &syntax.method_param_types,
             self.behavior,
         );
         let path_condition_sites =
@@ -139,9 +143,7 @@ impl<'a> StatefulSyntaxPass<'a> {
             protocol_call_paths,
             clone_candidates,
             redundant_nil_guards,
-            syntax: self
-                .behavior
-                .syntax_metadata(self.source, &facts.function_defs),
+            syntax,
         }
     }
 }

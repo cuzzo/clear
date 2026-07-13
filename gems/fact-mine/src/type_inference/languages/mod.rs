@@ -24,6 +24,9 @@ pub(super) fn parse(source: &str, language: &str) -> TypeExpr {
 }
 
 pub(super) fn flow_hint(hint: &str, language: &str) -> Option<TypeExpr> {
+    if let Some(declared) = hint.strip_prefix("declared:") {
+        return Some(parse(declared, language));
+    }
     match language {
         "ruby" => ruby::flow_hint(hint),
         "python" => python::flow_hint(hint),
@@ -77,5 +80,11 @@ mod tests {
         ));
         assert_eq!(flow_hint("nil", "go"), Some(TypeExpr::NilClass));
         assert_eq!(flow_hint("string", "go"), None);
+        assert_eq!(
+            flow_hint("declared:T::Array[String]", "ruby"),
+            Some(TypeExpr::Array(Box::new(TypeExpr::Primitive(
+                "String".into()
+            ))))
+        );
     }
 }

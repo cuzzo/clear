@@ -368,6 +368,7 @@ fn append_flow_types(
     function: &str,
     effects: &BTreeMap<String, super::NodeEffect>,
 ) {
+    let definition_types = definition_type_hints(facts, file, owner, function, effects);
     let reaching = facts
         .reaching_definitions
         .iter()
@@ -379,15 +380,18 @@ fn append_flow_types(
             .definitions
             .iter()
             .filter_map(|definition| {
-                effects
-                    .get(definition)?
-                    .write_type_hints
-                    .get(&fact.place_id)
+                definition_types.get(&(definition.clone(), fact.place_id.clone()))
             })
-            .cloned()
             .collect::<Vec<_>>();
-        let complete = !fact.definitions.is_empty() && hinted.len() == fact.definitions.len();
-        let hints = hinted.into_iter().collect::<BTreeSet<_>>();
+        let complete = !fact.definitions.is_empty()
+            && hinted.len() == fact.definitions.len()
+            && hinted
+                .iter()
+                .all(|hint| hint.complete && !hint.types.is_empty());
+        let hints = hinted
+            .into_iter()
+            .flat_map(|hint| hint.types.iter().cloned())
+            .collect::<BTreeSet<_>>();
         facts.flow_types.push(FlowTypeFact {
             node_id: fact.node_id,
             file: file.to_string(),
@@ -398,4 +402,83 @@ fn append_flow_types(
             complete,
         });
     }
+}
+
+#[derive(Clone, Debug, Default, Eq, PartialEq)]
+struct DefinitionTypeHint {
+    types: BTreeSet<String>,
+    complete: bool,
+}
+
+fn definition_type_hints(
+    facts: &ControlFlowFacts,
+    file: &str,
+    owner: &str,
+    function: &str,
+    effects: &BTreeMap<String, super::NodeEffect>,
+) -> BTreeMap<(String, String), DefinitionTypeHint> {
+    let reaching = facts
+        .reaching_definitions
+        .iter()
+        .filter(|fact| fact.file == file && fact.owner == owner && fact.function == function)
+        .map(|fact| {
+            (
+                (fact.node_id.clone(), fact.place_id.clone()),
+                fact.definitions.clone(),
+            )
+        })
+        .collect::<BTreeMap<_, _>>();
+    let mut state = BTreeMap::new();
+
+    for (node_id, effect) in effects {
+        for (place, hint) in &effect.write_type_hints {
+            state.insert(
+                (node_id.clone(), place.clone()),
+                DefinitionTypeHint {
+                    types: BTreeSet::from([hint.clone()]),
+                    complete: true,
+                },
+            );
+        }
+        for place in effect.write_sources.keys() {
+            state.entry((node_id.clone(), place.clone())).or_default();
+        }
+    }
+
+    loop {
+        let previous = state.clone();
+        let mut changed = false;
+        for (node_id, effect) in effects {
+            for (target, source) in &effect.write_sources {
+                let definitions = reaching
+                    .get(&(node_id.clone(), source.clone()))
+                    .cloned()
+                    .unwrap_or_default();
+                let source_hints = definitions
+                    .iter()
+                    .filter_map(|definition| previous.get(&(definition.clone(), source.clone())))
+                    .collect::<Vec<_>>();
+                let next = DefinitionTypeHint {
+                    types: source_hints
+                        .iter()
+                        .flat_map(|hint| hint.types.iter().cloned())
+                        .collect(),
+                    complete: !definitions.is_empty()
+                        && source_hints.len() == definitions.len()
+                        && source_hints
+                            .iter()
+                            .all(|hint| hint.complete && !hint.types.is_empty()),
+                };
+                let key = (node_id.clone(), target.clone());
+                if previous.get(&key) != Some(&next) {
+                    state.insert(key, next);
+                    changed = true;
+                }
+            }
+        }
+        if !changed {
+            break;
+        }
+    }
+    state
 }

@@ -177,8 +177,118 @@ fn dataflow_respects_early_return_and_publishes_literal_type() -> Result<()> {
         .as_array()
         .and_then(|sources| sources.iter().find(|source| source["code"] == "b"))
         .expect("DFG-derived return source");
-    assert_eq!(flow_source["type"], json!({"kind": "Primitive", "data": "String"}));
+    assert_eq!(
+        flow_source["type"],
+        json!({"kind": "Primitive", "data": "String"})
+    );
     assert_eq!(flow_source["flow_complete"], true);
+    Ok(())
+}
+
+#[test]
+fn dataflow_propagates_direct_copies_but_not_call_results() -> Result<()> {
+    use std::io::Write;
+
+    let mut fixture = tempfile::Builder::new().suffix(".rb").tempfile()?;
+    write!(
+        fixture,
+        "def copied\n  source = \"yes\"\n  middle = source\n  result = (middle)\n  result\nend\n\ndef transformed\n  source = \"yes\"\n  result = transform(source)\n  result\nend\n"
+    )?;
+    let document = syntax::parse_file(fixture.path().to_path_buf(), Language::Ruby)?;
+
+    let copied_read = document
+        .control_flow_nodes
+        .iter()
+        .find(|node| node.function == "copied" && node.source == "result")
+        .expect("copied result read");
+    let copied_place = document
+        .places
+        .iter()
+        .find(|place| place.function == "copied" && place.name == "result")
+        .expect("copied result place");
+    let copied_flow = document
+        .flow_types
+        .iter()
+        .find(|fact| fact.node_id == copied_read.id && fact.place_id == copied_place.id)
+        .expect("copied result flow");
+    assert_eq!(copied_flow.types, vec!["string"]);
+    assert!(copied_flow.complete);
+    assert!(document.node_effects.iter().any(|effect| {
+        effect
+            .write_sources
+            .iter()
+            .any(|(target, source)| target.ends_with(":result") && source.ends_with(":middle"))
+    }));
+
+    let transformed_read = document
+        .control_flow_nodes
+        .iter()
+        .find(|node| node.function == "transformed" && node.source == "result")
+        .expect("transformed result read");
+    let transformed_place = document
+        .places
+        .iter()
+        .find(|place| place.function == "transformed" && place.name == "result")
+        .expect("transformed result place");
+    let transformed_flow = document
+        .flow_types
+        .iter()
+        .find(|fact| fact.node_id == transformed_read.id && fact.place_id == transformed_place.id)
+        .expect("transformed result flow");
+    assert!(transformed_flow.types.is_empty());
+    assert!(!transformed_flow.complete);
+    Ok(())
+}
+
+#[test]
+fn ruby_dataflow_seeds_declared_parameters_and_propagates_copies() -> Result<()> {
+    use std::io::Write;
+
+    let mut fixture = tempfile::Builder::new().suffix(".rb").tempfile()?;
+    write!(
+        fixture,
+        "class Copier\n  extend T::Sig\n  sig {{ params(input: String).returns(String) }}\n  def copy(input)\n    result = input\n    result\n  end\nend\n"
+    )?;
+    let document = syntax::parse_file(fixture.path().to_path_buf(), Language::Ruby)?;
+    let method = document
+        .local_methods
+        .iter()
+        .find(|method| method.owner == "Copier" && method.name == "copy")
+        .expect("copy method summary");
+    assert_eq!(
+        method.param_types.get("input").map(String::as_str),
+        Some("String")
+    );
+
+    let read = document
+        .control_flow_nodes
+        .iter()
+        .find(|node| node.function == "copy" && node.source == "result")
+        .expect("result read");
+    let place = document
+        .places
+        .iter()
+        .find(|place| place.function == "copy" && place.name == "result")
+        .expect("result place");
+    let flow = document
+        .flow_types
+        .iter()
+        .find(|fact| fact.node_id == read.id && fact.place_id == place.id)
+        .expect("result flow");
+    assert_eq!(flow.types, vec!["declared:String"]);
+    assert!(flow.complete);
+
+    let nil_kill = profile::extract(&document, Profile::NilKill);
+    let origin = nil_kill
+        .return_origins
+        .iter()
+        .find(|origin| origin["class"] == "Copier" && origin["method"] == "copy")
+        .expect("copy return origin");
+    assert_eq!(
+        origin["candidate_type"],
+        json!({"kind": "Primitive", "data": "String"})
+    );
+    assert_eq!(origin["sources"][0]["flow_complete"], true);
     Ok(())
 }
 
@@ -199,9 +309,15 @@ fn ruby_cfg_control_bodies_preserve_executable_statement_spans() -> Result<()> {
         .iter()
         .filter(|node| node.function == "rescue_ensure" && node.source == "close(user)")
         .collect::<Vec<_>>();
-    assert_eq!(cleanup_nodes.len(), 2, "cleanup is expanded once per incoming path");
+    assert_eq!(
+        cleanup_nodes.len(),
+        2,
+        "cleanup is expanded once per incoming path"
+    );
     assert!(
-        cleanup_nodes.iter().all(|node| node.span == [26, 6, 26, 17]),
+        cleanup_nodes
+            .iter()
+            .all(|node| node.span == [26, 6, 26, 17]),
         "cleanup spans must exclude the trailing end keyword"
     );
     Ok(())

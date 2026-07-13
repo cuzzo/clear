@@ -68,6 +68,9 @@ pub struct NodeEffect {
     pub writes: Vec<String>,
     pub mutations: Vec<String>,
     pub write_type_hints: BTreeMap<String, String>,
+    /// Direct value-flow edges for assignments such as `destination = source`.
+    /// Calls and compound expressions are intentionally excluded.
+    pub write_sources: BTreeMap<String, String>,
     pub unknown_call: bool,
     pub complete: bool,
     pub unknown_reasons: Vec<String>,

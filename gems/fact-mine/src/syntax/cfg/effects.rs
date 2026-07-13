@@ -16,6 +16,7 @@ struct RawEffect {
     writes: BTreeSet<String>,
     mutations: BTreeSet<String>,
     write_type_hints: BTreeMap<String, String>,
+    write_sources: BTreeMap<String, String>,
     unknown_call: bool,
     complete: bool,
     unknown_reasons: Vec<String>,
@@ -39,6 +40,16 @@ pub(crate) fn extract(
             complete: true,
             ..RawEffect::default()
         };
+
+        if node.kind == "entry" {
+            if let Some(method) = method {
+                for (name, type_name) in &method.param_types {
+                    raw.writes.insert(name.clone());
+                    raw.write_type_hints
+                        .insert(name.clone(), format!("declared:{type_name}"));
+                }
+            }
+        }
 
         if !matches!(node.kind.as_str(), "entry" | "exit") {
             match method.and_then(|method| find_by_span(&method.node, node.span)) {
@@ -146,6 +157,11 @@ pub(crate) fn extract(
                 .into_iter()
                 .map(|(name, hint)| (id_for(&name), hint))
                 .collect(),
+            write_sources: raw
+                .write_sources
+                .into_iter()
+                .map(|(target, source)| (id_for(&target), id_for(&source)))
+                .collect(),
             unknown_call: raw.unknown_call,
             complete: raw.complete,
             unknown_reasons: raw.unknown_reasons,
@@ -198,6 +214,8 @@ fn collect(node: &Node, effect: &mut RawEffect) {
             if let Some(rhs) = node.children.iter().skip(1).find_map(ast::node) {
                 if let Some(hint) = value_type_hint(rhs) {
                     effect.write_type_hints.insert(name, hint.to_string());
+                } else if let Some(source) = direct_read_name(rhs) {
+                    effect.write_sources.insert(name, source);
                 }
                 collect(rhs, effect);
             }
@@ -237,6 +255,20 @@ fn value_type_hint(node: &Node) -> Option<&'static str> {
         },
         _ => None,
     }
+}
+
+fn direct_read_name(node: &Node) -> Option<String> {
+    if matches!(node.r#type.as_str(), "LVAR" | "DVAR") {
+        return node_name(node);
+    }
+    if matches!(node.r#type.as_str(), "PAREN" | "BEGIN") {
+        let mut children = node.children.iter().filter_map(ast::node);
+        let only = children.next()?;
+        if children.next().is_none() {
+            return direct_read_name(only);
+        }
+    }
+    None
 }
 
 fn node_name(node: &Node) -> Option<String> {
