@@ -2502,6 +2502,26 @@ impl<'a> TypeInferenceVisitor<'a> {
     }
 
     fn flow_type_for_local(&self, node: &crate::ast::Node, name: &str) -> Option<TypeExpr> {
+        let fact = self.flow_fact_for_local(node, name)?;
+        let mut types = fact
+            .types
+            .iter()
+            .filter_map(|hint| flow_hint_type(hint, self.document.language.as_str()))
+            .collect::<Vec<_>>();
+        types.sort();
+        types.dedup();
+        match types.len() {
+            0 => None,
+            1 => types.pop(),
+            _ => Some(TypeExpr::Union(types)),
+        }
+    }
+
+    fn flow_fact_for_local(
+        &self,
+        node: &crate::ast::Node,
+        name: &str,
+    ) -> Option<&crate::syntax::cfg::FlowTypeFact> {
         let function = self.current_method.as_ref()?;
         let owner = self
             .current_owners
@@ -2528,21 +2548,9 @@ impl<'a> TypeInferenceVisitor<'a> {
         let place = self.document.places.iter().find(|place| {
             place.function == *function && place.owner == owner && place.name == name
         })?;
-        let fact = self.document.flow_types.iter().find(|fact| {
+        self.document.flow_types.iter().find(|fact| {
             fact.node_id == cfg_node.id && fact.place_id == place.id && fact.complete
-        })?;
-        let mut types = fact
-            .types
-            .iter()
-            .filter_map(|hint| flow_hint_type(hint, self.document.language.as_str()))
-            .collect::<Vec<_>>();
-        types.sort();
-        types.dedup();
-        match types.len() {
-            0 => None,
-            1 => types.pop(),
-            _ => Some(TypeExpr::Union(types)),
-        }
+        })
     }
 
     fn static_expression_type(&self, node: &crate::ast::Node) -> Option<TypeExpr> {
@@ -3149,8 +3157,9 @@ impl<'a> TypeInferenceVisitor<'a> {
             }
             if let Some(ty) = self.expression_type(node) {
                 if useful_type(&ty) {
+                    let flow_complete = self.flow_fact_for_local(node, &name).is_some();
                     return vec![
-                        json!({"kind": if ty == TypeExpr::NilClass { "nil" } else { "static" }, "type": ty, "line": node_line, "code": code}),
+                        json!({"kind": if ty == TypeExpr::NilClass { "nil" } else { "static" }, "type": ty, "line": node_line, "code": code, "flow_complete": flow_complete}),
                     ];
                 }
             }

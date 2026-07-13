@@ -168,6 +168,17 @@ fn dataflow_respects_early_return_and_publishes_literal_type() -> Result<()> {
             && fact["types"] == json!(["string"])
             && fact["complete"] == true
     }));
+    let flow_return = nil_kill
+        .return_origins
+        .iter()
+        .find(|origin| origin["method"] == "flow")
+        .expect("flow return origin");
+    let flow_source = flow_return["sources"]
+        .as_array()
+        .and_then(|sources| sources.iter().find(|source| source["code"] == "b"))
+        .expect("DFG-derived return source");
+    assert_eq!(flow_source["type"], json!({"kind": "Primitive", "data": "String"}));
+    assert_eq!(flow_source["flow_complete"], true);
     Ok(())
 }
 
