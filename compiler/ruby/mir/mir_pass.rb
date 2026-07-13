@@ -444,7 +444,7 @@ class MIRPass
 
   # Recursively transform a statement list, inserting MIR nodes.
   # Returns a new array (does not mutate the input).
-  sig { params(stmts: T::Array[T.untyped], ctx: MIRPass::WalkCtx).returns(T::Array[T.untyped]) }
+  sig { params(stmts: T::Array[AST::Node], ctx: MIRPass::WalkCtx).returns(T::Array[T.untyped]) }
   def transform_body(stmts, ctx)
     return stmts unless stmts.is_a?(Array)
     result = []

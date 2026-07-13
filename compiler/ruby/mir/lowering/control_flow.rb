@@ -254,8 +254,10 @@ module MIRLoweringControlFlow
     T.bind(self, MIRLowering) rescue nil
     prev_alias_alloc = capability_state.with_alias_alloc_map
     prev_alias_owner = capability_state.with_alias_owner_map
+    prev_pointer_aliases = T.let(capability_state.if_bind_pointer_aliases, T::Set[String])
     alias_alloc_map = T.let((prev_alias_alloc || {}).dup, IfBindAliasAllocMap)
     alias_owner_map = T.let((prev_alias_owner || {}).dup, IfBindAliasOwnerMap)
+    pointer_aliases = T.let(prev_pointer_aliases.dup, T::Set[String])
 
     node.bindings.each do |binding|
       owner = extract_root_var_name(binding.expr)
@@ -264,15 +266,21 @@ module MIRLoweringControlFlow
       alias_name = binding.name.to_s
       alias_owner_map[alias_name] = owner
       alias_alloc_map[alias_name] = placement_for_node(binding.expr)
+      # Collection get operations expose a borrowed optional pointer. Compact
+      # @node handles are values, so they must retain their value shape.
+      binding_type = Type.from_node!(binding.expr, context: "IF binding pointer shape")
+      pointer_aliases.add(alias_name) if AST.container_borrow?(binding.expr) && !binding_type.node_reference?
     end
 
     capability_state.with_alias_alloc_map = alias_alloc_map
     capability_state.with_alias_owner_map = alias_owner_map
+    capability_state.if_bind_pointer_aliases = pointer_aliases
     blk.call
   ensure
     T.bind(self, MIRLowering) rescue nil
     capability_state.with_alias_alloc_map = prev_alias_alloc
     capability_state.with_alias_owner_map = prev_alias_owner
+    capability_state.if_bind_pointer_aliases = T.must(prev_pointer_aliases)
   end
 
   sig { params(expr: AST::Node).returns(T.nilable(CleanupEntry)) }
@@ -804,6 +812,11 @@ module MIRLoweringControlFlow
       t.generic_instance? ? t.generic_base : t.resolved
     end
     is_union = union_schemas.key?(union_lookup)
+    match_ident = T.cast(node.expr, T.nilable(AST::Identifier)) if node.expr.is_a?(AST::Identifier)
+    if is_union && match_ident &&
+        capability_state.if_bind_pointer_aliases.include?(match_ident.name.to_s)
+      subject = MIR::Deref.new(subject)
+    end
     expr_type = node.expr.resolved_type
     expr_type_sym = expr_type.is_a?(Type) ? expr_type.resolved : expr_type
     is_int_match = !!(!is_union && !node.string_match &&

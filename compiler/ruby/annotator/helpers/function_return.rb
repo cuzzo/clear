@@ -109,7 +109,7 @@ class FunctionReturn
   # host-method dispatch. Always returns a Type, never nil.
   # ruby-to-clear: skip
   sig do
-    params(receiver: T.nilable(Type), args: T::Array[T.untyped],
+    params(receiver: T.nilable(Type), args: T::Array[AST::Node],
            host: T.nilable(SemanticAnnotator)).returns(Type)
   end
   # ruby-to-clear: skip
@@ -150,7 +150,7 @@ class FunctionReturn
   end
 
   # ruby-to-clear: skip
-  sig { params(args: T::Array[T.untyped], host: T.nilable(SemanticAnnotator)).returns(Type) }
+  sig { params(args: T::Array[AST::Node], host: T.nilable(SemanticAnnotator)).returns(Type) }
   def resolve_infer(args, host)
     raise "FunctionReturn infer requires a SemanticAnnotator host" unless host
 

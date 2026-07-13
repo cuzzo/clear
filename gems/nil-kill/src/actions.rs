@@ -569,6 +569,18 @@ fn generic_candidate_type(
     elem_shapes: Option<&serde_json::Value>,
     kv_shapes: Option<&serde_json::Value>,
 ) -> Option<String> {
+    fn valid_candidate(candidate: String) -> Option<String> {
+        // Sorbet requires type arguments for its generic collection classes.
+        // Runtime element-class telemetry only reports `Hash`/`Array`/`Set`
+        // for nested containers; emitting that bare class creates an invalid
+        // signature and wastes an Auto-Type verification round. Shape evidence
+        // may still produce the valid `T::Hash[...]`/`T::Array[...]` forms.
+        let has_bare_collection = candidate
+            .split(|c: char| !(c.is_ascii_alphanumeric() || c == '_' || c == ':'))
+            .any(|token| matches!(token, "Array" | "Hash" | "Set"));
+        (!has_bare_collection).then_some(candidate)
+    }
+
     if current_type.starts_with("Array") || current_type.starts_with("T::Array") {
         let mut elem = None;
         if let Some(shapes) = elem_shapes.and_then(|v| v.as_array()) {
@@ -580,7 +592,7 @@ fn generic_candidate_type(
             }
         }
         if let Some(e) = elem {
-            return Some(format!("T::Array[{}]", e));
+            return valid_candidate(format!("T::Array[{}]", e));
         }
     } else if current_type.starts_with("Set") || current_type.starts_with("T::Set") {
         let mut elem = None;
@@ -593,7 +605,7 @@ fn generic_candidate_type(
             }
         }
         if let Some(e) = elem {
-            return Some(format!("T::Set[{}]", e));
+            return valid_candidate(format!("T::Set[{}]", e));
         }
     } else if current_type.starts_with("Hash") || current_type.starts_with("T::Hash") {
         let mut key = None;
@@ -621,7 +633,7 @@ fn generic_candidate_type(
             }
         }
         if let (Some(k), Some(v)) = (key, val) {
-            return Some(format!("T::Hash[{}, {}]", k, v));
+            return valid_candidate(format!("T::Hash[{}, {}]", k, v));
         }
     }
     None
@@ -2093,6 +2105,35 @@ mod tests {
             None,
         );
         assert_eq!(res4, Some("T::Hash[Symbol, Float]".to_string()));
+    }
+
+    #[test]
+    fn generic_candidate_refuses_bare_nested_collection_classes() {
+        use serde_json::json;
+
+        let array_classes = json!(["Hash"]);
+        assert_eq!(
+            super::generic_candidate_type(
+                "T::Array[T::Hash[Symbol, T.untyped]]",
+                Some(&array_classes),
+                None,
+                None,
+                None,
+            ),
+            None,
+        );
+
+        let hash_classes = json!([["String"], ["Hash"]]);
+        assert_eq!(
+            super::generic_candidate_type(
+                "T::Hash[String, T::Hash[Symbol, T.untyped]]",
+                None,
+                Some(&hash_classes),
+                None,
+                None,
+            ),
+            None,
+        );
     }
 
     #[test]

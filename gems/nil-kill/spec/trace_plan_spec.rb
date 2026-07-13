@@ -165,6 +165,10 @@ RSpec.describe NilKill::TracePlan do
       path = File.join(dir, "worker.rb")
       File.write(path, <<~RUBY)
         class Worker
+          class MutableState < T::Struct
+            prop :items, T::Array[String], factory: -> { [] }
+          end
+
           Payload = Data.define(:name, :metadata)
           sig { params(value: T.untyped).returns(T.untyped) }
           def call(value)
@@ -184,6 +188,16 @@ RSpec.describe NilKill::TracePlan do
       expect(evidence.dig("facts", "struct_declarations")).to include(a_hash_including(
         "class" => "Worker::Payload",
         "fields" => %w[name metadata]
+      ))
+      expect(evidence.dig("facts", "struct_declarations")).to include(a_hash_including(
+        "class" => "MutableState",
+        "fields" => %w[items],
+        "field_types" => { "items" => "T::Array[String]" }
+      ))
+      expect(evidence.dig("facts", "state_type_records")).to include(a_hash_including(
+        "owner" => "Worker",
+        "field" => "items",
+        "declared_type" => "T::Array[String]"
       ))
       expect(evidence.dig("facts", "flow_local_types")).to be_nil
     end

@@ -4,4 +4,4 @@
 
 require_relative "../lib/auto_type"
 
-AutoType::CLI.new(ARGV).run if $PROGRAM_NAME == __FILE__
+AutoType::CLI.new(ARGV).run

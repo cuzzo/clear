@@ -244,7 +244,7 @@ module MIRLoweringLiterals
     end
   end
 
-  sig { params(node: AST::HashLit).returns(T.untyped) }
+  sig { params(node: AST::HashLit).returns(MIR::Emittable) }
   def lower_hash_lit(node)
     T.bind(self, MIRLowering) rescue nil
 
@@ -252,7 +252,7 @@ module MIRLoweringLiterals
     capability = hash_literal_capability_plan(plan)
 
     if node.pairs.empty?
-      return capability.empty_result if capability.empty_result
+      return T.must(capability.empty_result) if capability.empty_result
 
       return empty_hash_literal(plan, capability.zig_type)
     end

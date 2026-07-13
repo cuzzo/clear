@@ -375,6 +375,34 @@ pub fn extract(document: &Document, profile: Profile) -> ProfileOutput {
                 &*behavior,
             );
             crate::type_inference::collect_tlet_sites(&root, &path, &mut tlet_sites);
+            // The field inventory keeps one representative write per state
+            // slot, which may be an earlier untyped setter. Preserve the
+            // enforceable class-wide type established by a later `T.let`
+            // initialization so runtime planning does not keep sampling an
+            // already-resolved ivar forever.
+            let mut ivar_tlet_types = BTreeMap::new();
+            crate::type_inference::collect_prepass_facts(
+                &root,
+                document.language,
+                &mut Vec::new(),
+                &mut ivar_tlet_types,
+            );
+            state_type_records.extend(ivar_tlet_types.into_iter().map(
+                |((owner, field), declared_type)| {
+                    let field = field.trim_start_matches('@').to_string();
+                    StateTypeRecord {
+                        language: language.clone(),
+                        path: path.clone(),
+                        owner: owner.clone(),
+                        field: field.clone(),
+                        declared_type,
+                        type_references: Vec::new(),
+                        line: 0,
+                        span: None,
+                        key: format!("{owner}\0{field}"),
+                    }
+                },
+            ));
         }
         return ProfileOutput {
             methods,
@@ -2001,19 +2029,40 @@ fn extract_struct_declarations(
     _language: &str,
     path: &str,
 ) -> Vec<StructDeclaration> {
-    document
+    // `immutable_struct_readers` intentionally contains only Sorbet `const`
+    // fields because it feeds immutable-read propagation. The parallel type
+    // map also contains mutable `prop` declarations. A struct declaration is
+    // a layout/type contract, not an immutability claim, so take the union here
+    // without weakening the immutable-reader analysis.
+    let class_names = document
         .immutable_struct_readers
-        .iter()
-        .map(|(class_name, fields)| {
+        .keys()
+        .chain(document.immutable_struct_reader_types.keys())
+        .cloned()
+        .collect::<BTreeSet<_>>();
+
+    class_names
+        .into_iter()
+        .map(|class_name| {
             let field_types = document
                 .immutable_struct_reader_types
-                .get(class_name)
+                .get(&class_name)
                 .cloned()
                 .unwrap_or_default();
+            let fields = document
+                .immutable_struct_readers
+                .get(&class_name)
+                .into_iter()
+                .flatten()
+                .cloned()
+                .chain(field_types.keys().cloned())
+                .collect::<BTreeSet<_>>()
+                .into_iter()
+                .collect();
             StructDeclaration {
                 path: path.to_string(),
-                class: class_name.clone(),
-                fields: fields.clone(),
+                class: class_name,
+                fields,
                 field_types,
                 line: 0,
             }

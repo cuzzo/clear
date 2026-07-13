@@ -1070,7 +1070,7 @@ class MIREmitter
     result
   end
 
-  sig { params(stmts: T::Array[T.untyped], return_kind: Symbol).returns(String) }
+  sig { params(stmts: T::Array[MIR::Node], return_kind: Symbol).returns(String) }
   def emit_body_flow(stmts, return_kind)
     return "" unless stmts
     stmts.filter_map { |s| emit_flow_stmt(s, return_kind) }.join("\n")
@@ -1108,7 +1108,7 @@ class MIREmitter
     "__flow.* = .{ #{fields.join(', ')} };\nreturn;"
   end
 
-  sig { params(stmts: T::Array[T.untyped]).returns(T::Boolean) }
+  sig { params(stmts: T::Array[MIR::Node]).returns(T::Boolean) }
   def flow_body_terminates?(stmts)
     return false unless stmts && !stmts.empty?
     last = stmts.last
@@ -2940,7 +2940,7 @@ class MIREmitter
 
   # --- Helpers ---
 
-  sig { params(stmts: T::Array[T.untyped]).returns(String) }
+  sig { params(stmts: T::Array[MIR::Node]).returns(String) }
   def emit_body(stmts)
     return "" unless stmts
     stmts.filter_map { |s|

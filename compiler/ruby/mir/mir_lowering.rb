@@ -3181,7 +3181,7 @@ class MIRLowering
     end
   end
 
-  sig { params(node: AST::UnionDef).returns(T.untyped) }
+  sig { params(node: AST::UnionDef).returns(LoweredMir) }
   def lower_union_def(node)
     lowering_schemas.register_union(node.name, Schemas::UnionSchema.new(variants: node.variants))
     variant_facts = union_variant_lowering_facts(node)

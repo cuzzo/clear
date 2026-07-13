@@ -68,8 +68,13 @@ module AutoType
       changed = 0
       actions = expand_cross_file_actions(actions)
       actions.group_by { |a| a["path"] }.each do |rel_path, list|
-        next unless @workspace.file?(rel_path)
-        lines = @workspace.read_lines(rel_path)
+        lines = if @workspace.file?(rel_path)
+          @workspace.read_lines(rel_path)
+        elsif list.all? { |action| action["kind"] == "add_struct_field_sig" && action.dig("data", "target").to_s == "rbi" }
+          ["# typed: true\n", "# frozen_string_literal: true\n", "\n"]
+        else
+          next
+        end
         list.sort_by { |a| -a["line"].to_i }.each { |action| changed += 1 if apply_one(lines, action) }
         ensure_sorbet_runtime(lines) if list.any? { |a| %w[add_sig add_tlet narrow_tlet narrow_generic_param narrow_generic_return promote_hash_record_to_struct promote_hash_record_cluster_to_struct].include?(a["kind"]) }
         ensure_sig_extensions(lines, rel_path, list.select { |a| a["kind"] == "add_sig" })

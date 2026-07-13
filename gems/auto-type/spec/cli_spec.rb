@@ -3,6 +3,20 @@
 require_relative "spec_helper"
 
 RSpec.describe AutoType::CLI do
+  it "runs when RubyGems loads the executable through its generated wrapper" do
+    executable = File.expand_path("../exe/auto-type", __dir__)
+    stdout, stderr, status = Open3.capture3(
+      RbConfig.ruby,
+      "-e",
+      "path = ARGV.fetch(0); $PROGRAM_NAME = 'rubygems-wrapper'; ARGV.replace(['help']); load path",
+      executable,
+    )
+
+    expect(status).to be_success
+    expect(stderr).to be_empty
+    expect(stdout).to include("bundle exec auto-type apply")
+  end
+
   it "prints Auto-type command help" do
     expect {
       described_class.new(["help"]).run

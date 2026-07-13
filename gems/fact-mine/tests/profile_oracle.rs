@@ -152,6 +152,11 @@ fn trace_plan_profile_keeps_elision_facts_and_skips_heavy_analysis() -> Result<(
     let mut tmp = tempfile::Builder::new().suffix(".rb").tempfile()?;
     tmp.write_all(
         br#"class Worker
+  class MutableState < T::Struct
+    const :name, String
+    prop :items, T::Array[String], factory: -> { [] }
+  end
+
   Payload = Data.define(:name, :metadata)
   sig { params(value: T.untyped).returns(T.untyped) }
   def call(value)
@@ -170,9 +175,21 @@ end
     assert!(output.tlet_sites.iter().any(|site| {
         site.get("type").and_then(Value::as_str) == Some("T::Array[String]")
     }));
+    assert!(output.state_type_records.iter().any(|record| {
+        record.owner == "Worker"
+            && record.field == "items"
+            && record.declared_type.to_sorbet_string() == "T::Array[String]"
+    }));
     assert!(output.struct_declarations.iter().any(|declaration| {
         declaration.class == "Worker::Payload"
             && declaration.fields == vec!["name".to_string(), "metadata".to_string()]
+    }));
+    assert!(output.struct_declarations.iter().any(|declaration| {
+        declaration.class == "MutableState"
+            && declaration.fields == vec!["items".to_string(), "name".to_string()]
+            && declaration.field_types.get("items").map(String::as_str)
+                == Some("T::Array[String]")
+            && declaration.field_types.get("name").map(String::as_str) == Some("String")
     }));
     assert!(output.flow_local_types.is_empty());
     assert!(output.collection_index_lookups.is_empty());
