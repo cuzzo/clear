@@ -1,4 +1,5 @@
 use anyhow::{bail, Context, Result};
+use fact_mine_rust::profile::{self, Profile};
 use fact_mine_rust::syntax::{self, Language};
 use fact_mine_rust::syntax_oracle;
 use serde::Serialize;
@@ -77,6 +78,17 @@ fn cfg_is_emitted_for_every_supported_language() -> Result<()> {
             "{} emitted incomplete CFG metrics",
             fixture.display()
         );
+        assert_eq!(
+            document.node_effects.len(),
+            document.control_flow_nodes.len()
+        );
+        assert_eq!(
+            document.reachability.len(),
+            document.control_flow_nodes.len()
+        );
+        assert_eq!(document.dominators.len(), document.control_flow_nodes.len());
+        assert_eq!(document.liveness.len(), document.control_flow_nodes.len());
+        assert!(document.source_digest.starts_with("sha256:"));
         covered.insert(language.as_str());
     }
 
@@ -103,6 +115,62 @@ fn cfg_is_emitted_for_every_supported_language() -> Result<()> {
     Ok(())
 }
 
+#[test]
+fn dataflow_respects_early_return_and_publishes_literal_type() -> Result<()> {
+    use std::io::Write;
+
+    let mut fixture = tempfile::Builder::new().suffix(".rb").tempfile()?;
+    write!(
+        fixture,
+        "def flow(x)\n  a = x\n  if a\n    b = \"yes\"\n  else\n    return 0\n  end\n  b\nend\n"
+    )?;
+    let document = syntax::parse_file(fixture.path().to_path_buf(), Language::Ruby)?;
+    let read = document
+        .control_flow_nodes
+        .iter()
+        .find(|node| node.source == "b")
+        .expect("final b read");
+    let assignment = document
+        .control_flow_nodes
+        .iter()
+        .find(|node| node.source == "b = \"yes\"")
+        .expect("b assignment");
+    let place = document
+        .places
+        .iter()
+        .find(|place| place.name == "b")
+        .expect("b place");
+
+    let reaching = document
+        .reaching_definitions
+        .iter()
+        .find(|fact| fact.node_id == read.id && fact.place_id == place.id)
+        .expect("reaching definition");
+    assert_eq!(reaching.definitions, vec![assignment.id.clone()]);
+    let flow_type = document
+        .flow_types
+        .iter()
+        .find(|fact| fact.node_id == read.id && fact.place_id == place.id)
+        .expect("flow type");
+    assert_eq!(flow_type.types, vec!["string"]);
+    assert!(flow_type.complete);
+    assert!(
+        document
+            .def_use
+            .iter()
+            .any(|fact| fact.definition_node_id == assignment.id
+                && fact.uses == vec![read.id.clone()])
+    );
+    let nil_kill = profile::extract(&document, Profile::NilKill);
+    assert!(nil_kill.flow_local_types.iter().any(|fact| {
+        fact["name"] == "b"
+            && fact["node_id"] == read.id
+            && fact["types"] == json!(["string"])
+            && fact["complete"] == true
+    }));
+    Ok(())
+}
+
 fn full_syntax_expected() -> Value {
     json!({
         "functions": [],
@@ -123,6 +191,14 @@ fn full_syntax_expected() -> Value {
         "control_flow_nodes": [],
         "control_flow_edges": [],
         "control_flow_metrics": [],
+        "places": [],
+        "node_effects": [],
+        "reachability": [],
+        "dominators": [],
+        "reaching_definitions": [],
+        "def_use": [],
+        "liveness": [],
+        "flow_types": [],
         "protocol_method_effects": [],
         "protocol_call_paths": [],
         "clone_candidates": [],

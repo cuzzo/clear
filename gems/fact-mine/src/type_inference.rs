@@ -2440,14 +2440,21 @@ impl<'a> TypeInferenceVisitor<'a> {
                 let name = node_symbol(node)?;
                 extra_locals
                     .get(&name)
-                    .or_else(|| self.param_types.get(&name))
-                    .or_else(|| self.local_types.get(&name))
                     .cloned()
+                    .or_else(|| self.flow_type_for_local(node, &name))
+                    .or_else(|| self.param_types.get(&name).cloned())
+                    .or_else(|| self.local_types.get(&name).cloned())
                     .or_else(|| {
                         if self.local_hash_shapes.contains_key(&name) {
-                            Some(TypeExpr::parse(&self.behavior.untyped_hash_type(), self.document.language.as_str()))
+                            Some(TypeExpr::parse(
+                                &self.behavior.untyped_hash_type(),
+                                self.document.language.as_str(),
+                            ))
                         } else if self.local_array_shapes.contains_key(&name) {
-                            Some(TypeExpr::parse(&self.behavior.untyped_array_type(), self.document.language.as_str()))
+                            Some(TypeExpr::parse(
+                                &self.behavior.untyped_array_type(),
+                                self.document.language.as_str(),
+                            ))
                         } else {
                             None
                         }
@@ -2486,7 +2493,55 @@ impl<'a> TypeInferenceVisitor<'a> {
                 }
                 None
             }
-            _ => self.static_expression_type_with_locals_and_shapes(node, extra_locals, extra_hash_shapes),
+            _ => self.static_expression_type_with_locals_and_shapes(
+                node,
+                extra_locals,
+                extra_hash_shapes,
+            ),
+        }
+    }
+
+    fn flow_type_for_local(&self, node: &crate::ast::Node, name: &str) -> Option<TypeExpr> {
+        let function = self.current_method.as_ref()?;
+        let owner = self
+            .current_owners
+            .last()
+            .map(String::as_str)
+            .unwrap_or("(top-level)");
+        let use_span = [
+            node.first_lineno,
+            node.first_column,
+            node.last_lineno,
+            node.last_column,
+        ];
+        let cfg_node = self
+            .document
+            .control_flow_nodes
+            .iter()
+            .filter(|cfg| {
+                cfg.function == *function
+                    && cfg.owner == owner
+                    && span_contains(cfg.span, use_span)
+                    && !matches!(cfg.kind.as_str(), "entry" | "exit")
+            })
+            .min_by_key(|cfg| span_size(cfg.span))?;
+        let place = self.document.places.iter().find(|place| {
+            place.function == *function && place.owner == owner && place.name == name
+        })?;
+        let fact = self.document.flow_types.iter().find(|fact| {
+            fact.node_id == cfg_node.id && fact.place_id == place.id && fact.complete
+        })?;
+        let mut types = fact
+            .types
+            .iter()
+            .filter_map(|hint| flow_hint_type(hint, self.document.language.as_str()))
+            .collect::<Vec<_>>();
+        types.sort();
+        types.dedup();
+        match types.len() {
+            0 => None,
+            1 => types.pop(),
+            _ => Some(TypeExpr::Union(types)),
         }
     }
 
@@ -5658,6 +5713,39 @@ fn merge_value(base: &Value, entries: &[(&str, Value)]) -> Value {
         object_insert(&mut out, key, value.clone());
     }
     out
+}
+
+fn span_contains(outer: Span, inner: Span) -> bool {
+    (outer[0], outer[1]) <= (inner[0], inner[1]) && (outer[2], outer[3]) >= (inner[2], inner[3])
+}
+
+fn span_size(span: Span) -> (usize, usize) {
+    (
+        span[2].saturating_sub(span[0]),
+        span[3].saturating_sub(span[1]),
+    )
+}
+
+fn flow_hint_type(hint: &str, language: &str) -> Option<TypeExpr> {
+    let primitive = |ruby: &str, python: &str| match language {
+        "ruby" => Some(ruby.to_string()),
+        "python" => Some(python.to_string()),
+        _ => None,
+    };
+    match hint {
+        "nil" => Some(TypeExpr::NilClass),
+        "string" => primitive("String", "str").map(TypeExpr::Primitive),
+        "integer" => primitive("Integer", "int").map(TypeExpr::Primitive),
+        "float" => primitive("Float", "float").map(TypeExpr::Primitive),
+        "boolean" => primitive("T::Boolean", "bool").map(TypeExpr::Primitive),
+        "symbol" => primitive("Symbol", "str").map(TypeExpr::Primitive),
+        "array" => Some(TypeExpr::Array(Box::new(TypeExpr::Untyped))),
+        "hash" => Some(TypeExpr::Hash {
+            key: Box::new(TypeExpr::Untyped),
+            value: Box::new(TypeExpr::Untyped),
+        }),
+        _ => None,
+    }
 }
 
 fn nilable_type(type_text: &str) -> String {

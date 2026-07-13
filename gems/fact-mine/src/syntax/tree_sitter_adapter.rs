@@ -3,6 +3,7 @@ use super::{
 };
 use crate::ast::normalize_tree;
 use anyhow::{Context, Result};
+use sha2::{Digest, Sha256};
 use std::fs;
 use std::path::PathBuf;
 use std::time::{Duration, Instant};
@@ -69,6 +70,7 @@ fn parse_normalized_file(
     let document = Document {
         file: parsed.file.to_string_lossy().to_string(),
         language,
+        source_digest: format!("sha256:{:x}", Sha256::digest(parsed.source.as_bytes())),
         function_defs: facts.function_defs,
         owner_defs: facts.owner_defs,
         call_sites: facts.call_sites,
@@ -88,6 +90,14 @@ fn parse_normalized_file(
         control_flow_nodes: metadata.control_flow.nodes,
         control_flow_edges: metadata.control_flow.edges,
         control_flow_metrics: metadata.control_flow_metrics,
+        places: metadata.control_flow.places,
+        node_effects: metadata.control_flow.effects,
+        reachability: metadata.control_flow.reachability,
+        dominators: metadata.control_flow.dominators,
+        reaching_definitions: metadata.control_flow.reaching_definitions,
+        def_use: metadata.control_flow.def_use,
+        liveness: metadata.control_flow.liveness,
+        flow_types: metadata.control_flow.flow_types,
         protocol_method_effects: metadata.protocol_method_effects,
         protocol_call_paths: metadata.protocol_call_paths,
         clone_candidates: metadata.clone_candidates,

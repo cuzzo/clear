@@ -1,5 +1,6 @@
 use crate::syntax::Span;
 use serde::{Deserialize, Serialize};
+use std::collections::BTreeMap;
 
 /// Language-owned vocabulary needed to interpret normalized callback regions.
 /// The CFG algorithms consume this profile without knowing which language
@@ -36,6 +37,99 @@ impl ControlFlowProfile {
 pub struct ControlFlowFacts {
     pub nodes: Vec<ControlFlowNode>,
     pub edges: Vec<ControlFlowEdge>,
+    pub places: Vec<Place>,
+    pub effects: Vec<NodeEffect>,
+    pub reachability: Vec<ReachabilityFact>,
+    pub dominators: Vec<DominatorFact>,
+    pub reaching_definitions: Vec<ReachingDefinitionFact>,
+    pub def_use: Vec<DefUseFact>,
+    pub liveness: Vec<LivenessFact>,
+    pub flow_types: Vec<FlowTypeFact>,
+}
+
+#[derive(Clone, Debug, Deserialize, Eq, Ord, PartialEq, PartialOrd, Serialize)]
+pub struct Place {
+    pub id: String,
+    pub file: String,
+    pub function: String,
+    pub owner: String,
+    pub kind: String,
+    pub name: String,
+    pub declaration_span: Span,
+}
+
+#[derive(Clone, Debug, Default, Deserialize, Eq, PartialEq, Serialize)]
+pub struct NodeEffect {
+    pub node_id: String,
+    pub file: String,
+    pub function: String,
+    pub owner: String,
+    pub reads: Vec<String>,
+    pub writes: Vec<String>,
+    pub mutations: Vec<String>,
+    pub write_type_hints: BTreeMap<String, String>,
+    pub unknown_call: bool,
+    pub complete: bool,
+    pub unknown_reasons: Vec<String>,
+}
+
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+pub struct ReachabilityFact {
+    pub node_id: String,
+    pub file: String,
+    pub function: String,
+    pub owner: String,
+    pub reachable: bool,
+}
+
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+pub struct DominatorFact {
+    pub node_id: String,
+    pub file: String,
+    pub function: String,
+    pub owner: String,
+    pub immediate_dominator: Option<String>,
+}
+
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+pub struct ReachingDefinitionFact {
+    pub node_id: String,
+    pub file: String,
+    pub function: String,
+    pub owner: String,
+    pub place_id: String,
+    pub definitions: Vec<String>,
+}
+
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+pub struct DefUseFact {
+    pub definition_node_id: String,
+    pub file: String,
+    pub function: String,
+    pub owner: String,
+    pub place_id: String,
+    pub uses: Vec<String>,
+}
+
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+pub struct LivenessFact {
+    pub node_id: String,
+    pub file: String,
+    pub function: String,
+    pub owner: String,
+    pub live_in: Vec<String>,
+    pub live_out: Vec<String>,
+}
+
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+pub struct FlowTypeFact {
+    pub node_id: String,
+    pub file: String,
+    pub function: String,
+    pub owner: String,
+    pub place_id: String,
+    pub types: Vec<String>,
+    pub complete: bool,
 }
 
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]

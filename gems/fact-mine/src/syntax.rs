@@ -1,8 +1,8 @@
 pub(crate) mod c;
 pub(crate) mod complexity_facts;
+pub mod cfg;
 pub(crate) mod clone_similarity;
 pub(crate) mod complexity;
-pub mod cfg;
 pub(crate) mod cpp;
 pub(crate) mod csharp;
 pub(crate) mod effects;
@@ -135,6 +135,8 @@ pub struct Document {
     pub file: String,
     pub language: Language,
     #[serde(default)]
+    pub source_digest: String,
+    #[serde(default)]
     pub function_defs: Vec<FunctionDef>,
     #[serde(default)]
     pub owner_defs: Vec<OwnerDef>,
@@ -172,6 +174,22 @@ pub struct Document {
     pub control_flow_edges: Vec<cfg::ControlFlowEdge>,
     #[serde(default)]
     pub control_flow_metrics: Vec<cfg::ControlFlowMetric>,
+    #[serde(default)]
+    pub places: Vec<cfg::Place>,
+    #[serde(default)]
+    pub node_effects: Vec<cfg::NodeEffect>,
+    #[serde(default)]
+    pub reachability: Vec<cfg::ReachabilityFact>,
+    #[serde(default)]
+    pub dominators: Vec<cfg::DominatorFact>,
+    #[serde(default)]
+    pub reaching_definitions: Vec<cfg::ReachingDefinitionFact>,
+    #[serde(default)]
+    pub def_use: Vec<cfg::DefUseFact>,
+    #[serde(default)]
+    pub liveness: Vec<cfg::LivenessFact>,
+    #[serde(default)]
+    pub flow_types: Vec<cfg::FlowTypeFact>,
     #[serde(default)]
     pub protocol_method_effects: Vec<ProtocolMethodEffect>,
     #[serde(default)]

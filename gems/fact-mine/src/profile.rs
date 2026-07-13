@@ -74,6 +74,8 @@ pub struct ProfileOutput {
     pub complexity_facts: Vec<syntax::complexity_facts::MethodComplexityFacts>,
     // NilKill-only fields
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub flow_local_types: Vec<serde_json::Value>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub collection_index_lookups: Vec<serde_json::Value>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub hash_record_blockers: Vec<serde_json::Value>,
@@ -404,6 +406,11 @@ pub fn extract(document: &Document, profile: Profile) -> ProfileOutput {
     let mut tuple_arrays = Vec::new();
     let mut struct_field_hash_shapes_out = BTreeMap::new();
     let mut struct_field_array_shapes_out = BTreeMap::new();
+    let flow_local_types = if nil_kill {
+        extract_flow_local_types(document)
+    } else {
+        Vec::new()
+    };
 
     let mut pre_registered_noreturns = std::collections::HashSet::new();
     if let Ok(env_val) = std::env::var("FACT_MINE_NORETURN_METHODS") {
@@ -608,6 +615,7 @@ pub fn extract(document: &Document, profile: Profile) -> ProfileOutput {
         calls,
         state_accesses,
         complexity_facts,
+        flow_local_types,
         collection_index_lookups,
         hash_record_blockers,
         tlet_sites,
@@ -652,6 +660,7 @@ pub fn merge(outputs: Vec<ProfileOutput>, profile: Profile) -> ProfileOutput {
     let mut calls = Vec::new();
     let mut state_accesses = Vec::new();
     let mut complexity_facts = Vec::new();
+    let mut flow_local_types = Vec::new();
     let mut collection_index_lookups = Vec::new();
     let mut hash_record_blockers = Vec::new();
     let mut tlet_sites = Vec::new();
@@ -700,6 +709,7 @@ pub fn merge(outputs: Vec<ProfileOutput>, profile: Profile) -> ProfileOutput {
         state_accesses.extend(output.state_accesses);
         complexity_facts.extend(output.complexity_facts);
         if nil_kill {
+            flow_local_types.extend(output.flow_local_types);
             collection_index_lookups.extend(output.collection_index_lookups);
             hash_record_blockers.extend(output.hash_record_blockers);
             tlet_sites.extend(output.tlet_sites);
@@ -759,6 +769,7 @@ pub fn merge(outputs: Vec<ProfileOutput>, profile: Profile) -> ProfileOutput {
         calls,
         state_accesses,
         complexity_facts,
+        flow_local_types,
         collection_index_lookups,
         hash_record_blockers,
         tlet_sites,
@@ -779,6 +790,54 @@ pub fn merge(outputs: Vec<ProfileOutput>, profile: Profile) -> ProfileOutput {
         struct_field_hash_shapes,
         struct_field_array_shapes,
     }
+}
+
+fn extract_flow_local_types(document: &Document) -> Vec<serde_json::Value> {
+    let places = document
+        .places
+        .iter()
+        .map(|place| (place.id.as_str(), place))
+        .collect::<BTreeMap<_, _>>();
+    let nodes = document
+        .control_flow_nodes
+        .iter()
+        .map(|node| (node.id.as_str(), node))
+        .collect::<BTreeMap<_, _>>();
+    let definitions = document
+        .reaching_definitions
+        .iter()
+        .map(|fact| {
+            (
+                (fact.node_id.as_str(), fact.place_id.as_str()),
+                &fact.definitions,
+            )
+        })
+        .collect::<BTreeMap<_, _>>();
+    document
+        .flow_types
+        .iter()
+        .filter_map(|fact| {
+            let place = places.get(fact.place_id.as_str())?;
+            let node = nodes.get(fact.node_id.as_str())?;
+            Some(json!({
+                "file": document.file,
+                "function": fact.function,
+                "owner": fact.owner,
+                "name": place.name,
+                "place_id": fact.place_id,
+                "node_id": fact.node_id,
+                "line": node.line,
+                "span": node.span,
+                "types": fact.types,
+                "complete": fact.complete,
+                "reaching_definitions": definitions
+                    .get(&(fact.node_id.as_str(), fact.place_id.as_str()))
+                    .cloned()
+                    .cloned()
+                    .unwrap_or_default(),
+            }))
+        })
+        .collect()
 }
 
 fn get_def_header(lines: &[String], start_line_1indexed: usize) -> String {
@@ -2688,6 +2747,7 @@ pub(crate) mod tests {
         Document {
             file: "test.rb".to_string(),
             language: Language::Ruby,
+            source_digest: String::new(),
             function_defs: vec![syntax::FunctionDef {
                 file: "test.rb".to_string(),
                 name: "hello".to_string(),
@@ -2747,6 +2807,14 @@ pub(crate) mod tests {
             control_flow_nodes: vec![],
             control_flow_edges: vec![],
             control_flow_metrics: vec![],
+            places: vec![],
+            node_effects: vec![],
+            reachability: vec![],
+            dominators: vec![],
+            reaching_definitions: vec![],
+            def_use: vec![],
+            liveness: vec![],
+            flow_types: vec![],
             protocol_method_effects: vec![],
             protocol_call_paths: vec![],
             clone_candidates: vec![],
