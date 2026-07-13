@@ -92,7 +92,11 @@ mod tests {
     }
 
     fn facts(nodes: Vec<ControlFlowNode>, edges: Vec<ControlFlowEdge>) -> ControlFlowFacts {
-        ControlFlowFacts { nodes, edges }
+        ControlFlowFacts {
+            nodes,
+            edges,
+            ..ControlFlowFacts::default()
+        }
     }
 
     fn node(id: &str) -> ControlFlowNode {

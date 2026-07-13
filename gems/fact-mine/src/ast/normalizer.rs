@@ -746,9 +746,7 @@ impl<'source> TreeSitterNormalizer<'source> {
     }
 
     fn normalize_control_body(&mut self, node: TreeSitterNode<'_>) -> Option<Node> {
-        if self.block_kind(node.kind())
-            || self.normalization_adapter.cfg_control_body_wrapper(node)
-        {
+        if self.normalization_adapter.cfg_control_body_wrapper(node) {
             let nodes = self.named_children(node);
             let source = nodes.first().copied().unwrap_or(node);
             self.normalize_body_nodes(nodes, source)

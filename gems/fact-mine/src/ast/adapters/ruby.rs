@@ -18,7 +18,7 @@ impl AstNormalizationAdapter for RubyAstAdapter {
     // CFG-SPECIFIC START: Ruby's `do` node includes trailing control keywords;
     // expose only its executable children to the shared CFG normalizer.
     fn cfg_control_body_wrapper(&self, node: TreeSitterNode<'_>) -> bool {
-        node.kind() == "do"
+        node.kind() == "do" || ENSURE_BODY_WRAPPER_KINDS.contains(&node.kind())
     }
     // CFG-SPECIFIC END
 
