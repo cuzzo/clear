@@ -27,7 +27,6 @@ module NilKillRuntimeTrace
   @tuples = {}
   @collections = {}
   @method_edges = {}
-  @loop_counts = Hash.new(0)
   @objects = {}
   @object_tokens = {}
   # Mutation coalescing: a tight loop mutating ONE object at ONE site
@@ -111,6 +110,8 @@ module NilKillRuntimeTrace
   @sym_s = Hash.new { |h, k| h[k] = (k.is_a?(String) ? k : k.to_s).freeze }
   @method_metadata = {}
   @planned_methods_by_class = nil
+  @sampled_tstruct_fields = {}
+  @tlet_site_decisions = {}
   @targeted_tracepoints = []
   @targeted_tracepoint_keys = Set.new
   @trace_plan_loaded = false
@@ -235,7 +236,10 @@ module NilKillRuntimeTrace
       return value unless value.nil?
     end
     
-    false
+    # Struct/Data declarations can be created dynamically or hidden behind
+    # unsupported syntax. Absence from the static plan is therefore not proof
+    # that a field is resolved; only an explicit false may elide observation.
+    true
   end
 
   # Ordinary ivars are open-ended, unlike Struct/Data fields. A missing
@@ -557,11 +561,12 @@ module NilKillRuntimeTrace
     end
   end
 
-  def self.register_collection_owner(value, owner)
+  def self.register_collection_owner(value, owner = nil, shape: nil, **owner_keywords)
     return unless value.is_a?(Array) || value.is_a?(Hash) || (defined?(Set) && value.is_a?(Set))
+    owner ||= owner_keywords
 
     if value.frozen?
-      record_collection_snapshot(value, owner)
+      record_collection_snapshot(value, owner, shape: shape)
       return
     end
 
@@ -597,7 +602,7 @@ module NilKillRuntimeTrace
       value.instance_variable_set(:@__nil_kill_traced, true)
     end
     owners[owner_identity_key(owner)] ||= owner
-    record_collection_snapshot(value, owner)
+    record_collection_snapshot(value, owner, shape: shape)
   end
 
   def self.owner_identity_key(owner)
@@ -622,8 +627,8 @@ module NilKillRuntimeTrace
     [owner[:owner_kind].to_s, owner[:name].to_s, abs_path(owner[:path]), owner[:line], kind]
   end
 
-  def self.record_collection_snapshot(value, owner)
-    shape = container_shape(value)
+  def self.record_collection_snapshot(value, owner, shape: nil)
+    shape ||= container_shape(value)
     return unless shape
     if shape[0] == :array
       record_collection_observation(value, owner, elem_classes: shape[1], elem_shapes: shape[2])
@@ -1024,7 +1029,7 @@ module NilKillRuntimeTrace
               b[:param_kv_shapes][name][0].merge(shape[2][0])
               b[:param_kv_shapes][name][1].merge(shape[2][1])
             end
-            register_collection_owner(value, owner_kind: "method_param", name: name, path: abs, line: line, bucket: b)
+            register_collection_owner(value, { owner_kind: "method_param", name: name, path: abs, line: line, bucket: b }, shape: shape)
           end
         end
       end
@@ -1061,7 +1066,7 @@ module NilKillRuntimeTrace
             b[:return_kv_shapes][0].merge(shape[2][0])
             b[:return_kv_shapes][1].merge(shape[2][1])
           end
-          register_collection_owner(value, owner_kind: "method_return", name: ctx[:method_s], path: abs, line: line, bucket: b)
+          register_collection_owner(value, { owner_kind: "method_return", name: ctx[:method_s], path: abs, line: line, bucket: b }, shape: shape)
         end
       end
     end
@@ -1148,7 +1153,7 @@ module NilKillRuntimeTrace
               frame[:param_kv_shapes][name.to_s][0].merge(shape[2][0])
               frame[:param_kv_shapes][name.to_s][1].merge(shape[2][1])
             end
-            register_collection_owner(value, owner_kind: "method_param", name: name.to_s, path: meta[:path], line: meta[:line], bucket: b)
+            register_collection_owner(value, { owner_kind: "method_param", name: name.to_s, path: meta[:path], line: meta[:line], bucket: b }, shape: shape)
           end
         end
         if meta[:frame_method] || sample_return?(method_plan)
@@ -1191,7 +1196,7 @@ module NilKillRuntimeTrace
             b[:return_kv_shapes][0].merge(shape[2][0])
             b[:return_kv_shapes][1].merge(shape[2][1])
           end
-          register_collection_owner(value, owner_kind: "method_return", name: meta[:method_id], path: meta[:path], line: meta[:line], bucket: b)
+          register_collection_owner(value, { owner_kind: "method_return", name: meta[:method_id], path: meta[:path], line: meta[:line], bucket: b }, shape: shape)
         end
       end
     end
@@ -1323,24 +1328,41 @@ module NilKillRuntimeTrace
     T.singleton_class.alias_method(:__nil_kill_orig_let, :let)
     T.singleton_class.define_method(:let) do |value, type, **kw|
       loc = caller_locations(1, 1)&.first
-      if loc && NilKillRuntimeTrace.target_path?(loc.absolute_path || loc.path)
+      if loc
         raw = loc.absolute_path || loc.path
-        path = File.expand_path(raw, ROOT)
-        # Under source instrumentation loc.lineno is the shifted
-        # instrumented line; the plan is keyed by the real src line.
-        src_ln = NilKillRuntimeTrace.src_line(raw, loc.lineno)
-        next T.send(:__nil_kill_orig_let, value, type, **kw) unless NilKillRuntimeTrace.sample_tlet?(path, src_ln)
-        key = [path, src_ln]
-        NilKillRuntimeTrace.with_collection_hooks_disabled do
-          NilKillRuntimeTrace.lock.synchronize do
-            rec = (NilKillRuntimeTrace.tlets[key] ||= { calls: 0, classes: NKSet.new })
-            rec[:calls] += 1
-            rec[:classes] << NilKillRuntimeTrace.class_name(value)
+        by_line = NilKillRuntimeTrace.tlet_site_decisions_for(raw)
+        decision = by_line[loc.lineno]
+        if decision.nil?
+          decision = false
+          if NilKillRuntimeTrace.target_path?(raw)
+            path = File.expand_path(raw, ROOT)
+            # Under source instrumentation loc.lineno is the shifted
+            # instrumented line; the plan is keyed by the real src line.
+            src_ln = NilKillRuntimeTrace.src_line(raw, loc.lineno)
+            decision = [path, src_ln].freeze if NilKillRuntimeTrace.sample_tlet?(path, src_ln)
+          end
+          NilKillRuntimeTrace.store_tlet_site_decision(by_line, loc.lineno, decision)
+        end
+        if decision
+          NilKillRuntimeTrace.with_collection_hooks_disabled do
+            NilKillRuntimeTrace.lock.synchronize do
+              rec = (NilKillRuntimeTrace.tlets[decision] ||= { calls: 0, classes: NKSet.new })
+              rec[:calls] += 1
+              rec[:classes] << NilKillRuntimeTrace.class_name(value)
+            end
           end
         end
       end
       T.send(:__nil_kill_orig_let, value, type, **kw)
     end
+  end
+
+  def self.tlet_site_decisions_for(path)
+    @tlet_site_decisions[path] ||= {}
+  end
+
+  def self.store_tlet_site_decision(by_line, line, decision)
+    ORIG_HASH_STORE.bind_call(by_line, line, decision)
   end
 
   def self.install_struct_hook
@@ -1426,14 +1448,24 @@ module NilKillRuntimeTrace
         if path && NilKillRuntimeTrace.target_path?(path)
           child.instance_variable_set(:@__nil_kill_struct_path, path)
           child.instance_variable_set(:@__nil_kill_struct_line, loc.lineno)
+          NilKillRuntimeTrace.attach_tstruct(child)
         end
       end
+    end)
+  end
 
-      # Observe construction above #initialize. Sorbet synthesizes and may
-      # replace a T::Struct subclass's initializer while its props are being
-      # declared; prepending an instance initializer to T::Struct makes that
-      # replacement illegal. Class#new is inherited through the singleton
-      # class chain and runs only after the subclass definition is complete.
+  # Observe construction above #initialize, but only for T::Struct subclasses
+  # declared in a target file. A global T::Struct.new wrapper charged every
+  # typed object in the process for telemetry that record_tstruct_instance
+  # immediately discarded because the class had no target source location.
+  # The inherited hook runs for named and anonymous subclasses before their
+  # first possible instance; prepending their singleton class remains robust
+  # when Sorbet later synthesizes/replaces the instance initializer.
+  def self.attach_tstruct(klass)
+    return if klass.instance_variable_get(:@__nil_kill_tstruct_attached)
+
+    klass.instance_variable_set(:@__nil_kill_tstruct_attached, true)
+    klass.singleton_class.prepend(Module.new do
       def new(*args, **kw, &blk)
         instance = super
         NilKillRuntimeTrace.record_tstruct_instance(instance, kw)
@@ -1446,7 +1478,9 @@ module NilKillRuntimeTrace
     klass = instance.class
     class_name = safe_module_name(klass) || "AnonymousTStruct"
     if klass.respond_to?(:props)
-      klass.props.each_key do |field|
+      fields = sampled_tstruct_fields(klass, class_name)
+      fields = klass.props.each_key unless fields
+      fields.each do |field|
         value = instance.send(field) rescue nil
         record_struct_field(klass, class_name, field, value)
       end
@@ -1457,14 +1491,24 @@ module NilKillRuntimeTrace
     end
   end
 
+  # T::Struct props are fixed once instances can be constructed. Resolve the
+  # trace-plan decision once per class instead of walking every known prop on
+  # every allocation. nil means there is no valid plan and preserves the
+  # exhaustive fallback; an empty array means the plan proved every prop.
+  def self.sampled_tstruct_fields(klass, class_name)
+    plan = trace_plan
+    return nil unless plan
+    return @sampled_tstruct_fields[klass] if @sampled_tstruct_fields.key?(klass)
+
+    fields = klass.props.each_key.select { |field| sample_struct_field?(class_name, field) }.freeze
+    ORIG_HASH_STORE.bind_call(@sampled_tstruct_fields, klass, fields)
+    fields
+  end
+
   def self.install_collection_hook
     install_array_hook
     install_hash_hook
     install_set_hook
-  end
-
-  def self.record_loop_iteration(path, line)
-    @loop_counts[[path, line]] += 1
   end
 
   # NOTE: the parallel instrumented tree and its require/require_relative
@@ -1771,12 +1815,12 @@ module NilKillRuntimeTrace
           rec[:array_calls] += 1
           rec[:elem_classes].merge(shape[1])
           record_tuple("struct_field", path, line, "#{klass_name}.#{field}", value)
-          register_collection_owner(value, owner_kind: "struct_field", name: "#{klass_name}.#{field}", path: path, line: line)
+          register_collection_owner(value, { owner_kind: "struct_field", name: "#{klass_name}.#{field}", path: path, line: line }, shape: shape)
         elsif shape&.first == :hash
           rec[:hash_calls] += 1
           rec[:key_classes].merge(shape[1][0])
           rec[:value_classes].merge(shape[1][1])
-          register_collection_owner(value, owner_kind: "struct_field", name: "#{klass_name}.#{field}", path: path, line: line)
+          register_collection_owner(value, { owner_kind: "struct_field", name: "#{klass_name}.#{field}", path: path, line: line }, shape: shape)
         end
       end
     end
@@ -1898,11 +1942,6 @@ module NilKillRuntimeTrace
         )
       end
     end
-    File.open(File.join(OUT_DIR, "loops-#{pid}.jsonl"), "w") do |file|
-      @loop_counts.each do |(path, line), count|
-        file.puts JSON.generate(path: path, line: line, count: count)
-      end
-    end
     dump_coverage(pid)
   end
 
@@ -1916,7 +1955,11 @@ module NilKillRuntimeTrace
       @coverage_owned = ENV["NIL_KILL_SHARED_COVERAGE"] == "1"
       return
     end
-    Coverage.start(lines: true)
+    # Nil-Kill needs reachability, not execution-frequency counters. Ruby's
+    # oneshot mode records each executed line once and then stops charging hot
+    # lines; this preserves the collect-ran and loop-reached invariants without
+    # turning tight loops into global counter-update hot paths.
+    Coverage.start(oneshot_lines: true)
     @coverage_owned = true
   rescue StandardError, LoadError
     @coverage_owned = false
@@ -1956,25 +1999,49 @@ module NilKillRuntimeTrace
     require "pathname"
     result = Coverage.result(stop: false, clear: false)
     lmap = coverage_line_map
+    covered_by_path = {}
     File.open(File.join(OUT_DIR, "coverage-#{pid}.jsonl"), "w") do |file|
       result.each do |abs, data|
         next unless target_path?(abs)
         src = abs_path(abs)
         rel = Pathname.new(src).relative_path_from(Pathname.new(ROOT)).to_s rescue src
-        # Coverage.start(lines: true) -> per-file value is
-        # { lines: [...] } (SYMBOL key); plain mode -> bare array.
+        # Native collection uses { oneshot_lines: [line, ...] }. A shared
+        # SimpleCov session may already be running in counted-lines mode, so
+        # retain compatibility with { lines: [nil, count, ...] } and plain
+        # arrays rather than restarting or weakening that external session.
+        oneshot = data.is_a?(Hash) ? (data[:oneshot_lines] || data["oneshot_lines"]) : nil
         lines = data.is_a?(Hash) ? (data[:lines] || data["lines"]) : data
         per_file = lmap[rel] # nil => file uninstrumented, lines == src
         covered = []
-        Array(lines).each_with_index do |hits, i|
-          next unless hits && hits.to_i.positive?
-          instr_line = i + 1
-          src_line = per_file ? (per_file[instr_line] || per_file[instr_line.to_s]) : instr_line
-          covered << src_line if src_line
+        if oneshot
+          Array(oneshot).each do |instr_line|
+            src_line = per_file ? (per_file[instr_line] || per_file[instr_line.to_s]) : instr_line
+            covered << src_line if src_line
+          end
+        else
+          Array(lines).each_with_index do |hits, i|
+            next unless hits && hits.to_i.positive?
+            instr_line = i + 1
+            src_line = per_file ? (per_file[instr_line] || per_file[instr_line.to_s]) : instr_line
+            covered << src_line if src_line
+          end
         end
         covered = covered.uniq.sort
         next if covered.empty?
+        covered_by_path[src] = covered.to_set
         file.puts JSON.generate(path: src, lines: covered)
+      end
+    end
+    File.open(File.join(OUT_DIR, "loops-#{pid}.jsonl"), "w") do |file|
+      Hash(trace_plan&.fetch("loop_sites", {})).each_key do |raw_key|
+        path, line = raw_key.split("\0", 2)
+        line = line.to_i
+        next unless covered_by_path[path]&.include?(line)
+
+        # Espalier consumes loop evidence as a reached/not-reached predicate;
+        # it does not use iteration magnitude. Ruby line coverage supplies
+        # that fact without charging every loop evaluation a Ruby hash update.
+        file.puts JSON.generate(path: path, line: line, count: 1)
       end
     end
   rescue StandardError

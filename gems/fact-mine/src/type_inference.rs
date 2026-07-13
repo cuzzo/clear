@@ -259,6 +259,15 @@ fn weak_type(t: &TypeExpr) -> bool {
     t.is_weak()
 }
 
+fn same_collection_kind(left: &TypeExpr, right: &TypeExpr) -> bool {
+    matches!(
+        (left, right),
+        (TypeExpr::Array(_), TypeExpr::Array(_))
+            | (TypeExpr::Hash { .. }, TypeExpr::Hash { .. })
+            | (TypeExpr::Set(_), TypeExpr::Set(_))
+    )
+}
+
 fn get_type_str(value: &Value) -> Option<String> {
     if let Some(s) = value.as_str() {
         Some(s.to_string())
@@ -523,6 +532,33 @@ pub(crate) fn collect_prepass_facts(
                 collect_prepass_facts(child, language, current_owners, ivar_tlet_types);
             }
         }
+    }
+}
+
+/// Collect the only expression-level fact required by NilKill's trace-plan
+/// profile without running whole-method type inference. This must use the
+/// same normalized call matcher as the full visitor so the lean and complete
+/// profiles agree on every `T.let` site.
+pub(crate) fn collect_tlet_sites(
+    node: &crate::ast::Node,
+    path: &str,
+    sites: &mut Vec<serde_json::Value>,
+) {
+    if matches!(node.r#type.as_str(), "CALL" | "QCALL") {
+        if let Some((receiver, method, args_node)) = match_call(node) {
+            if method == "let" && receiver.text == "T" {
+                let arg_nodes = call_arguments(args_node);
+                sites.push(json!({
+                    "path": path,
+                    "line": node.first_lineno,
+                    "tlet": true,
+                    "type": arg_nodes.get(1).map(|arg| arg.text.clone()),
+                }));
+            }
+        }
+    }
+    for child in child_nodes(node) {
+        collect_tlet_sites(child, path, sites);
     }
 }
 
@@ -914,7 +950,6 @@ impl<'a> TypeInferenceVisitor<'a> {
                     "blocked"
                 };
 
-                eprintln!("DEBUG: method={:?}, expressions={:?}", func_name, expressions.iter().map(|e| (&e.r#type, &e.text)).collect::<Vec<_>>());
                 let mut ret_hash_shape = None;
                 for expr in &expressions {
                     if let Some(shape) = self.hash_shape_for_value(expr) {
@@ -2165,9 +2200,7 @@ impl<'a> TypeInferenceVisitor<'a> {
         let mut class_chain = current_class.split("::").collect::<Vec<_>>();
         while !class_chain.is_empty() {
             let candidate = class_chain.join("::");
-            println!("Checking ivar {:?} for {:?}", name, candidate);
             if let Some(type_text) = self.ivar_tlet_types.get(&(candidate, name.to_string())) {
-                println!("Found type_text {:?}", type_text);
                 if useful_type(type_text) {
                     return Some(type_text.clone());
                 }
@@ -2209,9 +2242,8 @@ impl<'a> TypeInferenceVisitor<'a> {
                 extra_locals
                     .get(&name)
                     .cloned()
-                    .or_else(|| self.flow_type_for_local(node, &name))
                     .or_else(|| self.param_types.get(&name).cloned())
-                    .or_else(|| self.local_types.get(&name).cloned())
+                    .or_else(|| self.flow_or_refined_local_type(node, &name))
                     .or_else(|| {
                         if self.local_hash_shapes.contains_key(&name) {
                             Some(TypeExpr::parse(
@@ -2282,6 +2314,25 @@ impl<'a> TypeInferenceVisitor<'a> {
             0 => None,
             1 => types.pop(),
             _ => Some(TypeExpr::Union(types)),
+        }
+    }
+
+    fn flow_or_refined_local_type(
+        &self,
+        node: &crate::ast::Node,
+        name: &str,
+    ) -> Option<TypeExpr> {
+        let flow = self.flow_type_for_local(node, name);
+        let local = self.local_types.get(name).cloned();
+        match (&flow, &local) {
+            (Some(flow_type), Some(local_type))
+                if flow_type.is_weak()
+                    && !local_type.is_weak()
+                    && same_collection_kind(flow_type, local_type) =>
+            {
+                local
+            }
+            _ => flow.or(local),
         }
     }
 

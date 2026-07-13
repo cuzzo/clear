@@ -400,7 +400,9 @@ impl NormalizedLanguageBehavior for RubyNormalizedBehavior {
                 ast::Child::Symbol(s) | ast::Child::String(s) => Some(s.clone()),
                 _ => None,
             })?;
-            if method == "new" && receiver.text == "Struct" {
+            if (method == "new" && receiver.text == "Struct")
+                || (method == "define" && receiver.text == "Data")
+            {
                 let name = if current_owner.is_empty() {
                     var_name
                 } else {

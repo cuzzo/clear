@@ -74,7 +74,7 @@ module MiniCollect
       status: status, out: out, err: err, dir: dir,
       methods: glob.call("methods"), method_edges: glob.call("method-edges"), structs: glob.call("structs"),
       ivars: glob.call("ivars"), collections: glob.call("collections"),
-      tlets: glob.call("tlets"), coverage: glob.call("coverage"),
+      tlets: glob.call("tlets"), loops: glob.call("loops"), coverage: glob.call("coverage"),
       instr_lib: (File.file?(instr_lib_path) ? File.read(instr_lib_path) : ""),
     }
   end

@@ -4816,13 +4816,13 @@ module NilKill
       end
     end
 
-    # Collection tracing already records a call count per process and slot.
-    # Aggregating those existing counters identifies expensive unresolved
-    # collection state without adding another runtime hook to the workload.
+    # Collection tracing already records call counts plus the bounded shapes
+    # it inspected. Weighting calls by those shapes approximates sampler work
+    # without adding a timer, hook, or counter to the traced workload.
     def append_hot_runtime_collection_slots(lines, evidence)
       lines << ""
       lines << "### Hot Runtime Collection Slots"
-      lines << "- estimated from existing collection observations; this adds no runtime tracing"
+      lines << "- estimated from existing collection observations and sampled shape complexity; this adds no runtime tracing"
       rows = hot_runtime_collection_slots(evidence)
       if rows.empty?
         lines << "- none"
@@ -4830,7 +4830,7 @@ module NilKill
       end
 
       rows.first(30).each do |row|
-        lines << "- #{row["path"]}:#{row["line"]} #{row["owner_kind"]} #{row["name"]}; #{row["kind"]}; #{row["calls"]} total observation(s), #{row["max_process_calls"]} max in one process"
+        lines << "- #{row["path"]}:#{row["line"]} #{row["owner_kind"]} #{row["name"]}; #{row["kind"]}; #{row["sampling_pressure"]} sampling-pressure score, #{row["calls"]} total observation(s), #{row["max_process_calls"]} max in one process"
         unless row["mutation_sites"].empty?
           top = row["mutation_sites"].sort_by { |site, count| [-count, site] }.first(3)
           lines << "  - mutation sites: #{top.map { |site, count| "#{site} (#{count})" }.join(", ")}"
@@ -4853,6 +4853,9 @@ module NilKill
         rows.each do |row|
           Hash(row["mutation_sites"]).each { |site, count| mutation_sites[site] += count.to_i }
         end
+        process_work = rows.map do |row|
+          row["calls"].to_i * collection_shape_work_per_observation(row)
+        end
         {
           "path" => path,
           "line" => line,
@@ -4861,11 +4864,36 @@ module NilKill
           "kind" => kind,
           "calls" => rows.sum { |row| row["calls"].to_i },
           "max_process_calls" => rows.map { |row| row["calls"].to_i }.max.to_i,
+          "sampling_pressure" => process_work.sum,
+          "max_process_sampling_pressure" => process_work.max.to_i,
           "processes" => rows.size,
           "mutation_sites" => mutation_sites,
         }
       end.sort_by do |row|
-        [-row["calls"], -row["max_process_calls"], row["path"], row["line"], row["name"]]
+        [-row["sampling_pressure"], -row["calls"], -row["max_process_sampling_pressure"], row["path"], row["line"], row["name"]]
+      end
+    end
+
+    def collection_shape_work_per_observation(row)
+      scalar_classes = %w[elem_classes key_classes value_classes].sum do |key|
+        Array(row[key]).size
+      end
+      nested_shapes = %w[elem_shapes key_shapes value_shapes].sum do |key|
+        Array(row[key]).sum { |shape| collection_shape_complexity(shape) }
+      end
+      1 + scalar_classes + nested_shapes
+    end
+
+    def collection_shape_complexity(shape)
+      shape = Hash(shape)
+      case shape["kind"]
+      when "array", "set"
+        1 + Array(shape["elements"]).sum { |child| collection_shape_complexity(child) }
+      when "hash"
+        1 + Array(shape["keys"]).sum { |child| collection_shape_complexity(child) } +
+          Array(shape["values"]).sum { |child| collection_shape_complexity(child) }
+      else
+        1
       end
     end
 

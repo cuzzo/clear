@@ -179,7 +179,8 @@ RSpec.describe "nil-kill tracer capability matrix" do
       r = mini_collect(dir, "lib.rb", %(require_relative "lib"\nW.new.first([41])\n))
       expect(r[:status]).to be_success, r[:err]
       expect(r[:instr_lib]).to include('record_source_method_call("W", "first"')                 # NOT punted
-      expect(r[:instr_lib]).to include("throw __nil_kill_return_tag, NilKillRuntimeTrace.record_source_method_return") # block return rewritten
+      expect(r[:instr_lib]).to include("return NilKillRuntimeTrace.record_source_method_return") # block return rewritten
+      expect(r[:instr_lib]).not_to include("catch(")
       expect(r[:methods]).to include(a_hash_including(
         "class" => "W", "method" => "first", "returns" => include("String")
       ))
@@ -503,6 +504,30 @@ RSpec.describe "nil-kill tracer capability matrix" do
       RUBY
       r = mini_collect(dir, "lib.rb", %(require_relative "lib"\nW.new.go([])\n))
       expect(r[:collections]).to include(a_hash_including("owner_kind" => "ivar", "name" => "@bag", "elem_classes" => include("Symbol")))
+    end
+  end
+
+  it "derives reached loop sites from line coverage without per-iteration hooks" do
+    in_tmp do |dir|
+      path = lib(dir, <<~RUBY)
+        class W
+          def go
+            i = 0
+            while i < 10_000
+              i += 1
+            end
+          end
+        end
+      RUBY
+      loop_line = File.readlines(path).index { |line| line.include?("while") } + 1
+
+      r = mini_collect(dir, "lib.rb", %(require_relative "lib"\nW.new.go\n))
+
+      expect(r[:status]).to be_success, r[:err]
+      expect(r[:instr_lib]).not_to include("record_loop_iteration")
+      expect(r[:loops]).to include(a_hash_including(
+        "path" => path, "line" => loop_line, "count" => 1
+      ))
     end
   end
 

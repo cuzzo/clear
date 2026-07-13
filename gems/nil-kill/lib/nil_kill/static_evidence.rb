@@ -14,6 +14,53 @@ end
 
 module NilKill
   class StaticEvidence
+    TRACE_PLAN_FACT_KEYS = %w[
+      tlet_sites struct_declarations state_type_records type_definitions
+    ].freeze
+
+    # Runtime trace planning needs only enforceable declarations and T.let
+    # sites. Asking Espalier to construct the complete NilKill evidence bundle
+    # also computes CFG/DFG, protocols, shapes, aliases, call graphs, and
+    # pressure inputs that TracePlan immediately discards. Keep this narrow
+    # profile explicit so adding a new runtime-elision fact requires updating
+    # both this contract and its parity oracle.
+    def self.build_trace_plan(targets = nil, root: NilKill::ROOT)
+      files = Array(targets || NilKill.target_files)
+      return { "methods" => [], "fields" => [], "facts" => {} } if files.empty?
+
+      tmp = Tempfile.new(["nil-kill-trace-plan-facts", ".json"])
+      tmp.close
+      binary = Espalier::StaticEvidence::FACT_MINE_RUST_BINARY
+      ok = system(binary, "profile", "trace-plan", "--output", tmp.path, *files)
+      raise "fact-mine-rust trace-plan failed with status #{$?.exitstatus}" unless ok
+
+      raw = FactMine::Syntax::TypeExpr.wrap_types!(JSON.parse(File.read(tmp.path)))
+      facts = TRACE_PLAN_FACT_KEYS.to_h { |key| [key, raw[key]] }
+      declarations = Array(raw["struct_declarations"])
+      resolved_declarations = Marshal.load(Marshal.dump(declarations))
+      resolution_evidence = {
+        "methods" => Array(raw["methods"]),
+        "facts" => {
+          "struct_declarations" => resolved_declarations,
+          "type_definitions" => Array(raw["type_definitions"]),
+        },
+      }
+      resolve_struct_declaration_classes!(resolution_evidence)
+      # Preserve the conservative unqualified entry as sampled while adding
+      # the fully-qualified declaration with its enforceable field types.
+      # Runtime lookup tries the qualified class first and then suffixes.
+      facts["struct_declarations"] = declarations.map do |declaration|
+        declaration.merge("field_types" => {})
+      end + resolved_declarations
+      {
+        "methods" => Array(raw["methods"]),
+        "fields" => Array(raw["fields"]),
+        "facts" => facts,
+      }
+    ensure
+      tmp&.unlink
+    end
+
     def self.build(targets = nil, root: NilKill::ROOT, language: nil, vcs: nil, include_annotations: true)
       if defined?(NilKill::SourceIndex)
         ENV["FACT_MINE_NORETURN_METHODS"] = NilKill::SourceIndex.noreturn_methods.to_a.join(",")

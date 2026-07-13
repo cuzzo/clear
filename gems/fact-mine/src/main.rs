@@ -1,4 +1,5 @@
 use anyhow::{bail, Context, Result};
+use fact_mine_rust::parallel;
 use fact_mine_rust::profile::{self, Profile};
 use fact_mine_rust::syntax::{self, Language};
 use fact_mine_rust::syntax_oracle;
@@ -37,12 +38,18 @@ fn run() -> Result<()> {
             let profile = match profile.as_str() {
                 "espalier" => Profile::Espalier,
                 "nil-kill" | "nil_kill" => Profile::NilKill,
-                other => bail!("unsupported profile: {other}; use espalier or nil-kill"),
+                "trace-plan" | "trace_plan" => Profile::TracePlan,
+                other => bail!(
+                    "unsupported profile: {other}; use espalier, nil-kill, or trace-plan"
+                ),
             };
-            let mut all_outputs = Vec::new();
-            for file in &files {
-                let lang = if let Some(ref l) = language_override {
-                    Language::parse(l)?
+            let language_override = language_override
+                .as_deref()
+                .map(Language::parse)
+                .transpose()?;
+            let all_outputs = parallel::map_ordered(&files, |file| {
+                let lang = if let Some(language) = language_override {
+                    language
                 } else {
                     file.extension()
                         .and_then(|ext| ext.to_str())
@@ -50,8 +57,8 @@ fn run() -> Result<()> {
                         .with_context(|| format!("cannot detect language for {}", file.display()))?
                 };
                 let document = syntax::parse_file(file.clone(), lang)?;
-                all_outputs.push(profile::extract(&document, profile));
-            }
+                Ok(profile::extract(&document, profile))
+            })?;
             // Merge outputs across files (same shape as Ruby's per-file accumulation)
             let merged = profile::merge(all_outputs, profile);
             let json = serde_json::to_string_pretty(&merged)?;

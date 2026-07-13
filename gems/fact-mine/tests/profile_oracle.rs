@@ -146,6 +146,46 @@ fn nil_kill_profile_produces_same_core_structure() -> Result<()> {
 }
 
 #[test]
+fn trace_plan_profile_keeps_elision_facts_and_skips_heavy_analysis() -> Result<()> {
+    use std::io::Write;
+
+    let mut tmp = tempfile::Builder::new().suffix(".rb").tempfile()?;
+    tmp.write_all(
+        br#"class Worker
+  Payload = Data.define(:name, :metadata)
+  sig { params(value: T.untyped).returns(T.untyped) }
+  def call(value)
+    @items = T.let([], T::Array[String])
+    value
+  end
+end
+"#,
+    )?;
+    let path = tmp.path().to_path_buf();
+    let document = syntax::parse_file(path.clone(), Language::Ruby)?;
+
+    let output = profile::extract(&document, Profile::TracePlan);
+
+    assert_eq!(output.methods.len(), 1);
+    assert!(output.tlet_sites.iter().any(|site| {
+        site.get("type").and_then(Value::as_str) == Some("T::Array[String]")
+    }));
+    assert!(output.struct_declarations.iter().any(|declaration| {
+        declaration.class == "Worker::Payload"
+            && declaration.fields == vec!["name".to_string(), "metadata".to_string()]
+    }));
+    assert!(output.flow_local_types.is_empty());
+    assert!(output.collection_index_lookups.is_empty());
+    assert!(output.call_graph_edges.is_empty());
+    assert!(output.complexity_facts.is_empty());
+
+    let merged = profile::merge(vec![output], Profile::TracePlan);
+    assert_eq!(merged.tlet_sites.len(), 1);
+    assert_eq!(merged.methods.len(), 1);
+    Ok(())
+}
+
+#[test]
 fn nil_kill_all_profile_examples_extract_successfully() -> Result<()> {
     let mut method_count = 0;
     for entry in fs::read_dir(examples_dir())? {

@@ -33,6 +33,10 @@ pub enum Profile {
     Espalier,
     /// All facts including nil-kill-specific inference data.
     NilKill,
+    /// Only the declaration facts needed to decide which NilKill runtime
+    /// observations can be elided. This deliberately excludes CFG, flow,
+    /// protocol, shape, call-graph, and complexity extraction.
+    TracePlan,
 }
 
 /// The enriched output matching what Ruby's EspalierProfile::Builder.build returns.
@@ -338,6 +342,7 @@ pub fn extract(document: &Document, profile: Profile) -> ProfileOutput {
     let language = document.language.as_str().to_string();
     let path = document.file.clone();
     let nil_kill = profile == Profile::NilKill;
+    let trace_plan = profile == Profile::TracePlan;
 
     // Read source lines once for signature extraction (matches Ruby approach)
     let lines = std::fs::read_to_string(&path)
@@ -356,6 +361,34 @@ pub fn extract(document: &Document, profile: Profile) -> ProfileOutput {
         extract_state_param_origins(document, &language, &path);
     let signatures = extract_signatures(&lines, document);
     let type_definitions = extract_type_definitions(&lines, document, &language, &path);
+
+    if trace_plan {
+        let mut struct_declarations = extract_struct_declarations(document, &language, &path);
+        let mut tlet_sites = Vec::new();
+        if let Ok((root, _)) = crate::ast::parse(std::path::Path::new(&path)) {
+            let behavior = crate::syntax::normalized_behavior::behavior(document.language);
+            collect_struct_declarations(
+                &root,
+                &path,
+                &mut Vec::new(),
+                &mut struct_declarations,
+                &*behavior,
+            );
+            crate::type_inference::collect_tlet_sites(&root, &path, &mut tlet_sites);
+        }
+        return ProfileOutput {
+            methods,
+            fields,
+            struct_declarations,
+            state_types,
+            state_type_records,
+            signatures,
+            type_definitions,
+            tlet_sites,
+            ..ProfileOutput::default()
+        };
+    }
+
     let mut hash_shapes = extract_hash_shapes(&lines, &language, &path);
     let mut array_shapes = extract_array_shapes(&lines, &language, &path);
 
@@ -641,6 +674,7 @@ pub fn extract(document: &Document, profile: Profile) -> ProfileOutput {
 /// Merge outputs from multiple files into one (like Ruby's per-file accumulation).
 pub fn merge(outputs: Vec<ProfileOutput>, profile: Profile) -> ProfileOutput {
     let nil_kill = profile == Profile::NilKill;
+    let trace_plan = profile == Profile::TracePlan;
     let mut owners = Vec::new();
     let mut methods = Vec::new();
     let mut fields = Vec::new();
@@ -708,11 +742,13 @@ pub fn merge(outputs: Vec<ProfileOutput>, profile: Profile) -> ProfileOutput {
         calls.extend(output.calls);
         state_accesses.extend(output.state_accesses);
         complexity_facts.extend(output.complexity_facts);
+        if nil_kill || trace_plan {
+            tlet_sites.extend(output.tlet_sites);
+        }
         if nil_kill {
             flow_local_types.extend(output.flow_local_types);
             collection_index_lookups.extend(output.collection_index_lookups);
             hash_record_blockers.extend(output.hash_record_blockers);
-            tlet_sites.extend(output.tlet_sites);
             dead_nil_checks.extend(output.dead_nil_checks);
             deterministic_guards.extend(output.deterministic_guards);
             return_origins.extend(output.return_origins);

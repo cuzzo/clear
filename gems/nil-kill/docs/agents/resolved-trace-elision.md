@@ -35,22 +35,24 @@ The trace plan was generated over `compiler/ruby` on 2026-07-13:
 | Item | Count |
 |---|---:|
 | Methods | 5,931 |
-| Methods requiring runtime samples | 197 |
-| Fully resolved methods pruned | 5,734 (96.7%) |
+| Methods requiring runtime samples | 132 |
+| Fully resolved methods pruned | 5,799 (97.8%) |
 | Parameter slots | 7,841 |
 | Parameter slots sampled | 114 |
-| Returns sampled | 100 |
+| Returns sampled | 35 |
 | T.let sites sampled | 53 |
-| State/Struct field plan entries | 4,198 |
-| Resolved fields pruned | 1,230 |
-| Fields sampled or conservatively retained | 2,968 |
+| State/Struct field plan entries | 3,604 |
+| Resolved fields pruned | 1,980 |
+| Fields sampled or conservatively retained | 1,624 |
+| Exact state-write sites | 1,055 |
+| Strong state-write sites removed before rewriting | 373 |
 
-Using the richer Nil-Kill FactMine profile increased plan construction on this
-large corpus from 43.84s to 59.54s. That is a one-time 15.70s cost before a
-collection workload; it exposes the annotation facts needed to remove ongoing
-runtime hooks. For short one-shot commands, static-only `nil-kill infer` remains
-the appropriate first step. For the compiler's multi-suite collection workload,
-the runtime savings dominate this fixed preparation cost.
+Nil-Kill previously requested the complete Nil-Kill FactMine profile and then
+discarded CFG/DFG, protocol, shape, call-graph, alias, and pressure facts during
+trace planning. The purpose-specific trace-plan profile plus deterministic
+parallel file extraction reduces plan construction from 65.47s to 4.60s. A
+single raw grammar traversal reduces rewrite computation from roughly 15-17.6s
+to 8.0s. Combined preparation is now about 12.6s instead of roughly 81s.
 
 ## Runtime benchmark
 
@@ -65,8 +67,14 @@ Bundler startup in both cases:
 
 That is a 2.36x speedup, or 57.7% less wall time, for a call-heavy typed path.
 Whole-workload improvement will vary with collection mutation and unresolved
-slot frequency, but a corpus with 96.7% resolved method boundaries has enough
+slot frequency, but a corpus with 97.8% resolved method boundaries has enough
 eligible traffic to justify the optimization.
+
+The full CLEAR compiler suite (6,413 examples) measures 61.5s normally and
+329.5s under collection: 5.4x total, or about 4m28s added. Preparation is only
+12.6s of that result. The residual is concentrated in hot, deliberately
+heterogeneous `T.untyped` AST collection walkers, so the repository's overall
+typed percentage is not a work-weighted predictor of collection cost.
 
 ## Safety boundary
 
@@ -90,7 +98,7 @@ not silently restore tracing to every resolved method.
 
 - Focused method, ivar, TracePlan, source-instrumentation, and runtime tests
   cover both the elided and retained paths.
-- The full Nil-Kill suite passes with 498 examples and no failures. Existing
+- The full Nil-Kill suite passes with 511 examples and no failures. Existing
   pending examples are unchanged by this work.
 - The controlled benchmark verifies the intended runtime effect rather than
   relying only on the static count of eligible methods.

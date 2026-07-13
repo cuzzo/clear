@@ -11,12 +11,13 @@ module NilKill
       @methods = {}
       @tlets = {}
       @struct_fields = {}
+      @state_write_site_owners = {}
     end
 
     def write(path)
       files = NilKill.target_files
       unless files.empty?
-        static = StaticEvidence.build(files, root: ROOT, language: :ruby, include_annotations: true)
+        static = StaticEvidence.build_trace_plan(files, root: ROOT)
         static.fetch("methods", []).each { |method| add_static_method(method) }
         facts = Hash(static["facts"])
         tlet_types = Array(facts["tlet_sites"]).to_h do |site|
@@ -41,6 +42,7 @@ module NilKill
         "methods" => @methods,
         "tlets" => @tlets,
         "struct_fields" => @struct_fields,
+        "state_write_sites" => state_write_sites,
       }))
     end
 
@@ -102,8 +104,11 @@ module NilKill
     end
 
     def add_struct_decl(decl)
+      field_types = Hash(decl["field_types"])
       decl.fetch("fields", []).each do |field|
-        @struct_fields[[decl["class"], field.to_s].join("\0")] = true
+        type = field_types[field.to_s]
+        @struct_fields[[decl["class"], field.to_s].join("\0")] =
+          type.to_s.empty? || !NilKill.strong_trace_type?(type)
       end
     end
 
@@ -139,11 +144,24 @@ module NilKill
       klass = field["owner"].to_s
       name = (field["name"] || field["field"]).to_s.sub(/\A@/, "")
       path = File.expand_path(field["path"], ROOT)
+      unless klass.empty? || name.empty?
+        site_key = [path, field["line"].to_i, name].join("\0")
+        @state_write_site_owners[site_key] = [klass, name].join("\0")
+      end
       type = field["declared_type"]
       type = tlet_types[[path, field["line"].to_i]] if type.to_s.empty?
       return if klass.empty? || name.empty? || type.to_s.empty?
 
       @struct_fields[[klass, name].join("\0")] = !NilKill.strong_trace_type?(type)
+    end
+
+    # Exact source sites let the rewriter omit the recorder call entirely for
+    # a state slot whose final enforceable contract is strong. Unknown sites
+    # are deliberately absent and therefore remain sampled.
+    def state_write_sites
+      @state_write_site_owners.to_h do |site_key, owner_key|
+        [site_key, @struct_fields.fetch(owner_key, true)]
+      end
     end
 
     def method_name(method)

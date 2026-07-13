@@ -383,6 +383,7 @@ RSpec.describe "nil-kill runtime trace" do
 
       expect(instrumented_source).to include('record_source_method_call("Worker", "untyped"')
       expect(instrumented_source).not_to include('record_source_method_call("Worker", "typed"')
+      expect(instrumented_source).not_to include("catch(")
 
       trace_tmp = File.join(dir, "trace-tmp")
       trace_dir = File.join(trace_tmp, "runtime")
@@ -847,6 +848,68 @@ RSpec.describe "nil-kill runtime trace" do
     end
   end
 
+  it "instruments every conditional state write without relying on wrapped-node visitation" do
+    Dir.mktmpdir("nil-kill-conditional-state", NilKill::ROOT) do |dir|
+      src = File.join(dir, "conditional_state.rb")
+      File.write(src, <<~RUBY)
+        class ConditionalState
+          def update(enabled)
+            if enabled
+              @inside = []
+            end
+            @modifier = {} if enabled
+            @@class_state = Set.new unless enabled
+            $nil_kill_global_state = []
+          end
+        end
+      RUBY
+
+      instrumented = NilKill::SourceInstrumenter.new.instrument_file(src)
+
+      expect(instrumented.scan("record_ivar_assignment").length).to eq(4)
+      expect(instrumented).to include('record_ivar_assignment(self, "@inside"')
+      expect(instrumented).to include('record_ivar_assignment(self, "@modifier"')
+      expect(instrumented).to include('record_ivar_assignment(self, "@@class_state"')
+      expect(instrumented).to include('record_ivar_assignment(self, "$nil_kill_global_state"')
+
+      global_only = File.join(dir, "global_only.rb")
+      File.write(global_only, "$nil_kill_global_only = []\n")
+      global_instrumented = NilKill::SourceInstrumenter.new.instrument_file(global_only)
+      expect(global_instrumented).to include(
+        'record_ivar_assignment(self, "$nil_kill_global_only"'
+      )
+    end
+  end
+
+  it "omits exact strong state-write sites while retaining unknown writes" do
+    Dir.mktmpdir("nil-kill-strong-state-site", NilKill::ROOT) do |dir|
+      src = File.join(dir, "strong_state.rb")
+      File.write(src, <<~RUBY)
+        class StrongState
+          def update
+            @typed = 1
+            @unknown = []
+          end
+        end
+      RUBY
+      typed_line = File.readlines(src).index { |line| line.include?("@typed") } + 1
+      plan = {
+        "methods" => {},
+        "state_write_sites" => {
+          [File.expand_path(src), typed_line, "typed"].join("\0") => false,
+        },
+      }
+      FileUtils.mkdir_p(File.dirname(NilKill::TRACE_PLAN_PATH))
+      File.write(NilKill::TRACE_PLAN_PATH, JSON.generate(plan))
+
+      instrumented = NilKill::SourceInstrumenter.new.instrument_file(src)
+
+      expect(instrumented).to include("@typed = 1")
+      expect(instrumented).not_to include('record_ivar_assignment(self, "@typed"')
+      expect(instrumented).to include('record_ivar_assignment(self, "@unknown"')
+    end
+  end
+
   it "records loop iterations against original source lines even when __LINE__ is present" do
     Dir.mktmpdir("nil-kill-loop-line", NilKill::ROOT) do |dir|
       src = File.join(dir, "loop_line.rb")
@@ -870,24 +933,12 @@ RSpec.describe "nil-kill runtime trace" do
       instrumented = NilKill::SourceInstrumenter.new.instrument_file(src)
 
       expect(instrumented).to include("MARKER = #{marker_line}")
-      expect(instrumented).to include(
-        "NilKillRuntimeTrace.record_loop_iteration(#{File.expand_path(src, NilKill::ROOT).inspect}, #{while_line})"
-      )
+      expect(instrumented).not_to include("record_loop_iteration")
+      plan = JSON.parse(File.read(NilKill::TRACE_PLAN_PATH))
+      expect(plan.dig("loop_sites", [File.expand_path(src, NilKill::ROOT), while_line].join("\0"))).to be(true)
       expect(instrumented).not_to include("MARKER = __LINE__")
     end
   end
 
 
-  it "aggregates hot-loop counts in memory instead of writing one row per iteration" do
-    require_relative "../lib/nil_kill/runtime_trace"
-    path = File.join(NilKill::ROOT, "src", "hot_loop.rb")
-    key = [path, 17]
-    counts = NilKillRuntimeTrace.instance_variable_get(:@loop_counts)
-    before = counts[key]
-
-    10_000.times { NilKillRuntimeTrace.record_loop_iteration(path, 17) }
-
-    expect(counts[key] - before).to eq(10_000)
-    expect(NilKillRuntimeTrace.instance_variable_defined?(:@loop_file)).to be(false)
-  end
 end

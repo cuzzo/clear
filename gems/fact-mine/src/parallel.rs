@@ -79,7 +79,12 @@ where
 }
 
 fn env_jobs() -> Option<usize> {
-    ["DECOMPLEX_RUST_JOBS", "DECOMPLEX_JOBS"]
+    [
+        "FACT_MINE_RUST_JOBS",
+        "FACT_MINE_JOBS",
+        "DECOMPLEX_RUST_JOBS",
+        "DECOMPLEX_JOBS",
+    ]
         .into_iter()
         .find_map(|name| env::var(name).ok().and_then(|value| parse_jobs(&value)))
 }
@@ -125,6 +130,10 @@ mod tests {
 
     #[test]
     fn test_env_jobs() {
+        std::env::set_var("FACT_MINE_JOBS", "4");
+        assert_eq!(env_jobs(), Some(4));
+        std::env::remove_var("FACT_MINE_JOBS");
+
         std::env::set_var("DECOMPLEX_RUST_JOBS", "5");
         assert_eq!(env_jobs(), Some(5));
         std::env::remove_var("DECOMPLEX_RUST_JOBS");

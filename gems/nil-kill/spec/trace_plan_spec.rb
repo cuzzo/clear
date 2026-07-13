@@ -97,6 +97,21 @@ RSpec.describe NilKill::TracePlan do
     expect(fields[["Worker", "unresolved"].join("\0")]).to be(true)
   end
 
+  it "carries final strong field decisions back to exact state-write sites" do
+    plan = described_class.new
+    path = File.expand_path("src/parser.rb", NilKill::ROOT)
+    plan.send(:add_static_field, {
+      "owner" => "Parser", "name" => "pos", "path" => path, "line" => 12
+    }, {})
+    plan.send(:add_static_type_definition, {
+      "kind" => "state_field", "owner" => "Parser", "name" => "pos",
+      "declared_type" => "Integer"
+    })
+
+    sites = plan.send(:state_write_sites)
+    expect(sites[[path, 12, "pos"].join("\0")]).to be(false)
+  end
+
   it "lets a strong field declaration override conservative flow records" do
     plan = described_class.new
     plan.send(:add_static_state_type, {
@@ -126,5 +141,51 @@ RSpec.describe NilKill::TracePlan do
 
     fields = plan.instance_variable_get(:@struct_fields)
     expect(fields[["Payload", "values"].join("\0")]).to be(true)
+  end
+
+  it "uses declared Struct/Data field types and samples undeclared types" do
+    plan = described_class.new
+    plan.send(:add_struct_decl, {
+      "class" => "Payload",
+      "fields" => %w[name metadata unknown],
+      "field_types" => {
+        "name" => "String",
+        "metadata" => "T::Hash[Symbol, T.untyped]",
+      },
+    })
+
+    fields = plan.instance_variable_get(:@struct_fields)
+    expect(fields[["Payload", "name"].join("\0")]).to be(false)
+    expect(fields[["Payload", "metadata"].join("\0")]).to be(true)
+    expect(fields[["Payload", "unknown"].join("\0")]).to be(true)
+  end
+
+  it "builds its purpose-specific evidence without full CFG/DFG facts" do
+    Dir.mktmpdir("nil-kill-trace-plan-profile", NilKill::ROOT) do |dir|
+      path = File.join(dir, "worker.rb")
+      File.write(path, <<~RUBY)
+        class Worker
+          Payload = Data.define(:name, :metadata)
+          sig { params(value: T.untyped).returns(T.untyped) }
+          def call(value)
+            @items = T.let([], T::Array[String])
+            value
+          end
+        end
+      RUBY
+
+      evidence = NilKill::StaticEvidence.build_trace_plan([path], root: dir)
+
+      expect(evidence.fetch("methods").map { |method| method["name"] }).to include("call")
+      expect(evidence.fetch("facts").keys).to match_array(NilKill::StaticEvidence::TRACE_PLAN_FACT_KEYS)
+      expect(evidence.dig("facts", "tlet_sites")).to include(a_hash_including(
+        "type" => "T::Array[String]"
+      ))
+      expect(evidence.dig("facts", "struct_declarations")).to include(a_hash_including(
+        "class" => "Worker::Payload",
+        "fields" => %w[name metadata]
+      ))
+      expect(evidence.dig("facts", "flow_local_types")).to be_nil
+    end
   end
 end
