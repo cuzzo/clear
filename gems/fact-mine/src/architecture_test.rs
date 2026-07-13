@@ -24,6 +24,29 @@ fn collect_rust_files(dir: &Path, out: &mut Vec<PathBuf>) {
 }
 
 #[test]
+fn type_inference_language_grammars_live_in_language_modules() {
+    let engine = fs::read_to_string(crate_src().join("type_inference.rs"))
+        .expect("read type inference engine");
+    for token in [
+        "fn parse_ruby",
+        "fn parse_python",
+        "fn parse_typescript",
+        "fn parse_go",
+        "match language {",
+    ] {
+        assert!(
+            !engine.contains(token),
+            "shared type inference engine contains language selector {token}"
+        );
+    }
+
+    let languages = crate_src().join("type_inference/languages");
+    for file in ["ruby.rs", "python.rs", "typescript.rs", "go.rs"] {
+        assert!(languages.join(file).is_file(), "missing type semantics module {file}");
+    }
+}
+
+#[test]
 fn public_api_does_not_export_ast_or_parser_internals() {
     let lib_source = fs::read_to_string(crate_src().join("lib.rs")).expect("read lib.rs");
     let syntax_source = fs::read_to_string(crate_src().join("syntax.rs")).expect("read syntax.rs");
