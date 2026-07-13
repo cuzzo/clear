@@ -288,6 +288,9 @@ module Espalier
       dispatcher_inferences = Array(facts["dispatcher_inferences"])
       hash_record_member_calls = Array(facts["hash_record_member_calls"])
       complexity_facts = Array(facts["complexity_facts"])
+      flow_local_types = Array(facts["flow_local_types"]).uniq do |fact|
+        [fact["file"], fact["function"], fact["node_id"], fact["place_id"]]
+      end
 
       # Collect languages of owners to know if they need @ prepended for fields
       owner_languages = {}
@@ -361,6 +364,9 @@ module Espalier
           "calls" => calls.sort_by { |call| [call["path"].to_s, call["line"].to_i, call["id"].to_s] },
           "state_accesses" => state_accesses.sort_by { |access| [access["path"].to_s, access["line"].to_i, access["id"].to_s] },
           "complexity_facts" => complexity_facts.sort_by { |fact| [fact["path"].to_s, fact["line"].to_i, fact["function"].to_s] },
+          "flow_local_types" => flow_local_types.sort_by do |fact|
+            [fact["file"].to_s, fact["function"].to_s, fact["line"].to_i, fact["name"].to_s, fact["node_id"].to_s]
+          end,
           "call_graph_edges" => call_graph_edges.sort_by { |edge| [edge["source"].to_s, edge["target"].to_s, edge["kind"].to_s] },
           "state_type_edges" => state_type_edges.sort_by { |edge| [edge["source"].to_s, edge["target"].to_s, edge["label"].to_s] },
           "state_types" => Hash[state_types.sort],
@@ -405,6 +411,7 @@ module Espalier
           "fields" => fields.uniq { |field| field["id"] }.size,
           "calls" => calls.size,
           "state_accesses" => state_accesses.size,
+          "flow_local_types" => flow_local_types.size,
           "signatures" => typed_signature_count,
           "state_types" => state_types.size,
           "state_type_records" => deduped[:state_type_records].size,

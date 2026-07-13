@@ -1845,9 +1845,19 @@ RSpec.describe "NilKill coverage hardening" do
         report.send(:append_collection_slot_coverage, collection_lines, collection_slots)
         report.send(:append_collection_slot_candidates, collection_lines, evidence, collection_slots)
         report.send(:append_collection_blocker_pressure, collection_lines, evidence, collection_slots)
+        report.send(:append_hot_runtime_collection_slots, collection_lines, evidence)
         report.send(:append_runtime_collection_observations, collection_lines, evidence.dig("facts", "collection_runtime"))
         report.send(:append_collection_index_lookup_report, collection_lines, evidence.dig("facts", "collection_index_lookups"))
-        expect(collection_lines.join("\n")).to include("Weak Collection Slots", "mutation sites", "Runtime Collection", "forwarded return")
+        expect(collection_lines.join("\n")).to include("Weak Collection Slots", "mutation sites", "Runtime Collection", "Hot Runtime Collection Slots", "forwarded return")
+        hot_slots = report.send(:hot_runtime_collection_slots, evidence)
+        expect(hot_slots.first).to include(
+          "path" => rel,
+          "line" => 13,
+          "owner_kind" => "method_param",
+          "name" => "items",
+          "calls" => 4,
+          "max_process_calls" => 4
+        )
         expect(report.send(:collection_slot_missing_candidate_reason, collection_slots.find { |slot| slot.dig("method", "method") == "empty_items" })).to include("no element")
         expect(report.send(:collection_origin_label, { "kind" => "array literal", "name" => "records", "path" => rel, "line" => 1 })).to include("array literal")
         expect(report.send(:collection_origin_label, { "kind" => "instance variable", "name" => "@record" })).to include("instance")

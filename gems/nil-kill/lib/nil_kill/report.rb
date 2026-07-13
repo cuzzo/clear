@@ -3948,6 +3948,7 @@ module NilKill
       append_hash_record_struct_candidates(lines, evidence)
       append_collection_slot_candidates(lines, evidence, slots)
       append_collection_blocker_pressure(lines, evidence, slots)
+      append_hot_runtime_collection_slots(lines, evidence)
       append_runtime_collection_observations(lines, Array(evidence.dig("facts", "collection_runtime")))
       append_collection_index_lookup_report(lines, Array(evidence.dig("facts", "collection_index_lookups")))
     end
@@ -4812,6 +4813,59 @@ module NilKill
             elem ? "T::Array[#{elem}]" : "T::Array[T.untyped]"
           end
         lines << "  - #{rec["path"]}:#{rec["line"]} #{rec["owner_kind"]} #{rec["name"]}; #{rec["kind"]}; #{type}; #{rec["calls"]} observation(s)"
+      end
+    end
+
+    # Collection tracing already records a call count per process and slot.
+    # Aggregating those existing counters identifies expensive unresolved
+    # collection state without adding another runtime hook to the workload.
+    def append_hot_runtime_collection_slots(lines, evidence)
+      lines << ""
+      lines << "### Hot Runtime Collection Slots"
+      lines << "- estimated from existing collection observations; this adds no runtime tracing"
+      rows = hot_runtime_collection_slots(evidence)
+      if rows.empty?
+        lines << "- none"
+        return
+      end
+
+      rows.first(30).each do |row|
+        lines << "- #{row["path"]}:#{row["line"]} #{row["owner_kind"]} #{row["name"]}; #{row["kind"]}; #{row["calls"]} total observation(s), #{row["max_process_calls"]} max in one process"
+        unless row["mutation_sites"].empty?
+          top = row["mutation_sites"].sort_by { |site, count| [-count, site] }.first(3)
+          lines << "  - mutation sites: #{top.map { |site, count| "#{site} (#{count})" }.join(", ")}"
+        end
+      end
+    end
+
+    def hot_runtime_collection_slots(evidence)
+      grouped = Array(evidence.dig("facts", "collection_runtime")).group_by do |row|
+        [
+          collection_runtime_path_key(row["path"]),
+          row["line"].to_i,
+          row["owner_kind"].to_s,
+          row["name"].to_s,
+          row["kind"].to_s,
+        ]
+      end
+      grouped.map do |(path, line, owner_kind, name, kind), rows|
+        mutation_sites = Hash.new(0)
+        rows.each do |row|
+          Hash(row["mutation_sites"]).each { |site, count| mutation_sites[site] += count.to_i }
+        end
+        {
+          "path" => path,
+          "line" => line,
+          "owner_kind" => owner_kind,
+          "name" => name,
+          "kind" => kind,
+          "calls" => rows.sum { |row| row["calls"].to_i },
+          "max_process_calls" => rows.map { |row| row["calls"].to_i }.max.to_i,
+          "processes" => rows.size,
+          "mutation_sites" => mutation_sites,
+        }
+      end.sort_by do |row|
+        [-row["calls"], -row["max_process_calls"], row["path"], row["line"], row["name"]]
       end
     end
 

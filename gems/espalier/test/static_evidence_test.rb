@@ -163,6 +163,20 @@ class StaticEvidenceTest < Minitest::Test
             "line" => 1,
             "language" => "ruby"
           }
+        ],
+        "flow_local_types" => [
+          {
+            "file" => "mock.rb",
+            "function" => "mock_method",
+            "name" => "message",
+            "place_id" => "place-1",
+            "node_id" => "node-1",
+            "line" => 1,
+            "span" => [1, 0, 1, 7],
+            "types" => ["string"],
+            "complete" => true,
+            "reaching_definitions" => ["node-0"]
+          }
         ]
       }
       Tempfile.create(["mock-facts", ".json"]) do |f|
@@ -174,6 +188,8 @@ class StaticEvidenceTest < Minitest::Test
           assert_equal "espalier_static_evidence", evidence["kind"]
           assert_equal 1, evidence.dig("summary", "methods")
           assert_equal "mock_method", evidence.dig("methods", 0, "name")
+          assert_equal 1, evidence.dig("summary", "flow_local_types")
+          assert_equal ["string"], evidence.dig("facts", "flow_local_types", 0, "types")
         ensure
           ENV["FACT_MINE_FACTS_FILE"] = nil
         end

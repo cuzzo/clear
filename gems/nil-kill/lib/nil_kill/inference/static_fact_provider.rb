@@ -73,6 +73,7 @@ module NilKill
         concat_fact("hidden_enum_observations", facts["hidden_enum_observations"])
         concat_fact("dispatcher_inferences", facts["dispatcher_inferences"])
         concat_fact("hash_record_member_calls", facts["hash_record_member_calls"])
+        concat_fact("flow_local_types", facts["flow_local_types"])
         merge_fact_map("ivar_protocols", facts["ivar_protocols"])
         merge_fact_map("ivar_param_origins", facts["ivar_param_origins"])
       end
