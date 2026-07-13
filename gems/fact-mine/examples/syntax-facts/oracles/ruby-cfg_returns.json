@@ -1,0 +1,550 @@
+{
+  "documents": [
+    {
+      "control_flow_edges": [
+        {
+          "from": "cfg:CfgReturns#branch_return:entry:0:7:2",
+          "function": "branch_return",
+          "kind": "entry",
+          "line": 7,
+          "owner": "CfgReturns",
+          "span": [
+            7,
+            2,
+            12,
+            5
+          ],
+          "to": "cfg:CfgReturns#branch_return:stmt:1:8:4"
+        },
+        {
+          "from": "cfg:CfgReturns#branch_return:return:0.then.0:9:6",
+          "function": "branch_return",
+          "kind": "return",
+          "line": 9,
+          "owner": "CfgReturns",
+          "span": [
+            9,
+            6,
+            9,
+            17
+          ],
+          "to": "cfg:CfgReturns#branch_return:exit:3:12:5"
+        },
+        {
+          "from": "cfg:CfgReturns#branch_return:stmt:1:8:4",
+          "function": "branch_return",
+          "kind": "branch_false",
+          "line": 8,
+          "owner": "CfgReturns",
+          "span": [
+            8,
+            4,
+            10,
+            7
+          ],
+          "to": "cfg:CfgReturns#branch_return:stmt:2:11:4"
+        },
+        {
+          "from": "cfg:CfgReturns#branch_return:stmt:1:8:4",
+          "function": "branch_return",
+          "kind": "branch_true",
+          "line": 8,
+          "owner": "CfgReturns",
+          "span": [
+            8,
+            4,
+            10,
+            7
+          ],
+          "to": "cfg:CfgReturns#branch_return:return:0.then.0:9:6"
+        },
+        {
+          "from": "cfg:CfgReturns#branch_return:stmt:2:11:4",
+          "function": "branch_return",
+          "kind": "fallthrough",
+          "line": 11,
+          "owner": "CfgReturns",
+          "span": [
+            11,
+            4,
+            11,
+            17
+          ],
+          "to": "cfg:CfgReturns#branch_return:exit:3:12:5"
+        },
+        {
+          "from": "cfg:CfgReturns#early_return:entry:0:2:2",
+          "function": "early_return",
+          "kind": "entry",
+          "line": 2,
+          "owner": "CfgReturns",
+          "span": [
+            2,
+            2,
+            5,
+            5
+          ],
+          "to": "cfg:CfgReturns#early_return:return:0:3:4"
+        },
+        {
+          "from": "cfg:CfgReturns#early_return:return:0:3:4",
+          "function": "early_return",
+          "kind": "return",
+          "line": 3,
+          "owner": "CfgReturns",
+          "span": [
+            3,
+            4,
+            3,
+            15
+          ],
+          "to": "cfg:CfgReturns#early_return:exit:3:5:5"
+        },
+        {
+          "from": "cfg:CfgReturns#loop_return:branch:0.loop.0:16:6",
+          "function": "loop_return",
+          "kind": "branch_false",
+          "line": 16,
+          "owner": "CfgReturns",
+          "span": [
+            16,
+            6,
+            18,
+            9
+          ],
+          "to": "cfg:CfgReturns#loop_return:stmt:0.loop.1:19:6"
+        },
+        {
+          "from": "cfg:CfgReturns#loop_return:branch:0.loop.0:16:6",
+          "function": "loop_return",
+          "kind": "branch_true",
+          "line": 16,
+          "owner": "CfgReturns",
+          "span": [
+            16,
+            6,
+            18,
+            9
+          ],
+          "to": "cfg:CfgReturns#loop_return:return:0.loop.0.then.0:17:8"
+        },
+        {
+          "from": "cfg:CfgReturns#loop_return:entry:0:14:2",
+          "function": "loop_return",
+          "kind": "entry",
+          "line": 14,
+          "owner": "CfgReturns",
+          "span": [
+            14,
+            2,
+            22,
+            5
+          ],
+          "to": "cfg:CfgReturns#loop_return:stmt:1:15:4"
+        },
+        {
+          "from": "cfg:CfgReturns#loop_return:return:0.loop.0.then.0:17:8",
+          "function": "loop_return",
+          "kind": "return",
+          "line": 17,
+          "owner": "CfgReturns",
+          "span": [
+            17,
+            8,
+            17,
+            19
+          ],
+          "to": "cfg:CfgReturns#loop_return:exit:3:22:5"
+        },
+        {
+          "from": "cfg:CfgReturns#loop_return:stmt:0.loop.1:19:6",
+          "function": "loop_return",
+          "kind": "loop_backedge",
+          "line": 19,
+          "owner": "CfgReturns",
+          "span": [
+            19,
+            6,
+            19,
+            19
+          ],
+          "to": "cfg:CfgReturns#loop_return:stmt:1:15:4"
+        },
+        {
+          "from": "cfg:CfgReturns#loop_return:stmt:1:15:4",
+          "function": "loop_return",
+          "kind": "loop_body",
+          "line": 15,
+          "owner": "CfgReturns",
+          "span": [
+            15,
+            4,
+            20,
+            7
+          ],
+          "to": "cfg:CfgReturns#loop_return:branch:0.loop.0:16:6"
+        },
+        {
+          "from": "cfg:CfgReturns#loop_return:stmt:1:15:4",
+          "function": "loop_return",
+          "kind": "loop_exit",
+          "line": 15,
+          "owner": "CfgReturns",
+          "span": [
+            15,
+            4,
+            20,
+            7
+          ],
+          "to": "cfg:CfgReturns#loop_return:stmt:2:21:4"
+        },
+        {
+          "from": "cfg:CfgReturns#loop_return:stmt:2:21:4",
+          "function": "loop_return",
+          "kind": "fallthrough",
+          "line": 21,
+          "owner": "CfgReturns",
+          "span": [
+            21,
+            4,
+            21,
+            17
+          ],
+          "to": "cfg:CfgReturns#loop_return:exit:3:22:5"
+        },
+        {
+          "from": "cfg:CfgReturns#tail_return:entry:0:24:2",
+          "function": "tail_return",
+          "kind": "entry",
+          "line": 24,
+          "owner": "CfgReturns",
+          "span": [
+            24,
+            2,
+            27,
+            5
+          ],
+          "to": "cfg:CfgReturns#tail_return:stmt:1:25:4"
+        },
+        {
+          "from": "cfg:CfgReturns#tail_return:stmt:1:25:4",
+          "function": "tail_return",
+          "kind": "fallthrough",
+          "line": 25,
+          "owner": "CfgReturns",
+          "span": [
+            25,
+            4,
+            25,
+            17
+          ],
+          "to": "cfg:CfgReturns#tail_return:stmt:2:26:11"
+        },
+        {
+          "from": "cfg:CfgReturns#tail_return:stmt:2:26:11",
+          "function": "tail_return",
+          "kind": "fallthrough",
+          "line": 26,
+          "owner": "CfgReturns",
+          "span": [
+            26,
+            11,
+            26,
+            15
+          ],
+          "to": "cfg:CfgReturns#tail_return:exit:3:27:5"
+        }
+      ],
+      "control_flow_nodes": [
+        {
+          "function": "branch_return",
+          "id": "cfg:CfgReturns#branch_return:entry:0:7:2",
+          "kind": "entry",
+          "line": 7,
+          "owner": "CfgReturns",
+          "role": "function_entry",
+          "source": "",
+          "span": [
+            7,
+            2,
+            12,
+            5
+          ]
+        },
+        {
+          "function": "branch_return",
+          "id": "cfg:CfgReturns#branch_return:exit:3:12:5",
+          "kind": "exit",
+          "line": 12,
+          "owner": "CfgReturns",
+          "role": "function_exit",
+          "source": "",
+          "span": [
+            7,
+            2,
+            12,
+            5
+          ]
+        },
+        {
+          "function": "branch_return",
+          "id": "cfg:CfgReturns#branch_return:return:0.then.0:9:6",
+          "kind": "jump",
+          "line": 9,
+          "owner": "CfgReturns",
+          "role": "return",
+          "source": "return user",
+          "span": [
+            9,
+            6,
+            9,
+            17
+          ]
+        },
+        {
+          "function": "branch_return",
+          "id": "cfg:CfgReturns#branch_return:stmt:1:8:4",
+          "kind": "branch",
+          "line": 8,
+          "owner": "CfgReturns",
+          "role": "if_condition",
+          "source": "if user.ready? return user end",
+          "span": [
+            8,
+            4,
+            10,
+            7
+          ]
+        },
+        {
+          "function": "branch_return",
+          "id": "cfg:CfgReturns#branch_return:stmt:2:11:4",
+          "kind": "statement",
+          "line": 11,
+          "owner": "CfgReturns",
+          "role": "linear_statement",
+          "source": "publish(user)",
+          "span": [
+            11,
+            4,
+            11,
+            17
+          ]
+        },
+        {
+          "function": "early_return",
+          "id": "cfg:CfgReturns#early_return:entry:0:2:2",
+          "kind": "entry",
+          "line": 2,
+          "owner": "CfgReturns",
+          "role": "function_entry",
+          "source": "",
+          "span": [
+            2,
+            2,
+            5,
+            5
+          ]
+        },
+        {
+          "function": "early_return",
+          "id": "cfg:CfgReturns#early_return:exit:3:5:5",
+          "kind": "exit",
+          "line": 5,
+          "owner": "CfgReturns",
+          "role": "function_exit",
+          "source": "",
+          "span": [
+            2,
+            2,
+            5,
+            5
+          ]
+        },
+        {
+          "function": "early_return",
+          "id": "cfg:CfgReturns#early_return:return:0:3:4",
+          "kind": "jump",
+          "line": 3,
+          "owner": "CfgReturns",
+          "role": "return",
+          "source": "return user",
+          "span": [
+            3,
+            4,
+            3,
+            15
+          ]
+        },
+        {
+          "function": "loop_return",
+          "id": "cfg:CfgReturns#loop_return:branch:0.loop.0:16:6",
+          "kind": "branch",
+          "line": 16,
+          "owner": "CfgReturns",
+          "role": "if_condition",
+          "source": "if item.done? return item end",
+          "span": [
+            16,
+            6,
+            18,
+            9
+          ]
+        },
+        {
+          "function": "loop_return",
+          "id": "cfg:CfgReturns#loop_return:entry:0:14:2",
+          "kind": "entry",
+          "line": 14,
+          "owner": "CfgReturns",
+          "role": "function_entry",
+          "source": "",
+          "span": [
+            14,
+            2,
+            22,
+            5
+          ]
+        },
+        {
+          "function": "loop_return",
+          "id": "cfg:CfgReturns#loop_return:exit:3:22:5",
+          "kind": "exit",
+          "line": 22,
+          "owner": "CfgReturns",
+          "role": "function_exit",
+          "source": "",
+          "span": [
+            14,
+            2,
+            22,
+            5
+          ]
+        },
+        {
+          "function": "loop_return",
+          "id": "cfg:CfgReturns#loop_return:return:0.loop.0.then.0:17:8",
+          "kind": "jump",
+          "line": 17,
+          "owner": "CfgReturns",
+          "role": "return",
+          "source": "return item",
+          "span": [
+            17,
+            8,
+            17,
+            19
+          ]
+        },
+        {
+          "function": "loop_return",
+          "id": "cfg:CfgReturns#loop_return:stmt:0.loop.1:19:6",
+          "kind": "statement",
+          "line": 19,
+          "owner": "CfgReturns",
+          "role": "linear_statement",
+          "source": "publish(item)",
+          "span": [
+            19,
+            6,
+            19,
+            19
+          ]
+        },
+        {
+          "function": "loop_return",
+          "id": "cfg:CfgReturns#loop_return:stmt:1:15:4",
+          "kind": "loop",
+          "line": 15,
+          "owner": "CfgReturns",
+          "role": "iterator_loop",
+          "source": "items.each do |item| if item.done? return item end publish(item) end",
+          "span": [
+            15,
+            4,
+            20,
+            7
+          ]
+        },
+        {
+          "function": "loop_return",
+          "id": "cfg:CfgReturns#loop_return:stmt:2:21:4",
+          "kind": "statement",
+          "line": 21,
+          "owner": "CfgReturns",
+          "role": "linear_statement",
+          "source": "finish(items)",
+          "span": [
+            21,
+            4,
+            21,
+            17
+          ]
+        },
+        {
+          "function": "tail_return",
+          "id": "cfg:CfgReturns#tail_return:entry:0:24:2",
+          "kind": "entry",
+          "line": 24,
+          "owner": "CfgReturns",
+          "role": "function_entry",
+          "source": "",
+          "span": [
+            24,
+            2,
+            27,
+            5
+          ]
+        },
+        {
+          "function": "tail_return",
+          "id": "cfg:CfgReturns#tail_return:exit:3:27:5",
+          "kind": "exit",
+          "line": 27,
+          "owner": "CfgReturns",
+          "role": "function_exit",
+          "source": "",
+          "span": [
+            24,
+            2,
+            27,
+            5
+          ]
+        },
+        {
+          "function": "tail_return",
+          "id": "cfg:CfgReturns#tail_return:stmt:1:25:4",
+          "kind": "statement",
+          "line": 25,
+          "owner": "CfgReturns",
+          "role": "linear_statement",
+          "source": "publish(user)",
+          "span": [
+            25,
+            4,
+            25,
+            17
+          ]
+        },
+        {
+          "function": "tail_return",
+          "id": "cfg:CfgReturns#tail_return:stmt:2:26:11",
+          "kind": "statement",
+          "line": 26,
+          "owner": "CfgReturns",
+          "role": "linear_statement",
+          "source": "user",
+          "span": [
+            26,
+            11,
+            26,
+            15
+          ]
+        }
+      ],
+      "file": "gems/fact-mine/examples/syntax-facts/ruby/cfg_returns.rb",
+      "language": "ruby"
+    }
+  ],
+  "format": "decomplex.syntax-facts.v1"
+}

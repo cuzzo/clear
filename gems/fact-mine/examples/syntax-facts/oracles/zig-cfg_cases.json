@@ -1,0 +1,989 @@
+{
+  "documents": [
+    {
+      "branch_arms": [
+        {
+          "body": "invite(value)",
+          "decision_line": 2,
+          "decision_span": [
+            2,
+            4,
+            6,
+            5
+          ],
+          "function": "dispatch",
+          "kind": "case",
+          "line": 4,
+          "member": "1",
+          "predicate": "value",
+          "span": [
+            4,
+            8,
+            4,
+            29
+          ]
+        },
+        {
+          "body": "publish(value)",
+          "decision_line": 2,
+          "decision_span": [
+            2,
+            4,
+            6,
+            5
+          ],
+          "function": "dispatch",
+          "kind": "case",
+          "line": 3,
+          "member": "0",
+          "predicate": "value",
+          "span": [
+            3,
+            8,
+            3,
+            27
+          ]
+        }
+      ],
+      "branch_decisions": [],
+      "calls": [
+        {
+          "arguments": [
+            "value"
+          ],
+          "block": false,
+          "conditional": false,
+          "control": "always",
+          "function": "dispatch",
+          "line": 7,
+          "message": "finish",
+          "owner": "u8",
+          "receiver": "self",
+          "safe_navigation": false,
+          "span": [
+            7,
+            4,
+            7,
+            17
+          ]
+        },
+        {
+          "arguments": [
+            "value"
+          ],
+          "block": false,
+          "conditional": true,
+          "control": "conditional",
+          "function": "dispatch",
+          "line": 3,
+          "message": "publish",
+          "owner": "u8",
+          "receiver": "self",
+          "safe_navigation": false,
+          "span": [
+            3,
+            13,
+            3,
+            27
+          ]
+        },
+        {
+          "arguments": [
+            "value"
+          ],
+          "block": false,
+          "conditional": true,
+          "control": "conditional",
+          "function": "dispatch",
+          "line": 4,
+          "message": "invite",
+          "owner": "u8",
+          "receiver": "self",
+          "safe_navigation": false,
+          "span": [
+            4,
+            16,
+            4,
+            29
+          ]
+        },
+        {
+          "arguments": [
+            "value"
+          ],
+          "block": false,
+          "conditional": true,
+          "control": "conditional",
+          "function": "dispatch",
+          "line": 5,
+          "message": "ignore",
+          "owner": "u8",
+          "receiver": "self",
+          "safe_navigation": false,
+          "span": [
+            5,
+            16,
+            5,
+            29
+          ]
+        }
+      ],
+      "clone_candidates": [
+        {
+          "child_fingerprints": [
+            "argument_list(id)"
+          ],
+          "child_masses": [
+            2
+          ],
+          "fingerprint": "call<finish>(id argument_list(id))",
+          "line": 7,
+          "mass": 3,
+          "method_name": "dispatch",
+          "node_name": "call",
+          "raw": "finish(value)",
+          "span": [
+            7,
+            4,
+            7,
+            17
+          ]
+        },
+        {
+          "child_fingerprints": [
+            "argument_list(id)"
+          ],
+          "child_masses": [
+            2
+          ],
+          "fingerprint": "call<ignore>(id argument_list(id))",
+          "line": 5,
+          "mass": 3,
+          "method_name": "dispatch",
+          "node_name": "call",
+          "raw": "ignore(value)",
+          "span": [
+            5,
+            16,
+            5,
+            29
+          ]
+        },
+        {
+          "child_fingerprints": [
+            "argument_list(id)"
+          ],
+          "child_masses": [
+            2
+          ],
+          "fingerprint": "call<invite>(id argument_list(id))",
+          "line": 4,
+          "mass": 3,
+          "method_name": "dispatch",
+          "node_name": "call",
+          "raw": "invite(value)",
+          "span": [
+            4,
+            16,
+            4,
+            29
+          ]
+        },
+        {
+          "child_fingerprints": [
+            "argument_list(id)"
+          ],
+          "child_masses": [
+            2
+          ],
+          "fingerprint": "call<publish>(id argument_list(id))",
+          "line": 3,
+          "mass": 3,
+          "method_name": "dispatch",
+          "node_name": "call",
+          "raw": "publish(value)",
+          "span": [
+            3,
+            13,
+            3,
+            27
+          ]
+        },
+        {
+          "child_fingerprints": [
+            "argument_list(lit lit)",
+            "call<invite>(id argument_list(id))",
+            "when(call<ignore>(id argument_list(id)))"
+          ],
+          "child_masses": [
+            3,
+            3,
+            4
+          ],
+          "fingerprint": "when(argument_list(lit lit) call<invite>(id argument_list(id)) when(call<ignore>(id argument_list(id))))",
+          "line": 4,
+          "mass": 11,
+          "method_name": "dispatch",
+          "node_name": "when",
+          "raw": "1, 2 => invite(value)",
+          "span": [
+            4,
+            8,
+            4,
+            29
+          ]
+        },
+        {
+          "child_fingerprints": [
+            "argument_list(lit)",
+            "call<publish>(id argument_list(id))",
+            "when(argument_list(lit lit) call<invite>(id argument_list(id)) when(call<ignore>(id argument_list(id))))"
+          ],
+          "child_masses": [
+            2,
+            3,
+            11
+          ],
+          "fingerprint": "when(argument_list(lit) call<publish>(id argument_list(id)) when(argument_list(lit lit) call<invite>(id argument_list(id)) when(call<ignore>(id argument_list(id)))))",
+          "line": 3,
+          "mass": 17,
+          "method_name": "dispatch",
+          "node_name": "when",
+          "raw": "0 => publish(value)",
+          "span": [
+            3,
+            8,
+            3,
+            27
+          ]
+        },
+        {
+          "child_fingerprints": [
+            "call<ignore>(id argument_list(id))"
+          ],
+          "child_masses": [
+            3
+          ],
+          "fingerprint": "when(call<ignore>(id argument_list(id)))",
+          "line": 5,
+          "mass": 4,
+          "method_name": "dispatch",
+          "node_name": "when",
+          "raw": "else => ignore(value)",
+          "span": [
+            5,
+            8,
+            5,
+            29
+          ]
+        },
+        {
+          "child_fingerprints": [
+            "case(id when(argument_list(lit) call<publish>(id argument_list(id)) when(argument_list(lit lit) call<invite>(id argument_list(id)) when(call<ignore>(id argument_list(id))))))",
+            "call<finish>(id argument_list(id))"
+          ],
+          "child_masses": [
+            19,
+            3
+          ],
+          "fingerprint": "body_statement(case(id when(argument_list(lit) call<publish>(id argument_list(id)) when(argument_list(lit lit) call<invite>(id argument_list(id)) when(call<ignore>(id argument_list(id)))))) call<finish>(id argument_list(id)))",
+          "line": 1,
+          "mass": 23,
+          "method_name": "dispatch",
+          "node_name": "body_statement",
+          "raw": "{ switch (value) { 0 => publish(value), 1, 2 => invite(value), else => ignore(value), } finish(value); }",
+          "span": [
+            1,
+            28,
+            8,
+            1
+          ]
+        },
+        {
+          "child_fingerprints": [
+            "id",
+            "when(argument_list(lit) call<publish>(id argument_list(id)) when(argument_list(lit lit) call<invite>(id argument_list(id)) when(call<ignore>(id argument_list(id)))))"
+          ],
+          "child_masses": [
+            1,
+            17
+          ],
+          "fingerprint": "case(id when(argument_list(lit) call<publish>(id argument_list(id)) when(argument_list(lit lit) call<invite>(id argument_list(id)) when(call<ignore>(id argument_list(id))))))",
+          "line": 2,
+          "mass": 19,
+          "method_name": "dispatch",
+          "node_name": "case",
+          "raw": "switch (value) { 0 => publish(value), 1, 2 => invite(value), else => ignore(value), }",
+          "span": [
+            2,
+            4,
+            6,
+            5
+          ]
+        },
+        {
+          "child_fingerprints": [
+            "id"
+          ],
+          "child_masses": [
+            1
+          ],
+          "fingerprint": "argument_list(id)",
+          "line": 3,
+          "mass": 2,
+          "method_name": "dispatch",
+          "node_name": "argument_list",
+          "raw": "publish(value)",
+          "span": [
+            3,
+            13,
+            3,
+            27
+          ]
+        },
+        {
+          "child_fingerprints": [
+            "id"
+          ],
+          "child_masses": [
+            1
+          ],
+          "fingerprint": "argument_list(id)",
+          "line": 4,
+          "mass": 2,
+          "method_name": "dispatch",
+          "node_name": "argument_list",
+          "raw": "invite(value)",
+          "span": [
+            4,
+            16,
+            4,
+            29
+          ]
+        },
+        {
+          "child_fingerprints": [
+            "id"
+          ],
+          "child_masses": [
+            1
+          ],
+          "fingerprint": "argument_list(id)",
+          "line": 5,
+          "mass": 2,
+          "method_name": "dispatch",
+          "node_name": "argument_list",
+          "raw": "ignore(value)",
+          "span": [
+            5,
+            16,
+            5,
+            29
+          ]
+        },
+        {
+          "child_fingerprints": [
+            "id"
+          ],
+          "child_masses": [
+            1
+          ],
+          "fingerprint": "argument_list(id)",
+          "line": 7,
+          "mass": 2,
+          "method_name": "dispatch",
+          "node_name": "argument_list",
+          "raw": "finish(value)",
+          "span": [
+            7,
+            4,
+            7,
+            17
+          ]
+        },
+        {
+          "child_fingerprints": [
+            "lit",
+            "lit"
+          ],
+          "child_masses": [
+            1,
+            1
+          ],
+          "fingerprint": "argument_list(lit lit)",
+          "line": 4,
+          "mass": 3,
+          "method_name": "dispatch",
+          "node_name": "argument_list",
+          "raw": "1, 2 => invite(value)",
+          "span": [
+            4,
+            8,
+            4,
+            29
+          ]
+        },
+        {
+          "child_fingerprints": [
+            "lit"
+          ],
+          "child_masses": [
+            1
+          ],
+          "fingerprint": "argument_list(lit)",
+          "line": 3,
+          "mass": 2,
+          "method_name": "dispatch",
+          "node_name": "argument_list",
+          "raw": "0 => publish(value)",
+          "span": [
+            3,
+            8,
+            3,
+            27
+          ]
+        },
+        {
+          "child_fingerprints": [],
+          "child_masses": [],
+          "fingerprint": "method(id body(body_statement(case(id when(argument_list(lit) call<publish>(id argument_list(id)) when(argument_list(lit lit) call<invite>(id argument_list(id)) when(call<ignore>(id argument_list(id)))))) call<finish>(id argument_list(id)))))",
+          "line": 1,
+          "mass": 25,
+          "method_name": "dispatch",
+          "node_name": "defn",
+          "raw": "fn dispatch(value: u8) void { switch (value) { 0 => publish(value), 1, 2 => invite(value), else => ignore(value), } finish(value); }",
+          "span": [
+            1,
+            0,
+            8,
+            1
+          ]
+        }
+      ],
+      "comparisons": [],
+      "control_flow_edges": [
+        {
+          "from": "cfg:u8#dispatch:entry:0:1:0",
+          "function": "dispatch",
+          "kind": "entry",
+          "line": 1,
+          "owner": "u8",
+          "span": [
+            1,
+            0,
+            8,
+            1
+          ],
+          "to": "cfg:u8#dispatch:stmt:1:2:4"
+        },
+        {
+          "from": "cfg:u8#dispatch:stmt:0.case0.0:3:13",
+          "function": "dispatch",
+          "kind": "fallthrough",
+          "line": 3,
+          "owner": "u8",
+          "span": [
+            3,
+            13,
+            3,
+            27
+          ],
+          "to": "cfg:u8#dispatch:stmt:2:7:4"
+        },
+        {
+          "from": "cfg:u8#dispatch:stmt:0.case1.0:4:16",
+          "function": "dispatch",
+          "kind": "fallthrough",
+          "line": 4,
+          "owner": "u8",
+          "span": [
+            4,
+            16,
+            4,
+            29
+          ],
+          "to": "cfg:u8#dispatch:stmt:2:7:4"
+        },
+        {
+          "from": "cfg:u8#dispatch:stmt:0.case2.0:5:16",
+          "function": "dispatch",
+          "kind": "fallthrough",
+          "line": 5,
+          "owner": "u8",
+          "span": [
+            5,
+            16,
+            5,
+            29
+          ],
+          "to": "cfg:u8#dispatch:stmt:2:7:4"
+        },
+        {
+          "from": "cfg:u8#dispatch:stmt:1:2:4",
+          "function": "dispatch",
+          "kind": "case_arm",
+          "line": 2,
+          "owner": "u8",
+          "span": [
+            2,
+            4,
+            6,
+            5
+          ],
+          "to": "cfg:u8#dispatch:stmt:0.case0.0:3:13"
+        },
+        {
+          "from": "cfg:u8#dispatch:stmt:1:2:4",
+          "function": "dispatch",
+          "kind": "case_arm",
+          "line": 2,
+          "owner": "u8",
+          "span": [
+            2,
+            4,
+            6,
+            5
+          ],
+          "to": "cfg:u8#dispatch:stmt:0.case1.0:4:16"
+        },
+        {
+          "from": "cfg:u8#dispatch:stmt:1:2:4",
+          "function": "dispatch",
+          "kind": "case_arm",
+          "line": 2,
+          "owner": "u8",
+          "span": [
+            2,
+            4,
+            6,
+            5
+          ],
+          "to": "cfg:u8#dispatch:stmt:0.case2.0:5:16"
+        },
+        {
+          "from": "cfg:u8#dispatch:stmt:1:2:4",
+          "function": "dispatch",
+          "kind": "case_default",
+          "line": 2,
+          "owner": "u8",
+          "span": [
+            2,
+            4,
+            6,
+            5
+          ],
+          "to": "cfg:u8#dispatch:stmt:2:7:4"
+        },
+        {
+          "from": "cfg:u8#dispatch:stmt:2:7:4",
+          "function": "dispatch",
+          "kind": "fallthrough",
+          "line": 7,
+          "owner": "u8",
+          "span": [
+            7,
+            4,
+            7,
+            17
+          ],
+          "to": "cfg:u8#dispatch:exit:3:8:1"
+        }
+      ],
+      "control_flow_nodes": [
+        {
+          "function": "dispatch",
+          "id": "cfg:u8#dispatch:entry:0:1:0",
+          "kind": "entry",
+          "line": 1,
+          "owner": "u8",
+          "role": "function_entry",
+          "source": "",
+          "span": [
+            1,
+            0,
+            8,
+            1
+          ]
+        },
+        {
+          "function": "dispatch",
+          "id": "cfg:u8#dispatch:exit:3:8:1",
+          "kind": "exit",
+          "line": 8,
+          "owner": "u8",
+          "role": "function_exit",
+          "source": "",
+          "span": [
+            1,
+            0,
+            8,
+            1
+          ]
+        },
+        {
+          "function": "dispatch",
+          "id": "cfg:u8#dispatch:stmt:0.case0.0:3:13",
+          "kind": "statement",
+          "line": 3,
+          "owner": "u8",
+          "role": "linear_statement",
+          "source": "publish(value)",
+          "span": [
+            3,
+            13,
+            3,
+            27
+          ]
+        },
+        {
+          "function": "dispatch",
+          "id": "cfg:u8#dispatch:stmt:0.case1.0:4:16",
+          "kind": "statement",
+          "line": 4,
+          "owner": "u8",
+          "role": "linear_statement",
+          "source": "invite(value)",
+          "span": [
+            4,
+            16,
+            4,
+            29
+          ]
+        },
+        {
+          "function": "dispatch",
+          "id": "cfg:u8#dispatch:stmt:0.case2.0:5:16",
+          "kind": "statement",
+          "line": 5,
+          "owner": "u8",
+          "role": "linear_statement",
+          "source": "ignore(value)",
+          "span": [
+            5,
+            16,
+            5,
+            29
+          ]
+        },
+        {
+          "function": "dispatch",
+          "id": "cfg:u8#dispatch:stmt:1:2:4",
+          "kind": "case",
+          "line": 2,
+          "owner": "u8",
+          "role": "case_dispatch",
+          "source": "switch (value) { 0 => publish(value), 1, 2 => invite(value), else => ignore(value), }",
+          "span": [
+            2,
+            4,
+            6,
+            5
+          ]
+        },
+        {
+          "function": "dispatch",
+          "id": "cfg:u8#dispatch:stmt:2:7:4",
+          "kind": "statement",
+          "line": 7,
+          "owner": "u8",
+          "role": "linear_statement",
+          "source": "finish(value)",
+          "span": [
+            7,
+            4,
+            7,
+            17
+          ]
+        }
+      ],
+      "decisions": [
+        {
+          "enclosing_span": [
+            2,
+            4,
+            6,
+            5
+          ],
+          "function": "dispatch",
+          "kind": "case_dispatch",
+          "line": 2,
+          "members": [
+            "0",
+            "1"
+          ],
+          "predicate": "value",
+          "span": [
+            2,
+            4,
+            6,
+            5
+          ]
+        }
+      ],
+      "dispatch_sites": [],
+      "file": "gems/fact-mine/examples/syntax-facts/zig/cfg_cases.zig",
+      "functions": [
+        {
+          "line": 1,
+          "name": "dispatch",
+          "owner": "u8",
+          "params": [
+            "value"
+          ],
+          "span": [
+            1,
+            0,
+            8,
+            1
+          ],
+          "visibility": "private"
+        }
+      ],
+      "immutable_struct_reader_types": {},
+      "immutable_struct_readers": {},
+      "language": "zig",
+      "local_complexity_scores": [
+        {
+          "id": "u8#dispatch",
+          "score": 2.0,
+          "signals": {
+            "cases": 4
+          }
+        }
+      ],
+      "local_methods": [
+        {
+          "boundaries": [],
+          "id": "u8#dispatch",
+          "line": 1,
+          "local_contract_assignments": {},
+          "name": "dispatch",
+          "owner": "u8",
+          "span": [
+            1,
+            0,
+            8,
+            1
+          ],
+          "statements": [
+            {
+              "co_uses": [],
+              "dependencies": [],
+              "end_line": 6,
+              "index": 0,
+              "line": 2,
+              "reads": [
+                "value"
+              ],
+              "source": "switch (value) { 0 => publish(value), 1, 2 => invite(value), else => ignore(value), }",
+              "span": [
+                2,
+                4,
+                6,
+                5
+              ],
+              "writes": []
+            },
+            {
+              "co_uses": [],
+              "dependencies": [],
+              "end_line": 7,
+              "index": 1,
+              "line": 7,
+              "reads": [
+                "value"
+              ],
+              "source": "finish(value)",
+              "span": [
+                7,
+                4,
+                7,
+                17
+              ],
+              "writes": []
+            }
+          ]
+        }
+      ],
+      "method_param_types": {},
+      "owners": [],
+      "path_conditions": [],
+      "predicate_bodies": [],
+      "protocol_call_paths": [
+        {
+          "calls": [
+            {
+              "line": 3,
+              "mid": "publish",
+              "span": [
+                3,
+                13,
+                3,
+                27
+              ]
+            },
+            {
+              "line": 7,
+              "mid": "finish",
+              "span": [
+                7,
+                4,
+                7,
+                17
+              ]
+            }
+          ],
+          "line": 1,
+          "name": "dispatch",
+          "owner": "u8"
+        },
+        {
+          "calls": [
+            {
+              "line": 4,
+              "mid": "invite",
+              "span": [
+                4,
+                16,
+                4,
+                29
+              ]
+            },
+            {
+              "line": 7,
+              "mid": "finish",
+              "span": [
+                7,
+                4,
+                7,
+                17
+              ]
+            }
+          ],
+          "line": 1,
+          "name": "dispatch",
+          "owner": "u8"
+        },
+        {
+          "calls": [
+            {
+              "line": 5,
+              "mid": "ignore",
+              "span": [
+                5,
+                16,
+                5,
+                29
+              ]
+            },
+            {
+              "line": 7,
+              "mid": "finish",
+              "span": [
+                7,
+                4,
+                7,
+                17
+              ]
+            }
+          ],
+          "line": 1,
+          "name": "dispatch",
+          "owner": "u8"
+        },
+        {
+          "calls": [
+            {
+              "line": 7,
+              "mid": "finish",
+              "span": [
+                7,
+                4,
+                7,
+                17
+              ]
+            }
+          ],
+          "line": 1,
+          "name": "dispatch",
+          "owner": "u8"
+        }
+      ],
+      "protocol_method_effects": [
+        {
+          "line": 1,
+          "name": "dispatch",
+          "owner": "u8",
+          "reads": [
+            "finish",
+            "ignore",
+            "invite",
+            "publish"
+          ],
+          "writes": []
+        }
+      ],
+      "redundant_nil_guards": [],
+      "semantic_effects": [],
+      "state_declarations": [],
+      "state_param_origins": [],
+      "state_reads": [
+        {
+          "field": "finish",
+          "function": "dispatch",
+          "line": 7,
+          "owner": "u8",
+          "receiver": "self",
+          "span": [
+            7,
+            4,
+            7,
+            10
+          ]
+        },
+        {
+          "field": "ignore",
+          "function": "dispatch",
+          "line": 5,
+          "owner": "u8",
+          "receiver": "self",
+          "span": [
+            5,
+            16,
+            5,
+            22
+          ]
+        },
+        {
+          "field": "invite",
+          "function": "dispatch",
+          "line": 4,
+          "owner": "u8",
+          "receiver": "self",
+          "span": [
+            4,
+            16,
+            4,
+            22
+          ]
+        },
+        {
+          "field": "publish",
+          "function": "dispatch",
+          "line": 3,
+          "owner": "u8",
+          "receiver": "self",
+          "span": [
+            3,
+            13,
+            3,
+            20
+          ]
+        }
+      ],
+      "state_writes": [],
+      "type_aliases": {}
+    }
+  ],
+  "format": "decomplex.syntax-facts.v1"
+}

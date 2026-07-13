@@ -1,0 +1,955 @@
+{
+  "documents": [
+    {
+      "branch_arms": [
+        {
+          "body": "invite(value)",
+          "decision_line": 3,
+          "decision_span": [
+            3,
+            8,
+            7,
+            9
+          ],
+          "function": "dispatch",
+          "kind": "case",
+          "line": 5,
+          "member": "1 | 2",
+          "predicate": "value",
+          "span": [
+            5,
+            12,
+            5,
+            35
+          ]
+        },
+        {
+          "body": "publish(value)",
+          "decision_line": 3,
+          "decision_span": [
+            3,
+            8,
+            7,
+            9
+          ],
+          "function": "dispatch",
+          "kind": "case",
+          "line": 4,
+          "member": "0",
+          "predicate": "value",
+          "span": [
+            4,
+            12,
+            4,
+            32
+          ]
+        }
+      ],
+      "branch_decisions": [],
+      "calls": [
+        {
+          "arguments": [
+            "value"
+          ],
+          "block": false,
+          "conditional": false,
+          "control": "always",
+          "function": "dispatch",
+          "line": 8,
+          "message": "finish",
+          "owner": "Matcher",
+          "receiver": "self",
+          "safe_navigation": false,
+          "span": [
+            8,
+            8,
+            8,
+            21
+          ]
+        },
+        {
+          "arguments": [
+            "value"
+          ],
+          "block": false,
+          "conditional": true,
+          "control": "conditional",
+          "function": "dispatch",
+          "line": 4,
+          "message": "publish",
+          "owner": "Matcher",
+          "receiver": "self",
+          "safe_navigation": false,
+          "span": [
+            4,
+            17,
+            4,
+            31
+          ]
+        },
+        {
+          "arguments": [
+            "value"
+          ],
+          "block": false,
+          "conditional": true,
+          "control": "conditional",
+          "function": "dispatch",
+          "line": 5,
+          "message": "invite",
+          "owner": "Matcher",
+          "receiver": "self",
+          "safe_navigation": false,
+          "span": [
+            5,
+            21,
+            5,
+            34
+          ]
+        },
+        {
+          "arguments": [
+            "value"
+          ],
+          "block": false,
+          "conditional": true,
+          "control": "conditional",
+          "function": "dispatch",
+          "line": 6,
+          "message": "ignore",
+          "owner": "Matcher",
+          "receiver": "self",
+          "safe_navigation": false,
+          "span": [
+            6,
+            17,
+            6,
+            30
+          ]
+        }
+      ],
+      "clone_candidates": [
+        {
+          "child_fingerprints": [
+            "argument_list(id)"
+          ],
+          "child_masses": [
+            2
+          ],
+          "fingerprint": "call<finish>(id argument_list(id))",
+          "line": 8,
+          "mass": 3,
+          "method_name": "dispatch",
+          "node_name": "call",
+          "raw": "finish(value)",
+          "span": [
+            8,
+            8,
+            8,
+            21
+          ]
+        },
+        {
+          "child_fingerprints": [
+            "argument_list(id)"
+          ],
+          "child_masses": [
+            2
+          ],
+          "fingerprint": "call<ignore>(id argument_list(id))",
+          "line": 6,
+          "mass": 3,
+          "method_name": "dispatch",
+          "node_name": "call",
+          "raw": "ignore(value)",
+          "span": [
+            6,
+            17,
+            6,
+            30
+          ]
+        },
+        {
+          "child_fingerprints": [
+            "argument_list(id)"
+          ],
+          "child_masses": [
+            2
+          ],
+          "fingerprint": "call<invite>(id argument_list(id))",
+          "line": 5,
+          "mass": 3,
+          "method_name": "dispatch",
+          "node_name": "call",
+          "raw": "invite(value)",
+          "span": [
+            5,
+            21,
+            5,
+            34
+          ]
+        },
+        {
+          "child_fingerprints": [
+            "argument_list(id)"
+          ],
+          "child_masses": [
+            2
+          ],
+          "fingerprint": "call<publish>(id argument_list(id))",
+          "line": 4,
+          "mass": 3,
+          "method_name": "dispatch",
+          "node_name": "call",
+          "raw": "publish(value)",
+          "span": [
+            4,
+            17,
+            4,
+            31
+          ]
+        },
+        {
+          "child_fingerprints": [
+            "call<ignore>(id argument_list(id))"
+          ],
+          "child_masses": [
+            3
+          ],
+          "fingerprint": "when(call<ignore>(id argument_list(id)))",
+          "line": 6,
+          "mass": 4,
+          "method_name": "dispatch",
+          "node_name": "when",
+          "raw": "_ => ignore(value),",
+          "span": [
+            6,
+            12,
+            6,
+            31
+          ]
+        },
+        {
+          "child_fingerprints": [
+            "call<invite>(id argument_list(id))",
+            "when(call<ignore>(id argument_list(id)))"
+          ],
+          "child_masses": [
+            3,
+            4
+          ],
+          "fingerprint": "when(call<invite>(id argument_list(id)) when(call<ignore>(id argument_list(id))))",
+          "line": 5,
+          "mass": 8,
+          "method_name": "dispatch",
+          "node_name": "when",
+          "raw": "1 | 2 => invite(value),",
+          "span": [
+            5,
+            12,
+            5,
+            35
+          ]
+        },
+        {
+          "child_fingerprints": [
+            "call<publish>(id argument_list(id))",
+            "when(call<invite>(id argument_list(id)) when(call<ignore>(id argument_list(id))))"
+          ],
+          "child_masses": [
+            3,
+            8
+          ],
+          "fingerprint": "when(call<publish>(id argument_list(id)) when(call<invite>(id argument_list(id)) when(call<ignore>(id argument_list(id)))))",
+          "line": 4,
+          "mass": 12,
+          "method_name": "dispatch",
+          "node_name": "when",
+          "raw": "0 => publish(value),",
+          "span": [
+            4,
+            12,
+            4,
+            32
+          ]
+        },
+        {
+          "child_fingerprints": [
+            "case(id when(call<publish>(id argument_list(id)) when(call<invite>(id argument_list(id)) when(call<ignore>(id argument_list(id))))))",
+            "call<finish>(id argument_list(id))"
+          ],
+          "child_masses": [
+            14,
+            3
+          ],
+          "fingerprint": "body_statement(case(id when(call<publish>(id argument_list(id)) when(call<invite>(id argument_list(id)) when(call<ignore>(id argument_list(id)))))) call<finish>(id argument_list(id)))",
+          "line": 2,
+          "mass": 18,
+          "method_name": "dispatch",
+          "node_name": "body_statement",
+          "raw": "{ match value { 0 => publish(value), 1 | 2 => invite(value), _ => ignore(value), } finish(value); }",
+          "span": [
+            2,
+            28,
+            9,
+            5
+          ]
+        },
+        {
+          "child_fingerprints": [
+            "id",
+            "when(call<publish>(id argument_list(id)) when(call<invite>(id argument_list(id)) when(call<ignore>(id argument_list(id)))))"
+          ],
+          "child_masses": [
+            1,
+            12
+          ],
+          "fingerprint": "case(id when(call<publish>(id argument_list(id)) when(call<invite>(id argument_list(id)) when(call<ignore>(id argument_list(id))))))",
+          "line": 3,
+          "mass": 14,
+          "method_name": "dispatch",
+          "node_name": "case",
+          "raw": "match value { 0 => publish(value), 1 | 2 => invite(value), _ => ignore(value), }",
+          "span": [
+            3,
+            8,
+            7,
+            9
+          ]
+        },
+        {
+          "child_fingerprints": [
+            "id"
+          ],
+          "child_masses": [
+            1
+          ],
+          "fingerprint": "argument_list(id)",
+          "line": 4,
+          "mass": 2,
+          "method_name": "dispatch",
+          "node_name": "argument_list",
+          "raw": "publish(value)",
+          "span": [
+            4,
+            17,
+            4,
+            31
+          ]
+        },
+        {
+          "child_fingerprints": [
+            "id"
+          ],
+          "child_masses": [
+            1
+          ],
+          "fingerprint": "argument_list(id)",
+          "line": 5,
+          "mass": 2,
+          "method_name": "dispatch",
+          "node_name": "argument_list",
+          "raw": "invite(value)",
+          "span": [
+            5,
+            21,
+            5,
+            34
+          ]
+        },
+        {
+          "child_fingerprints": [
+            "id"
+          ],
+          "child_masses": [
+            1
+          ],
+          "fingerprint": "argument_list(id)",
+          "line": 6,
+          "mass": 2,
+          "method_name": "dispatch",
+          "node_name": "argument_list",
+          "raw": "ignore(value)",
+          "span": [
+            6,
+            17,
+            6,
+            30
+          ]
+        },
+        {
+          "child_fingerprints": [
+            "id"
+          ],
+          "child_masses": [
+            1
+          ],
+          "fingerprint": "argument_list(id)",
+          "line": 8,
+          "mass": 2,
+          "method_name": "dispatch",
+          "node_name": "argument_list",
+          "raw": "finish(value)",
+          "span": [
+            8,
+            8,
+            8,
+            21
+          ]
+        },
+        {
+          "child_fingerprints": [],
+          "child_masses": [],
+          "fingerprint": "method(id body(body_statement(case(id when(call<publish>(id argument_list(id)) when(call<invite>(id argument_list(id)) when(call<ignore>(id argument_list(id)))))) call<finish>(id argument_list(id)))))",
+          "line": 2,
+          "mass": 20,
+          "method_name": "dispatch",
+          "node_name": "defn",
+          "raw": "fn dispatch(value: i32) { match value { 0 => publish(value), 1 | 2 => invite(value), _ => ignore(value), } finish(value); }",
+          "span": [
+            2,
+            4,
+            9,
+            5
+          ]
+        }
+      ],
+      "comparisons": [],
+      "control_flow_edges": [
+        {
+          "from": "cfg:Matcher#dispatch:entry:0:2:4",
+          "function": "dispatch",
+          "kind": "entry",
+          "line": 2,
+          "owner": "Matcher",
+          "span": [
+            2,
+            4,
+            9,
+            5
+          ],
+          "to": "cfg:Matcher#dispatch:stmt:1:3:8"
+        },
+        {
+          "from": "cfg:Matcher#dispatch:stmt:0.case0.0:4:17",
+          "function": "dispatch",
+          "kind": "fallthrough",
+          "line": 4,
+          "owner": "Matcher",
+          "span": [
+            4,
+            17,
+            4,
+            31
+          ],
+          "to": "cfg:Matcher#dispatch:stmt:2:8:8"
+        },
+        {
+          "from": "cfg:Matcher#dispatch:stmt:0.case1.0:5:21",
+          "function": "dispatch",
+          "kind": "fallthrough",
+          "line": 5,
+          "owner": "Matcher",
+          "span": [
+            5,
+            21,
+            5,
+            34
+          ],
+          "to": "cfg:Matcher#dispatch:stmt:2:8:8"
+        },
+        {
+          "from": "cfg:Matcher#dispatch:stmt:0.case2.0:6:17",
+          "function": "dispatch",
+          "kind": "fallthrough",
+          "line": 6,
+          "owner": "Matcher",
+          "span": [
+            6,
+            17,
+            6,
+            30
+          ],
+          "to": "cfg:Matcher#dispatch:stmt:2:8:8"
+        },
+        {
+          "from": "cfg:Matcher#dispatch:stmt:1:3:8",
+          "function": "dispatch",
+          "kind": "case_arm",
+          "line": 3,
+          "owner": "Matcher",
+          "span": [
+            3,
+            8,
+            7,
+            9
+          ],
+          "to": "cfg:Matcher#dispatch:stmt:0.case0.0:4:17"
+        },
+        {
+          "from": "cfg:Matcher#dispatch:stmt:1:3:8",
+          "function": "dispatch",
+          "kind": "case_arm",
+          "line": 3,
+          "owner": "Matcher",
+          "span": [
+            3,
+            8,
+            7,
+            9
+          ],
+          "to": "cfg:Matcher#dispatch:stmt:0.case1.0:5:21"
+        },
+        {
+          "from": "cfg:Matcher#dispatch:stmt:1:3:8",
+          "function": "dispatch",
+          "kind": "case_arm",
+          "line": 3,
+          "owner": "Matcher",
+          "span": [
+            3,
+            8,
+            7,
+            9
+          ],
+          "to": "cfg:Matcher#dispatch:stmt:0.case2.0:6:17"
+        },
+        {
+          "from": "cfg:Matcher#dispatch:stmt:1:3:8",
+          "function": "dispatch",
+          "kind": "case_default",
+          "line": 3,
+          "owner": "Matcher",
+          "span": [
+            3,
+            8,
+            7,
+            9
+          ],
+          "to": "cfg:Matcher#dispatch:stmt:2:8:8"
+        },
+        {
+          "from": "cfg:Matcher#dispatch:stmt:2:8:8",
+          "function": "dispatch",
+          "kind": "fallthrough",
+          "line": 8,
+          "owner": "Matcher",
+          "span": [
+            8,
+            8,
+            8,
+            21
+          ],
+          "to": "cfg:Matcher#dispatch:exit:3:9:5"
+        }
+      ],
+      "control_flow_nodes": [
+        {
+          "function": "dispatch",
+          "id": "cfg:Matcher#dispatch:entry:0:2:4",
+          "kind": "entry",
+          "line": 2,
+          "owner": "Matcher",
+          "role": "function_entry",
+          "source": "",
+          "span": [
+            2,
+            4,
+            9,
+            5
+          ]
+        },
+        {
+          "function": "dispatch",
+          "id": "cfg:Matcher#dispatch:exit:3:9:5",
+          "kind": "exit",
+          "line": 9,
+          "owner": "Matcher",
+          "role": "function_exit",
+          "source": "",
+          "span": [
+            2,
+            4,
+            9,
+            5
+          ]
+        },
+        {
+          "function": "dispatch",
+          "id": "cfg:Matcher#dispatch:stmt:0.case0.0:4:17",
+          "kind": "statement",
+          "line": 4,
+          "owner": "Matcher",
+          "role": "linear_statement",
+          "source": "publish(value)",
+          "span": [
+            4,
+            17,
+            4,
+            31
+          ]
+        },
+        {
+          "function": "dispatch",
+          "id": "cfg:Matcher#dispatch:stmt:0.case1.0:5:21",
+          "kind": "statement",
+          "line": 5,
+          "owner": "Matcher",
+          "role": "linear_statement",
+          "source": "invite(value)",
+          "span": [
+            5,
+            21,
+            5,
+            34
+          ]
+        },
+        {
+          "function": "dispatch",
+          "id": "cfg:Matcher#dispatch:stmt:0.case2.0:6:17",
+          "kind": "statement",
+          "line": 6,
+          "owner": "Matcher",
+          "role": "linear_statement",
+          "source": "ignore(value)",
+          "span": [
+            6,
+            17,
+            6,
+            30
+          ]
+        },
+        {
+          "function": "dispatch",
+          "id": "cfg:Matcher#dispatch:stmt:1:3:8",
+          "kind": "case",
+          "line": 3,
+          "owner": "Matcher",
+          "role": "case_dispatch",
+          "source": "match value { 0 => publish(value), 1 | 2 => invite(value), _ => ignore(value), }",
+          "span": [
+            3,
+            8,
+            7,
+            9
+          ]
+        },
+        {
+          "function": "dispatch",
+          "id": "cfg:Matcher#dispatch:stmt:2:8:8",
+          "kind": "statement",
+          "line": 8,
+          "owner": "Matcher",
+          "role": "linear_statement",
+          "source": "finish(value)",
+          "span": [
+            8,
+            8,
+            8,
+            21
+          ]
+        }
+      ],
+      "decisions": [
+        {
+          "enclosing_span": [
+            3,
+            8,
+            7,
+            9
+          ],
+          "function": "dispatch",
+          "kind": "case_dispatch",
+          "line": 3,
+          "members": [
+            "0",
+            "1 | 2"
+          ],
+          "predicate": "value",
+          "span": [
+            3,
+            8,
+            7,
+            9
+          ]
+        }
+      ],
+      "dispatch_sites": [],
+      "file": "gems/fact-mine/examples/syntax-facts/rust/cfg_cases.rs",
+      "functions": [
+        {
+          "line": 2,
+          "name": "dispatch",
+          "owner": "Matcher",
+          "params": [
+            "value"
+          ],
+          "span": [
+            2,
+            4,
+            9,
+            5
+          ],
+          "visibility": "private"
+        }
+      ],
+      "immutable_struct_reader_types": {},
+      "immutable_struct_readers": {},
+      "language": "rust",
+      "local_complexity_scores": [
+        {
+          "id": "Matcher#dispatch",
+          "score": 2.0,
+          "signals": {
+            "cases": 4
+          }
+        }
+      ],
+      "local_methods": [
+        {
+          "boundaries": [],
+          "id": "Matcher#dispatch",
+          "line": 2,
+          "local_contract_assignments": {},
+          "name": "dispatch",
+          "owner": "Matcher",
+          "span": [
+            2,
+            4,
+            9,
+            5
+          ],
+          "statements": [
+            {
+              "co_uses": [],
+              "dependencies": [],
+              "end_line": 7,
+              "index": 0,
+              "line": 3,
+              "reads": [
+                "value"
+              ],
+              "source": "match value { 0 => publish(value), 1 | 2 => invite(value), _ => ignore(value), }",
+              "span": [
+                3,
+                8,
+                7,
+                9
+              ],
+              "writes": []
+            },
+            {
+              "co_uses": [],
+              "dependencies": [],
+              "end_line": 8,
+              "index": 1,
+              "line": 8,
+              "reads": [
+                "value"
+              ],
+              "source": "finish(value)",
+              "span": [
+                8,
+                8,
+                8,
+                21
+              ],
+              "writes": []
+            }
+          ]
+        }
+      ],
+      "method_param_types": {},
+      "owners": [
+        {
+          "kind": "impl",
+          "line": 1,
+          "name": "Matcher",
+          "span": [
+            1,
+            0,
+            10,
+            1
+          ]
+        }
+      ],
+      "path_conditions": [],
+      "predicate_bodies": [],
+      "protocol_call_paths": [
+        {
+          "calls": [
+            {
+              "line": 4,
+              "mid": "publish",
+              "span": [
+                4,
+                17,
+                4,
+                31
+              ]
+            },
+            {
+              "line": 8,
+              "mid": "finish",
+              "span": [
+                8,
+                8,
+                8,
+                21
+              ]
+            }
+          ],
+          "line": 2,
+          "name": "dispatch",
+          "owner": "Matcher"
+        },
+        {
+          "calls": [
+            {
+              "line": 5,
+              "mid": "invite",
+              "span": [
+                5,
+                21,
+                5,
+                34
+              ]
+            },
+            {
+              "line": 8,
+              "mid": "finish",
+              "span": [
+                8,
+                8,
+                8,
+                21
+              ]
+            }
+          ],
+          "line": 2,
+          "name": "dispatch",
+          "owner": "Matcher"
+        },
+        {
+          "calls": [
+            {
+              "line": 6,
+              "mid": "ignore",
+              "span": [
+                6,
+                17,
+                6,
+                30
+              ]
+            },
+            {
+              "line": 8,
+              "mid": "finish",
+              "span": [
+                8,
+                8,
+                8,
+                21
+              ]
+            }
+          ],
+          "line": 2,
+          "name": "dispatch",
+          "owner": "Matcher"
+        },
+        {
+          "calls": [
+            {
+              "line": 8,
+              "mid": "finish",
+              "span": [
+                8,
+                8,
+                8,
+                21
+              ]
+            }
+          ],
+          "line": 2,
+          "name": "dispatch",
+          "owner": "Matcher"
+        }
+      ],
+      "protocol_method_effects": [
+        {
+          "line": 2,
+          "name": "dispatch",
+          "owner": "Matcher",
+          "reads": [
+            "finish",
+            "ignore",
+            "invite",
+            "publish"
+          ],
+          "writes": []
+        }
+      ],
+      "redundant_nil_guards": [],
+      "semantic_effects": [],
+      "state_declarations": [],
+      "state_param_origins": [],
+      "state_reads": [
+        {
+          "field": "finish",
+          "function": "dispatch",
+          "line": 8,
+          "owner": "Matcher",
+          "receiver": "self",
+          "span": [
+            8,
+            8,
+            8,
+            14
+          ]
+        },
+        {
+          "field": "ignore",
+          "function": "dispatch",
+          "line": 6,
+          "owner": "Matcher",
+          "receiver": "self",
+          "span": [
+            6,
+            17,
+            6,
+            23
+          ]
+        },
+        {
+          "field": "invite",
+          "function": "dispatch",
+          "line": 5,
+          "owner": "Matcher",
+          "receiver": "self",
+          "span": [
+            5,
+            21,
+            5,
+            27
+          ]
+        },
+        {
+          "field": "publish",
+          "function": "dispatch",
+          "line": 4,
+          "owner": "Matcher",
+          "receiver": "self",
+          "span": [
+            4,
+            17,
+            4,
+            24
+          ]
+        }
+      ],
+      "state_writes": [],
+      "type_aliases": {}
+    }
+  ],
+  "format": "decomplex.syntax-facts.v1"
+}

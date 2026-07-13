@@ -49,6 +49,60 @@ fn syntax_fact_examples_match_oracles() -> Result<()> {
     }
 }
 
+#[test]
+fn cfg_is_emitted_for_every_supported_language() -> Result<()> {
+    let examples_root = examples_root().join("syntax-facts");
+    let mut covered = BTreeSet::new();
+
+    for fixture in syntax_fact_fixture_paths(&examples_root)? {
+        if !file_stem(&fixture)?.starts_with("cfg_") {
+            continue;
+        }
+        let language = language_for_fixture(&fixture)?;
+        let document = syntax::parse_file(fixture.clone(), language)?;
+
+        assert!(
+            !document.control_flow_nodes.is_empty(),
+            "{} emitted no CFG nodes",
+            fixture.display()
+        );
+        assert!(
+            !document.control_flow_edges.is_empty(),
+            "{} emitted no CFG edges",
+            fixture.display()
+        );
+        assert_eq!(
+            document.control_flow_metrics.len(),
+            document.local_methods.len(),
+            "{} emitted incomplete CFG metrics",
+            fixture.display()
+        );
+        covered.insert(language.as_str());
+    }
+
+    assert_eq!(
+        covered,
+        BTreeSet::from([
+            "c",
+            "cpp",
+            "csharp",
+            "go",
+            "java",
+            "javascript",
+            "kotlin",
+            "lua",
+            "php",
+            "python",
+            "ruby",
+            "rust",
+            "swift",
+            "typescript",
+            "zig",
+        ])
+    );
+    Ok(())
+}
+
 fn full_syntax_expected() -> Value {
     json!({
         "functions": [],
@@ -66,6 +120,9 @@ fn full_syntax_expected() -> Value {
         "predicate_bodies": [],
         "comparisons": [],
         "path_conditions": [],
+        "control_flow_nodes": [],
+        "control_flow_edges": [],
+        "control_flow_metrics": [],
         "protocol_method_effects": [],
         "protocol_call_paths": [],
         "clone_candidates": [],

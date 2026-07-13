@@ -1,0 +1,163 @@
+{
+  "documents": [
+    {
+      "control_flow_metrics": [
+        {
+          "branch_points": 0,
+          "callback_points": 0,
+          "case_points": 0,
+          "cyclomatic_complexity": 1,
+          "decision_points": 0,
+          "disconnected_nodes": 0,
+          "exception_points": 0,
+          "function": "linear",
+          "line": 2,
+          "loop_points": 0,
+          "owner": "CfgMetrics",
+          "path_pressure": 1,
+          "span": [
+            2,
+            2,
+            5,
+            5
+          ],
+          "terminal_edges": 0
+        },
+        {
+          "branch_points": 0,
+          "callback_points": 0,
+          "case_points": 0,
+          "cyclomatic_complexity": 2,
+          "decision_points": 2,
+          "disconnected_nodes": 0,
+          "exception_points": 2,
+          "function": "exception_flow",
+          "line": 28,
+          "loop_points": 0,
+          "owner": "CfgMetrics",
+          "path_pressure": 2,
+          "span": [
+            28,
+            2,
+            37,
+            5
+          ],
+          "terminal_edges": 0
+        },
+        {
+          "branch_points": 0,
+          "callback_points": 0,
+          "case_points": 1,
+          "cyclomatic_complexity": 3,
+          "decision_points": 2,
+          "disconnected_nodes": 0,
+          "exception_points": 0,
+          "function": "loop_case",
+          "line": 16,
+          "loop_points": 1,
+          "owner": "CfgMetrics",
+          "path_pressure": 4,
+          "span": [
+            16,
+            2,
+            26,
+            5
+          ],
+          "terminal_edges": 0
+        },
+        {
+          "branch_points": 0,
+          "callback_points": 1,
+          "case_points": 0,
+          "cyclomatic_complexity": 1,
+          "decision_points": 1,
+          "disconnected_nodes": 0,
+          "exception_points": 0,
+          "function": "exception_callback",
+          "line": 39,
+          "loop_points": 0,
+          "owner": "CfgMetrics",
+          "path_pressure": 1,
+          "span": [
+            39,
+            2,
+            50,
+            5
+          ],
+          "terminal_edges": 0
+        },
+        {
+          "branch_points": 1,
+          "callback_points": 0,
+          "case_points": 0,
+          "cyclomatic_complexity": 2,
+          "decision_points": 1,
+          "disconnected_nodes": 0,
+          "exception_points": 0,
+          "function": "branch",
+          "line": 7,
+          "loop_points": 0,
+          "owner": "CfgMetrics",
+          "path_pressure": 2,
+          "span": [
+            7,
+            2,
+            14,
+            5
+          ],
+          "terminal_edges": 0
+        },
+        {
+          "branch_points": 1,
+          "callback_points": 0,
+          "case_points": 0,
+          "cyclomatic_complexity": 2,
+          "decision_points": 1,
+          "disconnected_nodes": 0,
+          "exception_points": 0,
+          "function": "terminal",
+          "line": 52,
+          "loop_points": 0,
+          "owner": "CfgMetrics",
+          "path_pressure": 2,
+          "span": [
+            52,
+            2,
+            55,
+            5
+          ],
+          "terminal_edges": 1
+        }
+      ],
+      "file": "gems/fact-mine/examples/syntax-facts/ruby/cfg_metrics.rb",
+      "language": "ruby",
+      "local_complexity_scores": [
+        {
+          "id": "CfgMetrics#branch",
+          "score": 1.1
+        },
+        {
+          "id": "CfgMetrics#exception_callback",
+          "score": 6.3
+        },
+        {
+          "id": "CfgMetrics#exception_flow",
+          "score": 6.3
+        },
+        {
+          "id": "CfgMetrics#linear",
+          "score": 0.0
+        },
+        {
+          "id": "CfgMetrics#loop_case",
+          "score": 1.0
+        },
+        {
+          "id": "CfgMetrics#terminal",
+          "score": 1.1
+        }
+      ]
+    }
+  ],
+  "format": "decomplex.syntax-facts.v1"
+}

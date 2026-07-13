@@ -1,0 +1,737 @@
+{
+  "documents": [
+    {
+      "control_flow_edges": [
+        {
+          "from": "cfg:CfgBranches#boolean_short_circuit:entry:0:30:2",
+          "function": "boolean_short_circuit",
+          "kind": "entry",
+          "line": 30,
+          "owner": "CfgBranches",
+          "span": [
+            30,
+            2,
+            35,
+            5
+          ],
+          "to": "cfg:CfgBranches#boolean_short_circuit:stmt:1:31:4"
+        },
+        {
+          "from": "cfg:CfgBranches#boolean_short_circuit:stmt:0.then.0:32:6",
+          "function": "boolean_short_circuit",
+          "kind": "fallthrough",
+          "line": 32,
+          "owner": "CfgBranches",
+          "span": [
+            32,
+            6,
+            32,
+            19
+          ],
+          "to": "cfg:CfgBranches#boolean_short_circuit:stmt:2:34:4"
+        },
+        {
+          "from": "cfg:CfgBranches#boolean_short_circuit:stmt:1:31:4",
+          "function": "boolean_short_circuit",
+          "kind": "branch_false",
+          "line": 31,
+          "owner": "CfgBranches",
+          "span": [
+            31,
+            4,
+            33,
+            7
+          ],
+          "to": "cfg:CfgBranches#boolean_short_circuit:stmt:2:34:4"
+        },
+        {
+          "from": "cfg:CfgBranches#boolean_short_circuit:stmt:1:31:4",
+          "function": "boolean_short_circuit",
+          "kind": "branch_true",
+          "line": 31,
+          "owner": "CfgBranches",
+          "span": [
+            31,
+            4,
+            33,
+            7
+          ],
+          "to": "cfg:CfgBranches#boolean_short_circuit:stmt:0.then.0:32:6"
+        },
+        {
+          "from": "cfg:CfgBranches#boolean_short_circuit:stmt:1:31:4",
+          "function": "boolean_short_circuit",
+          "kind": "short_circuit",
+          "line": 31,
+          "owner": "CfgBranches",
+          "span": [
+            31,
+            4,
+            33,
+            7
+          ],
+          "to": "cfg:CfgBranches#boolean_short_circuit:stmt:2:34:4"
+        },
+        {
+          "from": "cfg:CfgBranches#boolean_short_circuit:stmt:2:34:4",
+          "function": "boolean_short_circuit",
+          "kind": "fallthrough",
+          "line": 34,
+          "owner": "CfgBranches",
+          "span": [
+            34,
+            4,
+            34,
+            16
+          ],
+          "to": "cfg:CfgBranches#boolean_short_circuit:exit:3:35:5"
+        },
+        {
+          "from": "cfg:CfgBranches#missing_else:entry:0:12:2",
+          "function": "missing_else",
+          "kind": "entry",
+          "line": 12,
+          "owner": "CfgBranches",
+          "span": [
+            12,
+            2,
+            17,
+            5
+          ],
+          "to": "cfg:CfgBranches#missing_else:stmt:1:13:4"
+        },
+        {
+          "from": "cfg:CfgBranches#missing_else:stmt:0.then.0:14:6",
+          "function": "missing_else",
+          "kind": "fallthrough",
+          "line": 14,
+          "owner": "CfgBranches",
+          "span": [
+            14,
+            6,
+            14,
+            19
+          ],
+          "to": "cfg:CfgBranches#missing_else:stmt:2:16:4"
+        },
+        {
+          "from": "cfg:CfgBranches#missing_else:stmt:1:13:4",
+          "function": "missing_else",
+          "kind": "branch_false",
+          "line": 13,
+          "owner": "CfgBranches",
+          "span": [
+            13,
+            4,
+            15,
+            7
+          ],
+          "to": "cfg:CfgBranches#missing_else:stmt:2:16:4"
+        },
+        {
+          "from": "cfg:CfgBranches#missing_else:stmt:1:13:4",
+          "function": "missing_else",
+          "kind": "branch_true",
+          "line": 13,
+          "owner": "CfgBranches",
+          "span": [
+            13,
+            4,
+            15,
+            7
+          ],
+          "to": "cfg:CfgBranches#missing_else:stmt:0.then.0:14:6"
+        },
+        {
+          "from": "cfg:CfgBranches#missing_else:stmt:2:16:4",
+          "function": "missing_else",
+          "kind": "fallthrough",
+          "line": 16,
+          "owner": "CfgBranches",
+          "span": [
+            16,
+            4,
+            16,
+            16
+          ],
+          "to": "cfg:CfgBranches#missing_else:exit:3:17:5"
+        },
+        {
+          "from": "cfg:CfgBranches#nested_branch:branch:0.then.0:21:6",
+          "function": "nested_branch",
+          "kind": "branch_false",
+          "line": 21,
+          "owner": "CfgBranches",
+          "span": [
+            21,
+            6,
+            23,
+            9
+          ],
+          "to": "cfg:CfgBranches#nested_branch:stmt:2:27:4"
+        },
+        {
+          "from": "cfg:CfgBranches#nested_branch:branch:0.then.0:21:6",
+          "function": "nested_branch",
+          "kind": "branch_true",
+          "line": 21,
+          "owner": "CfgBranches",
+          "span": [
+            21,
+            6,
+            23,
+            9
+          ],
+          "to": "cfg:CfgBranches#nested_branch:stmt:0.then.0.then.0:22:8"
+        },
+        {
+          "from": "cfg:CfgBranches#nested_branch:entry:0:19:2",
+          "function": "nested_branch",
+          "kind": "entry",
+          "line": 19,
+          "owner": "CfgBranches",
+          "span": [
+            19,
+            2,
+            28,
+            5
+          ],
+          "to": "cfg:CfgBranches#nested_branch:stmt:1:20:4"
+        },
+        {
+          "from": "cfg:CfgBranches#nested_branch:stmt:0.else.0:25:6",
+          "function": "nested_branch",
+          "kind": "fallthrough",
+          "line": 25,
+          "owner": "CfgBranches",
+          "span": [
+            25,
+            6,
+            25,
+            16
+          ],
+          "to": "cfg:CfgBranches#nested_branch:stmt:2:27:4"
+        },
+        {
+          "from": "cfg:CfgBranches#nested_branch:stmt:0.then.0.then.0:22:8",
+          "function": "nested_branch",
+          "kind": "fallthrough",
+          "line": 22,
+          "owner": "CfgBranches",
+          "span": [
+            22,
+            8,
+            22,
+            21
+          ],
+          "to": "cfg:CfgBranches#nested_branch:stmt:2:27:4"
+        },
+        {
+          "from": "cfg:CfgBranches#nested_branch:stmt:1:20:4",
+          "function": "nested_branch",
+          "kind": "branch_false",
+          "line": 20,
+          "owner": "CfgBranches",
+          "span": [
+            20,
+            4,
+            26,
+            7
+          ],
+          "to": "cfg:CfgBranches#nested_branch:stmt:0.else.0:25:6"
+        },
+        {
+          "from": "cfg:CfgBranches#nested_branch:stmt:1:20:4",
+          "function": "nested_branch",
+          "kind": "branch_true",
+          "line": 20,
+          "owner": "CfgBranches",
+          "span": [
+            20,
+            4,
+            26,
+            7
+          ],
+          "to": "cfg:CfgBranches#nested_branch:branch:0.then.0:21:6"
+        },
+        {
+          "from": "cfg:CfgBranches#nested_branch:stmt:2:27:4",
+          "function": "nested_branch",
+          "kind": "fallthrough",
+          "line": 27,
+          "owner": "CfgBranches",
+          "span": [
+            27,
+            4,
+            27,
+            16
+          ],
+          "to": "cfg:CfgBranches#nested_branch:exit:3:28:5"
+        },
+        {
+          "from": "cfg:CfgBranches#simple_if:entry:0:2:2",
+          "function": "simple_if",
+          "kind": "entry",
+          "line": 2,
+          "owner": "CfgBranches",
+          "span": [
+            2,
+            2,
+            10,
+            5
+          ],
+          "to": "cfg:CfgBranches#simple_if:stmt:1:3:4"
+        },
+        {
+          "from": "cfg:CfgBranches#simple_if:stmt:1.else.0:7:6",
+          "function": "simple_if",
+          "kind": "fallthrough",
+          "line": 7,
+          "owner": "CfgBranches",
+          "span": [
+            7,
+            6,
+            7,
+            16
+          ],
+          "to": "cfg:CfgBranches#simple_if:stmt:3:9:4"
+        },
+        {
+          "from": "cfg:CfgBranches#simple_if:stmt:1.then.0:5:6",
+          "function": "simple_if",
+          "kind": "fallthrough",
+          "line": 5,
+          "owner": "CfgBranches",
+          "span": [
+            5,
+            6,
+            5,
+            19
+          ],
+          "to": "cfg:CfgBranches#simple_if:stmt:3:9:4"
+        },
+        {
+          "from": "cfg:CfgBranches#simple_if:stmt:1:3:4",
+          "function": "simple_if",
+          "kind": "fallthrough",
+          "line": 3,
+          "owner": "CfgBranches",
+          "span": [
+            3,
+            4,
+            3,
+            17
+          ],
+          "to": "cfg:CfgBranches#simple_if:stmt:2:4:4"
+        },
+        {
+          "from": "cfg:CfgBranches#simple_if:stmt:2:4:4",
+          "function": "simple_if",
+          "kind": "branch_false",
+          "line": 4,
+          "owner": "CfgBranches",
+          "span": [
+            4,
+            4,
+            8,
+            7
+          ],
+          "to": "cfg:CfgBranches#simple_if:stmt:1.else.0:7:6"
+        },
+        {
+          "from": "cfg:CfgBranches#simple_if:stmt:2:4:4",
+          "function": "simple_if",
+          "kind": "branch_true",
+          "line": 4,
+          "owner": "CfgBranches",
+          "span": [
+            4,
+            4,
+            8,
+            7
+          ],
+          "to": "cfg:CfgBranches#simple_if:stmt:1.then.0:5:6"
+        },
+        {
+          "from": "cfg:CfgBranches#simple_if:stmt:3:9:4",
+          "function": "simple_if",
+          "kind": "fallthrough",
+          "line": 9,
+          "owner": "CfgBranches",
+          "span": [
+            9,
+            4,
+            9,
+            16
+          ],
+          "to": "cfg:CfgBranches#simple_if:exit:4:10:5"
+        }
+      ],
+      "control_flow_nodes": [
+        {
+          "function": "boolean_short_circuit",
+          "id": "cfg:CfgBranches#boolean_short_circuit:entry:0:30:2",
+          "kind": "entry",
+          "line": 30,
+          "owner": "CfgBranches",
+          "role": "function_entry",
+          "source": "",
+          "span": [
+            30,
+            2,
+            35,
+            5
+          ]
+        },
+        {
+          "function": "boolean_short_circuit",
+          "id": "cfg:CfgBranches#boolean_short_circuit:exit:3:35:5",
+          "kind": "exit",
+          "line": 35,
+          "owner": "CfgBranches",
+          "role": "function_exit",
+          "source": "",
+          "span": [
+            30,
+            2,
+            35,
+            5
+          ]
+        },
+        {
+          "function": "boolean_short_circuit",
+          "id": "cfg:CfgBranches#boolean_short_circuit:stmt:0.then.0:32:6",
+          "kind": "statement",
+          "line": 32,
+          "owner": "CfgBranches",
+          "role": "linear_statement",
+          "source": "publish(user)",
+          "span": [
+            32,
+            6,
+            32,
+            19
+          ]
+        },
+        {
+          "function": "boolean_short_circuit",
+          "id": "cfg:CfgBranches#boolean_short_circuit:stmt:1:31:4",
+          "kind": "branch",
+          "line": 31,
+          "owner": "CfgBranches",
+          "role": "if_condition",
+          "source": "if user.ready? && user.allowed? publish(user) end",
+          "span": [
+            31,
+            4,
+            33,
+            7
+          ]
+        },
+        {
+          "function": "boolean_short_circuit",
+          "id": "cfg:CfgBranches#boolean_short_circuit:stmt:2:34:4",
+          "kind": "statement",
+          "line": 34,
+          "owner": "CfgBranches",
+          "role": "linear_statement",
+          "source": "finish(user)",
+          "span": [
+            34,
+            4,
+            34,
+            16
+          ]
+        },
+        {
+          "function": "missing_else",
+          "id": "cfg:CfgBranches#missing_else:entry:0:12:2",
+          "kind": "entry",
+          "line": 12,
+          "owner": "CfgBranches",
+          "role": "function_entry",
+          "source": "",
+          "span": [
+            12,
+            2,
+            17,
+            5
+          ]
+        },
+        {
+          "function": "missing_else",
+          "id": "cfg:CfgBranches#missing_else:exit:3:17:5",
+          "kind": "exit",
+          "line": 17,
+          "owner": "CfgBranches",
+          "role": "function_exit",
+          "source": "",
+          "span": [
+            12,
+            2,
+            17,
+            5
+          ]
+        },
+        {
+          "function": "missing_else",
+          "id": "cfg:CfgBranches#missing_else:stmt:0.then.0:14:6",
+          "kind": "statement",
+          "line": 14,
+          "owner": "CfgBranches",
+          "role": "linear_statement",
+          "source": "publish(user)",
+          "span": [
+            14,
+            6,
+            14,
+            19
+          ]
+        },
+        {
+          "function": "missing_else",
+          "id": "cfg:CfgBranches#missing_else:stmt:1:13:4",
+          "kind": "branch",
+          "line": 13,
+          "owner": "CfgBranches",
+          "role": "if_condition",
+          "source": "if user.ready? publish(user) end",
+          "span": [
+            13,
+            4,
+            15,
+            7
+          ]
+        },
+        {
+          "function": "missing_else",
+          "id": "cfg:CfgBranches#missing_else:stmt:2:16:4",
+          "kind": "statement",
+          "line": 16,
+          "owner": "CfgBranches",
+          "role": "linear_statement",
+          "source": "finish(user)",
+          "span": [
+            16,
+            4,
+            16,
+            16
+          ]
+        },
+        {
+          "function": "nested_branch",
+          "id": "cfg:CfgBranches#nested_branch:branch:0.then.0:21:6",
+          "kind": "branch",
+          "line": 21,
+          "owner": "CfgBranches",
+          "role": "if_condition",
+          "source": "if user.allowed? publish(user) end",
+          "span": [
+            21,
+            6,
+            23,
+            9
+          ]
+        },
+        {
+          "function": "nested_branch",
+          "id": "cfg:CfgBranches#nested_branch:entry:0:19:2",
+          "kind": "entry",
+          "line": 19,
+          "owner": "CfgBranches",
+          "role": "function_entry",
+          "source": "",
+          "span": [
+            19,
+            2,
+            28,
+            5
+          ]
+        },
+        {
+          "function": "nested_branch",
+          "id": "cfg:CfgBranches#nested_branch:exit:3:28:5",
+          "kind": "exit",
+          "line": 28,
+          "owner": "CfgBranches",
+          "role": "function_exit",
+          "source": "",
+          "span": [
+            19,
+            2,
+            28,
+            5
+          ]
+        },
+        {
+          "function": "nested_branch",
+          "id": "cfg:CfgBranches#nested_branch:stmt:0.else.0:25:6",
+          "kind": "statement",
+          "line": 25,
+          "owner": "CfgBranches",
+          "role": "linear_statement",
+          "source": "warn(user)",
+          "span": [
+            25,
+            6,
+            25,
+            16
+          ]
+        },
+        {
+          "function": "nested_branch",
+          "id": "cfg:CfgBranches#nested_branch:stmt:0.then.0.then.0:22:8",
+          "kind": "statement",
+          "line": 22,
+          "owner": "CfgBranches",
+          "role": "linear_statement",
+          "source": "publish(user)",
+          "span": [
+            22,
+            8,
+            22,
+            21
+          ]
+        },
+        {
+          "function": "nested_branch",
+          "id": "cfg:CfgBranches#nested_branch:stmt:1:20:4",
+          "kind": "branch",
+          "line": 20,
+          "owner": "CfgBranches",
+          "role": "if_condition",
+          "source": "if user.ready? if user.allowed? publish(user) end else warn(user) end",
+          "span": [
+            20,
+            4,
+            26,
+            7
+          ]
+        },
+        {
+          "function": "nested_branch",
+          "id": "cfg:CfgBranches#nested_branch:stmt:2:27:4",
+          "kind": "statement",
+          "line": 27,
+          "owner": "CfgBranches",
+          "role": "linear_statement",
+          "source": "finish(user)",
+          "span": [
+            27,
+            4,
+            27,
+            16
+          ]
+        },
+        {
+          "function": "simple_if",
+          "id": "cfg:CfgBranches#simple_if:entry:0:2:2",
+          "kind": "entry",
+          "line": 2,
+          "owner": "CfgBranches",
+          "role": "function_entry",
+          "source": "",
+          "span": [
+            2,
+            2,
+            10,
+            5
+          ]
+        },
+        {
+          "function": "simple_if",
+          "id": "cfg:CfgBranches#simple_if:exit:4:10:5",
+          "kind": "exit",
+          "line": 10,
+          "owner": "CfgBranches",
+          "role": "function_exit",
+          "source": "",
+          "span": [
+            2,
+            2,
+            10,
+            5
+          ]
+        },
+        {
+          "function": "simple_if",
+          "id": "cfg:CfgBranches#simple_if:stmt:1.else.0:7:6",
+          "kind": "statement",
+          "line": 7,
+          "owner": "CfgBranches",
+          "role": "linear_statement",
+          "source": "warn(user)",
+          "span": [
+            7,
+            6,
+            7,
+            16
+          ]
+        },
+        {
+          "function": "simple_if",
+          "id": "cfg:CfgBranches#simple_if:stmt:1.then.0:5:6",
+          "kind": "statement",
+          "line": 5,
+          "owner": "CfgBranches",
+          "role": "linear_statement",
+          "source": "publish(user)",
+          "span": [
+            5,
+            6,
+            5,
+            19
+          ]
+        },
+        {
+          "function": "simple_if",
+          "id": "cfg:CfgBranches#simple_if:stmt:1:3:4",
+          "kind": "statement",
+          "line": 3,
+          "owner": "CfgBranches",
+          "role": "linear_statement",
+          "source": "prepare(user)",
+          "span": [
+            3,
+            4,
+            3,
+            17
+          ]
+        },
+        {
+          "function": "simple_if",
+          "id": "cfg:CfgBranches#simple_if:stmt:2:4:4",
+          "kind": "branch",
+          "line": 4,
+          "owner": "CfgBranches",
+          "role": "if_condition",
+          "source": "if user.ready? publish(user) else warn(user) end",
+          "span": [
+            4,
+            4,
+            8,
+            7
+          ]
+        },
+        {
+          "function": "simple_if",
+          "id": "cfg:CfgBranches#simple_if:stmt:3:9:4",
+          "kind": "statement",
+          "line": 9,
+          "owner": "CfgBranches",
+          "role": "linear_statement",
+          "source": "finish(user)",
+          "span": [
+            9,
+            4,
+            9,
+            16
+          ]
+        }
+      ],
+      "file": "gems/fact-mine/examples/syntax-facts/ruby/cfg_branches.rb",
+      "language": "ruby"
+    }
+  ],
+  "format": "decomplex.syntax-facts.v1"
+}

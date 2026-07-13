@@ -1,0 +1,682 @@
+{
+  "documents": [
+    {
+      "control_flow_edges": [
+        {
+          "from": "cfg:CfgCallbacks#empty_callback:entry:0:31:2",
+          "function": "empty_callback",
+          "kind": "entry",
+          "line": 31,
+          "owner": "CfgCallbacks",
+          "span": [
+            31,
+            2,
+            35,
+            5
+          ],
+          "to": "cfg:CfgCallbacks#empty_callback:stmt:1:32:4"
+        },
+        {
+          "from": "cfg:CfgCallbacks#empty_callback:stmt:1:32:4",
+          "function": "empty_callback",
+          "kind": "callback_return",
+          "line": 32,
+          "owner": "CfgCallbacks",
+          "span": [
+            32,
+            4,
+            33,
+            7
+          ],
+          "to": "cfg:CfgCallbacks#empty_callback:stmt:2:34:4"
+        },
+        {
+          "from": "cfg:CfgCallbacks#empty_callback:stmt:2:34:4",
+          "function": "empty_callback",
+          "kind": "fallthrough",
+          "line": 34,
+          "owner": "CfgCallbacks",
+          "span": [
+            34,
+            4,
+            34,
+            16
+          ],
+          "to": "cfg:CfgCallbacks#empty_callback:exit:3:35:5"
+        },
+        {
+          "from": "cfg:CfgCallbacks#iterator_block:entry:0:9:2",
+          "function": "iterator_block",
+          "kind": "entry",
+          "line": 9,
+          "owner": "CfgCallbacks",
+          "span": [
+            9,
+            2,
+            14,
+            5
+          ],
+          "to": "cfg:CfgCallbacks#iterator_block:stmt:1:10:4"
+        },
+        {
+          "from": "cfg:CfgCallbacks#iterator_block:stmt:0.loop.0:11:6",
+          "function": "iterator_block",
+          "kind": "loop_backedge",
+          "line": 11,
+          "owner": "CfgCallbacks",
+          "span": [
+            11,
+            6,
+            11,
+            19
+          ],
+          "to": "cfg:CfgCallbacks#iterator_block:stmt:1:10:4"
+        },
+        {
+          "from": "cfg:CfgCallbacks#iterator_block:stmt:1:10:4",
+          "function": "iterator_block",
+          "kind": "loop_body",
+          "line": 10,
+          "owner": "CfgCallbacks",
+          "span": [
+            10,
+            4,
+            12,
+            7
+          ],
+          "to": "cfg:CfgCallbacks#iterator_block:stmt:0.loop.0:11:6"
+        },
+        {
+          "from": "cfg:CfgCallbacks#iterator_block:stmt:1:10:4",
+          "function": "iterator_block",
+          "kind": "loop_exit",
+          "line": 10,
+          "owner": "CfgCallbacks",
+          "span": [
+            10,
+            4,
+            12,
+            7
+          ],
+          "to": "cfg:CfgCallbacks#iterator_block:stmt:2:13:4"
+        },
+        {
+          "from": "cfg:CfgCallbacks#iterator_block:stmt:2:13:4",
+          "function": "iterator_block",
+          "kind": "fallthrough",
+          "line": 13,
+          "owner": "CfgCallbacks",
+          "span": [
+            13,
+            4,
+            13,
+            17
+          ],
+          "to": "cfg:CfgCallbacks#iterator_block:exit:3:14:5"
+        },
+        {
+          "from": "cfg:CfgCallbacks#nested_callback:callback:0.callback.0:18:6",
+          "function": "nested_callback",
+          "kind": "callback_body",
+          "line": 18,
+          "owner": "CfgCallbacks",
+          "span": [
+            18,
+            6,
+            20,
+            9
+          ],
+          "to": "cfg:CfgCallbacks#nested_callback:stmt:0.callback.0.callback.0:19:8"
+        },
+        {
+          "from": "cfg:CfgCallbacks#nested_callback:entry:0:16:2",
+          "function": "nested_callback",
+          "kind": "entry",
+          "line": 16,
+          "owner": "CfgCallbacks",
+          "span": [
+            16,
+            2,
+            23,
+            5
+          ],
+          "to": "cfg:CfgCallbacks#nested_callback:stmt:1:17:4"
+        },
+        {
+          "from": "cfg:CfgCallbacks#nested_callback:stmt:0.callback.0.callback.0:19:8",
+          "function": "nested_callback",
+          "kind": "callback_return",
+          "line": 19,
+          "owner": "CfgCallbacks",
+          "span": [
+            19,
+            8,
+            19,
+            19
+          ],
+          "to": "cfg:CfgCallbacks#nested_callback:stmt:2:22:4"
+        },
+        {
+          "from": "cfg:CfgCallbacks#nested_callback:stmt:1:17:4",
+          "function": "nested_callback",
+          "kind": "callback_body",
+          "line": 17,
+          "owner": "CfgCallbacks",
+          "span": [
+            17,
+            4,
+            21,
+            7
+          ],
+          "to": "cfg:CfgCallbacks#nested_callback:callback:0.callback.0:18:6"
+        },
+        {
+          "from": "cfg:CfgCallbacks#nested_callback:stmt:2:22:4",
+          "function": "nested_callback",
+          "kind": "fallthrough",
+          "line": 22,
+          "owner": "CfgCallbacks",
+          "span": [
+            22,
+            4,
+            22,
+            16
+          ],
+          "to": "cfg:CfgCallbacks#nested_callback:exit:3:23:5"
+        },
+        {
+          "from": "cfg:CfgCallbacks#transaction_block:entry:0:2:2",
+          "function": "transaction_block",
+          "kind": "entry",
+          "line": 2,
+          "owner": "CfgCallbacks",
+          "span": [
+            2,
+            2,
+            7,
+            5
+          ],
+          "to": "cfg:CfgCallbacks#transaction_block:stmt:1:3:4"
+        },
+        {
+          "from": "cfg:CfgCallbacks#transaction_block:stmt:0.callback.0:4:6",
+          "function": "transaction_block",
+          "kind": "callback_return",
+          "line": 4,
+          "owner": "CfgCallbacks",
+          "span": [
+            4,
+            6,
+            4,
+            17
+          ],
+          "to": "cfg:CfgCallbacks#transaction_block:stmt:2:6:4"
+        },
+        {
+          "from": "cfg:CfgCallbacks#transaction_block:stmt:1:3:4",
+          "function": "transaction_block",
+          "kind": "callback_body",
+          "line": 3,
+          "owner": "CfgCallbacks",
+          "span": [
+            3,
+            4,
+            5,
+            7
+          ],
+          "to": "cfg:CfgCallbacks#transaction_block:stmt:0.callback.0:4:6"
+        },
+        {
+          "from": "cfg:CfgCallbacks#transaction_block:stmt:2:6:4",
+          "function": "transaction_block",
+          "kind": "fallthrough",
+          "line": 6,
+          "owner": "CfgCallbacks",
+          "span": [
+            6,
+            4,
+            6,
+            16
+          ],
+          "to": "cfg:CfgCallbacks#transaction_block:exit:3:7:5"
+        },
+        {
+          "from": "cfg:CfgCallbacks#yield_site:entry:0:25:2",
+          "function": "yield_site",
+          "kind": "entry",
+          "line": 25,
+          "owner": "CfgCallbacks",
+          "span": [
+            25,
+            2,
+            29,
+            5
+          ],
+          "to": "cfg:CfgCallbacks#yield_site:stmt:1:26:4"
+        },
+        {
+          "from": "cfg:CfgCallbacks#yield_site:stmt:1:26:4",
+          "function": "yield_site",
+          "kind": "fallthrough",
+          "line": 26,
+          "owner": "CfgCallbacks",
+          "span": [
+            26,
+            4,
+            26,
+            16
+          ],
+          "to": "cfg:CfgCallbacks#yield_site:stmt:2:27:4"
+        },
+        {
+          "from": "cfg:CfgCallbacks#yield_site:stmt:2:27:4",
+          "function": "yield_site",
+          "kind": "yield_return",
+          "line": 27,
+          "owner": "CfgCallbacks",
+          "span": [
+            27,
+            4,
+            27,
+            14
+          ],
+          "to": "cfg:CfgCallbacks#yield_site:stmt:3:28:4"
+        },
+        {
+          "from": "cfg:CfgCallbacks#yield_site:stmt:3:28:4",
+          "function": "yield_site",
+          "kind": "fallthrough",
+          "line": 28,
+          "owner": "CfgCallbacks",
+          "span": [
+            28,
+            4,
+            28,
+            15
+          ],
+          "to": "cfg:CfgCallbacks#yield_site:exit:4:29:5"
+        }
+      ],
+      "control_flow_nodes": [
+        {
+          "function": "empty_callback",
+          "id": "cfg:CfgCallbacks#empty_callback:entry:0:31:2",
+          "kind": "entry",
+          "line": 31,
+          "owner": "CfgCallbacks",
+          "role": "function_entry",
+          "source": "",
+          "span": [
+            31,
+            2,
+            35,
+            5
+          ]
+        },
+        {
+          "function": "empty_callback",
+          "id": "cfg:CfgCallbacks#empty_callback:exit:3:35:5",
+          "kind": "exit",
+          "line": 35,
+          "owner": "CfgCallbacks",
+          "role": "function_exit",
+          "source": "",
+          "span": [
+            31,
+            2,
+            35,
+            5
+          ]
+        },
+        {
+          "function": "empty_callback",
+          "id": "cfg:CfgCallbacks#empty_callback:stmt:1:32:4",
+          "kind": "callback",
+          "line": 32,
+          "owner": "CfgCallbacks",
+          "role": "callback_region",
+          "source": "transaction do end",
+          "span": [
+            32,
+            4,
+            33,
+            7
+          ]
+        },
+        {
+          "function": "empty_callback",
+          "id": "cfg:CfgCallbacks#empty_callback:stmt:2:34:4",
+          "kind": "statement",
+          "line": 34,
+          "owner": "CfgCallbacks",
+          "role": "linear_statement",
+          "source": "finish(user)",
+          "span": [
+            34,
+            4,
+            34,
+            16
+          ]
+        },
+        {
+          "function": "iterator_block",
+          "id": "cfg:CfgCallbacks#iterator_block:entry:0:9:2",
+          "kind": "entry",
+          "line": 9,
+          "owner": "CfgCallbacks",
+          "role": "function_entry",
+          "source": "",
+          "span": [
+            9,
+            2,
+            14,
+            5
+          ]
+        },
+        {
+          "function": "iterator_block",
+          "id": "cfg:CfgCallbacks#iterator_block:exit:3:14:5",
+          "kind": "exit",
+          "line": 14,
+          "owner": "CfgCallbacks",
+          "role": "function_exit",
+          "source": "",
+          "span": [
+            9,
+            2,
+            14,
+            5
+          ]
+        },
+        {
+          "function": "iterator_block",
+          "id": "cfg:CfgCallbacks#iterator_block:stmt:0.loop.0:11:6",
+          "kind": "statement",
+          "line": 11,
+          "owner": "CfgCallbacks",
+          "role": "linear_statement",
+          "source": "publish(item)",
+          "span": [
+            11,
+            6,
+            11,
+            19
+          ]
+        },
+        {
+          "function": "iterator_block",
+          "id": "cfg:CfgCallbacks#iterator_block:stmt:1:10:4",
+          "kind": "loop",
+          "line": 10,
+          "owner": "CfgCallbacks",
+          "role": "iterator_loop",
+          "source": "items.each do |item| publish(item) end",
+          "span": [
+            10,
+            4,
+            12,
+            7
+          ]
+        },
+        {
+          "function": "iterator_block",
+          "id": "cfg:CfgCallbacks#iterator_block:stmt:2:13:4",
+          "kind": "statement",
+          "line": 13,
+          "owner": "CfgCallbacks",
+          "role": "linear_statement",
+          "source": "finish(items)",
+          "span": [
+            13,
+            4,
+            13,
+            17
+          ]
+        },
+        {
+          "function": "nested_callback",
+          "id": "cfg:CfgCallbacks#nested_callback:callback:0.callback.0:18:6",
+          "kind": "callback",
+          "line": 18,
+          "owner": "CfgCallbacks",
+          "role": "callback_region",
+          "source": "around_hook do audit(user) end",
+          "span": [
+            18,
+            6,
+            20,
+            9
+          ]
+        },
+        {
+          "function": "nested_callback",
+          "id": "cfg:CfgCallbacks#nested_callback:entry:0:16:2",
+          "kind": "entry",
+          "line": 16,
+          "owner": "CfgCallbacks",
+          "role": "function_entry",
+          "source": "",
+          "span": [
+            16,
+            2,
+            23,
+            5
+          ]
+        },
+        {
+          "function": "nested_callback",
+          "id": "cfg:CfgCallbacks#nested_callback:exit:3:23:5",
+          "kind": "exit",
+          "line": 23,
+          "owner": "CfgCallbacks",
+          "role": "function_exit",
+          "source": "",
+          "span": [
+            16,
+            2,
+            23,
+            5
+          ]
+        },
+        {
+          "function": "nested_callback",
+          "id": "cfg:CfgCallbacks#nested_callback:stmt:0.callback.0.callback.0:19:8",
+          "kind": "statement",
+          "line": 19,
+          "owner": "CfgCallbacks",
+          "role": "linear_statement",
+          "source": "audit(user)",
+          "span": [
+            19,
+            8,
+            19,
+            19
+          ]
+        },
+        {
+          "function": "nested_callback",
+          "id": "cfg:CfgCallbacks#nested_callback:stmt:1:17:4",
+          "kind": "callback",
+          "line": 17,
+          "owner": "CfgCallbacks",
+          "role": "callback_region",
+          "source": "transaction do around_hook do audit(user) end end",
+          "span": [
+            17,
+            4,
+            21,
+            7
+          ]
+        },
+        {
+          "function": "nested_callback",
+          "id": "cfg:CfgCallbacks#nested_callback:stmt:2:22:4",
+          "kind": "statement",
+          "line": 22,
+          "owner": "CfgCallbacks",
+          "role": "linear_statement",
+          "source": "finish(user)",
+          "span": [
+            22,
+            4,
+            22,
+            16
+          ]
+        },
+        {
+          "function": "transaction_block",
+          "id": "cfg:CfgCallbacks#transaction_block:entry:0:2:2",
+          "kind": "entry",
+          "line": 2,
+          "owner": "CfgCallbacks",
+          "role": "function_entry",
+          "source": "",
+          "span": [
+            2,
+            2,
+            7,
+            5
+          ]
+        },
+        {
+          "function": "transaction_block",
+          "id": "cfg:CfgCallbacks#transaction_block:exit:3:7:5",
+          "kind": "exit",
+          "line": 7,
+          "owner": "CfgCallbacks",
+          "role": "function_exit",
+          "source": "",
+          "span": [
+            2,
+            2,
+            7,
+            5
+          ]
+        },
+        {
+          "function": "transaction_block",
+          "id": "cfg:CfgCallbacks#transaction_block:stmt:0.callback.0:4:6",
+          "kind": "statement",
+          "line": 4,
+          "owner": "CfgCallbacks",
+          "role": "linear_statement",
+          "source": "audit(user)",
+          "span": [
+            4,
+            6,
+            4,
+            17
+          ]
+        },
+        {
+          "function": "transaction_block",
+          "id": "cfg:CfgCallbacks#transaction_block:stmt:1:3:4",
+          "kind": "callback",
+          "line": 3,
+          "owner": "CfgCallbacks",
+          "role": "callback_region",
+          "source": "transaction do audit(user) end",
+          "span": [
+            3,
+            4,
+            5,
+            7
+          ]
+        },
+        {
+          "function": "transaction_block",
+          "id": "cfg:CfgCallbacks#transaction_block:stmt:2:6:4",
+          "kind": "statement",
+          "line": 6,
+          "owner": "CfgCallbacks",
+          "role": "linear_statement",
+          "source": "finish(user)",
+          "span": [
+            6,
+            4,
+            6,
+            16
+          ]
+        },
+        {
+          "function": "yield_site",
+          "id": "cfg:CfgCallbacks#yield_site:entry:0:25:2",
+          "kind": "entry",
+          "line": 25,
+          "owner": "CfgCallbacks",
+          "role": "function_entry",
+          "source": "",
+          "span": [
+            25,
+            2,
+            29,
+            5
+          ]
+        },
+        {
+          "function": "yield_site",
+          "id": "cfg:CfgCallbacks#yield_site:exit:4:29:5",
+          "kind": "exit",
+          "line": 29,
+          "owner": "CfgCallbacks",
+          "role": "function_exit",
+          "source": "",
+          "span": [
+            25,
+            2,
+            29,
+            5
+          ]
+        },
+        {
+          "function": "yield_site",
+          "id": "cfg:CfgCallbacks#yield_site:stmt:1:26:4",
+          "kind": "statement",
+          "line": 26,
+          "owner": "CfgCallbacks",
+          "role": "linear_statement",
+          "source": "before(user)",
+          "span": [
+            26,
+            4,
+            26,
+            16
+          ]
+        },
+        {
+          "function": "yield_site",
+          "id": "cfg:CfgCallbacks#yield_site:stmt:2:27:4",
+          "kind": "callback",
+          "line": 27,
+          "owner": "CfgCallbacks",
+          "role": "yield_site",
+          "source": "yield user",
+          "span": [
+            27,
+            4,
+            27,
+            14
+          ]
+        },
+        {
+          "function": "yield_site",
+          "id": "cfg:CfgCallbacks#yield_site:stmt:3:28:4",
+          "kind": "statement",
+          "line": 28,
+          "owner": "CfgCallbacks",
+          "role": "linear_statement",
+          "source": "after(user)",
+          "span": [
+            28,
+            4,
+            28,
+            15
+          ]
+        }
+      ],
+      "file": "gems/fact-mine/examples/syntax-facts/ruby/cfg_callbacks.rb",
+      "language": "ruby"
+    }
+  ],
+  "format": "decomplex.syntax-facts.v1"
+}

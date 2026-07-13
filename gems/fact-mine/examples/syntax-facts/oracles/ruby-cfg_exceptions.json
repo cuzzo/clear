@@ -1,0 +1,579 @@
+{
+  "documents": [
+    {
+      "control_flow_edges": [
+        {
+          "from": "cfg:CfgExceptions#ensure_return:entry:0:11:2",
+          "function": "ensure_return",
+          "kind": "entry",
+          "line": 11,
+          "owner": "CfgExceptions",
+          "span": [
+            11,
+            2,
+            18,
+            5
+          ],
+          "to": "cfg:CfgExceptions#ensure_return:stmt:1:13:6"
+        },
+        {
+          "from": "cfg:CfgExceptions#ensure_return:return:0.ensure_body.0:13:6",
+          "function": "ensure_return",
+          "kind": "ensure_cleanup",
+          "line": 13,
+          "owner": "CfgExceptions",
+          "span": [
+            13,
+            6,
+            13,
+            17
+          ],
+          "to": "cfg:CfgExceptions#ensure_return:stmt:0.ensure_cleanup0.0:15:6"
+        },
+        {
+          "from": "cfg:CfgExceptions#ensure_return:stmt:0.ensure_cleanup0.0:15:6",
+          "function": "ensure_return",
+          "kind": "return",
+          "line": 13,
+          "owner": "CfgExceptions",
+          "span": [
+            13,
+            6,
+            13,
+            17
+          ],
+          "to": "cfg:CfgExceptions#ensure_return:exit:3:18:5"
+        },
+        {
+          "from": "cfg:CfgExceptions#ensure_return:stmt:1:13:6",
+          "function": "ensure_return",
+          "kind": "ensure_body",
+          "line": 13,
+          "owner": "CfgExceptions",
+          "span": [
+            13,
+            6,
+            15,
+            17
+          ],
+          "to": "cfg:CfgExceptions#ensure_return:return:0.ensure_body.0:13:6"
+        },
+        {
+          "from": "cfg:CfgExceptions#rescue_ensure:entry:0:20:2",
+          "function": "rescue_ensure",
+          "kind": "entry",
+          "line": 20,
+          "owner": "CfgExceptions",
+          "span": [
+            20,
+            2,
+            29,
+            5
+          ],
+          "to": "cfg:CfgExceptions#rescue_ensure:stmt:1:22:6"
+        },
+        {
+          "from": "cfg:CfgExceptions#rescue_ensure:exception:0.ensure_body.0:22:6",
+          "function": "rescue_ensure",
+          "kind": "rescue_handler",
+          "line": 22,
+          "owner": "CfgExceptions",
+          "span": [
+            22,
+            6,
+            24,
+            19
+          ],
+          "to": "cfg:CfgExceptions#rescue_ensure:stmt:0.ensure_body.0.rescue0.0:24:6"
+        },
+        {
+          "from": "cfg:CfgExceptions#rescue_ensure:exception:0.ensure_body.0:22:6",
+          "function": "rescue_ensure",
+          "kind": "try_body",
+          "line": 22,
+          "owner": "CfgExceptions",
+          "span": [
+            22,
+            6,
+            24,
+            19
+          ],
+          "to": "cfg:CfgExceptions#rescue_ensure:stmt:0.ensure_body.0.try.0:22:6"
+        },
+        {
+          "from": "cfg:CfgExceptions#rescue_ensure:stmt:0.ensure_body.0.rescue0.0:24:6",
+          "function": "rescue_ensure",
+          "kind": "ensure_cleanup",
+          "line": 24,
+          "owner": "CfgExceptions",
+          "span": [
+            24,
+            6,
+            24,
+            19
+          ],
+          "to": "cfg:CfgExceptions#rescue_ensure:stmt:0.ensure_cleanup1.0:26:6"
+        },
+        {
+          "from": "cfg:CfgExceptions#rescue_ensure:stmt:0.ensure_body.0.try.0:22:6",
+          "function": "rescue_ensure",
+          "kind": "ensure_cleanup",
+          "line": 22,
+          "owner": "CfgExceptions",
+          "span": [
+            22,
+            6,
+            22,
+            19
+          ],
+          "to": "cfg:CfgExceptions#rescue_ensure:stmt:0.ensure_cleanup0.0:26:6"
+        },
+        {
+          "from": "cfg:CfgExceptions#rescue_ensure:stmt:0.ensure_cleanup0.0:26:6",
+          "function": "rescue_ensure",
+          "kind": "fallthrough",
+          "line": 22,
+          "owner": "CfgExceptions",
+          "span": [
+            22,
+            6,
+            22,
+            19
+          ],
+          "to": "cfg:CfgExceptions#rescue_ensure:stmt:2:28:4"
+        },
+        {
+          "from": "cfg:CfgExceptions#rescue_ensure:stmt:0.ensure_cleanup1.0:26:6",
+          "function": "rescue_ensure",
+          "kind": "fallthrough",
+          "line": 24,
+          "owner": "CfgExceptions",
+          "span": [
+            24,
+            6,
+            24,
+            19
+          ],
+          "to": "cfg:CfgExceptions#rescue_ensure:stmt:2:28:4"
+        },
+        {
+          "from": "cfg:CfgExceptions#rescue_ensure:stmt:1:22:6",
+          "function": "rescue_ensure",
+          "kind": "ensure_body",
+          "line": 22,
+          "owner": "CfgExceptions",
+          "span": [
+            22,
+            6,
+            26,
+            17
+          ],
+          "to": "cfg:CfgExceptions#rescue_ensure:exception:0.ensure_body.0:22:6"
+        },
+        {
+          "from": "cfg:CfgExceptions#rescue_ensure:stmt:2:28:4",
+          "function": "rescue_ensure",
+          "kind": "fallthrough",
+          "line": 28,
+          "owner": "CfgExceptions",
+          "span": [
+            28,
+            4,
+            28,
+            16
+          ],
+          "to": "cfg:CfgExceptions#rescue_ensure:exit:3:29:5"
+        },
+        {
+          "from": "cfg:CfgExceptions#rescue_fallback:entry:0:2:2",
+          "function": "rescue_fallback",
+          "kind": "entry",
+          "line": 2,
+          "owner": "CfgExceptions",
+          "span": [
+            2,
+            2,
+            9,
+            5
+          ],
+          "to": "cfg:CfgExceptions#rescue_fallback:stmt:1:4:6"
+        },
+        {
+          "from": "cfg:CfgExceptions#rescue_fallback:stmt:0.rescue0.0:6:6",
+          "function": "rescue_fallback",
+          "kind": "fallthrough",
+          "line": 6,
+          "owner": "CfgExceptions",
+          "span": [
+            6,
+            6,
+            6,
+            19
+          ],
+          "to": "cfg:CfgExceptions#rescue_fallback:stmt:2:8:4"
+        },
+        {
+          "from": "cfg:CfgExceptions#rescue_fallback:stmt:0.try.0:4:6",
+          "function": "rescue_fallback",
+          "kind": "fallthrough",
+          "line": 4,
+          "owner": "CfgExceptions",
+          "span": [
+            4,
+            6,
+            4,
+            19
+          ],
+          "to": "cfg:CfgExceptions#rescue_fallback:stmt:2:8:4"
+        },
+        {
+          "from": "cfg:CfgExceptions#rescue_fallback:stmt:1:4:6",
+          "function": "rescue_fallback",
+          "kind": "rescue_handler",
+          "line": 4,
+          "owner": "CfgExceptions",
+          "span": [
+            4,
+            6,
+            6,
+            19
+          ],
+          "to": "cfg:CfgExceptions#rescue_fallback:stmt:0.rescue0.0:6:6"
+        },
+        {
+          "from": "cfg:CfgExceptions#rescue_fallback:stmt:1:4:6",
+          "function": "rescue_fallback",
+          "kind": "try_body",
+          "line": 4,
+          "owner": "CfgExceptions",
+          "span": [
+            4,
+            6,
+            6,
+            19
+          ],
+          "to": "cfg:CfgExceptions#rescue_fallback:stmt:0.try.0:4:6"
+        },
+        {
+          "from": "cfg:CfgExceptions#rescue_fallback:stmt:2:8:4",
+          "function": "rescue_fallback",
+          "kind": "fallthrough",
+          "line": 8,
+          "owner": "CfgExceptions",
+          "span": [
+            8,
+            4,
+            8,
+            16
+          ],
+          "to": "cfg:CfgExceptions#rescue_fallback:exit:3:9:5"
+        }
+      ],
+      "control_flow_nodes": [
+        {
+          "function": "ensure_return",
+          "id": "cfg:CfgExceptions#ensure_return:entry:0:11:2",
+          "kind": "entry",
+          "line": 11,
+          "owner": "CfgExceptions",
+          "role": "function_entry",
+          "source": "",
+          "span": [
+            11,
+            2,
+            18,
+            5
+          ]
+        },
+        {
+          "function": "ensure_return",
+          "id": "cfg:CfgExceptions#ensure_return:exit:3:18:5",
+          "kind": "exit",
+          "line": 18,
+          "owner": "CfgExceptions",
+          "role": "function_exit",
+          "source": "",
+          "span": [
+            11,
+            2,
+            18,
+            5
+          ]
+        },
+        {
+          "function": "ensure_return",
+          "id": "cfg:CfgExceptions#ensure_return:return:0.ensure_body.0:13:6",
+          "kind": "jump",
+          "line": 13,
+          "owner": "CfgExceptions",
+          "role": "return",
+          "source": "return user",
+          "span": [
+            13,
+            6,
+            13,
+            17
+          ]
+        },
+        {
+          "function": "ensure_return",
+          "id": "cfg:CfgExceptions#ensure_return:stmt:0.ensure_cleanup0.0:15:6",
+          "kind": "statement",
+          "line": 15,
+          "owner": "CfgExceptions",
+          "role": "linear_statement",
+          "source": "close(user)",
+          "span": [
+            15,
+            6,
+            15,
+            17
+          ]
+        },
+        {
+          "function": "ensure_return",
+          "id": "cfg:CfgExceptions#ensure_return:stmt:1:13:6",
+          "kind": "exception",
+          "line": 13,
+          "owner": "CfgExceptions",
+          "role": "ensure_region",
+          "source": "return user ensure close(user)",
+          "span": [
+            13,
+            6,
+            15,
+            17
+          ]
+        },
+        {
+          "function": "rescue_ensure",
+          "id": "cfg:CfgExceptions#rescue_ensure:entry:0:20:2",
+          "kind": "entry",
+          "line": 20,
+          "owner": "CfgExceptions",
+          "role": "function_entry",
+          "source": "",
+          "span": [
+            20,
+            2,
+            29,
+            5
+          ]
+        },
+        {
+          "function": "rescue_ensure",
+          "id": "cfg:CfgExceptions#rescue_ensure:exception:0.ensure_body.0:22:6",
+          "kind": "exception",
+          "line": 22,
+          "owner": "CfgExceptions",
+          "role": "rescue_region",
+          "source": "publish(user) rescue StandardError recover(user)",
+          "span": [
+            22,
+            6,
+            24,
+            19
+          ]
+        },
+        {
+          "function": "rescue_ensure",
+          "id": "cfg:CfgExceptions#rescue_ensure:exit:3:29:5",
+          "kind": "exit",
+          "line": 29,
+          "owner": "CfgExceptions",
+          "role": "function_exit",
+          "source": "",
+          "span": [
+            20,
+            2,
+            29,
+            5
+          ]
+        },
+        {
+          "function": "rescue_ensure",
+          "id": "cfg:CfgExceptions#rescue_ensure:stmt:0.ensure_body.0.rescue0.0:24:6",
+          "kind": "statement",
+          "line": 24,
+          "owner": "CfgExceptions",
+          "role": "linear_statement",
+          "source": "recover(user)",
+          "span": [
+            24,
+            6,
+            24,
+            19
+          ]
+        },
+        {
+          "function": "rescue_ensure",
+          "id": "cfg:CfgExceptions#rescue_ensure:stmt:0.ensure_body.0.try.0:22:6",
+          "kind": "statement",
+          "line": 22,
+          "owner": "CfgExceptions",
+          "role": "linear_statement",
+          "source": "publish(user)",
+          "span": [
+            22,
+            6,
+            22,
+            19
+          ]
+        },
+        {
+          "function": "rescue_ensure",
+          "id": "cfg:CfgExceptions#rescue_ensure:stmt:0.ensure_cleanup0.0:26:6",
+          "kind": "statement",
+          "line": 26,
+          "owner": "CfgExceptions",
+          "role": "linear_statement",
+          "source": "close(user)",
+          "span": [
+            26,
+            6,
+            26,
+            17
+          ]
+        },
+        {
+          "function": "rescue_ensure",
+          "id": "cfg:CfgExceptions#rescue_ensure:stmt:0.ensure_cleanup1.0:26:6",
+          "kind": "statement",
+          "line": 26,
+          "owner": "CfgExceptions",
+          "role": "linear_statement",
+          "source": "close(user)",
+          "span": [
+            26,
+            6,
+            26,
+            17
+          ]
+        },
+        {
+          "function": "rescue_ensure",
+          "id": "cfg:CfgExceptions#rescue_ensure:stmt:1:22:6",
+          "kind": "exception",
+          "line": 22,
+          "owner": "CfgExceptions",
+          "role": "ensure_region",
+          "source": "publish(user) rescue StandardError recover(user) ensure close(user)",
+          "span": [
+            22,
+            6,
+            26,
+            17
+          ]
+        },
+        {
+          "function": "rescue_ensure",
+          "id": "cfg:CfgExceptions#rescue_ensure:stmt:2:28:4",
+          "kind": "statement",
+          "line": 28,
+          "owner": "CfgExceptions",
+          "role": "linear_statement",
+          "source": "finish(user)",
+          "span": [
+            28,
+            4,
+            28,
+            16
+          ]
+        },
+        {
+          "function": "rescue_fallback",
+          "id": "cfg:CfgExceptions#rescue_fallback:entry:0:2:2",
+          "kind": "entry",
+          "line": 2,
+          "owner": "CfgExceptions",
+          "role": "function_entry",
+          "source": "",
+          "span": [
+            2,
+            2,
+            9,
+            5
+          ]
+        },
+        {
+          "function": "rescue_fallback",
+          "id": "cfg:CfgExceptions#rescue_fallback:exit:3:9:5",
+          "kind": "exit",
+          "line": 9,
+          "owner": "CfgExceptions",
+          "role": "function_exit",
+          "source": "",
+          "span": [
+            2,
+            2,
+            9,
+            5
+          ]
+        },
+        {
+          "function": "rescue_fallback",
+          "id": "cfg:CfgExceptions#rescue_fallback:stmt:0.rescue0.0:6:6",
+          "kind": "statement",
+          "line": 6,
+          "owner": "CfgExceptions",
+          "role": "linear_statement",
+          "source": "recover(user)",
+          "span": [
+            6,
+            6,
+            6,
+            19
+          ]
+        },
+        {
+          "function": "rescue_fallback",
+          "id": "cfg:CfgExceptions#rescue_fallback:stmt:0.try.0:4:6",
+          "kind": "statement",
+          "line": 4,
+          "owner": "CfgExceptions",
+          "role": "linear_statement",
+          "source": "publish(user)",
+          "span": [
+            4,
+            6,
+            4,
+            19
+          ]
+        },
+        {
+          "function": "rescue_fallback",
+          "id": "cfg:CfgExceptions#rescue_fallback:stmt:1:4:6",
+          "kind": "exception",
+          "line": 4,
+          "owner": "CfgExceptions",
+          "role": "rescue_region",
+          "source": "publish(user) rescue StandardError recover(user)",
+          "span": [
+            4,
+            6,
+            6,
+            19
+          ]
+        },
+        {
+          "function": "rescue_fallback",
+          "id": "cfg:CfgExceptions#rescue_fallback:stmt:2:8:4",
+          "kind": "statement",
+          "line": 8,
+          "owner": "CfgExceptions",
+          "role": "linear_statement",
+          "source": "finish(user)",
+          "span": [
+            8,
+            4,
+            8,
+            16
+          ]
+        }
+      ],
+      "file": "gems/fact-mine/examples/syntax-facts/ruby/cfg_exceptions.rb",
+      "language": "ruby"
+    }
+  ],
+  "format": "decomplex.syntax-facts.v1"
+}
