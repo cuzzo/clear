@@ -310,7 +310,7 @@ where
     Ok(())
 }
 
-fn bind_sqlite<'q>(
+pub(crate) fn bind_sqlite<'q>(
     query: sqlx::query::Query<'q, Sqlite, sqlx::sqlite::SqliteArguments<'q>>,
     value: &'q ParameterValue,
 ) -> sqlx::query::Query<'q, Sqlite, sqlx::sqlite::SqliteArguments<'q>> {
@@ -326,7 +326,7 @@ fn bind_sqlite<'q>(
     }
 }
 
-fn bind_postgres<'q>(
+pub(crate) fn bind_postgres<'q>(
     query: sqlx::query::Query<'q, Postgres, sqlx::postgres::PgArguments>,
     value: &'q ParameterValue,
 ) -> sqlx::query::Query<'q, Postgres, sqlx::postgres::PgArguments> {
@@ -342,7 +342,7 @@ fn bind_postgres<'q>(
     }
 }
 
-fn bind_mysql<'q>(
+pub(crate) fn bind_mysql<'q>(
     query: sqlx::query::Query<'q, MySql, sqlx::mysql::MySqlArguments>,
     value: &'q ParameterValue,
 ) -> sqlx::query::Query<'q, MySql, sqlx::mysql::MySqlArguments> {
@@ -425,4 +425,3 @@ mod tests {
         execute_mysql_setup(&mysql_pool, "SELECT 1").await.unwrap();
     }
 }
-

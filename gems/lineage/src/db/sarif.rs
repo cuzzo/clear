@@ -688,6 +688,46 @@ mod tests {
     }
 
     #[test]
+    fn ingests_sql_cov_complexity_contract_without_sql_analysis() {
+        let dir = tempdir().unwrap();
+        let storage = Storage::open_memory().unwrap();
+        let sarif = dir.path().join("query-plan.sarif");
+        let document = serde_json::json!({
+            "version": "2.1.0",
+            "runs": [{
+                "tool": {"driver": {"name": "SQL-COV"}},
+                "properties": {"format": "sql-cov.plan.sarif.v1"},
+                "results": [{
+                    "ruleId": "complexity.observation",
+                    "level": "note",
+                    "message": {"text": "orders.list has estimated runtime O(N * M) and auxiliary space O(N)"},
+                    "locations": [{"physicalLocation": {
+                        "artifactLocation": {"uri": "queries/orders.sql"},
+                        "region": {"startLine": 1, "startColumn": 1}
+                    }}],
+                    "partialFingerprints": {"queryId": "orders.list"},
+                    "properties": {"category": "complexity", "complexity": {
+                        "subject_kind": "query", "subject_name": "orders.list",
+                        "time": "O(N * M)", "auxiliary_space": "O(N)",
+                        "dynamic": true, "basis": "postgres-explain"
+                    }}
+                }]
+            }]
+        });
+        fs::write(&sarif, serde_json::to_vec(&document).unwrap()).unwrap();
+
+        let stats = ingest_sarif_paths(&storage, dir.path(), &[sarif], "sql-cov", "abc", Some(20), true).unwrap();
+        assert_eq!(stats.findings, 1);
+        let findings = storage.sarif_findings_for_path("queries/orders.sql").unwrap();
+        assert_eq!(findings.len(), 1);
+        assert_eq!(findings[0].tool_name, "SQL-COV");
+        assert_eq!(findings[0].run_format, "sql-cov.plan.sarif.v1");
+        let properties: Value = serde_json::from_str(&findings[0].properties_json).unwrap();
+        assert_eq!(properties["complexity"]["time"], "O(N * M)");
+        assert_eq!(properties["complexity"]["basis"], "postgres-explain");
+    }
+
+    #[test]
     fn test_sarif_ingest_edge_cases() {
         let dir = tempdir().unwrap();
         let storage = Storage::open_memory().unwrap();

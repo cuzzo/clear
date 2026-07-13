@@ -55,6 +55,23 @@ fn cli_analyze_command() {
 }
 
 #[test]
+fn cli_plan_command_emits_canonical_sarif() {
+    let root = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
+    let output = tempfile::NamedTempFile::new().unwrap();
+    let result = Command::new(env!("CARGO_BIN_EXE_sql-cov"))
+        .args(["plan", "--input", root.join("tests/fixtures/users_query.sql").to_str().unwrap(),
+            "--setup", root.join("tests/fixtures/users.sql").to_str().unwrap(),
+            "--output", output.path().to_str().unwrap()])
+        .status().unwrap();
+    assert!(result.success());
+    let report: serde_json::Value = serde_json::from_str(&std::fs::read_to_string(output.path()).unwrap()).unwrap();
+    assert_eq!(report["runs"][0]["tool"]["driver"]["name"], "SQL-COV");
+    assert_eq!(report["runs"][0]["properties"]["format"], "sql-cov.plan.sarif.v1");
+    assert!(report["runs"][0]["results"].as_array().unwrap().iter()
+        .any(|result| result["ruleId"] == "complexity.observation"));
+}
+
+#[test]
 fn cli_hazards_command() {
     let root = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
     let output = tempfile::NamedTempFile::new().unwrap();

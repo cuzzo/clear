@@ -15,6 +15,7 @@ TOOL_ROOT = File.expand_path("../../..", __dir__)
 LINEAGE_MANIFEST = File.join(TOOL_ROOT, "gems/lineage/Cargo.toml")
 DECOMPLEX_MANIFEST = File.join(TOOL_ROOT, "gems/decomplex/Cargo.toml")
 FACT_MINE_MANIFEST = File.join(TOOL_ROOT, "gems/fact-mine/Cargo.toml")
+SQL_COV_MANIFEST = File.join(TOOL_ROOT, "gems/sql-cov/Cargo.toml")
 
 DEFAULT_EXCLUDES = %w[
   .git
@@ -73,6 +74,11 @@ options = {
   daemon: false,
   replace: true,
   top: 100,
+  sql_queries: nil,
+  sql_setup: nil,
+  sql_database: "sqlite::memory:",
+  sql_dialect: "sqlite",
+  sql_parameters: [],
 }
 
 OptionParser.new do |parser|
@@ -89,6 +95,11 @@ OptionParser.new do |parser|
   parser.on("--no-hazards", "Skip hazard discovery/ingestion") { options[:hazards] = false }
   parser.on("--coverage=PATH", "Additional coverage artifact. May be repeated") { |value| options[:coverage_inputs] << value }
   parser.on("--sarif-input=PATH", "Additional SARIF file/directory to ingest. May be repeated") { |value| options[:sarif_inputs] << value }
+  parser.on("--sql-queries=PATH", "SQL file/directory to analyze with SQL-COV EXPLAIN") { |value| options[:sql_queries] = value }
+  parser.on("--sql-setup=PATH", "Schema/setup SQL executed before SQL-COV EXPLAIN") { |value| options[:sql_setup] = value }
+  parser.on("--sql-database=URL", "Database URL/path for SQL-COV. Default: sqlite::memory:") { |value| options[:sql_database] = value }
+  parser.on("--sql-dialect=NAME", "SQL-COV dialect: sqlite, postgres, or mysql") { |value| options[:sql_dialect] = value }
+  parser.on("--sql-param=VALUE", "SQL-COV typed parameter. May be repeated") { |value| options[:sql_parameters] << value }
   parser.on("--exclude=GLOB", "Exclude glob from SARIF generation. May be repeated") { |value| options[:exclude] << value }
   parser.on("--host=HOST", "UI host if --serve is passed. Default: 127.0.0.1") { |value| options[:host] = value }
   parser.on("--port=PORT", Integer, "UI port if --serve is passed. Default: 8080") { |value| options[:port] = value }
@@ -384,6 +395,7 @@ coverage_dir = File.join(out_dir, "coverage-normalized")
 lineage_bin = File.join(TOOL_ROOT, "gems/lineage/target/release/lineage")
 decomplex_bin = File.join(TOOL_ROOT, "gems/decomplex/target/release/decomplex-rust")
 fact_mine_bin = File.join(TOOL_ROOT, "gems/fact-mine/target/release/fact-mine-rust")
+sql_cov_bin = File.join(TOOL_ROOT, "gems/sql-cov/target/release/sql-cov")
 
 FileUtils.mkdir_p(out_dir)
 FileUtils.rm_f(db) if options[:fresh]
@@ -401,7 +413,12 @@ if options[:build_tools]
       run_command("build-fact-mine", ["cargo", "build", "--release", "--manifest-path", FACT_MINE_MANIFEST], chdir: TOOL_ROOT, log_dir: log_dir, optional: true)
     end
   end
-  threads.each(&:join)
+  if options[:sql_queries]
+    threads << Thread.new do
+      run_command("build-sql-cov", ["cargo", "build", "--release", "--manifest-path", SQL_COV_MANIFEST], chdir: TOOL_ROOT, log_dir: log_dir)
+    end
+  end
+  threads.each(&:value)
 end
 
 commit = git_output(repo, "rev-parse", "HEAD").strip
@@ -440,7 +457,7 @@ if options[:coverage]
       run_command("coverage-#{rel}", cmd, chdir: repo, log_dir: log_dir, optional: true)
     end
   end
-  threads.each(&:join)
+  threads.each(&:value)
 
   inputs_and_metadata.each do |path, format, input, rel, type, test_id|
     analyzer_coverage_paths << path if analyzer_coverage_compatible?(path, format)
@@ -466,7 +483,7 @@ if options[:hazards]
       run_command("hazards-#{provider}", cmd, chdir: repo, log_dir: log_dir, optional: true)
     end
   end
-  threads.each(&:join)
+  threads.each(&:value)
 end
 
 sarif_threads = []
@@ -505,6 +522,25 @@ if options[:lints]
   end
 end
 
+if options[:sql_queries]
+  sarif_threads << Thread.new do
+    sql_plan = File.join(sarif_dir, "sql-cov-plan.sarif")
+    cmd = [
+      sql_cov_bin, "plan",
+      "--input", File.expand_path(options[:sql_queries], repo),
+      "--database", options[:sql_database],
+      "--dialect", options[:sql_dialect],
+      "--output", sql_plan,
+    ]
+    cmd += ["--setup", File.expand_path(options[:sql_setup], repo)] if options[:sql_setup]
+    cmd += options[:sql_parameters].flat_map { |parameter| ["--param", parameter] }
+    run_command("sql-cov-plan", cmd, chdir: repo, log_dir: log_dir)
+    ingest = [lineage_bin, "ingest-sarif", "--db", db, "--repo", repo, "--input", sql_plan, "--source", "sql-cov", "--commit", commit]
+    ingest << "--replace" if options[:replace]
+    run_command("ingest-sql-cov-plan", ingest, chdir: repo, log_dir: log_dir)
+  end
+end
+
 options[:sarif_inputs].each do |input|
   input = File.expand_path(input, repo)
   next unless File.exist?(input)
@@ -516,7 +552,7 @@ options[:sarif_inputs].each do |input|
   end
 end
 
-sarif_threads.each(&:join)
+sarif_threads.each(&:value)
 
 run_command("refresh-ui", [lineage_bin, "refresh-ui", "--db", db], chdir: repo, log_dir: log_dir)
 

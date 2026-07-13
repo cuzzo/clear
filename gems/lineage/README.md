@@ -181,7 +181,9 @@ from the same source and commit.
 
 Standalone `.sql` files are indexed as query logical units. A leading
 `-- query-id:` comment supplies the stable unit name, allowing SQL-COV branch
-coverage and SQL hazard SARIF to attach to the same source view.
+coverage, SQL hazard SARIF, and SQL-COV plan-complexity observations to attach to
+the same source view. Lineage only stores and presents those observations; all
+database/dialect analysis remains in SQL-COV.
 | One-line repository import | `gems/lineage/bin/lineage-import` | Git history, coverage discovery, hazards, bundled first-party SARIF, Go/Rust/Ruby/Zig lint SARIF, extra SARIF |
 
 ### SARIF Findings
@@ -197,6 +199,18 @@ the same `source` and `commit` before loading the new artifact set.
 first-party SARIF set automatically: Decomplex, SlopCop, Boobytrap,
 Nil-Kill, and Espalier. To generate that bundle without a full import,
 run `tools/generate_generalized_gem_sarif.rb --repo . --out-dir tmp/lineage-sarif`.
+
+Live plan analysis is opt-in because it requires an explicit test schema and
+database connection. The importer delegates it to SQL-COV and ingests the SARIF:
+
+```sh
+gems/lineage/bin/lineage-import \
+  --sql-queries=queries/ \
+  --sql-setup=test/schema.sql \
+  --sql-dialect=postgres \
+  --sql-database=postgres://localhost/app_test \
+  --sql-param=int:42
+```
 
 For third-party lint, smell, or security tools, upload their SARIF into
 a directory and use a source name that identifies the provider or CI

@@ -2,6 +2,7 @@ use anyhow::{bail, Context, Result};
 use clap::{Parser, Subcommand};
 use sql_cov::driver::{mysql_pool, postgres_pool, sqlite_pool};
 use sql_cov::hazard::{analyze_hazards, analyze_hazards_with_looker, parse_lookml, LookerJoin};
+use sql_cov::plan::{self, QueryPlanObservation};
 use sql_cov::reporter;
 use sql_cov::sarif;
 use sql_cov::schema::SchemaCatalog;
@@ -78,6 +79,21 @@ enum Command {
         dialect: String,
         #[arg(long)]
         id: String,
+    },
+    /// Derive time and auxiliary-space complexity from database EXPLAIN plans.
+    Plan {
+        #[arg(long)]
+        input: PathBuf,
+        #[arg(long)]
+        setup: Option<PathBuf>,
+        #[arg(long, default_value = "sqlite::memory:")]
+        database: String,
+        #[arg(long, default_value = "sqlite")]
+        dialect: String,
+        #[arg(long = "param")]
+        parameters: Vec<String>,
+        #[arg(long)]
+        output: Option<PathBuf>,
     },
 }
 
@@ -262,6 +278,48 @@ async fn main() -> Result<()> {
                 other => bail!("unsupported hazard format {other:?}; use sarif or json"),
             };
             write_output(output, &rendered)?;
+        }
+        Command::Plan { input, setup, database, dialect, parameters, output } => {
+            let dialect = DialectName::parse(&dialect)?;
+            let setup = setup.map(fs::read_to_string).transpose()?;
+            let files = plan::collect_sql_files(&input)?;
+            if files.is_empty() {
+                bail!("no SQL files found under {}", input.display());
+            }
+            let mut observations = Vec::new();
+            match dialect {
+                DialectName::Sqlite => {
+                    let pool = sqlite_pool(&database).await?;
+                    if let Some(setup) = &setup { execute_sqlite_setup(&pool, setup).await?; }
+                    for path in files {
+                        let source = fs::read_to_string(&path)?;
+                        let (complexity, explain) = plan::explain_sqlite(&pool, &source, &parameters).await
+                            .with_context(|| format!("analyze SQLite plan for {}", path.display()))?;
+                        observations.push(QueryPlanObservation { path: path.to_string_lossy().to_string(), query_id: plan::query_id(&path, &source), dialect, complexity, explain });
+                    }
+                }
+                DialectName::Postgres => {
+                    let pool = postgres_pool(&database).await?;
+                    if let Some(setup) = &setup { execute_postgres_setup(&pool, setup).await?; }
+                    for path in files {
+                        let source = fs::read_to_string(&path)?;
+                        let (complexity, explain) = plan::explain_postgres(&pool, &source, &parameters).await
+                            .with_context(|| format!("analyze PostgreSQL plan for {}", path.display()))?;
+                        observations.push(QueryPlanObservation { path: path.to_string_lossy().to_string(), query_id: plan::query_id(&path, &source), dialect, complexity, explain });
+                    }
+                }
+                DialectName::Mysql => {
+                    let pool = mysql_pool(&database).await?;
+                    if let Some(setup) = &setup { execute_mysql_setup(&pool, setup).await?; }
+                    for path in files {
+                        let source = fs::read_to_string(&path)?;
+                        let (complexity, explain) = plan::explain_mysql(&pool, &source, &parameters).await
+                            .with_context(|| format!("analyze MySQL plan for {}", path.display()))?;
+                        observations.push(QueryPlanObservation { path: path.to_string_lossy().to_string(), query_id: plan::query_id(&path, &source), dialect, complexity, explain });
+                    }
+                }
+            }
+            write_output(output, &plan::plan_sarif(&observations)?)?;
         }
         Command::GenerateCheck {
             input,

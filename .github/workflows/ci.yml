@@ -315,6 +315,46 @@ jobs:
           fail_ci_if_error: false
           token: ${{ secrets.CODECOV_TOKEN }}
 
+  sql-cov-dialects:
+    name: SQL-COV SQLite / PostgreSQL / MySQL plans
+    needs: changes
+    if: ${{ needs.changes.outputs.run_gems == 'true' }}
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: sql_cov
+          POSTGRES_PASSWORD: sql_cov
+          POSTGRES_DB: sql_cov
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U sql_cov -d sql_cov"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 20
+      mysql:
+        image: mysql:8.4
+        env:
+          MYSQL_ROOT_PASSWORD: sql_cov
+          MYSQL_DATABASE: sql_cov
+        ports:
+          - 3306:3306
+        options: >-
+          --health-cmd "mysqladmin ping -h 127.0.0.1 -uroot -psql_cov"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 30
+    env:
+      SQL_COV_POSTGRES_URL: postgres://sql_cov:sql_cov@127.0.0.1:5432/sql_cov
+      SQL_COV_MYSQL_URL: mysql://root:sql_cov@127.0.0.1:3306/sql_cov
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - name: Run all SQL-COV tests against all supported databases
+        run: cargo test --manifest-path gems/sql-cov/Cargo.toml --all-targets
+
   decomplex-rust-test:
     name: Decomplex Rust tests
     needs: changes
@@ -1466,6 +1506,7 @@ jobs:
       - zig-coverage
       - zig-mutants-coverage
       - lineage-rust-coverage
+      - sql-cov-dialects
     if: ${{ always() && github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository && (needs.changes.outputs.run_gems == 'true' || needs.changes.outputs.run_src == 'true' || needs.changes.outputs.run_zig == 'true') && !contains(needs.*.result, 'failure') && !contains(needs.*.result, 'cancelled') }}
     permissions:
       contents: read

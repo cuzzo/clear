@@ -1,5 +1,6 @@
 use sql_cov::driver::{mysql_pool, postgres_pool};
 use sql_cov::schema::SchemaCatalog;
+use sql_cov::plan::{explain_mysql, explain_postgres, Growth};
 use sql_cov::{
     analyze_hazards, analyze_sql, cover_mysql, cover_postgres, execute_mysql_setup,
     execute_postgres_setup, DialectName, HazardKind,
@@ -44,6 +45,12 @@ async fn postgres_live_schema_coverage_and_any_all_hazard() {
         .findings
         .iter()
         .any(|finding| finding.kind == HazardKind::NullableAnyAll));
+
+    let (complexity, explain) = explain_postgres(&pool,
+        "SELECT name FROM sql_cov_users WHERE age > $1 ORDER BY name", &["int:18".to_string()]).await.unwrap();
+    assert_ne!(complexity.time, Growth::Unknown);
+    assert!(complexity.auxiliary_space.rank() >= Growth::Constant.rank());
+    assert!(explain.contains("Plan"));
 }
 
 #[tokio::test]
@@ -85,4 +92,10 @@ async fn mysql_or_mariadb_live_schema_coverage_and_any_all_hazard() {
         .findings
         .iter()
         .any(|finding| finding.kind == HazardKind::NullableAnyAll));
+
+    let (complexity, explain) = explain_mysql(&pool,
+        "SELECT name FROM sql_cov_users WHERE age > ? ORDER BY name", &["int:18".to_string()]).await.unwrap();
+    assert_ne!(complexity.time, Growth::Unknown);
+    assert!(complexity.auxiliary_space.rank() >= Growth::Constant.rank());
+    assert!(explain.contains("query_block"));
 }

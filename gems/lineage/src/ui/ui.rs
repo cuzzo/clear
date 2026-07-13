@@ -450,6 +450,7 @@ pub struct UiArchitectureRisk {
 #[derive(Debug, Clone, Serialize, PartialEq)]
 pub struct UiComplexityFunction {
     pub name: String,
+    pub subject_kind: String,
     pub path: String,
     pub start_line: u32,
     pub runtime_complexity: String,
@@ -2041,6 +2042,7 @@ fn top_complexity_functions(
             row.get::<_, u32>(1)?,
             row.get::<_, String>(2)?,
             row.get::<_, String>(3)?,
+            row.get::<_, String>(4)?,
         ))
     })?;
 
@@ -2048,7 +2050,7 @@ fn top_complexity_functions(
     let mut seen = std::collections::HashSet::new();
 
     for row in rows {
-        let (path, start_line, properties_json, message) = row?;
+        let (path, start_line, properties_json, message, tool_name) = row?;
         if !scope.allows(&path)
             || !is_production_source_path(&path)
             || !path_in_directory(&path, directory)
@@ -2057,14 +2059,13 @@ fn top_complexity_functions(
         }
 
         let properties = serde_json::from_str::<Value>(&properties_json).unwrap_or(Value::Null);
-        let func_val = match properties.get("function") {
+        let complexity = match properties.get("complexity") {
             Some(v) => v,
             None => continue,
         };
 
-        let name = string_field(func_val, &["name"])
-            .or_else(|| string_field(&properties, &["function"]))
-            .or_else(|| message.rsplit('#').next())
+        let name = string_field(complexity, &["subject_name"])
+            .or_else(|| message.split_whitespace().next())
             .map(|s| s.trim())
             .filter(|s| !s.is_empty())
             .unwrap_or("*")
@@ -2075,51 +2076,50 @@ fn top_complexity_functions(
             continue;
         }
 
-        let metrics = match func_val.get("quality_metrics") {
-            Some(m) => m,
-            None => continue,
-        };
-
-        let big_o = metrics
-            .get("big_o")
+        let big_o = complexity
+            .get("time")
             .and_then(|v| v.as_str())
             .unwrap_or("O(1)")
             .to_string();
 
-        let big_o_space = metrics
-            .get("big_o_space")
+        let big_o_space = complexity
+            .get("auxiliary_space")
             .and_then(|v| v.as_str())
             .unwrap_or("O(1)")
             .to_string();
 
-        let is_dynamic = metrics
-            .get("big_o_dynamic")
+        let is_dynamic = complexity
+            .get("dynamic")
             .and_then(|v| v.as_bool())
             .unwrap_or(true);
 
-        let trigger = metrics
-            .get("complexity_trigger")
-            .and_then(|v| v.as_str())
-            .unwrap_or("")
-            .to_string();
+        let trigger = complexity.get("triggers").and_then(|value| {
+            value.as_str().map(str::to_string).or_else(|| {
+                value.as_array().map(|items| {
+                    items.iter().filter_map(Value::as_str).collect::<Vec<_>>().join(", ")
+                })
+            })
+        }).unwrap_or_default();
+        let basis = string_field(complexity, &["basis"]).unwrap_or("unspecified");
+        let subject_kind = string_field(complexity, &["subject_kind"]).unwrap_or("function");
 
         let rank = complexity_display_rank(&big_o);
 
         if rank > 10 {
             seen.insert(key);
-            functions.push((path, start_line, name, big_o, big_o_space, is_dynamic, trigger, rank));
+            functions.push((path, start_line, name, subject_kind.to_string(), big_o, big_o_space, is_dynamic, trigger, basis.to_string(), tool_name, rank));
         }
     }
 
     functions.sort_by(|left, right| {
-        right.7.cmp(&left.7)
+        right.10.cmp(&left.10)
             .then_with(|| left.0.cmp(&right.0))
             .then_with(|| left.2.cmp(&right.2))
     });
 
     let result = functions
         .into_iter()
-        .map(|(path, start_line, name, big_o, big_o_space, is_dynamic, trigger, _)| {
+        .map(|(path, start_line, name, subject_kind, big_o, big_o_space, is_dynamic, trigger, basis, tool_name, _)| {
             let complexity_type = if is_dynamic {
                 if !trigger.is_empty() {
                     format!("Dynamic, triggered by {}", trigger)
@@ -2129,9 +2129,10 @@ fn top_complexity_functions(
             } else {
                 "Static/Fixed".to_string()
             };
-            let detail = format!("Runtime: {} ({}) | Space: {}", big_o, complexity_type, big_o_space);
+            let detail = format!("Runtime: {} ({}) | Space: {} | Basis: {} ({})", big_o, complexity_type, big_o_space, basis, tool_name);
             UiComplexityFunction {
                 name,
+                subject_kind,
                 path,
                 start_line,
                 runtime_complexity: big_o,
@@ -2148,6 +2149,7 @@ fn complexity_display_rank(complexity: &str) -> u32 {
     match complexity {
         "O(1)" => 1,
         "O(log N)" => 2,
+        "O(log N + K)" => 3,
         "O(N)" => 10,
         "O(N log N)" => 11,
         "O(N * M)" => 14,
@@ -6171,7 +6173,7 @@ fn render_complexity_functions_section(dashboard: &UiDashboard, filter: &str) ->
         .iter()
         .map(|func| HotspotItem {
             href: format!("{}#L{}", page_href(&func.path, None, filter), func.start_line),
-            kind: unit_kind_label("function", &func.name),
+            kind: unit_kind_label(&func.subject_kind, &func.name),
             name: func.name.clone(),
             path: func.path.clone(),
             detail: func.detail.clone(),
@@ -6182,14 +6184,14 @@ fn render_complexity_functions_section(dashboard: &UiDashboard, filter: &str) ->
     let body = render_template_string(
         HotspotListTemplate {
             wrapper_class: "unit-hotspots complexity-hotspots",
-            empty_message: "No high complexity functions to show.",
+            empty_message: "No high-complexity operations to show.",
             items: &items,
         },
-        "complexity functions template",
+        "complexity operations template",
     );
 
     render_dashboard_disclosure(
-        "Expensive Functions",
+        "Expensive Operations",
         false,
         &body,
     )
@@ -9899,12 +9901,45 @@ mod tests {
 
     #[test]
     fn complexity_display_rank_orders_all_emitted_complexities() {
+        assert_eq!(complexity_display_rank("O(log N + K)"), 3);
         assert_eq!(complexity_display_rank("O(N)"), 10);
         assert_eq!(complexity_display_rank("O(N log N)"), 11);
         assert_eq!(complexity_display_rank("O(N^4)"), 18);
         assert_eq!(complexity_display_rank("O(N^4 log N)"), 19);
         assert_eq!(complexity_display_rank("O(2^N)"), 100);
         assert_eq!(complexity_display_rank("O(N!)"), 200);
+    }
+
+    #[test]
+    fn top_complexity_reads_provider_neutral_sql_cov_observations() {
+        let storage = Storage::open_memory().unwrap();
+        let artifact_id = storage.insert_sarif_artifact(&SarifArtifact {
+            source: "sql-cov".into(), tool_name: "SQL-COV".into(),
+            run_format: "sql-cov.plan.sarif.v1".into(), artifact_path: "tmp/sql-plan.sarif#run0".into(),
+            artifact_sha256: "plan-sha".into(), commit_hash: "abc".into(), timestamp: 20, payload_json: "{}".into(),
+        }).unwrap();
+        storage.insert_sarif_finding(&SarifFinding {
+            artifact_id, finding_key: "orders-by-customer".into(), source: "sql-cov".into(),
+            tool_name: "SQL-COV".into(), run_format: "sql-cov.plan.sarif.v1".into(), commit_hash: "abc".into(),
+            timestamp: 20, rule_id: "complexity.observation".into(), level: "note".into(),
+            message: "orders.by_customer has estimated runtime O(N * M)".into(), path: "queries/orders.sql".into(),
+            start_line: 1, start_column: Some(1), end_line: None, end_column: None, category: "complexity".into(),
+            is_dark_arm: false, unit_id: None, fingerprint: "query-id".into(),
+            properties_json: serde_json::json!({"complexity": {
+                "subject_kind": "query", "subject_name": "orders.by_customer", "time": "O(N * M)",
+                "auxiliary_space": "O(N)", "dynamic": true, "basis": "postgres-explain",
+                "triggers": ["postgres nested-loop join"]
+            }}).to_string(), raw_json: "{}".into(),
+        }).unwrap();
+        storage.refresh_current_sarif_findings_view().unwrap();
+
+        let findings = top_complexity_functions(&storage, "", &CoverageScope::all()).unwrap();
+        assert_eq!(findings.len(), 1);
+        assert_eq!(findings[0].name, "orders.by_customer");
+        assert_eq!(findings[0].subject_kind, "query");
+        assert_eq!(findings[0].runtime_complexity, "O(N * M)");
+        assert!(findings[0].detail.contains("postgres-explain (SQL-COV)"));
+        assert!(findings[0].detail.contains("postgres nested-loop join"));
     }
 
     #[test]

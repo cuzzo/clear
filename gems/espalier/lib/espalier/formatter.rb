@@ -108,6 +108,12 @@ module Espalier
           name: "Impure Function",
           short_description: "Function/method with direct state effects",
           default_level: "note"
+        ),
+        Decomplex::Sarif.rule(
+          id: "complexity.observation",
+          name: "Complexity Observation",
+          short_description: "Function time and auxiliary-space complexity",
+          default_level: "note"
         )
       ]
     end
@@ -119,7 +125,9 @@ module Espalier
     end
 
     def function_results(mod)
-      Array(mod[:functions]).filter_map { |fn| impure_function_result(mod, fn) }
+      Array(mod[:functions]).flat_map do |fn|
+        [impure_function_result(mod, fn), complexity_result(mod, fn)].compact
+      end
     end
 
     def impure_function_result(mod, fn)
@@ -144,6 +152,49 @@ module Espalier
             "writes" => writes
           },
           "source_format" => "espalier.manifest.v1"
+        }
+      )
+    end
+
+    def complexity_result(mod, fn)
+      metrics = fn[:quality_metrics] || fn["quality_metrics"]
+      return nil unless metrics.is_a?(Hash)
+
+      time = metrics[:big_o] || metrics["big_o"]
+      space = metrics[:big_o_space] || metrics["big_o_space"] || "O(1)"
+      return nil if time.to_s.empty?
+
+      dynamic = metrics.key?(:big_o_dynamic) ? metrics[:big_o_dynamic] : metrics["big_o_dynamic"]
+      dynamic = true if dynamic.nil?
+      trigger = metrics[:complexity_trigger] || metrics["complexity_trigger"]
+      warnings = Array(metrics[:big_o_warnings] || metrics["big_o_warnings"])
+      unknowns = Array(metrics[:big_o_unknowns] || metrics["big_o_unknowns"])
+      owner = mod[:module] || mod["module"]
+      function_name = fn[:name] || fn["name"]
+      subject_name = "#{owner}##{function_name}"
+
+      Decomplex::Sarif.result(
+        rule_id: "complexity.observation",
+        level: "note",
+        message: "#{subject_name} has estimated runtime #{time} and auxiliary space #{space}",
+        path: mod[:file] || mod["file"],
+        line: fn[:line] || fn["line"] || span_line(fn, 0) || 1,
+        end_line: span_line(fn, 2),
+        partial_fingerprints: { "subject" => subject_name },
+        properties: {
+          "category" => "complexity",
+          "complexity" => {
+            "subject_kind" => "function",
+            "subject_name" => subject_name,
+            "time" => time,
+            "auxiliary_space" => space,
+            "dynamic" => dynamic,
+            "basis" => "espalier-static",
+            "confidence" => unknowns.empty? ? "static-lower-bound" : "partial",
+            "triggers" => [trigger].compact,
+            "warnings" => warnings,
+            "unknown_operations" => unknowns
+          }
         }
       )
     end

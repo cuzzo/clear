@@ -69,6 +69,26 @@ cargo run -- hazards --dialect postgres \
   --output coverage/query-hazards.sarif
 ```
 
+### Analyze Query-Plan Complexity
+
+SQL-COV owns database-specific plan analysis. The `plan` command asks the selected
+database for a structured `EXPLAIN`, composes nested operator costs, and emits one
+provider-neutral `complexity.observation` per query plus operator warnings:
+
+```bash
+cargo run -- plan --dialect postgres \
+  --database postgres://localhost/app_test \
+  --input queries/ \
+  --setup tests/schema.sql \
+  --param int:42 \
+  --output coverage/query-plans.sarif
+```
+
+SQLite, PostgreSQL, and MySQL use their native plan formats rather than parsing a
+shared text approximation. `--param` values are bound with their declared types;
+SQL-COV does not replace parameters with `NULL`. A leading
+`-- query-id: stable.name` comment supplies the observation identity.
+
 ### Looker/LookML & Schema-Inferred JOIN Hazards
 You can detect double-counting (fan-out) hazards caused by joining one-to-many relationships and aggregating one-side columns without deduplication. SQL-COV does this in two ways:
 
@@ -144,6 +164,8 @@ SQL-COV generates outputs matching standard coverage and static analysis specifi
 - **LCOV**: Emits standard `BRDA` branch records, enabling integration with visualization tools like Codecov, Coveralls, or local HTML frontends.
 - **HTML**: Self-contained, premium interactive report highlighting SQL syntax, branch outcomes (True/False/Unknown), and coverage warnings.
 - **SARIF**: Emits SARIF 2.1.0 records representing static hazard findings for GitHub Code Scanning and IDE gutter integrations.
+- **Plan SARIF**: Emits `sql-cov.plan.sarif.v1`; Lineage stores and presents its
+  canonical time/auxiliary-space observations without re-analyzing SQL.
 
 ## Supported Dialects Roadmap
 
@@ -157,11 +179,12 @@ SQL-COV leverages dialect-specific frontends and live schema catalogs for exact 
 
 SQL-COV does not:
 - Rewrite production queries;
-- Prove that a query is optimal (e.g. index selection or CPU cost);
+- Prove that a query is globally optimal or predict constant-factor CPU/IO cost;
 - Inject runtime instrumentation inside production application binaries;
 - Execute without a mock/test database connection when running telemetry.
 
-It resolves SQL branch correctness and maps condition domains.
+It resolves SQL branch correctness, maps condition domains, and derives
+asymptotic estimates from the database-selected plan.
 
 ## CI Integration
 

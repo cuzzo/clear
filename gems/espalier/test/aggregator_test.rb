@@ -128,6 +128,20 @@ class AggregatorTest < Minitest::Test
             span: [10, 0, 12, 3],
             EFFECTS: { reads: ["@active"], writes: [] },
             quality_metrics: { privacy_candidate: false }
+          },
+          {
+            name: "sort_names",
+            signature: "def sort_names(names)",
+            visibility: :public,
+            line: 14,
+            span: [14, 0, 16, 3],
+            EFFECTS: { reads: [], writes: [] },
+            quality_metrics: {
+              big_o: "O(N log N)",
+              big_o_space: "O(N)",
+              big_o_dynamic: true,
+              complexity_trigger: "sort names"
+            }
           }
         ]
       }
@@ -142,6 +156,18 @@ class AggregatorTest < Minitest::Test
     assert run.fetch("results").any? { |result| result.dig("message", "text") == "read-only function: ConnectionManager#read_state" }
     refute run.fetch("results").any? { |result| result.dig("message", "text") == "impure function: ConnectionManager#read_state" }
     refute run.fetch("results").any? { |result| result.fetch("ruleId") == "espalier.privacy-candidate" }
+    complexity = run.fetch("results").find do |result|
+      result.fetch("ruleId") == "complexity.observation" &&
+        result.dig("properties", "complexity", "subject_name") == "ConnectionManager#sort_names"
+    end
+    refute_nil complexity, "pure functions must retain their complexity observation"
+    assert_equal "O(N log N)", complexity.dig("properties", "complexity", "time")
+    assert_equal "O(N)", complexity.dig("properties", "complexity", "auxiliary_space")
+    assert_equal ["sort names"], complexity.dig("properties", "complexity", "triggers")
+    refute run.fetch("results").any? { |result|
+      result.fetch("ruleId") == "espalier.function" &&
+        result.dig("properties", "function", "name") == "sort_names"
+    }
     assert_equal "espalier.manifest.sarif.v1", run.dig("properties", "format")
   end
 
