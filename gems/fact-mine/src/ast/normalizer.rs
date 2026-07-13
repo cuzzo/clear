@@ -745,6 +745,18 @@ impl<'source> TreeSitterNormalizer<'source> {
         self.normalize_node(node)
     }
 
+    fn normalize_control_body(&mut self, node: TreeSitterNode<'_>) -> Option<Node> {
+        if self.block_kind(node.kind())
+            || self.normalization_adapter.cfg_control_body_wrapper(node)
+        {
+            let nodes = self.named_children(node);
+            let source = nodes.first().copied().unwrap_or(node);
+            self.normalize_body_nodes(nodes, source)
+        } else {
+            self.normalize_body(node)
+        }
+    }
+
     pub(in crate::ast) fn normalize_if(&mut self, node: TreeSitterNode<'_>) -> Option<Node> {
         if self
             .normalization_adapter
@@ -834,7 +846,7 @@ impl<'source> TreeSitterNormalizer<'source> {
             .or_else(|| self.block_child(node));
         let condition =
             optional_node(condition.and_then(|condition| self.normalize_node(condition)));
-        let body = optional_node(body.and_then(|body| self.normalize_body(body)));
+        let body = optional_node(body.and_then(|body| self.normalize_control_body(body)));
         Some(self.wrap(node_type, vec![condition, body], node))
     }
 
@@ -2383,7 +2395,11 @@ impl<'source> TreeSitterNormalizer<'source> {
                 .collect::<Vec<_>>();
             let body =
                 self.normalize_body_nodes(body_nodes.clone(), *body_nodes.first().unwrap_or(&node));
-            let ensure_body = self.normalize_body(ensure_node);
+            let ensure_body_node = self
+                .normalization_adapter
+                .ensure_clause_body(ensure_node)
+                .unwrap_or(ensure_node);
+            let ensure_body = self.normalize_control_body(ensure_body_node);
             let source_start = body_nodes.first().copied().unwrap_or(node);
             let ensure_named = self.named_children(ensure_node);
             let source_end = ensure_named.last().copied().unwrap_or(ensure_node);
@@ -2425,7 +2441,11 @@ impl<'source> TreeSitterNormalizer<'source> {
         let Some(ensure_node) = ensure_node else {
             return Some(rescued);
         };
-        let ensure_body = self.normalize_body(ensure_node);
+        let ensure_body_node = self
+            .normalization_adapter
+            .ensure_clause_body(ensure_node)
+            .unwrap_or(ensure_node);
+        let ensure_body = self.normalize_control_body(ensure_body_node);
         let ensure_named = self.named_children(ensure_node);
         let source_end = ensure_named.last().copied().unwrap_or(ensure_node);
         let source = self.source_from_nodes(source_start, source_end);
@@ -3926,7 +3946,11 @@ if pre_init.is_empty() {
                 .first()
                 .and_then(|condition| self.normalize_node(*condition)),
         );
-        let body = optional_node(named.get(1).and_then(|body| self.normalize_body(*body)));
+        let body = optional_node(
+            named
+                .get(1)
+                .and_then(|body| self.normalize_control_body(*body)),
+        );
         Some(self.wrap(node_type, vec![condition, body], target))
     }
 
@@ -4046,7 +4070,7 @@ if pre_init.is_empty() {
             .normalization_adapter
             .ensure_clause_body(ensure_node)
             .unwrap_or(ensure_node);
-        let ensure_body = self.normalize_body(ensure_body_node);
+        let ensure_body = self.normalize_control_body(ensure_body_node);
         let source = body.clone();
         let children = vec![optional_node(body), optional_node(ensure_body)];
         if let Some(source) = source.as_ref() {

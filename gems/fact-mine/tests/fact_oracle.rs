@@ -171,6 +171,31 @@ fn dataflow_respects_early_return_and_publishes_literal_type() -> Result<()> {
     Ok(())
 }
 
+#[test]
+fn ruby_cfg_control_bodies_preserve_executable_statement_spans() -> Result<()> {
+    let examples = examples_root().join("syntax-facts/ruby");
+    let loops = syntax::parse_file(examples.join("cfg_loops.rb"), Language::Ruby)?;
+    let loop_body = loops
+        .control_flow_nodes
+        .iter()
+        .find(|node| node.function == "while_loop" && node.source == "publish(user)")
+        .expect("while-loop body statement");
+    assert_eq!(loop_body.span, [4, 6, 4, 19]);
+
+    let exceptions = syntax::parse_file(examples.join("cfg_exceptions.rb"), Language::Ruby)?;
+    let cleanup_nodes = exceptions
+        .control_flow_nodes
+        .iter()
+        .filter(|node| node.function == "rescue_ensure" && node.source == "close(user)")
+        .collect::<Vec<_>>();
+    assert_eq!(cleanup_nodes.len(), 2, "cleanup is expanded once per incoming path");
+    assert!(
+        cleanup_nodes.iter().all(|node| node.span == [26, 6, 26, 17]),
+        "cleanup spans must exclude the trailing end keyword"
+    );
+    Ok(())
+}
+
 fn full_syntax_expected() -> Value {
     json!({
         "functions": [],

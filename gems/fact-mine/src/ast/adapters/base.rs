@@ -1043,6 +1043,12 @@ pub(crate) trait AstNormalizationAdapter: Sync {
         )
     }
 
+    // CFG-SPECIFIC: identifies a grammar wrapper around executable control
+    // body statements. The shared normalizer unwraps it before CFG lowering.
+    fn cfg_control_body_wrapper(&self, _node: TreeSitterNode<'_>) -> bool {
+        false
+    }
+
     fn const_node_kind(&self, kind: &str) -> bool {
         matches!(
             kind,
