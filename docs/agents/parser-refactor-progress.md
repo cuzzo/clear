@@ -134,3 +134,37 @@ Validation: 103 focused parser/contract examples pass; all 480 top-level
 zero uncovered executable lines in the new token/AST contract methods. The
 canonical full compiler, MessagePack compatibility, SimpleCov, and Sorbet
 gates remain unavailable because the locked bundle is absent.
+
+### Stage 2A: named struct-literal fields
+
+Generic and ordinary struct literals now share one parser for
+`ParsedStructField` records. Field name, value, and diagnostic token remain
+attached until the final value/token maps are built; the former anonymous
+`[[name, value], token]` pair and duplicate grammar branches are gone.
+
+| Measure | Stage 1 | Stage 2A | Delta |
+| --- | ---: | ---: | ---: |
+| Parser methods | 182 | 184 | +2 |
+| Parser `T.must` sites | 94 | 90 | -4 |
+| NilKill array shapes | 1,419 | 1,420 | +1 |
+| NilKill hash-record blockers | 86 | 88 | +2 |
+| NilKill struct declarations | 3 | 4 | +1 |
+| Espalier known `O(2^N)` component | 95 | 97 | +2 |
+| Decomplex candidates | 440 | 441 | +1 |
+| Decomplex convergence units | 91 | 92 | +1 |
+| Decomplex root-cause clusters | 39 | 36 | -3 |
+| Decomplex weighted-inlined findings | 81 | 82 | +1 |
+
+The source contract improved materially, but no current headline metric
+represents “semantic tuple replaced by named record” or “duplicated grammar
+branch unified.” NilKill counts the honest `Array[ParsedStructField]` as one
+more array shape and the two genuine output maps as hash blockers. Espalier
+propagates the pre-existing replay SCC to the two new helpers, increasing the
+number of methods labelled with an exponential known component without any
+new replay or branch multiplicity. Decomplex's inlined metric deliberately
+keeps extracted helper cost visible, but consequently does not reflect this
+improved local contract either. FactMine does at least expose the additional
+typed struct declaration.
+
+Validation: 104 focused examples pass; all 480 top-level CLEAR fixtures parse;
+the new record-building helpers have zero uncovered executable lines.

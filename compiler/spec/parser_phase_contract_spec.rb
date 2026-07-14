@@ -23,6 +23,18 @@ RSpec.describe "parser phase contracts" do
     expect(AST::StructLit.new(nil, "Empty", {}, :stack).field_tokens).to eq({})
   end
 
+  it "uses the same named field result for generic struct literals" do
+    bind = parse("pair = Pair<Int64>{left: 1, Right: 2};").statements.fetch(0)
+    literal = bind.value
+
+    expect(literal.fields.keys).to eq(%w[left Right])
+    expect(literal.field_tokens.transform_values(&:text!)).to eq(
+      "left" => "left",
+      "Right" => "Right",
+    )
+    expect(literal.type_args).to eq(["Int64"])
+  end
+
   it "normalizes IF comptime state to booleans" do
     regular = parse("IF TRUE THEN PASS; END").statements.fetch(0)
     comptime = parse("COMPTIME IF TRUE THEN PASS; END").statements.fetch(0)

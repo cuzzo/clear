@@ -45,6 +45,12 @@ class ClearParser
     const :can_smash_token, T.nilable(Lexer::Token), default: nil
   end
 
+  class ParsedStructField < T::Struct
+    const :name, String
+    const :value, AST::Node
+    const :name_token, Lexer::Token
+  end
+
   include ErrorHelper
   include FixableHelper
 
@@ -3044,11 +3050,46 @@ class ClearParser
     peek_generic_angle_params?('{')
   end
 
+  sig { returns(T::Array[ParsedStructField]) }
+  def parse_struct_literal_fields
+    _, fields = parse_comma_seq(:CHAR, '{', '}') do
+      name_token = current.type == :TYPE_ID ? consume(:TYPE_ID) : consume(:VAR_ID)
+      consume(:CHAR, ':')
+      ParsedStructField.new(
+        name: name_token.text!,
+        value: parse_expression,
+        name_token: name_token,
+      )
+    end
+    fields
+  end
+
+  sig do
+    params(
+      type_token: Lexer::Token,
+      name: String,
+      storage: Symbol,
+      type_args: T.nilable(T::Array[String]),
+    ).returns(AST::StructLit)
+  end
+  def parse_struct_literal(type_token, name, storage, type_args = nil)
+    values = T.let({}, T::Hash[String, AST::Node])
+    field_tokens = T.let({}, T::Hash[String, Lexer::Token])
+    parse_struct_literal_fields.each do |field|
+      values[field.name] = field.value
+      field_tokens[field.name] = field.name_token
+    end
+
+    literal = AST::StructLit.new(type_token, name, values, storage, type_args)
+    literal.field_tokens = field_tokens
+    literal
+  end
+
   sig { params(storage: Symbol).returns(T.nilable(AST::Node)) }
   def parse_lit(storage)
     if match?(:TYPE_ID)
       type_token = consume(:TYPE_ID)
-      name = T.must(type_token).text!
+      name = type_token.text!
       # Collection constructor: List[] / Pool[] (with optional capabilities)
       # Element type is inferred from first append/insert.
       if %w[List Pool Set].include?(name) && match?(:CHAR, '[')
@@ -3057,7 +3098,7 @@ class ClearParser
         collection = { "List" => :list, "Pool" => :pool, "Set" => :set }.fetch(name)
         is_soa = false
         shard_count = nil
-        if (caps = parse_constructor_capabilities(T.must(type_token), name))
+        if (caps = parse_constructor_capabilities(type_token, name))
           shard_count = caps.shard_count
           is_soa = caps.is_soa
         end
@@ -3077,24 +3118,10 @@ class ClearParser
           match!(:CHAR, ',')
         end
         consume(:CHAR, '>')
-        _, fields = parse_comma_seq(:CHAR, '{', '}') do
-          name_tok = current.type == :TYPE_ID ? consume(:TYPE_ID) : consume(:VAR_ID)
-          consume(:CHAR, ':'); v = parse_expression
-          [[T.must(name_tok).text!, v], name_tok]
-        end
-        lit = AST::StructLit.new(type_token, name, fields.map(&:first).to_h, storage, type_args)
-        lit.field_tokens = fields.each_with_object({}) { |(kv, t), h| h[kv.first] = t }
-        return lit
+        return parse_struct_literal(type_token, name, storage, type_args)
       elsif match?(:CHAR, '{') && !@suppress_struct_lit
         # Struct literal: User{ id: 1 }
-        _, fields = parse_comma_seq(:CHAR, '{', '}') do
-          name_tok = current.type == :TYPE_ID ? consume(:TYPE_ID) : consume(:VAR_ID)
-          consume(:CHAR, ':'); v = parse_expression
-          [[T.must(name_tok).text!, v], name_tok]
-        end
-        lit = AST::StructLit.new(type_token, name, fields.map(&:first).to_h, storage)
-        lit.field_tokens = fields.each_with_object({}) { |(kv, t), h| h[kv.first] = t }
-        return lit
+        return parse_struct_literal(type_token, name, storage)
       else
         # Type name reference — e.g. enum variant access: Color.Red
         node = AST::Identifier.new(type_token, name)
