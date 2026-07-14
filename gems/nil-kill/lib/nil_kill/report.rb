@@ -276,7 +276,11 @@ module NilKill
 
       return_origins = static_return_origin_index(evidence)
       methods = Array(evidence.dig("static", "methods")).flat_map do |method|
-        key = [method["path"], method["owner"], method["name"].to_s.sub(/\Aself\./, "")]
+        key = [
+          static_identity_path(evidence, method["path"]),
+          method["owner"],
+          method["name"].to_s.sub(/\Aself\./, ""),
+        ]
         static_method_findings(method, return_origin: return_origins[key])
       end
       fields = Array(evidence.dig("static", "fields")).filter_map { |field| static_field_finding(field) }
@@ -341,10 +345,29 @@ module NilKill
       facts = evidence.dig("static", "facts")
       facts = evidence.dig("static", "language_extensions", "nil_kill_static_evidence", "facts") unless facts.is_a?(Hash)
       Array(facts && facts["return_origins"]).each_with_object({}) do |origin, index|
-        key = [origin["path"], origin["class"], origin["method"].to_s.sub(/\Aself\./, "")]
+        key = [
+          static_identity_path(evidence, origin["path"]),
+          origin["class"],
+          origin["method"].to_s.sub(/\Aself\./, ""),
+        ]
         current = index[key]
         index[key] = origin if current.nil? || (current["confidence"] != "strong" && origin["confidence"] == "strong")
       end
+    end
+
+    def static_identity_path(evidence, path)
+      value = path.to_s.tr("\\", "/")
+      root = evidence["root"].to_s
+      return value if value.empty? || root.empty?
+
+      root_path = File.expand_path(root)
+      expanded_path = File.expand_path(value, root_path)
+      return "." if expanded_path == root_path
+
+      prefix = root_path.end_with?(File::SEPARATOR) ? root_path : "#{root_path}#{File::SEPARATOR}"
+      return expanded_path.delete_prefix(prefix).tr("\\", "/") if expanded_path.start_with?(prefix)
+
+      value
     end
 
     def static_nullable_return_signature?(method, signature)

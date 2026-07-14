@@ -167,6 +167,37 @@ the declared result. “All resolved consumers cast the result to the same
 subtype” is corroborating evidence, not proof, and must be T2 when producer
 flow or call-graph closure is incomplete.
 
+**Current-corpus audit.** The parser audit has not yet proved a non-nil example
+where a method declares `T | K` but every reachable return produces only `T`.
+The token example above is discriminator-correlated storage, not such a
+method-return example. The corpus does contain nine producer-proven
+`T.nilable(T)` returns whose reachable return paths produce only `T`; those are
+the same analysis in the special case where the dead union member is nil.
+Do not use an illustrative `String | Integer` method as if it were a confirmed
+Parser or Annotator defect.
+
+**False-union ownership and confidence.** Nil-kill owns this type/shape
+finding. FactMine supplies normalized declared types, return origins, call
+targets, and flow edges but should not issue the product diagnostic.
+
+- T1 `false_union_return`: complete producer evidence proves that one or more
+  declared union members are unreachable. This directly generalizes
+  false-nilability and does not require consumer analysis.
+- T2 `union_recovery_convergence`: all resolved consumers narrow or assert the
+  same subtype, but producer or call-graph closure is incomplete. This is
+  recovery-debt evidence, not proof that the other union members are dead.
+- Espalier may aggregate the finding when erosion crosses owners, phases, or
+  layers. Decomplex may use it as one input to function/class design pressure.
+  Neither should own the base type finding. SlopCop should aggregate coverage,
+  regressions, and historically noisy implementations.
+
+**Implemented false-nilability repair (2026-07-14).** FactMine method rows used
+root-relative paths while return-origin facts used absolute paths. Nil-kill's
+SARIF join compared the raw strings and silently lost strong return proofs.
+Canonicalizing both identities against the evidence root restores nine Parser
+findings (`parse`, `consume`, five definition parsers,
+`parse_sync_policy_block`, and `parse_do_block`).
+
 **Metrics.** Lost normalized type facts; union-width increase; unknown/untyped
 leaves introduced; number and distance of recovery operations; callers that
 recover the same subtype.
@@ -203,11 +234,18 @@ larger analysis and should reuse FactMine's normalized types/CFG/DFG instead of
 being rebuilt independently in every CodeQL language library.
 
 **Products.** FactMine emits normalized producer/consumer type and recovery
-facts; Decomplex ranks local recovery debt; Espalier aggregates erosion across
-owner boundaries; Lineage displays paths.
+facts; Nil-kill owns false-union and recovery-convergence findings; Decomplex
+uses them only when they contribute to local design complexity; Espalier
+aggregates erosion across owner/phase boundaries; SlopCop audits coverage and
+historical noisiness; Lineage displays paths.
 
 **Estimated implementation.** FactMine 300-450 LoC; Decomplex 140-220 LoC;
 Espalier/reporting/oracles 160-280 LoC; **total 600-950 LoC**.
+The producer-only first slice is substantially smaller: approximately 80-140
+LoC in Nil-kill to join normalized declared return types to existing strong
+return origins and compare union members, plus 80-160 LoC of Ruby/Python
+oracles and reporting tests. Consumer convergence needs typed result-to-use
+flow and call-graph completeness and accounts for most of the larger estimate.
 
 **Risk profile.** Implementation bug risk: **medium-high**, because generic
 instantiation, aliases, and overloads can make declaration comparison subtle.

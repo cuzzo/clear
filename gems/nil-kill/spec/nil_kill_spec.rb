@@ -340,6 +340,52 @@ RSpec.describe NilKill do
       ))
     end
 
+    it "joins relative method paths to absolute return-origin paths" do
+      evidence = {
+        "schema_version" => 2,
+        "root" => "/repo",
+        "languages" => ["ruby"],
+        "static" => {
+          "files" => [],
+          "methods" => [{
+            "path" => "compiler/ruby/ast/parser.rb",
+            "line" => 10,
+            "owner" => "ClearParser",
+            "name" => "parse",
+            "kind" => "method",
+            "language" => "ruby",
+            "signature" => "sig { returns(T.nilable(AST::Program)) }",
+          }],
+          "facts" => {
+            "return_origins" => [{
+              "path" => "/repo/compiler/ruby/ast/parser.rb",
+              "class" => "ClearParser",
+              "method" => "parse",
+              "confidence" => "strong",
+              "blockers" => [],
+              "candidate_type" => {"kind" => "Primitive", "data" => "AST::Program"},
+              "sources" => [{
+                "line" => 14,
+                "kind" => "static",
+                "type" => {"kind" => "Primitive", "data" => "AST::Program"},
+              }],
+            }],
+          },
+        },
+        "runtime" => {},
+        "actions" => [],
+        "diagnostics" => [],
+      }
+
+      sarif = JSON.parse(described_class.new(["--format=sarif"], evidence: evidence).to_sarif(evidence))
+      results = sarif.fetch("runs").first.fetch("results")
+
+      expect(results).to include(a_hash_including(
+        "ruleId" => "nil-kill.static.false-nullable-return",
+        "message" => a_hash_including("text" => include("false-nilable return")),
+      ))
+    end
+
     it "renders pressure facts as actionable SARIF findings" do
       evidence = {
         "facts" => {
