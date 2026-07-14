@@ -84,6 +84,7 @@ module NilKill
           vcs: vcs,
           include_annotations: include_annotations
         )
+        enrich_fields_from_param_origins!(evidence)
         if evidence["facts"] && evidence["facts"]["type_definitions"]
           class_fields = Set.new(Array(evidence["fields"]).map { |f| [f["owner"], f["name"]] })
           evidence["facts"]["type_definitions"].each do |d|
@@ -113,6 +114,45 @@ module NilKill
         end
       end
     end
+
+    # FactMine records direct parameter-to-state assignments independently
+    # from signature extraction. Joining those normalized facts recovers a
+    # field's declared type without re-parsing any source-language syntax.
+    def self.enrich_fields_from_param_origins!(evidence)
+      facts = evidence["facts"] || {}
+      signatures = Array(facts["type_definitions"])
+        .select { |definition| definition["kind"] == "method_signature" }
+        .group_by do |definition|
+          [definition["language"], definition["path"], definition["owner"], definition["name"]]
+        end
+
+      Array(facts["state_param_origin_records"]).each do |origin|
+        key = [origin["language"], origin["path"], origin["owner"], origin["function"]]
+        param_types = Array(signatures[key]).filter_map do |signature|
+          param = Array(signature["params"]).find { |candidate| candidate["name"] == origin["param"] }
+          param && param["type"]
+        end
+        param_types = param_types.reject do |type|
+          type.to_s.empty? || type.to_s.match?(/\bT\.untyped\b|\bAny\b|(?<!\.)\bany\b|\bunknown\b/)
+        end
+        param_types.uniq!(&:to_s)
+        next unless param_types.one?
+
+        normalized_field = origin["field"].to_s.sub(/\A@/, "")
+        Array(evidence["fields"]).each do |field|
+          next unless field["language"] == origin["language"]
+          next unless field["path"] == origin["path"]
+          next unless field["owner"] == origin["owner"]
+          next unless field["name"].to_s.sub(/\A@/, "") == normalized_field
+          next unless field["declared_type"].to_s.empty?
+
+          field["declared_type"] = param_types.first
+          field["static_origin"] = "parameter_assignment"
+        end
+      end
+      evidence
+    end
+    private_class_method :enrich_fields_from_param_origins!
 
     def self.append_ruby_struct_definitions!(evidence, root)
       Array(evidence["files"]).each do |f|

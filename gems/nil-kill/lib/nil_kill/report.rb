@@ -274,7 +274,11 @@ module NilKill
     def sarif_static_findings(evidence)
       return [] unless Schema::EvidenceBundle.v2?(evidence)
 
-      methods = Array(evidence.dig("static", "methods")).flat_map { |method| static_method_findings(method) }
+      return_origins = static_return_origin_index(evidence)
+      methods = Array(evidence.dig("static", "methods")).flat_map do |method|
+        key = [method["path"], method["owner"], method["name"].to_s.sub(/\Aself\./, "")]
+        static_method_findings(method, return_origin: return_origins[key])
+      end
       fields = Array(evidence.dig("static", "fields")).filter_map { |field| static_field_finding(field) }
       aliases = static_alias_recommendations(evidence).map { |recommendation| static_alias_finding(recommendation) }
       methods + fields + aliases
@@ -286,7 +290,7 @@ module NilKill
       Array(facts && facts["alias_recommendations"])
     end
 
-    def static_method_findings(method)
+    def static_method_findings(method, return_origin: nil)
       signature = method["signature"].to_s
       return [] if signature.empty?
 
@@ -307,11 +311,19 @@ module NilKill
         }
       end
       if static_nullable_signature?(signature)
+        false_nullable = static_nullable_return_signature?(method, signature) &&
+          static_origin_proves_non_nil_return?(return_origin)
         findings << {
-          "kind" => "nullable_signature",
-          "level" => "note",
-          "message" => "nilability pressure: #{static_member_label(method)} has `#{signature}`; " \
-                       "confirm absence is meaningful, otherwise tighten the contract or use an empty collection/value",
+          "kind" => false_nullable ? "false_nullable_return" : "nullable_signature",
+          "level" => false_nullable ? "warning" : "note",
+          "message" => if false_nullable
+            source_lines = Array(return_origin["sources"]).filter_map { |source| source["line"] }.uniq.sort
+            "false-nilable return: #{static_member_label(method)} declares a nullable return, but every " \
+              "resolved return path is non-nil (#{source_lines.map { |line| "line #{line}" }.join(', ')}); tighten the return contract"
+          else
+            "nilability pressure: #{static_member_label(method)} has `#{signature}`; " \
+              "confirm absence is meaningful, otherwise tighten the contract or use an empty collection/value"
+          end,
           "path" => method["path"],
           "line" => method["line"],
           "static_kind" => method["kind"] || "method",
@@ -319,9 +331,55 @@ module NilKill
           "owner" => method["owner"],
           "name" => method["name"],
           "signature" => signature,
+          "return_evidence" => false_nullable ? return_origin : nil,
         }
       end
       findings
+    end
+
+    def static_return_origin_index(evidence)
+      facts = evidence.dig("static", "facts")
+      facts = evidence.dig("static", "language_extensions", "nil_kill_static_evidence", "facts") unless facts.is_a?(Hash)
+      Array(facts && facts["return_origins"]).each_with_object({}) do |origin, index|
+        key = [origin["path"], origin["class"], origin["method"].to_s.sub(/\Aself\./, "")]
+        current = index[key]
+        index[key] = origin if current.nil? || (current["confidence"] != "strong" && origin["confidence"] == "strong")
+      end
+    end
+
+    def static_nullable_return_signature?(method, signature)
+      return_type = method["return_type"]
+      return_type ||= method["source"]["return_type"] if method["source"].is_a?(Hash)
+      return static_nullable_signature?(return_type) unless return_type.to_s.empty?
+
+      case method["language"].to_s
+      when "ruby"
+        signature.match?(/\breturns\(\s*T\.nilable\b/)
+      when "python"
+        arrow = signature.split("->", 2)[1]
+        !arrow.to_s.empty? && static_nullable_signature?(arrow)
+      when "typescript", "javascript"
+        result = signature.match(/\)\s*:\s*(.+)\z/)&.[](1)
+        !result.to_s.empty? && static_nullable_signature?(result)
+      else
+        false
+      end
+    end
+
+    def static_origin_proves_non_nil_return?(origin)
+      return false unless origin.is_a?(Hash)
+      return false unless origin["confidence"] == "strong"
+      return false unless Array(origin["blockers"]).empty?
+      return false if Array(origin["sources"]).empty?
+
+      candidate = origin["candidate_type"]
+      kind = candidate.respond_to?(:kind) ? candidate.kind : candidate.is_a?(Hash) ? candidate["kind"] : nil
+      return false if %w[Untyped NilClass Nilable Union].include?(kind.to_s)
+
+      Array(origin["sources"]).all? do |source|
+        source_kind = source["type"].respond_to?(:kind) ? source["type"].kind : source.dig("type", "kind")
+        !source_kind.nil? && !%w[Untyped NilClass Nilable Union].include?(source_kind.to_s)
+      end
     end
 
     def static_field_finding(field)
@@ -366,7 +424,7 @@ module NilKill
     end
 
     def static_untyped_signature?(signature)
-      signature.to_s.match?(/\b(?:T\.untyped|typing\.Any|Any|any|unknown)\b/)
+      signature.to_s.match?(/\bT\.untyped\b|\btyping\.Any\b|\bAny\b|(?<!\.)\bany\b|\bunknown\b/)
     end
 
     def static_nullable_signature?(signature)

@@ -171,6 +171,53 @@ RSpec.describe "nil-kill multi-language runtime pipeline" do
     expect(maybe_findings.map { |finding| finding["kind"] }).to include("nullable_signature")
   end
 
+  it "does not mistake Sorbet T.any unions for untyped signatures" do
+    report = NilKill::Report.allocate
+    union = {
+      "language" => "ruby",
+      "owner" => "Parser",
+      "name" => "value",
+      "signature" => "sig { returns(T.any(String, Integer)) }",
+    }
+    typescript = union.merge("language" => "typescript", "signature" => "value(): any")
+
+    expect(report.send(:static_method_findings, union).map { |finding| finding["kind"] })
+      .not_to include("untyped_signature")
+    expect(report.send(:static_method_findings, typescript).map { |finding| finding["kind"] })
+      .to include("untyped_signature")
+  end
+
+  it "upgrades nullable returns only when return-path evidence proves non-nil" do
+    report = NilKill::Report.allocate
+    method = {
+      "language" => "ruby", "path" => "parser.rb", "line" => 4,
+      "owner" => "Parser", "name" => "token",
+      "signature" => "sig { returns(T.nilable(Token)) }",
+    }
+    origin = {
+      "confidence" => "strong", "blockers" => [],
+      "candidate_type" => {"kind" => "Primitive", "data" => "Token"},
+      "sources" => [
+        {"line" => 7, "kind" => "static", "type" => {"kind" => "Primitive", "data" => "Token"}},
+        {"line" => 9, "kind" => "typed_call", "type" => {"kind" => "Primitive", "data" => "Token"}},
+      ],
+    }
+
+    proven = report.send(:static_method_findings, method, return_origin: origin)
+    blocked = report.send(:static_method_findings, method, return_origin: origin.merge("blockers" => ["unknown path"]))
+    incomplete = report.send(
+      :static_method_findings,
+      method,
+      return_origin: origin.merge("sources" => [{"line" => 7, "kind" => "static"}])
+    )
+
+    expect(proven.map { |finding| finding["kind"] }).to include("false_nullable_return")
+    expect(proven.first["message"]).to include("line 7", "line 9")
+    expect(blocked.map { |finding| finding["kind"] }).to include("nullable_signature")
+    expect(blocked.map { |finding| finding["kind"] }).not_to include("false_nullable_return")
+    expect(incomplete.map { |finding| finding["kind"] }).not_to include("false_nullable_return")
+  end
+
   it "uses the FactMine extension for TypeScript Tree-sitter static evidence" do
     # skip "TypeScript type annotation extraction pending in Rust FactMine (Phase 3)"
     require_tree_sitter_language!(:typescript)

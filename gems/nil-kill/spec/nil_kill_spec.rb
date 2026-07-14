@@ -3,6 +3,31 @@
 require_relative "spec_helper"
 
 RSpec.describe NilKill do
+  it "recovers field types from typed parameter assignments" do
+    evidence = {
+      "fields" => [{
+        "language" => "ruby", "path" => "parser.rb", "owner" => "Parser",
+        "name" => "tokens", "declared_type" => nil,
+      }],
+      "facts" => {
+        "state_param_origin_records" => [{
+          "language" => "ruby", "path" => "parser.rb", "owner" => "Parser",
+          "function" => "initialize", "field" => "@tokens", "param" => "tokens",
+        }],
+        "type_definitions" => [{
+          "language" => "ruby", "path" => "parser.rb", "owner" => "Parser",
+          "name" => "initialize", "kind" => "method_signature",
+          "params" => [{"name" => "tokens", "type" => "T::Array[Token]"}],
+        }],
+      },
+    }
+
+    NilKill::StaticEvidence.send(:enrich_fields_from_param_origins!, evidence)
+
+    expect(evidence.dig("fields", 0, "declared_type")).to eq("T::Array[Token]")
+    expect(evidence.dig("fields", 0, "static_origin")).to eq("parameter_assignment")
+  end
+
   describe ".sorbet_type union policy" do
     it "emits T.any(...) for 2-3 class unions by default" do
       expect(NilKill.sorbet_type(%w[String Integer])).to eq("T.any(Integer, String)")
