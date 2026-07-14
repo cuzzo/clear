@@ -27,7 +27,8 @@ module Espalier
     def aggregate(modules)
       analyzer = Espalier::BigOAnalyzer.new(
         language: :ruby,
-        nil_kill: @nil_kill_evidence
+        nil_kill: @nil_kill_evidence,
+        declared_fields: declared_fields_for(modules)
       )
       internal_calls = internal_calls_by_method(modules)
       recursive_edges = recursive_internal_edges(internal_calls)
@@ -227,7 +228,8 @@ module Espalier
     def preliminary_method_complexities(modules)
       analyzer = Espalier::BigOAnalyzer.new(
         language: :ruby,
-        nil_kill: @nil_kill_evidence
+        nil_kill: @nil_kill_evidence,
+        declared_fields: declared_fields_for(modules)
       )
       complexities = Hash.new { |h, k| h[k] = {} }
       spaces = Hash.new { |h, k| h[k] = {} }
@@ -296,7 +298,8 @@ module Espalier
           Thread.new do
             local_analyzer = Espalier::BigOAnalyzer.new(
               language: :ruby,
-              nil_kill: @nil_kill_evidence
+              nil_kill: @nil_kill_evidence,
+              declared_fields: declared_fields_for(modules)
             )
             local_changes = []
             slice.each do |mod|
@@ -397,6 +400,10 @@ module Espalier
           index[[mod[:name].to_s, method[:name].to_s]] = facts
         end
       end
+    end
+
+    def declared_fields_for(modules)
+      modules.first&.fetch(:declared_fields, {}) || {}
     end
 
     def complexity_rank(complexity)

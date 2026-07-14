@@ -83,6 +83,10 @@ struct BlockSummary {
     invocations: usize,
 }
 
+fn is_false(value: &bool) -> bool {
+    !*value
+}
+
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
 pub struct AllocationFact {
     pub line: usize,
@@ -92,6 +96,10 @@ pub struct AllocationFact {
     pub domain_expression: Vec<String>,
     pub cardinality_relation: String,
     pub bound_classification: String,
+    /// Iterating a call result can be linear even when that result's size has
+    /// no proven relationship to the caller's inputs.
+    #[serde(default, skip_serializing_if = "is_false")]
+    pub receiver_is_call: bool,
 }
 
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
@@ -523,6 +531,26 @@ fn fact_for_method(
     );
     let mut allocations = Vec::new();
     collect_allocations(node, params, &assignments, &mut allocations, behavior);
+    for allocation in &mut allocations {
+        if allocation.cardinality_relation != "unknown" || allocation.receiver_is_call {
+            continue;
+        }
+        let matching_iteration = evidence.iter().find(|iteration| {
+            iteration.line == allocation.line
+                && iteration.message.as_deref() == Some(allocation.kind.as_str())
+                && iteration.cardinality_relation != "unknown"
+        });
+        if let Some(iteration) = matching_iteration {
+            allocation.cardinality_relation = "same".to_string();
+            allocation.bound_classification = iteration.bound_classification.clone();
+            if allocation.parameter_domains.is_empty() {
+                allocation.parameter_domains = iteration.parameter_domains.clone();
+            }
+            if allocation.domain_expression.is_empty() {
+                allocation.domain_expression = iteration.domain_expression.clone();
+            }
+        }
+    }
     allocations.sort_by_key(|fact| (fact.line, fact.span[1], fact.kind.clone()));
     allocations.dedup_by(|left, right| left.span == right.span && left.kind == right.kind);
 
@@ -626,6 +654,7 @@ fn collect_allocations(
                 domain_expression: domain_expression.into_iter().collect(),
                 cardinality_relation: relation.to_string(),
                 bound_classification: bound.to_string(),
+                receiver_is_call,
             });
         }
     }
@@ -1076,7 +1105,13 @@ fn visit_loops(
                 (node.first_lineno, node.first_column),
                 behavior,
             )
-            .and_then(|receiver_type| behavior.call_complexity(&receiver_type, message));
+            .and_then(|receiver_type| behavior.call_complexity(&receiver_type, message))
+            .or_else(|| {
+                behavior.intrinsic_call_complexity(
+                    call_receiver(node).map(|receiver| receiver.text.trim()),
+                    message,
+                )
+            });
             call_contexts.push(CallContainmentFact {
                 line: node.first_lineno,
                 span: [
@@ -2292,6 +2327,74 @@ end
             !matches!(call.message.as_str(), "sort" | "keys" | "split")
                 || call.known_time_complexity.is_some()
         }));
+    }
+
+    #[test]
+    fn language_intrinsics_carry_normalized_constant_costs() {
+        let rows = ruby_facts(
+            r#"
+class Worker
+  sig { params(value: AST::Node).void }
+  def check(value)
+    T.let(value, AST::Node)
+    T.cast(value, AST::Node)
+    value.frozen?
+    value.user_defined_predicate?
+  end
+end
+"#,
+        );
+        let row = rows.iter().find(|row| row.function == "check").unwrap();
+
+        for message in ["let", "cast"] {
+            let call = row
+                .call_contexts
+                .iter()
+                .find(|call| call.message == message)
+                .unwrap();
+            assert_eq!(call.known_time_complexity.as_deref(), Some("O(1)"));
+            assert_eq!(call.known_space_complexity.as_deref(), Some("O(1)"));
+        }
+        for message in ["frozen?", "user_defined_predicate?"] {
+            assert!(row
+                .call_contexts
+                .iter()
+                .find(|call| call.message == message)
+                .unwrap()
+                .known_time_complexity
+                .is_none());
+        }
+    }
+
+    #[test]
+    fn allocation_reuses_the_matching_iteration_cardinality() {
+        let rows = ruby_facts(
+            r#"
+class Renderer
+  def render
+    frame = Snapshot.new
+    txn_violations = frame.violations
+    txn_violations.map { |violation| violation.to_s }
+  end
+end
+"#,
+        );
+        let row = rows.iter().find(|row| row.function == "render").unwrap();
+        let iteration = row
+            .iterations
+            .iter()
+            .find(|iteration| iteration.message.as_deref() == Some("map"))
+            .unwrap();
+        assert_ne!(iteration.cardinality_relation, "unknown");
+        assert_eq!(iteration.bound_classification, "input");
+
+        let allocation = row
+            .allocations
+            .iter()
+            .find(|allocation| allocation.kind == "map")
+            .unwrap();
+        assert_ne!(allocation.cardinality_relation, "unknown");
+        assert_eq!(allocation.bound_classification, "input");
     }
 
     #[test]

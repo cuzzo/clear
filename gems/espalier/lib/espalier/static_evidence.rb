@@ -145,6 +145,12 @@ module Espalier
       end
 
       # Construct modules array
+      declared_fields = Hash.new { |hash, owner| hash[owner] = Set.new }
+      Array(evidence.dig("facts", "struct_declarations")).each do |declaration|
+        Array(declaration["fields"]).each do |field|
+          declared_fields[declaration["class"]] << field.to_s.delete_prefix("@")
+        end
+      end
       all_owners = (methods_by_owner.keys + fields_by_owner.keys).uniq.reject(&:empty?)
       all_owners.map do |owner|
         meta = module_metadata(owner, methods_by_owner[owner], first_field_by_owner[owner])
@@ -159,6 +165,7 @@ module Espalier
           state_records: fields_by_owner[owner],
           ivar_types: fields_by_owner[owner].to_h { |field| [field["name"], field["declared_type"]] }.compact,
           ivar_properties: {},
+          declared_fields: declared_fields,
           methods: methods_by_owner[owner]
         }
       end

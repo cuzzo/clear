@@ -110,6 +110,28 @@ class BigOTest < Minitest::Test
     assert_equal 3, result[:warnings].size
   end
 
+  def test_declared_struct_fields_are_constant_without_hiding_methods
+    analyzer = Espalier::BigOAnalyzer.new(
+      local_types: { "node" => "AST::BinaryOp" },
+      declared_fields: { "AST::BinaryOp" => %w[left right] }
+    )
+
+    field = analyzer.analyze_method("field", [
+      { type: :call, receiver: "node", method: "left", line: 1 }
+    ])
+    assert_equal "O(1)", field[:lower_bound_complexity]
+    assert_equal "O(1)", field[:space_complexity]
+    assert field[:time_complete]
+    assert field[:space_complete]
+    assert_empty field[:unknown_operations]
+
+    method = analyzer.analyze_method("method", [
+      { type: :call, receiver: "node", method: "rewrite", line: 2 }
+    ])
+    assert_equal "unknown", method[:lower_bound_complexity]
+    assert_includes method[:unknown_operations], "AST::BinaryOp#rewrite"
+  end
+
   def test_internal_calls_are_complete_but_callbacks_are_not
     analyzer = Espalier::BigOAnalyzer.new
     internal = analyzer.analyze_method("wrapper", [{

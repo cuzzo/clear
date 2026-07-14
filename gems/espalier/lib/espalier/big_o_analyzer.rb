@@ -36,13 +36,16 @@ module Espalier
 
     attr_reader :registry, :nil_kill_evidence
 
-    def initialize(language: :ruby, nil_kill_evidence: {}, class_name: nil, ivar_types: {}, nil_kill: nil, local_types: {})
+    def initialize(language: :ruby, nil_kill_evidence: {}, class_name: nil, ivar_types: {}, nil_kill: nil, local_types: {}, declared_fields: {})
       @language = language
       @nil_kill_evidence = nil_kill_evidence
       @class_name = class_name
       @ivar_types = ivar_types || {}
       @local_types = local_types || {}
       @nil_kill = nil_kill
+      @declared_fields = declared_fields.each_with_object({}) do |(owner, fields), index|
+        index[clean_type_name(owner)] = Set.new(Array(fields).map { |field| field.to_s.delete_prefix("@") })
+      end
       @registry = load_registry(language)
     end
 
@@ -106,7 +109,7 @@ module Espalier
             elsif (chained_complexity = flattened_chain_complexity(node, ast_nodes))
               chained_complexity = multiply_complexity(chained_complexity, node[:execution_complexity]) if node[:execution_complexity]
               complexity = max_complexity(complexity, chained_complexity)
-            elsif state_accessor_return_type(receiver_type, method_called)
+            elsif declared_field?(receiver_type, method_called) || state_accessor_return_type(receiver_type, method_called)
               complexity = max_complexity(complexity, "O(1)")
             else
               unknown_operations << "#{receiver_type}##{method_called}"
@@ -293,6 +296,11 @@ module Espalier
       return nil unless @nil_kill&.respond_to?(:state_types)
 
       clean_type_name(@nil_kill.state_types.dig(class_name, "@#{method_name}"))
+    end
+
+    def declared_field?(class_name, method_name)
+      fields = @declared_fields[clean_type_name(class_name)]
+      fields&.include?(method_name.to_s.delete_prefix("@"))
     end
 
     def flattened_chain_complexity(node, ast_nodes)

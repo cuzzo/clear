@@ -146,6 +146,17 @@ pub(crate) trait NormalizedLanguageBehavior: Sync {
         None
     }
 
+    /// Return a cost only when the adapter recognizes a language/runtime
+    /// intrinsic without guessing the receiver's type. This keeps spellings in
+    /// language adapters while downstream complexity analysis stays generic.
+    fn intrinsic_call_complexity(
+        &self,
+        _receiver: Option<&str>,
+        _message: &str,
+    ) -> Option<NormalizedCallComplexity> {
+        None
+    }
+
     fn literal_receiver_type(&self, _node: &Node) -> Option<TypeExpr> {
         None
     }

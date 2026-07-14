@@ -135,7 +135,13 @@ class StaticEvidenceTest < Minitest::Test
             "line" => 23
           }
         ],
-        "state_param_origin_records" => []
+        "state_param_origin_records" => [],
+        "struct_declarations" => [
+          {
+            "class" => "ConnectionManager",
+            "fields" => ["active_connections"]
+          }
+        ]
       }
     }
 
@@ -147,6 +153,7 @@ class StaticEvidenceTest < Minitest::Test
     assert_includes mod[:states], "@active_connections"
     assert_equal 1, mod[:methods].size
     assert_equal "connect", mod[:methods].first[:name]
+    assert_includes mod.dig(:declared_fields, "ConnectionManager"), "active_connections"
     assert_includes mod[:methods].first[:delegations], {
       receiver: "@active_connections",
       message: "sort_by",

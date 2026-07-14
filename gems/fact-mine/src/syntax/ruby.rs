@@ -341,6 +341,27 @@ impl NormalizedLanguageBehavior for RubyNormalizedBehavior {
         Some(NormalizedCallComplexity { time, space })
     }
 
+    fn intrinsic_call_complexity(
+        &self,
+        receiver: Option<&str>,
+        message: &str,
+    ) -> Option<NormalizedCallComplexity> {
+        let sorbet_type_operation = receiver == Some("T")
+            && [
+                "any", "bind", "cast", "let", "must", "nilable", "proc", "type_parameter",
+                "unsafe", "untyped",
+            ]
+            .contains(&message);
+        if sorbet_type_operation {
+            return Some(NormalizedCallComplexity {
+                time: "O(1)",
+                space: "O(1)",
+            });
+        }
+
+        None
+    }
+
     fn literal_receiver_type(&self, node: &Node) -> Option<TypeExpr> {
         match node.r#type.as_str() {
             "ARRAY" | "LIST" | "ZLIST" => {
