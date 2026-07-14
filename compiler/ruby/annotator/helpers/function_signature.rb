@@ -21,6 +21,7 @@ class FunctionSignature
   RequiresMap = T.type_alias { T::Hash[String, T::Set[Symbol]] }
   ExternEffects = T.type_alias { T::Hash[Symbol, Symbol] }
   EffectSet = T.type_alias { T::Set[Symbol] }
+  SyncSource = T.type_alias { T.any(AST::FunctionDef, Struct) }
 
   class Contract
     extend T::Sig
@@ -370,7 +371,7 @@ class FunctionSignature
   end
 
   # ruby-to-clear: skip
-  sig { params(sig: FunctionSignature, fn: T.any(AST::Node, Object, T.untyped)).returns(FunctionSignature) }
+  sig { params(sig: FunctionSignature, fn: SyncSource).returns(FunctionSignature) }
   # ruby-to-clear: skip
   def self.sync_signature_from_function_def!(sig, fn)
     T.cast(sig.send(:sync_from_function_def!, fn), FunctionSignature)
@@ -698,20 +699,21 @@ class FunctionSignature
   end
 
   # ruby-to-clear: skip
-  sig { params(fn: T.any(AST::Node, Object, T.untyped)).returns(FunctionSignature) }
+  sig { params(fn: SyncSource).returns(FunctionSignature) }
   # ruby-to-clear: skip
   def sync_from_function_def!(fn)
-    @facts.needs_rt = fn.needs_rt if fn.respond_to?(:needs_rt)
-    @facts.can_fail = fn.can_fail if fn.respond_to?(:can_fail)
-    @facts.alloc_fault = fn.alloc_fault if fn.respond_to?(:alloc_fault)
-    @facts.error_fallible = fn.error_fallible if fn.respond_to?(:error_fallible)
-    @facts.effects = fn.effects if fn.respond_to?(:effects)
-    replace_requires_storage!(fn.requires) if fn.respond_to?(:requires)
-    @facts.return_strategy = fn.return_strategy if fn.respond_to?(:return_strategy)
-    @contract.return_type = coerce_return_type(fn.return_type) if fn.respond_to?(:return_type) && fn.return_type
-    @facts.stack_tier = fn.stack_tier if fn.respond_to?(:stack_tier)
-    @facts.heap_carry_return = fn.heap_carry_return if fn.respond_to?(:heap_carry_return)
-    @facts.heap_carry_return_vars = fn.heap_carry_return_vars if fn.respond_to?(:heap_carry_return_vars)
+    source = T.unsafe(fn)
+    @facts.needs_rt = source.needs_rt if fn.respond_to?(:needs_rt)
+    @facts.can_fail = source.can_fail if fn.respond_to?(:can_fail)
+    @facts.alloc_fault = source.alloc_fault if fn.respond_to?(:alloc_fault)
+    @facts.error_fallible = source.error_fallible if fn.respond_to?(:error_fallible)
+    @facts.effects = source.effects if fn.respond_to?(:effects)
+    replace_requires_storage!(source.requires) if fn.respond_to?(:requires)
+    @facts.return_strategy = source.return_strategy if fn.respond_to?(:return_strategy)
+    @contract.return_type = coerce_return_type(source.return_type) if fn.respond_to?(:return_type) && source.return_type
+    @facts.stack_tier = source.stack_tier if fn.respond_to?(:stack_tier)
+    @facts.heap_carry_return = source.heap_carry_return if fn.respond_to?(:heap_carry_return)
+    @facts.heap_carry_return_vars = source.heap_carry_return_vars if fn.respond_to?(:heap_carry_return_vars)
     self
   end
   protected :sync_from_function_def!

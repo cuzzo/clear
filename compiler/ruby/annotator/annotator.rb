@@ -267,7 +267,15 @@ class SemanticAnnotator
   end
   private :refined_comptime_type_param_type
 
-  sig { params(type_param: Symbol, narrowed_type: Type, blk: T.proc.returns(T.untyped)).returns(T.untyped) }
+  sig do
+    type_parameters(:Result)
+      .params(
+        type_param: Symbol,
+        narrowed_type: Type,
+        blk: T.proc.returns(T.type_parameter(:Result)),
+      )
+      .returns(T.type_parameter(:Result))
+  end
   def with_comptime_type_param_refinement(type_param, narrowed_type, &blk)
     previous = @comptime_type_param_refinements
     @comptime_type_param_refinements = previous.merge(type_param => Type.new(narrowed_type))

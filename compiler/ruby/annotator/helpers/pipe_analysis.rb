@@ -11,6 +11,9 @@ module PipeAnalysis
   requires_ancestor { SemanticAnnotator }
 
   ConcurrentOptions = T.type_alias { T::Hash[String, AST::Node] }
+  ObservableTypeKwValue = T.type_alias do
+    T.nilable(T.any(Symbol, Integer, T::Boolean))
+  end
   ShardScanNode = T.type_alias { T.nilable(T.any(AST::Locatable, AST::RawBody)) }
 
   class PipeArityPlan < T::Struct
@@ -143,7 +146,7 @@ module PipeAnalysis
   #     raw: :"~Int64")
   #   lift_to_observable_if_terminal!(node, terminal: :distinct,
   #     raw: :"~Int64[]", collection: :set)
-  sig { params(node: AST::BinaryOp, terminal: Symbol, raw: Symbol, type_kwargs: T.untyped).returns(T.nilable(Type)) }
+  sig { params(node: AST::BinaryOp, terminal: Symbol, raw: Symbol, type_kwargs: ObservableTypeKwValue).returns(T.nilable(Type)) }
   def lift_to_observable_if_terminal!(node, terminal:, raw:, **type_kwargs)
     T.bind(self, SemanticAnnotator) rescue nil
     return unless node.observable_terminal
@@ -162,7 +165,7 @@ module PipeAnalysis
   # stamp_observable_terminal!, the only argumentation a call site
   # carries is terminal kind + raw type + extra type kwargs, so a
   # single helper is enough.
-  sig { params(node: AST::BinaryOp, terminal: Symbol, raw: Symbol, type_kwargs: T.untyped).returns(T.nilable(Type)) }
+  sig { params(node: AST::BinaryOp, terminal: Symbol, raw: Symbol, type_kwargs: ObservableTypeKwValue).returns(T.nilable(Type)) }
   def mark_observable_terminal!(node, terminal:, raw:, **type_kwargs)
     T.bind(self, SemanticAnnotator) rescue nil
     stamp_observable_terminal!(node)

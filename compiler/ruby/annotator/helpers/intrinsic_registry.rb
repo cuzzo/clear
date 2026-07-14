@@ -26,6 +26,9 @@ module IntrinsicRegistry
   SigsTable = T.type_alias { T::Hash[String, LookupResult] }
   SigsCache = T.type_alias { T::Hash[Symbol, SigsTable] }
   RawEmitInput = T.type_alias { T.nilable(T.any(RawRegistryEntry, Symbol, String, Numeric, T::Boolean)) }
+  EmitPassthroughValue = T.type_alias do
+    T.nilable(T.any(String, Symbol, Proc, Struct, T::Struct, T::Array[T.untyped], RawEntry))
+  end
   ReturnDescriptor = T.type_alias { T.nilable(T.any(Type, Symbol, String, RawEntry, Proc)) }
   IntegerValue = T.type_alias { T.any(Integer, String) }
   IntegerInput = T.type_alias { T.any(IntegerValue, T::Array[IntegerValue]) }
@@ -109,29 +112,29 @@ module IntrinsicRegistry
     end
   end
 
-  sig { params(e: IntrinsicEmit, key: Symbol, value: T.untyped).void }
+  sig { params(e: IntrinsicEmit, key: Symbol, value: EmitPassthroughValue).void }
   def self.assign_emit_value(e, key, value)
     case key
-    when :zig then e.zig = value
-    when :numeric_zig then e.numeric_zig = value
-    when :sharded_zig then e.sharded_zig = value
-    when :shard_direct_zig then e.shard_direct_zig = value
-    when :borrows then e.borrows = value
+    when :zig then e.zig = T.cast(value, T.nilable(IntrinsicEmit::StrOrSym))
+    when :numeric_zig then e.numeric_zig = T.cast(value, T.nilable(IntrinsicEmit::StrOrSym))
+    when :sharded_zig then e.sharded_zig = T.cast(value, T.nilable(IntrinsicEmit::StrOrSym))
+    when :shard_direct_zig then e.shard_direct_zig = T.cast(value, T.nilable(IntrinsicEmit::StrOrSym))
+    when :borrows then e.borrows = T.cast(value, T.nilable(T.any(Symbol, T::Array[Symbol])))
     when :fallible_clauses then e.fallible_clauses = value
     when :fsm_setup
-      e.fsm_setup = value
+      e.fsm_setup = T.cast(value, T::Array[T.untyped])
       e.fsm_setup_present = true
     when :fsm_state_decls
-      e.fsm_state_decls = value
+      e.fsm_state_decls = T.cast(value, T::Array[T.untyped])
       e.fsm_state_decls_present = true
     when :fsm_finish_block
-      e.fsm_finish_block = value
+      e.fsm_finish_block = T.cast(value, T::Array[T.untyped])
       e.fsm_finish_block_present = true
     when :fsm_state_finalize
-      e.fsm_state_finalize = value
+      e.fsm_state_finalize = T.cast(value, T::Array[T.untyped])
       e.fsm_state_finalize_present = true
     when :fsm_finish_value then e.fsm_finish_value = value
-    when :label then e.label = value
+    when :label then e.label = T.cast(value, T.nilable(Proc))
     else
       unknown_emit_key!(key)
     end
@@ -499,7 +502,7 @@ module IntrinsicRegistry
   # FunctionSignature through unchanged, and maps nil -> nil. Every
   # `*.stdlib_def = X` / `matched_stdlib_def = X` site routes through
   # this so the carried value is always a FunctionSignature.
-  sig { params(x: T.untyped, name: RegistryKey).returns(T.nilable(FunctionSignature)) }
+  sig { params(x: T.nilable(T.any(FunctionSignature, RawEntry)), name: RegistryKey).returns(T.nilable(FunctionSignature)) }
   def self.fs(x, name = "_inline")
     return nil if x.nil?
     return x if x.is_a?(FunctionSignature)

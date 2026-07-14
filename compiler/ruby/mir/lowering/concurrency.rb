@@ -936,7 +936,6 @@ module MIRLoweringConcurrency
   def finalize_bg_discard_expr(expr, mir)
     T.bind(self, MIRLowering) rescue nil
     finalized, hoisted_discard = materialize_statement_discard(expr, mir)
-    finalized = T.cast(finalized, MIR::NodeRoot)
     return finalized unless discard_expr_stmt?(expr, finalized) && !hoisted_discard
 
     MIR::ExprStmt.new(T.cast(finalized, MIR::Node), true)
@@ -1010,9 +1009,9 @@ module MIRLoweringConcurrency
   sig do
     params(
       node: AST::BgBlock,
-      transform_result: T.untyped,
+      transform_result: MIR::FsmLoweringResult,
       captured: T::Hash[String, Type],
-      analysis: T.untyped,
+      analysis: T.nilable(CapabilityHelper::CaptureAnalysis),
     ).returns(MIR::BgBlock)
   end
   def fsm_bg_block_from_transform!(node, transform_result, captured, analysis)

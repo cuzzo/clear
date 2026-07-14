@@ -50,7 +50,7 @@ module FsmTransform
     #   ctx_field_decls: typed FSM ctx field declarations
     #   result_var / result_zig_type: from the call's return type +
     #                                   the bound name in the body stmt
-    sig { params(io_tail: FsmTransform::Segments::IoSuspend, ctx: Emit::FsmEmitContext, lowering: T.any(MIRLowering, T.untyped)).returns(MIR::SuspendDescriptor) }
+    sig { params(io_tail: FsmTransform::Segments::IoSuspend, ctx: Emit::FsmEmitContext, lowering: FsmTransform::LoweringApi).returns(MIR::SuspendDescriptor) }
     def self.resolve_io(io_tail, ctx, lowering)
       T.bind(self, T.untyped) rescue nil
       stdlib_def = io_tail.stdlib_def
@@ -66,7 +66,7 @@ module FsmTransform
 
       # Lower call args via the surrounding capture-map context.
       arg_mirs = (io_tail.call_node.respond_to?(:args) ?
-                    (io_tail.call_node.args || []) : []).map { |a| lowering.lower(a) }
+                    (io_tail.call_node.args || []) : []).map { |a| T.unsafe(lowering).lower(a) }
 
       lowerer = FsmOps::Lowerer.new(ctx_id: id, arg_mirs: arg_mirs)
       setup_mir         = lowerer.lower_stmts(setup_ops)
@@ -149,12 +149,12 @@ module FsmTransform
     # The dispatch arm already registered/yielded or observed count==0,
     # so finishFsmNext consumes the settled result and destroys Inner
     # without blocking the scheduler thread.
-    sig { params(next_tail: FsmTransform::Segments::NextSuspend, ctx: Emit::FsmEmitContext, lowering: T.any(MIRLowering, T.untyped), susp_idx: Integer).returns(MIR::SuspendDescriptor) }
+    sig { params(next_tail: FsmTransform::Segments::NextSuspend, ctx: Emit::FsmEmitContext, lowering: FsmTransform::LoweringApi, susp_idx: Integer).returns(MIR::SuspendDescriptor) }
     def self.resolve_next(next_tail, ctx, lowering, susp_idx:)
       T.bind(self, T.untyped) rescue nil
       id = ctx.id
       sp_field = "sp_#{susp_idx}"
-      promise_expr_mir = lowering.lower(next_tail.promise_ast)
+      promise_expr_mir = T.unsafe(lowering).lower(next_tail.promise_ast)
       ctx_ident = MIR::Ident.new("__ctx_#{id}")
 
       setup_stmts = [
@@ -281,7 +281,7 @@ module FsmTransform
     sig { params(type_info: T.nilable(Type), lowering: T.any(MIRLowering, T.untyped)).returns(T::Boolean) }
     def self.ownership_bearing_result_type?(type_info, lowering)
       return false unless type_info
-      schema_lookup = lowering.respond_to?(:mir_schema_lookup) ? lowering.mir_schema_lookup : nil
+      schema_lookup = lowering.respond_to?(:mir_schema_lookup) ? T.unsafe(lowering).mir_schema_lookup : nil
       type_info.string? || type_info.heap_ptr? || type_info.collection_value? ||
         type_info.recursive_cleanup_shape?(schema_lookup)
     rescue StandardError

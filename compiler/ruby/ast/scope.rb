@@ -499,7 +499,14 @@ module ScopeHelper
     names.uniq
   end
 
-  sig { params(scope: T.nilable(Scope), blk: T.proc.returns(T.untyped)).returns(T.untyped) }
+  sig do
+    type_parameters(:Result)
+      .params(
+        scope: T.nilable(Scope),
+        blk: T.proc.returns(T.type_parameter(:Result)),
+      )
+      .returns(T.type_parameter(:Result))
+  end
   def with_new_scope(scope = nil, &blk)
     new_scope = scope.nil? ? Scope.new : scope.dup
     # Root scope keeps depth 0; each `with_new_scope` nest increases depth by

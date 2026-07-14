@@ -68,14 +68,14 @@ module MethodAnalysis
 
   private
 
-  sig { params(node: AST::MethodCall, obj_type: Type, registry: T::Hash[String, T::Hash[Symbol, T.untyped]], tag_field: Symbol, type_label: String).returns(T.nilable(T::Boolean)) }
+  sig { params(node: AST::MethodCall, obj_type: Type, registry: IntrinsicRegistry::RawRegistry, tag_field: Symbol, type_label: String).returns(T.nilable(T::Boolean)) }
   def resolve_typed_method(node, obj_type, registry, tag_field, type_label)
     T.bind(self, SemanticAnnotator) rescue nil
     defn = FunctionSignature.unwrap(IntrinsicRegistry.lookup(registry, T.unsafe(node).name))
     unless defn
       available = registry.keys.join(", ")
       emit_typo_suggestion!(
-        node.token, node.name, registry.keys,
+        node.token, node.name, registry.keys.map(&:to_s),
         "Unknown method '#{node.name}' on #{type_label}. Available: #{available}",
         "method of #{type_label}",
         category: :type, cascade: true

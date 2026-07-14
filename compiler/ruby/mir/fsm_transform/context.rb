@@ -27,6 +27,7 @@ module FsmTransform
   end
   ContextMap = T.type_alias { T::Hash[Symbol, TransformValue] }
   LoweringApi = T.type_alias { FsmTransform::LoweringProtocol }
+  BgBlockInput = T.type_alias { T.any(AST::BgBlock, Struct) }
 
   module Emit
     class FsmEmitContext < T::Struct

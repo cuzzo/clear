@@ -1,6 +1,6 @@
 # Nil-Kill Manual Typing Queue
 
-Status: active
+Status: completed
 
 This queue ranks manual compiler annotations by the number of currently
 unresolved FactMine DFG facts that the annotation would make resolvable. The
@@ -52,64 +52,89 @@ Fresh collection results after this batch:
 All 6,414 compiler unit examples, 303 fuzz cells, examples, build checks,
 module integration, and FFI integration passed.
 
-## Remaining 80% queue
+## Remaining 80% queue — completed
 
 Order is greedy marginal coverage. A high rank means “review this first,” not
 “blindly replace `T.untyped`.” In particular, registry adapters and recursive
 value walkers may intentionally accept a real union of shapes.
 
-- [ ] 1. `compiler/ruby/annotator/helpers/function_signature.rb:703` — `FunctionSignature#sync_from_function_def!(fn)`; 22 facts
-- [ ] 2. `compiler/ruby/mir/fsm_transform.rb:66` — `FsmTransform.transform(ctx)`; 6 facts
-- [ ] 3. `compiler/ruby/mir/hoist.rb:1134` — `MIRHoistLowering#replace_mir_expr_in_value!(value)`; 6 facts
-- [ ] 4. `compiler/ruby/annotator/helpers/intrinsic_registry.rb:503` — `IntrinsicRegistry.fs(x)`; 5 facts
-- [ ] 5. `compiler/ruby/annotator/domains/errors.rb:351` — `emit_error_type_conflict!(conflict)`; 4 facts
-- [ ] 6. `compiler/ruby/mir/fsm_transform.rb:66` — `FsmTransform.transform(bg_block)`; 4 facts
-- [ ] 7. `compiler/ruby/mir/mir_lowering.rb:1598` — `materialize_statement_discard(mir)`; 4 facts
-- [ ] 8. `compiler/ruby/mir/thunk_transform/emit.rb:104` — `build_trampoline(lowering)`; 4 facts
-- [ ] 9. `compiler/ruby/annotator/helpers/fixable_helpers.rb:1369` — `build_decl_cap_insert_fix(name)`; 3 facts
-- [ ] 10. `compiler/ruby/annotator/helpers/fixable_helpers.rb:1369` — `build_decl_cap_insert_fix(sigil)`; 3 facts
-- [ ] 11. `compiler/ruby/annotator/helpers/method_analysis.rb:72` — `resolve_typed_method(registry)`; 3 facts
-- [ ] 12. `compiler/ruby/ast/diagnostic_registry.rb:3238` — `format_template(args)`; 3 facts
-- [ ] 13. `compiler/ruby/mir/lowering/concurrency.rb:1018` — `fsm_bg_block_from_transform!(transform_result)`; 3 facts
-- [ ] 14. `compiler/ruby/annotator/domains/control_flow.rb:394` — `with_comptime_is_a_then_refinement(blk)`; 2 facts
-- [ ] 15. `compiler/ruby/annotator/helpers/auto_inference.rb:841` — `record_map_pair_evidence(args)`; 2 facts
-- [ ] 16. `compiler/ruby/annotator/helpers/with_match_check.rb:344` — `family_of_arg_set(arg)`; 2 facts
-- [ ] 17. `compiler/ruby/ast/diagnostic_examples.rb:147` — `find_block_end(lines)`; 2 facts
-- [ ] 18. `compiler/ruby/ast/syntax_typo_scanner.rb:125` — `emit_typo_finding!(rule)`; 2 facts
-- [ ] 19. `compiler/ruby/lsp/hover.rb:151` — `header_line(entry)`; 2 facts
-- [ ] 20. `compiler/ruby/mir/fsm_transform.rb:66` — `FsmTransform.transform(lowering)`; 2 facts
-- [ ] 21. `compiler/ruby/mir/fsm_transform/suspend_resolvers.rb:54` — `resolve_io(lowering)`; 2 facts
-- [ ] 22. `compiler/ruby/mir/fsm_transform/suspend_resolvers.rb:153` — `resolve_next(lowering)`; 2 facts
-- [ ] 23. `compiler/ruby/mir/mir_lowering.rb:1315` — `stack_fixed_array_coercion?(node)`; 2 facts
-- [ ] 24. `compiler/ruby/mir/thunk_transform/emit.rb:353` — `build_mutual_arm(lowering)`; 2 facts
-- [ ] 25. `compiler/ruby/mir/thunk_transform/emit.rb:316` — `build_mutual_trampoline(lowering)`; 2 facts
-- [ ] 26. `compiler/ruby/annotator/annotator.rb:271` — `with_comptime_type_param_refinement(blk)`; 1 fact
-- [ ] 27. `compiler/ruby/annotator/helpers/capabilities.rb:43` — `Capabilities.validate!(error_handler)`; 1 fact
-- [ ] 28. `compiler/ruby/annotator/helpers/capabilities.rb:1110` — `with_fiber_capture_analysis(blk)`; 1 fact
-- [ ] 29. `compiler/ruby/annotator/helpers/capabilities.rb:1247` — `without_capture_moves(blk)`; 1 fact
-- [ ] 30. `compiler/ruby/annotator/helpers/fixable_helpers.rb:1369` — `build_decl_cap_insert_fix(confidence)`; 1 fact
-- [ ] 31. `compiler/ruby/annotator/helpers/fixable_helpers.rb:1369` — `build_decl_cap_insert_fix(description_code)`; 1 fact
-- [ ] 32. `compiler/ruby/annotator/helpers/fixable_helpers.rb:1369` — `build_decl_cap_insert_fix(description_params)`; 1 fact
-- [ ] 33. `compiler/ruby/annotator/helpers/function_signature.rb:375` — `sync_signature_from_function_def!(fn)`; 1 fact
-- [ ] 34. `compiler/ruby/annotator/helpers/intrinsic_registry.rb:113` — `assign_emit_value(value)`; 1 fact
-- [ ] 35. `compiler/ruby/annotator/helpers/pipe_analysis.rb:147` — `lift_to_observable_if_terminal!(type_kwargs)`; 1 fact
-- [ ] 36. `compiler/ruby/annotator/helpers/pipe_analysis.rb:166` — `mark_observable_terminal!(type_kwargs)`; 1 fact
-- [ ] 37. `compiler/ruby/annotator/helpers/with_match_check.rb:304` — `family_of_arg(arg)`; 1 fact
-- [ ] 38. `compiler/ruby/ast/ast.rb:882` — `AST.each_capture_analysis(block)`; 1 fact
-- [ ] 39. `compiler/ruby/ast/ast.rb:897` — `AST.expr_each_concurrent_capture(block)`; 1 fact
-- [ ] 40. `compiler/ruby/ast/diagnostic_examples.rb:171` — `extract_first_heredoc_in_it(block_lines)`; 1 fact
-- [ ] 41. `compiler/ruby/ast/diagnostic_registry.rb:3225` — `format(args)`; 1 fact
-- [ ] 42. `compiler/ruby/ast/diagnostic_registry.rb:3225` — `format(kwargs)`; 1 fact
-- [ ] 43. `compiler/ruby/ast/diagnostic_registry.rb:3230` — `format_from_hash(args)`; 1 fact
-- [ ] 44. `compiler/ruby/ast/diagnostic_registry.rb:3230` — `format_from_hash(kwargs)`; 1 fact
-- [ ] 45. `compiler/ruby/ast/diagnostic_registry.rb:3317` — `missing_named_template_key(kwargs)`; 1 fact
-- [ ] 46. `compiler/ruby/ast/diagnostic_registry.rb:3251` — `named_template_args_complete?(kwargs)`; 1 fact
-- [ ] 47. `compiler/ruby/ast/diagnostic_registry.rb:3280` — `positional_template_args_complete?(args)`; 1 fact
-- [ ] 48. `compiler/ruby/ast/parser_rules.rb:33` — `ClearParser.rule(inject)`; 1 fact
-- [ ] 49. `compiler/ruby/ast/scope.rb:503` — `with_new_scope(blk)`; 1 fact
+- [x] 1. `compiler/ruby/annotator/helpers/function_signature.rb:703` — `FunctionSignature#sync_from_function_def!(fn)`; 22 facts
+- [x] 2. `compiler/ruby/mir/fsm_transform.rb:66` — `FsmTransform.transform(ctx)`; 6 facts
+- [x] 3. `compiler/ruby/mir/hoist.rb:1134` — `MIRHoistLowering#replace_mir_expr_in_value!(value)`; 6 facts
+- [x] 4. `compiler/ruby/annotator/helpers/intrinsic_registry.rb:503` — `IntrinsicRegistry.fs(x)`; 5 facts
+- [x] 5. `compiler/ruby/annotator/domains/errors.rb:351` — `emit_error_type_conflict!(conflict)`; 4 facts
+- [x] 6. `compiler/ruby/mir/fsm_transform.rb:66` — `FsmTransform.transform(bg_block)`; 4 facts
+- [x] 7. `compiler/ruby/mir/mir_lowering.rb:1598` — `materialize_statement_discard(mir)`; 4 facts
+- [x] 8. `compiler/ruby/mir/thunk_transform/emit.rb:104` — `build_trampoline(lowering)`; 4 facts
+- [x] 9. `compiler/ruby/annotator/helpers/fixable_helpers.rb:1369` — `build_decl_cap_insert_fix(name)`; 3 facts
+- [x] 10. `compiler/ruby/annotator/helpers/fixable_helpers.rb:1369` — `build_decl_cap_insert_fix(sigil)`; 3 facts
+- [x] 11. `compiler/ruby/annotator/helpers/method_analysis.rb:72` — `resolve_typed_method(registry)`; 3 facts
+- [x] 12. `compiler/ruby/ast/diagnostic_registry.rb:3238` — `format_template(args)`; 3 facts
+- [x] 13. `compiler/ruby/mir/lowering/concurrency.rb:1018` — `fsm_bg_block_from_transform!(transform_result)`; 3 facts
+- [x] 14. `compiler/ruby/annotator/domains/control_flow.rb:394` — `with_comptime_is_a_then_refinement(blk)`; 2 facts
+- [x] 15. `compiler/ruby/annotator/helpers/auto_inference.rb:841` — `record_map_pair_evidence(args)`; 2 facts
+- [x] 16. `compiler/ruby/annotator/helpers/with_match_check.rb:344` — `family_of_arg_set(arg)`; 2 facts
+- [x] 17. `compiler/ruby/ast/diagnostic_examples.rb:147` — `find_block_end(lines)`; 2 facts
+- [x] 18. `compiler/ruby/ast/syntax_typo_scanner.rb:125` — `emit_typo_finding!(rule)`; 2 facts
+- [x] 19. `compiler/ruby/lsp/hover.rb:151` — `header_line(entry)`; 2 facts
+- [x] 20. `compiler/ruby/mir/fsm_transform.rb:66` — `FsmTransform.transform(lowering)`; 2 facts
+- [x] 21. `compiler/ruby/mir/fsm_transform/suspend_resolvers.rb:54` — `resolve_io(lowering)`; 2 facts
+- [x] 22. `compiler/ruby/mir/fsm_transform/suspend_resolvers.rb:153` — `resolve_next(lowering)`; 2 facts
+- [x] 23. `compiler/ruby/mir/mir_lowering.rb:1315` — `stack_fixed_array_coercion?(node)`; 2 facts
+- [x] 24. `compiler/ruby/mir/thunk_transform/emit.rb:353` — `build_mutual_arm(lowering)`; 2 facts
+- [x] 25. `compiler/ruby/mir/thunk_transform/emit.rb:316` — `build_mutual_trampoline(lowering)`; 2 facts
+- [x] 26. `compiler/ruby/annotator/annotator.rb:271` — `with_comptime_type_param_refinement(blk)`; 1 fact
+- [x] 27. `compiler/ruby/annotator/helpers/capabilities.rb:43` — `Capabilities.validate!(error_handler)`; 1 fact
+- [x] 28. `compiler/ruby/annotator/helpers/capabilities.rb:1110` — `with_fiber_capture_analysis(blk)`; 1 fact
+- [x] 29. `compiler/ruby/annotator/helpers/capabilities.rb:1247` — `without_capture_moves(blk)`; 1 fact
+- [x] 30. `compiler/ruby/annotator/helpers/fixable_helpers.rb:1369` — `build_decl_cap_insert_fix(confidence)`; 1 fact
+- [x] 31. `compiler/ruby/annotator/helpers/fixable_helpers.rb:1369` — `build_decl_cap_insert_fix(description_code)`; 1 fact
+- [x] 32. `compiler/ruby/annotator/helpers/fixable_helpers.rb:1369` — `build_decl_cap_insert_fix(description_params)`; 1 fact
+- [x] 33. `compiler/ruby/annotator/helpers/function_signature.rb:375` — `sync_signature_from_function_def!(fn)`; 1 fact
+- [x] 34. `compiler/ruby/annotator/helpers/intrinsic_registry.rb:113` — `assign_emit_value(value)`; 1 fact
+- [x] 35. `compiler/ruby/annotator/helpers/pipe_analysis.rb:147` — `lift_to_observable_if_terminal!(type_kwargs)`; 1 fact
+- [x] 36. `compiler/ruby/annotator/helpers/pipe_analysis.rb:166` — `mark_observable_terminal!(type_kwargs)`; 1 fact
+- [x] 37. `compiler/ruby/annotator/helpers/with_match_check.rb:304` — `family_of_arg(arg)`; 1 fact
+- [x] 38. `compiler/ruby/ast/ast.rb:882` — `AST.each_capture_analysis(block)`; 1 fact
+- [x] 39. `compiler/ruby/ast/ast.rb:897` — `AST.expr_each_concurrent_capture(block)`; 1 fact
+- [x] 40. `compiler/ruby/ast/diagnostic_examples.rb:171` — `extract_first_heredoc_in_it(block_lines)`; 1 fact
+- [x] 41. `compiler/ruby/ast/diagnostic_registry.rb:3225` — `format(args)`; 1 fact
+- [x] 42. `compiler/ruby/ast/diagnostic_registry.rb:3225` — `format(kwargs)`; 1 fact
+- [x] 43. `compiler/ruby/ast/diagnostic_registry.rb:3230` — `format_from_hash(args)`; 1 fact
+- [x] 44. `compiler/ruby/ast/diagnostic_registry.rb:3230` — `format_from_hash(kwargs)`; 1 fact
+- [x] 45. `compiler/ruby/ast/diagnostic_registry.rb:3317` — `missing_named_template_key(kwargs)`; 1 fact
+- [x] 46. `compiler/ruby/ast/diagnostic_registry.rb:3251` — `named_template_args_complete?(kwargs)`; 1 fact
+- [x] 47. `compiler/ruby/ast/diagnostic_registry.rb:3280` — `positional_template_args_complete?(args)`; 1 fact
+- [x] 48. `compiler/ruby/ast/parser_rules.rb:33` — `ClearParser.rule(inject)`; 1 fact
+- [x] 49. `compiler/ruby/ast/scope.rb:503` — `with_new_scope(blk)`; 1 fact
 
 Refresh this order after each batch; earlier annotations can make later roots
 disappear or expose a more valuable transitive path.
+
+All 49 ranked entries were reviewed against their actual runtime shapes. Of
+those entries, 44 needed stronger contracts and were updated. Five entries
+(`build_decl_cap_insert_fix`'s `name`, `sigil`, `confidence`,
+`description_code`, and `description_params`) already had strong Sorbet
+contracts; changing those would have replaced precise types with noise. This
+exposed a ranking defect: parameter-origin candidates can currently survive
+even when the source signature is already strong. The source contract, rather
+than the stale candidate classification, is authoritative for this pass.
+
+The heterogeneous boundaries were narrowed to named, bounded unions rather
+than falsely claiming a single concrete class. Recursive MIR aggregate values
+and intrinsic authoring arrays consequently retain nested `T.untyped` only at
+their intentionally heterogeneous leaf boundary; their parameters are no
+longer unconstrained. Callback wrappers preserve their callers' return types
+with Sorbet type parameters, and FSM/thunk lowering collaborators now use
+load-order-safe marker protocols without adding runtime fallback methods.
+
+Verification after the pass:
+
+- Sorbet: no errors (excluding pre-existing root/scratch artifacts outside the
+  compiler target)
+- compiler: 6,414 examples, 0 failures
+- focused typing regressions: 318 examples, 0 failures
+- `Sorbet/EnforceSignatures`: 26 changed Ruby files, 0 offenses
 
 ## Xit migration — completed
 

@@ -143,7 +143,7 @@ module DiagnosticExamples
   # Walk forward from `start_idx` (line of `describe ... do`) and find
   # the `end` line at the same indentation level. Returns the index or
   # nil if the file is malformed.
-  sig { params(lines: T.untyped, start_idx: Integer, indent: T.nilable(Integer)).returns(T.untyped) }
+  sig { params(lines: T::Array[String], start_idx: Integer, indent: T.nilable(Integer)).returns(T.nilable(Integer)) }
   def self.find_block_end(lines, start_idx, indent)
     depth = 1
     k = start_idx + 1
@@ -167,14 +167,14 @@ module DiagnosticExamples
   # body satisfies `expecting_raise` (true == contains `raise_error`,
   # false == does not). Extract the first `<<~CLEAR ... CLEAR` heredoc
   # body within that `it`.
-  sig { params(block_lines: T.untyped, expecting_raise: T::Boolean).returns(T.nilable(String)) }
+  sig { params(block_lines: T::Array[String], expecting_raise: T::Boolean).returns(T.nilable(String)) }
   def self.extract_first_heredoc_in_it(block_lines, expecting_raise:)
     block_lines.each_with_index do |line, i|
       next unless line =~ /^(\s*)it\b/
       it_indent = $1.length
       it_end = find_block_end(block_lines, i, it_indent)
       next unless it_end
-      body = block_lines[i..it_end].join
+      body = T.must(block_lines[i..it_end]).join
       has_raise = body.include?("raise_error")
       next unless has_raise == expecting_raise
       return extract_heredoc(body)

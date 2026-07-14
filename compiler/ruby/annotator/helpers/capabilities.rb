@@ -39,11 +39,17 @@ module Capabilities
     errors
   end
 
-  sig { params(node: AST::Node, type: Type, error_handler: T.untyped).returns(NilClass) }
+  sig do
+    params(
+      node: AST::Node,
+      type: Type,
+      error_handler: T.nilable(T.proc.params(node: AST::Node, message: String).void),
+    ).returns(NilClass)
+  end
   def self.validate!(node, type, &error_handler)
     errs = errors_for(type)
     return if errs.empty?
-    error_handler.call(node, errs.first) if error_handler
+    error_handler.call(node, T.must(errs.first)) if error_handler
     nil
   end
 
@@ -1054,6 +1060,7 @@ module CapabilityHelper
 
   class CaptureAnalysis < T::Struct
     extend T::Sig
+    include AST::CaptureAnalysisValue
 
     prop :has_local, T::Boolean, default: false
     prop :has_rc, T::Boolean, default: false
@@ -1106,7 +1113,7 @@ module CapabilityHelper
     CaptureAnalysis.new
   end
 
-  sig { params(is_parallel: T.nilable(T::Boolean), mark_moves: T::Boolean, blk: T.untyped).returns(CapabilityHelper::CaptureAnalysis) }
+  sig { params(is_parallel: T.nilable(T::Boolean), mark_moves: T::Boolean, blk: T.proc.void).returns(CapabilityHelper::CaptureAnalysis) }
   def with_fiber_capture_analysis(is_parallel: false, mark_moves: false, &blk)
     T.bind(self, SemanticAnnotator)
     ctx = T.let(nil, T.nilable(CaptureContext))
@@ -1243,7 +1250,11 @@ module CapabilityHelper
     end
   end
 
-  sig { params(blk: T.untyped).returns(T.untyped) }
+  sig do
+    type_parameters(:Result)
+      .params(blk: T.proc.returns(T.type_parameter(:Result)))
+      .returns(T.type_parameter(:Result))
+  end
   def without_capture_moves(&blk)
     T.bind(self, SemanticAnnotator)
     phase_receiver_state.capture_move_suppression_depth += 1

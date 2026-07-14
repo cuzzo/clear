@@ -62,10 +62,11 @@ module FsmTransform
   #   :promoted_decls, :capture_inits, :rt_name, :pin_mode,
   #   :inner_zig, :is_void, :arena_init_flag, :id, :bg_rt,
   #   :ctx_type, :promise_zig, :blk_label, :capture_fields
-  sig { params(bg_block: T.any(AST::Node, T.untyped), ctx: T.untyped, lowering: T.any(MIRLowering, T.untyped)).returns(T.nilable(MIR::FsmLoweringResult)) }
+  sig { params(bg_block: BgBlockInput, ctx: ContextMap, lowering: LoweringApi).returns(T.nilable(MIR::FsmLoweringResult)) }
   def self.transform(bg_block, ctx, lowering)
     T.bind(self, T.untyped) rescue nil
-    suspend_points = bg_block.fsm_suspend_points || []
+    block_source = T.unsafe(bg_block)
+    suspend_points = block_source.fsm_suspend_points || []
 
     # The recursive splitter + Emit.build_recursive is the SOLE
     # FSM emit path. Any FSM-eligible body flows through it,
@@ -85,8 +86,8 @@ module FsmTransform
     # Pure linear bodies (NEXT chains, single IO + post-stmts) go
     # through Liveness cleanly; conservative promotion would
     # over-promote unused locals.
-    need_conservative = body_needs_conservative?(bg_block.body)
-    all_locals = need_conservative ? collect_body_locals(bg_block.body) : []
+    need_conservative = body_needs_conservative?(block_source.body)
+    all_locals = need_conservative ? collect_body_locals(block_source.body) : []
     # All names get capture_map entries so body refs lower to
     # `__ctx.NAME`. Suspend-result decls (`r = NEXT p`, etc.) are
     # already declared as ctx fields by their suspend descriptor's
@@ -94,13 +95,14 @@ module FsmTransform
     # avoid duplicate struct members.
     promoted_names = all_locals.map(&:name)
     field_locals   = all_locals.reject(&:is_suspend_result)
-    captured_map   = (ctx[:captured] || {}).keys.to_a
-    ctx_id         = ctx[:id]
+    captured = T.cast(ctx[:captured], T.nilable(FsmTransform::CapturedMap)) || {}
+    captured_map   = captured.keys.to_a
+    ctx_id         = T.cast(ctx[:id], Integer)
     promo_capture_map = (captured_map + promoted_names).to_h { |n|
       [n, "__ctx_#{ctx_id}.#{n}"]
     }
-    rec_segs = lowering.with_fiber_capture_map(promo_capture_map, rt_override: ctx[:bg_rt]) do
-      RecursiveSplitter.split(bg_block.body, lowering, ctx: ctx)
+    rec_segs = T.unsafe(lowering).with_fiber_capture_map(promo_capture_map, rt_override: T.cast(ctx[:bg_rt], String)) do
+      RecursiveSplitter.split(block_source.body, lowering, ctx: ctx)
     end
     return nil if rec_segs.nil?
     segments = rec_segs.segments
@@ -133,7 +135,7 @@ module FsmTransform
                   default_value: MIR::Undef.new(nil),
                 )
               end
-    raw_ctx = T.cast(ctx, FsmTransform::ContextMap)
+    raw_ctx = ctx
     emit_ctx = Emit::FsmEmitContext.new(
       id: T.cast(raw_ctx.fetch(:id), Integer),
       bg_rt: T.cast(raw_ctx.fetch(:bg_rt), String),

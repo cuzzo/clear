@@ -51,6 +51,8 @@ module DiagnosticRegistry
   end
   DiagnosticEntryValue = T.type_alias { T.nilable(T.any(String, Symbol, T::Boolean)) }
   DiagnosticEntry = T.type_alias { T::Hash[Symbol, DiagnosticEntryValue] }
+  DiagnosticArgs = T.type_alias { T::Array[DiagnosticKwValue] }
+  DiagnosticKwargs = T.type_alias { T::Hash[Symbol, DiagnosticKwValue] }
   CATEGORIES = T.let(%i[type ownership capability concurrency lifetime escape registry reentrance lint syntax mir test].freeze, T::Array[Symbol])
   SEVERITIES = T.let(%i[error warning hint info].freeze, T::Array[Symbol])
 
@@ -3221,12 +3223,12 @@ module DiagnosticRegistry
   # Format a registered code's template against `args`. Returns nil
   # when the code isn't known. The caller decides what to do with
   # nil — the legacy helper raises an internal-compiler-error there.
-  sig { params(code: Symbol, args: T::Array[T.untyped], kwargs: T.untyped).returns(T.nilable(String)) }
+  sig { params(code: Symbol, args: DiagnosticArgs, kwargs: DiagnosticKwValue).returns(T.nilable(String)) }
   def self.format(code, args = [], **kwargs)
     format_from_hash(code, args, kwargs)
   end
 
-  sig { params(code: Symbol, args: T::Array[T.untyped], kwargs: T.untyped).returns(T.nilable(String)) }
+  sig { params(code: Symbol, args: DiagnosticArgs, kwargs: DiagnosticKwargs).returns(T.nilable(String)) }
   def self.format_from_hash(code, args, kwargs)
     entry = DIAGNOSTICS[code]
     return nil unless entry
@@ -3234,7 +3236,7 @@ module DiagnosticRegistry
     format_template(T.cast(entry[:template], String), args, kwargs)
   end
 
-  sig { params(template: String, args: T::Array[T.untyped], kwargs: T::Hash[Symbol, DiagnosticKwValue]).returns(String) }
+  sig { params(template: String, args: DiagnosticArgs, kwargs: DiagnosticKwargs).returns(String) }
   def self.format_template(template, args = [], kwargs = {})
     if !kwargs.empty? || template.include?("%{")
       return template % kwargs if !template.include?("%{") || named_template_args_complete?(template, kwargs)
@@ -3247,7 +3249,7 @@ module DiagnosticRegistry
     "#{template} [Internal Args Error: #{args.inspect}]"
   end
 
-  sig { params(template: String, kwargs: T.untyped).returns(T::Boolean) }
+  sig { params(template: String, kwargs: DiagnosticKwargs).returns(T::Boolean) }
   def self.named_template_args_complete?(template, kwargs)
     keys = named_template_keys(template)
     i = T.let(0, Integer)
@@ -3276,7 +3278,7 @@ module DiagnosticRegistry
     keys
   end
 
-  sig { params(template: String, args: T::Array[T.untyped]).returns(T::Boolean) }
+  sig { params(template: String, args: DiagnosticArgs).returns(T::Boolean) }
   def self.positional_template_args_complete?(template, args)
     positional_placeholder_count(template) <= args.length
   end
@@ -3313,7 +3315,7 @@ module DiagnosticRegistry
     "#{template} [Internal Args Error: #{detail}]"
   end
 
-  sig { params(template: String, kwargs: T.untyped).returns(T.nilable(Symbol)) }
+  sig { params(template: String, kwargs: DiagnosticKwargs).returns(T.nilable(Symbol)) }
   def self.missing_named_template_key(template, kwargs)
     keys = named_template_keys(template)
     i = T.let(0, Integer)

@@ -837,11 +837,11 @@ class ShapeEvidenceCollector
   # Append (k, v) to the matching map sub-slots when the slot map
   # carries both halves. No-op for non-map shapes — keeps
   # method-call dispatch noise out of the call sites.
-  sig { params(slots: AutoShapeSlots, args: T::Array[T.untyped]).void }
+  sig { params(slots: AutoShapeSlots, args: T::Array[AST::Node]).void }
   def record_map_pair_evidence(slots, args)
     return unless slots.key && slots.value
-    T.must(slots.key).sources << args[0]
-    T.must(slots.value).sources << args[1]
+    T.must(slots.key).sources << T.must(args[0])
+    T.must(slots.value).sources << T.must(args[1])
   end
 
   # Detect `x[i] = v`. For list shape: v is element evidence. For

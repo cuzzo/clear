@@ -1920,7 +1920,7 @@ RSpec.describe "annotator branch gap burndown" do
     expect(sig.heap_carry_return_vars).to eq(Set["tmp"])
 
     unchanged = FunctionSignature.new(params: [], return_type: Type.new(:Int64))
-    FunctionSignature.sync_signature_from_function_def!(unchanged, Object.new)
+    FunctionSignature.sync_signature_from_function_def!(unchanged, Struct.new(:unused).new(nil))
     expect(unchanged.return_type.raw).to eq(:Int64)
     expect(unchanged.needs_rt).to be_nil
   end

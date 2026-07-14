@@ -11,12 +11,16 @@ class ClearParser
     const :action, T.nilable(Symbol), default: nil
   end
 
+  InjectValue = T.type_alias do
+    T.nilable(T.any(AST::Node, Type, String, Symbol, Integer, Float, T::Boolean))
+  end
+
   class ParserRule < T::Struct
     const :type, Symbol
     const :value, T.nilable(String), default: nil
     const :action, Symbol
     const :pattern, T::Array[PatternStep], default: []
-    const :inject, T::Array[T.untyped], default: []
+    const :inject, T::Array[InjectValue], default: []
   end
 
   Pattern = T.type_alias { T::Array[PatternStep] }
@@ -27,7 +31,7 @@ class ClearParser
       value: T.nilable(String),
       action: Symbol,
       pattern: T::Array[PatternStep],
-      inject: T::Array[T.untyped],
+      inject: T::Array[InjectValue],
     ).returns(ParserRule)
   end
   def self.rule(type, value = nil, action:, pattern: [], inject: [])

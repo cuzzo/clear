@@ -47,6 +47,7 @@ require_relative "lowering/control_flow"
 
 class MIRLowering
     extend T::Sig
+    include ThunkTransform::LoweringProtocol
 
   OwnershipFact = T.type_alias do
     T.any(
@@ -1311,7 +1312,7 @@ class MIRLowering
     ), MIR::StructInit)
   end
 
-  sig { params(node: T.any(AST::Locatable, T.untyped)).returns(T::Boolean) }
+  sig { params(node: AST::Locatable).returns(T::Boolean) }
   def stack_fixed_array_coercion?(node)
     return false unless node.is_a?(AST::ListLit) && node.storage == :stack
     coerced_type = node.respond_to?(:coerced_type_info) ? node.coerced_type_info : node.full_type!
@@ -1575,11 +1576,11 @@ class MIRLowering
     transfer_only = stmt.is_a?(AST::MoveNode)
     stmt_transfer_marks =
       if transfer_only
-        ownership_marks_for_transferred_temp(mir)
+        ownership_marks_for_transferred_temp(T.cast(mir, MIR::Node))
       else
         dedupe_transfer_marks(ownership_transfers_for_stmt(stmt, state.guarded_cleanup_names))
       end
-    statement_nodes = mir.is_a?(Array) ? mir.compact : [T.cast(mir, MIR::Node)]
+    statement_nodes = mir.is_a?(Array) ? mir.compact : [mir]
     guarded_nodes = if transfer_only
       []
     else
@@ -1594,13 +1595,13 @@ class MIRLowering
     )
   end
 
-  sig { params(stmt: LowerableStmt, mir: T.untyped).returns([T.untyped, T::Boolean]) }
+  sig { params(stmt: LowerableStmt, mir: MIR::NodeRoot).returns([MIR::NodeRoot, T::Boolean]) }
   def materialize_statement_discard(stmt, mir)
     return [mir, false] unless stmt.is_a?(AST::Locatable)
     return [mir, false] unless discard_expr_stmt?(stmt, mir)
 
     discard_type = Type.from_node!(stmt, context: "discard allocation mark")
-    mir = place_discarded_owned_branch_value(mir, discard_type)
+    mir = place_discarded_owned_branch_value(T.cast(mir, MIR::Node), discard_type)
     normalized_prefix = normalize_allocating_result_expr!(mir)
     function_state.pending_stmts.concat(normalized_prefix) unless normalized_prefix.empty?
     return [mir, false] unless mir_allocates?(mir) && !mutating_receiver_allocator_op?(mir)

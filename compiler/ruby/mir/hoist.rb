@@ -1130,7 +1130,11 @@ module MIRHoistLowering
     nil
   end
 
-  sig { params(value: T.untyped, old_child: MIR::Node, new_child: MIR::Node).returns(T::Boolean) }
+  MirAggregate = T.type_alias do
+    T.any(T::Array[T.untyped], T::Hash[T.untyped, T.untyped])
+  end
+
+  sig { params(value: MirAggregate, old_child: MIR::Node, new_child: MIR::Node).returns(T::Boolean) }
   def replace_mir_expr_in_value!(value, old_child, new_child)
     case value
     when Array
@@ -1139,7 +1143,9 @@ module MIRHoistLowering
           value[idx] = new_child
           return true
         end
-        return true if replace_mir_expr_in_value!(item, old_child, new_child)
+        if item.is_a?(Array) || item.is_a?(Hash)
+          return true if replace_mir_expr_in_value!(item, old_child, new_child)
+        end
       end
     when Hash
       value.each_key do |key|
@@ -1148,7 +1154,9 @@ module MIRHoistLowering
           value[key] = new_child
           return true
         end
-        return true if replace_mir_expr_in_value!(item, old_child, new_child)
+        if item.is_a?(Array) || item.is_a?(Hash)
+          return true if replace_mir_expr_in_value!(item, old_child, new_child)
+        end
       end
     end
     false

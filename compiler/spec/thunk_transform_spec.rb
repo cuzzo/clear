@@ -84,6 +84,7 @@ RSpec.describe "ThunkTransform emit coverage" do
   let(:tok) { Lexer::Token.new(:IDENT, "x", 1, 1) }
 
   class FakeThunkLowering
+    include ThunkTransform::LoweringProtocol
     OP_TO_ZIG = {
       ADD: "+",
       SUB: "-",
@@ -386,8 +387,8 @@ RSpec.describe "ThunkTransform recursive splitter helpers" do
   it "walks arrays while looking for mutual-recursion calls" do
     call = AST::FuncCall.new(tok, "even", [])
 
-    expect(ThunkTransform::RecursiveSplitter.send(:contains_any_call?, [AST::Identifier.new(tok, "x"), call], ["even"])).to be(true)
-    expect(ThunkTransform::RecursiveSplitter.send(:contains_any_call?, [AST::Identifier.new(tok, "x")], ["even"])).to be(false)
+    expect(ThunkTransform::RecursiveSplitter.send(:contains_any_call?, [AST::Identifier.new(tok, "x"), call], Set["even"])).to be(true)
+    expect(ThunkTransform::RecursiveSplitter.send(:contains_any_call?, [AST::Identifier.new(tok, "x")], Set["even"])).to be(false)
   end
 
   it "walks arrays while looking for self-recursion calls" do

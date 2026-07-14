@@ -347,18 +347,18 @@ module Annotator
         nil
       end
 
-      sig { params(site: T.any(AST::Locatable, Lexer::Token), type_name: String, conflict: T::Hash[Symbol, T.untyped]).void }
+      sig { params(site: T.any(AST::Locatable, Lexer::Token), type_name: String, conflict: AST::ErrorTypeConflict).void }
       def emit_error_type_conflict!(site, type_name, conflict)
         T.bind(self, SemanticAnnotator)
 
-        first_site = conflict[:first_site]
+        first_site = T.cast(conflict[:first_site], T.nilable(Lexer::Token))
         first_loc = first_site ? " (first registered at line #{first_site.line})" : ""
-        if conflict[:is_stdlib]
+        if conflict[:is_stdlib] == true
           error!(site, :ERROR_TYPE_RESERVED_BY_STDLIB,
-                 name: type_name, kind: conflict[:existing_kind])
+                 name: type_name, kind: T.cast(conflict[:existing_kind], Symbol))
         else
           error!(site, :ERROR_TYPE_KIND_CONFLICT,
-                 name: type_name, kind: conflict[:existing_kind], first_loc: first_loc)
+                 name: type_name, kind: T.cast(conflict[:existing_kind], Symbol), first_loc: first_loc)
         end
       end
 

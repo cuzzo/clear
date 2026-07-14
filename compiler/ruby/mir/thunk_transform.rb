@@ -14,9 +14,15 @@
 # must not route through opaque Zig text or the old Phase 4 segment scaffold.
 
 require "sorbet-runtime"
-require_relative "thunk_transform/recursive_splitter"
-require_relative "thunk_transform/emit"
 
 module ThunkTransform
   extend T::Sig
+
+  module LoweringProtocol
+  end
+
+  LoweringApi = T.type_alias { LoweringProtocol }
 end
+
+require_relative "thunk_transform/recursive_splitter"
+require_relative "thunk_transform/emit"

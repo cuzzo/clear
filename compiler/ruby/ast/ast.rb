@@ -15,6 +15,11 @@ require_relative "../annotator/helpers/function_signature"
 module AST
   extend T::Sig
 
+  # Load-order-safe protocol for capture analyses attached to fiber-like AST
+  # nodes. CapabilityHelper defines the concrete record after the AST loads.
+  module CaptureAnalysisValue
+  end
+
   RawBody = T.type_alias { T::Array[AST::Node] }
   HashLitPairs = T.type_alias { T::Hash[AST::Node, AST::Node] }
   BgNode = T.type_alias { T.any(AST::BgBlock, AST::BgStreamBlock) }
@@ -878,7 +883,7 @@ module AST
   # one with one pass per function. Replaces the per-source-type
   # iteration that used to live in lower_bg_block, lower_do_block, and
   # the pipeline_host concurrent lowerings.
-  sig { params(body: RawBody, block: T.proc.params(analysis: T.untyped).void).void }
+  sig { params(body: RawBody, block: T.proc.params(analysis: CaptureAnalysisValue).void).void }
   def self.each_capture_analysis(body, &block)
     each_bg_block(body) do |bg|
       yield bg.capture_analysis if bg.capture_analysis
@@ -893,7 +898,7 @@ module AST
     end
   end
 
-  sig { params(node: T.nilable(AST::Node), block: T.proc.params(analysis: T.untyped).void).void }
+  sig { params(node: T.nilable(AST::Node), block: T.proc.params(analysis: CaptureAnalysisValue).void).void }
   def self.expr_each_concurrent_capture(node, &block)
     case node
     when ConcurrentOp

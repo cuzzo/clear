@@ -390,7 +390,14 @@ module Annotator
         namespace == "AST"
       end
 
-      sig { params(condition: AST::Node, blk: T.proc.returns(T.untyped)).returns(T.untyped) }
+      sig do
+        type_parameters(:Result)
+          .params(
+            condition: AST::Node,
+            blk: T.proc.returns(T.type_parameter(:Result)),
+          )
+          .returns(T.type_parameter(:Result))
+      end
       def with_comptime_is_a_then_refinement(condition, &blk)
         refinement = comptime_is_a_type_param_refinement(condition)
         return blk.call unless refinement

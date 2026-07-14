@@ -147,7 +147,7 @@ module LSP
       lines.join("\n")
     end
 
-    sig { params(diag: RPC::OutboundMessage, entry: T.untyped).returns(String) }
+    sig { params(diag: RPC::OutboundMessage, entry: T.nilable(DiagnosticRegistry::DiagnosticEntry)).returns(String) }
     def self.header_line(diag, entry)
       severity = severity_label(diag[:severity])
       code     = diag[:code]
