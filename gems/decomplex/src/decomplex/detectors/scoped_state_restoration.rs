@@ -72,6 +72,16 @@ fn scan_document(document: &Document) -> Vec<ScopedStateRestorationFinding> {
             })
             .collect::<Vec<_>>();
         for (start_id, temporary_value) in writes {
+            if !has_scoped_call_before_restore(
+                &start_id,
+                &temporary_value,
+                &place.id,
+                &nodes,
+                &effects,
+                &successors,
+            ) {
+                continue;
+            }
             let reachable = reachable_nodes(&start_id, &successors);
             let restoration_values = reachable
                 .iter()
@@ -162,10 +172,62 @@ fn scan_document(document: &Document) -> Vec<ScopedStateRestorationFinding> {
                 sites,
                 spans,
             });
-            break;
         }
     }
     out
+}
+
+fn has_scoped_call_before_restore(
+    start_id: &str,
+    temporary_value: &str,
+    place_id: &str,
+    nodes: &BTreeMap<String, &crate::decomplex::syntax::cfg::ControlFlowNode>,
+    effects: &BTreeMap<String, &crate::decomplex::syntax::cfg::NodeEffect>,
+    successors: &BTreeMap<String, Vec<String>>,
+) -> bool {
+    let mut queue = successors
+        .get(start_id)
+        .into_iter()
+        .flatten()
+        .cloned()
+        .map(|node_id| (node_id, false))
+        .collect::<VecDeque<_>>();
+    let mut seen = BTreeSet::new();
+    while let Some((node_id, saw_call)) = queue.pop_front() {
+        if !seen.insert((node_id.clone(), saw_call)) {
+            continue;
+        }
+        if let Some(value) = direct_write_value(nodes, effects, &node_id, place_id) {
+            if value != temporary_value {
+                if saw_call {
+                    return true;
+                }
+                continue;
+            }
+        }
+        let Some(node) = nodes.get(&node_id) else {
+            continue;
+        };
+        let unknown_call = effects
+            .get(&node_id)
+            .is_some_and(|effect| effect.unknown_call);
+        // A call made by a branch/loop condition precedes entry into the
+        // apparent scope. Treating it as work protected by the later write
+        // reverses common `normal -> temporary -> normal` protocols.
+        if unknown_call && matches!(node.kind.as_str(), "branch" | "loop") {
+            continue;
+        }
+        let saw_call = saw_call || unknown_call;
+        queue.extend(
+            successors
+                .get(&node_id)
+                .into_iter()
+                .flatten()
+                .cloned()
+                .map(|next| (next, saw_call)),
+        );
+    }
+    false
 }
 
 fn direct_write_value(
@@ -228,5 +290,17 @@ mod tests {
             finding.classification == "unprotected_restoration_risk"
                 && finding.confidence == "medium"
         }));
+    }
+
+    #[test]
+    fn reports_repeated_scopes_without_inverting_the_baseline_value() {
+        let document = ruby_document(
+            "def parse\n  @mode = true\n  parse_expression\n  @mode = false\n  @mode = true\n  parse_expression\n  @mode = false\nend\n",
+        );
+        let findings = scan_documents(&[document]);
+        assert_eq!(findings.len(), 2, "{findings:#?}");
+        assert!(findings
+            .iter()
+            .all(|finding| finding.temporary_value == "boolean:true"));
     }
 }

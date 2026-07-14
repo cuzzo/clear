@@ -393,7 +393,11 @@ fn detector_tasks<'a>(
         })
     });
     detector_task!("declared_type_pressure", {
-        json_value(declared_type_pressure::scan(&shared.declaration_type_pressures))
+        let documents = groups.values().flatten().collect::<Vec<_>>();
+        json_value(declared_type_pressure::scan(
+            &shared.declaration_type_pressures,
+            &documents,
+        ))
     });
     detector_task!("scoped_state_restoration", {
         merge_array_reports(groups, |documents| json_value(scoped_state_restoration::scan_documents(documents)))
