@@ -81,6 +81,14 @@ class ClearParser
     const :tight, T::Boolean, default: false
   end
 
+  # A VAR_ID-led form is parsed once, then classified from the token that
+  # follows it.  Keeping the classification with the node lets statement,
+  # value-block, and BG parsers share the same non-replaying path.
+  class ParsedVarForm < T::Struct
+    const :node, AST::Node
+    const :assignment, T::Boolean
+  end
+
   include ErrorHelper
   include FixableHelper
 
@@ -919,11 +927,11 @@ class ClearParser
     # a, b = ...
     # a: Int32, b: Float64 = ...
     if current.type == :VAR_ID
-      result = try_parse_destructuring_assign
-      return result if result
+      return parse_destructuring_assign if destructuring_assignment?
 
-      result = try_parse_bind_or_assign
-      return result if result
+      parsed = parse_var_form
+      consume(:CHAR, ';')
+      return parsed.node
     end
 
     rule = STMT_RULE_INDEX[ClearParser.token_rule_key(current)]
@@ -933,28 +941,50 @@ class ClearParser
     expr
   end
 
-  # Speculatively parse identifier-only destructuring:
+  # A comma immediately after the first target makes this a destructuring
+  # assignment.  For a typed first target, scan only the type annotation and
+  # look for its top-level comma.  This is token lookahead: it never advances
+  # or restores the parser cursor and never recursively parses an expression.
+  sig { returns(T::Boolean) }
+  def destructuring_assignment?
+    return true if match_at?(1, :CHAR, ',')
+    return false unless match_at?(1, :CHAR, ':')
+
+    offset = 2
+    delimiters = T.let([], T::Array[String])
+    loop do
+      token = peek_at(offset)
+      return false unless token
+      return false if token.type == :EOF
+
+      if token.type == :CHAR
+        value = token.text!
+        case value
+        when '(', '[', '{', '<'
+          delimiters << value
+        when ')', ']', '}', '>'
+          delimiters.pop unless delimiters.empty?
+        when ','
+          return true if delimiters.empty?
+        when '=', ';'
+          return false if delimiters.empty?
+        end
+      end
+      offset += 1
+    end
+  end
+
+  # Parse identifier-only destructuring:
   #   a, b = expr;
   #   a: Int32, b: Float64 = expr;
   # Existing names are reassigned by the annotator; new names are declared.
-  sig { params(default_mutable: T::Boolean).returns(T.nilable(AST::DestructuringAssignment)) }
-  def try_parse_destructuring_assign(default_mutable: false)
-    saved_pos = @pos
+  sig { params(default_mutable: T::Boolean).returns(AST::DestructuringAssignment) }
+  def parse_destructuring_assign(default_mutable: false)
     start_token = current
     targets = [parse_destructure_target(default_mutable: default_mutable)]
 
-    unless match?(:CHAR, ',')
-      @pos = saved_pos
-      return nil
-    end
-
     while match!(:CHAR, ',')
       targets << parse_destructure_target(default_mutable: default_mutable)
-    end
-
-    unless match?(:CHAR, '=')
-      @pos = saved_pos
-      return nil
     end
 
     consume(:CHAR, '=')
@@ -975,14 +1005,14 @@ class ClearParser
     AST::DestructureTarget.new(T.must(name_tok), T.must(name_tok).text!, type_annotation, mutable)
   end
 
-  # Speculatively parse `target [: Type] = expression ;` as a BindExpr or Assignment.
-  # Returns nil (and backtracks) if no `=` follows the target, so we fall through to
-  # expression-statement parsing (e.g. method calls like `foo();`).
-  sig { returns(T.nilable(AST::Node)) }
-  def try_parse_bind_or_assign
-    saved_pos = @pos
+  # Parse a VAR_ID-led expression exactly once.  If `=`, `op=`, or a type
+  # annotation follows, classify the already-parsed expression as an assignment
+  # target.  Calls and value blocks therefore cannot be recursively parsed once
+  # during assignment speculation and again as an expression statement.
+  sig { returns(ParsedVarForm) }
+  def parse_var_form
     target_token = current
-    target = parse_var_id  # handles x, x.field, x[0]
+    target = parse_expression
 
     # Optional type annotation for simple identifiers: x: Type = ...
     opt_type = nil
@@ -994,15 +1024,13 @@ class ClearParser
     # Compound assignment: x += expr  →  x = x + expr
     if match?(:COMPOUND_ASSIGN)
       unless target.is_a?(AST::Identifier) || target.is_a?(AST::GetField) || target.is_a?(AST::GetIndex)
-        @pos = saved_pos
-        return nil
+        error!(target_token, :INVALID_ASSIGNMENT)
       end
 
       op_token = consume(:COMPOUND_ASSIGN)
       op_char = T.must(op_token).text![0]  # '+=' → '+', '-=' → '-', etc.
       op_sym = AST::OP_TO_OP_CODE[T.unsafe(op_char)] || T.unsafe(op_char).to_sym
       rhs = parse_expression
-      consume(:CHAR, ';')
 
       # Desugar: target op= rhs  →  target = target op rhs
       desugared_value = AST::BinaryOp.new(op_token, deep_clone_node(target), op_sym, rhs)
@@ -1012,34 +1040,33 @@ class ClearParser
         # Preserve the original compound operator so atomic targets can lower
         # to fetch_<op> instead of load/modify/store.
         bind.compound_op = op_sym
-        return bind
+        return ParsedVarForm.new(node: bind, assignment: true)
       else
         asgn = AST::Assignment.new(target_token, target, desugared_value)
         asgn.compound_op = op_sym
-        return asgn
+        return ParsedVarForm.new(node: asgn, assignment: true)
       end
     end
 
     unless match?(:CHAR, '=')
-      @pos = saved_pos
-      return nil
+      consume(:CHAR, '=') if opt_type
+      return ParsedVarForm.new(node: target, assignment: false)
     end
 
     unless target.is_a?(AST::Identifier) || target.is_a?(AST::GetField) || target.is_a?(AST::GetIndex)
-      @pos = saved_pos
-      return nil
+      error!(target_token, :INVALID_ASSIGNMENT)
     end
 
     consume(:CHAR, '=')
     value = parse_expression
-    consume(:CHAR, ';')
 
-    if target.is_a?(AST::Identifier)
+    node = if target.is_a?(AST::Identifier)
       AST::BindExpr.new(target_token, target.name, opt_type, value)
     else
       # Field or index assignment — always a reassignment, never a declaration
       AST::Assignment.new(target_token, target, value)
     end
+    ParsedVarForm.new(node: node, assignment: true)
   end
 
   sig { returns(AST::Node) }
@@ -1184,8 +1211,8 @@ class ClearParser
   sig { returns(T.any(AST::VarDecl, AST::DestructuringAssignment)) }
   def parse_mutable_var_decl
     start_token = consume(:KEYWORD, 'MUTABLE')
-    if (destructure = try_parse_destructuring_assign(default_mutable: true))
-      return destructure
+    if destructuring_assignment?
+      return parse_destructuring_assign(default_mutable: true)
     end
 
     name = consume(:VAR_ID).text!
@@ -2031,7 +2058,23 @@ class ClearParser
     result = T.let(nil, T.nilable(AST::Node))
 
     until match?(:CHAR, '}') || match?(:EOF)
-      if (stmt = try_parse_value_block_statement)
+      if current.type == :VAR_ID && destructuring_assignment?
+        body << parse_destructuring_assign
+        next
+      end
+
+      if current.type == :VAR_ID
+        parsed = parse_var_form
+        if parsed.assignment || match!(:CHAR, ';')
+          consume(:CHAR, ';') if parsed.assignment
+          body << parsed.node
+          next
+        end
+        result = parsed.node
+        break
+      end
+
+      if (stmt = parse_value_block_keyword_statement)
         body << stmt
         next
       end
@@ -2063,15 +2106,7 @@ class ClearParser
   ], T::Set[String])
 
   sig { returns(T.nilable(AST::Node)) }
-  def try_parse_value_block_statement
-    if current.type == :VAR_ID
-      stmt = try_parse_destructuring_assign
-      return stmt if stmt
-
-      stmt = try_parse_bind_or_assign
-      return stmt if stmt
-    end
-
+  def parse_value_block_keyword_statement
     return nil unless current.type == :KEYWORD
     return nil unless VALUE_BLOCK_STATEMENT_KEYWORDS.include?(current.value)
 
@@ -4480,17 +4515,20 @@ class ClearParser
   # If the expression is followed by AS or THEN, builds a ThenChain node.
   sig { returns(AST::Node) }
   def parse_bg_body_stmt
-    # Keywordless bind/assign: x = ..., x.field = ..., x[0] = ...
-    if current.type == :VAR_ID
-      result = try_parse_bind_or_assign
-      return result if result
+    if current.type == :VAR_ID && destructuring_assignment?
+      return parse_destructuring_assign
     end
 
     # Keyword statements (IF, WHILE, RETURN, etc.) — cannot start THEN chains
     rule = STMT_RULE_INDEX[ClearParser.token_rule_key(current)]
     return dispatch_stmt_rule(rule) if rule
 
-    expr = parse_expression
+    parsed_var = current.type == :VAR_ID ? parse_var_form : nil
+    if parsed_var&.assignment
+      consume(:CHAR, ';')
+      return parsed_var.node
+    end
+    expr = parsed_var ? parsed_var.node : parse_expression
 
     # THEN chain: expr [AS name] THEN expr [AS name] THEN ...
     if match?(:KEYWORD, 'AS') || match?(:KEYWORD, 'THEN')

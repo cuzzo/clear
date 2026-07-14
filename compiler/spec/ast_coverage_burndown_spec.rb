@@ -405,14 +405,14 @@ RSpec.describe ClearParser do
       expect(func_call.name).to eq("check?")
     end
 
-    it "covers functor-call suffixes and bind backtracking" do
+    it "covers functor-call suffixes and invalid assignment targets" do
       expect(parse_expr("(f)()")).to be_a(AST::FuncCall)
 
       compound = parser_for("f() += 1;")
-      expect(compound.send(:try_parse_bind_or_assign)).to be_nil
+      expect { compound.send(:parse_statement) }.to raise_error(ParserError, /Invalid assignment target/)
 
       assignment = parser_for("f() = 1;")
-      expect(assignment.send(:try_parse_bind_or_assign)).to be_nil
+      expect { assignment.send(:parse_statement) }.to raise_error(ParserError, /Invalid assignment target/)
     end
 
     it "parses TIGHT, EXIT, DIE, extern, method, and requires edge cases" do

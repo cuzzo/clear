@@ -31,17 +31,18 @@ RSpec.describe "destructuring assignment" do
       .to eq([["a", "Int32", true], ["b", "Float64", true]])
   end
 
-  it "backtracks speculative destructuring without an assignment operator" do
+  it "classifies destructuring without moving the parser cursor" do
     parser = ClearParser.new(Lexer.new("a, b;").tokenize, "a, b;")
 
-    expect(parser.send(:try_parse_destructuring_assign)).to be_nil
+    expect(parser.send(:destructuring_assignment?)).to eq(true)
+    expect(parser.instance_variable_get(:@pos)).to eq(0)
   end
 
   it "parses destructuring inside value block statements" do
     source = "a, b = [1_i64, 2_i64];"
     parser = ClearParser.new(Lexer.new(source).tokenize, source)
 
-    expect(parser.send(:try_parse_value_block_statement)).to be_a(AST::DestructuringAssignment)
+    expect(parser.send(:parse_statement)).to be_a(AST::DestructuringAssignment)
   end
 
   it "parses control-flow statements inside lambda value blocks before the result" do

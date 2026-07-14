@@ -349,3 +349,60 @@ the recursive complexity classification unchanged.
 Validation: 102 focused parser/contract examples pass; all 480 top-level CLEAR
 fixtures parse. Built-in coverage reports zero uncovered changed executable
 lines (58 parser lines and two parser-rule lines).
+
+### Stage 4A: single-pass VAR_ID statements
+
+The assignment parser no longer parses a VAR_ID-led form speculatively,
+restores `@pos`, and parses the same form again as an expression. A typed
+`ParsedVarForm` carries the already-parsed node and its assignment
+classification to ordinary statements, value blocks, and BG bodies.
+Destructuring is selected by non-mutating token lookahead and then parsed
+exactly once.
+
+The adversarial source is a nested sequence of calls whose arguments are value
+blocks, for example `f({ f({ f(); 0 }); 0 });`. Before this stage, depths 7
+through 11 took 0.042, 0.062, 0.142, 0.259, and 0.520 seconds. Every nested
+statement was reached down both the speculative-assignment and expression
+branches, giving Θ(2^N) time and Θ(N) live parser stack. After this stage,
+`parse_expression` invocations are exactly `3N + 1`; depth 10 takes about
+0.0025 seconds. A separate brace-classification lookahead still rescans nested
+blocks and leaves Θ(N²) token-peek work; Stage 4B addresses that independently.
+
+| Measure | Stage 3 | Stage 4A | Delta |
+| --- | ---: | ---: | ---: |
+| Parser lines | 4,900 | 4,938 | +38 |
+| Parser methods | 182 | 183 | +1 |
+| NilKill calls | 3,528 | 3,568 | +40 |
+| NilKill hash shapes | 21 | 21 | 0 |
+| NilKill array shapes | 1,396 | 1,411 | +15 |
+| NilKill collection index lookups | 42 | 42 | 0 |
+| NilKill hash-record blockers | 36 | 36 | 0 |
+| Espalier functions | 182 | 183 | +1 |
+| Espalier known `O(2^N)` component | 97 | 0 | -97 |
+| Espalier known `O(N)` time component | 11 | 31 | +20 |
+| Espalier known `O(N)` stack component | 98 | 5 | -93 |
+| Decomplex candidates | 434 | 432 | -2 |
+| Decomplex convergence units | 92 | 93 | +1 |
+| Decomplex state-based branch findings | 67 | 69 | +2 |
+| Decomplex False Simplicity findings | 65 | 66 | +1 |
+
+Espalier reflects the material algorithmic improvement unusually well: the
+generic recursive-SCC/replay facts remove the exponential component from all
+97 affected methods and the propagated linear-stack component from 93. This
+is evidence that the earlier FactMine/Espalier work is detecting the intended
+cross-language pattern rather than only the parser's method names.
+
+NilKill's counts rise because the deterministic classifier and typed result
+make more static calls and local array operations visible; its record-blocker
+metrics remain flat. Decomplex's total candidates fall slightly, but it adds
+local state-branch findings for the explicit token classifier and does not
+represent the exponential-to-linear recursive-work improvement. Those are not
+reporting bugs: NilKill and Decomplex answer different questions. A generic
+complexity-delta handoff from Espalier into Decomplex's convergence report
+would make this kind of high-value improvement harder to miss.
+
+Validation: 47 focused source-parser/contract examples pass; all 487 current
+top-level CLEAR fixtures parse. Ruby built-in coverage reports all 60 changed
+executable parser lines covered. Invalid call-result assignments now receive
+the existing `INVALID_ASSIGNMENT` diagnostic instead of failing later at the
+statement terminator.
