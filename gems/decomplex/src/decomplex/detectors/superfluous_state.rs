@@ -18,6 +18,8 @@ pub struct SuperfluousStateFinding {
     pub reader_methods: Vec<String>,
     pub ctorset: bool,
     pub adjacent_sites: Option<Vec<String>>,
+    pub confidence: String,
+    pub confidence_reason: Option<String>,
 }
 
 pub fn scan_files(files: &[PathBuf], language: Language) -> Result<Vec<SuperfluousStateFinding>> {
@@ -26,6 +28,10 @@ pub fn scan_files(files: &[PathBuf], language: Language) -> Result<Vec<Superfluo
 }
 
 pub fn scan_documents(documents: &[Document]) -> Vec<SuperfluousStateFinding> {
+    scan_documents_with_corpus(documents, true)
+}
+
+pub fn scan_documents_with_corpus(documents: &[Document], corpus_complete: bool) -> Vec<SuperfluousStateFinding> {
     // Public accessor reads are call facts rather than owner-local state reads.
     // Without points-to proof, a same-named external message or a self message
     // from a different method is enough to make a `dead_state` verdict unsound.
@@ -74,8 +80,8 @@ pub fn scan_documents(documents: &[Document]) -> Vec<SuperfluousStateFinding> {
         {
             results.push(SuperfluousStateFinding {
                 field: norm.clone(),
-                score: 0.85,
-                classification: "dead_state".to_string(),
+                score: if corpus_complete { 0.85 } else { 0.35 },
+                classification: if corpus_complete { "dead_state" } else { "unread_in_corpus" }.to_string(),
                 writer_method_count: self_writes
                     .iter()
                     .map(|w| (w.file.clone(), w.defn.clone()))
@@ -102,6 +108,8 @@ pub fn scan_documents(documents: &[Document]) -> Vec<SuperfluousStateFinding> {
                 reader_methods: Vec::new(),
                 ctorset: self_writes.iter().all(|w| w.defn == "initialize"),
                 adjacent_sites: None,
+                confidence: if corpus_complete { "high" } else { "low" }.to_string(),
+                confidence_reason: (!corpus_complete).then(|| "the selected files are not a proven closed corpus; readers may exist outside the target".to_string()),
             });
             continue;
         }
@@ -213,6 +221,8 @@ pub fn scan_documents(documents: &[Document]) -> Vec<SuperfluousStateFinding> {
             },
             ctorset,
             adjacent_sites: adj_sites,
+            confidence: "medium".to_string(),
+            confidence_reason: None,
         });
     }
 
@@ -429,5 +439,17 @@ mod tests {
                 .all(|finding| finding.field != "alloc_count"),
             "a public accessor read must prevent a dead-state verdict"
         );
+    }
+
+    #[test]
+    fn partial_corpus_downgrades_dead_state_claim() {
+        let doc: Document = serde_json::from_value(json!({
+            "file": "annotator.rb", "language": "ruby",
+            "state_writes": [{ "field": "semantic_index", "receiver": "self", "file": "annotator.rb", "function": "annotate", "line": 10, "span": [10, 1, 10, 20], "owner": "Annotator" }]
+        })).unwrap();
+        let findings = scan_documents_with_corpus(&[doc], false);
+        assert_eq!(findings[0].classification, "unread_in_corpus");
+        assert_eq!(findings[0].confidence, "low");
+        assert!(findings[0].confidence_reason.is_some());
     }
 }

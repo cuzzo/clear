@@ -1,8 +1,8 @@
 use crate::decomplex::detectors::{
-    co_update, decision_pressure, derived_state, false_simplicity, fat_union, flay_similarity,
+    co_update, decision_pressure, declared_type_pressure, derived_state, false_simplicity, fat_union, flay_similarity,
     function_lcom, implicit_control_flow, inconsistent_rename_clone, local_flow, locality_drag,
     miner, operational_discontinuity, oversized_predicate, path_condition, predicate_alias,
-    redundant_nil_guard, semantic_alias, sequence_mine, state_branch_density, state_mesh,
+    redundant_nil_guard, scoped_state_restoration, semantic_alias, sequence_mine, state_branch_density, state_mesh,
     superfluous_state, temporal_ordering_pressure, weighted_inlined_cognitive_complexity,
 };
 use crate::decomplex::parallel;
@@ -86,7 +86,11 @@ struct SharedFacts {
     local_summaries: Vec<local_flow::MethodSummary>,
     local_complexity_scores: BTreeMap<(String, String), syntax::LocalComplexityScore>,
     semantic_aliases: semantic_alias::SemanticAliasReport,
+    declaration_type_pressures: Vec<fact_mine_rust::profile::DeclarationTypePressure>,
 }
+
+#[derive(Clone, Debug, Serialize)]
+struct CorpusMetadata { complete: bool, reason: String, targets: Vec<String> }
 
 impl SharedFacts {
     fn new(documents: &[Document]) -> Self {
@@ -110,6 +114,8 @@ impl SharedFacts {
                 profile_phase(profile, "shared.semantic_aliases", started.elapsed());
                 result
             });
+            let declaration_type_pressures = scope.spawn(|| documents.iter()
+                .flat_map(fact_mine_rust::profile::extract_declaration_type_pressures).collect());
             Self {
                 local_summaries: local_summaries.join().expect("local-flow facts worker"),
                 local_complexity_scores: local_complexity_scores
@@ -118,6 +124,8 @@ impl SharedFacts {
                 semantic_aliases: semantic_aliases
                     .join()
                     .expect("semantic-alias facts worker"),
+                declaration_type_pressures: declaration_type_pressures.join()
+                    .expect("declaration-type-pressure facts worker"),
             }
         })
     }
@@ -125,7 +133,8 @@ impl SharedFacts {
 
 pub fn collect(targets: &[PathBuf], options: &Options, include_documents: bool) -> Result<Value> {
     let files = collect_source_files(targets, options)?;
-    facts_for_source_files(&files, options, include_documents)
+    let corpus = corpus_metadata(targets, &files, options);
+    facts_for_source_files_with_corpus(&files, options, include_documents, corpus)
 }
 
 pub fn collect_source_files(targets: &[PathBuf], options: &Options) -> Result<Vec<SourceFile>> {
@@ -143,6 +152,14 @@ pub fn collect_source_files(targets: &[PathBuf], options: &Options) -> Result<Ve
 }
 
 pub fn facts_for_source_files(files: &[SourceFile], options: &Options, include_documents: bool) -> Result<Value> {
+    facts_for_source_files_with_corpus(files, options, include_documents, CorpusMetadata {
+        complete: false,
+        reason: "source files were supplied without a closed-corpus target".to_string(),
+        targets: files.iter().map(|file| file.path.to_string_lossy().to_string()).collect(),
+    })
+}
+
+fn facts_for_source_files_with_corpus(files: &[SourceFile], options: &Options, include_documents: bool, corpus: CorpusMetadata) -> Result<Value> {
     if files.is_empty() {
         bail!("facts requires at least one supported source file");
     }
@@ -174,7 +191,7 @@ pub fn facts_for_source_files(files: &[SourceFile], options: &Options, include_d
     profile_phase(profile, "group_documents", group_started.elapsed());
 
     let detectors_started = Instant::now();
-    let detectors = collect_detector_facts(&groups, &shared, options)?;
+    let detectors = collect_detector_facts(&groups, &shared, options, corpus.complete)?;
     profile_phase(profile, "detectors", detectors_started.elapsed());
 
     let assemble_started = Instant::now();
@@ -196,6 +213,7 @@ pub fn facts_for_source_files(files: &[SourceFile], options: &Options, include_d
         "format": FORMAT,
         "files": reported_files,
         "file_roles": file_roles,
+        "corpus": corpus,
         "detectors": detectors,
         "documents": projected_documents,
     });
@@ -209,8 +227,9 @@ fn collect_detector_facts(
     groups: &BTreeMap<Language, Vec<Document>>,
     shared: &SharedFacts,
     options: &Options,
+    corpus_complete: bool,
 ) -> Result<Map<String, Value>> {
-    let tasks = detector_tasks(groups, shared, options);
+    let tasks = detector_tasks(groups, shared, options, corpus_complete);
     let jobs = parallel::job_count();
     if jobs <= 1 {
         return run_detector_tasks_sequential(tasks);
@@ -228,6 +247,7 @@ fn detector_tasks<'a>(
     groups: &'a BTreeMap<Language, Vec<Document>>,
     shared: &'a SharedFacts,
     options: &'a Options,
+    corpus_complete: bool,
 ) -> Vec<DetectorTask<'a>> {
     let mut tasks: Vec<DetectorTask<'a>> = Vec::new();
     macro_rules! detector_task {
@@ -369,10 +389,35 @@ fn detector_tasks<'a>(
     });
     detector_task!("superfluous_state", {
         merge_array_reports(groups, |documents| {
-            json_value(superfluous_state::scan_documents(documents))
+            json_value(superfluous_state::scan_documents_with_corpus(documents, corpus_complete))
         })
     });
+    detector_task!("declared_type_pressure", {
+        json_value(declared_type_pressure::scan(&shared.declaration_type_pressures))
+    });
+    detector_task!("scoped_state_restoration", {
+        merge_array_reports(groups, |documents| json_value(scoped_state_restoration::scan_documents(documents)))
+    });
     tasks
+}
+
+fn corpus_metadata(targets: &[PathBuf], files: &[SourceFile], options: &Options) -> CorpusMetadata {
+    let normalized_targets = targets.iter().map(|target| normalize_path(target)).collect::<Vec<_>>();
+    let roots = git_roots_for_files(files).unwrap_or_default();
+    let complete = options.excludes.is_empty() && roots.len() == 1
+        && normalized_targets.iter().any(|target| target.is_dir() && roots.contains(target));
+    let reason = if complete {
+        "the selected target includes the Git worktree root without custom exclusions"
+    } else if !options.excludes.is_empty() {
+        "custom exclusions make the selected corpus incomplete"
+    } else {
+        "the selected target does not cover a complete Git worktree"
+    };
+    CorpusMetadata {
+        complete,
+        reason: reason.to_string(),
+        targets: normalized_targets.iter().map(|target| target.to_string_lossy().to_string()).collect(),
+    }
 }
 
 fn run_detector_tasks_parallel(
@@ -900,6 +945,24 @@ mod tests {
             .collect::<Vec<_>>();
 
         assert_eq!(names, vec!["tracked.rb"]);
+    }
+
+    #[test]
+    fn corpus_metadata_distinguishes_worktree_root_from_partial_target() {
+        let dir = TempDir::new().expect("tempdir");
+        run_git(dir.path(), &["init"]);
+        let source = dir.path().join("state.rb");
+        fs::write(&source, "class State\n  def write\n    @value = 1\n  end\nend\n").unwrap();
+        run_git(dir.path(), &["add", "state.rb"]);
+
+        let complete = collect(&[dir.path().to_path_buf()], &Options::default(), false).unwrap();
+        assert_eq!(complete.pointer("/corpus/complete"), Some(&json!(true)));
+
+        let partial = collect(&[source], &Options::default(), false).unwrap();
+        assert_eq!(partial.pointer("/corpus/complete"), Some(&json!(false)));
+        let state = partial.get("detectors").and_then(|v| v.get("superfluous_state"))
+            .and_then(Value::as_array).and_then(|rows| rows.first()).unwrap();
+        assert_eq!(state.get("classification"), Some(&json!("unread_in_corpus")));
     }
 
     fn run_git(dir: &Path, args: &[&str]) {

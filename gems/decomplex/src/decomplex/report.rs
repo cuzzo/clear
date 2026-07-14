@@ -425,8 +425,10 @@ fn build_sections(detectors: &Value) -> Vec<ReportSection> {
         section("Redundant Nil Guards", 1, "nil checks / safe-nav dominated by an earlier non-nil proof -- delete repeated control flow or tighten the type", direct_array(detectors, "redundant_nil_guard")),
         section("State Heatmap", 1, "state fields ranked by write/read/re-derivation scatter -- tangled mutable state should get one owner", direct_array(detectors, "state_heatmap")).excluded_from_convergence(),
         section("Superfluous State", 1, "state fields that could be eliminated entirely (dead state / intra-method pass-through / adjacent-call pass-through / derived cache)", direct_array(detectors, "superfluous_state")),
+        section("Declared Type Pressure", 2, "normalized declared-type shapes where multiple pressures converge (wide/nested unions, unknown leaves, collection depth, and nilability)", direct_array(detectors, "declared_type_pressure")),
         section("State-Based Branch Density", 1, "branch decisions over mutable/object state -- state + control-flow pressure", direct_array(detectors, "state_branch_density")),
         section("Temporal Ordering Pressure", 1, "public mutable lifecycle surfaces that create implicit state-machine ordering", direct_array(detectors, "temporal_ordering_pressure")),
+        section("Scoped State Restoration", 1, "temporary mutable-state scopes with a proven restoration bypass, or a lower-confidence unprotected call before restoration", direct_array(detectors, "scoped_state_restoration")),
         section("Missing Abstractions", 1, "guard tuple recomputed across >=2 decision units", nested_array(miner, "missing_abstractions")),
         section("Reification Misses", 1, "an existing predicate reinvented inline -- invariant #16", nested_array(semantic_alias, "reification_misses")),
         section("Semantic Predicate Aliases", 1, "one decision, multiple names (receiver/polarity folded)", nested_array(semantic_alias, "alias_clusters")),
@@ -545,15 +547,23 @@ fn render_finding(title: &str, h: &Value) -> String {
             rv::field(h, "proof")
         ),
         "Superfluous State" => format!(
-            "- field `{}` -- classification: `{}` (score={:.3}, writers={}, readers={}, ctorset={})\n  - writes: {}\n  - reads: {}\n",
+            "- field `{}` -- classification: `{}` (confidence={}, score={:.3}, writers={}, readers={}, ctorset={})\n  - writes: {}\n  - reads: {}\n  - confidence reason: {}\n",
             rv::field(h, "field"),
             rv::field(h, "classification"),
+            rv::field(h, "confidence"),
             rv::get(h, "score").and_then(|v| v.as_f64()).unwrap_or(0.0),
             rv::field_usize(h, "writer_method_count"),
             rv::field_usize(h, "reader_method_count"),
             rv::field_bool(h, "ctorset"),
             rv::array(h, "write_sites").iter().map(|site| nav(&rv::string(Some(site)))).collect::<Vec<_>>().join(" ; "),
-            rv::array(h, "read_sites").iter().map(|site| nav(&rv::string(Some(site)))).collect::<Vec<_>>().join(" ; ")
+            rv::array(h, "read_sites").iter().map(|site| nav(&rv::string(Some(site)))).collect::<Vec<_>>().join(" ; "),
+            rv::field(h, "confidence_reason")
+        ),
+        "Declared Type Pressure" => format!(
+            "- {} `{}` slot `{}` -- score={} signals=`{}` union={} unknown={} collection_depth={}\n",
+            nav(&rv::field(h, "at")), rv::field(h, "declaration_kind"), rv::field(h, "slot"),
+            rv::field(h, "score"), rv::join_field(h, "signals", " | "), rv::field(h, "union_width"),
+            rv::field(h, "unknown_leaves"), rv::field(h, "collection_depth")
         ),
         "Missing Abstractions" => format!(
             "- **[{}]** support={} scatter={} rank={}\n  - tuple: `{}`\n  - {}\n",
@@ -587,6 +597,12 @@ fn render_finding(title: &str, h: &Value) -> String {
             rv::field(h, "state_space"),
             rv::array(h, "shared_fields").iter().take(8).map(|v| rv::string(Some(v))).collect::<Vec<_>>().join(" | "),
             rv::array(h, "sites").iter().take(6).map(|site| nav(&rv::string(Some(site)))).collect::<Vec<_>>().join(" ; ")
+        ),
+        "Scoped State Restoration" => format!(
+            "- {} -- `{}` on `{}` (confidence={}, score={}) temporary=`{}` restore=`{}`\n  - calls inside scope: {}\n",
+            nav(&rv::field(h, "at")), rv::field(h, "classification"), rv::field(h, "field"),
+            rv::field(h, "confidence"), rv::field(h, "score"), rv::field(h, "temporary_value"),
+            rv::join_field(h, "restoration_values", " | "), rv::join_field(h, "calls_inside_scope", " ; ")
         ),
         "Neglected Conditions" | "Neglected Path Conditions" => {
             let pattern = rv::get(h, "pattern").or_else(|| rv::get(h, "guards"));
@@ -1032,6 +1048,14 @@ fn sarif_message_detail(title: &str, finding: &Value) -> String {
             rv::field(finding, "local"),
             rv::field(finding, "guard"),
             rv::field(finding, "proof")
+        ),
+        "Declared Type Pressure" => format!(
+            "`{}` has converging declaration pressure: {}",
+            rv::field(finding, "slot"), rv::join_field(finding, "signals", " | ")
+        ),
+        "Scoped State Restoration" => format!(
+            "state `{}` has {} (confidence={})",
+            rv::field(finding, "field"), rv::field(finding, "classification"), rv::field(finding, "confidence")
         ),
         "State Heatmap" => format!(
             "state `{}` has pressure={}, messiness={} (writes={}, reads={}, re-derived={}, scatter={}); writers {}; readers {}",
