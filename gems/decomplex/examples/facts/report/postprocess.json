@@ -194,7 +194,7 @@
         "Neglected Updates: writes `.storage` but not co-written `.provenance` on receiver `order` (support=3)"
       ],
       "result_count": 8,
-      "rule_count": 26,
+      "rule_count": 28,
       "rule_ids": [
         "decomplex.decision-pressure",
         "decomplex.missing-abstractions",
