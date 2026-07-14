@@ -24,6 +24,7 @@ module Espalier
       @recursive_component_cache = {}
       @recursive_components_by_graph = {}
       @state_replay_summary_cache = {}
+      @state_rescan_summary_cache = {}
       @reachable_methods_cache = {}
     end
 
@@ -224,6 +225,8 @@ module Espalier
 
       replay = state_replay_recursion_summary(owner, member, members: members)
       return replay if replay
+      rescan = state_rescan_recursion_summary(owner, member, members: members)
+      return rescan if rescan
 
       progress = members.flat_map do |caller|
         recursive_targets = Array(graph[caller]).select { |callee| members.include?(callee.to_s) }
@@ -307,6 +310,82 @@ module Espalier
         space: "O(N)",
         reason: "receiver-state checkpoint restoration replays a progressing recursive component"
       }
+    end
+
+    # A single recursive continuation that advances a receiver cursor has
+    # linear depth. If every level calls a scan over the remaining collection,
+    # its per-level cost must be multiplied by that depth. FactMine supplies
+    # cursor aliases and collection domains, keeping this recurrence generic
+    # across source languages.
+    def state_rescan_recursion_summary(owner, member, members: nil)
+      graph = @internal_calls&.fetch(owner, nil)
+      return nil unless graph
+
+      members ||= recursive_component_members(graph, member)
+      return nil if members.empty?
+
+      component_key = [owner, members.sort]
+      return @state_rescan_summary_cache[component_key] if @state_rescan_summary_cache.key?(component_key)
+
+      component_facts = members.flat_map { |name| Array(@facts_by_method[[owner, name]]) }
+      recursive_call_sites = component_facts.sum do |fact|
+        Array(fact["call_contexts"]).count do |context|
+          members.include?(context["message"].to_s)
+        end
+      end
+      return @state_rescan_summary_cache[component_key] = nil unless recursive_call_sites == members.length
+
+      progress_domains = component_facts.flat_map do |fact|
+        Array(fact["state_progress"]).filter_map do |progress|
+          progress["state_domain"].to_s if %w[advance retreat].include?(progress["direction"].to_s)
+        end
+      end.uniq
+      return @state_rescan_summary_cache[component_key] = nil if progress_domains.empty?
+
+      reachable = reachable_methods(graph, members)
+      reachable_facts = reachable.flat_map { |name| Array(@facts_by_method[[owner, name]]) }
+      cursor_pairs = reachable_facts.flat_map { |fact| Array(fact["state_cursor_domains"]) }
+
+      summary = cursor_pairs.filter_map do |cursor|
+        cursor_domain = cursor["cursor_domain"].to_s
+        collection_domain = cursor["collection_domain"].to_s
+        next unless progress_domains.include?(cursor_domain)
+        next unless recursion_bounded_by_domain?(component_facts, collection_domain)
+
+        scan_costs = reachable_facts.flat_map do |fact|
+          Array(fact["iterations"]).filter_map do |iteration|
+            factors = Array(iteration.dig("symbolic_time", "factors"))
+            next unless factors.any? { |factor| factor["domain_id"].to_s == collection_domain }
+
+            Espalier::SymbolicComplexity.render(
+              Espalier::SymbolicComplexity.from_fact(iteration["symbolic_time"], fact["size_domains"])
+            )&.first || iteration["execution_multiplicity"].to_s
+          end
+        end
+        next if scan_costs.empty?
+
+        scan_cost = scan_costs.max_by { |cost| complexity_rank(cost) }
+        {
+          time: multiply("O(N)", scan_cost),
+          space: "O(N)",
+          reason: "receiver-state recursive depth repeatedly scans the cursor-bounded collection"
+        }
+      end.first
+
+      @state_rescan_summary_cache[component_key] = summary
+    end
+
+    def recursion_bounded_by_domain?(component_facts, collection_domain)
+      comparison_messages = %w[< <= > >= == !=]
+      component_facts.any? do |fact|
+        Array(fact["call_contexts"]).any? do |context|
+          next false unless comparison_messages.include?(context["message"].to_s)
+
+          domains = Array(context["receiver_size_domains"]) +
+            Array(context["argument_size_domains"]).flatten
+          domains.map(&:to_s).include?(collection_domain)
+        end
+      end
     end
 
     def recursive_component_members(graph, member)
@@ -416,8 +495,10 @@ module Espalier
                          iterations.max_by { |row| row["power"].to_i }&.fetch("execution_multiplicity", "O(1)") || "O(1)"
                        end
       state_replay = owner && state_replay_recursion_summary(owner, method[:name].to_s)
-      recursion_time, recursion_space, recursion_reason = if state_replay
-                                                            state_replay.values_at(:time, :space, :reason)
+      state_rescan = owner && state_rescan_recursion_summary(owner, method[:name].to_s)
+      state_recursion = state_replay || state_rescan
+      recursion_time, recursion_space, recursion_reason = if state_recursion
+                                                            state_recursion.values_at(:time, :space, :reason)
                                                           else
                                                             recursion_complexity(
                                                               recursion, Array(fact["parameters"]).length

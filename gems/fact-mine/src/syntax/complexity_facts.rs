@@ -858,17 +858,31 @@ fn collect_state_cursor_domains(
         node: &Node,
         domains: &mut DomainRegistry,
         behavior: &dyn NormalizedLanguageBehavior,
+        state_aliases: &mut BTreeMap<String, BTreeSet<String>>,
         output: &mut Vec<StateCursorDomainFact>,
     ) {
         if deferred_block(node, behavior) {
             return;
         }
+        if matches!(node.r#type.as_str(), "LASGN" | "DASGN") {
+            if let Some(local) = child_string(node.children.first()) {
+                let states = assignment_rhs(node).map(state_names).unwrap_or_default();
+                if states.is_empty() {
+                    state_aliases.remove(local);
+                } else {
+                    state_aliases.insert(local.to_string(), states);
+                }
+            }
+        }
         if direct_call_message(node) == Some("[]") {
             let collections = call_receiver(node).map(state_names).unwrap_or_default();
-            let cursors = call_argument_nodes(node)
+            let mut cursors = call_argument_nodes(node)
                 .into_iter()
                 .flat_map(state_names)
                 .collect::<BTreeSet<_>>();
+            for local in call_argument_nodes(node).into_iter().flat_map(local_names) {
+                cursors.extend(state_aliases.get(&local).into_iter().flatten().cloned());
+            }
             for collection in &collections {
                 for cursor in &cursors {
                     if collection != cursor {
@@ -883,12 +897,12 @@ fn collect_state_cursor_domains(
             }
         }
         for child in child_nodes(node) {
-            visit(child, domains, behavior, output);
+            visit(child, domains, behavior, state_aliases, output);
         }
     }
 
     let mut output = Vec::new();
-    visit(node, domains, behavior, &mut output);
+    visit(node, domains, behavior, &mut BTreeMap::new(), &mut output);
     output.sort();
     output.dedup();
     output
@@ -2343,6 +2357,45 @@ end
             .unwrap()
             .state_replays
             .is_empty());
+    }
+
+    #[test]
+    fn normalized_state_cursor_domains_follow_local_aliases_cross_language() {
+        let ruby = language_facts(
+            r#"
+class Cursor
+  def scan
+    cursor = @position
+    while cursor < @items.length
+      consume(@items[cursor])
+      cursor += 1
+    end
+  end
+end
+"#,
+            Language::Ruby,
+            ".rb",
+        );
+        let python = language_facts(
+            r#"
+class Cursor:
+    def scan(self):
+        cursor = self.position
+        while cursor < len(self.items):
+            consume(self.items[cursor])
+            cursor += 1
+"#,
+            Language::Python,
+            ".py",
+        );
+
+        for rows in [&ruby, &python] {
+            let scan = rows.iter().find(|row| row.function == "scan").unwrap();
+            assert!(scan.state_cursor_domains.iter().any(|cursor| {
+                cursor.cursor_domain == "state:Cursor:@position"
+                    && cursor.collection_domain == "state:Cursor:@items"
+            }), "{scan:#?}");
+        }
     }
 
     fn complexity(rows: &[MethodComplexityFacts], name: &str) -> Option<String> {

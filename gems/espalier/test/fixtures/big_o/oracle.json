@@ -14,6 +14,14 @@
     "block_exit_cleanup_summary": "O(N*M)",
     "block_exit_cleanup_summaries": "O(N*M)"
   },
+  "recursive_suffix_rescan.rb": {
+    "walk": "O(N^2)",
+    "scan_remaining": "O(N)"
+  },
+  "recursive_suffix_rescan.py": {
+    "walk": "O(N^2)",
+    "scan_remaining": "O(N)"
+  },
   "ruby_product.rb": {
     "cartesian_product": "O(N*M)",
     "same_domain_product": "O(N^2)",
