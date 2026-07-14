@@ -495,7 +495,7 @@ module Schemas
   sig { params(s: SchemaValue).returns(T::Boolean) }
   def self.resource?(s) = s.is_a?(ResourceSchema)
 
-  sig { params(v: UnionSchema::VariantValue).returns(T::Boolean) }
+  sig { params(v: Object).returns(T::Boolean) }
   def self.inline_struct?(v) = v.is_a?(InlineStructVariant)
 
   # Field-bearing schema: StructSchema or ResourceSchema (EXTERN STRUCT
