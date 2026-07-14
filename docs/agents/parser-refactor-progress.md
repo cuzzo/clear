@@ -256,3 +256,49 @@ Validation: 24 focused source-parser and diagnostic examples pass; all 480
 top-level CLEAR fixtures parse. Built-in coverage reports zero uncovered
 changed executable lines: 20 in the parser, three in the AST record, and four
 in the reentrance diagnostic consumer.
+
+### Stage 2D: typed WITH MATCH arms and complete body ownership
+
+The parser's `WithMatchArm` hash was confirmed to have one closed schema at
+all construction sites and is now `AST::WithMatchArm`. Parser, annotator, and
+MIR lowering consumers use named fields, including the mutable per-arm error
+clause list.
+
+The audit exposed two real bugs hidden by the former hash convention. Generic
+AST body traversal only returned the empty main body of a MATCH-form WITH and
+omitted every arm body. Pipeline placeholder rewriting therefore also returned
+early without rewriting arm bodies. `WithBlock#child_bodies`, `AST.body_slots`,
+and `PipelinePlaceholderRewriter` now own and transform arm bodies explicitly.
+
+| Measure | Stage 2C | Stage 2D | Delta |
+| --- | ---: | ---: | ---: |
+| NilKill calls | 3,628 | 3,623 | -5 |
+| NilKill hash shapes | 23 | 21 | -2 |
+| NilKill array shapes | 1,406 | 1,405 | -1 |
+| NilKill collection index lookups | 71 | 71 | 0 |
+| NilKill hash-record blockers | 65 | 65 | 0 |
+| NilKill struct declarations in parser target | 8 | 8 | 0 |
+| Espalier complete/incomplete time results | 10 / 174 | 10 / 174 | 0 / 0 |
+| Espalier known `O(2^N)` component | 97 | 97 | 0 |
+| Espalier known `O(N)` stack component | 98 | 98 | 0 |
+| Decomplex candidates | 439 | 439 | 0 |
+| Decomplex convergence units | 93 | 93 | 0 |
+| Decomplex decision-pressure findings | 5 | 5 | 0 |
+| Decomplex state-based branch findings | 70 | 70 | 0 |
+| Decomplex False Simplicity findings | 65 | 65 | 0 |
+
+The parser-only NilKill snapshot sees the two removed literal hash shapes but
+cannot represent the more valuable cross-file result: a previously invisible
+AST body subtree is now included in canonical traversal and transformation.
+None of the three parser-target headline reports moves for that correctness
+fix. A useful generic detector would compare body-owning records against
+canonical traversal/rewriter coverage, but only if it can be derived from
+typed body fields and visitor structure across languages; a parser-specific
+arm rule would not be worthwhile.
+
+Validation: 25 focused source-parser, annotation, traversal, pipeline rewrite,
+and MIR-lowering examples pass; all 480 top-level CLEAR fixtures parse.
+Built-in coverage reports zero uncovered changed executable lines across the
+parser, AST, annotator, and pipeline rewriter. The two MIR lowering changes
+are keyword-argument source lines Ruby marks non-executable, and the source
+regression exercises their named-field values through the resulting MIR arms.

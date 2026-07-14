@@ -2540,8 +2540,8 @@ RSpec.describe "MIR gap-burn characterization" do
       AST::Capability.new(capability: :EXCLUSIVE, var_node: match_cell, alias: "guarded")
     ], [], nil)
     match_node.arms = [
-      { family: :LOCKED, body: [AST::PassStmt.new(tok)] },
-      { family: :VERSIONED, body: [AST::PassStmt.new(tok)] },
+      AST::WithMatchArm.new(family: :LOCKED, body: [AST::PassStmt.new(tok)]),
+      AST::WithMatchArm.new(family: :VERSIONED, body: [AST::PassStmt.new(tok)]),
     ]
     attach_capability_plan!(match_node)
     low.define_singleton_method(:lower_body) { |_body| [MIR::Noop.new] }

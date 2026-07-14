@@ -134,7 +134,7 @@ module WithMatchCheck
       # Rule 2: REQUIRES↔WHEN exhaustiveness (only for MATCH form).
       next unless node.arms
 
-      arm_families = node.arms.map { |a| a[:family] }.to_set
+      arm_families = node.arms.map(&:family).to_set
 
       # Required families = union across all WITH-bound params' family disjunctions.
       required_families = bound_params.flat_map { |p| (requires_map[p] || Set.new).to_a }.to_set

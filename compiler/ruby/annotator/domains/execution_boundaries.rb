@@ -93,10 +93,10 @@ module Annotator
                 # (CONTENTION); ATOMIC binds the alias to the cell ref so any
                 # subsequent body access contends on the cache line (CONTENTION,
                 # no BLOCKING — atomics never park).
-                with_match_family_effects(arm[:family]).each { |effect| record_effect(effect) }
+                with_match_family_effects(arm.family).each { |effect| record_effect(effect) }
                 with_new_scope(current_scope) do
                   with_body_fact_scope(node) do
-                    visit_stmts(arm[:body])
+                    visit_stmts(arm.body)
                   end
                   finalize_scope(node)
                 end
@@ -179,7 +179,7 @@ module Annotator
         return unless node.arms && node.snapshot_mode.nil?
 
         mutable_cap = capability_plan.all.find(&:alias_mutable)
-        if mutable_cap && node.arms.any? { |arm| arm[:family] == :VERSIONED }
+        if mutable_cap && node.arms.any? { |arm| arm.family == :VERSIONED }
           error!(node, :WITH_MATCH_VERSIONED_AS_MUTABLE, name: mutable_cap.var_name)
         end
 
@@ -221,7 +221,7 @@ module Annotator
       def with_block_has_versioned_arm?(node)
         T.bind(self, SemanticAnnotator)
 
-        !!node.arms&.any? { |arm| arm[:family] == :VERSIONED }
+        !!node.arms&.any? { |arm| arm.family == :VERSIONED }
       end
 
       sig { params(node: AST::WithBlock, fn_ctx: FunctionContext).void }
@@ -477,7 +477,7 @@ module Annotator
         caps = capability_plan.sync_constrained
         return if caps.size < 2
 
-        arm_admits_atomic = (node.arms || []).any? { |arm| arm[:family] == :ATOMIC }
+        arm_admits_atomic = (node.arms || []).any? { |arm| arm.family == :ATOMIC }
         offender = caps.find { |c| cap_admits_atomic?(c) }
         return unless offender || arm_admits_atomic
 
@@ -526,14 +526,14 @@ module Annotator
         T.bind(self, SemanticAnnotator)
 
         (node.arms || []).each do |arm|
-          clauses = arm[:lock_error_clauses] || []
-          case arm[:family]
+          clauses = arm.lock_error_clauses
+          case arm.family
           when :VERSIONED
             # VERSIONED arms without an inline handler fall back to SYNC POLICY.
             if clauses.empty?
               synth = synthesize_clause_from_policy(:MvccConflict)
               if synth
-                arm[:lock_error_clauses] = [synth]
+                arm.lock_error_clauses = [synth]
               else
                 error!(node, :WITH_SNAPSHOT_MATCH_VERSIONED_NEEDS_HANDLER)
               end
@@ -548,7 +548,7 @@ module Annotator
         # annotated. Mirrors the single-arm pass at the bottom of
         # validate_lock_error_clause!.
         (node.arms || []).each do |arm|
-          (arm[:lock_error_clauses] || []).each do |clause|
+          arm.lock_error_clauses.each do |clause|
             case clause.action
             when AST::ErrorActionKind::Exit
               visit(T.must(clause.message))

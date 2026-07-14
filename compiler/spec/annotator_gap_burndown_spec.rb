@@ -328,7 +328,7 @@ RSpec.describe "annotator branch gap burndown" do
         var_node: AST::Literal.new(token(:INT64, "1"), :INT64, 1, :stack),
       ),
     ], [])
-    with_node.arms = [{ family: :VERSIONED, body: [], lock_error_clauses: [] }]
+    with_node.arms = [AST::WithMatchArm.new(family: :VERSIONED)]
     with_node.snapshot_mode = nil
 
     fact_builder = method(:with_capability_fact)
@@ -2790,20 +2790,20 @@ RSpec.describe "annotator branch gap burndown" do
     block_body = [AST::Literal.new(token(:NUMBER, "1_i64"), :INT64, 1, :stack)]
     node = AST::WithBlock.new(token(:WITH, "WITH"), [], [])
     node.arms = [
-      { family: :VERSIONED, lock_error_clauses: [], body: [] },
-      { family: :ATOMIC, lock_error_clauses: [AST::ErrorClause.new(selectors: [], action: AST::ErrorActionKind::Raise, retries: nil, token: nil)], body: [] },
-      { family: :LOCKED, lock_error_clauses: [AST::ErrorClause.new(selectors: [], action: AST::ErrorActionKind::Block, retries: nil, token: nil, body: block_body)], body: [] },
-      { family: :OTHER, lock_error_clauses: [AST::ErrorClause.new(selectors: [], action: AST::ErrorActionKind::Exit, retries: nil, token: nil, message: AST::Literal.new(token(:STRING, "\"x\""), :STRING, "x", :rodata))], body: [] },
+      AST::WithMatchArm.new(family: :VERSIONED),
+      AST::WithMatchArm.new(family: :ATOMIC, lock_error_clauses: [AST::ErrorClause.new(selectors: [], action: AST::ErrorActionKind::Raise, retries: nil, token: nil)]),
+      AST::WithMatchArm.new(family: :LOCKED, lock_error_clauses: [AST::ErrorClause.new(selectors: [], action: AST::ErrorActionKind::Block, retries: nil, token: nil, body: block_body)]),
+      AST::WithMatchArm.new(family: :OTHER, lock_error_clauses: [AST::ErrorClause.new(selectors: [], action: AST::ErrorActionKind::Exit, retries: nil, token: nil, message: AST::Literal.new(token(:STRING, "\"x\""), :STRING, "x", :rodata))]),
     ]
 
     ann.send(:validate_snapshot_match_arms!, node)
 
-    expect(node.arms.first[:lock_error_clauses].first.action).to eq(AST::ErrorActionKind::Exit)
-    expect(visited).to include(node.arms.first[:lock_error_clauses].first.message, block_body.first, node.arms.last[:lock_error_clauses].first.message)
+    expect(node.arms.first.lock_error_clauses.first.action).to eq(AST::ErrorActionKind::Exit)
+    expect(visited).to include(node.arms.first.lock_error_clauses.first.message, block_body.first, node.arms.last.lock_error_clauses.first.message)
     expect(direct_errors(ann).map { |e| e[1] }).to include(:WITH_SNAPSHOT_MATCH_ATOMIC_FORBIDS_HANDLER)
 
     miss = AST::WithBlock.new(token(:WITH, "WITH"), [], [])
-    miss.arms = [{ family: :VERSIONED, lock_error_clauses: [], body: [] }]
+    miss.arms = [AST::WithMatchArm.new(family: :VERSIONED)]
     ann.define_singleton_method(:synthesize_clause_from_policy) { |_name| nil }
     ann.send(:validate_snapshot_match_arms!, miss)
     expect(direct_errors(ann).map { |e| e[1] }).to include(:WITH_SNAPSHOT_MATCH_VERSIONED_NEEDS_HANDLER)
@@ -2826,7 +2826,7 @@ RSpec.describe "annotator branch gap burndown" do
     first = AST::Capability.new(capability: :EXCLUSIVE, var_node: AST::Identifier.new(token, "a"))
     second = AST::Capability.new(capability: :EXCLUSIVE, var_node: AST::Identifier.new(token, "b"))
     node = AST::WithBlock.new(token(:WITH, "WITH"), [first, second], [])
-    node.arms = [{ family: :ATOMIC, body: [], lock_error_clauses: [] }]
+    node.arms = [AST::WithMatchArm.new(family: :ATOMIC)]
     attach_capability_plan!(node)
 
     ann.send(:validate_no_multi_object_atomic!, node)
@@ -3277,8 +3277,9 @@ RSpec.describe "annotator branch gap burndown" do
     ann.define_singleton_method(:finalize_scope) { |_node| nil }
     ann.define_singleton_method(:validate_no_multi_object_atomic!) { |_node| nil }
     ann.define_singleton_method(:validate_lock_error_clause!) { |_node, _caps| nil }
+    heap_arm = AST::PassStmt.new(token(:KEYWORD, "PASS"))
     ann.define_singleton_method(:visit_stmts) do |body|
-      record_effect(EffectTracker::HEAP) if body.include?(:heap_arm)
+      record_effect(EffectTracker::HEAP) if body.include?(heap_arm)
       record_snapshot_txn_violation!(EffectTracker::BLOCKING, "with_fn") if body.include?(:snapshot_violation)
     end
 
@@ -3287,10 +3288,10 @@ RSpec.describe "annotator branch gap burndown" do
     node = AST::WithBlock.new(token(:WITH, "WITH"), [cap], [:snapshot_violation])
     node.snapshot_mode = :transaction
     node.arms = [
-      { family: :LOCKED, body: [:heap_arm], lock_error_clauses: [] },
-      { family: :VERSIONED, body: [], lock_error_clauses: [] },
-      { family: :ATOMIC, body: [], lock_error_clauses: [] },
-      { family: :OTHER, body: [], lock_error_clauses: [] },
+      AST::WithMatchArm.new(family: :LOCKED, body: [heap_arm]),
+      AST::WithMatchArm.new(family: :VERSIONED),
+      AST::WithMatchArm.new(family: :ATOMIC),
+      AST::WithMatchArm.new(family: :OTHER),
     ]
 
     ann.send(:visit_WithBlock, node)

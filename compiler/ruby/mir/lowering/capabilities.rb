@@ -708,11 +708,10 @@ module MIRLoweringCapabilities
     snapshot_mode = node.respond_to?(:snapshot_mode) && node.snapshot_mode
 
     arms_meta = node.arms.map { |arm|
-      family = T.cast(arm[:family], Symbol)
       MIR::WithMatchArm.new(
-        family: family,
+        family: arm.family,
         guard_var: "__#{alias_name}_match_#{node.object_id.abs}",
-        body: lower_body(arm[:body]),
+        body: lower_body(arm.body),
       )
     }
     MIR::ScopeBlock.new([MIR::WithMatchDispatch.new(cell, safe_alias, snapshot_mode, runtime_binding_name, arms_meta)])

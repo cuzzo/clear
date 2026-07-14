@@ -680,8 +680,13 @@ module AST
       slots << BodySlot.new(node.else_branch, ->(body) { node.else_branch = body }) if node.else_branch && !node.else_branch.empty?
     when WhileLoop, WhileBindLoop
       slots << BodySlot.new(node.do_branch, ->(body) { node.do_branch = body }) if node.do_branch
-    when ForRange, ForEach, WithBlock, BgBlock, BgStreamBlock
+    when ForRange, ForEach, BgBlock, BgStreamBlock
       slots << BodySlot.new(node.body, ->(body) { node.body = body }) if node.body
+    when WithBlock
+      slots << BodySlot.new(node.body, ->(body) { node.body = body }) if node.body
+      node.arms&.each do |arm|
+        slots << BodySlot.new(arm.body, ->(body) { arm.body = body })
+      end
     when MatchStatement
       node.cases.each { |match_case| slots << BodySlot.new(match_case.body, ->(body) { match_case.body = body }) if match_case.body }
       slots << BodySlot.new(node.default_case, ->(body) { node.default_case = body }) if node.default_case
@@ -2368,6 +2373,13 @@ module AST
     include Locatable
   end
   Require      = Struct.new(:token, :path) { include Locatable }
+  class WithMatchArm < T::Struct
+    const :family, Symbol
+    prop :body, RawBody, factory: -> { [] }
+    prop :lock_error_clauses, T::Array[ErrorClause], factory: -> { [] }
+    const :token, T.nilable(Lexer::Token), default: nil
+  end
+
   # lock_error_clause: optional ErrorClause describing ON TIMEOUT / RETRY
   # handling for EXCLUSIVE / write_locked_read captures.
   # retries > 0 means RETRY(N) THEN <action>; retries nil/0 means plain ON TIMEOUT <action>.
@@ -2381,6 +2393,7 @@ module AST
     def initialize(*args)
       super
       self[:capabilities] = [] if self[:capabilities].nil?
+      @arms = T.let(nil, T.nilable(T::Array[AST::WithMatchArm]))
     end
 
     sig { params(val: T::Array[AST::Capability]).void }
@@ -2389,17 +2402,26 @@ module AST
     end
 
     sig { returns(T::Array[RawBody]) }
-    def child_bodies = [body].compact
+    def child_bodies
+      bodies = T.let([body].compact, T::Array[RawBody])
+      bodies.concat(arms.map(&:body)) if arms
+      bodies
+    end
     attr_accessor :lock_error_clause
     # Per-WITH opt-out from a static nested-lock check. Hash shape:
     #   { kind: :deadlock | :lock_cycle, token: Token }
     # nil = no opt-out; annotator rejects violating nesting.
     attr_accessor :deadlock_escape
     # Arms for the WITH MATCH form. nil for plain WITH (single-family).
-    # Array of { family: Symbol, body: [stmts], lock_error_clauses: [clause, ...], token: Token }.
     # Single-family WITH is a one-arm WithMatch internally; the parser
     # leaves arms nil when no MATCH keyword was used.
-    attr_accessor :arms
+    sig { returns(T.nilable(T::Array[AST::WithMatchArm])) }
+    attr_reader :arms
+
+    sig { params(value: T.nilable(T::Array[AST::WithMatchArm])).void }
+    def arms=(value)
+      @arms = value
+    end
     # :view is a cheap immutable borrow on ~T@observable; :materialized_view is
     # an owned snapshot on any ~T aggregate. nil for traditional capability blocks.
     attr_accessor :view_kind

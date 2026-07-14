@@ -88,8 +88,6 @@ class ClearParser
   PatternCapture = T.type_alias { T.nilable(T.any(AST::Node, Type, String, Symbol, Integer, Float, T::Boolean)) }
   ArgumentType = T.type_alias { T.any(Symbol, Type) }
   ReturnLifetime = T.type_alias { T.nilable(T.any(Symbol, T::Array[AST::Node])) }
-  WithMatchArmValue = T.type_alias { T.nilable(T.any(Symbol, Lexer::Token, AST::RawBody, T::Array[AST::ErrorClause])) }
-  WithMatchArm = T.type_alias { T::Hash[Symbol, WithMatchArmValue] }
   SigilTable = T.type_alias { T::Hash[String, SigilAttrs] }
   WindowPipelineOp = T.type_alias { T.any(AST::WindowOp, AST::BatchWindowOp) }
   ConcurrentPipelineOp = T.type_alias do
@@ -4078,9 +4076,9 @@ class ClearParser
   #       '->' '{' <body> '}'
   #       [ ON <selectors> <action> | RETRY '(' N ')' THEN <action> ]*
   #
-  # Returns an array of arm hashes. The terminating END is consumed by
+  # Returns an array of typed arms. The terminating END is consumed by
   # the caller.
-  sig { returns(T::Array[WithMatchArm]) }
+  sig { returns(T::Array[AST::WithMatchArm]) }
   def parse_with_match_arms
     arms = []
     while match?(:KEYWORD, 'WHEN')
@@ -4096,7 +4094,12 @@ class ClearParser
         lock_error_clauses << clause if clause
       end
 
-      arms << { family: family, body: body, lock_error_clauses: lock_error_clauses, token: when_tok }
+      arms << AST::WithMatchArm.new(
+        family: family,
+        body: body,
+        lock_error_clauses: lock_error_clauses,
+        token: when_tok,
+      )
     end
 
     if arms.empty?
