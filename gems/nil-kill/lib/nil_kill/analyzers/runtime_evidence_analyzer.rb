@@ -39,7 +39,11 @@ module NilKill
       def dead_nil_check_action(fact)
         return unless fact.is_a?(Hash)
 
-        operation = fact["kind"] == "nil_check" ? "replace_condition" : "remove_safe_navigation"
+        operation = case fact["kind"]
+        when "nil_check" then "replace_condition"
+        when "non_nil_assertion" then "remove_non_nil_assertion"
+        else "remove_safe_navigation"
+        end
         build_static_action(
           fact,
           "dead_nil_check",

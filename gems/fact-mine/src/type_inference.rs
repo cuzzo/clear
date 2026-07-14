@@ -1497,6 +1497,18 @@ impl<'a> TypeInferenceVisitor<'a> {
                         "tlet": true,
                         "type": arg_nodes.get(1).map(|arg| arg.text.clone()),
                     }));
+                } else if method == "must" && receiver.text == "T" {
+                    let arg_nodes = call_arguments(args_node);
+                    if let Some(subject) = arg_nodes.first().filter(|arg| self.provably_non_nil(arg)) {
+                        self.facts.dead_nil_checks.push(json!({
+                            "path": self.path,
+                            "line": node.first_lineno,
+                            "kind": "non_nil_assertion",
+                            "code": node.text.clone(),
+                            "subject": subject.text.clone(),
+                            "reason": format!("{} has a statically proven non-nil type; T.must is redundant", subject.text),
+                        }));
+                    }
                 } else if node.r#type == "QCALL" {
                     if self.provably_non_nil(receiver) {
                         self.facts.dead_nil_checks.push(json!({

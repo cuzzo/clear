@@ -43,6 +43,51 @@ RSpec.describe NilKill::SourceIndex do
     end
   end
 
+  it "identifies T.must around a total call without flagging a nilable call" do
+    Dir.mktmpdir("nil-kill-source-index-t-must") do |dir|
+      path = File.join(dir, "sample.rb")
+      File.write(path, <<~RUBY)
+        class Example
+          extend T::Sig
+
+          sig { returns(String) }
+          def total
+            "value"
+          end
+
+          sig { returns(T.nilable(String)) }
+          def optional
+            nil
+          end
+
+          sig { returns(String) }
+          def run
+            T.must(total)
+            T.must(optional)
+          end
+        end
+      RUBY
+
+      checks = described_class.new(path).dead_nil_checks
+
+      expect(checks).to include(a_hash_including(
+        "kind" => "non_nil_assertion",
+        "code" => "T.must(total)",
+        "subject" => "total"
+      ))
+      expect(checks).not_to include(a_hash_including("code" => "T.must(optional)"))
+
+      actions = NilKill::Analyzers::RuntimeEvidenceAnalyzer.new(
+        "languages" => ["ruby"],
+        "static" => { "facts" => { "dead_nil_checks" => checks } }
+      ).analyze
+      expect(actions).to include(a_hash_including(
+        "kind" => "replace_deterministic_guard",
+        "data" => a_hash_including("operation" => "remove_non_nil_assertion")
+      ))
+    end
+  end
+
   it "indexes Ruby struct block owners and Sorbet struct fields" do
     Dir.mktmpdir("nil-kill-source-index-struct-owners") do |dir|
       path = File.join(dir, "sample.rb")
