@@ -95,7 +95,7 @@ production code is already wrong.
 | Feature | Exact primary trigger | Evidence in current source |
 |---|---|---|
 | FR-T1-01 | `Lexer::Token#value` into `ClearParser#parse_lit` field pairs | **Confirmed erosion/translation blocker.** Token-kind/value correlation is lost. |
-| FR-T1-02 | `process_pattern` into `dispatch_*_pattern_action` | **Confirmed shape loss.** Rule-specific capture positions become one union array. |
+| FR-T1-02 | Nested struct-field pair and `process_pattern` capture arrays | **Confirmed source shape loss; automated attribution is not T1 here.** Direct tuple literals are cheap evidence, but following their positions through helpers, blocks, and collection transforms is T3/high-risk. |
 | FR-T1-03 | `parse_union_def` converting `method_reqs.empty?` to nil | **Review candidate only.** No proof yet that nil and empty are equivalent to all consumers. |
 | FR-T1-04 | `AutoSlotId#eql?` | **Confirmed contract contradiction.** The declared domain makes the required protocol guard statically impossible. |
 | FR-T1-05 | `SemanticAnnotator#semantic_index` lifecycle | **Contract gap, not a found bypass.** Completion is nilability plus `T.must`; current frontend ordering is correct. |
@@ -147,6 +147,20 @@ nil in different token kinds; the erosion occurs because the token kind/value
 correlation is absent from the boundary. The correct recommendation is a
 checked textual-token accessor or a typed token variant, not a claim that
 `Token#value` always returns `String`.
+
+There are three distinct observations in this excerpt, and FR-T1-01 covers
+only the first:
+
+1. `name_tok` is known syntactically to be `TYPE_ID` or `VAR_ID`, but that fact
+   does not narrow the untyped `Token#value` slot to `String`. This is the
+   boundary type erosion.
+2. `[T.must(name_tok).value, v]` is the conventional two-element key/value
+   entry consumed by `Array#to_h`; it is not, by itself, evidence that the
+   source should allocate a one-entry hash.
+3. `[[name, value], token]` is an anonymous record-shaped outer pair. A named
+   parsed-field record containing `name`, `value`, and `token` would be clearer,
+   but recognizing that design opportunity is FR-T1-02/T3 evidence, not the
+   T1 type-erosion proof.
 
 **Finding.** Report T1 only when the producer flow proves a strict subtype of
 the declared result. “All resolved consumers cast the result to the same
@@ -210,12 +224,26 @@ identified the parser-rule capture boundary. The current generic
 `parse_comma_seq` signature preserves its element type and is not itself an
 example of this defect.
 
-**Exact Parser trigger.** The parser-rule DSL knows which action produced each
-capture, but `process_pattern` collapses every position into
-`T::Array[PatternCapture]`; the positional consumers in
-`dispatch_stmt_pattern_action` then use `args[0]` and `args[1]` without a
-correlated tuple contract (`compiler/ruby/ast/parser.rb:52,715-749` and
-`:385-393`):
+**Exact Parser triggers.** The struct-literal parser constructs an anonymous
+nested pair, projects the inner pair with `map(&:first)`, converts those pairs
+to the field hash, and separately destructures both levels to build the token
+map (`compiler/ruby/ast/parser.rb:3080-3086`):
+
+```ruby
+_, fields = parse_comma_seq(:CHAR, '{', '}') do
+  name_tok = current.type == :TYPE_ID ? consume(:TYPE_ID) : consume(:VAR_ID)
+  consume(:CHAR, ':'); v = parse_expression
+  [[T.must(name_tok).value, v], name_tok]
+end
+lit = AST::StructLit.new(type_token, name, fields.map(&:first).to_h, storage, type_args)
+lit.field_tokens = fields.each_with_object({}) { |(kv, t), h| h[kv.first] = t }
+```
+
+The parser-rule DSL is a second exact instance. It knows which action produced
+each capture, but `process_pattern` collapses every position into
+`T::Array[PatternCapture]`; positional consumers use `args[0]` and `args[1]`
+without a correlated tuple contract (`compiler/ruby/ast/parser.rb:52,715-749`
+and `:385-393`):
 
 ```ruby
 PatternCapture = T.type_alias do
@@ -245,6 +273,27 @@ generic signature preserves `[Lexer::Token, T::Array[Elem]]`. The requested
 metric must therefore identify correlation lost by the rule/capture boundary,
 not flag generic sequence helpers indiscriminately.
 
+**Automation boundary.** Detecting a heterogeneous or nested array literal is
+cheap. Detecting direct destructuring, `pair[0]`, `pair.first`, or an immediate
+`to_h` is bounded library modeling. Proving the complete struct-field case is
+not cheap: it requires interprocedural and field-sensitive flow through the
+block passed to `parse_comma_seq`, the generic return, `Symbol#to_proc`,
+`map(&:first)`, `first`, `to_h`, and the second destructuring consumer. Ruby's
+dynamic dispatch further weakens call-target certainty. That complete claim
+must be T3 unless a closed, fully resolved path is available; attempting to
+enumerate every equivalent collection transformation is not a viable T1
+strategy.
+
+**Verified extractor defect.** Running FactMine's nil-kill profile on the
+current parser does not emit the actual nested array literal at line 3083. It
+instead emits false `tuple_arrays` for call argument lists such as
+`consume(:CHAR, '>')` at line 3079 and `consume(:CHAR, ':')` at line 3082.
+FactMine is therefore conflating normalized call-argument lists with array
+literals while missing the source literal that motivated the feature. Fix this
+with a Ruby profile integration oracle before trusting any downstream tuple
+metric. Nil-kill's existing “Tuple-Like Array Report” cannot repair wrong or
+missing producer facts.
+
 **Metrics.** Stable arity; per-slot inferred type stability; correlated
 destructuring count; downstream slot casts; one-or-many normalization count;
 collection nesting introduced at a boundary.
@@ -253,17 +302,23 @@ collection nesting introduced at a boundary.
 tuple is declared. They do not generally infer and rank the boundary where a
 stable tuple relationship was unnecessarily converted into a generic array.
 
-**Products.** FactMine owns tuple/sequence and destructuring facts; Decomplex
-reports shape erasure and repeated normalization; Espalier aggregates erased
-shapes used across multiple phases.
+**Products.** FactMine owns correct tuple/sequence and destructuring facts;
+Nil-kill already consumes `tuple_arrays` for its tuple-like report; Decomplex
+may rank bounded shape-erasure/normalization pressure; Espalier aggregates only
+paths whose producer/consumer correlation is already established.
 
-**Estimated implementation.** FactMine 280-450 LoC; Decomplex 150-230 LoC;
-Espalier/oracles 140-220 LoC; **total 570-900 LoC**.
+**Estimated implementation.** Correct literal classification plus Ruby profile
+oracle: 80-180 LoC. Direct local projections/destructuring: another 180-320
+LoC. A general higher-order/interprocedural correlation detector would likely
+exceed 800-1,400 LoC before per-language collection-library models and would
+still be false-negative heavy; it is not recommended as the initial feature.
 
-**Risk profile.** Implementation bug risk: **medium**. False positives:
-**low-medium** because variadic arrays can legitimately have stable examples.
-Require multiple compatible producers or an explicit fixed-arity return to
-reach T1. False negatives: **medium** for values constructed through mutation.
+**Risk profile.** Literal extraction bug risk: **low-medium** once normalized
+node roles are correct. Direct local projection risk: **medium**. General
+correlation risk: **very high**; false negatives are **very high** across
+unknown helpers and collection operations, while imprecise call targets can
+also create false positives. Require an explicit fixed-arity declaration or a
+closed direct flow to reach T1.
 
 ### FR-T1-03: Locally Redundant Optional Collection
 
@@ -1214,9 +1269,11 @@ proof.
 
 1. Add stable binding/place IDs and closed-world/provenance metadata.
 2. Add normalized declaration-pressure and boundary-recovery facts.
-3. Implement the currently evidenced T1 contracts—FR-T1-01, FR-T1-02, and
-   FR-T1-04—using exact FactMine profile oracles. Keep FR-T1-03 at review
-   confidence until nil/empty equivalence can be proved over a closed corpus.
+3. Implement the currently evidenced T1 contracts—FR-T1-01 and FR-T1-04—using
+   exact FactMine profile oracles. First correct the FR-T1-02 literal facts,
+   then limit its initial detector to direct local flows. Keep FR-T1-03 at
+   review confidence until nil/empty equivalence can be proved over a closed
+   corpus.
 4. Add phase/annotation/host-capability facts.
 5. Implement FR-T1-05 and FR-T1-07 proof paths. Emit FR-T1-06 as T1 only for a
    proven continuing un-restored exit; otherwise surface it with the T2 scoped-
