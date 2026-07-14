@@ -501,6 +501,7 @@ module Espalier
         "vcs" => @vcs&.to_s,
         "target_dirs" => target_dirs.map { |dir| rel(dir) },
         "target_exclude_dirs" => Espalier.target_exclude_dirs(root: @root).map { |dir| rel(dir) },
+        "corpus" => corpus_metadata,
         "runtime_fields" => false,
         "files" => files.map { |file| file_record(file) },
         "owners" => owners.sort_by { |owner| [owner["path"].to_s, owner["line"].to_i, owner["name"].to_s] },
@@ -599,6 +600,7 @@ module Espalier
         "root" => @root,
         "target_dirs" => target_dirs.map { |dir| rel(dir) },
         "target_exclude_dirs" => Espalier.target_exclude_dirs(root: @root).map { |dir| rel(dir) },
+        "corpus" => corpus_metadata,
         "runtime_fields" => false,
         "files" => [],
         "fields" => [],
@@ -613,6 +615,25 @@ module Espalier
       return Espalier.target_dirs(root: @root) if @targets.empty?
 
       @targets.map { |target| File.expand_path(target, @root) }
+    end
+
+    def corpus_metadata
+      git_top = begin
+        git_root
+      rescue ArgumentError
+        nil
+      end
+      complete = git_top &&
+        target_dirs.any? { |target| File.directory?(target) && File.expand_path(target) == File.expand_path(git_top) } &&
+        Espalier.target_exclude_dirs(root: @root).empty?
+      {
+        "complete" => !!complete,
+        "reason" => if complete
+          "the selected target includes the Git worktree root without configured exclusions"
+        else
+          "the selected target is not a proven closed corpus"
+        end
+      }
     end
 
     def target_files
