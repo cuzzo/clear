@@ -2071,15 +2071,25 @@ fn extract_type_definitions(
     for (name, target) in &document.type_aliases {
         let ts = language_type_system(language);
         let (owner, short_name) = AliasResolver::resolve(name);
+        let line = document.type_alias_lines.get(name).copied().unwrap_or(0);
         out.push(TypeDefinition {
-            id: [language, path, &owner, "type_alias", &short_name, "1", ts].join("\u{0}"),
+            id: [
+                language,
+                path,
+                &owner,
+                "type_alias",
+                &short_name,
+                &line.to_string(),
+                ts,
+            ]
+            .join("\u{0}"),
             language: language.to_string(),
             type_system: ts.to_string(),
             kind: "type_alias".to_string(),
             path: path.to_string(),
             owner,
             name: short_name,
-            line: 0,
+            line,
             signature: None,
             return_type: None,
             params: Vec::new(),
@@ -3574,6 +3584,7 @@ pub(crate) mod tests {
             immutable_struct_readers: Default::default(),
             immutable_struct_reader_types: Default::default(),
             type_aliases: Default::default(),
+            type_alias_lines: Default::default(),
             method_param_types: Default::default(),
         }
     }

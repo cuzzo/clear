@@ -4,12 +4,12 @@
       "branch_decisions": [
         {
           "function": "(top-level)",
-          "line": 121,
+          "line": 125,
           "predicate": "$GLOBAL_STATE > 0",
           "span": [
-            121,
-            0,
             125,
+            0,
+            129,
             3
           ],
           "state_refs": [
@@ -280,15 +280,15 @@
           "conditional": true,
           "control": "conditional",
           "function": "(top-level)",
-          "line": 122,
+          "line": 126,
           "message": "puts",
           "owner": "core",
           "receiver": "self",
           "safe_navigation": false,
           "span": [
-            122,
+            126,
             2,
-            122,
+            126,
             15
           ]
         },
@@ -300,15 +300,15 @@
           "conditional": true,
           "control": "conditional",
           "function": "(top-level)",
-          "line": 124,
+          "line": 128,
           "message": "puts",
           "owner": "core",
           "receiver": "self",
           "safe_navigation": false,
           "span": [
-            124,
+            128,
             2,
-            124,
+            128,
             17
           ]
         },
@@ -1131,6 +1131,21 @@
           "visibility": "private"
         },
         {
+          "line": 120,
+          "name": "source_or_default",
+          "owner": "RubySyntaxFactsCore",
+          "params": [
+            "source"
+          ],
+          "span": [
+            120,
+            2,
+            122,
+            5
+          ],
+          "visibility": "private"
+        },
+        {
           "line": 14,
           "name": "self.build",
           "owner": "RubySyntaxFactsCore",
@@ -1284,7 +1299,7 @@
           "span": [
             8,
             0,
-            119,
+            123,
             3
           ]
         }
@@ -1308,11 +1323,11 @@
           "detail": "GLOBAL_STATE",
           "function": "(top-level)",
           "kind": "context_dependency",
-          "line": 121,
+          "line": 125,
           "span": [
-            121,
+            125,
             3,
-            121,
+            125,
             16
           ]
         },
@@ -1392,11 +1407,11 @@
           "detail": "puts",
           "function": "(top-level)",
           "kind": "hidden_io",
-          "line": 122,
+          "line": 126,
           "span": [
-            122,
+            126,
             2,
-            122,
+            126,
             15
           ]
         },
@@ -1404,11 +1419,11 @@
           "detail": "puts",
           "function": "(top-level)",
           "kind": "hidden_io",
-          "line": 124,
+          "line": 128,
           "span": [
-            124,
+            128,
             2,
-            124,
+            128,
             17
           ]
         },
@@ -1489,13 +1504,13 @@
         {
           "field": "GLOBAL_STATE",
           "function": "(top-level)",
-          "line": 121,
+          "line": 125,
           "owner": "core",
           "receiver": "self",
           "span": [
-            121,
+            125,
             3,
-            121,
+            125,
             16
           ]
         },
@@ -1653,6 +1668,19 @@
             9,
             32,
             18
+          ]
+        },
+        {
+          "field": "source",
+          "function": "source_or_default",
+          "line": 120,
+          "owner": "RubySyntaxFactsCore",
+          "receiver": "self",
+          "span": [
+            120,
+            33,
+            120,
+            40
           ]
         },
         {

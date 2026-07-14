@@ -105,6 +105,7 @@ fn parse_normalized_file(
         immutable_struct_readers: metadata.syntax.immutable_struct_readers,
         immutable_struct_reader_types: metadata.syntax.immutable_struct_reader_types,
         type_aliases: metadata.syntax.type_aliases,
+        type_alias_lines: metadata.syntax.type_alias_lines,
         method_param_types: metadata.syntax.method_param_types,
         state_param_origins: Vec::new(),
     };

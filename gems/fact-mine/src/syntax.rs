@@ -205,6 +205,8 @@ pub struct Document {
     #[serde(default)]
     pub type_aliases: BTreeMap<String, String>,
     #[serde(default)]
+    pub type_alias_lines: BTreeMap<String, usize>,
+    #[serde(default)]
     pub method_param_types: BTreeMap<String, BTreeMap<String, String>>,
     #[serde(default)]
     pub state_param_origins: Vec<StateParamOrigin>,

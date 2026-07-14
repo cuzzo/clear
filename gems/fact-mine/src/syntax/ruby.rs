@@ -591,6 +591,7 @@ impl NormalizedLanguageBehavior for RubyNormalizedBehavior {
             immutable_struct_readers: metadata.immutable_struct_readers,
             immutable_struct_reader_types: metadata.immutable_struct_reader_types,
             type_aliases: metadata.type_aliases,
+            type_alias_lines: metadata.type_alias_lines,
             method_param_types: metadata.method_param_types,
         }
     }
@@ -1163,16 +1164,19 @@ struct RubyMetadata {
     immutable_struct_readers: BTreeMap<String, Vec<String>>,
     immutable_struct_reader_types: BTreeMap<String, BTreeMap<String, String>>,
     type_aliases: BTreeMap<String, String>,
+    type_alias_lines: BTreeMap<String, usize>,
     method_param_types: BTreeMap<String, BTreeMap<String, String>>,
 }
 
 fn ruby_metadata(source: &str, functions: &[FunctionDef]) -> RubyMetadata {
+    let (type_aliases, type_alias_lines) = type_alias_metadata(source);
     RubyMetadata {
         immutable_struct_readers: reader_sets_to_vecs(immutable_struct_reader_sets(
             source, functions,
         )),
         immutable_struct_reader_types: immutable_struct_reader_types(source, functions),
-        type_aliases: type_aliases(source),
+        type_aliases,
+        type_alias_lines,
         method_param_types: method_param_types(source, functions),
     }
 }
@@ -1300,8 +1304,14 @@ fn immutable_struct_reader_types(
     reader_types
 }
 
+#[cfg(test)]
 fn type_aliases(source: &str) -> BTreeMap<String, String> {
+    type_alias_metadata(source).0
+}
+
+fn type_alias_metadata(source: &str) -> (BTreeMap<String, String>, BTreeMap<String, usize>) {
     let mut aliases = BTreeMap::new();
+    let mut alias_lines = BTreeMap::new();
     let lines: Vec<&str> = source.lines().map(|l| l.trim()).collect();
     let mut owner_stack: Vec<String> = Vec::new();
     let mut i = 0;
@@ -1430,13 +1440,14 @@ fn type_aliases(source: &str) -> BTreeMap<String, String> {
                     } else {
                         name.to_string()
                     };
+                    alias_lines.insert(qualified_name.clone(), i + 1);
                     aliases.insert(qualified_name, target);
                 }
             }
         }
         i += 1;
     }
-    aliases
+    (aliases, alias_lines)
 }
 
 fn method_param_types(

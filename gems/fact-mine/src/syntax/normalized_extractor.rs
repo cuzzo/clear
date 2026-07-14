@@ -264,6 +264,12 @@ impl<'a> Extractor<'a> {
             self.collect_owner_fields_from_children(node);
         }
         if let Some(scope) = function_scope(node) {
+            // Default argument expressions execute at method entry and may
+            // read owner state. They live in the normalized argument list,
+            // outside the function body, so scan them explicitly.
+            if let Some(args) = scope_args(scope) {
+                self.scan(args);
+            }
             if let Some(body) = scope_body(scope) {
                 self.scan(body);
             }

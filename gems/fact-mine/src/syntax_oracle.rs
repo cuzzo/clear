@@ -255,6 +255,7 @@ fn project_document_with_metadata(document: &Document, metadata: &SyntaxFactMeta
         "immutable_struct_readers": &document.immutable_struct_readers,
         "immutable_struct_reader_types": &document.immutable_struct_reader_types,
         "type_aliases": &document.type_aliases,
+        "type_alias_lines": &document.type_alias_lines,
         "method_param_types": &document.method_param_types,
         "clone_candidates": sorted(syntax::clone_candidates(document).iter().map(|candidate| json!({
             "line": candidate.line,
@@ -489,6 +490,7 @@ mod tests {
             immutable_struct_readers: BTreeMap::new(),
             immutable_struct_reader_types: BTreeMap::new(),
             type_aliases: BTreeMap::new(),
+            type_alias_lines: BTreeMap::new(),
             method_param_types: BTreeMap::new(),
             state_param_origins: Vec::new(),
         };
@@ -552,6 +554,7 @@ mod tests {
             ]
             .into_iter()
             .collect(),
+            type_alias_lines: BTreeMap::new(),
             method_param_types: vec![(
                 "foo".to_string(),
                 vec![("obj".to_string(), "AliasType".to_string())]

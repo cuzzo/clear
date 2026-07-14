@@ -12,6 +12,7 @@ pub(crate) struct SyntaxMetadata {
     pub(crate) immutable_struct_readers: BTreeMap<String, Vec<String>>,
     pub(crate) immutable_struct_reader_types: BTreeMap<String, BTreeMap<String, String>>,
     pub(crate) type_aliases: BTreeMap<String, String>,
+    pub(crate) type_alias_lines: BTreeMap<String, usize>,
     pub(crate) method_param_types: BTreeMap<String, BTreeMap<String, String>>,
 }
 
