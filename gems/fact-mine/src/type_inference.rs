@@ -844,10 +844,6 @@ impl<'a> TypeInferenceVisitor<'a> {
                 (fd.name == func_name || (node.r#type == "DEFS" && fd.name == format!("self.{}", func_name)))
                     && (fd.line == node.first_lineno || fd.owner == owner)
             }) {
-                eprintln!(
-                    "TypeInferenceVisitor matched: name={}, owner={}, line={}",
-                    func_name, owner, node.first_lineno
-                );
                 let old_method = self.current_method.clone();
                 let old_method_kind = self.current_method_kind.clone();
                 let old_method_line = self.current_method_line;
@@ -890,15 +886,14 @@ impl<'a> TypeInferenceVisitor<'a> {
                 }
 
                 // Populate local_container_origins with method parameters and parameter shapes
-                eprintln!("DEBUG: DEFN/DEFS matched method: {}, current_params: {:?}", func_name, self.current_params);
                 for (idx, param_name) in self.current_params.iter().enumerate() {
                     let origin = json!({
                         "kind": "method parameter",
                         "name": param_name,
                         "path": self.path,
-                        "line": node.first_lineno
+                        "line": node.first_lineno,
+                        "declared_type": self.param_types.get(param_name),
                     });
-                    eprintln!("DEBUG: inserting method parameter origin for {}: {:?}", param_name, origin);
                     self.local_container_origins.insert(param_name.clone(), origin);
 
                     if let Some(shape) = self.get_method_param_hash_shape(&owner, &func_name, param_name)
@@ -1531,8 +1526,6 @@ impl<'a> TypeInferenceVisitor<'a> {
         if node.r#type == "SELF" {
             return true;
         }
-        eprintln!("provably_non_nil: node.type={}, node.text={}, node_symbol={:?}, self.param_types={:?}, self.local_types={:?}",
-            node.r#type, node.text, node_symbol(node), self.param_types, self.local_types);
         match node.r#type.as_str() {
             "LVAR" | "DVAR" => {
                 if let Some(name) = node_symbol(node) {
@@ -4354,7 +4347,6 @@ impl<'a> TypeInferenceVisitor<'a> {
             return;
         }
         let receiver_type = self.expression_type(receiver);
-        println!("DEBUG inspect_index_lookup: receiver={}, receiver_type={:?}, local_hash_shapes={:?}, local_array_shapes={:?}", receiver.text, receiver_type, self.local_hash_shapes, self.local_array_shapes);
         let lookup_type = self.collection_index_return_type(node, receiver_type.as_ref());
         let index_type = self.expression_type(args[0]);
         let origin = self.receiver_collection_origin(receiver);
@@ -4690,6 +4682,9 @@ impl<'a> TypeInferenceVisitor<'a> {
         let Some((receiver, name, args_node)) = match_call(node) else {
             return;
         };
+        if !self.hash_record_receiver_candidate(receiver) {
+            return;
+        }
         let args = call_arguments(args_node);
         if name == "[]" || name == "fetch" {
             if name == "fetch" && args.len() > 1 {
@@ -4733,6 +4728,32 @@ impl<'a> TypeInferenceVisitor<'a> {
                 "message": "shape-changing hash-record mutation prevents broad struct rewrite",
             }));
         }
+    }
+
+    fn hash_record_receiver_candidate(&mut self, receiver: &crate::ast::Node) -> bool {
+        if let Some(receiver_type) = self.expression_type(receiver) {
+            if let Some(info) = collection_type_info(&receiver_type) {
+                return info.kind == "hash";
+            }
+            if !matches!(receiver_type.strip_nilable(), TypeExpr::Untyped) {
+                return false;
+            }
+        }
+
+        let origin = self.hash_record_blocker_origin_for_receiver(receiver);
+        if let Some(declared_type) = origin.get("declared_type").and_then(|value| {
+            serde_json::from_value::<TypeExpr>(value.clone())
+                .ok()
+                .or_else(|| value.as_str().map(|text| self.parse_type(text)))
+        }) {
+            if let Some(info) = collection_type_info(&declared_type) {
+                return info.kind == "hash";
+            }
+            if useful_type(&declared_type) {
+                return false;
+            }
+        }
+        hash_record_blocker_origin(&origin)
     }
 
     fn hash_record_blocker_origin_for_receiver(&mut self, receiver: &crate::ast::Node) -> Value {
@@ -5784,16 +5805,11 @@ fn static_expression_reason(type_text: &str) -> String {
 }
 
 fn hash_record_blocker_origin(origin: &Value) -> bool {
-    matches!(
-        origin.get("kind").and_then(Value::as_str),
-        Some(
-            "hash literal"
-                | "method parameter"
-                | "forwarded return"
-                | "instance variable"
-                | "local hash shape"
+    origin.get("shape").is_some()
+        || matches!(
+            origin.get("kind").and_then(Value::as_str),
+            Some("hash literal" | "local hash shape")
         )
-    )
 }
 
 fn value_array(value: Option<&Value>) -> Vec<Value> {

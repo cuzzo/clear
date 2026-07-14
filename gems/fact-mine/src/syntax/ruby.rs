@@ -1189,15 +1189,6 @@ fn immutable_struct_reader_sets(
     let mut class_stack = Vec::new();
     let method_ranges: Vec<(usize, usize)> =
         functions.iter().map(|f| (f.span[0], f.span[2])).collect();
-    let debug_funcs: Vec<_> = functions
-        .iter()
-        .map(|f| (&f.name, &f.span))
-        .collect();
-    eprintln!(
-        "IMMUTABLE_STRUCT_READER_SETS: functions={:?}, method_ranges={:?}",
-        debug_funcs,
-        method_ranges
-    );
     for (idx, line) in source.lines().enumerate() {
         let line_num = idx + 1;
         if method_ranges

@@ -1661,6 +1661,34 @@ RSpec.describe NilKill::SourceIndex do
     end
   end
 
+  it "does not classify typed array indexing or mutation as hash-record blockers" do
+    Dir.mktmpdir("nil-kill-array-hash-record-blockers") do |dir|
+      path = File.join(dir, "typed_arrays.rb")
+      File.write(path, <<~RUBY)
+        class TypedArrays
+          extend T::Sig
+
+          sig do
+            params(
+              tokens: T::Array[String],
+              closings: T::Array[T.nilable(Integer)],
+              position: Integer
+            ).returns(T.nilable(String))
+          end
+          def lookup(tokens, closings, position)
+            closings[position] = position
+            tokens[position]
+          end
+        end
+      RUBY
+
+      idx = described_class.new(path)
+
+      expect(idx.collection_index_lookups.map { |lookup| lookup["code"] }).to include("tokens[position]")
+      expect(idx.hash_record_blockers).to be_empty
+    end
+  end
+
   it "does not propose NilClass T.let sites for nil ivar placeholders" do
     Dir.mktmpdir("nil-kill-nil-ivar") do |dir|
       path = File.join(dir, "nil_ivar.rb")
