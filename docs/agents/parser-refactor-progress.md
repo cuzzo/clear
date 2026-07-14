@@ -168,3 +168,49 @@ typed struct declaration.
 
 Validation: 104 focused examples pass; all 480 top-level CLEAR fixtures parse;
 the new record-building helpers have zero uncovered executable lines.
+
+### Stage 2B: named capability records
+
+Capability sigil metadata, joined expression capabilities, and element
+capabilities are now explicit `T::Struct` records. Parser code reads named
+fields instead of indexing symbol-keyed hashes, and the mutable join state is
+confined to `CapJoin` and `ElementCapability` accumulators. The shared sigil
+tables remain genuine lookup maps.
+
+| Measure | Stage 2A | Stage 2B | Delta |
+| --- | ---: | ---: | ---: |
+| Parser lines | 4,916 | 4,944 | +28 |
+| Parser `T.must` sites | 90 | 83 | -7 |
+| NilKill calls | 3,651 | 3,626 | -25 |
+| NilKill hash shapes | 31 | 29 | -2 |
+| NilKill array shapes | 1,420 | 1,407 | -13 |
+| NilKill collection index lookups | 105 | 73 | -32 |
+| NilKill hash-record blockers | 88 | 65 | -23 |
+| NilKill struct declarations | 4 | 7 | +3 |
+| Espalier complete/incomplete time results | 9 / 175 | 10 / 174 | +1 / -1 |
+| Espalier known `O(2^N)` component | 97 | 97 | 0 |
+| Espalier known `O(N)` stack component | 98 | 98 | 0 |
+| Decomplex candidates | 441 | 439 | -2 |
+| Decomplex convergence units | 92 | 93 | +1 |
+| Decomplex state-based branch findings | 69 | 70 | +1 |
+| Decomplex False Simplicity findings | 69 | 65 | -4 |
+
+NilKill reflects this contract improvement well: semantic hash shapes,
+indexing, and hash-record blockers all fall substantially while three named
+struct declarations appear. Espalier appropriately leaves recursive
+complexity unchanged and gains one complete local result.
+
+Decomplex removes four False Simplicity findings and no longer reports
+eliminable nil-guard pressure in the capability join and branch-prefix
+methods. Its headline convergence and state-branch counts nevertheless rise
+because it treats reads of `const` fields on immutable `SigilAttrs` values as
+branches over mutable object state. That is a detector gap: FactMine exposes
+the `T::Struct` and `const` declarations, so Decomplex should distinguish a
+local immutable value record from receiver/parser lifecycle state. Property
+setters on the two deliberately local accumulators are real writes, but they
+should likewise not imply hidden non-local mutation without escape or receiver
+state evidence.
+
+Validation: 80 focused parser/contract examples pass; all 480 top-level CLEAR
+fixtures parse; Ruby built-in coverage reports all 81 changed executable
+parser lines covered.

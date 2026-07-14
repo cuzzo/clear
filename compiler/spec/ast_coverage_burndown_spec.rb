@@ -557,13 +557,18 @@ RSpec.describe ClearParser do
           token(:CHAR, ":"),
           token(:KEYWORD, "RETURN"),
           token(:EOF, nil),
-        ], ": RETURN").send(:parse_cap_join, token(:VAR_ID, "@shared"), { dim: :ownership, val: :shared })
+        ], ": RETURN").send(
+          :parse_cap_join,
+          token(:VAR_ID, "@shared"),
+          ClearParser::SigilAttrs.new(dim: :ownership, val: :shared),
+        )
       }.to raise_error(ParserError, /Expected a capability/)
 
       expect {
         parser_for("(rank: 1)(rank: 2)").tap do |p|
-          dims = { ownership: nil, sync: nil, layout: nil, lock_rank: 1 }
-          p.send(:parse_lock_rank_arg!, token(:VAR_ID, "@locked"), { dim: :sync, val: :locked }, dims)
+          dims = ClearParser::CapJoin.new(lock_rank: 1)
+          attrs = ClearParser::SigilAttrs.new(dim: :sync, val: :locked)
+          p.send(:parse_lock_rank_arg!, token(:VAR_ID, "@locked"), attrs, dims)
         end
       }.to raise_error(ParserError, /Duplicate rank/)
 

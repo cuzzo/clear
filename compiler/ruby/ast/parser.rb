@@ -51,6 +51,29 @@ class ClearParser
     const :name_token, Lexer::Token
   end
 
+  class SigilAttrs < T::Struct
+    const :dim, T.nilable(Symbol), default: nil
+    const :val, T.nilable(Symbol), default: nil
+    const :stack_size, T.nilable(Symbol), default: nil
+    const :pinned, T::Boolean, default: false
+    const :parallel, T::Boolean, default: false
+    const :arena, T::Boolean, default: false
+    const :can_smash, T::Boolean, default: false
+  end
+
+  class CapJoin < T::Struct
+    prop :ownership, T.nilable(Symbol), default: nil
+    prop :sync, T.nilable(Symbol), default: nil
+    prop :layout, T.nilable(Symbol), default: nil
+    prop :lock_rank, T.nilable(Integer), default: nil
+  end
+
+  class ElementCapability < T::Struct
+    prop :ownership, T.nilable(Symbol), default: nil
+    prop :sync, T.nilable(Symbol), default: nil
+    prop :layout, T.nilable(Symbol), default: nil
+  end
+
   include ErrorHelper
   include FixableHelper
 
@@ -61,13 +84,9 @@ class ClearParser
   EffectMetadataValue = T.type_alias { T.nilable(T.any(Lexer::Token, Integer, T::Boolean)) }
   EffectMetadata = T.type_alias { T::Hash[Symbol, EffectMetadataValue] }
   EffectsDecl = T.type_alias { [T.nilable(Symbol), T.nilable(EffectMetadata)] }
-  ElementCapability = T.type_alias { T::Hash[Symbol, T.nilable(Symbol)] }
   WithMatchArmValue = T.type_alias { T.nilable(T.any(Symbol, Lexer::Token, AST::RawBody, T::Array[AST::ErrorClause])) }
   WithMatchArm = T.type_alias { T::Hash[Symbol, WithMatchArmValue] }
-  CapJoin = T.type_alias { [T.nilable(Symbol), T.nilable(Symbol), T.nilable(Symbol), T.nilable(Integer)] }
-  SigilAttrs = T.type_alias { T::Hash[Symbol, T.any(Symbol, T::Boolean)] }
   SigilTable = T.type_alias { T::Hash[String, SigilAttrs] }
-  CapDims = T.type_alias { T::Hash[Symbol, T.nilable(T.any(Symbol, Integer))] }
   WindowPipelineOp = T.type_alias { T.any(AST::WindowOp, AST::BatchWindowOp) }
   ConcurrentPipelineOp = T.type_alias do
     T.any(AST::SelectOp, AST::WhereOp, AST::EachOp, AST::SumOp, AST::CountOp,
@@ -89,15 +108,15 @@ class ClearParser
     ).returns(SigilAttrs)
   end
   def self.sigil_attrs(dim: nil, val: nil, stack_size: nil, pinned: false, parallel: false, arena: false, can_smash: false)
-    attrs = T.let({}, SigilAttrs)
-    attrs[:dim] = dim if dim
-    attrs[:val] = val if val
-    attrs[:stack_size] = stack_size if stack_size
-    attrs[:pinned] = true if pinned
-    attrs[:parallel] = true if parallel
-    attrs[:arena] = true if arena
-    attrs[:can_smash] = true if can_smash
-    attrs
+    SigilAttrs.new(
+      dim: dim,
+      val: val,
+      stack_size: stack_size,
+      pinned: pinned,
+      parallel: parallel,
+      arena: arena,
+      can_smash: can_smash,
+    )
   end
 
   sig { returns(String) }
@@ -680,9 +699,10 @@ class ClearParser
   sig { params(lhs: AST::Node).returns(AST::CapabilityWrap) }
   def parse_capability_wrap_suffix(lhs)
     token = consume(:VAR_ID)
-    ownership, sync, layout, lock_rank = parse_cap_join(T.must(token), T.must(CAP_SIGIL_ATTRS[T.must(token).value]))
-    cw = AST::CapabilityWrap.new(token, lhs, ownership, sync, layout)
-    cw.lock_rank = lock_rank if lock_rank
+    attrs = T.must(CAP_SIGIL_ATTRS[token.text!])
+    joined = parse_cap_join(token, attrs)
+    cw = AST::CapabilityWrap.new(token, lhs, joined.ownership, joined.sync, joined.layout)
+    cw.lock_rank = joined.lock_rank if joined.lock_rank
     cw
   end
 
@@ -3369,9 +3389,9 @@ class ClearParser
     # Parsed BEFORE the [] suffix so it attaches to the element type, not the collection.
     # Also handles T@shared:locked[] (Arc<Mutex<T>>[]).
     elem_caps = parse_element_capability
-    elem_ownership = elem_caps[:ownership]
-    elem_sync = elem_caps[:sync]
-    elem_layout = elem_caps[:layout]
+    elem_ownership = elem_caps.ownership
+    elem_sync = elem_caps.sync
+    elem_layout = elem_caps.layout
 
     if match!(:CHAR, '[')
       # Case 1: Dynamic "Number[]"
@@ -3680,7 +3700,7 @@ class ClearParser
 
   sig { returns(ElementCapability) }
   def parse_element_capability
-    result = { ownership: nil, sync: nil, layout: nil }
+    result = ElementCapability.new
     return result unless match?(:VAR_ID) && ELEMENT_CAPABILITY_TOKENS.include?(current.value)
     return result unless element_capability_suffix?
 
@@ -3709,23 +3729,23 @@ class ClearParser
   def apply_element_capability!(result, value)
     case value
     when "@shared"
-      result[:ownership] = result[:ownership] == :node ? :shared_node : :shared
+      result.ownership = result.ownership == :node ? :shared_node : :shared
     when "@multiowned"
-      result[:ownership] = :multiowned
+      result.ownership = :multiowned
     when "@node"
-      result[:ownership] = result[:ownership] == :shared ? :shared_node : :node
+      result.ownership = result.ownership == :shared ? :shared_node : :node
     when "shared"
-      result[:ownership] = result[:ownership] == :node ? :shared_node : :shared
+      result.ownership = result.ownership == :node ? :shared_node : :shared
     when "node"
-      result[:ownership] = result[:ownership] == :shared ? :shared_node : :node
+      result.ownership = result.ownership == :shared ? :shared_node : :node
     when "@locked", "locked"
-      result[:sync] = :locked
+      result.sync = :locked
     when "@writeLocked", "writeLocked"
-      result[:sync] = :write_locked
+      result.sync = :write_locked
     when "@link"
-      result[:ownership] = :link
+      result.ownership = :link
     when "@indirect", "indirect"
-      result[:layout] = :indirect
+      result.layout = :indirect
     end
   end
 
@@ -4196,13 +4216,13 @@ class ClearParser
 
   # Parses an optional `:@cap` continuation after an expression-level capability sigil.
   # `tok` is the already-consumed first sigil token; `first_attrs` is its CAP_SIGIL_ATTRS entry.
-  # Returns [ownership, sync] — either field may be nil.
+  # Returns a named capability record whose dimensions may be nil.
   # Handles order-independent joins: @shared:locked and @locked:shared both work.
   # Parses a capability chain: @a:b:c (order-independent, max one per dimension).
-  # Returns [ownership, sync, layout].
+  # The record also carries an optional lock rank.
   sig { params(tok: Lexer::Token, first_attrs: SigilAttrs).returns(CapJoin) }
   def parse_cap_join(tok, first_attrs)
-    dims = { ownership: nil, sync: nil, layout: nil, lock_rank: nil }
+    dims = CapJoin.new
     apply_cap_dim!(tok, first_attrs, dims)
     parse_lock_rank_arg!(tok, first_attrs, dims)
 
@@ -4228,8 +4248,8 @@ class ClearParser
       end
       attrs = T.must(attrs)
       next_tok = consume(:VAR_ID)
-      apply_cap_dim!(T.must(next_tok), attrs, dims)
-      parse_lock_rank_arg!(T.must(next_tok), attrs, dims)
+      apply_cap_dim!(next_tok, attrs, dims)
+      parse_lock_rank_arg!(next_tok, attrs, dims)
     end
 
     # Reject T @cap1 @cap2 (must use : join, e.g. @shared:locked)
@@ -4237,44 +4257,50 @@ class ClearParser
       error!(current, :MIXED_AT_CAPABILITIES)
     end
 
-    ownership = dims[:ownership]
-    sync = dims[:sync]
-    layout = dims[:layout]
-    lock_rank = dims[:lock_rank]
-    [
-      ownership.is_a?(Symbol) ? ownership : nil,
-      sync.is_a?(Symbol) ? sync : nil,
-      layout.is_a?(Symbol) ? layout : nil,
-      lock_rank.is_a?(Integer) ? lock_rank : nil
-    ]
+    dims
   end
 
-  sig { params(tok: Lexer::Token, attrs: SigilAttrs, dims: CapDims).returns(T.nilable(Symbol)) }
+  sig { params(tok: Lexer::Token, attrs: SigilAttrs, dims: CapJoin).returns(T.nilable(Symbol)) }
   def apply_cap_dim!(tok, attrs, dims)
-    dim = attrs[:dim]
-    val = attrs[:val]
-    return nil unless dim.is_a?(Symbol) && val.is_a?(Symbol)
-    if dim == :ownership && ((dims[dim] == :shared && val == :node) || (dims[dim] == :node && val == :shared))
-      dims[dim] = :shared_node
+    dim = attrs.dim
+    val = attrs.val
+    return nil unless dim && val
+
+    current_value = case dim
+    when :ownership then dims.ownership
+    when :sync then dims.sync
+    when :layout then dims.layout
+    else return nil
+    end
+
+    if dim == :ownership && ((current_value == :shared && val == :node) || (current_value == :node && val == :shared))
+      dims.ownership = :shared_node
       return :shared_node
     end
-    if dims[dim]
-      error!(tok, :DUPLICATE_CAPABILITY_DIM, dim: dim, current: dims[dim], attempted: val)
+
+    if current_value
+      error!(tok, :DUPLICATE_CAPABILITY_DIM, dim: dim, current: current_value, attempted: val)
     end
-    dims[dim] = val
+
+    case dim
+    when :ownership then dims.ownership = val
+    when :sync then dims.sync = val
+    when :layout then dims.layout = val
+    end
+    val
   end
 
   # Parse an optional `(rank: N)` argument after @locked / @writeLocked.
   # The N is an integer; sign and magnitude are free. Duplicate rank on
   # the same capability chain is an error.
-  sig { params(sigil_tok: Lexer::Token, attrs: SigilAttrs, dims: CapDims).returns(T.nilable(Integer)) }
+  sig { params(sigil_tok: Lexer::Token, attrs: SigilAttrs, dims: CapJoin).returns(T.nilable(Integer)) }
   def parse_lock_rank_arg!(sigil_tok, attrs, dims)
-    return unless attrs[:dim] == :sync
-    return unless attrs[:val] == :locked || attrs[:val] == :write_locked
+    return unless attrs.dim == :sync
+    return unless attrs.val == :locked || attrs.val == :write_locked
     return unless match?(:CHAR, '(')
     consume(:CHAR, '(')
     unless match?(:VAR_ID, 'rank')
-      error!(current, :EXPECTED_RANK_KEYWORD, sigil: attrs[:val])
+      error!(current, :EXPECTED_RANK_KEYWORD, sigil: attrs.val)
     end
     consume(:VAR_ID, 'rank')
     consume(:CHAR, ':')
@@ -4283,10 +4309,10 @@ class ClearParser
     rank = num_tok.value.to_i
     rank = -rank if neg
     consume(:CHAR, ')')
-    if dims[:lock_rank]
-      error!(sigil_tok, :DUPLICATE_LOCK_RANK, current: dims[:lock_rank], attempted: rank)
+    if dims.lock_rank
+      error!(sigil_tok, :DUPLICATE_LOCK_RANK, current: dims.lock_rank, attempted: rank)
     end
-    dims[:lock_rank] = rank
+    dims.lock_rank = rank
   end
 
   # Branch-prefix sigils for DO blocks.
@@ -4337,28 +4363,29 @@ class ClearParser
 
     loop do
       tok      = consume(:VAR_ID)
-      cap_name = T.must(tok).text!.start_with?('@') ? T.must(tok).text! : "@#{T.must(tok).text!}"
+      token_text = tok.text!
+      cap_name = token_text.start_with?('@') ? token_text : "@#{token_text}"
       attrs    = DO_BRANCH_SIGILS[cap_name]
       unless attrs
-        has_at = T.must(tok).text!.start_with?('@')
+        has_at = token_text.start_with?('@')
         candidates = has_at ? DO_BRANCH_SIGILS.keys : DO_BRANCH_SIGILS.keys.map { |k| k.sub(/^@/, '') }
         emit_typo_suggestion!(
-          tok, T.must(tok).text!, candidates,
-          "Unknown branch prefix #{T.must(tok).text!.inspect}",
+          tok, token_text, candidates,
+          "Unknown branch prefix #{token_text.inspect}",
           "closest DO branch sigil",
           category: :type, cascade: true
         )
       end
       attrs = T.must(attrs)
 
-      stack_size_attr = attrs[:stack_size]
-      if stack_size_attr.is_a?(Symbol)
+      stack_size_attr = attrs.stack_size
+      if stack_size_attr
         error!(tok, :DUPLICATE_STACK_SIZE, kind: "branch") if stack_size
         stack_size = stack_size_attr
       end
-      pinned    = true if attrs[:pinned]
-      parallel  = true if attrs[:parallel]
-      can_smash = true if attrs[:can_smash]
+      pinned    = true if attrs.pinned
+      parallel  = true if attrs.parallel
+      can_smash = true if attrs.can_smash
 
       break unless match?(:CHAR, ':')
       consume(:CHAR, ':')
@@ -4419,30 +4446,31 @@ class ClearParser
 
     loop do
       tok      = consume(:VAR_ID)
-      cap_name = T.must(tok).text!.start_with?('@') ? T.must(tok).text! : "@#{T.must(tok).text!}"
+      token_text = tok.text!
+      cap_name = token_text.start_with?('@') ? token_text : "@#{token_text}"
       attrs    = BG_SIGILS[cap_name]
       unless attrs
-        has_at = T.must(tok).text!.start_with?('@')
+        has_at = token_text.start_with?('@')
         candidates = has_at ? BG_SIGILS.keys : BG_SIGILS.keys.map { |k| k.sub(/^@/, '') }
         emit_typo_suggestion!(
-          tok, T.must(tok).text!, candidates,
-          "Unknown BG prefix #{T.must(tok).text!.inspect}",
+          tok, token_text, candidates,
+          "Unknown BG prefix #{token_text.inspect}",
           "closest BG body sigil",
           category: :type, cascade: true
         )
       end
       attrs = T.must(attrs)
 
-      stack_size_attr = attrs[:stack_size]
-      if stack_size_attr.is_a?(Symbol)
+      stack_size_attr = attrs.stack_size
+      if stack_size_attr
         error!(tok, :DUPLICATE_STACK_SIZE, kind: "BG") if stack_size
         stack_size = stack_size_attr
         stack_size_token = tok
       end
-      pinned    = true if attrs[:pinned]
-      parallel  = true if attrs[:parallel]
-      arena     = true if attrs[:arena]
-      if attrs[:can_smash]
+      pinned    = true if attrs.pinned
+      parallel  = true if attrs.parallel
+      arena     = true if attrs.arena
+      if attrs.can_smash
         can_smash = true
         can_smash_token = tok
       end
