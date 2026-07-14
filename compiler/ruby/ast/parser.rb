@@ -102,6 +102,20 @@ class ClearParser
     const :reentrance, T::Hash[String, Symbol]
   end
 
+  class ParsedMatchStart < T::Struct
+    const :token, Lexer::Token
+    const :subject, AST::Node
+    const :takes, T::Boolean
+  end
+
+  class ParsedMatchArm < T::Struct
+    const :kind, Symbol
+    const :value, AST::Node
+    const :extra_values, T::Array[AST::Node]
+    const :binding, T.nilable(String), default: nil
+    const :destructure, T.nilable(AST::StructPattern), default: nil
+  end
+
   include ErrorHelper
   include FixableHelper
 
@@ -208,9 +222,10 @@ class ClearParser
   def index_delimiter_closings(tokens)
     opening_chars = T.let([], T::Array[String])
     opening_indices = T.let([], T::Array[Integer])
-    closings = T.let(Array.new(tokens.length), T::Array[T.nilable(Integer)])
+    closings = T.let([], T::Array[T.nilable(Integer)])
 
     tokens.each_with_index do |token, index|
+      closings << nil
       next unless token.type == :CHAR
       value = token.text!
       if OPEN_DELIMITERS.include?(value)
@@ -1689,7 +1704,7 @@ class ClearParser
 
       return_type_token = current
       return_type = parse_type_annotation()
-      return_type = mark_polymorphic_shared_type(T.must(return_type)) if shared_return
+      return_type = mark_polymorphic_shared_type(return_type) if shared_return
     end
 
     # Gates which sync families this function accepts on its parameters.
@@ -2334,7 +2349,7 @@ class ClearParser
 
   sig { returns(T.any(AST::Node, Type)) }
   def parse_is_a_rhs
-    return T.must(parse_type_annotation) if is_a_rhs_type_annotation?
+    return parse_type_annotation if is_a_rhs_type_annotation?
 
     parse_unary
   end
@@ -2669,10 +2684,7 @@ class ClearParser
   # Expression-position MATCH: each arm body is a single expression (no semicolons).
   sig { params(partial: T::Boolean).returns(AST::MatchStatement) }
   def parse_match_expr(partial: false)
-    tok = consume(:KEYWORD, 'MATCH')
-    takes = match?(:KEYWORD, 'TAKES') && consume(:KEYWORD, 'TAKES')
-    expr = parse_expression
-    consume(:KEYWORD, 'START')
+    start = parse_match_start
 
     cases = []
     default_case = T.let(nil, T.nilable(AST::RawBody))
@@ -2686,46 +2698,13 @@ class ClearParser
         break
       end
 
-      if match?(:KEYWORD, 'WHEN')
-        consume(:KEYWORD, 'WHEN')
-        condition = parse_expression
-        consume(:ARROW)
-        cases << AST::MatchCase.new(kind: :when, value: condition, body: [parse_expression])
-      elsif match?(:CHAR, '{')
-        pattern = parse_struct_pattern
-        consume(:ARROW)
-        cases << AST::MatchCase.new(kind: :struct_pattern, value: pattern, body: [parse_expression])
-      else
-        first_pattern = parse_expression
-        # Multi-pattern arm: `Pat1, Pat2, ... [AS x | { dest }] -> body`.
-        # The `,` here is part of the arm; arm-separator `,` is consumed
-        # AFTER the body. AS / { ... } apply to the whole arm.
-        extra_patterns = []
-        while match?(:CHAR, ',') && multi_pattern_continues?
-          consume(:CHAR, ',')
-          extra_patterns << parse_expression
-        end
-        binding = nil
-        destructure = nil
-        if match?(:KEYWORD, 'AS')
-          consume(:KEYWORD, 'AS')
-          binding = consume(:VAR_ID).text!
-        elsif match?(:CHAR, '{')
-          destructure = parse_struct_pattern
-        end
-        consume(:ARROW)
-        if extra_patterns.empty?
-          cases << AST::MatchCase.new(kind: :eq, value: first_pattern, binding: binding, destructure: destructure, body: [parse_expression])
-        else
-          cases << AST::MatchCase.new(kind: :eq, value: first_pattern, extra_values: extra_patterns,
-                     binding: binding, destructure: destructure, body: [parse_expression])
-        end
-      end
+      arm = parse_match_arm
+      cases << build_match_case(arm, [parse_expression])
       match!(:CHAR, ',')
     end
 
     consume(:KEYWORD, 'END')
-    AST::MatchStatement.new(tok, expr, cases, default_case, [], nil, !partial, !!takes)
+    AST::MatchStatement.new(start.token, start.subject, cases, default_case, [], nil, !partial, start.takes)
   end
 
   # FOR var IN (start ..= end) DO body END   — range iteration
@@ -2765,10 +2744,7 @@ class ClearParser
 
   sig { params(partial: T::Boolean).returns(AST::MatchStatement) }
   def parse_match_statement(partial: false)
-    tok = consume(:KEYWORD, 'MATCH')
-    takes = match?(:KEYWORD, 'TAKES') && consume(:KEYWORD, 'TAKES')
-    expr = parse_expression
-    consume(:KEYWORD, 'START')
+    start = parse_match_start
 
     cases = []
     default_case = T.let(nil, T.nilable(AST::RawBody))
@@ -2781,53 +2757,75 @@ class ClearParser
         break
       end
 
-      if match?(:KEYWORD, 'WHEN')
-        consume(:KEYWORD, 'WHEN')
-        condition = parse_expression
-        consume(:ARROW)
-        body = parse_block_body([',', 'DEFAULT', 'WHEN', 'END'])
-        cases << AST::MatchCase.new(kind: :when, value: condition, body: body)
-      elsif match?(:CHAR, '{')
-        pattern = parse_struct_pattern
-        consume(:ARROW)
-        body = parse_block_body([',', 'DEFAULT', 'WHEN', 'END'])
-        cases << AST::MatchCase.new(kind: :struct_pattern, value: pattern, body: body)
-      else
-        # Suppress struct literal parsing so TypeName.Variant{ ... } doesn't get
-        # consumed as a constructor — the { starts a destructuring pattern.
-        first_pattern = parse_expression
-        # Multi-pattern arm: `Pat1, Pat2, Pat3 [AS x | { dest }] -> body`.
-        # The `,` here (before the arrow) signals continuation; arm-
-        # separator `,` is consumed AFTER the body, below. AS / { ... }
-        # apply to the whole arm and bind across every pattern.
-        extra_patterns = []
-        while match?(:CHAR, ',') && multi_pattern_continues?
-          consume(:CHAR, ',')
-          extra_patterns << parse_expression
-        end
-        binding = nil
-        destructure = nil
-        if match?(:KEYWORD, 'AS')
-          consume(:KEYWORD, 'AS')
-          binding = consume(:VAR_ID).text!
-        elsif match?(:CHAR, '{')
-          # Union variant destructuring: Result.Ok{ value, count }
-          destructure = parse_struct_pattern
-        end
-        consume(:ARROW)
-        body = parse_block_body([',', 'DEFAULT', 'WHEN', 'END'])
-        if extra_patterns.empty?
-          cases << AST::MatchCase.new(kind: :eq, value: first_pattern, binding: binding, destructure: destructure, body: body)
-        else
-          cases << AST::MatchCase.new(kind: :eq, value: first_pattern, extra_values: extra_patterns,
-                     binding: binding, destructure: destructure, body: body)
-        end
-      end
+      arm = parse_match_arm
+      body = parse_block_body([',', 'DEFAULT', 'WHEN', 'END'])
+      cases << build_match_case(arm, body)
       match!(:CHAR, ',')  # consume comma separator between cases if present
     end
 
     consume(:KEYWORD, 'END')
-    AST::MatchStatement.new(tok, expr, cases, default_case, [], nil, !partial, !!takes)
+    AST::MatchStatement.new(start.token, start.subject, cases, default_case, [], nil, !partial, start.takes)
+  end
+
+  sig { returns(ParsedMatchStart) }
+  def parse_match_start
+    token = consume(:KEYWORD, 'MATCH')
+    takes = !!match!(:KEYWORD, 'TAKES')
+    subject = parse_expression
+    consume(:KEYWORD, 'START')
+    ParsedMatchStart.new(token: token, subject: subject, takes: takes)
+  end
+
+  # Parse the shared MATCH arm header and consume its arrow. Statement and
+  # expression MATCH forms differ only in how they parse the body afterward.
+  sig { returns(ParsedMatchArm) }
+  def parse_match_arm
+    if match!(:KEYWORD, 'WHEN')
+      condition = parse_expression
+      consume(:ARROW)
+      return ParsedMatchArm.new(kind: :when, value: condition, extra_values: [])
+    end
+
+    if match?(:CHAR, '{')
+      pattern = parse_struct_pattern
+      consume(:ARROW)
+      return ParsedMatchArm.new(kind: :struct_pattern, value: pattern, extra_values: [])
+    end
+
+    first_pattern = parse_expression
+    extra_patterns = T.let([], T::Array[AST::Node])
+    while match?(:CHAR, ',') && multi_pattern_continues?
+      consume(:CHAR, ',')
+      extra_patterns << parse_expression
+    end
+
+    binding = T.let(nil, T.nilable(String))
+    destructure = T.let(nil, T.nilable(AST::StructPattern))
+    if match!(:KEYWORD, 'AS')
+      binding = consume(:VAR_ID).text!
+    elsif match?(:CHAR, '{')
+      destructure = parse_struct_pattern
+    end
+    consume(:ARROW)
+    ParsedMatchArm.new(
+      kind: :eq,
+      value: first_pattern,
+      extra_values: extra_patterns,
+      binding: binding,
+      destructure: destructure,
+    )
+  end
+
+  sig { params(arm: ParsedMatchArm, body: AST::RawBody).returns(AST::MatchCase) }
+  def build_match_case(arm, body)
+    AST::MatchCase.new(
+      kind: arm.kind,
+      value: arm.value,
+      body: body,
+      binding: arm.binding,
+      destructure: arm.destructure,
+      extra_values: arm.extra_values,
+    )
   end
 
   sig { returns(AST::StructPattern) }
@@ -3136,7 +3134,7 @@ class ClearParser
         consume(:CHAR, '<')
         type_args = []
         until match?(:CHAR, '>')
-          type_args << type_annotation_source(T.must(parse_type_annotation))
+          type_args << type_annotation_source(parse_type_annotation)
           match!(:CHAR, ',')
         end
         consume(:CHAR, '>')
@@ -3297,7 +3295,7 @@ class ClearParser
     Type.function_type_from_parts(param_types, T.unsafe(return_type), false, nil)
   end
 
-  sig { returns(T.nilable(Type)) }
+  sig { returns(Type) }
   def parse_type_annotation
     # Function type: FN(Type, ...) -> ReturnType
     return parse_fn_type_annotation if match?(:KEYWORD, 'FN')
@@ -3306,7 +3304,7 @@ class ClearParser
     # This is distinct from concrete `T @shared` Arc syntax.
     if match?(:KEYWORD, 'SHARED')
       consume(:KEYWORD, 'SHARED')
-      return mark_polymorphic_shared_type(T.must(parse_type_annotation))
+      return mark_polymorphic_shared_type(parse_type_annotation)
     end
 
     # Check for tense (Promise) prefix: ~Type
@@ -3335,7 +3333,7 @@ class ClearParser
         error!(current, :PARSER_EXPECTED, expected: "a grouped optional without an outer tense/error prefix", got: current.value, type: current.type, line: current.line)
       end
       consume(:CHAR, '(')
-      wrapped = T.must(parse_type_annotation)
+      wrapped = parse_type_annotation
       consume(:CHAR, ')')
       return Type.optional_of(wrapped)
     end
@@ -3380,7 +3378,7 @@ class ClearParser
       consume(:CHAR, '<')
       type_args = []
       until match?(:CHAR, '>')
-        type_args << type_annotation_source(T.must(parse_type_annotation))
+        type_args << type_annotation_source(parse_type_annotation)
         match!(:CHAR, ',')
       end
       consume(:CHAR, '>')

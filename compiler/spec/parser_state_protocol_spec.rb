@@ -57,4 +57,16 @@ RSpec.describe "ClearParser state-free grammar decisions" do
     expect { parser_for("future IS_READY AS value").send(:parse_expression) }
       .to raise_error(ParserError)
   end
+
+  it "uses the non-optional type parser contract for nested type syntax" do
+    type_test = parser_for("value IS_A Int64").send(:parse_expression)
+    expect(type_test).to be_a(AST::IsA)
+
+    shared = parse_statement("value: SHARED Int64 = other;")
+    expect(shared.type.polymorphic_shared?).to eq(true)
+
+    grouped = parse_statement("values: ?(Int64[]) = other;")
+    expect(grouped.type.optional?).to eq(true)
+    expect(grouped.type.wrapped_type.array?).to eq(true)
+  end
 end

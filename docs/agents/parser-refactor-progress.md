@@ -553,3 +553,51 @@ Validation: focused source tests exercise ordinary EXISTS construction,
 conditional-binding decline, IS_READY's binding diagnostic, inline union
 construction, and MATCH destructuring. All changed executable lines are
 covered, and all 487 top-level CLEAR fixtures parse.
+
+### Stage 5B: shared typed MATCH grammar and truthful type syntax
+
+Expression and statement MATCH forms duplicated the entire arm-header grammar
+and differed only in body parsing. `ParsedMatchStart` and `ParsedMatchArm` now
+carry the shared token, subject, TAKES flag, pattern values, binding, and
+destructuring data. Each outer parser retains its own body rule and delegates
+only the genuinely identical header and AST construction work.
+
+`parse_type_annotation` now declares the `Type` it has always returned (or
+raises), removing five downstream `T.must` recoveries. The delimiter index
+also grows its typed optional array during the existing token pass instead of
+using `Array.new(length)`, the only construct that prevented strict
+Ruby-to-CLEAR emission.
+
+| Measure | Stage 5A | Stage 5B | Delta |
+| --- | ---: | ---: | ---: |
+| Parser lines | 4,954 | 4,952 | -2 |
+| Parser methods | 186 | 189 | +3 |
+| Parser `T.must` sites | 78 | 72 | -6 |
+| NilKill calls | 3,608 | 3,603 | -5 |
+| NilKill struct declarations | 11 | 13 | +2 |
+| NilKill array shapes | 1,424 | 1,420 | -4 |
+| NilKill collection indexes / blockers | 42 / 41 | 42 / 41 | 0 / 0 |
+| Espalier functions | 186 | 189 | +3 |
+| Espalier known `O(N)` time component | 33 | 33 | 0 |
+| Decomplex candidates | 398 | 343 | -55 |
+| Decomplex convergence units | 92 | 91 | -1 |
+| Decomplex root-cause clusters | 36 | 33 | -3 |
+| Decomplex state-based branch findings | 67 | 65 | -2 |
+| Decomplex structural-similarity findings | 2 | 1 | -1 |
+
+The top two Decomplex convergence units were the duplicated MATCH methods;
+both disappear from the ranked list. One shared `parse_match_arm` WICC finding
+and one False Simplicity finding replace the two 33/35-finding, five-detector
+clusters, while total candidates fall by 55. This is the intended effect of a
+typed grammar boundary rather than line-moving helpers. NilKill also sees four
+fewer anonymous array shapes and five fewer impossible nil assertions.
+
+Strict Ruby-to-CLEAR now emits the full parser. The targeted clean-
+transpilation verifier passes G0/G1 but cannot run G2-G4 in `--only` mode
+because generated `ast/ast.clear`, `lexer.clear`, and six other dependencies
+are absent. That is a verifier dependency classification (`C1`), not a parser
+translation error; the final full-corpus run must generate dependencies.
+
+Validation: focused source tests cover every shared arm variant in both MATCH
+body modes and the non-optional nested type paths; all 487 top-level CLEAR
+fixtures parse. Ruby-to-CLEAR strict emission succeeds without autofix.
