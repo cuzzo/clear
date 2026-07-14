@@ -7,8 +7,9 @@ with the same command and target file.
 
 ## Commands
 
-The repository's locked bundle is not installed in this worktree. The staged
-checks therefore use the available direct executables:
+The early staged checks used the available direct executables. After the
+locked bundle was installed for Stage 5E, the same static-only analyzer modes
+were retained so every snapshot remained comparable:
 
 ```sh
 env FACT_MINE_RUST_BINARY=gems/fact-mine/target/debug/fact-mine-rust \
@@ -723,3 +724,72 @@ coverage plus all 487 CLEAR fixtures covers every executable line authored by
 the refactor. The raw zero-context diff identifies six uncovered lines, but
 `git blame` shows that all six predate the refactor and were only included by
 hunk realignment; no refactor-authored executable line is uncovered.
+
+### Stage 6: generated CLEAR readiness gate
+
+The final Ruby parser translates in strict mode with the compiler helper
+configuration. The fresh artifact is 5,515 CLEAR lines, contains all twelve
+named parser records introduced by this refactor, and contains no
+`unsupportedRuby(...)` or unsupported marker. The clean-transpilation verifier
+reports G0 and G1 at 100% for all 4,399 nonblank Ruby source lines.
+
+The generated source is deliberately not committed under `compiler/src`.
+Repository policy requires the generated dependency closure and a successful
+CLEAR frontend/type-check before generated self-host sources become checked-in
+source. The targeted verifier classifies the next gate as C1 because
+`ast/ast.clear` is not part of a parser-only generation. Supplying the existing
+generated closure reaches the underlying blocker: strict translation of
+`compiler/ruby/ast/type.rb` fails on three early returns inside collection
+blocks, so `ast/type.clear` cannot be generated. Default-mode translation
+would insert `unsupportedRuby(...)` placeholders at those sites and therefore
+does not satisfy the gate. No generated dependency was hand-edited to conceal
+that repository-level self-host gap.
+
+This is not parser debt: `compiler/ruby/ast/parser.rb` itself is strict-clean.
+It is also why `tools/parser_compat.rb` cannot yet execute the CLEAR side of
+its differential oracle. The Ruby parser, its source-string regressions, and
+the full compiler suite are green; generated behavioral equivalence remains a
+self-host dependency milestone rather than an unfinished parser refactor.
+
+## Final outcome
+
+| Measure | Baseline | Final | Delta |
+| --- | ---: | ---: | ---: |
+| Parser lines | 4,889 | 4,904 | +15 |
+| Parser methods | 182 | 188 | +6 |
+| `T.cast` sites | 50 | 5 | -45 |
+| `T.must` sites | 161 | 21 | -140 |
+| `T.unsafe` sites | 6 | 6 | 0 |
+| NilKill calls | 3,768 | 3,508 | -260 |
+| NilKill state accesses | 106 | 85 | -21 |
+| NilKill struct declarations | 3 | 12 | +9 |
+| NilKill hash shapes | 31 | 19 | -12 |
+| NilKill array shapes | 1,461 | 1,407 | -54 |
+| NilKill collection index lookups | 105 | 41 | -64 |
+| NilKill hash-record blockers | 86 | 42 | -44 |
+| NilKill dead nil checks | 1 | 0 | -1 |
+| NilKill deterministic guards | 2 | 1 | -1 |
+| Espalier known `O(2^N)` component | 95 | 0 | -95 |
+| Espalier known `O(N)` stack component | 96 | 7 | -89 |
+| Espalier complete/incomplete results | 9 / 173 | 6 / 182 | -3 / +9 |
+| Decomplex total candidates | 438 | 334 | -104 |
+| Decomplex convergence units | 84 | 90 | +6 |
+| Decomplex root-cause clusters | 38 | 31 | -7 |
+| Decomplex state-based branches | 69 | 64 | -5 |
+| Decomplex scoped-state restoration | 4 | 0 | -4 |
+| Decomplex structural similarity | 2 | 0 | -2 |
+| Decomplex weighted-inlined complexity | 81 | 82 | +1 |
+| Decomplex False Simplicity | 67 | 66 | -1 |
+
+The parser now performs a single deterministic parse of VAR_ID-led forms and
+uses an immutable delimiter-closing index for nested lookahead. The adversarial
+nested-value-block family therefore moves from Θ(2^N) time to Θ(N) time,
+with Θ(N) live recursive stack and delimiter-index space. No CLEAR syntax
+change was necessary. Anonymous semantic tuples/hashes, the pattern mini-
+interpreter, suffix sentinels, cursor restoration, and parser semantic side
+channels have been replaced by typed records and explicit grammar boundaries.
+
+The final Espalier time distribution is 146 `O(1)`, 35 `O(N)`, six `O(N+M)`,
+and one `O(N+M+K+L+P)` known component; space is 181 `O(1)` and seven `O(N)`.
+Its exponential finding reaches zero. The remaining incomplete classifications
+are precision limits, not evidence of replay in the final parser.
