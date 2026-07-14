@@ -58,6 +58,29 @@ RSpec.describe NilKill::SlotCoverage do
     expect(type).to eq("String")
   end
 
+  it "normalizes structured FactMine types before measuring field strength" do
+    coverage = described_class.new([])
+    evidence = {
+      "facts" => {
+        "type_definitions" => [{
+          "kind" => "method_signature", "path" => "sample.rb",
+          "owner" => "Sample::Record", "name" => "items",
+          "return_type" => {
+            "kind" => "Array",
+            "data" => { "kind" => "Primitive", "data" => "String" },
+          },
+        }],
+        "struct_declarations" => [{
+          "path" => "sample.rb", "class" => "Sample::Record", "fields" => ["items"],
+        }],
+      },
+    }
+
+    types = coverage.resolved_struct_field_types(evidence)
+
+    expect(types.fetch(["Sample::Record", "items"])).to eq("T::Array[String]")
+  end
+
   it "does not assign built-in types from repeated project slot names" do
     path, = repo_tmp_file("slot_coverage_names_fixture.rb", <<~RUBY)
       class SlotCoverageNamesFixture

@@ -80,6 +80,26 @@ module NilKill
       @analysis ||= build_analysis
     end
 
+    # Resolve the effective accessor contract for every declared Struct field.
+    # This intentionally includes source accessor signatures and signatures
+    # inherited through included modules in addition to generated RBI entries.
+    # Report uses this same index so collection planning and hygiene accounting
+    # cannot disagree about whether a field is already typed.
+    def resolved_struct_field_types(evidence)
+      index = field_type_index(evidence)
+      Array(evidence.dig("facts", "struct_declarations")).each_with_object({}) do |declaration, out|
+        Array(declaration["fields"]).each do |field|
+          record = {
+            "path" => declaration["path"],
+            "owner" => declaration["class"],
+            "name" => field,
+          }
+          type = field_type_for(index, record)
+          out[[declaration["class"], field]] = normalize_slot_type(type) unless type.to_s.empty?
+        end
+      end
+    end
+
     private
 
     def build_analysis
@@ -580,6 +600,9 @@ module NilKill
     end
 
     def normalize_slot_type(type)
+      if type.is_a?(Hash)
+        type = FactMine::Syntax::TypeExpr.from_json(type, "ruby")
+      end
       text = type.to_s.strip
       case text
       when "" then ""

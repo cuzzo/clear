@@ -1346,6 +1346,10 @@ RSpec.describe NilKill do
             "tlet_sites" => [
               { "tlet" => true, "type" => "T.untyped", "path" => "src/a.rb", "line" => 30, "name" => "@z" },
             ],
+            "type_dependencies" => [{
+              "id" => "ivar:A:@z", "candidate" => true, "candidate_kind" => "instance_field",
+              "file" => "src/a.rb", "line" => 30, "name" => "@z", "owner" => "A",
+            }],
             "ivar_param_origins" => {},
             "collection_runtime" => [],
           },
@@ -1380,6 +1384,67 @@ RSpec.describe NilKill do
           NilKill::Report::UNTYPED_CAUSES.each { |c| counts[c] ||= 0 }
         end
         expect(NilKill::Report::UNTYPED_CAUSES.sum { |c| table["Struct/class fields & ivars"][c] }).to eq(3)
+      end
+    end
+
+    describe "struct field and ivar accounting" do
+      it "credits source accessors inherited through included modules" do
+        report = described_class.new
+        evidence = {
+          "methods" => [], "actions" => [],
+          "facts" => {
+            "existing_sigs" => [], "tlet_sites" => [], "type_dependencies" => [],
+            "type_definitions" => [
+              { "kind" => "included_module", "owner" => "AST::Loop", "name" => "AST::DropsField" },
+              {
+                "kind" => "method_signature", "owner" => "AST::DropsField", "name" => "drops",
+                "return_type" => { "kind" => "Primitive", "data" => "AST::DropSet" },
+              },
+            ],
+            "struct_declarations" => [{
+              "path" => "src/ast.rb", "class" => "AST::Loop", "fields" => ["drops"], "field_types" => {},
+            }],
+          },
+        }
+        report.define_singleton_method(:struct_rbi_types) { {} }
+
+        row = report.type_soundness_table(evidence).fetch("Struct/class fields & ivars")
+
+        expect(row).to include("total" => 1, "strong" => 1, "weak" => 0, "untyped" => 0)
+      end
+
+      it "counts only unique instance-field T.let roots as ivars" do
+        report = described_class.new
+        evidence = {
+          "methods" => [], "actions" => [],
+          "facts" => {
+            "existing_sigs" => [], "struct_declarations" => [], "type_definitions" => [],
+            "tlet_sites" => [
+              { "path" => "src/a.rb", "line" => 3, "tlet" => true, "type" => "T.untyped" },
+              { "path" => "src/a.rb", "line" => 4, "tlet" => true, "type" => "T.untyped" },
+              { "path" => "src/a.rb", "line" => 5, "tlet" => true, "type" => "T.untyped" },
+            ],
+            "type_dependencies" => [
+              {
+                "id" => "ivar:A:@value", "candidate" => true, "candidate_kind" => "instance_field",
+                "file" => "src/a.rb", "line" => 3, "name" => "@value", "owner" => "A",
+              },
+              {
+                "id" => "ivar:A:@value", "candidate" => true, "candidate_kind" => "instance_field",
+                "file" => "src/a.rb", "line" => 4, "name" => "@value", "owner" => "A",
+              },
+              {
+                "id" => "local:A#run:value", "candidate" => true, "candidate_kind" => "local",
+                "file" => "src/a.rb", "line" => 5, "name" => "value", "owner" => "A",
+              },
+            ],
+          },
+        }
+        report.define_singleton_method(:struct_rbi_types) { {} }
+
+        row = report.type_soundness_table(evidence).fetch("Struct/class fields & ivars")
+
+        expect(row).to include("total" => 1, "strong" => 0, "weak" => 0, "untyped" => 1)
       end
     end
 

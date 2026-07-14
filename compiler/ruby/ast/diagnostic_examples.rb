@@ -67,7 +67,7 @@ module DiagnosticExamples
   # Returns a hash { CODE_SYM => { bad:, fix:, good:, file:, line: } }.
   sig { returns(Examples) }
   def self.all
-    @all = T.let(@all, T.untyped)
+    @all = T.let(@all, T.nilable(Examples))
     @all ||= load!
   end
 

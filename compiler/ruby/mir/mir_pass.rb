@@ -76,6 +76,7 @@ class MIRPass
     @cleanup_plans = T.let({}, T::Hash[String, CleanupClassifier::CleanupClassificationPlan])
     @escape_placement_facts = T.let(EscapeAnalysis::EscapePlacementFacts.new, EscapeAnalysis::EscapePlacementFacts)
     @can_fail_fns = T.let(self.class.fallible_function_names(fn_nodes), T::Set[String])
+    @current_transform_fn = T.let(nil, T.nilable(AST::FunctionDef))
   end
 
   sig { params(fn_nodes: FnNodes).returns(T::Set[String]) }
@@ -109,7 +110,6 @@ class MIRPass
     # typed placement table explaining which phase forced each heap placement.
     escape_result = EscapeAnalysis.apply_with_facts!(@fn_nodes, @schema_lookup, @body_summaries, @hoist_bindings)
     @escape_placement_facts = escape_result.placements
-    @bg_heap_upgraded = T.let(escape_result.bg_heap, T.untyped)
     BgCaptureClassifier.classify_all!(@fn_nodes, schema_lookup: @schema_lookup)
     pass_state.mark!(:escape_analyzed)
 
@@ -399,14 +399,13 @@ class MIRPass
     pre_mark_bg_resource_captures!(function, cleanup_facts)
     dataflow = OwnershipDataflow.analyze(function, can_fail_fns: plan.can_fail_fns, schema_lookup: @schema_lookup)
     dataflow.cleanup_decisions!(function, cleanup_facts)
-    @last_dataflow = T.let(dataflow, T.untyped)
     mark_returned_cleanup_bindings!(function, cleanup_facts)
     function.cleanup_bindings = cleanup_facts.bindings
     CleanupClassifier.stamp_field_pre_cleanups!(function.body, cleanup_facts, schema_lookup: @schema_lookup)
 
-    @current_transform_fn = T.let(function, T.untyped)
+    @current_transform_fn = function
     function.body = transform_body(function.body, WalkCtx.new(cleanup_facts: cleanup_facts))
-    @current_transform_fn = T.let(nil, T.untyped)
+    @current_transform_fn = nil
     stamp_moved_guard_info!(function, cleanup_facts)
     nil
   end

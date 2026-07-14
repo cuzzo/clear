@@ -579,7 +579,7 @@ class SemanticAnnotator
   def initialize(importer: nil, compiler: nil, source_dir: nil, strict_test: false, source_code: nil)
     @importer   = T.let(importer || compiler, T.nilable(ModuleImporter))
     @source_dir = T.let(source_dir ? File.expand_path(source_dir) : Dir.pwd, String)
-    @strict_test = strict_test
+    @strict_test = T.let(strict_test, T::Boolean)
     @source_code = source_code
     @receiver_state = T.let(ReceiverState.new, ReceiverState)
     @function_registry = T.let(Annotator::FunctionRegistry.new, Annotator::FunctionRegistry)
@@ -590,6 +590,11 @@ class SemanticAnnotator
     # WITH validations on parameter bindings need caller-sync propagation first.
     @branch_terminated = T.let(false, T::Boolean)
     reset_compilation_state!
+  end
+
+  sig { returns(T::Boolean) }
+  def strict_test?
+    @strict_test
   end
 
   sig { returns(T::Boolean) }

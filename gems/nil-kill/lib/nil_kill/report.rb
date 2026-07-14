@@ -2575,13 +2575,13 @@ module NilKill
         rt = extract_return_type(m["sig"].to_s)
         tally.("Returns", rt) if rt
       end
-      rbi_types = struct_rbi_types
+      rbi_types = struct_field_types(evidence)
       Array(evidence.dig("facts", "struct_declarations")).each do |decl|
         Array(decl["fields"]).each do |field|
           tally.("Struct/class fields & ivars", struct_declared_type(decl, field, rbi_types) || "T.untyped")
         end
       end
-      Array(evidence.dig("facts", "tlet_sites")).each do |s|
+      state_tlet_sites(evidence).each do |s|
         next unless s["tlet"] && s["type"]
         tally.("Struct/class fields & ivars", s["type"])
       end
@@ -2655,7 +2655,7 @@ module NilKill
         end
       end
 
-      rbi_types = struct_rbi_types
+      rbi_types = struct_field_types(evidence)
       Array(evidence.dig("facts", "struct_declarations")).each do |decl|
         Array(decl["fields"]).each do |field|
           type = struct_declared_type(decl, field, rbi_types) || "T.untyped"
@@ -2881,13 +2881,13 @@ module NilKill
     def classify_struct_ivar_untyped!(bucket, evidence)
       # Explicit `T.let(x, T.untyped)` -- a deliberate untyped
       # declaration that is almost always narrowable.
-      Array(evidence.dig("facts", "tlet_sites")).each do |site|
+      state_tlet_sites(evidence).each do |site|
         next unless site["tlet"]
         type = strip_nilable(site["type"].to_s)
         next if collection_typed?(site["type"].to_s) || !type.include?("T.untyped")
         bucket[type == "T.untyped" ? "Refused/Pending" : "WeakEvidence"] += 1
       end
-      rbi_types = struct_rbi_types
+      rbi_types = struct_field_types(evidence)
       # Honest PropagationGap signal (same fix as returns/params): a
       # struct field is genuinely propagation-resolvable ONLY if there
       # is a concrete `add_struct_field_sig` action for it -- i.e. the
@@ -3031,7 +3031,7 @@ module NilKill
                      rec_elems.(hits) + Array(mrec && mrec["return_elem"]) + Array(mrec && mrec["return_kv"]).flatten,
                      hits.flat_map { |r| Array(r["elem_shapes"]) } + Array(mrec && mrec["return_elem_shapes"]) + Array(mrec && mrec["return_kv_shapes"]).flatten)
       end
-      rbi_types = struct_rbi_types
+      rbi_types = struct_field_types(evidence)
       Array(evidence.dig("facts", "struct_declarations")).each do |decl|
         Array(decl["fields"]).each do |field|
           next unless seen.(struct_declared_type(decl, field, rbi_types).to_s)
@@ -3805,7 +3805,7 @@ module NilKill
     end
 
     def append_struct_field_coverage(lines, declarations, accumulator: nil)
-      rbi_types = struct_rbi_types
+      rbi_types = struct_field_types(@evidence || {})
       counts = empty_type_counts.merge("missing" => 0)
       declarations.each do |decl|
         Array(decl["fields"]).each do |field|
@@ -3827,7 +3827,7 @@ module NilKill
     end
 
     def append_struct_field_breakdown(lines, declarations, runtime, static)
-      rbi_types = struct_rbi_types
+      rbi_types = struct_field_types(@evidence || {})
       candidates = struct_field_candidates(runtime, static).each_with_object({}) { |c, h| h[[c["class"], c["field"]]] = c }
       buckets = Hash.new { |h, k| h[k] = [] }
       declarations.each do |decl|
@@ -3877,6 +3877,43 @@ module NilKill
 
     def struct_rbi_types
       StructFieldTypeIndex.from_rbi(ROOT)
+    end
+
+    def struct_field_types(evidence)
+      source_types = SlotCoverage.new([]).resolved_struct_field_types(evidence)
+      struct_rbi_types.merge(source_types) do |_slot, rbi_type, source_type|
+        source_strength = type_strength(source_type)
+        rbi_strength = type_strength(rbi_type)
+        source_strength >= rbi_strength ? source_type : rbi_type
+      end
+    end
+
+    def type_strength(type)
+      inner = strip_nilable(type.to_s)
+      return 0 if inner.empty? || untyped_type?(inner)
+      return 1 if weak_type?(inner)
+
+      2
+    end
+
+    # FactMine records all T.let sites, including locals and constants. Only
+    # dependency roots classified as instance fields belong in the structural
+    # field/ivar denominator. Root identity also deduplicates repeated writes
+    # to the same ivar.
+    def state_tlet_sites(evidence)
+      sites = Array(evidence.dig("facts", "tlet_sites"))
+      canonical = ->(path) { File.expand_path(path.to_s, ROOT) }
+      by_location = sites.group_by { |site| [canonical.call(site["path"]), site["line"].to_i] }
+      seen = Set.new
+      Array(evidence.dig("facts", "type_dependencies")).filter_map do |dependency|
+        next unless dependency["candidate"] && dependency["candidate_kind"] == "instance_field"
+        next unless seen.add?(dependency["id"].to_s)
+
+        site = Array(by_location[[canonical.call(dependency["file"]), dependency["line"].to_i]]).find { |candidate| candidate["tlet"] }
+        next unless site
+
+        site.merge("name" => dependency["name"], "owner" => dependency["owner"])
+      end
     end
 
     # FactMine carries the field type beside each declaration. That is the
