@@ -601,3 +601,41 @@ translation error; the final full-corpus run must generate dependencies.
 Validation: focused source tests cover every shared arm variant in both MATCH
 body modes and the non-optional nested type paths; all 487 top-level CLEAR
 fixtures parse. Ruby-to-CLEAR strict emission succeeds without autofix.
+
+### Stage 5C: total capability parse results
+
+`parse_capabilities` and constructor capability parsing now return an empty
+`CapabilityParseResult` when no modifier is present. Their two consumers read
+the record's declared defaults directly instead of branching over nil and
+safe-navigating every field. Absence is data in the typed record, not absence
+of the parse result.
+
+| Measure | Stage 5B | Stage 5C | Delta |
+| --- | ---: | ---: | ---: |
+| Parser lines | 4,952 | 4,951 | -1 |
+| Parser methods | 189 | 189 | 0 |
+| NilKill calls | 3,603 | 3,601 | -2 |
+| NilKill hash/array shapes | 19 / 1,420 | 19 / 1,420 | 0 / 0 |
+| NilKill collection indexes / blockers | 42 / 41 | 42 / 41 | 0 / 0 |
+| Espalier functions | 189 | 189 | 0 |
+| Espalier known `O(N)` time component | 33 | 33 | 0 |
+| Decomplex candidates | 343 | 336 | -7 |
+| Decomplex root-cause clusters | 33 | 31 | -2 |
+| Decomplex False Simplicity findings | 67 | 66 | -1 |
+| `parse_type_annotation` converged findings | 44 | 27 | -17 |
+| `parse_lit` converged findings | 13 | 7 | -6 |
+
+This small contract correction removes 17 findings from the main type parser
+and six from literal parsing without adding helpers or state. It also produces
+ordinary non-optional CLEAR record returns under Ruby-to-CLEAR.
+
+An attempted `ParsedFunctionHeader`/return/catch decomposition was rejected
+before commit. It reduced `parse_function_def` from four detectors to three,
+but created a new three-detector return helper: total candidates increased
+343→346, convergence 91→93, state branches 65→66, and WICC 82→83. The code
+was reverted. The function grammar remains cohesive until a boundary can
+reduce total complexity instead of redistributing it.
+
+Validation: 62 focused source-parser and capability examples pass; all 15
+changed executable parser lines are covered; all 487 top-level CLEAR fixtures
+parse; strict Ruby-to-CLEAR emission remains green.

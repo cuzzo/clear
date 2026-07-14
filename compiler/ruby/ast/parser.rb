@@ -3118,10 +3118,9 @@ class ClearParser
         collection = { "List" => :list, "Pool" => :pool, "Set" => :set }.fetch(name)
         is_soa = false
         shard_count = nil
-        if (caps = parse_constructor_capabilities(type_token, name))
-          shard_count = caps.shard_count
-          is_soa = caps.is_soa
-        end
+        caps = parse_constructor_capabilities(type_token, name)
+        shard_count = caps.shard_count
+        is_soa = caps.is_soa
         node = AST::ListLit.new(type_token, ctor_items, storage)
         node.constructor_options = AST::CollectionConstructorFact.new(
           collection: collection,
@@ -3444,14 +3443,14 @@ class ClearParser
     # ClearParser only does token consumption and duplicate detection. Semantic validation
     # (e.g., "@list requires array", "@soa requires fixed array") is in the annotator.
     caps = parse_capabilities
-    ownership   = caps&.ownership
-    sync        = caps&.sync
-    collection  = caps&.collection
-    is_soa      = caps&.is_soa || false
-    is_indirect = caps&.is_indirect || false
-    shard_count = caps&.shard_count
-    observable  = caps&.observable || false
-    observable_token = caps&.observable_token
+    ownership   = caps.ownership
+    sync        = caps.sync
+    collection  = caps.collection
+    is_soa      = caps.is_soa
+    is_indirect = caps.is_indirect
+    shard_count = caps.shard_count
+    observable  = caps.observable
+    observable_token = caps.observable_token
 
 
     base_sym = "#{tense_prefix}#{error_prefix}#{optional_prefix}#{base}#{inner}".to_sym
@@ -3638,13 +3637,13 @@ class ClearParser
   }.freeze, T::Hash[String, Symbol])
 
   # Unified capability parser. Parses an optional @cap or @cap:chain sequence.
-  # Returns nil if no capability token is present.
+  # Returns an empty typed result if no capability token is present.
   # No semantic validation — just token consumption and duplicate detection.
-  sig { returns(T.nilable(CapabilityParseResult)) }
+  sig { returns(CapabilityParseResult) }
   def parse_capabilities
-    return nil unless match?(:VAR_ID) && CAPABILITY_TOKENS.include?(current.value)
-
     result = CapabilityParseResult.new
+    return result unless match?(:VAR_ID) && CAPABILITY_TOKENS.include?(current.value)
+
     apply_capability!(result, consume(:VAR_ID))
 
     # ':' chaining (e.g., @shared:locked, @soa:shared:locked, @list:soa)
@@ -3655,11 +3654,11 @@ class ClearParser
 
   private
 
-  sig { params(type_token: Lexer::Token, constructor_name: String).returns(T.nilable(CapabilityParseResult)) }
+  sig { params(type_token: Lexer::Token, constructor_name: String).returns(CapabilityParseResult) }
   def parse_constructor_capabilities(type_token, constructor_name)
-    return nil unless (match?(:VAR_ID) && CAPABILITY_TOKENS.include?(current.value)) || match?(:CHAR, ':')
-
     result = CapabilityParseResult.new
+    return result unless (match?(:VAR_ID) && CAPABILITY_TOKENS.include?(current.value)) || match?(:CHAR, ':')
+
     allowed = ["@soa", "@sharded"]
     cap_tok = Lexer::Token.new(:VAR_ID, "@#{constructor_name.downcase}", type_token.line, type_token.column)
 
