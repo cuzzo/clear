@@ -1570,8 +1570,23 @@ module AST
   end
 
   Program      = Struct.new(:token, :statements) do
+    extend T::Sig
     include Locatable
-    attr_accessor :language_mode
+
+    sig { params(args: InitArgs).void }
+    def initialize(*args)
+      super
+      @language_mode = T.let(:default, Symbol)
+    end
+
+    sig { returns(Symbol) }
+    attr_reader :language_mode
+
+    sig { params(value: Symbol).void }
+    def language_mode=(value)
+      @language_mode = value
+    end
+
     # Resolved program-level SYNC POLICY, either user-written or the baked-in
     # default. Lowering reads this when filling unhandled WITH error slots.
     attr_accessor :sync_policy
@@ -2114,10 +2129,23 @@ module AST
   StructLit    = Struct.new(:token, :name, :fields, :storage, :type_args) do
     extend T::Sig
     include Locatable
+
+    sig { params(args: InitArgs).void }
+    def initialize(*args)
+      super
+      @field_tokens = T.let({}, T::Hash[String, Lexer::Token])
+    end
+
     # Parallel map of field_name (String) -> the lexer Token that parsed
     # the name. Populated by the parser so `clear fix` can locate a
     # misspelled field-name for a fixable edit span.
-    attr_accessor :field_tokens
+    sig { returns(T::Hash[String, Lexer::Token]) }
+    attr_reader :field_tokens
+
+    sig { params(value: T::Hash[String, Lexer::Token]).void }
+    def field_tokens=(value)
+      @field_tokens = value
+    end
     # Set of field names the schema marks BORROWED, stamped by the
     # annotator. MIR lowering reads this instead of re-resolving the
     # struct schema (single-source-of-truth: the annotator already
@@ -2161,6 +2189,21 @@ module AST
     include HasBodies
     sig { returns(T::Array[RawBody]) }
     def child_bodies = [then_branch, else_branch].compact
+
+    sig { params(args: InitArgs).void }
+    def initialize(*args)
+      super
+      self[:comptime] = !!self[:comptime]
+    end
+
+    sig { returns(T::Boolean) }
+    def comptime = self[:comptime]
+
+    sig { params(value: T::Boolean).void }
+    def comptime=(value)
+      self[:comptime] = value
+    end
+
     attr_accessor :expr_mode           # true when used as an expression (x = IF ...)
     attr_accessor :then_result_type    # Type of last value expression in then_branch
     attr_accessor :else_result_type    # Type of last value expression in else_branch
@@ -2192,6 +2235,21 @@ module AST
     include DeferredDropsField
     sig { returns(T::Array[RawBody]) }
     def child_bodies = [do_branch].compact
+
+    sig { params(args: InitArgs).void }
+    def initialize(*args)
+      super
+      self[:tight] = !!self[:tight]
+    end
+
+    sig { returns(T::Boolean) }
+    def tight = self[:tight]
+
+    sig { params(value: T::Boolean).void }
+    def tight=(value)
+      self[:tight] = value
+    end
+
     attr_accessor :mark_per_iter
   end
   WhileBindLoop = Struct.new(:token, :condition, :binding_name, :binding_token, :do_branch, :deferred_drops) do
@@ -3000,6 +3058,20 @@ module AST
     include DeferredDropsField
     sig { returns(T::Array[RawBody]) }
     def child_bodies = [body].compact
+
+    sig { params(args: InitArgs).void }
+    def initialize(*args)
+      super
+      self[:tight] = !!self[:tight]
+    end
+
+    sig { returns(T::Boolean) }
+    def tight = self[:tight]
+
+    sig { params(value: T::Boolean).void }
+    def tight=(value)
+      self[:tight] = value
+    end
   end
 
   # ForEach: FOR var IN collection DO body END
@@ -3012,7 +3084,20 @@ module AST
     sig { returns(T::Array[RawBody]) }
     def child_bodies = [body].compact
     attr_accessor :mark_per_iter
-    attr_accessor :tight
+
+    sig { params(args: InitArgs).void }
+    def initialize(*args)
+      super
+      @tight = T.let(false, T::Boolean)
+    end
+
+    sig { returns(T::Boolean) }
+    attr_reader :tight
+
+    sig { params(value: T::Boolean).void }
+    def tight=(value)
+      @tight = value
+    end
   end
 
   # ── Test Framework ───────────────────────────────────────────────

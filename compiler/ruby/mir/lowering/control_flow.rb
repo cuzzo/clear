@@ -135,7 +135,7 @@ module MIRLoweringControlFlow
       then_body = lower_body_with_break(node.then_branch, label)
       else_body = lower_body_with_break(node.else_branch || [], label)
       if_stmt = MIR::IfStmt.new(cond, then_body, else_body)
-      if_stmt.comptime = !!node.comptime
+      if_stmt.comptime = node.comptime
       block = MIR::BlockExpr.new(label, [if_stmt])
       return with_pending(cond_pending, block)
     end
@@ -143,7 +143,7 @@ module MIRLoweringControlFlow
     then_body = lower_body(node.then_branch)
     else_body = (node.else_branch && !node.else_branch.empty?) ? lower_body(node.else_branch) : nil
     if_stmt = MIR::IfStmt.new(cond, then_body, else_body)
-    if_stmt.comptime = !!node.comptime
+    if_stmt.comptime = node.comptime
     with_pending(cond_pending, if_stmt)
   end
 
@@ -356,7 +356,7 @@ module MIRLoweringControlFlow
     body = b.is_a?(Array) ? lower_body(b) : []
     finalize_loop_frame_alloc_scopes!(body, node.mark_per_iter)
 
-    tight = node.tight == true
+    tight = node.tight
     body = prepend_loop_mark(body, mark_per_iter: node.mark_per_iter, tight: tight)
 
     # Yield check at end of loop body (skip when last stmt is unconditional exit)
@@ -385,7 +385,7 @@ module MIRLoweringControlFlow
     end
     finalize_loop_frame_alloc_scopes!(body, node.mark_per_iter)
 
-    tight = node.tight == true
+    tight = node.tight
     body = prepend_loop_mark(body, mark_per_iter: node.mark_per_iter, tight: tight)
 
     if !tight && current_function_has_rt? && !loop_body_exits?(body)
@@ -440,7 +440,7 @@ module MIRLoweringControlFlow
     end
     is_mutable = node.is_mutable == true
     mark_per_iter = node.mark_per_iter == true ? true : nil
-    tight = node.tight == true
+    tight = node.tight
 
     body = prepend_loop_mark(body, mark_per_iter: mark_per_iter, tight: tight)
 
@@ -648,7 +648,7 @@ module MIRLoweringControlFlow
       comparison: cmp,
       iter_var: iter_var,
       mark_per_iter: node.mark_per_iter == true ? true : nil,
-      tight: node.tight == true,
+      tight: node.tight,
     )
   end
 

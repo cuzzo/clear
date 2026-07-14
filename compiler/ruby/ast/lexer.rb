@@ -9,6 +9,53 @@ class Lexer
 
   Token = Struct.new(:type, :value, :line, :column)
 
+  class TokenPayloadError < TypeError; end
+
+  class Token
+    extend T::Sig
+
+    TEXT_TYPES = T.let(%i[
+      ARROW CHAR COMPOUND_ASSIGN DOUBLE_COLON ELLIPSIS KEYWORD LEGACY_LOGICAL
+      OR_ELSE PERCENT RANGE RANGE_EXCL RANGE_INCL SMOOTH STRING TYPE_ID VAR_ID
+    ].freeze, T::Array[Symbol])
+    INTEGER_TYPES = T.let(%i[
+      BYTE INT8 INT16 INT32 INT64 PREFIXED_INT UINT16 UINT32 UINT64
+    ].freeze, T::Array[Symbol])
+    FLOAT_TYPES = T.let(%i[FLOAT32 NUMBER].freeze, T::Array[Symbol])
+
+    sig { returns(String) }
+    def text!
+      payload = value
+      return payload if TEXT_TYPES.include?(type) && payload.is_a?(String)
+
+      raise TokenPayloadError, payload_error("text", "String")
+    end
+
+    sig { returns(Integer) }
+    def integer!
+      payload = value
+      return payload if INTEGER_TYPES.include?(type) && payload.is_a?(Integer)
+
+      raise TokenPayloadError, payload_error("integer", "Integer")
+    end
+
+    sig { returns(Float) }
+    def float!
+      payload = value
+      return payload if FLOAT_TYPES.include?(type) && payload.is_a?(Float)
+
+      raise TokenPayloadError, payload_error("float", "Float")
+    end
+
+    private
+
+    sig { params(accessor: String, expected_class: String).returns(String) }
+    def payload_error(accessor, expected_class)
+      "#{type.inspect} token at #{line}:#{column} has no #{accessor} payload " \
+        "(expected #{expected_class}, got #{value.class})"
+    end
+  end
+
   # We use a hash for O(1) lookups
   KEYWORDS = T.let(%w[
       MUTABLE

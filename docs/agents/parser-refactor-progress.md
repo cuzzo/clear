@@ -87,3 +87,50 @@ the refactor does not depend on the unavailable SimpleCov wrapper.
 This section is extended at every implementation stage with metric deltas,
 new-code findings, and detector gaps. A lower raw finding count is not treated
 as success unless the corresponding parser contract actually improved.
+
+### Stage 1: checked boundaries and typed AST defaults
+
+The lexer now owns checked textual, integer, and float payload accessors. The
+parser uses them at typed payload sites instead of reconstructing the
+kind/value invariant with casts. The nine reviewed return contracts are now
+non-nil, as are the immediately enclosing EXTERN and visibility dispatchers.
+Program language mode, struct field tokens, and parser-produced `comptime` and
+`tight` flags now have typed defaults.
+
+| Measure | Baseline | Stage 1 | Delta |
+| --- | ---: | ---: | ---: |
+| Parser `T.cast` sites | 50 | 8 | -42 |
+| Parser `T.must` sites | 161 | 94 | -67 |
+| Parser `T.unsafe` sites | 6 | 6 | 0 |
+| NilKill calls | 3,768 | 3,648 | -120 |
+| NilKill array shapes | 1,461 | 1,419 | -42 |
+| NilKill hash shapes | 31 | 31 | 0 |
+| NilKill hash-record blockers | 86 | 86 | 0 |
+| Espalier complete/incomplete time results | 9 / 173 | 9 / 173 | 0 / 0 |
+| Espalier known `O(2^N)` component | 95 | 95 | 0 |
+| Espalier known `O(N)` stack component | 96 | 96 | 0 |
+| Decomplex candidates | 438 | 440 | +2 |
+| Decomplex convergence units | 84 | 91 | +7 |
+| Decomplex root-cause clusters | 38 | 39 | +1 |
+
+The unchanged complexity values are expected: this stage corrects data
+contracts and does not alter recursive parser control flow. NilKill's raw fact
+counts reflect the eliminated casts and assertions, but it has no concise
+headline for “reviewed false-nilable signatures corrected”; the nine method
+signatures must currently be compared directly.
+
+Decomplex's apparent regression is a detector bug, not new parser mutation.
+It classifies the read-only `Token#text!` validation accessor as hidden
+mutation solely because its Ruby name ends in `!`. That adds 125 alleged
+mutation calls, increases False Simplicity from 67 to 69 categories, and pulls
+seven additional methods into convergence. The changed-files Espalier report
+correctly records that `text!`, `integer!`, and `float!` write no state.
+Decomplex should consume effect facts or otherwise distinguish a raising
+checked accessor from a mutating bang method before using the signal for
+cross-detector convergence.
+
+Validation: 103 focused parser/contract examples pass; all 480 top-level
+`transpile-tests/*.clear` fixtures lex and parse; Ruby built-in coverage reports
+zero uncovered executable lines in the new token/AST contract methods. The
+canonical full compiler, MessagePack compatibility, SimpleCov, and Sorbet
+gates remain unavailable because the locked bundle is absent.

@@ -622,7 +622,7 @@ class SemanticAnnotator
     AST.reset_user_types!
     reset_compilation_state!
     @program = T.let(node, T.nilable(AST::Program))  # WithMatchCheck reads node.sync_policy below.
-    @language_mode = node.language_mode || :default
+    @language_mode = node.language_mode
     visit(node)
     finalize_auto_types!(node)
     run_whole_program_semantics!

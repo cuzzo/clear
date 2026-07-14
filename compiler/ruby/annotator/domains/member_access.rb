@@ -440,7 +440,7 @@ module Annotator
           raw_expected = T.let(schema.fields[field_name]&.type, T.nilable(T.any(Type, Symbol)))
           if raw_expected.nil?
             valid_fields = schema.fields.keys.reject { |k| k.to_s.start_with?("_") }
-            name_tok = node.field_tokens&.[](field_name)
+            name_tok = node.field_tokens[field_name]
             if name_tok
               emit_typo_suggestion!(
                 name_tok, field_name, valid_fields,
