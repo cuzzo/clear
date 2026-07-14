@@ -224,6 +224,7 @@ impl Report {
 mod tests {
     use super::*;
     use serde_json::json;
+    use std::fs;
 
     #[test]
     fn test_false_simplicity_gaps() {
@@ -324,5 +325,29 @@ mod tests {
         let rows = scan_documents(&[doc]);
         assert_eq!(rows.len(), 1);
         assert_eq!(rows[0].sites, vec!["foo.rb:update:8"]);
+    }
+
+    #[test]
+    fn ruby_bang_accessors_are_not_mutations_but_known_destructive_calls_are() {
+        let dir = tempfile::tempdir().unwrap();
+        let file = dir.path().join("checked_access.rb");
+        fs::write(
+            &file,
+            r#"
+class Example
+  def inspect(token, items)
+    token.text!
+    items.sort!
+  end
+end
+"#,
+        )
+        .unwrap();
+
+        let rows = scan_files(&[file], Language::Ruby).unwrap();
+        let details = rows.iter().map(|row| row.detail.as_str()).collect::<Vec<_>>();
+
+        assert!(!details.contains(&"text!"));
+        assert!(details.contains(&"sort!"));
     }
 }

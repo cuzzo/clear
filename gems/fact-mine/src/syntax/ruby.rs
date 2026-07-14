@@ -199,7 +199,9 @@ const RUBY_EFFECT_LEXICON: EffectLexicon = EffectLexicon {
     context_bare: &["rand", "srand"],
     callback_set: RUBY_CALLBACK_SET,
     callback_requires_block: false,
-    bang_mutation: true,
+    // A trailing bang means "more dangerous than the non-bang form" in Ruby;
+    // it does not prove mutation (checked accessors commonly use it too).
+    bang_mutation: false,
 };
 
 // CFG-SPECIFIC START: Ruby control-flow vocabulary.
@@ -560,18 +562,32 @@ impl NormalizedLanguageBehavior for RubyNormalizedBehavior {
                 | "delete_if"
                 | "fill"
                 | "filter!"
+                | "flatten!"
+                | "insert"
                 | "keep_if"
+                | "map!"
                 | "merge!"
                 | "move"
+                | "prepend"
                 | "push"
                 | "reject!"
                 | "replace"
+                | "reverse!"
+                | "rotate!"
+                | "select!"
                 | "shift"
+                | "shuffle!"
+                | "slice!"
+                | "sort!"
+                | "sort_by!"
                 | "store"
+                | "transform_keys!"
+                | "transform_values!"
+                | "uniq!"
                 | "unshift"
                 | "update"
                 | "write"
-        ) || (message.ends_with('!') && !matches!(message, "!=" | "!~"))
+        )
     }
 
     fn parameter_list_source(&self, source: &str) -> String {
@@ -1031,6 +1047,12 @@ impl NormalizedLanguageBehavior for RubyNormalizedBehavior {
     fn semantic_effect_for_call(&self, call: &CallSite) -> Option<NormalizedSemanticEffect> {
         eliminable_guard_from_call(call, RUBY_GUARD_MIDS)
             .or_else(|| effect_from_call_with_lexicon(call, &RUBY_EFFECT_LEXICON))
+            .or_else(|| {
+                self.mutating_receiver_message(&call.message).then(|| NormalizedSemanticEffect {
+                    kind: "hidden_mutation".to_string(),
+                    detail: call.message.clone(),
+                })
+            })
     }
 
     fn core_owner_names(&self) -> &'static [&'static str] {
