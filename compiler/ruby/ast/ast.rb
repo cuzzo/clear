@@ -61,6 +61,13 @@ module AST
     const :shard_count, T.nilable(Integer), default: nil
   end
 
+  # Source span for an EFFECTS clause. This remains attached to the function
+  # so diagnostics can replace the original clause precisely.
+  class EffectSpan < T::Struct
+    const :start_token, Lexer::Token
+    const :end_token, Lexer::Token
+  end
+
   sig { params(node: AST::Locatable, value: SyntheticTypeInput, context: String).returns(Type) }
   def self.stamp_synthetic_type!(node, value, context:)
     node.full_type = value
@@ -1681,7 +1688,7 @@ module AST
                                  #     view over fn.effects + fn.can_fail
     attr_accessor :inferred_effects  # alias of effect_set; used by formatter
     # tail_call is true for EFFECTS REENTRANT:TAIL_CALL or routed THUNK tail recursion.
-    # Phase 4f.2: { start_tok:, end_tok: } pair covering the full
+    # Phase 4f.2: EffectSpan covering the full
     # `EFFECTS REENTRANT[:VARIANT]` clause text. Used by `clear fix`
     # to swap variants (e.g., `:THUNK` -> plain or `:NOT_LOGICAL`).
     # Phase 4f.3: positive Int from `EFFECTS REENTRANT:MAX_DEPTH(N)`.

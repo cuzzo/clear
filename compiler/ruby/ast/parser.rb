@@ -74,6 +74,13 @@ class ClearParser
     prop :layout, T.nilable(Symbol), default: nil
   end
 
+  class ParsedEffectsDecl < T::Struct
+    const :kind, T.nilable(Symbol), default: nil
+    const :span, T.nilable(AST::EffectSpan), default: nil
+    const :max_depth, T.nilable(Integer), default: nil
+    const :tight, T::Boolean, default: false
+  end
+
   include ErrorHelper
   include FixableHelper
 
@@ -81,9 +88,6 @@ class ClearParser
   PatternCapture = T.type_alias { T.nilable(T.any(AST::Node, Type, String, Symbol, Integer, Float, T::Boolean)) }
   ArgumentType = T.type_alias { T.any(Symbol, Type) }
   ReturnLifetime = T.type_alias { T.nilable(T.any(Symbol, T::Array[AST::Node])) }
-  EffectMetadataValue = T.type_alias { T.nilable(T.any(Lexer::Token, Integer, T::Boolean)) }
-  EffectMetadata = T.type_alias { T::Hash[Symbol, EffectMetadataValue] }
-  EffectsDecl = T.type_alias { [T.nilable(Symbol), T.nilable(EffectMetadata)] }
   WithMatchArmValue = T.type_alias { T.nilable(T.any(Symbol, Lexer::Token, AST::RawBody, T::Array[AST::ErrorClause])) }
   WithMatchArm = T.type_alias { T::Hash[Symbol, WithMatchArmValue] }
   SigilTable = T.type_alias { T::Hash[String, SigilAttrs] }
@@ -1692,7 +1696,9 @@ class ClearParser
     #   EFFECTS REENTRANT:TAIL_CALL   -> :reentrant_tail_call    (self-loop, verified)
     #   EFFECTS REENTRANT:NOT_LOGICAL -> :reentrant_not_logical  (runtime StackGuard;
     #                                                             requires `!T` return)
-    effects_decl, effects_span = parse_effects_decl
+    parsed_effects = parse_effects_decl
+    effects_decl = parsed_effects.kind
+    effects_span = parsed_effects.span
 
     # Reentrance constraints bind by parameter name; the annotator validates
     # that each name references a real parameter so the parser stays syntactic.
@@ -1802,8 +1808,8 @@ class ClearParser
     end
 
     consume(:KEYWORD, 'END')
-    max_depth_n = effects_span ? effects_span[:max_depth] : nil
-    tight_reentrance = effects_span ? effects_span[:tight] : nil
+    max_depth_n = parsed_effects.max_depth
+    tight_reentrance = parsed_effects.tight
     stored_requires_clauses = requires_clauses.empty? ? nil : requires_clauses
     stored_pre_clauses = pre_clauses.empty? ? nil : pre_clauses
     stored_post_clauses = post_clauses.empty? ? nil : post_clauses
@@ -1956,12 +1962,12 @@ class ClearParser
 
   # REENTRANT, THUNK, and TAIL_CALL parse as TYPE_IDs matched by value because
   # the only context they appear in is right after EFFECTS.
-  sig { returns(EffectsDecl) }
+  sig { returns(ParsedEffectsDecl) }
   def parse_effects_decl
-    return [nil, nil] unless match?(:KEYWORD, 'EFFECTS')
+    return ParsedEffectsDecl.new unless match?(:KEYWORD, 'EFFECTS')
     eff_kw = consume(:KEYWORD, 'EFFECTS')
     eff_tok = consume(:TYPE_ID)
-    effect_value = T.must(eff_tok).text!
+    effect_value = eff_tok.text!
     unless effect_value == 'REENTRANT'
       emit_typo_suggestion!(
         eff_tok, effect_value, %w[REENTRANT],
@@ -1973,8 +1979,8 @@ class ClearParser
     span_start = eff_kw
     span_end_tok = eff_tok # tail of `EFFECTS REENTRANT` so far
     unless match!(:CHAR, ':')
-      metadata = T.let({ start_tok: span_start, end_tok: span_end_tok, tight: false }, EffectMetadata)
-      return [:reentrant, metadata]
+      span = AST::EffectSpan.new(start_token: span_start, end_token: span_end_tok)
+      return ParsedEffectsDecl.new(kind: :reentrant, span: span)
     end
 
     # Optional `:TIGHT` modifier (mirrors `TIGHT WHILE`). Order:
@@ -1993,13 +1999,13 @@ class ClearParser
       if match!(:CHAR, ':')
         # fall through to variant parsing below
       else
-        metadata = T.let({ start_tok: span_start, end_tok: span_end_tok, tight: true }, EffectMetadata)
-        return [:reentrant, metadata]
+        span = AST::EffectSpan.new(start_token: span_start, end_token: span_end_tok)
+        return ParsedEffectsDecl.new(kind: :reentrant, span: span, tight: true)
       end
     end
 
     variant_tok = consume(:TYPE_ID)
-    variant_value = T.must(variant_tok).text!
+    variant_value = variant_tok.text!
     kind = T.let(:reentrant, Symbol)
     if variant_value == 'THUNK'
       kind = :reentrant_thunk
@@ -2037,11 +2043,8 @@ class ClearParser
       close_tok = consume(:CHAR, ')')
       span_end_tok = close_tok
     end
-    metadata = T.let(
-      { start_tok: span_start, end_tok: span_end_tok, max_depth: max_depth_n, tight: tight },
-      EffectMetadata
-    )
-    [kind, metadata]
+    span = AST::EffectSpan.new(start_token: span_start, end_token: span_end_tok)
+    ParsedEffectsDecl.new(kind: kind, span: span, max_depth: max_depth_n, tight: tight)
   end
 
   sig { params(stop_words: T::Array[String]).returns(AST::RawBody) }

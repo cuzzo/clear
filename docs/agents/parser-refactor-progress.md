@@ -214,3 +214,45 @@ state evidence.
 Validation: 80 focused parser/contract examples pass; all 480 top-level CLEAR
 fixtures parse; Ruby built-in coverage reports all 81 changed executable
 parser lines covered.
+
+### Stage 2C: named effect declarations and spans
+
+`parse_effects_decl` now returns `ParsedEffectsDecl` instead of a
+`[kind, metadata_hash]` tuple. Semantic modifiers live on that parse result;
+the AST retains a separate `AST::EffectSpan` with exactly the two source
+tokens diagnostics need. The reentrance annotator consumes those named token
+fields instead of heterogeneous hash entries.
+
+| Measure | Stage 2B | Stage 2C | Delta |
+| --- | ---: | ---: | ---: |
+| NilKill calls | 3,626 | 3,628 | +2 |
+| NilKill hash shapes | 29 | 23 | -6 |
+| NilKill array shapes | 1,407 | 1,406 | -1 |
+| NilKill collection index lookups | 73 | 71 | -2 |
+| NilKill hash-record blockers | 65 | 65 | 0 |
+| NilKill struct declarations | 7 | 8 | +1 |
+| Espalier complete/incomplete time results | 10 / 174 | 10 / 174 | 0 / 0 |
+| Espalier known `O(2^N)` component | 97 | 97 | 0 |
+| Espalier known `O(N)` stack component | 98 | 98 | 0 |
+| Decomplex candidates | 439 | 439 | 0 |
+| Decomplex convergence units | 93 | 93 | 0 |
+| Decomplex decision-pressure findings | 5 | 5 | 0 |
+| Decomplex state-based branch findings | 70 | 70 | 0 |
+| Decomplex False Simplicity findings | 65 | 65 | 0 |
+
+NilKill again captures the removal of fixed-schema hashes and indexing, but
+there is still no direct headline for replacing the semantic return tuple or
+for typing the AST/diagnostic boundary in another file. Espalier is correctly
+unchanged because recursive control flow did not change.
+
+An intermediate analyzer run was useful: the first record design placed
+semantic modifiers on an optional span and introduced two safe-navigation
+guards. Decomplex increased decision pressure and False Simplicity by one
+each. Separating semantic parse data from source-span data and giving `tight`
+a non-nil default removed both new findings; the final Decomplex counts match
+Stage 2B.
+
+Validation: 24 focused source-parser and diagnostic examples pass; all 480
+top-level CLEAR fixtures parse. Built-in coverage reports zero uncovered
+changed executable lines: 20 in the parser, three in the AST record, and four
+in the reentrance diagnostic consumer.

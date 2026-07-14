@@ -114,7 +114,7 @@ module ReentranceBridge
     span = fn_node.effects_span
     reason = T.must(suggestion_reason[1])
 
-    fixable!(span[:start_tok],
+    fixable!(span.start_token,
       level: :info,
       category: :reentrance,
       code: :PLAIN_REENTRANT_VARIANT_SUGGESTION,
@@ -633,9 +633,9 @@ module ReentranceBridge
   def effects_clause_edits(fn_node, replacement)
     T.bind(self, SemanticAnnotator) rescue nil
     span = fn_node.effects_span
-    return [] unless span && span[:start_tok] && span[:end_tok]
-    s = span[:start_tok]
-    e = span[:end_tok]
+    return [] unless span
+    s = span.start_token
+    e = span.end_token
     return [] if s.line != e.line
     end_col = e.column + e.value.to_s.length
     [Edit.new(
