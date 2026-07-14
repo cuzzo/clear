@@ -199,192 +199,54 @@ class Type
   end
 end
 
-class TypeShape < T::Struct
+require_relative "type_expression"
+
+class TypeShape
   extend T::Sig
 
   ArrayCapacity = T.type_alias { T.nilable(T.any(Integer, Symbol)) }
   Raw = T.type_alias { T.any(Type::FunctionType, Symbol, String) }
 
-  class ArrayParts < T::Struct
-    const :array, T::Boolean, default: false
-    const :element_type_raw, T.nilable(Symbol), default: nil
-    const :capacity, TypeShape::ArrayCapacity, default: nil
-  end
+  sig { returns(TypeExpression) }
+  attr_reader :expression
+  sig { returns(T::Boolean) }
+  attr_reader :auto
 
-  class MapParts < T::Struct
-    const :map, T::Boolean, default: false
-    const :key_type_raw, T.nilable(Symbol), default: nil
-    const :value_type_raw, T.nilable(Symbol), default: nil
+  sig do
+    params(
+      raw: Raw,
+      auto: T::Boolean,
+      expression: T.nilable(TypeExpression),
+      optional: T::Boolean,
+      wrapped_type_raw: T.nilable(Symbol),
+      wrapped_function_type_raw: T.nilable(Type::FunctionType)
+    ).void
   end
-
-  class GenericParts < T::Struct
-    const :generic_instance, T::Boolean, default: false
-    const :generic_base_raw, T.nilable(Symbol), default: nil
-    const :generic_args_raw, T::Array[Symbol], default: []
+  def initialize(
+    raw:,
+    auto: false,
+    expression: nil,
+    optional: false,
+    wrapped_type_raw: nil,
+    wrapped_function_type_raw: nil
+  )
+    @auto = T.let(auto, T::Boolean)
+    parsed = T.let(expression || TypeExpressionParser.parse(raw), TypeExpression)
+    if optional
+      wrapped = wrapped_function_type_raw || wrapped_type_raw
+      parsed = OptionalTypeExpression.new(inner: TypeExpressionParser.parse(wrapped)) unless wrapped.nil?
+    end
+    @expression = T.let(parsed, TypeExpression)
   end
-
-  const :raw, Raw
-  const :array, T::Boolean, default: false
-  const :map, T::Boolean, default: false
-  const :optional, T::Boolean, default: false
-  const :tense, T::Boolean, default: false
-  const :auto, T::Boolean, default: false
-  const :error_union, T::Boolean, default: false
-  const :generic_instance, T::Boolean, default: false
-  const :capacity, ArrayCapacity, default: nil
-  const :payload_type_raw, T.nilable(Symbol), default: nil
-  const :wrapped_type_raw, T.nilable(Symbol), default: nil
-  const :wrapped_function_type_raw, T.nilable(Type::FunctionType), default: nil
-  const :element_type_raw, T.nilable(Symbol), default: nil
-  const :key_type_raw, T.nilable(Symbol), default: nil
-  const :value_type_raw, T.nilable(Symbol), default: nil
-  const :generic_base_raw, T.nilable(Symbol), default: nil
-  const :generic_args_raw, T::Array[Symbol], default: []
-  const :tense_type_raw, T.nilable(Symbol), default: nil
 
   sig { params(core_str: String, auto: T::Boolean).returns(TypeShape) }
   def self.from_core(core_str, auto: false)
-    raw_symbol = core_str.to_sym
-
-    if core_str.start_with?("~")
-      tense_inner = T.must(core_str[1..])
-      raise "Invalid type '#{core_str}': double tense (~~) is not allowed — ~T is already a promise" if tense_inner.start_with?("~")
-
-      return TypeShape.new(
-        raw: raw_symbol,
-        auto: auto,
-        tense: true,
-        tense_type_raw: tense_inner.to_sym
-      )
+    if core_str.start_with?("!~")
+      raise "Invalid type '#{core_str}': !~T (error union of tense) is not allowed - use ~!T instead"
     end
 
-    after_error_str = core_str
-    if core_str.start_with?("!")
-      after_error_str = T.must(core_str[1..])
-      raise "Invalid type '#{core_str}': double error union (!!) is not allowed" if after_error_str.start_with?("!")
-      raise "Invalid type '#{core_str}': !~T (error union of tense) is not allowed — use ~!T instead" if after_error_str.start_with?("~")
-    end
-
-    shape_str = after_error_str
-    if after_error_str.start_with?("?")
-      shape_str = T.must(after_error_str[1..])
-      shape_str = T.must(shape_str[1..]) while shape_str.start_with?("?")
-      # ?~T is distinct from ~?T: the former is an optional promise (for
-      # example, a bounds-checked lookup in ~T[]@list), while the latter is a
-      # promise/stream whose produced value is optional. Both are meaningful.
-    end
-
-    array_parts = parse_array_shape(shape_str)
-    map_parts = parse_map_shape(shape_str)
-    generic_parts = parse_generic_shape(shape_str, array: array_parts.array, map: map_parts.map)
-
-    error_union = core_str.start_with?("!")
-    optional = after_error_str.start_with?("?")
-    payload_type_raw = T.let(nil, T.nilable(Symbol))
-    payload_type_raw = after_error_str.to_sym if error_union
-    wrapped_type_raw = T.let(nil, T.nilable(Symbol))
-    wrapped_type_raw = shape_str.to_sym if optional
-
-    TypeShape.new(
-      raw: raw_symbol,
-      array: array_parts.array,
-      map: map_parts.map,
-      optional: optional,
-      tense: false,
-      auto: auto,
-      error_union: error_union,
-      generic_instance: generic_parts.generic_instance,
-      capacity: array_parts.capacity,
-      payload_type_raw: payload_type_raw,
-      wrapped_type_raw: wrapped_type_raw,
-      element_type_raw: array_parts.element_type_raw,
-      key_type_raw: map_parts.key_type_raw,
-      value_type_raw: map_parts.value_type_raw,
-      generic_base_raw: generic_parts.generic_base_raw,
-      generic_args_raw: generic_parts.generic_args_raw,
-      tense_type_raw: nil
-    )
+    TypeShape.new(raw: core_str.to_sym, auto: auto)
   end
-
-  sig { params(shape_str: String).returns(ArrayParts) }
-  def self.parse_array_shape(shape_str)
-    match = shape_str.match(/^(.+)\[(\d+|INF|\?)?\]$/)
-    return ArrayParts.new unless match
-
-    ArrayParts.new(
-      array: true,
-      element_type_raw: T.must(match[1]).to_sym,
-      capacity: parse_array_capacity(match[2])
-    )
-  end
-
-  sig { params(raw_capacity: T.nilable(String)).returns(ArrayCapacity) }
-  def self.parse_array_capacity(raw_capacity)
-    return nil if raw_capacity.nil?
-
-    capacity = raw_capacity
-    return :STREAM_OPEN if capacity == "?"
-    return :INF if capacity == "INF"
-
-    return capacity.to_i
-  end
-
-  sig { params(shape_str: String).returns(MapParts) }
-  def self.parse_map_shape(shape_str)
-    map_match = shape_str.match(/^HashMap<(.+)>$/)
-    return MapParts.new unless map_match
-
-    map_inner = T.must(map_match[1])
-    if map_inner.include?(",")
-      parts = T.let(map_inner.split(",", 2).map(&:strip), T::Array[String])
-      return MapParts.new(
-        map: true,
-        key_type_raw: T.must(parts[0]).to_sym,
-        value_type_raw: T.must(parts[1]).to_sym
-      )
-    end
-
-    MapParts.new(map: true, key_type_raw: :String, value_type_raw: map_inner.to_sym)
-  end
-
-  sig { params(shape_str: String, array: T::Boolean, map: T::Boolean).returns(GenericParts) }
-  def self.parse_generic_shape(shape_str, array:, map:)
-    return GenericParts.new if map || array
-
-    generic_match = shape_str.match(/^([A-Z]\w*)<(.+)>$/)
-    return GenericParts.new unless generic_match
-
-    GenericParts.new(
-      generic_instance: true,
-      generic_base_raw: T.must(generic_match[1]).to_sym,
-      generic_args_raw: split_generic_type_args(T.must(generic_match[2])).map(&:to_sym)
-    )
-  end
-
-  sig { params(source: String).returns(T::Array[String]) }
-  def self.split_generic_type_args(source)
-    parts = T.let([], T::Array[String])
-    start = T.let(0, Integer)
-    depth = T.let(0, Integer)
-    source.each_char.with_index do |char, index|
-      case char
-      when "<", "(", "[", "{"
-        depth += 1
-      when ">", ")", "]", "}"
-        depth -= 1
-      when ","
-        next unless depth.zero?
-
-        parts << source[start...index].to_s.strip
-        start = index + 1
-      end
-    end
-    parts << source[start..].to_s.strip
-    parts
-  end
-
-  private_class_method :parse_array_shape, :parse_array_capacity, :parse_map_shape, :parse_generic_shape,
-    :split_generic_type_args
 
   sig { returns(TypeShape) }
   def copy
@@ -393,54 +255,178 @@ class TypeShape < T::Struct
 
   sig { params(auto_value: T::Boolean).returns(TypeShape) }
   def copy_with_auto(auto_value)
-    TypeShape.new(
-      raw: raw,
-      array: array,
-      map: map,
-      optional: optional,
-      tense: tense,
-      auto: auto_value,
-      error_union: error_union,
-      generic_instance: generic_instance,
-      capacity: capacity,
-      payload_type_raw: payload_type_raw,
-      wrapped_type_raw: wrapped_type_raw,
-      wrapped_function_type_raw: wrapped_function_type_raw,
-      element_type_raw: element_type_raw,
-      key_type_raw: key_type_raw,
-      value_type_raw: value_type_raw,
-      generic_base_raw: generic_base_raw,
-      generic_args_raw: generic_args_raw.dup,
-      tense_type_raw: tense_type_raw
-    )
+    TypeShape.new(raw: raw, auto: auto_value, expression: expression)
   end
 
-  sig { returns(T::Boolean) }
-  def fn_type?
-    TypeShape.raw_function_signature_like?(raw)
+  sig { returns(Raw) }
+  def raw
+    current = expression
+    return current.signature if current.is_a?(FunctionTypeExpression)
+
+    TypeExpressionPrinter.legacy(current).to_sym
   end
 
   sig { returns(Symbol) }
   def resolved
-    current_raw = raw
-    if current_raw.is_a?(Symbol)
-      current_raw
-    elsif current_raw.is_a?(String)
-      current_raw.to_sym
-    else
-      :Any
-    end
+    raw_value = raw
+    raw_value.is_a?(Type::FunctionType) ? :Any : raw_value.to_sym
   end
 
-  # ruby-to-clear: private
-  sig { params(value: Raw).returns(T::Boolean) }
-  def self.raw_function_signature_like?(value)
-    value.is_a?(Type::FunctionType)
+  sig { returns(T::Boolean) }
+  def fn_type?
+    expression.is_a?(FunctionTypeExpression)
+  end
+
+  sig { returns(T::Boolean) }
+  def array
+    !linear_expression.nil?
+  end
+
+  sig { returns(T::Boolean) }
+  def map
+    structural_expression.is_a?(MapTypeExpression)
+  end
+
+  sig { returns(T::Boolean) }
+  def optional
+    current = expression
+    current = current.inner if current.is_a?(FallibleTypeExpression)
+    current.is_a?(OptionalTypeExpression) ||
+      (current.is_a?(LinearTypeExpression) && current.item.is_a?(OptionalTypeExpression))
+  end
+
+  sig { returns(T::Boolean) }
+  def error_union
+    expression.is_a?(FallibleTypeExpression)
+  end
+
+  sig { returns(T::Boolean) }
+  def tense
+    expression.is_a?(FutureTypeExpression)
+  end
+
+  sig { returns(T::Boolean) }
+  def generic_instance
+    structural = structural_expression
+    structural.is_a?(TupleTypeExpression) ||
+      (structural.is_a?(NamedTypeExpression) && !structural.arguments.empty?)
+  end
+
+  sig { returns(ArrayCapacity) }
+  def capacity
+    linear = linear_expression
+    return nil if linear.nil?
+
+    dimension = linear.dimensions.last
+    dimension == :LIST ? nil : dimension
+  end
+
+  sig { returns(T.nilable(Symbol)) }
+  def payload_type_raw
+    current = expression
+    return nil unless current.is_a?(FallibleTypeExpression)
+
+    TypeExpressionPrinter.legacy(current.inner).to_sym
+  end
+
+  sig { returns(T.nilable(Symbol)) }
+  def wrapped_type_raw
+    current = expression
+    return nil unless current.is_a?(OptionalTypeExpression)
+    return nil if current.inner.is_a?(FunctionTypeExpression)
+
+    TypeExpressionPrinter.legacy(current.inner).to_sym
+  end
+
+  sig { returns(T.nilable(Type::FunctionType)) }
+  def wrapped_function_type_raw
+    current = expression
+    return nil unless current.is_a?(OptionalTypeExpression)
+    inner = current.inner
+    return nil unless inner.is_a?(FunctionTypeExpression)
+
+    inner.signature
+  end
+
+  sig { returns(T.nilable(Symbol)) }
+  def element_type_raw
+    linear = linear_expression
+    return nil if linear.nil?
+
+    item = linear.item
+    item = item.inner if item.is_a?(OptionalTypeExpression)
+    TypeExpressionPrinter.legacy(item).to_sym
+  end
+
+  sig { returns(T.nilable(Symbol)) }
+  def key_type_raw
+    structural = structural_expression
+    return nil unless structural.is_a?(MapTypeExpression)
+
+    TypeExpressionPrinter.legacy(structural.key).to_sym
+  end
+
+  sig { returns(T.nilable(Symbol)) }
+  def value_type_raw
+    structural = structural_expression
+    return nil unless structural.is_a?(MapTypeExpression)
+
+    TypeExpressionPrinter.legacy(structural.value).to_sym
+  end
+
+  sig { returns(T.nilable(Symbol)) }
+  def generic_base_raw
+    structural = structural_expression
+    return :Tuple if structural.is_a?(TupleTypeExpression)
+    return structural.name if structural.is_a?(NamedTypeExpression) && !structural.arguments.empty?
+
+    nil
+  end
+
+  sig { returns(T::Array[Symbol]) }
+  def generic_args_raw
+    structural = structural_expression
+    items = if structural.is_a?(TupleTypeExpression)
+      structural.items
+    elsif structural.is_a?(NamedTypeExpression)
+      structural.arguments
+    else
+      []
+    end
+    items.map { |item| TypeExpressionPrinter.legacy(item).to_sym }
+  end
+
+  sig { returns(T.nilable(Symbol)) }
+  def tense_type_raw
+    current = expression
+    return nil unless current.is_a?(FutureTypeExpression)
+
+    TypeExpressionPrinter.legacy(current.inner).to_sym
   end
 
   sig { returns(T::Boolean) }
   def numeric_map?
-    map && !key_type_raw.nil? && key_type_raw != :String
+    map && key_type_raw != :String
+  end
+
+  private
+
+  sig { returns(T.nilable(LinearTypeExpression)) }
+  def linear_expression
+    structural = structural_expression
+    return structural if structural.is_a?(LinearTypeExpression)
+
+    nil
+  end
+
+  sig { returns(TypeExpression) }
+  def structural_expression
+    structural = expression
+    structural = structural.inner if structural.is_a?(FallibleTypeExpression)
+    if structural.is_a?(OptionalTypeExpression) && !structural.inner.is_a?(LinearTypeExpression)
+      structural = structural.inner
+    end
+    structural
   end
 end
 
@@ -4533,7 +4519,8 @@ class Type
     end
 
     suffix = T.let(TypeCapabilitySuffix.new(base: normalized_str, ownership: nil, sync: nil), TypeCapabilitySuffix)
-    unless normalized_str.include?("<")
+    capability_marker = normalized_str.rindex("@")
+    unless normalized_str.include?("<") || capability_marker.nil? || capability_marker.zero?
       suffix = Type.strip_capability_suffix_from(normalized_str)
     end
     @shape = TypeShape.from_core(suffix.base, auto: auto)
