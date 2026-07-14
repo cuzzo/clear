@@ -560,6 +560,7 @@ impl<'source> TreeSitterNormalizer<'source> {
 
     pub(in crate::ast) fn normalize_lambda(&mut self, node: TreeSitterNode<'_>) -> Option<Node> {
         let target = self.lambda_target(node).unwrap_or(node);
+        let args = self.normalize_block_parameters(Some(target));
         let body_node = self
             .named_field(target, "body")
             .or_else(|| self.block_child(target))
@@ -569,7 +570,7 @@ impl<'source> TreeSitterNormalizer<'source> {
                 .normalize_body(body_node)
                 .map(|node| normalizer.normalize_dynamic_scope(node))
         });
-        let scope = self.scope(body, None, target);
+        let scope = self.scope(body, args, target);
         Some(self.wrap("LAMBDA", vec![Child::Node(Box::new(scope))], target))
     }
 

@@ -383,6 +383,7 @@ module Espalier
       flow_local_types = Array(facts["flow_local_types"]).uniq do |fact|
         [fact["file"], fact["function"], fact["node_id"], fact["place_id"]]
       end
+      type_dependencies = Array(facts["type_dependencies"]).uniq { |fact| fact["id"] }
 
       # Collect languages of owners to know if they need @ prepended for fields
       owner_languages = {}
@@ -459,6 +460,7 @@ module Espalier
           "flow_local_types" => flow_local_types.sort_by do |fact|
             [fact["file"].to_s, fact["function"].to_s, fact["line"].to_i, fact["name"].to_s, fact["node_id"].to_s]
           end,
+          "type_dependencies" => type_dependencies.sort_by { |fact| fact["id"].to_s },
           "call_graph_edges" => call_graph_edges.sort_by { |edge| [edge["source"].to_s, edge["target"].to_s, edge["kind"].to_s] },
           "state_type_edges" => state_type_edges.sort_by { |edge| [edge["source"].to_s, edge["target"].to_s, edge["label"].to_s] },
           "state_types" => Hash[state_types.sort],
@@ -504,6 +506,7 @@ module Espalier
           "calls" => calls.size,
           "state_accesses" => state_accesses.size,
           "flow_local_types" => flow_local_types.size,
+          "type_dependencies" => type_dependencies.size,
           "signatures" => typed_signature_count,
           "state_types" => state_types.size,
           "state_type_records" => deduped[:state_type_records].size,

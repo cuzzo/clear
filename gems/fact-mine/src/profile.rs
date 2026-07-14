@@ -79,6 +79,11 @@ pub struct ProfileOutput {
     // NilKill-only fields
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub flow_local_types: Vec<serde_json::Value>,
+    /// Replayable, language-neutral type dependencies for NilKill. Each row is
+    /// either a definition or a read and names every prerequisite that must be
+    /// resolved before its type is complete.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub type_dependencies: Vec<serde_json::Value>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub collection_index_lookups: Vec<serde_json::Value>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
@@ -483,6 +488,7 @@ pub fn extract(document: &Document, profile: Profile) -> ProfileOutput {
     } else {
         Vec::new()
     };
+    let mut type_dependencies = Vec::new();
 
     let mut pre_registered_noreturns = std::collections::HashSet::new();
     if let Ok(env_val) = std::env::var("FACT_MINE_NORETURN_METHODS") {
@@ -665,6 +671,8 @@ pub fn extract(document: &Document, profile: Profile) -> ProfileOutput {
                 (format!("{}\u{0}{}", c, f), v.clone())
             }).collect();
         }
+        type_dependencies = extract_type_dependencies(document, &state_types, &tlet_sites);
+        attach_return_type_dependencies(&type_dependencies, &mut return_origins);
     }
 
     ProfileOutput {
@@ -688,6 +696,7 @@ pub fn extract(document: &Document, profile: Profile) -> ProfileOutput {
         state_accesses,
         complexity_facts,
         flow_local_types,
+        type_dependencies,
         collection_index_lookups,
         hash_record_blockers,
         tlet_sites,
@@ -735,6 +744,7 @@ pub fn merge(outputs: Vec<ProfileOutput>, profile: Profile) -> ProfileOutput {
     let mut state_accesses = Vec::new();
     let mut complexity_facts = Vec::new();
     let mut flow_local_types = Vec::new();
+    let mut type_dependencies = Vec::new();
     let mut collection_index_lookups = Vec::new();
     let mut hash_record_blockers = Vec::new();
     let mut tlet_sites = Vec::new();
@@ -789,6 +799,7 @@ pub fn merge(outputs: Vec<ProfileOutput>, profile: Profile) -> ProfileOutput {
             flow_local_types.extend(output.flow_local_types);
         }
         if nil_kill {
+            type_dependencies.extend(output.type_dependencies);
             collection_index_lookups.extend(output.collection_index_lookups);
             hash_record_blockers.extend(output.hash_record_blockers);
             dead_nil_checks.extend(output.dead_nil_checks);
@@ -826,6 +837,8 @@ pub fn merge(outputs: Vec<ProfileOutput>, profile: Profile) -> ProfileOutput {
     calls.dedup_by(|a, b| a.id == b.id);
     state_accesses.sort_by(|a, b| a.id.cmp(&b.id));
     state_accesses.dedup_by(|a, b| a.id == b.id);
+    type_dependencies.sort_by(|left, right| left["id"].as_str().cmp(&right["id"].as_str()));
+    type_dependencies.dedup_by(|left, right| left["id"] == right["id"]);
 
     ProfileOutput {
         owners,
@@ -848,6 +861,7 @@ pub fn merge(outputs: Vec<ProfileOutput>, profile: Profile) -> ProfileOutput {
         state_accesses,
         complexity_facts,
         flow_local_types,
+        type_dependencies,
         collection_index_lookups,
         hash_record_blockers,
         tlet_sites,
@@ -922,6 +936,276 @@ fn extract_flow_local_types(document: &Document) -> Vec<serde_json::Value> {
             }))
         })
         .collect()
+}
+
+fn extract_type_dependencies(
+    document: &Document,
+    state_types: &BTreeMap<String, TypeExpr>,
+    tlet_sites: &[serde_json::Value],
+) -> Vec<serde_json::Value> {
+    let places = document
+        .places
+        .iter()
+        .map(|place| (place.id.as_str(), place))
+        .collect::<BTreeMap<_, _>>();
+    let nodes = document
+        .control_flow_nodes
+        .iter()
+        .map(|node| (node.id.as_str(), node))
+        .collect::<BTreeMap<_, _>>();
+    let reaching = document
+        .reaching_definitions
+        .iter()
+        .map(|fact| {
+            (
+                (fact.node_id.as_str(), fact.place_id.as_str()),
+                fact.definitions.as_slice(),
+            )
+        })
+        .collect::<BTreeMap<_, _>>();
+    let writes = document
+        .node_effects
+        .iter()
+        .flat_map(|effect| {
+            effect
+                .writes
+                .iter()
+                .map(move |place| (effect.node_id.as_str(), place.as_str()))
+        })
+        .collect::<BTreeSet<_>>();
+    let params = document
+        .function_defs
+        .iter()
+        .map(|function| {
+            (
+                (function.owner.as_str(), function.name.as_str()),
+                function
+                    .params
+                    .iter()
+                    .map(String::as_str)
+                    .collect::<BTreeSet<_>>(),
+            )
+        })
+        .collect::<BTreeMap<_, _>>();
+    let mut rows = BTreeMap::<String, serde_json::Value>::new();
+    let tlet_lines = tlet_sites
+        .iter()
+        .filter_map(|site| site["line"].as_u64().map(|line| line as usize))
+        .collect::<BTreeSet<_>>();
+
+    let root_id = |place: &crate::syntax::cfg::Place| {
+        match place.kind.as_str() {
+            "local" => format!("type-root:{}:{}", place.file, place.id),
+            // A program-global value is one storage location even when it is
+            // read and written by different owners or source files.
+            "global" => format!("type-root:state:global:{}", place.name),
+            _ => format!(
+                "type-root:state:{}:{}:{}",
+                place.owner, place.kind, place.name
+            ),
+        }
+    };
+    let definition_id = |node_id: &str, place: &crate::syntax::cfg::Place| {
+        if place.kind == "local" {
+            format!(
+                "type-definition:{}:{node_id}:{}",
+                place.file, place.id
+            )
+        } else {
+            root_id(place)
+        }
+    };
+    let requirements_for = |node_id: &str, place: &crate::syntax::cfg::Place| {
+        let definitions = reaching
+            .get(&(node_id, place.id.as_str()))
+            .copied()
+            .unwrap_or_default();
+        if definitions.is_empty() {
+            if writes.contains(&(node_id, place.id.as_str())) {
+                vec![definition_id(node_id, place)]
+            } else {
+                vec![root_id(place)]
+            }
+        } else {
+            definitions
+                .iter()
+                .map(|definition| definition_id(definition, place))
+                .collect()
+        }
+    };
+
+    let root_record = |place: &crate::syntax::cfg::Place| {
+        let id = root_id(place);
+        let resolved = place.kind != "local"
+            && state_types.contains_key(&state_key(
+                &place.owner,
+                place.name.trim_start_matches('@'),
+            ));
+        let candidate_kind = if params
+            .get(&(place.owner.as_str(), place.function.as_str()))
+            .is_some_and(|names| names.contains(place.name.as_str()))
+        {
+            "parameter"
+        } else {
+            place.kind.as_str()
+        };
+        (
+            id.clone(),
+            json!({
+                "id": id,
+                "kind": "definition",
+                "candidate": !resolved,
+                "candidate_kind": candidate_kind,
+                "resolved": resolved,
+                "requirements": [],
+                "file": place.file,
+                "owner": place.owner,
+                "function": place.function,
+                "name": place.name,
+                "line": place.declaration_span[0],
+                "span": place.declaration_span,
+            }),
+        )
+    };
+
+    for effect in &document.node_effects {
+        let Some(node) = nodes.get(effect.node_id.as_str()) else {
+            continue;
+        };
+        for place_id in &effect.writes {
+            let Some(place) = places.get(place_id.as_str()) else {
+                continue;
+            };
+            if place.kind != "local" {
+                let (root, record) = root_record(place);
+                rows.entry(root).or_insert(record);
+                continue;
+            }
+            let id = definition_id(&effect.node_id, place);
+            let source = effect.write_sources.get(place_id);
+            let requirements = source
+                .and_then(|source_id| places.get(source_id.as_str()))
+                .map(|source_place| requirements_for(&effect.node_id, source_place))
+                .unwrap_or_default();
+            for requirement in &requirements {
+                if requirement.starts_with("type-root:") {
+                    let source_place = source
+                        .and_then(|source_id| places.get(source_id.as_str()))
+                        .copied()
+                        .unwrap_or(place);
+                    let (root, record) = root_record(source_place);
+                    rows.entry(root).or_insert(record);
+                }
+            }
+            let resolved = effect.write_type_hints.contains_key(place_id)
+                || tlet_lines.contains(&node.line);
+            let candidate = !resolved && requirements.is_empty();
+            rows.insert(id.clone(), json!({
+                "id": id,
+                "kind": "definition",
+                "candidate": candidate,
+                "candidate_kind": if node.kind == "entry" { "parameter" } else { place.kind.as_str() },
+                "resolved": resolved,
+                "requirements": requirements,
+                "file": place.file,
+                "owner": place.owner,
+                "function": place.function,
+                "name": place.name,
+                "line": node.line,
+                "span": node.span,
+            }));
+        }
+    }
+
+    for fact in &document.flow_types {
+        let (Some(place), Some(node)) = (
+            places.get(fact.place_id.as_str()),
+            nodes.get(fact.node_id.as_str()),
+        ) else {
+            continue;
+        };
+        let requirements = requirements_for(&fact.node_id, place);
+        if requirements.iter().any(|id| id.starts_with("type-root:")) {
+            let (root, record) = root_record(place);
+            rows.entry(root).or_insert(record);
+        }
+        let id = format!(
+            "type-read:{}:{}:{}",
+            fact.file, fact.node_id, fact.place_id
+        );
+        rows.insert(
+            id.clone(),
+            json!({
+                "id": id,
+                "kind": "flow_read",
+                "candidate": false,
+                "candidate_kind": null,
+                "resolved": fact.complete,
+                "requirements": requirements,
+                "file": fact.file,
+                "owner": fact.owner,
+                "function": fact.function,
+                "name": place.name,
+                "line": node.line,
+                "span": node.span,
+                "types": fact.types,
+            }),
+        );
+    }
+
+    rows.into_values().collect()
+}
+
+fn attach_return_type_dependencies(
+    dependencies: &[serde_json::Value],
+    return_origins: &mut [serde_json::Value],
+) {
+    let reads = dependencies
+        .iter()
+        .filter(|fact| fact["kind"] == "flow_read")
+        .filter_map(|fact| {
+            Some((
+                (
+                    fact["file"].as_str()?,
+                    fact["owner"].as_str()?,
+                    fact["function"].as_str()?,
+                    fact["name"].as_str()?,
+                    fact["line"].as_u64()? as usize,
+                ),
+                fact["id"].as_str()?,
+            ))
+        })
+        .collect::<BTreeMap<_, _>>();
+    for origin in return_origins {
+        let (Some(path), Some(owner), Some(function)) = (
+            origin["path"].as_str().map(str::to_string),
+            origin["class"].as_str().map(str::to_string),
+            origin["method"].as_str().map(str::to_string),
+        ) else {
+            continue;
+        };
+        let Some(sources) = origin["sources"].as_array_mut() else {
+            continue;
+        };
+        for source in sources {
+            if source["kind"] != "unknown" {
+                continue;
+            }
+            let (Some(name), Some(line)) = (source["code"].as_str(), source["line"].as_u64())
+            else {
+                continue;
+            };
+            if let Some(dependency) = reads.get(&(
+                path.as_str(),
+                owner.as_str(),
+                function.as_str(),
+                name,
+                line as usize,
+            )) {
+                source["type_dependency_id"] = json!(dependency);
+            }
+        }
+    }
 }
 
 fn get_def_header(lines: &[String], start_line_1indexed: usize) -> String {

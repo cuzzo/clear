@@ -125,9 +125,76 @@ RSpec.describe NilKill do
       expect(graph.edges).to include(a_hash_including("kind" => "return_forward", "from" => "return:method_name:leaf"))
       expect(graph.sorbet_type_for("struct_field:Example::Node:name")).to eq("String")
     end
+
+
+    it "ranks conjunctive type dependencies by definite transitive unlocks" do
+      evidence = {
+        "facts" => {
+          "type_dependencies" => [
+            { "id" => "root:a", "kind" => "definition", "candidate" => true,
+              "candidate_kind" => "parameter", "resolved" => false, "requirements" => [], "name" => "a" },
+            { "id" => "root:b", "kind" => "definition", "candidate" => true,
+              "candidate_kind" => "parameter", "resolved" => false, "requirements" => [], "name" => "b" },
+            { "id" => "copy:a", "kind" => "definition", "candidate" => false,
+              "resolved" => false, "requirements" => ["root:a"], "name" => "copy" },
+            { "id" => "read:a", "kind" => "flow_read", "candidate" => false,
+              "resolved" => false, "requirements" => ["copy:a"], "name" => "copy" },
+            { "id" => "join", "kind" => "flow_read", "candidate" => false,
+              "resolved" => false, "requirements" => ["root:a", "root:b"], "name" => "joined" },
+          ],
+        },
+      }
+
+      pressure = described_class.from_evidence(evidence).unlock_pressure
+
+      expect(pressure.map { |row| row["candidate"] }).to eq(["root:a"])
+      expect(pressure.first["unlocked_ids"]).to include("copy:a", "read:a")
+      expect(pressure.first["unlocked_ids"]).not_to include("join")
+      expect(pressure.first["counts"]).to include("flow_read" => 1)
+    end
+
+    it "handles dependency cycles without treating an ungrounded cycle as resolved" do
+      graph = described_class.new
+      graph.add_dependency_node("left", requirements: ["right"], candidate: true)
+      graph.add_dependency_node("right", requirements: ["left"])
+      graph.add_dependency_node("read", requirements: ["right"], data: { "kind" => "flow_read" })
+
+      expect(graph.unlock_pressure.first["unlocked_ids"]).to contain_exactly("read", "right")
+
+      ungrounded = described_class.new
+      ungrounded.add_dependency_node("left", requirements: ["right"])
+      ungrounded.add_dependency_node("right", requirements: ["left"])
+      expect(ungrounded.unlock_pressure).to be_empty
+    end
   end
 
   describe NilKill::Report do
+    it "renders definite type dependency unlock pressure" do
+      evidence = {
+        "facts" => {
+          "type_dependencies" => [
+            { "id" => "root", "kind" => "definition", "candidate" => true,
+              "candidate_kind" => "parameter", "resolved" => false, "requirements" => [],
+              "file" => "src/pipeline.rb", "line" => 4, "name" => "source" },
+            { "id" => "read", "kind" => "flow_read", "candidate" => false,
+              "resolved" => false, "requirements" => ["root"], "name" => "source" },
+          ],
+        },
+      }
+      lines = []
+
+      described_class.new.send(:append_type_dependency_pressure, lines, evidence)
+
+      expect(lines.join("\n")).to include("Type Dependency Unlock Pressure")
+      expect(lines.join("\n")).to include("src/pipeline.rb:4 source (parameter); definitely unlocks 1 1 flow read")
+    end
+
+    it "reports when no single annotation has definite dependency impact" do
+      lines = []
+      described_class.new.send(:append_type_dependency_pressure, lines, { "facts" => {} })
+      expect(lines.last).to eq("- none")
+    end
+
     it "formats project paths as root-relative links when requested" do
       report = described_class.new(["--with-links"])
       abs = File.join(NilKill::ROOT, "src", "ast", "parser.rb")

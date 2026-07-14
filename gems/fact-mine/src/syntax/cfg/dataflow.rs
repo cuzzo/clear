@@ -7,13 +7,9 @@ use std::collections::{BTreeMap, BTreeSet, VecDeque};
 type DefinitionState = BTreeMap<String, BTreeSet<String>>;
 
 pub(crate) fn derive(facts: &mut ControlFlowFacts) {
-    let functions = facts
-        .nodes
-        .iter()
-        .map(|node| (node.file.clone(), node.owner.clone(), node.function.clone()))
-        .collect::<BTreeSet<_>>();
-    for (file, owner, function) in functions {
-        derive_function(facts, &file, &owner, &function);
+    let graphs = method_graphs(facts);
+    for (file, owner, function, entry, node_ids) in graphs {
+        derive_graph(facts, &file, &owner, &function, &entry, &node_ids);
     }
     facts.reachability.sort_by(|a, b| a.node_id.cmp(&b.node_id));
     facts.dominators.sort_by(|a, b| a.node_id.cmp(&b.node_id));
@@ -35,25 +31,78 @@ pub(crate) fn derive(facts: &mut ControlFlowFacts) {
     });
 }
 
-fn derive_function(facts: &mut ControlFlowFacts, file: &str, owner: &str, function: &str) {
+type MethodGraph = (String, String, String, String, Vec<String>);
+
+fn method_graphs(facts: &ControlFlowFacts) -> Vec<MethodGraph> {
+    let mut adjacency = facts
+        .nodes
+        .iter()
+        .map(|node| (node.id.clone(), BTreeSet::new()))
+        .collect::<BTreeMap<_, _>>();
+    for edge in &facts.edges {
+        if adjacency.contains_key(&edge.from) && adjacency.contains_key(&edge.to) {
+            adjacency
+                .entry(edge.from.clone())
+                .or_default()
+                .insert(edge.to.clone());
+            adjacency
+                .entry(edge.to.clone())
+                .or_default()
+                .insert(edge.from.clone());
+        }
+    }
     let nodes = facts
         .nodes
         .iter()
-        .filter(|node| node.file == file && node.owner == owner && node.function == function)
-        .collect::<Vec<_>>();
-    let node_ids = nodes.iter().map(|node| node.id.clone()).collect::<Vec<_>>();
+        .map(|node| (node.id.as_str(), node))
+        .collect::<BTreeMap<_, _>>();
+    let mut assigned = BTreeSet::new();
+    let mut graphs = Vec::new();
+    for entry in facts.nodes.iter().filter(|node| node.kind == "entry") {
+        if assigned.contains(&entry.id) {
+            continue;
+        }
+        let mut component = BTreeSet::new();
+        let mut queue = VecDeque::from([entry.id.clone()]);
+        while let Some(node_id) = queue.pop_front() {
+            if !component.insert(node_id.clone()) {
+                continue;
+            }
+            queue.extend(adjacency.get(&node_id).into_iter().flatten().cloned());
+        }
+        assigned.extend(component.iter().cloned());
+        graphs.push((
+            entry.file.clone(),
+            entry.owner.clone(),
+            entry.function.clone(),
+            entry.id.clone(),
+            component.into_iter().collect(),
+        ));
+    }
+    debug_assert_eq!(
+        assigned.len(),
+        nodes.len(),
+        "every CFG node must belong to exactly one method graph"
+    );
+    graphs
+}
+
+fn derive_graph(
+    facts: &mut ControlFlowFacts,
+    file: &str,
+    owner: &str,
+    function: &str,
+    entry: &str,
+    node_ids: &[String],
+) {
     let node_set = node_ids.iter().cloned().collect::<BTreeSet<_>>();
-    let entry = nodes
-        .iter()
-        .find(|node| node.kind == "entry")
-        .map(|node| node.id.clone());
     let edges = facts
         .edges
         .iter()
-        .filter(|edge| edge.file == file && edge.owner == owner && edge.function == function)
+        .filter(|edge| node_set.contains(&edge.from) && node_set.contains(&edge.to))
         .collect::<Vec<_>>();
-    let mut successors = empty_adjacency(&node_ids);
-    let mut predecessors = empty_adjacency(&node_ids);
+    let mut successors = empty_adjacency(node_ids);
+    let mut predecessors = empty_adjacency(node_ids);
     for edge in edges {
         if node_set.contains(&edge.from) && node_set.contains(&edge.to) {
             successors
@@ -66,8 +115,8 @@ fn derive_function(facts: &mut ControlFlowFacts, file: &str, owner: &str, functi
                 .insert(edge.from.clone());
         }
     }
-    let reachable = reachable_nodes(entry.as_deref(), &successors);
-    for node_id in &node_ids {
+    let reachable = reachable_nodes(Some(entry), &successors);
+    for node_id in node_ids {
         facts.reachability.push(ReachabilityFact {
             node_id: node_id.clone(),
             file: file.to_string(),
@@ -82,8 +131,8 @@ fn derive_function(facts: &mut ControlFlowFacts, file: &str, owner: &str, functi
         file,
         owner,
         function,
-        &node_ids,
-        entry.as_deref(),
+        node_ids,
+        Some(entry),
         &predecessors,
         &reachable,
     );
@@ -91,24 +140,22 @@ fn derive_function(facts: &mut ControlFlowFacts, file: &str, owner: &str, functi
     let effects = facts
         .effects
         .iter()
-        .filter(|effect| {
-            effect.file == file && effect.owner == owner && effect.function == function
-        })
+        .filter(|effect| node_set.contains(&effect.node_id))
         .map(|effect| (effect.node_id.clone(), effect.clone()))
         .collect::<BTreeMap<_, _>>();
-    let reaching = reaching_definitions(&node_ids, &predecessors, &reachable, &effects);
-    append_reaching_and_def_use(facts, file, owner, function, &node_ids, &effects, &reaching);
+    let reaching = reaching_definitions(node_ids, &predecessors, &reachable, &effects);
+    append_reaching_and_def_use(facts, file, owner, function, node_ids, &effects, &reaching);
     append_liveness(
         facts,
         file,
         owner,
         function,
-        &node_ids,
+        node_ids,
         &successors,
         &reachable,
         &effects,
     );
-    append_flow_types(facts, file, owner, function, &effects);
+    append_flow_types(facts, file, owner, function, &node_set, &effects);
 }
 
 fn empty_adjacency(node_ids: &[String]) -> BTreeMap<String, BTreeSet<String>> {
@@ -366,13 +413,14 @@ fn append_flow_types(
     file: &str,
     owner: &str,
     function: &str,
+    node_set: &BTreeSet<String>,
     effects: &BTreeMap<String, super::NodeEffect>,
 ) {
-    let definition_types = definition_type_hints(facts, file, owner, function, effects);
+    let definition_types = definition_type_hints(facts, node_set, effects);
     let reaching = facts
         .reaching_definitions
         .iter()
-        .filter(|fact| fact.file == file && fact.owner == owner && fact.function == function)
+        .filter(|fact| node_set.contains(&fact.node_id))
         .cloned()
         .collect::<Vec<_>>();
     for fact in reaching {
@@ -412,15 +460,13 @@ struct DefinitionTypeHint {
 
 fn definition_type_hints(
     facts: &ControlFlowFacts,
-    file: &str,
-    owner: &str,
-    function: &str,
+    node_set: &BTreeSet<String>,
     effects: &BTreeMap<String, super::NodeEffect>,
 ) -> BTreeMap<(String, String), DefinitionTypeHint> {
     let reaching = facts
         .reaching_definitions
         .iter()
-        .filter(|fact| fact.file == file && fact.owner == owner && fact.function == function)
+        .filter(|fact| node_set.contains(&fact.node_id))
         .map(|fact| {
             (
                 (fact.node_id.clone(), fact.place_id.clone()),

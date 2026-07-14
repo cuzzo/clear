@@ -56,6 +56,7 @@ module NilKill
         evidence["diagnostics"]["nil_origins"].first(20).each { |o| lines << "- #{o["origin"]}: #{o["count"]}" }
       end
       append_callsite_pressure(lines, actions)
+      append_type_dependency_pressure(lines, evidence)
       append_return_origin_report(lines, evidence)
       append_param_origin_report(lines, evidence)
       append_foreign_class_pressure(lines, evidence)
@@ -1071,6 +1072,33 @@ module NilKill
       end
     end
 
+    def append_type_dependency_pressure(lines, evidence)
+      pressure = type_dependency_pressure(evidence).select do |row|
+        !row.dig("candidate_data", "candidate_kind").to_s.empty?
+      end
+      lines << ""
+      lines << "## Type Dependency Unlock Pressure"
+      lines << "- definite lower bound: each row counts only slots that become resolvable from this annotation alone"
+      lines << "- conjunctive joins are excluded unless the same annotation satisfies every unresolved input"
+      if pressure.empty?
+        lines << "- none"
+        return
+      end
+      pressure.first(30).each do |row|
+        candidate = row["candidate_data"]
+        counts = row["counts"]
+        location = [candidate["file"], candidate["line"]].compact.join(":")
+        label = candidate["label"] || candidate["name"] || row["candidate"]
+        kind = candidate["candidate_kind"] || candidate["kind"]
+        breakdown = %w[flow_read return param].filter_map do |target_kind|
+          count = counts[target_kind].to_i
+          "#{count} #{target_kind.tr("_", " ")}" if count.positive?
+        end
+        suffix = breakdown.empty? ? "dependent facts" : breakdown.join(", ")
+        lines << "- #{location} #{label} (#{kind}); definitely unlocks #{row["unlocked_ids"].size} #{suffix}"
+      end
+    end
+
     def untyped_return_origins(evidence)
       untyped = Array(evidence.dig("facts", "existing_sigs")).each_with_object(Set.new) do |method, set|
         next unless extract_return_type(method["sig"].to_s) == "T.untyped"
@@ -1120,50 +1148,37 @@ module NilKill
 
     def return_cascade_pressure(origins, evidence)
       usage = return_usage_by_name(evidence)
-      method_name_counts = return_method_name_counts(evidence)
-      methods = origins.each_with_object({}) do |origin, lookup|
-        key = return_method_key(origin)
-        deps = return_unresolved_dependencies(origin)
-        next if deps.empty?
-        lookup[key] = {
-          "origin" => origin,
-          "deps" => deps,
-          "method_token" => return_method_token(origin),
-          "method_name" => origin["method"].to_s,
-        }
+      indexed_origins = Array(evidence.dig("facts", "return_origins"))
+      indexed_keys = indexed_origins.map { |origin| return_method_key(origin) }.to_set
+      requested_keys = origins.map { |origin| return_method_key(origin) }.to_set
+      rows = if requested_keys.subset?(indexed_keys)
+        type_dependency_pressure(evidence)
+      else
+        facts = Hash(evidence["facts"]).merge("return_origins" => origins)
+        FlowGraph.dependencies_from_evidence(evidence.merge("facts" => facts)).unlock_pressure
       end
-      roots = methods.values.flat_map { |entry| entry["deps"].select { |dep| dep.start_with?("root:") } }.uniq
-      param_flows = Array(evidence.dig("facts", "param_origins")).select { |origin| %w[typed_return untyped_return].include?(origin["origin_kind"]) }
-      param_flows_by_source = param_flows.group_by { |flow| flow["source_method"].to_s }
-      roots.each_with_object({}) do |root_dep, pressure|
-        resolved = Set[root_dep]
-        unlocked = Set.new
-        changed = true
-        while changed
-          changed = false
-          methods.each do |key, entry|
-            next if unlocked.include?(key)
-            next unless entry["deps"].all? { |dep| resolved.include?(dep) }
-            unlocked << key
-            resolved << entry["method_token"]
-            resolved << "root:untyped callee #{entry["method_name"]}" if unambiguous_return_name?(entry["method_name"], method_name_counts)
-            changed = true
-          end
+      requested_methods = origins.map { |origin| origin["method"].to_s }.to_set
+      rows.each_with_object({}) do |row, pressure|
+        candidate = row["candidate_data"]
+        next unless candidate["kind"] == "return_root"
+        returns = row["unlocked_nodes"].select do |node|
+          node["kind"] == "return" && requested_keys.include?(node["label"])
         end
-        next if unlocked.empty?
-        direct = methods.select { |key, entry| entry["deps"].include?(root_dep) && unlocked.include?(key) }.keys.to_set
-        cascade = unlocked - direct
-        method_names = unlocked.map { |key| methods[key]["method_name"] }.select { |name| unambiguous_return_name?(name, method_name_counts) }.to_set
-        params = method_names.flat_map { |name| Array(param_flows_by_source[name]) }
-          .map { |flow| "#{flow["path"]}:#{flow["line"]} #{flow["callee"]}(#{flow["slot"]})" }.to_set
-        root = root_dep.delete_prefix("root:")
+        next if returns.empty?
+        return_ids = returns.map { |node| node["id"] }.to_set
+        direct = (row["direct_ids"].to_set & return_ids)
+        params = row["unlocked_nodes"].select do |node|
+          node["kind"] == "param" && requested_methods.include?(node["source_method"].to_s)
+        end
+          .map { |node| node["label"] }.compact.to_set
+        root = candidate["label"]
         pressure[root] = {
-          "returns" => unlocked,
+          "returns" => return_ids,
           "direct" => direct,
-          "cascade" => cascade,
+          "cascade" => return_ids - direct,
           "params" => params,
           "suggestion" => root_return_suggestion(root, nil, usage),
-          "examples" => unlocked.first(6).to_a,
+          "examples" => returns.map { |node| node["label"] }.compact.first(6),
         }
       end.sort_by { |_root, data| [-data["returns"].size, -data["cascade"].size, -data["params"].size] }
     end
@@ -1219,49 +1234,8 @@ module NilKill
       end
     end
 
-    def return_method_name_counts(evidence)
-      Array(evidence["methods"]).each_with_object(Hash.new(0)) do |method, counts|
-        source = method["source"] || method
-        name = source["method"]
-        counts[name.to_s] += 1 if name
-      end
-    end
-
-    def unambiguous_return_name?(name, method_name_counts)
-      count = method_name_counts[name.to_s]
-      count.nil? || count <= 1
-    end
-
-    def return_unresolved_dependencies(origin)
-      deps = Set.new
-      Array(origin["sources"]).each do |source|
-        case source["kind"]
-        when "call_untyped"
-          deps << "root:untyped callee #{source["callee"]}"
-        when "setter_assignment_unknown"
-          deps << "root:setter assignment #{source["callee"]}"
-        when "nil"
-          deps << "root:nil return at #{origin["path"]}:#{source["line"] || origin["line"]}"
-        when "unknown"
-          deps << "root:unknown expression at #{origin["path"]}:#{source["line"] || origin["line"]}"
-        end
-      end
-      Array(origin["blockers"]).each do |blocker|
-        if blocker.include?("untyped callee") || blocker.include?("unknown return") || blocker.include?("safe navigation") ||
-            blocker.include?("setter assignment")
-          deps << "root:#{blocker}"
-        end
-      end
-      deps.delete(return_method_token(origin))
-      deps
-    end
-
     def return_method_key(origin)
       "#{origin["path"]}:#{origin["line"]} #{origin["class"]}##{origin["method"]}"
-    end
-
-    def return_method_token(origin)
-      "method:#{origin["method"]}"
     end
 
     def root_return_suggestion(root, source, usage = {})
@@ -4503,6 +4477,14 @@ module NilKill
 
     def flow_graph(evidence = @evidence)
       @flow_graph ||= FlowGraph.from_evidence(evidence)
+    end
+
+    def type_dependency_pressure(evidence = @evidence)
+      if evidence.equal?(@evidence)
+        @type_dependency_pressure ||= FlowGraph.dependencies_from_evidence(evidence).unlock_pressure
+      else
+        FlowGraph.dependencies_from_evidence(evidence).unlock_pressure
+      end
     end
 
     def hash_record_lookup?(lookup)

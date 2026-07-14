@@ -1,7 +1,7 @@
 use anyhow::{bail, Context, Result};
 use fact_mine_rust::profile::{self, Profile};
 use fact_mine_rust::syntax::{self, Language};
-use serde_json::Value;
+use serde_json::{json, Value};
 use std::fs;
 use std::path::PathBuf;
 
@@ -113,6 +113,248 @@ end
         .context("missing Record declaration")?;
     assert_eq!(record.constant_operations, ["new", "[]", "[]="]);
 
+    Ok(())
+}
+
+#[test]
+fn nil_kill_profile_exports_replayable_type_dependencies() -> Result<()> {
+    use std::io::Write;
+
+    let mut tmp = tempfile::Builder::new().suffix(".rb").tempfile()?;
+    tmp.write_all(
+        br#"class Pipeline
+  def initialize
+    @state = load
+    @typed = T.let(load, String)
+  end
+
+  def state
+    @state
+  end
+
+  def fanout(source)
+    first = source
+    second = first
+    typed_copy = @typed
+    typed_local = T.let(load, String)
+    fixed = "ok"
+    mystery = load
+    mapped = [source].map { |mapped_item| mapped_item.to_s }
+    [first, second, fixed, mystery]
+  end
+
+  def passthrough(source)
+    copy = source
+    copy
+  end
+
+  def choose(flag, left, right)
+    if flag
+      chosen = left
+    else
+      chosen = right
+    end
+    chosen
+  end
+end
+"#,
+    )?;
+    let document = syntax::parse_file(tmp.path().to_path_buf(), Language::Ruby)?;
+    let output = profile::extract(&document, Profile::NilKill);
+
+    let source_root = output
+        .type_dependencies
+        .iter()
+        .find(|fact| {
+            fact["name"] == "source"
+                && fact["kind"] == "definition"
+                && fact["candidate"] == true
+                && fact["candidate_kind"] == "parameter"
+        })
+        .context("missing untyped parameter dependency root")?;
+    let source_id = source_root["id"]
+        .as_str()
+        .context("parameter root has no stable id")?;
+
+    let first_definition = output
+        .type_dependencies
+        .iter()
+        .find(|fact| fact["name"] == "first" && fact["kind"] == "definition")
+        .context("missing direct-copy definition")?;
+    assert_eq!(first_definition["candidate"], false);
+    assert!(first_definition["requirements"]
+        .as_array()
+        .context("definition requirements")?
+        .iter()
+        .any(|requirement| requirement == source_id));
+
+    let second_read = output
+        .type_dependencies
+        .iter()
+        .find(|fact| fact["name"] == "second" && fact["kind"] == "flow_read")
+        .context("missing downstream flow read")?;
+    assert_eq!(second_read["resolved"], false);
+    assert!(!second_read["requirements"]
+        .as_array()
+        .context("read requirements")?
+        .is_empty());
+
+    let fixed_definition = output
+        .type_dependencies
+        .iter()
+        .find(|fact| fact["name"] == "fixed" && fact["kind"] == "definition")
+        .context("missing literal definition")?;
+    assert_eq!(fixed_definition["resolved"], true);
+    assert_eq!(fixed_definition["candidate"], false);
+
+    let mystery_definition = output
+        .type_dependencies
+        .iter()
+        .find(|fact| fact["name"] == "mystery" && fact["kind"] == "definition")
+        .context("missing opaque definition")?;
+    assert_eq!(mystery_definition["candidate"], true);
+    assert_eq!(mystery_definition["candidate_kind"], "local");
+
+    let merged = profile::merge(vec![output.clone()], Profile::NilKill);
+    assert_eq!(merged.type_dependencies, output.type_dependencies);
+    assert!(output
+        .type_dependencies
+        .iter()
+        .filter(|fact| fact["candidate_kind"] == "local" || fact["candidate_kind"] == "parameter")
+        .all(|fact| fact["id"]
+            .as_str()
+            .is_some_and(|id| id.contains(tmp.path().to_string_lossy().as_ref()))));
+    let espalier = profile::extract(&document, Profile::Espalier);
+    assert!(espalier.type_dependencies.is_empty());
+
+    let passthrough = output
+        .return_origins
+        .iter()
+        .find(|origin| origin["method"] == "passthrough")
+        .context("missing passthrough return origin")?;
+    let source = passthrough["sources"]
+        .as_array()
+        .and_then(|sources| sources.first())
+        .context("missing passthrough return source")?;
+    assert_eq!(source["kind"], "unknown");
+    assert!(source["type_dependency_id"]
+        .as_str()
+        .is_some_and(|id| id.starts_with("type-read:")));
+    let state_roots = output
+        .type_dependencies
+        .iter()
+        .filter(|fact| fact["name"] == "@state" && fact["candidate"] == true)
+        .collect::<Vec<_>>();
+    assert_eq!(state_roots.len(), 1);
+    assert_eq!(state_roots[0]["candidate_kind"], "instance_field");
+    let state_read = output
+        .type_dependencies
+        .iter()
+        .find(|fact| fact["name"] == "@state" && fact["kind"] == "flow_read")
+        .context("missing state read")?;
+    assert_eq!(
+        state_read["requirements"],
+        json!([state_roots[0]["id"].clone()])
+    );
+    let typed_root = output
+        .type_dependencies
+        .iter()
+        .find(|fact| fact["name"] == "@typed" && fact["kind"] == "definition")
+        .context("missing typed state root")?;
+    assert_eq!(typed_root["resolved"], true);
+    assert_eq!(typed_root["candidate"], false);
+    let typed_copy = output
+        .type_dependencies
+        .iter()
+        .find(|fact| fact["name"] == "typed_copy" && fact["kind"] == "definition")
+        .context("missing copy from typed state")?;
+    assert_eq!(
+        typed_copy["requirements"],
+        json!([typed_root["id"].clone()])
+    );
+    let typed_local = output
+        .type_dependencies
+        .iter()
+        .find(|fact| fact["name"] == "typed_local" && fact["kind"] == "definition")
+        .context("missing T.let local definition")?;
+    assert_eq!(typed_local["resolved"], true);
+    assert_eq!(typed_local["candidate"], false);
+    let mapped_definition = output
+        .type_dependencies
+        .iter()
+        .find(|fact| {
+            fact["function"] == "fanout"
+                && fact["name"] == "mapped_item"
+                && fact["kind"] == "definition"
+        })
+        .context("missing nested callback definition")?;
+    let mapped_read = output
+        .type_dependencies
+        .iter()
+        .find(|fact| {
+            fact["function"] == "fanout"
+                && fact["name"] == "mapped_item"
+                && fact["kind"] == "flow_read"
+        })
+        .context("missing nested callback read")?;
+    assert_eq!(
+        mapped_read["requirements"],
+        json!([mapped_definition["id"].clone()])
+    );
+    let chosen_read = output
+        .type_dependencies
+        .iter()
+        .find(|fact| {
+            fact["function"] == "choose" && fact["name"] == "chosen" && fact["kind"] == "flow_read"
+        })
+        .context("missing diamond-join read")?;
+    assert_eq!(
+        chosen_read["requirements"]
+            .as_array()
+            .context("diamond requirements")?
+            .len(),
+        2
+    );
+    Ok(())
+}
+
+#[test]
+fn nil_kill_profile_connects_program_globals_across_owners_and_files() -> Result<()> {
+    use std::io::Write;
+
+    let mut writer = tempfile::Builder::new().suffix(".rb").tempfile()?;
+    writer.write_all(
+        b"class Writer\n  def write\n    $shared = \"ready\"\n  end\nend\n",
+    )?;
+    let mut reader = tempfile::Builder::new().suffix(".rb").tempfile()?;
+    reader.write_all(b"class Reader\n  def read\n    $shared\n  end\nend\n")?;
+
+    let output = profile::merge(
+        vec![
+            profile::extract(
+                &syntax::parse_file(writer.path().to_path_buf(), Language::Ruby)?,
+                Profile::NilKill,
+            ),
+            profile::extract(
+                &syntax::parse_file(reader.path().to_path_buf(), Language::Ruby)?,
+                Profile::NilKill,
+            ),
+        ],
+        Profile::NilKill,
+    );
+    let roots = output
+        .type_dependencies
+        .iter()
+        .filter(|fact| fact["name"] == "$shared" && fact["kind"] == "definition")
+        .collect::<Vec<_>>();
+    assert_eq!(roots.len(), 1, "a program global must have one DFG root");
+    assert_eq!(roots[0]["id"], "type-root:state:global:$shared");
+    let read = output
+        .type_dependencies
+        .iter()
+        .find(|fact| fact["name"] == "$shared" && fact["kind"] == "flow_read")
+        .context("missing cross-file global read")?;
+    assert_eq!(read["requirements"], json!([roots[0]["id"].clone()]));
     Ok(())
 }
 

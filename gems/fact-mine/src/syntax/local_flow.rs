@@ -25,6 +25,8 @@ pub struct MethodSummary {
     pub node: Node,
     pub statements: Vec<Statement>,
     pub boundaries: Vec<Boundary>,
+    #[serde(default, skip_serializing)]
+    pub params: BTreeSet<String>,
     #[serde(default)]
     pub param_types: BTreeMap<String, String>,
 }
@@ -290,6 +292,9 @@ impl<'a> LocalFlow<'a> {
             .map(|(index, stmt)| self.statement_summary(stmt, index, &local_names))
             .collect::<Vec<_>>();
         let param_types = self.param_types_for(owner, &name);
+        let params = metadata
+            .map(|metadata| metadata.params.clone())
+            .unwrap_or_default();
         MethodSummary {
             id: format!("{}#{}", owner, name),
             owner: owner.to_string(),
@@ -300,6 +305,7 @@ impl<'a> LocalFlow<'a> {
             node: node.clone(),
             boundaries: self.structural_boundaries(&statements),
             statements,
+            params,
             param_types,
         }
     }
@@ -961,6 +967,7 @@ mod tests {
             node: empty_node(),
             statements: Vec::new(),
             boundaries: Vec::new(),
+            params: BTreeSet::new(),
             param_types: BTreeMap::new(),
         }];
 
@@ -976,6 +983,7 @@ mod tests {
             node: empty_node(),
             statements: Vec::new(),
             boundaries: Vec::new(),
+            params: BTreeSet::new(),
             param_types: BTreeMap::new(),
         }];
 

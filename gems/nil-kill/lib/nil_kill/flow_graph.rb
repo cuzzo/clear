@@ -17,11 +17,21 @@ module NilKill
       graph
     end
 
+    def self.dependencies_from_evidence(evidence)
+      graph = new
+      graph.import_dependency_evidence(evidence)
+      graph
+    end
+
     def initialize
       @nodes = {}
       @edges = []
       @edge_keys = Set.new
       @types = Hash.new { |hash, key| hash[key] = Set.new }
+      @requirements = Hash.new { |hash, key| hash[key] = Set.new }
+      @dependents = Hash.new { |hash, key| hash[key] = Set.new }
+      @resolved = Set.new
+      @candidates = Set.new
     end
 
     def add_node(kind, id, data = {})
@@ -84,6 +94,72 @@ module NilKill
       false
     end
 
+    def add_dependency_node(id, requirements: [], resolved: false, candidate: false, data: {})
+      id = id.to_s
+      values = stringify_keys(data)
+      add_node(values["kind"] || "dependency", id, values)
+      Array(requirements).each do |requirement|
+        requirement = requirement.to_s
+        @requirements[id] << requirement
+        @dependents[requirement] << id
+        add_node("dependency", requirement) unless @nodes.key?(requirement)
+      end
+      @resolved << id if resolved
+      @candidates << id if candidate
+      id
+    end
+
+    # Returns the exact lower bound of nodes that become resolvable when one
+    # candidate is explicitly typed. Dependencies are conjunctive: a join only
+    # unlocks when the same candidate can satisfy every unresolved prerequisite.
+    def unlock_pressure
+      baseline = resolved_closure
+      enablers = Hash.new { |hash, key| hash[key] = Set.new }
+      candidates = @candidates - baseline
+      candidates.each { |candidate| enablers[candidate] << candidate }
+      requirements = @requirements.transform_values { |items| items.reject { |item| baseline.include?(item) } }
+      queue = candidates.to_a
+      queued = candidates.dup
+      until queue.empty?
+        changed_id = queue.shift
+        queued.delete(changed_id)
+        @dependents[changed_id].each do |dependent|
+          next if baseline.include?(dependent)
+          needed = requirements[dependent]
+          next if needed.nil? || needed.empty?
+          common = needed.map { |requirement| enablers[requirement] }
+          next if common.any?(&:empty?)
+          common = common.reduce { |left, right| left & right }
+          additions = common - enablers[dependent]
+          next if additions.empty?
+          enablers[dependent].merge(additions)
+          queue << dependent if queued.add?(dependent)
+        end
+      end
+
+      impacts = Hash.new { |hash, key| hash[key] = [] }
+      enablers.each do |id, enabling_candidates|
+        enabling_candidates.each do |candidate|
+          impacts[candidate] << id if id != candidate && !baseline.include?(id)
+        end
+      end
+      candidates.map do |candidate|
+        unlocked = impacts[candidate]
+        counts = unlocked.each_with_object(Hash.new(0)) do |id, out|
+          out[@nodes.fetch(id)["kind"]] += 1
+        end
+        {
+          "candidate" => candidate,
+          "candidate_data" => @nodes.fetch(candidate),
+          "unlocked_ids" => unlocked.sort,
+          "unlocked_nodes" => unlocked.map { |id| @nodes.fetch(id) },
+          "direct_ids" => unlocked.select { |id| @requirements[id].include?(candidate) }.sort,
+          "counts" => counts.sort.to_h,
+        }
+      end.select { |row| !row["unlocked_ids"].empty? }
+        .sort_by { |row| [-row["unlocked_ids"].size, dependency_label(row["candidate_data"]), row["candidate"]] }
+    end
+
     def hash_record_identity_for_lookup(lookup, include_field: true)
       key = hash_record_key(lookup)
       receiver = lookup["receiver"].to_s
@@ -130,12 +206,20 @@ module NilKill
     end
 
     def import_evidence(evidence)
+      import_dependency_evidence(evidence)
       import_methods(evidence)
       import_return_origins(evidence)
       import_param_origins(evidence)
       import_collection_lookups(evidence)
       import_struct_fields(evidence)
       import_runtime(evidence)
+      self
+    end
+
+    def import_dependency_evidence(evidence)
+      import_type_dependencies(evidence)
+      import_return_dependencies(evidence)
+      import_param_dependencies(evidence)
       self
     end
 
@@ -148,6 +232,45 @@ module NilKill
     end
 
     private
+
+    def resolved_closure
+      closure = @resolved.dup
+      unresolved_counts = @requirements.each_with_object({}) do |(id, requirements), counts|
+        next if requirements.empty?
+        counts[id] = requirements.count { |requirement| !closure.include?(requirement) }
+      end
+      queue = closure.to_a
+      unresolved_counts.each do |id, count|
+        if count.zero? && closure.add?(id)
+          queue << id
+        end
+      end
+      until queue.empty?
+        resolved = queue.shift
+        @dependents[resolved].each do |dependent|
+          next if closure.include?(dependent) || !unresolved_counts.key?(dependent)
+          unresolved_counts[dependent] -= 1
+          queue << dependent if unresolved_counts[dependent].zero? && closure.add?(dependent)
+        end
+      end
+      closure
+    end
+
+    def dependency_label(data)
+      [data["file"], data["line"], data["owner"], data["function"], data["name"]].compact.join(":")
+    end
+
+    def import_type_dependencies(evidence)
+      Array(evidence.dig("facts", "type_dependencies")).each do |fact|
+        add_dependency_node(
+          fact["id"],
+          requirements: fact["requirements"],
+          resolved: fact["resolved"],
+          candidate: fact["candidate"],
+          data: fact
+        )
+      end
+    end
 
     def stringify_keys(hash)
       Hash(hash).each_with_object({}) { |(key, value), out| out[key.to_s] = value }
@@ -166,7 +289,8 @@ module NilKill
     end
 
     def import_return_origins(evidence)
-      Array(evidence.dig("facts", "return_origins")).each do |origin|
+      origins = Array(evidence.dig("facts", "return_origins"))
+      origins.each do |origin|
         ret_id = return_node_id(origin)
         add_node("return", ret_id, origin.merge("type" => origin["candidate_type"]))
         Array(origin["sources"]).each_with_index do |source, idx|
@@ -178,6 +302,38 @@ module NilKill
             add_node("return", callee_id, "method" => source["callee"])
             add_edge("return_forward", callee_id, ret_id, source.slice("line", "code", "callee"))
           end
+        end
+      end
+    end
+
+    def import_return_dependencies(evidence)
+      origins = Array(evidence.dig("facts", "return_origins"))
+      method_name_counts = Array(evidence["methods"]).each_with_object(Hash.new(0)) do |method, counts|
+        source = method["source"] || method
+        counts[source["method"].to_s] += 1 unless source["method"].to_s.empty?
+      end
+      origins.each do |origin|
+        ret_id = return_node_id(origin)
+        add_node("return", ret_id, origin.merge("type" => origin["candidate_type"]))
+        dependency_ids = Array(origin["sources"]).filter_map { |source| source["type_dependency_id"] }
+        dependency_ids.concat(return_dependency_labels(origin).map do |label|
+          id = "return-root:#{label}"
+          add_dependency_node(id, candidate: true, data: {
+            "kind" => "return_root", "label" => label, "name" => label,
+          })
+          id
+        end)
+        unless dependency_ids.empty?
+          add_dependency_node(ret_id, requirements: dependency_ids, data: origin.merge(
+            "kind" => "return", "label" => return_label(origin),
+          ))
+        end
+        name = origin["method"].to_s
+        if !name.empty? && method_name_counts[name] <= 1
+          alias_id = "return-root:untyped callee #{name}"
+          add_dependency_node(alias_id, requirements: [ret_id], candidate: true, data: {
+            "kind" => "return_root", "label" => "untyped callee #{name}", "name" => name,
+          })
         end
       end
     end
@@ -194,6 +350,18 @@ module NilKill
           add_node("return", ret_id, "method" => origin["source_method"], "type" => origin["type"])
           add_edge("call_result", ret_id, source_id, origin.slice("path", "line", "source_method"))
         end
+      end
+    end
+
+    def import_param_dependencies(evidence)
+      Array(evidence.dig("facts", "param_origins")).each do |origin|
+        next unless %w[typed_return untyped_return].include?(origin["origin_kind"].to_s)
+        next if origin["source_method"].to_s.empty?
+        param_id = "param:callee:#{origin["callee"]}:#{origin["arg_kind"]}:#{origin["slot"]}"
+        dependency_id = "return-root:untyped callee #{origin["source_method"]}"
+        add_dependency_node(param_id, requirements: [dependency_id], data: origin.merge(
+          "kind" => "param", "label" => "#{origin["path"]}:#{origin["line"]} #{origin["callee"]}(#{origin["slot"]})",
+        ))
       end
     end
 
@@ -278,6 +446,35 @@ module NilKill
       when /\A["']([^"']+)["']\z/
         Regexp.last_match(1)
       end
+    end
+
+    def return_dependency_labels(origin)
+      labels = Set.new
+      Array(origin["sources"]).each do |source|
+        next if source["type_dependency_id"]
+        label = case source["kind"]
+        when "call_untyped"
+          "untyped callee #{source["callee"]}"
+        when "setter_assignment_unknown"
+          "setter assignment #{source["callee"]}"
+        when "nil"
+          "nil return at #{origin["path"]}:#{source["line"] || origin["line"]}"
+        when "unknown"
+          "unknown expression at #{origin["path"]}:#{source["line"] || origin["line"]}"
+        end
+        labels << label if label
+      end
+      Array(origin["blockers"]).each do |blocker|
+        if blocker.include?("untyped callee") || blocker.include?("unknown return") ||
+            blocker.include?("safe navigation") || blocker.include?("setter assignment")
+          labels << blocker
+        end
+      end
+      labels.to_a.sort
+    end
+
+    def return_label(origin)
+      "#{origin["path"]}:#{origin["line"]} #{origin["class"]}##{origin["method"]}"
     end
   end
 end

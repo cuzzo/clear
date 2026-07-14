@@ -82,12 +82,81 @@ fn cfg_is_emitted_for_every_supported_language() -> Result<()> {
             document.node_effects.len(),
             document.control_flow_nodes.len()
         );
+        assert!(
+            document.node_effects.iter().all(|effect| effect.complete),
+            "{} emitted an incomplete executable-node effect",
+            fixture.display()
+        );
         assert_eq!(
             document.reachability.len(),
             document.control_flow_nodes.len()
         );
         assert_eq!(document.dominators.len(), document.control_flow_nodes.len());
         assert_eq!(document.liveness.len(), document.control_flow_nodes.len());
+        for method in &document.local_methods {
+            let entry = document
+                .control_flow_nodes
+                .iter()
+                .find(|node| {
+                    node.owner == method.owner
+                        && node.function == method.name
+                        && node.kind == "entry"
+                })
+                .with_context(|| format!("missing CFG entry for {}#{}", method.owner, method.name))?;
+            let effect = document
+                .node_effects
+                .iter()
+                .find(|effect| effect.node_id == entry.id)
+                .context("missing entry effect")?;
+            for parameter in &method.params {
+                assert!(
+                    effect
+                        .writes
+                        .iter()
+                        .any(|place| place.rsplit(':').next() == Some(parameter.as_str())),
+                    "{}#{} parameter {parameter} has no entry definition",
+                    method.owner,
+                    method.name
+                );
+            }
+        }
+        let local_places = document
+            .places
+            .iter()
+            .filter(|place| place.kind == "local")
+            .map(|place| place.id.as_str())
+            .collect::<BTreeSet<_>>();
+        let reachable = document
+            .reachability
+            .iter()
+            .filter(|fact| fact.reachable)
+            .map(|fact| fact.node_id.as_str())
+            .collect::<BTreeSet<_>>();
+        for effect in document
+            .node_effects
+            .iter()
+            .filter(|effect| reachable.contains(effect.node_id.as_str()))
+        {
+            for place in effect
+                .reads
+                .iter()
+                .filter(|place| local_places.contains(place.as_str()))
+            {
+                let reaching = document
+                    .reaching_definitions
+                    .iter()
+                    .find(|fact| fact.node_id == effect.node_id && fact.place_id == *place)
+                    .context("reachable local read has no reaching-definition fact")?;
+                assert!(
+                    !reaching.definitions.is_empty(),
+                    "{} has a disconnected local read {} at {}#{}",
+                    fixture.display(),
+                    place,
+                    effect.owner,
+                    effect.function
+                );
+            }
+        }
         assert!(document.source_digest.starts_with("sha256:"));
         covered.insert(language.as_str());
     }
@@ -237,6 +306,233 @@ fn dataflow_propagates_direct_copies_but_not_call_results() -> Result<()> {
         .expect("transformed result flow");
     assert!(transformed_flow.types.is_empty());
     assert!(!transformed_flow.complete);
+    Ok(())
+}
+
+#[test]
+fn dataflow_uses_the_innermost_equal_span_and_unwraps_literal_groups() -> Result<()> {
+    use std::io::Write;
+
+    let mut fixture = tempfile::Builder::new().suffix(".rb").tempfile()?;
+    write!(
+        fixture,
+        "def flow(items)\n  items.each do |item|\n    publish(item)\n  end\n  transaction do |token|\n    consume(token)\n  end\n  mapped = items.map {{ |mapped_item| mapped_item.to_s }}\n  items.ownership_bearing?(->(lambda_name) {{ ownership(lambda_name) }})\n  ownership = \"local\"\n  dims = {{ ownership: nil }}\n  called = ownership(items)\n  wrapped = (\"yes\")\n  wrapped\nend\n"
+    )?;
+    let document = syntax::parse_file(fixture.path().to_path_buf(), Language::Ruby)?;
+
+    let body = document
+        .control_flow_nodes
+        .iter()
+        .find(|node| node.function == "flow" && node.source == "publish(item)")
+        .expect("iterator body node");
+    let body_effect = document
+        .node_effects
+        .iter()
+        .find(|effect| effect.node_id == body.id)
+        .expect("iterator body effect");
+    assert!(body_effect.writes.is_empty());
+    assert!(body_effect.reads.iter().any(|place| place.ends_with(":item")));
+    let loop_node = document
+        .control_flow_nodes
+        .iter()
+        .find(|node| node.function == "flow" && node.role == "iterator_loop")
+        .expect("iterator node");
+    let entry = document
+        .control_flow_nodes
+        .iter()
+        .find(|node| node.function == "flow" && node.kind == "entry")
+        .expect("flow entry");
+    let items = document
+        .places
+        .iter()
+        .find(|place| place.function == "flow" && place.name == "items")
+        .expect("items parameter");
+    let items_reaching = document
+        .reaching_definitions
+        .iter()
+        .find(|fact| fact.node_id == loop_node.id && fact.place_id == items.id)
+        .expect("parameter reaching definition");
+    assert_eq!(items_reaching.definitions, vec![entry.id.clone()]);
+    let item = document
+        .places
+        .iter()
+        .find(|place| place.function == "flow" && place.name == "item")
+        .expect("iterator binding");
+    let item_reaching = document
+        .reaching_definitions
+        .iter()
+        .find(|fact| fact.node_id == body.id && fact.place_id == item.id)
+        .expect("iterator binding reaching definition");
+    assert_eq!(item_reaching.definitions, vec![loop_node.id.clone()]);
+
+    let callback = document
+        .control_flow_nodes
+        .iter()
+        .find(|node| node.function == "flow" && node.role == "callback_region")
+        .expect("callback node");
+    let callback_effect = document
+        .node_effects
+        .iter()
+        .find(|effect| effect.node_id == callback.id)
+        .expect("callback effect");
+    assert!(callback_effect.writes.iter().any(|place| place.ends_with(":token")));
+    assert!(!callback_effect.reads.iter().any(|place| place.ends_with(":token")));
+    let callback_body = document
+        .control_flow_nodes
+        .iter()
+        .find(|node| node.function == "flow" && node.source == "consume(token)")
+        .expect("callback body node");
+    let token = document
+        .places
+        .iter()
+        .find(|place| place.function == "flow" && place.name == "token")
+        .expect("callback binding");
+    let token_reaching = document
+        .reaching_definitions
+        .iter()
+        .find(|fact| fact.node_id == callback_body.id && fact.place_id == token.id)
+        .expect("callback binding reaching definition");
+    assert_eq!(token_reaching.definitions, vec![callback.id.clone()]);
+
+    let nested_callback = document
+        .control_flow_nodes
+        .iter()
+        .find(|node| node.function == "flow" && node.source.starts_with("mapped = items.map"))
+        .expect("nested callback expression");
+    let nested_effect = document
+        .node_effects
+        .iter()
+        .find(|effect| effect.node_id == nested_callback.id)
+        .expect("nested callback effect");
+    let mapped_item = document
+        .places
+        .iter()
+        .find(|place| place.function == "flow" && place.name == "mapped_item")
+        .expect("nested callback binding");
+    assert!(nested_effect.reads.contains(&mapped_item.id));
+    assert!(nested_effect.writes.contains(&mapped_item.id));
+    assert!(document
+        .reaching_definitions
+        .iter()
+        .find(|fact| fact.node_id == nested_callback.id && fact.place_id == mapped_item.id)
+        .is_some_and(|fact| fact.definitions.is_empty()));
+    let lambda_node = document
+        .control_flow_nodes
+        .iter()
+        .find(|node| node.function == "flow" && node.source.starts_with("items.ownership_bearing?"))
+        .expect("lambda argument expression");
+    let lambda_effect = document
+        .node_effects
+        .iter()
+        .find(|effect| effect.node_id == lambda_node.id)
+        .expect("lambda argument effect");
+    let lambda_name = document
+        .places
+        .iter()
+        .find(|place| place.function == "flow" && place.name == "lambda_name")
+        .expect("lambda argument binding");
+    assert!(lambda_effect.writes.contains(&lambda_name.id));
+    let lambda_body = document
+        .control_flow_nodes
+        .iter()
+        .find(|node| node.function == "flow" && node.source == "ownership(lambda_name)")
+        .expect("lambda body node");
+    let lambda_reaching = document
+        .reaching_definitions
+        .iter()
+        .find(|fact| fact.node_id == lambda_body.id && fact.place_id == lambda_name.id)
+        .expect("lambda parameter reaching definition");
+    assert_eq!(lambda_reaching.definitions, vec![lambda_node.id.clone()]);
+    for source in ["dims = { ownership: nil }", "called = ownership(items)"] {
+        let node = document
+            .control_flow_nodes
+            .iter()
+            .find(|node| node.function == "flow" && node.source == source)
+            .expect("label/call regression node");
+        let effect = document
+            .node_effects
+            .iter()
+            .find(|effect| effect.node_id == node.id)
+            .expect("label/call regression effect");
+        assert!(
+            !effect.reads.iter().any(|place| place.ends_with(":ownership")),
+            "{source} must not treat a label or method name as a local read"
+        );
+    }
+
+    let read = document
+        .control_flow_nodes
+        .iter()
+        .find(|node| node.function == "flow" && node.source == "wrapped")
+        .expect("wrapped read");
+    let place = document
+        .places
+        .iter()
+        .find(|place| place.function == "flow" && place.name == "wrapped")
+        .expect("wrapped place");
+    let flow = document
+        .flow_types
+        .iter()
+        .find(|fact| fact.node_id == read.id && fact.place_id == place.id)
+        .expect("wrapped flow type");
+    assert_eq!(flow.types, vec!["string"]);
+    assert!(flow.complete);
+    Ok(())
+}
+
+#[test]
+fn overloaded_methods_keep_independent_cfg_and_dfg_identity() -> Result<()> {
+    use std::io::Write;
+
+    let mut fixture = tempfile::Builder::new().suffix(".java").tempfile()?;
+    write!(
+        fixture,
+        "class Overloaded {{\n  int convert(int number) {{ return number; }}\n  String convert(String text) {{ return text; }}\n}}\n"
+    )?;
+    let document = syntax::parse_file(fixture.path().to_path_buf(), Language::Java)?;
+
+    assert_eq!(
+        document
+            .control_flow_nodes
+            .iter()
+            .filter(|node| node.function == "convert" && node.kind == "entry")
+            .count(),
+        2
+    );
+    assert!(document.reachability.iter().all(|fact| fact.reachable));
+
+    for (line, parameter) in [(2, "number"), (3, "text")] {
+        let entry = document
+            .control_flow_nodes
+            .iter()
+            .find(|node| node.function == "convert" && node.kind == "entry" && node.line == line)
+            .expect("overload entry");
+        let effect = document
+            .node_effects
+            .iter()
+            .find(|effect| effect.node_id == entry.id)
+            .expect("overload entry effect");
+        let place = document
+            .places
+            .iter()
+            .find(|place| place.function == "convert" && place.name == parameter)
+            .expect("overload parameter place");
+        assert_eq!(effect.writes, vec![place.id.clone()]);
+
+        let read = document
+            .reaching_definitions
+            .iter()
+            .find(|fact| fact.place_id == place.id && fact.node_id != entry.id)
+            .expect("overload parameter read");
+        assert_eq!(read.definitions, vec![entry.id.clone()]);
+    }
+    let ids = document
+        .places
+        .iter()
+        .filter(|place| place.function == "convert")
+        .map(|place| place.id.as_str())
+        .collect::<BTreeSet<_>>();
+    assert_eq!(ids.len(), 2, "overload-local place IDs must not collide");
     Ok(())
 }
 

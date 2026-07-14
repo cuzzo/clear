@@ -13,7 +13,7 @@ You can often times resolve one `nil` or type ambiguity and remove hundreds nil 
 
 Nil-kill helps you prioritize your efforts by *pressure*.
 
-### Nil-kill's Four Types of Pressure
+### Nil-kill's Five Types of Pressure
 
 1. Nil pressure: where `nil` originates and how many nil guards it
    causes.
@@ -23,6 +23,11 @@ Nil-kill helps you prioritize your efforts by *pressure*.
    ad hoc enum.
 4. Primitive pressure: when code uses a hashmap as an ad hoc struct or
    an array as an ad hoc tuple.
+5. Type dependency pressure: which single missing annotation definitely
+   unlocks the most downstream reads, definitions, parameters, and returns.
+   This is replayed from FactMine's CFG/DFG facts; branch joins are treated as
+   conjunctive, so Nil-kill does not award speculative credit when another
+   unresolved input would still block the result.
 
 ## How well does it work?
 
