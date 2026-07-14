@@ -145,4 +145,64 @@ RSpec.describe "type-system change contracts" do
 
     expect(contains_mir?(mir, MIR::TupleLiteral)).to be(true)
   end
+
+  it "parses Inline Pivot aliases directly into recursive type nodes" do
+    source = <<~CLEAR
+      fixed: [10]Int64 = DEFAULT;
+      list: []String = List[];
+      set: [Set]Int64 = Set[];
+      pool: [Pool(16)]Int64 = Pool[];
+      map: {Symbol}[]Int64 = {};
+    CLEAR
+    ast = parse(source)
+    types = ast.statements.map(&:type)
+
+    expect(types.map { |type| type.shape.expression.class }).to all(be <= TypeExpression)
+    expect(types[0]).to be_fixed
+    expect(types[1].collection).to eq(:list)
+    expect(types[2].collection).to eq(:set)
+    expect(types[3].collection).to eq(:pool)
+    expect(types[4]).to be_map
+    expect(types[4].value_type.collection).to eq(:list)
+  end
+
+  it "parses tense and nested map layers without backtracking" do
+    ast = parse("value: ?{Symbol}{Int64}[10]String = NIL;")
+    type = ast.statements.first.type
+
+    expect(type).to be_optional
+    outer = T.must(type.wrapped_type)
+    expect(outer.key_type.resolved).to eq(:Symbol)
+    expect(outer.value_type.key_type.resolved).to eq(:Int64)
+    expect(outer.value_type.value_type).to be_fixed
+  end
+
+  it "parses every predictive Inline Pivot layer without speculative replay" do
+    ast = parse(<<~CLEAR)
+      fallible: ![List(8)]Tuple<Int64, String> = DEFAULT;
+      future: ~[Set(4)]Int64 = DEFAULT;
+      callbacks: {}FN(Int64) -> Bool = {};
+    CLEAR
+    fallible, future, callbacks = ast.statements.map(&:type)
+
+    expect(fallible).to be_error_union
+    fallible_expression = T.cast(fallible.shape.expression, FallibleTypeExpression)
+    fallible_list = Type.from_child_expression(fallible_expression.inner)
+    expect(fallible_list.collection).to eq(:list)
+    expect(fallible_list.shape.expression).to be_a(LinearTypeExpression)
+    expect(T.cast(fallible_list.shape.expression, LinearTypeExpression).allocation_hint).to eq(8)
+    expect(future).to be_future
+    expect(future.tense_type.collection).to eq(:set)
+    expect(callbacks.key_type.resolved).to eq(:Symbol)
+    expect(callbacks.value_type.shape.expression).to be_a(FunctionTypeExpression)
+  end
+
+  it "rejects unsupported dimensions before accepting ambiguous type syntax" do
+    expect { parse("value: [Matrix]Int64 = DEFAULT;") }
+      .to raise_error(ParserError, /Inline Pivot dimension/)
+    expect { parse("value: [10, 5]Int64 = DEFAULT;") }
+      .to raise_error(ParserError, /flat-rank lowering/)
+    expect { parse("value: {Symbol, Int64}String = {};") }
+      .to raise_error(ParserError, /nested maps use separate brace layers/)
+  end
 end

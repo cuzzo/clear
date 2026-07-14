@@ -3297,6 +3297,10 @@ class ClearParser
 
   sig { returns(Type) }
   def parse_type_annotation
+    if inline_type_annotation_start?
+      return Type.new(parse_inline_type_expression)
+    end
+
     # Function type: FN(Type, ...) -> ReturnType
     return parse_fn_type_annotation if match?(:KEYWORD, 'FN')
 
@@ -3467,6 +3471,119 @@ class ClearParser
     t.auto_token = auto_tok if auto_tok
     t.apply_type_annotation_extras!(soa: is_soa, elem_ownership: elem_ownership, elem_sync: elem_sync, elem_layout: elem_layout, observable_token: observable_token)
     t
+  end
+
+  sig { returns(T::Boolean) }
+  def inline_type_annotation_start?
+    offset = T.let(0, Integer)
+    token = T.must(peek_at(0))
+    while token.type == :CHAR && %w[? ! ~].include?(token.value)
+      offset += 1
+      token = peek_at(offset) || token
+    end
+    token.type == :CHAR && ["[", "{"].include?(token.value)
+  end
+
+  sig { returns(TypeExpression) }
+  def parse_inline_type_expression
+    token = T.must(peek_at(0))
+    if token.type == :CHAR
+      return parse_inline_prefixed_expression if %w[? ! ~].include?(token.value)
+      return parse_inline_linear_expression if token.value == '['
+      return parse_inline_map_expression if token.value == '{'
+    end
+
+    parse_inline_atom_expression
+  end
+
+  sig { returns(TypeExpression) }
+  def parse_inline_prefixed_expression
+    prefix = consume(:CHAR).text!
+    inner = parse_inline_type_expression
+    return OptionalTypeExpression.new(inner: inner) if prefix == "?"
+    return FallibleTypeExpression.new(inner: inner) if prefix == "!"
+
+    FutureTypeExpression.new(inner: inner)
+  end
+
+  sig { returns(TypeExpression) }
+  def parse_inline_atom_expression
+    if match?(:KEYWORD, 'FN')
+      return parse_fn_type_annotation.shape.expression
+    end
+
+    name = consume(:TYPE_ID).text!
+    arguments = T.let([], T::Array[TypeExpression])
+    if match?(:CHAR, '<')
+      consume(:CHAR, '<')
+      until match?(:CHAR, '>')
+        arguments << parse_inline_type_expression
+        break unless match!(:CHAR, ',')
+      end
+      consume(:CHAR, '>')
+    end
+    return TupleTypeExpression.new(items: arguments) if name == "Tuple"
+
+    NamedTypeExpression.new(name: name.to_sym, arguments: arguments)
+  end
+
+  sig { returns(LinearTypeExpression) }
+  def parse_inline_linear_expression
+    consume(:CHAR, '[')
+    if match!(:CHAR, ']')
+      return LinearTypeExpression.new(kind: :list, dimensions: [:LIST], item: parse_inline_type_expression)
+    end
+
+    kind = T.let(:array, Symbol)
+    dimension = T.let(nil, T.nilable(T.any(Integer, Symbol)))
+    allocation_hint = T.let(nil, T.nilable(Integer))
+    if match?(:NUMBER) || match?(:INT64)
+      dimension = consume_number.value.to_i
+    else
+      layout = consume(:TYPE_ID).text!
+      case layout
+      when "List", "Set"
+        kind = layout.downcase.to_sym
+        dimension = layout == "List" ? :LIST : :SET
+        if match!(:CHAR, '(')
+          allocation_hint = consume_number.value.to_i
+          consume(:CHAR, ')')
+        end
+      when "Pool"
+        kind = :pool
+        consume(:CHAR, '(')
+        dimension = consume_number.value.to_i
+        consume(:CHAR, ')')
+      else
+        error!(previous, :PARSER_EXPECTED, expected: "an Inline Pivot dimension", got: layout, type: previous.type, line: previous.line)
+      end
+    end
+    if match?(:CHAR, ',')
+      error!(current, :PARSER_EXPECTED, expected: "one dimension until flat-rank lowering is enabled", got: current.value, type: current.type, line: current.line)
+    end
+    consume(:CHAR, ']')
+    LinearTypeExpression.new(
+      kind: kind,
+      dimensions: [T.must(dimension)],
+      item: parse_inline_type_expression,
+      allocation_hint: allocation_hint
+    )
+  end
+
+  sig { returns(MapTypeExpression) }
+  def parse_inline_map_expression
+    consume(:CHAR, '{')
+    key = if match?(:CHAR, '}')
+      NamedTypeExpression.new(name: :Symbol)
+    else
+      parsed_key = parse_inline_type_expression
+      if match?(:CHAR, ',')
+        error!(current, :PARSER_EXPECTED, expected: "a closing brace; nested maps use separate brace layers", got: current.value, type: current.type, line: current.line)
+      end
+      parsed_key
+    end
+    consume(:CHAR, '}')
+    MapTypeExpression.new(key: key, value: parse_inline_type_expression)
   end
 
   sig { params(type: Type).returns(Type) }

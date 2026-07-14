@@ -421,7 +421,7 @@ class TypeShape
 
   sig { returns(TypeExpression) }
   def structural_expression
-    structural = expression
+    structural = T.let(expression, TypeExpression)
     structural = structural.inner if structural.is_a?(FallibleTypeExpression)
     if structural.is_a?(OptionalTypeExpression) && !structural.inner.is_a?(LinearTypeExpression)
       structural = structural.inner
@@ -4608,6 +4608,16 @@ class Type
   def parse_expression_input!(expression, auto: false)
     @shape = TypeShape.new(raw: :Any, auto: auto, expression: expression)
     @capabilities = TypeCapabilities.new(ownership: :affine)
+    structural = T.let(expression, TypeExpression)
+    structural = structural.inner while structural.is_a?(OptionalTypeExpression) || structural.is_a?(FallibleTypeExpression) || structural.is_a?(FutureTypeExpression)
+    if structural.is_a?(LinearTypeExpression)
+      collection = case structural.kind
+      when :list then :list
+      when :set then :set
+      when :pool then :pool
+      end
+      @capabilities = TypeCapabilities.new(ownership: :affine, collection: collection) unless collection.nil?
+    end
   end
 
   sig { params(raw_str: String, auto: T::Boolean).void }
