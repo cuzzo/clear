@@ -18,12 +18,17 @@ class StaticEvidenceTest < Minitest::Test
 
           sig { params(client: T.untyped).void }
           def initialize(client)
-            @client = client
+            @client = T.let(client, T.untyped)
           end
 
           sig { returns(String) }
           def call
             @client.fetch
+            self.helper
+          end
+
+          sig { void }
+          def helper
           end
         end
       RUBY
@@ -31,8 +36,9 @@ class StaticEvidenceTest < Minitest::Test
       evidence = Espalier::StaticEvidence.build([src], root: dir)
 
       assert_equal "espalier_static_evidence", evidence["kind"]
-      assert_equal 2, evidence.dig("summary", "methods")
-      # state_protocols from call_sites (Rust detects @client.fetch)
+      assert_equal 3, evidence.dig("summary", "methods")
+      # State protocols include the field call, but never the explicit
+      # owner-method call (`self.helper`).
       assert_equal ["fetch"], evidence.dig("facts", "state_protocols", "ClientUser\u0000@client")
       assert_equal false, evidence.dig("language_capabilities", "ruby", "runtime_tracing")
       assert_equal nil_kill_features, loaded_nil_kill_features

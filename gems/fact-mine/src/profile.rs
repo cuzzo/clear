@@ -1455,11 +1455,10 @@ pub(crate) fn receiver_state_field(receiver: &str, document: &Document) -> Optio
         return None;
     }
 
-    // Self-receiver: resolve to a declared state field
+    // A bare owner receiver names the object, not one of its fields. Guessing a
+    // field here fabricates protocols whenever the owner calls one of its own
+    // methods. Qualified self.field/this.field receivers are handled below.
     if receiver == "self" || receiver == "this" {
-        if let Some(first) = document.state_declarations.first() {
-            return Some(first.field.clone());
-        }
         return None;
     }
 
@@ -2910,6 +2909,22 @@ pub(crate) mod tests {
             type_aliases: Default::default(),
             method_param_types: Default::default(),
         }
+    }
+
+    #[test]
+    fn owner_receivers_are_not_state_fields() {
+        let document = test_document();
+
+        assert_eq!(receiver_state_field("self", &document), None);
+        assert_eq!(receiver_state_field("this", &document), None);
+        assert_eq!(
+            receiver_state_field("self.name", &document),
+            Some("name".to_string())
+        );
+        assert_eq!(
+            receiver_state_field("this.name", &document),
+            Some("name".to_string())
+        );
     }
 
     pub(crate) fn extracts_methods_impl() {

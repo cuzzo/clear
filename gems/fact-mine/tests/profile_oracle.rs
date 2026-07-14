@@ -318,6 +318,38 @@ fn call_sites_on_fields_emit_state_protocols() -> Result<()> {
     Ok(())
 }
 
+#[test]
+fn bare_owner_calls_do_not_emit_state_protocols_for_the_first_field() -> Result<()> {
+    use std::io::Write;
+    let mut tmp = tempfile::NamedTempFile::new()?;
+    tmp.write_all(
+        b"class Service\n  def initialize(client)\n    @client = T.let(client, Client)\n  end\n\n  def call\n    @client.fetch\n    self.helper\n  end\n\n  def helper\n  end\nend\n",
+    )?;
+    let path = tmp.path().to_path_buf();
+
+    let document = syntax::parse_file(path, Language::Ruby)?;
+    let output = profile::extract(&document, Profile::Espalier);
+
+    let key = "Service\u{0}client";
+    let protocols = output
+        .state_protocols
+        .get(key)
+        .with_context(|| format!("missing state_protocols key {}", key))?;
+    assert!(protocols.contains(&"fetch".to_string()));
+    assert!(
+        !protocols.contains(&"helper".to_string()),
+        "a bare owner-method call must not be attributed to a state field"
+    );
+    assert!(
+        !output.state_protocol_records.iter().any(|record| {
+            record.owner == "Service" && record.field == "client" && record.protocol == "helper"
+        }),
+        "a bare owner-method call must not emit a state-protocol record"
+    );
+
+    Ok(())
+}
+
 // ---------------------------------------------------------------------------
 // Oracle-based cross-language tests
 // ---------------------------------------------------------------------------
