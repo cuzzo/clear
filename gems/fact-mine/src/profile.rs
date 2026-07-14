@@ -59,6 +59,8 @@ pub struct ProfileOutput {
     pub state_param_origin_records: Vec<StateParamOriginRecord>,
     pub signatures: BTreeMap<String, String>,
     pub type_definitions: Vec<TypeDefinition>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub declaration_type_pressures: Vec<DeclarationTypePressure>,
     pub hash_shapes: Vec<HashShape>,
     pub array_shapes: Vec<ArrayShape>,
     /// Edges from an owner to another owner via typed state fields.
@@ -315,6 +317,25 @@ pub struct TypeDefinition {
 }
 
 #[derive(Clone, Debug, Serialize)]
+pub struct DeclarationTypePressure {
+    pub id: String,
+    pub language: String,
+    pub path: String,
+    pub owner: String,
+    pub declaration_kind: String,
+    pub declaration_name: String,
+    pub slot: String,
+    pub line: usize,
+    pub declared_type: TypeExpr,
+    pub union_width: usize,
+    pub nested_union_width: usize,
+    pub unknown_leaves: usize,
+    pub collection_depth: usize,
+    pub nilable: bool,
+    pub nilable_collection: bool,
+}
+
+#[derive(Clone, Debug, Serialize)]
 pub struct HashShape {
     pub path: String,
     pub line: usize,
@@ -377,6 +398,7 @@ pub fn extract(document: &Document, profile: Profile) -> ProfileOutput {
         extract_state_param_origins(document, &language, &path);
     let signatures = extract_signatures(&lines, document);
     let type_definitions = extract_type_definitions(&lines, document, &language, &path);
+    let declaration_type_pressures = declaration_type_pressures_from_definitions(&type_definitions);
 
     if trace_plan {
         let mut struct_declarations = extract_struct_declarations(document, &language, &path);
@@ -428,6 +450,7 @@ pub fn extract(document: &Document, profile: Profile) -> ProfileOutput {
             state_type_records,
             signatures,
             type_definitions,
+            declaration_type_pressures,
             tlet_sites,
             ..ProfileOutput::default()
         };
@@ -706,6 +729,7 @@ pub fn extract(document: &Document, profile: Profile) -> ProfileOutput {
         state_param_origin_records,
         signatures,
         type_definitions,
+        declaration_type_pressures,
         hash_shapes,
         array_shapes,
         state_type_edges,
@@ -754,6 +778,7 @@ pub fn merge(outputs: Vec<ProfileOutput>, profile: Profile) -> ProfileOutput {
     let mut state_param_origin_records = Vec::new();
     let mut signatures = BTreeMap::new();
     let mut type_definitions = Vec::new();
+    let mut declaration_type_pressures = Vec::new();
     let mut hash_shapes = Vec::new();
     let mut array_shapes = Vec::new();
     let mut state_type_edges = Vec::new();
@@ -803,6 +828,7 @@ pub fn merge(outputs: Vec<ProfileOutput>, profile: Profile) -> ProfileOutput {
         state_param_origin_records.extend(output.state_param_origin_records);
         signatures.extend(output.signatures);
         type_definitions.extend(output.type_definitions);
+        declaration_type_pressures.extend(output.declaration_type_pressures);
         hash_shapes.extend(output.hash_shapes);
         array_shapes.extend(output.array_shapes);
         state_type_edges.extend(output.state_type_edges);
@@ -876,6 +902,7 @@ pub fn merge(outputs: Vec<ProfileOutput>, profile: Profile) -> ProfileOutput {
         state_param_origin_records,
         signatures,
         type_definitions,
+        declaration_type_pressures,
         hash_shapes,
         array_shapes,
         state_type_edges,
@@ -2151,6 +2178,114 @@ fn extract_type_definitions(
     }
 
     out
+}
+
+/// Produce language-neutral declaration-shape pressure from the same
+/// normalized types used by the Espalier and NilKill profiles.
+pub fn extract_declaration_type_pressures(document: &Document) -> Vec<DeclarationTypePressure> {
+    let language = document.language.as_str();
+    let lines = std::fs::read_to_string(&document.file)
+        .unwrap_or_default()
+        .lines()
+        .map(ToString::to_string)
+        .collect::<Vec<_>>();
+    let definitions = extract_type_definitions(&lines, document, language, &document.file);
+    declaration_type_pressures_from_definitions(&definitions)
+}
+
+fn declaration_type_pressures_from_definitions(definitions: &[TypeDefinition]) -> Vec<DeclarationTypePressure> {
+    let mut out = Vec::new();
+    for definition in definitions {
+        if let Some(declared_type) = &definition.return_type {
+            out.push(type_pressure_row(definition, "return", declared_type.clone()));
+        }
+        if let Some(declared_type) = &definition.declared_type {
+            out.push(type_pressure_row(definition, "declared", declared_type.clone()));
+        }
+        if let Some(target) = &definition.target {
+            out.push(type_pressure_row(
+                definition,
+                "alias_target",
+                TypeExpr::parse(target, &definition.language),
+            ));
+        }
+        for param in &definition.params {
+            let Some(name) = param.get("name").and_then(Value::as_str) else { continue };
+            let Some(value) = param.get("type") else { continue };
+            if let Ok(declared_type) = serde_json::from_value::<TypeExpr>(value.clone()) {
+                out.push(type_pressure_row(definition, &format!("param:{name}"), declared_type));
+            }
+        }
+    }
+    out.sort_by(|left, right| left.id.cmp(&right.id));
+    out.dedup_by(|left, right| left.id == right.id);
+    out
+}
+
+#[derive(Default)]
+struct TypePressureMetrics {
+    union_width: usize,
+    nested_union_width: usize,
+    unknown_leaves: usize,
+    collection_depth: usize,
+    nilable: bool,
+    nilable_collection: bool,
+}
+
+fn type_pressure_row(definition: &TypeDefinition, slot: &str, declared_type: TypeExpr) -> DeclarationTypePressure {
+    let mut metrics = TypePressureMetrics::default();
+    measure_type_pressure(&declared_type, 0, false, &mut metrics);
+    DeclarationTypePressure {
+        id: format!("{}\0{}", definition.id, slot),
+        language: definition.language.clone(),
+        path: definition.path.clone(),
+        owner: definition.owner.clone(),
+        declaration_kind: definition.kind.clone(),
+        declaration_name: definition.name.clone(),
+        slot: slot.to_string(),
+        line: definition.line.max(1),
+        declared_type,
+        union_width: metrics.union_width,
+        nested_union_width: metrics.nested_union_width,
+        unknown_leaves: metrics.unknown_leaves,
+        collection_depth: metrics.collection_depth,
+        nilable: metrics.nilable,
+        nilable_collection: metrics.nilable_collection,
+    }
+}
+
+fn measure_type_pressure(value: &TypeExpr, collection_depth: usize, inside_union: bool, metrics: &mut TypePressureMetrics) {
+    match value {
+        TypeExpr::Untyped => metrics.unknown_leaves += 1,
+        TypeExpr::NilClass | TypeExpr::Primitive(_) => {}
+        TypeExpr::Nilable(inner) => {
+            metrics.nilable = true;
+            if matches!(inner.as_ref(), TypeExpr::Array(_) | TypeExpr::Hash { .. } | TypeExpr::Set(_)) {
+                metrics.nilable_collection = true;
+            }
+            measure_type_pressure(inner, collection_depth, inside_union, metrics);
+        }
+        TypeExpr::Array(inner) | TypeExpr::Set(inner) => {
+            let depth = collection_depth + 1;
+            metrics.collection_depth = metrics.collection_depth.max(depth);
+            measure_type_pressure(inner, depth, inside_union, metrics);
+        }
+        TypeExpr::Hash { key, value } => {
+            let depth = collection_depth + 1;
+            metrics.collection_depth = metrics.collection_depth.max(depth);
+            measure_type_pressure(key, depth, inside_union, metrics);
+            measure_type_pressure(value, depth, inside_union, metrics);
+        }
+        TypeExpr::Union(parts) => {
+            metrics.union_width = metrics.union_width.max(parts.len());
+            if inside_union {
+                metrics.nested_union_width = metrics.nested_union_width.max(parts.len());
+            }
+            for part in parts {
+                measure_type_pressure(part, collection_depth, true, metrics);
+            }
+        }
+    }
 }
 
 struct SignatureParser;

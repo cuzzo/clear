@@ -551,6 +551,28 @@ fn overloaded_methods_keep_independent_cfg_and_dfg_identity() -> Result<()> {
 }
 
 #[test]
+fn cfg_publishes_exact_boolean_assignment_values_for_ruby_and_python() -> Result<()> {
+    use std::io::Write;
+
+    for (suffix, language, source, expected_name) in [
+        (".rb", Language::Ruby, "def toggle\n  @mode = true\n  @mode = false\nend\n", "@mode"),
+        (".py", Language::Python, "class Demo:\n    def toggle(self):\n        self.mode = True\n        self.mode = False\n", "@mode"),
+    ] {
+        let mut fixture = tempfile::Builder::new().suffix(suffix).tempfile()?;
+        write!(fixture, "{source}")?;
+        let document = syntax::parse_file(fixture.path().to_path_buf(), language)?;
+        let place = document.places.iter()
+            .find(|place| place.name == expected_name || place.name.ends_with("mode"))
+            .context("missing state place")?;
+        let values = document.node_effects.iter()
+            .filter_map(|effect| effect.write_value_hints.get(&place.id))
+            .cloned().collect::<Vec<_>>();
+        assert_eq!(values, vec!["boolean:true", "boolean:false"], "{}", language.as_str());
+    }
+    Ok(())
+}
+
+#[test]
 fn ruby_dataflow_seeds_declared_parameters_and_propagates_copies() -> Result<()> {
     use std::io::Write;
 

@@ -542,6 +542,31 @@ fn nil_kill_profile_produces_same_core_structure() -> Result<()> {
 }
 
 #[test]
+fn declaration_pressure_is_normalized_for_sorbet_and_typed_python() -> Result<()> {
+    use std::io::Write;
+
+    let mut ruby = tempfile::Builder::new().suffix(".rb").tempfile()?;
+    write!(ruby, "extend T::Sig\nPayload = T.type_alias {{ T.nilable(T.any(String, Integer, Float, Symbol)) }}\n")?;
+    let ruby_doc = syntax::parse_file(ruby.path().to_path_buf(), Language::Ruby)?;
+    let ruby_rows = profile::extract_declaration_type_pressures(&ruby_doc);
+    let ruby_alias = ruby_rows.iter().find(|row| row.declaration_name == "Payload")
+        .context("missing Sorbet alias pressure")?;
+    assert_eq!(ruby_alias.union_width, 4);
+    assert!(ruby_alias.nilable);
+
+    let mut python = tempfile::Builder::new().suffix(".py").tempfile()?;
+    write!(python, "def parse(value: str | int | float | bool | None) -> object:\n    return value\n")?;
+    let python_doc = syntax::parse_file(python.path().to_path_buf(), Language::Python)?;
+    let python_rows = profile::extract_declaration_type_pressures(&python_doc);
+    let python_param = python_rows.iter()
+        .find(|row| row.declaration_name == "parse" && row.slot == "param:value")
+        .context("missing Python parameter pressure")?;
+    assert_eq!(python_param.union_width, 4);
+    assert!(python_param.nilable);
+    Ok(())
+}
+
+#[test]
 fn trace_plan_profile_keeps_elision_facts_and_skips_heavy_analysis() -> Result<()> {
     use std::io::Write;
 

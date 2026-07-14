@@ -189,6 +189,7 @@ fn project_document_with_metadata(document: &Document, metadata: &SyntaxFactMeta
             "writes": effect.writes,
             "mutations": effect.mutations,
             "write_type_hints": effect.write_type_hints,
+            "write_value_hints": effect.write_value_hints,
             "unknown_call": effect.unknown_call,
             "complete": effect.complete,
             "unknown_reasons": effect.unknown_reasons,

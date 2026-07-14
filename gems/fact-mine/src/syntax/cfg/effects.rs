@@ -19,6 +19,7 @@ struct RawEffect {
     writes: BTreeSet<String>,
     mutations: BTreeSet<String>,
     write_type_hints: BTreeMap<String, String>,
+    write_value_hints: BTreeMap<String, String>,
     write_sources: BTreeMap<String, String>,
     unknown_call: bool,
     complete: bool,
@@ -156,6 +157,11 @@ pub(crate) fn extract(
                 .write_type_hints
                 .into_iter()
                 .map(|(name, hint)| (id_for(&name), hint))
+                .collect(),
+            write_value_hints: raw
+                .write_value_hints
+                .into_iter()
+                .map(|(name, value)| (id_for(&name), value))
                 .collect(),
             write_sources: raw
                 .write_sources
@@ -295,7 +301,10 @@ fn collect(node: &Node, effect: &mut RawEffect) {
             }
             if let Some(rhs) = node.children.iter().skip(1).find_map(ast::node) {
                 if let Some(hint) = value_type_hint(rhs) {
-                    effect.write_type_hints.insert(name, hint.to_string());
+                    effect.write_type_hints.insert(name.clone(), hint.to_string());
+                    if let Some(value) = literal_value_hint(rhs) {
+                        effect.write_value_hints.insert(name, value);
+                    }
                 } else if let Some(source) = direct_read_name(rhs) {
                     effect.write_sources.insert(name, source);
                 }
@@ -319,6 +328,21 @@ fn collect(node: &Node, effect: &mut RawEffect) {
     }
     for child in node.children.iter().filter_map(ast::node) {
         collect(child, effect);
+    }
+}
+
+fn literal_value_hint(node: &Node) -> Option<String> {
+    match node.r#type.as_str() {
+        "NIL" => Some("nil".to_string()),
+        "TRUE" => Some("boolean:true".to_string()),
+        "FALSE" => Some("boolean:false".to_string()),
+        "LIT" => match node.children.first() {
+            Some(Child::Bool(value)) => Some(format!("boolean:{value}")),
+            Some(Child::Integer(value)) => Some(format!("integer:{value}")),
+            Some(Child::Symbol(value)) => Some(format!("symbol:{value}")),
+            _ => None,
+        },
+        _ => None,
     }
 }
 
