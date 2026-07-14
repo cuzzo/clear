@@ -380,6 +380,10 @@ impl Report {
         SarifEmitter::render(&self.rollup)
     }
 
+    pub fn to_snapshot(&self) -> Value {
+        delta::snapshot(&self.rollup.sections, &self.rollup.root)
+    }
+
     pub fn to_sarif_value(
         &self,
         include_snapshot: bool,

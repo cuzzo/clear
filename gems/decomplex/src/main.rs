@@ -8,6 +8,7 @@ use decomplex_rust::decomplex::detectors::{
     weighted_inlined_cognitive_complexity,
 };
 use decomplex_rust::decomplex::parallel;
+use decomplex_rust::decomplex::delta;
 use decomplex_rust::decomplex::report::Report;
 use decomplex_rust::decomplex::report_facts::{
     self, Options as ReportFactsOptions, SourceRole, VcsFilter,
@@ -273,6 +274,29 @@ fn run_with_args(args: Vec<String>) -> Result<()> {
                 .with_context(|| "failed to collect report facts")?;
             render_report(&facts, &format, output.as_ref())?;
         }
+        Command::Delta {
+            options,
+            targets,
+            baseline,
+            output,
+            ..
+        } => {
+            let baseline: Value = serde_json::from_str(
+                &std::fs::read_to_string(&baseline)
+                    .with_context(|| format!("failed to read {}", baseline.display()))?,
+            )
+            .with_context(|| format!("failed to parse {}", baseline.display()))?;
+            let facts = report_facts::collect(&targets, &options, false)
+                .with_context(|| "failed to collect delta report facts")?;
+            let report = Report::from_facts(&facts)?;
+            let comparison = delta::diff(&baseline, &report.to_snapshot());
+            let text = delta::to_markdown(&comparison);
+            if let Some(path) = output {
+                std::fs::write(path, text)?;
+            } else {
+                print!("{text}");
+            }
+        }
         Command::RenderReport {
             input,
             from_stdin,
@@ -452,6 +476,13 @@ enum Command {
         output: Option<PathBuf>,
         jobs: Option<usize>,
     },
+    Delta {
+        options: ReportFactsOptions,
+        targets: Vec<PathBuf>,
+        baseline: PathBuf,
+        output: Option<PathBuf>,
+        jobs: Option<usize>,
+    },
     RenderReport {
         input: Option<PathBuf>,
         from_stdin: bool,
@@ -499,6 +530,7 @@ impl Command {
             | Self::FatUnion { jobs, .. }
             | Self::Facts { jobs, .. }
             | Self::Report { jobs, .. }
+            | Self::Delta { jobs, .. }
             | Self::SyntaxFacts { jobs, .. } => *jobs,
             Self::RenderReport { .. } | Self::DetectorFacts { .. } => None,
         }
@@ -532,6 +564,23 @@ fn parse_args(args: Vec<String>) -> Result<Command> {
                 options: args.options,
                 targets: args.targets,
                 format: args.format,
+                output: args.output,
+                jobs: args.jobs,
+            })
+        }
+        "delta" => {
+            let baseline = cursor
+                .next()
+                .map(PathBuf::from)
+                .with_context(|| "delta requires BASELINE.json")?;
+            let args = parse_report_facts_args(cursor.collect(), false)?;
+            if args.targets.is_empty() {
+                bail!("delta requires at least one file or directory");
+            }
+            Ok(Command::Delta {
+                options: args.options,
+                targets: args.targets,
+                baseline,
                 output: args.output,
                 jobs: args.jobs,
             })
@@ -1271,6 +1320,7 @@ fn render_report(facts: &serde_json::Value, format: &str, output: Option<&PathBu
     let text = match format {
         "markdown" | "md" => report.to_markdown(),
         "sarif" | "json" => report.to_sarif(),
+        "snapshot" => serde_json::to_string_pretty(&report.to_snapshot())?,
         _ => bail!("unsupported report format: {format}"),
     };
     if let Some(path) = output {
@@ -1473,6 +1523,15 @@ mod tests {
         assert!(run_cli(&["report", "--language=ruby", "--jobs=2", "--format=markdown", &get_path("examples/ruby/co-update.rb")]).is_ok());
         assert!(run_cli(&["render-report", "--input", &get_path("examples/facts/report/postprocess.json"), "--format", "markdown"]).is_ok());
         assert!(run_cli(&["render-report", "--input", &get_path("examples/facts/report/postprocess.json"), "--format=sarif"]).is_ok());
+        let baseline = tempfile::NamedTempFile::new().unwrap();
+        assert!(run_cli(&[
+            "report", "--language=ruby", "--format=snapshot", "--output",
+            baseline.path().to_str().unwrap(), &get_path("examples/ruby/co-update.rb")
+        ]).is_ok());
+        assert!(run_cli(&[
+            "delta", baseline.path().to_str().unwrap(), "--language=ruby",
+            &get_path("examples/ruby/co-update.rb")
+        ]).is_ok());
         assert!(run_cli(&["syntax-facts", "--language=ruby", "--jobs=1", &get_path("examples/ruby/co-update.rb")]).is_ok());
     }
 
@@ -1517,6 +1576,8 @@ mod tests {
         // Target lists empty checks
         assert!(run_cli(&["facts"]).is_err());
         assert!(run_cli(&["report"]).is_err());
+        assert!(run_cli(&["delta"]).is_err());
+        assert!(run_cli(&["delta", "missing.json"]).is_err());
         assert!(run_cli(&["syntax-facts"]).is_err());
         assert!(run_cli(&["co-update"]).is_err());
         assert!(run_cli(&["flay-similarity"]).is_err());
