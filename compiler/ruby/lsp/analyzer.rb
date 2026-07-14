@@ -37,7 +37,7 @@ module LSP
         ast       = ClearParser.new(tokens, source).parse
         annotator = SemanticAnnotator.new
         annotator.source_code = source
-        annotator.annotate!(T.must(ast))
+        annotator.annotate!(ast)
       rescue CompilerError, ParserError => e
         fatal = synthetic_finding_from(e)
       rescue => e

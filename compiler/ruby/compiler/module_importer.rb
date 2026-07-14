@@ -108,19 +108,19 @@ class ModuleImporter
     # source still tokenizes; the post-parse check below catches it.
     saved_gradual = ClearParser.gradual_mode
     ClearParser.gradual_mode = false
-    begin
+    ast = begin
       tokens = Lexer.new(source).tokenize
-      ast    = ClearParser.new(tokens, source).parse
+      ClearParser.new(tokens, source).parse
     ensure
       ClearParser.gradual_mode = saved_gradual
     end
 
-    reject_auto_in_public_signatures!(T.must(ast), abs_path)
+    reject_auto_in_public_signatures!(ast, abs_path)
 
     annotator = SemanticAnnotator.new(importer: self, source_dir: source_dir, source_code: source)
-    annotator.annotate!(T.must(ast))
+    annotator.annotate!(ast)
 
-    mod = compile_module_mir(T.must(ast), annotator, source_dir)
+    mod = compile_module_mir(ast, annotator, source_dir)
 
     @module_cache[abs_path] = mod
     @compiling.delete(abs_path)

@@ -679,3 +679,47 @@ Validation: 48 focused source-parser examples cover absent prefixes, every
 shared attribute, token provenance, duplicate stack sizes, and both typo
 diagnostics; all 22 changed executable parser lines are covered; all 487
 top-level CLEAR fixtures parse; strict Ruby-to-CLEAR emission remains green.
+
+### Stage 5E: finish truthful boundary propagation
+
+Running the locked Sorbet toolchain after installing the repository bundle
+exposed the final propagation work from Stage 1's non-nil parser contracts.
+Fifty parser `T.must` calls were now provably redundant, as were five
+assertions at parser consumers in the compiler frontend, module importer, and
+LSP analyzer. The four parser-produced AST fields now use explicit typed
+getters, which Sorbet and Ruby-to-CLEAR both recognize without relying on
+`attr_reader` macro inference inside `Struct` blocks.
+
+The delimiter index keeps its two genuinely necessary assertions: a
+non-empty typed stack has a last entry, and an entry drawn from the fixed
+opening-delimiter alphabet has a matching index. REQUIRES typo recovery now
+returns an explicit empty `RequiresKind` when `FixCollector` mode continues
+after recording the error, rather than violating its declared result type.
+
+| Measure | Stage 5D | Stage 5E | Delta |
+| --- | ---: | ---: | ---: |
+| Parser lines | 4,899 | 4,904 | +5 |
+| Parser `T.must` sites | 71 | 21 | -50 |
+| NilKill calls | 3,565 | 3,508 | -57 |
+| NilKill flow-local types | 1,668 | 1,677 | +9 |
+| NilKill state-type records | 240 | 241 | +1 |
+| NilKill hash/array shapes | 19 / 1,407 | 19 / 1,407 | 0 / 0 |
+| NilKill collection indexes / blockers | 41 / 42 | 41 / 42 | 0 / 0 |
+| Espalier time/space classifications | unchanged | unchanged | 0 |
+| Decomplex total candidates | 334 | 334 | 0 |
+| Decomplex convergence / root clusters | 90 / 31 | 90 / 31 | 0 / 0 |
+| Decomplex state / scoped-state findings | 64 / 0 | 64 / 0 | 0 / 0 |
+
+NilKill correctly reflects the 57-call reduction. None of the three analyzers
+reports Sorbet-invalid redundant assertions or malformed accessor signatures
+as a dedicated correctness signal; that is reasonable for Espalier, but a
+useful NilKill contract check could have caught the redundant non-nil
+assertions once `consume` became total. Decomplex is appropriately stable:
+the grammar and decisions did not change.
+
+Validation: locked `bundle exec srb tc` passes with zero errors, and the full
+non-integration compiler suite passes 6,472 examples. Aggregate built-in line
+coverage plus all 487 CLEAR fixtures covers every executable line authored by
+the refactor. The raw zero-context diff identifies six uncovered lines, but
+`git blame` shows that all six predate the refactor and were only included by
+hunk realignment; no refactor-authored executable line is uncovered.

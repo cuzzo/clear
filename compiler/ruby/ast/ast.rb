@@ -1592,7 +1592,7 @@ module AST
     end
 
     sig { returns(Symbol) }
-    attr_reader :language_mode
+    def language_mode = @language_mode
 
     sig { params(value: Symbol).void }
     def language_mode=(value)
@@ -2152,7 +2152,7 @@ module AST
     # the name. Populated by the parser so `clear fix` can locate a
     # misspelled field-name for a fixable edit span.
     sig { returns(T::Hash[String, Lexer::Token]) }
-    attr_reader :field_tokens
+    def field_tokens = @field_tokens
 
     sig { params(value: T::Hash[String, Lexer::Token]).void }
     def field_tokens=(value)
@@ -2416,7 +2416,7 @@ module AST
     # Single-family WITH is a one-arm WithMatch internally; the parser
     # leaves arms nil when no MATCH keyword was used.
     sig { returns(T.nilable(T::Array[AST::WithMatchArm])) }
-    attr_reader :arms
+    def arms = @arms
 
     sig { params(value: T.nilable(T::Array[AST::WithMatchArm])).void }
     def arms=(value)
@@ -3121,7 +3121,7 @@ module AST
     end
 
     sig { returns(T::Boolean) }
-    attr_reader :tight
+    def tight = @tight
 
     sig { params(value: T::Boolean).void }
     def tight=(value)
