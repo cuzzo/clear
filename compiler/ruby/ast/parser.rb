@@ -15,7 +15,10 @@ require_relative "../annotator/helpers/fixable_helpers" # ruby-to-clear: no-requ
 # PARSER
 # ==========================================
 class ClearParser
-    extend T::Sig
+  extend T::Sig
+
+  OPEN_DELIMITERS = T.let('([{'.freeze, String)
+  CLOSE_DELIMITERS = T.let(')]}'.freeze, String)
 
   class CapabilityParseResult < T::Struct
     prop :ownership, T.nilable(Symbol), default: nil
@@ -136,6 +139,7 @@ class ClearParser
     @tokens = tokens
     @pos = T.let(0, Integer)
     @source_code = source_code
+    @delimiter_closings = T.let(index_delimiter_closings(tokens), T::Array[T.nilable(Integer)])
     @last_requires_clauses = T.let({}, T::Hash[String, Symbol])
     @suppress_struct_lit = T.let(false, T::Boolean)
     # `gradual` controls whether omitted type annotations on
@@ -195,6 +199,30 @@ class ClearParser
   end
 
   private
+
+  # Pair structural delimiters once so token lookahead can skip nested forms in
+  # O(1). Malformed pairs are deliberately left absent; the ordinary parser
+  # remains responsible for reporting the syntax error at the real cursor.
+  sig { params(tokens: T::Array[Lexer::Token]).returns(T::Array[T.nilable(Integer)]) }
+  def index_delimiter_closings(tokens)
+    opening_chars = T.let([], T::Array[String])
+    opening_indices = T.let([], T::Array[Integer])
+    closings = T.let(Array.new(tokens.length), T::Array[T.nilable(Integer)])
+
+    tokens.each_with_index do |token, index|
+      next unless token.type == :CHAR
+      value = token.text!
+      if OPEN_DELIMITERS.include?(value)
+        opening_chars << value
+        opening_indices << index
+      elsif !opening_chars.empty? && CLOSE_DELIMITERS[OPEN_DELIMITERS.index(opening_chars.last)] == value
+        opening_chars.pop
+        opening_index = opening_indices.pop
+        closings[T.must(opening_index)] = index
+      end
+    end
+    closings.freeze
+  end
 
   sig { returns(Lexer::Token) }
   def peek
@@ -2128,6 +2156,10 @@ class ClearParser
         token_value = token.text!
         case token_value
         when '{', '(', '['
+          if depth > 0 && (closing_index = @delimiter_closings[@pos + offset])
+            offset = closing_index - @pos + 1
+            next
+          end
           depth += 1
         when '}', ')', ']'
           depth -= 1
@@ -2158,6 +2190,10 @@ class ClearParser
         token_value = token.text!
         case token_value
         when '{', '(', '['
+          if (closing_index = @delimiter_closings[@pos + offset])
+            offset = closing_index - @pos + 1
+            next
+          end
           depth += 1
         when '}', ')', ']'
           depth -= 1

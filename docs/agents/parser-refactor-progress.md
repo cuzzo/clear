@@ -406,3 +406,60 @@ top-level CLEAR fixtures parse. Ruby built-in coverage reports all 60 changed
 executable parser lines covered. Invalid call-result assignments now receive
 the existing `INVALID_ASSIGNMENT` diagnostic instead of failing later at the
 statement terminator.
+
+### Stage 4B: linear nested-delimiter lookahead
+
+Hash-literal versus value-block disambiguation previously scanned from each
+opening brace to its first top-level separator. On nested value-block calls,
+every outer scan walked every inner block, so Stage 4A's linear recursive parse
+still performed Θ(N²) token peeks. The parser now indexes matching structural
+delimiters once in Θ(N) time and Θ(N) space. Lookahead jumps directly over a
+nested `()`, `[]`, or `{}` without moving `@pos`.
+
+At depths 20, 40, and 80, measured lookahead fell from 1,492, 5,782, and
+22,762 token peeks to 142, 282, and 562. Depth 160 performs 1,122 peeks and
+parses in about 0.016 seconds. This establishes Θ(N) time for the adversarial
+family after tokenization, with the ordinary Θ(N) recursive-descent stack.
+Ruby's Sorbet-wrapped implementation reaches its host stack limit near 320 of
+these deeply nested forms. That bounded linear-space behavior does not justify
+changing CLEAR syntax; a documented nesting limit or iterative expression
+stack would be preferable if real programs approach it.
+
+| Measure | Stage 4A | Stage 4B | Delta |
+| --- | ---: | ---: | ---: |
+| Parser lines | 4,938 | 4,974 | +36 |
+| Parser methods | 183 | 184 | +1 |
+| Parser state fields | 8 | 9 | +1 |
+| NilKill calls | 3,568 | 3,605 | +37 |
+| NilKill hash shapes | 21 | 21 | 0 |
+| NilKill array shapes | 1,411 | 1,418 | +7 |
+| NilKill collection index lookups | 42 | 45 | +3 |
+| NilKill hash-record blockers | 36 | 39 | +3 |
+| Espalier functions | 183 | 184 | +1 |
+| Espalier known `O(N)` time component | 31 | 33 | +2 |
+| Espalier known `O(N)` stack component | 5 | 5 | 0 |
+| Decomplex candidates | 432 | 435 | +3 |
+| Decomplex convergence units | 93 | 94 | +1 |
+| Decomplex state-based branch findings | 69 | 70 | +1 |
+| Decomplex False Simplicity findings | 66 | 66 | 0 |
+
+The surface metrics move upward because the optimization adds one immutable,
+derived token index and its construction loop. The first version used an
+integer-keyed hash and raised NilKill's hash-shape count; replacing it with a
+typed positional array and two fixed delimiter strings returned hash shapes to
+the Stage 4A count. The remaining index/blocker findings are real operations,
+but describe a bounded data structure that removes repeated work.
+
+Neither Espalier nor Decomplex distinguishes Stage 4A's measured Θ(N²) nested
+rescanning from Stage 4B's Θ(N) behavior: Espalier reports `O(N)` as a known
+component for the individual scanner in both versions, without multiplying
+that scan by recursive nesting depth. This is a generic feature gap worth
+addressing. The needed fact is “a recursive parse SCC invokes a scan over the
+remaining receiver-state cursor domain”; it should not depend on braces,
+CLEAR, or parser method names. Decomplex correctly reports the added local
+state/control surface but has no cross-method asymptotic model to credit the
+trade.
+
+Validation: 49 focused source-parser/contract examples pass; all 487 current
+top-level CLEAR fixtures parse. Ruby built-in coverage reports all 25 changed
+executable parser lines covered.

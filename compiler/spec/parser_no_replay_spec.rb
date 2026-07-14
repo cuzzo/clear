@@ -64,4 +64,26 @@ RSpec.describe "ClearParser non-replaying VAR_ID statements" do
     expect(parser.send(:parse_statement)).to be_a(AST::FuncCall)
     expect(expression_calls).to be <= 3 * 20 + 1
   end
+
+  it "skips indexed nested delimiters while classifying value blocks" do
+    expression = "call()"
+    40.times { expression = "call({ #{expression}; 0 })" }
+    source = "#{expression};"
+    parser = parser_for(source)
+    token_peeks = 0
+
+    parser.define_singleton_method(:peek_at) do |offset|
+      token_peeks += 1
+      super(offset)
+    end
+
+    expect(parser.send(:parse_statement)).to be_a(AST::FuncCall)
+    expect(token_peeks).to be <= 12 * 40
+  end
+
+  it "preserves hash and value-block disambiguation" do
+    expect(parser_for("{}").send(:parse_expression)).to be_a(AST::HashLit)
+    expect(parser_for("{ key: nested({ other: 1_i64 }) }").send(:parse_expression)).to be_a(AST::HashLit)
+    expect(parser_for("{ value: Int64 = 1_i64; value }").send(:parse_expression)).to be_a(AST::BlockExpr)
+  end
 end
