@@ -326,15 +326,15 @@ module MIRLoweringControlFlow
         s.scope = scope if MIR::Placement.frame?(s.alloc)
       when MIR::IfStmt, MIR::IfBindStmt
         stamp_loop_frame_alloc_scopes!(s.then_body, scope)
-        stamp_loop_frame_alloc_scopes!(s.else_body, scope) if s.else_body
+        stamp_loop_frame_alloc_scopes!(T.must(s.else_body), scope) if s.else_body
       when MIR::ScopeBlock, MIR::BlockExpr, MIR::SnapshotRead, MIR::SnapshotTransaction, MIR::SnapshotMultiTxn
         stamp_loop_frame_alloc_scopes!(s.body, scope)
       when MIR::SwitchStmt
         s.arms&.each { |a| stamp_loop_frame_alloc_scopes!(a.body, scope) }
-        stamp_loop_frame_alloc_scopes!(s.default_body, scope) if s.default_body
+        stamp_loop_frame_alloc_scopes!(T.must(s.default_body), scope) if s.default_body
       when MIR::IfChain
         s.branches&.each { |b| stamp_loop_frame_alloc_scopes!(b.body, scope) }
-        stamp_loop_frame_alloc_scopes!(s.default_body, scope) if s.default_body
+        stamp_loop_frame_alloc_scopes!(T.must(s.default_body), scope) if s.default_body
       when MIR::WithMatchDispatch
         s.arms&.each { |a| stamp_loop_frame_alloc_scopes!(a.body, scope) }
       end
@@ -942,7 +942,9 @@ module MIRLoweringControlFlow
     if facts.is_enum_match
       all_variants = enum_schemas[facts.expr_type_sym]&.map(&:to_s)&.sort || []
       covered = node.cases.flat_map { |c|
-        [c.value.field.to_s, *((c.extra_values || []).map { |ev| ev.field.to_s })]
+        value = T.cast(c.value, AST::GetField)
+        extras = c.extra_values.map { |ev| T.cast(ev, AST::GetField).field.to_s }
+        [value.field.to_s, *extras]
       }.sort
       exhaustive = covered == all_variants
       default = nil if default && exhaustive
@@ -975,12 +977,13 @@ module MIRLoweringControlFlow
       ast_value = returns[ret_i]
       ret_i += 1
       name = "__tmp_#{lowering_counters.next_tmp_id}"
-      entry = hoist_cleanup_entry(stmt.value, ast_value)
+      return_value = T.must(stmt.value)
+      entry = hoist_cleanup_entry(return_value, ast_value)
       materialized = MIR::BindingMaterialization.new(
         name: name,
-        expr: T.cast(stmt.value, MIR::Node),
+        expr: return_value,
         alloc: :heap,
-        type_info: mir_alloc_mark_type_info(stmt.value, ast_value, context: "unhoisted return allocation"),
+        type_info: mir_alloc_mark_type_info(return_value, ast_value, context: "unhoisted return allocation"),
         mutable: false,
         cleanup_entry: entry,
         cleanup_mode: entry ? :err : :normal,

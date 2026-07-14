@@ -153,7 +153,7 @@ module MethodAnalysis
 
     # Ownership: mark TAKES args as moved (same as function_analysis.rb line 305-310)
     defn.intrinsic_argument_takes_indices.each do |arg_idx|
-      arg_node = node.args[arg_idx]
+      arg_node = T.must(node.args[arg_idx])
       move_if_takes_ownership!(arg_node, action: :takes, consumer_param_type: nil)
     end
 
@@ -192,24 +192,24 @@ module MethodAnalysis
 
     element_type = receiver_type.element_type
     return unless element_type
-    actual_type = T.must(value_arg).full_type!(context: "collection insertion")
+    actual_type = value_arg.full_type!(context: "collection insertion")
     return unless element_type.resolved == actual_type.resolved
 
     if element_type.indirect? && !actual_type.indirect?
       if actual_type.any_rc? || actual_type.node_reference? || actual_type.link?
-        error!(T.must(value_arg), :INDIRECT_ELEMENT_IDENTITY,
+        error!(value_arg, :INDIRECT_ELEMENT_IDENTITY,
           type: element_type.resolved, actual: indirect_identity_display(actual_type))
       elsif language_mode != :easy
-        emit_indirect_element_explicit_error!(T.must(value_arg), element_type)
+        emit_indirect_element_explicit_error!(value_arg, element_type)
       else
         node.implicit_layout_cost = true
-        T.must(value_arg).layout_transport = :box
+        value_arg.layout_transport = :box
       end
     elsif !element_type.indirect? && actual_type.indirect?
-      T.must(value_arg).layout_transport = :unbox
+      value_arg.layout_transport = :unbox
     elsif element_type.indirect? != actual_type.indirect? &&
         (actual_type.any_rc? || actual_type.node_reference? || actual_type.link?)
-      error!(T.must(value_arg), :INDIRECT_ELEMENT_IDENTITY,
+      error!(value_arg, :INDIRECT_ELEMENT_IDENTITY,
         type: element_type.resolved, actual: indirect_identity_display(actual_type))
     end
   end
@@ -254,7 +254,7 @@ module MethodAnalysis
     return unless node.args.length == 1
     return unless obj_type.element_type&.resolved == :Any
 
-    val_type = node.args[0].resolved_type
+    val_type = T.must(node.args[0]).resolved_type
     new_type = Type.new(:"#{val_type}[]", collection: obj_type.collection)
     new_type.copy_placement_from!(obj_type, preserve_existing: false)
     new_type.copy_collection_shape_from!(obj_type)

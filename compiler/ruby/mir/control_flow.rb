@@ -449,7 +449,7 @@ class OwnershipDataflow
     state[resolve_state_place(state, place)]
   end
 
-  sig { params(cfg: FunctionCFG, fn_node: AST::FunctionDef, schema_lookup: T.nilable(Proc)).void }
+  sig { params(cfg: FunctionCFG, fn_node: AST::FunctionDef, schema_lookup: T.nilable(Type::SchemaLookup)).void }
   def initialize(cfg, fn_node, schema_lookup: nil)
     @cfg = T.let(cfg, FunctionCFG)
     @fn_node = T.let(fn_node, AST::FunctionDef)
@@ -839,8 +839,8 @@ class OwnershipDataflow
 
   # Build CFG + run dataflow for a function node. Returns the analysis.
   # @param can_fail_fns [Set<String>, nil] names of functions that can fail
-  # @param schema_lookup [Proc, nil] type schema resolver for needs_explicit_cleanup
-  sig { params(fn_node: AST::FunctionDef, can_fail_fns: T.nilable(T::Set[String]), schema_lookup: T.nilable(Proc)).returns(OwnershipDataflow) }
+  # @param schema_lookup [Type::SchemaLookup, nil] type schema resolver for needs_explicit_cleanup
+  sig { params(fn_node: AST::FunctionDef, can_fail_fns: T.nilable(T::Set[String]), schema_lookup: T.nilable(Type::SchemaLookup)).returns(OwnershipDataflow) }
   def self.analyze(fn_node, can_fail_fns: nil, schema_lookup: nil)
     cfg = FunctionCFG.build(fn_node, can_fail_fns: can_fail_fns)
     new(cfg, fn_node, schema_lookup: schema_lookup).analyze!
@@ -1339,7 +1339,7 @@ class UseAfterMoveChecker
   end
 
   # Convenience: build dataflow + run check in one call.
-  sig { params(fn_node: AST::FunctionDef, can_fail_fns: T.nilable(T::Set[String]), schema_lookup: T.nilable(Proc)).returns(T::Array[String]) }
+  sig { params(fn_node: AST::FunctionDef, can_fail_fns: T.nilable(T::Set[String]), schema_lookup: T.nilable(Type::SchemaLookup)).returns(T::Array[String]) }
   def self.check(fn_node, can_fail_fns: nil, schema_lookup: nil)
     df = OwnershipDataflow.analyze(fn_node, can_fail_fns: can_fail_fns, schema_lookup: schema_lookup)
     checker = new(fn_node, df)
@@ -1874,12 +1874,12 @@ class BorrowChecker
 
   attr_reader :errors
 
-  sig { params(fn_node: AST::FunctionDef, schema_lookup: Proc).returns(T::Array[String]) }
+  sig { params(fn_node: AST::FunctionDef, schema_lookup: Type::SchemaLookup).returns(T::Array[String]) }
   def self.check(fn_node, schema_lookup:)
     new(fn_node, schema_lookup: schema_lookup).check!
   end
 
-  sig { params(fn_node: AST::FunctionDef, schema_lookup: T.nilable(Proc)).void }
+  sig { params(fn_node: AST::FunctionDef, schema_lookup: T.nilable(Type::SchemaLookup)).void }
   def initialize(fn_node, schema_lookup:)
     @fn_name = T.let(fn_node.name, String)
     @fn_node = T.let(fn_node, AST::FunctionDef)

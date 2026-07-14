@@ -1270,6 +1270,19 @@ RSpec.describe NilKill do
         expect(slot["type"]).to eq("String")
       end
 
+      it "preserves bounded concrete node unions for field contracts" do
+        report = described_class.new
+        runtime = [{
+          "class" => "AST::Call", "field" => "target",
+          "classes" => ["AST::Identifier", "AST::GetField"], "calls" => 50,
+        }]
+
+        candidates = report.struct_field_candidates(runtime, [])
+
+        slot = candidates.find { |candidate| candidate["class"] == "AST::Call" && candidate["field"] == "target" }
+        expect(slot.fetch("type")).to eq("T.any(AST::GetField, AST::Identifier)")
+      end
+
       it "skips T.nilable candidates at any nesting depth" do
         report = described_class.new
         runtime = []
@@ -1388,6 +1401,30 @@ RSpec.describe NilKill do
     end
 
     describe "struct field and ivar accounting" do
+      it "prefers a strong source accessor over an untyped raw struct declaration" do
+        report = described_class.new
+        evidence = {
+          "methods" => [], "actions" => [],
+          "facts" => {
+            "existing_sigs" => [], "tlet_sites" => [], "type_dependencies" => [],
+            "type_definitions" => [{
+              "kind" => "method_signature", "owner" => "AST::Field", "name" => "type",
+              "signature" => "sig { returns(Type) }",
+              "return_type" => { "kind" => "Primitive", "data" => "Type" },
+            }],
+            "struct_declarations" => [{
+              "path" => "src/ast.rb", "class" => "AST::Field", "fields" => ["type"],
+              "field_types" => { "type" => "T.untyped" },
+            }],
+          },
+        }
+        report.define_singleton_method(:struct_rbi_types) { {} }
+
+        row = report.type_soundness_table(evidence).fetch("Struct/class fields & ivars")
+
+        expect(row).to include("total" => 1, "strong" => 1, "weak" => 0, "untyped" => 0)
+      end
+
       it "credits source accessors inherited through included modules" do
         report = described_class.new
         evidence = {

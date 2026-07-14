@@ -247,8 +247,8 @@ class PipelineSetIndexLowerer < T::Struct
   sig { params(range_source: AST::Node).returns(T.nilable(MIR::Emittable)) }
   def bc_index_iter(range_source)
     if range_source.is_a?(AST::RangeLit)
-      start_mir = self.visit_mir.call(T.cast(range_source.start, AST::Node))
-      end_mir = self.visit_mir.call(T.cast(range_source.finish, AST::Node))
+      start_mir = self.visit_mir.call(range_source.start)
+      end_mir = self.visit_mir.call(range_source.finish)
       end_expr = range_source.inclusive ? MIR::BinOp.new("+", end_mir, MIR::Lit.new("1")) : end_mir
       return MIR::IterRange.new(start_mir, end_expr, :i64)
     end

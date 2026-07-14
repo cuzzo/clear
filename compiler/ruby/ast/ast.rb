@@ -3375,12 +3375,12 @@ module MIR
 
     sig { returns(Symbol) }
     def alloc!
-      T.cast(alloc, Symbol)
+      alloc
     end
 
     sig { returns(String) }
     def zig_type!
-      T.cast(zig_type, String)
+      zig_type
     end
   end
 

@@ -347,10 +347,10 @@ class MIRChecker
     const :alloc, T.nilable(Symbol)
   end
 
-  sig { params(fn_name: T.nilable(String), schema_lookup: T.nilable(Proc)).void }
+  sig { params(fn_name: T.nilable(String), schema_lookup: T.nilable(Type::SchemaLookup)).void }
   def initialize(fn_name: nil, schema_lookup: nil)
     @fn_name = fn_name
-    @schema_lookup = T.let(schema_lookup, T.nilable(Proc))
+    @schema_lookup = T.let(schema_lookup, T.nilable(Type::SchemaLookup))
     @errors = T.let([], T::Array[String])
   end
 
@@ -721,9 +721,13 @@ class MIRChecker
       stmt.clause_bodies&.each { |body| check_linear_stmts!(body, state.copy) }
     when MIR::StructDef
       stmt.methods&.each { |method| check_linear_stmt!(method, LinearOwnershipState.new) if method.is_a?(MIR::FnDef) }
-    when MIR::FsmB1Body, MIR::FsmGenericBody, MIR::FsmIoBody
-      ctx = stmt.ctx_struct
-      check_linear_stmts!(ctx.run_body, LinearOwnershipState.new) if ctx.respond_to?(:run_body)
+    when MIR::FsmB1Body
+      body_stmts = stmt.ctx_struct.run_body.body_stmts.filter_map do |body_stmt|
+        body_stmt if body_stmt.is_a?(MIR::Emittable)
+      end
+      check_linear_stmts!(body_stmts, LinearOwnershipState.new)
+    when MIR::FsmGenericBody, MIR::FsmIoBody
+      nil
     when MIR::Comment, MIR::ContinueStmt, MIR::EnumDef, MIR::FrameRestore,
          MIR::FrameSave, MIR::Import, MIR::MutualThunkTrampoline, MIR::Noop,
          MIR::PubConst, MIR::Suppress, MIR::ThunkTrampoline, MIR::TypeAlias,

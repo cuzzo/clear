@@ -156,7 +156,7 @@ module TestLowering
        env.ctx.test_block.before_each, env.ctx.test_block.after_each].flatten,
     )
     let_decls_mir = used_let_names
-      .map { |n| MIR::Let.new(n, lower(env.let_ast_map[n].expr), false, nil, nil) }
+      .map { |n| MIR::Let.new(n, lower(env.let_ast_map.fetch(n).expr), false, nil, nil) }
 
     body = [env.ctx.fresh_preamble] +
            env.stub_mir + env.ctx.setup_mir + env.when_setup_mir +

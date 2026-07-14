@@ -84,7 +84,7 @@ module Annotator
           return
         end
 
-        decl = decls.first
+        decl = T.cast(T.must(decls.first), AST::SyncPolicyDecl)
         has_main = program_node.statements.any? { |s|
           s.is_a?(AST::FunctionDef) && s.name == Compiler::Entrypoint::NAME
         }

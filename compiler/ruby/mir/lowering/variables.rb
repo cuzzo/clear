@@ -95,7 +95,7 @@ module MIRLoweringVariables
       pt.shared? && pt.resolved == ret.resolved
     end
     return nil unless params.size == 1
-    name = params.first[:name]
+    name = T.must(params.first).name
     zig_name = mutable_scalar_params.include?(name) ? "_m_#{name}" : name
     "@TypeOf(#{zig_name})"
   end
@@ -878,10 +878,10 @@ module MIRLoweringVariables
   def fallible_self_fallback_reassign?(name, value)
     expr = value
     expr = expr.expr if expr.is_a?(MIR::Cast)
-    expr.is_a?(MIR::TryCatch) &&
-      expr.capture.nil? &&
-      expr.catch_body.is_a?(MIR::Ident) &&
-      expr.catch_body.name.to_s == name.to_s
+    return false unless expr.is_a?(MIR::TryCatch) && expr.capture.nil?
+
+    catch_body = expr.catch_body
+    catch_body.is_a?(MIR::Ident) && catch_body.name.to_s == name.to_s
   end
 
   # Emit `cell.<op>(arg)` for atomic assignments. The annotator stamped

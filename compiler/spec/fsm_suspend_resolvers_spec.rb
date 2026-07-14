@@ -137,8 +137,9 @@ RSpec.describe FsmTransform::SuspendResolvers do
     }
 
     let(:call_node) {
-      Struct.new(:args, :receiver, :matched_stdlib_def, :full_type).new(
-        [Struct.new(:value).new(100)], nil, stdlib_def, :Void)
+      AST::FuncCall.new(nil, "sleep", [AST::Literal.new(100, :Int64)]).tap do |call|
+        call.full_type = :Void
+      end
     }
 
     let(:io_tail) {
@@ -161,12 +162,10 @@ RSpec.describe FsmTransform::SuspendResolvers do
       expect(d.result_needs_cleanup).to eq(false)
     end
 
-    it "tolerates IO calls whose args reader returns nil" do
-      nil_args_def = IntrinsicRegistry.fs({ suspends: true, fsm_setup: [] })
-      nil_args_call = Struct.new(:args, :receiver, :matched_stdlib_def, :full_type).new(
-        nil, nil, nil_args_def, :Void
-      )
-      tail = FsmTransform::Segments::IoSuspend.new(nil_args_call, nil_args_def, nil)
+    it "accepts function calls with no arguments" do
+      no_args_def = IntrinsicRegistry.fs({ suspends: true, fsm_setup: [] })
+      no_args_call = AST::FuncCall.new(nil, "yield_now", []).tap { |call| call.full_type = :Void }
+      tail = FsmTransform::Segments::IoSuspend.new(no_args_call, no_args_def, nil)
 
       d = FsmTransform::SuspendResolvers.resolve(
         FsmTransform::Segments::Segment.new(0, [], tail), ctx, lowering)
@@ -175,11 +174,11 @@ RSpec.describe FsmTransform::SuspendResolvers do
       expect(d.bind_stmts).to be_empty
     end
 
-    it "tolerates IO call nodes without an args reader" do
+    it "accepts method calls with no arguments" do
       no_args_def = IntrinsicRegistry.fs({ suspends: true, fsm_setup: [] })
-      no_args_call = Struct.new(:receiver, :matched_stdlib_def, :full_type).new(
-        nil, no_args_def, :Void
-      )
+      receiver = typed_identifier("stream", :Stream)
+      no_args_call = AST::MethodCall.new(nil, receiver, "flush", [])
+      no_args_call.full_type = :Void
       tail = FsmTransform::Segments::IoSuspend.new(no_args_call, no_args_def, nil)
 
       d = FsmTransform::SuspendResolvers.resolve(

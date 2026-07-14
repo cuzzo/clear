@@ -65,8 +65,7 @@ module FsmTransform
       state_finalize = em&.fsm_state_finalize || []
 
       # Lower call args via the surrounding capture-map context.
-      arg_mirs = (io_tail.call_node.respond_to?(:args) ?
-                    (io_tail.call_node.args || []) : []).map { |a| T.unsafe(lowering).lower(a) }
+      arg_mirs = io_tail.call_node.args.map { |a| T.unsafe(lowering).lower(a) }
 
       lowerer = FsmOps::Lowerer.new(ctx_id: id, arg_mirs: arg_mirs)
       setup_mir         = lowerer.lower_stmts(setup_ops)

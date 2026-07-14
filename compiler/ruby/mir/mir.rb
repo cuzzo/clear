@@ -615,7 +615,7 @@ module MIR
       let = stmts.grep(MIR::Let).find { |stmt| stmt.name.to_s == name }
       init_effect = of(let&.init)
       cleanup_kind = { true => init_effect.cleanup_kind || :uniform, false => :uniform }[init_effect.produces_owned] || :uniform
-      active = T.must(!name.empty? && !mark.nil? && !transfer.nil?)
+      active = !name.empty? && !mark.nil? && !transfer.nil?
       effect_when(active,
         owned(alloc: mark&.alloc, cleanup_kind: cleanup_kind, target_var: name))
     end
@@ -1128,7 +1128,7 @@ module MIR
     sig { returns(T::Array[BodySlot]) }
     def body_slots
       slots = T.let([body_slot(:then_body, then_body, ->(new_body) { self.then_body = new_body })], T::Array[BodySlot])
-      slots << body_slot(:else_body, else_body, ->(new_body) { self.else_body = new_body }) if else_body
+      slots << body_slot(:else_body, T.must(else_body), ->(new_body) { self.else_body = new_body }) if else_body
       slots
     end
   end
@@ -1148,7 +1148,7 @@ module MIR
     sig { returns(T::Array[BodySlot]) }
     def body_slots
       slots = T.let([body_slot(:then_body, then_body, ->(new_body) { self.then_body = new_body })], T::Array[BodySlot])
-      slots << body_slot(:else_body, else_body, ->(new_body) { self.else_body = new_body }) if else_body
+      slots << body_slot(:else_body, T.must(else_body), ->(new_body) { self.else_body = new_body }) if else_body
       slots
     end
   end
@@ -1234,7 +1234,7 @@ module MIR
       arms&.each_with_index do |arm, index|
         slots << body_slot(:"arms_#{index}", arm.body, ->(new_body) { arm.body = new_body })
       end
-      slots << body_slot(:default_body, default_body, ->(new_body) { self.default_body = new_body }) if default_body
+      slots << body_slot(:default_body, T.must(default_body), ->(new_body) { self.default_body = new_body }) if default_body
       slots
     end
   end
@@ -1263,7 +1263,7 @@ module MIR
       arms&.each_with_index do |arm, index|
         slots << body_slot(:"arms_#{index}", arm.body, ->(new_body) { arm.body = new_body })
       end
-      slots << body_slot(:default_body, default_body, ->(new_body) { self.default_body = new_body }) if default_body
+      slots << body_slot(:default_body, T.must(default_body), ->(new_body) { self.default_body = new_body }) if default_body
       slots
     end
   end
@@ -1291,7 +1291,7 @@ module MIR
       branches&.each_with_index do |branch, index|
         slots << body_slot(:"branches_#{index}", branch.body, ->(new_body) { branch.body = new_body })
       end
-      slots << body_slot(:default_body, default_body, ->(new_body) { self.default_body = new_body }) if default_body
+      slots << body_slot(:default_body, T.must(default_body), ->(new_body) { self.default_body = new_body }) if default_body
       slots
     end
   end
@@ -3640,7 +3640,8 @@ module MIR
     def ownership_effect
       return OwnershipEffect.none unless owned_return?
       alloc_arg = args.find { |arg| arg.is_a?(AllocatorRef) }
-      OwnershipEffect.owned(alloc: alloc_arg&.kind || :heap)
+      alloc = alloc_arg.is_a?(AllocatorRef) ? alloc_arg.kind : :heap
+      OwnershipEffect.owned(alloc: alloc)
     end
   end
 
@@ -3682,7 +3683,8 @@ module MIR
     def ownership_effect
       return OwnershipEffect.none unless owned_return?
       alloc_arg = args.find { |arg| arg.is_a?(AllocatorRef) }
-      OwnershipEffect.owned(alloc: alloc_arg&.kind || :heap)
+      alloc = alloc_arg.is_a?(AllocatorRef) ? alloc_arg.kind : :heap
+      OwnershipEffect.owned(alloc: alloc)
     end
   end
 

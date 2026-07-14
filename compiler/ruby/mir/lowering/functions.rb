@@ -248,10 +248,12 @@ module MIRLoweringFunctions
     mod = node.from_module
     if program_state.emitted_extern_modules.add?(mod)
       mod_parts = mod.split(".")
-      import_expr = "@import(\"#{mod_parts.first}\")" + mod_parts[1..].map { |p| ".#{p}" }.join
+      root_module = T.must(mod_parts.first)
+      tail_modules = mod_parts.drop(1)
+      import_expr = "@import(\"#{root_module}\")" + tail_modules.map { |p| ".#{p}" }.join
       mod_alias = mod.gsub(".", "_")
-      module_path = MIRLowering::EXTERN_MODULE_ROOTS.include?(mod_parts.first) ? mod_parts.first : "#{mod_parts.first}.zig"
-      MIR::Import.new(mod_alias, module_path, mod_parts.length > 1 ? mod_parts[1..].join(".") : nil)
+      module_path = MIRLowering::EXTERN_MODULE_ROOTS.include?(root_module) ? root_module : "#{root_module}.zig"
+      MIR::Import.new(mod_alias, module_path, tail_modules.empty? ? nil : tail_modules.join("."))
     else
       MIR::Noop.new("extern_fn_import_already_emitted")
     end
@@ -260,15 +262,16 @@ module MIRLoweringFunctions
   sig { params(node: AST::ExternStructDecl).returns(T.any(MIR::Node, T::Array[MIR::Node])) }
   def lower_extern_struct(node)
     T.bind(self, MIRLowering) rescue nil
-    if node.from_module
-      mod = node.from_module
+    if (mod = node.from_module)
       mod_parts = mod.split(".")
       mod_alias = mod.gsub(".", "_")
 
       items = T.let([], T::Array[MIR::Node])
       if program_state.emitted_extern_modules.add?(mod)
-        member_chain = mod_parts[1..].any? ? mod_parts[1..].join(".") : nil
-        module_path = MIRLowering::EXTERN_MODULE_ROOTS.include?(mod_parts.first) ? mod_parts.first : "#{mod_parts.first}.zig"
+        root_module = T.must(mod_parts.first)
+        tail_modules = mod_parts.drop(1)
+        member_chain = tail_modules.empty? ? nil : tail_modules.join(".")
+        module_path = MIRLowering::EXTERN_MODULE_ROOTS.include?(root_module) ? root_module : "#{root_module}.zig"
         items << MIR::Import.new(mod_alias, module_path, member_chain)
       end
       # AS "ZigTypeExpr" allows aliasing to parameterized types like Parsed(JsonRecord).
@@ -1601,6 +1604,7 @@ module MIRLoweringFunctions
       end
       has_param_return = true
       arg = node.args[idx]
+      return true unless arg
       return true if ast_expr_produces_heap?(arg)
     end
     if has_param_return
@@ -1783,8 +1787,8 @@ module MIRLoweringFunctions
     target_var = T.let(nil, T.nilable(String))
     if node.is_a?(AST::MethodCall) && receiver_mutates && node.object.respond_to?(:name)
       target_var = extract_root_var_name(node.object)
-    elsif receiver_mutates && node.args&.first.respond_to?(:name)
-      target_var = extract_root_var_name(node.args.first)
+    elsif receiver_mutates && (first_arg = node.args.first)&.respond_to?(:name)
+      target_var = extract_root_var_name(first_arg)
     end
     MIR::RegistryCall.new(
       entry: entry,

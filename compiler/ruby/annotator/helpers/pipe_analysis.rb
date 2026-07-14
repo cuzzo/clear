@@ -513,8 +513,8 @@ module PipeAnalysis
       # Lambda form: %(a, b) -> a.id == b.userId
       params = key_expr.params
       error!(key_expr, :JOIN_LAMBDA_ARITY) unless params.size == 2
-      left_name  = params[0].name
-      right_name = params[1].name
+      left_name  = T.must(params[0]).name
+      right_name = T.must(params[1]).name
       with_new_scope do
         current_scope.declare(left_name, nil, left_type, false, false, nil, :stack)
         current_scope.declare(right_name, nil, right_type, false, false, nil, :stack)

@@ -418,7 +418,7 @@ module MIRLoweringExpressions
     T.bind(self, MIRLowering) rescue nil
     BinaryOperandFacts.new(
       node: node,
-      op: T.cast(node.op, Symbol),
+      op: node.op,
       left: T.cast(lower(node.left), MIR::Node),
       right: T.cast(lower(node.right), MIR::Node),
       left_type: Type.from_node!(node.left, context: "binary lhs"),
@@ -1251,16 +1251,16 @@ module MIRLoweringExpressions
 
     if ex.kind
       kind = ex.kind.to_s
-      if ex.error_name
-        error_name = ex.error_name.to_s
-        name_id = AST.id_of_type(ex.error_name.to_sym)
+      if (explicit_error_name = ex.error_name)
+        error_name = explicit_error_name
+        name_id = AST.id_of_type(explicit_error_name.to_sym)
       else
         clear_type = true
       end
-    elsif ex.error_name && AST.error_type?(ex.error_name.to_sym)
-      kind = AST.kind_of_type(ex.error_name.to_sym).to_s
-      error_name = ex.error_name.to_s
-      name_id = AST.id_of_type(ex.error_name.to_sym)
+    elsif (explicit_error_name = ex.error_name) && AST.error_type?(explicit_error_name.to_sym)
+      kind = AST.kind_of_type(explicit_error_name.to_sym).to_s
+      error_name = explicit_error_name
+      name_id = AST.id_of_type(explicit_error_name.to_sym)
     end
 
     OrElseExitFacts.new(
@@ -1956,7 +1956,8 @@ module MIRLoweringExpressions
       MIR::BinOp.new("+", MIR::Cast.new(end_expr, "usize", :intCast), MIR::Lit.new("1"))
     end
 
-    elem_zig = node.target.full_type!.element_type ? Type.new(node.target.full_type!.element_type).zig_type : "u8"
+    element_type = node.target.full_type!.element_type
+    elem_zig = element_type ? Type.new(element_type).zig_type : "u8"
     MIR::SliceExpr.new(target, start_cast, end_cast, elem_zig)
   end
 
@@ -2106,8 +2107,9 @@ module MIRLoweringExpressions
     rt = MIR::Ident.new(runtime_binding_name)
     kind = (node.kind || :Unknown).to_s
     # error_name is a u32 id into the per-program ErrorName enum.
-    name_expr = if node.error_name && !node.error_name.empty?
-      MIR::EnumOrdinal.new(MIR::FieldGet.new(MIR::Ident.new("ErrorName"), node.error_name))
+    error_name = node.error_name
+    name_expr = if error_name && !error_name.empty?
+      MIR::EnumOrdinal.new(MIR::FieldGet.new(MIR::Ident.new("ErrorName"), error_name))
     else
       MIR::Lit.new("0")
     end

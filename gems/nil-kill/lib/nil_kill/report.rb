@@ -3924,9 +3924,11 @@ module NilKill
     def struct_declared_type(declaration, field, rbi_types = struct_rbi_types)
       field_types = declaration["field_types"] || {}
       direct = field_types[field.to_s] || field_types[field.to_sym]
+      effective = rbi_types[[declaration["class"], field]]
+      return effective if type_strength(effective) > type_strength(direct)
       return direct unless direct.to_s.empty?
 
-      rbi_types[[declaration["class"], field]]
+      effective
     end
 
     def append_struct_field_candidates(lines, runtime, static)
@@ -3997,10 +3999,16 @@ module NilKill
     def struct_slot_type(slot)
       classes = Array(slot["classes"]).compact.reject(&:empty?)
       if classes == ["Array"] && !slot["elem_classes"].empty?
-        elem = NilKill.sorbet_type(slot["elem_classes"], allow_nilable: true)
+        elem = NilKill.sorbet_type(slot["elem_classes"], allow_nilable: true, collapse_nodes: false)
         return elem == "T.untyped" ? "T::Array[T.untyped]" : "T::Array[#{elem}]"
       end
-      NilKill.sorbet_type(classes, allow_nilable: true)
+      # A struct field is a semantic contract, not merely a telemetry
+      # distribution. Collapsing two observed concrete variants to the broad
+      # AST::Node/MIR::Node family loses the exact methods consumers rely on
+      # and can make an otherwise valid RBI produce hundreds of Sorbet errors.
+      # Preserve bounded concrete unions here; if the union exceeds policy,
+      # leave the field unresolved for an explicit protocol/type alias.
+      NilKill.sorbet_type(classes, allow_nilable: true, collapse_nodes: false)
     end
 
     def append_hash_shape_candidates(lines, shapes)

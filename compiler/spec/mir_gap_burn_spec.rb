@@ -2088,11 +2088,12 @@ RSpec.describe "MIR gap-burn characterization" do
       nil,
       "pub fn helper() void {}",
       "/tmp",
-      nil,
-      nil,
-      nil,
-      nil,
-      nil,
+      {},
+      {},
+      {},
+      "",
+      [],
+      [],
     )
     importer = ModuleImporter.new(base_dir: "/tmp")
     importer.define_singleton_method(:compile_file) { |_path, caller_dir:| imported_mod }
@@ -3305,7 +3306,7 @@ RSpec.describe "MIR gap-burn characterization" do
     error_fallback.full_type = Type.new(:String)
     expect(low.send(:or_fallback_expected_type, error_fallback).resolved).to eq(:String)
 
-    ex = AST::OrElseExit.new(tok, nil, :MvccConflict, nil)
+    ex = AST::OrElseExit.new(tok, nil, "MvccConflict", nil)
     facts = low.send(:or_else_exit_facts, ex, 11)
     expect(facts.kind).to eq(AST.kind_of_type(:MvccConflict).to_s)
     expect(facts.name_id).to eq(AST.id_of_type(:MvccConflict))

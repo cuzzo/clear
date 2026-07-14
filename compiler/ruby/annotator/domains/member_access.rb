@@ -252,7 +252,7 @@ module Annotator
         # A slice of T[3] is T[] (Fixed becomes Dynamic view)
         target_type = node.target.full_type!(context: "slice target")
         if target_type&.array?
-          element = target_type.element_type
+          element = T.must(target_type.element_type)
           slice_type = Type.new(:"#{element.resolved}[]")
           slice_type.elem_ownership = element.ownership
           slice_type.elem_sync = element.sync
@@ -334,13 +334,14 @@ module Annotator
       def visit_StructLit(node)
         T.bind(self, SemanticAnnotator)
 
-        schema = lookup_type_schema(node.name.to_sym)
+        display_name = node.name.to_s
+        schema = lookup_type_schema(display_name.to_sym)
         if schema.nil?
           tok = node.token
           if tok
             emit_typo_suggestion!(
-              tok, node.name, all_known_type_names,
-              "Unknown struct type '#{node.name}'",
+              tok, display_name, all_known_type_names,
+              "Unknown struct type '#{display_name}'",
               "closest declared type",
               category: :type, cascade: true
             )
@@ -550,8 +551,8 @@ module Annotator
         # Produces ~T[N] type — a fixed-size stream of N concurrent BG fibers.
         # This must be checked before the general array logic, since ~T items would
         # otherwise produce a bare ~T[] type (which is a compiler error).
-        if !node.items.empty? && node.items.all? { |i| Type.new(i.resolved_type).future? }
-          inner_types = node.items.map { |i| Type.new(i.resolved_type).tense_type.to_sym }.uniq
+        if !node.items.empty? && node.items.all? { |i| Type.new(T.must(i.resolved_type)).future? }
+          inner_types = node.items.map { |i| Type.new(T.must(i.resolved_type)).tense_type.to_sym }.uniq
           if inner_types.size > 1
             error!(node, :BOUNDED_STREAM_MIXED_TYPES, types: inner_types.join(', '))
           end
@@ -587,10 +588,10 @@ module Annotator
         # 2. Infer base type from the first element.
         #    If all items are string-like (Byte[N] or String), widen to String so mixed
         #    string lengths ("a", "bb", "ccc") don't produce a type error.
-        if node.items.all? { |i| Type.new(i.resolved_type).string? }
+        if node.items.all? { |i| Type.new(T.must(i.resolved_type)).string? }
           base_type = :String
         else
-          base_type = node.items.first.resolved_type
+          base_type = T.must(T.must(node.items.first).resolved_type)
           # 3. Validate Consistency — all items must share the same type.
           node.items.each_with_index do |item, index|
             next if index == 0
@@ -625,8 +626,8 @@ module Annotator
         visit(node.start)
         visit(node.finish)
 
-        start_type = node.start.resolved_type
-        finish_type = node.finish.resolved_type
+        start_type = node.start.full_type!.resolved
+        finish_type = node.finish.full_type!.resolved
 
         unless Type.new(start_type).numeric?
           error!(node, :RANGE_START_NEEDS_NUMERIC, got: start_type)

@@ -83,7 +83,7 @@ module Annotator
       def destructure_value_type_at(node, index, fallback)
         value = node.value
         if value.is_a?(AST::ListLit) && value.items[index]
-          return value.items[index].full_type!(context: "destructuring literal element")
+          return T.must(value.items[index]).full_type!(context: "destructuring literal element")
         end
 
         if node.value.full_type!(context: "destructuring tuple value").tuple?

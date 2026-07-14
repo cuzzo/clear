@@ -816,13 +816,13 @@ module Annotator
           visit(step.expr)
           step_type = step.expr.full_type!(context: "THEN step")
 
-          if step.binding
+          if (binding = step.binding)
             # Unwrap error union for the binding: !T -> T
             bind_type = step_type
             bind_type = step_type.payload_type if step_type.error_union?
 
             current_scope.declare(
-              step.binding,
+              binding,
               nil,
               bind_type,
               false,  # immutable

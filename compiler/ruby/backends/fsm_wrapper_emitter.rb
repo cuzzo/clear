@@ -347,9 +347,9 @@ module FsmWrapperEmitter
   def self.render_dispatch_arm(arm, ctx_id)
     T.bind(self, T.untyped) rescue nil
     body_lines = []
-    if arm.pre_body_skip
-      body_lines << "if (#{render_fsm_expr(arm.pre_body_skip.condition)}) {"
-      body_lines << "    __ctx_#{ctx_id}.step = #{arm.pre_body_skip.skip_step};"
+    if (pre_body_skip = arm.pre_body_skip)
+      body_lines << "if (#{render_fsm_expr(pre_body_skip.condition)}) {"
+      body_lines << "    __ctx_#{ctx_id}.step = #{pre_body_skip.skip_step};"
       body_lines << "    continue :__sw;"
       body_lines << "}"
     end

@@ -19,7 +19,8 @@ class FunctionSignature
   LifetimeSource = T.type_alias { T.any(String, Symbol) }
   LifetimeInput = T.type_alias { T.nilable(T.any(LifetimeSource, T::Array[LifetimeSource])) }
   RequiresMap = T.type_alias { T::Hash[String, T::Set[Symbol]] }
-  ExternEffects = T.type_alias { T::Hash[Symbol, Symbol] }
+  ExternEffectValue = T.type_alias { T.any(Symbol, TrueClass) }
+  ExternEffects = T.type_alias { T::Hash[Symbol, ExternEffectValue] }
   EffectSet = T.type_alias { T::Set[Symbol] }
   SyncSource = T.type_alias { T.any(AST::FunctionDef, Struct) }
 

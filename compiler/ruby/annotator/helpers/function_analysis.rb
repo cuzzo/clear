@@ -1108,8 +1108,7 @@ module FunctionAnalysis
     end
 
     # Extract the resolved type name (Type objects from parse_type_annotation)
-    param_type = param.type
-    current_type_name = param_type.is_a?(Type) ? param_type.resolved : param_type.to_sym
+    current_type_name = T.let(param.type.resolved, Symbol)
 
     path.drop(1).each do |field_sym|
       field_name = field_sym.to_s
@@ -1129,7 +1128,7 @@ module FunctionAnalysis
       end
 
       # Advance to the next type name (Type objects carry the resolved name)
-      current_type_name = sf.type.resolved
+      current_type_name = T.must(sf).type.resolved
     end
   end
 
@@ -1139,8 +1138,8 @@ module FunctionAnalysis
     requires_map = T.let(node.is_a?(AST::FunctionDef) ? node.requires || {} : {}, T::Hash[String, T::Set[Symbol]])
     node.params.each do |param|
       # Validate Defaults
-      if param.default
-        if param.default.is_a?(AST::DefaultLit)
+      if (param_default = param.default)
+        if param_default.is_a?(AST::DefaultLit)
           # DEFAULT is only valid for struct-type params
           param_type_sym = param.type.resolved
           schema = lookup_type_schema(param_type_sym)
@@ -1156,10 +1155,10 @@ module FunctionAnalysis
               error!(node, :DEFAULT_STRUCT_MISSING_DEFAULTS, name: param.name, type: param.type, missing: missing.join(', '))
             end
           end
-          stamp_type!(param.default, param.type)
+          stamp_type!(param_default, param.type)
         else
-          visit(param.default)
-          def_type = param.default.full_type!(context: "parameter default")
+          visit(param_default)
+          def_type = param_default.full_type!(context: "parameter default")
           param_type = param.type
           unless is_safe_autocast?(def_type, param_type)
             error!(node, :DEFAULT_VALUE_TYPE_MISMATCH, name: param.name, expected: param_type, got: def_type)
@@ -1198,7 +1197,7 @@ module FunctionAnalysis
         param_layout = :indirect if param_t.respond_to?(:struct?) && param_t.struct?
       end
       current_scope.declare(
-        param.name, nil, param.type, param.mutable, false, nil, :stack,
+        param.name, nil, param.type, !!param.mutable, false, nil, :stack,
         Set.new, [], sync: param_sync, layout: param_layout
       )
       # Stash the SymbolEntry on the Param so downstream passes don't

@@ -326,7 +326,7 @@ module FsmOps
         MIR::Let.new(op.name, lower_expr(op.value), false, Type.new(op.zig_type), nil)
       when ErrDeferCall
         MIR::ErrDeferStmt.new(
-          MIR::Call.new(resolve_fn(T.cast(op.fn, FsmOps::FunctionPath)), op.args.map { |a| lower_expr(a) }, false),
+          MIR::Call.new(resolve_fn(op.fn), op.args.map { |a| lower_expr(a) }, false),
         )
       when ErrDeferFreeField
         MIR::ErrDeferStmt.new(free_call(op.field))
@@ -334,7 +334,7 @@ module FsmOps
         MIR::DeferStmt.new(free_call(op.field))
       when StmtCall
         MIR::ExprStmt.new(
-          MIR::Call.new(resolve_fn(T.cast(op.fn, FsmOps::FunctionPath)), op.args.map { |a| lower_expr(a) }, op.is_try),
+          MIR::Call.new(resolve_fn(op.fn), op.args.map { |a| lower_expr(a) }, op.is_try),
           false,
         )
       when IoSubmit
@@ -357,7 +357,7 @@ module FsmOps
           MIR::Lit.new("0"),
         )
         ret = MIR::ReturnStmt.new(
-          MIR::Call.new(resolve_fn(T.cast(op.return_fn, FsmOps::FunctionPath)), op.return_args.map { |a| lower_expr(a) }, false),
+          MIR::Call.new(resolve_fn(op.return_fn), op.return_args.map { |a| lower_expr(a) }, false),
         )
         MIR::IfStmt.new(cond, [ret], [])
       else
@@ -394,7 +394,7 @@ module FsmOps
         )
       when CallExpr
         MIR::Call.new(
-          resolve_fn(T.cast(expr.fn, FsmOps::FunctionPath)),
+          resolve_fn(expr.fn),
           expr.args.map { |a| lower_expr(a) },
           expr.is_try,
         )

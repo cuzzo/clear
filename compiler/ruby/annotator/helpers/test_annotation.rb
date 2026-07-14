@@ -60,8 +60,7 @@ module TestAnnotation
     # Strict test mode: verify all IO functions are stubbed in this WHEN block.
     if strict_test?
       stubbed_fns = node.setup
-        .select { |s| s.is_a?(AST::StubDecl) }
-        .map { |s| s.function_name }
+        .filter_map { |setup| setup.function_name if setup.is_a?(AST::StubDecl) }
         .to_set
       node.tests.each { |t| validate_strict_io!(t, stubbed_fns, T.must(test_body_summaries[t.object_id])) }
     end

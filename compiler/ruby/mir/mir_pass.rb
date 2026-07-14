@@ -66,7 +66,7 @@ class MIRPass
   sig { returns(EscapeAnalysis::EscapePlacementFacts) }
   attr_reader :escape_placement_facts
 
-  sig { params(fn_nodes: FnNodes, schema_lookup: Proc, body_summaries: T::Hash[String, Annotator::Phases::FunctionBodySummary], hoist_bindings: T.nilable(HoistBindings)).void }
+  sig { params(fn_nodes: FnNodes, schema_lookup: Type::SchemaLookup, body_summaries: T::Hash[String, Annotator::Phases::FunctionBodySummary], hoist_bindings: T.nilable(HoistBindings)).void }
   def initialize(fn_nodes:, schema_lookup:, body_summaries: {}, hoist_bindings: nil)
     @fn_nodes = T.let(fn_nodes, FnNodes)
     @schema_lookup = schema_lookup
@@ -729,7 +729,8 @@ class MIRPass
     stmt.cases.each do |c|
       next unless c.binding
 
-      facts.with_live_entry_for(c.binding) do |as_entry|
+      binding = T.must(c.binding)
+      facts.with_live_entry_for(binding) do |as_entry|
         has_as_cleanup = true
 
         # Insert MIR nodes at the start of case body for checker coverage.
@@ -738,13 +739,14 @@ class MIRPass
         if has_source_cleanup
           mir_prefix << MIR::SuppressCleanup.new(stmt.token, expr.name.to_s)
         end
-        alloc_type = if c.destructure.is_a?(AST::Locatable)
-          c.destructure.full_type!(context: "match AS allocation marker")
+        destructure = c.destructure
+        alloc_type = if destructure
+          destructure.full_type!(context: "match AS allocation marker")
         else
           Type.from_node!(expr, context: "match AS allocation marker")
         end
-        mir_prefix << alloc_marker(c.binding.to_s, as_entry.alloc, alloc_type)
-        drop = MIR::Drop.new(stmt.token, c.binding.to_s)
+        mir_prefix << alloc_marker(binding, as_entry.alloc, alloc_type)
+        drop = MIR::Drop.new(stmt.token, binding)
         drop.cleanup_entry = as_entry
         mir_prefix << drop
         c.body = mir_prefix + c.body

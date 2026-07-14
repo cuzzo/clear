@@ -294,7 +294,7 @@ module Hoist
       end
     when AST::ListLit
       node.items.each_index do |idx|
-        v = node.items[idx]
+        v = T.must(node.items[idx])
         if concat?(v)
           node.items[idx] = make_temp!(v, hoists, counter.next_name)
         else
@@ -905,7 +905,7 @@ module MIRHoistLowering
         stmt.then_body = then_marks + stmt.then_body
         stmt.else_body ||= []
         else_marks = MIR.ownership_transfer_marks(normalized.name.to_s, :owned_sink, target_alloc: target_alloc, move_guarded: true)
-        stmt.else_body = else_marks + stmt.else_body
+        stmt.else_body = else_marks + T.must(stmt.else_body)
       end
     when MIR::WhileStmt
       prefix.concat(normalize_used_expr_attr!(stmt, :cond)) unless stmt.capture

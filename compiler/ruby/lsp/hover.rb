@@ -67,7 +67,7 @@ module LSP
     sig { params(result: LSP::AnalysisResult, position: LspPosition, source: String).returns(T.nilable(FindingLike)) }
     def self.find_overlapping(result, position, source)
       candidates = result.findings.dup
-      candidates << result.fatal_error if result.fatal?
+      candidates << T.must(result.fatal_error) if result.fatal?
 
       # Pass 1 — strict range overlap. Wins for every finding whose
       # token squigglesthe cursor sits on.
@@ -89,7 +89,7 @@ module LSP
         [f, (diag[:range][:start][:character] - cursor_char).abs]
       end
       return nil if same_line.empty?
-      same_line.min_by { |_, dist| dist }.first
+      T.must(same_line.min_by { |_, dist| dist }).first
     end
 
     sig { params(position: LspPosition, key: Symbol).returns(Integer) }

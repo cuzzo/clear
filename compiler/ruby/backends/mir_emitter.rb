@@ -164,7 +164,7 @@ class MIREmitter
     when MIR::FallibleOk       then "if (#{emit(node.expr)}) |_| true else |_| false"
     when MIR::FutureReady      then "#{emit(node.expr)}.isReady()"
     when MIR::UnaryOp          then emit_unary_op(node)
-    when MIR::Lit              then node.value
+    when MIR::Lit              then node.value.to_s
     when MIR::SymbolLit        then symbol_literal_name(node.value.to_s)
     when MIR::VoidLiteral      then "{}"
     when MIR::DefaultValue     then emit_default_value(node)
@@ -495,7 +495,7 @@ class MIREmitter
   sig { params(node: ShardedMapNode).returns(T.untyped) }
   def sharded_map_template(node)
     op = node.stdlib_def
-    kind = T.cast(node.template_kind || IntrinsicTemplateKind::Zig, IntrinsicTemplateKind)
+    kind = node.template_kind || IntrinsicTemplateKind::Zig
     op.intrinsic_template(kind) or raise "ShardedMap: op has no :#{kind.serialize} template (contract=#{op.intrinsic_contract.inspect})"
   end
 
@@ -1089,7 +1089,8 @@ class MIREmitter
     when MIR::IfStmt
       then_zig = emit_body_flow(stmt.then_body || [], return_kind)
       else_zig = emit_body_flow(stmt.else_body || [], return_kind)
-      if stmt.else_body && !stmt.else_body.empty?
+      else_body = stmt.else_body
+      if else_body && !else_body.empty?
         "if (#{emit(stmt.cond)}) {\n#{indent_block(then_zig, 4)}\n} else {\n#{indent_block(else_zig, 4)}\n}"
       else
         "if (#{emit(stmt.cond)}) {\n#{indent_block(then_zig, 4)}\n}"
@@ -1119,9 +1120,10 @@ class MIREmitter
       flow_body_terminates?(last.body || [])
     when MIR::IfStmt
       return false unless flow_body_terminates?(last.then_body || [])
-      return false unless last.else_body && !last.else_body.empty?
+      else_body = last.else_body
+      return false unless else_body && !else_body.empty?
 
-      flow_body_terminates?(last.else_body || [])
+      flow_body_terminates?(else_body)
     else
       false
     end
@@ -1742,8 +1744,9 @@ class MIREmitter
     value = value.expr if value.is_a?(MIR::Cast)
     return nil unless value.is_a?(MIR::TryCatch)
     return nil unless value.capture.nil?
-    return nil unless value.catch_body.is_a?(MIR::Ident)
-    return nil unless value.catch_body.name.to_s == node.name.to_s
+    catch_body = value.catch_body
+    return nil unless catch_body.is_a?(MIR::Ident)
+    return nil unless catch_body.name.to_s == node.name.to_s
     value.expr
   end
 
@@ -1753,8 +1756,8 @@ class MIREmitter
     cond = "comptime #{cond}" if node.comptime
     then_body = emit_body(node.then_body)
     result = "if (#{cond}) {\n#{then_body}\n}"
-    if node.else_body && !node.else_body.empty?
-      else_body = emit_body(node.else_body)
+    if (else_stmts = node.else_body) && !else_stmts.empty?
+      else_body = emit_body(else_stmts)
       result += " else {\n#{else_body}\n}"
     end
     result
@@ -1763,7 +1766,8 @@ class MIREmitter
   sig { params(node: MIR::IfBindStmt).returns(String) }
   def emit_if_bind_stmt(node)
     then_body = emit_body(node.then_body)
-    else_body = node.else_body && !node.else_body.empty? ? emit_body(node.else_body) : nil
+    else_stmts = node.else_body
+    else_body = else_stmts && !else_stmts.empty? ? emit_body(else_stmts) : nil
 
     if node.bindings.length == 1
       b = node.bindings[0]
@@ -1836,9 +1840,10 @@ class MIREmitter
 
   sig { params(node: MIR::ForStmt).returns(T::Boolean) }
   def i64_range_capture_cast_required?(node)
-    node.iter.is_a?(MIR::IterRange) && node.iter.capture_type == :i64 &&
+    iter = node.iter
+    !!(iter.is_a?(MIR::IterRange) && iter.capture_type == :i64 &&
       node.index_capture.nil? && node.capture.is_a?(String) &&
-      !node.capture.start_with?("*")
+      !node.capture.start_with?("*"))
   end
 
   sig { params(node: MIR::SwitchStmt).returns(String) }
@@ -1848,8 +1853,8 @@ class MIREmitter
       body = emit_body(arm.body)
       "#{emit_switch_patterns(arm.patterns)} => {\n#{body}\n}"
     }
-    if node.default_body
-      body = node.default_body.empty? ? "" : emit_body(node.default_body)
+    if (default_body = node.default_body)
+      body = default_body.empty? ? "" : emit_body(default_body)
       arms << "else => {\n#{body}\n}"
     end
     "switch (#{subject}) {\n    #{arms.join(",\n    ")},\n}"
@@ -1971,8 +1976,8 @@ class MIREmitter
       capture = payload ? " |#{payload}|" : ""
       ".#{arm.variant} =>#{capture} {\n#{body}\n}"
     end
-    if node.default_body
-      body = node.default_body.empty? ? "" : emit_body(node.default_body)
+    if (default_body = node.default_body)
+      body = default_body.empty? ? "" : emit_body(default_body)
       arms << "else => {\n#{body}\n}"
     end
     "switch (#{subject}) {\n    #{arms.join(",\n    ")},\n}"
@@ -1986,8 +1991,8 @@ class MIREmitter
       "if (#{cond}) {\n#{body}\n}"
     }
     result = parts.join(" else ")
-    if node.default_body && !node.default_body.empty?
-      body = emit_body(node.default_body)
+    if (default_body = node.default_body) && !default_body.empty?
+      body = emit_body(default_body)
       result += " else {\n#{body}\n}"
     end
     result
@@ -2349,7 +2354,7 @@ class MIREmitter
 
     case entry.kind
     when :resource
-      close = render_resource_close_plan(entry.resource_close_plan, name)
+      close = render_resource_close_plan(T.must(entry.resource_close_plan), name)
       guarded_defer(name, close, g, errdefer:)
 
     else
@@ -2366,7 +2371,7 @@ class MIREmitter
       #                              `name__buf` binding
       use_alloc =
         if entry.kind == :rc && entry.rc_alloc
-          alloc_from_sym(entry.rc_alloc)
+          alloc_from_sym(T.must(entry.rc_alloc))
         else
           alloc
         end
@@ -2815,10 +2820,11 @@ class MIREmitter
 
   sig { params(expr: MIR::Node).returns(T::Boolean) }
   def discard_success_only?(expr)
-    expr.is_a?(MIR::TryCatch) &&
-      expr.capture.nil? &&
-      ((expr.catch_body.is_a?(MIR::Ident) && expr.catch_body.name.to_s == "undefined") ||
-       expr.catch_body.is_a?(MIR::Undef))
+    return false unless expr.is_a?(MIR::TryCatch) && expr.capture.nil?
+
+    catch_body = expr.catch_body
+    (catch_body.is_a?(MIR::Ident) && catch_body.name.to_s == "undefined") ||
+      catch_body.is_a?(MIR::Undef)
   end
 
   sig { params(node: MIR::Conditional).returns(String) }

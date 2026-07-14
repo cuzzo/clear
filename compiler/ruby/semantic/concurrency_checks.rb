@@ -171,7 +171,7 @@ module ConcurrencyChecks
           next unless sig.requires.key?(pname)
           arg = node.args[idx]
           next unless arg
-          arg_name = arg.respond_to?(:name) ? arg.name : nil
+          arg_name = arg.respond_to?(:name) ? T.unsafe(arg).name : nil
           next unless arg_name && held_params.include?(arg_name)
 
           error_handler.call(node,

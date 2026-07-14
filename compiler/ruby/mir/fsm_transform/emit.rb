@@ -1033,7 +1033,7 @@ module FsmTransform
         end
       when MIR::Let
         promoted_name = promoted_fsm_field_name(node.name.to_s, promoted_names)
-        rewritten_init = T.cast(rewrite_promoted_fsm_node(T.cast(node.init, MIR::Node), promoted_names, id), MIR::Node)
+        rewritten_init = T.cast(rewrite_promoted_fsm_node(node.init, promoted_names, id), MIR::Node)
         if promoted_name
           return MIR::Set.new(fsm_ctx_field(id, promoted_name), rewritten_init, false)
         end

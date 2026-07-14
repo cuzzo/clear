@@ -143,7 +143,7 @@ class PipelineListLowerer < T::Struct
     elem_type = source_shape.element_type.resolved.to_s
     elem_zig = self.transpile_type.call(elem_type)
     alloc = self.pipeline_alloc.call(smooth_node)
-    count_mir = self.visit_mir.call(T.cast(limit_node.count, AST::Node))
+    count_mir = self.visit_mir.call(limit_node.count)
 
     if source_shape.bc_infinite_stream?
       label = self.next_label.call
@@ -225,7 +225,7 @@ class PipelineListLowerer < T::Struct
     label = self.next_label.call
     source_mir = self.visit_mir.call(list_node)
     self.set_current_label.call(label)
-    count_mir = self.visit_mir.call(T.cast(skip_node.count, AST::Node))
+    count_mir = self.visit_mir.call(skip_node.count)
 
     MIR::BlockExpr.new(label, [
       MIR::Let.new("__skip_src", source_mir, false, nil, nil),
@@ -275,7 +275,7 @@ class PipelineListLowerer < T::Struct
   def lower_reduce(site, reduce_node)
     list_node = site.list
     acc_zig = self.transpile_type.call(reduce_node.full_type!)
-    init_mir = self.visit_mir.call(T.cast(reduce_node.initial_value, AST::Node))
+    init_mir = self.visit_mir.call(reduce_node.initial_value)
     expr_mir = self.visit_reduce_expr.call(reduce_node.expression, "it", "acc")
     self.pipeline_block.call(list_node, lambda do |items, label|
       [
@@ -295,7 +295,7 @@ class PipelineListLowerer < T::Struct
     expr_type_str = window_node.expression.full_type!.to_s
     res_zig = self.transpile_type.call(expr_type_str)
     alloc = self.pipeline_alloc.call(smooth_node)
-    size_mir = self.visit_mir.call(T.cast(window_node.size, AST::Node))
+    size_mir = self.visit_mir.call(window_node.size)
     expr_mir = self.visit_expr.call(list_node, window_node.expression, "window_slice")
     self.pipeline_block.call(list_node, lambda do |items, label|
       [
@@ -372,13 +372,14 @@ class PipelineListLowerer < T::Struct
     list_node = site.list
     left_type_info = T.must(list_node.full_type!.element_type)
     left_zig = self.transpile_type.call(left_type_info.resolved.to_s)
-    right_src_mir = self.visit_mir.call(T.cast(join_node.right_source, AST::Node))
+    right_src_mir = self.visit_mir.call(join_node.right_source)
     right_type_info = join_node.right_source.full_type!
-    right_zig = self.transpile_type.call(right_type_info.element_type.resolved.to_s)
+    right_element_type = T.must(right_type_info.element_type)
+    right_zig = self.transpile_type.call(right_element_type.resolved.to_s)
     result_zig = "struct { left: #{left_zig}, right: ?#{right_zig} }"
     alloc = self.pipeline_result_alloc.call
     left_owns = self.cleanup_bearing_type.call(left_type_info)
-    right_owns = self.cleanup_bearing_type.call(right_type_info.element_type)
+    right_owns = self.cleanup_bearing_type.call(right_element_type)
     pred_mir = join_predicate_mir(list_node, join_node)
     label = self.next_label.call
     source_mir = self.visit_mir.call(list_node)
@@ -447,11 +448,11 @@ class PipelineListLowerer < T::Struct
 
   sig { params(list_node: AST::Node, join_node: AST::JoinOp).returns(MIR::Node) }
   def join_predicate_mir(list_node, join_node)
-    key_expr = T.cast(join_node.key_expr, AST::Node)
+    key_expr = join_node.key_expr
     if key_expr.is_a?(AST::LambdaLit)
       params = key_expr.params
-      left_param = params[0].name
-      right_param = params[1].name
+      left_param = T.must(params[0]).name
+      right_param = T.must(params[1]).name
       join_params = T.let({ left_param => "__jl", right_param => "__jr" }, T::Hash[String, String])
       return self.visit_join_lambda.call(T.cast(key_expr.body, AST::Node), join_params)
     end

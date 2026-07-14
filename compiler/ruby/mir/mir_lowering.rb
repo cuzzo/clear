@@ -699,7 +699,7 @@ class MIRLowering
         body << MIR::BreakStmt.new(label, original_init)
       end
       block = MIR::BlockExpr.new(label, body)
-      block.result_type = original_init.result_type if original_init.respond_to?(:result_type)
+      block.result_type = T.unsafe(original_init).result_type if original_init.respond_to?(:result_type)
       binding.init = block
       return nodes
     end
@@ -1893,9 +1893,11 @@ class MIRLowering
 
   sig { params(node: MIR::Node, body: T::Array[MIR::Node], state: OwnershipFinalizationContext).void }
   def append_block_result_transfer!(node, body, state)
-    return unless node.is_a?(MIR::BreakStmt) && node.value.is_a?(MIR::Ident)
+    return unless node.is_a?(MIR::BreakStmt)
+    value = node.value
+    return unless value.is_a?(MIR::Ident)
 
-    name = node.value.name.to_s
+    name = value.name.to_s
     return if state.body_transfer_mark_names.include?(name)
     return unless state.alloc_marks.key?(name) || state.body_alloc_mark_names.include?(name)
 
@@ -1997,7 +1999,8 @@ class MIRLowering
     when MIR::IfBindStmt
       if_bind_ownership_fact_targets(node)
     when MIR::ReturnStmt, MIR::BreakStmt
-      node.value ? ownership_fact_target_for_expr(ownership_fact_source(node.value), node.value, nil) : []
+      value = node.value
+      value ? ownership_fact_target_for_expr(ownership_fact_source(value), value, nil) : []
     when MIR::ReassignWithCleanup
       ownership_fact_target_for_expr(node.name.to_s, node.value, nil)
     when MIR::BgBlock
@@ -3506,9 +3509,9 @@ class MIRLowering
 
   sig { params(mod: ModuleImporter::CompiledModule).void }
   def merge_module_schemas!(mod)
-    struct_schemas = mod.struct_schemas || {}
-    enum_schemas = T.cast(mod.enum_schemas || {}, T::Hash[Symbol, MIRLoweringSchemas::EnumVariants])
-    union_schemas = mod.union_schemas || {}
+    struct_schemas = mod.struct_schemas
+    enum_schemas = mod.enum_schemas
+    union_schemas = mod.union_schemas
 
     lowering_schemas.merge!(
       struct_schemas: struct_schemas,
@@ -3688,7 +3691,7 @@ class MIRLowering
         field_access = MIR::FieldGet.new(subject, f.name.to_s)
         bindings << MIR::Let.new(f.name.to_s, field_access, false, nil, "_ = &#{f.name};")
       else
-        val = T.cast(lower(f.expr), MIR::Node)
+        val = T.cast(lower(T.must(f.expr)), MIR::Node)
         field_access = MIR::FieldGet.new(subject, f.name.to_s)
         conditions << MIR::BinOp.new("==", field_access, val)
       end

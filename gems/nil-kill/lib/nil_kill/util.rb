@@ -171,13 +171,13 @@ module NilKill
     target_exclude_dirs.any? { |dir| abs == dir || abs.start_with?(dir + File::SEPARATOR) }
   end
 
-  def sorbet_type(classes, allow_nilable: true)
+  def sorbet_type(classes, allow_nilable: true, collapse_nodes: true)
     classes = Array(classes).compact.reject(&:empty?)
     return "T.untyped" if classes.empty?
     has_nil = classes.include?("NilClass")
     others = classes.reject { |c| c == "NilClass" || c.include?("#") || c.start_with?("Sorbet::Private::") }
     return "T.untyped" if others.empty?
-    others = collapse_node_types(others)
+    others = collapse_node_types(others) if collapse_nodes
     base =
       if others.all? { |c| c == "TrueClass" || c == "FalseClass" }
         "T::Boolean"

@@ -200,9 +200,9 @@ class ModuleImporter
     sync_global_scope_function_signatures!(ast, annotator)
 
     # Collect schemas
-    struct_schemas = {}
-    enum_schemas = {}
-    union_schemas = {}
+    struct_schemas = T.let({}, T::Hash[Symbol, Schemas::StructSchema])
+    enum_schemas = T.let({}, T::Hash[Symbol, MIRLoweringSchemas::EnumVariants])
+    union_schemas = T.let({}, T::Hash[Symbol, Schemas::UnionSchema])
     ast.statements.each do |stmt|
       case stmt
       when AST::StructDef then struct_schemas[stmt.name.to_sym] = Schemas::StructSchema.new(fields: stmt.field_decls)
@@ -211,13 +211,13 @@ class ModuleImporter
       end
     end
 
-    fn_sigs = {}
+    fn_sigs = T.let({}, T::Hash[String, FunctionSignature])
     ast.statements.each do |stmt|
       next unless stmt.is_a?(AST::FunctionDef)
       fn_sigs[stmt.name] = FunctionSignature.from_function_def(stmt)
     end
 
-    moved_guard_info = {}
+    moved_guard_info = T.let({}, MIRLoweringInput::MovedGuardInfo)
     fn_nodes.each { |name, fn| moved_guard_info[name] = fn.moved_guard_info if fn.moved_guard_info }
 
     lowering = MIRLowering.new(input: MIRLoweringInput.new(

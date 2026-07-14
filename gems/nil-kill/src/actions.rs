@@ -1715,11 +1715,52 @@ fn runtime_field_candidate(classes: &[String], elem_classes: &[String]) -> Optio
         return Some("T::Boolean".to_string());
     }
 
-    let observed = sorbet_type(&concrete, false);
+    // Field telemetry must never erase a nil observation. A field contract is
+    // persistent state, not a transient parameter sample; narrowing
+    // `T.nilable(MIR::Node)` to `MIR::Node` from the non-nil observations is
+    // unsound. Nilable candidates remain review-only until callers are proven
+    // ready for the stronger contract.
+    let observed = persistent_field_type(&concrete);
     if useful_type(&observed) && !weak_type(&observed) && !observed.contains("T.nilable") {
         Some(observed)
     } else {
         None
+    }
+}
+
+fn persistent_field_type(classes: &[String]) -> String {
+    let mut concrete = Vec::new();
+    let mut has_nil = false;
+    for class in classes {
+        if class == "NilClass" {
+            has_nil = true;
+        } else if useful_type(class)
+            && !class.contains('#')
+            && !class.starts_with("Sorbet::Private::")
+        {
+            concrete.push(class.clone());
+        }
+    }
+    concrete.sort();
+    concrete.dedup();
+
+    let base = if concrete.len() == 2
+        && concrete.contains(&"TrueClass".to_string())
+        && concrete.contains(&"FalseClass".to_string())
+    {
+        "T::Boolean".to_string()
+    } else if concrete.len() == 1 {
+        concrete[0].clone()
+    } else if concrete.len() > 1 && concrete.len() <= 3 {
+        format!("T.any({})", concrete.join(", "))
+    } else {
+        return "T.untyped".to_string();
+    };
+
+    if has_nil {
+        format!("T.nilable({base})")
+    } else {
+        base
     }
 }
 
@@ -1960,6 +2001,12 @@ fn propose_struct_field_sig_actions(input: &InputState) -> Vec<Action> {
         .and_then(|v| v.as_array())
         .cloned()
         .unwrap_or_default();
+    let effective_field_types = input
+        .facts
+        .get("effective_struct_field_types")
+        .and_then(|v| v.as_array())
+        .cloned()
+        .unwrap_or_default();
 
     if struct_runtime.is_empty()
         && ivar_runtime.is_empty()
@@ -1968,6 +2015,90 @@ fn propose_struct_field_sig_actions(input: &InputState) -> Vec<Action> {
     {
         return actions;
     }
+
+    // A Struct's raw storage declaration is not necessarily its public field
+    // contract. Ruby code commonly replaces the generated accessor with a
+    // typed method, or includes a module that does so. Do not propose a second
+    // RBI signature when FactMine already found a strong effective accessor:
+    // it is redundant at best and can unsafely narrow a deliberately broader
+    // source contract from the runtime classes observed in one test run.
+    let mut accessor_contracts = std::collections::BTreeSet::new();
+    let mut included_modules: std::collections::HashMap<
+        String,
+        std::collections::BTreeSet<String>,
+    > = std::collections::HashMap::new();
+    for rec in &type_definitions {
+        match rec.get("kind").and_then(|v| v.as_str()) {
+            Some("method_signature") => {
+                let owner = rec.get("owner").and_then(|v| v.as_str()).unwrap_or("");
+                let name = rec.get("name").and_then(|v| v.as_str()).unwrap_or("");
+                let signature = rec.get("signature").and_then(|v| v.as_str()).unwrap_or("");
+                let Some(return_type) = extract_return_type(signature) else {
+                    continue;
+                };
+                if !owner.is_empty()
+                    && !name.is_empty()
+                    && useful_type(&return_type)
+                    && !return_type.contains("T.untyped")
+                    && !weak_type(&return_type)
+                    && !weak_collection_type(&return_type)
+                {
+                    accessor_contracts.insert((owner.to_string(), name.to_string()));
+                }
+            }
+            Some("included_module") => {
+                let owner = rec.get("owner").and_then(|v| v.as_str()).unwrap_or("");
+                let name = rec.get("name").and_then(|v| v.as_str()).unwrap_or("");
+                if !owner.is_empty() && !name.is_empty() {
+                    included_modules
+                        .entry(owner.to_string())
+                        .or_default()
+                        .insert(name.to_string());
+                }
+            }
+            _ => {}
+        }
+    }
+    for rec in effective_field_types {
+        let owner = rec.get("owner").and_then(|v| v.as_str()).unwrap_or("");
+        let field = rec.get("field").and_then(|v| v.as_str()).unwrap_or("");
+        let field_type = rec.get("type").and_then(|v| v.as_str()).unwrap_or("");
+        if !owner.is_empty()
+            && !field.is_empty()
+            && useful_type(field_type)
+            && !field_type.contains("T.untyped")
+            && !weak_type(field_type)
+            && !weak_collection_type(field_type)
+        {
+            accessor_contracts.insert((owner.to_string(), field.to_string()));
+        }
+    }
+    loop {
+        let snapshot = included_modules.clone();
+        let mut changed = false;
+        for modules in included_modules.values_mut() {
+            let inherited: Vec<String> = modules
+                .iter()
+                .flat_map(|module| snapshot.get(module).into_iter().flatten().cloned())
+                .collect();
+            for module in inherited {
+                changed |= modules.insert(module);
+            }
+        }
+        if !changed {
+            break;
+        }
+    }
+    let inherited_contracts: Vec<(String, String)> = included_modules
+        .iter()
+        .flat_map(|(owner, modules)| {
+            accessor_contracts
+                .iter()
+                .filter(move |(contract_owner, _)| modules.contains(contract_owner))
+                .map(move |(_, field)| (owner.clone(), field.clone()))
+        })
+        .collect();
+    accessor_contracts.extend(inherited_contracts);
 
     #[derive(Clone)]
     struct Declaration {
@@ -2201,6 +2332,9 @@ fn propose_struct_field_sig_actions(input: &InputState) -> Vec<Action> {
     });
 
     for slot in slots {
+        if accessor_contracts.contains(&(slot.class.clone(), slot.field.clone())) {
+            continue;
+        }
         if slot.has_unknown_static && slot.runtime_calls == 0 {
             continue;
         }
@@ -2567,7 +2701,7 @@ mod tests {
                 &vec!["AST::Identifier".to_string(), "AST::Literal".to_string()],
                 &[]
             ),
-            Some("AST::Node".to_string())
+            Some("T.any(AST::Identifier, AST::Literal)".to_string())
         );
     }
 
@@ -2586,6 +2720,36 @@ mod tests {
                     "Symbol".to_string(),
                     "Float".to_string(),
                 ],
+                &[]
+            ),
+            None
+        );
+        assert_eq!(
+            super::runtime_field_candidate(&vec!["MIR::CallableContract".to_string()], &[]),
+            Some("MIR::CallableContract".to_string())
+        );
+        assert_eq!(
+            super::runtime_field_candidate(
+                &vec!["AST::Identifier".to_string(), "AST::Literal".to_string()],
+                &[]
+            ),
+            Some("T.any(AST::Identifier, AST::Literal)".to_string())
+        );
+        assert_eq!(
+            super::runtime_field_candidate(
+                &vec![
+                    "AST::Identifier".to_string(),
+                    "AST::Literal".to_string(),
+                    "AST::FuncCall".to_string(),
+                    "AST::MethodCall".to_string(),
+                ],
+                &[]
+            ),
+            None
+        );
+        assert_eq!(
+            super::runtime_field_candidate(
+                &vec!["MIR::Ident".to_string(), "NilClass".to_string()],
                 &[]
             ),
             None
@@ -2711,6 +2875,77 @@ mod tests {
                 && action.data.get("raw_field").and_then(|v| v.as_str()) == Some("@shape")
                 && action.data.get("type").and_then(|v| v.as_str()) == Some("TypeShape")
         }));
+    }
+
+    #[test]
+    fn test_struct_field_actions_respect_direct_and_inherited_accessor_contracts() {
+        use serde_json::json;
+
+        let input: crate::schemas::InputState = serde_json::from_value(json!({
+            "methods": [],
+            "tlets": [],
+            "unused_return_methods_by_location": {},
+            "facts": {
+                "struct_field_runtime": [
+                    { "class": "Direct", "field": "value", "classes": ["String"], "calls": 10 },
+                    { "class": "Inherited", "field": "value", "classes": ["String"], "calls": 10 },
+                    { "class": "NeedsType", "field": "value", "classes": ["String"], "calls": 10 }
+                ],
+                "type_definitions": [
+                    {
+                        "kind": "method_signature", "owner": "Direct", "name": "value",
+                        "signature": "sig { returns(ValueProtocol) }"
+                    },
+                    {
+                        "kind": "method_signature", "owner": "AccessorModule", "name": "value",
+                        "signature": "sig { returns(T.nilable(ValueProtocol)) }"
+                    },
+                    { "kind": "included_module", "owner": "Intermediate", "name": "AccessorModule" },
+                    { "kind": "included_module", "owner": "Inherited", "name": "Intermediate" }
+                ]
+            }
+        }))
+        .unwrap();
+
+        let actions = super::build_actions(&input);
+        let fields: Vec<&str> = actions
+            .iter()
+            .filter(|action| action.kind == "add_struct_field_sig")
+            .filter_map(|action| action.data.get("class").and_then(|v| v.as_str()))
+            .collect();
+
+        assert_eq!(fields, vec!["NeedsType"]);
+    }
+
+    #[test]
+    fn test_struct_field_actions_respect_effective_rbi_contracts() {
+        use serde_json::json;
+
+        let input: crate::schemas::InputState = serde_json::from_value(json!({
+            "methods": [],
+            "tlets": [],
+            "unused_return_methods_by_location": {},
+            "facts": {
+                "struct_field_runtime": [
+                    { "class": "AlreadyTyped", "field": "value", "classes": ["String"], "calls": 10 },
+                    { "class": "NeedsType", "field": "value", "classes": ["String"], "calls": 10 }
+                ],
+                "effective_struct_field_types": [
+                    { "owner": "AlreadyTyped", "field": "value", "type": "String" },
+                    { "owner": "NeedsType", "field": "value", "type": "T.untyped" }
+                ]
+            }
+        }))
+        .unwrap();
+
+        let actions = super::build_actions(&input);
+        let fields: Vec<&str> = actions
+            .iter()
+            .filter(|action| action.kind == "add_struct_field_sig")
+            .filter_map(|action| action.data.get("class").and_then(|v| v.as_str()))
+            .collect();
+
+        assert_eq!(fields, vec!["NeedsType"]);
     }
 
     #[test]

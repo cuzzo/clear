@@ -1898,7 +1898,7 @@ module FixableHelper
   def auto_param_slot_label(slot)
     T.bind(self, SemanticAnnotator) rescue nil
     fn = T.cast(slot.decl_node, AST::FunctionDef)
-    param = fn.params[T.must(slot.index)]
+    param = T.must(fn.params[T.must(slot.index)])
     "parameter '#{param.name}' of `#{slot.fn_name}`"
   end
 
@@ -1946,7 +1946,7 @@ module FixableHelper
     if slot.kind == :param || slot.kind == :return
       union_name = if slot.kind == :param
         fn = T.cast(slot.decl_node, AST::FunctionDef)
-        fn.params[T.must(slot.index)][:name].to_s.capitalize
+        T.must(fn.params[T.must(slot.index)]).name.capitalize
       else
         "Result"
       end

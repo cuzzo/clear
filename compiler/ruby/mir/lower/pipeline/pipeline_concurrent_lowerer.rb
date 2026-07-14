@@ -392,8 +392,8 @@ class PipelineConcurrentLowerer < T::Struct
     idx_var = "__sh#{id}_i"
     key_var = "__sh#{id}_key"
 
-    start_mir = self.visit_mir.call(T.cast(range_node.start, AST::Node))
-    finish_mir = self.visit_mir.call(T.cast(range_node.finish, AST::Node))
+    start_mir = self.visit_mir.call(range_node.start)
+    finish_mir = self.visit_mir.call(range_node.finish)
     return lower_shard_concurrent_each_zig(ctx, each_op, conc_op, range_node, id, idx_var, key_var, start_mir, finish_mir) unless self.bc_target.call
 
     end_mir = finish_mir
@@ -1022,7 +1022,7 @@ class PipelineConcurrentLowerer < T::Struct
   def concurrent_list_item_type(lhs)
     if lhs.is_a?(AST::RangeLit)
       elem = lhs.full_type!.tense_type&.element_type&.resolved ||
-        T.cast(lhs.start, AST::Node).full_type!
+        lhs.start.full_type!
       return Type.new(elem)
     end
 
@@ -1270,7 +1270,7 @@ class PipelineConcurrentLowerer < T::Struct
 
   sig { params(conc_op: AST::ConcurrentOp, key: String).returns(T.nilable(AST::Node)) }
   def concurrent_option(conc_op, key)
-    T.cast(conc_op.options[key], T.nilable(AST::Node))
+    conc_op.options[key]
   end
 
   sig { params(var: String, rt: String).returns(T::Array[MIR::Emittable]) }

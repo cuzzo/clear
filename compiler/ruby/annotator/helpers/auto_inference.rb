@@ -662,7 +662,7 @@ class AutoUnifier
     case slot.kind
     when :param
       fn = T.cast(slot.decl_node, AST::FunctionDef)
-      fn.params[T.must(slot.index)][:type] = resolved_type
+      T.must(fn.params[T.must(slot.index)]).type = resolved_type
     when :return
       T.cast(slot.decl_node, AST::FunctionDef).return_type = resolved_type
     when :local

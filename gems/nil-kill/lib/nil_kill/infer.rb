@@ -20,6 +20,9 @@ module NilKill
 
       input_data = @store.to_h
       input_data["unused_return_methods_by_location"] = unused_return_methods_by_location.to_h { |k, v| [k.to_json, v] }
+      input_data["facts"]["effective_struct_field_types"] = SlotCoverage.new([])
+        .resolved_struct_field_types(input_data)
+        .map { |(owner, field), type| { "owner" => owner, "field" => field, "type" => type } }
       delegate_to_rust(input_data)
 
       evidence = @store.to_h

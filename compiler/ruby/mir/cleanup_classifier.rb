@@ -41,7 +41,7 @@ module CleanupClassifier
   FieldBearingSchema = T.type_alias { T.any(Schemas::StructSchema, Schemas::ResourceSchema, Schemas::InlineStructVariant) }
   CleanupNode = T.type_alias { T.nilable(AST::Node) }
   CaptureBindingBlock = T.type_alias do
-    T.proc.params(name: String, expr: AST::Node, anchor: AST::Node).void
+    T.proc.params(name: String, expr: AST::Node, anchor: T.any(AST::Node, AST::Binding)).void
   end
   CleanupExtraValue = T.type_alias do
     T.nilable(T.any(String, Symbol, T::Boolean, Type, Schemas::ResourceClosePlan))
@@ -611,9 +611,10 @@ module CleanupClassifier
 
       node.cases.each do |c|
         next unless c.binding
-        variant_name = case c.value
-                       when AST::GetField then c.value.field
-                       when AST::MethodCall then c.value.name
+        case_value = c.value
+        variant_name = case case_value
+                       when AST::GetField then case_value.field
+                       when AST::MethodCall then case_value.name
                        else nil
                        end
         next unless variant_name
@@ -627,7 +628,7 @@ module CleanupClassifier
 
         src_entry = bindings[expr.name.to_s]
         e.set_alloc!(src_entry.alloc) if e && src_entry
-        bindings[c.binding] = e if e
+        bindings[T.must(c.binding)] = e if e
       end
     end
   end
@@ -777,7 +778,7 @@ module CleanupClassifier
       when AST::WhileBindLoop
         yield node.binding_name.to_s, node.condition, node
       when AST::IfBind
-        node.bindings.each { |b| yield b.name.to_s, b.expr, b }
+        node.bindings.each { |binding| yield binding.name.to_s, binding.expr, binding }
       end
     end
   end
@@ -1308,8 +1309,10 @@ module CleanupClassifier
 
   sig { params(schema: T.nilable(FieldBearingSchema), schema_lookup: T.nilable(Proc)).returns(T::Boolean) }
   private_class_method def self.elem_has_cleanup_fields?(schema, schema_lookup)
-    return false unless Schemas.inline_struct?(T.unsafe(schema)) || Schemas.field_bearing?(T.cast(schema, Schemas::SchemaValue))
-    concrete_schema = T.must(schema)
+    return false unless schema.is_a?(Schemas::InlineStructVariant) ||
+      schema.is_a?(Schemas::StructSchema) ||
+      schema.is_a?(Schemas::ResourceSchema)
+    concrete_schema = schema
     borrowed = borrowed_field_names(concrete_schema)
     concrete_schema.fields.any? do |name, v|
       next false if borrowed.include?(name.to_s)

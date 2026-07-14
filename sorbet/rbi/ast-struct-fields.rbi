@@ -64,6 +64,8 @@ class AST::StructField
 end
 
 class AST::BinaryOp
+  sig { returns(Symbol) }
+  def op; end
   sig { returns(TrueClass) }
   def paren_bind; end
   sig { returns(Lexer::Token) }
@@ -71,6 +73,8 @@ class AST::BinaryOp
 end
 
 class AST::FunctionDef
+  sig { returns(T::Array[AST::Param]) }
+  def params; end
   sig { returns(T::Array[String]) }
   def type_params; end
   sig { returns(Type) }
@@ -103,6 +107,11 @@ class AST::FunctionDef
   def is_method; end
   sig { returns(Lexer::Token) }
   def token; end
+end
+
+class AST::LambdaLit
+  sig { returns(T::Array[AST::Param]) }
+  def params; end
 end
 
 class AST::BindExpr
@@ -235,6 +244,8 @@ class MIR::Set
   def target; end
   sig { returns(FalseClass) }
   def needs_field_cleanup; end
+  sig { returns(MIR::Node) }
+  def value; end
 end
 
 class MIR::AllocMark
@@ -244,6 +255,8 @@ class MIR::AllocMark
   def alloc; end
   sig { returns(String) }
   def name; end
+  sig { returns(Type) }
+  def type_info; end
 end
 
 class MIR::OwnedDestroy
@@ -258,8 +271,20 @@ end
 class AST::StructLit
   sig { returns(Symbol) }
   def storage; end
+  sig { returns(T.any(String, Type)) }
+  def name; end
   sig { returns(Lexer::Token) }
   def token; end
+end
+
+class MIR::Ident
+  sig { returns(String) }
+  def name; end
+end
+
+class MIR::ForStmt
+  sig { returns(String) }
+  def capture; end
 end
 
 class MIR::Call
@@ -376,6 +401,8 @@ class MIR::Param
 end
 
 class FsmOps::CallExpr
+  sig { returns(FsmOps::FunctionPath) }
+  def fn; end
   sig { returns(T::Array[T.any(FsmOps::AddrOf, FsmOps::ArgRef, FsmOps::StateField)]) }
   def args; end
   sig { returns(T::Boolean) }
@@ -563,8 +590,136 @@ class FsmOps::SubField
 end
 
 class FsmOps::StmtCall
+  sig { returns(FsmOps::FunctionPath) }
+  def fn; end
   sig { returns(T::Boolean) }
   def is_try; end
+end
+
+class MIR::FsmCtxStruct
+  sig { returns(T::Array[String]) }
+  def promoted_field_decls; end
+end
+
+class MIR::FsmStateArm
+  sig { returns(T.nilable(MIR::FsmTailCondSkip)) }
+  def pre_body_skip; end
+  sig { returns(T::Array[MIR::Emittable]) }
+  def pre_body_stmts; end
+  sig { returns(T::Array[MIR::Emittable]) }
+  def err_cleanups; end
+end
+
+class MIR::CatchWrapper
+  sig { returns(T::Array[MIR::CatchReassign]) }
+  def error_reassigns; end
+end
+
+class MIR::SortedLockAcquire
+  sig { returns(T.nilable(MIR::FailureAction)) }
+  def action; end
+end
+
+class AST::ExternStructDecl
+  sig { returns(T.nilable(String)) }
+  def from_module; end
+end
+
+class AST::OrElseExit
+  sig { returns(T.nilable(Symbol)) }
+  def kind; end
+  sig { returns(T.nilable(String)) }
+  def error_name; end
+end
+
+class AST::Raise
+  sig { returns(T.nilable(String)) }
+  def error_name; end
+end
+
+class AST::Require
+  sig { returns(Lexer::Token) }
+  def token; end
+  sig { returns(String) }
+  def path; end
+end
+
+class AST::Param
+  sig { returns(T.nilable(AST::Locatable)) }
+  def default; end
+end
+
+class AST::Literal
+  sig { returns(Lexer::Token) }
+  def token; end
+end
+
+class AST::UnionVariantLit
+  sig { returns(T::Hash[String, AST::Node]) }
+  def fields; end
+end
+
+class LSP::AnalysisResult
+  sig { returns(T.nilable(LSP::Analyzer::SyntheticFinding)) }
+  def fatal_error; end
+end
+
+class LSP::Analyzer::SyntheticFinding
+  sig { returns(T::Array[Fix]) }
+  def fixes; end
+end
+
+class AST::ExternFnDecl
+  sig { returns(FunctionSignature::ExternEffects) }
+  def effects; end
+end
+
+class AST::BatchWindowOp
+  sig { returns(T::Hash[String, AST::Node]) }
+  def options; end
+end
+
+class AST::ConcurrentOp
+  sig { returns(T::Hash[String, AST::Node]) }
+  def options; end
+end
+
+class MIR::SnapshotTransaction
+  sig { returns(T.nilable(MIR::FailureAction)) }
+  def conflict_action; end
+  sig { returns(T.nilable(Integer)) }
+  def retries; end
+end
+
+class MIR::SnapshotMultiTxn
+  sig { returns(Symbol) }
+  def alloc; end
+  sig { returns(T.nilable(MIR::FailureAction)) }
+  def conflict_action; end
+  sig { returns(T.nilable(Integer)) }
+  def retries; end
+  sig { returns(T.nilable(String)) }
+  def with_label; end
+end
+
+class MIR::MethodCall
+  sig { returns(T.nilable(MIR::CallableContract)) }
+  def callable_contract; end
+end
+
+class MIR::TailCall
+  sig { returns(T.nilable(MIR::CallableContract)) }
+  def callable_contract; end
+end
+
+class MIR::IfChain
+  sig { returns(T.nilable(T::Array[MIR::Emittable])) }
+  def default_body; end
+end
+
+class MIR::UnionMatchStmt
+  sig { returns(T.nilable(T::Array[MIR::Emittable])) }
+  def default_body; end
 end
 
 class FsmTransform::Segments::Segment
@@ -690,6 +845,8 @@ class FsmOps::IoSubmit
 end
 
 class FsmOps::ErrDeferCall
+  sig { returns(FsmOps::FunctionPath) }
+  def fn; end
   sig { returns(T::Array[FsmOps::StateField]) }
   def args; end
 end
@@ -699,9 +856,230 @@ class FsmOps::IfFieldSubLtZeroReturnCall
   def field; end
   sig { returns(T::Array[FsmOps::SubField]) }
   def return_args; end
+  sig { returns(FsmOps::FunctionPath) }
+  def return_fn; end
   sig { returns(String) }
   def sub; end
 end
+
+class MIR::ReassignPlan
+  sig { returns(Symbol) }
+  def alloc; end
+  sig { returns(String) }
+  def zig_type; end
+end
+
+class Capabilities::Conflict
+  sig { returns(T::Array[Symbol]) }
+  def set_a; end
+  sig { returns(T::Array[Symbol]) }
+  def set_b; end
+end
+
+class AST::MatchStatement
+  sig { returns(T::Array[AST::MatchCase]) }
+  def cases; end
+end
+
+class AST::IfBind
+  sig { returns(T::Array[AST::Binding]) }
+  def bindings; end
+end
+
+class AST::StructPattern
+  sig { returns(T::Array[AST::PatternField]) }
+  def fields; end
+end
+
+class AST::DoBlock
+  sig { returns(T::Array[AST::DoBranch]) }
+  def branches; end
+end
+
+class AST::ThenChain
+  sig { returns(T::Array[AST::ThenStep]) }
+  def steps; end
+end
+
+class AST::Slice
+  sig { returns(T.any(AST::GetIndex, AST::Identifier)) }
+  def target; end
+end
+
+class AST::ExternFnDecl
+  sig { returns(String) }
+  def from_module; end
+end
+
+class AST::WhenBlock
+  sig { returns(T::Array[T.any(AST::BindExpr, AST::PassStmt, AST::StubDecl)]) }
+  def setup; end
+end
+
+class MIR::ShardedMapPut
+  sig { returns(MIR::InlineAllocMetadata) }
+  def resolved_allocs; end
+end
+
+class MIR::FsmB1Body
+  sig { returns(MIR::FsmB1CtxStruct) }
+  def ctx_struct; end
+end
+
+class LSP::AnalysisResult
+  sig { returns(T::Array[T.any(FixableFinding, LSP::Analyzer::SyntheticFinding)]) }
+  def findings; end
+end
+
+class MIR::FnDef
+  sig { returns(T::Array[String]) }
+  def comptime_params; end
+end
+
+class MIR::StructDef
+  sig { returns(T::Array[MIR::FnDef]) }
+  def methods; end
+end
+
+class MIR::Let
+  sig { returns(MIR::Emittable) }
+  def init; end
+  sig { returns(T.nilable(T::Boolean)) }
+  def alias_safe; end
+end
+
+class MIR::IfStmt
+  sig { returns(T::Array[MIR::Emittable]) }
+  def then_body; end
+  sig { returns(T.nilable(T::Array[MIR::Emittable])) }
+  def else_body; end
+end
+
+class MIR::IfBindStmt
+  sig { returns(T::Array[MIR::Emittable]) }
+  def then_body; end
+  sig { returns(T.nilable(T::Array[MIR::Emittable])) }
+  def else_body; end
+end
+
+class MIR::ForStmt
+  sig { returns(MIR::Emittable) }
+  def iter; end
+end
+
+class MIR::SwitchStmt
+  sig { returns(T.nilable(T::Array[MIR::Emittable])) }
+  def default_body; end
+end
+
+class MIR::ReturnStmt
+  sig { returns(T.nilable(MIR::Emittable)) }
+  def value; end
+end
+
+class MIR::BreakStmt
+  sig { returns(T.nilable(MIR::Emittable)) }
+  def value; end
+end
+
+class MIR::BgBlock
+  sig { returns(T::Hash[String, Type]) }
+  def captures; end
+  sig { returns(T.nilable(MIR::FsmStructure)) }
+  def fsm_structure; end
+end
+
+class MIR::StreamSpawn
+  sig { returns(T::Hash[String, Type]) }
+  def captures; end
+end
+
+class MIR::Call
+  sig { returns(T::Array[MIR::Emittable]) }
+  def args; end
+  sig { returns(T.nilable(MIR::CallableContract)) }
+  def callable_contract; end
+end
+
+class MIR::RuntimeCall
+  sig { returns(T::Array[MIR::Emittable]) }
+  def args; end
+end
+
+class MIR::ArrayInit
+  sig { returns(T::Array[MIR::Emittable]) }
+  def items; end
+end
+
+class MIR::TryCatch
+  sig { returns(MIR::Emittable) }
+  def catch_body; end
+end
+
+class MIR::LambdaExpr
+  sig { returns(T.nilable(T::Array[String])) }
+  def captures; end
+end
+
+class CompilerFrontend::Result
+  sig { returns(T::Hash[String, AST::FunctionDef]) }
+  def fn_nodes; end
+  sig { returns(T::Hash[String, FunctionSignature]) }
+  def fn_sigs; end
+  sig { returns(T::Hash[Symbol, Schemas::StructSchema]) }
+  def struct_schemas; end
+  sig { returns(T::Hash[Symbol, MIRLoweringSchemas::EnumVariants]) }
+  def enum_schemas; end
+  sig { returns(T::Hash[Symbol, Schemas::UnionSchema]) }
+  def union_schemas; end
+  sig { returns(MIRLoweringInput::MovedGuardInfo) }
+  def moved_guard_info; end
+end
+
+class ModuleImporter::CompiledModule
+  sig { returns(AST::Program) }
+  def ast; end
+  sig { returns(T::Hash[Symbol, Schemas::StructSchema]) }
+  def struct_schemas; end
+  sig { returns(T::Hash[Symbol, Schemas::UnionSchema]) }
+  def union_schemas; end
+  sig { returns(T::Hash[Symbol, MIRLoweringSchemas::EnumVariants]) }
+  def enum_schemas; end
+  sig { returns(T::Array[MIR::Emittable]) }
+  def mir_items; end
+  sig { returns(T::Array[MIR::Emittable]) }
+  def type_items; end
+end
+
+class FsmTransform::Liveness::Result
+  sig { returns(T::Hash[String, FsmTransform::Liveness::CrossSegmentVarFact]) }
+  def cross_segment_vars; end
+end
+
+class FsmTransform::Segments::IoSuspend
+  sig { returns(T.any(AST::FuncCall, AST::MethodCall)) }
+  def call_node; end
+  sig { returns(FunctionSignature) }
+  def stdlib_def; end
+end
+
+class FsmTransform::Segments::LockSuspend
+  sig { returns(AST::WithBlock) }
+  def with_node; end
+  sig { returns(FsmTransform::Segments::LockCap) }
+  def cap; end
+end
+
+class FsmOps::AssignField
+  sig { returns(FsmOps::Expr) }
+  def value; end
+end
+
+class FsmOps::StmtCall
+  sig { returns(T::Array[FsmOps::Expr]) }
+  def args; end
+end
+
 
 class MIR::OwnedStore
   sig { returns(Symbol) }
@@ -724,6 +1102,8 @@ end
 class CompilerFrontend::Result
   sig { returns(SemanticAnnotator) }
   def annotator; end
+  sig { returns(AST::Program) }
+  def ast; end
 end
 
 class AST::MatchStatement
@@ -772,6 +1152,10 @@ class AST::UnaryOp
 end
 
 class AST::RangeLit
+  sig { returns(AST::Node) }
+  def start; end
+  sig { returns(AST::Node) }
+  def finish; end
   sig { returns(T::Boolean) }
   def inclusive; end
   sig { returns(Lexer::Token) }
@@ -791,6 +1175,8 @@ end
 class MIR::UnionMatchStmt
   sig { returns(MIR::Node) }
   def subject; end
+  sig { returns(T::Array[MIR::UnionMatchArm]) }
+  def arms; end
 end
 
 class AST::Binding
@@ -830,6 +1216,8 @@ class MIR::StructDef
   def name; end
   sig { returns(Symbol) }
   def visibility; end
+  sig { returns(T::Array[MIR::FieldDef]) }
+  def fields; end
 end
 
 class MIR::DeferStmt
@@ -1169,6 +1557,8 @@ class MIR::FsmGenericBody
   def blk_label; end
   sig { returns(MIR::Node) }
   def spawn_setup; end
+  sig { returns(MIR::FsmGenericCtxStruct) }
+  def ctx_struct; end
 end
 
 class MIR::FsmGenericCtxStruct
@@ -1261,6 +1651,8 @@ class AST::WhenBlock
   def description; end
   sig { returns(Lexer::Token) }
   def token; end
+  sig { returns(T::Array[AST::TestThat]) }
+  def tests; end
 end
 
 class MIR::CapabilityLockTarget
@@ -1310,7 +1702,7 @@ class MIR::ShardedMapGet
   def key_type; end
   sig { returns(Symbol) }
   def map_kind; end
-  sig { returns(MIR::Node) }
+  sig { returns(MIR::InlineAllocMetadata) }
   def resolved_allocs; end
   sig { returns(MIR::Node) }
   def shard_idx; end
@@ -1318,6 +1710,8 @@ class MIR::ShardedMapGet
   def shard_key; end
   sig { returns(FunctionSignature) }
   def stdlib_def; end
+  sig { returns(IntrinsicTemplateKind) }
+  def template_kind; end
   sig { returns(Type) }
   def value_type; end
 end
@@ -1479,6 +1873,8 @@ end
 
 class AST::ReduceOp
   sig { returns(AST::Node) }
+  def initial_value; end
+  sig { returns(AST::Node) }
   def expression; end
   sig { returns(Lexer::Token) }
   def token; end
@@ -1505,6 +1901,8 @@ class MIR::IterRange
 end
 
 class AST::LimitOp
+  sig { returns(AST::Node) }
+  def count; end
   sig { returns(Lexer::Token) }
   def token; end
 end
@@ -1525,6 +1923,8 @@ class AST::TestBlock
   def setup; end
   sig { returns(Lexer::Token) }
   def token; end
+  sig { returns(T::Array[AST::WhenBlock]) }
+  def whens; end
 end
 
 class MIR::TypeOf
@@ -1631,6 +2031,8 @@ class MIR::UnionTypeDef
   def name; end
   sig { returns(Symbol) }
   def visibility; end
+  sig { returns(T::Array[T.any(Hash, MIR::UnionTypeVariant)]) }
+  def variants; end
 end
 
 class AST::FindOp
@@ -1650,6 +2052,8 @@ end
 class MIR::SwitchStmt
   sig { returns(MIR::Node) }
   def subject; end
+  sig { returns(T::Array[MIR::SwitchArm]) }
+  def arms; end
 end
 
 class MIR::TestDef
@@ -1811,6 +2215,8 @@ class AST::StubDecl
 end
 
 class AST::SkipOp
+  sig { returns(AST::Node) }
+  def count; end
   sig { returns(Lexer::Token) }
   def token; end
 end
@@ -1837,6 +2243,46 @@ class TestLowering::TestThatEnv
   def when_desc; end
   sig { returns(T::Array[MIR::Node]) }
   def when_setup_mir; end
+  sig { returns(AST::WhenBlock) }
+  def when_block; end
+end
+
+class FsmTransform::Segments::Done
+  sig { returns(NilClass) }
+  def _; end
+end
+
+class MIR::FsmGenericCtxStruct
+  sig { returns(MIR::FsmDispatch) }
+  def dispatch; end
+  sig { returns(T::Array[MIR::FsmDestroyAction]) }
+  def destroy_actions; end
+end
+
+class MIR::FsmSpawnSetup
+  sig { returns(MIR::ProfileTaskSite) }
+  def profile_site; end
+end
+
+class MIR::FsmStateArm
+  sig do
+    returns(T.any(
+      MIR::FsmTailDone,
+      MIR::FsmTailJump,
+      MIR::FsmTailYield,
+      MIR::FsmTailRegisterYield,
+      MIR::FsmTailCondJump,
+      MIR::FsmTailLockTry,
+      MIR::FsmTailWokenCheck,
+      MIR::FsmTailRetryOrError,
+    ))
+  end
+  def tail; end
+end
+
+class MIR::InlineBc
+  sig { returns(FunctionSignature) }
+  def stdlib_def; end
 end
 
 class AST::CloneNode
@@ -2012,6 +2458,8 @@ end
 class AST::WindowOp
   sig { returns(AST::Node) }
   def expression; end
+  sig { returns(AST::Node) }
+  def size; end
   sig { returns(Lexer::Token) }
   def token; end
 end
@@ -2032,6 +2480,8 @@ class MIR::CatchWrapper
   def rt_name; end
   sig { returns(Type) }
   def snapshot_type; end
+  sig { returns(T::Array[MIR::CatchClause]) }
+  def clauses; end
 end
 
 class MIR::CapabilityLockAddress
@@ -2170,6 +2620,8 @@ class MIR::FallibleLockBinding
   def rt_name; end
   sig { returns(String) }
   def source_line; end
+  sig { returns(MIR::FailureAction) }
+  def action; end
 end
 
 class AST::BenchmarkStmt
@@ -2198,6 +2650,8 @@ end
 class AST::SyncPolicyDecl
   sig { returns(Lexer::Token) }
   def token; end
+  sig { returns(T::Array[AST::ErrorClause]) }
+  def handlers; end
 end
 
 class MIR::PolymorphicMutateFlow
@@ -2241,6 +2695,8 @@ class MIR::SortedLockAcquire
   def rt_name; end
   sig { returns(String) }
   def source_line; end
+  sig { returns(T::Array[MIR::SortedLockAcquireEntry]) }
+  def entries; end
 end
 
 class MIR::WeakUpgrade
@@ -2287,6 +2743,10 @@ class AST::ContinueNode
 end
 
 class AST::JoinOp
+  sig { returns(AST::Node) }
+  def key_expr; end
+  sig { returns(AST::Node) }
+  def right_source; end
   sig { returns(Lexer::Token) }
   def token; end
 end
@@ -2367,6 +2827,8 @@ class MIR::FsmCtxStruct
   def step1; end
   sig { returns(String) }
   def type_name; end
+  sig { returns(MIR::FsmDispatch) }
+  def resume_fn; end
 end
 
 class MIR::FsmIoBody
@@ -2374,6 +2836,8 @@ class MIR::FsmIoBody
   def blk_label; end
   sig { returns(MIR::Node) }
   def spawn_setup; end
+  sig { returns(MIR::FsmCtxStruct) }
+  def ctx_struct; end
 end
 
 class AST::DefaultArrayLit
@@ -2413,6 +2877,8 @@ class MIR::WithMatchDispatch
   def cell; end
   sig { returns(String) }
   def rt_name; end
+  sig { returns(T::Array[MIR::WithMatchArm]) }
+  def arms; end
 end
 
 class MIR::ConstCast
@@ -2471,6 +2937,8 @@ class MIR::FreezeExpr
   def inner; end
   sig { returns(String) }
   def zig_base; end
+  sig { returns(MIR::AllocatorRef) }
+  def alloc_ref; end
 end
 
 class MIR::FsmB1Body
@@ -2511,6 +2979,8 @@ class MIR::FsmB1CtxStruct
   def promise_zig; end
   sig { returns(String) }
   def type_name; end
+  sig { returns(MIR::FsmStep) }
+  def run_body; end
 end
 
 class MIR::PolymorphicMutate
@@ -2713,6 +3183,43 @@ class AST::CatchBlock
   def token; end
 end
 
+class MIR::Cleanup
+  sig { returns(CleanupEntry) }
+  def cleanup_entry; end
+end
+
+class MIR::ContinueStmt
+  sig { returns(NilClass) }
+  def unused; end
+end
+
+class MIR::TestPreamble
+  sig { returns(NilClass) }
+  def unused; end
+end
+
+class MIR::FsmTailDone
+  sig { returns(NilClass) }
+  def _; end
+end
+
+class MIR::IfChain
+  sig { returns(T::Array[MIR::IfChainBranch]) }
+  def branches; end
+end
+
+class MIR::WithMatchDispatch
+  sig { returns(T::Boolean) }
+  def snapshot_mode; end
+end
+
+class TestLowering::TestThatEnv
+  sig { returns(T::Hash[String, AST::LetBinding]) }
+  def let_ast_map; end
+end
+
+
+
 class AST::Copy
   sig { returns(Lexer::Token) }
   def token; end
@@ -2765,7 +3272,7 @@ end
 class OpenStruct
   sig { returns(Symbol) }
   def alloc; end
-  sig { returns(MIR::Node) }
+  sig { returns(MIR::AllocMark) }
   def mark; end
 end
 
@@ -2791,4 +3298,42 @@ class MIR::TryOrPanic
   def expr; end
   sig { returns(String) }
   def panic_msg; end
+end
+class MIR::RuntimeCall
+  sig { returns(MIR::RuntimeCallSpec) }
+  def spec; end
+end
+
+class MIR::LambdaExpr
+  sig { returns(MIR::FnDef) }
+  def fn_def; end
+end
+
+# Parser-owned collection shapes. Keep these structural contracts beside the
+# generated field RBI until the Struct declarations themselves become typed.
+class AST::Program
+  sig { returns(AST::RawBody) }
+  def statements; end
+end
+
+class AST::ListLit
+  sig { returns(AST::RawBody) }
+  def items; end
+end
+
+class AST::FuncCall
+  sig { returns(AST::RawBody) }
+  def args; end
+end
+
+class AST::MethodCall
+  sig { returns(AST::RawBody) }
+  def args; end
+end
+
+class AST::CatchBlock
+  sig { returns(T::Array[AST::CatchClause]) }
+  def catch_clauses; end
+  sig { returns(T.nilable(AST::RawBody)) }
+  def default_body; end
 end

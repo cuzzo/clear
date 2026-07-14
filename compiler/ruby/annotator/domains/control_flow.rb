@@ -602,13 +602,14 @@ module Annotator
               og_declare(f.name, nil, field_type)
             end
           else
-            visit(f.expr)
+            field_expr = T.must(f.expr)
+            visit(field_expr)
 
             if schema
               field_def = schema.fields[f.name]
               ft = field_def&.type
               field_type = ft.is_a?(Type) ? ft.resolved : ft
-              val_type   = f.expr.resolved_type
+              val_type   = field_expr.resolved_type
               is_numeric_promo = (val_type == :Int64 && (field_type == :Float64 || field_type == :Float64))
               unless val_type == field_type || val_type == :Any || field_type == :Any || is_numeric_promo
                 error!(match_node, :MATCH_FIELD_TYPE_MISMATCH, field: f.name, declared: field_type, got: val_type)

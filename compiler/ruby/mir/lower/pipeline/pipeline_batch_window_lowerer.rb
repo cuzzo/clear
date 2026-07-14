@@ -134,7 +134,7 @@ class PipelineBatchWindowLowerer < T::Struct
 
   sig { params(bw_node: AST::BatchWindowOp).returns(MIR::Node) }
   def batch_size_mir(bw_node)
-    size = T.cast(bw_node.options["size"], T.nilable(AST::Node))
+    size = bw_node.options["size"]
     return MIR::Lit.new("0") unless size
 
     self.visit_mir.call(size)

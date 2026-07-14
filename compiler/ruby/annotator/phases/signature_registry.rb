@@ -65,7 +65,7 @@ module Annotator
       end
       private_class_method :extern_param
 
-      sig { params(node: AST::ExternFnDecl).returns(T::Hash[Symbol, Symbol]) }
+      sig { params(node: AST::ExternFnDecl).returns(FunctionSignature::ExternEffects) }
       def self.extern_effects(node)
         node.effects || {}
       end
