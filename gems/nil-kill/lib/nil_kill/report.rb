@@ -2222,7 +2222,9 @@ module NilKill
     # whenever the body actually executes).
     def collect_ran?(idx, rel_path, lo, hi)
       return false unless idx
-      ls = idx[rel_path.to_s]
+      path = rel_path.to_s
+      path = NilKill.rel(File.expand_path(path, ROOT)) if Pathname.new(path).absolute?
+      ls = idx[path]
       return false unless ls
       lo = lo.to_i
       hi = (hi || lo).to_i
@@ -2257,6 +2259,7 @@ module NilKill
     # inherently untraceable arg. Mirrors the exact NoEvidence gate of
     # the cause classifiers so the counts reconcile.
     def untyped_evidence_gaps(evidence)
+      enforce_trace_plan_coverage!(evidence)
       ml = Array(evidence["methods"]).each_with_object({}) do |m, h|
         s = m["source"]
         h[[s["path"], s["line"]]] = m if s
@@ -2330,6 +2333,58 @@ module NilKill
       end
       enforce_no_hard_gaps!(gaps)
       gaps
+    end
+
+    # Validate instrumentation before inference can hide a missing runtime
+    # record by resolving the sampled slot from static evidence. The trace
+    # plan samples a method when at least one traceable parameter or its
+    # return remains weak. If that method's body ran during this collect, a
+    # source-wrapped record is mandatory regardless of the actions inferred
+    # later. Keeping this check at the method/coverage boundary makes the
+    # negative control non-vacuous and uses the same facts as TracePlan rather
+    # than rediscovering source structure with another walker.
+    def enforce_trace_plan_coverage!(evidence)
+      coverage = collect_coverage_index(evidence)
+      return unless coverage
+
+      recorded = Array(evidence["methods"]).each_with_object(Set.new) do |method, out|
+        source = method["source"]
+        next unless source && method["calls"].to_i.positive?
+
+        out << [source["path"].to_s, source["line"].to_i]
+      end
+      missing = (Array(evidence.dig("facts", "existing_sigs")) +
+                 Array(evidence.dig("facts", "unsigned_methods"))).filter_map do |method|
+        next unless trace_plan_samples_method?(method)
+        next if recorded.include?([method["path"].to_s, method["line"].to_i])
+        next unless collect_ran?(coverage, method["path"], method["line"], method["end_line"])
+
+        owner = method["class"].to_s
+        name = method["method"].to_s
+        {
+          "cat" => "Methods",
+          "text" => "#{method["path"]}:#{method["line"]} `#{owner}##{name}`",
+        }
+      end
+      return if missing.empty?
+
+      sample = missing.first(20).map { |gap| gap["text"] }
+      more = missing.size > 20 ? " (+#{missing.size - 20} more)" : ""
+      raise "nil-kill: #{missing.size} collect_ran_untraced -- " \
+            "#{EVIDENCE_GAP_HARD["collect_ran_untraced"]}. This MUST be zero " \
+            "(see spec/zero_evidence_gap_guarantee_spec.rb). Offenders: #{sample.join("; ")}#{more}"
+    end
+
+    def trace_plan_samples_method?(method)
+      signature = method["sig"].to_s
+      untraceable = Array(method["untraceable_params"]).map(&:to_s).to_set
+      samples_param = extract_param_entries(signature).any? do |name, type|
+        !untraceable.include?(name.to_s) && !NilKill.strong_trace_type?(type)
+      end
+      return true if samples_param
+
+      return_type = extract_return_type(signature)
+      !signature.match?(/\bvoid\b/) && !NilKill.strong_trace_type?(return_type)
     end
 
     # Neither collect_ran_untraced nor never_run is a report column:

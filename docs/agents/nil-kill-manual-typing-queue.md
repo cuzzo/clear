@@ -111,28 +111,21 @@ value walkers may intentionally accept a real union of shapes.
 Refresh this order after each batch; earlier annotations can make later roots
 disappear or expose a more valuable transitive path.
 
-## Xit migration queue
+## Xit migration — completed
 
-The normal Nil-Kill suite currently has 521 examples, 0 failures, and 83
-pending: 82 `xit` examples plus one deliberately skipped negative control.
-The 82 xits are grouped as follows:
+The 82 historical `xit` examples were audited against the current public
+FactMine/Rust inference pipeline:
 
-- 63 in `nil_kill_spec.rb`: receiver/return propagation, parameter backflow,
-  generic narrowing, runtime contradiction policy, and hash-record escapes
-- 13 in `source_index_spec.rb`: hash-record and forwarded-shape behavior
-- 5 in `generic_narrowing_spec.rb`
-- 1 in `fallibility_pressure_spec.rb`
+- one fallibility-pressure regression described a still-supported public
+  invariant; it was reactivated and the missing orchestration restored;
+- 81 examples asserted private methods from the deleted Ruby inference engine
+  and were removed rather than reviving a second inference path;
+- their supported behavior is covered through Rust action matrices and Ruby
+  public-pipeline regressions for runtime contradictions, protocol backflow,
+  forwarded returns, generic collection shapes, hash-record reporting, and
+  focus output;
+- the skipped uninstrumented-collect negative control was reactivated. The
+  report now validates every executed trace-plan-selected method before an
+  inferred action can hide its missing runtime record.
 
-Most call private Ruby inference methods removed by the Rust migration. Do not
-make them green by restoring that deleted inference path. For each behavior:
-
-1. state the current public-pipeline invariant;
-2. port it to a FactMine oracle or Nil-Kill end-to-end regression;
-3. fix the Rust/public pipeline if the regression fails;
-4. delete the obsolete private-method spec only after replacement coverage is
-   green.
-
-One additional negative-control gap is already confirmed: an uninstrumented
-collection can currently reach infer/report without proving that expected
-runtime evidence was collected. That invariant should be repaired before the
-bulk historical-xit migration.
+There are no `xit` declarations in the Nil-Kill suite.

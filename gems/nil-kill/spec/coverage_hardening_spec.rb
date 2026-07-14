@@ -201,23 +201,20 @@ RSpec.describe "NilKill coverage hardening" do
         src = File.join(dir, "src", "record.rb")
         FileUtils.mkdir_p(File.dirname(src))
         File.write(src, "record = {name: 'Ada'}\n")
-        action = {
-          "kind" => "promote_hash_record_cluster_to_struct",
-          "data" => {
-            "struct_name" => "UserRecord",
-            "pressure" => { "total" => 3 },
-            "producers" => [{ "path" => src }],
-            "consumers" => [{ "path" => src }],
-            "signatures" => [{ "path" => src }],
-            "blockers" => [],
-          },
+        candidate = {
+          "struct_name" => "UserRecord",
+          "total_pressure" => 3,
+          "producers" => [{ "path" => src }],
+          "consumers" => [{ "path" => src }],
+          "signatures" => [{ "path" => src }],
+          "blockers" => [],
         }
 
-        allow(NilKill::Store).to receive(:read).and_return("actions" => [action])
-        store = instance_double(NilKill::Store, actions: [action])
+        allow(NilKill::Store).to receive(:read).and_return("facts" => {})
+        store = instance_double(NilKill::Store, to_h: { "facts" => {} })
         allow(NilKill::Store).to receive(:new).and_return(store)
         allow(NilKill::StaticAnalysis).to receive(:index_store)
-        allow_any_instance_of(NilKill::Infer).to receive(:propose_hash_record_cluster_actions)
+        allow_any_instance_of(NilKill::Report).to receive(:hash_record_struct_candidates).and_return([candidate])
 
         out, = capture_io { NilKill::FocusHashRecord.new(["UserRecord"]).run }
         expect(out).to include("focused hash-record UserRecord", "pressure: 3")

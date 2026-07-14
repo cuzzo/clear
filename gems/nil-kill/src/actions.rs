@@ -355,7 +355,9 @@ fn shape_union_type(shapes: &[serde_json::Value]) -> Option<String> {
                         all_elems.extend(elems.clone());
                     }
                 }
-                if let Some(elem) = shape_union_type(&all_elems) {
+                if !all_elems.is_empty() {
+                    let elem =
+                        shape_union_type(&all_elems).unwrap_or_else(|| "T.untyped".to_string());
                     return Some(format!("T::Array[{}]", elem));
                 }
             }
@@ -366,7 +368,9 @@ fn shape_union_type(shapes: &[serde_json::Value]) -> Option<String> {
                         all_elems.extend(elems.clone());
                     }
                 }
-                if let Some(elem) = shape_union_type(&all_elems) {
+                if !all_elems.is_empty() {
+                    let elem =
+                        shape_union_type(&all_elems).unwrap_or_else(|| "T.untyped".to_string());
                     return Some(format!("T::Set[{}]", elem));
                 }
             }
@@ -383,6 +387,9 @@ fn shape_union_type(shapes: &[serde_json::Value]) -> Option<String> {
                 }
                 let key = shape_union_type(&all_keys);
                 let mut value = shape_union_type(&all_values);
+                if value.is_none() && !all_values.is_empty() {
+                    value = Some("T.untyped".to_string());
+                }
                 if let Some(ref v) = value {
                     if v.contains("T.any(") {
                         value = Some("T.untyped".to_string());
@@ -672,7 +679,13 @@ pub fn validate_sig(
 
             if let Some(cand) = candidate {
                 let final_cand = preserve_nilable_wrapper(current_type, &cand);
-                if final_cand != *current_type {
+                let observed = m
+                    .params_ok
+                    .get(name)
+                    .or_else(|| m.params_by_name.get(name))
+                    .cloned()
+                    .unwrap_or_default();
+                if final_cand != *current_type && !runtime_contradicts(&observed, &final_cand) {
                     let mut data = HashMap::new();
                     data.insert(
                         "name".to_string(),
@@ -721,7 +734,7 @@ pub fn validate_sig(
             );
             if let Some(cand) = candidate {
                 let final_cand = preserve_nilable_wrapper(&current_return, &cand);
-                if final_cand != current_return {
+                if final_cand != current_return && !runtime_contradicts(&m.returns, &final_cand) {
                     let mut data = HashMap::new();
                     data.insert(
                         "from".to_string(),
@@ -853,7 +866,10 @@ pub fn validate_sig(
         }
     }
 
-    if sig.contains("returns(T.untyped)") && src.noreturn_candidate {
+    if sig.contains("returns(T.untyped)")
+        && src.noreturn_candidate
+        && !runtime_contradicts(&m.returns, "T.noreturn")
+    {
         let mut data = HashMap::new();
         data.insert(
             "type".to_string(),
@@ -1031,7 +1047,7 @@ pub fn validate_sig(
                             }
                         }
 
-                        if !contradicts_void {
+                        if !contradicts_void && !runtime_contradicts(&m.returns, cand) {
                             actions.push(Action {
                                 kind: "fix_sig_return".to_string(),
                                 confidence: action_conf.to_string(),
@@ -1105,6 +1121,171 @@ fn extract_param_entries(sig: &str) -> Vec<(String, String)> {
     params
 }
 
+#[derive(Default)]
+struct ProtocolRequirements {
+    methods: std::collections::BTreeSet<String>,
+    unresolved: bool,
+}
+
+fn signature_identity(signature: &serde_json::Value) -> String {
+    format!(
+        "{}#{}",
+        signature
+            .get("class")
+            .and_then(|value| value.as_str())
+            .unwrap_or(""),
+        signature
+            .get("method")
+            .and_then(|value| value.as_str())
+            .unwrap_or("")
+    )
+}
+
+fn signature_param_name(signature: &serde_json::Value, slot: &str) -> Option<String> {
+    let entries = extract_param_entries(
+        signature
+            .get("sig")
+            .and_then(|value| value.as_str())
+            .unwrap_or(""),
+    );
+    if let Ok(index) = slot.parse::<usize>() {
+        return entries.get(index).map(|(name, _)| name.clone());
+    }
+    entries
+        .iter()
+        .find(|(name, _)| name == slot)
+        .map(|(name, _)| name.clone())
+}
+
+fn resolve_protocol_requirements(
+    signature: &serde_json::Value,
+    param_name: &str,
+    existing_sigs: &[serde_json::Value],
+    ivar_protocols: Option<&serde_json::Map<String, serde_json::Value>>,
+    visiting: &mut std::collections::BTreeSet<String>,
+) -> ProtocolRequirements {
+    let visit_key = format!("{}:{param_name}", signature_identity(signature));
+    if !visiting.insert(visit_key.clone()) {
+        return ProtocolRequirements::default();
+    }
+
+    let mut result = ProtocolRequirements::default();
+    let protocol = signature
+        .get("protocols")
+        .and_then(|value| value.as_object())
+        .and_then(|protocols| protocols.get(param_name))
+        .and_then(|value| value.as_object());
+    let Some(protocol) = protocol else {
+        visiting.remove(&visit_key);
+        return result;
+    };
+
+    for method in protocol
+        .get("methods")
+        .and_then(|value| value.as_array())
+        .into_iter()
+        .flatten()
+        .filter_map(|value| value.as_str())
+    {
+        result.methods.insert(method.to_string());
+    }
+
+    for gap in protocol
+        .get("gaps")
+        .and_then(|value| value.as_array())
+        .into_iter()
+        .flatten()
+        .filter_map(|value| value.as_str())
+    {
+        if let Some(rest) = gap.strip_prefix("forwarded to ") {
+            let Some((method_name, slot_tail)) = rest.split_once(" slot ") else {
+                result.unresolved = true;
+                continue;
+            };
+            let slot = slot_tail.split_whitespace().next().unwrap_or("");
+            let candidates: Vec<&serde_json::Value> = existing_sigs
+                .iter()
+                .filter(|candidate| {
+                    candidate.get("method").and_then(|value| value.as_str()) == Some(method_name)
+                })
+                .collect();
+            if candidates.len() != 1 {
+                result.unresolved = true;
+                continue;
+            }
+            let Some(target_param) = signature_param_name(candidates[0], slot) else {
+                result.unresolved = true;
+                continue;
+            };
+            let nested = resolve_protocol_requirements(
+                candidates[0],
+                &target_param,
+                existing_sigs,
+                ivar_protocols,
+                visiting,
+            );
+            result.methods.extend(nested.methods);
+            result.unresolved |= nested.unresolved;
+        } else if let Some(rest) = gap.strip_prefix("captured in ") {
+            let ivar = rest.split_whitespace().next().unwrap_or("");
+            let owner = signature
+                .get("class")
+                .and_then(|value| value.as_str())
+                .unwrap_or("");
+            let key = format!("{owner}\0{ivar}");
+            let methods = ivar_protocols
+                .and_then(|protocols| protocols.get(&key))
+                .and_then(|value| value.as_array());
+            let Some(methods) = methods else {
+                result.unresolved = true;
+                continue;
+            };
+            result.methods.extend(
+                methods
+                    .iter()
+                    .filter_map(|value| value.as_str())
+                    .map(str::to_string),
+            );
+        } else {
+            result.unresolved = true;
+        }
+    }
+
+    visiting.remove(&visit_key);
+    result
+}
+
+fn candidate_satisfies_protocol(
+    candidate: &str,
+    signature: &serde_json::Value,
+    param_name: &str,
+    existing_sigs: &[serde_json::Value],
+    ivar_protocols: Option<&serde_json::Map<String, serde_json::Value>>,
+) -> bool {
+    let requirements = resolve_protocol_requirements(
+        signature,
+        param_name,
+        existing_sigs,
+        ivar_protocols,
+        &mut std::collections::BTreeSet::new(),
+    );
+    if requirements.unresolved {
+        return false;
+    }
+    requirements.methods.iter().all(|required| {
+        existing_sigs.iter().any(|candidate_method| {
+            candidate_method
+                .get("class")
+                .and_then(|value| value.as_str())
+                == Some(candidate)
+                && candidate_method
+                    .get("method")
+                    .and_then(|value| value.as_str())
+                    == Some(required.as_str())
+        })
+    })
+}
+
 fn propose_static_param_backflow_actions(
     input: &InputState,
     existing_actions: &[Action],
@@ -1120,6 +1301,10 @@ fn propose_static_param_backflow_actions(
         Some(arr) => arr,
         None => return actions,
     };
+    let ivar_protocols = input
+        .facts
+        .get("ivar_protocols")
+        .and_then(|value| value.as_object());
 
     let mut origins_by_callee = std::collections::HashMap::new();
     for origin in param_origins {
@@ -1209,6 +1394,26 @@ fn propose_static_param_backflow_actions(
                     || strip_nilable_type(&candidate) == "Object"
                 {
                     continue;
+                }
+                if !candidate_satisfies_protocol(
+                    &candidate,
+                    method,
+                    param_name,
+                    existing_sigs,
+                    ivar_protocols,
+                ) {
+                    continue;
+                }
+                if let Some(runtime) = runtime_record_for_signature(input, method) {
+                    let observed = runtime
+                        .params_ok
+                        .get(param_name)
+                        .or_else(|| runtime.params_by_name.get(param_name))
+                        .cloned()
+                        .unwrap_or_default();
+                    if runtime_contradicts(&observed, &candidate) {
+                        continue;
+                    }
                 }
 
                 // Skip if an existing action already covers this param with the same candidate
@@ -1303,21 +1508,183 @@ fn weak_type(t: &str) -> bool {
         && (t.contains("T.untyped") || t.contains("Object") || t.contains("BasicObject"))
 }
 
+fn proposed_type_accepts(proposed_type: &str, observed_class: &str) -> bool {
+    let proposed = proposed_type.trim();
+    if proposed.is_empty() || observed_class.is_empty() {
+        return false;
+    }
+    if proposed == "T.untyped"
+        || observed_class.contains('#')
+        || observed_class.starts_with("Sorbet::Private::")
+    {
+        return true;
+    }
+    if proposed == "void" {
+        return observed_class == "NilClass";
+    }
+    if proposed == "T.noreturn" {
+        return false;
+    }
+    if let Some(inner) = proposed
+        .strip_prefix("T.nilable(")
+        .and_then(|value| value.strip_suffix(')'))
+    {
+        return observed_class == "NilClass" || proposed_type_accepts(inner, observed_class);
+    }
+    if let Some(inner) = proposed
+        .strip_prefix("T.any(")
+        .and_then(|value| value.strip_suffix(')'))
+    {
+        return split_top_level_types(inner)
+            .iter()
+            .any(|alternative| proposed_type_accepts(alternative, observed_class));
+    }
+    if proposed == "T::Boolean" {
+        return matches!(observed_class, "TrueClass" | "FalseClass" | "T::Boolean");
+    }
+    if proposed.starts_with("T::Array[") {
+        return observed_class == "Array";
+    }
+    if proposed.starts_with("T::Hash[") {
+        return observed_class == "Hash";
+    }
+    if proposed.starts_with("T::Set[") {
+        return observed_class == "Set";
+    }
+    if proposed.starts_with("T::Enumerable[") {
+        return matches!(observed_class, "Array" | "Hash" | "Set");
+    }
+    proposed == observed_class
+}
+
+fn split_top_level_types(types: &str) -> Vec<String> {
+    let mut result = Vec::new();
+    let mut token = String::new();
+    let mut depth = 0_i64;
+    for character in types.chars() {
+        match character {
+            '(' | '[' | '{' => {
+                depth += 1;
+                token.push(character);
+            }
+            ')' | ']' | '}' => {
+                depth -= 1;
+                token.push(character);
+            }
+            ',' if depth == 0 => {
+                result.push(token.trim().to_string());
+                token.clear();
+            }
+            _ => token.push(character),
+        }
+    }
+    if !token.trim().is_empty() {
+        result.push(token.trim().to_string());
+    }
+    result
+}
+
+fn runtime_contradicts(observed_classes: &[String], proposed_type: &str) -> bool {
+    observed_classes
+        .iter()
+        .filter(|observed| !observed.is_empty())
+        .any(|observed| !proposed_type_accepts(proposed_type, observed))
+}
+
+fn runtime_record_for_signature<'a>(
+    input: &'a InputState,
+    signature: &serde_json::Value,
+) -> Option<&'a MethodRecord> {
+    let path = signature
+        .get("path")
+        .and_then(|value| value.as_str())
+        .unwrap_or("");
+    let line = signature
+        .get("line")
+        .and_then(|value| value.as_i64())
+        .unwrap_or(0);
+    let owner = signature
+        .get("class")
+        .and_then(|value| value.as_str())
+        .unwrap_or("");
+    let method = signature
+        .get("method")
+        .and_then(|value| value.as_str())
+        .unwrap_or("");
+    let kind = signature
+        .get("kind")
+        .and_then(|value| value.as_str())
+        .unwrap_or("");
+
+    input.methods.iter().find(|record| {
+        if let Some(source) = &record.source {
+            return source.line == line
+                && source.class == owner
+                && source.method == method
+                && source.kind == kind
+                && (source.path == path
+                    || source.path.ends_with(path)
+                    || path.ends_with(&source.path));
+        }
+        let key_strings: Vec<String> = record
+            .key
+            .iter()
+            .map(|value| value.as_str().unwrap_or("").to_string())
+            .collect();
+        key_strings.get(0).map(String::as_str) == Some(owner)
+            && key_strings.get(1).map(String::as_str) == Some(method)
+            && key_strings.get(2).map(String::as_str) == Some(kind)
+            && record.key.get(4).and_then(|value| value.as_i64()) == Some(line)
+            && key_strings
+                .get(3)
+                .is_some_and(|runtime_path| runtime_path == path || runtime_path.ends_with(path))
+    })
+}
+
 fn static_sorbet_type(types: &[String]) -> Option<String> {
     if types.is_empty() {
         return None;
     }
+    let mut has_nil = false;
     let mut uniq = Vec::new();
     for t in types {
-        if !uniq.contains(t) {
-            uniq.push(t.clone());
+        let normalized = match t.as_str() {
+            "NilClass" => {
+                has_nil = true;
+                continue;
+            }
+            "Array" => "T::Array[T.untyped]".to_string(),
+            "Hash" => "T::Hash[T.untyped, T.untyped]".to_string(),
+            "Set" => "T::Set[T.untyped]".to_string(),
+            value if value.starts_with("T.nilable(") && value.ends_with(')') => {
+                has_nil = true;
+                value[10..value.len() - 1].to_string()
+            }
+            value => value.to_string(),
+        };
+        if !uniq.contains(&normalized) {
+            uniq.push(normalized);
         }
     }
-    if uniq.len() == 1 {
-        return Some(uniq[0].to_string());
+    if uniq.is_empty() {
+        return has_nil.then(|| "NilClass".to_string());
     }
     uniq.sort();
-    Some(format!("T.any({})", uniq.join(", ")))
+    let base = if uniq
+        .iter()
+        .all(|value| matches!(value.as_str(), "TrueClass" | "FalseClass" | "T::Boolean"))
+    {
+        "T::Boolean".to_string()
+    } else if uniq.len() == 1 {
+        uniq[0].clone()
+    } else {
+        return None;
+    };
+    Some(if has_nil {
+        format!("T.nilable({base})")
+    } else {
+        base
+    })
 }
 
 fn weak_collection_type(t: &str) -> bool {
@@ -1520,6 +1887,11 @@ fn propose_forwarded_return_chain_actions(input: &InputState) -> Vec<Action> {
             if let Some(candidate) = static_sorbet_type(&types) {
                 if !useful_type(&candidate) || weak_type(&candidate) {
                     continue;
+                }
+                if let Some(runtime) = runtime_record_for_signature(input, method) {
+                    if runtime_contradicts(&runtime.returns, &candidate) {
+                        continue;
+                    }
                 }
 
                 let confidence = if ["String", "Integer", "Float", "Symbol", "T::Boolean"]
@@ -2105,6 +2477,50 @@ mod tests {
             None,
         );
         assert_eq!(res4, Some("T::Hash[Symbol, Float]".to_string()));
+
+        let broad_classes = json!([
+            {"kind": "class", "name": "Float"},
+            {"kind": "class", "name": "Hash"},
+            {"kind": "class", "name": "Integer"},
+            {"kind": "class", "name": "String"}
+        ]);
+        let nested_array = json!([{"kind": "array", "elements": broad_classes}]);
+        assert_eq!(
+            super::generic_candidate_type(
+                "T::Array[T.untyped]",
+                None,
+                None,
+                Some(&nested_array),
+                None,
+            ),
+            Some("T::Array[T::Array[T.untyped]]".to_string()),
+        );
+
+        let hash_shapes = json!([
+            {
+                "kind": "hash",
+                "keys": [{"kind": "class", "name": "Symbol"}],
+                "values": [
+                    {"kind": "class", "name": "String"},
+                    {"kind": "class", "name": "Symbol"}
+                ]
+            },
+            {
+                "kind": "hash",
+                "keys": [{"kind": "class", "name": "Symbol"}],
+                "values": [{"kind": "class", "name": "Integer"}]
+            }
+        ]);
+        assert_eq!(
+            super::generic_candidate_type(
+                "T::Array[T.untyped]",
+                None,
+                None,
+                Some(&hash_shapes),
+                None,
+            ),
+            Some("T::Array[T::Hash[Symbol, T.untyped]]".to_string()),
+        );
     }
 
     #[test]
@@ -2620,7 +3036,7 @@ mod tests {
         ]);
         assert_eq!(
             super::shape_union_type(mixed_hash.as_array().unwrap()),
-            None
+            Some("T::Hash[String, T.untyped]".to_string())
         );
         assert_eq!(
             super::shape_union_type(&[json!({ "kind": "unknown" })]),
@@ -3059,7 +3475,7 @@ mod tests {
             .find(|a| a.kind == "fix_sig_return" && a.line == 20)
             .unwrap();
         assert_eq!(forwarded.confidence, "review");
-        assert_eq!(forwarded.data["type"], "T.any(NilClass, String)");
+        assert_eq!(forwarded.data["type"], "T.nilable(String)");
         assert!(!actions
             .iter()
             .any(|a| a.kind == "fix_sig_return" && a.line == 30));
@@ -3076,5 +3492,187 @@ mod tests {
         assert!(!actions
             .iter()
             .any(|a| a.kind == "add_struct_field_sig" && a.data["field"] == "empty"));
+    }
+
+    #[test]
+    fn legacy_runtime_contradiction_and_static_type_invariants() {
+        assert!(super::runtime_contradicts(
+            &["Hash".to_string(), "NilClass".to_string()],
+            "T.nilable(T::Array[T.untyped])",
+        ));
+        assert!(!super::runtime_contradicts(
+            &["Array".to_string(), "NilClass".to_string()],
+            "T.nilable(T::Array[T.untyped])",
+        ));
+        assert!(super::runtime_contradicts(
+            &["Array".to_string()],
+            "T::Hash[T.untyped, T.untyped]",
+        ));
+        assert!(super::runtime_contradicts(
+            &["NilClass".to_string()],
+            "T.noreturn",
+        ));
+        assert!(!super::runtime_contradicts(
+            &["NilClass".to_string()],
+            "void",
+        ));
+        assert_eq!(
+            super::static_sorbet_type(&["String".to_string(), "NilClass".to_string()]),
+            Some("T.nilable(String)".to_string()),
+        );
+        assert_eq!(
+            super::static_sorbet_type(&["String".to_string(), "Symbol".to_string()]),
+            None,
+        );
+    }
+
+    #[test]
+    fn static_backflow_requires_protocol_and_runtime_compatibility() {
+        use serde_json::json;
+
+        let input = input_from_json(json!({
+            "methods": [
+                {
+                    "key": ["Service", "accept_runtime", "instance", "/repo/src/service.rb", 40],
+                    "params_by_name": {"node": ["AST::Foo", "Symbol"]}
+                }
+            ],
+            "facts": {
+                "existing_sigs": [
+                    {
+                        "path": "src/service.rb", "line": 10, "class": "Service",
+                        "method": "accept", "kind": "instance",
+                        "sig": "sig { params(node: T.untyped).void }",
+                        "protocols": {"node": {"methods": ["token"], "gaps": []}}
+                    },
+                    {
+                        "path": "src/service.rb", "line": 20, "class": "Service",
+                        "method": "missing_protocol", "kind": "instance",
+                        "sig": "sig { params(node: T.untyped).void }",
+                        "protocols": {"node": {"methods": ["missing"], "gaps": []}}
+                    },
+                    {
+                        "path": "src/service.rb", "line": 30, "class": "Service",
+                        "method": "missing_forward", "kind": "instance",
+                        "sig": "sig { params(node: T.untyped).void }",
+                        "protocols": {"node": {"methods": [], "gaps": ["forwarded to absent slot 0 at src/service.rb:31"]}}
+                    },
+                    {
+                        "path": "src/service.rb", "line": 40, "class": "Service",
+                        "method": "accept_runtime", "kind": "instance",
+                        "sig": "sig { params(node: T.untyped).void }",
+                        "protocols": {"node": {"methods": [], "gaps": []}}
+                    },
+                    {
+                        "path": "src/ast.rb", "line": 1, "class": "AST::Foo",
+                        "method": "token", "kind": "instance",
+                        "sig": "sig { returns(Token) }", "protocols": {}
+                    }
+                ],
+                "param_origins": [
+                    {"callee": "accept", "slot": "node", "origin_kind": "static", "type": "AST::Foo", "path": "src/caller.rb", "line": 1, "code": "accept(foo)"},
+                    {"callee": "missing_protocol", "slot": "node", "origin_kind": "static", "type": "AST::Foo", "path": "src/caller.rb", "line": 2, "code": "missing_protocol(foo)"},
+                    {"callee": "missing_forward", "slot": "node", "origin_kind": "static", "type": "AST::Foo", "path": "src/caller.rb", "line": 3, "code": "missing_forward(foo)"},
+                    {"callee": "accept_runtime", "slot": "node", "origin_kind": "static", "type": "AST::Foo", "path": "src/caller.rb", "line": 4, "code": "accept_runtime(foo)"}
+                ]
+            }
+        }));
+
+        let actions = super::build_actions(&input);
+        assert!(actions.iter().any(|action| {
+            action.kind == "fix_sig_param" && action.line == 10 && action.data["type"] == "AST::Foo"
+        }));
+        assert!(!actions
+            .iter()
+            .any(|action| action.kind == "fix_sig_param" && action.line == 20));
+        assert!(!actions
+            .iter()
+            .any(|action| action.kind == "fix_sig_param" && action.line == 30));
+        assert!(!actions
+            .iter()
+            .any(|action| action.kind == "fix_sig_param" && action.line == 40));
+    }
+
+    #[test]
+    fn forwarded_returns_and_noreturn_actions_reject_runtime_conflicts() {
+        use serde_json::json;
+
+        let input = input_from_json(json!({
+            "methods": [
+                {
+                    "has_sig": true,
+                    "returns": ["Symbol"],
+                    "source": {
+                        "path": "src/service.rb", "line": 10, "class": "Service",
+                        "method": "forwarded", "kind": "instance", "has_sig": true,
+                        "sig": "sig { returns(T.untyped) }", "params": []
+                    }
+                },
+                {
+                    "has_sig": true,
+                    "returns": ["NilClass"],
+                    "source": {
+                        "path": "src/service.rb", "line": 20, "class": "Service",
+                        "method": "boom", "kind": "instance", "has_sig": true,
+                        "sig": "sig { returns(T.untyped) }", "params": [],
+                        "noreturn_candidate": true
+                    }
+                },
+                {
+                    "has_sig": true,
+                    "returns": [],
+                    "source": {
+                        "path": "src/service.rb", "line": 30, "class": "Service",
+                        "method": "maybe_name", "kind": "instance", "has_sig": true,
+                        "sig": "sig { returns(T.untyped) }", "params": []
+                    }
+                }
+            ],
+            "facts": {
+                "existing_sigs": [
+                    {"path": "src/service.rb", "line": 10, "class": "Service", "method": "forwarded", "kind": "instance", "sig": "sig { returns(T.untyped) }"},
+                    {"path": "src/service.rb", "line": 30, "class": "Service", "method": "maybe_name", "kind": "instance", "sig": "sig { returns(T.untyped) }"}
+                ],
+                "return_origins": [
+                    {
+                        "path": "src/service.rb", "line": 10, "class": "Service",
+                        "method": "forwarded", "kind": "instance",
+                        "sources": [{"kind": "typed_call", "type": "String", "callee": "name", "line": 11}]
+                    },
+                    {
+                        "path": "src/service.rb", "line": 30, "class": "Service",
+                        "method": "maybe_name", "kind": "instance",
+                        "sources": [
+                            {"kind": "typed_call", "type": "String", "callee": "name", "line": 31},
+                            {"kind": "nil"}
+                        ]
+                    }
+                ]
+            }
+        }));
+
+        let actions = super::build_actions(&input);
+        assert!(!actions.iter().any(|action| {
+            action.kind == "fix_sig_return"
+                && action.line == 10
+                && action.data.get("source").and_then(|value| value.as_str())
+                    == Some("forwarded_return_chain")
+        }));
+        assert!(!actions.iter().any(|action| {
+            action.kind == "fix_sig_return"
+                && action.line == 20
+                && action.data.get("type").and_then(|value| value.as_str()) == Some("T.noreturn")
+        }));
+        let maybe = actions
+            .iter()
+            .find(|action| {
+                action.kind == "fix_sig_return"
+                    && action.line == 30
+                    && action.data.get("source").and_then(|value| value.as_str())
+                        == Some("forwarded_return_chain")
+            })
+            .expect("nilable forwarded return action");
+        assert_eq!(maybe.data["type"], "T.nilable(String)");
+        assert_eq!(maybe.confidence, "review");
     }
 }

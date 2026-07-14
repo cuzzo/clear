@@ -23,21 +23,19 @@ module NilKill
 
       store = Store.new
       StaticAnalysis.index_store(store: store, targets: paths, root: ROOT)
-
-      infer = Infer.allocate
-      infer.instance_variable_set(:@store, store)
-      infer.send(:propose_hash_record_cluster_actions)
-      action = store.actions.find { |candidate| candidate.dig("data", "struct_name").to_s == @struct_name }
+      evidence = store.to_h
+      report = Report.new([], evidence: evidence)
+      candidate = report.send(:hash_record_struct_candidates, evidence)
+        .find { |row| row["struct_name"].to_s == @struct_name }
       elapsed = Process.clock_gettime(Process::CLOCK_MONOTONIC) - started
 
       puts "focused hash-record #{@struct_name}"
       puts "files: #{paths.map { |path| NilKill.rel(path) }.join(", ")}"
       puts "elapsed: #{format("%.3f", elapsed)}s"
-      if action
-        data = action["data"] || {}
-        puts "pressure: #{data.dig("pressure", "total")}; producers: #{Array(data["producers"]).size}; consumers: #{Array(data["consumers"]).size}; signatures: #{Array(data["signatures"]).size}"
-        puts "blockers: #{Array(data["blockers"]).empty? ? "none" : Array(data["blockers"]).join("; ")}"
-        puts JSON.pretty_generate(action)
+      if candidate
+        puts "pressure: #{candidate["total_pressure"]}; producers: #{Array(candidate["producers"]).size}; consumers: #{Array(candidate["consumers"]).size}; signatures: #{Array(candidate["signatures"]).size}"
+        puts "blockers: #{Array(candidate["blockers"]).empty? ? "none" : Array(candidate["blockers"]).join("; ")}"
+        puts JSON.pretty_generate(candidate)
       else
         puts "no #{@struct_name} action produced from focused evidence"
       end
@@ -48,10 +46,11 @@ module NilKill
       return explicit.uniq.sort unless explicit.empty?
 
       evidence = Store.read
-      action = Array(evidence["actions"]).find { |candidate| candidate.dig("data", "struct_name").to_s == @struct_name }
-      return [] unless action
-      data = action["data"] || {}
-      (Array(data["producers"]) + Array(data["consumers"]) + Array(data["signatures"]))
+      report = Report.new([], evidence: evidence)
+      candidate = report.send(:hash_record_struct_candidates, evidence)
+        .find { |row| row["struct_name"].to_s == @struct_name }
+      return [] unless candidate
+      (Array(candidate["producers"]) + Array(candidate["consumers"]) + Array(candidate["signatures"]))
         .map { |site| site["path"].to_s }
         .reject(&:empty?)
         .map { |path| File.expand_path(path, ROOT) }
