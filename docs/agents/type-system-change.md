@@ -30,8 +30,8 @@ The design must preserve these project constraints:
 - automatic migration only when the old and new types are semantically
   equivalent;
 - explicit asynchronous result contracts: `BG STREAM YIELDS T` names the item
-  type, and heterogeneous `BG`, `DO`, or `BG STREAM` results never silently
-  synthesize unions, optionals, or `Any`.
+  type; asynchronous joins may widen `T` only with `?` and `!` over the same
+  payload, and never silently synthesize a general union, `~`, or `Any`.
 
 ## Current-State Audit
 
@@ -536,28 +536,45 @@ accepts only explicit variant values; a raw value is never injected into a
 variant merely because its payload type matches.
 
 Without an expected item type, the annotator collects full yielded `Type`
-values and performs a strict asynchronous join:
+values and performs a controlled tense join. First it separates the semantic
+payload from its tense envelope. All reachable sites must have the same payload
+type, including collection topology, generic arguments, capabilities, error
+type, and ownership meaning, after any existing lossless scalar coercion.
+`Never` sites do not participate.
 
-- identical types remain unchanged;
-- unreachable/`Never` sites do not affect the result;
-- compatible numeric types use normal numeric promotion;
-- capabilities, ownership, collection topology, and generic arguments must be
-  identical unless an existing lossless scalar coercion proves equivalence;
-- `T` plus `NIL` is an error unless an expected `?T` contract was declared;
-- unrelated types are an error and do not create an anonymous union or `Any`.
+For that one payload, optionality and fallibility may widen monotonically:
 
-If unrelated yielded types occur, the producer must declare a named union item
-type and yield its variants. The current check of `yield_types.map(&:resolved)`
-is insufficient because it discards optional, collection, generic, and
-capability structure.
+| Sites | Inferred type |
+| --- | --- |
+| `T`, `T` | `T` |
+| `T`, `NIL` or `T`, `?T` | `?T` |
+| `T`, `!T` | `!T` |
+| `!T`, `?T` or `!T`, `NIL` | `!?T` |
 
-The same strict join policy applies at every asynchronous boundary. `BG` and
-result-producing `DO` blocks do not infer unions, optionality, common nominal
-ancestors, protocols, or `Any` from heterogeneous terminal values. An expected
-type may come from the enclosing binding, return position, parameter, or an
-explicit boundary contract. Otherwise incompatible terminal sites are a
-compile error. Effect-only `DO` blocks remain `Void` and do not acquire a result
-type from incidental expressions.
+This is tense widening, not union inference. It permits a producer to expose
+absence and failure discovered on different paths without inventing a new
+payload type. The join is commutative, associative, and independent of source
+order.
+
+Future is not a widening bit. Two identical `~T` values may join as `~T`, but
+mixing `~T` with `T`, `?T`, or `!T` is an error: the compiler must never insert
+an implicit `NEXT`, await, or future lift at an asynchronous boundary. Likewise,
+`T` and an unrelated `K` are an error and never produce an anonymous union,
+common nominal ancestor, protocol, or `Any`.
+
+If unrelated payload types occur, the producer must declare a named union item
+type and yield explicit variants. The current check of
+`yield_types.map(&:resolved)` is insufficient because it discards optional,
+fallible, collection, generic, and capability structure. If fallible types
+later gain explicit error sets, those error sets must also agree or use an
+explicit declared conversion; the join must not invent an error union.
+
+The same controlled tense join applies at every result-producing asynchronous
+boundary: `BG`, `DO`, and `BG STREAM`. An expected type may come from the
+enclosing binding, return position, parameter, or an explicit boundary
+contract. Incompatible payloads or future states are compile errors.
+Effect-only `DO` blocks remain `Void` and do not acquire a result type from
+incidental expressions.
 
 ### Termination
 
@@ -604,6 +621,38 @@ During migration, a list literal contextually coerced to `Tuple<...>` remains
 accepted and is auto-fixed to `Tuple{...}`. New code and formatter output use
 the dedicated literal.
 
+## Scope Boundary: Parser Work Versus Semantic Work
+
+The complete Inline Pivot architecture is not a parser-only change. Parsing a
+new spelling without changing the semantic model is safe only when the new
+spelling is an exact alias for an already implemented type. The following
+boundaries are normative:
+
+| Feature | Minimum affected layers | Reason |
+| --- | --- | --- |
+| `[N]T`, `[]T`, and `{K}V` aliases for existing layouts | parser, canonical printer/fixer, source tests | The existing semantic type and lowering can be reused only where layout and defaults are identical. |
+| `BG STREAM YIELDS T` | parser, AST, annotator, diagnostics, formatter | The expected item type must reach the body before its `YIELD` sites are checked. |
+| `?`/`!` asynchronous tense join | annotator and shared type operations | This is a semantic least-upper-bound operation, not syntax. |
+| `Tuple{...}` | parser, AST, annotator, MIR literal lowering, formatter | A standalone heterogeneous tuple must retain positional types without an expected context. Existing tuple type, indexing, cleanup, and backend representation should be reused. |
+| Per-layer capabilities | recursive type model, annotator, ownership/cleanup, MIR, backends | The current flattened capability slots cannot identify an arbitrary collection layer. |
+| Flat multidimensional ranks | type/layout model, MIR indexing, runtime checks, backends | Nested arrays are not layout-equivalent to a flat rank with strides. |
+| Optional yielded values plus finite completion | annotator, `StreamStep` MIR/runtime protocol, consumers, backends | A parser cannot distinguish a yielded `NIL` from the old optional completion sentinel. |
+
+Accordingly, the recommended first delivery is deliberately smaller than the
+full Inline Pivot migration: add `YIELDS`, the controlled tense join, and
+`Tuple{...}` by reusing the current tuple and stream machinery wherever its
+semantics are already correct. Do not make the collection syntax general or
+claim flat ranks/per-layer capabilities in that series. This keeps the change
+mostly in the front end, but it is not parser-only.
+
+Tuple support in particular must not add a second tuple representation. The
+compiler already understands `Tuple<A, B>`, positional indexing, cleanup, and
+backend tuple layout. The minimum new path is a distinct `AST::TupleLit` whose
+annotator infers its positional `Type` children and whose MIR lowering emits the
+existing tuple literal form. If current MIR can represent only contextually
+typed list-to-tuple coercion, that lowering is the one small semantic extension
+required; no tuple runtime container is introduced.
+
 ## Migration Rules
 
 Migration is staged and source-preserving.
@@ -637,6 +686,76 @@ The compiler follows an expand-contract sequence:
 
 Compatibility parsing is temporary and must have a deletion issue and metric.
 No backend may branch on whether a type originated in legacy syntax.
+
+## Recommended Commit Sequence
+
+Every commit below must keep the tree green, include source-level CLEAR tests
+for its behavior, and maintain 100% line coverage for changed executable lines.
+NilKill static mode, Espalier, and Decomplex are recorded at each boundary. A
+parser commit must not make syntax generally available before annotation and
+lowering can preserve its promised semantics.
+
+### First delivery: contracts and tuples
+
+This is the smallest coherent next stream of work. It intentionally does not
+enable Inline Pivot collection spelling, flat ranks, per-layer capabilities, or
+the stream-completion protocol change.
+
+1. `test(types): freeze async join and tuple literal contracts`
+   Add parser/annotation oracles for `YIELDS`, `Tuple{...}`, `T` plus `NIL`,
+   `!T` plus `?T`, unrelated payloads, and future/non-future conflicts. The
+   initially unsupported cases are asserted as diagnostics, not skipped.
+2. `feat(parser): parse YIELDS contracts and tuple literals`
+   Add the minimal typed AST fields/nodes, predictive parsing, source spans,
+   recovery, and parser tests. Do not change tuple or stream runtime layout.
+3. `feat(types): define same-payload asynchronous tense joins`
+   Add one shared type operation implementing the `?`/`!` lattice and rejecting
+   payload or future-state mismatches. Test algebraic properties directly:
+   order independence, associativity, idempotence, and `Never` identity.
+4. `feat(annotator): enforce async result and stream item contracts`
+   Apply the shared join to result-producing `BG`, `DO`, and `BG STREAM`; push
+   `YIELDS T` into the body as its expected type; diagnose every conflicting
+   site without synthesizing a union or `Any`.
+5. `feat(tuples): infer and lower dedicated tuple literals`
+   Infer exact positional types for `AST::TupleLit` and lower it through the
+   existing tuple MIR/backend representation. Reuse existing indexing,
+   ownership, cleanup, and ABI behavior; add no tuple runtime container.
+6. `feat(tools): print and migrate async contracts and tuple literals`
+   Teach the formatter, diagnostics/fixes, LSP spans, and ruby-to-clear to emit
+   `BG STREAM YIELDS T` and `Tuple{...}`. Auto-fix contextual tuple list
+   literals only when equivalence is proven.
+
+The first delivery should touch the parser and AST, shared type/annotation
+logic, the tuple-literal MIR entry point, and syntax-producing tools. It should
+not require changes to tuple storage, tuple indexing, backend tuple layout, or
+the runtime. If implementation discovers that those existing tuple paths
+cannot be reused, stop and document the mismatch before widening the change.
+
+### Full Inline Pivot delivery
+
+After the first delivery is stable, complete the architectural work in these
+reviewable commits. A commit may be split mechanically to remain reviewable,
+but the dependency order remains fixed.
+
+7. `test(types): add inline pivot equivalence and rejection oracles`
+8. `refactor(types): replace flattened shapes with recursive type nodes`
+9. `refactor(types): make all type visitors exhaustive over recursive nodes`
+10. `feat(parser): parse and print inline pivot collection layers`
+11. `feat(types): attach capabilities to their exact type layers`
+12. `feat(types): enforce capability and type complexity budgets`
+13. `feat(collections): lower lists sets pools and maps from type nodes`
+14. `feat(collections): lower flat multidimensional ranks and indexing`
+15. `feat(streams): represent cardinality independently of item tenses`
+16. `feat(streams): distinguish finite completion with StreamStep`
+17. `feat(streams): implement CLOSE reachability and lowering`
+18. `feat(tools): migrate sources and normalized type facts to inline pivot`
+19. `refactor(capabilities): rename indirect to boxed`
+20. `refactor(types): remove legacy type parsing and compatibility paths`
+
+The `@indirect` to `@boxed` rename remains deliberately penultimate. It must
+not obscure structural capability changes or cause unrelated churn while those
+changes are being reviewed. `@sharded(N)` remains canonical throughout; there
+is no `@striped` rename.
 
 ## Implementation Plan
 
@@ -727,10 +846,10 @@ old/new equivalent spellings produce equivalent MIR layouts.
 - Add the ergonomic finite-stream consumer control form and migrate pipelines.
 - Add `AST::StreamClose`, control-flow reachability rules, implicit close, and
   exactly-once runtime close.
-- Implement the shared strict asynchronous join for `BG`, result-producing
-  `DO`, and `BG STREAM`: identical complete types plus existing lossless scalar
-  promotions only; no inferred unions, optionality, common ancestors,
-  protocols, or `Any`.
+- Implement the shared controlled tense join for `BG`, result-producing `DO`,
+  and `BG STREAM`: identical semantic payloads may accumulate `?` and `!`, but
+  may not mix `~` states or infer payload unions, common ancestors, protocols,
+  or `Any`.
 - Require named unions and explicit variant construction for heterogeneous
   stream items. Do not inject raw payload values into union variants.
 - Migrate `~?T[]`, `~T[?]`, `~T[N]`, and `~T[INF]` without changing behavior.
@@ -739,14 +858,16 @@ Exit gate:
 
 - `[~]?T` can yield both `NIL` and a closed event and consumers distinguish
   them in source and runtime tests;
-- `BG STREAM YIELDS ?T` and an expected `[~]?T` binding accept `T` and `NIL`,
-  while an unannotated `T`/`NIL` producer is rejected;
+- both an annotated `BG STREAM YIELDS ?T` and an unannotated `T`/`NIL`
+  producer are accepted; the latter infers `?T`;
+- an unannotated producer with `!T` and `?T` sites infers `!?T`;
+- `T`/`K`, `T`/`~T`, and `!T`/`~T` producer sites are rejected;
 - heterogeneous unannotated `BG`, `DO`, and `BG STREAM` boundaries fail with
   diagnostics naming every conflicting terminal site;
 - a declared union accepts explicit variants and rejects implicit raw-payload
   injection;
-- no async inference path constructs `Union`, `Optional`, or `Any` as a
-  fallback;
+- no async inference path constructs a payload `Union` or `Any`; `Optional`
+  and `Fallible` arise only through the same-payload tense lattice;
 - parser, annotator, MIR, Zig, bytecode, formatter, and ruby-to-clear agree on
   the `YIELDS` contract.
 
@@ -817,10 +938,14 @@ Required adversarial tests include:
 - optional container versus optional element at every layer;
 - `BG STREAM YIELDS T` supplied directly and through an expected binding type;
 - rejection of postfix `BG STREAM { ... }: T` syntax;
-- heterogeneous `BG`, `DO`, and `BG STREAM` terminal sites that must not infer
-  `Union`, `Optional`, a common ancestor, a protocol, or `Any`;
+- same-payload `T`/`NIL` and `!T`/`?T` asynchronous sites that must infer `?T`
+  and `!?T`, respectively, independent of source order;
+- unrelated-payload and mixed-future `BG`, `DO`, and `BG STREAM` terminal
+  sites that must not infer `Union`, a common ancestor, a protocol, `Any`, or
+  an implicit await/lift;
 - explicit named-union variants versus rejected raw-payload injection;
-- unannotated `T`/`NIL` yields versus annotated `YIELDS ?T`;
+- unannotated `T`/`NIL` yields versus annotated `YIELDS ?T`, both accepted with
+  the same item type;
 - yielded `NIL` followed by `CLOSE`;
 - close on every control-flow path, duplicate close, and yield-after-close;
 - nested capability ownership/cleanup across BG, DO, BG STREAM, fields, returns,
@@ -831,8 +956,9 @@ Required adversarial tests include:
 ## Risks and Non-Goals
 
 - This design does not introduce anonymous structural unions.
-- This design does not infer unions, optionality, or `Any` at asynchronous
-  boundaries to make heterogeneous terminal values type-check.
+- This design does not infer payload unions or `Any` at asynchronous
+  boundaries. It infers only optional and fallible tenses over one identical
+  payload, and never inserts an implicit future transition.
 - This design does not infer a sharding count or synchronization policy.
 - This design does not treat initial list/set capacity as a durable contract.
 - This design does not preserve both old and new type models internally.
