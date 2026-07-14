@@ -21,6 +21,10 @@ module Espalier
       @recursive_edges = recursive_edges || {}
       @resolved_calls = resolved_calls
       @resolved_recursive_edges = resolved_recursive_edges
+      @recursive_component_cache = {}
+      @recursive_components_by_graph = {}
+      @state_replay_summary_cache = {}
+      @reachable_methods_cache = {}
     end
 
     def hints_for(_file, method, owner)
@@ -30,7 +34,7 @@ module Espalier
         facts = Array(@facts_by_method[[owner.to_s, method[:name].to_s]])
       end
 
-      hints = facts.map { |fact| summary_hint(fact, method) }
+      hints = facts.map { |fact| summary_hint(fact, method, owner.to_s) }
 
       facts.each do |fact|
         Array(fact["call_contexts"]).each do |context|
@@ -41,17 +45,19 @@ module Espalier
           if resolved_target
             callee_owner, callee = resolved_target.map(&:to_s)
             if @resolved_recursive_edges[[owner.to_s, caller, callee_owner, callee]]
+              replay = callee_owner == owner.to_s &&
+                state_replay_recursion_summary(owner.to_s, caller)
               hints << {
                 type: :structural,
                 line: line,
-                complexity: "unknown",
-                space: "unknown",
+                complexity: replay ? replay.fetch(:time) : "unknown",
+                space: replay ? replay.fetch(:space) : "unknown",
                 is_dynamic: true,
                 operation: message,
-                reason: "cross-owner recursive call progress is unknown",
-                confidence: "unknown",
-                time_complete: false,
-                space_complete: false,
+                reason: replay ? replay.fetch(:reason) : "cross-owner recursive call progress is unknown",
+                confidence: replay ? "high" : "unknown",
+                time_complete: !!replay,
+                space_complete: !!replay,
                 fact_source: "fact_mine"
               }
               next
@@ -213,10 +219,11 @@ module Espalier
       graph = @internal_calls&.fetch(owner, nil)
       return nil unless graph
 
-      members = graph.keys.select do |candidate|
-        reachable?(graph, member, candidate) && reachable?(graph, candidate, member)
-      end
+      members = recursive_component_members(graph, member)
       return nil if members.length < 2
+
+      replay = state_replay_recursion_summary(owner, member, members: members)
+      return replay if replay
 
       progress = members.flat_map do |caller|
         recursive_targets = Array(graph[caller]).select { |callee| members.include?(callee.to_s) }
@@ -240,6 +247,144 @@ module Espalier
       }
     end
 
+    # A checkpoint/restore region can make a receiver-state traversal execute
+    # the same suffix again.  FactMine supplies only normalized protocol and
+    # domain evidence; this SCC-level recurrence classification is deliberately
+    # independent of parser names and source language.
+    def state_replay_recursion_summary(owner, member, members: nil)
+      graph = @internal_calls&.fetch(owner, nil)
+      return nil unless graph
+
+      members ||= recursive_component_members(graph, member)
+      return nil if members.empty?
+
+      component_key = [owner, members.sort]
+      return @state_replay_summary_cache[component_key] if @state_replay_summary_cache.key?(component_key)
+
+      @state_replay_summary_cache[component_key] = compute_state_replay_recursion_summary(
+        owner, graph, members
+      )
+    end
+
+    def compute_state_replay_recursion_summary(owner, graph, members)
+      component_facts = members.flat_map { |name| Array(@facts_by_method[[owner, name]]) }
+      replays = component_facts.flat_map { |fact| Array(fact["state_replays"]) }
+      return nil if replays.empty?
+
+      # A simple directed cycle is one recursive continuation, not branching.
+      # Count normalized call sites so two calls to the same member are
+      # preserved even when the project call graph de-duplicates its edges.
+      recursive_call_sites = component_facts.sum do |fact|
+        Array(fact["call_contexts"]).count do |context|
+          members.include?(context["message"].to_s)
+        end
+      end
+      return nil unless recursive_call_sites > members.length
+
+      reachable = reachable_methods(graph, members)
+      reachable_facts = reachable.flat_map { |name| Array(@facts_by_method[[owner, name]]) }
+      progress_domains = reachable_facts.flat_map do |fact|
+        Array(fact["state_progress"]).filter_map do |progress|
+          progress["state_domain"].to_s unless progress["direction"].to_s == "monotonic_update"
+        end
+      end.uniq
+      cursor_domains = reachable_facts.flat_map do |fact|
+        Array(fact["state_cursor_domains"]).map { |cursor| cursor["cursor_domain"].to_s }
+      end.uniq
+
+      replay = replays.find do |candidate|
+        domain = candidate["state_domain"].to_s
+        progress_domains.include?(domain) &&
+          cursor_domains.include?(domain) &&
+          Array(candidate["replayed_calls"]).any? do |call|
+            members.include?(call["message"].to_s)
+          end
+      end
+      return nil unless replay
+
+      {
+        time: "O(2^N)",
+        space: "O(N)",
+        reason: "receiver-state checkpoint restoration replays a progressing recursive component"
+      }
+    end
+
+    def recursive_component_members(graph, member)
+      cache_key = [graph.object_id, member.to_s]
+      return @recursive_component_cache[cache_key] if @recursive_component_cache.key?(cache_key)
+
+      components = @recursive_components_by_graph[graph.object_id] ||= strongly_connected_components(graph)
+      components.each do |component|
+        component.each do |candidate|
+          @recursive_component_cache[[graph.object_id, candidate]] = component
+        end
+      end
+      @recursive_component_cache[cache_key] || []
+    end
+
+    def strongly_connected_components(graph)
+      nodes = (graph.keys + graph.values.flatten).map(&:to_s).uniq
+      adjacency = nodes.to_h { |node| [node, Array(graph[node]).map(&:to_s)] }
+      visited = {}
+      order = []
+      nodes.each do |root|
+        next if visited[root]
+
+        pending = [[root, false]]
+        until pending.empty?
+          node, expanded = pending.pop
+          if expanded
+            order << node
+            next
+          end
+          next if visited[node]
+
+          visited[node] = true
+          pending << [node, true]
+          adjacency[node].reverse_each do |target|
+            pending << [target, false] unless visited[target]
+          end
+        end
+      end
+
+      reversed = nodes.to_h { |node| [node, []] }
+      adjacency.each do |source, targets|
+        targets.each { |target| reversed[target] << source }
+      end
+      assigned = {}
+      order.reverse_each.filter_map do |root|
+        next if assigned[root]
+
+        component = []
+        pending = [root]
+        until pending.empty?
+          node = pending.pop
+          next if assigned[node]
+
+          assigned[node] = true
+          component << node
+          pending.concat(reversed[node])
+        end
+        component
+      end
+    end
+
+    def reachable_methods(graph, starts)
+      cache_key = [graph.object_id, Array(starts).map(&:to_s).sort]
+      return @reachable_methods_cache[cache_key] if @reachable_methods_cache.key?(cache_key)
+
+      pending = Array(starts).map(&:to_s)
+      visited = {}
+      until pending.empty?
+        current = pending.pop
+        next if visited[current]
+
+        visited[current] = true
+        pending.concat(Array(graph[current]).map(&:to_s))
+      end
+      @reachable_methods_cache[cache_key] = visited.keys
+    end
+
     def reachable?(graph, start, target)
       pending = [start.to_s]
       visited = {}
@@ -254,7 +399,7 @@ module Espalier
       false
     end
 
-    def summary_hint(fact, method)
+    def summary_hint(fact, method, owner = nil)
       iterations = Array(fact["iterations"])
       recursion = fact.fetch("recursion", {})
       symbolic_time = Espalier::SymbolicComplexity.sum(
@@ -270,9 +415,14 @@ module Espalier
                        else
                          iterations.max_by { |row| row["power"].to_i }&.fetch("execution_multiplicity", "O(1)") || "O(1)"
                        end
-      recursion_time, recursion_space, recursion_reason = recursion_complexity(
-        recursion, Array(fact["parameters"]).length
-      )
+      state_replay = owner && state_replay_recursion_summary(owner, method[:name].to_s)
+      recursion_time, recursion_space, recursion_reason = if state_replay
+                                                            state_replay.values_at(:time, :space, :reason)
+                                                          else
+                                                            recursion_complexity(
+                                                              recursion, Array(fact["parameters"]).length
+                                                            )
+                                                          end
       allocation_space = allocation_complexity(Array(fact["allocations"]))
       complexity = max_complexity(iteration_time, recursion_time)
 

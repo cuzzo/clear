@@ -1,4 +1,14 @@
 {
+  "state_replay.rb": {
+    "parse_statement": "O(2^N)",
+    "speculate": "O(2^N)",
+    "parse_value": "O(2^N)"
+  },
+  "state_replay.py": {
+    "parse_statement": "O(2^N)",
+    "speculate": "O(2^N)",
+    "parse_value": "O(2^N)"
+  },
   "receiver_state_rescan.rb": {
     "cleanup_decisions": "O(N*M*K)",
     "block_exit_cleanup_summary": "O(N*M)",

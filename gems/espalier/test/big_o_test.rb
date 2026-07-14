@@ -309,6 +309,75 @@ class BigOTest < Minitest::Test
       variable[:propagated_via].transform_keys(&:to_sym))
   end
 
+  def test_state_replay_requires_generic_protocol_domain_progress_and_branching_evidence
+    statement = {
+      "line" => 1, "parameters" => [], "iterations" => [],
+      "recursion" => { "calls" => 0 },
+      "call_contexts" => [
+        { "message" => "speculate", "line" => 2 },
+        { "message" => "parse_value", "line" => 3 }
+      ]
+    }
+    speculate = {
+      "line" => 5, "parameters" => [], "iterations" => [],
+      "recursion" => { "calls" => 0 },
+      "call_contexts" => [{ "message" => "parse_value", "line" => 7 }],
+      "state_replays" => [{
+        "state_domain" => "state:Walker:@cursor",
+        "replayed_calls" => [{ "message" => "parse_value", "line" => 7 }]
+      }]
+    }
+    value = {
+      "line" => 10, "parameters" => [], "iterations" => [],
+      "recursion" => { "calls" => 0 },
+      "call_contexts" => [{ "message" => "parse_statement", "line" => 12 }],
+      "state_progress" => [{
+        "state_domain" => "state:Walker:@cursor", "direction" => "advance"
+      }],
+      "state_cursor_domains" => [{
+        "cursor_domain" => "state:Walker:@cursor",
+        "collection_domain" => "state:Walker:@items"
+      }]
+    }
+    facts = {
+      ["Walker", "parse_statement"] => [statement],
+      ["Walker", "speculate"] => [speculate],
+      ["Walker", "parse_value"] => [value]
+    }
+    graph = {
+      "Walker" => {
+        "parse_statement" => %w[speculate parse_value],
+        "speculate" => ["parse_value"],
+        "parse_value" => ["parse_statement"]
+      }
+    }
+    recursive_edges = {
+      ["Walker", "parse_statement", "speculate"] => true,
+      ["Walker", "parse_statement", "parse_value"] => true,
+      ["Walker", "speculate", "parse_value"] => true,
+      ["Walker", "parse_value", "parse_statement"] => true
+    }
+    consumer = Espalier::StructuralBigO.new(
+      facts_by_method: facts,
+      internal_calls: graph,
+      recursive_edges: recursive_edges
+    )
+
+    hint = consumer.hints_for(nil, { name: "parse_statement", line: 1 }, "Walker").first
+    assert_equal "O(2^N)", hint[:complexity]
+    assert_equal "O(N)", hint[:space]
+    assert_includes hint[:reason], "checkpoint restoration"
+
+    without_cursor_domain = Marshal.load(Marshal.dump(facts))
+    without_cursor_domain[["Walker", "parse_value"]][0]["state_cursor_domains"] = []
+    rejected = Espalier::StructuralBigO.new(
+      facts_by_method: without_cursor_domain,
+      internal_calls: graph,
+      recursive_edges: recursive_edges
+    ).hints_for(nil, { name: "parse_statement", line: 1 }, "Walker").first
+    refute_equal "O(2^N)", rejected[:complexity]
+  end
+
   def test_structural_big_o_propagates_unique_cross_owner_targets
     facts = {
       ["Caller", "run"] => [{

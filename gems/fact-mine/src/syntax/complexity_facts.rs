@@ -30,6 +30,51 @@ pub struct MethodComplexityFacts {
     pub block_invocations: Vec<BlockInvocationFact>,
     #[serde(default)]
     pub deferred_regions: Vec<DeferredRegionFact>,
+    /// Receiver-state checkpoint/restore regions that roll back calls made in
+    /// between.  These are language-neutral normalized facts; SCC and cost
+    /// classification remains the consumer's responsibility.
+    #[serde(default)]
+    pub state_replays: Vec<StateReplayFact>,
+    /// Monotonic-looking updates of receiver state, such as a cursor advance.
+    #[serde(default)]
+    pub state_progress: Vec<StateProgressFact>,
+    /// Receiver-state values used as indices into receiver-state collections.
+    #[serde(default)]
+    pub state_cursor_domains: Vec<StateCursorDomainFact>,
+}
+
+#[derive(Clone, Debug, Deserialize, Eq, Ord, PartialEq, PartialOrd, Serialize)]
+pub struct ReplayCallFact {
+    pub message: String,
+    pub line: usize,
+    pub span: [usize; 4],
+}
+
+#[derive(Clone, Debug, Deserialize, Eq, Ord, PartialEq, PartialOrd, Serialize)]
+pub struct StateReplayFact {
+    pub state_domain: String,
+    pub checkpoint_local: String,
+    pub checkpoint_line: usize,
+    pub checkpoint_span: [usize; 4],
+    pub restore_line: usize,
+    pub restore_span: [usize; 4],
+    pub replayed_calls: Vec<ReplayCallFact>,
+}
+
+#[derive(Clone, Debug, Deserialize, Eq, Ord, PartialEq, PartialOrd, Serialize)]
+pub struct StateProgressFact {
+    pub state_domain: String,
+    pub direction: String,
+    pub line: usize,
+    pub span: [usize; 4],
+}
+
+#[derive(Clone, Debug, Deserialize, Eq, Ord, PartialEq, PartialOrd, Serialize)]
+pub struct StateCursorDomainFact {
+    pub cursor_domain: String,
+    pub collection_domain: String,
+    pub line: usize,
+    pub span: [usize; 4],
 }
 
 #[derive(Clone, Debug, Deserialize, Eq, Ord, PartialEq, PartialOrd, Serialize)]
@@ -494,6 +539,10 @@ fn fact_for_method(
     let mut block_invocations = Vec::new();
     let mut deferred_regions = Vec::new();
     collect_deferred_regions(node, &mut deferred_regions, behavior);
+    let state_replays = collect_state_replays(node, &mut domain_registry, behavior);
+    let state_progress = collect_state_progress(node, &mut domain_registry, behavior);
+    let state_cursor_domains =
+        collect_state_cursor_domains(node, &mut domain_registry, behavior);
     let mut collection_growth = BTreeMap::new();
     visit_loops(
         node,
@@ -560,6 +609,9 @@ fn fact_for_method(
         && call_contexts.is_empty()
         && block_invocations.is_empty()
         && deferred_regions.is_empty()
+        && state_replays.is_empty()
+        && state_progress.is_empty()
+        && state_cursor_domains.is_empty()
     {
         return None;
     }
@@ -579,7 +631,267 @@ fn fact_for_method(
         size_domains: domain_registry.values(),
         block_invocations,
         deferred_regions,
+        state_replays,
+        state_progress,
+        state_cursor_domains,
     })
+}
+
+#[derive(Clone, Debug)]
+struct StateCheckpoint {
+    local: String,
+    state: String,
+    line: usize,
+    span: [usize; 4],
+}
+
+fn node_span(node: &Node) -> [usize; 4] {
+    [
+        node.first_lineno,
+        node.first_column,
+        node.last_lineno,
+        node.last_column,
+    ]
+}
+
+fn source_position(node: &Node) -> (usize, usize) {
+    (node.first_lineno, node.first_column)
+}
+
+fn state_assignment_name(node: &Node) -> Option<String> {
+    if matches!(node.r#type.as_str(), "IASGN" | "CVASGN" | "GASGN") {
+        return child_string(node.children.first()).map(ToString::to_string);
+    }
+    if node.r#type == "OP_ASGN2"
+        && node
+            .children
+            .first()
+            .and_then(ast::node)
+            .is_some_and(|receiver| receiver.r#type == "SELF")
+    {
+        return child_string(node.children.get(2)).map(|name| {
+            if name.starts_with('@') {
+                name.to_string()
+            } else {
+                format!("@{name}")
+            }
+        });
+    }
+    None
+}
+
+fn assignment_rhs(node: &Node) -> Option<&Node> {
+    node.children.iter().skip(1).find_map(ast::node)
+}
+
+fn collect_state_checkpoints(node: &Node, output: &mut Vec<StateCheckpoint>) {
+    if matches!(node.r#type.as_str(), "LASGN" | "DASGN") {
+        if let (Some(local), Some(rhs)) =
+            (child_string(node.children.first()), assignment_rhs(node))
+        {
+            let states = state_names(rhs);
+            if states.len() == 1 {
+                output.push(StateCheckpoint {
+                    local: local.to_string(),
+                    state: states.into_iter().next().unwrap_or_default(),
+                    line: node.first_lineno,
+                    span: node_span(node),
+                });
+            }
+        }
+    }
+    for child in child_nodes(node) {
+        collect_state_checkpoints(child, output);
+    }
+}
+
+fn collect_calls_between(
+    node: &Node,
+    after: (usize, usize),
+    before: (usize, usize),
+    output: &mut Vec<ReplayCallFact>,
+    behavior: &dyn NormalizedLanguageBehavior,
+) {
+    if deferred_block(node, behavior) {
+        return;
+    }
+    let position = source_position(node);
+    if after < position && position < before {
+        if let Some(message) = direct_call_message(node) {
+            output.push(ReplayCallFact {
+                message: message.to_string(),
+                line: node.first_lineno,
+                span: node_span(node),
+            });
+        }
+    }
+    for child in child_nodes(node) {
+        collect_calls_between(child, after, before, output, behavior);
+    }
+}
+
+fn collect_restore_nodes<'a>(node: &'a Node, output: &mut Vec<&'a Node>) {
+    if state_assignment_name(node).is_some() {
+        output.push(node);
+    }
+    for child in child_nodes(node) {
+        collect_restore_nodes(child, output);
+    }
+}
+
+fn collect_state_replays(
+    node: &Node,
+    domains: &mut DomainRegistry,
+    behavior: &dyn NormalizedLanguageBehavior,
+) -> Vec<StateReplayFact> {
+    let mut checkpoints = Vec::new();
+    collect_state_checkpoints(node, &mut checkpoints);
+    let mut writes = Vec::new();
+    collect_restore_nodes(node, &mut writes);
+    let mut output = Vec::new();
+
+    for checkpoint in checkpoints {
+        let Some(restore) = writes.iter().copied().find(|write| {
+            source_position(write) > (checkpoint.line, checkpoint.span[1])
+                && state_assignment_name(write).as_deref() == Some(checkpoint.state.as_str())
+                && assignment_rhs(write)
+                    .map(local_names)
+                    .is_some_and(|names| names.contains(&checkpoint.local))
+        }) else {
+            continue;
+        };
+        let mut replayed_calls = Vec::new();
+        collect_calls_between(
+            node,
+            (checkpoint.line, checkpoint.span[1]),
+            source_position(restore),
+            &mut replayed_calls,
+            behavior,
+        );
+        replayed_calls.sort();
+        replayed_calls.dedup();
+        if replayed_calls.is_empty() {
+            continue;
+        }
+        output.push(StateReplayFact {
+            state_domain: domains.state(&checkpoint.state, Some(checkpoint.span)),
+            checkpoint_local: checkpoint.local,
+            checkpoint_line: checkpoint.line,
+            checkpoint_span: checkpoint.span,
+            restore_line: restore.first_lineno,
+            restore_span: node_span(restore),
+            replayed_calls,
+        });
+    }
+    output.sort();
+    output.dedup();
+    output
+}
+
+fn collect_state_progress(
+    node: &Node,
+    domains: &mut DomainRegistry,
+    behavior: &dyn NormalizedLanguageBehavior,
+) -> Vec<StateProgressFact> {
+    fn visit(
+        node: &Node,
+        domains: &mut DomainRegistry,
+        behavior: &dyn NormalizedLanguageBehavior,
+        output: &mut Vec<StateProgressFact>,
+    ) {
+        if deferred_block(node, behavior) {
+            return;
+        }
+        if let Some(state) = state_assignment_name(node) {
+            let rhs = assignment_rhs(node);
+            let symbols = descendant_symbols(node);
+            // Some grammars preserve augmented assignment as an ordinary
+            // canonical state write whose source span still carries the
+            // language-common +=/-= token. Keep this bounded fallback here,
+            // rather than adding the same rule to every language adapter.
+            let compound_direction = if node.text.contains("+=") {
+                Some("advance")
+            } else if node.text.contains("-=") {
+                Some("retreat")
+            } else {
+                None
+            };
+            let updates_same_state = rhs.is_some_and(|value| state_names(value).contains(&state))
+                || node.r#type == "OP_ASGN2"
+                || compound_direction.is_some();
+            if updates_same_state {
+                let direction = if let Some(direction) = compound_direction {
+                    direction
+                } else if symbols.iter().any(|symbol| symbol == "+") {
+                    "advance"
+                } else if symbols.iter().any(|symbol| symbol == "-") {
+                    "retreat"
+                } else {
+                    "monotonic_update"
+                };
+                output.push(StateProgressFact {
+                    state_domain: domains.state(&state, Some(node_span(node))),
+                    direction: direction.to_string(),
+                    line: node.first_lineno,
+                    span: node_span(node),
+                });
+            }
+        }
+        for child in child_nodes(node) {
+            visit(child, domains, behavior, output);
+        }
+    }
+
+    let mut output = Vec::new();
+    visit(node, domains, behavior, &mut output);
+    output.sort();
+    output.dedup();
+    output
+}
+
+fn collect_state_cursor_domains(
+    node: &Node,
+    domains: &mut DomainRegistry,
+    behavior: &dyn NormalizedLanguageBehavior,
+) -> Vec<StateCursorDomainFact> {
+    fn visit(
+        node: &Node,
+        domains: &mut DomainRegistry,
+        behavior: &dyn NormalizedLanguageBehavior,
+        output: &mut Vec<StateCursorDomainFact>,
+    ) {
+        if deferred_block(node, behavior) {
+            return;
+        }
+        if direct_call_message(node) == Some("[]") {
+            let collections = call_receiver(node).map(state_names).unwrap_or_default();
+            let cursors = call_argument_nodes(node)
+                .into_iter()
+                .flat_map(state_names)
+                .collect::<BTreeSet<_>>();
+            for collection in &collections {
+                for cursor in &cursors {
+                    if collection != cursor {
+                        output.push(StateCursorDomainFact {
+                            cursor_domain: domains.state(cursor, Some(node_span(node))),
+                            collection_domain: domains.state(collection, Some(node_span(node))),
+                            line: node.first_lineno,
+                            span: node_span(node),
+                        });
+                    }
+                }
+            }
+        }
+        for child in child_nodes(node) {
+            visit(child, domains, behavior, output);
+        }
+    }
+
+    let mut output = Vec::new();
+    visit(node, domains, behavior, &mut output);
+    output.sort();
+    output.dedup();
+    output
 }
 
 fn collect_deferred_regions(
@@ -1959,6 +2271,78 @@ mod tests {
         file.write_all(source.as_bytes()).unwrap();
         let document = syntax::parse_file(file.path().to_path_buf(), Language::Ruby).unwrap();
         facts(&document)
+    }
+
+    fn language_facts(source: &str, language: Language, suffix: &str) -> Vec<MethodComplexityFacts> {
+        let mut file = tempfile::Builder::new().suffix(suffix).tempfile().unwrap();
+        file.write_all(source.as_bytes()).unwrap();
+        let document = syntax::parse_file(file.path().to_path_buf(), language).unwrap();
+        facts(&document)
+    }
+
+    #[test]
+    fn normalized_state_replay_facts_are_cross_language_and_reject_incomplete_protocols() {
+        let ruby = language_facts(
+            r#"
+class ReplayCursor
+  def speculate
+    checkpoint = @cursor
+    parse_value
+    @cursor = checkpoint
+  end
+
+  def parse_value
+    @tokens[@cursor]
+    @cursor += 1
+  end
+end
+"#,
+            Language::Ruby,
+            ".rb",
+        );
+        let python = language_facts(
+            r#"
+class ReplayCursor:
+    def speculate(self):
+        checkpoint = self.cursor
+        self.parse_value()
+        self.cursor = checkpoint
+
+    def parse_value(self):
+        self.tokens[self.cursor]
+        self.cursor += 1
+"#,
+            Language::Python,
+            ".py",
+        );
+
+        for rows in [&ruby, &python] {
+            let replay = rows.iter().find(|row| row.function == "speculate").unwrap();
+            assert_eq!(replay.state_replays.len(), 1);
+            assert_eq!(replay.state_replays[0].checkpoint_local, "checkpoint");
+            assert_eq!(replay.state_replays[0].replayed_calls[0].message, "parse_value");
+            let value = rows.iter().find(|row| row.function == "parse_value").unwrap();
+            assert_eq!(value.state_cursor_domains.len(), 1);
+            assert_eq!(value.state_cursor_domains[0].cursor_domain, "state:ReplayCursor:@cursor");
+            assert_eq!(value.state_progress.len(), 1, "{value:#?}");
+        }
+
+        let incomplete = ruby_facts(
+            r#"
+class ReplayCursor
+  def inspect_only
+    checkpoint = @cursor
+    parse_value
+  end
+end
+"#,
+        );
+        assert!(incomplete
+            .iter()
+            .find(|row| row.function == "inspect_only")
+            .unwrap()
+            .state_replays
+            .is_empty());
     }
 
     fn complexity(rows: &[MethodComplexityFacts], name: &str) -> Option<String> {
