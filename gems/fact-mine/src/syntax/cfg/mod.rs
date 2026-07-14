@@ -31,7 +31,7 @@ pub(crate) fn build(
     behavior: &dyn NormalizedLanguageBehavior,
 ) -> ControlFlowFacts {
     let mut facts = builder::build(methods, behavior);
-    effects::extract(methods, behavior.cfg_profile(), &mut facts);
+    effects::extract(methods, behavior, &mut facts);
     dataflow::derive(&mut facts);
     facts
 }

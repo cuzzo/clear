@@ -2315,7 +2315,7 @@ module NilKill
       Array(evidence.dig("facts", "struct_declarations")).each do |decl|
         Array(decl["fields"]).each do |field|
           next if strong_static.include?([decl["class"].to_s, field.to_s])
-          type = decl.dig("field_types", field.to_s) || rbi[[decl["class"], field]]
+          type = struct_declared_type(decl, field, rbi)
           next if type && !untyped_type?(strip_nilable(type.to_s))
           observed = rt[[decl["class"].to_s, field.to_s]].uniq
           non_nil = observed.reject { |c| c == "NilClass" || c.to_s.empty? }
@@ -2523,7 +2523,7 @@ module NilKill
       rbi_types = struct_rbi_types
       Array(evidence.dig("facts", "struct_declarations")).each do |decl|
         Array(decl["fields"]).each do |field|
-          tally.("Struct/class fields & ivars", rbi_types[[decl["class"], field]] || "T.untyped")
+          tally.("Struct/class fields & ivars", struct_declared_type(decl, field, rbi_types) || "T.untyped")
         end
       end
       Array(evidence.dig("facts", "tlet_sites")).each do |s|
@@ -2603,7 +2603,7 @@ module NilKill
       rbi_types = struct_rbi_types
       Array(evidence.dig("facts", "struct_declarations")).each do |decl|
         Array(decl["fields"]).each do |field|
-          type = rbi_types[[decl["class"], field]] || "T.untyped"
+          type = struct_declared_type(decl, field, rbi_types) || "T.untyped"
           next unless untyped_type?(strip_nilable(type.to_s))
 
           add.(field, "field", "#{decl["path"]}:#{decl["line"]} #{decl["class"]}.#{field}")
@@ -2656,7 +2656,13 @@ module NilKill
       sigs.each do |method|
         rec = method_lookup[[method["path"], method["line"]]]
         extract_param_entries(method["sig"].to_s).each_with_index do |(name, type), idx|
-          next unless type == "T.untyped"
+          inner = strip_nilable(type.to_s)
+          next if collection_typed?(type)
+          next unless inner.include?("T.untyped")
+          if inner != "T.untyped"
+            rows["Param inputs"]["WeakEvidence"] += 1
+            next
+          end
           classes = Array(rec&.dig("params_ok", name))
           classes = Array(rec&.dig("params_by_name", name)) if classes.empty?
           slot_origins = Array(origins_by_callee[method["method"].to_s]).select do |o|
@@ -2664,7 +2670,14 @@ module NilKill
           end
           rows["Param inputs"][classify_param_untyped_cause(method, name, classes, rec, slot_origins)] += 1
         end
-        next unless extract_return_type(method["sig"].to_s) == "T.untyped"
+        return_type = extract_return_type(method["sig"].to_s).to_s
+        return_inner = strip_nilable(return_type)
+        next if collection_typed?(return_type)
+        next unless return_inner.include?("T.untyped")
+        if return_inner != "T.untyped"
+          rows["Returns"]["WeakEvidence"] += 1
+          next
+        end
         rows["Returns"][classify_return_untyped_cause(method, rec, unused)] += 1
       end
 
@@ -2814,8 +2827,10 @@ module NilKill
       # Explicit `T.let(x, T.untyped)` -- a deliberate untyped
       # declaration that is almost always narrowable.
       Array(evidence.dig("facts", "tlet_sites")).each do |site|
-        next unless site["tlet"] && site["type"].to_s == "T.untyped"
-        bucket["Refused/Pending"] += 1
+        next unless site["tlet"]
+        type = strip_nilable(site["type"].to_s)
+        next if collection_typed?(site["type"].to_s) || !type.include?("T.untyped")
+        bucket[type == "T.untyped" ? "Refused/Pending" : "WeakEvidence"] += 1
       end
       rbi_types = struct_rbi_types
       # Honest PropagationGap signal (same fix as returns/params): a
@@ -2843,11 +2858,16 @@ module NilKill
       end
       Array(evidence.dig("facts", "struct_declarations")).each do |decl|
         Array(decl["fields"]).each do |field|
-          type = rbi_types[[decl["class"], field]]
+          type = struct_declared_type(decl, field, rbi_types)
           inner = strip_nilable(type.to_s)
+          next if collection_typed?(type.to_s)
           # "missing" (no RBI type) and plain untyped both count here;
           # weak-collection goes to the Arrays/Sets/Hashmaps row.
-          next if type && !untyped_type?(inner)
+          next if type && !inner.include?("T.untyped")
+          if type && inner != "T.untyped"
+            bucket["WeakEvidence"] += 1
+            next
+          end
           observed = rt[[decl["class"].to_s, field.to_s]].uniq
           non_nil = observed.reject { |c| c == "NilClass" || c.to_s.empty? }
           useful = non_nil.select { |c| NilKill.useful_type?(c) && !weak_collection_type?(c) }
@@ -2959,7 +2979,7 @@ module NilKill
       rbi_types = struct_rbi_types
       Array(evidence.dig("facts", "struct_declarations")).each do |decl|
         Array(decl["fields"]).each do |field|
-          next unless seen.(rbi_types[[decl["class"], field]].to_s)
+          next unless seen.(struct_declared_type(decl, field, rbi_types).to_s)
           recs = struct_idx["#{decl["class"]}.#{field}"] + sfr[[decl["class"].to_s, field.to_s]]
           slots << mk.("#{decl["path"]}:#{decl["line"]}", "#{decl["class"]}.#{field}",
                        rec_elems.(recs), recs.flat_map { |r| Array(r["elem_shapes"]) })
@@ -3734,7 +3754,7 @@ module NilKill
       counts = empty_type_counts.merge("missing" => 0)
       declarations.each do |decl|
         Array(decl["fields"]).each do |field|
-          type = rbi_types[[decl["class"], field]]
+          type = struct_declared_type(decl, field, rbi_types)
           if type
             classify_type!(counts, type)
           else
@@ -3758,7 +3778,7 @@ module NilKill
       declarations.each do |decl|
         Array(decl["fields"]).each do |field|
           key = [decl["class"], field]
-          type = rbi_types[key]
+          type = struct_declared_type(decl, field, rbi_types)
           candidate = candidates[key]
           bucket =
             if type.nil?
@@ -3801,25 +3821,20 @@ module NilKill
     end
 
     def struct_rbi_types
-      types = {}
-      Dir.glob(File.join(ROOT, "sorbet", "rbi", "**", "*.rbi")).each do |path|
-        klass = nil
-        pending_type = nil
-        File.readlines(path).each do |line|
-          if line =~ /^\s*class\s+([A-Z]\S*)/
-            klass = $1
-          elsif klass && line =~ /^\s*sig\s*\{\s*returns\((.+)\)\s*\}/
-            pending_type = $1.strip
-          elsif klass && pending_type && line =~ /^\s*def\s+([a-zA-Z_]\w*)\b/
-            types[[klass, $1]] = pending_type
-            pending_type = nil
-          elsif line =~ /^\s*end\s*$/
-            klass = nil
-            pending_type = nil
-          end
-        end
-      end
-      types
+      StructFieldTypeIndex.from_rbi(ROOT)
+    end
+
+    # FactMine carries the field type beside each declaration. That is the
+    # primary source of truth: generated accessor RBI is an optional fallback,
+    # and can legitimately lag a newly indexed source declaration. Treating a
+    # missing RBI accessor as an untyped source field made the hygiene report
+    # disagree with both the trace plan and the evidence-gap invariant.
+    def struct_declared_type(declaration, field, rbi_types = struct_rbi_types)
+      field_types = declaration["field_types"] || {}
+      direct = field_types[field.to_s] || field_types[field.to_sym]
+      return direct unless direct.to_s.empty?
+
+      rbi_types[[declaration["class"], field]]
     end
 
     def append_struct_field_candidates(lines, runtime, static)
@@ -5000,7 +5015,7 @@ module NilKill
     # unknown. Counted in "weak" already; this sub-bucket lets us report the
     # primitive-collection-with-untyped-element pressure across all slot kinds.
     def weak_collection_type?(type)
-      type.to_s.match?(/\AT::(?:Array|Hash|Enumerable|Set)\b.*\[T\.untyped/)
+      type.to_s.match?(/\AT::(?:Array|Hash|Enumerable|Set)\b.*T\.untyped/)
     end
 
     def extract_param_types(sig)

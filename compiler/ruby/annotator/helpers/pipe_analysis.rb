@@ -1153,7 +1153,7 @@ module PipeAnalysis
   # Pre-scan: check if the EACH body references any @sharded map variable
   # by scanning for identifiers that are in scope as @sharded (without :locked).
   # This runs BEFORE visiting the body, so we only check unvisited AST.
-  sig { params(conc: AST::ConcurrentOp, sharded_names: T.untyped).void }
+  sig { params(conc: AST::ConcurrentOp, sharded_names: T::Set[String]).void }
   def emit_multi_map_warning(conc, sharded_names)
     T.bind(self, SemanticAnnotator) rescue nil
     shard_counts = sharded_names.map do |name|

@@ -196,7 +196,7 @@ module ConcurrencyChecks
   end
 
   # Names of function parameters held by a WithBlock's bindings.
-  sig { params(with_block: T.untyped, fn: T.untyped).returns(T::Set[String]) }
+  sig { params(with_block: AST::WithBlock, fn: AST::FunctionDef).returns(T::Set[String]) }
   def self.collect_held_params(with_block, fn)
     return Set.new unless fn.respond_to?(:params)
     param_names = fn.params.map { |p| p.name.to_s }.to_set

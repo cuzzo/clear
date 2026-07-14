@@ -97,7 +97,13 @@ module LSP
       T.must(position[key] || position[key.to_s])
     end
 
-    sig { params(diag: RPC::OutboundMessage, entry: T.untyped, example: T.untyped).returns(String) }
+    sig do
+      params(
+        diag: RPC::OutboundMessage,
+        entry: T.nilable(DiagnosticRegistry::DiagnosticEntry),
+        example: T.nilable(DiagnosticExamples::Example),
+      ).returns(String)
+    end
     def self.build_markdown(diag, entry, example)
       lines = []
       lines << header_line(diag, entry)
@@ -115,22 +121,25 @@ module LSP
       end
 
       if example
-        if example[:bad]
+        bad = T.cast(example[:bad], T.nilable(String))
+        fix = T.cast(example[:fix], T.nilable(String))
+        good = T.cast(example[:good], T.nilable(String))
+        if bad
           lines << ""
           lines << "**Example (bad):**"
           lines << "```clear"
-          lines << example[:bad].rstrip
+          lines << bad.rstrip
           lines << "```"
         end
-        if example[:fix] && !example[:fix].empty?
+        if fix && !fix.empty?
           lines << ""
-          lines << "**Fix prose:** #{example[:fix].gsub("\n", " ")}"
+          lines << "**Fix prose:** #{fix.gsub("\n", " ")}"
         end
-        if example[:good]
+        if good
           lines << ""
           lines << "**Example (good):**"
           lines << "```clear"
-          lines << example[:good].rstrip
+          lines << good.rstrip
           lines << "```"
         end
       end

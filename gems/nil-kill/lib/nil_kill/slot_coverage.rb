@@ -139,14 +139,23 @@ module NilKill
       type_definitions(evidence).each_with_object({}) do |definition, index|
         next unless definition["kind"] == "method_signature"
 
-        index[method_key(definition)] = definition
+        key = method_key(definition)
+        current = index[key]
+        index[key] = definition if current.nil? || (method_signature_quality(definition) <=> method_signature_quality(current)) == 1
       end
+    end
+
+    def method_signature_quality(signature)
+      params = Array(signature["params"])
+      typed_params = params.count { |param| slot_strength(param["type"]) != "untyped" }
+      return_type = return_type_for(signature)
+      [params.size, typed_params, return_type.to_s.empty? ? 0 : 1, signature["signature"].to_s.length]
     end
 
     def field_type_index(evidence)
       definitions = type_definitions(evidence)
       included_modules = included_modules_by_owner(definitions)
-      definitions.each_with_object({}) do |definition, index|
+      index = definitions.each_with_object({}) do |definition, out|
         case definition["kind"]
         when "state_field"
           type = definition["declared_type"]
@@ -157,12 +166,29 @@ module NilKill
         end
 
         field_keys(definition).each do |key|
-          assign_field_type!(index, key, type)
+          assign_field_type!(out, key, type)
         end
         included_method_field_keys(definition, included_modules).each do |key|
-          assign_field_type!(index, key, type)
+          assign_field_type!(out, key, type)
         end
       end
+      Array(evidence.dig("facts", "struct_declarations")).each do |declaration|
+        Array(declaration["fields"]).each do |field|
+          type = declaration.dig("field_types", field.to_s)
+          next if type.to_s.empty?
+
+          record = {
+            "path" => declaration["path"],
+            "owner" => declaration["class"],
+            "name" => field,
+          }
+          field_keys(record).each { |key| assign_field_type!(index, key, type) }
+        end
+      end
+      StructFieldTypeIndex.from_rbi(ROOT).each do |(owner, field), type|
+        assign_field_type!(index, [owner, field], type)
+      end
+      index
     end
 
     def included_modules_by_owner(definitions)
@@ -254,7 +280,7 @@ module NilKill
       [
         record["path"].to_s,
         record["owner"].to_s,
-        record["name"].to_s
+        record["name"].to_s.delete_prefix("self.")
       ]
     end
 

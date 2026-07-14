@@ -1130,7 +1130,7 @@ module MIRHoistLowering
     nil
   end
 
-  sig { params(value: T.untyped, old_child: MIR::Node, new_child: T.untyped).returns(T::Boolean) }
+  sig { params(value: T.untyped, old_child: MIR::Node, new_child: MIR::Node).returns(T::Boolean) }
   def replace_mir_expr_in_value!(value, old_child, new_child)
     case value
     when Array

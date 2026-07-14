@@ -1954,7 +1954,7 @@ RSpec.describe NilKill do
       )
     end
 
-    xit "turns Sorbet result-type errors into review widening feedback" do
+    it "turns Sorbet result-type errors into review widening feedback" do
       infer = infer_with_store
       output = <<~TEXT
         lib/example.rb:12: Expected `String` but found `T.nilable(String)` for method result type https://srb.help/7005

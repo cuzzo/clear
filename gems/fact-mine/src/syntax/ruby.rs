@@ -212,6 +212,10 @@ const RUBY_CFG_PROFILE: ControlFlowProfile = ControlFlowProfile {
 pub(crate) struct RubyNormalizedBehavior;
 
 impl NormalizedLanguageBehavior for RubyNormalizedBehavior {
+    fn declared_type_hint_complete(&self, type_name: &str) -> bool {
+        !type_name.contains("T.untyped")
+    }
+
     fn function_dispatch_name(&self, name: &str) -> String {
         name.strip_prefix("self.").unwrap_or(name).to_string()
     }
@@ -1484,7 +1488,7 @@ fn sig_param_types(source: &str, function_line: usize) -> BTreeMap<String, Strin
         if stripped.starts_with("sig") {
             break;
         }
-        if cursor == 0 || sig_lines.len() >= 12 {
+        if cursor == 0 {
             break;
         }
         cursor -= 1;
@@ -1630,6 +1634,38 @@ mod tests {
         assert!(aliases.contains_key("Parent::MyAlias6"));
         assert!(!aliases.contains_key("Nested::Child::MyAliasEmpty"));
     }
+
+    #[test]
+    fn sig_param_types_accepts_long_multiline_signatures() {
+        let source = r#"sig do
+    params(
+      first: String,
+      second: Integer,
+      third: Symbol,
+      fourth: T::Boolean,
+      fifth: T.nilable(String),
+      sixth: T::Array[String],
+      seventh: T::Hash[String, Integer],
+      eighth: Float,
+      ninth: Object,
+      tenth: Numeric,
+      eleventh: BasicObject,
+      twelfth: Exception,
+      thirteenth: Thread,
+      weak: T::Array[T.untyped]
+    ).void
+  end
+  def call(first, second, third, fourth, fifth, sixth, seventh, eighth, ninth, tenth, eleventh, twelfth, thirteenth)
+  end"#;
+
+        let param_types = sig_param_types(source, 18);
+
+        assert_eq!(param_types.get("first").map(String::as_str), Some("String"));
+        assert_eq!(param_types.get("thirteenth").map(String::as_str), Some("Thread"));
+        assert_eq!(param_types.get("weak").map(String::as_str), Some("T::Array[T.untyped]"));
+        assert_eq!(param_types.len(), 14);
+    }
+
     #[test]
     fn test_ruby_behavior_uncovered_methods() {
         use crate::syntax::Child;
@@ -2002,6 +2038,9 @@ mod tests {
         assert!(!is_valid_type(""));
         assert!(!is_valid_type("lowercase"));
         assert!(is_valid_type("T.foo"));
+        assert!(behavior.declared_type_hint_complete("T::Array[String]"));
+        assert!(!behavior.declared_type_hint_complete("T.untyped"));
+        assert!(!behavior.declared_type_hint_complete("T::Array[T.untyped]"));
 
         // parameter_list_source success path
         assert_eq!(behavior.parameter_list_source("def foo(a, b)"), "a, b");

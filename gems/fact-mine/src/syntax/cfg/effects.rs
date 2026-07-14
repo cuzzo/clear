@@ -2,6 +2,7 @@ use super::{
     branches, loops, ControlFlowFacts, ControlFlowNode, ControlFlowProfile, NodeEffect, Place,
 };
 use crate::ast::{self, Child, Node};
+use crate::syntax::normalized_behavior::NormalizedLanguageBehavior;
 use crate::syntax::{local_flow::MethodSummary, Span};
 use std::collections::{BTreeMap, BTreeSet};
 
@@ -28,9 +29,10 @@ type GraphKey = (String, String, String, usize, usize);
 
 pub(crate) fn extract(
     methods: &[MethodSummary],
-    profile: &ControlFlowProfile,
+    behavior: &dyn NormalizedLanguageBehavior,
     facts: &mut ControlFlowFacts,
 ) {
+    let profile = behavior.cfg_profile();
     let mut raw_by_node = BTreeMap::new();
     let mut all_names = BTreeMap::<GraphKey, BTreeSet<String>>::new();
     let mut declaration_spans = BTreeMap::<(GraphKey, String), Span>::new();
@@ -63,8 +65,10 @@ pub(crate) fn extract(
             raw.writes.extend(method.params.iter().cloned());
             for (name, type_name) in &method.param_types {
                 raw.writes.insert(name.clone());
-                raw.write_type_hints
-                    .insert(name.clone(), format!("declared:{type_name}"));
+                if behavior.declared_type_hint_complete(type_name) {
+                    raw.write_type_hints
+                        .insert(name.clone(), format!("declared:{type_name}"));
+                }
             }
         }
 

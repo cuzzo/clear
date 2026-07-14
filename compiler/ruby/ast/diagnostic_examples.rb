@@ -43,7 +43,9 @@ require_relative "../semantic/ownership_graph"
 module DiagnosticExamples
   extend T::Sig
 
-  Example = T.type_alias { T::Hash[Symbol, T.untyped] }
+  ExampleValue = T.type_alias { T.nilable(T.any(String, Integer)) }
+  Example = T.type_alias { T::Hash[Symbol, ExampleValue] }
+  Examples = T.type_alias { T::Hash[Symbol, Example] }
 
   class FixScan < T::Struct
     const :fix_lines, T::Array[String]
@@ -63,7 +65,7 @@ module DiagnosticExamples
 
   # Public entry point. Parses each spec file once, memoises results.
   # Returns a hash { CODE_SYM => { bad:, fix:, good:, file:, line: } }.
-  sig { returns(T::Hash[Symbol, T::Hash[Symbol, T.untyped]]) }
+  sig { returns(Examples) }
   def self.all
     @all = T.let(@all, T.untyped)
     @all ||= load!
@@ -74,7 +76,7 @@ module DiagnosticExamples
     all[code.to_sym]
   end
 
-  sig { params(spec_files: T.untyped).returns(T::Hash[Symbol, T::Hash[Symbol, T.untyped]]) }
+  sig { params(spec_files: T::Array[String]).returns(Examples) }
   def self.load!(spec_files = DEFAULT_SPEC_FILES)
     out = {}
     spec_files.each do |path|
@@ -86,7 +88,7 @@ module DiagnosticExamples
 
   # ---- internals ----
 
-  sig { params(path: String, out: T.untyped).returns(NilClass) }
+  sig { params(path: String, out: Examples).returns(NilClass) }
   def self.scan_file(path, out)
     lines = File.readlines(path)
     i = T.let(0, Integer)

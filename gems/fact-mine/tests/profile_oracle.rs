@@ -319,6 +319,45 @@ end
 }
 
 #[test]
+fn nil_kill_profile_preserves_weak_declared_shapes_without_marking_them_resolved() -> Result<()> {
+    use std::io::Write;
+
+    let mut tmp = tempfile::Builder::new().suffix(".rb").tempfile()?;
+    tmp.write_all(br#"class TypedInputs
+  extend T::Sig
+  sig { params(strong: String, weak: T::Array[T.untyped]).void }
+  def run(strong, weak)
+    strong.to_s
+    weak.length
+  end
+end
+"#)?;
+    let document = syntax::parse_file(tmp.path().to_path_buf(), Language::Ruby)?;
+    let declared = document
+        .method_param_types
+        .get("TypedInputs\0run")
+        .context("missing declared parameter shapes")?;
+    assert_eq!(declared.get("weak").map(String::as_str), Some("T::Array[T.untyped]"));
+
+    let output = profile::extract(&document, Profile::NilKill);
+    let parameter = |name: &str| {
+        output.type_dependencies.iter().find(|fact| {
+            fact["function"] == "run"
+                && fact["name"] == name
+                && fact["kind"] == "definition"
+                && fact["candidate_kind"] == "parameter"
+        })
+    };
+    let strong = parameter("strong").context("missing strong parameter dependency")?;
+    let weak = parameter("weak").context("missing weak parameter dependency")?;
+    assert_eq!(strong["resolved"], true);
+    assert_eq!(strong["candidate"], false);
+    assert_eq!(weak["resolved"], false);
+    assert_eq!(weak["candidate"], true);
+    Ok(())
+}
+
+#[test]
 fn nil_kill_profile_connects_program_globals_across_owners_and_files() -> Result<()> {
     use std::io::Write;
 

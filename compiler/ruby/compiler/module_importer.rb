@@ -32,7 +32,7 @@ class ModuleImporter
   sig { returns(T::Hash[T.untyped, T.untyped]) }
   attr_reader :module_cache
 
-  sig { params(base_dir: String, pkg_paths: T::Hash[T.untyped, T.untyped], use_mir: T::Boolean, stdlib_root: String).void }
+  sig { params(base_dir: String, pkg_paths: T::Hash[String, String], use_mir: T::Boolean, stdlib_root: String).void }
   def initialize(base_dir: Dir.pwd, pkg_paths: {}, use_mir: false, stdlib_root: STDLIB_ROOT)
     @base_dir     = T.let(File.expand_path(base_dir), String)
     @module_cache = T.let({}, T::Hash[T.untyped, T.untyped])  # abs_path => CompiledModule

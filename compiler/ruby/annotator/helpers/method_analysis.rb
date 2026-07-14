@@ -42,7 +42,7 @@ module MethodAnalysis
   #
   # @param matched_def [Hash] the STD_LIB definition that matched
   # @param args [Array] the resolved argument nodes
-  sig { params(matched_def: FunctionSignature, args: T::Array[T.untyped]).returns(T.nilable(Type)) }
+  sig { params(matched_def: FunctionSignature, args: T::Array[AST::Node]).returns(T.nilable(Type)) }
   def narrow_collection_type!(matched_def, args)
     T.bind(self, SemanticAnnotator) rescue nil
     return unless matched_def.intrinsic_contract.behavior.narrows_collection && args.size >= 2
@@ -56,7 +56,7 @@ module MethodAnalysis
     return if ti.is_a?(Type) && ti.promise_list?
     return unless ti.is_a?(Type) && ti.collection && ti.element_type&.resolved == :Any
 
-    val_arg = args[1]
+    val_arg = T.must(args[1])
     val_type = val_arg.resolved_type
     new_type = Type.new(:"#{val_type}[]", collection: ti.collection)
     new_type.copy_collection_shape_from!(ti)

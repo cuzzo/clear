@@ -46,7 +46,9 @@ require "sorbet-runtime"
 module DiagnosticRegistry
   extend T::Sig
 
-  DiagnosticKwValue = T.type_alias { T.nilable(T.any(String, Symbol, Integer, T::Boolean, T::Class[T.anything])) }
+  DiagnosticKwValue = T.type_alias do
+    T.nilable(T.any(String, Symbol, Integer, T::Boolean, T::Class[T.anything], T::Array[Symbol]))
+  end
   DiagnosticEntryValue = T.type_alias { T.nilable(T.any(String, Symbol, T::Boolean)) }
   DiagnosticEntry = T.type_alias { T::Hash[Symbol, DiagnosticEntryValue] }
   CATEGORIES = T.let(%i[type ownership capability concurrency lifetime escape registry reentrance lint syntax mir test].freeze, T::Array[Symbol])
@@ -3232,7 +3234,7 @@ module DiagnosticRegistry
     format_template(T.cast(entry[:template], String), args, kwargs)
   end
 
-  sig { params(template: String, args: T::Array[T.untyped], kwargs: T.untyped).returns(String) }
+  sig { params(template: String, args: T::Array[T.untyped], kwargs: T::Hash[Symbol, DiagnosticKwValue]).returns(String) }
   def self.format_template(template, args = [], kwargs = {})
     if !kwargs.empty? || template.include?("%{")
       return template % kwargs if !template.include?("%{") || named_template_args_complete?(template, kwargs)

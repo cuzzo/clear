@@ -147,14 +147,15 @@ module UnionAnalysis
   # Validate that a union type and variant exist, and that the variant
   # supports inline struct construction (not a unit or single-payload variant).
   # Returns the variant data hash on success.
-  sig { params(node: AST::UnionVariantLit, schema: T.untyped).returns(T.nilable(Schemas::InlineStructVariant)) }
+  sig { params(node: AST::UnionVariantLit, schema: Schemas::SchemaValue).returns(T.nilable(Schemas::InlineStructVariant)) }
   def validate_union_schema!(node, schema)
     T.bind(self, SemanticAnnotator) rescue {}
     if schema.nil?
       error!(node, :UNION_TYPE_UNKNOWN, name: node.union_name)
     end
-    unless Schemas.union?(schema)
+    unless schema.is_a?(Schemas::UnionSchema)
       error!(node, :NOT_A_UNION_TYPE, name: node.union_name)
+      return nil
     end
     unless schema.variants.key?(node.variant_name)
       emit_variant_typo!(
@@ -167,12 +168,13 @@ module UnionAnalysis
     end
 
     var_data = schema.variants[node.variant_name]
-    unless Schemas.inline_struct?(var_data)
+    unless var_data.is_a?(Schemas::InlineStructVariant)
       if var_data.nil?
         error!(node, :UNION_VARIANT_IS_UNIT_NO_FIELDS, variant: node.variant_name, union: node.union_name)
       else
         error!(node, :UNION_VARIANT_NEEDS_PAYLOAD_OBJECT, variant: node.variant_name, union: node.union_name)
       end
+      return nil
     end
 
     var_data

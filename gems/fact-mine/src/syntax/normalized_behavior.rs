@@ -105,6 +105,10 @@ pub(crate) trait NormalizedLanguageBehavior: Sync {
         ControlFlowProfile::neutral_ref()
     }
 
+    fn declared_type_hint_complete(&self, _type_name: &str) -> bool {
+        true
+    }
+
     fn collection_allocation_semantics(&self, _message: &str) -> CollectionAllocationSemantics {
         CollectionAllocationSemantics::None
     }

@@ -666,7 +666,7 @@ module GenericAnalysis
   # Walk through OR/OR_ELSE to find the root container/struct variable name.
   # Returns the root variable name when the expression borrows from a container
   # (GetIndex on map/list) or extracts a non-Copy field from a struct (GetField).
-  sig { params(expr: T.untyped).returns(T.nilable(String)) }
+  sig { params(expr: T.nilable(AST::Node)).returns(T.nilable(String)) }
   def find_container_source(expr)
     T.bind(self, SemanticAnnotator) rescue nil
     return nil unless expr

@@ -1970,5 +1970,98 @@ RSpec.describe "NilKill coverage hardening" do
         expect(report.send(:strip_nilable, "T.nilable(String)")).to eq("String")
       end
     end
+
+    it "uses declaration field types when generated accessor RBI is absent" do
+      report = described_class.new
+      allow(report).to receive(:struct_rbi_types).and_return({})
+      declaration = {
+          "path" => "compiler/ruby/example.rb",
+          "line" => 10,
+          "class" => "ExampleRecord",
+          "fields" => %w[name tags missing],
+          "field_types" => {
+            "name" => "String",
+            "tags" => "T::Array[T.untyped]",
+          },
+      }
+      evidence = {
+          "methods" => [],
+          "actions" => [],
+          "facts" => {
+            "existing_sigs" => [],
+            "param_origins" => [],
+            "return_origins" => [],
+            "struct_declarations" => [declaration],
+            "struct_field_runtime" => [],
+            "ivar_runtime" => [],
+            "collection_runtime" => [],
+            "tlet_sites" => [],
+          },
+      }
+
+      soundness = report.send(:type_soundness_table, evidence)
+      expect(soundness["Struct/class fields & ivars"]).to include(
+        "total" => 2,
+        "strong" => 1,
+        "untyped" => 1
+      )
+      expect(soundness["Arrays/Sets/Hashmaps"]).to include(
+        "total" => 1,
+        "untyped" => 1
+      )
+
+      causes = report.send(:untyped_cause_table, evidence)
+      expect(causes["Struct/class fields & ivars"]["NoEvidence"]).to eq(1)
+      expect(causes["Arrays/Sets/Hashmaps"]["NoEvidence"]).to eq(1)
+
+      lines = []
+      report.send(:append_struct_field_coverage, lines, [declaration])
+      expect(lines.join("\n")).to include("strong 1", "missing field type 1")
+    end
+
+    it "reconciles nested untyped unions and hash values across soundness and cause tables" do
+      report = described_class.new
+      allow(report).to receive(:struct_rbi_types).and_return({})
+      evidence = {
+        "methods" => [],
+        "actions" => [],
+        "facts" => {
+          "existing_sigs" => [{
+            "path" => "compiler/ruby/example.rb",
+            "line" => 1,
+            "class" => "Example",
+            "method" => "run",
+            "sig" => "sig { params(value: T.any(String, T.untyped), lookup: T::Hash[String, T.untyped]).returns(T.any(Symbol, T.untyped)) }",
+          }],
+          "param_origins" => [],
+          "return_origins" => [],
+          "struct_declarations" => [{
+            "path" => "compiler/ruby/example.rb",
+            "line" => 10,
+            "class" => "Record",
+            "fields" => %w[payload],
+            "field_types" => { "payload" => "T.any(Integer, T.untyped)" },
+          }],
+          "struct_field_runtime" => [],
+          "ivar_runtime" => [],
+          "collection_runtime" => [],
+          "tlet_sites" => [],
+        },
+      }
+
+      soundness = report.send(:type_soundness_table, evidence)
+      causes = report.send(:untyped_cause_table, evidence)
+      cause_total = lambda do |category|
+        NilKill::Report::UNTYPED_CAUSES.sum { |cause| causes[category][cause] }
+      end
+
+      expect(causes["Param inputs"]["WeakEvidence"]).to eq(1)
+      expect(causes["Returns"]["WeakEvidence"]).to eq(1)
+      expect(causes["Struct/class fields & ivars"]["WeakEvidence"]).to eq(1)
+      expect(cause_total.call("Arrays/Sets/Hashmaps")).to eq(1)
+      NilKill::Report::SOUNDNESS_CATEGORIES.each do |category|
+        expect(cause_total.call(category)).to eq(soundness[category]["untyped"])
+      end
+    end
   end
 end

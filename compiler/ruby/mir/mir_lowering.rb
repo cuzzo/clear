@@ -1594,8 +1594,9 @@ class MIRLowering
     )
   end
 
-  sig { params(stmt: T.untyped, mir: T.untyped).returns([T.untyped, T::Boolean]) }
+  sig { params(stmt: LowerableStmt, mir: T.untyped).returns([T.untyped, T::Boolean]) }
   def materialize_statement_discard(stmt, mir)
+    return [mir, false] unless stmt.is_a?(AST::Locatable)
     return [mir, false] unless discard_expr_stmt?(stmt, mir)
 
     discard_type = Type.from_node!(stmt, context: "discard allocation mark")
