@@ -105,6 +105,7 @@ fn hits_for_document(document: &Document) -> Vec<Hit> {
     document
         .semantic_effect_sites
         .iter()
+        .filter(|site| !(site.kind == "hidden_mutation" && site.receiver_scope == "owned_local"))
         .map(|site| Hit {
             kind: site.kind.clone(),
             detail: site.detail.clone(),
@@ -299,5 +300,29 @@ mod tests {
 
         let findings = scan_files(&[file_path], Language::TypeScript).unwrap();
         assert!(findings.iter().all(|finding| finding.kind != "monkeypatch"));
+    }
+
+    #[test]
+    fn excludes_local_collection_mutation_but_keeps_boundary_mutation() {
+        let doc: Document = serde_json::from_value(json!({
+            "file": "foo.rb",
+            "language": "ruby",
+            "semantic_effect_sites": [
+                {
+                    "file": "foo.rb", "function": "build", "kind": "hidden_mutation",
+                    "detail": "<<", "receiver_scope": "owned_local", "line": 2,
+                    "span": [2, 2, 2, 12]
+                },
+                {
+                    "file": "foo.rb", "function": "update", "kind": "hidden_mutation",
+                    "detail": "<<", "receiver_scope": "parameter", "line": 8,
+                    "span": [8, 2, 8, 12]
+                }
+            ]
+        })).unwrap();
+
+        let rows = scan_documents(&[doc]);
+        assert_eq!(rows.len(), 1);
+        assert_eq!(rows[0].sites, vec!["foo.rb:update:8"]);
     }
 }
