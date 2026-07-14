@@ -52,6 +52,7 @@ module Espalier
 
       manifest = modules.map do |mod|
         internal_edges = internal_edges_for(mod)
+        transitive_effects = transitive_effects_for(mod, internal_edges)
         callers_by_method = internal_edges.each_with_object(Hash.new { |h, k| h[k] = [] }) do |edge, index|
           index[edge[:callee]] << edge[:caller]
         end
@@ -77,6 +78,7 @@ module Espalier
 
         aggregated_methods = mod[:methods].map do |m|
           key = "#{mod[:name]}##{m[:name]}"
+          effects = transitive_effects.fetch(m[:name].to_s)
 
           # 1. Capture concrete type signature if nil-kill supplied custom RBI/data
           sig = @nil_kill_data[key] || m[:signature]
@@ -147,8 +149,8 @@ module Espalier
             span: m[:span],
             language: mod[:language],
             EFFECTS: {
-              reads: m[:effects][:reads].to_a.sort,
-              writes: m[:effects][:writes].to_a.sort
+              reads: effects[:reads].to_a.sort,
+              writes: effects[:writes].to_a.sort
             },
             DELEGATIONS: delegations.empty? ? nil : delegations,
             CALL_GRAPH: call_graph_for(m[:name], callers_by_method, callees_by_method),
@@ -195,6 +197,39 @@ module Espalier
           }
         end
       end.uniq.sort_by { |edge| [edge[:callee], edge[:caller], edge[:type].to_s] }
+    end
+
+    def transitive_effects_for(mod, internal_edges)
+      effects = Array(mod[:methods]).to_h do |method|
+        direct = method[:effects] || {}
+        [
+          method[:name].to_s,
+          {
+            reads: Set.new(
+              direct[:reads].respond_to?(:to_a) ? direct[:reads].to_a : Array(direct[:reads])
+            ),
+            writes: Set.new(
+              direct[:writes].respond_to?(:to_a) ? direct[:writes].to_a : Array(direct[:writes])
+            ),
+          },
+        ]
+      end
+
+      changed = true
+      while changed
+        changed = false
+        internal_edges.each do |edge|
+          caller = effects[edge[:caller].to_s]
+          callee = effects[edge[:callee].to_s]
+          next unless caller && callee
+
+          before = [caller[:reads].size, caller[:writes].size]
+          caller[:reads].merge(callee[:reads])
+          caller[:writes].merge(callee[:writes])
+          changed ||= before != [caller[:reads].size, caller[:writes].size]
+        end
+      end
+      effects
     end
 
     def call_graph_for(method_name, callers_by_method, callees_by_method)

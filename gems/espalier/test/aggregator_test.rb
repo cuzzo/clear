@@ -103,6 +103,37 @@ class AggregatorTest < Minitest::Test
     assert_equal :high, helper[:quality_metrics][:privacy_confidence]
   end
 
+  def test_propagates_impurity_to_callers_to_a_fixed_point
+    modules = [{
+      type: :class,
+      name: "Pipeline",
+      file: "pipeline.rb",
+      states: %w[@value].to_set,
+      methods: [
+        {
+          name: "run", effects: {reads: Set.new, writes: Set.new},
+          delegations: [{receiver: "self", message: "step", type: :always}],
+        },
+        {
+          name: "step", effects: {reads: Set.new, writes: Set.new},
+          delegations: [{receiver: "self", message: "store", type: :always}],
+        },
+        {
+          name: "store", effects: {reads: Set.new, writes: %w[@value].to_set},
+          delegations: [{receiver: "self", message: "step", type: :conditional}],
+        },
+      ],
+    }]
+
+    functions = Espalier::Aggregator.new.aggregate(modules).first[:functions].to_h do |function|
+      [function[:name], function]
+    end
+
+    assert_equal %w[@value], functions["run"][:EFFECTS][:writes]
+    assert_equal %w[@value], functions["step"][:EFFECTS][:writes]
+    assert_equal %w[@value], functions["store"][:EFFECTS][:writes]
+  end
+
   def test_formatter_json_is_sarif
     manifest = [
       {
