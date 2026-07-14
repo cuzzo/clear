@@ -100,6 +100,42 @@ class StaticEvidenceTest < Minitest::Test
     end
   end
 
+  def test_indexed_declared_token_predicate_is_constant_and_complete
+    Dir.mktmpdir("espalier-indexed-token", Dir.pwd) do |dir|
+      source = File.join(dir, "parser.rb")
+      File.write(source, <<~RUBY)
+        class Token < T::Struct
+          const :kind, Symbol
+        end
+
+        class Parser
+          extend T::Sig
+
+          sig { params(tokens: T::Array[Token], position: Integer).returns(T::Boolean) }
+          def eof?(tokens, position)
+            tokens[position].kind == :eof
+          end
+        end
+      RUBY
+
+      evidence = Espalier::StaticEvidence.build([source], root: dir)
+      modules = Espalier::StaticEvidence.project_modules(evidence)
+      manifest = Espalier::Aggregator.new.aggregate(modules)
+      parser_owner = manifest.find { |owner| owner[:module] == "Parser" }
+      refute_nil parser_owner, manifest.inspect
+      predicate = parser_owner.fetch(:functions)
+        .find { |function| function[:name] == "eof?" }
+      refute_nil predicate, parser_owner.inspect
+      metrics = predicate.fetch(:quality_metrics)
+
+      assert_equal "O(1)", metrics[:big_o]
+      assert_equal "O(1)", metrics[:big_o_space]
+      assert_equal true, metrics[:big_o_complete]
+      assert_equal true, metrics[:big_o_space_complete]
+      assert_empty Array(metrics[:big_o_unknowns])
+    end
+  end
+
   def test_project_modules_groups_by_owner
     evidence = {
       "methods" => [

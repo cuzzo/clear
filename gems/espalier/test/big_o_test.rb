@@ -40,11 +40,20 @@ class BigOTest < Minitest::Test
 
     analyzer = Espalier::BigOAnalyzer.new(
       class_name: "Owner", ivar_types: { "@cfg" => "FunctionCFG", "@values" => "Hash" },
-      nil_kill: nil_kill, local_types: { "users" => "T.nilable(T::Array[User])" }
+      nil_kill: nil_kill,
+      local_types: {
+        "users" => "T.nilable(T::Array[User])",
+        "tokens" => "T.nilable(T::Array[AST::Token])",
+        "table" => "T::Hash[String, T::Array[AST::Token]]",
+        "text" => "String"
+      }
     )
     assert_equal "Owner", analyzer.send(:resolve_type, "self", 1)
     assert_equal "Array", analyzer.send(:resolve_type, "items", 1)
     assert_equal "Array", analyzer.send(:resolve_type, "users", 1)
+    assert_equal "AST::Token", analyzer.send(:resolve_type, "tokens[position]", 1)
+    assert_equal "Array", analyzer.send(:resolve_type, "table[key]", 1)
+    assert_equal "String", analyzer.send(:resolve_type, "text[position]", 1)
     assert_equal "Array", analyzer.send(:resolve_type, "cfg.blocks", 1)
 
     result = analyzer.analyze_method("sort", [

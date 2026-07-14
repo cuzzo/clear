@@ -225,6 +225,11 @@ module Espalier
       return nil unless receiver_name
       receiver_name = receiver_name.to_s
 
+      if receiver_name.match?(/\A[^\[\]]+\[[^\[\]]+\]\z/)
+        collection_name = receiver_name.sub(/\[[^\[\]]+\]\z/, "")
+        return clean_type_name(indexed_element_type(raw_simple_type(collection_name, line)))
+      end
+
       if receiver_name.include?(".")
         parts = receiver_name.split(".")
         current_type = resolve_simple_type(parts.first, line)
@@ -239,37 +244,78 @@ module Espalier
     end
 
     def resolve_simple_type(receiver_name, line)
+      clean_type_name(raw_simple_type(receiver_name, line))
+    end
+
+    def raw_simple_type(receiver_name, line)
       if receiver_name == "self"
-        return clean_type_name(@class_name)
+        return @class_name
       end
 
       if (type = @local_types[receiver_name])
-        return clean_type_name(type)
+        return type
       end
 
       if receiver_name.start_with?("@")
         type = @ivar_types[receiver_name] || @ivar_types[receiver_name[1..]]
-        return clean_type_name(type) if type
+        return type if type
       end
 
       if (type = @ivar_types["@#{receiver_name}"] || @ivar_types[receiver_name])
-        return clean_type_name(type)
+        return type
       end
 
       if @class_name && @nil_kill
         sig = @nil_kill.method_signatures["#{@class_name}##{receiver_name}"]
         if sig
           ret = extract_return_type(sig)
-          return clean_type_name(ret) if ret
+          return ret if ret
         end
       end
 
       if @nil_kill_evidence
         type = @nil_kill_evidence.dig(line.to_s, receiver_name) || @nil_kill_evidence.dig(line.to_s, "@#{receiver_name}")
-        return clean_type_name(type) if type
+        return type if type
       end
 
       nil
+    end
+
+    def indexed_element_type(type)
+      return nil unless type
+
+      text = type.to_s.strip
+      if text =~ /\AT\.nilable\((.+)\)\z/
+        return indexed_element_type(Regexp.last_match(1))
+      end
+      if text =~ /\A(?:T::|T\.)?Array\[(.+)\]\z/
+        return Regexp.last_match(1).strip
+      end
+      if text =~ /\A(?:T::|T\.)?Hash\[(.+)\]\z/
+        parts = split_generic_arguments(Regexp.last_match(1))
+        return parts[1]&.strip if parts.length == 2
+      end
+
+      "String" if clean_type_name(text) == "String"
+    end
+
+    def split_generic_arguments(source)
+      depth = 0
+      start = 0
+      parts = []
+      source.each_char.with_index do |char, index|
+        case char
+        when "[", "(", "{" then depth += 1
+        when "]", ")", "}" then depth -= 1
+        when ","
+          next unless depth.zero?
+
+          parts << source[start...index]
+          start = index + 1
+        end
+      end
+      parts << source[start..]
+      parts
     end
 
     def resolve_method_return_type(class_name, method_name)
