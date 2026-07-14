@@ -92,6 +92,16 @@ class ClearParser
     const :assignment, T::Boolean
   end
 
+  class RequiresKind < T::Struct
+    const :family, T.nilable(Symbol), default: nil
+    const :reentrance, T.nilable(Symbol), default: nil
+  end
+
+  class ParsedRequiresClause < T::Struct
+    const :capabilities, T::Hash[String, T::Set[Symbol]]
+    const :reentrance, T::Hash[String, Symbol]
+  end
+
   include ErrorHelper
   include FixableHelper
 
@@ -140,8 +150,6 @@ class ClearParser
     @pos = T.let(0, Integer)
     @source_code = source_code
     @delimiter_closings = T.let(index_delimiter_closings(tokens), T::Array[T.nilable(Integer)])
-    @last_requires_clauses = T.let({}, T::Hash[String, Symbol])
-    @suppress_struct_lit = T.let(false, T::Boolean)
     # `gradual` controls whether omitted type annotations on
     # parameters / return types parse as implicit Auto (per
     # docs/agents/gradual-typing.md §3.3). Defaults to the global
@@ -151,12 +159,6 @@ class ClearParser
     # landed.
     @gradual = T.let(gradual.nil? ? self.class.gradual_mode : gradual, T::Boolean)
   end
-
-  sig { returns(T::Boolean) }
-  def suppress_struct_lit?
-    @suppress_struct_lit
-  end
-  private :suppress_struct_lit?
 
   class << self
     extend T::Sig
@@ -757,7 +759,7 @@ class ClearParser
   # like parse_with_capability that legitimately follow an expression with '{' are unaffected.
   sig { params(lhs: AST::Node).returns(SuffixResult) }
   def parse_inline_union_variant_suffix(lhs)
-    if !suppress_struct_lit? && AST.inline_union_constructor_target?(lhs)
+    if !match_destructure_brace? && AST.inline_union_constructor_target?(lhs)
       tok = current
       field_pairs = T.let([], T::Array[[String, AST::Node]])
       _, field_pairs = parse_comma_seq(:CHAR, '{', '}') do
@@ -773,6 +775,18 @@ class ClearParser
     else
       SUFFIX_DECLINE
     end
+  end
+
+  # In MATCH grammar, a brace immediately followed by the arm arrow is a
+  # destructuring pattern rather than a struct/union constructor. The token
+  # index makes that distinction explicit without parser-wide mode state.
+  sig { returns(T::Boolean) }
+  def match_destructure_brace?
+    return false unless match?(:CHAR, '{')
+    closing_index = @delimiter_closings[@pos]
+    return false unless closing_index
+    following = T.must(@tokens[closing_index + 1]) # token streams always end in EOF
+    following.type == :ARROW
   end
 
   sig { params(type: Symbol, storage: Symbol).returns(AST::Node) }
@@ -1682,14 +1696,11 @@ class ClearParser
     # Gates which sync families this function accepts on its parameters.
     # Mandatory whenever the body uses WITH on a parameter.
     requires_clause = T.let(nil, T.nilable(T::Hash[String, T::Set[Symbol]]))
-    early_requires_clauses = T.let(nil, T.nilable(T::Hash[String, Symbol]))
+    early_requires_clauses = T.let({}, T::Hash[String, Symbol])
     if match!(:KEYWORD, 'REQUIRES')
-      requires_clause = parse_requires_clause
-      # If this REQUIRES contained reentrance kinds (e.g. NON_REENTRANT),
-      # parse_requires_clause stashed them on @last_requires_clauses --
-      # forward them to the same `requires_clauses` hash that
-      # parse_requires_clauses (post-RETURNS) populates.
-      early_requires_clauses = @last_requires_clauses
+      parsed_requires = parse_requires_clause
+      requires_clause = parsed_requires.capabilities
+      early_requires_clauses = parsed_requires.reentrance
     end
 
     # EFFECTS REENTRANT variants:
@@ -1709,7 +1720,7 @@ class ClearParser
     # Merge any reentrance kinds caught by the early-position
     # parse_requires_clause into the canonical hash. Duplicates
     # across the two positions still error.
-    if early_requires_clauses && !early_requires_clauses.empty?
+    unless early_requires_clauses.empty?
       early_requires_clauses.each do |k, v|
         if requires_clauses.key?(k)
           error!(fn_token, :DUPLICATE_REQUIRES_CLAUSE, fn: name, name: k)
@@ -1834,7 +1845,7 @@ class ClearParser
   # extends the name-list. After ':' and the family disjunction, a ','
   # starts a new group.
   #
-  # Returns: { param_name_string => Set[Symbol] }
+  # Returns capability families and reentrance constraints explicitly.
   # Family table for REQUIRES.
   #   - LOCKED: mutex / rwlock (admits @locked, @writeLocked).
   #   - SNAPSHOTTED: retry-style umbrella (admits @versioned, @atomic).
@@ -1848,10 +1859,10 @@ class ClearParser
   # into `requires_clauses` so they don't pollute the capability-family hash.
   REQUIRES_REENTRANCE_KINDS = T.let(%w[NON_REENTRANT].to_set.freeze, T::Set[String])
 
-  sig { returns(T::Hash[String, T::Set[Symbol]]) }
+  sig { returns(ParsedRequiresClause) }
   def parse_requires_clause
     requires_hash = T.let({}, T::Hash[String, T::Set[Symbol]])
-    @last_requires_clauses = {}
+    requires_reentrance = T.let({}, T::Hash[String, Symbol])
 
     loop do
       names = T.let([consume(:VAR_ID).text!], T::Array[String])
@@ -1863,53 +1874,39 @@ class ClearParser
       families = T.let(Set.new, T::Set[Symbol])
       reentrance_kinds = T.let([], T::Array[Symbol])
       first = parse_requires_family_or_reentrance
-      first_family = first[:family]
-      first_reentrance = first[:reentrance]
-      if first_family
-        families << first_family
-      else
-        if first_reentrance
-          reentrance_kinds << first_reentrance
-        end
-      end
+      families << first.family if first.family
+      reentrance_kinds << first.reentrance if first.reentrance
       while match!(:CHAR, '|')
         nxt = parse_requires_family_or_reentrance
-        next_family = nxt[:family]
-        next_reentrance = nxt[:reentrance]
-        if next_family
-          families << next_family
-        else
-          if next_reentrance
-            reentrance_kinds << next_reentrance
-          end
-        end
+        families << nxt.family if nxt.family
+        reentrance_kinds << nxt.reentrance if nxt.reentrance
       end
 
       names.each do |n|
         requires_hash[n] = families if !families.empty?
-        reentrance_kinds.each { |k| @last_requires_clauses[n] = k }
+        reentrance_kinds.each { |k| requires_reentrance[n] = k }
       end
 
       break unless match!(:CHAR, ',')
     end
 
-    requires_hash
+    ParsedRequiresClause.new(capabilities: requires_hash, reentrance: requires_reentrance)
   end
 
   # Returns { family: Symbol } or { reentrance: Symbol } based on the
   # token. Family kinds go into the capability `requires` hash; reentrance
   # kinds are forwarded into `requires_clauses`.
-  sig { returns(T::Hash[Symbol, T.nilable(Symbol)]) }
+  sig { returns(RequiresKind) }
   def parse_requires_family_or_reentrance
     tok = consume(:TYPE_ID)
     token_value = T.must(tok).text!
     if REQUIRES_VALID_FAMILIES.include?(token_value)
-      { family: token_value.to_sym }
+      RequiresKind.new(family: token_value.to_sym)
     elsif REQUIRES_REENTRANCE_KINDS.include?(token_value)
       kind = case token_value
              when 'NON_REENTRANT' then :non_reentrant
              end
-      { reentrance: kind }
+      RequiresKind.new(reentrance: kind)
     else
       candidates = REQUIRES_VALID_FAMILIES.to_a + REQUIRES_REENTRANCE_KINDS.to_a
       emit_typo_suggestion!(
@@ -1918,7 +1915,6 @@ class ClearParser
         "closest REQUIRES family/kind",
         category: :type, cascade: true
       )
-      {}
     end
   end
 
@@ -1926,7 +1922,7 @@ class ClearParser
   sig { returns(Symbol) }
   def parse_requires_family
     res = parse_requires_family_or_reentrance
-    family = res[:family]
+    family = res.family
     error!(current, :EXPECTED_CAP_FAMILY) unless family
     family
   end
@@ -2705,18 +2701,14 @@ class ClearParser
         consume(:ARROW)
         cases << AST::MatchCase.new(kind: :struct_pattern, value: pattern, body: [parse_expression])
       else
-        @suppress_struct_lit = true
         first_pattern = parse_expression
-        @suppress_struct_lit = false
         # Multi-pattern arm: `Pat1, Pat2, ... [AS x | { dest }] -> body`.
         # The `,` here is part of the arm; arm-separator `,` is consumed
         # AFTER the body. AS / { ... } apply to the whole arm.
         extra_patterns = []
         while match?(:CHAR, ',') && multi_pattern_continues?
           consume(:CHAR, ',')
-          @suppress_struct_lit = true
           extra_patterns << parse_expression
-          @suppress_struct_lit = false
         end
         binding = nil
         destructure = nil
@@ -2808,9 +2800,7 @@ class ClearParser
       else
         # Suppress struct literal parsing so TypeName.Variant{ ... } doesn't get
         # consumed as a constructor — the { starts a destructuring pattern.
-        @suppress_struct_lit = true
         first_pattern = parse_expression
-        @suppress_struct_lit = false
         # Multi-pattern arm: `Pat1, Pat2, Pat3 [AS x | { dest }] -> body`.
         # The `,` here (before the arrow) signals continuation; arm-
         # separator `,` is consumed AFTER the body, below. AS / { ... }
@@ -2818,9 +2808,7 @@ class ClearParser
         extra_patterns = []
         while match?(:CHAR, ',') && multi_pattern_continues?
           consume(:CHAR, ',')
-          @suppress_struct_lit = true
           extra_patterns << parse_expression
-          @suppress_struct_lit = false
         end
         binding = nil
         destructure = nil
@@ -3064,25 +3052,22 @@ class ClearParser
   # Used to disambiguate generic annotations from comparison operators.
   sig { params(end_char: String).returns(T::Boolean) }
   def peek_generic_angle_params?(end_char)
-    saved = @pos
-    begin
-      return false unless current.type == :CHAR && current.value == '<'
-      @pos += 1 # skip '<'
-      depth = 1
-      loop do
-        return false if current.nil?
-        if current.type == :CHAR && current.value == '<'
-          depth += 1
-        elsif current.type == :CHAR && current.value == '>'
-          depth -= 1
-          @pos += 1
-          return current.type == :CHAR && current.value == end_char if depth == 0
-          next
+    return false unless match?(:CHAR, '<')
+    offset = 1
+    depth = 1
+    loop do
+      token = peek_at(offset)
+      return false unless token
+      if token.type == :CHAR && token.value == '<'
+        depth += 1
+      elsif token.type == :CHAR && token.value == '>'
+        depth -= 1
+        if depth == 0
+          following = peek_at(offset + 1)
+          return !following.nil? && following.type == :CHAR && following.value == end_char
         end
-        @pos += 1
       end
-    ensure
-      @pos = saved
+      offset += 1
     end
   end
 
@@ -3161,7 +3146,7 @@ class ClearParser
         end
         consume(:CHAR, '>')
         return parse_struct_literal(type_token, name, storage, type_args)
-      elsif match?(:CHAR, '{') && !@suppress_struct_lit
+      elsif match?(:CHAR, '{') && !match_destructure_brace?
         # Struct literal: User{ id: 1 }
         return parse_struct_literal(type_token, name, storage)
       else

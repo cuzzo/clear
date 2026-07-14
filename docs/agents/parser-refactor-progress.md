@@ -463,3 +463,59 @@ trade.
 Validation: 49 focused source-parser/contract examples pass; all 487 current
 top-level CLEAR fixtures parse. Ruby built-in coverage reports all 25 changed
 executable parser lines covered.
+
+### Stage 4C: remove cursor and semantic side channels
+
+Three implicit parser protocols are gone:
+
+- Generic-angle lookahead now advances a local offset instead of mutating
+  `@pos` under an `ensure` restoration.
+- MATCH disambiguation uses the indexed closing brace and following arm arrow,
+  so the four temporary `@suppress_struct_lit` scopes and the field itself are
+  gone. A pattern parse exception can no longer leak that mode into later work.
+- `parse_requires_clause` returns a typed `ParsedRequiresClause` containing
+  capability and reentrance products. `@last_requires_clauses` and the
+  `RequiresKind` hash-union/indexing convention are gone.
+
+| Measure | Stage 4B | Stage 4C | Delta |
+| --- | ---: | ---: | ---: |
+| Parser lines | 4,974 | 4,959 | -15 |
+| Parser methods | 184 | 184 | 0 |
+| Parser state fields | 9 | 7 | -2 |
+| NilKill state accesses | 106 | 85 | -21 |
+| NilKill struct declarations | 9 | 11 | +2 |
+| NilKill hash shapes | 21 | 19 | -2 |
+| NilKill array shapes | 1,418 | 1,424 | +6 |
+| NilKill collection index lookups | 45 | 42 | -3 |
+| NilKill hash-record blockers | 39 | 41 | +2 |
+| Espalier functions | 184 | 184 | 0 |
+| Espalier known `O(N)` time component | 33 | 33 | 0 |
+| Espalier known `O(N)` stack component | 5 | 5 | 0 |
+| Decomplex candidates | 435 | 401 | -34 |
+| Decomplex root-cause clusters | 37 | 36 | -1 |
+| Decomplex scoped-state restoration | 4 | 0 | -4 |
+| Decomplex weighted-inlined findings | 82 | 81 | -1 |
+
+NilKill and Decomplex both capture the architectural result: two fewer state
+fields, 21 fewer state accesses, two fewer literal hash shapes, and no scoped
+restoration hazards. The first replacement for `match_destructure_brace?`
+guarded a token that is guaranteed by the lexer's trailing EOF contract;
+Decomplex raised decision pressure from five to six. Tightening that read with
+`T.must` returned the final count to five.
+
+NilKill's `hash_record_blockers` increase is a reporting bug. The two new
+findings cite `@delimiter_closings[@pos]` and `@tokens[closing_index + 1]`, both
+statically typed arrays, but describe them as “dynamic hash-record keys.” The
+same report also labels assignment into the typed `closings` array as a
+“shape-changing hash-record mutation.” Collection-index facts are valid; these
+sites must not contribute to hash-record blockers.
+
+Espalier is correctly stable on asymptotic components. Its complete-result
+count falls from seven to six because the new token-boundary predicate becomes
+an unknown component in callers, even though it contains only constant-time
+indexed reads. That is a smaller generic inference gap around fixed-count
+collection access, not a runtime-complexity regression.
+
+Validation: 82 focused source-parser, MATCH, REQUIRES, generic-literal, and
+contract examples pass; all 487 current top-level CLEAR fixtures parse. Ruby
+built-in coverage reports all 46 changed executable parser lines covered.
