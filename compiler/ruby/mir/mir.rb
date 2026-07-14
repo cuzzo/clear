@@ -3136,12 +3136,12 @@ module MIR
   # Make a list from items.
   # Zig: try CheatLib.makeList(elem_type, alloc, &.{ items })
   # alloc: symbol (:heap, :frame) -- resolved to Zig by emitter.
-  MakeList = Struct.new(:elem_type, :items, :alloc) do
+  MakeList = Struct.new(:elem_type, :items, :alloc, :minimum_capacity) do
     extend T::Sig
     include Expr
-    sig { params(elem_type: String, items: T::Array[Emittable], alloc: Symbol).void }
-    def initialize(elem_type, items, alloc)
-      super(elem_type, items, alloc)
+    sig { params(elem_type: String, items: T::Array[Emittable], alloc: Symbol, minimum_capacity: T.nilable(Integer)).void }
+    def initialize(elem_type, items, alloc, minimum_capacity = nil)
+      super(elem_type, items, alloc, minimum_capacity)
     end
 
     sig { returns(T::Array[Emittable]) }

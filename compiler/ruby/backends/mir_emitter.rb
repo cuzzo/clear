@@ -2424,7 +2424,7 @@ class MIREmitter
   sig { params(node: MIR::ContainerInit).returns(String) }
   def emit_container_init(node)
     case node.strategy
-    when :pool, :list_capacity
+    when :pool, :list_capacity, :set_capacity
       "try #{node.zig_type}.initCapacity(#{alloc_zig(node.alloc)}, #{node.capacity})"
     when :array_list_empty
       "@as(#{node.zig_type}, .empty)"
@@ -2510,7 +2510,11 @@ class MIREmitter
   def emit_make_list(node)
     items = node.items.map { |i| emit(i) }.join(", ")
     items_expr = node.items.empty? ? "&.{}" : "&.{ #{items} }"
-    "try CheatLib.makeList(#{node.elem_type}, #{alloc_zig(node.alloc)}, #{items_expr})"
+    if node.minimum_capacity
+      "try CheatLib.makeListCapacity(#{node.elem_type}, #{alloc_zig(node.alloc)}, #{items_expr}, #{node.minimum_capacity})"
+    else
+      "try CheatLib.makeList(#{node.elem_type}, #{alloc_zig(node.alloc)}, #{items_expr})"
+    end
   end
 
   sig { params(node: MIR::FrameSave).returns(String) }

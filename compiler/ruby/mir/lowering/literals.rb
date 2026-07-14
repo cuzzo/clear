@@ -193,7 +193,7 @@ module MIRLoweringLiterals
     # Non-empty list literal -> makeList
     inner = T.cast(
       with_ownership_consumption(
-        MIR::MakeList.new(elem_zig, items_mir, list_alloc),
+        MIR::MakeList.new(elem_zig, items_mir, list_alloc, ti.allocation_hint),
         items_mir.flat_map { |item| mir_ident_names(item) },
         "MIR::MakeList",
         target_alloc: list_alloc,

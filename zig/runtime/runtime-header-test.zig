@@ -19,6 +19,16 @@ const CheatLib = header.CheatLib;
 const Runtime = rt_mod.Runtime;
 const alloc = std.heap.c_allocator;
 
+test "makeListCapacity honors a minimum above the initial item count" {
+    const allocator = std.testing.allocator;
+    const items = [_]u64{ 3, 5 };
+    var list = try CheatLib.makeListCapacity(u64, allocator, &items, 16);
+    defer list.deinit(allocator);
+
+    try std.testing.expectEqualSlices(u64, &items, list.items);
+    try std.testing.expect(list.capacity >= 16);
+}
+
 test "AtomicPtr fiber retains keep the cell and managed payload alive until the final release" {
     const allocator = std.testing.allocator;
     const Payload = struct { text: []const u8 };

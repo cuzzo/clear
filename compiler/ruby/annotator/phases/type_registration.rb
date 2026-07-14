@@ -216,6 +216,9 @@ module Annotator
       def register_struct_declaration(node)
         T.bind(self, SemanticAnnotator)
         validate_type_param_list!(node, node.type_params, "struct") if node.type_params.any?
+        node.field_decls.each_value do |field|
+          error!(node, :COLLECTION_HINT_VALUE_ONLY) if field.type.preallocation_hint?
+        end
         stamp_field_defaults!(node.field_decls)
 
         declare_type_schema!(node, node.name.to_sym, Schemas::StructSchema.new(

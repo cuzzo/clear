@@ -2149,6 +2149,12 @@ pub fn bind(comptime deps: type) type {
             const Self = @This();
             inner: Map = .{},
 
+            pub fn initCapacity(alloc: std.mem.Allocator, capacity: u32) !Self {
+                var result = Self{};
+                try result.inner.ensureTotalCapacity(alloc, capacity);
+                return result;
+            }
+
             pub fn insert(self: *Self, alloc: std.mem.Allocator, value: T) !void {
                 if (is_string) {
                     if (self.inner.contains(value)) {

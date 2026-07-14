@@ -602,7 +602,8 @@ module MIRLoweringVariables
     if ft.set_collection?
       return lower(node.value) if rhs.is_a?(AST::BinaryOp) && rhs.smooth?
       return lower(node.value) if rhs_unwrapped.is_a?(AST::MoveNode) || AST.call?(rhs_unwrapped) || !rhs_unwrapped.is_a?(AST::ListLit)
-      inner = MIR::ContainerInit.new(bare_zig, :set_empty, nil, nil)
+      hint = ft.allocation_hint
+      inner = MIR::ContainerInit.new(bare_zig, hint ? :set_capacity : :set_empty, decl_alloc, hint)
       return has_caps ? compose_capability_wrap(inner, bare_zig, ft, decl_alloc) : inner
     end
 
@@ -615,9 +616,8 @@ module MIRLoweringVariables
       end
       return lower(node.value) unless rhs_unwrapped.is_a?(AST::ListLit)
       return with_expected_type(ft) { lower(node.value) } unless rhs_unwrapped.items.empty?
-      ft_capacity = ft.capacity
-      init_kind = ft_capacity.is_a?(Integer) && ft_capacity > 0 ? :list_capacity : :array_list_empty
-      init_capacity = init_kind == :list_capacity ? ft_capacity : nil
+      init_capacity = ft.allocation_hint
+      init_kind = init_capacity ? :list_capacity : :array_list_empty
       inner = MIR::ContainerInit.new(bare_zig, init_kind, decl_alloc, init_capacity)
       return has_caps ? compose_capability_wrap(inner, bare_zig, ft, decl_alloc) : inner
     end

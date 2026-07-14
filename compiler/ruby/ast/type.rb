@@ -363,6 +363,11 @@ class TypeShape
     dimension == :LIST ? nil : dimension
   end
 
+  sig { returns(T.nilable(Integer)) }
+  def allocation_hint
+    linear_expression&.allocation_hint
+  end
+
   sig { returns(T.nilable(Symbol)) }
   def payload_type_raw
     current = expression
@@ -2217,6 +2222,21 @@ class Type
     shape.capacity
   end
 
+  # Minimum allocation requested by an Inline Pivot collection layer, such as
+  # `[List(32)]T` or `[Set(32)]T`. Unlike `capacity`, this is not part of the
+  # collection's value shape and must not affect assignability or ABI identity.
+  sig { returns(T.nilable(Integer)) }
+  def allocation_hint
+    shape.allocation_hint
+  end
+
+  sig { returns(T::Boolean) }
+  def preallocation_hint?
+    TypeExpressionTree.each_node(shape.expression).any? do |node|
+      node.is_a?(LinearTypeExpression) && (node.list? || node.set?) && !node.allocation_hint.nil?
+    end
+  end
+
   sig { returns(String) }
   def to_s; resolved.to_s; end
 
@@ -2773,7 +2793,7 @@ class Type
   # Backed by AutoHashMapUnmanaged — no key duplication, pure arena-allocated.
   sig { returns(T::Boolean) }
   def numeric_map?
-    shape.numeric_map?
+    map? && key_type.numeric?
   end
 
   sig { returns(T::Boolean) }

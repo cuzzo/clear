@@ -622,6 +622,12 @@ pub const CheatLib = struct {
         return list;
     }
 
+    pub fn makeListCapacity(comptime T: type, allocator: std.mem.Allocator, items: []const T, minimum_capacity: usize) !std.ArrayListUnmanaged(T) {
+        var list = try std.ArrayListUnmanaged(T).initCapacity(allocator, @max(items.len, minimum_capacity));
+        list.appendSliceAssumeCapacity(items);
+        return list;
+    }
+
     // Works for ArrayListUnmanaged (has .items) AND Standard Slices (direct access)
     // Also handles casting the index to usize automatically.
     // Unwraps optional containers (e.g. from hashmap.get()) before indexing.

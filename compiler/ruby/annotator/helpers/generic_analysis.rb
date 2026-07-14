@@ -98,10 +98,20 @@ module GenericAnalysis
     facts = type_annotation_facts(node, type_obj, is_param)
     validate_param_annotation_capabilities!(facts)
     validate_collection_annotation_capabilities!(facts)
+    validate_collection_allocation_hint!(facts)
     validate_observable_annotation_capabilities!(facts)
     validate_shape_annotation_capabilities!(facts)
     validate_generic_annotation!(facts)
     nil
+  end
+
+  sig { params(facts: TypeAnnotationFacts).void }
+  def validate_collection_allocation_hint!(facts)
+    T.bind(self, SemanticAnnotator)
+    return unless facts.type_obj.preallocation_hint?
+    return if !facts.is_param && (facts.node.is_a?(AST::VarDecl) || facts.node.is_a?(AST::BindExpr))
+
+    error!(facts.node, :COLLECTION_HINT_VALUE_ONLY)
   end
 
   sig { params(node: AnnotationNode, type_obj: Type, is_param: T::Boolean).returns(TypeAnnotationFacts) }

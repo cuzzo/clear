@@ -7,6 +7,7 @@ require_relative "../ruby/annotator/annotator" unless defined?(SemanticAnnotator
 require_relative "../ruby/compiler/module_importer" unless defined?(ModuleImporter)
 require_relative "../ruby/compiler/compiler_frontend" unless defined?(CompilerFrontend)
 require_relative "../ruby/mir/mir_lowering" unless defined?(MIRLowering)
+require_relative "../ruby/backends/transpiler" unless defined?(ZigTranspiler)
 require_relative "../ruby/tools/clear_fix_support" unless defined?(ClearFixSupport::LocationToken)
 
 RSpec.describe "type-system change contracts" do
@@ -33,6 +34,10 @@ RSpec.describe "type-system change contracts" do
       source_dir: Dir.pwd,
       target: :zig
     )).lower_program(result.ast)
+  end
+
+  def transpile(source)
+    ZigTranspiler.new(source_dir: Dir.pwd).transpile(source)
   end
 
   def contains_mir?(value, expected_class, seen = {})
@@ -166,6 +171,74 @@ RSpec.describe "type-system change contracts" do
     expect(types[3].collection).to eq(:pool)
     expect(types[4]).to be_map
     expect(types[4].value_type.collection).to eq(:list)
+  end
+
+  it "classifies Inline Pivot maps from their semantic key types" do
+    symbol_map, string_map, numeric_map = parse(<<~CLEAR).statements.map(&:type)
+      by_symbol: {Symbol}Int64 = {};
+      by_string: {String}Int64 = {};
+      by_number: {Int64}String = {};
+    CLEAR
+
+    expect(symbol_map).not_to be_numeric_map
+    expect(string_map).not_to be_numeric_map
+    expect(numeric_map).to be_numeric_map
+  end
+
+  it "annotates canonical string-like and numeric map operations" do
+    expect {
+      annotate(<<~CLEAR)
+        by_symbol: {Symbol}Int64 = {};
+        by_symbol.put("answer", 42_i64);
+        symbol_value = by_symbol["answer"];
+        by_number: {Int64}String = {};
+        by_number.put(42_i64, "answer");
+        numeric_value = by_number[42_i64];
+      CLEAR
+    }.not_to raise_error
+  end
+
+  it "lowers canonical collection layers and their allocation hints" do
+    zig = transpile(<<~CLEAR)
+      FN main() RETURNS !Void ->
+        list: [List(10)]Int64 = [1_i64, 2_i64];
+        empty_list: [List(9)]Int64 = List[];
+        set: [Set(12)]Int64 = Set[];
+        pool: [Pool(16)]Int64 = Pool[];
+        by_symbol: {Symbol}Int64 = {};
+        by_number: {Int64}String = {};
+        RETURN;
+      END
+    CLEAR
+
+    expect(zig).to include("makeListCapacity(i64")
+    expect(zig).to include("&.{ 1, 2 }, 10")
+    expect(zig).to include("std.ArrayListUnmanaged(i64).initCapacity")
+    expect(zig).to include(", 9)")
+    expect(zig).to include("CheatLib.Set(i64).initCapacity")
+    expect(zig).to include(", 12)")
+    expect(zig).to include("CheatLib.Pool(i64).initCapacity")
+    expect(zig).to include(", 16)")
+    expect(zig).to include("CheatLib.StringMap(i64)")
+    expect(zig).to include("CheatLib.NumericMapType(i64, []const u8)")
+  end
+
+  it "keeps pre-allocation hints at value construction sites" do
+    expect {
+      annotate("FN consume(values: [List(8)]Int64) RETURNS Void -> RETURN; END")
+    }.to raise_error(CompilerError, /pre-allocation hints are allowed only on initialized local bindings/)
+
+    expect {
+      annotate("FN create() RETURNS [Set(8)]Int64 -> RETURN Set[]; END")
+    }.to raise_error(CompilerError, /pre-allocation hints are allowed only on initialized local bindings/)
+
+    expect {
+      annotate("STRUCT Cache { values: [List(8)]Int64 }")
+    }.to raise_error(CompilerError, /pre-allocation hints are allowed only on initialized local bindings/)
+
+    expect {
+      annotate("FN use_pool(values: [Pool(8)]Int64) RETURNS Void -> RETURN; END")
+    }.not_to raise_error
   end
 
   it "parses tense and nested map layers without backtracking" do

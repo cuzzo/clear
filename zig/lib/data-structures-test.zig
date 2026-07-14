@@ -37,6 +37,17 @@ test "Set(Rc(T)) uses handle identity and releases removed keys" {
     CheatLib.rcRelease(u64, allocator, item);
 }
 
+test "Set.initCapacity reserves buckets without inserting values" {
+    const allocator = std.testing.allocator;
+    var set = try CheatLib.Set(u64).initCapacity(allocator, 32);
+    defer set.deinit(allocator);
+
+    try std.testing.expectEqual(@as(usize, 0), set.inner.count());
+    try std.testing.expect(set.inner.capacity() >= 32);
+    try set.insert(allocator, 7);
+    try std.testing.expect(set.contains(7));
+}
+
 const PromiseTestState = struct {
     promise: CheatLib.Promise(f64),
     result: f64 = 0.0,

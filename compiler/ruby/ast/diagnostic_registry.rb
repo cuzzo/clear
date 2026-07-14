@@ -1528,6 +1528,13 @@ module DiagnosticRegistry
       cause: "Primitive values already have finite, compact layouts. Boxing each element would predictably damage locality and memory use.",
       fix_hint: "Use `%{type}[]@list`, or wrap the primitive in a STRUCT if stable identity is actually required.",
     },
+    COLLECTION_HINT_VALUE_ONLY: {
+      severity: :error, category: :type,
+      template: "Type Error: collection pre-allocation hints are allowed only on initialized local bindings.",
+      summary: "A capacity hint controls one allocation site; it is not part of a reusable type contract.",
+      cause: "Parameters, returns, and fields describe value shapes and ABIs, but `[List(N)]` and `[Set(N)]` describe how a particular value should initially allocate storage.",
+      fix_hint: "Use `[]T` or `[Set]T` in the reusable type, then put the capacity hint on the local binding that constructs the collection.",
+    },
     INDIRECT_ELEMENT_EXPLICIT: {
       severity: :error, category: :type,
       template: "Layout Error: inserting inline %{type} into `%{type}@indirect[]@list` requires a heap allocation. EASY may apply this uniquely forced layout; DEFAULT and STRICT require an explicit `@indirect` construction.",
