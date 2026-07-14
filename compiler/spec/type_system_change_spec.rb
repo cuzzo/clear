@@ -1,4 +1,5 @@
 require "rspec"
+require "set"
 
 require_relative "../ruby/ast/lexer" unless defined?(Lexer)
 require_relative "../ruby/ast/parser" unless defined?(ClearParser)
@@ -6,6 +7,7 @@ require_relative "../ruby/annotator/annotator" unless defined?(SemanticAnnotator
 require_relative "../ruby/compiler/module_importer" unless defined?(ModuleImporter)
 require_relative "../ruby/compiler/compiler_frontend" unless defined?(CompilerFrontend)
 require_relative "../ruby/mir/mir_lowering" unless defined?(MIRLowering)
+require_relative "../ruby/tools/clear_fix_support" unless defined?(ClearFixSupport::LocationToken)
 
 RSpec.describe "type-system change contracts" do
   def parse(source)
@@ -204,5 +206,47 @@ RSpec.describe "type-system change contracts" do
       .to raise_error(ParserError, /flat-rank lowering/)
     expect { parse("value: {Symbol, Int64}String = {};") }
       .to raise_error(ParserError, /nested maps use separate brace layers/)
+  end
+
+  it "autofixes legacy annotations from their semantic type trees" do
+    source = <<~CLEAR
+      list: Int64[] = [];
+      maybe_item: ?Int64[] = [];
+      maybe_list: ?(Int64[]) = NIL;
+      lookup: HashMap<Int64> = {};
+      nested: HashMap<Symbol, String[]> = {};
+      unique: Int64[]@set = Set[];
+      arena: Int64[16]@pool = Pool[];
+      optional_unique: ?(Int64[]@set) = NIL;
+      fallible_unique: !Int64[]@set = DEFAULT;
+      future_unique: ~Int64[]@set = DEFAULT;
+    CLEAR
+    expected = <<~CLEAR
+      list: []Int64 = [];
+      maybe_item: []?Int64 = [];
+      maybe_list: ?[]Int64 = NIL;
+      lookup: {String}Int64 = {};
+      nested: {Symbol}[]String = {};
+      unique: [Set]Int64 = Set[];
+      arena: [Pool(16)]Int64 = Pool[];
+      optional_unique: ?[Set]Int64 = NIL;
+      fallible_unique: ![Set]Int64 = DEFAULT;
+      future_unique: ~[Set]Int64 = DEFAULT;
+    CLEAR
+
+    rewritten, count, = ClearFixSupport.apply_to_source(source, only_set: Set[:type])
+    expect(count).to eq(10)
+    expect(rewritten).to eq(expected)
+    expect(ClearFixSupport.apply_to_source(rewritten, only_set: Set[:type]).first).to eq(rewritten)
+  end
+
+  it "preserves legacy capability syntax until capabilities live on type layers" do
+    source = "values: Int64[]@shared:locked = [];\n"
+    rewritten, count, = ClearFixSupport.apply_to_source(source, only_set: Set[:type])
+    shared = parse("value: SHARED Int64 = DEFAULT;").statements.first.type
+
+    expect(count).to eq(0)
+    expect(rewritten).to eq(source)
+    expect(shared).to be_polymorphic_shared
   end
 end

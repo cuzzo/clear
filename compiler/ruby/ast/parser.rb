@@ -3283,20 +3283,29 @@ class ClearParser
         consume(:VAR_ID)   # name is for documentation only
         consume(:CHAR, ':')
       end
-      param_types << parse_type_annotation
+      param_types << parse_type_annotation(migration_root: false)
       break unless match!(:CHAR, ',')
     end
     consume(:CHAR, ')')
     consume(:ARROW, '->')
-    return_type = parse_type_annotation
+    return_type = parse_type_annotation(migration_root: false)
     if match?(:VAR_ID) && %w[@reentrant @nonReentrant].include?(current.value)
       error!(current, :PARSER_EXPECTED, expected: "supported function type annotation", got: current.value, type: current.type, line: current.line)
     end
     Type.function_type_from_parts(param_types, T.unsafe(return_type), false, nil)
   end
 
+  sig { params(migration_root: T::Boolean).returns(Type) }
+  def parse_type_annotation(migration_root: true)
+    start_token = T.must(peek_at(0))
+    inline_syntax = inline_type_annotation_start?
+    parsed = parse_type_annotation_body
+    emit_legacy_type_migration(start_token, previous, parsed) if migration_root && !inline_syntax
+    parsed
+  end
+
   sig { returns(Type) }
-  def parse_type_annotation
+  def parse_type_annotation_body
     if inline_type_annotation_start?
       return Type.new(parse_inline_type_expression)
     end
@@ -3308,7 +3317,7 @@ class ClearParser
     # This is distinct from concrete `T @shared` Arc syntax.
     if match?(:KEYWORD, 'SHARED')
       consume(:KEYWORD, 'SHARED')
-      return mark_polymorphic_shared_type(parse_type_annotation)
+      return mark_polymorphic_shared_type(parse_type_annotation(migration_root: false))
     end
 
     # Check for tense (Promise) prefix: ~Type
@@ -3337,7 +3346,7 @@ class ClearParser
         error!(current, :PARSER_EXPECTED, expected: "a grouped optional without an outer tense/error prefix", got: current.value, type: current.type, line: current.line)
       end
       consume(:CHAR, '(')
-      wrapped = parse_type_annotation
+      wrapped = parse_type_annotation(migration_root: false)
       consume(:CHAR, ')')
       return Type.optional_of(wrapped)
     end
@@ -3382,7 +3391,7 @@ class ClearParser
       consume(:CHAR, '<')
       type_args = []
       until match?(:CHAR, '>')
-        type_args << type_annotation_source(parse_type_annotation)
+        type_args << type_annotation_source(parse_type_annotation(migration_root: false))
         match!(:CHAR, ',')
       end
       consume(:CHAR, '>')
@@ -3471,6 +3480,34 @@ class ClearParser
     t.auto_token = auto_tok if auto_tok
     t.apply_type_annotation_extras!(soa: is_soa, elem_ownership: elem_ownership, elem_sync: elem_sync, elem_layout: elem_layout, observable_token: observable_token)
     t
+  end
+
+  sig { params(start_token: Lexer::Token, end_token: Lexer::Token, type: Type).void }
+  def emit_legacy_type_migration(start_token, end_token, type)
+    return unless FixCollector.type_migrations_enabled?
+    return unless start_token.line == end_token.line
+
+    replacement = Type.inline_migration_name(type)
+    return if replacement.nil?
+
+    line = @source_code.lines[start_token.line - 1]
+    return if line.nil?
+
+    length = end_token.column + end_token.value.to_s.length - start_token.column
+    original = line[(start_token.column - 1), length].to_s
+    return if original.gsub(/\s+/, "") == replacement.gsub(/\s+/, "")
+
+    edit = Edit.new(
+      span: Span.new(file: nil, line: start_token.line, col: start_token.column, length: length),
+      replacement: replacement
+    )
+    FixCollector.push(FixableFinding.new(
+      level: :info,
+      message: "Legacy type syntax can be written in Inline Pivot form",
+      token: start_token,
+      category: :type,
+      fixes: [Fix.new(description: fix_description(:REWRITE_INLINE_PIVOT_TYPE, type: replacement), confidence: :auto, edits: [edit])]
+    ))
   end
 
   sig { returns(T::Boolean) }

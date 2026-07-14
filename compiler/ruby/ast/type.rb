@@ -128,6 +128,16 @@ class TypeCapabilities < T::Struct
       elem_layout: nil
     )
   end
+
+  sig { returns(T::Boolean) }
+  def inline_migration_safe?
+    return false unless ownership.nil? || ownership == :affine
+    return false unless [sync, layout, lock_rank, shard_count, elem_ownership,
+      elem_sync, elem_layout, link_source, observable_terminal].all?(&:nil?)
+    return false if [soa, observable, polymorphic_shared].any?
+
+    [nil, :list, :set, :pool].include?(collection)
+  end
 end
 
 class TypePlacementUnset < T::Struct
@@ -884,6 +894,54 @@ class Type
   def self.surface_name(type)
     surface_name_type(from_input(type))
   end
+
+  sig { params(type: Type).returns(T.nilable(String)) }
+  def self.inline_migration_name(type)
+    caps = type.capabilities
+    return nil unless caps.inline_migration_safe?
+
+    expression = type.shape.expression
+    return nil if expression.is_a?(FunctionTypeExpression)
+    return nil if TypeExpressionPrinter.legacy(expression).include?("@")
+
+    projected = project_inline_collection(expression, type)
+    return nil if projected.nil?
+
+    TypeExpressionPrinter.inline(projected)
+  end
+
+  sig { params(expression: TypeExpression, type: Type).returns(T.nilable(TypeExpression)) }
+  def self.project_inline_collection(expression, type)
+    collection = type.collection
+    return expression if collection.nil?
+    if expression.is_a?(OptionalTypeExpression)
+      inner = project_inline_collection(expression.inner, type)
+      return inner.nil? ? nil : OptionalTypeExpression.new(inner: inner)
+    end
+    if expression.is_a?(FallibleTypeExpression)
+      inner = project_inline_collection(expression.inner, type)
+      return inner.nil? ? nil : FallibleTypeExpression.new(inner: inner, error_set: expression.error_set)
+    end
+    if expression.is_a?(FutureTypeExpression)
+      inner = project_inline_collection(expression.inner, type)
+      return inner.nil? ? nil : FutureTypeExpression.new(inner: inner)
+    end
+    return nil unless expression.is_a?(LinearTypeExpression)
+
+    hint = expression.allocation_hint
+    if hint.nil? && type.pool?
+      pool_dimension = expression.dimensions.find { |dimension| dimension.is_a?(Integer) }
+      hint = pool_dimension if pool_dimension.is_a?(Integer)
+    end
+    LinearTypeExpression.new(
+      kind: collection,
+      dimensions: expression.dimensions,
+      item: expression.item,
+      allocation_hint: hint,
+      capabilities: expression.capabilities
+    )
+  end
+  private_class_method :project_inline_collection
 
   # ruby-to-clear: effects reentrant
   sig { params(t: Type).returns(String) }

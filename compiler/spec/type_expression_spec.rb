@@ -71,6 +71,16 @@ RSpec.describe TypeExpressionParser do
     ])
   end
 
+  it "prints an explicit dynamic array dimension without changing its rank" do
+    dynamic = LinearTypeExpression.new(
+      kind: :array,
+      dimensions: [:LIST],
+      item: NamedTypeExpression.new(name: :Int64)
+    )
+
+    expect(TypeExpressionPrinter.inline(dynamic)).to eq("[List]Int64")
+  end
+
   it "prints function and stream nodes in both surfaces" do
     signature = Type::FunctionType.new(
       params: [Type::FunctionTypeParam.new(type: Type.new(:Int64))],

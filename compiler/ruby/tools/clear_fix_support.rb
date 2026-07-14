@@ -139,6 +139,7 @@ module ClearFixSupport
   sig { params(source: String, source_dir: String).returns(T::Array[FixableFinding]) }
   def self.collect_findings(source, source_dir: Dir.pwd)
     FixCollector.enable!
+    FixCollector.enable_type_migrations!
     begin
       SyntaxTypoScanner.scan!(source)
       PredicateRewriter.lint!(source)
@@ -161,6 +162,7 @@ module ClearFixSupport
             # A root diagnostic is expected during this non-collecting warmup.
           ensure
             FixCollector.enable!
+            FixCollector.enable_type_migrations!
           end
           tokens = Lexer.new(source).tokenize
           ast = ClearParser.new(tokens, source).parse

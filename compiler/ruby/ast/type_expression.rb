@@ -47,6 +47,7 @@ class FutureTypeExpression < T::Struct
 end
 
 class LinearTypeExpression < T::Struct
+  extend T::Sig
   include TypeExpression
 
   const :kind, Symbol
@@ -54,6 +55,21 @@ class LinearTypeExpression < T::Struct
   const :item, TypeExpression
   const :allocation_hint, T.nilable(Integer), default: nil
   const :capabilities, T::Array[Symbol], default: []
+
+  sig { returns(T::Boolean) }
+  def list?
+    kind == :list
+  end
+
+  sig { returns(T::Boolean) }
+  def set?
+    kind == :set
+  end
+
+  sig { returns(T::Boolean) }
+  def pool?
+    kind == :pool
+  end
 end
 
 class MapTypeExpression < T::Struct
@@ -369,16 +385,7 @@ class TypeExpressionPrinter
     when FutureTypeExpression
       "~#{inline(expression.inner)}"
     when LinearTypeExpression
-      dimensions = expression.dimensions.map do |dimension|
-        case dimension
-        when :LIST then "List"
-        when :STREAM_OPEN then "~"
-        when :INF then "~INF"
-        when :INFERRED then "*"
-        else dimension.to_s
-        end
-      end
-      prefix = dimensions == ["List"] ? "[]" : "[#{dimensions.join(", ")}]"
+      prefix = inline_linear_prefix(expression)
       "#{prefix}#{inline(expression.item)}"
     when MapTypeExpression
       "{#{inline(expression.key)}}#{inline(expression.value)}"
@@ -390,4 +397,27 @@ class TypeExpressionPrinter
       raise "unknown type expression #{expression.class}"
     end
   end
+
+  sig { params(expression: LinearTypeExpression).returns(String) }
+  def self.inline_linear_prefix(expression)
+    hint = expression.allocation_hint
+    return hint.nil? ? "[]" : "[List(#{hint})]" if expression.list?
+    return hint.nil? ? "[Set]" : "[Set(#{hint})]" if expression.set?
+    if expression.pool?
+      pool_size = hint || expression.dimensions.find { |dimension| dimension.is_a?(Integer) }
+      return "[Pool(#{T.must(pool_size)})]"
+    end
+
+    dimensions = expression.dimensions.map do |dimension|
+      case dimension
+      when :LIST then "List"
+      when :STREAM_OPEN then "~"
+      when :INF then "~INF"
+      when :INFERRED then "*"
+      else dimension.to_s
+      end
+    end
+    "[#{dimensions.join(", ")}]"
+  end
+  private_class_method :inline_linear_prefix
 end

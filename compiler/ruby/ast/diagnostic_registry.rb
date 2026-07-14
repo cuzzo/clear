@@ -3171,6 +3171,7 @@ module DiagnosticRegistry
     REPLACE_MATCH_WITH_PARTIAL: "Replace `MATCH` with `PARTIAL MATCH` (relaxes exhaustiveness; allows DEFAULT and WHEN guards).",
     REPLACE_OPERATOR_TYPO: "Replace `%{match}` with `%{replace}` -- %{label}.",
     REPLACE_STRING_CONCAT_OPERATOR: "Replace `+` with `$+` for string concatenation.",
+    REWRITE_INLINE_PIVOT_TYPE: "Rewrite as `%{type}`.",
     TEST_OPTIONAL_BOOL_PRESENCE: "Test whether the optional Bool is present with `%{name} EXISTS`.",
     DEFAULT_OPTIONAL_BOOL_PAYLOAD: "Use the Bool payload, defaulting NIL to FALSE, with `(%{name} OR_ELSE FALSE)`.",
     REPLACE_REENTRANT_WITH_VARIANT: "Replace `EFFECTS REENTRANT` with `%{suggestion}` (%{reason}).",

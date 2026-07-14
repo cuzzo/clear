@@ -103,7 +103,8 @@ RSpec.describe ClearFixSupport do
         RETURN m.coutn();
       END
     CLEAR
-    expect_rewrite(method_source, method_source.sub("coutn", "count"))
+    method_expected = method_source.sub("HashMap<Int64>", "{String}Int64").sub("coutn", "count")
+    expect_rewrite(method_source, method_expected, count: 2)
 
     var_source = <<~CLEAR
       FN main() RETURNS Int64 ->
@@ -157,8 +158,8 @@ RSpec.describe ClearFixSupport do
         RETURN;
       END
     CLEAR
-    expected = moved_source.sub("b = a;", "b = (COPY a);")
-    expect_rewrite(moved_source, expected, take_first: true)
+    expected = moved_source.sub("HashMap<Float64>", "{String}Float64").sub("b = a;", "b = (COPY a);")
+    expect_rewrite(moved_source, expected, take_first: true, count: 2)
     expect(descriptions_for(moved_source).join("\n")).to include("Change 'a' to `@shared`")
   end
 
@@ -282,6 +283,22 @@ RSpec.describe ClearFixSupport do
       expect(raw_heredoc.indent).to eq(0)
 
       expect(described_class.extract_clear_heredocs("source = <<CLEAR\nFN main() RETURNS Void ->\n")).to be_empty
+    end
+  end
+
+  it "restores type migrations after warming REQUIRE imports" do
+    Dir.mktmpdir do |dir|
+      File.write(File.join(dir, "helper.clear"), "STRUCT Helper { value: Int64 }\n")
+      source = <<~CLEAR
+        REQUIRE "helper.clear";
+        FN main() RETURNS Void ->
+          values: Int64[] = [];
+          RETURN;
+        END
+      CLEAR
+
+      findings = described_class.collect_findings(source, source_dir: dir)
+      expect(findings.flat_map(&:fixes).map(&:description)).to include("Rewrite as `[]Int64`.")
     end
   end
 
