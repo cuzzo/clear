@@ -48,4 +48,13 @@ RSpec.describe "ClearParser state-free grammar decisions" do
 
     expect { parser_for(source).parse }.to raise_error(ParserError, /Unknown REQUIRES family/)
   end
+
+  it "keeps binding applicability separate from suffix construction" do
+    exists = parser_for("optional EXISTS").send(:parse_expression)
+    expect(exists).to be_a(AST::UnaryOp)
+    expect(exists.op).to eq(:EXISTS)
+
+    expect { parser_for("future IS_READY AS value").send(:parse_expression) }
+      .to raise_error(ParserError)
+  end
 end

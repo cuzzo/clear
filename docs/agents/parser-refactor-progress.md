@@ -519,3 +519,37 @@ collection access, not a runtime-complexity regression.
 Validation: 82 focused source-parser, MATCH, REQUIRES, generic-literal, and
 contract examples pass; all 487 current top-level CLEAR fixtures parse. Ruby
 built-in coverage reports all 46 changed executable parser lines covered.
+
+### Stage 5A: semantic-only suffix results
+
+Suffix parsing no longer returns `AST::Node | Symbol`. The internal
+`SUFFIX_DECLINE` symbol, result union, identity test, and loop cast are gone.
+`suffix_rule_applicable?` decides whether conditional-binding and inline-union
+suffixes belong to their surrounding grammar before dispatch; every dispatched
+suffix method now returns its concrete AST type.
+
+| Measure | Stage 4C | Stage 5A | Delta |
+| --- | ---: | ---: | ---: |
+| Parser lines | 4,959 | 4,954 | -5 |
+| Parser methods | 184 | 186 | +2 |
+| Parser `T.cast` sites | 6 | 5 | -1 |
+| NilKill calls | 3,612 | 3,608 | -4 |
+| NilKill state accesses | 85 | 85 | 0 |
+| NilKill hash/array shapes | 19 / 1,424 | 19 / 1,424 | 0 / 0 |
+| NilKill collection indexes / blockers | 42 / 41 | 42 / 41 | 0 / 0 |
+| Espalier functions | 184 | 186 | +2 |
+| Espalier known `O(N)` time component | 33 | 33 | 0 |
+| Decomplex candidates | 401 | 398 | -3 |
+| Decomplex convergence units | 94 | 92 | -2 |
+| Decomplex state-based branch findings | 70 | 67 | -3 |
+
+The two small predicates add methods but remove a non-semantic union and
+state-like branches over its sentinel value. NilKill records the removed cast
+and four calls; Decomplex removes three state-based findings and two
+cross-detector convergence units. Espalier appropriately sees two constant
+helpers without changing the parser's known asymptotic components.
+
+Validation: focused source tests exercise ordinary EXISTS construction,
+conditional-binding decline, IS_READY's binding diagnostic, inline union
+construction, and MATCH destructuring. All changed executable lines are
+covered, and all 487 top-level CLEAR fixtures parse.

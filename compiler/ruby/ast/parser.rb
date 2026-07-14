@@ -105,7 +105,6 @@ class ClearParser
   include ErrorHelper
   include FixableHelper
 
-  SuffixResult = T.type_alias { T.any(AST::Node, Symbol) }
   ArgumentType = T.type_alias { T.any(Symbol, Type) }
   ReturnLifetime = T.type_alias { T.nilable(T.any(Symbol, T::Array[AST::Node])) }
   SigilTable = T.type_alias { T::Hash[String, SigilAttrs] }
@@ -368,9 +367,6 @@ class ClearParser
 
   SUFFIX_RULE_INDEX = T.let(index_rules(SUFFIX_RULES), T::Hash[String, ParserRule])
 
-  # Sentinel returned by a suffix rule to stop without consuming a token.
-  SUFFIX_DECLINE = T.let(:__clear_parser_suffix_decline__, Symbol)
-
   # Capability Wraps: expr @multiowned -> Rc(T), expr @shared -> Arc(T), expr @locked -> *Locked(T)
   # Supports `:` join: expr @shared:locked, expr @locked:multiowned (order-independent).
   # Three orthogonal dimensions:
@@ -627,7 +623,7 @@ class ClearParser
       fixes: [fix])
   end
 
-  sig { params(rule: ParserRule, lhs: AST::Node).returns(SuffixResult) }
+  sig { params(rule: ParserRule, lhs: AST::Node).returns(AST::Node) }
   def dispatch_suffix_rule(rule, lhs)
     case rule.action
     when :parse_index_suffix then parse_index_suffix(lhs)
@@ -645,30 +641,38 @@ class ClearParser
     end
   end
 
-  sig { params(lhs: AST::Node).returns(SuffixResult) }
-  def parse_exists_suffix(lhs)
-    # Conditional binding owns `EXISTS AS`; leave both tokens for the existing
-    # IfBind/WhileBindLoop refinement parser. Everywhere else EXISTS is a
-    # normal postfix Bool expression.
-    return SUFFIX_DECLINE if peek.type == :KEYWORD && peek.value == 'AS'
+  sig { params(rule: ParserRule, lhs: AST::Node).returns(T::Boolean) }
+  def suffix_rule_applicable?(rule, lhs)
+    case rule.action
+    when :parse_exists_suffix, :parse_is_ok_suffix
+      !conditional_binding_suffix?
+    when :parse_inline_union_variant_suffix
+      !match_destructure_brace? && AST.inline_union_constructor_target?(lhs)
+    else
+      true
+    end
+  end
 
+  sig { returns(T::Boolean) }
+  def conditional_binding_suffix?
+    peek.type == :KEYWORD && peek.value == 'AS'
+  end
+
+  sig { params(lhs: AST::Node).returns(AST::UnaryOp) }
+  def parse_exists_suffix(lhs)
     token = consume(:KEYWORD, 'EXISTS')
     AST::UnaryOp.new(token, :EXISTS, lhs)
   end
 
-  sig { params(lhs: AST::Node).returns(SuffixResult) }
+  sig { params(lhs: AST::Node).returns(AST::UnaryOp) }
   def parse_is_ok_suffix(lhs)
-    return SUFFIX_DECLINE if peek.type == :KEYWORD && peek.value == 'AS'
-
     token = consume(:KEYWORD, 'IS_OK')
     AST::UnaryOp.new(token, :IS_OK, lhs)
   end
 
-  sig { params(lhs: AST::Node).returns(SuffixResult) }
+  sig { params(lhs: AST::Node).returns(AST::UnaryOp) }
   def parse_is_ready_suffix(lhs)
-    if peek.type == :KEYWORD && peek.value == 'AS'
-      error!(current, :IS_READY_CANNOT_BIND)
-    end
+    error!(current, :IS_READY_CANNOT_BIND) if conditional_binding_suffix?
     token = consume(:KEYWORD, 'IS_READY')
     AST::UnaryOp.new(token, :IS_READY, lhs)
   end
@@ -755,26 +759,21 @@ class ClearParser
 
   # Inline union variant constructor: TypeName.VariantName{ field: val, ... }
   # Only fires when lhs is a GetField whose target is a TYPE_ID (uppercase) identifier.
-  # Returns SUFFIX_DECLINE (without consuming '{') for any other lhs, so callers
-  # like parse_with_capability that legitimately follow an expression with '{' are unaffected.
-  sig { params(lhs: AST::Node).returns(SuffixResult) }
+  # Applicability is checked before dispatch, so this method always constructs.
+  sig { params(lhs: AST::Node).returns(AST::UnionVariantLit) }
   def parse_inline_union_variant_suffix(lhs)
-    if !match_destructure_brace? && AST.inline_union_constructor_target?(lhs)
-      tok = current
-      field_pairs = T.let([], T::Array[[String, AST::Node]])
-      _, field_pairs = parse_comma_seq(:CHAR, '{', '}') do
-        key_token = current.type == :TYPE_ID ? consume(:TYPE_ID) : consume(:VAR_ID)
-        k = T.must(key_token).text!
-        consume(:CHAR, ':')
-        v = parse_expression
-        [k, v]
-      end
-      target = T.cast(lhs, AST::GetField)
-      target_ident = T.cast(target.target, AST::Identifier)
-      AST::UnionVariantLit.new(tok, target_ident.name, T.cast(target.field, String), field_pairs.to_h, :stack)
-    else
-      SUFFIX_DECLINE
+    tok = current
+    field_pairs = T.let([], T::Array[[String, AST::Node]])
+    _, field_pairs = parse_comma_seq(:CHAR, '{', '}') do
+      key_token = current.type == :TYPE_ID ? consume(:TYPE_ID) : consume(:VAR_ID)
+      k = T.must(key_token).text!
+      consume(:CHAR, ':')
+      v = parse_expression
+      [k, v]
     end
+    target = T.cast(lhs, AST::GetField)
+    target_ident = T.cast(target.target, AST::Identifier)
+    AST::UnionVariantLit.new(tok, target_ident.name, T.cast(target.field, String), field_pairs.to_h, :stack)
   end
 
   # In MATCH grammar, a brace immediately followed by the arm arrow is a
@@ -2464,12 +2463,8 @@ class ClearParser
     loop do
       rule = SUFFIX_RULE_INDEX[ClearParser.token_rule_key(current)]
       break unless rule
-      # Run the rule, passing the current 'lhs' into it.
-      # If the rule returns SUFFIX_DECLINE, it did not consume anything and
-      # the suffix loop should stop (leaving the token for the caller).
-      result = dispatch_suffix_rule(rule, lhs)
-      break if result.equal?(SUFFIX_DECLINE)
-      lhs = T.cast(result, AST::Node)
+      break unless suffix_rule_applicable?(rule, lhs)
+      lhs = dispatch_suffix_rule(rule, lhs)
     end
     lhs
   end
