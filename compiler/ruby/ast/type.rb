@@ -26,6 +26,7 @@ class TypeCapabilities < T::Struct
   MaybeToken = T.type_alias { T.any(TypeCapabilityUnset, Lexer::Token, NilClass) }
 
   const :ownership, T.nilable(Symbol), default: nil
+  const :ownership_set, T::Boolean, default: false
   const :sync, T.nilable(Symbol), default: nil
   const :layout, T.nilable(Symbol), default: nil
   const :lock_rank, T.nilable(Integer), default: nil
@@ -49,6 +50,7 @@ class TypeCapabilities < T::Struct
   sig do
     params(
       ownership: MaybeSymbol,
+      ownership_set: MaybeBoolean,
       sync: MaybeSymbol,
       layout: MaybeSymbol,
       lock_rank: MaybeInteger,
@@ -67,6 +69,7 @@ class TypeCapabilities < T::Struct
   end
   def with(
     ownership: UNSET,
+    ownership_set: UNSET,
     sync: UNSET,
     layout: UNSET,
     lock_rank: UNSET,
@@ -83,6 +86,10 @@ class TypeCapabilities < T::Struct
     polymorphic_shared: UNSET
   )
     next_ownership = T.let(ownership.equal?(UNSET) ? self.ownership : T.cast(ownership, T.nilable(Symbol)), T.nilable(Symbol))
+    next_ownership_set = T.let(
+      ownership_set.equal?(UNSET) ? (!ownership.equal?(UNSET) || self.ownership_set) : T.cast(ownership_set, T::Boolean),
+      T::Boolean
+    )
     next_sync = T.let(sync.equal?(UNSET) ? self.sync : T.cast(sync, T.nilable(Symbol)), T.nilable(Symbol))
     next_layout = T.let(layout.equal?(UNSET) ? self.layout : T.cast(layout, T.nilable(Symbol)), T.nilable(Symbol))
     next_lock_rank = T.let(lock_rank.equal?(UNSET) ? self.lock_rank : T.cast(lock_rank, T.nilable(Integer)), T.nilable(Integer))
@@ -100,6 +107,7 @@ class TypeCapabilities < T::Struct
 
     TypeCapabilities.new(
       ownership: next_ownership,
+      ownership_set: next_ownership_set,
       sync: next_sync,
       layout: next_layout,
       lock_rank: next_lock_rank,
@@ -121,6 +129,7 @@ class TypeCapabilities < T::Struct
   def without_runtime_wrappers
     with(
       ownership: :affine,
+      ownership_set: false,
       sync: nil,
       layout: nil,
       elem_ownership: nil,
@@ -131,12 +140,25 @@ class TypeCapabilities < T::Struct
 
   sig { returns(T::Boolean) }
   def inline_migration_safe?
-    return false unless ownership.nil? || ownership == :affine
-    return false unless [sync, layout, lock_rank, shard_count, elem_ownership,
-      elem_sync, elem_layout, link_source, observable_terminal].all?(&:nil?)
-    return false if [soa, observable, polymorphic_shared].any?
+    return false unless [lock_rank, elem_ownership, elem_sync, elem_layout,
+      link_source, observable_terminal].all?(&:nil?)
+    return false if polymorphic_shared
 
     [nil, :list, :set, :pool].include?(collection)
+  end
+
+  sig { returns(T::Boolean) }
+  def explicit_layer_capability?
+    (!ownership.nil? && ownership != :affine) || !sync.nil? || !layout.nil? || !lock_rank.nil? ||
+      !shard_count.nil? || soa || !elem_ownership.nil? || !elem_sync.nil? ||
+      !elem_layout.nil? || !link_source.nil? || observable ||
+      !observable_terminal.nil? || polymorphic_shared
+  end
+
+  sig { params(ownership: MaybeSymbol, sync: MaybeSymbol, layout: MaybeSymbol).returns(T::Boolean) }
+  def element_update_requested?(ownership:, sync:, layout:)
+    !ownership.equal?(UNSET) || !sync.equal?(UNSET) || !layout.equal?(UNSET) ||
+      !elem_ownership.nil? || !elem_sync.nil? || !elem_layout.nil?
   end
 end
 
@@ -268,12 +290,22 @@ class TypeShape
     TypeShape.new(raw: raw, auto: auto_value, expression: expression)
   end
 
+  sig { params(next_expression: TypeExpression).returns(TypeShape) }
+  def with_expression(next_expression)
+    TypeShape.new(raw: :Any, auto: auto, expression: next_expression)
+  end
+
   sig { returns(Raw) }
   def raw
     current = expression
     return current.signature if current.is_a?(FunctionTypeExpression)
 
-    TypeExpressionPrinter.legacy(current).to_sym
+    root_caps = TypeExpressionTree.root_capabilities(current)
+    shape_only = TypeExpressionTree.with_root_capabilities(
+      current,
+      TypeCapabilities.new(ownership: :affine, collection: root_caps.collection)
+    )
+    TypeExpressionPrinter.legacy(shape_only).to_sym
   end
 
   sig { returns(Symbol) }
@@ -579,12 +611,6 @@ class Type
 
   sig { params(expression: TypeExpression).returns(Type) }
   def self.from_child_expression(expression)
-    surface = TypeExpressionPrinter.legacy(expression)
-    # Legacy nested capability suffixes have not yet been promoted into typed
-    # per-node capability records. Keep that one compatibility edge isolated;
-    # ordinary child construction never returns through the string parser.
-    return Type.new(surface) if surface.include?("@")
-
     Type.new(expression)
   end
 
@@ -902,8 +928,10 @@ class Type
 
     expression = type.shape.expression
     return nil if expression.is_a?(FunctionTypeExpression)
-    return nil if TypeExpressionPrinter.legacy(expression).include?("@")
-
+    if TypeExpressionTree.tense_wrapper?(expression) &&
+        expression.capabilities.explicit_layer_capability?
+      return nil
+    end
     projected = project_inline_collection(expression, type)
     return nil if projected.nil?
 
@@ -1574,7 +1602,11 @@ class Type
 
   sig { returns(T.nilable(Symbol)) }
   def elem_ownership
-    @capabilities.elem_ownership
+    capabilities = TypeExpressionTree.linear_item_capabilities(@shape.expression)
+    value = capabilities.nil? ? @capabilities.elem_ownership : capabilities.ownership
+    return nil if value == :affine && !capabilities.nil? && !capabilities.ownership_set
+
+    value
   end
 
   sig { params(value: T.nilable(Symbol)).returns(T.nilable(Symbol)) }
@@ -1585,7 +1617,8 @@ class Type
 
   sig { returns(T.nilable(Symbol)) }
   def elem_sync
-    @capabilities.elem_sync
+    capabilities = TypeExpressionTree.linear_item_capabilities(@shape.expression)
+    capabilities.nil? ? @capabilities.elem_sync : capabilities.sync
   end
 
   sig { params(value: T.nilable(Symbol)).returns(T.nilable(Symbol)) }
@@ -1596,7 +1629,8 @@ class Type
 
   sig { returns(T.nilable(Symbol)) }
   def elem_layout
-    @capabilities.elem_layout
+    capabilities = TypeExpressionTree.linear_item_capabilities(@shape.expression)
+    capabilities.nil? ? @capabilities.elem_layout : capabilities.layout
   end
 
   sig { params(value: T.nilable(Symbol)).returns(T.nilable(Symbol)) }
@@ -1694,6 +1728,29 @@ class Type
     observable_token: TypeCapabilities::UNSET,
     polymorphic_shared: TypeCapabilities::UNSET
   )
+    item_capabilities = TypeExpressionTree.linear_item_capabilities(@shape.expression)
+    update_item = !item_capabilities.nil? && @capabilities.element_update_requested?(
+      ownership: elem_ownership,
+      sync: elem_sync,
+      layout: elem_layout
+    )
+    legacy_elem_ownership = @capabilities.elem_ownership
+    legacy_elem_sync = @capabilities.elem_sync
+    legacy_elem_layout = @capabilities.elem_layout
+    if update_item
+      next_item_capabilities = item_capabilities.with(
+        ownership: elem_ownership.equal?(TypeCapabilities::UNSET) && !legacy_elem_ownership.nil? ?
+          legacy_elem_ownership : elem_ownership,
+        sync: elem_sync.equal?(TypeCapabilities::UNSET) && !legacy_elem_sync.nil? ?
+          legacy_elem_sync : elem_sync,
+        layout: elem_layout.equal?(TypeCapabilities::UNSET) && !legacy_elem_layout.nil? ?
+          legacy_elem_layout : elem_layout
+      )
+      @shape = @shape.with_expression(
+        TypeExpressionTree.with_linear_item_capabilities(@shape.expression, next_item_capabilities)
+      )
+    end
+
     @capabilities = @capabilities.with(
       ownership: ownership,
       sync: sync,
@@ -1702,15 +1759,19 @@ class Type
       collection: collection,
       shard_count: shard_count,
       soa: soa,
-      elem_ownership: elem_ownership,
-      elem_sync: elem_sync,
-      elem_layout: elem_layout,
+      elem_ownership: update_item ? nil : elem_ownership,
+      elem_sync: update_item ? nil : elem_sync,
+      elem_layout: update_item ? nil : elem_layout,
       link_source: link_source,
       observable: observable,
       observable_terminal: observable_terminal,
       observable_token: observable_token,
       polymorphic_shared: polymorphic_shared
     )
+    @shape = @shape.with_expression(
+      TypeExpressionTree.with_root_capabilities(@shape.expression, @capabilities)
+    )
+    @capabilities
   end
 
   sig { void }
@@ -1965,6 +2026,9 @@ class Type
   sig { params(capabilities: TypeCapabilities).returns(TypeCapabilities) }
   def replace_capabilities!(capabilities)
     @capabilities = capabilities.copy
+    @shape = @shape.with_expression(
+      TypeExpressionTree.with_root_capabilities(@shape.expression, @capabilities)
+    )
     @capabilities
   end
 
@@ -2113,6 +2177,10 @@ class Type
   sig { returns(TypeCapabilities) }
   def strip_runtime_capabilities!
     @capabilities = @capabilities.without_runtime_wrappers
+    @shape = @shape.with_expression(
+      TypeExpressionTree.with_root_capabilities(@shape.expression, @capabilities)
+    )
+    @capabilities
   end
 
   # -----------------------------------------------
@@ -3635,13 +3703,7 @@ class Type
     expression = expression.inner if expression.is_a?(OptionalTypeExpression) && expression.inner.is_a?(LinearTypeExpression)
     return nil unless expression.is_a?(LinearTypeExpression)
 
-    t = Type.from_child_expression(expression.item)
-    t.apply_capabilities!(
-      ownership: Type.capability_symbol_or_unset(elem_ownership),
-      sync: Type.capability_symbol_or_unset(elem_sync),
-      layout: Type.capability_symbol_or_unset(elem_layout)
-    )
-    t
+    Type.from_child_expression(expression.item)
   end
 
   sig { params(lookup_arg: T.nilable(SchemaResolver), lookup_block: T.nilable(SchemaLookup)).returns(Integer) }
@@ -4665,17 +4727,7 @@ class Type
   sig { params(expression: TypeExpression, auto: T::Boolean).void }
   def parse_expression_input!(expression, auto: false)
     @shape = TypeShape.new(raw: :Any, auto: auto, expression: expression)
-    @capabilities = TypeCapabilities.new(ownership: :affine)
-    structural = T.let(expression, TypeExpression)
-    structural = structural.inner while structural.is_a?(OptionalTypeExpression) || structural.is_a?(FallibleTypeExpression) || structural.is_a?(FutureTypeExpression)
-    if structural.is_a?(LinearTypeExpression)
-      collection = case structural.kind
-      when :list then :list
-      when :set then :set
-      when :pool then :pool
-      end
-      @capabilities = TypeCapabilities.new(ownership: :affine, collection: collection) unless collection.nil?
-    end
+    @capabilities = TypeExpressionTree.root_capabilities(expression)
   end
 
   sig { params(raw_str: String, auto: T::Boolean).void }

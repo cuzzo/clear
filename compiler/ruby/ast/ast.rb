@@ -1247,11 +1247,13 @@ module AST
     #
     sig { params(declared_type: CoerceTypeInput).returns(CoerceResult) }
     def coerce!(declared_type)
-      # fn_type metadata must not be flattened to a surface symbol: function
-      # params/returns are stored in the Type object, including for ?FN.
+      # Function metadata and node-local capabilities cannot be reduced to a
+      # flat `resolved` symbol without loss. Ordinary inferred values retain
+      # the historical root-capability projection below.
       if @type_object && (declared_type.nil? || declared_type == :Any)
         inferred_type = @type_object
-        if inferred_type.fn_type? || (inferred_type.optional? && inferred_type.wrapped_type&.fn_type?)
+        if inferred_type.fn_type? || (inferred_type.optional? && inferred_type.wrapped_type&.fn_type?) ||
+            TypeExpressionTree.nested_capabilities?(inferred_type.shape.expression)
           return [inferred_type, nil]
         end
       end

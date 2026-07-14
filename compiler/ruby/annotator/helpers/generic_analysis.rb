@@ -373,7 +373,17 @@ module GenericAnalysis
     T.bind(self, SemanticAnnotator) rescue nil
     p_res = param_type.resolved
     a_res = actual_type.resolved
-    if type_params.include?(p_res)
+    if param_type.fn_type? && actual_type.fn_type?
+      param_fn = param_type.function_type
+      actual_fn = actual_type.function_type
+      return unless param_fn && actual_fn
+
+      param_fn.params.zip(actual_fn.params).each do |p_param, a_param|
+        next unless p_param && a_param
+        extract_type_bindings!(node, p_param.type, a_param.type, type_params, subst)
+      end
+      extract_type_bindings!(node, param_fn.return_type, actual_fn.return_type, type_params, subst)
+    elsif type_params.include?(p_res)
       actual_binding = if generic_shared_family_param?(param_type) && actual_type.shared?
         generic_shared_payload_binding(actual_type)
       else
@@ -390,16 +400,6 @@ module GenericAnalysis
         next unless p_arg && a_arg
         extract_type_bindings!(node, p_arg, a_arg, type_params, subst)
       end
-    elsif param_type.fn_type? && actual_type.fn_type?
-      param_fn = param_type.function_type
-      actual_fn = actual_type.function_type
-      return unless param_fn && actual_fn
-
-      param_fn.params.zip(actual_fn.params).each do |p_param, a_param|
-        next unless p_param && a_param
-        extract_type_bindings!(node, p_param.type, a_param.type, type_params, subst)
-      end
-      extract_type_bindings!(node, param_fn.return_type, actual_fn.return_type, type_params, subst)
     end
   end
 
@@ -414,17 +414,7 @@ module GenericAnalysis
     T.bind(self, SemanticAnnotator) rescue nil
     return Type.new(:Any) if type_obj.nil?
     t = type_obj.is_a?(Type) ? type_obj : Type.new(type_obj)
-    resolved = t.resolved
-    if subst.key?(resolved)
-      substituted = Type.new(T.unsafe(subst[resolved]))
-      if generic_type_has_capabilities?(t)
-        merged = Type.new(substituted)
-        merged.merge_capabilities_from!(t)
-        merged
-      else
-        substituted
-      end
-    elsif t.fn_type?
+    if t.fn_type?
       fn_type = t.function_type
       return t unless fn_type
 
@@ -437,35 +427,88 @@ module GenericAnalysis
         reentrant: fn_type.reentrant,
         source_signature: fn_type.source_signature
       ))
-    elsif t.generic_instance?
-      new_args = t.generic_args.map { |arg| generic_binding_source(apply_type_subst(arg, subst)) }
-      Type.new(:"#{t.generic_base}<#{new_args.join(',')}>")
     else
-      # Handle array suffix: T[] → String[] when T → String
-      str = resolved.to_s
-      if str.end_with?('[]')
-        inner = T.must(str[0..-3]).to_sym
-        if subst.key?(inner)
-          substituted_array = Type.new(:"#{generic_binding_source(T.must(subst[inner]))}[]")
-          substituted_array.merge_capabilities_from!(t)
-          return substituted_array
-        end
-      end
-
-      # Handle prefixed types: !T, ?T, ~T — substitute the inner type.
-      prefix = str.match(/\A([!?~]+)/)&.[](1)
-      if prefix
-        inner = T.must(str[prefix.length..]).to_sym
-        if subst.key?(inner)
-          Type.new(:"#{prefix}#{generic_binding_source(T.must(subst[inner]))}")
-        else
-          t
-        end
-      else
-        t
-      end
+      Type.new(apply_expression_subst(t.shape.expression, subst))
     end
   end
+
+  sig { params(expression: TypeExpression, subst: GenericSubstitution).returns(TypeExpression) }
+  def apply_expression_subst(expression, subst)
+    T.bind(self, SemanticAnnotator) rescue nil
+    case expression
+    when NamedTypeExpression
+      if expression.arguments.empty? && subst.key?(expression.name)
+        replacement = Type.new(T.unsafe(subst[expression.name]))
+        if replacement.generic_payload_type_arg? && !expression.capabilities.polymorphic_shared
+          replacement.strip_runtime_capabilities!
+        end
+        parameter = Type.new(expression)
+        replacement.merge_capabilities_from!(parameter) if generic_type_has_capabilities?(parameter)
+        return replacement.shape.expression
+      end
+      NamedTypeExpression.new(
+        name: expression.name,
+        arguments: expression.arguments.map { |argument| apply_expression_subst(argument, subst) },
+        capabilities: expression.capabilities
+      )
+    when FunctionTypeExpression
+      signature = expression.signature
+      FunctionTypeExpression.new(
+        signature: Type::FunctionType.new(
+          params: signature.params.map do |param|
+            Type::FunctionTypeParam.new(type: apply_type_subst(param.type, subst))
+          end,
+          return_type: apply_type_subst(signature.return_type, subst),
+          reentrant: signature.reentrant,
+          source_signature: signature.source_signature
+        ),
+        capabilities: expression.capabilities
+      )
+    when TupleTypeExpression
+      TupleTypeExpression.new(
+        items: expression.items.map { |item| apply_expression_subst(item, subst) },
+        capabilities: expression.capabilities
+      )
+    when OptionalTypeExpression
+      OptionalTypeExpression.new(inner: apply_expression_subst(expression.inner, subst),
+        capabilities: expression.capabilities)
+    when FallibleTypeExpression
+      error_set = expression.error_set
+      FallibleTypeExpression.new(
+        inner: apply_expression_subst(expression.inner, subst),
+        error_set: error_set.nil? ? nil : apply_expression_subst(error_set, subst),
+        capabilities: expression.capabilities
+      )
+    when FutureTypeExpression
+      FutureTypeExpression.new(inner: apply_expression_subst(expression.inner, subst),
+        capabilities: expression.capabilities)
+    when LinearTypeExpression
+      LinearTypeExpression.new(
+        kind: expression.kind,
+        dimensions: expression.dimensions,
+        item: apply_expression_subst(expression.item, subst),
+        allocation_hint: expression.allocation_hint,
+        capabilities: expression.capabilities
+      )
+    when MapTypeExpression
+      MapTypeExpression.new(
+        key: apply_expression_subst(expression.key, subst),
+        value: apply_expression_subst(expression.value, subst),
+        key_implicit: expression.key_implicit,
+        legacy_separator: expression.legacy_separator,
+        capabilities: expression.capabilities
+      )
+    when StreamTypeExpression
+      StreamTypeExpression.new(
+        cardinality: expression.cardinality,
+        item: apply_expression_subst(expression.item, subst),
+        capabilities: expression.capabilities
+      )
+    else
+      expression
+    end
+  end
+  private :apply_expression_subst
 
   sig { params(type: Type).returns(Type) }
   def generic_binding_value(type)

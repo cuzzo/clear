@@ -626,9 +626,55 @@ RSpec.describe SemanticAnnotator do
 
       it "ignores explicit container borrow markers without a receiver" do
         annotator = SemanticAnnotator.new
-        expr = Struct.new(:container_borrow).new(true)
+        token = Lexer::Token.new(:INT64, 1, 1, 1)
+        expr = AST::Literal.new(token, :INT64, 1, nil)
+        expr.container_borrow = true
 
         expect(annotator.send(:find_container_source, expr)).to be_nil
+      end
+
+      it "substitutes every recursive type-expression variant without reparsing" do
+        annotator = SemanticAnnotator.new
+        parameter = NamedTypeExpression.new(name: :T)
+        signature = Type::FunctionType.new(
+          params: [Type::FunctionTypeParam.new(type: Type.new(:T))],
+          return_type: Type.new(:T)
+        )
+        expression = TupleTypeExpression.new(items: [
+          FunctionTypeExpression.new(signature: signature),
+          OptionalTypeExpression.new(inner: parameter),
+          FallibleTypeExpression.new(inner: parameter, error_set: parameter),
+          FutureTypeExpression.new(inner: parameter),
+          LinearTypeExpression.new(kind: :list, dimensions: [:LIST], item: parameter),
+          MapTypeExpression.new(key: parameter, value: parameter),
+          StreamTypeExpression.new(cardinality: :FINITE, item: parameter),
+        ])
+        substituted = annotator.send(:apply_expression_subst, expression, { T: Type.new(:Int64) })
+        unknown_class = Class.new { include TypeExpression }
+        unknown = T.cast(unknown_class.new, TypeExpression)
+
+        expect(TypeExpressionPrinter.inline(substituted))
+          .to eq("Tuple<FN(Int64) -> Int64, ?Int64, !Int64, ~Int64, []Int64, {Int64}Int64, [~]Int64>")
+        expect(annotator.send(:apply_expression_subst, unknown, {})).to equal(unknown)
+      end
+
+      it "binds generic callback parameter and result types structurally" do
+        annotator = SemanticAnnotator.new
+        token = Lexer::Token.new(:VAR_ID, "invoke", 1, 1)
+        node = AST::FuncCall.new(token, "invoke", [])
+        param_signature = Type::FunctionType.new(
+          params: [Type::FunctionTypeParam.new(type: Type.new(:T))],
+          return_type: Type.new(:T)
+        )
+        actual_signature = Type::FunctionType.new(
+          params: [Type::FunctionTypeParam.new(type: Type.new(:Int64))],
+          return_type: Type.new(:Int64)
+        )
+        substitution = {}
+
+        annotator.send(:extract_type_bindings!, node, Type.new(param_signature),
+          Type.new(actual_signature), [:T], substitution)
+        expect(substitution.fetch(:T).resolved).to eq(:Int64)
       end
 
       it "ignores slices whose target is not array-shaped" do

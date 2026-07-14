@@ -105,7 +105,7 @@ module DiagnosticBuckets
       codes: %i[
         FIXED_ARRAY_SIZE_AS_DYNAMIC FIXED_ARRAY_SIZE_MISMATCH
         SOA_NEEDS_FIXED_ARRAY POOL_NEEDS_FIXED_CAPACITY
-        SHARDED_NEEDS_2_PLUS COLLECTION_NEEDS_ARRAY_TYPE
+        SHARDED_NEEDS_2_PLUS COLLECTION_NEEDS_ARRAY_TYPE TYPE_NODE_LIMIT
       ],
     },
 
@@ -452,7 +452,7 @@ module DiagnosticBuckets
       summary: "`@cap(modifier)` parens, mixing `:` and `,` capability separators, sharded counts that need ≥ 2, sigils that need a positive count argument.",
       codes: %i[
         MIXED_AT_CAPABILITIES CAP_BAD_MODIFIER
-        SHARDED_TOO_FEW SIGIL_N_NONPOSITIVE
+        SHARDED_TOO_FEW SIGIL_N_NONPOSITIVE TYPE_CAPABILITY_SITE_LIMIT
       ],
     },
 

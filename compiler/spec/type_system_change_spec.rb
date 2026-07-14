@@ -240,13 +240,59 @@ RSpec.describe "type-system change contracts" do
     expect(ClearFixSupport.apply_to_source(rewritten, only_set: Set[:type]).first).to eq(rewritten)
   end
 
-  it "preserves legacy capability syntax until capabilities live on type layers" do
+  it "migrates collection and element capabilities onto their exact layers" do
     source = "values: Int64[]@shared:locked = [];\n"
     rewritten, count, = ClearFixSupport.apply_to_source(source, only_set: Set[:type])
+    element_source = "values: Int64@shared[] = [];\n"
+    element_rewritten, element_count, = ClearFixSupport.apply_to_source(element_source, only_set: Set[:type])
     shared = parse("value: SHARED Int64 = DEFAULT;").statements.first.type
 
-    expect(count).to eq(0)
-    expect(rewritten).to eq(source)
+    expect(count).to eq(1)
+    expect(rewritten).to eq("values: []@shared:locked Int64 = [];\n")
+    expect(element_count).to eq(1)
+    expect(element_rewritten).to eq("values: []Int64@shared = [];\n")
     expect(shared).to be_polymorphic_shared
+  end
+
+
+  it "attaches capabilities to the exact Inline Pivot layers" do
+    type = parse("value: [List]@local {Symbol}@shared:locked Int64 = DEFAULT;")
+      .statements.first.type
+    map = T.must(type.element_type)
+
+    expect(type.sync).to eq(:local)
+    expect(map).to be_map
+    expect(map.ownership).to eq(:shared)
+    expect(map.sync).to eq(:locked)
+    expect(map.value_type.resolved).to eq(:Int64)
+    expect(TypeExpressionTree.capability_site_count(type.shape.expression)).to eq(2)
+    expect(TypeExpressionPrinter.inline(type.shape.expression))
+      .to eq("[]@local {Symbol}@shared:locked Int64")
+
+    boxed_item = parse("value: []Int64@indirect = DEFAULT;").statements.first.type
+    expect(T.must(boxed_item.element_type).layout).to eq(:indirect)
+  end
+
+  it "enforces capability-site and semantic-node budgets" do
+    legal = "Box<" * 31 + "Int64" + ">" * 31
+    illegal = "Box<" * 32 + "Int64" + ">" * 32
+    expect { parse("value: #{legal} = DEFAULT;") }.not_to raise_error
+    expect { parse("value: #{illegal} = DEFAULT;") }
+      .to raise_error(ParserError, /maximum is 32/)
+
+    too_many_caps = "[]@local {Symbol}@versioned []@shared {Int64}@locked String"
+    expect { parse("value: #{too_many_caps} = DEFAULT;") }
+      .to raise_error(ParserError, /maximum is 3/)
+    expect { parse("value: []@list Int64 = DEFAULT;") }
+      .to raise_error(ParserError, /topology in the Inline Pivot layer sigil/)
+  end
+
+  it "does not migrate an ambiguous capability attached to a tense wrapper" do
+    expression = FutureTypeExpression.new(
+      inner: NamedTypeExpression.new(name: :Int64),
+      capabilities: TypeCapabilities.new(ownership: :shared)
+    )
+
+    expect(Type.inline_migration_name(Type.new(expression))).to be_nil
   end
 end

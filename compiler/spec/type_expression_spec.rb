@@ -157,6 +157,63 @@ RSpec.describe "recursive Type accessors" do
   end
 end
 
+RSpec.describe TypeExpressionTree do
+  it "updates capability-bearing unary and stream nodes exhaustively" do
+    item = NamedTypeExpression.new(name: :Item)
+    linear = LinearTypeExpression.new(kind: :list, dimensions: [:LIST], item: item)
+    wrapped = FutureTypeExpression.new(
+      inner: FallibleTypeExpression.new(inner: OptionalTypeExpression.new(inner: linear))
+    )
+    caps = TypeCapabilities.new(ownership: :shared, sync: :locked)
+    updated = described_class.with_linear_item_capabilities(wrapped, caps)
+
+    expect(described_class.linear_item_capabilities(updated)).to eq(caps)
+
+    stream = StreamTypeExpression.new(cardinality: :FINITE, item: item)
+    updated_stream = described_class.with_root_capabilities(stream, caps)
+    expect(described_class.root_capabilities(updated_stream)).to eq(caps)
+  end
+
+  it "counts function parameter and result nodes and keeps unknown variants total" do
+    signature = Type::FunctionType.new(
+      params: [Type::FunctionTypeParam.new(type: Type.new(:Int64))],
+      return_type: Type.new(:String)
+    )
+    function = FunctionTypeExpression.new(signature: signature)
+    unknown_class = Class.new do
+      include TypeExpression
+      define_method(:capabilities) { TypeCapabilities.new(ownership: :affine) }
+    end
+    unknown = T.cast(unknown_class.new, TypeExpression)
+    caps = TypeCapabilities.new(ownership: :shared)
+
+    expect(described_class.node_count(function)).to eq(3)
+    expect(described_class.root_capabilities(unknown).ownership).to eq(:affine)
+    expect(described_class.with_root_capabilities(unknown, caps)).to equal(unknown)
+    expect(described_class.node_count(unknown)).to eq(1)
+  end
+
+  it "normalizes every supported legacy capability dimension" do
+    expected = {
+      "Box@link" => [:link, nil, nil],
+      "Box@split" => [:split, nil, nil],
+      "Box@writeLocked" => [:affine, :write_locked, nil],
+      "Box@versioned" => [:affine, :versioned, nil],
+      "Box@atomic" => [:affine, :atomic, nil],
+      "Box@local" => [:affine, :local, nil],
+      "Box@raw" => [:affine, :raw, nil],
+      "Box@symbol" => [:affine, :symbol, nil],
+      "Box@indirect" => [:affine, nil, :indirect],
+    }
+
+    expected.each do |source, dimensions|
+      expression = TypeExpressionParser.parse(source)
+      caps = described_class.root_capabilities(expression)
+      expect([caps.ownership, caps.sync, caps.layout]).to eq(dimensions)
+    end
+  end
+end
+
 RSpec.describe TypeShape do
   it "keeps one recursive expression instead of raw child-symbol fields" do
     shape = described_class.from_core("!?HashMap<Symbol,String[]>")

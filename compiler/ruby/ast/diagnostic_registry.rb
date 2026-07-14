@@ -110,6 +110,16 @@ module DiagnosticRegistry
       template: "Unknown operator '%{value}'.",
       summary:  "The lexer saw an operator-shaped token it does not recognise.",
     },
+    TYPE_NODE_LIMIT: {
+      severity: :error, category: :type,
+      template: "Type contains %{count} semantic nodes; the maximum is %{limit}.",
+      summary: "Type exceeds the compiler's semantic-node safety limit.",
+    },
+    TYPE_CAPABILITY_SITE_LIMIT: {
+      severity: :error, category: :capability,
+      template: "Type contains %{count} capability-bearing nodes; the maximum is %{limit}.",
+      summary: "Type exceeds the capability-site readability limit.",
+    },
     OPERATOR_TYPO_SUGGESTION: {
       severity: :error, category: :syntax,
       template: "Unknown operator `%{match}` -- did you mean `%{replace}`?",

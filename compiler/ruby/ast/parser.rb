@@ -3300,6 +3300,7 @@ class ClearParser
     start_token = T.must(peek_at(0))
     inline_syntax = inline_type_annotation_start?
     parsed = parse_type_annotation_body
+    validate_type_expression_budget!(start_token, parsed.shape.expression) if migration_root
     emit_legacy_type_migration(start_token, previous, parsed) if migration_root && !inline_syntax
     parsed
   end
@@ -3546,7 +3547,8 @@ class ClearParser
   sig { returns(TypeExpression) }
   def parse_inline_atom_expression
     if match?(:KEYWORD, 'FN')
-      return parse_fn_type_annotation.shape.expression
+      expression = parse_fn_type_annotation.shape.expression
+      return TypeExpressionTree.with_root_capabilities(expression, parse_inline_capabilities)
     end
 
     name = consume(:TYPE_ID).text!
@@ -3559,16 +3561,22 @@ class ClearParser
       end
       consume(:CHAR, '>')
     end
-    return TupleTypeExpression.new(items: arguments) if name == "Tuple"
+    expression = if name == "Tuple"
+      TupleTypeExpression.new(items: arguments)
+    else
+      NamedTypeExpression.new(name: name.to_sym, arguments: arguments)
+    end
 
-    NamedTypeExpression.new(name: name.to_sym, arguments: arguments)
+    TypeExpressionTree.with_root_capabilities(expression, parse_inline_capabilities)
   end
 
   sig { returns(LinearTypeExpression) }
   def parse_inline_linear_expression
     consume(:CHAR, '[')
     if match!(:CHAR, ']')
-      return LinearTypeExpression.new(kind: :list, dimensions: [:LIST], item: parse_inline_type_expression)
+      caps = parse_inline_capabilities(collection: :list)
+      return LinearTypeExpression.new(kind: :list, dimensions: [:LIST],
+        item: parse_inline_type_expression, capabilities: caps)
     end
 
     kind = T.let(:array, Symbol)
@@ -3599,11 +3607,13 @@ class ClearParser
       error!(current, :PARSER_EXPECTED, expected: "one dimension until flat-rank lowering is enabled", got: current.value, type: current.type, line: current.line)
     end
     consume(:CHAR, ']')
+    caps = parse_inline_capabilities(collection: kind == :array ? nil : kind)
     LinearTypeExpression.new(
       kind: kind,
       dimensions: [T.must(dimension)],
       item: parse_inline_type_expression,
-      allocation_hint: allocation_hint
+      allocation_hint: allocation_hint,
+      capabilities: caps
     )
   end
 
@@ -3620,7 +3630,39 @@ class ClearParser
       parsed_key
     end
     consume(:CHAR, '}')
-    MapTypeExpression.new(key: key, value: parse_inline_type_expression)
+    caps = parse_inline_capabilities
+    MapTypeExpression.new(key: key, value: parse_inline_type_expression, capabilities: caps)
+  end
+
+  sig { params(collection: T.nilable(Symbol)).returns(TypeCapabilities) }
+  def parse_inline_capabilities(collection: nil)
+    parsed = parse_capabilities
+    unless parsed.collection.nil?
+      error!(previous, :PARSER_EXPECTED,
+        expected: "collection topology in the Inline Pivot layer sigil",
+        got: previous.value, type: previous.type, line: previous.line)
+    end
+    TypeCapabilities.new(
+      ownership: parsed.ownership || :affine,
+      sync: parsed.sync,
+      layout: parsed.is_indirect ? :indirect : nil,
+      collection: collection || parsed.collection,
+      shard_count: parsed.shard_count,
+      soa: parsed.is_soa,
+      observable: parsed.observable,
+      observable_token: parsed.observable_token
+    )
+  end
+
+  sig { params(token: Lexer::Token, expression: TypeExpression).void }
+  def validate_type_expression_budget!(token, expression)
+    node_count = TypeExpressionTree.node_count(expression)
+    error!(token, :TYPE_NODE_LIMIT, count: node_count, limit: 32) if node_count > 32
+
+    capability_sites = TypeExpressionTree.capability_site_count(expression)
+    if capability_sites > 3
+      error!(token, :TYPE_CAPABILITY_SITE_LIMIT, count: capability_sites, limit: 3)
+    end
   end
 
   sig { params(type: Type).returns(Type) }
