@@ -63,6 +63,7 @@ pub(crate) fn dedup_semantic_effect_sites(sites: &mut Vec<SemanticEffectSite>) {
         seen.insert((
             site.kind.clone(),
             site.detail.clone(),
+            site.receiver_scope.clone(),
             site.file.clone(),
             site.function.clone(),
             site.line,
@@ -93,6 +94,11 @@ fn semantic_effect_site_for_call(
     Some(SemanticEffectSite {
         kind: effect.kind,
         detail: effect.detail,
+        receiver_scope: if call.receiver == "self" || call.receiver.starts_with('@') {
+            "state".to_string()
+        } else {
+            "unknown".to_string()
+        },
         file: call.file.clone(),
         function: call.function.clone(),
         line: call.line,

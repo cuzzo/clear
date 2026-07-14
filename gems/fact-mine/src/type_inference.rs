@@ -4957,7 +4957,7 @@ impl<'a> TypeInferenceVisitor<'a> {
     }
 
     fn inspect_array_literal(&mut self, node: &crate::ast::Node) {
-        if self.is_prepass {
+        if self.is_prepass || !self.behavior.array_literal_node(node) {
             return;
         }
         let elements = child_nodes(node);
@@ -4973,7 +4973,11 @@ impl<'a> TypeInferenceVisitor<'a> {
             if let Some(ty) = self.expression_type(elem) {
                 values.push(ty);
             } else {
-                return;
+                // Syntax identity already proved this is a source literal.
+                // Preserve an unknown slot instead of discarding the entire
+                // heterogeneous tuple fact; array_shapes uses the same
+                // conservative placeholder for partially known literals.
+                values.push(TypeExpr::Untyped);
             }
         }
         let unique = values.iter().collect::<BTreeSet<_>>();

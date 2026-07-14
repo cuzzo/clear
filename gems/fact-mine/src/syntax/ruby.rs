@@ -279,6 +279,13 @@ impl NormalizedLanguageBehavior for RubyNormalizedBehavior {
     }
     // CFG-SPECIFIC END
 
+    // TYPE-INFERENCE-SPECIFIC: Ruby's normalized LIST/ARRAY vocabulary is
+    // also used for call arguments. Only bracket-delimited nodes represent
+    // source array literals and are eligible for tuple-shape facts.
+    fn array_literal_node(&self, node: &Node) -> bool {
+        node.text.trim_start().starts_with('[')
+    }
+
     fn collection_allocation_semantics(&self, message: &str) -> CollectionAllocationSemantics {
         if [
             "map", "collect", "select", "reject", "filter", "filter_map", "group_by",

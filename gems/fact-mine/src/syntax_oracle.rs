@@ -127,6 +127,7 @@ fn project_document_with_metadata(document: &Document, metadata: &SyntaxFactMeta
         "semantic_effects": sorted(document.semantic_effect_sites.iter().map(|site| json!({
             "kind": site.kind,
             "detail": site.detail,
+            "receiver_scope": site.receiver_scope,
             "function": site.function,
             "line": site.line,
             "span": site.span,

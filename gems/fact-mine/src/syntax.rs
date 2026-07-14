@@ -376,6 +376,8 @@ pub struct DispatchSite {
 pub struct SemanticEffectSite {
     pub kind: String,
     pub detail: String,
+    #[serde(default)]
+    pub receiver_scope: String,
     pub file: String,
     pub function: String,
     pub line: usize,

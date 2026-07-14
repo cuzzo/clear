@@ -48,6 +48,7 @@ struct Extractor<'a> {
     owners: Vec<String>,
     functions: Vec<String>,
     function_params: Vec<Vec<String>>,
+    local_owned_values: Vec<BTreeSet<String>>,
     controls: Vec<String>,
     decision_spans: Vec<Span>,
     receiver_aliases: Vec<BTreeMap<String, String>>,
@@ -56,7 +57,7 @@ struct Extractor<'a> {
     seen_calls: HashSet<(String, String, String, usize, Span)>,
     seen_reads: HashSet<(String, String, String, String, usize, Span)>,
     seen_writes: HashSet<(String, String, String, String, usize, Span)>,
-    seen_effects: HashSet<(String, String, String, usize, Span)>,
+    seen_effects: HashSet<(String, String, String, String, usize, Span)>,
 }
 
 impl<'a> Extractor<'a> {
@@ -75,6 +76,7 @@ impl<'a> Extractor<'a> {
             owners: Vec::new(),
             functions: Vec::new(),
             function_params: Vec::new(),
+            local_owned_values: Vec::new(),
             controls: Vec::new(),
             decision_spans: Vec::new(),
             receiver_aliases: Vec::new(),
@@ -240,6 +242,7 @@ impl<'a> Extractor<'a> {
         }
         self.functions.push(name);
         self.function_params.push(params);
+        self.local_owned_values.push(BTreeSet::new());
         let function_name = self.current_function();
         let owner_name = self.current_owner();
         self.record_initializer_field_reads(node, &owner_name, &function_name);
@@ -269,6 +272,7 @@ impl<'a> Extractor<'a> {
             self.owners.pop();
         }
         self.receiver_aliases.pop();
+        self.local_owned_values.pop();
         self.function_params.pop();
         self.functions.pop();
         if owner_pushed {
@@ -476,7 +480,15 @@ impl<'a> Extractor<'a> {
             }
         }
         if hidden_assignment_mutation(node, written_field.as_deref(), self.behavior) {
-            self.record_semantic_effect(node, "hidden_mutation", &effect_detail);
+            let receiver_scope = child_node(node, 0)
+                .map(|receiver| self.mutation_receiver_scope(receiver))
+                .unwrap_or_else(|| "unknown".to_string());
+            self.record_semantic_effect_with_scope(
+                node,
+                "hidden_mutation",
+                &effect_detail,
+                &receiver_scope,
+            );
         }
         if let Some(receiver) = child_node(node, 0) {
             self.scan(receiver);
@@ -509,7 +521,10 @@ impl<'a> Extractor<'a> {
         if child_symbol(node, 1).as_deref() == Some("<<")
             && !self.behavior.stream_insertion_operator(node)
         {
-            self.record_semantic_effect(node, "hidden_mutation", "<<");
+            let receiver_scope = child_node(node, 0)
+                .map(|receiver| self.mutation_receiver_scope(receiver))
+                .unwrap_or_else(|| "unknown".to_string());
+            self.record_semantic_effect_with_scope(node, "hidden_mutation", "<<", &receiver_scope);
         }
         self.scan_children(node);
     }
@@ -567,7 +582,15 @@ impl<'a> Extractor<'a> {
     }
 
     fn scan_operator_assignment(&mut self, node: &Node) {
-        self.record_semantic_effect(node, "hidden_mutation", "op-assign");
+        let receiver_scope = child_node(node, 0)
+            .map(|receiver| self.mutation_receiver_scope(receiver))
+            .unwrap_or_else(|| "unknown".to_string());
+        self.record_semantic_effect_with_scope(
+            node,
+            "hidden_mutation",
+            "op-assign",
+            &receiver_scope,
+        );
         self.scan_children(node);
     }
 
@@ -720,6 +743,7 @@ impl<'a> Extractor<'a> {
         }
         let field =
             first_string_or_symbol(node).or_else(|| child_node(node, 0).map(|n| n.text.clone()));
+        self.record_local_owned_value(field.as_deref(), child_node(node, 1));
         let writes = self
             .behavior
             .local_assignment_writes(field.as_deref(), node, span(node));
@@ -749,6 +773,25 @@ impl<'a> Extractor<'a> {
         }
         if let Some(value) = child_node(node, 1) {
             self.scan(value);
+        }
+    }
+
+    fn record_local_owned_value(&mut self, name: Option<&str>, value: Option<&Node>) {
+        let Some(name) = name.map(|name| self.behavior.clean_identifier(name)) else {
+            return;
+        };
+        let owned = value.is_some_and(|value| {
+            (matches!(value.r#type.as_str(), "ARRAY" | "LIST" | "ZLIST")
+                && self.behavior.array_literal_node(value))
+                || value.r#type == "HASH"
+        });
+        let Some(locals) = self.local_owned_values.last_mut() else {
+            return;
+        };
+        if owned {
+            locals.insert(name);
+        } else {
+            locals.remove(&name);
         }
     }
 
@@ -1040,13 +1083,37 @@ impl<'a> Extractor<'a> {
     }
 
     fn record_semantic_effect(&mut self, node: &Node, kind: &str, detail: &str) {
-        self.record_semantic_effect_at(node.first_lineno, span(node), kind, detail);
+        self.record_semantic_effect_with_scope(node, kind, detail, "unknown");
     }
 
-    fn record_semantic_effect_at(&mut self, line: usize, span: Span, kind: &str, detail: &str) {
+    fn record_semantic_effect_with_scope(
+        &mut self,
+        node: &Node,
+        kind: &str,
+        detail: &str,
+        receiver_scope: &str,
+    ) {
+        self.record_semantic_effect_at(
+            node.first_lineno,
+            span(node),
+            kind,
+            detail,
+            receiver_scope,
+        );
+    }
+
+    fn record_semantic_effect_at(
+        &mut self,
+        line: usize,
+        span: Span,
+        kind: &str,
+        detail: &str,
+        receiver_scope: &str,
+    ) {
         let key = (
             kind.to_string(),
             detail.to_string(),
+            receiver_scope.to_string(),
             self.current_function(),
             line,
             span,
@@ -1057,11 +1124,37 @@ impl<'a> Extractor<'a> {
         self.facts.semantic_effect_sites.push(SemanticEffectSite {
             kind: kind.to_string(),
             detail: detail.to_string(),
+            receiver_scope: receiver_scope.to_string(),
             file: self.file.clone(),
             function: self.current_function(),
             line,
             span,
         });
+    }
+
+    fn mutation_receiver_scope(&self, receiver: &Node) -> String {
+        match receiver.r#type.as_str() {
+            "IVAR" | "CVAR" | "GVAR" | "SELF" => "state".to_string(),
+            "LVAR" | "DVAR" => {
+                let name = self.receiver_text(receiver);
+                if self
+                    .function_params
+                    .last()
+                    .is_some_and(|params| params.iter().any(|param| param == &name))
+                {
+                    "parameter".to_string()
+                } else if self
+                    .local_owned_values
+                    .last()
+                    .is_some_and(|locals| locals.contains(&name))
+                {
+                    "owned_local".to_string()
+                } else {
+                    "unknown".to_string()
+                }
+            }
+            _ => "unknown".to_string(),
+        }
     }
 
     fn record_branch_decision(&mut self, node: &Node, condition: &Node) {

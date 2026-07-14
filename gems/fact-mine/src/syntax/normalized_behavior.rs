@@ -197,6 +197,13 @@ pub(crate) trait NormalizedLanguageBehavior: Sync {
     fn literal_receiver_type(&self, _node: &Node) -> Option<TypeExpr> {
         None
     }
+
+    /// Whether a normalized ARRAY/LIST node is a source collection literal.
+    /// Some parsers reuse those node kinds for argument lists, so the
+    /// language adapter must make the syntax-identity decision.
+    fn array_literal_node(&self, _node: &Node) -> bool {
+        true
+    }
     fn supports_parameter_normalization(&self) -> bool {
         false
     }

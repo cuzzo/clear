@@ -984,6 +984,15 @@ fn project_source_syntax(fixture: &Path, language: Language, expected: &Value) -
                 "dispatch_sites" => {
                     &["variant_set", "arm_members", "outside", "function", "line"][..]
                 }
+                "semantic_effects"
+                    if object[key]
+                        .as_array()
+                        .and_then(|items| items.first())
+                        .and_then(Value::as_object)
+                        .is_some_and(|item| item.contains_key("receiver_scope")) =>
+                {
+                    &["kind", "detail", "receiver_scope", "function", "line"][..]
+                }
                 "semantic_effects" => &["kind", "detail", "function", "line"][..],
                 "predicate_bodies" => &["name", "owner", "body", "line"][..],
                 "comparisons" => &[
