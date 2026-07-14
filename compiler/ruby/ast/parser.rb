@@ -31,14 +31,7 @@ class ClearParser
     prop :observable_token, T.nilable(Lexer::Token), default: nil
   end
 
-  class DoBranchPrefix < T::Struct
-    const :pinned, T::Boolean, default: false
-    const :parallel, T::Boolean, default: false
-    const :stack_size, T.nilable(Symbol), default: nil
-    const :can_smash, T::Boolean, default: false
-  end
-
-  class BgPrefix < T::Struct
+  class TaskPrefix < T::Struct
     const :pinned, T::Boolean, default: false
     const :parallel, T::Boolean, default: false
     const :stack_size, T.nilable(Symbol), default: nil
@@ -4348,35 +4341,45 @@ class ClearParser
     '@canSmash' => sigil_attrs(can_smash: true),
   }.freeze, SigilTable)
 
-  # Parses an optional `@size_sigil(:cap_sigil)* ->` prefix from a DO branch.
-  # Returns a typed prefix record consumed when the branch body is parsed.
-  # Only enters the prefix parser when the first token is a known DO branch sigil.
-  # After `:`, the next identifier is normalised (@ prepended if absent).
-  sig { returns(DoBranchPrefix) }
-  def parse_branch_prefix
+  # Parse an optional chained task prefix. The caller supplies the allowed
+  # sigils and diagnostic wording; accumulation has one typed result.
+  sig do
+    params(
+      sigils: SigilTable,
+      kind: String,
+      prefix_label: String,
+      suggestion_label: String,
+    ).returns(TaskPrefix)
+  end
+  def parse_task_prefix(sigils, kind, prefix_label, suggestion_label)
     pinned     = T.let(false, T::Boolean)
     parallel   = T.let(false, T::Boolean)
+    arena      = T.let(false, T::Boolean)
     can_smash  = T.let(false, T::Boolean)
     stack_size = T.let(nil, T.nilable(Symbol))
+    stack_size_token = T.let(nil, T.nilable(Lexer::Token))
+    can_smash_token = T.let(nil, T.nilable(Lexer::Token))
 
-    # Enter the loop on a known sigil OR on a `@<typo>` token that the
-    # user clearly intended as a sigil (so the typo path can fire).
     looks_like_sigil = current.type == :VAR_ID && current.value.start_with?('@')
-    return DoBranchPrefix.new(pinned: pinned, parallel: parallel, stack_size: stack_size, can_smash: can_smash) unless
-      looks_like_sigil
+    unless looks_like_sigil
+      return TaskPrefix.new(
+        pinned: pinned, parallel: parallel, stack_size: stack_size,
+        arena: arena, can_smash: can_smash,
+      )
+    end
 
     loop do
-      tok      = consume(:VAR_ID)
+      tok = consume(:VAR_ID)
       token_text = tok.text!
       cap_name = token_text.start_with?('@') ? token_text : "@#{token_text}"
-      attrs    = DO_BRANCH_SIGILS[cap_name]
+      attrs = sigils[cap_name]
       unless attrs
         has_at = token_text.start_with?('@')
-        candidates = has_at ? DO_BRANCH_SIGILS.keys : DO_BRANCH_SIGILS.keys.map { |k| k.sub(/^@/, '') }
+        candidates = has_at ? sigils.keys : sigils.keys.map { |key| key.sub(/^@/, '') }
         emit_typo_suggestion!(
           tok, token_text, candidates,
-          "Unknown branch prefix #{token_text.inspect}",
-          "closest DO branch sigil",
+          "Unknown #{prefix_label} prefix #{token_text.inspect}",
+          suggestion_label,
           category: :type, cascade: true
         )
       end
@@ -4384,19 +4387,32 @@ class ClearParser
 
       stack_size_attr = attrs.stack_size
       if stack_size_attr
-        error!(tok, :DUPLICATE_STACK_SIZE, kind: "branch") if stack_size
+        error!(tok, :DUPLICATE_STACK_SIZE, kind: kind) if stack_size
         stack_size = stack_size_attr
+        stack_size_token = tok
       end
       pinned    = true if attrs.pinned
       parallel  = true if attrs.parallel
-      can_smash = true if attrs.can_smash
+      arena     = true if attrs.arena
+      if attrs.can_smash
+        can_smash = true
+        can_smash_token = tok
+      end
 
       break unless match?(:CHAR, ':')
       consume(:CHAR, ':')
     end
 
     consume(:ARROW, '->')
-    DoBranchPrefix.new(pinned: pinned, parallel: parallel, stack_size: stack_size, can_smash: can_smash)
+    TaskPrefix.new(
+      pinned: pinned,
+      parallel: parallel,
+      stack_size: stack_size,
+      arena: arena,
+      can_smash: can_smash,
+      stack_size_token: stack_size_token,
+      can_smash_token: can_smash_token,
+    )
   end
 
   sig { returns(AST::DoBlock) }
@@ -4406,7 +4422,7 @@ class ClearParser
     branches = []
 
     until match?(:CHAR, '}') || match?(:EOF)
-      prefix = parse_branch_prefix
+      prefix = parse_task_prefix(DO_BRANCH_SIGILS, "branch", "branch", "closest DO branch sigil")
 
       # A branch is either a block-statement (WITH, IF, etc.) starting with a keyword,
       # or a bare expression. Keyword branches don't need a trailing semicolon.
@@ -4429,73 +4445,6 @@ class ClearParser
     AST::DoBlock.new(do_token, branches)
   end
 
-  # Parses an optional `@size_sigil ->` prefix at the very start of a BG body.
-  # Returns a typed prefix record where stack_size_token is the
-  # token of the FIRST sigil that contributed a stack_size (or nil).
-  sig { returns(BgPrefix) }
-  def parse_bg_prefix
-    pinned     = T.let(false, T::Boolean)
-    parallel   = T.let(false, T::Boolean)
-    arena      = T.let(false, T::Boolean)
-    can_smash  = T.let(false, T::Boolean)
-    stack_size = T.let(nil, T.nilable(Symbol))
-    stack_size_token = T.let(nil, T.nilable(Lexer::Token))
-    can_smash_token  = T.let(nil, T.nilable(Lexer::Token))
-
-    # Enter the loop on a known sigil OR on `@<typo>` that the user
-    # clearly intended as a BG sigil (so the typo path can fire).
-    looks_like_sigil = current.type == :VAR_ID && current.value.start_with?('@')
-    return BgPrefix.new(pinned: pinned, parallel: parallel, stack_size: stack_size, arena: arena, can_smash: can_smash) unless
-      looks_like_sigil
-
-    loop do
-      tok      = consume(:VAR_ID)
-      token_text = tok.text!
-      cap_name = token_text.start_with?('@') ? token_text : "@#{token_text}"
-      attrs    = BG_SIGILS[cap_name]
-      unless attrs
-        has_at = token_text.start_with?('@')
-        candidates = has_at ? BG_SIGILS.keys : BG_SIGILS.keys.map { |k| k.sub(/^@/, '') }
-        emit_typo_suggestion!(
-          tok, token_text, candidates,
-          "Unknown BG prefix #{token_text.inspect}",
-          "closest BG body sigil",
-          category: :type, cascade: true
-        )
-      end
-      attrs = T.must(attrs)
-
-      stack_size_attr = attrs.stack_size
-      if stack_size_attr
-        error!(tok, :DUPLICATE_STACK_SIZE, kind: "BG") if stack_size
-        stack_size = stack_size_attr
-        stack_size_token = tok
-      end
-      pinned    = true if attrs.pinned
-      parallel  = true if attrs.parallel
-      arena     = true if attrs.arena
-      if attrs.can_smash
-        can_smash = true
-        can_smash_token = tok
-      end
-
-      # More sigils chained with ':'?
-      break unless match?(:CHAR, ':')
-      consume(:CHAR, ':')
-    end
-
-    consume(:ARROW, '->')
-    BgPrefix.new(
-      pinned: pinned,
-      parallel: parallel,
-      stack_size: stack_size,
-      arena: arena,
-      can_smash: can_smash,
-      stack_size_token: stack_size_token,
-      can_smash_token: can_smash_token,
-    )
-  end
-
   sig { returns(AST::BgNode) }
   def parse_bg_block
     bg_token = consume(:KEYWORD, 'BG')
@@ -4503,7 +4452,7 @@ class ClearParser
       return parse_bg_stream_block(bg_token)
     end
     open_brace = consume(:CHAR, '{')
-    prefix = parse_bg_prefix
+    prefix = parse_task_prefix(BG_SIGILS, "BG", "BG", "closest BG body sigil")
     body = parse_bg_then_body
     consume(:CHAR, '}')
     node = AST::BgBlock.new(bg_token, body, nil, prefix.stack_size, prefix.pinned, prefix.parallel, prefix.arena, prefix.can_smash)
@@ -4927,10 +4876,9 @@ class ClearParser
    private :deep_clone_node
    private :parse_benchmark_stmt
    private :parse_bg_body_stmt
-   private :parse_bg_prefix
+   private :parse_task_prefix
    private :parse_bg_stream_block
    private :parse_bg_then_body
-   private :parse_branch_prefix
    private :parse_comma_seq
    private :parse_error_selector
    private :parse_error_selectors

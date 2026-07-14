@@ -639,3 +639,43 @@ reduce total complexity instead of redistributing it.
 Validation: 62 focused source-parser and capability examples pass; all 15
 changed executable parser lines are covered; all 487 top-level CLEAR fixtures
 parse; strict Ruby-to-CLEAR emission remains green.
+
+### Stage 5D: one typed task-prefix grammar
+
+DO-branch and BG-body prefixes were near-clones over the same `SigilAttrs`
+schema. `TaskPrefix` is now their typed superset, and `parse_task_prefix`
+receives the allowed sigil table plus the caller-specific diagnostic labels.
+DO and BG keep distinct allowed sets and errors; accumulation, duplicate stack
+size checks, token provenance, and arrow consumption have one implementation.
+
+| Measure | Stage 5C | Stage 5D | Delta |
+| --- | ---: | ---: | ---: |
+| Parser lines | 4,951 | 4,899 | -52 |
+| Parser methods | 189 | 188 | -1 |
+| NilKill calls | 3,601 | 3,565 | -36 |
+| NilKill struct declarations | 13 | 12 | -1 |
+| NilKill array shapes | 1,420 | 1,407 | -13 |
+| NilKill collection indexes | 42 | 41 | -1 |
+| NilKill hash-record blockers | 41 | 42 | +1 |
+| Espalier functions | 189 | 188 | -1 |
+| Espalier known `O(N)` time component | 33 | 35 | +2 |
+| Decomplex candidates | 336 | 334 | -2 |
+| Decomplex convergence units | 91 | 90 | -1 |
+| Decomplex state-based branch findings | 65 | 64 | -1 |
+| Decomplex structural-similarity findings | 1 | 0 | -1 |
+
+The last structural clone disappears, along with 52 parser lines, 36 calls,
+and 13 array-shape facts. The unified method remains a visible convergence
+unit because prefix parsing genuinely has validation branches, but no longer
+forces two grammar implementations to evolve together.
+
+NilKill's blocker count again moves opposite to its actual facts: indexing the
+caller-provided `T::Hash[String, SigilAttrs]` is a real dynamic map lookup, but
+the blocker headline mixes it with the previously documented array false
+positives. The one-count increase is not evidence of a new anonymous-record
+schema; both sigil tables are genuine lookup maps and should remain hashes.
+
+Validation: 48 focused source-parser examples cover absent prefixes, every
+shared attribute, token provenance, duplicate stack sizes, and both typo
+diagnostics; all 22 changed executable parser lines are covered; all 487
+top-level CLEAR fixtures parse; strict Ruby-to-CLEAR emission remains green.
