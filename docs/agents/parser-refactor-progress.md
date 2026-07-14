@@ -302,3 +302,50 @@ Built-in coverage reports zero uncovered changed executable lines across the
 parser, AST, annotator, and pipeline rewriter. The two MIR lowering changes
 are keyword-argument source lines Ruby marks non-executable, and the source
 regression exercises their named-field values through the resulting MIR arms.
+
+### Stage 3: typed rule execution without capture interpretation
+
+The token-routing tables remain declarative, but `ParserRule` now contains
+only its token key and action. `PatternStep#value: T.untyped`, generic injected
+values, the broad `PatternCapture` union, `process_pattern`, `run_action`, and
+both positional action dispatchers are gone. Multi-step ASSERT, CAST, BREAK,
+and CONTINUE routes parse their operands in dedicated typed methods; trivial
+single-expression routes construct their typed AST nodes directly in the
+primary dispatcher.
+
+An intermediate implementation extracted every trivial route into a method.
+Decomplex correctly showed that those one-expression, single-caller helpers
+added no meaningful boundary, and Espalier propagated the existing replay SCC
+through all of them. Inlining only the trivial routes removed that noise while
+retaining typed grammar entry points for the genuinely multi-step forms.
+
+| Measure | Stage 2D | Stage 3 | Delta |
+| --- | ---: | ---: | ---: |
+| Parser lines | 4,950 | 4,900 | -50 |
+| Parser methods | 184 | 182 | -2 |
+| Parser `T.cast` sites | 8 | 6 | -2 |
+| Parser `T.must` sites | 78 | 76 | -2 |
+| NilKill calls | 3,623 | 3,528 | -95 |
+| NilKill hash shapes | 21 | 21 | 0 |
+| NilKill array shapes | 1,405 | 1,396 | -9 |
+| NilKill collection index lookups | 71 | 42 | -29 |
+| NilKill hash-record blockers | 65 | 36 | -29 |
+| Espalier functions | 184 | 182 | -2 |
+| Espalier complete/incomplete time results | 10 / 174 | 10 / 172 | 0 / -2 |
+| Espalier known `O(2^N)` component | 97 | 97 | 0 |
+| Espalier known `O(N)` stack component | 98 | 98 | 0 |
+| Decomplex candidates | 439 | 434 | -5 |
+| Decomplex convergence units | 93 | 92 | -1 |
+| Decomplex state-based branch findings | 70 | 67 | -3 |
+| Decomplex weighted-inlined findings | 82 | 82 | 0 |
+
+The metrics now move with the source design: NilKill reflects removal of the
+heterogeneous capture arrays and their positional reads, and Decomplex loses
+three state-based decisions that were really branches over pattern metadata.
+There is still no direct headline for “untyped mini-interpreter removed,” but
+the underlying facts make the improvement visible. Espalier correctly keeps
+the recursive complexity classification unchanged.
+
+Validation: 102 focused parser/contract examples pass; all 480 top-level CLEAR
+fixtures parse. Built-in coverage reports zero uncovered changed executable
+lines (58 parser lines and two parser-rule lines).

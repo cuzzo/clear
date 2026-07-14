@@ -375,12 +375,6 @@ RSpec.describe ClearParser do
 
   describe ClearParser do
     it "covers token-level parser helpers and parser-only predicate suffixes" do
-      underscore = ClearParser.new([
-        token(:UNDERSCORE, "_"),
-        token(:EOF, nil),
-      ], "_").send(:consume_literal, "_")
-      expect(underscore.type).to eq(:UNDERSCORE)
-
       parser = parser_for("x")
       expect(parser.send(:match_at?, 1, :EOF)).to be(true)
       expect(parser.send(:match_at?, 99, :EOF)).to be(false)

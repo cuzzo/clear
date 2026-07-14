@@ -85,7 +85,6 @@ class ClearParser
   include FixableHelper
 
   SuffixResult = T.type_alias { T.any(AST::Node, Symbol) }
-  PatternCapture = T.type_alias { T.nilable(T.any(AST::Node, Type, String, Symbol, Integer, Float, T::Boolean)) }
   ArgumentType = T.type_alias { T.any(Symbol, Type) }
   ReturnLifetime = T.type_alias { T.nilable(T.any(Symbol, T::Array[AST::Node])) }
   SigilTable = T.type_alias { T::Hash[String, SigilAttrs] }
@@ -217,7 +216,7 @@ class ClearParser
     rule(:KEYWORD, 'FOR', action: :parse_for_range),
     rule(:KEYWORD, 'TIGHT', action: :parse_tight_stmt),
     rule(:KEYWORD, 'RETURN', action: :parse_return),
-    rule(:KEYWORD, 'ASSERT', action: :build_assert, pattern: [lit('ASSERT'), capture(:expression), optional_capture(',', :STRING), lit(';')]),
+    rule(:KEYWORD, 'ASSERT', action: :parse_assert),
     rule(:KEYWORD, 'ASSERT_RAISES', action: :parse_assert_raises),
     rule(:KEYWORD, 'TEST', action: :parse_test_block),
     rule(:KEYWORD, 'STUB', action: :parse_stub),
@@ -227,8 +226,8 @@ class ClearParser
     rule(:KEYWORD, 'RAISE', action: :parse_raise_stmt),
     rule(:KEYWORD, 'EXIT', action: :parse_exit),
     rule(:KEYWORD, 'DIE', action: :parse_die),
-    rule(:KEYWORD, 'BREAK', action: :build_break, pattern: [lit('BREAK'), lit(';')]),
-    rule(:KEYWORD, 'CONTINUE', action: :build_continue, pattern: [lit('CONTINUE'), lit(';')]),
+    rule(:KEYWORD, 'BREAK', action: :parse_break),
+    rule(:KEYWORD, 'CONTINUE', action: :parse_continue),
     rule(:KEYWORD, 'WITH', action: :parse_with_capability),
     rule(:KEYWORD, 'SYNC', action: :parse_sync_policy_block),
     rule(:KEYWORD, 'DO', action: :parse_do_block),
@@ -263,41 +262,41 @@ class ClearParser
     rule(:KEYWORD, 'FALSE', action: :parse_false_literal),
     rule(:KEYWORD, 'NIL', action: :parse_nil_literal),
     rule(:KEYWORD, 'DEFAULT', action: :parse_default_literal),
-    rule(:KEYWORD, 'CAST', action: :build_cast, pattern: [lit('CAST'), lit('('), capture(:expression), lit('AS'), capture(:type_annotation), lit(')')]),
-    rule(:KEYWORD, 'MOVE', action: :build_move_node, pattern: [lit('MOVE'), capture(:expression)]),
-    rule(:KEYWORD, 'GIVE', action: :build_move_node, pattern: [lit('GIVE'), capture(:expression)]),
-    rule(:KEYWORD, 'COPY', action: :build_copy_node, pattern: [lit('COPY'), capture(:expression)]),
-    rule(:KEYWORD, 'CLONE', action: :build_clone_node, pattern: [lit('CLONE'), capture(:expression)]),
-    rule(:KEYWORD, 'SHARE', action: :build_share_node, pattern: [lit('SHARE'), capture(:expression)]),
-    rule(:KEYWORD, 'LINK', action: :build_link_node, pattern: [lit('LINK'), capture(:expression)]),
-    rule(:KEYWORD, 'RESOLVE', action: :build_resolve_node, pattern: [lit('RESOLVE'), capture(:expression)]),
-    rule(:KEYWORD, 'FREEZE', action: :build_freeze_node, pattern: [lit('FREEZE'), capture(:expression)]),
+    rule(:KEYWORD, 'CAST', action: :parse_cast),
+    rule(:KEYWORD, 'MOVE', action: :parse_move_node),
+    rule(:KEYWORD, 'GIVE', action: :parse_move_node),
+    rule(:KEYWORD, 'COPY', action: :parse_copy_node),
+    rule(:KEYWORD, 'CLONE', action: :parse_clone_node),
+    rule(:KEYWORD, 'SHARE', action: :parse_share_node),
+    rule(:KEYWORD, 'LINK', action: :parse_link_node),
+    rule(:KEYWORD, 'RESOLVE', action: :parse_resolve_node),
+    rule(:KEYWORD, 'FREEZE', action: :parse_freeze_node),
     rule(:KEYWORD, 'BG', action: :parse_bg_block),
     rule(:KEYWORD, 'NEXT', action: :parse_next_expr),
     rule(:PERCENT, '%', action: :parse_sigil_construct),
-    rule(:KEYWORD, 'REQUIRE', action: :build_require, pattern: [lit('REQUIRE'), capture(:STRING)]),
-    rule(:KEYWORD, 'SELECT', action: :build_select_op, pattern: [lit('SELECT'), capture(:pipe_expression)]),
-    rule(:KEYWORD, 'WHERE', action: :build_where_op, pattern: [lit('WHERE'), capture(:pipe_expression)]),
-    rule(:KEYWORD, 'INDEX', action: :build_index_op, pattern: [lit('INDEX'), capture(:pipe_expression)]),
+    rule(:KEYWORD, 'REQUIRE', action: :parse_require_expression),
+    rule(:KEYWORD, 'SELECT', action: :parse_select_op),
+    rule(:KEYWORD, 'WHERE', action: :parse_where_op),
+    rule(:KEYWORD, 'INDEX', action: :parse_index_op),
     rule(:KEYWORD, 'REDUCE', action: :parse_reduce_op),
-    rule(:KEYWORD, 'ORDER_BY', action: :build_order_by_op, pattern: [lit('ORDER_BY'), capture(:pipe_expression)]),
-    rule(:KEYWORD, 'LIMIT', action: :build_limit_op, pattern: [lit('LIMIT'), capture(:pipe_expression)]),
-    rule(:KEYWORD, 'SKIP', action: :build_skip_op, pattern: [lit('SKIP'), capture(:pipe_expression)]),
-    rule(:KEYWORD, 'UNNEST', action: :build_unnest_op, pattern: [lit('UNNEST'), capture(:pipe_expression)]),
-    rule(:KEYWORD, 'DISTINCT', action: :build_distinct_op, pattern: [lit('DISTINCT'), capture(:pipe_expression)]),
+    rule(:KEYWORD, 'ORDER_BY', action: :parse_order_by_op),
+    rule(:KEYWORD, 'LIMIT', action: :parse_limit_op),
+    rule(:KEYWORD, 'SKIP', action: :parse_skip_op),
+    rule(:KEYWORD, 'UNNEST', action: :parse_unnest_op),
+    rule(:KEYWORD, 'DISTINCT', action: :parse_distinct_op),
     rule(:KEYWORD, 'EACH', action: :parse_each_op),
     rule(:KEYWORD, 'TAP', action: :parse_tap_op),
-    rule(:KEYWORD, 'FIND', action: :build_find_op, pattern: [lit('FIND'), capture(:pipe_expression)]),
-    rule(:KEYWORD, 'ANY', action: :build_any_op, pattern: [lit('ANY'), capture(:pipe_expression)]),
-    rule(:KEYWORD, 'ALL', action: :build_all_op, pattern: [lit('ALL'), capture(:pipe_expression)]),
-    rule(:KEYWORD, 'COUNT', action: :build_count_op, pattern: [lit('COUNT'), capture(:pipe_expression)]),
-    rule(:KEYWORD, 'SUM', action: :build_sum_op, pattern: [lit('SUM'), capture(:pipe_expression)]),
-    rule(:KEYWORD, 'AVERAGE', action: :build_average_op, pattern: [lit('AVERAGE'), capture(:pipe_expression)]),
-    rule(:KEYWORD, 'MIN', action: :build_min_op, pattern: [lit('MIN'), capture(:pipe_expression)]),
-    rule(:KEYWORD, 'MAX', action: :build_max_op, pattern: [lit('MAX'), capture(:pipe_expression)]),
-    rule(:KEYWORD, 'TAKE_WHILE', action: :build_take_while_op, pattern: [lit('TAKE_WHILE'), capture(:pipe_expression)]),
+    rule(:KEYWORD, 'FIND', action: :parse_find_op),
+    rule(:KEYWORD, 'ANY', action: :parse_any_op),
+    rule(:KEYWORD, 'ALL', action: :parse_all_op),
+    rule(:KEYWORD, 'COUNT', action: :parse_count_op),
+    rule(:KEYWORD, 'SUM', action: :parse_sum_op),
+    rule(:KEYWORD, 'AVERAGE', action: :parse_average_op),
+    rule(:KEYWORD, 'MIN', action: :parse_min_op),
+    rule(:KEYWORD, 'MAX', action: :parse_max_op),
+    rule(:KEYWORD, 'TAKE_WHILE', action: :parse_take_while_op),
     rule(:KEYWORD, 'RECOVER', action: :parse_recover_op),
-    rule(:KEYWORD, 'COLLECT', action: :build_collect_op, pattern: [lit('COLLECT')]),
+    rule(:KEYWORD, 'COLLECT', action: :parse_collect_op),
     rule(:KEYWORD, 'WINDOW', action: :parse_window_op),
     rule(:KEYWORD, 'JOIN', action: :parse_join_op),
     rule(:KEYWORD, 'SHARD', action: :parse_shard_op),
@@ -362,13 +361,6 @@ class ClearParser
 
   sig { params(rule: ParserRule).returns(AST::Node) }
   def dispatch_stmt_rule(rule)
-    unless rule.pattern.empty?
-      start_token = current
-      args = process_pattern(rule.pattern)
-      args.concat(rule.inject)
-      return dispatch_stmt_pattern_action(rule.action, start_token, args)
-    end
-
     result = case rule.action
     when :parse_require then parse_require
     when :parse_extern_decl then parse_extern_decl
@@ -386,6 +378,7 @@ class ClearParser
     when :parse_for_range then parse_for_range
     when :parse_tight_stmt then parse_tight_stmt
     when :parse_return then parse_return
+    when :parse_assert then parse_assert
     when :parse_assert_raises then parse_assert_raises
     when :parse_test_block then parse_test_block
     when :parse_stub then parse_stub
@@ -395,6 +388,8 @@ class ClearParser
     when :parse_raise_stmt then parse_raise_stmt
     when :parse_exit then parse_exit
     when :parse_die then parse_die
+    when :parse_break then parse_break
+    when :parse_continue then parse_continue
     when :parse_with_capability then parse_with_capability
     when :parse_sync_policy_block then parse_sync_policy_block
     when :parse_do_block then parse_do_block
@@ -409,15 +404,30 @@ class ClearParser
     T.must(result)
   end
 
-  sig { params(action: Symbol, token: Lexer::Token, args: T::Array[PatternCapture]).returns(AST::Node) }
-  def dispatch_stmt_pattern_action(action, token, args)
-    case action
-    when :build_assert then AST::Assert.new(token, args[0], args[1])
-    when :build_break then AST::BreakNode.new(token)
-    when :build_continue then AST::ContinueNode.new(token)
-    else
-      raise "Unknown statement pattern action #{action}"
+  sig { returns(AST::Assert) }
+  def parse_assert
+    token = consume(:KEYWORD, 'ASSERT')
+    condition = parse_expression
+    message = T.let(:Any, T.any(Symbol, String))
+    if match!(:CHAR, ',')
+      message = consume(:STRING).text!
     end
+    consume(:CHAR, ';')
+    AST::Assert.new(token, condition, message)
+  end
+
+  sig { returns(AST::BreakNode) }
+  def parse_break
+    token = consume(:KEYWORD, 'BREAK')
+    consume(:CHAR, ';')
+    AST::BreakNode.new(token)
+  end
+
+  sig { returns(AST::ContinueNode) }
+  def parse_continue
+    token = consume(:KEYWORD, 'CONTINUE')
+    consume(:CHAR, ';')
+    AST::ContinueNode.new(token)
   end
 
   sig { returns(AST::Node) }
@@ -435,12 +445,6 @@ class ClearParser
 
   sig { params(rule: ParserRule).returns(AST::Node) }
   def dispatch_primary_rule(rule)
-    unless rule.pattern.empty?
-      start_token = current
-      args = process_pattern(rule.pattern)
-      return dispatch_primary_pattern_action(rule.action, start_token, args)
-    end
-
     result = case rule.action
     when :parse_if_expr then parse_if_expr
     when :parse_match_expr then parse_match_expr
@@ -452,13 +456,40 @@ class ClearParser
     when :parse_false_literal then parse_boolean_literal(false)
     when :parse_nil_literal then parse_nil_literal
     when :parse_default_literal then parse_default_literal
+    when :parse_cast then parse_cast
+    when :parse_move_node then AST::MoveNode.new(consume(:KEYWORD), parse_expression)
+    when :parse_copy_node then AST::CopyNode.new(consume(:KEYWORD, 'COPY'), parse_expression)
+    when :parse_clone_node then AST::CloneNode.new(consume(:KEYWORD, 'CLONE'), parse_expression)
+    when :parse_share_node then AST::ShareNode.new(consume(:KEYWORD, 'SHARE'), parse_expression)
+    when :parse_link_node then AST::LinkNode.new(consume(:KEYWORD, 'LINK'), parse_expression)
+    when :parse_resolve_node then AST::ResolveNode.new(consume(:KEYWORD, 'RESOLVE'), parse_expression)
+    when :parse_freeze_node then AST::FreezeNode.new(consume(:KEYWORD, 'FREEZE'), parse_expression)
     when :parse_bg_block then parse_bg_block
     when :parse_next_expr then parse_next_expr
     when :parse_sigil_construct then parse_sigil_construct
+    when :parse_require_expression then AST::Require.new(consume(:KEYWORD, 'REQUIRE'), consume(:STRING).text!)
+    when :parse_select_op then AST::SelectOp.new(consume(:KEYWORD, 'SELECT'), parse_expression(1))
+    when :parse_where_op then AST::WhereOp.new(consume(:KEYWORD, 'WHERE'), parse_expression(1))
+    when :parse_index_op then AST::IndexOp.new(consume(:KEYWORD, 'INDEX'), parse_expression(1))
     when :parse_reduce_op then parse_reduce_op
+    when :parse_order_by_op then AST::OrderByOp.new(consume(:KEYWORD, 'ORDER_BY'), parse_expression(1))
+    when :parse_limit_op then AST::LimitOp.new(consume(:KEYWORD, 'LIMIT'), parse_expression(1))
+    when :parse_skip_op then AST::SkipOp.new(consume(:KEYWORD, 'SKIP'), parse_expression(1))
+    when :parse_unnest_op then AST::UnnestOp.new(consume(:KEYWORD, 'UNNEST'), parse_expression(1))
+    when :parse_distinct_op then AST::DistinctOp.new(consume(:KEYWORD, 'DISTINCT'), parse_expression(1))
     when :parse_each_op then parse_each_op
     when :parse_tap_op then parse_tap_op
+    when :parse_find_op then AST::FindOp.new(consume(:KEYWORD, 'FIND'), parse_expression(1))
+    when :parse_any_op then AST::AnyOp.new(consume(:KEYWORD, 'ANY'), parse_expression(1))
+    when :parse_all_op then AST::AllOp.new(consume(:KEYWORD, 'ALL'), parse_expression(1))
+    when :parse_count_op then AST::CountOp.new(consume(:KEYWORD, 'COUNT'), parse_expression(1))
+    when :parse_sum_op then AST::SumOp.new(consume(:KEYWORD, 'SUM'), parse_expression(1))
+    when :parse_average_op then AST::AverageOp.new(consume(:KEYWORD, 'AVERAGE'), parse_expression(1))
+    when :parse_min_op then AST::MinOp.new(consume(:KEYWORD, 'MIN'), parse_expression(1))
+    when :parse_max_op then AST::MaxOp.new(consume(:KEYWORD, 'MAX'), parse_expression(1))
+    when :parse_take_while_op then AST::TakeWhileOp.new(consume(:KEYWORD, 'TAKE_WHILE'), parse_expression(1))
     when :parse_recover_op then parse_recover_op
+    when :parse_collect_op then AST::CollectOp.new(consume(:KEYWORD, 'COLLECT'))
     when :parse_window_op then parse_window_op
     when :parse_join_op then parse_join_op
     when :parse_shard_op then parse_shard_op
@@ -470,39 +501,15 @@ class ClearParser
     T.must(result)
   end
 
-  sig { params(action: Symbol, token: Lexer::Token, args: T::Array[PatternCapture]).returns(AST::Node) }
-  def dispatch_primary_pattern_action(action, token, args)
-    case action
-    when :build_cast then AST::Cast.new(token, args[0], args[1])
-    when :build_move_node then AST::MoveNode.new(token, args[0])
-    when :build_copy_node then AST::CopyNode.new(token, args[0])
-    when :build_clone_node then AST::CloneNode.new(token, args[0])
-    when :build_share_node then AST::ShareNode.new(token, args[0])
-    when :build_link_node then AST::LinkNode.new(token, args[0])
-    when :build_resolve_node then AST::ResolveNode.new(token, args[0])
-    when :build_freeze_node then AST::FreezeNode.new(token, args[0])
-    when :build_require then AST::Require.new(token, args[0])
-    when :build_select_op then AST::SelectOp.new(token, args[0])
-    when :build_where_op then AST::WhereOp.new(token, args[0])
-    when :build_index_op then AST::IndexOp.new(token, args[0])
-    when :build_order_by_op then AST::OrderByOp.new(token, args[0])
-    when :build_limit_op then AST::LimitOp.new(token, args[0])
-    when :build_skip_op then AST::SkipOp.new(token, args[0])
-    when :build_unnest_op then AST::UnnestOp.new(token, args[0])
-    when :build_distinct_op then AST::DistinctOp.new(token, args[0])
-    when :build_find_op then AST::FindOp.new(token, args[0])
-    when :build_any_op then AST::AnyOp.new(token, args[0])
-    when :build_all_op then AST::AllOp.new(token, args[0])
-    when :build_count_op then AST::CountOp.new(token, args[0])
-    when :build_sum_op then AST::SumOp.new(token, args[0])
-    when :build_average_op then AST::AverageOp.new(token, args[0])
-    when :build_min_op then AST::MinOp.new(token, args[0])
-    when :build_max_op then AST::MaxOp.new(token, args[0])
-    when :build_take_while_op then AST::TakeWhileOp.new(token, args[0])
-    when :build_collect_op then AST::CollectOp.new(token)
-    else
-      raise "Unknown primary pattern action #{action}"
-    end
+  sig { returns(AST::Cast) }
+  def parse_cast
+    token = consume(:KEYWORD, 'CAST')
+    consume(:CHAR, '(')
+    value = parse_expression
+    consume(:KEYWORD, 'AS')
+    type = parse_type_annotation
+    consume(:CHAR, ')')
+    AST::Cast.new(token, value, type)
   end
 
   sig { returns(AST::Node) }
@@ -739,67 +746,10 @@ class ClearParser
     parse_suffixes(node)
   end
 
-  ## START PATTERN DSL
-  sig { params(pattern: Pattern).returns(T::Array[PatternCapture]) }
-  def process_pattern(pattern)
-    captures = T.let([], T::Array[PatternCapture])
-
-    pattern.each do |step|
-      case step.kind
-      when :literal
-        consume_literal(T.cast(step.value, String))
-      when :capture
-        captures << run_action(T.must(step.action))
-      when :optional_capture
-        trigger = T.cast(step.value, String)
-        if match_literal!(trigger)
-          captures << run_action(T.must(step.action))
-        else
-          captures << :Any
-        end
-      else
-        raise "Unknown parser pattern step #{step.kind}"
-      end
-    end
-
-    captures
-  end
-
-  sig { params(item: Symbol).returns(PatternCapture) }
-  def run_action(item)
-    # Convention: :UPPER_CASE is a Token Type to eat
-    return consume(item).text! if item == item.upcase
-    return parse_expression if item == :expression
-    # :pipe_expression → parse_expression with min precedence = |> (1)
-    # Excludes |> (prec 1, since 1 > 1 is false) but includes OR (prec 2).
-    return parse_expression(1) if item == :pipe_expression
-    return parse_type_annotation if item == :type_annotation
-    error!(current, :PARSER_EXPECTED, expected: "known pattern action", got: item.to_s, type: current.type, line: current.line)
-  end
-
-  # Helpers for the literals (Keywords or Chars)
-  sig { params(val: String).returns(T.nilable(Lexer::Token)) }
-  def consume_literal(val)
-    if val == '_'
-      consume(:UNDERSCORE)
-    elsif val.match?(/[a-zA-Z]/)
-      consume(:KEYWORD, val)
-    else
-      consume(:CHAR, val)
-    end
-  end
-
-  sig { params(val: String).returns(T.any(Lexer::Token, FalseClass)) }
-  def match_literal!(val)
-    type = val.match?(/[a-zA-Z]/) ? :KEYWORD : :CHAR
-    match!(type, val)
-  end
-
   sig { params(val: String).returns(Symbol) }
   def literal_token_type(val)
     val.match?(/[a-zA-Z]/) ? :KEYWORD : :CHAR
   end
-  ## END PATTERN DSL
 
 
   sig { returns(Lexer::Token) }
