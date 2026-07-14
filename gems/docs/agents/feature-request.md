@@ -81,30 +81,77 @@ facts should need little or no per-language consumer work.
 The estimates overlap because several features share the same foundational
 facts. They must not be summed as if each were implemented independently.
 
+## Source-Traceability Rule
+
+Every example below is a faithful excerpt from the current Parser or Annotator
+source (or from a direct consumer when the problem is the boundary between
+them). The path, method, and current line span are named explicitly. Formatting
+is occasionally condensed and `# ...` marks omitted statements; declarations,
+types, and relevant operations are not synthetic. A feature motivated by a
+risky protocol rather than a demonstrated bug is labelled as such. This
+distinction matters: an analyzer request is not evidence that the motivating
+production code is already wrong.
+
+| Feature | Exact primary trigger | Evidence in current source |
+|---|---|---|
+| FR-T1-01 | `Lexer::Token#value` into `ClearParser#parse_lit` field pairs | **Confirmed erosion/translation blocker.** Token-kind/value correlation is lost. |
+| FR-T1-02 | `process_pattern` into `dispatch_*_pattern_action` | **Confirmed shape loss.** Rule-specific capture positions become one union array. |
+| FR-T1-03 | `parse_union_def` converting `method_reqs.empty?` to nil | **Review candidate only.** No proof yet that nil and empty are equivalent to all consumers. |
+| FR-T1-04 | `AutoSlotId#eql?` | **Confirmed contract contradiction.** The declared domain makes the required protocol guard statically impossible. |
+| FR-T1-05 | `SemanticAnnotator#semantic_index` lifecycle | **Contract gap, not a found bypass.** Completion is nilability plus `T.must`; current frontend ordering is correct. |
+| FR-T1-06 | `@suppress_struct_lit` toggles in both match parsers | **Scoped-state risk, not a found continuing leak.** The previous early-return example was false. |
+| FR-T1-07 | `ErrorHelper#error!` / `diagnostic_token` | **Confirmed escape boundary.** DFG is still needed to distinguish containment from propagation. |
+| FR-T2-01 | Parser metadata aliases at `parser.rb:55-64` | **Confirmed record-shaped hashes.** Per-key value types are erased. |
+| FR-T2-02 | `FunctionAnalysis` requiring `SemanticAnnotator` | **Confirmed whole-host dependency.** Sorbet declares it, but only at maximum capability. |
+| FR-T2-03 | `run_whole_program_semantics!` | **Confirmed implicit phase inputs/outputs.** Whether to split them is architectural judgment. |
+| FR-T2-04 | `matched_signature` writers/readers | **Confirmed multiple writers.** Writer overlap or invalid bypass is not yet proven. |
+| FR-T2-05 | `FunctionAnalysis#resolve_call` | **Confirmed decision/application fusion.** |
+| FR-T2-06 | `PatternCapture` and comptime refinement result | **Confirmed type-pressure convergence.** |
+| FR-T2-07 | `DeclarationNode` versus raw lifetime unions | **Confirmed normalized type duplication.** Alias adoption remains a coupling judgment. |
+| FR-T3-01 | `PatternCapture` roles | **Exploratory cohesion evidence.** |
+| FR-T3-02 | Parser global/instance/temporary modes | **Exploratory state-space evidence.** The fields must not automatically be treated as one machine. |
+| FR-T3-03 | `PipeAnalysis` capability clusters | **Exploratory cohesion evidence.** |
+| FR-T3-04 | `resolve_call` semantic fan-out | **Exploratory record opportunity.** Smaller decision records already exist nearby. |
+| FR-T3-05 | `semantic_index` readers outside the annotator corpus | **Confirmed analyzer-confidence defect case.** |
+
 ## T1 Metrics
 
 ### FR-T1-01: Boundary Type Erosion and Recovery Debt
 
-**Problem.** A helper receives or constructs a value with a precise shape, but
-its declared output erases that shape. Callers immediately recover the lost
-fact with a cast, assertion, destructuring assumption, or dynamic check. This
-identified the parser's broad token-value and generic sequence boundaries.
+**Problem.** A producer, storage slot, or helper has a value whose precise
+shape is known from construction or a discriminator, but its exposed type
+erases that fact. Callers immediately recover the lost fact with a cast,
+assertion, destructuring assumption, or dynamic check. This identified the
+parser's broad token-value boundary.
+
+**Exact Parser trigger.** `Lexer::Token#value` is an untyped slot in
+`compiler/ruby/ast/lexer.rb:10`. A struct-literal parser then relies on the
+token kind to mean that the value is a field-name string, but carries the raw
+slot into a nested pair in `ClearParser#parse_lit`
+(`compiler/ruby/ast/parser.rb:3080-3086`):
 
 ```ruby
-sig { params(token: Token).returns(T.any(String, Integer)) }
-def identifier_value(token)
-  token.value
-end
+Token = Struct.new(:type, :value, :line, :column)
 
-sig { params(token: Token).returns(Symbol) }
-def parse_name(token)
-  T.cast(identifier_value(token), String).to_sym
+_, fields = parse_comma_seq(:CHAR, '{', '}') do
+  name_tok = current.type == :TYPE_ID ? consume(:TYPE_ID) : consume(:VAR_ID)
+  consume(:CHAR, ':'); v = parse_expression
+  [[T.must(name_tok).value, v], name_tok]
 end
+lit = AST::StructLit.new(type_token, name, fields.map(&:first).to_h, storage, type_args)
 ```
 
-**Finding.** `identifier_value` introduces a wider type than its consumer can
-accept, and `parse_name` recovers `String` immediately. Recommend a checked
-`Token#identifier_value` boundary rather than propagating the broad union.
+This is the exact source of the unreadable nested CLEAR cast reported during
+the parser translation. The lexer is allowed to store strings, numbers, and
+nil in different token kinds; the erosion occurs because the token kind/value
+correlation is absent from the boundary. The correct recommendation is a
+checked textual-token accessor or a typed token variant, not a claim that
+`Token#value` always returns `String`.
+
+**Finding.** Report T1 only when the producer flow proves a strict subtype of
+the declared result. “All resolved consumers cast the result to the same
+subtype” is corroborating evidence, not proof, and must be T2 when producer
+flow or call-graph closure is incomplete.
 
 **Metrics.** Lost normalized type facts; union-width increase; unknown/untyped
 leaves introduced; number and distance of recovery operations; callers that
@@ -113,6 +160,33 @@ recover the same subtype.
 **Existing-tool gap.** Type checkers enforce assignability and linters can count
 casts, but they do not normally report that one API erased a fact which its
 callers systematically reconstruct.
+
+Sorbet will accept a body whose actual result is narrower than its declared
+return type because the result is assignable to that type; it does not require
+every member of a declared union to be reachable. See Sorbet's
+[method-signature](https://sorbet.org/docs/sigs) and
+[union-type](https://sorbet.org/docs/union-types) semantics. CodeQL can cheaply
+find the Ruby-specific syntactic candidate “all resolved uses flow into
+`T.cast(..., B)`,” using its Ruby
+[call](https://codeql.github.com/docs/codeql-language-guides/codeql-library-for-ruby/)
+and [data-flow](https://codeql.github.com/docs/codeql-language-guides/analyzing-data-flow-in-ruby/)
+libraries, but that is not one query that runs unchanged across languages and
+it is not proof of the producer's result type. The official Ruby library docs
+describe Ruby AST/call/data-flow extraction and custom library modeling, but I
+found no built-in Sorbet signature model; absent such a model, `sig` and
+`T.cast` must be recognized as Sorbet DSL calls by the custom query/model.
+FactMine already normalizes Sorbet declarations, so it is the better product
+foundation; a CodeQL query is useful as a Ruby audit/oracle.
+
+**CodeQL effort.** A Ruby-only candidate query is small-to-medium rather than
+trivial: approximately 150-300 QL LoC plus 100-200 LoC of Sorbet modeling and
+query tests. It can require that every resolved use of a method result flows
+immediately into the same `T.cast` target and that no other resolved use
+escapes. Each additional CodeQL language needs its own declaration, cast/
+assertion, call-target, and type-relation adapter/query work; only the concept
+and result schema are shared. Proving the producer's narrower return flow is a
+larger analysis and should reuse FactMine's normalized types/CFG/DFG instead of
+being rebuilt independently in every CodeQL language library.
 
 **Products.** FactMine emits normalized producer/consumer type and recovery
 facts; Decomplex ranks local recovery debt; Espalier aggregates erosion across
@@ -132,20 +206,44 @@ dispatch or reflection hides the recovery operation.
 **Problem.** A producer returns a fixed tuple, pair, or typed sequence but the
 boundary exposes only an untyped array or one-or-many union. Consumers rely on
 positional relationships that no longer exist in the declared type. This
-identified generic parser sequence helpers and MIR one-or-many results.
+identified the parser-rule capture boundary. The current generic
+`parse_comma_seq` signature preserves its element type and is not itself an
+example of this defect.
+
+**Exact Parser trigger.** The parser-rule DSL knows which action produced each
+capture, but `process_pattern` collapses every position into
+`T::Array[PatternCapture]`; the positional consumers in
+`dispatch_stmt_pattern_action` then use `args[0]` and `args[1]` without a
+correlated tuple contract (`compiler/ruby/ast/parser.rb:52,715-749` and
+`:385-393`):
 
 ```ruby
-sig { returns(T::Array[T.untyped]) }
-def parsed_name
-  ["name", current_token]
+PatternCapture = T.type_alias do
+  T.nilable(T.any(AST::Node, Type, String, Symbol, Integer, Float, T::Boolean))
 end
 
-name, token = parsed_name
-T.cast(name, String).upcase
+sig { params(pattern: Pattern).returns(T::Array[PatternCapture]) }
+def process_pattern(pattern)
+  captures = T.let([], T::Array[PatternCapture])
+  # each PatternStep action determines the real type appended here
+  captures
+end
+
+sig { params(action: Symbol, token: Lexer::Token, args: T::Array[PatternCapture]).returns(AST::Node) }
+def dispatch_stmt_pattern_action(action, token, args)
+  case action
+  when :build_assert then AST::Assert.new(token, args[0], args[1])
+  # ...
+  end
+end
 ```
 
-**Finding.** A stable two-slot result is declared as an arbitrary array, and a
-consumer immediately assumes the first slot is `String`.
+**Finding.** The stable relationship is between `ParserRule#pattern` and the
+capture positions it produces, but the boundary retains only “array of any
+capture variant.” `parse_comma_seq` itself is no longer the defect: its current
+generic signature preserves `[Lexer::Token, T::Array[Elem]]`. The requested
+metric must therefore identify correlation lost by the rule/capture boundary,
+not flag generic sequence helpers indiscriminately.
 
 **Metrics.** Stable arity; per-slot inferred type stability; correlated
 destructuring count; downstream slot casts; one-or-many normalization count;
@@ -174,16 +272,33 @@ collection and nil is never distinguished afterward. The API encodes two
 states with identical semantics. This identified suspicious optional arrays in
 the parser and annotator.
 
+**Exact Parser trigger.** `ClearParser#parse_union_def` constructs a normal
+array, then converts the empty case to nil immediately before constructing the
+AST (`compiler/ruby/ast/parser.rb:1530-1532`):
+
 ```ruby
-sig { params(names: T.nilable(T::Array[String])).returns(Integer) }
-def name_count(names)
-  (names || []).length
+methods = T.let(nil, T.nilable(T::Array[AST::UnionMethodRequirement]))
+methods = method_reqs unless method_reqs.empty?
+AST::UnionDef.new(tok, name, variants, visibility, type_params, methods)
+```
+
+**Exact Annotator corroboration.** `comptime_is_a_type_param_refinement`
+returns a nilable untyped array even though its success value is always a
+two-slot `[Symbol, Type]` pair (`compiler/ruby/annotator/domains/control_flow.rb:393-414`):
+
+```ruby
+sig { params(condition: AST::Node).returns(T.nilable(T::Array[T.untyped])) }
+def comptime_is_a_type_param_refinement(condition)
+  # ...
+  narrowed_type ? [type_param, narrowed_type] : nil
 end
 ```
 
-**Finding.** Within the complete method flow, `nil` and `[]` converge before
-any observable use. Recommend a non-nil collection parameter with `[]` as the
-absence representation.
+**Finding.** The parser site is a review candidate, not yet proof that nil and
+empty are equivalent: downstream `AST::UnionDef#methods` consumers may attach
+meaning to nil. The annotator site primarily proves result-shape erosion, not
+redundant optional collection. Promote a finding to T1 only after complete
+flow proves that nil and empty converge before every observable use.
 
 **Metrics.** Nil-distinguishing branch count; convergence point; operations
 performed before convergence; nil/empty return equivalence; number of callers
@@ -212,13 +327,21 @@ narrower parameter than the protocol permits and then defensively checks that
 same type. This identified the incorrect equality signatures in annotator and
 MIR identifiers.
 
-```ruby
-sig { params(other: NodeId).returns(T::Boolean) }
-def ==(other)
-  return false unless other.is_a?(NodeId)
+**Exact Annotator trigger.** `AutoSlotId#eql?` narrows its Sorbet input to
+`AutoSlotId` and then performs the runtime class guard required by Ruby's hash
+equality protocol (`compiler/ruby/annotator/helpers/auto_inference.rb:89-103`):
 
-  other.value == value
+```ruby
+sig { params(other: AutoSlotId).returns(T::Boolean) }
+def eql?(other)
+  return false unless other.is_a?(AutoSlotId)
+  @kind == other.kind &&
+    @fn_name == other.fn_name &&
+    @index == other.index &&
+    @decl_id == other.decl_id
 end
+
+alias == eql?
 ```
 
 **Finding.** Ruby equality accepts arbitrary objects, while the signature says
@@ -251,20 +374,34 @@ language needs a small, explicit protocol table rather than shared name checks.
 producer phase initializes it. Dynamic AST stamping currently makes this hard
 to prove in the annotator.
 
+**Exact Annotator trigger.** `SemanticAnnotator#semantic_index` is optional
+during construction/reset, is populated only at the end of `annotate!`, and is
+recovered with `T.must` by the compiler frontend
+(`compiler/ruby/annotator/annotator.rb:578-623` and
+`compiler/ruby/compiler/compiler_frontend.rb:76-85`):
+
 ```ruby
-class EmitPhase
-  def run(node)
-    emit(node.resolved_type)
-  end
+@semantic_index = T.let(nil, T.nilable(SemanticIndex))
+
+def annotate!(node)
+  # ... body analysis and whole-program phases ...
+  @semantic_index = T.let(SemanticIndex.new(
+    program: node,
+    root_scope: semantic_root_scope,
+    function_registry: semantic_function_registry,
+    id_index: semantic_id_index_from_body_summaries,
+  ), T.nilable(SemanticIndex))
+  mark_annotation_complete!(node)
 end
 
-EmitPhase.new.run(node)
-node.resolved_type = resolve(node)
+body_summaries: T.must(annotator.semantic_index).body_summaries
 ```
 
-**Finding.** `resolved_type` is read before its first reachable write. In a
-declared phase pipeline, also report a producer phase that fails to initialize
-the annotation on all exits.
+**Finding.** No current read-before-write bug is asserted here: the frontend
+calls `annotate!` first. The exact design problem is that phase completion is
+represented as a nilable field plus a caller assertion rather than a result
+whose type proves completion. A T1 diagnostic requires a reachable read that
+bypasses the writer, or a producer exit that omits a required annotation.
 
 **Metrics.** Definite assignment by phase exit; read-before-write paths;
 producer coverage; required annotation completeness; bypass edges around the
@@ -288,18 +425,31 @@ negatives: **high** around reflective writes unless adapters expose them.
 
 ### FR-T1-06: Scoped State Restoration Leak
 
-**Problem.** Code saves mutable mode state, changes it temporarily, and exits a
-path before restoring it. This directly addresses implicit parser modes.
+**Problem.** Code changes mutable mode state temporarily and a reachable exit
+can bypass restoration. This directly addresses implicit parser modes.
+
+**Exact Parser trigger.** Both match-expression paths manually toggle
+`@suppress_struct_lit` around calls that can raise, with no scoped helper
+(`compiler/ruby/ast/parser.rb:2660-2671` and `:2761-2775`):
 
 ```ruby
-old = @mode
-@mode = :type
-return parse_type if ready?
-@mode = old
+@suppress_struct_lit = true
+first_pattern = parse_expression
+@suppress_struct_lit = false
+
+# repeated in the same method for each extra pattern
+@suppress_struct_lit = true
+extra_patterns << parse_expression
+@suppress_struct_lit = false
 ```
 
-**Finding.** The early-return path leaves `@mode` changed. Recommend an `ensure`
-or a typed scoped-mode helper.
+**Finding.** The previous invented early return was not present in the parser
+and overstated the evidence. The current source has a duplicated unprotected
+temporary-state protocol. Parser errors currently abort parsing, so an
+exception-only exit is not automatically a user-visible state leak. Report T1
+only when CFG proves execution can continue after an un-restored exit;
+otherwise report scoped-state risk at T2 and recommend an `ensure`-backed
+helper.
 
 **Metrics.** Save/mutate/restore triples; exits between mutation and restore;
 exception edges without restoration; nested scope depth; restored field set
@@ -328,19 +478,32 @@ boundary but its value propagates into ordinary core logic instead of being
 validated and retyped immediately. This identified dynamic token, diagnostic,
 and AST-property leakage.
 
+**Exact Parser-boundary trigger.** The shared parser/annotator diagnostic
+helper accepts `T.untyped`, uses reflective token detection, casts through a
+union containing `Object`, and forwards the result into compiler error/fix
+construction (`compiler/ruby/ast/source_error.rb:9,26-48` and `:170-181`):
+
 ```ruby
-def dynamic_name(node)
-  T.unsafe(node).name
+DiagnosticToken = T.type_alias { T.nilable(T.any(Lexer::Token, Struct, Object)) }
+
+sig { params(node_or_token: T.untyped, code_or_message: T.any(String, Symbol), args: String, kwargs: T.untyped).returns(T.noreturn) }
+def error!(node_or_token, code_or_message, *args, **kwargs)
+  token = diagnostic_token(node_or_token)
+  # ...
+  raise err_class.new(source_error_token(token), T.unsafe(message), diagnostic_source_code)
 end
 
-def register(node)
-  @table[dynamic_name(node)] = node
+def diagnostic_token(node_or_token)
+  token = node_or_token.respond_to?(:token) ? node_or_token.token : node_or_token
+  T.cast(token, DiagnosticToken)
 end
 ```
 
-**Finding.** An unsafe value crosses into a registry key without a checked
-boundary. Merely counting `T.unsafe` is insufficient; the metric follows the
-value to typed or architectural sinks.
+**Finding.** A value entering through `T.untyped` is widened to a token union
+containing `Object`, then reaches error/fix construction through reflection and
+`T.unsafe`. Merely counting `T.unsafe` is insufficient; the metric should show
+whether the value is contained and normalized at this diagnostic adapter or
+propagates onward into typed parser/annotator state.
 
 **Metrics.** Propagation depth; owner boundaries crossed; state/return/call
 sinks reached; percentage contained within one method; first recovery or
@@ -369,16 +532,31 @@ or metaprogramming.
 **Problem.** A stable heterogeneous hash acts as a record whose required keys
 and value types are implicit. This identified parser metadata hashes.
 
-```ruby
-def metadata(token)
-  {name: token.value, token: token}
-end
+**Exact Parser trigger.** The parser declares several heterogeneous hashes
+whose keys are a closed schema and whose value union is widened to cover every
+key (`compiler/ruby/ast/parser.rb:55-64`):
 
-metadata(token)[:name].upcase
+```ruby
+EffectMetadataValue = T.type_alias do
+  T.nilable(T.any(Lexer::Token, Integer, T::Boolean))
+end
+EffectMetadata = T.type_alias { T::Hash[Symbol, EffectMetadataValue] }
+ElementCapability = T.type_alias { T::Hash[Symbol, T.nilable(Symbol)] }
+WithMatchArmValue = T.type_alias do
+  T.nilable(T.any(Symbol, Lexer::Token, AST::RawBody, T::Array[AST::ErrorClause]))
+end
+WithMatchArm = T.type_alias { T::Hash[Symbol, WithMatchArmValue] }
+CapDims = T.type_alias { T::Hash[Symbol, T.nilable(T.any(Symbol, Integer))] }
 ```
 
-**Finding.** The same fixed keys travel together and are accessed as named
-fields. Recommend a typed record only after enough stable evidence exists.
+For example, `parse_effects_decl` constructs `EffectMetadata` with stable keys
+such as `:start_tok`, `:end_tok`, and `:tight`
+(`compiler/ruby/ast/parser.rb:1950-1970`). The exact problem is that the type of
+each value depends on its key, but the hash contract forgets that correlation.
+
+**Finding.** Recommend a typed record only after the observed construction and
+access sites establish stable required/optional keys. Do not flag ordinary
+homogeneous lookup tables.
 
 **Metrics.** Key stability; heterogeneous value-type score; required versus
 optional keys; construction/access site count; cross-method and cross-phase
@@ -406,21 +584,34 @@ splats.
 only a tiny subset of that host. This identified annotator and MIR mixins whose
 real interface is implicit.
 
-```ruby
-module NameParsing
-  def parse_name
-    current_token.value
-  end
-end
+**Exact Annotator trigger.** `FunctionAnalysis` explicitly requires the whole
+`SemanticAnnotator` ancestor, and its methods bind `self` to that 36-public-
+method/11-state-slot host even for bounded operations
+(`compiler/ruby/annotator/helpers/function_analysis.rb:5-15` and `:91-100`):
 
-class Parser
-  include NameParsing
-  # many unrelated public methods and state fields
+```ruby
+module FunctionAnalysis
+  extend T::Helpers
+  requires_ancestor { SemanticAnnotator }
+
+  sig do
+    params(node: RoutineNode, body: RoutineBody,
+      declared_return: DeclaredReturn, is_implicit: T::Boolean)
+      .returns(T.nilable(Symbol))
+  end
+  def analyze_routine(node, body, declared_return, is_implicit)
+    T.bind(self, SemanticAnnotator) rescue nil
+    verify_captures!(node)
+    # ... scope, visit, return, diagnostic, and ownership host calls ...
+  end
 end
 ```
 
-**Finding.** `NameParsing` needs one token capability, not the entire `Parser`
-surface.
+**Finding.** The original example understated an important fact: this mixin is
+not completely undeclared—Sorbet sees `requires_ancestor`. The problem is
+capability amplification: the smallest usable contract is still the entire
+mutable `SemanticAnnotator`, not the subset needed by a method or operation
+family.
 
 **Metrics.** Host public surface divided by capabilities used; hidden self-call
 count; host state domains touched; number of modules sharing the universal
@@ -449,21 +640,30 @@ negatives: **medium-high** for dynamically sent host calls.
 unrelated registries, diagnostics, scopes, and mutable context instead of
 having explicit inputs and outputs.
 
-```ruby
-class ResolvePhase
-  def initialize(host)
-    @host = host
-  end
+**Exact Annotator trigger.** `WholeProgramSemantics#run_whole_program_semantics!`
+is named as a phase but obtains function nodes, body summaries, schema lookup,
+diagnostics, root scope, program policy, signatures, and lock ranks through the
+full host (`compiler/ruby/annotator/phases/whole_program_semantics.rb:19-81`):
 
-  def run(node)
-    node.type = @host.scope.resolve(node.name)
-    @host.errors << node unless node.type
-  end
+```ruby
+def run_whole_program_semantics!
+  T.bind(self, SemanticAnnotator)
+  fn_nodes = whole_program_fn_nodes
+  body_summaries = function_body_summaries
+  EscapeAnalysis.propagate_caller_sync!(fn_nodes, body_summaries)
+  # ... mutates function plans and capture facts ...
+  error_handler = lambda { |node, message|
+    error!(node, :EFFECT_INFERENCE_VIOLATION, detail: message)
+  }
+  root_scope = whole_program_root_scope
+  signature_lookup = lambda { |name| root_scope.resolve_entry(name)&.type }
+  # ... effects, WITH checks, signature restamping, concurrency checks ...
 end
 ```
 
-**Finding.** The phase both resolves through global scope and mutates global
-diagnostics, with neither dependency represented in its API.
+**Finding.** The phase's real inputs and outputs are not represented in its
+signature. This is architectural pressure, not proof that its coordination is
+incorrect; hence T2.
 
 **Metrics.** Host domains touched; mutable services used; explicit input/output
 count versus implicit host accesses; transitive host dependence; phase-local
@@ -492,22 +692,28 @@ contexts.
 outside the intended producer phase. The update may be a legitimate refinement
 or an accidental second source of truth.
 
-```ruby
-class ResolvePhase
-  def run(node)
-    node.type = resolve(node)
-  end
-end
+**Exact Annotator trigger.** `matched_signature` is stamped by multiple
+resolution paths and read by later body analysis:
 
-class CoercePhase
-  def run(node)
-    node.type = coerced(node)
-  end
-end
+```ruby
+# compiler/ruby/annotator/phases/expression_domains.rb:141-145
+node.matched_stdlib_def = method_def
+node.matched_signature = method_def if node.respond_to?(:matched_signature=)
+
+# compiler/ruby/annotator/helpers/function_analysis.rb:481-487
+verify_function_signature!(node, substituted, args)
+T.unsafe(node).matched_signature = substituted if node.respond_to?(:matched_signature=)
+# ... or ...
+T.unsafe(node).matched_signature = signature if node.respond_to?(:matched_signature=)
+
+# compiler/ruby/annotator/phases/body_analysis.rb:473-481
+sig = FunctionSignature.unwrap(node.matched_signature) if node.respond_to?(:matched_signature)
 ```
 
-**Finding.** `node.type` has two phase writers. Require an explicit refinement
-contract or split raw/resolved/coerced annotations.
+**Finding.** These writers may be mutually exclusive and therefore are not,
+by themselves, a bug. The exact missing capability is an ownership/refinement
+matrix able to prove whether writers overlap, whether one intentionally refines
+another, and whether any reader bypasses all valid writers.
 
 **Metrics.** Writers per annotation; writer phase ordering; overwrite without
 read; divergent value provenance; helper writes outside owner phase; final
@@ -536,17 +742,36 @@ it, emits diagnostics, mutates nodes, and updates registries in one method.
 Traditional complexity metrics count branches but do not identify this role
 mixture.
 
+**Exact Annotator trigger.** `FunctionAnalysis#resolve_call`
+(`compiler/ruby/annotator/helpers/function_analysis.rb:396-530`) performs name
+lookup, typo diagnostics, intrinsic/user/fn-variable dispatch, extern-effect
+recording, generic substitution, argument verification, annotation stamping,
+and result-type rewriting in one method. A minimal exact slice is:
+
 ```ruby
-def visit(node)
-  type = resolve(node.name)
-  @errors << node unless type
-  node.type = type
-  @registry[node.name] = node
+scope = lookup_scope_for(func_name)
+unless scope
+  emit_typo_suggestion!(node.token, func_name, function_node_map.keys,
+    "Undefined function '#{func_name}'", "closest declared function")
+  return
+end
+
+# ... choose intrinsic, static function, generic function, or fn variable ...
+substituted = substitute_type_params(signature, subst)
+verify_function_signature!(node, substituted, args)
+T.unsafe(node).matched_signature = substituted if node.respond_to?(:matched_signature=)
+stamp_type!(node, substituted.return_type)
+
+call_type = node.full_type!(context: "function call result")
+if call_type.respond_to?(:error_union?) && call_type.error_union?
+  T.unsafe(node).error_union_type = call_type if node.respond_to?(:error_union_type=)
+  stamp_type!(node, call_type.success_type)
 end
 ```
 
-**Finding.** One decision drives diagnostics plus multiple semantic mutations.
-Recommend producing a typed decision record and applying it separately.
+**Finding.** One resolution decision drives diagnostics, effects, several AST
+annotations, and type mutation. Recommend producing and then applying a typed
+call-resolution decision; do not recommend merely extracting private methods.
 
 **Metrics.** Semantic role count; mutation-target count; diagnostic emissions;
 registry/state domains written; decision value fan-out; resolve/validate/apply
@@ -574,16 +799,35 @@ union analysis focuses on dispatch behavior rather than normalized declaration
 pressure. Parser and annotator hotspots combine wide unions, nilability, casts,
 and branch/state pressure.
 
+**Exact Parser trigger.** The parser's rule boundary combines a seven-variant
+union plus nilability with positional dispatch and recovery operations
+(`compiler/ruby/ast/parser.rb:51-54`, `:385-388`, and `:715-749`):
+
 ```ruby
-sig { params(value: T.nilable(T.any(String, Integer, Token))).void }
-def emit(value)
-  return unless value
-  puts value.is_a?(Token) ? value.value : value.to_s
+PatternCapture = T.type_alias do
+  T.nilable(T.any(AST::Node, Type, String, Symbol, Integer, Float, T::Boolean))
+end
+
+sig do
+  params(action: Symbol, token: Lexer::Token,
+    args: T::Array[PatternCapture]).returns(AST::Node)
+end
+def dispatch_stmt_pattern_action(action, token, args)
+  case action
+  when :build_assert then AST::Assert.new(token, args[0], args[1])
+  # ...
+  end
 end
 ```
 
-**Finding.** Report when union width/nilability/casts converge with decision,
-state, or fan-in pressure. A wide union alone is not enough.
+**Exact Annotator corroboration.** The successful result of
+`comptime_is_a_type_param_refinement` is a fixed `[Symbol, Type]`, but the
+declaration is `T.nilable(T::Array[T.untyped])` and its caller casts both slots
+(`compiler/ruby/annotator/domains/control_flow.rb:393-414`).
+
+**Finding.** Report only when union width, unknown leaves, casts, positional
+assumptions, and decision/state pressure converge. A wide closed union alone is
+not a smell.
 
 **Metrics.** Union and nested-union width; untyped leaves; collection nesting;
 cast/assertion count; variant branches; convergence score with existing
@@ -610,15 +854,36 @@ design. False negatives: **medium** where declarations are absent or untyped.
 continue to be repeated across nearby APIs. This identified annotator aliases
 that should already have been reused.
 
-```ruby
-Declaration = T.type_alias { T.any(VarDecl, BindExpr) }
+**Exact Annotator trigger.** `GenericAnalysis` declares a domain alias, while
+three lifetime helpers repeat the same normalized union
+(`compiler/ruby/annotator/helpers/generic_analysis.rb:21` and
+`compiler/ruby/annotator/domains/lifetimes.rb:886-900,1128-1129`):
 
-sig { params(node: T.any(VarDecl, BindExpr)).void }
-def validate(node); end
+```ruby
+# helpers/generic_analysis.rb
+DeclarationNode = T.type_alias { T.any(AST::VarDecl, AST::BindExpr) }
+
+# domains/lifetimes.rb
+sig { params(decl_node: T.any(AST::VarDecl, AST::BindExpr)).void }
+def stamp_bg_handle_lifetime!(decl_node)
+  # ...
+end
+
+sig { params(decl_node: T.any(AST::VarDecl, AST::BindExpr)).void }
+def stamp_init_contents_heap!(decl_node)
+  # ...
+end
+
+sig do
+  params(node: T.any(AST::VarDecl, AST::BindExpr)).returns(T.nilable(Symbol))
+end
+def set_cleanup_alloc!(node)
+  # ...
+end
 ```
 
-**Finding.** The signature is structurally equivalent to `Declaration` but
-bypasses the domain name.
+**Finding.** The signatures are structurally equivalent to `DeclarationNode`
+but bypass the domain name.
 
 **Metrics.** Normalized type-expression equivalence; existing alias matches;
 raw repetitions; owner/directory distance; inconsistent partial variants.
@@ -647,20 +912,30 @@ subtyping rather than exact normalized equality.
 suggesting several result types or a tagged state machine rather than one
 domain sum.
 
-```ruby
-Value = T.type_alias { T.any(String, Token, Diagnostic, Integer) }
+**Exact Parser trigger.** `PatternCapture` combines AST nodes, types, token
+text, symbols, numeric literals, booleans, and absence because one pattern DSL
+array carries the outputs of every action (`compiler/ruby/ast/parser.rb:51-54`
+and `:740-749`):
 
-def handle(value)
-  case value
-  when Token then parse(value)
-  when Diagnostic then report(value)
-  else format(value)
-  end
+```ruby
+PatternCapture = T.type_alias do
+  T.nilable(T.any(AST::Node, Type, String, Symbol, Integer, Float, T::Boolean))
+end
+
+sig { params(item: Symbol).returns(PatternCapture) }
+def run_action(item)
+  return T.must(consume(item)).value if item == item.upcase
+  return parse_expression if item == :expression
+  return parse_expression(1) if item == :pipe_expression
+  return parse_type_annotation if item == :type_annotation
+  error!(current, :PARSER_EXPECTED, expected: "known pattern action", got: item.to_s,
+    type: current.type, line: current.line)
 end
 ```
 
-**Finding.** Variants cluster into unrelated operations with little shared
-behavior. Recommend review, never an automatic split.
+**Finding.** This exact union has weak shared behavior because it represents
+several capture roles rather than one semantic sum. Recommend review or a
+typed capture/result family, never an automatic split.
 
 **Metrics.** Variant behavioral clusters; shared member/call ratio; dispatch
 destination divergence; variant-specific state domains; unrelated return
@@ -686,13 +961,27 @@ visitors. False negatives: **medium-high** when behavior is delegated.
 **Problem.** Several booleans or enum flags create a large implicit parser or
 annotator state machine whose valid combinations are undocumented.
 
-```ruby
-@gradual = true
-@ownership = false
-@suppress_literal = true
+**Exact Parser trigger.** `ClearParser` combines process-global mode defaults,
+an instance language-mode choice, and a temporary parse-disambiguation flag
+(`compiler/ruby/ast/parser.rb:71-72,100-119,126-159`):
 
-parse if @gradual && !@ownership
+```ruby
+@gradual_mode = T.let(false, T.nilable(T::Boolean))
+@ownership_mode = T.let(:default, T.nilable(Symbol))
+
+def initialize(tokens, source_code = "", gradual: nil)
+  # ...
+  @suppress_struct_lit = T.let(false, T::Boolean)
+  @gradual = T.let(gradual.nil? ? self.class.gradual_mode : gradual, T::Boolean)
+end
+
+program.language_mode = @gradual ? :easy : self.class.ownership_mode
 ```
+
+`@suppress_struct_lit` is then toggled manually in both match parsers. These
+states do not all form one coherent state machine, which is exactly why a T3
+metric must first infer co-use and reachable combinations instead of simply
+multiplying every field's cardinality.
 
 **Finding.** Rank owners by reachable mode combinations and by branches that
 depend on combinations of independently written flags.
@@ -723,17 +1012,39 @@ summaries are used.
 capability clusters, suggesting the module is an organizational bucket rather
 than one abstraction.
 
+**Exact Annotator trigger.** `PipeAnalysis` contains ordinary pipeline
+dispatch, window time parsing, scope/type stamping, sharded-access tree
+walking, ownership mutation, and concurrent option validation in one host
+mixin. Representative exact methods are
+`visit_Smooth` (`compiler/ruby/annotator/helpers/pipe_analysis.rb:65-89`),
+`parse_batch_window_time_ns` (`:419-425`), `walk_for_sharded_access`
+(`:1269-1276`), and `analyze_concurrent_op` (`:1424-1468`):
+
 ```ruby
-module Helpers
-  def resolve(node); scope.lookup(node.name); end
-  def diagnose(node); errors << node; end
-  def register(node); registry[node.name] = node; end
+def visit_Smooth(node)
+  T.bind(self, SemanticAnnotator) rescue nil
+  with_smooth_context do
+    visit(node.left)
+    # ...
+  end
+end
+
+def parse_batch_window_time_ns(str)
+  T.bind(self, SemanticAnnotator) rescue nil
+  m = BATCH_WINDOW_TIME_RE.match(str)
+  return nil unless m
+  (m[1].to_f * T.must(BATCH_WINDOW_TIME_NS[T.must(m[2])])).to_i
+end
+
+def analyze_concurrent_op(node)
+  T.bind(self, SemanticAnnotator) rescue nil
+  # ...
 end
 ```
 
-**Finding.** The methods form three capability components with little shared
-data or collaboration. This extends ordinary LCOM to implicit host
-capabilities.
+**Finding.** The source justifies measuring capability components; it does not
+prove these methods belong in separate modules. This extends ordinary LCOM to
+the host services and state implicitly borrowed by a mixin.
 
 **Metrics.** Capability-based connected components; shared host calls/state;
 bridge methods; component fragmentation; inferred minimal module partition.
@@ -761,15 +1072,29 @@ or behavior, and emit diagnostics, but the decision has no named immutable
 representation. The metric suggests where a decision record might remove
 repeated inference.
 
+**Exact Annotator trigger.** The direct-call branch in
+`FunctionAnalysis#resolve_call` derives `signature`/`substituted` and uses that
+decision to verify arguments, stamp `generic_type_args`, `matched_signature`,
+the main type, `error_union_type`, extern effects, allocator use, and function
+context (`compiler/ruby/annotator/helpers/function_analysis.rb:428-507`):
+
 ```ruby
-type = resolve(node)
-node.type = type
-node.owned = owned?(type)
-errors << node unless valid?(type)
+substituted = substitute_type_params(signature, subst)
+verify_function_signature!(node, substituted, args)
+T.unsafe(node).matched_signature = substituted if node.respond_to?(:matched_signature=)
+stamp_type!(node, substituted.return_type)
+
+call_type = node.full_type!(context: "function call result")
+if call_type.respond_to?(:error_union?) && call_type.error_union?
+  T.unsafe(node).error_union_type = call_type if node.respond_to?(:error_union_type=)
+  stamp_type!(node, call_type.success_type)
+end
 ```
 
-**Finding.** One derived value fans out into several semantic outputs. Review
-whether a typed `ResolutionDecision` should be constructed and applied.
+**Finding.** Review whether a typed `CallResolutionDecision` should capture
+those outputs before application. The file already contains smaller records
+such as `CallSignatureSite` and `CallArgumentFacts`, so this request is to
+complete an existing direction, not introduce record objects indiscriminately.
 
 **Metrics.** Derived-value semantic fan-out; number of fields/registries/
 diagnostics affected; repeated recomputation in later phases; decision inputs
@@ -796,16 +1121,27 @@ record. False negatives: **high** when applications occur through helpers.
 consumer lives outside the selected files. Calling it dead state overstates
 the proof and produced misleading parser/annotator/MIR findings.
 
+**Exact Annotator trigger.** The annotator-only corpus writes and exposes
+`@semantic_index`, but its concrete readers are outside that corpus in the
+compiler frontend and module importer
+(`compiler/ruby/annotator/annotator.rb:213-214,617-623`,
+`compiler/ruby/compiler/compiler_frontend.rb:81-85`, and
+`compiler/ruby/compiler/module_importer.rb:189-197`):
+
 ```ruby
-class Pass
-  attr_reader :facts
+# annotator/annotator.rb
+sig { returns(T.nilable(SemanticIndex)) }
+attr_reader :semantic_index
 
-  def run
-    @facts = build_facts
-  end
-end
+@semantic_index = T.let(SemanticIndex.new(
+  program: node,
+  root_scope: semantic_root_scope,
+  function_registry: semantic_function_registry,
+  id_index: semantic_id_index_from_body_summaries,
+), T.nilable(SemanticIndex))
 
-# Read by a frontend file outside the analyzed directory.
+# compiler/compiler_frontend.rb (outside the analyzed annotator corpus)
+body_summaries: T.must(annotator.semantic_index).body_summaries
 ```
 
 **Finding.** Report `unread_in_corpus`, not `dead_state`, unless the input is a
@@ -878,9 +1214,13 @@ proof.
 
 1. Add stable binding/place IDs and closed-world/provenance metadata.
 2. Add normalized declaration-pressure and boundary-recovery facts.
-3. Implement FR-T1-01 through FR-T1-04 using exact FactMine profile oracles.
+3. Implement the currently evidenced T1 contracts—FR-T1-01, FR-T1-02, and
+   FR-T1-04—using exact FactMine profile oracles. Keep FR-T1-03 at review
+   confidence until nil/empty equivalence can be proved over a closed corpus.
 4. Add phase/annotation/host-capability facts.
-5. Implement FR-T1-05 through FR-T1-07.
+5. Implement FR-T1-05 and FR-T1-07 proof paths. Emit FR-T1-06 as T1 only for a
+   proven continuing un-restored exit; otherwise surface it with the T2 scoped-
+   state risk described above.
 6. Implement T2 metrics as consumers of the same facts, prioritizing host
    amplification, phase impurity, and multi-writer annotations.
 7. Add T3 metrics only after representative parser, annotator, and non-compiler
