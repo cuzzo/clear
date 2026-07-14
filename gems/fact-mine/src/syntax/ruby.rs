@@ -212,6 +212,59 @@ const RUBY_CFG_PROFILE: ControlFlowProfile = ControlFlowProfile {
 pub(crate) struct RubyNormalizedBehavior;
 
 impl NormalizedLanguageBehavior for RubyNormalizedBehavior {
+    fn function_dispatch_name(&self, name: &str) -> String {
+        name.strip_prefix("self.").unwrap_or(name).to_string()
+    }
+
+    fn function_dispatch_kind(&self, name: &str, owner: &str) -> String {
+        if name.starts_with("self.") {
+            "class"
+        } else if owner.is_empty() {
+            "top"
+        } else {
+            "instance"
+        }
+        .to_string()
+    }
+
+    fn receiver_is_type_reference(&self, receiver: &str) -> bool {
+        let receiver = receiver.strip_prefix("::").unwrap_or(receiver);
+        !receiver.is_empty()
+            && receiver.split("::").all(|segment| {
+                segment.chars().next().is_some_and(|first| first.is_ascii_uppercase())
+                    && segment.chars().all(|character| character.is_ascii_alphanumeric() || character == '_')
+            })
+    }
+
+    fn constructor_dispatch_name(&self, receiver: &str, message: &str) -> Option<String> {
+        (message == "new" && self.receiver_is_type_reference(receiver))
+            .then(|| "initialize".to_string())
+    }
+
+    fn declarative_owner_constant_operations(&self, node: &Node) -> Vec<String> {
+        let Some(value) = node.children.get(1).and_then(ast::node) else {
+            return Vec::new();
+        };
+        let call = if value.r#type == "ITER" {
+            value.children.first().and_then(ast::node).unwrap_or(value)
+        } else {
+            value
+        };
+        let receiver = call.children.first().and_then(ast::node).map(|node| node.text.as_str());
+        let message = call.children.get(1).and_then(|child| match child {
+            ast::Child::Symbol(value) | ast::Child::String(value) => Some(value.as_str()),
+            _ => None,
+        });
+        match (receiver, message) {
+            (Some("Struct"), Some("new")) => vec!["new", "[]", "[]="],
+            (Some("Data"), Some("define")) => vec!["new"],
+            _ => Vec::new(),
+        }
+        .into_iter()
+        .map(ToString::to_string)
+        .collect()
+    }
+
     // CFG-SPECIFIC START: expose the Ruby CFG profile.
     fn cfg_profile(&self) -> &'static ControlFlowProfile {
         &RUBY_CFG_PROFILE
@@ -352,7 +405,9 @@ impl NormalizedLanguageBehavior for RubyNormalizedBehavior {
                 "unsafe", "untyped",
             ]
             .contains(&message);
-        if sorbet_type_operation {
+        let sorbet_generic_operation = receiver.is_some_and(|receiver| receiver.starts_with("T::"))
+            && message == "[]";
+        if sorbet_type_operation || sorbet_generic_operation {
             return Some(NormalizedCallComplexity {
                 time: "O(1)",
                 space: "O(1)",

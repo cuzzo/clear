@@ -10,7 +10,7 @@ module Espalier
   # Tree-sitter normalization layer. Missing facts remain unknown rather than
   # being guessed from source strings.
   class StructuralBigO
-    def initialize(facts_by_method: {}, method_complexities: {}, method_spaces: {}, method_time_complete: {}, method_space_complete: {}, method_symbolic_time: {}, internal_calls: nil, recursive_edges: nil)
+    def initialize(facts_by_method: {}, method_complexities: {}, method_spaces: {}, method_time_complete: {}, method_space_complete: {}, method_symbolic_time: {}, internal_calls: nil, recursive_edges: nil, resolved_calls: {}, resolved_recursive_edges: {})
       @facts_by_method = facts_by_method
       @method_complexities = method_complexities
       @method_spaces = method_spaces
@@ -19,6 +19,8 @@ module Espalier
       @method_symbolic_time = method_symbolic_time
       @internal_calls = internal_calls
       @recursive_edges = recursive_edges || {}
+      @resolved_calls = resolved_calls
+      @resolved_recursive_edges = resolved_recursive_edges
     end
 
     def hints_for(_file, method, owner)
@@ -33,10 +35,34 @@ module Espalier
       facts.each do |fact|
         Array(fact["call_contexts"]).each do |context|
           caller = method[:name].to_s
-          callee = context["message"].to_s
-          next if @internal_calls && !Array(@internal_calls.dig(owner.to_s, caller)).include?(callee)
+          message = context["message"].to_s
+          line = context.fetch("line", method[:line]).to_i
+          resolved_target = @resolved_calls[[owner.to_s, caller, message, line]]
+          if resolved_target
+            callee_owner, callee = resolved_target.map(&:to_s)
+            if @resolved_recursive_edges[[owner.to_s, caller, callee_owner, callee]]
+              hints << {
+                type: :structural,
+                line: line,
+                complexity: "unknown",
+                space: "unknown",
+                is_dynamic: true,
+                operation: message,
+                reason: "cross-owner recursive call progress is unknown",
+                confidence: "unknown",
+                time_complete: false,
+                space_complete: false,
+                fact_source: "fact_mine"
+              }
+              next
+            end
+          else
+            callee = message
+            callee_owner = owner.to_s
+            next if @internal_calls && !Array(@internal_calls.dig(owner.to_s, caller)).include?(callee)
+          end
 
-          if @recursive_edges[[owner.to_s, caller, callee]]
+          if callee_owner == owner.to_s && @recursive_edges[[owner.to_s, caller, callee]]
             # Direct recursion is classified from FactMine's progress facts in
             # summary_hint. A mutually recursive SCC has no normalized progress
             # proof yet, so multiplying the previous fixed-point estimate would
@@ -60,22 +86,22 @@ module Espalier
             next
           end
 
-          callee_complexity = @method_complexities.dig(owner.to_s, callee)
-          callee_space = @method_spaces.dig(owner.to_s, callee)
-          callee_symbolic = @method_symbolic_time.dig(owner.to_s, callee)
-          callee_time_complete = @method_time_complete.dig(owner.to_s, callee) != false
-          callee_space_complete = @method_space_complete.dig(owner.to_s, callee) != false
+          callee_complexity = @method_complexities.dig(callee_owner, callee)
+          callee_space = @method_spaces.dig(callee_owner, callee)
+          callee_symbolic = @method_symbolic_time.dig(callee_owner, callee)
+          callee_time_complete = @method_time_complete.dig(callee_owner, callee) != false
+          callee_space_complete = @method_space_complete.dig(callee_owner, callee) != false
           next unless callee_complexity || callee_space
           next if callee_complexity == "O(1)" && (!callee_space || callee_space == "O(1)") &&
             callee_time_complete && callee_space_complete
 
           propagated_symbolic = propagated_call_symbolic(
-            owner.to_s,
+            callee_owner,
             callee,
             fact,
             context,
             callee_symbolic,
-            receiver_state_dependent: receiver_state_dependent?(owner.to_s, callee)
+            receiver_state_dependent: receiver_state_dependent?(callee_owner, callee)
           )
           rendered_symbolic = Espalier::SymbolicComplexity.render(propagated_symbolic)&.first
           hints << {
@@ -84,7 +110,7 @@ module Espalier
             complexity: rendered_symbolic || propagated_call_complexity(
               context,
               callee_complexity || "O(1)",
-              receiver_state_dependent: receiver_state_dependent?(owner.to_s, callee)
+              receiver_state_dependent: receiver_state_dependent?(callee_owner, callee)
             ),
             space: callee_space,
             is_dynamic: true,

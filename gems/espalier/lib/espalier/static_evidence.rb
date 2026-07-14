@@ -57,7 +57,10 @@ module Espalier
         meth = {
           id: m["id"],
           owner_id: m["owner_id"],
+          raw_owner: m["owner"],
           name: m["name"],
+          dispatch_name: m["dispatch_name"] || m["name"],
+          dispatch_kind: m["kind"],
           signature: m["signature"],
           parameters: Array(m["params"]),
           visibility: (m["visibility"] || :public).to_sym,
@@ -73,8 +76,37 @@ module Espalier
           delegations: []
         }
         owner_key = resolve_owner.call(m["owner"], m["path"], m["language"])
+        meth[:projected_owner] = owner_key
         methods_by_owner[owner_key] << meth
         methods_by_id[m["id"]] = meth
+      end
+
+      methods_by_dispatch = Hash.new { |hash, key| hash[key] = [] }
+      methods_by_id.each_value do |method|
+        methods_by_dispatch[[method[:raw_owner].to_s, method[:dispatch_name].to_s, method[:dispatch_kind].to_s]] << method
+      end
+
+      flow_types = Hash.new { |hash, key| hash[key] = Set.new }
+      Array(evidence.dig("facts", "flow_local_types")).each do |fact|
+        next unless fact["complete"]
+
+        resolved = Array(fact["resolved_types"]).filter_map do |type|
+          if type.is_a?(FactMine::Syntax::TypeExpr) && type.kind == "Primitive"
+            type.data.to_s
+          elsif type.is_a?(Hash) && type["kind"] == "Primitive"
+            type["data"].to_s
+          end
+        end.uniq
+        next unless resolved.length == 1
+
+        key = [fact["file"].to_s, fact["owner"].to_s, fact["function"].to_s,
+               fact["line"].to_i, fact["name"].to_s]
+        flow_types[key] << resolved.first
+      end
+
+      constant_operations = Hash.new { |hash, owner| hash[owner] = Set.new }
+      Array(evidence.dig("facts", "struct_declarations")).each do |declaration|
+        constant_operations[declaration["class"].to_s].merge(Array(declaration["constant_operations"]).map(&:to_s))
       end
 
       # Group fields by owner
@@ -93,15 +125,68 @@ module Espalier
         next unless source
 
         target = methods_by_id[call["target"]]
+        receiver = call["receiver"].to_s
+        implicit_receiver = receiver.empty? || receiver == "self" || receiver == "this"
+        operation_owner = nil
+        operation_overridden = false
+        unless target || !implicit_receiver
+          implicit_candidates = methods_by_dispatch[
+            [source[:raw_owner].to_s, call["message"].to_s, source[:dispatch_kind].to_s]
+          ]
+          operation_overridden ||= !implicit_candidates.empty?
+          target = implicit_candidates.first if implicit_candidates.length == 1
+          operation_owner = source[:raw_owner].to_s
+        end
+        unless target || call["receiver_kind"] != "type"
+          static_candidates = methods_by_dispatch[[call["receiver"].to_s, call["message"].to_s, "class"]]
+          operation_overridden ||= !static_candidates.empty?
+          target = static_candidates.first if static_candidates.length == 1
+          operation_owner = call["receiver"].to_s
+        end
+        unless target || call["constructor_target"].to_s.empty? || call["receiver_kind"] != "type"
+          constructor_candidates = methods_by_dispatch[
+            [call["receiver"].to_s, call["constructor_target"].to_s, "instance"]
+          ]
+          operation_overridden ||= !constructor_candidates.empty?
+          target = constructor_candidates.first if constructor_candidates.length == 1
+        end
+        unless target
+          flow_key = [(call["path"] || source[:file]).to_s,
+                      (call["owner"] || source[:raw_owner]).to_s,
+                      (call["function"] || source[:name]).to_s,
+                      call["line"].to_i, call["receiver"].to_s]
+          receiver_types = flow_types[flow_key]
+          if receiver_types.length == 1
+            typed_candidates = methods_by_dispatch[[receiver_types.first, call["message"].to_s, "instance"]]
+            operation_overridden ||= !typed_candidates.empty?
+            target = typed_candidates.first if typed_candidates.length == 1
+            operation_owner = receiver_types.first
+          end
+        end
+        known_time = call["known_time_complexity"]
+        known_space = call["known_space_complexity"]
+        if !target && !operation_overridden && operation_owner &&
+            constant_operations[operation_owner].include?(call["message"].to_s)
+          known_time ||= "O(1)"
+          known_space ||= "O(1)"
+        end
         source[:delegations] << {
           receiver: call["receiver"].to_s.empty? ? "self" : call["receiver"],
-          message: target ? target[:name] : call["message"],
+          message: call["message"],
           line: call["line"]&.to_i,
           span: call["span"],
           type: call["conditional"] ? :conditional : :always,
           confidence: call["confidence"],
-          unresolved_reason: call["unresolved_reason"]
+          unresolved_reason: (target || known_time || known_space) ? nil : call["unresolved_reason"],
+          target_id: target && target[:id],
+          target_owner: target && target[:projected_owner],
+          target_method: target && target[:name],
+          known_time_complexity: known_time,
+          known_space_complexity: known_space
         }
+        if target
+          source[:delegations].last[:confidence] = "high"
+        end
       end
 
       # Map state protocols and param origins to reads/writes and delegations

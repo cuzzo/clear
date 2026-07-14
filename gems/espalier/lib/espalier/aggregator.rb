@@ -32,6 +32,8 @@ module Espalier
       )
       internal_calls = internal_calls_by_method(modules)
       recursive_edges = recursive_internal_edges(internal_calls)
+      resolved_calls = resolved_calls_by_site(modules)
+      resolved_recursive_edges = recursive_resolved_edges(modules)
       method_complexities, method_spaces, method_time_complete, method_space_complete, method_symbolic_time = structural_method_complexities(modules)
       structural_big_o = Espalier::StructuralBigO.new(
         facts_by_method: complexity_facts_by_method(modules),
@@ -41,7 +43,9 @@ module Espalier
         method_space_complete: method_space_complete,
         method_symbolic_time: method_symbolic_time,
         internal_calls: internal_calls,
-        recursive_edges: recursive_edges
+        recursive_edges: recursive_edges,
+        resolved_calls: resolved_calls,
+        resolved_recursive_edges: resolved_recursive_edges
       )
 
       manifest = modules.map do |mod|
@@ -261,6 +265,8 @@ module Espalier
     def structural_method_complexities(modules)
       complexities, spaces, time_complete, space_complete, symbolic_time = preliminary_method_complexities(modules)
       internal_calls = internal_calls_by_method(modules)
+      resolved_calls = resolved_calls_by_site(modules)
+      resolved_recursive_edges = recursive_resolved_edges(modules)
       structural_big_o = Espalier::StructuralBigO.new(
         facts_by_method: complexity_facts_by_method(modules),
         method_complexities: complexities,
@@ -269,7 +275,9 @@ module Espalier
         method_space_complete: space_complete,
         method_symbolic_time: symbolic_time,
         internal_calls: internal_calls,
-        recursive_edges: recursive_internal_edges(internal_calls)
+        recursive_edges: recursive_internal_edges(internal_calls),
+        resolved_calls: resolved_calls,
+        resolved_recursive_edges: resolved_recursive_edges
       )
 
       cores = ENV.fetch("CORES", ENV.fetch("JOBS", "4")).to_i
@@ -369,27 +377,106 @@ module Espalier
       end
     end
 
+    def resolved_calls_by_site(modules)
+      modules.each_with_object({}) do |mod, index|
+        Array(mod[:methods]).each do |method|
+          Array(method[:delegations]).each do |delegation|
+            next unless delegation[:target_owner] && delegation[:target_method]
+
+            key = [mod[:name].to_s, method[:name].to_s, delegation[:message].to_s,
+                   (delegation[:line] || method[:line] || 0).to_i]
+            target = [delegation[:target_owner].to_s, delegation[:target_method].to_s]
+            if index.key?(key) && index[key] != target
+              index[key] = nil
+            else
+              index[key] = target
+            end
+          end
+        end
+      end.compact
+    end
+
+    def recursive_resolved_edges(modules)
+      graph = Hash.new { |hash, key| hash[key] = Set.new }
+      modules.each do |mod|
+        Array(mod[:methods]).each do |method|
+          source = [mod[:name].to_s, method[:name].to_s]
+          Array(method[:delegations]).each do |delegation|
+            next unless delegation[:target_owner] && delegation[:target_method]
+
+            graph[source] << [delegation[:target_owner].to_s, delegation[:target_method].to_s]
+          end
+        end
+      end
+
+      components = strongly_connected_component_ids(graph)
+      graph.each_with_object({}) do |(source, targets), recursive|
+        targets.each do |target|
+          next unless components[source] == components[target]
+
+          recursive[[source[0], source[1], target[0], target[1]]] = true
+        end
+      end
+    end
+
     def recursive_internal_edges(internal_calls)
       internal_calls.each_with_object({}) do |(owner, graph), recursive|
+        components = strongly_connected_component_ids(graph)
         graph.each do |caller, callees|
           callees.each do |callee|
-            recursive[[owner, caller, callee]] = true if reachable_method?(graph, callee, caller)
+            recursive[[owner, caller, callee]] = true if components[caller] == components[callee]
           end
         end
       end
     end
 
-    def reachable_method?(graph, start, target)
-      pending = [start]
-      visited = Set.new
-      until pending.empty?
-        method_name = pending.pop
-        return true if method_name == target
-        next unless visited.add?(method_name)
-
-        pending.concat(Array(graph[method_name]))
+    def strongly_connected_component_ids(graph)
+      adjacency = Hash.new { |hash, node| hash[node] = Set.new }
+      graph.each do |source, targets|
+        adjacency[source].merge(Array(targets))
+        Array(targets).each { |target| adjacency[target] }
       end
-      false
+
+      visited = Set.new
+      finish_order = []
+      adjacency.each_key do |root|
+        next if visited.include?(root)
+
+        pending = [[root, false]]
+        until pending.empty?
+          node, expanded = pending.pop
+          if expanded
+            finish_order << node
+          elsif visited.add?(node)
+            pending << [node, true]
+            adjacency[node].each do |target|
+              pending << [target, false] unless visited.include?(target)
+            end
+          end
+        end
+      end
+
+      reversed = Hash.new { |hash, node| hash[node] = Set.new }
+      adjacency.each do |source, targets|
+        reversed[source]
+        targets.each { |target| reversed[target] << source }
+      end
+
+      component_ids = {}
+      finish_order.reverse_each do |root|
+        next if component_ids.key?(root)
+
+        component_id = component_ids.length
+        pending = [root]
+        until pending.empty?
+          node = pending.pop
+          next if component_ids.key?(node)
+
+          component_ids[node] = component_id
+          pending.concat(reversed[node].reject { |source| component_ids.key?(source) })
+        end
+      end
+      component_ids
     end
 
     def complexity_facts_by_method(modules)
@@ -441,12 +528,13 @@ module Espalier
           method: delegation[:message],
           line: delegation[:line] || method[:line] || 0,
           execution_complexity: context && context["execution_multiplicity"],
-          known_time_complexity: context && context["known_time_complexity"],
-          known_space_complexity: context && context["known_space_complexity"],
+          known_time_complexity: (context && context["known_time_complexity"]) || delegation[:known_time_complexity],
+          known_space_complexity: (context && context["known_space_complexity"]) || delegation[:known_space_complexity],
           symbolic_time: context && symbolic_call_complexity(context),
           collection_arguments: context && context["power"].to_i.positive? &&
             (Array(context["parameter_arguments"]) & Array(context["collection_parameters"])),
-          internal_call: delegation[:receiver].to_s == "self" && Array(mod[:methods]).any? { |candidate| candidate[:name].to_s == delegation[:message].to_s }
+          internal_call: (delegation[:receiver].to_s == "self" && Array(mod[:methods]).any? { |candidate| candidate[:name].to_s == delegation[:message].to_s }) ||
+            (delegation[:target_owner] && delegation[:target_method] && context)
         }.compact
       end
 

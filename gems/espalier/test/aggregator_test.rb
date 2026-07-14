@@ -876,4 +876,103 @@ class AggregatorTest < Minitest::Test
     end
   end
 
+  def test_big_o_propagates_resolved_cross_owner_calls_end_to_end
+    caller_fact = {
+      "line" => 2, "parameters" => [], "collection_parameters" => [],
+      "iterations" => [], "allocations" => [], "size_domains" => [],
+      "recursion" => { "calls" => 0 },
+      "call_contexts" => [{
+        "line" => 3, "message" => "work", "execution_multiplicity" => "O(1)",
+        "argument_cardinality_relation" => "same", "power" => 0
+      }]
+    }
+    target_fact = {
+      "line" => 10, "parameters" => ["items"], "collection_parameters" => ["items"],
+      "iterations" => [{
+        "line" => 11, "power" => 1, "execution_multiplicity" => "O(N)",
+        "cardinality_relation" => "independent_of", "bound_classification" => "input"
+      }],
+      "allocations" => [], "call_contexts" => [], "size_domains" => [],
+      "recursion" => { "calls" => 0 }
+    }
+    modules = [
+      {
+        type: :class, name: "Caller", file: "caller.rb", states: Set.new,
+        methods: [{
+          name: "run", signature: "def run", parameters: [], visibility: :public,
+          line: 2, span: [2, 0, 4, 3], effects: { reads: Set.new, writes: Set.new },
+          complexity_facts: [caller_fact],
+          delegations: [{
+            receiver: "Target", message: "work", line: 3, type: :always,
+            target_owner: "Target", target_method: "self.work", target_id: "target-work"
+          }]
+        }]
+      },
+      {
+        type: :class, name: "Target", file: "target.rb", states: Set.new,
+        methods: [{
+          id: "target-work", name: "self.work", signature: "def self.work", parameters: ["items"],
+          visibility: :public, line: 10, span: [10, 0, 12, 3],
+          effects: { reads: Set.new, writes: Set.new }, complexity_facts: [target_fact],
+          delegations: []
+        }]
+      }
+    ]
+
+    manifest = Espalier::Aggregator.new.aggregate(modules)
+    caller = manifest.find { |mod| mod[:module] == "Caller" }[:functions].first
+    assert_equal "O(N)", caller[:quality_metrics][:big_o]
+    assert caller[:quality_metrics][:big_o_complete]
+    assert caller[:quality_metrics][:big_o_space_complete]
+    refute_includes Array(caller[:quality_metrics][:big_o_unknowns]), "Target#work"
+  end
+
+  def test_big_o_consumes_normalized_constant_call_cost_without_source_guessing
+    modules = [{
+      type: :class, name: "Source", file: "source.rb", states: Set.new,
+      methods: [{
+        name: "run", signature: "def run", parameters: [], visibility: :public,
+        line: 2, span: [2, 0, 4, 3], effects: { reads: Set.new, writes: Set.new },
+        delegations: [{
+          receiver: "Generated", message: "new", line: 3, type: :always,
+          known_time_complexity: "O(1)", known_space_complexity: "O(1)"
+        }]
+      }]
+    }]
+
+    function = Espalier::Aggregator.new.aggregate(modules).first[:functions].first
+    assert_equal "O(1)", function[:quality_metrics][:big_o]
+    assert_equal "O(1)", function[:quality_metrics][:big_o_space]
+    assert function[:quality_metrics][:big_o_complete]
+    assert function[:quality_metrics][:big_o_space_complete]
+    refute_includes Array(function[:quality_metrics][:big_o_unknowns]), "Generated#new"
+  end
+
+  def test_resolved_recursion_uses_stack_safe_component_analysis
+    chain_length = 5_000
+    methods = Array.new(chain_length) do |index|
+      target = index + 1
+      {
+        name: "m#{index}", line: index + 1,
+        delegations: target < chain_length ? [{
+          message: "m#{target}", line: index + 1,
+          target_owner: "Chain", target_method: "m#{target}"
+        }] : []
+      }
+    end
+    methods[-1][:delegations] << {
+      message: "m2500", line: chain_length,
+      target_owner: "Chain", target_method: "m2500"
+    }
+
+    recursive = Espalier::Aggregator.new.send(
+      :recursive_resolved_edges,
+      [{ name: "Chain", methods: methods }]
+    )
+
+    refute recursive[["Chain", "m2499", "Chain", "m2500"]]
+    assert recursive[["Chain", "m2500", "Chain", "m2501"]]
+    assert recursive[["Chain", "m4999", "Chain", "m2500"]]
+  end
+
 end

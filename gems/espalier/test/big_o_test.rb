@@ -273,6 +273,48 @@ class BigOTest < Minitest::Test
     assert_equal "unknown", unknown[:complexity]
   end
 
+  def test_structural_big_o_propagates_unique_cross_owner_targets
+    facts = {
+      ["Caller", "run"] => [{
+        "line" => 2, "parameters" => [], "iterations" => [],
+        "recursion" => { "calls" => 0 },
+        "call_contexts" => [{
+          "line" => 3, "message" => "work", "execution_multiplicity" => "O(1)",
+          "argument_cardinality_relation" => "same"
+        }]
+      }]
+    }
+    consumer = Espalier::StructuralBigO.new(
+      facts_by_method: facts,
+      method_complexities: { "Target" => { "work" => "O(N)" } },
+      method_spaces: { "Target" => { "work" => "O(1)" } },
+      method_time_complete: { "Target" => { "work" => true } },
+      method_space_complete: { "Target" => { "work" => true } },
+      resolved_calls: {
+        ["Caller", "run", "work", 3] => ["Target", "work"]
+      }
+    )
+
+    hints = consumer.hints_for(nil, { name: "run", line: 2 }, "Caller")
+    propagated = hints.find { |hint| hint[:operation] == "work" }
+    assert_equal "O(N)", propagated[:complexity]
+    assert_equal "O(1)", propagated[:space]
+    assert propagated[:time_complete]
+    assert propagated[:space_complete]
+
+    recursive = Espalier::StructuralBigO.new(
+      facts_by_method: facts,
+      method_complexities: { "Target" => { "work" => "O(N)" } },
+      resolved_calls: { ["Caller", "run", "work", 3] => ["Target", "work"] },
+      resolved_recursive_edges: { ["Caller", "run", "Target", "work"] => true }
+    ).hints_for(nil, { name: "run", line: 2 }, "Caller")
+      .find { |hint| hint[:operation] == "work" }
+    assert_equal "unknown", recursive[:complexity]
+    assert_equal "unknown", recursive[:space]
+    refute recursive[:time_complete]
+    refute recursive[:space_complete]
+  end
+
   def test_remaining_complexity_lattice_and_type_resolution_paths
     nil_kill = Object.new
     def nil_kill.method_signatures

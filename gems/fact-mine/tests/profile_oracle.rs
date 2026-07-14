@@ -31,6 +31,7 @@ fn ruby_calculator_extracts_methods() -> Result<()> {
         .with_context(|| "missing 'add' method")?;
     assert_eq!(add_method.owner, "Calculator");
     assert_eq!(add_method.kind, "instance");
+    assert_eq!(add_method.dispatch_name, "add");
     assert!(add_method.raw_source.contains("def add"));
     assert_eq!(
         add_method.normalized_source,
@@ -47,6 +48,70 @@ fn ruby_calculator_extracts_methods() -> Result<()> {
         .find(|m| m.name == "result")
         .with_context(|| "missing 'result' method")?;
     assert_eq!(result_method.owner, "Calculator");
+
+    Ok(())
+}
+
+#[test]
+fn espalier_profile_carries_dispatch_and_resolved_flow_types() -> Result<()> {
+    use std::io::Write;
+
+    let mut tmp = tempfile::Builder::new().suffix(".rb").tempfile()?;
+    tmp.write_all(
+        br#"Record = Struct.new(:value)
+
+class Target
+  def initialize(value); end
+  def self.build(value = nil); end
+  def work; end
+end
+
+class Source
+  extend T::Sig
+  sig { params(target: Target).void }
+  def run(target)
+    T.let(target, Target)
+    Target.new(target)
+    Record.new(target)
+    Target.build(target)
+    target.work
+  end
+end
+"#,
+    )?;
+    let document = syntax::parse_file(tmp.path().to_path_buf(), Language::Ruby)?;
+    let output = profile::extract(&document, Profile::Espalier);
+
+    let build = output.methods.iter().find(|method| method.name == "self.build").unwrap();
+    assert_eq!(build.kind, "class");
+    assert_eq!(build.dispatch_name, "build");
+
+    let target_flow = output.flow_local_types.iter().find(|fact| {
+        fact.get("function").and_then(Value::as_str) == Some("run")
+            && fact.get("name").and_then(Value::as_str) == Some("target")
+            && fact.get("complete").and_then(Value::as_bool) == Some(true)
+    }).context("missing complete target flow type")?;
+    let resolved = target_flow.get("resolved_types").and_then(Value::as_array)
+        .context("missing normalized resolved flow types")?;
+    assert_eq!(resolved.len(), 1);
+    assert_eq!(resolved[0].get("kind").and_then(Value::as_str), Some("Primitive"));
+    assert_eq!(resolved[0].get("data").and_then(Value::as_str), Some("Target"));
+    let static_call = output.calls.iter().find(|call| {
+        call.function == "run" && call.receiver == "Target" && call.message == "build"
+    }).with_context(|| format!("missing static Target.build call in {:?}", output.calls))?;
+    assert_eq!(static_call.receiver_kind, "type");
+    let constructor = output.calls.iter().find(|call| {
+        call.function == "run" && call.receiver == "Target" && call.message == "new"
+    }).context("missing Target.new call")?;
+    assert_eq!(constructor.constructor_target.as_deref(), Some("initialize"));
+    let type_operation = output.calls.iter().find(|call| {
+        call.function == "run" && call.receiver == "T" && call.message == "let"
+    }).context("missing T.let call")?;
+    assert_eq!(type_operation.known_time_complexity.as_deref(), Some("O(1)"));
+    assert_eq!(type_operation.known_space_complexity.as_deref(), Some("O(1)"));
+    let record = output.struct_declarations.iter().find(|declaration| declaration.class == "Record")
+        .context("missing Record declaration")?;
+    assert_eq!(record.constant_operations, ["new", "[]", "[]="]);
 
     Ok(())
 }

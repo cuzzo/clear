@@ -162,6 +162,123 @@ class StaticEvidenceTest < Minitest::Test
     }
   end
 
+  def test_project_modules_resolves_unique_static_and_flow_typed_targets
+    evidence = {
+      "methods" => [
+        { "id" => "source-run", "owner" => "Source", "name" => "run", "kind" => "instance",
+          "dispatch_name" => "run", "path" => "source.rb", "line" => 2, "language" => "ruby" },
+        { "id" => "target-build", "owner" => "Target", "name" => "self.build", "kind" => "class",
+          "dispatch_name" => "build", "path" => "target.rb", "line" => 2, "language" => "ruby" },
+        { "id" => "target-work", "owner" => "Target", "name" => "work", "kind" => "instance",
+          "dispatch_name" => "work", "path" => "target.rb", "line" => 6, "language" => "ruby" }
+      ],
+      "facts" => {
+        "calls" => [
+          { "source" => "source-run", "receiver" => "Target", "receiver_kind" => "type",
+            "message" => "build", "line" => 3 },
+          { "source" => "source-run", "receiver" => "target", "receiver_kind" => "value",
+            "message" => "work", "line" => 4 }
+        ],
+        "flow_local_types" => [
+          { "file" => "source.rb", "owner" => "Source", "function" => "run", "name" => "target",
+            "line" => 4, "complete" => true,
+            "resolved_types" => [FactMine::Syntax::TypeExpr.new("Primitive", "Target", "ruby")] }
+        ]
+      }
+    }
+
+    modules = Espalier::StaticEvidence.project_modules(evidence)
+    run = modules.find { |mod| mod[:name] == "Source" }[:methods].first
+    static_call = run[:delegations].find { |call| call[:message] == "build" }
+    typed_call = run[:delegations].find { |call| call[:message] == "work" }
+
+    assert_equal ["Target", "self.build"], [static_call[:target_owner], static_call[:target_method]]
+    assert_equal ["Target", "work"], [typed_call[:target_owner], typed_call[:target_method]]
+    assert_equal "high", static_call[:confidence]
+    assert_equal "high", typed_call[:confidence]
+  end
+
+  def test_project_modules_does_not_guess_ambiguous_or_incomplete_targets
+    evidence = {
+      "methods" => [
+        { "id" => "source-run", "owner" => "Source", "name" => "run", "kind" => "instance",
+          "dispatch_name" => "run", "path" => "source.rb", "line" => 2, "language" => "ruby" },
+        { "id" => "target-build-a", "owner" => "Target", "name" => "self.build", "kind" => "class",
+          "dispatch_name" => "build", "path" => "a.rb", "line" => 2, "language" => "ruby" },
+        { "id" => "target-build-b", "owner" => "Target", "name" => "self.build", "kind" => "class",
+          "dispatch_name" => "build", "path" => "b.rb", "line" => 2, "language" => "ruby" },
+        { "id" => "target-work", "owner" => "Target", "name" => "work", "kind" => "instance",
+          "dispatch_name" => "work", "path" => "target.rb", "line" => 6, "language" => "ruby" }
+      ],
+      "facts" => {
+        "calls" => [
+          { "source" => "source-run", "receiver" => "Target", "receiver_kind" => "type",
+            "message" => "build", "line" => 3 },
+          { "source" => "source-run", "receiver" => "target", "receiver_kind" => "value",
+            "message" => "work", "line" => 4 }
+        ],
+        "flow_local_types" => [{
+          "file" => "source.rb", "owner" => "Source", "function" => "run", "name" => "target",
+          "line" => 4, "complete" => false,
+          "resolved_types" => [FactMine::Syntax::TypeExpr.new("Primitive", "Target", "ruby")]
+        }],
+        "struct_declarations" => [{
+          "class" => "Target", "fields" => [], "constant_operations" => ["build"]
+        }]
+      }
+    }
+
+    run = Espalier::StaticEvidence.project_modules(evidence)
+      .find { |mod| mod[:name] == "Source" }[:methods].first
+    run[:delegations].each do |call|
+      assert_nil call[:target_owner]
+      assert_nil call[:target_method]
+      assert_nil call[:known_time_complexity], "ambiguous overrides must not fall back to generated cost"
+    end
+  end
+
+  def test_project_modules_uses_normalized_constructor_and_constant_operation_evidence
+    evidence = {
+      "methods" => [
+        { "id" => "source-run", "owner" => "Source", "name" => "run", "kind" => "instance",
+          "dispatch_name" => "run", "path" => "source.rb", "line" => 2, "language" => "ruby" },
+        { "id" => "record-init", "owner" => "Record", "name" => "initialize", "kind" => "instance",
+          "dispatch_name" => "initialize", "path" => "record.rb", "line" => 2, "language" => "ruby" }
+      ],
+      "facts" => {
+        "calls" => [
+          { "source" => "source-run", "receiver" => "Record", "receiver_kind" => "type",
+            "message" => "new", "constructor_target" => "initialize", "line" => 3 },
+          { "source" => "source-run", "receiver" => "Generated", "receiver_kind" => "type",
+            "message" => "new", "constructor_target" => "initialize", "line" => 4 },
+          { "source" => "source-run", "receiver" => "self", "receiver_kind" => "value",
+            "message" => "[]", "line" => 5 },
+          { "source" => "source-run", "receiver" => "T", "receiver_kind" => "type",
+            "message" => "let", "known_time_complexity" => "O(1)",
+            "known_space_complexity" => "O(1)", "line" => 6 }
+        ],
+        "struct_declarations" => [
+          { "class" => "Source", "fields" => [], "constant_operations" => ["[]"] },
+          { "class" => "Record", "fields" => [], "constant_operations" => ["new"] },
+          { "class" => "Generated", "fields" => [], "constant_operations" => ["new"] }
+        ]
+      }
+    }
+
+    run = Espalier::StaticEvidence.project_modules(evidence)
+      .find { |mod| mod[:name] == "Source" }[:methods].first
+    constructor = run[:delegations].find { |call| call[:receiver] == "Record" }
+    generated = run[:delegations].find { |call| call[:receiver] == "Generated" }
+    reader = run[:delegations].find { |call| call[:message] == "[]" }
+    intrinsic = run[:delegations].find { |call| call[:message] == "let" }
+
+    assert_equal ["Record", "initialize"], [constructor[:target_owner], constructor[:target_method]]
+    assert_nil constructor[:known_time_complexity], "an exact override must win over generated-operation cost"
+    assert_equal ["O(1)", "O(1)"], [generated[:known_time_complexity], generated[:known_space_complexity]]
+    assert_equal ["O(1)", "O(1)"], [reader[:known_time_complexity], reader[:known_space_complexity]]
+    assert_equal ["O(1)", "O(1)"], [intrinsic[:known_time_complexity], intrinsic[:known_space_complexity]]
+  end
+
   def test_builds_using_fact_mine_facts_file
     Dir.mktmpdir("espalier-mock", Dir.pwd) do |dir|
       mock_file = File.join(dir, "mock.rb")

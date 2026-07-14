@@ -141,6 +141,13 @@ pub struct CallRecord {
     pub owner: String,
     pub function: String,
     pub receiver: String,
+    pub receiver_kind: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub constructor_target: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub known_time_complexity: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub known_space_complexity: Option<String>,
     pub message: String,
     pub path: String,
     pub line: usize,
@@ -197,6 +204,7 @@ pub struct MethodRecord {
     pub key: Vec<String>,
     pub owner: String,
     pub name: String,
+    pub dispatch_name: String,
     pub kind: String,
     pub path: String,
     pub line: usize,
@@ -330,6 +338,8 @@ pub struct StructDeclaration {
     pub fields: Vec<String>,
     #[serde(default)]
     pub field_types: BTreeMap<String, String>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub constant_operations: Vec<String>,
     pub line: usize,
 }
 
@@ -342,6 +352,7 @@ pub fn extract(document: &Document, profile: Profile) -> ProfileOutput {
     let language = document.language.as_str().to_string();
     let path = document.file.clone();
     let nil_kill = profile == Profile::NilKill;
+    let espalier = profile == Profile::Espalier;
     let trace_plan = profile == Profile::TracePlan;
 
     // Read source lines once for signature extraction (matches Ruby approach)
@@ -467,7 +478,7 @@ pub fn extract(document: &Document, profile: Profile) -> ProfileOutput {
     let mut tuple_arrays = Vec::new();
     let mut struct_field_hash_shapes_out = BTreeMap::new();
     let mut struct_field_array_shapes_out = BTreeMap::new();
-    let flow_local_types = if nil_kill {
+    let flow_local_types = if nil_kill || espalier {
         extract_flow_local_types(document)
     } else {
         Vec::new()
@@ -702,6 +713,7 @@ pub fn extract(document: &Document, profile: Profile) -> ProfileOutput {
 /// Merge outputs from multiple files into one (like Ruby's per-file accumulation).
 pub fn merge(outputs: Vec<ProfileOutput>, profile: Profile) -> ProfileOutput {
     let nil_kill = profile == Profile::NilKill;
+    let espalier = profile == Profile::Espalier;
     let trace_plan = profile == Profile::TracePlan;
     let mut owners = Vec::new();
     let mut methods = Vec::new();
@@ -773,8 +785,10 @@ pub fn merge(outputs: Vec<ProfileOutput>, profile: Profile) -> ProfileOutput {
         if nil_kill || trace_plan {
             tlet_sites.extend(output.tlet_sites);
         }
-        if nil_kill {
+        if nil_kill || espalier {
             flow_local_types.extend(output.flow_local_types);
+        }
+        if nil_kill {
             collection_index_lookups.extend(output.collection_index_lookups);
             hash_record_blockers.extend(output.hash_record_blockers);
             dead_nil_checks.extend(output.dead_nil_checks);
@@ -883,6 +897,11 @@ fn extract_flow_local_types(document: &Document) -> Vec<serde_json::Value> {
         .filter_map(|fact| {
             let place = places.get(fact.place_id.as_str())?;
             let node = nodes.get(fact.node_id.as_str())?;
+            let resolved_types = fact
+                .types
+                .iter()
+                .filter_map(|hint| TypeExpr::from_flow_hint(hint, document.language.as_str()))
+                .collect::<BTreeSet<_>>();
             Some(json!({
                 "file": document.file,
                 "function": fact.function,
@@ -893,6 +912,7 @@ fn extract_flow_local_types(document: &Document) -> Vec<serde_json::Value> {
                 "line": node.line,
                 "span": node.span,
                 "types": fact.types,
+                "resolved_types": resolved_types,
                 "complete": fact.complete,
                 "reaching_definitions": definitions
                     .get(&(fact.node_id.as_str(), fact.place_id.as_str()))
@@ -1015,13 +1035,15 @@ fn extract_methods(
     language: &str,
     path: &str,
 ) -> Vec<MethodRecord> {
+    let behavior = crate::syntax::normalized_behavior::behavior(document.language);
     document
         .function_defs
         .iter()
         .map(|fn_def| {
             let owner = fn_def.owner.clone();
             let name = fn_def.name.clone();
-            let kind = method_kind(fn_def, &owner);
+            let dispatch_name = behavior.function_dispatch_name(&name);
+            let kind = behavior.function_dispatch_kind(&name, &owner);
             let signature = method_signature(lines, fn_def, language);
             let source = method_source(&signature, language);
             let raw_source = source_for_span(lines, fn_def.span);
@@ -1036,6 +1058,7 @@ fn extract_methods(
                 key: vec![owner.clone(), name.clone(), kind.clone()],
                 owner,
                 name,
+                dispatch_name,
                 kind,
                 path: path.to_string(),
                 line: fn_def.line,
@@ -1139,16 +1162,6 @@ fn source_for_span(lines: &[String], span: [usize; 4]) -> String {
         *last = last.get(..end_column.min(last.len())).unwrap_or_default().to_string();
     }
     selected.join("\n")
-}
-
-fn method_kind(fn_def: &syntax::FunctionDef, owner: &str) -> String {
-    if fn_def.name == "initialize" || fn_def.name.starts_with("self.") {
-        "class".to_string()
-    } else if !owner.is_empty() {
-        "instance".to_string()
-    } else {
-        "top".to_string()
-    }
 }
 
 fn method_signature(lines: &[String], fn_def: &syntax::FunctionDef, language: &str) -> String {
@@ -2063,6 +2076,7 @@ fn extract_struct_declarations(
                 class: class_name,
                 fields,
                 field_types,
+                constant_operations: vec!["new".to_string()],
                 line: 0,
             }
         })
@@ -2479,6 +2493,7 @@ fn collect_struct_declarations<'a>(
             class: owner.name.clone(),
             fields,
             field_types: std::collections::BTreeMap::new(),
+            constant_operations: behavior.declarative_owner_constant_operations(node),
             line: node.first_lineno,
         });
         namespace.push(simple_name);
@@ -2703,7 +2718,12 @@ fn source_function_id(
 }
 
 fn extract_calls(document: &Document, language: &str, path: &str) -> Vec<CallRecord> {
+    let behavior = crate::syntax::normalized_behavior::behavior(document.language);
     document.call_sites.iter().map(|call| {
+        let intrinsic = behavior.intrinsic_call_complexity(
+            (!call.receiver.is_empty()).then_some(call.receiver.as_str()),
+            &call.message,
+        );
         let source = source_function_id(
             document, language, path, &call.owner, &call.function, call.line,
         );
@@ -2746,6 +2766,14 @@ fn extract_calls(document: &Document, language: &str, path: &str) -> Vec<CallRec
             owner: call.owner.clone(),
             function: call.function.clone(),
             receiver: call.receiver.clone(),
+            receiver_kind: if behavior.receiver_is_type_reference(&call.receiver) {
+                "type"
+            } else {
+                "value"
+            }.to_string(),
+            constructor_target: behavior.constructor_dispatch_name(&call.receiver, &call.message),
+            known_time_complexity: intrinsic.map(|cost| cost.time.to_string()),
+            known_space_complexity: intrinsic.map(|cost| cost.space.to_string()),
             message: call.message.clone(),
             path: path.to_string(),
             line: call.line,
@@ -3786,6 +3814,8 @@ def py_fn(a: int) -> str:
             id: "edge:call".into(), source: "fn:a".into(), target: Some("fn:b".into()),
             kind: "internal_call".into(), owner: "Demo".into(), function: "a".into(),
             receiver: "self".into(), message: "b".into(), path: "demo.rb".into(), line: 2,
+            receiver_kind: "value".into(),
+            constructor_target: None, known_time_complexity: None, known_space_complexity: None,
             span: [2, 0, 2, 3], conditional: false, confidence: "high".into(), unresolved_reason: None,
         });
         output.state_accesses.push(StateAccessRecord {

@@ -51,6 +51,10 @@ pub enum TypeExpr {
 }
 
 impl TypeExpr {
+    pub fn from_flow_hint(hint: &str, language: &str) -> Option<Self> {
+        languages::flow_hint(hint, language)
+    }
+
     fn has_balanced_delimiters(s: &str, open: char, close: char) -> bool {
         let mut depth = 0;
         for c in s.chars() {

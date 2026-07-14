@@ -426,6 +426,31 @@ pub(crate) trait NormalizedLanguageBehavior: Sync {
         current_owner.to_string()
     }
 
+    fn function_dispatch_name(&self, name: &str) -> String {
+        name.to_string()
+    }
+
+    fn function_dispatch_kind(&self, _name: &str, owner: &str) -> String {
+        if owner.is_empty() {
+            "top"
+        } else {
+            "instance"
+        }
+        .to_string()
+    }
+
+    fn receiver_is_type_reference(&self, _receiver: &str) -> bool {
+        false
+    }
+
+    fn constructor_dispatch_name(&self, _receiver: &str, _message: &str) -> Option<String> {
+        None
+    }
+
+    fn declarative_owner_constant_operations(&self, _node: &Node) -> Vec<String> {
+        Vec::new()
+    }
+
     fn body_owner_for_function(
         &self,
         _name: &str,
