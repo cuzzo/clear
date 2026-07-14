@@ -456,6 +456,7 @@ class Type
 
   # ruby-to-clear: pub
   TypeInput = T.type_alias { T.any(FunctionType, Type, Symbol, String) }
+  ConstructionInput = T.type_alias { T.any(TypeInput, TypeExpression) }
   RawParseInput = T.type_alias { T.any(FunctionType, Symbol, String) }
   TypeNodeInput = T.type_alias { T.untyped }
   ArrayCapacity = T.type_alias { T.nilable(T.any(Integer, Symbol)) }
@@ -545,6 +546,17 @@ class Type
     end
 
     Type.new(:Any)
+  end
+
+  sig { params(expression: TypeExpression).returns(Type) }
+  def self.from_child_expression(expression)
+    surface = TypeExpressionPrinter.legacy(expression)
+    # Legacy nested capability suffixes have not yet been promoted into typed
+    # per-node capability records. Keep that one compatibility edge isolated;
+    # ordinary child construction never returns through the string parser.
+    return Type.new(surface) if surface.include?("@")
+
+    Type.new(expression)
   end
 
   # ruby-to-clear: skip
@@ -1250,7 +1262,7 @@ class Type
 
   sig do
     params(
-      raw_input: TypeInput,
+      raw_input: ConstructionInput,
       ownership: T.nilable(Symbol),
       sync: T.nilable(Symbol),
       layout: T.nilable(Symbol),
@@ -1264,7 +1276,7 @@ class Type
     ).void
   end
   def initialize(raw_input, ownership: nil, sync: nil, layout: nil, location: nil, collection: nil, shard_count: nil, stripe_count: nil, observable: nil, observable_terminal: nil, auto: false) # stripe_count kept for backwards compat (ignored)
-    @shape              = T.let(TypeShape.new(raw: :Any), TypeShape)
+    @shape              = T.let(DEFAULT_SHAPE.copy, TypeShape)
     @capabilities       = T.let(TypeCapabilities.new, TypeCapabilities)
     @placement          = T.let(TypePlacement.new, TypePlacement)
     @is_resource        = T.let(nil, T.nilable(T::Boolean))
@@ -1277,6 +1289,8 @@ class Type
       @placement          = raw_input.placement.copy
       @auto_token         = raw_input.auto_token
       @generic_payload_type_arg = raw_input.generic_payload_type_arg?
+    elsif raw_input.is_a?(TypeExpression)
+      parse_expression_input!(raw_input, auto: auto)
     elsif raw_input.is_a?(FunctionType)
       parse_function_type_input!(raw_input, auto: auto)
     elsif raw_input.is_a?(Symbol)
@@ -2579,7 +2593,12 @@ class Type
 
   sig { returns(Type) }
   def key_type
-    Type.new(Type.type_input_symbol_or_default(shape.key_type_raw, :String))
+    expression = shape.expression
+    expression = expression.inner if expression.is_a?(FallibleTypeExpression)
+    expression = expression.inner if expression.is_a?(OptionalTypeExpression)
+    return Type.from_child_expression(expression.key) if expression.is_a?(MapTypeExpression)
+
+    Type.new(:String)
   end
 
   # True when this is an explicit @pool (generational pool) collection.
@@ -2980,7 +2999,12 @@ class Type
 
   sig { returns(Type) }
   def value_type
-    Type.new(Type.type_input_symbol_or_any(shape.value_type_raw))
+    expression = shape.expression
+    expression = expression.inner if expression.is_a?(FallibleTypeExpression)
+    expression = expression.inner if expression.is_a?(OptionalTypeExpression)
+    return Type.from_child_expression(expression.value) if expression.is_a?(MapTypeExpression)
+
+    Type.new(:Any)
   end
 
   # Generic struct instance: Pair<Number>, Map<String, Number>
@@ -3032,14 +3056,17 @@ class Type
   # The type arguments as Type objects: [Type(:Float64), Type(:String)]
   sig { returns(T::Array[Type]) }
   def generic_args
-    args = T.let([], T::Array[Type])
-    raw_args = shape.generic_args_raw
-    i = T.let(0, Integer)
-    while i < raw_args.length
-      args << Type.new(T.must(raw_args[i]))
-      i += 1
+    expression = shape.expression
+    expression = expression.inner if expression.is_a?(FallibleTypeExpression)
+    expression = expression.inner if expression.is_a?(OptionalTypeExpression)
+    items = if expression.is_a?(TupleTypeExpression)
+      expression.items
+    elsif expression.is_a?(NamedTypeExpression)
+      expression.arguments
+    else
+      []
     end
-    args
+    items.map { |item| Type.from_child_expression(item) }
   end
 
   sig { returns(T::Boolean) }
@@ -3065,18 +3092,14 @@ class Type
   def wrapped_type
     return nil unless optional?
 
-    function_raw = T.let(shape.wrapped_function_type_raw, T.nilable(FunctionType))
-    unless function_raw.nil?
-      function_inner = Type.new(function_raw)
-      function_inner.merge_capabilities_from!(self)
-      function_inner.copy_placement_from!(self)
-      return function_inner
-    end
+    expression = shape.expression
+    expression = expression.inner if expression.is_a?(FallibleTypeExpression)
+    return nil unless expression.is_a?(OptionalTypeExpression)
 
-    symbol_inner = Type.new(Type.type_input_symbol_or_any(shape.wrapped_type_raw))
-    symbol_inner.merge_capabilities_from!(self)
-    symbol_inner.copy_placement_from!(self)
-    symbol_inner
+    inner = Type.from_child_expression(expression.inner)
+    inner.merge_capabilities_from!(self)
+    inner.copy_placement_from!(self)
+    inner
   end
 
   # Error union types: !T (Zig-style error returns)
@@ -3088,7 +3111,10 @@ class Type
   sig { returns(T.nilable(Type)) }
   def payload_type
     return nil unless error_union?
-    Type.new(Type.type_input_symbol_or_any(shape.payload_type_raw))
+    expression = shape.expression
+    return nil unless expression.is_a?(FallibleTypeExpression)
+
+    Type.from_child_expression(expression.inner)
   end
 
   sig { returns(Type) }
@@ -3303,7 +3329,10 @@ class Type
 
   sig { returns(Type) }
   def tense_type
-    Type.new(Type.type_input_symbol_or_default(shape.tense_type_raw, :Void))
+    expression = shape.expression
+    return Type.from_child_expression(expression.inner) if expression.is_a?(FutureTypeExpression)
+
+    Type.new(:Void)
   end
 
   # Finite dynamic stream: ~T[].
@@ -3479,10 +3508,12 @@ class Type
   # ruby-to-clear: effects reentrant
   def element_type
     return nil unless array?
-    # Uses the capture from parse_raw_input, ensuring "Number[3]" becomes "Float64"
-    raw = Type.type_input_symbol_or_any(shape.element_type_raw)
-    t = Type.new(raw)
-    t = Type.new("?#{Type.surface_name(raw)}") if optional_element_array? && !t.optional?
+    expression = shape.expression
+    expression = expression.inner if expression.is_a?(FallibleTypeExpression)
+    expression = expression.inner if expression.is_a?(OptionalTypeExpression) && expression.inner.is_a?(LinearTypeExpression)
+    return nil unless expression.is_a?(LinearTypeExpression)
+
+    t = Type.from_child_expression(expression.item)
     t.apply_capabilities!(
       ownership: Type.capability_symbol_or_unset(elem_ownership),
       sync: Type.capability_symbol_or_unset(elem_sync),
@@ -4506,6 +4537,12 @@ class Type
   sig { params(raw_input: FunctionType, auto: T::Boolean).void }
   def parse_function_type_input!(raw_input, auto: false)
     @shape = TypeShape.new(raw: raw_input, auto: auto)
+    @capabilities = TypeCapabilities.new(ownership: :affine)
+  end
+
+  sig { params(expression: TypeExpression, auto: T::Boolean).void }
+  def parse_expression_input!(expression, auto: false)
+    @shape = TypeShape.new(raw: :Any, auto: auto, expression: expression)
     @capabilities = TypeCapabilities.new(ownership: :affine)
   end
 

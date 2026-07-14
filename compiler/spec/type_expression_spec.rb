@@ -119,6 +119,34 @@ RSpec.describe TypeExpressionParser do
   end
 end
 
+RSpec.describe "recursive Type accessors" do
+  it "constructs every child Type directly from semantic nodes" do
+    type = Type.new("~!?HashMap<Symbol,Tuple<Int64,String[]>>")
+    allow(TypeExpressionParser).to receive(:parse).and_raise("child type was reparsed")
+
+    future_payload = type.tense_type
+    fallible_payload = T.must(future_payload.payload_type)
+    map = T.must(fallible_payload.wrapped_type)
+    expect(map.key_type.resolved).to eq(:Symbol)
+    tuple = map.value_type
+    expect(tuple.generic_args.map(&:resolved)).to eq([:Int64, :"String[]"])
+    expect(T.must(tuple.generic_args.last.element_type).resolved).to eq(:String)
+  end
+
+
+  it "isolates legacy nested capability suffix compatibility" do
+    map = Type.new("HashMap<String,Box@shared@locked>")
+
+    expect(map.value_type.resolved).to eq(:Box)
+    expect(map.value_type.ownership).to eq(:shared)
+    expect(map.value_type.sync).to eq(:locked)
+  end
+
+  it "keeps the legacy non-future tense fallback total" do
+    expect(Type.new(:Int64).tense_type.resolved).to eq(:Void)
+  end
+end
+
 RSpec.describe TypeShape do
   it "keeps one recursive expression instead of raw child-symbol fields" do
     shape = described_class.from_core("!?HashMap<Symbol,String[]>")
