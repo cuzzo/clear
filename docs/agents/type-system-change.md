@@ -28,7 +28,10 @@ The design must preserve these project constraints:
 - source-based tests that compile or annotate CLEAR strings;
 - 100% line coverage for changed executable lines;
 - automatic migration only when the old and new types are semantically
-  equivalent.
+  equivalent;
+- explicit asynchronous result contracts: `BG STREAM YIELDS T` names the item
+  type, and heterogeneous `BG`, `DO`, or `BG STREAM` results never silently
+  synthesize unions, optionals, or `Any`.
 
 ## Current-State Audit
 
@@ -97,18 +100,21 @@ The proposal describes both braces and brackets for sets but only demonstrates
 canonical set spelling. Sets do not support positional indexing even though
 their layout constructor uses brackets.
 
-### 3. Existing capability names remain canonical
+### 3. Capability vocabulary remains stable, with one deferred rename
 
 The new syntax changes attachment location, not the established capability
 vocabulary.
 
-| Proposed spelling | Canonical CLEAR spelling | Reason |
+| Proposed/current spelling | Final canonical CLEAR spelling | Reason |
 | --- | --- | --- |
 | `@mvcc` | `@versioned` | Already implemented with `SNAPSHOT` semantics. `@mvcc` may be accepted temporarily as a fixable alias. |
-| `@boxed` | `@indirect` | Stable heap indirection is already represented by `@indirect`. |
+| `@indirect` | `@boxed` | Stable heap indirection is currently represented by `@indirect`. The rename is intentionally deferred until the recursive model and backend are stable. |
 | `@shared:striped` | `@sharded(N):locked` or `@sharded(N):writeLocked` | Shard count and lock policy must remain explicit. There is no safe inferred `N`. |
 
-No auto-fix may invent a shard count.
+No auto-fix may invent a shard count. `@sharded` remains the language term;
+`striped` is not introduced as a surface capability. At the final contraction
+phase, `@indirect` is renamed once to `@boxed`; both names do not remain
+canonical.
 
 ### 4. Capacity hints are not nominal identity
 
@@ -182,7 +188,7 @@ UNION TextOrInteger {
   Integer: Int64
 }
 
-values = BG STREAM: ?TextOrInteger {
+values = BG STREAM YIELDS ?TextOrInteger {
   YIELD TextOrInteger{ Text: "one" };
   YIELD NIL;
   CLOSE;
@@ -330,7 +336,7 @@ A capability chain immediately follows the exact node it modifies:
 ```clear
 {Symbol}@versioned[]T
 {Symbol}[]@versioned T
-[]T@indirect
+[]T@boxed
 [List]@local {Symbol}@shared:locked T
 ```
 
@@ -343,7 +349,7 @@ is validated against that node, not against the entire flattened type:
 
 - `@versioned` on a map version-controls that map only;
 - `@local` on a list constrains that list's scheduler visibility;
-- `@indirect` on `T` boxes the payload values, not the surrounding list;
+- `@boxed` on `T` boxes the payload values, not the surrounding list;
 - `@soa` applies only to a compatible struct collection layer;
 - `@sharded(N)` applies only to a sharded collection/map layer.
 
@@ -504,37 +510,54 @@ aliases and whitespace cannot bypass it.
 
 ### Construction and annotation
 
-`BG STREAM` accepts an optional item annotation:
+`BG STREAM YIELDS T` is the canonical explicit item contract:
 
 ```clear
-values = BG STREAM: ?TextOrInteger {
+values = BG STREAM YIELDS ?TextOrInteger {
   YIELD TextOrInteger{ Text: "one" };
   YIELD NIL;
   CLOSE;
 };
 ```
 
-The annotation names the yielded item type, not the entire stream wrapper. The
-binding or context determines `[~]`, `[~N]`, or `[~INF]`.
+`YIELDS` names the yielded item type, not the entire stream wrapper. The
+binding or context determines `[~]`, `[~N]`, or `[~INF]`. The postfix form
+`BG STREAM { ... }: T` is not part of the grammar: it delays the expected type
+until after the body and introduces an unrelated general block-ascription form.
 Without an expected stream type, `BG STREAM` defaults to finite unbounded
 `[~]Item`. Bounded and infinite claims require an expected binding/return type
 or an explicit future extension to the producer header.
 
 ### Inference
 
-The annotator collects full yielded `Type` values and computes a least upper
-bound using existing coercion rules:
+When `YIELDS T` or an expected binding type is present, the annotator checks
+every `YIELD` against that item type while visiting the body. A named union
+accepts only explicit variant values; a raw value is never injected into a
+variant merely because its payload type matches.
+
+Without an expected item type, the annotator collects full yielded `Type`
+values and performs a strict asynchronous join:
 
 - identical types remain unchanged;
-- `T` plus `NIL` becomes `?T`;
+- unreachable/`Never` sites do not affect the result;
 - compatible numeric types use normal numeric promotion;
-- capabilities and ownership must be safely joinable;
-- unrelated types do not create an anonymous union.
+- capabilities, ownership, collection topology, and generic arguments must be
+  identical unless an existing lossless scalar coercion proves equivalence;
+- `T` plus `NIL` is an error unless an expected `?T` contract was declared;
+- unrelated types are an error and do not create an anonymous union or `Any`.
 
 If unrelated yielded types occur, the producer must declare a named union item
 type and yield its variants. The current check of `yield_types.map(&:resolved)`
 is insufficient because it discards optional, collection, generic, and
 capability structure.
+
+The same strict join policy applies at every asynchronous boundary. `BG` and
+result-producing `DO` blocks do not infer unions, optionality, common nominal
+ancestors, protocols, or `Any` from heterogeneous terminal values. An expected
+type may come from the enclosing binding, return position, parameter, or an
+explicit boundary contract. Otherwise incompatible terminal sites are a
+compile error. Effect-only `DO` blocks remain `Void` and do not acquire a result
+type from incidental expressions.
 
 ### Termination
 
@@ -669,8 +692,9 @@ node limit. No parser rule may restart type parsing from an earlier cursor.
   cleanup, escape, and scheduler rules recursively.
 - Implement the three-site hard limit, node-depth limit, and access-obligation
   diagnostic.
-- Accept fixable aliases `@mvcc` and `@boxed`, but print `@versioned` and
-  `@indirect`.
+- Accept `@mvcc` only as a fixable alias and print `@versioned`.
+- Keep `@indirect` canonical during the structural implementation; defer its
+  one-time `@boxed` rename until the legacy-contraction phase.
 - Reject `@shared:striped` with a fix that requests an explicit shard count.
 
 Exit gate: nested capabilities affect exactly their target layer through AST,
@@ -695,16 +719,36 @@ old/new equivalent spellings produce equivalent MIR layouts.
 
 - Add stream cardinality nodes for finite unbounded, finite bounded, and
   infinite streams.
+- Add `BG STREAM YIELDS T` as the only explicit producer item annotation and
+  reject the postfix `BG STREAM { ... }: T` form.
+- Propagate expected item types from `YIELDS`, bindings, returns, and argument
+  positions into the stream body before visiting any `YIELD`.
 - Add `StreamStep<T>` to MIR/runtime finite advancement.
 - Add the ergonomic finite-stream consumer control form and migrate pipelines.
 - Add `AST::StreamClose`, control-flow reachability rules, implicit close, and
   exactly-once runtime close.
-- Infer full yield types and least upper bounds; require named unions for
-  incompatible items.
+- Implement the shared strict asynchronous join for `BG`, result-producing
+  `DO`, and `BG STREAM`: identical complete types plus existing lossless scalar
+  promotions only; no inferred unions, optionality, common ancestors,
+  protocols, or `Any`.
+- Require named unions and explicit variant construction for heterogeneous
+  stream items. Do not inject raw payload values into union variants.
 - Migrate `~?T[]`, `~T[?]`, `~T[N]`, and `~T[INF]` without changing behavior.
 
-Exit gate: `[~]?T` can yield both `NIL` and a closed event and consumers can
-distinguish them in source and runtime tests.
+Exit gate:
+
+- `[~]?T` can yield both `NIL` and a closed event and consumers distinguish
+  them in source and runtime tests;
+- `BG STREAM YIELDS ?T` and an expected `[~]?T` binding accept `T` and `NIL`,
+  while an unannotated `T`/`NIL` producer is rejected;
+- heterogeneous unannotated `BG`, `DO`, and `BG STREAM` boundaries fail with
+  diagnostics naming every conflicting terminal site;
+- a declared union accepts explicit variants and rejects implicit raw-payload
+  injection;
+- no async inference path constructs `Union`, `Optional`, or `Any` as a
+  fallback;
+- parser, annotator, MIR, Zig, bytecode, formatter, and ruby-to-clear agree on
+  the `YIELDS` contract.
 
 ### Phase 6: Tuple literal and generic-boundary enforcement
 
@@ -737,6 +781,9 @@ outside explicit migration fixtures.
 ### Phase 8: Contract legacy syntax
 
 - Make legacy spellings errors with fixes for one release window.
+- Rename the stable-indirection surface from `@indirect` to `@boxed`, provide a
+  semantics-preserving fix, migrate the corpus, and remove `@indirect` after
+  the compatibility window.
 - Remove legacy parser branches, aliases, raw-string reconstruction, and stale
   diagnostics.
 - Remove the migration feature flag and inventory.
@@ -768,6 +815,12 @@ Required adversarial tests include:
 - old/new map default-key preservation;
 - multidimensional extent and stride overflow;
 - optional container versus optional element at every layer;
+- `BG STREAM YIELDS T` supplied directly and through an expected binding type;
+- rejection of postfix `BG STREAM { ... }: T` syntax;
+- heterogeneous `BG`, `DO`, and `BG STREAM` terminal sites that must not infer
+  `Union`, `Optional`, a common ancestor, a protocol, or `Any`;
+- explicit named-union variants versus rejected raw-payload injection;
+- unannotated `T`/`NIL` yields versus annotated `YIELDS ?T`;
 - yielded `NIL` followed by `CLOSE`;
 - close on every control-flow path, duplicate close, and yield-after-close;
 - nested capability ownership/cleanup across BG, DO, BG STREAM, fields, returns,
@@ -778,6 +831,8 @@ Required adversarial tests include:
 ## Risks and Non-Goals
 
 - This design does not introduce anonymous structural unions.
+- This design does not infer unions, optionality, or `Any` at asynchronous
+  boundaries to make heterogeneous terminal values type-check.
 - This design does not infer a sharding count or synchronization policy.
 - This design does not treat initial list/set capacity as a durable contract.
 - This design does not preserve both old and new type models internally.
