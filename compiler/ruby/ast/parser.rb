@@ -3126,6 +3126,9 @@ class ClearParser
           shard_count: shard_count
         )
         return node
+      elsif name == "Tuple" && match?(:CHAR, '{')
+        tuple_token, tuple_items = parse_comma_seq(:CHAR, '{', '}') { parse_expression }
+        return AST::TupleLit.new(tuple_token, tuple_items, storage)
       elsif match?(:CHAR, '<') && peek_is_generic_struct_lit?
         # Generic struct literal: Pair<Number>{ first: 1.0, second: 2.0 }
         consume(:CHAR, '<')
@@ -4531,8 +4534,16 @@ class ClearParser
   sig { params(bg_token: Lexer::Token).returns(AST::BgStreamBlock) }
   def parse_bg_stream_block(bg_token)
     consume(:KEYWORD, 'STREAM')
+    yields_token = T.let(nil, T.nilable(Lexer::Token))
+    declared_yield_type = T.let(nil, T.nilable(Type))
+    if match?(:KEYWORD, 'YIELDS')
+      yields_token = consume(:KEYWORD, 'YIELDS')
+      declared_yield_type = parse_type_annotation
+    end
     body = parse_brace_block
-    AST::BgStreamBlock.new(bg_token, body, nil)
+    node = AST::BgStreamBlock.new(bg_token, body, nil)
+    node.set_yield_contract(declared_yield_type, yields_token)
+    node
   end
 
   sig { returns(AST::YieldExpr) }

@@ -116,6 +116,7 @@ class SemanticAnnotator
 
   class StreamYieldFrame < T::Struct
     const :node, AST::BgStreamBlock
+    const :expected_type, T.nilable(Type), default: nil
     const :yield_types, T::Array[Type], factory: -> { [] }
   end
 
@@ -478,7 +479,7 @@ class SemanticAnnotator
       .returns(T::Array[Type])
   end
   def with_stream_yield_frame(node, &blk)
-    frame = StreamYieldFrame.new(node: node)
+    frame = StreamYieldFrame.new(node: node, expected_type: node.declared_yield_type)
     @receiver_state.stream_yield_frames << frame
     begin
       blk.call

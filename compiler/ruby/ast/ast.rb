@@ -2116,6 +2116,15 @@ module AST
       [res, nil]
     end
   }
+  TupleLit     = Struct.new(:token, :items, :storage) do
+    extend T::Sig
+    include Locatable
+
+    sig { returns(T::Array[AST::Node]) }
+    def items
+      self[:items]
+    end
+  end
   DefaultArrayLit = Struct.new(:token, :type_info, :storage) do
     extend T::Sig
     include Locatable
@@ -3013,6 +3022,22 @@ module AST
     attr_accessor :spawn_form
     attr_accessor :fsm_ineligible_reason
     attr_accessor :fsm_suspend_points
+
+    sig { returns(T.nilable(Type)) }
+    def declared_yield_type
+      @declared_yield_type
+    end
+
+    sig { returns(T.nilable(Lexer::Token)) }
+    def yields_token
+      @yields_token
+    end
+
+    sig { params(type: T.nilable(Type), token: T.nilable(Lexer::Token)).void }
+    def set_yield_contract(type, token)
+      @declared_yield_type = T.let(type, T.nilable(Type))
+      @yields_token = T.let(token, T.nilable(Lexer::Token))
+    end
   end
 
   # YieldExpr: push a value into the enclosing BG STREAM's buffer.

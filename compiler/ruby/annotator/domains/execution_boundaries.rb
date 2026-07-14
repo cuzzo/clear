@@ -682,12 +682,19 @@ module Annotator
           error!(node, :BG_STREAM_NO_YIELD)
         end
 
-        elem_syms = yield_types.map(&:resolved).uniq
-        if elem_syms.size > 1
-          error!(node, :BG_STREAM_INCONSISTENT_YIELD, types: elem_syms.join(', '))
+        inferred_join = Type.join_async_results(yield_types)
+        if node.declared_yield_type.nil? && !inferred_join.success?
+          surfaces = yield_types.map { |type| Type.surface_name(type) }.uniq
+          error!(node, :BG_STREAM_INCONSISTENT_YIELD, types: surfaces.join(', '))
         end
 
-        stamp_type!(node, Type.new(:"~?#{elem_syms.first}[]"))
+        element_type = node.declared_yield_type || inferred_join.type || Type.new(:Any)
+        legacy_element_surface = Type.surface_name(element_type)
+        # Until StreamStep replaces the legacy optional completion sentinel,
+        # the wrapper contributes the leading `?`. Keep the explicit contract
+        # on the AST so a declared optional item is not inferred as a union.
+        legacy_element_surface = legacy_element_surface.delete_prefix("?") if element_type.optional?
+        stamp_type!(node, Type.new(:"~?#{legacy_element_surface}[]"))
 
         node.capture_analysis = stream_analysis_result
 
@@ -707,7 +714,13 @@ module Annotator
         end
         visit(node.expr)
         stamp_type!(node, node.expr.full_type!(context: "yield expression"))
-        frame.yield_types << Type.new(node.full_type!(context: "yield result"))
+        yielded_type = Type.new(node.full_type!(context: "yield result"))
+        expected_type = frame.expected_type
+        if expected_type && !expected_type.accepts?(yielded_type)
+          error!(node, :BG_STREAM_INCONSISTENT_YIELD,
+            types: "#{Type.surface_name(expected_type)}, #{Type.surface_name(yielded_type)}")
+        end
+        frame.yield_types << yielded_type
         record_effect(EffectTracker::SUSPENDS)
       end
 

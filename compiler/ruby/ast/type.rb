@@ -454,6 +454,25 @@ end
 class Type
   extend T::Sig
 
+  class AsyncJoinResult < T::Struct
+    extend T::Sig
+
+    const :type, T.nilable(Type), default: nil
+    const :reason, T.nilable(Symbol), default: nil
+
+    sig { returns(T::Boolean) }
+    def success?
+      !type.nil?
+    end
+  end
+
+  class AsyncJoinEnvelope < T::Struct
+    const :payload, Type
+    const :optional, T::Boolean, default: false
+    const :fallible, T::Boolean, default: false
+    const :future, T::Boolean, default: false
+  end
+
   # ruby-to-clear: pub
   TypeInput = T.type_alias { T.any(FunctionType, Type, Symbol, String) }
   ConstructionInput = T.type_alias { T.any(TypeInput, TypeExpression) }
@@ -558,6 +577,51 @@ class Type
 
     Type.new(expression)
   end
+
+  sig { params(types: T::Array[Type]).returns(AsyncJoinResult) }
+  def self.join_async_results(types)
+    live_types = types.reject { |type| type.resolved == :Never }
+    return AsyncJoinResult.new(reason: :empty) if live_types.empty?
+
+    saw_nil = live_types.any? { |type| type.resolved == :NIL }
+    envelopes = live_types.reject { |type| type.resolved == :NIL }.map do |type|
+      async_join_envelope(type)
+    end
+    return AsyncJoinResult.new(type: Type.new(:NIL)) if envelopes.empty?
+
+    future_states = envelopes.map(&:future).uniq
+    return AsyncJoinResult.new(reason: :future_mismatch) if future_states.length > 1
+    return AsyncJoinResult.new(reason: :future_mismatch) if saw_nil && future_states.first
+
+    payload_keys = envelopes.map { |envelope| envelope.payload.semantic_type_key }.uniq
+    return AsyncJoinResult.new(reason: :payload_mismatch) if payload_keys.length > 1
+
+    payload = copy_type(T.must(envelopes.first).payload)
+    expression = payload.shape.expression
+    optional = saw_nil || envelopes.any?(&:optional)
+    fallible = envelopes.any?(&:fallible)
+    expression = OptionalTypeExpression.new(inner: expression) if optional
+    expression = FallibleTypeExpression.new(inner: expression) if fallible
+    expression = FutureTypeExpression.new(inner: expression) if future_states.first
+    joined = Type.new(expression)
+    joined.merge_capabilities_from!(payload, include_affine_ownership: true)
+    AsyncJoinResult.new(type: joined)
+  end
+
+  sig { params(type: Type).returns(AsyncJoinEnvelope) }
+  def self.async_join_envelope(type)
+    outer = type.shape.expression
+    future = outer.is_a?(FutureTypeExpression)
+    after_future = outer.is_a?(FutureTypeExpression) ? outer.inner : outer
+    fallible = after_future.is_a?(FallibleTypeExpression)
+    after_fallible = after_future.is_a?(FallibleTypeExpression) ? after_future.inner : after_future
+    optional = after_fallible.is_a?(OptionalTypeExpression)
+    payload_expression = after_fallible.is_a?(OptionalTypeExpression) ? after_fallible.inner : after_fallible
+    payload = Type.from_child_expression(payload_expression)
+    payload.merge_capabilities_from!(type, include_affine_ownership: true)
+    AsyncJoinEnvelope.new(payload: payload, optional: optional, fallible: fallible, future: future)
+  end
+  private_class_method :async_join_envelope
 
   # ruby-to-clear: skip
   sig { params(value: BasicObject).returns(T::Boolean) }

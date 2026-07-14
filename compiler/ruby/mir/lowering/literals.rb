@@ -203,6 +203,17 @@ module MIRLoweringLiterals
     wrap_list_literal_capability(inner, ti, list_alloc)
   end
 
+  sig { params(node: AST::TupleLit).returns(MIR::TupleLiteral) }
+  def lower_tuple_lit(node)
+    T.bind(self, MIRLowering) rescue nil
+    tuple_type = node.full_type!(context: "tuple literal lowering")
+    items = node.items.each_with_index.map do |item, index|
+      expected_item = T.must(tuple_type.generic_args[index])
+      with_expected_type(expected_item) { lower(item) }
+    end
+    MIR::TupleLiteral.new(items)
+  end
+
   sig { params(ti: Type).returns(T::Boolean) }
   def list_literal_capability_wrap_needed?(ti)
     return false if ti.striped?

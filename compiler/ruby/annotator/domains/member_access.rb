@@ -610,6 +610,16 @@ module Annotator
         end
       end
 
+      sig { params(node: AST::TupleLit).void }
+      def visit_TupleLit(node)
+        T.bind(self, SemanticAnnotator)
+
+        node.items.each { |item| visit(item) }
+        item_types = node.items.map { |item| item.full_type!(context: "tuple literal item") }
+        stamp_type!(node, Type.generic_instance_of(:Tuple, item_types))
+        node.storage = :stack
+      end
+
       sig { params(node: AST::DefaultArrayLit).returns(Type) }
       def visit_DefaultArrayLit(node)
         T.bind(self, SemanticAnnotator)
