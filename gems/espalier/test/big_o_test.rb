@@ -126,8 +126,8 @@ class BigOTest < Minitest::Test
   def test_unknown_and_known_receiver_warnings
     analyzer = Espalier::BigOAnalyzer.new(class_name: "Owner", ivar_types: { "@thing" => "Widget" })
     result = analyzer.analyze_method("unknowns", [
-      { type: :call, receiver: "thing", method: "work", line: 1 },
-      { type: :call, receiver: "mystery", method: "work", line: 2 },
+      { type: :call, receiver: "thing", method: "work", line: 1, evidence_gap: "unmodeled_typed_operation" },
+      { type: :call, receiver: "mystery", method: "work", line: 2, evidence_gap: "unresolved_receiver_type" },
       { type: :yield, line: 3 }
     ])
     assert_includes result[:unknown_operations], "Widget#work"
@@ -137,6 +137,9 @@ class BigOTest < Minitest::Test
     refute result[:time_complete]
     refute result[:space_complete]
     assert_equal 3, result[:warnings].size
+    assert_equal 1, result.dig(:unknown_operation_evidence, "Widget#work", "typed_unmodeled_occurrences")
+    assert_equal({ "unmodeled_typed_operation" => 1 }, result.dig(:unknown_operation_evidence, "Widget#work", "evidence_gaps"))
+    assert_equal({ "unresolved_receiver_type" => 1 }, result.dig(:unknown_operation_evidence, "mystery.work", "evidence_gaps"))
   end
 
   def test_declared_struct_fields_are_constant_without_hiding_methods

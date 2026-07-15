@@ -32,6 +32,13 @@ module Espalier
       is_dynamic = false
       trigger = nil
       unknown_operations = []
+      unknown_operation_evidence = Hash.new do |operations, operation|
+        operations[operation] = {
+          "occurrences" => 0,
+          "typed_unmodeled_occurrences" => 0,
+          "evidence_gaps" => Hash.new(0)
+        }
+      end
       warnings = []
       evidence_gaps = []
 
@@ -71,7 +78,13 @@ module Espalier
             unknown_operations << operation
             time_complete = false
             space_complete = false
-            evidence_gaps.concat(Array(node[:evidence_gaps] || node[:evidence_gap] || "unmodeled_operation"))
+            operation_gaps = Array(node[:evidence_gaps] || node[:evidence_gap]).map(&:to_s).reject(&:empty?)
+            operation_gaps = ["unmodeled_operation"] if operation_gaps.empty?
+            evidence_gaps.concat(operation_gaps)
+            operation_evidence = unknown_operation_evidence[operation]
+            operation_evidence["occurrences"] += 1
+            operation_evidence["typed_unmodeled_occurrences"] += 1 if operation_gaps == ["unmodeled_typed_operation"]
+            operation_gaps.each { |gap| operation_evidence["evidence_gaps"][gap] += 1 }
             warnings << "Fact-Mine did not provide a normalized complexity fact for `#{operation}` at line #{node[:line]}."
             if Array(node[:collection_arguments]).any?
               warnings << unknown_collection_call_warning(node, method_called)
@@ -133,6 +146,9 @@ module Espalier
         is_dynamic: is_dynamic,
         trigger: trigger,
         unknown_operations: unknown_operations.uniq,
+        unknown_operation_evidence: unknown_operation_evidence.transform_values do |entry|
+          entry.merge("evidence_gaps" => entry.fetch("evidence_gaps").sort.to_h)
+        end,
         evidence_gaps: evidence_gaps.compact.uniq.sort,
         warnings: warnings.uniq
       }

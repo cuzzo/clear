@@ -138,6 +138,7 @@ module Espalier
           quality[:complexity_trigger] = big_o_result[:trigger] if big_o_result[:trigger]
           quality[:big_o_warnings] = big_o_result[:warnings] unless big_o_result[:warnings].empty?
           quality[:big_o_unknowns] = big_o_result[:unknown_operations] unless big_o_result[:unknown_operations].empty?
+          quality[:big_o_unknown_operation_evidence] = big_o_result[:unknown_operation_evidence] unless big_o_result[:unknown_operation_evidence].empty?
           quality[:big_o_evidence_gaps] = big_o_result[:evidence_gaps] unless big_o_result[:evidence_gaps].empty?
 
           {

@@ -27,7 +27,7 @@ stable before/after comparison, not a production-only benchmark.
 
 ## Results
 
-| Language | Repos | Functions | Complete time: before → after | Delta | Unknown call occurrences: before → after |
+| Language | Repos | Functions | Complete time: before → after | Delta | Unknown operation/function pairs: before → after |
 | --- | ---: | ---: | ---: | ---: | ---: |
 | C | 4 | 2,165 | 258 → 270 | +12 | 6,761 → 6,454 |
 | C++ | 4 | 1,938 | 654 → 654 | 0 | 4,068 → 4,069 |
@@ -78,8 +78,9 @@ espalier --format unknown_operations <source roots...>
 ```
 
 It emits `espalier.unknown-operations.v1`, grouped by source language and
-ranked by occurrence count, affected incomplete functions, and operation name.
-Each row includes the Fact-Mine evidence-gap frequencies and exact locations.
+ranked by actual call occurrence count, affected incomplete functions, and
+operation name. Each row includes the exact Fact-Mine evidence-gap frequencies,
+locations, and `typed_unmodeled_occurrences` for the registry-review subset.
 It is intentionally a review queue rather than a second registry:
 
 1. A documented native call with a proven receiver belongs in that language’s
