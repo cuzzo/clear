@@ -1778,6 +1778,9 @@ class MIREmitter
         result += "if (!#{b[:capture]}.isNil()) {\n#{suppress}#{then_body}\n}"
         result += " else {\n#{else_body}\n}" if else_body
         result += "\n}"
+      elsif b[:predicate] == :stream_item
+        result = "switch (#{expr}) {\n.Item => |#{b[:capture]}| {\n#{suppress}#{then_body}\n},\n.Closed => {\n#{else_body}\n},\n}" if else_body
+        result ||= "switch (#{expr}) {\n.Item => |#{b[:capture]}| {\n#{suppress}#{then_body}\n},\n.Closed => {},\n}"
       elsif b[:predicate] == :is_ok
         result = "if (#{expr}) |#{b[:capture]}| {\n#{suppress}#{then_body}\n}"
         result += " else |_| {\n#{else_body}\n}" if else_body
@@ -1795,6 +1798,8 @@ class MIREmitter
       inner = node.bindings.map { |b|
         if b[:node_ref]
           "const #{b[:capture]} = #{emit(b[:expr])}; if (#{b[:capture]}.isNil()) break :#{label};"
+        elsif b[:predicate] == :stream_item
+          "const #{b[:capture]} = switch (#{emit(b[:expr])}) { .Item => |payload| payload, .Closed => break :#{label} };"
         elsif b[:predicate] == :is_ok
           "const #{b[:capture]} = #{emit(b[:expr])} catch break :#{label};"
         else
@@ -1974,7 +1979,8 @@ class MIREmitter
       body = emit_body(arm.body)
       payload = arm.payload
       capture = payload ? " |#{payload}|" : ""
-      ".#{arm.variant} =>#{capture} {\n#{body}\n}"
+      suppress = payload ? "_ = &#{payload};\n" : ""
+      ".#{arm.variant} =>#{capture} {\n#{suppress}#{body}\n}"
     end
     if (default_body = node.default_body)
       body = default_body.empty? ? "" : emit_body(default_body)

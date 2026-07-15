@@ -130,6 +130,152 @@ RSpec.describe "type-system change contracts" do
     }.to raise_error(CompilerError, /inconsistent types/i)
   end
 
+  it "requires YIELDS for future items but not optional or fallible widening" do
+    expect {
+      annotate(<<~CLEAR)
+        promise: ~Int64 = BG { 10_i64; };
+        stream = BG STREAM { YIELD promise; };
+      CLEAR
+    }.to raise_error(CompilerError, /requires an explicit item contract.*YIELDS ~Int64/m)
+
+    expect {
+      annotate(<<~CLEAR)
+        promise: ~Int64 = BG { 10_i64; };
+        stream = BG STREAM YIELDS ~Int64 { YIELD promise; };
+      CLEAR
+    }.not_to raise_error
+
+    expect {
+      annotate("stream = BG STREAM { YIELD 10_i64; YIELD NIL; };")
+    }.not_to raise_error
+  end
+
+  it "requires YIELDS for a named union even when all variants share its type" do
+    source = <<~CLEAR
+      UNION NumberOrText { Number: Int64, Text: String }
+      stream = BG STREAM {
+        YIELD NumberOrText{ Number: 10_i64 };
+        YIELD NumberOrText{ Text: "OK" };
+      };
+    CLEAR
+
+    expect { annotate(source) }
+      .to raise_error(CompilerError, /YIELDS NumberOrText/)
+    expect {
+      annotate(source.sub("BG STREAM {", "BG STREAM YIELDS NumberOrText {"))
+    }.not_to raise_error
+  end
+
+  it "offers an exact clear-fix insertion when a YIELDS contract is knowable" do
+    source = <<~CLEAR
+      promise: ~Int64 = BG { 10_i64; };
+      stream = BG STREAM { YIELD promise; };
+    CLEAR
+    findings = ClearFixSupport.collect_findings(source, source_dir: Dir.pwd)
+    finding = findings.find { |item| item.message.include?("YIELDS ~Int64") }
+
+    expect(finding).not_to be_nil
+    edit = T.must(finding).fixes.first.edits.first
+    expect(edit.replacement).to eq(" YIELDS ~Int64")
+    line = source.lines.fetch(edit.span.line - 1)
+    rewritten = line.dup.insert(edit.span.col - 1, edit.replacement)
+    expect(rewritten).to include("BG STREAM YIELDS ~Int64 {")
+  end
+
+  it "diagnoses heterogeneous yields with both viable remedies" do
+    expect {
+      annotate('stream = BG STREAM { YIELD 10_i64; YIELD "OK"; };')
+    }.to raise_error(CompilerError, /Union<Int64, Byte\[2\]>.*add `YIELDS YourUnion`.*OR change one of the YIELD/m)
+  end
+
+  it "parses CLOSE as an explicit stream terminator" do
+    stream = parse("stream = BG STREAM { YIELD 1_i64; CLOSE; };").statements.first.value
+
+    expect(stream.body.last).to be_a(AST::CloseStream)
+  end
+
+  it "keeps yielded NIL distinct from finite stream completion" do
+    ast = annotate(<<~CLEAR)
+      stream = BG STREAM { YIELD 10_i64; YIELD NIL; };
+      step = NEXT stream;
+    CLEAR
+    stream = ast.statements.fetch(0).value
+    step = ast.statements.fetch(1).value
+
+    expect(stream.full_type!).to be_dynamic_stream
+    expect(stream.full_type!.tense_type.element_type).to be_optional
+    expect(step.full_type!).to be_stream_step
+    expect(step.full_type!.stream_step_item_type).to be_optional
+  end
+
+  it "uses EXISTS AS to bind a StreamStep item without unwrapping its optional payload" do
+    zig = transpile(<<~CLEAR)
+      stream = BG STREAM { YIELD 10_i64; YIELD NIL; };
+      IF NEXT stream EXISTS AS item THEN
+        seen = item;
+      END
+    CLEAR
+
+    expect(zig).to include(".nextStep()")
+    expect(zig).to include(".Item => |item|")
+    expect(zig).to include(".Closed =>")
+  end
+
+  it "uses StreamStep for canonical bounded streams while preserving legacy NEXT" do
+    canonical = annotate(<<~CLEAR)
+      stream: [~2]Int64 = [BG { 10_i64; }, BG { 20_i64; }];
+      step = NEXT stream;
+    CLEAR
+    legacy = annotate(<<~CLEAR)
+      stream: ~Int64[2] = [BG { 10_i64; }, BG { 20_i64; }];
+      item = NEXT stream;
+    CLEAR
+
+    expect(canonical.statements.last.value.full_type!).to be_stream_step
+    expect(legacy.statements.last.value.resolved_type).to eq(:Int64)
+  end
+
+  it "rejects CLOSE outside a stream and YIELD after CLOSE" do
+    expect { annotate("CLOSE;") }
+      .to raise_error(CompilerError, /CLOSE can only be used inside a BG STREAM/)
+    expect {
+      annotate("stream = BG STREAM { CLOSE; YIELD 1_i64; };")
+    }.to raise_error(CompilerError, /YIELD cannot follow CLOSE/)
+  end
+
+  it "lowers explicit CLOSE and relies on idempotent deferred close for fallthrough" do
+    zig = transpile(<<~CLEAR)
+      stream = BG STREAM { YIELD 1_i64; CLOSE; };
+      step = NEXT stream;
+    CLEAR
+
+    expect(zig).to include(".close();")
+    expect(zig).to include("return;")
+    expect(zig).to include(".nextStep()")
+  end
+
+  it "rejects explicit and implicit normal completion for infinite streams" do
+    expect {
+      annotate("stream: ~Int64[INF] = BG STREAM { YIELD 1_i64; CLOSE; };")
+    }.to raise_error(CompilerError, /infinite stream cannot execute CLOSE/i)
+    expect {
+      annotate("stream: ~Int64[INF] = BG STREAM { YIELD 1_i64; };")
+    }.to raise_error(CompilerError, /infinite stream producer can reach the end/i)
+    expect {
+      annotate("stream: ~Int64[INF] = BG STREAM { WHILE TRUE DO YIELD 1_i64; END };")
+    }.not_to raise_error
+    expect {
+      annotate(<<~CLEAR)
+        stream: ~Int64[INF] = BG STREAM {
+          WHILE TRUE DO
+            WHILE FALSE DO BREAK; END
+            YIELD 1_i64;
+          END
+        };
+      CLEAR
+    }.not_to raise_error
+  end
+
   it "infers exact positional types for Tuple literals" do
     ast = annotate(<<~CLEAR)
       value = Tuple{10_i64, "OK", TRUE};

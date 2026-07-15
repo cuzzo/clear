@@ -226,7 +226,7 @@ module GenericAnalysis
     inner = facts.inner
     base_name = inner.generic_base
     return if base_name == :Id
-    if base_name == :Tuple
+    if base_name == :Tuple || base_name == :StreamStep
       inner.generic_args.each { |arg| validate_generic_type_arg!(facts, arg) }
       return
     end
@@ -257,7 +257,7 @@ module GenericAnalysis
     # schema. Its own annotation validation checks the key/value shape.
     return if arg.map?
     if arg.generic_instance?
-      if arg.generic_base == :Tuple
+      if arg.generic_base == :Tuple || arg.generic_base == :StreamStep
         arg.generic_args.each { |nested_arg| validate_generic_type_arg!(facts, nested_arg) }
         return
       end
@@ -655,6 +655,17 @@ module GenericAnalysis
 
     # BgStreamBlock infers ~?T[]; declared ~T[INF] picks the runtime wrapper.
     if node.value.is_a?(AST::BgStreamBlock) && node.type.inf_stream?
+      stream = T.cast(node.value, AST::BgStreamBlock)
+      if stream_body_contains_close?(stream.body)
+        error!(stream, :INFINITE_STREAM_CLOSE)
+      end
+      if stream_body_may_fall_through?(stream.body)
+        error!(stream, :INFINITE_STREAM_FALLTHROUGH)
+      end
+    end
+
+
+    if node.value.is_a?(AST::BgStreamBlock) && node.type.runtime_stream?
       stamp_type!(node.value, final_type_info)
     end
 
@@ -673,6 +684,51 @@ module GenericAnalysis
       value_type = node.value.full_type!(context: "BgBlock shared_promise value")
       T.unsafe(node.value).async_result_shape = AsyncResultShape.promise(value_type.tense_type, shared: true)
       stamp_type!(node.value, Type.new(value_type, ownership: :shared))
+    end
+  end
+
+  sig { params(body: T::Array[AST::Node]).returns(T::Boolean) }
+  def stream_body_contains_close?(body)
+    body.any? do |stmt|
+      stmt.is_a?(AST::CloseStream) || AST.child_bodies(stmt).any? { |child| stream_body_contains_close?(child) }
+    end
+  end
+
+  sig { params(body: T::Array[AST::Node]).returns(T::Boolean) }
+  def stream_body_may_fall_through?(body)
+    return true if body.empty?
+
+    stmt = body.last
+    return false if stmt.is_a?(AST::CloseStream) || stmt.is_a?(AST::ReturnNode) ||
+      stmt.is_a?(AST::Raise) || stmt.is_a?(AST::DieNode)
+    if stmt.is_a?(AST::IfStatement)
+      return true if stmt.else_branch.nil? || stmt.else_branch.empty?
+      return stream_body_may_fall_through?(stmt.then_branch) ||
+        stream_body_may_fall_through?(stmt.else_branch)
+    end
+    if stmt.is_a?(AST::IfBind)
+      return true if stmt.else_branch.nil? || stmt.else_branch.empty?
+      return stream_body_may_fall_through?(stmt.then_branch) ||
+        stream_body_may_fall_through?(stmt.else_branch)
+    end
+    if stmt.is_a?(AST::WhileLoop)
+      condition = stmt.condition
+      is_true = condition.is_a?(AST::Literal) && condition.true_boolean?
+      return false if is_true && !stream_body_contains_break?(stmt.do_branch)
+    end
+
+    true
+  end
+
+  sig { params(body: T::Array[AST::Node]).returns(T::Boolean) }
+  def stream_body_contains_break?(body)
+    body.any? do |stmt|
+      next true if stmt.is_a?(AST::BreakNode)
+      # BREAK is lexically scoped to its nearest loop. A BREAK inside a
+      # nested loop cannot make the outer `WHILE TRUE` producer terminate.
+      next false if AST.loop_node?(stmt) || AST.call_like_boundary?(stmt)
+
+      AST.child_bodies(stmt).any? { |child| stream_body_contains_break?(child) }
     end
   end
 

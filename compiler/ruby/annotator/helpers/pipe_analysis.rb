@@ -470,8 +470,10 @@ module PipeAnalysis
     left_ti = node.left.full_type!(context: "pipeline left")
     item_type = if left_ti&.inf_stream?
       left_ti.inf_stream_element_type.resolved
-    elsif left_ti&.open_stream? || left_ti&.dynamic_stream?
+    elsif left_ti&.open_stream?
       left_ti.open_stream_element_type.resolved
+    elsif left_ti&.dynamic_stream?
+      T.must(left_ti.tense_type.element_type).resolved
     elsif left_ti&.bounded_stream?
       left_ti.stream_element_type.resolved
     elsif left_ti&.element_type

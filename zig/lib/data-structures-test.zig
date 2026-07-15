@@ -346,6 +346,21 @@ test "BoundedStream(i64,3): deinit() drains unconsumed promises (early-exit simu
     // DebugAllocator will fail the test if any Promise.Inner was leaked.
 }
 
+test "StreamStep keeps optional items distinct from completion" {
+    const Step = CheatLib.StreamStep(?i64);
+    const nil_item: Step = .{ .Item = null };
+    const value_item: Step = .{ .Item = 42 };
+    const closed: Step = .Closed;
+
+    try std.testing.expect(nil_item.isItem());
+    try std.testing.expect(value_item.isItem());
+    try std.testing.expect(!closed.isItem());
+    switch (nil_item) {
+        .Item => |item| try std.testing.expect(item == null),
+        .Closed => return error.TestUnexpectedResult,
+    }
+}
+
 test {
     _ = @import("../runtime/bounded-stream-test.zig");
     _ = @import("../runtime/inf-stream-test.zig");

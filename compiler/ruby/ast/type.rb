@@ -344,7 +344,7 @@ class TypeShape
 
   sig { returns(T::Boolean) }
   def tense
-    expression.is_a?(FutureTypeExpression)
+    expression.is_a?(FutureTypeExpression) || expression.is_a?(StreamTypeExpression)
   end
 
   sig { returns(T::Boolean) }
@@ -452,6 +452,11 @@ class TypeShape
   sig { returns(T.nilable(Symbol)) }
   def tense_type_raw
     current = expression
+    if current.is_a?(StreamTypeExpression)
+      dimension = current.cardinality == :FINITE ? :LIST : current.cardinality
+      linear = LinearTypeExpression.new(kind: :array, dimensions: [dimension], item: current.item)
+      return TypeExpressionPrinter.legacy(linear).to_sym
+    end
     return nil unless current.is_a?(FutureTypeExpression)
 
     TypeExpressionPrinter.legacy(current.inner).to_sym
@@ -1063,6 +1068,11 @@ class Type
   def self.generic_instance_of(base, args)
     names = T.let(args.map { |arg| surface_name(arg) }, T::Array[String])
     Type.new("#{base}<#{names.join(",")}>")
+  end
+
+  sig { params(item_type: TypeInput).returns(Type) }
+  def self.stream_step_of(item_type)
+    generic_instance_of(:StreamStep, [item_type])
   end
 
   sig { params(param_types: T::Array[Type], return_type: Type, reentrant: T::Boolean, source_signature: T.nilable(BasicObject)).returns(Type) }
@@ -3606,14 +3616,40 @@ class Type
   def tense_type
     expression = shape.expression
     return Type.from_child_expression(expression.inner) if expression.is_a?(FutureTypeExpression)
+    if expression.is_a?(StreamTypeExpression)
+      dimension = expression.cardinality == :FINITE ? :LIST : expression.cardinality
+      return Type.from_child_expression(
+        LinearTypeExpression.new(kind: :array, dimensions: [dimension], item: expression.item)
+      )
+    end
 
     Type.new(:Void)
+  end
+
+  sig { returns(T::Boolean) }
+  def canonical_stream?
+    shape.expression.is_a?(StreamTypeExpression)
+  end
+
+  sig { returns(T::Boolean) }
+  def stream_step?
+    generic_instance? && generic_base == :StreamStep && generic_args.length == 1
+  end
+
+  sig { returns(T.nilable(Type)) }
+  def stream_step_item_type
+    return nil unless stream_step?
+
+    generic_args.first
   end
 
   # Finite dynamic stream: ~T[].
   # Used for lazy finite producers like ranges. NEXT returns ?T until exhausted.
   sig { returns(T::Boolean) }
   def dynamic_stream?
+    expression = shape.expression
+    return true if expression.is_a?(StreamTypeExpression) && expression.cardinality == :FINITE
+
     !!(future? && tense_type.dynamic? && !tense_type.optional? &&
       !tense_type.optional_element_array? && !list_collection?)
   end
@@ -3692,6 +3728,9 @@ class Type
   # Distinct from a single promise (~T): NEXT can be called N times, not exactly once.
   sig { returns(T::Boolean) }
   def bounded_stream?
+    expression = shape.expression
+    return true if expression.is_a?(StreamTypeExpression) && expression.cardinality.is_a?(Integer)
+
     # ~T[N] is a bounded stream of N elements. ~String is NOT a bounded stream
     # even though String is internally []const u8 (a fixed array) - it's a Promise.
     optional_shape = T.let(optional_stream_shape_type, T.nilable(Type))
@@ -3741,6 +3780,9 @@ class Type
   # Resource semantics: call deinit() to free the heap-allocated Inner.
   sig { returns(T::Boolean) }
   def inf_stream?
+    expression = shape.expression
+    return true if expression.is_a?(StreamTypeExpression) && expression.cardinality == :INF
+
     future? && tense_type.inf_stream_marker?
   end
 
@@ -4740,6 +4782,21 @@ class Type
     return true if promise_list? && (other_type.empty_list? || (other_type.future? && other_type.tense_type.dynamic?))
     return false unless other_type.future?
 
+    # A BG STREAM is inferred in the canonical finite form `[~]T` before
+    # its declaration chooses a legacy open or infinite runtime wrapper.
+    # This is a producer-shape coercion only; bounded declarations remain
+    # exact because their cardinality is a value-level contract.
+    if other_type.canonical_stream? && other_type.dynamic_stream?
+      other_element = other_type.tense_type.element_type
+      if open_stream?
+        self_element = open_stream_element_type
+        return self_element.accepts?(other_element) if self_element && other_element
+      elsif inf_stream?
+        self_element = inf_stream_element_type
+        return self_element.accepts?(other_element) if self_element && other_element
+      end
+    end
+
     if dynamic_stream? && other_type.dynamic_stream?
       se = T.let(tense_type.element_type, T.nilable(Type))
       oe = T.let(other_type.tense_type.element_type, T.nilable(Type))
@@ -5256,6 +5313,7 @@ class Type
     end
     args_zig = args_zig_parts.join(", ")
     return "struct { #{args_zig} }" if tuple?
+    return "CheatLib.StreamStep(#{args_zig})" if generic_base == :StreamStep
 
     base_name = Type.symbol_or_default(shape.generic_base_raw, resolved)
     "#{base_name}(#{args_zig})"

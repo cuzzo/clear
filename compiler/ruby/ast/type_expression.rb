@@ -328,7 +328,26 @@ class TypeExpressionParser
   def self.parse(raw)
     return FunctionTypeExpression.new(signature: raw) if raw.is_a?(Type::FunctionType)
 
-    parse_source(raw.to_s)
+    source = raw.to_s
+    if source.start_with?("[~")
+      closing = source.index("]")
+      unless closing.nil?
+        marker = source[2...closing].to_s
+        cardinality = if marker.empty?
+          :FINITE
+        elsif marker == "INF"
+          :INF
+        elsif marker.match?(/\A\d+\z/)
+          marker.to_i
+        end
+        unless cardinality.nil?
+          item_source = source[(closing + 1)..].to_s
+          return StreamTypeExpression.new(cardinality: cardinality, item: parse(item_source)) unless item_source.empty?
+        end
+      end
+    end
+
+    parse_source(source)
   end
 
   sig { params(source: String).returns(TypeExpression) }

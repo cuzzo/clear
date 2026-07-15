@@ -1456,17 +1456,17 @@ RSpec.describe SemanticAnnotator do
             RETURN;
           END
         CLEAR
-        expect { run(src) }.to raise_error(SourceError, /Type Mismatch: Cannot assign ~\?Float64\[] to ~Float64\[3\]/)
+        expect { run(src) }.to raise_error(SourceError, /Type Mismatch: Cannot assign ~Float64\[] to ~Float64\[3\]/)
       end
 
-      it "still accepts infinite streams as a separate syntax" do
+      it "rejects an infinite stream producer that can fall through" do
         src = <<~CLEAR
           FN f() RETURNS !Void ->
             s: ~Float64[INF] = BG STREAM { YIELD 1.0; };
             RETURN;
           END
         CLEAR
-        expect { run(src) }.not_to raise_error
+        expect { run(src) }.to raise_error(SourceError, /infinite stream producer can reach the end/i)
       end
 
       it "accepts the new open-stream spelling ~?T[]" do

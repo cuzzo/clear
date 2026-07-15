@@ -1,0 +1,74 @@
+FN absent() RETURNS ?Int64 ->
+    RETURN NIL;
+END
+
+FN present() RETURNS ?Int64 ->
+    RETURN 40;
+END
+
+FN main() RETURNS Void ->
+    stream: [~]?Int64 = BG STREAM YIELDS ?Int64 {
+        YIELD 10;
+        YIELD NIL;
+        CLOSE;
+    };
+
+    IF NEXT stream EXISTS AS first THEN
+        IF first EXISTS AS value THEN
+            ASSERT value == 10, "first item keeps its payload";
+        ELSE
+            ASSERT FALSE, "first item must be present";
+        END
+    ELSE
+        ASSERT FALSE, "stream closed before first item";
+    END
+
+    IF NEXT stream EXISTS AS second THEN
+        ASSERT !(second EXISTS), "NIL is an item, not stream completion";
+    ELSE
+        ASSERT FALSE, "stream closed before optional NIL item";
+    END
+
+    IF NEXT stream EXISTS AS extra THEN
+        ASSERT FALSE, "closed stream produced an extra item";
+    ELSE
+        PASS;
+    END
+
+
+    loop_stream: [~]?Int64 = BG STREAM YIELDS ?Int64 {
+        YIELD NIL;
+        YIELD 20;
+    };
+    MUTABLE loop_count: Int64 = 0;
+    WHILE NEXT loop_stream EXISTS AS item DO
+        loop_count = loop_count + 1;
+        IF item EXISTS AS value THEN
+            ASSERT value == 20, "the present loop item is preserved";
+        END
+    END
+    ASSERT loop_count == 2, "WHILE consumes optional items and stops only on Closed";
+
+
+    each_stream: [~]?Int64 = BG STREAM YIELDS ?Int64 {
+        YIELD NIL;
+        YIELD 30;
+    };
+    MUTABLE each_count: Int64 = 0;
+    FOR item IN each_stream DO
+        each_count = each_count + 1;
+    END
+    ASSERT each_count == 2, "FOR consumes optional items and stops only on Closed";
+
+    bounded: [~2]?Int64 = [BG { absent(); }, BG { present(); }];
+    MUTABLE bounded_count: Int64 = 0;
+    FOR item IN bounded DO
+        bounded_count = bounded_count + 1;
+        IF item EXISTS AS value THEN
+            ASSERT value == 40, "bounded present item keeps its payload";
+        END
+    END
+    ASSERT bounded_count == 2, "bounded FOR distinguishes optional NIL from Closed";
+
+    RETURN;
+END

@@ -2061,8 +2061,15 @@ module DiagnosticRegistry
     },
     BG_STREAM_INCONSISTENT_YIELD: {
       severity: :error, category: :type,
-      template: "BG STREAM block yields inconsistent types: %{types}. All YIELD expressions must produce the same type.",
-      summary:  "BG STREAM produces a typed stream; every YIELD must produce the same element type.",
+      template: "BG STREAM returns inconsistent types (%{types}) from its YIELD expressions. To return both, declare a named union covering %{union_shape}, add `YIELDS YourUnion`, and YIELD its explicit variants; OR change one of the YIELD expressions so every YIELD has the same base type.",
+      summary:  "BG STREAM never infers an accidental payload union; declare the union contract or make the yields homogeneous.",
+      fix_hint: "Use `BG STREAM YIELDS YourUnion { ... }` with explicit named-union variants, OR convert the conflicting YIELD expression to the other payload type. Optional (`?`) and fallible (`!`) widening of one base type does not need YIELDS.",
+    },
+    BG_STREAM_YIELDS_REQUIRED: {
+      severity: :error, category: :type,
+      template: "BG STREAM yields `%{type}`, which requires an explicit item contract. Write `BG STREAM YIELDS %{type} { ... }`. YIELDS is optional for one non-future base type widened only by `?` and/or `!`, but required for future and union item types.",
+      summary:  "Future and union stream items require an explicit YIELDS contract.",
+      fix_hint: "Insert `YIELDS %{type}` between `STREAM` and the opening brace.",
     },
     BG_STREAM_CAPTURES_WITH_SCOPED: {
       severity: :error, category: :escape,
@@ -2074,6 +2081,31 @@ module DiagnosticRegistry
       severity: :error, category: :type,
       template: "YIELD can only be used inside a BG STREAM { } block.",
       summary:  "YIELD only makes sense inside BG STREAM bodies.",
+    },
+    CLOSE_OUTSIDE_BG_STREAM: {
+      severity: :error, category: :type,
+      template: "CLOSE can only be used inside a BG STREAM { } block.",
+      summary:  "CLOSE terminates a BG STREAM producer.",
+    },
+    YIELD_AFTER_CLOSE: {
+      severity: :error, category: :concurrency,
+      template: "YIELD cannot follow CLOSE on the same BG STREAM control-flow path.",
+      summary:  "A closed stream cannot emit another item.",
+    },
+    STREAM_ALREADY_CLOSED: {
+      severity: :error, category: :concurrency,
+      template: "This BG STREAM control-flow path has already executed CLOSE.",
+      summary:  "A stream producer can close only once on a path.",
+    },
+    INFINITE_STREAM_CLOSE: {
+      severity: :error, category: :concurrency,
+      template: "An infinite stream cannot execute CLOSE; declare a finite [~]T stream instead.",
+      summary:  "Infinite streams have no normal completion event.",
+    },
+    INFINITE_STREAM_FALLTHROUGH: {
+      severity: :error, category: :concurrency,
+      template: "An infinite stream producer can reach the end of its body. Use a non-terminating loop or declare a finite [~]T stream.",
+      summary:  "An infinite stream must not close by normal fallthrough.",
     },
     BG_ARENA_AND_PARALLEL: {
       severity: :error, category: :capability,
@@ -3193,6 +3225,7 @@ module DiagnosticRegistry
   FIX_DESCRIPTIONS = T.let({
     ADD_DECL_CAPABILITY_GENERIC: "Add `%{sigil}` to '%{name}' at its declaration (line %{line}).",
     ADD_EFFECTS_REENTRANT: "Add `EFFECTS REENTRANT` so the runtime knows to schedule this fn on a service stack.",
+    ADD_STREAM_YIELDS_CONTRACT: "Add `YIELDS %{type}` so the stream's future or union item type is explicit.",
     ADD_ERROR_UNION_TO_RETURN: "Add `!` to the return type to declare the error union (Zig-style fallible signature).",
     ADD_NON_REENTRANT_REQUIRES: "Add %{requires} (rejects reentrant callbacks).",
     ADD_WITH_GUARD_ALIASES: "Add `AS <alias>` to each binding so the GUARD predicate can read the unwrapped value.",

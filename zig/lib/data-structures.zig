@@ -20,6 +20,20 @@ pub fn bind(comptime deps: type) type {
     return struct {
         const WaitGroup = fp.WaitGroup;
 
+        /// A finite stream step keeps producer completion separate from the
+        /// item payload. In particular, `StreamStep(?T).Item = null` is a
+        /// yielded optional value; `.Closed` is end-of-stream.
+        pub fn StreamStep(comptime T: type) type {
+            return union(enum) {
+                Item: T,
+                Closed: void,
+
+                pub fn isItem(self: @This()) bool {
+                    return self == .Item;
+                }
+            };
+        }
+
         fn cleanup(comptime T: type, alloc: std.mem.Allocator, cptr: *const T) void {
             deps.cleanup(T, alloc, cptr);
         }
@@ -772,6 +786,15 @@ pub fn bind(comptime deps: type) type {
                 return val;
             }
 
+            /// Tagged completion form used by canonical `[~N]T`. Unlike an
+            /// optional sentinel, this preserves `null` when T is optional.
+            pub fn nextStep(self: *Self) anyerror!StreamStep(T) {
+                if (self.head >= N) return .{ .Closed = {} };
+                const val = try self.items[self.head].next();
+                self.head += 1;
+                return .{ .Item = val };
+            }
+
             /// Drain any unconsumed promises, freeing their Inner allocations.
             /// No-op when all N items have already been consumed.
             /// Must be called after a pipeline loop that may terminate early
@@ -831,6 +854,10 @@ pub fn bind(comptime deps: type) type {
                 /// `lock` and use .release; readers use .acquire so they
                 /// observe `err` after seeing `closed = true`.
                 closed:        Atomic(bool) = Atomic(bool).init(false),
+                /// Exactly-once lifecycle signal. `deinit` may set `closed`
+                /// before the producer's deferred close runs, while an
+                /// explicit CLOSE may run before that defer.
+                finished:      Atomic(bool) = Atomic(bool).init(false),
                 /// Written under `lock` by setError/close-paths BEFORE
                 /// `closed.store(true, .release)`. Readers must observe
                 /// `closed.load(.acquire) == true` before reading this.
@@ -923,7 +950,56 @@ pub fn bind(comptime deps: type) type {
                 } else {
                     inner.lock.store(0, .release);
                 }
-                inner.wg.done();
+                if (!inner.finished.swap(true, .acq_rel)) inner.wg.done();
+            }
+
+            /// Read one tagged step without using the item type's optionality
+            /// as an EOF sentinel.
+            pub fn nextStep(self: *Self) anyerror!StreamStep(T) {
+                const inner = self.inner;
+                while (true) {
+                    const t = inner.tail.load(.monotonic);
+                    const h = inner.head.load(.acquire);
+                    if (h != t) {
+                        const val = inner.buf[t & MASK];
+                        inner.tail.store(t +% 1, .release);
+                        if (h -% t == BUF_SIZE) {
+                            while (inner.lock.swap(1, .acquire) == 1) std.Thread.yield() catch {};
+                            if (inner.producer_task) |producer| {
+                                const producer_sched = inner.producer_sched orelse inner.sched;
+                                inner.producer_task = null;
+                                inner.producer_sched = null;
+                                inner.lock.store(0, .release);
+                                producer_sched.schedule(producer);
+                            } else {
+                                inner.lock.store(0, .release);
+                            }
+                        }
+                        return .{ .Item = val };
+                    }
+                    if (inner.closed.load(.acquire)) {
+                        if (inner.err) |err| return err;
+                        return .Closed;
+                    }
+                    while (inner.lock.swap(1, .acquire) == 1) std.Thread.yield() catch {};
+                    const h2 = inner.head.load(.acquire);
+                    if (h2 != t) {
+                        inner.lock.store(0, .release);
+                        continue;
+                    }
+                    if (inner.closed.load(.acquire)) {
+                        inner.lock.store(0, .release);
+                        if (inner.err) |err| return err;
+                        return .Closed;
+                    }
+                    const waiter_sched = fp.active_scheduler;
+                    const task = waiter_sched.getCurrent();
+                    task.status.store(.Blocked, .release);
+                    inner.consumer_task = task;
+                    inner.consumer_sched = waiter_sched;
+                    inner.lock.store(0, .release);
+                    task.base.yield();
+                }
             }
 
             /// Record a terminal error from the generator fiber. Acquires
@@ -1076,6 +1152,7 @@ pub fn bind(comptime deps: type) type {
                 /// without taking `lock`. Writers (close, deinit) hold
                 /// `lock` and use .release; readers use .acquire.
                 closed: Atomic(bool) = Atomic(bool).init(false),
+                finished: Atomic(bool) = Atomic(bool).init(false),
                 err: ?anyerror = null,
                 has_generator: bool = false, // true only when created via spawnNew
                 wg: WaitGroup = undefined, // valid only when has_generator == true
@@ -1237,7 +1314,7 @@ pub fn bind(comptime deps: type) type {
                 } else {
                     inner.lock.store(0, .release);
                 }
-                inner.wg.done();
+                if (inner.has_generator and !inner.finished.swap(true, .acq_rel)) inner.wg.done();
             }
 
             /// Consumer reads next value, returning null on EOF (closed + empty).

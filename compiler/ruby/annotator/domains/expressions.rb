@@ -93,7 +93,7 @@ module Annotator
           stamp_type!(node, :Bool)
         when :EXISTS
           operand_type = node.right.full_type!(context: "EXISTS operand")
-          unless Type.new(operand_type).optional?
+          unless Type.new(operand_type).optional? || Type.new(operand_type).stream_step?
             error!(node, :EXISTS_REQUIRES_OPTIONAL, got: operand_type)
           end
           stamp_type!(node, :Bool)

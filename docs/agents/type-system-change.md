@@ -510,7 +510,7 @@ aliases and whitespace cannot bypass it.
 
 ### Construction and annotation
 
-`BG STREAM YIELDS T` is the canonical explicit item contract:
+`BG STREAM YIELDS T` is the explicit item contract:
 
 ```clear
 values = BG STREAM YIELDS ?TextOrInteger {
@@ -527,6 +527,13 @@ until after the body and introduces an unrelated general block-ascription form.
 Without an expected stream type, `BG STREAM` defaults to finite unbounded
 `[~]Item`. Bounded and infinite claims require an expected binding/return type
 or an explicit future extension to the producer header.
+
+`YIELDS` is optional when inference produces one non-future base payload with
+only optional and/or fallible widening: `T`, `?T`, `!T`, and `!?T`. It remains
+legal to spell the contract in those cases. It is required when the item is a
+future (`~T`) or a named union. An expected binding type does not replace that
+source-level declaration: future and union items must be visibly intentional
+at the producer boundary.
 
 ### Inference
 
@@ -556,14 +563,19 @@ absence and failure discovered on different paths without inventing a new
 payload type. The join is commutative, associative, and independent of source
 order.
 
-Future is not a widening bit. Two identical `~T` values may join as `~T`, but
-mixing `~T` with `T`, `?T`, or `!T` is an error: the compiler must never insert
+Future is not a widening bit. Two identical `~T` values have a well-defined
+join, but the producer must spell `YIELDS ~T`. Mixing `~T` with `T`, `?T`, or
+`!T` is an error: the compiler must never insert
 an implicit `NEXT`, await, or future lift at an asynchronous boundary. Likewise,
 `T` and an unrelated `K` are an error and never produce an anonymous union,
 common nominal ancestor, protocol, or `Any`.
 
 If unrelated payload types occur, the producer must declare a named union item
-type and yield explicit variants. The current check of
+type, add `YIELDS ThatUnion`, and yield explicit variants. The diagnostic must
+name the conflicting types and present that remedy alongside changing the
+conflicting `YIELD` to the same base type. When the exact contract is already
+known, such as homogeneous `~T` or an already constructed named-union value,
+`clear fix` inserts the missing `YIELDS` clause. The current check of
 `yield_types.map(&:resolved)` is insufficient because it discards optional,
 fallible, collection, generic, and capability structure. If fallible types
 later gain explicit error sets, those error sets must also agree or use an
@@ -841,7 +853,7 @@ old/new equivalent spellings produce equivalent MIR layouts.
 
 - Add stream cardinality nodes for finite unbounded, finite bounded, and
   infinite streams.
-- Add `BG STREAM YIELDS T` as the only explicit producer item annotation and
+- Add `BG STREAM YIELDS T` as the explicit producer item annotation and
   reject the postfix `BG STREAM { ... }: T` form.
 - Propagate expected item types from `YIELDS`, bindings, returns, and argument
   positions into the stream body before visiting any `YIELD`.
@@ -864,6 +876,8 @@ Exit gate:
 - both an annotated `BG STREAM YIELDS ?T` and an unannotated `T`/`NIL`
   producer are accepted; the latter infers `?T`;
 - an unannotated producer with `!T` and `?T` sites infers `!?T`;
+- homogeneous future items and named-union items are rejected without
+  `YIELDS`, with an exact insertion fix when the contract is knowable;
 - `T`/`K`, `T`/`~T`, and `!T`/`~T` producer sites are rejected;
 - heterogeneous unannotated `BG`, `DO`, and `BG STREAM` boundaries fail with
   diagnostics naming every conflicting terminal site;
@@ -940,7 +954,8 @@ Required adversarial tests include:
 - old/new map default-key preservation;
 - multidimensional extent and stride overflow;
 - optional container versus optional element at every layer;
-- `BG STREAM YIELDS T` supplied directly and through an expected binding type;
+- optional explicit `BG STREAM YIELDS T`, plus required `YIELDS` for future and
+  named-union items even when an expected binding type exists;
 - rejection of postfix `BG STREAM { ... }: T` syntax;
 - same-payload `T`/`NIL` and `!T`/`?T` asynchronous sites that must infer `?T`
   and `!?T`, respectively, independent of source order;

@@ -85,6 +85,8 @@ module Annotator
         # Restore graph to pre-branch state before analyzing each branch.
         ownership_graph.restore_lightweight(og_snapshot) if og_snapshot
         prev_terminated = @branch_terminated
+        stream_frame = current_stream_yield_frame
+        prev_stream_closed = stream_frame&.closed
         @branch_terminated = false
 
         begin
@@ -104,6 +106,7 @@ module Annotator
           end
         ensure
           @branch_terminated = prev_terminated
+          stream_frame.closed = T.must(prev_stream_closed) if stream_frame && !prev_stream_closed.nil?
         end
       end
       private :analyze_control_flow_branch
@@ -502,10 +505,15 @@ module Annotator
                 end
                 T.must(ti.success_type)
               else
-                unless ti.optional?
-                  error!(b.expr, :IF_AS_NEEDS_OPTIONAL, got: b.expr.resolved_type)
+                if ti.stream_step?
+                  b[:predicate] = :stream_item
+                  T.must(ti.stream_step_item_type)
+                else
+                  unless ti.optional?
+                    error!(b.expr, :IF_AS_NEEDS_OPTIONAL, got: b.expr.resolved_type)
+                  end
+                  T.must(ti.wrapped_type)
                 end
-                T.must(ti.wrapped_type)
               end
               if b.expr.is_a?(AST::ResolveNode) && (ti.multiowned? || ti.shared?)
                 unwrapped.apply_reference_ownership!(ti.ownership, link_source: ti.link_source)
@@ -1119,7 +1127,9 @@ module Annotator
         ct = coll_type.is_a?(Type) ? coll_type : Type.new(coll_type)
 
         # Determine element type from collection
-        elem_type = if ct.array? || ct.list_collection?
+        elem_type = if ct.dynamic_stream? || (ct.bounded_stream? && ct.canonical_stream?)
+          ct.stream_element_type || ct.tense_type.element_type || :Any
+        elsif ct.array? || ct.list_collection?
           ct.element_type || ct.value_type || :Any
         elsif ct.map?
           # FOR k IN map iterates over keys (strings)
@@ -1162,7 +1172,7 @@ module Annotator
 
         # Effect tracking: WHILE TRUE or any non-trivially-bounded loop.
         if (node.condition.is_a?(AST::Identifier) && node.condition.name == "TRUE") ||
-           (node.condition.is_a?(AST::Literal) && node.condition.value == true)
+           (node.condition.is_a?(AST::Literal) && node.condition.true_boolean?)
           record_effect(EffectTracker::LOOP_UNBOUND)
         end
 
@@ -1211,11 +1221,11 @@ module Annotator
 
         visit(node.condition)
         ti = node.condition.full_type!(context: "WHILE AS condition")
-        unless ti.optional?
+        unless ti.optional? || ti.stream_step?
           error!(node.condition, :WHILE_AS_NEEDS_OPTIONAL, got: node.condition.resolved_type)
         end
 
-        unwrapped = ti.wrapped_type
+        unwrapped = ti.stream_step? ? ti.stream_step_item_type : ti.wrapped_type
         if node.condition.is_a?(AST::ResolveNode) && (ti.multiowned? || ti.shared?)
           unwrapped.apply_reference_ownership!(ti.ownership, link_source: ti.link_source)
         end

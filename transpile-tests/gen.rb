@@ -64,6 +64,8 @@ class TestGenerator
                       cheat_code.include?("@pinned") ||
                       cheat_code.include?("@sharded") ||
                       cheat_code.include?("SHARD(") ||
+                      transpiled_body.include?(".submitSpawn(") ||
+                      transpiled_body.include?(".spawnNew(") ||
                       transpiled_body.include?("WaitGroup") ||
                       transpiled_body.include?("PartitionedStringMap") ||
                       transpiled_body.include?("PartitionedNumericMap") ||

@@ -1088,6 +1088,7 @@ pub const CheatLib = struct {
     pub const Promise = DataStructures.Promise;
     pub const SharedPromise = DataStructures.SharedPromise;
     pub const BoundedStream = DataStructures.BoundedStream;
+    pub const StreamStep = DataStructures.StreamStep;
     pub const Stream = DataStructures.Stream;
     pub const InfStream = DataStructures.InfStream;
     pub const BoundedChannel = DataStructures.BoundedChannel;

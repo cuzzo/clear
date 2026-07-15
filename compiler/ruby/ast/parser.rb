@@ -281,6 +281,7 @@ class ClearParser
     rule(:KEYWORD, 'DO', action: :parse_do_block),
     rule(:KEYWORD, 'BG', action: :parse_bg_block),
     rule(:KEYWORD, 'YIELD', action: :parse_yield_expr),
+    rule(:KEYWORD, 'CLOSE', action: :parse_close_stream),
     rule(:KEYWORD, 'MATCH', action: :parse_match_statement),
     rule(:KEYWORD, 'PARTIAL', action: :parse_partial_match_statement),
     rule(:KEYWORD, 'PASS', action: :parse_pass_statement),
@@ -440,6 +441,7 @@ class ClearParser
     when :parse_do_block then parse_do_block
     when :parse_bg_block then parse_bg_block
     when :parse_yield_expr then parse_yield_expr
+    when :parse_close_stream then parse_close_stream
     when :parse_match_statement then parse_match_statement
     when :parse_partial_match_statement then parse_partial_match_statement
     when :parse_pass_statement then parse_pass_statement
@@ -3556,11 +3558,34 @@ class ClearParser
     token = T.must(peek_at(0))
     if token.type == :CHAR
       return parse_inline_prefixed_expression if %w[? ! ~].include?(token.value)
-      return parse_inline_linear_expression if token.value == '['
+      if token.value == '['
+        return parse_inline_stream_expression if peek_at(1)&.value == '~'
+        return parse_inline_linear_expression
+      end
       return parse_inline_map_expression if token.value == '{'
     end
 
     parse_inline_atom_expression
+  end
+
+  sig { returns(StreamTypeExpression) }
+  def parse_inline_stream_expression
+    consume(:CHAR, '[')
+    consume(:CHAR, '~')
+    cardinality = T.let(:FINITE, T.any(Integer, Symbol))
+    if match?(:NUMBER) || match?(:INT64)
+      cardinality = consume_number.value.to_i
+    elsif match?(:TYPE_ID) && current.value == "INF"
+      consume(:TYPE_ID, 'INF')
+      cardinality = :INF
+    end
+    consume(:CHAR, ']')
+    caps = parse_inline_capabilities
+    StreamTypeExpression.new(
+      cardinality: cardinality,
+      item: parse_inline_type_expression,
+      capabilities: caps,
+    )
   end
 
   sig { returns(TypeExpression) }
@@ -4792,6 +4817,13 @@ class ClearParser
     expr = parse_expression
     consume(:CHAR, ';')
     AST::YieldExpr.new(tok, expr)
+  end
+
+  sig { returns(AST::CloseStream) }
+  def parse_close_stream
+    tok = consume(:KEYWORD, 'CLOSE')
+    consume(:CHAR, ';')
+    AST::CloseStream.new(tok)
   end
 
   sig { returns(AST::NextExpr) }

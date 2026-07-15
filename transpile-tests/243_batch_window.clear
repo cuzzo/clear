@@ -73,9 +73,9 @@ FN main() RETURNS Void ->
     ASSERT total5 == 55, "test5: sum 1..10=55";
 
     # -------------------------------------------------------
-    # Test 6: inf stream source, size-only
+    # Test 6: finite stream source, size-only
     # -------------------------------------------------------
-    gen6: ~Int64[INF] = BG STREAM {
+    gen6: [~]Int64 = BG STREAM {
         MUTABLE i6: Int64 = 1;
         WHILE i6 <= 6 DO
             YIELD i6;

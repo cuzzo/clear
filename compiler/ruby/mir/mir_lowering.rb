@@ -1201,6 +1201,7 @@ class MIRLowering
     when AST::TestBlock        then lower_test_block(node)
     when AST::RequireNode      then lower_require(node)
     when AST::YieldExpr        then lower_yield(node)
+    when AST::CloseStream      then lower_close_stream(node)
     when AST::NextExpr         then lower_next_expr(node)
     when AST::StaticCall       then lower_static_call(node)
     when AST::OrElseRaise          then MIR::FieldGet.new(MIR::Ident.new("error"), "OrElseRaise")

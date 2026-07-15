@@ -685,16 +685,18 @@ module Annotator
         inferred_join = Type.join_async_results(yield_types)
         if node.declared_yield_type.nil? && !inferred_join.success?
           surfaces = yield_types.map { |type| Type.surface_name(type) }.uniq
-          error!(node, :BG_STREAM_INCONSISTENT_YIELD, types: surfaces.join(', '))
+          error!(node, :BG_STREAM_INCONSISTENT_YIELD,
+            types: surfaces.join(', '), union_shape: "Union<#{surfaces.join(', ')}>")
+        elsif node.declared_yield_type.nil? && inferred_join.type &&
+              stream_yields_contract_required?(T.must(inferred_join.type))
+          emit_missing_stream_yields_contract!(node, T.must(inferred_join.type))
         end
 
         element_type = node.declared_yield_type || inferred_join.type || Type.new(:Any)
-        legacy_element_surface = Type.surface_name(element_type)
-        # Until StreamStep replaces the legacy optional completion sentinel,
-        # the wrapper contributes the leading `?`. Keep the explicit contract
-        # on the AST so a declared optional item is not inferred as a union.
-        legacy_element_surface = legacy_element_surface.delete_prefix("?") if element_type.optional?
-        stamp_type!(node, Type.new(:"~?#{legacy_element_surface}[]"))
+        stamp_type!(node, Type.new(StreamTypeExpression.new(
+          cardinality: :FINITE,
+          item: element_type.shape.expression,
+        )))
 
         node.capture_analysis = stream_analysis_result
 
@@ -712,16 +714,75 @@ module Annotator
           error!(node, :YIELD_OUTSIDE_BG_STREAM)
           return
         end
+        error!(node, :YIELD_AFTER_CLOSE) if frame.closed
         visit(node.expr)
         stamp_type!(node, node.expr.full_type!(context: "yield expression"))
         yielded_type = Type.new(node.full_type!(context: "yield result"))
         expected_type = frame.expected_type
         if expected_type && !expected_type.accepts?(yielded_type)
           error!(node, :BG_STREAM_INCONSISTENT_YIELD,
-            types: "#{Type.surface_name(expected_type)}, #{Type.surface_name(yielded_type)}")
+            types: "#{Type.surface_name(expected_type)}, #{Type.surface_name(yielded_type)}",
+            union_shape: "Union<#{Type.surface_name(expected_type)}, #{Type.surface_name(yielded_type)}>")
         end
         frame.yield_types << yielded_type
         record_effect(EffectTracker::SUSPENDS)
+      end
+
+      sig { params(type: Type).returns(T::Boolean) }
+      def stream_yields_contract_required?(type)
+        T.bind(self, SemanticAnnotator)
+        return true if type.future?
+
+        lookup_type_schema(type.resolved).is_a?(Schemas::UnionSchema)
+      end
+
+      sig { params(node: AST::BgStreamBlock, contract: Type).void }
+      def emit_missing_stream_yields_contract!(node, contract)
+        T.bind(self, SemanticAnnotator)
+        contract_name = Type.surface_name(contract)
+        source = @source_code
+        token = node.token
+        fix = T.let(nil, T.nilable(Fix))
+        if source && token
+          line = source.lines[token.line - 1]
+          start = token.column - 1
+          stream_at = line&.index(/\bSTREAM\b/, start)
+          if stream_at
+            insert_col = stream_at + "STREAM".length + 1
+            fix = Fix.new(
+              description: fix_description(:ADD_STREAM_YIELDS_CONTRACT, type: contract_name),
+              confidence: :auto,
+              edits: [Edit.new(
+                span: Span.new(file: nil, line: token.line, col: insert_col, length: 0),
+                replacement: " YIELDS #{contract_name}",
+              )],
+            )
+          end
+        end
+
+        return error!(node, :BG_STREAM_YIELDS_REQUIRED, type: contract_name) unless fix
+
+        fixable!(node,
+          code: :BG_STREAM_YIELDS_REQUIRED,
+          type: contract_name,
+          category: :type,
+          level: :error,
+          fixes: [fix])
+      end
+
+      sig { params(node: AST::CloseStream).void }
+      def visit_CloseStream(node)
+        T.bind(self, SemanticAnnotator)
+
+        frame = current_stream_yield_frame
+        unless frame
+          error!(node, :CLOSE_OUTSIDE_BG_STREAM)
+          return
+        end
+        error!(node, :STREAM_ALREADY_CLOSED) if frame.closed
+        frame.closed = true
+        stamp_type!(node, :Void)
+        @branch_terminated = true
       end
 
       sig { params(node: AST::BgBlock).returns(T.nilable(T::Boolean)) }
@@ -902,11 +963,21 @@ module Annotator
           node.storage   = :heap
         elsif promise_type.dynamic_stream?
           elem_sym = T.must(promise_type.tense_type.element_type).to_sym
-          stamp_type!(node, Type.new(:"?#{elem_sym}"))
+          if promise_type.canonical_stream?
+            stamp_type!(node, Type.stream_step_of(T.must(promise_type.tense_type.element_type)))
+          else
+            stamp_type!(node, Type.new(:"?#{elem_sym}"))
+          end
         elsif promise_type.bounded_stream?
-          # NEXT on ~T[N]: returns T (the element type).
-          # Does NOT mark the stream as moved — the stream can be NEXT'd up to N times.
-          stamp_type!(node, T.must(promise_type.stream_element_type).to_sym)
+          # Canonical finite streams expose completion as a tagged step so an
+          # optional item remains distinguishable from exhaustion. Legacy
+          # ~T[N] keeps its direct-T behavior until corpus migration completes.
+          element_type = T.must(promise_type.stream_element_type)
+          if promise_type.canonical_stream?
+            stamp_type!(node, Type.stream_step_of(element_type))
+          else
+            stamp_type!(node, element_type.to_sym)
+          end
         elsif promise_type.shared_promise?
           # NEXT on ~T@shared: returns T, idempotent — same handle can be NEXT'd again.
           # Does NOT mark as moved; multiple consumers may hold their own handles.

@@ -1422,10 +1422,10 @@ RSpec.describe SemanticAnnotator do
       expect(bind.full_type.to_s).to eq("Int64[]")
     end
 
-    it "accepts inf stream source (~T[INF])" do
+    it "accepts a finite stream source ([~]T)" do
       tree = run(<<~CLEAR)
         FN f() RETURNS !Void ->
-            gen: ~Int64[INF] = BG STREAM { YIELD 1; YIELD 2; };
+            gen: [~]Int64 = BG STREAM { YIELD 1; YIELD 2; };
             result = gen |> WINDOW(size: 2) _.length();
         END
       CLEAR

@@ -118,6 +118,7 @@ class SemanticAnnotator
     const :node, AST::BgStreamBlock
     const :expected_type, T.nilable(Type), default: nil
     const :yield_types, T::Array[Type], factory: -> { [] }
+    prop :closed, T::Boolean, default: false
   end
 
   class SnapshotTxnFrame < T::Struct

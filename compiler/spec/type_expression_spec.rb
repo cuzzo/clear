@@ -98,6 +98,32 @@ RSpec.describe TypeExpressionParser do
     expect(TypeExpressionPrinter.inline(bounded)).to eq("[~10]String")
   end
 
+  it "projects inline stream nodes through the runtime stream API without losing optional items" do
+    finite = Type.new(StreamTypeExpression.new(
+      cardinality: :FINITE,
+      item: OptionalTypeExpression.new(inner: NamedTypeExpression.new(name: :Int64))
+    ))
+    infinite = Type.new(StreamTypeExpression.new(
+      cardinality: :INF,
+      item: NamedTypeExpression.new(name: :String)
+    ))
+
+    expect(finite).to be_future
+    expect(finite).to be_dynamic_stream
+    expect(finite.tense_type.element_type).to be_optional
+    expect(finite.zig_type).to eq("CheatLib.Stream(?i64)")
+    expect(infinite).to be_inf_stream
+    expect(infinite.zig_type).to eq("CheatLib.InfStream([]const u8)")
+  end
+
+  it "maps StreamStep<T> to the runtime tagged step type" do
+    step = Type.stream_step_of(Type.optional_of(:Int64))
+
+    expect(step).to be_stream_step
+    expect(step.stream_step_item_type).to be_optional
+    expect(step.zig_type).to eq("CheatLib.StreamStep(?i64)")
+  end
+
   it "prints tense wrappers recursively in Inline Pivot form" do
     surfaces = ["?(String[])", "!Int64", "~Int64"]
 

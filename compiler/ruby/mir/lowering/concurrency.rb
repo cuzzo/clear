@@ -197,21 +197,25 @@ module MIRLoweringConcurrency
       .params(
         local_stream: String,
         is_inf: T::Boolean,
+        close_label: T.nilable(String),
         blk: T.proc.returns(T.type_parameter(:Result)),
       )
       .returns(T.type_parameter(:Result))
   end
-  def with_stream_body_context(local_stream, is_inf, &blk)
+  def with_stream_body_context(local_stream, is_inf, close_label: nil, &blk)
     T.bind(self, MIRLowering) rescue nil
     prev_stream_local = capture_state.current_stream_local
     prev_stream_is_inf = capture_state.current_stream_is_inf
+    prev_close_label = capture_state.current_stream_close_label
     capture_state.current_stream_local = local_stream
     capture_state.current_stream_is_inf = is_inf
+    capture_state.current_stream_close_label = close_label
     blk.call
   ensure
     T.bind(self, MIRLowering) rescue nil
     capture_state.current_stream_local = prev_stream_local
     capture_state.current_stream_is_inf = prev_stream_is_inf
+    capture_state.current_stream_close_label = prev_close_label
   end
 
   sig { params(caps: FiberCtxBuilder::Result, analysis: T.nilable(CapabilityHelper::CaptureAnalysis), receiver: String, close_plans: T::Hash[String, Schemas::ResourceClosePlan]).returns(T::Array[MIR::Stmt]) }
@@ -1061,7 +1065,7 @@ module MIRLoweringConcurrency
     # rendezvous-channel form (MIR::StreamSpawn / MIR::StreamYield)
     # that the bc_emitter compiles to STREAM_SPAWN + STREAM_YIELD opcodes.
     if bc_target?
-      run_body = with_stream_body_context(local_stream, is_inf) do
+      run_body = with_stream_body_context(local_stream, is_inf, close_label: is_inf ? nil : blk_label) do
         node.body.map { |expr| lower(expr) }
       end
 
@@ -1206,6 +1210,23 @@ module MIRLoweringConcurrency
     transfer_marks.empty? ? push : MIR::ScopeBlock.new([*transfer_marks, MIR::ExprStmt.new(push, false)])
   end
 
+  sig { params(_node: AST::CloseStream).returns(MIR::Node) }
+  def lower_close_stream(_node)
+    T.bind(self, MIRLowering) rescue nil
+    stream_local = capture_state.current_stream_local || "__stream_local"
+    close = MIR::ExprStmt.new(
+      MIR::MethodCall.new(MIR::Ident.new(stream_local), "close", [], false,
+        MIR::CallableContract.no_ownership(0)),
+      false,
+    )
+    label = capture_state.current_stream_close_label
+    if bc_target? && label
+      return MIR::ScopeBlock.new([close, MIR::BreakStmt.new(label, MIR::Ident.new(stream_local))])
+    end
+
+    MIR::ScopeBlock.new([close, MIR::ReturnStmt.new(nil)])
+  end
+
   sig { params(promise_type: Type, result_type: Type, fallback_alloc: Symbol).returns(T.nilable(Symbol)) }
   def next_result_owned_alloc(promise_type, result_type, fallback_alloc)
     T.bind(self, MIRLowering) rescue nil
@@ -1336,14 +1357,14 @@ module MIRLoweringConcurrency
       block = MIR::BlockExpr.new(label, [
         MIR::Let.new(temp, receiver, true, nil, nil),
         MIR::BreakStmt.new(label,
-          MIR::MethodCall.new(MIR::Ident.new(temp), "next", [], true,
+          MIR::MethodCall.new(MIR::Ident.new(temp), result_t.stream_step? ? "nextStep" : "next", [], true,
             MIR::CallableContract.no_ownership(0), plan.result_alloc)),
       ])
       block.result_type = Type.new(result_t)
       return block
     end
 
-    MIR::MethodCall.new(receiver, "next", [], true, MIR::CallableContract.no_ownership(0),
+    MIR::MethodCall.new(receiver, result_t.stream_step? ? "nextStep" : "next", [], true, MIR::CallableContract.no_ownership(0),
       plan.result_alloc)
   end
 

@@ -392,6 +392,26 @@ module MIRLoweringControlFlow
       body << MIR::ExprStmt.new(MIR::MethodCall.new(rt, "checkYield", [], false, MIR::CallableContract.no_ownership(0)), false)
     end
 
+    if Type.from_node!(node.condition).stream_step?
+      step_name = "__stream_step_#{lowering_counters.next_for_loop_id}"
+      step = MIR::Ident.new(step_name)
+      item_arm = MIR::UnionMatchArm.new(
+        variant: "Item",
+        payload: node.binding_name,
+        body: body,
+      )
+      closed_arm = MIR::UnionMatchArm.new(
+        variant: "Closed",
+        payload: nil,
+        body: [MIR::BreakStmt.new(nil, nil)],
+      )
+      loop_body = cond_pending + [
+        MIR::Let.new(step_name, cond, false, nil, nil),
+        MIR::UnionMatchStmt.new(step, [item_arm, closed_arm], nil),
+      ]
+      return MIR::WhileStmt.new(MIR::Lit.new("true"), loop_body, nil, nil, node.mark_per_iter, tight)
+    end
+
     MIR::WhileStmt.new(loop_condition_expr(cond, cond_pending), body, node.binding_name, nil, node.mark_per_iter, tight)
   end
 
@@ -502,11 +522,37 @@ module MIRLoweringControlFlow
         false, nil, nil)
       full_body = [skip_dead, value_bind] + body
       loop_stmt = MIR::ForStmt.new(slots_iter, slot_var, full_body, nil, mark_per_iter, tight)
+    elsif ct.dynamic_stream? && ct.canonical_stream?
+      step_name = "__stream_step_#{lowering_counters.next_for_loop_id}"
+      next_step = MIR::MethodCall.new(coll, "nextStep", [], true, MIR::CallableContract.no_ownership(0))
+      item_arm = MIR::UnionMatchArm.new(variant: "Item", payload: var, body: body)
+      closed_arm = MIR::UnionMatchArm.new(
+        variant: "Closed", payload: nil, body: [MIR::BreakStmt.new(nil, nil)])
+      loop_stmt = MIR::WhileStmt.new(
+        MIR::Lit.new("true"),
+        [
+          MIR::Let.new(step_name, next_step, false, nil, nil),
+          MIR::UnionMatchStmt.new(MIR::Ident.new(step_name), [item_arm, closed_arm], nil),
+        ],
+        nil, nil, mark_per_iter, tight)
     elsif ct.dynamic_stream? || ct.open_stream?
       # Finite/open stream (~T[] / ~?T[]): next() returns ?T; while-loop with optional capture.
       loop_stmt = MIR::WhileStmt.new(
         MIR::MethodCall.new(coll, "next", [], true, MIR::CallableContract.no_ownership(0)),
         body, var, nil, mark_per_iter, tight)
+    elsif ct.bounded_stream? && ct.canonical_stream?
+      step_name = "__stream_step_#{lowering_counters.next_for_loop_id}"
+      next_step = MIR::MethodCall.new(coll, "nextStep", [], true, MIR::CallableContract.no_ownership(0))
+      item_arm = MIR::UnionMatchArm.new(variant: "Item", payload: var, body: body)
+      closed_arm = MIR::UnionMatchArm.new(
+        variant: "Closed", payload: nil, body: [MIR::BreakStmt.new(nil, nil)])
+      loop_stmt = MIR::WhileStmt.new(
+        MIR::Lit.new("true"),
+        [
+          MIR::Let.new(step_name, next_step, false, nil, nil),
+          MIR::UnionMatchStmt.new(MIR::Ident.new(step_name), [item_arm, closed_arm], nil),
+        ],
+        nil, nil, mark_per_iter, tight)
     elsif ct.bounded_stream?
       # Bounded stream (~T[N]): next() returns T (panics when exhausted).
       # Use nextOrNull() so the while-loop optional-capture pattern works.

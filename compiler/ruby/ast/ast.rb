@@ -2068,6 +2068,11 @@ module AST
     def full_type
       @type_object ||= Type.new(LITERAL_VALUE_TYPE.fetch(self[:type], :Any))
     end
+
+    sig { returns(T::Boolean) }
+    def true_boolean?
+      self[:type] == :BOOLEAN && self[:value] == true
+    end
   end
   ListLit      = Struct.new(:token, :items, :storage, :constructor_options) {
     extend T::Sig
@@ -3082,6 +3087,13 @@ module AST
     def expr
       self[:expr]
     end
+  end
+
+  # CloseStream: explicitly terminate the enclosing finite BG STREAM.
+  # Completion is a control event and carries no item payload.
+  CloseStream       = Struct.new(:token) do
+    include Locatable
+    include StatementVoidType
   end
 
   # NextExpr: consume a Promise (~T), blocking the current fiber until the result is ready.

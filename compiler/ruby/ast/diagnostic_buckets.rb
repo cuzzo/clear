@@ -304,8 +304,8 @@ module DiagnosticBuckets
       alien_factor: :medium,
       summary: "BG STREAM / YIELD / NEXT / @split. Async/await is a partial onramp for JS devs; CLEAR's fiber model is stricter about consumption and capability requirements.",
       codes: %i[
-        BG_STREAM_NO_YIELD BG_STREAM_INCONSISTENT_YIELD
-        YIELD_OUTSIDE_BG_STREAM
+        BG_STREAM_NO_YIELD BG_STREAM_INCONSISTENT_YIELD BG_STREAM_YIELDS_REQUIRED
+        YIELD_OUTSIDE_BG_STREAM CLOSE_OUTSIDE_BG_STREAM
         NEXT_NEEDS_FUTURE
         ATSPLIT_STREAM_ONLY ATSPLIT_NEEDS_OPEN_STREAM
         RC_PROMISE_NEEDS_SHARED SOA_TO_EXTERN_FN

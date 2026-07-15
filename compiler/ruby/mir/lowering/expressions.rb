@@ -332,7 +332,12 @@ module MIRLoweringExpressions
     right = lower(node.right)
     case node.op
     when :NOT, "!" then MIR::UnaryOp.new("!", right)
-    when :EXISTS then MIR::BinOp.new("!=", right, MIR::Lit.new("null"))
+    when :EXISTS
+      if Type.from_node!(node.right).stream_step?
+        MIR::MethodCall.new(right, "isItem", [], false, MIR::CallableContract.no_ownership(0))
+      else
+        MIR::BinOp.new("!=", right, MIR::Lit.new("null"))
+      end
     when :IS_OK then MIR::FallibleOk.new(strip_try(right))
     when :IS_READY then MIR::FutureReady.new(right)
     when :SUB, "-" then MIR::UnaryOp.new("-", right)
