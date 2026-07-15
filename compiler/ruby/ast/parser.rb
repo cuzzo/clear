@@ -654,6 +654,7 @@ class ClearParser
       predicate_tok = consume(:KEYWORD)
       consume(:KEYWORD, 'AS')
       name_tok = consume(:VAR_ID)
+      error!(current, :CONDITIONAL_BINDING_UNDER_OR) if match?(:KEYWORD, 'OR')
       consume(:CHAR, ')')
       bind = AST::BinaryOp.new(predicate_tok, expr, :BIND_VAR,
                AST::Identifier.new(name_tok, name_tok.text!))

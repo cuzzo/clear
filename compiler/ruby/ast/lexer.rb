@@ -250,7 +250,7 @@ class Lexer
         read_interpolated_string(start_line, start_col, start_offset)
 
       else
-        raise "Unexpected char: #{@s.peek(1)} on line #{@line}:#{@column}"
+        raise Error, "Lexer Error: Unexpected char: #{@s.peek(1).inspect} on line #{@line}:#{@column}"
       end
     end
 

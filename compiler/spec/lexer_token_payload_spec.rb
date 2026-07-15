@@ -4,6 +4,15 @@ require_relative "../ruby/ast/lexer" unless defined?(Lexer)
 
 RSpec.describe Lexer::Token do
   describe "checked payload accessors" do
+    it "reports byte length from source offsets with a legacy-token fallback" do
+      ranged = described_class.new(:STRING, "ignored", 2, 4, "sample.clear", 10, 14, 2, 8)
+      legacy = described_class.new(:STRING, "🙂", 2, 4)
+
+      expect(ranged.byte_length).to eq(4)
+      expect(legacy.byte_length).to eq(4)
+      expect([ranged.start_line, ranged.start_column]).to eq([2, 4])
+    end
+
     it "returns textual payloads only for textual token kinds" do
       Lexer::Token::TEXT_TYPES.each do |type|
         expect(described_class.new(type, "body", 2, 4).text!).to eq("body")

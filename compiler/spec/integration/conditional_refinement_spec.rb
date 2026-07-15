@@ -52,6 +52,69 @@ RSpec.describe "frontend conditional-refinement integration" do
     expect(bind.then_branch.first).to be_a(AST::IfStatement)
   end
 
+  it "supports the single-statement arrow form" do
+    source = <<~CLEAR
+      FN main(maybe: ?Int64, enabled: Bool) RETURNS Void ->
+        IF enabled AND maybe EXISTS AS value -> PASS;
+      END
+    CLEAR
+
+    expect { frontend(source) }.not_to raise_error
+  end
+
+  it "supports a refinement chain in an ELSE_IF arm" do
+    source = <<~CLEAR
+      FN main(maybe: ?Int64, enabled: Bool) RETURNS Void ->
+        IF enabled THEN
+          PASS;
+        ELSE_IF enabled AND maybe EXISTS AS value AND value > 0_i64 THEN
+          PASS;
+        END
+      END
+    CLEAR
+
+    expect { frontend(source) }.not_to raise_error
+  end
+
+  it "supports ELSE_IF after a refined first arm" do
+    source = <<~CLEAR
+      FN main(maybe: ?Int64, enabled: Bool) RETURNS Void ->
+        IF enabled AND maybe EXISTS AS value THEN
+          PASS;
+        ELSE_IF enabled THEN
+          PASS;
+        END
+      END
+    CLEAR
+
+    expect { frontend(source) }.not_to raise_error
+  end
+
+  it "preserves a grouped Boolean atom before a later capture" do
+    ["(enabled OR enabled)", "(enabled AND enabled)"].each do |group|
+      expect { frontend(main_with("#{group} AND maybe EXISTS AS value")) }
+        .not_to raise_error
+    end
+  end
+
+  it "rejects a capture nested inside a grouped OR atom" do
+    expect { frontend(main_with("enabled AND (maybe EXISTS AS value OR enabled)")) }
+      .to raise_error(ParserError, /not definite beneath `OR`/)
+    expect { frontend(main_with("enabled AND ((maybe EXISTS AS value) OR enabled)")) }
+      .to raise_error(ParserError, /not definite beneath `OR`/)
+  end
+
+
+  it "accepts an expression statement while stamping the enclosing source range" do
+    source = <<~CLEAR
+      FN main() RETURNS Void ->
+        1_i64;
+      END
+    CLEAR
+
+    expect { frontend(source) }.not_to raise_error
+  end
+
   it "survives annotation, cleanup classification, and the MIR frontend" do
     source = <<~CLEAR
       FN choose(maybe: ?Int64, enabled: Bool) RETURNS Int64 ->

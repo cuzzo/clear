@@ -26,4 +26,15 @@ RSpec.describe "parsed type-syntax boundary" do
     expect(TypeExpressionPrinter.inline(semantic.shape.expression))
       .to eq("[]Tuple<Int64, ?String>@shared")
   end
+
+  it "rejects trailing tokens at the standalone syntax boundary" do
+    expect { ClearParser.parse_type_syntax("Int64 extra") }
+      .to raise_error(ParserError, /Expected end of type/)
+  end
+
+  it "renders fallible types nested inside structural syntax through the backend adapter" do
+    semantic = TypeSyntaxLowering.lower(ClearParser.parse_type_syntax("Tuple<!Int64, Bool>"))
+
+    expect(semantic.zig_type).to eq("struct { anyerror!i64, bool }")
+  end
 end

@@ -30,15 +30,16 @@ module FixableSuggestionHelper
                             category: :registry, cascade: true)
     token_line = T.cast(T.unsafe(token).line, Integer)
     token_column = T.cast(T.unsafe(token).column, Integer)
-    best = if fix_label == "closest in-scope variable" && name.match?(/\A[A-Z]/)
-      nil
-    else
-      closest_name(name, candidates)
-    end
+    best = closest_name(name, candidates)
     fixes = T.let([], T::Array[Fix])
     if best
       fixes << Fix.new(
-        description: T.unsafe(self).fix_description(:REPLACE_IDENTIFIER_WITH_CANDIDATE, name: name, best: best, label: fix_label),
+        description: DiagnosticRegistry.fix_description(
+          :REPLACE_IDENTIFIER_WITH_CANDIDATE,
+          name: name,
+          best: best,
+          label: fix_label,
+        ),
         confidence: :auto,
         edits: [Edit.new(
           span: Span.new(file: nil, line: token_line, col: token_column, length: name.length),

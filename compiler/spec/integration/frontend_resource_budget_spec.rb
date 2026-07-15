@@ -24,6 +24,27 @@ RSpec.describe "frontend resource-budget integration" do
       .to raise_error(ParserError, /Frontend tokens resource limit exceeded \(limit 8\)/)
   end
 
+  it "bounds source bytes at both public frontend boundaries" do
+    lexer_budget = FrontendResourceBudget.new(max_source_bytes: 3)
+    expect { Lexer.new("four", budget: lexer_budget) }
+      .to raise_error(Lexer::Error, /source_bytes resource limit exceeded \(limit 3\)/)
+
+    source = "value = 1_i64;"
+    tokens = Lexer.new(source).tokenize
+    parser_budget = FrontendResourceBudget.new(max_source_bytes: 3)
+    expect { ClearParser.new(tokens, source, budget: parser_budget).parse }
+      .to raise_error(ParserError, /source_bytes resource limit exceeded \(limit 3\)/)
+  end
+
+  it "normalizes an unexpected host stack overflow to a stable parser diagnostic" do
+    source = "PASS;"
+    parser = ClearParser.new(Lexer.new(source).tokenize, source)
+    allow(parser).to receive(:parse_statement).and_raise(SystemStackError)
+
+    expect { parser.parse }
+      .to raise_error(ParserError, /Frontend nesting resource limit exceeded/)
+  end
+
   it "keeps flat parsing geometric rather than replaying prefixes" do
     elapsed = [400, 800].map do |count|
       source = Array.new(count) { |index| "v#{index} = #{index}_i64;" }.join("\n")

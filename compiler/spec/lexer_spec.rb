@@ -282,7 +282,7 @@ RSpec.describe Lexer do
 
     it "rejects an unexpected character with its exact source position" do
       expect { Lexer.new("\n  `").tokenize }
-        .to raise_error(RuntimeError, "Unexpected char: ` on line 2:3")
+        .to raise_error(Lexer::Error, 'Lexer Error: Unexpected char: "`" on line 2:3')
     end
 
     it "handles tight spacing (operators next to identifiers)" do
@@ -301,6 +301,8 @@ RSpec.describe Lexer do
       sources = [
         %q!"value ${foo("}")} tail"!,
         %q!"value ${foo("{")} tail"!,
+        %q!"value ${foo("escaped \" } still string")} tail"!,
+        %q!"value ${foo("""triple } still string""")} tail"!,
         "\"value \${foo(1 # } ignored\n + 2)} tail\"",
       ]
 
