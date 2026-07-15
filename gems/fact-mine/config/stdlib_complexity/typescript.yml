@@ -1,0 +1,61 @@
+Array:
+  at: constant
+  length: constant
+  pop: constant
+  push: constant
+  shift: constant
+  unshift: constant
+  includes: linear_scan
+  find: linear_scan
+  findIndex: linear_scan
+  indexOf: linear_scan
+  lastIndexOf: linear_scan
+  concat: linear_materialize
+  filter: linear_materialize
+  flatMap: linear_materialize
+  map: linear_materialize
+  slice: linear_materialize
+  splice: linear_materialize
+  sort: sort
+Hash:
+  add: constant
+  delete: constant
+  get: constant
+  has: constant
+  set: constant
+  size: constant
+  entries: linear_materialize
+  keys: linear_materialize
+  values: linear_materialize
+Set:
+  add: constant
+  delete: constant
+  get: constant
+  has: constant
+  set: constant
+  size: constant
+  entries: linear_materialize
+  keys: linear_materialize
+  values: linear_materialize
+string:
+  includes: linear_scan
+  indexOf: linear_scan
+  lastIndexOf: linear_scan
+  match: linear_scan
+  search: linear_scan
+  split: linear_materialize
+  slice: linear_materialize
+  substring: linear_materialize
+  trim: linear_materialize
+  length: constant
+String:
+  includes: linear_scan
+  indexOf: linear_scan
+  lastIndexOf: linear_scan
+  match: linear_scan
+  search: linear_scan
+  split: linear_materialize
+  slice: linear_materialize
+  substring: linear_materialize
+  trim: linear_materialize
+  length: constant

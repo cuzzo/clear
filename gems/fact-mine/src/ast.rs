@@ -105,10 +105,7 @@ impl Node {
 }
 
 pub fn parse(file: &Path) -> Result<(Node, Vec<String>)> {
-    let language = file
-        .extension()
-        .and_then(|extension| extension.to_str())
-        .and_then(Language::for_extension)
+    let language = Language::for_path(file)
         .with_context(|| format!("unsupported source extension for {}", file.display()))?;
     parse_with_language(file, language)
 }

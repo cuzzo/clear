@@ -31,5 +31,34 @@
     "binary_search": "O(log N)",
     "permute": "O(N)",
     "recurse_unknown": "unknown"
+  },
+  "typed_operations.ts": {
+    "scanAndCopy": "O(N)"
+  },
+  "listener_fanout.cpp": {
+    "sum": "O(1)"
+  },
+  "cpp_header_fixture.h": {
+    "sum": "O(1)"
+  },
+  "typed_collections.java": {
+    "copyIfPresent": "O(N)"
+  },
+  "typed_collections.cs": {
+    "CopyIfPresent": "O(N)"
+  },
+  "typed_collections.go": {
+    "Size": "O(1)"
+  },
+  "typed_collections.py": {
+    "copy_if_present": "O(N)"
+  },
+  "typed_collections.cpp": {
+    "contains": "O(1)"
+  },
+  "static_capacity.ts": {
+    "fixedKeywords": "O(1)",
+    "dynamicKeywords": "O(1)",
+    "grownKeywords": "O(N)"
   }
 }

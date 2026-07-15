@@ -1,0 +1,30 @@
+Array:
+  get: constant
+  Count: constant
+  Add: constant
+  Remove: constant
+  Contains: linear_scan
+  IndexOf: linear_scan
+  ToArray: linear_materialize
+  ToList: linear_materialize
+  OrderBy: sort
+Hash:
+  get_Item: constant
+  TryGetValue: constant
+  ContainsKey: constant
+  Add: constant
+  Count: constant
+  Keys: linear_materialize
+  Values: linear_materialize
+Set:
+  Add: constant
+  Remove: constant
+  Contains: constant
+  Count: constant
+  ToArray: linear_materialize
+String:
+  Length: constant
+  Contains: linear_scan
+  IndexOf: linear_scan
+  Split: linear_materialize
+  Substring: linear_materialize

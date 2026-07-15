@@ -1,0 +1,34 @@
+Array:
+  get: constant
+  size: constant
+  isEmpty: constant
+  add: constant
+  contains: linear_scan
+  indexOf: linear_scan
+  lastIndexOf: linear_scan
+  toArray: linear_materialize
+  sort: sort
+Hash:
+  get: constant
+  put: constant
+  containsKey: constant
+  size: constant
+  isEmpty: constant
+  keySet: linear_materialize
+  values: linear_materialize
+  entrySet: linear_materialize
+Set:
+  add: constant
+  remove: constant
+  contains: constant
+  size: constant
+  isEmpty: constant
+  toArray: linear_materialize
+String:
+  charAt: constant
+  length: constant
+  contains: linear_scan
+  indexOf: linear_scan
+  lastIndexOf: linear_scan
+  split: linear_materialize
+  substring: linear_materialize

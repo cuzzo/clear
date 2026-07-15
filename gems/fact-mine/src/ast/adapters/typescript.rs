@@ -295,4 +295,21 @@ impl AstNormalizationAdapter for TypeScriptAstAdapter {
             _ => None,
         }
     }
+
+    fn loop_condition_node<'tree>(
+        &self,
+        node: TreeSitterNode<'tree>,
+        _source: &str,
+    ) -> Option<TreeSitterNode<'tree>> {
+        // In tree-sitter TypeScript, a `for (const item of items)` header has
+        // both a binding (`left`) and the cardinality-bearing iterable
+        // (`right`). The generic first-named-child fallback selected the
+        // binding, which made every `for..of` loop look like an unbounded
+        // local domain. Preserve the iterable in the normalized `FOR`
+        // condition so all downstream CFG/DFG and complexity consumers see
+        // the same source of cardinality.
+        (node.kind() == "for_in_statement")
+            .then(|| node.child_by_field_name("right"))
+            .flatten()
+    }
 }

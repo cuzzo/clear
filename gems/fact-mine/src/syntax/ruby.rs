@@ -24,9 +24,9 @@ use super::effects::{effect_from_call_with_lexicon, EffectLexicon};
 
 use super::normalized_behavior::{
     eliminable_guard_from_call, matching_paren_index, BlockCallSemantics, CardinalityCallSemantics,
-    CollectionAllocationSemantics, NormalizedCallParts, NormalizedCallProjection,
-    NormalizedCallComplexity, NormalizedLanguageBehavior, NormalizedNilGuardFact, NormalizedSemanticEffect,
-    NormalizedVisibilityEvent, SyntaxMetadata,
+    configured_collection_operation, CollectionAllocationSemantics, NormalizedCallParts, NormalizedCallProjection,
+    method_parameter_type_key, NormalizedCallComplexity, NormalizedCollectionOperation, NormalizedLanguageBehavior,
+    NormalizedNilGuardFact, NormalizedSemanticEffect, NormalizedVisibilityEvent, SyntaxMetadata,
 };
 use super::{CallSite, FunctionDef, StateDeclaration};
 use crate::ast::{self, Node, Span};
@@ -376,39 +376,12 @@ impl NormalizedLanguageBehavior for RubyNormalizedBehavior {
         ["Array", "Hash", "Set", "Enumerable"].iter().any(|name| type_name.contains(name))
     }
 
-    fn call_complexity(&self, receiver_type: &TypeExpr, message: &str) -> Option<NormalizedCallComplexity> {
-        let receiver = match receiver_type.strip_nilable() {
-            TypeExpr::Array(_) => "Array",
-            TypeExpr::Hash { .. } => "Hash",
-            TypeExpr::Set(_) => "Set",
-            TypeExpr::Primitive(name) => match name.rsplit("::").next().unwrap_or(&name) {
-                "Array" => "Array", "Hash" => "Hash", "Set" => "Set", "String" => "String",
-                _ => return None,
-            },
-            _ => return None,
-        };
-        let (time, space) = match (receiver, message) {
-            ("Array", "[]" | "length" | "size" | "first" | "last" | "empty?" | "push" | "pop") => ("O(1)", "O(1)"),
-            ("Array", "include?" | "index" | "rindex") => ("O(N)", "O(1)"),
-            ("Array", "join") => ("O(N)", "O(N)"),
-            ("Array", "each" | "each_with_index" | "each_index" | "reverse_each") => ("O(N)", "O(1)"),
-            ("Array", "map" | "collect" | "select" | "reject" | "filter" | "filter_map" | "compact" | "flatten" | "values" | "to_set" | "+" | "concat") => ("O(N)", "O(N)"),
-            ("Array", "sort" | "sort_by") => ("O(N log N)", "O(N)"),
-            ("Array", "-" | "&" | "|") => ("O(N * M)", "O(N)"),
-            ("Hash", "[]" | "key?" | "has_key?" | "include?" | "length" | "size" | "empty?") => ("O(1)", "O(1)"),
-            ("Hash", "each" | "each_key" | "each_value" | "each_pair" | "delete_if") => ("O(N)", "O(1)"),
-            ("Hash", "map" | "merge" | "keys" | "values" | "dup" | "to_set" | "transform_keys" | "transform_values") => ("O(N)", "O(N)"),
-            ("Hash", "sort" | "sort_by") => ("O(N log N)", "O(N)"),
-            ("Set", "include?" | "contains" | "length" | "size" | "empty?" | "add" | "insert") => ("O(1)", "O(1)"),
-            ("Set", "each") => ("O(N)", "O(1)"),
-            ("Set", "map" | "select" | "reject" | "to_a") => ("O(N)", "O(N)"),
-            ("String", "empty?") => ("O(1)", "O(1)"),
-            ("String", "length" | "size") => ("O(N)", "O(1)"),
-            ("String", "[]") => ("O(N)", "O(N)"),
-            ("String", "scan" | "gsub" | "split" | "+") => ("O(N)", "O(N)"),
-            _ => return None,
-        };
-        Some(NormalizedCallComplexity { time, space })
+    fn collection_operation(
+        &self,
+        receiver_type: &TypeExpr,
+        message: &str,
+    ) -> Option<NormalizedCollectionOperation> {
+        configured_collection_operation("ruby", receiver_type, message)
     }
 
     fn intrinsic_call_complexity(
@@ -1471,7 +1444,7 @@ fn method_param_types(
         .iter()
         .map(|function| {
             (
-                format!("{}\u{0}{}", function.owner, function.name),
+                method_parameter_type_key(&function.owner, &function.name, function.line),
                 sig_param_types(source, function.line),
             )
         })

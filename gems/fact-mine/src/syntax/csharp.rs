@@ -4,7 +4,7 @@ use super::cfg::ControlFlowProfile;
 
 use super::effects::{effect_from_call_with_lexicon, EffectLexicon};
 use super::normalized_behavior::{
-    eliminable_guard_from_call, nil_guard_from_predicates, NormalizedCallParts,
+    configured_collection_operation, eliminable_guard_from_call, nil_guard_from_predicates, type_before_parameter_name, NormalizedCallParts,
     NormalizedCallProjection, NormalizedLanguageBehavior, NormalizedNilGuardFact,
     NormalizedSemanticEffect,
 };
@@ -138,6 +138,22 @@ impl NormalizedLanguageBehavior for CSharpNormalizedBehavior {
         } else {
             "private".to_string()
         }
+    }
+
+    fn parameter_type_from_signature(&self, parameter: &str) -> Option<String> {
+        type_before_parameter_name(parameter)
+    }
+
+    fn collection_operation(
+        &self,
+        receiver_type: &crate::type_inference::TypeExpr,
+        message: &str,
+    ) -> Option<super::normalized_behavior::NormalizedCollectionOperation> {
+        configured_collection_operation("csharp", receiver_type, message)
+    }
+
+    fn mutating_receiver_message(&self, message: &str) -> bool {
+        matches!(message, "Add" | "Clear" | "Remove" | "Reverse" | "Sort")
     }
 
     fn property_read_call(&self, node: &Node, parts: &NormalizedCallParts) -> bool {

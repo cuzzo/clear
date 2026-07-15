@@ -1,0 +1,33 @@
+Array:
+  append: constant
+  pop: constant
+  count: linear_scan
+  index: linear_scan
+  copy: linear_materialize
+  sort: sort
+Hash:
+  get: constant
+  pop: constant
+  setdefault: constant
+  copy: linear_materialize
+Set:
+  add: constant
+  discard: constant
+  remove: constant
+  copy: linear_materialize
+str:
+  count: linear_scan
+  find: linear_scan
+  index: linear_scan
+  startswith: linear_scan
+  replace: linear_materialize
+  split: linear_materialize
+  strip: linear_materialize
+String:
+  count: linear_scan
+  find: linear_scan
+  index: linear_scan
+  startswith: linear_scan
+  replace: linear_materialize
+  split: linear_materialize
+  strip: linear_materialize

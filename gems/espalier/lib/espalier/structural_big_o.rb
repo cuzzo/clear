@@ -481,6 +481,8 @@ module Espalier
     def summary_hint(fact, method, owner = nil)
       iterations = Array(fact["iterations"])
       recursion = fact.fetch("recursion", {})
+      evidence_gaps = iterations.filter_map { |row| row["evidence_gap"] }
+      evidence_gaps.concat(Array(fact["allocations"]).filter_map { |row| row["evidence_gap"] })
       symbolic_time = Espalier::SymbolicComplexity.sum(
         iterations.filter_map do |row|
           Espalier::SymbolicComplexity.from_fact(row["symbolic_time"], fact["size_domains"])
@@ -504,7 +506,11 @@ module Espalier
                                                               recursion, Array(fact["parameters"]).length
                                                             )
                                                           end
-      allocation_space = allocation_complexity(Array(fact["allocations"]))
+      evidence_gaps << "unresolved_recursive_progress" if recursion_reason&.include?("unknown")
+      allocation_space, symbolic_space = allocation_complexity(
+        Array(fact["allocations"]),
+        fact["size_domains"]
+      )
       complexity = max_complexity(iteration_time, recursion_time)
 
       {
@@ -518,17 +524,27 @@ module Espalier
         confidence: complexity == "unknown" ? "unknown" : "high",
         time_complete: complexity != "unknown" && (!symbolic_time || symbolic_time.fetch(:complete, true)),
         space_complete: max_space_complexity(allocation_space, recursion_space) != "unknown",
+        evidence_gaps: evidence_gaps.uniq.sort,
         symbolic_time: symbolic_time,
+        symbolic_space: symbolic_space,
         fact_source: "fact_mine"
       }
     end
 
-    def allocation_complexity(allocations)
-      return nil if allocations.empty?
-      return "unknown" if allocations.any? { |row| row["cardinality_relation"] == "unknown" }
-      return "O(N)" if allocations.any? { |row| row["bound_classification"] == "input" }
+    def allocation_complexity(allocations, domains)
+      return [nil, nil] if allocations.empty?
+      return ["unknown", nil] if allocations.any? { |row| row["cardinality_relation"] == "unknown" }
 
-      "O(1)"
+      symbolic = Espalier::SymbolicComplexity.sum(
+        allocations.filter_map do |row|
+          Espalier::SymbolicComplexity.from_fact(row["symbolic_size"], domains)
+        end
+      )
+      rendered_symbolic = Espalier::SymbolicComplexity.render(symbolic)&.first
+      return [rendered_symbolic, symbolic] if rendered_symbolic
+      return ["O(N)", nil] if allocations.any? { |row| row["bound_classification"] == "input" }
+
+      ["O(1)", nil]
     end
 
     def max_space_complexity(left, right)

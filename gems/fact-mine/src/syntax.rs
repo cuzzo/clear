@@ -35,7 +35,7 @@ use crate::parallel;
 use anyhow::{bail, Result};
 use serde::{Deserialize, Deserializer, Serialize};
 use std::collections::BTreeMap;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 #[derive(Clone, Copy, Debug, Eq, Ord, PartialEq, PartialOrd)]
 pub enum Language {
@@ -118,6 +118,31 @@ impl Language {
             _ => None,
         }
     }
+
+    /// Detect a source language from a path. `.h` is the one ambiguous common
+    /// extension: keep C as the conservative extension default, but recognize
+    /// unmistakable C++ syntax before choosing a grammar. This belongs at the
+    /// source-adapter boundary so every downstream consumer receives one
+    /// correctly normalized language, rather than teaching analyzers about
+    /// headers or repository conventions.
+    pub fn for_path(path: &Path) -> Option<Self> {
+        let extension = path.extension()?.to_str()?.to_ascii_lowercase();
+        if extension != "h" {
+            return Self::for_extension(&extension);
+        }
+        let source = std::fs::read_to_string(path).ok()?;
+        Some(if looks_like_cpp_header(&source) {
+            Self::Cpp
+        } else {
+            Self::C
+        })
+    }
+}
+
+fn looks_like_cpp_header(source: &str) -> bool {
+    ["namespace ", "template <", "typename ", "constexpr ", "std::", "class "]
+        .iter()
+        .any(|marker| source.contains(marker))
 }
 
 impl<'de> Deserialize<'de> for Language {
@@ -564,6 +589,19 @@ mod tests {
         assert_eq!(Language::parse("php").unwrap(), Language::Php);
         assert!(Language::parse("invalid").is_err());
         assert!(Language::for_extension("invalid").is_none());
+
+        let mut c_header = tempfile::Builder::new()
+            .suffix(".h")
+            .tempfile()
+            .expect("C header");
+        c_header.write_all(b"typedef struct item { int value; } item;").expect("write C header");
+        assert_eq!(Language::for_path(c_header.path()), Some(Language::C));
+        let mut cpp_header = tempfile::Builder::new()
+            .suffix(".h")
+            .tempfile()
+            .expect("C++ header");
+        cpp_header.write_all(b"namespace eventpp { template <typename T> class CallbackList {}; }").expect("write C++ header");
+        assert_eq!(Language::for_path(cpp_header.path()), Some(Language::Cpp));
 
         // Enable profile variable to cover profiling path
         std::env::set_var("DECOMPLEX_RUST_PROFILE", "1");

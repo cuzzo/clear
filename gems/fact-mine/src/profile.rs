@@ -886,6 +886,8 @@ pub fn merge(outputs: Vec<ProfileOutput>, profile: Profile) -> ProfileOutput {
     calls.dedup_by(|a, b| a.id == b.id);
     state_accesses.sort_by(|a, b| a.id.cmp(&b.id));
     state_accesses.dedup_by(|a, b| a.id == b.id);
+    type_definitions.sort_by(|a, b| a.id.cmp(&b.id));
+    type_definitions.dedup_by(|a, b| a.id == b.id);
     type_dependencies.sort_by(|left, right| left["id"].as_str().cmp(&right["id"].as_str()));
     type_dependencies.dedup_by(|left, right| left["id"] == right["id"]);
 
@@ -2135,18 +2137,20 @@ fn extract_type_definitions(
 
     // Method param types from Document method_param_types
     for (fn_key, param_types) in &document.method_param_types {
-        let (owner, name) = split_method_key(fn_key);
+        let (owner, name, declared_line) = split_method_key(fn_key);
         let mut clean_name = name.clone();
         let name_to_find = name.clone();
         if clean_name.starts_with("self.") {
             clean_name = clean_name.strip_prefix("self.").unwrap().to_string();
         }
-        let line = document
-            .function_defs
-            .iter()
-            .find(|fd| fd.owner == owner && fd.name == name_to_find)
-            .map(|fd| fd.line)
-            .unwrap_or(0);
+        let line = declared_line.unwrap_or_else(|| {
+            document
+                .function_defs
+                .iter()
+                .find(|fd| fd.owner == owner && fd.name == name_to_find)
+                .map(|fd| fd.line)
+                .unwrap_or(0)
+        });
         let ts = language_type_system(language);
         let params: Vec<serde_json::Value> = param_types
             .iter()
@@ -2157,19 +2161,20 @@ fn extract_type_definitions(
                 })
             })
             .collect();
+        let id = [
+            language,
+            path,
+            &owner,
+            "method_signature",
+            &clean_name,
+            &line.to_string(),
+            ts,
+        ]
+        .join("\u{0}");
 
-        if !params.is_empty() {
+        if !params.is_empty() && !out.iter().any(|definition| definition.id == id) {
             out.push(TypeDefinition {
-                id: [
-                    language,
-                    path,
-                    &owner,
-                    "method_signature",
-                    &clean_name,
-                    &line.to_string(),
-                    ts,
-                ]
-                .join("\u{0}"),
+                id,
                 language: language.to_string(),
                 type_system: ts.to_string(),
                 kind: "method_signature".to_string(),
@@ -3489,12 +3494,16 @@ pub(crate) fn state_key(owner: &str, field: &str) -> String {
     format!("{}\u{0}{}", owner, field)
 }
 
-fn split_method_key(key: &str) -> (String, String) {
+fn split_method_key(key: &str) -> (String, String, Option<usize>) {
     let parts: Vec<&str> = key.split('\u{0}').collect();
     if parts.len() >= 2 {
-        (parts[0].to_string(), parts[1].to_string())
+        (
+            parts[0].to_string(),
+            parts[1].to_string(),
+            parts.get(2).and_then(|line| line.parse::<usize>().ok()),
+        )
     } else {
-        (String::new(), key.to_string())
+        (String::new(), key.to_string(), None)
     }
 }
 

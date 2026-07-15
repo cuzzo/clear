@@ -864,6 +864,11 @@ impl<'a> TypeInferenceVisitor<'a> {
                 self.current_method_end_line = node.last_lineno;
                 self.current_params = fn_def.params.clone();
 
+                let fn_key_line = crate::syntax::normalized_behavior::method_parameter_type_key(
+                    &owner,
+                    &func_name,
+                    node.first_lineno,
+                );
                 let fn_key_null = format!("{}\u{0}{}", owner, func_name);
                 let fn_key_colon = if owner.is_empty() {
                     func_name.clone()
@@ -873,7 +878,8 @@ impl<'a> TypeInferenceVisitor<'a> {
                 let types_opt = self
                     .document
                     .method_param_types
-                    .get(&fn_key_null)
+                    .get(&fn_key_line)
+                    .or_else(|| self.document.method_param_types.get(&fn_key_null))
                     .or_else(|| self.document.method_param_types.get(&fn_key_colon))
                     .or_else(|| self.document.method_param_types.get(&func_name));
                 if let Some(types) = types_opt {

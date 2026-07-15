@@ -4,7 +4,7 @@ use super::cfg::ControlFlowProfile;
 
 use super::effects::{effect_from_call_with_lexicon, EffectLexicon};
 use super::normalized_behavior::{
-    eliminable_guard_from_call, nil_guard_from_predicates, NormalizedCallProjection,
+    configured_collection_operation, eliminable_guard_from_call, nil_guard_from_predicates, type_before_parameter_name, NormalizedCallProjection,
     NormalizedLanguageBehavior, NormalizedNilGuardFact, NormalizedSemanticEffect,
     NormalizedStateRead,
 };
@@ -110,6 +110,22 @@ impl NormalizedLanguageBehavior for CppNormalizedBehavior {
             }
         }
         visibility.to_string()
+    }
+
+    fn parameter_type_from_signature(&self, parameter: &str) -> Option<String> {
+        type_before_parameter_name(parameter)
+    }
+
+    fn collection_operation(
+        &self,
+        receiver_type: &crate::type_inference::TypeExpr,
+        message: &str,
+    ) -> Option<super::normalized_behavior::NormalizedCollectionOperation> {
+        configured_collection_operation("cpp", receiver_type, message)
+    }
+
+    fn mutating_receiver_message(&self, message: &str) -> bool {
+        matches!(message, "clear" | "erase" | "insert" | "pop_back" | "push_back" | "reserve" | "resize")
     }
 
     fn implicit_owner_fields(&self) -> bool {

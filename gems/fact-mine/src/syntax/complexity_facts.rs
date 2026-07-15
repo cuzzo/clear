@@ -5,8 +5,8 @@ use std::collections::{BTreeMap, BTreeSet};
 
 use super::{
     normalized_behavior::{
-        BlockCallSemantics, CardinalityCallSemantics, CollectionAllocationSemantics,
-        NormalizedLanguageBehavior,
+        method_parameter_type_key, BlockCallSemantics, CardinalityCallSemantics, CollectionAllocationSemantics,
+        NormalizedCollectionOperation, NormalizedLanguageBehavior,
     },
     Document,
 };
@@ -141,6 +141,14 @@ pub struct AllocationFact {
     pub domain_expression: Vec<String>,
     pub cardinality_relation: String,
     pub bound_classification: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub evidence_gap: Option<String>,
+    /// A materialization can be proportional to more than one caller domain
+    /// (for example, a fixed local collection grown inside nested loops).
+    /// Keep that provenance in Fact-Mine instead of having a consumer infer it
+    /// from source text or rendered `O(...)` strings.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub symbolic_size: Option<SymbolicComplexityFact>,
     /// Iterating a call result can be linear even when that result's size has
     /// no proven relationship to the caller's inputs.
     #[serde(default, skip_serializing_if = "is_false")]
@@ -168,6 +176,8 @@ pub struct CallContainmentFact {
     pub known_time_complexity: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub known_space_complexity: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub evidence_gap: Option<String>,
 }
 
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
@@ -183,6 +193,8 @@ pub struct IterationFact {
     pub domain_expression: Vec<String>,
     pub cardinality_relation: String,
     pub bound_classification: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub evidence_gap: Option<String>,
     pub execution_multiplicity: String,
     pub power: usize,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -211,6 +223,7 @@ struct Assignment {
     shrinking: bool,
     halving: bool,
     empty_collection: bool,
+    fixed_collection: bool,
 }
 
 #[derive(Clone, Debug, Default)]
@@ -218,6 +231,11 @@ struct CollectionGrowth {
     power: usize,
     symbolic_factors: BTreeMap<String, usize>,
     symbolic_complete: bool,
+    parameter_domains: BTreeSet<String>,
+    domain_expression: BTreeSet<String>,
+    line: usize,
+    span: [usize; 4],
+    receiver_was_fixed: bool,
 }
 
 #[derive(Clone, Debug)]
@@ -369,7 +387,7 @@ pub(crate) fn facts(document: &Document) -> Vec<MethodComplexityFacts> {
                     }
                 }
             }
-            let type_key = format!("{}\u{0}{}", owner, method.name);
+            let type_key = method_parameter_type_key(owner, &method.name, method.line);
             let parameter_types = document
                 .method_param_types
                 .get(&type_key)
@@ -387,7 +405,10 @@ pub(crate) fn facts(document: &Document) -> Vec<MethodComplexityFacts> {
                 .get(&type_key)
                 .into_iter()
                 .flat_map(|types| types.iter())
-                .filter(|(_, value)| behavior.collection_parameter_type(value))
+                .filter(|(_, value)| {
+                    behavior.collection_parameter_type(value)
+                        || collection_type(&TypeExpr::parse(value, document.language.as_str()))
+                })
                 .map(|(name, _)| name.clone())
                 .collect::<BTreeSet<_>>();
             fact_for_method(
@@ -410,6 +431,13 @@ pub(crate) fn facts(document: &Document) -> Vec<MethodComplexityFacts> {
             )
         })
         .collect()
+}
+
+fn collection_type(type_expr: &TypeExpr) -> bool {
+    matches!(
+        type_expr.strip_nilable(),
+        TypeExpr::Array(_) | TypeExpr::Hash { .. } | TypeExpr::Set(_)
+    )
 }
 
 fn preliminary_block_summaries(
@@ -535,6 +563,8 @@ fn fact_for_method(
     }
     let mut assignments = BTreeMap::<String, Vec<Assignment>>::new();
     collect_assignments(node, &mut assignments, behavior);
+    let mut collection_mutations = BTreeMap::<String, Vec<(usize, usize)>>::new();
+    collect_collection_mutations(node, &mut collection_mutations, behavior);
     let mut max_power = 0;
     let mut evidence = Vec::new();
     let mut call_contexts = Vec::new();
@@ -550,6 +580,7 @@ fn fact_for_method(
         node,
         params,
         &assignments,
+        &collection_mutations,
         &LoopContext::default(),
         &mut max_power,
         &mut evidence,
@@ -581,7 +612,41 @@ fn fact_for_method(
         recursion.shrinking_calls + recursion.halving_calls + recursion.visited_guarded_calls,
     );
     let mut allocations = Vec::new();
-    collect_allocations(node, params, &assignments, &mut allocations, behavior);
+    collect_allocations(
+        node,
+        params,
+        &assignments,
+        &collection_mutations,
+        parameter_types,
+        state_types,
+        &mut allocations,
+        behavior,
+    );
+    // Appending into a locally-created fixed collection is a materialization
+    // of the loop's input, even though the allocation happens incrementally.
+    // This is distinct from mutating a caller-owned parameter: the latter is
+    // not auxiliary storage owned by this method, so it must not manufacture
+    // an O(N) space result.
+    for growth in collection_growth.values() {
+        if !growth.receiver_was_fixed || growth.parameter_domains.is_empty() {
+            continue;
+        }
+        allocations.push(AllocationFact {
+            line: growth.line,
+            span: growth.span,
+            kind: "collection_growth".to_string(),
+            parameter_domains: growth.parameter_domains.iter().cloned().collect(),
+            domain_expression: growth.domain_expression.iter().cloned().collect(),
+            cardinality_relation: "same".to_string(),
+            bound_classification: "input".to_string(),
+            evidence_gap: None,
+            symbolic_size: Some(symbolic_complexity(
+                &growth.symbolic_factors,
+                growth.symbolic_complete,
+            )),
+            receiver_is_call: false,
+        });
+    }
     for allocation in &mut allocations {
         if allocation.cardinality_relation != "unknown" || allocation.receiver_is_call {
             continue;
@@ -937,6 +1002,9 @@ fn collect_allocations(
     node: &Node,
     params: &BTreeSet<String>,
     assignments: &BTreeMap<String, Vec<Assignment>>,
+    collection_mutations: &BTreeMap<String, Vec<(usize, usize)>>,
+    parameter_types: &BTreeMap<String, TypeExpr>,
+    state_types: &BTreeMap<String, TypeExpr>,
     output: &mut Vec<AllocationFact>,
     behavior: &dyn NormalizedLanguageBehavior,
 ) {
@@ -944,7 +1012,25 @@ fn collect_allocations(
         return;
     }
     if let Some(message) = direct_call_message(node) {
-        let semantics = behavior.collection_allocation_semantics(message);
+        let typed_operation = call_receiver_type(
+            node,
+            parameter_types,
+            assignments,
+            state_types,
+            (node.first_lineno, node.first_column),
+            behavior,
+        )
+        .and_then(|receiver_type| behavior.collection_operation(&receiver_type, message));
+        let semantics = match (
+            behavior.collection_allocation_semantics(message),
+            typed_operation,
+        ) {
+            (
+                CollectionAllocationSemantics::None,
+                Some(NormalizedCollectionOperation::LinearMaterialize),
+            ) => CollectionAllocationSemantics::PreservesReceiver,
+            (configured, _) => configured,
+        };
         if semantics != CollectionAllocationSemantics::None {
             let domain_expression = call_receiver(node).map(local_names).unwrap_or_default();
             let parameter_domains = parameter_domains(
@@ -959,12 +1045,21 @@ fn collect_allocations(
                 matches!(value.r#type.as_str(), "ARRAY" | "HASH" | "LIST")
                     && local_names(value).is_empty()
             });
+            let fixed_local_receiver = !domain_expression.is_empty()
+                && domain_expression.iter().all(|name| {
+                    fixed_collection_local(
+                        name,
+                        assignments,
+                        collection_mutations,
+                        (node.first_lineno, node.first_column),
+                    )
+                });
             let (relation, bound) =
                 if semantics == CollectionAllocationSemantics::UnknownSize || receiver_is_call {
                     ("unknown", "unknown")
                 } else if !parameter_domains.is_empty() {
                     ("same", "input")
-                } else if fixed_receiver {
+                } else if fixed_receiver || fixed_local_receiver {
                     ("fixed", "fixed")
                 } else {
                     ("unknown", "unknown")
@@ -982,12 +1077,29 @@ fn collect_allocations(
                 domain_expression: domain_expression.into_iter().collect(),
                 cardinality_relation: relation.to_string(),
                 bound_classification: bound.to_string(),
+                evidence_gap: (relation == "unknown").then_some(
+                    if receiver_is_call {
+                        "unresolved_materialization_size".to_string()
+                    } else {
+                        "unresolved_allocation_cardinality".to_string()
+                    },
+                ),
+                symbolic_size: None,
                 receiver_is_call,
             });
         }
     }
     for child in child_nodes(node) {
-        collect_allocations(child, params, assignments, output, behavior);
+        collect_allocations(
+            child,
+            params,
+            assignments,
+            collection_mutations,
+            parameter_types,
+            state_types,
+            output,
+            behavior,
+        );
     }
 }
 
@@ -995,6 +1107,7 @@ fn visit_loops(
     node: &Node,
     params: &BTreeSet<String>,
     assignments: &BTreeMap<String, Vec<Assignment>>,
+    collection_mutations: &BTreeMap<String, Vec<(usize, usize)>>,
     parent: &LoopContext,
     max_power: &mut usize,
     evidence: &mut Vec<IterationFact>,
@@ -1042,6 +1155,7 @@ fn visit_loops(
                 control,
                 params,
                 assignments,
+                collection_mutations,
                 parent,
                 max_power,
                 evidence,
@@ -1067,6 +1181,7 @@ fn visit_loops(
                 child,
                 params,
                 assignments,
+                collection_mutations,
                 parent,
                 max_power,
                 evidence,
@@ -1132,10 +1247,19 @@ fn visit_loops(
         let growth_power = growth.as_ref().map(|growth| growth.power);
         let unknown_iteration =
             node.r#type == "ITER" && block_semantics == BlockCallSemantics::Unknown;
+        let fixed_locals = !locals.is_empty()
+            && locals.iter().all(|local| {
+                fixed_collection_local(
+                    local,
+                    assignments,
+                    collection_mutations,
+                    (node.first_lineno, node.first_column),
+                )
+            });
         let fixed = !unknown_iteration
             && refs.is_empty()
             && states.is_empty()
-            && locals.is_empty()
+            && (locals.is_empty() || fixed_locals)
             && growth_power.is_none();
         let cursor = growth_control.and_then(|row| {
             local_names(row)
@@ -1307,6 +1431,13 @@ fn visit_loops(
                 "input"
             }
             .to_string(),
+            evidence_gap: if unknown_iteration {
+                Some("unresolved_iteration_cardinality".to_string())
+            } else if !symbolic_complete {
+                Some("ambiguous_size_domain".to_string())
+            } else {
+                None
+            },
             execution_multiplicity: if unknown_iteration {
                 "unknown".to_string()
             } else {
@@ -1355,6 +1486,7 @@ fn visit_loops(
                 control,
                 params,
                 assignments,
+                collection_mutations,
                 parent,
                 max_power,
                 evidence,
@@ -1377,6 +1509,7 @@ fn visit_loops(
                 body,
                 params,
                 assignments,
+                collection_mutations,
                 &context,
                 max_power,
                 evidence,
@@ -1395,7 +1528,14 @@ fn visit_loops(
             );
         }
     } else {
-        record_collection_growth(node, parent, collection_growth, behavior);
+        record_collection_growth(
+            node,
+            parent,
+            collection_growth,
+            assignments,
+            collection_mutations,
+            behavior,
+        );
         if let Some(message) = direct_call_message(node) {
             if behavior.callback_invocation_message(message) {
                 let receiver_names = call_receiver(node).map(local_names).unwrap_or_default();
@@ -1482,20 +1622,33 @@ fn visit_loops(
             } else {
                 "unknown"
             };
-            let known_call_complexity = call_receiver_type(
+            let receiver_type = call_receiver_type(
                 node,
                 parameter_types,
                 assignments,
                 state_types,
                 (node.first_lineno, node.first_column),
                 behavior,
-            )
-            .and_then(|receiver_type| behavior.call_complexity(&receiver_type, message))
+            );
+            let known_call_complexity = receiver_type
+            .as_ref()
+            .and_then(|receiver_type| behavior.call_complexity(receiver_type, message))
             .or_else(|| {
                 behavior.intrinsic_call_complexity(
                     call_receiver(node).map(|receiver| receiver.text.trim()),
                     message,
                 )
+            });
+            let evidence_gap = known_call_complexity.is_none().then(|| {
+                if behavior.callback_invocation_message(message) {
+                    "callback_dispatch".to_string()
+                } else if receiver_type.is_some() {
+                    "unmodeled_typed_operation".to_string()
+                } else if call_receiver(node).is_some() {
+                    "unresolved_receiver_type".to_string()
+                } else {
+                    "unresolved_call_target".to_string()
+                }
             });
             call_contexts.push(CallContainmentFact {
                 line: node.first_lineno,
@@ -1529,6 +1682,7 @@ fn visit_loops(
                     .map(|complexity| complexity.time.to_string()),
                 known_space_complexity: known_call_complexity
                     .map(|complexity| complexity.space.to_string()),
+                evidence_gap,
             });
         }
         for child in child_nodes(node) {
@@ -1536,6 +1690,7 @@ fn visit_loops(
                 child,
                 params,
                 assignments,
+                collection_mutations,
                 parent,
                 max_power,
                 evidence,
@@ -1591,6 +1746,8 @@ fn record_collection_growth(
     node: &Node,
     context: &LoopContext,
     growth: &mut BTreeMap<String, CollectionGrowth>,
+    assignments: &BTreeMap<String, Vec<Assignment>>,
+    collection_mutations: &BTreeMap<String, Vec<(usize, usize)>>,
     behavior: &dyn NormalizedLanguageBehavior,
 ) {
     if context.power == 0 {
@@ -1609,11 +1766,26 @@ fn record_collection_growth(
         return;
     };
     for name in local_names(receiver) {
-        let entry = growth.entry(name).or_default();
+        let entry = growth.entry(name.clone()).or_default();
         if context.power >= entry.power {
             entry.power = context.power;
             entry.symbolic_factors = context.symbolic_factors.clone();
             entry.symbolic_complete = context.symbolic_complete;
+            entry.parameter_domains = context.params.clone();
+            entry.domain_expression = context.domain_names.clone();
+            entry.line = node.first_lineno;
+            entry.span = [
+                node.first_lineno,
+                node.first_column,
+                node.last_lineno,
+                node.last_column,
+            ];
+            entry.receiver_was_fixed = fixed_collection_local(
+                &name,
+                assignments,
+                collection_mutations,
+                (node.first_lineno, node.first_column),
+            );
         }
     }
 }
@@ -1684,12 +1856,64 @@ fn collect_assignments(
                         .any(|symbol| matches!(symbol.as_str(), "/" | ">>")),
                     empty_collection: rhs
                         .is_some_and(|value| empty_collection_expression(value, behavior)),
+                    fixed_collection: rhs
+                        .is_some_and(fixed_collection_expression),
                 });
         }
     }
     for child in child_nodes(node) {
         collect_assignments(child, output, behavior);
     }
+}
+
+fn collect_collection_mutations(
+    node: &Node,
+    output: &mut BTreeMap<String, Vec<(usize, usize)>>,
+    behavior: &dyn NormalizedLanguageBehavior,
+) {
+    if deferred_block(node, behavior) {
+        return;
+    }
+    if direct_call_message(node)
+        .is_some_and(|message| behavior.mutating_receiver_message(message))
+    {
+        if let Some(receiver) = call_receiver(node) {
+            for name in local_names(receiver) {
+                output
+                    .entry(name)
+                    .or_default()
+                    .push((node.first_lineno, node.first_column));
+            }
+        }
+    }
+    for child in child_nodes(node) {
+        collect_collection_mutations(child, output, behavior);
+    }
+}
+
+fn fixed_collection_expression(node: &Node) -> bool {
+    matches!(node.r#type.as_str(), "ARRAY" | "HASH" | "LIST")
+}
+
+fn fixed_collection_local(
+    variable: &str,
+    assignments: &BTreeMap<String, Vec<Assignment>>,
+    mutations: &BTreeMap<String, Vec<(usize, usize)>>,
+    before: (usize, usize),
+) -> bool {
+    let Some(assignment) = assignments.get(variable).and_then(|rows| {
+        rows.iter()
+            .rev()
+            .find(|row| (row.line, row.column) < before)
+    }) else {
+        return false;
+    };
+    assignment.fixed_collection
+        && !mutations
+            .get(variable)
+            .into_iter()
+            .flatten()
+            .any(|position| *position > (assignment.line, assignment.column) && *position < before)
 }
 
 fn linear_worklist(
@@ -2456,6 +2680,14 @@ class Cursor:
         }
     }
 
+    fn typescript_facts(source: &str) -> Vec<MethodComplexityFacts> {
+        language_facts(source, Language::TypeScript, ".ts")
+    }
+
+    fn python_facts(source: &str) -> Vec<MethodComplexityFacts> {
+        language_facts(source, Language::Python, ".py")
+    }
+
     fn complexity(rows: &[MethodComplexityFacts], name: &str) -> Option<String> {
         let row = rows.iter().find(|row| row.function == name)?;
         let recursion = &row.recursion;
@@ -2863,6 +3095,68 @@ end
     }
 
     #[test]
+    fn declared_types_and_normalized_operations_are_available_outside_ruby() {
+        let rows = typescript_facts(
+            r#"
+export function scanAndCopy(items: string[]): string[] {
+  items.includes("needle");
+  return items.map((item) => item);
+}
+"#,
+        );
+        let row = rows
+            .iter()
+            .find(|row| row.function == "scanAndCopy")
+            .expect("TypeScript function facts");
+        assert_eq!(row.collection_parameters, vec!["items"]);
+        let includes = row
+            .call_contexts
+            .iter()
+            .find(|call| call.message == "includes")
+            .expect("includes call");
+        assert_eq!(includes.known_time_complexity.as_deref(), Some("O(N)"));
+        assert_eq!(includes.known_space_complexity.as_deref(), Some("O(1)"));
+        let map = row
+            .call_contexts
+            .iter()
+            .find(|call| call.message == "map")
+            .expect("map call");
+        assert_eq!(map.known_time_complexity.as_deref(), Some("O(N)"));
+        assert_eq!(map.known_space_complexity.as_deref(), Some("O(N)"));
+        assert!(row.allocations.iter().any(|allocation| {
+            allocation.kind == "map"
+                && allocation.cardinality_relation == "same"
+                && allocation.parameter_domains == ["items"]
+        }));
+    }
+
+    #[test]
+    fn declared_python_collection_types_use_the_same_operation_contract() {
+        let rows = python_facts(
+            r#"
+def find_and_copy(items: list[str]) -> list[str]:
+    items.index("needle")
+    return items.copy()
+"#,
+        );
+        let row = rows
+            .iter()
+            .find(|row| row.function == "find_and_copy")
+            .expect("Python function facts");
+        assert_eq!(row.collection_parameters, vec!["items"]);
+        assert!(row.call_contexts.iter().any(|call| {
+            call.message == "index"
+                && call.known_time_complexity.as_deref() == Some("O(N)")
+                && call.known_space_complexity.as_deref() == Some("O(1)")
+        }));
+        assert!(row.allocations.iter().any(|allocation| {
+            allocation.kind == "copy"
+                && allocation.cardinality_relation == "same"
+                && allocation.parameter_domains == ["items"]
+        }));
+    }
+
+    #[test]
     fn language_intrinsics_carry_normalized_constant_costs() {
         let rows = ruby_facts(
             r#"
@@ -3084,6 +3378,7 @@ end
                 shrinking: false,
                 halving: false,
                 empty_collection: false,
+                fixed_collection: false,
             }],
         );
         assignments.insert(
@@ -3096,6 +3391,7 @@ end
                 shrinking: false,
                 halving: false,
                 empty_collection: false,
+                fixed_collection: false,
             }],
         );
         let mut output = BTreeSet::new();
@@ -3233,5 +3529,46 @@ end
         file.write_all(b"def scan(eligible, block_size):\n    for path, ids in eligible.items():\n        for start in range(0, len(ids), block_size):\n            consume(path, start)\n").unwrap();
         let document = syntax::parse_file(file.path().to_path_buf(), Language::Python).unwrap();
         assert_eq!(complexity(&facts(&document), "scan"), Some("O(N)".into()));
+    }
+
+    #[test]
+    fn fixed_literal_collections_remain_constant_until_a_loop_grows_them() {
+        let rows = typescript_facts(
+            r#"
+function fixed() {
+  const labels = ["a", "b"];
+  for (const label of labels) consume(label);
+}
+
+function dynamic(labels: string[]) {
+  for (const label of labels) consume(label);
+}
+
+function grown(values: string[]) {
+  const labels = ["a"];
+  for (const value of values) labels.push(value);
+  for (const label of labels) consume(label);
+}
+"#,
+        );
+
+        let fixed = rows.iter().find(|row| row.function == "fixed").unwrap();
+        assert!(fixed.iterations[0].fixed);
+        assert_eq!(fixed.iterations[0].bound_classification, "fixed");
+
+        let dynamic = rows.iter().find(|row| row.function == "dynamic").unwrap();
+        assert!(!dynamic.iterations[0].fixed);
+        assert_eq!(dynamic.iterations[0].parameter_domains, vec!["labels"]);
+
+        let grown = rows.iter().find(|row| row.function == "grown").unwrap();
+        assert!(grown.iterations.iter().all(|row| !row.fixed));
+        let allocation = grown
+            .allocations
+            .iter()
+            .find(|row| row.kind == "collection_growth")
+            .unwrap();
+        assert_eq!(allocation.parameter_domains, vec!["values"]);
+        assert_eq!(allocation.bound_classification, "input");
+        assert!(allocation.symbolic_size.is_some());
     }
 }

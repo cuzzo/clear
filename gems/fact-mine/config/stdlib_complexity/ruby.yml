@@ -1,0 +1,89 @@
+# Ruby core collection operations. Values are canonical operations, not
+# rendered Big-O strings: Fact-Mine emits the facts and Espalier owns algebra.
+Array:
+  "[]": constant
+  each: linear_scan
+  each_with_index: linear_scan
+  each_index: linear_scan
+  reverse_each: linear_scan
+  include?: linear_scan
+  index: linear_scan
+  rindex: linear_scan
+  join: linear_materialize
+  map: linear_materialize
+  collect: linear_materialize
+  select: linear_materialize
+  reject: linear_materialize
+  filter: linear_materialize
+  filter_map: linear_materialize
+  compact: linear_materialize
+  flatten: linear_materialize
+  values: linear_materialize
+  to_set: linear_materialize
+  "+": linear_materialize
+  concat: linear_materialize
+  length: constant
+  size: constant
+  last: constant
+  first: constant
+  empty?: constant
+  push: constant
+  pop: constant
+  freeze: constant
+  sort: sort
+  sort_by: sort
+  "-": pairwise
+  "&": pairwise
+  "|": pairwise
+Hash:
+  "[]": constant
+  key?: constant
+  has_key?: constant
+  include?: constant
+  length: constant
+  size: constant
+  empty?: constant
+  each: linear_scan
+  each_key: linear_scan
+  each_value: linear_scan
+  each_pair: linear_scan
+  delete_if: linear_scan
+  map: linear_materialize
+  merge: linear_materialize
+  keys: linear_materialize
+  values: linear_materialize
+  dup: linear_materialize
+  to_set: linear_materialize
+  transform_keys: linear_materialize
+  transform_values: linear_materialize
+  sort: sort
+  sort_by: sort
+Set:
+  include?: constant
+  contains: constant
+  length: constant
+  size: constant
+  empty?: constant
+  add: constant
+  insert: constant
+  each: linear_scan
+  map: linear_materialize
+  select: linear_materialize
+  reject: linear_materialize
+  to_a: linear_materialize
+String:
+  empty?: constant
+  length: linear_scan
+  size: linear_scan
+  "[]": linear_materialize
+  scan: linear_materialize
+  gsub: linear_materialize
+  split: linear_materialize
+  "+": linear_materialize
+StringScanner:
+  "[]": constant
+  eos?: constant
+  scan: linear_scan
+  scan_until: linear_scan
+Integer:
+  positive?: constant

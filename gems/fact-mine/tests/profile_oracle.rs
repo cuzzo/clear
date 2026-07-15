@@ -385,7 +385,7 @@ end
     let document = syntax::parse_file(tmp.path().to_path_buf(), Language::Ruby)?;
     let declared = document
         .method_param_types
-        .get("TypedInputs\0run")
+        .get("TypedInputs\0run\04")
         .context("missing declared parameter shapes")?;
     assert_eq!(declared.get("weak").map(String::as_str), Some("T::Array[T.untyped]"));
 

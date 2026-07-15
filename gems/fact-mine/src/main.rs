@@ -51,9 +51,7 @@ fn run() -> Result<()> {
                 let lang = if let Some(language) = language_override {
                     language
                 } else {
-                    file.extension()
-                        .and_then(|ext| ext.to_str())
-                        .and_then(|ext| Language::for_extension(&ext.to_ascii_lowercase()))
+                    Language::for_path(file)
                         .with_context(|| format!("cannot detect language for {}", file.display()))?
                 };
                 let document = syntax::parse_file(file.clone(), lang)?;

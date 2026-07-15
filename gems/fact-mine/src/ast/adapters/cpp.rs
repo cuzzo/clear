@@ -16,7 +16,11 @@ impl AstNormalizationAdapter for CppAstAdapter {
     }
 
     fn loop_node_type(&self, kind: &str) -> Option<&'static str> {
-        matches!(kind, "for_range_loop" | "range_based_for_statement").then_some("FOR")
+        matches!(
+            kind,
+            "for_statement" | "for_range_loop" | "range_based_for_statement"
+        )
+        .then_some("FOR")
     }
 
     fn case_arm_body_nodes<'tree>(
@@ -111,5 +115,16 @@ mod tests {
             nodes.extend(named_children(node));
         }
         assert!(saw_recovery);
+    }
+
+    #[test]
+    fn normalizes_counted_for_loops_alongside_range_loops() {
+        let adapter = CppAstAdapter;
+        assert_eq!(adapter.loop_node_type("for_statement"), Some("FOR"));
+        assert_eq!(adapter.loop_node_type("for_range_loop"), Some("FOR"));
+        assert_eq!(
+            adapter.loop_node_type("range_based_for_statement"),
+            Some("FOR")
+        );
     }
 }

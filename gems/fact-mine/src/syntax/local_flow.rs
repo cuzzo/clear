@@ -291,7 +291,7 @@ impl<'a> LocalFlow<'a> {
             .enumerate()
             .map(|(index, stmt)| self.statement_summary(stmt, index, &local_names))
             .collect::<Vec<_>>();
-        let param_types = self.param_types_for(owner, &name);
+        let param_types = self.param_types_for(owner, &name, node.first_lineno);
         let params = metadata
             .map(|metadata| metadata.params.clone())
             .unwrap_or_default();
@@ -310,7 +310,8 @@ impl<'a> LocalFlow<'a> {
         }
     }
 
-    fn param_types_for(&self, owner: &str, name: &str) -> BTreeMap<String, String> {
+    fn param_types_for(&self, owner: &str, name: &str, line: usize) -> BTreeMap<String, String> {
+        let line_key = super::normalized_behavior::method_parameter_type_key(owner, name, line);
         let null_key = format!("{owner}\0{name}");
         let colon_key = if owner.is_empty() || owner == "(top-level)" {
             name.to_string()
@@ -318,7 +319,8 @@ impl<'a> LocalFlow<'a> {
             format!("{owner}::{name}")
         };
         self.method_param_types
-            .get(&null_key)
+            .get(&line_key)
+            .or_else(|| self.method_param_types.get(&null_key))
             .or_else(|| self.method_param_types.get(&colon_key))
             .or_else(|| self.method_param_types.get(name))
             .cloned()

@@ -4,7 +4,7 @@ use super::cfg::ControlFlowProfile;
 
 use super::effects::{effect_from_call_with_lexicon, EffectLexicon};
 use super::normalized_behavior::{
-    eliminable_guard_from_call, nil_guard_from_predicates, NormalizedCallParts,
+    configured_collection_operation, eliminable_guard_from_call, nil_guard_from_predicates, NormalizedCallParts,
     NormalizedCallProjection, NormalizedLanguageBehavior, NormalizedNilGuardFact, NormalizedOwner,
     NormalizedSemanticEffect, NormalizedStateRead, NormalizedStateWrite,
 };
@@ -237,6 +237,32 @@ impl NormalizedLanguageBehavior for GoNormalizedBehavior {
             .next()
             .filter(|name| simple_identifier(name))
             .map(|name| name.trim_end_matches('?').to_string())
+    }
+
+    fn parameter_type_from_signature(&self, param: &str) -> Option<String> {
+        let mut parts = param.split_whitespace();
+        let _name = parts.next()?;
+        let type_name = parts.collect::<Vec<_>>().join(" ");
+        (!type_name.is_empty()).then_some(type_name)
+    }
+
+    fn collection_operation(
+        &self,
+        receiver_type: &crate::type_inference::TypeExpr,
+        message: &str,
+    ) -> Option<super::normalized_behavior::NormalizedCollectionOperation> {
+        configured_collection_operation("go", receiver_type, message)
+    }
+
+    fn intrinsic_call_complexity(
+        &self,
+        _receiver: Option<&str>,
+        message: &str,
+    ) -> Option<super::normalized_behavior::NormalizedCallComplexity> {
+        (message == "len").then_some(super::normalized_behavior::NormalizedCallComplexity {
+            time: "O(1)",
+            space: "O(1)",
+        })
     }
 
     fn split_case_source(&self, source: &str) -> Vec<String> {

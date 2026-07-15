@@ -1,0 +1,8 @@
+{
+  "listener_fanout.cpp": {
+    "dispatch": {
+      "time": "O(N)",
+      "space": "O(1)"
+    }
+  }
+}

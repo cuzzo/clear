@@ -6,6 +6,7 @@ use crate::ast::{Node, Span};
 use crate::syntax::cfg::ControlFlowProfile;
 use crate::type_inference::TypeExpr;
 use std::collections::BTreeMap;
+use std::sync::OnceLock;
 
 #[derive(Clone, Debug, Default)]
 pub(crate) struct SyntaxMetadata {
@@ -101,6 +102,134 @@ pub(crate) struct NormalizedCallComplexity {
     pub(crate) space: &'static str,
 }
 
+/// A language adapter maps a native collection API spelling to one of these
+/// operations. The cost table deliberately lives here, rather than in an
+/// analyzer or an individual language implementation: all downstream facts
+/// therefore describe the same operation regardless of surface syntax.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub(crate) enum NormalizedCollectionOperation {
+    Constant,
+    LinearScan,
+    LinearMaterialize,
+    Sort,
+    Pairwise,
+}
+
+impl NormalizedCollectionOperation {
+    pub(crate) fn complexity(self) -> NormalizedCallComplexity {
+        match self {
+            Self::Constant => NormalizedCallComplexity {
+                time: "O(1)",
+                space: "O(1)",
+            },
+            Self::LinearScan => NormalizedCallComplexity {
+                time: "O(N)",
+                space: "O(1)",
+            },
+            Self::LinearMaterialize => NormalizedCallComplexity {
+                time: "O(N)",
+                space: "O(N)",
+            },
+            Self::Sort => NormalizedCallComplexity {
+                time: "O(N log N)",
+                space: "O(N)",
+            },
+            Self::Pairwise => NormalizedCallComplexity {
+                time: "O(N * M)",
+                space: "O(N)",
+            },
+        }
+    }
+}
+
+type StdlibOperationMap = BTreeMap<String, BTreeMap<String, String>>;
+
+const RUBY_STDLIB_OPERATIONS: &str =
+    include_str!("../../config/stdlib_complexity/ruby.yml");
+const PYTHON_STDLIB_OPERATIONS: &str =
+    include_str!("../../config/stdlib_complexity/python.yml");
+const TYPESCRIPT_STDLIB_OPERATIONS: &str =
+    include_str!("../../config/stdlib_complexity/typescript.yml");
+const JAVA_STDLIB_OPERATIONS: &str =
+    include_str!("../../config/stdlib_complexity/java.yml");
+const CSHARP_STDLIB_OPERATIONS: &str =
+    include_str!("../../config/stdlib_complexity/csharp.yml");
+const GO_STDLIB_OPERATIONS: &str =
+    include_str!("../../config/stdlib_complexity/go.yml");
+const CPP_STDLIB_OPERATIONS: &str =
+    include_str!("../../config/stdlib_complexity/cpp.yml");
+
+fn parsed_stdlib_operations(source: &'static str, cache: &'static OnceLock<StdlibOperationMap>) -> &'static StdlibOperationMap {
+    cache.get_or_init(|| {
+        serde_yaml::from_str(source)
+            .expect("Fact-Mine stdlib complexity configuration must be valid YAML")
+    })
+}
+
+fn stdlib_operations(language: &str) -> Option<&'static StdlibOperationMap> {
+    static RUBY: OnceLock<StdlibOperationMap> = OnceLock::new();
+    static PYTHON: OnceLock<StdlibOperationMap> = OnceLock::new();
+    static TYPESCRIPT: OnceLock<StdlibOperationMap> = OnceLock::new();
+    static JAVA: OnceLock<StdlibOperationMap> = OnceLock::new();
+    static CSHARP: OnceLock<StdlibOperationMap> = OnceLock::new();
+    static GO: OnceLock<StdlibOperationMap> = OnceLock::new();
+    static CPP: OnceLock<StdlibOperationMap> = OnceLock::new();
+
+    match language {
+        "ruby" => Some(parsed_stdlib_operations(RUBY_STDLIB_OPERATIONS, &RUBY)),
+        "python" => Some(parsed_stdlib_operations(PYTHON_STDLIB_OPERATIONS, &PYTHON)),
+        "typescript" | "javascript" => Some(parsed_stdlib_operations(TYPESCRIPT_STDLIB_OPERATIONS, &TYPESCRIPT)),
+        "java" => Some(parsed_stdlib_operations(JAVA_STDLIB_OPERATIONS, &JAVA)),
+        "csharp" => Some(parsed_stdlib_operations(CSHARP_STDLIB_OPERATIONS, &CSHARP)),
+        "go" => Some(parsed_stdlib_operations(GO_STDLIB_OPERATIONS, &GO)),
+        "cpp" => Some(parsed_stdlib_operations(CPP_STDLIB_OPERATIONS, &CPP)),
+        _ => None,
+    }
+}
+
+fn operation_from_config(value: &str) -> Option<NormalizedCollectionOperation> {
+    match value {
+        "constant" => Some(NormalizedCollectionOperation::Constant),
+        "linear_scan" => Some(NormalizedCollectionOperation::LinearScan),
+        "linear_materialize" => Some(NormalizedCollectionOperation::LinearMaterialize),
+        "sort" => Some(NormalizedCollectionOperation::Sort),
+        "pairwise" => Some(NormalizedCollectionOperation::Pairwise),
+        _ => None,
+    }
+}
+
+/// Resolve a language-owned collection spelling through Fact-Mine's YAML
+/// configuration. Adapters provide only the language identity; Espalier never
+/// loads or interprets a language-specific complexity table.
+pub(crate) fn configured_collection_operation(
+    language: &str,
+    receiver_type: &TypeExpr,
+    message: &str,
+) -> Option<NormalizedCollectionOperation> {
+    let receiver = receiver_type.strip_nilable();
+    let names = match &receiver {
+        TypeExpr::Array(_) => vec!["Array".to_string()],
+        TypeExpr::Hash { .. } => vec!["Hash".to_string()],
+        TypeExpr::Set(_) => vec!["Set".to_string()],
+        TypeExpr::Primitive(name) => {
+            let unqualified = name.rsplit("::").next().unwrap_or(name);
+            if unqualified == name {
+                vec![name.clone()]
+            } else {
+                vec![name.clone(), unqualified.to_string()]
+            }
+        }
+        _ => return None,
+    };
+    let operations = stdlib_operations(language)?;
+    names.into_iter().find_map(|name| {
+        operations
+            .get(&name)
+            .and_then(|methods| methods.get(message))
+            .and_then(|operation| operation_from_config(operation))
+    })
+}
+
 pub(crate) trait NormalizedLanguageBehavior: Sync {
     fn cfg_profile(&self) -> &'static ControlFlowProfile {
         ControlFlowProfile::neutral_ref()
@@ -179,12 +308,24 @@ pub(crate) trait NormalizedLanguageBehavior: Sync {
     fn collection_parameter_type(&self, _type_name: &str) -> bool {
         false
     }
-    fn call_complexity(
+    /// Maps a native standard-library method to a normalized operation. The
+    /// adapter owns spellings and receiver compatibility; the common operation
+    /// table owns cost. Unknown/user calls must return `None`.
+    fn collection_operation(
         &self,
         _receiver_type: &TypeExpr,
         _message: &str,
-    ) -> Option<NormalizedCallComplexity> {
+    ) -> Option<NormalizedCollectionOperation> {
         None
+    }
+
+    fn call_complexity(
+        &self,
+        receiver_type: &TypeExpr,
+        message: &str,
+    ) -> Option<NormalizedCallComplexity> {
+        self.collection_operation(receiver_type, message)
+            .map(NormalizedCollectionOperation::complexity)
     }
 
     /// Return a cost only when the adapter recognizes a language/runtime
@@ -496,8 +637,18 @@ pub(crate) trait NormalizedLanguageBehavior: Sync {
         false
     }
 
-    fn syntax_metadata(&self, _source: &str, _functions: &[FunctionDef]) -> SyntaxMetadata {
-        SyntaxMetadata::default()
+    /// Extract a declared type from a single normalized function parameter.
+    /// Parsing the surface spelling stays in the syntax adapter; callers only
+    /// consume the common parameter-name -> type contract.
+    fn parameter_type_from_signature(&self, _parameter: &str) -> Option<String> {
+        None
+    }
+
+    fn syntax_metadata(&self, source: &str, functions: &[FunctionDef]) -> SyntaxMetadata {
+        SyntaxMetadata {
+            method_param_types: method_param_types_from_signatures(self, source, functions),
+            ..SyntaxMetadata::default()
+        }
     }
 
     fn owner_for_function(
@@ -861,6 +1012,86 @@ pub(crate) fn matching_paren_index(source: &str, open_index: usize) -> Option<us
         }
     }
     None
+}
+
+fn method_param_types_from_signatures<B: NormalizedLanguageBehavior + ?Sized>(
+    behavior: &B,
+    source: &str,
+    functions: &[FunctionDef],
+) -> BTreeMap<String, BTreeMap<String, String>> {
+    functions
+        .iter()
+        .filter_map(|function| {
+            let declaration = source
+                .lines()
+                .nth(function.line.saturating_sub(1))
+                .unwrap_or_default();
+            let params = behavior.parameter_list_source(declaration);
+            let param_types = split_signature_parameters(&params)
+                .into_iter()
+                .filter_map(|parameter| {
+                    let name = behavior.parameter_name_from_signature(&parameter)?;
+                    let type_name = behavior.parameter_type_from_signature(&parameter)?;
+                    (!type_name.trim().is_empty()).then_some((name, type_name))
+                })
+                .collect::<BTreeMap<_, _>>();
+            (!param_types.is_empty()).then_some((
+                method_parameter_type_key(&function.owner, &function.name, function.line),
+                param_types,
+            ))
+        })
+        .collect()
+}
+
+pub(crate) fn method_parameter_type_key(owner: &str, name: &str, line: usize) -> String {
+    format!("{owner}\u{0}{name}\u{0}{line}")
+}
+
+fn split_signature_parameters(source: &str) -> Vec<String> {
+    let mut params = Vec::new();
+    let mut depth = 0usize;
+    let mut start = 0usize;
+    for (index, character) in source.char_indices() {
+        match character {
+            '(' | '[' | '{' | '<' => depth += 1,
+            ')' | ']' | '}' | '>' => depth = depth.saturating_sub(1),
+            ',' if depth == 0 => {
+                let parameter = source[start..index].trim();
+                if !parameter.is_empty() {
+                    params.push(parameter.to_string());
+                }
+                start = index + 1;
+            }
+            _ => {}
+        }
+    }
+    let parameter = source[start..].trim();
+    if !parameter.is_empty() {
+        params.push(parameter.to_string());
+    }
+    params
+}
+
+/// Extract the declared type from C-family `Type name` parameters. Concrete
+/// adapters decide that their grammar uses this shape; the shared helper only
+/// handles token boundaries and common non-type modifiers.
+pub(crate) fn type_before_parameter_name(parameter: &str) -> Option<String> {
+    let text = parameter.split('=').next().unwrap_or(parameter).trim();
+    let name = text
+        .split_whitespace()
+        .next_back()?
+        .trim_matches(|ch: char| matches!(ch, '*' | '&' | '[' | ']' | ','))
+        .trim_start_matches("...");
+    if name.is_empty() {
+        return None;
+    }
+    let name_index = text.rfind(name)?;
+    let mut type_name = text[..name_index].trim();
+    for modifier in ["final ", "ref ", "out ", "in ", "params ", "this "] {
+        type_name = type_name.strip_prefix(modifier).unwrap_or(type_name);
+    }
+    let type_name = type_name.trim();
+    (!type_name.is_empty()).then(|| type_name.to_string())
 }
 
 #[cfg(test)]

@@ -1,4 +1,5 @@
 mod go;
+mod nominal;
 mod python;
 mod ruby;
 mod typescript;
@@ -16,6 +17,7 @@ pub(super) fn parse(source: &str, language: &str) -> TypeExpr {
         "python" => python::parse(source),
         "typescript" | "javascript" => typescript::parse(source),
         "go" => go::parse(source),
+        "java" | "csharp" | "cpp" => nominal::parse(source),
         // FactMine's legacy generic syntax is Sorbet-shaped. Keeping that
         // fallback explicit here prevents the shared engine from silently
         // accumulating another language's grammar.

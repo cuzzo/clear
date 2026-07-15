@@ -4,8 +4,8 @@ use super::cfg::ControlFlowProfile;
 
 use super::effects::{effect_from_call_with_lexicon, EffectLexicon};
 use super::normalized_behavior::{
-    eliminable_guard_from_call, nil_guard_from_predicates, CardinalityCallSemantics, NormalizedCallParts,
-    NormalizedCallProjection, NormalizedLanguageBehavior, NormalizedNilGuardFact,
+    configured_collection_operation, eliminable_guard_from_call, nil_guard_from_predicates, CardinalityCallSemantics, NormalizedCallParts,
+    NormalizedCallProjection, NormalizedCollectionOperation, NormalizedLanguageBehavior, NormalizedNilGuardFact,
     NormalizedSemanticEffect, NormalizedStateRead,
 };
 use super::CallSite;
@@ -148,6 +148,25 @@ impl NormalizedLanguageBehavior for PythonNormalizedBehavior {
             .unwrap_or(param)
             .trim();
         (!text.is_empty()).then(|| text.trim_start_matches('*').to_string())
+    }
+
+    fn parameter_type_from_signature(&self, param: &str) -> Option<String> {
+        let declaration = param.split('=').next().unwrap_or(param).trim();
+        let (_, type_name) = declaration.split_once(':')?;
+        let type_name = type_name.trim();
+        (!type_name.is_empty()).then(|| type_name.to_string())
+    }
+
+    fn collection_operation(
+        &self,
+        receiver_type: &crate::type_inference::TypeExpr,
+        message: &str,
+    ) -> Option<NormalizedCollectionOperation> {
+        configured_collection_operation("python", receiver_type, message)
+    }
+
+    fn mutating_receiver_message(&self, message: &str) -> bool {
+        matches!(message, "append" | "clear" | "discard" | "extend" | "insert" | "pop" | "remove" | "reverse" | "sort" | "update")
     }
 
     fn state_read_uses_access_span(&self, _call: &NormalizedCallProjection) -> bool {

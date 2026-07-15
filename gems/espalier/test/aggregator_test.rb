@@ -281,7 +281,7 @@ class AggregatorTest < Minitest::Test
     assert_equal "O(1)", fn[:quality_metrics][:big_o]
   end
 
-  def test_big_o_uses_signature_param_types
+  def test_big_o_uses_fact_mine_normalized_call_costs
     modules = [
       {
         type: :class,
@@ -297,6 +297,17 @@ class AggregatorTest < Minitest::Test
             line: 20,
             span: [20, 2, 25, 5],
             effects: { reads: Set.new, writes: Set.new },
+            complexity_facts: [{
+              "line" => 20, "parameters" => ["segments", "entry"],
+              "collection_parameters" => ["segments"], "iterations" => [],
+              "allocations" => [], "size_domains" => [],
+              "recursion" => { "calls" => 0 },
+              "call_contexts" => [{
+                "line" => 24, "message" => "sort_by", "execution_multiplicity" => "O(1)",
+                "power" => 0, "argument_cardinality_relation" => "same",
+                "known_time_complexity" => "O(N log N)", "known_space_complexity" => "O(N)"
+              }]
+            }],
             delegations: [
               { receiver: "segments", message: "sort_by", line: 24, type: :always }
             ]
@@ -978,6 +989,30 @@ class AggregatorTest < Minitest::Test
     assert function[:quality_metrics][:big_o_complete]
     assert function[:quality_metrics][:big_o_space_complete]
     refute_includes Array(function[:quality_metrics][:big_o_unknowns]), "Generated#new"
+  end
+
+  def test_big_o_exposes_fact_mine_evidence_gaps
+    modules = [{
+      type: :class, name: "Source", file: "source.rb", states: Set.new,
+      methods: [{
+        name: "run", signature: "def run", parameters: [], visibility: :public,
+        line: 2, span: [2, 0, 4, 3], effects: { reads: Set.new, writes: Set.new },
+        complexity_facts: [{
+          "line" => 2, "parameters" => [], "collection_parameters" => [],
+          "iterations" => [], "allocations" => [], "size_domains" => [],
+          "recursion" => { "calls" => 0 },
+          "call_contexts" => [{
+            "line" => 3, "message" => "scan", "execution_multiplicity" => "O(1)",
+            "power" => 0, "argument_cardinality_relation" => "same",
+            "evidence_gap" => "unmodeled_typed_operation"
+          }]
+        }],
+        delegations: [{ receiver: "items", message: "scan", line: 3, type: :always }]
+      }]
+    }]
+
+    function = Espalier::Aggregator.new.aggregate(modules).first[:functions].first
+    assert_equal ["unmodeled_typed_operation"], function[:quality_metrics][:big_o_evidence_gaps]
   end
 
   def test_resolved_recursion_uses_stack_safe_component_analysis

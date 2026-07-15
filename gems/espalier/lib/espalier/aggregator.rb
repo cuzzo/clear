@@ -1,6 +1,5 @@
 # frozen_string_literal: true
 
-require "yaml"
 require "set"
 require_relative "big_o_analyzer"
 require_relative "structural_big_o"
@@ -28,7 +27,6 @@ module Espalier
     # Aggregate extracted AST structure with auxiliary indicators
     def aggregate(modules)
       analyzer = Espalier::BigOAnalyzer.new(
-        language: :ruby,
         nil_kill: @nil_kill_evidence,
         declared_fields: declared_fields_for(modules)
       )
@@ -140,6 +138,7 @@ module Espalier
           quality[:complexity_trigger] = big_o_result[:trigger] if big_o_result[:trigger]
           quality[:big_o_warnings] = big_o_result[:warnings] unless big_o_result[:warnings].empty?
           quality[:big_o_unknowns] = big_o_result[:unknown_operations] unless big_o_result[:unknown_operations].empty?
+          quality[:big_o_evidence_gaps] = big_o_result[:evidence_gaps] unless big_o_result[:evidence_gaps].empty?
 
           {
             name: m[:name],
@@ -268,7 +267,6 @@ module Espalier
 
     def preliminary_method_complexities(modules)
       analyzer = Espalier::BigOAnalyzer.new(
-        language: :ruby,
         nil_kill: @nil_kill_evidence,
         declared_fields: declared_fields_for(modules)
       )
@@ -345,7 +343,6 @@ module Espalier
         threads = slices.map do |slice|
           Thread.new do
             local_analyzer = Espalier::BigOAnalyzer.new(
-              language: :ruby,
               nil_kill: @nil_kill_evidence,
               declared_fields: declared_fields_for(modules)
             )
@@ -570,6 +567,7 @@ module Espalier
           execution_complexity: context && context["execution_multiplicity"],
           known_time_complexity: (context && context["known_time_complexity"]) || delegation[:known_time_complexity],
           known_space_complexity: (context && context["known_space_complexity"]) || delegation[:known_space_complexity],
+          evidence_gap: context && context["evidence_gap"],
           symbolic_time: context && symbolic_call_complexity(context),
           collection_arguments: context && context["power"].to_i.positive? &&
             (Array(context["parameter_arguments"]) & Array(context["collection_parameters"])),

@@ -1,0 +1,6 @@
+Array:
+  len: constant
+Hash:
+  len: constant
+String:
+  len: constant

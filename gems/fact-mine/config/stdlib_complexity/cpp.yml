@@ -1,0 +1,26 @@
+Array:
+  at: constant
+  size: constant
+  empty: constant
+  push_back: constant
+  pop_back: constant
+  find: linear_scan
+  begin: constant
+  end: constant
+  sort: sort
+Hash:
+  at: constant
+  find: constant
+  contains: constant
+  size: constant
+  empty: constant
+Set:
+  find: constant
+  contains: constant
+  size: constant
+  empty: constant
+String:
+  size: constant
+  empty: constant
+  find: linear_scan
+  substr: linear_materialize
