@@ -178,10 +178,6 @@ class AST::ForEach
   def mark_per_iter; end
   sig { params(value: T.untyped).returns(T.untyped) }
   def mark_per_iter=(value); end
-  sig { returns(T.untyped) }
-  def tight; end
-  sig { params(value: T.untyped).returns(T.untyped) }
-  def tight=(value); end
 end
 
 class AST::FuncCall
@@ -453,10 +449,6 @@ end
 
 class AST::Program
   sig { returns(T.untyped) }
-  def language_mode; end
-  sig { params(value: T.untyped).returns(T.untyped) }
-  def language_mode=(value); end
-  sig { returns(T.untyped) }
   def mir_pass_state; end
   sig { params(value: T.untyped).returns(T.untyped) }
   def mir_pass_state=(value); end
@@ -471,10 +463,6 @@ class AST::StructLit
   def borrowed_field_names; end
   sig { params(value: T.untyped).returns(T.untyped) }
   def borrowed_field_names=(value); end
-  sig { returns(T.untyped) }
-  def field_tokens; end
-  sig { params(value: T.untyped).returns(T.untyped) }
-  def field_tokens=(value); end
 end
 
 class AST::TestBlock
@@ -568,10 +556,6 @@ class AST::WhileLoop
 end
 
 class AST::WithBlock
-  sig { returns(T.untyped) }
-  def arms; end
-  sig { params(value: T.untyped).returns(T.untyped) }
-  def arms=(value); end
   sig { returns(T.untyped) }
   def deadlock_escape; end
   sig { params(value: T.untyped).returns(T.untyped) }
@@ -880,10 +864,6 @@ class ForEach
   def mark_per_iter; end
   sig { params(value: T.untyped).returns(T.untyped) }
   def mark_per_iter=(value); end
-  sig { returns(T.untyped) }
-  def tight; end
-  sig { params(value: T.untyped).returns(T.untyped) }
-  def tight=(value); end
 end
 
 class FsmTransform::RecursiveSplitter::Builder
@@ -1438,10 +1418,6 @@ end
 
 class Program
   sig { returns(T.untyped) }
-  def language_mode; end
-  sig { params(value: T.untyped).returns(T.untyped) }
-  def language_mode=(value); end
-  sig { returns(T.untyped) }
   def mir_pass_state; end
   sig { params(value: T.untyped).returns(T.untyped) }
   def mir_pass_state=(value); end
@@ -1568,10 +1544,6 @@ class StructLit
   def borrowed_field_names; end
   sig { params(value: T.untyped).returns(T.untyped) }
   def borrowed_field_names=(value); end
-  sig { returns(T.untyped) }
-  def field_tokens; end
-  sig { params(value: T.untyped).returns(T.untyped) }
-  def field_tokens=(value); end
 end
 
 class SymbolEntry
@@ -1747,6 +1719,13 @@ class Type
   def shape; end
 end
 
+class TypeShape
+  sig { returns(T::Boolean) }
+  def auto; end
+  sig { returns(TypeExpression) }
+  def expression; end
+end
+
 class UseAfterMoveChecker
   sig { returns(T::Array[String]) }
   def errors; end
@@ -1809,10 +1788,6 @@ class WhileLoop
 end
 
 class WithBlock
-  sig { returns(T.untyped) }
-  def arms; end
-  sig { params(value: T.untyped).returns(T.untyped) }
-  def arms=(value); end
   sig { returns(T.untyped) }
   def deadlock_escape; end
   sig { params(value: T.untyped).returns(T.untyped) }

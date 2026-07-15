@@ -78,14 +78,15 @@ module Annotator
                 fallible_sources
               )
             end
-            if node.arms
+            arms = node.arms
+            if arms
               # Record family-specific prelude effects before each arm body so
               # the per-arm delta includes synthetic acquire/snapshot work.
               fn_ctx_name = current_fn_ctx&.name
               direct_effects = effect_direct_effects
               snapshot = fn_ctx_name ? effect_direct_effects_for(fn_ctx_name).dup : nil
               per_arm_effects = []
-              node.arms.each do |arm|
+              arms.each do |arm|
                 before = fn_ctx_name ? effect_direct_effects_for(fn_ctx_name).dup : nil
                 # Family-specific prelude effects that the lowering will emit
                 # for this arm. LOCKED acquires a mutex (BLOCKING + CONTENTION
@@ -176,10 +177,11 @@ module Annotator
       def validate_with_match_source_shape!(node, capability_plan)
         T.bind(self, SemanticAnnotator)
 
-        return unless node.arms && node.snapshot_mode.nil?
+        arms = node.arms
+        return unless arms && node.snapshot_mode.nil?
 
         mutable_cap = capability_plan.all.find(&:alias_mutable)
-        if mutable_cap && node.arms.any? { |arm| arm.family == :VERSIONED }
+        if mutable_cap && arms.any? { |arm| arm.family == :VERSIONED }
           error!(node, :WITH_MATCH_VERSIONED_AS_MUTABLE, name: mutable_cap.var_name)
         end
 

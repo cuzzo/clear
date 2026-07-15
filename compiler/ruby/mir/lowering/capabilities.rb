@@ -707,7 +707,7 @@ module MIRLoweringCapabilities
     safe_alias = safe_with_capability_alias(alias_name)
     snapshot_mode = node.respond_to?(:snapshot_mode) && node.snapshot_mode
 
-    arms_meta = node.arms.map { |arm|
+    arms_meta = T.must(node.arms).map { |arm|
       MIR::WithMatchArm.new(
         family: arm.family,
         guard_var: "__#{alias_name}_match_#{node.object_id.abs}",

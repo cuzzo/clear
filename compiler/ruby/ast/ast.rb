@@ -2450,7 +2450,8 @@ module AST
     sig { returns(T::Array[RawBody]) }
     def child_bodies
       bodies = T.let([body].compact, T::Array[RawBody])
-      bodies.concat(arms.map(&:body)) if arms
+      match_arms = arms
+      bodies.concat(match_arms.map(&:body)) if match_arms
       bodies
     end
     attr_accessor :lock_error_clause
