@@ -98,6 +98,17 @@ RSpec.describe TypeExpressionParser do
     expect(TypeExpressionPrinter.inline(bounded)).to eq("[~10]String")
   end
 
+  it "parses every canonical stream cardinality from its textual surface" do
+    finite = expression("[~]Int64")
+    infinite = expression("[~INF]String")
+    bounded = expression("[~12]Bool")
+
+    expect(T.cast(finite, StreamTypeExpression).cardinality).to eq(:FINITE)
+    expect(T.cast(infinite, StreamTypeExpression).cardinality).to eq(:INF)
+    expect(T.cast(bounded, StreamTypeExpression).cardinality).to eq(12)
+    expect(TypeShape.from_core("[~]Int64").tense_type_raw).to eq(:"Int64[]")
+  end
+
   it "projects inline stream nodes through the runtime stream API without losing optional items" do
     finite = Type.new(StreamTypeExpression.new(
       cardinality: :FINITE,

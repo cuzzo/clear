@@ -777,7 +777,6 @@ module Annotator
         frame = current_stream_yield_frame
         unless frame
           error!(node, :CLOSE_OUTSIDE_BG_STREAM)
-          return
         end
         error!(node, :STREAM_ALREADY_CLOSED) if frame.closed
         frame.closed = true

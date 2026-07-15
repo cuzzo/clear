@@ -21,7 +21,7 @@ RSpec.describe "type-system change contracts" do
     ast
   end
 
-  def lower(source)
+  def lower(source, target: :zig)
     importer = ModuleImporter.new(base_dir: Dir.pwd, use_mir: true)
     result = CompilerFrontend.compile(source, importer: importer, source_dir: Dir.pwd)
     MIRLowering.new(input: MIRLoweringInput.new(
@@ -32,7 +32,7 @@ RSpec.describe "type-system change contracts" do
       moved_guard_info: result.moved_guard_info,
       importer: importer,
       source_dir: Dir.pwd,
-      target: :zig
+      target: target
     )).lower_program(result.ast)
   end
 
@@ -274,6 +274,59 @@ RSpec.describe "type-system change contracts" do
         };
       CLEAR
     }.not_to raise_error
+  end
+
+  it "parses canonical infinite streams and proves branch-complete producers cannot fall through" do
+    expect {
+      annotate(<<~CLEAR)
+        stream: [~INF]Int64 = BG STREAM {
+          IF TRUE THEN
+            WHILE TRUE DO YIELD 1_i64; END
+          ELSE
+            WHILE TRUE DO YIELD 2_i64; END
+          END
+        };
+      CLEAR
+    }.not_to raise_error
+
+    expect {
+      annotate(<<~CLEAR)
+        stream: [~INF]Int64 = BG STREAM {
+          IF TRUE THEN WHILE TRUE DO YIELD 1_i64; END END
+        };
+      CLEAR
+    }.to raise_error(CompilerError, /can reach the end/i)
+  end
+
+  it "proves branch-complete optional bindings cannot fall through" do
+    prelude = <<~CLEAR
+      FN maybe() RETURNS ?Bool -> RETURN TRUE; END
+    CLEAR
+    expect {
+      annotate(prelude + <<~CLEAR)
+        stream: [~INF]Int64 = BG STREAM {
+          IF maybe() EXISTS AS flag THEN
+            WHILE TRUE DO YIELD 1_i64; END
+          ELSE
+            WHILE TRUE DO YIELD 2_i64; END
+          END
+        };
+      CLEAR
+    }.not_to raise_error
+
+    expect {
+      annotate(prelude + <<~CLEAR)
+        stream: [~INF]Int64 = BG STREAM {
+          IF maybe() EXISTS AS flag THEN WHILE TRUE DO YIELD 1_i64; END END
+        };
+      CLEAR
+    }.to raise_error(CompilerError, /can reach the end/i)
+  end
+
+  it "lowers finite CLOSE to the bytecode stream exit label" do
+    mir = lower("stream = BG STREAM { YIELD 1_i64; CLOSE; };", target: :bc)
+
+    expect(contains_mir?(mir, MIR::BreakStmt)).to be(true)
   end
 
   it "infers exact positional types for Tuple literals" do
