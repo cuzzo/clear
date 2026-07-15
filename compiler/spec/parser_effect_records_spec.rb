@@ -80,6 +80,25 @@ RSpec.describe "ClearParser effect records" do
     expect(program.statements.first.reentrance_kind).to eq(:reentrant)
   end
 
+  it "builds extern effects through a named parse result" do
+    source = <<~CLEAR
+      EXTERN FN plain() RETURNS Void FROM "native";
+      EXTERN FN frame() RETURNS Void EFFECTS :alloc FROM "native";
+      EXTERN FN heap() RETURNS Void EFFECTS :alloc:heap FROM "native";
+      EXTERN FN direct() RETURNS Void EFFECTS :safe FROM "native";
+      EXTERN FN both() RETURNS Void EFFECTS :safe, :alloc:frame FROM "native";
+    CLEAR
+    declarations = ClearParser.new(Lexer.new(source).tokenize, source).parse.statements
+
+    expect(declarations.map(&:effects)).to eq([
+      {},
+      { alloc: :frame },
+      { alloc: :heap },
+      { safe: true },
+      { safe: true, alloc: :frame },
+    ])
+  end
+
   it "rejects invalid bounded and tight variant combinations" do
     expect { parse_function("EFFECTS REENTRANT:MAX_DEPTH(0)") }
       .to raise_error(ParserError, /positive integer N/)

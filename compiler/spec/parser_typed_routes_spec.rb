@@ -59,6 +59,25 @@ RSpec.describe "ClearParser typed rule routes" do
     expect(node.path).to eq("module.clear")
   end
 
+  it "keeps exponentiation right-associative" do
+    node = parse_expression("base ** exponent ** tail")
+
+    expect(node).to be_a(AST::BinaryOp)
+    expect(node.op).to eq(:POW)
+    expect(node.left.name).to eq("base")
+    expect(node.right).to be_a(AST::BinaryOp)
+    expect(node.right.op).to eq(:POW)
+    expect([node.right.left.name, node.right.right.name]).to eq(%w[exponent tail])
+  end
+
+  it "rejects duplicate entries in a parser rule table" do
+    first = ClearParser.rule(:KEYWORD, "PASS", action: :parse_pass)
+    duplicate = ClearParser.rule(:KEYWORD, "PASS", action: :parse_return)
+
+    expect { ClearParser.index_rules([first, duplicate]) }
+      .to raise_error(/Duplicate parser rule/)
+  end
+
   it "parses every single-expression pipeline route directly" do
     expected = {
       "SELECT predicate" => AST::SelectOp,

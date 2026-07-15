@@ -7,6 +7,8 @@ require 'set'
 class Lexer
     extend T::Sig
 
+  MAX_INTERPOLATION_DEPTH = 64
+
   class Error < StandardError; end
 
   Token = Struct.new(:type, :value, :line, :column)
@@ -83,12 +85,13 @@ class Lexer
       PENDING BEFORE AFTER LET TAGS
     ].to_set, T::Set[String])
 
-  sig { params(source: String).void }
-  def initialize(source)
+  sig { params(source: String, interpolation_depth: Integer).void }
+  def initialize(source, interpolation_depth: 0)
     @s = T.let(StringScanner.new(source), StringScanner)
     @line = T.let(1, Integer)
     @column = T.let(1, Integer)
     @tokens = T.let([], T::Array[Token])
+    @interpolation_depth = T.let(interpolation_depth, Integer)
   end
 
   sig { returns(T::Array[Token]) }
@@ -272,6 +275,10 @@ class Lexer
         # String interpolation: ${expr}
         # Desugared to concatenation: "..." $+ (expr) $+ "..."
 
+        if @interpolation_depth >= MAX_INTERPOLATION_DEPTH
+          raise Error, "Lexer Error: string interpolation nesting exceeds #{MAX_INTERPOLATION_DEPTH} levels"
+        end
+
         # 1. Emit current buffer
         @tokens << Token.new(:STRING, buffer, @line, chunk_start_col)
         buffer = ""
@@ -286,9 +293,9 @@ class Lexer
 
         # 4. Sub-lex the expression inside braces
         expr_source = extract_balanced_brace_content
-        sub_lexer = Lexer.new(expr_source)
+        sub_lexer = Lexer.new(expr_source, interpolation_depth: @interpolation_depth + 1)
         sub_tokens = sub_lexer.tokenize
-        sub_tokens.pop if T.must(sub_tokens.last).type == :EOF
+        sub_tokens.pop
         @tokens.concat(sub_tokens)
 
         # 5. Inject closer tokens: ) $+
@@ -349,8 +356,6 @@ class Lexer
 
   sig { params(str: String).returns(Integer) }
   def advance_pos(str)
-    return unless str # Guard clause for safety
-
     newlines = str.count("\n")
     if newlines > 0
       @line += newlines

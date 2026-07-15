@@ -3478,7 +3478,6 @@ class Type
   def observable_array_future?
     tt = tense_type
     return false unless observable?
-    return false unless tt.is_a?(Type)
 
     tt.array? == true
   end

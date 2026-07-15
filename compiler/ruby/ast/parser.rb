@@ -77,6 +77,23 @@ class ClearParser
     const :tight, T::Boolean, default: false
   end
 
+  class ParsedExternEffects < T::Struct
+    extend T::Sig
+
+    prop :alloc, T.nilable(Symbol), default: nil
+    prop :safe, T::Boolean, default: false
+
+    sig { returns(T::Hash[Symbol, T.any(Symbol, TrueClass)]) }
+    def to_h
+      alloc_kind = alloc
+      return { alloc: alloc_kind, safe: true } if alloc_kind && safe
+      return { alloc: alloc_kind } if alloc_kind
+      return { safe: true } if safe
+
+      {}
+    end
+  end
+
   # A VAR_ID-led form is parsed once, then classified from the token that
   # follows it.  Keeping the classification with the node lets statement,
   # value-block, and BG parsers share the same non-replaying path.
@@ -1314,8 +1331,8 @@ class ClearParser
   # and String); other types must be initialized explicitly.
   sig { params(tok: Lexer::Token, type: Type).returns(AST::DefaultArrayLit) }
   def synthesize_default_for_type(tok, type)
-    unless type.is_a?(Type) && type.fixed?
-      error!(tok, :MUTABLE_BARE_NEEDS_FIXED, type: type.respond_to?(:resolved) ? type.resolved : type)
+    unless type.fixed?
+      error!(tok, :MUTABLE_BARE_NEEDS_FIXED, type: type.resolved)
     end
     elem = type.element_type
     elem = T.must(elem)
@@ -1428,47 +1445,54 @@ class ClearParser
     # :safe        → run directly on fiber stack (skip onRootStack trampoline).
     #                Use for pure compute FFI (SHA256, math, JSON parsing).
     #                Do NOT use for filesystem I/O or deep-stack functions.
-    effects = {}
-    if match!(:KEYWORD, 'EFFECTS')
-      loop do
-        consume(:CHAR, ':')
-        eff_tok = consume(:VAR_ID)
-        eff_name = eff_tok.text!.to_sym
-        unless [:alloc, :safe].include?(eff_name)
-          emit_typo_suggestion!(
-            eff_tok, eff_tok.text!, %w[alloc safe],
-            "Unknown effect ':#{eff_name}'",
-            "closest effect",
-            category: :type, cascade: true
-          )
-        end
-        if eff_name == :safe
-          effects[:safe] = true
-        elsif eff_name == :alloc && match?(:CHAR, ':')
-          consume(:CHAR, ':')
-          qual_tok = consume(:VAR_ID)
-          qualifier = qual_tok.text!.to_sym
-          unless [:frame, :heap].include?(qualifier)
-            emit_typo_suggestion!(
-              qual_tok, qual_tok.text!, %w[frame heap],
-              "Unknown alloc qualifier ':#{qualifier}'",
-              "closest alloc qualifier",
-              category: :type, cascade: true
-            )
-          end
-          effects[:alloc] = qualifier
-        else
-          effects[:alloc] = :frame
-        end
-        break unless match!(:CHAR, ',')
-      end
-    end
+    effects = parse_extern_effects
 
     consume(:KEYWORD, 'FROM')
     from_module = consume(:STRING).text!
     match!(:CHAR, ';')
-    AST::ExternFnDecl.new(extern_tok, name, params, return_type, from_module, effects,
+    AST::ExternFnDecl.new(extern_tok, name, params, return_type, from_module, effects.to_h,
                           owner_type, owner_type_params, fn_type_params)
+  end
+
+  sig { returns(ParsedExternEffects) }
+  def parse_extern_effects
+    effects = ParsedExternEffects.new
+    return effects unless match!(:KEYWORD, 'EFFECTS')
+
+    loop do
+      consume(:CHAR, ':')
+      effect_token = consume(:VAR_ID)
+      effect = effect_token.text!.to_sym
+      unless [:alloc, :safe].include?(effect)
+        emit_typo_suggestion!(
+          effect_token, effect_token.text!, %w[alloc safe],
+          "Unknown effect ':#{effect}'",
+          "closest effect",
+          category: :type, cascade: true
+        )
+      end
+
+      if effect == :safe
+        effects.safe = true
+      elsif effect == :alloc && match?(:CHAR, ':')
+        consume(:CHAR, ':')
+        qualifier_token = consume(:VAR_ID)
+        qualifier = qualifier_token.text!.to_sym
+        unless [:frame, :heap].include?(qualifier)
+          emit_typo_suggestion!(
+            qualifier_token, qualifier_token.text!, %w[frame heap],
+            "Unknown alloc qualifier ':#{qualifier}'",
+            "closest alloc qualifier",
+            category: :type, cascade: true
+          )
+        end
+        effects.alloc = qualifier
+      else
+        effects.alloc = :frame
+      end
+      break unless match!(:CHAR, ',')
+    end
+    effects
   end
 
   sig { params(extern_tok: Lexer::Token).returns(AST::ExternStructDecl) }
@@ -3774,7 +3798,7 @@ class ClearParser
 
   sig { params(type: Type).returns(String) }
   def type_annotation_source(type)
-    t = type.is_a?(Type) ? type : Type.new(type)
+    t = type
     if t.polymorphic_shared?
       inner = Type.new(t)
       inner.apply_reference_ownership!(:affine)
@@ -3788,40 +3812,42 @@ class ClearParser
       return wrapped.array? || wrapped.map? ? "?(#{inner})" : "?#{inner}"
     end
 
-    parts = [t.resolved.to_s]
+    base = Type.strip_capability_suffix_from(t.resolved.to_s).base
+    capabilities = T.let([], T::Array[String])
 
     collection = case t.collection
-    when :list then "@list"
-    when :pool then "@pool"
-    when :set then "@set"
+    when :list then "list"
+    when :pool then "pool"
+    when :set then "set"
     end
     if collection
       collection += ":soa" if t.soa?
       collection += ":sharded(#{t.shard_count})" if t.sharded? && t.shard_count
-      parts << collection
+      capabilities << collection
     end
 
     ownership = case t.ownership
-    when :shared then "@shared"
-    when :shared_node then "@shared:node"
-    when :multiowned then "@multiowned"
-    when :link then "@link"
-    when :split then "@split"
-    when :frozen then "@frozen"
+    when :shared then "shared"
+    when :shared_node then "shared:node"
+    when :multiowned then "multiowned"
+    when :link then "link"
+    when :split then "split"
+    when :frozen then "frozen"
     end
-    parts << ownership if ownership
+    capabilities << ownership if ownership
 
     sync = case t.sync
-    when :locked then "@locked"
-    when :write_locked then "@writeLocked"
-    when :versioned then "@versioned"
-    when :atomic then "@atomic"
-    when :local then "@local"
-    when :always_mutable then "@alwaysMutable"
+    when :locked then "locked"
+    when :write_locked then "writeLocked"
+    when :versioned then "versioned"
+    when :atomic then "atomic"
+    when :local then "local"
+    when :always_mutable then "alwaysMutable"
     end
-    parts << sync if sync
+    capabilities << sync if sync
+    capabilities << "observable" if t.observable?
 
-    parts.join("")
+    capabilities.empty? ? base : "#{base}@#{capabilities.join(":")}"
   end
 
   # Parses `CONCURRENT(workers: N)? SELECT|WHERE|EACH ...`
@@ -4443,15 +4469,15 @@ class ClearParser
       selectors = parse_error_selectors
       retries = match_optional_retry!
       action = parse_lock_action
-      AST::ErrorClause.from_action(selectors: selectors, retries: retries, action: T.must(action))
+      AST::ErrorClause.from_action(selectors: selectors, retries: retries, action: action)
     elsif match?(:KEYWORD, 'RETRY')
       retries = match_optional_retry!
       action = parse_lock_action
       # Sugar: `RETRY(N) THEN <action>` == `ON Transient RETRY(N) THEN <action>`.
       AST::ErrorClause.from_action(
-        selectors: [AST::ErrorSelector.new(form: :kind, name: :Transient, token: T.must(action).token)],
+        selectors: [AST::ErrorSelector.new(form: :kind, name: :Transient, token: action.token)],
         retries: retries,
-        action: T.must(action),
+        action: action,
       )
     else
       nil
@@ -4496,7 +4522,7 @@ class ClearParser
   end
 
   # Parse a single error-handler action: RAISE | PASS | RETURN expr | EXIT "msg" | -> { stmts }.
-  sig { returns(T.nilable(AST::ErrorAction)) }
+  sig { returns(AST::ErrorAction) }
   def parse_lock_action
     if match!(:KEYWORD, 'RAISE')
       AST::ErrorAction.new(action: AST::ErrorActionKind::Raise, token: previous)
