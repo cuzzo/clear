@@ -769,6 +769,11 @@ module DiagnosticRegistry
       template: "Syntax Error: Multiple optional bindings require parentheses around each binding.\n  Found: IF expr EXISTS AS name AND expr EXISTS AS name THEN\n  Use:   IF (expr EXISTS AS name) AND (expr EXISTS AS name) THEN",
       summary:  "Optional-binding chains in IF need each `expr EXISTS AS name` parenthesised.",
     },
+    CONDITIONAL_BINDING_UNDER_OR: {
+      severity: :error, category: :syntax,
+      template: "A conditional capture is not definite beneath `OR`; move `EXISTS AS`/`IS_OK AS` into an `AND` chain or use separate branches.",
+      summary:  "Conditional captures compose left-to-right through `AND`, but are not in scope after `OR`.",
+    },
     OPTIONAL_BINDING_REQUIRES_EXISTS: {
       severity: :error, category: :syntax,
       template: "Optional binding must state its test: use `expr EXISTS AS name`, not `expr AS name`.",
