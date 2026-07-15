@@ -345,11 +345,12 @@ module WithMatchCheck
   def self.family_of_arg_set(arg)
     sym = arg.symbol
     return Set.new unless sym
-    if sym.sync_families && sym.sync_families.size > 1
-      return expand_snapshotted(sym.sync_families)
+    families = sym.sync_families
+    if families && families.size > 1
+      return expand_snapshotted(families)
     end
-    if sym.sync_families && sym.sync_families.size == 1
-      single = sym.sync_families.first
+    if families && families.size == 1
+      single = families.first
       return Set[:VERSIONED, :ATOMIC] if single == :SNAPSHOTTED
     end
     fam = family_of_arg(arg)

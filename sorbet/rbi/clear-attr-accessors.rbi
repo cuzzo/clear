@@ -1627,9 +1627,9 @@ class SymbolEntry
   def ownership_kind; end
   sig { params(value: T.nilable(Symbol)).returns(T.nilable(Symbol)) }
   def ownership_kind=(value); end
-  sig { returns(T.untyped) }
+  sig { returns(T.nilable(Lexer::Token)) }
   def param_decl_token; end
-  sig { params(value: T.untyped).returns(T.untyped) }
+  sig { params(value: T.nilable(Lexer::Token)).returns(T.nilable(Lexer::Token)) }
   def param_decl_token=(value); end
   sig { returns(T::Boolean) }
   def poly_borrow_target; end
@@ -1671,9 +1671,9 @@ class SymbolEntry
   def sync; end
   sig { params(value: T.nilable(Symbol)).returns(T.nilable(Symbol)) }
   def sync=(value); end
-  sig { returns(T.untyped) }
+  sig { returns(T.nilable(T::Set[Symbol])) }
   def sync_families; end
-  sig { params(value: T.untyped).returns(T.untyped) }
+  sig { params(value: T.nilable(T::Set[Symbol])).returns(T.nilable(T::Set[Symbol])) }
   def sync_families=(value); end
   sig { returns(T::Boolean) }
   def takes; end

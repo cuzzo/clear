@@ -612,8 +612,12 @@ module MIRLoweringFunctions
     type_sym = param.type.resolved
     is_user_struct = struct_schemas.key?(type_sym)
     sym = param.symbol
-    atomic_sync = sym && (sym.atomic? ||
-                          (sym.sync_families && sym.sync_families.include?(:ATOMIC)))
+    atomic_sync = if sym
+                    families = sym.sync_families
+                    sym.atomic? || (families ? families.include?(:ATOMIC) : false)
+                  else
+                    false
+                  end
     return "CheatLib.Arc(#{type_info.resolved})" if type_info.shared? && type_info.generic_type_parameter?
     return "anytype" if is_user_struct || type_info.collection? || atomic_sync
 
