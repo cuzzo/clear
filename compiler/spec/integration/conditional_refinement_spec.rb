@@ -51,4 +51,19 @@ RSpec.describe "frontend conditional-refinement integration" do
     expect(bind.bindings.map(&:name)).to eq(["value"])
     expect(bind.then_branch.first).to be_a(AST::IfStatement)
   end
+
+  it "survives annotation, cleanup classification, and the MIR frontend" do
+    source = <<~CLEAR
+      FN choose(maybe: ?Int64, enabled: Bool) RETURNS Int64 ->
+        IF enabled AND maybe EXISTS AS value AND value > 0_i64 THEN
+          RETURN value;
+        ELSE
+          RETURN 0_i64;
+        END
+      END
+    CLEAR
+
+    result = compile_mir_frontend(source)
+    expect(result.ast.statements.first).to be_a(AST::FunctionDef)
+  end
 end

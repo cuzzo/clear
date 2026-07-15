@@ -19,6 +19,8 @@ require_relative "../mir/hoist"
 require_relative "../semantic/pass_state"
 require_relative "../mir/control_flow"
 require_relative "../mir/pre_mir_type_check"
+require_relative "../mir/lowering/schema_registry"
+require_relative "../mir/lowering/state"
 
 class CompilerFrontend
     extend T::Sig
