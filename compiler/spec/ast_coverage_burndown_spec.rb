@@ -465,13 +465,6 @@ RSpec.describe ClearParser do
       expect(chained).to be_a(AST::IfBind)
       expect(chained.bindings.map(&:name)).to eq(%w[a b])
 
-      bare = AST::BinaryOp.new(token, AST::Identifier.new(token, "maybe"), :BIND_VAR, AST::Identifier.new(token, "a"))
-      expect {
-        parser_for("").send(:validate_no_bare_bind!, AST::BinaryOp.new(token, bare, :AND, AST::Identifier.new(token, "ok")), token(:KEYWORD, "IF"))
-      }.to raise_error(ParserError, /Multiple optional bindings/)
-      expect {
-        parser_for("").send(:validate_no_bare_bind!, AST::BinaryOp.new(token, AST::Identifier.new(token, "ok"), :AND, bare), token(:KEYWORD, "IF"))
-      }.to raise_error(ParserError, /Multiple optional bindings/)
     end
 
     it "parses match-expression arms, multi-pattern metadata, and while-bind shorthand" do

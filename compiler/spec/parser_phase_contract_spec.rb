@@ -67,6 +67,45 @@ RSpec.describe "parser phase contracts" do
     expect(tight_collection.tight).to be(true)
   end
 
+  it "routes standalone test-support statements through the shared statement table" do
+    program = parse(<<~CLEAR)
+      STUB fetch RETURNS 1;
+      SMASH work();
+      PROFILE work();
+    CLEAR
+
+    expect(program.statements.map(&:class)).to eq([
+      AST::StubDecl,
+      AST::SmashStmt,
+      AST::ProfileStmt,
+    ])
+  end
+
+  it "keeps diagnostic-only grammar routes explicit" do
+    expect { parse("COMPTIME PASS;") }.to raise_error(ParserError, /IF/)
+    expect { parser_for("~?(Int64[])").send(:parse_type_annotation) }
+      .to raise_error(ParserError, /grouped optional/)
+    expect { parser_for("~FN() -> Int64").send(:parse_type_annotation) }
+      .to raise_error(ParserError, /function type annotation/)
+  end
+
+  it "fails closed when a parser table contains an unsupported action" do
+    parser = parser_for("(value")
+    unknown = ClearParser::ParserRule.new(type: :VAR_ID, action: :unknown)
+    value = AST::Identifier.new(nil, "value")
+
+    expect { parser.send(:dispatch_stmt_rule, unknown) }
+      .to raise_error(RuntimeError, /Unknown statement parser action/)
+    expect { parser.send(:dispatch_primary_rule, unknown) }
+      .to raise_error(RuntimeError, /Unknown primary parser action/)
+    expect { parser.send(:dispatch_suffix_rule, unknown, value) }
+      .to raise_error(RuntimeError, /Unknown suffix parser action/)
+
+    # The delimiter index deliberately leaves malformed pairs unpaired. The
+    # fallback scan must still make progress and terminate at EOF.
+    expect(parser.send(:top_level_assignment_before_brace_delimiter?, 0)).to be(false)
+  end
+
   it "keeps checked identifier payloads across uncommon grammar routes" do
     method = parse("METHOD update() -> RETURN; END").statements.fetch(0)
     require_node = parse('REQUIRE "helper.clear" AS helper;').statements.fetch(0)

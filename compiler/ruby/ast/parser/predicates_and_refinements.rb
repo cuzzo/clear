@@ -37,20 +37,7 @@ class ClearParser
       return node
     end
 
-    # Explicit predicate bindings refine left-to-right, so a later expression
-    # may use an earlier alias without parentheses.
-    if conditional_binding_predicate?
-      bindings = [parse_conditional_binding(condition)]
-      while match?(:KEYWORD, 'AND')
-        consume(:KEYWORD, 'AND')
-        next_expr = parse_expression
-        unless conditional_binding_predicate?
-          error!(current, :PARSER_EXPECTED, expected: "EXISTS AS or IS_OK AS", got: current.value, type: current.type, line: current.line)
-        end
-        bindings << parse_conditional_binding(next_expr)
-      end
-      return parse_if_bind_body(if_token, bindings)
-    elsif match?(:KEYWORD, 'AS')
+    if match?(:KEYWORD, 'AS')
       emit_legacy_optional_binding!(current)
       consume(:KEYWORD, 'AS')
       name_tok = consume(:VAR_ID)
@@ -59,12 +46,6 @@ class ClearParser
         error!(if_token, :MULTIPLE_BINDINGS_NEED_PARENS)
       end
       bindings = [AST::Binding.new(expr: condition, name: name_tok.text!, name_token: name_tok)]
-      return parse_if_bind_body(if_token, bindings)
-    end
-
-    # Paren-bind form: IF (expr EXISTS AS name) AND (...) THEN ...
-    bindings = extract_paren_bindings(condition, if_token)
-    unless bindings.empty?
       return parse_if_bind_body(if_token, bindings)
     end
 
@@ -240,44 +221,6 @@ class ClearParser
       consume(:KEYWORD, 'END')
     end
     AST::IfBind.new(if_token, bindings, then_branch, else_branch)
-  end
-
-  # Returns Array of {expr:, name:, name_token:} if condition is fully paren-bind.
-  # Returns [] if condition is not a paren-bind pattern.
-  # Raises error if any bind in a && chain is bare (not paren-wrapped).
-  sig { params(node: AST::Node, if_token: Lexer::Token).returns(T::Array[AST::Binding]) }
-  def extract_paren_bindings(node, if_token)
-    case node
-    when AST::BinaryOp
-      if node.op == :BIND_VAR
-        right = T.cast(node.right, AST::Identifier)
-        predicate = node.token.value == 'IS_OK' ? :is_ok : :exists
-        return node.paren_bind ? [AST::Binding.new(expr: node.left, name: right.name, name_token: right.token, predicate: predicate)] : []
-      elsif node.op == :AND  # && maps to :AND in OP_TO_OP_CODE
-        left_binds  = extract_paren_bindings(node.left, if_token)
-        right_binds = extract_paren_bindings(node.right, if_token)
-        # Only treat as bind-chain if at least one side is a paren-bind
-        unless left_binds.empty? && right_binds.empty?
-          # Validate: bare binds in && position are illegal
-          validate_no_bare_bind!(node.left,  if_token) if left_binds.empty?
-          validate_no_bare_bind!(node.right, if_token) if right_binds.empty?
-          return left_binds.concat(right_binds)
-        end
-      end
-    end
-    []
-  end
-
-  # Raises an error if node is a non-paren BIND_VAR anywhere in the && tree.
-  sig { params(node: AST::Node, if_token: Lexer::Token).void }
-  def validate_no_bare_bind!(node, if_token)
-    return unless node.is_a?(AST::BinaryOp)
-    if node.op == :BIND_VAR && !node.paren_bind
-      error!(if_token, :MULTIPLE_BINDINGS_NEED_PARENS)
-    elsif node.op == :AND
-      validate_no_bare_bind!(node.left,  if_token)
-      validate_no_bare_bind!(node.right, if_token)
-    end
   end
 
   # Expression-position IF: each branch is a single expression (no semicolons).
