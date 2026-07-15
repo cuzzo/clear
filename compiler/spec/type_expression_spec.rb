@@ -61,6 +61,8 @@ RSpec.describe TypeExpressionParser do
 
   it "keeps empty generic positions and canonicalizes legacy ownership spellings" do
     expect(Type.new(:Int64).shape.generic_args_raw).to eq([])
+    expect(Type.new(:"?Int64").shape.generic_args_raw).to eq([])
+    expect(Type.new(:"?Int64[]").shape.generic_args_raw).to eq([])
     expect(Type.new("Box@multiowned")).to be_multiowned
   end
 
@@ -293,6 +295,7 @@ RSpec.describe TypeExpressionTree do
 
   it "normalizes every supported legacy capability dimension" do
     expected = {
+      "Box@multiowned" => [:multiowned, nil, nil],
       "Box@link" => [:link, nil, nil],
       "Box@split" => [:split, nil, nil],
       "Box@writeLocked" => [:affine, :write_locked, nil],
