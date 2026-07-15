@@ -221,6 +221,27 @@ RSpec.describe "type-system change contracts" do
     expect(zig).to include(".Closed =>")
   end
 
+  it "lowers canonical stream iteration and StreamStep presence through the tagged protocol" do
+    zig = transpile(<<~CLEAR)
+      FN main() RETURNS Void ->
+        stream: [~]?Int64 = BG STREAM YIELDS ?Int64 { YIELD NIL; CLOSE; };
+        step = NEXT stream;
+        ASSERT step EXISTS;
+        maybe: ?Int64 = NIL;
+        ASSERT !(maybe EXISTS);
+        FOR item IN stream DO
+          ASSERT item == NIL;
+        END
+        RETURN;
+      END
+    CLEAR
+
+    expect(zig).to include(".nextStep()")
+    expect(zig).to include(".isItem()")
+    expect(zig).to include(".Item =>")
+    expect(zig).to include(".Closed =>")
+  end
+
   it "uses StreamStep for canonical bounded streams while preserving legacy NEXT" do
     canonical = annotate(<<~CLEAR)
       stream: [~2]Int64 = [BG { 10_i64; }, BG { 20_i64; }];
@@ -734,6 +755,7 @@ RSpec.describe "type-system change contracts" do
       open: ~?Int64[] = DEFAULT;
       infinite: ~Int64[INF] = DEFAULT;
       ambiguous_list: ~Int64[]@list = DEFAULT;
+      nested_future: ?~Int64[]@list = NIL;
     CLEAR
 
     rewritten, count, = ClearFixSupport.apply_to_source(source, only_set: Set[:type_migration])

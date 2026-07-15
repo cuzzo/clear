@@ -948,7 +948,9 @@ class Type
     # streams, lists of promises, and promises resolving to lists. Migrating
     # only the annotation can change NEXT's result protocol, so those require
     # a whole-program migration and are deliberately not auto-fixed here.
-    return nil if expression.is_a?(FutureTypeExpression)
+    return nil if TypeExpressionTree.each_node(expression).any? do |node|
+      node.is_a?(FutureTypeExpression)
+    end
     # A bare legacy T[] is a slice/view, while Inline Pivot []T is an owned
     # dynamic list. Only an explicit legacy @list is semantics-preserving.
     return nil if TypeExpressionTree.each_node(expression).any? do |node|
@@ -988,10 +990,6 @@ class Type
     if expression.is_a?(FallibleTypeExpression)
       inner = project_inline_collection(expression.inner, type)
       return inner.nil? ? nil : FallibleTypeExpression.new(inner: inner, error_set: expression.error_set)
-    end
-    if expression.is_a?(FutureTypeExpression)
-      inner = project_inline_collection(expression.inner, type)
-      return inner.nil? ? nil : FutureTypeExpression.new(inner: inner)
     end
     return nil unless expression.is_a?(LinearTypeExpression)
 

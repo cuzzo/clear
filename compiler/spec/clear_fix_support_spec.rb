@@ -333,6 +333,10 @@ RSpec.describe ClearFixSupport do
     end
   end
 
+  it "drains findings when a pre-parser lint encounters malformed tokens" do
+    expect(described_class.collect_findings('"unterminated')).to eq([])
+  end
+
   it "runs isolated type migrations without invoking semantic annotation" do
     Dir.mktmpdir do |dir|
       path = File.join(dir, "legacy.clear")

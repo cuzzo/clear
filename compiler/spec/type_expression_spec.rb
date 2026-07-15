@@ -59,6 +59,24 @@ RSpec.describe TypeExpressionParser do
     expect(TypeExpressionPrinter.inline(tuple)).to eq("Tuple<Int64, String, ?Bool>")
   end
 
+  it "keeps empty generic positions and canonicalizes legacy ownership spellings" do
+    expect(Type.new(:Int64).shape.generic_args_raw).to eq([])
+    expect(Type.new("Box@multiowned")).to be_multiowned
+  end
+
+  it "refuses to migrate a capability-bearing tense wrapper across its child" do
+    expression = OptionalTypeExpression.new(
+      inner: LinearTypeExpression.new(
+        kind: :list,
+        dimensions: [:LIST],
+        item: NamedTypeExpression.new(name: :Int64),
+      ),
+      capabilities: TypeCapabilities.new(ownership: :shared, collection: :list),
+    )
+
+    expect(Type.inline_migration_name(Type.new(expression))).to be_nil
+  end
+
   it "prints every legacy collection marker and named generic" do
     surfaces = ["Int64[?]", "Int64[INF]", "Int64[*]", "Page<Row>"]
 
