@@ -30,3 +30,17 @@ found.
 - Missing complexity facts are mostly LINQ/reflection/generic-library calls.
   No probable SmartEnum bug was found; cache behavior would need runtime
   profiling or a per-closed-generic identity test.
+
+## Second-pass time/space audit
+
+- **Partial evidence:** all 144 unknown time/space results retain components.
+  Reflection/converter provider execution is appropriately opaque; static enum
+  lookup and flag/name splitting are under-specified local map/string work. The
+  sample is two under-specified, one appropriate.
+- **Actual dominant work:** closed-generic registry construction and reflection
+  discovery are per-type setup costs; `SmartFlagEnum` name/value conversion is
+  proportional to flag/name parts. Dictionaries/cached enum values and
+  converted collections are the corresponding space terms.
+- **Coverage verdict:** generic closed-type identity plus collection/string
+  primitives should produce useful symbolic bounds without pretending to know
+  reflection internals.

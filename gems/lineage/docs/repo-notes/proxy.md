@@ -30,3 +30,17 @@ cross-tool conclusion or product defect is warranted.
   extraction between tools.
 - Do not treat the partial Espalier output as a code-quality assessment. No
   candidate library bug was recorded.
+
+## Second-pass time/space audit
+
+- **Partial evidence:** all 16 unknown time/space results retain components,
+  but the sample is not representative because only 33/194 extracted methods
+  reached Espalier. Template diagnostics and reflection-meta helpers are
+  appropriately opaque/compile-time dependent; simple facade construction is
+  under-specified. The sample is one under-specified, two appropriate.
+- **Actual dominant work:** runtime proxy construction/dispatch may be constant
+  per erased call, while compile-time template instantiation scales with facade
+  and convention composition. The latter is outside ordinary runtime Big-O.
+- **Coverage verdict:** first solve complete header extraction and explicitly
+  separate runtime from compile-time complexity. A final source result is not
+  trustworthy until then.

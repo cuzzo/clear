@@ -28,3 +28,17 @@ tests, not trustworthy product rankings yet.
   one-tool ranking should be turned into product advice.
 - Useful missing capability: preprocess/macro provenance and header-only
   compilation-unit handling. No probable plog defect was identified.
+
+## Second-pass time/space audit
+
+- **Partial evidence:** all 68 unknown time/space results retain components.
+  Appender virtual I/O is appropriately opaque; `write`/`format` paths and CSV
+  field assembly are under-specified string/output work. The sample is two
+  under-specified, one appropriate.
+- **Actual dominant work:** enabled logging is proportional to message,
+  formatting fields, and sink fan-out; buffer/string allocation is the matching
+  space term. Compile-time-disabled macro paths should not be ranked as runtime
+  work.
+- **Coverage verdict:** message-length/output-size primitives and macro
+  provenance are general C++ requirements. Header-only incompleteness still
+  prevents treating this as a complete audit.

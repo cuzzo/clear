@@ -34,3 +34,18 @@ analysis noise, and no product bug was inferred.
 - No probable library defect. A performance hypothesis—repeated `$ref`
   resolution on recursive schemas—needs a constructed workload before it is
   treated as actionable.
+
+## Second-pass time/space audit
+
+- **Partial evidence:** all 38 unknown time/space results retain components.
+  `resolveRef` is under-specified—string searching and schema-map traversal are
+  locally visible; `build`/`traverse` are under-specified recursive schema
+  walks; generated validator dispatch is appropriately opaque as generated
+  runtime code. The sample is two under-specified, one appropriate.
+- **Actual dominant work:** schema/reference traversal and generated serializer
+  construction scale with schema nodes, properties/items, reference-chain
+  depth, and emitted program size. Generated code and serializer output are the
+  principal space consumers.
+- **Coverage verdict:** recursive schema graphs with cycle detection and
+  string/reference primitives are analyzable and should yield a symbolic bound.
+  The tool finds the right functions but misses their actual time/space drivers.

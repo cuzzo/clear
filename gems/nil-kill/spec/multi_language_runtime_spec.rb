@@ -30,7 +30,7 @@ RSpec.describe "nil-kill multi-language runtime pipeline" do
     expect(python.dig("runtime_capabilities", "params")).to be(true)
     expect(python.dig("runtime_capabilities", "line_coverage")).to be(true)
     expect(typescript).to include("static_analysis" => true, "runtime_tracing" => false, "type_indexing" => false)
-    expect(typescript).to include("type_next_annotation_advice" => false)
+    expect(typescript).to include("type_next_annotation_advice" => true)
     expect(typescript["annotation_systems"]).to include("typescript")
     expect(lua).to include("static_analysis" => true, "runtime_tracing" => false, "type_indexing" => false)
     expect(go).to include("static_analysis" => true, "runtime_tracing" => false, "type_indexing" => false)
@@ -656,6 +656,32 @@ RSpec.describe "nil-kill multi-language runtime pipeline" do
     expect(evidence.dig("summary", "type_next_status")).to eq("not_applicable_static_language")
     report = NilKill::Reporting::MultiLanguageReport.new("static" => evidence)
     expect(report.lines.join("\n")).to include("Not applicable for statically typed source (cpp, go)")
+  end
+
+  it "keeps Type Next available for gradual TypeScript declarations" do
+    evidence = {
+      "files" => [
+        { "path" => "src/service.ts", "language" => "typescript", "source_role" => "production" }
+      ],
+      "language_capabilities" => {
+        "typescript" => NilKill::Languages.capability_for("typescript")
+      },
+      "facts" => {
+        "type_dependencies" => [
+          { "id" => "input", "kind" => "parameter", "candidate" => true, "resolved" => false,
+            "requirements" => [], "name" => "input", "file" => "src/service.ts" },
+          { "id" => "result", "kind" => "return", "candidate" => true, "resolved" => false,
+            "requirements" => ["input"], "name" => "result", "file" => "src/service.ts" }
+        ]
+      }
+    }
+
+    NilKill::Commands::StaticCommand.new([]).send(:append_type_next!, evidence)
+
+    expect(evidence.dig("summary", "type_next_status")).to eq("available")
+    expect(evidence.dig("facts", "type_next")).to include(a_hash_including(
+      "candidate" => "input", "candidate_id" => "input", "unlock_count" => 1
+    ))
   end
 
   it "keeps Go name-type struct fields typed in static evidence" do

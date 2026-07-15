@@ -32,3 +32,17 @@ is a clear capability gap, not a library-performance verdict.
 - No likely product bug was found from reading source. Potential copy/optimize
   blow-ups require a deliberately shared/deep grammar benchmark before any
   claim is made.
+
+## Second-pass time/space audit
+
+- **Partial evidence:** 257/257 unknown time and space results retain
+  components. Allocation-only input constructors are appropriate unknowns;
+  `mpc_copy` and `mpc_optimise_unretained` are under-specified recursive parser
+  graph walks. The sample is two under-specified, one appropriate.
+- **Actual dominant work:** parser execution depends on input, grammar graph,
+  backtracking, and callback behavior; copying/optimizing parser and AST graphs
+  costs graph size and allocation space. Callback cost is legitimately opaque,
+  but graph traversal is not.
+- **Coverage verdict:** Espalier should emit separate grammar/input/opaque
+  callback components and recognize recursive copy/transform patterns. This is
+  general parser-combinator support, not an mpc-specific rule.

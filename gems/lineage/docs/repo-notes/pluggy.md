@@ -32,3 +32,17 @@ plugin lifecycle is correctly surfaced; no probable product defect.
   unknown, when receiver dispatch is intentional.
 - No probable library bug. A useful future fixture is failed registration
   followed by re-registration, to validate rollback state identity.
+
+## Second-pass time/space audit
+
+- **Partial evidence:** all 58 unknown time/space results retain components.
+  Registry lookups/registration scans and `_multicall` wrapper traversal are
+  under-specified; user hook invocation is appropriately opaque. The sampled
+  split is two under-specified, one appropriate.
+- **Actual dominant work:** registration is proportional to discovered hook
+  implementations; hook execution is proportional to implementations and
+  wrapper nesting, plus user callback cost. Registry and wrapper stacks supply
+  the corresponding space terms.
+- **Coverage verdict:** callback cost should stay opaque, but callback count,
+  wrapper depth, and local registry loops are available from the source. A
+  parameterized hook-fan-out bound is a capability Espalier should provide.

@@ -31,3 +31,16 @@ bugs.
 - Espalier should represent `O(key length + traversal height)`/copy-path space
   rather than generic unknown. This repository is an important oracle for
   avoiding false mutable-alias conclusions on persistent structures.
+
+## Second-pass time/space audit
+
+- **Partial evidence:** all 52 unknown time/space results retain components.
+  `Tree.Insert`, `DeletePrefix`, and iterator seek are locally analyzable radix
+  path traversals/copies; the three sampled wrappers are all under-specified.
+- **Actual dominant work:** lookup/seek/insert/delete depend on key length and
+  traversed radix height; transactions copy changed paths and edges, which is
+  the principal allocation term. `longestPrefix` supplies a direct key-length
+  loop that should compose into callers.
+- **Coverage verdict:** this is a general interprocedural recursive-structure
+  gap. Espalier should find these symbolic bounds and should not hide them
+  merely because public methods delegate to transaction methods.

@@ -30,3 +30,17 @@ no static result establishes a race, deadlock, or throughput defect.
   leak can be inferred without a schedule-sensitive hazard test.
 - Espalier needs queue-size and worker-count symbolic components, while the
   hazard tool needs runtime/interleaving evidence before claims are made.
+
+## Second-pass time/space audit
+
+- **Partial evidence:** all 96 unknown time/space results retain components.
+  Worker release/wait paths are appropriately opaque with goroutine scheduling;
+  purge/idle-worker scans are under-specified local queue work. The sample is
+  one under-specified, two appropriate.
+- **Actual dominant work:** worker lifecycle scales with active/idle workers,
+  queued tasks, and timeout/wait behavior; `purgePeriodically`/queue cleanup
+  are the local scanning surfaces. Worker stacks, task queues, and goroutines
+  are the material space/retention terms.
+- **Coverage verdict:** source can safely emit worker/queue-size components and
+  leave scheduler/task callback latency unknown. Static analysis cannot infer a
+  race or deadlock from this result.

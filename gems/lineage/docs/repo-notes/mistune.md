@@ -35,3 +35,17 @@ mostly unavailable.
 - A future oracle should distinguish monotonic cursor advancement from a
   repeatedly rescanned suffix; that is the key fact needed to identify actual
   quadratic Markdown cases.
+
+## Second-pass time/space audit
+
+- **Partial evidence:** 332/332 unknown time and space results retain a known
+  component. `markdown` and `parse_link` are under-specified: their source
+  cursor/range scans should expose input-length terms. `import_plugin` is an
+  appropriate unknown because plugin import/callback work is external.
+- **Actual dominant work:** block/inline parsing and token construction scale
+  with source length, nesting, and emitted tokens; pathological re-scanning of
+  nested emphasis/link ranges is the real potential superlinear risk. Space is
+  token/state depth plus rendered output, not a constant parser frame.
+- **Coverage verdict:** local cursor-progress and token-append facts are
+  derivable and should be modeled. Plugin callbacks should remain parameterized
+  opaque work. The tool finds the functions but misses their useful bounds.

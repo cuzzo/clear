@@ -30,3 +30,17 @@ this is a meaningful analyzer prioritization gap, not a product defect claim.
   rather than leaving the important algorithms opaque.
 - No probable RTree bug. A future ground-truth test should assert that search
   and insertion rank above geometry helpers under a traversal-aware model.
+
+## Second-pass time/space audit
+
+- **Partial evidence:** all 296 unknown time/space results retain components.
+  `search`, `searchLeaf`, and `searchNonLeaf` are under-specified tree
+  traversals; selector/geometry contracts introduce appropriate opaque terms.
+  The sample is two under-specified, one appropriate.
+- **Actual dominant work:** search visits candidate nodes and returns matches;
+  insertion/deletion descend tree height and may split/rebuild persistent nodes.
+  Time depends on height, branching, overlap, and results; space includes
+  traversal stacks, result streams, and copied path nodes.
+- **Coverage verdict:** recursive tree traversal and structural-sharing facts
+  are source-visible and should be modeled. Espalier currently misses the
+  library's most algorithmically significant time/space functions.

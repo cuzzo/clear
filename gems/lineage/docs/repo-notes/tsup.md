@@ -8,7 +8,7 @@ workload.
 
 | Tool | Evidence |
 | --- | --- |
-| Nil-Kill static | 34 files, 86 methods, 51 fields; no Type Next for a statically typed corpus. |
+| Nil-Kill static | 34 files, 86 methods, 51 fields; **30** ranked Type Next candidates after enabling gradual-TypeScript advice. `runEsbuild.options` unlocks 17 flow facts. |
 | Espalier | 74/86 bounds unknown (86.0%). `index.build` is the top coordinator with 58 conditional calls. |
 | Decomplex | 29 convergences: `runEsbuild`, plugin completion, DTS rollup, CLI main, and build orchestration. |
 
@@ -31,3 +31,16 @@ workload.
 - No candidate product bug. The missing feature is an I/O/tool boundary model
   that reports “per entry / per plugin / external” components instead of losing
   the entire bound to unknown.
+
+## Second-pass time/space audit
+
+- **Partial evidence:** all 74 unknown time/space results retain components.
+  `rollupDtsFiles` has a correct local `O(N)` component but no final bound;
+  `runEsbuild`/DTS tool calls are appropriately opaque; file cleanup is
+  under-specified. The sample is two appropriate, one under-specified.
+- **Actual dominant work:** build work scales with entries, formats, plugins,
+  emitted files, and the external Esbuild/Rollup graphs. Memory includes build
+  contexts and generated bundle/declaration material.
+- **Coverage verdict:** Espalier should compose entry/file/plugin loops and
+  label external tool cost separately. It cannot honestly infer the external
+  bundler algorithm, but it should not discard the local dimensions.

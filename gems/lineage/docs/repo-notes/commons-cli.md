@@ -31,3 +31,17 @@ claimed, but this is a quality gap in prioritization.
   loop/cursor + mutable option-state heuristic would improve prioritization.
 - No probable performance/correctness bug was found. Big-O unknowns must be
   interpreted cautiously because Java collection/library summaries are sparse.
+
+## Second-pass time/space audit
+
+- **Partial evidence:** all 283 unknown time/space results retain components.
+  `DefaultParser.parse`, option matching, and `HelpFormatter.appendOptions`
+  are locally analyzable scans/formatting; the sample (`createMessage`,
+  `addArg`, `addOption`) contains three under-specified standard-library uses.
+- **Actual dominant work:** parsing is token count × option-prefix/match work,
+  with list/map state and argument values as space; help rendering is option
+  count × rendered text. The parser is more operationally important than the
+  formatter even when both are linear.
+- **Coverage verdict:** Java collection/string summaries and interprocedural
+  parser cursor facts should be available. The unknown label is conservative,
+  but the missed parser bound and ranking are analyzable shortcomings.

@@ -32,3 +32,17 @@ boundaries; no probable defect asserted.
 - Big-O needs metadata/reference collection summaries. Findings should remain
   build-time maintenance signal, not a performance alarm, until workload data
   distinguishes small from huge assemblies.
+
+## Second-pass time/space audit
+
+- **Partial evidence:** all 83 unknown time/space results retain components.
+  `EmbedResources` and reference filters are under-specified collection and
+  byte-stream traversals; Cecil/assembly-loader behavior is appropriately
+  opaque. The sample is two under-specified, one appropriate.
+- **Actual dominant work:** resources, references, and assembly metadata are
+  scanned/filtered and may be compressed or injected; time and retained buffers
+  scale with input assembly/resource size. This is build-time space, not a
+  runtime request cost.
+- **Coverage verdict:** local foreach/filter/compression-buffer terms should be
+  composed, while external metadata rewriting remains opaque. The source facts
+  are sufficient for a substantially better partial bound.

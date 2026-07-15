@@ -36,3 +36,16 @@ defect established.
 - No candidate defect was found. The most valuable future test is a deeply
   nested model with repeated aliases, to distinguish intentional one-pass
   traversal from repeated parser construction.
+
+## Second-pass time/space audit
+
+- **Partial evidence:** all 168 unknown time/space results have components.
+  `_settings_init_sources` and local model/config reads are under-specified;
+  source-provider invocation in `_settings_build_values` is appropriately
+  opaque. The three-source sample is two under-specified, one appropriate.
+- **Actual dominant work:** parser construction and value resolution depend on
+  settings fields, nesting, aliases, and number of configured sources. Space
+  grows with parser/model-derived maps and parsed argument/environment values.
+- **Coverage verdict:** Espalier should emit a field × source/nesting symbolic
+  component while preserving external provider work as unknown. It currently
+  identifies the right owner but not the time/space shape.

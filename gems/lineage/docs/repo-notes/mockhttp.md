@@ -31,3 +31,16 @@ probable product defect.
 - No candidate defect. Future complexity summaries should expose request
   matcher count × request field count, and identity should distinguish static
   extension helpers from handler-owned state.
+
+## Second-pass time/space audit
+
+- **Partial evidence:** all 119 unknown time/space results retain components.
+  Request matcher/definition selection is under-specified; user response or
+  matcher delegate execution is appropriately opaque; string formatting is
+  under-specified. The sample is two under-specified, one appropriate.
+- **Actual dominant work:** `SendAsync` can inspect request definitions and
+  their matchers, yielding definition × matcher × request-data work; matcher
+  diagnostics and expectation collections are the main temporary space.
+- **Coverage verdict:** collection traversal and matcher fan-out are visible and
+  should be emitted while delegates stay opaque. The current final unknown is
+  too coarse for the library's central behavior.

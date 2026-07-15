@@ -31,3 +31,18 @@ finding establishes a throughput or lifecycle bug.
 - No probable product defect. A meaningful follow-up would model event-ready
   count and callback fan-out, then compare inferred per-tick work with a
   controlled benchmark; static inspection cannot establish latency regressions.
+
+## Second-pass time/space audit
+
+- **Partial evidence:** all 156 unknown time/space results retain components.
+  `aeCreateEventLoop` has a visible linear allocation and is under-specified;
+  `http_parser_execute` should expose input-byte/state-machine work; kernel
+  wait/callback execution is appropriately opaque. The sample is two
+  under-specified, one appropriate.
+- **Actual dominant work:** each event-loop tick is ready events plus time
+  events plus callback work; HTTP parsing is input-byte proportional. Event
+  arrays, connection buffers, parser state, and Lua/request payloads dominate
+  memory, not the small loop-control frames.
+- **Coverage verdict:** local ready-set/timer loops and allocations should be
+  emitted as symbolic terms with callback/kernel work opaque. The current
+  unknowns hide most of the benchmark's actual work profile.

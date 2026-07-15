@@ -30,3 +30,18 @@ well-ranked; broad browser-module ownership is partly representation noise.
 - No probable product bug. Potential performance questions around serializer
   cost or multistream fan-out require benchmarked payload/stream workloads,
   not this static evidence.
+
+## Second-pass time/space audit
+
+- **Partial evidence:** 78/78 unknown time/space results retain components.
+  `setupBaseLogFunctions` visibly iterates levels and is under-specified;
+  `_asJson` has local object/serializer work that should be parameterized;
+  transport execution is appropriately opaque. The sample is two
+  under-specified, one appropriate.
+- **Actual dominant work:** per-log-event JSON/error serialization is driven by
+  bindings, message/object fields, serializers, and redaction paths;
+  multistream/transport cost adds stream fan-out and back-pressure queues.
+  Allocations are serialized buffers, child bindings, and queued writes.
+- **Coverage verdict:** array/object iteration and stream-count components are
+  locally discoverable; transport latency is not. `unknown` is safe but hides
+  the primary logger data-size and fan-out terms.

@@ -31,3 +31,18 @@ highlighted; no security or performance bug is claimed from static evidence.
 - No probable library bug. Any finding around unverified parsing must be
   validated interprocedurally against use-before-verify, rather than inferred
   from this function alone.
+
+## Second-pass time/space audit
+
+- **Partial evidence:** all 59 unknown time/space results retain components.
+  `ParseWithClaims` locally scans allowed methods and verification keys and is
+  under-specified; crypto verification/key callbacks are appropriately opaque;
+  `ParseUnverified` has visible token/JSON input-byte work. The sample is two
+  under-specified, one appropriate.
+- **Actual dominant work:** parse/decode is token-byte/claim-map dependent;
+  verification adds allowed-method and key-set iteration plus cryptographic
+  work. Header/claims maps, decoded bytes, and error chains are the main space
+  terms.
+- **Coverage verdict:** Espalier should compose local method/key loops and
+  decoding allocations while retaining crypto/callback operations as opaque.
+  This produces a useful partial bound without making security claims.

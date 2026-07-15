@@ -32,3 +32,18 @@ results are unknown—an unambiguous Go/reflection analysis gap.
 - A future workload should vary map keys, embedded structs, and slice nesting
   to distinguish linear decode from repeated field scans. No source change is
   proposed here.
+
+## Second-pass time/space audit
+
+- **Partial evidence:** 42/42 unknown time/space results retain components.
+  `typedDecodeHook`, `DecodeHookExec`, and composed hooks are correctly
+  parameterized by hook-chain length but under-specified as final results; the
+  sample contains three locally analyzable cases, no external-only case.
+- **Actual dominant work:** `decodeArray`/`decodeSlice` are element-recursive;
+  `decodeStructFromMap` builds key/unused maps, explores embedded fields,
+  decodes fields, and may sort errors. Its bounds involve keys, fields, nested
+  values, and `O(keys log keys)` error formatting; maps/errors/metadata drive
+  space.
+- **Coverage verdict:** reflection does not excuse losing explicit source loops
+  and allocations. Espalier misses the corpus's clearest locally derivable
+  time/space model and should support it generally.

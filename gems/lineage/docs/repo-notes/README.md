@@ -7,10 +7,18 @@ deliberately not bug reports and do not modify the evaluated projects.
 For every repository, Nil-Kill static, Decomplex, and Espalier were run against
 production paths only, at the pinned revision. `Big-O unknown/total` is the
 number of Espalier function results whose overall time bound was unknown; a
-known *component* is not counted as a known final bound. The source review then
-checked the ranked functions and independently selected the real operational
-hot paths. “Candidate” means a hypothesis worth reproducing upstream, not a
-confirmed defect.
+known *component* is not counted as a known final bound. Every such result in
+this run retains a known time and space component, so `unknown` means
+incomplete—not no information. The second-pass audit samples three unknown
+results per repository and labels them either **appropriate unknown** (external
+I/O, callback, dynamic dispatch, or a deliberately opaque contract) or
+**under-specified** (a local traversal/allocation/string operation for which a
+symbolic final bound should be emitted). It separately records any incorrect
+*known* bound found during source inspection.
+
+The source review then checked the ranked functions and independently selected
+the real operational hot paths. “Candidate” means a hypothesis worth
+reproducing upstream, not a confirmed defect.
 
 ## Corpus index
 

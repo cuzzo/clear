@@ -38,3 +38,19 @@ probable product defect from this static pass.
 - The main negative control is `Response`/`HTTPAdapter` owner pressure: public
   API breadth is real, but it should not be interpreted as a request-state
   aliasing bug without a concrete trace.
+
+## Second-pass time/space audit
+
+- **Partial evidence:** all 204 unknown time bounds (and all 204 unknown space
+  bounds) retain a known component. Sampling `check_compatibility`,
+  `should_bypass_proxies`, and `resolve_redirects` found two under-specified
+  local string/list traversals and one appropriate unknown at the retry/I/O
+  boundary.
+- **Actual dominant work:** body preparation/streaming is `O(body bytes)`;
+  proxy/no-proxy processing is linear in configured rules and string lengths;
+  redirect handling is bounded by redirect count times request/body work. The
+  corresponding allocation pressure is body/header/cookie data plus history.
+- **Coverage verdict:** Espalier should retain an opaque transport component
+  while composing the local scans and redirect loop. It currently misses this
+  useful symbolic bound; the unknown label is safe but not sufficiently
+  informative.

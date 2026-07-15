@@ -30,3 +30,17 @@ the complexity result non-actionable.
 - No probable library bug was inferred. The corpus should later include a
   nested generated-type workload to determine whether import/name lookup has
   avoidable repeated work.
+
+## Second-pass time/space audit
+
+- **Partial evidence:** 346/346 unknown time/space results retain components.
+  `TypeSpec.emit`, `CodeWriter.emit`, and name/import lookup are
+  under-specified local graph/text traversals; writer I/O is an appropriate
+  opaque term. The sample is two under-specified, one appropriate.
+- **Actual dominant work:** emission is proportional to type/member/code-block
+  graph and emitted text; import/name resolution adds collection lookup or scan
+  work. Output buffers, import maps, nested specs, and code blocks determine
+  memory.
+- **Coverage verdict:** recursive emit edges, collection iteration, and output
+  accumulation are derivable. Espalier finds these methods but leaves the core
+  time/space model almost entirely unknown.
