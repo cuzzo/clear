@@ -42,7 +42,7 @@ MUTABLE local_c     = Counter{ value: 0 } @local;
 MUTABLE locked_c    = Counter{ value: 0 } @shared:locked;
 MUTABLE wlocked_c   = Counter{ value: 0 } @shared:writeLocked;
 MUTABLE versioned_c = Counter{ value: 0 } @shared:versioned;
-MUTABLE atomic_c    = Counter{ value: 0 } @indirect:atomic;
+MUTABLE atomic_c    = Counter{ value: 0 } @boxed:atomic;
 
 tick!(local_c)     OR DIE;
 tick!(locked_c)    OR DIE;
@@ -55,11 +55,11 @@ The compiler lowers each call to the strategy that matches the actual binding:
 
 | Binding strategy | Lowering shape | Cost model |
 |---|---|---|
-| Plain `T`, `@local`, `@multiowned`, `@shared`, `@indirect` | Direct pointer access | No synchronization |
+| Plain `T`, `@local`, `@multiowned`, `@shared`, `@boxed` | Direct pointer access | No synchronization |
 | `@locked`, `@shared:locked` | Mutex acquire / release | Blocking |
 | `@writeLocked`, `@shared:writeLocked` | Write-lock acquire / release | Blocking |
 | `@versioned`, `@shared:versioned` | Snapshot update with bounded retry | Contention / retry |
-| `@indirect:atomic` | Atomic pointer update with bounded retry | Contention / retry |
+| `@boxed:atomic` | Atomic pointer update with bounded retry | Contention / retry |
 
 The source stays data-shaped. The compiled code is strategy-shaped.
 
@@ -118,9 +118,9 @@ Current families:
 | Family | Admits | Use when |
 |---|---|---|
 | `LOCKED` | `@locked`, `@writeLocked`, shared locked forms | The body can block while holding a lock |
-| `SNAPSHOTTED` | `@versioned`, `@indirect:atomic` | The body can run as a retryable snapshot transaction |
+| `SNAPSHOTTED` | `@versioned`, `@boxed:atomic` | The body can run as a retryable snapshot transaction |
 | `VERSIONED` | `@versioned` only | MVCC behavior is required |
-| `ATOMIC` | `@indirect:atomic` for structs | Atomic pointer behavior is required |
+| `ATOMIC` | `@boxed:atomic` for structs | Atomic pointer behavior is required |
 | `LOCAL` | Plain `T`, `@local`, `@multiowned` | The body should lower to direct local access |
 
 `LOCKED` and `SNAPSHOTTED` are polymorphic families because each admits more
@@ -189,7 +189,7 @@ END
 
 ```ruby clear illustrative
 MUTABLE mvcc_cfg   = Config{ port: 8080 } @versioned;
-MUTABLE atomic_cfg = Config{ port: 8080 } @indirect:atomic;
+MUTABLE atomic_cfg = Config{ port: 8080 } @boxed:atomic;
 
 updateConfig!(mvcc_cfg) OR_ELSE RAISE;    # may surface MvccConflict
 updateConfig!(atomic_cfg) OR_ELSE RAISE;  # may surface AtomicConflict
@@ -211,7 +211,7 @@ The compiler projects the error set at each call site:
 |---|---|
 | `@locked`, `@writeLocked` | `LockTimeout` |
 | `@versioned` | `MvccConflict` |
-| `@indirect:atomic` | `AtomicConflict` |
+| `@boxed:atomic` | `AtomicConflict` |
 
 Example:
 
@@ -227,7 +227,7 @@ FN tick!(MUTABLE c: Counter)
 END
 
 MUTABLE mvcc_c = Counter{ value: 0 } @versioned;
-MUTABLE atomic_c = Counter{ value: 0 } @indirect:atomic;
+MUTABLE atomic_c = Counter{ value: 0 } @boxed:atomic;
 
 tick!(mvcc_c);    # caller sees MvccConflict
 tick!(atomic_c);  # caller sees AtomicConflict
@@ -369,7 +369,7 @@ The relevant protection is mostly unit specs plus targeted transpile tests.
 Think of a synchronized value as three separate things:
 
 * The **type**: `Counter`
-* The **strategy**: `@shared:locked`, `@versioned`, `@indirect:atomic`
+* The **strategy**: `@shared:locked`, `@versioned`, `@boxed:atomic`
 * The **gate**: `WITH`, `WITH EXCLUSIVE`, `WITH POLYMORPHIC`, etc...
 
 Most functions should care about the type. A few functions care about the

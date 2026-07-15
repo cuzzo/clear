@@ -3,7 +3,7 @@
 Status: **DRAFT**. Settled in conversation; this doc is the spec
 the implementation tranches at the bottom will hit.
 
-`@indirect:atomic` is the v0.3 follow-up to v0.2's
+`@boxed:atomic` is the v0.3 follow-up to v0.2's
 `@shared:atomic`. Where `@shared:atomic` gives lock-free CAS on a
 free-standing primitive (Int64/Float64/Bool, scope-bounded), this
 adds **lock-free atomic pointer publish** for whole structs —
@@ -19,7 +19,7 @@ as the rest of the sync family:
 
 ```clear
 -- ILLUSTRATIVE
-config: Config = Config{ host: "localhost", port: 8080 } @indirect:atomic;
+config: Config = Config{ host: "localhost", port: 8080 } @boxed:atomic;
 
 -- Reader (any number, parallel, no contention)
 WITH SNAPSHOT config AS c {
@@ -53,17 +53,17 @@ don't have.
 | CAS retry | unbounded (rcu loops)       | user-loop               | unbounded (matches Rust rcu) |
 | Conflict | none — rcu always succeeds   | none — caller's loop   | none — `ON Conflict` is **forbidden** |
 
-## 3. Capability — `@indirect:atomic`
+## 3. Capability — `@boxed:atomic`
 
 Three sigils on three orthogonal axes:
 
 | Sigil | Axis | Meaning |
 |---|---|---|
-| `@indirect` | layout/storage | heap-pinned cell, stable address (so atomic-ptr ops are well-defined) |
+| `@boxed` | layout/storage | heap-pinned cell, stable address (so atomic-ptr ops are well-defined) |
 | `@atomic`   | sync           | atomic ops on the cell (load/store/CAS at the pointer level) |
 | (`@shared` is implicit) | sharing | published values are Arc-refcounted so loaded snapshots can outlive the producer's iteration |
 
-The user writes `@indirect:atomic`. The compiler infers `:shared`
+The user writes `@boxed:atomic`. The compiler infers `:shared`
 because escaping the declaring scope is the whole point of
 atomic-ptr — without Arc semantics on the published values, a
 loaded snapshot could become invalid mid-read when the producer
@@ -79,7 +79,7 @@ operations on a non-word-sized payload need either:
 - pointer indirection — atomic CAS on the pointer to an
   immutable heap-allocated `T`.
 
-CLEAR picks the second path. `@indirect` makes the indirection
+CLEAR picks the second path. `@boxed` makes the indirection
 explicit at the binding site so the user knows they're paying
 for one heap allocation per published value (not per field).
 
@@ -87,15 +87,15 @@ for one heap allocation per published value (not per field).
 
 | Form | Status |
 |---|---|
-| `@atomic` (alone) on a struct  | disallowed — use `@indirect:atomic` |
-| `@local:indirect:atomic`       | disallowed — atomic without cross-thread is pointless |
-| `@multiowned:indirect:atomic`  | disallowed — Rc isn't thread-safe |
-| `@indirect:atomic` on a primitive (Int64/Float64/Bool) | disallowed — use `@shared:atomic` (already exists; v0.2) |
-| `@indirect:atomic` on slices/lists/maps | disallowed for v0.3 — separate work item |
+| `@atomic` (alone) on a struct  | disallowed — use `@boxed:atomic` |
+| `@local:boxed:atomic`       | disallowed — atomic without cross-thread is pointless |
+| `@multiowned:boxed:atomic`  | disallowed — Rc isn't thread-safe |
+| `@boxed:atomic` on a primitive (Int64/Float64/Bool) | disallowed — use `@shared:atomic` (already exists; v0.2) |
+| `@boxed:atomic` on slices/lists/maps | disallowed for v0.3 — separate work item |
 
 ## 4. Surface — WITH SNAPSHOT
 
-`@indirect:atomic` reuses the existing `WITH SNAPSHOT` shape
+`@boxed:atomic` reuses the existing `WITH SNAPSHOT` shape
 introduced for `@shared:versioned`. The two families are
 **source-uniform** for read and **MATCH-dispatched** for mutate.
 
@@ -110,7 +110,7 @@ WITH SNAPSHOT config AS c {
 ```
 
 Single body works for both `@shared:versioned` and
-`@indirect:atomic`. No `MATCH` needed. No `ON Conflict` valid
+`@boxed:atomic`. No `MATCH` needed. No `ON Conflict` valid
 (read paths can't fail).
 
 ### 4.2. Mutate (single-family)
@@ -153,7 +153,7 @@ shape (parser.rb:2882-2896, parse_with_match_arms at 3037).
 ### 4.4. Multi-cell
 
 **Multi-cell `WITH SNAPSHOT` is forbidden when any cell is
-`@indirect:atomic`** (single-arm or any ATOMIC arm in a MATCH):
+`@boxed:atomic`** (single-arm or any ATOMIC arm in a MATCH):
 
 ```clear
 -- REJECTED at compile time
@@ -162,7 +162,7 @@ WITH SNAPSHOT a AS MUTABLE va, SNAPSHOT b AS MUTABLE vb { ... };
 
 Error message:
 
-> *"`@indirect:atomic` cannot guarantee multi-object consistency.
+> *"`@boxed:atomic` cannot guarantee multi-object consistency.
 > If you need multi-object consistency use `@shared:versioned` or
 > `@shared:locked`."*
 
@@ -175,7 +175,7 @@ cells.
 
 ## 5. Lifetime model
 
-`@indirect:atomic` is Arc-refcounted internally. Published values
+`@boxed:atomic` is Arc-refcounted internally. Published values
 have refcount lifetime; a `WITH SNAPSHOT` `AS x` binding bumps
 the refcount on entry, decrements on exit. Loaded snapshots can
 therefore outlive the producer's iteration.
@@ -186,19 +186,19 @@ divergence is structural:
 
 - `@shared:atomic` (primitive): bare `*Atomic(T)`, no refcount,
   scope-bounded. Cheap. Cannot escape.
-- `@indirect:atomic`: `Atomic(Arc<T>)`-shaped, refcounted, can
+- `@boxed:atomic`: `Atomic(Arc<T>)`-shaped, refcounted, can
   escape. One heap allocation per publish.
 
-Storing an `@indirect:atomic` cell in a long-lived struct field,
+Storing an `@boxed:atomic` cell in a long-lived struct field,
 returning it from a function, capturing it into a long-lived BG
 handle — all fine. The Arc keeps the live published value alive;
 the cell keeps the atomic-pointer alive.
 
 ## 6. Errors
 
-### 6.1. Bare mutation on `@indirect:atomic`
+### 6.1. Bare mutation on `@boxed:atomic`
 
-Direct field assignment on an `@indirect:atomic` binding is
+Direct field assignment on an `@boxed:atomic` binding is
 rejected with a message that **explicitly distinguishes from
 primitive `@atomic`**:
 
@@ -206,21 +206,21 @@ primitive `@atomic`**:
 config.port = 9090;        -- REJECTED
 ```
 
-> *"`@indirect:atomic` requires `WITH SNAPSHOT cfg AS MUTABLE x { x.port = 9090; }` for mutation. Atomic pointer swap publishes a new whole-T snapshot, not a per-field write — the `WITH SNAPSHOT` block clones the snapshot, mutates the clone, and CAS-publishes it. (This is different from primitive `@shared:atomic` Int64/Float64/Bool, which use direct ops like `c += 1` because they fit in a single CAS-able machine word.)"*
+> *"`@boxed:atomic` requires `WITH SNAPSHOT cfg AS MUTABLE x { x.port = 9090; }` for mutation. Atomic pointer swap publishes a new whole-T snapshot, not a per-field write — the `WITH SNAPSHOT` block clones the snapshot, mutates the clone, and CAS-publishes it. (This is different from primitive `@shared:atomic` Int64/Float64/Bool, which use direct ops like `c += 1` because they fit in a single CAS-able machine word.)"*
 
-### 6.2. `ON Conflict` on `@indirect:atomic`
+### 6.2. `ON Conflict` on `@boxed:atomic`
 
 ```clear
 WITH SNAPSHOT config AS MUTABLE x { ... } ON Conflict RAISE;  -- REJECTED
 ```
 
-> *"`ON Conflict` isn't valid on `@indirect:atomic`. Atomic CAS retries until success (matches Rust `rcu` semantics); there's no conflict path. Drop the trailing `ON Conflict`."*
+> *"`ON Conflict` isn't valid on `@boxed:atomic`. Atomic CAS retries until success (matches Rust `rcu` semantics); there's no conflict path. Drop the trailing `ON Conflict`."*
 
-### 6.3. Multi-cell `@indirect:atomic`
+### 6.3. Multi-cell `@boxed:atomic`
 
 Per §4.4:
 
-> *"`@indirect:atomic` cannot guarantee multi-object consistency. If you need multi-object consistency use `@shared:versioned` or `@shared:locked`."*
+> *"`@boxed:atomic` cannot guarantee multi-object consistency. If you need multi-object consistency use `@shared:versioned` or `@shared:locked`."*
 
 ### 6.4. Polymorphic mutate without MATCH
 
@@ -230,11 +230,11 @@ FN f(MUTABLE c: Config) REQUIRES c: VERSIONED | ATOMIC ->
 END
 ```
 
-> *"Mutate surface differs by family: `@shared:versioned` bounds retries and requires `ON Conflict`; `@indirect:atomic` retries unbounded and forbids it. Dispatch per family with `WITH SNAPSHOT c AS MUTABLE x MATCH ...`."*
+> *"Mutate surface differs by family: `@shared:versioned` bounds retries and requires `ON Conflict`; `@boxed:atomic` retries unbounded and forbids it. Dispatch per family with `WITH SNAPSHOT c AS MUTABLE x MATCH ...`."*
 
 ## 7. What's NOT in M3
 
-- `@indirect:atomic` on slices / lists / maps. Separate work item.
+- `@boxed:atomic` on slices / lists / maps. Separate work item.
 - Memory-ordering surface (acquire/release etc.). v0.2 atomics
   are seq_cst only; M3 inherits.
 - `compareAndSwap` / `exchange` / `load` / `store` as user-callable
@@ -247,18 +247,18 @@ END
 
 Numbered M3.* to mirror the M1.* / M2.* atomics organisation.
 
-### M3.1 — Type axis: `@indirect:atomic` on a struct
+### M3.1 — Type axis: `@boxed:atomic` on a struct
 
 Extend `Type` so the combination `(ownership: :indirect, sync: :atomic)`
 parses, has well-defined `zig_type` lowering (`*CheatLib.AtomicPtr(T)`
 or similar), and survives `bare_data_type` stripping. Mirrors what
-M1.3 did for primitive `:atomic`. Reject `@indirect:atomic` on
+M1.3 did for primitive `:atomic`. Reject `@boxed:atomic` on
 primitives and on `@local`/`@multiowned` storage.
 
 ### M3.2 — Parser: capability sigil
 
-`@indirect:atomic` recognised as a valid sigil chain at the
-declaration site. Order-independent (`@atomic:indirect` accepted
+`@boxed:atomic` recognised as a valid sigil chain at the
+declaration site. Order-independent (`@atomic:boxed` accepted
 too). Composes with `@shared` (which is implicit anyway). Mirrors
 M1.2.
 
@@ -306,25 +306,25 @@ is days.
 
 ### M3.4 — Annotator: capability validation
 
-- Allow `@indirect:atomic` only on struct types (not primitives,
+- Allow `@boxed:atomic` only on struct types (not primitives,
   slices, collections — see §3 disallowed table).
 - REQUIRES family `ATOMIC` covers BOTH primitive `@shared:atomic`
-  AND `@indirect:atomic` (single family, two layouts; the WHEN
+  AND `@boxed:atomic` (single family, two layouts; the WHEN
   ATOMIC arm dispatches via `@hasField` / `@hasDecl` in the
   comptime body — same pattern as M1.6).
-- Plain `:shared` is ALLOWED (implicit) on `@indirect:atomic`;
+- Plain `:shared` is ALLOWED (implicit) on `@boxed:atomic`;
   conflicts errored at parse for `@local` / `@multiowned`.
 
 ### M3.5 — WITH SNAPSHOT: read mode
 
-`WITH SNAPSHOT cell AS x { ... }` on an `@indirect:atomic`
+`WITH SNAPSHOT cell AS x { ... }` on an `@boxed:atomic`
 binding lowers to `cell.loadShared() => x` with cleanup at scope
 exit. No `ON Conflict` at this surface, same as the existing
 VERSIONED read path.
 
 ### M3.6 — WITH SNAPSHOT: MUTABLE (atomic CAS loop)
 
-`WITH SNAPSHOT cell AS MUTABLE x { ... };` on `@indirect:atomic`
+`WITH SNAPSHOT cell AS MUTABLE x { ... };` on `@boxed:atomic`
 lowers to:
 ```
 loop:
@@ -361,20 +361,20 @@ dispatch when arms exist:
 
 Inside `parse_snapshot_block` (and arm validation in the new
 MATCH path): when `capabilities.size > 1` AND any cell resolves
-to `@indirect:atomic` (or any `WHEN ATOMIC` arm exists in a
+to `@boxed:atomic` (or any `WHEN ATOMIC` arm exists in a
 multi-cell MATCH), error per §6.3 with the exact message:
-> "`@indirect:atomic` cannot guarantee multi-object consistency.
+> "`@boxed:atomic` cannot guarantee multi-object consistency.
 >  If you need multi-object consistency use `@shared:versioned`
 >  or `@shared:locked`."
 
 ### M3.10 — Bare-mutation rejection
 
 When the annotator sees an assignment whose target's root binding
-is `@indirect:atomic` AND the assignment is not inside a
+is `@boxed:atomic` AND the assignment is not inside a
 `WITH SNAPSHOT ... AS MUTABLE` block whose alias rooted at this
 binding — error per §6.1. Wording must explicitly distinguish
 primitive `@shared:atomic` (which uses direct ops) from
-`@indirect:atomic` (which requires WITH SNAPSHOT).
+`@boxed:atomic` (which requires WITH SNAPSHOT).
 
 ### M3.11 — Polymorphic mutate without MATCH
 
@@ -385,7 +385,7 @@ MATCH) — error per §6.4 directing the user to MATCH-dispatch.
 ### M3.12 — Lifetime: Arc-escape allowed
 
 Update `bg_lifetime_sources` (annotator.rb:5063) and the M2.6
-escape audit so `@indirect:atomic` bindings DO NOT contribute to
+escape audit so `@boxed:atomic` bindings DO NOT contribute to
 a tied lifetime — they're Arc-refcounted, free to escape. Mirror
 the existing `@shared`-without-sync exemption. Verify with
 positive (escape allowed) AND negative (primitive
@@ -410,7 +410,7 @@ Coverage matrix:
 `benchmarks/concurrent/atomic_ptr/`: producer-consumer config swap.
 - Single producer, N consumers, fixed publish rate, measure
   consumer read latency.
-- Compare CLEAR `@indirect:atomic` vs:
+- Compare CLEAR `@boxed:atomic` vs:
   - Rust `arc-swap` (same workload)
   - Go `atomic.Pointer[T]` (same workload)
   - CLEAR `@shared:writeLocked` (RwLock baseline)
@@ -424,8 +424,8 @@ Coverage matrix:
 Two patterns from real code:
 1. `STRUCT C { ... } @shared:writeLocked` with read-mostly
    workload + whole-struct commits (no field-level mutation) →
-   suggest `@indirect:atomic`.
-2. `@indirect:shared:locked` with read-mostly workload → same.
+   suggest `@boxed:atomic`.
+2. `@boxed:shared:locked` with read-mostly workload → same.
 
 Static eligibility check (similar to `AtomicMigrationSuggester`
 from M1.9): WITH-EXCLUSIVE bodies that only do `alias = NewT{...}`
@@ -440,5 +440,5 @@ Two surfaces:
 2. **Atomic-fit upgrade signal:** when an existing
    `@shared:versioned` cell sees only single-cell whole-struct
    commits (never multi-cell, never field-level mutation), the
-   doctor notes that `@indirect:atomic` would skip the bounded-
+   doctor notes that `@boxed:atomic` would skip the bounded-
    retry and EBR-pin overhead.

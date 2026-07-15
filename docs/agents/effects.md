@@ -12,7 +12,7 @@ The effects system is **not** function coloring. Effects are only required on pu
 
 | Effect | Meaning | Source |
 |---|---|---|
-| `HEAP` | Dynamic allocation (GPA, arena escape) | `@list`, `HashMap`, capability wraps (`@shared`, `@locked`, `@indirect`) |
+| `HEAP` | Dynamic allocation (GPA, arena escape) | `@list`, `HashMap`, capability wraps (`@shared`, `@locked`, `@boxed`) |
 | `BLOCKING` | May yield the fiber waiting for a lock | `WITH EXCLUSIVE` or auto-lock field mutations on `@locked`/`@writeLocked` |
 | `REENTRANT` | Function is directly or indirectly recursive | `EFFECTS REENTRANT` declaration, mutual recursion cycles |
 | `LOOP_UNBOUND` | Contains a loop without a provable bound | `WHILE TRUE`, `BG STREAM` generators |

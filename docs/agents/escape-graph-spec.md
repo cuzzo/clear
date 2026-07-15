@@ -81,7 +81,7 @@ the entire escape-graph surface to two types.
 
 | # | Sink | Source proxy(ies) | Borrow carve-out applies? |
 |---|---|---|---|
-| S-return | value flows to a `ReturnNode` value (→ `RET[fn]`) | E1 `fn_body_returns_heap?`/`return_expr_is_heap?`; E2 cond 1 `:always_returned`, cond 3 `:heap_ptr_return` (`@indirect`), `e2_carry_return_vars` (string) | **YES** |
+| S-return | value flows to a `ReturnNode` value (→ `RET[fn]`) | E1 `fn_body_returns_heap?`/`return_expr_is_heap?`; E2 cond 1 `:always_returned`, cond 3 `:heap_ptr_return` (`@boxed`), `e2_carry_return_vars` (string) | **YES** |
 | S-heapfield | stored into a heap-storage field/container (`x.f = v` where root storage ∈ {heap,multiowned,shared}) | E2 cond 4 `:assign_escape` | no |
 | S-heapmut-arg | frame string-concat passed as arg into a heap-container mutator (`cont.append(a+b)`) | E2 cond 7 `:concat_into_heap` | no |
 | S-bgcapture | captured by a BG block / closure | E2 cond 2 `:bg_captured` | no |
@@ -192,7 +192,7 @@ Re-gated against that oracle, the single value-flow EscapeGraph
 Collections/strings/structs are uniformly escape-conditional (the
 "map/set/pool inherently heap" and "397/444 are type categories"
 buckets were themselves measured against the buggy proxies -- the same
-trap). Sinks: S-return (list ownership transfer / @indirect),
+trap). Sinks: S-return (list ownership transfer / @boxed),
 S-heapfield, S-heapmut-arg (concat_into_heap), S-bgcapture,
 S-loopcarry, S-takes, S-mutlist, transitive heap-call. Shapes are
 EDGES in one graph; no composition can be missed.

@@ -1,4 +1,4 @@
-# CLEAR Collections: Array, List, Pool
+# CLEAR Collections: Array, List, Set, Pool, and Map
 
 CLEAR has three collection types, each designed for a different access pattern. The choice is a capability annotation — the element type and functions that operate on it stay the same regardless of which collection you use.
 
@@ -6,18 +6,20 @@ CLEAR has three collection types, each designed for a different access pattern. 
 
 | Collection | Zig Type | Access | Growth | Safety | Use when |
 |---|---|---|---|---|---|
-| `T[N]` | `[N]T` | Index O(1) | Fixed | Bounds-checked | Size known at compile time |
-| `T[]@list` | `ArrayListUnmanaged(T)` | Index O(1), append O(1)* | Dynamic | Bounds-checked | Size unknown, sequential access |
-| `T[N]@pool` | `Pool(T)` | Handle O(1) | Fixed | **Generational handles** | Frequent insert/remove, stable references |
+| `[N]T` | `[N]T` | Index O(1) | Fixed | Bounds-checked | Size known at compile time |
+| `[]T` | `ArrayListUnmanaged(T)` | Index O(1), append O(1)* | Dynamic | Bounds-checked | Size unknown, sequential access |
+| `[Set]T` | `HashMap(T, void)` | Lookup O(1)* | Dynamic | Key uniqueness | Membership and distinct values |
+| `[Pool(N)]T` | `Pool(T)` | Handle O(1) | Fixed | **Generational handles** | Frequent insert/remove, stable references |
+| `{K}V` | `HashMap(K, V)` | Lookup O(1)* | Dynamic | Key lookup | Associative data |
 
 \* Amortized O(1) — occasional reallocation when capacity is exceeded.
 
-## Arrays — `T[N]`
+## Arrays — `[N]T`
 
 Fixed-size, stack-allocated. The size is part of the type.
 
 ```clear
-MUTABLE scores: Int64[5] = [10, 20, 30, 40, 50];
+MUTABLE scores: [5]Int64 = [10, 20, 30, 40, 50];
 x = scores[2];          # 30
 scores[0] = 99;         # mutation via index
 ASSERT x == 30, "index access";
@@ -28,7 +30,7 @@ ASSERT scores[0] == 99, "mutation via index";
 
 **Limitations**: Cannot append, remove, or resize. Index out of bounds is a runtime panic.
 
-## Lists — `@list`
+## Lists — `[]T` / `[List]T`
 
 Dynamic-size, heap-allocated. Backed by `std.ArrayListUnmanaged(T)`.
 
@@ -44,23 +46,23 @@ name = users[0];           # "Alice"
 
 **Limitations**: Removing from the middle is O(N) (shift elements). Handles/pointers to elements are invalidated on reallocation. Not suitable for frequent insert/remove of interior elements.
 
-**Variant — sharded list**: `T[]@list:sharded(N)` splits the list into N shards for parallel pipeline operations (`|> EACH`, `|> SUM`). Each shard is an independent list. Round-robin distribution on append.
+**Variant — sharded list**: `[List]@sharded(N) T` splits the list into N shards for parallel pipeline operations (`|> EACH`, `|> SUM`). Each shard is an independent list. Round-robin distribution on append.
 
 **Lazy inference**: `List[]` creates an untyped list. The element type is inferred from the first `append`:
 
 ```clear
 MUTABLE items = List[];
-items.append(42.0);  # type inferred as Float64[]@list
+items.append(42.0);  # type inferred as []Float64
 ```
 
-## Pools — `@pool`
+## Pools — `[Pool(N)]T`
 
 Handle-based, pre-allocated with fixed capacity. Backed by `Pool(T)` with **generational handles** for ABA safety. The capacity is specified at declaration time and all slots are allocated up front — no dynamic resizing, no reallocation. Insert and remove are O(1) via an internal free stack.
 
 ```clear
 STRUCT Enemy { hp: Int64, name: String }
 
-MUTABLE enemies: Enemy[1000]@pool = [];
+MUTABLE enemies: [Pool(1000)]Enemy = [];
 id1: Id<Enemy> = enemies.insert(Enemy{ hp: 100, name: "Goblin" });
 id2: Id<Enemy> = enemies.insert(Enemy{ hp: 200, name: "Dragon" });
 
@@ -110,7 +112,7 @@ No garbage collector. No reference counting. Just a 4-byte integer comparison pe
 
 ### Pools vs Lists
 
-| Operation | List `T[]@list` | Pool `T[N]@pool` |
+| Operation | List `[]T` | Pool `[Pool(N)]T` |
 |---|---|---|
 | Append/Insert | O(1) amortized | O(1) via free stack |
 | Access | `list[i]` → `T` (direct) | `pool[id]` → `?T` (requires `OR`) |
@@ -125,24 +127,26 @@ No garbage collector. No reference counting. Just a 4-byte integer comparison pe
 
 ```
 Is the size fixed at compile time?
-├── Yes → T[N] (array)
+├── Yes → [N]T (array)
 └── No
     ├── Access pattern?
-    │   ├── Sequential / index-based → T[]@list (list)
-    │   └── Handle-based / frequent insert+remove → T[N]@pool (pool)
+    │   ├── Sequential / index-based → []T (list)
+    │   └── Handle-based / frequent insert+remove → [Pool(N)]T (pool)
     └── Need stable references across insert/remove?
-        ├── Yes → T[N]@pool (generational handles survive mutations)
-        └── No → T[]@list (simpler, more cache-friendly for iteration)
+        ├── Yes → [Pool(N)]T (generational handles survive mutations)
+        └── No → []T (simpler, more cache-friendly for iteration)
 ```
 
 Note: pools require a compile-time capacity `N`. All slots are pre-allocated up front, giving O(1) insert/remove via an internal free stack with no runtime reallocation. Choose a capacity that covers your expected maximum — the pool will panic if you exceed it.
 
-## Hash Maps — `HashMap<V>` and `HashMap<K, V>`
+## Hash Maps — `{K}V`
 
-Key-value maps. String-keyed by default, numeric-keyed with explicit `HashMap<K, V>`.
+Key-value maps. The key is explicit in `{K}V`; the shorthand `{}V` uses
+`Symbol`. Legacy one-argument `HashMap<V>` remains String-keyed during
+migration and fixes to `{String}V`.
 
 ```clear
-MUTABLE scores: HashMap<Int64> = {};     # String → Int64
+MUTABLE scores: {String}Int64 = {};
 scores["alice"] = 100_i64;
 scores["bob"] = 200_i64;
 val = scores["alice"];                    # 100
@@ -157,18 +161,18 @@ scores.count();                           # 1
 
 By default, collections store elements as **Array of Structures** (AOS): each element is a contiguous block of all its fields. When a pipeline accesses only a subset of fields, the CPU loads entire cache lines but uses only a fraction — wasting memory bandwidth.
 
-The `:soa` capability switches to **Structure of Arrays** layout: each field gets its own contiguous array. A pipeline that touches one field iterates a dense, cache-friendly slice.
+The `@soa` capability switches to **Structure of Arrays** layout: each field gets its own contiguous array. A pipeline that touches one field iterates a dense, cache-friendly slice.
 
 ```clear
 STRUCT Entity { x: Float64, y: Float64, vx: Float64, vy: Float64, health: Float64, mana: Float64, name: String, level: Float64 }
 
 # AOS (default): each entity is 8 fields × 8 bytes = 64 bytes per cache line.
 # SUM _.health loads all 8 fields but uses only 1 — 87.5% wasted bandwidth.
-MUTABLE pool: Entity[10000]@pool = [];
+MUTABLE pool: [Pool(10000)]Entity = [];
 
 # SOA: health values are stored in a contiguous f64 array.
 # SUM _.health touches only that array — zero waste.
-MUTABLE pool: Entity[10000]@pool:soa = [];
+MUTABLE pool: [Pool(10000)]@soa Entity = [];
 ```
 
 The compiler detects when SOA would help and suggests it:
@@ -178,27 +182,27 @@ NOTE: Pipeline accesses 1 of 8 fields (health). Consider @soa
       for better cache performance on 'Entity'.
 ```
 
-**When `:soa` helps most:**
+**When `@soa` helps most:**
 - Pipelines that touch < 50% of fields (SUM, MIN, MAX, AVERAGE on one field)
 - Large structs (8+ fields)
 - High-volume iteration (thousands of elements)
 
-**When `:soa` doesn't help:**
+**When `@soa` doesn't help:**
 - Small structs (< 4 fields) — cache lines already fit the whole struct
 - EACH that reads/writes most fields — no bandwidth savings
 - Random-access by handle (`pool.get(id)`) — must reassemble the struct
 
 **How it works under the hood:**
 
-All pipeline operators (SUM, MIN, MAX, AVERAGE, COUNT, ANY, ALL, WHERE, FIND, SELECT) automatically use field-slice iteration on `:soa` pools. The compiler rewrites `_.health` to `data.items(.health)[i]` — a direct index into the contiguous field array. No materialization, no struct reassembly for the common case.
+All pipeline operators (SUM, MIN, MAX, AVERAGE, COUNT, ANY, ALL, WHERE, FIND, SELECT) automatically use field-slice iteration on `@soa` pools. The compiler rewrites `_.health` to `data.items(.health)[i]` — a direct index into the contiguous field array. No materialization, no struct reassembly for the common case.
 
 For operators that produce struct output (WHERE, FIND), structs are reassembled only for matching elements — the predicate still uses field-slice access, so most iterations touch only the predicate field.
 
-`:soa` works on both `@pool` and `@list`:
+`@soa` works on both pool and list layers:
 
 ```clear
-MUTABLE pool: Entity[10000]@pool:soa = [];   # SOA pool (generational handles)
-MUTABLE items: Entity[]@list:soa = [];  # SOA list (dense, indexed)
+MUTABLE pool: [Pool(10000)]@soa Entity = []; # SOA pool (generational handles)
+MUTABLE items: [List]@soa Entity = [];       # SOA list (dense, indexed)
 ```
 
 Same API as their non-SOA counterparts. The difference is invisible except in pipeline performance.
@@ -210,9 +214,9 @@ Same API as their non-SOA counterparts. The difference is invisible except in pi
 Lists, pools, and hash maps all support sharding for parallel access:
 
 ```clear
-MUTABLE data: Float64[]@list:sharded(4) = [];
-MUTABLE entities: Enemy[10000]@pool:sharded(4) = [];
-MUTABLE counts: HashMap<Int64>@sharded(4) = {};
+MUTABLE data: [List]@sharded(4) Float64 = [];
+MUTABLE entities: [Pool(10000)]@sharded(4) Enemy = [];
+MUTABLE counts: {String}@sharded(4) Int64 = {};
 ```
 
 Sharding splits the collection into N independent partitions. Each shard is a complete, independent data structure — no shared state, no locks, no atomic operations between shards.
@@ -239,7 +243,7 @@ Sharding splits the collection into N independent partitions. Each shard is a co
 The `SHARD` pipeline operator partitions work so each fiber owns its shard exclusively:
 
 ```clear
-MUTABLE map: HashMap<String>@sharded(8) = {};
+MUTABLE map: {String}@sharded(8) String = {};
 n = 1000000;
 
 # SHARD routes each key to the scheduler that owns its shard.
@@ -261,14 +265,14 @@ n = 1000000;
 
 ### One-Line Optimization
 
-`@sharded(N)` is a one-line declaration change. Functions don't need to know — a function that takes `HashMap<String>` seamlessly accepts `HashMap<String>@sharded(8)`:
+`@sharded(N)` is a one-line declaration change. Functions don't need to know — a function that takes `{String}String` can accept the same map payload behind a sharded binding:
 
 ```clear
 # One-line change: add @sharded(8) to the declaration
-MUTABLE map: HashMap<String>@sharded(8) = {};
+MUTABLE map: {String}@sharded(8) String = {};
 
 # Functions: no @sharded needed in parameter types
-FN doWork!(MUTABLE map: HashMap<String>, key: String) RETURNS !Void ->
+FN doWork!(MUTABLE map: {String}String, key: String) RETURNS !Void ->
     map[key] = "value";
 END
 
@@ -295,7 +299,7 @@ The compiler handles everything:
 For rare cases where multiple schedulers must read/write the same keys concurrently (e.g., a global session registry), use `@shared:writeLocked`:
 
 ```clear
-MUTABLE sessions: HashMap<Session> @shared:writeLocked = {};
+MUTABLE sessions: {String}@shared:writeLocked Session = {};
 # Arc<RwLock<HashMap>>: readers are parallel, writers are serialized
 ```
 
@@ -313,8 +317,8 @@ For performance-critical internal infrastructure where keys are not attacker-con
 
 ```ruby clear
 # Planned syntax (not yet implemented):
-MUTABLE symbols: HashMap<SymbolInfo>@fastTrusted = {};
-MUTABLE fast_sharded: HashMap<Int64>@sharded(8):fastTrusted = {};
+MUTABLE symbols: {String}@fastTrusted SymbolInfo = {};
+MUTABLE fast_sharded: {String}@sharded(8):fastTrusted Int64 = {};
 ```
 
 `@fastTrusted` would switch to unsalted FNV-1a or raw Wyhash — faster, but vulnerable to Hash DoS if keys come from untrusted input. The name is deliberate: it forces the developer to declare "I trust this data source."

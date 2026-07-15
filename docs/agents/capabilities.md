@@ -68,7 +68,7 @@ CLEAR has three orthogonal capability dimensions. They can be combined in any or
 | Capability | Mechanism | Cost | Use when |
 |---|---|---|---|
 | *(none)* | Stack or frame (compiler decides) | Zero | Default. Small values. |
-| `@indirect` | Heap pointer (`*T`) | ~1ns (pointer deref) | Stable address needed (graph edges, self-referential structs). |
+| `@boxed` | Heap pointer (`*T`) | ~1ns (pointer deref) | Stable address needed (graph edges, self-referential structs). |
 
 ### Combining dimensions
 
@@ -76,7 +76,7 @@ CLEAR has three orthogonal capability dimensions. They can be combined in any or
 -- ILLUSTRATIVE
 config = AppConfig{ port: 8080 } @shared:locked;      -- Arc<Mutex<T>>
 node   = TreeNode{ left: NIL }   @multiowned;         -- Rc<T>
-cache  = LargeStruct{ data: [] } @local:indirect;     -- *T (both intents expressed)
+cache  = LargeStruct{ data: [] } @local:boxed;        -- *T (both intents expressed)
 counter = Counter{ value: 0 }    @local;              -- *T (zero-cost sharing)
 ```
 
@@ -86,6 +86,27 @@ Invalid same-dimension combinations are compile errors:
 x = Foo{} @locked:writeLocked;    -- ERROR: duplicate sync
 x = Foo{} @shared:multiowned;     -- ERROR: duplicate ownership
 ```
+
+## Capabilities on Inline Type Layers
+
+For structural types, a capability follows the exact node it governs. The
+leftmost collection is also the first access operation:
+
+```clear
+lists: []@shared:locked User = [];          -- one shared, locked list
+users: []User@boxed = [];                   -- definite list of boxed Users
+index: {Symbol}@versioned []User = {};       -- versioned map of lists
+nested: [List]@local {Symbol}@shared T = []; -- local list of shared maps
+```
+
+Moving a capability across a layer changes the type and runtime obligations.
+The compiler preserves each attachment through capability-polymorphic access,
+cleanup, escape analysis, MIR, and backend lowering; it does not flatten a
+nested synchronization policy into the outer binding.
+
+A type may contain at most three separate capability sites. A joined chain
+such as `@shared:locked` counts as one site. This keeps access obligations
+locally understandable while still allowing nested collection designs.
 
 ## Interior Mutability (@alwaysMutable)
 
@@ -202,7 +223,7 @@ Is the data shared across fibers?
         └── Cross-scheduler → @shared (Arc)
 
 Stable heap address needed (graphs)?
-└── @indirect (combinable with any of the above)
+└── @boxed (combinable with any of the above)
 ```
 
 ## Internal vs. External Capabilities

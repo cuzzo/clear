@@ -138,18 +138,18 @@ instead of 250-line copies.
 
 ---
 
-## D. SNAPSHOT alias inner_type misses @indirect:atomic strip
+## D. SNAPSHOT alias inner_type misses @boxed:atomic strip
 
 **Signal:** `capabilities.rb:482`:
 ```ruby
 inner_type = st.versioned? ? st.bare_data_type : st
 ```
 
-For `@indirect:atomic`, `st.versioned?` is false, so `inner_type = st`
+For `@boxed:atomic`, `st.versioned?` is false, so `inner_type = st`
 (carries sync=:atomic, layout=:indirect). The alias's `SymbolEntry`
 doesn't actually CARRY those flags (sym.sync/layout default nil
 because the declare call passes neither), but the alias's
-`.type` field IS the full @indirect:atomic Type.
+`.type` field IS the full @boxed:atomic Type.
 
 **Why it works today:** The M3.10 reject (`reject_bare_atomic_ptr_mutation!`)
 checks `sym.sync == :atomic && sym.layout == :indirect` — NOT the
@@ -157,7 +157,7 @@ type. So the alias falls through (its sym has nil for both).
 
 **Risk if missed:** Future code that reads `alias.type.sync` (instead
 of `alias.sym.sync`) would see :atomic on the alias and apply
-@indirect:atomic semantics where the alias is actually a bare *T
+@boxed:atomic semantics where the alias is actually a bare *T
 pointer. Land-mine for downstream work.
 
 **Fix:** Extend the strip:
@@ -176,21 +176,21 @@ preserves that behavior under future code that reads alias.type.
 
 ---
 
-## E. Test gap: escape via RETURN of @indirect:atomic
+## E. Test gap: escape via RETURN of @boxed:atomic
 
 **Signal:** `docs/agents/atomicptr.md` §5 commits to "Storing an
-@indirect:atomic cell in a long-lived struct field, returning it
+@boxed:atomic cell in a long-lived struct field, returning it
 from a function, capturing it into a long-lived BG handle — all
 fine." M3.12 verified the BG-handle case. The RETURN case was
 deferred during M3.13 (transpile-tests):
 
 > The escape-via-RETURN case is a separate concern: Arc-managed
-> cleanup of an @indirect:atomic returned through a fn signature
+> cleanup of an @boxed:atomic returned through a fn signature
 > needs additional cleanup-classification work the bare M3 design
 > contract doesn't yet specify (M3.12 only exempted the BG-capture
 > lifetime audit, not the caller-side cleanup of a returned cell).
 
-**Surfaced:** Calling `make() RETURNS Cfg@indirect:atomic` produces
+**Surfaced:** Calling `make() RETURNS Cfg@boxed:atomic` produces
 a heap-allocated cell; the caller's `cfg = make()` binding takes
 ownership. The cleanup classifier needs to recognize the returned
 type as :rc-shaped (heap pointer to AtomicPtr cell) so the
@@ -200,13 +200,13 @@ Ad-hoc test produced a leak.
 **Fix:** Two parts:
 1. **Test:** `transpile-tests/346_atomic_ptr_escape_return.clear`
    demonstrating the escape pattern (small fn returning an
-   @indirect:atomic cell; caller reads it).
+   @boxed:atomic cell; caller reads it).
 2. **Investigate:** the actual leak when I tried the test. Likely
    classify_rc_or_link in promotion_plan.rb needs to handle the
    atomic-ptr case specifically (currently bindings DECLARED as
-   @indirect:atomic auto-promote to ownership=:shared and hit the
+   @boxed:atomic auto-promote to ownership=:shared and hit the
    :rc path; bindings RECEIVED as `cfg = make()` with
-   `RETURNS Cfg@indirect:atomic` may not get the same classification).
+   `RETURNS Cfg@boxed:atomic` may not get the same classification).
 
 **Risk:** Medium — could surface a real bug. If it does, fix is
 worth it.
@@ -221,7 +221,7 @@ worth it.
 **Signal:**
 ```
 benchmarks/concurrent/18_atomic_counter   (M1.8 — primitive @shared:atomic)
-benchmarks/concurrent/18_atomic_ptr       (M3.14 — @indirect:atomic)
+benchmarks/concurrent/18_atomic_ptr       (M3.14 — @boxed:atomic)
 ```
 
 Both numbered 18 because each milestone created independently against
@@ -261,7 +261,7 @@ No multi-step state machine. Loom + stress is sufficient. **No action.**
 
 **Signal:** `docs/agents/atomicptr.md` M3.16 lists two surfaces; only
 surface 1 (lock-profile → atomic-ptr) is implemented. Surface 2
-(`@shared:versioned` → `@indirect:atomic` upgrade when the cell only
+(`@shared:versioned` → `@boxed:atomic` upgrade when the cell only
 does single-cell whole-struct commits) is deferred.
 
 **What's needed:**
@@ -297,17 +297,17 @@ to `.gitignore`, OR make the test runner build into a temp dir.
 
 ---
 
-## J. Cleanup classification: @indirect:atomic via `:rc` path is roundabout
+## J. Cleanup classification: @boxed:atomic via `:rc` path is roundabout
 
 **Signal:** In `promotion_plan.rb classify_binding`, an
-`@indirect:atomic` binding flows through `classify_rc_or_link`
+`@boxed:atomic` binding flows through `classify_rc_or_link`
 because the M3.5 auto-promotion sets ownership=:shared, which makes
 `ti.any_rc?` true. The result is a `:rc` cleanup entry whose
 `zig_type` is `*CheatLib.AtomicPtr(T)` (correct), and the
 cleanup() Zig shim then comptime-detects AtomicPtr via
 `@hasDecl(child, "compareAndPublish")`.
 
-**Why it works:** ti.zig_type for @indirect:atomic returns the right
+**Why it works:** ti.zig_type for @boxed:atomic returns the right
 zig type (M3.1), so the rc path's `ti.zig_type` substitution lands
 on the right cleanup-arg type.
 
@@ -324,7 +324,7 @@ emission path. Two new lines plus a small emitter case.
 **Risk:** Low. The current path works; this is a clarity refactor.
 Loom + stress tests + the M3.13 transpile-tests catch any regression.
 
-**Effort:** ~1 hour. **Impact:** Removes the "an @indirect:atomic
+**Effort:** ~1 hour. **Impact:** Removes the "an @boxed:atomic
 binding is classified as :rc" surprise. Self-documenting.
 
 ---
@@ -354,7 +354,7 @@ is intentional — different migration targets.
 | A. Move atomic_ptr.zig → runtime/, drop extractEbr | High  | 1h  | atomic_ptr.zig, *-test.zig |
 | B. `:layout` declare kwarg (consistency w/ `sync`)| High  | 30m | scope.rb, symbol_entry.rb, annotator.rb |
 | F. Renumber `18_atomic_ptr` → `19_atomic_ptr`     | High  | 5m  | benchmarks/concurrent/ |
-| D. SNAPSHOT alias inner_type strip @indirect:atomic | High | 5m | capabilities.rb |
+| D. SNAPSHOT alias inner_type strip @boxed:atomic | High | 5m | capabilities.rb |
 | I. Gitignore transpile-tests/<NNN>_* binaries     | Low   | 5m  | .gitignore |
 | C. Consolidate two migration suggesters           | Medium | 2-4h | src/tools/ |
 | J. Dedicated `:atomic_ptr` cleanup kind           | Medium | 1h  | promotion_plan.rb, mir_emitter.rb |

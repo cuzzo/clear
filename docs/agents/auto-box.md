@@ -2,18 +2,18 @@
 
 Status: Implemented (constrained form)
 
-Scope: EASY-mode storage-layout elision for `@indirect`, and the boundary
+Scope: EASY-mode storage-layout elision for `@boxed`, and the boundary
 between automatic placement and explicit representation choices
 
 Related: `docs/agents/auto-copy-clone.md`, `docs/agents/graph.md`
 
 Implementation note (2026-07): CLEAR models collection-element layout as an
-independent type axis, so `Foo@indirect[]@list` is a list of unique `*Foo`
-elements while `Foo[]@list:indirect` is a unique box around a list of inline
+independent type axis, so `Foo@boxed[]@list` is a list of unique `*Foo`
+elements while `Foo[]@list:boxed` is a unique box around a list of inline
 `Foo` elements. Resolved intrinsic signature metadata—not method names—marks
 consuming collection transport. EASY can move a direct payload into an
 explicitly indirect element destination; DEFAULT and STRICT require an
-explicit `@indirect` construction. A consumed unique box can move its payload
+explicit `@boxed` construction. A consumed unique box can move its payload
 into an inline element and release only the empty allocation shell. If the
 source remains live, the compiler rejects the hidden deep copy. Bare recursive
 types now always produce fixable topology choices rather than silently choosing
@@ -21,7 +21,7 @@ one representation.
 
 ## 1. Decision
 
-CLEAR should permit EASY mode to omit `@indirect` syntax only when the
+CLEAR should permit EASY mode to omit `@boxed` syntax only when the
 program's already-resolved contract has fixed an indirect representation and
 the compiler is merely elaborating the source into that contract. The
 elaborated program must have exactly the same representation, allocation
@@ -36,16 +36,16 @@ decision.
 This document therefore rejects the broad proposal that EASY should box a
 value because it escapes, enters a collection, or happens to be recursive. It
 also narrows an earlier version of this design: even a uniquely recursive
-field is not silently boxed by default. `@indirect`, `@node`, an indexed
+field is not silently boxed by default. `@boxed`, `@node`, an indexed
 arena, and a different contiguous formulation can have radically different
-allocation and cache behavior. The fact that only `@indirect` preserves the
+allocation and cache behavior. The fact that only `@boxed` preserves the
 exact invalid inline spelling does not make it the uniquely best program.
 
 This is deliberately narrower than “box every value that escapes.” Escape, ownership, and representation are separate questions:
 
 - Moving `Foo` into a `Foo[]@list` stores `Foo` inline in the list. It does not require a box.
 - Moving `Foo` into an inline global slot changes its storage location, not its representation.
-- `Foo@indirect` changes the representation to a pointer-backed allocation and can change allocation count, ABI, cache locality, address stability, and destruction behavior.
+- `Foo@boxed` changes the representation to a pointer-backed allocation and can change allocation count, ABI, cache locality, address stability, and destruction behavior.
 - `Foo@node` selects a graph domain and compact handle representation; it is not merely spelling for a box.
 
 The compiler must preserve these distinctions.
@@ -71,7 +71,7 @@ The feature must support CLEAR's priorities:
 2. Maximize optionality. EASY removes a forced annotation, DEFAULT exposes layout, and STRICT exposes every potentially costly ownership operation.
 3. Minimize cognitive complexity. Users need not name a representation when there is only one valid, cost-equivalent answer.
 4. Maximize safety. No stack address may escape, no recursive value may have infinite size, and no inferred box may be used to conceal ambiguous aliasing.
-5. Preserve near-perfect performance. Inferred and explicit `@indirect` must lower through the same MIR and runtime operations. The inference feature must add no allocation, copy, branch, header, or pointer chase beyond the explicit representation.
+5. Preserve near-perfect performance. Inferred and explicit `@boxed` must lower through the same MIR and runtime operations. The inference feature must add no allocation, copy, branch, header, or pointer chase beyond the explicit representation.
 
 “Perfect performance” here means parity with the best explicit spelling of the same chosen representation. It does not mean that a pointer-backed recursive structure is universally as cache-efficient as an inline array, `@node`, or a purpose-built arena.
 
@@ -114,11 +114,11 @@ profile-only warning is too weak for an unbounded copy in a loop.
 
 | Mode | Types | Ownership transport | Storage layout |
 |---|---|---|---|
-| EASY | Mostly inferred | Infer move/borrow/trivial copy and capability-preserving retain; never guess across mutation; require explicit potentially expensive deep `COPY` | Elide construction only after a contract fixes `@indirect`; do not infer opportunistic boxes |
+| EASY | Mostly inferred | Infer move/borrow/trivial copy and capability-preserving retain; never guess across mutation; require explicit potentially expensive deep `COPY` | Elide construction only after a contract fixes `@boxed`; do not infer opportunistic boxes |
 | DEFAULT | Explicit, with local inference | Apply the same transport cost threshold as EASY; representation and potentially expensive deep `COPY` remain explicit | Explicit |
 | STRICT | Explicit | Reject hidden cost; require explicit costly copy/share operations | Explicit |
 
-DEFAULT does not infer `@indirect`. Explicit types are a local contract for layout and API shape. Silently changing an inline `Foo` to a pointer-backed `Foo@indirect` would invalidate cache, allocation, and ABI reasoning.
+DEFAULT does not infer `@boxed`. Explicit types are a local contract for layout and API shape. Silently changing an inline `Foo` to a pointer-backed `Foo@boxed` would invalidate cache, allocation, and ABI reasoning.
 
 STRICT has the same layout rule and additionally rejects any hidden costful ownership transport. Zero-cost moves and borrows may still be proven and lowered without runtime work.
 
@@ -131,7 +131,7 @@ must not have separate inference engines:
 - STRICT requires every cost-bearing representation and transport decision to
   be explicit.
 
-## 5. When EASY May Elide `@indirect` Syntax
+## 5. When EASY May Elide `@boxed` Syntax
 
 ### 5.1 Recursive declarations require a layout choice
 
@@ -149,7 +149,7 @@ STRUCT Node {
 ```clear
 STRUCT Node {
   value: Int64,
-  next: ?Node@indirect
+  next: ?Node@boxed
 }
 ```
 
@@ -160,7 +160,7 @@ invalid inline representation, but they may be the correct and dramatically
 faster program.
 
 The default diagnostic should therefore offer explicit, costed fixes. It may
-offer `next: ?Node@indirect` as the first fix for unique ownership, but applying
+offer `next: ?Node@boxed` as the first fix for unique ownership, but applying
 that fix is a developer decision. If CLEAR later adds a declaration whose
 semantic family is inherently reference-shaped, such as an explicitly
 declared reference aggregate, recursion within that family can be automatic
@@ -170,10 +170,10 @@ If a recursive strongly connected component has several valid cycle-breaking edg
 
 ### 5.2 An explicit resolved destination contract
 
-EASY may insert construction of `Foo@indirect` when the local destination or callee ABI already requires `Foo@indirect`:
+EASY may insert construction of `Foo@boxed` when the local destination or callee ABI already requires `Foo@boxed`:
 
 ```clear
-FUNCTION remember(value: Foo@indirect) TAKES value DO
+FUNCTION remember(value: Foo@boxed) TAKES value DO
   # ...
 END
 
@@ -194,7 +194,7 @@ The same rule applies when an EASY-inferred local is initialized directly into
 an explicitly indirect field. It does not justify changing an inline local or
 collection element into an indirect representation elsewhere.
 
-## 6. When EASY Must Not Infer `@indirect`
+## 6. When EASY Must Not Infer `@boxed`
 
 ### 6.1 Collection or global escape alone
 
@@ -219,7 +219,7 @@ retains ownership, that requirement must appear in its type/effect contract,
 such as `TAKES`, and its storage representation must be visible in the
 destination or parameter type where relevant.
 
-Even then, `TAKES Foo` does not mean `TAKES Foo@indirect`. A flat `Foo` may be
+Even then, `TAKES Foo` does not mean `TAKES Foo@boxed`. A flat `Foo` may be
 moved by value into an inline global or collection without boxing. If the
 callee stores into an indirect global, either its parameter/destination
 contract exposes that representation or the callee performs an explicit
@@ -228,10 +228,10 @@ callee body was edited.
 
 Ordinary CLEAR user-struct parameters are already representation-polymorphic:
 the Zig backend emits `anytype`, so the same source function accepts inline
-`T`, frame pointers, `T@indirect`, and other compatible pointer-backed forms,
+`T`, frame pointers, `T@boxed`, and other compatible pointer-backed forms,
 with Zig specializing and auto-dereferencing at each call site. Auto-box work
 must preserve that property. A reader such as `FN read(x: Foo)` does not need
-its signature rewritten merely because one caller has `Foo@indirect`.
+its signature rewritten merely because one caller has `Foo@boxed`.
 
 A signature needs an explicit indirect contract only when indirection itself
 is semantically relevant: the function takes ownership of the box, returns or
@@ -247,17 +247,17 @@ EASY must not infer a box merely because it might avoid a future copy, might sta
 
 ### 6.4 Ambiguous topology
 
-For graphs, parent pointers, many-to-many cycles, or large recursive collections, `@indirect`, `@node`, and explicit shared ownership have different semantics and performance profiles. EASY must not choose among them.
+For graphs, parent pointers, many-to-many cycles, or large recursive collections, `@boxed`, `@node`, and explicit shared ownership have different semantics and performance profiles. EASY must not choose among them.
 
-The diagnostic should normally recommend `@node` for a lifecycle-bounded graph, `@indirect` for unique pointer-owned recursion, and `@shared`/LINK for independently owned cross-domain aliases.
+The diagnostic should normally recommend `@node` for a lifecycle-bounded graph, `@boxed` for unique pointer-owned recursion, and `@shared`/LINK for independently owned cross-domain aliases.
 
 ### 6.5 Address stability and self-reference
 
 Heap placement alone does not make a type safely self-referential. A value may
 need pinning, staged initialization, or a handle-based design if an interior
-pointer can refer back into its payload. EASY must not infer `@indirect` as a
+pointer can refer back into its payload. EASY must not infer `@boxed` as a
 way to make an otherwise illegal self-reference compile unless the existing
-`@indirect` contract explicitly guarantees the required address stability and
+`@boxed` contract explicitly guarantees the required address stability and
 initialization protocol.
 
 ### 6.6 Unbounded recursive destruction
@@ -286,7 +286,7 @@ The compiler resolves representation before MIR lowering.
 2. The mode policy either admits EASY syntax elision for an already-fixed contract or emits a fixable layout-choice error.
 3. The typed AST records the resolved storage contract.
 4. Ownership/escape analysis chooses move, borrow, copy, and destination placement without changing that contract.
-5. MIR contains the same explicit heap creation, allocation mark, transfer, and cleanup operations used by source-written `@indirect`.
+5. MIR contains the same explicit heap creation, allocation mark, transfer, and cleanup operations used by source-written `@boxed`.
 6. MIR validation rejects late pointer casts, stack-address escapes, missing allocation rollback, duplicate cleanup, and any attempt to infer representation during code generation.
 
 There must be no “stack first, migrate later” implementation. When indirection is required, construction is planned directly in its final storage. There must also be no legacy and inferred lowering path: inference produces the existing explicit semantic form before lowering.
@@ -309,7 +309,7 @@ spelling may remain canonical when the operation is safely elidable.
 
 Separately, the compiler should emit a complete machine-applicable fix plan.
 An IDE, language server, or explicit authoring command such as
-`clear fix --materialize-layout` may write `@indirect` through constructors,
+`clear fix --materialize-layout` may write `@boxed` through constructors,
 locals, fields, and function signatures. This can be a sophisticated
 constraint-solving autofix rather than a one-token suggestion.
 
@@ -333,7 +333,7 @@ source normalize to the same fact and the same MIR operation.
 The fix engine must distinguish propagation from choice:
 
 1. **Mechanical propagation may auto-apply.** Once an explicit declaration or
-   destination has fixed `Foo@indirect`, EASY may automatically update a
+   destination has fixed `Foo@boxed`, EASY may automatically update a
    private constructor, inferred local, or the uncommon private signature
    whose semantic contract must preserve the box. Ordinary struct parameters
    remain representation-polymorphic and must not be rewritten unnecessarily.
@@ -341,7 +341,7 @@ The fix engine must distinguish propagation from choice:
    cost.
 2. **Representation choice requires confirmation.** A bare recursive schema,
    body-derived global escape, optional optimization, or choice among
-   `@indirect`, `@node`, inline handles, and `@shared` has materially different
+   `@boxed`, `@node`, inline handles, and `@shared` has materially different
    costs or semantics. The tool may prepare every alternative but must not
    choose one merely because EASY autofix is enabled.
 3. **Public changes require confirmation.** Exported signatures, FFI types,
@@ -391,7 +391,7 @@ When inference is not provably cost-equivalent, the compiler should issue a fixa
 error[E_LAYOUT_CHOICE]: this value requires an explicit storage layout
   `Node` cannot be inline and the valid recursive representations have different costs
 
-  fix: use `Node@indirect` for unique heap-owned identity
+  fix: use `Node@boxed` for unique heap-owned identity
        one allocation and pointer traversal per indirect value
   fix: use `Node@node` for a lifecycle-bounded graph domain
        compact handles, paged storage, and automatic domain cleanup
@@ -404,14 +404,14 @@ error[E_LAYOUT_CHOICE]: this value requires an explicit storage layout
 DEFAULT and STRICT should use the same diagnostic when source omits a required layout annotation. Fixes must edit the type or construction site; they must not silently change the generated representation.
 
 Compiler explanation output should report every elided EASY indirection and
-its proof, for example “explicit destination requires `Foo@indirect`.” It
+its proof, for example “explicit destination requires `Foo@boxed`.” It
 should report rejected recursive choices separately, including the estimated
 allocation and locality consequences of each fix. This keeps hidden syntax
 observable without charging ordinary users for it.
 
 ## 9. Resource and Failure Semantics
 
-Inferred `@indirect` has exactly the existing RAII contract:
+Inferred `@boxed` has exactly the existing RAII contract:
 
 - allocation failure is propagated without leaking partially initialized fields;
 - field destructors run once in reverse initialization order;
@@ -423,7 +423,7 @@ Inferred `@indirect` has exactly the existing RAII contract:
 
 No tracing collector or delayed cleanup is introduced.
 
-Allocation is also an effect and a failure boundary. If `@indirect`
+Allocation is also an effect and a failure boundary. If `@boxed`
 construction can fail, EASY may omit the constructor spelling only when the
 surrounding function already admits the resulting error/effect or when normal
 EASY effect inference can expose it at the function boundary. It must not:
@@ -432,7 +432,7 @@ EASY effect inference can expose it at the function boundary. It must not:
 - hide allocation inside a `NO_HEAP`, real-time, interrupt, or equivalent
   constrained context;
 - retry allocation with a different ownership action;
-- abort where explicit `@indirect` would propagate an error; or
+- abort where explicit `@boxed` would propagate an error; or
 - introduce allocation into a loop whose declared cost policy forbids it.
 
 DEFAULT and STRICT diagnostics should point to both the representation fix and
@@ -446,8 +446,8 @@ Implementation is complete only with:
 - positive tests for explicit indirect recursion and EASY coercion into already-resolved indirect destinations;
 - compile-fail tests for bare direct recursion, optional recursion, multiple recursive edges, mutually recursive SCCs, DEFAULT omission, STRICT omission, and mutation collisions;
 - layout assertions proving `Foo[]@list` remains contiguous and unboxed;
-- generated-MIR/ABI equivalence tests between inferred EASY and explicit `@indirect` programs;
-- allocation-count and instruction-level benchmarks proving no additional allocation, copy, branch, or pointer chase versus explicit `@indirect`;
+- generated-MIR/ABI equivalence tests between inferred EASY and explicit `@boxed` programs;
+- allocation-count and instruction-level benchmarks proving no additional allocation, copy, branch, or pointer chase versus explicit `@boxed`;
 - allocator-failure injection at every construction step;
 - destructor-count oracles for scalar, managed, optional, union, collection, and nested payloads;
 - fuzz matrices spanning mode, source/destination, recursion shape, ownership capability, move/borrow/copy, overwrite, error exit, and allocation failure;
@@ -465,13 +465,13 @@ Implementation is complete only with:
 
 The feature may ship only when all of the following are true:
 
-1. EASY source can omit construction syntax when an already-resolved destination contract requires `@indirect`.
+1. EASY source can omit construction syntax when an already-resolved destination contract requires `@boxed`.
 2. The inferred program has the same resolved type, MIR, ABI, allocation count, cleanup behavior, and benchmark performance as its explicit equivalent.
 3. No bare recursion, ordinary escape, list insertion, global move, or return causes opportunistic boxing.
 4. DEFAULT and STRICT require explicit layout whenever representation is not already fixed by a destination contract.
 5. Every ambiguous or potentially performance-affecting choice is a fixable compile error in every mode.
 6. Mutation across an inferred alias is rejected in every mode.
-7. The implementation reuses the explicit `@indirect` lowering and runtime path; no parallel compatibility path exists.
+7. The implementation reuses the explicit `@boxed` lowering and runtime path; no parallel compatibility path exists.
 8. Allocation failure/effect behavior, equality, serialization, reflection, and public ABI are identical between elided and explicit source.
 9. Potentially unbounded deep copies and representation-changing allocations remain explicit, fixable decisions.
 10. EASY's default authoring autofix may propagate an already-fixed private layout, while public or performance-selecting changes require confirmation.
@@ -488,7 +488,7 @@ DEFAULT, and STRICT, but it did not fully account for these issues:
 2. **Finite layout does not imply optimal layout.** Making recursive syntax
    compile with one box per edge may be dramatically worse than `@node`, an
    arena, indices, or a flat representation.
-3. **Optional recursion is still allocation.** `?Node@indirect` avoids an
+3. **Optional recursion is still allocation.** `?Node@boxed` avoids an
    allocation for `NIL`, but every present edge still allocates and pointer
    chases. Optionality does not make the choice free.
 4. **Allocator provenance is semantic.** A box retained globally cannot use a

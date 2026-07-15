@@ -80,8 +80,8 @@ If you need to explicitly force an object onto the heap (e.g., for recursive str
 # Recursive structures use 'indirect' to avoid infinite size on stack
 STRUCT Node {
   value: Int64,
-  left: ?Node @indirect,
-  left: ?Node @indirect
+  left: ?Node @boxed,
+  left: ?Node @boxed
 }
 ```
 
@@ -111,11 +111,11 @@ In CLEAR, we separate **Types** from **Capabilities**.
    * Automatically acts like Cell for data under 16 bytes
    * `alwaysMutable` must be unwrapped before individually passing into a function as an argument, like any other capability
  * **Existence:** Option, Result => not a capability -> a tense:
-   * `T?` = Optional `T`
+   * `?T` = Optional `T`
    * Unwrapped like in Rust and Zig with `.?`
  * **Future:**: Something that will arrive later
     * `~T` = Future `T`
-    * `~T[]` = Future `T`s (like a Stream).
+    * `[~]T` = Future `T`s (like a Stream).
 
 
 ```CLEAR

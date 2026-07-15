@@ -48,16 +48,16 @@ ownership, effects, and capability use.
 ## Pipeline Result Defaults
 
 Pipelines may stream internally, but collection is determined by explicit
-terminal or destination type. A `~T[]` destination keeps a stream; a
-`T[]` or `T[]@list` destination collects to a list; a `HashMap<K,V>`
+terminal or destination type. A `[~]T` destination keeps a stream; an `[]T`
+destination collects to a list; a `{K}V`
 destination collects to a map if the pipeline shape supplies keys.
 
 ```ruby clear illustrative
-names: String[] = users
+names: []String = users
     |> SELECT { _.active?() }
     |> MAP { _.name };
 
-names_stream: ~String[] = users
+names_stream: [~]String = users
     |> SELECT { _.name };
 ```
 

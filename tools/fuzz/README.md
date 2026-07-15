@@ -199,7 +199,7 @@ Combinatoric set for "STREAM nexts passed in DO / BG / BG STREAM blocks".
 Per-cell parameters:
 
 - `consumer` ∈ {bg, do, bg_stream}
-- `ownership` ∈ {local, shared}                 (per spec — @multiowned/@indirect cannot cross)
+- `ownership` ∈ {local, shared}                 (per spec — @multiowned/@boxed cannot cross)
 - `sync` ∈ {none, locked, write_locked, atomic, versioned}
 - `move` ∈ {borrow, copy, give, clone, lend}    (CLONE only for @shared/@split)
 - `value` ∈ {int, string, struct}               (struct used for non-atomic @shared cells)

@@ -1,6 +1,6 @@
 # Inline Pivot Type Architecture
 
-Status: approved direction with the normative revisions in this document
+Status: implemented; legacy spellings are in the documented compatibility window
 
 Core domain: type syntax, recursive type representation, collection topology,
 memory layout, stream completion, and polymorphic synchronization
@@ -8,9 +8,9 @@ memory layout, stream completion, and polymorphic synchronization
 ## Purpose
 
 This document turns the Inline Pivot proposal into an implementable CLEAR
-design. It records the current compiler behavior, resolves contradictions in
-the proposal, defines one canonical reading order, and provides a staged
-implementation plan.
+design. It records the pre-change compiler behavior, resolves contradictions
+in the proposal, defines one canonical reading order, and records the staged
+implementation and its compatibility boundary.
 
 This is a type-system replacement, not a parser-only syntax change. The current
 compiler stores a mostly flattened `TypeShape`, reconstructs child types from
@@ -33,7 +33,7 @@ The design must preserve these project constraints:
   type; asynchronous joins may widen `T` only with `?` and `!` over the same
   payload, and never silently synthesize a general union, `~`, or `Any`.
 
-## Current-State Audit
+## Pre-Change Audit
 
 The proposal overlaps several implemented features, but the current surface
 and representation differ materially.
@@ -49,7 +49,7 @@ and representation differ materially.
 | Fallible | `!T` | The error set is implicit; it is not equivalent to an arbitrary `Result<T, E>`. |
 | Future | `~T` | A tense wrapper around one raw child type. |
 | Streams | `~T[N]`, `~?T[]`, legacy `~T[?]`, `~T[INF]` | Finite stream completion is currently encoded through optionality, which prevents a finite stream from losslessly yielding optional values. |
-| Capabilities | `@versioned`, `@indirect`, `@sharded(N):locked`, and others | Capability facts are flattened into top-level and element-level slots. They cannot describe an arbitrary nested layer. |
+| Capabilities | `@versioned`, legacy `@indirect`, `@sharded(N):locked`, and others | Capability facts were flattened into top-level and element-level slots. They could not describe an arbitrary nested layer. |
 | Union | named `UNION Name { ... }` | There is no structural `Union<A, B>` type. An uppercase generic spelling is currently only a nominal generic instance. |
 | Tuple | `Tuple<A, B>` with contextual list literal `[a, b]` | Tuple types and positional access already exist; a distinct `Tuple{...}` literal does not. |
 | Multidimensional arrays | nested `T[N][M]` spellings | The backend models arrays recursively as arrays of arrays, not one flat rank/stride layout. |
@@ -100,7 +100,7 @@ The proposal describes both braces and brackets for sets but only demonstrates
 canonical set spelling. Sets do not support positional indexing even though
 their layout constructor uses brackets.
 
-### 3. Capability vocabulary remains stable, with one deferred rename
+### 3. Capability vocabulary remains stable, with one completed rename
 
 The new syntax changes attachment location, not the established capability
 vocabulary.
@@ -108,13 +108,13 @@ vocabulary.
 | Proposed/current spelling | Final canonical CLEAR spelling | Reason |
 | --- | --- | --- |
 | `@mvcc` | `@versioned` | Already implemented with `SNAPSHOT` semantics. `@mvcc` may be accepted temporarily as a fixable alias. |
-| `@indirect` | `@boxed` | Stable heap indirection is currently represented by `@indirect`. The rename is intentionally deferred until the recursive model and backend are stable. |
+| `@indirect` | `@boxed` | Stable heap indirection is now spelled `@boxed`; `@indirect` is accepted only as a fixable compatibility alias. |
 | `@shared:striped` | `@sharded(N):locked` or `@sharded(N):writeLocked` | Shard count and lock policy must remain explicit. There is no safe inferred `N`. |
 
 No auto-fix may invent a shard count. `@sharded` remains the language term;
-`striped` is not introduced as a surface capability. At the final contraction
-phase, `@indirect` is renamed once to `@boxed`; both names do not remain
-canonical.
+`striped` is not introduced as a surface capability. `@boxed` is the only
+canonical stable-indirection spelling; `clear fix --only=type_migration`
+rewrites the temporary `@indirect` alias.
 
 ### 4. Capacity hints are not nominal identity
 
@@ -764,12 +764,11 @@ but the dependency order remains fixed.
 16. `feat(streams): distinguish finite completion with StreamStep`
 17. `feat(streams): implement CLOSE reachability and lowering`
 18. `feat(tools): migrate sources and normalized type facts to inline pivot`
-19. `refactor(capabilities): rename indirect to boxed`
-20. `refactor(types): remove legacy type parsing and compatibility paths`
+19. `refactor(capabilities): rename indirect to boxed` (implemented)
+20. `refactor(types): contract legacy compatibility after the release window`
 
-The `@indirect` to `@boxed` rename remains deliberately penultimate. It must
-not obscure structural capability changes or cause unrelated churn while those
-changes are being reviewed. `@sharded(N)` remains canonical throughout; there
+The `@indirect` to `@boxed` rename was deliberately penultimate so it did not
+obscure structural capability changes. `@sharded(N)` remains canonical; there
 is no `@striped` rename.
 
 ## Implementation Plan
@@ -827,8 +826,8 @@ node limit. No parser rule may restart type parsing from an earlier cursor.
 - Implement the three-site hard limit, node-depth limit, and access-obligation
   diagnostic.
 - Accept `@mvcc` only as a fixable alias and print `@versioned`.
-- Keep `@indirect` canonical during the structural implementation; defer its
-  one-time `@boxed` rename until the legacy-contraction phase.
+- Keep `@boxed` canonical and accept `@indirect` only through the fixable
+  compatibility boundary.
 - Reject `@shared:striped` with a fix that requests an explicit shard count.
 
 Exit gate: nested capabilities affect exactly their target layer through AST,
@@ -914,22 +913,56 @@ and no generic auto-fix loses error or capability semantics.
   Espalier cost models for ranks, sets, maps, and streams.
 - Update public documentation and migration notes.
 
-Exit gate: repository and generated CLEAR contain no legacy type spellings
-outside explicit migration fixtures.
+Exit gate: repository and generated CLEAR use canonical spelling outside
+explicit migration fixtures and compatibility-only cases whose semantics
+cannot be preserved by a local rewrite.
 
 ### Phase 8: Contract legacy syntax
 
 - Make legacy spellings errors with fixes for one release window.
-- Rename the stable-indirection surface from `@indirect` to `@boxed`, provide a
-  semantics-preserving fix, migrate the corpus, and remove `@indirect` after
-  the compatibility window.
+- Keep the semantics-preserving `@indirect` to `@boxed` fix during one release
+  window, then remove the alias.
 - Remove legacy parser branches, aliases, raw-string reconstruction, and stale
   diagnostics.
 - Remove the migration feature flag and inventory.
 - Re-run fuzzing with deeply nested, malformed, and capability-heavy types.
 
-Exit gate: one parser, one semantic tree, one canonical printer, and one backend
-path remain.
+Exit gate after the compatibility window: one parser surface, one semantic
+tree, one canonical printer, and one backend path remain.
+
+## Implemented Outcome and Compatibility Boundary
+
+The compiler now has one recursive semantic type expression tree for named
+types, tuples, tenses, linear collections, maps, streams, and node-local
+capabilities. Inline Pivot parsing is predictive and does not checkpoint,
+restore, or replay the token cursor. Annotation, compatibility, ownership,
+cleanup, MIR, and backend paths consume that tree.
+
+The delivered surface includes:
+
+- `[N]T`, `[]T`, `[List(N)]T`, `[Set]T`, `[Pool(N)]T`, and flat ranks;
+- `{K}V` maps and left-to-right mixed collection composition;
+- node-local capability attachment with a three-site complexity limit;
+- `Tuple<T, K>`, `Tuple{...}`, checked `._N` access, and no tuple indexing;
+- `[~]T`, `[~N]T`, and `[~INF]T` with completion distinct from optional data;
+- `BG STREAM YIELDS T`, controlled optional/fallible inference, and rejection
+  of implicit heterogeneous unions;
+- canonical `@boxed`, canonical `@sharded(N)`, and no `@striped` surface.
+
+Two legacy families intentionally remain behind the compatibility parser for
+one release window:
+
+1. Bare `T[]` is a slice/view in legacy CLEAR, while canonical `[]T` is an
+   owned list. A local spelling rewrite would change ownership, so it is not
+   auto-fixed until a canonical slice/view spelling is approved.
+2. Legacy async spellings such as `~T[N]`, `~?T[]`, and `~T[]@list` overload
+   future, stream, and collection behavior. They require whole-program `NEXT`
+   migration and are not rewritten from an annotation alone.
+
+This is source compatibility, not a second semantic model: both paths produce
+the same recursive tree and canonical printers emit only the new surface. The
+compatibility branches may be deleted after those source contracts have a
+semantics-preserving migration.
 
 ## Test and Measurement Requirements
 

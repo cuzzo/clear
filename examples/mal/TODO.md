@@ -11,7 +11,7 @@ and the foundation for the **CLEAR VM backend** (see `docs/vm.md`).
 
 **Compiles and runs.** All 21 tests pass. The P0 blockers listed in the
 original TODO are resolved - the compiler supports string escapes, charAt,
-substr, toNumber, MATCH AS, @indirect, @shared, and RAISE in WHILE.
+substr, toNumber, MATCH AS, @boxed, @shared, and RAISE in WHILE.
 
 ```bash
 ./clear test examples/mal/interpreter.clear
@@ -92,4 +92,4 @@ These are standard Scheme/Mal features that the transpiler will never emit:
 - Slot-indexed environments (variable index instead of hash lookup)
 - Native @regex (replace manual tokenizer)
 - Weak pointers for Env->Lambda->Env cycles
-- Automatic @indirect inference on recursive unions
+- Automatic @boxed inference on recursive unions

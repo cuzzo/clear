@@ -84,19 +84,19 @@ built, are NOT a branch-coverage-closure lever. Closing the branch gap
 requires shape-specific cells driven off the actual dark `type_info`,
 or re-triaging the fuzz_axis bucket against reachability.
 
-## B4 — invalid Zig: @indirect:atomic + WITH EXCLUSIVE has no `ctrl`
+## B4 — invalid Zig: @boxed:atomic + WITH EXCLUSIVE has no `ctrl`
 Template `capability_wrap_matrix` (enumerated), cell `{mode: atomic}`.
 
 ```
 STRUCT Counter { value: Int64 }
 FN main() RETURNS Void ->
-    MUTABLE c = Counter{ value: 1_i64 } @indirect:atomic;
+    MUTABLE c = Counter{ value: 1_i64 } @boxed:atomic;
     WITH EXCLUSIVE c AS x { x.value = 2_i64; ASSERT x.value == 2_i64; }
     RETURN;
 END
 ```
 Both forms are the compiler's OWN guidance (it rejected `@atomic` on a
-struct telling us to use `@indirect:atomic`; it rejected
+struct telling us to use `@boxed:atomic`; it rejected
 `WITH POLYMORPHIC` telling us to use plain `WITH`). CLEAR then accepts
 this and emits invalid Zig: `no field named 'ctrl' in AtomicPtr(...)`.
 The `is_atomic_ptr -> atomicPtrCreate` arm of compose_capability_wrap

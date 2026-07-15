@@ -308,7 +308,7 @@ mvcc-profile already), `clear doctor` can recommend:
   ships seq_cst only; we add the surface in v0.3 once benchmarks
   prove relaxation matters.
 - **Atomic arrays / slices** (`Int64[]@atomic`).
-- **`@indirect:atomic`** (heap-pinned atomic with stable address).
+- **`@boxed:atomic`** (heap-pinned atomic with stable address).
 - **Sharded atomic counters** (per-CPU + summarize-on-read) as a
   capability sigil (`@sharded:atomic`?). Useful when an atomic
   hits sustained contention; doctor heuristic should suggest it

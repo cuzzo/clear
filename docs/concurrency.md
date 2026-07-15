@@ -103,7 +103,7 @@ result = BG {
     fetch("https://api.example.com/data1") AS r THEN parse(r),
     fetch("https://api.example.com/data2") AS r THEN parse(r)
 };
-# result = ~T[] -> this is only valid when all T are the same.
+# result = [~]T -> this is only valid when all T are the same.
 ```
 
 
@@ -159,27 +159,28 @@ result: Float64 = NEXT p;
 |---|---|---|
 | `~T` | `T` | Consumes the promise (one-shot) |
 | `~T @shared` | `T` | Returns cached result (safe for multiple NEXT) |
-| `~?T[]` | `?T` | Returns next value or nil (open stream) |
-| `~T[INF]` | `T` | Returns next value, never nil (infinite stream) |
+| `[~]T` | `StreamStep<T>` | Item or finite completion; unwrap with `EXISTS` |
+| `[~]?T` | `StreamStep<?T>` | Optional item or completion; `NIL` remains data |
+| `[~INF]T` | `T` | Returns next value, never nil (infinite stream) |
 
 ## BG STREAM — Generators
 
 Spawn a fiber that yields values over time:
 
 ```ruby clear illustrative
-# Open stream (finite)
-s: ~?Float64[] = BG STREAM {
+# Finite stream
+s: [~]Float64 = BG STREAM {
     YIELD 1.0;
     YIELD 4.0;
     YIELD 9.0;
+    CLOSE;
 };
-v1 = NEXT s;  # 1.0
-v2 = NEXT s;  # 4.0
-v3 = NEXT s;  # 9.0
-v4 = NEXT s;  # NIL (exhausted)
+WHILE NEXT s EXISTS AS value DO
+    print(value);
+END
 
 # Infinite stream
-counter: ~Float64[INF] = BG STREAM {
+counter: [~INF]Float64 = BG STREAM {
     MUTABLE i = 0.0;
     WHILE TRUE DO
         YIELD i;
