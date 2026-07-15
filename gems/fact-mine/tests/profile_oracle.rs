@@ -11,6 +11,56 @@ fn examples_dir() -> PathBuf {
         .join("profile")
 }
 
+fn fixture(name: &str) -> PathBuf {
+    PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+        .join("tests")
+        .join("fixtures")
+        .join(name)
+}
+
+#[test]
+fn python_profile_keeps_lexical_closures_out_of_owner_methods() -> Result<()> {
+    let document = syntax::parse_file(
+        fixture("python_state_projection.py"),
+        Language::Python,
+    )?;
+    let output = profile::extract(&document, Profile::Espalier);
+    let methods = output
+        .methods
+        .iter()
+        .filter(|method| method.owner == "Console")
+        .map(|method| method.name.as_str())
+        .collect::<Vec<_>>();
+    assert_eq!(methods, vec!["export"]);
+    Ok(())
+}
+
+#[test]
+fn python_profile_canonicalizes_and_projects_state_reads() -> Result<()> {
+    let document = syntax::parse_file(
+        fixture("python_state_projection.py"),
+        Language::Python,
+    )?;
+    let reads = document
+        .state_reads
+        .iter()
+        .map(|read| (read.receiver.as_str(), read.field.as_str()))
+        .collect::<Vec<_>>();
+    assert!(reads.contains(&("self", "@_record_buffer_lock")));
+    assert!(reads.contains(&("self", "@_items")));
+    assert!(reads.contains(&("theme", "ansi_colors")));
+    assert!(reads.contains(&("theme", "guard")));
+    assert!(reads.contains(&("element", "href")));
+    Ok(())
+}
+
+#[test]
+fn go_short_declaration_does_not_reuse_outer_non_nil_proof() -> Result<()> {
+    let document = syntax::parse_file(fixture("go_shadowing.go"), Language::Go)?;
+    assert!(document.redundant_nil_guards.is_empty());
+    Ok(())
+}
+
 #[test]
 fn ruby_calculator_extracts_methods() -> Result<()> {
     let file = examples_dir().join("ruby_calculator.rb");

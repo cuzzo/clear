@@ -1474,7 +1474,7 @@ pub(crate) trait AstNormalizationAdapter: Sync {
         &self,
         _node: TreeSitterNode<'tree>,
         _source: &str,
-    ) -> Option<(Option<TreeSitterNode<'tree>>, Option<TreeSitterNode<'tree>>)> {
+    ) -> Option<(Vec<TreeSitterNode<'tree>>, Option<TreeSitterNode<'tree>>)> {
         None
     }
 

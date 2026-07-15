@@ -3898,15 +3898,30 @@ if pre_init.is_empty() {
             ));
         }
 
-        if let Some((clause, body)) = self
+        if let Some((contexts, body)) = self
             .normalization_adapter
             .normalized_with_parts(node, self.source)
         {
-            let clause = clause.and_then(|clause| self.normalize_node(clause));
+            let mut contexts = contexts
+                .into_iter()
+                .filter_map(|context| self.normalize_node(context))
+                .collect::<Vec<_>>();
+            let context = match contexts.len() {
+                0 => None,
+                1 => contexts.pop(),
+                _ => Some(self.wrap(
+                    "LIST",
+                    contexts
+                        .into_iter()
+                        .map(|context| Child::Node(Box::new(context)))
+                        .collect(),
+                    node,
+                )),
+            };
             let body = body.and_then(|body| self.normalize_body(body));
             return Some(self.wrap(
                 "WITH",
-                vec![optional_node(clause), optional_node(body)],
+                vec![optional_node(context), optional_node(body)],
                 node,
             ));
         }

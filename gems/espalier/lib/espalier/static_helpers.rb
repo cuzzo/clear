@@ -7,7 +7,7 @@ require "set"
 require_relative "type_profile"
 
 module Espalier
-  ROOT = File.expand_path("../../../..", __dir__)
+  ROOT = File.expand_path("../../../..", __dir__) unless const_defined?(:ROOT, false)
 
   HIGH = "high"
   REVIEW = "review"

@@ -167,7 +167,10 @@ module Espalier
           name: domain["name"] || domain[:name] || id,
           source_kind: domain["source_kind"] || domain[:source_kind] || "unknown",
           path: domain["path"] || domain[:path],
-          span: domain["span"] || domain[:span]
+          span: domain["span"] || domain[:span],
+          origin_owner: domain["origin_owner"] || domain[:origin_owner],
+          origin_function: domain["origin_function"] || domain[:origin_function],
+          propagated_via: domain["propagated_via"] || domain[:propagated_via]
         }.compact
       end
     end

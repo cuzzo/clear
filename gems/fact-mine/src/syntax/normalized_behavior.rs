@@ -137,6 +137,22 @@ pub(crate) trait NormalizedLanguageBehavior: Sync {
         false
     }
 
+    /// Whether a function nested inside another function is a lexical closure
+    /// rather than an owner method.
+    fn nested_function_is_lexical(&self, _function: &Node) -> bool {
+        false
+    }
+
+    /// Bindings introduced by a conditional header that shadow outer locals.
+    fn conditional_local_bindings(&self, _conditional: &Node) -> Vec<String> {
+        Vec::new()
+    }
+
+    /// Project equivalent state spellings to one owner-relative identity.
+    fn canonical_state_field(&self, _receiver: &str, field: &str) -> String {
+        field.to_string()
+    }
+
     fn empty_check_call(&self, _message: &str) -> bool { false }
     fn visited_membership_call(&self, _message: &str) -> bool { false }
     fn visited_insert_call(&self, _message: &str) -> bool { false }
@@ -354,6 +370,10 @@ pub(crate) trait NormalizedLanguageBehavior: Sync {
 
     fn record_method_calls_as_state_reads(&self) -> bool {
         true
+    }
+
+    fn suppress_method_call_state_read(&self, _call: &NormalizedCallProjection) -> bool {
+        false
     }
 
     fn suppress_self_call_state_read(&self, _call: &NormalizedCallProjection) -> bool {

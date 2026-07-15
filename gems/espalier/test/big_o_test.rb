@@ -273,6 +273,42 @@ class BigOTest < Minitest::Test
     assert_equal "unknown", unknown[:complexity]
   end
 
+  def test_interprocedural_domains_are_attributed_to_the_callee
+    domain = {
+      "id" => "state:Helper:@items", "name" => "@items", "source_kind" => "state",
+      "path" => "helper.py", "span" => [20, 4, 20, 15]
+    }
+    callee_symbolic = Espalier::SymbolicComplexity.from_fact(
+      { "factors" => [{ "domain_id" => domain["id"], "exponent" => 1 }], "complete" => true },
+      [domain]
+    )
+    facts = {
+      "caller-id" => [{
+        "owner" => "Caller", "function" => "render", "line" => 3,
+        "parameters" => [], "iterations" => [], "size_domains" => [],
+        "recursion" => { "calls" => 0 },
+        "call_contexts" => [{ "line" => 4, "message" => "helper" }]
+      }],
+      ["Caller", "helper"] => [{
+        "owner" => "Caller", "function" => "helper", "line" => 20,
+        "parameters" => [], "iterations" => [], "size_domains" => [domain],
+        "recursion" => { "calls" => 0 }, "call_contexts" => []
+      }]
+    }
+    consumer = Espalier::StructuralBigO.new(
+      facts_by_method: facts,
+      method_complexities: { "Caller" => { "helper" => "O(N)" } },
+      method_symbolic_time: { "Caller" => { "helper" => callee_symbolic } }
+    )
+
+    hint = consumer.hints_for(nil, { id: "caller-id", name: "render", line: 3 }, "Caller").last
+    variable = Espalier::SymbolicComplexity.render(hint[:symbolic_time]).last.first
+    assert_equal "Caller", variable[:origin_owner]
+    assert_equal "helper", variable[:origin_function]
+    assert_equal({ owner: "Caller", function: "render", message: "helper", line: 4 },
+      variable[:propagated_via].transform_keys(&:to_sym))
+  end
+
   def test_structural_big_o_propagates_unique_cross_owner_targets
     facts = {
       ["Caller", "run"] => [{

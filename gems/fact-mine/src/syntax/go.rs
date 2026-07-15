@@ -75,6 +75,28 @@ impl NormalizedLanguageBehavior for GoNormalizedBehavior {
     }
     // CFG-SPECIFIC END
 
+    fn conditional_local_bindings(&self, conditional: &Node) -> Vec<String> {
+        let header = conditional
+            .text
+            .lines()
+            .next()
+            .unwrap_or_default()
+            .trim()
+            .strip_prefix("if ")
+            .unwrap_or_default();
+        let Some((initializer, _)) = header.split_once(';') else {
+            return Vec::new();
+        };
+        let Some((lhs, _)) = initializer.split_once(":=") else {
+            return Vec::new();
+        };
+        lhs.split(',')
+            .map(str::trim)
+            .filter(|name| simple_identifier(name))
+            .map(str::to_string)
+            .collect()
+    }
+
     fn self_member_receiver(&self, message: &str) -> String {
         format!("self.{message}")
     }
@@ -605,6 +627,20 @@ mod tests {
             text: "first\nsecond".to_string(),
         };
         assert!(behavior.embedded_member_reads(&multiline_node).is_empty());
+
+        assert_eq!(
+            behavior.conditional_local_bindings(&node(
+                "IF",
+                "if value, err := load(); err != nil { return err }"
+            )),
+            vec!["value", "err"]
+        );
+        assert!(behavior
+            .conditional_local_bindings(&node("IF", "if err != nil { return err }"))
+            .is_empty());
+        assert!(behavior
+            .conditional_local_bindings(&node("IF", "if err = load(); err != nil {}"))
+            .is_empty());
 
         // owner_for_function
         let fn_node = node("FUNCTION", "func (r *Receiver) MyMethod() {}");

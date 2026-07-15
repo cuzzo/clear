@@ -162,6 +162,29 @@ class StaticEvidenceTest < Minitest::Test
     }
   end
 
+  def test_project_modules_ranks_production_by_default_and_retains_selectable_tests
+    evidence = {
+      "methods" => [
+        { "id" => "prod", "name" => "run", "owner" => "App", "path" => "src/app.go", "line" => 1 },
+        { "id" => "test", "name" => "test_run", "owner" => "AppTest", "path" => "src/app_test.go", "line" => 1 },
+      ],
+      "fields" => [],
+      "facts" => {},
+    }
+
+    assert_equal ["App"], Espalier::StaticEvidence.project_modules(evidence).map { |mod| mod[:name] }
+    assert_equal ["AppTest"],
+      Espalier::StaticEvidence.project_modules(evidence, source_roles: ["test"]).map { |mod| mod[:name] }
+  end
+
+  def test_source_roles_are_language_neutral_path_facts
+    assert_equal "test", Espalier::StaticEvidence.source_role("src/widget_test.go")
+    assert_equal "test", Espalier::StaticEvidence.source_role("tests/test_widget.py")
+    assert_equal "benchmark", Espalier::StaticEvidence.source_role("benchmarks/widget.rs")
+    assert_equal "example", Espalier::StaticEvidence.source_role("examples/widget.rb")
+    assert_equal "production", Espalier::StaticEvidence.source_role("rich/console.py")
+  end
+
   def test_project_modules_resolves_unique_static_and_flow_typed_targets
     evidence = {
       "methods" => [

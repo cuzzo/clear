@@ -9,7 +9,9 @@ use decomplex_rust::decomplex::detectors::{
 };
 use decomplex_rust::decomplex::parallel;
 use decomplex_rust::decomplex::report::Report;
-use decomplex_rust::decomplex::report_facts::{self, Options as ReportFactsOptions, VcsFilter};
+use decomplex_rust::decomplex::report_facts::{
+    self, Options as ReportFactsOptions, SourceRole, VcsFilter,
+};
 use decomplex_rust::decomplex::syntax::{Document, Language, LocalComplexityScore};
 use decomplex_rust::decomplex::syntax_oracle;
 use serde::Deserialize;
@@ -1201,6 +1203,12 @@ fn parse_report_facts_args(args: Vec<String>, allow_format: bool) -> Result<Repo
             )?);
         } else if let Some(value) = arg.strip_prefix("--vcs=") {
             options.vcs = Some(parse_vcs_filter(value.to_string())?);
+        } else if arg == "--source-role" {
+            options.source_roles = parse_source_roles(
+                &cursor.next().with_context(|| "--source-role requires a value")?,
+            )?;
+        } else if let Some(value) = arg.strip_prefix("--source-role=") {
+            options.source_roles = parse_source_roles(value)?;
         } else {
             targets.push(PathBuf::from(arg));
         }
@@ -1307,6 +1315,34 @@ fn parse_vcs_filter(value: String) -> Result<VcsFilter> {
     }
 }
 
+fn parse_source_roles(value: &str) -> Result<std::collections::BTreeSet<SourceRole>> {
+    let all = [
+        SourceRole::Production,
+        SourceRole::Test,
+        SourceRole::Benchmark,
+        SourceRole::Example,
+        SourceRole::Generated,
+        SourceRole::Vendored,
+        SourceRole::VcsMetadata,
+    ];
+    if value == "all" {
+        return Ok(all.into_iter().collect());
+    }
+    value
+        .split(',')
+        .map(|role| match role.trim() {
+            "production" => Ok(SourceRole::Production),
+            "test" => Ok(SourceRole::Test),
+            "benchmark" => Ok(SourceRole::Benchmark),
+            "example" => Ok(SourceRole::Example),
+            "generated" => Ok(SourceRole::Generated),
+            "vendored" => Ok(SourceRole::Vendored),
+            "vcs_metadata" => Ok(SourceRole::VcsMetadata),
+            other => bail!("unsupported source role: {other}"),
+        })
+        .collect()
+}
+
 fn parse_jobs(value: String) -> Result<usize> {
     let jobs = value
         .parse::<usize>()
@@ -1361,6 +1397,26 @@ mod tests {
             Command::Facts { options, .. } => assert_eq!(options.vcs, Some(VcsFilter::Git)),
             _ => panic!("expected facts command"),
         }
+    }
+
+    #[test]
+    fn parses_selectable_source_roles_for_facts() {
+        let command = parse_args(vec![
+            "facts".to_string(),
+            "--source-role=test,benchmark".to_string(),
+            "src".to_string(),
+        ])
+        .expect("command");
+
+        match command {
+            Command::Facts { options, .. } => assert_eq!(
+                options.source_roles,
+                std::collections::BTreeSet::from([SourceRole::Test, SourceRole::Benchmark])
+            ),
+            _ => panic!("expected facts command"),
+        }
+        assert_eq!(parse_source_roles("all").unwrap().len(), 7);
+        assert!(parse_source_roles("unknown").is_err());
     }
 
     #[test]

@@ -161,6 +161,16 @@ module Espalier
         mapping,
         caller_domains: caller_domains
       )
+      substituted = annotate_propagated_domains(
+        substituted,
+        callee_symbolic,
+        mapping,
+        caller_domains,
+        owner,
+        callee,
+        caller_fact,
+        context
+      )
       return substituted unless execution
       return substituted if Espalier::SymbolicComplexity.degree(execution).zero?
 
@@ -172,6 +182,31 @@ module Espalier
       else
         nil
       end
+    end
+
+    def annotate_propagated_domains(expression, callee_expression, mapping, caller_domains, owner, callee, caller_fact, context)
+      return expression unless expression
+
+      retained = (callee_expression[:domains] || {}).keys.reject do |domain_id|
+        caller_domains.key?(domain_id) || !Array(mapping[domain_id]).empty?
+      end
+      return expression if retained.empty?
+
+      domains = (expression[:domains] || {}).transform_values(&:dup)
+      retained.each do |domain_id|
+        domain = domains[domain_id]
+        next unless domain
+
+        domain["origin_owner"] = owner
+        domain["origin_function"] = callee
+        domain["propagated_via"] = {
+          "owner" => caller_fact["owner"],
+          "function" => caller_fact["function"],
+          "message" => context["message"],
+          "line" => context["line"]
+        }.compact
+      end
+      expression.merge(domains: domains)
     end
 
     def mutual_recursion_summary(owner, member)

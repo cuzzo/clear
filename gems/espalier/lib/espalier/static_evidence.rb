@@ -28,8 +28,17 @@ module Espalier
       new(targets, root: root, language: language, vcs: vcs, include_annotations: include_annotations).build
     end
 
-    def self.project_modules(evidence)
+    def self.project_modules(evidence, source_roles: ["production"])
       return [] unless evidence && evidence["methods"]
+
+      allowed_roles = Array(source_roles).map(&:to_s).to_set
+      roles_by_path = Array(evidence["files"]).each_with_object({}) do |file, roles|
+        path = file["path"].to_s
+        role = file["source_role"] || source_role(path)
+        roles[path] = role
+        roles[File.expand_path(path, evidence["root"])] = role if evidence["root"]
+      end
+      role_for = ->(path) { roles_by_path.fetch(path.to_s) { source_role(path) } }
 
       resolve_owner = ->(owner, path, language) {
         lang = language.to_s.downcase
@@ -53,6 +62,7 @@ module Espalier
         complexity_by_method[key] << fact
       end
       Array(evidence["methods"]).each do |m|
+        next unless allowed_roles.include?(role_for.call(m["path"]))
         accesses = accesses_by_function[m["id"]]
         meth = {
           id: m["id"],
@@ -113,6 +123,7 @@ module Espalier
       fields_by_owner = Hash.new { |h, k| h[k] = [] }
       first_field_by_owner = {}
       Array(evidence["fields"]).each do |f|
+        next unless allowed_roles.include?(role_for.call(f["path"]))
         owner_key = resolve_owner.call(f["owner"], f["path"], f["language"])
         fields_by_owner[owner_key] << f
         first_field_by_owner[owner_key] ||= f
@@ -264,6 +275,21 @@ module Espalier
         line: first_meth ? first_meth[:line] : (first_field ? first_field["line"] : 1),
         span: first_meth ? first_meth[:span] : (first_field ? first_field["span"] : nil)
       }
+    end
+
+    def self.source_role(path)
+      text = path.to_s.tr("\\", "/")
+      parts = text.split("/").reject(&:empty?)
+      basename = parts.last.to_s
+      return "vcs_metadata" if (parts & %w[.git .hg .svn]).any?
+      return "vendored" if (parts & %w[vendor vendors third_party third-party]).any?
+      return "generated" if (parts & %w[generated gen dist]).any?
+      return "benchmark" if (parts & %w[benchmark benchmarks bench benches]).any?
+      return "example" if (parts & %w[example examples sample samples]).any?
+      return "test" if (parts & %w[test tests spec specs __tests__]).any?
+      return "test" if basename.match?(/(?:\A|[_\.])test(?:[_\.]|\z)|(?:\A|[_\.])spec(?:[_\.]|\z)/)
+
+      "production"
     end
 
 
@@ -627,6 +653,7 @@ module Espalier
       {
         "path" => rel(file),
         "language" => file_language(file).to_s,
+        "source_role" => self.class.source_role(rel(file)),
         "digest" => "sha256:#{Digest::SHA256.file(file).hexdigest}",
         "parser" => "tree_sitter",
       }

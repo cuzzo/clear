@@ -187,6 +187,10 @@ impl<'a> Extractor<'a> {
     }
 
     fn scan_function(&mut self, node: &Node) {
+        if !self.functions.is_empty() && self.behavior.nested_function_is_lexical(node) {
+            self.scan_children(node);
+            return;
+        }
         let name = function_name_with_behavior(node, self.behavior)
             .unwrap_or_else(|| "(anonymous)".to_string());
         let current_owner = self.current_owner();
@@ -621,7 +625,9 @@ impl<'a> Extractor<'a> {
             call.span,
         );
         if self.seen_calls.insert(key) {
-            if self.behavior.record_method_calls_as_state_reads() {
+            if self.behavior.record_method_calls_as_state_reads()
+                && !self.behavior.suppress_method_call_state_read(&projected)
+            {
                 self.record_state_read_for_call(&projected, node);
             }
             self.record_state_write_for_mutating_call(&call);
@@ -738,6 +744,7 @@ impl<'a> Extractor<'a> {
     ) {
         let receiver = self.behavior.clean_receiver(&receiver);
         let field = self.behavior.clean_identifier(&field);
+        let field = self.behavior.canonical_state_field(&receiver, &field);
         let write = StateWrite {
             field,
             receiver,
@@ -942,7 +949,7 @@ impl<'a> Extractor<'a> {
             return;
         };
         let write = StateWrite {
-            field,
+            field: self.behavior.canonical_state_field("self", &field),
             receiver: "self".to_string(),
             file: call.file.clone(),
             function: call.function.clone(),
@@ -963,7 +970,10 @@ impl<'a> Extractor<'a> {
         }
     }
 
-    fn push_state_read(&mut self, read: StateRead) {
+    fn push_state_read(&mut self, mut read: StateRead) {
+        read.field = self
+            .behavior
+            .canonical_state_field(&read.receiver, &read.field);
         let key = (
             read.field.clone(),
             read.receiver.clone(),

@@ -102,4 +102,29 @@ class BigOGoldenTest < Minitest::Test
     assert_equal 5, analyzer.send(:space_complexity_rank, "O(log N)")
     assert_equal 1, analyzer.send(:space_complexity_rank, "unknown")
   end
+
+  def test_go_and_python_call_provenance_excludes_unrelated_sibling_loops
+    files = %w[python_call_provenance.py go_call_provenance.go]
+      .map { |name| File.join(FIXTURE_ROOT, name) }
+    evidence = Espalier::StaticEvidence.build(files, root: FIXTURE_ROOT)
+    manifest = Espalier::Aggregator.new.aggregate(
+      Espalier::StaticEvidence.project_modules(evidence)
+    )
+    functions = manifest.each_with_object(Hash.new { |hash, key| hash[key] = [] }) do |owner, rows|
+      extension = File.extname(owner.fetch(:file))
+      owner.fetch(:functions).each do |function|
+        rows[[extension, function.fetch(:name)]] << function
+      end
+    end
+
+    %w[.py .go].each do |extension|
+      helper = functions.fetch([extension, "helper"]).first.fetch(:quality_metrics)
+      unrelated = functions.fetch([extension, "unrelated"]).first.fetch(:quality_metrics)
+      caller = functions.fetch([extension, "caller"]).first.fetch(:quality_metrics)
+      assert_equal "O(N)", helper.fetch(:big_o_known_component)
+      assert_equal "O(N*M)", unrelated.fetch(:big_o_known_component)
+      assert_equal "O(N)", caller.fetch(:big_o_known_component)
+      assert_equal ["items"], Array(caller[:big_o_variables]).map { |variable| variable[:name] }
+    end
+  end
 end

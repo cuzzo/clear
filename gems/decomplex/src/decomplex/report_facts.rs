@@ -25,6 +25,7 @@ pub const FORMAT: &str = "decomplex.report-facts.v1";
 const DEFAULT_MASS: usize = 32;
 const DEFAULT_FUZZY: usize = 1;
 const DEFAULT_EXCLUDE_DIRS: &[&str] = &[
+    ".git",
     ".clear-cache",
     ".clear-transpile-cache",
     ".global-zig-cache",
@@ -39,6 +40,18 @@ pub enum VcsFilter {
     Git,
 }
 
+#[derive(Clone, Copy, Debug, Eq, Ord, PartialEq, PartialOrd, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum SourceRole {
+    Production,
+    Test,
+    Benchmark,
+    Example,
+    Generated,
+    Vendored,
+    VcsMetadata,
+}
+
 #[derive(Clone, Debug)]
 pub struct Options {
     pub language: Option<Language>,
@@ -46,6 +59,7 @@ pub struct Options {
     pub mass: usize,
     pub fuzzy: usize,
     pub vcs: Option<VcsFilter>,
+    pub source_roles: BTreeSet<SourceRole>,
 }
 
 impl Default for Options {
@@ -56,6 +70,7 @@ impl Default for Options {
             mass: DEFAULT_MASS,
             fuzzy: DEFAULT_FUZZY,
             vcs: None,
+            source_roles: BTreeSet::from([SourceRole::Production]),
         }
     }
 }
@@ -64,6 +79,7 @@ impl Default for Options {
 pub struct SourceFile {
     pub path: PathBuf,
     pub language: Language,
+    pub source_role: SourceRole,
 }
 
 struct SharedFacts {
@@ -167,9 +183,19 @@ pub fn facts_for_source_files(files: &[SourceFile], options: &Options, include_d
         .map(|file| file.path.to_string_lossy().to_string())
         .collect::<Vec<_>>();
     reported_files.sort();
+    let file_roles = files
+        .iter()
+        .map(|file| {
+            (
+                file.path.to_string_lossy().to_string(),
+                serde_json::to_value(file.source_role).expect("serialize source role"),
+            )
+        })
+        .collect::<BTreeMap<_, _>>();
     let output = json!({
         "format": FORMAT,
         "files": reported_files,
+        "file_roles": file_roles,
         "detectors": detectors,
         "documents": projected_documents,
     });
@@ -700,7 +726,7 @@ fn expand_target(target: &Path, options: &Options, out: &mut Vec<SourceFile>) ->
     if target.is_dir() {
         expand_directory(target, options, out)
     } else if target.is_file() {
-        push_source_file(target, options, out);
+        push_source_file(target, options, out, true);
         Ok(())
     } else {
         Ok(())
@@ -717,7 +743,7 @@ fn expand_directory(dir: &Path, options: &Options, out: &mut Vec<SourceFile>) ->
         if path.is_dir() {
             expand_directory(&path, options, out)?;
         } else if path.is_file() {
-            push_source_file(&path, options, out);
+            push_source_file(&path, options, out, false);
         }
     }
     Ok(())
@@ -741,7 +767,12 @@ fn is_binary_file(path: &Path) -> bool {
     false
 }
 
-fn push_source_file(path: &Path, options: &Options, out: &mut Vec<SourceFile>) {
+fn push_source_file(
+    path: &Path,
+    options: &Options,
+    out: &mut Vec<SourceFile>,
+    allow_extensionless_override: bool,
+) {
     if excluded_path(path, options) {
         return;
     }
@@ -761,17 +792,63 @@ fn push_source_file(path: &Path, options: &Options, out: &mut Vec<SourceFile>) {
 
     let language = match (options.language, ext_lang) {
         (Some(opt_lang), Some(e_lang)) if opt_lang == e_lang => Some(opt_lang),
-        (Some(opt_lang), _) if path.extension().is_none() => Some(opt_lang),
+        (Some(opt_lang), _) if allow_extensionless_override && path.extension().is_none() => {
+            Some(opt_lang)
+        }
         (None, Some(e_lang)) => Some(e_lang),
         _ => None,
     };
     let Some(language) = language else {
         return;
     };
+    let source_role = source_role(path);
+    if !allow_extensionless_override && !options.source_roles.contains(&source_role) {
+        return;
+    }
     out.push(SourceFile {
         path: path.to_path_buf(),
         language,
+        source_role,
     });
+}
+
+fn source_role(path: &Path) -> SourceRole {
+    let text = path.to_string_lossy().replace('\\', "/");
+    let parts = text.split('/').filter(|part| !part.is_empty()).collect::<Vec<_>>();
+    let basename = parts.last().copied().unwrap_or_default();
+    if parts.iter().any(|part| matches!(*part, ".git" | ".hg" | ".svn")) {
+        SourceRole::VcsMetadata
+    } else if parts
+        .iter()
+        .any(|part| matches!(*part, "vendor" | "vendors" | "third_party" | "third-party"))
+    {
+        SourceRole::Vendored
+    } else if parts
+        .iter()
+        .any(|part| matches!(*part, "generated" | "gen" | "dist"))
+    {
+        SourceRole::Generated
+    } else if parts
+        .iter()
+        .any(|part| matches!(*part, "benchmark" | "benchmarks" | "bench" | "benches"))
+    {
+        SourceRole::Benchmark
+    } else if parts
+        .iter()
+        .any(|part| matches!(*part, "example" | "examples" | "sample" | "samples"))
+    {
+        SourceRole::Example
+    } else if parts
+        .iter()
+        .any(|part| matches!(*part, "test" | "tests" | "spec" | "specs" | "__tests__"))
+        || basename
+            .split(['_', '.'])
+            .any(|part| matches!(part, "test" | "spec"))
+    {
+        SourceRole::Test
+    } else {
+        SourceRole::Production
+    }
 }
 
 fn excluded_path(path: &Path, options: &Options) -> bool {
@@ -875,6 +952,7 @@ mod tests {
         };
 
         assert!(excluded_path(Path::new("/node_modules/foo.js"), &options));
+        assert!(excluded_path(Path::new("/repo/.git/HEAD"), &options));
         assert!(excluded_path(Path::new("/zig-cache/bar"), &options));
         assert!(excluded_path(Path::new("/foo/abc"), &options));
         assert!(excluded_path(Path::new("dir/foo/abc"), &options));
@@ -933,8 +1011,72 @@ mod tests {
 
         // Test root directory name parsing fallback
         let mut files_root = Vec::new();
-        push_source_file(Path::new("/"), &options, &mut files_root);
+        push_source_file(Path::new("/"), &options, &mut files_root, true);
         assert!(files_root.is_empty());
+    }
+
+    #[test]
+    fn directory_expansion_ignores_extensionless_files_even_with_language_override() {
+        let dir = TempDir::new().expect("tempdir");
+        fs::write(dir.path().join("main.go"), "package main\n").unwrap();
+        fs::write(dir.path().join("Dockerfile"), "FROM scratch\n").unwrap();
+        fs::write(dir.path().join("install"), "#!/bin/sh\n").unwrap();
+        fs::create_dir(dir.path().join(".git")).unwrap();
+        fs::write(dir.path().join(".git").join("HEAD"), "ref: refs/heads/main\n").unwrap();
+        let options = Options {
+            language: Some(Language::Go),
+            ..Options::default()
+        };
+
+        let files = collect_source_files(&[dir.path().to_path_buf()], &options).unwrap();
+
+        assert_eq!(files.len(), 1);
+        assert_eq!(files[0].path.file_name().unwrap(), "main.go");
+    }
+
+    #[test]
+    fn directory_expansion_ranks_production_and_retains_selectable_test_sources() {
+        let dir = TempDir::new().expect("tempdir");
+        let production = dir.path().join("app.go");
+        let test = dir.path().join("app_test.go");
+        fs::write(&production, "package app\n").unwrap();
+        fs::write(&test, "package app\n").unwrap();
+
+        let production_files = collect_source_files(
+            &[dir.path().to_path_buf()],
+            &Options::default(),
+        )
+        .unwrap();
+        assert_eq!(production_files.len(), 1);
+        assert_eq!(production_files[0].path, production);
+
+        let test_files = collect_source_files(
+            &[dir.path().to_path_buf()],
+            &Options {
+                source_roles: BTreeSet::from([SourceRole::Test]),
+                ..Options::default()
+            },
+        )
+        .unwrap();
+        assert_eq!(test_files.len(), 1);
+        assert_eq!(test_files[0].path, test);
+        assert_eq!(test_files[0].source_role, SourceRole::Test);
+    }
+
+    #[test]
+    fn explicit_extensionless_target_can_use_language_override() {
+        let dir = TempDir::new().expect("tempdir");
+        let script = dir.path().join("tool");
+        fs::write(&script, "package main\n").unwrap();
+        let options = Options {
+            language: Some(Language::Go),
+            ..Options::default()
+        };
+
+        let files = collect_source_files(&[script.clone()], &options).unwrap();
+
+        assert_eq!(files.len(), 1);
+        assert_eq!(files[0].path, script);
     }
 
     #[test]
@@ -1051,6 +1193,7 @@ mod tests {
         let file_in = SourceFile {
             path: PathBuf::from("src/decomplex/report_facts.rs"),
             language: Language::Rust,
+            source_role: SourceRole::Production,
         };
         let res_in = git_roots_for_files(&[file_in]);
         assert!(res_in.is_ok());
@@ -1059,6 +1202,7 @@ mod tests {
         let file_out = SourceFile {
             path: PathBuf::from("/non-existent-dir-12345/some-file.rb"),
             language: Language::Ruby,
+            source_role: SourceRole::Production,
         };
         let res_out = git_roots_for_files(&[file_out]);
         assert!(res_out.is_err());
