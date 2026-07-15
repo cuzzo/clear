@@ -774,6 +774,11 @@ module DiagnosticRegistry
       template: "A conditional capture is not definite beneath `OR`; move `EXISTS AS`/`IS_OK AS` into an `AND` chain or use separate branches.",
       summary:  "Conditional captures compose left-to-right through `AND`, but are not in scope after `OR`.",
     },
+    FRONTEND_RESOURCE_LIMIT: {
+      severity: :error, category: :syntax,
+      template: "Frontend %{kind} resource limit exceeded (limit %{limit}); simplify or split this source.",
+      summary:  "The source exceeded a deterministic lexer/parser resource budget.",
+    },
     OPTIONAL_BINDING_REQUIRES_EXISTS: {
       severity: :error, category: :syntax,
       template: "Optional binding must state its test: use `expr EXISTS AS name`, not `expr AS name`.",

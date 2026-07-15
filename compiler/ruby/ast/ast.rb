@@ -68,6 +68,19 @@ module AST
     const :end_token, Lexer::Token
   end
 
+
+  # Immutable half-open source range retained by syntax nodes. Offsets are
+  # absolute bytes within +file+; line/column coordinates are one-based.
+  class SourceRange < T::Struct
+    const :file, T.nilable(String), default: nil
+    const :start_offset, Integer
+    const :end_offset, Integer
+    const :start_line, Integer
+    const :start_column, Integer
+    const :end_line, Integer
+    const :end_column, Integer
+  end
+
   sig { params(node: AST::Locatable, value: SyntheticTypeInput, context: String).returns(Type) }
   def self.stamp_synthetic_type!(node, value, context:)
     node.full_type = value
@@ -975,6 +988,29 @@ module AST
     def column; token.column; end
     sig { void }
     def token_value; token.value; end
+
+    sig { returns(AST::SourceRange) }
+    def source_range
+      stored = @source_range
+      return stored if stored
+
+      start_offset = token.start_offset || 0
+      end_offset = token.end_offset || (start_offset + token.value.to_s.bytesize)
+      AST::SourceRange.new(
+        file: token.file,
+        start_offset: start_offset,
+        end_offset: end_offset,
+        start_line: token.line,
+        start_column: token.column,
+        end_line: token.end_line || token.line,
+        end_column: token.end_column || (token.column + token.value.to_s.length),
+      )
+    end
+
+    sig { params(range: AST::SourceRange).void }
+    def source_range=(range)
+      @source_range = T.let(range, T.nilable(AST::SourceRange))
+    end
 
     sig { returns(T.nilable(Type)) }
     def coerced_type_object

@@ -3,6 +3,7 @@ require "sorbet-runtime"
 
 require 'strscan'
 require 'set'
+require_relative "frontend_resource_budget"
 
 class Lexer
     extend T::Sig
@@ -11,7 +12,13 @@ class Lexer
 
   class Error < StandardError; end
 
-  Token = Struct.new(:type, :value, :line, :column)
+  # Half-open source range: start is inclusive and end is immediately after
+  # the token. The first four fields remain in their historical positions so
+  # direct Token.new calls in compiler clients stay source-compatible.
+  Token = Struct.new(
+    :type, :value, :line, :column,
+    :file, :start_offset, :end_offset, :end_line, :end_column,
+  )
 
   class TokenPayloadError < TypeError; end
 
@@ -51,6 +58,19 @@ class Lexer
       raise TokenPayloadError, payload_error("float", "Float")
     end
 
+    sig { returns(Integer) }
+    def start_line = line
+
+    sig { returns(Integer) }
+    def start_column = column
+
+    sig { returns(Integer) }
+    def byte_length
+      return end_offset - start_offset if start_offset && end_offset
+
+      value.to_s.bytesize
+    end
+
     private
 
     sig { params(accessor: String, expected_class: String).returns(String) }
@@ -85,11 +105,29 @@ class Lexer
       PENDING BEFORE AFTER LET TAGS
     ].to_set, T::Set[String])
 
-  sig { params(source: String, interpolation_depth: Integer).void }
-  def initialize(source, interpolation_depth: 0)
+  sig do
+    params(
+      source: String,
+      interpolation_depth: Integer,
+      file: T.nilable(String),
+      start_line: Integer,
+      start_column: Integer,
+      start_offset: Integer,
+      budget: T.nilable(FrontendResourceBudget),
+    ).void
+  end
+  def initialize(source, interpolation_depth: 0, file: nil, start_line: 1, start_column: 1, start_offset: 0, budget: nil)
     @s = T.let(StringScanner.new(source), StringScanner)
-    @line = T.let(1, Integer)
-    @column = T.let(1, Integer)
+    @line = T.let(start_line, Integer)
+    @column = T.let(start_column, Integer)
+    @base_offset = T.let(start_offset, Integer)
+    @file = T.let(file, T.nilable(String))
+    @budget = T.let(budget || FrontendResourceBudget.new, FrontendResourceBudget)
+    begin
+      @budget.check_source!(source)
+    rescue FrontendResourceBudget::Exceeded => e
+      raise Error, "Lexer Error: frontend #{e.kind} resource limit exceeded (limit #{e.limit})"
+    end
     @tokens = T.let([], T::Array[Token])
     @interpolation_depth = T.let(interpolation_depth, Integer)
   end
@@ -98,7 +136,9 @@ class Lexer
   def tokenize
     until @s.eos?
       # 1. Snapshot start column before scanning
+      start_line = @line
       start_col = @column
+      start_offset = current_offset
 
       case
       # --- SKIPPABLE (No Token Generated) = MANUAL ADVANCE!!!
@@ -204,7 +244,7 @@ class Lexer
 
       when @s.scan(/"/)
         advance_pos(@s.matched) # Advance past the opening quote
-        read_interpolated_string(start_col)
+        read_interpolated_string(start_line, start_col, start_offset)
 
       else
         raise "Unexpected char: #{@s.peek(1)} on line #{@line}:#{@column}"
@@ -212,16 +252,18 @@ class Lexer
     end
 
     # Manually push EOF (don't use add() here as there is nothing matched)
-    @tokens << Token.new(:EOF, nil, @line, @column)
+    @tokens << source_token(:EOF, nil, @line, @column, current_offset, @line, @column, current_offset)
     @tokens
   end
 
   private
 
-  sig { params(start_col: Integer).void }
-  def read_interpolated_string(start_col)
+  sig { params(start_line: Integer, start_col: Integer, start_offset: Integer).void }
+  def read_interpolated_string(start_line, start_col, start_offset)
     buffer = ""
-    chunk_start_col = T.let(start_col, Integer) # Track where the *current* text buffer started
+    chunk_start_line = T.let(start_line, Integer)
+    chunk_start_col = T.let(start_col, Integer)
+    chunk_start_offset = T.let(start_offset, Integer)
 
     loop do
       # Scan until we hit a quote, backslash, or interpolation start ($)
@@ -268,7 +310,8 @@ class Lexer
         # End of String
         @s.getch # Consume "
         advance_pos('"')
-        @tokens << Token.new(:STRING, buffer, @line, chunk_start_col)
+        @tokens << source_token(:STRING, buffer, chunk_start_line, chunk_start_col,
+          chunk_start_offset, @line, @column, current_offset)
         break
 
       elsif @s.peek(2) == '${'
@@ -280,7 +323,11 @@ class Lexer
         end
 
         # 1. Emit current buffer
-        @tokens << Token.new(:STRING, buffer, @line, chunk_start_col)
+        interpolation_line = @line
+        interpolation_col = @column
+        interpolation_offset = current_offset
+        @tokens << source_token(:STRING, buffer, chunk_start_line, chunk_start_col,
+          chunk_start_offset, @line, @column, current_offset)
         buffer = ""
 
         # 2. Consume ${
@@ -288,28 +335,47 @@ class Lexer
         advance_pos('${')
 
         # 3. Inject connector tokens: $+ (
-        @tokens << Token.new(:CHAR, '$+', @line, @column)
-        @tokens << Token.new(:CHAR, '(', @line, @column)
+        @tokens << source_token(:CHAR, '$+', interpolation_line, interpolation_col,
+          interpolation_offset, interpolation_line, interpolation_col, interpolation_offset)
+        @tokens << source_token(:CHAR, '(', interpolation_line, interpolation_col,
+          interpolation_offset, interpolation_line, interpolation_col, interpolation_offset)
 
         # 4. Sub-lex the expression inside braces
+        expr_line = @line
+        expr_column = @column
+        expr_offset = current_offset
         expr_source = extract_balanced_brace_content
-        sub_lexer = Lexer.new(expr_source, interpolation_depth: @interpolation_depth + 1)
-        sub_tokens = sub_lexer.tokenize
+        sub_lexer = Lexer.new(
+          expr_source,
+          interpolation_depth: @interpolation_depth + 1,
+          file: @file,
+          start_line: expr_line,
+          start_column: expr_column,
+          start_offset: expr_offset,
+          budget: @budget,
+        )
+        sub_tokens = @budget.nested { sub_lexer.tokenize }
         sub_tokens.pop
         @tokens.concat(sub_tokens)
 
         # 5. Inject closer tokens: ) $+
-        @tokens << Token.new(:CHAR, ')', @line, @column)
-        @tokens << Token.new(:CHAR, '$+', @line, @column)
+        @tokens << source_token(:CHAR, ')', @line, @column, current_offset,
+          @line, @column, current_offset)
+        @tokens << source_token(:CHAR, '$+', @line, @column, current_offset,
+          @line, @column, current_offset)
 
+        chunk_start_line = @line
         chunk_start_col = @column
+        chunk_start_offset = current_offset
 
       elsif @s.peek(1) == '$'
         # Bare $ (not followed by {) — literal character
         buffer << @s.getch
         advance_pos('$')
       else
-        raise Error, "Lexer Error: Unclosed string starting at line #{start_col}" if @s.eos?
+        if @s.eos?
+          raise Error, "Lexer Error: Unclosed string starting at line #{start_line}:#{start_col}"
+        end
       end
     end
   end
@@ -318,30 +384,68 @@ class Lexer
   def extract_balanced_brace_content
     content = ""
     depth = 1
+    state = T.let(:code, Symbol)
+    escaped = T.let(false, T::Boolean)
 
     until @s.eos?
-      # Scan safe chars
-      text = @s.scan(/[^\{\}]+/)
-      if text
-        content << text
-        advance_pos(text)
+      if state == :code && @s.peek(3) == '"""'
+        raw = T.must(@s.scan(/"""/))
+        content << raw
+        advance_pos(raw)
+        state = :triple_string
+        next
       end
 
-      if @s.peek(1) == '{'
+      ch = @s.getch
+      break unless ch
+
+      if state == :comment
+        content << ch
+        advance_pos(ch)
+        state = :code if ch == "\n"
+        next
+      end
+
+      if state == :string
+        content << ch
+        advance_pos(ch)
+        if escaped
+          escaped = false
+        elsif ch == '\\'
+          escaped = true
+        elsif ch == '"'
+          state = :code
+        end
+        next
+      end
+
+      if state == :triple_string
+        content << ch
+        advance_pos(ch)
+        if ch == '"' && @s.peek(2) == '""'
+          tail = T.must(@s.scan(/""/))
+          content << tail
+          advance_pos(tail)
+          state = :code
+        end
+        next
+      end
+
+      if ch == '#'
+        state = :comment
+      elsif ch == '"'
+        state = :string
+      elsif ch == '{'
         depth += 1
-        content << @s.getch
-        advance_pos('{')
-      elsif @s.peek(1) == '}'
+      elsif ch == '}'
         depth -= 1
         if depth == 0
-          @s.getch # Consume final closing brace
-          advance_pos('}')
+          advance_pos(ch)
           return content
-        else
-          content << @s.getch
-          advance_pos('}')
         end
       end
+      content << ch
+      advance_pos(ch)
     end
 
     raise Error, "Lexer Error: Unclosed interpolation %{...}"
@@ -349,9 +453,34 @@ class Lexer
 
   sig { params(type: Symbol, val: T.any(Float, Integer, String), col: Integer).returns(Integer) }
   def add(type, val, col)
-    @tokens << Token.new(type, val, @line, col)
+    start_line = @line
+    start_offset = current_offset - @s.matched.bytesize
     # Automatically update position based on the last matched string
     advance_pos(@s.matched)
+    @tokens << source_token(type, val, start_line, col, start_offset,
+      @line, @column, current_offset)
+    current_offset
+  end
+
+  sig { returns(Integer) }
+  def current_offset
+    @base_offset + @s.pos
+  end
+
+  sig do
+    params(
+      type: Symbol,
+      value: T.untyped,
+      line: Integer,
+      column: Integer,
+      start_offset: Integer,
+      end_line: Integer,
+      end_column: Integer,
+      end_offset: Integer,
+    ).returns(Token)
+  end
+  def source_token(type, value, line, column, start_offset, end_line, end_column, end_offset)
+    Token.new(type, value, line, column, @file, start_offset, end_offset, end_line, end_column)
   end
 
   sig { params(str: String).returns(Integer) }

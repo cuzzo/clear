@@ -297,6 +297,29 @@ RSpec.describe Lexer do
       expect_token(tokens[4], :VAR_ID, "y", 1, 5)
     end
   describe "String Interpolation" do
+    it "does not balance braces inside nested strings, escapes, or comments" do
+      sources = [
+        %q!"value ${foo("}")} tail"!,
+        %q!"value ${foo("{")} tail"!,
+        "\"value \${foo(1 # } ignored\n + 2)} tail\"",
+      ]
+
+      sources.each do |source|
+        expect { Lexer.new(source).tokenize }.not_to raise_error
+      end
+    end
+
+    it "keeps absolute source coordinates for interpolation sub-lexers" do
+      source = "before\n\"value \${\n  answer + 1_i64\n} tail\""
+      answer = Lexer.new(source, file: "sample.clear").tokenize.find { |token| token.value == "answer" }
+
+      expect(answer).not_to be_nil
+      expect(answer.file).to eq("sample.clear")
+      expect([answer.line, answer.column]).to eq([3, 3])
+      expect(source.byteslice(answer.start_offset...answer.end_offset)).to eq("answer")
+      expect([answer.end_line, answer.end_column]).to eq([3, 9])
+    end
+
     it "interpolates a variable in the middle of a string" do
       # Source: "Hello ${name}!"
       # Logic:  "Hello " $+ (name) $+ "!"

@@ -9,6 +9,7 @@ require_relative "./parser_rules"
 require_relative "./error_registry"
 require_relative "./source_error"
 require_relative "./fixable_error"
+require_relative "./frontend_resource_budget"
 require_relative "../annotator/helpers/fixable_helpers" # ruby-to-clear: no-require
 
 # ==========================================
@@ -167,11 +168,19 @@ class ClearParser
   sig { returns(String) }
   attr_reader :source_code
 
-  sig { params(tokens: T::Array[Lexer::Token], source_code: String, gradual: T.nilable(T::Boolean)).void }
-  def initialize(tokens, source_code = "", gradual: nil)
+  sig do
+    params(
+      tokens: T::Array[Lexer::Token],
+      source_code: String,
+      gradual: T.nilable(T::Boolean),
+      budget: T.nilable(FrontendResourceBudget),
+    ).void
+  end
+  def initialize(tokens, source_code = "", gradual: nil, budget: nil)
     @tokens = tokens
     @pos = T.let(0, Integer)
     @source_code = source_code
+    @budget = T.let(budget || FrontendResourceBudget.new, FrontendResourceBudget)
     @delimiter_closings = T.let(index_delimiter_closings(tokens), T::Array[T.nilable(Integer)])
     # `gradual` controls whether omitted type annotations on
     # parameters / return types parse as implicit Auto (per
@@ -216,11 +225,19 @@ class ClearParser
 
   sig { returns(AST::Program) }
   def parse
+    @budget.check_source!(@source_code)
+    @budget.check_tokens!(@tokens.length)
     stmts = []
     stmts << parse_statement() while current.type != :EOF
     program = AST::Program.new(current, stmts)
+    first = @tokens.first || current
+    stamp_source_range!(program, first, current)
     program.language_mode = @gradual ? :easy : self.class.ownership_mode
     program
+  rescue FrontendResourceBudget::Exceeded => e
+    raise ParserError.new(current, "Frontend #{e.kind} resource limit exceeded (limit #{e.limit})", @source_code)
+  rescue SystemStackError
+    raise ParserError.new(current, "Frontend nesting resource limit exceeded", @source_code)
   end
 
   private
@@ -1013,22 +1030,34 @@ class ClearParser
 
   sig { returns(AST::Node) }
   def parse_statement
+    @budget.nested { parse_statement_body }
+  end
+
+  sig { returns(AST::Node) }
+  def parse_statement_body
+    start_token = current
+    node = T.let(nil, T.nilable(AST::Node))
     # Destructuring bind/assign must win before scalar bind parsing:
     # a, b = ...
     # a: Int32, b: Float64 = ...
     if current.type == :VAR_ID
-      return parse_destructuring_assign if destructuring_assignment?
-
-      parsed = parse_var_form
-      consume(:CHAR, ';')
-      return parsed.node
+      if destructuring_assignment?
+        node = parse_destructuring_assign
+      else
+        parsed = parse_var_form
+        consume(:CHAR, ';')
+        node = parsed.node
+      end
+    else
+      rule = STMT_RULE_INDEX[ClearParser.token_rule_key(current)]
+      if rule
+        node = dispatch_stmt_rule(rule)
+      else
+        node = parse_expression
+        consume(:CHAR, ';')
+      end
     end
-
-    rule = STMT_RULE_INDEX[ClearParser.token_rule_key(current)]
-    return dispatch_stmt_rule(rule) if rule
-    expr = parse_expression
-    consume(:CHAR, ';')
-    expr
+    stamp_source_range!(node, start_token, previous)
   end
 
   # A comma immediately after the first target makes this a destructuring
@@ -2264,6 +2293,12 @@ class ClearParser
 
   sig { params(precedence: Integer).returns(AST::Node) }
   def parse_expression(precedence = 0)
+    @budget.nested { parse_expression_body(precedence) }
+  end
+
+  sig { params(precedence: Integer).returns(AST::Node) }
+  def parse_expression_body(precedence)
+    start_token = current
     lhs = parse_unary
 
     while (op_token = current) && (op_prec = get_precedence(op_token)) && op_prec > precedence
@@ -2276,7 +2311,23 @@ class ClearParser
       lhs = parse_binary_op(lhs, op_token, op_prec)
     end
 
-    lhs
+    stamp_source_range!(lhs, start_token, previous)
+  end
+
+  sig { params(node: AST::Node, first: Lexer::Token, last: Lexer::Token).returns(AST::Node) }
+  def stamp_source_range!(node, first, last)
+    start_offset = first.start_offset || 0
+    end_offset = last.end_offset || (start_offset + last.value.to_s.bytesize)
+    node.source_range = AST::SourceRange.new(
+      file: first.file || last.file,
+      start_offset: start_offset,
+      end_offset: end_offset,
+      start_line: first.line,
+      start_column: first.column,
+      end_line: last.end_line || last.line,
+      end_column: last.end_column || (last.column + last.value.to_s.length),
+    )
+    node
   end
 
   sig { params(token: Lexer::Token).returns(T.nilable(Integer)) }
@@ -2694,7 +2745,7 @@ class ClearParser
       return false if depth == 0 && ((token.type == :KEYWORD && %w[THEN ELSE END].include?(token.value)) || token.type == :ARROW || token.type == :EOF)
       if token.type == :KEYWORD && %w[EXISTS IS_OK].include?(token.value)
         following = peek_at(offset + 1)
-        return true if following&.type == :KEYWORD && following.value == 'AS'
+        return true if following && following.type == :KEYWORD && following.value == 'AS'
       end
       offset += 1
     end
@@ -3467,6 +3518,11 @@ class ClearParser
 
   sig { params(migration_root: T::Boolean).returns(Type) }
   def parse_type_annotation(migration_root: true)
+    @budget.nested { parse_type_annotation_unbudgeted(migration_root: migration_root) }
+  end
+
+  sig { params(migration_root: T::Boolean).returns(Type) }
+  def parse_type_annotation_unbudgeted(migration_root: true)
     start_token = T.must(peek_at(0))
     inline_syntax = inline_type_annotation_start?
     parsed = parse_type_annotation_body

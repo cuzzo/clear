@@ -110,8 +110,9 @@ class ModuleImporter
       saved_gradual = ClearParser.gradual_mode
       ClearParser.gradual_mode = false
       ast = begin
-        tokens = Lexer.new(source).tokenize
-        ClearParser.new(tokens, source).parse
+        budget = FrontendResourceBudget.new
+        tokens = Lexer.new(source, file: abs_path, budget: budget).tokenize
+        ClearParser.new(tokens, source, budget: budget).parse
       ensure
         ClearParser.gradual_mode = saved_gradual
       end
