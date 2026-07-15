@@ -10,6 +10,36 @@ use super::normalized_behavior::{
 };
 use super::{CallSite, StateDeclaration};
 use crate::ast::{Child, Node, Span};
+use crate::type_inference::languages::nominal::{self, NominalTypeSyntax};
+use crate::type_inference::TypeExpr;
+
+const ZIG_NOMINAL_TYPE_SYNTAX: NominalTypeSyntax = NominalTypeSyntax {
+    strip_prefixes: &[],
+    trim_prefix_chars: &[],
+    trim_suffix_chars: &[],
+    array_names: &["ArrayList", "ArrayListUnmanaged"],
+    hash_names: &["StringHashMap", "AutoHashMap", "AutoHashMapUnmanaged"],
+    set_names: &[],
+    string_names: &[],
+    bare_array_names: &[],
+    suffix_array: false,
+    bracket_array: false,
+};
+
+pub(crate) fn parse_declared_type(source: &str) -> TypeExpr {
+    // Zig generic type constructors use `Name(T)` rather than angle brackets.
+    // Normalize only adapter-owned container constructors before handing the
+    // structural split to the language-neutral helper.
+    let source = source.trim();
+    let normalized = source.find('(').and_then(|open| {
+        let close = source.rfind(')')?;
+        let base = source[..open].rsplit('.').next().unwrap_or(&source[..open]);
+        let recognized = ZIG_NOMINAL_TYPE_SYNTAX.array_names.contains(&base)
+            || ZIG_NOMINAL_TYPE_SYNTAX.hash_names.contains(&base);
+        (recognized && close > open).then(|| format!("{}<{}>", &source[..open], &source[(open + 1)..close]))
+    });
+    nominal::parse(normalized.as_deref().unwrap_or(source), &ZIG_NOMINAL_TYPE_SYNTAX)
+}
 
 const ZIG_CONTEXT_PAIRS: &[(&str, &[&str])] =
     &[("time", &["timestamp", "nanoTimestamp", "milliTimestamp"])];
@@ -63,6 +93,10 @@ const ZIG_CFG_PROFILE: ControlFlowProfile = ControlFlowProfile {
 pub(crate) struct ZigNormalizedBehavior;
 
 impl NormalizedLanguageBehavior for ZigNormalizedBehavior {
+    fn stdlib_language(&self) -> Option<&'static str> {
+        Some("zig")
+    }
+
     // CFG-SPECIFIC START: expose the Zig CFG profile.
     fn cfg_profile(&self) -> &'static ControlFlowProfile {
         &ZIG_CFG_PROFILE

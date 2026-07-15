@@ -4,7 +4,7 @@ use super::cfg::ControlFlowProfile;
 
 use super::effects::{effect_from_call_with_lexicon, EffectLexicon};
 use super::normalized_behavior::{
-    configured_collection_operation, eliminable_guard_from_call, nil_guard_from_predicates, NormalizedCallParts,
+    configured_collection_operation, configured_intrinsic_call_complexity, eliminable_guard_from_call, nil_guard_from_predicates, NormalizedCallParts,
     NormalizedCallProjection, NormalizedLanguageBehavior, NormalizedNilGuardFact, NormalizedOwner,
     NormalizedSemanticEffect, NormalizedStateRead, NormalizedStateWrite,
 };
@@ -69,6 +69,10 @@ const GO_CFG_PROFILE: ControlFlowProfile = ControlFlowProfile {
 pub(crate) struct GoNormalizedBehavior;
 
 impl NormalizedLanguageBehavior for GoNormalizedBehavior {
+    fn stdlib_language(&self) -> Option<&'static str> {
+        Some("go")
+    }
+
     // CFG-SPECIFIC START: expose the Go CFG profile.
     fn cfg_profile(&self) -> &'static ControlFlowProfile {
         &GO_CFG_PROFILE
@@ -256,13 +260,10 @@ impl NormalizedLanguageBehavior for GoNormalizedBehavior {
 
     fn intrinsic_call_complexity(
         &self,
-        _receiver: Option<&str>,
+        receiver: Option<&str>,
         message: &str,
     ) -> Option<super::normalized_behavior::NormalizedCallComplexity> {
-        (message == "len").then_some(super::normalized_behavior::NormalizedCallComplexity {
-            time: "O(1)",
-            space: "O(1)",
-        })
+        configured_intrinsic_call_complexity("go", receiver, message)
     }
 
     fn split_case_source(&self, source: &str) -> Vec<String> {

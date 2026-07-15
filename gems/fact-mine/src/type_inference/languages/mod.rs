@@ -1,5 +1,5 @@
 mod go;
-mod nominal;
+pub(crate) mod nominal;
 mod python;
 mod ruby;
 mod typescript;
@@ -17,7 +17,14 @@ pub(super) fn parse(source: &str, language: &str) -> TypeExpr {
         "python" => python::parse(source),
         "typescript" | "javascript" => typescript::parse(source),
         "go" => go::parse(source),
-        "java" | "csharp" | "cpp" => nominal::parse(source),
+        "java" => crate::syntax::java::parse_declared_type(source),
+        "csharp" => crate::syntax::csharp::parse_declared_type(source),
+        "cpp" => crate::syntax::cpp::parse_declared_type(source),
+        "kotlin" => crate::syntax::kotlin::parse_declared_type(source),
+        "swift" => crate::syntax::swift::parse_declared_type(source),
+        "rust" => crate::syntax::rust::parse_declared_type(source),
+        "zig" => crate::syntax::zig::parse_declared_type(source),
+        "php" => crate::syntax::php::parse_declared_type(source),
         // FactMine's legacy generic syntax is Sorbet-shaped. Keeping that
         // fallback explicit here prevents the shared engine from silently
         // accumulating another language's grammar.
@@ -88,5 +95,21 @@ mod tests {
                 "String".into()
             ))))
         );
+    }
+
+    #[test]
+    fn delegates_native_collection_spellings_to_language_adapters() {
+        assert!(matches!(parse("ArrayList<String>", "java"), TypeExpr::Array(_)));
+        assert_eq!(
+            parse("List<String>", "java"),
+            TypeExpr::Primitive("List<String>".into())
+        );
+        assert!(matches!(parse("List<string>", "csharp"), TypeExpr::Array(_)));
+        assert!(matches!(parse("std::vector<int>", "cpp"), TypeExpr::Array(_)));
+        assert!(matches!(parse("ArrayList<String>", "kotlin"), TypeExpr::Array(_)));
+        assert!(matches!(parse("[String]", "swift"), TypeExpr::Array(_)));
+        assert!(matches!(parse("Vec<String>", "rust"), TypeExpr::Array(_)));
+        assert!(matches!(parse("std.ArrayList(u8)", "zig"), TypeExpr::Array(_)));
+        assert!(matches!(parse("array", "php"), TypeExpr::Array(_)));
     }
 }

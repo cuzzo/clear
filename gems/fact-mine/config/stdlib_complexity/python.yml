@@ -1,6 +1,11 @@
 Array:
   append: constant
   pop: constant
+  extend: linear_scan
+  insert: linear_scan
+  remove: linear_scan
+  reverse: linear_scan
+  clear: linear_scan
   count: linear_scan
   index: linear_scan
   copy: linear_materialize
@@ -10,11 +15,18 @@ Hash:
   pop: constant
   setdefault: constant
   copy: linear_materialize
+  update: linear_scan
+  clear: linear_scan
+  keys: constant
+  values: constant
+  items: constant
 Set:
   add: constant
   discard: constant
   remove: constant
   copy: linear_materialize
+  update: linear_scan
+  clear: linear_scan
 str:
   count: linear_scan
   find: linear_scan

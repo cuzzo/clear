@@ -1,0 +1,10 @@
+# Lua's standard table/string modules are explicitly-qualified globals.
+Intrinsic:
+  "table.insert": constant
+  "table.remove": linear_scan
+  "table.sort": sort
+  "table.concat": linear_materialize
+  "string.find": linear_scan
+  "string.match": linear_scan
+  "string.gsub": linear_materialize
+  "string.sub": linear_materialize

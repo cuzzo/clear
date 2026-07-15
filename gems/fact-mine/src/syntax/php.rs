@@ -12,6 +12,25 @@ use super::CallSite;
 use super::StateDeclaration;
 use crate::ast::Child;
 use crate::ast::{Node, Span};
+use crate::type_inference::languages::nominal::{self, NominalTypeSyntax};
+use crate::type_inference::TypeExpr;
+
+const PHP_NOMINAL_TYPE_SYNTAX: NominalTypeSyntax = NominalTypeSyntax {
+    strip_prefixes: &[],
+    trim_prefix_chars: &[],
+    trim_suffix_chars: &[],
+    array_names: &["array"],
+    hash_names: &[],
+    set_names: &[],
+    string_names: &["string"],
+    bare_array_names: &["array"],
+    suffix_array: false,
+    bracket_array: false,
+};
+
+pub(crate) fn parse_declared_type(source: &str) -> TypeExpr {
+    nominal::parse(source, &PHP_NOMINAL_TYPE_SYNTAX)
+}
 
 const PHP_CONTEXT_PAIRS: &[(&str, &[&str])] = &[
     ("DateTime", &["createFromFormat"]),
@@ -84,6 +103,10 @@ const PHP_CFG_PROFILE: ControlFlowProfile = ControlFlowProfile {
 pub(crate) struct PhpNormalizedBehavior;
 
 impl NormalizedLanguageBehavior for PhpNormalizedBehavior {
+    fn stdlib_language(&self) -> Option<&'static str> {
+        Some("php")
+    }
+
     // CFG-SPECIFIC START: expose the PHP CFG profile.
     fn cfg_profile(&self) -> &'static ControlFlowProfile {
         &PHP_CFG_PROFILE

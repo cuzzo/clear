@@ -24,3 +24,6 @@ String:
   empty: constant
   find: linear_scan
   substr: linear_materialize
+Intrinsic:
+  "std::sort": sort
+  "std::binary_search": logarithmic

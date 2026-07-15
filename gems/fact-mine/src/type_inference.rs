@@ -1,6 +1,6 @@
 // Type inference visitor and analysis engine.
 
-mod languages;
+pub(crate) mod languages;
 
 #[allow(unused_macros)]
 macro_rules! println {

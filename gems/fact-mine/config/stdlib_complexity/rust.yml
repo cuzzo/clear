@@ -1,0 +1,35 @@
+Array:
+  len: constant
+  is_empty: constant
+  capacity: constant
+  get: constant
+  first: constant
+  last: constant
+  push: constant
+  pop: constant
+  contains: linear_scan
+  position: linear_scan
+  binary_search: logarithmic
+  clone: linear_materialize
+  sort: sort
+  sort_by: sort
+Hash:
+  len: constant
+  is_empty: constant
+  get: constant
+  contains_key: constant
+  insert: constant
+  remove: constant
+Set:
+  len: constant
+  is_empty: constant
+  contains: constant
+  insert: constant
+  remove: constant
+String:
+  len: constant
+  is_empty: constant
+  contains: linear_scan
+  find: linear_scan
+  split: linear_materialize
+  replace: linear_materialize

@@ -23,7 +23,7 @@ macro_rules! eprintln {
 use super::effects::{effect_from_call_with_lexicon, EffectLexicon};
 
 use super::normalized_behavior::{
-    eliminable_guard_from_call, matching_paren_index, BlockCallSemantics, CardinalityCallSemantics,
+    configured_intrinsic_call_complexity, eliminable_guard_from_call, matching_paren_index, BlockCallSemantics, CardinalityCallSemantics,
     configured_collection_operation, CollectionAllocationSemantics, NormalizedCallParts, NormalizedCallProjection,
     method_parameter_type_key, NormalizedCallComplexity, NormalizedCollectionOperation, NormalizedLanguageBehavior,
     NormalizedNilGuardFact, NormalizedSemanticEffect, NormalizedVisibilityEvent, SyntaxMetadata,
@@ -214,6 +214,10 @@ const RUBY_CFG_PROFILE: ControlFlowProfile = ControlFlowProfile {
 pub(crate) struct RubyNormalizedBehavior;
 
 impl NormalizedLanguageBehavior for RubyNormalizedBehavior {
+    fn stdlib_language(&self) -> Option<&'static str> {
+        Some("ruby")
+    }
+
     fn reopenable_owner(&self, node: &Node) -> bool {
         matches!(node.r#type.as_str(), "CLASS" | "MODULE")
     }
@@ -404,7 +408,7 @@ impl NormalizedLanguageBehavior for RubyNormalizedBehavior {
             });
         }
 
-        None
+        configured_intrinsic_call_complexity("ruby", receiver, message)
     }
 
     fn literal_receiver_type(&self, node: &Node) -> Option<TypeExpr> {

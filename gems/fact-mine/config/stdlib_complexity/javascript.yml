@@ -1,3 +1,5 @@
+# ECMAScript built-ins. Kept separately from TypeScript so each language has
+# an independently reviewable native API contract.
 Array:
   at: constant
   length: constant
@@ -23,21 +25,18 @@ Array:
   reduce: linear_scan
   sort: sort
 Hash:
-  add: constant
-  delete: constant
   get: constant
   has: constant
   set: constant
+  delete: constant
   size: constant
   entries: linear_materialize
   keys: linear_materialize
   values: linear_materialize
 Set:
   add: constant
-  delete: constant
-  get: constant
   has: constant
-  set: constant
+  delete: constant
   size: constant
   entries: linear_materialize
   keys: linear_materialize
@@ -53,11 +52,6 @@ string:
   substring: linear_materialize
   trim: linear_materialize
   length: constant
-Intrinsic:
-  "Array.isArray": constant
-  "Object.keys": linear_materialize
-  "Object.values": linear_materialize
-  "Object.entries": linear_materialize
 String:
   includes: linear_scan
   indexOf: linear_scan
@@ -69,3 +63,8 @@ String:
   substring: linear_materialize
   trim: linear_materialize
   length: constant
+Intrinsic:
+  "Array.isArray": constant
+  "Object.keys": linear_materialize
+  "Object.values": linear_materialize
+  "Object.entries": linear_materialize

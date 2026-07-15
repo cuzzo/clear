@@ -1,0 +1,30 @@
+Array:
+  count: constant
+  isEmpty: constant
+  first: constant
+  last: constant
+  append: constant
+  popLast: constant
+  contains: linear_scan
+  firstIndex: linear_scan
+  map: linear_materialize
+  filter: linear_materialize
+  sorted: sort
+Hash:
+  count: constant
+  isEmpty: constant
+  keys: constant
+  values: constant
+  removeValue: constant
+Set:
+  count: constant
+  isEmpty: constant
+  contains: constant
+  insert: constant
+  remove: constant
+String:
+  isEmpty: constant
+  count: linear_scan
+  contains: linear_scan
+  firstIndex: linear_scan
+  split: linear_materialize

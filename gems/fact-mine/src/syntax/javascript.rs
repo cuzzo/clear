@@ -73,6 +73,10 @@ const JAVASCRIPT_CFG_PROFILE: ControlFlowProfile = ControlFlowProfile {
 pub(crate) struct JavaScriptNormalizedBehavior;
 
 impl NormalizedLanguageBehavior for JavaScriptNormalizedBehavior {
+    fn stdlib_language(&self) -> Option<&'static str> {
+        Some("javascript")
+    }
+
     // CFG-SPECIFIC START: expose the JavaScript CFG profile.
     fn cfg_profile(&self) -> &'static ControlFlowProfile {
         &JAVASCRIPT_CFG_PROFILE

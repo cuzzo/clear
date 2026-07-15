@@ -87,3 +87,6 @@ StringScanner:
   scan_until: linear_scan
 Integer:
   positive?: constant
+Intrinsic:
+  "Array.new": linear_materialize
+  "Hash.new": constant

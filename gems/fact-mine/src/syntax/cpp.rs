@@ -10,6 +10,25 @@ use super::normalized_behavior::{
 };
 use super::CallSite;
 use crate::ast::{Node, Span};
+use crate::type_inference::languages::nominal::{self, NominalTypeSyntax};
+use crate::type_inference::TypeExpr;
+
+const CPP_NOMINAL_TYPE_SYNTAX: NominalTypeSyntax = NominalTypeSyntax {
+    strip_prefixes: &["const "],
+    trim_prefix_chars: &[],
+    trim_suffix_chars: &['&', '*'],
+    array_names: &["vector", "array", "span"],
+    hash_names: &["unordered_map"],
+    set_names: &["unordered_set"],
+    string_names: &["string", "basic_string"],
+    bare_array_names: &[],
+    suffix_array: false,
+    bracket_array: false,
+};
+
+pub(crate) fn parse_declared_type(source: &str) -> TypeExpr {
+    nominal::parse(source, &CPP_NOMINAL_TYPE_SYNTAX)
+}
 
 const CPP_CONTEXT_PAIRS: &[(&str, &[&str])] =
     &[("chrono", &["now"]), ("random_device", &["operator()"])];
@@ -72,6 +91,10 @@ const CPP_CFG_PROFILE: ControlFlowProfile = ControlFlowProfile {
 pub(crate) struct CppNormalizedBehavior;
 
 impl NormalizedLanguageBehavior for CppNormalizedBehavior {
+    fn stdlib_language(&self) -> Option<&'static str> {
+        Some("cpp")
+    }
+
     // CFG-SPECIFIC START: expose the C++ CFG profile.
     fn cfg_profile(&self) -> &'static ControlFlowProfile {
         &CPP_CFG_PROFILE

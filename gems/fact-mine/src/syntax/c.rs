@@ -54,6 +54,10 @@ const C_CFG_PROFILE: ControlFlowProfile = ControlFlowProfile {
 struct CNormalizedBehavior;
 
 impl NormalizedLanguageBehavior for CNormalizedBehavior {
+    fn stdlib_language(&self) -> Option<&'static str> {
+        Some("c")
+    }
+
     // CFG-SPECIFIC START: expose the C CFG profile.
     fn cfg_profile(&self) -> &'static ControlFlowProfile {
         &C_CFG_PROFILE

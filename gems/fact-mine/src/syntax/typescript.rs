@@ -5,7 +5,7 @@ use super::cfg::ControlFlowProfile;
 use super::effects::effect_from_call_with_lexicon;
 use super::javascript;
 use super::normalized_behavior::{
-    configured_collection_operation, eliminable_guard_from_call, nil_guard_from_predicates, NormalizedCallParts,
+    configured_collection_operation, configured_intrinsic_call_complexity, eliminable_guard_from_call, nil_guard_from_predicates, NormalizedCallParts,
     NormalizedCallProjection, NormalizedCollectionOperation, NormalizedLanguageBehavior,
     NormalizedNilGuardFact, NormalizedSemanticEffect,
 };
@@ -30,6 +30,10 @@ const TYPESCRIPT_CFG_PROFILE: ControlFlowProfile = ControlFlowProfile {
 pub(crate) struct TypeScriptNormalizedBehavior;
 
 impl NormalizedLanguageBehavior for TypeScriptNormalizedBehavior {
+    fn stdlib_language(&self) -> Option<&'static str> {
+        Some("typescript")
+    }
+
     // CFG-SPECIFIC START: expose the TypeScript CFG profile.
     fn cfg_profile(&self) -> &'static ControlFlowProfile {
         &TYPESCRIPT_CFG_PROFILE
@@ -78,12 +82,7 @@ impl NormalizedLanguageBehavior for TypeScriptNormalizedBehavior {
         receiver: Option<&str>,
         message: &str,
     ) -> Option<super::normalized_behavior::NormalizedCallComplexity> {
-        (receiver == Some("Array") && message == "isArray").then_some(
-            super::normalized_behavior::NormalizedCallComplexity {
-                time: "O(1)",
-                space: "O(1)",
-            },
-        )
+        configured_intrinsic_call_complexity("typescript", receiver, message)
     }
 
     fn mutating_receiver_message(&self, message: &str) -> bool {

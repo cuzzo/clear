@@ -10,6 +10,25 @@ use super::normalized_behavior::{
 };
 use super::{CallSite, StateDeclaration};
 use crate::ast::{Node, Span};
+use crate::type_inference::languages::nominal::{self, NominalTypeSyntax};
+use crate::type_inference::TypeExpr;
+
+const CSHARP_NOMINAL_TYPE_SYNTAX: NominalTypeSyntax = NominalTypeSyntax {
+    strip_prefixes: &["readonly "],
+    trim_prefix_chars: &[],
+    trim_suffix_chars: &[],
+    array_names: &["List", "ArrayList", "Vector"],
+    hash_names: &["Dictionary", "HashMap"],
+    set_names: &["HashSet"],
+    string_names: &["string", "String"],
+    bare_array_names: &[],
+    suffix_array: true,
+    bracket_array: false,
+};
+
+pub(crate) fn parse_declared_type(source: &str) -> TypeExpr {
+    nominal::parse(source, &CSHARP_NOMINAL_TYPE_SYNTAX)
+}
 
 const CSHARP_CONTEXT_PAIRS: &[(&str, &[&str])] = &[
     ("DateTime", &["Now", "UtcNow", "Today"]),
@@ -76,6 +95,10 @@ const CSHARP_CFG_PROFILE: ControlFlowProfile = ControlFlowProfile {
 pub(crate) struct CSharpNormalizedBehavior;
 
 impl NormalizedLanguageBehavior for CSharpNormalizedBehavior {
+    fn stdlib_language(&self) -> Option<&'static str> {
+        Some("csharp")
+    }
+
     // CFG-SPECIFIC START: expose the C# CFG profile.
     fn cfg_profile(&self) -> &'static ControlFlowProfile {
         &CSHARP_CFG_PROFILE

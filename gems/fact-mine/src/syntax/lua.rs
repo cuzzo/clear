@@ -71,6 +71,10 @@ const LUA_CFG_PROFILE: ControlFlowProfile = ControlFlowProfile {
 pub(crate) struct LuaNormalizedBehavior;
 
 impl NormalizedLanguageBehavior for LuaNormalizedBehavior {
+    fn stdlib_language(&self) -> Option<&'static str> {
+        Some("lua")
+    }
+
     // CFG-SPECIFIC START: expose the Lua CFG profile.
     fn cfg_profile(&self) -> &'static ControlFlowProfile {
         &LUA_CFG_PROFILE

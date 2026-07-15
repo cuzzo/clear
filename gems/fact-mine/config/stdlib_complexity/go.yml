@@ -4,3 +4,6 @@ Hash:
   len: constant
 String:
   len: constant
+Intrinsic:
+  len: constant
+  cap: constant

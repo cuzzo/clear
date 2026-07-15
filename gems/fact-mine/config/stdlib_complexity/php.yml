@@ -1,0 +1,19 @@
+# PHP core functions cannot be redefined in normal application code. Map only
+# documented array/string operations with a receiver-independent bound; never
+# framework helpers or `Countable` dispatch with similar names.
+Intrinsic:
+  in_array: linear_scan
+  array_search: linear_scan
+  array_map: linear_materialize
+  array_filter: linear_materialize
+  array_values: linear_materialize
+  array_keys: linear_materialize
+  array_merge: linear_materialize
+  array_unique: linear_materialize
+  sort: sort
+  asort: sort
+  ksort: sort
+  strlen: linear_scan
+  strpos: linear_scan
+  explode: linear_materialize
+  substr: linear_materialize

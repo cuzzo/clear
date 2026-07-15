@@ -12,6 +12,27 @@ use super::CallSite;
 use super::StateDeclaration;
 use crate::ast::Child;
 use crate::ast::{Node, Span};
+use crate::type_inference::languages::nominal::{self, NominalTypeSyntax};
+use crate::type_inference::TypeExpr;
+
+const JAVA_NOMINAL_TYPE_SYNTAX: NominalTypeSyntax = NominalTypeSyntax {
+    strip_prefixes: &[],
+    trim_prefix_chars: &[],
+    trim_suffix_chars: &[],
+    array_names: &["ArrayList", "Vector"],
+    hash_names: &["HashMap", "LinkedHashMap"],
+    set_names: &["HashSet"],
+    string_names: &["String"],
+    bare_array_names: &[],
+    suffix_array: true,
+    bracket_array: false,
+};
+
+/// Java-specific declaration spelling normalization. Interface types (List,
+/// Map, Collection) remain nominal because their bounds are implementation-dependent.
+pub(crate) fn parse_declared_type(source: &str) -> TypeExpr {
+    nominal::parse(source, &JAVA_NOMINAL_TYPE_SYNTAX)
+}
 
 const JAVA_CONTEXT_PAIRS: &[(&str, &[&str])] = &[
     (
@@ -83,6 +104,10 @@ const JAVA_CFG_PROFILE: ControlFlowProfile = ControlFlowProfile {
 pub(crate) struct JavaNormalizedBehavior;
 
 impl NormalizedLanguageBehavior for JavaNormalizedBehavior {
+    fn stdlib_language(&self) -> Option<&'static str> {
+        Some("java")
+    }
+
     // CFG-SPECIFIC START: expose the Java CFG profile.
     fn cfg_profile(&self) -> &'static ControlFlowProfile {
         &JAVA_CFG_PROFILE

@@ -102,13 +102,14 @@ pub(crate) struct NormalizedCallComplexity {
     pub(crate) space: &'static str,
 }
 
-/// A language adapter maps a native collection API spelling to one of these
-/// operations. The cost table deliberately lives here, rather than in an
-/// analyzer or an individual language implementation: all downstream facts
-/// therefore describe the same operation regardless of surface syntax.
+/// Fact-Mine's language registry maps a native collection API spelling to one
+/// of these operations. The common operation algebra deliberately lives here,
+/// rather than in an analyzer: all downstream facts describe the same
+/// operation regardless of surface syntax.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub(crate) enum NormalizedCollectionOperation {
     Constant,
+    Logarithmic,
     LinearScan,
     LinearMaterialize,
     Sort,
@@ -120,6 +121,10 @@ impl NormalizedCollectionOperation {
         match self {
             Self::Constant => NormalizedCallComplexity {
                 time: "O(1)",
+                space: "O(1)",
+            },
+            Self::Logarithmic => NormalizedCallComplexity {
+                time: "O(log N)",
                 space: "O(1)",
             },
             Self::LinearScan => NormalizedCallComplexity {
@@ -158,6 +163,22 @@ const GO_STDLIB_OPERATIONS: &str =
     include_str!("../../config/stdlib_complexity/go.yml");
 const CPP_STDLIB_OPERATIONS: &str =
     include_str!("../../config/stdlib_complexity/cpp.yml");
+const C_STDLIB_OPERATIONS: &str =
+    include_str!("../../config/stdlib_complexity/c.yml");
+const JAVASCRIPT_STDLIB_OPERATIONS: &str =
+    include_str!("../../config/stdlib_complexity/javascript.yml");
+const KOTLIN_STDLIB_OPERATIONS: &str =
+    include_str!("../../config/stdlib_complexity/kotlin.yml");
+const LUA_STDLIB_OPERATIONS: &str =
+    include_str!("../../config/stdlib_complexity/lua.yml");
+const PHP_STDLIB_OPERATIONS: &str =
+    include_str!("../../config/stdlib_complexity/php.yml");
+const RUST_STDLIB_OPERATIONS: &str =
+    include_str!("../../config/stdlib_complexity/rust.yml");
+const SWIFT_STDLIB_OPERATIONS: &str =
+    include_str!("../../config/stdlib_complexity/swift.yml");
+const ZIG_STDLIB_OPERATIONS: &str =
+    include_str!("../../config/stdlib_complexity/zig.yml");
 
 fn parsed_stdlib_operations(source: &'static str, cache: &'static OnceLock<StdlibOperationMap>) -> &'static StdlibOperationMap {
     cache.get_or_init(|| {
@@ -174,15 +195,31 @@ fn stdlib_operations(language: &str) -> Option<&'static StdlibOperationMap> {
     static CSHARP: OnceLock<StdlibOperationMap> = OnceLock::new();
     static GO: OnceLock<StdlibOperationMap> = OnceLock::new();
     static CPP: OnceLock<StdlibOperationMap> = OnceLock::new();
+    static C: OnceLock<StdlibOperationMap> = OnceLock::new();
+    static JAVASCRIPT: OnceLock<StdlibOperationMap> = OnceLock::new();
+    static KOTLIN: OnceLock<StdlibOperationMap> = OnceLock::new();
+    static LUA: OnceLock<StdlibOperationMap> = OnceLock::new();
+    static PHP: OnceLock<StdlibOperationMap> = OnceLock::new();
+    static RUST: OnceLock<StdlibOperationMap> = OnceLock::new();
+    static SWIFT: OnceLock<StdlibOperationMap> = OnceLock::new();
+    static ZIG: OnceLock<StdlibOperationMap> = OnceLock::new();
 
     match language {
         "ruby" => Some(parsed_stdlib_operations(RUBY_STDLIB_OPERATIONS, &RUBY)),
         "python" => Some(parsed_stdlib_operations(PYTHON_STDLIB_OPERATIONS, &PYTHON)),
-        "typescript" | "javascript" => Some(parsed_stdlib_operations(TYPESCRIPT_STDLIB_OPERATIONS, &TYPESCRIPT)),
+        "typescript" => Some(parsed_stdlib_operations(TYPESCRIPT_STDLIB_OPERATIONS, &TYPESCRIPT)),
+        "javascript" => Some(parsed_stdlib_operations(JAVASCRIPT_STDLIB_OPERATIONS, &JAVASCRIPT)),
         "java" => Some(parsed_stdlib_operations(JAVA_STDLIB_OPERATIONS, &JAVA)),
         "csharp" => Some(parsed_stdlib_operations(CSHARP_STDLIB_OPERATIONS, &CSHARP)),
         "go" => Some(parsed_stdlib_operations(GO_STDLIB_OPERATIONS, &GO)),
         "cpp" => Some(parsed_stdlib_operations(CPP_STDLIB_OPERATIONS, &CPP)),
+        "c" => Some(parsed_stdlib_operations(C_STDLIB_OPERATIONS, &C)),
+        "kotlin" => Some(parsed_stdlib_operations(KOTLIN_STDLIB_OPERATIONS, &KOTLIN)),
+        "lua" => Some(parsed_stdlib_operations(LUA_STDLIB_OPERATIONS, &LUA)),
+        "php" => Some(parsed_stdlib_operations(PHP_STDLIB_OPERATIONS, &PHP)),
+        "rust" => Some(parsed_stdlib_operations(RUST_STDLIB_OPERATIONS, &RUST)),
+        "swift" => Some(parsed_stdlib_operations(SWIFT_STDLIB_OPERATIONS, &SWIFT)),
+        "zig" => Some(parsed_stdlib_operations(ZIG_STDLIB_OPERATIONS, &ZIG)),
         _ => None,
     }
 }
@@ -190,6 +227,7 @@ fn stdlib_operations(language: &str) -> Option<&'static StdlibOperationMap> {
 fn operation_from_config(value: &str) -> Option<NormalizedCollectionOperation> {
     match value {
         "constant" => Some(NormalizedCollectionOperation::Constant),
+        "logarithmic" => Some(NormalizedCollectionOperation::Logarithmic),
         "linear_scan" => Some(NormalizedCollectionOperation::LinearScan),
         "linear_materialize" => Some(NormalizedCollectionOperation::LinearMaterialize),
         "sort" => Some(NormalizedCollectionOperation::Sort),
@@ -198,9 +236,39 @@ fn operation_from_config(value: &str) -> Option<NormalizedCollectionOperation> {
     }
 }
 
+/// Resolve a language-owned free function or static standard-library call.
+/// The YAML key is either `function` for a bare intrinsic or `Type.function`
+/// for a statically-qualified one. We deliberately do not match a qualified
+/// call by bare method name: `Util.sort` is not `Collections.sort`.
+pub(crate) fn configured_intrinsic_operation(
+    language: &str,
+    receiver: Option<&str>,
+    message: &str,
+) -> Option<NormalizedCollectionOperation> {
+    let operations = stdlib_operations(language)?;
+    let intrinsics = operations.get("Intrinsic")?;
+    let key = receiver
+        .filter(|receiver| !receiver.trim().is_empty())
+        .map(|receiver| format!("{}.{}", receiver.trim(), message))
+        .unwrap_or_else(|| message.to_string());
+    intrinsics
+        .get(&key)
+        .and_then(|operation| operation_from_config(operation))
+}
+
+pub(crate) fn configured_intrinsic_call_complexity(
+    language: &str,
+    receiver: Option<&str>,
+    message: &str,
+) -> Option<NormalizedCallComplexity> {
+    configured_intrinsic_operation(language, receiver, message)
+        .map(NormalizedCollectionOperation::complexity)
+}
+
 /// Resolve a language-owned collection spelling through Fact-Mine's YAML
-/// configuration. Adapters provide only the language identity; Espalier never
-/// loads or interprets a language-specific complexity table.
+/// configuration. Adapters provide the language identity and normalize native
+/// declaration grammar; Espalier never loads or interprets a language-specific
+/// complexity table.
 pub(crate) fn configured_collection_operation(
     language: &str,
     receiver_type: &TypeExpr,
@@ -231,6 +299,12 @@ pub(crate) fn configured_collection_operation(
 }
 
 pub(crate) trait NormalizedLanguageBehavior: Sync {
+    /// The configuration key for this source language. Keeping this at the
+    /// adapter boundary ensures Fact-Mine owns native spellings while every
+    /// downstream consumer sees only normalized complexity facts.
+    fn stdlib_language(&self) -> Option<&'static str> {
+        None
+    }
     fn cfg_profile(&self) -> &'static ControlFlowProfile {
         ControlFlowProfile::neutral_ref()
     }
@@ -308,15 +382,17 @@ pub(crate) trait NormalizedLanguageBehavior: Sync {
     fn collection_parameter_type(&self, _type_name: &str) -> bool {
         false
     }
-    /// Maps a native standard-library method to a normalized operation. The
-    /// adapter owns spellings and receiver compatibility; the common operation
-    /// table owns cost. Unknown/user calls must return `None`.
+    /// Maps a type-proven standard-library method to a normalized operation.
+    /// The adapter owns native declaration grammar and receiver normalization;
+    /// Fact-Mine's language registry owns native API spellings and costs.
+    /// Unknown/user calls must return `None`.
     fn collection_operation(
         &self,
-        _receiver_type: &TypeExpr,
-        _message: &str,
+        receiver_type: &TypeExpr,
+        message: &str,
     ) -> Option<NormalizedCollectionOperation> {
-        None
+        self.stdlib_language()
+            .and_then(|language| configured_collection_operation(language, receiver_type, message))
     }
 
     fn call_complexity(
@@ -333,10 +409,11 @@ pub(crate) trait NormalizedLanguageBehavior: Sync {
     /// language adapters while downstream complexity analysis stays generic.
     fn intrinsic_call_complexity(
         &self,
-        _receiver: Option<&str>,
-        _message: &str,
+        receiver: Option<&str>,
+        message: &str,
     ) -> Option<NormalizedCallComplexity> {
-        None
+        self.stdlib_language()
+            .and_then(|language| configured_intrinsic_call_complexity(language, receiver, message))
     }
 
     fn literal_receiver_type(&self, _node: &Node) -> Option<TypeExpr> {
@@ -1170,5 +1247,62 @@ mod tests {
     #[test]
     fn test_matching_paren_index_none() {
         assert!(matching_paren_index("(", 0).is_none());
+    }
+
+    #[test]
+    fn all_language_configs_map_only_their_documented_operations() {
+        let array = TypeExpr::Array(Box::new(TypeExpr::Untyped));
+        let hash = TypeExpr::Hash {
+            key: Box::new(TypeExpr::Untyped),
+            value: Box::new(TypeExpr::Untyped),
+        };
+        let string = TypeExpr::Primitive("String".to_string());
+
+        for (language, receiver, message, expected) in [
+            ("ruby", &array, "include?", NormalizedCollectionOperation::LinearScan),
+            ("python", &array, "append", NormalizedCollectionOperation::Constant),
+            ("javascript", &array, "shift", NormalizedCollectionOperation::LinearScan),
+            ("typescript", &array, "shift", NormalizedCollectionOperation::LinearScan),
+            ("java", &array, "contains", NormalizedCollectionOperation::LinearScan),
+            ("csharp", &array, "Remove", NormalizedCollectionOperation::LinearScan),
+            ("go", &array, "len", NormalizedCollectionOperation::Constant),
+            ("cpp", &array, "find", NormalizedCollectionOperation::LinearScan),
+            ("kotlin", &array, "contains", NormalizedCollectionOperation::LinearScan),
+            ("rust", &array, "binary_search", NormalizedCollectionOperation::Logarithmic),
+            ("swift", &array, "sorted", NormalizedCollectionOperation::Sort),
+            ("zig", &array, "append", NormalizedCollectionOperation::Constant),
+        ] {
+            assert_eq!(
+                configured_collection_operation(language, receiver, message),
+                Some(expected),
+                "{language} {message}"
+            );
+        }
+        assert_eq!(
+            configured_collection_operation("php", &array, "unknown"),
+            None
+        );
+        assert_eq!(
+            configured_collection_operation("rust", &hash, "get"),
+            Some(NormalizedCollectionOperation::Constant)
+        );
+        assert_eq!(
+            configured_collection_operation("swift", &string, "count"),
+            Some(NormalizedCollectionOperation::LinearScan)
+        );
+        for (language, receiver, message, expected) in [
+            ("c", None, "strlen", NormalizedCollectionOperation::LinearScan),
+            ("go", None, "len", NormalizedCollectionOperation::Constant),
+            ("php", None, "array_map", NormalizedCollectionOperation::LinearMaterialize),
+            ("lua", Some("table"), "sort", NormalizedCollectionOperation::Sort),
+            ("java", Some("Collections"), "binarySearch", NormalizedCollectionOperation::Logarithmic),
+        ] {
+            assert_eq!(
+                configured_intrinsic_operation(language, receiver, message),
+                Some(expected),
+                "{language} {receiver:?}.{message}"
+            );
+        }
+        assert_eq!(configured_intrinsic_operation("c", Some("project"), "strlen"), None);
     }
 }

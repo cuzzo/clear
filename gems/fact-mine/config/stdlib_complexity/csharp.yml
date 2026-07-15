@@ -2,7 +2,7 @@ Array:
   get: constant
   Count: constant
   Add: constant
-  Remove: constant
+  Remove: linear_scan
   Contains: linear_scan
   IndexOf: linear_scan
   ToArray: linear_materialize
@@ -28,3 +28,7 @@ String:
   IndexOf: linear_scan
   Split: linear_materialize
   Substring: linear_materialize
+Intrinsic:
+  "Array.Sort": sort
+  "Enumerable.ToArray": linear_materialize
+  "Enumerable.ToList": linear_materialize

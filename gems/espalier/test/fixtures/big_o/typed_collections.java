@@ -1,7 +1,7 @@
-import java.util.List;
+import java.util.ArrayList;
 
 class TypedCollections {
-  String[] copyIfPresent(List<String> values, String needle) {
+  String[] copyIfPresent(ArrayList<String> values, String needle) {
     if (values.contains(needle)) {
       return values.toArray(new String[0]);
     }

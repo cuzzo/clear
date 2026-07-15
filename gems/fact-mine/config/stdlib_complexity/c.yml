@@ -1,0 +1,13 @@
+# ISO C library calls. These are free functions because C has no native
+# collection methods. Do not add project-local helpers here.
+Intrinsic:
+  strlen: linear_scan
+  strnlen: linear_scan
+  strchr: linear_scan
+  strrchr: linear_scan
+  memchr: linear_scan
+  memcmp: linear_scan
+  memcpy: linear_scan
+  memmove: linear_scan
+  qsort: sort
+  bsearch: logarithmic

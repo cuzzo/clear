@@ -12,6 +12,25 @@ use super::CallSite;
 use super::StateDeclaration;
 use crate::ast::Child;
 use crate::ast::{Node, Span};
+use crate::type_inference::languages::nominal::{self, NominalTypeSyntax};
+use crate::type_inference::TypeExpr;
+
+const RUST_NOMINAL_TYPE_SYNTAX: NominalTypeSyntax = NominalTypeSyntax {
+    strip_prefixes: &["&mut "],
+    trim_prefix_chars: &['&'],
+    trim_suffix_chars: &[],
+    array_names: &["Vec"],
+    hash_names: &["HashMap"],
+    set_names: &["HashSet"],
+    string_names: &["String", "str"],
+    bare_array_names: &[],
+    suffix_array: false,
+    bracket_array: false,
+};
+
+pub(crate) fn parse_declared_type(source: &str) -> TypeExpr {
+    nominal::parse(source, &RUST_NOMINAL_TYPE_SYNTAX)
+}
 
 const RUST_CONTEXT_PAIRS: &[(&str, &[&str])] = &[("SystemTime", &["now"]), ("Instant", &["now"])];
 
@@ -73,6 +92,10 @@ const RUST_CFG_PROFILE: ControlFlowProfile = ControlFlowProfile {
 pub(crate) struct RustNormalizedBehavior;
 
 impl NormalizedLanguageBehavior for RustNormalizedBehavior {
+    fn stdlib_language(&self) -> Option<&'static str> {
+        Some("rust")
+    }
+
     // CFG-SPECIFIC START: expose the Rust CFG profile.
     fn cfg_profile(&self) -> &'static ControlFlowProfile {
         &RUST_CFG_PROFILE

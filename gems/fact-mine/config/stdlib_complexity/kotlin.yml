@@ -2,37 +2,35 @@ Array:
   get: constant
   size: constant
   isEmpty: constant
+  first: constant
+  last: constant
   add: constant
+  removeLast: constant
   contains: linear_scan
   indexOf: linear_scan
   lastIndexOf: linear_scan
-  toArray: linear_materialize
-  sort: sort
+  map: linear_materialize
+  filter: linear_materialize
+  toList: linear_materialize
+  sorted: sort
 Hash:
   get: constant
   put: constant
   containsKey: constant
   size: constant
   isEmpty: constant
-  keySet: linear_materialize
-  values: linear_materialize
-  entrySet: linear_materialize
+  keys: constant
+  values: constant
 Set:
   add: constant
   remove: constant
   contains: constant
   size: constant
   isEmpty: constant
-  toArray: linear_materialize
 String:
-  charAt: constant
   length: constant
   contains: linear_scan
   indexOf: linear_scan
   lastIndexOf: linear_scan
   split: linear_materialize
   substring: linear_materialize
-Intrinsic:
-  "Arrays.sort": sort
-  "Collections.sort": sort
-  "Collections.binarySearch": logarithmic

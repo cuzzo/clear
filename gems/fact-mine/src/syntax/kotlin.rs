@@ -12,6 +12,25 @@ use super::CallSite;
 use super::StateDeclaration;
 use crate::ast::Child;
 use crate::ast::{Node, Span};
+use crate::type_inference::languages::nominal::{self, NominalTypeSyntax};
+use crate::type_inference::TypeExpr;
+
+const KOTLIN_NOMINAL_TYPE_SYNTAX: NominalTypeSyntax = NominalTypeSyntax {
+    strip_prefixes: &[],
+    trim_prefix_chars: &[],
+    trim_suffix_chars: &[],
+    array_names: &["ArrayList", "Array"],
+    hash_names: &["HashMap"],
+    set_names: &["HashSet"],
+    string_names: &["String"],
+    bare_array_names: &[],
+    suffix_array: false,
+    bracket_array: false,
+};
+
+pub(crate) fn parse_declared_type(source: &str) -> TypeExpr {
+    nominal::parse(source, &KOTLIN_NOMINAL_TYPE_SYNTAX)
+}
 
 const KOTLIN_CONTEXT_PAIRS: &[(&str, &[&str])] = &[
     (
@@ -89,6 +108,10 @@ const KOTLIN_CFG_PROFILE: ControlFlowProfile = ControlFlowProfile {
 struct KotlinNormalizedBehavior;
 
 impl NormalizedLanguageBehavior for KotlinNormalizedBehavior {
+    fn stdlib_language(&self) -> Option<&'static str> {
+        Some("kotlin")
+    }
+
     // CFG-SPECIFIC START: expose the Kotlin CFG profile.
     fn cfg_profile(&self) -> &'static ControlFlowProfile {
         &KOTLIN_CFG_PROFILE

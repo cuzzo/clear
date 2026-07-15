@@ -76,6 +76,10 @@ const PYTHON_CFG_PROFILE: ControlFlowProfile = ControlFlowProfile {
 pub(crate) struct PythonNormalizedBehavior;
 
 impl NormalizedLanguageBehavior for PythonNormalizedBehavior {
+    fn stdlib_language(&self) -> Option<&'static str> {
+        Some("python")
+    }
+
     // CFG-SPECIFIC START: expose the Python CFG profile.
     fn cfg_profile(&self) -> &'static ControlFlowProfile {
         &PYTHON_CFG_PROFILE

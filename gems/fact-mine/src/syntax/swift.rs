@@ -12,6 +12,25 @@ use super::CallSite;
 use super::StateDeclaration;
 use crate::ast::Child;
 use crate::ast::{Node, Span};
+use crate::type_inference::languages::nominal::{self, NominalTypeSyntax};
+use crate::type_inference::TypeExpr;
+
+const SWIFT_NOMINAL_TYPE_SYNTAX: NominalTypeSyntax = NominalTypeSyntax {
+    strip_prefixes: &[],
+    trim_prefix_chars: &[],
+    trim_suffix_chars: &[],
+    array_names: &["Array"],
+    hash_names: &["Dictionary"],
+    set_names: &["Set"],
+    string_names: &["String"],
+    bare_array_names: &[],
+    suffix_array: false,
+    bracket_array: true,
+};
+
+pub(crate) fn parse_declared_type(source: &str) -> TypeExpr {
+    nominal::parse(source, &SWIFT_NOMINAL_TYPE_SYNTAX)
+}
 
 const SWIFT_CONTEXT_PAIRS: &[(&str, &[&str])] = &[("Date", &["now"]), ("UUID", &["init"])];
 
@@ -90,6 +109,10 @@ const SWIFT_CFG_PROFILE: ControlFlowProfile = ControlFlowProfile {
 struct SwiftNormalizedBehavior;
 
 impl NormalizedLanguageBehavior for SwiftNormalizedBehavior {
+    fn stdlib_language(&self) -> Option<&'static str> {
+        Some("swift")
+    }
+
     // CFG-SPECIFIC START: expose the Swift CFG profile.
     fn cfg_profile(&self) -> &'static ControlFlowProfile {
         &SWIFT_CFG_PROFILE

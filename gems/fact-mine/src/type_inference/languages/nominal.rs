@@ -1,54 +1,105 @@
 use super::super::TypeExpr;
 
-/// Conservative storage-shape parsing for nominal, C-family type spellings.
-/// This recognizes only standard collection declarations; every unrecognized
-/// nominal type remains a primitive instead of being guessed as a collection.
-pub(super) fn parse(source: &str) -> TypeExpr {
-    let source = source.trim();
-    let source = source
-        .strip_prefix("const ")
-        .or_else(|| source.strip_prefix("readonly "))
-        .unwrap_or(source)
-        .trim_end_matches('&')
-        .trim_end_matches('*')
-        .trim();
-    if let Some(inner) = source.strip_suffix("[]") {
-        return TypeExpr::Array(Box::new(parse(inner)));
+/// Generic machinery for language adapters that use angle-bracket nominal
+/// types. It deliberately knows no language spellings: every concrete
+/// library name belongs in the corresponding `syntax/<language>.rs` adapter.
+pub(crate) struct NominalTypeSyntax {
+    pub(crate) strip_prefixes: &'static [&'static str],
+    pub(crate) trim_prefix_chars: &'static [char],
+    pub(crate) trim_suffix_chars: &'static [char],
+    pub(crate) array_names: &'static [&'static str],
+    pub(crate) hash_names: &'static [&'static str],
+    pub(crate) set_names: &'static [&'static str],
+    pub(crate) string_names: &'static [&'static str],
+    pub(crate) bare_array_names: &'static [&'static str],
+    pub(crate) suffix_array: bool,
+    pub(crate) bracket_array: bool,
+}
+
+pub(crate) fn parse(source: &str, syntax: &NominalTypeSyntax) -> TypeExpr {
+    let source = strip_decorators(source, syntax);
+    if syntax.bracket_array {
+        if let Some(inner) = source.strip_prefix('[').and_then(|value| value.strip_suffix(']')) {
+            return TypeExpr::Array(Box::new(parse(inner, syntax)));
+        }
+    }
+    if syntax.suffix_array {
+        if let Some(inner) = source.strip_suffix("[]") {
+            return TypeExpr::Array(Box::new(parse(inner, syntax)));
+        }
     }
     let Some((base, arguments)) = generic_parts(source) else {
-        return primitive(source);
+        return primitive(source, syntax);
     };
     let arguments = split_top_level(arguments);
-    match base.rsplit("::").next().unwrap_or(base).rsplit('.').next().unwrap_or(base) {
-        "List" | "IList" | "ICollection" | "IEnumerable" | "Collection" | "Iterable"
-        | "Vector" | "vector" | "array" | "span" | "basic_string" => {
-            TypeExpr::Array(Box::new(arguments.first().map(|value| parse(value)).unwrap_or(TypeExpr::Untyped)))
+    let argument = |index: usize| {
+        Box::new(
+            arguments
+                .get(index)
+                .map(|value| parse(value, syntax))
+                .unwrap_or(TypeExpr::Untyped),
+        )
+    };
+    let base = short_name(base);
+    if syntax.array_names.contains(&base) {
+        TypeExpr::Array(argument(0))
+    } else if syntax.hash_names.contains(&base) {
+        TypeExpr::Hash {
+            key: argument(0),
+            value: argument(1),
         }
-        "Map" | "HashMap" | "LinkedHashMap" | "Dictionary" | "unordered_map" | "map" => {
-            TypeExpr::Hash {
-                key: Box::new(arguments.first().map(|value| parse(value)).unwrap_or(TypeExpr::Untyped)),
-                value: Box::new(arguments.get(1).map(|value| parse(value)).unwrap_or(TypeExpr::Untyped)),
-            }
-        }
-        "Set" | "HashSet" | "TreeSet" | "unordered_set" | "set" => {
-            TypeExpr::Set(Box::new(arguments.first().map(|value| parse(value)).unwrap_or(TypeExpr::Untyped)))
-        }
-        _ => primitive(source),
+    } else if syntax.set_names.contains(&base) {
+        TypeExpr::Set(argument(0))
+    } else {
+        TypeExpr::Primitive(source.to_string())
     }
 }
 
-fn primitive(source: &str) -> TypeExpr {
-    let short = source.rsplit("::").next().unwrap_or(source).rsplit('.').next().unwrap_or(source);
-    match short {
-        "String" | "string" | "basic_string" => TypeExpr::Primitive("String".to_string()),
-        _ => TypeExpr::Primitive(source.to_string()),
+fn strip_decorators<'a>(source: &'a str, syntax: &NominalTypeSyntax) -> &'a str {
+    let mut source = source.trim();
+    for prefix in syntax.strip_prefixes {
+        if let Some(rest) = source.strip_prefix(prefix) {
+            source = rest.trim_start();
+        }
     }
+    source
+        .trim_start_matches(|ch| syntax.trim_prefix_chars.contains(&ch))
+        .trim_end_matches(|ch| syntax.trim_suffix_chars.contains(&ch))
+        .trim()
+}
+
+fn primitive(source: &str, syntax: &NominalTypeSyntax) -> TypeExpr {
+    let short = short_name(source);
+    if syntax.string_names.contains(&short) {
+        TypeExpr::Primitive("String".to_string())
+    } else if syntax.bare_array_names.contains(&short) {
+        TypeExpr::Array(Box::new(TypeExpr::Untyped))
+    } else {
+        TypeExpr::Primitive(source.to_string())
+    }
+}
+
+fn short_name(source: &str) -> &str {
+    source
+        .rsplit("::")
+        .next()
+        .unwrap_or(source)
+        .rsplit('.')
+        .next()
+        .unwrap_or(source)
 }
 
 fn generic_parts(source: &str) -> Option<(&str, &str)> {
     let open = source.find('<')?;
     let close = source.rfind('>')?;
-    (close > open).then_some((&source[..open], &source[(open + 1)..close]))
+    // `Option::then_some` evaluates its argument eagerly. Guard before slicing
+    // so malformed external source can become an unknown nominal type instead
+    // of crashing Fact-Mine.
+    if close > open {
+        Some((&source[..open], &source[(open + 1)..close]))
+    } else {
+        None
+    }
 }
 
 fn split_top_level(source: &str) -> Vec<&str> {
@@ -77,12 +128,32 @@ fn split_top_level(source: &str) -> Vec<&str> {
 mod tests {
     use super::*;
 
+    const TEST_SYNTAX: NominalTypeSyntax = NominalTypeSyntax {
+        strip_prefixes: &["qual "],
+        trim_prefix_chars: &[],
+        trim_suffix_chars: &[],
+        array_names: &["Dense"],
+        hash_names: &["Table"],
+        set_names: &["Unique"],
+        string_names: &["Text"],
+        bare_array_names: &["sequence"],
+        suffix_array: true,
+        bracket_array: true,
+    };
+
     #[test]
-    fn parses_common_nominal_collection_shapes_without_guessing_custom_types() {
-        assert!(matches!(parse("List<String>"), TypeExpr::Array(_)));
-        assert!(matches!(parse("Dictionary<String, List<int>>"), TypeExpr::Hash { .. }));
-        assert!(matches!(parse("std::unordered_set<int>"), TypeExpr::Set(_)));
-        assert!(matches!(parse("const std::vector<int> &"), TypeExpr::Array(_)));
-        assert_eq!(parse("Widget"), TypeExpr::Primitive("Widget".to_string()));
+    fn parses_adapter_supplied_normalized_families_only() {
+        assert!(matches!(parse("Dense<Text>", &TEST_SYNTAX), TypeExpr::Array(_)));
+        assert!(matches!(parse("Table<Text, Dense<int>>", &TEST_SYNTAX), TypeExpr::Hash { .. }));
+        assert!(matches!(parse("Unique<int>", &TEST_SYNTAX), TypeExpr::Set(_)));
+        assert!(matches!(parse("[Text]", &TEST_SYNTAX), TypeExpr::Array(_)));
+        assert!(matches!(parse("sequence", &TEST_SYNTAX), TypeExpr::Array(_)));
+        assert_eq!(parse("Widget", &TEST_SYNTAX), TypeExpr::Primitive("Widget".to_string()));
+    }
+
+    #[test]
+    fn malformed_generic_order_is_not_sliced_or_guessed() {
+        let source = "value > other < \u{00e9}";
+        assert_eq!(parse(source, &TEST_SYNTAX), TypeExpr::Primitive(source.to_string()));
     }
 }
