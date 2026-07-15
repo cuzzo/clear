@@ -679,7 +679,13 @@ module CleanupClassifier
     each_capture_binding(body) do |name, expr, anchor_node|
       next unless AST.capture_expr_owns_result?(expr)
       expr_ti = Type.from_node!(expr, context: "capture binding")
-      inner_ti = expr_ti.wrapped_type
+      inner_ti = if expr_ti.stream_step?
+        expr_ti.stream_step_item_type
+      elsif expr_ti.error_union?
+        expr_ti.success_type
+      else
+        expr_ti.wrapped_type
+      end
       next unless inner_ti
       classification_node = anchor_node.is_a?(AST::Binding) ? anchor_node.expr : anchor_node
       e = classify_binding(inner_ti, classification_node, schema_lookup)
@@ -705,6 +711,10 @@ module CleanupClassifier
   sig { params(expr: AST::Node, schema_lookup: Proc).returns(T.nilable(Symbol)) }
   private_class_method def self.capture_expr_owned_alloc(expr, schema_lookup)
     case expr
+    when AST::NextExpr
+      # NEXT transfers an awaited value (or a popped stream item) into the
+      # receiving binding. Async results are materialized in heap storage.
+      :heap
     when AST::ResolveNode
       :heap
     when AST::FuncCall

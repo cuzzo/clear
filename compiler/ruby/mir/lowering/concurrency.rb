@@ -1047,7 +1047,12 @@ module MIRLoweringConcurrency
     expected_t = Type.from_node(function_state.current_expected_type)
     tense_t = bg_stream_expected_type?(expected_t) ? T.must(expected_t) : Type.new(node.full_type!)
     is_inf = tense_t.inf_stream?
-    stream_zig = tense_t.zig_type
+    stream_zig = if tense_t.dynamic_stream?
+      element_t = T.must(tense_t.tense_type.element_type)
+      "CheatLib.Stream(#{element_t.zig_type})"
+    else
+      tense_t.zig_type
+    end
 
     ctx_type = "__SgCtx#{id}"
     alloc_var = "__sg#{id}_alloc"

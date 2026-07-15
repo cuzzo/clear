@@ -42,9 +42,9 @@ FN main() RETURNS Void ->
     }
 
     # -------------------------------------------------------
-    # Test 4: ~T[INF] | CONCURRENT SELECT (finite self-closing generator)
+    # Test 4: [~]T | CONCURRENT SELECT (finite self-closing generator)
     # -------------------------------------------------------
-    gen4: ~Int64[INF] = BG STREAM {
+    gen4: [~]Int64 = BG STREAM {
         YIELD 10;
         YIELD 20;
         YIELD 30;
@@ -56,9 +56,9 @@ FN main() RETURNS Void ->
     ASSERT sum4 == 63, "concurrent inf stream SELECT: 11+21+31=63";
 
     # -------------------------------------------------------
-    # Test 5: ~T[INF] | CONCURRENT WHERE (finite self-closing generator)
+    # Test 5: [~]T | CONCURRENT WHERE (finite self-closing generator)
     # -------------------------------------------------------
-    gen5: ~Int64[INF] = BG STREAM {
+    gen5: [~]Int64 = BG STREAM {
         MUTABLE i5: Int64 = 1;
         WHILE i5 <= 8 DO
             YIELD i5;

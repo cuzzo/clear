@@ -1079,19 +1079,11 @@ pub fn bind(comptime deps: type) type {
             /// Safe to call after reading all items (next() returned null) or mid-stream.
             pub fn deinit(self: *Self) void {
                 const inner = self.inner;
-                // Signal producer to stop (mirrors InfStream.deinit drain for strings).
+                // Signal the producer to stop before waiting for its final push
+                // attempt. Any item still buffered after the producer exits is
+                // owned by the stream and must be recursively cleaned.
                 while (inner.lock.swap(1, .acquire) == 1) std.Thread.yield() catch {};
                 inner.closed.store(true, .release);
-                if (comptime (T == []const u8 or T == []u8)) {
-                    const h = inner.head.load(.acquire);
-                    const t = inner.tail.load(.acquire);
-                    var i: u32 = t;
-                    while (i != h) : (i +%= 1) {
-                        const item = inner.buf[i & MASK];
-                        if (item.len > 0) self.alloc.free(item);
-                    }
-                    inner.tail.store(h, .release);
-                }
                 if (inner.producer_task) |producer| {
                     const producer_sched = inner.producer_sched orelse inner.sched;
                     inner.producer_task = null;
@@ -1104,6 +1096,15 @@ pub fn bind(comptime deps: type) type {
                 // Wait for the generator fiber to call close() (wg.done()).
                 // Guarantees Inner is not accessed by the generator after destroy.
                 inner.wg.wait();
+                if (comptime needsCleanup(T)) {
+                    const h = inner.head.load(.acquire);
+                    const t = inner.tail.load(.acquire);
+                    var i: u32 = t;
+                    while (i != h) : (i +%= 1) {
+                        cleanup(T, self.alloc, &inner.buf[i & MASK]);
+                    }
+                    inner.tail.store(h, .release);
+                }
                 self.alloc.destroy(inner);
             }
         };

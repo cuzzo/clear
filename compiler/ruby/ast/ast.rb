@@ -528,7 +528,7 @@ module AST
       return false if signature&.respond_to?(:return_lifetime) && !signature.return_lifetime.empty?
     end
 
-    call?(node) || node.is_a?(AST::ResolveNode) ||
+    call?(node) || node.is_a?(AST::NextExpr) || node.is_a?(AST::ResolveNode) ||
       node.is_a?(AST::CopyNode) || node.is_a?(AST::CloneNode) ||
       node.is_a?(AST::MoveNode) || node.is_a?(AST::ShareNode)
   end

@@ -200,7 +200,7 @@ module MIRLoweringControlFlow
       end
       if (capture_cleanup = bind_capture_cleanup(b.expr))
         capture_name = b.name.to_s
-        capture_type = Type.from_node!(b.expr)
+        capture_type = capture_expr_payload_type(b.expr)
         capture_markers << MIR::AllocMark.new(capture_name, :heap, capture_type, :function)
         capture_markers << MIR::Cleanup.new(capture_name, capture_cleanup)
       end
@@ -283,6 +283,18 @@ module MIRLoweringControlFlow
     capability_state.if_bind_pointer_aliases = T.must(prev_pointer_aliases)
   end
 
+  sig { params(expr: AST::Node).returns(Type) }
+  def capture_expr_payload_type(expr)
+    ti = Type.from_node!(expr)
+    if ti.stream_step?
+      T.must(ti.stream_step_item_type)
+    elsif ti.error_union?
+      ti.success_type
+    else
+      ti.wrapped_type || ti
+    end
+  end
+
   sig { params(expr: AST::Node).returns(T.nilable(CleanupEntry)) }
   def bind_capture_cleanup(expr)
     # Variable, field, and index optional access borrows from an existing
@@ -290,11 +302,12 @@ module MIRLoweringControlFlow
     # successful payload whose capture must be released at block exit.
     return nil unless AST.capture_expr_owns_result?(expr)
 
-    ti = Type.from_node!(expr)
-    ti = ti.success_type || ti
-    return nil unless ti.any_rc? || (ti.optional? && ti.wrapped_type&.any_rc?)
+    capture_type = capture_expr_payload_type(expr)
+    schema_lookup = T.unsafe(self).mir_schema_lookup
+    return nil unless capture_type.needs_explicit_cleanup?(:heap, schema_lookup)
 
-    CleanupEntry.build(:rc, alloc: :heap, has_moved_guard: false)
+    kind = capture_type.any_rc? ? :rc : :uniform
+    CleanupEntry.build(kind, alloc: :heap, has_moved_guard: false)
   end
 
   # Single-source frame-arena marker injection for every loop shape
@@ -375,7 +388,7 @@ module MIRLoweringControlFlow
     body = lower_body(node.do_branch)
     if (capture_cleanup = bind_capture_cleanup(node.condition))
       capture_name = node.binding_name.to_s
-      capture_type = Type.from_node!(node.condition)
+      capture_type = capture_expr_payload_type(node.condition)
       unless body.any? { |stmt| stmt.is_a?(MIR::AllocMark) && stmt.name.to_s == capture_name }
         body = [
           MIR::AllocMark.new(capture_name, :heap, capture_type, :iteration),

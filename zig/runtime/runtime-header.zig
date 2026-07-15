@@ -3624,13 +3624,18 @@ pub const CheatLib = struct {
         // 2. ArrayList (list collections)
         if (comptime isArrayList(T)) {
             const ElemT = comptime arrayListElemType(T).?;
+            // ArrayList.deinit overwrites its receiver. The compiler may place
+            // an immutable empty list nested in a Tuple/struct in read-only
+            // storage, so drop a shallow copy while retaining ownership of the
+            // same backing allocation.
+            var list = ptr.*;
             // Recursively cleanup elements (RC release, string free, nested unions, etc.)
             if (comptime needsCleanup(ElemT)) {
-                for (ptr.items) |*item| {
+                for (list.items) |*item| {
                     cleanup(ElemT, alloc, item);
                 }
             }
-            ptr.deinit(alloc);
+            list.deinit(alloc);
             return;
         }
 

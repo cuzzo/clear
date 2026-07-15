@@ -361,6 +361,29 @@ test "StreamStep keeps optional items distinct from completion" {
     }
 }
 
+test "Stream deinit recursively cleans unconsumed owned items" {
+    const allocator = std.testing.allocator;
+    const Payload = struct { bytes: []u8 };
+
+    var global_ctx = ebr.EbrContext{};
+    defer global_ctx.deinit(allocator);
+    var stack_pool = fm.StackPool.init(allocator);
+    defer stack_pool.deinit();
+    var sched = try fp.Scheduler.init(allocator, &global_ctx, &stack_pool);
+    defer sched.deinit();
+
+    var stream = try CheatLib.Stream(Payload).spawnNew(allocator, &sched);
+    try stream.push(.{ .bytes = try allocator.dupe(u8, "buffered") });
+    stream.close();
+    stream.deinit();
+}
+
+test "cleanup does not write through immutable aggregate storage" {
+    const Aggregate = struct { std.ArrayListUnmanaged(i64), bool };
+    const value: Aggregate = .{ .empty, true };
+    CheatLib.cleanup(@TypeOf(value), std.testing.allocator, &value);
+}
+
 test {
     _ = @import("../runtime/bounded-stream-test.zig");
     _ = @import("../runtime/inf-stream-test.zig");

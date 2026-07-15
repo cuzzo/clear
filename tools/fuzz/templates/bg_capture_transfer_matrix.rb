@@ -171,10 +171,14 @@ FuzzGenerator.register(:bg_capture_transfer_matrix, cells: BG_CAPTURE_TRANSFER_C
       #{prelude}#{helper}
       FN main() RETURNS Void ->
           #{bct_decl(p[:shape])}
-          s: ~Int64[INF] = BG STREAM {
+          s: [~]Int64 = BG STREAM {
               YIELD #{body_expr};
           };
-          ASSERT (NEXT s) == 3_i64, "bg stream capture transfer";
+          IF NEXT s EXISTS AS value THEN
+              ASSERT value == 3_i64, "bg stream capture transfer";
+          ELSE
+              ASSERT FALSE, "bg stream closed before capture transfer";
+          END
           RETURN;
       END
     CHT

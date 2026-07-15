@@ -24,52 +24,63 @@ CROSS_FIBER_CELLS = []
 end
 
 FuzzGenerator.register(:cross_fiber_consumer, cells: CROSS_FIBER_CELLS) do |p|
-  producer, target, ty, assert = case p[:producer]
+  producer, target, ty, assert, finite_stream = case p[:producer]
   when :bg_stream_int
     [
-      "gen: ~Int64[INF] = BG STREAM {\n        MUTABLE k: Int64 = 0_i64;\n        WHILE k < 3_i64 DO YIELD k; k = k + 1_i64; END\n    };",
+      "gen: [~]Int64 = BG STREAM {\n        MUTABLE k: Int64 = 0_i64;\n        WHILE k < 3_i64 DO YIELD k; k = k + 1_i64; END\n    };",
       "gen", "Int64",
-      'final >= 0_i64',
+      'final >= 0_i64', true,
     ]
   when :bg_stream_string
     [
-      "gen: ~String[INF] = BG STREAM {\n        MUTABLE k: Int64 = 0_i64;\n        WHILE k < 3_i64 DO YIELD k.toString(); k = k + 1_i64; END\n    };",
+      "gen: [~]String = BG STREAM {\n        MUTABLE k: Int64 = 0_i64;\n        WHILE k < 3_i64 DO YIELD k.toString(); k = k + 1_i64; END\n    };",
       "gen", "String",
-      'final.length() > 0_i64',
+      'final.length() > 0_i64', true,
     ]
   when :bg_stream_list
     [
-      "STRUCT PayloadList { items: Int64[]@list }\n\n    gen: ~PayloadList[INF] = BG STREAM {\n        MUTABLE k: Int64 = 0_i64;\n        WHILE k < 3_i64 DO MUTABLE xs: Int64[]@list = []; xs.append(k); YIELD PayloadList{ items: xs }; k = k + 1_i64; END\n    };",
+      "STRUCT PayloadList { items: Int64[]@list }\n\n    gen: [~]PayloadList = BG STREAM {\n        MUTABLE k: Int64 = 0_i64;\n        WHILE k < 3_i64 DO MUTABLE xs: Int64[]@list = []; xs.append(k); YIELD PayloadList{ items: xs }; k = k + 1_i64; END\n    };",
       "gen", "PayloadList",
-      'final.items.length() == 1_i64',
+      'final.items.length() == 1_i64', true,
     ]
   when :bg_stream_struct
     [
-      "STRUCT Payload { value: String }\n\n    gen: ~Payload[INF] = BG STREAM {\n        MUTABLE k: Int64 = 0_i64;\n        WHILE k < 3_i64 DO YIELD Payload{ value: k.toString() }; k = k + 1_i64; END\n    };",
+      "STRUCT Payload { value: String }\n\n    gen: [~]Payload = BG STREAM {\n        MUTABLE k: Int64 = 0_i64;\n        WHILE k < 3_i64 DO YIELD Payload{ value: k.toString() }; k = k + 1_i64; END\n    };",
       "gen", "Payload",
-      'final.value.length() > 0_i64',
+      'final.value.length() > 0_i64', true,
     ]
   when :observable_find
     [
       "gen: ~?String[] = BG STREAM {\n        MUTABLE k: Int64 = 0_i64;\n        WHILE k < 3_i64 DO YIELD k.toString(); k = k + 1_i64; END\n    };\n    matched: ~?String@observable = gen |> FIND _.contains?(\"1\");",
       "matched", "?String",
-      'final != NIL',
+      'final != NIL', false,
     ]
   when :observable_reduce_int
     [
       "gen: ~?Int64[] = BG STREAM {\n        MUTABLE k: Int64 = 0_i64;\n        WHILE k < 3_i64 DO YIELD k; k = k + 1_i64; END\n    };\n    acc: ~Int64@observable = gen |> SUM _;",
       "acc", "Int64",
-      'final >= 0_i64',
+      'final >= 0_i64', false,
     ]
   when :observable_distinct_string
     [
       "gen: ~?String[] = BG STREAM {\n        MUTABLE k: Int64 = 0_i64;\n        WHILE k < 3_i64 DO YIELD k.toString(); k = k + 1_i64; END\n    };\n    distinct: ~String[]@set:observable = gen |> DISTINCT _;",
       "distinct", "String[]@set",
-      'final.length() >= 0_i64',
+      'final.length() >= 0_i64', false,
     ]
   end
 
-  consume = "#{producer}\n    final: #{ty} = NEXT #{target};\n    ASSERT #{assert}, \"cross-fiber consumer\";"
+  next_and_assert = if finite_stream
+    <<~CHT.chomp
+      IF NEXT #{target} EXISTS AS final THEN
+          ASSERT #{assert}, "cross-fiber consumer";
+      ELSE
+          ASSERT FALSE, "finite stream closed before cross-fiber consumer";
+      END
+    CHT
+  else
+    "final: #{ty} = NEXT #{target};\nASSERT #{assert}, \"cross-fiber consumer\";"
+  end
+  consume = "#{producer}\n    #{next_and_assert.lines.join("    ")}"
 
   if p[:consumer_ctx] == :in_frame_loop
     inner = consume.lines.map { |l| "        #{l}" }.join
