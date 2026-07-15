@@ -117,6 +117,9 @@ class Lexer
     ).void
   end
   def initialize(source, interpolation_depth: 0, file: nil, start_line: 1, start_column: 1, start_offset: 0, budget: nil)
+    source = source.dup.force_encoding(Encoding::UTF_8)
+    raise Error, "Lexer Error: source is not valid UTF-8" unless source.valid_encoding?
+
     @s = T.let(StringScanner.new(source), StringScanner)
     @line = T.let(start_line, Integer)
     @column = T.let(start_column, Integer)
