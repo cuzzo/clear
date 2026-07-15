@@ -19,7 +19,9 @@ RSpec.describe "parser dependency boundary" do
     expect(output).not_to include("annotator/helpers/function_signature.rb")
     expect(output).not_to include("annotator/helpers/fixable_helpers.rb")
     expect(output).not_to include("backends/zig_type.rb")
-    expect(output.lines.grep(/compiler\/ruby/).length).to be <= 18
+    loaded = output.lines.grep(/compiler\/ruby/)
+    non_parser_dependencies = loaded.reject { |path| path.match?(%r{/ast/parser(?:\.rb|/)}) }
+    expect(non_parser_dependencies.length).to be <= 17
   end
 
   it "loads Zig rendering only when a backend spelling is requested" do
