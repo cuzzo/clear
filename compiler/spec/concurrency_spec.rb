@@ -1797,7 +1797,7 @@ RSpec.describe SemanticAnnotator do
         STRUCT Entity { health: Int64 }
         FN f() RETURNS !Void ->
           p: ~Int64 = BG {
-            MUTABLE pool: Entity[8]@pool = [];
+            MUTABLE pool: [Pool(8)]Entity = [];
             pool.insert(Entity{ health: 10_i64 });
             sleep(1_i64);
             1_i64;

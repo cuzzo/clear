@@ -12,7 +12,7 @@ UNION Value {
 }
 
 STRUCT Env {
-    vars: HashMap<Value>
+    vars: {String}Value
 }
 
 FN forceTco!(f: Value) RETURNS !Value ->
@@ -36,13 +36,13 @@ END
 
 FN main() RETURNS Void ->
     bodyText = "lambda-" $+ "body";
-    MUTABLE params: Value[]@list = [];
+    MUTABLE params: []Value = [];
     params.append(Value{ Symbol: COPY "x" });
-    MUTABLE bodyItems: Value[]@list = [];
+    MUTABLE bodyItems: []Value = [];
     bodyItems.append(Value{ Symbol: COPY "identity" });
     bodyItems.append(Value{ Str: COPY bodyText });
 
-    MUTABLE pool: Env[8]@pool = [];
+    MUTABLE pool: [Pool(8)]Env = [];
     envId: Id<Env> = pool.insert(Env{ vars: {} });
     IF pool[envId] EXISTS AS env THEN
         env.vars["f"] = Value.Lambda{ params: COPY params, body: Value{ List: bodyItems } };

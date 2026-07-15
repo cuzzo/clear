@@ -6,7 +6,7 @@
 STRUCT Entry { id: Int64, name: String }
 
 FN main() RETURNS Void ->
-    MUTABLE entries: Entry[]@list = [];
+    MUTABLE entries: []Entry = [];
     FOR i IN (1_i64 ..= 4) DO
         entries.append(Entry{ id: i, name: "item-" $+ i.toString() });
     END

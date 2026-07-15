@@ -2376,6 +2376,7 @@ class ClearParser
     return true if match?(:KEYWORD, 'SHARED')
     return true if match?(:KEYWORD, 'Auto')
     return true if match?(:CHAR, '~') || match?(:CHAR, '!') || match?(:CHAR, '?')
+    return true if match?(:CHAR, '[') || match?(:CHAR, '{')
     return false unless match?(:TYPE_ID)
 
     nxt = peek_at(1)
@@ -3518,6 +3519,9 @@ class ClearParser
   def emit_legacy_type_migration(start_token, end_token, type)
     return unless FixCollector.type_migrations_enabled?
     return unless start_token.line == end_token.line
+    return unless TypeExpressionTree.each_node(type.shape.expression).any? do |node|
+      node.is_a?(LinearTypeExpression) || node.is_a?(MapTypeExpression) || node.is_a?(StreamTypeExpression)
+    end
 
     replacement = Type.inline_migration_name(type)
     return if replacement.nil?
@@ -3537,7 +3541,7 @@ class ClearParser
       level: :info,
       message: "Legacy type syntax can be written in Inline Pivot form",
       token: start_token,
-      category: :type,
+      category: :type_migration,
       fixes: [Fix.new(description: fix_description(:REWRITE_INLINE_PIVOT_TYPE, type: replacement), confidence: :auto, edits: [edit])]
     ))
   end

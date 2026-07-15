@@ -30,7 +30,7 @@ END
 
 FN generateJson(id: Int64) RETURNS !String ->
   sz = sizeForId(id);
-  MUTABLE parts: String[]@list = [];
+  MUTABLE parts: []String = [];
   FOR i IN (1 ..= sz) -> parts.append(i.toString());
   RETURN "{\"id\":${id.toString()},\"data\":[${join(parts, ",")}]}";
 END
@@ -102,7 +102,7 @@ FN main() RETURNS Void ->
 
   # Cache pins BG fibers to the main scheduler, preventing fiber stealing
   # which corrupts epoll fd registration.
-  MUTABLE cache: HashMap<Int64> @sharded(32):locked = {};
+  MUTABLE cache: {String}@sharded(32):locked Int64 = {};
 
   MUTABLE tasks: ~Void[]@list = [];
   WHILE TRUE DO

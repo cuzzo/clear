@@ -12,12 +12,12 @@ FN sumFirstThree(values: Int64[]) RETURNS Int64 ->
 END
 
 FN main() RETURNS Void ->
-    fixed: Int64[5] = [1_i64, 2_i64, 3_i64, 4_i64, 5_i64];
+    fixed: [5]Int64 = [1_i64, 2_i64, 3_i64, 4_i64, 5_i64];
     total = sumFirstThree(fixed);
     ASSERT total == 6_i64, "fixed array passed to slice-typed param";
 
     # Also exercise via @list slice -- both shapes should call cleanly.
-    MUTABLE list: Int64[]@list = List[];
+    MUTABLE list: []Int64 = List[];
     list.append(10_i64);
     list.append(20_i64);
     list.append(30_i64);

@@ -910,6 +910,27 @@ RSpec.describe "Gradual typing — STRICT-imports boundary (M1.5)" do
     end
   end
 
+  it "clears cycle-detection state after a failed import so the file can be retried" do
+    import("", "helper.clear" => <<~HELPER) do |compiler, dir|
+      PUB FN identity(x: Int64) RETURNS Auto ->
+        RETURN x;
+      END
+    HELPER
+      expect {
+        compiler.compile_file("helper.clear", caller_dir: dir)
+      }.to raise_error(CompilerError, /public signature/)
+
+      File.write(File.join(dir, "helper.clear"), <<~CLEAR)
+        PUB FN identity(x: Int64) RETURNS Int64 ->
+          RETURN x;
+        END
+      CLEAR
+      expect {
+        compiler.compile_file("helper.clear", caller_dir: dir)
+      }.not_to raise_error
+    end
+  end
+
   it "rejects an imported package-visible function (default visibility)" do
     # Default visibility is `:package`, which is importable from
     # same-directory modules. Auto must be rejected for these too.

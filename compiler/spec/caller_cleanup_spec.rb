@@ -22,7 +22,7 @@ RSpec.describe CleanupClassifier do
     let(:zig) do
       transpile(<<~CLEAR)
         FN makeList() RETURNS !Int64[] ->
-            MUTABLE items: Int64[]@list = List[];
+            MUTABLE items: []Int64 = List[];
             items.append(1_i64);
             RETURN items;
         END
@@ -77,7 +77,7 @@ RSpec.describe CleanupClassifier do
     let(:zig) do
       transpile(<<~CLEAR)
         FN makeList() RETURNS !Int64[] ->
-            MUTABLE items: Int64[]@list = List[];
+            MUTABLE items: []Int64 = List[];
             items.append(1_i64);
             RETURN items;
         END

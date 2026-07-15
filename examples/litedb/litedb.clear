@@ -9,8 +9,8 @@ ENUM Op {
 }
 
 STRUCT Node {
-  keys: Int64[]@list,
-  vals: String[]@list,
+  keys: []Int64,
+  vals: []String,
   numChildren: Int64,
   isLeaf: Bool
 }
@@ -20,12 +20,12 @@ STRUCT TreeStats {
   searchCount: Int64
 }
 STRUCT ResultSet {
-  keys: Int64[]@list,
+  keys: []Int64,
   count: Int64
 }
 
 FN makeResultSet(count: Int64) RETURNS !ResultSet@multiowned ->
-  MUTABLE ks: Int64[]@list = [];
+  MUTABLE ks: []Int64 = [];
   MUTABLE i = 0;
   WHILE i < count DO
     ks.append((i + 1) * 10);
@@ -38,7 +38,7 @@ FN childKey(parentIdx: Int64, pos: Int64) RETURNS !String ->
   RETURN "${parentIdx.toString()}:${pos.toString()}";
 END
 
-FN findKeyIndex(keys: Int64[]@list, key: Int64) RETURNS Int64 ->
+FN findKeyIndex(keys: []Int64, key: Int64) RETURNS Int64 ->
   MUTABLE i = 0;
   WHILE i < keys.length() DO
     IF keys[i] EXISTS AS candidate THEN
@@ -49,7 +49,7 @@ FN findKeyIndex(keys: Int64[]@list, key: Int64) RETURNS Int64 ->
   RETURN i;
 END
 
-FN scanWithFilter(keys: Int64[]@list, filter: FN (Int64) -> Bool) RETURNS !Int64 ->
+FN scanWithFilter(keys: []Int64, filter: FN (Int64) -> Bool) RETURNS !Int64 ->
   MUTABLE count = 0;
   MUTABLE i = 0;
   WHILE i < keys.length() DO
@@ -62,24 +62,24 @@ FN scanWithFilter(keys: Int64[]@list, filter: FN (Int64) -> Bool) RETURNS !Int64
 END
 
 FN main() RETURNS !Void ->
-  MUTABLE nodes: Node[]@list = [];
-  MUTABLE children: HashMap<Int64> = {};
+  MUTABLE nodes: []Node = [];
+  MUTABLE children: {String}Int64 = {};
 
   # Build B-tree: root(30) -> left(10,20), right(40)
-  MUTABLE lk0: Int64[]@list = [];
-  MUTABLE lv0: String[]@list = [];
+  MUTABLE lk0: []Int64 = [];
+  MUTABLE lv0: []String = [];
   lk0.append(10);
   lk0.append(20);
   lv0.append("10");
   lv0.append("20");
   nodes.append(Node{ keys: lk0, vals: lv0, numChildren: 0, isLeaf: TRUE });
-  MUTABLE rk0: Int64[]@list = [];
-  MUTABLE rv0: String[]@list = [];
+  MUTABLE rk0: []Int64 = [];
+  MUTABLE rv0: []String = [];
   rk0.append(40);
   rv0.append("40");
   nodes.append(Node{ keys: rk0, vals: rv0, numChildren: 0, isLeaf: TRUE });
-  MUTABLE rootK: Int64[]@list = [];
-  MUTABLE rootV: String[]@list = [];
+  MUTABLE rootK: []Int64 = [];
+  MUTABLE rootV: []String = [];
   rootK.append(30);
   rootV.append("30");
   nodes.append(Node{ keys: rootK, vals: rootV, numChildren: 2, isLeaf: FALSE });
@@ -113,7 +113,7 @@ FN main() RETURNS !Void ->
   ASSERT (leafNode.keys[1] OR_ELSE 0_i64) == 20, "tree search: key 20";
 
   # Collect all keys for pipeline queries
-  MUTABLE allKeys: Int64[]@list = [];
+  MUTABLE allKeys: []Int64 = [];
   allKeys.append(10);
   allKeys.append(20);
   allKeys.append(40);

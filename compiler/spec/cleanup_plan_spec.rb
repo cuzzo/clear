@@ -190,7 +190,7 @@ RSpec.describe CleanupClassifier do
         FN main() RETURNS Void ->
           MUTABLE i = 0_i64;
           WHILE i < 1_i64 DO
-            MUTABLE vals: Int64[]@list = List[];
+            MUTABLE vals: []Int64 = List[];
             i = i + 1_i64;
           END
           RETURN;
@@ -371,9 +371,9 @@ RSpec.describe CleanupClassifier do
     it "marks moved source guards through the public plan entrypoint" do
       plan = cleanup_plan_for(<<~CLEAR, "main")
         STRUCT Pt { x: Float64, y: Float64 }
-        FN consume(TAKES p: Pt[10]@pool) RETURNS Void -> RETURN; END
+        FN consume(TAKES p: [Pool(10)]Pt) RETURNS Void -> RETURN; END
         FN main() RETURNS Void ->
-          MUTABLE pool: Pt[10]@pool = [];
+          MUTABLE pool: [Pool(10)]Pt = [];
           consume(GIVE pool);
           RETURN;
         END
@@ -393,7 +393,7 @@ RSpec.describe CleanupClassifier do
       let(:plan) do
         cleanup_for(<<~CLEAR, "test!")
           UNION Value { Nil, Str: String }
-          FN test!(MUTABLE map: HashMap<Value>) RETURNS !String ->
+          FN test!(MUTABLE map: {String}Value) RETURNS !String ->
               val = map["t0"] OR_ELSE Value.Nil;
               PARTIAL MATCH val START
                   Value.Str AS s -> RETURN s;,
@@ -1006,7 +1006,7 @@ RSpec.describe CleanupClassifier do
       let(:plan) do
         cleanup_for(<<~CLEAR, "main")
           FN main() RETURNS Void ->
-              MUTABLE vals: Int64[]@list = List[];
+              MUTABLE vals: []Int64 = List[];
               vals.append(1_i64);
               RETURN;
           END
@@ -1024,7 +1024,7 @@ RSpec.describe CleanupClassifier do
       let(:plan) do
         cleanup_for(<<~CLEAR, "main")
           FN main() RETURNS Void ->
-              MUTABLE m: HashMap<Int64> = {};
+              MUTABLE m: {String}Int64 = {};
               m["x"] = 1_i64;
               RETURN;
           END
@@ -1048,7 +1048,7 @@ RSpec.describe CleanupClassifier do
       let(:plan) do
         cleanup_for(<<~CLEAR, "main")
           FN makeList() RETURNS !Int64[] ->
-              MUTABLE items: Int64[]@list = List[];
+              MUTABLE items: []Int64 = List[];
               items.append(1_i64);
               RETURN items;
           END
@@ -1071,7 +1071,7 @@ RSpec.describe CleanupClassifier do
       let(:plan) do
         cleanup_for(<<~CLEAR, "main")
           FN makeList() RETURNS !Int64[] ->
-              MUTABLE items: Int64[]@list = List[];
+              MUTABLE items: []Int64 = List[];
               items.append(1_i64);
               RETURN items;
           END
@@ -1096,7 +1096,7 @@ RSpec.describe CleanupClassifier do
         cleanup_for(<<~CLEAR, "main")
           UNION Value { Num: Float64, Items: Int64[] }
           FN makeValue() RETURNS !Value ->
-              MUTABLE items: Int64[]@list = List[];
+              MUTABLE items: []Int64 = List[];
               items.append(1_i64);
               RETURN Value{ Items: items };
           END
@@ -1209,7 +1209,7 @@ RSpec.describe CleanupClassifier do
         cleanup_for(<<~CLEAR, "main")
           STRUCT Pt { x: Float64, y: Float64 }
           FN main() RETURNS Void ->
-              MUTABLE pool: Pt[10]@pool = [];
+              MUTABLE pool: [Pool(10)]Pt = [];
               RETURN;
           END
         CLEAR

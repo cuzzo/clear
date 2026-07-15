@@ -38,7 +38,7 @@ STRUCT TraceItem {
     ip: Int64,
 }
 
-FN record!(MUTABLE items: TraceItem[]@list, step: Int64) RETURNS !Void ->
+FN record!(MUTABLE items: []TraceItem, step: Int64) RETURNS !Void ->
     items.append(TraceItem{
         step: step, kind: 1_i64, slot: 0_i64,
         iBefore: 0_i64, iAfter: step,
@@ -55,7 +55,7 @@ FN burnFrame!(value: Int64) RETURNS !String ->
 END
 
 FN main!() RETURNS !Void ->
-    MUTABLE items: TraceItem[]@list = List[];
+    MUTABLE items: []TraceItem = List[];
     record!(items, 1_i64);
     junk1 = burnFrame!(42_i64);
     junk2 = burnFrame!(43_i64);

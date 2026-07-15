@@ -28,7 +28,7 @@
 # post-spawn-mutation assertion.)
 
 FN main() RETURNS Void ->
-    items: Int64[]@list = [];
+    items: []Int64 = [];
     items.append(10_i64);
     items.append(20_i64);
     items.append(30_i64);

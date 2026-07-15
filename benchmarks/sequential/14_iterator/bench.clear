@@ -57,7 +57,7 @@ FN main() RETURNS Void ->
   iters = 1000;
 
   # Build data array
-  MUTABLE data: Int64[10_000]@list = [];
+  MUTABLE data: []Int64 = [];
   TIGHT FOR i IN (0 ..< n) -> data.append(i %* 7 %+ 13);
 
   # Warm up

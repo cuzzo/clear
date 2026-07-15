@@ -21,7 +21,7 @@ FN sumAll(items: Int64[]) RETURNS Int64 ->
 END
 
 FN main() RETURNS Void ->
-    items: Int64[]@list = [];
+    items: []Int64 = [];
     items.append(1_i64);
     items.append(2_i64);
     items.append(3_i64);

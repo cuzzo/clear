@@ -12,7 +12,7 @@ STRUCT Account {
   balance: Int64
 }
 STRUCT Bank {
-  accounts: Account@shared:locked[]@list
+  accounts: []Account@shared:locked
 }
 
 FN main() RETURNS Void ->
@@ -23,7 +23,7 @@ FN main() RETURNS Void ->
   numAccounts = 64;
   opsPerWorker = 500_000;
 
-  MUTABLE accts: Account@shared:locked[]@list = [];
+  MUTABLE accts: []Account@shared:locked = [];
   FOR i IN (0 ..< numAccounts) DO
     accts.append(Account{ balance: 1000 } @shared:locked);
   END
@@ -88,7 +88,7 @@ FN main() RETURNS Void ->
   # already joined so no symmetric caller exists, but the lint can't
   # prove that. The snapshot pattern sidesteps the warning while
   # preserving the read-then-per-element-lock semantics.)
-  acct_refs: Account@shared:locked[]@list = [];
+  acct_refs: []Account@shared:locked = [];
   WITH bank AS bk {
     FOR i IN (0 ..< numAccounts) DO
       IF bk.accounts[i] EXISTS AS account THEN acct_refs.append(CLONE account); END

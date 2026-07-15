@@ -117,7 +117,7 @@ RSpec.describe "destructuring assignment" do
   it "uses fixed identifier shape when destructuring non-literal values" do
     zig = transpile(<<~CLEAR)
       FN main() RETURNS Int64 ->
-        pair: Int64[2] = [13_i64, 14_i64];
+        pair: [2]Int64 = [13_i64, 14_i64];
         a, b = pair;
         RETURN a + b;
       END
@@ -164,7 +164,7 @@ RSpec.describe "destructuring assignment" do
     expect {
       transpile(<<~CLEAR)
         FN main() RETURNS Void ->
-          xs: Int64[]@list = [];
+          xs: []Int64 = [];
           a: Int64, b: Int64 = xs;
           RETURN;
         END

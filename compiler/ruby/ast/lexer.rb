@@ -7,6 +7,8 @@ require 'set'
 class Lexer
     extend T::Sig
 
+  class Error < StandardError; end
+
   Token = Struct.new(:type, :value, :line, :column)
 
   class TokenPayloadError < TypeError; end
@@ -184,7 +186,7 @@ class Lexer
         case suffix
         when 'f32' then add(:FLOAT32, val, start_col)
         when 'f64' then add(:NUMBER, val, start_col)
-        else raise "Lexer Error: Unknown float suffix '_#{suffix}' at line #{@line}:#{@column}"
+        else raise Error, "Lexer Error: Unknown float suffix '_#{suffix}' at line #{@line}:#{@column}"
         end
 
       when @s.scan(/\d+(?:_\d+)*\.\d+(?:_\d+)*/)
@@ -241,16 +243,16 @@ class Lexer
         when '0'  then buffer << "\0"   # actual null byte (0x00)
         when 'x'                        # \xHH hex byte
           hex = @s.scan(/[0-9a-fA-F]{2}/)
-          raise "Lexer Error: \\x requires exactly 2 hex digits at line #{@line}:#{@column}" unless hex
+          raise Error, "Lexer Error: \\x requires exactly 2 hex digits at line #{@line}:#{@column}" unless hex
           advance_pos(hex)
           buffer << hex.to_i(16).chr
         when 'u'                        # \u{HHHH} unicode codepoint -> UTF-8
-          raise "Lexer Error: \\u requires {hex} at line #{@line}:#{@column}" unless @s.peek(1) == '{'
+          raise Error, "Lexer Error: \\u requires {hex} at line #{@line}:#{@column}" unless @s.peek(1) == '{'
           @s.getch; advance_pos('{')
           hex = @s.scan(/[0-9a-fA-F]{1,6}/)
-          raise "Lexer Error: invalid \\u{} escape at line #{@line}:#{@column}" unless hex
+          raise Error, "Lexer Error: invalid \\u{} escape at line #{@line}:#{@column}" unless hex
           advance_pos(hex)
-          raise "Lexer Error: unclosed \\u{} at line #{@line}:#{@column}" unless @s.peek(1) == '}'
+          raise Error, "Lexer Error: unclosed \\u{} at line #{@line}:#{@column}" unless @s.peek(1) == '}'
           @s.getch; advance_pos('}')
           buffer << hex.to_i(16).chr(Encoding::UTF_8)
         else buffer << '\\' << (ch || '')
@@ -300,7 +302,7 @@ class Lexer
         buffer << @s.getch
         advance_pos('$')
       else
-        raise "Lexer Error: Unclosed string starting at line #{start_col}" if @s.eos?
+        raise Error, "Lexer Error: Unclosed string starting at line #{start_col}" if @s.eos?
       end
     end
   end
@@ -335,7 +337,7 @@ class Lexer
       end
     end
 
-    raise "Lexer Error: Unclosed interpolation %{...}"
+    raise Error, "Lexer Error: Unclosed interpolation %{...}"
   end
 
   sig { params(type: Symbol, val: T.any(Float, Integer, String), col: Integer).returns(Integer) }
@@ -387,9 +389,9 @@ class Lexer
   sig { params(val: Integer, suffix: String, start_col: Integer).returns(T.nilable(Integer)) }
   def add_prefixed_int(val, suffix, start_col)
     range = INT_SUFFIX_RANGES[suffix]
-    raise "Lexer Error: Unknown numeric suffix '_#{suffix}' at line #{@line}:#{@column}" unless range || suffix == 'f32' || suffix == 'f64'
+    raise Error, "Lexer Error: Unknown numeric suffix '_#{suffix}' at line #{@line}:#{@column}" unless range || suffix == 'f32' || suffix == 'f64'
     if range && !range.include?(val)
-      raise "Lexer Error: Literal #{@s.matched} overflows #{suffix} (range #{range})"
+      raise Error, "Lexer Error: Literal #{@s.matched} overflows #{suffix} (range #{range})"
     end
     case suffix
     when 'i64' then add(:INT64,   val,        start_col)

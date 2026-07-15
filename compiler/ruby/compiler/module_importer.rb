@@ -3,7 +3,8 @@ require "sorbet-runtime"
 
 require "set"
 
-class CircularDependencyError < StandardError; end
+class ModuleImportError < StandardError; end
+class CircularDependencyError < ModuleImportError; end
 
 # Orchestrates multi-file compilation with a shared module cache.
 # Prevents circular dependencies and compiles each .clear file exactly once.
@@ -52,7 +53,7 @@ class ModuleImporter
   def compile_package(pkg_name, caller_dir: @base_dir)
     path = @pkg_paths[pkg_name.to_s] || resolve_stdlib_package(pkg_name)
     unless path
-      raise "REQUIRE error: unknown package '#{pkg_name}'. " \
+      raise ModuleImportError, "REQUIRE error: unknown package '#{pkg_name}'. " \
             "Register it with --pkg #{pkg_name}=/path/to/lib.clear " \
             "or place it under #{@stdlib_root}/#{pkg_name}/src/lib.clear"
     end
@@ -93,38 +94,40 @@ class ModuleImporter
       raise CircularDependencyError, "Circular dependency detected: #{cycle} -> #{File.basename(path)}"
     end
 
-    raise "REQUIRE error: file not found: #{abs_path}" unless File.exist?(abs_path)
+    raise ModuleImportError, "REQUIRE error: file not found: #{abs_path}" unless File.exist?(abs_path)
 
     @compiling.add(abs_path)
+    begin
+      source     = File.read(abs_path)
+      source_dir = File.dirname(abs_path)
 
-    source     = File.read(abs_path)
-    source_dir = File.dirname(abs_path)
+      # STRICT-imports boundary (gradual-typing.md §7): imported modules
+      # must export concrete types in their public surface. Force the
+      # parser into strict mode (gradual=false) for the duration of the
+      # imported module's parse so `--gradual` from the top-level build
+      # never propagates across module boundaries. Explicit `Auto` in
+      # source still tokenizes; the post-parse check below catches it.
+      saved_gradual = ClearParser.gradual_mode
+      ClearParser.gradual_mode = false
+      ast = begin
+        tokens = Lexer.new(source).tokenize
+        ClearParser.new(tokens, source).parse
+      ensure
+        ClearParser.gradual_mode = saved_gradual
+      end
 
-    # STRICT-imports boundary (gradual-typing.md §7): imported modules
-    # must export concrete types in their public surface. Force the
-    # parser into strict mode (gradual=false) for the duration of the
-    # imported module's parse so `--gradual` from the top-level build
-    # never propagates across module boundaries. Explicit `Auto` in
-    # source still tokenizes; the post-parse check below catches it.
-    saved_gradual = ClearParser.gradual_mode
-    ClearParser.gradual_mode = false
-    ast = begin
-      tokens = Lexer.new(source).tokenize
-      ClearParser.new(tokens, source).parse
+      reject_auto_in_public_signatures!(ast, abs_path)
+
+      annotator = SemanticAnnotator.new(importer: self, source_dir: source_dir, source_code: source)
+      annotator.annotate!(ast)
+
+      mod = compile_module_mir(ast, annotator, source_dir)
+
+      @module_cache[abs_path] = mod
+      mod
     ensure
-      ClearParser.gradual_mode = saved_gradual
+      @compiling.delete(abs_path)
     end
-
-    reject_auto_in_public_signatures!(ast, abs_path)
-
-    annotator = SemanticAnnotator.new(importer: self, source_dir: source_dir, source_code: source)
-    annotator.annotate!(ast)
-
-    mod = compile_module_mir(ast, annotator, source_dir)
-
-    @module_cache[abs_path] = mod
-    @compiling.delete(abs_path)
-    mod
   end
 
   # STRICT-imports check (M1.5). Imported modules cannot expose

@@ -13,7 +13,7 @@ FN getStr(v: Value) RETURNS String ->
 END
 
 FN main() RETURNS Void ->
-    MUTABLE env: HashMap<Value> = {};
+    MUTABLE env: {String}Value = {};
     s = "hello";
 
     # Struct literal with COPY: the COPY already dupes to heap.

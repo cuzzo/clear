@@ -23,7 +23,7 @@ FN eval!(TAKES ast: Val) RETURNS !Val EFFECTS REENTRANT ->
 END
 
 FN main() RETURNS Void ->
-    MUTABLE list: Val[]@list = List[];
+    MUTABLE list: []Val = List[];
     list.append(Val{ Str: "hello" });
     ast = Val{ List: list };
     result = eval!(COPY ast);

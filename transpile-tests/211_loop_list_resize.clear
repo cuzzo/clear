@@ -3,7 +3,7 @@
 # After resize, all previously-stored elements must survive frame rewinds.
 
 FN main() RETURNS Void ->
-    MUTABLE items: String[]@list = [];
+    MUTABLE items: []String = [];
     FOR i IN (1_i64 ..= 200) DO
         items.append("entry-" $+ i.toString());
     END

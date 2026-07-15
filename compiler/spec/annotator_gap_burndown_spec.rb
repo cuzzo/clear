@@ -1163,7 +1163,7 @@ RSpec.describe "annotator branch gap burndown" do
       CHT
       <<~CHT,
         FN main() RETURNS Void ->
-          MUTABLE items: HashMap<Int64> = {};
+          MUTABLE items: {String}Int64 = {};
           items["a"] = 1_i64;
           items["b"] = 2_i64;
           FOR k IN items DO
@@ -1174,12 +1174,12 @@ RSpec.describe "annotator branch gap burndown" do
         END
       CHT
       <<~CHT,
-        STRUCT Box { values: Int64[]@list }
+        STRUCT Box { values: []Int64 }
         FN main() RETURNS Void ->
-          MUTABLE xs: Int64[]@list = [];
+          MUTABLE xs: []Int64 = [];
           xs.append(1_i64);
           b = Box{ values: xs };
-          MUTABLE out: Int64[]@list = [];
+          MUTABLE out: []Int64 = [];
           out.append(b.values[0_i64]);
           RETURN;
         END

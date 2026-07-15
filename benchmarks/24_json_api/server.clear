@@ -25,7 +25,7 @@ END
 
 FN generateJson(id: Int64) RETURNS String ->
     sz = sizeForId(id);
-    MUTABLE parts: String[]@list = [];
+    MUTABLE parts: []String = [];
     FOR i IN (1_i64 ..= sz) -> parts.append(i.toString());
     RETURN "{\"id\":${id.toString()},\"data\":[${join(parts, ",")}]}";
 END

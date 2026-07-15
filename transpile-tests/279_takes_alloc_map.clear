@@ -1,12 +1,12 @@
 # Bug: frame-allocated HashMap GIVE'd to TAKES HashMap param → alloc mismatch.
 # Same architectural cause as 277.
 
-FN consume!(TAKES m: HashMap<Int64>) RETURNS Int64 ->
+FN consume!(TAKES m: {String}Int64) RETURNS Int64 ->
     RETURN m.length();
 END
 
 FN main() RETURNS Void ->
-    MUTABLE map: HashMap<Int64> = {};
+    MUTABLE map: {String}Int64 = {};
     map["a"] = 1_i64;
     map["b"] = 2_i64;
     map["c"] = 3_i64;

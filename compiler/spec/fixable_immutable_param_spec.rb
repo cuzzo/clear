@@ -26,7 +26,7 @@ RSpec.describe "Immutable param auto-fix" do
   describe "ASSIGN_INDEX_IMMUTABLE_LIST on a HashMap parameter" do
     let(:src) {
       <<~CLEAR
-        FN parseValue!(json: String, penv: HashMap<Int64>) RETURNS Void ->
+        FN parseValue!(json: String, penv: {String}Int64) RETURNS Void ->
           penv["__jp"] = 0;
         END
         FN main() RETURNS Void -> END

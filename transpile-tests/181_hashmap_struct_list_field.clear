@@ -5,18 +5,18 @@
 
 STRUCT Item {
     name: String,
-    tags: String[]@list,
+    tags: []String,
 }
 
-FN addItem!(MUTABLE items: HashMap<Item>, key: String, name: String, tag: String) RETURNS !Void ->
-    MUTABLE tags: String[]@list = [];
+FN addItem!(MUTABLE items: {String}Item, key: String, name: String, tag: String) RETURNS !Void ->
+    MUTABLE tags: []String = [];
     tags.append(COPY tag);
     items[key] = Item{ name: COPY name, tags: tags };
     RETURN;
 END
 
 FN main() RETURNS Void ->
-    MUTABLE items: HashMap<Item> = {};
+    MUTABLE items: {String}Item = {};
 
     # Store a struct with a populated list field
     addItem!(items, "x", "first", "a");

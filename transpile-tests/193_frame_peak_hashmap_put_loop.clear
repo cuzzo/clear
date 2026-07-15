@@ -3,7 +3,7 @@
 # should reclaim per-iteration frame temporaries.
 
 FN main() RETURNS Void ->
-    MUTABLE map: HashMap<Int64> = {};
+    MUTABLE map: {String}Int64 = {};
     FOR i IN (1_i64 ..= 500) DO
         key = "key_" $+ i.toString();
         map[key] = i;

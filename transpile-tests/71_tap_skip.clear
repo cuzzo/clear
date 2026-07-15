@@ -2,7 +2,7 @@
 
 # TAP: side-effect observer, passes collection through unchanged
 FN test_tap_passthrough() RETURNS !Void ->
-    MUTABLE data: Float64[]@list = [];
+    MUTABLE data: []Float64 = [];
     FOR i IN (0_i64 ..< 5_i64) -> data.append(toFloat(i + 1_i64));
 
     # TAP block runs for each item, original list passes through
@@ -12,7 +12,7 @@ FN test_tap_passthrough() RETURNS !Void ->
 END
 
 FN test_tap_in_chain() RETURNS !Void ->
-    MUTABLE data: Float64[]@list = [];
+    MUTABLE data: []Float64 = [];
     FOR i IN (0_i64 ..< 10_i64) -> data.append(toFloat(i));
 
     # TAP in middle of chain: WHERE -> TAP -> SUM
@@ -24,7 +24,7 @@ END
 
 # SKIP: skip first N elements, return rest
 FN test_skip_basic() RETURNS !Void ->
-    MUTABLE data: Float64[]@list = [];
+    MUTABLE data: []Float64 = [];
     FOR i IN (0_i64 ..< 5_i64) -> data.append(toFloat(i + 1_i64));
 
     skipped = data |> SKIP 2_i64;
@@ -33,7 +33,7 @@ FN test_skip_basic() RETURNS !Void ->
 END
 
 FN test_skip_with_sum() RETURNS !Void ->
-    MUTABLE data: Float64[]@list = [];
+    MUTABLE data: []Float64 = [];
     FOR i IN (0_i64 ..< 5_i64) -> data.append(toFloat(i + 1_i64));
 
     # [1,2,3,4,5] -> SKIP 2 -> [3,4,5] -> SUM = 12
@@ -43,7 +43,7 @@ FN test_skip_with_sum() RETURNS !Void ->
 END
 
 FN test_skip_all() RETURNS !Void ->
-    MUTABLE data: Float64[]@list = [];
+    MUTABLE data: []Float64 = [];
     FOR i IN (0_i64 ..< 3_i64) -> data.append(toFloat(i));
 
     # SKIP more than length -> empty
@@ -53,7 +53,7 @@ FN test_skip_all() RETURNS !Void ->
 END
 
 FN test_skip_zero() RETURNS !Void ->
-    MUTABLE data: Float64[]@list = [];
+    MUTABLE data: []Float64 = [];
     FOR i IN (0_i64 ..< 3_i64) -> data.append(toFloat(i));
 
     # SKIP 0 -> full list

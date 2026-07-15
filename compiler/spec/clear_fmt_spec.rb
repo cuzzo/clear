@@ -147,20 +147,20 @@ RSpec.describe Formatter do
 
   it "keeps MUTABLE on bindings passed to bang helpers" do
     src = <<~CLEAR
-      FN appendOne!(MUTABLE xs: Int64[]@list) RETURNS Void ->
+      FN appendOne!(MUTABLE xs: []Int64) RETURNS Void ->
         xs.append(1_i64);
         RETURN;
       END
 
       FN main() RETURNS Void ->
-        MUTABLE xs: Int64[]@list = [];
+        MUTABLE xs: []Int64 = [];
         appendOne!(xs);
         RETURN;
       END
     CLEAR
     path = write("bang_mutable.clear", src)
     out, _, _ = run_fmt("--stdout", path)
-    expect(out).to include("MUTABLE xs: Int64[]@list = []")
+    expect(out).to include("MUTABLE xs: []Int64 = []")
   end
 
   it "wraps FN signature when it exceeds 120 chars" do
@@ -1079,12 +1079,12 @@ RSpec.describe Formatter do
     it "keeps decorated types (HashMap<K, V>) — not redundant" do
       src = <<~CLEAR
         FN main() RETURNS Void ->
-          MUTABLE m: HashMap<Int64, Float64> = {};
+          MUTABLE m: {Int64}Float64 = {};
           RETURN;
         END
       CLEAR
       out = Formatter.format(src)
-      expect(out).to include(": HashMap<Int64, Float64>")
+      expect(out).to include(": {Int64}Float64")
     end
   end
 
@@ -1092,23 +1092,23 @@ RSpec.describe Formatter do
     it "tightens `HashMap < T, U >` to `HashMap<T, U>`" do
       src = <<~CLEAR
         FN main() RETURNS Void ->
-          MUTABLE m: HashMap < Int64, Float64 > = {};
+          MUTABLE m: {Int64}Float64 = {};
           RETURN;
         END
       CLEAR
       out = Formatter.format(src)
-      expect(out).to include("HashMap<Int64, Float64>")
+      expect(out).to include("{Int64}Float64")
     end
 
     it "normalizes `HashMap< T,U >` (mixed spacing) to `HashMap<T, U>`" do
       src = <<~CLEAR
         FN main() RETURNS Void ->
-          MUTABLE m: HashMap< Int64,Float64 > = {};
+          MUTABLE m: {Int64}Float64 = {};
           RETURN;
         END
       CLEAR
       out = Formatter.format(src)
-      expect(out).to include("HashMap<Int64, Float64>")
+      expect(out).to include("{Int64}Float64")
     end
 
     it "leaves comparison `a < b` with spaces (not a generic)" do
@@ -1304,7 +1304,7 @@ RSpec.describe Formatter do
     it "keeps `:` flush after a `@cap(N)` segment" do
       src = <<~CLEAR
         FN main() RETURNS Void ->
-          MUTABLE map: HashMap<String> @sharded(8):locked = {};
+          MUTABLE map: {String}@sharded(8):locked String = {};
           map["k"] = "v";
           RETURN;
         END
@@ -1317,7 +1317,7 @@ RSpec.describe Formatter do
     it "keeps `:` flush across a 3-segment chain with a paren arg" do
       src = <<~CLEAR
         FN main() RETURNS Void ->
-          MUTABLE map: HashMap<String> @shared:sharded(128):locked = {};
+          MUTABLE map: {String}@shared:sharded(128):locked String = {};
           map["k"] = "v";
           RETURN;
         END
@@ -1600,13 +1600,13 @@ RSpec.describe Formatter do
       src = <<~CLEAR
         STRUCT Env { v: Int64 }
         FN main() RETURNS Void ->
-          MUTABLE pool: Env[10] @pool: shared: locked = [];
+          MUTABLE pool: [Pool(10)]@shared:locked Env = [];
           RETURN;
         END
       CLEAR
       out = Formatter.format(src)
-      expect(out).to include("@pool:shared:locked")
-      expect(out).not_to include("@pool: shared")
+      expect(out).to include("[Pool(10)]@shared:locked Env")
+      expect(out).not_to include("@shared: locked")
       expect(out).not_to include("shared: locked")
     end
 

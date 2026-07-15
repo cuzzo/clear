@@ -6,7 +6,7 @@ RSpec.describe "@node capability" do
     STRUCT Node {
       left: ?Node@node,
       right: ?Node@node,
-      children: Node@node[]@list,
+      children: []Node@node,
       id: Int64
     }
 
@@ -65,7 +65,7 @@ RSpec.describe "@node capability" do
     source = <<~CLEAR
       STRUCT Node { id: Int64 }
       FN main() RETURNS Void ->
-        MUTABLE nodes: Node@node[8]@list = [];
+        MUTABLE nodes: []Node@node = [];
         TIGHT FOR i IN (0_i64 ..< 8_i64) DO
           nodes.append(Node{ id: i });
         END
@@ -81,7 +81,7 @@ RSpec.describe "@node capability" do
     source = <<~CLEAR
       STRUCT Node { peer: ?Node@shared:node, id: Int64 }
       FN main() RETURNS Void ->
-        MUTABLE roots: Node@node:shared[]@list = [];
+        MUTABLE roots: []Node@shared:node = [];
       END
     CLEAR
 

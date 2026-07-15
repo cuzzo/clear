@@ -106,7 +106,7 @@ RSpec.describe "Stack Tier Recommendations" do
 
     it "does not count frame-allocated variables" do
       src = <<~CLEAR
-        STRUCT Big { a: Float64[200] }
+        STRUCT Big { a: [200]Float64 }
         FN test() RETURNS !Float64 ->
             b = Big{ a: [0.0] };
             RETURN b.a[0];

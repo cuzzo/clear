@@ -1,5 +1,5 @@
 FN main() RETURNS Int64 ->
-    MUTABLE m: HashMap<Int64, Int64> = {};
+    MUTABLE m: {Int64}Int64 = {};
     m[1_i64] = 10_i64;
     m[2_i64] = 20_i64;
     m[2_i64] = 22_i64;

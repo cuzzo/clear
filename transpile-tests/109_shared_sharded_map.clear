@@ -5,7 +5,7 @@
 
 FN main() RETURNS Void ->
     # shared:sharded:writeLocked = Arc<ShardedStringMap> with RwLock per shard.
-    MUTABLE map: HashMap<Int64>@shared:sharded(4):writeLocked = {};
+    MUTABLE map: {String}@shared:sharded(4):writeLocked Int64 = {};
 
     # Put values (each hashes to a shard, acquires write lock on that shard).
     map["alice"] = 100;
@@ -41,7 +41,7 @@ FN main() RETURNS Void ->
     ASSERT a2 == 999, "alice should be overwritten to 999";
 
     # Also test @shared:sharded(N):locked (Mutex variant).
-    MUTABLE map2: HashMap<Int64>@shared:sharded(2):locked = {};
+    MUTABLE map2: {String}@shared:sharded(2):locked Int64 = {};
     map2["x"] = 42;
     x = map2["x"] OR_ELSE 0;
     ASSERT x == 42, "mutex variant should work";

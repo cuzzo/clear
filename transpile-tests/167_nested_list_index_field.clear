@@ -2,8 +2,8 @@
 # Verifies that the compiler emits mutable pointer access for GetIndex
 # nodes when the indexed result flows into a mutation context.
 
-STRUCT Node { keys: Int64[]@list, vals: String[]@list }
-STRUCT DB { nodes: Node[]@list }
+STRUCT Node { keys: []Int64, vals: []String }
+STRUCT DB { nodes: []Node }
 
 # Read-only: method call on nested indexed field
 FN countKeys(db: DB, idx: Int64) RETURNS Int64 ->
@@ -12,7 +12,7 @@ FN countKeys(db: DB, idx: Int64) RETURNS Int64 ->
 END
 
 FN main() RETURNS Void ->
-    MUTABLE nodes: Node[]@list = [];
+    MUTABLE nodes: []Node = [];
     MUTABLE n0 = Node{ keys: [], vals: [] };
     MUTABLE n1 = Node{ keys: [], vals: [] };
     nodes.append(n0);

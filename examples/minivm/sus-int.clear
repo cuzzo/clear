@@ -38,7 +38,7 @@ FN nativePointManhattan(a: Int64[], b: Int64[]) RETURNS Int64 ->
 END
 
 FN nativeTranslate(point: Int64[], dx: Int64, dy: Int64) RETURNS !Int64[] ->
-    MUTABLE result: Int64[]@list = List[];
+    MUTABLE result: []Int64 = List[];
     result.append(point[0] + dx);
     result.append(point[1] + dy);
     RETURN result;
@@ -58,7 +58,7 @@ END
 # Parser uses HashMap<Value> with numeric keys (avoids frame-arena string issues).
 
 STRUCT Env {
-    vars: HashMap<Value>
+    vars: {String}Value
 }
 
 UNION Value {
@@ -269,7 +269,7 @@ END
 # Position and count stored as Value.Number at "__rp" and "__tc".
 # This avoids toString() inside WHILE loops for position updates.
 
-FN tokenizeToEnv!(MUTABLE penv: HashMap<Value>, str: String) RETURNS Void ->
+FN tokenizeToEnv!(MUTABLE penv: {String}Value, str: String) RETURNS Void ->
     MUTABLE count: Int64 = 0;
     MUTABLE i: Int64 = 0;
     WHILE i < str.length() DO
@@ -305,12 +305,12 @@ FN tokenizeToEnv!(MUTABLE penv: HashMap<Value>, str: String) RETURNS Void ->
     RETURN;
 END
 
-FN getTokenStr!(MUTABLE penv: HashMap<Value>, idx: Int64) RETURNS String ->
+FN getTokenStr!(MUTABLE penv: {String}Value, idx: Int64) RETURNS String ->
     val = penv["__t" $+ idx.toString()] OR_ELSE Value.Nil;
     RETURN getStr(val);
 END
 
-FN readFormEnv!(MUTABLE penv: HashMap<Value>) RETURNS Value EFFECTS REENTRANT ->
+FN readFormEnv!(MUTABLE penv: {String}Value) RETURNS Value EFFECTS REENTRANT ->
     posVal = penv["__rp"] OR_ELSE Value{ Number: 0.0 };
     tcVal = penv["__tc"] OR_ELSE Value{ Number: 0.0 };
     pos = toInt(getNum(posVal));
@@ -330,8 +330,8 @@ FN readFormEnv!(MUTABLE penv: HashMap<Value>) RETURNS Value EFFECTS REENTRANT ->
     RETURN readAtom(tok);
 END
 
-FN readListEnv!(MUTABLE penv: HashMap<Value>) RETURNS Value EFFECTS REENTRANT ->
-    MUTABLE items: Value[]@list = List[];
+FN readListEnv!(MUTABLE penv: {String}Value) RETURNS Value EFFECTS REENTRANT ->
+    MUTABLE items: []Value = List[];
     MUTABLE listDone = FALSE;
     WHILE listDone == FALSE DO
         curPosVal = penv["__rp"] OR_ELSE Value{ Number: 0.0 };
@@ -399,7 +399,7 @@ FN applyNative(id: Int64, evaled: Value[]) RETURNS !Value EFFECTS REENTRANT ->
     IF id == 9 THEN RETURN boolVal(getNum(evaled[1]) >= getNum(evaled[2])); END
     # List
     IF id == 10 THEN
-        MUTABLE litems: Value[]@list = List[];
+        MUTABLE litems: []Value = List[];
         FOR li IN (1_i64 ..< evaled.length()) ->
             litems.append(COPY evaled[li]);
         RETURN Value{ List: litems };
@@ -411,7 +411,7 @@ FN applyNative(id: Int64, evaled: Value[]) RETURNS !Value EFFECTS REENTRANT ->
     IF id == 15 THEN print(prStr(evaled[1], TRUE)); RETURN Value.Nil; END
     # Vector
     IF id == 16 THEN
-        MUTABLE velems: Value[]@list = List[];
+        MUTABLE velems: []Value = List[];
         FOR vi IN (1_i64 ..< evaled.length()) ->
             velems.append(COPY evaled[vi]);
         RETURN Value{ Vector: velems };
@@ -474,7 +474,7 @@ FN applyNative(id: Int64, evaled: Value[]) RETURNS !Value EFFECTS REENTRANT ->
         # split(str, delim) -> List of strings
         s = getStr(evaled[1]);
         delim = getStr(evaled[2]);
-        MUTABLE parts: Value[]@list = List[];
+        MUTABLE parts: []Value = List[];
         MUTABLE start: Int64 = 0;
         MUTABLE si: Int64 = 0;
         WHILE si + delim.length() <= s.length() DO
@@ -625,28 +625,28 @@ FN applyNative(id: Int64, evaled: Value[]) RETURNS !Value EFFECTS REENTRANT ->
         # list-push: return new list with element appended (preserves typed arrays)
         PARTIAL MATCH evaled[1] START
             Value.TypedI64Arr AS srcInts ->
-                MUTABLE newInts: Int64[]@list = List[];
+                MUTABLE newInts: []Int64 = List[];
                 FOR li IN (0_i64 ..< srcInts.length()) DO
                     newInts.append(srcInts[li]);
                 END
                 newInts.append(getInt(evaled[2]));
                 RETURN Value{ TypedI64Arr: newInts };,
             Value.TypedF64Arr AS srcFloats ->
-                MUTABLE newFloats: Float64[]@list = List[];
+                MUTABLE newFloats: []Float64 = List[];
                 FOR li IN (0_i64 ..< srcFloats.length()) DO
                     newFloats.append(srcFloats[li]);
                 END
                 newFloats.append(getNum(evaled[2]));
                 RETURN Value{ TypedF64Arr: newFloats };,
             Value.List AS srcItems ->
-                MUTABLE newItems: Value[]@list = List[];
+                MUTABLE newItems: []Value = List[];
                 FOR li IN (0_i64 ..< srcItems.length()) DO
                     newItems.append(COPY srcItems[li]);
                 END
                 newItems.append(COPY evaled[2]);
                 RETURN Value{ List: newItems };,
             DEFAULT ->
-                MUTABLE singleItem: Value[]@list = List[];
+                MUTABLE singleItem: []Value = List[];
                 singleItem.append(COPY evaled[2]);
                 RETURN Value{ List: singleItem };
         END
@@ -658,7 +658,7 @@ END
 
 # Environment operations using Pool
 
-FN envGet!(envId: Id<Env>, name: String, MUTABLE pool: Env[50000]@pool) RETURNS Value REQUIRES pool: LOCKED EFFECTS REENTRANT ->
+FN envGet!(envId: Id<Env>, name: String, MUTABLE pool: [Pool(50000)]Env) RETURNS Value REQUIRES pool: LOCKED EFFECTS REENTRANT ->
     val = COPY (pool[envId]?.vars[name] OR_ELSE Value{ Number: 0.0 - 777777.0 });
     PARTIAL MATCH val START
         Value.Number AS n ->
@@ -677,7 +677,7 @@ END
 
 # envSet!: walk scope chain, update existing binding. Returns TRUE if found.
 
-FN envSet!(envId: Id<Env>, name: String, val: Value, MUTABLE pool: Env[50000]@pool) RETURNS !Bool REQUIRES pool: LOCKED EFFECTS REENTRANT ->
+FN envSet!(envId: Id<Env>, name: String, val: Value, MUTABLE pool: [Pool(50000)]Env) RETURNS !Bool REQUIRES pool: LOCKED EFFECTS REENTRANT ->
     existing = pool[envId]?.vars[name] OR_ELSE Value{ Number: 0.0 - 777777.0 };
     PARTIAL MATCH existing START
         Value.Number AS n ->
@@ -773,7 +773,7 @@ FN getErrKind(v: Value) RETURNS !String ->
     RETURN "";
 END
 
-FN handleCatch!(catchExpr: Value, errMsg: String, errKind: String, envId: Id<Env>, MUTABLE pool: Env[50000]@pool) RETURNS !Value REQUIRES pool: LOCKED ->
+FN handleCatch!(catchExpr: Value, errMsg: String, errKind: String, envId: Id<Env>, MUTABLE pool: [Pool(50000)]Env) RETURNS !Value REQUIRES pool: LOCKED ->
     PARTIAL MATCH catchExpr START
         Value.List AS catchItems ->
             catchEnvId: Id<Env> = pool.insert(Env{ vars: {} });
@@ -786,12 +786,12 @@ FN handleCatch!(catchExpr: Value, errMsg: String, errKind: String, envId: Id<Env
     RETURN Value.Error{ errMsg: COPY errMsg, errKind: COPY errKind };
 END
 
-FN readFileOr!(path: String, fallback: String, MUTABLE pool: Env[50000]@pool) RETURNS !String REQUIRES pool: LOCKED ->
+FN readFileOr!(path: String, fallback: String, MUTABLE pool: [Pool(50000)]Env) RETURNS !String REQUIRES pool: LOCKED ->
     content = readFile(path) OR_ELSE RAISE;
     RETURN content;
 END
 
-FN readFileSafe!(path: String, MUTABLE pool: Env[50000]@pool) RETURNS String REQUIRES pool: LOCKED ->
+FN readFileSafe!(path: String, MUTABLE pool: [Pool(50000)]Env) RETURNS String REQUIRES pool: LOCKED ->
     content = readFileOr!(path, "", pool) OR_ELSE "";
     RETURN content;
 END
@@ -799,7 +799,7 @@ END
 # Debug pause: writes break info, polls for commands, resumes on :c/:s/:n/:f.
 # Returns the debug action: 0=continue, 1=step-into, 2=step-over, 3=step-out
 
-FN debugPause!(reason: String, envId: Id<Env>, MUTABLE pool: Env[50000]@pool) RETURNS !Int64 REQUIRES pool: LOCKED EFFECTS REENTRANT ->
+FN debugPause!(reason: String, envId: Id<Env>, MUTABLE pool: [Pool(50000)]Env) RETURNS !Int64 REQUIRES pool: LOCKED EFFECTS REENTRANT ->
     # Build call stack string
     stackStr = envGet!(envId, "__dbg_stack", pool);
     stackDisplay = getStr(stackStr);
@@ -827,7 +827,7 @@ FN debugPause!(reason: String, envId: Id<Env>, MUTABLE pool: Env[50000]@pool) RE
                 debugAction = 3; debugActive = FALSE;
             ELSE_IF startsWith?(cmdRaw, ":i ") THEN
                 inspectExpr = substr(cmdRaw, 3, cmdRaw.length() - 3);
-                MUTABLE inspPenv: HashMap<Value> = {};
+                MUTABLE inspPenv: {String}Value = {};
                 tokenizeToEnv!(inspPenv, inspectExpr);
                 inspPenv["__rp"] = Value{ Number: 0.0 };
                 inspAst = readFormEnv!(inspPenv);
@@ -864,7 +864,7 @@ FN isSymbol?(v: Value) RETURNS Bool ->
 END
 
 # resolveTco: if value is a Tco trampoline, evaluate it; otherwise return as-is.
-FN resolveTco!(v: Value, MUTABLE pool: Env[50000]@pool) RETURNS !Value REQUIRES pool: LOCKED EFFECTS REENTRANT ->
+FN resolveTco!(v: Value, MUTABLE pool: [Pool(50000)]Env) RETURNS !Value REQUIRES pool: LOCKED EFFECTS REENTRANT ->
     PARTIAL MATCH v START
         Value.Tco AS tco ->
             tcoAst = COPY tco.tcoAst;
@@ -877,7 +877,7 @@ END
 
 # eval: TCO trampoline. evalList! returns Value.Tco to signal tail call.
 
-FN eval!(TAKES ast: Value, envId: Id<Env>, MUTABLE pool: Env[50000]@pool) RETURNS !Value REQUIRES pool: LOCKED EFFECTS REENTRANT ->
+FN eval!(TAKES ast: Value, envId: Id<Env>, MUTABLE pool: [Pool(50000)]Env) RETURNS !Value REQUIRES pool: LOCKED EFFECTS REENTRANT ->
     PARTIAL MATCH TAKES ast START
         Value.Symbol AS sym ->
             RETURN envGet!(envId, sym, pool);,
@@ -902,7 +902,7 @@ FN eval!(TAKES ast: Value, envId: Id<Env>, MUTABLE pool: Env[50000]@pool) RETURN
     RETURN Value.Nil;
 END
 
-FN evalList!(TAKES items: Value[], envId: Id<Env>, MUTABLE pool: Env[50000]@pool) RETURNS !Value REQUIRES pool: LOCKED EFFECTS REENTRANT ->
+FN evalList!(TAKES items: Value[], envId: Id<Env>, MUTABLE pool: [Pool(50000)]Env) RETURNS !Value REQUIRES pool: LOCKED EFFECTS REENTRANT ->
     IF items.length() == 0 THEN RETURN Value.Nil; END
     formName = getSymName(items[0]);
 
@@ -912,11 +912,11 @@ FN evalList!(TAKES items: Value[], envId: Id<Env>, MUTABLE pool: Env[50000]@pool
         listVal = eval!(COPY items[1], envId, pool);
         IF isError?(listVal) THEN RETURN listVal; END
         predVal = eval!(COPY items[2], envId, pool);
-        MUTABLE filtered: Value[]@list = List[];
+        MUTABLE filtered: []Value = List[];
         len = listLen(listVal);
         FOR fi IN (0_i64 ..< len) DO
             elem = listRef(listVal, fi);
-            MUTABLE callArgs: Value[]@list = List[];
+            MUTABLE callArgs: []Value = List[];
             callArgs.append(COPY predVal);
             callArgs.append(COPY elem);
             MUTABLE callResult: Value = evalList!(callArgs, envId, pool);
@@ -930,11 +930,11 @@ FN evalList!(TAKES items: Value[], envId: Id<Env>, MUTABLE pool: Env[50000]@pool
         listVal = eval!(COPY items[1], envId, pool);
         IF isError?(listVal) THEN RETURN listVal; END
         fnVal = eval!(COPY items[2], envId, pool);
-        MUTABLE mapped: Value[]@list = List[];
+        MUTABLE mapped: []Value = List[];
         PARTIAL MATCH listVal START
             Value.List AS srcItems ->
                 FOR mi IN (0_i64 ..< srcItems.length()) DO
-                    MUTABLE callArgs: Value[]@list = List[];
+                    MUTABLE callArgs: []Value = List[];
                     callArgs.append(COPY fnVal);
                     callArgs.append(COPY srcItems[mi]);
                     MUTABLE callResult: Value = evalList!(callArgs, envId, pool);
@@ -954,7 +954,7 @@ FN evalList!(TAKES items: Value[], envId: Id<Env>, MUTABLE pool: Env[50000]@pool
         len = listLen(listVal);
         FOR ri IN (0_i64 ..< len) DO
             elem = listRef(listVal, ri);
-            MUTABLE callArgs: Value[]@list = List[];
+            MUTABLE callArgs: []Value = List[];
             callArgs.append(COPY fnVal);
             callArgs.append(COPY acc);
             callArgs.append(COPY elem);
@@ -968,7 +968,7 @@ FN evalList!(TAKES items: Value[], envId: Id<Env>, MUTABLE pool: Env[50000]@pool
         IF isError?(listVal) THEN RETURN listVal; END
         limitN = getInt(eval!(COPY items[2], envId, pool));
         len = listLen(listVal);
-        MUTABLE limited: Value[]@list = List[];
+        MUTABLE limited: []Value = List[];
         FOR li IN (0_i64 ..< len) DO
             IF li < limitN THEN
                 elem = listRef(listVal, li);
@@ -980,7 +980,7 @@ FN evalList!(TAKES items: Value[], envId: Id<Env>, MUTABLE pool: Env[50000]@pool
     ELSE_IF formName == "list-distinct" THEN
         listVal = eval!(COPY items[1], envId, pool);
         IF isError?(listVal) THEN RETURN listVal; END
-        MUTABLE distinct: Value[]@list = List[];
+        MUTABLE distinct: []Value = List[];
         len = listLen(listVal);
         FOR di IN (0_i64 ..< len) DO
             elem = listRef(listVal, di);
@@ -997,7 +997,7 @@ FN evalList!(TAKES items: Value[], envId: Id<Env>, MUTABLE pool: Env[50000]@pool
         listVal = eval!(COPY items[1], envId, pool);
         IF isError?(listVal) THEN RETURN listVal; END
         keyFn = eval!(COPY items[2], envId, pool);
-        MUTABLE sorted: Value[]@list = List[];
+        MUTABLE sorted: []Value = List[];
         len = listLen(listVal);
         FOR oi IN (0_i64 ..< len) DO
             elem = listRef(listVal, oi);
@@ -1009,11 +1009,11 @@ FN evalList!(TAKES items: Value[], envId: Id<Env>, MUTABLE pool: Env[50000]@pool
                 WHILE si < sorted.length() DO
                     MUTABLE j: Int64 = si;
                     WHILE j > 0 DO
-                        MUTABLE aArgs: Value[]@list = List[];
+                        MUTABLE aArgs: []Value = List[];
                         aArgs.append(COPY keyFn); aArgs.append(COPY (sorted[j] OR_ELSE Value.Nil));
                         MUTABLE aKey: Value = evalList!(aArgs, envId, pool);
                         aKey = resolveTco!(aKey, pool) OR_ELSE RAISE;
-                        MUTABLE bArgs: Value[]@list = List[];
+                        MUTABLE bArgs: []Value = List[];
                         bArgs.append(COPY keyFn); bArgs.append(COPY (sorted[j - 1] OR_ELSE Value.Nil));
                         MUTABLE bKey: Value = evalList!(bArgs, envId, pool);
                         bKey = resolveTco!(bKey, pool) OR_ELSE RAISE;
@@ -1036,11 +1036,11 @@ FN evalList!(TAKES items: Value[], envId: Id<Env>, MUTABLE pool: Env[50000]@pool
         listVal = eval!(COPY items[1], envId, pool);
         IF isError?(listVal) THEN RETURN listVal; END
         fieldFn = eval!(COPY items[2], envId, pool);
-        MUTABLE flat: Value[]@list = List[];
+        MUTABLE flat: []Value = List[];
         PARTIAL MATCH listVal START
             Value.List AS srcItems ->
                 FOR ui IN (0_i64 ..< srcItems.length()) DO
-                    MUTABLE fArgs: Value[]@list = List[];
+                    MUTABLE fArgs: []Value = List[];
                     fArgs.append(COPY fieldFn); fArgs.append(COPY srcItems[ui]);
                     MUTABLE nested: Value = evalList!(fArgs, envId, pool);
                     nested = resolveTco!(nested, pool) OR_ELSE RAISE;
@@ -1061,11 +1061,11 @@ FN evalList!(TAKES items: Value[], envId: Id<Env>, MUTABLE pool: Env[50000]@pool
         listVal = eval!(COPY items[1], envId, pool);
         IF isError?(listVal) THEN RETURN listVal; END
         keyFn = eval!(COPY items[2], envId, pool);
-        MUTABLE groups: Value[]@list = List[];
+        MUTABLE groups: []Value = List[];
         PARTIAL MATCH listVal START
             Value.List AS srcItems ->
                 FOR gi IN (0_i64 ..< srcItems.length()) DO
-                    MUTABLE kArgs: Value[]@list = List[];
+                    MUTABLE kArgs: []Value = List[];
                     kArgs.append(COPY keyFn); kArgs.append(COPY srcItems[gi]);
                     MUTABLE gKey: Value = evalList!(kArgs, envId, pool);
                     gKey = resolveTco!(gKey, pool) OR_ELSE RAISE;
@@ -1078,7 +1078,7 @@ FN evalList!(TAKES items: Value[], envId: Id<Env>, MUTABLE pool: Env[50000]@pool
                     IF found >= 0 THEN
                         # Add to existing group (rebuild pair with appended list)
                         existingList = pairCdr(groups[found] OR_ELSE Value.Nil);
-                        MUTABLE newGroupItems: Value[]@list = List[];
+                        MUTABLE newGroupItems: []Value = List[];
                         PARTIAL MATCH existingList START
                             Value.List AS gl -> FOR gj IN (0_i64 ..< gl.length()) DO newGroupItems.append(COPY gl[gj]); END,
                             DEFAULT -> PASS;
@@ -1087,7 +1087,7 @@ FN evalList!(TAKES items: Value[], envId: Id<Env>, MUTABLE pool: Env[50000]@pool
                         groups[found] = Value.Pair{ pairCar: COPY gKey, pairCdr: Value{ List: newGroupItems } };
                     ELSE
                         # New group
-                        MUTABLE newItems: Value[]@list = List[];
+                        MUTABLE newItems: []Value = List[];
                         newItems.append(COPY srcItems[gi]);
                         groups.append(Value.Pair{ pairCar: COPY gKey, pairCdr: Value{ List: newItems } });
                     END
@@ -1116,7 +1116,7 @@ FN evalList!(TAKES items: Value[], envId: Id<Env>, MUTABLE pool: Env[50000]@pool
         listVal = eval!(COPY items[1], envId, pool);
         startIdx = toInt(getNum(eval!(COPY items[2], envId, pool)));
         endIdx = toInt(getNum(eval!(COPY items[3], envId, pool)));
-        MUTABLE sliced: Value[]@list = List[];
+        MUTABLE sliced: []Value = List[];
         PARTIAL MATCH listVal START Value.List AS srcItems ->
             FOR si IN (startIdx ..< endIdx) DO
                 IF si < srcItems.length() THEN sliced.append(COPY srcItems[si]); END
@@ -1126,7 +1126,7 @@ FN evalList!(TAKES items: Value[], envId: Id<Env>, MUTABLE pool: Env[50000]@pool
     ELSE_IF formName == "list-range" THEN
         startVal = toInt(getNum(eval!(COPY items[1], envId, pool)));
         endVal = toInt(getNum(eval!(COPY items[2], envId, pool)));
-        MUTABLE rangeItems: Value[]@list = List[];
+        MUTABLE rangeItems: []Value = List[];
         FOR ri IN (startVal ..< endVal) DO
             rangeItems.append(Value{ Number: toFloat(ri) });
         END
@@ -1142,7 +1142,7 @@ FN evalList!(TAKES items: Value[], envId: Id<Env>, MUTABLE pool: Env[50000]@pool
         MUTABLE total = 0.0;
         PARTIAL MATCH listVal START Value.List AS srcItems ->
             FOR si IN (0_i64 ..< srcItems.length()) DO
-                MUTABLE kArgs: Value[]@list = List[];
+                MUTABLE kArgs: []Value = List[];
                 kArgs.append(COPY keyFn); kArgs.append(COPY srcItems[si]);
                 MUTABLE kResult: Value = evalList!(kArgs, envId, pool);
                 kResult = resolveTco!(kResult, pool) OR_ELSE RAISE;
@@ -1157,7 +1157,7 @@ FN evalList!(TAKES items: Value[], envId: Id<Env>, MUTABLE pool: Env[50000]@pool
         count = listLen(listVal);
         PARTIAL MATCH listVal START Value.List AS srcItems ->
             FOR si IN (0_i64 ..< srcItems.length()) DO
-                MUTABLE kArgs: Value[]@list = List[];
+                MUTABLE kArgs: []Value = List[];
                 kArgs.append(COPY keyFn); kArgs.append(COPY srcItems[si]);
                 MUTABLE kResult: Value = evalList!(kArgs, envId, pool);
                 kResult = resolveTco!(kResult, pool) OR_ELSE RAISE;
@@ -1172,7 +1172,7 @@ FN evalList!(TAKES items: Value[], envId: Id<Env>, MUTABLE pool: Env[50000]@pool
         MUTABLE best = 999999999.0;
         PARTIAL MATCH listVal START Value.List AS srcItems ->
             FOR si IN (0_i64 ..< srcItems.length()) DO
-                MUTABLE kArgs: Value[]@list = List[];
+                MUTABLE kArgs: []Value = List[];
                 kArgs.append(COPY keyFn); kArgs.append(COPY srcItems[si]);
                 MUTABLE kResult: Value = evalList!(kArgs, envId, pool);
                 kResult = resolveTco!(kResult, pool) OR_ELSE RAISE;
@@ -1187,7 +1187,7 @@ FN evalList!(TAKES items: Value[], envId: Id<Env>, MUTABLE pool: Env[50000]@pool
         MUTABLE best = 0.0 - 999999999.0;
         PARTIAL MATCH listVal START Value.List AS srcItems ->
             FOR si IN (0_i64 ..< srcItems.length()) DO
-                MUTABLE kArgs: Value[]@list = List[];
+                MUTABLE kArgs: []Value = List[];
                 kArgs.append(COPY keyFn); kArgs.append(COPY srcItems[si]);
                 MUTABLE kResult: Value = evalList!(kArgs, envId, pool);
                 kResult = resolveTco!(kResult, pool) OR_ELSE RAISE;
@@ -1202,7 +1202,7 @@ FN evalList!(TAKES items: Value[], envId: Id<Env>, MUTABLE pool: Env[50000]@pool
         MUTABLE findResult: Value = Value.Nil;
         PARTIAL MATCH listVal START Value.List AS srcItems ->
             FOR si IN (0_i64 ..< srcItems.length()) DO
-                MUTABLE pArgs: Value[]@list = List[];
+                MUTABLE pArgs: []Value = List[];
                 pArgs.append(COPY predFn); pArgs.append(COPY srcItems[si]);
                 MUTABLE pResult: Value = evalList!(pArgs, envId, pool);
                 pResult = resolveTco!(pResult, pool) OR_ELSE RAISE;
@@ -1215,7 +1215,7 @@ FN evalList!(TAKES items: Value[], envId: Id<Env>, MUTABLE pool: Env[50000]@pool
         predFn = eval!(COPY items[2], envId, pool);
         PARTIAL MATCH listVal START Value.List AS srcItems ->
             FOR si IN (0_i64 ..< srcItems.length()) DO
-                MUTABLE pArgs: Value[]@list = List[];
+                MUTABLE pArgs: []Value = List[];
                 pArgs.append(COPY predFn); pArgs.append(COPY srcItems[si]);
                 MUTABLE pResult: Value = evalList!(pArgs, envId, pool);
                 pResult = resolveTco!(pResult, pool) OR_ELSE RAISE;
@@ -1228,7 +1228,7 @@ FN evalList!(TAKES items: Value[], envId: Id<Env>, MUTABLE pool: Env[50000]@pool
         predFn = eval!(COPY items[2], envId, pool);
         PARTIAL MATCH listVal START Value.List AS srcItems ->
             FOR si IN (0_i64 ..< srcItems.length()) DO
-                MUTABLE pArgs: Value[]@list = List[];
+                MUTABLE pArgs: []Value = List[];
                 pArgs.append(COPY predFn); pArgs.append(COPY srcItems[si]);
                 MUTABLE pResult: Value = evalList!(pArgs, envId, pool);
                 pResult = resolveTco!(pResult, pool) OR_ELSE RAISE;
@@ -1241,7 +1241,7 @@ FN evalList!(TAKES items: Value[], envId: Id<Env>, MUTABLE pool: Env[50000]@pool
         fnVal = eval!(COPY items[2], envId, pool);
         PARTIAL MATCH listVal START Value.List AS srcItems ->
             FOR si IN (0_i64 ..< srcItems.length()) DO
-                MUTABLE eArgs: Value[]@list = List[];
+                MUTABLE eArgs: []Value = List[];
                 eArgs.append(COPY fnVal); eArgs.append(COPY srcItems[si]);
                 MUTABLE eResult: Value = evalList!(eArgs, envId, pool);
                 eResult = resolveTco!(eResult, pool) OR_ELSE RAISE;
@@ -1251,7 +1251,7 @@ FN evalList!(TAKES items: Value[], envId: Id<Env>, MUTABLE pool: Env[50000]@pool
     ELSE_IF formName == "list-skip" THEN
         listVal = eval!(COPY items[1], envId, pool);
         skipN = toInt(getNum(eval!(COPY items[2], envId, pool)));
-        MUTABLE skipped: Value[]@list = List[];
+        MUTABLE skipped: []Value = List[];
         PARTIAL MATCH listVal START Value.List AS srcItems ->
             FOR si IN (skipN ..< srcItems.length()) DO
                 skipped.append(COPY srcItems[si]);
@@ -1261,12 +1261,12 @@ FN evalList!(TAKES items: Value[], envId: Id<Env>, MUTABLE pool: Env[50000]@pool
     ELSE_IF formName == "list-take-while" THEN
         listVal = eval!(COPY items[1], envId, pool);
         predFn = eval!(COPY items[2], envId, pool);
-        MUTABLE taken: Value[]@list = List[];
+        MUTABLE taken: []Value = List[];
         MUTABLE taking = TRUE;
         PARTIAL MATCH listVal START Value.List AS srcItems ->
             FOR si IN (0_i64 ..< srcItems.length()) DO
                 IF taking THEN
-                    MUTABLE tArgs: Value[]@list = List[];
+                    MUTABLE tArgs: []Value = List[];
                     tArgs.append(COPY predFn); tArgs.append(COPY srcItems[si]);
                     MUTABLE tResult: Value = evalList!(tArgs, envId, pool);
                     tResult = resolveTco!(tResult, pool) OR_ELSE RAISE;
@@ -1283,7 +1283,7 @@ FN evalList!(TAKES items: Value[], envId: Id<Env>, MUTABLE pool: Env[50000]@pool
         IF isError?(key) THEN RETURN key; END
         val = eval!(COPY items[3], envId, pool);
         IF isError?(val) THEN RETURN val; END
-        MUTABLE newPairs: Value[]@list = List[];
+        MUTABLE newPairs: []Value = List[];
         MUTABLE replaced = FALSE;
         PARTIAL MATCH alist START
             Value.List AS pairs ->
@@ -1330,7 +1330,7 @@ FN evalList!(TAKES items: Value[], envId: Id<Env>, MUTABLE pool: Env[50000]@pool
 
     ELSE_IF formName == "typed-list:i64" THEN
         # (typed-list:i64 1 2 3) -> TypedI64Arr with raw Int64[] storage
-        MUTABLE typedItems: Int64[]@list = List[];
+        MUTABLE typedItems: []Int64 = List[];
         FOR ti IN (1_i64 ..< items.length()) DO
             tval = eval!(COPY items[ti], envId, pool);
             IF isError?(tval) THEN RETURN tval; END
@@ -1343,7 +1343,7 @@ FN evalList!(TAKES items: Value[], envId: Id<Env>, MUTABLE pool: Env[50000]@pool
         # (typed-struct:i64 "Name" field1 field2 ...) -> Pair{Symbol(Name), TypedI64Arr}
         tagVal = eval!(COPY items[1], envId, pool);
         IF isError?(tagVal) THEN RETURN tagVal; END
-        MUTABLE structData: Int64[]@list = List[];
+        MUTABLE structData: []Int64 = List[];
         FOR fi IN (2_i64 ..< items.length()) DO
             fval = eval!(COPY items[fi], envId, pool);
             IF isError?(fval) THEN RETURN fval; END
@@ -1354,7 +1354,7 @@ FN evalList!(TAKES items: Value[], envId: Id<Env>, MUTABLE pool: Env[50000]@pool
     ELSE_IF formName == "typed-struct:f64" THEN
         tagVal = eval!(COPY items[1], envId, pool);
         IF isError?(tagVal) THEN RETURN tagVal; END
-        MUTABLE structData: Float64[]@list = List[];
+        MUTABLE structData: []Float64 = List[];
         FOR fi IN (2_i64 ..< items.length()) DO
             fval = eval!(COPY items[fi], envId, pool);
             IF isError?(fval) THEN RETURN fval; END
@@ -1383,7 +1383,7 @@ FN evalList!(TAKES items: Value[], envId: Id<Env>, MUTABLE pool: Env[50000]@pool
         RETURN vecRef(sval, idx);
 
     ELSE_IF formName == "typed-list:f64" THEN
-        MUTABLE typedFloats: Float64[]@list = List[];
+        MUTABLE typedFloats: []Float64 = List[];
         FOR ti IN (1_i64 ..< items.length()) DO
             tval = eval!(COPY items[ti], envId, pool);
             IF isError?(tval) THEN RETURN tval; END
@@ -1394,7 +1394,7 @@ FN evalList!(TAKES items: Value[], envId: Id<Env>, MUTABLE pool: Env[50000]@pool
     ELSE_IF formName == "to-typed:f64" THEN
         listVal = eval!(COPY items[1], envId, pool);
         IF isError?(listVal) THEN RETURN listVal; END
-        MUTABLE convertedF: Float64[]@list = List[];
+        MUTABLE convertedF: []Float64 = List[];
         PARTIAL MATCH listVal START
             Value.List AS srcItems ->
                 FOR ci IN (0_i64 ..< srcItems.length()) DO
@@ -1423,7 +1423,7 @@ FN evalList!(TAKES items: Value[], envId: Id<Env>, MUTABLE pool: Env[50000]@pool
         # (to-typed:i64 untypedList) -> convert Value[] list to Int64[]
         listVal = eval!(COPY items[1], envId, pool);
         IF isError?(listVal) THEN RETURN listVal; END
-        MUTABLE converted: Int64[]@list = List[];
+        MUTABLE converted: []Int64 = List[];
         PARTIAL MATCH listVal START
             Value.List AS srcItems ->
                 FOR ci IN (0_i64 ..< srcItems.length()) DO
@@ -1440,7 +1440,7 @@ FN evalList!(TAKES items: Value[], envId: Id<Env>, MUTABLE pool: Env[50000]@pool
         IF isError?(arrVal) THEN RETURN arrVal; END
         PARTIAL MATCH arrVal START
             Value.TypedI64Arr AS iarr ->
-                MUTABLE untyped: Value[]@list = List[];
+                MUTABLE untyped: []Value = List[];
                 FOR ui IN (0_i64 ..< iarr.length()) DO
                     untyped.append(Value{ Int64Val: iarr[ui] });
                 END
@@ -1456,7 +1456,7 @@ FN evalList!(TAKES items: Value[], envId: Id<Env>, MUTABLE pool: Env[50000]@pool
         IF isError?(arrVal) THEN RETURN arrVal; END
         newVal = eval!(COPY items[2], envId, pool);
         IF isError?(newVal) THEN RETURN newVal; END
-        MUTABLE newArr: Int64[]@list = List[];
+        MUTABLE newArr: []Int64 = List[];
         PARTIAL MATCH arrVal START
             Value.TypedI64Arr AS iarr ->
                 FOR pi IN (0_i64 ..< iarr.length()) DO
@@ -1579,7 +1579,7 @@ FN evalList!(TAKES items: Value[], envId: Id<Env>, MUTABLE pool: Env[50000]@pool
         sCdr = pairCdr(sVal);
         PARTIAL MATCH sCdr START
             Value.TypedI64Arr AS si ->
-                MUTABLE trData: Int64[]@list = List[];
+                MUTABLE trData: []Int64 = List[];
                 trData.append(si[0] + getInt(dxVal));
                 trData.append(si[1] + getInt(dyVal));
                 RETURN Value.Pair{ pairCar: COPY tagVal, pairCdr: Value{ TypedI64Arr: trData } };,
@@ -1725,7 +1725,7 @@ FN evalList!(TAKES items: Value[], envId: Id<Env>, MUTABLE pool: Env[50000]@pool
         END
 
     ELSE
-        MUTABLE evaled: Value[]@list = List[];
+        MUTABLE evaled: []Value = List[];
         FOR ei IN (0_i64 ..< items.length()) DO
             argVal = eval!(COPY items[ei], envId, pool);
             IF isError?(argVal) THEN RETURN argVal; END
@@ -1805,7 +1805,7 @@ END
 
 # runTest: tokenize + parse + eval
 
-FN runTest!(input: String, envId: Id<Env>, MUTABLE pool: Env[50000]@pool, MUTABLE penv: HashMap<Value>) RETURNS !Value REQUIRES pool: LOCKED EFFECTS REENTRANT ->
+FN runTest!(input: String, envId: Id<Env>, MUTABLE pool: [Pool(50000)]Env, MUTABLE penv: {String}Value) RETURNS !Value REQUIRES pool: LOCKED EFFECTS REENTRANT ->
     tokenizeToEnv!(penv, input);
     penv["__rp"] = Value{ Number: 0.0 };
     ast = readFormEnv!(penv);
@@ -1815,7 +1815,7 @@ END
 # Setup: create root env with all native functions registered.
 # Returns the root env Id.
 
-FN setupEnv!(MUTABLE pool: Env[50000]@pool) RETURNS !Id<Env> REQUIRES pool: LOCKED ->
+FN setupEnv!(MUTABLE pool: [Pool(50000)]Env) RETURNS !Id<Env> REQUIRES pool: LOCKED ->
     rootId: Id<Env> = pool.insert(Env{ vars: {} });
     # Arithmetic: 1-4
     pool[rootId]?.vars["+"] = Value{ NativeFn: 1 };
@@ -1936,9 +1936,9 @@ END
 # A compiled bytecode chunk: flat instruction array + constant pool + source lines.
 
 STRUCT Chunk {
-    ops: Int64[]@list,
-    consts: Value[]@list,
-    lines: Int64[]@list
+    ops: []Int64,
+    consts: []Value,
+    lines: []Int64
 }
 
 # A call frame tracks the return point and base pointer for each function call.
@@ -1952,11 +1952,11 @@ STRUCT Frame {
 
 # Bytecode loader: reads ops and consts from files written by Ruby compiler
 
-FN loadBytecodeOps!(path: String, MUTABLE pool: Env[50000]@pool) RETURNS !Int64[] REQUIRES pool: LOCKED ->
+FN loadBytecodeOps!(path: String, MUTABLE pool: [Pool(50000)]Env) RETURNS !Int64[] REQUIRES pool: LOCKED ->
     raw = readFile(path) OR_ELSE RAISE;
     # Split on commas using the interpreter's split function
     parts = split(raw, ",");
-    MUTABLE ops: Int64[]@list = List[];
+    MUTABLE ops: []Int64 = List[];
     FOR pi IN (0_i64 ..< parts.length()) DO
         part = trim(parts[pi]);
         IF part.length() > 0 THEN
@@ -1968,9 +1968,9 @@ FN loadBytecodeOps!(path: String, MUTABLE pool: Env[50000]@pool) RETURNS !Int64[
     RETURN ops;
 END
 
-FN loadBytecodeConsts!(path: String, MUTABLE pool: Env[50000]@pool) RETURNS !Value[] REQUIRES pool: LOCKED ->
+FN loadBytecodeConsts!(path: String, MUTABLE pool: [Pool(50000)]Env) RETURNS !Value[] REQUIRES pool: LOCKED ->
     raw = readFile(path) OR_ELSE RAISE;
-    MUTABLE consts: Value[]@list = List[];
+    MUTABLE consts: []Value = List[];
     # Parse line by line
     MUTABLE lineStart: Int64 = 0;
     FOR ci IN (0_i64 ..< raw.length()) DO
@@ -1988,7 +1988,7 @@ FN loadBytecodeConsts!(path: String, MUTABLE pool: Env[50000]@pool) RETURNS !Val
     RETURN consts;
 END
 
-FN parseConstLine!(line: String, MUTABLE pool: Env[50000]@pool) RETURNS !Value REQUIRES pool: LOCKED ->
+FN parseConstLine!(line: String, MUTABLE pool: [Pool(50000)]Env) RETURNS !Value REQUIRES pool: LOCKED ->
     IF line == "N" THEN RETURN Value.Nil; END
     IF startsWith?(line, "I:") THEN
         numStr = substr(line, 2, line.length() - 2);
@@ -2012,7 +2012,7 @@ FN parseConstLine!(line: String, MUTABLE pool: Env[50000]@pool) RETURNS !Value R
         RETURN Value{ Symbol: substr(line, 4, line.length() - 4) };
     END
     IF line == "L" THEN
-        MUTABLE empty: Value[]@list = List[];
+        MUTABLE empty: []Value = List[];
         RETURN Value{ List: empty };
     END
     RETURN Value.Nil;
@@ -2045,9 +2045,9 @@ END
 # compile! stores results in pool env at __bc_ops and __bc_consts keys.
 # Caller reads them from pool[envId] after the call.
 
-FN compile!(ast: Value, envId: Id<Env>, MUTABLE pool: Env[50000]@pool) RETURNS !Void REQUIRES pool: LOCKED EFFECTS REENTRANT ->
-    MUTABLE ops: Value[]@list = List[];
-    MUTABLE consts: Value[]@list = List[];
+FN compile!(ast: Value, envId: Id<Env>, MUTABLE pool: [Pool(50000)]Env) RETURNS !Void REQUIRES pool: LOCKED EFFECTS REENTRANT ->
+    MUTABLE ops: []Value = List[];
+    MUTABLE consts: []Value = List[];
 
     IF isSymbol?(ast) THEN
         symName = getSymName(ast);
@@ -2178,9 +2178,9 @@ END
 # Push: IF sp >= stack.length() THEN stack.append(val) ELSE stack[sp] = val END; sp += 1
 # Returns the value on top of the stack at halt.
 
-FN exec!(ops: Int64[], consts: Value[], envId: Id<Env>, MUTABLE pool: Env[50000]@pool) RETURNS !Value REQUIRES pool: LOCKED EFFECTS REENTRANT ->
-    MUTABLE stack: Value[]@list = List[];
-    MUTABLE slots: Value[]@list = List[];
+FN exec!(ops: Int64[], consts: Value[], envId: Id<Env>, MUTABLE pool: [Pool(50000)]Env) RETURNS !Value REQUIRES pool: LOCKED EFFECTS REENTRANT ->
+    MUTABLE stack: []Value = List[];
+    MUTABLE slots: []Value = List[];
     MUTABLE sp: Int64 = 0;
     MUTABLE ip: Int64 = 0;
     MUTABLE curEnv: Id<Env> = COPY envId;
@@ -2288,7 +2288,7 @@ FN exec!(ops: Int64[], consts: Value[], envId: Id<Env>, MUTABLE pool: Env[50000]
             fnId = getNativeId(fnVal);
             IF fnId > 0 THEN
                 # Native function call
-                MUTABLE cArgs: Value[]@list = List[];
+                MUTABLE cArgs: []Value = List[];
                 cArgs.append(Value.Nil);
                 FOR ci IN (0_i64 ..< argc) DO
                     cArgs.append(COPY (stack[sp - argc + ci] OR_ELSE Value.Nil));
@@ -2307,7 +2307,7 @@ FN exec!(ops: Int64[], consts: Value[], envId: Id<Env>, MUTABLE pool: Env[50000]
         ELSE_IF op == 70 THEN
             nid = ops[ip]; ip += 1;
             argc = ops[ip]; ip += 1;
-            MUTABLE nArgs: Value[]@list = List[];
+            MUTABLE nArgs: []Value = List[];
             nArgs.append(Value.Nil);
             FOR ni IN (0_i64 ..< argc) DO
                 nArgs.append(COPY (stack[sp - argc + ni] OR_ELSE Value.Nil));
@@ -2400,11 +2400,11 @@ END
 
 # Test helpers: create fresh interpreter, run input, return result string.
 
-FN evalIn!(input: String, readable: Bool, rootId: Id<Env>, MUTABLE pool: Env[50000]@pool, MUTABLE penv: HashMap<Value>) RETURNS !String REQUIRES pool: LOCKED ->
+FN evalIn!(input: String, readable: Bool, rootId: Id<Env>, MUTABLE pool: [Pool(50000)]Env, MUTABLE penv: {String}Value) RETURNS !String REQUIRES pool: LOCKED ->
     RETURN prStr(runTest!(input, rootId, pool, penv) OR_ELSE RAISE, readable);
 END
 
-FN evalSeqIn!(inputs: String[], readable: Bool, rootId: Id<Env>, MUTABLE pool: Env[50000]@pool, MUTABLE penv: HashMap<Value>) RETURNS !String REQUIRES pool: LOCKED ->
+FN evalSeqIn!(inputs: String[], readable: Bool, rootId: Id<Env>, MUTABLE pool: [Pool(50000)]Env, MUTABLE penv: {String}Value) RETURNS !String REQUIRES pool: LOCKED ->
     MUTABLE result: Value = Value.Nil;
     FOR i IN (0_i64 ..< inputs.length()) DO
         result = runTest!(inputs[i], rootId, pool, penv) OR_ELSE RAISE;
@@ -2416,7 +2416,7 @@ END
 # Uses the tree-walker's eval! to run compile! (which is CLEAR code),
 # then extracts the result and runs it on exec!.
 
-FN bcEvalIn!(input: String, readable: Bool, rootId: Id<Env>, MUTABLE pool: Env[50000]@pool, MUTABLE penv: HashMap<Value>) RETURNS !String REQUIRES pool: LOCKED ->
+FN bcEvalIn!(input: String, readable: Bool, rootId: Id<Env>, MUTABLE pool: [Pool(50000)]Env, MUTABLE penv: {String}Value) RETURNS !String REQUIRES pool: LOCKED ->
     tokenizeToEnv!(penv, input) OR_ELSE RAISE;
     penv["__rp"] = Value{ Number: 0.0 };
     ast = readFormEnv!(penv);
@@ -2424,12 +2424,12 @@ FN bcEvalIn!(input: String, readable: Bool, rootId: Id<Env>, MUTABLE pool: Env[5
     # Read compiled bytecode from env (stored entry-by-entry)
     opCount = toInt(getNum(pool[rootId]?.vars["__bc_opN"] OR_ELSE Value{ Number: 0.0 }));
     constCount = toInt(getNum(pool[rootId]?.vars["__bc_cN"] OR_ELSE Value{ Number: 0.0 }));
-    MUTABLE intOps: Int64[]@list = List[];
+    MUTABLE intOps: []Int64 = List[];
     FOR oi IN (0_i64 ..< opCount) DO
         opV = pool[rootId]?.vars["__bc_o" $+ oi.toString()] OR_ELSE Value{ Number: 0.0 };
         intOps.append(toInt(getNum(opV)));
     END
-    MUTABLE bcConsts: Value[]@list = List[];
+    MUTABLE bcConsts: []Value = List[];
     FOR ci IN (0_i64 ..< constCount) DO
         cV = pool[rootId]?.vars["__bc_c" $+ ci.toString()] OR_ELSE Value.Nil;
         bcConsts.append(COPY cV);
@@ -2438,10 +2438,10 @@ FN bcEvalIn!(input: String, readable: Bool, rootId: Id<Env>, MUTABLE pool: Env[5
     RETURN prStr(result, readable);
 END
 
-FN testBytecode!(rootId: Id<Env>, MUTABLE pool: Env[50000]@pool) RETURNS !Void REQUIRES pool: LOCKED ->
+FN testBytecode!(rootId: Id<Env>, MUTABLE pool: [Pool(50000)]Env) RETURNS !Void REQUIRES pool: LOCKED ->
     # Test 1: (10 - 4) * 3 = 18 (arithmetic + stack ops)
-    MUTABLE ops1: Int64[]@list = List[];
-    MUTABLE c1: Value[]@list = List[];
+    MUTABLE ops1: []Int64 = List[];
+    MUTABLE c1: []Value = List[];
     c1.append(Value{ Number: 10.0 }); c1.append(Value{ Number: 4.0 }); c1.append(Value{ Number: 3.0 });
     ops1.append(1); ops1.append(0);   # loadConst 10
     ops1.append(1); ops1.append(1);   # loadConst 4
@@ -2452,8 +2452,8 @@ FN testBytecode!(rootId: Id<Env>, MUTABLE pool: Env[50000]@pool) RETURNS !Void R
     ASSERT prStr(exec!(ops1, c1, rootId, pool) OR_ELSE RAISE, TRUE) == "18", "bc: (10-4)*3 = 18";
 
     # Test 2: if 1 < 2 then 10 else 20 (control flow)
-    MUTABLE ops2: Int64[]@list = List[];
-    MUTABLE c2: Value[]@list = List[];
+    MUTABLE ops2: []Int64 = List[];
+    MUTABLE c2: []Value = List[];
     c2.append(Value{ Number: 1.0 }); c2.append(Value{ Number: 2.0 });
     c2.append(Value{ Number: 10.0 }); c2.append(Value{ Number: 20.0 });
     ops2.append(1); ops2.append(0);     # loadConst 1
@@ -2467,8 +2467,8 @@ FN testBytecode!(rootId: Id<Env>, MUTABLE pool: Env[50000]@pool) RETURNS !Void R
     ASSERT prStr(exec!(ops2, c2, rootId, pool) OR_ELSE RAISE, TRUE) == "10", "bc: if 1<2 then 10 else 20";
 
     # Test 3: define x=5, native +(x, 3) -> 8 (env + native calls)
-    MUTABLE ops3: Int64[]@list = List[];
-    MUTABLE c3: Value[]@list = List[];
+    MUTABLE ops3: []Int64 = List[];
+    MUTABLE c3: []Value = List[];
     c3.append(Value{ Number: 5.0 }); c3.append(Value{ Symbol: "x" }); c3.append(Value{ Number: 3.0 });
     ops3.append(1); ops3.append(0);     # loadConst 5
     ops3.append(3); ops3.append(1);     # storeName "x"
@@ -2483,8 +2483,8 @@ FN testBytecode!(rootId: Id<Env>, MUTABLE pool: Env[50000]@pool) RETURNS !Void R
 END
 
 FN main() RETURNS !Void ->
-    MUTABLE pool: Env[50000]@pool:shared:locked = [];
-    MUTABLE penv: HashMap<Value> = {};
+    MUTABLE pool: [Pool(50000)]@shared:locked Env = [];
+    MUTABLE penv: {String}Value = {};
     rootId = setupEnv!(pool) OR_ELSE RAISE;
 
     # Arithmetic

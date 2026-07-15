@@ -557,7 +557,7 @@ RSpec.describe SemanticAnnotator do
       it "preserves declared sharding and sync metadata on map bindings" do
         ast = run(<<~CLEAR)
           FN main() RETURNS Void ->
-            MUTABLE counts: HashMap<Int64>@sharded(4):locked = {};
+            MUTABLE counts: {String}@sharded(4):locked Int64 = {};
             RETURN;
           END
         CLEAR

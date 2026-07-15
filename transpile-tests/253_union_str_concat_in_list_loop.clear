@@ -20,7 +20,7 @@ UNION Value {
 }
 
 FN main() RETURNS Void ->
-    MUTABLE list: Value[]@list = List[];
+    MUTABLE list: []Value = List[];
 
     FOR i IN (0_i64 ..< 10) DO
         s1 = "item_";

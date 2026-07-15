@@ -182,7 +182,7 @@ RSpec.describe "automatic ownership transport" do
   it "derives mutation from stdlib and user signature metadata" do
     stdlib_source = <<~CLEAR
       FN main() RETURNS Void ->
-        MUTABLE x: Int64[]@list = [1];
+        MUTABLE x: []Int64 = [1];
         y = x;
         x.append(2);
         ASSERT y[0] == 1;
@@ -239,7 +239,7 @@ RSpec.describe "automatic ownership transport" do
 
   it "records resolved mutation through a nested place against its root binding" do
     source = <<~CLEAR
-      STRUCT Holder { values: Int64[]@list, name: String }
+      STRUCT Holder { values: []Int64, name: String }
       FN main() RETURNS Void ->
         MUTABLE holder = Holder{ values: [1], name: "Ada" };
         snapshot = holder;

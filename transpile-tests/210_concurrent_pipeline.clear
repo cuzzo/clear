@@ -19,7 +19,7 @@ FN main() RETURNS Void ->
     ASSERT result == 42, "bg + next";
 
     # CONCURRENT SELECT with larger workload (exercises worker pool)
-    MUTABLE big: Int64[]@list = [];
+    MUTABLE big: []Int64 = [];
     FOR i IN (0_i64 ..< 100) -> big.append(i);
     mapped = big |> CONCURRENT(workers: 4) SELECT _ * 3;
     ASSERT mapped.length() == 100, "big concurrent select length";

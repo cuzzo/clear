@@ -18,7 +18,7 @@ FN main() RETURNS Void ->
     n2 = COPY n;
 
     # COPY into function argument
-    MUTABLE list: Value[]@list = List[];
+    MUTABLE list: []Value = List[];
     list.append(COPY v);
     list.append(COPY n);
     ASSERT list.length() == 2, "list has 2";

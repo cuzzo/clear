@@ -18,7 +18,7 @@
 # Compare to Go (sync.Map) and Rust (dashmap).
 
 FN main() RETURNS Void ->
-  MUTABLE map: HashMap<String> @sharded(32) = {};
+  MUTABLE map: {String}@sharded(32) String = {};
   n = 10_000_000;
 
   # Workload 1: Uniform SET (1M keys, partitioned)

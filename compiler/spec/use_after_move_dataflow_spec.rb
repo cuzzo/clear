@@ -157,7 +157,7 @@ RSpec.describe UseAfterMoveChecker do
           RETURN items.length();
         END
         FN main() RETURNS Void ->
-          MUTABLE vals: Int64[]@list = List[];
+          MUTABLE vals: []Int64 = List[];
           vals.append(1_i64);
           n = consume(GIVE vals);
           RETURN;
@@ -168,7 +168,7 @@ RSpec.describe UseAfterMoveChecker do
     it "return of owned value" do
       expect_no_error(<<~CLEAR)
         FN makeList() RETURNS !Int64[] ->
-          MUTABLE items: Int64[]@list = List[];
+          MUTABLE items: []Int64 = List[];
           items.append(1_i64);
           RETURN items;
         END
@@ -197,7 +197,7 @@ RSpec.describe UseAfterMoveChecker do
           RETURN items.length();
         END
         FN main() RETURNS Void ->
-          MUTABLE vals: Int64[]@list = List[];
+          MUTABLE vals: []Int64 = List[];
           vals.append(1_i64);
           n1 = readLen(vals);
           n2 = readLen(vals);
@@ -209,7 +209,7 @@ RSpec.describe UseAfterMoveChecker do
     it "if/else where no branch moves" do
       expect_no_error(<<~CLEAR)
         FN main() RETURNS Void ->
-          MUTABLE vals: Int64[]@list = List[];
+          MUTABLE vals: []Int64 = List[];
           vals.append(1_i64);
           IF vals.length() > 0 THEN
             vals.append(2_i64);
@@ -223,7 +223,7 @@ RSpec.describe UseAfterMoveChecker do
     it "loop with no move" do
       expect_no_error(<<~CLEAR)
         FN main() RETURNS Void ->
-          MUTABLE vals: Int64[]@list = List[];
+          MUTABLE vals: []Int64 = List[];
           MUTABLE i = 0;
           WHILE i < 5 DO
             vals.append(i);
@@ -808,7 +808,7 @@ RSpec.describe UseAfterMoveChecker do
     it "direct return of collection marks source as moved" do
       df = analyze_state(<<~CLEAR, "makeList")
         FN makeList() RETURNS !Int64[] ->
-          MUTABLE items: Int64[]@list = List[];
+          MUTABLE items: []Int64 = List[];
           items.append(1_i64);
           RETURN items;
         END
@@ -821,7 +821,7 @@ RSpec.describe UseAfterMoveChecker do
       df = analyze_state(<<~CLEAR, "wrap")
         STRUCT Wrapper { data: Int64[] }
         FN wrap() RETURNS !Wrapper @indirect ->
-          MUTABLE items: Int64[]@list = List[];
+          MUTABLE items: []Int64 = List[];
           items.append(1_i64);
           RETURN Wrapper{ data: items };
         END
@@ -834,7 +834,7 @@ RSpec.describe UseAfterMoveChecker do
     it "return preserves allocator info on moved OwnerEntry" do
       df = analyze_state(<<~CLEAR, "makeList")
         FN makeList() RETURNS !Int64[] ->
-          MUTABLE items: Int64[]@list = List[];
+          MUTABLE items: []Int64 = List[];
           items.append(1_i64);
           RETURN items;
         END
@@ -852,7 +852,7 @@ RSpec.describe UseAfterMoveChecker do
           RETURN items.length();
         END
         FN main() RETURNS Void ->
-          MUTABLE vals: Int64[]@list = List[];
+          MUTABLE vals: []Int64 = List[];
           vals.append(1_i64);
           n = consume(GIVE vals);
           RETURN;

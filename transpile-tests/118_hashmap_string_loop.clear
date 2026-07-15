@@ -5,7 +5,7 @@
 UNION Value { Nil, Str: String, Num: Float64 }
 
 FN main() RETURNS Void ->
-    MUTABLE map: HashMap<Value> = {};
+    MUTABLE map: {String}Value = {};
     MUTABLE i: Int64 = 0;
     WHILE i < 3 DO
         c = charAt("abc", i);

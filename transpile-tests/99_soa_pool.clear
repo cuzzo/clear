@@ -13,13 +13,13 @@ FN main() RETURNS Void ->
     ];
 
     # Same data in a SOA pool.
-    MUTABLE pool: Entity[100]@pool:soa = [];
+    MUTABLE pool: [Pool(100)]@soa Entity = [];
     pool.insert(Entity{ x: 10, y: 20, vx: 1, vy: 2, health: 100 });
     pool.insert(Entity{ x: 30, y: 40, vx: 3, vy: 4, health: 200 });
     pool.insert(Entity{ x: 50, y: 60, vx: 5, vy: 6, health: 0 });
 
     # Same data in a fixed SOA array (T[N]@soa).
-    MUTABLE fixed: Entity[100]@soa = [];
+    MUTABLE fixed: [100]@soa Entity = [];
     fixed.append(Entity{ x: 10, y: 20, vx: 1, vy: 2, health: 100 });
     fixed.append(Entity{ x: 30, y: 40, vx: 3, vy: 4, health: 200 });
     fixed.append(Entity{ x: 50, y: 60, vx: 5, vy: 6, health: 0 });

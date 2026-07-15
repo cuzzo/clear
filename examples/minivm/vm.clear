@@ -176,16 +176,16 @@ ENUM RegisterOp {
 }
 
 STRUCT PackedRegisterProgram {
-    ops: Int64[]@list,
-    opcodes: RegisterOp[]@list,
+    ops: []Int64,
+    opcodes: []RegisterOp,
 }
 
 STRUCT RegisterIntListHandle {
-    values: Int64[]@list,
+    values: []Int64,
 }
 
 STRUCT RegisterStringListHandle {
-    values: String[]@list,
+    values: []String,
 }
 
 # Per-binding metadata recorded by the emitter when --debug is set:
@@ -207,7 +207,7 @@ STRUCT RegisterStringListHandle {
 FN loadRegisterOps!(path: String) RETURNS !Int64[] ->
     raw = readFile(path) OR_ELSE RAISE;
     parts = split(raw, ",");
-    MUTABLE ops: Int64[]@list = List[];
+    MUTABLE ops: []Int64 = List[];
     FOR pi IN (0_i64 ..< parts.length()) DO
         part = trim(parts[pi]);
         IF part.length() > 0 THEN
@@ -227,9 +227,9 @@ END
 # instruction; operand-position entries hold 0. The runner consults this
 # on error to format "<file>:<line>" instead of just "ip=<N>". Always
 # present (emitted by bc_run.rb) -- see register_bc_emitter.rb.
-FN loadRegisterSourceLines!(path: String) RETURNS !Int64[]@list ->
+FN loadRegisterSourceLines!(path: String) RETURNS ![]Int64 ->
     bytes: String@raw = readFile(path) OR_ELSE RAISE;
-    MUTABLE lines: Int64[]@list = List[];
+    MUTABLE lines: []Int64 = List[];
     MUTABLE cursor: Int64 = 0_i64;
     TIGHT WHILE cursor + 4_i64 <= bytes.length() DO
         word = readPackedU32(bytes, cursor);
@@ -249,9 +249,9 @@ END
 # in `:l` and visualization). `<endSourceLine>` is the last line
 # where the binding is live (`-1` means "until function return").
 # `<typeName>` may be empty when the emitter didn't resolve a type.
-FN loadRegisterVarNames!(path: String) RETURNS !RegisterVarName[]@list ->
+FN loadRegisterVarNames!(path: String) RETURNS ![]RegisterVarName ->
     raw = readFile(path) OR_ELSE "";
-    MUTABLE entries: RegisterVarName[]@list = List[];
+    MUTABLE entries: []RegisterVarName = List[];
     parts = split(raw, "\n");
     TIGHT FOR pi IN (0_i64 ..< parts.length()) DO
         entry = trim(parts[pi]);
@@ -320,9 +320,9 @@ END
 # empty list -- the runner then runs without trap rewrites. bc_run.rb
 # writes this file when invoked with `--pause-on=file:line`; see the
 # `--debug` path there.
-FN loadRegisterBreakpoints!(path: String) RETURNS !Int64[]@list ->
+FN loadRegisterBreakpoints!(path: String) RETURNS ![]Int64 ->
     raw = readFile(path) OR_ELSE "";
-    MUTABLE bps: Int64[]@list = List[];
+    MUTABLE bps: []Int64 = List[];
     parts = split(raw, "\n");
     FOR pi IN (0_i64 ..< parts.length()) DO
         entry = trim(parts[pi]);
@@ -338,9 +338,9 @@ END
 # CLEAR source path. Today there is one entry (the main file); a
 # future multi-file (module-imported) attribution will append more
 # entries and stamp non-zero file_ids on MIR statements.
-FN loadRegisterSourcePaths!(path: String) RETURNS !String[]@list ->
+FN loadRegisterSourcePaths!(path: String) RETURNS ![]String ->
     raw: String@raw = readFile(path) OR_ELSE RAISE;
-    MUTABLE paths: String[]@list = List[];
+    MUTABLE paths: []String = List[];
     parts = split(raw, "\n");
     FOR pi IN (0_i64 ..< parts.length()) DO
         entry = parts[pi];
@@ -351,7 +351,7 @@ END
 
 # Returns the CLEAR source line for the instruction starting at `ip`,
 # or 0 if unknown / out of range. Cheap (one bounds-checked load).
-FN sourceLineFor(sourceLines: Int64[]@list, ip: Int64) RETURNS Int64 ->
+FN sourceLineFor(sourceLines: []Int64, ip: Int64) RETURNS Int64 ->
     IF ip < 0_i64 OR ip >= sourceLines.length() THEN RETURN 0_i64; END
     RETURN sourceLines[ip] OR_ELSE 0_i64;
 END
@@ -359,7 +359,7 @@ END
 # Returns the source path for file_id (0 = main file) or empty string
 # if unknown. Today every line attributes to file_id 0; the parameter
 # is plumbed through for the future multi-file path.
-FN sourcePathFor(sourcePaths: String[]@list, fileId: Int64) RETURNS String ->
+FN sourcePathFor(sourcePaths: []String, fileId: Int64) RETURNS String ->
     IF fileId < 0_i64 OR fileId >= sourcePaths.length() THEN RETURN ""; END
     RETURN sourcePaths[fileId] OR_ELSE "";
 END
@@ -386,7 +386,7 @@ END
 # `currentLine`. Used by the `:s` step-source-line command. Walks
 # forward via `nextOpcodeIp`, returning the first opcode whose
 # `sourceLines[ip]` is non-zero and != currentLine. -1 if none.
-FN nextDifferentLineIp(opcodes: RegisterOp[], sourceLines: Int64[]@list, ip: Int64, currentLine: Int64) RETURNS Int64 ->
+FN nextDifferentLineIp(opcodes: RegisterOp[], sourceLines: []Int64, ip: Int64, currentLine: Int64) RETURNS Int64 ->
     MUTABLE candidate: Int64 = nextOpcodeIp(opcodes, ip);
     TIGHT WHILE candidate >= 0_i64 DO
         candLine = sourceLineFor(sourceLines, candidate);
@@ -399,7 +399,7 @@ END
 # Format a runtime VM error with source-line context. Always returns a
 # string the caller can `print()`. Falls back to ip-only when the line
 # table has no entry for `ip` (e.g., synthesized HALT padding).
-FN formatVmError(message: String, ip: Int64, sourceLines: Int64[]@list, sourcePaths: String[]@list) RETURNS !String ->
+FN formatVmError(message: String, ip: Int64, sourceLines: []Int64, sourcePaths: []String) RETURNS !String ->
     line = sourceLineFor(sourceLines, ip);
     ipStr = ip.toString() OR_ELSE RAISE;
     IF line > 0_i64 THEN
@@ -425,8 +425,8 @@ END
 
 FN loadPackedRegisterProgram!(path: String) RETURNS !PackedRegisterProgram ->
     bytes: String@raw = readFile(path) OR_ELSE RAISE;
-    MUTABLE ops: Int64[]@list = List[];
-    MUTABLE opcodes: RegisterOp[]@list = List[];
+    MUTABLE ops: []Int64 = List[];
+    MUTABLE opcodes: []RegisterOp = List[];
     IF bytes.length() < 4 THEN RETURN PackedRegisterProgram{ ops: ops, opcodes: opcodes }; END
     # RBC1
     IF byteAt(bytes, 0) != 82_i64 OR byteAt(bytes, 1) != 66_i64 OR byteAt(bytes, 2) != 67_i64 OR byteAt(bytes, 3) != 49_i64 THEN
@@ -785,7 +785,7 @@ FN registerOpArity(ops: Int64[], ip: Int64, op: RegisterOp) RETURNS Int64 ->
 END
 
 FN decodeRegisterOpcodes!(ops: Int64[]) RETURNS !RegisterOp[] ->
-    MUTABLE decoded: RegisterOp[]@list = List[];
+    MUTABLE decoded: []RegisterOp = List[];
     MUTABLE ip: Int64 = 0;
     TIGHT WHILE ip < ops.length() DO
         op: RegisterOp = CAST(ops[ip] AS RegisterOp);
@@ -824,7 +824,7 @@ END
 
 FN loadRegisterConsts!(path: String) RETURNS !RegisterValue[] ->
     raw = readFile(path) OR_ELSE RAISE;
-    MUTABLE consts: RegisterValue[]@list = List[];
+    MUTABLE consts: []RegisterValue = List[];
     MUTABLE pos: Int64 = 0;
     n = raw.length();
     TIGHT WHILE pos < n DO
@@ -881,14 +881,14 @@ FN stringResult(v: String) RETURNS !RegisterValue ->
     RETURN RegisterValue{ Str: COPY v };
 END
 
-FN runRegisterBytecode!(ops: Int64[], opcodes: RegisterOp[], consts: RegisterValue[], sourceLines: Int64[]@list, sourceColumns: Int64[]@list, sourcePaths: String[]@list, breakpointIps: Int64[]@list, varNames: RegisterVarName[]@list, entryIp: Int64, TAKES initCaps: RegisterValue[], MUTABLE sharedCells: RegisterValue[]@list) RETURNS !RegisterValue REQUIRES sharedCells: LOCKED EFFECTS REENTRANT:MAX_DEPTH(1024) ->
+FN runRegisterBytecode!(ops: Int64[], opcodes: RegisterOp[], consts: RegisterValue[], sourceLines: []Int64, sourceColumns: []Int64, sourcePaths: []String, breakpointIps: []Int64, varNames: []RegisterVarName, entryIp: Int64, TAKES initCaps: RegisterValue[], MUTABLE sharedCells: []RegisterValue) RETURNS !RegisterValue REQUIRES sharedCells: LOCKED EFFECTS REENTRANT:MAX_DEPTH(1024) ->
     # Debugger breakpoints are checked per-instruction by consulting a
     # parallel flag array `isBreakpoint`. Zero overhead on the success
     # path: when `breakpointIps` is empty we bypass the build and the
     # per-dispatch IF short-circuits.
     debuggerActive = breakpointIps.length() > 0_i64;
-    MUTABLE isBreakpoint: Int64[]@list = List[];
-    MUTABLE breakpointEntries: BreakpointEntry[]@list = List[];
+    MUTABLE isBreakpoint: []Int64 = List[];
+    MUTABLE breakpointEntries: []BreakpointEntry = List[];
     IF debuggerActive THEN
         FOR oi IN (0_i64 ..< opcodes.length()) DO
             isBreakpoint.append(0_i64);
@@ -917,57 +917,57 @@ FN runRegisterBytecode!(ops: Int64[], opcodes: RegisterOp[], consts: RegisterVal
     # examples/minivm/register_opcode_layout.rb's RegisterFileLimits;
     # the AllocatorRewriter enforces per-segment caps statically and
     # ICall/FCall enforces nextITop/nextFTop <= cap at runtime.
-    MUTABLE iregs: Int64[512];
-    MUTABLE fregs: Float64[512];
-    MUTABLE sregs: String[256];
-    MUTABLE list0: Int64[]@list = List[];
-    MUTABLE list1: Int64[]@list = List[];
-    MUTABLE list2: Int64[]@list = List[];
-    MUTABLE list3: Int64[]@list = List[];
-    MUTABLE flist0: Float64[]@list = List[];
-    MUTABLE flist1: Float64[]@list = List[];
-    MUTABLE flist2: Float64[]@list = List[];
-    MUTABLE flist3: Float64[]@list = List[];
-    MUTABLE slist0: String[]@list = List[];
-    MUTABLE slist1: String[]@list = List[];
-    MUTABLE slist2: String[]@list = List[];
-    MUTABLE slist3: String[]@list = List[];
-    MUTABLE vmap0: HashMap<RegisterValue> = {};
-    MUTABLE vmap1: HashMap<RegisterValue> = {};
-    MUTABLE vmap2: HashMap<RegisterValue> = {};
-    MUTABLE vmap3: HashMap<RegisterValue> = {};
-    MUTABLE vlist0: RegisterValue[]@list = List[];
-    MUTABLE vlist1: RegisterValue[]@list = List[];
-    MUTABLE vlist2: RegisterValue[]@list = List[];
-    MUTABLE vlist3: RegisterValue[]@list = List[];
+    MUTABLE iregs: [512]Int64;
+    MUTABLE fregs: [512]Float64;
+    MUTABLE sregs: [256]String;
+    MUTABLE list0: []Int64 = List[];
+    MUTABLE list1: []Int64 = List[];
+    MUTABLE list2: []Int64 = List[];
+    MUTABLE list3: []Int64 = List[];
+    MUTABLE flist0: []Float64 = List[];
+    MUTABLE flist1: []Float64 = List[];
+    MUTABLE flist2: []Float64 = List[];
+    MUTABLE flist3: []Float64 = List[];
+    MUTABLE slist0: []String = List[];
+    MUTABLE slist1: []String = List[];
+    MUTABLE slist2: []String = List[];
+    MUTABLE slist3: []String = List[];
+    MUTABLE vmap0: {String}RegisterValue = {};
+    MUTABLE vmap1: {String}RegisterValue = {};
+    MUTABLE vmap2: {String}RegisterValue = {};
+    MUTABLE vmap3: {String}RegisterValue = {};
+    MUTABLE vlist0: []RegisterValue = List[];
+    MUTABLE vlist1: []RegisterValue = List[];
+    MUTABLE vlist2: []RegisterValue = List[];
+    MUTABLE vlist3: []RegisterValue = List[];
     # Separate from vlist0..3 (guests clobber those via LVNew).
-    MUTABLE captureSlots: RegisterValue[]@list = List[];
+    MUTABLE captureSlots: []RegisterValue = List[];
     # futureResolved keyed by id.toString() (no HashMap<Int64>).
     MUTABLE futureTable: ~RegisterValue[]@list = List[];
-    MUTABLE futureResolved: HashMap<RegisterValue> = {};
+    MUTABLE futureResolved: {String}RegisterValue = {};
     # Dedicated BGSPAWN capture-marshal channel; never the guest
     # vlist0..3 (those are clobbered by LVNew).
-    MUTABLE pendingCaps: RegisterValue[]@list = List[];
-    MUTABLE map0: HashMap<Int64> = {};
-    MUTABLE map1: HashMap<Int64> = {};
-    MUTABLE map2: HashMap<Int64> = {};
-    MUTABLE map3: HashMap<Int64> = {};
-    MUTABLE nmap0: HashMap<Int64, Int64> = {};
-    MUTABLE nmap1: HashMap<Int64, Int64> = {};
-    MUTABLE nmap2: HashMap<Int64, Int64> = {};
-    MUTABLE nmap3: HashMap<Int64, Int64> = {};
-    MUTABLE nfmap0: HashMap<Int64, Float64> = {};
-    MUTABLE nfmap1: HashMap<Int64, Float64> = {};
-    MUTABLE nfmap2: HashMap<Int64, Float64> = {};
-    MUTABLE nfmap3: HashMap<Int64, Float64> = {};
-    MUTABLE intListHandles: RegisterIntListHandle[]@list = List[];
-    MUTABLE stringListHandles: RegisterStringListHandle[]@list = List[];
-    MUTABLE frameIBases: Int64[]@list = List[];
-    MUTABLE frameFBases: Int64[]@list = List[];
-    MUTABLE frameITops: Int64[]@list = List[];
-    MUTABLE frameFTops: Int64[]@list = List[];
-    MUTABLE frameRetIps: Int64[]@list = List[];
-    MUTABLE frameRetDsts: Int64[]@list = List[];
+    MUTABLE pendingCaps: []RegisterValue = List[];
+    MUTABLE map0: {String}Int64 = {};
+    MUTABLE map1: {String}Int64 = {};
+    MUTABLE map2: {String}Int64 = {};
+    MUTABLE map3: {String}Int64 = {};
+    MUTABLE nmap0: {Int64}Int64 = {};
+    MUTABLE nmap1: {Int64}Int64 = {};
+    MUTABLE nmap2: {Int64}Int64 = {};
+    MUTABLE nmap3: {Int64}Int64 = {};
+    MUTABLE nfmap0: {Int64}Float64 = {};
+    MUTABLE nfmap1: {Int64}Float64 = {};
+    MUTABLE nfmap2: {Int64}Float64 = {};
+    MUTABLE nfmap3: {Int64}Float64 = {};
+    MUTABLE intListHandles: []RegisterIntListHandle = List[];
+    MUTABLE stringListHandles: []RegisterStringListHandle = List[];
+    MUTABLE frameIBases: []Int64 = List[];
+    MUTABLE frameFBases: []Int64 = List[];
+    MUTABLE frameITops: []Int64 = List[];
+    MUTABLE frameFTops: []Int64 = List[];
+    MUTABLE frameRetIps: []Int64 = List[];
+    MUTABLE frameRetDsts: []Int64 = List[];
     MUTABLE iBase: Int64 = 0_i64;
     MUTABLE fBase: Int64 = 0_i64;
     # Error-union runtime control state (VM-internal machinery, not a
@@ -991,8 +991,8 @@ FN runRegisterBytecode!(ops: Int64[], opcodes: RegisterOp[], consts: RegisterVal
     MUTABLE recordingActive: Int64 = 0_i64;
     IF debuggerActive THEN recordingActive = 1_i64; END
     MUTABLE step: Int64 = 0_i64;
-    MUTABLE traceEvents: TraceEvent[]@list = List[];
-    MUTABLE traceStrings: String[]@list = List[];
+    MUTABLE traceEvents: []TraceEvent = List[];
+    MUTABLE traceStrings: []String = List[];
     # Monotonic alloc-id for trace's kind=4 (allocation) events.
     # Each container creation (LNew / MNew / LFNew / NMNew) increments
     # this and records an event so visualizers can attribute future
@@ -2528,7 +2528,7 @@ FN runRegisterBytecode!(ops: Int64[], opcodes: RegisterOp[], consts: RegisterVal
                     bgDst = ops[ip]; ip += 1;
                     bgEntry = ops[ip]; ip += 1;
                     ip += 1;
-                    MUTABLE bgCaps: RegisterValue[]@list = List[];
+                    MUTABLE bgCaps: []RegisterValue = List[];
                     FOR bci IN (0_i64 ..< pendingCaps.length()) DO
                         bgCaps.append(COPY (pendingCaps[bci] OR_ELSE RegisterValue.Nil));
                     END

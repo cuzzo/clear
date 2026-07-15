@@ -292,13 +292,61 @@ RSpec.describe ClearFixSupport do
       source = <<~CLEAR
         REQUIRE "helper.clear";
         FN main() RETURNS Void ->
-          values: Int64[] = [];
+          values: Int64[]@list = [];
           RETURN;
         END
       CLEAR
 
       findings = described_class.collect_findings(source, source_dir: dir)
-      expect(findings.flat_map(&:fixes).map(&:description)).to include("Rewrite as `[]Int64`.")
+      migration = findings.find { |finding| finding.category == :type_migration }
+      expect(migration&.fixes&.map(&:description)).to include("Rewrite as `[]Int64`.")
+    end
+  end
+
+  it "still collects root migrations when an external package is unavailable" do
+    source = <<~CLEAR
+      REQUIRE "pkg:not-installed";
+      values: Int64[]@list = [];
+    CLEAR
+
+    findings = described_class.collect_findings(source)
+    migration = findings.find { |finding| finding.category == :type_migration }
+    expect(migration&.fixes&.map(&:description)).to include("Rewrite as `[]Int64`.")
+  end
+
+  it "skips malformed CLEAR heredocs without aborting a bulk fix run" do
+    Dir.mktmpdir do |dir|
+      path = File.join(dir, "negative_spec.rb")
+      File.write(path, <<~RUBY)
+        source = <<~CLEAR
+          value = "unterminated;
+        CLEAR
+      RUBY
+
+      result = described_class.run_args(
+        ["--only=type_migration", path],
+        out: StringIO.new,
+        err: StringIO.new,
+        input: StringIO.new,
+      )
+      expect(result.edits_applied).to eq(0)
+    end
+  end
+
+  it "runs isolated type migrations without invoking semantic annotation" do
+    Dir.mktmpdir do |dir|
+      path = File.join(dir, "legacy.clear")
+      File.write(path, "values: Int64[]@list = [];\n")
+      allow(SemanticAnnotator).to receive(:new).and_raise("annotation must not run")
+
+      result = described_class.run_args(
+        ["--only=type_migration", path],
+        out: StringIO.new,
+        err: StringIO.new,
+        input: StringIO.new,
+      )
+      expect(result.edits_applied).to eq(1)
+      expect(File.read(path)).to eq("values: []Int64 = [];\n")
     end
   end
 
@@ -350,7 +398,7 @@ RSpec.describe ClearFixSupport do
 
       moved_path = File.join(dir, "moved.clear")
       File.write(moved_path, <<~CLEAR)
-        STRUCT Config {id: Float64, data: HashMap<Float64>}
+        STRUCT Config {id: Float64, data: {String}Float64}
 
         FN main() RETURNS Void ->
           a = Config {id: 1.0, data: {"x": 1.0}};

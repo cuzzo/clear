@@ -2,7 +2,7 @@
 # $u is substituted as ctx.items[__idx] in the worker body.
 
 STRUCT Order { price: Float64, qty: Int64 }
-STRUCT User { name: String, discount: Float64, score: Float64, orders: Order[]@list }
+STRUCT User { name: String, discount: Float64, score: Float64, orders: []Order }
 
 FN main() RETURNS Void ->
     alice_orders: Order[] = [Order{ price: 10.0, qty: 2 }];

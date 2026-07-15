@@ -43,7 +43,7 @@ FN isDelimiter?(c: String) RETURNS Bool ->
     RETURN c == " " OR c == "," OR c == "\n" OR c == "\t" OR c == "(" OR c == ")" OR c == "[" OR c == "]" OR c == "\"" OR c == ";";
 END
 
-FN tokenizeToEnv!(MUTABLE penv: HashMap<Value>, str: String) RETURNS !Void ->
+FN tokenizeToEnv!(MUTABLE penv: {String}Value, str: String) RETURNS !Void ->
     MUTABLE count: Int64 = 0;
     MUTABLE i: Int64 = 0;
     len = str.length();
@@ -82,12 +82,12 @@ FN tokenizeToEnv!(MUTABLE penv: HashMap<Value>, str: String) RETURNS !Void ->
     RETURN;
 END
 
-FN getTokenStr!(MUTABLE penv: HashMap<Value>, idx: Int64) RETURNS !String ->
+FN getTokenStr!(MUTABLE penv: {String}Value, idx: Int64) RETURNS !String ->
     val = penv["__t" $+ idx.toString()] OR_ELSE Value.Nil;
     RETURN getStr(val);
 END
 
-FN readFormEnv!(MUTABLE penv: HashMap<Value>) RETURNS !Value EFFECTS REENTRANT ->
+FN readFormEnv!(MUTABLE penv: {String}Value) RETURNS !Value EFFECTS REENTRANT ->
     posVal = penv["__rp"] OR_ELSE Value{ Number: 0.0 };
     tcVal = penv["__tc"] OR_ELSE Value{ Number: 0.0 };
     pos = toInt(getNum(posVal));
@@ -107,8 +107,8 @@ FN readFormEnv!(MUTABLE penv: HashMap<Value>) RETURNS !Value EFFECTS REENTRANT -
     RETURN readAtom(tok) OR_ELSE RAISE;
 END
 
-FN readListEnv!(MUTABLE penv: HashMap<Value>) RETURNS !Value EFFECTS REENTRANT ->
-    MUTABLE items: Value[]@list = List[];
+FN readListEnv!(MUTABLE penv: {String}Value) RETURNS !Value EFFECTS REENTRANT ->
+    MUTABLE items: []Value = List[];
     MUTABLE listDone = FALSE;
     WHILE listDone == FALSE DO
         curPosVal = penv["__rp"] OR_ELSE Value{ Number: 0.0 };

@@ -115,23 +115,23 @@ RSpec.describe LintFixRewriter do
     it "keeps `: HashMap<K, V>` (decorated type)" do
       src = <<~CLEAR
         FN main() RETURNS Void ->
-          MUTABLE m: HashMap<Int64, Float64> = {};
+          MUTABLE m: {Int64}Float64 = {};
           RETURN;
         END
       CLEAR
       out = rw(src)
-      expect(out).to include(": HashMap<Int64, Float64>")
+      expect(out).to include(": {Int64}Float64")
     end
 
     it "keeps `: Float64[]@list` (collection type)" do
       src = <<~CLEAR
         FN main() RETURNS Void ->
-          MUTABLE xs: Float64[]@list = [];
+          MUTABLE xs: []Float64 = [];
           RETURN;
         END
       CLEAR
       out = rw(src)
-      expect(out).to include(": Float64[]@list")
+      expect(out).to include(": []Float64")
     end
 
     it "keeps `: ?Int64` (optional)" do
@@ -186,19 +186,19 @@ RSpec.describe LintFixRewriter do
 
     it "keeps MUTABLE when the binding is passed to a bang helper" do
       src = <<~CLEAR
-        FN appendOne!(MUTABLE xs: Int64[]@list) RETURNS Void ->
+        FN appendOne!(MUTABLE xs: []Int64) RETURNS Void ->
           xs.append(1_i64);
           RETURN;
         END
 
         FN main() RETURNS Void ->
-          MUTABLE xs: Int64[]@list = [];
+          MUTABLE xs: []Int64 = [];
           appendOne!(xs);
           RETURN;
         END
       CLEAR
       out = rw(src)
-      expect(out).to include("MUTABLE xs: Int64[]@list = []")
+      expect(out).to include("MUTABLE xs: []Int64 = []")
     end
   end
 

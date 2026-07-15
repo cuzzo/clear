@@ -6,7 +6,7 @@ FN main() RETURNS Void ->
     MUTABLE total: Float64 = 0.0;
     MUTABLE outer = 0_i64;
     WHILE outer < 100 DO
-        MUTABLE vals: Float64[]@list = [];
+        MUTABLE vals: []Float64 = [];
         MUTABLE inner = 0_i64;
         WHILE inner < 1000 DO
             append(vals, inner + 0.0);

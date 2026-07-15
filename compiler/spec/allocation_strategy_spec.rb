@@ -203,7 +203,7 @@ RSpec.describe "Allocation Strategy Invariants" do
     it "local primitive @list → storage :frame, cleanup :frame" do
       ast = run_mir(<<~CLEAR)
         FN main() RETURNS Void ->
-          MUTABLE parts: Int64[]@list = [];
+          MUTABLE parts: []Int64 = [];
           parts.append(1_i64);
           RETURN;
         END
@@ -219,7 +219,7 @@ RSpec.describe "Allocation Strategy Invariants" do
     it "local String @list → storage :frame, cleanup :frame" do
       src = <<~CLEAR
         FN main() RETURNS Void ->
-          MUTABLE parts: String[]@list = List[];
+          MUTABLE parts: []String = List[];
           parts.append("hello");
           RETURN;
         END
@@ -259,7 +259,7 @@ RSpec.describe "Allocation Strategy Invariants" do
       ast = run_mir(<<~CLEAR)
         FN main() RETURNS Void ->
           FOR i IN (0_i64 ..< 5) DO
-            MUTABLE parts: Int64[]@list = [];
+            MUTABLE parts: []Int64 = [];
             parts.append(i);
           END
           RETURN;
@@ -277,7 +277,7 @@ RSpec.describe "Allocation Strategy Invariants" do
     it "non-escaping HashMap → cleanup uses map-owned heap allocator" do
       ast = run_mir(<<~CLEAR)
         FN main() RETURNS Void ->
-          MUTABLE m: HashMap<Int64> = {};
+          MUTABLE m: {String}Int64 = {};
           m["k"] = 1_i64;
           RETURN;
         END
@@ -300,8 +300,8 @@ RSpec.describe "Allocation Strategy Invariants" do
 
     it "returned @list → cleanup :heap" do
       ast = run_mir(<<~CLEAR)
-        FN get_list() RETURNS !String[]@list ->
-          MUTABLE parts: String[]@list = [];
+        FN get_list() RETURNS ![]String ->
+          MUTABLE parts: []String = [];
           parts.append("a");
           parts.append("b");
           RETURN parts;
@@ -315,8 +315,8 @@ RSpec.describe "Allocation Strategy Invariants" do
 
     it "returned String@list → cleanup :heap" do
       ast = run_mir(<<~CLEAR)
-        FN build() RETURNS !String[]@list ->
-          MUTABLE s: String[]@list = [];
+        FN build() RETURNS ![]String ->
+          MUTABLE s: []String = [];
           s.append("hello");
           RETURN s;
         END
@@ -331,9 +331,9 @@ RSpec.describe "Allocation Strategy Invariants" do
       # The non-returned 'scratch' must NOT be heap-promoted just because
       # something else in the same function is returned. No speculative promotion.
       ast = run_mir(<<~CLEAR)
-        FN get_parts() RETURNS !String[]@list ->
-          MUTABLE result: String[]@list = [];
-          MUTABLE scratch: Int64[]@list = [];
+        FN get_parts() RETURNS ![]String ->
+          MUTABLE result: []String = [];
+          MUTABLE scratch: []Int64 = [];
           scratch.append(1_i64);
           result.append("keep");
           RETURN result;
@@ -357,10 +357,10 @@ RSpec.describe "Allocation Strategy Invariants" do
       # Declarations start on the frame. Heap promotion happens only at escape points.
       # 'local' is never returned — it must stay :frame even though 'result' is :heap.
       ast = run_mir(<<~CLEAR)
-        FN build() RETURNS !String[]@list ->
-          MUTABLE local: Int64[]@list = [];
+        FN build() RETURNS ![]String ->
+          MUTABLE local: []Int64 = [];
           local.append(1_i64);
-          MUTABLE result: String[]@list = [];
+          MUTABLE result: []String = [];
           result.append("final");
           RETURN result;
         END
@@ -374,10 +374,10 @@ RSpec.describe "Allocation Strategy Invariants" do
       # Verifies that heap promotion is surgical (only the escaping binding),
       # not wholesale (all bindings in a function that has a return).
       ast = run_mir(<<~CLEAR)
-        FN multi() RETURNS !String[]@list ->
-          MUTABLE a: Int64[]@list = [];
-          MUTABLE b: Int64[]@list = [];
-          MUTABLE out: String[]@list = [];
+        FN multi() RETURNS ![]String ->
+          MUTABLE a: []Int64 = [];
+          MUTABLE b: []Int64 = [];
+          MUTABLE out: []String = [];
           a.append(1_i64);
           b.append(2_i64);
           out.append("result");
@@ -406,7 +406,7 @@ RSpec.describe "Allocation Strategy Invariants" do
     it ":bg_captured — BG-captured @list gets cleanup :heap" do
       ast = run_mir(<<~CLEAR)
         FN main() RETURNS Void ->
-          MUTABLE items: Float64[]@list = [];
+          MUTABLE items: []Float64 = [];
           items.append(1.0);
           p: ~Void = BG { items.append(2.0); };
           NEXT p;
@@ -465,7 +465,7 @@ RSpec.describe "Allocation Strategy Invariants" do
           MUTABLE i: Int64 = 0;
           MUTABLE resp = "";
           WHILE i < 5 DO
-            MUTABLE tmp: String[]@list = [];
+            MUTABLE tmp: []String = [];
             tmp.append("x");
             resp = resp $+ i.toString();
             i += 1;
@@ -486,8 +486,8 @@ RSpec.describe "Allocation Strategy Invariants" do
     # apply_transitive_heap_promotion! handles this.
     it ":transitive_callee — binding of heap-returning call → cleanup :heap" do
       ast = run_mir(<<~CLEAR)
-        FN build!() RETURNS !Float64[]@list ->
-          MUTABLE v: Float64[]@list = [];
+        FN build!() RETURNS ![]Float64 ->
+          MUTABLE v: []Float64 = [];
           v.append(1.0);
           RETURN v;
         END
@@ -504,8 +504,8 @@ RSpec.describe "Allocation Strategy Invariants" do
     it ":transitive_imported_callee — imported heap-returning call → cleanup :heap" do
       Dir.mktmpdir("clear-import-owned-return") do |dir|
         File.write(File.join(dir, "lib.clear"), <<~CLEAR)
-          FN build!() RETURNS !Float64[]@list ->
-            MUTABLE v: Float64[]@list = [];
+          FN build!() RETURNS ![]Float64 ->
+            MUTABLE v: []Float64 = [];
             v.append(1.0);
             RETURN v;
           END
@@ -663,9 +663,9 @@ RSpec.describe "Allocation Strategy Invariants" do
 
     it ":borrow_return (list payload) — collection return is carved out" do
       ast = run_mir(<<~CLEAR)
-        FN borrowList(xs: Int64[]@list) RETURNS xs: Int64[]@list -> RETURN xs; END
+        FN borrowList(xs: []Int64) RETURNS xs: []Int64 -> RETURN xs; END
         FN main() RETURNS Void ->
-            src: Int64[]@list = [];
+            src: []Int64 = [];
             src.append(1_i64);
             r = borrowList(src);
             RETURN;
@@ -677,11 +677,11 @@ RSpec.describe "Allocation Strategy Invariants" do
 
     it ":aggregate_extract_ident_secondary_field — heap ident in non-first field" do
       ast = run_mir(<<~CLEAR)
-        STRUCT Pair { first: Int64[]@list, second: Int64[]@list }
+        STRUCT Pair { first: []Int64, second: []Int64 }
         FN mk!() RETURNS !Pair ->
-            a: Int64[]@list = [];
+            a: []Int64 = [];
             a.append(1_i64);
-            b: Int64[]@list = [];
+            b: []Int64 = [];
             b.append(2_i64);
             RETURN Pair{ first: a, second: b };
         END

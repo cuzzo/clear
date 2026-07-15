@@ -45,7 +45,7 @@ FN main() RETURNS Void ->
   ASSERT ipow!(2.0, exp10) == 1024.0;
 
   # TIGHT sum-of-squares over a small array
-  MUTABLE data: Float64[]@list = [];
+  MUTABLE data: []Float64 = [];
   append(data, 1.0);
   append(data, 2.0);
   append(data, 3.0);

@@ -2,7 +2,7 @@
 STRUCT Counter { value: Float64 }
 
 FN main() RETURNS Void ->
-    MUTABLE items: Counter[]@list = [];
+    MUTABLE items: []Counter = [];
     append(items, Counter{value: 0.0});
     append(items, Counter{value: 0.0});
     append(items, Counter{value: 0.0});

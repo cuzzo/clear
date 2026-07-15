@@ -5,7 +5,7 @@ STRUCT Item { val: Int64 }
 
 FN main() RETURNS Void ->
     # @list: insert and push are aliases for append
-    MUTABLE nums: Int64[]@list = [];
+    MUTABLE nums: []Int64 = [];
     nums.insert(5);
     nums.push(10);
     nums.insert(15);
@@ -23,7 +23,7 @@ FN main() RETURNS Void ->
     ASSERT nums.length() == 2, "list length after pop";
 
     # pop on empty list returns nil
-    MUTABLE empty: Int64[]@list = [];
+    MUTABLE empty: []Int64 = [];
     MUTABLE popped_nil: Bool = FALSE;
     IF empty.pop() EXISTS AS _ THEN
         popped_nil = TRUE;
@@ -33,7 +33,7 @@ FN main() RETURNS Void ->
     ASSERT popped_nil == FALSE, "empty pop returns nil";
 
     # @set: insert and length
-    MUTABLE s: Int64[]@set = [];
+    MUTABLE s: [Set]Int64 = [];
     s.insert(1);
     s.insert(2);
     s.insert(3);
@@ -41,7 +41,7 @@ FN main() RETURNS Void ->
     ASSERT s.contains?(2) == TRUE, "set contains 2";
 
     # @pool: insert returns Id, length counts live slots
-    MUTABLE pool: Item[100]@pool = [];
+    MUTABLE pool: [Pool(100)]Item = [];
     id1 = pool.insert(Item{ val: 42 });
     id2 = pool.insert(Item{ val: 99 });
     ASSERT pool.length() == 2, "pool length";
@@ -50,7 +50,7 @@ FN main() RETURNS Void ->
     END
 
     # HashMap: length as alias for count
-    MUTABLE m: HashMap<Int64> = {};
+    MUTABLE m: {String}Int64 = {};
     m["x"] = 10;
     m["y"] = 20;
     ASSERT m.length() == 2, "map length";

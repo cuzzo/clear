@@ -12,7 +12,7 @@ RSpec.describe "RC ownership through optional collection bindings" do
     source = <<~CLEAR
       STRUCT Item { value: Int64 }
       FN main() RETURNS Void ->
-        MUTABLE items: HashMap<Item@multiowned> = {};
+        MUTABLE items: {String}Item@multiowned = {};
         items["x"] = Item{ value: 1_i64 } @multiowned;
         IF items["x"] EXISTS AS item THEN ASSERT item.value == 1_i64; END
       END
@@ -31,7 +31,7 @@ RSpec.describe "RC ownership through optional collection bindings" do
     source = <<~CLEAR
       STRUCT Item { value: Int64 }
       FN main() RETURNS Void ->
-        MUTABLE items: Item@shared[]@list = [];
+        MUTABLE items: []Item@shared = [];
         items.append(Item{ value: 1_i64 } @shared);
         WHILE items.pop() EXISTS AS item DO ASSERT item.value == 1_i64; END
       END
@@ -49,7 +49,7 @@ RSpec.describe "RC ownership through optional collection bindings" do
     source = <<~CLEAR
       STRUCT Item { value: Int64 }
       FN main() RETURNS Void ->
-        MUTABLE items: Item@multiowned[]@list = [];
+        MUTABLE items: []Item@multiowned = [];
         items.append(Item{ value: 1_i64 } @multiowned);
         window = items[0_i64..<1_i64];
         ASSERT window.length() == 1_i64;
@@ -67,7 +67,7 @@ RSpec.describe "RC ownership through optional collection bindings" do
     source = <<~CLEAR
       STRUCT Item { value: Int64 }
       FN main() RETURNS Void ->
-        MUTABLE items: HashMap<Item@multiowned> = {};
+        MUTABLE items: {String}Item@multiowned = {};
         items["x"] = Item{ value: 1_i64 } @multiowned;
         values = items.values();
         ASSERT values[0_i64]?.value == 1_i64;

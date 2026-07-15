@@ -3,7 +3,7 @@
 FN main() RETURNS Void ->
     n = 256_i64;
     buckets = 8_i64;
-    MUTABLE counts: HashMap<Int64, Int64>@sharded(4) = {};
+    MUTABLE counts: {Int64}@sharded(4) Int64 = {};
 
     (0..<n) |> SHARD(_ MOD buckets, counts) |> CONCURRENT(capacity: 2, batch: 3) EACH {
         counts[_] = (counts[_] OR_ELSE 0_i64) + 1_i64;

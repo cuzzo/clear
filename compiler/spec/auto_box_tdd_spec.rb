@@ -43,7 +43,7 @@ RSpec.describe "automatic box transport — TDD contract" do
       source = <<~CLEAR
         STRUCT Foo { name: String }
         FN main() RETURNS Void ->
-          MUTABLE items: Foo[]@list:indirect = [];
+          MUTABLE items: []@indirect Foo = [];
           items.append(Foo{ name: COPY "inline" });
         END
       CLEAR
@@ -58,11 +58,11 @@ RSpec.describe "automatic box transport — TDD contract" do
     it "allocates a box and moves an inline TAKES payload into a boxed-element list" do
       source = <<~CLEAR
         STRUCT Foo { name: String }
-        FN add!(TAKES f: Foo, MUTABLE items: Foo@indirect[]@list) RETURNS Void ->
+        FN add!(TAKES f: Foo, MUTABLE items: []Foo@indirect) RETURNS Void ->
           items.append(f);
         END
         FN main() RETURNS Void ->
-          MUTABLE items: Foo@indirect[]@list = [];
+          MUTABLE items: []Foo@indirect = [];
           f = Foo{ name: COPY "inline" };
           add!(f, items);
           ASSERT items.length() == 1;
@@ -131,11 +131,11 @@ RSpec.describe "automatic box transport — TDD contract" do
     it "specializes a generic TAKES append to the boxed element representation" do
       source = <<~CLEAR
         STRUCT Foo { name: String }
-        FN add!<T>(TAKES value: T, MUTABLE items: T@indirect[]@list) RETURNS Void ->
+        FN add!<T>(TAKES value: T, MUTABLE items: []T@indirect) RETURNS Void ->
           items.append(value);
         END
         FN main() RETURNS Void ->
-          MUTABLE items: Foo@indirect[]@list = [];
+          MUTABLE items: []Foo@indirect = [];
           value = Foo{ name: COPY "generic" };
           add!(value, items);
           ASSERT items.length() == 1;
@@ -150,11 +150,11 @@ RSpec.describe "automatic box transport — TDD contract" do
     it "moves a boxed payload into an inline list and releases only the empty box shell" do
       source = <<~CLEAR
         STRUCT Foo { name: String }
-        FN add!(TAKES f: Foo@indirect, MUTABLE items: Foo[]@list) RETURNS Void ->
+        FN add!(TAKES f: Foo@indirect, MUTABLE items: []Foo) RETURNS Void ->
           items.append(f);
         END
         FN main() RETURNS Void ->
-          MUTABLE items: Foo[]@list = [];
+          MUTABLE items: []Foo = [];
           f = Foo{ name: COPY "boxed" } @indirect;
           add!(f, items);
           ASSERT items.length() == 1;
@@ -173,7 +173,7 @@ RSpec.describe "automatic box transport — TDD contract" do
       source = <<~CLEAR
         STRUCT Foo { name: String }
         FN main() RETURNS Void ->
-          MUTABLE items: Foo@indirect[]@list = [];
+          MUTABLE items: []Foo@indirect = [];
           f = Foo{ name: COPY "default" };
           items.append(f);
         END
@@ -187,7 +187,7 @@ RSpec.describe "automatic box transport — TDD contract" do
       source = <<~CLEAR
         STRUCT Foo { name: String }
         FN main() RETURNS Void ->
-          MUTABLE items: Foo@indirect[]@list = [];
+          MUTABLE items: []Foo@indirect = [];
           f = Foo{ name: COPY "strict" };
           items.append(f);
         END
@@ -230,7 +230,7 @@ RSpec.describe "automatic box transport — TDD contract" do
       source = <<~CLEAR
         STRUCT Foo { name: String }
         FN main() RETURNS Void ->
-          MUTABLE items: Foo@indirect[]@list = [];
+          MUTABLE items: []Foo@indirect = [];
           f = Foo{ name: COPY "still-live" };
           items.append(f);
           ASSERT f.name == "still-live";
@@ -244,11 +244,11 @@ RSpec.describe "automatic box transport — TDD contract" do
     it "rejects a boxed-element list where a concrete inline-element list is required" do
       source = <<~CLEAR
         STRUCT Foo { name: String }
-        FN add!(TAKES f: Foo, MUTABLE items: Foo[]@list) RETURNS Void ->
+        FN add!(TAKES f: Foo, MUTABLE items: []Foo) RETURNS Void ->
           items.append(f);
         END
         FN main() RETURNS Void ->
-          MUTABLE items: Foo@indirect[]@list = [];
+          MUTABLE items: []Foo@indirect = [];
           f = Foo{ name: COPY "mismatch" };
           add!(f, items);
         END
@@ -269,7 +269,7 @@ RSpec.describe "automatic box transport — TDD contract" do
         source = <<~CLEAR
           STRUCT Foo { name: String }
           FN main() RETURNS Void ->
-            MUTABLE items: Foo@indirect[]@list = [];
+            MUTABLE items: []Foo@indirect = [];
             value = Foo{ name: COPY "#{label}" } #{capability};
             items.append(value);
           END
@@ -282,7 +282,7 @@ RSpec.describe "automatic box transport — TDD contract" do
     it "rejects element-level @indirect on primitives as pointless indirection" do
       source = <<~CLEAR
         FN main() RETURNS Void ->
-          MUTABLE values: Int64@indirect[]@list = [];
+          MUTABLE values: []Int64@indirect = [];
           values.append(1);
         END
       CLEAR
@@ -325,7 +325,7 @@ RSpec.describe "automatic box transport — TDD contract" do
       source = <<~CLEAR
         STRUCT Foo { name: String }
         FN main() RETURNS Void ->
-          MUTABLE items: Foo@indirect[]@list = [];
+          MUTABLE items: []Foo@indirect = [];
           MUTABLE value = Foo{ name: COPY "before" };
           alias = value;
           items.append(value);
@@ -356,7 +356,7 @@ RSpec.describe "automatic box transport — TDD contract" do
       source = <<~CLEAR
         STRUCT Foo { name: String }
         FN main() RETURNS Void ->
-          MUTABLE items: Foo@indirect[]@list = [];
+          MUTABLE items: []Foo@indirect = [];
           value = Foo{ name: COPY "fix" };
           items.append(value);
         END

@@ -3,7 +3,7 @@
 # HashMap still references it, causing use-after-free on HashMap cleanup.
 
 STRUCT Env {
-    vars: HashMap<Value>,
+    vars: {String}Value,
 }
 
 UNION Value {
@@ -23,8 +23,8 @@ END
 
 FN main() RETURNS Void ->
     # Simulate lambda param binding: store list elements into a HashMap
-    MUTABLE env: HashMap<Value> = {};
-    MUTABLE args: Value[]@list = List[];
+    MUTABLE env: {String}Value = {};
+    MUTABLE args: []Value = List[];
     args.append(Value{ Str: "hello" });
     args.append(Value{ Str: "world" });
 

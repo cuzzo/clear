@@ -46,10 +46,10 @@ RSpec.describe "ClearParser mutable fixed-array defaults" do
   it "keeps bare mutable fixed primitive array defaults compact" do
     body = parse_main_body(<<~CLEAR)
       FN main() RETURNS Void ->
-        MUTABLE ints: Int64[2];
-        MUTABLE floats: Float64[2];
-        MUTABLE strings: String[2];
-        MUTABLE bools: Bool[2];
+        MUTABLE ints: [2]Int64;
+        MUTABLE floats: [2]Float64;
+        MUTABLE strings: [2]String;
+        MUTABLE bools: [2]Bool;
         RETURN;
       END
     CLEAR
@@ -86,7 +86,7 @@ RSpec.describe "ClearParser mutable fixed-array defaults" do
       parse_main_body(<<~CLEAR)
         STRUCT Box { value: Int64 }
         FN main() RETURNS Void ->
-          MUTABLE boxes: Box[2];
+          MUTABLE boxes: [2]Box;
           RETURN;
         END
       CLEAR

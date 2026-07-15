@@ -2,7 +2,7 @@
 # hanging the producer.
 
 FN failsInShard() RETURNS !Bool ->
-    MUTABLE counts: HashMap<Int64, Int64>@sharded(4) = {};
+    MUTABLE counts: {Int64}@sharded(4) Int64 = {};
 
     (0..<1000_i64) |> SHARD(_ MOD 16_i64, counts) |> CONCURRENT(capacity: 4) EACH {
         IF _ == 7_i64 THEN

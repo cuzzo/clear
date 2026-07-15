@@ -19,7 +19,7 @@ FN makeStr!(prefix: String, suffix: String) RETURNS !String ->
 END
 
 FN buildList!() RETURNS !Val ->
-    MUTABLE items: Val[]@list = List[];
+    MUTABLE items: []Val = List[];
     # Use dynamically built strings (frame-arena allocated, not rodata)
     items.append(Val{ Str: makeStr!("hel", "lo") });
     items.append(Val{ Str: makeStr!("wor", "ld") });

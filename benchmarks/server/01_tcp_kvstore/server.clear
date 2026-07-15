@@ -8,7 +8,7 @@
 # Test:    redis-cli -p 6390 SET foo bar / GET foo / INCR counter
 # Bench:   redis-benchmark -p 6390 -t set,get,incr -n 100000 -c 50 -P 16
 
-FN handleClient!(client: TCPClient, MUTABLE store: HashMap<String>, MUTABLE counters: HashMap<Int64>) RETURNS !Void ->
+FN handleClient!(client: TCPClient, MUTABLE store: {String}String, MUTABLE counters: {String}Int64) RETURNS !Void ->
   MUTABLE running = TRUE;
   WHILE running DO
     data: String@raw = client.tcpRead();
@@ -145,8 +145,8 @@ FN handleClient!(client: TCPClient, MUTABLE store: HashMap<String>, MUTABLE coun
 END
 
 FN main() RETURNS Void ->
-  MUTABLE store: HashMap<String> @sharded(128):locked = {};
-  MUTABLE counters: HashMap<Int64> @sharded(128):locked = {};
+  MUTABLE store: {String}@sharded(128):locked String = {};
+  MUTABLE counters: {String}@sharded(128):locked Int64 = {};
 
   server = TCPServer::listen(6390);
   print("CLEAR kvstore listening on port 6390");

@@ -2,13 +2,13 @@
 # A HashMap passed to a function that has saveFrameMark/restoreFrameMark
 # must retain valid keys after the callee returns.
 
-FN modify!(MUTABLE map: HashMap<Int64>, key: String, val: Int64) RETURNS !Void ->
+FN modify!(MUTABLE map: {String}Int64, key: String, val: Int64) RETURNS !Void ->
     map[key] = val;
     RETURN;
 END
 
 FN main() RETURNS Void ->
-    MUTABLE m: HashMap<Int64> = {};
+    MUTABLE m: {String}Int64 = {};
 
     # Put via function calls (each has its own frame mark)
     modify!(m, "alpha", 1);

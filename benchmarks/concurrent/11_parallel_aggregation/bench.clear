@@ -30,7 +30,7 @@ FN main() RETURNS Void ->
   buckets = 1000;
 
   # Pre-compute seeds (LCG is sequential so we must pre-compute).
-  MUTABLE seeds: Int64[]@list = List[];
+  MUTABLE seeds: []Int64 = List[];
   MUTABLE seed = 42;
   FOR i IN (0 ..< n) DO
     seed = lcg(seed);
@@ -39,7 +39,7 @@ FN main() RETURNS Void ->
 
   # Phase 1: Build histogram via SHARD with integer keys — zero string allocation.
   t0 = timestampMs();
-  MUTABLE counts: HashMap<Int64, Int64> @sharded(32) = {};
+  MUTABLE counts: {Int64}@sharded(32) Int64 = {};
   (0 ..< n)
     |> SHARD(absInt(seeds[_] OR_ELSE 0_i64) MOD buckets, counts)
     |> CONCURRENT(batch: 512) EACH {counts[_] = (counts[_] OR_ELSE 0) + 1;};

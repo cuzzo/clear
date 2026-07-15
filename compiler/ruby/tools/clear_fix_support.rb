@@ -16,8 +16,6 @@ require_relative "../annotator"
 module ClearFixSupport
   extend T::Sig
 
-  @importer_cache = T.let({}, T::Hash[String, ModuleImporter])
-
   class UsageError < StandardError; end
   class FileMissingError < StandardError; end
 
@@ -112,7 +110,6 @@ module ClearFixSupport
 
   sig { params(options: Options, out: OutputStream, err: OutputStream, input: InputStream).returns(RunResult) }
   def self.run(options, out: $stdout, err: $stderr, input: $stdin)
-    @importer_cache.clear
     iter = T.let(0, Integer)
     total = T.let(0, Integer)
 
@@ -147,7 +144,10 @@ module ClearFixSupport
       begin
         tokens = Lexer.new(source).tokenize
         ast = ClearParser.new(tokens, source).parse
-        importer = @importer_cache[source_dir] ||= ModuleImporter.new(base_dir: source_dir)
+        # Importer state belongs to one root analysis. Reusing it across files
+        # can retain an interrupted dependency stack after a diagnostic and
+        # make the next root look circular during a bulk migration.
+        importer = ModuleImporter.new(base_dir: source_dir)
 
         # Prime REQUIRE modules without collecting their findings. Otherwise a
         # root-file fix could accidentally apply an imported module's spans to
@@ -158,7 +158,7 @@ module ClearFixSupport
           begin
             SemanticAnnotator.new(importer: importer, source_dir: source_dir,
               source_code: source).annotate!(ast)
-          rescue CompilerError, ParserError
+          rescue CompilerError, ParserError, ModuleImportError
             # A root diagnostic is expected during this non-collecting warmup.
           ensure
             FixCollector.enable!
@@ -171,8 +171,25 @@ module ClearFixSupport
         annotator = SemanticAnnotator.new(importer: importer, source_dir: source_dir,
           source_code: source)
         annotator.annotate!(ast)
-      rescue CompilerError, ParserError
+      rescue CompilerError, ParserError, ModuleImportError, Lexer::Error
       end
+      FixCollector.drain
+    rescue Lexer::Error
+      FixCollector.drain
+    ensure
+      FixCollector.disable!
+    end
+  end
+
+  sig { params(source: String).returns(T::Array[FixableFinding]) }
+  def self.collect_type_migrations(source)
+    FixCollector.enable!
+    FixCollector.enable_type_migrations!
+    begin
+      tokens = Lexer.new(source).tokenize
+      ClearParser.new(tokens, source).parse
+      FixCollector.drain
+    rescue Lexer::Error, ParserError
       FixCollector.drain
     ensure
       FixCollector.disable!
@@ -355,7 +372,7 @@ module ClearFixSupport
       raise FileMissingError, "No such file: #{path}" unless File.file?(path)
 
       source = File.read(path)
-      findings = findings_for_path(path, source, out: out)
+      findings = findings_for_path(path, source, out: out, only_set: options.only_set)
       findings = filter_findings(findings, options.only_set)
 
       if findings.empty?
@@ -395,9 +412,14 @@ module ClearFixSupport
   end
   private_class_method :run_one_pass
 
-  sig { params(path: String, source: String, out: OutputStream).returns(T::Array[FixableFinding]) }
-  def self.findings_for_path(path, source, out:)
-    return collect_findings(source, source_dir: File.dirname(File.expand_path(path))) unless path.end_with?(".rb")
+  sig { params(path: String, source: String, out: OutputStream, only_set: T.nilable(T::Set[Symbol])).returns(T::Array[FixableFinding]) }
+  def self.findings_for_path(path, source, out:, only_set:)
+    migrations_only = only_set == Set[:type_migration]
+    unless path.end_with?(".rb")
+      return collect_type_migrations(source) if migrations_only
+
+      return collect_findings(source, source_dir: File.dirname(File.expand_path(path)))
+    end
 
     heredocs = extract_clear_heredocs(source)
     if heredocs.empty?
@@ -407,7 +429,8 @@ module ClearFixSupport
 
     findings = T.let([], T::Array[FixableFinding])
     heredocs.each do |heredoc|
-      collect_findings(heredoc.content).each do |finding|
+      collected = migrations_only ? collect_type_migrations(heredoc.content) : collect_findings(heredoc.content)
+      collected.each do |finding|
         findings << translate_finding_for_heredoc(finding, heredoc, path)
       end
     end

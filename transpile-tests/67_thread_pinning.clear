@@ -24,7 +24,7 @@ FN main() RETURNS Void ->
     # -------------------------
     # 2. @pool pipeline operators
     # -------------------------
-    MUTABLE pool: Item[100]@pool = [];
+    MUTABLE pool: [Pool(100)]Item = [];
     id1: Id<Item> = pool.insert(Item{ value: 10.0 });
     id2: Id<Item> = pool.insert(Item{ value: 20.0 });
     id3: Id<Item> = pool.insert(Item{ value: 30.0 });
@@ -62,7 +62,7 @@ FN main() RETURNS Void ->
     # -------------------------
     # 3. @list:sharded pipeline operators
     # -------------------------
-    MUTABLE slist: Float64[]@list:sharded(2) = [];
+    MUTABLE slist: []@sharded(2) Float64 = [];
     append(slist, 1.0);
     append(slist, 2.0);
     append(slist, 3.0);
@@ -83,7 +83,7 @@ FN main() RETURNS Void ->
     # -------------------------
     # 4. @list:sharded EACH (parallel)
     # -------------------------
-    MUTABLE slist2: Item[]@list:sharded(2) = [];
+    MUTABLE slist2: []@sharded(2) Item = [];
     append(slist2, Item{ value: 5.0 });
     append(slist2, Item{ value: 6.0 });
     # EACH runs N parallel fibers, one per shard (side-effect mutation)

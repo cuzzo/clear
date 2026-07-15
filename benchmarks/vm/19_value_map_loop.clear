@@ -2,7 +2,7 @@ UNION Value { Nil, Str: String, Num: Float64 }
 
 FN main() RETURNS Void ->
     t0 = timestampMs();
-    MUTABLE m: HashMap<Value> = {};
+    MUTABLE m: {String}Value = {};
 
     FOR i IN (0_i64 ..< 50000_i64) DO
         IF (i MOD 2_i64) == 0_i64 THEN

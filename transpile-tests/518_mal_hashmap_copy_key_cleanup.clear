@@ -3,7 +3,7 @@
 # key must still be cleaned up by MIR lowering.
 
 FN main() RETURNS Void ->
-    MUTABLE map: HashMap<Int64> = {};
+    MUTABLE map: {String}Int64 = {};
     key = "dynamic-" $+ "key";
 
     map[COPY key] = 1_i64;

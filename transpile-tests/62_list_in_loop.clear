@@ -3,7 +3,7 @@
 # after posix-based writeFile/readFile rewrite.
 
 FN buildList(n: Int64) RETURNS !String ->
-    MUTABLE parts: String[]@list = [];
+    MUTABLE parts: []String = [];
     FOR i IN (1_i64 ..= n) -> parts.append(i.toString());
     RETURN join(parts, ",");
 END

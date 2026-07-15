@@ -2,16 +2,16 @@
 # Verifies that Node{ keys: someList } passes the ArrayList struct
 # rather than converting to a slice via .items.
 
-STRUCT Node { keys: Int64[]@list }
+STRUCT Node { keys: []Int64 }
 
 FN main() RETURNS Void ->
     # Build a list and move it into a struct
-    MUTABLE keys: Int64[]@list = [];
+    MUTABLE keys: []Int64 = [];
     keys.append(10);
     keys.append(20);
     keys.append(30);
 
-    MUTABLE nodes: Node[]@list = [];
+    MUTABLE nodes: []Node = [];
     nodes.append(Node{ keys: keys });
 
     ASSERT nodes[0]?.keys.length() == 3, "node has 3 keys";
@@ -20,7 +20,7 @@ FN main() RETURNS Void ->
     ASSERT nodes[0]?.keys[2] == 30, "key 2 is 30";
 
     # Build a second node with fresh keys
-    MUTABLE keys2: Int64[]@list = [];
+    MUTABLE keys2: []Int64 = [];
     keys2.append(40);
     keys2.append(50);
     nodes.append(Node{ keys: keys2 });

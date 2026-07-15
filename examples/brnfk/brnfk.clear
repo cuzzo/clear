@@ -26,8 +26,8 @@ FN byteToString(n: Int64) RETURNS !String ->
   RAISE "brnfk cannot render non-printable byte ${n.toString()} as String";
 END
 
-FN bytesToString(bytes: Int64[]@list) RETURNS !String ->
-  MUTABLE parts: String[]@list = [];
+FN bytesToString(bytes: []Int64) RETURNS !String ->
+  MUTABLE parts: []String = [];
   parts.reserve(bytes.length());
   MUTABLE i = 0;
   WHILE i < bytes.length() DO
@@ -37,7 +37,7 @@ FN bytesToString(bytes: Int64[]@list) RETURNS !String ->
   RETURN parts.join("");
 END
 
-FN ownedBytesToString(TAKES bytes: Int64[]@list) RETURNS !String ->
+FN ownedBytesToString(TAKES bytes: []Int64) RETURNS !String ->
   RETURN bytesToString(bytes);
 END
 
@@ -58,8 +58,8 @@ FN stringToByte(ch: String) RETURNS !Int64 ->
   RAISE "brnfk input contains unsupported non-printable character";
 END
 
-FN stringToBytes(s: String) RETURNS !Int64[]@list ->
-  MUTABLE bytes: Int64[]@list = [];
+FN stringToBytes(s: String) RETURNS ![]Int64 ->
+  MUTABLE bytes: []Int64 = [];
   bytes.reserve(s.length());
   MUTABLE i = 0;
   WHILE i < s.length() DO
@@ -69,8 +69,8 @@ FN stringToBytes(s: String) RETURNS !Int64[]@list ->
   RETURN bytes;
 END
 
-FN copyBytes(bytes: Int64[]@list) RETURNS !Int64[]@list ->
-  MUTABLE copied: Int64[]@list = [];
+FN copyBytes(bytes: []Int64) RETURNS ![]Int64 ->
+  MUTABLE copied: []Int64 = [];
   copied.reserve(bytes.length());
   MUTABLE i = 0;
   WHILE i < bytes.length() DO
@@ -86,7 +86,7 @@ FN isCommand(ch: String) RETURNS Bool ->
 END
 
 FN commands(program: String) RETURNS !String ->
-  MUTABLE parts: String[]@list = [];
+  MUTABLE parts: []String = [];
   MUTABLE i = 0;
   WHILE i < program.length() DO
     ch = program.charAt(i);
@@ -98,12 +98,12 @@ FN commands(program: String) RETURNS !String ->
   RETURN parts.join("");
 END
 
-FN makeTape(size: Int64) RETURNS !Int64[]@list ->
+FN makeTape(size: Int64) RETURNS ![]Int64 ->
   IF size <= 0 THEN
     RAISE "brnfk tape size must be positive";
   END
 
-  MUTABLE tape: Int64[]@list = [];
+  MUTABLE tape: []Int64 = [];
   tape.reserve(size);
   MUTABLE i = 0;
   WHILE i < size DO
@@ -113,8 +113,8 @@ FN makeTape(size: Int64) RETURNS !Int64[]@list ->
   RETURN tape;
 END
 
-FN makeJumpTable(program: String) RETURNS !Int64[]@list ->
-  MUTABLE jumps: Int64[]@list = [];
+FN makeJumpTable(program: String) RETURNS ![]Int64 ->
+  MUTABLE jumps: []Int64 = [];
   jumps.reserve(program.length());
   MUTABLE i = 0;
   WHILE i < program.length() DO
@@ -122,7 +122,7 @@ FN makeJumpTable(program: String) RETURNS !Int64[]@list ->
     i += 1;
   END
 
-  MUTABLE stack: Int64[]@list = [];
+  MUTABLE stack: []Int64 = [];
   i = 0;
   WHILE i < program.length() DO
     ch = program.charAt(i);
@@ -151,7 +151,7 @@ FN run(program: String, input: String) RETURNS !String ->
   RETURN runWithLimits(program, input, 30_000, 10_000_000);
 END
 
-FN runBytes(program: String, input: String) RETURNS !Int64[]@list ->
+FN runBytes(program: String, input: String) RETURNS ![]Int64 ->
   RETURN runBytesWithLimits(program, input, 30_000, 10_000_000);
 END
 
@@ -159,7 +159,7 @@ FN runFile(path: String, input: String) RETURNS !String ->
   RETURN runFileWithLimits(path, input, 30_000, 10_000_000);
 END
 
-FN runFileBytes(path: String, input: String) RETURNS !Int64[]@list ->
+FN runFileBytes(path: String, input: String) RETURNS ![]Int64 ->
   RETURN runFileBytesWithLimits(path, input, 30_000, 10_000_000);
 END
 
@@ -168,7 +168,7 @@ FN runFileWithLimits(path: String, input: String, tapeSize: Int64, maxSteps: Int
   RETURN ownedBytesToString(GIVE bytes);
 END
 
-FN runFileBytesWithLimits(path: String, input: String, tapeSize: Int64, maxSteps: Int64) RETURNS !Int64[]@list ->
+FN runFileBytesWithLimits(path: String, input: String, tapeSize: Int64, maxSteps: Int64) RETURNS ![]Int64 ->
   program = readFile(path) OR_ELSE RAISE;
   RETURN runBytesWithLimits(program, input, tapeSize, maxSteps);
 END
@@ -178,29 +178,29 @@ FN runWithLimits(program: String, input: String, tapeSize: Int64, maxSteps: Int6
   RETURN ownedBytesToString(GIVE bytes);
 END
 
-FN runBytesWithLimits(program: String, input: String, tapeSize: Int64, maxSteps: Int64) RETURNS !Int64[]@list ->
+FN runBytesWithLimits(program: String, input: String, tapeSize: Int64, maxSteps: Int64) RETURNS ![]Int64 ->
   inputBytes = stringToBytes(input) OR_ELSE RAISE;
   RETURN runOwnedByteInputWithLimits(program, GIVE inputBytes, tapeSize, maxSteps);
 END
 
 FN runByteInputWithLimits(
     program: String,
-    inputBytes: Int64[]@list,
+    inputBytes: []Int64,
     tapeSize: Int64,
     maxSteps: Int64
 )
-RETURNS !Int64[]@list ->
+RETURNS ![]Int64 ->
   ownedInput = copyBytes(inputBytes) OR_ELSE RAISE;
   RETURN runOwnedByteInputWithLimits(program, GIVE ownedInput, tapeSize, maxSteps);
 END
 
 FN runOwnedByteInputWithLimits(
     program: String,
-    TAKES inputBytes: Int64[]@list,
+    TAKES inputBytes: []Int64,
     tapeSize: Int64,
     maxSteps: Int64
 )
-RETURNS !Int64[]@list ->
+RETURNS ![]Int64 ->
   code = commands(program);
   jumps = makeJumpTable(code);
   MUTABLE tape = makeTape(tapeSize);
@@ -208,7 +208,7 @@ RETURNS !Int64[]@list ->
   MUTABLE ip = 0;
   MUTABLE inputPos = 0;
   MUTABLE steps = 0;
-  MUTABLE output: Int64[]@list = [];
+  MUTABLE output: []Int64 = [];
 
   WHILE ip < code.length() DO
     IF steps >= maxSteps THEN

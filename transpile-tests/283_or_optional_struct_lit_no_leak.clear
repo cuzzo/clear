@@ -20,7 +20,7 @@
 STRUCT Node { label: String }
 
 FN main() RETURNS Void ->
-    MUTABLE nodes: HashMap<Node> = {};
+    MUTABLE nodes: {String}Node = {};
     nodes["a"] = Node{ label: "Alice" };
     nodes["b"] = Node{ label: "Bob" };
 

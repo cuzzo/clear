@@ -3,7 +3,7 @@ REQUIRE "types.clear"
 FN vecSetSlot(v: Value, idx: Int64, newVal: Value) RETURNS Value ->
     PARTIAL MATCH v START
         Value.Vector AS elems ->
-            MUTABLE vsNew: Value[]@list = List[];
+            MUTABLE vsNew: []Value = List[];
             FOR vsi IN (0_i64 ..< elems.length()) DO
                 IF vsi == idx THEN vsNew.append(COPY newVal);
                 ELSE vsNew.append(COPY elems[vsi]); END
@@ -23,7 +23,7 @@ FN vecRef(v: Value, idx: Int64) RETURNS Value ->
 END
 
 FN main() RETURNS Void ->
-    MUTABLE velems: Value[]@list = List[];
+    MUTABLE velems: []Value = List[];
     velems.append(Value{ Int64Val: 100 });
     vec = Value{ Vector: velems };
     updated = vecSetSlot(vec, 0, Value{ Int64Val: 999 });

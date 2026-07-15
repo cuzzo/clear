@@ -79,7 +79,7 @@ FN main() RETURNS Void ->
 
   # Pin BG fibers to the main scheduler to prevent work-stealing
   # which corrupts epoll fd registration.
-  MUTABLE pin: HashMap<Int64> @sharded(32):locked = {};
+  MUTABLE pin: {String}@sharded(32):locked Int64 = {};
 
   MUTABLE tasks: ~Void[]@list = [];
   WHILE TRUE DO

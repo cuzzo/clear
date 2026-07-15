@@ -42,10 +42,14 @@ module MiniVM
         true
       end
 
-      # Matches `MUTABLE iregs: Int64[512]` (with or without `;` and any
-      # capability suffix). Returns the integer N or nil.
+      # Matches canonical `MUTABLE iregs: [512]Int64` and the legacy
+      # `MUTABLE iregs: Int64[512]`. Returns the integer N or nil.
       def self.scan_decl_size(source, name, elem_type)
-        m = source.match(/MUTABLE\s+#{Regexp.escape(name)}\s*:\s*#{Regexp.escape(elem_type)}\s*\[\s*(\d+)\s*\]/)
+        prefix = /MUTABLE\s+#{Regexp.escape(name)}\s*:\s*/
+        canonical = source.match(/#{prefix}\[\s*(\d+)\s*\]\s*#{Regexp.escape(elem_type)}/)
+        return canonical[1].to_i if canonical
+
+        m = source.match(/#{prefix}#{Regexp.escape(elem_type)}\s*\[\s*(\d+)\s*\]/)
         m && m[1].to_i
       end
     end

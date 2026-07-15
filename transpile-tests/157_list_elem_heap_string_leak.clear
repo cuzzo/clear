@@ -8,7 +8,7 @@ UNION Val {
 }
 
 FN buildAndDiscard!() RETURNS !Void ->
-    MUTABLE items: Val[]@list = List[];
+    MUTABLE items: []Val = List[];
     items.append(Val{ Str: "hello" });
     items.append(Val{ Str: "world" });
     RETURN;

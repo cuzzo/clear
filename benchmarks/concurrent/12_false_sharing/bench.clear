@@ -22,7 +22,7 @@ FN main() RETURNS !Void ->
   increments = totalWork / workers;
 
   # Each worker gets its own @shared:locked counter (separate heap alloc)
-  MUTABLE counters: Counter@shared:locked[]@list = [];
+  MUTABLE counters: []Counter@shared:locked = [];
   FOR i IN (0 ..< workers) DO
     counters.append(Counter{ value: 0 } @shared:locked);
   END

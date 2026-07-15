@@ -22,7 +22,7 @@ FN heavyInner!(outer: Int64) RETURNS !Void ->
         # Allocate many small strings on the frame; after ~20 iterations of the
         # outer caller this should exhaust the 4 KB static block and create
         # at least one overflow block per inner loop pass.
-        MUTABLE parts: String[]@list = [];
+        MUTABLE parts: []String = [];
         MUTABLE k: Int64 = 0;
         WHILE k < 150 DO
             parts.append(k.toString());

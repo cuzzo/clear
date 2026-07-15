@@ -672,7 +672,7 @@ RSpec.describe SemanticAnnotator do
         out = transpile(<<~CLEAR)
           UNION Value { Number: Int64, Empty }
           FN main() RETURNS Void ->
-            values: Value[]@list = [Value{ Number: 7_i64 }];
+            values: []Value = [Value{ Number: 7_i64 }];
             IF values[0_i64] EXISTS AS value THEN
               PARTIAL MATCH value START
                 Value.Number AS number -> ASSERT number == 7_i64;,

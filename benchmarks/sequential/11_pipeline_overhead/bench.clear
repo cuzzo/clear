@@ -28,8 +28,8 @@
 #   which LLVM can vectorize. A nested-if with intermediate variable (the
 #   "natural" form) blocks LLVM vectorization and gives 962ms instead of 338ms.
 
-FN buildData(n: Int64) RETURNS !Float64[]@list ->
-  MUTABLE data: Float64[]@list = [];
+FN buildData(n: Int64) RETURNS ![]Float64 ->
+  MUTABLE data: []Float64 = [];
   data.reserve(n);
   # TODO: replace with Float64[n]@list once T[expr]@list supports runtime capacity
 

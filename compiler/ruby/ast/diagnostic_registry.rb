@@ -53,7 +53,7 @@ module DiagnosticRegistry
   DiagnosticEntry = T.type_alias { T::Hash[Symbol, DiagnosticEntryValue] }
   DiagnosticArgs = T.type_alias { T::Array[DiagnosticKwValue] }
   DiagnosticKwargs = T.type_alias { T::Hash[Symbol, DiagnosticKwValue] }
-  CATEGORIES = T.let(%i[type ownership capability concurrency lifetime escape registry reentrance lint syntax mir test].freeze, T::Array[Symbol])
+  CATEGORIES = T.let(%i[type type_migration ownership capability concurrency lifetime escape registry reentrance lint syntax mir test].freeze, T::Array[Symbol])
   SEVERITIES = T.let(%i[error warning hint info].freeze, T::Array[Symbol])
 
   sig { returns(T::Array[Symbol]) }

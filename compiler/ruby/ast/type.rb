@@ -944,6 +944,16 @@ class Type
 
     expression = type.shape.expression
     return nil if expression.is_a?(FunctionTypeExpression)
+    # Legacy async collection spellings overload the same surface form for
+    # streams, lists of promises, and promises resolving to lists. Migrating
+    # only the annotation can change NEXT's result protocol, so those require
+    # a whole-program migration and are deliberately not auto-fixed here.
+    return nil if expression.is_a?(FutureTypeExpression)
+    # A bare legacy T[] is a slice/view, while Inline Pivot []T is an owned
+    # dynamic list. Only an explicit legacy @list is semantics-preserving.
+    return nil if TypeExpressionTree.each_node(expression).any? do |node|
+      unsafe_inline_linear_migration?(node, type)
+    end
     if TypeExpressionTree.tense_wrapper?(expression) &&
         expression.capabilities.explicit_layer_capability?
       return nil
@@ -952,6 +962,19 @@ class Type
     return nil if projected.nil?
 
     TypeExpressionPrinter.inline(projected)
+  end
+
+  sig { params(node: TypeExpression, type: Type).returns(T::Boolean) }
+  def self.unsafe_inline_linear_migration?(node, type)
+    return false unless node.is_a?(LinearTypeExpression)
+    return true if node.dimensions.include?(:INFERRED)
+
+    bare_legacy_slice?(node, type)
+  end
+
+  sig { params(node: LinearTypeExpression, type: Type).returns(T::Boolean) }
+  def self.bare_legacy_slice?(node, type)
+    type.collection.nil? && node.list? && node.capabilities.collection.nil?
   end
 
   sig { params(expression: TypeExpression, type: Type).returns(T.nilable(TypeExpression)) }
@@ -977,6 +1000,10 @@ class Type
       pool_dimension = expression.dimensions.find { |dimension| dimension.is_a?(Integer) }
       hint = pool_dimension if pool_dimension.is_a?(Integer)
     end
+    # Inline Pivot pools require an explicit capacity (`[Pool(N)]T`). A
+    # legacy dynamic `T[]@pool` has no semantics-preserving spelling yet.
+    return nil if type.pool? && hint.nil?
+
     LinearTypeExpression.new(
       kind: collection,
       dimensions: expression.dimensions,
@@ -1497,7 +1524,7 @@ class Type
     # Symbol strings live in static read-only memory — always rodata, never heap/frame.
     mark_rodata! if symbol?
     # Pool collection always lives on the heap (owns internal slot array).
-    pin_heap_for_collection! if !collection.nil? && pool?
+    pin_heap_for_collection! if pool?
     # Gradual-typing placeholder. When set, this Type represents an
     # unresolved Auto slot — the inference pass (see
     # docs/agents/gradual-typing.md) walks every Auto Type, collects
@@ -2031,6 +2058,10 @@ class Type
   def copy_collection_shape_from!(source)
     source_collection = source.collection
     source_shard_count = source.shard_count
+    # Symbol-only reconstruction cannot represent Inline Pivot markers such
+    # as [Set] (its legacy projection is Int64[SET]). Recover the recursive
+    # node from the authoritative source before merging binding capabilities.
+    @shape = source.shape.copy if element_type.nil? && !source.element_type.nil?
     apply_capabilities!(
       collection: Type.capability_symbol_or_unset(collection.nil? && !source_collection.nil? ? source_collection : nil),
       shard_count: Type.capability_integer_or_unset(shard_count.nil? && !source_shard_count.nil? ? source_shard_count : nil),

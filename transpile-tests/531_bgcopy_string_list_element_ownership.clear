@@ -1,10 +1,10 @@
 # Regression: COPY of a String[]@list into a BG must deep-copy the
 # element strings, else its cleanup double-frees the source's.
 # Detected only under leak detection (`./clear test`).
-FN consume(xs: String[]@list) RETURNS Int64 -> RETURN xs.length(); END
+FN consume(xs: []String) RETURNS Int64 -> RETURN xs.length(); END
 
 FN runit() RETURNS !Int64 ->
-    MUTABLE c0: String[]@list = List[];
+    MUTABLE c0: []String = List[];
     c0.append("a");
     f: ~Int64 = BG { consume(COPY c0); };
     RETURN NEXT f;

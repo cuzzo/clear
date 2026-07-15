@@ -2,7 +2,7 @@
 
 FN main() RETURNS Void ->
     # Fixed array iteration
-    items: Int64[4] = [10_i64, 20_i64, 30_i64, 40_i64];
+    items: [4]Int64 = [10_i64, 20_i64, 30_i64, 40_i64];
     MUTABLE arr_sum: Int64 = 0;
     FOR x IN items DO
         arr_sum += x;
@@ -10,7 +10,7 @@ FN main() RETURNS Void ->
     ASSERT arr_sum == 100_i64, "array FOR sum should be 100";
 
     # List iteration
-    MUTABLE nums: Int64[]@list = [];
+    MUTABLE nums: []Int64 = [];
     nums.append(1_i64);
     nums.append(2_i64);
     nums.append(3_i64);

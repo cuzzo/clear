@@ -8,10 +8,10 @@ FN parseCell(line: String) RETURNS !Cell ->
   RETURN Cell{ x: x, y: y };
 END
 
-FN readGrid(path: String) RETURNS !Cell[]@list ->
+FN readGrid(path: String) RETURNS ![]Cell ->
   raw = readFile(path) OR_ELSE RAISE;
   lines = raw.split("\n");
-  MUTABLE cells: Cell[]@list = [];
+  MUTABLE cells: []Cell = [];
   MUTABLE i = 0;
   WHILE i < lines.length() DO
     line = lines[i].trim();
@@ -33,8 +33,8 @@ FN runLife(path: String, generations: Int64) RETURNS !Void ->
   END
 END
 
-FN defaultGlider() RETURNS !Cell[]@list ->
-  MUTABLE cells: Cell[]@list = [];
+FN defaultGlider() RETURNS ![]Cell ->
+  MUTABLE cells: []Cell = [];
   cells.append(Cell{ x: 1, y: 0 });
   cells.append(Cell{ x: 2, y: 1 });
   cells.append(Cell{ x: 0, y: 2 });

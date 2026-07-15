@@ -1,7 +1,7 @@
 REQUIRE "grid.clear";
 
-FN liveCellMap(cells: Cell[]@list) RETURNS !HashMap<Int64> ->
-  MUTABLE live: HashMap<Int64> = {};
+FN liveCellMap(cells: []Cell) RETURNS !{String}Int64 ->
+  MUTABLE live: {String}Int64 = {};
   MUTABLE i = 0;
   WHILE i < cells.length() DO
     IF cells[i] EXISTS AS cell THEN live[cellKey(cell)] = 1; END
@@ -10,8 +10,8 @@ FN liveCellMap(cells: Cell[]@list) RETURNS !HashMap<Int64> ->
   RETURN live;
 END
 
-FN bounds(cells: Cell[]@list) RETURNS !Cell[]@list ->
-  MUTABLE result: Cell[]@list = [];
+FN bounds(cells: []Cell) RETURNS ![]Cell ->
+  MUTABLE result: []Cell = [];
   IF cells.empty?() THEN
     result.append(Cell{ x: 0, y: 0 });
     result.append(Cell{ x: 0, y: 0 });
@@ -39,12 +39,12 @@ FN bounds(cells: Cell[]@list) RETURNS !Cell[]@list ->
   RETURN result;
 END
 
-FN graph(cells: Cell[]@list) RETURNS !String[]@list ->
+FN graph(cells: []Cell) RETURNS ![]String ->
   live = liveCellMap(cells);
   b = bounds(cells);
   min = b[0] OR_ELSE Cell{ x: 0_i64, y: 0_i64 };
   max = b[1] OR_ELSE Cell{ x: 0_i64, y: 0_i64 };
-  MUTABLE rows: String[]@list = [];
+  MUTABLE rows: []String = [];
 
   MUTABLE x = min.x - 1;
   WHILE x <= max.x + 1 DO
@@ -66,7 +66,7 @@ FN graph(cells: Cell[]@list) RETURNS !String[]@list ->
   RETURN rows;
 END
 
-FN render(cells: Cell[]@list) RETURNS !Void ->
+FN render(cells: []Cell) RETURNS !Void ->
   b = bounds(cells);
   min = b[0] OR_ELSE Cell{ x: 0_i64, y: 0_i64 };
   max = b[1] OR_ELSE Cell{ x: 0_i64, y: 0_i64 };

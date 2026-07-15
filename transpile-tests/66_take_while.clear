@@ -10,7 +10,7 @@ FN main() RETURNS Void ->
     ASSERT result[2] == 3.0, "last taken element";
 
     # Take while positive from an @list
-    MUTABLE nums: Float64[]@list = [];
+    MUTABLE nums: []Float64 = [];
     nums.append(5.0);
     nums.append(3.0);
     nums.append(1.0);

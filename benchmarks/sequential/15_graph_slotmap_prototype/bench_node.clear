@@ -9,7 +9,7 @@ FN main() RETURNS Void ->
   n = 1_000_000_i64;
   readRounds = 8_i64;
   writeRounds = 4_i64;
-  MUTABLE nodes: BenchNode@node[1_000_000]@list = [];
+  MUTABLE nodes: []BenchNode@node = [];
 
   buildStart = timestampMs();
   TIGHT FOR i IN (0_i64 ..< n) DO

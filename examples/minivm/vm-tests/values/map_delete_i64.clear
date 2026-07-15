@@ -1,5 +1,5 @@
 FN main() RETURNS Int64 ->
-    MUTABLE m: HashMap<Int64> = {};
+    MUTABLE m: {String}Int64 = {};
     m["a"] = 10_i64;
     m["b"] = 20_i64;
     m.delete("a");

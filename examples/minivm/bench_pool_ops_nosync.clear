@@ -2,7 +2,7 @@
 
 REQUIRE "types.clear";
 
-FN run!(MUTABLE pool: Env[200000]@pool) RETURNS Int64 ->
+FN run!(MUTABLE pool: [Pool(200000)]Env) RETURNS Int64 ->
     MUTABLE total: Int64 = 0;
     MUTABLE iter: Int64 = 0;
     WHILE iter < 100000 DO
@@ -24,7 +24,7 @@ FN run!(MUTABLE pool: Env[200000]@pool) RETURNS Int64 ->
 END
 
 FN main() RETURNS Void ->
-    MUTABLE pool: Env[200000]@pool = [];
+    MUTABLE pool: [Pool(200000)]Env = [];
     startMs = timestampMs();
     total = run!(pool);
     endMs = timestampMs();

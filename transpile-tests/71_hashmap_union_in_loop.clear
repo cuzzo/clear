@@ -6,7 +6,7 @@
 UNION Value { Nil, Str: String, Num: Float64 }
 
 FN main() RETURNS Void ->
-    MUTABLE map: HashMap<Value> = {};
+    MUTABLE map: {String}Value = {};
     data: String[] = ["alpha", "beta", "gamma"];
 
     # Store strings from loop iterations into the hashmap

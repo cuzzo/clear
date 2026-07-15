@@ -5,7 +5,7 @@
 
 FN main() RETURNS Void ->
     # String-keyed sharded+locked map with 4 stripes.
-    MUTABLE scores: HashMap<Int64>@sharded(4):locked = {};
+    MUTABLE scores: {String}@sharded(4):locked Int64 = {};
 
     # Put values (any thread can write to any stripe).
     scores["alice"] = 100;

@@ -21,7 +21,7 @@ UNION JsonValue {
   JNum: Float64,
   JStr: String,
   JArray: JsonValue[],
-  JObj: HashMap<JsonValue>
+  JObj: {String}JsonValue
 }
 
 # =========================================================================
@@ -73,7 +73,7 @@ FN skipWhitespace(json: String, pos: Int64) RETURNS !Int64 ->
   RETURN p;
 END
 
-FN parseString!(json: String, pos: Int64, MUTABLE penv: HashMap<Int64>) RETURNS !String ->
+FN parseString!(json: String, pos: Int64, MUTABLE penv: {String}Int64) RETURNS !String ->
   # pos points at the opening "
   MUTABLE p = pos + 1;
   MUTABLE result = "";
@@ -113,7 +113,7 @@ END
 FN parseValue!(
     json: String,
     pos: Int64,
-    MUTABLE penv: HashMap<Int64>,
+    MUTABLE penv: {String}Int64,
     depth: Int64
 )
  RETURNS !JsonValue
@@ -173,7 +173,7 @@ FN parseValue!(
   # Array
   IF c == "[" THEN
     p += 1;
-    MUTABLE items: JsonValue[]@list = List[];
+    MUTABLE items: []JsonValue = List[];
     p = skipWhitespace(json, p);
     IF p < json.length() AND json.charAt(p) == "]" THEN
       penv["__jp"] = p + 1;
@@ -202,7 +202,7 @@ FN parseValue!(
   # Object
   IF c == "{" THEN
     p += 1;
-    MUTABLE obj: HashMap<JsonValue> = {};
+    MUTABLE obj: {String}JsonValue = {};
     p = skipWhitespace(json, p);
     IF p < json.length() AND json.charAt(p) == "}" THEN
       penv["__jp"] = p + 1;
@@ -274,7 +274,7 @@ END
 # =========================================================================
 
 FN main() RETURNS Void ->
-  MUTABLE penv: HashMap<Int64> = {};
+  MUTABLE penv: {String}Int64 = {};
   MUTABLE passed = 0;
   MUTABLE failed = 0;
 

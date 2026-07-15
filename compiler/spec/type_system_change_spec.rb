@@ -383,8 +383,8 @@ RSpec.describe "type-system change contracts" do
 
   it "renders fixed SOA elements through recursive nested type lowering" do
     plain, locked = parse(<<~CLEAR).statements.map(&:type)
-      plain: Int64[2]@soa = DEFAULT;
-      locked: Int64[2]@soa:locked = DEFAULT;
+      plain: [2]@soa Int64 = DEFAULT;
+      locked: [2]@soa:locked Int64 = DEFAULT;
     CLEAR
 
     expect(plain.zig_type).to eq("CheatLib.SoaList(i64)")
@@ -453,8 +453,8 @@ RSpec.describe "type-system change contracts" do
       pool_outer: [Pool(4)]Tuple<Int64, Bool> = DEFAULT;
       set_outer: [Set]Tuple<Int64, Bool> = DEFAULT;
       map_outer: {String}Tuple<Int64, Bool> = DEFAULT;
-      tuple_inner: Tuple<[2]Int64, [List]Bool, [Pool(4)]Int64, [Set]Bool, {String}Int64> = DEFAULT;
-      capable_inner: Tuple<[List]@shared Int64, {String}@sharded(2) Bool> = DEFAULT;
+      tuple_inner: Tuple<[2]Int64, []Bool, [Pool(4)]Int64, [Set]Bool, {String}Int64> = DEFAULT;
+      capable_inner: Tuple<[]@shared Int64, {String}@sharded(2) Bool> = DEFAULT;
     CLEAR
 
     expect(types.first.element_type).to be_tuple
@@ -474,7 +474,7 @@ RSpec.describe "type-system change contracts" do
 
   it "preserves the exact Tuple or collection node gated by each tense" do
     type = parse(<<~CLEAR).statements.first.type
-      value: Tuple<?[List]Int64, [List]?Int64, !{String}Int64, {String}!Int64, ~[List]Int64, [List]~Int64> = DEFAULT;
+      value: Tuple<?[]Int64, []?Int64, !{String}Int64, {String}!Int64, ~[]Int64, []~Int64> = DEFAULT;
     CLEAR
     optional_list, list_optional, fallible_map, map_fallible, future_list, list_future = type.generic_args
 
@@ -698,11 +698,11 @@ RSpec.describe "type-system change contracts" do
 
   it "autofixes legacy annotations from their semantic type trees" do
     source = <<~CLEAR
-      list: Int64[] = [];
-      maybe_item: ?Int64[] = [];
-      maybe_list: ?(Int64[]) = NIL;
+      list: Int64[]@list = [];
+      maybe_item: ?Int64[]@list = [];
+      maybe_list: ?(Int64[]@list) = NIL;
       lookup: HashMap<Int64> = {};
-      nested: HashMap<Symbol, String[]> = {};
+      nested: HashMap<Symbol, String[]@list> = {};
       unique: Int64[]@set = Set[];
       arena: Int64[16]@pool = Pool[];
       optional_unique: ?(Int64[]@set) = NIL;
@@ -719,20 +719,57 @@ RSpec.describe "type-system change contracts" do
       arena: [Pool(16)]Int64 = Pool[];
       optional_unique: ?[Set]Int64 = NIL;
       fallible_unique: ![Set]Int64 = DEFAULT;
-      future_unique: ~[Set]Int64 = DEFAULT;
+      future_unique: ~Int64[]@set = DEFAULT;
     CLEAR
 
-    rewritten, count, = ClearFixSupport.apply_to_source(source, only_set: Set[:type])
-    expect(count).to eq(10)
+    rewritten, count, = ClearFixSupport.apply_to_source(source, only_set: Set[:type_migration])
+    expect(count).to eq(9)
     expect(rewritten).to eq(expected)
-    expect(ClearFixSupport.apply_to_source(rewritten, only_set: Set[:type]).first).to eq(rewritten)
+    expect(ClearFixSupport.apply_to_source(rewritten, only_set: Set[:type_migration]).first).to eq(rewritten)
+  end
+
+  it "does not auto-migrate overloaded legacy async collection annotations" do
+    source = <<~CLEAR
+      bounded: ~Int64[2] = DEFAULT;
+      open: ~?Int64[] = DEFAULT;
+      infinite: ~Int64[INF] = DEFAULT;
+      ambiguous_list: ~Int64[]@list = DEFAULT;
+    CLEAR
+
+    rewritten, count, = ClearFixSupport.apply_to_source(source, only_set: Set[:type_migration])
+    expect(count).to eq(0)
+    expect(rewritten).to eq(source)
+  end
+
+  it "does not rewrite a legacy slice as an owned Inline Pivot list" do
+    source = "values: Int64[] = [];\n"
+    rewritten, count, = ClearFixSupport.apply_to_source(source, only_set: Set[:type_migration])
+
+    expect(count).to eq(0)
+    expect(rewritten).to eq(source)
+  end
+
+  it "does not treat nominal aliases as collection-syntax migrations" do
+    source = "value: Number = 1.0;\n"
+    rewritten, count, = ClearFixSupport.apply_to_source(source, only_set: Set[:type_migration])
+
+    expect(count).to eq(0)
+    expect(rewritten).to eq(source)
+  end
+
+  it "leaves a legacy capacity-free pool unchanged because Inline Pivot pools require a bound" do
+    source = "values: Int64[]@pool = Pool[];\n"
+    rewritten, count, = ClearFixSupport.apply_to_source(source, only_set: Set[:type_migration])
+
+    expect(count).to eq(0)
+    expect(rewritten).to eq(source)
   end
 
   it "migrates collection and element capabilities onto their exact layers" do
-    source = "values: Int64[]@shared:locked = [];\n"
-    rewritten, count, = ClearFixSupport.apply_to_source(source, only_set: Set[:type])
-    element_source = "values: Int64@shared[] = [];\n"
-    element_rewritten, element_count, = ClearFixSupport.apply_to_source(element_source, only_set: Set[:type])
+    source = "values: Int64[]@list:shared:locked = [];\n"
+    rewritten, count, = ClearFixSupport.apply_to_source(source, only_set: Set[:type_migration])
+    element_source = "values: Int64@shared[]@list = [];\n"
+    element_rewritten, element_count, = ClearFixSupport.apply_to_source(element_source, only_set: Set[:type_migration])
     shared = parse("value: SHARED Int64 = DEFAULT;").statements.first.type
 
     expect(count).to eq(1)

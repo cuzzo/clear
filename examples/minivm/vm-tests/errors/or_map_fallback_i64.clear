@@ -1,4 +1,4 @@
 FN main() RETURNS Int64 ->
-    m: HashMap<Int64> = {};
+    m: {String}Int64 = {};
     RETURN m["missing"] OR_ELSE 99_i64;
 END

@@ -82,7 +82,7 @@ FN main() RETURNS Void ->
   iterations = 100;
 
   # SOA layout via T[N]@soa (fixed-size SOA array)
-  MUTABLE soa: Particle[100_000]@soa = [];
+  MUTABLE soa: [100000]@soa Particle = [];
   TIGHT FOR i IN (0 ..< n) DO
     soa
       .append(

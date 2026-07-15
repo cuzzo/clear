@@ -463,7 +463,7 @@ RSpec.describe SemanticAnnotator do
           run(<<~CLEAR)
             STRUCT Score { value: Float64 }
             FN f() RETURNS !Void ->
-              MUTABLE sp: Score[100]@pool:sharded(4) = [];
+              MUTABLE sp: [Pool(100)]@sharded(4) Score = [];
               RETURN;
             END
           CLEAR
@@ -474,7 +474,7 @@ RSpec.describe SemanticAnnotator do
         tree = run(<<~CLEAR)
           STRUCT Score { value: Float64 }
           FN f() RETURNS !Void ->
-            MUTABLE sp: Score[100]@pool:sharded(4) = [];
+            MUTABLE sp: [Pool(100)]@sharded(4) Score = [];
             RETURN;
           END
         CLEAR
@@ -488,7 +488,7 @@ RSpec.describe SemanticAnnotator do
         out = transpile_fn(<<~CLEAR)
           STRUCT Score { value: Float64 }
           FN f() RETURNS !Void ->
-            MUTABLE sp: Score[100]@pool:sharded(4) = [];
+            MUTABLE sp: [Pool(100)]@sharded(4) Score = [];
             RETURN;
           END
         CLEAR
@@ -499,7 +499,7 @@ RSpec.describe SemanticAnnotator do
         out = transpile_fn(<<~CLEAR)
           STRUCT Score { value: Float64 }
           FN f() RETURNS !Void ->
-            MUTABLE sp: Score[100]@pool:sharded(4) = [];
+            MUTABLE sp: [Pool(100)]@sharded(4) Score = [];
             RETURN;
           END
         CLEAR
@@ -525,7 +525,7 @@ RSpec.describe SemanticAnnotator do
           run(<<~CLEAR)
             STRUCT Score { value: Float64 }
             FN f() RETURNS !Void ->
-              MUTABLE sp: Score[100]@pool:sharded(4) = [];
+              MUTABLE sp: [Pool(100)]@sharded(4) Score = [];
               id = sp.insert(Score{ value: 1.0 });
               result = sp.get(id);
               sp.remove(id);
@@ -540,7 +540,7 @@ RSpec.describe SemanticAnnotator do
         out = transpile_fn(<<~CLEAR)
           STRUCT Score { value: Float64 }
           FN f() RETURNS !Void ->
-            MUTABLE sp: Score[100]@pool:sharded(4) = [];
+            MUTABLE sp: [Pool(100)]@sharded(4) Score = [];
             id = sp.insert(Score{ value: 1.0 });
             result = sp.get(id);
             sp.remove(id);
@@ -564,7 +564,7 @@ RSpec.describe SemanticAnnotator do
           run(<<~CLEAR)
             STRUCT Score { value: Float64 }
             FN f() RETURNS !Void ->
-              MUTABLE sl: Score[]@list:sharded(2) = [];
+              MUTABLE sl: []@sharded(2) Score = [];
               RETURN;
             END
           CLEAR
@@ -575,7 +575,7 @@ RSpec.describe SemanticAnnotator do
         tree = run(<<~CLEAR)
           STRUCT Score { value: Float64 }
           FN f() RETURNS !Void ->
-            MUTABLE sl: Score[]@list:sharded(2) = [];
+            MUTABLE sl: []@sharded(2) Score = [];
             RETURN;
           END
         CLEAR
@@ -589,7 +589,7 @@ RSpec.describe SemanticAnnotator do
         out = transpile_fn(<<~CLEAR)
           STRUCT Score { value: Float64 }
           FN f() RETURNS !Void ->
-            MUTABLE sl: Score[]@list:sharded(2) = [];
+            MUTABLE sl: []@sharded(2) Score = [];
             RETURN;
           END
         CLEAR
@@ -631,7 +631,7 @@ RSpec.describe SemanticAnnotator do
           run(<<~CLEAR)
             STRUCT Score { value: Float64 }
             FN f() RETURNS !Void ->
-              MUTABLE items: Score[]@list = [];
+              MUTABLE items: []Score = [];
               items |> EACH { _.value = 0.0; };
               RETURN;
             END
@@ -644,7 +644,7 @@ RSpec.describe SemanticAnnotator do
           run(<<~CLEAR)
             STRUCT Score { value: Float64 }
             FN f() RETURNS !Void ->
-              MUTABLE pool: Score[100]@pool = [];
+              MUTABLE pool: [Pool(100)]Score = [];
               pool |> EACH { _.value = 0.0; };
               RETURN;
             END
@@ -657,7 +657,7 @@ RSpec.describe SemanticAnnotator do
           run(<<~CLEAR)
             STRUCT Score { value: Float64 }
             FN f() RETURNS !Void ->
-              MUTABLE sp: Score[100]@pool:sharded(4) = [];
+              MUTABLE sp: [Pool(100)]@sharded(4) Score = [];
               sp |> EACH { _.value = 0.0; };
               RETURN;
             END
@@ -694,7 +694,7 @@ RSpec.describe SemanticAnnotator do
         out = transpile_fn(<<~CLEAR)
           STRUCT Score { value: Float64 }
           FN f() RETURNS !Void ->
-            MUTABLE pool: Score[100]@pool = [];
+            MUTABLE pool: [Pool(100)]Score = [];
             pool |> EACH { _.value = 0.0; };
             RETURN;
           END
@@ -707,7 +707,7 @@ RSpec.describe SemanticAnnotator do
         out = transpile_fn(<<~CLEAR)
           STRUCT Score { value: Float64 }
           FN f() RETURNS !Void ->
-            MUTABLE sp: Score[100]@pool:sharded(4) = [];
+            MUTABLE sp: [Pool(100)]@sharded(4) Score = [];
             sp |> EACH { _.value = 0.0; };
             RETURN;
           END
@@ -759,7 +759,7 @@ RSpec.describe SemanticAnnotator do
       it "emits .put() for index assignment on sharded map" do
         code = <<~CLEAR
           FN f() RETURNS !Void ->
-              MUTABLE m: HashMap<Int64>@sharded(2) = {};
+              MUTABLE m: {String}@sharded(2) Int64 = {};
               m["key"] = 42_i64;
               RETURN;
           END
@@ -771,7 +771,7 @@ RSpec.describe SemanticAnnotator do
       it "emits .get() for index access on sharded map" do
         code = <<~CLEAR
           FN f() RETURNS !Void ->
-              MUTABLE m: HashMap<Int64>@sharded(2) = {};
+              MUTABLE m: {String}@sharded(2) Int64 = {};
               m["key"] = 42_i64;
               v = m["key"] OR_ELSE 0;
               RETURN;
@@ -784,7 +784,7 @@ RSpec.describe SemanticAnnotator do
       it "emits .count() for count method on sharded map" do
         code = <<~CLEAR
           FN f() RETURNS !Void ->
-              MUTABLE m: HashMap<Int64>@sharded(2) = {};
+              MUTABLE m: {String}@sharded(2) Int64 = {};
               n: Int64 = m.count();
               RETURN;
           END
@@ -810,7 +810,7 @@ RSpec.describe SemanticAnnotator do
       it "emits .put() for index assignment" do
         code = <<~CLEAR
           FN f() RETURNS !Void ->
-              MUTABLE m: HashMap<Int64>@sharded(4):locked = {};
+              MUTABLE m: {String}@sharded(4):locked Int64 = {};
               m["key"] = 42_i64;
               RETURN;
           END
@@ -822,7 +822,7 @@ RSpec.describe SemanticAnnotator do
       it "emits .get() for index access" do
         code = <<~CLEAR
           FN f() RETURNS !Void ->
-              MUTABLE m: HashMap<Int64>@sharded(4):locked = {};
+              MUTABLE m: {String}@sharded(4):locked Int64 = {};
               m["key"] = 42_i64;
               v = m["key"] OR_ELSE 0;
               RETURN;
@@ -881,7 +881,7 @@ RSpec.describe SemanticAnnotator do
       it "auto-derefs Arc for index read (.get)" do
         code = <<~CLEAR
           FN f() RETURNS !Void ->
-              MUTABLE m: HashMap<Int64>@shared:sharded(4):writeLocked = {};
+              MUTABLE m: {String}@shared:sharded(4):writeLocked Int64 = {};
               m["key"] = 42_i64;
               v = m["key"] OR_ELSE 0;
               RETURN;
@@ -894,7 +894,7 @@ RSpec.describe SemanticAnnotator do
       it "auto-derefs Arc for index write (.put)" do
         code = <<~CLEAR
           FN f() RETURNS !Void ->
-              MUTABLE m: HashMap<Int64>@shared:sharded(4):writeLocked = {};
+              MUTABLE m: {String}@shared:sharded(4):writeLocked Int64 = {};
               m["key"] = 42_i64;
               RETURN;
           END
@@ -906,7 +906,7 @@ RSpec.describe SemanticAnnotator do
       it "auto-derefs Arc for .count()" do
         code = <<~CLEAR
           FN f() RETURNS !Void ->
-              MUTABLE m: HashMap<Int64>@shared:sharded(4):writeLocked = {};
+              MUTABLE m: {String}@shared:sharded(4):writeLocked Int64 = {};
               n: Int64 = m.count();
               RETURN;
           END
@@ -924,7 +924,7 @@ RSpec.describe SemanticAnnotator do
     it "accepts Entity[100]@pool:soa as a valid type annotation" do
       code = <<~CLEAR
         STRUCT Entity { x: Float64, y: Float64, vx: Float64, vy: Float64, health: Float64 }
-        FN f() RETURNS !Void -> MUTABLE pool: Entity[100]@pool:soa = []; RETURN; END
+        FN f() RETURNS !Void -> MUTABLE pool: [Pool(100)]@soa Entity = []; RETURN; END
       CLEAR
       expect { run(code) }.not_to raise_error
     end
@@ -932,7 +932,7 @@ RSpec.describe SemanticAnnotator do
     it "generates SoaPool Zig type" do
       code = <<~CLEAR
         STRUCT Entity { x: Float64, y: Float64, vx: Float64, vy: Float64, health: Float64 }
-        FN f() RETURNS !Void -> MUTABLE pool: Entity[100]@pool:soa = []; RETURN; END
+        FN f() RETURNS !Void -> MUTABLE pool: [Pool(100)]@soa Entity = []; RETURN; END
       CLEAR
       zig = ZigTranspiler.new.transpile(code)
       expect(zig).to include("CheatLib.SoaPool(Entity)")
@@ -942,7 +942,7 @@ RSpec.describe SemanticAnnotator do
     it "plain @pool still generates Pool (not SoaPool)" do
       code = <<~CLEAR
         STRUCT Entity { x: Float64, y: Float64 }
-        FN f() RETURNS !Void -> MUTABLE pool: Entity[100]@pool = []; RETURN; END
+        FN f() RETURNS !Void -> MUTABLE pool: [Pool(100)]Entity = []; RETURN; END
       CLEAR
       zig = ZigTranspiler.new.transpile(code)
       expect(zig).to include("CheatLib.Pool(Entity)")
@@ -952,7 +952,7 @@ RSpec.describe SemanticAnnotator do
     it "emits defer cleanup for @pool:soa" do
       code = <<~CLEAR
         STRUCT Entity { x: Float64, y: Float64, vx: Float64, vy: Float64, health: Float64 }
-        FN f() RETURNS !Void -> MUTABLE pool: Entity[100]@pool:soa = []; RETURN; END
+        FN f() RETURNS !Void -> MUTABLE pool: [Pool(100)]@soa Entity = []; RETURN; END
       CLEAR
       zig = ZigTranspiler.new.transpile(code)
       # Post-collapse: SOA pool routes through CheatLib.cleanup shim.
@@ -963,7 +963,7 @@ RSpec.describe SemanticAnnotator do
       code = <<~CLEAR
         STRUCT Entity { x: Float64, y: Float64, vx: Float64, vy: Float64, health: Float64 }
         FN f() RETURNS !Float64 ->
-          MUTABLE pool: Entity[100]@pool:soa = [];
+          MUTABLE pool: [Pool(100)]@soa Entity = [];
           total = pool |> SUM _.health;
           RETURN total;
         END
@@ -1008,7 +1008,7 @@ RSpec.describe SemanticAnnotator do
 
     it "old syntax T[]@list still works" do
       zig = ZigTranspiler.new.transpile(<<~CLEAR)
-        FN f() RETURNS !Void -> MUTABLE items: Int64[]@list = []; RETURN; END
+        FN f() RETURNS !Void -> MUTABLE items: []Int64 = []; RETURN; END
       CLEAR
       expect(zig).to include("ArrayListUnmanaged(i64)")
     end
@@ -1021,7 +1021,7 @@ RSpec.describe SemanticAnnotator do
     it "accepts Entity[]@list:soa as a valid type annotation" do
       code = <<~CLEAR
         STRUCT Entity { x: Float64, y: Float64, vx: Float64, vy: Float64, health: Float64 }
-        FN f() RETURNS !Void -> MUTABLE items: Entity[]@list:soa = []; RETURN; END
+        FN f() RETURNS !Void -> MUTABLE items: []@soa Entity = []; RETURN; END
       CLEAR
       expect { run(code) }.not_to raise_error
     end
@@ -1029,7 +1029,7 @@ RSpec.describe SemanticAnnotator do
     it "generates SoaList Zig type" do
       code = <<~CLEAR
         STRUCT Entity { x: Float64, y: Float64, vx: Float64, vy: Float64, health: Float64 }
-        FN f() RETURNS !Void -> MUTABLE items: Entity[]@list:soa = []; RETURN; END
+        FN f() RETURNS !Void -> MUTABLE items: []@soa Entity = []; RETURN; END
       CLEAR
       zig = ZigTranspiler.new.transpile(code)
       expect(zig).to include("CheatLib.SoaList(Entity)")
@@ -1039,7 +1039,7 @@ RSpec.describe SemanticAnnotator do
       code = <<~CLEAR
         STRUCT Entity { x: Float64, y: Float64, vx: Float64, vy: Float64, health: Float64 }
         FN f() RETURNS !Float64 ->
-          MUTABLE items: Entity[]@list:soa = [];
+          MUTABLE items: []@soa Entity = [];
           total = items |> SUM _.health;
           RETURN total;
         END
@@ -1056,7 +1056,7 @@ RSpec.describe SemanticAnnotator do
     it "plain @list still generates ArrayListUnmanaged (not SoaList)" do
       code = <<~CLEAR
         STRUCT Entity { x: Float64, y: Float64 }
-        FN f() RETURNS !Void -> MUTABLE items: Entity[]@list = []; RETURN; END
+        FN f() RETURNS !Void -> MUTABLE items: []Entity = []; RETURN; END
       CLEAR
       zig = ZigTranspiler.new.transpile(code)
       expect(zig).to include("ArrayListUnmanaged(Entity)")
@@ -1073,7 +1073,7 @@ RSpec.describe SemanticAnnotator do
         STRUCT Vec2 { x: Float64, y: Float64 }
         EXTERN FN process_vecs(data: Vec2) RETURNS Void FROM "native";
         FN f() RETURNS !Void ->
-          MUTABLE pool: Vec2[100]@pool:soa = [];
+          MUTABLE pool: [Pool(100)]@soa Vec2 = [];
           process_vecs(pool);
           RETURN;
         END
@@ -1086,7 +1086,7 @@ RSpec.describe SemanticAnnotator do
         STRUCT Vec2 { x: Float64, y: Float64 }
         EXTERN FN process_vecs(data: Vec2) RETURNS Void FROM "native";
         FN f() RETURNS !Void ->
-          MUTABLE items: Vec2[]@list:soa = [];
+          MUTABLE items: []@soa Vec2 = [];
           process_vecs(items);
           RETURN;
         END
@@ -2313,7 +2313,7 @@ RSpec.describe SemanticAnnotator do
     context "sharded list |> SUM _ resolves to Float64" do
       let(:code) {
         <<~FLUX
-          MUTABLE slist: Float64[]@list:sharded(2) = [];
+          MUTABLE slist: []@sharded(2) Float64 = [];
           total = slist |> SUM _;
         FLUX
       }
@@ -2330,7 +2330,7 @@ RSpec.describe SemanticAnnotator do
     context "sharded list |> COUNT predicate resolves to Int64" do
       let(:code) {
         <<~FLUX
-          MUTABLE slist: Float64[]@list:sharded(2) = [];
+          MUTABLE slist: []@sharded(2) Float64 = [];
           n = slist |> COUNT _ > 0.0;
         FLUX
       }
@@ -2343,7 +2343,7 @@ RSpec.describe SemanticAnnotator do
     context "sharded list |> ANY predicate resolves to Bool" do
       let(:code) {
         <<~FLUX
-          MUTABLE slist: Float64[]@list:sharded(2) = [];
+          MUTABLE slist: []@sharded(2) Float64 = [];
           found = slist |> ANY _ > 0.0;
         FLUX
       }
@@ -2372,7 +2372,7 @@ RSpec.describe SemanticAnnotator do
     context "sharded list |> ALL predicate resolves to Bool" do
       let(:code) {
         <<~FLUX
-          MUTABLE slist: Float64[]@list:sharded(2) = [];
+          MUTABLE slist: []@sharded(2) Float64 = [];
           result = slist |> ALL _ > 0.0;
         FLUX
       }
@@ -2385,7 +2385,7 @@ RSpec.describe SemanticAnnotator do
     context "sharded list |> AVERAGE _ resolves to Float64" do
       let(:code) {
         <<~FLUX
-          MUTABLE slist: Float64[]@list:sharded(2) = [];
+          MUTABLE slist: []@sharded(2) Float64 = [];
           result = slist |> AVERAGE _;
         FLUX
       }
@@ -2402,7 +2402,7 @@ RSpec.describe SemanticAnnotator do
     context "sharded list |> MIN _ resolves to Float64" do
       let(:code) {
         <<~FLUX
-          MUTABLE slist: Float64[]@list:sharded(2) = [];
+          MUTABLE slist: []@sharded(2) Float64 = [];
           result = slist |> MIN _;
         FLUX
       }
@@ -2415,7 +2415,7 @@ RSpec.describe SemanticAnnotator do
     context "sharded list |> MAX _ resolves to Float64" do
       let(:code) {
         <<~FLUX
-          MUTABLE slist: Float64[]@list:sharded(2) = [];
+          MUTABLE slist: []@sharded(2) Float64 = [];
           result = slist |> MAX _;
         FLUX
       }
@@ -2429,7 +2429,7 @@ RSpec.describe SemanticAnnotator do
       let(:code) {
         <<~FLUX
           STRUCT Item { value: Float64 }
-          MUTABLE slist: Item[]@list:sharded(2) = [];
+          MUTABLE slist: []@sharded(2) Item = [];
           result = slist |> WHERE _.value > 0.0;
         FLUX
       }
@@ -2447,7 +2447,7 @@ RSpec.describe SemanticAnnotator do
       let(:code) {
         <<~FLUX
           STRUCT Item { value: Float64 }
-          MUTABLE slist: Item[]@list:sharded(2) = [];
+          MUTABLE slist: []@sharded(2) Item = [];
           result = slist |> FIND _.value > 0.0;
         FLUX
       }
@@ -2467,7 +2467,7 @@ RSpec.describe SemanticAnnotator do
         <<~FLUX
           STRUCT Item { value: Float64 }
           FN f() RETURNS !Void ->
-            MUTABLE slist: Item[]@list:sharded(2) = [];
+            MUTABLE slist: []@sharded(2) Item = [];
             result = slist |> WHERE _.value > 0.0;
             RETURN;
           END
@@ -2485,7 +2485,7 @@ RSpec.describe SemanticAnnotator do
       let(:code) {
         <<~FLUX
           STRUCT Item { value: Float64 }
-          MUTABLE slist: Item[]@list:sharded(2) = [];
+          MUTABLE slist: []@sharded(2) Item = [];
           slist |> EACH { _.value = 0.0; };
         FLUX
       }
@@ -2507,7 +2507,7 @@ RSpec.describe SemanticAnnotator do
       let(:code) {
         <<~FLUX
           STRUCT Item { value: Float64 }
-          MUTABLE pool: Item[100]@pool = [];
+          MUTABLE pool: [Pool(100)]Item = [];
           total = pool |> SUM _.value;
         FLUX
       }
@@ -2525,7 +2525,7 @@ RSpec.describe SemanticAnnotator do
       let(:code) {
         <<~FLUX
           STRUCT Item { value: Float64 }
-          MUTABLE pool: Item[100]@pool = [];
+          MUTABLE pool: [Pool(100)]Item = [];
           result = pool |> WHERE _.value > 0.0;
         FLUX
       }
@@ -2543,7 +2543,7 @@ RSpec.describe SemanticAnnotator do
       let(:code) {
         <<~FLUX
           STRUCT Item { value: Float64 }
-          MUTABLE pool: Item[100]@pool = [];
+          MUTABLE pool: [Pool(100)]Item = [];
           n = pool |> COUNT _.value > 0.0;
         FLUX
       }
@@ -2557,7 +2557,7 @@ RSpec.describe SemanticAnnotator do
       let(:code) {
         <<~FLUX
           STRUCT Item { value: Float64 }
-          MUTABLE pool: Item[100]@pool = [];
+          MUTABLE pool: [Pool(100)]Item = [];
           found = pool |> ANY _.value > 0.0;
         FLUX
       }
@@ -2571,7 +2571,7 @@ RSpec.describe SemanticAnnotator do
       let(:code) {
         <<~FLUX
           STRUCT Item { value: Float64 }
-          MUTABLE pool: Item[100]@pool = [];
+          MUTABLE pool: [Pool(100)]Item = [];
           all_pos = pool |> ALL _.value > 0.0;
         FLUX
       }
@@ -2585,7 +2585,7 @@ RSpec.describe SemanticAnnotator do
       let(:code) {
         <<~FLUX
           STRUCT Item { value: Float64 }
-          MUTABLE pool: Item[100]@pool = [];
+          MUTABLE pool: [Pool(100)]Item = [];
           mn = pool |> MIN _.value;
         FLUX
       }
@@ -2599,7 +2599,7 @@ RSpec.describe SemanticAnnotator do
       let(:code) {
         <<~FLUX
           STRUCT Item { value: Float64 }
-          MUTABLE pool: Item[100]@pool = [];
+          MUTABLE pool: [Pool(100)]Item = [];
           mx = pool |> MAX _.value;
         FLUX
       }
@@ -2613,7 +2613,7 @@ RSpec.describe SemanticAnnotator do
       let(:code) {
         <<~FLUX
           STRUCT Item { value: Float64 }
-          MUTABLE pool: Item[100]@pool = [];
+          MUTABLE pool: [Pool(100)]Item = [];
           avg = pool |> AVERAGE _.value;
         FLUX
       }
@@ -2627,7 +2627,7 @@ RSpec.describe SemanticAnnotator do
       let(:code) {
         <<~FLUX
           STRUCT Item { value: Float64 }
-          MUTABLE pool: Item[100]@pool = [];
+          MUTABLE pool: [Pool(100)]Item = [];
           total = pool |> SUM _.value;
         FLUX
       }
@@ -2650,7 +2650,7 @@ RSpec.describe SemanticAnnotator do
       let(:code) {
         <<~FLUX
           STRUCT Item { value: Float64 }
-          MUTABLE pool: Item[100]@pool = [];
+          MUTABLE pool: [Pool(100)]Item = [];
           found = pool |> FIND _.value == 10.0;
         FLUX
       }
@@ -2668,7 +2668,7 @@ RSpec.describe SemanticAnnotator do
       let(:code) {
         <<~FLUX
           STRUCT Item { value: Float64 }
-          MUTABLE pool: Item[100]@pool = [];
+          MUTABLE pool: [Pool(100)]Item = [];
           found = pool |> FIND _.value == 99.0;
         FLUX
       }
@@ -2683,7 +2683,7 @@ RSpec.describe SemanticAnnotator do
         <<~FLUX
           STRUCT Item { value: Float64 }
           FN f() RETURNS !Void ->
-            MUTABLE pool: Item[100]@pool = [];
+            MUTABLE pool: [Pool(100)]Item = [];
             found = pool |> FIND _.value == 10.0;
             RETURN;
           END

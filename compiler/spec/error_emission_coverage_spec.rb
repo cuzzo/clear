@@ -143,7 +143,7 @@ RSpec.describe "error emission coverage" do
       run(<<~CLEAR)
         STRUCT Particle { x: Float64, y: Float64 }
         FN main() RETURNS Void ->
-          ps: Particle[100]@soa = [];
+          ps: [100]@soa Particle = [];
         END
       CLEAR
     end
@@ -168,7 +168,7 @@ RSpec.describe "error emission coverage" do
       run(<<~CLEAR)
         STRUCT Item { v: Int64 }
         FN main() RETURNS Void ->
-          xs: Item[64]@pool = [];
+          xs: [Pool(64)]Item = [];
         END
       CLEAR
     end
@@ -192,7 +192,7 @@ RSpec.describe "error emission coverage" do
     it "compiles when @set is applied to an array of strings" do
       run(<<~CLEAR)
         FN main() RETURNS Void ->
-          xs: String[]@set = [];
+          xs: [Set]String = [];
         END
       CLEAR
     end
@@ -1110,7 +1110,7 @@ RSpec.describe "error emission coverage" do
       expect {
         run(<<~CLEAR)
           FN main() RETURNS Void ->
-              m: HashMap<Int64> = {};
+              m: {String}Int64 = {};
               m["key"] = 5_i64;
           END
         CLEAR
@@ -1120,7 +1120,7 @@ RSpec.describe "error emission coverage" do
     it "compiles when the collection is MUTABLE" do
       run(<<~CLEAR)
         FN main() RETURNS Void ->
-            MUTABLE m: HashMap<Int64> = {};
+            MUTABLE m: {String}Int64 = {};
             m["key"] = 5_i64;
         END
       CLEAR
@@ -1302,7 +1302,7 @@ RSpec.describe "error emission coverage" do
           FN consume(TAKES v: Value) RETURNS Void -> END
           FN main() RETURNS Void ->
               msg = Value.Nil;
-              MUTABLE items: Int64[5]@list = [];
+              MUTABLE items: []Int64 = [];
               items.append(1_i64);
               items.append(2_i64);
               WHILE items.pop() EXISTS AS i DO
@@ -1319,7 +1319,7 @@ RSpec.describe "error emission coverage" do
         FN inspect(v: Value, n: Int64) RETURNS Void -> END
         FN main() RETURNS Void ->
             msg = Value.Nil;
-            MUTABLE items: Int64[5]@list = [];
+            MUTABLE items: []Int64 = [];
             items.append(1_i64);
             items.append(2_i64);
             WHILE items.pop() EXISTS AS i DO
@@ -1591,7 +1591,7 @@ RSpec.describe "error emission coverage" do
           UNION Value { Nil, Lambda { body: Value @indirect } }
           FN consume(TAKES v: Value) RETURNS Void -> END
           FN main() RETURNS Void ->
-              MUTABLE list: Value[]@list = [];
+              MUTABLE list: []Value = [];
               list.append(Value.Nil);
             IF list[0_i64] EXISTS AS value THEN consume(value); END
           END
@@ -1604,7 +1604,7 @@ RSpec.describe "error emission coverage" do
         UNION Value { Nil, Lambda { body: Value @indirect } }
         FN inspect(v: Value) RETURNS Void -> END
         FN main() RETURNS Void ->
-            MUTABLE list: Value[]@list = [];
+            MUTABLE list: []Value = [];
             list.append(Value.Nil);
             IF list[0_i64] EXISTS AS value THEN inspect(value); END
         END
@@ -1797,7 +1797,7 @@ RSpec.describe "error emission coverage" do
       expect {
         run(<<~CLEAR)
           FN main() RETURNS !Void ->
-              items: Int64[5]@list = [];
+              items: []Int64 = [];
               WHILE items.pop() EXISTS AS v DO
                   _ = v;
               END
@@ -1809,7 +1809,7 @@ RSpec.describe "error emission coverage" do
     it "compiles when the receiver is MUTABLE" do
       run(<<~CLEAR)
         FN main() RETURNS !Void ->
-            MUTABLE items: Int64[5]@list = [];
+            MUTABLE items: []Int64 = [];
             items.append(1_i64);
             WHILE items.pop() EXISTS AS v DO
                 print(v);
@@ -2320,7 +2320,7 @@ RSpec.describe "error emission coverage" do
       expect {
         run(<<~CLEAR)
           FN main() RETURNS Void ->
-              MUTABLE m: HashMap<Int64> = {};
+              MUTABLE m: {String}Int64 = {};
               m["a"] = 1_i64;
               n = m.count(0_i64);
               print(n.toString());
@@ -2332,7 +2332,7 @@ RSpec.describe "error emission coverage" do
     it "compiles when the method is called with no arguments" do
       run(<<~CLEAR)
         FN main() RETURNS Void ->
-            MUTABLE m: HashMap<Int64> = {};
+            MUTABLE m: {String}Int64 = {};
             m["a"] = 1_i64;
             n = m.count();
             print(n.toString());
@@ -2351,7 +2351,7 @@ RSpec.describe "error emission coverage" do
         run(<<~CLEAR)
           STRUCT Item { v: Int64 }
           FN main() RETURNS Void ->
-              MUTABLE pool: Item[100]@pool = [];
+              MUTABLE pool: [Pool(100)]Item = [];
               id = pool.insert();
               _ = id;
           END
@@ -2363,7 +2363,7 @@ RSpec.describe "error emission coverage" do
       run(<<~CLEAR)
         STRUCT Item { v: Int64 }
         FN main() RETURNS Void ->
-            MUTABLE pool: Item[100]@pool = [];
+            MUTABLE pool: [Pool(100)]Item = [];
             id = pool.insert(Item{v: 1});
             IF pool[id] EXISTS AS got THEN
                 print(got.v.toString());
@@ -2603,7 +2603,7 @@ RSpec.describe "error emission coverage" do
     it "compiles when all map values share the same type" do
       run(<<~CLEAR)
         FN main() RETURNS Void ->
-            m: HashMap<Int64> = {"a": 1_i64, "b": 2_i64};
+            m: {String}Int64 = {"a": 1_i64, "b": 2_i64};
             print(m.count().toString());
         END
       CLEAR
@@ -2740,7 +2740,7 @@ RSpec.describe "error emission coverage" do
     it "compiles when the loop drains a list via `pop()`" do
       run(<<~CLEAR)
         FN main() RETURNS !Void ->
-            MUTABLE items: Int64[5]@list = [];
+            MUTABLE items: []Int64 = [];
             items.append(1_i64);
             WHILE items.pop() EXISTS AS v DO
                 print(v.toString());
@@ -3714,7 +3714,7 @@ RSpec.describe "error emission coverage" do
       expect {
         run(<<~CLEAR)
           FN main() RETURNS Void ->
-              MUTABLE m: HashMap<Int64, Int64> = {};
+              MUTABLE m: {Int64}Int64 = {};
               m["str"] = 1_i64;
           END
         CLEAR
@@ -3724,7 +3724,7 @@ RSpec.describe "error emission coverage" do
     it "compiles with a matching numeric key" do
       run(<<~CLEAR)
         FN main() RETURNS Void ->
-            MUTABLE m: HashMap<Int64, Int64> = {};
+            MUTABLE m: {Int64}Int64 = {};
             m[1_i64] = 100_i64;
             print(m.count().toString());
         END
@@ -3741,7 +3741,7 @@ RSpec.describe "error emission coverage" do
       expect {
         run(<<~CLEAR)
           FN main() RETURNS Void ->
-              MUTABLE m: HashMap<Int64> = {};
+              MUTABLE m: {String}Int64 = {};
               m[5_i64] = 1_i64;
           END
         CLEAR
@@ -3751,7 +3751,7 @@ RSpec.describe "error emission coverage" do
     it "compiles with a String key" do
       run(<<~CLEAR)
         FN main() RETURNS Void ->
-            MUTABLE m: HashMap<Int64> = {};
+            MUTABLE m: {String}Int64 = {};
             m["a"] = 1_i64;
             print(m.count().toString());
         END
