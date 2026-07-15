@@ -50,6 +50,127 @@ artifacts, repeat `--coverage path/to/artifact` or `--sarif-input path/to/dir`.
 
 All UI servers were restarted with detached sessions and smoke checked through `curl` on ports `18101` through `18110`.
 
+## Mini-Corpus: Bounded Manual-Review Validation
+
+The validation matrix above answers a different question from analyzer quality:
+can Lineage ingest a large, realistic repository?  It cannot cheaply establish
+whether a high-ranked finding is true, whether an important function was
+missed, or which adapter is responsible when either happens.  Large projects
+also combine too many unrelated language features to make a regression
+actionable.
+
+This companion corpus is intentionally small.  Every candidate has **3,000 to
+5,000 production source lines** in the language under test, excluding tests,
+examples, documentation, generated output, build directories, and vendored
+dependencies.  That is small enough to establish a ground-truth ledger for
+its real hotspots, while still containing several independent modules and
+nontrivial state/control/data-flow.
+
+This is a validation corpus, not a benchmark leaderboard.  A tool finding
+little in a repository is not a success by itself: reviewers must also inspect
+the deliberately chosen challenge surfaces below and record missed findings.
+
+### Sizing and Snapshot Rule
+
+Counts below were measured on 2026-07-15 from shallow checkouts with:
+
+```bash
+cloc --json --quiet \
+  --exclude-dir=.git,node_modules,vendor,third_party,dist,build,target,bin,obj,coverage,examples,docs,test,tests,spec,specs \
+  REPOSITORY
+```
+
+The number is the `code` count for the target language.  For C++, it is the
+sum of `C++` and `C/C++ Header`: header-only template code is production code,
+not documentation.  The command deliberately does not count test code toward
+the size budget, but tests remain essential manual evidence when validating a
+finding.  Pin the listed revision for an evaluation run; re-measure on update,
+and replace a project rather than silently allowing the corpus to drift outside
+the 3–5k window.
+
+### Priority and Review Order
+
+Prioritize the corpus by common OSS application surface and expected analyzer
+value, not by which adapter is easiest to make green:
+
+1. Python, TypeScript, JavaScript, and Go: broadest current OSS/app use and
+   the widest combination of dynamic shapes, async code, and collection state.
+2. Java and C#: common typed-server ecosystems with generics, builders,
+   reflection, nullability, and asynchronous APIs.
+3. C++ and C: lower repository count in general OSS, but high value for parser,
+   ownership, callback, preprocessor, and resource-lifetime correctness.
+
+Within each repository, run Nil-Kill (static), Espalier, and Decomplex over
+production source only first.  Then manually inspect the top findings and a
+small set of known difficult functions which received no finding.  This avoids
+letting test fixtures or generated code hide either false positives or false
+negatives.
+
+### Selected Repositories
+
+The selection intentionally differs by *shape*, not merely by domain.  It
+covers parsers, plugin/DI dispatch, recursive structures, mutable state
+machines, generated/dynamic code, resource failure paths, generics/templates,
+and concurrent work queues.  Those are the places where cross-language
+analyzers most often make plausible but incorrect claims.
+
+| Language | Repository (pinned revision) | Production LoC | Why it belongs in the corpus / mandatory manual audit |
+| --- | --- | ---: | --- |
+| Python | [`psf/requests`](https://github.com/psf/requests) `f361ead047be` | 3,611 | HTTP sessions, adapters, redirects, cookies, and exception paths. Verify that response/session state is neither merged across owners nor reported dead after mutation. |
+| Python | [`lepture/mistune`](https://github.com/lepture/mistune) `060f73ac87e8` | 4,511 | Nested token parsing and renderer dispatch. Audit recursive/iterative parser costs and callback/data-flow attribution. |
+| Python | [`pydantic/pydantic-settings`](https://github.com/pydantic/pydantic-settings) `5c702e535b08` | 4,335 | Typed configuration plus dynamic environment/CLI/secret sources. Stress Nil-Kill's precision around optional settings, aliases, and source-precedence state. |
+| Python | [`pytest-dev/pluggy`](https://github.com/pytest-dev/pluggy) `c1a5f3ea743c` | 3,656 | Plugin registration, hook wrappers, and indirect dispatch. Verify callback/escape identity and ensure dynamic hooks do not become false architecture claims. |
+| TypeScript | [`microsoft/tsyringe`](https://github.com/microsoft/tsyringe) `e033769d97cf` | 3,014 | Generic dependency-injection tokens, registries, lifetimes, and delayed resolution. Stress type-flow, state identity, and graph/cycle attribution. |
+| TypeScript | [`egoist/tsup`](https://github.com/egoist/tsup) `b6bcae8504d0` | 3,246 | Build configuration, plugins, subprocesses, and asynchronous orchestration. Audit closure/module ownership and interprocedural complexity under Node-style async control flow. |
+| JavaScript | [`fastify/fast-json-stringify`](https://github.com/fastify/fast-json-stringify) `6aa2ed4cc403` | 3,240 | Schema traversal and generated serializer code. Verify schema-walk complexity without analyzing generated strings as ordinary source or losing dynamic object-shape facts. |
+| JavaScript | [`pinojs/pino`](https://github.com/pinojs/pino) `98d8fa4d95f1` | 3,681 | Logger children, serializers, transports, streams, and error paths. Audit owner-relative state and asynchronous/back-pressure control flow. |
+| C | [`DaveGamble/cJSON`](https://github.com/DaveGamble/cJSON) `fb16e5cf3587` | 4,097 | Recursive JSON parser/printer with custom allocation, `realloc`, and failure cleanup. A direct resource-lifetime, invalidation, and recursive-complexity oracle. |
+| C | [`orangeduck/mpc`](https://github.com/orangeduck/mpc) `1049534fc56b` | 3,071 | Parser combinators, recursive grammars, callbacks, and AST ownership. Check that combinator composition is not collapsed into false fixed-size or false-product complexity. |
+| C | [`wg/wrk`](https://github.com/wg/wrk) `a211dd5a7050` | 4,049 | Event-loop callbacks, connection state, threading, and global configuration. Stress callback targets, shared-state identity, and systems-style control flow. |
+| C++ | [`microsoft/proxy`](https://github.com/microsoft/proxy) `dc3d95c763ec` | 3,649 | Type erasure, concepts/templates, and RAII. Verify syntax extraction never creates pseudo-functions or attributes template members to the wrong owner. |
+| C++ | [`SergiusTheBest/plog`](https://github.com/SergiusTheBest/plog) `6bee2eaa3b82` | 3,333 | Macro-heavy logging, singleton configuration, virtual interfaces, and platform conditionals. Audit macro/preprocessor boundaries and global-versus-instance state identity. |
+| C++ | [`wqking/eventpp`](https://github.com/wqking/eventpp) `1224dd6c9bd4` | 4,053 | Header-only callback/event policies, templates, and optional threading. Stress listener escape/fan-out and ensure policy types do not contaminate one another's state. |
+| C# | [`ardalis/SmartEnum`](https://github.com/ardalis/SmartEnum) `9bc3f7a43055` | 3,697 | Static enum instances, generic conversion, nullable APIs, and lookup state. Verify property/backing-field identities and static state are modeled safely. |
+| C# | [`Fody/Costura`](https://github.com/Fody/Costura) `55874fe54f66` | 3,832 | Build-time weaving, resource streams, assembly resolution, and rewriting. A high-value test of source-role filtering, reflection-like paths, and resource cleanup. |
+| C# | [`richardszalay/mockhttp`](https://github.com/richardszalay/mockhttp) `cfbc8266df93` | 3,237 | Fluent request matchers, expectation collections, asynchronous responses, and exceptions. Audit collection mutation/overwrite and nullable/async flow precision. |
+| Java | [`apache/commons-cli`](https://github.com/apache/commons-cli) `8d56926d951f` | 3,708 | Stateful option parsing with mutable configuration and token scanning. Check parser loop bounds, builder state, and generic API attribution. |
+| Java | [`davidmoten/rtree`](https://github.com/davidmoten/rtree) `364c739f2987` | 4,739 | Recursive spatial-tree insertion/search and persistent/functional paths. A direct oracle for nested traversal complexity, structural sharing, and space facts. |
+| Java | [`square/javapoet`](https://github.com/square/javapoet) `b9017a9503b7` | 3,622 | Builder-heavy source generation, type graphs, and recursive rendering. Verify ownership of builder state and avoid mistaking generated text for source control flow. |
+| Go | [`panjf2000/ants`](https://github.com/panjf2000/ants) `107e37678122` | 3,462 | Worker-pool goroutine lifecycle, queues, locks, and capacity transitions. Primary concurrency/hazard and synchronization audit target. |
+| Go | [`hashicorp/go-immutable-radix`](https://github.com/hashicorp/go-immutable-radix) `65dce5bf5254` | 3,007 | Persistent radix tree and structural sharing. Verify alias/escape reasoning and recursive time/space complexity without treating immutable nodes as mutable global state. |
+| Go | [`mitchellh/mapstructure`](https://github.com/mitchellh/mapstructure) `8508981c8b6c` | 4,982 | Reflection-based map/slice/pointer decoding and overwrite behavior. Stress map facts, typed/untyped aliases, and decoder error paths. |
+| Go | [`golang-jwt/jwt`](https://github.com/golang-jwt/jwt) `1a11d3724e63` | 4,752 | Token parsing, claim maps, validation, and error propagation. Check interface/map identity, validation-state paths, and parser complexity. |
+
+All selected projects have permissive licenses suitable for an external
+validation corpus: MIT, Apache-2.0, BSD-3-Clause, MPL-2.0, or the repository's
+BSD/modified-Apache notice.  The corpus only clones and analyzes them; it does
+not vendor their sources.  `mpc` carries a BSD notice and `wrk` carries its
+own modified-Apache notice, so keep those notices with any archived snapshots.
+
+### Per-Repository Ground-Truth Protocol
+
+For each pinned checkout:
+
+1. Run all three analyzers on production paths only and preserve their JSON and
+   SARIF output in an evaluation artifact.
+2. Independently identify the three most complex/stateful functions before
+   looking at rankings.  At least one must be a negative control: a function
+   that *looks* suspicious but has a bounded/immutable explanation.
+3. Review the top ten ranked functions/findings from each analyzer and label
+   each as true positive, useful-but-low-confidence, false positive, or
+   insufficient evidence.  A false positive must name the missing fact or
+   mistaken identity, not merely say that the result feels noisy.
+4. Compare the independent hotspot list with the ranked list.  Record every
+   missed high-value case and whether the gap is shared CFG/DFG/complexity
+   logic, a language adapter gap, or intentionally unsupported semantics.
+5. Promote every discovered general defect to a minimal cross-language fixture
+   (or to `fact-mine/syntax/adapter` when it is genuinely language-specific),
+   then rerun the whole mini-corpus before claiming a fix.
+
+The success criterion is not a finding count.  It is a compact, reviewable
+ledger that can demonstrate both correct signal and known blind spots for each
+language, and turn every repeatable blind spot into a regression.
+
 ## Evidence Targets
 
 Each repository received as much of this evidence as the current tools could produce without repository-specific hacks:
