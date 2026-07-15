@@ -29,6 +29,10 @@ module NilKill
           false
         end
 
+        def type_next_annotation_advice?
+          true
+        end
+
         def notes
           ["JSDoc parsing is Tree-sitter static evidence; no JavaScript runtime tracer is wired yet"]
         end

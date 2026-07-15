@@ -74,6 +74,15 @@ module NilKill
         Array(facts && facts["type_next"])
       end
 
+      def type_next_status
+        summary = static["summary"] || {}
+        summary["type_next_status"]
+      end
+
+      def type_next_languages
+        Array((static["summary"] || {})["type_next_languages"])
+      end
+
       def param_observation_count
         Hash(runtime["param_observations"]).sum { |_id, params| Hash(params).size }
       end
@@ -104,12 +113,19 @@ module NilKill
 
       def type_next_lines
         lines = ["## Type Next", ""]
+        if type_next_status == "not_applicable_static_language"
+          lines << "- Not applicable for statically typed source (#{type_next_languages.join(", ")}). Declared types are the source of truth; unresolved flow edges are analyzer work, not annotation advice."
+          return lines + [""]
+        end
         if type_next.empty?
           lines << "- None"
           return lines + [""]
         end
         type_next.first(50).each do |candidate|
-          lines << "- #{candidate["candidate"]}: unlocks #{candidate["unlock_count"]} static flow fact(s)"
+          location = candidate["location"] || {}
+          site = [location["file"], location["line"]].compact.join(":")
+          site = " at #{site}" unless site.empty?
+          lines << "- #{candidate["candidate"]}#{site}: #{candidate["reason"] || "unlocks #{candidate["unlock_count"]} static flow fact(s)"}"
         end
         lines << "- ... #{type_next.size - 50} more" if type_next.size > 50
         lines << ""

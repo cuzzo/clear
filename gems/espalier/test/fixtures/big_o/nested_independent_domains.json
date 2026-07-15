@@ -1,0 +1,29 @@
+{
+  "owner": "Matrix",
+  "function": "fill",
+  "line": 1,
+  "parameters": ["rows", "columns"],
+  "size_domains": [
+    {"id": "param:Matrix#fill:rows", "name": "rows", "source_kind": "parameter", "path": "matrix", "span": [1, 1, 1, 1]},
+    {"id": "param:Matrix#fill:columns", "name": "columns", "source_kind": "parameter", "path": "matrix", "span": [1, 2, 1, 2]}
+  ],
+  "iterations": [
+    {
+      "line": 2,
+      "cardinality_relation": "independent_of",
+      "execution_multiplicity": "O(N)",
+      "power": 1,
+      "symbolic_time": {"factors": [{"domain_id": "param:Matrix#fill:rows", "exponent": 1}], "complete": true}
+    },
+    {
+      "line": 3,
+      "cardinality_relation": "independent_of",
+      "execution_multiplicity": "O(N^2)",
+      "power": 2,
+      "symbolic_time": {"factors": [{"domain_id": "param:Matrix#fill:rows", "exponent": 1}, {"domain_id": "param:Matrix#fill:columns", "exponent": 1}], "complete": true}
+    }
+  ],
+  "recursion": {"calls": 0},
+  "call_contexts": [],
+  "allocations": []
+}

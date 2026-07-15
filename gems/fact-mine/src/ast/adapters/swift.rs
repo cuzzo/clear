@@ -5,6 +5,26 @@ use tree_sitter::Node as TreeSitterNode;
 pub(crate) struct SwiftAstAdapter;
 
 impl AstNormalizationAdapter for SwiftAstAdapter {
+    fn dollar_prefixed_local_name(&self, text: &str) -> Option<String> {
+        let text = text.trim();
+        (text.starts_with('$')
+            && text.len() > 1
+            && text[1..]
+                .chars()
+                .all(|character| character.is_ascii_digit()))
+        .then(|| text.to_string())
+    }
+
+    fn loop_condition_node<'tree>(
+        &self,
+        node: TreeSitterNode<'tree>,
+        _source: &str,
+    ) -> Option<TreeSitterNode<'tree>> {
+        (node.kind() == "for_statement")
+            .then(|| node.child_by_field_name("collection"))
+            .flatten()
+    }
+
     fn explicit_alternative<'tree>(
         &self,
         node: TreeSitterNode<'tree>,

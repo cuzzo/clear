@@ -295,6 +295,7 @@ impl DomainRegistry {
 struct LoopContext {
     power: usize,
     params: BTreeSet<String>,
+    domain_names: BTreeSet<String>,
     independent_collection_bindings: BTreeSet<String>,
     partition_locals: BTreeSet<String>,
     cursor: Option<String>,
@@ -311,6 +312,7 @@ impl Default for LoopContext {
         Self {
             power: 0,
             params: BTreeSet::new(),
+            domain_names: BTreeSet::new(),
             independent_collection_bindings: BTreeSet::new(),
             partition_locals: BTreeSet::new(),
             cursor: None,
@@ -1164,6 +1166,42 @@ fn visit_loops(
                     )
                 })
             });
+        // A nested loop over a separately named bound is a product unless we
+        // can prove that the bound is the parent's iterator/bound (or derives
+        // from it). The old `refs.is_empty() => partition` rule collapsed
+        // ordinary `m × n` loops whenever both sizes were local aliases, as
+        // in a Levenshtein matrix. This is language-neutral normalized-flow
+        // evidence; adapters merely supply the loop control expression.
+        let independent_nested_domain = parent.power > 0
+            && !domain_names.is_empty()
+            // Local aliases only prove an independent product when their
+            // assignment carries a recognized cardinality expression. A
+            // collection returned by an arbitrary call is an unbounded
+            // unknown, not a second input-size dimension.
+            && domain_names.iter().all(|domain| {
+                local_cardinality_bound(
+                    domain,
+                    assignments,
+                    (node.first_lineno, node.first_column),
+                )
+            })
+            && domain_names.is_disjoint(&parent.domain_names)
+            && domain_names.is_disjoint(&parent.partition_locals)
+            && !domain_names.iter().any(|domain| {
+                parent.domain_names.iter().any(|parent_domain| {
+                    derived_from(
+                        domain,
+                        parent_domain,
+                        (node.first_lineno, node.first_column),
+                        assignments,
+                    ) || derived_from(
+                        parent_domain,
+                        domain,
+                        (node.first_lineno, node.first_column),
+                        assignments,
+                    )
+                })
+            });
         let mut power = parent.power;
         if parent.collapse_direct_child && !refs.is_empty() {
             power = parent.power;
@@ -1184,6 +1222,8 @@ fn visit_loops(
             power = if let Some(growth_power) = growth_power {
                 parent.power + growth_power
             } else if !locals.is_disjoint(&parent.independent_collection_bindings) {
+                parent.power + inferred_block_power
+            } else if refs.is_empty() && independent_nested_domain {
                 parent.power + inferred_block_power
             } else if refs.is_empty() {
                 power.max(1)
@@ -1232,7 +1272,9 @@ fn visit_loops(
             "unknown"
         } else if fixed {
             "fixed"
-        } else if !locals.is_disjoint(&parent.independent_collection_bindings) {
+        } else if !locals.is_disjoint(&parent.independent_collection_bindings)
+            || independent_nested_domain
+        {
             "independent_of"
         } else if amortized
             || parent.collapse_direct_child
@@ -1294,6 +1336,7 @@ fn visit_loops(
         let context = LoopContext {
             power,
             params: refs,
+            domain_names,
             independent_collection_bindings,
             partition_locals: bindings,
             cursor,
@@ -1783,6 +1826,21 @@ fn collect_parameter_dependencies(
             output,
         );
     }
+}
+
+fn local_cardinality_bound(
+    variable: &str,
+    assignments: &BTreeMap<String, Vec<Assignment>>,
+    before: (usize, usize),
+) -> bool {
+    assignments
+        .get(variable)
+        .and_then(|rows| {
+            rows.iter()
+                .rev()
+                .find(|row| (row.line, row.column) < before)
+        })
+        .is_some_and(|row| !row.cardinality_dependencies.is_empty())
 }
 
 fn cardinality_names(node: &Node, behavior: &dyn NormalizedLanguageBehavior) -> BTreeSet<String> {

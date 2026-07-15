@@ -22,14 +22,15 @@ RSpec.describe "nil-kill multi-language runtime pipeline" do
     kotlin = NilKill::Languages.capability_for("kotlin")
     swift = NilKill::Languages.capability_for("swift")
 
-    expect(ruby).to include("runtime_tracing" => true)
+    expect(ruby).to include("runtime_tracing" => true, "type_next_annotation_advice" => true)
     expect(ruby["type_systems"]).to include("sorbet", "rbi")
-    expect(python).to include("runtime_tracing" => true)
+    expect(python).to include("runtime_tracing" => true, "type_next_annotation_advice" => true)
     expect(python).to include("type_indexing" => false)
     expect(python["annotation_systems"]).to include("python-typing")
     expect(python.dig("runtime_capabilities", "params")).to be(true)
     expect(python.dig("runtime_capabilities", "line_coverage")).to be(true)
     expect(typescript).to include("static_analysis" => true, "runtime_tracing" => false, "type_indexing" => false)
+    expect(typescript).to include("type_next_annotation_advice" => false)
     expect(typescript["annotation_systems"]).to include("typescript")
     expect(lua).to include("static_analysis" => true, "runtime_tracing" => false, "type_indexing" => false)
     expect(go).to include("static_analysis" => true, "runtime_tracing" => false, "type_indexing" => false)
@@ -37,6 +38,7 @@ RSpec.describe "nil-kill multi-language runtime pipeline" do
     expect(zig).to include("static_analysis" => true, "runtime_tracing" => false)
     expect(c).to include("static_analysis" => true, "runtime_tracing" => false, "display_name" => "C")
     expect(cpp).to include("static_analysis" => true, "runtime_tracing" => false, "display_name" => "C++")
+    expect(cpp).to include("type_next_annotation_advice" => false)
     expect(csharp).to include("static_analysis" => true, "runtime_tracing" => false, "display_name" => "C#")
     expect(java).to include("static_analysis" => true, "runtime_tracing" => false, "display_name" => "Java")
     expect(kotlin).to include("static_analysis" => true, "runtime_tracing" => false, "display_name" => "Kotlin")
@@ -621,13 +623,39 @@ RSpec.describe "nil-kill multi-language runtime pipeline" do
     command.send(:append_type_next!, evidence)
 
     expect(evidence.dig("facts", "type_next")).to contain_exactly(a_hash_including(
-      "candidate" => "root", "unlock_count" => 1, "unlocked_ids" => ["copy"]
+      "candidate" => "value", "candidate_id" => "root", "unlock_count" => 1, "unlocked_ids" => ["copy"],
+      "location" => { "file" => "lib/app.rb" }
     ))
     command.send(:append_type_next!, evidence, source_roles: ["test"])
     expect(evidence.dig("facts", "type_next")).to contain_exactly(a_hash_including(
-      "candidate" => "test-root", "unlock_count" => 1, "unlocked_ids" => ["test-copy"]
+      "candidate" => "test_value", "candidate_id" => "test-root", "unlock_count" => 1,
+      "unlocked_ids" => ["test-copy"]
     ))
     expect(evidence.dig("summary", "type_next_candidates")).to eq(1)
+  end
+
+  it "does not turn unresolved static-language flow facts into annotation advice" do
+    evidence = {
+      "files" => [
+        { "path" => "worker.cpp", "language" => "cpp", "source_role" => "production" },
+        { "path" => "worker.go", "language" => "go", "source_role" => "production" }
+      ],
+      "facts" => {
+        "type_dependencies" => [
+          { "id" => "root", "kind" => "parameter", "candidate" => true, "resolved" => false,
+            "requirements" => [], "name" => "value", "file" => "worker.cpp" },
+          { "id" => "use", "kind" => "local", "candidate" => false, "resolved" => false,
+            "requirements" => ["root"], "name" => "copy", "file" => "worker.cpp" }
+        ]
+      }
+    }
+
+    NilKill::Commands::StaticCommand.new([]).send(:append_type_next!, evidence)
+
+    expect(evidence.dig("facts", "type_next")).to eq([])
+    expect(evidence.dig("summary", "type_next_status")).to eq("not_applicable_static_language")
+    report = NilKill::Reporting::MultiLanguageReport.new("static" => evidence)
+    expect(report.lines.join("\n")).to include("Not applicable for statically typed source (cpp, go)")
   end
 
   it "keeps Go name-type struct fields typed in static evidence" do

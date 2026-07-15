@@ -292,6 +292,33 @@ class StaticEvidenceTest < Minitest::Test
     assert_equal "benchmark", Espalier::StaticEvidence.source_role("benchmarks/widget.rs")
     assert_equal "example", Espalier::StaticEvidence.source_role("examples/widget.rb")
     assert_equal "production", Espalier::StaticEvidence.source_role("rich/console.py")
+    assert_equal "test", Espalier::StaticEvidence.source_role("Sources/ArgumentParserTestHelpers/Helpers.swift")
+  end
+
+  def test_project_modules_prefers_a_primary_owner_over_an_extension_and_never_gives_protocols_state
+    evidence = {
+      "owners" => [
+        { "name" => "Counter", "kind" => "extension", "path" => "Sources/Counter+Extras.swift", "line" => 1, "language" => "swift" },
+        { "name" => "Counter", "kind" => "struct", "path" => "Sources/Counter.swift", "line" => 3, "language" => "swift" },
+        { "name" => "Renderable", "kind" => "protocol", "path" => "Sources/Renderable.swift", "line" => 1, "language" => "swift" }
+      ],
+      "methods" => [
+        { "id" => "counter-extra", "name" => "incremented", "owner" => "Counter", "path" => "Sources/Counter+Extras.swift", "line" => 2, "language" => "swift" },
+        { "id" => "renderable", "name" => "render", "owner" => "Renderable", "path" => "Sources/Renderable.swift", "line" => 2, "language" => "swift" }
+      ],
+      "fields" => [
+        { "name" => "cached", "owner" => "Renderable", "path" => "Sources/Renderable.swift", "line" => 1, "language" => "swift" }
+      ],
+      "facts" => {}
+    }
+
+    modules = Espalier::StaticEvidence.project_modules(evidence)
+    counter = modules.find { |mod| mod[:name] == "Counter" }
+    protocol = modules.find { |mod| mod[:name] == "Renderable" }
+    assert_equal "Sources/Counter.swift", counter[:file]
+    assert_equal :class, counter[:type]
+    assert_equal :module, protocol[:type]
+    assert_empty protocol[:states]
   end
 
   def test_project_modules_resolves_unique_static_and_flow_typed_targets

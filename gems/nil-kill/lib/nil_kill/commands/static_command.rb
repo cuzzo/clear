@@ -5,6 +5,7 @@ module NilKill
   module Commands
     class StaticCommand
       SOURCE_ROLES = %w[production test benchmark example generated vendored vcs_metadata].freeze
+      TYPE_NEXT_CANDIDATE_KINDS = %w[parameter return state_field field ivar].freeze
 
       def initialize(argv)
         @argv = argv.dup
@@ -53,6 +54,16 @@ module NilKill
       end
 
       def append_type_next!(evidence, source_roles: ["production"])
+        evidence["facts"] ||= {}
+        languages = evidence_languages(evidence)
+        unless languages.empty? || languages.all? { |language| type_next_annotation_advice?(evidence, language) }
+          evidence["facts"]["type_next"] = []
+          evidence["summary"] ||= {}
+          evidence["summary"]["type_next_candidates"] = 0
+          evidence["summary"]["type_next_status"] = "not_applicable_static_language"
+          evidence["summary"]["type_next_languages"] = languages
+          return
+        end
         roles_by_path = Array(evidence["files"]).each_with_object({}) do |file, roles|
           path = file["path"].to_s
           role = file["source_role"] || "production"
@@ -68,13 +79,51 @@ module NilKill
           "facts" => Hash(evidence["facts"]).merge("type_dependencies" => dependencies)
         )
         pressure = FlowGraph.dependencies_from_evidence(ranked_evidence).unlock_pressure
-        evidence["facts"] ||= {}
-        evidence["facts"]["type_next"] = pressure.map do |row|
-          row.slice("candidate", "candidate_data", "direct_ids", "unlocked_ids", "counts")
-            .merge("unlock_count" => row.fetch("unlocked_ids").length)
+        evidence["facts"]["type_next"] = pressure.filter_map do |row|
+          candidate = row.fetch("candidate_data")
+          next unless type_next_candidate?(candidate)
+
+          candidate.slice("file", "line", "owner", "function", "name", "kind")
+          row.slice("candidate_data", "direct_ids", "unlocked_ids", "counts")
+            .merge(
+              "candidate" => candidate.fetch("name"),
+              "candidate_id" => row.fetch("candidate"),
+              "unlock_count" => row.fetch("unlocked_ids").length,
+              "location" => candidate.slice("file", "line", "owner", "function"),
+              "reason" => type_next_reason(candidate, row)
+            )
         end
         evidence["summary"] ||= {}
-        evidence["summary"]["type_next_candidates"] = pressure.length
+        evidence["summary"]["type_next_candidates"] = evidence["facts"]["type_next"].length
+        evidence["summary"]["type_next_status"] = "available"
+      end
+
+      def evidence_languages(evidence)
+        Array(evidence["files"]).filter_map do |file|
+          language = file["language"].to_s.downcase
+          language unless language.empty?
+        end
+          .uniq
+          .sort
+      end
+
+      def type_next_annotation_advice?(evidence, language)
+        capability = Hash(evidence["language_capabilities"])[language]
+        capability ||= NilKill::Languages.capability_for(language) if defined?(NilKill::Languages)
+        Hash(capability)["type_next_annotation_advice"] == true
+      end
+
+      def type_next_candidate?(candidate)
+        kind = (candidate["candidate_kind"] || candidate["kind"]).to_s
+        name = candidate["name"].to_s
+        TYPE_NEXT_CANDIDATE_KINDS.include?(kind) && name.match?(/\A[A-Za-z_][A-Za-z0-9_]*\z/)
+      end
+
+      def type_next_reason(candidate, row)
+        kind = (candidate["candidate_kind"] || candidate["kind"]).to_s.tr("_", " ")
+        direct = row.fetch("direct_ids").length
+        total = row.fetch("unlocked_ids").length
+        "Add or verify this #{kind} type: it directly resolves #{direct} and transitively unlocks #{total} static flow fact#{total == 1 ? "" : "s"}."
       end
     end
   end

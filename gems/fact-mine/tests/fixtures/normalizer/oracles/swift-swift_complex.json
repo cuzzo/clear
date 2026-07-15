@@ -143,15 +143,34 @@
                                                 "Node": {
                                                   "children": [
                                                     {
-                                                      "String": "i"
+                                                      "Node": {
+                                                        "children": [],
+                                                        "first_column": 17,
+                                                        "first_lineno": 7,
+                                                        "last_column": 18,
+                                                        "last_lineno": 7,
+                                                        "text": "0",
+                                                        "type": "INTEGER_LITERAL"
+                                                      }
+                                                    },
+                                                    {
+                                                      "Node": {
+                                                        "children": [],
+                                                        "first_column": 21,
+                                                        "first_lineno": 7,
+                                                        "last_column": 23,
+                                                        "last_lineno": 7,
+                                                        "text": "10",
+                                                        "type": "INTEGER_LITERAL"
+                                                      }
                                                     }
                                                   ],
-                                                  "first_column": 12,
+                                                  "first_column": 17,
                                                   "first_lineno": 7,
-                                                  "last_column": 13,
+                                                  "last_column": 23,
                                                   "last_lineno": 7,
-                                                  "text": "i",
-                                                  "type": "LVAR"
+                                                  "text": "0..<10",
+                                                  "type": "RANGE_EXPRESSION"
                                                 }
                                               },
                                               {

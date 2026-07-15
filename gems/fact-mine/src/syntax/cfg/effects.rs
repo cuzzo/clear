@@ -17,6 +17,11 @@ const NESTED_SCOPE_TYPES: &[&str] = &["CLASS", "MODULE", "DEFN", "DEFS", "LAMBDA
 struct RawEffect {
     reads: BTreeSet<String>,
     writes: BTreeSet<String>,
+    /// Storage class comes from the normalized AST node, never the spelling
+    /// of the identifier. A dollar-prefixed closure argument can be lexical;
+    /// inferring its class from spelling can merge unrelated closures into
+    /// one fictional global.
+    place_kinds: BTreeMap<String, String>,
     mutations: BTreeSet<String>,
     write_type_hints: BTreeMap<String, String>,
     write_value_hints: BTreeMap<String, String>,
@@ -24,6 +29,14 @@ struct RawEffect {
     unknown_call: bool,
     complete: bool,
     unknown_reasons: Vec<String>,
+}
+
+impl RawEffect {
+    fn record_place(&mut self, name: String, kind: &str) {
+        self.place_kinds
+            .entry(name)
+            .or_insert_with(|| kind.to_string());
+    }
 }
 
 type GraphKey = (String, String, String, usize, usize);
@@ -35,7 +48,7 @@ pub(crate) fn extract(
 ) {
     let profile = behavior.cfg_profile();
     let mut raw_by_node = BTreeMap::new();
-    let mut all_names = BTreeMap::<GraphKey, BTreeSet<String>>::new();
+    let mut all_places = BTreeMap::<GraphKey, BTreeMap<String, String>>::new();
     let mut declaration_spans = BTreeMap::<(GraphKey, String), Span>::new();
     let mut method_spans = BTreeMap::<GraphKey, Span>::new();
     let mut graph_key_by_node = BTreeMap::new();
@@ -43,7 +56,11 @@ pub(crate) fn extract(
         .iter()
         .fold(BTreeMap::new(), |mut counts, method| {
             *counts
-                .entry((method.file.as_str(), method.owner.as_str(), method.name.as_str()))
+                .entry((
+                    method.file.as_str(),
+                    method.owner.as_str(),
+                    method.name.as_str(),
+                ))
                 .or_insert(0usize) += 1;
             counts
         })
@@ -64,8 +81,12 @@ pub(crate) fn extract(
 
         if node.kind == "entry" {
             raw.writes.extend(method.params.iter().cloned());
+            for name in &method.params {
+                raw.record_place(name.clone(), "local");
+            }
             for (name, type_name) in &method.param_types {
                 raw.writes.insert(name.clone());
+                raw.record_place(name.clone(), "local");
                 if behavior.declared_type_hint_complete(type_name) {
                     raw.write_type_hints
                         .insert(name.clone(), format!("declared:{type_name}"));
@@ -88,9 +109,12 @@ pub(crate) fn extract(
             }
         }
 
-        let names = all_names.entry(graph_key.clone()).or_default();
-        names.extend(raw.reads.iter().cloned());
-        names.extend(raw.writes.iter().cloned());
+        let places = all_places.entry(graph_key.clone()).or_default();
+        places.extend(
+            raw.place_kinds
+                .iter()
+                .map(|(name, kind)| (name.clone(), kind.clone())),
+        );
         for name in &raw.writes {
             declaration_spans
                 .entry((graph_key.clone(), name.clone()))
@@ -100,10 +124,9 @@ pub(crate) fn extract(
     }
 
     let mut place_id_by_name = BTreeMap::new();
-    for (graph_key, names) in all_names {
+    for (graph_key, places) in all_places {
         let (file, owner, function, discriminator_line, discriminator_column) = &graph_key;
-        for name in names {
-            let kind = place_kind(&name);
+        for (name, kind) in places {
             let id = if *discriminator_line == 0 {
                 format!("place:{owner}#{function}:{kind}:{name}")
             } else {
@@ -116,16 +139,13 @@ pub(crate) fn extract(
                 .copied()
                 .or_else(|| method_spans.get(&graph_key).copied())
                 .unwrap_or([0, 0, 0, 0]);
-            place_id_by_name.insert(
-                (graph_key.clone(), name.clone()),
-                id.clone(),
-            );
+            place_id_by_name.insert((graph_key.clone(), name.clone()), id.clone());
             facts.places.push(Place {
                 id,
                 file: file.clone(),
                 function: function.clone(),
                 owner: owner.clone(),
-                kind: kind.to_string(),
+                kind,
                 name,
                 declaration_span,
             });
@@ -201,8 +221,7 @@ fn method_for_node<'a>(
 }
 
 fn span_contains(outer: Span, inner: Span) -> bool {
-    (outer[0], outer[1]) <= (inner[0], inner[1])
-        && (outer[2], outer[3]) >= (inner[2], inner[3])
+    (outer[0], outer[1]) <= (inner[0], inner[1]) && (outer[2], outer[3]) >= (inner[2], inner[3])
 }
 
 fn graph_key(
@@ -296,6 +315,7 @@ fn collect(node: &Node, effect: &mut RawEffect) {
     if WRITE_TYPES.contains(&node.r#type.as_str()) {
         if let Some(name) = node_name(node) {
             effect.writes.insert(name.clone());
+            effect.record_place(name.clone(), place_kind_for_node(&node.r#type));
             if !matches!(node.r#type.as_str(), "LASGN" | "DASGN") {
                 effect.mutations.insert(name.clone());
             }
@@ -320,7 +340,8 @@ fn collect(node: &Node, effect: &mut RawEffect) {
     }
     if READ_TYPES.contains(&node.r#type.as_str()) {
         if let Some(name) = node_name(node) {
-            effect.reads.insert(name);
+            effect.reads.insert(name.clone());
+            effect.record_place(name, place_kind_for_node(&node.r#type));
         }
     }
     if CALL_TYPES.contains(&node.r#type.as_str()) {
@@ -395,15 +416,12 @@ fn node_name(node: &Node) -> Option<String> {
     }
 }
 
-fn place_kind(name: &str) -> &'static str {
-    if name.starts_with("@@") {
-        "class_field"
-    } else if name.starts_with('@') {
-        "instance_field"
-    } else if name.starts_with('$') {
-        "global"
-    } else {
-        "local"
+fn place_kind_for_node(node_type: &str) -> &'static str {
+    match node_type {
+        "IVAR" | "IASGN" => "instance_field",
+        "CVAR" | "CVASGN" => "class_field",
+        "GVAR" | "GASGN" => "global",
+        _ => "local",
     }
 }
 

@@ -225,11 +225,10 @@ impl PathCondition {
         }
 
         let slice = ast::slice(node, &self.lines);
-        let action = if slice.len() > 80 {
-            slice[..80].to_string()
-        } else {
-            slice
-        };
+        // `slice` is UTF-8 source text. Do not use a byte index here: a
+        // perfectly ordinary non-ASCII token can straddle byte 80 and panic
+        // while we are merely preparing a diagnostic excerpt.
+        let action = truncate_action(&slice, 80);
 
         self.sites.push(Site {
             guards: members,
@@ -247,6 +246,24 @@ impl PathCondition {
                 node.last_column,
             ],
         });
+    }
+}
+
+fn truncate_action(slice: &str, max_chars: usize) -> String {
+    slice.chars().take(max_chars).collect()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn truncating_diagnostic_source_never_splits_a_utf8_codepoint() {
+        let source = format!("{}€ŠšŽ", "a".repeat(79));
+        let action = truncate_action(&source, 80);
+        assert_eq!(action.chars().count(), 80);
+        assert!(action.ends_with('€'));
+        assert!(std::str::from_utf8(action.as_bytes()).is_ok());
     }
 }
 
@@ -349,7 +366,11 @@ impl Report {
                     let missing = diff_gs_s.into_iter().next().unwrap();
 
                     // Do not flag structural pattern match bindings (e.g. `let Some(x) = ...`) as optional neglected checks.
-                    if missing.starts_with("let ") || missing.starts_with("!let ") || missing.starts_with("let(") || missing.starts_with("!let(") {
+                    if missing.starts_with("let ")
+                        || missing.starts_with("!let ")
+                        || missing.starts_with("let(")
+                        || missing.starts_with("!let(")
+                    {
                         continue;
                     }
 

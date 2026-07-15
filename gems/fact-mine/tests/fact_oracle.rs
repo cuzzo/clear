@@ -767,6 +767,81 @@ fn source_fact_examples_match_oracles() -> Result<()> {
     }
 }
 
+#[test]
+fn regression_fixtures_preserve_utf8_state_scope_and_product_domains() -> Result<()> {
+    let root = examples_root().join("regressions");
+
+    let php = syntax::parse_file(root.join("php/utf8_and_instance_state.php"), Language::Php)?;
+    // Scanning the fixture exercises the formerly panicking path-condition
+    // excerpt and establishes that identical `$this->options` spellings stay
+    // owner-relative rather than becoming one global flow root.
+    let path_conditions = syntax::path_condition::scan_documents(&[php.clone()]);
+    // The fixture reaches the normalized path-condition pass; successful
+    // completion is the regression for the former UTF-8 boundary panic.
+    assert_eq!(path_conditions.neglected.len(), 0);
+    assert!(php.state_reads.iter().all(|read| read.field == "options"));
+    assert_eq!(
+        php.state_reads
+            .iter()
+            .map(|read| read.owner.as_str())
+            .collect::<BTreeSet<_>>(),
+        BTreeSet::from(["First", "Second"])
+    );
+
+    let cpp = syntax::parse_file(root.join("cpp/preprocessor_recovery.cpp"), Language::Cpp)?;
+    assert!(cpp
+        .function_defs
+        .iter()
+        .all(|function| function.name != "namespace"));
+    assert!(cpp
+        .function_defs
+        .iter()
+        .any(|function| function.name == "real_function"));
+
+    let swift = syntax::parse_file(
+        root.join("general/nested_independent_domains.swift"),
+        Language::Swift,
+    )?;
+    let profile = profile::extract(&swift, Profile::Espalier);
+    let facts = profile
+        .complexity_facts
+        .iter()
+        .find(|fact| fact.function == "fill")
+        .context("missing fill complexity facts")?;
+    let iterations = &facts.iterations;
+    assert_eq!(iterations.len(), 2);
+    assert_eq!(iterations[1].cardinality_relation, "independent_of");
+    assert_eq!(iterations[1].power, 2);
+    let symbolic = iterations[1]
+        .symbolic_time
+        .as_ref()
+        .context("missing symbolic time")?;
+    assert!(symbolic.complete);
+    assert_eq!(symbolic.factors.len(), 2);
+
+    let swift_scope = syntax::parse_file(
+        root.join("swift/extension_and_closure.swift"),
+        Language::Swift,
+    )?;
+    let swift_profile = profile::extract(&swift_scope, Profile::NilKill);
+    assert!(swift_profile
+        .flow_local_types
+        .iter()
+        .any(|fact| fact["name"] == "$0"));
+    assert!(swift_scope
+        .places
+        .iter()
+        .any(|place| place.name == "$0" && place.kind == "local"));
+    assert!(swift_scope
+        .places
+        .iter()
+        .all(|place| place.name != "$0" || place.kind != "global"));
+    let owners = profile::extract(&swift_scope, Profile::Espalier).owners;
+    assert!(owners.iter().any(|owner| owner.kind == "struct"));
+    assert!(owners.iter().any(|owner| owner.kind == "extension"));
+    Ok(())
+}
+
 fn examples_root() -> PathBuf {
     let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("examples");
     fs::canonicalize(&root).unwrap_or(root)
@@ -1182,12 +1257,19 @@ fn owner_reopenability_is_normalized_in_the_language_adapter() -> Result<()> {
     let mut ruby = tempfile::Builder::new().suffix(".rb").tempfile()?;
     ruby.write_all(b"class Extension; end\n")?;
     let ruby_document = syntax::parse_file(ruby.path().to_path_buf(), Language::Ruby)?;
-    assert!(ruby_document.owner_defs.iter().any(|owner| owner.reopenable));
+    assert!(ruby_document
+        .owner_defs
+        .iter()
+        .any(|owner| owner.reopenable));
 
     let mut typescript = tempfile::Builder::new().suffix(".ts").tempfile()?;
     typescript.write_all(b"class Extension {}\n")?;
-    let typescript_document = syntax::parse_file(typescript.path().to_path_buf(), Language::TypeScript)?;
-    assert!(typescript_document.owner_defs.iter().all(|owner| !owner.reopenable));
+    let typescript_document =
+        syntax::parse_file(typescript.path().to_path_buf(), Language::TypeScript)?;
+    assert!(typescript_document
+        .owner_defs
+        .iter()
+        .all(|owner| !owner.reopenable));
     Ok(())
 }
 

@@ -5,6 +5,16 @@ use tree_sitter::Node as TreeSitterNode;
 pub(crate) struct CppAstAdapter;
 
 impl AstNormalizationAdapter for CppAstAdapter {
+    fn valid_function_definition(&self, node: TreeSitterNode<'_>, _source: &str) -> bool {
+        if node.kind() != "function_definition" {
+            return true;
+        }
+        let Some(declarator) = node.child_by_field_name("declarator") else {
+            return false;
+        };
+        cpp_function_declarator(declarator)
+    }
+
     fn loop_node_type(&self, kind: &str) -> Option<&'static str> {
         matches!(kind, "for_range_loop" | "range_based_for_statement").then_some("FOR")
     }
@@ -62,5 +72,44 @@ impl AstNormalizationAdapter for CppAstAdapter {
             }
         }
         None
+    }
+}
+
+fn cpp_function_declarator(node: TreeSitterNode<'_>) -> bool {
+    if matches!(node.kind(), "function_declarator" | "operator_cast") {
+        return true;
+    }
+    named_children(node)
+        .into_iter()
+        .any(cpp_function_declarator)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use tree_sitter::Parser;
+
+    #[test]
+    fn rejects_preprocessor_recovery_that_looks_like_a_function() {
+        let source =
+            "FMT_BEGIN_NAMESPACE\nnamespace detail {\nint real_function() { return 1; }\n}\n";
+        let mut parser = Parser::new();
+        parser
+            .set_language(&tree_sitter_cpp::LANGUAGE.into())
+            .unwrap();
+        let tree = parser.parse(source, None).unwrap();
+        let mut nodes = vec![tree.root_node()];
+        let mut saw_recovery = false;
+        while let Some(node) = nodes.pop() {
+            if node.kind() == "function_definition" {
+                saw_recovery |=
+                    !cpp_function_declarator(node.child_by_field_name("declarator").unwrap());
+                if !cpp_function_declarator(node.child_by_field_name("declarator").unwrap()) {
+                    assert!(!CppAstAdapter.valid_function_definition(node, source));
+                }
+            }
+            nodes.extend(named_children(node));
+        }
+        assert!(saw_recovery);
     }
 }

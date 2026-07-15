@@ -58,10 +58,12 @@ module Espalier
       # Group methods by owner
       methods_by_owner = Hash.new { |h, k| h[k] = [] }
       methods_by_id = {}
-      owner_kinds = Array(evidence["owners"]).each_with_object({}) do |owner, kinds|
+      owner_definitions = Array(evidence["owners"]).each_with_object(Hash.new { |h, k| h[k] = [] }) do |owner, definitions|
         key = resolve_owner.call(owner["name"], owner["path"], owner["language"])
-        kinds[key] = owner["kind"].to_s
+        definitions[key] << owner
       end
+      owner_definitions.transform_values! { |definitions| preferred_owner_definition(definitions) }
+      owner_kinds = owner_definitions.transform_values { |owner| owner["kind"].to_s }
       accesses_by_function = Hash.new { |h, k| h[k] = [] }
       Array(evidence.dig("facts", "state_accesses")).each do |access|
         accesses_by_function[access["function_id"]] << access
@@ -273,9 +275,13 @@ module Espalier
       end
       all_owners = (methods_by_owner.keys + fields_by_owner.keys).uniq.reject(&:empty?)
       all_owners.map do |owner|
-        meta = module_metadata(owner, methods_by_owner[owner], first_field_by_owner[owner])
+        meta = module_metadata(owner, methods_by_owner[owner], first_field_by_owner[owner], owner_definitions.fetch(owner, nil))
         owner_kind = owner_kinds[owner]
-        module_like = %w[module program namespace].include?(owner_kind) ||
+        # Extensions, protocols, traits, and interfaces can contribute
+        # behavior, but do not introduce independently-owned mutable stored
+        # state. Treating them as lifecycle classes produces unsafe advice in
+        # Swift and the same mistake in every other language with those forms.
+        module_like = %w[module program namespace extension protocol trait interface].include?(owner_kind) ||
           (%i[javascript typescript].include?(meta[:language]) && owner_kind == "owner")
         {
           type: module_like ? :module : :class,
@@ -294,14 +300,33 @@ module Espalier
       end
     end
 
-    def self.module_metadata(owner, methods, first_field)
+    def self.module_metadata(owner, methods, first_field, owner_definition = nil)
       first_meth = methods&.first
       {
-        file: first_meth ? first_meth[:file] : (first_field ? first_field["path"] : nil),
+        file: owner_definition ? owner_definition["path"] : (first_meth ? first_meth[:file] : (first_field ? first_field["path"] : nil)),
         language: first_meth ? first_meth[:language] : (first_field ? first_field["language"]&.to_sym : nil),
-        line: first_meth ? first_meth[:line] : (first_field ? first_field["line"] : 1),
-        span: first_meth ? first_meth[:span] : (first_field ? first_field["span"] : nil)
+        line: owner_definition ? owner_definition["line"] : (first_meth ? first_meth[:line] : (first_field ? first_field["line"] : 1)),
+        span: owner_definition ? owner_definition["span"] : (first_meth ? first_meth[:span] : (first_field ? first_field["span"] : nil))
       }
+    end
+
+    def self.preferred_owner_definition(definitions)
+      definitions.min_by do |owner|
+        [owner_definition_rank(owner["kind"]), owner["path"].to_s, owner["line"].to_i]
+      end
+    end
+
+    def self.owner_definition_rank(kind)
+      case kind.to_s
+      when "class", "struct", "enum"
+        0
+      when "protocol", "interface", "trait"
+        1
+      when "extension"
+        2
+      else
+        3
+      end
     end
 
     def self.source_role(path)
@@ -315,6 +340,10 @@ module Espalier
       return "example" if (parts & %w[example examples sample samples]).any?
       return "test" if (parts & %w[test tests spec specs __tests__]).any?
       return "test" if basename.match?(/(?:\A|[_\.])test(?:[_\.]|\z)|(?:\A|[_\.])spec(?:[_\.]|\z)/)
+      # Test-helper products are executable support code, not production
+      # library surface. Match common portable path spellings, including the
+      # Swift Package Manager `ArgumentParserTestHelpers` convention.
+      return "test" if parts.any? { |part| part.match?(/test(?:_|-)?(?:helpers?|support)/i) }
 
       "production"
     end

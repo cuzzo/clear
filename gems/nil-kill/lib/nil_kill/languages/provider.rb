@@ -48,6 +48,14 @@ module NilKill
         false
       end
 
+      # Whether an unresolved static-flow root is a useful request for a
+      # maintainer to add or verify a source annotation. This is deliberately
+      # separate from parsing and tracing: in a language with mandatory
+      # declarations, it is analyzer precision work rather than user advice.
+      def type_next_annotation_advice?
+        false
+      end
+
       def runtime_trace_events
         []
       end
@@ -82,6 +90,7 @@ module NilKill
           "type_indexing" => type_indexing?,
           "type_systems" => type_systems.map(&:to_s).sort,
           "runtime_tracing" => runtime_tracing?,
+          "type_next_annotation_advice" => type_next_annotation_advice?,
           "runtime_trace_events" => runtime_trace_events.map(&:to_s).sort,
           "runtime_capabilities" => runtime_capabilities,
           "notes" => notes.map(&:to_s),

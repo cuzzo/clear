@@ -1,10 +1,25 @@
 # frozen_string_literal: true
 
 require "minitest/autorun"
+require "json"
 require_relative "../lib/espalier/big_o_analyzer"
 require_relative "../lib/espalier/structural_big_o"
 
 class BigOTest < Minitest::Test
+  def test_language_neutral_nested_independent_domains_render_a_product
+    fixture = JSON.parse(File.read(File.join(__dir__, "fixtures", "big_o", "nested_independent_domains.json")))
+    consumer = Espalier::StructuralBigO.new(
+      facts_by_method: { "matrix-fill" => [fixture] }
+    )
+
+    hint = consumer.hints_for(nil, { id: "matrix-fill", name: "fill", line: 1 }, "Matrix").first
+    assert_equal "O(N*M)", hint.fetch(:complexity)
+    assert hint.fetch(:time_complete)
+    assert_equal %w[rows columns], hint.fetch(:symbolic_time).then { |expression|
+      Espalier::SymbolicComplexity.render(expression).last.map { |variable| variable[:name] }
+    }
+  end
+
   def test_complexity_arithmetic_and_ranking
     analyzer = Espalier::BigOAnalyzer.new
     assert_equal "O(N)", analyzer.send(:multiply_complexity, "O(1)", "O(N)")

@@ -212,6 +212,13 @@ pub(crate) trait AstNormalizationAdapter: Sync {
         None
     }
 
+    /// Tree-sitter error recovery can occasionally label a malformed region
+    /// as a function definition. Adapters with syntax that makes a reliable
+    /// declaration check possible may reject that recovery node here.
+    fn valid_function_definition(&self, _node: TreeSitterNode<'_>, _source: &str) -> bool {
+        true
+    }
+
     fn begin_statement(&self, _node: TreeSitterNode<'_>, _source: &str) -> bool {
         false
     }
@@ -1252,6 +1259,17 @@ pub(crate) trait AstNormalizationAdapter: Sync {
         }
     }
 
+    /// Supplies the iterable/range expression for `FOR` syntaxes whose
+    /// binding is the first named child. Returning the binding as the loop
+    /// condition loses the cardinality domain and collapses nested products.
+    fn loop_condition_node<'tree>(
+        &self,
+        _node: TreeSitterNode<'tree>,
+        _source: &str,
+    ) -> Option<TreeSitterNode<'tree>> {
+        None
+    }
+
     fn modifier_loop_kind(&self, _kind: &str) -> bool {
         false
     }
@@ -1290,6 +1308,12 @@ pub(crate) trait AstNormalizationAdapter: Sync {
 
     fn dynamic_instance_variable_text(&self, _text: &str) -> bool {
         false
+    }
+
+    /// Some grammars spell compiler-provided closure parameters with a dollar
+    /// prefix. They are lexical locals, not process-global variables.
+    fn dollar_prefixed_local_name(&self, _text: &str) -> Option<String> {
+        None
     }
 
     fn literal_fragment_assignment_context(&self, node: TreeSitterNode<'_>, _source: &str) -> bool {

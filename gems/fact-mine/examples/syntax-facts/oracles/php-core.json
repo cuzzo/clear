@@ -27,7 +27,7 @@
             9
           ],
           "state_refs": [
-            "$this->status",
+            "status",
             "user.ready"
           ]
         }
@@ -368,45 +368,6 @@
       ],
       "state_reads": [
         {
-          "field": "$this->count",
-          "function": "ready",
-          "line": 57,
-          "owner": "PhpSyntaxFactsCore",
-          "receiver": "self",
-          "span": [
-            57,
-            15,
-            57,
-            27
-          ]
-        },
-        {
-          "field": "$this->status",
-          "function": "audit",
-          "line": 52,
-          "owner": "PhpSyntaxFactsCore",
-          "receiver": "self",
-          "span": [
-            52,
-            15,
-            52,
-            28
-          ]
-        },
-        {
-          "field": "$this->status",
-          "function": "process",
-          "line": 34,
-          "owner": "PhpSyntaxFactsCore",
-          "receiver": "self",
-          "span": [
-            34,
-            12,
-            34,
-            25
-          ]
-        },
-        {
           "field": "active",
           "function": "process",
           "line": 18,
@@ -430,6 +391,19 @@
             12,
             42,
             29
+          ]
+        },
+        {
+          "field": "count",
+          "function": "ready",
+          "line": 57,
+          "owner": "PhpSyntaxFactsCore",
+          "receiver": "self",
+          "span": [
+            57,
+            15,
+            57,
+            27
           ]
         },
         {
@@ -561,11 +535,37 @@
             51,
             19
           ]
+        },
+        {
+          "field": "status",
+          "function": "audit",
+          "line": 52,
+          "owner": "PhpSyntaxFactsCore",
+          "receiver": "self",
+          "span": [
+            52,
+            15,
+            52,
+            28
+          ]
+        },
+        {
+          "field": "status",
+          "function": "process",
+          "line": 34,
+          "owner": "PhpSyntaxFactsCore",
+          "receiver": "self",
+          "span": [
+            34,
+            12,
+            34,
+            25
+          ]
         }
       ],
       "state_writes": [
         {
-          "field": "$this->count",
+          "field": "count",
           "function": "process",
           "line": 35,
           "owner": "PhpSyntaxFactsCore",
@@ -578,7 +578,7 @@
           ]
         },
         {
-          "field": "$this->sink",
+          "field": "sink",
           "function": "__construct",
           "line": 12,
           "owner": "PhpSyntaxFactsCore",
@@ -591,7 +591,7 @@
           ]
         },
         {
-          "field": "$this->status",
+          "field": "status",
           "function": "__construct",
           "line": 11,
           "owner": "PhpSyntaxFactsCore",
