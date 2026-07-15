@@ -2,7 +2,6 @@
 require "sorbet-runtime"
 require_relative "lexer"
 require_relative "struct_field"
-require_relative "../backends/zig_type"
 
 # Result struct for binary operation type resolution
 BinaryOpResult = Struct.new(:type, :left_coercion, :right_coercion, :storage, :error, keyword_init: true)
@@ -4506,7 +4505,8 @@ class Type
   sig { params(is_param: T::Boolean, is_field: T::Boolean).returns(String) }
   # ruby-to-clear: effects reentrant
   def zig_type(is_param: false, is_field: false)
-    compute_zig_type(is_param: is_param, is_field: is_field)
+    require_relative "../backends/type_zig_renderer" unless defined?(TypeZigRenderer)
+    TypeZigRenderer.render(self, is_param: is_param, is_field: is_field)
   end
 
   # Zig permits inferred error sets (`!T`) only in function return positions.
@@ -4514,12 +4514,8 @@ class Type
   # and promise payloads—must name a concrete error set.
   sig { params(is_param: T::Boolean, is_field: T::Boolean).returns(String) }
   def nested_zig_type(is_param: false, is_field: false)
-    if error_union?
-      payload = error_union_payload_with_outer_capabilities
-      return "anyerror!#{payload.nested_zig_type(is_param: is_param, is_field: is_field)}"
-    end
-
-    compute_zig_type(is_param: is_param, is_field: is_field)
+    require_relative "../backends/type_zig_renderer" unless defined?(TypeZigRenderer)
+    TypeZigRenderer.render(self, is_param: is_param, is_field: is_field, nested: true)
   end
 
   # Determines the appropriate storage location based on type characteristics and size.
@@ -5388,14 +5384,6 @@ module TypeHelper
   end
 
 end
-
-# Loaded after `class Type` is fully defined so the
-# function_signature -> function_return -> type require cycle resolves
-# with `Type` already present (function_return's `const :fixed,
-# T.nilable(Type)` evaluates at class-body time). All Type refs to
-# FunctionSignature are runtime-lazy (method bodies), so deferring
-# this require is safe.
-require_relative "../annotator/helpers/function_signature" # ruby-to-clear: no-require
 
 class Type
   sig { returns(T.nilable(BasicObject)) }

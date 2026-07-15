@@ -10,7 +10,8 @@ require_relative "./error_registry"
 require_relative "./source_error"
 require_relative "./fixable_error"
 require_relative "./frontend_resource_budget"
-require_relative "../annotator/helpers/fixable_helpers" # ruby-to-clear: no-require
+require_relative "./fixable_suggestion_helper"
+require_relative "./parsed_type_syntax"
 
 # ==========================================
 # PARSER
@@ -128,7 +129,7 @@ class ClearParser
   end
 
   include ErrorHelper
-  include FixableHelper
+  include FixableSuggestionHelper
 
   ArgumentType = T.type_alias { T.any(Symbol, Type) }
   ReturnLifetime = T.type_alias { T.nilable(T.any(Symbol, T::Array[AST::Node])) }
@@ -220,6 +221,23 @@ class ClearParser
     def ownership_mode=(value)
       @ownership_mode = T.let(value, T.nilable(Symbol))
       value
+    end
+
+    # Standalone syntax-only entry point for formatter/oracle/self-host
+    # comparisons. It deliberately does not expose semantic Type.
+    sig { params(source: String, file: T.nilable(String)).returns(ParsedTypeSyntax) }
+    def parse_type_syntax(source, file: nil)
+      budget = FrontendResourceBudget.new
+      tokens = Lexer.new(source, file: file, budget: budget).tokenize
+      parser = new(tokens, source, budget: budget)
+      syntax = T.cast(parser.__send__(:parse_type_annotation_syntax), ParsedTypeSyntax)
+      current_token = T.cast(parser.__send__(:current), Lexer::Token)
+      unless current_token.type == :EOF
+        parser.__send__(:error!, current_token, :PARSER_EXPECTED,
+          expected: "end of type", got: current_token.value,
+          type: current_token.type, line: current_token.line)
+      end
+      syntax
     end
   end
 
@@ -3518,17 +3536,24 @@ class ClearParser
 
   sig { params(migration_root: T::Boolean).returns(Type) }
   def parse_type_annotation(migration_root: true)
-    @budget.nested { parse_type_annotation_unbudgeted(migration_root: migration_root) }
+    syntax = @budget.nested { parse_type_annotation_syntax(migration_root: migration_root) }
+    TypeSyntaxLowering.lower(syntax)
   end
 
-  sig { params(migration_root: T::Boolean).returns(Type) }
-  def parse_type_annotation_unbudgeted(migration_root: true)
+  sig { params(migration_root: T::Boolean).returns(ParsedTypeSyntax) }
+  def parse_type_annotation_syntax(migration_root: true)
     start_token = T.must(peek_at(0))
     inline_syntax = inline_type_annotation_start?
     parsed = parse_type_annotation_body
     validate_type_expression_budget!(start_token, parsed.shape.expression) if migration_root
     emit_legacy_type_migration(start_token, previous, parsed) if migration_root && !inline_syntax
-    parsed
+    ParsedTypeSyntax.new(
+      expression: parsed.shape.expression,
+      start_token: start_token,
+      end_token: previous,
+      auto_token: parsed.auto_token,
+      auto: parsed.auto?,
+    )
   end
 
   sig { returns(Type) }

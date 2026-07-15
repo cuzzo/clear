@@ -21,10 +21,12 @@ require_relative "../../ast/ast"
 require_relative "../../ast/diagnostic_registry"
 require_relative "../../ast/fixable_error"
 require_relative "../../ast/type"
+require_relative "../../ast/fixable_suggestion_helper"
 
 # ruby-to-clear: emit-module-methods
 module FixableHelper
     extend T::Sig
+  include FixableSuggestionHelper
 
   DiagnosticKwValue = T.type_alias { DiagnosticRegistry::DiagnosticKwValue }
   NameCandidate = T.type_alias { T.any(String, Symbol) }

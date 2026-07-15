@@ -7,7 +7,7 @@ require_relative "struct_field"
 require_relative "type"
 require_relative "schemas"
 require_relative "lexer"
-require_relative "../annotator/helpers/function_signature"
+require_relative "function_signature_forward"
 
 # ==========================================
 # AST
