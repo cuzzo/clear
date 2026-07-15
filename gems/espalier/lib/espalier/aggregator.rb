@@ -14,13 +14,15 @@ module Espalier
       nil_kill_data: {},
       risk_data: {},
       nil_kill_loops: {},
-      nil_kill_evidence: nil
+      nil_kill_evidence: nil,
+      closed_world: false
     )
       @decomplex_data = decomplex_data
       @nil_kill_data = nil_kill_data
       @risk_data = risk_data
       @nil_kill_loops = nil_kill_loops
       @nil_kill_evidence = nil_kill_evidence
+      @closed_world = closed_world
     end
 
     # Aggregate extracted AST structure with auxiliary indicators
@@ -167,7 +169,7 @@ module Espalier
         mod_row[:call_graph] = { internal_edges: internal_edges } unless internal_edges.empty?
         mod_row
       end
-      PrivacyAnalyzer.annotate!(manifest)
+      PrivacyAnalyzer.annotate!(manifest, closed_world: @closed_world)
     end
 
     private
@@ -263,6 +265,8 @@ module Espalier
     end
 
     def structural_method_complexities(modules)
+      return preliminary_method_complexities(modules) if modules.empty?
+
       complexities, spaces, time_complete, space_complete, symbolic_time = preliminary_method_complexities(modules)
       internal_calls = internal_calls_by_method(modules)
       resolved_calls = resolved_calls_by_site(modules)
@@ -280,7 +284,7 @@ module Espalier
         resolved_recursive_edges: resolved_recursive_edges
       )
 
-      cores = ENV.fetch("CORES", ENV.fetch("JOBS", "4")).to_i
+      cores = [ENV.fetch("CORES", ENV.fetch("JOBS", "4")).to_i, 1].max
 
       8.times do
         changed = false
@@ -301,7 +305,8 @@ module Espalier
           methods.transform_values { |expression| expression }
         })
 
-        slices = modules.each_slice((modules.size.to_f / cores).ceil).to_a
+        slice_size = [(modules.size.to_f / cores).ceil, 1].max
+        slices = modules.each_slice(slice_size).to_a
         threads = slices.map do |slice|
           Thread.new do
             local_analyzer = Espalier::BigOAnalyzer.new(

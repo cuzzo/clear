@@ -551,6 +551,13 @@ impl<'a> RedundantNilGuard<'a> {
 
     fn stmts_for<'node>(&self, node: Option<&'node Node>) -> Vec<&'node Node> {
         let Some(node) = node else { return Vec::new() };
+        // Tree-sitter C/C#/JS-style `else if` uses an ELSE_CLAUSE wrapper.
+        // Process its child as a statement so assignments and nested branch
+        // facts update flow state, rather than merely recursively inspecting
+        // it under the predecessor's proof set.
+        if node.r#type == "ELSE_CLAUSE" {
+            return node.children.iter().filter_map(ast::node).collect();
+        }
         if self.call_parts(node).is_some() {
             return vec![node];
         }
@@ -584,6 +591,7 @@ impl<'a> RedundantNilGuard<'a> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use tree_sitter::Parser;
 
     struct TestBehavior;
     impl NormalizedLanguageBehavior for TestBehavior {}
@@ -602,6 +610,33 @@ mod tests {
             behavior: &TestBehavior,
             findings: Vec::new(),
         }
+    }
+
+    #[test]
+    fn c_reallocation_kills_a_prior_non_nil_proof() {
+        let source = r#"
+struct entry { int size; };
+int queue(struct entry* previous) {
+  struct entry* value = previous;
+  if (value == NULL) {
+    return 1;
+  } else if (value->size == 0) {
+    value = realloc(value, 64);
+    if (value == NULL)
+      return 2;
+  }
+  return 0;
+}
+"#;
+        let mut parser = Parser::new();
+        parser
+            .set_language(&tree_sitter_c::LANGUAGE.into())
+            .expect("C grammar");
+        let tree = parser.parse(source, None).expect("C source parses");
+        let root = crate::ast::normalize_tree(tree.root_node(), source, Language::C);
+        let lines = source.lines().map(str::to_string).collect::<Vec<_>>();
+        let findings = scan_normalized("queue.c", &lines, &root, crate::syntax::c::behavior());
+        assert!(findings.is_empty(), "unexpected findings: {findings:?}");
     }
 
     #[test]

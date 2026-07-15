@@ -34,6 +34,7 @@ pub fn scan_documents(documents: &[Document]) -> Vec<SuperfluousStateFinding> {
     );
 
     let icf_report = implicit_control_flow::scan_documents(documents);
+    let opaque_state_escapes = opaque_state_escape_functions(documents);
     let mut adjacent_pairs: BTreeMap<(String, String), BTreeSet<String>> = BTreeMap::new();
     for proto in &icf_report.ordered_protocols {
         if proto.dependency.contains(&"write_read".to_string()) && proto.protocol.len() >= 2 {
@@ -53,7 +54,12 @@ pub fn scan_documents(documents: &[Document]) -> Vec<SuperfluousStateFinding> {
         let self_reads: Vec<_> = row.readers.iter().filter(|r| r.recv == "self").collect();
 
         // ---- Pattern 1: dead state (written, never read) ----
-        if !self_writes.is_empty() && row.readers.is_empty() {
+        if !self_writes.is_empty()
+            && row.readers.is_empty()
+            && !self_writes.iter().any(|writer| {
+                opaque_state_escapes.contains(&(writer.file.clone(), writer.defn.clone()))
+            })
+        {
             results.push(SuperfluousStateFinding {
                 field: norm.clone(),
                 score: 0.85,
@@ -75,7 +81,8 @@ pub fn scan_documents(documents: &[Document]) -> Vec<SuperfluousStateFinding> {
                 },
                 read_sites: Vec::new(),
                 writer_methods: {
-                    let mut defns: Vec<String> = self_writes.iter().map(|w| w.defn.clone()).collect();
+                    let mut defns: Vec<String> =
+                        self_writes.iter().map(|w| w.defn.clone()).collect();
                     defns.sort();
                     defns.dedup();
                     defns
@@ -179,13 +186,15 @@ pub fn scan_documents(documents: &[Document]) -> Vec<SuperfluousStateFinding> {
                 sites
             },
             writer_methods: {
-                let mut defns: Vec<String> = writer_methods.iter().map(|(_, d)| d.clone()).collect();
+                let mut defns: Vec<String> =
+                    writer_methods.iter().map(|(_, d)| d.clone()).collect();
                 defns.sort();
                 defns.dedup();
                 defns
             },
             reader_methods: {
-                let mut defns: Vec<String> = reader_methods.iter().map(|(_, d)| d.clone()).collect();
+                let mut defns: Vec<String> =
+                    reader_methods.iter().map(|(_, d)| d.clone()).collect();
                 defns.sort();
                 defns.dedup();
                 defns
@@ -203,6 +212,21 @@ pub fn scan_documents(documents: &[Document]) -> Vec<SuperfluousStateFinding> {
     });
 
     results
+}
+
+/// Language adapters emit this normalized effect only when a call can
+/// externally inspect an owned aggregate. The detector merely consumes it.
+fn opaque_state_escape_functions(documents: &[Document]) -> BTreeSet<(String, String)> {
+    documents
+        .iter()
+        .flat_map(|document| {
+            document
+                .semantic_effect_sites
+                .iter()
+                .filter(|site| site.kind == "opaque_state_escape")
+                .map(|site| (site.file.clone(), site.function.clone()))
+        })
+        .collect()
 }
 
 #[cfg(test)]
@@ -352,5 +376,22 @@ mod tests {
         assert_eq!(results.len(), 1);
         assert_eq!(results[0].field, "x");
         assert_eq!(results[0].classification, "dead_state");
+    }
+
+    #[test]
+    fn c_aggregate_escape_prevents_false_dead_field() {
+        let temp_dir = tempfile::tempdir().unwrap();
+        let file_path = temp_dir.path().join("state.c");
+        std::fs::write(
+            &file_path,
+            "struct State { int flag; };\nvoid observe(struct State* state);\nvoid update(struct State* state) { state->flag = 1; observe(state); }\n",
+        )
+        .unwrap();
+
+        let findings = scan_files(&[file_path], Language::C).unwrap();
+        assert!(
+            findings.is_empty(),
+            "opaque aggregate call is a possible read: {findings:?}"
+        );
     }
 }

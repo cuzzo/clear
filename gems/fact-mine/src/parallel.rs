@@ -6,6 +6,11 @@ use std::thread;
 
 static JOBS_OVERRIDE: AtomicUsize = AtomicUsize::new(0);
 const DEFAULT_MAX_JOBS: usize = 8;
+// Parsing and normalizing real-world nested source trees is intentionally
+// recursive in a few adapters. The process entrypoint has a 64 MiB stack, so
+// give scoped project workers the same budget rather than silently reducing
+// the supported nesting depth whenever more than one file is analyzed.
+const WORKER_STACK_SIZE: usize = 64 * 1024 * 1024;
 
 pub fn set_jobs_for_process(jobs: Option<usize>) -> Result<()> {
     let Some(jobs) = jobs else {
@@ -54,15 +59,19 @@ where
             let tx = tx.clone();
             let func = &func;
             let next_index = &next_index;
-            scope.spawn(move || loop {
-                let index = next_index.fetch_add(1, Ordering::Relaxed);
-                if index >= items.len() {
-                    break;
-                }
-                if tx.send((index, func(&items[index]))).is_err() {
-                    break;
-                }
-            });
+            thread::Builder::new()
+                .name("fact-mine-worker".to_string())
+                .stack_size(WORKER_STACK_SIZE)
+                .spawn_scoped(scope, move || loop {
+                    let index = next_index.fetch_add(1, Ordering::Relaxed);
+                    if index >= items.len() {
+                        break;
+                    }
+                    if tx.send((index, func(&items[index]))).is_err() {
+                        break;
+                    }
+                })
+                .expect("failed to start fact-mine worker thread");
         }
         drop(tx);
     });
@@ -85,8 +94,8 @@ fn env_jobs() -> Option<usize> {
         "DECOMPLEX_RUST_JOBS",
         "DECOMPLEX_JOBS",
     ]
-        .into_iter()
-        .find_map(|name| env::var(name).ok().and_then(|value| parse_jobs(&value)))
+    .into_iter()
+    .find_map(|name| env::var(name).ok().and_then(|value| parse_jobs(&value)))
 }
 
 fn parse_jobs(value: &str) -> Option<usize> {
@@ -112,6 +121,11 @@ mod tests {
     #[test]
     fn rejects_zero_jobs_override() {
         assert!(set_jobs_for_process(Some(0)).is_err());
+    }
+
+    #[test]
+    fn project_workers_have_the_same_stack_budget_as_the_entrypoint() {
+        assert_eq!(WORKER_STACK_SIZE, 64 * 1024 * 1024);
     }
 
     #[test]

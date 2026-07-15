@@ -153,11 +153,28 @@ pub(crate) trait NormalizedLanguageBehavior: Sync {
         field.to_string()
     }
 
-    fn empty_check_call(&self, _message: &str) -> bool { false }
-    fn visited_membership_call(&self, _message: &str) -> bool { false }
-    fn visited_insert_call(&self, _message: &str) -> bool { false }
-    fn empty_collection_constructor(&self, _message: &str) -> bool { false }
-    fn collection_parameter_type(&self, _type_name: &str) -> bool { false }
+    /// A stable state identity for analyzers that must distinguish two owners
+    /// with the same field spelling. Empty means the field spelling is the
+    /// appropriate portable identity.
+    fn state_identity(&self, _owner: &str, _field: &str) -> String {
+        String::new()
+    }
+
+    fn empty_check_call(&self, _message: &str) -> bool {
+        false
+    }
+    fn visited_membership_call(&self, _message: &str) -> bool {
+        false
+    }
+    fn visited_insert_call(&self, _message: &str) -> bool {
+        false
+    }
+    fn empty_collection_constructor(&self, _message: &str) -> bool {
+        false
+    }
+    fn collection_parameter_type(&self, _type_name: &str) -> bool {
+        false
+    }
     fn call_complexity(
         &self,
         _receiver_type: &TypeExpr,
@@ -315,6 +332,19 @@ pub(crate) trait NormalizedLanguageBehavior: Sync {
         Vec::new()
     }
 
+    /// Excludes syntax that looks like a field assignment but only initializes
+    /// a callable view. `this.run = this.run.bind(this)` does not create
+    /// independently mutable domain state.
+    fn suppress_state_write(&self, _receiver: &str, _field: &str, _node: &Node) -> bool {
+        false
+    }
+
+    /// Whether passing the receiver aggregate to this call makes every field
+    /// of that aggregate an opaque possible read.
+    fn opaque_receiver_escape_call(&self, _call: &CallSite) -> bool {
+        false
+    }
+
     fn implicit_owner_fields(&self) -> bool {
         false
     }
@@ -328,6 +358,18 @@ pub(crate) trait NormalizedLanguageBehavior: Sync {
         _node: &Node,
         _owner: &str,
         _in_method: bool,
+    ) -> Option<StateDeclaration> {
+        None
+    }
+
+    /// Recover a declared state slot from a function-shaped normalized node.
+    /// Some source constructs (for example a C# auto-property) are modeled as
+    /// a function to retain their executable accessor body, but still declare
+    /// a stable state slot.
+    fn state_declaration_from_function(
+        &self,
+        _node: &Node,
+        _owner: &str,
     ) -> Option<StateDeclaration> {
         None
     }
@@ -428,6 +470,13 @@ pub(crate) trait NormalizedLanguageBehavior: Sync {
         default_kind.to_string()
     }
 
+    /// Whether an owner declaration may extend a prior declaration with the
+    /// same name. This is normalized evidence for downstream detectors; the
+    /// language rule itself belongs in the language behavior.
+    fn reopenable_owner(&self, _node: &Node) -> bool {
+        false
+    }
+
     fn declarative_owner(&self, _node: &Node, _current_owner: &str) -> Option<NormalizedOwner> {
         None
     }
@@ -455,12 +504,7 @@ pub(crate) trait NormalizedLanguageBehavior: Sync {
     }
 
     fn function_dispatch_kind(&self, _name: &str, owner: &str) -> String {
-        if owner.is_empty() {
-            "top"
-        } else {
-            "instance"
-        }
-        .to_string()
+        if owner.is_empty() { "top" } else { "instance" }.to_string()
     }
 
     fn receiver_is_type_reference(&self, _receiver: &str) -> bool {
@@ -570,7 +614,12 @@ pub(crate) trait NormalizedLanguageBehavior: Sync {
         false
     }
 
-    fn initializer_writes(&self, _node: &Node, _source_text: &str, _span: Span) -> Vec<NormalizedStateWrite> {
+    fn initializer_writes(
+        &self,
+        _node: &Node,
+        _source_text: &str,
+        _span: Span,
+    ) -> Vec<NormalizedStateWrite> {
         Vec::new()
     }
 
@@ -707,7 +756,8 @@ pub(crate) trait NormalizedLanguageBehavior: Sync {
     }
 
     fn format_nilable_type(&self, type_text: &str) -> String {
-        if type_text.is_empty() || type_text == "nil" || type_text == "null" || type_text == "None" {
+        if type_text.is_empty() || type_text == "nil" || type_text == "null" || type_text == "None"
+        {
             return type_text.to_string();
         }
         if type_text == "NilClass" || type_text.starts_with("T.nilable(") {

@@ -47,6 +47,7 @@ RSpec.describe "nil-kill multi-language runtime pipeline" do
   it "resolves language providers from file extensions for static diff dispatch" do
     expect(NilKill::Languages.provider_for_path("src/probe.rb").language).to eq("ruby")
     expect(NilKill::Languages.provider_for_path("src/probe.py").language).to eq("python")
+    expect(NilKill::Languages.provider_for_path("src/probe.mjs").language).to eq("javascript")
     expect(NilKill::Languages.provider_for_path("src/probe.ts").language).to eq("typescript")
     expect(NilKill::Languages.provider_for_path("src/probe.lua").language).to eq("lua")
     expect(NilKill::Languages.provider_for_path("src/probe.go").language).to eq("go")

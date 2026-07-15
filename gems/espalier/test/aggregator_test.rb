@@ -58,7 +58,8 @@ class AggregatorTest < Minitest::Test
     aggregator = Espalier::Aggregator.new(
       decomplex_data: decomplex_data,
       nil_kill_data: nil_kill_data,
-      risk_data: risk_data
+      risk_data: risk_data,
+      closed_world: true
     )
 
     modules.first[:ivar_properties] = {

@@ -8,7 +8,7 @@ use super::normalized_behavior::{
     NormalizedCallProjection, NormalizedLanguageBehavior, NormalizedNilGuardFact,
     NormalizedSemanticEffect,
 };
-use super::CallSite;
+use super::{CallSite, StateDeclaration};
 use crate::ast::{Node, Span};
 
 const CSHARP_CONTEXT_PAIRS: &[(&str, &[&str])] = &[
@@ -171,6 +171,52 @@ impl NormalizedLanguageBehavior for CSharpNormalizedBehavior {
             .filter(|part| !part.is_empty())
             .next_back()
             .map(str::to_string)
+    }
+
+    fn state_declaration_from_function(
+        &self,
+        node: &Node,
+        owner: &str,
+    ) -> Option<StateDeclaration> {
+        // C# properties are normalized as functions so their getter body is
+        // analyzable. An auto-property also declares a real storage slot.
+        // Limit this to semicolon accessors; a computed property with a
+        // custom getter is a read-only function, not independent storage.
+        let source = node.text.trim();
+        let body_start = source.find('{')?;
+        let body = &source[body_start..];
+        if !body.contains("get;") && !body.contains("set;") && !body.contains("init;") {
+            return None;
+        }
+
+        let mut parts = source[..body_start]
+            .split_whitespace()
+            .filter(|part| {
+                !matches!(
+                    *part,
+                    "public"
+                        | "private"
+                        | "protected"
+                        | "internal"
+                        | "static"
+                        | "virtual"
+                        | "override"
+                        | "sealed"
+                        | "abstract"
+                        | "required"
+                )
+            })
+            .collect::<Vec<_>>();
+        let field = parts.pop()?.to_string();
+        let r#type = parts.join(" ");
+        (!r#type.is_empty()).then(|| StateDeclaration {
+            field,
+            owner: owner.to_string(),
+            r#type: Some(r#type),
+            file: String::new(),
+            line: 0,
+            span: [0, 0, 0, 0],
+        })
     }
 
     fn wrap_branch_predicate(&self, _branch: &Node) -> bool {
@@ -400,6 +446,20 @@ mod tests {
         let field_node = node("FIELD_DECLARATION", "private int _myField;");
         assert_eq!(b.field_name_from_declaration(&field_node), Some("_myField".to_string()));
         assert_eq!(b.field_name_from_declaration(&node("LVAR", "x")), None);
+        let property = b
+            .state_declaration_from_function(
+                &node("DEFN", "public string Name { get; set; }"),
+                "Worker",
+            )
+            .expect("auto-property declaration");
+        assert_eq!(property.field, "Name");
+        assert_eq!(property.r#type.as_deref(), Some("string"));
+        assert!(b
+            .state_declaration_from_function(
+                &node("DEFN", "public string Name { get { return _name; } }"),
+                "Worker",
+            )
+            .is_none());
 
         assert!(!b.wrap_branch_predicate(&node("IF", "if (a)")));
         assert!(b.owner_name_span("A", &node("CLASS", "class A"), [1, 2, 3, 4]).is_some());

@@ -773,13 +773,29 @@ fn visit_loops(
         let domain_names = growth_control
             .map(|control| iteration_domain_names(control, behavior))
             .unwrap_or_default();
-        let refs = parameter_domains(
+        let all_refs = parameter_domains(
             &domain_names,
             params,
             assignments,
             (node.first_lineno, node.first_column),
         );
         let states = state_names(growth_control.unwrap_or(node));
+        let selectors = boolean_selector_names(growth_control.unwrap_or(node));
+        // Boolean flags can select whether a state-backed loop executes, but
+        // cannot be its size domain. When the loop also names a state, retain
+        // the state as the sole symbolic source rather than rendering a
+        // spurious Boolean N alongside it.
+        let refs = if states.is_empty() {
+            all_refs.clone()
+        } else {
+            all_refs
+                .iter()
+                .filter(|name| {
+                    !boolean_parameter(name, parameter_types) && !selectors.contains(*name)
+                })
+                .cloned()
+                .collect()
+        };
         let growth = locals
             .iter()
             .filter_map(|name| collection_growth.get(name))
@@ -1390,6 +1406,28 @@ fn parameter_domains(
         collect_parameter_dependencies(local, params, assignments, before, &mut output);
     }
     output
+}
+
+fn boolean_parameter(name: &str, parameter_types: &BTreeMap<String, TypeExpr>) -> bool {
+    matches!(parameter_types.get(name), Some(TypeExpr::Primitive(kind)) if {
+        matches!(kind.trim().to_ascii_lowercase().as_str(), "bool" | "boolean" | "t::boolean")
+    })
+}
+
+// A negated local can decide whether a loop runs, but is not a cardinality
+// source. This lets a state-backed drain retain the queue as its size domain
+// even when it also honours a `!stop`/`!cancelled` selector. The rule is
+// structural, so it applies consistently across supported languages.
+fn boolean_selector_names(node: &Node) -> BTreeSet<String> {
+    if matches!(node.r#type.as_str(), "PREFIX_UNARY_EXPRESSION" | "NOT")
+        && node.text.trim_start().starts_with('!')
+    {
+        return local_names(node);
+    }
+    child_nodes(node)
+        .into_iter()
+        .flat_map(boolean_selector_names)
+        .collect()
 }
 
 fn collect_parameter_dependencies(

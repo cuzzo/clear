@@ -181,6 +181,7 @@ impl<'a> Extractor<'a> {
             file: self.file.clone(),
             name: name.to_string(),
             kind: kind.to_string(),
+            reopenable: self.behavior.reopenable_owner(node),
             line: owner_span[0],
             span: owner_span,
         }
@@ -215,6 +216,21 @@ impl<'a> Extractor<'a> {
             callback_params: self.behavior.callback_parameter_names(node),
             signature: String::new(),
         });
+        if let Some(mut declaration) = self
+            .behavior
+            .state_declaration_from_function(node, &owner)
+        {
+            declaration.field = self.behavior.clean_identifier(&declaration.field);
+            declaration.file = self.file.clone();
+            declaration.owner = owner.clone();
+            declaration.line = node.first_lineno;
+            declaration.span = span(node);
+            self.owner_fields
+                .entry(owner.clone())
+                .or_default()
+                .push(declaration.field.clone());
+            self.facts.state_declarations.push(declaration);
+        }
         if let Some(alias) = predicate_alias(node, &self.file, &owner, self.behavior) {
             self.facts.predicate_aliases.push(alias);
         }
@@ -296,7 +312,11 @@ impl<'a> Extractor<'a> {
         if let Some(recv_node) = child_node(node, 0) {
             let receiver = normalized_text(recv_node);
             if receiver != "self" {
-                self.record_semantic_effect(node, "metaprogramming", &format!("class << {receiver}"));
+                self.record_semantic_effect(
+                    node,
+                    "metaprogramming",
+                    &format!("class << {receiver}"),
+                );
             }
         }
         self.scan_children(node);
@@ -469,10 +489,7 @@ impl<'a> Extractor<'a> {
     fn scan_operator_call(&mut self, node: &Node) {
         if let Some(operator) = child_symbol(node, 1) {
             let op = operator.as_str();
-            if matches!(
-                op,
-                "==" | "!=" | "===" | "!==" | "<" | "<=" | ">" | ">="
-            ) {
+            if matches!(op, "==" | "!=" | "===" | "!==" | "<" | "<=" | ">" | ">=") {
                 let raw = normalized_text(node);
                 self.facts.comparison_uses.push(ComparisonUse {
                     canon_source: self.behavior.normalize_comparison_source(&raw),
@@ -631,6 +648,15 @@ impl<'a> Extractor<'a> {
                 self.record_state_read_for_call(&projected, node);
             }
             self.record_state_write_for_mutating_call(&call);
+            if self.behavior.opaque_receiver_escape_call(&call)
+                && call.arguments.iter().any(|argument| {
+                    self.receiver_aliases.last().is_some_and(|aliases| {
+                        aliases.contains_key(argument.trim().trim_start_matches('&'))
+                    })
+                })
+            {
+                self.record_semantic_effect(node, "opaque_state_escape", "receiver");
+            }
             if call.receiver == "self" && node.text.contains(".(") {
                 self.record_semantic_effect(
                     node,
@@ -745,8 +771,12 @@ impl<'a> Extractor<'a> {
         let receiver = self.behavior.clean_receiver(&receiver);
         let field = self.behavior.clean_identifier(&field);
         let field = self.behavior.canonical_state_field(&receiver, &field);
+        if self.behavior.suppress_state_write(&receiver, &field, node) {
+            return;
+        }
         let write = StateWrite {
             field,
+            identity: String::new(),
             receiver,
             file: self.file.clone(),
             function: self.current_function(),
@@ -754,6 +784,8 @@ impl<'a> Extractor<'a> {
             span: write_span,
             owner: self.current_owner(),
         };
+        let mut write = write;
+        write.identity = self.behavior.state_identity(&write.owner, &write.field);
         let key = (
             write.field.clone(),
             write.receiver.clone(),
@@ -775,6 +807,7 @@ impl<'a> Extractor<'a> {
         }
         let read = StateRead {
             field,
+            identity: String::new(),
             receiver: "self".to_string(),
             file: self.file.clone(),
             function: self.current_function(),
@@ -796,6 +829,7 @@ impl<'a> Extractor<'a> {
         }
         self.push_state_read(StateRead {
             field,
+            identity: String::new(),
             receiver: "self".to_string(),
             file: self.file.clone(),
             function: self.current_function(),
@@ -840,8 +874,15 @@ impl<'a> Extractor<'a> {
     }
 
     fn record_behavior_initializer_writes(&mut self, node: &Node) {
-        let node_span = [node.first_lineno, node.first_column, node.last_lineno, node.last_column];
-        let init_writes = self.behavior.initializer_writes(node, &node.text, node_span);
+        let node_span = [
+            node.first_lineno,
+            node.first_column,
+            node.last_lineno,
+            node.last_column,
+        ];
+        let init_writes = self
+            .behavior
+            .initializer_writes(node, &node.text, node_span);
         for write in init_writes {
             let key = (
                 write.field.clone(),
@@ -852,15 +893,20 @@ impl<'a> Extractor<'a> {
                 write.span,
             );
             if self.seen_writes.insert(key) {
-                self.facts.state_writes.push(StateWrite {
+                let mut state_write = StateWrite {
                     field: write.field,
+                    identity: String::new(),
                     receiver: write.receiver,
                     file: self.file.clone(),
                     function: self.current_function(),
                     line: node.first_lineno,
                     span: write.span,
                     owner: self.current_owner(),
-                });
+                };
+                state_write.identity = self
+                    .behavior
+                    .state_identity(&state_write.owner, &state_write.field);
+                self.facts.state_writes.push(state_write);
             }
         }
     }
@@ -880,6 +926,7 @@ impl<'a> Extractor<'a> {
         let field = self.behavior.clean_identifier(&read.field);
         self.push_state_read(StateRead {
             field,
+            identity: String::new(),
             receiver,
             file: self.file.clone(),
             function: self.current_function(),
@@ -932,6 +979,7 @@ impl<'a> Extractor<'a> {
         };
         self.push_state_read(StateRead {
             field: call.message.clone(),
+            identity: String::new(),
             receiver: call.receiver.clone(),
             file: self.file.clone(),
             function: self.current_function(),
@@ -950,6 +998,7 @@ impl<'a> Extractor<'a> {
         };
         let write = StateWrite {
             field: self.behavior.canonical_state_field("self", &field),
+            identity: String::new(),
             receiver: "self".to_string(),
             file: call.file.clone(),
             function: call.function.clone(),
@@ -957,6 +1006,8 @@ impl<'a> Extractor<'a> {
             span: call.span,
             owner: call.owner.clone(),
         };
+        let mut write = write;
+        write.identity = self.behavior.state_identity(&write.owner, &write.field);
         let key = (
             write.field.clone(),
             write.receiver.clone(),
@@ -974,6 +1025,7 @@ impl<'a> Extractor<'a> {
         read.field = self
             .behavior
             .canonical_state_field(&read.receiver, &read.field);
+        read.identity = self.behavior.state_identity(&read.owner, &read.field);
         let key = (
             read.field.clone(),
             read.receiver.clone(),
@@ -1862,9 +1914,10 @@ fn predicate_expression<'a>(
     behavior: &dyn NormalizedLanguageBehavior,
 ) -> Option<&'a Node> {
     if node.r#type == "BLOCK" {
-        if let Some(single) = single_expression(node) {
-            return Some(single);
-        }
+        // An exact predicate alias must be a single expression. Treating the
+        // tail `return false` of a multi-statement body as the predicate made
+        // unrelated methods look like cloned boolean APIs.
+        return single_expression(node);
     }
     if !predicate_container_node(node)
         && predicate_body_text(&normalized_text_with_behavior(node, behavior), behavior).is_some()

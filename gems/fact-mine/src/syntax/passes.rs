@@ -90,6 +90,22 @@ impl<'a> StatefulSyntaxPass<'a> {
                 &facts.call_sites,
                 &facts.function_defs,
             ));
+        // The extractor records an opaque aggregate escape before all
+        // declarations have been seen. Once the document is complete, remove
+        // the conservative marker for a statically known local self-call: its
+        // reads are represented by the callee's own facts instead.
+        facts.semantic_effect_sites.retain(|site| {
+            site.kind != "opaque_state_escape"
+                || !facts.call_sites.iter().any(|call| {
+                    call.file == site.file
+                        && call.function == site.function
+                        && call.line == site.line
+                        && call.receiver == "self"
+                        && facts.function_defs.iter().any(|function| {
+                            function.owner == call.owner && function.name == call.message
+                        })
+                })
+        });
         effects::dedup_semantic_effect_sites(&mut facts.semantic_effect_sites);
 
         let file = self.file.to_string_lossy().to_string();

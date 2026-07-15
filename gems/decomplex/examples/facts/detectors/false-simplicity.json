@@ -101,6 +101,7 @@
             "kind": "class",
             "line": 1,
             "name": "Project::Thing",
+            "reopenable": true,
             "span": [
               1,
               0,
@@ -196,6 +197,7 @@
             "kind": "class",
             "line": 1,
             "name": "Project::Thing",
+            "reopenable": true,
             "span": [
               1,
               0,

@@ -212,6 +212,10 @@ const RUBY_CFG_PROFILE: ControlFlowProfile = ControlFlowProfile {
 pub(crate) struct RubyNormalizedBehavior;
 
 impl NormalizedLanguageBehavior for RubyNormalizedBehavior {
+    fn reopenable_owner(&self, node: &Node) -> bool {
+        matches!(node.r#type.as_str(), "CLASS" | "MODULE")
+    }
+
     fn declared_type_hint_complete(&self, type_name: &str) -> bool {
         !type_name.contains("T.untyped")
     }

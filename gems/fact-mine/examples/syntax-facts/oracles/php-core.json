@@ -339,20 +339,7 @@
           ]
         }
       ],
-      "predicate_bodies": [
-        {
-          "body": "name ?? null",
-          "line": 15,
-          "name": "process",
-          "owner": "PhpSyntaxFactsCore",
-          "span": [
-            15,
-            4,
-            46,
-            5
-          ]
-        }
-      ],
+      "predicate_bodies": [],
       "semantic_effects": [
         {
           "detail": "print",

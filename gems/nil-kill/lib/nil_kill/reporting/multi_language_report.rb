@@ -25,7 +25,7 @@ module NilKill
           "- Actions: #{actions.size}",
           "- Diagnostics: #{diagnostics.size}",
           "",
-        ] + alias_recommendation_lines + action_lines + diagnostic_lines + observation_lines
+        ] + type_next_lines + alias_recommendation_lines + action_lines + diagnostic_lines + observation_lines
       end
 
       private
@@ -68,6 +68,12 @@ module NilKill
         Array(facts && facts["alias_recommendations"])
       end
 
+      def type_next
+        facts = static["facts"]
+        facts = static.dig("language_extensions", "nil_kill_static_evidence", "facts") unless facts.is_a?(Hash)
+        Array(facts && facts["type_next"])
+      end
+
       def param_observation_count
         Hash(runtime["param_observations"]).sum { |_id, params| Hash(params).size }
       end
@@ -92,6 +98,20 @@ module NilKill
           lines << "- #{path}:#{line} #{action["kind"]} [#{action["confidence"]}]: #{action["message"]}"
         end
         lines << "- ... #{actions.size - 100} more" if actions.size > 100
+        lines << ""
+        lines
+      end
+
+      def type_next_lines
+        lines = ["## Type Next", ""]
+        if type_next.empty?
+          lines << "- None"
+          return lines + [""]
+        end
+        type_next.first(50).each do |candidate|
+          lines << "- #{candidate["candidate"]}: unlocks #{candidate["unlock_count"]} static flow fact(s)"
+        end
+        lines << "- ... #{type_next.size - 50} more" if type_next.size > 50
         lines << ""
         lines
       end

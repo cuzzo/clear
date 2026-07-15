@@ -63,6 +63,9 @@ fn class_records_for_document(document: &Document) -> (Vec<ClassRec>, Vec<Hit>) 
     let mut hits = Vec::new();
 
     for owner in &document.owner_defs {
+        if !owner.reopenable {
+            continue;
+        }
         let canonical = owner.name.trim_start_matches("::").to_string();
         if canonical.is_empty() {
             continue;
@@ -275,12 +278,26 @@ mod tests {
             "type_aliases": {},
             "method_param_types": {},
             "state_param_origins": []
-        })).unwrap();
+        }))
+        .unwrap();
 
         let res = scan_documents(&[doc]);
         assert_eq!(res.len(), 1);
         assert_eq!(res[0].detail, "test");
         assert_eq!(res[0].sites, vec!["foo.rb:(top-level):10"]);
     }
-}
 
+    #[test]
+    fn non_reopenable_duplicate_types_are_not_monkey_patches() {
+        let temp_dir = tempfile::tempdir().unwrap();
+        let file_path = temp_dir.path().join("theme.ts");
+        std::fs::write(
+            &file_path,
+            "class Theme { first() {} }\nclass Theme { second() {} }\n",
+        )
+        .unwrap();
+
+        let findings = scan_files(&[file_path], Language::TypeScript).unwrap();
+        assert!(findings.iter().all(|finding| finding.kind != "monkeypatch"));
+    }
+}

@@ -1,7 +1,7 @@
 use crate::decomplex::detectors::local_flow::{self, MethodSummary, Statement};
 use crate::decomplex::syntax::{self, Document, Language, Span};
-use fact_mine_rust::syntax::{Child, Node};
 use anyhow::Result;
+use fact_mine_rust::syntax::{Child, Node};
 use serde::Serialize;
 use std::collections::{BTreeMap, BTreeSet};
 use std::path::PathBuf;
@@ -195,6 +195,14 @@ fn analyze(method: &MethodSummary, asgns: &[Asgn]) -> Vec<DerivedStateRow> {
                 .find(|x| &x.name == a && x.statement_index > b.statement_index);
             let Some(reasn) = reasn else { continue };
 
+            // `snapshot = original` followed by `original = snapshot` is a
+            // deliberate snapshot/restore sequence, not a stale derived
+            // cache. A bare copy remains analyzable: it is only this explicit
+            // reverse data-flow edge that proves snapshot semantics.
+            if reasn.deps.iter().any(|dependency| dependency == &b.name) {
+                continue;
+            }
+
             // b recomputed at or after a's reassignment?
             let recomputed = asgns
                 .iter()
@@ -205,9 +213,10 @@ fn analyze(method: &MethodSummary, asgns: &[Asgn]) -> Vec<DerivedStateRow> {
             }
 
             // Is the derived variable b read at or after a's reassignment?
-            let is_read_after_reasn = method.statements.iter().any(|stmt| {
-                stmt.index >= reasn.statement_index && stmt.reads.contains(&b.name)
-            });
+            let is_read_after_reasn = method
+                .statements
+                .iter()
+                .any(|stmt| stmt.index >= reasn.statement_index && stmt.reads.contains(&b.name));
             if !is_read_after_reasn {
                 continue;
             }
@@ -501,6 +510,3 @@ mod tests {
         assert_eq!(res.len(), 1);
     }
 }
-
-
-

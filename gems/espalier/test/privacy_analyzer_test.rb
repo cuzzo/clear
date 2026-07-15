@@ -5,7 +5,7 @@ require_relative "../lib/espalier"
 
 class PrivacyAnalyzerTest < Minitest::Test
   def test_flags_public_internal_helper_with_no_external_calls
-    rows = Espalier::PrivacyAnalyzer.candidates(manifest)
+    rows = Espalier::PrivacyAnalyzer.candidates(manifest, closed_world: true)
 
     candidate = rows.find { |row| row[:name] == "prepare_state" }
     refute_nil candidate
@@ -16,7 +16,7 @@ class PrivacyAnalyzerTest < Minitest::Test
   end
 
   def test_suppresses_private_public_surface_external_and_weak_shared_helpers
-    rows = Espalier::PrivacyAnalyzer.candidates(manifest)
+    rows = Espalier::PrivacyAnalyzer.candidates(manifest, closed_world: true)
     names = rows.map { |row| row[:name] }
 
     refute_includes names, "hidden_step"
@@ -29,7 +29,7 @@ class PrivacyAnalyzerTest < Minitest::Test
   def test_annotates_manifest_quality_metrics
     data = manifest
 
-    Espalier::PrivacyAnalyzer.annotate!(data)
+    Espalier::PrivacyAnalyzer.annotate!(data, closed_world: true)
     fn = data.first[:functions].find { |row| row[:name] == "prepare_state" }
 
     assert_equal true, fn[:quality_metrics][:privacy_candidate]
@@ -38,7 +38,7 @@ class PrivacyAnalyzerTest < Minitest::Test
   end
 
   def test_threshold_can_be_tuned_for_lower_confidence_rows
-    rows = Espalier::PrivacyAnalyzer.candidates(manifest, threshold: 3.0)
+    rows = Espalier::PrivacyAnalyzer.candidates(manifest, threshold: 3.0, closed_world: true)
 
     assert_includes rows.map { |row| row[:name] }, "shared_leaf"
   end

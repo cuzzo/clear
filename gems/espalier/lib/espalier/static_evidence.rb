@@ -42,7 +42,13 @@ module Espalier
 
       resolve_owner = ->(owner, path, language) {
         lang = language.to_s.downcase
-        if lang == "rust" || lang == "go" || lang == "zig" || lang == "c" || lang == "cpp" || lang == "csharp"
+        # A source file is part of an owner identity in languages that permit
+        # unrelated modules/classes with the same short name. Without it,
+        # parallel TS/JS version trees (and native compilation units) are
+        # merged into a fictional class and produce false state/complexity
+        # claims. Deliberate declaration merging remains an explicit future
+        # relation, never an accidental name collision.
+        if lang == "rust" || lang == "go" || lang == "zig" || lang == "c" || lang == "cpp" || lang == "csharp" || lang == "typescript" || lang == "javascript"
           "#{owner}@#{path}"
         else
           owner
@@ -52,6 +58,10 @@ module Espalier
       # Group methods by owner
       methods_by_owner = Hash.new { |h, k| h[k] = [] }
       methods_by_id = {}
+      owner_kinds = Array(evidence["owners"]).each_with_object({}) do |owner, kinds|
+        key = resolve_owner.call(owner["name"], owner["path"], owner["language"])
+        kinds[key] = owner["kind"].to_s
+      end
       accesses_by_function = Hash.new { |h, k| h[k] = [] }
       Array(evidence.dig("facts", "state_accesses")).each do |access|
         accesses_by_function[access["function_id"]] << access
@@ -61,8 +71,22 @@ module Espalier
         key = [fact["path"], fact["owner"], fact["function"], fact["line"].to_i]
         complexity_by_method[key] << fact
       end
-      Array(evidence["methods"]).each do |m|
+      raw_methods = Array(evidence["methods"])
+      implementation_keys = raw_methods.filter_map do |method|
+        source = method["raw_source"].to_s
+        next unless source.include?("{")
+
+        [method["path"].to_s, method["owner"].to_s, method["name"].to_s, method["kind"].to_s]
+      end.to_set
+      raw_methods.each do |m|
         next unless allowed_roles.include?(role_for.call(m["path"]))
+        overload_key = [m["path"].to_s, m["owner"].to_s, m["name"].to_s, m["kind"].to_s]
+        # TypeScript overload signatures are declarations immediately followed
+        # by a concrete implementation. Reporting both as executable methods
+        # doubles every downstream metric; retain the implementation only.
+        if implementation_keys.include?(overload_key) && !m["raw_source"].to_s.include?("{")
+          next
+        end
         accesses = accesses_by_function[m["id"]]
         meth = {
           id: m["id"],
@@ -250,16 +274,19 @@ module Espalier
       all_owners = (methods_by_owner.keys + fields_by_owner.keys).uniq.reject(&:empty?)
       all_owners.map do |owner|
         meta = module_metadata(owner, methods_by_owner[owner], first_field_by_owner[owner])
+        owner_kind = owner_kinds[owner]
+        module_like = %w[module program namespace].include?(owner_kind) ||
+          (%i[javascript typescript].include?(meta[:language]) && owner_kind == "owner")
         {
-          type: :class,
+          type: module_like ? :module : :class,
           name: owner,
           file: meta[:file],
           line: meta[:line],
           span: meta[:span],
           language: meta[:language],
-          states: fields_by_owner[owner].map { |field| field["name"] }.to_set,
-          state_records: fields_by_owner[owner],
-          ivar_types: fields_by_owner[owner].to_h { |field| [field["name"], field["declared_type"]] }.compact,
+          states: module_like ? Set.new : fields_by_owner[owner].map { |field| field["name"] }.to_set,
+          state_records: module_like ? [] : fields_by_owner[owner],
+          ivar_types: module_like ? {} : fields_by_owner[owner].to_h { |field| [field["name"], field["declared_type"]] }.compact,
           ivar_properties: {},
           declared_fields: declared_fields,
           methods: methods_by_owner[owner]
@@ -609,22 +636,25 @@ module Espalier
 
     def git_tracked_target_files(exts)
       targets = target_dirs
-      git_tracked_files.select do |path|
+      tracked = targets.flat_map do |target|
+        git_tracked_files(git_root_for(target))
+      end
+      tracked.select do |path|
         target_path?(path, targets) && source_file?(path, exts)
       end.uniq.sort
     end
 
-    def git_tracked_files
-      top = git_root
+    def git_tracked_files(top)
       out, status = Open3.capture2e("git", "-C", top, "ls-files", "-z")
       raise ArgumentError, "git ls-files failed under #{top}: #{out.strip}" unless status.success?
 
       out.split("\0").reject(&:empty?).map { |path| File.expand_path(path, top) }
     end
 
-    def git_root
-      out, status = Open3.capture2e("git", "-C", @root, "rev-parse", "--show-toplevel")
-      raise ArgumentError, "--vcs=git requires #{@root} to be inside a git worktree" unless status.success?
+    def git_root_for(target)
+      probe = File.directory?(target) ? target : File.dirname(target)
+      out, status = Open3.capture2e("git", "-C", probe, "rev-parse", "--show-toplevel")
+      raise ArgumentError, "--vcs=git requires #{probe} to be inside a git worktree" unless status.success?
 
       File.expand_path(out.strip)
     end

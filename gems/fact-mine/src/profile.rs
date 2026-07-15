@@ -19,11 +19,11 @@ macro_rules! eprintln {
     };
 }
 
-use crate::syntax::{self, Document, Language};
+use crate::syntax::{self, Document};
 use crate::type_inference::TypeExpr;
 
 use serde::Serialize;
-use serde_json::{json, Value};
+use serde_json::json;
 use std::collections::{BTreeMap, BTreeSet};
 
 /// Which fact-set to produce.
@@ -522,19 +522,31 @@ pub fn extract(document: &Document, profile: Profile) -> ProfileOutput {
             if let Ok(path_str) = std::env::var("FACT_MINE_GLOBAL_SHAPES_FILE") {
                 if let Ok(content) = std::fs::read_to_string(path_str) {
                     if let Ok(val) = serde_json::from_str::<serde_json::Value>(&content) {
-                        if let Some(hash_map) = val.get("struct_field_hash_shapes").and_then(|v| v.as_object()) {
+                        if let Some(hash_map) = val
+                            .get("struct_field_hash_shapes")
+                            .and_then(|v| v.as_object())
+                        {
                             for (k, v) in hash_map {
                                 let parts: Vec<&str> = k.split('\u{0}').collect();
                                 if parts.len() == 2 {
-                                    struct_field_hash_shapes.insert((parts[0].to_string(), parts[1].to_string()), v.clone());
+                                    struct_field_hash_shapes.insert(
+                                        (parts[0].to_string(), parts[1].to_string()),
+                                        v.clone(),
+                                    );
                                 }
                             }
                         }
-                        if let Some(array_map) = val.get("struct_field_array_shapes").and_then(|v| v.as_object()) {
+                        if let Some(array_map) = val
+                            .get("struct_field_array_shapes")
+                            .and_then(|v| v.as_object())
+                        {
                             for (k, v) in array_map {
                                 let parts: Vec<&str> = k.split('\u{0}').collect();
                                 if parts.len() == 2 {
-                                    struct_field_array_shapes.insert((parts[0].to_string(), parts[1].to_string()), v.clone());
+                                    struct_field_array_shapes.insert(
+                                        (parts[0].to_string(), parts[1].to_string()),
+                                        v.clone(),
+                                    );
                                 }
                             }
                         }
@@ -664,14 +676,20 @@ pub fn extract(document: &Document, profile: Profile) -> ProfileOutput {
             visitor.collect_return_usage_site_context(root, "statement", None, None, false);
             visitor.collect_return_usage_site_context(root, "statement", None, None, true);
             visitor.collect_hash_record_escape_sites(root);
-            struct_field_hash_shapes_out = visitor.struct_field_hash_shapes.iter().map(|((c, f), v)| {
-                (format!("{}\u{0}{}", c, f), v.clone())
-            }).collect();
-            struct_field_array_shapes_out = visitor.struct_field_array_shapes.iter().map(|((c, f), v)| {
-                (format!("{}\u{0}{}", c, f), v.clone())
-            }).collect();
+            struct_field_hash_shapes_out = visitor
+                .struct_field_hash_shapes
+                .iter()
+                .map(|((c, f), v)| (format!("{}\u{0}{}", c, f), v.clone()))
+                .collect();
+            struct_field_array_shapes_out = visitor
+                .struct_field_array_shapes
+                .iter()
+                .map(|((c, f), v)| (format!("{}\u{0}{}", c, f), v.clone()))
+                .collect();
         }
-        type_dependencies = extract_type_dependencies(document, &state_types, &tlet_sites);
+        let declared_parameters = resolved_declared_parameter_names(&lines, document, &language);
+        type_dependencies =
+            extract_type_dependencies(document, &state_types, &tlet_sites, &declared_parameters);
         attach_return_type_dependencies(&type_dependencies, &mut return_origins);
     }
 
@@ -832,7 +850,12 @@ pub fn merge(outputs: Vec<ProfileOutput>, profile: Profile) -> ProfileOutput {
 
     owners.sort_by(|a, b| a.id.cmp(&b.id));
     owners.dedup_by(|a, b| a.id == b.id);
-    call_graph_edges.sort_by(|a, b| a.source.cmp(&b.source).then_with(|| a.target.cmp(&b.target)).then_with(|| a.kind.cmp(&b.kind)));
+    call_graph_edges.sort_by(|a, b| {
+        a.source
+            .cmp(&b.source)
+            .then_with(|| a.target.cmp(&b.target))
+            .then_with(|| a.kind.cmp(&b.kind))
+    });
     calls.sort_by(|a, b| a.id.cmp(&b.id));
     calls.dedup_by(|a, b| a.id == b.id);
     state_accesses.sort_by(|a, b| a.id.cmp(&b.id));
@@ -942,6 +965,7 @@ fn extract_type_dependencies(
     document: &Document,
     state_types: &BTreeMap<String, TypeExpr>,
     tlet_sites: &[serde_json::Value],
+    declared_parameters: &BTreeSet<(String, String)>,
 ) -> Vec<serde_json::Value> {
     let places = document
         .places
@@ -1007,10 +1031,7 @@ fn extract_type_dependencies(
     };
     let definition_id = |node_id: &str, place: &crate::syntax::cfg::Place| {
         if place.kind == "local" {
-            format!(
-                "type-definition:{}:{node_id}:{}",
-                place.file, place.id
-            )
+            format!("type-definition:{}:{node_id}:{}", place.file, place.id)
         } else {
             root_id(place)
         }
@@ -1034,13 +1055,15 @@ fn extract_type_dependencies(
         }
     };
 
+    let parameter_is_declared = |place: &crate::syntax::cfg::Place| {
+        declared_parameters.contains(&(place.function.clone(), place.name.clone()))
+    };
     let root_record = |place: &crate::syntax::cfg::Place| {
         let id = root_id(place);
         let resolved = place.kind != "local"
-            && state_types.contains_key(&state_key(
-                &place.owner,
-                place.name.trim_start_matches('@'),
-            ));
+            && state_types
+                .contains_key(&state_key(&place.owner, place.name.trim_start_matches('@')))
+            || parameter_is_declared(place);
         let candidate_kind = if params
             .get(&(place.owner.as_str(), place.function.as_str()))
             .is_some_and(|names| names.contains(place.name.as_str()))
@@ -1098,7 +1121,8 @@ fn extract_type_dependencies(
                 }
             }
             let resolved = effect.write_type_hints.contains_key(place_id)
-                || tlet_lines.contains(&node.line);
+                || tlet_lines.contains(&node.line)
+                || (node.kind == "entry" && parameter_is_declared(place));
             let candidate = !resolved && requirements.is_empty();
             rows.insert(id.clone(), json!({
                 "id": id,
@@ -1129,10 +1153,7 @@ fn extract_type_dependencies(
             let (root, record) = root_record(place);
             rows.entry(root).or_insert(record);
         }
-        let id = format!(
-            "type-read:{}:{}:{}",
-            fact.file, fact.node_id, fact.place_id
-        );
+        let id = format!("type-read:{}:{}:{}", fact.file, fact.node_id, fact.place_id);
         rows.insert(
             id.clone(),
             json!({
@@ -1140,7 +1161,7 @@ fn extract_type_dependencies(
                 "kind": "flow_read",
                 "candidate": false,
                 "candidate_kind": null,
-                "resolved": fact.complete,
+                "resolved": fact.complete || parameter_is_declared(place),
                 "requirements": requirements,
                 "file": fact.file,
                 "owner": fact.owner,
@@ -1154,6 +1175,39 @@ fn extract_type_dependencies(
     }
 
     rows.into_values().collect()
+}
+
+/// Returns only parameters whose declared type is a useful static fact.  A
+/// declaration such as Sorbet's `T.untyped` (or a dynamic/unknown annotation
+/// in another language) documents an API boundary but cannot safely resolve a
+/// Nil-Kill slot.
+fn resolved_declared_parameter_names(
+    lines: &[String],
+    document: &Document,
+    language: &str,
+) -> BTreeSet<(String, String)> {
+    document
+        .function_defs
+        .iter()
+        .flat_map(|function| {
+            let signature = method_signature(lines, function, language);
+            let (_, parameters) = SignatureParser::parse(&signature, language);
+            parameters.into_iter().filter_map(move |parameter| {
+                let name = parameter.get("name")?.trim();
+                let ty = parameter.get("type")?.trim();
+                (!name.is_empty() && declared_parameter_type_is_resolved(ty))
+                    .then(|| (function.name.clone(), name.to_string()))
+            })
+        })
+        .collect()
+}
+
+fn declared_parameter_type_is_resolved(ty: &str) -> bool {
+    let normalized = ty.trim().to_ascii_lowercase();
+    !normalized.is_empty()
+        && !["untyped", "any", "unknown", "dynamic"]
+            .iter()
+            .any(|marker| normalized.contains(marker))
 }
 
 fn attach_return_type_dependencies(
@@ -1349,9 +1403,14 @@ fn extract_methods(
                 span: Some(fn_def.span),
                 language: language.to_string(),
                 signature,
-                visibility: fn_def.visibility.clone().unwrap_or_else(|| "public".to_string()),
+                visibility: fn_def
+                    .visibility
+                    .clone()
+                    .unwrap_or_else(|| "public".to_string()),
                 local_complexity: complexity.map(|row| row.score).unwrap_or(0.0),
-                complexity_signals: complexity.map(|row| row.signals.clone()).unwrap_or_default(),
+                complexity_signals: complexity
+                    .map(|row| row.signals.clone())
+                    .unwrap_or_default(),
                 params: fn_def.params.clone(),
                 raw_source,
                 normalized_source,
@@ -1363,16 +1422,20 @@ fn extract_methods(
 }
 
 fn extract_owners(document: &Document, language: &str, path: &str) -> Vec<OwnerRecord> {
-    let mut owners = document.owner_defs.iter().map(|owner| OwnerRecord {
-        id: owner_id(language, path, &owner.name, Some(owner.span)),
-        name: owner.name.clone(),
-        kind: owner.kind.clone(),
-        language: language.to_string(),
-        path: path.to_string(),
-        line: owner.line,
-        span: owner.span,
-        confidence: "high".to_string(),
-    }).collect::<Vec<_>>();
+    let mut owners = document
+        .owner_defs
+        .iter()
+        .map(|owner| OwnerRecord {
+            id: owner_id(language, path, &owner.name, Some(owner.span)),
+            name: owner.name.clone(),
+            kind: owner.kind.clone(),
+            language: language.to_string(),
+            path: path.to_string(),
+            line: owner.line,
+            span: owner.span,
+            confidence: "high".to_string(),
+        })
+        .collect::<Vec<_>>();
 
     // Some grammars attach functions to an implicit/file owner without a
     // separate owner definition. Preserve that owner instead of forcing
@@ -1396,15 +1459,37 @@ fn extract_owners(document: &Document, language: &str, path: &str) -> Vec<OwnerR
 }
 
 fn owner_span(document: &Document, owner: &str) -> Option<[usize; 4]> {
-    document.owner_defs.iter().find(|row| row.name == owner).map(|row| row.span)
+    document
+        .owner_defs
+        .iter()
+        .find(|row| row.name == owner)
+        .map(|row| row.span)
 }
 
 fn owner_id(language: &str, path: &str, owner: &str, span: Option<[usize; 4]>) -> String {
-    stable_id("owner", &[language, path, owner, &span.map(span_key).unwrap_or_default()])
+    stable_id(
+        "owner",
+        &[
+            language,
+            path,
+            owner,
+            &span.map(span_key).unwrap_or_default(),
+        ],
+    )
 }
 
 fn function_id(language: &str, path: &str, function: &syntax::FunctionDef) -> String {
-    stable_id("fn", &[language, path, &function.owner, &function.name, &function.signature, &span_key(function.span)])
+    stable_id(
+        "fn",
+        &[
+            language,
+            path,
+            &function.owner,
+            &function.name,
+            &function.signature,
+            &span_key(function.span),
+        ],
+    )
 }
 
 fn span_key(span: [usize; 4]) -> String {
@@ -1440,10 +1525,16 @@ fn source_for_span(lines: &[String], span: [usize; 4]) -> String {
     }
 
     if let Some(first) = selected.first_mut() {
-        *first = first.get(start_column.min(first.len())..).unwrap_or_default().to_string();
+        *first = first
+            .get(start_column.min(first.len())..)
+            .unwrap_or_default()
+            .to_string();
     }
     if let Some(last) = selected.last_mut() {
-        *last = last.get(..end_column.min(last.len())).unwrap_or_default().to_string();
+        *last = last
+            .get(..end_column.min(last.len()))
+            .unwrap_or_default()
+            .to_string();
     }
     selected.join("\n")
 }
@@ -1463,6 +1554,16 @@ fn method_signature(lines: &[String], fn_def: &syntax::FunctionDef, language: &s
             String::new()
         }
         "python" | "typescript" | "javascript" => source_signature_for(lines, fn_def),
+        // C and C# keep FunctionDef.signature as display text (`name (arg)`),
+        // which loses the declaration annotations required by CFG/DFG. The
+        // declaration header is the source of truth for static type facts.
+        "c" | "csharp" => get_def_header(lines, fn_def.line)
+            .split('{')
+            .next()
+            .unwrap_or_default()
+            .split_whitespace()
+            .collect::<Vec<_>>()
+            .join(" "),
         _ => {
             let params = fn_def.params.join(", ");
             if params.is_empty() {
@@ -1592,7 +1693,12 @@ fn extract_fields(document: &Document, language: &str, path: &str) -> Vec<FieldR
             language: language.to_string(),
             path: path.to_string(),
             owner: state.owner.clone(),
-            owner_id: owner_id(language, path, &state.owner, owner_span(document, &state.owner)),
+            owner_id: owner_id(
+                language,
+                path,
+                &state.owner,
+                owner_span(document, &state.owner),
+            ),
             name,
             line: state.line,
             span: Some(state.span),
@@ -1644,7 +1750,12 @@ fn extract_fields(document: &Document, language: &str, path: &str) -> Vec<FieldR
             language: language.to_string(),
             path: path.to_string(),
             owner: write.owner.clone(),
-            owner_id: owner_id(language, path, &write.owner, owner_span(document, &write.owner)),
+            owner_id: owner_id(
+                language,
+                path,
+                &write.owner,
+                owner_span(document, &write.owner),
+            ),
             name,
             line: write.line,
             span: Some(write.span),
@@ -1882,14 +1993,17 @@ fn extract_type_definitions(
         }
 
         let return_type_expr = return_type.map(|t| TypeExpr::parse(&t, language));
-        let params_json: Vec<serde_json::Value> = params.into_iter().map(|p| {
-            let p_name = p.get("name").cloned().unwrap_or_default();
-            let p_type_str = p.get("type").cloned().unwrap_or_default();
-            json!({
-                "name": p_name,
-                "type": TypeExpr::parse(&p_type_str, language)
+        let params_json: Vec<serde_json::Value> = params
+            .into_iter()
+            .map(|p| {
+                let p_name = p.get("name").cloned().unwrap_or_default();
+                let p_type_str = p.get("type").cloned().unwrap_or_default();
+                json!({
+                    "name": p_name,
+                    "type": TypeExpr::parse(&p_type_str, language)
+                })
             })
-        }).collect();
+            .collect();
 
         let mut clean_name = fn_def.name.clone();
         if clean_name.starts_with("self.") {
@@ -2044,6 +2158,7 @@ impl SignatureParser {
             "ruby" => parse_sorbet_signature(sig),
             "python" => parse_python_signature(sig),
             "typescript" | "javascript" => parse_typescript_signature(sig),
+            "c" | "cpp" | "csharp" | "java" => parse_c_family_signature(sig),
             _ => parse_generic_signature(sig),
         }
     }
@@ -2313,6 +2428,47 @@ fn parse_generic_signature(sig: &str) -> (Option<String>, Vec<BTreeMap<String, S
         })
         .collect();
 
+    (return_type, params)
+}
+
+fn parse_c_family_signature(sig: &str) -> (Option<String>, Vec<BTreeMap<String, String>>) {
+    let (mut return_type, params) = parse_generic_signature(sig);
+    if return_type.is_some() {
+        return (return_type, params);
+    }
+
+    let Some(paren_open) = sig.find('(') else {
+        return (None, params);
+    };
+    let prefix = sig[..paren_open].trim();
+    let mut words = prefix.split_whitespace().collect::<Vec<_>>();
+    let _method_name = words.pop();
+    while words.first().is_some_and(|word| {
+        matches!(
+            *word,
+            "public"
+                | "private"
+                | "protected"
+                | "internal"
+                | "static"
+                | "virtual"
+                | "override"
+                | "abstract"
+                | "sealed"
+                | "partial"
+                | "async"
+                | "extern"
+                | "unsafe"
+                | "readonly"
+                | "inline"
+                | "const"
+        )
+    }) {
+        words.remove(0);
+    }
+    if !words.is_empty() {
+        return_type = Some(words.join(" "));
+    }
     (return_type, params)
 }
 
@@ -2990,96 +3146,145 @@ fn source_function_id(
     function: &str,
     line: usize,
 ) -> String {
-    let candidates = document.function_defs.iter().filter(|row| {
-        row.owner == owner && row.name == function
-    }).collect::<Vec<_>>();
-    let selected = candidates.iter().copied().find(|row| {
-        row.span[0] <= line && line <= row.span[2]
-    }).or_else(|| candidates.first().copied());
-    selected.map(|row| function_id(language, path, row)).unwrap_or_else(|| {
-        stable_id("fn", &[language, path, owner, function])
-    })
+    let candidates = document
+        .function_defs
+        .iter()
+        .filter(|row| row.owner == owner && row.name == function)
+        .collect::<Vec<_>>();
+    let selected = candidates
+        .iter()
+        .copied()
+        .find(|row| row.span[0] <= line && line <= row.span[2])
+        .or_else(|| candidates.first().copied());
+    selected
+        .map(|row| function_id(language, path, row))
+        .unwrap_or_else(|| stable_id("fn", &[language, path, owner, function]))
 }
 
 fn extract_calls(document: &Document, language: &str, path: &str) -> Vec<CallRecord> {
     let behavior = crate::syntax::normalized_behavior::behavior(document.language);
-    document.call_sites.iter().map(|call| {
-        let intrinsic = behavior.intrinsic_call_complexity(
-            (!call.receiver.is_empty()).then_some(call.receiver.as_str()),
-            &call.message,
-        );
-        let source = source_function_id(
-            document, language, path, &call.owner, &call.function, call.line,
-        );
-        let implicit = call.receiver.is_empty() || call.receiver == "self" || call.receiver == "this";
-        let target_def = implicit.then(|| {
-            document.function_defs.iter().find(|row| {
-                row.owner == call.owner && row.name == call.message
-            })
-        }).flatten();
-        let target = target_def.map(|row| function_id(language, path, row));
-        let state_receiver = document.state_declarations.iter().any(|row| {
-            call.receiver == row.field
-                || call.receiver.trim_start_matches('@') == row.field.trim_start_matches('@')
-                || call.receiver.strip_prefix("self.") == Some(row.field.trim_start_matches('@'))
-                || call.receiver.strip_prefix("this.") == Some(row.field.trim_start_matches('@'))
-        });
-        let kind = if target.is_some() {
-            "internal_call"
-        } else if state_receiver {
-            "delegation"
-        } else if implicit {
-            "unresolved_call"
-        } else {
-            "external_call"
-        };
-        let unresolved_reason = if target.is_some() {
-            None
-        } else if state_receiver {
-            Some("state_receiver_requires_corpus_resolution".to_string())
-        } else if implicit {
-            Some("target_not_defined_in_document".to_string())
-        } else {
-            Some("receiver_requires_corpus_resolution".to_string())
-        };
-        CallRecord {
-            id: stable_id("edge", &[&source, path, &span_key(call.span), kind, &call.message]),
-            source,
-            target,
-            kind: kind.to_string(),
-            owner: call.owner.clone(),
-            function: call.function.clone(),
-            receiver: call.receiver.clone(),
-            receiver_kind: if behavior.receiver_is_type_reference(&call.receiver) {
-                "type"
+    document
+        .call_sites
+        .iter()
+        .map(|call| {
+            let intrinsic = behavior.intrinsic_call_complexity(
+                (!call.receiver.is_empty()).then_some(call.receiver.as_str()),
+                &call.message,
+            );
+            let source = source_function_id(
+                document,
+                language,
+                path,
+                &call.owner,
+                &call.function,
+                call.line,
+            );
+            let implicit =
+                call.receiver.is_empty() || call.receiver == "self" || call.receiver == "this";
+            let target_def = implicit
+                .then(|| {
+                    document
+                        .function_defs
+                        .iter()
+                        .find(|row| row.owner == call.owner && row.name == call.message)
+                })
+                .flatten();
+            let target = target_def.map(|row| function_id(language, path, row));
+            let state_receiver = document.state_declarations.iter().any(|row| {
+                call.receiver == row.field
+                    || call.receiver.trim_start_matches('@') == row.field.trim_start_matches('@')
+                    || call.receiver.strip_prefix("self.")
+                        == Some(row.field.trim_start_matches('@'))
+                    || call.receiver.strip_prefix("this.")
+                        == Some(row.field.trim_start_matches('@'))
+            });
+            let kind = if target.is_some() {
+                "internal_call"
+            } else if state_receiver {
+                "delegation"
+            } else if implicit {
+                "unresolved_call"
             } else {
-                "value"
-            }.to_string(),
-            constructor_target: behavior.constructor_dispatch_name(&call.receiver, &call.message),
-            known_time_complexity: intrinsic.map(|cost| cost.time.to_string()),
-            known_space_complexity: intrinsic.map(|cost| cost.space.to_string()),
-            message: call.message.clone(),
-            path: path.to_string(),
-            line: call.line,
-            span: call.span,
-            conditional: call.conditional,
-            confidence: if kind == "internal_call" { "high" } else { "partial" }.to_string(),
-            unresolved_reason,
-        }
-    }).collect()
+                "external_call"
+            };
+            let unresolved_reason = if target.is_some() {
+                None
+            } else if state_receiver {
+                Some("state_receiver_requires_corpus_resolution".to_string())
+            } else if implicit {
+                Some("target_not_defined_in_document".to_string())
+            } else {
+                Some("receiver_requires_corpus_resolution".to_string())
+            };
+            CallRecord {
+                id: stable_id(
+                    "edge",
+                    &[&source, path, &span_key(call.span), kind, &call.message],
+                ),
+                source,
+                target,
+                kind: kind.to_string(),
+                owner: call.owner.clone(),
+                function: call.function.clone(),
+                receiver: call.receiver.clone(),
+                receiver_kind: if behavior.receiver_is_type_reference(&call.receiver) {
+                    "type"
+                } else {
+                    "value"
+                }
+                .to_string(),
+                constructor_target: behavior
+                    .constructor_dispatch_name(&call.receiver, &call.message),
+                known_time_complexity: intrinsic.map(|cost| cost.time.to_string()),
+                known_space_complexity: intrinsic.map(|cost| cost.space.to_string()),
+                message: call.message.clone(),
+                path: path.to_string(),
+                line: call.line,
+                span: call.span,
+                conditional: call.conditional,
+                confidence: if kind == "internal_call" {
+                    "high"
+                } else {
+                    "partial"
+                }
+                .to_string(),
+                unresolved_reason,
+            }
+        })
+        .collect()
 }
 
-fn extract_state_accesses(document: &Document, language: &str, path: &str) -> Vec<StateAccessRecord> {
+fn extract_state_accesses(
+    document: &Document,
+    language: &str,
+    path: &str,
+) -> Vec<StateAccessRecord> {
     let reads = document.state_reads.iter().map(|row| {
         state_access_record(
-            document, language, path, &row.owner, &row.function, &row.field,
-            &row.receiver, "reads", row.line, row.span,
+            document,
+            language,
+            path,
+            &row.owner,
+            &row.function,
+            &row.field,
+            &row.receiver,
+            "reads",
+            row.line,
+            row.span,
         )
     });
     let writes = document.state_writes.iter().map(|row| {
         state_access_record(
-            document, language, path, &row.owner, &row.function, &row.field,
-            &row.receiver, "writes", row.line, row.span,
+            document,
+            language,
+            path,
+            &row.owner,
+            &row.function,
+            &row.field,
+            &row.receiver,
+            "writes",
+            row.line,
+            row.span,
         )
     });
     reads.chain(writes).collect()
@@ -3101,7 +3306,10 @@ fn state_access_record(
     let function_id = source_function_id(document, language, path, owner, function, line);
     let state_id = field_id(language, path, owner, field);
     StateAccessRecord {
-        id: stable_id("edge", &[&function_id, &state_id, kind, path, &span_key(span)]),
+        id: stable_id(
+            "edge",
+            &[&function_id, &state_id, kind, path, &span_key(span)],
+        ),
         function_id,
         state_id,
         owner: owner.to_string(),
@@ -3167,6 +3375,7 @@ pub(crate) mod tests {
                 file: "test.rb".to_string(),
                 name: "Greeter".to_string(),
                 kind: "class".to_string(),
+                reopenable: false,
                 line: 1,
                 span: [1, 0, 1, 16],
             }],
@@ -3262,9 +3471,7 @@ pub(crate) mod tests {
         let output = extract(&doc, Profile::Espalier);
         assert_eq!(output.state_types.len(), 1);
         assert_eq!(
-            output
-                .state_types
-                .get("Greeter\u{0}@name"),
+            output.state_types.get("Greeter\u{0}@name"),
             Some(&TypeExpr::Primitive("String".to_string()))
         );
     }
@@ -3565,6 +3772,7 @@ def py_fn(a: int) -> str:
             file: file_path.clone(),
             name: "Database".to_string(),
             kind: "class".to_string(),
+            reopenable: false,
             line: 1,
             span: [1, 0, 1, 15],
         });
@@ -3614,6 +3822,7 @@ def py_fn(a: int) -> str:
         // State writes with invalid owner to cover skip branch
         doc.state_writes.push(syntax::StateWrite {
             field: "db".to_string(),
+            identity: String::new(),
             receiver: "self".to_string(),
             file: file_path.clone(),
             function: "hello".to_string(),
@@ -3915,6 +4124,29 @@ def py_fn(a: int) -> str:
         let sig_py = method_signature(&lines, &fn_def_py, "python");
         assert_eq!(sig_py, "");
 
+        let c_lines = vec!["int uv_loop_init(uv_loop_t* loop) {".to_string()];
+        let c_sig = method_signature(&c_lines, &fn_def, "c");
+        assert_eq!(c_sig, "int uv_loop_init(uv_loop_t* loop)");
+        let (c_return, c_params) = SignatureParser::parse(&c_sig, "c");
+        assert_eq!(c_return, Some("int".to_string()));
+        assert_eq!(c_params[0].get("name"), Some(&"loop".to_string()));
+        assert_eq!(c_params[0].get("type"), Some(&"uv_loop_t*".to_string()));
+
+        let csharp_lines = vec![
+            "protected virtual void FormatLiteralValue(object? value, TextWriter output)"
+                .to_string(),
+        ];
+        let csharp_sig = method_signature(&csharp_lines, &fn_def, "csharp");
+        let (csharp_return, csharp_params) = SignatureParser::parse(&csharp_sig, "csharp");
+        assert_eq!(csharp_return, Some("void".to_string()));
+        assert_eq!(csharp_params[0].get("name"), Some(&"value".to_string()));
+        assert_eq!(csharp_params[0].get("type"), Some(&"object?".to_string()));
+        assert_eq!(csharp_params[1].get("name"), Some(&"output".to_string()));
+        assert_eq!(
+            csharp_params[1].get("type"),
+            Some(&"TextWriter".to_string())
+        );
+
         // 5. collect_braced_block with close brace before open brace
         let lines_braced = vec!["}".to_string()];
         assert!(collect_braced_block(&lines_braced, 0).is_none());
@@ -4095,22 +4327,47 @@ def py_fn(a: int) -> str:
     fn merge_preserves_lossless_relationships() {
         let mut output = ProfileOutput::default();
         output.calls.push(CallRecord {
-            id: "edge:call".into(), source: "fn:a".into(), target: Some("fn:b".into()),
-            kind: "internal_call".into(), owner: "Demo".into(), function: "a".into(),
-            receiver: "self".into(), message: "b".into(), path: "demo.rb".into(), line: 2,
+            id: "edge:call".into(),
+            source: "fn:a".into(),
+            target: Some("fn:b".into()),
+            kind: "internal_call".into(),
+            owner: "Demo".into(),
+            function: "a".into(),
+            receiver: "self".into(),
+            message: "b".into(),
+            path: "demo.rb".into(),
+            line: 2,
             receiver_kind: "value".into(),
-            constructor_target: None, known_time_complexity: None, known_space_complexity: None,
-            span: [2, 0, 2, 3], conditional: false, confidence: "high".into(), unresolved_reason: None,
+            constructor_target: None,
+            known_time_complexity: None,
+            known_space_complexity: None,
+            span: [2, 0, 2, 3],
+            conditional: false,
+            confidence: "high".into(),
+            unresolved_reason: None,
         });
         output.state_accesses.push(StateAccessRecord {
-            id: "edge:state".into(), function_id: "fn:a".into(), state_id: "state:x".into(),
-            owner: "Demo".into(), function: "a".into(), field: "x".into(), receiver: "self".into(),
-            kind: "writes".into(), path: "demo.rb".into(), line: 3, span: [3, 0, 3, 1],
-            conditional: false, confidence: "high".into(),
+            id: "edge:state".into(),
+            function_id: "fn:a".into(),
+            state_id: "state:x".into(),
+            owner: "Demo".into(),
+            function: "a".into(),
+            field: "x".into(),
+            receiver: "self".into(),
+            kind: "writes".into(),
+            path: "demo.rb".into(),
+            line: 3,
+            span: [3, 0, 3, 1],
+            conditional: false,
+            confidence: "high".into(),
         });
         output.call_graph_edges.push(CallGraphEdge {
-            source: "fn:a".into(), target: "fn:b".into(), kind: "internal_call".into(),
-            label: "internal".into(), conditional: false, weight: 1,
+            source: "fn:a".into(),
+            target: "fn:b".into(),
+            kind: "internal_call".into(),
+            label: "internal".into(),
+            conditional: false,
+            weight: 1,
         });
         let merged = merge(vec![output], Profile::Espalier);
         assert_eq!(merged.calls.len(), 1);
@@ -4240,7 +4497,14 @@ pub(crate) fn child_nodes(node: &crate::ast::Node) -> Vec<&crate::ast::Node> {
 
 pub(crate) fn call_arguments<'a>(args_node: &'a crate::ast::Node) -> Vec<&'a crate::ast::Node> {
     let t = args_node.r#type.as_str();
-    if t == "argument_list" || t == "arguments" || t == "parenthesized_arguments" || t == "ARGUMENTS" || t == "ARGUMENT_LIST" || t == "LIST" || t == "list" {
+    if t == "argument_list"
+        || t == "arguments"
+        || t == "parenthesized_arguments"
+        || t == "ARGUMENTS"
+        || t == "ARGUMENT_LIST"
+        || t == "LIST"
+        || t == "list"
+    {
         child_nodes(args_node)
     } else if t.is_empty() {
         vec![]
@@ -4383,7 +4647,9 @@ impl<'a> StateParamVisitor<'a> {
                         final_func_name, owner, node.first_lineno
                     );
                     if let Some(fn_def) = self.document.function_defs.iter().find(|fd| {
-                        (fd.name == final_func_name || (node.r#type == "DEFS" && fd.name == format!("self.{}", final_func_name)))
+                        (fd.name == final_func_name
+                            || (node.r#type == "DEFS"
+                                && fd.name == format!("self.{}", final_func_name)))
                             && (fd.line == node.first_lineno || fd.owner == owner)
                     }) {
                         let old_alias = self.current_receiver_alias.clone();

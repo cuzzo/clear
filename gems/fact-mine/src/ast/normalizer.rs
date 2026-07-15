@@ -4,7 +4,7 @@ use super::{
     exact_bare_identifier_text, exact_integer_text, identifier_kind_name, integer_text, kind_type,
     list_or_nil, literal_symbol_arguments, node, node_text, operator_assignment_statement_operator,
     optional_node, return_kind, return_statement_kind, span, Child, Node, Span, TernaryParts,
-    BINARY_WRAPPER_KINDS, COMPARISON_OPERATORS, OPERATOR_CALL_OPERATORS,
+    COMPARISON_OPERATORS, OPERATOR_CALL_OPERATORS,
 };
 use crate::syntax::Language;
 use std::collections::BTreeSet;
@@ -189,6 +189,14 @@ impl<'source> TreeSitterNormalizer<'source> {
         }
         if let Some(name) = self
             .normalization_adapter
+            .direct_state_identifier(node, self.source)
+        {
+            if !self.dynamic_local_name(&name) {
+                return Some(self.wrap("IVAR", vec![Child::String(name)], node));
+            }
+        }
+        if let Some(name) = self
+            .normalization_adapter
             .local_identifier_text(node, self.source)
         {
             return Some(self.normalize_identifier_with_name(node, name));
@@ -256,18 +264,30 @@ impl<'source> TreeSitterNormalizer<'source> {
         if self.normalization_adapter.check_node_role(node, "yield") {
             return Some(self.normalize_yield(node));
         }
-        if self.normalization_adapter.check_node_role(node, "operator_assignment") {
+        if self
+            .normalization_adapter
+            .check_node_role(node, "operator_assignment")
+        {
             return self.normalize_operator_assignment(node);
         }
-        if self.normalization_adapter.check_node_role(node, "assignment") {
+        if self
+            .normalization_adapter
+            .check_node_role(node, "assignment")
+        {
             return self.normalize_assignment(node);
         }
-        if self.normalization_adapter.check_node_role(node, "variable_declarator") {
+        if self
+            .normalization_adapter
+            .check_node_role(node, "variable_declarator")
+        {
             if !self.has_assignment_operator_child(node) {
                 return Some(self.wrap(&kind_type(node.kind()), Vec::new(), node));
             }
         }
-        if self.normalization_adapter.check_node_role(node, "expression_list") {
+        if self
+            .normalization_adapter
+            .check_node_role(node, "expression_list")
+        {
             if self.single_short_var_lhs(node) {
                 return Some(self.wrap(&kind_type(node.kind()), Vec::new(), node));
             }
@@ -285,13 +305,19 @@ impl<'source> TreeSitterNormalizer<'source> {
                 .next()
                 .and_then(|child| self.normalize_node(child));
         }
-        if self.normalization_adapter.check_node_role(node, "element_reference") {
+        if self
+            .normalization_adapter
+            .check_node_role(node, "element_reference")
+        {
             return self.normalize_element_reference(node);
         }
         if self.normalization_adapter.check_node_role(node, "super") {
             return Some(self.normalize_super(node));
         }
-        if self.normalization_adapter.check_node_role(node, "return_or_break") {
+        if self
+            .normalization_adapter
+            .check_node_role(node, "return_or_break")
+        {
             return self.normalize_return(node);
         }
         if self.normalization_adapter.check_node_role(node, "nil") {
@@ -303,13 +329,19 @@ impl<'source> TreeSitterNormalizer<'source> {
         if self.normalization_adapter.check_node_role(node, "false") {
             return Some(self.wrap("FALSE", Vec::new(), node));
         }
-        if self.normalization_adapter.check_node_role(node, "identifier") {
+        if self
+            .normalization_adapter
+            .check_node_role(node, "identifier")
+        {
             return Some(self.normalize_identifier(node));
         }
         if self.normalization_adapter.check_node_role(node, "constant") {
             return Some(self.normalize_const(node));
         }
-        if self.normalization_adapter.check_node_role(node, "self_or_this") {
+        if self
+            .normalization_adapter
+            .check_node_role(node, "self_or_this")
+        {
             return Some(self.wrap("SELF", Vec::new(), node));
         }
         if self.normalization_adapter.check_node_role(node, "array") {
@@ -374,7 +406,12 @@ impl<'source> TreeSitterNormalizer<'source> {
         let body = self.with_dynamic_scope(node, true, |normalizer| {
             let body_node = normalizer
                 .named_field(node, "body")
-                .or_else(|| normalizer.block_child(node))?;
+                .or_else(|| normalizer.block_child(node))
+                .or_else(|| {
+                    normalizer
+                        .normalization_adapter
+                        .function_body(node, normalizer.source)
+                })?;
             let body = normalizer.normalize_body(body_node);
             let body = normalizer.elide_tail_returns(body);
             let body = normalizer.prepend_inline_parameter_begin(node, body);
@@ -575,10 +612,10 @@ impl<'source> TreeSitterNormalizer<'source> {
     }
 
     pub(in crate::ast) fn normalize_yield(&mut self, node: TreeSitterNode<'_>) -> Node {
-        let args_node = self
-            .named_children(node)
-            .into_iter()
-            .find(|child| self.normalization_adapter.check_node_role(*child, "argument_list"));
+        let args_node = self.named_children(node).into_iter().find(|child| {
+            self.normalization_adapter
+                .check_node_role(*child, "argument_list")
+        });
         let args = args_node
             .map(|args| self.yield_argument_nodes(args))
             .unwrap_or_else(|| self.yield_inline_arguments(node));
@@ -590,10 +627,10 @@ impl<'source> TreeSitterNormalizer<'source> {
     }
 
     pub(in crate::ast) fn normalize_yield_statement(&mut self, node: TreeSitterNode<'_>) -> Node {
-        let args_node = self
-            .named_children(node)
-            .into_iter()
-            .find(|child| self.normalization_adapter.check_node_role(*child, "argument_list"));
+        let args_node = self.named_children(node).into_iter().find(|child| {
+            self.normalization_adapter
+                .check_node_role(*child, "argument_list")
+        });
         let args = args_node
             .map(|args| self.yield_argument_nodes(args))
             .unwrap_or_else(|| self.yield_inline_arguments(node));
@@ -615,14 +652,16 @@ impl<'source> TreeSitterNormalizer<'source> {
 
     pub(in crate::ast) fn normalize_super_statement(&mut self, node: TreeSitterNode<'_>) -> Node {
         let raw = self.raw_named_children(node);
-        let children = if raw.len() == 1 && self.normalization_adapter.check_node_role(raw[0], "call") {
-            self.raw_named_children(raw[0])
-        } else {
-            raw
-        };
-        let args_node = children
-            .into_iter()
-            .find(|child| self.normalization_adapter.check_node_role(*child, "argument_list"));
+        let children =
+            if raw.len() == 1 && self.normalization_adapter.check_node_role(raw[0], "call") {
+                self.raw_named_children(raw[0])
+            } else {
+                raw
+            };
+        let args_node = children.into_iter().find(|child| {
+            self.normalization_adapter
+                .check_node_role(*child, "argument_list")
+        });
         let args = args_node
             .map(|args| self.yield_argument_nodes(args))
             .unwrap_or_default();
@@ -897,7 +936,11 @@ impl<'source> TreeSitterNormalizer<'source> {
             .into_iter()
             .filter(|child| child.kind() != "comment")
             .collect::<Vec<_>>();
-        if statements.len() != 1 || !self.normalization_adapter.check_node_role(statements[0], "if_statement") {
+        if statements.len() != 1
+            || !self
+                .normalization_adapter
+                .check_node_role(statements[0], "if_statement")
+        {
             return None;
         }
         let if_node = statements[0];
@@ -958,7 +1001,8 @@ impl<'source> TreeSitterNormalizer<'source> {
                 self.raw_named_children(node)
                     .into_iter()
                     .filter(|child| {
-                        self.normalization_adapter.is_pattern_node_kind(child.kind())
+                        self.normalization_adapter
+                            .is_pattern_node_kind(child.kind())
                     })
                     .collect::<Vec<_>>()
             });
@@ -980,7 +1024,9 @@ impl<'source> TreeSitterNormalizer<'source> {
         let mut normalized = Vec::new();
         for pattern in patterns {
             let pattern_text = node_text(pattern, self.source).to_string();
-            let pattern_wrapper = self.normalization_adapter.is_pattern_wrapper_kind(pattern.kind());
+            let pattern_wrapper = self
+                .normalization_adapter
+                .is_pattern_wrapper_kind(pattern.kind());
             let pattern_children = self.named_children(pattern);
             if pattern_text.contains("::") {
                 normalized.push(self.wrap("CONST", vec![Child::Symbol(pattern_text)], pattern));
@@ -1038,7 +1084,9 @@ impl<'source> TreeSitterNormalizer<'source> {
         if self
             .normalization_adapter
             .case_else_arm(else_node, self.source)
-            || self.normalization_adapter.check_node_role(else_node, "switch_default")
+            || self
+                .normalization_adapter
+                .check_node_role(else_node, "switch_default")
         {
             if let Some(body_nodes) = self
                 .normalization_adapter
@@ -1090,10 +1138,10 @@ impl<'source> TreeSitterNormalizer<'source> {
     }
 
     pub(in crate::ast) fn normalize_super(&mut self, node: TreeSitterNode<'_>) -> Node {
-        let args_node = self
-            .named_children(node)
-            .into_iter()
-            .find(|child| self.normalization_adapter.check_node_role(*child, "argument_list"));
+        let args_node = self.named_children(node).into_iter().find(|child| {
+            self.normalization_adapter
+                .check_node_role(*child, "argument_list")
+        });
         let args = args_node
             .map(|args| {
                 self.named_children(args)
@@ -1141,7 +1189,8 @@ impl<'source> TreeSitterNormalizer<'source> {
     }
 
     pub(in crate::ast) fn wrapped_return_statement(&self, node: TreeSitterNode<'_>) -> bool {
-        self.normalization_adapter.wrapped_return_block_kind(node.kind())
+        self.normalization_adapter
+            .wrapped_return_block_kind(node.kind())
             && !node_text(node, self.source).contains('\n')
             && node
                 .children(&mut node.walk())
@@ -1178,7 +1227,10 @@ impl<'source> TreeSitterNormalizer<'source> {
         &mut self,
         node: TreeSitterNode<'_>,
     ) -> Option<Node> {
-        if !self.normalization_adapter.check_node_role(node, "argument_list") {
+        if !self
+            .normalization_adapter
+            .check_node_role(node, "argument_list")
+        {
             return self.normalize_node(node);
         }
         if self.named_children(node).is_empty() {
@@ -1218,10 +1270,10 @@ impl<'source> TreeSitterNormalizer<'source> {
             }
         }
         if let (Some(function), Some(nested_args)) = (children.first(), children.get(1)) {
-            if let Some(function_name) = self
-                .identifier_text(*function)
-                .filter(|_| self.normalization_adapter.check_node_role(*nested_args, "argument_list"))
-            {
+            if let Some(function_name) = self.identifier_text(*function).filter(|_| {
+                self.normalization_adapter
+                    .check_node_role(*nested_args, "argument_list")
+            }) {
                 let args = self
                     .named_children(*nested_args)
                     .into_iter()
@@ -1272,9 +1324,10 @@ impl<'source> TreeSitterNormalizer<'source> {
             .named_field(node, "arguments")
             .or_else(|| self.named_field(node, "argument"))
             .or_else(|| {
-                self.named_children(node)
-                    .into_iter()
-                    .find(|child| self.normalization_adapter.check_node_role(*child, "argument_list"))
+                self.named_children(node).into_iter().find(|child| {
+                    self.normalization_adapter
+                        .check_node_role(*child, "argument_list")
+                })
             });
         let args = args_node
             .map(|args_node| {
@@ -1338,7 +1391,10 @@ impl<'source> TreeSitterNormalizer<'source> {
     ) -> Option<Node> {
         let raw_named = self.raw_named_children(node);
         let target = if raw_named.len() == 1
-            && self.normalization_adapter.binary_wrapper_kinds().contains(&raw_named[0].kind())
+            && self
+                .normalization_adapter
+                .binary_wrapper_kinds()
+                .contains(&raw_named[0].kind())
             && node_text(node, self.source) == node_text(raw_named[0], self.source)
         {
             raw_named[0]
@@ -1489,7 +1545,10 @@ impl<'source> TreeSitterNormalizer<'source> {
             node
         };
         let operand = self.named_children(target).into_iter().next()?;
-        if self.normalization_adapter.check_node_role(operand, "integer") {
+        if self
+            .normalization_adapter
+            .check_node_role(operand, "integer")
+        {
             if let Ok(value) = node_text(operand, self.source).parse::<i64>() {
                 return Some(self.wrap("INTEGER", vec![Child::Integer(-value)], operand));
             }
@@ -1554,7 +1613,10 @@ impl<'source> TreeSitterNormalizer<'source> {
         let right = self
             .assignment_right(node)
             .and_then(|right| self.normalize_node(right));
-        if self.normalization_adapter.check_node_role(left, "multiple_assignment_left") {
+        if self
+            .normalization_adapter
+            .check_node_role(left, "multiple_assignment_left")
+        {
             return Some(self.normalize_multiple_assignment(left, right, node));
         }
         if let Some(target) = self.assignment_target(left, right.clone(), node) {
@@ -1576,7 +1638,10 @@ impl<'source> TreeSitterNormalizer<'source> {
         let right = right_raw.and_then(|right| self.normalize_node(right));
         let operator = self.operator_assignment_operator(node);
 
-        if self.normalization_adapter.check_node_role(left, "element_reference") {
+        if self
+            .normalization_adapter
+            .check_node_role(left, "element_reference")
+        {
             let named = self.named_children(left);
             let receiver = *named.first()?;
             let args = named
@@ -1645,7 +1710,10 @@ impl<'source> TreeSitterNormalizer<'source> {
         let (left, operator, right_raw) = self.operator_assignment_statement_parts(node)?;
         let right = self.normalize_node(right_raw);
 
-        if self.normalization_adapter.check_node_role(left, "element_reference") {
+        if self
+            .normalization_adapter
+            .check_node_role(left, "element_reference")
+        {
             let named = self.named_children(left);
             let receiver = *named.first()?;
             let args = named
@@ -1746,7 +1814,10 @@ impl<'source> TreeSitterNormalizer<'source> {
     }
 
     pub(in crate::ast) fn operator_assignment_statement(&self, node: TreeSitterNode<'_>) -> bool {
-        if !self.normalization_adapter.check_node_role(node, "block_wrapper") {
+        if !self
+            .normalization_adapter
+            .check_node_role(node, "block_wrapper")
+        {
             return false;
         }
         if self.operator_assignment_statement_parts(node).is_some() {
@@ -1946,13 +2017,19 @@ impl<'source> TreeSitterNormalizer<'source> {
         &mut self,
         node: TreeSitterNode<'_>,
     ) -> Option<Node> {
-        if !self.dynamic_syntax_enabled() || !self.normalization_adapter.check_node_role(node, "argument_list") {
+        if !self.dynamic_syntax_enabled()
+            || !self
+                .normalization_adapter
+                .check_node_role(node, "argument_list")
+        {
             return None;
         }
         let target = {
             let raw_named = self.raw_named_children(node);
             if raw_named.len() == 1
-                && self.normalization_adapter.check_node_role(raw_named[0], "call")
+                && self
+                    .normalization_adapter
+                    .check_node_role(raw_named[0], "call")
                 && node_text(raw_named[0], self.source) == node_text(node, self.source)
             {
                 raw_named[0]
@@ -1961,10 +2038,10 @@ impl<'source> TreeSitterNormalizer<'source> {
             }
         };
         let function = self.named_children(target).into_iter().next()?;
-        let args_node = self
-            .named_children(target)
-            .into_iter()
-            .find(|child| self.normalization_adapter.check_node_role(*child, "argument_list"));
+        let args_node = self.named_children(target).into_iter().find(|child| {
+            self.normalization_adapter
+                .check_node_role(*child, "argument_list")
+        });
         let args = args_node
             .map(|args| {
                 self.named_children(args)
@@ -1993,7 +2070,9 @@ impl<'source> TreeSitterNormalizer<'source> {
         let target = {
             let raw_named = self.raw_named_children(node);
             if raw_named.len() == 1
-                && self.normalization_adapter.check_node_role(raw_named[0], "element_reference")
+                && self
+                    .normalization_adapter
+                    .check_node_role(raw_named[0], "element_reference")
                 && node_text(raw_named[0], self.source) == node_text(node, self.source)
             {
                 raw_named[0]
@@ -2030,7 +2109,9 @@ impl<'source> TreeSitterNormalizer<'source> {
         let target = {
             let raw_named = self.raw_named_children(node);
             if raw_named.len() == 1
-                && self.normalization_adapter.check_node_role(raw_named[0], "unary")
+                && self
+                    .normalization_adapter
+                    .check_node_role(raw_named[0], "unary")
                 && node_text(raw_named[0], self.source) == node_text(node, self.source)
             {
                 raw_named[0]
@@ -2051,13 +2132,19 @@ impl<'source> TreeSitterNormalizer<'source> {
         &mut self,
         node: TreeSitterNode<'_>,
     ) -> Option<Node> {
-        if !self.dynamic_syntax_enabled() || !self.normalization_adapter.check_node_role(node, "argument_list") {
+        if !self.dynamic_syntax_enabled()
+            || !self
+                .normalization_adapter
+                .check_node_role(node, "argument_list")
+        {
             return None;
         }
         let target = {
             let raw_named = self.raw_named_children(node);
             if raw_named.len() == 1
-                && self.normalization_adapter.check_node_role(raw_named[0], "call")
+                && self
+                    .normalization_adapter
+                    .check_node_role(raw_named[0], "call")
                 && node_text(raw_named[0], self.source) == node_text(node, self.source)
             {
                 raw_named[0]
@@ -2465,7 +2552,9 @@ impl<'source> TreeSitterNormalizer<'source> {
         let exception_nodes = exceptions
             .iter()
             .filter_map(|child| {
-                if self.normalization_adapter.check_node_role(*child, "exceptions")
+                if self
+                    .normalization_adapter
+                    .check_node_role(*child, "exceptions")
                     && self
                         .normalization_adapter
                         .dynamic_exception_constant_text(node_text(*child, self.source))
@@ -2616,9 +2705,13 @@ impl<'source> TreeSitterNormalizer<'source> {
         node: TreeSitterNode<'_>,
     ) -> Option<Node> {
         let raw_named = self.raw_named_children(node);
-        let target = if self.normalization_adapter.is_command_call_wrapper_kind(node.kind())
+        let target = if self
+            .normalization_adapter
+            .is_command_call_wrapper_kind(node.kind())
             && raw_named.len() == 1
-            && self.normalization_adapter.check_node_role(raw_named[0], "call")
+            && self
+                .normalization_adapter
+                .check_node_role(raw_named[0], "call")
             && node_text(node, self.source) == node_text(raw_named[0], self.source)
         {
             raw_named[0]
@@ -2637,10 +2730,10 @@ impl<'source> TreeSitterNormalizer<'source> {
                 node,
             ));
         }
-        let args_node = self
-            .named_children(target)
-            .into_iter()
-            .find(|child| self.normalization_adapter.check_node_role(*child, "argument_list"));
+        let args_node = self.named_children(target).into_iter().find(|child| {
+            self.normalization_adapter
+                .check_node_role(*child, "argument_list")
+        });
         let args = args_node
             .map(|args| self.command_arguments(args))
             .unwrap_or_default();
@@ -2693,10 +2786,10 @@ impl<'source> TreeSitterNormalizer<'source> {
     ) -> Option<Node> {
         let message =
             node_text(self.named_children(node).into_iter().next()?, self.source).to_string();
-        let args = self
-            .named_children(node)
-            .into_iter()
-            .find(|child| self.normalization_adapter.check_node_role(*child, "argument_list"));
+        let args = self.named_children(node).into_iter().find(|child| {
+            self.normalization_adapter
+                .check_node_role(*child, "argument_list")
+        });
         let method = self.inline_def_from_argument_list(args);
         Some(self.wrap(
             "FCALL",
@@ -2709,7 +2802,10 @@ impl<'source> TreeSitterNormalizer<'source> {
     }
 
     pub(in crate::ast) fn normalize_const(&mut self, node: TreeSitterNode<'_>) -> Node {
-        if self.normalization_adapter.check_node_role(node, "scope_resolution_or_scoped_type") {
+        if self
+            .normalization_adapter
+            .check_node_role(node, "scope_resolution_or_scoped_type")
+        {
             let parts = self.named_children(node);
             let base = parts
                 .first()
@@ -2884,7 +2980,9 @@ impl<'source> TreeSitterNormalizer<'source> {
         &mut self,
         node: TreeSitterNode<'_>,
     ) -> Option<Node> {
-        if self.normalization_adapter.check_node_role(node, "field") || self.normalization_adapter.check_node_role(node, "pair") {
+        if self.normalization_adapter.check_node_role(node, "field")
+            || self.normalization_adapter.check_node_role(node, "pair")
+        {
             let named = self.named_children(node);
             if named.len() >= 2 {
                 let key = named[0];
@@ -2926,7 +3024,8 @@ impl<'source> TreeSitterNormalizer<'source> {
     }
 
     pub(in crate::ast) fn terminal_statement(&self, node: TreeSitterNode<'_>) -> bool {
-        self.normalization_adapter.is_terminal_statement_kind(node.kind())
+        self.normalization_adapter
+            .is_terminal_statement_kind(node.kind())
             && self.named_children(node).is_empty()
             && !node_text(node, self.source).trim().is_empty()
     }
@@ -3009,7 +3108,12 @@ impl<'source> TreeSitterNormalizer<'source> {
 
         let key_text = node_text(key, self.source);
         let key_lit = self.wrap("LIT", vec![Child::Symbol(key_text.to_string())], key);
-        if self.dynamic_syntax_enabled() && self.normalization_adapter.check_node_role(key, "hash_key_symbol") && value_raw.is_none() {
+        if self.dynamic_syntax_enabled()
+            && self
+                .normalization_adapter
+                .check_node_role(key, "hash_key_symbol")
+            && value_raw.is_none()
+        {
             let value = self.local_or_call_for_name(key_text, key);
             return Some(self.wrap(
                 "HASH",
@@ -3053,7 +3157,10 @@ impl<'source> TreeSitterNormalizer<'source> {
                 if self.normalization_adapter.interpolation_node(child) {
                     self.normalize_interpolation(child)
                         .map(|node| Child::Node(Box::new(node)))
-                } else if self.normalization_adapter.check_node_role(child, "string_content") {
+                } else if self
+                    .normalization_adapter
+                    .check_node_role(child, "string_content")
+                {
                     Some(Child::Node(Box::new(self.wrap(
                         "STR",
                         vec![Child::String(node_text(child, self.source).to_string())],
@@ -3379,7 +3486,10 @@ impl<'source> TreeSitterNormalizer<'source> {
     }
 
     pub(in crate::ast) fn parameter_name(&self, param: TreeSitterNode<'_>) -> Option<String> {
-        if self.normalization_adapter.is_parameter_name_kind(param.kind()) {
+        if self
+            .normalization_adapter
+            .is_parameter_name_kind(param.kind())
+        {
             if let Some(name) = self.identifier_text(param) {
                 return Some(name);
             }
@@ -3397,7 +3507,10 @@ impl<'source> TreeSitterNormalizer<'source> {
         &self,
         param: TreeSitterNode<'tree>,
     ) -> Option<TreeSitterNode<'tree>> {
-        if !self.normalization_adapter.check_node_role(param, "optional_or_keyword_parameter") {
+        if !self
+            .normalization_adapter
+            .check_node_role(param, "optional_or_keyword_parameter")
+        {
             return None;
         }
         let name = self.parameter_name(param)?;
@@ -3415,31 +3528,29 @@ impl<'source> TreeSitterNormalizer<'source> {
             return None;
         }
         let block = block?;
-        let params = self
-            .named_children(block)
-            .into_iter()
-            .find(|child| self.normalization_adapter.check_node_role(*child, "block_parameters"))?;
-let mut pre_init = Vec::new();
-for param in self.named_children(params) {
-    if self.normalization_adapter.check_node_role(param, "destructured_parameter") {
-        if let Some(node) = self.normalize_destructured_block_parameter(param) {
-            pre_init.push(Child::Node(Box::new(node)));
+        let params = self.named_children(block).into_iter().find(|child| {
+            self.normalization_adapter
+                .check_node_role(*child, "block_parameters")
+        })?;
+        let mut pre_init = Vec::new();
+        for param in self.named_children(params) {
+            if self
+                .normalization_adapter
+                .check_node_role(param, "destructured_parameter")
+            {
+                if let Some(node) = self.normalize_destructured_block_parameter(param) {
+                    pre_init.push(Child::Node(Box::new(node)));
+                }
+            } else if let Some(name) = self.parameter_name(param) {
+                let lasgn = self.wrap("LASGN", vec![Child::Symbol(name), Child::Nil], param);
+                pre_init.push(Child::Node(Box::new(lasgn)));
+            }
         }
-    } else if let Some(name) = self.parameter_name(param) {
-        let lasgn = self.wrap(
-            "LASGN",
-            vec![Child::Symbol(name), Child::Nil],
-            param,
-        );
-        pre_init.push(Child::Node(Box::new(lasgn)));
-    }
-}
-if pre_init.is_empty() {
-    None
-} else {
-    Some(self.wrap("ARGS", pre_init, params))
-}
-
+        if pre_init.is_empty() {
+            None
+        } else {
+            Some(self.wrap("ARGS", pre_init, params))
+        }
     }
 
     pub(in crate::ast) fn normalize_destructured_block_parameter(
@@ -3651,7 +3762,10 @@ if pre_init.is_empty() {
         let Some(parent) = node.parent() else {
             return false;
         };
-        if self.normalization_adapter.is_vcall_excluded_parent_kind(parent.kind()) {
+        if self
+            .normalization_adapter
+            .is_vcall_excluded_parent_kind(parent.kind())
+        {
             return false;
         }
         if self.member_read_node(parent) {
@@ -3664,8 +3778,11 @@ if pre_init.is_empty() {
             return false;
         }
 
-        if self.normalization_adapter.check_node_role(parent, "block_wrapper") || self.normalization_adapter.check_node_role(parent, "then")
-            && self.parent_named_child(parent, node)
+        if self
+            .normalization_adapter
+            .check_node_role(parent, "block_wrapper")
+            || self.normalization_adapter.check_node_role(parent, "then")
+                && self.parent_named_child(parent, node)
         {
             return true;
         }
@@ -3686,7 +3803,8 @@ if pre_init.is_empty() {
     }
 
     pub(in crate::ast) fn self_node(&self, node: TreeSitterNode<'_>) -> bool {
-        self.normalization_adapter.check_node_role(node, "self") || self.normalization_adapter.check_node_role(node, "this")
+        self.normalization_adapter.check_node_role(node, "self")
+            || self.normalization_adapter.check_node_role(node, "this")
             || matches!(node_text(node, self.source), "self" | "this")
     }
 
@@ -3711,7 +3829,10 @@ if pre_init.is_empty() {
             return false;
         }
         if let Some(parent) = node.parent() {
-            if self.normalization_adapter.check_node_role(parent, "assignment") {
+            if self
+                .normalization_adapter
+                .check_node_role(parent, "assignment")
+            {
                 if let Some(left) = self.assignment_left(parent) {
                     if self.same_ts_node(left, node) {
                         return true;
@@ -3736,7 +3857,10 @@ if pre_init.is_empty() {
         &self,
         node: TreeSitterNode<'_>,
     ) -> bool {
-        if !self.normalization_adapter.check_node_role(node, "expression_list") {
+        if !self
+            .normalization_adapter
+            .check_node_role(node, "expression_list")
+        {
             return false;
         }
 
@@ -3771,7 +3895,10 @@ if pre_init.is_empty() {
         let Some(parent) = node.parent() else {
             return false;
         };
-        if !self.normalization_adapter.check_node_role(parent, "short_var_declaration") {
+        if !self
+            .normalization_adapter
+            .check_node_role(parent, "short_var_declaration")
+        {
             return false;
         }
         if self.named_children(node).len() != 1 {
@@ -3786,13 +3913,15 @@ if pre_init.is_empty() {
 
     pub(in crate::ast) fn modifier_statement(&self, node: TreeSitterNode<'_>) -> bool {
         let named = self.named_children(node);
-        self.normalization_adapter.check_node_role(node, "block_wrapper")
+        self.normalization_adapter
+            .check_node_role(node, "block_wrapper")
             && self.modifier_keyword(node).is_some()
             && named.len() >= 2
     }
 
     pub(in crate::ast) fn modifier_return_action(&self, node: TreeSitterNode<'_>) -> bool {
-        self.normalization_adapter.check_node_role(node, "return_or_break")
+        self.normalization_adapter
+            .check_node_role(node, "return_or_break")
     }
 
     pub(in crate::ast) fn leading_if_statement(&self, node: TreeSitterNode<'_>) -> bool {
@@ -3909,14 +4038,16 @@ if pre_init.is_empty() {
             let context = match contexts.len() {
                 0 => None,
                 1 => contexts.pop(),
-                _ => Some(self.wrap(
-                    "LIST",
-                    contexts
-                        .into_iter()
-                        .map(|context| Child::Node(Box::new(context)))
-                        .collect(),
-                    node,
-                )),
+                _ => Some(
+                    self.wrap(
+                        "LIST",
+                        contexts
+                            .into_iter()
+                            .map(|context| Child::Node(Box::new(context)))
+                            .collect(),
+                        node,
+                    ),
+                ),
             };
             let body = body.and_then(|body| self.normalize_body(body));
             return Some(self.wrap(
@@ -4095,13 +4226,19 @@ if pre_init.is_empty() {
     }
 
     pub(in crate::ast) fn command_call_statement(&self, node: TreeSitterNode<'_>) -> bool {
-        if !self.normalization_adapter.is_command_call_wrapper_kind(node.kind()) || self.dotted_call(node) {
+        if !self
+            .normalization_adapter
+            .is_command_call_wrapper_kind(node.kind())
+            || self.dotted_call(node)
+        {
             return false;
         }
 
         let raw_named = self.raw_named_children(node);
         let target = if raw_named.len() == 1
-            && self.normalization_adapter.check_node_role(raw_named[0], "call")
+            && self
+                .normalization_adapter
+                .check_node_role(raw_named[0], "call")
             && node_text(node, self.source) == node_text(raw_named[0], self.source)
         {
             raw_named[0]
@@ -4113,10 +4250,10 @@ if pre_init.is_empty() {
             .first()
             .map(|child| self.identifier_kind(child.kind()))
             .unwrap_or(false)
-            && (children
-                .iter()
-                .any(|child| self.normalization_adapter.check_node_role(*child, "argument_list"))
-                || self.call_block(target).is_some())
+            && (children.iter().any(|child| {
+                self.normalization_adapter
+                    .check_node_role(*child, "argument_list")
+            }) || self.call_block(target).is_some())
     }
 
     pub(in crate::ast) fn visibility_inline_def_call(&self, node: TreeSitterNode<'_>) -> bool {
@@ -4134,7 +4271,10 @@ if pre_init.is_empty() {
         }
         self.named_children(node)
             .into_iter()
-            .find(|child| self.normalization_adapter.check_node_role(*child, "argument_list"))
+            .find(|child| {
+                self.normalization_adapter
+                    .check_node_role(*child, "argument_list")
+            })
             .map(|args| {
                 node_text(args, self.source)
                     .trim_start()
@@ -4178,7 +4318,10 @@ if pre_init.is_empty() {
         let source = self
             .named_children(target)
             .into_iter()
-            .find(|child| self.normalization_adapter.check_node_role(*child, "argument_list"))
+            .find(|child| {
+                self.normalization_adapter
+                    .check_node_role(*child, "argument_list")
+            })
             .unwrap_or(target);
         self.inline_def_from_source(source)
     }
@@ -4260,7 +4403,8 @@ if pre_init.is_empty() {
         }
 
         children.into_iter().find(|child| {
-            self.normalization_adapter.is_inline_def_receiver_kind(child.kind())
+            self.normalization_adapter
+                .is_inline_def_receiver_kind(child.kind())
         })
     }
 
@@ -4303,7 +4447,10 @@ if pre_init.is_empty() {
             .rev()
             .collect::<Vec<_>>();
         while let Some(child) = stack.pop() {
-            if self.normalization_adapter.check_node_role(child, "body_statement") {
+            if self
+                .normalization_adapter
+                .check_node_role(child, "body_statement")
+            {
                 return Some(child);
             }
             stack.extend(self.named_children(child).into_iter().rev());
@@ -4427,7 +4574,10 @@ if pre_init.is_empty() {
     }
 
     pub(in crate::ast) fn boolean_statement(&self, node: TreeSitterNode<'_>) -> bool {
-        if !self.normalization_adapter.is_boolean_statement_wrapper_kind(node.kind()) {
+        if !self
+            .normalization_adapter
+            .is_boolean_statement_wrapper_kind(node.kind())
+        {
             return false;
         }
         let named = self.named_children(node);
@@ -4479,12 +4629,18 @@ if pre_init.is_empty() {
     }
 
     pub(in crate::ast) fn regex_literal(&self, node: Option<TreeSitterNode<'_>>) -> bool {
-        node.map(|node| self.normalization_adapter.check_node_role(node, "regex_or_literal"))
-            .unwrap_or(false)
+        node.map(|node| {
+            self.normalization_adapter
+                .check_node_role(node, "regex_or_literal")
+        })
+        .unwrap_or(false)
     }
 
     pub(in crate::ast) fn argument_list_unary_not(&self, node: TreeSitterNode<'_>) -> bool {
-        if !self.normalization_adapter.check_node_role(node, "argument_list") {
+        if !self
+            .normalization_adapter
+            .check_node_role(node, "argument_list")
+        {
             return false;
         }
         let named = self.named_children(node);
@@ -4499,7 +4655,11 @@ if pre_init.is_empty() {
         }
 
         let raw_named = self.raw_named_children(node);
-        if raw_named.len() != 1 || !self.normalization_adapter.check_node_role(raw_named[0], "unary") {
+        if raw_named.len() != 1
+            || !self
+                .normalization_adapter
+                .check_node_role(raw_named[0], "unary")
+        {
             return false;
         }
         node_text(node, self.source) == node_text(raw_named[0], self.source)
@@ -4508,7 +4668,10 @@ if pre_init.is_empty() {
     }
 
     pub(in crate::ast) fn unary_not_statement(&self, node: TreeSitterNode<'_>) -> bool {
-        if !self.normalization_adapter.is_statement_wrapper_kind(node.kind()) {
+        if !self
+            .normalization_adapter
+            .is_statement_wrapper_kind(node.kind())
+        {
             return false;
         }
         let named = self.named_children(node);
@@ -4524,7 +4687,9 @@ if pre_init.is_empty() {
 
         let raw_named = self.raw_named_children(node);
         raw_named.len() == 1
-            && self.normalization_adapter.check_node_role(raw_named[0], "unary")
+            && self
+                .normalization_adapter
+                .check_node_role(raw_named[0], "unary")
             && node_text(node, self.source) == node_text(raw_named[0], self.source)
             && self.unary_not_expression(raw_named[0])
             && self.raw_named_children(raw_named[0]).len() == 1
@@ -4553,12 +4718,17 @@ if pre_init.is_empty() {
         &self,
         node: TreeSitterNode<'tree>,
     ) -> Option<(TreeSitterNode<'tree>, String, TreeSitterNode<'tree>)> {
-        if !self.normalization_adapter.is_statement_wrapper_kind(node.kind()) {
+        if !self
+            .normalization_adapter
+            .is_statement_wrapper_kind(node.kind())
+        {
             return None;
         }
         let raw_named = self.raw_named_children(node);
         let target = if raw_named.len() == 1
-            && self.normalization_adapter.is_infix_target_kind(raw_named[0].kind())
+            && self
+                .normalization_adapter
+                .is_infix_target_kind(raw_named[0].kind())
             && node_text(node, self.source) == node_text(raw_named[0], self.source)
         {
             raw_named[0]
@@ -4625,7 +4795,8 @@ if pre_init.is_empty() {
     }
 
     pub(in crate::ast) fn module_node(&self, node: TreeSitterNode<'_>) -> bool {
-        self.normalization_adapter.check_node_role(node, "module") && self.named_field(node, "name").is_some()
+        self.normalization_adapter.check_node_role(node, "module")
+            && self.named_field(node, "name").is_some()
     }
 
     pub(in crate::ast) fn interpolated_statement(&self, node: TreeSitterNode<'_>) -> bool {
@@ -4666,7 +4837,8 @@ if pre_init.is_empty() {
     }
 
     pub(in crate::ast) fn statement_call_with_block(&self, node: TreeSitterNode<'_>) -> bool {
-        self.normalization_adapter.check_node_role(node, "block_wrapper")
+        self.normalization_adapter
+            .check_node_role(node, "block_wrapper")
             && self.call_block(node).is_some()
             && self.statement_block_call(node).is_some()
     }
@@ -4697,7 +4869,10 @@ if pre_init.is_empty() {
     }
 
     pub(in crate::ast) fn yield_argument_list(&self, node: TreeSitterNode<'_>) -> bool {
-        if !self.normalization_adapter.check_node_role(node, "argument_list") {
+        if !self
+            .normalization_adapter
+            .check_node_role(node, "argument_list")
+        {
             return false;
         }
         let Some(parent) = self.parent_node(node) else {
@@ -4718,14 +4893,17 @@ if pre_init.is_empty() {
     }
 
     pub(in crate::ast) fn argument_list_element_reference(&self, node: TreeSitterNode<'_>) -> bool {
-        if !self.normalization_adapter.check_node_role(node, "argument_list") {
+        if !self
+            .normalization_adapter
+            .check_node_role(node, "argument_list")
+        {
             return false;
         }
         let named = self.named_children(node);
-        if named
-            .iter()
-            .any(|child| self.normalization_adapter.check_node_role(*child, "block_or_do_block"))
-        {
+        if named.iter().any(|child| {
+            self.normalization_adapter
+                .check_node_role(*child, "block_or_do_block")
+        }) {
             return false;
         }
 
@@ -4745,15 +4923,20 @@ if pre_init.is_empty() {
             return true;
         }
 
-        if named.len() != 1 || !self.normalization_adapter.check_node_role(named[0], "element_reference") {
+        if named.len() != 1
+            || !self
+                .normalization_adapter
+                .check_node_role(named[0], "element_reference")
+        {
             return false;
         }
         let reference = named[0];
         let reference_named = self.raw_named_children(reference);
         if reference_named.len() < 2
-            || reference_named
-                .iter()
-                .any(|child| self.normalization_adapter.check_node_role(*child, "block_or_do_block"))
+            || reference_named.iter().any(|child| {
+                self.normalization_adapter
+                    .check_node_role(*child, "block_or_do_block")
+            })
         {
             return false;
         }
@@ -4777,7 +4960,11 @@ if pre_init.is_empty() {
     }
 
     pub(in crate::ast) fn argument_list_call_with_block(&self, node: TreeSitterNode<'_>) -> bool {
-        if !self.normalization_adapter.check_node_role(node, "argument_list") || self.dotted_call(node) {
+        if !self
+            .normalization_adapter
+            .check_node_role(node, "argument_list")
+            || self.dotted_call(node)
+        {
             return false;
         }
 
@@ -4816,12 +5003,16 @@ if pre_init.is_empty() {
         let callable = self
             .named_children(node)
             .into_iter()
-            .filter(|child| !self.normalization_adapter.is_call_block_or_arg_kind(child.kind()))
+            .filter(|child| {
+                !self
+                    .normalization_adapter
+                    .is_call_block_or_arg_kind(child.kind())
+            })
             .collect::<Vec<_>>();
-        if callable
-            .iter()
-            .any(|child| self.normalization_adapter.check_node_role(*child, "string_content_or_interpolation"))
-        {
+        if callable.iter().any(|child| {
+            self.normalization_adapter
+                .check_node_role(*child, "string_content_or_interpolation")
+        }) {
             return false;
         }
         callable.len() >= 2
@@ -4849,7 +5040,11 @@ if pre_init.is_empty() {
             .named_children(node)
             .into_iter()
             .filter(|child| Some(*child) != block)
-            .filter(|child| !self.normalization_adapter.is_call_block_or_arg_kind(child.kind()))
+            .filter(|child| {
+                !self
+                    .normalization_adapter
+                    .is_call_block_or_arg_kind(child.kind())
+            })
             .collect::<Vec<_>>();
         let receiver = *callable.first()?;
         let method = node_text(*callable.get(1)?, self.source)
@@ -4873,7 +5068,9 @@ if pre_init.is_empty() {
         &self,
         node: TreeSitterNode<'tree>,
     ) -> Option<(TreeSitterNode<'tree>, String)> {
-        if self.normalization_adapter.check_node_role(node, "expression_list")
+        if self
+            .normalization_adapter
+            .check_node_role(node, "expression_list")
             && !(self.named_field(node, "operand").is_some()
                 && self.named_field(node, "field").is_some())
         {
@@ -4890,10 +5087,11 @@ if pre_init.is_empty() {
             .or_else(|| self.named_field(node, "value"))
             .or_else(|| self.named_field(node, "expression"))
             .or_else(|| {
-                named_children
-                    .iter()
-                    .copied()
-                    .find(|child| !self.normalization_adapter.check_node_role(*child, "navigation_suffix"))
+                named_children.iter().copied().find(|child| {
+                    !self
+                        .normalization_adapter
+                        .check_node_role(*child, "navigation_suffix")
+                })
             })?;
         let method = self
             .named_field(node, "method")
@@ -4901,14 +5099,16 @@ if pre_init.is_empty() {
             .or_else(|| self.named_field(node, "property"))
             .or_else(|| self.named_field(node, "suffix"))
             .or_else(|| {
-                named_children
-                    .iter()
-                    .copied()
-                    .find(|child| self.normalization_adapter.check_node_role(*child, "navigation_suffix"))
+                named_children.iter().copied().find(|child| {
+                    self.normalization_adapter
+                        .check_node_role(*child, "navigation_suffix")
+                })
             })
             .or_else(|| {
                 named_children.iter().copied().rev().find(|child| {
-                    !self.normalization_adapter.is_call_block_or_arg_kind(child.kind())
+                    !self
+                        .normalization_adapter
+                        .is_call_block_or_arg_kind(child.kind())
                 })
             })?;
         (receiver != method).then(|| {
@@ -4920,7 +5120,10 @@ if pre_init.is_empty() {
     }
 
     pub(in crate::ast) fn member_name(&self, node: TreeSitterNode<'_>) -> String {
-        if self.normalization_adapter.check_node_role(node, "navigation_suffix") {
+        if self
+            .normalization_adapter
+            .check_node_role(node, "navigation_suffix")
+        {
             let named_children = self.named_children(node);
             let suffix = self
                 .named_field(node, "suffix")
@@ -4967,9 +5170,10 @@ if pre_init.is_empty() {
             .named_field(node, "arguments")
             .or_else(|| self.named_field(node, "argument"))
             .or_else(|| {
-                self.named_children(node)
-                    .into_iter()
-                    .find(|child| self.normalization_adapter.check_node_role(*child, "argument_list"))
+                self.named_children(node).into_iter().find(|child| {
+                    self.normalization_adapter
+                        .check_node_role(*child, "argument_list")
+                })
             })
         else {
             return Vec::new();
@@ -5166,14 +5370,15 @@ if pre_init.is_empty() {
     }
 
     pub(in crate::ast) fn hidden_match(&self, node: TreeSitterNode<'_>) -> bool {
-        self.normalization_adapter.check_node_role(node, "expression_statement")
+        self.normalization_adapter
+            .check_node_role(node, "expression_statement")
             && node_text(node, self.source)
                 .trim_start()
                 .starts_with("match ")
-            && self
-                .named_children(node)
-                .into_iter()
-                .any(|child| self.normalization_adapter.check_node_role(child, "match_block"))
+            && self.named_children(node).into_iter().any(|child| {
+                self.normalization_adapter
+                    .check_node_role(child, "match_block")
+            })
     }
 
     pub(in crate::ast) fn assignment_left<'tree>(
@@ -5231,7 +5436,8 @@ if pre_init.is_empty() {
     ) -> Option<TreeSitterNode<'tree>> {
         self.named_field(node, "parameters").or_else(|| {
             self.named_children(node).into_iter().find(|child| {
-                self.normalization_adapter.check_node_role(*child, "parameter_child")
+                self.normalization_adapter
+                    .check_node_role(*child, "parameter_child")
             })
         })
     }
@@ -5247,7 +5453,10 @@ if pre_init.is_empty() {
         let params = self.named_field(function_node, "parameters").or_else(|| {
             self.named_children(function_node)
                 .into_iter()
-                .find(|child| self.normalization_adapter.check_node_role(*child, "method_parameters"))
+                .find(|child| {
+                    self.normalization_adapter
+                        .check_node_role(*child, "method_parameters")
+                })
         })?;
         let semicolon = params.next_sibling()?;
         if semicolon.is_named() || node_text(semicolon, self.source) != ";" {
@@ -5334,7 +5543,10 @@ if pre_init.is_empty() {
                 source,
             ));
         }
-        if self.normalization_adapter.check_node_role(left, "element_reference") {
+        if self
+            .normalization_adapter
+            .check_node_role(left, "element_reference")
+        {
             let named = self.named_children(left);
             let receiver = *named.first()?;
             let mut args = named
@@ -5372,7 +5584,10 @@ if pre_init.is_empty() {
                 source,
             ));
         }
-        if self.normalization_adapter.check_node_role(left, "expression_list") {
+        if self
+            .normalization_adapter
+            .check_node_role(left, "expression_list")
+        {
             return self
                 .named_children(left)
                 .into_iter()
@@ -5386,7 +5601,10 @@ if pre_init.is_empty() {
         &mut self,
         node: TreeSitterNode<'_>,
     ) -> Option<Node> {
-        let right_node = if let Some(parent) = node.parent().filter(|p| self.normalization_adapter.check_node_role(*p, "assignment")) {
+        let right_node = if let Some(parent) = node
+            .parent()
+            .filter(|p| self.normalization_adapter.check_node_role(*p, "assignment"))
+        {
             self.assignment_right(parent)
         } else {
             node.next_named_sibling()
@@ -5408,7 +5626,10 @@ if pre_init.is_empty() {
         let text = node_text(node, self.source);
         if let Some(name) = self.identifier_text(node) {
             name
-        } else if self.normalization_adapter.check_node_role(node, "splat_or_rest") {
+        } else if self
+            .normalization_adapter
+            .check_node_role(node, "splat_or_rest")
+        {
             text.trim_start_matches('*').to_string()
         } else {
             text.to_string()
@@ -5416,7 +5637,10 @@ if pre_init.is_empty() {
     }
 
     pub(in crate::ast) fn function_name(&self, node: TreeSitterNode<'_>) -> Option<String> {
-        if let Some(name) = self.normalization_adapter.custom_function_name(node, self.source) {
+        if let Some(name) = self
+            .normalization_adapter
+            .custom_function_name(node, self.source)
+        {
             return Some(name);
         }
 
@@ -5428,7 +5652,10 @@ if pre_init.is_empty() {
             self.named_field(node, "name")
                 .or_else(|| {
                     self.named_children(node).into_iter().find(|child| {
-                        self.identifier_text(*child).is_some() || self.normalization_adapter.check_node_role(*child, "constant")
+                        self.identifier_text(*child).is_some()
+                            || self
+                                .normalization_adapter
+                                .check_node_role(*child, "constant")
                     })
                 })
                 .map(|name| {
@@ -5490,7 +5717,8 @@ if pre_init.is_empty() {
         node: TreeSitterNode<'tree>,
     ) -> Option<TreeSitterNode<'tree>> {
         self.named_children(node).into_iter().find(|child| {
-            self.normalization_adapter.check_node_role(*child, "block_child")
+            self.normalization_adapter
+                .check_node_role(*child, "block_child")
         })
     }
 
@@ -5505,9 +5733,10 @@ if pre_init.is_empty() {
             return self.call_block(target);
         }
 
-        self.named_children(node)
-            .into_iter()
-            .find(|child| self.normalization_adapter.check_node_role(*child, "block_or_do_block"))
+        self.named_children(node).into_iter().find(|child| {
+            self.normalization_adapter
+                .check_node_role(*child, "block_or_do_block")
+        })
     }
 
     pub(in crate::ast) fn named_field<'tree>(
@@ -5550,7 +5779,11 @@ if pre_init.is_empty() {
         &self,
         node: TreeSitterNode<'tree>,
     ) -> Vec<TreeSitterNode<'tree>> {
-        if self.normalization_adapter.check_node_role(node, "dotted_name") && !node_text(node, self.source).contains('.') {
+        if self
+            .normalization_adapter
+            .check_node_role(node, "dotted_name")
+            && !node_text(node, self.source).contains('.')
+        {
             return Vec::new();
         }
 
@@ -5566,31 +5799,53 @@ if pre_init.is_empty() {
         }
 
         if self.normalization_adapter.check_node_role(node, "type") && children.len() == 1 {
-            if self.normalization_adapter.check_node_role(children[0], "union_type") {
+            if self
+                .normalization_adapter
+                .check_node_role(children[0], "union_type")
+            {
                 return self.named_children(children[0]);
             }
-            if self.normalization_adapter.check_node_role(children[0], "generic_type") {
+            if self
+                .normalization_adapter
+                .check_node_role(children[0], "generic_type")
+            {
                 return self.named_children(children[0]);
             }
-            if self.normalization_adapter.check_node_role(children[0], "attribute") {
+            if self
+                .normalization_adapter
+                .check_node_role(children[0], "attribute")
+            {
                 return self.named_children(children[0]);
             }
-            if self.normalization_adapter.check_node_role(children[0], "string") {
+            if self
+                .normalization_adapter
+                .check_node_role(children[0], "string")
+            {
                 return self.named_children(children[0]);
             }
-            if self.normalization_adapter.check_node_role(children[0], "list") {
+            if self
+                .normalization_adapter
+                .check_node_role(children[0], "list")
+            {
                 if self.raw_named_children(children[0]).is_empty() {
                     return Vec::new();
                 }
                 return self.named_children(children[0]);
             }
-            if self.normalization_adapter.check_node_role(children[0], "type_leaf") {
+            if self
+                .normalization_adapter
+                .check_node_role(children[0], "type_leaf")
+            {
                 return Vec::new();
             }
         }
-        if self.normalization_adapter.check_node_role(node, "expression_statement")
+        if self
+            .normalization_adapter
+            .check_node_role(node, "expression_statement")
             && children.len() == 1
-            && self.normalization_adapter.check_node_role(children[0], "assignment_or_augmented")
+            && self
+                .normalization_adapter
+                .check_node_role(children[0], "assignment_or_augmented")
         {
             return self.named_children(children[0]);
         }
@@ -6069,7 +6324,6 @@ if pre_init.is_empty() {
     }
 }
 
-
 impl<'source> TreeSitterNormalizer<'source> {
     pub(in crate::ast) fn with_dynamic_scope<T>(
         &mut self,
@@ -6096,7 +6350,8 @@ impl<'source> TreeSitterNormalizer<'source> {
         node: TreeSitterNode<'_>,
         name: &str,
     ) -> bool {
-        self.normalization_adapter.vcall_identifier(node, name, self)
+        self.normalization_adapter
+            .vcall_identifier(node, name, self)
     }
 
     pub(in crate::ast) fn dynamic_local_name(&self, name: &str) -> bool {
@@ -6109,7 +6364,6 @@ impl<'source> TreeSitterNormalizer<'source> {
     pub(in crate::ast) fn dynamic_syntax_enabled(&self) -> bool {
         self.normalization_adapter.tracks_dynamic_local_scope()
     }
-
 }
 
 include!("normalizer-test.rs");

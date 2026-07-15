@@ -162,6 +162,60 @@ class StaticEvidenceTest < Minitest::Test
     }
   end
 
+  def test_project_modules_does_not_model_javascript_module_exports_as_instance_state
+    evidence = {
+      "owners" => [
+        { "name" => "schemas", "kind" => "owner", "path" => "src/schemas.js", "language" => "javascript" }
+      ],
+      "methods" => [
+        { "id" => "m1", "name" => "parse", "owner" => "schemas", "path" => "src/schemas.js", "line" => 3, "language" => "javascript" }
+      ],
+      "fields" => [
+        { "name" => "parse", "owner" => "schemas", "path" => "src/schemas.js", "line" => 1, "language" => "javascript" }
+      ],
+      "facts" => { "calls" => [], "state_accesses" => [], "complexity_facts" => [], "struct_declarations" => [] }
+    }
+
+    mod = Espalier::StaticEvidence.project_modules(evidence).fetch(0)
+    assert_equal :module, mod[:type]
+    assert_empty mod[:states]
+    assert_empty mod[:state_records]
+  end
+
+  def test_git_vcs_discovers_an_explicit_target_outside_the_command_root
+    Dir.mktmpdir("espalier-vcs") do |dir|
+      src = File.join(dir, "src")
+      FileUtils.mkdir_p(src)
+      file = File.join(src, "worker.js")
+      File.write(file, "export function work() { return 1 }\n")
+      system("git", "-C", dir, "init", "--quiet")
+      system("git", "-C", dir, "add", ".")
+      system("git", "-C", dir, "-c", "user.email=test@example.test", "-c", "user.name=test", "commit", "--quiet", "-m", "fixture")
+
+      evidence = Espalier::StaticEvidence.new([src], root: Dir.pwd, vcs: :git)
+      assert_equal [file], evidence.send(:target_files)
+    end
+  end
+
+  def test_aggregator_accepts_zero_modules
+    assert_equal [], Espalier::Aggregator.new.aggregate([])
+  end
+
+  def test_project_modules_excludes_typescript_overload_declarations_when_an_implementation_exists
+    evidence = {
+      "methods" => [
+        { "id" => "declaration", "name" => "format", "owner" => "Formatter", "kind" => "instance", "path" => "src/formatter.ts", "line" => 1, "language" => "typescript", "raw_source" => "format(value: string): string;" },
+        { "id" => "implementation", "name" => "format", "owner" => "Formatter", "kind" => "instance", "path" => "src/formatter.ts", "line" => 2, "language" => "typescript", "raw_source" => "format(value: string) { return value; }" }
+      ],
+      "fields" => [],
+      "facts" => { "calls" => [], "state_accesses" => [], "complexity_facts" => [], "struct_declarations" => [] }
+    }
+
+    methods = Espalier::StaticEvidence.project_modules(evidence).fetch(0).fetch(:methods)
+    assert_equal ["format"], methods.map { |method| method[:name] }
+    assert_equal 2, methods.first[:line]
+  end
+
   def test_project_modules_ranks_production_by_default_and_retains_selectable_tests
     evidence = {
       "methods" => [

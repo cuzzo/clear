@@ -411,18 +411,6 @@
             63,
             1
           ]
-        },
-        {
-          "body": "name ?? null",
-          "line": 10,
-          "name": "process",
-          "owner": "JavaScriptSyntaxFactsCore",
-          "span": [
-            10,
-            2,
-            39,
-            3
-          ]
         }
       ],
       "semantic_effects": [

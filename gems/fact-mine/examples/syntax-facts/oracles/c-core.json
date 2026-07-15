@@ -403,6 +403,54 @@
             43,
             12
           ]
+        },
+        {
+          "detail": "receiver",
+          "function": "CSyntaxFactsCore_process",
+          "kind": "opaque_state_escape",
+          "line": 20,
+          "span": [
+            20,
+            6,
+            20,
+            26
+          ]
+        },
+        {
+          "detail": "receiver",
+          "function": "CSyntaxFactsCore_process",
+          "kind": "opaque_state_escape",
+          "line": 23,
+          "span": [
+            23,
+            6,
+            23,
+            26
+          ]
+        },
+        {
+          "detail": "receiver",
+          "function": "CSyntaxFactsCore_process",
+          "kind": "opaque_state_escape",
+          "line": 26,
+          "span": [
+            26,
+            6,
+            26,
+            30
+          ]
+        },
+        {
+          "detail": "receiver",
+          "function": "CSyntaxFactsCore_process",
+          "kind": "opaque_state_escape",
+          "line": 32,
+          "span": [
+            32,
+            4,
+            32,
+            30
+          ]
         }
       ],
       "state_reads": [

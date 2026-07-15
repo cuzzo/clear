@@ -231,6 +231,10 @@ pub struct OwnerDef {
     pub file: String,
     pub name: String,
     pub kind: String,
+    /// Normalized language fact: this declaration may reopen/extend another
+    /// declaration with the same name.
+    #[serde(default)]
+    pub reopenable: bool,
     pub line: usize,
     pub span: Span,
 }
@@ -264,6 +268,10 @@ pub struct StateDeclaration {
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
 pub struct StateWrite {
     pub field: String,
+    /// Canonical owner-qualified identity when the language can prove that a
+    /// bare field spelling is not globally unique.
+    #[serde(default)]
+    pub identity: String,
     pub receiver: String,
     pub file: String,
     pub function: String,
@@ -275,6 +283,10 @@ pub struct StateWrite {
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
 pub struct StateRead {
     pub field: String,
+    /// Canonical owner-qualified identity when the language can prove that a
+    /// bare field spelling is not globally unique.
+    #[serde(default)]
+    pub identity: String,
     pub receiver: String,
     pub file: String,
     pub function: String,

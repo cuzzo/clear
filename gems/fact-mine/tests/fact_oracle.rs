@@ -102,7 +102,9 @@ fn cfg_is_emitted_for_every_supported_language() -> Result<()> {
                         && node.function == method.name
                         && node.kind == "entry"
                 })
-                .with_context(|| format!("missing CFG entry for {}#{}", method.owner, method.name))?;
+                .with_context(|| {
+                    format!("missing CFG entry for {}#{}", method.owner, method.name)
+                })?;
             let effect = document
                 .node_effects
                 .iter()
@@ -331,7 +333,10 @@ fn dataflow_uses_the_innermost_equal_span_and_unwraps_literal_groups() -> Result
         .find(|effect| effect.node_id == body.id)
         .expect("iterator body effect");
     assert!(body_effect.writes.is_empty());
-    assert!(body_effect.reads.iter().any(|place| place.ends_with(":item")));
+    assert!(body_effect
+        .reads
+        .iter()
+        .any(|place| place.ends_with(":item")));
     let loop_node = document
         .control_flow_nodes
         .iter()
@@ -375,8 +380,14 @@ fn dataflow_uses_the_innermost_equal_span_and_unwraps_literal_groups() -> Result
         .iter()
         .find(|effect| effect.node_id == callback.id)
         .expect("callback effect");
-    assert!(callback_effect.writes.iter().any(|place| place.ends_with(":token")));
-    assert!(!callback_effect.reads.iter().any(|place| place.ends_with(":token")));
+    assert!(callback_effect
+        .writes
+        .iter()
+        .any(|place| place.ends_with(":token")));
+    assert!(!callback_effect
+        .reads
+        .iter()
+        .any(|place| place.ends_with(":token")));
     let callback_body = document
         .control_flow_nodes
         .iter()
@@ -455,7 +466,10 @@ fn dataflow_uses_the_innermost_equal_span_and_unwraps_literal_groups() -> Result
             .find(|effect| effect.node_id == node.id)
             .expect("label/call regression effect");
         assert!(
-            !effect.reads.iter().any(|place| place.ends_with(":ownership")),
+            !effect
+                .reads
+                .iter()
+                .any(|place| place.ends_with(":ownership")),
             "{source} must not treat a label or method name as a local read"
         );
     }
@@ -1073,6 +1087,96 @@ fn canonical_locations(value: &Value) -> Value {
             .map(canonical_location)
             .collect::<Vec<_>>(),
     )
+}
+
+#[test]
+fn csharp_properties_and_while_drains_are_first_class_facts() -> Result<()> {
+    use std::io::Write;
+
+    let mut fixture = tempfile::Builder::new().suffix(".cs").tempfile()?;
+    write!(
+        fixture,
+        "class Queue {{\n  object _current;\n  readonly System.Collections.Generic.Queue<int> _queue;\n  public object Current => _current;\n  public object Value {{ get; set; }}\n  void Drain(bool stop) {{ int _queue = 1; while (this._queue.TryDequeue(out _) && !stop) {{ Consume(); }} }}\n}}\n"
+    )?;
+    let document = syntax::parse_file(fixture.path().to_path_buf(), Language::CSharp)?;
+    assert!(document
+        .function_defs
+        .iter()
+        .any(|method| method.name == "Current"));
+    assert!(document
+        .state_reads
+        .iter()
+        .any(|read| read.function == "Current" && read.field == "_current"));
+    assert!(document.state_declarations.iter().any(|declaration| {
+        declaration.owner == "Queue"
+            && declaration.field == "Value"
+            && declaration.r#type.as_deref() == Some("object")
+    }));
+
+    let output = profile::extract(&document, Profile::NilKill);
+    let drain = output
+        .complexity_facts
+        .iter()
+        .find(|fact| fact.function == "Drain")
+        .context("Drain complexity fact")?;
+    assert!(drain.iterations.iter().any(|iteration| {
+        iteration.kind == "WHILE"
+            && iteration.state_domains == ["@_queue"]
+            && iteration.parameter_domains.is_empty()
+    }));
+    Ok(())
+}
+
+#[test]
+fn javascript_bound_method_setup_is_not_mutable_instance_state() -> Result<()> {
+    use std::io::Write;
+
+    let mut fixture = tempfile::Builder::new().suffix(".ts").tempfile()?;
+    write!(
+        fixture,
+        "class Handler {{ run() {{}} constructor() {{ this.run = this.run.bind(this); }} }}\n"
+    )?;
+    let document = syntax::parse_file(fixture.path().to_path_buf(), Language::TypeScript)?;
+    assert!(!document
+        .state_writes
+        .iter()
+        .any(|write| write.field == "run"));
+    Ok(())
+}
+
+#[test]
+fn owner_reopenability_is_normalized_in_the_language_adapter() -> Result<()> {
+    use std::io::Write;
+
+    let mut ruby = tempfile::Builder::new().suffix(".rb").tempfile()?;
+    ruby.write_all(b"class Extension; end\n")?;
+    let ruby_document = syntax::parse_file(ruby.path().to_path_buf(), Language::Ruby)?;
+    assert!(ruby_document.owner_defs.iter().any(|owner| owner.reopenable));
+
+    let mut typescript = tempfile::Builder::new().suffix(".ts").tempfile()?;
+    typescript.write_all(b"class Extension {}\n")?;
+    let typescript_document = syntax::parse_file(typescript.path().to_path_buf(), Language::TypeScript)?;
+    assert!(typescript_document.owner_defs.iter().all(|owner| !owner.reopenable));
+    Ok(())
+}
+
+#[test]
+fn c_aggregate_state_identity_is_owner_qualified() -> Result<()> {
+    use std::io::Write;
+
+    let mut fixture = tempfile::Builder::new().suffix(".c").tempfile()?;
+    write!(
+        fixture,
+        "struct Alpha {{ int flag; }};\nstruct Beta {{ int flag; }};\nvoid alpha(struct Alpha* self) {{ self->flag = 1; }}\nvoid beta(struct Beta* self) {{ self->flag = 2; }}\n"
+    )?;
+    let document = syntax::parse_file(fixture.path().to_path_buf(), Language::C)?;
+    let identities = document
+        .state_writes
+        .iter()
+        .map(|write| write.identity.as_str())
+        .collect::<BTreeSet<_>>();
+    assert_eq!(identities, BTreeSet::from(["Alpha::flag", "Beta::flag"]));
+    Ok(())
 }
 
 fn canonical_location_text(text: &str) -> String {
